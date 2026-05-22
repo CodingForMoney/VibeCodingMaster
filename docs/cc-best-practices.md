@@ -50,6 +50,17 @@ High-risk tasks must reduce Claude’s autonomy:
 
 These tasks require a plan, public contracts, test contracts, validation commands, and human review.
 
+Behavioral guardrails:
+
+- State key assumptions before coding; call out unclear requirements, boundaries, or acceptance criteria.
+- When multiple interpretations are reasonable, do not choose silently; explain the difference and tradeoff, and ask for confirmation when needed.
+- Prefer the simplest solution that satisfies the task; do not add unrequested features, configuration, extension points, or abstractions.
+- Touch only files required by the task; do not clean up, format, or refactor adjacent code opportunistically.
+- Clean up only unused imports, variables, functions, or test leftovers created by the current change.
+- Report-but-don't-act: when noticing an issue outside the current task scope (unrelated dead code, doc drift, adjacent bug, architecture concern, security smell), record it in `.ai/state/known-issues.md` and continue; do not act on it without an explicit task.
+- Every diff line must trace to the task goal, public contract, test contract, or required documentation sync.
+- For multi-step tasks, define the validation check for each step.
+
 ## 2. Repo Harness Structure
 
 Recommended structure:
@@ -174,7 +185,19 @@ Root template:
 - Changed files validation: `tools/check-changed`
 - Module validation: `tools/check-module <module>`
 
-## Hard Rules
+## Default Behavior
+
+- State assumptions before coding; ask when requirements, boundaries, or acceptance criteria are unclear.
+- When multiple interpretations are reasonable, do not choose silently; explain the difference and tradeoff, and ask for confirmation when needed.
+- Prefer the simplest solution that satisfies the task; do not add speculative features, abstractions, configuration, or flexibility.
+- Touch only files required by the task; do not clean up or refactor unrelated code.
+- Clean up only unused code created by the current change.
+- Report-but-don't-act: record out-of-scope issues in `.ai/state/known-issues.md`; do not act on them.
+- Every changed line must trace to the task goal, public contract, test contract, or required documentation sync.
+- For multi-step tasks, define the validation check for each step before implementing it.
+
+
+## Forbidden
 
 - Do not edit generated, vendor, third-party, lock, or secret files unless explicitly requested.
 - Do not introduce dependencies without approval.
