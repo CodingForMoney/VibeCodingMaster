@@ -92,6 +92,7 @@ repo/
       decisions.md
       validation-log.md
       known-issues.md
+      scratch.md
     module-index.json
 
   tools/
@@ -837,10 +838,50 @@ State files:
 
 ```text
 .ai/state/
-  progress.md
-  decisions.md
-  validation-log.md
-  known-issues.md
+  progress.md       — snapshot of all active tasks' current state
+  decisions.md      — architectural / design decisions with rationale (append-only)
+  validation-log.md — recent validation runs (rolling, ~last 20)
+  known-issues.md   — deferred findings awaiting triage
+  scratch.md        — current session's working TODOs (cleared at task completion)
+```
+
+Information lifetime determines where it lives:
+
+```text
+within one session (phase breakdown, mid-implementation TODOs)
+  -> scratch.md
+
+across sessions of one task (progress, decisions)
+  -> exec-plan (if task has one) + decisions.md
+  -> otherwise progress.md + decisions.md
+
+across tasks (deferred findings, out-of-scope discoveries)
+  -> known-issues.md
+```
+
+`progress.md` rules:
+
+- Snapshot, not log. Holds current status of every active task in one place.
+- One entry per active task; entry is rewritten in place, not appended.
+- When a task has an `exec-plan`, its detailed progress lives in the exec-plan's `current state`; `progress.md` keeps only a one-line pointer.
+- Completed tasks are removed from `progress.md`; their final state is preserved in the archived exec-plan or commit history.
+
+`scratch.md` rules:
+
+- Session-local working memory for multi-phase tasks: current phase, intermediate TODOs discovered mid-implementation, temporary notes.
+- Cleared when the task completes or when a fresh session starts.
+- Anything that must survive (decisions, deferred findings, progress) is promoted to `decisions.md`, `known-issues.md`, `progress.md`, or the exec-plan before clearing.
+- This file is the legitimate home for the working TODOs that `Stop` hook forbids inside source code.
+
+`known-issues.md` entry format:
+
+```md
+## YYYY-MM-DD <one-line summary>
+
+- discovered in: <task / session>
+- type: bug | doc-drift | dead-code | architecture | security | other
+- impact: low | medium | high
+- proposed action: ignore | create task | revisit at next replan
 ```
 
 Update after each session:
@@ -873,6 +914,8 @@ Execution plans include:
 - risks
 - decision log
 - current state
+
+When a task has an exec-plan, `current state` in the exec-plan is the authoritative progress record; `progress.md` only points to it.
 
 ### 11.1 Documentation Sync Contract
 
@@ -1201,6 +1244,12 @@ Monthly review:
 - Which prompts should become skills?
 - Which validation commands are too slow?
 - Which checks should move into hooks?
+
+`known-issues.md` triage (every monthly review):
+
+- For each unhandled entry, decide: promote to task, fold into a planned change, or dismiss.
+- Entries older than 90 days with no action are dismissed with a reason recorded in `decisions.md`.
+- `known-issues.md` is only useful if it stays small; an ever-growing file means triage is not happening.
 
 ## 15. Minimum Team Rules
 
