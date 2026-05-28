@@ -83,17 +83,34 @@ repo/
     settings.json
     skills/
     agents/
+      architect.md
+      coder.md
+      reviewer.md
+      optional/
+        security-specialist.md
+        migration-specialist.md
+        performance-specialist.md
+        frontend-qa.md
     commands/
 
   .ai/
     task-specs/
+    handoffs/
+      <task-slug>/
+        architecture-plan.md
+        implementation-log.md
+        validation-log.md
+        review-report.md
     state/
       progress.md
       decisions.md
       validation-log.md
       known-issues.md
       scratch.md
-    module-index.json
+    generated/
+      module-index.json
+      test-map.json
+      public-surface.json
 
   tools/
     check-fast
@@ -101,38 +118,28 @@ repo/
     check-module
     check-e2e-smoke
     check-boundaries
+    check-public-surface
+    check-contract-tests
+    check-generated-artifacts
     check-docs-freshness
     check-agent-rules
 ```
 
-Progressive adoption path:
+Required large-project baseline:
 
-A large project rarely adopts the full harness at once. New modules and new subsystems can ramp up in phases:
+For a large project, the harness is not a maturity ladder. Treat the structure above as the baseline before letting Claude Code make non-trivial changes.
 
-```text
-Phase 1 — new module bootstrap:
-  CLAUDE.md
-  docs/ARCHITECTURE.md
-  docs/TESTING.md
-  tools/check-fast
-  tools/check-changed
+Missing pieces are not an accepted intermediate design. If a legacy project is missing part of the harness, record the gap in `.ai/state/known-issues.md` or an execution plan with owner, risk, and target date. High-risk work must wait until the relevant rules, role agents, docs, and validation commands exist.
 
-Phase 2 — normal development:
-  + docs/MODULE_MAP.md
-  + module-local CLAUDE.md
-  + .ai/state/
-  + tools/check-module
-  + tools/check-boundaries
+Minimum baseline for non-trivial AI coding:
 
-Phase 3 — high-risk areas (auth, payment, schema, public API):
-  + docs/SECURITY.md
-  + docs/DEPENDENCY_RULES.md
-  + .claude/ hooks, skills, agents
-  + tools/check-public-surface
-  + tools/check-contract-tests
-  + tools/check-docs-freshness
-  + MCP integrations
-```
+- root `CLAUDE.md`
+- module-local `CLAUDE.md` for edited modules
+- architecture, module map, testing, security, and dependency docs
+- role agents for architecture/planning, coding, and independent review/testing
+- task specs, handoff artifacts, progress state, decisions, validation logs, known issues, and generated context artifacts
+- fast, changed-file, module, boundary, public-surface, contract-test, generated-artifact, docs-freshness, and agent-rule checks
+- hooks or CI gates for protected files, validation, docs sync, public contracts, and test quality
 
 ## 3. `CLAUDE.md`
 
@@ -186,6 +193,16 @@ Root template:
 - Changed files validation: `tools/check-changed`
 - Module validation: `tools/check-module <module>`
 
+## Role Sessions
+
+- For complex features, cross-module changes, refactors, public API changes, schema changes, auth, payment, permission, or security-sensitive work, start Claude Code with an explicit role: `claude --agent <role>`.
+- Default core roles are `architect`, `coder`, and `reviewer`.
+- Do not let one coding session own architecture/plan decisions, implementation, final testing responsibility, and review.
+- Role outputs are exchanged through `.ai/handoffs/<task-slug>/`, not through chat history.
+- When the required role route includes `architect`, coding must not start until the architecture and plan artifact exists.
+- If the current session was not started with the required role, stop and ask the user to restart with `claude --agent <role>`; do not pretend to be that role inside the wrong session.
+- Critical global rules may be repeated in role agent files for defense in depth, but repeated rules must use stable rule IDs and be checked by `tools/check-agent-rules`. Do not maintain untracked manual copies.
+
 ## Default Behavior
 
 - State assumptions before coding; ask when requirements, boundaries, or acceptance criteria are unclear.
@@ -196,7 +213,6 @@ Root template:
 - Report-but-don't-act: record out-of-scope issues in `.ai/state/known-issues.md`; do not act on them.
 - Every changed line must trace to the task goal, public contract, test contract, or required documentation sync.
 - For multi-step tasks, define the validation check for each step before implementing it.
-
 
 ## Forbidden
 
@@ -287,6 +303,12 @@ Large tasks can start with modules, directories, file responsibilities, data flo
 
 ## Non-goals
 
+## Task Severity
+
+## Required Role Route
+
+## Handoff Directory
+
 ## Relevant Files
 
 ## File Responsibilities
@@ -341,6 +363,7 @@ Business-critical functions also cover:
 
 Stop and update the plan before editing if:
 
+- current session role does not match the required role route
 - public API change seems necessary
 - DB schema change seems necessary
 - planned contract duplicates an existing API
@@ -452,7 +475,7 @@ Review should prioritize:
 - architecture boundary violations
 - public contract mismatch
 
-Use a fresh session or reviewer subagent for complex tasks. Do not let the same session that implemented the change be the only reviewer.
+Use a `reviewer` role session for complex or high-risk tasks. A fresh review session or reviewer subagent is acceptable for smaller scoped changes. Do not let the same session that implemented the change be the only reviewer.
 
 ## 6. Context Management
 
@@ -497,13 +520,375 @@ Do not include:
 - stale design docs
 - unrelated CI logs
 
-## 7. Testing and Validation
+## 7. Role-Based Agent Sessions
+
+For large projects, the default execution model should be role-based sessions, not dynamic role routing inside one main Claude conversation.
+
+Do not make one generic Claude session own architecture, planning, coding, final testing, and review for non-trivial work. That blurs responsibility and makes acceptance weak.
+
+Instead, start each major phase with an explicit session-wide role:
+
+```bash
+claude --agent architect
+claude --agent coder
+claude --agent reviewer
+```
+
+For background work:
+
+```bash
+claude --agent reviewer --bg "Review PR 123 for architecture drift, test gaps, and scope creep"
+```
+
+The role is selected at session startup. The agent file defines that session's system prompt, tool restrictions, model, stop conditions, and output format. `CLAUDE.md` still provides project rules, but critical safety, architecture, permission, and output constraints must be repeated inside the role agent file.
+
+If the current session was not started with the required role, stop and ask the user to restart with the correct `claude --agent <role>` command. Do not simulate a different role through a normal prompt.
+
+### 7.1 Task Severity Routing
+
+This is not progressive adoption. The full harness exists by default; the role chain depends on task risk.
+
+| Task class | Examples | Required role route |
+| --- | --- | --- |
+| T0 trivial | copy, comments, docs typo, tiny config with no behavior change | `coder`; optional reviewer checklist |
+| T1 small scoped change | single-file bug, focused test addition, known-pattern fix | `coder` -> fresh review context or `reviewer` |
+| T2 ordinary feature | bounded behavior, normal multi-file feature, ordinary PR | `architect` -> `coder` -> `reviewer` |
+| T3 cross-module / architectural | cross-module change, module boundary change, refactor, new public surface | `architect` -> `coder` -> `reviewer` |
+| T4 high-risk | auth, permission, payment, billing, schema, data deletion, public API/SDK, security-sensitive infrastructure | `architect` -> relevant specialist if needed -> `coder` -> `reviewer` -> human approval |
+| T5 large rewrite / greenfield | new subsystem, major rewrite, migration across many modules | `architect`; then repeat `coder` -> `reviewer` per phase, with architect review at phase boundaries |
+
+If classification is unclear, use the stricter route.
+
+### 7.2 Required Roles
+
+Large projects should define these project-level agents:
+
+```text
+.claude/agents/
+  architect.md
+  coder.md
+  reviewer.md
+  optional/
+    security-specialist.md
+    migration-specialist.md
+    performance-specialist.md
+    frontend-qa.md
+```
+
+Role responsibilities:
+
+```text
+architect
+  owns architecture and plan
+  defines module boundaries, file responsibilities, public contracts, dependency direction, risk, and phases
+  outputs .ai/handoffs/<task-slug>/architecture-plan.md
+  must not implement production code
+
+coder
+  owns code changes and baseline tests required to complete the approved task
+  follows approved architecture-plan.md and task spec
+  outputs touched files, implementation notes, validation results, and follow-ups
+  must write/update direct unit, contract, or regression tests needed for the changed behavior
+  must not change module responsibilities, public contracts, architecture direction, or test strategy without Replan
+
+reviewer
+  owns independent acceptance and final test responsibility
+  checks scope, role compliance, architecture compliance, public contract compliance, docs sync, validation evidence, and risk
+  checks, designs, and adds missing tests when needed
+  owns complex tests, E2E coverage, regression matrix, and release-level validation recommendations
+  outputs .ai/handoffs/<task-slug>/review-report.md
+  should default to read-mostly tools and artifact-only writes
+```
+
+### 7.3 Role Permission Matrix
+
+Prompt rules are not enough. Role separation must be backed by tool scope, permission mode, hooks, and review.
+
+| Role | Suggested tools | Write scope | Must not |
+| --- | --- | --- | --- |
+| `architect` | `Read`, `Grep`, `Glob`, `Bash`, `Edit`, `Write` | architecture plan, task spec, architecture docs only with approval | edit production code, rewrite tests, expand task scope |
+| `coder` | `Read`, `Grep`, `Glob`, `Bash`, `Edit`, `Write` | approved source files, baseline tests, validation log, implementation log | change scope, public contracts, module boundaries, or test strategy without Replan |
+| `reviewer` | `Read`, `Grep`, `Glob`, `Bash`, `Edit`, `Write` | review report, missing tests/fixtures, validation log | change production behavior, approve own implementation, weaken tests |
+| `security-specialist` | `Read`, `Grep`, `Glob`, `Bash`, `Edit`, `Write` | security review report and approved security tests | bypass approvals, edit production code without explicit scope |
+| `migration-specialist` | `Read`, `Grep`, `Glob`, `Bash`, `Edit`, `Write` | migration plan, migration tests, validation notes | run destructive migrations, change schema without approval |
+| `performance-specialist` | `Read`, `Grep`, `Glob`, `Bash`, `Edit`, `Write` | performance report, benchmarks, approved perf tests | change product behavior, hide regressions |
+
+Recommended permission modes:
+
+```text
+architect:  default with write hooks limited to architecture-plan.md, task specs, and approved docs
+coder:      default or acceptEdits, but only inside approved scope
+reviewer:   default with production-code writes blocked; test writes allowed when adding missing coverage
+specialist: default with write hooks limited to specialist reports, tests, and approved files
+```
+
+Tool lists alone cannot enforce path-level ownership. Add hooks or CI checks that reject writes outside each role's allowed scope. If path-scoped enforcement is unavailable, the final review must explicitly inspect role ownership violations.
+
+### 7.4 Handoff Contract
+
+Role sessions communicate through files, not memory from previous chats.
+
+Required handoff directory:
+
+```text
+.ai/handoffs/<task-slug>/
+  architecture-plan.md
+  implementation-log.md
+  validation-log.md
+  review-report.md
+```
+
+Each role session must start by reading the artifacts it depends on:
+
+```text
+architect
+  reads: task request, task spec, ARCHITECTURE.md, MODULE_MAP.md, module-local CLAUDE.md, relevant source/tests
+  writes: architecture-plan.md
+
+coder
+  reads: task spec, architecture-plan.md, relevant module docs
+  writes: code, baseline tests, implementation-log.md, validation-log.md
+
+reviewer
+  reads: task spec, architecture-plan.md, implementation-log.md, validation-log.md, git diff
+  writes: review-report.md
+
+optional specialist
+  reads: task spec, architecture-plan.md, relevant source/tests
+  writes: specialist report, approved tests, validation-log.md
+```
+
+Reviewer test responsibility:
+
+```text
+coder:
+  writes direct tests required by the code change
+  runs focused validation
+
+reviewer:
+  owns final test adequacy
+  identifies and adds missing unit/contract/integration tests when needed
+  owns complex test strategy, E2E smoke/release coverage, and regression matrix
+  may request coder fixes for production code issues
+  must not weaken tests to pass validation
+```
+
+For a task with a handoff directory, `.ai/handoffs/<task-slug>/validation-log.md` is the authoritative validation record for that task. `.ai/state/validation-log.md` is only a rolling index of recent validation results across tasks.
+
+For complex or high-risk work, the next role must not start until the required previous artifact exists and is coherent.
+
+Handoff artifact schemas:
+
+```md
+# architecture-plan.md
+
+## Architecture Summary
+## Task Classification
+## Required Role Route
+## Modules / Files
+## File Responsibilities
+## Public Surface Contract
+## Dependency Direction
+## Data Flow
+## Phases
+## Files Per Phase
+## Validation Per Phase
+## Rollback / Replan Triggers
+## Risks
+## Stop Conditions
+## Docs To Update
+## Approval
+
+# implementation-log.md
+
+## Summary
+## Files Changed
+## Public Surface Changed
+## Tests Added / Updated
+## Validation Run
+## Deviations From Architecture Plan
+## Follow-ups
+
+# validation-log.md
+
+## <timestamp> <command>
+
+- role:
+- commit / diff:
+- scope:
+- result:
+- failures:
+- fixes:
+- rerun:
+
+# review-report.md
+
+## Summary
+## Role / Handoff Compliance
+## Scope Review
+## Architecture Review
+## Public Contract Review
+## Test Review
+## Missing Tests Added
+## E2E / Regression Recommendation
+## Validation Evidence
+## Docs Sync
+## Findings
+## Decision
+```
+
+### 7.5 Role Session vs Subagent
+
+Use a role session when:
+
+- the phase is the main work, not a side task
+- the role needs sustained interaction with the user
+- the role owns decisions or artifacts
+- the role may run for a long time
+- the role needs clear accountability
+
+Use a subagent when:
+
+- the work is a bounded side task
+- the task produces verbose output that should not pollute the main context
+- the task can return a concise summary
+- the task is read-only exploration, review, triage, or log analysis
+- the task can safely run in parallel
+
+Do not use dynamic subagent routing as the primary workflow for architecture/plan -> coding -> independent review/testing. Use explicit role sessions and file handoffs for that.
+
+### 7.6 Agent File Contract
+
+Every role agent file should define:
+
+```md
+---
+name: architect
+description: Use as a session-wide role for architecture design, task planning, module boundaries, file responsibilities, public contracts, dependency direction, and risk assessment.
+tools: Read, Grep, Glob, Bash, Edit, Write
+disallowedTools: Agent
+permissionMode: default
+model: sonnet
+---
+
+# Role
+
+You are the architecture and planning role for this project.
+
+# Global Rules To Repeat
+
+- Follow root `CLAUDE.md`, module-local `CLAUDE.md`, and the relevant handoff artifacts.
+- Do not exceed this role's write scope.
+- Stop when scope, architecture, public contract, test strategy, or risk changes.
+
+# Responsibilities
+
+- Define module boundaries.
+- Define file-level responsibilities.
+- Define public function and public API contracts.
+- Identify dependency direction and forbidden imports.
+- Split work into phases.
+- Define validation per phase.
+- Identify architecture risks and stop conditions.
+
+# Required Inputs
+
+- task spec or user request
+- `docs/ARCHITECTURE.md`
+- `docs/MODULE_MAP.md`
+- relevant module-local `CLAUDE.md`
+
+# Outputs
+
+- `.ai/handoffs/<task-slug>/architecture-plan.md`
+
+# Do Not
+
+- Do not implement production code.
+- Do not rewrite tests.
+- Do not invent product requirements.
+- Do not bypass module ownership rules.
+
+# Stop Conditions
+
+- Requested behavior is ambiguous.
+- The design requires public API, schema, auth, payment, permission, or security boundary changes without approval.
+- The existing architecture cannot support the requested behavior without Replan.
+```
+
+Use frontmatter fields such as `tools`, `disallowedTools`, `permissionMode`, `hooks`, `mcpServers`, and `skills` when the role needs stricter tool, permission, or integration boundaries.
+
+Minimum role templates:
+
+```text
+architect.md
+  frontmatter:
+    tools: Read, Grep, Glob, Bash, Edit, Write
+    permissionMode: default
+  required inputs:
+    task spec, ARCHITECTURE.md, MODULE_MAP.md, module-local CLAUDE.md
+  outputs:
+    architecture-plan.md
+  do not:
+    implement code, rewrite tests, expand task scope
+  stop when:
+    public API, schema, auth, permission, payment, or security boundaries need approval
+
+coder.md
+  frontmatter:
+    tools: Read, Grep, Glob, Bash, Edit, Write
+    permissionMode: default
+  required inputs:
+    task spec, architecture-plan.md
+  outputs:
+    code, baseline tests, implementation-log.md, validation-log.md
+  do not:
+    change architecture, public contracts, scope, test strategy, or module responsibilities without Replan
+  stop when:
+    implementation requires design, contract, dependency, schema, permission, or test-strategy changes
+
+reviewer.md
+  frontmatter:
+    tools: Read, Grep, Glob, Bash, Edit, Write
+    permissionMode: default
+  required inputs:
+    task spec, architecture-plan.md, implementation-log.md, validation-log.md, git diff
+  outputs:
+    review-report.md, missing tests/fixtures when needed, validation-log.md
+  do not:
+    change production behavior, weaken tests, lower assertions, delete failing tests, approve own implementation
+  stop when:
+    handoffs are missing, validation evidence is missing, or architecture/test/doc compliance cannot be verified
+```
+
+### 7.7 Default Workflow
+
+For large features:
+
+```text
+architect session
+  -> architecture-plan.md
+
+coder session
+  -> code + baseline tests + implementation-log.md + validation-log.md
+
+reviewer session
+  -> review-report.md + missing tests/fixtures if needed + validation-log.md
+
+human approval
+```
+
+For small bug fixes or ordinary PRs, one coder session is acceptable if the task spec is clear, file responsibilities are explicit, public contracts are defined when needed, and validation is cheap.
+
+For complex features, cross-module changes, public API changes, schema changes, auth, payment, permissions, data deletion, or security-sensitive work, role sessions are required.
+
+## 8. Testing and Validation
 
 Core principle:
 
 > Test assets should be rich, and execution should be smart. Run fast, relevant tests during development; run broad, expensive suites before release.
 
-### 7.1 Layers
+### 8.1 Layers
 
 ```text
 L0 Fast Checks
@@ -532,7 +917,7 @@ L3 smoke-e2e:         <= 15min
 L4 full-regression:   nightly / release only
 ```
 
-### 7.2 Commands
+### 8.2 Commands
 
 ```text
 tools/check-fast
@@ -572,9 +957,9 @@ release / major version / high-risk migration:
   L0 + L1 + L2 + L3 + L4
 ```
 
-### 7.3 Change-Aware Test Selection
+### 8.3 Change-Aware Test Selection
 
-Maintain a test map:
+Do not maintain a manual test map. Generate or verify a test map from source code, test naming conventions, coverage data, build metadata, and CI history.
 
 ```json
 {
@@ -586,6 +971,19 @@ Maintain a test map:
   }
 }
 ```
+
+The generated artifact should live at:
+
+```text
+.ai/generated/test-map.json
+```
+
+Rules:
+
+- `.ai/generated/test-map.json` is a derived artifact, not a hand-edited source of truth.
+- Manual edits to generated test maps are forbidden.
+- `tools/check-generated-artifacts` fails in CI if the generated map is stale.
+- If the map cannot be generated reliably, `tools/check-changed` must fall back to code search, LSP, ownership metadata, and conservative module-level tests.
 
 `tools/check-changed` should:
 
@@ -599,7 +997,7 @@ git diff
   -> if critical user path changed, suggest L3
 ```
 
-### 7.4 E2E Tiers
+### 8.4 E2E Tiers
 
 ```text
 e2e/
@@ -629,7 +1027,7 @@ Test tags:
 @billing @auth @risk-high @public-api @contract
 ```
 
-### 7.5 Public Function Test Contract
+### 8.5 Public Function Test Contract
 
 Every new or modified public function must have tests covering its contract.
 
@@ -667,7 +1065,7 @@ internal helper call counts
 local implementation steps
 ```
 
-### 7.6 Test Quality Red Lines
+### 8.6 Test Quality Red Lines
 
 Forbidden:
 
@@ -695,7 +1093,7 @@ Maintenance:
 - skipped tests require issue, owner, and expiration
 - fast and slow tests are maintained separately
 
-## 8. Hooks / Skills / Subagents / Commands
+## 9. Hooks / Skills / Subagents / Commands
 
 Do not rely on `CLAUDE.md` for constraints that can be automated.
 
@@ -707,6 +1105,8 @@ PreToolUse:
   block destructive commands
   block unapproved deploy/migration/data deletion
   block production secrets
+  block writes outside the current role's allowed scope
+  block implementation edits that change architecture/public contracts without Replan
 
 PostToolUse:
   format touched files
@@ -714,7 +1114,10 @@ PostToolUse:
   run cheap lint
 
 Stop:
+  check task severity and required role route
+  check required handoff artifacts exist
   check required validation
+  check task-level validation-log.md updated when handoffs exist
   check progress updated
   check docs synced after plan/contract/test changes
   check no TODO(agent), placeholder, mocked implementation
@@ -722,6 +1125,8 @@ Stop:
   check tests were not weakened
 
 SessionStart:
+  show current role and expected role for the task
+  show required handoff artifacts for the task severity
   inject current task state
   show recent failing checks
   show module owner and validation commands
@@ -736,6 +1141,7 @@ secrets/
 vendor/
 third_party/
 generated/
+.ai/generated/
 package-lock.json
 pnpm-lock.yaml
 db/migrations/
@@ -750,16 +1156,18 @@ Recommended subagents:
 ```text
 codebase-explorer
 test-failure-triager
-security-reviewer
-performance-reviewer
+security-specialist
+performance-specialist
 frontend-qa
 api-contract-reviewer
-migration-planner
+migration-specialist
 ```
 
 Review and explorer subagents should default to read-only.
 
-## 9. Git / Worktrees / Review
+Role agent sessions are different from subagents. Role sessions own a project phase and should be started with `claude --agent <role>`. Subagents are for bounded side tasks, context isolation, parallel exploration, triage, and independent review.
+
+## 10. Git / Worktrees / Review
 
 Small commits:
 
@@ -788,7 +1196,7 @@ AI review is good at details. Humans remain responsible for:
 - whether the work is worth doing
 - whether the solution is over-engineered
 
-## 10. Large Codebase Rules
+## 11. Large Codebase Rules
 
 Do not rely only on grep. In large codebases, grep easily finds the wrong symbol, misses affected files, and causes partial completion or tool thrashing.
 
@@ -804,7 +1212,28 @@ tools/check-boundaries
 
 If LSP, Sourcegraph, code search, or MCP is available, Claude should prefer them.
 
-Maintain `.ai/module-index.json`:
+Do not maintain hand-written large-codebase indexes as authoritative context. Indexes drift, and stale indexes mislead agents.
+
+Generate context artifacts from source-of-truth systems:
+
+```text
+source of truth:
+  codebase
+  package manifests
+  CODEOWNERS / ownership metadata
+  build graph
+  import graph
+  test config
+  coverage / CI metadata
+  LSP / code search
+
+derived artifacts:
+  .ai/generated/module-index.json
+  .ai/generated/test-map.json
+  .ai/generated/public-surface.json
+```
+
+Example generated module index:
 
 ```json
 {
@@ -822,15 +1251,24 @@ Maintain `.ai/module-index.json`:
 }
 ```
 
+Rules:
+
+- generated artifacts are caches, not truth
+- manual edits to `.ai/generated/**` are forbidden
+- CI must run `tools/check-generated-artifacts`
+- if a generated artifact is stale, Claude must regenerate it or fall back to live code search
+- if generated context conflicts with live code, live code wins
+
 Architecture boundaries must be mechanically checked:
 
 ```text
 tools/check-boundaries
+tools/check-generated-artifacts
 ```
 
 and enforced in CI.
 
-## 11. Long Tasks, Documentation Sync, and Replan
+## 12. Long Tasks, Documentation Sync, and Replan
 
 Long tasks cannot rely on chat context.
 
@@ -840,10 +1278,16 @@ State files:
 .ai/state/
   progress.md       — snapshot of all active tasks' current state
   decisions.md      — architectural / design decisions with rationale (append-only)
-  validation-log.md — recent validation runs (rolling, ~last 20)
+  validation-log.md — recent validation runs across tasks (rolling index, ~last 20)
   known-issues.md   — deferred findings awaiting triage
   scratch.md        — current session's working TODOs (cleared at task completion)
 ```
+
+Validation log authority:
+
+- `.ai/handoffs/<task-slug>/validation-log.md` is authoritative for one task.
+- `.ai/state/validation-log.md` is a rolling index across tasks and should point to the task-level log when one exists.
+- Final reports and review reports should cite the task-level validation log, not scattered chat output.
 
 Information lifetime determines where it lives:
 
@@ -917,7 +1361,7 @@ Execution plans include:
 
 When a task has an exec-plan, `current state` in the exec-plan is the authoritative progress record; `progress.md` only points to it.
 
-### 11.1 Documentation Sync Contract
+### 12.1 Documentation Sync Contract
 
 Changes to plan, architecture, public function contracts, test strategy, or module responsibilities must update the related docs.
 
@@ -953,7 +1397,7 @@ Enforcement:
 - Stop hook checks that plan, public contract, or test strategy changes have matching doc updates before the session ends.
 - `tools/check-docs-freshness` runs in CI and fails the build when code touching tracked surfaces lands without corresponding doc updates.
 
-### 11.2 Replan Protocol
+### 12.2 Replan Protocol
 
 Triggers:
 
@@ -998,7 +1442,7 @@ Low-risk deviations may continue with a note:
 - private implementation detail changes
 - scope, public surface, architecture boundary, and test contract stay unchanged
 
-### 11.3 Design Change Control
+### 12.3 Design Change Control
 
 When a large feature is split into subtasks and a design defect is found midstream, do not default to full rollback, and do not continue because of sunk cost.
 
@@ -1053,7 +1497,7 @@ Principle:
 
 > Preserve tests, knowledge, and reusable assets; discard wrong boundaries, wrong contracts, and wrong abstractions. Decide based on future maintenance cost, not lines already written.
 
-## 12. AI Code Acceptance
+## 13. AI Code Acceptance
 
 AI code must satisfy:
 
@@ -1066,7 +1510,7 @@ behavior is correct
 + plan deviations are traceable
 ```
 
-### 12.1 Acceptance Checklist
+### 13.1 Acceptance Checklist
 
 ```md
 # AI Code Acceptance Checklist
@@ -1078,6 +1522,16 @@ behavior is correct
 - [ ] No forbidden files changed.
 - [ ] No unapproved dependency added.
 - [ ] No scope expansion without Replan.
+
+## Role / Handoff
+
+- [ ] Task severity was classified.
+- [ ] Required role route was followed or an exception was approved.
+- [ ] The coder session did not own architecture, planning, final testing responsibility, and review by itself.
+- [ ] Required handoff artifacts exist and match the handoff schemas.
+- [ ] The coder did not change task scope, module boundaries, public contracts, or test strategy without Replan.
+- [ ] The reviewer used fresh context, a reviewer role session, or a read-only reviewer subagent.
+- [ ] Task-level validation evidence is recorded in `.ai/handoffs/<task-slug>/validation-log.md` when a handoff directory exists.
 
 ## Architecture
 
@@ -1130,23 +1584,28 @@ behavior is correct
 - [ ] Design defects were handled through Design Change Control.
 ```
 
-### 12.2 Acceptance Flow
+### 13.2 Acceptance Flow
 
 ```text
-1. Inspect diff scope
-2. Compare diff against task spec and architecture contract
-3. Compare public surface against Public Surface Contract
-4. Review tests for contract and regression coverage
-5. Run or inspect validation evidence
-6. Run architecture boundary checks
-7. Check docs consistency
-8. Run independent review for complex/high-risk changes
-9. Approve, request changes, or trigger Replan
+1. Classify task severity and required role route
+2. Verify required handoff artifacts exist
+3. Inspect diff scope
+4. Compare diff against task spec and architecture plan
+5. Compare public surface against Public Surface Contract
+6. Review tests for contract and regression coverage
+7. Run or inspect validation evidence
+8. Run architecture boundary checks
+9. Check docs consistency
+10. Run independent review for complex/high-risk changes
+11. Approve, request changes, or trigger Replan
 ```
 
 Claude’s final report must include:
 
 ```text
+Task severity:
+Role sessions used:
+Handoff artifacts:
 Files changed:
 Public surface changed:
 Tests added/updated:
@@ -1177,12 +1636,13 @@ tools/check-boundaries
 tools/check-public-surface
 tools/check-contract-tests
 tools/check-docs-freshness
+tools/check-generated-artifacts
 tools/check-agent-rules
 tools/check-changed
 tools/check-e2e-smoke
 ```
 
-## 13. MCP and Permissions
+## 14. MCP and Permissions
 
 MCP is useful for repo-external, frequently changing, tool-accessible context:
 
@@ -1213,7 +1673,91 @@ Permission principles:
 - destructive actions require hard gates
 - third-party MCP servers require source review and version pinning, with an owner recorded for each enabled server
 
-## 14. Team Governance
+## 15. Harness Drift and Evolution
+
+The harness itself can drift. Rules, role agent files, commands, hooks, generated indexes, and validation scripts are also software and must be maintained with the same skepticism as production code.
+
+### 15.1 Generated Context Only
+
+Manual indexes are not reliable sources of truth in a large codebase.
+
+Forbidden:
+
+- hand-maintained module indexes as authoritative context
+- hand-maintained test maps as authoritative context
+- stale public-surface maps
+- generated artifacts edited by hand
+
+Allowed:
+
+- generated artifacts created from source code, build graphs, ownership metadata, test configs, coverage, CI, LSP, and code search
+- checked-in generated artifacts only when CI verifies freshness
+- fallback to live code search when generated context is missing or stale
+
+Required check:
+
+```text
+tools/check-generated-artifacts
+```
+
+This check should fail when:
+
+- `.ai/generated/module-index.json` is stale
+- `.ai/generated/test-map.json` is stale
+- `.ai/generated/public-surface.json` is stale
+- a generated artifact was hand-edited
+- generated context disagrees with source-of-truth code metadata
+
+If generated context conflicts with live code, live code wins.
+
+### 15.2 Repeated Rules Need Rule IDs
+
+Repeating critical rules in root `CLAUDE.md`, module-local `CLAUDE.md`, and role agent files can be useful defense in depth, but untracked duplication causes drift.
+
+Rules:
+
+- critical repeated rules must have stable IDs, such as `RULE-SCOPE-001`, `RULE-ARCH-001`, `RULE-TEST-001`, `RULE-PERM-001`
+- root rule text is canonical unless a different canonical source is explicitly defined
+- role agent files should reference rule IDs or include generated rule snippets
+- `tools/check-agent-rules` must fail when repeated rule text, rule IDs, or required rule coverage drift
+- do not copy long rule blocks manually into many files without a freshness check
+
+### 15.3 Scaffolding Must Earn Its Keep
+
+The right philosophy is not "more constraints means more reliability." The right philosophy is:
+
+> Add constraints when they prevent observed failures. Remove constraints when they no longer pay for their maintenance cost.
+
+Every rule, role, handoff artifact, hook, generated index, validation command, and required checklist item adds cost.
+
+Monthly review must remove as well as add scaffolding:
+
+- remove rules that no longer prevent real failures
+- merge roles that create handoff overhead without reducing risk
+- replace manual docs or indexes with generated artifacts
+- relax constraints that block safe cross-file edits by stronger models
+- promote useful repeated behavior into tests, CI, hooks, or generated checks
+- delete soft behavioral rules that are not measurable and do not prevent observed failures
+- delete stale workarounds created for older model limitations
+
+Do not preserve a rule only because it helped an older model. A rule must justify itself against the current model, current tools, current codebase, and current failure data.
+
+### 15.4 Model Evolution Review
+
+When the model, Claude Code, MCP tooling, code search, test selection, or CI improves, revisit the harness.
+
+Review questions:
+
+- Which constraints were added for a weaker model?
+- Which rules now block safe multi-file reasoning or coordinated edits?
+- Which role handoffs are producing useful artifacts, and which are ritual?
+- Which prompts can be replaced by stronger tests, generated checks, or tools?
+- Which checks are redundant because CI or type systems now cover them?
+- Which tasks can safely move to a lighter route because failure data improved?
+
+The goal is a harness that stays strong by staying lean.
+
+## 16. Team Governance
 
 The team needs a Claude Code Harness owner, usually DevEx, platform, staff engineer, or architecture group.
 
@@ -1221,11 +1765,12 @@ Responsibilities:
 
 - maintain `CLAUDE.md`
 - maintain hooks
-- maintain skills/subagents
+- maintain role agents, skills, subagents, and commands
 - maintain validation commands
+- maintain generated context artifacts and freshness checks
 - maintain docs freshness and documentation sync rules
 - review MCP permissions
-- clean stale rules and stale docs
+- clean stale rules, stale docs, stale generated artifacts, and stale scaffolding
 - collect agent failure modes
 
 Rule updates:
@@ -1234,6 +1779,8 @@ Rule updates:
 - high-risk boundaries go into `CLAUDE.md`
 - information used by every task goes into `CLAUDE.md`
 - everything else goes into module-local `CLAUDE.md`, docs, skill, command, hook, or CI check
+- every repeated critical rule needs a stable rule ID and freshness check
+- every generated context artifact needs a source-of-truth generator and CI freshness check
 
 Monthly review:
 
@@ -1241,9 +1788,13 @@ Monthly review:
 - Which task types succeed most often?
 - Which tasks should be forbidden for automation?
 - Which rules or docs are stale?
+- Which rules should be removed because the current model no longer needs them?
+- Which roles or handoff artifacts add overhead without reducing real failures?
+- Which manual indexes or docs should become generated artifacts?
 - Which prompts should become skills?
 - Which validation commands are too slow?
 - Which checks should move into hooks?
+- Which checks, hooks, or role requirements can be simplified?
 
 `known-issues.md` triage (every monthly review):
 
@@ -1251,22 +1802,24 @@ Monthly review:
 - Entries older than 90 days with no action are dismissed with a reason recorded in `decisions.md`.
 - `known-issues.md` is only useful if it stays small; an ever-growing file means triage is not happening.
 
-## 15. Minimum Team Rules
+## 17. Minimum Team Rules
 
-If you can only enforce 10 rules, enforce these:
+If you can only enforce 12 rules, enforce these:
 
-1. Complex tasks plan first; do not edit directly.
-2. One session handles one coherent task.
+1. Complex tasks use explicit role sessions, handoff artifacts, and plan first; do not edit directly.
+2. One session handles one coherent role and task.
 3. Tasks must define scope, non-goals, and validation.
 4. Every task must define file-level responsibilities.
 5. Ordinary tasks must define public function contracts.
 6. New or modified public functions must have contract tests.
 7. Code changes must run relevant validation.
 8. Architecture, public contract, or test strategy changes must sync docs.
-9. AI review uses fresh context.
-10. High-risk actions require human approval.
+9. Manual indexes are not authoritative; generated context must be freshness-checked.
+10. AI review uses fresh context or a reviewer role session.
+11. High-risk actions require human approval.
+12. Harness rules, roles, checks, and handoffs must be reviewed for removal as well as addition.
 
-## 16. Common Anti-Patterns
+## 18. Common Anti-Patterns
 
 ```text
 Huge CLAUDE.md
@@ -1275,16 +1828,30 @@ Huge CLAUDE.md
 Natural-language-only constraints
   -> hooks / lint / tests / CI / permissions
 
+Hand-maintained indexes
+  -> generated artifacts + CI freshness checks
+
+Copied critical rules in many files
+  -> rule IDs + generated snippets + check-agent-rules
+
 No validation command
   -> check-fast / check-changed / check-module
 
 Too much at once
   -> phases / incremental commits / draft PR
 
-Implementation session self-reviews
-  -> fresh review session / reviewer subagent
+One do-everything session
+  -> explicit role sessions + file handoffs
+
+Dynamic subagent routing for the main workflow
+  -> start the session with claude --agent <role>
+
+Permanent scaffolding for old model limits
+  -> monthly model evolution review + remove stale constraints
+
+Coder session self-reviews
+  -> reviewer role session / fresh review session / reviewer subagent
 
 Unbounded multi-agent parallelism
   -> worktrees / ownership / read-write separation
 ```
-
