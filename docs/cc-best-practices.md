@@ -193,6 +193,29 @@ Root template:
 - Changed files validation: `tools/check-changed`
 - Module validation: `tools/check-module <module>`
 
+## Default Role: Project Orchestrator
+
+When no explicit `--agent` is used, act as the project orchestrator.
+
+Responsibilities:
+
+- Clarify the task with the user.
+- Classify task severity.
+- Select the required role route.
+- Ensure required handoff artifacts exist.
+- Ask the user to start the correct `claude --agent <role>` session when needed.
+- Track progress, blockers, validation, docs sync, and Replan.
+- Verify that architect, coder, reviewer, and specialist outputs satisfy the required process.
+- Summarize final status, validation evidence, plan deviations, and remaining risks.
+
+Do not:
+
+- Own architecture, coding, and independent review in the same non-trivial task.
+- Let coding start before the required architecture-plan.md exists.
+- Approve coder output without reviewer evidence for complex or high-risk work.
+- Bypass the required role route for high-risk work.
+- Convert process coordination into a do-everything coding session.
+
 ## Role Sessions
 
 - For complex features, cross-module changes, refactors, public API changes, schema changes, auth, payment, permission, or security-sensitive work, start Claude Code with an explicit role: `claude --agent <role>`.
@@ -524,7 +547,40 @@ Do not include:
 
 For large projects, the default execution model should be role-based sessions, not dynamic role routing inside one main Claude conversation.
 
+The main session should be the project orchestrator: it owns communication, severity classification, role routing, progress tracking, and process verification. It does not own architecture, coding, and independent review for the same non-trivial task.
+
 Do not make one generic Claude session own architecture, planning, coding, final testing, and review for non-trivial work. That blurs responsibility and makes acceptance weak.
+
+### 7.1 Main Session: Project Orchestrator
+
+When Claude Code is started without an explicit role agent, the main session acts as the project orchestrator.
+
+Project orchestrator responsibilities:
+
+```text
+clarify task
+  -> classify severity
+  -> choose required role route
+  -> ensure handoff directory exists when needed
+  -> ask user to start architect/coder/reviewer/specialist sessions when needed
+  -> track progress, blockers, validation, docs sync, and Replan
+  -> verify role outputs and handoff artifacts
+  -> summarize final status and risks to the user
+```
+
+The orchestrator is a process owner, not an execution owner.
+
+It may handle T0/T1 work directly when the task is small, scoped, and low risk. For non-trivial work, it coordinates role sessions and verifies the process.
+
+Do not let the orchestrator:
+
+- implement complex changes directly
+- skip required `architect`, `coder`, or `reviewer` sessions
+- approve coder output without independent reviewer evidence
+- bypass the required role route for high-risk work
+- turn coordination into a do-everything session
+
+### 7.2 Session-Wide Role Agents
 
 Instead, start each major phase with an explicit session-wide role:
 
@@ -544,7 +600,7 @@ The role is selected at session startup. The agent file defines that session's s
 
 If the current session was not started with the required role, stop and ask the user to restart with the correct `claude --agent <role>` command. Do not simulate a different role through a normal prompt.
 
-### 7.1 Task Severity Routing
+### 7.3 Task Severity Routing
 
 This is not progressive adoption. The full harness exists by default; the role chain depends on task risk.
 
@@ -559,7 +615,7 @@ This is not progressive adoption. The full harness exists by default; the role c
 
 If classification is unclear, use the stricter route.
 
-### 7.2 Required Roles
+### 7.4 Required Roles
 
 Large projects should define these project-level agents:
 
@@ -602,7 +658,7 @@ reviewer
   must escalate architecture, public contract, or design issues to architect
 ```
 
-### 7.3 Role Permission Matrix
+### 7.5 Role Permission Matrix
 
 Prompt rules are not enough. Role separation must be backed by tool scope, permission mode, hooks, and review.
 
@@ -626,7 +682,7 @@ specialist: default with write hooks limited to specialist reports, tests, and a
 
 Tool lists alone cannot enforce path-level ownership. Add hooks or CI checks that reject writes outside each role's allowed scope. If path-scoped enforcement is unavailable, the final review must explicitly inspect role ownership violations.
 
-### 7.4 Handoff Contract
+### 7.6 Handoff Contract
 
 Role sessions communicate through files, not memory from previous chats.
 
@@ -779,7 +835,7 @@ Handoff artifact schemas:
 ## Decision
 ```
 
-### 7.5 Role Session vs Subagent
+### 7.7 Role Session vs Subagent
 
 Use a role session when:
 
@@ -799,7 +855,7 @@ Use a subagent when:
 
 Do not use dynamic subagent routing as the primary workflow for architecture/plan -> coding -> independent review/testing. Use explicit role sessions and file handoffs for that.
 
-### 7.6 Agent File Contract
+### 7.8 Agent File Contract
 
 Every role agent file should define:
 
@@ -903,11 +959,14 @@ reviewer.md
     handoffs are missing, validation evidence is missing, architecture/test/doc compliance cannot be verified, or the fix is no longer small/local/low-risk
 ```
 
-### 7.7 Default Workflow
+### 7.9 Default Workflow
 
 For large features:
 
 ```text
+orchestrator main session
+  -> classify task + route roles + track process
+
 architect session
   -> architecture-plan.md
 
@@ -1156,6 +1215,7 @@ PostToolUse:
   run cheap lint
 
 Stop:
+  check orchestrator did not bypass required role route
   check task severity and required role route
   check required handoff artifacts exist
   check required validation
@@ -1167,6 +1227,7 @@ Stop:
   check tests were not weakened
 
 SessionStart:
+  show that untagged main sessions act as project orchestrator
   show current role and expected role for the task
   show required handoff artifacts for the task severity
   inject current task state
@@ -1567,8 +1628,11 @@ behavior is correct
 
 ## Role / Handoff
 
+- [ ] The main session acted as project orchestrator when no explicit role agent was used.
 - [ ] Task severity was classified.
 - [ ] Required role route was followed or an exception was approved.
+- [ ] The orchestrator verified required handoff artifacts, validation evidence, docs sync, and remaining risks.
+- [ ] The orchestrator did not become the architect, coder, and reviewer for the same non-trivial task.
 - [ ] The coder session did not own architecture, planning, final testing responsibility, and review by itself.
 - [ ] Required handoff artifacts exist and match the handoff schemas.
 - [ ] The coder did not change task scope, module boundaries, public contracts, or test strategy without Replan.
@@ -1632,7 +1696,7 @@ behavior is correct
 ### 13.2 Acceptance Flow
 
 ```text
-1. Classify task severity and required role route
+1. Orchestrator classifies task severity and required role route
 2. Verify required handoff artifacts exist
 3. Inspect diff scope
 4. Compare diff against task spec and architecture plan
@@ -1642,13 +1706,15 @@ behavior is correct
 8. Run architecture boundary checks
 9. Check docs consistency
 10. Run independent review for complex/high-risk changes
-11. Approve, request changes, or trigger Replan
+11. Orchestrator verifies process compliance, remaining risks, and next step
+12. Approve, request changes, or trigger Replan
 ```
 
 Claude’s final report must include:
 
 ```text
 Task severity:
+Orchestrator decision:
 Role sessions used:
 Handoff artifacts:
 Files changed:
@@ -1809,6 +1875,7 @@ The team needs a Claude Code Harness owner, usually DevEx, platform, staff engin
 Responsibilities:
 
 - maintain `CLAUDE.md`
+- maintain the project orchestrator behavior in root `CLAUDE.md`
 - maintain hooks
 - maintain role agents, skills, subagents, and commands
 - maintain validation commands
@@ -1849,20 +1916,21 @@ Monthly review:
 
 ## 17. Minimum Team Rules
 
-If you can only enforce 12 rules, enforce these:
+If you can only enforce 13 rules, enforce these:
 
-1. Complex tasks use explicit role sessions, handoff artifacts, and plan first; do not edit directly.
-2. One session handles one coherent role and task.
-3. Tasks must define scope, non-goals, and validation.
-4. Every task must define file-level responsibilities.
-5. Ordinary tasks must define public function contracts.
-6. New or modified public functions must have contract tests.
-7. Code changes must run relevant validation.
-8. Architecture, public contract, or test strategy changes must sync docs.
-9. Manual indexes are not authoritative; generated context must be freshness-checked.
-10. AI review uses fresh context or a reviewer role session.
-11. High-risk actions require human approval.
-12. Harness rules, roles, checks, and handoffs must be reviewed for removal as well as addition.
+1. Untagged main sessions act as project orchestrator, not do-everything executors.
+2. Complex tasks use explicit role sessions, handoff artifacts, and plan first; do not edit directly.
+3. One session handles one coherent role and task.
+4. Tasks must define scope, non-goals, and validation.
+5. Every task must define file-level responsibilities.
+6. Ordinary tasks must define public function contracts.
+7. New or modified public functions must have contract tests.
+8. Code changes must run relevant validation.
+9. Architecture, public contract, or test strategy changes must sync docs.
+10. Manual indexes are not authoritative; generated context must be freshness-checked.
+11. AI review uses fresh context or a reviewer role session.
+12. High-risk actions require human approval.
+13. Harness rules, roles, checks, and handoffs must be reviewed for removal as well as addition.
 
 ## 18. Common Anti-Patterns
 
@@ -1887,6 +1955,9 @@ Too much at once
 
 One do-everything session
   -> explicit role sessions + file handoffs
+
+Orchestrator becomes coder/reviewer
+  -> orchestrator coordinates and verifies; role sessions execute
 
 Dynamic subagent routing for the main workflow
   -> start the session with claude --agent <role>
