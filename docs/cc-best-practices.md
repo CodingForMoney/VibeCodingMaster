@@ -595,9 +595,11 @@ reviewer
   owns independent acceptance and final test responsibility
   checks scope, role compliance, architecture compliance, public contract compliance, docs sync, validation evidence, and risk
   checks, designs, and adds missing tests when needed
+  may directly apply small, local, low-risk review fixes
   owns complex tests, E2E coverage, regression matrix, and release-level validation recommendations
   outputs .ai/handoffs/<task-slug>/review-report.md
-  should default to read-mostly tools and artifact-only writes
+  must escalate larger implementation issues to coder
+  must escalate architecture, public contract, or design issues to architect
 ```
 
 ### 7.3 Role Permission Matrix
@@ -608,7 +610,7 @@ Prompt rules are not enough. Role separation must be backed by tool scope, permi
 | --- | --- | --- | --- |
 | `architect` | `Read`, `Grep`, `Glob`, `Bash`, `Edit`, `Write` | architecture plan, task spec, architecture docs only with approval | edit production code, rewrite tests, expand task scope |
 | `coder` | `Read`, `Grep`, `Glob`, `Bash`, `Edit`, `Write` | approved source files, baseline tests, validation log, implementation log | change scope, public contracts, module boundaries, or test strategy without Replan |
-| `reviewer` | `Read`, `Grep`, `Glob`, `Bash`, `Edit`, `Write` | review report, missing tests/fixtures, validation log | change production behavior, approve own implementation, weaken tests |
+| `reviewer` | `Read`, `Grep`, `Glob`, `Bash`, `Edit`, `Write` | review report, missing tests/fixtures, validation log, small review-scoped fixes | take over implementation, change architecture/public contracts, approve own implementation, weaken tests |
 | `security-specialist` | `Read`, `Grep`, `Glob`, `Bash`, `Edit`, `Write` | security review report and approved security tests | bypass approvals, edit production code without explicit scope |
 | `migration-specialist` | `Read`, `Grep`, `Glob`, `Bash`, `Edit`, `Write` | migration plan, migration tests, validation notes | run destructive migrations, change schema without approval |
 | `performance-specialist` | `Read`, `Grep`, `Glob`, `Bash`, `Edit`, `Write` | performance report, benchmarks, approved perf tests | change product behavior, hide regressions |
@@ -618,7 +620,7 @@ Recommended permission modes:
 ```text
 architect:  default with write hooks limited to architecture-plan.md, task specs, and approved docs
 coder:      default or acceptEdits, but only inside approved scope
-reviewer:   default with production-code writes blocked; test writes allowed when adding missing coverage
+reviewer:   default with production-code writes blocked except explicitly review-scoped small fixes; test writes allowed
 specialist: default with write hooks limited to specialist reports, tests, and approved files
 ```
 
@@ -669,8 +671,46 @@ reviewer:
   owns final test adequacy
   identifies and adds missing unit/contract/integration tests when needed
   owns complex test strategy, E2E smoke/release coverage, and regression matrix
-  may request coder fixes for production code issues
+  may directly apply small, local, low-risk review fixes
+  must request coder fixes for larger implementation issues
+  must request architect review for architecture, public contract, dependency, schema, auth, permission, payment, or design issues
   must not weaken tests to pass validation
+```
+
+Reviewer direct fixes must be review-scoped:
+
+```text
+allowed:
+  strengthen test assertions
+  add missing small boundary/regression tests
+  fix test names, fixtures, or validation documentation
+  fix obvious typo, import, lint, formatting, or local compile error
+  fix a small local bug discovered during review
+
+required conditions:
+  small and local
+  low-risk
+  no public contract change
+  no architecture change
+  no new dependency
+  no schema/migration change
+  no auth, permission, payment, or data deletion behavior change
+  no broad production rewrite
+
+escalate to coder:
+  business logic needs a medium or large change
+  multiple production files need coordinated edits
+  implementation structure needs rework
+  validation fails because core behavior is wrong
+  the fix would exceed a small review patch
+
+escalate to architect:
+  module boundary is wrong
+  file responsibilities are wrong
+  public contract is wrong
+  dependency direction is wrong
+  schema, auth, permission, payment, public API, or security design is wrong
+  the implementation reveals that the architecture plan is invalid
 ```
 
 For a task with a handoff directory, `.ai/handoffs/<task-slug>/validation-log.md` is the authoritative validation record for that task. `.ai/state/validation-log.md` is only a rolling index of recent validation results across tasks.
@@ -730,6 +770,8 @@ Handoff artifact schemas:
 ## Public Contract Review
 ## Test Review
 ## Missing Tests Added
+## Review Fixes Applied
+## Escalations To Coder / Architect
 ## E2E / Regression Recommendation
 ## Validation Evidence
 ## Docs Sync
@@ -854,11 +896,11 @@ reviewer.md
   required inputs:
     task spec, architecture-plan.md, implementation-log.md, validation-log.md, git diff
   outputs:
-    review-report.md, missing tests/fixtures when needed, validation-log.md
+    review-report.md, missing tests/fixtures when needed, review-scoped small fixes, validation-log.md
   do not:
-    change production behavior, weaken tests, lower assertions, delete failing tests, approve own implementation
+    take over implementation, change architecture/public contracts, weaken tests, lower assertions, delete failing tests, approve own implementation
   stop when:
-    handoffs are missing, validation evidence is missing, or architecture/test/doc compliance cannot be verified
+    handoffs are missing, validation evidence is missing, architecture/test/doc compliance cannot be verified, or the fix is no longer small/local/low-risk
 ```
 
 ### 7.7 Default Workflow
@@ -1531,6 +1573,9 @@ behavior is correct
 - [ ] Required handoff artifacts exist and match the handoff schemas.
 - [ ] The coder did not change task scope, module boundaries, public contracts, or test strategy without Replan.
 - [ ] The reviewer used fresh context, a reviewer role session, or a read-only reviewer subagent.
+- [ ] Any reviewer direct fixes were small, local, low-risk, and review-scoped.
+- [ ] Larger implementation issues were returned to coder.
+- [ ] Architecture, public contract, dependency, schema, auth, permission, payment, or design issues were returned to architect.
 - [ ] Task-level validation evidence is recorded in `.ai/handoffs/<task-slug>/validation-log.md` when a handoff directory exists.
 
 ## Architecture
