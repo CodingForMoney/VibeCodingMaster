@@ -40,7 +40,7 @@ Current V1 capabilities:
 
 ## Requirements
 
-- Node.js 20+.
+- Node.js 20 LTS or 22+.
 - npm.
 - Git.
 - Claude Code installed and available as `claude` in the runtime environment.

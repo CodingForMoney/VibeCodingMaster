@@ -1,6 +1,8 @@
+#!/usr/bin/env node
+import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { createServer as createViteDevServer, type ViteDevServer } from "vite";
+import type { ViteDevServer } from "vite";
 import {
   DEFAULT_BACKEND_PORT,
   DEFAULT_FRONTEND_PORT
@@ -43,6 +45,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
   let vite: ViteDevServer | undefined;
 
   if (options.dev) {
+    const { createServer: createViteDevServer } = await import("vite");
     vite = await createViteDevServer({
       server: {
         host,
@@ -69,6 +72,20 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
   });
 }
 
-if (fileURLToPath(import.meta.url) === path.resolve(process.argv[1] ?? "")) {
+function isMainModule(): boolean {
+  const argvPath = process.argv[1];
+  if (!argvPath) {
+    return false;
+  }
+
+  const modulePath = fileURLToPath(import.meta.url);
+  try {
+    return fs.realpathSync(argvPath) === fs.realpathSync(modulePath);
+  } catch {
+    return path.resolve(argvPath) === modulePath;
+  }
+}
+
+if (isMainModule()) {
   void main();
 }
