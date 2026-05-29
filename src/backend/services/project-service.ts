@@ -59,9 +59,21 @@ export function createProjectService(deps: ProjectServiceDeps): ProjectService {
       await deps.fs.ensureDir(path.join(repoRoot, config.stateRoot, "sessions"));
       await this.saveConfig(config, true);
 
-      const branch = await deps.git.getCurrentBranch(repoRoot);
-      const isDirty = await deps.git.isDirty(repoRoot);
       const warnings: string[] = [];
+      let branch = "unknown";
+      let isDirty = false;
+
+      try {
+        branch = await deps.git.getCurrentBranch(repoRoot);
+      } catch (caught) {
+        warnings.push(`Unable to read current Git branch. ${getErrorHint(caught)}`);
+      }
+
+      try {
+        isDirty = await deps.git.isDirty(repoRoot);
+      } catch (caught) {
+        warnings.push(`Unable to read Git dirty status. ${getErrorHint(caught)}`);
+      }
 
       if (branch === "main" || branch === "master") {
         warnings.push(`You are on ${branch}. Consider creating a task branch before coding.`);
@@ -102,6 +114,18 @@ export function createProjectService(deps: ProjectServiceDeps): ProjectService {
       return path.join(repoRoot, ".vcm", "config.json");
     }
   };
+}
+
+function getErrorHint(caught: unknown): string {
+  if (caught instanceof VcmError) {
+    return caught.hint?.trim() || caught.message;
+  }
+
+  if (caught instanceof Error) {
+    return caught.message;
+  }
+
+  return "Unknown Git metadata error.";
 }
 
 export function buildDefaultProjectConfig(repoRoot: string): ProjectConfig {

@@ -5,7 +5,7 @@ import type { FileSystemAdapter } from "../../../src/backend/adapters/filesystem
 import type { GitAdapter } from "../../../src/backend/adapters/git-adapter.js";
 
 describe("createProjectService", () => {
-  it("trims repository paths before validating the Git worktree", async () => {
+  it("trims repository paths before validating the Git repository", async () => {
     const fs = createMemoryFs(new Set(["/workspace"]));
     const checkedRepos: string[] = [];
     const service = createProjectService({
@@ -31,6 +31,24 @@ describe("createProjectService", () => {
       code: "INVALID_REPO",
       hint: "Path does not exist inside the VCM runtime: /workspace"
     });
+  });
+
+  it("connects when the repo marker is valid even if Git metadata reads fail", async () => {
+    const service = createProjectService({
+      fs: createMemoryFs(new Set(["/workspace"])),
+      git: createGitAdapterStub([], { failMetadata: true }),
+      claude: createClaudeAdapterStub()
+    });
+
+    const project = await service.connectProject({ repoPath: "/workspace" });
+
+    expect(project.repoRoot).toBe("/workspace");
+    expect(project.branch).toBe("unknown");
+    expect(project.isDirty).toBe(false);
+    expect(project.warnings).toEqual([
+      "Unable to read current Git branch. branch unavailable",
+      "Unable to read Git dirty status. status unavailable"
+    ]);
   });
 });
 
@@ -70,7 +88,7 @@ function createMemoryFs(existingPaths: Set<string>): FileSystemAdapter {
   };
 }
 
-function createGitAdapterStub(checkedRepos: string[]): GitAdapter {
+function createGitAdapterStub(checkedRepos: string[], options: { failMetadata?: boolean } = {}): GitAdapter {
   return {
     async checkRepo(repoRoot) {
       checkedRepos.push(repoRoot);
@@ -80,9 +98,15 @@ function createGitAdapterStub(checkedRepos: string[]): GitAdapter {
       return true;
     },
     async getCurrentBranch() {
+      if (options.failMetadata) {
+        throw new Error("branch unavailable");
+      }
       return "feature/devcontainer";
     },
     async isDirty() {
+      if (options.failMetadata) {
+        throw new Error("status unavailable");
+      }
       return false;
     }
   };

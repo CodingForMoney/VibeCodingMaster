@@ -148,7 +148,7 @@ Important container notes:
 - Make sure Claude Code authentication works inside the container.
 - Make sure the container has network access to Claude services.
 - Use the path as seen from inside the container, for example `/workspace`.
-- If Git still reports dubious ownership for the mounted repository, run inside the container: `git config --global --add safe.directory /workspace`.
+- VCM accepts normal repositories by checking `/workspace/.git` directly; it does not require global Git `safe.directory` config to connect.
 - Keep the user project, `.vcm`, and `.ai/handoffs` on the same mounted workspace so paths are consistent.
 - Treat the container as the sandbox boundary, especially when using relaxed Claude Code permission modes.
 

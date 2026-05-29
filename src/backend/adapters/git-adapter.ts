@@ -1,4 +1,5 @@
 import fs from "node:fs/promises";
+import path from "node:path";
 import { VcmError } from "../errors.js";
 import type { CommandRunner } from "./command-runner.js";
 
@@ -17,11 +18,7 @@ export interface GitAdapter {
 export function createGitAdapter(runner: CommandRunner): GitAdapter {
   return {
     async checkRepo(repoRoot) {
-      const result = await runGit(runner, repoRoot, ["rev-parse", "--is-inside-work-tree"]);
-      return {
-        isRepo: result.exitCode === 0 && result.stdout.trim() === "true",
-        hint: result.exitCode === 0 ? undefined : formatGitHint(result.stderr)
-      };
+      return checkGitMarker(repoRoot);
     },
     async isRepo(repoRoot) {
       return (await this.checkRepo(repoRoot)).isRepo;
@@ -55,6 +52,71 @@ export function createGitAdapter(runner: CommandRunner): GitAdapter {
   };
 }
 
+async function checkGitMarker(repoRoot: string): Promise<GitRepoCheck> {
+  const markerPath = path.join(repoRoot, ".git");
+  try {
+    const markerStat = await fs.lstat(markerPath);
+    if (markerStat.isDirectory()) {
+      return checkGitDirectory(markerPath);
+    }
+
+    if (markerStat.isFile()) {
+      return checkGitFile(repoRoot, markerPath);
+    }
+
+    return {
+      isRepo: false,
+      hint: `.git exists but is neither a directory nor a gitdir file: ${markerPath}`
+    };
+  } catch {
+    return {
+      isRepo: false,
+      hint: `.git not found under selected path: ${markerPath}`
+    };
+  }
+}
+
+async function checkGitDirectory(gitDir: string): Promise<GitRepoCheck> {
+  if (await pathExists(path.join(gitDir, "HEAD"))) {
+    return { isRepo: true };
+  }
+
+  return {
+    isRepo: false,
+    hint: `.git directory exists but HEAD is missing: ${gitDir}`
+  };
+}
+
+async function checkGitFile(repoRoot: string, markerPath: string): Promise<GitRepoCheck> {
+  const marker = await fs.readFile(markerPath, "utf8");
+  const match = marker.match(/^gitdir:\s*(.+)\s*$/m);
+  if (!match) {
+    return {
+      isRepo: false,
+      hint: `.git file does not contain a gitdir pointer: ${markerPath}`
+    };
+  }
+
+  const gitDir = path.resolve(repoRoot, match[1]);
+  if (await pathExists(path.join(gitDir, "HEAD"))) {
+    return { isRepo: true };
+  }
+
+  return {
+    isRepo: false,
+    hint: `.git file points to a gitdir without HEAD: ${gitDir}`
+  };
+}
+
+async function pathExists(targetPath: string): Promise<boolean> {
+  try {
+    await fs.access(targetPath);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 async function runGit(runner: CommandRunner, repoRoot: string, args: string[]) {
   return runner.run("git", [...await buildSafeDirectoryArgs(repoRoot), ...args], { cwd: repoRoot });
 }
@@ -68,17 +130,4 @@ async function buildSafeDirectoryArgs(repoRoot: string): Promise<string[]> {
   }
 
   return [...safeDirs].flatMap((safeDir) => ["-c", `safe.directory=${safeDir}`]);
-}
-
-function formatGitHint(stderr: string): string | undefined {
-  const hint = stderr.trim();
-  if (!hint) {
-    return undefined;
-  }
-
-  if (hint.includes("detected dubious ownership")) {
-    return `${hint} If this is a devContainer mount, run inside the container: git config --global --add safe.directory <repo-path>`;
-  }
-
-  return hint;
 }
