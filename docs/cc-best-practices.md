@@ -193,6 +193,29 @@ Root template:
 - Changed files validation: `tools/check-changed`
 - Module validation: `tools/check-module <module>`
 
+## Default Role: Project Orchestrator
+
+When no explicit `--agent` is used, act as the project orchestrator.
+
+Responsibilities:
+
+- Clarify the task with the user.
+- Classify task severity.
+- Select the required role route.
+- Ensure required handoff artifacts exist.
+- Ask the user to start the correct `claude --agent <role>` session when needed.
+- Track progress, blockers, validation, docs sync, and Replan.
+- Verify that architect, coder, reviewer, and specialist outputs satisfy the required process.
+- Summarize final status, validation evidence, plan deviations, and remaining risks.
+
+Do not:
+
+- Own architecture, coding, and independent review in the same non-trivial task.
+- Let coding start before the required architecture-plan.md exists.
+- Approve coder output without reviewer evidence for complex or high-risk work.
+- Bypass the required role route for high-risk work.
+- Convert process coordination into a do-everything coding session.
+
 ## Role Sessions
 
 - For complex features, cross-module changes, refactors, public API changes, schema changes, auth, payment, permission, or security-sensitive work, start Claude Code with an explicit role: `claude --agent <role>`.
@@ -524,7 +547,40 @@ Do not include:
 
 For large projects, the default execution model should be role-based sessions, not dynamic role routing inside one main Claude conversation.
 
+The main session should be the project orchestrator: it owns communication, severity classification, role routing, progress tracking, and process verification. It does not own architecture, coding, and independent review for the same non-trivial task.
+
 Do not make one generic Claude session own architecture, planning, coding, final testing, and review for non-trivial work. That blurs responsibility and makes acceptance weak.
+
+### 7.1 Main Session: Project Orchestrator
+
+When Claude Code is started without an explicit role agent, the main session acts as the project orchestrator.
+
+Project orchestrator responsibilities:
+
+```text
+clarify task
+  -> classify severity
+  -> choose required role route
+  -> ensure handoff directory exists when needed
+  -> ask user to start architect/coder/reviewer/specialist sessions when needed
+  -> track progress, blockers, validation, docs sync, and Replan
+  -> verify role outputs and handoff artifacts
+  -> summarize final status and risks to the user
+```
+
+The orchestrator is a process owner, not an execution owner.
+
+It may handle T0/T1 work directly when the task is small, scoped, and low risk. For non-trivial work, it coordinates role sessions and verifies the process.
+
+Do not let the orchestrator:
+
+- implement complex changes directly
+- skip required `architect`, `coder`, or `reviewer` sessions
+- approve coder output without independent reviewer evidence
+- bypass the required role route for high-risk work
+- turn coordination into a do-everything session
+
+### 7.2 Session-Wide Role Agents
 
 Instead, start each major phase with an explicit session-wide role:
 
@@ -544,7 +600,7 @@ The role is selected at session startup. The agent file defines that session's s
 
 If the current session was not started with the required role, stop and ask the user to restart with the correct `claude --agent <role>` command. Do not simulate a different role through a normal prompt.
 
-### 7.1 Task Severity Routing
+### 7.3 Task Severity Routing
 
 This is not progressive adoption. The full harness exists by default; the role chain depends on task risk.
 
@@ -559,7 +615,7 @@ This is not progressive adoption. The full harness exists by default; the role c
 
 If classification is unclear, use the stricter route.
 
-### 7.2 Required Roles
+### 7.4 Required Roles
 
 Large projects should define these project-level agents:
 
@@ -595,12 +651,14 @@ reviewer
   owns independent acceptance and final test responsibility
   checks scope, role compliance, architecture compliance, public contract compliance, docs sync, validation evidence, and risk
   checks, designs, and adds missing tests when needed
+  may directly apply small, local, low-risk review fixes
   owns complex tests, E2E coverage, regression matrix, and release-level validation recommendations
   outputs .ai/handoffs/<task-slug>/review-report.md
-  should default to read-mostly tools and artifact-only writes
+  must escalate larger implementation issues to coder
+  must escalate architecture, public contract, or design issues to architect
 ```
 
-### 7.3 Role Permission Matrix
+### 7.5 Role Permission Matrix
 
 Prompt rules are not enough. Role separation must be backed by tool scope, permission mode, hooks, and review.
 
@@ -608,7 +666,7 @@ Prompt rules are not enough. Role separation must be backed by tool scope, permi
 | --- | --- | --- | --- |
 | `architect` | `Read`, `Grep`, `Glob`, `Bash`, `Edit`, `Write` | architecture plan, task spec, architecture docs only with approval | edit production code, rewrite tests, expand task scope |
 | `coder` | `Read`, `Grep`, `Glob`, `Bash`, `Edit`, `Write` | approved source files, baseline tests, validation log, implementation log | change scope, public contracts, module boundaries, or test strategy without Replan |
-| `reviewer` | `Read`, `Grep`, `Glob`, `Bash`, `Edit`, `Write` | review report, missing tests/fixtures, validation log | change production behavior, approve own implementation, weaken tests |
+| `reviewer` | `Read`, `Grep`, `Glob`, `Bash`, `Edit`, `Write` | review report, missing tests/fixtures, validation log, small review-scoped fixes | take over implementation, change architecture/public contracts, approve own implementation, weaken tests |
 | `security-specialist` | `Read`, `Grep`, `Glob`, `Bash`, `Edit`, `Write` | security review report and approved security tests | bypass approvals, edit production code without explicit scope |
 | `migration-specialist` | `Read`, `Grep`, `Glob`, `Bash`, `Edit`, `Write` | migration plan, migration tests, validation notes | run destructive migrations, change schema without approval |
 | `performance-specialist` | `Read`, `Grep`, `Glob`, `Bash`, `Edit`, `Write` | performance report, benchmarks, approved perf tests | change product behavior, hide regressions |
@@ -618,13 +676,13 @@ Recommended permission modes:
 ```text
 architect:  default with write hooks limited to architecture-plan.md, task specs, and approved docs
 coder:      default or acceptEdits, but only inside approved scope
-reviewer:   default with production-code writes blocked; test writes allowed when adding missing coverage
+reviewer:   default with production-code writes blocked except explicitly review-scoped small fixes; test writes allowed
 specialist: default with write hooks limited to specialist reports, tests, and approved files
 ```
 
 Tool lists alone cannot enforce path-level ownership. Add hooks or CI checks that reject writes outside each role's allowed scope. If path-scoped enforcement is unavailable, the final review must explicitly inspect role ownership violations.
 
-### 7.4 Handoff Contract
+### 7.6 Handoff Contract
 
 Role sessions communicate through files, not memory from previous chats.
 
@@ -669,8 +727,46 @@ reviewer:
   owns final test adequacy
   identifies and adds missing unit/contract/integration tests when needed
   owns complex test strategy, E2E smoke/release coverage, and regression matrix
-  may request coder fixes for production code issues
+  may directly apply small, local, low-risk review fixes
+  must request coder fixes for larger implementation issues
+  must request architect review for architecture, public contract, dependency, schema, auth, permission, payment, or design issues
   must not weaken tests to pass validation
+```
+
+Reviewer direct fixes must be review-scoped:
+
+```text
+allowed:
+  strengthen test assertions
+  add missing small boundary/regression tests
+  fix test names, fixtures, or validation documentation
+  fix obvious typo, import, lint, formatting, or local compile error
+  fix a small local bug discovered during review
+
+required conditions:
+  small and local
+  low-risk
+  no public contract change
+  no architecture change
+  no new dependency
+  no schema/migration change
+  no auth, permission, payment, or data deletion behavior change
+  no broad production rewrite
+
+escalate to coder:
+  business logic needs a medium or large change
+  multiple production files need coordinated edits
+  implementation structure needs rework
+  validation fails because core behavior is wrong
+  the fix would exceed a small review patch
+
+escalate to architect:
+  module boundary is wrong
+  file responsibilities are wrong
+  public contract is wrong
+  dependency direction is wrong
+  schema, auth, permission, payment, public API, or security design is wrong
+  the implementation reveals that the architecture plan is invalid
 ```
 
 For a task with a handoff directory, `.ai/handoffs/<task-slug>/validation-log.md` is the authoritative validation record for that task. `.ai/state/validation-log.md` is only a rolling index of recent validation results across tasks.
@@ -730,6 +826,8 @@ Handoff artifact schemas:
 ## Public Contract Review
 ## Test Review
 ## Missing Tests Added
+## Review Fixes Applied
+## Escalations To Coder / Architect
 ## E2E / Regression Recommendation
 ## Validation Evidence
 ## Docs Sync
@@ -737,7 +835,31 @@ Handoff artifact schemas:
 ## Decision
 ```
 
-### 7.5 Role Session vs Subagent
+### 7.7 Role Session vs Subagent
+
+Role sessions for the same task should normally share the same task worktree and branch.
+
+Worktree isolation is by task, not by role:
+
+```text
+one task
+  -> one branch
+  -> one worktree
+  -> one handoff directory
+  -> architect -> coder -> reviewer in sequence
+```
+
+Do not create separate worktrees only because the task uses `architect`, `coder`, and `reviewer`. That fragments context, makes diffs harder to audit, and adds merge overhead without improving role separation.
+
+Role separation comes from:
+
+- session role
+- write permissions
+- handoff files
+- phase boundaries
+- validation and review
+
+Worktree separation is for different tasks or truly parallel writable sub-tasks.
 
 Use a role session when:
 
@@ -757,7 +879,7 @@ Use a subagent when:
 
 Do not use dynamic subagent routing as the primary workflow for architecture/plan -> coding -> independent review/testing. Use explicit role sessions and file handoffs for that.
 
-### 7.6 Agent File Contract
+### 7.8 Agent File Contract
 
 Every role agent file should define:
 
@@ -854,18 +976,21 @@ reviewer.md
   required inputs:
     task spec, architecture-plan.md, implementation-log.md, validation-log.md, git diff
   outputs:
-    review-report.md, missing tests/fixtures when needed, validation-log.md
+    review-report.md, missing tests/fixtures when needed, review-scoped small fixes, validation-log.md
   do not:
-    change production behavior, weaken tests, lower assertions, delete failing tests, approve own implementation
+    take over implementation, change architecture/public contracts, weaken tests, lower assertions, delete failing tests, approve own implementation
   stop when:
-    handoffs are missing, validation evidence is missing, or architecture/test/doc compliance cannot be verified
+    handoffs are missing, validation evidence is missing, architecture/test/doc compliance cannot be verified, or the fix is no longer small/local/low-risk
 ```
 
-### 7.7 Default Workflow
+### 7.9 Default Workflow
 
 For large features:
 
 ```text
+orchestrator main session
+  -> classify task + route roles + track process
+
 architect session
   -> architecture-plan.md
 
@@ -1114,6 +1239,7 @@ PostToolUse:
   run cheap lint
 
 Stop:
+  check orchestrator did not bypass required role route
   check task severity and required role route
   check required handoff artifacts exist
   check required validation
@@ -1125,6 +1251,7 @@ Stop:
   check tests were not weakened
 
 SessionStart:
+  show that untagged main sessions act as project orchestrator
   show current role and expected role for the task
   show required handoff artifacts for the task severity
   inject current task state
@@ -1169,23 +1296,78 @@ Role agent sessions are different from subagents. Role sessions own a project ph
 
 ## 10. Git / Worktrees / Review
 
+Git is part of the harness. It is the audit trail for scope, architecture compliance, validation, and rollback.
+
+Default rule:
+
+```text
+one task
+  -> one branch
+  -> one worktree
+  -> one handoff directory
+  -> one PR
+```
+
+Architect, coder, and reviewer should normally work in the same task worktree. They should hand off sequentially, not write concurrently.
+
+Do not split worktrees by role:
+
+```text
+bad:
+  task-login-architect/
+  task-login-coder/
+  task-login-reviewer/
+
+good:
+  task-login/
+    architect -> coder -> reviewer
+```
+
+Role isolation is enforced by role files, permissions, hooks, handoff artifacts, and review. Worktree isolation is enforced at the task boundary.
+
+Use separate worktrees only when:
+
+- two different tasks are active at the same time
+- a large task has been explicitly split into independent writable sub-tasks
+- CI repair must proceed without disturbing an active implementation
+- a read-only investigation needs a clean checkout of a different branch or commit
+
+Single-writer rule:
+
+- only one write-capable role should edit a task worktree at a time
+- read-only review, exploration, or log analysis may run in parallel
+- reviewer may apply small review-scoped fixes after coder hands off
+- if two sessions need to edit the same files at the same time, split the work or stop and replan
+
+Branch rules:
+
+- never do AI implementation work directly on the main branch
+- one task branch should map to one task worktree
+- large work should use phase commits on the same task branch unless phases are independently releasable
+- if a task becomes too large, split it into child tasks with explicit branch and PR ownership
+
 Small commits:
 
 - one commit per phase
 - commit messages describe behavior changes
+- each commit should be understandable and revertible
+- each commit should pass the relevant validation tier when practical
 - use draft PRs for large changes
 - do not leave a 2,000-line diff for final review
 
-Parallel Claude sessions must use worktree isolation.
+Diff discipline:
 
-Good worktree uses:
+- every changed file must trace to the task spec, architecture plan, implementation log, validation log, or reviewer fix
+- before handoff, coder must inspect `git diff` for unrelated changes, architecture drift, accidental formatting churn, generated artifacts, lockfiles, and migrations
+- before acceptance, reviewer must compare `git diff` against the architecture plan and public contracts
+- unrelated cleanup belongs in a separate task
 
-- one agent fixes CI
-- one agent adds tests
-- one agent performs read-only review
-- one agent implements phase 1
+PR discipline:
 
-Do not let multiple agents write the same files unless ownership is explicit.
+- PR description must link or summarize task spec, architecture plan, validation evidence, docs sync, and known risks
+- draft PRs are preferred for large or phased work
+- PR review must check scope, architecture compliance, public contracts, test adequacy, docs sync, and whether the diff is appropriately small
+- final merge requires human accountability for product semantics, security boundaries, and business risk
 
 AI review is good at details. Humans remain responsible for:
 
@@ -1525,12 +1707,18 @@ behavior is correct
 
 ## Role / Handoff
 
+- [ ] The main session acted as project orchestrator when no explicit role agent was used.
 - [ ] Task severity was classified.
 - [ ] Required role route was followed or an exception was approved.
+- [ ] The orchestrator verified required handoff artifacts, validation evidence, docs sync, and remaining risks.
+- [ ] The orchestrator did not become the architect, coder, and reviewer for the same non-trivial task.
 - [ ] The coder session did not own architecture, planning, final testing responsibility, and review by itself.
 - [ ] Required handoff artifacts exist and match the handoff schemas.
 - [ ] The coder did not change task scope, module boundaries, public contracts, or test strategy without Replan.
 - [ ] The reviewer used fresh context, a reviewer role session, or a read-only reviewer subagent.
+- [ ] Any reviewer direct fixes were small, local, low-risk, and review-scoped.
+- [ ] Larger implementation issues were returned to coder.
+- [ ] Architecture, public contract, dependency, schema, auth, permission, payment, or design issues were returned to architect.
 - [ ] Task-level validation evidence is recorded in `.ai/handoffs/<task-slug>/validation-log.md` when a handoff directory exists.
 
 ## Architecture
@@ -1587,7 +1775,7 @@ behavior is correct
 ### 13.2 Acceptance Flow
 
 ```text
-1. Classify task severity and required role route
+1. Orchestrator classifies task severity and required role route
 2. Verify required handoff artifacts exist
 3. Inspect diff scope
 4. Compare diff against task spec and architecture plan
@@ -1597,13 +1785,15 @@ behavior is correct
 8. Run architecture boundary checks
 9. Check docs consistency
 10. Run independent review for complex/high-risk changes
-11. Approve, request changes, or trigger Replan
+11. Orchestrator verifies process compliance, remaining risks, and next step
+12. Approve, request changes, or trigger Replan
 ```
 
 Claude’s final report must include:
 
 ```text
 Task severity:
+Orchestrator decision:
 Role sessions used:
 Handoff artifacts:
 Files changed:
@@ -1764,6 +1954,7 @@ The team needs a Claude Code Harness owner, usually DevEx, platform, staff engin
 Responsibilities:
 
 - maintain `CLAUDE.md`
+- maintain the project orchestrator behavior in root `CLAUDE.md`
 - maintain hooks
 - maintain role agents, skills, subagents, and commands
 - maintain validation commands
@@ -1804,20 +1995,23 @@ Monthly review:
 
 ## 17. Minimum Team Rules
 
-If you can only enforce 12 rules, enforce these:
+If you can only enforce 15 rules, enforce these:
 
-1. Complex tasks use explicit role sessions, handoff artifacts, and plan first; do not edit directly.
-2. One session handles one coherent role and task.
-3. Tasks must define scope, non-goals, and validation.
-4. Every task must define file-level responsibilities.
-5. Ordinary tasks must define public function contracts.
-6. New or modified public functions must have contract tests.
-7. Code changes must run relevant validation.
-8. Architecture, public contract, or test strategy changes must sync docs.
-9. Manual indexes are not authoritative; generated context must be freshness-checked.
-10. AI review uses fresh context or a reviewer role session.
-11. High-risk actions require human approval.
-12. Harness rules, roles, checks, and handoffs must be reviewed for removal as well as addition.
+1. Untagged main sessions act as project orchestrator, not do-everything executors.
+2. Complex tasks use explicit role sessions, handoff artifacts, and plan first; do not edit directly.
+3. One task uses one branch, one worktree, one handoff directory, and one PR by default.
+4. Role sessions for the same task work in the same task worktree sequentially; parallel write work uses separate task or sub-task worktrees.
+5. One session handles one coherent role and task.
+6. Tasks must define scope, non-goals, and validation.
+7. Every task must define file-level responsibilities.
+8. Ordinary tasks must define public function contracts.
+9. New or modified public functions must have contract tests.
+10. Code changes must run relevant validation.
+11. Architecture, public contract, or test strategy changes must sync docs.
+12. Manual indexes are not authoritative; generated context must be freshness-checked.
+13. AI review uses fresh context or a reviewer role session.
+14. High-risk actions require human approval.
+15. Harness rules, roles, checks, and handoffs must be reviewed for removal as well as addition.
 
 ## 18. Common Anti-Patterns
 
@@ -1843,6 +2037,12 @@ Too much at once
 One do-everything session
   -> explicit role sessions + file handoffs
 
+Orchestrator becomes coder/reviewer
+  -> orchestrator coordinates and verifies; role sessions execute
+
+Role-based worktree fragmentation
+  -> one task worktree; architect -> coder -> reviewer hand off sequentially inside it
+
 Dynamic subagent routing for the main workflow
   -> start the session with claude --agent <role>
 
@@ -1853,5 +2053,5 @@ Coder session self-reviews
   -> reviewer role session / fresh review session / reviewer subagent
 
 Unbounded multi-agent parallelism
-  -> worktrees / ownership / read-write separation
+  -> separate task or sub-task worktrees / ownership / read-write separation
 ```
