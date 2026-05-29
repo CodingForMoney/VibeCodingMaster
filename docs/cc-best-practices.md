@@ -83,6 +83,7 @@ repo/
     settings.json
     skills/
     agents/
+      project-manager.md
       architect.md
       coder.md
       reviewer.md
@@ -136,7 +137,7 @@ Minimum baseline for non-trivial AI coding:
 - root `CLAUDE.md`
 - module-local `CLAUDE.md` for edited modules
 - architecture, module map, testing, security, and dependency docs
-- role agents for architecture/planning, coding, and independent review/testing
+- role agents for project management/user communication/translation, architecture/planning, coding, and independent review/testing
 - task specs, handoff artifacts, progress state, decisions, validation logs, known issues, and generated context artifacts
 - fast, changed-file, module, boundary, public-surface, contract-test, generated-artifact, docs-freshness, and agent-rule checks
 - hooks or CI gates for protected files, validation, docs sync, public contracts, and test quality
@@ -193,33 +194,22 @@ Root template:
 - Changed files validation: `tools/check-changed`
 - Module validation: `tools/check-module <module>`
 
-## Default Role: Project Orchestrator
+## Role Entry Points
 
-When no explicit `--agent` is used, act as the project orchestrator.
+Role-specific behavior lives in `.claude/agents/`.
 
-Responsibilities:
-
-- Clarify the task with the user.
-- Classify task severity.
-- Select the required role route.
-- Ensure required handoff artifacts exist.
-- Ask the user to start the correct `claude --agent <role>` session when needed.
-- Track progress, blockers, validation, docs sync, and Replan.
-- Verify that architect, coder, reviewer, and specialist outputs satisfy the required process.
-- Summarize final status, validation evidence, plan deviations, and remaining risks.
-
-Do not:
-
-- Own architecture, coding, and independent review in the same non-trivial task.
-- Let coding start before the required architecture-plan.md exists.
-- Approve coder output without reviewer evidence for complex or high-risk work.
-- Bypass the required role route for high-risk work.
-- Convert process coordination into a do-everything coding session.
+- Use `claude --agent project-manager` for user communication, translation, task clarification, task specs, role routing, role commands, status summaries, and final acceptance.
+- Use `claude --agent architect` for architecture plans, module boundaries, file responsibilities, public contracts, test contracts, and phase plans.
+- Use `claude --agent coder` for implementation and direct tests within an approved plan.
+- Use `claude --agent reviewer` for independent review, test adequacy, validation evidence, docs sync, and acceptance findings.
+- Do not use an untagged session as an implicit project manager for non-trivial work.
+- Do not simulate another role inside the wrong session.
 
 ## Role Sessions
 
 - For complex features, cross-module changes, refactors, public API changes, schema changes, auth, payment, permission, or security-sensitive work, start Claude Code with an explicit role: `claude --agent <role>`.
-- Default core roles are `architect`, `coder`, and `reviewer`.
+- Default core roles are `project-manager`, `architect`, `coder`, and `reviewer`.
+- The `project-manager` role owns user communication, translation, task routing, role commands, handoff verification, and final status reporting.
 - Do not let one coding session own architecture/plan decisions, implementation, final testing responsibility, and review.
 - Role outputs are exchanged through `.ai/handoffs/<task-slug>/`, not through chat history.
 - When the required role route includes `architect`, coding must not start until the architecture and plan artifact exists.
@@ -523,7 +513,7 @@ Rule of thumb:
 
 > Continue when the next action depends on previous reasoning. Start fresh when the next action needs independent judgment. Start fresh when Claude gets confused.
 
-For large-codebase exploration, use read-only subagents. Keep only findings, file paths, and the plan in the main session.
+For large-codebase exploration, use read-only subagents. Keep only findings, file paths, and the plan in the `project-manager` session or the current owning role session.
 
 Context should include:
 
@@ -545,34 +535,43 @@ Do not include:
 
 ## 7. Role-Based Agent Sessions
 
-For large projects, the default execution model should be role-based sessions, not dynamic role routing inside one main Claude conversation.
+For large projects, the default execution model should be explicit role-based sessions, not dynamic role routing inside one generic Claude conversation.
 
-The main session should be the project orchestrator: it owns communication, severity classification, role routing, progress tracking, and process verification. It does not own architecture, coding, and independent review for the same non-trivial task.
+The user-facing task should start with a `project-manager` role session. The project manager owns user communication, translation, role command dispatch, severity classification, role routing, progress tracking, and process verification. It does not own architecture, coding, and independent review for the same non-trivial task.
 
 Do not make one generic Claude session own architecture, planning, coding, final testing, and review for non-trivial work. That blurs responsibility and makes acceptance weak.
 
-### 7.1 Main Session: Project Orchestrator
+### 7.1 Project Manager Session
 
-When Claude Code is started without an explicit role agent, the main session acts as the project orchestrator.
+Start the user-facing coordination session explicitly:
 
-Project orchestrator responsibilities:
+```bash
+claude --agent project-manager
+```
+
+Project manager responsibilities:
 
 ```text
-clarify task
+communicate with user
+  -> clarify task
+  -> translate user intent into a task brief / task spec
   -> classify severity
   -> choose required role route
+  -> prepare the next role command
   -> ensure handoff directory exists when needed
-  -> ask user to start architect/coder/reviewer/specialist sessions when needed
+  -> start or ask the user to start architect/coder/reviewer/specialist sessions when needed
   -> track progress, blockers, validation, docs sync, and Replan
   -> verify role outputs and handoff artifacts
   -> summarize final status and risks to the user
 ```
 
-The orchestrator is a process owner, not an execution owner.
+The project manager is a process owner, not an execution owner.
 
-It may handle T0/T1 work directly when the task is small, scoped, and low risk. For non-trivial work, it coordinates role sessions and verifies the process.
+It is also the communication bridge between the user and the role agents. The user should not need to know how to write a perfect Claude Code prompt. The project manager owns the translation from user intent to precise agent instructions.
 
-Do not let the orchestrator:
+It may route T0/T1 work to a lightweight coder flow when the task is small, scoped, and low risk. For non-trivial work, it coordinates role sessions and verifies the process.
+
+Do not let the project manager:
 
 - implement complex changes directly
 - skip required `architect`, `coder`, or `reviewer` sessions
@@ -580,11 +579,56 @@ Do not let the orchestrator:
 - bypass the required role route for high-risk work
 - turn coordination into a do-everything session
 
+### 7.1.1 Role Command Contract
+
+For non-trivial tasks, the project manager must not hand off a vague prompt to the next role. It must prepare a role command that is specific enough for that role to execute without recovering missing process context from chat history.
+
+A role command must include:
+
+```text
+role identity
+task spec path
+required input artifacts
+allowed write scope
+public surface contract
+test contract
+stop conditions
+validation commands
+expected output artifact path
+escalation / Replan triggers
+```
+
+Role command examples:
+
+```text
+architect command:
+  read the task spec, architecture docs, module map, and relevant module-local CLAUDE.md
+  produce .ai/handoffs/<task-slug>/architecture-plan.md
+  define file responsibilities, public contracts, test contracts, phases, validation, and Replan triggers
+  do not edit production code
+
+coder command:
+  read the task spec and approved architecture-plan.md
+  implement only the approved phase and allowed files
+  add or update direct contract/regression tests
+  update implementation-log.md and validation-log.md
+  stop if scope, public contract, architecture, or test strategy must change
+
+reviewer command:
+  read task spec, architecture-plan.md, implementation-log.md, validation-log.md, and git diff
+  verify scope, architecture, public contract, tests, validation, and docs sync
+  write review-report.md
+  only apply small, local, low-risk review-scoped fixes
+```
+
+The project manager may use a prompt compiler or template system to build role commands, but the responsibility stays with the project manager. A role command is an auditable artifact: if a role agent fails because the command was vague, the harness should improve the command template rather than blaming the role agent alone.
+
 ### 7.2 Session-Wide Role Agents
 
 Instead, start each major phase with an explicit session-wide role:
 
 ```bash
+claude --agent project-manager
 claude --agent architect
 claude --agent coder
 claude --agent reviewer
@@ -604,14 +648,16 @@ If the current session was not started with the required role, stop and ask the 
 
 This is not progressive adoption. The full harness exists by default; the role chain depends on task risk.
 
+All user-facing routes begin with `project-manager`. The project manager may hand off T0/T1 work to `coder` quickly, but it still owns translation, status reporting, and acceptance communication.
+
 | Task class | Examples | Required role route |
 | --- | --- | --- |
-| T0 trivial | copy, comments, docs typo, tiny config with no behavior change | `coder`; optional reviewer checklist |
-| T1 small scoped change | single-file bug, focused test addition, known-pattern fix | `coder` -> fresh review context or `reviewer` |
-| T2 ordinary feature | bounded behavior, normal multi-file feature, ordinary PR | `architect` -> `coder` -> `reviewer` |
-| T3 cross-module / architectural | cross-module change, module boundary change, refactor, new public surface | `architect` -> `coder` -> `reviewer` |
-| T4 high-risk | auth, permission, payment, billing, schema, data deletion, public API/SDK, security-sensitive infrastructure | `architect` -> relevant specialist if needed -> `coder` -> `reviewer` -> human approval |
-| T5 large rewrite / greenfield | new subsystem, major rewrite, migration across many modules | `architect`; then repeat `coder` -> `reviewer` per phase, with architect review at phase boundaries |
+| T0 trivial | copy, comments, docs typo, tiny config with no behavior change | `project-manager` -> `coder`; optional reviewer checklist |
+| T1 small scoped change | single-file bug, focused test addition, known-pattern fix | `project-manager` -> `coder` -> fresh review context or `reviewer` |
+| T2 ordinary feature | bounded behavior, normal multi-file feature, ordinary PR | `project-manager` -> `architect` -> `coder` -> `reviewer` |
+| T3 cross-module / architectural | cross-module change, module boundary change, refactor, new public surface | `project-manager` -> `architect` -> `coder` -> `reviewer` |
+| T4 high-risk | auth, permission, payment, billing, schema, data deletion, public API/SDK, security-sensitive infrastructure | `project-manager` -> `architect` -> relevant specialist if needed -> `coder` -> `reviewer` -> human approval |
+| T5 large rewrite / greenfield | new subsystem, major rewrite, migration across many modules | `project-manager` -> `architect`; then repeat `coder` -> `reviewer` per phase, with architect review at phase boundaries |
 
 If classification is unclear, use the stricter route.
 
@@ -621,6 +667,7 @@ Large projects should define these project-level agents:
 
 ```text
 .claude/agents/
+  project-manager.md
   architect.md
   coder.md
   reviewer.md
@@ -634,6 +681,15 @@ Large projects should define these project-level agents:
 Role responsibilities:
 
 ```text
+project-manager
+  owns user communication, multilingual translation, task clarification, task specs, role routing, and role command dispatch
+  translates user input into an English engineering task when needed
+  translates role outputs back into the user's preferred language
+  creates and verifies handoff artifacts
+  tracks progress, blockers, validation, docs sync, and Replan
+  outputs task specs, role commands, status summaries, and final acceptance reports
+  must not own architecture, implementation, and independent review for the same non-trivial task
+
 architect
   owns architecture and plan
   defines module boundaries, file responsibilities, public contracts, dependency direction, risk, and phases
@@ -664,6 +720,7 @@ Prompt rules are not enough. Role separation must be backed by tool scope, permi
 
 | Role | Suggested tools | Write scope | Must not |
 | --- | --- | --- | --- |
+| `project-manager` | `Read`, `Grep`, `Glob`, `Bash`, `Edit`, `Write` | task specs, role commands, handoff metadata, status/progress/known-issues, final reports | implement non-trivial production code, approve without reviewer evidence, replace architect/coder/reviewer roles |
 | `architect` | `Read`, `Grep`, `Glob`, `Bash`, `Edit`, `Write` | architecture plan, task spec, architecture docs only with approval | edit production code, rewrite tests, expand task scope |
 | `coder` | `Read`, `Grep`, `Glob`, `Bash`, `Edit`, `Write` | approved source files, baseline tests, validation log, implementation log | change scope, public contracts, module boundaries, or test strategy without Replan |
 | `reviewer` | `Read`, `Grep`, `Glob`, `Bash`, `Edit`, `Write` | review report, missing tests/fixtures, validation log, small review-scoped fixes | take over implementation, change architecture/public contracts, approve own implementation, weaken tests |
@@ -674,6 +731,7 @@ Prompt rules are not enough. Role separation must be backed by tool scope, permi
 Recommended permission modes:
 
 ```text
+project-manager: default with write hooks limited to task specs, role commands, handoff metadata, state files, and final reports
 architect:  default with write hooks limited to architecture-plan.md, task specs, and approved docs
 coder:      default or acceptEdits, but only inside approved scope
 reviewer:   default with production-code writes blocked except explicitly review-scoped small fixes; test writes allowed
@@ -690,6 +748,10 @@ Required handoff directory:
 
 ```text
 .ai/handoffs/<task-slug>/
+  role-commands/
+    architect-command.md
+    coder-command.md
+    reviewer-command.md
   architecture-plan.md
   implementation-log.md
   validation-log.md
@@ -699,6 +761,10 @@ Required handoff directory:
 Each role session must start by reading the artifacts it depends on:
 
 ```text
+project-manager
+  reads: user request, repo entry docs, task state, role outputs
+  writes: task spec, role commands, progress/status, known issues, final acceptance report
+
 architect
   reads: task request, task spec, ARCHITECTURE.md, MODULE_MAP.md, module-local CLAUDE.md, relevant source/tests
   writes: architecture-plan.md
@@ -943,6 +1009,19 @@ Use frontmatter fields such as `tools`, `disallowedTools`, `permissionMode`, `ho
 Minimum role templates:
 
 ```text
+project-manager.md
+  frontmatter:
+    tools: Read, Grep, Glob, Bash, Edit, Write
+    permissionMode: default
+  required inputs:
+    user request, repo entry docs, current task state, role outputs
+  outputs:
+    task spec, role commands, progress/status updates, final acceptance report
+  do not:
+    implement non-trivial production code, replace architect/coder/reviewer, approve without reviewer evidence
+  stop when:
+    user intent is ambiguous, role route is unclear, handoff artifacts are missing, or scope/risk changes
+
 architect.md
   frontmatter:
     tools: Read, Grep, Glob, Bash, Edit, Write
@@ -988,8 +1067,8 @@ reviewer.md
 For large features:
 
 ```text
-orchestrator main session
-  -> classify task + route roles + track process
+project-manager session
+  -> communicate with user + translate intent + classify task + route roles + track process
 
 architect session
   -> architecture-plan.md
@@ -1239,7 +1318,7 @@ PostToolUse:
   run cheap lint
 
 Stop:
-  check orchestrator did not bypass required role route
+  check project manager did not bypass required role route
   check task severity and required role route
   check required handoff artifacts exist
   check required validation
@@ -1251,7 +1330,8 @@ Stop:
   check tests were not weakened
 
 SessionStart:
-  show that untagged main sessions act as project orchestrator
+  show that task coordination should use `claude --agent project-manager`
+  warn when a non-trivial task is running in an untagged session
   show current role and expected role for the task
   show required handoff artifacts for the task severity
   inject current task state
@@ -1707,11 +1787,11 @@ behavior is correct
 
 ## Role / Handoff
 
-- [ ] The main session acted as project orchestrator when no explicit role agent was used.
+- [ ] The task used an explicit `project-manager` role session for user communication, translation, routing, and status reporting.
 - [ ] Task severity was classified.
 - [ ] Required role route was followed or an exception was approved.
-- [ ] The orchestrator verified required handoff artifacts, validation evidence, docs sync, and remaining risks.
-- [ ] The orchestrator did not become the architect, coder, and reviewer for the same non-trivial task.
+- [ ] The project manager verified required handoff artifacts, validation evidence, docs sync, and remaining risks.
+- [ ] The project manager did not become the architect, coder, and reviewer for the same non-trivial task.
 - [ ] The coder session did not own architecture, planning, final testing responsibility, and review by itself.
 - [ ] Required handoff artifacts exist and match the handoff schemas.
 - [ ] The coder did not change task scope, module boundaries, public contracts, or test strategy without Replan.
@@ -1775,7 +1855,7 @@ behavior is correct
 ### 13.2 Acceptance Flow
 
 ```text
-1. Orchestrator classifies task severity and required role route
+1. Project manager classifies task severity and required role route
 2. Verify required handoff artifacts exist
 3. Inspect diff scope
 4. Compare diff against task spec and architecture plan
@@ -1785,7 +1865,7 @@ behavior is correct
 8. Run architecture boundary checks
 9. Check docs consistency
 10. Run independent review for complex/high-risk changes
-11. Orchestrator verifies process compliance, remaining risks, and next step
+11. Project manager verifies process compliance, remaining risks, and next step
 12. Approve, request changes, or trigger Replan
 ```
 
@@ -1793,7 +1873,7 @@ Claude’s final report must include:
 
 ```text
 Task severity:
-Orchestrator decision:
+Project manager decision:
 Role sessions used:
 Handoff artifacts:
 Files changed:
@@ -1954,7 +2034,8 @@ The team needs a Claude Code Harness owner, usually DevEx, platform, staff engin
 Responsibilities:
 
 - maintain `CLAUDE.md`
-- maintain the project orchestrator behavior in root `CLAUDE.md`
+- maintain `.claude/agents/project-manager.md`
+- maintain role command templates used by the project manager to brief `architect`, `coder`, `reviewer`, and specialist sessions
 - maintain hooks
 - maintain role agents, skills, subagents, and commands
 - maintain validation commands
@@ -1995,23 +2076,24 @@ Monthly review:
 
 ## 17. Minimum Team Rules
 
-If you can only enforce 15 rules, enforce these:
+If you can only enforce 16 rules, enforce these:
 
-1. Untagged main sessions act as project orchestrator, not do-everything executors.
-2. Complex tasks use explicit role sessions, handoff artifacts, and plan first; do not edit directly.
-3. One task uses one branch, one worktree, one handoff directory, and one PR by default.
-4. Role sessions for the same task work in the same task worktree sequentially; parallel write work uses separate task or sub-task worktrees.
-5. One session handles one coherent role and task.
-6. Tasks must define scope, non-goals, and validation.
-7. Every task must define file-level responsibilities.
-8. Ordinary tasks must define public function contracts.
-9. New or modified public functions must have contract tests.
-10. Code changes must run relevant validation.
-11. Architecture, public contract, or test strategy changes must sync docs.
-12. Manual indexes are not authoritative; generated context must be freshness-checked.
-13. AI review uses fresh context or a reviewer role session.
-14. High-risk actions require human approval.
-15. Harness rules, roles, checks, and handoffs must be reviewed for removal as well as addition.
+1. User-facing tasks start with `claude --agent project-manager`; untagged sessions are not implicit project managers.
+2. The `project-manager` agent owns user communication, translation, task clarification, and precise role command dispatch.
+3. Complex tasks use explicit role sessions, handoff artifacts, and plan first; do not edit directly.
+4. One task uses one branch, one worktree, one handoff directory, and one PR by default.
+5. Role sessions for the same task work in the same task worktree sequentially; parallel write work uses separate task or sub-task worktrees.
+6. One session handles one coherent role and task.
+7. Tasks must define scope, non-goals, and validation.
+8. Every task must define file-level responsibilities.
+9. Ordinary tasks must define public function contracts.
+10. New or modified public functions must have contract tests.
+11. Code changes must run relevant validation.
+12. Architecture, public contract, or test strategy changes must sync docs.
+13. Manual indexes are not authoritative; generated context must be freshness-checked.
+14. AI review uses fresh context or a reviewer role session.
+15. High-risk actions require human approval.
+16. Harness rules, roles, checks, and handoffs must be reviewed for removal as well as addition.
 
 ## 18. Common Anti-Patterns
 
@@ -2037,8 +2119,11 @@ Too much at once
 One do-everything session
   -> explicit role sessions + file handoffs
 
-Orchestrator becomes coder/reviewer
-  -> orchestrator coordinates and verifies; role sessions execute
+Project manager becomes coder/reviewer
+  -> project manager coordinates and verifies; role sessions execute
+
+Project manager only tracks status but sends vague role prompts
+  -> project manager translates user intent into precise role commands with scope, contracts, validation, outputs, and stop conditions
 
 Role-based worktree fragmentation
   -> one task worktree; architect -> coder -> reviewer hand off sequentially inside it
