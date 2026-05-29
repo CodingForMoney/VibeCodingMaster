@@ -29,12 +29,26 @@ export function createProjectService(deps: ProjectServiceDeps): ProjectService {
 
   return {
     async connectProject(input) {
-      const repoRoot = path.resolve(input.repoPath);
+      const requestedPath = input.repoPath.trim();
+      const repoRoot = path.resolve(requestedPath);
 
-      if (!(await deps.git.isRepo(repoRoot))) {
+      if (!requestedPath || !(await deps.fs.pathExists(repoRoot))) {
         throw new VcmError({
           code: "INVALID_REPO",
           message: "Selected path is not a Git repository.",
+          hint: requestedPath
+            ? `Path does not exist inside the VCM runtime: ${repoRoot}`
+            : "Repository path cannot be empty.",
+          statusCode: 400
+        });
+      }
+
+      const repoCheck = await deps.git.checkRepo(repoRoot);
+      if (!repoCheck.isRepo) {
+        throw new VcmError({
+          code: "INVALID_REPO",
+          message: "Selected path is not a Git repository.",
+          hint: repoCheck.hint,
           statusCode: 400
         });
       }
