@@ -837,6 +837,30 @@ Handoff artifact schemas:
 
 ### 7.7 Role Session vs Subagent
 
+Role sessions for the same task should normally share the same task worktree and branch.
+
+Worktree isolation is by task, not by role:
+
+```text
+one task
+  -> one branch
+  -> one worktree
+  -> one handoff directory
+  -> architect -> coder -> reviewer in sequence
+```
+
+Do not create separate worktrees only because the task uses `architect`, `coder`, and `reviewer`. That fragments context, makes diffs harder to audit, and adds merge overhead without improving role separation.
+
+Role separation comes from:
+
+- session role
+- write permissions
+- handoff files
+- phase boundaries
+- validation and review
+
+Worktree separation is for different tasks or truly parallel writable sub-tasks.
+
 Use a role session when:
 
 - the phase is the main work, not a side task
@@ -1272,23 +1296,78 @@ Role agent sessions are different from subagents. Role sessions own a project ph
 
 ## 10. Git / Worktrees / Review
 
+Git is part of the harness. It is the audit trail for scope, architecture compliance, validation, and rollback.
+
+Default rule:
+
+```text
+one task
+  -> one branch
+  -> one worktree
+  -> one handoff directory
+  -> one PR
+```
+
+Architect, coder, and reviewer should normally work in the same task worktree. They should hand off sequentially, not write concurrently.
+
+Do not split worktrees by role:
+
+```text
+bad:
+  task-login-architect/
+  task-login-coder/
+  task-login-reviewer/
+
+good:
+  task-login/
+    architect -> coder -> reviewer
+```
+
+Role isolation is enforced by role files, permissions, hooks, handoff artifacts, and review. Worktree isolation is enforced at the task boundary.
+
+Use separate worktrees only when:
+
+- two different tasks are active at the same time
+- a large task has been explicitly split into independent writable sub-tasks
+- CI repair must proceed without disturbing an active implementation
+- a read-only investigation needs a clean checkout of a different branch or commit
+
+Single-writer rule:
+
+- only one write-capable role should edit a task worktree at a time
+- read-only review, exploration, or log analysis may run in parallel
+- reviewer may apply small review-scoped fixes after coder hands off
+- if two sessions need to edit the same files at the same time, split the work or stop and replan
+
+Branch rules:
+
+- never do AI implementation work directly on the main branch
+- one task branch should map to one task worktree
+- large work should use phase commits on the same task branch unless phases are independently releasable
+- if a task becomes too large, split it into child tasks with explicit branch and PR ownership
+
 Small commits:
 
 - one commit per phase
 - commit messages describe behavior changes
+- each commit should be understandable and revertible
+- each commit should pass the relevant validation tier when practical
 - use draft PRs for large changes
 - do not leave a 2,000-line diff for final review
 
-Parallel Claude sessions must use worktree isolation.
+Diff discipline:
 
-Good worktree uses:
+- every changed file must trace to the task spec, architecture plan, implementation log, validation log, or reviewer fix
+- before handoff, coder must inspect `git diff` for unrelated changes, architecture drift, accidental formatting churn, generated artifacts, lockfiles, and migrations
+- before acceptance, reviewer must compare `git diff` against the architecture plan and public contracts
+- unrelated cleanup belongs in a separate task
 
-- one agent fixes CI
-- one agent adds tests
-- one agent performs read-only review
-- one agent implements phase 1
+PR discipline:
 
-Do not let multiple agents write the same files unless ownership is explicit.
+- PR description must link or summarize task spec, architecture plan, validation evidence, docs sync, and known risks
+- draft PRs are preferred for large or phased work
+- PR review must check scope, architecture compliance, public contracts, test adequacy, docs sync, and whether the diff is appropriately small
+- final merge requires human accountability for product semantics, security boundaries, and business risk
 
 AI review is good at details. Humans remain responsible for:
 
@@ -1916,21 +1995,23 @@ Monthly review:
 
 ## 17. Minimum Team Rules
 
-If you can only enforce 13 rules, enforce these:
+If you can only enforce 15 rules, enforce these:
 
 1. Untagged main sessions act as project orchestrator, not do-everything executors.
 2. Complex tasks use explicit role sessions, handoff artifacts, and plan first; do not edit directly.
-3. One session handles one coherent role and task.
-4. Tasks must define scope, non-goals, and validation.
-5. Every task must define file-level responsibilities.
-6. Ordinary tasks must define public function contracts.
-7. New or modified public functions must have contract tests.
-8. Code changes must run relevant validation.
-9. Architecture, public contract, or test strategy changes must sync docs.
-10. Manual indexes are not authoritative; generated context must be freshness-checked.
-11. AI review uses fresh context or a reviewer role session.
-12. High-risk actions require human approval.
-13. Harness rules, roles, checks, and handoffs must be reviewed for removal as well as addition.
+3. One task uses one branch, one worktree, one handoff directory, and one PR by default.
+4. Role sessions for the same task work in the same task worktree sequentially; parallel write work uses separate task or sub-task worktrees.
+5. One session handles one coherent role and task.
+6. Tasks must define scope, non-goals, and validation.
+7. Every task must define file-level responsibilities.
+8. Ordinary tasks must define public function contracts.
+9. New or modified public functions must have contract tests.
+10. Code changes must run relevant validation.
+11. Architecture, public contract, or test strategy changes must sync docs.
+12. Manual indexes are not authoritative; generated context must be freshness-checked.
+13. AI review uses fresh context or a reviewer role session.
+14. High-risk actions require human approval.
+15. Harness rules, roles, checks, and handoffs must be reviewed for removal as well as addition.
 
 ## 18. Common Anti-Patterns
 
@@ -1959,6 +2040,9 @@ One do-everything session
 Orchestrator becomes coder/reviewer
   -> orchestrator coordinates and verifies; role sessions execute
 
+Role-based worktree fragmentation
+  -> one task worktree; architect -> coder -> reviewer hand off sequentially inside it
+
 Dynamic subagent routing for the main workflow
   -> start the session with claude --agent <role>
 
@@ -1969,5 +2053,5 @@ Coder session self-reviews
   -> reviewer role session / fresh review session / reviewer subagent
 
 Unbounded multi-agent parallelism
-  -> worktrees / ownership / read-write separation
+  -> separate task or sub-task worktrees / ownership / read-write separation
 ```
