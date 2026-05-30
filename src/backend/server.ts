@@ -10,6 +10,7 @@ import { createCommandRunner } from "./adapters/command-runner.js";
 import { createCommandDispatcher, type CommandDispatcher } from "./services/command-dispatcher.js";
 import { createGitAdapter } from "./adapters/git-adapter.js";
 import { createAppSettingsService } from "./services/app-settings-service.js";
+import { createClaudeTranscriptService } from "./services/claude-transcript-service.js";
 import { createHarnessService, type HarnessService } from "./services/harness-service.js";
 import { createNodeFileSystemAdapter } from "./adapters/filesystem.js";
 import { createNodePtyTerminalRuntime } from "./runtime/node-pty-runtime.js";
@@ -179,6 +180,8 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
   });
   const translationService = createTranslationService({
     runtime,
+    sessionRegistry: registry,
+    transcripts: createClaudeTranscriptService(),
     sessionService,
     appSettings,
     provider: createOpenAiCompatibleTranslationProvider()

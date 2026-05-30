@@ -882,7 +882,6 @@ export interface TranslationSettings {
   preserveTechnicalTokens: boolean;
   skipCjkText: boolean;
   redactSecrets: boolean;
-  maxChunkChars: number;
   requestTimeoutMs: number;
   temperature: number;
 }
@@ -1007,7 +1006,7 @@ export function shouldSkipForTargetLanguage(value: string, targetLanguage: strin
 
 职责：
 
-- 对 terminal output chunk 做轻量分类。
+- 对 Claude transcript assistant text 做轻量分类。
 - 决定翻译、摘要、保留、脱敏或跳过。
 
 导出定义：
@@ -1810,9 +1809,9 @@ export function createTranslationQueueRegistry(): TranslationQueueRegistry;
 
 职责：
 
-- 管理 Translation Mode 设置和 runtime subscriptions。
+- 管理 Translation Mode 设置和 Claude transcript subscriptions。
 - 翻译用户输入并可选发送到当前 role pty。
-- 翻译或处理 Claude Code output chunks。
+- 翻译或处理 Claude Code transcript assistant text event。
 - 维护 `lastAssistantText` 用于上下文翻译。
 
 导出定义：
@@ -1859,6 +1858,8 @@ export type TranslationEventListener = (message: TranslationWsMessage) => void;
 export interface TranslationServiceDeps {
   provider: TranslationProvider;
   runtime: TerminalRuntime;
+  sessionRegistry: Pick<SessionRegistry, "get">;
+  transcripts: ClaudeTranscriptService;
   sessionService: SessionService;
   appSettings: Pick<AppSettingsService, "getTranslationConfig" | "updateTranslationConfig">;
   now?: () => string;
@@ -1870,14 +1871,17 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
 
 实现规则：
 
-- `handleTerminalOutput` 先检查 `settings.enabled && settings.translateOutput`。
-- 对 terminal output strip ANSI 后 buffer 到语义边界或 `maxChunkChars`。
+- `subscribeToSession` 先通过 `sessionRegistry.get(sessionId)` 找到 role session 的 `cwd` 和 `claudeSessionId`。
+- `ClaudeTranscriptService` tail `~/.claude/projects/<project-hash>/<session-id>.jsonl`。
+- `parseAssistantContent` 从 JSONL 中解析 assistant text、thinking、tool_use、tool_result 等结构化 event。
+- output translation 只处理 assistant `text` event；`stop_reason=tool_use` 的中间回合和 tool events 不调用 provider。
+- 不再从 raw PTY output 推断段落边界，也不再用 `maxChunkChars` 切分 Claude 输出。
 - `classifyTranslationChunk` 返回 `sensitive` 时不调用 provider。
 - `already-target-language` 和 CJK 内容标记 `skipped`。
 - `code`、`diff`、`permission-prompt` 标记 `preserved`。
 - `log` 和 `tool-output` 默认摘要或保留。
 - `prose` 进入 per-role FIFO queue。
-- 翻译成功的 prose chunk 更新该 role 的 `lastAssistantText`。
+- 翻译成功的 prose event 更新该 role 的 `lastAssistantText`。
 - `translateUserInput` 在 `contextEnabled` 时使用 `lastAssistantText`，但只发送新输入给 provider。
 - `send: true` 时只写入当前 role session pty，不允许写入其他 role。
 - Translation Panel entries 只存在 runtime memory，不写 `.ai/handoffs`。
@@ -2795,18 +2799,18 @@ SessionConsole Translate toggle
   -> if provider missing: open TranslationSettingsModal
   -> TranslationStore.connect(taskSlug, role)
   -> WS /ws/tasks/:taskSlug/sessions/:role/translation
-  -> TranslationService subscribes to runtime output copy
+  -> TranslationService subscribes to Claude transcript tail
 ```
 
 输出翻译：
 
 ```text
-node-pty output event
-  -> raw log append
-  -> xterm terminal output
-  -> translationService.handleTerminalOutput
-  -> stripAnsiForTranslation
-  -> classifyTranslationChunk
+~/.claude/projects/<project-hash>/<session-id>.jsonl append
+  -> TranscriptTail reads new JSONL lines
+  -> parseAssistantContent
+  -> ignore tool_use / tool_result for translation
+  -> skip stop_reason=tool_use assistant text
+  -> classifyTranslationChunk on assistant text
   -> skip / preserve / summarize / enqueue translate
   -> TranslationProvider.translate
   -> TranslationWsMessage

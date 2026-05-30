@@ -59,7 +59,6 @@ export interface TranslationSettings {
   preserveTechnicalTokens: boolean;
   skipCjkText: boolean;
   redactSecrets: boolean;
-  maxChunkChars: number;
   requestTimeoutMs: number;
   temperature: number;
   prompts?: Partial<Record<TranslationPromptKey, string>>;

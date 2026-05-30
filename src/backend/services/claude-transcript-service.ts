@@ -1,0 +1,382 @@
+import {
+  closeSync,
+  existsSync,
+  openSync,
+  readFileSync,
+  readSync,
+  statSync,
+  watch as fsWatch
+} from "node:fs";
+import type { FSWatcher } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
+import type { RoleSessionRecord } from "../../shared/types/session.js";
+import type { Unsubscribe } from "../runtime/terminal-runtime.js";
+
+export type ClaudeTranscriptContentKind =
+  | "text"
+  | "thinking"
+  | "question"
+  | "todo"
+  | "agent"
+  | "tool_use"
+  | "tool_result";
+
+export type ClaudeTranscriptStopReason =
+  | "end_turn"
+  | "tool_use"
+  | "stop_sequence"
+  | "max_tokens"
+  | "pause_turn"
+  | "refusal"
+  | (string & {});
+
+interface BaseTranscriptEvent {
+  id: string;
+  timestamp: string;
+}
+
+export type ClaudeTranscriptEvent =
+  | (BaseTranscriptEvent & {
+      kind: "text";
+      text: string;
+      stopReason?: ClaudeTranscriptStopReason;
+    })
+  | (BaseTranscriptEvent & {
+      kind: "thinking";
+      text: string;
+      stopReason?: ClaudeTranscriptStopReason;
+    })
+  | (BaseTranscriptEvent & {
+      kind: Exclude<ClaudeTranscriptContentKind, "text" | "thinking">;
+      payload: unknown;
+    });
+
+export type ClaudeTranscriptEventListener = (event: ClaudeTranscriptEvent) => void;
+
+export interface ClaudeTranscriptService {
+  subscribeToRoleSession(
+    session: RoleSessionRecord,
+    listener: ClaudeTranscriptEventListener,
+    options?: ClaudeTranscriptSubscribeOptions
+  ): Unsubscribe;
+}
+
+export interface ClaudeTranscriptSubscribeOptions {
+  replayLastN?: number;
+  onError?: (error: Error) => void;
+}
+
+export interface TailHandlers {
+  onContent: (event: ClaudeTranscriptEvent) => void;
+  onError?: (err: Error) => void;
+}
+
+export interface TailOptions {
+  replayLastN?: number;
+}
+
+/**
+ * Adapted from CodingForMoney/cc-pm's transcript tailer.
+ *
+ * Claude Code writes semantic JSONL events under ~/.claude/projects. Tailing
+ * those files is much more reliable than trying to infer answer boundaries
+ * from the terminal TUI's raw PTY output.
+ */
+export class TranscriptTail {
+  private offset = 0;
+  private buffer = "";
+  private watcher: FSWatcher | null = null;
+  private flushing = false;
+  private flushScheduled = false;
+
+  constructor(
+    private readonly path: string,
+    private readonly handlers: TailHandlers
+  ) {}
+
+  start(opts?: TailOptions): void {
+    if (!existsSync(this.path)) {
+      throw new Error(`transcript not found: ${this.path}`);
+    }
+
+    const stat = statSync(this.path);
+    if (opts?.replayLastN && opts.replayLastN > 0) {
+      this.replayHistory(opts.replayLastN);
+    }
+
+    this.offset = stat.size;
+    this.buffer = "";
+    this.watcher = fsWatch(this.path, () => {
+      this.scheduleFlush();
+    });
+  }
+
+  stop(): void {
+    if (this.watcher) {
+      this.watcher.close();
+      this.watcher = null;
+    }
+  }
+
+  private scheduleFlush(): void {
+    if (this.flushing || this.flushScheduled) {
+      return;
+    }
+    this.flushScheduled = true;
+    setImmediate(() => {
+      this.flushScheduled = false;
+      this.flush();
+    });
+  }
+
+  private flush(): void {
+    if (this.flushing) {
+      return;
+    }
+    this.flushing = true;
+    try {
+      const stat = statSync(this.path);
+      if (stat.size < this.offset) {
+        this.offset = stat.size;
+        this.buffer = "";
+        return;
+      }
+      if (stat.size === this.offset) {
+        return;
+      }
+
+      const toRead = stat.size - this.offset;
+      const fd = openSync(this.path, "r");
+      try {
+        const buf = Buffer.alloc(toRead);
+        readSync(fd, buf, 0, toRead, this.offset);
+        this.offset = stat.size;
+        this.buffer += buf.toString("utf-8");
+      } finally {
+        closeSync(fd);
+      }
+
+      const lines = this.buffer.split("\n");
+      this.buffer = lines.pop() ?? "";
+
+      for (const line of lines) {
+        if (line.trim()) {
+          this.tryEmit(line);
+        }
+      }
+    } catch (error) {
+      this.handlers.onError?.(error as Error);
+    } finally {
+      this.flushing = false;
+    }
+  }
+
+  private replayHistory(n: number): void {
+    try {
+      const text = readFileSync(this.path, "utf-8");
+      const events: ClaudeTranscriptEvent[] = [];
+      for (const line of text.split("\n")) {
+        if (line.trim()) {
+          events.push(...parseAssistantContent(line));
+        }
+      }
+      for (const event of events.slice(-n)) {
+        this.handlers.onContent(event);
+      }
+    } catch (error) {
+      this.handlers.onError?.(error as Error);
+    }
+  }
+
+  private tryEmit(line: string): void {
+    for (const event of parseAssistantContent(line)) {
+      this.handlers.onContent(event);
+    }
+  }
+}
+
+export function createClaudeTranscriptService(): ClaudeTranscriptService {
+  return {
+    subscribeToRoleSession(session, listener, options = {}) {
+      const transcriptPath = claudeTranscriptPath(session.cwd, session.claudeSessionId);
+      let tail: TranscriptTail | undefined;
+      let retryTimer: ReturnType<typeof setTimeout> | undefined;
+      let stopped = false;
+
+      const start = () => {
+        if (stopped) {
+          return;
+        }
+        if (!existsSync(transcriptPath)) {
+          retryTimer = setTimeout(start, 500);
+          return;
+        }
+
+        tail = new TranscriptTail(transcriptPath, {
+          onContent: listener,
+          onError: options.onError
+        });
+        tail.start({ replayLastN: options.replayLastN });
+      };
+
+      start();
+
+      return () => {
+        stopped = true;
+        if (retryTimer) {
+          clearTimeout(retryTimer);
+        }
+        tail?.stop();
+      };
+    }
+  };
+}
+
+export function projectHash(projectDir: string): string {
+  return projectDir.replace(/\//g, "-");
+}
+
+export function projectsTranscriptDir(projectDir: string): string {
+  return join(homedir(), ".claude", "projects", projectHash(projectDir));
+}
+
+export function claudeTranscriptPath(projectDir: string, claudeSessionId: string): string {
+  return join(projectsTranscriptDir(projectDir), `${claudeSessionId}.jsonl`);
+}
+
+export function parseAssistantContent(line: string): ClaudeTranscriptEvent[] {
+  let obj: Record<string, unknown>;
+  try {
+    obj = JSON.parse(line) as Record<string, unknown>;
+  } catch {
+    return [];
+  }
+
+  if (obj.type === "user") {
+    return parseUserToolResults(obj);
+  }
+
+  if (obj.type !== "assistant") {
+    return [];
+  }
+
+  const message = obj.message as { content?: unknown } | undefined;
+  const content = message?.content;
+  if (!Array.isArray(content)) {
+    return [];
+  }
+
+  const textParts: string[] = [];
+  const thinkingParts: string[] = [];
+  const structuralEvents: ClaudeTranscriptEvent[] = [];
+  const timestamp = typeof obj.timestamp === "string" ? obj.timestamp : new Date().toISOString();
+  const uuid = typeof obj.uuid === "string" ? obj.uuid : undefined;
+  const rawStopReason = (message as Record<string, unknown> | undefined)?.stop_reason;
+  const stopReason = typeof rawStopReason === "string" ? rawStopReason : undefined;
+
+  for (const entry of content) {
+    if (!entry || typeof entry !== "object") {
+      continue;
+    }
+    const block = entry as Record<string, unknown>;
+    if (block.type === "text" && typeof block.text === "string" && block.text.length > 0) {
+      textParts.push(block.text);
+      continue;
+    }
+    if (block.type === "thinking" && typeof block.thinking === "string" && block.thinking.length > 0) {
+      thinkingParts.push(block.thinking);
+      continue;
+    }
+    if (block.type !== "tool_use") {
+      continue;
+    }
+
+    const toolId = typeof block.id === "string" ? block.id : undefined;
+    const toolName = typeof block.name === "string" ? block.name : undefined;
+    if (!toolId || !toolName) {
+      continue;
+    }
+    structuralEvents.push({
+      kind: classifyToolUseKind(toolName),
+      id: toolId,
+      timestamp,
+      payload: {
+        name: toolName,
+        input: block.input
+      }
+    });
+  }
+
+  const out: ClaudeTranscriptEvent[] = [];
+  if (textParts.length > 0) {
+    const text = textParts.join("\n\n");
+    out.push({
+      kind: "text",
+      timestamp,
+      text,
+      id: uuid ?? `${timestamp}-${text.slice(0, 16)}`,
+      ...(stopReason !== undefined ? { stopReason } : {})
+    });
+  }
+  if (thinkingParts.length > 0) {
+    const text = thinkingParts.join("\n\n");
+    out.push({
+      kind: "thinking",
+      timestamp,
+      text,
+      id: uuid ? `${uuid}#thinking` : `${timestamp}-thinking-${text.slice(0, 16)}`,
+      ...(stopReason !== undefined ? { stopReason } : {})
+    });
+  }
+
+  return out.concat(structuralEvents);
+}
+
+function parseUserToolResults(obj: Record<string, unknown>): ClaudeTranscriptEvent[] {
+  const message = obj.message as { content?: unknown } | undefined;
+  const content = message?.content;
+  if (!Array.isArray(content)) {
+    return [];
+  }
+
+  const timestamp = typeof obj.timestamp === "string" ? obj.timestamp : new Date().toISOString();
+  const out: ClaudeTranscriptEvent[] = [];
+  for (const entry of content) {
+    if (!entry || typeof entry !== "object") {
+      continue;
+    }
+    const block = entry as Record<string, unknown>;
+    if (block.type !== "tool_result") {
+      continue;
+    }
+    const toolUseId = typeof block.tool_use_id === "string" ? block.tool_use_id : undefined;
+    if (!toolUseId) {
+      continue;
+    }
+    out.push({
+      kind: "tool_result",
+      timestamp,
+      id: `${toolUseId}#result`,
+      payload: {
+        tool_use_id: toolUseId,
+        content: block.content,
+        isError: block.is_error === true
+      }
+    });
+  }
+  return out;
+}
+
+function classifyToolUseKind(toolName: string): Exclude<ClaudeTranscriptContentKind, "text" | "thinking" | "tool_result"> {
+  if (toolName === "AskUserQuestion") {
+    return "question";
+  }
+  if (toolName === "TodoWrite") {
+    return "todo";
+  }
+  if (toolName === "Agent" || toolName === "Task") {
+    return "agent";
+  }
+  return "tool_use";
+}

@@ -1,11 +1,12 @@
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import type { FileSystemAdapter } from "../../../src/backend/adapters/filesystem.js";
 import type { TranslationProvider } from "../../../src/backend/adapters/translation-provider.js";
-import type { TerminalEvent } from "../../../src/shared/types/terminal.js";
-import type { TerminalEventListener, TerminalRuntime } from "../../../src/backend/runtime/terminal-runtime.js";
+import type { TerminalRuntime } from "../../../src/backend/runtime/terminal-runtime.js";
 import { createAppSettingsService, type AppSettingsFile } from "../../../src/backend/services/app-settings-service.js";
+import type { ClaudeTranscriptEvent, ClaudeTranscriptService } from "../../../src/backend/services/claude-transcript-service.js";
 import type { SessionService } from "../../../src/backend/services/session-service.js";
 import { createTranslationService } from "../../../src/backend/services/translation-service.js";
+import type { RoleSessionRecord } from "../../../src/shared/types/session.js";
 import type { TranslationWsMessage } from "../../../src/shared/types/translation.js";
 
 describe("translation-service", () => {
@@ -21,6 +22,8 @@ describe("translation-service", () => {
       appSettings,
       provider: createProviderStub(),
       runtime: {} as TerminalRuntime,
+      sessionRegistry: createRegistryStub(),
+      transcripts: createTranscriptStub(),
       sessionService: {} as SessionService
     });
 
@@ -52,6 +55,8 @@ describe("translation-service", () => {
       appSettings,
       provider: createProviderStub(),
       runtime: {} as TerminalRuntime,
+      sessionRegistry: createRegistryStub(),
+      transcripts: createTranscriptStub(),
       sessionService: {} as SessionService
     });
 
@@ -72,10 +77,13 @@ describe("translation-service", () => {
       legacyTranslationPath: "/translation.json"
     });
     const runtime = createRuntimeStub();
+    const transcripts = createTranscriptStub();
     const service = createTranslationService({
       appSettings,
       provider: createProviderStub("我找到了失败的测试。"),
       runtime,
+      sessionRegistry: createRegistryStub(),
+      transcripts,
       sessionService: {} as SessionService,
       now: createClock([
         "2026-05-30T00:00:00.000Z",
@@ -87,13 +95,13 @@ describe("translation-service", () => {
 
     const messages: TranslationWsMessage[] = [];
     service.subscribeToSession("session-1", (message) => messages.push(message));
-    runtime.emitOutput([
-      "\u001b[36m● Bash(npm test)\u001b[0m",
-      "  ⎿  PASS tests/unit/example.test.ts",
-      "",
-      "I found the failing test.",
-      ""
-    ].join("\n"));
+    transcripts.emit({
+      kind: "text",
+      id: "assistant-message-1",
+      timestamp: "2026-05-30T00:00:00.000Z",
+      stopReason: "end_turn",
+      text: "I found the failing test."
+    });
 
     await waitFor(() => messages.some((message) =>
       message.type === "translation-entry" && message.entry.status === "translated"
@@ -115,57 +123,73 @@ describe("translation-service", () => {
     expect(entries.at(-1)?.entry.translationStartedAt).toBe("2026-05-30T00:00:01.000Z");
   });
 
-  it("does not flush Claude output solely because maxChunkChars is exceeded", async () => {
-    vi.useFakeTimers();
-    try {
-      const fs = createMemoryFs();
-      const appSettings = createAppSettingsService({
-        fs,
-        settingsPath: "/settings.json",
-        legacySettingsPath: "/old-settings.json",
-        legacyTranslationPath: "/translation.json"
-      });
-      const runtime = createRuntimeStub();
-      const service = createTranslationService({
-        appSettings,
-        provider: createProviderStub("长输出译文。"),
-        runtime,
-        sessionService: {} as SessionService
-      });
-      await service.updateSettings({ enabled: true, translateOutput: true, maxChunkChars: 5 }, { apiKey: "sk-local-test" });
+  it("waits for the transcript end_turn instead of translating tool-use turns", async () => {
+    const fs = createMemoryFs();
+    const appSettings = createAppSettingsService({
+      fs,
+      settingsPath: "/settings.json",
+      legacySettingsPath: "/old-settings.json",
+      legacyTranslationPath: "/translation.json"
+    });
+    const runtime = createRuntimeStub();
+    const transcripts = createTranscriptStub();
+    const translateCalls: unknown[] = [];
+    const service = createTranslationService({
+      appSettings,
+      provider: createProviderStub("最终译文。", translateCalls),
+      runtime,
+      sessionRegistry: createRegistryStub(),
+      transcripts,
+      sessionService: {} as SessionService
+    });
+    await service.updateSettings({ enabled: true, translateOutput: true }, { apiKey: "sk-local-test" });
 
-      const messages: TranslationWsMessage[] = [];
-      service.subscribeToSession("session-1", (message) => messages.push(message));
-      runtime.emitOutput("This output is much longer than five characters but has no paragraph break.");
-      await vi.advanceTimersByTimeAsync(0);
+    const messages: TranslationWsMessage[] = [];
+    service.subscribeToSession("session-1", (message) => messages.push(message));
+    transcripts.emit({
+      kind: "text",
+      id: "assistant-message-tool-use",
+      timestamp: "2026-05-30T00:00:00.000Z",
+      stopReason: "tool_use",
+      text: "I will inspect the test logs first."
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
 
-      expect(messages.some((message) => message.type === "translation-entry")).toBe(false);
+    expect(messages.some((message) => message.type === "translation-entry")).toBe(false);
+    expect(translateCalls).toHaveLength(0);
 
-      await vi.advanceTimersByTimeAsync(700);
-      await Promise.resolve();
+    transcripts.emit({
+      kind: "text",
+      id: "assistant-message-end-turn",
+      timestamp: "2026-05-30T00:00:01.000Z",
+      stopReason: "end_turn",
+      text: "The tests are passing now."
+    });
 
-      expect(messages.some((message) =>
-        message.type === "translation-entry" && message.entry.sourceText.includes("much longer than five characters")
-      )).toBe(true);
-    } finally {
-      vi.useRealTimers();
-    }
+    await waitFor(() => messages.some((message) =>
+      message.type === "translation-entry" && message.entry.status === "translated"
+    ));
+
+    expect(translateCalls).toHaveLength(1);
+    expect(messages.some((message) =>
+      message.type === "translation-entry" && message.entry.sourceText === "The tests are passing now."
+    )).toBe(true);
   });
 });
 
-function createProviderStub(text = "translated"): TranslationProvider {
+function createProviderStub(text = "translated", calls: unknown[] = []): TranslationProvider {
   return {
     async testConnection(settings) {
       return { ok: true, model: settings.model, elapsedMs: 1 };
     },
-    async translate() {
+    async translate(input) {
+      calls.push(input);
       return { text, elapsedMs: 1 };
     }
   };
 }
 
-function createRuntimeStub(): TerminalRuntime & { emitOutput(data: string): void } {
-  const listeners = new Set<TerminalEventListener>();
+function createRuntimeStub(): TerminalRuntime {
   const session = {
     id: "session-1",
     taskSlug: "demo-task",
@@ -193,24 +217,50 @@ function createRuntimeStub(): TerminalRuntime & { emitOutput(data: string): void
     async restart() {
       return session;
     },
-    subscribe(_sessionId, listener) {
+    subscribe() {
+      return () => {};
+    }
+  };
+}
+
+function createRegistryStub(record = createRoleSessionRecord()): { get(sessionId: string): RoleSessionRecord | undefined } {
+  return {
+    get(sessionId) {
+      return sessionId === record.id ? record : undefined;
+    }
+  };
+}
+
+function createTranscriptStub(): ClaudeTranscriptService & { emit(event: ClaudeTranscriptEvent): void } {
+  const listeners = new Set<(event: ClaudeTranscriptEvent) => void>();
+  return {
+    subscribeToRoleSession(_session, listener) {
       listeners.add(listener);
       return () => listeners.delete(listener);
     },
-    emitOutput(data) {
-      const event: TerminalEvent = {
-        id: "evt-1",
-        sessionId: session.id,
-        taskSlug: session.taskSlug,
-        role: session.role,
-        type: "output",
-        timestamp: "2026-05-30T00:00:00.000Z",
-        data
-      };
+    emit(event) {
       for (const listener of listeners) {
         listener(event);
       }
     }
+  };
+}
+
+function createRoleSessionRecord(): RoleSessionRecord {
+  return {
+    id: "session-1",
+    claudeSessionId: "claude-session-1",
+    taskSlug: "demo-task",
+    role: "coder",
+    status: "running",
+    command: "claude --agent coder",
+    permissionMode: "default",
+    cwd: "/repo",
+    terminalBackend: "node-pty",
+    logPath: ".ai/handoffs/demo-task/logs/coder.log",
+    startedAt: "2026-05-30T00:00:00.000Z",
+    updatedAt: "2026-05-30T00:00:00.000Z",
+    exitCode: null
   };
 }
 

@@ -128,16 +128,6 @@ export function TranslationSettingsModal({
             />
           </label>
           <label>
-            <span>Max chunk chars</span>
-            <input
-              min={500}
-              max={12000}
-              type="number"
-              value={draft.maxChunkChars}
-              onChange={(event) => setDraft({ ...draft, maxChunkChars: Number(event.target.value) })}
-            />
-          </label>
-          <label>
             <span>Timeout ms</span>
             <input
               min={3000}

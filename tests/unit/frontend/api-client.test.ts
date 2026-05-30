@@ -66,7 +66,6 @@ describe("apiClient", () => {
       preserveTechnicalTokens: true,
       skipCjkText: true,
       redactSecrets: true,
-      maxChunkChars: 4000,
       requestTimeoutMs: 15000,
       temperature: 0.1
     });

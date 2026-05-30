@@ -22,7 +22,9 @@ import type { TranslationProvider } from "../adapters/translation-provider.js";
 import { TranslationProviderError } from "../adapters/translation-provider.js";
 import { VcmError } from "../errors.js";
 import type { TerminalRuntime, Unsubscribe } from "../runtime/terminal-runtime.js";
+import type { SessionRegistry } from "../runtime/session-registry.js";
 import type { AppSettingsService } from "./app-settings-service.js";
+import type { ClaudeTranscriptEvent, ClaudeTranscriptService } from "./claude-transcript-service.js";
 import type { SessionService } from "./session-service.js";
 import { buildTranslationPrompt, getTranslationPromptPreviews, parseTranslationWarning } from "./translation-prompts.js";
 import { createTranslationQueueRegistry } from "./translation-queue.js";
@@ -56,6 +58,8 @@ export type TranslationEventListener = (message: TranslationWsMessage) => void;
 export interface TranslationServiceDeps {
   provider: TranslationProvider;
   runtime: TerminalRuntime;
+  sessionRegistry: Pick<SessionRegistry, "get">;
+  transcripts: ClaudeTranscriptService;
   sessionService: SessionService;
   appSettings: Pick<AppSettingsService, "getTranslationConfig" | "updateTranslationConfig">;
   now?: () => string;
@@ -69,10 +73,9 @@ interface StoredTranslationConfig {
 
 interface SessionState {
   listeners: Set<TranslationEventListener>;
-  unsubscribeRuntime?: Unsubscribe;
-  hasReplayedRuntimeOutput: boolean;
-  buffer: string;
-  flushTimer?: ReturnType<typeof setTimeout>;
+  unsubscribeTranscript?: Unsubscribe;
+  hasReplayedTranscriptOutput: boolean;
+  seenTranscriptIds: Set<string>;
   entries: TranslationEntry[];
   lastAssistantText?: string;
 }
@@ -93,7 +96,6 @@ const DEFAULT_SETTINGS: TranslationSettings = {
   preserveTechnicalTokens: true,
   skipCjkText: true,
   redactSecrets: true,
-  maxChunkChars: 4000,
   requestTimeoutMs: 15000,
   temperature: 0.1
 };
@@ -137,8 +139,8 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
     if (!state) {
       state = {
         listeners: new Set(),
-        hasReplayedRuntimeOutput: false,
-        buffer: "",
+        hasReplayedTranscriptOutput: false,
+        seenTranscriptIds: new Set(),
         entries: []
       };
       sessionStates.set(sessionId, state);
@@ -153,49 +155,28 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
     }
   }
 
-  async function handleOutput(sessionId: string, data: string): Promise<void> {
+  async function handleTranscriptEvent(sessionId: string, event: ClaudeTranscriptEvent): Promise<void> {
+    if (event.kind !== "text" || event.stopReason === "tool_use") {
+      return;
+    }
+
+    const state = getState(sessionId);
+    if (state.seenTranscriptIds.has(event.id)) {
+      return;
+    }
+    state.seenTranscriptIds.add(event.id);
+
     const { settings } = await loadConfig();
     if (!settings.enabled || !settings.translateOutput) {
       return;
     }
-
-    const state = getState(sessionId);
-    state.buffer += data;
-    if (/\n\s*\n/.test(state.buffer)) {
-      flushOutput(sessionId);
-      return;
-    }
-
-    if (state.flushTimer) {
-      clearTimeout(state.flushTimer);
-    }
-    state.flushTimer = setTimeout(() => flushOutput(sessionId), 700);
+    await processClaudeOutputText(sessionId, event.text);
   }
 
-  function flushOutput(sessionId: string): void {
-    const state = getState(sessionId);
-    if (state.flushTimer) {
-      clearTimeout(state.flushTimer);
-      state.flushTimer = undefined;
-    }
-
-    const chunk = state.buffer;
-    state.buffer = "";
-    if (!chunk.trim()) {
-      return;
-    }
-
-    void processOutputChunk(sessionId, chunk).catch((error) => {
-      emit(sessionId, {
-        type: "translation-error",
-        message: error instanceof Error ? error.message : "Translation failed."
-      });
-    });
-  }
-
-  async function processOutputChunk(sessionId: string, rawText: string): Promise<void> {
+  async function processClaudeOutputText(sessionId: string, rawText: string): Promise<void> {
     const session = deps.runtime.getSession(sessionId);
-    if (!session) {
+    const roleSession = deps.sessionRegistry.get(sessionId);
+    if (!session && !roleSession) {
       return;
     }
 
@@ -210,8 +191,8 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
     }
 
     const baseEntry = createEntry({
-      taskSlug: session.taskSlug,
-      role: session.role,
+      taskSlug: roleSession?.taskSlug ?? session!.taskSlug,
+      role: roleSession?.role ?? session!.role,
       direction: "cc-output-to-user",
       sourceKind: classified.sourceKind,
       sourceText: classified.text,
@@ -426,7 +407,8 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
     },
     subscribeToSession(sessionId, listener) {
       const session = deps.runtime.getSession(sessionId);
-      if (!session) {
+      const roleSession = deps.sessionRegistry?.get(sessionId);
+      if (!session && !roleSession) {
         throw new VcmError({
           code: "SESSION_MISSING",
           message: `Terminal session does not exist: ${sessionId}`,
@@ -440,14 +422,32 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
         listener({ type: "translation-entry", entry });
       }
 
-      if (!state.unsubscribeRuntime) {
-        const replay = !state.hasReplayedRuntimeOutput;
-        state.hasReplayedRuntimeOutput = true;
-        state.unsubscribeRuntime = deps.runtime.subscribe(sessionId, (event) => {
-          if (event.type === "output" && event.data) {
-            void handleOutput(sessionId, event.data);
-          }
-        }, { replay });
+      if (!state.unsubscribeTranscript) {
+        if (!roleSession) {
+          listener({
+            type: "translation-error",
+            message: "Claude transcript watcher is unavailable for this session."
+          });
+        } else {
+          const replayLastN = state.hasReplayedTranscriptOutput ? 0 : 1;
+          state.hasReplayedTranscriptOutput = true;
+          state.unsubscribeTranscript = deps.transcripts.subscribeToRoleSession(roleSession, (event) => {
+            void handleTranscriptEvent(sessionId, event).catch((error) => {
+              emit(sessionId, {
+                type: "translation-error",
+                message: error instanceof Error ? error.message : "Translation failed."
+              });
+            });
+          }, {
+            replayLastN,
+            onError(error) {
+              emit(sessionId, {
+                type: "translation-error",
+                message: error.message
+              });
+            }
+          });
+        }
       }
 
       void loadConfig().then(({ settings }) => {
@@ -456,20 +456,15 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
 
       return () => {
         state.listeners.delete(listener);
-        if (state.listeners.size === 0 && state.unsubscribeRuntime) {
-          state.unsubscribeRuntime();
-          state.unsubscribeRuntime = undefined;
+        if (state.listeners.size === 0 && state.unsubscribeTranscript) {
+          state.unsubscribeTranscript();
+          state.unsubscribeTranscript = undefined;
         }
       };
     },
     clearSession(sessionId) {
       const state = getState(sessionId);
       state.entries = [];
-      state.buffer = "";
-      if (state.flushTimer) {
-        clearTimeout(state.flushTimer);
-        state.flushTimer = undefined;
-      }
       queues.clearQueue(sessionId);
     },
     async retryTranslation(sessionId, translationId) {
@@ -489,7 +484,7 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
           statusCode: 400
         });
       }
-      await processOutputChunk(sessionId, original.sourceText);
+      await processClaudeOutputText(sessionId, original.sourceText);
       return state.entries[state.entries.length - 1] ?? original;
     }
   };
@@ -515,7 +510,6 @@ function normalizeSettings(input: Partial<TranslationSettings>): TranslationSett
     version: 1,
     providerType: "openai-compatible",
     workingLanguage: "en",
-    maxChunkChars: clampNumber(input.maxChunkChars, 500, 12000, DEFAULT_SETTINGS.maxChunkChars),
     requestTimeoutMs: clampNumber(input.requestTimeoutMs, 3000, 120000, DEFAULT_SETTINGS.requestTimeoutMs),
     temperature: clampNumber(input.temperature, 0, 1, DEFAULT_SETTINGS.temperature),
     prompts: normalizePromptMap(input.prompts)
