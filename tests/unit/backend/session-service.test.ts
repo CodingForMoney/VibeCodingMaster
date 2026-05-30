@@ -101,7 +101,8 @@ function createTestSessionService(fs: FileSystemAdapter, runtimeInputs: CreateTe
           architecturePlanPath: ".ai/handoffs/demo-task/architecture-plan.md",
           implementationLogPath: ".ai/handoffs/demo-task/implementation-log.md",
           validationLogPath: ".ai/handoffs/demo-task/validation-log.md",
-          reviewReportPath: ".ai/handoffs/demo-task/review-report.md"
+          reviewReportPath: ".ai/handoffs/demo-task/review-report.md",
+          docsSyncReportPath: ".ai/handoffs/demo-task/docs-sync-report.md"
         };
       }
     } as never,

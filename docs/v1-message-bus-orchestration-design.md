@@ -364,6 +364,8 @@ Recommended V1 behavior:
 - Persist every attempted delivery.
 - Do not auto-confirm Claude Code prompts.
 - Do not send more than one queued message to a role at a time.
+- Treat workflow gates as soft guidance in V1: architecture plan, implementation/validation, review report, docs sync report, then PM final acceptance.
+- Do not hard-block role startup from message policy alone; surface missing or placeholder artifacts in the GUI workflow strip.
 
 Known limitation:
 

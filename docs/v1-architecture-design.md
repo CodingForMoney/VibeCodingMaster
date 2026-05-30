@@ -389,7 +389,7 @@ V1 的主界面。
 ├───────────────┬──────────────────────────────────────────────────────────────┤
 │ Task Nav      │ Role Sessions                                                │
 │               │ tabs: PM | Architect | Coder | Reviewer                      │
-│ Session State │ embedded terminal                                             │
+│ Session State │ workflow strip + embedded terminal                           │
 │ Known Issues  │ session ops                                                   │
 │               │ input handled by terminal                                     │
 ├───────────────┴──────────────────────────────────────────────────────────────┤
@@ -411,11 +411,31 @@ V1 的主界面。
 - 支持 start / stop / restart。
 - 显示 raw log path。
 
-### 6.4 Handoff Files
+### 6.4 Workflow Strip
+
+V1 在 role tabs 下方展示紧凑的 workflow strip：
+
+```text
+Architecture -> Implementation -> Review -> Docs Sync -> PM Final
+```
+
+它是 soft gate，不是强制状态机。Backend 根据 handoff artifact status 计算当前 gate、下一步建议和 blocked/ready/complete 状态；GUI 只展示提示，不阻止用户手动启动或切换 role session。
+
+### 6.5 Handoff Files
 
 V1 不在主界面展示独立 artifact inspector。handoff artifacts 和 role commands 仍保存在任务目录中，作为 session 之间的文件级事实源；GUI 的主工作区优先展示 embedded terminal。
 
-### 6.5 Event Log
+核心 handoff artifacts：
+
+```text
+architecture-plan.md
+implementation-log.md
+validation-log.md
+review-report.md
+docs-sync-report.md
+```
+
+### 6.6 Event Log
 
 展示产品级事件，不展示完整 terminal stream。
 
@@ -590,6 +610,7 @@ V1 需要创建和维护：
       implementation-log.md
       validation-log.md
       review-report.md
+      docs-sync-report.md
 
 .vcm/
   config.json
@@ -1041,7 +1062,8 @@ PM writes architect.md
 ### 12.7 查看 artifacts
 
 ```text
-V1 main GUI does not render artifact status.
+V1 main GUI renders compact workflow status derived from artifact checks.
+The full artifact inspector remains out of scope for V1.
 Handoff files remain available in the task directory and backend services.
 ```
 
@@ -1112,6 +1134,20 @@ Public Contract Review
 Test Review
 Validation Evidence
 Findings
+Decision
+```
+
+### 13.5 docs-sync-report.md
+
+最低标题：
+
+```text
+Summary
+Architecture Drift Check
+Docs Updated
+Docs Reviewed And Left Unchanged
+Public Contract / Module Boundary Notes
+Remaining Documentation Risks
 Decision
 ```
 

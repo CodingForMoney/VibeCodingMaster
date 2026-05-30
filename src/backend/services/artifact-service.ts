@@ -14,6 +14,7 @@ import {
 } from "../adapters/filesystem.js";
 import {
   renderArchitecturePlanTemplate,
+  renderDocsSyncReportTemplate,
   renderImplementationLogTemplate,
   renderReviewReportTemplate,
   renderValidationLogTemplate
@@ -73,7 +74,8 @@ const ARTIFACT_PATH_KEYS: Array<[ArtifactKind, keyof HandoffPaths]> = [
   ["architecture-plan", "architecturePlanPath"],
   ["implementation-log", "implementationLogPath"],
   ["validation-log", "validationLogPath"],
-  ["review-report", "reviewReportPath"]
+  ["review-report", "reviewReportPath"],
+  ["docs-sync-report", "docsSyncReportPath"]
 ];
 const ROLE_COMMAND_PLACEHOLDER_PATTERN = /(^|\n)\s*(TBD|status:\s*draft)\s*(\n|$)/i;
 
@@ -101,7 +103,8 @@ export function createArtifactService(fs: FileSystemAdapter): ArtifactService {
         architecturePlanPath: path.posix.join(handoffDir, "architecture-plan.md"),
         implementationLogPath: path.posix.join(handoffDir, "implementation-log.md"),
         validationLogPath: path.posix.join(handoffDir, "validation-log.md"),
-        reviewReportPath: path.posix.join(handoffDir, "review-report.md")
+        reviewReportPath: path.posix.join(handoffDir, "review-report.md"),
+        docsSyncReportPath: path.posix.join(handoffDir, "docs-sync-report.md")
       };
     },
     async ensureHandoffStructure(input) {
@@ -120,7 +123,8 @@ export function createArtifactService(fs: FileSystemAdapter): ArtifactService {
         [paths.architecturePlanPath, renderArchitecturePlanTemplate(input.taskSlug)],
         [paths.implementationLogPath, renderImplementationLogTemplate(input.taskSlug)],
         [paths.validationLogPath, renderValidationLogTemplate(input.taskSlug)],
-        [paths.reviewReportPath, renderReviewReportTemplate(input.taskSlug)]
+        [paths.reviewReportPath, renderReviewReportTemplate(input.taskSlug)],
+        [paths.docsSyncReportPath, renderDocsSyncReportTemplate(input.taskSlug)]
       ];
       const created: string[] = [];
 

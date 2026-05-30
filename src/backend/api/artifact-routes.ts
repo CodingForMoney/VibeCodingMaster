@@ -120,6 +120,9 @@ function artifactNameToPath(paths: ReturnType<ArtifactService["getHandoffPaths"]
   if (artifactName === "review-report.md") {
     return paths.reviewReportPath;
   }
+  if (artifactName === "docs-sync-report.md") {
+    return paths.docsSyncReportPath;
+  }
   throw new VcmError({
     code: "ARTIFACT_UNKNOWN",
     message: `Unknown artifact: ${artifactName}`,

@@ -167,6 +167,14 @@ Important container notes:
 
 The recommended flow is to mostly talk to `project-manager`. The PM role should coordinate the other roles through VCM messaging instead of asking the user to copy prompts between terminals.
 
+VCM shows a compact workflow strip for the normal gate order:
+
+```text
+architect plan -> coder implementation -> reviewer review -> architect docs sync -> PM final acceptance / commit / PR
+```
+
+This is a soft guide in the current release. VCM highlights missing or placeholder handoff artifacts and suggests the next step, but it does not yet hard-block starting a role out of order.
+
 ## Message Bus
 
 The message bus is API-driven. VCM does not watch files to trigger role messages.
@@ -198,6 +206,7 @@ Files are still used for durability and auditability:
 .ai/handoffs/<task>/messages/<message-id>.md
 .ai/handoffs/<task>/role-commands/
 .ai/handoffs/<task>/logs/
+.ai/handoffs/<task>/docs-sync-report.md
 ```
 
 ## Orchestration Modes

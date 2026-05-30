@@ -457,12 +457,14 @@ VibeCodingMaster 根据任务类型自动推荐 role route。
 | --- | --- | --- | --- |
 | T0 | trivial | 文案、注释、无行为变化的小配置 | `coder`，可选 review checklist |
 | T1 | small scoped change | 单文件 bug、简单测试、已知模式修复 | `coder -> fresh review` 或 `coder -> reviewer` |
-| T2 | ordinary feature | 有边界的多文件 feature、普通 PR | `architect -> coder -> reviewer` |
-| T3 | cross-module / architectural | 跨模块改动、重构、新 public surface | `architect -> coder -> reviewer` |
-| T4 | high-risk | auth、permission、payment、billing、schema、public API、security | `architect -> specialist -> coder -> reviewer -> human approval` |
-| T5 | large rewrite / greenfield | 新子系统、大迁移、长期重构 | `architect`，然后每个 phase 循环 `coder -> reviewer`，阶段边界做 architect review |
+| T2 | ordinary feature | 有边界的多文件 feature、普通 PR | `architect -> coder -> reviewer -> architect docs sync -> PM commit/PR` |
+| T3 | cross-module / architectural | 跨模块改动、重构、新 public surface | `architect -> coder -> reviewer -> architect docs sync -> PM commit/PR` |
+| T4 | high-risk | auth、permission、payment、billing、schema、public API、security | `architect -> specialist -> coder -> reviewer -> architect docs sync -> human approval -> PM commit/PR` |
+| T5 | large rewrite / greenfield | 新子系统、大迁移、长期重构 | `architect`，然后每个 phase 循环 `coder -> reviewer -> architect docs sync`，阶段或任务边界由 PM commit/PR |
 
 当分类不明确时，选择更严格的路由。
+
+V1 GUI 先提供软流程提示：根据 handoff artifacts 是否存在、是否仍是占位内容、是否通过标题 schema 检查，提示当前 gate 和下一步建议。它不在 V1 中硬拦截用户启动某个 role session。
 
 ## 8. 端到端工作流
 

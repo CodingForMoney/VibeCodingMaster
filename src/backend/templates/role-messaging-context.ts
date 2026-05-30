@@ -21,6 +21,13 @@ Use VCM messaging instead of asking the user to copy commands:
 - Ask a question with: ${vcmctlCommand} send --to <role> --type question --body "..."
 - Check pending messages with: ${vcmctlCommand} inbox
 
+Recommended workflow gates:
+1. architect produces ${paths.architecturePlanPath}
+2. coder produces ${paths.implementationLogPath} and ${paths.validationLogPath}
+3. reviewer produces ${paths.reviewReportPath}
+4. architect performs post-review docs sync / architecture drift check and produces ${paths.docsSyncReportPath}
+5. project-manager prepares final acceptance, commit, and PR only after reviewer and docs-sync gates pass
+
 Canonical role command files still exist for durable handoff:
 - architect: ${paths.roleCommandPaths.architect}
 - coder: ${paths.roleCommandPaths.coder}
@@ -44,6 +51,12 @@ When complete, blocked, or unclear, reply to project-manager through VCM:
 - ${vcmctlCommand} reply --type result --body-file <file>
 - ${vcmctlCommand} reply --type blocked --body "..."
 - ${vcmctlCommand} reply --type question --body "..."
+
+Expected handoff artifacts:
+- architect planning: ${paths.architecturePlanPath}
+- coder work: ${paths.implementationLogPath} and ${paths.validationLogPath}
+- reviewer work: ${paths.reviewReportPath}
+- architect post-review docs sync: ${paths.docsSyncReportPath}
 
 Hard rules:
 - Only reply to project-manager. Do not message other roles directly.

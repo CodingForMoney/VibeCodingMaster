@@ -77,3 +77,36 @@ TBD
 TBD
 `;
 }
+
+export function renderDocsSyncReportTemplate(taskSlug: string): string {
+  return `# Docs Sync Report: ${taskSlug}
+
+## Summary
+
+TBD
+
+## Architecture Drift Check
+
+TBD
+
+## Docs Updated
+
+TBD
+
+## Docs Reviewed And Left Unchanged
+
+TBD
+
+## Public Contract / Module Boundary Notes
+
+TBD
+
+## Remaining Documentation Risks
+
+TBD
+
+## Decision
+
+TBD
+`;
+}

@@ -602,7 +602,8 @@ export type ArtifactKind =
   | "architecture-plan"
   | "implementation-log"
   | "validation-log"
-  | "review-report";
+  | "review-report"
+  | "docs-sync-report";
 
 export interface HandoffPaths {
   handoffDir: string;
@@ -614,6 +615,7 @@ export interface HandoffPaths {
   implementationLogPath: string;
   validationLogPath: string;
   reviewReportPath: string;
+  docsSyncReportPath: string;
 }
 
 export interface ArtifactCheckResult {
@@ -621,6 +623,7 @@ export interface ArtifactCheckResult {
   path: string;
   exists: boolean;
   isEmpty: boolean;
+  hasPlaceholder: boolean;
   missingHeadings: string[];
   status: "missing" | "empty" | "incomplete" | "ok";
 }
@@ -1174,6 +1177,8 @@ Please read and execute the role command at: <path>
 职责：
 
 - 汇总 task、sessions、artifacts、events。
+- 根据 handoff artifact status 计算 soft workflow gates：architecture、implementation、review、docs sync、PM final。
+- 只提供下一步建议和 blocked/ready/complete 状态，不在 V1 硬拦截 role session 启动。
 
 导出定义：
 
@@ -1182,7 +1187,23 @@ export interface TaskStatusReport {
   task: TaskRecord;
   sessions: RoleSessionRecord[];
   artifacts: ArtifactSummary;
+  workflow: TaskWorkflowReport;
   warnings: string[];
+}
+
+export interface TaskWorkflowReport {
+  currentStepId: "architecture-plan" | "implementation" | "review" | "docs-sync" | "final-acceptance";
+  nextAction: string;
+  blocked: boolean;
+  steps: TaskWorkflowStep[];
+}
+
+export interface TaskWorkflowStep {
+  id: TaskWorkflowReport["currentStepId"];
+  label: string;
+  status: "pending" | "blocked" | "ready" | "complete";
+  detail: string;
+  artifactPaths: string[];
 }
 
 export interface StatusService {
@@ -1656,7 +1677,7 @@ Role toolbar Send Command
 
 ### 14.7 Handoff files
 
-V1 主界面不展示 artifact 状态。handoff files 和 role commands 仍由 backend templates / services 管理，供 Claude Code sessions 和 dispatch 流程使用。
+V1 主界面展示紧凑 workflow strip，用 artifact status 推导当前 gate 和下一步建议。完整 artifact inspector 仍不放在主界面；handoff files 和 role commands 仍由 backend templates / services 管理，供 Claude Code sessions 和 dispatch 流程使用。
 
 ## 15. 测试计划
 
@@ -1765,7 +1786,7 @@ Start architect
 Type in PM terminal
 Send architect command
 Verify logs/architect.log
-Verify artifact status
+Verify workflow strip and artifact status
 Restart coder
 Refresh browser
 Verify session state recovers

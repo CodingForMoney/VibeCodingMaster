@@ -9,6 +9,7 @@ import { EventLog } from "../components/event-log.js";
 import { MessageTimeline } from "../components/message-timeline.js";
 import { RoleSessionTabs } from "../components/role-session-tabs.js";
 import { SessionConsole } from "../components/session-console.js";
+import { WorkflowPanel } from "../components/workflow-panel.js";
 import { getSessionForRole } from "../state/session-store.js";
 import { apiClient } from "../state/api-client.js";
 
@@ -64,10 +65,12 @@ export function TaskWorkspace({ task, onTaskChanged }: TaskWorkspaceProps) {
   useEffect(() => {
     const interval = window.setInterval(() => {
       void Promise.all([
+        apiClient.getTaskStatus(task.taskSlug),
         apiClient.listMessages(task.taskSlug),
         apiClient.getOrchestrationState(task.taskSlug)
       ])
-        .then(([nextMessages, nextOrchestration]) => {
+        .then(([nextStatusReport, nextMessages, nextOrchestration]) => {
+          setStatusReport(nextStatusReport);
           setMessages(nextMessages);
           setOrchestration(nextOrchestration);
         })
@@ -151,6 +154,8 @@ export function TaskWorkspace({ task, onTaskChanged }: TaskWorkspaceProps) {
         sessions={statusReport?.sessions ?? []}
         onSelect={setActiveRole}
       />
+
+      <WorkflowPanel workflow={statusReport?.workflow} />
 
       {error ? <div className="error-banner">{error}</div> : null}
 

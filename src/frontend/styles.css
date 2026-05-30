@@ -311,6 +311,63 @@ h2 {
   text-align: left;
 }
 
+.workflow-panel {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) minmax(0, 2fr);
+  gap: 10px;
+  align-items: center;
+  margin-bottom: 8px;
+  border: 1px solid #d6d0c6;
+  border-radius: 8px;
+  background: #fffdf8;
+  padding: 8px 10px;
+}
+
+.workflow-summary h2,
+.workflow-summary p {
+  margin-bottom: 0;
+}
+
+.workflow-summary p {
+  color: #4f5558;
+  font-size: 13px;
+}
+
+.workflow-steps {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.workflow-steps li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px;
+  align-items: center;
+  min-height: 26px;
+  border: 1px solid #ece5d9;
+  border-radius: 6px;
+  padding: 4px 6px;
+  background: #fffdfa;
+}
+
+.workflow-steps li.is-current {
+  border-color: #2f6f73;
+  background: #e8f1ef;
+}
+
+.workflow-steps span {
+  overflow: hidden;
+  color: #394246;
+  font-size: 12px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .workspace-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
@@ -580,7 +637,8 @@ h2 {
 }
 
 .status-pending_approval,
-.status-queued {
+.status-queued,
+.status-ready {
   border-color: #c4a34e;
   background: #f7efcf;
   color: #604e16;
@@ -588,10 +646,17 @@ h2 {
 
 .status-rejected,
 .status-failed,
-.status-cancelled {
+.status-cancelled,
+.status-blocked {
   border-color: #c46e5f;
   background: #fae9e6;
   color: #6f2b21;
+}
+
+.status-pending {
+  border-color: #c7c1b8;
+  background: #f2eee7;
+  color: #4f5558;
 }
 
 .empty-workspace {
@@ -611,6 +676,11 @@ h2 {
 
   .role-tabs {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .workflow-panel,
+  .workflow-steps {
+    grid-template-columns: 1fr;
   }
 
 }
