@@ -199,9 +199,9 @@ Root template:
 Role-specific behavior lives in `.claude/agents/`.
 
 - Use `claude --agent project-manager` for user communication, translation, task clarification, task specs, role routing, role commands, status summaries, and final acceptance.
-- Use `claude --agent architect` for architecture plans, module boundaries, file responsibilities, public contracts, test contracts, and phase plans.
+- Use `claude --agent architect` for architecture plans, module boundaries, file responsibilities, public contracts, test contracts, phase plans, and post-review docs sync / architecture drift checks.
 - Use `claude --agent coder` for implementation and direct tests within an approved plan.
-- Use `claude --agent reviewer` for independent review, test adequacy, validation evidence, docs sync, and acceptance findings.
+- Use `claude --agent reviewer` for independent review, test adequacy, validation evidence, docs gap detection, and acceptance findings.
 - Do not use an untagged session as an implicit project manager for non-trivial work.
 - Do not simulate another role inside the wrong session.
 
@@ -209,7 +209,7 @@ Role-specific behavior lives in `.claude/agents/`.
 
 - For complex features, cross-module changes, refactors, public API changes, schema changes, auth, payment, permission, or security-sensitive work, start Claude Code with an explicit role: `claude --agent <role>`.
 - Default core roles are `project-manager`, `architect`, `coder`, and `reviewer`.
-- The `project-manager` role owns user communication, translation, task routing, role commands, handoff verification, and final status reporting.
+- The `project-manager` role owns user communication, translation, task routing, role commands, handoff verification, final status reporting, and PR preparation after required gates pass.
 - Do not let one coding session own architecture/plan decisions, implementation, final testing responsibility, and review.
 - Role outputs are exchanged through `.ai/handoffs/<task-slug>/`, not through chat history.
 - When the required role route includes `architect`, coding must not start until the architecture and plan artifact exists.
@@ -241,7 +241,7 @@ Role-specific behavior lives in `.claude/agents/`.
 - Required validation passes.
 - New or modified public functions have contract tests.
 - Behavior changes have regression tests unless impractical.
-- Plan, architecture, public contract, test strategy, and module responsibility changes are reflected in docs.
+- Plan, architecture, public contract, test strategy, and module responsibility changes are reflected in docs after post-review architect docs sync.
 - Follow-ups are recorded in `.ai/state/known-issues.md` or the execution plan.
 ```
 
@@ -418,6 +418,7 @@ Explore
   -> implement phase 1
   -> validate
   -> review
+  -> architect docs sync / architecture drift check
   -> commit
   -> implement next phase
 ```
@@ -562,6 +563,8 @@ communicate with user
   -> start or ask the user to start architect/coder/reviewer/specialist sessions when needed
   -> track progress, blockers, validation, docs sync, and Replan
   -> verify role outputs and handoff artifacts
+  -> request post-review architect docs sync when required
+  -> prepare commit and submit the PR only after review and docs sync gates pass
   -> summarize final status and risks to the user
 ```
 
@@ -616,9 +619,16 @@ coder command:
 
 reviewer command:
   read task spec, architecture-plan.md, implementation-log.md, validation-log.md, and git diff
-  verify scope, architecture, public contract, tests, validation, and docs sync
+  verify scope, architecture, public contract, tests, validation, and docs gaps
   write review-report.md
   only apply small, local, low-risk review-scoped fixes
+
+architect docs-sync command:
+  read task spec, architecture-plan.md, implementation-log.md, validation-log.md, review-report.md, and git diff
+  verify whether the final code still matches the approved architecture and public contracts
+  update architecture/module/testing/security docs when the code change made them stale
+  write docs-sync-report.md with docs changed, docs intentionally unchanged, and remaining doc risks
+  stop and request Replan if implementation drift changes architecture, public contracts, dependency direction, schema, auth, permission, payment, or design assumptions
 ```
 
 The project manager may use a prompt compiler or template system to build role commands, but the responsibility stays with the project manager. A role command is an auditable artifact: if a role agent fails because the command was vague, the harness should improve the command template rather than blaming the role agent alone.
@@ -652,12 +662,12 @@ All user-facing routes begin with `project-manager`. The project manager may han
 
 | Task class | Examples | Required role route |
 | --- | --- | --- |
-| T0 trivial | copy, comments, docs typo, tiny config with no behavior change | `project-manager` -> `coder`; optional reviewer checklist |
-| T1 small scoped change | single-file bug, focused test addition, known-pattern fix | `project-manager` -> `coder` -> fresh review context or `reviewer` |
-| T2 ordinary feature | bounded behavior, normal multi-file feature, ordinary PR | `project-manager` -> `architect` -> `coder` -> `reviewer` |
-| T3 cross-module / architectural | cross-module change, module boundary change, refactor, new public surface | `project-manager` -> `architect` -> `coder` -> `reviewer` |
-| T4 high-risk | auth, permission, payment, billing, schema, data deletion, public API/SDK, security-sensitive infrastructure | `project-manager` -> `architect` -> relevant specialist if needed -> `coder` -> `reviewer` -> human approval |
-| T5 large rewrite / greenfield | new subsystem, major rewrite, migration across many modules | `project-manager` -> `architect`; then repeat `coder` -> `reviewer` per phase, with architect review at phase boundaries |
+| T0 trivial | copy, comments, docs typo, tiny config with no behavior change | `project-manager` -> `coder`; optional reviewer checklist; PM commit/PR |
+| T1 small scoped change | single-file bug, focused test addition, known-pattern fix | `project-manager` -> `coder` -> fresh review context or `reviewer` -> docs checklist; PM commit/PR |
+| T2 ordinary feature | bounded behavior, normal multi-file feature, ordinary PR | `project-manager` -> `architect` -> `coder` -> `reviewer` -> `architect` docs sync -> PM commit/PR |
+| T3 cross-module / architectural | cross-module change, module boundary change, refactor, new public surface | `project-manager` -> `architect` -> `coder` -> `reviewer` -> `architect` docs sync -> PM commit/PR |
+| T4 high-risk | auth, permission, payment, billing, schema, data deletion, public API/SDK, security-sensitive infrastructure | `project-manager` -> `architect` -> relevant specialist if needed -> `coder` -> `reviewer` -> `architect` docs sync -> human approval -> PM commit/PR |
+| T5 large rewrite / greenfield | new subsystem, major rewrite, migration across many modules | `project-manager` -> `architect`; then repeat `coder` -> `reviewer` -> `architect` docs sync per phase; PM commit/PR at phase or task boundary |
 
 If classification is unclear, use the stricter route.
 
@@ -693,7 +703,9 @@ project-manager
 architect
   owns architecture and plan
   defines module boundaries, file responsibilities, public contracts, dependency direction, risk, and phases
+  owns post-review docs sync and architecture drift checks before PM final acceptance
   outputs .ai/handoffs/<task-slug>/architecture-plan.md
+  outputs .ai/handoffs/<task-slug>/docs-sync-report.md when a post-review docs sync gate is required
   must not implement production code
 
 coder
@@ -705,13 +717,13 @@ coder
 
 reviewer
   owns independent acceptance and final test responsibility
-  checks scope, role compliance, architecture compliance, public contract compliance, docs sync, validation evidence, and risk
+  checks scope, role compliance, architecture compliance, public contract compliance, docs gaps, validation evidence, and risk
   checks, designs, and adds missing tests when needed
   may directly apply small, local, low-risk review fixes
   owns complex tests, E2E coverage, regression matrix, and release-level validation recommendations
   outputs .ai/handoffs/<task-slug>/review-report.md
   must escalate larger implementation issues to coder
-  must escalate architecture, public contract, or design issues to architect
+  must escalate architecture, public contract, design, or documentation drift issues to architect
 ```
 
 ### 7.5 Role Permission Matrix
@@ -720,8 +732,8 @@ Prompt rules are not enough. Role separation must be backed by tool scope, permi
 
 | Role | Suggested tools | Write scope | Must not |
 | --- | --- | --- | --- |
-| `project-manager` | `Read`, `Grep`, `Glob`, `Bash`, `Edit`, `Write` | task specs, role commands, handoff metadata, status/progress/known-issues, final reports | implement non-trivial production code, approve without reviewer evidence, replace architect/coder/reviewer roles |
-| `architect` | `Read`, `Grep`, `Glob`, `Bash`, `Edit`, `Write` | architecture plan, task spec, architecture docs only with approval | edit production code, rewrite tests, expand task scope |
+| `project-manager` | `Read`, `Grep`, `Glob`, `Bash`, `Edit`, `Write` | task specs, role commands, handoff metadata, status/progress/known-issues, final reports, PR description | implement non-trivial production code, approve without reviewer/docs-sync evidence, replace architect/coder/reviewer roles |
+| `architect` | `Read`, `Grep`, `Glob`, `Bash`, `Edit`, `Write` | architecture plan, docs sync report, task spec, approved architecture/module/testing/security docs | edit production code, rewrite tests, expand task scope |
 | `coder` | `Read`, `Grep`, `Glob`, `Bash`, `Edit`, `Write` | approved source files, baseline tests, validation log, implementation log | change scope, public contracts, module boundaries, or test strategy without Replan |
 | `reviewer` | `Read`, `Grep`, `Glob`, `Bash`, `Edit`, `Write` | review report, missing tests/fixtures, validation log, small review-scoped fixes | take over implementation, change architecture/public contracts, approve own implementation, weaken tests |
 | `security-specialist` | `Read`, `Grep`, `Glob`, `Bash`, `Edit`, `Write` | security review report and approved security tests | bypass approvals, edit production code without explicit scope |
@@ -731,8 +743,8 @@ Prompt rules are not enough. Role separation must be backed by tool scope, permi
 Recommended permission modes:
 
 ```text
-project-manager: default with write hooks limited to task specs, role commands, handoff metadata, state files, and final reports
-architect:  default with write hooks limited to architecture-plan.md, task specs, and approved docs
+project-manager: default with write hooks limited to task specs, role commands, handoff metadata, state files, final reports, and PR description
+architect:  default with write hooks limited to architecture-plan.md, docs-sync-report.md, task specs, and approved docs
 coder:      default or acceptEdits, but only inside approved scope
 reviewer:   default with production-code writes blocked except explicitly review-scoped small fixes; test writes allowed
 specialist: default with write hooks limited to specialist reports, tests, and approved files
@@ -756,6 +768,7 @@ Required handoff directory:
   implementation-log.md
   validation-log.md
   review-report.md
+  docs-sync-report.md
 ```
 
 Each role session must start by reading the artifacts it depends on:
@@ -768,6 +781,10 @@ project-manager
 architect
   reads: task request, task spec, ARCHITECTURE.md, MODULE_MAP.md, module-local CLAUDE.md, relevant source/tests
   writes: architecture-plan.md
+
+architect docs sync
+  reads: task spec, architecture-plan.md, implementation-log.md, validation-log.md, review-report.md, git diff, relevant docs
+  writes: docs updates when needed, docs-sync-report.md
 
 coder
   reads: task spec, architecture-plan.md, relevant module docs
@@ -795,7 +812,7 @@ reviewer:
   owns complex test strategy, E2E smoke/release coverage, and regression matrix
   may directly apply small, local, low-risk review fixes
   must request coder fixes for larger implementation issues
-  must request architect review for architecture, public contract, dependency, schema, auth, permission, payment, or design issues
+  must request architect review for architecture, public contract, dependency, schema, auth, permission, payment, design, or docs drift issues
   must not weaken tests to pass validation
 ```
 
@@ -832,6 +849,7 @@ escalate to architect:
   public contract is wrong
   dependency direction is wrong
   schema, auth, permission, payment, public API, or security design is wrong
+  architecture, module, testing, security, or dependency docs are stale after implementation
   the implementation reveals that the architecture plan is invalid
 ```
 
@@ -896,8 +914,18 @@ Handoff artifact schemas:
 ## Escalations To Coder / Architect
 ## E2E / Regression Recommendation
 ## Validation Evidence
-## Docs Sync
+## Docs Gap Review
 ## Findings
+## Decision
+
+# docs-sync-report.md
+
+## Summary
+## Architecture Drift Check
+## Docs Updated
+## Docs Reviewed And Left Unchanged
+## Public Contract / Module Boundary Notes
+## Remaining Documentation Risks
 ## Decision
 ```
 
@@ -1079,7 +1107,13 @@ coder session
 reviewer session
   -> review-report.md + missing tests/fixtures if needed + validation-log.md
 
-human approval
+architect docs-sync session
+  -> docs updates if needed + docs-sync-report.md
+
+human approval when required
+
+project-manager session
+  -> final acceptance + commit + PR submission
 ```
 
 For small bug fixes or ordinary PRs, one coder session is acceptable if the task spec is clear, file responsibilities are explicit, public contracts are defined when needed, and validation is cheap.
@@ -1799,6 +1833,9 @@ behavior is correct
 - [ ] Any reviewer direct fixes were small, local, low-risk, and review-scoped.
 - [ ] Larger implementation issues were returned to coder.
 - [ ] Architecture, public contract, dependency, schema, auth, permission, payment, or design issues were returned to architect.
+- [ ] For T2+ work, architect performed post-review docs sync / architecture drift check before final PM acceptance.
+- [ ] Docs updates or a docs-sync-report explain why affected architecture/module/testing/security/dependency docs are current.
+- [ ] The project manager prepared final acceptance, commit, and PR only after reviewer and docs-sync gates passed or an exception was approved.
 - [ ] Task-level validation evidence is recorded in `.ai/handoffs/<task-slug>/validation-log.md` when a handoff directory exists.
 
 ## Architecture
