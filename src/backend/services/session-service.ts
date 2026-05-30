@@ -169,9 +169,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       }
       deps.registry.remove(existing.id);
 
-      return existing.claudeSessionId
-        ? launchRoleSession(repoRoot, taskSlug, role, input, "resume")
-        : launchRoleSession(repoRoot, taskSlug, role, input, "fresh");
+      return launchRoleSession(repoRoot, taskSlug, role, input, "fresh");
     },
     async getRoleSession(repoRoot, taskSlug, role) {
       const config = await deps.projectService.loadConfig(repoRoot);

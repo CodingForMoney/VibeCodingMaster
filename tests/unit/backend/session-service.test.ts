@@ -54,6 +54,28 @@ describe("createSessionService", () => {
       VCM_ROLE: "project-manager"
     });
   });
+
+  it("restarts with a fresh Claude session instead of resuming the persisted one", async () => {
+    const fs = createMemoryFs();
+    const firstRuntimeInputs: CreateTerminalSessionInput[] = [];
+    const firstService = createTestSessionService(fs, firstRuntimeInputs);
+
+    const started = await firstService.startRoleSession("/repo", "demo-task", "coder");
+    expect(firstRuntimeInputs[0]?.args).toContain("--session-id");
+
+    const secondRuntimeInputs: CreateTerminalSessionInput[] = [];
+    const secondService = createTestSessionService(fs, secondRuntimeInputs);
+    const restarted = await secondService.restartRoleSession("/repo", "demo-task", "coder");
+
+    expect(restarted.claudeSessionId).not.toBe(started.claudeSessionId);
+    expect(secondRuntimeInputs[0]?.args).toEqual([
+      "--agent",
+      "coder",
+      "--session-id",
+      restarted.claudeSessionId
+    ]);
+    expect(secondRuntimeInputs[0]?.args).not.toContain("--resume");
+  });
 });
 
 function createTestSessionService(fs: FileSystemAdapter, runtimeInputs: CreateTerminalSessionInput[], writes: string[] = []) {
