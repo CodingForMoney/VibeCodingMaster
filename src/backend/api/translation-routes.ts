@@ -19,18 +19,15 @@ export interface TranslationRouteDeps {
 
 export function registerTranslationRoutes(app: FastifyInstance, deps: TranslationRouteDeps): void {
   app.get("/api/translation/settings", async () => {
-    await requireCurrentProject(deps.projectService);
     return deps.translationService.getSettings();
   });
 
   app.put<{ Body: Partial<TranslationSettings> & TranslationSecretSettings }>("/api/translation/settings", async (request) => {
-    await requireCurrentProject(deps.projectService);
     const { apiKey, ...settings } = request.body ?? {};
     return deps.translationService.updateSettings(settings, apiKey !== undefined ? { apiKey } : undefined);
   });
 
   app.post("/api/translation/test", async () => {
-    await requireCurrentProject(deps.projectService);
     return deps.translationService.testProvider();
   });
 
@@ -102,4 +99,3 @@ async function requireCurrentProject(projectService: ProjectService) {
   }
   return project;
 }
-

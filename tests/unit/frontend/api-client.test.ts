@@ -38,6 +38,44 @@ describe("apiClient", () => {
     expect(init?.body).toBe(JSON.stringify({ repoPath: "/repo" }));
     expect(new Headers(init?.headers).get("content-type")).toBe("application/json");
   });
+
+  it("sends translation API keys in the settings request body", async () => {
+    const fetchMock = mockFetch({
+      version: 1,
+      enabled: true,
+      providerType: "openai-compatible",
+      baseUrl: "https://api.example.com/v1",
+      model: "cheap-translator",
+      sourceLanguage: "auto",
+      targetLanguage: "zh-CN",
+      workingLanguage: "en",
+      inputMode: "review-before-send",
+      translateOutput: true,
+      translateUserInput: true,
+      contextEnabled: true,
+      preserveTechnicalTokens: true,
+      skipCjkText: true,
+      redactSecrets: true,
+      maxChunkChars: 4000,
+      requestTimeoutMs: 15000,
+      temperature: 0.1
+    });
+
+    await apiClient.updateTranslationSettings({
+      enabled: true,
+      model: "cheap-translator",
+      apiKey: "sk-local-test"
+    });
+
+    const init = fetchMock.mock.calls[0]?.[1];
+    expect(init?.method).toBe("PUT");
+    expect(JSON.parse(String(init?.body))).toMatchObject({
+      enabled: true,
+      model: "cheap-translator",
+      apiKey: "sk-local-test"
+    });
+    expect(new Headers(init?.headers).get("content-type")).toBe("application/json");
+  });
 });
 
 function mockFetch(payload: unknown) {

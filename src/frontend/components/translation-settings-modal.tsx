@@ -62,7 +62,11 @@ export function TranslationSettingsModal({
               value={apiKey}
               onChange={(event) => setApiKey(event.target.value)}
               placeholder="Leave blank to keep existing key"
-              type="password"
+              autoCapitalize="off"
+              autoComplete="off"
+              autoCorrect="off"
+              spellCheck={false}
+              type="text"
             />
           </label>
           <label>
@@ -165,4 +169,3 @@ export function TranslationSettingsModal({
     </div>
   );
 }
-
