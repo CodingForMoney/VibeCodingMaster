@@ -11,6 +11,15 @@ import type { ProjectSummary, ConnectProjectRequest } from "../../shared/types/p
 import type { DispatchableRole, RoleName } from "../../shared/types/role.js";
 import type { RoleSessionRecord, StartRoleSessionRequest } from "../../shared/types/session.js";
 import type { CreateTaskRequest, TaskRecord } from "../../shared/types/task.js";
+import type {
+  SendTranslatedInputRequest,
+  TranslateUserInputRequest,
+  TranslateUserInputResult,
+  TranslationEntry,
+  TranslationProviderTestResult,
+  TranslationSecretSettings,
+  TranslationSettings
+} from "../../shared/types/translation.js";
 
 export const apiClient = {
   getCurrentProject() {
@@ -99,6 +108,42 @@ export const apiClient = {
     return request<VcmOrchestrationState>(`/api/tasks/${encodeURIComponent(taskSlug)}/orchestration`, {
       method: "PUT",
       body: JSON.stringify(input)
+    });
+  },
+  getTranslationSettings() {
+    return request<TranslationSettings>("/api/translation/settings");
+  },
+  updateTranslationSettings(input: Partial<TranslationSettings> & TranslationSecretSettings) {
+    return request<TranslationSettings>("/api/translation/settings", {
+      method: "PUT",
+      body: JSON.stringify(input)
+    });
+  },
+  testTranslationProvider() {
+    return request<TranslationProviderTestResult>("/api/translation/test", {
+      method: "POST"
+    });
+  },
+  translateUserInput(taskSlug: string, role: RoleName, input: TranslateUserInputRequest) {
+    return request<TranslateUserInputResult>(`/api/tasks/${encodeURIComponent(taskSlug)}/sessions/${role}/translation/input`, {
+      method: "POST",
+      body: JSON.stringify(input)
+    });
+  },
+  sendTranslatedInput(taskSlug: string, role: RoleName, input: SendTranslatedInputRequest) {
+    return request<{ ok: true }>(`/api/tasks/${encodeURIComponent(taskSlug)}/sessions/${role}/translation/send`, {
+      method: "POST",
+      body: JSON.stringify(input)
+    });
+  },
+  clearTranslationSession(sessionId: string) {
+    return request<{ ok: true }>(`/api/translation/sessions/${encodeURIComponent(sessionId)}/clear`, {
+      method: "POST"
+    });
+  },
+  retryTranslation(sessionId: string, translationId: string) {
+    return request<TranslationEntry>(`/api/translation/sessions/${encodeURIComponent(sessionId)}/retry/${encodeURIComponent(translationId)}`, {
+      method: "POST"
     });
   }
 };

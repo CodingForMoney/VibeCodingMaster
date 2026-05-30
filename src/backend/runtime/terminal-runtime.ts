@@ -27,6 +27,10 @@ export interface TerminalSession {
 export type TerminalEventListener = (event: TerminalEvent) => void;
 export type Unsubscribe = () => void;
 
+export interface SubscribeTerminalOptions {
+  replay?: boolean;
+}
+
 export interface TerminalRuntime {
   createSession(input: CreateTerminalSessionInput): Promise<TerminalSession>;
   getSession(sessionId: string): TerminalSession | undefined;
@@ -36,5 +40,5 @@ export interface TerminalRuntime {
   resize(sessionId: string, cols: number, rows: number): void;
   stop(sessionId: string): Promise<void>;
   restart(sessionId: string): Promise<TerminalSession>;
-  subscribe(sessionId: string, listener: TerminalEventListener): Unsubscribe;
+  subscribe(sessionId: string, listener: TerminalEventListener, options?: SubscribeTerminalOptions): Unsubscribe;
 }

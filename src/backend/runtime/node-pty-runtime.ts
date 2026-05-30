@@ -140,29 +140,31 @@ export function createNodePtyTerminalRuntime(deps: NodePtyRuntimeDeps): Terminal
       entry.process.kill();
       return create(entry.input, sessionId);
     },
-    subscribe(sessionId, listener) {
+    subscribe(sessionId, listener, options = {}) {
       const entry = getEntry(entries, sessionId);
       entry.listeners.add(listener);
 
-      void deps.fs.readText(entry.input.logPath)
-        .then((data) => {
-          if (!data || !entry.listeners.has(listener)) {
-            return;
-          }
+      if (options.replay !== false) {
+        void deps.fs.readText(entry.input.logPath)
+          .then((data) => {
+            if (!data || !entry.listeners.has(listener)) {
+              return;
+            }
 
-          listener({
-            id: `evt_${Date.now()}_${Math.random().toString(16).slice(2)}`,
-            sessionId,
-            taskSlug: entry.session.taskSlug,
-            role: entry.session.role,
-            type: "output",
-            timestamp: now(),
-            data
+            listener({
+              id: `evt_${Date.now()}_${Math.random().toString(16).slice(2)}`,
+              sessionId,
+              taskSlug: entry.session.taskSlug,
+              role: entry.session.role,
+              type: "output",
+              timestamp: now(),
+              data
+            });
+          })
+          .catch(() => {
+            // The log file may not exist yet for a brand-new session.
           });
-        })
-        .catch(() => {
-          // The log file may not exist yet for a brand-new session.
-        });
+      }
 
       return () => {
         entry.listeners.delete(listener);

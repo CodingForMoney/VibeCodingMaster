@@ -12,19 +12,23 @@ import { createGitAdapter } from "./adapters/git-adapter.js";
 import { createHarnessService, type HarnessService } from "./services/harness-service.js";
 import { createNodeFileSystemAdapter } from "./adapters/filesystem.js";
 import { createNodePtyTerminalRuntime } from "./runtime/node-pty-runtime.js";
+import { createOpenAiCompatibleTranslationProvider } from "./adapters/translation-provider.js";
 import { createProjectService, type ProjectService } from "./services/project-service.js";
 import { createSessionRegistry } from "./runtime/session-registry.js";
 import { createSessionService, type SessionService } from "./services/session-service.js";
 import { createMessageService, type MessageService } from "./services/message-service.js";
 import { createStatusService, type StatusService } from "./services/status-service.js";
 import { createTaskService, type TaskService } from "./services/task-service.js";
+import { createTranslationService, type TranslationService } from "./services/translation-service.js";
 import { registerArtifactRoutes } from "./api/artifact-routes.js";
 import { registerHarnessRoutes } from "./api/harness-routes.js";
 import { registerMessageRoutes } from "./api/message-routes.js";
 import { registerProjectRoutes } from "./api/project-routes.js";
 import { registerSessionRoutes } from "./api/session-routes.js";
 import { registerTaskRoutes } from "./api/task-routes.js";
+import { registerTranslationRoutes } from "./api/translation-routes.js";
 import { registerTerminalWs } from "./ws/terminal-ws.js";
+import { registerTranslationWs } from "./ws/translation-ws.js";
 import { toVcmError } from "./errors.js";
 import type { TerminalRuntime } from "./runtime/terminal-runtime.js";
 
@@ -44,6 +48,7 @@ export interface ServerDeps {
   commandDispatcher: CommandDispatcher;
   messageService: MessageService;
   statusService: StatusService;
+  translationService: TranslationService;
   runtime: TerminalRuntime;
 }
 
@@ -88,7 +93,13 @@ export async function createServer(deps: ServerDeps, options: CreateServerOption
     taskService: deps.taskService,
     messageService: deps.messageService
   });
+  registerTranslationRoutes(app, {
+    projectService: deps.projectService,
+    taskService: deps.taskService,
+    translationService: deps.translationService
+  });
   registerTerminalWs(app, { runtime: deps.runtime });
+  registerTranslationWs(app, { translationService: deps.translationService });
 
   if (options.staticDir) {
     await app.register(fastifyStatic, {
@@ -164,6 +175,12 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     sessionService,
     taskService
   });
+  const translationService = createTranslationService({
+    fs,
+    runtime,
+    sessionService,
+    provider: createOpenAiCompatibleTranslationProvider()
+  });
 
   return {
     projectService,
@@ -174,6 +191,7 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     commandDispatcher,
     messageService,
     statusService,
+    translationService,
     runtime
   };
 }

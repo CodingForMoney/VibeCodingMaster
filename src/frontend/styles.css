@@ -477,6 +477,13 @@ h2 {
   padding: 10px;
 }
 
+.session-console-top {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+}
+
 .session-controls {
   display: flex;
   flex-wrap: wrap;
@@ -531,6 +538,37 @@ h2 {
   padding: 4px 9px;
 }
 
+.translation-toggle {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  color: #4f5558;
+  font-size: 13px;
+  font-weight: 650;
+  white-space: nowrap;
+}
+
+.translation-toggle input,
+.translation-settings-grid input[type="checkbox"] {
+  width: auto;
+}
+
+.session-console-body {
+  min-width: 0;
+}
+
+.session-console-body.has-translation {
+  display: grid;
+  grid-template-columns: minmax(0, 1.55fr) minmax(320px, 0.85fr);
+  gap: 10px;
+  align-items: stretch;
+}
+
+.terminal-pane,
+.translation-pane {
+  min-width: 0;
+}
+
 .terminal-frame,
 .terminal-empty {
   height: clamp(560px, calc(100vh - 210px), 960px);
@@ -547,6 +585,180 @@ h2 {
   gap: 8px;
   color: #d6d0c6;
   border: 1px solid #292d31;
+}
+
+.translation-panel {
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 8px;
+  height: clamp(560px, calc(100vh - 210px), 960px);
+  min-height: 520px;
+  border: 1px solid #d6d0c6;
+  border-radius: 6px;
+  background: #fffefa;
+  padding: 8px;
+  overflow: hidden;
+}
+
+.translation-panel-header,
+.translation-panel-actions,
+.translation-composer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.translation-panel-header h2,
+.translation-panel-header p {
+  margin-bottom: 0;
+}
+
+.translation-panel-header p,
+.translation-entry-meta,
+.translation-composer span {
+  color: #667071;
+  font-size: 12px;
+}
+
+.translation-entry-list {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  min-height: 0;
+  overflow: auto;
+}
+
+.translation-entry {
+  border: 1px solid #ece5d9;
+  border-radius: 6px;
+  background: #fffdf8;
+  padding: 8px;
+}
+
+.translation-entry-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  margin-bottom: 6px;
+}
+
+.translation-entry pre {
+  margin: 0 0 6px;
+  max-height: 180px;
+  overflow: auto;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+}
+
+.translation-original {
+  margin-top: 6px !important;
+  color: #596366;
+  background: #f3f0e8;
+  padding: 6px;
+  border-radius: 4px;
+}
+
+.translation-warning {
+  color: #7a3a16;
+  margin-bottom: 6px;
+}
+
+.translation-composer {
+  display: grid;
+  gap: 6px;
+  border-top: 1px solid #ece5d9;
+  padding-top: 8px;
+}
+
+.translation-composer textarea {
+  min-height: 76px;
+  max-height: 160px;
+  font-family: inherit;
+  font-size: 13px;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  display: grid;
+  place-items: center;
+  background: rgba(24, 28, 31, 0.38);
+  padding: 18px;
+}
+
+.translation-settings-modal {
+  display: grid;
+  gap: 12px;
+  width: min(760px, 100%);
+  max-height: min(760px, 92vh);
+  overflow: auto;
+  border: 1px solid #d6d0c6;
+  border-radius: 8px;
+  background: #fffdf8;
+  padding: 14px;
+}
+
+.translation-settings-modal header,
+.translation-settings-modal footer {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.translation-settings-modal h2,
+.translation-settings-modal p {
+  margin-bottom: 0;
+}
+
+.translation-settings-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.translation-settings-grid label {
+  display: grid;
+  gap: 4px;
+}
+
+.translation-settings-grid span {
+  color: #4f5558;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.translation-settings-grid select {
+  min-height: 34px;
+  border: 1px solid #b9b0a1;
+  border-radius: 6px;
+  background: #fffdf8;
+  color: #202326;
+  padding: 6px 10px;
+}
+
+.translation-test-result {
+  border-radius: 6px;
+  padding: 8px;
+  font-size: 13px;
+}
+
+.translation-test-result.is-ok {
+  border: 1px solid #6ea77e;
+  background: #e6f3e9;
+  color: #245334;
+}
+
+.translation-test-result.is-error {
+  border: 1px solid #c46e5f;
+  background: #fae9e6;
+  color: #6f2b21;
 }
 
 .message-panel {
@@ -711,6 +923,7 @@ h2 {
 
 .status-pending_approval,
 .status-queued,
+.status-translating,
 .status-ready,
 .status-create,
 .status-insert,
@@ -735,6 +948,16 @@ h2 {
   color: #4f5558;
 }
 
+.status-translated,
+.status-skipped,
+.status-summarized,
+.status-preserved,
+.status-redacted {
+  border-color: #7b98b8;
+  background: #e9f0f8;
+  color: #2e4e70;
+}
+
 .empty-workspace {
   max-width: 680px;
 }
@@ -756,6 +979,11 @@ h2 {
 
   .workflow-panel,
   .workflow-steps {
+    grid-template-columns: 1fr;
+  }
+
+  .session-console-body.has-translation,
+  .translation-settings-grid {
     grid-template-columns: 1fr;
   }
 
