@@ -27,6 +27,7 @@ Open local GUI
 Current V1 capabilities:
 
 - GUI-first task workspace.
+- Recent repository path dropdown, stored locally with the five most recent paths.
 - Embedded Claude Code terminals powered by `node-pty`.
 - One Claude Code session per role.
 - Role session recovery with persisted Claude session ids and `claude --resume`.
@@ -156,7 +157,7 @@ Important container notes:
 
 1. Start VCM.
 2. Open the GUI.
-3. Connect a Git repository.
+3. Connect a Git repository, or choose one from the recent repository dropdown.
 4. Review the VCM Harness status.
 5. Install or update the VCM Harness rules when prompted.
 6. Review the files VCM created or changed, then commit them if they look right.
@@ -177,6 +178,16 @@ architect plan -> coder implementation -> reviewer review -> architect docs sync
 ```
 
 This is a soft guide in the current release. VCM highlights missing or placeholder handoff artifacts and suggests the next step, but it does not yet hard-block starting a role out of order.
+
+## Local Settings
+
+VCM stores app-level local settings in:
+
+```text
+~/.vibe-coding-master/settings.json
+```
+
+This file contains translation provider settings and the recent repository path list. Translation API keys are stored locally in that file under `translation.secrets.apiKey`; they are not written into the connected repository, `.ai/handoffs`, or git diffs.
 
 ## Project Harness
 

@@ -9,6 +9,7 @@ import { createClaudeAdapter } from "./adapters/claude-adapter.js";
 import { createCommandRunner } from "./adapters/command-runner.js";
 import { createCommandDispatcher, type CommandDispatcher } from "./services/command-dispatcher.js";
 import { createGitAdapter } from "./adapters/git-adapter.js";
+import { createAppSettingsService } from "./services/app-settings-service.js";
 import { createHarnessService, type HarnessService } from "./services/harness-service.js";
 import { createNodeFileSystemAdapter } from "./adapters/filesystem.js";
 import { createNodePtyTerminalRuntime } from "./runtime/node-pty-runtime.js";
@@ -141,11 +142,12 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
   const runner = createCommandRunner();
   const git = createGitAdapter(runner);
   const claude = createClaudeAdapter(runner);
+  const appSettings = createAppSettingsService({ fs });
   const runtime = createNodePtyTerminalRuntime({ fs });
   const registry = createSessionRegistry();
   const artifactService = createArtifactService(fs);
   const harnessService = createHarnessService({ fs });
-  const projectService = createProjectService({ fs, git, claude });
+  const projectService = createProjectService({ fs, git, claude, appSettings });
   const taskService = createTaskService({ fs, git, artifactService, projectService });
   const sessionService = createSessionService({
     fs,
@@ -176,9 +178,9 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     taskService
   });
   const translationService = createTranslationService({
-    fs,
     runtime,
     sessionService,
+    appSettings,
     provider: createOpenAiCompatibleTranslationProvider()
   });
 

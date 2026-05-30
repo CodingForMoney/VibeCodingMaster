@@ -9,6 +9,10 @@ export interface ProjectRouteDeps {
 export function registerProjectRoutes(app: FastifyInstance, deps: ProjectRouteDeps): void {
   app.get("/api/health", async () => ({ ok: true }));
 
+  app.get("/api/projects/recent", async () => {
+    return deps.projectService.getRecentRepositoryPaths();
+  });
+
   app.post<{ Body: ConnectProjectRequest }>("/api/projects/connect", async (request) => {
     return deps.projectService.connectProject(request.body);
   });

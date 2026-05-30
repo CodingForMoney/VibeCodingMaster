@@ -1,5 +1,3 @@
-import path from "node:path";
-import { homedir } from "node:os";
 import type { RoleName } from "../../shared/types/role.js";
 import type {
   SendTranslatedInputRequest,
@@ -22,11 +20,11 @@ import {
   shouldSummarizeSourceKind,
   shouldTranslateSourceKind
 } from "../../shared/validation/translation-classifier.js";
-import type { FileSystemAdapter } from "../adapters/filesystem.js";
 import type { TranslationProvider } from "../adapters/translation-provider.js";
 import { TranslationProviderError } from "../adapters/translation-provider.js";
 import { VcmError } from "../errors.js";
 import type { TerminalRuntime, Unsubscribe } from "../runtime/terminal-runtime.js";
+import type { AppSettingsService } from "./app-settings-service.js";
 import type { SessionService } from "./session-service.js";
 import { buildTranslationPrompt, getTranslationPromptPreviews, parseTranslationWarning } from "./translation-prompts.js";
 import { createTranslationQueueRegistry } from "./translation-queue.js";
@@ -61,10 +59,9 @@ export interface TranslationServiceDeps {
   provider: TranslationProvider;
   runtime: TerminalRuntime;
   sessionService: SessionService;
-  fs: FileSystemAdapter;
+  appSettings: Pick<AppSettingsService, "getTranslationConfig" | "updateTranslationConfig">;
   now?: () => string;
   id?: () => string;
-  configPath?: string;
 }
 
 interface StoredTranslationConfig {
@@ -105,7 +102,6 @@ const DEFAULT_SETTINGS: TranslationSettings = {
 export function createTranslationService(deps: TranslationServiceDeps): TranslationService {
   const now = deps.now ?? (() => new Date().toISOString());
   const id = deps.id ?? (() => `tr_${Date.now()}_${Math.random().toString(16).slice(2)}`);
-  const configPath = deps.configPath ?? path.join(homedir(), ".vibe-coding-master", "translation.json");
   const queues = createTranslationQueueRegistry();
   const sessionStates = new Map<string, SessionState>();
   let cachedConfig: StoredTranslationConfig | null = null;
@@ -114,18 +110,18 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
     if (cachedConfig) {
       return cachedConfig;
     }
-    if (!(await deps.fs.pathExists(configPath))) {
+    const storedConfig = await deps.appSettings.getTranslationConfig();
+    if (!storedConfig) {
       cachedConfig = { settings: DEFAULT_SETTINGS, secrets: {} };
       return cachedConfig;
     }
 
-    const raw = await deps.fs.readJson<Partial<StoredTranslationConfig>>(configPath);
-    const rawSettings: Partial<TranslationSettings> = raw.settings ?? {};
-    const apiKey = raw.secrets?.apiKey ?? rawSettings.apiKey;
+    const rawSettings: Partial<TranslationSettings> = storedConfig.settings ?? {};
+    const apiKey = storedConfig.secrets?.apiKey ?? rawSettings.apiKey;
     cachedConfig = {
       settings: normalizeSettings(rawSettings),
       secrets: {
-        ...(raw.secrets ?? {}),
+        ...(storedConfig.secrets ?? {}),
         ...(apiKey !== undefined ? { apiKey } : {})
       }
     };
@@ -134,7 +130,7 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
 
   async function saveConfig(config: StoredTranslationConfig): Promise<void> {
     cachedConfig = config;
-    await deps.fs.writeJsonAtomic(configPath, config);
+    await deps.appSettings.updateTranslationConfig(config);
   }
 
   function getState(sessionId: string): SessionState {

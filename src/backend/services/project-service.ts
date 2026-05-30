@@ -9,10 +9,12 @@ import { VcmError } from "../errors.js";
 import type { ClaudeAdapter } from "../adapters/claude-adapter.js";
 import type { FileSystemAdapter } from "../adapters/filesystem.js";
 import type { GitAdapter } from "../adapters/git-adapter.js";
+import type { AppSettingsService } from "./app-settings-service.js";
 
 export interface ProjectService {
   connectProject(input: ConnectProjectRequest): Promise<ProjectSummary>;
   getCurrentProject(): Promise<ProjectSummary | null>;
+  getRecentRepositoryPaths(): Promise<string[]>;
   loadConfig(repoRoot: string): Promise<ProjectConfig>;
   saveConfig(config: ProjectConfig, force?: boolean): Promise<void>;
   getConfigPath(repoRoot: string): string;
@@ -22,6 +24,7 @@ export interface ProjectServiceDeps {
   fs: FileSystemAdapter;
   git: GitAdapter;
   claude: ClaudeAdapter;
+  appSettings: Pick<AppSettingsService, "getRecentRepositoryPaths" | "recordRecentRepositoryPath">;
 }
 
 export function createProjectService(deps: ProjectServiceDeps): ProjectService {
@@ -91,10 +94,14 @@ export function createProjectService(deps: ProjectServiceDeps): ProjectService {
         warnings
       };
 
+      await deps.appSettings.recordRecentRepositoryPath(repoRoot);
       return currentProject;
     },
     async getCurrentProject() {
       return currentProject;
+    },
+    async getRecentRepositoryPaths() {
+      return deps.appSettings.getRecentRepositoryPaths();
     },
     async loadConfig(repoRoot) {
       const configPath = this.getConfigPath(repoRoot);

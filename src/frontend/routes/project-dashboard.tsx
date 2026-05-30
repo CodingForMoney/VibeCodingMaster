@@ -8,6 +8,7 @@ import { TaskNav } from "../components/task-nav.js";
 
 export interface ProjectDashboardProps {
   project: ProjectSummary | null;
+  recentRepositoryPaths: string[];
   tasks: TaskRecord[];
   activeTaskSlug: string | null;
   harnessStatus: HarnessStatusReport | null;
@@ -22,6 +23,7 @@ export interface ProjectDashboardProps {
 
 export function ProjectDashboard({
   project,
+  recentRepositoryPaths,
   tasks,
   activeTaskSlug,
   harnessStatus,
@@ -55,6 +57,7 @@ export function ProjectDashboard({
 
       <RepoConnectForm
         defaultPath={project?.repoRoot ?? ""}
+        recentPaths={recentRepositoryPaths}
         busy={busy}
         onConnect={onConnect}
       />

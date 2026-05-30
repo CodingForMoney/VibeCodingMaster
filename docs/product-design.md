@@ -219,6 +219,7 @@ V1 的主入口不是 CLI，而是本地 GUI 工作台。
 用户应该通过页面完成：
 
 - 选择本地 repo。
+- 从最近访问的 repo path 下拉列表中重新连接项目，最多保留 5 个最近路径。
 - 创建任务。
 - 启动或停止 role sessions。
 - 切换 `project-manager / architect / coder / reviewer`。
@@ -622,6 +623,7 @@ V1 GUI 先提供软流程提示：根据 handoff artifacts 是否存在、是否
 
 ```text
 Connect repo
+  -> record repo path in local app settings recentRepositoryPaths
   -> identify language, framework, package manager
   -> identify test commands
   -> inspect directory and module boundaries
@@ -1195,6 +1197,7 @@ temperature: 0.1
 API key 处理：
 
 - API key 只保存在本机。
+- 本机设置统一保存在 `~/.vibe-coding-master/settings.json`，翻译配置位于 `translation` 字段。
 - Settings API 会把已保存的 API key 返回给本地 GUI，用于在输入框中显示和继续编辑。
 - 不写入 repo。
 - 不写入 `.ai/handoffs/`。

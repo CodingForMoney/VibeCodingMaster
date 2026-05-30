@@ -26,6 +26,9 @@ export const apiClient = {
   getCurrentProject() {
     return request<ProjectSummary | null>("/api/projects/current");
   },
+  getRecentRepositoryPaths() {
+    return request<string[]>("/api/projects/recent");
+  },
   connectProject(input: ConnectProjectRequest) {
     return request<ProjectSummary>("/api/projects/connect", {
       method: "POST",

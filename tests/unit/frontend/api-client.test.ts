@@ -39,6 +39,15 @@ describe("apiClient", () => {
     expect(new Headers(init?.headers).get("content-type")).toBe("application/json");
   });
 
+  it("loads recent repository paths", async () => {
+    const fetchMock = mockFetch(["/workspace", "/repo"]);
+
+    const paths = await apiClient.getRecentRepositoryPaths();
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/projects/recent");
+    expect(paths).toEqual(["/workspace", "/repo"]);
+  });
+
   it("sends translation API keys in the settings request body", async () => {
     const fetchMock = mockFetch({
       version: 1,

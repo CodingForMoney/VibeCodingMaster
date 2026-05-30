@@ -1328,6 +1328,28 @@ export function createSessionRegistry(): SessionRegistry;
 
 ## 10. Backend Service 层
 
+### 10.0 `src/backend/services/app-settings-service.ts`
+
+职责：
+
+- 管理 `~/.vibe-coding-master/settings.json`。
+- 保存 `translation.settings`、`translation.secrets` 和 `recentRepositoryPaths`。
+- 从旧 `~/.vibe-coding-master/translation.json` 迁移翻译设置。
+- 最近 repo path 去重、保留最近 5 个。
+
+导出定义：
+
+```ts
+export interface AppSettingsService {
+  loadSettings(): Promise<AppSettingsFile>;
+  updateTranslationConfig(config: StoredTranslationConfig): Promise<StoredTranslationConfig>;
+  getTranslationConfig(): Promise<StoredTranslationConfig | undefined>;
+  getRecentRepositoryPaths(): Promise<string[]>;
+  recordRecentRepositoryPath(repoRoot: string): Promise<string[]>;
+  getSettingsPath(): string;
+}
+```
+
 ### 10.1 `src/backend/services/project-service.ts`
 
 职责：
@@ -1335,6 +1357,7 @@ export function createSessionRegistry(): SessionRegistry;
 - 连接 repo。
 - 创建 `.vcm/config.json`。
 - 检查 Claude Code、branch、dirty state。
+- 连接成功后把 repo root 记录到 app settings 的 `recentRepositoryPaths`。
 
 导出定义：
 
@@ -1342,6 +1365,7 @@ export function createSessionRegistry(): SessionRegistry;
 export interface ProjectService {
   connectProject(input: ConnectProjectInput): Promise<ProjectSummary>;
   getCurrentProject(): Promise<ProjectSummary | null>;
+  getRecentRepositoryPaths(): Promise<string[]>;
   loadConfig(repoRoot: string): Promise<ProjectConfig>;
   saveConfig(config: ProjectConfig, force?: boolean): Promise<void>;
   getConfigPath(repoRoot: string): string;
@@ -1351,6 +1375,7 @@ export interface ProjectServiceDeps {
   fs: FileSystemAdapter;
   git: GitAdapter;
   claude: ClaudeAdapter;
+  appSettings: Pick<AppSettingsService, "getRecentRepositoryPaths" | "recordRecentRepositoryPath">;
 }
 
 export function createProjectService(deps: ProjectServiceDeps): ProjectService;
@@ -1835,7 +1860,7 @@ export interface TranslationServiceDeps {
   provider: TranslationProvider;
   runtime: TerminalRuntime;
   sessionService: SessionService;
-  fs: FileSystemAdapter;
+  appSettings: Pick<AppSettingsService, "getTranslationConfig" | "updateTranslationConfig">;
   now?: () => string;
   id?: () => string;
 }
@@ -1899,6 +1924,7 @@ Routes：
 
 ```text
 GET  /api/health
+GET  /api/projects/recent
 POST /api/projects/connect
 GET  /api/projects/current
 ```
@@ -2099,7 +2125,7 @@ export interface TranslationRouteDeps {
 实现规则：
 
 - settings API 返回本机已保存的 `apiKey`，用于设置页显示和继续编辑。
-- `PUT settings` 接收 API key 并写入 TranslationService local secret storage；输入框为空并保存时清空本机 API key。
+- `PUT settings` 接收 API key 并写入 `~/.vibe-coding-master/settings.json` 的 `translation.secrets.apiKey`；输入框为空并保存时清空本机 API key。
 - input route 必须 load current task，防止跨 taskSlug。
 - input route 只允许向当前 role session 发送翻译结果。
 - retry / clear 只影响 Translation Panel runtime state。
@@ -2168,6 +2194,7 @@ export function App(): JSX.Element;
 export interface ApiClient {
   connectProject(input: ConnectProjectRequest): Promise<ProjectSummary>;
   getCurrentProject(): Promise<ProjectSummary | null>;
+  getRecentRepositoryPaths(): Promise<string[]>;
   getHarnessStatus(): Promise<HarnessStatusReport>;
   applyHarness(): Promise<HarnessApplyResult>;
   listTasks(): Promise<TaskRecord[]>;
@@ -2463,6 +2490,7 @@ UI 规则：
 职责：
 
 - 展示 repo 连接表单、任务列表和 harness health。
+- Repo 连接表单支持手动输入 path，也支持从最近 5 个 repo path 下拉选择。
 - 在 repo 连接后拉取 harness status。
 - 展示 `Install / Update VCM Harness`，但只在用户点击后应用变更。
 - 应用后展示 changed files summary 和 review/commit 提示。
@@ -2851,6 +2879,7 @@ TranslationPanel composer
 
 - unwraps successful API responses。
 - throws useful errors for API failures。
+- loads recent repository paths。
 
 `tests/unit/frontend/terminal-client.test.ts`
 
@@ -3017,6 +3046,7 @@ Verify session state recovers
 文件：
 
 - `src/backend/adapters/*.ts`
+- `src/backend/services/app-settings-service.ts`
 - `src/backend/services/project-service.ts`
 - `src/backend/validation/environment-check.ts`
 - `src/backend/api/project-routes.ts`
@@ -3024,7 +3054,7 @@ Verify session state recovers
 
 验收：
 
-- GUI 可以选择/输入 repo path。
+- GUI 可以输入 repo path，也可以从最近 5 个 repo path 中选择。
 - backend 检查 Git repo 和 Claude Code。
 - `.vcm/config.json` 被创建。
 - main/master 和 dirty state 显示 warning。

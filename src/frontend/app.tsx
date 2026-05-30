@@ -10,6 +10,7 @@ import { TaskWorkspace } from "./routes/task-workspace.js";
 
 export function App() {
   const [project, setProject] = useState<ProjectSummary | null>(null);
+  const [recentRepositoryPaths, setRecentRepositoryPaths] = useState<string[]>([]);
   const [harnessStatus, setHarnessStatus] = useState<HarnessStatusReport | null>(null);
   const [harnessApplyResult, setHarnessApplyResult] = useState<HarnessApplyResult | null>(null);
   const [tasks, setTasks] = useState<TaskRecord[]>([]);
@@ -33,10 +34,20 @@ export function App() {
     return nextStatus;
   }
 
+  async function loadRecentRepositoryPaths() {
+    const nextPaths = await apiClient.getRecentRepositoryPaths();
+    setRecentRepositoryPaths(nextPaths);
+    return nextPaths;
+  }
+
   useEffect(() => {
-    apiClient.getCurrentProject()
-      .then(async (currentProject) => {
+    Promise.all([
+      apiClient.getCurrentProject(),
+      apiClient.getRecentRepositoryPaths()
+    ])
+      .then(async ([currentProject, recentPaths]) => {
         setProject(currentProject);
+        setRecentRepositoryPaths(recentPaths);
         if (currentProject) {
           await Promise.all([
             loadTasks(),
@@ -64,6 +75,7 @@ export function App() {
       sidebar={(
         <ProjectDashboard
           project={project}
+          recentRepositoryPaths={recentRepositoryPaths}
           tasks={tasks}
           activeTaskSlug={activeTask?.taskSlug ?? null}
           harnessStatus={harnessStatus}
@@ -75,7 +87,8 @@ export function App() {
             setHarnessApplyResult(null);
             await Promise.all([
               loadTasks(),
-              loadHarnessStatus()
+              loadHarnessStatus(),
+              loadRecentRepositoryPaths()
             ]);
           })}
           onRefreshHarness={() => withBusy(async () => {

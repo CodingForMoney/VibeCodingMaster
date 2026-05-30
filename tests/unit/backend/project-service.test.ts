@@ -3,6 +3,7 @@ import { createProjectService } from "../../../src/backend/services/project-serv
 import type { ClaudeAdapter } from "../../../src/backend/adapters/claude-adapter.js";
 import type { FileSystemAdapter } from "../../../src/backend/adapters/filesystem.js";
 import type { GitAdapter } from "../../../src/backend/adapters/git-adapter.js";
+import type { AppSettingsService } from "../../../src/backend/services/app-settings-service.js";
 
 describe("createProjectService", () => {
   it("trims repository paths before validating the Git repository", async () => {
@@ -11,7 +12,8 @@ describe("createProjectService", () => {
     const service = createProjectService({
       fs,
       git: createGitAdapterStub(checkedRepos),
-      claude: createClaudeAdapterStub()
+      claude: createClaudeAdapterStub(),
+      appSettings: createAppSettingsStub()
     });
 
     const project = await service.connectProject({ repoPath: "  /workspace  " });
@@ -24,7 +26,8 @@ describe("createProjectService", () => {
     const service = createProjectService({
       fs: createMemoryFs(new Set()),
       git: createGitAdapterStub([]),
-      claude: createClaudeAdapterStub()
+      claude: createClaudeAdapterStub(),
+      appSettings: createAppSettingsStub()
     });
 
     await expect(service.connectProject({ repoPath: "/workspace" })).rejects.toMatchObject({
@@ -37,7 +40,8 @@ describe("createProjectService", () => {
     const service = createProjectService({
       fs: createMemoryFs(new Set(["/workspace"])),
       git: createGitAdapterStub([], { failMetadata: true }),
-      claude: createClaudeAdapterStub()
+      claude: createClaudeAdapterStub(),
+      appSettings: createAppSettingsStub()
     });
 
     const project = await service.connectProject({ repoPath: "/workspace" });
@@ -49,6 +53,21 @@ describe("createProjectService", () => {
       "Unable to read current Git branch. branch unavailable",
       "Unable to read Git dirty status. status unavailable"
     ]);
+  });
+
+  it("records successful repository connections in recent paths", async () => {
+    const appSettings = createAppSettingsStub();
+    const service = createProjectService({
+      fs: createMemoryFs(new Set(["/workspace"])),
+      git: createGitAdapterStub([]),
+      claude: createClaudeAdapterStub(),
+      appSettings
+    });
+
+    await service.connectProject({ repoPath: "/workspace" });
+
+    expect(appSettings.recordedPaths).toEqual(["/workspace"]);
+    expect(await service.getRecentRepositoryPaths()).toEqual(["/workspace"]);
   });
 });
 
@@ -122,6 +141,22 @@ function createClaudeAdapterStub(): ClaudeAdapter {
     },
     buildRoleStartCommand() {
       return { command: "claude", args: [], display: "claude" };
+    }
+  };
+}
+
+function createAppSettingsStub(): Pick<AppSettingsService, "getRecentRepositoryPaths" | "recordRecentRepositoryPath"> & {
+  recordedPaths: string[];
+} {
+  const recordedPaths: string[] = [];
+  return {
+    recordedPaths,
+    async getRecentRepositoryPaths() {
+      return recordedPaths;
+    },
+    async recordRecentRepositoryPath(repoRoot) {
+      recordedPaths.unshift(repoRoot);
+      return recordedPaths;
     }
   };
 }

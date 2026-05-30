@@ -148,6 +148,9 @@ function createProjectServiceThatShouldNotBeCalled(): ProjectService {
     async getCurrentProject() {
       throw new Error("project service should not be used");
     },
+    async getRecentRepositoryPaths() {
+      throw new Error("project service should not be used");
+    },
     async loadConfig() {
       throw new Error("project service should not be used");
     },

@@ -2,31 +2,36 @@ import { describe, expect, it } from "vitest";
 import type { FileSystemAdapter } from "../../../src/backend/adapters/filesystem.js";
 import type { TranslationProvider } from "../../../src/backend/adapters/translation-provider.js";
 import type { TerminalRuntime } from "../../../src/backend/runtime/terminal-runtime.js";
+import { createAppSettingsService, type AppSettingsFile } from "../../../src/backend/services/app-settings-service.js";
 import type { SessionService } from "../../../src/backend/services/session-service.js";
 import { createTranslationService } from "../../../src/backend/services/translation-service.js";
 
 describe("translation-service", () => {
   it("saves API keys locally and returns them to the local settings UI", async () => {
     const fs = createMemoryFs();
-    const service = createTranslationService({
+    const appSettings = createAppSettingsService({
       fs,
+      settingsPath: "/settings.json",
+      legacyTranslationPath: "/translation.json"
+    });
+    const service = createTranslationService({
+      appSettings,
       provider: createProviderStub(),
       runtime: {} as TerminalRuntime,
-      sessionService: {} as SessionService,
-      configPath: "/translation.json"
+      sessionService: {} as SessionService
     });
 
     const saved = await service.updateSettings({ enabled: true }, { apiKey: "sk-local-test" });
     const reloaded = await service.getSettings();
-    const stored = await fs.readJson<{ settings: Record<string, unknown>; secrets: { apiKey?: string } }>("/translation.json");
+    const stored = await fs.readJson<AppSettingsFile>("/settings.json");
 
     expect(saved.apiKey).toBe("sk-local-test");
     expect(reloaded.apiKey).toBe("sk-local-test");
-    expect(stored.secrets.apiKey).toBe("sk-local-test");
-    expect(stored.settings.apiKey).toBeUndefined();
+    expect(stored.translation?.secrets.apiKey).toBe("sk-local-test");
+    expect(stored.translation?.settings.apiKey).toBeUndefined();
   });
 
-  it("migrates API keys from older settings-shaped config files", async () => {
+  it("migrates API keys from the legacy translation config file", async () => {
     const fs = createMemoryFs();
     await fs.writeJsonAtomic("/translation.json", {
       settings: {
@@ -34,17 +39,24 @@ describe("translation-service", () => {
       },
       secrets: {}
     });
-    const service = createTranslationService({
+    const appSettings = createAppSettingsService({
       fs,
+      settingsPath: "/settings.json",
+      legacyTranslationPath: "/translation.json"
+    });
+    const service = createTranslationService({
+      appSettings,
       provider: createProviderStub(),
       runtime: {} as TerminalRuntime,
-      sessionService: {} as SessionService,
-      configPath: "/translation.json"
+      sessionService: {} as SessionService
     });
 
     const settings = await service.getSettings();
+    const stored = await fs.readJson<AppSettingsFile>("/settings.json");
 
     expect(settings.apiKey).toBe("sk-old-local-test");
+    expect(stored.translation?.settings.apiKey).toBeUndefined();
+    expect(stored.translation?.secrets.apiKey).toBe("sk-old-local-test");
   });
 });
 
