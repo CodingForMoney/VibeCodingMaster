@@ -1,6 +1,6 @@
 {
   "name": "vibe-coding-master",
-  "version": "0.0.5",
+  "version": "0.0.6",
   "description": "Local GUI session cockpit for Claude Code role sessions.",
   "type": "module",
   "files": [
@@ -24,6 +24,8 @@
     "clean": "node scripts/clean-build.mjs",
     "fix:node-pty": "node scripts/fix-node-pty-spawn-helper.mjs",
     "postinstall": "node scripts/fix-node-pty-spawn-helper.mjs",
+    "verify:package": "node scripts/verify-package.mjs",
+    "prepack": "npm run build && npm run verify:package",
     "dev": "tsx src/main.ts --dev",
     "build": "npm run clean && tsc -p tsconfig.node.json && vite build",
     "start": "node dist/main.js",
