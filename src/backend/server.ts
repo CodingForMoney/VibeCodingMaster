@@ -170,12 +170,12 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
 }
 
 export function getDefaultStaticDir(): string {
-  return path.resolve("dist-frontend");
+  return path.join(getAppRoot(), "dist-frontend");
 }
 
 function resolveVcmctlCommand(): string {
+  const appRoot = getAppRoot();
   const currentModulePath = fileURLToPath(import.meta.url);
-  const appRoot = path.resolve(path.dirname(currentModulePath), "../..");
   const sourceCli = path.join(appRoot, "src", "cli", "vcmctl.ts");
   const tsxCli = path.join(appRoot, "node_modules", "tsx", "dist", "cli.mjs");
   if (currentModulePath.includes(`${path.sep}src${path.sep}`) && existsSync(tsxCli) && existsSync(sourceCli)) {
@@ -192,6 +192,10 @@ function resolveVcmctlCommand(): string {
   }
 
   return "vcmctl";
+}
+
+function getAppRoot(): string {
+  return path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 }
 
 function quoteShellArg(value: string): string {
