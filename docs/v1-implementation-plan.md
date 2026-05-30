@@ -1,8 +1,8 @@
 # VibeCodingMaster V1 实施计划
 
-版本：v0.2  
-日期：2026-05-29  
-状态：实施计划草案  
+版本：v0.3
+日期：2026-05-30
+状态：实施计划草案
 依据：
 
 - `docs/product-design.md`
@@ -26,6 +26,9 @@ Open VibeCodingMaster
   -> View role commands, logs, and handoff artifacts
   -> Let project-manager send role messages through VCM message bus
   -> Inspect and stage pending role messages in manual mode
+  -> Turn on Translation Mode beside any embedded terminal
+  -> Translate user-language input into English preview and send it to Claude Code
+  -> Read translated Claude Code prose output while preserving raw terminal output
   -> Restart / stop role sessions
 ```
 
@@ -58,6 +61,9 @@ V1 不实现：
 12. 状态必须能从 backend session registry、terminal process state、repo artifacts、`.vcm` metadata 恢复。
 13. V1 不把每个 role 放到独立 worktree。同一任务默认共享当前 repo working directory。
 14. V1 默认遵守 single-writer rule，但主要通过流程提示、role status 和 review gate 实现，不做强制 sandbox。
+15. Translation Mode 只借鉴：OpenAI-compatible Provider、工程化 prompt、上一条回复上下文、FIFO queue、输出分类、CJK skip。
+16. Translation Mode 不采用独立 TUI、slash command、文件桥接或 repo 内默认翻译历史。
+17. 翻译失败不得影响 raw terminal、raw log、handoff artifacts 和 message bus。
 
 ## 3. 技术选型
 
@@ -107,9 +113,12 @@ VibeCodingMaster/
         session.ts
         task.ts
         terminal.ts
+        translation.ts
       validation/
         artifact-check.ts
+        language-detect.ts
         slug-check.ts
+        translation-classifier.ts
 
     frontend/
       app.tsx
@@ -129,6 +138,9 @@ VibeCodingMaster/
         session-toolbar.tsx
         status-badge.tsx
         task-nav.tsx
+        translation-entry-row.tsx
+        translation-panel.tsx
+        translation-settings-modal.tsx
       terminal/
         terminal-client.ts
         xterm-view.tsx
@@ -136,6 +148,7 @@ VibeCodingMaster/
         api-client.ts
         app-store.ts
         session-store.ts
+        translation-store.ts
 
     backend/
       server.ts
@@ -146,8 +159,10 @@ VibeCodingMaster/
         project-routes.ts
         session-routes.ts
         task-routes.ts
+        translation-routes.ts
       ws/
         terminal-ws.ts
+        translation-ws.ts
       runtime/
         node-pty-runtime.ts
         session-registry.ts
@@ -161,11 +176,15 @@ VibeCodingMaster/
         session-service.ts
         status-service.ts
         task-service.ts
+        translation-prompts.ts
+        translation-queue.ts
+        translation-service.ts
       adapters/
         claude-adapter.ts
         command-runner.ts
         filesystem.ts
         git-adapter.ts
+        translation-provider.ts
       templates/
         handoff.ts
         message-envelope.ts
@@ -805,6 +824,130 @@ export interface ApiFailure {
 export type ApiResponse<T> = ApiSuccess<T> | ApiFailure;
 ```
 
+### 6.11 `src/shared/types/translation.ts`
+
+职责：
+
+- 定义 Translation Mode 的 settings、entry、request、provider result 和 source classification。
+- 支持 OpenAI-compatible 便宜模型配置。
+- 支持 user-input-to-english 和 cc-output-to-user 两个方向。
+
+导出定义：
+
+```ts
+export type TranslationProviderType = "openai-compatible";
+
+export type TranslationDirection =
+  | "user-input-to-english"
+  | "cc-output-to-user";
+
+export type TranslationInputMode =
+  | "review-before-send"
+  | "auto-send";
+
+export type TranslationSourceKind =
+  | "prose"
+  | "code"
+  | "diff"
+  | "log"
+  | "tool-output"
+  | "permission-prompt"
+  | "error"
+  | "already-target-language"
+  | "sensitive";
+
+export type TranslationStatus =
+  | "queued"
+  | "translating"
+  | "translated"
+  | "skipped"
+  | "failed"
+  | "redacted"
+  | "summarized"
+  | "preserved";
+
+export interface TranslationSettings {
+  version: 1;
+  enabled: boolean;
+  providerType: TranslationProviderType;
+  baseUrl: string;
+  model: string;
+  sourceLanguage: "auto" | string;
+  targetLanguage: string;
+  workingLanguage: "en";
+  inputMode: TranslationInputMode;
+  translateOutput: boolean;
+  translateUserInput: boolean;
+  contextEnabled: boolean;
+  preserveTechnicalTokens: boolean;
+  skipCjkText: boolean;
+  redactSecrets: boolean;
+  maxChunkChars: number;
+  requestTimeoutMs: number;
+  temperature: number;
+  storeTranslationHistory: boolean;
+}
+
+export interface TranslationSecretSettings {
+  apiKey?: string;
+}
+
+export interface TranslationTokenUsage {
+  input: number;
+  output: number;
+  total?: number;
+}
+
+export interface TranslationEntry {
+  id: string;
+  taskSlug: string;
+  role: RoleName;
+  direction: TranslationDirection;
+  sourceKind: TranslationSourceKind;
+  sourceLanguage: string;
+  targetLanguage: string;
+  sourceText: string;
+  translatedText: string;
+  status: TranslationStatus;
+  contextUsed: boolean;
+  warning?: string;
+  error?: string;
+  createdAt: string;
+  completedAt?: string;
+  provider: TranslationProviderType;
+  model: string;
+  tokenUsage?: TranslationTokenUsage;
+}
+
+export interface TranslateUserInputRequest {
+  text: string;
+  mode?: TranslationInputMode;
+  useContext?: boolean;
+  send?: boolean;
+}
+
+export interface TranslateUserInputResult {
+  translation: TranslationEntry;
+  englishPreview: string;
+  contextUsed: boolean;
+  requiresReview: boolean;
+  sent: boolean;
+}
+
+export interface TranslationProviderTestResult {
+  ok: boolean;
+  model: string;
+  elapsedMs: number;
+  error?: string;
+}
+
+export type TranslationWsMessage =
+  | { type: "translation-entry"; entry: TranslationEntry }
+  | { type: "translation-delta"; id: string; delta: string }
+  | { type: "translation-status"; status: "ready" | "paused" | "translating" | "failed" }
+  | { type: "translation-error"; id?: string; message: string };
+```
+
 ## 7. Shared Validation
 
 ### 7.1 `src/shared/validation/slug-check.ts`
@@ -839,6 +982,58 @@ export function findMissingHeadings(content: string, required: readonly string[]
 export function checkMarkdownArtifact(kind: ArtifactKind, path: string, content: string | null): ArtifactCheckResult;
 export function checkValidationLogArtifact(path: string, content: string | null): ArtifactCheckResult;
 ```
+
+### 7.3 `src/shared/validation/language-detect.ts`
+
+职责：
+
+- 提供轻量 CJK / 目标语言检测。
+- 避免已经是用户语言的内容被重复翻译。
+
+导出定义：
+
+```ts
+export function cjkRatio(value: string): number;
+export function isProbablyCjk(value: string, threshold?: number): boolean;
+export function shouldSkipForTargetLanguage(value: string, targetLanguage: string): boolean;
+```
+
+实现规则：
+
+- 只做轻量启发式，不引入大型语言检测依赖。
+- ASCII punctuation 和 whitespace 不计入 CJK denominator。
+- `targetLanguage` 以 `zh` 开头时，`isProbablyCjk` 为 true 即跳过翻译。
+
+### 7.4 `src/shared/validation/translation-classifier.ts`
+
+职责：
+
+- 对 terminal output chunk 做轻量分类。
+- 决定翻译、摘要、保留、脱敏或跳过。
+
+导出定义：
+
+```ts
+export interface ClassifiedTranslationChunk {
+  sourceKind: TranslationSourceKind;
+  text: string;
+  reason?: string;
+}
+
+export function stripAnsiForTranslation(value: string): string;
+export function containsSensitiveToken(value: string): boolean;
+export function classifyTranslationChunk(value: string, targetLanguage: string): ClassifiedTranslationChunk;
+export function shouldTranslateSourceKind(kind: TranslationSourceKind): boolean;
+export function shouldSummarizeSourceKind(kind: TranslationSourceKind): boolean;
+export function shouldPreserveSourceKind(kind: TranslationSourceKind): boolean;
+```
+
+分类规则：
+
+- prose -> translate。
+- error -> translate explanation while preserving original error string。
+- code / diff / permission-prompt / sensitive / already-target-language -> preserve, redact, or skip。
+- log / tool-output -> summarize when useful, otherwise preserve。
 
 ## 8. Backend Adapter 层
 
@@ -943,6 +1138,60 @@ export interface ClaudeAdapter {
 
 export function createClaudeAdapter(runner: CommandRunner): ClaudeAdapter;
 ```
+
+### 8.5 `src/backend/adapters/translation-provider.ts`
+
+职责：
+
+- 封装 OpenAI-compatible `/chat/completions`。
+- 支持非流式翻译和可选 SSE streaming。
+- 统一 timeout、错误码、token usage 和 provider test。
+
+导出定义：
+
+```ts
+export interface TranslationProviderRequest {
+  settings: TranslationSettings;
+  secrets: TranslationSecretSettings;
+  direction: TranslationDirection;
+  sourceKind: TranslationSourceKind;
+  text: string;
+  systemPrompt: string;
+  userPrompt: string;
+  signal?: AbortSignal;
+  onDelta?: (delta: string) => void;
+}
+
+export interface TranslationProviderResult {
+  text: string;
+  elapsedMs: number;
+  tokenUsage?: TranslationTokenUsage;
+  warning?: string;
+}
+
+export class TranslationProviderError extends Error {
+  code: string;
+  elapsedMs: number;
+  constructor(message: string, code: string, elapsedMs?: number);
+}
+
+export interface TranslationProvider {
+  testConnection(settings: TranslationSettings, secrets: TranslationSecretSettings): Promise<TranslationProviderTestResult>;
+  translate(input: TranslationProviderRequest): Promise<TranslationProviderResult>;
+}
+
+export function createOpenAiCompatibleTranslationProvider(fetchImpl?: typeof fetch): TranslationProvider;
+export function buildChatCompletionsUrl(baseUrl: string): string;
+export function parseOpenAiUsage(raw: unknown): TranslationTokenUsage | undefined;
+```
+
+实现规则：
+
+- `apiKey` 只从 `TranslationSecretSettings` 读取。
+- `settings.baseUrl` 去掉尾部 `/` 后拼接 `/chat/completions`。
+- request body 使用 `model`、`messages`、`temperature`、`stream`。
+- request timeout 使用 `AbortController`。
+- HTTP 401 / 403 / 429 / 5xx 返回明确 `TranslationProviderError.code`。
 
 ## 9. Backend Runtime 层
 
@@ -1470,6 +1719,144 @@ export interface StatusServiceDeps {
 export function createStatusService(deps: StatusServiceDeps): StatusService;
 ```
 
+### 10.9 `src/backend/services/translation-prompts.ts`
+
+职责：
+
+- 集中定义工程化翻译 prompts。
+- 确保代码、路径、命令、flag、错误信息、标识符和 git refs 被保留。
+
+导出定义：
+
+```ts
+export type TranslationPromptKey =
+  | "user-input-to-english"
+  | "user-input-to-english-with-context"
+  | "cc-output-to-user";
+
+export interface TranslationPromptInput {
+  key: TranslationPromptKey;
+  sourceText: string;
+  contextText?: string;
+  sourceKind?: TranslationSourceKind;
+  targetLanguage: string;
+  workingLanguage: "en";
+}
+
+export function getBaseTranslationPrompt(key: TranslationPromptKey): string;
+export function buildTranslationPrompt(input: TranslationPromptInput): {
+  systemPrompt: string;
+  userPrompt: string;
+};
+export function parseTranslationWarning(raw: string): { warning?: string; text: string };
+```
+
+规则：
+
+- with-context prompt 必须明确：context 只用于消歧，只翻译 new user input。
+- output prompt 必须根据 `sourceKind` 要求模型保留技术 token。
+- V1 可以支持 prompt extension，但不把完全自定义 prompt 作为主 UI。
+
+### 10.10 `src/backend/services/translation-queue.ts`
+
+职责：
+
+- 提供每个 role session 的 FIFO translation queue。
+- 避免并发翻译导致顺序错乱和 provider 429。
+
+导出定义：
+
+```ts
+export interface SerialTranslationQueue {
+  enqueue<T>(task: () => Promise<T>): Promise<T>;
+  readonly pending: number;
+}
+
+export interface TranslationQueueRegistry {
+  getQueue(taskSlug: string, role: RoleName): SerialTranslationQueue;
+  clearQueue(taskSlug: string, role: RoleName): void;
+}
+
+export function createSerialTranslationQueue(): SerialTranslationQueue;
+export function createTranslationQueueRegistry(): TranslationQueueRegistry;
+```
+
+### 10.11 `src/backend/services/translation-service.ts`
+
+职责：
+
+- 管理 Translation Mode 设置和 runtime subscriptions。
+- 翻译用户输入并可选发送到当前 role pty。
+- 翻译或处理 Claude Code output chunks。
+- 维护 `lastAssistantText` 用于上下文翻译。
+
+导出定义：
+
+```ts
+export interface TranslationService {
+  getSettings(): Promise<TranslationSettings>;
+  updateSettings(input: Partial<TranslationSettings>, secrets?: TranslationSecretSettings): Promise<TranslationSettings>;
+  testProvider(): Promise<TranslationProviderTestResult>;
+  translateUserInput(input: TranslateUserInputServiceInput): Promise<TranslateUserInputResult>;
+  handleTerminalOutput(input: TerminalOutputTranslationInput): void;
+  subscribe(input: TranslationSubscribeInput, listener: TranslationEventListener): Unsubscribe;
+  clearSession(input: TranslationSessionInput): void;
+  retryTranslation(input: RetryTranslationInput): Promise<TranslationEntry>;
+}
+
+export interface TranslateUserInputServiceInput extends TranslateUserInputRequest {
+  repoRoot: string;
+  taskSlug: string;
+  role: RoleName;
+}
+
+export interface TerminalOutputTranslationInput {
+  repoRoot: string;
+  taskSlug: string;
+  role: RoleName;
+  sessionId: string;
+  data: string;
+}
+
+export interface TranslationSessionInput {
+  taskSlug: string;
+  role: RoleName;
+}
+
+export interface TranslationSubscribeInput extends TranslationSessionInput {}
+
+export interface RetryTranslationInput extends TranslationSessionInput {
+  translationId: string;
+}
+
+export type TranslationEventListener = (message: TranslationWsMessage) => void;
+
+export interface TranslationServiceDeps {
+  provider: TranslationProvider;
+  runtime: TerminalRuntime;
+  sessionService: SessionService;
+  fs: FileSystemAdapter;
+  now?: () => string;
+  id?: () => string;
+}
+
+export function createTranslationService(deps: TranslationServiceDeps): TranslationService;
+```
+
+实现规则：
+
+- `handleTerminalOutput` 先检查 `settings.enabled && settings.translateOutput`。
+- 对 terminal output strip ANSI 后 buffer 到语义边界或 `maxChunkChars`。
+- `classifyTranslationChunk` 返回 `sensitive` 时不调用 provider。
+- `already-target-language` 和 CJK 内容标记 `skipped`。
+- `code`、`diff`、`permission-prompt` 标记 `preserved`。
+- `log` 和 `tool-output` 默认摘要或保留。
+- `prose` 进入 per-role FIFO queue。
+- 翻译成功的 prose chunk 更新该 role 的 `lastAssistantText`。
+- `translateUserInput` 在 `contextEnabled` 时使用 `lastAssistantText`，但只发送新输入给 provider。
+- `send: true` 时只写入当前 role session pty，不允许写入其他 role。
+- translation history 默认只存在内存；`storeTranslationHistory` 为 true 时才写本机 app data，不写 `.ai/handoffs`。
+
 ## 11. Backend API 层
 
 ### 11.1 `src/backend/server.ts`
@@ -1498,6 +1885,7 @@ export interface ServerDeps {
   artifactService: ArtifactService;
   commandDispatcher: CommandDispatcher;
   statusService: StatusService;
+  translationService: TranslationService;
   runtime: TerminalRuntime;
 }
 
@@ -1683,6 +2071,65 @@ export function parseClientTerminalMessage(raw: string): ClientTerminalMessage;
 export function serializeServerTerminalMessage(message: ServerTerminalMessage): string;
 ```
 
+### 11.9 `src/backend/api/translation-routes.ts`
+
+Routes：
+
+```text
+GET  /api/translation/settings
+PUT  /api/translation/settings
+POST /api/translation/test
+POST /api/tasks/:taskSlug/sessions/:role/translation/input
+POST /api/tasks/:taskSlug/sessions/:role/translation/retry/:translationId
+POST /api/tasks/:taskSlug/sessions/:role/translation/clear
+```
+
+导出定义：
+
+```ts
+export function registerTranslationRoutes(app: FastifyInstance, deps: TranslationRouteDeps): void;
+
+export interface TranslationRouteDeps {
+  projectService: ProjectService;
+  taskService: TaskService;
+  translationService: TranslationService;
+}
+```
+
+实现规则：
+
+- settings API 不返回 `apiKey`。
+- `PUT settings` 可以接收 API key，但只能交给 TranslationService secret storage。
+- input route 必须 load current task，防止跨 taskSlug。
+- input route 只允许向当前 role session 发送翻译结果。
+- retry / clear 只影响 Translation Panel runtime state。
+
+### 11.10 `src/backend/ws/translation-ws.ts`
+
+职责：
+
+- 处理 `/ws/tasks/:taskSlug/sessions/:role/translation`。
+- 将 TranslationService events 推送给前端 Translation Panel。
+
+导出定义：
+
+```ts
+export interface TranslationWsDeps {
+  projectService: ProjectService;
+  taskService: TaskService;
+  translationService: TranslationService;
+}
+
+export function registerTranslationWebSocket(server: FastifyInstance, deps: TranslationWsDeps): void;
+export function serializeTranslationWsMessage(message: TranslationWsMessage): string;
+```
+
+实现规则：
+
+- Translation WS 不发送 raw terminal stream。
+- 页面关闭或 role 切换时 unsubscribe。
+- 如果 settings disabled，推送 `translation-status: paused`。
+
 ## 12. Frontend 层
 
 ### 12.1 `src/frontend/main.tsx`
@@ -1742,6 +2189,12 @@ export interface ApiClient {
   rejectMessage(taskSlug: string, messageId: string): Promise<VcmRoleMessage>;
   getOrchestrationState(taskSlug: string): Promise<VcmOrchestrationState>;
   updateOrchestrationState(taskSlug: string, input: { mode?: VcmOrchestrationMode; paused?: boolean }): Promise<VcmOrchestrationState>;
+  getTranslationSettings(): Promise<TranslationSettings>;
+  updateTranslationSettings(input: Partial<TranslationSettings>, apiKey?: string): Promise<TranslationSettings>;
+  testTranslationProvider(): Promise<TranslationProviderTestResult>;
+  translateUserInput(taskSlug: string, role: RoleName, input: TranslateUserInputRequest): Promise<TranslateUserInputResult>;
+  retryTranslation(taskSlug: string, role: RoleName, translationId: string): Promise<TranslationEntry>;
+  clearTranslationSession(taskSlug: string, role: RoleName): Promise<void>;
 }
 
 export function createApiClient(baseUrl?: string): ApiClient;
@@ -1793,7 +2246,39 @@ export interface XtermViewProps {
 export function XtermView(props: XtermViewProps): JSX.Element;
 ```
 
-### 12.6 `src/frontend/components/session-console.tsx`
+### 12.6 `src/frontend/state/translation-store.ts`
+
+职责：
+
+- 管理当前 role 的 Translation Mode UI state。
+- 连接 translation WebSocket。
+- 保存 Translation Panel runtime entries。
+
+导出定义：
+
+```ts
+export interface TranslationPanelState {
+  enabled: boolean;
+  paused: boolean;
+  settings: TranslationSettings | null;
+  entries: TranslationEntry[];
+  englishPreview: string;
+  contextUsed: boolean;
+  error?: string;
+}
+
+export interface TranslationStore {
+  getState(taskSlug: string, role: RoleName): TranslationPanelState;
+  connect(taskSlug: string, role: RoleName): void;
+  disconnect(taskSlug: string, role: RoleName): void;
+  applyMessage(taskSlug: string, role: RoleName, message: TranslationWsMessage): void;
+  clear(taskSlug: string, role: RoleName): void;
+}
+
+export function createTranslationStore(api: ApiClient): TranslationStore;
+```
+
+### 12.7 `src/frontend/components/session-console.tsx`
 
 职责：
 
@@ -1816,12 +2301,95 @@ export interface SessionConsoleProps {
   onResume(role: RoleName): Promise<void>;
   onStop(role: RoleName): Promise<void>;
   onRestart(role: RoleName): Promise<void>;
+  translationEnabled: boolean;
+  onTranslationEnabledChange(enabled: boolean): void;
 }
 
 export function SessionConsole(props: SessionConsoleProps): JSX.Element;
 ```
 
-### 12.7 `src/frontend/components/role-session-tabs.tsx`
+UI 规则：
+
+- `translationEnabled=false` 时，SessionConsole 只展示 xterm.js terminal。
+- `translationEnabled=true` 时，SessionConsole 使用 split layout：左侧 XtermView，右侧 TranslationPanel。
+- Raw terminal input 不经过 TranslationPanel。
+
+### 12.8 `src/frontend/components/translation-panel.tsx`
+
+职责：
+
+- 展示翻译输出流。
+- 展示 sourceKind、status、原文引用、译文或摘要。
+- 提供用户语言 composer、English preview、Send English、Edit English、Send Raw、Retry、Pause。
+
+导出定义：
+
+```tsx
+export interface TranslationPanelProps {
+  taskSlug: string;
+  role: RoleName;
+  settings: TranslationSettings;
+  entries: TranslationEntry[];
+  busy: boolean;
+  englishPreview: string;
+  contextUsed: boolean;
+  onTranslateInput(input: TranslateUserInputRequest): Promise<TranslateUserInputResult>;
+  onSendEnglish(text: string): Promise<void>;
+  onRetry(entryId: string): Promise<void>;
+  onClear(): Promise<void>;
+  onOpenSettings(): void;
+}
+
+export function TranslationPanel(props: TranslationPanelProps): JSX.Element;
+```
+
+交互规则：
+
+- 默认 `review-before-send`：先显示英文 preview，不自动发送。
+- `auto-send` 必须由用户显式选择。
+- `Use context` 状态必须可见。
+- `sourceKind=code/diff/log/tool-output` 的 entry 显示 preserved/summarized badge。
+- 失败 entry 显示 retry。
+
+### 12.9 `src/frontend/components/translation-entry-row.tsx`
+
+导出定义：
+
+```tsx
+export interface TranslationEntryRowProps {
+  entry: TranslationEntry;
+  expanded: boolean;
+  onToggleExpanded(): void;
+  onRetry?(): void;
+}
+
+export function TranslationEntryRow(props: TranslationEntryRowProps): JSX.Element;
+```
+
+### 12.10 `src/frontend/components/translation-settings-modal.tsx`
+
+职责：
+
+- 配置 OpenAI-compatible provider。
+- 测试连接。
+- 展示 prompt preview 和隐私提示。
+
+导出定义：
+
+```tsx
+export interface TranslationSettingsModalProps {
+  settings: TranslationSettings;
+  busy: boolean;
+  testResult?: TranslationProviderTestResult;
+  onSave(settings: Partial<TranslationSettings>, apiKey?: string): Promise<void>;
+  onTest(): Promise<void>;
+  onClose(): void;
+}
+
+export function TranslationSettingsModal(props: TranslationSettingsModalProps): JSX.Element;
+```
+
+### 12.11 `src/frontend/components/role-session-tabs.tsx`
 
 职责：
 
@@ -1840,7 +2408,7 @@ export interface RoleSessionTabsProps {
 export function RoleSessionTabs(props: RoleSessionTabsProps): JSX.Element;
 ```
 
-### 12.8 `src/frontend/components/event-log.tsx`
+### 12.12 `src/frontend/components/event-log.tsx`
 
 职责：
 
@@ -1856,7 +2424,7 @@ export interface EventLogProps {
 export function EventLog(props: EventLogProps): JSX.Element;
 ```
 
-### 12.9 `src/frontend/components/message-timeline.tsx`
+### 12.13 `src/frontend/components/message-timeline.tsx`
 
 职责：
 
@@ -1890,7 +2458,7 @@ UI 规则：
 - `auto` mode 必须显式打开，并可以随时 pause。
 - failed delivery 必须显示 failure reason。
 
-### 12.10 `src/frontend/routes/project-dashboard.tsx`
+### 12.14 `src/frontend/routes/project-dashboard.tsx`
 
 职责：
 
@@ -1905,7 +2473,7 @@ UI 规则：
 export function ProjectDashboard(): JSX.Element;
 ```
 
-### 12.11 `src/frontend/components/harness-panel.tsx`
+### 12.15 `src/frontend/components/harness-panel.tsx`
 
 职责：
 
@@ -1928,12 +2496,12 @@ export interface HarnessPanelProps {
 export function HarnessPanel(props: HarnessPanelProps): JSX.Element;
 ```
 
-### 12.12 `src/frontend/routes/task-workspace.tsx`
+### 12.16 `src/frontend/routes/task-workspace.tsx`
 
 职责：
 
 - 任务运行时主界面。
-- 组合 TaskNav、RoleSessionTabs、SessionConsole、MessageTimeline、EventLog。
+- 组合 TaskNav、RoleSessionTabs、SessionConsole、TranslationPanel、MessageTimeline、EventLog。
 - 不渲染独立 ArtifactPanel；handoff files 保留在任务目录中。
 
 导出定义：
@@ -2189,6 +2757,55 @@ Role toolbar Send Command
 
 V1 主界面展示紧凑 workflow strip，用 artifact status 推导当前 gate 和下一步建议。完整 artifact inspector 仍不放在主界面；handoff files 和 role commands 仍由 backend templates / services 管理，供 Claude Code sessions 和 dispatch 流程使用。
 
+### 14.9 Translation Mode
+
+开启翻译：
+
+```text
+SessionConsole Translate toggle
+  -> api.getTranslationSettings
+  -> if provider missing: open TranslationSettingsModal
+  -> TranslationStore.connect(taskSlug, role)
+  -> WS /ws/tasks/:taskSlug/sessions/:role/translation
+  -> TranslationService subscribes to runtime output copy
+```
+
+输出翻译：
+
+```text
+node-pty output event
+  -> raw log append
+  -> xterm terminal output
+  -> translationService.handleTerminalOutput
+  -> stripAnsiForTranslation
+  -> classifyTranslationChunk
+  -> skip / preserve / summarize / enqueue translate
+  -> TranslationProvider.translate
+  -> TranslationWsMessage
+  -> TranslationPanel entry row
+```
+
+用户输入翻译：
+
+```text
+TranslationPanel composer
+  -> api.translateUserInput({ text, useContext: true, send: false })
+  -> translationService.translateUserInput
+  -> buildTranslationPrompt(user-input-to-english-with-context)
+  -> provider.translate
+  -> English preview
+  -> user clicks Send English
+  -> api.translateUserInput({ text, send: true }) or direct confirmed send path
+  -> runtime.write(current role pty, english + "\r")
+```
+
+约束：
+
+- 不使用 slash command。
+- 不写 `user-input.md` 文件桥。
+- 不要求用户切换到另一个 TUI。
+- 不把 translation history 默认写进 repo。
+
 ## 15. 测试计划
 
 ### 15.1 Unit Tests
@@ -2247,6 +2864,37 @@ V1 主界面展示紧凑 workflow strip，用 artifact status 推导当前 gate 
 - serializes input and resize messages。
 - dispatches output/status/exit messages to listeners。
 
+`tests/unit/shared/language-detect.test.ts`
+
+- computes CJK ratio。
+- skips Chinese target-language chunks。
+- does not skip English prose。
+
+`tests/unit/shared/translation-classifier.test.ts`
+
+- classifies prose。
+- classifies code fences and diffs as preserved。
+- classifies permission prompts。
+- detects sensitive tokens。
+- strips ANSI before classification。
+
+`tests/unit/backend/translation-provider.test.ts`
+
+- builds OpenAI-compatible `/chat/completions` URL。
+- sends model、messages、temperature 和 auth header。
+- parses token usage。
+- maps HTTP 401 / 429 / 5xx to useful errors。
+
+`tests/unit/backend/translation-service.test.ts`
+
+- translates user input with last assistant context。
+- does not mix context into translated output。
+- queues output translations FIFO per role。
+- skips CJK chunks。
+- preserves code / diff / permission prompt chunks。
+- does not call provider for sensitive chunks。
+- writes confirmed English only to the current role pty。
+
 ### 15.2 Integration Tests
 
 `tests/integration/api/project-routes.test.ts`
@@ -2276,6 +2924,14 @@ V1 主界面展示紧凑 workflow strip，用 artifact status 推导当前 gate 
 - sends and stages a VCM role message。
 - dispatches legacy role command.
 
+`tests/integration/api/translation-routes.test.ts`
+
+- saves settings without exposing API key。
+- tests provider with fake provider。
+- translates user input into English preview。
+- sends confirmed English to fake runtime。
+- retries failed translation。
+
 ### 15.3 E2E Tests
 
 `tests/e2e/task-workspace.spec.ts`
@@ -2289,6 +2945,11 @@ V1 主界面展示紧凑 workflow strip，用 artifact status 推导当前 gate 
 - switch to architect tab。
 - see Start button。
 - verify the main workspace has no right-side artifact panel。
+- enable Translation Mode。
+- type Chinese in Translation Panel。
+- see English preview。
+- send English to fake terminal。
+- see prose output translated and code/log output preserved or summarized。
 
 V1 e2e 可以使用 fake Claude command，避免真实消耗 Claude Code tokens。
 
@@ -2309,6 +2970,11 @@ Run vcmctl send from PM or create a message through API
 Stage the pending architect message from GUI
 Verify logs/architect.log
 Verify workflow strip and artifact status
+Enable Translation Mode
+Type Chinese in Translation Panel and verify English preview
+Send English and verify current role terminal receives it
+Verify prose output translation appears in the right panel
+Verify code/log output is preserved or summarized
 Restart coder
 Refresh browser
 Verify session state recovers
@@ -2434,7 +3100,39 @@ Verify session state recovers
 - long body 写入 `.ai/handoffs/<task-slug>/messages/<message-id>.md`。
 - 旧 Send Command 仍可作为过渡调试能力，但不再是推荐主路径。
 
-### Milestone 7: Acceptance and Hardening
+### Milestone 7: Translation Mode
+
+文件：
+
+- `src/shared/types/translation.ts`
+- `src/shared/validation/language-detect.ts`
+- `src/shared/validation/translation-classifier.ts`
+- `src/backend/adapters/translation-provider.ts`
+- `src/backend/services/translation-prompts.ts`
+- `src/backend/services/translation-queue.ts`
+- `src/backend/services/translation-service.ts`
+- `src/backend/api/translation-routes.ts`
+- `src/backend/ws/translation-ws.ts`
+- `src/frontend/state/translation-store.ts`
+- `src/frontend/components/translation-panel.tsx`
+- `src/frontend/components/translation-entry-row.tsx`
+- `src/frontend/components/translation-settings-modal.tsx`
+- `src/frontend/components/session-console.tsx`
+
+验收：
+
+- Session Toolbar 可以开启 / 关闭 Translation Mode。
+- 未配置 provider 时打开 Translation Settings。
+- OpenAI-compatible provider 可以 Test Connection。
+- 用户中文输入生成英文 preview。
+- review-before-send 默认不自动发送。
+- Send English 只写入当前 role pty。
+- output prose 按 FIFO 顺序翻译并显示在 Translation Panel。
+- code / diff / log / tool-output 被 preserved 或 summarized。
+- 已经是目标语言或 CJK 的内容被 skipped。
+- 翻译失败不影响 raw terminal。
+
+### Milestone 8: Acceptance and Hardening
 
 内容：
 
@@ -2446,6 +3144,8 @@ Verify session state recovers
 - empty/missing/incomplete artifact 状态。
 - Claude Code 缺失提示。
 - process crashed 提示。
+- Translation Provider 错误态。
+- translation pause / retry / clear。
 
 验收：
 
@@ -2478,6 +3178,15 @@ Verify session state recovers
 - [ ] 用户可以从 GUI stage / reject pending message。
 - [ ] Stage 只写入一行 prompt，不自动按 Enter。
 - [ ] backend 不粘贴隐藏长 prompt；auto delivery 使用可见 `[VCM MESSAGE]` envelope。
+- [ ] 用户可以在每个 role session 旁开启 Translation Mode。
+- [ ] Translation Settings 可以配置 OpenAI-compatible provider 并测试连接。
+- [ ] 用户语言 input 可以翻译成英文 preview。
+- [ ] review-before-send 默认不自动发送。
+- [ ] Send English 只写入当前 role embedded terminal。
+- [ ] Claude Code prose output 可以在 Translation Panel 中按顺序显示翻译。
+- [ ] code / diff / log / tool output 默认保留或摘要，不被逐字误译。
+- [ ] 已经是目标语言或 CJK 的内容会跳过翻译。
+- [ ] 翻译失败不影响 raw terminal、raw log、handoff artifacts 或 message bus。
 - [ ] 用户可以 stop / restart role session。
 - [ ] 页面刷新后可以恢复 task/session 可见状态。
 - [ ] Claude Code 缺失时 GUI 有清晰提示。
@@ -2493,6 +3202,8 @@ V1 文件中可以预留类型或接口，但不实现完整功能：
 - `SessionPersistenceService`：后续增强 backend lifecycle、session registry 持久化、raw log replay 和恢复体验。
 - `DesktopShell`：后续用 Electron 或 Tauri 打包。
 - `PermissionHookManager`：后续生成 role-specific Claude Code permission hooks。
+- `TranslationHistoryExporter`：后续在用户显式选择时导出翻译历史。
+- `TranslationKeychainStore`：后续把 provider API key 放入 OS keychain。
 
 V1 的判断标准是：
 
