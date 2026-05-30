@@ -74,7 +74,6 @@ interface StoredTranslationConfig {
 interface SessionState {
   listeners: Set<TranslationEventListener>;
   unsubscribeTranscript?: Unsubscribe;
-  hasReplayedTranscriptOutput: boolean;
   seenTranscriptIds: Set<string>;
   entries: TranslationEntry[];
   lastAssistantText?: string;
@@ -139,7 +138,6 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
     if (!state) {
       state = {
         listeners: new Set(),
-        hasReplayedTranscriptOutput: false,
         seenTranscriptIds: new Set(),
         entries: []
       };
@@ -156,24 +154,37 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
   }
 
   async function handleTranscriptEvent(sessionId: string, event: ClaudeTranscriptEvent): Promise<void> {
-    if (event.kind !== "text" || event.stopReason === "tool_use") {
-      return;
-    }
-
     const state = getState(sessionId);
     if (state.seenTranscriptIds.has(event.id)) {
       return;
     }
     state.seenTranscriptIds.add(event.id);
 
+    if (event.kind === "text") {
+      state.lastAssistantText = event.text;
+    }
+
     const { settings } = await loadConfig();
     if (!settings.enabled || !settings.translateOutput) {
       return;
     }
-    await processClaudeOutputText(sessionId, event.text);
+
+    if (event.kind === "text") {
+      await processClaudeOutputText(sessionId, event.text, event.id);
+      return;
+    }
+
+    if (event.kind === "question" || event.kind === "todo" || event.kind === "agent") {
+      await processClaudeOutputText(sessionId, formatStructuredTranscriptEvent(event), event.id);
+      return;
+    }
+
+    if (event.kind === "tool_use" || event.kind === "tool_result") {
+      await pushPreservedTranscriptEntry(sessionId, event.id, formatRawTranscriptEvent(event));
+    }
   }
 
-  async function processClaudeOutputText(sessionId: string, rawText: string): Promise<void> {
+  async function processClaudeOutputText(sessionId: string, rawText: string, entryId?: string): Promise<void> {
     const session = deps.runtime.getSession(sessionId);
     const roleSession = deps.sessionRegistry.get(sessionId);
     if (!session && !roleSession) {
@@ -198,7 +209,8 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
       sourceText: classified.text,
       settings,
       status: "queued",
-      contextUsed: false
+      contextUsed: false,
+      id: entryId
     });
 
     pushEntry(sessionId, baseEntry);
@@ -254,6 +266,33 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
     emit(sessionId, { type: "translation-entry", entry });
   }
 
+  async function pushPreservedTranscriptEntry(sessionId: string, entryId: string, sourceText: string): Promise<void> {
+    const session = deps.runtime.getSession(sessionId);
+    const roleSession = deps.sessionRegistry.get(sessionId);
+    if (!session && !roleSession) {
+      return;
+    }
+
+    const { settings } = await loadConfig();
+    const queue = queues.getQueue(sessionId);
+    await queue.enqueue(async () => {
+      const entry = createEntry({
+        taskSlug: roleSession?.taskSlug ?? session!.taskSlug,
+        role: roleSession?.role ?? session!.role,
+        direction: "cc-output-to-user",
+        sourceKind: "tool-output",
+        sourceText,
+        settings,
+        status: "preserved",
+        contextUsed: false,
+        id: entryId,
+        translatedText: sourceText,
+        completedAt: now()
+      });
+      pushEntry(sessionId, entry);
+    });
+  }
+
   function replaceEntry(sessionId: string, entry: TranslationEntry): void {
     const state = getState(sessionId);
     state.entries = state.entries.map((current) => current.id === entry.id ? entry : current);
@@ -269,9 +308,12 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
     settings: TranslationSettings;
     status: TranslationStatus;
     contextUsed: boolean;
+    id?: string;
+    translatedText?: string;
+    completedAt?: string;
   }): TranslationEntry {
     return {
-      id: id(),
+      id: input.id ?? id(),
       taskSlug: input.taskSlug,
       role: input.role,
       direction: input.direction,
@@ -279,10 +321,11 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
       sourceLanguage: input.direction === "user-input-to-english" ? input.settings.sourceLanguage : "en",
       targetLanguage: input.direction === "user-input-to-english" ? "en" : input.settings.targetLanguage,
       sourceText: input.sourceText,
-      translatedText: "",
+      translatedText: input.translatedText ?? "",
       status: input.status,
       contextUsed: input.contextUsed,
       createdAt: now(),
+      completedAt: input.completedAt,
       provider: input.settings.providerType,
       model: input.settings.model
     };
@@ -407,7 +450,7 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
     },
     subscribeToSession(sessionId, listener) {
       const session = deps.runtime.getSession(sessionId);
-      const roleSession = deps.sessionRegistry?.get(sessionId);
+      const roleSession = deps.sessionRegistry.get(sessionId);
       if (!session && !roleSession) {
         throw new VcmError({
           code: "SESSION_MISSING",
@@ -429,8 +472,6 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
             message: "Claude transcript watcher is unavailable for this session."
           });
         } else {
-          const replayLastN = state.hasReplayedTranscriptOutput ? 0 : 1;
-          state.hasReplayedTranscriptOutput = true;
           state.unsubscribeTranscript = deps.transcripts.subscribeToRoleSession(roleSession, (event) => {
             void handleTranscriptEvent(sessionId, event).catch((error) => {
               emit(sessionId, {
@@ -439,7 +480,6 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
               });
             });
           }, {
-            replayLastN,
             onError(error) {
               emit(sessionId, {
                 type: "translation-error",
@@ -499,6 +539,60 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
       });
     }
     deps.runtime.write(record.id, text.endsWith("\r") || text.endsWith("\n") ? text : `${text}\r`);
+  }
+}
+
+function formatStructuredTranscriptEvent(event: Extract<ClaudeTranscriptEvent, { kind: "question" | "todo" | "agent" }>): string {
+  if (event.kind === "question") {
+    return event.question.questions.map((question, index) => {
+      const title = question.header ? `${question.header}: ${question.question}` : question.question;
+      const options = question.options.map((option) => {
+        const preview = option.preview ? `\n  Preview: ${option.preview}` : "";
+        return `- ${option.label}: ${option.description}${preview}`;
+      });
+      return [`AskUserQuestion ${index + 1}`, title, `Multi-select: ${question.multiSelect ? "yes" : "no"}`, "Options:", ...options]
+        .filter(Boolean)
+        .join("\n");
+    }).join("\n\n");
+  }
+
+  if (event.kind === "todo") {
+    return [
+      "TodoWrite plan",
+      ...event.todo.todos.map((todo) => {
+        const text = todo.status === "in_progress" && todo.activeForm ? todo.activeForm : todo.content;
+        return `- [${todo.status}] ${text}`;
+      })
+    ].join("\n");
+  }
+
+  return [
+    `Agent dispatch${event.agent.subagent_type ? `: ${event.agent.subagent_type}` : ""}`,
+    event.agent.description ? `Description: ${event.agent.description}` : "",
+    event.agent.prompt ? `Prompt:\n${event.agent.prompt}` : ""
+  ].filter(Boolean).join("\n");
+}
+
+function formatRawTranscriptEvent(event: Extract<ClaudeTranscriptEvent, { kind: "tool_use" | "tool_result" }>): string {
+  if (event.kind === "tool_use") {
+    return `● ${event.toolUse.name}(${formatUnknown(event.toolUse.input)})`;
+  }
+
+  const errorPrefix = event.toolResult.isError ? "[error] " : "";
+  return `⎿ ${errorPrefix}${formatUnknown(event.toolResult.content)}`;
+}
+
+function formatUnknown(value: unknown): string {
+  if (typeof value === "string") {
+    return value;
+  }
+  if (value === undefined) {
+    return "";
+  }
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
   }
 }
 

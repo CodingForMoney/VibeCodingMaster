@@ -647,6 +647,11 @@ h2 {
   padding: 8px;
 }
 
+.translation-entry.is-tool-output {
+  border-color: #d4dde0;
+  background: #f6faf9;
+}
+
 .translation-entry-meta {
   display: flex;
   flex-wrap: wrap;

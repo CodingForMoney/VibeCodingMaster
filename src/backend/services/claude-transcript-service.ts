@@ -36,6 +36,52 @@ interface BaseTranscriptEvent {
   timestamp: string;
 }
 
+export interface RawQuestionOption {
+  label: string;
+  description: string;
+  preview?: string;
+}
+
+export interface RawQuestion {
+  question: string;
+  header: string;
+  multiSelect: boolean;
+  options: RawQuestionOption[];
+}
+
+export interface RawQuestionPayload {
+  questions: RawQuestion[];
+}
+
+export type TodoStatus = "pending" | "in_progress" | "completed";
+
+export interface RawTodoItem {
+  content: string;
+  activeForm: string;
+  status: TodoStatus;
+}
+
+export interface RawTodoPayload {
+  todos: RawTodoItem[];
+}
+
+export interface RawAgentPayload {
+  description: string;
+  prompt: string;
+  subagent_type: string;
+}
+
+export interface RawToolUsePayload {
+  name: string;
+  input: unknown;
+}
+
+export interface RawToolResultPayload {
+  tool_use_id: string;
+  content: unknown;
+  isError: boolean;
+}
+
 export type ClaudeTranscriptEvent =
   | (BaseTranscriptEvent & {
       kind: "text";
@@ -48,8 +94,24 @@ export type ClaudeTranscriptEvent =
       stopReason?: ClaudeTranscriptStopReason;
     })
   | (BaseTranscriptEvent & {
-      kind: Exclude<ClaudeTranscriptContentKind, "text" | "thinking">;
-      payload: unknown;
+      kind: "question";
+      question: RawQuestionPayload;
+    })
+  | (BaseTranscriptEvent & {
+      kind: "todo";
+      todo: RawTodoPayload;
+    })
+  | (BaseTranscriptEvent & {
+      kind: "agent";
+      agent: RawAgentPayload;
+    })
+  | (BaseTranscriptEvent & {
+      kind: "tool_use";
+      toolUse: RawToolUsePayload;
+    })
+  | (BaseTranscriptEvent & {
+      kind: "tool_result";
+      toolResult: RawToolResultPayload;
     });
 
 export type ClaudeTranscriptEventListener = (event: ClaudeTranscriptEvent) => void;
@@ -269,7 +331,10 @@ export function parseAssistantContent(line: string): ClaudeTranscriptEvent[] {
 
   const textParts: string[] = [];
   const thinkingParts: string[] = [];
-  const structuralEvents: ClaudeTranscriptEvent[] = [];
+  const questions: { id: string; payload: RawQuestionPayload }[] = [];
+  const todos: { id: string; payload: RawTodoPayload }[] = [];
+  const agents: { id: string; payload: RawAgentPayload }[] = [];
+  const rawTools: { id: string; payload: RawToolUsePayload }[] = [];
   const timestamp = typeof obj.timestamp === "string" ? obj.timestamp : new Date().toISOString();
   const uuid = typeof obj.uuid === "string" ? obj.uuid : undefined;
   const rawStopReason = (message as Record<string, unknown> | undefined)?.stop_reason;
@@ -297,15 +362,27 @@ export function parseAssistantContent(line: string): ClaudeTranscriptEvent[] {
     if (!toolId || !toolName) {
       continue;
     }
-    structuralEvents.push({
-      kind: classifyToolUseKind(toolName),
-      id: toolId,
-      timestamp,
-      payload: {
-        name: toolName,
-        input: block.input
+    if (toolName === "AskUserQuestion") {
+      const payload = parseQuestionInput(block.input);
+      if (payload) {
+        questions.push({ id: toolId, payload });
       }
-    });
+    } else if (toolName === "TodoWrite") {
+      const payload = parseTodoInput(block.input);
+      if (payload) {
+        todos.push({ id: toolId, payload });
+      }
+    } else if (toolName === "Agent" || toolName === "Task") {
+      const payload = parseAgentInput(block.input);
+      if (payload) {
+        agents.push({ id: toolId, payload });
+      }
+    } else {
+      rawTools.push({
+        id: toolId,
+        payload: { name: toolName, input: block.input }
+      });
+    }
   }
 
   const out: ClaudeTranscriptEvent[] = [];
@@ -330,7 +407,40 @@ export function parseAssistantContent(line: string): ClaudeTranscriptEvent[] {
     });
   }
 
-  return out.concat(structuralEvents);
+  for (const question of questions) {
+    out.push({
+      kind: "question",
+      timestamp,
+      id: question.id,
+      question: question.payload
+    });
+  }
+  for (const todo of todos) {
+    out.push({
+      kind: "todo",
+      timestamp,
+      id: todo.id,
+      todo: todo.payload
+    });
+  }
+  for (const agent of agents) {
+    out.push({
+      kind: "agent",
+      timestamp,
+      id: agent.id,
+      agent: agent.payload
+    });
+  }
+  for (const tool of rawTools) {
+    out.push({
+      kind: "tool_use",
+      timestamp,
+      id: tool.id,
+      toolUse: tool.payload
+    });
+  }
+
+  return out;
 }
 
 function parseUserToolResults(obj: Record<string, unknown>): ClaudeTranscriptEvent[] {
@@ -358,7 +468,7 @@ function parseUserToolResults(obj: Record<string, unknown>): ClaudeTranscriptEve
       kind: "tool_result",
       timestamp,
       id: `${toolUseId}#result`,
-      payload: {
+      toolResult: {
         tool_use_id: toolUseId,
         content: block.content,
         isError: block.is_error === true
@@ -368,15 +478,94 @@ function parseUserToolResults(obj: Record<string, unknown>): ClaudeTranscriptEve
   return out;
 }
 
-function classifyToolUseKind(toolName: string): Exclude<ClaudeTranscriptContentKind, "text" | "thinking" | "tool_result"> {
-  if (toolName === "AskUserQuestion") {
-    return "question";
+function parseQuestionInput(raw: unknown): RawQuestionPayload | null {
+  if (!raw || typeof raw !== "object") {
+    return null;
   }
-  if (toolName === "TodoWrite") {
-    return "todo";
+  const rawQuestions = (raw as Record<string, unknown>).questions;
+  if (!Array.isArray(rawQuestions) || rawQuestions.length === 0) {
+    return null;
   }
-  if (toolName === "Agent" || toolName === "Task") {
-    return "agent";
+
+  const questions: RawQuestion[] = [];
+  for (const rawQuestion of rawQuestions) {
+    if (!rawQuestion || typeof rawQuestion !== "object") {
+      continue;
+    }
+    const questionRecord = rawQuestion as Record<string, unknown>;
+    const rawOptions = questionRecord.options;
+    if (!Array.isArray(rawOptions) || rawOptions.length === 0) {
+      continue;
+    }
+
+    const options: RawQuestionOption[] = [];
+    for (const rawOption of rawOptions) {
+      if (!rawOption || typeof rawOption !== "object") {
+        continue;
+      }
+      const optionRecord = rawOption as Record<string, unknown>;
+      const option: RawQuestionOption = {
+        label: typeof optionRecord.label === "string" ? optionRecord.label : "",
+        description: typeof optionRecord.description === "string" ? optionRecord.description : ""
+      };
+      if (typeof optionRecord.preview === "string") {
+        option.preview = optionRecord.preview;
+      }
+      options.push(option);
+    }
+
+    if (options.length > 0) {
+      questions.push({
+        question: typeof questionRecord.question === "string" ? questionRecord.question : "",
+        header: typeof questionRecord.header === "string" ? questionRecord.header : "",
+        multiSelect: questionRecord.multiSelect === true,
+        options
+      });
+    }
   }
-  return "tool_use";
+
+  return questions.length > 0 ? { questions } : null;
+}
+
+function parseTodoInput(raw: unknown): RawTodoPayload | null {
+  if (!raw || typeof raw !== "object") {
+    return null;
+  }
+  const rawTodos = (raw as Record<string, unknown>).todos;
+  if (!Array.isArray(rawTodos) || rawTodos.length === 0) {
+    return null;
+  }
+
+  const todos: RawTodoItem[] = [];
+  for (const rawTodo of rawTodos) {
+    if (!rawTodo || typeof rawTodo !== "object") {
+      continue;
+    }
+    const todoRecord = rawTodo as Record<string, unknown>;
+    const content = typeof todoRecord.content === "string" ? todoRecord.content : "";
+    const activeForm = typeof todoRecord.activeForm === "string" ? todoRecord.activeForm : "";
+    const rawStatus = todoRecord.status;
+    const status: TodoStatus = rawStatus === "in_progress" || rawStatus === "completed"
+      ? rawStatus
+      : "pending";
+    if (content || activeForm) {
+      todos.push({ content, activeForm, status });
+    }
+  }
+
+  return todos.length > 0 ? { todos } : null;
+}
+
+function parseAgentInput(raw: unknown): RawAgentPayload | null {
+  if (!raw || typeof raw !== "object") {
+    return null;
+  }
+  const record = raw as Record<string, unknown>;
+  const description = typeof record.description === "string" ? record.description : "";
+  const prompt = typeof record.prompt === "string" ? record.prompt : "";
+  const subagent_type = typeof record.subagent_type === "string" ? record.subagent_type : "";
+  if (!description && !prompt) {
+    return null;
+  }
+  return { description, prompt, subagent_type };
 }

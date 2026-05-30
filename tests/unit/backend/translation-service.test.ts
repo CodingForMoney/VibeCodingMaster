@@ -123,7 +123,7 @@ describe("translation-service", () => {
     expect(entries.at(-1)?.entry.translationStartedAt).toBe("2026-05-30T00:00:01.000Z");
   });
 
-  it("waits for the transcript end_turn instead of translating tool-use turns", async () => {
+  it("translates assistant text even when the transcript stop reason is tool_use", async () => {
     const fs = createMemoryFs();
     const appSettings = createAppSettingsService({
       fs,
@@ -153,18 +153,6 @@ describe("translation-service", () => {
       stopReason: "tool_use",
       text: "I will inspect the test logs first."
     });
-    await new Promise((resolve) => setTimeout(resolve, 20));
-
-    expect(messages.some((message) => message.type === "translation-entry")).toBe(false);
-    expect(translateCalls).toHaveLength(0);
-
-    transcripts.emit({
-      kind: "text",
-      id: "assistant-message-end-turn",
-      timestamp: "2026-05-30T00:00:01.000Z",
-      stopReason: "end_turn",
-      text: "The tests are passing now."
-    });
 
     await waitFor(() => messages.some((message) =>
       message.type === "translation-entry" && message.entry.status === "translated"
@@ -172,8 +160,137 @@ describe("translation-service", () => {
 
     expect(translateCalls).toHaveLength(1);
     expect(messages.some((message) =>
-      message.type === "translation-entry" && message.entry.sourceText === "The tests are passing now."
+      message.type === "translation-entry" && message.entry.sourceText === "I will inspect the test logs first."
     )).toBe(true);
+  });
+
+  it("preserves raw tool_use and tool_result events in the translation panel", async () => {
+    const fs = createMemoryFs();
+    const appSettings = createAppSettingsService({
+      fs,
+      settingsPath: "/settings.json",
+      legacySettingsPath: "/old-settings.json",
+      legacyTranslationPath: "/translation.json"
+    });
+    const runtime = createRuntimeStub();
+    const transcripts = createTranscriptStub();
+    const translateCalls: unknown[] = [];
+    const service = createTranslationService({
+      appSettings,
+      provider: createProviderStub("不会被调用。", translateCalls),
+      runtime,
+      sessionRegistry: createRegistryStub(),
+      transcripts,
+      sessionService: {} as SessionService
+    });
+    await service.updateSettings({ enabled: true, translateOutput: true }, { apiKey: "sk-local-test" });
+
+    const messages: TranslationWsMessage[] = [];
+    service.subscribeToSession("session-1", (message) => messages.push(message));
+    transcripts.emit({
+      kind: "tool_use",
+      id: "toolu_bash",
+      timestamp: "2026-05-30T00:00:01.000Z",
+      toolUse: {
+        name: "Bash",
+        input: { command: "npm test" }
+      }
+    });
+    transcripts.emit({
+      kind: "tool_result",
+      id: "toolu_bash#result",
+      timestamp: "2026-05-30T00:00:02.000Z",
+      toolResult: {
+        tool_use_id: "toolu_bash",
+        content: "PASS tests/unit/example.test.ts",
+        isError: false
+      }
+    });
+
+    await waitFor(() => messages.filter((message) => message.type === "translation-entry").length >= 2);
+
+    const entries = messages.filter((message): message is Extract<TranslationWsMessage, { type: "translation-entry" }> =>
+      message.type === "translation-entry"
+    );
+    expect(translateCalls).toHaveLength(0);
+    expect(entries[0]?.entry).toMatchObject({
+      id: "toolu_bash",
+      status: "preserved",
+      sourceKind: "tool-output",
+      sourceText: expect.stringContaining("● Bash")
+    });
+    expect(entries[1]?.entry).toMatchObject({
+      id: "toolu_bash#result",
+      status: "preserved",
+      sourceKind: "tool-output",
+      sourceText: expect.stringContaining("PASS tests/unit/example.test.ts")
+    });
+  });
+
+  it("translates structured question, todo, and agent transcript events", async () => {
+    const fs = createMemoryFs();
+    const appSettings = createAppSettingsService({
+      fs,
+      settingsPath: "/settings.json",
+      legacySettingsPath: "/old-settings.json",
+      legacyTranslationPath: "/translation.json"
+    });
+    const runtime = createRuntimeStub();
+    const transcripts = createTranscriptStub();
+    const translateCalls: Array<{ userPrompt: string }> = [];
+    const service = createTranslationService({
+      appSettings,
+      provider: createProviderStub("结构化译文。", translateCalls),
+      runtime,
+      sessionRegistry: createRegistryStub(),
+      transcripts,
+      sessionService: {} as SessionService
+    });
+    await service.updateSettings({ enabled: true, translateOutput: true }, { apiKey: "sk-local-test" });
+
+    const messages: TranslationWsMessage[] = [];
+    service.subscribeToSession("session-1", (message) => messages.push(message));
+    transcripts.emit({
+      kind: "question",
+      id: "toolu_question",
+      timestamp: "2026-05-30T00:00:01.000Z",
+      question: {
+        questions: [{
+          question: "Should I run all tests?",
+          header: "Tests",
+          multiSelect: false,
+          options: [{ label: "Run", description: "Run all tests." }]
+        }]
+      }
+    });
+    transcripts.emit({
+      kind: "todo",
+      id: "toolu_todo",
+      timestamp: "2026-05-30T00:00:02.000Z",
+      todo: {
+        todos: [{ content: "Fix parser", activeForm: "Fixing parser", status: "in_progress" }]
+      }
+    });
+    transcripts.emit({
+      kind: "agent",
+      id: "toolu_agent",
+      timestamp: "2026-05-30T00:00:03.000Z",
+      agent: {
+        description: "Review changes",
+        prompt: "Check the patch carefully.",
+        subagent_type: "reviewer"
+      }
+    });
+
+    await waitFor(() => messages.filter((message) =>
+      message.type === "translation-entry" && message.entry.status === "translated"
+    ).length >= 3);
+
+    expect(translateCalls.map((call) => call.userPrompt)).toEqual([
+      expect.stringContaining("AskUserQuestion"),
+      expect.stringContaining("TodoWrite plan"),
+      expect.stringContaining("Agent dispatch")
+    ]);
   });
 });
 

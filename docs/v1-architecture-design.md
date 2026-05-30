@@ -200,7 +200,7 @@ Translation Mode 是 Session Console 的旁路辅助层，不是 Claude Code ter
 - 翻译 prompt 必须面向 Claude Code 工程场景，保留代码、路径、命令、flag、错误信息、标识符和 git refs。
 - 用户输入翻译可以使用当前 role session 的上一条 Claude Code 自然语言输出作为上下文，但只翻译新输入。
 - 每个 role session 必须有独立 FIFO output translation queue，避免并发翻译造成顺序错乱。
-- output translation 必须基于 Claude transcript assistant text 先分类：prose 翻译，code/diff/log/permission prompt 默认保留或摘要。
+- output translation 必须基于 Claude transcript assistant text / question / todo / agent 先分类：prose 翻译，code/diff/log/permission prompt 默认保留或摘要；raw tool_use / tool_result 作为 preserved 原文行显示。
 - 已经是用户目标语言或 CJK 的内容跳过翻译。
 - 翻译失败只影响 Translation Panel，不影响 raw terminal、raw log、handoff artifacts 和 message bus。
 
@@ -964,9 +964,10 @@ Delivery policy：
 - 把用户语言输入翻译成英文工程指令。
 - 使用当前 role 的上一条 Claude Code prose output 作为可选上下文。
 - 通过 `ClaudeTranscriptService` tail `~/.claude/projects/<project-hash>/<session-id>.jsonl`。
-- 解析 Claude Code JSONL transcript，只把 assistant `text` event 作为 output translation 输入。
-- 对 `stop_reason=tool_use` 的中间输出跳过，等待完成回合；tool_use / tool_result 不发送给翻译模型。
-- 对 assistant prose 做 classification、secret redaction 和 CJK skip。
+- 解析 Claude Code JSONL transcript，把 assistant `text`、`AskUserQuestion`、`TodoWrite`、`Agent` / `Task` 作为 output translation 输入。
+- `stop_reason` 只用于完成状态判断，不用于过滤 assistant text 翻译。
+- raw tool_use / tool_result 不发送给翻译模型，但作为 preserved 原文行推送给 Translation Panel。
+- 对 assistant text / question / todo / agent 内容做 classification、secret redaction 和 CJK skip。
 - 为每个 role session 维护 FIFO output translation queue。
 - 向 Translation Panel 推送 `queued / translating / translated / summarized / preserved / skipped / failed` events。
 
@@ -1661,9 +1662,10 @@ User toggles Translate on
   -> open translation WebSocket for active role
   -> TranslationService resolves role cwd + claudeSessionId from SessionRegistry
   -> ClaudeTranscriptService tails ~/.claude/projects/<project-hash>/<session-id>.jsonl
-  -> parse assistant text events
-  -> skip stop_reason=tool_use and structural tool events
-  -> classify assistant text
+  -> parse assistant text / question / todo / agent / raw tool events
+  -> translate assistant text regardless of stop_reason
+  -> preserve raw tool_use / tool_result rows
+  -> classify translatable assistant content
   -> skip CJK / preserve code-diff-log-tool output / translate prose
   -> enqueue per-role FIFO translation job
   -> push TranslationEntry to Translation Panel

@@ -1811,7 +1811,7 @@ export function createTranslationQueueRegistry(): TranslationQueueRegistry;
 
 - 管理 Translation Mode 设置和 Claude transcript subscriptions。
 - 翻译用户输入并可选发送到当前 role pty。
-- 翻译或处理 Claude Code transcript assistant text event。
+- 翻译或处理 Claude Code transcript assistant text / question / todo / agent / raw tool event。
 - 维护 `lastAssistantText` 用于上下文翻译。
 
 导出定义：
@@ -1874,7 +1874,9 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
 - `subscribeToSession` 先通过 `sessionRegistry.get(sessionId)` 找到 role session 的 `cwd` 和 `claudeSessionId`。
 - `ClaudeTranscriptService` tail `~/.claude/projects/<project-hash>/<session-id>.jsonl`。
 - `parseAssistantContent` 从 JSONL 中解析 assistant text、thinking、tool_use、tool_result 等结构化 event。
-- output translation 只处理 assistant `text` event；`stop_reason=tool_use` 的中间回合和 tool events 不调用 provider。
+- output translation 处理 assistant `text` event，不用 `stop_reason=tool_use` 过滤文本。
+- `AskUserQuestion`、`TodoWrite`、`Agent` / `Task` 结构化 event 转换为可读文本后进入 provider。
+- raw tool_use / tool_result 不调用 provider，作为 preserved 原文行推送到 Translation Panel。
 - 不再从 raw PTY output 推断段落边界，也不再用 `maxChunkChars` 切分 Claude 输出。
 - `classifyTranslationChunk` 返回 `sensitive` 时不调用 provider。
 - `already-target-language` 和 CJK 内容标记 `skipped`。
@@ -2808,9 +2810,10 @@ SessionConsole Translate toggle
 ~/.claude/projects/<project-hash>/<session-id>.jsonl append
   -> TranscriptTail reads new JSONL lines
   -> parseAssistantContent
-  -> ignore tool_use / tool_result for translation
-  -> skip stop_reason=tool_use assistant text
-  -> classifyTranslationChunk on assistant text
+  -> translate assistant text regardless of stop_reason
+  -> translate structured question / todo / agent prose
+  -> preserve raw tool_use / tool_result rows
+  -> classifyTranslationChunk on translatable assistant content
   -> skip / preserve / summarize / enqueue translate
   -> TranslationProvider.translate
   -> TranslationWsMessage
