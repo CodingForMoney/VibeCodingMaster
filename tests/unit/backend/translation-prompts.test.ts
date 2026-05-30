@@ -62,7 +62,7 @@ describe("translation-prompts", () => {
     });
 
     const outputPreview = previews.find((preview) => preview.key === "en-to-zh");
-    expect(outputPreview?.defaultPrompt).toContain("Claude Code output");
+    expect(outputPreview?.defaultPrompt).toContain("Claude Code (an AI coding assistant CLI) replies in English");
     expect(outputPreview?.userPrompt).toBe("CUSTOM OUTPUT PROMPT");
     expect(outputPreview?.customized).toBe(true);
   });
