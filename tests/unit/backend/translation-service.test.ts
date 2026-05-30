@@ -12,6 +12,7 @@ describe("translation-service", () => {
     const appSettings = createAppSettingsService({
       fs,
       settingsPath: "/settings.json",
+      legacySettingsPath: "/old-settings.json",
       legacyTranslationPath: "/translation.json"
     });
     const service = createTranslationService({
@@ -42,6 +43,7 @@ describe("translation-service", () => {
     const appSettings = createAppSettingsService({
       fs,
       settingsPath: "/settings.json",
+      legacySettingsPath: "/old-settings.json",
       legacyTranslationPath: "/translation.json"
     });
     const service = createTranslationService({

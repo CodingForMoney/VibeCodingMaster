@@ -184,7 +184,7 @@ This is a soft guide in the current release. VCM highlights missing or placehold
 VCM stores app-level local settings in:
 
 ```text
-~/.vibe-coding-master/settings.json
+~/.vcm/settings.json
 ```
 
 This file contains translation provider settings and the recent repository path list. Translation API keys are stored locally in that file under `translation.secrets.apiKey`; they are not written into the connected repository, `.ai/handoffs`, or git diffs.

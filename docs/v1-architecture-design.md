@@ -1011,9 +1011,9 @@ interface TranslationProvider {
 
 职责：
 
-- 统一管理本机 app-level settings 文件：`~/.vibe-coding-master/settings.json`。
+- 统一管理本机 app-level settings 文件：`~/.vcm/settings.json`。
 - 保存 `translation.settings` 和 `translation.secrets`，替代旧的 `translation.json`。
-- 启动时兼容迁移旧 `~/.vibe-coding-master/translation.json`。
+- 启动时兼容迁移旧 `~/.vibe-coding-master/settings.json` 和 `~/.vibe-coding-master/translation.json`。
 - 保存最近访问的 repo path，字段为 `recentRepositoryPaths`，最多 5 个，最近连接的排在最前。
 - 不把 app-level settings 写入项目 repo。
 
@@ -1434,7 +1434,7 @@ cancel
 
 - `apiKey` 不出现在 repo-local JSON 示例和导出中。
 - `GET /api/translation/settings` 会返回已保存的 `apiKey` 给本地 GUI，设置页必须显示当前值。
-- API key 存在 `~/.vibe-coding-master/settings.json` 的 `translation.secrets.apiKey`；后续可迁移到 OS keychain。
+- API key 存在 `~/.vcm/settings.json` 的 `translation.secrets.apiKey`；后续可迁移到 OS keychain。
 - Settings 可以全局生效，后续再支持 project override。
 
 ### 11.10 TranslationEntry

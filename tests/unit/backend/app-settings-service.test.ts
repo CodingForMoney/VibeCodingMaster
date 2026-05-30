@@ -17,6 +17,7 @@ describe("app-settings-service", () => {
     const service = createAppSettingsService({
       fs,
       settingsPath: "/settings.json",
+      legacySettingsPath: "/old-settings.json",
       legacyTranslationPath: "/translation.json"
     });
 
@@ -30,11 +31,42 @@ describe("app-settings-service", () => {
     expect(stored.recentRepositoryPaths).toEqual([]);
   });
 
+  it("migrates old app settings into the new settings path", async () => {
+    const fs = createMemoryFs();
+    await fs.writeJsonAtomic("/old-settings.json", {
+      version: 1,
+      translation: {
+        settings: {
+          model: "old-settings-model"
+        },
+        secrets: {
+          apiKey: "sk-old-settings"
+        }
+      },
+      recentRepositoryPaths: ["/repo/one", "/repo/two"]
+    });
+    const service = createAppSettingsService({
+      fs,
+      settingsPath: "/settings.json",
+      legacySettingsPath: "/old-settings.json",
+      legacyTranslationPath: "/translation.json"
+    });
+
+    const settings = await service.loadSettings();
+    const stored = await fs.readJson<AppSettingsFile>("/settings.json");
+
+    expect(settings.translation?.settings.model).toBe("old-settings-model");
+    expect(settings.translation?.secrets.apiKey).toBe("sk-old-settings");
+    expect(settings.recentRepositoryPaths).toEqual(["/repo/one", "/repo/two"]);
+    expect(stored).toEqual(settings);
+  });
+
   it("keeps the five most recent repository paths with newest first", async () => {
     const fs = createMemoryFs();
     const service = createAppSettingsService({
       fs,
       settingsPath: "/settings.json",
+      legacySettingsPath: "/old-settings.json",
       legacyTranslationPath: "/translation.json"
     });
 

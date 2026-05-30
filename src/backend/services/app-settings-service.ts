@@ -26,13 +26,16 @@ export interface AppSettingsService {
 export interface AppSettingsServiceDeps {
   fs: FileSystemAdapter;
   settingsPath?: string;
+  legacySettingsPath?: string;
   legacyTranslationPath?: string;
 }
 
 const MAX_RECENT_REPOSITORIES = 5;
 
 export function createAppSettingsService(deps: AppSettingsServiceDeps): AppSettingsService {
-  const settingsPath = deps.settingsPath ?? path.join(homedir(), ".vibe-coding-master", "settings.json");
+  const settingsPath = deps.settingsPath ?? path.join(homedir(), ".vcm", "settings.json");
+  const legacySettingsPath = deps.legacySettingsPath
+    ?? path.join(homedir(), ".vibe-coding-master", "settings.json");
   const legacyTranslationPath = deps.legacyTranslationPath
     ?? path.join(homedir(), ".vibe-coding-master", "translation.json");
   let cachedSettings: AppSettingsFile | null = null;
@@ -46,6 +49,9 @@ export function createAppSettingsService(deps: AppSettingsServiceDeps): AppSetti
     let shouldSave = false;
     if (await deps.fs.pathExists(settingsPath)) {
       raw = await deps.fs.readJson<Partial<AppSettingsFile>>(settingsPath);
+    } else if (await deps.fs.pathExists(legacySettingsPath)) {
+      raw = await deps.fs.readJson<Partial<AppSettingsFile>>(legacySettingsPath);
+      shouldSave = true;
     } else {
       shouldSave = true;
     }

@@ -1332,9 +1332,9 @@ export function createSessionRegistry(): SessionRegistry;
 
 职责：
 
-- 管理 `~/.vibe-coding-master/settings.json`。
+- 管理 `~/.vcm/settings.json`。
 - 保存 `translation.settings`、`translation.secrets` 和 `recentRepositoryPaths`。
-- 从旧 `~/.vibe-coding-master/translation.json` 迁移翻译设置。
+- 从旧 `~/.vibe-coding-master/settings.json` 和 `~/.vibe-coding-master/translation.json` 迁移设置。
 - 最近 repo path 去重、保留最近 5 个。
 
 导出定义：
@@ -2125,7 +2125,7 @@ export interface TranslationRouteDeps {
 实现规则：
 
 - settings API 返回本机已保存的 `apiKey`，用于设置页显示和继续编辑。
-- `PUT settings` 接收 API key 并写入 `~/.vibe-coding-master/settings.json` 的 `translation.secrets.apiKey`；输入框为空并保存时清空本机 API key。
+- `PUT settings` 接收 API key 并写入 `~/.vcm/settings.json` 的 `translation.secrets.apiKey`；输入框为空并保存时清空本机 API key。
 - input route 必须 load current task，防止跨 taskSlug。
 - input route 只允许向当前 role session 发送翻译结果。
 - retry / clear 只影响 Translation Panel runtime state。
