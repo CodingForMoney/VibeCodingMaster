@@ -24,7 +24,8 @@ Open VibeCodingMaster
   -> Switch between role sessions
   -> Type directly into embedded Claude Code terminals
   -> View role commands, logs, and handoff artifacts
-  -> Send role command to target session from GUI
+  -> Let project-manager send role messages through VCM message bus
+  -> Inspect and stage pending role messages in manual mode
   -> Restart / stop role sessions
 ```
 
@@ -46,15 +47,17 @@ V1 不实现：
 1. GUI 是用户主入口，CLI 只用于启动 dev server、调试和 smoke test。
 2. Claude Code role session 必须在 embedded terminal 中可见、可输入、可重启。
 3. Project Manager 不直接无限制控制其他 role sessions。
-4. Role command 必须先落盘到 `.ai/handoffs/<task-slug>/role-commands/<role>.md`。
-5. GUI 读取 role command，用户点击发送后，backend 只向目标 terminal 写入短指令。
-6. Backend 可以程序化写入和监听 embedded terminal，但 V1 只允许用户触发的 command dispatch，不自动确认权限，不自动串联驱动角色。
-7. Terminal output 只作为调试信息；长期事实源是 handoff artifacts。
-8. Raw terminal stream 必须持续写入 `.ai/handoffs/<task-slug>/logs/<role>.log`。
-9. V1 只做 artifact 存在性和标题完整性检查，不判断内容质量。
-10. 状态必须能从 backend session registry、terminal process state、repo artifacts、`.vcm` metadata 恢复。
-11. V1 不把每个 role 放到独立 worktree。同一任务默认共享当前 repo working directory。
-12. V1 默认遵守 single-writer rule，但主要通过流程提示、role status 和 review gate 实现，不做强制 sandbox。
+4. Project Manager 必须通过 VCM message bus / `vcmctl send` 调度其他角色。
+5. 非 PM role 只能通过 VCM message bus 回复 Project Manager。
+6. `manual` orchestration mode 是默认；用户 stage 后 VCM 只写一行 prompt，不自动按 Enter。
+7. `auto` orchestration mode 必须显式开启，并受 backend policy、pause state 和 target session state 约束。
+8. Role command artifact 可作为长 handoff 引用保留，但不再是唯一 dispatch 机制。
+9. Terminal output 只作为调试信息；长期事实源是 handoff artifacts 和 `.vcm/messages/<task-slug>.jsonl`。
+10. Raw terminal stream 必须持续写入 `.ai/handoffs/<task-slug>/logs/<role>.log`。
+11. V1 只做 artifact 存在性和标题完整性检查，不判断内容质量。
+12. 状态必须能从 backend session registry、terminal process state、repo artifacts、`.vcm` metadata 恢复。
+13. V1 不把每个 role 放到独立 worktree。同一任务默认共享当前 repo working directory。
+14. V1 默认遵守 single-writer rule，但主要通过流程提示、role status 和 review gate 实现，不做强制 sandbox。
 
 ## 3. 技术选型
 
@@ -98,6 +101,7 @@ VibeCodingMaster/
         api.ts
         artifact.ts
         harness.ts
+        message.ts
         project.ts
         role.ts
         session.ts
@@ -118,6 +122,7 @@ VibeCodingMaster/
         app-shell.tsx
         event-log.tsx
         harness-panel.tsx
+        message-timeline.tsx
         repo-connect-form.tsx
         role-session-tabs.tsx
         session-console.tsx
@@ -137,6 +142,7 @@ VibeCodingMaster/
       api/
         artifact-routes.ts
         harness-routes.ts
+        message-routes.ts
         project-routes.ts
         session-routes.ts
         task-routes.ts
@@ -150,6 +156,7 @@ VibeCodingMaster/
         artifact-service.ts
         command-dispatcher.ts
         harness-service.ts
+        message-service.ts
         project-service.ts
         session-service.ts
         status-service.ts
@@ -161,6 +168,7 @@ VibeCodingMaster/
         git-adapter.ts
       templates/
         handoff.ts
+        message-envelope.ts
         harness/
           claude-root.ts
           project-manager-agent.ts
@@ -170,6 +178,9 @@ VibeCodingMaster/
         role-command.ts
       validation/
         environment-check.ts
+
+    cli/
+      vcmctl.ts
 
   tests/
     unit/
@@ -692,7 +703,83 @@ export interface HarnessApplyResult {
 }
 ```
 
-### 6.9 `src/shared/types/api.ts`
+### 6.9 `src/shared/types/message.ts`
+
+职责：
+
+- 定义 VCM role message bus 的消息、状态和 orchestration mode。
+- 支持 PM-mediated role messaging，不支持任意 role-to-role chat。
+
+导出定义：
+
+```ts
+export type VcmMessageActor = RoleName | "user";
+
+export type VcmMessageType =
+  | "user-request"
+  | "task"
+  | "question"
+  | "blocked"
+  | "result"
+  | "finding"
+  | "review-request"
+  | "revise"
+  | "cancel";
+
+export type VcmMessageStatus =
+  | "pending_approval"
+  | "queued"
+  | "staged"
+  | "delivered"
+  | "acknowledged"
+  | "failed"
+  | "rejected"
+  | "cancelled";
+
+export type VcmOrchestrationMode = "manual" | "auto";
+
+export interface VcmRoleMessage {
+  id: string;
+  taskSlug: string;
+  fromRole: VcmMessageActor;
+  toRole: RoleName;
+  type: VcmMessageType;
+  body: string;
+  artifactRefs: string[];
+  bodyPath?: string;
+  parentMessageId?: string;
+  status: VcmMessageStatus;
+  createdAt: string;
+  deliveredAt?: string;
+  acknowledgedAt?: string;
+  stagedAt?: string;
+  failureReason?: string;
+}
+
+export interface VcmOrchestrationState {
+  taskSlug: string;
+  mode: VcmOrchestrationMode;
+  paused: boolean;
+  updatedAt: string;
+}
+
+export interface SendRoleMessageRequest {
+  fromRole: VcmMessageActor;
+  toRole: RoleName;
+  type: VcmMessageType;
+  body: string;
+  artifactRefs?: string[];
+  parentMessageId?: string;
+}
+
+export interface SendRoleMessageResult {
+  message: VcmRoleMessage;
+  delivered: boolean;
+  requiresUserApproval: boolean;
+}
+```
+
+### 6.10 `src/shared/types/api.ts`
 
 职责：
 
@@ -949,21 +1036,24 @@ V1 的 backend 允许程序化读写 embedded terminal：
 - `runtime.write(sessionId, data)`：向指定 role session 写入 terminal input。
 - `runtime.subscribe(sessionId, listener)`：监听 terminal output、status、exit 和 error event。
 - `terminal-ws`：把用户在 GUI terminal 中输入的内容转发给 runtime。
-- `command-dispatcher`：在用户点击 Send Command 后，向目标 session 写入短指令。
+- `message-service`：在 manual stage 或 auto delivery 时，按 policy 向目标 session 写入消息。
+- `command-dispatcher`：兼容旧 Send Command，向目标 session 写入 role command 短指令。
 
 V1 允许的自动化边界：
 
 - 用户在 GUI terminal 里的输入可以原样转发。
-- 用户点击 Send Command 后，backend 可以写入 `Please read and execute the role command at: <path>`。
+- 用户点击 `Stage` 后，backend 可以写入 `Read and handle VCM message ...`，但不追加 Enter。
+- 用户打开 auto mode 后，backend 可以在 policy 通过时写入可见 `[VCM MESSAGE]` envelope。
+- 用户点击旧 Send Command 后，backend 可以写入 `Please read and execute the role command at: <path>`。
 - Backend 可以监听 output 并写入 raw log。
 - Backend 可以根据 output/exit event 更新轻量状态和 GUI 提示。
 
 V1 明确不做：
 
 - 不自动确认 Claude Code permission prompt。
-- 不由 Project Manager 自动向 Architect/Coder/Reviewer 连续下发命令。
-- 不由 Architect 输出自动触发 Coder。
-- 不由 Coder 输出自动触发 Reviewer。
+- 不允许 Project Manager 绕过 MessageService 直接写 Architect/Coder/Reviewer terminal。
+- 不允许 Architect 绕过 PM 直接触发 Coder。
+- 不允许 Coder 绕过 PM 直接触发 Reviewer。
 - 不根据 terminal output 自动执行高风险下一步。
 
 ### 9.4 `src/backend/runtime/session-registry.ts`
@@ -1275,7 +1365,65 @@ export function createCommandDispatcher(deps: CommandDispatcherDeps): CommandDis
 Please read and execute the role command at: <path>
 ```
 
-### 10.7 `src/backend/services/status-service.ts`
+### 10.7 `src/backend/services/message-service.ts`
+
+职责：
+
+- 实现 PM-mediated VCM message bus。
+- 校验 sender / target / message type / taskSlug policy。
+- 持久化 `.vcm/messages/<task-slug>.jsonl`。
+- 写入长正文 `.ai/handoffs/<task-slug>/messages/<message-id>.md`。
+- 管理 `.vcm/orchestration/<task-slug>.json`。
+- 支持 manual mode 的 pending approval 和 staging。
+- 支持 auto mode 的 visible envelope delivery。
+- 禁止非 PM role 直接互发消息。
+
+导出定义：
+
+```ts
+export interface MessageService {
+  listMessages(input: ListMessagesInput): Promise<VcmRoleMessage[]>;
+  sendMessage(input: SendMessageInput): Promise<SendRoleMessageResult>;
+  stageMessage(input: MessageActionInput): Promise<VcmRoleMessage>;
+  approveMessage(input: MessageActionInput): Promise<VcmRoleMessage>;
+  rejectMessage(input: MessageActionInput): Promise<VcmRoleMessage>;
+  getOrchestrationState(input: OrchestrationStateInput): Promise<VcmOrchestrationState>;
+  updateOrchestrationState(input: UpdateOrchestrationStateInput): Promise<VcmOrchestrationState>;
+}
+
+export interface SendMessageInput extends SendRoleMessageRequest {
+  repoRoot: string;
+  stateRoot: string;
+  handoffDir: string;
+  taskSlug: string;
+}
+
+export interface MessageActionInput {
+  repoRoot: string;
+  stateRoot: string;
+  taskSlug: string;
+  messageId: string;
+}
+
+export interface UpdateOrchestrationStateInput extends OrchestrationStateInput {
+  mode?: VcmOrchestrationMode;
+  paused?: boolean;
+}
+```
+
+Policy：
+
+- `user -> project-manager` only with `user-request`。
+- `project-manager -> architect/coder/reviewer` only with `task/question/review-request/revise/cancel`。
+- `architect/coder/reviewer -> project-manager` only with `result/question/blocked/finding`。
+- target session missing/running false -> `queued`。
+- missing orchestration state -> `manual`, `paused: false`。
+- manual mode -> `pending_approval`。
+- manual stage -> write one-line prompt without trailing `\r`。
+- auto mode and not paused -> write visible `[VCM MESSAGE]` envelope with trailing `\r`。
+- never auto-confirm Claude Code permission prompts。
+
+### 10.8 `src/backend/services/status-service.ts`
 
 职责：
 
@@ -1476,7 +1624,43 @@ export interface ArtifactRouteDeps {
 }
 ```
 
-### 11.7 `src/backend/ws/terminal-ws.ts`
+### 11.7 `src/backend/api/message-routes.ts`
+
+Routes：
+
+```text
+GET  /api/tasks/:taskSlug/messages
+POST /api/tasks/:taskSlug/messages
+POST /api/tasks/:taskSlug/messages/:messageId/stage
+POST /api/tasks/:taskSlug/messages/:messageId/approve
+POST /api/tasks/:taskSlug/messages/:messageId/reject
+GET  /api/tasks/:taskSlug/orchestration
+PUT  /api/tasks/:taskSlug/orchestration
+POST /api/tasks/:taskSlug/orchestration/pause
+POST /api/tasks/:taskSlug/orchestration/resume
+```
+
+导出定义：
+
+```ts
+export function registerMessageRoutes(app: FastifyInstance, deps: MessageRouteDeps): void;
+
+export interface MessageRouteDeps {
+  projectService: ProjectService;
+  taskService: TaskService;
+  messageService: MessageService;
+}
+```
+
+实现规则：
+
+- 所有 route 必须 require current project。
+- 所有 message route 必须 load task，防止跨 taskSlug 注入。
+- `PUT orchestration` 只接受 `manual` / `auto`。
+- `stage` / `approve` 必须走 MessageService，不能直接写 terminal。
+- route 不做 delivery policy；policy 集中在 MessageService。
+
+### 11.8 `src/backend/ws/terminal-ws.ts`
 
 职责：
 
@@ -1552,6 +1736,12 @@ export interface ApiClient {
   readRoleCommand(taskSlug: string, role: DispatchableRole): Promise<string>;
   saveRoleCommand(taskSlug: string, role: DispatchableRole, content: string): Promise<void>;
   readLog(taskSlug: string, role: RoleName): Promise<string>;
+  listMessages(taskSlug: string): Promise<VcmRoleMessage[]>;
+  sendRoleMessage(taskSlug: string, input: SendRoleMessageRequest): Promise<SendRoleMessageResult>;
+  stageMessage(taskSlug: string, messageId: string): Promise<VcmRoleMessage>;
+  rejectMessage(taskSlug: string, messageId: string): Promise<VcmRoleMessage>;
+  getOrchestrationState(taskSlug: string): Promise<VcmOrchestrationState>;
+  updateOrchestrationState(taskSlug: string, input: { mode?: VcmOrchestrationMode; paused?: boolean }): Promise<VcmOrchestrationState>;
 }
 
 export function createApiClient(baseUrl?: string): ApiClient;
@@ -1666,7 +1856,41 @@ export interface EventLogProps {
 export function EventLog(props: EventLogProps): JSX.Element;
 ```
 
-### 12.9 `src/frontend/routes/project-dashboard.tsx`
+### 12.9 `src/frontend/components/message-timeline.tsx`
+
+职责：
+
+- 展示当前 task 的 VCM role messages。
+- 显示 pending / queued / staged / delivered / failed / rejected 状态。
+- 在 manual mode 下显示 approval cards。
+- 提供 `Stage`、`Reject`、`Open target role` 操作。
+- 显示 `Auto orchestration` toggle 和 pause/resume state。
+
+导出定义：
+
+```tsx
+export interface MessageTimelineProps {
+  messages: VcmRoleMessage[];
+  orchestration: VcmOrchestrationState;
+  busy: boolean;
+  onStage(messageId: string): Promise<void>;
+  onReject(messageId: string): Promise<void>;
+  onModeChange(mode: VcmOrchestrationMode): Promise<void>;
+  onPauseChange(paused: boolean): Promise<void>;
+  onOpenRole(role: RoleName): void;
+}
+
+export function MessageTimeline(props: MessageTimelineProps): JSX.Element;
+```
+
+UI 规则：
+
+- `manual` mode 是默认显示状态。
+- `Stage` 只把一行提示写入 terminal，不触发 Enter。
+- `auto` mode 必须显式打开，并可以随时 pause。
+- failed delivery 必须显示 failure reason。
+
+### 12.10 `src/frontend/routes/project-dashboard.tsx`
 
 职责：
 
@@ -1681,7 +1905,7 @@ export function EventLog(props: EventLogProps): JSX.Element;
 export function ProjectDashboard(): JSX.Element;
 ```
 
-### 12.10 `src/frontend/components/harness-panel.tsx`
+### 12.11 `src/frontend/components/harness-panel.tsx`
 
 职责：
 
@@ -1704,12 +1928,12 @@ export interface HarnessPanelProps {
 export function HarnessPanel(props: HarnessPanelProps): JSX.Element;
 ```
 
-### 12.11 `src/frontend/routes/task-workspace.tsx`
+### 12.12 `src/frontend/routes/task-workspace.tsx`
 
 职责：
 
 - 任务运行时主界面。
-- 组合 TaskNav、RoleSessionTabs、SessionConsole、EventLog。
+- 组合 TaskNav、RoleSessionTabs、SessionConsole、MessageTimeline、EventLog。
 - 不渲染独立 ArtifactPanel；handoff files 保留在任务目录中。
 
 导出定义：
@@ -1749,6 +1973,70 @@ export function renderDispatchInstruction(commandPath: string): string;
 ```text
 Please read and execute the role command at: <commandPath>
 ```
+
+### 13.3 `src/backend/templates/message-envelope.ts`
+
+导出定义：
+
+```ts
+export function renderMessageEnvelope(message: VcmRoleMessage): string;
+export function renderManualStagePrompt(message: VcmRoleMessage): string;
+```
+
+`renderMessageEnvelope` 必须返回可见 envelope：
+
+```text
+[VCM MESSAGE]
+id: msg_...
+task: demo-task
+from: project-manager
+to: coder
+type: task
+
+<message body>
+
+Artifact refs:
+- .ai/handoffs/demo-task/architecture-plan.md
+
+Instructions:
+- Read the message and execute only within this VCM task.
+- Reply to project-manager with vcmctl reply when complete, blocked, or unclear.
+[/VCM MESSAGE]
+```
+
+`renderManualStagePrompt` 必须返回不带 trailing Enter 的短指令：
+
+```text
+Read and handle VCM message msg_123 at .ai/handoffs/demo-task/messages/msg_123.md
+```
+
+### 13.4 CLI Bridge
+
+#### 13.4.1 `src/cli/vcmctl.ts`
+
+职责：
+
+- 给 Claude Code role sessions 提供调用 VCM backend 的本地命令。
+- 读取 `VCM_API_URL`、`VCM_TASK_SLUG`、`VCM_ROLE`。
+- 发送 PM task messages、非 PM replies、result messages。
+- 查询 inbox。
+
+命令：
+
+```bash
+vcmctl send --to coder --type task --body-file /tmp/vcm-message.md
+vcmctl reply --type blocked --body "Need clarification on test scope."
+vcmctl result --body-file /tmp/vcm-result.md --artifact .ai/handoffs/task/implementation-log.md
+vcmctl inbox
+vcmctl ready
+```
+
+规则：
+
+- `send` 使用当前 `VCM_ROLE` 作为 sender。
+- `reply` / `result` 默认发给 `project-manager`。
+- CLI 不自行决定是否投递；它只调用 backend，policy 由 MessageService 执行。
+- `vcmctl ready` 是显式 role readiness signal 的预留命令，可在后续 auto mode 阶段启用。
 
 ## 14. 核心调用链
 
@@ -1835,7 +2123,56 @@ XtermView
   -> xterm.write
 ```
 
-### 14.6 下发 role command
+### 14.6 PM-mediated message bus
+
+PM sends work:
+
+```text
+Project Manager terminal
+  -> vcmctl send --to coder --type task --body-file /tmp/message.md
+  -> POST /api/tasks/:taskSlug/messages
+  -> messageService.sendMessage
+  -> validateMessagePolicy(project-manager, coder, task)
+  -> write .ai/handoffs/<task-slug>/messages/<message-id>.md
+  -> append .vcm/messages/<task-slug>.jsonl
+  -> manual mode: return pending_approval
+  -> GUI shows approval card
+```
+
+User stages in manual mode:
+
+```text
+MessageTimeline Stage
+  -> api.stageMessage
+  -> POST /api/tasks/:taskSlug/messages/:messageId/stage
+  -> messageService.stageMessage
+  -> sessionService.getRoleSession(target)
+  -> runtime.write(one-line prompt without Enter)
+  -> append staged snapshot to .vcm/messages/<task-slug>.jsonl
+```
+
+Auto delivery:
+
+```text
+vcmctl send/reply/result
+  -> messageService.sendMessage
+  -> orchestration mode is auto
+  -> not paused
+  -> target session running
+  -> runtime.write(renderMessageEnvelope(message) + "\r")
+  -> append delivered snapshot
+```
+
+Role reply:
+
+```text
+Coder terminal
+  -> vcmctl reply --type blocked --body-file /tmp/blocker.md
+  -> MessageService validates coder -> project-manager
+  -> PM receives pending/delivered message
+```
+
+### 14.7 Legacy role command dispatch
 
 ```text
 Role toolbar Send Command
@@ -1848,7 +2185,7 @@ Role toolbar Send Command
   -> registry event
 ```
 
-### 14.7 Handoff files
+### 14.8 Handoff files
 
 V1 主界面展示紧凑 workflow strip，用 artifact status 推导当前 gate 和下一步建议。完整 artifact inspector 仍不放在主界面；handoff files 和 role commands 仍由 backend templates / services 管理，供 Claude Code sessions 和 dispatch 流程使用。
 
@@ -1882,6 +2219,16 @@ V1 主界面展示紧凑 workflow strip，用 artifact status 推导当前 gate 
 - rejects empty command。
 - rejects not-started target session。
 - writes only short instruction to runtime。
+
+`tests/unit/backend/message-service.test.ts`
+
+- accepts project-manager -> coder task messages。
+- rejects non-PM role-to-role messages。
+- persists message snapshots to `.vcm/messages/<task-slug>.jsonl`。
+- writes long message bodies to `.ai/handoffs/<task-slug>/messages/<message-id>.md`。
+- returns `pending_approval` in manual mode。
+- stages one-line prompts without trailing Enter。
+- delivers visible envelopes in auto mode only when target session is running and orchestration is not paused。
 
 `tests/unit/backend/session-registry.test.ts`
 
@@ -1926,7 +2273,8 @@ V1 主界面展示紧凑 workflow strip，用 artifact status 推导当前 gate 
 - starts role session with fake runtime。
 - stops role session。
 - restarts role session。
-- dispatches role command.
+- sends and stages a VCM role message。
+- dispatches legacy role command.
 
 ### 15.3 E2E Tests
 
@@ -1957,7 +2305,8 @@ Create demo-task
 Start project-manager
 Start architect
 Type in PM terminal
-Send architect command
+Run vcmctl send from PM or create a message through API
+Stage the pending architect message from GUI
 Verify logs/architect.log
 Verify workflow strip and artifact status
 Restart coder
@@ -2060,19 +2409,30 @@ Verify session state recovers
 - 状态 badge 正确显示。
 - 页面刷新后可重新加载 task/session 状态。
 
-### Milestone 6: GUI Role Command Dispatch
+### Milestone 6: PM-mediated Message Bus
 
 文件：
 
+- `src/shared/types/message.ts`
+- `src/backend/services/message-service.ts`
+- `src/backend/api/message-routes.ts`
+- `src/backend/templates/message-envelope.ts`
+- `src/cli/vcmctl.ts`
+- `src/frontend/components/message-timeline.tsx`
+- `src/frontend/state/api-client.ts`
 - `src/backend/services/command-dispatcher.ts`
 - `src/frontend/components/event-log.tsx`
 
 验收：
 
-- 用户点击目标 role toolbar 的 Send Command。
-- backend 写入短指令到 architect runtime。
-- dispatch event 出现在 Event Log。
-- 不发送未落盘长 prompt。
+- PM 可以通过 `vcmctl send --to coder` 创建 message。
+- backend 按 PM-mediated policy 拒绝非法 role-to-role messages。
+- manual mode 默认创建 `pending_approval` message。
+- 用户点击 `Stage` 后，backend 只写入一行 prompt，不按 Enter。
+- role 可以通过 `vcmctl reply` 回 PM。
+- messages 持久化到 `.vcm/messages/<task-slug>.jsonl`。
+- long body 写入 `.ai/handoffs/<task-slug>/messages/<message-id>.md`。
+- 旧 Send Command 仍可作为过渡调试能力，但不再是推荐主路径。
 
 ### Milestone 7: Acceptance and Hardening
 
@@ -2111,8 +2471,13 @@ Verify session state recovers
 - [ ] embedded terminal 可以显示 Claude Code output。
 - [ ] 用户可以直接在 embedded terminal 中输入。
 - [ ] terminal output 被保存到 role log。
-- [ ] 用户可以从 GUI 发送 role command 到目标 role session。
-- [ ] backend 只发送短指令，不粘贴完整长 prompt。
+- [ ] PM 可以通过 `vcmctl send` 给目标 role 创建 message。
+- [ ] 非 PM role 只能通过 `vcmctl reply/result` 回 PM。
+- [ ] MessageService 拒绝非法 role-to-role message。
+- [ ] manual mode 下 message 默认进入 `pending_approval`。
+- [ ] 用户可以从 GUI stage / reject pending message。
+- [ ] Stage 只写入一行 prompt，不自动按 Enter。
+- [ ] backend 不粘贴隐藏长 prompt；auto delivery 使用可见 `[VCM MESSAGE]` envelope。
 - [ ] 用户可以 stop / restart role session。
 - [ ] 页面刷新后可以恢复 task/session 可见状态。
 - [ ] Claude Code 缺失时 GUI 有清晰提示。

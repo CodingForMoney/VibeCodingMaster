@@ -283,4 +283,3 @@ See also:
 - `docs/product-design.md`
 - `docs/v1-architecture-design.md`
 - `docs/v1-implementation-plan.md`
-- `docs/v1-message-bus-orchestration-design.md`

@@ -241,6 +241,31 @@ Claude Code 本质上仍然是交互式终端程序，VibeCodingMaster 可以使
 
 这些只应该是底层实现细节。产品界面表达的是任务、角色、会话、状态、artifact 和验收。
 
+### 5.10 PM-mediated Role Messaging
+
+VibeCodingMaster 的角色通信模型是：
+
+```text
+User <-> Project Manager <-> Other Roles
+```
+
+产品不应该变成一个所有角色两两互聊的 agent chat room。
+
+规则：
+
+- 用户主要和 `project-manager` 交流。
+- `project-manager` 可以通过 VCM message bus 给 `architect`、`coder`、`reviewer` 分配任务或提出问题。
+- 非 PM 角色只能把结果、问题、阻塞和 findings 回给 `project-manager`。
+- 如果一个非 PM 角色需要另一个角色协助，必须先回到 PM，由 PM 决定是否继续调度。
+- 用户必须始终能查看 message history、切换 role terminal、暂停自动编排并手动介入。
+
+Message bus 和自动执行是两个不同能力：
+
+- `manual`：默认模式。角色可以发消息，但 VCM 不自动让目标 terminal 执行；用户查看后点击 `Stage`，VCM 只把一行提示写进目标 terminal，用户按 Enter 才执行。
+- `auto`：可选模式。VCM 在 backend policy 通过、目标 session running、编排未暂停时，可以把可见 message envelope 直接写入目标 terminal 并提交。
+
+无论哪种模式，VCM 都不能自动确认 Claude Code 权限提示，也不能绕过高风险 human approval。
+
 ## 6. 核心概念
 
 ### 6.1 Project Manager
@@ -257,6 +282,7 @@ Project Manager 是面向用户的沟通者，也是面向 AI 角色的指令调
 - 选择 required role route。
 - 决定下一步应该调用 architect、coder、reviewer 还是 specialist。
 - 为每个角色准备准确、完整、边界清楚的 role command。
+- 通过 VCM message bus / `vcmctl send` 调度角色，而不是要求用户复制 prompt。
 - 确保 handoff artifacts 存在。
 - 调度 Claude Code 的 architect、coder、reviewer session。
 - 收集 validation evidence。
@@ -281,10 +307,59 @@ Project Manager 是面向用户的沟通者，也是面向 AI 角色的指令调
 换句话说：
 
 ```text
-Project Manager = user-facing conversation owner + role command dispatcher
+Project Manager = user-facing conversation owner + role message orchestrator
 ```
 
 它负责让每个 AI 角色“收到正确任务”，但不替代该角色完成任务。
+
+### 6.1.1 VCM Message Bus
+
+VCM Message Bus 是 PM 调度角色的产品主干。它不是文件监听器，也不是让角色直接写入其他 PTY；角色通过本地 `vcmctl` 调用 VCM backend API，backend 负责 policy check、持久化和投递。
+
+推荐流程：
+
+```text
+project-manager Claude Code session
+  -> vcmctl send --to coder --type task --body-file ...
+  -> VCM backend MessageService
+  -> persist message
+  -> policy check
+  -> manual mode: show approval card
+  -> auto mode: write visible envelope to coder terminal
+
+coder Claude Code session
+  -> vcmctl reply --type blocked --body-file ...
+  -> VCM backend MessageService
+  -> persist message
+  -> policy check
+  -> manual mode: show approval card
+  -> auto mode: write visible envelope to project-manager terminal
+```
+
+允许的最小通信矩阵：
+
+| Sender | Allowed target | Allowed message types |
+| --- | --- | --- |
+| user | project-manager | user-request |
+| project-manager | architect / coder / reviewer | task, question, review-request, revise, cancel |
+| architect | project-manager | result, question, blocked |
+| coder | project-manager | result, question, blocked |
+| reviewer | project-manager | result, finding, blocked |
+
+禁止：
+
+- `coder -> architect`
+- `architect -> coder`
+- `reviewer -> coder`
+- 任意角色伪造其他 task identity
+- 任意角色为非当前 `taskSlug` 发消息
+
+每条消息都必须可审计，至少持久化到：
+
+```text
+.vcm/messages/<task-slug>.jsonl
+.ai/handoffs/<task-slug>/messages/<message-id>.md
+```
 
 ### 6.2 Task Spec
 
@@ -403,9 +478,11 @@ Review Report 是 reviewer role 的输出。
 
 ### 6.7 Role Command
 
-Role Command 是 Project Manager 发给每个 AI 角色的可执行指令。
+Role Command 是 Project Manager 为某个 AI 角色准备的 durable handoff artifact。
 
 它不是普通聊天 prompt，而是由结构化上下文编译出来的任务命令。
+
+V1 的稳定调度路径是 VCM message bus：PM 通过 `vcmctl send` 把任务消息发给目标角色，message 可以引用 role command artifact。旧的 GUI `Send Command` 只作为过渡和调试路径，不能成为长期主交互。
 
 Role Command 的输入：
 
@@ -447,7 +524,7 @@ Rules:
 - stop and escalate if ...
 ```
 
-VibeCodingMaster 应保存每次发出的 Role Command，方便后续审计、复现和优化。
+VibeCodingMaster 应保存 Role Command，方便后续审计、复现和优化；真正的角色间投递状态以 `.vcm/messages/<task-slug>.jsonl` 为准。
 
 ## 7. 任务分级与角色路由
 
@@ -848,7 +925,8 @@ Each role session:
 - 支持启动、停止、重启、恢复单个 role session。
 - 展示每个 role session 的状态：not started / starting / running / waiting / blocked / done / crashed。
 - 展示每个 role session 对应的 role command、raw log 和 handoff artifact。
-- 支持把 Project Manager 生成的 role command 从 GUI 发送到目标 role session。
+- 支持 message timeline、manual approval cards、stage / reject role messages。
+- 保留 role command link，作为长 handoff artifact 和兼容调试路径。
 - 支持将 terminal output 持续写入 task logs。
 
 原则：
@@ -894,24 +972,26 @@ GUI frontend
 
 自动化边界：
 
-- V1 可以程序化写入 terminal input，但只用于用户触发的 command dispatch。
+- V1 可以程序化写入 terminal input，但必须经过 MessageService policy。
+- manual mode 下，用户点击 `Stage` 只写入一行 prompt，不自动按 Enter。
+- auto mode 下，只有在用户显式开启、未 paused、目标 session running、policy 通过时，才写入可见 message envelope 并提交。
 - V1 可以程序化读取 terminal output，但只做 raw log、轻量状态和 UI 提醒。
 - V1 不自动确认 Claude Code 权限提示。
 - V1 允许用户在启动 session 时主动选择较宽松的 Claude Code 权限模式。
-- V1 不让 PM 自动连续驱动 architect / coder / reviewer。
+- V1 不允许 PM 绕过 message bus 直接无限制驱动 architect / coder / reviewer。
 - V1 不根据 terminal output 自动执行高风险下一步。
 
 ### 9.9 Claude Code Adapter
 
-负责将 Prompt Compiler 生成的 role command 交给 Claude Code 执行，或生成可复制的 Claude Code prompt。
+负责生成 Claude Code role session 启动/恢复命令，并检查本机 Claude Code 可用性。
 
 能力：
 
 - 启动或恢复 architect session。
 - 启动或恢复 coder session。
 - 启动或恢复 reviewer session。
-- 注入 artifact paths。
-- 注入 stop conditions。
+- 选择权限模式。
+- 设置 VCM environment。
 - 收集执行输出。
 - 处理 Claude Code 交互式权限确认和等待状态。
 
@@ -1159,6 +1239,54 @@ V1 不在任务主界面展示独立 artifact panel。role commands、handoff ar
 
 应用后必须展示 changed files summary，并提示用户 review/commit。
 
+### 11.8 Message Timeline and Orchestration Controls
+
+Task Workspace 必须提供任务级 message timeline，让用户看到 PM 发出了什么、角色回复了什么、哪些消息等待处理。
+
+显示：
+
+- message id。
+- from / to role。
+- type：task / question / blocked / result / finding / review-request / revise / cancel。
+- status：pending approval / queued / staged / delivered / failed / rejected / cancelled。
+- artifact refs。
+- failure reason。
+
+控制：
+
+- `Auto orchestration` toggle，默认 off。
+- `Pause / Resume orchestration`。
+- pending message approval cards。
+- approval actions：`Stage`、`Reject`、`Edit`、`Open target role`。
+
+Manual mode 行为：
+
+```text
+User clicks Stage
+  -> VCM writes one line into target embedded terminal
+  -> VCM does not append Enter
+  -> user inspects terminal
+  -> user presses Enter to execute
+```
+
+Stage 文本示例：
+
+```text
+Read and handle VCM message msg_123 at .ai/handoffs/demo-task/messages/msg_123.md
+```
+
+Auto mode 行为：
+
+```text
+PM / role sends message through vcmctl
+  -> backend validates policy
+  -> backend checks target session and orchestration state
+  -> backend writes visible [VCM MESSAGE] envelope to target terminal
+  -> backend appends Enter only when policy allows
+```
+
+VCM 不应隐藏角色间执行，也不应自动确认 Claude Code 权限提示。
+
 ## 12. 数据对象
 
 ### 12.1 Project
@@ -1282,6 +1410,38 @@ V1 不在任务主界面展示独立 artifact panel。role commands、handoff ar
 }
 ```
 
+### 12.7 VCM Role Message
+
+```json
+{
+  "id": "msg_123",
+  "taskSlug": "coupon-partial-refund",
+  "fromRole": "project-manager",
+  "toRole": "coder",
+  "type": "task",
+  "body": "Read the architecture plan and implement phase 1.",
+  "artifactRefs": [
+    ".ai/handoffs/coupon-partial-refund/architecture-plan.md"
+  ],
+  "bodyPath": ".ai/handoffs/coupon-partial-refund/messages/msg_123.md",
+  "status": "pending_approval",
+  "createdAt": "2026-05-29T00:03:14+08:00"
+}
+```
+
+### 12.8 VCM Orchestration State
+
+```json
+{
+  "taskSlug": "coupon-partial-refund",
+  "mode": "manual",
+  "paused": false,
+  "updatedAt": "2026-05-29T00:03:14+08:00"
+}
+```
+
+如果 state file 不存在，VCM 必须按 `manual` mode、`paused: false` 处理。
+
 ## 13. MVP 范围
 
 ### 13.1 V1 产品定位
@@ -1320,14 +1480,17 @@ V1 的核心判断标准不是“CLI 是否能控制多个终端”，而是：
 10. 支持 Claude Code 权限确认、等待用户输入、失败后补充指令等交互式场景。
 11. 展示每个 role session 的状态：not started / starting / running / waiting / blocked / done / crashed。
 12. 支持启动、停止、重启某个 role session。
-13. 支持 Project Manager 生成 role command artifact。
-14. 支持用户在 GUI 中查看 role command，并一键发送到目标 role session。
-15. 将每个 role session 的 raw output 保存为日志。
-16. 在 GUI 中查看 architecture-plan / implementation-log / validation-log / review-report。
-17. 检查 handoff artifacts 是否存在、是否为空、是否包含必要标题。
-18. 展示当前任务的状态摘要和下一步建议。
-19. 在 `.vcm/sessions/<task-slug>.json` 中记录每个 role 的 `claudeSessionId`，支持异常中断后 Resume。
-20. 保留 CLI 作为开发和调试入口，但不要求用户用 CLI 完成主流程。
+13. 支持 Project Manager 通过 VCM message bus 调度其他角色。
+14. 支持 `manual` orchestration mode，默认不自动执行角色消息。
+15. 支持用户在 GUI 中检查、stage、reject role messages。
+16. 支持可选 `auto` orchestration mode，但必须经过 backend policy check。
+17. 支持 Project Manager 生成 role command artifact，作为长 handoff 的 durable ref。
+18. 将每个 role session 的 raw output 保存为日志。
+19. 在 GUI 中查看 architecture-plan / implementation-log / validation-log / review-report。
+20. 检查 handoff artifacts 是否存在、是否为空、是否包含必要标题。
+21. 展示当前任务的状态摘要和下一步建议。
+22. 在 `.vcm/sessions/<task-slug>.json` 中记录每个 role 的 `claudeSessionId`，支持异常中断后 Resume。
+23. 保留 CLI 作为开发和调试入口；`vcmctl` 只作为 Claude Code role 调用 VCM 的本地桥接命令，不是用户主交互入口。
 
 ### 13.3 V1 明确不做
 
@@ -1377,7 +1540,7 @@ TerminalRuntime implementation = node-pty
 
 后续如果要增强持久性，应优先改进本地 backend lifecycle、session registry、raw logs 和恢复体验，而不是引入额外终端复用层。
 
-### 13.5 Controller-Mediated Role Command
+### 13.5 Controller-Mediated Role Messaging
 
 推荐文件：
 
@@ -1387,6 +1550,8 @@ TerminalRuntime implementation = node-pty
     architect.md
     coder.md
     reviewer.md
+  messages/
+    <message-id>.md
   logs/
     project-manager.log
     architect.log
@@ -1404,22 +1569,23 @@ Project Manager 不直接无限制控制其他 Claude Code sessions。
 
 ```text
 Project Manager session
-  -> writes role command artifact
-  -> GUI shows command artifact to user
-  -> user approves or sends from GUI
-  -> VibeCodingMaster backend writes short instruction to target role session
-  -> target role session executes
-  -> backend records raw log
-  -> handoff artifact becomes stable result
+  -> vcmctl send
+  -> VCM backend validates message policy
+  -> backend persists message and body file
+  -> manual mode: GUI shows approval card
+  -> user stages or rejects
+  -> auto mode: backend writes visible envelope to target terminal
+  -> target role executes
+  -> non-PM role replies to PM through vcmctl
 ```
 
 也就是说：
 
-- PM 负责“决定发什么命令”。
-- GUI 负责让用户看见、确认和发送。
-- Backend 负责把命令送进正确 role session。
+- PM 负责“决定是否调度、调度谁、发送什么 message”。
+- GUI 负责让用户看见 message history、pending approvals 和 failures。
+- Backend 负责 policy check、message persistence、staging / delivery。
 - Role agent 负责执行命令并输出结果。
-- Handoff artifacts 负责跨 session 传递稳定结果。
+- Handoff artifacts 和 `.vcm/messages/<task-slug>.jsonl` 负责跨 session 传递稳定事实。
 
 ### 13.6 V1 交互形态
 
@@ -1462,7 +1628,7 @@ CLI 可以保留为：
 - Claude Code role session 启动成功率。
 - embedded terminal 输入输出成功率。
 - WebSocket 断线重连成功率。
-- role command 从 GUI 发送成功率。
+- role message 创建 / stage / delivery 成功率。
 - session output 保存为 raw log 的成功率。
 - stop / restart / recover 成功率。
 
@@ -1511,15 +1677,15 @@ CLI 可以保留为：
 - 检查 handoff artifact schema completeness。
 - 支持从 artifact 跳转到对应 role session。
 
-### Phase 4：GUI Role Command Dispatch
+### Phase 4：Message Bus Orchestration
 
-- PM 生成 architect.md。
-- GUI 展示 command 并允许用户发送到 architect session。
-- PM 生成 coder.md。
-- GUI 展示 command 并允许用户发送到 coder session。
-- PM 生成 reviewer.md。
-- GUI 展示 command 并允许用户发送到 reviewer session。
-- Backend 保存 raw logs 和 dispatch event。
+- PM 通过 `vcmctl send` 创建 role messages。
+- 非 PM role 通过 `vcmctl reply/result` 回 PM。
+- Backend enforce PM-mediated policy。
+- GUI 展示 message timeline 和 approval cards。
+- Manual mode 下用户 stage / reject。
+- Auto mode 下 backend 只在 policy 通过时投递 visible envelope。
+- Backend 保存 raw logs、message snapshots 和 delivery state。
 
 ### Phase 5：后续增强
 
@@ -1576,10 +1742,12 @@ CLI 可以保留为：
 应对：
 
 - 采用 controller-mediated 模式。
-- PM 只产出 role command artifact。
-- GUI 显示 role command，用户可确认后发送。
-- Backend 负责发送短指令和记录 dispatch。
-- 对高风险命令要求用户确认。
+- PM 只能通过 VCM message bus 调度其他角色。
+- 非 PM 角色只能回复 PM。
+- Manual mode 默认关闭自动执行，用户可 stage / reject。
+- Auto mode 需要用户显式打开，并支持 pause。
+- Backend 负责 policy check、message persistence 和 delivery state。
+- 对高风险命令要求用户确认或回到 PM 询问用户。
 
 ### 16.5 流程过重
 
