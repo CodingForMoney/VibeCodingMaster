@@ -11,6 +11,11 @@ describe("translation-classifier", () => {
     expect(stripAnsiForTranslation("\u001b[31mError\u001b[0m\r\n")).toBe("Error\n");
   });
 
+  it("preserves Claude Code cursor-forward spacing while stripping ANSI", () => {
+    expect(stripAnsiForTranslation("holds\u001b[1Cruntime\u001b[3Cstate")).toBe("holds runtime   state");
+    expect(cleanClaudeOutputForTranslation(".vcm/\u001b[1Cholds\u001b[1Cruntime\u001b[1Cstate")).toBe(".vcm/ holds runtime state");
+  });
+
   it("classifies prose, code, diff, and target-language chunks", () => {
     expect(classifyTranslationChunk("I will inspect the failing tests first.", "zh-CN").sourceKind).toBe("prose");
     expect(classifyTranslationChunk("```ts\nconst value = 1;\n```", "zh-CN").sourceKind).toBe("code");

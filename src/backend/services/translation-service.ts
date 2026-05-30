@@ -161,7 +161,7 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
 
     const state = getState(sessionId);
     state.buffer += data;
-    if (state.buffer.length >= settings.maxChunkChars || /\n\s*\n/.test(state.buffer)) {
+    if (/\n\s*\n/.test(state.buffer)) {
       flushOutput(sessionId);
       return;
     }

@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { FileSystemAdapter } from "../../../src/backend/adapters/filesystem.js";
 import type { TranslationProvider } from "../../../src/backend/adapters/translation-provider.js";
 import type { TerminalEvent } from "../../../src/shared/types/terminal.js";
@@ -113,6 +113,43 @@ describe("translation-service", () => {
       translatedText: "我找到了失败的测试。"
     });
     expect(entries.at(-1)?.entry.translationStartedAt).toBe("2026-05-30T00:00:01.000Z");
+  });
+
+  it("does not flush Claude output solely because maxChunkChars is exceeded", async () => {
+    vi.useFakeTimers();
+    try {
+      const fs = createMemoryFs();
+      const appSettings = createAppSettingsService({
+        fs,
+        settingsPath: "/settings.json",
+        legacySettingsPath: "/old-settings.json",
+        legacyTranslationPath: "/translation.json"
+      });
+      const runtime = createRuntimeStub();
+      const service = createTranslationService({
+        appSettings,
+        provider: createProviderStub("长输出译文。"),
+        runtime,
+        sessionService: {} as SessionService
+      });
+      await service.updateSettings({ enabled: true, translateOutput: true, maxChunkChars: 5 }, { apiKey: "sk-local-test" });
+
+      const messages: TranslationWsMessage[] = [];
+      service.subscribeToSession("session-1", (message) => messages.push(message));
+      runtime.emitOutput("This output is much longer than five characters but has no paragraph break.");
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(messages.some((message) => message.type === "translation-entry")).toBe(false);
+
+      await vi.advanceTimersByTimeAsync(700);
+      await Promise.resolve();
+
+      expect(messages.some((message) =>
+        message.type === "translation-entry" && message.entry.sourceText.includes("much longer than five characters")
+      )).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

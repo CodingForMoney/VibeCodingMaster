@@ -8,6 +8,7 @@ export interface ClassifiedTranslationChunk {
 }
 
 const CSI_ANSI_PATTERN = /(?:\u001b\[|\u009b)[0-?]*[ -/]*[@-~]/g;
+const CURSOR_FORWARD_PATTERN = /(?:\u001b\[|\u009b)(\d*)C/g;
 const OSC_ANSI_PATTERN = /\u001b\][^\u0007]*(?:\u0007|\u001b\\)/g;
 const SIMPLE_ESCAPE_PATTERN = /\u001b[=>M78]|\u001b[()][A-Za-z0-9]/g;
 const SECRET_PATTERN = /\b(?:sk-[A-Za-z0-9_-]{20,}|[A-Za-z0-9_]*(?:TOKEN|SECRET|PASSWORD|API_KEY)[A-Za-z0-9_]*\s*=\s*\S+|-----BEGIN [A-Z ]*PRIVATE KEY-----)\b/i;
@@ -15,6 +16,7 @@ const SECRET_PATTERN = /\b(?:sk-[A-Za-z0-9_-]{20,}|[A-Za-z0-9_]*(?:TOKEN|SECRET|
 export function stripAnsiForTranslation(value: string): string {
   let text = value
     .replace(OSC_ANSI_PATTERN, "")
+    .replace(CURSOR_FORWARD_PATTERN, (_match, count: string) => " ".repeat(Number(count || "1")))
     .replace(CSI_ANSI_PATTERN, "")
     .replace(SIMPLE_ESCAPE_PATTERN, "")
     .replace(/\r\n/g, "\n")
