@@ -40,6 +40,28 @@ describe("createArtifactService", () => {
       code: "ROLE_COMMAND_NOT_READY"
     });
   });
+
+  it("creates and checks docs sync report artifacts", async () => {
+    const fs = createMemoryFs();
+    const service = createArtifactService(fs);
+
+    const created = await service.createArtifactTemplates({
+      repoRoot: "/repo",
+      taskSlug: "demo-task",
+      handoffDir: ".ai/handoffs/demo-task"
+    });
+    const summary = await service.listArtifacts({
+      repoRoot: "/repo",
+      handoffDir: ".ai/handoffs/demo-task"
+    });
+
+    expect(created).toContain(".ai/handoffs/demo-task/docs-sync-report.md");
+    expect(summary.paths.docsSyncReportPath).toBe(".ai/handoffs/demo-task/docs-sync-report.md");
+    expect(summary.checks.find((check) => check.kind === "docs-sync-report")).toMatchObject({
+      status: "incomplete",
+      hasPlaceholder: true
+    });
+  });
 });
 
 function createMemoryFs(): FileSystemAdapter {

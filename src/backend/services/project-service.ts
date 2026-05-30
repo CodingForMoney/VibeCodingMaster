@@ -9,10 +9,12 @@ import { VcmError } from "../errors.js";
 import type { ClaudeAdapter } from "../adapters/claude-adapter.js";
 import type { FileSystemAdapter } from "../adapters/filesystem.js";
 import type { GitAdapter } from "../adapters/git-adapter.js";
+import type { AppSettingsService } from "./app-settings-service.js";
 
 export interface ProjectService {
   connectProject(input: ConnectProjectRequest): Promise<ProjectSummary>;
   getCurrentProject(): Promise<ProjectSummary | null>;
+  getRecentRepositoryPaths(): Promise<string[]>;
   loadConfig(repoRoot: string): Promise<ProjectConfig>;
   saveConfig(config: ProjectConfig, force?: boolean): Promise<void>;
   getConfigPath(repoRoot: string): string;
@@ -22,6 +24,7 @@ export interface ProjectServiceDeps {
   fs: FileSystemAdapter;
   git: GitAdapter;
   claude: ClaudeAdapter;
+  appSettings: Pick<AppSettingsService, "getRecentRepositoryPaths" | "recordRecentRepositoryPath">;
 }
 
 export function createProjectService(deps: ProjectServiceDeps): ProjectService {
@@ -29,12 +32,26 @@ export function createProjectService(deps: ProjectServiceDeps): ProjectService {
 
   return {
     async connectProject(input) {
-      const repoRoot = path.resolve(input.repoPath);
+      const requestedPath = input.repoPath.trim();
+      const repoRoot = path.resolve(requestedPath);
 
-      if (!(await deps.git.isRepo(repoRoot))) {
+      if (!requestedPath || !(await deps.fs.pathExists(repoRoot))) {
         throw new VcmError({
           code: "INVALID_REPO",
           message: "Selected path is not a Git repository.",
+          hint: requestedPath
+            ? `Path does not exist inside the VCM runtime: ${repoRoot}`
+            : "Repository path cannot be empty.",
+          statusCode: 400
+        });
+      }
+
+      const repoCheck = await deps.git.checkRepo(repoRoot);
+      if (!repoCheck.isRepo) {
+        throw new VcmError({
+          code: "INVALID_REPO",
+          message: "Selected path is not a Git repository.",
+          hint: repoCheck.hint,
           statusCode: 400
         });
       }
@@ -45,9 +62,21 @@ export function createProjectService(deps: ProjectServiceDeps): ProjectService {
       await deps.fs.ensureDir(path.join(repoRoot, config.stateRoot, "sessions"));
       await this.saveConfig(config, true);
 
-      const branch = await deps.git.getCurrentBranch(repoRoot);
-      const isDirty = await deps.git.isDirty(repoRoot);
       const warnings: string[] = [];
+      let branch = "unknown";
+      let isDirty = false;
+
+      try {
+        branch = await deps.git.getCurrentBranch(repoRoot);
+      } catch (caught) {
+        warnings.push(`Unable to read current Git branch. ${getErrorHint(caught)}`);
+      }
+
+      try {
+        isDirty = await deps.git.isDirty(repoRoot);
+      } catch (caught) {
+        warnings.push(`Unable to read Git dirty status. ${getErrorHint(caught)}`);
+      }
 
       if (branch === "main" || branch === "master") {
         warnings.push(`You are on ${branch}. Consider creating a task branch before coding.`);
@@ -65,10 +94,14 @@ export function createProjectService(deps: ProjectServiceDeps): ProjectService {
         warnings
       };
 
+      await deps.appSettings.recordRecentRepositoryPath(repoRoot);
       return currentProject;
     },
     async getCurrentProject() {
       return currentProject;
+    },
+    async getRecentRepositoryPaths() {
+      return deps.appSettings.getRecentRepositoryPaths();
     },
     async loadConfig(repoRoot) {
       const configPath = this.getConfigPath(repoRoot);
@@ -88,6 +121,18 @@ export function createProjectService(deps: ProjectServiceDeps): ProjectService {
       return path.join(repoRoot, ".vcm", "config.json");
     }
   };
+}
+
+function getErrorHint(caught: unknown): string {
+  if (caught instanceof VcmError) {
+    return caught.hint?.trim() || caught.message;
+  }
+
+  if (caught instanceof Error) {
+    return caught.message;
+  }
+
+  return "Unknown Git metadata error.";
 }
 
 export function buildDefaultProjectConfig(repoRoot: string): ProjectConfig {

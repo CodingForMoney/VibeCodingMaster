@@ -14,8 +14,8 @@ import type { ClaudeAdapter } from "../adapters/claude-adapter.js";
 import type { FileSystemAdapter } from "../adapters/filesystem.js";
 import type { SessionRegistry } from "../runtime/session-registry.js";
 import type { TerminalRuntime } from "../runtime/terminal-runtime.js";
-import { renderRoleMessagingContext } from "../templates/role-messaging-context.js";
 import type { ArtifactService } from "./artifact-service.js";
+import { claudeTranscriptPath } from "./claude-transcript-service.js";
 import type { ProjectService } from "./project-service.js";
 import type { TaskService } from "./task-service.js";
 
@@ -75,6 +75,9 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
         hint: "Start the role once before using Resume."
       });
     }
+    const transcriptPath = launchMode === "resume" && persisted?.transcriptPath
+      ? persisted.transcriptPath
+      : claudeTranscriptPath(repoRoot, claudeSessionId);
 
     const startCommand = deps.claude.buildRoleStartCommand(
       role,
@@ -103,6 +106,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     const record: RoleSessionRecord = {
       id: runtimeSession.id,
       claudeSessionId,
+      transcriptPath,
       taskSlug,
       role,
       status: runtimeSession.status,
@@ -125,7 +129,6 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     deps.registry.upsert(record);
     await persistTaskSession(deps.fs, repoRoot, config.stateRoot, record);
     await deps.taskService.updateTaskStatus(repoRoot, taskSlug, "running");
-    deps.runtime.write(runtimeSession.id, `${renderRoleMessagingContext(task, paths, role, deps.vcmctlCommand)}\r`);
     return record;
   }
 
@@ -171,9 +174,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       }
       deps.registry.remove(existing.id);
 
-      return existing.claudeSessionId
-        ? launchRoleSession(repoRoot, taskSlug, role, input, "resume")
-        : launchRoleSession(repoRoot, taskSlug, role, input, "fresh");
+      return launchRoleSession(repoRoot, taskSlug, role, input, "fresh");
     },
     async getRoleSession(repoRoot, taskSlug, role) {
       const config = await deps.projectService.loadConfig(repoRoot);
@@ -279,6 +280,7 @@ async function persistTaskSession(
       [session.role]: {
         id: session.id,
         claudeSessionId: session.claudeSessionId,
+        transcriptPath: session.transcriptPath,
         status: session.status,
         record
       }

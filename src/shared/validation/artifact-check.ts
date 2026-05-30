@@ -23,8 +23,19 @@ const REQUIRED_HEADINGS: Record<ArtifactKind, readonly string[]> = {
     "Findings",
     "Validation",
     "Decision"
+  ],
+  "docs-sync-report": [
+    "Summary",
+    "Architecture Drift Check",
+    "Docs Updated",
+    "Docs Reviewed And Left Unchanged",
+    "Public Contract / Module Boundary Notes",
+    "Remaining Documentation Risks",
+    "Decision"
   ]
 };
+
+const PLACEHOLDER_PATTERN = /(^|\n)\s*(TBD|Not run yet\.?|status:\s*draft)\s*(\n|$)/i;
 
 export function checkMarkdownArtifact(
   kind: ArtifactKind,
@@ -37,6 +48,7 @@ export function checkMarkdownArtifact(
       path: artifactPath,
       exists: false,
       isEmpty: true,
+      hasPlaceholder: false,
       missingHeadings: [...REQUIRED_HEADINGS[kind]],
       status: "missing"
     };
@@ -49,20 +61,23 @@ export function checkMarkdownArtifact(
       path: artifactPath,
       exists: true,
       isEmpty: true,
+      hasPlaceholder: false,
       missingHeadings: [...REQUIRED_HEADINGS[kind]],
       status: "empty"
     };
   }
 
   const missingHeadings = REQUIRED_HEADINGS[kind].filter((heading) => !hasHeading(trimmed, heading));
+  const hasPlaceholder = PLACEHOLDER_PATTERN.test(trimmed);
 
   return {
     kind,
     path: artifactPath,
     exists: true,
     isEmpty: false,
+    hasPlaceholder,
     missingHeadings,
-    status: missingHeadings.length === 0 ? "ok" : "incomplete"
+    status: missingHeadings.length === 0 && !hasPlaceholder ? "ok" : "incomplete"
   };
 }
 

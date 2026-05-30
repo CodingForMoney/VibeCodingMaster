@@ -4,7 +4,8 @@ export type ArtifactKind =
   | "architecture-plan"
   | "implementation-log"
   | "validation-log"
-  | "review-report";
+  | "review-report"
+  | "docs-sync-report";
 
 export interface HandoffPaths {
   handoffDir: string;
@@ -16,6 +17,7 @@ export interface HandoffPaths {
   implementationLogPath: string;
   validationLogPath: string;
   reviewReportPath: string;
+  docsSyncReportPath: string;
 }
 
 export interface ArtifactCheckResult {
@@ -23,6 +25,7 @@ export interface ArtifactCheckResult {
   path: string;
   exists: boolean;
   isEmpty: boolean;
+  hasPlaceholder: boolean;
   missingHeadings: string[];
   status: "missing" | "empty" | "incomplete" | "ok";
 }

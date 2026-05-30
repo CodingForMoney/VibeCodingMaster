@@ -9,20 +9,28 @@ import { createClaudeAdapter } from "./adapters/claude-adapter.js";
 import { createCommandRunner } from "./adapters/command-runner.js";
 import { createCommandDispatcher, type CommandDispatcher } from "./services/command-dispatcher.js";
 import { createGitAdapter } from "./adapters/git-adapter.js";
+import { createAppSettingsService } from "./services/app-settings-service.js";
+import { createClaudeTranscriptService } from "./services/claude-transcript-service.js";
+import { createHarnessService, type HarnessService } from "./services/harness-service.js";
 import { createNodeFileSystemAdapter } from "./adapters/filesystem.js";
 import { createNodePtyTerminalRuntime } from "./runtime/node-pty-runtime.js";
+import { createOpenAiCompatibleTranslationProvider } from "./adapters/translation-provider.js";
 import { createProjectService, type ProjectService } from "./services/project-service.js";
 import { createSessionRegistry } from "./runtime/session-registry.js";
 import { createSessionService, type SessionService } from "./services/session-service.js";
 import { createMessageService, type MessageService } from "./services/message-service.js";
 import { createStatusService, type StatusService } from "./services/status-service.js";
 import { createTaskService, type TaskService } from "./services/task-service.js";
+import { createTranslationService, type TranslationService } from "./services/translation-service.js";
 import { registerArtifactRoutes } from "./api/artifact-routes.js";
+import { registerHarnessRoutes } from "./api/harness-routes.js";
 import { registerMessageRoutes } from "./api/message-routes.js";
 import { registerProjectRoutes } from "./api/project-routes.js";
 import { registerSessionRoutes } from "./api/session-routes.js";
 import { registerTaskRoutes } from "./api/task-routes.js";
+import { registerTranslationRoutes } from "./api/translation-routes.js";
 import { registerTerminalWs } from "./ws/terminal-ws.js";
+import { registerTranslationWs } from "./ws/translation-ws.js";
 import { toVcmError } from "./errors.js";
 import type { TerminalRuntime } from "./runtime/terminal-runtime.js";
 
@@ -38,9 +46,11 @@ export interface ServerDeps {
   taskService: TaskService;
   sessionService: SessionService;
   artifactService: ArtifactService;
+  harnessService: HarnessService;
   commandDispatcher: CommandDispatcher;
   messageService: MessageService;
   statusService: StatusService;
+  translationService: TranslationService;
   runtime: TerminalRuntime;
 }
 
@@ -61,6 +71,10 @@ export async function createServer(deps: ServerDeps, options: CreateServerOption
   });
 
   registerProjectRoutes(app, { projectService: deps.projectService });
+  registerHarnessRoutes(app, {
+    projectService: deps.projectService,
+    harnessService: deps.harnessService
+  });
   registerTaskRoutes(app, {
     projectService: deps.projectService,
     taskService: deps.taskService,
@@ -81,7 +95,13 @@ export async function createServer(deps: ServerDeps, options: CreateServerOption
     taskService: deps.taskService,
     messageService: deps.messageService
   });
+  registerTranslationRoutes(app, {
+    projectService: deps.projectService,
+    taskService: deps.taskService,
+    translationService: deps.translationService
+  });
   registerTerminalWs(app, { runtime: deps.runtime });
+  registerTranslationWs(app, { translationService: deps.translationService });
 
   if (options.staticDir) {
     await app.register(fastifyStatic, {
@@ -123,10 +143,12 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
   const runner = createCommandRunner();
   const git = createGitAdapter(runner);
   const claude = createClaudeAdapter(runner);
+  const appSettings = createAppSettingsService({ fs });
   const runtime = createNodePtyTerminalRuntime({ fs });
   const registry = createSessionRegistry();
   const artifactService = createArtifactService(fs);
-  const projectService = createProjectService({ fs, git, claude });
+  const harnessService = createHarnessService({ fs });
+  const projectService = createProjectService({ fs, git, claude, appSettings });
   const taskService = createTaskService({ fs, git, artifactService, projectService });
   const sessionService = createSessionService({
     fs,
@@ -156,26 +178,36 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     sessionService,
     taskService
   });
+  const translationService = createTranslationService({
+    runtime,
+    sessionRegistry: registry,
+    transcripts: createClaudeTranscriptService(),
+    sessionService,
+    appSettings,
+    provider: createOpenAiCompatibleTranslationProvider()
+  });
 
   return {
     projectService,
     taskService,
     sessionService,
     artifactService,
+    harnessService,
     commandDispatcher,
     messageService,
     statusService,
+    translationService,
     runtime
   };
 }
 
 export function getDefaultStaticDir(): string {
-  return path.resolve("dist-frontend");
+  return path.join(getAppRoot(), "dist-frontend");
 }
 
 function resolveVcmctlCommand(): string {
+  const appRoot = getAppRoot();
   const currentModulePath = fileURLToPath(import.meta.url);
-  const appRoot = path.resolve(path.dirname(currentModulePath), "../..");
   const sourceCli = path.join(appRoot, "src", "cli", "vcmctl.ts");
   const tsxCli = path.join(appRoot, "node_modules", "tsx", "dist", "cli.mjs");
   if (currentModulePath.includes(`${path.sep}src${path.sep}`) && existsSync(tsxCli) && existsSync(sourceCli)) {
@@ -192,6 +224,10 @@ function resolveVcmctlCommand(): string {
   }
 
   return "vcmctl";
+}
+
+function getAppRoot(): string {
+  return path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
 }
 
 function quoteShellArg(value: string): string {

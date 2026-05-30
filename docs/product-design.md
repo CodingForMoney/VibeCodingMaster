@@ -1,1307 +1,301 @@
-# VibeCodingMaster 产品设计文档
+# VibeCodingMaster Product Design
 
-版本：v0.1  
-日期：2026-05-29  
-状态：产品设计草案  
-依据：`docs/cc-best-practices.md`
+Last updated: 2026-05-30
 
-## 1. 产品定位
+This document describes the product that the current code implements. It intentionally removes older CLI-first, tmux, raw-PTY-translation, and main-page artifact-panel designs that are no longer part of V1.
 
-VibeCodingMaster 是面向 Claude Code 的本地 GUI 多 session 工作台，也是 AI Project Manager 和 Harness Manager。
+## 1. Product Positioning
 
-它把用户的自然语言需求转化为可计划、可执行、可验证、可审查、可沉淀的工程任务，并在一个图形化任务工作台中托管多个 Claude Code role sessions，让用户可以在 `project-manager`、`architect`、`coder`、`reviewer` 等 session 之间切换、沟通、观察输出和管理交接 artifact。
+VibeCodingMaster is a local GUI task workspace for Claude Code.
 
-一句话：
+It helps a user run one engineering task through several explicit Claude Code role sessions:
 
-> VibeCodingMaster 不是让用户手动管理一堆终端和 prompt，而是把多个 Claude Code sessions 放进一个可视化、有角色、有契约、有测试、有交接、有验收的本地工程工作台里。
+- `project-manager`
+- `architect`
+- `coder`
+- `reviewer`
 
-核心闭环：
+The user should mostly talk to `project-manager`. The project manager coordinates the other roles through VCM messaging and durable handoff files. The user can still switch into any role session to inspect, guide, or interrupt.
+
+VCM is not a hosted SaaS product. It runs locally, connects to a local repository path, starts local Claude Code processes, and writes local task metadata into that repository.
+
+## 2. Product Goals
+
+VCM V1 must make multi-session Claude Code work visible and recoverable:
+
+- Connect a local Git repository.
+- Create a named task.
+- Start, stop, restart, and resume one Claude Code session per role.
+- Keep role terminals embedded in one GUI.
+- Preserve task state, session state, handoff files, message history, and raw terminal logs.
+- Let roles communicate through a PM-mediated message bus.
+- Let users choose between manual message approval and auto orchestration.
+- Install or update VCM role rules into `CLAUDE.md` and `.claude/agents/*.md`.
+- Provide a low-cost translation layer so the user can write Chinese while Claude Code receives English engineering instructions.
+
+## 3. Non-Goals
+
+V1 does not include:
+
+- tmux.
+- Worktree isolation per role.
+- Concurrent edits across roles as a product workflow.
+- Automatic confirmation of Claude Code permission prompts.
+- A main-page artifact inspector.
+- Raw PTY parsing to infer Claude answer boundaries.
+- Automatic writing of translations into repo artifacts.
+- Hosted auth, cloud sync, multi-user collaboration, or project indexing.
+
+## 4. Core Workflow
+
+Recommended flow:
 
 ```text
-user intent
-  -> GUI task workspace
-  -> project manager session clarification
-  -> project manager command planning
-  -> task severity classification
-  -> task spec
-  -> required role route
-  -> role session cockpit
-  -> role-specific command generation
-  -> architecture plan
-  -> public contract review
-  -> Claude Code implementation
-  -> validation
-  -> independent AI review
-  -> replan when needed
-  -> PR / final acceptance
-  -> project memory update
+project-manager
+  -> architect architecture plan
+  -> coder implementation and validation
+  -> reviewer independent review
+  -> architect docs sync / architecture drift check
+  -> project-manager final acceptance, commit, and PR
 ```
 
-## 2. 产品背景
+The workflow is a soft guide in V1. VCM computes readiness from handoff artifact checks and session state, then shows the result in the sidebar. It does not block the user from manually starting a role out of order.
 
-Claude Code 已经可以在真实项目中高效写代码，但复杂项目里的失败通常不是因为模型完全不会写代码，而是因为缺少工程控制层：
+## 5. Roles
 
-- 需求没有被澄清，Claude Code 直接开始改代码。
-- 任务没有 scope、non-goals、public contract、test contract。
-- 一个 session 同时承担架构、编码、测试、review，导致自我确认。
-- 任务进度、实现偏差、验证结果和决策只留在聊天里，无法跨 session 延续。
-- 文档、模块边界、测试策略和代码变化不同步。
-- AI 发现了计划问题，但没有正式 Replan 协议，只能边做边改。
-- 代码完成后缺少独立 reviewer 和验收清单。
+### Project Manager
 
-最新最佳实践的核心判断是：
+The project manager owns:
 
-> AI coding reliability comes from two things: public contract design prevents architecture drift, and public contract tests prevent behavior drift.
+- user communication
+- task clarification
+- role routing
+- message dispatch
+- handoff verification
+- final acceptance
+- commit and PR preparation after gates pass
 
-VibeCodingMaster 的产品机会，就是把这条原则变成日常 AI 编程工作流。
+The project manager must not become the architect, coder, and reviewer for non-trivial work.
 
-## 3. 核心价值
+### Architect
 
-### 3.1 对用户
+The architect owns:
 
-- 用户可以用自然语言描述需求，不需要手写复杂 Claude Code prompt。
-- 用户能在编码前看到清晰的实现方案和风险。
-- 用户能知道 Claude Code 做了什么、为什么这么做、如何验证。
-- 用户能把长期项目的经验沉淀到 repo，而不是沉没在聊天记录里。
-
-### 3.2 对工程团队
-
-- 降低 AI 编码带来的架构漂移。
-- 降低行为回归和测试缺失。
-- 让高风险任务进入更严格的角色路由和 human approval。
-- 让 AI 生成代码具备可审计的任务、计划、验证和 review 证据。
-
-### 3.3 对 Claude Code
-
-- 给 Claude Code 提供正确上下文，而不是大量噪音。
-- 把模糊需求转成明确 task spec。
-- 用 public contract 限制可变范围。
-- 用 contract tests 和 validation commands 提供可执行反馈。
-- 用 handoff artifacts 跨 session 保留任务状态。
-
-## 4. 目标用户
-
-### 4.1 Solo Builder
-
-已经使用 Claude Code 做大量开发，但经常遇到：
-
-- 改错文件。
-- 一次做太多。
-- 上下文丢失。
-- 测试没跑。
-- 代码能跑但架构变形。
-
-VibeCodingMaster 帮他把想法整理成小步、可验证、可回滚的任务。
-
-### 4.2 Tech Lead
-
-希望团队使用 Claude Code 提升吞吐量，但担心：
-
-- 架构边界被打穿。
-- 测试质量下降。
-- public API 被随意修改。
-- 高风险业务逻辑缺少审查。
-
-VibeCodingMaster 提供角色制、contract gate、review gate 和最终验收流程。
-
-### 4.3 Product-minded Founder
-
-能表达产品意图，但不能稳定写出高质量工程 prompt。
-
-VibeCodingMaster 把业务语言转成：
-
-- task spec
 - architecture plan
-- public surface contract
-- validation plan
-- PR summary
+- module boundaries
+- file responsibilities
+- public contracts
+- test contracts
+- Replan triggers
+- post-review docs sync and architecture drift checks
 
-## 5. 产品原则
+Outputs:
 
-### 5.1 Repo 是事实源
+- `.ai/handoffs/<task>/architecture-plan.md`
+- `.ai/handoffs/<task>/docs-sync-report.md`
 
-重要项目知识必须进入 repo，成为 Claude Code 可读取、可版本化、可 review 的 artifact。
+### Coder
 
-核心 artifact：
+The coder owns:
+
+- implementation within the approved plan
+- direct unit/contract/regression tests
+- validation evidence
+- implementation log
+
+Outputs:
+
+- `.ai/handoffs/<task>/implementation-log.md`
+- `.ai/handoffs/<task>/validation-log.md`
+
+### Reviewer
+
+The reviewer owns:
+
+- independent review
+- test adequacy
+- scope and architecture compliance
+- docs gap detection
+- risk findings
+
+Output:
+
+- `.ai/handoffs/<task>/review-report.md`
+
+## 6. Information Architecture
+
+The app has two primary areas:
+
+```text
+┌───────────────────────────────┬─────────────────────────────────────────────┐
+│ Sidebar                       │ Task Workspace                              │
+│ collapsible sections          │ header + active role console                │
+└───────────────────────────────┴─────────────────────────────────────────────┘
+```
+
+### Sidebar
+
+All sidebar groups are collapsible and default to collapsed. When no task is selected, `Repository Path` opens by default.
+
+Sections:
+
+- `Repository Path`
+- `Repository`
+- `Workflow`
+- `Settings`
+- `VCM Harness`
+- `New Task`
+- `Tasks`
+
+`Repository Path` layout:
+
+```text
+Repository Path
+[ /path/to/repo                         ]
+[ Recent v                  ] [ Connect ]
+```
+
+`Repository` shows:
+
+- path
+- branch
+- working tree state
+
+The old `Dirty: yes/no` label is not used. The UI uses `Working tree: clean` or `Working tree: uncommitted changes`.
+
+`Workflow` shows the five soft workflow gates:
+
+- Architecture
+- Implementation
+- Review
+- Docs Sync
+- PM Final
+
+`Settings` contains:
+
+- `Messages` button, opening a modal list of role messages.
+- `Events` button, opening a modal list of runtime UI events for the current task.
+- `Auto orchestration` on/off toggle.
+
+There is no separate `Pause orchestration` or `Resume orchestration` control in the GUI. The current product model is one on/off toggle.
+
+`VCM Harness` shows whether VCM managed blocks are installed/up to date in the project rules files.
+
+`New Task` contains one input:
+
+- `task name`
+
+There is no optional title input in the current UI.
+
+### Task Workspace
+
+The task workspace header is one compact row:
+
+```text
+TASK WORKSPACE  <task>  <branch>   [Project Manager] [Architect] [Coder] [Reviewer] [Refresh]
+```
+
+Role tabs show the session status for each role.
+
+The main task workspace only renders the active role console. Messages, Events, and Workflow are in the sidebar.
+
+## 7. Role Console
+
+The role console owns a single role session.
+
+Controls:
+
+- Permission mode select.
+- `Start`.
+- `Resume`.
+- `Restart`.
+- `Stop`.
+- `Translate` toggle.
+
+Permission modes:
+
+- `default`
+- `bypassPermissions`
+- `--dangerously-skip-permissions`
+
+The permission mode applies on the next start/resume/restart. If a session is already running, changing the select does not mutate that live process.
+
+When translation is off, the console shows one embedded terminal.
+
+When translation is on, the console splits horizontally:
+
+```text
+┌────────────────────────────┬────────────────────────────┐
+│ embedded Claude terminal   │ Translation panel           │
+└────────────────────────────┴────────────────────────────┘
+```
+
+The split should stay close to 50/50 width. Both panes expand vertically to fill the remaining workspace height.
+
+## 8. Session Lifecycle
+
+Buttons:
+
+- `Start`: creates a new Claude session id and starts a fresh role process.
+- `Resume`: reuses the persisted Claude session id and starts Claude Code with resume.
+- `Restart`: stops the current process and starts a fresh Claude session id.
+- `Stop`: stops the current embedded terminal process.
+
+Current command shapes:
+
+```text
+claude --agent <role> --session-id <uuid>
+claude --agent <role> --resume <uuid>
+claude --agent <role> --session-id <uuid> --permission-mode bypassPermissions
+claude --agent <role> --session-id <uuid> --dangerously-skip-permissions
+```
+
+VCM persists:
+
+- terminal runtime session id
+- Claude session id
+- transcript path
+- role status
+- permission mode
+- display command
+- cwd
+- pid when running
+- log path
+
+## 9. Harness Installation
+
+On repository connect, VCM checks:
 
 ```text
 CLAUDE.md
-docs/
-.ai/task-specs/
-.ai/handoffs/
-.ai/state/
-.ai/generated/
-tools/
+.claude/agents/project-manager.md
+.claude/agents/architect.md
+.claude/agents/coder.md
+.claude/agents/reviewer.md
 ```
 
-### 5.2 Public Contract 优先
+If a file is missing, VCM can create a recommended default.
 
-普通 feature、bug fix、PR 不能只说“改哪些文件”，还要定义：
-
-- public/exported functions
-- public methods
-- module APIs
-- service / controller / repository public entry points
-- route handlers / command handlers
-- hooks
-- externally used component props
-
-VibeCodingMaster 必须在编码前帮助用户锁定这些公共边界。
-
-### 5.3 Public Contract Tests 是验收底线
-
-新增或修改 public function 必须有契约测试。
-
-最低要求：
-
-- happy path
-- boundary or failure path
-
-高风险业务还需要：
-
-- invalid input
-- permission or state constraints
-- side effects
-- idempotency
-- historical regressions
-
-### 5.4 角色分离
-
-复杂任务中，不允许一个 Claude Code session 同时拥有架构、编码、最终测试和独立 review。
-
-默认角色链：
-
-```text
-project manager -> architect -> coder -> reviewer -> human approval
-```
-
-### 5.5 文件交接，不靠聊天记忆
-
-角色之间通过 handoff artifacts 交接：
-
-```text
-.ai/handoffs/<task-slug>/
-  architecture-plan.md
-  implementation-log.md
-  validation-log.md
-  review-report.md
-```
-
-聊天记录可以辅助理解，但不能作为长期事实源。
-
-### 5.6 Replan 是正式流程
-
-当计划和代码现实不一致时，不能悄悄改方向。
-
-VibeCodingMaster 必须触发：
-
-```text
-Stop
-  -> Explain blocker
-  -> Compare approved plan with code reality
-  -> List options
-  -> Recommend new plan
-  -> Ask approval if scope or risk changed
-  -> Update docs
-  -> Continue
-```
-
-### 5.7 流程按风险分级
-
-VibeCodingMaster 不是让所有任务都变重，而是按任务风险选择流程重量。
-
-小任务要快，复杂任务要稳，高风险任务要有硬 gate。
-
-### 5.8 GUI 是主交互入口
-
-V1 的主入口不是 CLI，而是本地 GUI 工作台。
-
-用户应该通过页面完成：
-
-- 选择本地 repo。
-- 创建任务。
-- 启动或停止 role sessions。
-- 切换 `project-manager / architect / coder / reviewer`。
-- 直接在 session 面板里和 Claude Code 沟通。
-- 查看 role command、handoff artifacts、logs、状态和风险。
-
-CLI 可以作为开发、调试或自动化入口保留，但不能成为 V1 的主要用户体验。
-
-### 5.9 终端是能力，不是产品界面
-
-Claude Code 本质上仍然是交互式终端程序，VibeCodingMaster 可以使用 embedded terminal 来承载它。
-
-但用户不应该被迫理解：
-
-- pseudo-terminal。
-- process id。
-- terminal stream。
-- WebSocket message。
-- input/output bridge。
-
-这些只应该是底层实现细节。产品界面表达的是任务、角色、会话、状态、artifact 和验收。
-
-## 6. 核心概念
-
-### 6.1 Project Manager
-
-VibeCodingMaster 的核心角色是 Project Manager。
-
-Project Manager 是面向用户的沟通者，也是面向 AI 角色的指令调度者。它不只是记录流程，而是负责把用户的业务语言逐步转成其他角色可以准确执行的命令。
-
-它负责：
-
-- 和用户对话，澄清需求。
-- 把用户输入整理成 task brief 和 task spec。
-- 判断任务严重级别。
-- 选择 required role route。
-- 决定下一步应该调用 architect、coder、reviewer 还是 specialist。
-- 为每个角色准备准确、完整、边界清楚的 role command。
-- 确保 handoff artifacts 存在。
-- 调度 Claude Code 的 architect、coder、reviewer session。
-- 收集 validation evidence。
-- 判断是否需要 Replan。
-- 维护项目状态和最终验收。
-
-它不应该成为一个“什么都自己做”的 coding session。
-
-它发给其他角色的命令必须包含：
-
-- role identity
-- task spec path
-- required input artifacts
-- allowed scope
-- public surface contract
-- test contract
-- stop conditions
-- validation commands
-- expected output artifact path
-- escalation / Replan triggers
-
-换句话说：
-
-```text
-Project Manager = user-facing conversation owner + role command dispatcher
-```
-
-它负责让每个 AI 角色“收到正确任务”，但不替代该角色完成任务。
-
-### 6.2 Task Spec
-
-Task Spec 是用户需求进入工程系统的入口。
-
-建议路径：
-
-```text
-.ai/task-specs/<task-slug>.md
-```
-
-标准结构：
+If a file already exists, VCM only inserts or replaces the managed block:
 
 ```md
-# Task Spec
-
-## Goal
-## Background
-## Scope
-## Non-goals
-## Task Severity
-## Required Role Route
-## Handoff Directory
-## Relevant Files
-## File Responsibilities
-## Public Surface Contract
-## Test Contract
-## Architecture Constraints
-## Stop Conditions
-## Expected Behavior
-## Validation Commands
-## Definition of Done
-## Risks
-## Questions
+<!-- VCM:BEGIN version=1 -->
+...
+<!-- VCM:END -->
 ```
 
-### 6.3 Architecture Plan
+VCM must preserve all user-authored content outside the managed block.
 
-Architecture Plan 是 architect role 的输出。
+After applying harness changes, the UI tells the user what changed and recommends reviewing and committing those files.
 
-建议路径：
+Role sessions get VCM behavior from `CLAUDE.md` and `.claude/agents/*.md`, not from a pasted startup context.
+
+## 10. Handoff Files
+
+Each task creates:
 
 ```text
-.ai/handoffs/<task-slug>/architecture-plan.md
-```
-
-它定义：
-
-- task classification
-- required role route
-- modules and files
-- file responsibilities
-- public surface contract
-- dependency direction
-- data flow
-- phases
-- validation per phase
-- rollback / replan triggers
-- risks
-- docs to update
-
-### 6.4 Implementation Log
-
-Implementation Log 是 coder role 的输出。
-
-建议路径：
-
-```text
-.ai/handoffs/<task-slug>/implementation-log.md
-```
-
-它记录：
-
-- files changed
-- public surface changed
-- tests added / updated
-- validation run
-- deviations from architecture plan
-- follow-ups
-
-### 6.5 Validation Log
-
-Validation Log 是任务级验证证据。
-
-建议路径：
-
-```text
-.ai/handoffs/<task-slug>/validation-log.md
-```
-
-它是单个任务的权威验证记录。  
-`.ai/state/validation-log.md` 只是跨任务滚动索引。
-
-### 6.6 Review Report
-
-Review Report 是 reviewer role 的输出。
-
-建议路径：
-
-```text
-.ai/handoffs/<task-slug>/review-report.md
-```
-
-它必须覆盖：
-
-- role / handoff compliance
-- scope review
-- architecture review
-- public contract review
-- test review
-- missing tests added
-- validation evidence
-- docs sync
-- findings
-- decision
-
-### 6.7 Role Command
-
-Role Command 是 Project Manager 发给每个 AI 角色的可执行指令。
-
-它不是普通聊天 prompt，而是由结构化上下文编译出来的任务命令。
-
-Role Command 的输入：
-
-- user intent
-- task spec
-- required role route
-- architecture plan
-- public surface contract
-- test contract
-- handoff paths
-- validation requirements
-- stop conditions
-- current task state
-
-Role Command 必须写入当前 VCM task 的 canonical handoff directory：
-
-```text
-.ai/handoffs/<task-slug>/role-commands/<role>.md
-```
-
-Project Manager 不得为同一个 VCM task 创建或使用另一个 `.ai/handoffs/<other-task>/` 目录。如果 task slug 不对，Project Manager 必须停下来要求用户创建或选择正确的 VCM task。
-
-Role Command 的输出形式：
-
-```text
-Start the architect role for task <task-slug>.
-
-Read:
-- <task spec path>
-- <relevant docs>
-
-Produce:
-- .ai/handoffs/<task-slug>/architecture-plan.md
-
-Rules:
-- define public surface contract
-- define test contract
-- do not edit production code
-- stop and escalate if ...
-```
-
-VibeCodingMaster 应保存每次发出的 Role Command，方便后续审计、复现和优化。
-
-## 7. 任务分级与角色路由
-
-VibeCodingMaster 根据任务类型自动推荐 role route。
-
-| 等级 | 任务类型 | 示例 | 推荐路由 |
-| --- | --- | --- | --- |
-| T0 | trivial | 文案、注释、无行为变化的小配置 | `coder`，可选 review checklist |
-| T1 | small scoped change | 单文件 bug、简单测试、已知模式修复 | `coder -> fresh review` 或 `coder -> reviewer` |
-| T2 | ordinary feature | 有边界的多文件 feature、普通 PR | `architect -> coder -> reviewer` |
-| T3 | cross-module / architectural | 跨模块改动、重构、新 public surface | `architect -> coder -> reviewer` |
-| T4 | high-risk | auth、permission、payment、billing、schema、public API、security | `architect -> specialist -> coder -> reviewer -> human approval` |
-| T5 | large rewrite / greenfield | 新子系统、大迁移、长期重构 | `architect`，然后每个 phase 循环 `coder -> reviewer`，阶段边界做 architect review |
-
-当分类不明确时，选择更严格的路由。
-
-## 8. 端到端工作流
-
-### 8.1 新项目初始化
-
-用户连接一个 repo 后，VibeCodingMaster 执行 Harness Scan：
-
-```text
-Scan repo
-  -> identify language, framework, package manager
-  -> identify test commands
-  -> inspect directory and module boundaries
-  -> check CLAUDE.md
-  -> check docs/ARCHITECTURE.md
-  -> check docs/MODULE_MAP.md
-  -> check docs/TESTING.md
-  -> check module-local CLAUDE.md
-  -> check validation tools
-  -> check generated artifacts
-  -> report harness gaps
-```
-
-输出 Project Harness Report：
-
-- 当前 harness level。
-- 缺失的核心文档。
-- 缺失的 validation commands。
-- 高风险模块。
-- 是否存在 generated artifact freshness check。
-- 是否适合执行非平凡 AI coding。
-
-### 8.2 用户提出需求
-
-用户输入自然语言：
-
-```text
-帮我把账单里的优惠券和部分退款逻辑修一下。
-```
-
-VibeCodingMaster 不直接让 Claude Code 编码，而是先澄清：
-
-- 期望行为是什么？
-- 哪些入口受影响？
-- 是否允许改 public API？
-- 是否允许改 schema？
-- 是否涉及权限、支付、数据删除？
-- 成功标准是什么？
-- 需要保留哪些兼容行为？
-
-### 8.3 生成 Task Spec
-
-VibeCodingMaster 根据用户回答和代码库扫描生成 Task Spec。
-
-关键要求：
-
-- 至少定义 file responsibilities。
-- 普通任务定义 public surface contract。
-- 新增或修改 public function 定义 test contract。
-- 高风险任务定义 human approval gate。
-
-### 8.4 Preflight Architecture Review
-
-VibeCodingMaster 调用 Claude Code architect session 或等价架构角色生成 `architecture-plan.md`。
-
-随后可调用独立模型做 Preflight Review，例如 ChatGPT、Gemini 或 fresh Claude session。
-
-Preflight Review 输出：
-
-```text
-Decision: approve / request_changes / block
-
-Critical Issues:
-Architecture Risks:
-Public Contract Risks:
-Missing Context:
-Test Requirements:
-Suggested Plan Changes:
-Final Recommendation:
-```
-
-如果 decision 是 `request_changes`，回到 architect 修改计划。  
-如果 decision 是 `block`，停止并请求用户或 human reviewer 决策。
-
-### 8.5 Coder 执行
-
-Coder role 只执行 approved plan。
-
-执行 prompt 必须包含：
-
-- task spec path
-- architecture plan path
-- scope
-- public surface contract
-- test contract
-- validation commands
-- stop conditions
-- handoff log path
-
-Coder 不能静默改变：
-
-- scope
-- public contract
-- module responsibility
-- architecture direction
-- test strategy
-
-如需改变，必须触发 Replan。
-
-### 8.6 Validation
-
-VibeCodingMaster 按任务风险选择验证层级：
-
-```text
-L0 Fast Checks
-  format, lint, typecheck, architecture boundary, dependency rules
-
-L1 Focused Unit / Contract Tests
-  changed-file tests, public contract tests, regression tests
-
-L2 Module / Integration Tests
-  module service tests, DB integration, API contract
-
-L3 Smoke E2E
-  core user journeys, browser/API smoke flows
-
-L4 Full Regression / Release Suite
-  historical replay, visual, accessibility, perf, cross-browser
-```
-
-默认规则：
-
-- T0：L0。
-- T1：L0 + focused L1。
-- T2：L0 + L1 + relevant L2。
-- T3：L0 + L1 + L2。
-- T4：L0 + L1 + L2 + relevant L3，release 前 L4。
-- T5：每个 phase 有独立 validation plan。
-
-### 8.7 Independent Review
-
-Reviewer role 使用 fresh context 或独立 reviewer session。
-
-Review 优先级：
-
-1. correctness
-2. security / permission risk
-3. regressions
-4. missing tests
-5. architecture boundary violations
-6. public contract mismatch
-7. docs sync
-
-Reviewer 可以做小范围、低风险、review-scoped fixes，例如：
-
-- 增强测试断言。
-- 增加小的边界测试。
-- 修复测试 fixture。
-- 修复明显 typo、import、lint。
-
-Reviewer 不能接管中大型实现。如果发现业务逻辑或架构问题，必须退回 coder 或 architect。
-
-### 8.8 Final Acceptance
-
-VibeCodingMaster 的最终验收检查：
-
-```text
-behavior is correct
-+ architecture is compliant
-+ public contract is accurate
-+ tests are sufficient
-+ validation evidence exists
-+ docs are synced
-+ plan deviations are traceable
-```
-
-最终报告必须包含：
-
-```text
-Task severity:
-Role sessions used:
-Handoff artifacts:
-Files changed:
-Public surface changed:
-Tests added/updated:
-Validation run:
-Architecture checks:
-Docs updated:
-Plan deviations:
-Remaining risks:
-Decision:
-```
-
-## 9. 产品功能模块
-
-### 9.1 Chat Intake
-
-负责和用户沟通，把自然语言变成工程需求。
-
-能力：
-
-- 识别任务类型。
-- 判断风险等级。
-- 追问关键需求。
-- 识别 high-risk boundaries。
-- 生成 task brief。
-
-### 9.2 Task Spec Builder
-
-负责生成和维护 `.ai/task-specs/<task-slug>.md`。
-
-能力：
-
-- scope / non-goals。
-- severity classification。
-- required role route。
-- file responsibilities。
-- public surface contract。
-- test contract。
-- validation commands。
-- stop conditions。
-
-### 9.3 Role Route Manager
-
-负责根据任务分级选择 role route。
-
-能力：
-
-- 推荐 `architect / coder / reviewer / specialist`。
-- 检查当前 session role 是否匹配。
-- 阻止错误角色继续执行。
-- 在 GUI 中引导用户启动或切换到正确 Claude Code role session。
-
-### 9.4 Handoff Manager
-
-负责管理 `.ai/handoffs/<task-slug>/`。
-
-能力：
-
-- 创建 handoff directory。
-- 校验 artifact schema。
-- 检查前置 artifact 是否存在。
-- 汇总角色输出。
-- 标记缺失或不一致内容。
-
-### 9.5 Contract Manager
-
-负责管理 public surface contract 和 test contract。
-
-能力：
-
-- 识别 public functions / module APIs。
-- 记录输入、输出、副作用、错误行为、依赖规则。
-- 检查代码变更是否修改 public surface。
-- 提醒新增或更新 contract tests。
-- 调用 `tools/check-public-surface` 和 `tools/check-contract-tests`。
-
-### 9.6 Prompt Compiler
-
-负责把 VibeCodingMaster 的结构化任务上下文编译成 AI 角色可以准确执行的完整命令。
-
-它服务于 Project Manager，是 Project Manager “给其他角色发准确命令”的核心能力。
-
-输入：
-
-- 用户原始需求。
-- Task Spec。
-- Required Role Route。
-- Architecture Plan。
-- Public Surface Contract。
-- Test Contract。
-- Handoff Directory。
-- Validation Commands。
-- Stop Conditions。
-- 当前任务状态。
-
-输出：
-
-- architect role command。
-- coder role command。
-- reviewer role command。
-- specialist role command。
-- human approval brief。
-
-每个 role command 必须回答：
-
-- 你是谁。
-- 你要读什么。
-- 你要产出什么。
-- 你可以改什么。
-- 你不能改什么。
-- 什么情况下必须停止。
-- 你必须运行或检查哪些验证。
-- 你的完成标准是什么。
-
-### 9.7 Session Cockpit
-
-V1 的核心产品模块。负责在 GUI 中管理一个任务里的多个 Claude Code role sessions。
-
-推荐结构：
-
-```text
-Task Workspace: <task-slug>
-
-Role sessions:
-  project-manager
-  architect
-  coder
-  reviewer
-
-Each role session:
-  embedded terminal
-  input channel
-  output stream
-  status badge
-  role command link
-  raw log link
-  handoff artifact link
-```
-
-能力：
-
-- 在页面中展示一个任务下的所有 role sessions。
-- 允许用户用 tabs 或 split view 切换 `project-manager`、`architect`、`coder`、`reviewer`。
-- 在每个 session 面板中嵌入真实 Claude Code 交互终端。
-- 支持用户直接在当前 role session 中输入、确认权限、继续对话。
-- 支持启动、停止、重启、恢复单个 role session。
-- 展示每个 role session 的状态：not started / starting / running / waiting / blocked / done / crashed。
-- 展示每个 role session 对应的 role command、raw log 和 handoff artifact。
-- 支持把 Project Manager 生成的 role command 从 GUI 发送到目标 role session。
-- 支持将 terminal output 持续写入 task logs。
-
-原则：
-
-- GUI 是主入口，终端编排是底层能力。
-- 一个任务默认对应一个 session cockpit。
-- 一个角色默认对应一个 Claude Code session。
-- 多个 role session 可以同时存在，但写代码仍遵守 single-writer rule。
-- VibeCodingMaster 负责 session lifecycle、可见性、artifact 管理和状态汇总，不替代 role agent 的专业判断。
-
-### 9.8 Terminal Runtime Manager
-
-负责在本地机器上托管 Claude Code 的交互式终端进程，并把输入输出桥接到 GUI。
-
-V1 推荐：
-
-```text
-GUI frontend
-  -> WebSocket
-  -> local Node backend
-  -> node-pty
-  -> claude --agent <role> [permission option]
-```
-
-能力：
-
-- 为每个 role 创建 pseudo-terminal。
-- 将终端输出流式推送到前端 embedded terminal。
-- 将用户键盘输入从前端写回对应 pty。
-- 允许 backend 在用户触发时向 pty 写入短指令。
-- 允许 backend 监听 pty output，并用于日志、状态和 GUI 提醒。
-- 支持 resize。
-- 支持进程退出、异常、重启和状态上报。
-- 支持将 raw terminal stream 保存到 logs。
-
-权限模式：
-
-- GUI 在每个 role session 的 Start / Restart 上方提供权限选项。
-- `默认`：不额外传权限参数，使用 Claude Code 默认权限行为。
-- `bypassPermissions`：启动参数为 `--permission-mode bypassPermissions`。
-- `--dangerously-skip-permissions`：启动参数为 `--dangerously-skip-permissions`。
-- 选项只影响新启动或重启的 session，不自动改变已经运行中的 Claude Code 进程。
-
-自动化边界：
-
-- V1 可以程序化写入 terminal input，但只用于用户触发的 command dispatch。
-- V1 可以程序化读取 terminal output，但只做 raw log、轻量状态和 UI 提醒。
-- V1 不自动确认 Claude Code 权限提示。
-- V1 允许用户在启动 session 时主动选择较宽松的 Claude Code 权限模式。
-- V1 不让 PM 自动连续驱动 architect / coder / reviewer。
-- V1 不根据 terminal output 自动执行高风险下一步。
-
-### 9.9 Claude Code Adapter
-
-负责将 Prompt Compiler 生成的 role command 交给 Claude Code 执行，或生成可复制的 Claude Code prompt。
-
-能力：
-
-- 启动或恢复 architect session。
-- 启动或恢复 coder session。
-- 启动或恢复 reviewer session。
-- 注入 artifact paths。
-- 注入 stop conditions。
-- 收集执行输出。
-- 处理 Claude Code 交互式权限确认和等待状态。
-
-V1 中，Claude Code Adapter 主要通过 Terminal Runtime Manager 工作。它不直接实现翻译功能；翻译由 `project-manager` agent 根据自己的 role prompt 完成。
-
-### 9.10 Cross-Model Reviewer
-
-负责让另一个 AI 模型审查计划或代码。
-
-能力：
-
-- Preflight Plan Review。
-- Public Contract Review。
-- Test Contract Review。
-- Code Diff Review。
-- Security Review。
-- Architecture Review。
-
-价值：
-
-- 避免实现 session 自我确认。
-- 在编码前发现方案问题。
-- 在 PR 前发现遗漏测试、边界问题和架构漂移。
-
-### 9.11 Validation Runner
-
-负责验证命令管理。
-
-能力：
-
-- 推荐验证层级。
-- 运行或指导运行 validation commands。
-- 摘要失败日志。
-- 要求失败后 rerun。
-- 写入 task-level validation log。
-
-### 9.12 Replan Controller
-
-负责处理计划偏差。
-
-能力：
-
-- 识别 replan trigger。
-- 冻结当前实现状态。
-- 比较 plan 和 code reality。
-- 生成选项：patch forward、partial rollback、full rollback。
-- 记录用户或 human reviewer 的决策。
-- 更新 task spec、architecture plan 和 docs。
-
-### 9.13 Project Memory
-
-负责项目长期状态。
-
-文件：
-
-```text
-.ai/state/progress.md
-.ai/state/decisions.md
-.ai/state/validation-log.md
-.ai/state/known-issues.md
-.ai/state/scratch.md
-```
-
-能力：
-
-- 记录 active tasks。
-- 记录架构和设计决策。
-- 记录 deferred findings。
-- 记录 validation index。
-- 清理 session-local scratch。
-
-### 9.14 PR Assistant
-
-负责把任务结果整理成 PR。
-
-PR 描述应包含：
-
-- task summary。
-- task spec link。
-- architecture plan link。
-- files changed。
-- public surface changed。
-- tests added / updated。
-- validation evidence。
-- docs sync。
-- remaining risks。
-
-## 10. 信息架构
-
-推荐 repo 结构：
-
-```text
-repo/
-  CLAUDE.md
-
-  docs/
-    ARCHITECTURE.md
-    MODULE_MAP.md
-    TESTING.md
-    SECURITY.md
-    DEPENDENCY_RULES.md
-    cc-best-practices.md
-    product-design.md
-    exec-plans/
-      active/
-      completed/
-
-  .claude/
-    settings.json
-    skills/
-    agents/
-      architect.md
-      coder.md
-      reviewer.md
-      optional/
-        security-specialist.md
-        migration-specialist.md
-        performance-specialist.md
-        frontend-qa.md
-    commands/
-
-  .ai/
-    task-specs/
-    handoffs/
-    state/
-    generated/
-
-  tools/
-    check-fast
-    check-changed
-    check-module
-    check-e2e-smoke
-    check-boundaries
-    check-public-surface
-    check-contract-tests
-    check-generated-artifacts
-    check-docs-freshness
-    check-agent-rules
-```
-
-## 11. 关键界面
-
-### 11.1 Project Dashboard
-
-显示：
-
-- 已连接 repo。
-- active tasks。
-- task severity。
-- required role route。
-- 每个任务的 session health。
-- blocked tasks。
-- recent validation failures。
-- known issues。
-- harness health。
-- 最近打开的 role session。
-
-### 11.2 Task Workspace
-
-一个任务的主工作台。
-
-左侧：
-
-- 任务列表。
-- 用户需求。
-- task spec。
-- required role route。
-- open questions。
-
-中间：
-
-- role session tabs。
-- embedded Claude Code terminal。
-- 当前 role 的输入框和输出流。
-- session toolbar：start / stop / restart / clear view / open log。
-- role status：starting / running / waiting / blocked / done / crashed。
-- acceptance checklist。
-
-### 11.3 Session Console
-
-显示单个 Claude Code role session 的完整交互界面：
-
-- role name。
-- agent command，例如 `claude --agent architect`。
-- terminal viewport。
-- terminal input。
-- running / waiting / crashed 状态。
-- last output time。
-- raw log path。
-- restart / stop / mark done 操作。
-
-Session Console 必须支持 Claude Code 的交互式确认场景，例如权限确认、继续执行确认、失败后用户补充指令。
-
-### 11.4 Handoff Files
-
-V1 不在任务主界面展示独立 artifact panel。role commands、handoff artifacts 和 raw logs 仍保存在任务目录中，作为 Claude Code sessions 之间的文件级事实源；GUI 优先把空间留给 embedded terminal。
-
-### 11.5 Contract View
-
-显示当前任务涉及的 public surface：
-
-- public function name。
-- owner module。
-- inputs。
-- outputs。
-- side effects。
-- error behavior。
-- dependency rules。
-- existing tests。
-- required tests。
-- contract status。
-
-### 11.6 Review Inbox
-
-集中处理：
-
-- Preflight Review findings。
-- Code Review findings。
-- Replan requests。
-- Missing test warnings。
-- Docs sync warnings。
-- Human approval gates。
-
-### 11.7 Harness Health
-
-显示：
-
-- root `CLAUDE.md` 是否存在。
-- module-local `CLAUDE.md` 覆盖率。
-- architecture docs 是否存在。
-- testing docs 是否存在。
-- validation tools 是否存在。
-- generated artifacts 是否 freshness-checked。
-- role agents 是否存在。
-- hooks / CI gates 是否存在。
-- known issues 是否过期。
-
-## 12. 数据对象
-
-### 12.1 Project
-
-```json
-{
-  "id": "project_123",
-  "name": "VibeCodingMaster",
-  "repoPath": "/path/to/repo",
-  "defaultBranch": "main",
-  "harnessHealth": "partial",
-  "validationCommands": [
-    "tools/check-fast",
-    "tools/check-changed"
-  ]
-}
-```
-
-### 12.2 Task
-
-```json
-{
-  "id": "task_123",
-  "slug": "coupon-partial-refund",
-  "title": "Fix coupon and partial refund calculation",
-  "severity": "T4",
-  "status": "planning",
-  "requiredRoleRoute": [
-    "architect",
-    "billing-specialist",
-    "coder",
-    "reviewer",
-    "human-approval"
-  ],
-  "specPath": ".ai/task-specs/coupon-partial-refund.md",
-  "handoffDirectory": ".ai/handoffs/coupon-partial-refund"
-}
-```
-
-### 12.3 Public Contract
-
-```json
-{
-  "symbol": "RefundService.calculateRefundAmount",
-  "module": "billing",
-  "signatureStatus": "unchanged",
-  "inputs": ["invoiceId", "request"],
-  "output": "Money",
-  "sideEffects": [],
-  "errorBehavior": ["throws when invoice is not refundable"],
-  "dependencyRules": ["must not call payment adapter internals"],
-  "requiredTests": [
-    "happy path",
-    "refund cannot exceed post-discount total",
-    "invalid invoice state"
-  ]
-}
-```
-
-### 12.4 Review
-
-```json
-{
-  "id": "review_123",
-  "type": "preflight_plan",
-  "reviewer": "cross_model_reviewer",
-  "decision": "request_changes",
-  "findings": [
-    {
-      "severity": "high",
-      "category": "public_contract",
-      "message": "The plan changes refund behavior but does not define consumer-facing contract tests."
-    }
-  ]
-}
-```
-
-### 12.5 Role Session
-
-```json
-{
-  "id": "session_architect_123",
-  "claudeSessionId": "00000000-0000-4000-8000-000000000001",
-  "taskSlug": "coupon-partial-refund",
-  "role": "architect",
-  "status": "running",
-  "command": "claude --agent architect --permission-mode bypassPermissions",
-  "permissionMode": "bypassPermissions",
-  "terminalBackend": "node-pty",
-  "logPath": ".ai/handoffs/coupon-partial-refund/logs/architect.log",
-  "roleCommandPath": ".ai/handoffs/coupon-partial-refund/role-commands/architect.md",
-  "handoffArtifactPath": ".ai/handoffs/coupon-partial-refund/architecture-plan.md",
-  "startedAt": "2026-05-29T00:00:00+08:00",
-  "lastOutputAt": "2026-05-29T00:03:14+08:00"
-}
-```
-
-### 12.6 Terminal Event
-
-```json
-{
-  "id": "evt_123",
-  "sessionId": "session_architect_123",
-  "type": "output",
-  "timestamp": "2026-05-29T00:03:14+08:00",
-  "data": "Architecture Summary..."
-}
-```
-
-## 13. MVP 范围
-
-### 13.1 V1 产品定位
-
-V1 只做一件事：
-
-> 做一个本地 GUI Session Cockpit，让用户可以在一个任务工作台中启动、切换、查看、输入和管理多个 Claude Code role sessions。
-
-V1 不在产品层做翻译功能。  
-用户输入和 Claude Code 输出的中英翻译，交给 `.claude/agents/project-manager.md` 中定义的 Project Manager 角色完成。
-
-V1 的核心判断标准不是“CLI 是否能控制多个终端”，而是：
-
-> 用户是否可以不离开 GUI，就完成多 Claude Code sessions 的创建、切换、沟通、观察、日志保存和 handoff artifact 查看。
-
-### 13.2 V1 必须支持
-
-1. 启动本地 GUI 应用。
-2. 连接或选择本地 Git repo。
-3. 检查本机是否安装 Claude Code。
-4. 创建任务 workspace。
-5. 为任务创建 handoff directory：
-   - `.ai/handoffs/<task-slug>/`
-   - `.ai/handoffs/<task-slug>/role-commands/`
-   - `.ai/handoffs/<task-slug>/logs/`
-6. 在 GUI 中展示 role session tabs：
-   - `project-manager`
-   - `architect`
-   - `coder`
-   - `reviewer`
-7. 在对应 role session 中启动 Claude Code：
-   - 首次启动：`claude --agent <role> --session-id <uuid>`
-   - 恢复启动：`claude --agent <role> --resume <uuid>`
-8. 在页面中嵌入每个 Claude Code session 的终端输出和输入。
-9. 支持用户切换 role session 并直接沟通。
-10. 支持 Claude Code 权限确认、等待用户输入、失败后补充指令等交互式场景。
-11. 展示每个 role session 的状态：not started / starting / running / waiting / blocked / done / crashed。
-12. 支持启动、停止、重启某个 role session。
-13. 支持 Project Manager 生成 role command artifact。
-14. 支持用户在 GUI 中查看 role command，并一键发送到目标 role session。
-15. 将每个 role session 的 raw output 保存为日志。
-16. 在 GUI 中查看 architecture-plan / implementation-log / validation-log / review-report。
-17. 检查 handoff artifacts 是否存在、是否为空、是否包含必要标题。
-18. 展示当前任务的状态摘要和下一步建议。
-19. 在 `.vcm/sessions/<task-slug>.json` 中记录每个 role 的 `claudeSessionId`，支持异常中断后 Resume。
-20. 保留 CLI 作为开发和调试入口，但不要求用户用 CLI 完成主流程。
-
-### 13.3 V1 明确不做
-
-- SaaS 多用户协作。
-- 企业权限和审计。
-- 完整 Desktop 打包和自动更新。
-- 产品层翻译管线。
-- 独立翻译模型调用。
-- 自动生成完整 Task Spec。
-- 自动做 Preflight Review。
-- 自动做 Cross-Model Code Review。
-- 自动判断 public contract 和 test contract。
-- 自动运行 validation commands。
-- 自动创建 PR。
-- Jira / Linear / GitHub 双向同步。
-- 云端 session 托管。
-- 多 repo / 多任务并行调度。
-- 多 worktree 自动管理。
-- 让用户手动管理底层 terminal process。
-
-这些能力可以作为后续版本演进。V1 的判断标准不是“PM 流程是否全部自动化”，而是“GUI 是否让多 Claude Code role sessions 变得可见、可切换、可沟通、可恢复、可交接”。
-
-### 13.4 V1 本地执行机制
-
-推荐 V1 使用本地 Web GUI：
-
-```text
-Browser UI / Desktop shell
-  -> local Node backend
-  -> WebSocket terminal bridge
-  -> node-pty
-  -> claude --agent <role>
-```
-
-职责分离：
-
-- Frontend 负责工作台、tabs、terminal viewport、状态展示。
-- Backend 负责 repo 连接、进程生命周期、pty I/O、日志写入、artifact 读写。
-- Claude Code role session 负责实际沟通和执行。
-- Handoff artifacts 负责跨 session 传递稳定结果。
-
-V1 的 terminal runtime 固定为：
-
-```text
-TerminalRuntime implementation = node-pty
-```
-
-后续如果要增强持久性，应优先改进本地 backend lifecycle、session registry、raw logs 和恢复体验，而不是引入额外终端复用层。
-
-### 13.5 Controller-Mediated Role Command
-
-推荐文件：
-
-```text
-.ai/handoffs/<task-slug>/
+.ai/handoffs/<task>/
   role-commands/
     architect.md
     coder.md
@@ -1315,283 +309,194 @@ TerminalRuntime implementation = node-pty
   implementation-log.md
   validation-log.md
   review-report.md
+  docs-sync-report.md
+  messages/
+    <message-id>.md
 ```
 
-Project Manager 不直接无限制控制其他 Claude Code sessions。
+The product treats handoff files as durable facts. The terminal is useful for live interaction, but handoff files and message history are what survive task handoffs cleanly.
 
-正确模型：
+The main UI no longer has a dedicated artifact panel. Artifact APIs still exist for status checks, role command compatibility, and future UI work.
+
+## 11. Message Bus
+
+VCM messaging is API-driven.
 
 ```text
-Project Manager session
-  -> writes role command artifact
-  -> GUI shows command artifact to user
-  -> user approves or sends from GUI
-  -> VibeCodingMaster backend writes short instruction to target role session
-  -> target role session executes
-  -> backend records raw log
-  -> handoff artifact becomes stable result
+role terminal
+  -> vcmctl
+  -> VCM backend API
+  -> policy validation
+  -> durable message snapshots
+  -> target terminal write when allowed
 ```
 
-也就是说：
+Allowed message routes:
 
-- PM 负责“决定发什么命令”。
-- GUI 负责让用户看见、确认和发送。
-- Backend 负责把命令送进正确 role session。
-- Role agent 负责执行命令并输出结果。
-- Handoff artifacts 负责跨 session 传递稳定结果。
+- `project-manager` to `architect` / `coder` / `reviewer`: `task`, `question`, `review-request`, `revise`, `cancel`
+- `architect` / `coder` / `reviewer` to `project-manager`: `result`, `question`, `blocked`, `finding`
+- `user` to `project-manager`: `user-request`
 
-### 13.6 V1 交互形态
+Manual mode:
 
-第一版应该是本地 GUI：
+- message status becomes `pending_approval` when the target role is running
+- user opens `Messages`
+- user clicks `Stage`
+- VCM writes a short prompt into the target terminal
+- VCM does not submit Enter
+
+Auto mode:
+
+- if target role is running, VCM writes a `[VCM MESSAGE]` envelope and submits it
+- PM remains the routing hub
+- non-PM roles reply to PM
+
+The backend still has a `paused` state field and pause/resume API routes for compatibility. The current GUI exposes only manual/auto.
+
+## 12. Translation
+
+Translation is a local assistant layer beside the role terminal.
+
+### Provider Settings
+
+Settings are saved in:
 
 ```text
-Open VibeCodingMaster
-  -> Select repo
-  -> New task
-  -> Start project-manager session
-  -> PM clarifies task
-  -> Start architect session
-  -> Send architect command
-  -> View architecture-plan.md
-  -> Start coder session
-  -> Send coder command
-  -> View implementation-log.md and validation-log.md
-  -> Start reviewer session
-  -> Send reviewer command
-  -> View review-report.md
-  -> Final acceptance
+~/.vcm/settings.json
 ```
 
-CLI 可以保留为：
+The settings file stores:
 
-- 启动 dev server。
-- 调试 backend。
-- 导出状态。
-- 执行自动化 smoke test。
+- translation provider settings
+- translation API key
+- recent repository paths
 
-但用户主流程必须在 GUI 中完成。
+The API key input is a normal text input. The file is local to the user's machine/runtime.
 
-## 14. 成功指标
+Provider type:
 
-### 14.1 V1 稳定性指标
+- OpenAI-compatible chat completions
 
-- GUI 启动成功率。
-- repo 连接成功率。
-- role session 创建成功率。
-- Claude Code role session 启动成功率。
-- embedded terminal 输入输出成功率。
-- WebSocket 断线重连成功率。
-- role command 从 GUI 发送成功率。
-- session output 保存为 raw log 的成功率。
-- stop / restart / recover 成功率。
+Prompt slots:
 
-### 14.2 流程指标
+- `zh-to-en`
+- `zh-to-en-with-context`
+- `en-to-zh`
 
-- 每个任务都有 GUI workspace 的比例。
-- 每个 role session 都有 raw log 的比例。
-- 每个 role command 都有 artifact 的比例。
-- 用户能在 GUI 中查看 handoff artifacts 的比例。
-- PM 能读取 architect / coder / reviewer 输出并生成状态摘要的比例。
-- 用户在 role session 中手动介入后，VibeCodingMaster 能恢复 session 状态的比例。
+The settings modal shows the default prompt for each slot and allows a user override. Empty override means use the default prompt.
 
-### 14.3 用户体验指标
+### Claude Output Translation
 
-- 用户手写 prompt 长度下降。
-- 用户可以清楚看到每个 role session 当前状态。
-- 用户可以在 GUI 中切换到任意 Claude Code role session。
-- 用户可以直接在 GUI 中输入、确认权限和继续对话。
-- 用户觉得多 Claude Code session 的切换和管理成本下降。
-- 用户愿意用 VibeCodingMaster 启动下一次多角色任务。
+Output translation does not read raw PTY text.
 
-## 15. 里程碑
-
-### Phase 1：Local GUI Shell
-
-- 创建本地 Web GUI 或 Desktop shell。
-- 支持选择本地 repo。
-- 显示 Project Dashboard。
-- 显示 Task Workspace。
-- 创建 `.vcm` 和 `.ai/handoffs/` 基础目录。
-
-### Phase 2：Embedded Claude Code Sessions
-
-- 使用 `node-pty` 启动 `claude --agent <role>`。
-- 使用 xterm.js 嵌入 terminal。
-- 支持 terminal input / output / resize。
-- 支持 `project-manager / architect / coder / reviewer` tabs。
-- 支持 stop / restart / crashed 状态。
-
-### Phase 3：Task Artifacts Panel
-
-- 创建 `.ai/handoffs/<task-slug>/`。
-- 创建 `role-commands/` 和 `logs/`。
-- 展示 architecture-plan / implementation-log / validation-log / review-report。
-- 检查 handoff artifact 是否存在。
-- 检查 handoff artifact schema completeness。
-- 支持从 artifact 跳转到对应 role session。
-
-### Phase 4：GUI Role Command Dispatch
-
-- PM 生成 architect.md。
-- GUI 展示 command 并允许用户发送到 architect session。
-- PM 生成 coder.md。
-- GUI 展示 command 并允许用户发送到 coder session。
-- PM 生成 reviewer.md。
-- GUI 展示 command 并允许用户发送到 reviewer session。
-- Backend 保存 raw logs 和 dispatch event。
-
-### Phase 5：后续增强
-
-- Task Spec Builder。
-- public contract / test contract gate。
-- Preflight Review。
-- Cross-Model Code Review。
-- validation runner。
-- GitHub PR integration。
-- session persistence hardening。
-- Desktop packaging。
-
-## 16. 主要风险
-
-### 16.1 Claude Code 交互终端嵌入复杂
-
-风险：Claude Code 是交互式终端程序，GUI 必须完整支持 ANSI output、键盘输入、resize、权限确认、长输出和等待用户输入。
-
-应对：
-
-- 使用 xterm.js 承载终端显示。
-- 使用 node-pty 承载真实 pty。
-- 保留 raw terminal stream。
-- 支持用户直接在当前 session 面板中输入。
-- 对 waiting / crashed / exited 状态做显式提示。
-
-### 16.2 Session 持久性和恢复
-
-风险：页面刷新、backend 重启或进程崩溃可能导致 session 丢失。
-
-应对：
-
-- Backend 持有 session registry。
-- 原始输出全部保存到 logs。
-- 关键结论以 handoff artifacts 为准。
-- 页面刷新后从 backend 重新订阅 session。
-- 后续增强本地 backend lifecycle、session metadata 和恢复体验。
-
-### 16.3 多 session 资源和成本
-
-风险：同时启动多个 Claude Code sessions 会消耗本地资源、上下文和 token。
-
-应对：
-
-- 默认按角色路由逐步启动 session。
-- T0/T1 只启动 project-manager 和 coder。
-- 未使用 role session 保持 not started。
-- UI 显示运行中 session 和资源提示。
-
-### 16.4 PM 直接控制其他 session 的权限过大
-
-风险：如果 Project Manager agent 可以无限制向其他 session 写入指令，可能误发命令、覆盖用户输入或形成 agent 间失控循环。
-
-应对：
-
-- 采用 controller-mediated 模式。
-- PM 只产出 role command artifact。
-- GUI 显示 role command，用户可确认后发送。
-- Backend 负责发送短指令和记录 dispatch。
-- 对高风险命令要求用户确认。
-
-### 16.5 流程过重
-
-风险：用户只是想改一个小 bug，却被迫打开完整多角色工作台。
-
-应对：
-
-- T0/T1 提供 lightweight task mode。
-- T0/T1 可以只启动 `project-manager` 和 `coder`。
-- T2 以上才推荐完整 role route。
-- UI 中默认折叠高级 contract 字段，但内部仍保留检查。
-
-### 16.6 AI Review 不可靠
-
-风险：Reviewer 模型会误判、漏判或提出过度设计建议。
-
-应对：
-
-- 使用结构化 review output。
-- 要求引用代码证据。
-- 区分 block、request changes、suggestion。
-- 高风险任务保留 human approval。
-
-### 16.7 Handoff 成为形式主义
-
-风险：角色交接文件被创建，但内容空洞。
-
-应对：
-
-- 用 schema check 检查关键字段。
-- reviewer 检查 handoff compliance。
-- final acceptance 把 handoff artifact 作为硬条件。
-- UI 中直接显示 missing / incomplete / ok。
-
-### 16.8 文档漂移
-
-风险：VibeCodingMaster 生成大量文档，但后续不更新。
-
-应对：
-
-- `tools/check-docs-freshness`。
-- Replan 时强制同步文档。
-- PR template 加 docs sync checklist。
-- 月度 harness review 删除无用文档。
-
-### 16.9 和 Claude Code 原生能力重叠
-
-风险：Claude Code 原生增强后，简单 prompt wrapper 或简单多终端管理被替代。
-
-应对：
-
-- 不把核心价值放在 prompt 美化。
-- 不把核心价值放在 terminal 包装。
-- 核心放在 GUI session cockpit、project orchestration、public contract、test contract、handoff、review gate、acceptance。
-
-### 16.10 GUI 产品复杂度上升
-
-风险：GUI、terminal runtime、backend process manager 一起做，复杂度高于 CLI。
-
-应对：
-
-- V1 只做本地单用户。
-- V1 只做一个 repo、一个 task workspace 的核心路径。
-- V1 不做自动 review、自动 validation、自动 PR。
-- 先把 embedded Claude Code sessions 和 handoff artifact visibility 做扎实。
-
-### 16.11 安全和权限边界不清
-
-风险：用户以为 GUI 是 sandbox，但 Claude Code 实际仍在本地 repo 环境运行。
-
-应对：
-
-- 在 repo 连接和 session 启动前明确提示。
-- 显示当前 repo path 和 branch。
-- 高风险任务保留 human approval。
-- 后续接入 Claude Code permissions/hooks。
-- 不隐藏 Claude Code 的权限确认。
-
-## 17. 产品判断
-
-VibeCodingMaster 的机会不是做一个更会聊天的 Claude Code 外壳，而是做 Claude Code 之上的工程管理层。
-
-最小可行定位：
-
-> 面向 Claude Code 的本地 GUI 多 session 工作台。它用一个任务页面托管 project-manager、architect、coder、reviewer 等 Claude Code sessions，让用户可以切换沟通、查看输出、管理 handoff artifacts，并逐步用 public contract、contract tests、独立 review 和 human approval 管住高风险任务。
-
-长期形态：
+VCM tails Claude Code transcript JSONL files under:
 
 ```text
-Claude Code = coding engine
-VibeCodingMaster = GUI session cockpit + project manager + harness manager + quality gatekeeper
+~/.claude/projects/<project-hash>/<claude-session-id>.jsonl
 ```
 
-如果 VibeCodingMaster 只做 prompt 优化，它很容易被插件或 Claude Code 原生能力替代。  
-如果它只做 CLI 或 terminal 包装，也很难成为用户每天愿意打开的产品。  
-如果它做到 GUI session cockpit、角色路由、handoff 管理、contract gate、validation evidence、review gate、Replan 和项目记忆，它就会成为 AI 编程团队的工程控制台。
+The transcript path is persisted in the role session record. If that path is missing, VCM falls back to resolving by current working directory and then scanning `~/.claude/projects` for the newest file with the session id.
+
+Transcript event handling:
+
+- assistant text -> `prose` -> translated
+- AskUserQuestion tool -> formatted `prose` -> translated
+- TodoWrite tool -> formatted `prose` -> translated
+- Agent/Task tool -> formatted `prose` -> translated
+- normal tool_use -> `tool-output` -> preserved
+- tool_result -> `tool-output` -> preserved
+
+Display behavior:
+
+- `prose` starts by showing the English source.
+- while translating, panel status shows `translating <elapsed>`.
+- when translation succeeds, the English source is replaced by Chinese translated text.
+- when translation fails, panel status shows `error` and the entry keeps the visible source plus an error.
+- `tool-output` is dim, one-line, truncated by CSS, and not translated.
+
+There is no keyword classifier that drops assistant text. A previous design skipped permission-looking or log-looking text; that is removed.
+
+### User Input Translation
+
+The composer has one textarea and one `Send English` button.
+
+Keyboard behavior:
+
+- `Enter`: translate current Chinese text, or send the current English draft.
+- `Shift+Enter`: insert newline.
+
+After translation succeeds, the English draft replaces the original Chinese text in the same textarea.
+
+`Send English` writes the current English text to the active role terminal and submits Enter.
+
+Translation panel `Auto-send` is separate from task `Auto orchestration`:
+
+- `Auto-send` on: translate and send if there is no translation warning.
+- `Auto-send` off: translate to English draft and wait for user send.
+
+## 13. Local State
+
+App-level settings:
+
+```text
+~/.vcm/settings.json
+```
+
+Repository-level VCM state:
+
+```text
+.vcm/config.json
+.vcm/tasks/<task>.json
+.vcm/sessions/<task>.json
+.vcm/messages/<task>.jsonl
+.vcm/orchestration/<task>.json
+```
+
+Repo handoff artifacts:
+
+```text
+.ai/handoffs/<task>/
+```
+
+External Claude transcripts:
+
+```text
+~/.claude/projects/<project-hash>/<claude-session-id>.jsonl
+```
+
+## 14. Packaging Expectations
+
+Published npm packages must include built output:
+
+- `dist/main.js`
+- `dist/cli/vcmctl.js`
+- backend route/service/template output in `dist/`
+- frontend static assets in `dist-frontend/`
+- `README.md`
+- `docs/`
+- `scripts/`
+
+`prepack` runs:
+
+```text
+npm run build && npm run verify:package
+```
+
+This protects against publishing raw TypeScript bin files or missing frontend assets.
+
+## 15. Success Criteria
+
+VCM V1 is successful when:
+
+- A user can connect a repo without global Git safe-directory setup.
+- A user can create a task and start all four role sessions.
+- Switching roles never loses the embedded terminal.
+- Restart creates a fresh Claude session; Resume reconnects to the persisted one.
+- Permission modes are reflected in the Claude command.
+- PM can route messages through `vcmctl`.
+- Manual orchestration lets the user inspect and stage messages without auto-submitting Enter.
+- Auto orchestration can deliver PM-approved work to running target roles.
+- Translation settings save to `~/.vcm/settings.json`.
+- Translation reads Claude transcript JSONL reliably after start, resume, and restart.
+- Terminal and translation panel have equal, stable reading space.
+- Harness install/update preserves user content outside VCM managed blocks.

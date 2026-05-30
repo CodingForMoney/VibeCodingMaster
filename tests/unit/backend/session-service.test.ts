@@ -16,6 +16,7 @@ describe("createSessionService", () => {
       permissionMode: "default"
     });
     expect(started.claudeSessionId).toMatch(/^[0-9a-f-]{36}$/);
+    expect(started.transcriptPath).toMatch(/\.claude\/projects\/-repo\/[0-9a-f-]{36}\.jsonl$/);
     expect(started.command).toContain("--session-id");
     expect(firstRuntimeInputs[0]?.args).toContain("--session-id");
 
@@ -26,12 +27,14 @@ describe("createSessionService", () => {
       {
         role: "architect",
         status: "resumable",
-        claudeSessionId: started.claudeSessionId
+        claudeSessionId: started.claudeSessionId,
+        transcriptPath: started.transcriptPath
       }
     ]);
 
     const resumed = await secondService.resumeRoleSession("/repo", "demo-task", "architect");
     expect(resumed.claudeSessionId).toBe(started.claudeSessionId);
+    expect(resumed.transcriptPath).toBe(started.transcriptPath);
     expect(secondRuntimeInputs[0]?.args).toEqual([
       "--agent",
       "architect",
@@ -40,7 +43,7 @@ describe("createSessionService", () => {
     ]);
   });
 
-  it("sends canonical task context to project-manager sessions", async () => {
+  it("starts project-manager sessions with VCM environment instead of pasted context", async () => {
     const fs = createMemoryFs();
     const runtimeInputs: CreateTerminalSessionInput[] = [];
     const writes: string[] = [];
@@ -48,11 +51,34 @@ describe("createSessionService", () => {
 
     await service.startRoleSession("/repo", "demo-task", "project-manager");
 
-    expect(writes).toHaveLength(1);
-    expect(writes[0]).toContain("Task slug: demo-task");
-    expect(writes[0]).toContain("Canonical handoff directory: .ai/handoffs/demo-task");
-    expect(writes[0]).toContain("coder: .ai/handoffs/demo-task/role-commands/coder.md");
-    expect(writes[0]).toContain("Do not create or write .ai/handoffs/<other-task>/");
+    expect(writes).toHaveLength(0);
+    expect(runtimeInputs[0]?.env).toMatchObject({
+      VCM_TASK_SLUG: "demo-task",
+      VCM_ROLE: "project-manager"
+    });
+  });
+
+  it("restarts with a fresh Claude session instead of resuming the persisted one", async () => {
+    const fs = createMemoryFs();
+    const firstRuntimeInputs: CreateTerminalSessionInput[] = [];
+    const firstService = createTestSessionService(fs, firstRuntimeInputs);
+
+    const started = await firstService.startRoleSession("/repo", "demo-task", "coder");
+    expect(firstRuntimeInputs[0]?.args).toContain("--session-id");
+
+    const secondRuntimeInputs: CreateTerminalSessionInput[] = [];
+    const secondService = createTestSessionService(fs, secondRuntimeInputs);
+    const restarted = await secondService.restartRoleSession("/repo", "demo-task", "coder");
+
+    expect(restarted.claudeSessionId).not.toBe(started.claudeSessionId);
+    expect(restarted.transcriptPath).not.toBe(started.transcriptPath);
+    expect(secondRuntimeInputs[0]?.args).toEqual([
+      "--agent",
+      "coder",
+      "--session-id",
+      restarted.claudeSessionId
+    ]);
+    expect(secondRuntimeInputs[0]?.args).not.toContain("--resume");
   });
 });
 
@@ -101,7 +127,8 @@ function createTestSessionService(fs: FileSystemAdapter, runtimeInputs: CreateTe
           architecturePlanPath: ".ai/handoffs/demo-task/architecture-plan.md",
           implementationLogPath: ".ai/handoffs/demo-task/implementation-log.md",
           validationLogPath: ".ai/handoffs/demo-task/validation-log.md",
-          reviewReportPath: ".ai/handoffs/demo-task/review-report.md"
+          reviewReportPath: ".ai/handoffs/demo-task/review-report.md",
+          docsSyncReportPath: ".ai/handoffs/demo-task/docs-sync-report.md"
         };
       }
     } as never,
