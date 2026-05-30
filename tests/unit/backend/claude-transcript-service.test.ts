@@ -1,9 +1,15 @@
 import { describe, expect, it } from "vitest";
+import { appendFileSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import {
   claudeTranscriptPath,
+  createClaudeTranscriptService,
   parseAssistantContent,
-  projectHash
+  projectHash,
+  TranscriptTail
 } from "../../../src/backend/services/claude-transcript-service.js";
+import type { RoleSessionRecord } from "../../../src/shared/types/session.js";
 
 describe("claude-transcript-service", () => {
   it("parses assistant text from Claude Code JSONL without losing spaces", () => {
@@ -63,7 +69,134 @@ describe("claude-transcript-service", () => {
 
   it("resolves Claude Code transcript paths from the project cwd and session id", () => {
     expect(projectHash("/workspace")).toBe("-workspace");
+    expect(projectHash("/Users/sheldon/Documents/New project 3/VibeCodingMaster"))
+      .toBe("-Users-sheldon-Documents-New-project-3-VibeCodingMaster");
     expect(claudeTranscriptPath("/workspace", "session-1")).toMatch(/\.claude\/projects\/-workspace\/session-1\.jsonl$/);
+    expect(claudeTranscriptPath(
+      "/Users/sheldon/Documents/New project 3/VibeCodingMaster",
+      "session-1"
+    )).toMatch(/\.claude\/projects\/-Users-sheldon-Documents-New-project-3-VibeCodingMaster\/session-1\.jsonl$/);
+  });
+
+  it("replays current-run transcript events by timestamp before tailing new output", () => {
+    const dir = mkdtempSync(join(tmpdir(), "vcm-transcript-"));
+    const path = join(dir, "session.jsonl");
+    try {
+      writeFileSync(path, [
+        JSON.stringify({
+          type: "assistant",
+          uuid: "old-message",
+          timestamp: "2026-05-29T23:59:00.000Z",
+          message: { content: [{ type: "text", text: "Old output." }] }
+        }),
+        JSON.stringify({
+          type: "assistant",
+          uuid: "current-message",
+          timestamp: "2026-05-30T00:00:01.000Z",
+          message: { content: [{ type: "text", text: "Current output." }] }
+        }),
+        ""
+      ].join("\n"));
+
+      const events: ReturnType<typeof parseAssistantContent> = [];
+      const tail = new TranscriptTail(path, {
+        onContent(event) {
+          events.push(event);
+        }
+      });
+      tail.start({ replaySince: "2026-05-30T00:00:00.000Z" });
+      tail.stop();
+
+      expect(events).toEqual([
+        {
+          kind: "text",
+          id: "current-message",
+          timestamp: "2026-05-30T00:00:01.000Z",
+          text: "Current output."
+        }
+      ]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("polls for appends that happen before fs.watch delivers an event", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "vcm-transcript-"));
+    const path = join(dir, "session.jsonl");
+    try {
+      writeFileSync(path, "");
+      const events: ReturnType<typeof parseAssistantContent> = [];
+      const tail = new TranscriptTail(path, {
+        onContent(event) {
+          events.push(event);
+        }
+      });
+
+      tail.start({ pollIntervalMs: 20 });
+      appendFileSync(path, `${JSON.stringify({
+        type: "assistant",
+        uuid: "immediate-message",
+        timestamp: "2026-05-30T00:00:02.000Z",
+        message: { content: [{ type: "text", text: "Immediate output." }] }
+      })}\n`);
+
+      await waitFor(() => events.length === 1);
+      tail.stop();
+
+      expect(events).toEqual([
+        {
+          kind: "text",
+          id: "immediate-message",
+          timestamp: "2026-05-30T00:00:02.000Z",
+          text: "Immediate output."
+        }
+      ]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("subscribes to the persisted transcript path instead of only deriving from cwd", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "vcm-transcript-"));
+    const path = join(dir, "explicit-session.jsonl");
+    try {
+      writeFileSync(path, "");
+      const service = createClaudeTranscriptService();
+      const events: ReturnType<typeof parseAssistantContent> = [];
+      const resolvedPaths: string[] = [];
+      const unsubscribe = service.subscribeToRoleSession(createRoleSessionRecord({
+        claudeSessionId: "different-session-id",
+        transcriptPath: path
+      }), (event) => {
+        events.push(event);
+      }, {
+        onTranscriptPathResolved(resolvedPath) {
+          resolvedPaths.push(resolvedPath);
+        }
+      });
+
+      appendFileSync(path, `${JSON.stringify({
+        type: "assistant",
+        uuid: "persisted-path-message",
+        timestamp: "2026-05-30T00:00:03.000Z",
+        message: { content: [{ type: "text", text: "Read through explicit transcript path." }] }
+      })}\n`);
+
+      await waitFor(() => events.length === 1);
+      unsubscribe();
+
+      expect(resolvedPaths).toEqual([path]);
+      expect(events).toEqual([
+        {
+          kind: "text",
+          id: "persisted-path-message",
+          timestamp: "2026-05-30T00:00:03.000Z",
+          text: "Read through explicit transcript path."
+        }
+      ]);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
   });
 
   it("normalizes AskUserQuestion, TodoWrite, Agent, and tool_result events", () => {
@@ -141,3 +274,30 @@ describe("claude-transcript-service", () => {
     }]);
   });
 });
+
+function createRoleSessionRecord(overrides: Partial<RoleSessionRecord> = {}): RoleSessionRecord {
+  return {
+    id: "runtime-session-1",
+    claudeSessionId: "claude-session-1",
+    taskSlug: "demo-task",
+    role: "project-manager",
+    status: "running",
+    command: "claude --agent project-manager",
+    permissionMode: "default",
+    cwd: "/repo",
+    terminalBackend: "node-pty",
+    logPath: ".ai/handoffs/demo-task/logs/project-manager.log",
+    updatedAt: "2026-05-30T00:00:00.000Z",
+    ...overrides
+  };
+}
+
+async function waitFor(assertion: () => boolean): Promise<void> {
+  const startedAt = Date.now();
+  while (!assertion()) {
+    if (Date.now() - startedAt > 1000) {
+      throw new Error("Timed out waiting for transcript event.");
+    }
+    await new Promise((resolve) => setTimeout(resolve, 10));
+  }
+}

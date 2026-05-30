@@ -15,6 +15,7 @@ import type { FileSystemAdapter } from "../adapters/filesystem.js";
 import type { SessionRegistry } from "../runtime/session-registry.js";
 import type { TerminalRuntime } from "../runtime/terminal-runtime.js";
 import type { ArtifactService } from "./artifact-service.js";
+import { claudeTranscriptPath } from "./claude-transcript-service.js";
 import type { ProjectService } from "./project-service.js";
 import type { TaskService } from "./task-service.js";
 
@@ -74,6 +75,9 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
         hint: "Start the role once before using Resume."
       });
     }
+    const transcriptPath = launchMode === "resume" && persisted?.transcriptPath
+      ? persisted.transcriptPath
+      : claudeTranscriptPath(repoRoot, claudeSessionId);
 
     const startCommand = deps.claude.buildRoleStartCommand(
       role,
@@ -102,6 +106,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     const record: RoleSessionRecord = {
       id: runtimeSession.id,
       claudeSessionId,
+      transcriptPath,
       taskSlug,
       role,
       status: runtimeSession.status,
@@ -275,6 +280,7 @@ async function persistTaskSession(
       [session.role]: {
         id: session.id,
         claudeSessionId: session.claudeSessionId,
+        transcriptPath: session.transcriptPath,
         status: session.status,
         record
       }

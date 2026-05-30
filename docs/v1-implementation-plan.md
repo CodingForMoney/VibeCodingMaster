@@ -1,3248 +1,1128 @@
-# VibeCodingMaster V1 实施计划
+# V1 Implementation Plan And File Map
 
-版本：v0.3
-日期：2026-05-30
-状态：实施计划草案
-依据：
+Last updated: 2026-05-30
 
-- `docs/product-design.md`
-- `docs/v1-architecture-design.md`
-- `docs/cc-best-practices.md`
+This document is the current implementation map for VCM V1. It replaces older plan text that referenced removed files or obsolete UI behavior.
 
-## 1. 实施目标
+## 1. Current Status
 
-V1 实现一个本地 GUI Session Cockpit，让用户可以在一个任务工作台中启动、切换、查看、输入和管理多个 Claude Code role sessions。
+V1 is implemented as a local GUI app with:
 
-V1 完成后，用户应能：
+- Fastify backend.
+- React frontend.
+- `node-pty` embedded terminals.
+- `xterm.js` terminal rendering.
+- Four Claude Code role sessions.
+- VCM harness installer.
+- API-driven message bus.
+- Translation panel based on Claude transcript JSONL tailing.
+- npm packaging with built `dist` and `dist-frontend` output.
 
-```text
-Open VibeCodingMaster
-  -> Select repo
-  -> New task
-  -> Start project-manager session
-  -> Start architect session
-  -> Switch between role sessions
-  -> Type directly into embedded Claude Code terminals
-  -> View role commands, logs, and handoff artifacts
-  -> Let project-manager send role messages through VCM message bus
-  -> Inspect and stage pending role messages in manual mode
-  -> Turn on Translation Mode beside any embedded terminal
-  -> Translate user-language input into English preview and send it to Claude Code
-  -> Read translated Claude Code prose output while preserving raw terminal output
-  -> Restart / stop role sessions
-```
+The implementation still has planned improvement space, but this file only describes code that exists now.
 
-V1 不再以手动 CLI 或手动终端控制为主路径。
+## 2. Package And Build
 
-V1 不实现：
-
-- 自动生成完整 Task Spec。
-- 自动识别 public contract / test contract。
-- 自动执行 validation commands。
-- 自动 Cross-Model Review。
-- 自动创建 PR。
-- SaaS 多用户协作。
-- 完整 Desktop 打包和自动更新。
-- 多 worktree 自动管理。
-
-## 2. 关键约束
-
-1. GUI 是用户主入口，CLI 只用于启动 dev server、调试和 smoke test。
-2. Claude Code role session 必须在 embedded terminal 中可见、可输入、可重启。
-3. Project Manager 不直接无限制控制其他 role sessions。
-4. Project Manager 必须通过 VCM message bus / `vcmctl send` 调度其他角色。
-5. 非 PM role 只能通过 VCM message bus 回复 Project Manager。
-6. `manual` orchestration mode 是默认；用户 stage 后 VCM 只写一行 prompt，不自动按 Enter。
-7. `auto` orchestration mode 必须显式开启，并受 backend policy、pause state 和 target session state 约束。
-8. Role command artifact 可作为长 handoff 引用保留，但不再是唯一 dispatch 机制。
-9. Terminal output 只作为调试信息；长期事实源是 handoff artifacts 和 `.vcm/messages/<task-slug>.jsonl`。
-10. Raw terminal stream 必须持续写入 `.ai/handoffs/<task-slug>/logs/<role>.log`。
-11. V1 只做 artifact 存在性和标题完整性检查，不判断内容质量。
-12. 状态必须能从 backend session registry、terminal process state、repo artifacts、`.vcm` metadata 恢复。
-13. V1 不把每个 role 放到独立 worktree。同一任务默认共享当前 repo working directory。
-14. V1 默认遵守 single-writer rule，但主要通过流程提示、role status 和 review gate 实现，不做强制 sandbox。
-15. Translation Mode 只借鉴：OpenAI-compatible Provider、工程化 prompt、上一条回复上下文、FIFO queue、输出分类、CJK skip。
-16. 翻译失败不得影响 raw terminal、raw log、handoff artifacts 和 message bus。
-
-## 3. 技术选型
-
-```text
-Language: TypeScript
-Runtime: Node.js LTS
-Frontend: React + Vite
-Terminal UI: xterm.js
-Backend: Fastify + ws
-Terminal runtime: node-pty
-Process execution: execa
-State storage: JSON files
-Test runner: Vitest + Playwright
-Module format: ESM / NodeNext
-```
-
-## 4. 目标目录结构
-
-```text
-VibeCodingMaster/
-  package.json
-  tsconfig.json
-  tsconfig.node.json
-  vite.config.ts
-  vitest.config.ts
-  playwright.config.ts
-  index.html
-  README.md
-  docs/
-    product-design.md
-    v1-architecture-design.md
-    v1-implementation-plan.md
-    cc-best-practices.md
-
-  src/
-    main.ts
-
-    shared/
-      constants.ts
-      types/
-        api.ts
-        artifact.ts
-        harness.ts
-        message.ts
-        project.ts
-        role.ts
-        session.ts
-        task.ts
-        terminal.ts
-        translation.ts
-      validation/
-        artifact-check.ts
-        language-detect.ts
-        slug-check.ts
-        translation-classifier.ts
-
-    frontend/
-      app.tsx
-      main.tsx
-      styles.css
-      routes/
-        project-dashboard.tsx
-        task-workspace.tsx
-      components/
-        app-shell.tsx
-        event-log.tsx
-        harness-panel.tsx
-        message-timeline.tsx
-        repo-connect-form.tsx
-        role-session-tabs.tsx
-        session-console.tsx
-        session-toolbar.tsx
-        status-badge.tsx
-        task-nav.tsx
-        translation-entry-row.tsx
-        translation-panel.tsx
-        translation-settings-modal.tsx
-      terminal/
-        terminal-client.ts
-        xterm-view.tsx
-      state/
-        api-client.ts
-        app-store.ts
-        session-store.ts
-        translation-store.ts
-
-    backend/
-      server.ts
-      api/
-        artifact-routes.ts
-        harness-routes.ts
-        message-routes.ts
-        project-routes.ts
-        session-routes.ts
-        task-routes.ts
-        translation-routes.ts
-      ws/
-        terminal-ws.ts
-        translation-ws.ts
-      runtime/
-        node-pty-runtime.ts
-        session-registry.ts
-        terminal-runtime.ts
-      services/
-        artifact-service.ts
-        command-dispatcher.ts
-        harness-service.ts
-        message-service.ts
-        project-service.ts
-        session-service.ts
-        status-service.ts
-        task-service.ts
-        translation-prompts.ts
-        translation-queue.ts
-        translation-service.ts
-      adapters/
-        claude-adapter.ts
-        command-runner.ts
-        filesystem.ts
-        git-adapter.ts
-        translation-provider.ts
-      templates/
-        handoff.ts
-        message-envelope.ts
-        harness/
-          claude-root.ts
-          project-manager-agent.ts
-          architect-agent.ts
-          coder-agent.ts
-          reviewer-agent.ts
-        role-command.ts
-      validation/
-        environment-check.ts
-
-    cli/
-      vcmctl.ts
-
-  tests/
-    unit/
-      shared/
-      backend/
-      frontend/
-    integration/
-      api/
-      runtime/
-    e2e/
-      task-workspace.spec.ts
-```
-
-## 5. Package 和配置文件
-
-### 5.1 `package.json`
-
-职责：
-
-- 声明本地开发命令。
-- 声明 build、test、typecheck、e2e 命令。
-- 保留 `vcm` binary 用于启动本地 GUI dev/prod server。
-
-计划字段：
-
-```json
-{
-  "type": "module",
-  "bin": {
-    "vcm": "./dist/main.js"
-  },
-  "scripts": {
-    "dev": "tsx src/main.ts --dev",
-    "build": "tsc -p tsconfig.node.json && vite build",
-    "start": "node dist/main.js",
-    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.node.json --noEmit",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "e2e": "playwright test"
-  },
-  "dependencies": {
-    "@fastify/static": "^7.0.0",
-    "@xterm/addon-fit": "^0.10.0",
-    "@xterm/addon-web-links": "^0.11.0",
-    "@xterm/xterm": "^5.5.0",
-    "execa": "^9.0.0",
-    "fastify": "^5.0.0",
-    "node-pty": "^1.0.0",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0",
-    "ws": "^8.0.0",
-    "zod": "^3.0.0"
-  },
-  "devDependencies": {
-    "@playwright/test": "^1.0.0",
-    "@types/node": "^22.0.0",
-    "@types/react": "^19.0.0",
-    "@types/react-dom": "^19.0.0",
-    "@types/ws": "^8.0.0",
-    "@vitejs/plugin-react": "^4.0.0",
-    "tsx": "^4.0.0",
-    "typescript": "^5.0.0",
-    "vite": "^6.0.0",
-    "vitest": "^2.0.0"
-  }
-}
-```
-
-### 5.2 `tsconfig.json`
-
-职责：
-
-- 类型检查前端和 shared 代码。
-- 使用 JSX。
-- 不输出文件。
-
-关键配置：
-
-```json
-{
-  "compilerOptions": {
-    "target": "ES2022",
-    "module": "ESNext",
-    "moduleResolution": "Bundler",
-    "jsx": "react-jsx",
-    "strict": true,
-    "esModuleInterop": true,
-    "skipLibCheck": true,
-    "types": ["vite/client"]
-  },
-  "include": ["src/frontend/**/*.ts", "src/frontend/**/*.tsx", "src/shared/**/*.ts"]
-}
-```
-
-### 5.3 `tsconfig.node.json`
-
-职责：
-
-- 编译 backend、main 和 shared 代码到 `dist/`。
-- 使用 NodeNext ESM。
-
-关键配置：
-
-```json
-{
-  "compilerOptions": {
-    "target": "ES2022",
-    "module": "NodeNext",
-    "moduleResolution": "NodeNext",
-    "rootDir": "src",
-    "outDir": "dist",
-    "strict": true,
-    "esModuleInterop": true,
-    "skipLibCheck": true
-  },
-  "include": ["src/main.ts", "src/backend/**/*.ts", "src/shared/**/*.ts"]
-}
-```
-
-### 5.4 `vite.config.ts`
-
-职责：
-
-- 构建 React frontend。
-- 开发时代理 API 和 WebSocket 到 local backend。
-
-导出定义：
-
-```ts
-export default defineConfig({
-  plugins: [react()],
-  root: ".",
-  build: {
-    outDir: "dist-frontend"
-  },
-  server: {
-    port: 5173,
-    proxy: {
-      "/api": "http://localhost:4173",
-      "/ws": {
-        target: "ws://localhost:4173",
-        ws: true
-      }
-    }
-  }
-});
-```
-
-### 5.5 `vitest.config.ts`
-
-职责：
-
-- 运行 unit 和 integration tests。
-- 使用 node environment。
-
-导出定义：
-
-```ts
-export default defineConfig({
-  test: {
-    environment: "node",
-    include: ["tests/unit/**/*.test.ts", "tests/integration/**/*.test.ts"]
-  }
-});
-```
-
-### 5.6 `playwright.config.ts`
-
-职责：
-
-- 运行 GUI smoke tests。
-- 启动 `npm run dev` 作为 webServer。
-
-导出定义：
-
-```ts
-export default defineConfig({
-  testDir: "tests/e2e",
-  webServer: {
-    command: "npm run dev",
-    url: "http://localhost:5173",
-    reuseExistingServer: true
-  }
-});
-```
-
-### 5.7 `src/main.ts`
-
-职责：
-
-- 启动 local backend。
-- 在 dev 模式提示 Vite URL。
-- 在 prod 模式 serve frontend static assets。
-
-导出定义：
-
-```ts
-export interface MainOptions {
-  dev?: boolean;
-  host?: string;
-  port?: number;
-  open?: boolean;
-}
-
-export function parseMainArgs(argv: string[]): MainOptions;
-
-export async function main(argv?: string[]): Promise<void>;
-```
-
-## 6. Shared 类型层
-
-### 6.1 `src/shared/types/role.ts`
-
-职责：
-
-- 定义 V1 role 集合和状态。
-
-导出定义：
-
-```ts
-export type RoleName =
-  | "project-manager"
-  | "architect"
-  | "coder"
-  | "reviewer";
-
-export type DispatchableRole =
-  | "architect"
-  | "coder"
-  | "reviewer";
-
-export type RoleStatus =
-  | "not_started"
-  | "starting"
-  | "running"
-  | "waiting"
-  | "blocked"
-  | "done"
-  | "resumable"
-  | "crashed"
-  | "exited"
-  | "missing"
-  | "unknown";
-
-export interface RoleDefinition {
-  name: RoleName;
-  label: string;
-  commandAgent: string;
-  dispatchable: boolean;
-}
-```
-
-### 6.2 `src/shared/constants.ts`
-
-职责：
-
-- 定义固定 role、artifact 文件名、默认端口。
-
-导出定义：
-
-```ts
-export const DEFAULT_BACKEND_PORT = 4173;
-export const DEFAULT_FRONTEND_PORT = 5173;
-
-export const ROLE_DEFINITIONS: readonly RoleDefinition[];
-export const ROLE_NAMES: readonly RoleName[];
-export const DISPATCHABLE_ROLES: readonly DispatchableRole[];
-
-export function isRoleName(value: string): value is RoleName;
-export function isDispatchableRole(value: string): value is DispatchableRole;
-export function getRoleDefinition(role: RoleName): RoleDefinition;
-```
-
-### 6.3 `src/shared/types/project.ts`
-
-职责：
-
-- 定义 repo 连接和项目配置。
-
-导出定义：
-
-```ts
-export interface ProjectConfig {
-  version: 1;
-  repoRoot: string;
-  defaultRoles: RoleName[];
-  handoffRoot: string;
-  stateRoot: string;
-  terminalBackend: "node-pty";
-  claudeCommand: string;
-}
-
-export interface ProjectSummary {
-  repoRoot: string;
-  branch: string;
-  isDirty: boolean;
-  config: ProjectConfig;
-  warnings: string[];
-}
-
-export interface ConnectProjectRequest {
-  repoPath: string;
-}
-```
-
-### 6.4 `src/shared/types/task.ts`
-
-职责：
-
-- 定义 task metadata。
-
-导出定义：
-
-```ts
-export type TaskStatus =
-  | "created"
-  | "planning"
-  | "running"
-  | "blocked"
-  | "stopped"
-  | "done";
-
-export interface TaskRecord {
-  version: 1;
-  taskSlug: string;
-  title?: string;
-  createdAt: string;
-  updatedAt: string;
-  repoRoot: string;
-  branch: string;
-  handoffDir: string;
-  status: TaskStatus;
-  specPath?: string;
-}
-
-export interface CreateTaskRequest {
-  taskSlug: string;
-  title?: string;
-  specPath?: string;
-}
-```
-
-### 6.5 `src/shared/types/session.ts`
-
-职责：
-
-- 定义 role session metadata 和 task session summary。
-
-导出定义：
-
-```ts
-export type ClaudePermissionMode =
-  | "default"
-  | "bypassPermissions"
-  | "dangerously-skip-permissions";
-
-export interface RoleSessionRecord {
-  id: string;
-  claudeSessionId: string;
-  taskSlug: string;
-  role: RoleName;
-  status: RoleStatus;
-  command: string;
-  permissionMode: ClaudePermissionMode;
-  cwd: string;
-  terminalBackend: "node-pty";
-  pid?: number;
-  logPath: string;
-  roleCommandPath?: string;
-  handoffArtifactPath?: string;
-  startedAt?: string;
-  updatedAt: string;
-  lastOutputAt?: string;
-  exitCode?: number | null;
-}
-
-export interface TaskSessionRecord {
-  version: 1;
-  taskSlug: string;
-  updatedAt: string;
-  roles: Record<RoleName, RoleSessionPointer>;
-}
-
-export interface RoleSessionPointer {
-  id: string | null;
-  claudeSessionId?: string;
-  status: RoleStatus;
-  record?: RoleSessionRecord;
-}
-
-export interface StartRoleSessionRequest {
-  cols?: number;
-  rows?: number;
-  permissionMode?: ClaudePermissionMode;
-}
-```
-
-### 6.6 `src/shared/types/terminal.ts`
-
-职责：
-
-- 定义 WebSocket terminal 消息和事件。
-
-导出定义：
-
-```ts
-export type ClientTerminalMessage =
-  | { type: "input"; data: string }
-  | { type: "resize"; cols: number; rows: number };
-
-export type ServerTerminalMessage =
-  | { type: "output"; data: string }
-  | { type: "status"; status: RoleStatus }
-  | { type: "exit"; exitCode: number | null }
-  | { type: "error"; message: string };
-
-export interface TerminalEvent {
-  id: string;
-  sessionId: string;
-  taskSlug: string;
-  role: RoleName;
-  type: "input" | "output" | "status" | "exit" | "error" | "dispatch";
-  timestamp: string;
-  data?: string;
-  status?: RoleStatus;
-  exitCode?: number | null;
-}
-```
-
-### 6.7 `src/shared/types/artifact.ts`
-
-职责：
-
-- 定义 handoff artifact paths 和 schema check。
-
-导出定义：
-
-```ts
-export type ArtifactKind =
-  | "architecture-plan"
-  | "implementation-log"
-  | "validation-log"
-  | "review-report"
-  | "docs-sync-report";
-
-export interface HandoffPaths {
-  handoffDir: string;
-  roleCommandsDir: string;
-  logsDir: string;
-  roleCommandPaths: Record<DispatchableRole, string>;
-  roleLogPaths: Record<RoleName, string>;
-  architecturePlanPath: string;
-  implementationLogPath: string;
-  validationLogPath: string;
-  reviewReportPath: string;
-  docsSyncReportPath: string;
-}
-
-export interface ArtifactCheckResult {
-  kind: ArtifactKind;
-  path: string;
-  exists: boolean;
-  isEmpty: boolean;
-  hasPlaceholder: boolean;
-  missingHeadings: string[];
-  status: "missing" | "empty" | "incomplete" | "ok";
-}
-
-export interface ArtifactSummary {
-  paths: HandoffPaths;
-  checks: ArtifactCheckResult[];
-}
-```
-
-### 6.8 `src/shared/types/harness.ts`
-
-职责：
-
-- 定义 VCM Harness 检查、计划和应用结果。
-
-导出定义：
-
-```ts
-export type HarnessFileKind =
-  | "root-claude"
-  | "agent-project-manager"
-  | "agent-architect"
-  | "agent-coder"
-  | "agent-reviewer";
-
-export type HarnessFileAction = "create" | "insert" | "update" | "ok";
-
-export interface HarnessFileStatus {
-  kind: HarnessFileKind;
-  path: string;
-  exists: boolean;
-  hasManagedBlock: boolean;
-  managedVersion?: number;
-  action: HarnessFileAction;
-}
-
-export interface HarnessStatusReport {
-  version: number;
-  files: HarnessFileStatus[];
-  needsApply: boolean;
-  plannedChanges: HarnessPlannedChange[];
-  warnings: string[];
-}
-
-export interface HarnessPlannedChange {
-  path: string;
-  action: HarnessFileAction;
-  reason: string;
-}
-
-export interface HarnessApplyResult {
-  version: number;
-  changedFiles: HarnessPlannedChange[];
-  message: string;
-}
-```
-
-### 6.9 `src/shared/types/message.ts`
-
-职责：
-
-- 定义 VCM role message bus 的消息、状态和 orchestration mode。
-- 支持 PM-mediated role messaging，不支持任意 role-to-role chat。
-
-导出定义：
-
-```ts
-export type VcmMessageActor = RoleName | "user";
-
-export type VcmMessageType =
-  | "user-request"
-  | "task"
-  | "question"
-  | "blocked"
-  | "result"
-  | "finding"
-  | "review-request"
-  | "revise"
-  | "cancel";
-
-export type VcmMessageStatus =
-  | "pending_approval"
-  | "queued"
-  | "staged"
-  | "delivered"
-  | "acknowledged"
-  | "failed"
-  | "rejected"
-  | "cancelled";
-
-export type VcmOrchestrationMode = "manual" | "auto";
-
-export interface VcmRoleMessage {
-  id: string;
-  taskSlug: string;
-  fromRole: VcmMessageActor;
-  toRole: RoleName;
-  type: VcmMessageType;
-  body: string;
-  artifactRefs: string[];
-  bodyPath?: string;
-  parentMessageId?: string;
-  status: VcmMessageStatus;
-  createdAt: string;
-  deliveredAt?: string;
-  acknowledgedAt?: string;
-  stagedAt?: string;
-  failureReason?: string;
-}
-
-export interface VcmOrchestrationState {
-  taskSlug: string;
-  mode: VcmOrchestrationMode;
-  paused: boolean;
-  updatedAt: string;
-}
-
-export interface SendRoleMessageRequest {
-  fromRole: VcmMessageActor;
-  toRole: RoleName;
-  type: VcmMessageType;
-  body: string;
-  artifactRefs?: string[];
-  parentMessageId?: string;
-}
-
-export interface SendRoleMessageResult {
-  message: VcmRoleMessage;
-  delivered: boolean;
-  requiresUserApproval: boolean;
-}
-```
-
-### 6.10 `src/shared/types/api.ts`
-
-职责：
-
-- 定义统一 API response。
-
-导出定义：
-
-```ts
-export interface ApiSuccess<T> {
-  ok: true;
-  data: T;
-}
-
-export interface ApiFailure {
-  ok: false;
-  error: {
-    code: string;
-    message: string;
-    hint?: string;
-  };
-}
-
-export type ApiResponse<T> = ApiSuccess<T> | ApiFailure;
-```
-
-### 6.11 `src/shared/types/translation.ts`
-
-职责：
-
-- 定义 Translation Mode 的 settings、entry、request、provider result 和 source classification。
-- 支持 OpenAI-compatible 便宜模型配置。
-- 支持 `user-input-to-english` 和 `cc-output-to-user` 两个 runtime direction。
-- 支持 `zh-to-en`、`zh-to-en-with-context`、`en-to-zh` 三个 cc-pm 风格 prompt slot。
-
-导出定义：
-
-```ts
-export type TranslationProviderType = "openai-compatible";
-
-export type TranslationDirection =
-  | "user-input-to-english"
-  | "cc-output-to-user";
-
-export type TranslationInputMode =
-  | "review-before-send"
-  | "auto-send";
-
-export type TranslationSourceKind =
-  | "prose"
-  | "code"
-  | "diff"
-  | "log"
-  | "tool-output"
-  | "permission-prompt"
-  | "error"
-  | "already-target-language"
-  | "sensitive";
-
-export type TranslationStatus =
-  | "queued"
-  | "translating"
-  | "translated"
-  | "skipped"
-  | "failed"
-  | "redacted"
-  | "summarized"
-  | "preserved";
-
-export interface TranslationSettings {
-  version: 1;
-  enabled: boolean;
-  providerType: TranslationProviderType;
-  baseUrl: string;
-  model: string;
-  sourceLanguage: "auto" | string;
-  targetLanguage: string;
-  workingLanguage: "en";
-  inputMode: TranslationInputMode;
-  translateOutput: boolean;
-  translateUserInput: boolean;
-  contextEnabled: boolean;
-  preserveTechnicalTokens: boolean;
-  skipCjkText: boolean;
-  redactSecrets: boolean;
-  requestTimeoutMs: number;
-  temperature: number;
-}
-
-export interface TranslationSecretSettings {
-  apiKey?: string;
-}
-
-export interface TranslationTokenUsage {
-  input: number;
-  output: number;
-  total?: number;
-}
-
-export interface TranslationEntry {
-  id: string;
-  taskSlug: string;
-  role: RoleName;
-  direction: TranslationDirection;
-  sourceKind: TranslationSourceKind;
-  sourceLanguage: string;
-  targetLanguage: string;
-  sourceText: string;
-  translatedText: string;
-  status: TranslationStatus;
-  contextUsed: boolean;
-  warning?: string;
-  error?: string;
-  createdAt: string;
-  completedAt?: string;
-  provider: TranslationProviderType;
-  model: string;
-  tokenUsage?: TranslationTokenUsage;
-}
-
-export interface TranslateUserInputRequest {
-  text: string;
-  mode?: TranslationInputMode;
-  useContext?: boolean;
-  send?: boolean;
-}
-
-export interface TranslateUserInputResult {
-  translation: TranslationEntry;
-  englishPreview: string;
-  contextUsed: boolean;
-  requiresReview: boolean;
-  sent: boolean;
-}
-
-export interface TranslationProviderTestResult {
-  ok: boolean;
-  model: string;
-  elapsedMs: number;
-  error?: string;
-}
-
-export type TranslationWsMessage =
-  | { type: "translation-entry"; entry: TranslationEntry }
-  | { type: "translation-delta"; id: string; delta: string }
-  | { type: "translation-status"; status: "ready" | "paused" | "translating" | "failed" }
-  | { type: "translation-error"; id?: string; message: string };
-```
-
-## 7. Shared Validation
-
-### 7.1 `src/shared/validation/slug-check.ts`
-
-导出定义：
-
-```ts
-export interface SlugValidationResult {
-  valid: boolean;
-  reason?: string;
-  suggestion?: string;
-}
-
-export function isValidTaskSlug(value: string): boolean;
-export function validateTaskSlug(value: string): SlugValidationResult;
-export function assertValidTaskSlug(value: string): string;
-export function suggestTaskSlug(value: string): string;
-```
-
-### 7.2 `src/shared/validation/artifact-check.ts`
-
-导出定义：
-
-```ts
-export const REQUIRED_ARCHITECTURE_PLAN_HEADINGS: readonly string[];
-export const REQUIRED_IMPLEMENTATION_LOG_HEADINGS: readonly string[];
-export const REQUIRED_REVIEW_REPORT_HEADINGS: readonly string[];
-
-export function getRequiredHeadings(kind: ArtifactKind): readonly string[];
-export function parseMarkdownHeadings(content: string): string[];
-export function findMissingHeadings(content: string, required: readonly string[]): string[];
-export function checkMarkdownArtifact(kind: ArtifactKind, path: string, content: string | null): ArtifactCheckResult;
-export function checkValidationLogArtifact(path: string, content: string | null): ArtifactCheckResult;
-```
-
-### 7.3 `src/shared/validation/language-detect.ts`
-
-职责：
-
-- 提供轻量 CJK / 目标语言检测。
-- 避免已经是用户语言的内容被重复翻译。
-
-导出定义：
-
-```ts
-export function cjkRatio(value: string): number;
-export function isProbablyCjk(value: string, threshold?: number): boolean;
-export function shouldSkipForTargetLanguage(value: string, targetLanguage: string): boolean;
-```
-
-实现规则：
-
-- 只做轻量启发式，不引入大型语言检测依赖。
-- ASCII punctuation 和 whitespace 不计入 CJK denominator。
-- `targetLanguage` 以 `zh` 开头时，`isProbablyCjk` 为 true 即跳过翻译。
-
-### 7.4 `src/shared/validation/translation-classifier.ts`
-
-职责：
-
-- 对 Claude transcript assistant text 做轻量分类。
-- 决定翻译、摘要、保留、脱敏或跳过。
-
-导出定义：
-
-```ts
-export interface ClassifiedTranslationChunk {
-  sourceKind: TranslationSourceKind;
-  text: string;
-  reason?: string;
-}
-
-export function stripAnsiForTranslation(value: string): string;
-export function containsSensitiveToken(value: string): boolean;
-export function classifyTranslationChunk(value: string, targetLanguage: string): ClassifiedTranslationChunk;
-export function shouldTranslateSourceKind(kind: TranslationSourceKind): boolean;
-export function shouldSummarizeSourceKind(kind: TranslationSourceKind): boolean;
-export function shouldPreserveSourceKind(kind: TranslationSourceKind): boolean;
-```
-
-分类规则：
-
-- prose -> translate。
-- error -> translate explanation while preserving original error string。
-- code / diff / permission-prompt / sensitive / already-target-language -> preserve, redact, or skip。
-- log / tool-output -> summarize when useful, otherwise preserve。
-
-## 8. Backend Adapter 层
-
-### 8.1 `src/backend/adapters/command-runner.ts`
-
-职责：
-
-- 封装 `execa`。
-- 供 git / claude check 使用。
-
-导出定义：
-
-```ts
-export interface RunCommandOptions {
-  cwd?: string;
-  reject?: boolean;
-  env?: NodeJS.ProcessEnv;
-}
-
-export interface RunCommandResult {
-  stdout: string;
-  stderr: string;
-  exitCode: number;
-}
-
-export interface CommandRunner {
-  run(command: string, args: string[], options?: RunCommandOptions): Promise<RunCommandResult>;
-}
-
-export function createDefaultCommandRunner(): CommandRunner;
-export function normalizeCommandError(error: unknown): RunCommandResult;
-```
-
-### 8.2 `src/backend/adapters/filesystem.ts`
-
-职责：
-
-- 封装文件读写、JSON 读写、目录创建。
-
-导出定义：
-
-```ts
-export interface FileSystemAdapter {
-  pathExists(path: string): Promise<boolean>;
-  ensureDir(path: string): Promise<void>;
-  readText(path: string): Promise<string>;
-  writeText(path: string, content: string): Promise<void>;
-  appendText(path: string, content: string): Promise<void>;
-  readJson<T>(path: string): Promise<T>;
-  writeJsonAtomic<T>(path: string, value: T): Promise<void>;
-  ensureFile(path: string, content: string, options?: EnsureFileOptions): Promise<boolean>;
-}
-
-export interface EnsureFileOptions {
-  overwrite?: boolean;
-}
-
-export function createNodeFileSystemAdapter(): FileSystemAdapter;
-export function resolveRepoPath(repoRoot: string, repoRelativePath: string): string;
-export function toRepoRelativePath(repoRoot: string, absolutePath: string): string;
-```
-
-### 8.3 `src/backend/adapters/git-adapter.ts`
-
-职责：
-
-- 检查 Git repo 和 branch 状态。
-
-导出定义：
-
-```ts
-export interface GitAdapter {
-  isGitRepo(cwd: string): Promise<boolean>;
-  getRepoRoot(cwd: string): Promise<string>;
-  getCurrentBranch(repoRoot: string): Promise<string>;
-  isDirty(repoRoot: string): Promise<boolean>;
-  getDiffSummary(repoRoot: string): Promise<string>;
-}
-
-export function createGitAdapter(runner: CommandRunner): GitAdapter;
-```
-
-### 8.4 `src/backend/adapters/claude-adapter.ts`
-
-职责：
-
-- 检查 Claude Code 是否安装。
-- 生成 role session 启动命令。
-
-导出定义：
-
-```ts
-export interface ClaudeAdapter {
-  isAvailable(command?: string): Promise<boolean>;
-  getVersion(command?: string): Promise<string>;
-  buildRoleStartCommand(
-    role: RoleName,
-    command?: string,
-    permissionMode?: ClaudePermissionMode
-  ): { command: string; args: string[]; display: string };
-}
-
-export function createClaudeAdapter(runner: CommandRunner): ClaudeAdapter;
-```
-
-### 8.5 `src/backend/adapters/translation-provider.ts`
-
-职责：
-
-- 封装 OpenAI-compatible `/chat/completions`。
-- 支持非流式翻译和可选 SSE streaming。
-- 统一 timeout、错误码、token usage 和 provider test。
-
-导出定义：
-
-```ts
-export interface TranslationProviderRequest {
-  settings: TranslationSettings;
-  secrets: TranslationSecretSettings;
-  direction: TranslationDirection;
-  sourceKind: TranslationSourceKind;
-  text: string;
-  systemPrompt: string;
-  userPrompt: string;
-  signal?: AbortSignal;
-  onDelta?: (delta: string) => void;
-}
-
-export interface TranslationProviderResult {
-  text: string;
-  elapsedMs: number;
-  tokenUsage?: TranslationTokenUsage;
-  warning?: string;
-}
-
-export class TranslationProviderError extends Error {
-  code: string;
-  elapsedMs: number;
-  constructor(message: string, code: string, elapsedMs?: number);
-}
-
-export interface TranslationProvider {
-  testConnection(settings: TranslationSettings, secrets: TranslationSecretSettings): Promise<TranslationProviderTestResult>;
-  translate(input: TranslationProviderRequest): Promise<TranslationProviderResult>;
-}
-
-export function createOpenAiCompatibleTranslationProvider(fetchImpl?: typeof fetch): TranslationProvider;
-export function buildChatCompletionsUrl(baseUrl: string): string;
-export function parseOpenAiUsage(raw: unknown): TranslationTokenUsage | undefined;
-```
-
-实现规则：
-
-- `apiKey` 只从 `TranslationSecretSettings` 读取。
-- `settings.baseUrl` 去掉尾部 `/` 后拼接 `/chat/completions`。
-- request body 使用 `model`、`messages`、`temperature`、`stream`。
-- request timeout 使用 `AbortController`。
-- HTTP 401 / 403 / 429 / 5xx 返回明确 `TranslationProviderError.code`。
-
-## 9. Backend Runtime 层
-
-### 9.1 `src/backend/runtime/terminal-runtime.ts`
-
-职责：
-
-- 定义 terminal runtime 抽象。
-- 让上层业务不依赖 node-pty 细节。
-
-导出定义：
-
-```ts
-export interface CreateTerminalSessionInput {
-  taskSlug: string;
-  role: RoleName;
-  command: string;
-  args: string[];
-  cwd: string;
-  env?: NodeJS.ProcessEnv;
-  cols?: number;
-  rows?: number;
-  logPath: string;
-}
-
-export interface TerminalSession {
-  id: string;
-  taskSlug: string;
-  role: RoleName;
-  status: RoleStatus;
-  pid?: number;
-  startedAt: string;
-  lastOutputAt?: string;
-  exitCode?: number | null;
-}
-
-export type TerminalEventListener = (event: TerminalEvent) => void;
-export type Unsubscribe = () => void;
-
-export interface TerminalRuntime {
-  createSession(input: CreateTerminalSessionInput): Promise<TerminalSession>;
-  getSession(sessionId: string): TerminalSession | undefined;
-  getSessionByRole(taskSlug: string, role: RoleName): TerminalSession | undefined;
-  listSessions(taskSlug?: string): TerminalSession[];
-  write(sessionId: string, data: string): void;
-  resize(sessionId: string, cols: number, rows: number): void;
-  stop(sessionId: string): Promise<void>;
-  restart(sessionId: string): Promise<TerminalSession>;
-  subscribe(sessionId: string, listener: TerminalEventListener): Unsubscribe;
-}
-```
-
-### 9.2 `src/backend/runtime/node-pty-runtime.ts`
-
-职责：
-
-- 实现 `TerminalRuntime`。
-- 使用 node-pty 承载 Claude Code 交互式 session。
-- 将 output 写入 logs 并推送给 subscribers。
-
-导出定义：
-
-```ts
-export interface NodePtyRuntimeDeps {
-  fs: FileSystemAdapter;
-  now?: () => string;
-  id?: () => string;
-}
-
-export function createNodePtyTerminalRuntime(deps: NodePtyRuntimeDeps): TerminalRuntime;
-```
-
-实现规则：
-
-- `createSession` 使用 `pty.spawn(command, args, { cwd, env, cols, rows })`。
-- 监听 `onData`：
-  - append 到 log。
-  - emit `TerminalEvent`。
-  - 更新 `lastOutputAt`。
-- 监听 `onExit`：
-  - 更新 `status` 为 `exited` 或 `crashed`。
-  - emit `exit` event。
-- `write` 写入 pty。
-- `resize` 调用 pty resize。
-- `stop` kill pty 并更新状态。
-
-### 9.3 Programmatic I/O Boundary
-
-V1 的 backend 允许程序化读写 embedded terminal：
-
-- `runtime.write(sessionId, data)`：向指定 role session 写入 terminal input。
-- `runtime.subscribe(sessionId, listener)`：监听 terminal output、status、exit 和 error event。
-- `terminal-ws`：把用户在 GUI terminal 中输入的内容转发给 runtime。
-- `message-service`：在 manual stage 或 auto delivery 时，按 policy 向目标 session 写入消息。
-- `command-dispatcher`：兼容旧 Send Command，向目标 session 写入 role command 短指令。
-
-V1 允许的自动化边界：
-
-- 用户在 GUI terminal 里的输入可以原样转发。
-- 用户点击 `Stage` 后，backend 可以写入 `Read and handle VCM message ...`，但不追加 Enter。
-- 用户打开 auto mode 后，backend 可以在 policy 通过时写入可见 `[VCM MESSAGE]` envelope。
-- 用户点击旧 Send Command 后，backend 可以写入 `Please read and execute the role command at: <path>`。
-- Backend 可以监听 output 并写入 raw log。
-- Backend 可以根据 output/exit event 更新轻量状态和 GUI 提示。
-
-V1 明确不做：
-
-- 不自动确认 Claude Code permission prompt。
-- 不允许 Project Manager 绕过 MessageService 直接写 Architect/Coder/Reviewer terminal。
-- 不允许 Architect 绕过 PM 直接触发 Coder。
-- 不允许 Coder 绕过 PM 直接触发 Reviewer。
-- 不根据 terminal output 自动执行高风险下一步。
-
-### 9.4 `src/backend/runtime/session-registry.ts`
-
-职责：
-
-- 保存 backend 内存中的 live sessions。
-- 将 runtime state 转为 GUI 可展示状态。
-
-导出定义：
-
-```ts
-export interface SessionRegistry {
-  upsert(session: RoleSessionRecord): void;
-  get(sessionId: string): RoleSessionRecord | undefined;
-  getByRole(taskSlug: string, role: RoleName): RoleSessionRecord | undefined;
-  list(taskSlug?: string): RoleSessionRecord[];
-  updateStatus(sessionId: string, status: RoleStatus, patch?: Partial<RoleSessionRecord>): void;
-  remove(sessionId: string): void;
-}
-
-export function createSessionRegistry(): SessionRegistry;
-```
-
-## 10. Backend Service 层
-
-### 10.0 `src/backend/services/app-settings-service.ts`
-
-职责：
-
-- 管理 `~/.vcm/settings.json`。
-- 保存 `translation.settings`、`translation.secrets` 和 `recentRepositoryPaths`。
-- 从旧 `~/.vibe-coding-master/settings.json` 和 `~/.vibe-coding-master/translation.json` 迁移设置。
-- 最近 repo path 去重、保留最近 5 个。
-
-导出定义：
-
-```ts
-export interface AppSettingsService {
-  loadSettings(): Promise<AppSettingsFile>;
-  updateTranslationConfig(config: StoredTranslationConfig): Promise<StoredTranslationConfig>;
-  getTranslationConfig(): Promise<StoredTranslationConfig | undefined>;
-  getRecentRepositoryPaths(): Promise<string[]>;
-  recordRecentRepositoryPath(repoRoot: string): Promise<string[]>;
-  getSettingsPath(): string;
-}
-```
-
-### 10.1 `src/backend/services/project-service.ts`
-
-职责：
-
-- 连接 repo。
-- 创建 `.vcm/config.json`。
-- 检查 Claude Code、branch、dirty state。
-- 连接成功后把 repo root 记录到 app settings 的 `recentRepositoryPaths`。
-
-导出定义：
-
-```ts
-export interface ProjectService {
-  connectProject(input: ConnectProjectInput): Promise<ProjectSummary>;
-  getCurrentProject(): Promise<ProjectSummary | null>;
-  getRecentRepositoryPaths(): Promise<string[]>;
-  loadConfig(repoRoot: string): Promise<ProjectConfig>;
-  saveConfig(config: ProjectConfig, force?: boolean): Promise<void>;
-  getConfigPath(repoRoot: string): string;
-}
-
-export interface ProjectServiceDeps {
-  fs: FileSystemAdapter;
-  git: GitAdapter;
-  claude: ClaudeAdapter;
-  appSettings: Pick<AppSettingsService, "getRecentRepositoryPaths" | "recordRecentRepositoryPath">;
-}
-
-export function createProjectService(deps: ProjectServiceDeps): ProjectService;
-export function buildDefaultProjectConfig(repoRoot: string): ProjectConfig;
-```
-
-### 10.2 `src/backend/services/task-service.ts`
-
-职责：
-
-- 创建任务 metadata。
-- 创建 handoff structure。
-- 读取任务列表和单个任务。
-
-导出定义：
-
-```ts
-export interface TaskService {
-  createTask(repoRoot: string, input: CreateTaskRequest): Promise<TaskRecord>;
-  listTasks(repoRoot: string): Promise<TaskRecord[]>;
-  loadTask(repoRoot: string, taskSlug: string): Promise<TaskRecord>;
-  saveTask(repoRoot: string, task: TaskRecord): Promise<void>;
-  updateTaskStatus(repoRoot: string, taskSlug: string, status: TaskStatus): Promise<TaskRecord>;
-}
-
-export interface TaskServiceDeps {
-  fs: FileSystemAdapter;
-  git: GitAdapter;
-  artifactService: ArtifactService;
-  projectService: Pick<ProjectService, "loadConfig">;
-}
-
-export function createTaskService(deps: TaskServiceDeps): TaskService;
-```
-
-### 10.3 `src/backend/services/artifact-service.ts`
-
-职责：
-
-- 创建 handoff 目录结构。
-- 创建 artifact 模板。
-- 读写 role command。
-- 检查 artifact 状态。
-- 追加 raw logs。
-
-导出定义：
-
-```ts
-export interface ArtifactService {
-  getHandoffPaths(repoRoot: string, handoffDir: string): HandoffPaths;
-  ensureHandoffStructure(input: EnsureHandoffStructureInput): Promise<HandoffPaths>;
-  createArtifactTemplates(input: CreateArtifactTemplatesInput): Promise<string[]>;
-  listArtifacts(input: ListArtifactsInput): Promise<ArtifactSummary>;
-  readArtifact(input: ReadArtifactInput): Promise<string>;
-  readRoleCommand(input: ReadRoleCommandInput): Promise<string>;
-  saveRoleCommand(input: SaveRoleCommandInput): Promise<void>;
-  appendRoleLog(input: AppendRoleLogInput): Promise<void>;
-}
-
-export interface EnsureHandoffStructureInput {
-  repoRoot: string;
-  taskSlug: string;
-  handoffDir: string;
-}
-
-export interface CreateArtifactTemplatesInput {
-  repoRoot: string;
-  taskSlug: string;
-  handoffDir: string;
-  overwrite?: boolean;
-}
-
-export interface ListArtifactsInput {
-  repoRoot: string;
-  taskSlug: string;
-  handoffDir: string;
-}
-
-export interface ReadArtifactInput {
-  repoRoot: string;
-  path: string;
-}
-
-export interface ReadRoleCommandInput {
-  repoRoot: string;
-  handoffDir: string;
-  role: DispatchableRole;
-}
-
-export interface SaveRoleCommandInput {
-  repoRoot: string;
-  handoffDir: string;
-  role: DispatchableRole;
-  content: string;
-}
-
-export interface AppendRoleLogInput {
-  repoRoot: string;
-  handoffDir: string;
-  role: RoleName;
-  content: string;
-}
-
-export function createArtifactService(fs: FileSystemAdapter): ArtifactService;
-```
-
-### 10.4 `src/backend/services/harness-service.ts`
-
-职责：
-
-- 检查 repo 是否安装 VCM Harness rules。
-- 检查并计划 `CLAUDE.md` 与 `.claude/agents/*.md` 的 VCM managed block。
-- 对缺失文件生成推荐默认内容。
-- 对已有文件只插入或更新 `<!-- VCM:BEGIN version=... -->` managed block。
-- 返回 planned changes，供 GUI 在写入前展示。
-- 应用变更后返回 changed files summary，并提示用户 review/commit。
-
-导出定义：
-
-```ts
-export interface HarnessService {
-  getHarnessStatus(repoRoot: string): Promise<HarnessStatusReport>;
-  applyHarness(repoRoot: string): Promise<HarnessApplyResult>;
-}
-
-export interface HarnessServiceDeps {
-  fs: FileSystemAdapter;
-  now?: () => string;
-}
-
-export function createHarnessService(deps: HarnessServiceDeps): HarnessService;
-```
-
-实现规则：
-
-- `CLAUDE.md` 不存在时创建推荐默认文件。
-- `.claude/agents/project-manager.md`、`architect.md`、`coder.md`、`reviewer.md` 不存在时创建推荐默认文件。
-- 文件存在且无 VCM block 时，追加 VCM block。
-- 文件存在且 VCM block 版本过期时，只替换 VCM block。
-- 文件存在且 VCM block 最新时，不修改。
-- 不修改 managed block 之外的用户内容。
-- 如果 working tree 已 dirty，仍可应用，但必须在结果 warnings 中提示用户 review diff，避免混淆已有改动和 VCM 改动。
-
-默认模板内容：
-
-- `templates/harness/claude-root.ts`：共享 VCM 规则、canonical handoff directory、`vcmctl` 基本规则、高风险停止条件。
-- `templates/harness/project-manager-agent.ts`：用户沟通入口、任务澄清、角色路由、`vcmctl send`、workflow gate、final acceptance / commit / PR。
-- `templates/harness/architect-agent.ts`：architecture plan、module boundary、public/test contract、post-review docs sync / architecture drift check、`docs-sync-report.md`。
-- `templates/harness/coder-agent.ts`：按 approved plan 实现、维护 implementation / validation logs、遇到范围或架构变化时回 PM。
-- `templates/harness/reviewer-agent.ts`：独立 review、测试充分性、review report、发现 docs drift 时交回 PM。
-
-### 10.5 `src/backend/services/session-service.ts`
-
-职责：
-
-- 启动、停止、重启 role session。
-- 同步 runtime、registry 和 `.vcm/sessions` metadata。
-- 首次启动生成 `claudeSessionId`，并使用 `claude --agent <role> --session-id <uuid>`。
-- 异常中断或 backend 重启后，从 `.vcm/sessions/<task-slug>.json` 恢复 role metadata。
-- Resume 使用 `claude --agent <role> --resume <claudeSessionId>` 创建新的 embedded terminal。
-- Restart 优先复用已有 `claudeSessionId`，避免丢失长任务上下文。
-
-导出定义：
-
-```ts
-export interface SessionService {
-  listSessions(repoRoot: string, taskSlug: string): Promise<RoleSessionRecord[]>;
-  startRoleSession(input: StartRoleSessionInput): Promise<RoleSessionRecord>;
-  resumeRoleSession(input: StartRoleSessionInput): Promise<RoleSessionRecord>;
-  stopRoleSession(input: StopRoleSessionInput): Promise<RoleSessionRecord>;
-  restartRoleSession(input: RestartRoleSessionInput): Promise<RoleSessionRecord>;
-  getRoleSession(repoRoot: string, taskSlug: string, role: RoleName): Promise<RoleSessionRecord | null>;
-}
-
-export interface StartRoleSessionInput {
-  repoRoot: string;
-  taskSlug: string;
-  role: RoleName;
-  cols?: number;
-  rows?: number;
-  permissionMode?: ClaudePermissionMode;
-}
-
-export interface StopRoleSessionInput {
-  repoRoot: string;
-  taskSlug: string;
-  role: RoleName;
-}
-
-export interface RestartRoleSessionInput extends StopRoleSessionInput {
-  cols?: number;
-  rows?: number;
-}
-
-export interface SessionServiceDeps {
-  claude: ClaudeAdapter;
-  runtime: TerminalRuntime;
-  registry: SessionRegistry;
-  taskService: TaskService;
-  artifactService: ArtifactService;
-  projectService: Pick<ProjectService, "loadConfig">;
-}
-
-export function createSessionService(deps: SessionServiceDeps): SessionService;
-```
-
-### 10.6 `src/backend/services/command-dispatcher.ts`
-
-职责：
-
-- 从 role command artifact 读取命令。
-- 将短指令写入目标 role terminal。
-- 记录 dispatch event。
-
-导出定义：
-
-```ts
-export interface CommandDispatcher {
-  dispatchRoleCommand(input: DispatchRoleCommandInput): Promise<DispatchRoleCommandResult>;
-}
-
-export interface DispatchRoleCommandInput {
-  repoRoot: string;
-  taskSlug: string;
-  role: DispatchableRole;
-}
-
-export interface DispatchRoleCommandResult {
-  taskSlug: string;
-  role: DispatchableRole;
-  commandPath: string;
-  instruction: string;
-  dispatchedAt: string;
-}
-
-export interface CommandDispatcherDeps {
-  runtime: TerminalRuntime;
-  sessionService: SessionService;
-  taskService: TaskService;
-  artifactService: ArtifactService;
-}
-
-export function createCommandDispatcher(deps: CommandDispatcherDeps): CommandDispatcher;
-```
-
-实现规则：
-
-- role command 文件缺失时失败。
-- role command 文件为空时失败。
-- role command 文件仍是模板或包含 `TBD` / `status: draft` 时失败。
-- role command 必须使用当前 VCM task 的 canonical path：`.ai/handoffs/<task-slug>/role-commands/<role>.md`。
-- Project Manager 的 VCM 协作规则必须来自 repo-local `CLAUDE.md` / `.claude/agents/project-manager.md` managed block，不再通过 terminal 输入注入长 context。
-- 目标 role session 未运行时失败并提示启动 session。
-- `instruction` 必须是短文本：
-- 只有用户通过 GUI 点击 Send Command 时才调用 dispatch。
-- dispatch 不解析 Claude Code 输出，不自动重试，不自动确认权限。
-- dispatch 成功后只记录 event，不继续触发下一个 role。
-
-```text
-Please read and execute the role command at: <path>
-```
-
-### 10.7 `src/backend/services/message-service.ts`
-
-职责：
-
-- 实现 PM-mediated VCM message bus。
-- 校验 sender / target / message type / taskSlug policy。
-- 持久化 `.vcm/messages/<task-slug>.jsonl`。
-- 写入长正文 `.ai/handoffs/<task-slug>/messages/<message-id>.md`。
-- 管理 `.vcm/orchestration/<task-slug>.json`。
-- 支持 manual mode 的 pending approval 和 staging。
-- 支持 auto mode 的 visible envelope delivery。
-- 禁止非 PM role 直接互发消息。
-
-导出定义：
-
-```ts
-export interface MessageService {
-  listMessages(input: ListMessagesInput): Promise<VcmRoleMessage[]>;
-  sendMessage(input: SendMessageInput): Promise<SendRoleMessageResult>;
-  stageMessage(input: MessageActionInput): Promise<VcmRoleMessage>;
-  approveMessage(input: MessageActionInput): Promise<VcmRoleMessage>;
-  rejectMessage(input: MessageActionInput): Promise<VcmRoleMessage>;
-  getOrchestrationState(input: OrchestrationStateInput): Promise<VcmOrchestrationState>;
-  updateOrchestrationState(input: UpdateOrchestrationStateInput): Promise<VcmOrchestrationState>;
-}
-
-export interface SendMessageInput extends SendRoleMessageRequest {
-  repoRoot: string;
-  stateRoot: string;
-  handoffDir: string;
-  taskSlug: string;
-}
-
-export interface MessageActionInput {
-  repoRoot: string;
-  stateRoot: string;
-  taskSlug: string;
-  messageId: string;
-}
-
-export interface UpdateOrchestrationStateInput extends OrchestrationStateInput {
-  mode?: VcmOrchestrationMode;
-  paused?: boolean;
-}
-```
-
-Policy：
-
-- `user -> project-manager` only with `user-request`。
-- `project-manager -> architect/coder/reviewer` only with `task/question/review-request/revise/cancel`。
-- `architect/coder/reviewer -> project-manager` only with `result/question/blocked/finding`。
-- target session missing/running false -> `queued`。
-- missing orchestration state -> `manual`, `paused: false`。
-- manual mode -> `pending_approval`。
-- manual stage -> write one-line prompt without trailing `\r`。
-- auto mode and not paused -> write visible `[VCM MESSAGE]` envelope with trailing `\r`。
-- never auto-confirm Claude Code permission prompts。
-
-### 10.8 `src/backend/services/status-service.ts`
-
-职责：
-
-- 汇总 task、sessions、artifacts、events。
-- 根据 handoff artifact status 计算 soft workflow gates：architecture、implementation、review、docs sync、PM final。
-- 只提供下一步建议和 blocked/ready/complete 状态，不在 V1 硬拦截 role session 启动。
-
-导出定义：
-
-```ts
-export interface TaskStatusReport {
-  task: TaskRecord;
-  sessions: RoleSessionRecord[];
-  artifacts: ArtifactSummary;
-  workflow: TaskWorkflowReport;
-  warnings: string[];
-}
-
-export interface TaskWorkflowReport {
-  currentStepId: "architecture-plan" | "implementation" | "review" | "docs-sync" | "final-acceptance";
-  nextAction: string;
-  blocked: boolean;
-  steps: TaskWorkflowStep[];
-}
-
-export interface TaskWorkflowStep {
-  id: TaskWorkflowReport["currentStepId"];
-  label: string;
-  status: "pending" | "blocked" | "ready" | "complete";
-  detail: string;
-  artifactPaths: string[];
-}
-
-export interface StatusService {
-  getTaskStatus(repoRoot: string, taskSlug: string): Promise<TaskStatusReport>;
-}
-
-export interface StatusServiceDeps {
-  taskService: TaskService;
-  sessionService: SessionService;
-  artifactService: ArtifactService;
-}
-
-export function createStatusService(deps: StatusServiceDeps): StatusService;
-```
-
-### 10.9 `src/backend/services/translation-prompts.ts`
-
-职责：
-
-- 集中定义工程化翻译 prompts。
-- 确保代码、路径、命令、flag、错误信息、标识符和 git refs 被保留。
-
-导出定义：
-
-```ts
-export type TranslationPromptKey =
-  | "zh-to-en"
-  | "zh-to-en-with-context"
-  | "en-to-zh";
-
-export interface TranslationPromptInput {
-  key: TranslationPromptKey;
-  sourceText: string;
-  contextText?: string;
-  sourceKind?: TranslationSourceKind;
-  targetLanguage: string;
-  workingLanguage: "en";
-}
-
-export function getBaseTranslationPrompt(key: TranslationPromptKey): string;
-export function buildTranslationPrompt(input: TranslationPromptInput): {
-  systemPrompt: string;
-  userPrompt: string;
-};
-export function parseTranslationWarning(raw: string): { warning?: string; text: string };
-```
-
-规则：
-
-- with-context prompt 必须明确：context 只用于消歧，只翻译 new user input。
-- output prompt 必须根据 `sourceKind` 要求模型保留技术 token。
-- 设置页必须按 `cc-pm` 风格展示三个 prompt slot：`zh-to-en`、`zh-to-en-with-context`、`en-to-zh`。
-- 每个 slot 提供 `User prompt (empty = use default)` 和 `Default prompt (read-only)`。
-
-### 10.10 `src/backend/services/translation-queue.ts`
-
-职责：
-
-- 提供每个 role session 的 FIFO translation queue。
-- 避免并发翻译导致顺序错乱和 provider 429。
-
-导出定义：
-
-```ts
-export interface SerialTranslationQueue {
-  enqueue<T>(task: () => Promise<T>): Promise<T>;
-  readonly pending: number;
-}
-
-export interface TranslationQueueRegistry {
-  getQueue(taskSlug: string, role: RoleName): SerialTranslationQueue;
-  clearQueue(taskSlug: string, role: RoleName): void;
-}
-
-export function createSerialTranslationQueue(): SerialTranslationQueue;
-export function createTranslationQueueRegistry(): TranslationQueueRegistry;
-```
-
-### 10.11 `src/backend/services/translation-service.ts`
-
-职责：
-
-- 管理 Translation Mode 设置和 Claude transcript subscriptions。
-- 翻译用户输入并可选发送到当前 role pty。
-- 翻译或处理 Claude Code transcript assistant text / question / todo / agent / raw tool event。
-- 维护 `lastAssistantText` 用于上下文翻译。
-
-导出定义：
-
-```ts
-export interface TranslationService {
-  getSettings(): Promise<TranslationSettings>;
-  updateSettings(input: Partial<TranslationSettings>, secrets?: TranslationSecretSettings): Promise<TranslationSettings>;
-  testProvider(): Promise<TranslationProviderTestResult>;
-  translateUserInput(input: TranslateUserInputServiceInput): Promise<TranslateUserInputResult>;
-  handleTerminalOutput(input: TerminalOutputTranslationInput): void;
-  subscribe(input: TranslationSubscribeInput, listener: TranslationEventListener): Unsubscribe;
-  clearSession(input: TranslationSessionInput): void;
-  retryTranslation(input: RetryTranslationInput): Promise<TranslationEntry>;
-}
-
-export interface TranslateUserInputServiceInput extends TranslateUserInputRequest {
-  repoRoot: string;
-  taskSlug: string;
-  role: RoleName;
-}
-
-export interface TerminalOutputTranslationInput {
-  repoRoot: string;
-  taskSlug: string;
-  role: RoleName;
-  sessionId: string;
-  data: string;
-}
-
-export interface TranslationSessionInput {
-  taskSlug: string;
-  role: RoleName;
-}
-
-export interface TranslationSubscribeInput extends TranslationSessionInput {}
-
-export interface RetryTranslationInput extends TranslationSessionInput {
-  translationId: string;
-}
-
-export type TranslationEventListener = (message: TranslationWsMessage) => void;
-
-export interface TranslationServiceDeps {
-  provider: TranslationProvider;
-  runtime: TerminalRuntime;
-  sessionRegistry: Pick<SessionRegistry, "get">;
-  transcripts: ClaudeTranscriptService;
-  sessionService: SessionService;
-  appSettings: Pick<AppSettingsService, "getTranslationConfig" | "updateTranslationConfig">;
-  now?: () => string;
-  id?: () => string;
-}
-
-export function createTranslationService(deps: TranslationServiceDeps): TranslationService;
-```
-
-实现规则：
-
-- `subscribeToSession` 先通过 `sessionRegistry.get(sessionId)` 找到 role session 的 `cwd` 和 `claudeSessionId`。
-- `ClaudeTranscriptService` tail `~/.claude/projects/<project-hash>/<session-id>.jsonl`。
-- `parseAssistantContent` 从 JSONL 中解析 assistant text、thinking、tool_use、tool_result 等结构化 event。
-- output translation 处理 assistant `text` event，不用 `stop_reason=tool_use` 过滤文本。
-- `AskUserQuestion`、`TodoWrite`、`Agent` / `Task` 结构化 event 转换为可读文本后进入 provider。
-- raw tool_use / tool_result 不调用 provider，作为 preserved 原文行推送到 Translation Panel。
-- 不再从 raw PTY output 推断段落边界，也不再用 `maxChunkChars` 切分 Claude 输出。
-- `classifyTranslationChunk` 返回 `sensitive` 时不调用 provider。
-- `already-target-language` 和 CJK 内容标记 `skipped`。
-- `code`、`diff`、`permission-prompt` 标记 `preserved`。
-- `log` 和 `tool-output` 默认摘要或保留。
-- `prose` 进入 per-role FIFO queue。
-- 翻译成功的 prose event 更新该 role 的 `lastAssistantText`。
-- `translateUserInput` 在 `contextEnabled` 时使用 `lastAssistantText`，但只发送新输入给 provider。
-- `send: true` 时只写入当前 role session pty，不允许写入其他 role。
-- Translation Panel entries 只存在 runtime memory，不写 `.ai/handoffs`。
-
-## 11. Backend API 层
-
-### 11.1 `src/backend/server.ts`
-
-职责：
-
-- 创建 Fastify server。
-- 注册 API routes。
-- 注册 WebSocket terminal bridge。
-- Serve frontend assets。
-
-导出定义：
-
-```ts
-export interface CreateServerOptions {
-  host?: string;
-  port?: number;
-  staticDir?: string;
-  dev?: boolean;
-}
-
-export interface ServerDeps {
-  projectService: ProjectService;
-  taskService: TaskService;
-  sessionService: SessionService;
-  artifactService: ArtifactService;
-  commandDispatcher: CommandDispatcher;
-  statusService: StatusService;
-  translationService: TranslationService;
-  runtime: TerminalRuntime;
-}
-
-export function createServer(deps: ServerDeps, options?: CreateServerOptions): Promise<FastifyInstance>;
-export async function startServer(options?: CreateServerOptions): Promise<{ url: string; close(): Promise<void> }>;
-```
-
-### 11.2 `src/backend/api/project-routes.ts`
-
-Routes：
-
-```text
-GET  /api/health
-GET  /api/projects/recent
-POST /api/projects/connect
-GET  /api/projects/current
-```
-
-导出定义：
-
-```ts
-export function registerProjectRoutes(app: FastifyInstance, deps: ProjectRouteDeps): void;
-
-export interface ProjectRouteDeps {
-  projectService: ProjectService;
-}
-```
-
-### 11.3 `src/backend/api/harness-routes.ts`
-
-Routes：
-
-```text
-GET  /api/projects/harness
-POST /api/projects/harness/apply
-```
-
-导出定义：
-
-```ts
-export function registerHarnessRoutes(app: FastifyInstance, deps: HarnessRouteDeps): void;
-
-export interface HarnessRouteDeps {
-  projectService: ProjectService;
-  harnessService: HarnessService;
-}
-```
-
-实现规则：
-
-- `GET` 只返回 status 和 planned changes，不写文件。
-- `POST /apply` 才写文件。
-- `POST /apply` 只能改 VCM managed block 或创建缺失文件。
-- 返回 changed files summary，供 GUI 提示用户 review/commit。
-
-### 11.4 `src/backend/api/task-routes.ts`
-
-Routes：
-
-```text
-GET  /api/tasks
-POST /api/tasks
-GET  /api/tasks/:taskSlug
-GET  /api/tasks/:taskSlug/status
-```
-
-导出定义：
-
-```ts
-export function registerTaskRoutes(app: FastifyInstance, deps: TaskRouteDeps): void;
-
-export interface TaskRouteDeps {
-  projectService: ProjectService;
-  taskService: TaskService;
-  statusService: StatusService;
-}
-```
-
-### 11.5 `src/backend/api/session-routes.ts`
-
-Routes：
-
-```text
-GET  /api/tasks/:taskSlug/sessions
-POST /api/tasks/:taskSlug/sessions/:role/start
-POST /api/tasks/:taskSlug/sessions/:role/stop
-POST /api/tasks/:taskSlug/sessions/:role/resume
-POST /api/tasks/:taskSlug/sessions/:role/restart
-POST /api/tasks/:taskSlug/sessions/:role/dispatch
-```
-
-导出定义：
-
-```ts
-export function registerSessionRoutes(app: FastifyInstance, deps: SessionRouteDeps): void;
-
-export interface SessionRouteDeps {
-  projectService: ProjectService;
-  sessionService: SessionService;
-  commandDispatcher: CommandDispatcher;
-}
-```
-
-### 11.6 `src/backend/api/artifact-routes.ts`
-
-Routes：
-
-```text
-GET /api/tasks/:taskSlug/artifacts
-GET /api/tasks/:taskSlug/artifacts/:artifactName
-GET /api/tasks/:taskSlug/role-commands/:role
-PUT /api/tasks/:taskSlug/role-commands/:role
-GET /api/tasks/:taskSlug/logs/:role
-```
-
-导出定义：
-
-```ts
-export function registerArtifactRoutes(app: FastifyInstance, deps: ArtifactRouteDeps): void;
-
-export interface ArtifactRouteDeps {
-  projectService: ProjectService;
-  taskService: TaskService;
-  artifactService: ArtifactService;
-}
-```
-
-### 11.7 `src/backend/api/message-routes.ts`
-
-Routes：
-
-```text
-GET  /api/tasks/:taskSlug/messages
-POST /api/tasks/:taskSlug/messages
-POST /api/tasks/:taskSlug/messages/:messageId/stage
-POST /api/tasks/:taskSlug/messages/:messageId/approve
-POST /api/tasks/:taskSlug/messages/:messageId/reject
-GET  /api/tasks/:taskSlug/orchestration
-PUT  /api/tasks/:taskSlug/orchestration
-POST /api/tasks/:taskSlug/orchestration/pause
-POST /api/tasks/:taskSlug/orchestration/resume
-```
-
-导出定义：
-
-```ts
-export function registerMessageRoutes(app: FastifyInstance, deps: MessageRouteDeps): void;
-
-export interface MessageRouteDeps {
-  projectService: ProjectService;
-  taskService: TaskService;
-  messageService: MessageService;
-}
-```
-
-实现规则：
-
-- 所有 route 必须 require current project。
-- 所有 message route 必须 load task，防止跨 taskSlug 注入。
-- `PUT orchestration` 只接受 `manual` / `auto`。
-- `stage` / `approve` 必须走 MessageService，不能直接写 terminal。
-- route 不做 delivery policy；policy 集中在 MessageService。
-
-### 11.8 `src/backend/ws/terminal-ws.ts`
-
-职责：
-
-- 处理 `/ws/tasks/:taskSlug/sessions/:role`。
-- 将 runtime events 推送给前端。
-- 将前端 input/resize 写回 runtime。
-
-导出定义：
-
-```ts
-export interface TerminalWsDeps {
-  projectService: ProjectService;
-  sessionService: SessionService;
-  runtime: TerminalRuntime;
-}
-
-export function registerTerminalWebSocket(server: FastifyInstance, deps: TerminalWsDeps): void;
-
-export function parseClientTerminalMessage(raw: string): ClientTerminalMessage;
-export function serializeServerTerminalMessage(message: ServerTerminalMessage): string;
-```
-
-### 11.9 `src/backend/api/translation-routes.ts`
-
-Routes：
-
-```text
-GET  /api/translation/settings
-PUT  /api/translation/settings
-POST /api/translation/test
-POST /api/tasks/:taskSlug/sessions/:role/translation/input
-POST /api/tasks/:taskSlug/sessions/:role/translation/retry/:translationId
-POST /api/tasks/:taskSlug/sessions/:role/translation/clear
-```
-
-导出定义：
-
-```ts
-export function registerTranslationRoutes(app: FastifyInstance, deps: TranslationRouteDeps): void;
-
-export interface TranslationRouteDeps {
-  projectService: ProjectService;
-  taskService: TaskService;
-  translationService: TranslationService;
-}
-```
-
-实现规则：
-
-- settings API 返回本机已保存的 `apiKey`，用于设置页显示和继续编辑。
-- `PUT settings` 接收 API key 并写入 `~/.vcm/settings.json` 的 `translation.secrets.apiKey`；输入框为空并保存时清空本机 API key。
-- input route 必须 load current task，防止跨 taskSlug。
-- input route 只允许向当前 role session 发送翻译结果。
-- retry / clear 只影响 Translation Panel runtime state。
-
-### 11.10 `src/backend/ws/translation-ws.ts`
-
-职责：
-
-- 处理 `/ws/tasks/:taskSlug/sessions/:role/translation`。
-- 将 TranslationService events 推送给前端 Translation Panel。
-
-导出定义：
-
-```ts
-export interface TranslationWsDeps {
-  projectService: ProjectService;
-  taskService: TaskService;
-  translationService: TranslationService;
-}
-
-export function registerTranslationWebSocket(server: FastifyInstance, deps: TranslationWsDeps): void;
-export function serializeTranslationWsMessage(message: TranslationWsMessage): string;
-```
-
-实现规则：
-
-- Translation WS 不发送 raw terminal stream。
-- 页面关闭或 role 切换时 unsubscribe。
-- 如果 settings disabled，推送 `translation-status: paused`。
-
-## 12. Frontend 层
-
-### 12.1 `src/frontend/main.tsx`
-
-职责：
-
-- 挂载 React app。
-
-导出定义：
-
-```ts
-export function bootstrap(): void;
-```
-
-### 12.2 `src/frontend/app.tsx`
-
-职责：
-
-- 应用顶层路由和布局。
-
-导出定义：
-
-```tsx
-export function App(): JSX.Element;
-```
-
-### 12.3 `src/frontend/state/api-client.ts`
-
-职责：
-
-- 封装 REST API。
-
-导出定义：
-
-```ts
-export interface ApiClient {
-  connectProject(input: ConnectProjectRequest): Promise<ProjectSummary>;
-  getCurrentProject(): Promise<ProjectSummary | null>;
-  getRecentRepositoryPaths(): Promise<string[]>;
-  getHarnessStatus(): Promise<HarnessStatusReport>;
-  applyHarness(): Promise<HarnessApplyResult>;
-  listTasks(): Promise<TaskRecord[]>;
-  createTask(input: CreateTaskRequest): Promise<TaskRecord>;
-  getTask(taskSlug: string): Promise<TaskRecord>;
-  getTaskStatus(taskSlug: string): Promise<TaskStatusReport>;
-  listSessions(taskSlug: string): Promise<RoleSessionRecord[]>;
-  startRoleSession(taskSlug: string, role: RoleName, input?: StartRoleSessionRequest): Promise<RoleSessionRecord>;
-  stopRoleSession(taskSlug: string, role: RoleName): Promise<RoleSessionRecord>;
-  restartRoleSession(taskSlug: string, role: RoleName, input?: StartRoleSessionRequest): Promise<RoleSessionRecord>;
-  dispatchRoleCommand(taskSlug: string, role: DispatchableRole): Promise<DispatchRoleCommandResult>;
-  listArtifacts(taskSlug: string): Promise<ArtifactSummary>;
-  readRoleCommand(taskSlug: string, role: DispatchableRole): Promise<string>;
-  saveRoleCommand(taskSlug: string, role: DispatchableRole, content: string): Promise<void>;
-  readLog(taskSlug: string, role: RoleName): Promise<string>;
-  listMessages(taskSlug: string): Promise<VcmRoleMessage[]>;
-  sendRoleMessage(taskSlug: string, input: SendRoleMessageRequest): Promise<SendRoleMessageResult>;
-  stageMessage(taskSlug: string, messageId: string): Promise<VcmRoleMessage>;
-  rejectMessage(taskSlug: string, messageId: string): Promise<VcmRoleMessage>;
-  getOrchestrationState(taskSlug: string): Promise<VcmOrchestrationState>;
-  updateOrchestrationState(taskSlug: string, input: { mode?: VcmOrchestrationMode; paused?: boolean }): Promise<VcmOrchestrationState>;
-  getTranslationSettings(): Promise<TranslationSettings>;
-  updateTranslationSettings(input: Partial<TranslationSettings>, apiKey?: string): Promise<TranslationSettings>;
-  testTranslationProvider(): Promise<TranslationProviderTestResult>;
-  translateUserInput(taskSlug: string, role: RoleName, input: TranslateUserInputRequest): Promise<TranslateUserInputResult>;
-  retryTranslation(taskSlug: string, role: RoleName, translationId: string): Promise<TranslationEntry>;
-  clearTranslationSession(taskSlug: string, role: RoleName): Promise<void>;
-}
-
-export function createApiClient(baseUrl?: string): ApiClient;
-```
-
-### 12.4 `src/frontend/terminal/terminal-client.ts`
-
-职责：
-
-- 封装 terminal WebSocket。
-
-导出定义：
-
-```ts
-export interface TerminalClient {
-  connect(): void;
-  disconnect(): void;
-  sendInput(data: string): void;
-  resize(cols: number, rows: number): void;
-  onMessage(listener: (message: ServerTerminalMessage) => void): Unsubscribe;
-}
-
-export function createTerminalClient(input: CreateTerminalClientInput): TerminalClient;
-
-export interface CreateTerminalClientInput {
-  taskSlug: string;
-  role: RoleName;
-  baseUrl?: string;
-}
-```
-
-### 12.5 `src/frontend/terminal/xterm-view.tsx`
-
-职责：
-
-- 渲染 xterm.js。
-- 连接 TerminalClient。
-- 处理 fit、resize、input、output。
-
-导出定义：
-
-```tsx
-export interface XtermViewProps {
-  taskSlug: string;
-  role: RoleName;
-  active: boolean;
-}
-
-export function XtermView(props: XtermViewProps): JSX.Element;
-```
-
-### 12.6 `src/frontend/state/translation-store.ts`
-
-职责：
-
-- 管理当前 role 的 Translation Mode UI state。
-- 连接 translation WebSocket。
-- 保存 Translation Panel runtime entries。
-
-导出定义：
-
-```ts
-export interface TranslationPanelState {
-  enabled: boolean;
-  paused: boolean;
-  settings: TranslationSettings | null;
-  entries: TranslationEntry[];
-  englishPreview: string;
-  contextUsed: boolean;
-  error?: string;
-}
-
-export interface TranslationStore {
-  getState(taskSlug: string, role: RoleName): TranslationPanelState;
-  connect(taskSlug: string, role: RoleName): void;
-  disconnect(taskSlug: string, role: RoleName): void;
-  applyMessage(taskSlug: string, role: RoleName, message: TranslationWsMessage): void;
-  clear(taskSlug: string, role: RoleName): void;
-}
-
-export function createTranslationStore(api: ApiClient): TranslationStore;
-```
-
-### 12.7 `src/frontend/components/session-console.tsx`
-
-职责：
-
-- 展示单个 role session。
-- 在 Start / Restart 上方提供三档权限模式选择。
-- 未启动时显示 Start。
-- 已启动时显示 terminal。
-
-导出定义：
-
-```tsx
-export interface SessionConsoleProps {
-  taskSlug: string;
-  role: RoleName;
-  session?: RoleSessionRecord;
-  active: boolean;
-  permissionMode: ClaudePermissionMode;
-  onPermissionModeChange(mode: ClaudePermissionMode): void;
-  onStart(role: RoleName): Promise<void>;
-  onResume(role: RoleName): Promise<void>;
-  onStop(role: RoleName): Promise<void>;
-  onRestart(role: RoleName): Promise<void>;
-  translationEnabled: boolean;
-  onTranslationEnabledChange(enabled: boolean): void;
-}
-
-export function SessionConsole(props: SessionConsoleProps): JSX.Element;
-```
-
-UI 规则：
-
-- `translationEnabled=false` 时，SessionConsole 只展示 xterm.js terminal。
-- `translationEnabled=true` 时，SessionConsole 使用 split layout：左侧 XtermView，右侧 TranslationPanel。
-- Raw terminal input 不经过 TranslationPanel。
-
-### 12.8 `src/frontend/components/translation-panel.tsx`
-
-职责：
-
-- 展示翻译输出流。
-- 展示 sourceKind、status、原文引用、译文或摘要。
-- 提供用户语言 composer、English preview、Send English、Edit English、Send Raw、Retry、Pause。
-
-导出定义：
-
-```tsx
-export interface TranslationPanelProps {
-  taskSlug: string;
-  role: RoleName;
-  settings: TranslationSettings;
-  entries: TranslationEntry[];
-  busy: boolean;
-  englishPreview: string;
-  contextUsed: boolean;
-  onTranslateInput(input: TranslateUserInputRequest): Promise<TranslateUserInputResult>;
-  onSendEnglish(text: string): Promise<void>;
-  onRetry(entryId: string): Promise<void>;
-  onClear(): Promise<void>;
-  onOpenSettings(): void;
-}
-
-export function TranslationPanel(props: TranslationPanelProps): JSX.Element;
-```
-
-交互规则：
-
-- 默认 `review-before-send`：先显示英文 preview，不自动发送。
-- `auto-send` 必须由用户显式选择。
-- `Use context` 状态必须可见。
-- `sourceKind=code/diff/log/tool-output` 的 entry 显示 preserved/summarized badge。
-- 失败 entry 显示 retry。
-
-### 12.9 `src/frontend/components/translation-entry-row.tsx`
-
-导出定义：
-
-```tsx
-export interface TranslationEntryRowProps {
-  entry: TranslationEntry;
-  expanded: boolean;
-  onToggleExpanded(): void;
-  onRetry?(): void;
-}
-
-export function TranslationEntryRow(props: TranslationEntryRowProps): JSX.Element;
-```
-
-### 12.10 `src/frontend/components/translation-settings-modal.tsx`
-
-职责：
-
-- 配置 OpenAI-compatible provider。
-- 测试连接。
-- 展示 prompt preview 和隐私提示。
-
-导出定义：
-
-```tsx
-export interface TranslationSettingsModalProps {
-  settings: TranslationSettings;
-  busy: boolean;
-  testResult?: TranslationProviderTestResult;
-  onSave(settings: Partial<TranslationSettings>, apiKey?: string): Promise<void>;
-  onTest(): Promise<void>;
-  onClose(): void;
-}
-
-export function TranslationSettingsModal(props: TranslationSettingsModalProps): JSX.Element;
-```
-
-### 12.11 `src/frontend/components/role-session-tabs.tsx`
-
-职责：
-
-- 渲染 PM / Architect / Coder / Reviewer tabs。
-- 展示 status badge。
-
-导出定义：
-
-```tsx
-export interface RoleSessionTabsProps {
-  activeRole: RoleName;
-  sessions: RoleSessionRecord[];
-  onRoleChange(role: RoleName): void;
-}
-
-export function RoleSessionTabs(props: RoleSessionTabsProps): JSX.Element;
-```
-
-### 12.12 `src/frontend/components/event-log.tsx`
-
-职责：
-
-- 展示产品级事件摘要。
-
-导出定义：
-
-```tsx
-export interface EventLogProps {
-  events: TerminalEvent[];
-}
-
-export function EventLog(props: EventLogProps): JSX.Element;
-```
-
-### 12.13 `src/frontend/components/message-timeline.tsx`
-
-职责：
-
-- 展示当前 task 的 VCM role messages。
-- 显示 pending / queued / staged / delivered / failed / rejected 状态。
-- 在 manual mode 下显示 approval cards。
-- 提供 `Stage`、`Reject`、`Open target role` 操作。
-- 显示 `Auto orchestration` toggle 和 pause/resume state。
-
-导出定义：
-
-```tsx
-export interface MessageTimelineProps {
-  messages: VcmRoleMessage[];
-  orchestration: VcmOrchestrationState;
-  busy: boolean;
-  onStage(messageId: string): Promise<void>;
-  onReject(messageId: string): Promise<void>;
-  onModeChange(mode: VcmOrchestrationMode): Promise<void>;
-  onPauseChange(paused: boolean): Promise<void>;
-  onOpenRole(role: RoleName): void;
-}
-
-export function MessageTimeline(props: MessageTimelineProps): JSX.Element;
-```
-
-UI 规则：
-
-- `manual` mode 是默认显示状态。
-- `Stage` 只把一行提示写入 terminal，不触发 Enter。
-- `auto` mode 必须显式打开，并可以随时 pause。
-- failed delivery 必须显示 failure reason。
-
-### 12.14 `src/frontend/routes/project-dashboard.tsx`
-
-职责：
-
-- 展示 repo 连接表单、任务列表和 harness health。
-- Repo 连接表单支持手动输入 path，也支持从最近 5 个 repo path 下拉选择。
-- 在 repo 连接后拉取 harness status。
-- 展示 `Install / Update VCM Harness`，但只在用户点击后应用变更。
-- 应用后展示 changed files summary 和 review/commit 提示。
-
-导出定义：
-
-```tsx
-export function ProjectDashboard(): JSX.Element;
-```
-
-### 12.15 `src/frontend/components/harness-panel.tsx`
-
-职责：
-
-- 展示 `CLAUDE.md` 和 4 个 role agent 的 status。
-- 展示每个文件的 action：`create` / `insert` / `update` / `ok`。
-- 展示 planned changes。
-- 提供 `View Planned Changes`、`Install / Update VCM Harness`、`Refresh`。
-- 应用后提示用户 review diff 并提交独立 commit。
-
-导出定义：
-
-```tsx
-export interface HarnessPanelProps {
-  status: HarnessStatusReport | null;
-  busy: boolean;
-  onRefresh(): Promise<void>;
-  onApply(): Promise<void>;
-}
-
-export function HarnessPanel(props: HarnessPanelProps): JSX.Element;
-```
-
-### 12.16 `src/frontend/routes/task-workspace.tsx`
-
-职责：
-
-- 任务运行时主界面。
-- 组合 TaskNav、RoleSessionTabs、SessionConsole、TranslationPanel、MessageTimeline、EventLog。
-- 不渲染独立 ArtifactPanel；handoff files 保留在任务目录中。
-
-导出定义：
-
-```tsx
-export interface TaskWorkspaceProps {
-  taskSlug: string;
-}
-
-export function TaskWorkspace(props: TaskWorkspaceProps): JSX.Element;
-```
-
-## 13. Templates
-
-### 13.1 `src/backend/templates/handoff.ts`
-
-导出定义：
-
-```ts
-export function renderArchitecturePlanTemplate(taskSlug: string): string;
-export function renderImplementationLogTemplate(taskSlug: string): string;
-export function renderValidationLogTemplate(taskSlug: string): string;
-export function renderReviewReportTemplate(taskSlug: string): string;
-```
-
-### 13.2 `src/backend/templates/role-command.ts`
-
-导出定义：
-
-```ts
-export function renderRoleCommandTemplate(taskSlug: string, role: DispatchableRole): string;
-export function renderDispatchInstruction(commandPath: string): string;
-```
-
-`renderDispatchInstruction` 必须返回单行短指令：
-
-```text
-Please read and execute the role command at: <commandPath>
-```
-
-### 13.3 `src/backend/templates/message-envelope.ts`
-
-导出定义：
-
-```ts
-export function renderMessageEnvelope(message: VcmRoleMessage): string;
-export function renderManualStagePrompt(message: VcmRoleMessage): string;
-```
-
-`renderMessageEnvelope` 必须返回可见 envelope：
-
-```text
-[VCM MESSAGE]
-id: msg_...
-task: demo-task
-from: project-manager
-to: coder
-type: task
-
-<message body>
-
-Artifact refs:
-- .ai/handoffs/demo-task/architecture-plan.md
-
-Instructions:
-- Read the message and execute only within this VCM task.
-- Reply to project-manager with vcmctl reply when complete, blocked, or unclear.
-[/VCM MESSAGE]
-```
-
-`renderManualStagePrompt` 必须返回不带 trailing Enter 的短指令：
-
-```text
-Read and handle VCM message msg_123 at .ai/handoffs/demo-task/messages/msg_123.md
-```
-
-### 13.4 CLI Bridge
-
-#### 13.4.1 `src/cli/vcmctl.ts`
-
-职责：
-
-- 给 Claude Code role sessions 提供调用 VCM backend 的本地命令。
-- 读取 `VCM_API_URL`、`VCM_TASK_SLUG`、`VCM_ROLE`。
-- 发送 PM task messages、非 PM replies、result messages。
-- 查询 inbox。
-
-命令：
-
-```bash
-vcmctl send --to coder --type task --body-file /tmp/vcm-message.md
-vcmctl reply --type blocked --body "Need clarification on test scope."
-vcmctl result --body-file /tmp/vcm-result.md --artifact .ai/handoffs/task/implementation-log.md
-vcmctl inbox
-vcmctl ready
-```
-
-规则：
-
-- `send` 使用当前 `VCM_ROLE` 作为 sender。
-- `reply` / `result` 默认发给 `project-manager`。
-- CLI 不自行决定是否投递；它只调用 backend，policy 由 MessageService 执行。
-- `vcmctl ready` 是显式 role readiness signal 的预留命令，可在后续 auto mode 阶段启用。
-
-## 14. 核心调用链
-
-### 14.1 启动应用
-
-```text
-main
-  -> startServer
-  -> create services/adapters/runtime
-  -> register REST routes
-  -> register terminal WebSocket
-  -> serve frontend
-```
-
-### 14.2 连接 repo
-
-```text
-ProjectDashboard
-  -> api.connectProject
-  -> POST /api/projects/connect
-  -> projectService.connectProject
-  -> git.getRepoRoot
-  -> git.getCurrentBranch
-  -> git.isDirty
-  -> claude.isAvailable
-  -> fs.writeJsonAtomic(.vcm/config.json)
-  -> api.getHarnessStatus
-  -> GET /api/projects/harness
-  -> harnessService.getHarnessStatus
-  -> GUI shows missing/outdated VCM rules and planned changes
-```
-
-连接 repo 不自动修改 `CLAUDE.md` 或 `.claude/agents/*`。
-
-```text
-User clicks Install / Update VCM Harness
-  -> api.applyHarness
-  -> POST /api/projects/harness/apply
-  -> harnessService.applyHarness
-  -> create missing harness files or update VCM managed blocks
-  -> GUI shows changed files summary
-  -> GUI recommends review and commit
-```
-
-### 14.3 创建任务
-
-```text
-ProjectDashboard / TaskWorkspace
-  -> api.createTask
-  -> POST /api/tasks
-  -> taskService.createTask
-  -> assertValidTaskSlug
-  -> artifactService.ensureHandoffStructure
-  -> artifactService.createArtifactTemplates
-  -> fs.writeJsonAtomic(.vcm/tasks/<task-slug>.json)
-```
-
-### 14.4 启动 role session
-
-```text
-SessionConsole Start
-  -> api.startRoleSession
-  -> POST /api/tasks/:taskSlug/sessions/:role/start
-  -> sessionService.startRoleSession
-  -> claude.buildRoleStartCommand
-  -> runtime.createSession
-  -> node-pty spawn
-  -> registry.upsert
-  -> write session metadata
-```
-
-### 14.5 Terminal 输入输出
-
-```text
-XtermView
-  -> TerminalClient WebSocket
-  -> input message
-  -> terminal-ws
-  -> runtime.write
-  -> node-pty
-  -> output event
-  -> append role log
-  -> WebSocket output message
-  -> xterm.write
-```
-
-### 14.6 PM-mediated message bus
-
-PM sends work:
-
-```text
-Project Manager terminal
-  -> vcmctl send --to coder --type task --body-file /tmp/message.md
-  -> POST /api/tasks/:taskSlug/messages
-  -> messageService.sendMessage
-  -> validateMessagePolicy(project-manager, coder, task)
-  -> write .ai/handoffs/<task-slug>/messages/<message-id>.md
-  -> append .vcm/messages/<task-slug>.jsonl
-  -> manual mode: return pending_approval
-  -> GUI shows approval card
-```
-
-User stages in manual mode:
-
-```text
-MessageTimeline Stage
-  -> api.stageMessage
-  -> POST /api/tasks/:taskSlug/messages/:messageId/stage
-  -> messageService.stageMessage
-  -> sessionService.getRoleSession(target)
-  -> runtime.write(one-line prompt without Enter)
-  -> append staged snapshot to .vcm/messages/<task-slug>.jsonl
-```
-
-Auto delivery:
-
-```text
-vcmctl send/reply/result
-  -> messageService.sendMessage
-  -> orchestration mode is auto
-  -> not paused
-  -> target session running
-  -> runtime.write(renderMessageEnvelope(message) + "\r")
-  -> append delivered snapshot
-```
-
-Role reply:
-
-```text
-Coder terminal
-  -> vcmctl reply --type blocked --body-file /tmp/blocker.md
-  -> MessageService validates coder -> project-manager
-  -> PM receives pending/delivered message
-```
-
-### 14.7 Legacy role command dispatch
-
-```text
-Role toolbar Send Command
-  -> api.dispatchRoleCommand
-  -> POST /api/tasks/:taskSlug/sessions/:role/dispatch
-  -> commandDispatcher.dispatchRoleCommand
-  -> artifactService.readRoleCommand
-  -> sessionService.getRoleSession
-  -> runtime.write(short instruction)
-  -> registry event
-```
-
-### 14.8 Handoff files
-
-V1 主界面展示紧凑 workflow strip，用 artifact status 推导当前 gate 和下一步建议。完整 artifact inspector 仍不放在主界面；handoff files 和 role commands 仍由 backend templates / services 管理，供 Claude Code sessions 和 dispatch 流程使用。
-
-### 14.9 Translation Mode
-
-开启翻译：
-
-```text
-SessionConsole Translate toggle
-  -> api.getTranslationSettings
-  -> if provider missing: open TranslationSettingsModal
-  -> TranslationStore.connect(taskSlug, role)
-  -> WS /ws/tasks/:taskSlug/sessions/:role/translation
-  -> TranslationService subscribes to Claude transcript tail
-```
-
-输出翻译：
-
-```text
-~/.claude/projects/<project-hash>/<session-id>.jsonl append
-  -> TranscriptTail reads new JSONL lines
-  -> parseAssistantContent
-  -> translate assistant text regardless of stop_reason
-  -> translate structured question / todo / agent prose
-  -> preserve raw tool_use / tool_result rows
-  -> classifyTranslationChunk on translatable assistant content
-  -> skip / preserve / summarize / enqueue translate
-  -> TranslationProvider.translate
-  -> TranslationWsMessage
-  -> TranslationPanel entry row
-```
-
-用户输入翻译：
-
-```text
-TranslationPanel composer
-  -> api.translateUserInput({ text, useContext: true, send: false })
-  -> translationService.translateUserInput
-  -> buildTranslationPrompt(zh-to-en-with-context)
-  -> provider.translate
-  -> English preview
-  -> user clicks Send English
-  -> api.translateUserInput({ text, send: true }) or direct confirmed send path
-  -> runtime.write(current role pty, english + "\r")
-```
-
-## 15. 测试计划
-
-### 15.1 Unit Tests
-
-`tests/unit/shared/slug-check.test.ts`
-
-- accepts valid task slugs。
-- rejects uppercase、underscore、space、path traversal。
-- suggests normalized slugs。
-
-`tests/unit/shared/artifact-check.test.ts`
-
-- parses headings。
-- detects missing headings。
-- validates handoff templates。
-- validates `validation-log` not-run reason。
-
-`tests/unit/backend/artifact-service.test.ts`
-
-- creates handoff directory。
-- creates role command files。
-- does not overwrite existing files by default。
-- returns artifact summary statuses。
-
-`tests/unit/backend/command-dispatcher.test.ts`
-
-- rejects missing command。
-- rejects empty command。
-- rejects not-started target session。
-- writes only short instruction to runtime。
-
-`tests/unit/backend/message-service.test.ts`
-
-- accepts project-manager -> coder task messages。
-- rejects non-PM role-to-role messages。
-- persists message snapshots to `.vcm/messages/<task-slug>.jsonl`。
-- writes long message bodies to `.ai/handoffs/<task-slug>/messages/<message-id>.md`。
-- returns `pending_approval` in manual mode。
-- stages one-line prompts without trailing Enter。
-- delivers visible envelopes in auto mode only when target session is running and orchestration is not paused。
-
-`tests/unit/backend/session-registry.test.ts`
-
-- upserts sessions。
-- finds by task + role。
-- updates status。
-- removes sessions。
-
-`tests/unit/frontend/api-client.test.ts`
-
-- unwraps successful API responses。
-- throws useful errors for API failures。
-- loads recent repository paths。
-
-`tests/unit/frontend/terminal-client.test.ts`
-
-- serializes input and resize messages。
-- dispatches output/status/exit messages to listeners。
-
-`tests/unit/shared/language-detect.test.ts`
-
-- computes CJK ratio。
-- skips Chinese target-language chunks。
-- does not skip English prose。
-
-`tests/unit/shared/translation-classifier.test.ts`
-
-- classifies prose。
-- classifies code fences and diffs as preserved。
-- classifies permission prompts。
-- detects sensitive tokens。
-- strips ANSI before classification。
-
-`tests/unit/backend/translation-provider.test.ts`
-
-- builds OpenAI-compatible `/chat/completions` URL。
-- sends model、messages、temperature 和 auth header。
-- parses token usage。
-- maps HTTP 401 / 429 / 5xx to useful errors。
-
-`tests/unit/backend/translation-service.test.ts`
-
-- translates user input with last assistant context。
-- does not mix context into translated output。
-- queues output translations FIFO per role。
-- skips CJK chunks。
-- preserves code / diff / permission prompt chunks。
-- does not call provider for sensitive chunks。
-- writes confirmed English only to the current role pty。
-
-### 15.2 Integration Tests
-
-`tests/integration/api/project-routes.test.ts`
-
-- connects repo fixture。
-- writes `.vcm/config.json`。
-- returns branch and dirty warning。
-
-`tests/integration/api/task-routes.test.ts`
-
-- creates task。
-- writes `.vcm/tasks/<task-slug>.json`。
-- creates handoff artifacts。
-
-`tests/integration/runtime/node-pty-runtime.test.ts`
-
-- starts a simple shell command fixture。
-- streams output。
-- writes log file。
-- handles exit。
-
-`tests/integration/api/session-routes.test.ts`
-
-- starts role session with fake runtime。
-- stops role session。
-- restarts role session。
-- sends and stages a VCM role message。
-- dispatches legacy role command.
-
-`tests/integration/api/translation-routes.test.ts`
-
-- saves settings and returns the locally saved API key to the local settings UI。
-- tests provider with fake provider。
-- translates user input into English preview。
-- sends confirmed English to fake runtime。
-- retries failed translation。
-
-### 15.3 E2E Tests
-
-`tests/e2e/task-workspace.spec.ts`
-
-- open GUI。
-- connect temp repo。
-- create task。
-- see Task Workspace。
-- start fake project-manager session。
-- see terminal output。
-- switch to architect tab。
-- see Start button。
-- verify the main workspace has no right-side artifact panel。
-- enable Translation Mode。
-- type Chinese in Translation Panel。
-- see English preview。
-- send English to fake terminal。
-- see prose output translated and code/log output preserved or summarized。
-
-V1 e2e 可以使用 fake Claude command，避免真实消耗 Claude Code tokens。
-
-### 15.4 Manual Smoke Test
-
-在真实 repo 中执行：
-
-```text
-npm install
-npm run dev
-open http://localhost:5173
-Select repo
-Create demo-task
-Start project-manager
-Start architect
-Type in PM terminal
-Run vcmctl send from PM or create a message through API
-Stage the pending architect message from GUI
-Verify logs/architect.log
-Verify workflow strip and artifact status
-Enable Translation Mode
-Type Chinese in Translation Panel and verify English preview
-Send English and verify current role terminal receives it
-Verify prose output translation appears in the right panel
-Verify code/log output is preserved or summarized
-Restart coder
-Refresh browser
-Verify session state recovers
-```
-
-## 16. 实施里程碑
-
-### Milestone 1: Project Reshape and Local GUI Shell
-
-文件：
+File:
 
 - `package.json`
-- `tsconfig.json`
-- `tsconfig.node.json`
-- `vite.config.ts`
-- `src/main.ts`
-- `src/backend/server.ts`
-- `src/frontend/main.tsx`
-- `src/frontend/app.tsx`
-- `src/frontend/routes/project-dashboard.tsx`
 
-验收：
+Current package facts:
 
-- `npm run dev` 启动 backend + frontend。
-- 浏览器打开 Project Dashboard。
-- `/api/health` 返回 ok。
+- package name: `vibe-coding-master`
+- current version: `0.0.6`
+- type: ESM
+- `bin.vcm`: `dist/main.js`
+- `bin.vcmctl`: `dist/cli/vcmctl.js`
+- published files: `dist`, `dist-frontend`, `docs`, `scripts`, `README.md`
 
-### Milestone 2: Shared Types, Validation, and Artifacts
+Scripts:
 
-文件：
+- `clean`: remove build output.
+- `fix:node-pty`: fix packaged `node-pty` spawn helper.
+- `postinstall`: run `fix:node-pty`.
+- `verify:package`: verify required package files.
+- `prepack`: run build and package verification.
+- `dev`: start backend plus Vite dev server.
+- `build`: clean, compile Node TypeScript, build frontend.
+- `start`: run built backend.
+- `typecheck`: TypeScript no-emit checks for browser and Node configs.
+- `test`: Vitest.
+- `e2e`: Playwright.
 
-- `src/shared/types/*.ts`
-- `src/shared/validation/*.ts`
-- `src/backend/templates/*.ts`
-- `src/backend/services/artifact-service.ts`
-- `src/backend/services/task-service.ts`
-- `src/backend/api/task-routes.ts`
+Packaging guard:
 
-验收：
+- `scripts/verify-package.mjs`
 
-- GUI 可以创建 task。
-- `.ai/handoffs/<task-slug>/` 被创建。
-- Handoff artifacts 在任务目录中被创建。
+It verifies required files, shebangs, packaged static path behavior, and frontend built assets.
 
-### Milestone 3: Repo Connect and Project Service
-
-文件：
-
-- `src/backend/adapters/*.ts`
-- `src/backend/services/app-settings-service.ts`
-- `src/backend/services/project-service.ts`
-- `src/backend/validation/environment-check.ts`
-- `src/backend/api/project-routes.ts`
-- `src/frontend/components/repo-connect-form.tsx`
-
-验收：
-
-- GUI 可以输入 repo path，也可以从最近 5 个 repo path 中选择。
-- backend 检查 Git repo 和 Claude Code。
-- `.vcm/config.json` 被创建。
-- main/master 和 dirty state 显示 warning。
-
-### Milestone 4: Embedded Terminal Runtime
-
-文件：
-
-- `src/backend/runtime/terminal-runtime.ts`
-- `src/backend/runtime/node-pty-runtime.ts`
-- `src/backend/runtime/session-registry.ts`
-- `src/backend/ws/terminal-ws.ts`
-- `src/frontend/terminal/terminal-client.ts`
-- `src/frontend/terminal/xterm-view.tsx`
-- `src/frontend/components/session-console.tsx`
-
-验收：
-
-- GUI 可以启动 fake role session。
-- xterm.js 显示 output。
-- 用户输入能写入 backend runtime。
-- output 写入 raw log。
-- resize 工作。
-
-### Milestone 5: Role Session Cockpit
-
-文件：
-
-- `src/backend/services/session-service.ts`
-- `src/backend/api/session-routes.ts`
-- `src/frontend/components/role-session-tabs.tsx`
-- `src/frontend/components/session-toolbar.tsx`
-- `src/frontend/components/status-badge.tsx`
-- `src/frontend/routes/task-workspace.tsx`
-- `src/frontend/state/session-store.ts`
-
-验收：
-
-- PM / Architect / Coder / Reviewer tabs 可切换。
-- 每个 role 可 start / stop / restart。
-- 状态 badge 正确显示。
-- 页面刷新后可重新加载 task/session 状态。
-
-### Milestone 6: PM-mediated Message Bus
-
-文件：
-
-- `src/shared/types/message.ts`
-- `src/backend/services/message-service.ts`
-- `src/backend/api/message-routes.ts`
-- `src/backend/templates/message-envelope.ts`
-- `src/cli/vcmctl.ts`
-- `src/frontend/components/message-timeline.tsx`
-- `src/frontend/state/api-client.ts`
-- `src/backend/services/command-dispatcher.ts`
-- `src/frontend/components/event-log.tsx`
-
-验收：
-
-- PM 可以通过 `vcmctl send --to coder` 创建 message。
-- backend 按 PM-mediated policy 拒绝非法 role-to-role messages。
-- manual mode 默认创建 `pending_approval` message。
-- 用户点击 `Stage` 后，backend 只写入一行 prompt，不按 Enter。
-- role 可以通过 `vcmctl reply` 回 PM。
-- messages 持久化到 `.vcm/messages/<task-slug>.jsonl`。
-- long body 写入 `.ai/handoffs/<task-slug>/messages/<message-id>.md`。
-- 旧 Send Command 仍可作为过渡调试能力，但不再是推荐主路径。
-
-### Milestone 7: Translation Mode
-
-文件：
-
-- `src/shared/types/translation.ts`
-- `src/shared/validation/language-detect.ts`
-- `src/shared/validation/translation-classifier.ts`
-- `src/backend/adapters/translation-provider.ts`
-- `src/backend/services/translation-prompts.ts`
-- `src/backend/services/translation-queue.ts`
-- `src/backend/services/translation-service.ts`
-- `src/backend/api/translation-routes.ts`
-- `src/backend/ws/translation-ws.ts`
-- `src/frontend/state/translation-store.ts`
-- `src/frontend/components/translation-panel.tsx`
-- `src/frontend/components/translation-entry-row.tsx`
-- `src/frontend/components/translation-settings-modal.tsx`
-- `src/frontend/components/session-console.tsx`
-
-验收：
-
-- Session Toolbar 可以开启 / 关闭 Translation Mode。
-- 未配置 provider 时打开 Translation Settings。
-- OpenAI-compatible provider 可以 Test Connection。
-- 用户中文输入生成英文 preview。
-- review-before-send 默认不自动发送。
-- Send English 只写入当前 role pty。
-- output prose 按 FIFO 顺序翻译并显示在 Translation Panel。
-- code / diff / log / tool-output 被 preserved 或 summarized。
-- 已经是目标语言或 CJK 的内容被 skipped。
-- 翻译失败不影响 raw terminal。
-
-### Milestone 8: Acceptance and Hardening
-
-内容：
-
-- unit tests。
-- integration tests。
-- e2e smoke。
-- README 更新。
-- GUI 错误态。
-- empty/missing/incomplete artifact 状态。
-- Claude Code 缺失提示。
-- process crashed 提示。
-- Translation Provider 错误态。
-- translation pause / retry / clear。
-
-验收：
-
-- `npm run typecheck` 通过。
-- `npm test` 通过。
-- `npm run build` 通过。
-- `npm run e2e` 通过或有明确 fake Claude 限制说明。
-
-## 17. 最终 V1 验收清单
-
-- [ ] GUI 可以启动。
-- [ ] 用户可以连接本地 Git repo。
-- [ ] GUI 显示 repo path、branch、dirty warning。
-- [ ] 用户可以创建 task workspace。
-- [ ] 系统创建 `.vcm/config.json`。
-- [ ] 系统创建 `.vcm/tasks/<task-slug>.json`。
-- [ ] 系统创建 `.ai/handoffs/<task-slug>/role-commands/`。
-- [ ] 系统创建 `.ai/handoffs/<task-slug>/logs/`。
-- [ ] 系统创建 architecture / implementation / validation / review artifact templates。
-- [ ] GUI 显示 PM / Architect / Coder / Reviewer tabs。
-- [ ] 用户可以启动 project-manager session。
-- [ ] 用户可以启动 architect session。
-- [ ] embedded terminal 可以显示 Claude Code output。
-- [ ] 用户可以直接在 embedded terminal 中输入。
-- [ ] terminal output 被保存到 role log。
-- [ ] PM 可以通过 `vcmctl send` 给目标 role 创建 message。
-- [ ] 非 PM role 只能通过 `vcmctl reply/result` 回 PM。
-- [ ] MessageService 拒绝非法 role-to-role message。
-- [ ] manual mode 下 message 默认进入 `pending_approval`。
-- [ ] 用户可以从 GUI stage / reject pending message。
-- [ ] Stage 只写入一行 prompt，不自动按 Enter。
-- [ ] backend 不粘贴隐藏长 prompt；auto delivery 使用可见 `[VCM MESSAGE]` envelope。
-- [ ] 用户可以在每个 role session 旁开启 Translation Mode。
-- [ ] Translation Settings 可以配置 OpenAI-compatible provider 并测试连接。
-- [ ] 用户语言 input 可以翻译成英文 preview。
-- [ ] review-before-send 默认不自动发送。
-- [ ] Send English 只写入当前 role embedded terminal。
-- [ ] Claude Code prose output 可以在 Translation Panel 中按顺序显示翻译。
-- [ ] code / diff / log / tool output 默认保留或摘要，不被逐字误译。
-- [ ] 已经是目标语言或 CJK 的内容会跳过翻译。
-- [ ] 翻译失败不影响 raw terminal、raw log、handoff artifacts 或 message bus。
-- [ ] 用户可以 stop / restart role session。
-- [ ] 页面刷新后可以恢复 task/session 可见状态。
-- [ ] Claude Code 缺失时 GUI 有清晰提示。
-- [ ] 进程 crashed/exited 时 GUI 有清晰提示。
-
-## 18. 需要延后到 V2 的接口
-
-V1 文件中可以预留类型或接口，但不实现完整功能：
-
-- `ReviewAdapter`：后续接 Cross-Model Reviewer。
-- `ValidationRunner`：后续自动运行 validation commands。
-- `WorktreeManager`：后续实现 one task -> one branch -> one worktree。
-- `SessionPersistenceService`：后续增强 backend lifecycle、session registry 持久化、raw log replay 和恢复体验。
-- `DesktopShell`：后续用 Electron 或 Tauri 打包。
-- `PermissionHookManager`：后续生成 role-specific Claude Code permission hooks。
-- `TranslationKeychainStore`：后续把 provider API key 放入 OS keychain。
-
-V1 的判断标准是：
+## 3. Source Tree
 
 ```text
-少做智能判断
-多做状态可见
-少自动修改代码
-多沉淀 artifacts
-少解析终端语义
-多保留 raw logs
-少暴露终端编排细节
-多提供 GUI 操作入口
+src/
+  main.ts
+  cli/
+    vcmctl.ts
+  shared/
+    constants.ts
+    types/
+    validation/
+  backend/
+    server.ts
+    adapters/
+    api/
+    runtime/
+    services/
+    templates/
+    ws/
+  frontend/
+    app.tsx
+    main.tsx
+    routes/
+    components/
+    state/
+    terminal/
+    styles.css
 ```
+
+Removed/obsolete files that must not be documented as active:
+
+- `src/shared/validation/translation-classifier.ts`
+- `src/frontend/state/translation-store.ts`
+- `src/frontend/components/translation-entry-row.tsx`
+- `src/frontend/state/task-store.ts`
+
+## 4. Entry Points
+
+### `src/main.ts`
+
+Exports:
+
+- `MainOptions`
+- `parseMainArgs(argv): MainOptions`
+- `main(argv): Promise<void>`
+
+Responsibilities:
+
+- parse `--dev`, `--open`, `--host=`, `--port=`
+- start backend on port `4173` by default
+- start Vite on port `5173` in dev mode
+- serve `dist-frontend` through backend in production mode
+- close backend/Vite on `SIGINT`
+
+### `src/cli/vcmctl.ts`
+
+CLI commands:
+
+- `vcmctl send`
+- `vcmctl reply`
+- `vcmctl result`
+- `vcmctl inbox`
+- `vcmctl ready`
+
+Environment required in role sessions:
+
+- `VCM_API_URL`
+- `VCM_TASK_SLUG`
+- `VCM_ROLE`
+
+Role sessions receive these env vars from `SessionService`.
+
+## 5. Shared Layer
+
+### `src/shared/constants.ts`
+
+Exports:
+
+- `DEFAULT_BACKEND_PORT`
+- `DEFAULT_FRONTEND_PORT`
+- `ROLE_DEFINITIONS`
+- `ROLE_NAMES`
+- `DISPATCHABLE_ROLES`
+- `isRoleName(value)`
+- `isDispatchableRole(value)`
+- `getRoleDefinition(role)`
+
+Roles:
+
+- `project-manager`
+- `architect`
+- `coder`
+- `reviewer`
+
+Dispatchable roles:
+
+- `architect`
+- `coder`
+- `reviewer`
+
+### `src/shared/types/role.ts`
+
+Defines:
+
+- `RoleName`
+- `DispatchableRole`
+- `RoleStatus`
+- `RoleDefinition`
+
+### `src/shared/types/project.ts`
+
+Defines:
+
+- `ProjectConfig`
+- `ProjectSummary`
+- `ConnectProjectRequest`
+
+Important fields:
+
+- `handoffRoot`
+- `stateRoot`
+- `terminalBackend`
+- `claudeCommand`
+- `isDirty`
+
+### `src/shared/types/task.ts`
+
+Defines:
+
+- `TaskStatus`
+- `TaskRecord`
+- `CreateTaskRequest`
+
+Current UI sends only `taskSlug`, although the API type still permits optional `title` and `specPath`.
+
+### `src/shared/types/session.ts`
+
+Defines:
+
+- `ClaudePermissionMode`
+- `RoleSessionRecord`
+- `TaskSessionRecord`
+- `RoleSessionPointer`
+- `StartRoleSessionRequest`
+
+`RoleSessionRecord` includes `claudeSessionId` and `transcriptPath`, which are required for resume and translation transcript lookup.
+
+### `src/shared/types/message.ts`
+
+Defines:
+
+- `VcmMessageActor`
+- `VcmMessageType`
+- `VcmMessageStatus`
+- `VcmOrchestrationMode`
+- `VcmRoleMessage`
+- `VcmOrchestrationState`
+- `SendRoleMessageRequest`
+- `SendRoleMessageResult`
+
+The state type includes `paused` for backend/API compatibility. The current GUI only exposes manual/auto.
+
+### `src/shared/types/translation.ts`
+
+Defines:
+
+- `TranslationProviderType`
+- `TranslationDirection`
+- `TranslationInputMode`
+- `TranslationPromptKey`
+- `TRANSLATION_PROMPT_KEYS`
+- `TranslationSourceKind`
+- `TranslationStatus`
+- `TranslationSettings`
+- `TranslationSecretSettings`
+- `TranslationEntry`
+- `TranslateUserInputRequest`
+- `TranslateUserInputResult`
+- `SendTranslatedInputRequest`
+- `TranslationProviderTestResult`
+- `TranslationPromptPreview`
+- `TranslationWsMessage`
+
+Prompt keys:
+
+- `zh-to-en`
+- `zh-to-en-with-context`
+- `en-to-zh`
+
+Source kinds:
+
+- `prose`
+- `tool-output`
+
+Statuses:
+
+- `queued`
+- `translating`
+- `translated`
+- `failed`
+- `preserved`
+
+### `src/shared/types/api.ts`
+
+Defines:
+
+- `ApiErrorResponse`
+- `TaskStatusReport`
+- `TaskWorkflowStepId`
+- `TaskWorkflowStepStatus`
+- `TaskWorkflowStep`
+- `TaskWorkflowReport`
+- `DispatchRoleCommandResult`
+- `BootstrapState`
+
+### `src/shared/types/artifact.ts`
+
+Defines:
+
+- `ArtifactKind`
+- `HandoffPaths`
+- `ArtifactCheckResult`
+- `ArtifactSummary`
+
+Artifact kinds:
+
+- `architecture-plan`
+- `implementation-log`
+- `validation-log`
+- `review-report`
+- `docs-sync-report`
+
+### `src/shared/types/harness.ts`
+
+Defines:
+
+- `HarnessFileKind`
+- `HarnessFileAction`
+- `HarnessFileStatus`
+- `HarnessPlannedChange`
+- `HarnessStatusReport`
+- `HarnessApplyResult`
+
+### `src/shared/types/terminal.ts`
+
+Defines:
+
+- `ClientTerminalMessage`
+- `ServerTerminalMessage`
+- `TerminalEvent`
+
+### `src/shared/validation/slug-check.ts`
+
+Exports:
+
+- `validateTaskSlug(taskSlug)`
+- `assertValidTaskSlug(taskSlug)`
+
+Current rule:
+
+- lowercase slug-style task names
+- safe for local paths and URLs
+
+### `src/shared/validation/artifact-check.ts`
+
+Exports:
+
+- `checkMarkdownArtifact(kind, path, content)`
+
+Current checks are title/placeholder oriented and do not judge semantic quality.
+
+### `src/shared/validation/language-detect.ts`
+
+Exports:
+
+- `cjkRatio(value)`
+- `isProbablyCjk(value, threshold)`
+- `shouldSkipForTargetLanguage(value, targetLanguage)`
+
+These helpers remain available, but current Claude-output translation no longer uses a classifier to skip assistant prose.
+
+## 6. Backend Adapters
+
+### `src/backend/adapters/filesystem.ts`
+
+Exports:
+
+- `FileSystemAdapter`
+- `EnsureFileOptions`
+- `createNodeFileSystemAdapter()`
+- `resolveRepoPath(repoRoot, repoRelativePath)`
+- `toRepoRelativePath(repoRoot, absolutePath)`
+
+Used by all services that touch repo/app files.
+
+### `src/backend/adapters/command-runner.ts`
+
+Exports:
+
+- `CommandResult`
+- `CommandRunner`
+- `CommandRunnerOptions`
+- `createCommandRunner()`
+
+Used by Git and Claude adapters.
+
+### `src/backend/adapters/git-adapter.ts`
+
+Exports:
+
+- `GitRepoCheck`
+- `GitAdapter`
+- `createGitAdapter(runner)`
+
+Important behavior:
+
+- checks `.git` directly
+- accepts normal `.git` directories
+- accepts `.git` pointer files
+- passes per-command `safe.directory`
+
+### `src/backend/adapters/claude-adapter.ts`
+
+Exports:
+
+- `ClaudeAdapter`
+- `createClaudeAdapter(runner)`
+
+Builds role commands:
+
+```text
+claude --agent <role> --session-id <uuid>
+claude --agent <role> --resume <uuid>
+```
+
+Adds permission flags for `bypassPermissions` and `dangerously-skip-permissions`.
+
+### `src/backend/adapters/translation-provider.ts`
+
+Exports:
+
+- `TranslationProviderRequest`
+- `TranslationProviderResult`
+- `TranslationProvider`
+- `TranslationProviderError`
+- `createOpenAiCompatibleTranslationProvider(fetchImpl)`
+- `buildChatCompletionsUrl(baseUrl)`
+- `parseOpenAiUsage(raw)`
+
+Implements OpenAI-compatible chat completions.
+
+## 7. Backend Runtime
+
+### `src/backend/runtime/terminal-runtime.ts`
+
+Defines the runtime interface:
+
+- `CreateTerminalSessionInput`
+- `TerminalSession`
+- `TerminalEventListener`
+- `Unsubscribe`
+- `SubscribeTerminalOptions`
+- `TerminalRuntime`
+
+### `src/backend/runtime/node-pty-runtime.ts`
+
+Exports:
+
+- `NodePtyRuntimeDeps`
+- `createNodePtyTerminalRuntime(deps)`
+- `buildPtyEnvironment(baseEnv, inputEnv)`
+
+Responsibilities:
+
+- spawn Claude Code with `node-pty`
+- append raw output to role log file
+- emit terminal output/input/exit events
+- replay logs on subscribe
+- handle writes, resize, stop
+- set color-friendly terminal env vars
+
+### `src/backend/runtime/session-registry.ts`
+
+Exports:
+
+- `SessionRegistry`
+- `createSessionRegistry()`
+
+In-memory index for live/persisted role records by runtime session id and role.
+
+## 8. Backend Services
+
+### `src/backend/services/project-service.ts`
+
+Exports:
+
+- `ProjectService`
+- `ProjectServiceDeps`
+- `createProjectService(deps)`
+- `buildDefaultProjectConfig(repoRoot)`
+
+Responsibilities:
+
+- connect repo
+- store current project in process memory
+- record recent repo paths in app settings
+- create `.vcm/config.json`
+- ensure base state directories
+
+### `src/backend/services/task-service.ts`
+
+Exports:
+
+- `TaskService`
+- `TaskServiceDeps`
+- `createTaskService(deps)`
+
+Responsibilities:
+
+- create task
+- list tasks
+- load task
+- save task
+- update task status
+
+Task files:
+
+```text
+.vcm/tasks/<task>.json
+```
+
+### `src/backend/services/artifact-service.ts`
+
+Exports:
+
+- `ArtifactService`
+- input interfaces for handoff, artifacts, role commands, logs
+- `createArtifactService(fs)`
+
+Responsibilities:
+
+- compute handoff paths
+- create handoff directory structure
+- create artifact templates
+- list artifact checks
+- read artifacts
+- read/save role commands
+- append role logs
+
+Primary role command path:
+
+```text
+.ai/handoffs/<task>/role-commands/<role>.md
+```
+
+Legacy fallback:
+
+```text
+.ai/handoffs/<task>/role-commands/<role>-command.md
+```
+
+### `src/backend/services/status-service.ts`
+
+Exports:
+
+- `StatusService`
+- `StatusServiceDeps`
+- `createStatusService(deps)`
+
+Responsibilities:
+
+- assemble `TaskStatusReport`
+- list sessions
+- list artifact checks
+- compute workflow report
+
+### `src/backend/services/session-service.ts`
+
+Exports:
+
+- `SessionService`
+- `SessionServiceDeps`
+- `createSessionService(deps)`
+
+Responsibilities:
+
+- start role session
+- resume role session
+- restart role session
+- stop role session
+- get role session
+- list role sessions
+
+Persistence:
+
+```text
+.vcm/sessions/<task>.json
+```
+
+Environment passed to Claude Code:
+
+- `VCM_API_URL`
+- `VCM_CTL_COMMAND`
+- `VCM_TASK_SLUG`
+- `VCM_ROLE`
+
+### `src/backend/services/message-service.ts`
+
+Exports:
+
+- `MessageService`
+- input interfaces
+- `createMessageService(deps)`
+
+Responsibilities:
+
+- list messages
+- send messages
+- stage/approve/reject messages
+- get/update orchestration state
+- enforce message policy
+- persist message snapshots
+- write message body markdown
+- write staged or delivered messages to target terminal
+
+### `src/backend/services/command-dispatcher.ts`
+
+Exports:
+
+- `CommandDispatcher`
+- `DispatchRoleCommandInput`
+- `CommandDispatcherDeps`
+- `createCommandDispatcher(deps)`
+
+Compatibility role-command dispatch only. Preferred orchestration is `MessageService` plus `vcmctl`.
+
+### `src/backend/services/harness-service.ts`
+
+Exports:
+
+- `HarnessService`
+- `HarnessServiceDeps`
+- `VCM_HARNESS_VERSION`
+- `createHarnessService(deps)`
+
+Responsibilities:
+
+- inspect harness files
+- plan create/insert/update/ok
+- apply VCM managed blocks
+- preserve user content outside managed blocks
+
+### `src/backend/services/app-settings-service.ts`
+
+Exports:
+
+- `StoredTranslationConfig`
+- `AppSettingsFile`
+- `AppSettingsService`
+- `AppSettingsServiceDeps`
+- `createAppSettingsService(deps)`
+
+Storage:
+
+```text
+~/.vcm/settings.json
+```
+
+Also migrates legacy:
+
+```text
+~/.vibe-coding-master/settings.json
+~/.vibe-coding-master/translation.json
+```
+
+### `src/backend/services/translation-prompts.ts`
+
+Exports:
+
+- `TranslationPromptInput`
+- `BuiltTranslationPrompt`
+- `buildTranslationPrompt(input)`
+- `getTranslationPromptKey(input)`
+- `getBaseTranslationPrompt(key, settings)`
+- `resolveTranslationSystemPrompt(key, settings)`
+- `getTranslationPromptPreviews(settings)`
+
+Owns default prompts and user overrides.
+
+### `src/backend/services/translation-queue.ts`
+
+Exports:
+
+- `SerialTranslationQueue`
+- `TranslationQueueRegistry`
+- `createSerialTranslationQueue()`
+- `createTranslationQueueRegistry()`
+
+Ensures translations for one session run serially.
+
+### `src/backend/services/claude-transcript-service.ts`
+
+Exports:
+
+- transcript event types
+- `ClaudeTranscriptService`
+- `TranscriptTail`
+- `createClaudeTranscriptService()`
+- `resolveExistingClaudeTranscriptPath(session)`
+- `findClaudeTranscriptPathBySessionId(claudeSessionId)`
+- `claudeProjectsRoot()`
+- `projectHash(projectDir)`
+- `projectsTranscriptDir(projectDir)`
+- `claudeTranscriptPath(projectDir, claudeSessionId)`
+- `parseAssistantContent(line)`
+
+Responsibilities:
+
+- tail Claude JSONL transcript files
+- resolve transcript path after start/resume/restart
+- parse assistant messages, tool uses, tool results, questions, todos, and agent calls
+
+### `src/backend/services/translation-service.ts`
+
+Exports:
+
+- `TranslationService`
+- `TranslateUserInputServiceInput`
+- `SendTranslatedInputServiceInput`
+- `TranslationEventListener`
+- `TranslationServiceDeps`
+- `createTranslationService(deps)`
+- `formatTerminalSubmit(text)`
+
+Responsibilities:
+
+- load/update translation settings
+- expose prompt previews
+- test provider
+- translate user input
+- send English text to active terminal
+- subscribe to session translation events
+- clear session entries
+- retry failed output translation
+- subscribe to Claude transcript service
+- translate prose output and preserve tool output
+
+## 9. Backend API
+
+### `src/backend/server.ts`
+
+Exports:
+
+- `CreateServerOptions`
+- `ServerDeps`
+- `createServer(deps, options)`
+- `startServer(options)`
+- `CreateDefaultServerDepsOptions`
+- `createDefaultServerDeps(options)`
+- `getDefaultStaticDir()`
+
+Registers all routes and WebSockets.
+
+### Route files
+
+- `src/backend/api/project-routes.ts`: health, recent paths, connect/current project
+- `src/backend/api/harness-routes.ts`: harness status/apply
+- `src/backend/api/task-routes.ts`: tasks and task status
+- `src/backend/api/session-routes.ts`: session lifecycle and dispatch compatibility endpoint
+- `src/backend/api/artifact-routes.ts`: artifact, role command, and log reads/writes
+- `src/backend/api/message-routes.ts`: messages and orchestration
+- `src/backend/api/translation-routes.ts`: settings, prompt previews, provider test, input/send, clear/retry
+
+### WebSocket files
+
+- `src/backend/ws/terminal-ws.ts`
+- `src/backend/ws/translation-ws.ts`
+
+Terminal WebSocket forwards PTY output/input/resize.
+
+Translation WebSocket subscribes to translation entries/status for a runtime session id.
+
+## 10. Backend Templates
+
+### `src/backend/templates/handoff.ts`
+
+Exports:
+
+- `renderArchitecturePlanTemplate(taskSlug)`
+- `renderImplementationLogTemplate(taskSlug)`
+- `renderValidationLogTemplate(taskSlug)`
+- `renderReviewReportTemplate(taskSlug)`
+- `renderDocsSyncReportTemplate(taskSlug)`
+
+### `src/backend/templates/role-command.ts`
+
+Exports:
+
+- `renderRoleCommandTemplate(taskSlug, role)`
+
+### `src/backend/templates/message-envelope.ts`
+
+Exports:
+
+- `renderMessageEnvelope(message)`
+- `renderManualStagePrompt(message)`
+
+Manual stage prompt does not submit Enter.
+
+Auto delivery envelope is submitted with Enter.
+
+### Harness templates
+
+- `src/backend/templates/harness/claude-root.ts`
+- `src/backend/templates/harness/project-manager-agent.ts`
+- `src/backend/templates/harness/architect-agent.ts`
+- `src/backend/templates/harness/coder-agent.ts`
+- `src/backend/templates/harness/reviewer-agent.ts`
+
+Each exports one render function for VCM managed rules.
+
+## 11. Frontend State And API Client
+
+### `src/frontend/state/api-client.ts`
+
+Central browser API wrapper.
+
+It calls:
+
+- project endpoints
+- harness endpoints
+- task endpoints
+- session endpoints
+- artifact endpoints
+- message endpoints
+- orchestration endpoints
+- translation endpoints
+
+### `src/frontend/state/app-store.ts`
+
+Exports:
+
+- `AppStateSnapshot`
+- `selectActiveTask(tasks, activeTaskSlug)`
+
+### `src/frontend/state/session-store.ts`
+
+Exports:
+
+- `getSessionForRole(sessions, role)`
+
+## 12. Frontend Routes
+
+### `src/frontend/app.tsx`
+
+Exports:
+
+- `App()`
+
+Responsibilities:
+
+- own top-level app state
+- load current project and recent paths on startup
+- load tasks and harness status after connect
+- pass sidebar props to `ProjectDashboard`
+- pass task props to `TaskWorkspace`
+- keep active workflow/messages/orchestration/events synchronized by task
+
+### `src/frontend/routes/project-dashboard.tsx`
+
+Exports:
+
+- `ProjectDashboardProps`
+- `ProjectDashboard(props)`
+
+Responsibilities:
+
+- collapsible sidebar
+- repository connect form
+- repository summary
+- workflow panel
+- settings section
+- messages modal
+- events modal
+- harness panel
+- one-field task creation
+- task navigation
+
+### `src/frontend/routes/task-workspace.tsx`
+
+Exports:
+
+- `TaskWorkspaceProps`
+- `TaskWorkspace(props)`
+
+Responsibilities:
+
+- task header with role tabs and refresh
+- status/message/orchestration refresh
+- periodic polling
+- session lifecycle actions
+- per-role permission state
+- runtime event collection for sidebar Events modal
+
+## 13. Frontend Components
+
+### `src/frontend/components/app-shell.tsx`
+
+Exports:
+
+- `AppShellProps`
+- `AppShell({ sidebar, children })`
+
+Two-column page shell.
+
+### `src/frontend/components/repo-connect-form.tsx`
+
+Exports:
+
+- `RepoConnectFormProps`
+- `RepoConnectForm(props)`
+
+Layout:
+
+- path input row
+- recent select plus connect button row
+
+### `src/frontend/components/harness-panel.tsx`
+
+Exports:
+
+- `HarnessPanelProps`
+- `HarnessPanel(props)`
+
+Shows harness status and install/update action.
+
+### `src/frontend/components/workflow-panel.tsx`
+
+Exports:
+
+- `WorkflowPanelProps`
+- `WorkflowPanel({ workflow })`
+
+Renders the sidebar workflow steps.
+
+### `src/frontend/components/message-timeline.tsx`
+
+Exports:
+
+- `MessageTimelineProps`
+- `getMessageCounts(messages)`
+- `MessageTimeline(props)`
+
+Used inside the Messages modal. Can show stage/reject/open-role actions.
+
+### `src/frontend/components/event-log.tsx`
+
+Exports:
+
+- `EventLogProps`
+- `EventLog(props)`
+
+Used inside the Events modal.
+
+### `src/frontend/components/task-nav.tsx`
+
+Exports:
+
+- `TaskNavProps`
+- `TaskNav(props)`
+
+Task list in sidebar.
+
+### `src/frontend/components/role-session-tabs.tsx`
+
+Exports:
+
+- `RoleSessionTabsProps`
+- `RoleSessionTabs(props)`
+
+Header role tabs with status badges.
+
+### `src/frontend/components/session-console.tsx`
+
+Exports:
+
+- `SessionConsoleProps`
+- `SessionConsole(props)`
+
+Role console and translation split.
+
+### `src/frontend/components/session-toolbar.tsx`
+
+Exports:
+
+- `SessionToolbarProps`
+- `SessionToolbar(props)`
+
+Renders permission select and session lifecycle buttons.
+
+There is no visible primary `Send Command` button in the current toolbar. Role-command dispatch remains backend compatibility.
+
+### `src/frontend/components/translation-panel.tsx`
+
+Exports:
+
+- `TranslationPanelProps`
+- `TranslationPanel(props)`
+
+Renders output translations, settings actions, auto-send toggle, and composer.
+
+Important current behavior:
+
+- panel-level status only
+- no per-entry status label
+- no `Original` buttons
+- tool output is preserved, dim, one-line
+- prose source is replaced by translated text after completion
+- no separate translated-English textarea
+
+### `src/frontend/components/translation-settings-modal.tsx`
+
+Exports:
+
+- `TranslationSettingsModalProps`
+- `TranslationSettingsModal(props)`
+
+Settings:
+
+- enable translation
+- base URL
+- API key as text input
+- model
+- target language
+- input mode
+- context
+- translate output
+- translate user input
+- timeout
+- temperature
+- prompt slot overrides
+- provider test
+
+### `src/frontend/components/status-badge.tsx`
+
+Exports:
+
+- `StatusBadgeProps`
+- `StatusBadge(props)`
+
+### `src/frontend/terminal/xterm-view.tsx`
+
+Renders `xterm.js`, connects to terminal WebSocket, sends input and resize, and preserves terminal colors.
+
+### `src/frontend/terminal/terminal-client.ts`
+
+Terminal WebSocket client wrapper.
+
+## 14. UI State Details
+
+Sidebar:
+
+- all groups default collapsed
+- `Repository Path` default open only when no task is selected
+- `Settings` includes `Messages`, `Events`, and `Auto orchestration`
+
+Task workspace:
+
+- role tabs in the first header row
+- workflow is not in main workspace
+- messages/events are not in main workspace
+- active role console fills available space
+
+Translation:
+
+- top role toolbar button label is `✅ Translate` when on and `× Translate` when off
+- translation panel `Auto-send` label is `✅ Auto-send` when on and `× Auto-send` when off
+- panel uses terminal-like dark styling
+- composer height is compact
+- `Enter` translates/sends, `Shift+Enter` inserts newline
+
+## 15. Data Persistence Summary
+
+App settings:
+
+```text
+~/.vcm/settings.json
+```
+
+Project config:
+
+```text
+.vcm/config.json
+```
+
+Task state:
+
+```text
+.vcm/tasks/<task>.json
+```
+
+Session state:
+
+```text
+.vcm/sessions/<task>.json
+```
+
+Messages:
+
+```text
+.vcm/messages/<task>.jsonl
+.ai/handoffs/<task>/messages/<message-id>.md
+```
+
+Orchestration:
+
+```text
+.vcm/orchestration/<task>.json
+```
+
+Handoff artifacts:
+
+```text
+.ai/handoffs/<task>/
+```
+
+Claude transcripts:
+
+```text
+~/.claude/projects/<project-hash>/<claude-session-id>.jsonl
+```
+
+## 16. Validation Checklist
+
+Before release or publish:
+
+```bash
+npm run typecheck
+npm test
+npm run build
+npm run verify:package
+```
+
+For frontend layout changes, also verify manually:
+
+- connect repository
+- open task
+- role tabs stay in header
+- sidebar sections collapse/open correctly
+- embedded terminal remains visible after role switch
+- translation split is 50/50
+- Messages modal opens from sidebar Settings
+- Events modal opens from sidebar Settings
+- Auto orchestration toggles on/off
+- `Enter` in translation composer translates/sends
+- `Shift+Enter` inserts newline
+
+## 17. V1 Boundaries To Preserve
+
+Do not reintroduce these into V1 docs or UI unless the product direction changes:
+
+- tmux persistence backend
+- CLI-first task management as the main product mode
+- main workspace artifact panel
+- Pause/Resume orchestration buttons in GUI
+- raw PTY output translation
+- translation classifier that drops assistant prose
+- separate translated-English textarea
+- optional title input in New Task
+- `Dirty: yes/no` sidebar label
+- role command dispatch as the primary orchestration path

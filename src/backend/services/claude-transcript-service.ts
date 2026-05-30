@@ -2,6 +2,7 @@ import {
   closeSync,
   existsSync,
   openSync,
+  readdirSync,
   readFileSync,
   readSync,
   statSync,
@@ -126,7 +127,9 @@ export interface ClaudeTranscriptService {
 
 export interface ClaudeTranscriptSubscribeOptions {
   replayLastN?: number;
+  replaySince?: string;
   onError?: (error: Error) => void;
+  onTranscriptPathResolved?: (path: string) => void;
 }
 
 export interface TailHandlers {
@@ -136,7 +139,11 @@ export interface TailHandlers {
 
 export interface TailOptions {
   replayLastN?: number;
+  replaySince?: string;
+  pollIntervalMs?: number;
 }
+
+const DEFAULT_TAIL_POLL_INTERVAL_MS = 500;
 
 /**
  * Adapted from CodingForMoney/cc-pm's transcript tailer.
@@ -149,6 +156,7 @@ export class TranscriptTail {
   private offset = 0;
   private buffer = "";
   private watcher: FSWatcher | null = null;
+  private pollTimer: ReturnType<typeof setInterval> | null = null;
   private flushing = false;
   private flushScheduled = false;
 
@@ -163,21 +171,35 @@ export class TranscriptTail {
     }
 
     const stat = statSync(this.path);
-    if (opts?.replayLastN && opts.replayLastN > 0) {
+    if (opts?.replaySince) {
+      this.replaySince(opts.replaySince);
+    } else if (opts?.replayLastN && opts.replayLastN > 0) {
       this.replayHistory(opts.replayLastN);
     }
 
     this.offset = stat.size;
     this.buffer = "";
-    this.watcher = fsWatch(this.path, () => {
+    try {
+      this.watcher = fsWatch(this.path, () => {
+        this.scheduleFlush();
+      });
+    } catch {
+      this.watcher = null;
+    }
+    this.pollTimer = setInterval(() => {
       this.scheduleFlush();
-    });
+    }, opts?.pollIntervalMs ?? DEFAULT_TAIL_POLL_INTERVAL_MS);
+    this.scheduleFlush();
   }
 
   stop(): void {
     if (this.watcher) {
       this.watcher.close();
       this.watcher = null;
+    }
+    if (this.pollTimer) {
+      clearInterval(this.pollTimer);
+      this.pollTimer = null;
     }
   }
 
@@ -251,6 +273,30 @@ export class TranscriptTail {
     }
   }
 
+  private replaySince(replaySince: string): void {
+    const sinceMs = Date.parse(replaySince);
+    if (!Number.isFinite(sinceMs)) {
+      return;
+    }
+
+    try {
+      const text = readFileSync(this.path, "utf-8");
+      for (const line of text.split("\n")) {
+        if (!line.trim()) {
+          continue;
+        }
+        for (const event of parseAssistantContent(line)) {
+          const eventMs = Date.parse(event.timestamp);
+          if (Number.isFinite(eventMs) && eventMs >= sinceMs) {
+            this.handlers.onContent(event);
+          }
+        }
+      }
+    } catch (error) {
+      this.handlers.onError?.(error as Error);
+    }
+  }
+
   private tryEmit(line: string): void {
     for (const event of parseAssistantContent(line)) {
       this.handlers.onContent(event);
@@ -261,7 +307,6 @@ export class TranscriptTail {
 export function createClaudeTranscriptService(): ClaudeTranscriptService {
   return {
     subscribeToRoleSession(session, listener, options = {}) {
-      const transcriptPath = claudeTranscriptPath(session.cwd, session.claudeSessionId);
       let tail: TranscriptTail | undefined;
       let retryTimer: ReturnType<typeof setTimeout> | undefined;
       let stopped = false;
@@ -270,16 +315,28 @@ export function createClaudeTranscriptService(): ClaudeTranscriptService {
         if (stopped) {
           return;
         }
-        if (!existsSync(transcriptPath)) {
+        const transcriptPath = resolveExistingClaudeTranscriptPath(session);
+        if (!transcriptPath) {
           retryTimer = setTimeout(start, 500);
           return;
         }
 
-        tail = new TranscriptTail(transcriptPath, {
-          onContent: listener,
-          onError: options.onError
-        });
-        tail.start({ replayLastN: options.replayLastN });
+        try {
+          tail = new TranscriptTail(transcriptPath, {
+            onContent: listener,
+            onError: options.onError
+          });
+          tail.start({
+            replayLastN: options.replayLastN,
+            replaySince: options.replaySince
+          });
+          options.onTranscriptPathResolved?.(transcriptPath);
+        } catch (error) {
+          options.onError?.(error as Error);
+          tail?.stop();
+          tail = undefined;
+          retryTimer = setTimeout(start, 500);
+        }
       };
 
       start();
@@ -295,12 +352,73 @@ export function createClaudeTranscriptService(): ClaudeTranscriptService {
   };
 }
 
+export function resolveExistingClaudeTranscriptPath(session: RoleSessionRecord): string | undefined {
+  const sessionPath = existingFile(session.transcriptPath);
+  if (sessionPath) {
+    return sessionPath;
+  }
+
+  const cwdPath = existingFile(claudeTranscriptPath(session.cwd, session.claudeSessionId));
+  if (cwdPath) {
+    return cwdPath;
+  }
+
+  return findClaudeTranscriptPathBySessionId(session.claudeSessionId);
+}
+
+export function findClaudeTranscriptPathBySessionId(claudeSessionId: string): string | undefined {
+  const root = claudeProjectsRoot();
+  let projectDirs;
+  try {
+    projectDirs = readdirSync(root, { withFileTypes: true });
+  } catch {
+    return undefined;
+  }
+
+  const matches: Array<{ path: string; mtimeMs: number }> = [];
+  for (const dirent of projectDirs) {
+    if (!dirent.isDirectory()) {
+      continue;
+    }
+
+    const candidate = existingFile(join(root, dirent.name, `${claudeSessionId}.jsonl`));
+    if (!candidate) {
+      continue;
+    }
+
+    try {
+      matches.push({ path: candidate, mtimeMs: statSync(candidate).mtimeMs });
+    } catch {
+      // Ignore files that disappear while scanning Claude's transcript folder.
+    }
+  }
+
+  matches.sort((a, b) => b.mtimeMs - a.mtimeMs);
+  return matches[0]?.path;
+}
+
+function existingFile(candidate: string | undefined): string | undefined {
+  if (!candidate) {
+    return undefined;
+  }
+
+  try {
+    return statSync(candidate).isFile() ? candidate : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+export function claudeProjectsRoot(): string {
+  return join(homedir(), ".claude", "projects");
+}
+
 export function projectHash(projectDir: string): string {
-  return projectDir.replace(/\//g, "-");
+  return projectDir.replace(/[\/\s]+/g, "-");
 }
 
 export function projectsTranscriptDir(projectDir: string): string {
-  return join(homedir(), ".claude", "projects", projectHash(projectDir));
+  return join(claudeProjectsRoot(), projectHash(projectDir));
 }
 
 export function claudeTranscriptPath(projectDir: string, claudeSessionId: string): string {

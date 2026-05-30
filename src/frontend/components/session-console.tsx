@@ -32,7 +32,6 @@ export function SessionConsole({
   onRestart,
   onTerminalEvent
 }: SessionConsoleProps) {
-  const translationToggleId = `translation-toggle-${role}`;
   const [translationEnabled, setTranslationEnabled] = useState(false);
 
   return (
@@ -49,15 +48,14 @@ export function SessionConsole({
           onStop={onStop}
           onRestart={onRestart}
         />
-        <label className="translation-toggle" htmlFor={translationToggleId}>
-          <input
-            checked={translationEnabled}
-            id={translationToggleId}
-            type="checkbox"
-            onChange={(event) => setTranslationEnabled(event.target.checked)}
-          />
-          <span>Translate</span>
-        </label>
+        <button
+          aria-pressed={translationEnabled}
+          className={`translation-toggle${translationEnabled ? " is-active" : ""}`}
+          type="button"
+          onClick={() => setTranslationEnabled((current) => !current)}
+        >
+          {translationEnabled ? "✅ Translate" : "× Translate"}
+        </button>
       </div>
       {session?.status === "running" ? (
         <SessionConsoleBody
@@ -100,11 +98,11 @@ function SessionConsoleBody({
   return (
     <div className={translationEnabled ? "session-console-body has-translation" : "session-console-body"}>
       <div className="terminal-pane">
-        <XtermView sessionId={session.id} active={active} onEvent={onTerminalEvent} />
+        <XtermView key={session.id} sessionId={session.id} active={active} onEvent={onTerminalEvent} />
       </div>
       {translationEnabled ? (
         <div className="translation-pane">
-          <TranslationPanel taskSlug={taskSlug} role={role} sessionId={session.id} />
+          <TranslationPanel key={session.id} taskSlug={taskSlug} role={role} sessionId={session.id} />
         </div>
       ) : null}
     </div>

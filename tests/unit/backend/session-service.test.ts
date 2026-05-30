@@ -16,6 +16,7 @@ describe("createSessionService", () => {
       permissionMode: "default"
     });
     expect(started.claudeSessionId).toMatch(/^[0-9a-f-]{36}$/);
+    expect(started.transcriptPath).toMatch(/\.claude\/projects\/-repo\/[0-9a-f-]{36}\.jsonl$/);
     expect(started.command).toContain("--session-id");
     expect(firstRuntimeInputs[0]?.args).toContain("--session-id");
 
@@ -26,12 +27,14 @@ describe("createSessionService", () => {
       {
         role: "architect",
         status: "resumable",
-        claudeSessionId: started.claudeSessionId
+        claudeSessionId: started.claudeSessionId,
+        transcriptPath: started.transcriptPath
       }
     ]);
 
     const resumed = await secondService.resumeRoleSession("/repo", "demo-task", "architect");
     expect(resumed.claudeSessionId).toBe(started.claudeSessionId);
+    expect(resumed.transcriptPath).toBe(started.transcriptPath);
     expect(secondRuntimeInputs[0]?.args).toEqual([
       "--agent",
       "architect",
@@ -68,6 +71,7 @@ describe("createSessionService", () => {
     const restarted = await secondService.restartRoleSession("/repo", "demo-task", "coder");
 
     expect(restarted.claudeSessionId).not.toBe(started.claudeSessionId);
+    expect(restarted.transcriptPath).not.toBe(started.transcriptPath);
     expect(secondRuntimeInputs[0]?.args).toEqual([
       "--agent",
       "coder",

@@ -13,7 +13,6 @@ export function WorkflowPanel({ workflow }: WorkflowPanelProps) {
   return (
     <section className="workflow-panel">
       <div className="workflow-summary">
-        <h2>Workflow</h2>
         <p>{workflow.nextAction}</p>
       </div>
       <ol className="workflow-steps">

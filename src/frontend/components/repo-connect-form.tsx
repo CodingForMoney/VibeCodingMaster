@@ -28,9 +28,9 @@ export function RepoConnectForm({
 
   return (
     <form className="repo-connect" onSubmit={handleSubmit}>
-      <label htmlFor="repo-path">Repository path</label>
       <div className={recentPaths.length > 0 ? "inline-form has-recent-paths" : "inline-form"}>
         <input
+          aria-label="Repository path"
           id="repo-path"
           value={repoPath}
           onChange={(event) => setRepoPath(event.target.value)}

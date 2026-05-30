@@ -8,6 +8,7 @@ export type ClaudePermissionMode =
 export interface RoleSessionRecord {
   id: string;
   claudeSessionId: string;
+  transcriptPath?: string;
   taskSlug: string;
   role: RoleName;
   status: RoleStatus;
@@ -35,6 +36,7 @@ export interface TaskSessionRecord {
 export interface RoleSessionPointer {
   id: string | null;
   claudeSessionId?: string;
+  transcriptPath?: string;
   status: RoleStatus;
   record?: RoleSessionRecord;
 }

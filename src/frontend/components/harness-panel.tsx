@@ -23,14 +23,11 @@ export function HarnessPanel({
   return (
     <section className="harness-panel">
       <div className="harness-panel-header">
-        <div>
-          <h2>VCM Harness</h2>
-          <p className="muted">
-            {status.needsApply
-              ? `${status.plannedChanges.length} planned changes`
-              : "up to date"}
-          </p>
-        </div>
+        <p className="muted">
+          {status.needsApply
+            ? `${status.plannedChanges.length} planned changes`
+            : "up to date"}
+        </p>
         <div className="harness-actions">
           <button type="button" disabled={busy} onClick={() => void onRefresh()}>
             Refresh

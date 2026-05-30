@@ -1,15 +1,15 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import type { RoleName } from "../../shared/types/role.js";
 import type {
-  TranslateUserInputResult,
   TranslationEntry,
   TranslationPromptPreview,
   TranslationSettings,
   TranslationWsMessage
 } from "../../shared/types/translation.js";
 import { apiClient } from "../state/api-client.js";
-import { StatusBadge } from "./status-badge.js";
 import { TranslationSettingsModal } from "./translation-settings-modal.js";
+
+type TranslationPanelStatus = Extract<TranslationWsMessage, { type: "translation-status" }>["status"];
 
 export interface TranslationPanelProps {
   taskSlug: string;
@@ -21,14 +21,17 @@ export function TranslationPanel({ taskSlug, role, sessionId }: TranslationPanel
   const [settings, setSettings] = useState<TranslationSettings | null>(null);
   const [entries, setEntries] = useState<TranslationEntry[]>([]);
   const [composer, setComposer] = useState("");
-  const [englishPreview, setEnglishPreview] = useState("");
+  const [composerIsEnglishDraft, setComposerIsEnglishDraft] = useState(false);
+  const [autoSendEnabled, setAutoSendEnabled] = useState(false);
   const [contextUsed, setContextUsed] = useState(false);
-  const [status, setStatus] = useState("ready");
+  const [status, setStatus] = useState<TranslationPanelStatus>("ready");
+  const [panelNowMs, setPanelNowMs] = useState(Date.now());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [showSettings, setShowSettings] = useState(false);
   const [promptPreviews, setPromptPreviews] = useState<TranslationPromptPreview[]>([]);
   const [testResult, setTestResult] = useState<Awaited<ReturnType<typeof apiClient.testTranslationProvider>> | undefined>();
+  const [socketRevision, setSocketRevision] = useState(0);
   const bottomRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
@@ -47,9 +50,16 @@ export function TranslationPanel({ taskSlug, role, sessionId }: TranslationPanel
   }, []);
 
   useEffect(() => {
+    setEntries([]);
+    setError("");
+    setStatus("ready");
+    let active = true;
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
     const socket = new WebSocket(`${protocol}//${window.location.host}/ws/translation/${encodeURIComponent(sessionId)}`);
-    socket.addEventListener("message", (event) => {
+    const handleMessage = (event: MessageEvent) => {
+      if (!active) {
+        return;
+      }
       const message = JSON.parse(event.data as string) as TranslationWsMessage;
       if (message.type === "translation-entry") {
         setEntries((current) => upsertEntry(current, message.entry));
@@ -58,14 +68,29 @@ export function TranslationPanel({ taskSlug, role, sessionId }: TranslationPanel
       } else if (message.type === "translation-error") {
         setError(message.message);
       }
-    });
-    socket.addEventListener("error", () => setError("Translation connection failed."));
-    return () => socket.close();
-  }, [sessionId]);
+    };
+    socket.addEventListener("message", handleMessage);
+    return () => {
+      active = false;
+      socket.removeEventListener("message", handleMessage);
+      socket.close();
+    };
+  }, [sessionId, socketRevision]);
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ block: "nearest" });
   }, [entries.length]);
+
+  const activeTranslationStartedAt = getActiveTranslationStartedAt(entries);
+  useEffect(() => {
+    if (!activeTranslationStartedAt) {
+      return;
+    }
+
+    setPanelNowMs(Date.now());
+    const interval = window.setInterval(() => setPanelNowMs(Date.now()), 250);
+    return () => window.clearInterval(interval);
+  }, [activeTranslationStartedAt]);
 
   async function translateInput(send = false) {
     if (!settings) {
@@ -73,18 +98,21 @@ export function TranslationPanel({ taskSlug, role, sessionId }: TranslationPanel
     }
     setBusy(true);
     setError("");
+    setComposerIsEnglishDraft(false);
     try {
-      const result: TranslateUserInputResult = await apiClient.translateUserInput(taskSlug, role, {
+      const result = await apiClient.translateUserInput(taskSlug, role, {
         text: composer,
         mode: send ? "auto-send" : settings.inputMode,
         useContext: settings.contextEnabled,
         send
       });
-      setEnglishPreview(result.englishPreview);
       setContextUsed(result.contextUsed);
       if (result.sent) {
         setComposer("");
-        setEnglishPreview("");
+        setComposerIsEnglishDraft(false);
+      } else {
+        setComposer(result.englishPreview);
+        setComposerIsEnglishDraft(true);
       }
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Translation failed.");
@@ -94,20 +122,34 @@ export function TranslationPanel({ taskSlug, role, sessionId }: TranslationPanel
   }
 
   async function sendEnglish() {
-    if (!englishPreview.trim()) {
+    if (!composer.trim()) {
       return;
     }
     setBusy(true);
     setError("");
     try {
-      await apiClient.sendTranslatedInput(taskSlug, role, { englishText: englishPreview });
+      await apiClient.sendTranslatedInput(taskSlug, role, { englishText: composer });
       setComposer("");
-      setEnglishPreview("");
+      setComposerIsEnglishDraft(false);
       setContextUsed(false);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Failed to send English input.");
     } finally {
       setBusy(false);
+    }
+  }
+
+  function handleComposerKeyDown(event: KeyboardEvent<HTMLTextAreaElement>) {
+    if (event.key !== "Enter" || event.shiftKey || event.nativeEvent.isComposing) {
+      return;
+    }
+    event.preventDefault();
+    if (!busy && composer.trim()) {
+      if (composerIsEnglishDraft) {
+        void sendEnglish();
+      } else {
+        void translateInput(autoSendEnabled);
+      }
     }
   }
 
@@ -120,6 +162,7 @@ export function TranslationPanel({ taskSlug, role, sessionId }: TranslationPanel
       setSettings(saved);
       setPromptPreviews(previews);
       setShowSettings(false);
+      setSocketRevision((current) => current + 1);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Failed to save translation settings.");
     } finally {
@@ -160,16 +203,28 @@ export function TranslationPanel({ taskSlug, role, sessionId }: TranslationPanel
     return <aside className="translation-panel"><p className="muted">Loading translation settings...</p></aside>;
   }
 
+  const panelStatus = getPanelStatus(entries, status, panelNowMs);
+
   return (
     <aside className="translation-panel">
       <header className="translation-panel-header">
-        <div>
+        <div className="translation-panel-titlebar">
           <h2>Translation</h2>
-          <p>{settings.model} · {status}{contextUsed ? " · context used" : ""}</p>
+          <div className="translation-panel-actions">
+            <button
+              aria-pressed={autoSendEnabled}
+              className={`auto-send-toggle${autoSendEnabled ? " is-active" : ""}`}
+              type="button"
+              onClick={() => setAutoSendEnabled((current) => !current)}
+            >
+              {autoSendEnabled ? "✅ Auto-send" : "× Auto-send"}
+            </button>
+            <button type="button" onClick={() => setShowSettings(true)}>Settings</button>
+            <button type="button" onClick={() => void clearPanel()}>Clear</button>
+          </div>
         </div>
-        <div className="translation-panel-actions">
-          <button type="button" onClick={() => setShowSettings(true)}>Settings</button>
-          <button type="button" onClick={() => void clearPanel()}>Clear</button>
+        <div>
+          <p>{settings.model} · {panelStatus}{contextUsed ? " · context used" : ""}</p>
         </div>
       </header>
 
@@ -188,31 +243,24 @@ export function TranslationPanel({ taskSlug, role, sessionId }: TranslationPanel
       </div>
 
       <div className="translation-composer">
-        <label>
-          <span>User-language input</span>
+        <div className="translation-composer-row">
           <textarea
             value={composer}
-            onChange={(event) => setComposer(event.target.value)}
+            onChange={(event) => {
+              setComposer(event.target.value);
+              if (!event.target.value.trim()) {
+                setComposerIsEnglishDraft(false);
+              }
+            }}
+            onKeyDown={handleComposerKeyDown}
             placeholder="输入中文，先翻译成英文工程指令..."
           />
-        </label>
-        <div className="translation-composer-actions">
-          <button type="button" disabled={busy || !composer.trim()} onClick={() => void translateInput(false)}>
-            Translate
-          </button>
-          <button type="button" disabled={busy || !englishPreview.trim()} onClick={() => void sendEnglish()}>
-            Send English
-          </button>
-          <button type="button" disabled={busy || !composer.trim()} onClick={() => void translateInput(true)}>
-            Auto-send
-          </button>
+          <div className="translation-composer-actions">
+            <button type="button" disabled={busy || !composerIsEnglishDraft || !composer.trim()} onClick={() => void sendEnglish()}>
+              Send English
+            </button>
+          </div>
         </div>
-        {englishPreview ? (
-          <label>
-            <span>English preview</span>
-            <textarea value={englishPreview} onChange={(event) => setEnglishPreview(event.target.value)} />
-          </label>
-        ) : null}
       </div>
 
       {showSettings ? (
@@ -231,41 +279,56 @@ export function TranslationPanel({ taskSlug, role, sessionId }: TranslationPanel
 }
 
 function TranslationEntryRow({ entry, onRetry }: { entry: TranslationEntry; onRetry?: () => void }) {
-  const [expanded, setExpanded] = useState(false);
-  const [nowMs, setNowMs] = useState(Date.now());
-
-  useEffect(() => {
-    if (entry.status !== "translating" || !entry.translationStartedAt) {
-      return;
-    }
-
-    setNowMs(Date.now());
-    const interval = window.setInterval(() => setNowMs(Date.now()), 250);
-    return () => window.clearInterval(interval);
-  }, [entry.status, entry.translationStartedAt]);
-
-  const elapsedMs = entry.status === "translating" && entry.translationStartedAt
-    ? Math.max(0, nowMs - Date.parse(entry.translationStartedAt))
-    : undefined;
+  const displayText = getTranslationEntryDisplayText(entry);
 
   return (
     <article className={`translation-entry is-${entry.sourceKind}`}>
-      <div className="translation-entry-meta">
-        <span>{entry.sourceKind}</span>
-        <StatusBadge status={entry.status} />
-        {elapsedMs !== undefined ? <span className="translation-timer">translating {formatElapsed(elapsedMs)}</span> : null}
-        {entry.contextUsed ? <span>context</span> : null}
-      </div>
       {entry.warning ? <p className="translation-warning">{entry.warning}</p> : null}
       {entry.error ? <p className="translation-warning">{entry.error}</p> : null}
-      <pre>{entry.translatedText || entry.sourceText}</pre>
-      <button type="button" onClick={() => setExpanded(!expanded)}>
-        {expanded ? "Hide original" : "Original"}
-      </button>
+      <pre>{displayText}</pre>
       {onRetry ? <button type="button" onClick={onRetry}>Retry</button> : null}
-      {expanded ? <pre className="translation-original">{entry.sourceText}</pre> : null}
     </article>
   );
+}
+
+function getActiveTranslationStartedAt(entries: TranslationEntry[]): string | undefined {
+  const activeEntry = entries.find(isActiveTranslation);
+  return activeEntry?.translationStartedAt ?? activeEntry?.createdAt;
+}
+
+function getPanelStatus(entries: TranslationEntry[], fallbackStatus: TranslationPanelStatus, nowMs: number): string {
+  const activeEntry = entries.find(isActiveTranslation);
+  if (activeEntry) {
+    return `translating ${formatElapsed(Math.max(0, nowMs - getEntryStartedMs(activeEntry)))}`;
+  }
+
+  const latestEntry = entries.at(-1);
+  if (latestEntry?.status === "failed" || fallbackStatus === "failed") {
+    return "error";
+  }
+
+  return fallbackStatus;
+}
+
+function isActiveTranslation(entry: TranslationEntry): boolean {
+  return entry.status === "queued" || entry.status === "translating";
+}
+
+function getEntryStartedMs(entry: TranslationEntry): number {
+  const timestamp = Date.parse(entry.translationStartedAt ?? entry.createdAt);
+  return Number.isFinite(timestamp) ? timestamp : Date.now();
+}
+
+function getTranslationEntryDisplayText(entry: TranslationEntry): string {
+  if (entry.status === "queued" || entry.status === "translating") {
+    return entry.sourceText;
+  }
+
+  if (entry.status === "translated") {
+    return entry.translatedText;
+  }
+
+  return entry.translatedText || entry.sourceText;
 }
 
 function upsertEntry(entries: TranslationEntry[], entry: TranslationEntry): TranslationEntry[] {

@@ -1,4 +1,5 @@
 import type { RoleName } from "../../shared/types/role.js";
+import type { RoleSessionRecord } from "../../shared/types/session.js";
 import type {
   SendTranslatedInputRequest,
   TranslateUserInputRequest,
@@ -14,17 +15,16 @@ import type {
   TranslationWsMessage
 } from "../../shared/types/translation.js";
 import { TRANSLATION_PROMPT_KEYS } from "../../shared/types/translation.js";
-import {
-  classifyTranslationChunk,
-  shouldTranslateSourceKind
-} from "../../shared/validation/translation-classifier.js";
 import type { TranslationProvider } from "../adapters/translation-provider.js";
 import { TranslationProviderError } from "../adapters/translation-provider.js";
 import { VcmError } from "../errors.js";
 import type { TerminalRuntime, Unsubscribe } from "../runtime/terminal-runtime.js";
 import type { SessionRegistry } from "../runtime/session-registry.js";
 import type { AppSettingsService } from "./app-settings-service.js";
-import type { ClaudeTranscriptEvent, ClaudeTranscriptService } from "./claude-transcript-service.js";
+import {
+  type ClaudeTranscriptEvent,
+  type ClaudeTranscriptService
+} from "./claude-transcript-service.js";
 import type { SessionService } from "./session-service.js";
 import { buildTranslationPrompt, getTranslationPromptPreviews, parseTranslationWarning } from "./translation-prompts.js";
 import { createTranslationQueueRegistry } from "./translation-queue.js";
@@ -98,6 +98,8 @@ const DEFAULT_SETTINGS: TranslationSettings = {
   requestTimeoutMs: 15000,
   temperature: 0.1
 };
+
+const TRANSCRIPT_REPLAY_GRACE_MS = 5000;
 
 export function createTranslationService(deps: TranslationServiceDeps): TranslationService {
   const now = deps.now ?? (() => new Date().toISOString());
@@ -192,44 +194,37 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
     }
 
     const { settings, secrets } = await loadConfig();
-    const classified = classifyTranslationChunk(rawText, settings.targetLanguage);
-    if (classified.sourceKind === "sensitive" || classified.sourceKind === "already-target-language") {
+    if (!rawText.trim()) {
       return;
     }
+    const text = rawText;
 
-    if (!shouldTranslateSourceKind(classified.sourceKind)) {
-      return;
-    }
-
-    const baseEntry = createEntry({
-      taskSlug: roleSession?.taskSlug ?? session!.taskSlug,
-      role: roleSession?.role ?? session!.role,
-      direction: "cc-output-to-user",
-      sourceKind: classified.sourceKind,
-      sourceText: classified.text,
-      settings,
-      status: "queued",
-      contextUsed: false,
-      id: entryId
-    });
+    const baseEntry: TranslationEntry = {
+      ...createEntry({
+        taskSlug: roleSession?.taskSlug ?? session!.taskSlug,
+        role: roleSession?.role ?? session!.role,
+        direction: "cc-output-to-user",
+        sourceKind: "prose",
+        sourceText: text,
+        settings,
+        status: "translating",
+        contextUsed: false,
+        id: entryId
+      }),
+      translationStartedAt: now()
+    };
 
     pushEntry(sessionId, baseEntry);
 
     const queue = queues.getQueue(sessionId);
     await queue.enqueue(async () => {
-      const translatingEntry = {
-        ...baseEntry,
-        status: "translating" as TranslationStatus,
-        translationStartedAt: now()
-      };
-      replaceEntry(sessionId, translatingEntry);
       emit(sessionId, { type: "translation-status", status: "translating" });
 
       try {
         const prompt = buildTranslationPrompt({
           direction: "cc-output-to-user",
-          text: classified.text,
-          sourceKind: classified.sourceKind,
+          text,
+          sourceKind: "prose",
           settings
         });
         const result = await deps.provider.translate({
@@ -239,18 +234,18 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
           userPrompt: prompt.userPrompt
         });
         const completed = {
-          ...translatingEntry,
+          ...baseEntry,
           status: "translated" as TranslationStatus,
           translatedText: result.text,
           completedAt: now(),
           tokenUsage: result.tokenUsage
         };
         replaceEntry(sessionId, completed);
-        getState(sessionId).lastAssistantText = classified.text;
+        getState(sessionId).lastAssistantText = text;
         emit(sessionId, { type: "translation-status", status: "ready" });
       } catch (error) {
         const failed = {
-          ...translatingEntry,
+          ...baseEntry,
           status: "failed" as TranslationStatus,
           error: error instanceof Error ? error.message : "Translation failed.",
           completedAt: now()
@@ -384,16 +379,22 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
         contextText,
         settings
       });
-      const entry = createEntry({
-        taskSlug: input.taskSlug,
-        role: input.role,
-        direction: "user-input-to-english",
-        sourceKind: "prose",
-        sourceText: input.text,
-        settings,
-        status: "translating",
-        contextUsed: Boolean(contextText)
-      });
+      const entry: TranslationEntry = {
+        ...createEntry({
+          taskSlug: input.taskSlug,
+          role: input.role,
+          direction: "user-input-to-english",
+          sourceKind: "prose",
+          sourceText: input.text,
+          settings,
+          status: "translating",
+          contextUsed: Boolean(contextText)
+        }),
+        translationStartedAt: now()
+      };
+      if (roleSession) {
+        pushEntry(roleSession.id, entry);
+      }
 
       try {
         const result = await deps.provider.translate({
@@ -412,7 +413,7 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
           tokenUsage: result.tokenUsage
         };
         if (roleSession) {
-          pushEntry(roleSession.id, completed);
+          replaceEntry(roleSession.id, completed);
         }
 
         const mode = input.mode ?? settings.inputMode;
@@ -436,7 +437,7 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
           completedAt: now()
         };
         if (roleSession) {
-          pushEntry(roleSession.id, failed);
+          replaceEntry(roleSession.id, failed);
         }
         throw new VcmError({
           code: "TRANSLATION_FAILED",
@@ -472,6 +473,7 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
             message: "Claude transcript watcher is unavailable for this session."
           });
         } else {
+          const replaySince = getTranscriptReplaySince(roleSession);
           state.unsubscribeTranscript = deps.transcripts.subscribeToRoleSession(roleSession, (event) => {
             void handleTranscriptEvent(sessionId, event).catch((error) => {
               emit(sessionId, {
@@ -485,7 +487,8 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
                 type: "translation-error",
                 message: error.message
               });
-            }
+            },
+            replaySince
           });
         }
       }
@@ -538,8 +541,21 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
         statusCode: 409
       });
     }
-    deps.runtime.write(record.id, text.endsWith("\r") || text.endsWith("\n") ? text : `${text}\r`);
+    deps.runtime.write(record.id, formatTerminalSubmit(text));
   }
+}
+
+export function formatTerminalSubmit(text: string): string {
+  return `${text.replace(/[\r\n]+$/g, "")}\r`;
+}
+
+function getTranscriptReplaySince(roleSession: RoleSessionRecord): string | undefined {
+  const rawTimestamp = roleSession.startedAt ?? roleSession.updatedAt;
+  const timestampMs = Date.parse(rawTimestamp);
+  if (!Number.isFinite(timestampMs)) {
+    return undefined;
+  }
+  return new Date(Math.max(0, timestampMs - TRANSCRIPT_REPLAY_GRACE_MS)).toISOString();
 }
 
 function formatStructuredTranscriptEvent(event: Extract<ClaudeTranscriptEvent, { kind: "question" | "todo" | "agent" }>): string {
@@ -590,7 +606,7 @@ function formatUnknown(value: unknown): string {
     return "";
   }
   try {
-    return JSON.stringify(value, null, 2);
+    return JSON.stringify(value);
   } catch {
     return String(value);
   }

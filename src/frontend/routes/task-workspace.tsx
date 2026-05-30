@@ -1,26 +1,37 @@
 import { useCallback, useEffect, useState } from "react";
 import { ROLE_DEFINITIONS } from "../../shared/constants.js";
-import type { TaskStatusReport } from "../../shared/types/api.js";
-import type { VcmOrchestrationMode, VcmOrchestrationState, VcmRoleMessage } from "../../shared/types/message.js";
+import type { TaskStatusReport, TaskWorkflowReport } from "../../shared/types/api.js";
+import type { VcmOrchestrationState, VcmRoleMessage } from "../../shared/types/message.js";
 import type { RoleName } from "../../shared/types/role.js";
 import type { ClaudePermissionMode } from "../../shared/types/session.js";
 import type { TaskRecord } from "../../shared/types/task.js";
-import { EventLog } from "../components/event-log.js";
-import { MessageTimeline } from "../components/message-timeline.js";
 import { RoleSessionTabs } from "../components/role-session-tabs.js";
 import { SessionConsole } from "../components/session-console.js";
-import { WorkflowPanel } from "../components/workflow-panel.js";
 import { getSessionForRole } from "../state/session-store.js";
 import { apiClient } from "../state/api-client.js";
 
 export interface TaskWorkspaceProps {
   task: TaskRecord;
+  activeRole: RoleName;
   onTaskChanged(): Promise<void>;
+  onActiveRoleChange(role: RoleName): void;
+  onWorkflowChanged?(workflow: TaskWorkflowReport): void;
+  onMessagesChanged?(messages: VcmRoleMessage[]): void;
+  onOrchestrationChanged?(orchestration: VcmOrchestrationState): void;
+  onEventsChanged?(events: string[]): void;
 }
 
-export function TaskWorkspace({ task, onTaskChanged }: TaskWorkspaceProps) {
+export function TaskWorkspace({
+  task,
+  activeRole,
+  onTaskChanged,
+  onActiveRoleChange,
+  onWorkflowChanged,
+  onMessagesChanged,
+  onOrchestrationChanged,
+  onEventsChanged
+}: TaskWorkspaceProps) {
   const [statusReport, setStatusReport] = useState<TaskStatusReport | null>(null);
-  const [activeRole, setActiveRole] = useState<RoleName>("project-manager");
   const [permissionModes, setPermissionModes] = useState<Record<RoleName, ClaudePermissionMode>>({
     "project-manager": "default",
     architect: "default",
@@ -30,8 +41,6 @@ export function TaskWorkspace({ task, onTaskChanged }: TaskWorkspaceProps) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [events, setEvents] = useState<string[]>([]);
-  const [messages, setMessages] = useState<VcmRoleMessage[]>([]);
-  const [orchestration, setOrchestration] = useState<VcmOrchestrationState | null>(null);
 
   const refresh = useCallback(async () => {
     const [nextStatusReport, nextMessages, nextOrchestration] = await Promise.all([
@@ -40,13 +49,19 @@ export function TaskWorkspace({ task, onTaskChanged }: TaskWorkspaceProps) {
       apiClient.getOrchestrationState(task.taskSlug)
     ]);
     setStatusReport(nextStatusReport);
-    setMessages(nextMessages);
-    setOrchestration(nextOrchestration);
-  }, [task.taskSlug]);
+    onWorkflowChanged?.(nextStatusReport.workflow);
+    onMessagesChanged?.(nextMessages);
+    onOrchestrationChanged?.(nextOrchestration);
+  }, [onMessagesChanged, onOrchestrationChanged, onWorkflowChanged, task.taskSlug]);
 
   useEffect(() => {
     void refresh().catch((caught: Error) => setError(caught.message));
   }, [refresh]);
+
+  useEffect(() => {
+    setEvents([]);
+    onEventsChanged?.([]);
+  }, [onEventsChanged, task.taskSlug]);
 
   useEffect(() => {
     setPermissionModes((current) => {
@@ -71,14 +86,15 @@ export function TaskWorkspace({ task, onTaskChanged }: TaskWorkspaceProps) {
       ])
         .then(([nextStatusReport, nextMessages, nextOrchestration]) => {
           setStatusReport(nextStatusReport);
-          setMessages(nextMessages);
-          setOrchestration(nextOrchestration);
+          onWorkflowChanged?.(nextStatusReport.workflow);
+          onMessagesChanged?.(nextMessages);
+          onOrchestrationChanged?.(nextOrchestration);
         })
         .catch((caught: Error) => setError(caught.message));
     }, 3000);
 
     return () => window.clearInterval(interval);
-  }, [task.taskSlug]);
+  }, [onMessagesChanged, onOrchestrationChanged, onWorkflowChanged, task.taskSlug]);
 
   async function runAction(action: () => Promise<void>) {
     setBusy(true);
@@ -95,7 +111,11 @@ export function TaskWorkspace({ task, onTaskChanged }: TaskWorkspaceProps) {
   }
 
   function appendEvent(message: string) {
-    setEvents((current) => [...current, `${new Date().toLocaleTimeString()} ${message}`]);
+    setEvents((current) => {
+      const next = [...current, `${new Date().toLocaleTimeString()} ${message}`];
+      onEventsChanged?.(next);
+      return next;
+    });
   }
 
   function setRolePermissionMode(role: RoleName, permissionMode: ClaudePermissionMode) {
@@ -103,37 +123,6 @@ export function TaskWorkspace({ task, onTaskChanged }: TaskWorkspaceProps) {
       ...current,
       [role]: permissionMode
     }));
-  }
-
-  function setOrchestrationMode(mode: VcmOrchestrationMode) {
-    void runAction(async () => {
-      const next = await apiClient.updateOrchestrationState(task.taskSlug, { mode });
-      setOrchestration(next);
-      appendEvent(`orchestration mode set to ${mode}`);
-    });
-  }
-
-  function setOrchestrationPaused(paused: boolean) {
-    void runAction(async () => {
-      const next = await apiClient.updateOrchestrationState(task.taskSlug, { paused });
-      setOrchestration(next);
-      appendEvent(paused ? "orchestration paused" : "orchestration resumed");
-    });
-  }
-
-  function stageMessage(message: VcmRoleMessage) {
-    void runAction(async () => {
-      const staged = await apiClient.stageMessage(task.taskSlug, message.id);
-      setActiveRole(staged.toRole);
-      appendEvent(`staged ${staged.fromRole} -> ${staged.toRole}`);
-    });
-  }
-
-  function rejectMessage(message: VcmRoleMessage) {
-    void runAction(async () => {
-      const rejected = await apiClient.rejectMessage(task.taskSlug, message.id);
-      appendEvent(`rejected ${rejected.fromRole} -> ${rejected.toRole}`);
-    });
   }
 
   return (
@@ -144,18 +133,15 @@ export function TaskWorkspace({ task, onTaskChanged }: TaskWorkspaceProps) {
           <h1>{task.title || task.taskSlug}</h1>
           <span className="workspace-branch">{task.branch}</span>
         </div>
+        <RoleSessionTabs
+          activeRole={activeRole}
+          sessions={statusReport?.sessions ?? []}
+          onSelect={onActiveRoleChange}
+        />
         <button type="button" onClick={() => void refresh()}>
           Refresh
         </button>
       </header>
-
-      <RoleSessionTabs
-        activeRole={activeRole}
-        sessions={statusReport?.sessions ?? []}
-        onSelect={setActiveRole}
-      />
-
-      <WorkflowPanel workflow={statusReport?.workflow} />
 
       {error ? <div className="error-banner">{error}</div> : null}
 
@@ -214,17 +200,6 @@ export function TaskWorkspace({ task, onTaskChanged }: TaskWorkspaceProps) {
               );
             })}
           </div>
-          <MessageTimeline
-            messages={messages}
-            orchestration={orchestration}
-            busy={busy}
-            onModeChange={setOrchestrationMode}
-            onPausedChange={setOrchestrationPaused}
-            onStage={stageMessage}
-            onReject={rejectMessage}
-            onOpenRole={setActiveRole}
-          />
-          <EventLog events={events} />
         </div>
       </div>
     </div>

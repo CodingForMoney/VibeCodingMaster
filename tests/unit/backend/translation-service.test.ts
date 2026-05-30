@@ -3,13 +3,24 @@ import type { FileSystemAdapter } from "../../../src/backend/adapters/filesystem
 import type { TranslationProvider } from "../../../src/backend/adapters/translation-provider.js";
 import type { TerminalRuntime } from "../../../src/backend/runtime/terminal-runtime.js";
 import { createAppSettingsService, type AppSettingsFile } from "../../../src/backend/services/app-settings-service.js";
-import type { ClaudeTranscriptEvent, ClaudeTranscriptService } from "../../../src/backend/services/claude-transcript-service.js";
+import type {
+  ClaudeTranscriptEvent,
+  ClaudeTranscriptService,
+  ClaudeTranscriptSubscribeOptions
+} from "../../../src/backend/services/claude-transcript-service.js";
 import type { SessionService } from "../../../src/backend/services/session-service.js";
-import { createTranslationService } from "../../../src/backend/services/translation-service.js";
+import { createTranslationService, formatTerminalSubmit } from "../../../src/backend/services/translation-service.js";
 import type { RoleSessionRecord } from "../../../src/shared/types/session.js";
 import type { TranslationWsMessage } from "../../../src/shared/types/translation.js";
 
 describe("translation-service", () => {
+  it("normalizes translated input to a terminal submit keystroke", () => {
+    expect(formatTerminalSubmit("run tests")).toBe("run tests\r");
+    expect(formatTerminalSubmit("run tests\n")).toBe("run tests\r");
+    expect(formatTerminalSubmit("run tests\r")).toBe("run tests\r");
+    expect(formatTerminalSubmit("line one\nline two\n")).toBe("line one\nline two\r");
+  });
+
   it("saves API keys locally and returns them to the local settings UI", async () => {
     const fs = createMemoryFs();
     const appSettings = createAppSettingsService({
@@ -111,9 +122,10 @@ describe("translation-service", () => {
       message.type === "translation-entry"
     );
     expect(entries[0]?.entry).toMatchObject({
-      status: "queued",
+      status: "translating",
       sourceText: "I found the failing test.",
-      translatedText: ""
+      translatedText: "",
+      translationStartedAt: "2026-05-30T00:00:01.000Z"
     });
     expect(entries.at(-1)?.entry).toMatchObject({
       status: "translated",
@@ -121,6 +133,60 @@ describe("translation-service", () => {
       translatedText: "我找到了失败的测试。"
     });
     expect(entries.at(-1)?.entry.translationStartedAt).toBe("2026-05-30T00:00:01.000Z");
+  });
+
+  it("shows user input before replacing it with translated text", async () => {
+    const fs = createMemoryFs();
+    const appSettings = createAppSettingsService({
+      fs,
+      settingsPath: "/settings.json",
+      legacySettingsPath: "/old-settings.json",
+      legacyTranslationPath: "/translation.json"
+    });
+    const roleSession = createRoleSessionRecord();
+    const service = createTranslationService({
+      appSettings,
+      provider: createProviderStub("Please inspect the failing test."),
+      runtime: createRuntimeStub(),
+      sessionRegistry: createRegistryStub(roleSession),
+      transcripts: createTranscriptStub(),
+      sessionService: {
+        async getRoleSession() {
+          return roleSession;
+        }
+      } as SessionService,
+      now: createClock([
+        "2026-05-30T00:00:00.000Z",
+        "2026-05-30T00:00:01.000Z",
+        "2026-05-30T00:00:02.000Z"
+      ])
+    });
+    await service.updateSettings({ enabled: true, translateUserInput: true }, { apiKey: "sk-local-test" });
+
+    const messages: TranslationWsMessage[] = [];
+    service.subscribeToSession("session-1", (message) => messages.push(message));
+    await service.translateUserInput({
+      repoRoot: "/repo",
+      taskSlug: "demo-task",
+      role: "coder",
+      text: "请检查失败的测试。",
+      send: false
+    });
+
+    const entries = messages.filter((message): message is Extract<TranslationWsMessage, { type: "translation-entry" }> =>
+      message.type === "translation-entry"
+    );
+    expect(entries[0]?.entry).toMatchObject({
+      status: "translating",
+      sourceText: "请检查失败的测试。",
+      translatedText: "",
+      translationStartedAt: "2026-05-30T00:00:01.000Z"
+    });
+    expect(entries.at(-1)?.entry).toMatchObject({
+      status: "translated",
+      sourceText: "请检查失败的测试。",
+      translatedText: "Please inspect the failing test."
+    });
   });
 
   it("translates assistant text even when the transcript stop reason is tool_use", async () => {
@@ -161,6 +227,63 @@ describe("translation-service", () => {
     expect(translateCalls).toHaveLength(1);
     expect(messages.some((message) =>
       message.type === "translation-entry" && message.entry.sourceText === "I will inspect the test logs first."
+    )).toBe(true);
+  });
+
+  it("translates long assistant prose even when it mentions permissions or code-like terms", async () => {
+    const fs = createMemoryFs();
+    const appSettings = createAppSettingsService({
+      fs,
+      settingsPath: "/settings.json",
+      legacySettingsPath: "/old-settings.json",
+      legacyTranslationPath: "/translation.json"
+    });
+    const runtime = createRuntimeStub();
+    const transcripts = createTranscriptStub();
+    const translateCalls: Array<{ userPrompt: string }> = [];
+    const service = createTranslationService({
+      appSettings,
+      provider: createProviderStub("项目理解已翻译。", translateCalls),
+      runtime,
+      sessionRegistry: createRegistryStub(),
+      transcripts,
+      sessionService: {} as SessionService
+    });
+    await service.updateSettings({ enabled: true, translateOutput: true }, { apiKey: "sk-local-test" });
+
+    const text = [
+      "I've now read the documentation and explored the codebase.",
+      "",
+      "## VibeCodingMaster Project Understanding",
+      "",
+      "- The translation pane shows classified translations.",
+      "- The text mentions code, diff, log, tool-output, and permission without being filtered.",
+      "- Backend services include `translation-service`, `claude-transcript-service`, and `session-registry`.",
+      "",
+      "What would you like to work on next?"
+    ].join("\n");
+
+    const messages: TranslationWsMessage[] = [];
+    service.subscribeToSession("session-1", (message) => messages.push(message));
+    transcripts.emit({
+      kind: "text",
+      id: "assistant-final-message",
+      timestamp: "2026-05-30T00:00:00.000Z",
+      stopReason: "end_turn",
+      text
+    });
+
+    await waitFor(() => messages.some((message) =>
+      message.type === "translation-entry" && message.entry.status === "translated"
+    ));
+
+    expect(translateCalls).toHaveLength(1);
+    expect(translateCalls[0]?.userPrompt).toBe(text);
+    expect(messages.some((message) =>
+      message.type === "translation-entry"
+      && message.entry.id === "assistant-final-message"
+      && message.entry.sourceKind === "prose"
+      && message.entry.translatedText === "项目理解已翻译。"
     )).toBe(true);
   });
 
@@ -217,7 +340,7 @@ describe("translation-service", () => {
       id: "toolu_bash",
       status: "preserved",
       sourceKind: "tool-output",
-      sourceText: expect.stringContaining("● Bash")
+      sourceText: "● Bash({\"command\":\"npm test\"})"
     });
     expect(entries[1]?.entry).toMatchObject({
       id: "toolu_bash#result",
@@ -292,6 +415,79 @@ describe("translation-service", () => {
       expect.stringContaining("Agent dispatch")
     ]);
   });
+
+  it("subscribes to transcript output from the current embedded terminal run", () => {
+    const fs = createMemoryFs();
+    const appSettings = createAppSettingsService({
+      fs,
+      settingsPath: "/settings.json",
+      legacySettingsPath: "/old-settings.json",
+      legacyTranslationPath: "/translation.json"
+    });
+    const subscribeCalls: Array<{
+      session: RoleSessionRecord;
+      options?: ClaudeTranscriptSubscribeOptions;
+    }> = [];
+    const service = createTranslationService({
+      appSettings,
+      provider: createProviderStub(),
+      runtime: createRuntimeStub(),
+      sessionRegistry: createRegistryStub(createRoleSessionRecord({
+        startedAt: "2026-05-30T00:00:00.000Z"
+      })),
+      transcripts: createTranscriptStub(subscribeCalls),
+      sessionService: {} as SessionService
+    });
+
+    const messages: TranslationWsMessage[] = [];
+    const unsubscribe = service.subscribeToSession("session-1", (message) => messages.push(message));
+    unsubscribe();
+
+    expect(subscribeCalls[0]?.session.claudeSessionId).toBe("claude-session-1");
+    expect(subscribeCalls[0]?.options?.replaySince).toBe("2026-05-29T23:59:55.000Z");
+  });
+
+  it("dedupes transcript ids even while output translation is disabled", async () => {
+    const fs = createMemoryFs();
+    const appSettings = createAppSettingsService({
+      fs,
+      settingsPath: "/settings.json",
+      legacySettingsPath: "/old-settings.json",
+      legacyTranslationPath: "/translation.json"
+    });
+    const runtime = createRuntimeStub();
+    const transcripts = createTranscriptStub();
+    const service = createTranslationService({
+      appSettings,
+      provider: createProviderStub("已翻译。"),
+      runtime,
+      sessionRegistry: createRegistryStub(),
+      transcripts,
+      sessionService: {} as SessionService
+    });
+
+    const event: ClaudeTranscriptEvent = {
+      kind: "text",
+      id: "replayed-message",
+      timestamp: "2026-05-30T00:00:01.000Z",
+      stopReason: "end_turn",
+      text: "This was replayed before settings were enabled."
+    };
+    const firstMessages: TranslationWsMessage[] = [];
+    const firstUnsubscribe = service.subscribeToSession("session-1", (message) => firstMessages.push(message));
+    transcripts.emit(event);
+    await delay(20);
+    firstUnsubscribe();
+
+    await service.updateSettings({ enabled: true, translateOutput: true }, { apiKey: "sk-local-test" });
+    const secondMessages: TranslationWsMessage[] = [];
+    service.subscribeToSession("session-1", (message) => secondMessages.push(message));
+    transcripts.emit(event);
+    await delay(20);
+
+    expect(firstMessages.some((message) => message.type === "translation-entry")).toBe(false);
+    expect(secondMessages.some((message) => message.type === "translation-entry")).toBe(false);
+  });
 });
 
 function createProviderStub(text = "translated", calls: unknown[] = []): TranslationProvider {
@@ -348,10 +544,14 @@ function createRegistryStub(record = createRoleSessionRecord()): { get(sessionId
   };
 }
 
-function createTranscriptStub(): ClaudeTranscriptService & { emit(event: ClaudeTranscriptEvent): void } {
+function createTranscriptStub(subscribeCalls: Array<{
+  session: RoleSessionRecord;
+  options?: ClaudeTranscriptSubscribeOptions;
+}> = []): ClaudeTranscriptService & { emit(event: ClaudeTranscriptEvent): void } {
   const listeners = new Set<(event: ClaudeTranscriptEvent) => void>();
   return {
-    subscribeToRoleSession(_session, listener) {
+    subscribeToRoleSession(session, listener, options) {
+      subscribeCalls.push({ session, options });
       listeners.add(listener);
       return () => listeners.delete(listener);
     },
@@ -363,7 +563,7 @@ function createTranscriptStub(): ClaudeTranscriptService & { emit(event: ClaudeT
   };
 }
 
-function createRoleSessionRecord(): RoleSessionRecord {
+function createRoleSessionRecord(overrides: Partial<RoleSessionRecord> = {}): RoleSessionRecord {
   return {
     id: "session-1",
     claudeSessionId: "claude-session-1",
@@ -377,7 +577,8 @@ function createRoleSessionRecord(): RoleSessionRecord {
     logPath: ".ai/handoffs/demo-task/logs/coder.log",
     startedAt: "2026-05-30T00:00:00.000Z",
     updatedAt: "2026-05-30T00:00:00.000Z",
-    exitCode: null
+    exitCode: null,
+    ...overrides
   };
 }
 
@@ -394,6 +595,10 @@ async function waitFor(assertion: () => boolean): Promise<void> {
     }
     await new Promise((resolve) => setTimeout(resolve, 10));
   }
+}
+
+async function delay(ms: number): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function createMemoryFs(): FileSystemAdapter {

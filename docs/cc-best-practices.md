@@ -781,9 +781,9 @@ Required handoff directory:
 ```text
 .ai/handoffs/<task-slug>/
   role-commands/
-    architect-command.md
-    coder-command.md
-    reviewer-command.md
+    architect.md
+    coder.md
+    reviewer.md
   architecture-plan.md
   implementation-log.md
   validation-log.md

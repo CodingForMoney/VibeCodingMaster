@@ -23,23 +23,13 @@ export const TRANSLATION_PROMPT_KEYS: readonly TranslationPromptKey[] = [
 
 export type TranslationSourceKind =
   | "prose"
-  | "code"
-  | "diff"
-  | "log"
-  | "tool-output"
-  | "permission-prompt"
-  | "error"
-  | "already-target-language"
-  | "sensitive";
+  | "tool-output";
 
 export type TranslationStatus =
   | "queued"
   | "translating"
   | "translated"
-  | "skipped"
   | "failed"
-  | "redacted"
-  | "summarized"
   | "preserved";
 
 export interface TranslationSettings {
