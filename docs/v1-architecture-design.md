@@ -44,8 +44,6 @@ V1 明确不做：
 - SaaS 多用户协作。
 - 企业权限和审计。
 - 完整 Desktop 打包和自动更新。
-- 产品层翻译管线。
-- 独立翻译模型调用。
 - 自动生成完整 Task Spec。
 - 自动 Preflight Review。
 - 自动 Cross-Model Code Review。

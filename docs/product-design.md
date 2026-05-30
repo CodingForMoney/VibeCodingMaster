@@ -995,7 +995,7 @@ GUI frontend
 - 收集执行输出。
 - 处理 Claude Code 交互式权限确认和等待状态。
 
-V1 中，Claude Code Adapter 主要通过 Terminal Runtime Manager 工作。它不直接实现翻译功能；翻译由 `project-manager` agent 根据自己的 role prompt 完成。
+V1 中，Claude Code Adapter 主要通过 Terminal Runtime Manager 工作。
 
 ### 9.10 Cross-Model Reviewer
 
@@ -1450,9 +1450,6 @@ V1 只做一件事：
 
 > 做一个本地 GUI Session Cockpit，让用户可以在一个任务工作台中启动、切换、查看、输入和管理多个 Claude Code role sessions。
 
-V1 不在产品层做翻译功能。  
-用户输入和 Claude Code 输出的中英翻译，交给 `.claude/agents/project-manager.md` 中定义的 Project Manager 角色完成。
-
 V1 的核心判断标准不是“CLI 是否能控制多个终端”，而是：
 
 > 用户是否可以不离开 GUI，就完成多 Claude Code sessions 的创建、切换、沟通、观察、日志保存和 handoff artifact 查看。
@@ -1497,8 +1494,6 @@ V1 的核心判断标准不是“CLI 是否能控制多个终端”，而是：
 - SaaS 多用户协作。
 - 企业权限和审计。
 - 完整 Desktop 打包和自动更新。
-- 产品层翻译管线。
-- 独立翻译模型调用。
 - 自动生成完整 Task Spec。
 - 自动做 Preflight Review。
 - 自动做 Cross-Model Code Review。

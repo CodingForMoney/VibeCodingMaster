@@ -137,7 +137,7 @@ Minimum baseline for non-trivial AI coding:
 - root `CLAUDE.md`
 - module-local `CLAUDE.md` for edited modules
 - architecture, module map, testing, security, and dependency docs
-- role agents for project management/user communication/translation, architecture/planning, coding, and independent review/testing
+- role agents for project management/user communication, architecture/planning, coding, and independent review/testing
 - task specs, handoff artifacts, progress state, decisions, validation logs, known issues, and generated context artifacts
 - fast, changed-file, module, boundary, public-surface, contract-test, generated-artifact, docs-freshness, and agent-rule checks
 - hooks or CI gates for protected files, validation, docs sync, public contracts, and test quality
@@ -198,7 +198,7 @@ Root template:
 
 Role-specific behavior lives in `.claude/agents/`.
 
-- Use `claude --agent project-manager` for user communication, translation, task clarification, task specs, role routing, role commands, status summaries, and final acceptance.
+- Use `claude --agent project-manager` for user communication, task clarification, task specs, role routing, role commands, status summaries, and final acceptance.
 - Use `claude --agent architect` for architecture plans, module boundaries, file responsibilities, public contracts, test contracts, phase plans, and post-review docs sync / architecture drift checks.
 - Use `claude --agent coder` for implementation and direct tests within an approved plan.
 - Use `claude --agent reviewer` for independent review, test adequacy, validation evidence, docs gap detection, and acceptance findings.
@@ -209,7 +209,7 @@ Role-specific behavior lives in `.claude/agents/`.
 
 - For complex features, cross-module changes, refactors, public API changes, schema changes, auth, payment, permission, or security-sensitive work, start Claude Code with an explicit role: `claude --agent <role>`.
 - Default core roles are `project-manager`, `architect`, `coder`, and `reviewer`.
-- The `project-manager` role owns user communication, translation, task routing, role commands, handoff verification, final status reporting, and PR preparation after required gates pass.
+- The `project-manager` role owns user communication, task routing, role commands, handoff verification, final status reporting, and PR preparation after required gates pass.
 - Do not let one coding session own architecture/plan decisions, implementation, final testing responsibility, and review.
 - Role outputs are exchanged through `.ai/handoffs/<task-slug>/`, not through chat history.
 - When the required role route includes `architect`, coding must not start until the architecture and plan artifact exists.
@@ -558,7 +558,7 @@ Do not include:
 
 For large projects, the default execution model should be explicit role-based sessions, not dynamic role routing inside one generic Claude conversation.
 
-The user-facing task should start with a `project-manager` role session. The project manager owns user communication, translation, role command dispatch, severity classification, role routing, progress tracking, and process verification. It does not own architecture, coding, and independent review for the same non-trivial task.
+The user-facing task should start with a `project-manager` role session. The project manager owns user communication, role command dispatch, severity classification, role routing, progress tracking, and process verification. It does not own architecture, coding, and independent review for the same non-trivial task.
 
 Do not make one generic Claude session own architecture, planning, coding, final testing, and review for non-trivial work. That blurs responsibility and makes acceptance weak.
 
@@ -575,7 +575,7 @@ Project manager responsibilities:
 ```text
 communicate with user
   -> clarify task
-  -> translate user intent into a task brief / task spec
+  -> turn user intent into a task brief / task spec
   -> classify severity
   -> choose required role route
   -> prepare the next role command
@@ -590,7 +590,7 @@ communicate with user
 
 The project manager is a process owner, not an execution owner.
 
-It is also the communication bridge between the user and the role agents. The user should not need to know how to write a perfect Claude Code prompt. The project manager owns the translation from user intent to precise agent instructions.
+It is also the communication bridge between the user and the role agents. The user should not need to know how to write a perfect Claude Code prompt. The project manager owns the conversion from user intent to precise agent instructions.
 
 It may route T0/T1 work to a lightweight coder flow when the task is small, scoped, and low risk. For non-trivial work, it coordinates role sessions and verifies the process.
 
@@ -678,7 +678,7 @@ If the current session was not started with the required role, stop and ask the 
 
 This is not progressive adoption. The full harness exists by default; the role chain depends on task risk.
 
-All user-facing routes begin with `project-manager`. The project manager may hand off T0/T1 work to `coder` quickly, but it still owns translation, status reporting, and acceptance communication.
+All user-facing routes begin with `project-manager`. The project manager may hand off T0/T1 work to `coder` quickly, but it still owns status reporting and acceptance communication.
 
 | Task class | Examples | Required role route |
 | --- | --- | --- |
@@ -712,9 +712,9 @@ Role responsibilities:
 
 ```text
 project-manager
-  owns user communication, multilingual translation, task clarification, task specs, role routing, and role command dispatch
-  translates user input into an English engineering task when needed
-  translates role outputs back into the user's preferred language
+  owns user communication, task clarification, task specs, role routing, and role command dispatch
+  turns user input into an engineering task when needed
+  summarizes role outputs back to the user
   creates and verifies handoff artifacts
   tracks progress, blockers, validation, docs sync, and Replan
   outputs task specs, role commands, status summaries, and final acceptance reports
@@ -1116,7 +1116,7 @@ For large features:
 
 ```text
 project-manager session
-  -> communicate with user + translate intent + classify task + route roles + track process
+  -> communicate with user + clarify intent + classify task + route roles + track process
 
 architect session
   -> architecture-plan.md
@@ -1841,7 +1841,7 @@ behavior is correct
 
 ## Role / Handoff
 
-- [ ] The task used an explicit `project-manager` role session for user communication, translation, routing, and status reporting.
+- [ ] The task used an explicit `project-manager` role session for user communication, routing, and status reporting.
 - [ ] Task severity was classified.
 - [ ] Required role route was followed or an exception was approved.
 - [ ] The project manager verified required handoff artifacts, validation evidence, docs sync, and remaining risks.
@@ -2136,7 +2136,7 @@ Monthly review:
 If you can only enforce 16 rules, enforce these:
 
 1. User-facing tasks start with `claude --agent project-manager`; untagged sessions are not implicit project managers.
-2. The `project-manager` agent owns user communication, translation, task clarification, and precise role command dispatch.
+2. The `project-manager` agent owns user communication, task clarification, and precise role command dispatch.
 3. Complex tasks use explicit role sessions, handoff artifacts, and plan first; do not edit directly.
 4. One task uses one branch, one worktree, one handoff directory, and one PR by default.
 5. Role sessions for the same task work in the same task worktree sequentially; parallel write work uses separate task or sub-task worktrees.
@@ -2180,7 +2180,7 @@ Project manager becomes coder/reviewer
   -> project manager coordinates and verifies; role sessions execute
 
 Project manager only tracks status but sends vague role prompts
-  -> project manager translates user intent into precise role commands with scope, contracts, validation, outputs, and stop conditions
+  -> project manager turns user intent into precise role commands with scope, contracts, validation, outputs, and stop conditions
 
 Role-based worktree fragmentation
   -> one task worktree; architect -> coder -> reviewer hand off sequentially inside it
