@@ -1,4 +1,5 @@
 import type { DispatchRoleCommandResult, TaskStatusReport } from "../../shared/types/api.js";
+import type { HarnessApplyResult, HarnessStatusReport } from "../../shared/types/harness.js";
 import type {
   SendRoleMessageRequest,
   SendRoleMessageResult,
@@ -28,6 +29,14 @@ export const apiClient = {
     return request<TaskRecord>("/api/tasks", {
       method: "POST",
       body: JSON.stringify(input)
+    });
+  },
+  getHarnessStatus() {
+    return request<HarnessStatusReport>("/api/projects/harness");
+  },
+  applyHarness() {
+    return request<HarnessApplyResult>("/api/projects/harness/apply", {
+      method: "POST"
     });
   },
   getTaskStatus(taskSlug: string) {

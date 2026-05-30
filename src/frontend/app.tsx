@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import type { HarnessApplyResult, HarnessStatusReport } from "../shared/types/harness.js";
 import type { ProjectSummary } from "../shared/types/project.js";
 import type { TaskRecord } from "../shared/types/task.js";
 import { AppShell } from "./components/app-shell.js";
@@ -9,6 +10,8 @@ import { TaskWorkspace } from "./routes/task-workspace.js";
 
 export function App() {
   const [project, setProject] = useState<ProjectSummary | null>(null);
+  const [harnessStatus, setHarnessStatus] = useState<HarnessStatusReport | null>(null);
+  const [harnessApplyResult, setHarnessApplyResult] = useState<HarnessApplyResult | null>(null);
   const [tasks, setTasks] = useState<TaskRecord[]>([]);
   const [activeTaskSlug, setActiveTaskSlug] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -24,12 +27,21 @@ export function App() {
     setActiveTaskSlug((current) => current ?? nextTasks[0]?.taskSlug ?? null);
   }
 
+  async function loadHarnessStatus() {
+    const nextStatus = await apiClient.getHarnessStatus();
+    setHarnessStatus(nextStatus);
+    return nextStatus;
+  }
+
   useEffect(() => {
     apiClient.getCurrentProject()
       .then(async (currentProject) => {
         setProject(currentProject);
         if (currentProject) {
-          await loadTasks();
+          await Promise.all([
+            loadTasks(),
+            loadHarnessStatus()
+          ]);
         }
       })
       .catch((caught: Error) => setError(caught.message));
@@ -54,11 +66,26 @@ export function App() {
           project={project}
           tasks={tasks}
           activeTaskSlug={activeTask?.taskSlug ?? null}
+          harnessStatus={harnessStatus}
+          harnessApplyResult={harnessApplyResult}
           busy={busy}
           onConnect={(repoPath) => withBusy(async () => {
             const nextProject = await apiClient.connectProject({ repoPath });
             setProject(nextProject);
-            await loadTasks();
+            setHarnessApplyResult(null);
+            await Promise.all([
+              loadTasks(),
+              loadHarnessStatus()
+            ]);
+          })}
+          onRefreshHarness={() => withBusy(async () => {
+            setHarnessApplyResult(null);
+            await loadHarnessStatus();
+          })}
+          onApplyHarness={() => withBusy(async () => {
+            const result = await apiClient.applyHarness();
+            setHarnessApplyResult(result);
+            await loadHarnessStatus();
           })}
           onCreateTask={(input) => withBusy(async () => {
             const task = await apiClient.createTask(input);

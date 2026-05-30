@@ -40,7 +40,7 @@ describe("createSessionService", () => {
     ]);
   });
 
-  it("sends canonical task context to project-manager sessions", async () => {
+  it("starts project-manager sessions with VCM environment instead of pasted context", async () => {
     const fs = createMemoryFs();
     const runtimeInputs: CreateTerminalSessionInput[] = [];
     const writes: string[] = [];
@@ -48,11 +48,11 @@ describe("createSessionService", () => {
 
     await service.startRoleSession("/repo", "demo-task", "project-manager");
 
-    expect(writes).toHaveLength(1);
-    expect(writes[0]).toContain("Task slug: demo-task");
-    expect(writes[0]).toContain("Canonical handoff directory: .ai/handoffs/demo-task");
-    expect(writes[0]).toContain("coder: .ai/handoffs/demo-task/role-commands/coder.md");
-    expect(writes[0]).toContain("Do not create or write .ai/handoffs/<other-task>/");
+    expect(writes).toHaveLength(0);
+    expect(runtimeInputs[0]?.env).toMatchObject({
+      VCM_TASK_SLUG: "demo-task",
+      VCM_ROLE: "project-manager"
+    });
   });
 });
 

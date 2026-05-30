@@ -14,7 +14,6 @@ import type { ClaudeAdapter } from "../adapters/claude-adapter.js";
 import type { FileSystemAdapter } from "../adapters/filesystem.js";
 import type { SessionRegistry } from "../runtime/session-registry.js";
 import type { TerminalRuntime } from "../runtime/terminal-runtime.js";
-import { renderRoleMessagingContext } from "../templates/role-messaging-context.js";
 import type { ArtifactService } from "./artifact-service.js";
 import type { ProjectService } from "./project-service.js";
 import type { TaskService } from "./task-service.js";
@@ -125,7 +124,6 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     deps.registry.upsert(record);
     await persistTaskSession(deps.fs, repoRoot, config.stateRoot, record);
     await deps.taskService.updateTaskStatus(repoRoot, taskSlug, "running");
-    deps.runtime.write(runtimeSession.id, `${renderRoleMessagingContext(task, paths, role, deps.vcmctlCommand)}\r`);
     return record;
   }
 

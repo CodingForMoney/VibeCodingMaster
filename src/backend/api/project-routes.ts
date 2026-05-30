@@ -16,13 +16,4 @@ export function registerProjectRoutes(app: FastifyInstance, deps: ProjectRouteDe
   app.get("/api/projects/current", async () => {
     return deps.projectService.getCurrentProject();
   });
-
-  app.get("/api/projects/harness", async () => ({
-    checks: [
-      {
-        name: "local-gui",
-        status: "ok"
-      }
-    ]
-  }));
 }

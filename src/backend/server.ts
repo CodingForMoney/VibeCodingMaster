@@ -9,6 +9,7 @@ import { createClaudeAdapter } from "./adapters/claude-adapter.js";
 import { createCommandRunner } from "./adapters/command-runner.js";
 import { createCommandDispatcher, type CommandDispatcher } from "./services/command-dispatcher.js";
 import { createGitAdapter } from "./adapters/git-adapter.js";
+import { createHarnessService, type HarnessService } from "./services/harness-service.js";
 import { createNodeFileSystemAdapter } from "./adapters/filesystem.js";
 import { createNodePtyTerminalRuntime } from "./runtime/node-pty-runtime.js";
 import { createProjectService, type ProjectService } from "./services/project-service.js";
@@ -18,6 +19,7 @@ import { createMessageService, type MessageService } from "./services/message-se
 import { createStatusService, type StatusService } from "./services/status-service.js";
 import { createTaskService, type TaskService } from "./services/task-service.js";
 import { registerArtifactRoutes } from "./api/artifact-routes.js";
+import { registerHarnessRoutes } from "./api/harness-routes.js";
 import { registerMessageRoutes } from "./api/message-routes.js";
 import { registerProjectRoutes } from "./api/project-routes.js";
 import { registerSessionRoutes } from "./api/session-routes.js";
@@ -38,6 +40,7 @@ export interface ServerDeps {
   taskService: TaskService;
   sessionService: SessionService;
   artifactService: ArtifactService;
+  harnessService: HarnessService;
   commandDispatcher: CommandDispatcher;
   messageService: MessageService;
   statusService: StatusService;
@@ -61,6 +64,10 @@ export async function createServer(deps: ServerDeps, options: CreateServerOption
   });
 
   registerProjectRoutes(app, { projectService: deps.projectService });
+  registerHarnessRoutes(app, {
+    projectService: deps.projectService,
+    harnessService: deps.harnessService
+  });
   registerTaskRoutes(app, {
     projectService: deps.projectService,
     taskService: deps.taskService,
@@ -126,6 +133,7 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
   const runtime = createNodePtyTerminalRuntime({ fs });
   const registry = createSessionRegistry();
   const artifactService = createArtifactService(fs);
+  const harnessService = createHarnessService({ fs });
   const projectService = createProjectService({ fs, git, claude });
   const taskService = createTaskService({ fs, git, artifactService, projectService });
   const sessionService = createSessionService({
@@ -162,6 +170,7 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     taskService,
     sessionService,
     artifactService,
+    harnessService,
     commandDispatcher,
     messageService,
     statusService,

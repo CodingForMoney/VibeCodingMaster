@@ -1,6 +1,8 @@
 import { FormEvent, useState } from "react";
+import type { HarnessApplyResult, HarnessStatusReport } from "../../shared/types/harness.js";
 import type { ProjectSummary } from "../../shared/types/project.js";
 import type { TaskRecord } from "../../shared/types/task.js";
+import { HarnessPanel } from "../components/harness-panel.js";
 import { RepoConnectForm } from "../components/repo-connect-form.js";
 import { TaskNav } from "../components/task-nav.js";
 
@@ -8,8 +10,12 @@ export interface ProjectDashboardProps {
   project: ProjectSummary | null;
   tasks: TaskRecord[];
   activeTaskSlug: string | null;
+  harnessStatus: HarnessStatusReport | null;
+  harnessApplyResult?: HarnessApplyResult | null;
   busy?: boolean;
   onConnect(repoPath: string): Promise<void>;
+  onRefreshHarness(): Promise<void>;
+  onApplyHarness(): Promise<void>;
   onCreateTask(input: { taskSlug: string; title?: string }): Promise<void>;
   onSelectTask(taskSlug: string): void;
 }
@@ -18,8 +24,12 @@ export function ProjectDashboard({
   project,
   tasks,
   activeTaskSlug,
+  harnessStatus,
+  harnessApplyResult,
   busy,
   onConnect,
+  onRefreshHarness,
+  onApplyHarness,
   onCreateTask,
   onSelectTask
 }: ProjectDashboardProps) {
@@ -74,6 +84,16 @@ export function ProjectDashboard({
             </ul>
           ) : null}
         </section>
+      ) : null}
+
+      {project ? (
+        <HarnessPanel
+          status={harnessStatus}
+          applyResult={harnessApplyResult}
+          busy={busy}
+          onRefresh={onRefreshHarness}
+          onApply={onApplyHarness}
+        />
       ) : null}
 
       {project ? (

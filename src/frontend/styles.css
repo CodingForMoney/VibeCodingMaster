@@ -181,6 +181,7 @@ h2 {
 
 .repo-connect,
 .project-summary,
+.harness-panel,
 .task-create,
 .project-dashboard section {
   margin-bottom: 16px;
@@ -233,6 +234,78 @@ h2 {
   margin: 12px 0 0;
   padding-left: 26px;
   font-size: 13px;
+}
+
+.harness-panel {
+  display: grid;
+  gap: 8px;
+}
+
+.harness-panel-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: center;
+}
+
+.harness-panel-header h2,
+.harness-panel-header p,
+.harness-result p {
+  margin-bottom: 0;
+}
+
+.harness-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.harness-file-list {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.harness-file-list li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  border: 1px solid #ece5d9;
+  border-radius: 6px;
+  padding: 6px 8px;
+  background: #fffdfa;
+}
+
+.harness-file-list span {
+  overflow: hidden;
+  font-size: 12px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.harness-changes,
+.harness-result {
+  border: 1px solid #e0d6c7;
+  border-radius: 6px;
+  padding: 8px;
+  background: #f8f7f2;
+  font-size: 12px;
+}
+
+.harness-changes h3 {
+  margin: 0 0 4px;
+  font-size: 12px;
+}
+
+.harness-changes ul,
+.harness-result ul {
+  margin: 0;
+  padding-left: 18px;
 }
 
 .task-create form {
@@ -638,7 +711,10 @@ h2 {
 
 .status-pending_approval,
 .status-queued,
-.status-ready {
+.status-ready,
+.status-create,
+.status-insert,
+.status-update {
   border-color: #c4a34e;
   background: #f7efcf;
   color: #604e16;
