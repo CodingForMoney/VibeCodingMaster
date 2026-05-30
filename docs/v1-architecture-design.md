@@ -58,8 +58,6 @@ V1 明确不做：
 - 多 repo / 多任务并行调度。
 - 多 worktree 自动管理。
 - 让用户手动管理底层 terminal process。
-- 采用独立翻译 TUI、slash command 或文件桥接作为主要输入路径。
-- 将翻译历史默认写入 repo 或 handoff artifacts。
 
 这些能力应在 V1 的 GUI session cockpit 稳定后作为 V2/V3 能力演进。
 
@@ -1413,8 +1411,7 @@ cancel
   "redactSecrets": true,
   "maxChunkChars": 4000,
   "requestTimeoutMs": 15000,
-  "temperature": 0.1,
-  "storeTranslationHistory": false
+  "temperature": 0.1
 }
 ```
 
@@ -1422,7 +1419,6 @@ cancel
 
 - `apiKey` 不出现在 repo-local JSON 示例和导出中。
 - API key 存在 local app config；后续可迁移到 OS keychain。
-- `storeTranslationHistory` 默认 `false`。
 - Settings 可以全局生效，后续再支持 project override。
 
 ### 11.10 TranslationEntry
@@ -1479,7 +1475,7 @@ status:
   preserved
 ```
 
-TranslationEntry 默认只存在 backend/front-end runtime memory 中，用于显示、retry 和 clear；除非用户明确开启 history，否则不写入 repo。
+TranslationEntry 默认只存在 backend/front-end runtime memory 中，用于显示、retry 和 clear；不写入 repo。
 
 ## 12. 核心工作流
 
@@ -1922,7 +1918,6 @@ V1 只做当前 repo working directory orchestration。
 - project-level glossary / prompt extension。
 - provider cost estimation。
 - local model / vLLM profiles。
-- translation history export with explicit user opt-in。
 
 ## 17. 实施顺序
 

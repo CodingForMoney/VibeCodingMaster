@@ -288,8 +288,6 @@ VCM 只借鉴现有轻量翻译工具中的这些产品策略：
 - 对输出做分类处理：自然语言翻译；代码、diff、日志、tool output、权限提示等默认保留原文或摘要，不做逐字误译。
 - 对已经是用户语言或 CJK 的内容直接跳过翻译，避免来回翻译损坏含义。
 
-VCM 不采用独立 TUI、`/i` slash command、文件桥接、跨项目 session picker 或 repo 内持久化翻译历史作为主路径。VCM 已经拥有 embedded terminal 和 backend runtime，因此翻译输入应由 VCM 直接写入当前 role pty，翻译输出只作为 GUI 辅助视图展示。
-
 这不是“让 Project Manager 承担翻译职责”。翻译是 VCM GUI/Backend 的辅助能力，由独立 Translation Provider 完成；Project Manager 仍专注需求澄清、任务拆分、角色调度和验收。
 
 ## 6. 核心概念
@@ -1098,8 +1096,6 @@ V1 中，Claude Code Adapter 主要通过 Terminal Runtime Manager 工作。
 - 不把翻译内容写入 handoff artifacts，除非用户或 PM 明确复制/引用。
 - 不翻译代码块、diff、stack trace、命令输出中的关键 token；默认保留原文并提供简短说明。
 - 不处理密码、secret、API key、private token 等敏感内容；检测到疑似敏感内容时跳过或脱敏。
-- 不使用 slash command 或文件桥接把用户输入交给 Claude Code；VCM 直接向当前 role pty 写入经过用户确认的英文输入。
-- 不依赖独立 TUI 或外部 watcher；Translation Panel 是 VCM Session Console 的一部分。
 
 推荐 chunk 策略：
 
@@ -1174,7 +1170,6 @@ redactSecrets
 maxChunkChars
 requestTimeoutMs
 temperature
-storeTranslationHistory
 ```
 
 默认建议：
@@ -1190,7 +1185,6 @@ contextEnabled: on
 preserveTechnicalTokens: on
 skipCjkText: on
 redactSecrets: on
-storeTranslationHistory: off
 temperature: 0.1
 ```
 
@@ -1208,7 +1202,7 @@ API key 处理：
 - `Estimate Cost` 或 token 使用提示。
 - `Reset`。
 - `Disable Translation`。
-- `Clear Translation History`。
+- `Clear Translation Panel`。
 - Prompt preview：展示内置 prompt 摘要和用户追加规则。
 
 ### 9.12 Cross-Model Reviewer
@@ -1479,7 +1473,7 @@ User focuses left terminal
 - 小屏幕下可以改为上下分栏：terminal 在上，translation panel 在下。
 - terminal 的 ANSI colors、光标、交互输入必须保持原样。
 - 翻译输出不能覆盖或遮挡 Claude Code terminal。
-- 关闭翻译时，terminal 恢复完整宽度；翻译历史可保留在内存中直到 session 关闭。
+- 关闭翻译时，terminal 恢复完整宽度；本次 Translation Panel entries 可保留到 session 关闭。
 
 ### 11.4 Handoff Files
 
@@ -1759,8 +1753,7 @@ VCM 不应隐藏角色间执行，也不应自动确认 Claude Code 权限提示
   "redactSecrets": true,
   "maxChunkChars": 4000,
   "requestTimeoutMs": 15000,
-  "temperature": 0.1,
-  "storeTranslationHistory": false
+  "temperature": 0.1
 }
 ```
 
@@ -1809,7 +1802,7 @@ summarized
 preserved
 ```
 
-默认情况下 Translation Entry 只保存在前端/本地运行态，用于显示和重试；除非用户开启 `storeTranslationHistory`，否则不写入 repo，也不进入 handoff artifacts。
+Translation Entry 只保存在前端/本地运行态，用于显示和重试；不写入 repo，也不进入 handoff artifacts。
 
 `sourceKind` 建议枚举：
 
@@ -1903,9 +1896,6 @@ V1 的核心判断标准不是“CLI 是否能控制多个终端”，而是：
 - 自动把翻译结果写入 handoff artifacts。
 - 在 raw terminal keystrokes 上做逐键翻译。
 - 自动翻译或外发密码、API key、token、secret。
-- 采用独立翻译 TUI 作为主交互。
-- 通过 slash command 或临时文件桥接来发送用户输入。
-- 把 repo 内翻译历史作为默认持久化数据。
 
 这些能力可以作为后续版本演进。V1 的判断标准不是“PM 流程是否全部自动化”，而是“GUI 是否让多 Claude Code role sessions 变得可见、可切换、可沟通、可恢复、可交接”。
 
@@ -2107,8 +2097,7 @@ CLI 可以保留为：
 - 默认生成 English preview，用户确认后发送给 Claude Code。
 - input translation 默认使用上一条 Claude Code 回复作为 context。
 - 支持 auto-send mode。
-- 支持 pause output translation、retry failed translation、clear history。
-- 默认不保存 translation history 到 repo。
+- 支持 pause output translation、retry failed translation、clear panel。
 
 ### Phase 6：后续增强
 
@@ -2225,7 +2214,7 @@ CLI 可以保留为：
 - 检测疑似 secret、token、password、private key 时跳过或脱敏。
 - API key 只保存在本机，不进 repo，不进 handoff artifacts。
 - 支持关闭 output translation，只使用 input translation。
-- 支持清除 translation history。
+- 支持清除 Translation Panel entries。
 
 ### 16.9 AI Review 不可靠
 

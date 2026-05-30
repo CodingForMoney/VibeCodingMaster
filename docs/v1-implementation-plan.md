@@ -62,8 +62,7 @@ V1 不实现：
 13. V1 不把每个 role 放到独立 worktree。同一任务默认共享当前 repo working directory。
 14. V1 默认遵守 single-writer rule，但主要通过流程提示、role status 和 review gate 实现，不做强制 sandbox。
 15. Translation Mode 只借鉴：OpenAI-compatible Provider、工程化 prompt、上一条回复上下文、FIFO queue、输出分类、CJK skip。
-16. Translation Mode 不采用独立 TUI、slash command、文件桥接或 repo 内默认翻译历史。
-17. 翻译失败不得影响 raw terminal、raw log、handoff artifacts 和 message bus。
+16. 翻译失败不得影响 raw terminal、raw log、handoff artifacts 和 message bus。
 
 ## 3. 技术选型
 
@@ -885,7 +884,6 @@ export interface TranslationSettings {
   maxChunkChars: number;
   requestTimeoutMs: number;
   temperature: number;
-  storeTranslationHistory: boolean;
 }
 
 export interface TranslationSecretSettings {
@@ -1855,7 +1853,7 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
 - 翻译成功的 prose chunk 更新该 role 的 `lastAssistantText`。
 - `translateUserInput` 在 `contextEnabled` 时使用 `lastAssistantText`，但只发送新输入给 provider。
 - `send: true` 时只写入当前 role session pty，不允许写入其他 role。
-- translation history 默认只存在内存；`storeTranslationHistory` 为 true 时才写本机 app data，不写 `.ai/handoffs`。
+- Translation Panel entries 只存在 runtime memory，不写 `.ai/handoffs`。
 
 ## 11. Backend API 层
 
@@ -2799,13 +2797,6 @@ TranslationPanel composer
   -> runtime.write(current role pty, english + "\r")
 ```
 
-约束：
-
-- 不使用 slash command。
-- 不写 `user-input.md` 文件桥。
-- 不要求用户切换到另一个 TUI。
-- 不把 translation history 默认写进 repo。
-
 ## 15. 测试计划
 
 ### 15.1 Unit Tests
@@ -3202,7 +3193,6 @@ V1 文件中可以预留类型或接口，但不实现完整功能：
 - `SessionPersistenceService`：后续增强 backend lifecycle、session registry 持久化、raw log replay 和恢复体验。
 - `DesktopShell`：后续用 Electron 或 Tauri 打包。
 - `PermissionHookManager`：后续生成 role-specific Claude Code permission hooks。
-- `TranslationHistoryExporter`：后续在用户显式选择时导出翻译历史。
 - `TranslationKeychainStore`：后续把 provider API key 放入 OS keychain。
 
 V1 的判断标准是：
