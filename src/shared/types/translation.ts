@@ -11,14 +11,14 @@ export type TranslationInputMode =
   | "auto-send";
 
 export type TranslationPromptKey =
-  | "user-input-to-english"
-  | "user-input-to-english-with-context"
-  | "cc-output-to-user";
+  | "zh-to-en"
+  | "zh-to-en-with-context"
+  | "en-to-zh";
 
 export const TRANSLATION_PROMPT_KEYS: readonly TranslationPromptKey[] = [
-  "user-input-to-english",
-  "user-input-to-english-with-context",
-  "cc-output-to-user"
+  "zh-to-en",
+  "zh-to-en-with-context",
+  "en-to-zh"
 ] as const;
 
 export type TranslationSourceKind =
@@ -124,9 +124,8 @@ export interface TranslationProviderTestResult {
 export interface TranslationPromptPreview {
   key: TranslationPromptKey;
   label: string;
-  baseSystemPrompt: string;
-  activeSystemPrompt: string;
-  userMessageTemplate: string;
+  defaultPrompt: string;
+  userPrompt: string;
   customized: boolean;
 }
 

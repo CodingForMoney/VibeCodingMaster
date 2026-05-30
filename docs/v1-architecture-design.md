@@ -656,7 +656,7 @@ terminal output:
 
 user-language input:
   Translation Panel composer
-    -> TranslationService user-input-to-english
+    -> TranslationService zh-to-en / zh-to-en-with-context prompt slot
     -> optional context from last assistant prose chunk
     -> English preview
     -> user confirms
@@ -1003,7 +1003,7 @@ interface TranslationProvider {
 上下文规则：
 
 - 只保留当前 role session 最近一条自然语言 output 作为 `lastAssistantText`。
-- 上下文只用于 user-input-to-english 消歧。
+- 上下文只用于 `zh-to-en-with-context` 消歧。
 - 上下文不能写入 Claude Code terminal。
 - 上下文不能进入 repo、handoff artifacts 或 raw logs。
 
@@ -1452,6 +1452,12 @@ cancel
 direction:
   user-input-to-english
   cc-output-to-user
+
+promptKey:
+  zh-to-en
+  zh-to-en-with-context
+  en-to-zh
+  en-to-zh
 
 sourceKind:
   prose
@@ -1915,7 +1921,7 @@ V1 只做当前 repo working directory orchestration。
 后续增强：
 
 - OS keychain integration。
-- project-level glossary / prompt extension。
+- project-level glossary。
 - provider cost estimation。
 - local model / vLLM profiles。
 

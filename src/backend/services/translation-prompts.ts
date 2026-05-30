@@ -30,16 +30,16 @@ const PRESERVE_RULES = `Preserve verbatim:
 Translate only the surrounding prose. Output only the requested translation or summary.`;
 
 const PROMPT_LABELS: Record<TranslationPromptKey, string> = {
-  "user-input-to-english": "User input -> English",
-  "user-input-to-english-with-context": "User input -> English with context",
-  "cc-output-to-user": "Claude Code output -> user language"
+  "zh-to-en": "zh-to-en",
+  "zh-to-en-with-context": "zh-to-en-with-context",
+  "en-to-zh": "en-to-zh"
 };
 
 export function buildTranslationPrompt(input: TranslationPromptInput): BuiltTranslationPrompt {
   const key = getTranslationPromptKey(input);
 
   if (input.direction === "user-input-to-english") {
-    if (key === "user-input-to-english-with-context") {
+    if (key === "zh-to-en-with-context") {
       return {
         systemPrompt: resolveTranslationSystemPrompt(key, input.settings),
         userPrompt: `[PRIOR CLAUDE CODE REPLY]\n${input.contextText}\n\n[NEW USER INPUT - translate only this]\n${input.text}`,
@@ -67,10 +67,10 @@ export function getTranslationPromptKey(input: {
 }): TranslationPromptKey {
   if (input.direction === "user-input-to-english") {
     return input.contextText?.trim()
-      ? "user-input-to-english-with-context"
-      : "user-input-to-english";
+      ? "zh-to-en-with-context"
+      : "zh-to-en";
   }
-  return "cc-output-to-user";
+  return "en-to-zh";
 }
 
 export function getBaseTranslationPrompt(
@@ -78,13 +78,13 @@ export function getBaseTranslationPrompt(
   settings: TranslationSettings,
   sourceKind: TranslationSourceKind = "prose"
 ): string {
-  if (key === "user-input-to-english") {
+  if (key === "zh-to-en") {
     return `You translate a developer's message for Claude Code into clear, concise, professional technical English.
 
 ${PRESERVE_RULES}`;
   }
 
-  if (key === "user-input-to-english-with-context") {
+  if (key === "zh-to-en-with-context") {
     return `You translate a developer's message for Claude Code into clear technical English.
 
 Use the prior Claude Code reply only to disambiguate references such as "continue", "that file", or "as you said".
@@ -126,33 +126,16 @@ export function resolveTranslationSystemPrompt(
 
 export function getTranslationPromptPreviews(settings: TranslationSettings): TranslationPromptPreview[] {
   return TRANSLATION_PROMPT_KEYS.map((key) => {
-    const baseSystemPrompt = getBaseTranslationPrompt(key, settings);
-    const activeSystemPrompt = resolveTranslationSystemPrompt(key, settings);
+    const defaultPrompt = getBaseTranslationPrompt(key, settings);
+    const userPrompt = settings.prompts?.[key]?.trim() ? settings.prompts[key] ?? "" : "";
     return {
       key,
       label: PROMPT_LABELS[key],
-      baseSystemPrompt,
-      activeSystemPrompt,
-      userMessageTemplate: getUserMessageTemplate(key),
-      customized: activeSystemPrompt !== baseSystemPrompt
+      defaultPrompt,
+      userPrompt,
+      customized: Boolean(userPrompt)
     };
   });
-}
-
-function getUserMessageTemplate(key: TranslationPromptKey): string {
-  if (key === "user-input-to-english-with-context") {
-    return `[PRIOR CLAUDE CODE REPLY]
-<last assistant reply>
-
-[NEW USER INPUT - translate only this]
-<user input>`;
-  }
-
-  if (key === "user-input-to-english") {
-    return "<user input>";
-  }
-
-  return "<Claude Code output chunk>";
 }
 
 export function parseTranslationWarning(raw: string): { warning?: string; text: string } {

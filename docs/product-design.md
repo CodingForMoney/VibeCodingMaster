@@ -420,8 +420,8 @@ Translation Assistant 有两种输入模式：
 
 翻译策略：
 
-- `user-input-to-english` 使用当前 role 的 recent assistant output 作为 context，但 context 只用于消歧，不能把旧回复内容混入新指令。
-- `cc-output-to-user` 必须先分类，再决定翻译、摘要、保留原文或跳过。
+- `zh-to-en-with-context` 使用当前 role 的 recent assistant output 作为 context，但 context 只用于消歧，不能把旧回复内容混入新指令。
+- `en-to-zh` 必须先分类，再决定翻译、摘要、保留原文或跳过。
 - `tool-output`、`code`、`diff`、`stack-trace`、`permission-prompt` 默认不逐字翻译。
 - 每个 role session 的 output translation queue concurrency 固定为 1。
 - 翻译失败只影响右侧 Translation Panel，不影响左侧 Claude Code terminal。
@@ -1133,10 +1133,11 @@ terminal output stream
 
 Prompt 策略：
 
-- 内置 `user-input-to-english` prompt，面向 Claude Code coding assistant 场景。
-- 内置 `user-input-to-english-with-context` prompt，包含上一条 Claude Code 回复和新输入，但要求模型只翻译新输入。
-- 内置 `cc-output-to-user` prompt，面向软件工程师阅读，保留 Markdown、代码、路径、命令、flag、错误信息和标识符。
-- 允许用户在设置中追加 prompt extension，但 V1 不鼓励完全替换内置 prompt。
+- 采用 `cc-pm` 风格的三个 prompt slot：`zh-to-en`、`zh-to-en-with-context`、`en-to-zh`。
+- `zh-to-en` 面向用户输入到 Claude Code 的英文工程指令。
+- `zh-to-en-with-context` 包含上一条 Claude Code 回复和新输入，但要求模型只翻译新输入。
+- `en-to-zh` 面向软件工程师阅读 Claude Code 输出，保留 Markdown、代码、路径、命令、flag、错误信息和标识符。
+- 每个 slot 支持一个 `User prompt (empty = use default)` 完整覆盖；同时展示 `Default prompt (read-only)`。
 - 如果模型返回可能误译或上下文不匹配的 warning，Translation Panel 必须进入 review-before-send 确认态。
 
 ### 9.11 Translation Provider Settings
@@ -1170,6 +1171,9 @@ redactSecrets
 maxChunkChars
 requestTimeoutMs
 temperature
+prompts.zh-to-en
+prompts.zh-to-en-with-context
+prompts.en-to-zh
 ```
 
 默认建议：
@@ -1203,7 +1207,7 @@ API key 处理：
 - `Reset`。
 - `Disable Translation`。
 - `Clear Translation Panel`。
-- Prompt preview：展示内置 prompt 摘要和用户追加规则。
+- Prompt settings：按 `zh-to-en`、`zh-to-en-with-context`、`en-to-zh` 三个 slot 展示用户 prompt 和默认 prompt。
 
 ### 9.12 Cross-Model Reviewer
 
@@ -1753,7 +1757,12 @@ VCM 不应隐藏角色间执行，也不应自动确认 Claude Code 权限提示
   "redactSecrets": true,
   "maxChunkChars": 4000,
   "requestTimeoutMs": 15000,
-  "temperature": 0.1
+  "temperature": 0.1,
+  "prompts": {
+    "zh-to-en": "",
+    "zh-to-en-with-context": "",
+    "en-to-zh": ""
+  }
 }
 ```
 

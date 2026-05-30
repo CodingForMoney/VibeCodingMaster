@@ -30,8 +30,8 @@ const settings: TranslationSettings = {
 
 describe("translation-prompts", () => {
   it("uses built-in prompts by default", () => {
-    expect(resolveTranslationSystemPrompt("user-input-to-english", settings)).toBe(
-      getBaseTranslationPrompt("user-input-to-english", settings)
+    expect(resolveTranslationSystemPrompt("zh-to-en", settings)).toBe(
+      getBaseTranslationPrompt("zh-to-en", settings)
     );
   });
 
@@ -39,7 +39,7 @@ describe("translation-prompts", () => {
     const overridden: TranslationSettings = {
       ...settings,
       prompts: {
-        "user-input-to-english": "CUSTOM PROMPT"
+        "zh-to-en": "CUSTOM PROMPT"
       }
     };
 
@@ -57,13 +57,13 @@ describe("translation-prompts", () => {
     const previews = getTranslationPromptPreviews({
       ...settings,
       prompts: {
-        "cc-output-to-user": "CUSTOM OUTPUT PROMPT"
+        "en-to-zh": "CUSTOM OUTPUT PROMPT"
       }
     });
 
-    const outputPreview = previews.find((preview) => preview.key === "cc-output-to-user");
-    expect(outputPreview?.baseSystemPrompt).toContain("Claude Code output");
-    expect(outputPreview?.activeSystemPrompt).toBe("CUSTOM OUTPUT PROMPT");
+    const outputPreview = previews.find((preview) => preview.key === "en-to-zh");
+    expect(outputPreview?.defaultPrompt).toContain("Claude Code output");
+    expect(outputPreview?.userPrompt).toBe("CUSTOM OUTPUT PROMPT");
     expect(outputPreview?.customized).toBe(true);
   });
 });

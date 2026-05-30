@@ -829,7 +829,8 @@ export type ApiResponse<T> = ApiSuccess<T> | ApiFailure;
 
 - 定义 Translation Mode 的 settings、entry、request、provider result 和 source classification。
 - 支持 OpenAI-compatible 便宜模型配置。
-- 支持 user-input-to-english 和 cc-output-to-user 两个方向。
+- 支持 `user-input-to-english` 和 `cc-output-to-user` 两个 runtime direction。
+- 支持 `zh-to-en`、`zh-to-en-with-context`、`en-to-zh` 三个 cc-pm 风格 prompt slot。
 
 导出定义：
 
@@ -1728,9 +1729,9 @@ export function createStatusService(deps: StatusServiceDeps): StatusService;
 
 ```ts
 export type TranslationPromptKey =
-  | "user-input-to-english"
-  | "user-input-to-english-with-context"
-  | "cc-output-to-user";
+  | "zh-to-en"
+  | "zh-to-en-with-context"
+  | "en-to-zh";
 
 export interface TranslationPromptInput {
   key: TranslationPromptKey;
@@ -1753,7 +1754,8 @@ export function parseTranslationWarning(raw: string): { warning?: string; text: 
 
 - with-context prompt 必须明确：context 只用于消歧，只翻译 new user input。
 - output prompt 必须根据 `sourceKind` 要求模型保留技术 token。
-- V1 可以支持 prompt extension，但不把完全自定义 prompt 作为主 UI。
+- 设置页必须按 `cc-pm` 风格展示三个 prompt slot：`zh-to-en`、`zh-to-en-with-context`、`en-to-zh`。
+- 每个 slot 提供 `User prompt (empty = use default)` 和 `Default prompt (read-only)`。
 
 ### 10.10 `src/backend/services/translation-queue.ts`
 
@@ -2789,7 +2791,7 @@ node-pty output event
 TranslationPanel composer
   -> api.translateUserInput({ text, useContext: true, send: false })
   -> translationService.translateUserInput
-  -> buildTranslationPrompt(user-input-to-english-with-context)
+  -> buildTranslationPrompt(zh-to-en-with-context)
   -> provider.translate
   -> English preview
   -> user clicks Send English

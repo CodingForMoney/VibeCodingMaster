@@ -567,12 +567,30 @@ function normalizePromptMap(
 
   const prompts: TranslationSettings["prompts"] = {};
   for (const [key, value] of Object.entries(input)) {
-    if (TRANSLATION_PROMPT_KEYS.includes(key as TranslationPromptKey) && typeof value === "string" && value.trim()) {
-      prompts[key as TranslationPromptKey] = value;
+    const normalizedKey = normalizePromptKey(key);
+    if (normalizedKey && typeof value === "string" && value.trim()) {
+      prompts[normalizedKey] = value;
     }
   }
 
   return Object.keys(prompts).length > 0 ? prompts : undefined;
+}
+
+function normalizePromptKey(key: string): TranslationPromptKey | undefined {
+  if (TRANSLATION_PROMPT_KEYS.includes(key as TranslationPromptKey)) {
+    return key as TranslationPromptKey;
+  }
+
+  if (key === "user-input-to-english") {
+    return "zh-to-en";
+  }
+  if (key === "user-input-to-english-with-context") {
+    return "zh-to-en-with-context";
+  }
+  if (key === "cc-output-to-user") {
+    return "en-to-zh";
+  }
+  return undefined;
 }
 
 function clampNumber(value: unknown, min: number, max: number, fallback: number): number {

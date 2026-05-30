@@ -28,7 +28,7 @@ export function TranslationSettingsModal({
 }: TranslationSettingsModalProps) {
   const [draft, setDraft] = useState(settings);
   const [apiKey, setApiKey] = useState("");
-  const [selectedPromptKey, setSelectedPromptKey] = useState<TranslationPromptKey>("user-input-to-english");
+  const [selectedPromptKey, setSelectedPromptKey] = useState<TranslationPromptKey>("zh-to-en");
 
   useEffect(() => {
     setDraft(settings);
@@ -36,9 +36,6 @@ export function TranslationSettingsModal({
 
   const selectedPromptPreview = promptPreviews.find((preview) => preview.key === selectedPromptKey);
   const customPrompt = draft.prompts?.[selectedPromptKey] ?? "";
-  const activePrompt = customPrompt.trim()
-    ? customPrompt
-    : selectedPromptPreview?.baseSystemPrompt ?? "";
 
   return (
     <div className="modal-backdrop">
@@ -165,7 +162,7 @@ export function TranslationSettingsModal({
           <header>
             <div>
               <h3>Translation Prompts</h3>
-              <p>Customize or inspect the prompt sent to the translation model.</p>
+              <p>cc-pm style prompt slots: zh-to-en, zh-to-en-with-context, en-to-zh.</p>
             </div>
             <label>
               <span>Prompt slot</span>
@@ -181,33 +178,23 @@ export function TranslationSettingsModal({
             </label>
           </header>
 
-          <label>
-            <span>Custom prompt override</span>
-            <textarea
-              value={customPrompt}
-              onChange={(event) => setDraft({
-                ...draft,
-                prompts: updatePromptOverride(draft.prompts, selectedPromptKey, event.target.value)
-              })}
-              placeholder="Leave blank to use the built-in prompt."
-            />
-          </label>
-
-          <div className="translation-prompt-preview-grid">
+          <div className="translation-prompt-editor-grid">
             <label>
-              <span>Active system prompt</span>
-              <textarea readOnly value={activePrompt} />
+              <span>User prompt (empty = use default)</span>
+              <textarea
+                value={customPrompt}
+                onChange={(event) => setDraft({
+                  ...draft,
+                  prompts: updatePromptOverride(draft.prompts, selectedPromptKey, event.target.value)
+                })}
+                placeholder="Leave blank to use the default prompt."
+              />
             </label>
             <label>
-              <span>Built-in system prompt</span>
-              <textarea readOnly value={selectedPromptPreview?.baseSystemPrompt ?? ""} />
+              <span>Default prompt (read-only)</span>
+              <textarea readOnly value={selectedPromptPreview?.defaultPrompt ?? ""} />
             </label>
           </div>
-
-          <label>
-            <span>User message template</span>
-            <textarea readOnly value={selectedPromptPreview?.userMessageTemplate ?? ""} />
-          </label>
 
           <button
             type="button"

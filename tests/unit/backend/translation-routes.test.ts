@@ -99,11 +99,10 @@ describe("translation routes", () => {
         },
         async getPromptPreviews() {
           return [{
-            key: "user-input-to-english",
-            label: "User input -> English",
-            baseSystemPrompt: "BASE",
-            activeSystemPrompt: "ACTIVE",
-            userMessageTemplate: "<user input>",
+            key: "zh-to-en",
+            label: "zh-to-en",
+            defaultPrompt: "DEFAULT",
+            userPrompt: "USER",
             customized: true
           }];
         },
@@ -131,11 +130,10 @@ describe("translation routes", () => {
 
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual([{
-      key: "user-input-to-english",
-      label: "User input -> English",
-      baseSystemPrompt: "BASE",
-      activeSystemPrompt: "ACTIVE",
-      userMessageTemplate: "<user input>",
+      key: "zh-to-en",
+      label: "zh-to-en",
+      defaultPrompt: "DEFAULT",
+      userPrompt: "USER",
       customized: true
     }]);
     await app.close();

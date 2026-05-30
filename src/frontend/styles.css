@@ -742,7 +742,7 @@ h2 {
   font-size: 12px;
 }
 
-.translation-prompt-preview-grid {
+.translation-prompt-editor-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
@@ -1021,7 +1021,7 @@ h2 {
 
   .session-console-body.has-translation,
   .translation-settings-grid,
-  .translation-prompt-preview-grid {
+  .translation-prompt-editor-grid {
     grid-template-columns: 1fr;
   }
 

@@ -79,18 +79,17 @@ describe("apiClient", () => {
 
   it("loads translation prompt previews", async () => {
     const fetchMock = mockFetch([{
-      key: "user-input-to-english",
-      label: "User input -> English",
-      baseSystemPrompt: "BASE",
-      activeSystemPrompt: "ACTIVE",
-      userMessageTemplate: "<user input>",
+      key: "zh-to-en",
+      label: "zh-to-en",
+      defaultPrompt: "DEFAULT",
+      userPrompt: "USER",
       customized: true
     }]);
 
     const prompts = await apiClient.getTranslationPrompts();
 
     expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/translation/prompts");
-    expect(prompts[0]?.activeSystemPrompt).toBe("ACTIVE");
+    expect(prompts[0]?.userPrompt).toBe("USER");
   });
 });
 
