@@ -16,8 +16,6 @@ import type {
 import { TRANSLATION_PROMPT_KEYS } from "../../shared/types/translation.js";
 import {
   classifyTranslationChunk,
-  shouldPreserveSourceKind,
-  shouldSummarizeSourceKind,
   shouldTranslateSourceKind
 } from "../../shared/validation/translation-classifier.js";
 import type { TranslationProvider } from "../adapters/translation-provider.js";
@@ -72,6 +70,7 @@ interface StoredTranslationConfig {
 interface SessionState {
   listeners: Set<TranslationEventListener>;
   unsubscribeRuntime?: Unsubscribe;
+  hasReplayedRuntimeOutput: boolean;
   buffer: string;
   flushTimer?: ReturnType<typeof setTimeout>;
   entries: TranslationEntry[];
@@ -138,6 +137,7 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
     if (!state) {
       state = {
         listeners: new Set(),
+        hasReplayedRuntimeOutput: false,
         buffer: "",
         entries: []
       };
@@ -201,6 +201,14 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
 
     const { settings, secrets } = await loadConfig();
     const classified = classifyTranslationChunk(rawText, settings.targetLanguage);
+    if (classified.sourceKind === "sensitive" || classified.sourceKind === "already-target-language") {
+      return;
+    }
+
+    if (!shouldTranslateSourceKind(classified.sourceKind)) {
+      return;
+    }
+
     const baseEntry = createEntry({
       taskSlug: session.taskSlug,
       role: session.role,
@@ -212,62 +220,18 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
       contextUsed: false
     });
 
-    if (classified.sourceKind === "sensitive") {
-      completeEntry(sessionId, {
-        ...baseEntry,
-        status: "redacted",
-        translatedText: "[redacted sensitive output]",
-        completedAt: now()
-      });
-      return;
-    }
-
-    if (classified.sourceKind === "already-target-language") {
-      completeEntry(sessionId, {
-        ...baseEntry,
-        status: "skipped",
-        translatedText: classified.text,
-        completedAt: now()
-      });
-      return;
-    }
-
-    if (shouldPreserveSourceKind(classified.sourceKind)) {
-      completeEntry(sessionId, {
-        ...baseEntry,
-        status: "preserved",
-        translatedText: classified.text,
-        completedAt: now()
-      });
-      return;
-    }
-
-    if (shouldSummarizeSourceKind(classified.sourceKind)) {
-      completeEntry(sessionId, {
-        ...baseEntry,
-        status: "summarized",
-        translatedText: summarizeLocally(classified.text, classified.sourceKind),
-        completedAt: now()
-      });
-      return;
-    }
-
-    if (!shouldTranslateSourceKind(classified.sourceKind)) {
-      completeEntry(sessionId, {
-        ...baseEntry,
-        status: "preserved",
-        translatedText: classified.text,
-        completedAt: now()
-      });
-      return;
-    }
-
-    const runningEntry = { ...baseEntry, status: "translating" as TranslationStatus };
-    pushEntry(sessionId, runningEntry);
-    emit(sessionId, { type: "translation-status", status: "translating" });
+    pushEntry(sessionId, baseEntry);
 
     const queue = queues.getQueue(sessionId);
     await queue.enqueue(async () => {
+      const translatingEntry = {
+        ...baseEntry,
+        status: "translating" as TranslationStatus,
+        translationStartedAt: now()
+      };
+      replaceEntry(sessionId, translatingEntry);
+      emit(sessionId, { type: "translation-status", status: "translating" });
+
       try {
         const prompt = buildTranslationPrompt({
           direction: "cc-output-to-user",
@@ -282,7 +246,7 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
           userPrompt: prompt.userPrompt
         });
         const completed = {
-          ...runningEntry,
+          ...translatingEntry,
           status: "translated" as TranslationStatus,
           translatedText: result.text,
           completedAt: now(),
@@ -293,7 +257,7 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
         emit(sessionId, { type: "translation-status", status: "ready" });
       } catch (error) {
         const failed = {
-          ...runningEntry,
+          ...translatingEntry,
           status: "failed" as TranslationStatus,
           error: error instanceof Error ? error.message : "Translation failed.",
           completedAt: now()
@@ -313,11 +277,6 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
     const state = getState(sessionId);
     state.entries = state.entries.map((current) => current.id === entry.id ? entry : current);
     emit(sessionId, { type: "translation-entry", entry });
-  }
-
-  function completeEntry(sessionId: string, entry: TranslationEntry): void {
-    pushEntry(sessionId, entry);
-    emit(sessionId, { type: "translation-status", status: "ready" });
   }
 
   function createEntry(input: {
@@ -482,11 +441,13 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
       }
 
       if (!state.unsubscribeRuntime) {
+        const replay = !state.hasReplayedRuntimeOutput;
+        state.hasReplayedRuntimeOutput = true;
         state.unsubscribeRuntime = deps.runtime.subscribe(sessionId, (event) => {
           if (event.type === "output" && event.data) {
             void handleOutput(sessionId, event.data);
           }
-        }, { replay: false });
+        }, { replay });
       }
 
       void loadConfig().then(({ settings }) => {
@@ -608,13 +569,6 @@ function clampNumber(value: unknown, min: number, max: number, fallback: number)
     return fallback;
   }
   return Math.min(max, Math.max(min, value));
-}
-
-function summarizeLocally(text: string, sourceKind: TranslationSourceKind): string {
-  const lines = text.split("\n").filter((line) => line.trim());
-  const shown = lines.slice(0, 6).join("\n");
-  const suffix = lines.length > 6 ? `\n... +${lines.length - 6} lines preserved` : "";
-  return `[${sourceKind} preserved]\n${shown}${suffix}`;
 }
 
 function normalizeTranslationError(error: unknown): string {

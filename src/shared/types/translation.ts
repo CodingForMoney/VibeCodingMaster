@@ -90,6 +90,7 @@ export interface TranslationEntry {
   warning?: string;
   error?: string;
   createdAt: string;
+  translationStartedAt?: string;
   completedAt?: string;
   provider: TranslationProviderType;
   model: string;

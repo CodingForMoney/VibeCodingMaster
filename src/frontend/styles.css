@@ -655,6 +655,11 @@ h2 {
   margin-bottom: 6px;
 }
 
+.translation-timer {
+  color: #7a5f0f;
+  font-variant-numeric: tabular-nums;
+}
+
 .translation-entry pre {
   margin: 0 0 6px;
   max-height: 180px;

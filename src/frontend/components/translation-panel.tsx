@@ -232,11 +232,28 @@ export function TranslationPanel({ taskSlug, role, sessionId }: TranslationPanel
 
 function TranslationEntryRow({ entry, onRetry }: { entry: TranslationEntry; onRetry?: () => void }) {
   const [expanded, setExpanded] = useState(false);
+  const [nowMs, setNowMs] = useState(Date.now());
+
+  useEffect(() => {
+    if (entry.status !== "translating" || !entry.translationStartedAt) {
+      return;
+    }
+
+    setNowMs(Date.now());
+    const interval = window.setInterval(() => setNowMs(Date.now()), 250);
+    return () => window.clearInterval(interval);
+  }, [entry.status, entry.translationStartedAt]);
+
+  const elapsedMs = entry.status === "translating" && entry.translationStartedAt
+    ? Math.max(0, nowMs - Date.parse(entry.translationStartedAt))
+    : undefined;
+
   return (
     <article className={`translation-entry is-${entry.sourceKind}`}>
       <div className="translation-entry-meta">
         <span>{entry.sourceKind}</span>
         <StatusBadge status={entry.status} />
+        {elapsedMs !== undefined ? <span className="translation-timer">translating {formatElapsed(elapsedMs)}</span> : null}
         {entry.contextUsed ? <span>context</span> : null}
       </div>
       {entry.warning ? <p className="translation-warning">{entry.warning}</p> : null}
@@ -257,4 +274,19 @@ function upsertEntry(entries: TranslationEntry[], entry: TranslationEntry): Tran
     return [...entries, entry];
   }
   return entries.map((current) => current.id === entry.id ? entry : current);
+}
+
+function formatElapsed(elapsedMs: number): string {
+  if (elapsedMs < 1000) {
+    return `${Math.max(0.1, elapsedMs / 1000).toFixed(1)}s`;
+  }
+
+  const seconds = elapsedMs / 1000;
+  if (seconds < 60) {
+    return `${seconds.toFixed(1)}s`;
+  }
+
+  const minutes = Math.floor(seconds / 60);
+  const remainder = Math.floor(seconds % 60).toString().padStart(2, "0");
+  return `${minutes}:${remainder}`;
 }

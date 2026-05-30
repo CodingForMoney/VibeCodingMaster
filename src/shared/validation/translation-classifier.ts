@@ -7,11 +7,46 @@ export interface ClassifiedTranslationChunk {
   reason?: string;
 }
 
-const ANSI_PATTERN = /\u001b\[[0-?]*[ -/]*[@-~]/g;
+const CSI_ANSI_PATTERN = /(?:\u001b\[|\u009b)[0-?]*[ -/]*[@-~]/g;
+const OSC_ANSI_PATTERN = /\u001b\][^\u0007]*(?:\u0007|\u001b\\)/g;
+const SIMPLE_ESCAPE_PATTERN = /\u001b[=>M78]|\u001b[()][A-Za-z0-9]/g;
 const SECRET_PATTERN = /\b(?:sk-[A-Za-z0-9_-]{20,}|[A-Za-z0-9_]*(?:TOKEN|SECRET|PASSWORD|API_KEY)[A-Za-z0-9_]*\s*=\s*\S+|-----BEGIN [A-Z ]*PRIVATE KEY-----)\b/i;
 
 export function stripAnsiForTranslation(value: string): string {
-  return value.replace(ANSI_PATTERN, "").replace(/\r/g, "");
+  let text = value
+    .replace(OSC_ANSI_PATTERN, "")
+    .replace(CSI_ANSI_PATTERN, "")
+    .replace(SIMPLE_ESCAPE_PATTERN, "")
+    .replace(/\r\n/g, "\n")
+    .replace(/\r/g, "\n");
+
+  while (/[^\n]\u0008/.test(text)) {
+    text = text.replace(/[^\n]\u0008/g, "");
+  }
+
+  return text.replace(/\u0008/g, "");
+}
+
+export function cleanClaudeOutputForTranslation(value: string): string {
+  const lines = stripAnsiForTranslation(value).split("\n");
+  const kept: string[] = [];
+
+  for (const rawLine of lines) {
+    const line = rawLine.replace(/[ \t]+$/g, "");
+    const trimmed = line.trim();
+    if (!trimmed) {
+      appendBlankLine(kept);
+      continue;
+    }
+
+    if (isClaudeCodeNoiseLine(trimmed)) {
+      continue;
+    }
+
+    kept.push(unboxClaudeCodeLine(line));
+  }
+
+  return collapseBlankLines(kept).trim();
 }
 
 export function containsSensitiveToken(value: string): boolean {
@@ -19,7 +54,7 @@ export function containsSensitiveToken(value: string): boolean {
 }
 
 export function classifyTranslationChunk(value: string, targetLanguage: string): ClassifiedTranslationChunk {
-  const text = stripAnsiForTranslation(value).trim();
+  const text = cleanClaudeOutputForTranslation(value);
   if (!text) {
     return { sourceKind: "already-target-language", text, reason: "empty" };
   }
@@ -105,10 +140,70 @@ function isStackTraceOrError(text: string): boolean {
 
 function isLogLike(text: string): boolean {
   const lines = text.split("\n").filter((line) => line.trim());
-  if (lines.length >= 8) {
+  const logLikeLines = lines.filter((line) =>
+    /^\[[^\]]+\]|\d{4}-\d{2}-\d{2}|^\s*(?:PASS|FAIL|WARN|INFO|DEBUG|ERROR)\b/.test(line)
+  );
+  if (logLikeLines.length >= 2) {
     return true;
   }
 
-  return lines.length >= 3 && lines.some((line) => /^\[[^\]]+\]|\d{4}-\d{2}-\d{2}|^\s*(?:PASS|FAIL|WARN|INFO|DEBUG)\b/.test(line));
+  return lines.length >= 8 && logLikeLines.length / lines.length >= 0.25;
 }
 
+function appendBlankLine(lines: string[]): void {
+  if (lines.length > 0 && lines[lines.length - 1] !== "") {
+    lines.push("");
+  }
+}
+
+function collapseBlankLines(lines: string[]): string {
+  const collapsed: string[] = [];
+  for (const line of lines) {
+    if (!line.trim() && (!collapsed.length || !collapsed[collapsed.length - 1]?.trim())) {
+      continue;
+    }
+    collapsed.push(line);
+  }
+  return collapsed.join("\n");
+}
+
+function isClaudeCodeNoiseLine(trimmed: string): boolean {
+  const unboxed = trimmed.replace(/^[│┃|]\s*/u, "").replace(/\s*[│┃|]$/u, "").trim();
+  if (isBoxDrawingLine(trimmed)) {
+    return true;
+  }
+
+  if (/^(?:[●⏺]\s*)?(?:Bash|Read|Edit|Write|Grep|Glob|LS|Task|TodoWrite|MultiEdit|NotebookEdit|WebFetch|WebSearch)\(/i.test(unboxed)) {
+    return true;
+  }
+
+  if (/^⎿/.test(unboxed)) {
+    return true;
+  }
+
+  if (/^(?:esc to interrupt|ctrl-c|shift\+tab|accept edits|auto-accept|edit permissions)/i.test(unboxed)) {
+    return true;
+  }
+
+  if (/^>\s*$/.test(unboxed)) {
+    return true;
+  }
+
+  if (/^(?:[✻✽✢·*]\s*)?(?:Working|Thinking|Reading|Writing|Searching|Loading|Compiling|Checking|Running|Updating)\.{0,3}$/i.test(unboxed)) {
+    return true;
+  }
+
+  return false;
+}
+
+function isBoxDrawingLine(trimmed: string): boolean {
+  return /^[╭╮╰╯─│┌┐└┘├┤┬┴┼═║╔╗╚╝╠╣╦╩╬\s]+$/.test(trimmed);
+}
+
+function unboxClaudeCodeLine(line: string): string {
+  if (!/^\s*[│┃]/u.test(line) && !/[│┃]\s*$/u.test(line)) {
+    return line;
+  }
+
+  return line.trim().replace(/^[│┃]\s*/u, "").replace(/\s*[│┃]$/u, "");
+}
