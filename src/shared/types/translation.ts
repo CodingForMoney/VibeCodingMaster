@@ -10,6 +10,17 @@ export type TranslationInputMode =
   | "review-before-send"
   | "auto-send";
 
+export type TranslationPromptKey =
+  | "user-input-to-english"
+  | "user-input-to-english-with-context"
+  | "cc-output-to-user";
+
+export const TRANSLATION_PROMPT_KEYS: readonly TranslationPromptKey[] = [
+  "user-input-to-english",
+  "user-input-to-english-with-context",
+  "cc-output-to-user"
+] as const;
+
 export type TranslationSourceKind =
   | "prose"
   | "code"
@@ -50,6 +61,7 @@ export interface TranslationSettings {
   maxChunkChars: number;
   requestTimeoutMs: number;
   temperature: number;
+  prompts?: Partial<Record<TranslationPromptKey, string>>;
 }
 
 export interface TranslationSecretSettings {
@@ -109,8 +121,16 @@ export interface TranslationProviderTestResult {
   error?: string;
 }
 
+export interface TranslationPromptPreview {
+  key: TranslationPromptKey;
+  label: string;
+  baseSystemPrompt: string;
+  activeSystemPrompt: string;
+  userMessageTemplate: string;
+  customized: boolean;
+}
+
 export type TranslationWsMessage =
   | { type: "translation-entry"; entry: TranslationEntry }
   | { type: "translation-status"; status: "ready" | "paused" | "translating" | "failed" }
   | { type: "translation-error"; id?: string; message: string };
-

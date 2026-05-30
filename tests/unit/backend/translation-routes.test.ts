@@ -45,6 +45,9 @@ describe("translation routes", () => {
           savedSecrets = secrets;
           return { ...settings, ...input };
         },
+        async getPromptPreviews() {
+          return [];
+        },
         async testProvider() {
           return { ok: true, model: settings.model, elapsedMs: 1 };
         },
@@ -78,6 +81,63 @@ describe("translation routes", () => {
       model: "cheap-translator"
     });
     expect(savedSecrets).toEqual({ apiKey: "sk-local-test" });
+    await app.close();
+  });
+
+  it("returns prompt previews without requiring a connected project", async () => {
+    const app = Fastify({ logger: false });
+
+    registerTranslationRoutes(app, {
+      projectService: createProjectServiceThatShouldNotBeCalled(),
+      taskService: {} as TaskService,
+      translationService: {
+        async getSettings() {
+          return settings;
+        },
+        async updateSettings() {
+          return settings;
+        },
+        async getPromptPreviews() {
+          return [{
+            key: "user-input-to-english",
+            label: "User input -> English",
+            baseSystemPrompt: "BASE",
+            activeSystemPrompt: "ACTIVE",
+            userMessageTemplate: "<user input>",
+            customized: true
+          }];
+        },
+        async testProvider() {
+          return { ok: true, model: settings.model, elapsedMs: 1 };
+        },
+        async translateUserInput() {
+          throw new Error("not implemented");
+        },
+        async sendTranslatedInput() {},
+        subscribeToSession() {
+          throw new Error("not implemented");
+        },
+        clearSession() {},
+        async retryTranslation() {
+          throw new Error("not implemented");
+        }
+      } satisfies TranslationService
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/translation/prompts"
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toEqual([{
+      key: "user-input-to-english",
+      label: "User input -> English",
+      baseSystemPrompt: "BASE",
+      activeSystemPrompt: "ACTIVE",
+      userMessageTemplate: "<user input>",
+      customized: true
+    }]);
     await app.close();
   });
 });

@@ -712,6 +712,42 @@ h2 {
   justify-content: space-between;
 }
 
+.translation-prompt-settings {
+  display: grid;
+  gap: 10px;
+  border-top: 1px solid #ece5d9;
+  padding-top: 12px;
+}
+
+.translation-prompt-settings header {
+  display: flex;
+  gap: 10px;
+  align-items: end;
+  justify-content: space-between;
+}
+
+.translation-prompt-settings h3,
+.translation-prompt-settings p {
+  margin-bottom: 0;
+}
+
+.translation-prompt-settings h3 {
+  font-size: 13px;
+}
+
+.translation-prompt-settings textarea {
+  min-height: 120px;
+  max-height: 260px;
+  font-family: Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+}
+
+.translation-prompt-preview-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
 .translation-settings-modal h2,
 .translation-settings-modal p {
   margin-bottom: 0;
@@ -734,7 +770,8 @@ h2 {
   font-weight: 650;
 }
 
-.translation-settings-grid select {
+.translation-settings-grid select,
+.translation-prompt-settings select {
   min-height: 34px;
   border: 1px solid #b9b0a1;
   border-radius: 6px;
@@ -983,7 +1020,8 @@ h2 {
   }
 
   .session-console-body.has-translation,
-  .translation-settings-grid {
+  .translation-settings-grid,
+  .translation-prompt-preview-grid {
     grid-template-columns: 1fr;
   }
 

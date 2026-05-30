@@ -6,6 +6,8 @@ import type {
   TranslateUserInputRequest,
   TranslateUserInputResult,
   TranslationEntry,
+  TranslationPromptKey,
+  TranslationPromptPreview,
   TranslationProviderTestResult,
   TranslationSecretSettings,
   TranslationSettings,
@@ -13,6 +15,7 @@ import type {
   TranslationStatus,
   TranslationWsMessage
 } from "../../shared/types/translation.js";
+import { TRANSLATION_PROMPT_KEYS } from "../../shared/types/translation.js";
 import {
   classifyTranslationChunk,
   shouldPreserveSourceKind,
@@ -25,12 +28,13 @@ import { TranslationProviderError } from "../adapters/translation-provider.js";
 import { VcmError } from "../errors.js";
 import type { TerminalRuntime, Unsubscribe } from "../runtime/terminal-runtime.js";
 import type { SessionService } from "./session-service.js";
-import { buildTranslationPrompt, parseTranslationWarning } from "./translation-prompts.js";
+import { buildTranslationPrompt, getTranslationPromptPreviews, parseTranslationWarning } from "./translation-prompts.js";
 import { createTranslationQueueRegistry } from "./translation-queue.js";
 
 export interface TranslationService {
   getSettings(): Promise<TranslationSettings>;
   updateSettings(input: Partial<TranslationSettings>, secrets?: TranslationSecretSettings): Promise<TranslationSettings>;
+  getPromptPreviews(): Promise<TranslationPromptPreview[]>;
   testProvider(): Promise<TranslationProviderTestResult>;
   translateUserInput(input: TranslateUserInputServiceInput): Promise<TranslateUserInputResult>;
   sendTranslatedInput(input: SendTranslatedInputServiceInput): Promise<void>;
@@ -359,6 +363,10 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
       await saveConfig(next);
       return next.settings;
     },
+    async getPromptPreviews() {
+      const { settings } = await loadConfig();
+      return getTranslationPromptPreviews(settings);
+    },
     async testProvider() {
       const { settings, secrets } = await loadConfig();
       return deps.provider.testConnection(settings, secrets);
@@ -545,8 +553,26 @@ function normalizeSettings(input: Partial<TranslationSettings>): TranslationSett
     workingLanguage: "en",
     maxChunkChars: clampNumber(input.maxChunkChars, 500, 12000, DEFAULT_SETTINGS.maxChunkChars),
     requestTimeoutMs: clampNumber(input.requestTimeoutMs, 3000, 120000, DEFAULT_SETTINGS.requestTimeoutMs),
-    temperature: clampNumber(input.temperature, 0, 1, DEFAULT_SETTINGS.temperature)
+    temperature: clampNumber(input.temperature, 0, 1, DEFAULT_SETTINGS.temperature),
+    prompts: normalizePromptMap(input.prompts)
   };
+}
+
+function normalizePromptMap(
+  input: TranslationSettings["prompts"]
+): TranslationSettings["prompts"] {
+  if (!input || typeof input !== "object") {
+    return undefined;
+  }
+
+  const prompts: TranslationSettings["prompts"] = {};
+  for (const [key, value] of Object.entries(input)) {
+    if (TRANSLATION_PROMPT_KEYS.includes(key as TranslationPromptKey) && typeof value === "string" && value.trim()) {
+      prompts[key as TranslationPromptKey] = value;
+    }
+  }
+
+  return Object.keys(prompts).length > 0 ? prompts : undefined;
 }
 
 function clampNumber(value: unknown, min: number, max: number, fallback: number): number {

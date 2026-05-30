@@ -27,6 +27,10 @@ export function registerTranslationRoutes(app: FastifyInstance, deps: Translatio
     return deps.translationService.updateSettings(settings, apiKey !== undefined ? { apiKey } : undefined);
   });
 
+  app.get("/api/translation/prompts", async () => {
+    return deps.translationService.getPromptPreviews();
+  });
+
   app.post("/api/translation/test", async () => {
     return deps.translationService.testProvider();
   });

@@ -76,6 +76,22 @@ describe("apiClient", () => {
     });
     expect(new Headers(init?.headers).get("content-type")).toBe("application/json");
   });
+
+  it("loads translation prompt previews", async () => {
+    const fetchMock = mockFetch([{
+      key: "user-input-to-english",
+      label: "User input -> English",
+      baseSystemPrompt: "BASE",
+      activeSystemPrompt: "ACTIVE",
+      userMessageTemplate: "<user input>",
+      customized: true
+    }]);
+
+    const prompts = await apiClient.getTranslationPrompts();
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/translation/prompts");
+    expect(prompts[0]?.activeSystemPrompt).toBe("ACTIVE");
+  });
 });
 
 function mockFetch(payload: unknown) {

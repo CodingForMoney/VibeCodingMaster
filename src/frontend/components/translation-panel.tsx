@@ -3,6 +3,7 @@ import type { RoleName } from "../../shared/types/role.js";
 import type {
   TranslateUserInputResult,
   TranslationEntry,
+  TranslationPromptPreview,
   TranslationSettings,
   TranslationWsMessage
 } from "../../shared/types/translation.js";
@@ -26,13 +27,18 @@ export function TranslationPanel({ taskSlug, role, sessionId }: TranslationPanel
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [showSettings, setShowSettings] = useState(false);
+  const [promptPreviews, setPromptPreviews] = useState<TranslationPromptPreview[]>([]);
   const [testResult, setTestResult] = useState<Awaited<ReturnType<typeof apiClient.testTranslationProvider>> | undefined>();
   const bottomRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
-    void apiClient.getTranslationSettings()
-      .then((next) => {
+    void Promise.all([
+      apiClient.getTranslationSettings(),
+      apiClient.getTranslationPrompts()
+    ])
+      .then(([next, previews]) => {
         setSettings(next);
+        setPromptPreviews(previews);
         if (!next.enabled) {
           setShowSettings(true);
         }
@@ -110,7 +116,9 @@ export function TranslationPanel({ taskSlug, role, sessionId }: TranslationPanel
     setError("");
     try {
       const saved = await apiClient.updateTranslationSettings({ ...next, ...(apiKey ? { apiKey } : {}) });
+      const previews = await apiClient.getTranslationPrompts();
       setSettings(saved);
+      setPromptPreviews(previews);
       setShowSettings(false);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Failed to save translation settings.");
@@ -211,6 +219,7 @@ export function TranslationPanel({ taskSlug, role, sessionId }: TranslationPanel
         <TranslationSettingsModal
           settings={settings}
           busy={busy}
+          promptPreviews={promptPreviews}
           testResult={testResult}
           onSave={saveSettings}
           onTest={testProvider}
@@ -249,4 +258,3 @@ function upsertEntry(entries: TranslationEntry[], entry: TranslationEntry): Tran
   }
   return entries.map((current) => current.id === entry.id ? entry : current);
 }
-

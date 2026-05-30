@@ -1,12 +1,16 @@
 import { useEffect, useState } from "react";
 import type {
+  TranslationPromptKey,
+  TranslationPromptPreview,
   TranslationProviderTestResult,
   TranslationSettings
 } from "../../shared/types/translation.js";
+import { TRANSLATION_PROMPT_KEYS } from "../../shared/types/translation.js";
 
 export interface TranslationSettingsModalProps {
   settings: TranslationSettings;
   busy?: boolean;
+  promptPreviews: TranslationPromptPreview[];
   testResult?: TranslationProviderTestResult;
   onSave(settings: Partial<TranslationSettings>, apiKey?: string): Promise<void>;
   onTest(): Promise<void>;
@@ -16,6 +20,7 @@ export interface TranslationSettingsModalProps {
 export function TranslationSettingsModal({
   settings,
   busy = false,
+  promptPreviews,
   testResult,
   onSave,
   onTest,
@@ -23,10 +28,17 @@ export function TranslationSettingsModal({
 }: TranslationSettingsModalProps) {
   const [draft, setDraft] = useState(settings);
   const [apiKey, setApiKey] = useState("");
+  const [selectedPromptKey, setSelectedPromptKey] = useState<TranslationPromptKey>("user-input-to-english");
 
   useEffect(() => {
     setDraft(settings);
   }, [settings]);
+
+  const selectedPromptPreview = promptPreviews.find((preview) => preview.key === selectedPromptKey);
+  const customPrompt = draft.prompts?.[selectedPromptKey] ?? "";
+  const activePrompt = customPrompt.trim()
+    ? customPrompt
+    : selectedPromptPreview?.baseSystemPrompt ?? "";
 
   return (
     <div className="modal-backdrop">
@@ -149,6 +161,66 @@ export function TranslationSettingsModal({
           </label>
         </div>
 
+        <section className="translation-prompt-settings">
+          <header>
+            <div>
+              <h3>Translation Prompts</h3>
+              <p>Customize or inspect the prompt sent to the translation model.</p>
+            </div>
+            <label>
+              <span>Prompt slot</span>
+              <select
+                value={selectedPromptKey}
+                onChange={(event) => setSelectedPromptKey(event.target.value as TranslationPromptKey)}
+              >
+                {TRANSLATION_PROMPT_KEYS.map((key) => {
+                  const preview = promptPreviews.find((candidate) => candidate.key === key);
+                  return <option key={key} value={key}>{preview?.label ?? key}</option>;
+                })}
+              </select>
+            </label>
+          </header>
+
+          <label>
+            <span>Custom prompt override</span>
+            <textarea
+              value={customPrompt}
+              onChange={(event) => setDraft({
+                ...draft,
+                prompts: updatePromptOverride(draft.prompts, selectedPromptKey, event.target.value)
+              })}
+              placeholder="Leave blank to use the built-in prompt."
+            />
+          </label>
+
+          <div className="translation-prompt-preview-grid">
+            <label>
+              <span>Active system prompt</span>
+              <textarea readOnly value={activePrompt} />
+            </label>
+            <label>
+              <span>Built-in system prompt</span>
+              <textarea readOnly value={selectedPromptPreview?.baseSystemPrompt ?? ""} />
+            </label>
+          </div>
+
+          <label>
+            <span>User message template</span>
+            <textarea readOnly value={selectedPromptPreview?.userMessageTemplate ?? ""} />
+          </label>
+
+          <button
+            type="button"
+            disabled={busy || !customPrompt}
+            onClick={() => setDraft({
+              ...draft,
+              prompts: updatePromptOverride(draft.prompts, selectedPromptKey, "")
+            })}
+          >
+            Reset selected prompt
+          </button>
+        </section>
+
         {testResult ? (
           <div className={testResult.ok ? "translation-test-result is-ok" : "translation-test-result is-error"}>
             {testResult.ok ? `Connection ok: ${testResult.model} in ${testResult.elapsedMs}ms` : testResult.error}
@@ -168,4 +240,18 @@ export function TranslationSettingsModal({
       </section>
     </div>
   );
+}
+
+function updatePromptOverride(
+  prompts: TranslationSettings["prompts"],
+  key: TranslationPromptKey,
+  value: string
+): TranslationSettings["prompts"] {
+  const next = { ...(prompts ?? {}) };
+  if (value.trim()) {
+    next[key] = value;
+  } else {
+    delete next[key];
+  }
+  return Object.keys(next).length > 0 ? next : undefined;
 }

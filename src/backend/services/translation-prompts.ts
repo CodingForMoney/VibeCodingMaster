@@ -1,8 +1,11 @@
 import type {
   TranslationDirection,
+  TranslationPromptKey,
+  TranslationPromptPreview,
   TranslationSourceKind,
   TranslationSettings
 } from "../../shared/types/translation.js";
+import { TRANSLATION_PROMPT_KEYS } from "../../shared/types/translation.js";
 
 export interface TranslationPromptInput {
   direction: TranslationDirection;
@@ -26,11 +29,63 @@ const PRESERVE_RULES = `Preserve verbatim:
 
 Translate only the surrounding prose. Output only the requested translation or summary.`;
 
+const PROMPT_LABELS: Record<TranslationPromptKey, string> = {
+  "user-input-to-english": "User input -> English",
+  "user-input-to-english-with-context": "User input -> English with context",
+  "cc-output-to-user": "Claude Code output -> user language"
+};
+
 export function buildTranslationPrompt(input: TranslationPromptInput): BuiltTranslationPrompt {
+  const key = getTranslationPromptKey(input);
+
   if (input.direction === "user-input-to-english") {
-    if (input.contextText?.trim()) {
+    if (key === "user-input-to-english-with-context") {
       return {
-        systemPrompt: `You translate a developer's message for Claude Code into clear technical English.
+        systemPrompt: resolveTranslationSystemPrompt(key, input.settings),
+        userPrompt: `[PRIOR CLAUDE CODE REPLY]\n${input.contextText}\n\n[NEW USER INPUT - translate only this]\n${input.text}`,
+        parseWarning: true
+      };
+    }
+
+    return {
+      systemPrompt: resolveTranslationSystemPrompt(key, input.settings),
+      userPrompt: input.text,
+      parseWarning: false
+    };
+  }
+
+  return {
+    systemPrompt: resolveTranslationSystemPrompt(key, input.settings, input.sourceKind),
+    userPrompt: input.text,
+    parseWarning: false
+  };
+}
+
+export function getTranslationPromptKey(input: {
+  direction: TranslationDirection;
+  contextText?: string;
+}): TranslationPromptKey {
+  if (input.direction === "user-input-to-english") {
+    return input.contextText?.trim()
+      ? "user-input-to-english-with-context"
+      : "user-input-to-english";
+  }
+  return "cc-output-to-user";
+}
+
+export function getBaseTranslationPrompt(
+  key: TranslationPromptKey,
+  settings: TranslationSettings,
+  sourceKind: TranslationSourceKind = "prose"
+): string {
+  if (key === "user-input-to-english") {
+    return `You translate a developer's message for Claude Code into clear, concise, professional technical English.
+
+${PRESERVE_RULES}`;
+  }
+
+  if (key === "user-input-to-english-with-context") {
+    return `You translate a developer's message for Claude Code into clear technical English.
 
 Use the prior Claude Code reply only to disambiguate references such as "continue", "that file", or "as you said".
 Do not copy facts from the prior reply into the translation unless the new user input clearly refers to them.
@@ -45,36 +100,59 @@ WARN: <short warning in the user's language>
 
 <English translation>
 
-${PRESERVE_RULES}`,
-        userPrompt: `[PRIOR CLAUDE CODE REPLY]\n${input.contextText}\n\n[NEW USER INPUT - translate only this]\n${input.text}`,
-        parseWarning: true
-      };
-    }
-
-    return {
-      systemPrompt: `You translate a developer's message for Claude Code into clear, concise, professional technical English.
-
-${PRESERVE_RULES}`,
-      userPrompt: input.text,
-      parseWarning: false
-    };
+${PRESERVE_RULES}`;
   }
 
-  const targetLanguage = input.settings.targetLanguage || "the user's language";
-  const sourceKind = input.sourceKind ?? "prose";
+  const targetLanguage = settings.targetLanguage || "the user's language";
   const outputInstruction = sourceKind === "error"
     ? "Explain the prose in the target language, but preserve the exact error text."
     : "Translate the prose faithfully and naturally.";
 
-  return {
-    systemPrompt: `You translate Claude Code output for a software engineer into ${targetLanguage}.
+  return `You translate Claude Code output for a software engineer into ${targetLanguage}.
 
 Source kind: ${sourceKind}.
 ${outputInstruction}
-${PRESERVE_RULES}`,
-    userPrompt: input.text,
-    parseWarning: false
-  };
+${PRESERVE_RULES}`;
+}
+
+export function resolveTranslationSystemPrompt(
+  key: TranslationPromptKey,
+  settings: TranslationSettings,
+  sourceKind: TranslationSourceKind = "prose"
+): string {
+  const override = settings.prompts?.[key];
+  return override?.trim() ? override : getBaseTranslationPrompt(key, settings, sourceKind);
+}
+
+export function getTranslationPromptPreviews(settings: TranslationSettings): TranslationPromptPreview[] {
+  return TRANSLATION_PROMPT_KEYS.map((key) => {
+    const baseSystemPrompt = getBaseTranslationPrompt(key, settings);
+    const activeSystemPrompt = resolveTranslationSystemPrompt(key, settings);
+    return {
+      key,
+      label: PROMPT_LABELS[key],
+      baseSystemPrompt,
+      activeSystemPrompt,
+      userMessageTemplate: getUserMessageTemplate(key),
+      customized: activeSystemPrompt !== baseSystemPrompt
+    };
+  });
+}
+
+function getUserMessageTemplate(key: TranslationPromptKey): string {
+  if (key === "user-input-to-english-with-context") {
+    return `[PRIOR CLAUDE CODE REPLY]
+<last assistant reply>
+
+[NEW USER INPUT - translate only this]
+<user input>`;
+  }
+
+  if (key === "user-input-to-english") {
+    return "<user input>";
+  }
+
+  return "<Claude Code output chunk>";
 }
 
 export function parseTranslationWarning(raw: string): { warning?: string; text: string } {
@@ -95,4 +173,3 @@ export function parseTranslationWarning(raw: string): { warning?: string; text: 
   }
   return { text: trimmed };
 }
-

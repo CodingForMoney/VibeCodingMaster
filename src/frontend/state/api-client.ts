@@ -16,6 +16,7 @@ import type {
   TranslateUserInputRequest,
   TranslateUserInputResult,
   TranslationEntry,
+  TranslationPromptPreview,
   TranslationProviderTestResult,
   TranslationSecretSettings,
   TranslationSettings
@@ -118,6 +119,9 @@ export const apiClient = {
       method: "PUT",
       body: JSON.stringify(input)
     });
+  },
+  getTranslationPrompts() {
+    return request<TranslationPromptPreview[]>("/api/translation/prompts");
   },
   testTranslationProvider() {
     return request<TranslationProviderTestResult>("/api/translation/test", {
