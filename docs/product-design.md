@@ -7,9 +7,9 @@
 
 ## 1. 产品定位
 
-VibeCodingMaster 是面向 Claude Code 的本地 GUI 多 session 工作台，也是 AI Project Manager 和 Harness Manager。
+VibeCodingMaster 是面向 Claude Code 的本地 GUI 多 session 工作台，也是 AI Project Manager、Harness Manager 和 English Working Layer。
 
-它把用户的自然语言需求转化为可计划、可执行、可验证、可审查、可沉淀的工程任务，并在一个图形化任务工作台中托管多个 Claude Code role sessions，让用户可以在 `project-manager`、`architect`、`coder`、`reviewer` 等 session 之间切换、沟通、观察输出和管理交接 artifact。
+它把用户的自然语言需求转化为可计划、可执行、可验证、可审查、可沉淀的英文工程任务，并在一个图形化任务工作台中托管多个 Claude Code role sessions，让用户可以在 `project-manager`、`architect`、`coder`、`reviewer` 等 session 之间切换、沟通、观察输出、管理交接 artifact，并在需要时用便宜模型翻译 Claude Code 输入输出。
 
 一句话：
 
@@ -266,6 +266,21 @@ Message bus 和自动执行是两个不同能力：
 
 无论哪种模式，VCM 都不能自动确认 Claude Code 权限提示，也不能绕过高风险 human approval。
 
+### 5.11 English Working Layer
+
+Claude Code 在英文工程上下文里通常更稳定：代码标识符、错误日志、依赖文档、GitHub issue、测试输出和架构术语大多以英文存在。VCM 应提供一个低成本模型驱动的 English Working Layer，让用户可以继续用自己的语言表达，但让 Claude Code 主要接收英文工程指令、英文 handoff artifacts 和英文技术上下文。
+
+核心规则：
+
+- repo 内长期保存的工程 artifact 默认使用英文。
+- role command、VCM role message、architecture plan、implementation log、validation log、review report 默认使用英文。
+- 用户可以在 GUI 中用中文或其他语言输入。
+- VCM 使用独立、便宜、可配置的大模型把用户输入转换为英文工程指令，再发送给 Claude Code。
+- VCM 使用同一个翻译通道持续把 Claude Code terminal output 转成用户语言，帮助用户理解执行过程。
+- 翻译结果是辅助视图，不是事实源；事实源仍是 terminal raw log、handoff artifacts、git diff 和 validation evidence。
+
+这不是“让 Project Manager 承担翻译职责”。翻译是 VCM GUI/Backend 的辅助能力，由独立 Translation Provider 完成；Project Manager 仍专注需求澄清、任务拆分、角色调度和验收。
+
 ## 6. 核心概念
 
 ### 6.1 Project Manager
@@ -360,6 +375,41 @@ coder Claude Code session
 .vcm/messages/<task-slug>.jsonl
 .ai/handoffs/<task-slug>/messages/<message-id>.md
 ```
+
+### 6.1.2 Translation Assistant
+
+Translation Assistant 是 embedded terminal 的旁路辅助层。它不替代 Claude Code terminal，也不伪装成 Claude Code 的一部分。
+
+职责：
+
+- 将用户语言输入转换为英文 terminal instruction。
+- 将 Claude Code terminal output 持续转换为用户语言解释。
+- 保留英文原文和翻译结果的对应关系。
+- 避免把 ANSI control sequences、密码、token、二进制输出、超长日志原样发送给翻译模型。
+- 在翻译不确定时标记 low confidence，并提示用户查看左侧英文原文。
+
+基本交互：
+
+```text
+User writes Chinese in Translation Panel
+  -> Translation Provider produces English instruction
+  -> user reviews English preview by default
+  -> VCM writes English instruction to Claude Code pty
+  -> Claude Code outputs English
+  -> Translation Provider translates output chunks to Chinese
+  -> GUI shows translated stream in the right panel
+```
+
+Translation Assistant 有两种输入模式：
+
+- `review-before-send`：默认。用户输入先翻译成英文预览，用户点击 Send 后才写入 Claude Code terminal。
+- `auto-send`：可选。用户输入后自动翻译并发送给 Claude Code，适合低风险连续对话。
+
+Raw Terminal Mode 必须始终可用：
+
+- 当用户直接聚焦左侧 embedded terminal 时，键盘输入原样进入 Claude Code。
+- 权限确认、方向键、快捷键、shell 控制字符、密码输入等不经过翻译。
+- 翻译层不得拦截或改写 raw terminal keystrokes。
 
 ### 6.2 Task Spec
 
@@ -997,7 +1047,125 @@ GUI frontend
 
 V1 中，Claude Code Adapter 主要通过 Terminal Runtime Manager 工作。
 
-### 9.10 Cross-Model Reviewer
+### 9.10 Translation Layer
+
+负责在 embedded terminal 旁边提供可开关的翻译工作层。
+
+能力：
+
+- 每个 role session 独立开启 / 关闭翻译。
+- 开启后，Session Console 从单栏 terminal 变为左右分栏：
+  - 左侧：原始 Claude Code embedded terminal。
+  - 右侧：Translation Panel。
+- 持续读取 terminal output stream，过滤 ANSI/control chars 后按 chunk 翻译。
+- 将用户在 Translation Panel 输入的中文或其他语言转换为英文 instruction。
+- 默认让用户确认英文预览后再发送到 Claude Code。
+- 支持 auto-send mode，但必须是用户显式开启。
+- 支持暂停输出翻译，避免大日志造成成本失控。
+- 支持复制原文、复制译文、复制英文 input draft。
+- 支持查看翻译失败、跳过、截断和重试状态。
+
+不做：
+
+- 不修改 raw terminal output。
+- 不修改 Claude Code 的真实上下文，除非用户发送英文 input draft。
+- 不把翻译内容写入 handoff artifacts，除非用户或 PM 明确复制/引用。
+- 不翻译代码块、diff、stack trace、命令输出中的关键 token；默认保留原文并提供简短说明。
+- 不处理密码、secret、API key、private token 等敏感内容；检测到疑似敏感内容时跳过或脱敏。
+
+推荐 chunk 策略：
+
+```text
+terminal output stream
+  -> strip ANSI for translation copy
+  -> preserve original output in terminal
+  -> buffer until semantic boundary
+       - prompt completed
+       - blank line
+       - bullet/list block
+       - command finished
+       - max chars reached
+  -> classify chunk
+       - prose
+       - code/diff/log
+       - permission prompt
+       - error
+  -> translate or summarize
+  -> append to Translation Panel
+```
+
+便宜模型策略：
+
+- Translation Provider 独立于 Claude Code。
+- 默认使用 OpenAI-compatible API 形态，允许接入便宜模型。
+- 支持用户配置 provider、base URL、API key、model、timeout、max tokens、temperature。
+- 默认低 temperature。
+- 对高频 terminal output 做 batch / debounce。
+- 对重复内容做去重。
+- 对超长输出做摘要式翻译，而不是逐字翻译。
+
+### 9.11 Translation Provider Settings
+
+负责管理翻译模型配置。
+
+入口：
+
+- 全局 Settings。
+- Session Console 翻译开关旁的 `Translation Settings`。
+- 首次开启翻译但未配置 provider 时弹出设置。
+
+字段：
+
+```text
+enabled
+providerType
+baseUrl
+apiKey
+model
+sourceLanguage
+targetLanguage
+workingLanguage
+inputMode
+translateOutput
+translateUserInput
+redactSecrets
+maxChunkChars
+requestTimeoutMs
+temperature
+storeTranslationHistory
+```
+
+默认建议：
+
+```text
+sourceLanguage: auto
+targetLanguage: user's UI language
+workingLanguage: English
+inputMode: review-before-send
+translateOutput: on
+translateUserInput: on
+redactSecrets: on
+storeTranslationHistory: off
+temperature: 0.1
+```
+
+API key 处理：
+
+- API key 只保存在本机。
+- 不写入 repo。
+- 不写入 `.ai/handoffs/`。
+- 不进入 git diff。
+- V1 可以先存在 local app config；后续优先接 OS keychain。
+
+设置页必须提供：
+
+- `Test Connection`。
+- `Estimate Cost` 或 token 使用提示。
+- `Reset`。
+- `Disable Translation`。
+- `Clear Translation History`。
+
+### 9.12 Cross-Model Reviewer
 
 负责让另一个 AI 模型审查计划或代码。
 
@@ -1016,7 +1184,7 @@ V1 中，Claude Code Adapter 主要通过 Terminal Runtime Manager 工作。
 - 在编码前发现方案问题。
 - 在 PR 前发现遗漏测试、边界问题和架构漂移。
 
-### 9.11 Validation Runner
+### 9.13 Validation Runner
 
 负责验证命令管理。
 
@@ -1028,7 +1196,7 @@ V1 中，Claude Code Adapter 主要通过 Terminal Runtime Manager 工作。
 - 要求失败后 rerun。
 - 写入 task-level validation log。
 
-### 9.12 Replan Controller
+### 9.14 Replan Controller
 
 负责处理计划偏差。
 
@@ -1041,7 +1209,7 @@ V1 中，Claude Code Adapter 主要通过 Terminal Runtime Manager 工作。
 - 记录用户或 human reviewer 的决策。
 - 更新 task spec、architecture plan 和 docs。
 
-### 9.13 Project Memory
+### 9.15 Project Memory
 
 负责项目长期状态。
 
@@ -1063,7 +1231,7 @@ V1 中，Claude Code Adapter 主要通过 Terminal Runtime Manager 工作。
 - 记录 validation index。
 - 清理 session-local scratch。
 
-### 9.14 PR Assistant
+### 9.16 PR Assistant
 
 负责把任务结果整理成 PR。
 
@@ -1184,6 +1352,85 @@ repo/
 - restart / stop / mark done 操作。
 
 Session Console 必须支持 Claude Code 的交互式确认场景，例如权限确认、继续执行确认、失败后用户补充指令。
+
+### 11.3.1 Translation Mode
+
+Session Console 的 embedded terminal 旁边必须提供翻译开关。
+
+关闭时：
+
+```text
+┌──────────────────────────────────────────────────────────────┐
+│ Session Toolbar: role / status / permission / translation off │
+├──────────────────────────────────────────────────────────────┤
+│ Claude Code embedded terminal                                │
+└──────────────────────────────────────────────────────────────┘
+```
+
+打开时：
+
+```text
+┌──────────────────────────────────────────────────────────────────────────────┐
+│ Session Toolbar: role / status / permission / translation on / settings     │
+├──────────────────────────────────────┬───────────────────────────────────────┤
+│ Claude Code embedded terminal         │ Translation Panel                     │
+│ raw English input/output              │ translated output + translated input  │
+│ accepts raw terminal keystrokes       │ user-language composer                │
+└──────────────────────────────────────┴───────────────────────────────────────┘
+```
+
+Toolbar controls：
+
+- `Translate` toggle。
+- `Input mode` segmented control：`Review` / `Auto-send` / `Raw only`。
+- `Output translation` toggle。
+- `Pause translation`。
+- `Settings`。
+- translation status：ready / translating / paused / failed / not configured。
+
+Translation Panel 区域：
+
+- Output translation stream：持续显示 Claude Code 输出的用户语言解释。
+- Original chunk reference：允许展开查看对应英文原文。
+- User-language composer：用户输入中文或其他语言。
+- English preview：默认展示即将发送给 Claude Code 的英文指令。
+- Send controls：`Translate`、`Send English`、`Edit English`、`Send Raw`。
+- Retry controls：对失败 chunk 或 input draft 重试。
+
+默认交互：
+
+```text
+User types Chinese in Translation Panel
+  -> VCM translates to English
+  -> English preview appears
+  -> User clicks Send English
+  -> VCM writes the English text to Claude Code terminal and submits it
+```
+
+Auto-send 交互：
+
+```text
+User types Chinese in Translation Panel
+  -> VCM translates to English
+  -> VCM sends English text to Claude Code terminal automatically
+```
+
+Raw terminal 交互：
+
+```text
+User focuses left terminal
+  -> all keystrokes go directly to Claude Code
+  -> no translation, no interception
+```
+
+布局规则：
+
+- 翻译开关打开后，左侧 terminal 不得小到不可用。
+- Translation Panel 默认占 35%-45% 宽度，用户可拖拽调整。
+- 小屏幕下可以改为上下分栏：terminal 在上，translation panel 在下。
+- terminal 的 ANSI colors、光标、交互输入必须保持原样。
+- 翻译输出不能覆盖或遮挡 Claude Code terminal。
+- 关闭翻译时，terminal 恢复完整宽度；翻译历史可保留在内存中直到 session 关闭。
 
 ### 11.4 Handoff Files
 
@@ -1442,6 +1689,73 @@ VCM 不应隐藏角色间执行，也不应自动确认 Claude Code 权限提示
 
 如果 state file 不存在，VCM 必须按 `manual` mode、`paused: false` 处理。
 
+### 12.9 Translation Settings
+
+```json
+{
+  "version": 1,
+  "enabled": true,
+  "providerType": "openai-compatible",
+  "baseUrl": "https://api.example.com/v1",
+  "model": "cheap-translation-model",
+  "sourceLanguage": "auto",
+  "targetLanguage": "zh-CN",
+  "workingLanguage": "en",
+  "inputMode": "review-before-send",
+  "translateOutput": true,
+  "translateUserInput": true,
+  "redactSecrets": true,
+  "maxChunkChars": 4000,
+  "requestTimeoutMs": 15000,
+  "temperature": 0.1,
+  "storeTranslationHistory": false
+}
+```
+
+安全规则：
+
+- `apiKey` 不应出现在普通 JSON 导出示例里。
+- V1 可以把 API key 存在本机 app config，后续迁移到 OS keychain。
+- project repo 内不得保存 provider API key。
+- translation settings 可以是全局配置；后续可支持 project override。
+
+### 12.10 Translation Entry
+
+```json
+{
+  "id": "tr_123",
+  "taskSlug": "coupon-partial-refund",
+  "role": "coder",
+  "direction": "cc-output-to-user",
+  "sourceLanguage": "en",
+  "targetLanguage": "zh-CN",
+  "sourceText": "I will inspect the failing tests first.",
+  "translatedText": "我会先检查失败的测试。",
+  "status": "translated",
+  "createdAt": "2026-05-29T00:03:14+08:00",
+  "provider": "openai-compatible",
+  "model": "cheap-translation-model",
+  "tokenUsage": {
+    "input": 12,
+    "output": 14
+  }
+}
+```
+
+状态：
+
+```text
+queued
+translating
+translated
+skipped
+failed
+redacted
+summarized
+```
+
+默认情况下 Translation Entry 只保存在前端/本地运行态，用于显示和重试；除非用户开启 `storeTranslationHistory`，否则不写入 repo，也不进入 handoff artifacts。
+
 ## 13. MVP 范围
 
 ### 13.1 V1 产品定位
@@ -1481,13 +1795,18 @@ V1 的核心判断标准不是“CLI 是否能控制多个终端”，而是：
 14. 支持 `manual` orchestration mode，默认不自动执行角色消息。
 15. 支持用户在 GUI 中检查、stage、reject role messages。
 16. 支持可选 `auto` orchestration mode，但必须经过 backend policy check。
-17. 支持 Project Manager 生成 role command artifact，作为长 handoff 的 durable ref。
-18. 将每个 role session 的 raw output 保存为日志。
-19. 在 GUI 中查看 architecture-plan / implementation-log / validation-log / review-report。
-20. 检查 handoff artifacts 是否存在、是否为空、是否包含必要标题。
-21. 展示当前任务的状态摘要和下一步建议。
-22. 在 `.vcm/sessions/<task-slug>.json` 中记录每个 role 的 `claudeSessionId`，支持异常中断后 Resume。
-23. 保留 CLI 作为开发和调试入口；`vcmctl` 只作为 Claude Code role 调用 VCM 的本地桥接命令，不是用户主交互入口。
+17. 支持在每个 embedded terminal 旁开启 Translation Mode。
+18. Translation Mode 打开后，terminal 显示区左右分栏：左侧 Claude Code 原始 terminal，右侧翻译页。
+19. 支持用便宜大模型持续翻译 Claude Code output。
+20. 支持把用户在 Translation Panel 输入的中文或其他语言转换为英文并发送给 Claude Code。
+21. 支持翻译模型 API 设置：provider、base URL、API key、model、语言、timeout、chunk 大小。
+22. 支持 Project Manager 生成 role command artifact，作为长 handoff 的 durable ref。
+23. 将每个 role session 的 raw output 保存为日志。
+24. 在 GUI 中查看 architecture-plan / implementation-log / validation-log / review-report。
+25. 检查 handoff artifacts 是否存在、是否为空、是否包含必要标题。
+26. 展示当前任务的状态摘要和下一步建议。
+27. 在 `.vcm/sessions/<task-slug>.json` 中记录每个 role 的 `claudeSessionId`，支持异常中断后 Resume。
+28. 保留 CLI 作为开发和调试入口；`vcmctl` 只作为 Claude Code role 调用 VCM 的本地桥接命令，不是用户主交互入口。
 
 ### 13.3 V1 明确不做
 
@@ -1505,6 +1824,11 @@ V1 的核心判断标准不是“CLI 是否能控制多个终端”，而是：
 - 多 repo / 多任务并行调度。
 - 多 worktree 自动管理。
 - 让用户手动管理底层 terminal process。
+- 保证翻译 100% 准确。
+- 把翻译结果作为 repo 事实源。
+- 自动把翻译结果写入 handoff artifacts。
+- 在 raw terminal keystrokes 上做逐键翻译。
+- 自动翻译或外发密码、API key、token、secret。
 
 这些能力可以作为后续版本演进。V1 的判断标准不是“PM 流程是否全部自动化”，而是“GUI 是否让多 Claude Code role sessions 变得可见、可切换、可沟通、可恢复、可交接”。
 
@@ -1591,15 +1915,18 @@ Open VibeCodingMaster
   -> Select repo
   -> New task
   -> Start project-manager session
+  -> Optional: turn on Translation Mode
+  -> User writes in Translation Panel when useful
+  -> VCM sends English working instructions to Claude Code
   -> PM clarifies task
   -> Start architect session
-  -> Send architect command
+  -> PM sends architect message through VCM message bus
   -> View architecture-plan.md
   -> Start coder session
-  -> Send coder command
+  -> PM sends coder message through VCM message bus
   -> View implementation-log.md and validation-log.md
   -> Start reviewer session
-  -> Send reviewer command
+  -> PM sends reviewer message through VCM message bus
   -> View review-report.md
   -> Final acceptance
 ```
@@ -1624,6 +1951,9 @@ CLI 可以保留为：
 - embedded terminal 输入输出成功率。
 - WebSocket 断线重连成功率。
 - role message 创建 / stage / delivery 成功率。
+- translation provider 连接成功率。
+- terminal output chunk 翻译成功率。
+- translated input draft 发送成功率。
 - session output 保存为 raw log 的成功率。
 - stop / restart / recover 成功率。
 
@@ -1642,6 +1972,8 @@ CLI 可以保留为：
 - 用户可以清楚看到每个 role session 当前状态。
 - 用户可以在 GUI 中切换到任意 Claude Code role session。
 - 用户可以直接在 GUI 中输入、确认权限和继续对话。
+- 用户可以在不离开 GUI 的情况下用自己的语言理解 Claude Code 输出。
+- 用户可以把自己的语言输入转换为英文工作指令并发送给 Claude Code。
 - 用户觉得多 Claude Code session 的切换和管理成本下降。
 - 用户愿意用 VibeCodingMaster 启动下一次多角色任务。
 
@@ -1682,7 +2014,21 @@ CLI 可以保留为：
 - Auto mode 下 backend 只在 policy 通过时投递 visible envelope。
 - Backend 保存 raw logs、message snapshots 和 delivery state。
 
-### Phase 5：后续增强
+### Phase 5：Translation Mode
+
+- 在 Session Toolbar 增加 `Translate` toggle。
+- 打开后将 terminal 区域切成左侧 Claude Code terminal、右侧 Translation Panel。
+- 提供 Translation Provider Settings。
+- 支持 OpenAI-compatible provider、base URL、API key、model 配置。
+- 支持 `Test Connection`。
+- 持续翻译 Claude Code output chunks。
+- 支持用户语言 input composer。
+- 默认生成 English preview，用户确认后发送给 Claude Code。
+- 支持 auto-send mode。
+- 支持 pause output translation、retry failed translation、clear history。
+- 默认不保存 translation history 到 repo。
+
+### Phase 6：后续增强
 
 - Task Spec Builder。
 - public contract / test contract gate。
@@ -1755,7 +2101,46 @@ CLI 可以保留为：
 - T2 以上才推荐完整 role route。
 - UI 中默认折叠高级 contract 字段，但内部仍保留检查。
 
-### 16.6 AI Review 不可靠
+### 16.6 翻译不准确导致误操作
+
+风险：便宜模型可能误译用户意图、命令、错误信息或 Claude Code 输出，导致 Claude Code 执行错误指令。
+
+应对：
+
+- 默认 `review-before-send`，显示英文预览。
+- 用户可以编辑英文 draft。
+- 对高风险词、删除、迁移、权限、支付、schema 等内容标记风险。
+- 翻译 panel 始终保留英文原文引用。
+- 对低 confidence 翻译显示 warning。
+- Raw terminal mode 始终可用，用户可以绕过翻译。
+
+### 16.7 翻译成本失控
+
+风险：Claude Code terminal output 很长，如果逐字持续翻译，会造成大量 token 成本和延迟。
+
+应对：
+
+- output translation 支持 pause。
+- chunk 翻译做 debounce 和 batch。
+- 超长日志默认摘要翻译。
+- 重复输出去重。
+- 设置 `maxChunkChars` 和 request timeout。
+- UI 显示 token/cost usage hint。
+
+### 16.8 隐私和密钥泄露
+
+风险：terminal output 可能包含 API key、token、内部路径、日志和业务数据，翻译模型 API 可能是第三方服务。
+
+应对：
+
+- 首次开启翻译时提示输出会发送给 Translation Provider。
+- 默认 `redactSecrets: on`。
+- 检测疑似 secret、token、password、private key 时跳过或脱敏。
+- API key 只保存在本机，不进 repo，不进 handoff artifacts。
+- 支持关闭 output translation，只使用 input translation。
+- 支持清除 translation history。
+
+### 16.9 AI Review 不可靠
 
 风险：Reviewer 模型会误判、漏判或提出过度设计建议。
 
@@ -1766,7 +2151,7 @@ CLI 可以保留为：
 - 区分 block、request changes、suggestion。
 - 高风险任务保留 human approval。
 
-### 16.7 Handoff 成为形式主义
+### 16.10 Handoff 成为形式主义
 
 风险：角色交接文件被创建，但内容空洞。
 
@@ -1777,7 +2162,7 @@ CLI 可以保留为：
 - final acceptance 把 handoff artifact 作为硬条件。
 - UI 中直接显示 missing / incomplete / ok。
 
-### 16.8 文档漂移
+### 16.11 文档漂移
 
 风险：VibeCodingMaster 生成大量文档，但后续不更新。
 
@@ -1788,7 +2173,7 @@ CLI 可以保留为：
 - PR template 加 docs sync checklist。
 - 月度 harness review 删除无用文档。
 
-### 16.9 和 Claude Code 原生能力重叠
+### 16.12 和 Claude Code 原生能力重叠
 
 风险：Claude Code 原生增强后，简单 prompt wrapper 或简单多终端管理被替代。
 
@@ -1798,7 +2183,7 @@ CLI 可以保留为：
 - 不把核心价值放在 terminal 包装。
 - 核心放在 GUI session cockpit、project orchestration、public contract、test contract、handoff、review gate、acceptance。
 
-### 16.10 GUI 产品复杂度上升
+### 16.13 GUI 产品复杂度上升
 
 风险：GUI、terminal runtime、backend process manager 一起做，复杂度高于 CLI。
 
@@ -1809,7 +2194,7 @@ CLI 可以保留为：
 - V1 不做自动 review、自动 validation、自动 PR。
 - 先把 embedded Claude Code sessions 和 handoff artifact visibility 做扎实。
 
-### 16.11 安全和权限边界不清
+### 16.14 安全和权限边界不清
 
 风险：用户以为 GUI 是 sandbox，但 Claude Code 实际仍在本地 repo 环境运行。
 
