@@ -1195,6 +1195,7 @@ temperature: 0.1
 API key 处理：
 
 - API key 只保存在本机。
+- Settings API 会把已保存的 API key 返回给本地 GUI，用于在输入框中显示和继续编辑。
 - 不写入 repo。
 - 不写入 `.ai/handoffs/`。
 - 不进入 git diff。

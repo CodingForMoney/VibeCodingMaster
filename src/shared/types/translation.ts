@@ -47,6 +47,7 @@ export interface TranslationSettings {
   enabled: boolean;
   providerType: TranslationProviderType;
   baseUrl: string;
+  apiKey?: string;
   model: string;
   sourceLanguage: "auto" | string;
   targetLanguage: string;

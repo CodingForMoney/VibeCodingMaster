@@ -27,11 +27,12 @@ export function TranslationSettingsModal({
   onClose
 }: TranslationSettingsModalProps) {
   const [draft, setDraft] = useState(settings);
-  const [apiKey, setApiKey] = useState("");
+  const [apiKey, setApiKey] = useState(settings.apiKey ?? "");
   const [selectedPromptKey, setSelectedPromptKey] = useState<TranslationPromptKey>("zh-to-en");
 
   useEffect(() => {
     setDraft(settings);
+    setApiKey(settings.apiKey ?? "");
   }, [settings]);
 
   const selectedPromptPreview = promptPreviews.find((preview) => preview.key === selectedPromptKey);
@@ -70,7 +71,7 @@ export function TranslationSettingsModal({
             <input
               value={apiKey}
               onChange={(event) => setApiKey(event.target.value)}
-              placeholder="Leave blank to keep existing key"
+              placeholder="API key"
               autoCapitalize="off"
               autoComplete="off"
               autoCorrect="off"
@@ -219,7 +220,7 @@ export function TranslationSettingsModal({
           <button
             type="button"
             disabled={busy}
-            onClick={() => void onSave(draft, apiKey.trim() || undefined)}
+            onClick={() => void onSave(draft, apiKey.trim())}
           >
             Save
           </button>

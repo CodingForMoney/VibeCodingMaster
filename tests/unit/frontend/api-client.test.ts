@@ -45,6 +45,7 @@ describe("apiClient", () => {
       enabled: true,
       providerType: "openai-compatible",
       baseUrl: "https://api.example.com/v1",
+      apiKey: "sk-local-test",
       model: "cheap-translator",
       sourceLanguage: "auto",
       targetLanguage: "zh-CN",

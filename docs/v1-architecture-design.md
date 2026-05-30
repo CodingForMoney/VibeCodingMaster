@@ -1418,6 +1418,7 @@ cancel
 规则：
 
 - `apiKey` 不出现在 repo-local JSON 示例和导出中。
+- `GET /api/translation/settings` 会返回已保存的 `apiKey` 给本地 GUI，设置页必须显示当前值。
 - API key 存在 local app config；后续可迁移到 OS keychain。
 - Settings 可以全局生效，后续再支持 project override。
 

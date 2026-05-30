@@ -120,9 +120,14 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
     }
 
     const raw = await deps.fs.readJson<Partial<StoredTranslationConfig>>(configPath);
+    const rawSettings: Partial<TranslationSettings> = raw.settings ?? {};
+    const apiKey = raw.secrets?.apiKey ?? rawSettings.apiKey;
     cachedConfig = {
-      settings: normalizeSettings(raw.settings ?? {}),
-      secrets: raw.secrets ?? {}
+      settings: normalizeSettings(rawSettings),
+      secrets: {
+        ...(raw.secrets ?? {}),
+        ...(apiKey !== undefined ? { apiKey } : {})
+      }
     };
     return cachedConfig;
   }
@@ -349,7 +354,8 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
 
   return {
     async getSettings() {
-      return (await loadConfig()).settings;
+      const { settings, secrets } = await loadConfig();
+      return exposeSettings(settings, secrets);
     },
     async updateSettings(input, secrets) {
       const current = await loadConfig();
@@ -361,7 +367,7 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
         }
       };
       await saveConfig(next);
-      return next.settings;
+      return exposeSettings(next.settings, next.secrets);
     },
     async getPromptPreviews() {
       const { settings } = await loadConfig();
@@ -545,9 +551,10 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
 }
 
 function normalizeSettings(input: Partial<TranslationSettings>): TranslationSettings {
+  const { apiKey: _apiKey, ...settings } = input;
   return {
     ...DEFAULT_SETTINGS,
-    ...input,
+    ...settings,
     version: 1,
     providerType: "openai-compatible",
     workingLanguage: "en",
@@ -555,6 +562,13 @@ function normalizeSettings(input: Partial<TranslationSettings>): TranslationSett
     requestTimeoutMs: clampNumber(input.requestTimeoutMs, 3000, 120000, DEFAULT_SETTINGS.requestTimeoutMs),
     temperature: clampNumber(input.temperature, 0, 1, DEFAULT_SETTINGS.temperature),
     prompts: normalizePromptMap(input.prompts)
+  };
+}
+
+function exposeSettings(settings: TranslationSettings, secrets: TranslationSecretSettings): TranslationSettings {
+  return {
+    ...settings,
+    apiKey: secrets.apiKey ?? ""
   };
 }
 

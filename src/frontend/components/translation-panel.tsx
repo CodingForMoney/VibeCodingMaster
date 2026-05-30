@@ -115,7 +115,7 @@ export function TranslationPanel({ taskSlug, role, sessionId }: TranslationPanel
     setBusy(true);
     setError("");
     try {
-      const saved = await apiClient.updateTranslationSettings({ ...next, ...(apiKey ? { apiKey } : {}) });
+      const saved = await apiClient.updateTranslationSettings({ ...next, ...(apiKey !== undefined ? { apiKey } : {}) });
       const previews = await apiClient.getTranslationPrompts();
       setSettings(saved);
       setPromptPreviews(previews);

@@ -2098,8 +2098,8 @@ export interface TranslationRouteDeps {
 
 实现规则：
 
-- settings API 不返回 `apiKey`。
-- `PUT settings` 可以接收 API key，但只能交给 TranslationService secret storage。
+- settings API 返回本机已保存的 `apiKey`，用于设置页显示和继续编辑。
+- `PUT settings` 接收 API key 并写入 TranslationService local secret storage；输入框为空并保存时清空本机 API key。
 - input route 必须 load current task，防止跨 taskSlug。
 - input route 只允许向当前 role session 发送翻译结果。
 - retry / clear 只影响 Translation Panel runtime state。
@@ -2919,7 +2919,7 @@ TranslationPanel composer
 
 `tests/integration/api/translation-routes.test.ts`
 
-- saves settings without exposing API key。
+- saves settings and returns the locally saved API key to the local settings UI。
 - tests provider with fake provider。
 - translates user input into English preview。
 - sends confirmed English to fake runtime。
