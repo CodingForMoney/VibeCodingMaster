@@ -216,6 +216,26 @@ Role-specific behavior lives in `.claude/agents/`.
 - If the current session was not started with the required role, stop and ask the user to restart with `claude --agent <role>`; do not pretend to be that role inside the wrong session.
 - Critical global rules may be repeated in role agent files for defense in depth, but repeated rules must use stable rule IDs and be checked by `tools/check-agent-rules`. Do not maintain untracked manual copies.
 
+## VCM Managed Harness Blocks
+
+If VibeCodingMaster or another harness manager maintains project rules, those rules must live in repo-local files and be reviewable in Git. Do not inject long-lived collaboration rules into a Claude Code terminal as ordinary input.
+
+Allowed managed block format:
+
+```md
+<!-- VCM:BEGIN version=1 -->
+VCM-managed rules.
+<!-- VCM:END -->
+```
+
+Rules:
+
+- VCM may create missing `CLAUDE.md` and `.claude/agents/{project-manager,architect,coder,reviewer}.md` from recommended defaults.
+- If a file already exists, VCM may only insert or replace the VCM managed block.
+- VCM must not overwrite user-authored content outside managed blocks.
+- After applying harness changes, VCM must report changed files and recommend a user review/commit.
+- Session startup should pass environment variables and start the role agent; it should not paste a long VCM context into the terminal.
+
 ## Default Behavior
 
 - State assumptions before coding; ask when requirements, boundaries, or acceptance criteria are unclear.

@@ -97,6 +97,7 @@ VibeCodingMaster/
       types/
         api.ts
         artifact.ts
+        harness.ts
         project.ts
         role.ts
         session.ts
@@ -116,6 +117,7 @@ VibeCodingMaster/
       components/
         app-shell.tsx
         event-log.tsx
+        harness-panel.tsx
         repo-connect-form.tsx
         role-session-tabs.tsx
         session-console.tsx
@@ -134,6 +136,7 @@ VibeCodingMaster/
       server.ts
       api/
         artifact-routes.ts
+        harness-routes.ts
         project-routes.ts
         session-routes.ts
         task-routes.ts
@@ -146,6 +149,7 @@ VibeCodingMaster/
       services/
         artifact-service.ts
         command-dispatcher.ts
+        harness-service.ts
         project-service.ts
         session-service.ts
         status-service.ts
@@ -157,6 +161,12 @@ VibeCodingMaster/
         git-adapter.ts
       templates/
         handoff.ts
+        harness/
+          claude-root.ts
+          project-manager-agent.ts
+          architect-agent.ts
+          coder-agent.ts
+          reviewer-agent.ts
         role-command.ts
       validation/
         environment-check.ts
@@ -634,7 +644,55 @@ export interface ArtifactSummary {
 }
 ```
 
-### 6.8 `src/shared/types/api.ts`
+### 6.8 `src/shared/types/harness.ts`
+
+职责：
+
+- 定义 VCM Harness 检查、计划和应用结果。
+
+导出定义：
+
+```ts
+export type HarnessFileKind =
+  | "root-claude"
+  | "agent-project-manager"
+  | "agent-architect"
+  | "agent-coder"
+  | "agent-reviewer";
+
+export type HarnessFileAction = "create" | "insert" | "update" | "ok";
+
+export interface HarnessFileStatus {
+  kind: HarnessFileKind;
+  path: string;
+  exists: boolean;
+  hasManagedBlock: boolean;
+  managedVersion?: number;
+  action: HarnessFileAction;
+}
+
+export interface HarnessStatusReport {
+  version: number;
+  files: HarnessFileStatus[];
+  needsApply: boolean;
+  plannedChanges: HarnessPlannedChange[];
+  warnings: string[];
+}
+
+export interface HarnessPlannedChange {
+  path: string;
+  action: HarnessFileAction;
+  reason: string;
+}
+
+export interface HarnessApplyResult {
+  version: number;
+  changedFiles: HarnessPlannedChange[];
+  message: string;
+}
+```
+
+### 6.9 `src/shared/types/api.ts`
 
 职责：
 
@@ -1061,7 +1119,52 @@ export interface AppendRoleLogInput {
 export function createArtifactService(fs: FileSystemAdapter): ArtifactService;
 ```
 
-### 10.4 `src/backend/services/session-service.ts`
+### 10.4 `src/backend/services/harness-service.ts`
+
+职责：
+
+- 检查 repo 是否安装 VCM Harness rules。
+- 检查并计划 `CLAUDE.md` 与 `.claude/agents/*.md` 的 VCM managed block。
+- 对缺失文件生成推荐默认内容。
+- 对已有文件只插入或更新 `<!-- VCM:BEGIN version=... -->` managed block。
+- 返回 planned changes，供 GUI 在写入前展示。
+- 应用变更后返回 changed files summary，并提示用户 review/commit。
+
+导出定义：
+
+```ts
+export interface HarnessService {
+  getHarnessStatus(repoRoot: string): Promise<HarnessStatusReport>;
+  applyHarness(repoRoot: string): Promise<HarnessApplyResult>;
+}
+
+export interface HarnessServiceDeps {
+  fs: FileSystemAdapter;
+  now?: () => string;
+}
+
+export function createHarnessService(deps: HarnessServiceDeps): HarnessService;
+```
+
+实现规则：
+
+- `CLAUDE.md` 不存在时创建推荐默认文件。
+- `.claude/agents/project-manager.md`、`architect.md`、`coder.md`、`reviewer.md` 不存在时创建推荐默认文件。
+- 文件存在且无 VCM block 时，追加 VCM block。
+- 文件存在且 VCM block 版本过期时，只替换 VCM block。
+- 文件存在且 VCM block 最新时，不修改。
+- 不修改 managed block 之外的用户内容。
+- 如果 working tree 已 dirty，仍可应用，但必须在结果 warnings 中提示用户 review diff，避免混淆已有改动和 VCM 改动。
+
+默认模板内容：
+
+- `templates/harness/claude-root.ts`：共享 VCM 规则、canonical handoff directory、`vcmctl` 基本规则、高风险停止条件。
+- `templates/harness/project-manager-agent.ts`：用户沟通入口、任务澄清、角色路由、`vcmctl send`、workflow gate、final acceptance / commit / PR。
+- `templates/harness/architect-agent.ts`：architecture plan、module boundary、public/test contract、post-review docs sync / architecture drift check、`docs-sync-report.md`。
+- `templates/harness/coder-agent.ts`：按 approved plan 实现、维护 implementation / validation logs、遇到范围或架构变化时回 PM。
+- `templates/harness/reviewer-agent.ts`：独立 review、测试充分性、review report、发现 docs drift 时交回 PM。
+
+### 10.5 `src/backend/services/session-service.ts`
 
 职责：
 
@@ -1116,7 +1219,7 @@ export interface SessionServiceDeps {
 export function createSessionService(deps: SessionServiceDeps): SessionService;
 ```
 
-### 10.5 `src/backend/services/command-dispatcher.ts`
+### 10.6 `src/backend/services/command-dispatcher.ts`
 
 职责：
 
@@ -1161,7 +1264,7 @@ export function createCommandDispatcher(deps: CommandDispatcherDeps): CommandDis
 - role command 文件为空时失败。
 - role command 文件仍是模板或包含 `TBD` / `status: draft` 时失败。
 - role command 必须使用当前 VCM task 的 canonical path：`.ai/handoffs/<task-slug>/role-commands/<role>.md`。
-- Project Manager 启动时，backend 必须向 session 注入 task context，明确 `taskSlug`、`handoffDir` 和三个 role command 路径。
+- Project Manager 的 VCM 协作规则必须来自 repo-local `CLAUDE.md` / `.claude/agents/project-manager.md` managed block，不再通过 terminal 输入注入长 context。
 - 目标 role session 未运行时失败并提示启动 session。
 - `instruction` 必须是短文本：
 - 只有用户通过 GUI 点击 Send Command 时才调用 dispatch。
@@ -1172,7 +1275,7 @@ export function createCommandDispatcher(deps: CommandDispatcherDeps): CommandDis
 Please read and execute the role command at: <path>
 ```
 
-### 10.6 `src/backend/services/status-service.ts`
+### 10.7 `src/backend/services/status-service.ts`
 
 职责：
 
@@ -1262,7 +1365,6 @@ Routes：
 GET  /api/health
 POST /api/projects/connect
 GET  /api/projects/current
-GET  /api/projects/harness
 ```
 
 导出定义：
@@ -1275,7 +1377,34 @@ export interface ProjectRouteDeps {
 }
 ```
 
-### 11.3 `src/backend/api/task-routes.ts`
+### 11.3 `src/backend/api/harness-routes.ts`
+
+Routes：
+
+```text
+GET  /api/projects/harness
+POST /api/projects/harness/apply
+```
+
+导出定义：
+
+```ts
+export function registerHarnessRoutes(app: FastifyInstance, deps: HarnessRouteDeps): void;
+
+export interface HarnessRouteDeps {
+  projectService: ProjectService;
+  harnessService: HarnessService;
+}
+```
+
+实现规则：
+
+- `GET` 只返回 status 和 planned changes，不写文件。
+- `POST /apply` 才写文件。
+- `POST /apply` 只能改 VCM managed block 或创建缺失文件。
+- 返回 changed files summary，供 GUI 提示用户 review/commit。
+
+### 11.4 `src/backend/api/task-routes.ts`
 
 Routes：
 
@@ -1298,7 +1427,7 @@ export interface TaskRouteDeps {
 }
 ```
 
-### 11.4 `src/backend/api/session-routes.ts`
+### 11.5 `src/backend/api/session-routes.ts`
 
 Routes：
 
@@ -1323,7 +1452,7 @@ export interface SessionRouteDeps {
 }
 ```
 
-### 11.5 `src/backend/api/artifact-routes.ts`
+### 11.6 `src/backend/api/artifact-routes.ts`
 
 Routes：
 
@@ -1347,7 +1476,7 @@ export interface ArtifactRouteDeps {
 }
 ```
 
-### 11.6 `src/backend/ws/terminal-ws.ts`
+### 11.7 `src/backend/ws/terminal-ws.ts`
 
 职责：
 
@@ -1408,6 +1537,8 @@ export function App(): JSX.Element;
 export interface ApiClient {
   connectProject(input: ConnectProjectRequest): Promise<ProjectSummary>;
   getCurrentProject(): Promise<ProjectSummary | null>;
+  getHarnessStatus(): Promise<HarnessStatusReport>;
+  applyHarness(): Promise<HarnessApplyResult>;
   listTasks(): Promise<TaskRecord[]>;
   createTask(input: CreateTaskRequest): Promise<TaskRecord>;
   getTask(taskSlug: string): Promise<TaskRecord>;
@@ -1540,6 +1671,9 @@ export function EventLog(props: EventLogProps): JSX.Element;
 职责：
 
 - 展示 repo 连接表单、任务列表和 harness health。
+- 在 repo 连接后拉取 harness status。
+- 展示 `Install / Update VCM Harness`，但只在用户点击后应用变更。
+- 应用后展示 changed files summary 和 review/commit 提示。
 
 导出定义：
 
@@ -1547,7 +1681,30 @@ export function EventLog(props: EventLogProps): JSX.Element;
 export function ProjectDashboard(): JSX.Element;
 ```
 
-### 12.10 `src/frontend/routes/task-workspace.tsx`
+### 12.10 `src/frontend/components/harness-panel.tsx`
+
+职责：
+
+- 展示 `CLAUDE.md` 和 4 个 role agent 的 status。
+- 展示每个文件的 action：`create` / `insert` / `update` / `ok`。
+- 展示 planned changes。
+- 提供 `View Planned Changes`、`Install / Update VCM Harness`、`Refresh`。
+- 应用后提示用户 review diff 并提交独立 commit。
+
+导出定义：
+
+```tsx
+export interface HarnessPanelProps {
+  status: HarnessStatusReport | null;
+  busy: boolean;
+  onRefresh(): Promise<void>;
+  onApply(): Promise<void>;
+}
+
+export function HarnessPanel(props: HarnessPanelProps): JSX.Element;
+```
+
+### 12.11 `src/frontend/routes/task-workspace.tsx`
 
 职责：
 
@@ -1618,6 +1775,22 @@ ProjectDashboard
   -> git.isDirty
   -> claude.isAvailable
   -> fs.writeJsonAtomic(.vcm/config.json)
+  -> api.getHarnessStatus
+  -> GET /api/projects/harness
+  -> harnessService.getHarnessStatus
+  -> GUI shows missing/outdated VCM rules and planned changes
+```
+
+连接 repo 不自动修改 `CLAUDE.md` 或 `.claude/agents/*`。
+
+```text
+User clicks Install / Update VCM Harness
+  -> api.applyHarness
+  -> POST /api/projects/harness/apply
+  -> harnessService.applyHarness
+  -> create missing harness files or update VCM managed blocks
+  -> GUI shows changed files summary
+  -> GUI recommends review and commit
 ```
 
 ### 14.3 创建任务

@@ -470,31 +470,86 @@ V1 GUI 先提供软流程提示：根据 handoff artifacts 是否存在、是否
 
 ### 8.1 新项目初始化
 
-用户连接一个 repo 后，VibeCodingMaster 执行 Harness Scan：
+用户连接一个 repo 后，VibeCodingMaster 执行 Harness Check。这个步骤不是静默改项目，而是先检查、展示计划，再由用户确认是否安装或更新 VCM Harness。
 
 ```text
-Scan repo
+Connect repo
   -> identify language, framework, package manager
   -> identify test commands
   -> inspect directory and module boundaries
   -> check CLAUDE.md
+  -> check .claude/agents/project-manager.md
+  -> check .claude/agents/architect.md
+  -> check .claude/agents/coder.md
+  -> check .claude/agents/reviewer.md
+  -> check VCM managed block version
   -> check docs/ARCHITECTURE.md
   -> check docs/MODULE_MAP.md
   -> check docs/TESTING.md
   -> check module-local CLAUDE.md
   -> check validation tools
   -> check generated artifacts
-  -> report harness gaps
+  -> report harness gaps and planned VCM changes
 ```
 
 输出 Project Harness Report：
 
 - 当前 harness level。
+- `CLAUDE.md` 是否存在，是否包含 VCM managed block。
+- 4 个默认 role agent 是否存在，是否包含 VCM managed block。
+- 每个文件的建议动作：`create` / `insert` / `update` / `ok`。
 - 缺失的核心文档。
 - 缺失的 validation commands。
 - 高风险模块。
 - 是否存在 generated artifact freshness check。
 - 是否适合执行非平凡 AI coding。
+
+如果用户点击 `Install / Update VCM Harness`，VCM 执行：
+
+```text
+Apply harness plan
+  -> create missing CLAUDE.md if needed
+  -> create missing .claude/agents/*.md if needed
+  -> insert or update only <!-- VCM:BEGIN ... --> managed blocks in existing files
+  -> never overwrite user-authored content outside managed blocks
+  -> show changed files and actions
+  -> recommend user review and commit
+```
+
+VCM managed block 格式：
+
+```md
+<!-- VCM:BEGIN version=1 -->
+VCM-managed collaboration rules.
+<!-- VCM:END -->
+```
+
+首次安装可能创建或修改：
+
+```text
+CLAUDE.md
+.claude/agents/project-manager.md
+.claude/agents/architect.md
+.claude/agents/coder.md
+.claude/agents/reviewer.md
+```
+
+默认模板职责：
+
+- `CLAUDE.md`：共享 VCM 规则、canonical handoff directory、`vcmctl` 基本规则、高风险停止条件。
+- `project-manager.md`：用户沟通入口、任务澄清、角色路由、`vcmctl send`、workflow gate、final acceptance / commit / PR。
+- `architect.md`：architecture plan、module boundary、public/test contract、post-review docs sync / architecture drift check、`docs-sync-report.md`。
+- `coder.md`：按 approved plan 实现、维护 implementation / validation logs、遇到范围或架构变化时回 PM。
+- `reviewer.md`：独立 review、测试充分性、review report、发现 docs drift 时交回 PM。
+
+Role sessions 的 VCM 协作规则必须从这些 repo-local 文件读取。VCM 不应在启动 Claude Code session 时把长段 messaging context 粘贴进 terminal。
+
+安装完成后，GUI 必须告诉用户：
+
+- VCM 创建了哪些文件。
+- VCM 更新了哪些文件。
+- 是否存在原本就 dirty 的工作区。
+- 建议用户 review diff，并提交一个独立 commit，例如 `Install VCM harness rules`。
 
 ### 8.2 用户提出需求
 
@@ -1085,14 +1140,24 @@ V1 不在任务主界面展示独立 artifact panel。role commands、handoff ar
 显示：
 
 - root `CLAUDE.md` 是否存在。
+- root `CLAUDE.md` 是否包含最新 VCM managed block。
+- 4 个 role agent 是否存在。
+- 4 个 role agent 是否包含最新 VCM managed block。
 - module-local `CLAUDE.md` 覆盖率。
 - architecture docs 是否存在。
 - testing docs 是否存在。
 - validation tools 是否存在。
 - generated artifacts 是否 freshness-checked。
-- role agents 是否存在。
 - hooks / CI gates 是否存在。
 - known issues 是否过期。
+
+可执行操作：
+
+- `View Planned Changes`
+- `Install / Update VCM Harness`
+- `Refresh Harness Status`
+
+应用后必须展示 changed files summary，并提示用户 review/commit。
 
 ## 12. 数据对象
 
@@ -1105,6 +1170,20 @@ V1 不在任务主界面展示独立 artifact panel。role commands、handoff ar
   "repoPath": "/path/to/repo",
   "defaultBranch": "main",
   "harnessHealth": "partial",
+  "vcmHarness": {
+    "needsApply": true,
+    "managedBlockVersion": 1,
+    "plannedChanges": [
+      {
+        "path": "CLAUDE.md",
+        "action": "insert"
+      },
+      {
+        "path": ".claude/agents/project-manager.md",
+        "action": "create"
+      }
+    ]
+  },
   "validationCommands": [
     "tools/check-fast",
     "tools/check-changed"

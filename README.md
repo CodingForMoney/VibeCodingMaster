@@ -157,13 +157,16 @@ Important container notes:
 1. Start VCM.
 2. Open the GUI.
 3. Connect a Git repository.
-4. Create a task.
-5. Select a role tab.
-6. Choose the Claude Code permission mode for that role.
-7. Click `Start`.
-8. Talk to `project-manager` first.
-9. Let PM delegate to `architect`, `coder`, or `reviewer`.
-10. Inspect and approve role messages in the `Messages` panel.
+4. Review the VCM Harness status.
+5. Install or update the VCM Harness rules when prompted.
+6. Review the files VCM created or changed, then commit them if they look right.
+7. Create a task.
+8. Select a role tab.
+9. Choose the Claude Code permission mode for that role.
+10. Click `Start`.
+11. Talk to `project-manager` first.
+12. Let PM delegate to `architect`, `coder`, or `reviewer`.
+13. Inspect and approve role messages in the `Messages` panel.
 
 The recommended flow is to mostly talk to `project-manager`. The PM role should coordinate the other roles through VCM messaging instead of asking the user to copy prompts between terminals.
 
@@ -174,6 +177,30 @@ architect plan -> coder implementation -> reviewer review -> architect docs sync
 ```
 
 This is a soft guide in the current release. VCM highlights missing or placeholder handoff artifacts and suggests the next step, but it does not yet hard-block starting a role out of order.
+
+## Project Harness
+
+VCM works best when the target repository contains the VCM collaboration rules as normal project files. On first connect, VCM should check the repo harness and offer an explicit install/update action.
+
+VCM checks:
+
+- `CLAUDE.md`
+- `.claude/agents/project-manager.md`
+- `.claude/agents/architect.md`
+- `.claude/agents/coder.md`
+- `.claude/agents/reviewer.md`
+
+If a file is missing, VCM can create a recommended default. If a file already exists, VCM must preserve the user's content and only insert or update a managed block:
+
+```md
+<!-- VCM:BEGIN version=1 -->
+VCM-managed rules live here.
+<!-- VCM:END -->
+```
+
+After applying harness changes, VCM should show the exact files changed and remind the user to review and commit them before starting long-running work.
+
+Role sessions should learn VCM rules from these repo files. VCM should not paste a long messaging context into the embedded terminal when a Claude Code session starts.
 
 ## Message Bus
 

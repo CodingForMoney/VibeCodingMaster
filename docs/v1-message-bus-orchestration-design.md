@@ -256,18 +256,31 @@ VCM_MESSAGE_TOKEN=<local-session-token>
 
 Backend must verify token, task, role, and session before accepting a message.
 
-Skill files:
+Role rule files:
 
 ```text
-.vcm/skills/project-manager-messaging.md
-.vcm/skills/role-reply.md
+CLAUDE.md
+.claude/agents/project-manager.md
+.claude/agents/architect.md
+.claude/agents/coder.md
+.claude/agents/reviewer.md
 ```
 
-Or generated role context injected at session start:
+VCM installs or updates these files through a user-approved harness setup flow. Existing files are preserved; VCM only writes inside managed blocks:
+
+```md
+<!-- VCM:BEGIN version=1 -->
+...
+<!-- VCM:END -->
+```
+
+Rule ownership:
 
 - PM gets `send_to_role` rules.
 - Other roles get `reply_to_pm` rules.
 - All roles get the canonical `taskSlug` and `handoffDir`.
+
+Do not inject the long VCM messaging context into the terminal at session startup. Session startup should pass only environment variables such as `VCM_API_URL`, `VCM_TASK_SLUG`, `VCM_ROLE`, and `VCM_CTL_COMMAND`.
 
 ## 8. Backend Components
 
@@ -278,7 +291,6 @@ src/shared/types/message.ts
 src/backend/services/message-service.ts
 src/backend/api/message-routes.ts
 src/backend/templates/message-envelope.ts
-src/backend/templates/role-messaging-context.ts
 src/cli/vcmctl.ts
 tests/unit/backend/message-service.test.ts
 tests/unit/backend/message-envelope.test.ts
@@ -451,8 +463,8 @@ Recommended transition:
 2. Add MessageService and message APIs.
 3. Add task-level orchestration mode, default `manual`.
 4. Add `vcmctl send/reply`.
-5. Inject role messaging context into sessions.
-6. Update PM instructions to use `vcmctl send`.
+5. Install or update repo-local VCM Harness rules in `CLAUDE.md` and `.claude/agents/*`.
+6. Update PM instructions in `.claude/agents/project-manager.md` to use `vcmctl send`.
 7. Replace `Send Command` button with message timeline approval actions.
 8. Remove old role-command dispatch once message bus is stable.
 
@@ -483,8 +495,8 @@ Acceptance:
 
 - Add `vcmctl`.
 - Inject `VCM_*` env vars into role sessions.
-- Add role messaging context templates.
-- Add PM skill text and non-PM reply skill text.
+- Add HarnessService templates for `CLAUDE.md` and `.claude/agents/*`.
+- Add PM `vcmctl send` rules and non-PM `vcmctl reply` rules through managed blocks.
 
 Acceptance:
 

@@ -594,6 +594,14 @@ bypassPermissions
 V1 需要创建和维护：
 
 ```text
+CLAUDE.md
+.claude/
+  agents/
+    project-manager.md
+    architect.md
+    coder.md
+    reviewer.md
+
 .ai/
   handoffs/
     <task-slug>/
@@ -655,6 +663,7 @@ src/
     server.ts
     api/
       project-routes.ts
+      harness-routes.ts
       task-routes.ts
       session-routes.ts
       artifact-routes.ts
@@ -666,6 +675,7 @@ src/
       session-registry.ts
     services/
       project-service.ts
+      harness-service.ts
       task-service.ts
       session-service.ts
       artifact-service.ts
@@ -683,6 +693,12 @@ src/
     templates/
       handoff.ts
       role-command.ts
+      harness/
+        claude-root.ts
+        project-manager-agent.ts
+        architect-agent.ts
+        coder-agent.ts
+        reviewer-agent.ts
     types/
       project.ts
       task.ts
@@ -764,7 +780,28 @@ tests/
 - 保存 role command。
 - 追加 raw terminal logs。
 
-### 9.8 CommandDispatcher
+### 9.8 HarnessService
+
+职责：
+
+- 检查 repo-level VCM Harness 是否存在、是否过期。
+- 检查 `CLAUDE.md` 和 `.claude/agents/{project-manager,architect,coder,reviewer}.md`。
+- 为缺失文件生成推荐默认内容。
+- 对已有文件只插入或更新 VCM managed block。
+- 生成 planned changes，让用户在写入前审阅。
+- 写入后返回 changed files summary，并提示用户 review/commit。
+
+Managed block 边界：
+
+```md
+<!-- VCM:BEGIN version=1 -->
+...
+<!-- VCM:END -->
+```
+
+HarnessService 不覆盖 managed block 之外的用户内容。
+
+### 9.9 CommandDispatcher
 
 职责：
 
@@ -788,6 +825,7 @@ GET  /api/health
 POST /api/projects/connect
 GET  /api/projects/current
 GET  /api/projects/harness
+POST /api/projects/harness/apply
 ```
 
 `POST /api/projects/connect`：
@@ -797,6 +835,10 @@ GET  /api/projects/harness
   "repoPath": "/path/to/repo"
 }
 ```
+
+`GET /api/projects/harness` 返回 repo harness status、planned changes、managed block version 和每个文件的建议动作。
+
+`POST /api/projects/harness/apply` 只执行用户确认后的 VCM managed block 创建/插入/更新，并返回 changed files summary。
 
 ### 10.2 Task API
 
@@ -1010,8 +1052,37 @@ User selects repo path
   -> check claude --version
   -> create .vcm/config.json
   -> create .ai/handoffs/
+  -> run HarnessService.check
+  -> show Harness Status and planned VCM changes
   -> show branch and dirty warning
 ```
+
+VCM 不应在连接 repo 时静默写入 `CLAUDE.md` 或 `.claude/agents/*`。用户必须明确点击 `Install / Update VCM Harness` 后才写入。
+
+### 12.2.1 安装或更新 VCM Harness
+
+```text
+User clicks Install / Update VCM Harness
+  -> POST /api/projects/harness/apply
+  -> create missing CLAUDE.md if needed
+  -> create missing .claude/agents/*.md if needed
+  -> insert or update VCM managed blocks in existing files
+  -> preserve user content outside managed blocks
+  -> return changed files summary
+  -> GUI recommends review and commit
+```
+
+典型结果：
+
+```text
+created CLAUDE.md
+created .claude/agents/project-manager.md
+created .claude/agents/architect.md
+updated .claude/agents/coder.md VCM block
+created .claude/agents/reviewer.md
+```
+
+用户应在开始长期任务前 review diff，并提交一个独立 harness commit。
 
 ### 12.3 创建任务 workspace
 
@@ -1234,13 +1305,15 @@ V1 必须明确提示：
 
 V1 推荐但不强制：
 
+- 项目提供 `CLAUDE.md`。
 - 项目提供 `.claude/agents/project-manager.md`。
 - 项目提供 `.claude/agents/architect.md`。
 - 项目提供 `.claude/agents/coder.md`。
 - 项目提供 `.claude/agents/reviewer.md`。
+- 上述文件包含最新 VCM managed block。
 - 项目配置 Claude Code permission hooks。
 
-V1 可以提供 Harness Health 检查这些文件是否存在，但不自动生成复杂 role agents。
+V1 可以提供 Harness Health 检查和用户确认后的 Harness Install / Update。VCM 只能管理自己的 VCM block；不应重写用户已有 role agent 内容。
 
 ## 16. 后续演进接口
 
