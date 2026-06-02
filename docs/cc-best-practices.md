@@ -56,6 +56,7 @@ Behavioral guardrails:
 - When multiple interpretations are reasonable, do not choose silently; explain the difference and tradeoff, and ask for confirmation when needed.
 - Prefer the simplest solution that satisfies the task; do not add unrequested features, configuration, extension points, or abstractions.
 - Touch only files required by the task; do not clean up, format, or refactor adjacent code opportunistically.
+- When the current task replaces a mechanism, remove obsolete code, stale paths, dead branches, legacy adapters, and unused compatibility shims. Do not preserve backward compatibility with stale code unless the user explicitly asks for it.
 - Clean up only unused imports, variables, functions, or test leftovers created by the current change.
 - Report-but-don't-act: when noticing an issue outside the current task scope (unrelated dead code, doc drift, adjacent bug, architecture concern, security smell), record it in `.ai/state/known-issues.md` and continue; do not act on it without an explicit task.
 - Every diff line must trace to the task goal, public contract, test contract, or required documentation sync.
@@ -68,6 +69,7 @@ Recommended structure:
 ```text
 repo/
   CLAUDE.md
+  .gitignore
 
   docs/
     ARCHITECTURE.md
@@ -95,13 +97,13 @@ repo/
     commands/
 
   .ai/
-    task-specs/
-    handoffs/
-      <task-slug>/
+    vcm/                 # ignored local VCM control state
+      handoffs/
         architecture-plan.md
         implementation-log.md
         validation-log.md
         review-report.md
+    task-specs/
     state/
       progress.md
       decisions.md
@@ -211,7 +213,14 @@ Role-specific behavior lives in `.claude/agents/`.
 - Default core roles are `project-manager`, `architect`, `coder`, and `reviewer`.
 - The `project-manager` role owns user communication, task routing, role commands, handoff verification, final status reporting, and PR preparation after required gates pass.
 - Do not let one coding session own architecture/plan decisions, implementation, final testing responsibility, and review.
-- Role outputs are exchanged through `.ai/handoffs/<task-slug>/`, not through chat history.
+- Role outputs are exchanged through `.ai/vcm/handoffs/`, not through chat history.
+- Role messaging is turn-based. Keep at most one active message to the same target role.
+- Send role messages by writing or updating the fixed route file under `.ai/vcm/handoffs/messages/<from-role>-<to-role>.md`.
+- For a given target role, update the same route file instead of creating multiple fragmented messages.
+- After writing or updating a role message file, end the current Claude Code turn. Treat the file write as the final coordination action of that turn.
+- Do not poll message files, start shell loops, or keep the turn open waiting for another role's answer. VCM dispatches pending route files after Claude Code `Stop`.
+- Do not use Claude Code Task/Subagent for VCM role delegation; VCM owns the four long-running role sessions.
+- If new information appears while a role is still processing, update the handoff artifact or wait instead of sending fragmented follow-up messages.
 - When the required role route includes `architect`, coding must not start until the architecture and plan artifact exists.
 - If the current session was not started with the required role, stop and ask the user to restart with `claude --agent <role>`; do not pretend to be that role inside the wrong session.
 - Critical global rules may be repeated in role agent files for defense in depth, but repeated rules must use stable rule IDs and be checked by `tools/check-agent-rules`. Do not maintain untracked manual copies.
@@ -558,7 +567,7 @@ Do not include:
 
 For large projects, the default execution model should be explicit role-based sessions, not dynamic role routing inside one generic Claude conversation.
 
-The user-facing task should start with a `project-manager` role session. The project manager owns user communication, role command dispatch, severity classification, role routing, progress tracking, and process verification. It does not own architecture, coding, and independent review for the same non-trivial task.
+The user-facing task should start with a `project-manager` role session. The project manager owns user communication, route-file message preparation, severity classification, role routing, progress tracking, and process verification. It does not own architecture, coding, and independent review for the same non-trivial task.
 
 Do not make one generic Claude session own architecture, planning, coding, final testing, and review for non-trivial work. That blurs responsibility and makes acceptance weak.
 
@@ -626,7 +635,7 @@ Role command examples:
 ```text
 architect command:
   read the task spec, architecture docs, module map, and relevant module-local CLAUDE.md
-  produce .ai/handoffs/<task-slug>/architecture-plan.md
+  produce .ai/vcm/handoffs/architecture-plan.md
   define file responsibilities, public contracts, test contracts, phases, validation, and Replan triggers
   do not edit production code
 
@@ -712,7 +721,7 @@ Role responsibilities:
 
 ```text
 project-manager
-  owns user communication, task clarification, task specs, role routing, and role command dispatch
+  owns user communication, task clarification, task specs, role routing, and route-file message preparation
   turns user input into an engineering task when needed
   summarizes role outputs back to the user
   creates and verifies handoff artifacts
@@ -724,8 +733,8 @@ architect
   owns architecture and plan
   defines module boundaries, file responsibilities, public contracts, dependency direction, risk, and phases
   owns post-review docs sync and architecture drift checks before PM final acceptance
-  outputs .ai/handoffs/<task-slug>/architecture-plan.md
-  outputs .ai/handoffs/<task-slug>/docs-sync-report.md when a post-review docs sync gate is required
+  outputs .ai/vcm/handoffs/architecture-plan.md
+  outputs .ai/vcm/handoffs/docs-sync-report.md when a post-review docs sync gate is required
   must not implement production code
 
 coder
@@ -741,7 +750,7 @@ reviewer
   checks, designs, and adds missing tests when needed
   may directly apply small, local, low-risk review fixes
   owns complex tests, E2E coverage, regression matrix, and release-level validation recommendations
-  outputs .ai/handoffs/<task-slug>/review-report.md
+  outputs .ai/vcm/handoffs/review-report.md
   must escalate larger implementation issues to coder
   must escalate architecture, public contract, design, or documentation drift issues to architect
 ```
@@ -779,7 +788,7 @@ Role sessions communicate through files, not memory from previous chats.
 Required handoff directory:
 
 ```text
-.ai/handoffs/<task-slug>/
+.ai/vcm/handoffs/
   role-commands/
     architect.md
     coder.md
@@ -873,7 +882,7 @@ escalate to architect:
   the implementation reveals that the architecture plan is invalid
 ```
 
-For a task with a handoff directory, `.ai/handoffs/<task-slug>/validation-log.md` is the authoritative validation record for that task. `.ai/state/validation-log.md` is only a rolling index of recent validation results across tasks.
+For a task with a handoff directory, `.ai/vcm/handoffs/validation-log.md` is the authoritative validation record for that task. `.ai/state/validation-log.md` is only a rolling index of recent validation results across tasks.
 
 For complex or high-risk work, the next role must not start until the required previous artifact exists and is coherent.
 
@@ -957,8 +966,8 @@ Worktree isolation is by task, not by role:
 
 ```text
 one task
-  -> one branch
-  -> one worktree
+  -> one branch: feature/<task-slug>
+  -> one worktree: .claude/worktrees/<task-slug>
   -> one handoff directory
   -> architect -> coder -> reviewer in sequence
 ```
@@ -1036,7 +1045,7 @@ You are the architecture and planning role for this project.
 
 # Outputs
 
-- `.ai/handoffs/<task-slug>/architecture-plan.md`
+- `.ai/vcm/handoffs/architecture-plan.md`
 
 # Do Not
 
@@ -1358,6 +1367,10 @@ Do not rely on `CLAUDE.md` for constraints that can be automated.
 Recommended hooks:
 
 ```text
+Stop:
+  notify VCM that a role turn ended
+  trigger VCM to scan .ai/vcm/handoffs/messages/ for pending route files
+
 PreToolUse:
   block protected files
   block destructive commands
@@ -1372,6 +1385,7 @@ PostToolUse:
   run cheap lint
 
 Stop:
+  switch the role activity state to idle
   check project manager did not bypass required role route
   check task severity and required role route
   check required handoff artifacts exist
@@ -1436,8 +1450,8 @@ Default rule:
 
 ```text
 one task
-  -> one branch
-  -> one worktree
+  -> one branch: feature/<task-slug>
+  -> one worktree: .claude/worktrees/<task-slug>
   -> one handoff directory
   -> one PR
 ```
@@ -1477,8 +1491,18 @@ Branch rules:
 
 - never do AI implementation work directly on the main branch
 - one task branch should map to one task worktree
+- VCM-managed task branches should use `feature/<task-slug>`
+- VCM-managed task worktrees should live under `.claude/worktrees/<task-slug>`
+- `.gitignore` should contain a VCM managed block that ignores `.ai/vcm/` and `.claude/worktrees/`
+- a task should not switch to a different branch/worktree after creation; create a new task instead
 - large work should use phase commits on the same task branch unless phases are independently releasable
 - if a task becomes too large, split it into child tasks with explicit branch and PR ownership
+
+Close Task rules:
+
+- after task completion, use VCM `Close Task` only when the user is ready to delete task-local state
+- for worktree-backed tasks, `Close Task` deletes the task worktree, deletes the task branch by default, and removes VCM task/session/message/orchestration/handoff metadata
+- `Close Task` stops VCM-managed running role sessions, but it does not check uncommitted changes; finish, commit, or preserve anything important before using it
 
 Small commits:
 
@@ -1601,7 +1625,7 @@ State files:
 
 Validation log authority:
 
-- `.ai/handoffs/<task-slug>/validation-log.md` is authoritative for one task.
+- `.ai/vcm/handoffs/validation-log.md` is authoritative for one task.
 - `.ai/state/validation-log.md` is a rolling index across tasks and should point to the task-level log when one exists.
 - Final reports and review reports should cite the task-level validation log, not scattered chat output.
 
@@ -1856,7 +1880,7 @@ behavior is correct
 - [ ] For T2+ work, architect performed post-review docs sync / architecture drift check before final PM acceptance.
 - [ ] Docs updates or a docs-sync-report explain why affected architecture/module/testing/security/dependency docs are current.
 - [ ] The project manager prepared final acceptance, commit, and PR only after reviewer and docs-sync gates passed or an exception was approved.
-- [ ] Task-level validation evidence is recorded in `.ai/handoffs/<task-slug>/validation-log.md` when a handoff directory exists.
+- [ ] Task-level validation evidence is recorded in `.ai/vcm/handoffs/validation-log.md` when a handoff directory exists.
 
 ## Architecture
 
@@ -2136,7 +2160,7 @@ Monthly review:
 If you can only enforce 16 rules, enforce these:
 
 1. User-facing tasks start with `claude --agent project-manager`; untagged sessions are not implicit project managers.
-2. The `project-manager` agent owns user communication, task clarification, and precise role command dispatch.
+2. The `project-manager` agent owns user communication, task clarification, and precise route-file message preparation.
 3. Complex tasks use explicit role sessions, handoff artifacts, and plan first; do not edit directly.
 4. One task uses one branch, one worktree, one handoff directory, and one PR by default.
 5. Role sessions for the same task work in the same task worktree sequentially; parallel write work uses separate task or sub-task worktrees.

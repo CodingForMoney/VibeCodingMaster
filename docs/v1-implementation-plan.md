@@ -1,8 +1,8 @@
 # V1 Implementation Plan And File Map
 
-Last updated: 2026-05-30
+Last updated: 2026-06-02
 
-This document is the current implementation map for VCM V1. It replaces older plan text that referenced removed files or obsolete UI behavior.
+This document is the current implementation map for VCM V1.
 
 ## 1. Current Status
 
@@ -14,11 +14,10 @@ V1 is implemented as a local GUI app with:
 - `xterm.js` terminal rendering.
 - Four Claude Code role sessions.
 - VCM harness installer.
-- API-driven message bus.
+- File-driven route-file message bus dispatched by VCM from Claude Code `Stop` hooks.
 - Translation panel based on Claude transcript JSONL tailing.
 - npm packaging with built `dist` and `dist-frontend` output.
-
-The implementation still has planned improvement space, but this file only describes code that exists now.
+- Task creation creates one `feature/<task>` branch and one `.claude/worktrees/<task>` git worktree by default; users may clear `Create worktree and branch` to create an inline task in the connected repository/current branch. Because handoffs are scoped as `.ai/vcm/handoffs/` under the task runtime repo, only one active inline task is allowed per connected repository.
 
 ## 2. Package And Build
 
@@ -29,10 +28,9 @@ File:
 Current package facts:
 
 - package name: `vibe-coding-master`
-- current version: `0.0.6`
+- current version: `0.0.14`
 - type: ESM
 - `bin.vcm`: `dist/main.js`
-- `bin.vcmctl`: `dist/cli/vcmctl.js`
 - published files: `dist`, `dist-frontend`, `docs`, `scripts`, `README.md`
 
 Scripts:
@@ -60,8 +58,6 @@ It verifies required files, shebangs, packaged static path behavior, and fronten
 ```text
 src/
   main.ts
-  cli/
-    vcmctl.ts
   shared/
     constants.ts
     types/
@@ -109,23 +105,24 @@ Responsibilities:
 - serve `dist-frontend` through backend in production mode
 - close backend/Vite on `SIGINT`
 
-### `src/cli/vcmctl.ts`
+### Removed CLI Surface
 
-CLI commands:
+The target design removes `vcmctl` completely. Role sessions must not call a VCM CLI to send messages or hook events.
 
-- `vcmctl send`
-- `vcmctl reply`
-- `vcmctl result`
-- `vcmctl inbox`
-- `vcmctl ready`
+Remove:
 
-Environment required in role sessions:
+- `src/cli/vcmctl.ts`
+- `bin.vcmctl` from `package.json`
+- packaged `dist/cli/vcmctl.js`
+- `VCM_CTL_COMMAND` session environment
+- harness rules that mention `vcmctl`
+
+Role sessions still receive enough environment for direct hook POSTs and backend-aware terminal delivery:
 
 - `VCM_API_URL`
 - `VCM_TASK_SLUG`
 - `VCM_ROLE`
-
-Role sessions receive these env vars from `SessionService`.
+- `VCM_SESSION_ID`
 
 ## 5. Shared Layer
 
@@ -180,6 +177,25 @@ Important fields:
 - `claudeCommand`
 - `isDirty`
 
+### `src/shared/types/app-settings.ts`
+
+Defines:
+
+- `ThemeMode`
+- `AppPreferences`
+- `UpdateAppPreferencesRequest`
+
+Theme modes:
+
+- `system`
+- `light`
+- `dark`
+
+Preferences:
+
+- `themeMode`
+- `roundCompletionAlerts`, default `true`
+
 ### `src/shared/types/task.ts`
 
 Defines:
@@ -188,7 +204,16 @@ Defines:
 - `TaskRecord`
 - `CreateTaskRequest`
 
-Current UI sends only `taskSlug`, although the API type still permits optional `title` and `specPath`.
+Current UI sends `taskSlug` and `createWorktree`; the API type still permits optional `title` and `specPath`.
+
+Worktree fields:
+
+- `worktreePath?: string`
+- `branch: feature/<taskSlug>` when worktree creation is selected, otherwise the connected repo's current branch
+- `cleanupStatus?: "active" | "cleaned"`
+- `cleanedAt?: string`
+
+`CreateTaskRequest` supports `createWorktree?: boolean`. It creates a worktree and branch by default, and skips both when `createWorktree === false`. Inline creation rejects a second active inline task in the same connected repository.
 
 ### `src/shared/types/session.ts`
 
@@ -208,14 +233,24 @@ Defines:
 
 - `VcmMessageActor`
 - `VcmMessageType`
-- `VcmMessageStatus`
 - `VcmOrchestrationMode`
 - `VcmRoleMessage`
 - `VcmOrchestrationState`
-- `SendRoleMessageRequest`
-- `SendRoleMessageResult`
+- `VcmRouteFile`
+- `VcmRouteFileDispatchResult`
 
-The state type includes `paused` for backend/API compatibility. The current GUI only exposes manual/auto.
+The state type should only expose the current manual/auto mode. Remove compatibility-only paused state when deleting `vcmctl`.
+
+### `src/shared/types/round.ts`
+
+Defines:
+
+- `VcmRoleTurnStatus`
+- `VcmTaskRoundStatus`
+- `VcmRoleTurnState`
+- `VcmTaskRoundState`
+
+Round state is task-level. It reports the latest active/completed role, pending route-file count, and a stable `completionId` for frontend notification dedupe.
 
 ### `src/shared/types/translation.ts`
 
@@ -236,7 +271,10 @@ Defines:
 - `SendTranslatedInputRequest`
 - `TranslationProviderTestResult`
 - `TranslationPromptPreview`
-- `TranslationWsMessage`
+- `TranslationSessionStatus`
+- `TranslationSessionEvent`
+- `StartTranslationSessionResult`
+- `PollTranslationSessionResult`
 
 Prompt keys:
 
@@ -263,10 +301,6 @@ Defines:
 
 - `ApiErrorResponse`
 - `TaskStatusReport`
-- `TaskWorkflowStepId`
-- `TaskWorkflowStepStatus`
-- `TaskWorkflowStep`
-- `TaskWorkflowReport`
 - `DispatchRoleCommandResult`
 - `BootstrapState`
 
@@ -376,6 +410,21 @@ Important behavior:
 - accepts `.git` pointer files
 - passes per-command `safe.directory`
 
+Worktree methods:
+
+- `branchExists(repoRoot, branch): Promise<boolean>`
+- `createWorktree(input): Promise<void>`
+- `removeWorktree(repoRoot, worktreePath, options): Promise<void>`
+- `deleteBranch(repoRoot, branch, options): Promise<void>`
+- `getStatusPorcelain(repoRoot): Promise<string>`
+- `isIgnored(repoRoot, repoRelativePath): Promise<boolean>`
+
+Required safety:
+
+- all Git commands keep command-scoped `safe.directory`
+- `TaskService` verifies Close Task worktree paths are under `<baseRepoRoot>/.claude/worktrees/`
+- VCM-created task branches are derived from validated task slugs as `feature/<taskSlug>`
+
 ### `src/backend/adapters/claude-adapter.ts`
 
 Exports:
@@ -461,8 +510,12 @@ Responsibilities:
 - connect repo
 - store current project in process memory
 - record recent repo paths in app settings
-- create `.vcm/config.json`
+- create `~/.vcm/projects/<project-id>/config.json`
 - ensure base state directories
+- ensure `.ai/vcm/` and `.claude/worktrees/` are ignored by Git before task-worktree creation
+- expose base repo as the project control root
+
+Repository connect should keep connecting to the base repo. Task worktrees are managed under that base repo and should not be treated as separate projects in the normal task list.
 
 ### `src/backend/services/task-service.ts`
 
@@ -479,12 +532,61 @@ Responsibilities:
 - load task
 - save task
 - update task status
+- create task branch and worktree
+- clean up completed task worktree and task metadata
 
 Task files:
 
 ```text
-.vcm/tasks/<task>.json
+<baseRepoRoot>/.ai/vcm/tasks/<task>.json
 ```
+
+Create flow:
+
+```text
+createTask(baseRepoRoot, { taskSlug })
+  -> assertValidTaskSlug(taskSlug)
+  -> assert .ai/vcm/ is ignored
+  -> if createWorktree is not false:
+       -> assert .claude/worktrees/ is ignored
+       -> branch = feature/<taskSlug>
+       -> worktreePath = <baseRepoRoot>/.claude/worktrees/<taskSlug>
+       -> assert base repo has no uncommitted changes
+       -> assert branch does not exist
+       -> assert worktree path does not exist
+       -> git.createWorktree({ baseRepoRoot, branch, worktreePath, baseRef: HEAD })
+       -> taskRepoRoot = worktreePath
+	  -> otherwise:
+	       -> branch = current base repo branch
+	       -> worktreePath = undefined
+	       -> taskRepoRoot = baseRepoRoot
+	       -> reject if another inline task is already active
+  -> artifactService.ensureHandoffStructure({ repoRoot: taskRepoRoot, handoffDir })
+  -> artifactService.createArtifactTemplates({ repoRoot: taskRepoRoot, handoffDir })
+  -> ensure task runtime state dirs under <taskRepoRoot>/.ai/vcm/
+  -> write central task record under <baseRepoRoot>/.ai/vcm/tasks/<task>.json
+```
+
+Close Task flow:
+
+```text
+cleanupTask(baseRepoRoot, taskSlug, options)
+  -> load central task record
+  -> route layer lists role sessions
+  -> route layer stops each VCM-managed role session with status running
+  -> route layer stops translation tailers and clears task translation cache
+  -> if worktreePath exists, verify it is under <baseRepoRoot>/.claude/worktrees/
+  -> if worktreePath exists, git.removeWorktree(baseRepoRoot, worktreePath, force=true)
+  -> if worktreePath exists, git.deleteBranch(baseRepoRoot, task.branch, force=true) by default
+	  -> delete <baseRepoRoot>/.ai/vcm/tasks/<task>.json
+	  -> delete <taskRepoRoot>/.ai/vcm/handoffs/
+  -> delete <taskRepoRoot>/.ai/vcm/sessions/<task>.json
+  -> delete <taskRepoRoot>/.ai/vcm/messages/<task>.jsonl
+  -> delete <taskRepoRoot>/.ai/vcm/orchestration/<task>.json
+  -> delete <taskRepoRoot>/.ai/vcm/translation/<task>/
+```
+
+The UI labels this operation `Close Task`, styles it as a red destructive action, and shows a browser confirmation that names running role-session shutdown, the worktree, branch, and metadata that will be deleted. VCM actively stops VCM-managed running role sessions, but it does not preflight running sessions or uncommitted changes before closing. Tasks created without a worktree remove VCM metadata only.
 
 ### `src/backend/services/artifact-service.ts`
 
@@ -504,16 +606,18 @@ Responsibilities:
 - read/save role commands
 - append role logs
 
+In task-worktree mode, artifact paths are still repo-relative, but `repoRoot` must be the task worktree path, not the base repo path.
+
 Primary role command path:
 
 ```text
-.ai/handoffs/<task>/role-commands/<role>.md
+.ai/vcm/handoffs/role-commands/<role>.md
 ```
 
 Legacy fallback:
 
 ```text
-.ai/handoffs/<task>/role-commands/<role>-command.md
+.ai/vcm/handoffs/role-commands/<role>-command.md
 ```
 
 ### `src/backend/services/status-service.ts`
@@ -529,7 +633,7 @@ Responsibilities:
 - assemble `TaskStatusReport`
 - list sessions
 - list artifact checks
-- compute workflow report
+- emit missing/incomplete artifact warnings
 
 ### `src/backend/services/session-service.ts`
 
@@ -551,7 +655,7 @@ Responsibilities:
 Persistence:
 
 ```text
-.vcm/sessions/<task>.json
+<taskRepoRoot>/.ai/vcm/sessions/<task>.json
 ```
 
 Environment passed to Claude Code:
@@ -561,24 +665,93 @@ Environment passed to Claude Code:
 - `VCM_TASK_SLUG`
 - `VCM_ROLE`
 
+In task-worktree mode:
+
+- session cwd is `task.worktreePath`
+- session persistence is written under `task.worktreePath/.ai/vcm/sessions`
+- raw logs and handoff artifacts are written under the task worktree
+
 ### `src/backend/services/message-service.ts`
 
 Exports:
 
 - `MessageService`
-- input interfaces
+- `ScanPendingRouteFilesInput`
+- `DispatchPendingRouteFileInput`
+- `RouteFileRecord`
 - `createMessageService(deps)`
 
 Responsibilities:
 
 - list messages
-- send messages
-- stage/approve/reject messages
+- scan route-file outboxes after Claude Code `Stop`
+- snapshot pending route-file messages
+- mark all open messages done for manual recovery
 - get/update orchestration state
 - enforce message policy
+- enforce per-target-role hook-driven busy/idle delivery
+- leave non-empty route files pending when a target role is busy, unavailable, or terminal submission fails
+- deliver the next pending route file when a target role becomes idle
 - persist message snapshots
-- write message body markdown
-- write staged or delivered messages to target terminal
+- archive dispatched route-file bodies before clearing source files
+- submit route-file messages to the target terminal
+
+In task-worktree mode:
+
+- message snapshots live under `task.worktreePath/.ai/vcm/messages`
+- orchestration state lives under `task.worktreePath/.ai/vcm/orchestration`
+- pending route files live under `task.worktreePath/.ai/vcm/handoffs/messages`
+- terminal delivery uses the runtime session for the role, whose cwd is the task worktree
+- message mutations are serialized per task inside the VCM process to avoid concurrent dispatch and confirmation races
+
+Route-file protocol:
+
+- route file name is `<from-role>-<to-role>.md`
+- the filename is the authoritative route; frontmatter cannot override `from` or `to`
+- blank or whitespace-only files are ignored
+- non-empty files are pending
+- each directed route has exactly one pending file, so repeated sends by the same role to the same target become edits to the same file
+- VCM scans after every `Stop` hook
+- Stop hook handling is the only code path allowed to trigger automatic route-file dispatch; do not expose a frontend or public API scan/dispatch endpoint.
+- VCM scans the stopped role's outgoing files and pending files targeting newly idle roles
+- VCM delivers at most one route file per target role per scan
+- if several files target the same idle role, choose oldest modified time, then route name
+- before terminal write, store a `dispatchingAt` snapshot and wait briefly so the GUI can switch to the target role tab
+- successful terminal write snapshots the delivered body as message history
+- `UserPromptSubmit` confirms Claude Code accepted the prompt, stores `acceptedAt`, then clears the source route file if it still contains that same message
+- failed, blocked, manual, or unavailable delivery leaves the source route file unchanged
+- `markAllDone` may clear pending route files only after user confirmation; it does not mutate message history
+- `deleteMessageHistory` rewrites the latest message snapshot file to remove all message history; it must not clear pending route files
+
+Required service functions:
+
+- `listMessages(taskSlug): Promise<VcmRoleMessage[]>`
+- `listPendingRouteFiles(repoRoot, taskSlug): Promise<RouteFileRecord[]>`
+- `scanAndDispatchPendingRouteFiles(input: { repoRoot: string; taskSlug: string; stoppedRole: RoleName }): Promise<void>`
+- `readRouteFile(path): Promise<RouteFileRecord | null>`
+- `dispatchPendingRouteFile(record): Promise<VcmRouteFileDispatchResult>`
+- `appendMessageSnapshot(message): Promise<void>`
+- `clearRouteFile(path): Promise<void>`
+- `markAllDone(taskSlug, options): Promise<MarkAllMessagesDoneResult>`
+- `deleteMessageHistory(taskSlug): Promise<DeleteMessageHistoryResult>`
+
+`dispatchPendingRouteFile` must snapshot before clearing. Clearing means truncating the route file to an empty string, not deleting it.
+
+### `src/backend/services/claude-hook-service.ts`
+
+Exports:
+
+- `ClaudeHookService`
+- `createClaudeHookService(deps)`
+
+Responsibilities:
+
+- accept Claude Code `UserPromptSubmit` and `Stop` hook events directly over HTTP
+- map hook events to the current VCM project, task, role, and persisted Claude session id
+- update `RoleSessionRecord.activityStatus`: `UserPromptSubmit -> running`, `Stop -> idle`
+- call `MessageService.confirmPromptSubmitted` when `UserPromptSubmit` includes a VCM message envelope
+- call `MessageService.scanAndDispatchPendingRouteFiles` after recording the stop event
+- never require `vcmctl hook-event`
 
 ### `src/backend/services/command-dispatcher.ts`
 
@@ -589,7 +762,7 @@ Exports:
 - `CommandDispatcherDeps`
 - `createCommandDispatcher(deps)`
 
-Compatibility role-command dispatch only. Preferred orchestration is `MessageService` plus `vcmctl`.
+Backend compatibility role-command dispatch path. The current GUI does not expose it as a primary action, and V1 orchestration does not rely on it. Preferred orchestration is `MessageService` scanning `.ai/vcm/handoffs/messages/<from-role>-<to-role>.md` after `Stop`.
 
 ### `src/backend/services/harness-service.ts`
 
@@ -603,6 +776,7 @@ Exports:
 Responsibilities:
 
 - inspect harness files
+- manage `.gitignore` entries for VCM local state
 - plan create/insert/update/ok
 - apply VCM managed blocks
 - preserve user content outside managed blocks
@@ -617,17 +791,16 @@ Exports:
 - `AppSettingsServiceDeps`
 - `createAppSettingsService(deps)`
 
+Settings responsibilities:
+
+- persist UI theme mode: `system`, `light`, or `dark`
+- persist translation settings and translation secrets
+- persist up to five recent repository paths
+
 Storage:
 
 ```text
 ~/.vcm/settings.json
-```
-
-Also migrates legacy:
-
-```text
-~/.vibe-coding-master/settings.json
-~/.vibe-coding-master/translation.json
 ```
 
 ### `src/backend/services/translation-prompts.ts`
@@ -687,20 +860,42 @@ Exports:
 - `TranslationEventListener`
 - `TranslationServiceDeps`
 - `createTranslationService(deps)`
-- `formatTerminalSubmit(text)`
 
 Responsibilities:
 
 - load/update translation settings
 - expose prompt previews
 - test provider
+- start backend transcript listening for a role session
+- poll cached translation events by cursor
 - translate user input
 - send English text to active terminal
-- subscribe to session translation events
-- clear session entries
+- clear session entries and cached events
+- stop session/task translation listeners
 - retry failed output translation
 - subscribe to Claude transcript service
 - translate prose output and preserve tool output
+
+Terminal submission is delegated to `src/backend/runtime/terminal-submit.ts`, which bracket-pastes text, waits briefly, then sends Enter separately.
+
+### `src/backend/services/round-service.ts`
+
+Exports:
+
+- `RoundService`
+- `TaskRoundInput`
+- `RoundServiceDeps`
+- `createRoundService(deps)`
+- `evaluateTaskRoundState(input)`
+
+Responsibilities:
+
+- read hook-driven role activity from `RoleSessionRecord`
+- map `activityStatus: "running"` to role state `answering`
+- map `activityStatus: "idle"` plus `lastStopAt` to role state `idle`
+- evaluate task-level round completion from hook-driven role states
+- use pending route-file count to keep the round active while more dispatch work exists
+- complete PM -> role -> PM chains only after the final role's hook `Stop`
 
 ## 9. Backend API
 
@@ -716,26 +911,38 @@ Exports:
 - `createDefaultServerDeps(options)`
 - `getDefaultStaticDir()`
 
-Registers all routes and WebSockets.
+Registers HTTP routes and the terminal WebSocket.
 
 ### Route files
 
+- `src/backend/api/app-settings-routes.ts`: UI preferences
 - `src/backend/api/project-routes.ts`: health, recent paths, connect/current project
 - `src/backend/api/harness-routes.ts`: harness status/apply
-- `src/backend/api/task-routes.ts`: tasks and task status
-- `src/backend/api/session-routes.ts`: session lifecycle and dispatch compatibility endpoint
-- `src/backend/api/artifact-routes.ts`: artifact, role command, and log reads/writes
-- `src/backend/api/message-routes.ts`: messages and orchestration
-- `src/backend/api/translation-routes.ts`: settings, prompt previews, provider test, input/send, clear/retry
+- `src/backend/api/task-routes.ts`: tasks, task status, and Close Task cleanup endpoint; Close Task stops running role sessions before translation/task cleanup
+- `src/backend/api/session-routes.ts`: session lifecycle
+- `src/backend/api/artifact-routes.ts`: artifact and log reads/writes
+- `src/backend/api/message-routes.ts`: message history, pending route files, Mark All Done recovery, and orchestration
+- `src/backend/api/claude-hook-routes.ts`: Claude Code `UserPromptSubmit` and `Stop` hook receiver
+- `src/backend/api/round-routes.ts`: task round completion state
+- `src/backend/api/translation-routes.ts`: settings, prompt previews, provider test, start/poll, input/send, clear/retry
+
+Worktree task API:
+
+```text
+POST /api/tasks/:taskSlug/cleanup
+```
+
+Do not add a "switch task worktree" endpoint. Worktree assignment happens only during task creation.
 
 ### WebSocket files
 
 - `src/backend/ws/terminal-ws.ts`
-- `src/backend/ws/translation-ws.ts`
 
 Terminal WebSocket forwards PTY output/input/resize.
 
-Translation WebSocket subscribes to translation entries/status for a runtime session id.
+Translation does not use WebSocket. The backend writes cached translation events under `<taskRepoRoot>/.ai/vcm/translation/<task>/<role>/<session-id>.jsonl`; the frontend polls `GET /api/translation/sessions/:sessionId/events?after=<cursor>`. The cursor is the next expected seq, so `after=18` means seq `1..17` can be removed and seq `18+` should be returned.
+
+Round completion is HTTP-polled too. `GET /api/tasks/:taskSlug/round` returns `VcmTaskRoundState` from hook-driven role activity plus pending-message blockers; it is not a WebSocket stream.
 
 ## 10. Backend Templates
 
@@ -769,6 +976,7 @@ Auto delivery envelope is submitted with Enter.
 ### Harness templates
 
 - `src/backend/templates/harness/claude-root.ts`
+- `src/backend/templates/harness/gitignore.ts`
 - `src/backend/templates/harness/project-manager-agent.ts`
 - `src/backend/templates/harness/architect-agent.ts`
 - `src/backend/templates/harness/coder-agent.ts`
@@ -791,7 +999,15 @@ It calls:
 - artifact endpoints
 - message endpoints
 - orchestration endpoints
+- route-file inspection endpoints for the Messages modal
+- round completion endpoint
 - translation endpoints
+
+Implemented task cleanup method:
+
+- `cleanupTask(taskSlug, options)`
+
+There are no branch/worktree switching APIs in the current frontend client.
 
 ### `src/frontend/state/app-store.ts`
 
@@ -818,10 +1034,12 @@ Responsibilities:
 
 - own top-level app state
 - load current project and recent paths on startup
+- load app preferences, including `themeMode` and `roundCompletionAlerts`
 - load tasks and harness status after connect
 - pass sidebar props to `ProjectDashboard`
 - pass task props to `TaskWorkspace`
-- keep active workflow/messages/orchestration/events synchronized by task
+- keep active messages/orchestration/events synchronized by task
+- dedupe task round `completionId` values and show/play completion alerts when enabled
 
 ### `src/frontend/routes/project-dashboard.tsx`
 
@@ -835,12 +1053,13 @@ Responsibilities:
 - collapsible sidebar
 - repository connect form
 - repository summary
-- workflow panel
 - settings section
+- round completion alert toggle
+- try alert test button
 - messages modal
 - events modal
 - harness panel
-- one-field task creation
+- task creation with one task-name field, `Create worktree and branch` checkbox selected by default, branch preview, and worktree path preview
 - task navigation
 
 ### `src/frontend/routes/task-workspace.tsx`
@@ -852,8 +1071,11 @@ Exports:
 
 Responsibilities:
 
-- task header with role tabs and refresh
+- task header with task title, role tabs, global `Translate`, and `Close Task`
+- red `Close Task` action with destructive confirmation
+- no task-header `Refresh` button; workspace state refreshes automatically
 - status/message/orchestration refresh
+- round state refresh
 - periodic polling
 - session lifecycle actions
 - per-role permission state
@@ -882,6 +1104,8 @@ Layout:
 - path input row
 - recent select plus connect button row
 
+This form connects the base repository. It is not used to switch an existing task to another worktree.
+
 ### `src/frontend/components/harness-panel.tsx`
 
 Exports:
@@ -891,15 +1115,6 @@ Exports:
 
 Shows harness status and install/update action.
 
-### `src/frontend/components/workflow-panel.tsx`
-
-Exports:
-
-- `WorkflowPanelProps`
-- `WorkflowPanel({ workflow })`
-
-Renders the sidebar workflow steps.
-
 ### `src/frontend/components/message-timeline.tsx`
 
 Exports:
@@ -908,7 +1123,7 @@ Exports:
 - `getMessageCounts(messages)`
 - `MessageTimeline(props)`
 
-Used inside the Messages modal. Can show stage/reject/open-role actions.
+Used inside the Messages modal. Current UI rows show newest message history first with stable increasing sequence numbers, timestamp, route, type, body preview, source route file path, and a `Copy` button. The modal header includes `Mark All Done` for clearing manually handled pending route files and `Delete All` for removing message history. Stage/approve/reject controls are not part of the current UI.
 
 ### `src/frontend/components/event-log.tsx`
 
@@ -944,7 +1159,7 @@ Exports:
 - `SessionConsoleProps`
 - `SessionConsole(props)`
 
-Role console and translation split.
+Role console, `Auto orchestration` toggle, and translation split.
 
 ### `src/frontend/components/session-toolbar.tsx`
 
@@ -955,7 +1170,7 @@ Exports:
 
 Renders permission select and session lifecycle buttons.
 
-There is no visible primary `Send Command` button in the current toolbar. Role-command dispatch remains backend compatibility.
+There is no visible primary `Send Command` button in the current toolbar. Role-command dispatch remains a backend compatibility path; normal role coordination uses route-file messages.
 
 ### `src/frontend/components/translation-panel.tsx`
 
@@ -973,6 +1188,8 @@ Important current behavior:
 - no `Original` buttons
 - tool output is preserved, dim, one-line
 - prose source is replaced by translated text after completion
+- prose renders Markdown with GFM support
+- user-input translation entries add a thick divider and larger top spacing to mark question/answer boundaries
 - no separate translated-English textarea
 
 ### `src/frontend/components/translation-settings-modal.tsx`
@@ -984,18 +1201,15 @@ Exports:
 
 Settings:
 
-- enable translation
 - base URL
 - API key as text input
 - model
 - target language
-- input mode
 - context
-- translate output
-- translate user input
 - timeout
 - temperature
-- prompt slot overrides
+- direct editors for `zh-to-en`, `zh-to-en-with-context`, and `en-to-zh`
+- reset prompts to built-in defaults
 - provider test
 
 ### `src/frontend/components/status-badge.tsx`
@@ -1019,18 +1233,30 @@ Sidebar:
 
 - all groups default collapsed
 - `Repository Path` default open only when no task is selected
-- `Settings` includes `Messages`, `Events`, and `Auto orchestration`
+- `Settings` includes `Theme`, `Round alert`, `Try alert`, `Messages`, and `Events`
+- `Theme` cycles through `System`, `Light`, and `Dark`; `System` follows the browser/OS color-scheme preference
+- `Round alert` is on by default and controls the in-app completion prompt plus a soft two-note completion chime
+- `Try alert` calls the same prompt/sound path without waiting for a real completed round
 
 Task workspace:
 
 - role tabs in the first header row
-- workflow is not in main workspace
 - messages/events are not in main workspace
 - active role console fills available space
+- `Auto orchestration` is a compact role console toggle
+
+Round completion:
+
+- task round completion follows hook-driven role activity, not message history
+- role activity uses Claude Code `UserPromptSubmit` -> `running` and Claude Code `Stop` -> `idle`; VCM terminal submit also optimistically marks the target role `running`
+- PM -> role -> PM chains complete after PM's final hook `Stop`, not after the intermediate role's `Stop`
+- pending route files keep the round active
+- frontend dedupes `completionId` before showing a prompt or playing sound
 
 Translation:
 
-- top role toolbar button label is `✅ Translate` when on and `× Translate` when off
+- task header button label is `✅ Translate` when on and `× Translate` when off
+- the task header `Translate` toggle is global across all four role consoles
 - translation panel `Auto-send` label is `✅ Auto-send` when on and `× Auto-send` when off
 - panel uses terminal-like dark styling
 - composer height is compact
@@ -1044,41 +1270,56 @@ App settings:
 ~/.vcm/settings.json
 ```
 
+Contains UI theme preference, round-completion alert preference, translation settings/secrets, and recent repository paths.
+
 Project config:
 
 ```text
-.vcm/config.json
+~/.vcm/projects/<project-id>/config.json
+~/.vcm/projects/index.json
 ```
 
 Task state:
 
 ```text
-.vcm/tasks/<task>.json
+<baseRepoRoot>/.ai/vcm/tasks/<task>.json
 ```
 
 Session state:
 
 ```text
-.vcm/sessions/<task>.json
+<taskRepoRoot>/.ai/vcm/sessions/<task>.json
 ```
 
 Messages:
 
 ```text
-.vcm/messages/<task>.jsonl
-.ai/handoffs/<task>/messages/<message-id>.md
+<taskRepoRoot>/.ai/vcm/messages/<task>.jsonl
+<taskRepoRoot>/.ai/vcm/handoffs/messages/<from-role>-<to-role>.md
 ```
 
 Orchestration:
 
 ```text
-.vcm/orchestration/<task>.json
+<taskRepoRoot>/.ai/vcm/orchestration/<task>.json
+```
+
+Translation cache:
+
+```text
+<taskRepoRoot>/.ai/vcm/translation/<task>/
+```
+
+Task worktrees:
+
+```text
+.claude/worktrees/<task>/
 ```
 
 Handoff artifacts:
 
 ```text
-.ai/handoffs/<task>/
+.ai/vcm/handoffs/
 ```
 
 Claude transcripts:
@@ -1101,16 +1342,23 @@ npm run verify:package
 For frontend layout changes, also verify manually:
 
 - connect repository
+- confirm `.ai/vcm/` and `.claude/worktrees/` are ignored before creating a task worktree
+- create task and verify branch `feature/<task>` is created
+- verify worktree path is `<baseRepoRoot>/.claude/worktrees/<task>`
 - open task
+- verify role sessions start with cwd set to the task worktree
 - role tabs stay in header
 - sidebar sections collapse/open correctly
 - embedded terminal remains visible after role switch
 - translation split is 50/50
 - Messages modal opens from sidebar Settings
 - Events modal opens from sidebar Settings
-- Auto orchestration toggles on/off
+- Auto orchestration toggles on/off from the role console toolbar
+- Auto orchestration switches to the target role tab when VCM records `dispatchingAt`, before VCM submits the route-file message
+- Round alert can be toggled from sidebar Settings and fires once after a chained round truly completes
 - `Enter` in translation composer translates/sends
 - `Shift+Enter` inserts newline
+- close a worktree-backed task and verify it stops running role sessions, removes the worktree, deletes the task branch, and removes central task metadata
 
 ## 17. V1 Boundaries To Preserve
 
@@ -1126,3 +1374,7 @@ Do not reintroduce these into V1 docs or UI unless the product direction changes
 - optional title input in New Task
 - `Dirty: yes/no` sidebar label
 - role command dispatch as the primary orchestration path
+- `vcmctl` as an active CLI or agent-facing message path
+- per-role worktrees
+- switching a task to another branch/worktree after creation
+- a separate `Create task worktree` button outside task creation

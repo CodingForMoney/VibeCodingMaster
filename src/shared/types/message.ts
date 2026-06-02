@@ -13,16 +13,6 @@ export type VcmMessageType =
   | "revise"
   | "cancel";
 
-export type VcmMessageStatus =
-  | "pending_approval"
-  | "queued"
-  | "staged"
-  | "delivered"
-  | "acknowledged"
-  | "failed"
-  | "rejected"
-  | "cancelled";
-
 export type VcmOrchestrationMode = "manual" | "auto";
 
 export interface VcmRoleMessage {
@@ -34,33 +24,49 @@ export interface VcmRoleMessage {
   body: string;
   artifactRefs: string[];
   bodyPath?: string;
+  routePath?: string;
   parentMessageId?: string;
-  status: VcmMessageStatus;
   createdAt: string;
+  dispatchingAt?: string;
   deliveredAt?: string;
-  acknowledgedAt?: string;
-  stagedAt?: string;
+  acceptedAt?: string;
   failureReason?: string;
 }
 
 export interface VcmOrchestrationState {
   taskSlug: string;
   mode: VcmOrchestrationMode;
-  paused: boolean;
   updatedAt: string;
 }
 
-export interface SendRoleMessageRequest {
-  fromRole: VcmMessageActor;
+export interface VcmRouteFile {
+  path: string;
+  fromRole: RoleName;
   toRole: RoleName;
   type: VcmMessageType;
   body: string;
-  artifactRefs?: string[];
-  parentMessageId?: string;
+  artifactRefs: string[];
+  exists: boolean;
+  pending: boolean;
+  updatedAt?: string;
 }
 
-export interface SendRoleMessageResult {
-  message: VcmRoleMessage;
+export interface VcmRouteFileDispatchResult {
+  message?: VcmRoleMessage;
   delivered: boolean;
   requiresUserApproval: boolean;
+  clearedRouteFile: boolean;
+  failureReason?: string;
+}
+
+export interface MarkAllMessagesDoneResult {
+  taskSlug: string;
+  updatedCount: number;
+  messages: VcmRoleMessage[];
+}
+
+export interface DeleteMessageHistoryResult {
+  taskSlug: string;
+  deletedCount: number;
+  messages: VcmRoleMessage[];
 }

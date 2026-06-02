@@ -11,8 +11,10 @@ export interface HandoffPaths {
   handoffDir: string;
   roleCommandsDir: string;
   logsDir: string;
+  messagesDir: string;
   roleCommandPaths: Record<DispatchableRole, string>;
   roleLogPaths: Record<RoleName, string>;
+  messageRoutePaths: Record<string, string>;
   architecturePlanPath: string;
   implementationLogPath: string;
   validationLogPath: string;

@@ -15,6 +15,9 @@ export function RoleSessionTabs({ activeRole, sessions, onSelect }: RoleSessionT
     <div className="role-tabs" role="tablist" aria-label="Role sessions">
       {ROLE_DEFINITIONS.map((definition) => {
         const session = getSessionForRole(sessions, definition.name);
+        const tabStatus = session?.status === "running"
+          ? session.activityStatus ?? "idle"
+          : session?.status ?? "not_started";
         return (
           <button
             className={definition.name === activeRole ? "role-tab is-active" : "role-tab"}
@@ -25,7 +28,7 @@ export function RoleSessionTabs({ activeRole, sessions, onSelect }: RoleSessionT
             onClick={() => onSelect(definition.name)}
           >
             <span>{definition.label}</span>
-            <StatusBadge status={session?.status ?? "not_started"} />
+            <StatusBadge status={tabStatus} />
           </button>
         );
       })}

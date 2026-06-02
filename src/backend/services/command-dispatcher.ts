@@ -2,9 +2,10 @@ import type { DispatchRoleCommandResult } from "../../shared/types/api.js";
 import type { DispatchableRole } from "../../shared/types/role.js";
 import { VcmError } from "../errors.js";
 import type { TerminalRuntime } from "../runtime/terminal-runtime.js";
+import { submitTerminalInput } from "../runtime/terminal-submit.js";
 import type { ArtifactService } from "./artifact-service.js";
 import type { SessionService } from "./session-service.js";
-import type { TaskService } from "./task-service.js";
+import { getTaskRuntimeRepoRoot, type TaskService } from "./task-service.js";
 
 export interface CommandDispatcher {
   dispatchRoleCommand(input: DispatchRoleCommandInput): Promise<DispatchRoleCommandResult>;
@@ -30,13 +31,14 @@ export function createCommandDispatcher(deps: CommandDispatcherDeps): CommandDis
   return {
     async dispatchRoleCommand(input) {
       const task = await deps.taskService.loadTask(input.repoRoot, input.taskSlug);
+      const taskRepoRoot = getTaskRuntimeRepoRoot(task);
       await deps.artifactService.readRoleCommand({
-        repoRoot: input.repoRoot,
+        repoRoot: taskRepoRoot,
         handoffDir: task.handoffDir,
         role: input.role
       });
       const commandPath = await deps.artifactService.resolveRoleCommandPath({
-        repoRoot: input.repoRoot,
+        repoRoot: taskRepoRoot,
         handoffDir: task.handoffDir,
         role: input.role
       });
@@ -52,7 +54,7 @@ export function createCommandDispatcher(deps: CommandDispatcherDeps): CommandDis
       }
 
       const instruction = `Please read and execute the role command at: ${commandPath}`;
-      deps.runtime.write(session.id, `${instruction}\r`);
+      await submitTerminalInput(deps.runtime, session.id, instruction);
 
       return {
         taskSlug: input.taskSlug,

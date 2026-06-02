@@ -156,6 +156,29 @@ describe("claude-transcript-service", () => {
     }
   });
 
+  it("reports successful transcript poll checks", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "vcm-transcript-"));
+    const path = join(dir, "session.jsonl");
+    try {
+      writeFileSync(path, "");
+      const polls: string[] = [];
+      const tail = new TranscriptTail(path, {
+        onContent() {},
+        onPoll(checkedAt) {
+          polls.push(checkedAt);
+        }
+      });
+
+      tail.start({ pollIntervalMs: 20 });
+      await waitFor(() => polls.length >= 2);
+      tail.stop();
+
+      expect(polls.every((poll) => Number.isFinite(Date.parse(poll)))).toBe(true);
+    } finally {
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("subscribes to the persisted transcript path instead of only deriving from cwd", async () => {
     const dir = mkdtempSync(join(tmpdir(), "vcm-transcript-"));
     const path = join(dir, "explicit-session.jsonl");
@@ -286,7 +309,7 @@ function createRoleSessionRecord(overrides: Partial<RoleSessionRecord> = {}): Ro
     permissionMode: "default",
     cwd: "/repo",
     terminalBackend: "node-pty",
-    logPath: ".ai/handoffs/demo-task/logs/project-manager.log",
+    logPath: ".ai/vcm/handoffs/logs/project-manager.log",
     updatedAt: "2026-05-30T00:00:00.000Z",
     ...overrides
   };

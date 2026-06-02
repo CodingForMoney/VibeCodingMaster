@@ -1,23 +1,25 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { ROLE_DEFINITIONS } from "../../shared/constants.js";
-import type { TaskStatusReport, TaskWorkflowReport } from "../../shared/types/api.js";
-import type { VcmOrchestrationState, VcmRoleMessage } from "../../shared/types/message.js";
+import type { TaskStatusReport } from "../../shared/types/api.js";
+import type { VcmOrchestrationMode, VcmOrchestrationState, VcmRoleMessage } from "../../shared/types/message.js";
 import type { RoleName } from "../../shared/types/role.js";
+import type { VcmTaskRoundState } from "../../shared/types/round.js";
 import type { ClaudePermissionMode } from "../../shared/types/session.js";
 import type { TaskRecord } from "../../shared/types/task.js";
 import { RoleSessionTabs } from "../components/role-session-tabs.js";
 import { SessionConsole } from "../components/session-console.js";
 import { getSessionForRole } from "../state/session-store.js";
 import { apiClient } from "../state/api-client.js";
+import { selectAutoDispatchRole } from "../state/message-navigation.js";
 
 export interface TaskWorkspaceProps {
   task: TaskRecord;
   activeRole: RoleName;
   onTaskChanged(): Promise<void>;
   onActiveRoleChange(role: RoleName): void;
-  onWorkflowChanged?(workflow: TaskWorkflowReport): void;
   onMessagesChanged?(messages: VcmRoleMessage[]): void;
   onOrchestrationChanged?(orchestration: VcmOrchestrationState): void;
+  onRoundStateChanged?(roundState: VcmTaskRoundState): void;
   onEventsChanged?(events: string[]): void;
 }
 
@@ -26,9 +28,9 @@ export function TaskWorkspace({
   activeRole,
   onTaskChanged,
   onActiveRoleChange,
-  onWorkflowChanged,
   onMessagesChanged,
   onOrchestrationChanged,
+  onRoundStateChanged,
   onEventsChanged
 }: TaskWorkspaceProps) {
   const [statusReport, setStatusReport] = useState<TaskStatusReport | null>(null);
@@ -41,18 +43,44 @@ export function TaskWorkspace({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [events, setEvents] = useState<string[]>([]);
+  const [orchestration, setOrchestration] = useState<VcmOrchestrationState | null>(null);
+  const [translationEnabled, setTranslationEnabled] = useState(false);
+  const messageSnapshotRef = useRef<{ taskSlug: string; messages: VcmRoleMessage[] } | null>(null);
 
-  const refresh = useCallback(async () => {
-    const [nextStatusReport, nextMessages, nextOrchestration] = await Promise.all([
-      apiClient.getTaskStatus(task.taskSlug),
-      apiClient.listMessages(task.taskSlug),
-      apiClient.getOrchestrationState(task.taskSlug)
-    ]);
-    setStatusReport(nextStatusReport);
-    onWorkflowChanged?.(nextStatusReport.workflow);
+  const applyMessageState = useCallback((nextMessages: VcmRoleMessage[], nextOrchestration: VcmOrchestrationState) => {
+    const previousMessages = messageSnapshotRef.current?.taskSlug === task.taskSlug
+      ? messageSnapshotRef.current.messages
+      : null;
+    const targetRole = selectAutoDispatchRole(previousMessages, nextMessages, nextOrchestration);
+    messageSnapshotRef.current = {
+      taskSlug: task.taskSlug,
+      messages: nextMessages
+    };
+
+    setOrchestration(nextOrchestration);
     onMessagesChanged?.(nextMessages);
     onOrchestrationChanged?.(nextOrchestration);
-  }, [onMessagesChanged, onOrchestrationChanged, onWorkflowChanged, task.taskSlug]);
+    if (targetRole) {
+      onActiveRoleChange(targetRole);
+      appendEvent(`auto switched to ${targetRole} before VCM dispatch`);
+    }
+  }, [onActiveRoleChange, onMessagesChanged, onOrchestrationChanged, task.taskSlug]);
+
+  const applyFetchedState = useCallback((nextStatusReport: TaskStatusReport, nextMessages: VcmRoleMessage[], nextOrchestration: VcmOrchestrationState, nextRoundState: VcmTaskRoundState) => {
+    setStatusReport(nextStatusReport);
+    applyMessageState(nextMessages, nextOrchestration);
+    onRoundStateChanged?.(nextRoundState);
+  }, [applyMessageState, onRoundStateChanged]);
+
+  const refresh = useCallback(async () => {
+    const [nextStatusReport, nextMessages, nextOrchestration, nextRoundState] = await Promise.all([
+      apiClient.getTaskStatus(task.taskSlug),
+      apiClient.listMessages(task.taskSlug),
+      apiClient.getOrchestrationState(task.taskSlug),
+      apiClient.getTaskRoundState(task.taskSlug)
+    ]);
+    applyFetchedState(nextStatusReport, nextMessages, nextOrchestration, nextRoundState);
+  }, [applyFetchedState, task.taskSlug]);
 
   useEffect(() => {
     void refresh().catch((caught: Error) => setError(caught.message));
@@ -82,19 +110,51 @@ export function TaskWorkspace({
       void Promise.all([
         apiClient.getTaskStatus(task.taskSlug),
         apiClient.listMessages(task.taskSlug),
-        apiClient.getOrchestrationState(task.taskSlug)
+        apiClient.getOrchestrationState(task.taskSlug),
+        apiClient.getTaskRoundState(task.taskSlug)
       ])
-        .then(([nextStatusReport, nextMessages, nextOrchestration]) => {
-          setStatusReport(nextStatusReport);
-          onWorkflowChanged?.(nextStatusReport.workflow);
-          onMessagesChanged?.(nextMessages);
-          onOrchestrationChanged?.(nextOrchestration);
+        .then(([nextStatusReport, nextMessages, nextOrchestration, nextRoundState]) => {
+          applyFetchedState(nextStatusReport, nextMessages, nextOrchestration, nextRoundState);
         })
         .catch((caught: Error) => setError(caught.message));
     }, 3000);
 
     return () => window.clearInterval(interval);
-  }, [onMessagesChanged, onOrchestrationChanged, onWorkflowChanged, task.taskSlug]);
+  }, [applyFetchedState, task.taskSlug]);
+
+  useEffect(() => {
+    let cancelled = false;
+    let inFlight = false;
+
+    const interval = window.setInterval(() => {
+      if (inFlight) {
+        return;
+      }
+      inFlight = true;
+      void Promise.all([
+        apiClient.listMessages(task.taskSlug),
+        apiClient.getOrchestrationState(task.taskSlug)
+      ])
+        .then(([nextMessages, nextOrchestration]) => {
+          if (!cancelled) {
+            applyMessageState(nextMessages, nextOrchestration);
+          }
+        })
+        .catch((caught: Error) => {
+          if (!cancelled) {
+            setError(caught.message);
+          }
+        })
+        .finally(() => {
+          inFlight = false;
+        });
+    }, 200);
+
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
+  }, [applyMessageState, task.taskSlug]);
 
   async function runAction(action: () => Promise<void>) {
     setBusy(true);
@@ -105,6 +165,52 @@ export function TaskWorkspace({
       await onTaskChanged();
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Action failed.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function closeTask() {
+    const closeMessage = task.worktreePath
+      ? [
+          `Close task "${task.taskSlug}"?`,
+          "",
+          "This is destructive:",
+          "- stops VCM-managed running role sessions for this task",
+          `- deletes the task worktree: ${task.worktreePath}`,
+          `- deletes the Git branch: ${task.branch}`,
+          "- deletes VCM task/session/message/orchestration state",
+          "",
+          "VCM will not check running sessions or uncommitted changes before closing."
+        ].join("\n")
+      : [
+          `Close task "${task.taskSlug}"?`,
+          "",
+          "This task was created without a separate worktree/branch.",
+          "VCM will stop VCM-managed running role sessions for this task.",
+          "VCM will delete task/session/message/orchestration state only.",
+          "",
+          "VCM will not check running sessions or uncommitted changes before closing."
+        ].join("\n");
+    const confirmed = window.confirm(
+      closeMessage
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    setBusy(true);
+    setError("");
+    try {
+      await apiClient.cleanupTask(task.taskSlug, {
+        force: true,
+        deleteBranch: Boolean(task.worktreePath),
+        forceDeleteBranch: true
+      });
+      appendEvent(`closed ${task.taskSlug}`);
+      await onTaskChanged();
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Close task failed.");
     } finally {
       setBusy(false);
     }
@@ -125,22 +231,45 @@ export function TaskWorkspace({
     }));
   }
 
+  async function setOrchestrationMode(mode: VcmOrchestrationMode) {
+    setBusy(true);
+    setError("");
+    try {
+      const nextOrchestration = await apiClient.updateOrchestrationState(task.taskSlug, { mode });
+      setOrchestration(nextOrchestration);
+      onOrchestrationChanged?.(nextOrchestration);
+      appendEvent(`auto orchestration ${mode === "auto" ? "enabled" : "disabled"}`);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Failed to update orchestration mode.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
   return (
     <div className="task-workspace">
       <header className="workspace-header">
         <div className="workspace-title-line">
-          <span className="eyebrow">Task Workspace</span>
           <h1>{task.title || task.taskSlug}</h1>
-          <span className="workspace-branch">{task.branch}</span>
         </div>
         <RoleSessionTabs
           activeRole={activeRole}
           sessions={statusReport?.sessions ?? []}
           onSelect={onActiveRoleChange}
         />
-        <button type="button" onClick={() => void refresh()}>
-          Refresh
-        </button>
+        <div className="workspace-header-actions">
+          <button
+            aria-pressed={translationEnabled}
+            className={`translation-toggle${translationEnabled ? " is-active" : ""}`}
+            type="button"
+            onClick={() => setTranslationEnabled((current) => !current)}
+          >
+            {translationEnabled ? "✅ Translate" : "× Translate"}
+          </button>
+          <button className="danger-button" type="button" disabled={busy} onClick={() => void closeTask()}>
+            Close Task
+          </button>
+        </div>
       </header>
 
       {error ? <div className="error-banner">{error}</div> : null}
@@ -165,7 +294,10 @@ export function TaskWorkspace({
                     permissionMode={permissionModes[role]}
                     active={isActive}
                     busy={busy}
+                    orchestrationMode={orchestration?.mode ?? "manual"}
+                    translationEnabled={translationEnabled}
                     onPermissionModeChange={(permissionMode) => setRolePermissionMode(role, permissionMode)}
+                    onOrchestrationModeChange={(mode) => void setOrchestrationMode(mode)}
                     onStart={() => void runAction(async () => {
                       await apiClient.startRoleSession(task.taskSlug, role, {
                         cols: 100,

@@ -54,7 +54,9 @@ function bindTerminalSocket(ws: WebSocket, sessionId: string, runtime: TerminalR
       if (message.type === "input") {
         runtime.write(sessionId, message.data);
       } else if (message.type === "resize") {
-        runtime.resize(sessionId, message.cols, message.rows);
+        if (isSafeTerminalResize(message.cols, message.rows)) {
+          runtime.resize(sessionId, message.cols, message.rows);
+        }
       }
     } catch (error) {
       const vcmError = toVcmError(error);
@@ -66,6 +68,22 @@ function bindTerminalSocket(ws: WebSocket, sessionId: string, runtime: TerminalR
     unsubscribe();
   });
 }
+
+export function isSafeTerminalResize(cols: number, rows: number): boolean {
+  return (
+    Number.isInteger(cols) &&
+    Number.isInteger(rows) &&
+    cols >= MIN_TERMINAL_COLS &&
+    rows >= MIN_TERMINAL_ROWS &&
+    cols <= MAX_TERMINAL_COLS &&
+    rows <= MAX_TERMINAL_ROWS
+  );
+}
+
+const MIN_TERMINAL_COLS = 20;
+const MIN_TERMINAL_ROWS = 5;
+const MAX_TERMINAL_COLS = 1000;
+const MAX_TERMINAL_ROWS = 200;
 
 function send(ws: WebSocket, message: ServerTerminalMessage): void {
   if (ws.readyState === ws.OPEN) {

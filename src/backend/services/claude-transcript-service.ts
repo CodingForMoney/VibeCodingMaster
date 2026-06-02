@@ -130,11 +130,13 @@ export interface ClaudeTranscriptSubscribeOptions {
   replaySince?: string;
   onError?: (error: Error) => void;
   onTranscriptPathResolved?: (path: string) => void;
+  onPoll?: (checkedAt: string) => void;
 }
 
 export interface TailHandlers {
   onContent: (event: ClaudeTranscriptEvent) => void;
   onError?: (err: Error) => void;
+  onPoll?: (checkedAt: string) => void;
 }
 
 export interface TailOptions {
@@ -143,7 +145,7 @@ export interface TailOptions {
   pollIntervalMs?: number;
 }
 
-const DEFAULT_TAIL_POLL_INTERVAL_MS = 500;
+const DEFAULT_TAIL_POLL_INTERVAL_MS = 200;
 
 /**
  * Adapted from CodingForMoney/cc-pm's transcript tailer.
@@ -181,15 +183,15 @@ export class TranscriptTail {
     this.buffer = "";
     try {
       this.watcher = fsWatch(this.path, () => {
-        this.scheduleFlush();
+        this.scheduleFlush("watch");
       });
     } catch {
       this.watcher = null;
     }
     this.pollTimer = setInterval(() => {
-      this.scheduleFlush();
+      this.scheduleFlush("poll");
     }, opts?.pollIntervalMs ?? DEFAULT_TAIL_POLL_INTERVAL_MS);
-    this.scheduleFlush();
+    this.scheduleFlush("initial");
   }
 
   stop(): void {
@@ -203,24 +205,27 @@ export class TranscriptTail {
     }
   }
 
-  private scheduleFlush(): void {
+  private scheduleFlush(source: "initial" | "poll" | "watch"): void {
     if (this.flushing || this.flushScheduled) {
       return;
     }
     this.flushScheduled = true;
     setImmediate(() => {
       this.flushScheduled = false;
-      this.flush();
+      this.flush(source);
     });
   }
 
-  private flush(): void {
+  private flush(source: "initial" | "poll" | "watch"): void {
     if (this.flushing) {
       return;
     }
     this.flushing = true;
     try {
       const stat = statSync(this.path);
+      if (source === "poll") {
+        this.handlers.onPoll?.(new Date().toISOString());
+      }
       if (stat.size < this.offset) {
         this.offset = stat.size;
         this.buffer = "";
@@ -324,7 +329,8 @@ export function createClaudeTranscriptService(): ClaudeTranscriptService {
         try {
           tail = new TranscriptTail(transcriptPath, {
             onContent: listener,
-            onError: options.onError
+            onError: options.onError,
+            onPoll: options.onPoll
           });
           tail.start({
             replayLastN: options.replayLastN,

@@ -1,9 +1,9 @@
 import type { FastifyInstance } from "fastify";
-import type { SendRoleMessageRequest, VcmOrchestrationMode } from "../../shared/types/message.js";
+import type { VcmOrchestrationMode } from "../../shared/types/message.js";
 import { VcmError } from "../errors.js";
 import type { MessageService } from "../services/message-service.js";
 import type { ProjectService } from "../services/project-service.js";
-import type { TaskService } from "../services/task-service.js";
+import { getTaskRuntimeRepoRoot, type TaskService } from "../services/task-service.js";
 
 export interface MessageRouteDeps {
   projectService: ProjectService;
@@ -17,56 +17,33 @@ export function registerMessageRoutes(app: FastifyInstance, deps: MessageRouteDe
     return deps.messageService.listMessages(context);
   });
 
-  app.post<{ Params: { taskSlug: string }; Body: SendRoleMessageRequest }>(
-    "/api/tasks/:taskSlug/messages",
+  app.get<{ Params: { taskSlug: string } }>("/api/tasks/:taskSlug/messages/pending-routes", async (request) => {
+    const context = await getRouteContext(deps, request.params.taskSlug);
+    return deps.messageService.listPendingRouteFiles(context);
+  });
+
+  app.post<{ Params: { taskSlug: string } }>(
+    "/api/tasks/:taskSlug/messages/mark-all-done",
     async (request) => {
       const context = await getRouteContext(deps, request.params.taskSlug);
-      return deps.messageService.sendMessage({
+      return deps.messageService.markAllDone({
         ...context,
-        ...request.body
+        clearRouteFiles: true
       });
     }
   );
 
-  app.post<{ Params: { taskSlug: string; messageId: string } }>(
-    "/api/tasks/:taskSlug/messages/:messageId/stage",
-    async (request) => {
-      const context = await getRouteContext(deps, request.params.taskSlug);
-      return deps.messageService.stageMessage({
-        ...context,
-        messageId: request.params.messageId
-      });
-    }
-  );
-
-  app.post<{ Params: { taskSlug: string; messageId: string } }>(
-    "/api/tasks/:taskSlug/messages/:messageId/approve",
-    async (request) => {
-      const context = await getRouteContext(deps, request.params.taskSlug);
-      return deps.messageService.approveMessage({
-        ...context,
-        messageId: request.params.messageId
-      });
-    }
-  );
-
-  app.post<{ Params: { taskSlug: string; messageId: string } }>(
-    "/api/tasks/:taskSlug/messages/:messageId/reject",
-    async (request) => {
-      const context = await getRouteContext(deps, request.params.taskSlug);
-      return deps.messageService.rejectMessage({
-        ...context,
-        messageId: request.params.messageId
-      });
-    }
-  );
+  app.delete<{ Params: { taskSlug: string } }>("/api/tasks/:taskSlug/messages/history", async (request) => {
+    const context = await getRouteContext(deps, request.params.taskSlug);
+    return deps.messageService.deleteMessageHistory(context);
+  });
 
   app.get<{ Params: { taskSlug: string } }>("/api/tasks/:taskSlug/orchestration", async (request) => {
     const context = await getRouteContext(deps, request.params.taskSlug);
     return deps.messageService.getOrchestrationState(context);
   });
 
-  app.put<{ Params: { taskSlug: string }; Body: { mode?: VcmOrchestrationMode; paused?: boolean } }>(
+  app.put<{ Params: { taskSlug: string }; Body: { mode?: VcmOrchestrationMode } }>(
     "/api/tasks/:taskSlug/orchestration",
     async (request) => {
       const context = await getRouteContext(deps, request.params.taskSlug);
@@ -79,35 +56,21 @@ export function registerMessageRoutes(app: FastifyInstance, deps: MessageRouteDe
       }
       return deps.messageService.updateOrchestrationState({
         ...context,
-        mode: request.body.mode,
-        paused: request.body.paused
+        mode: request.body.mode
       });
     }
   );
-
-  app.post<{ Params: { taskSlug: string } }>("/api/tasks/:taskSlug/orchestration/pause", async (request) => {
-    const context = await getRouteContext(deps, request.params.taskSlug);
-    return deps.messageService.updateOrchestrationState({
-      ...context,
-      paused: true
-    });
-  });
-
-  app.post<{ Params: { taskSlug: string } }>("/api/tasks/:taskSlug/orchestration/resume", async (request) => {
-    const context = await getRouteContext(deps, request.params.taskSlug);
-    return deps.messageService.updateOrchestrationState({
-      ...context,
-      paused: false
-    });
-  });
 }
 
 async function getRouteContext(deps: MessageRouteDeps, taskSlug: string) {
   const project = await requireCurrentProject(deps.projectService);
   const config = await deps.projectService.loadConfig(project.repoRoot);
   const task = await deps.taskService.loadTask(project.repoRoot, taskSlug);
+  const taskRepoRoot = getTaskRuntimeRepoRoot(task);
   return {
     repoRoot: project.repoRoot,
+    taskRepoRoot,
+    stateRepoRoot: taskRepoRoot,
     stateRoot: config.stateRoot,
     handoffDir: task.handoffDir,
     taskSlug

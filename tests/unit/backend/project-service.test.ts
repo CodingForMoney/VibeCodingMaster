@@ -3,7 +3,7 @@ import { createProjectService } from "../../../src/backend/services/project-serv
 import type { ClaudeAdapter } from "../../../src/backend/adapters/claude-adapter.js";
 import type { FileSystemAdapter } from "../../../src/backend/adapters/filesystem.js";
 import type { GitAdapter } from "../../../src/backend/adapters/git-adapter.js";
-import type { AppSettingsService } from "../../../src/backend/services/app-settings-service.js";
+import { getProjectId, type AppSettingsService } from "../../../src/backend/services/app-settings-service.js";
 
 describe("createProjectService", () => {
   it("trims repository paths before validating the Git repository", async () => {
@@ -69,12 +69,32 @@ describe("createProjectService", () => {
     expect(appSettings.recordedPaths).toEqual(["/workspace"]);
     expect(await service.getRecentRepositoryPaths()).toEqual(["/workspace"]);
   });
+
+  it("stores project config in the app project config path", async () => {
+    const fs = createMemoryFs(new Set(["/workspace"]));
+    const service = createProjectService({
+      fs,
+      git: createGitAdapterStub([]),
+      claude: createClaudeAdapterStub(),
+      appSettings: createAppSettingsStub(fs)
+    });
+
+    const project = await service.connectProject({ repoPath: "/workspace" });
+    const configPath = `/home/.vcm/projects/${getProjectId("/workspace")}/config.json`;
+
+    expect(project.config.claudeCommand).toBe("claude");
+    await expect(fs.readJson(configPath)).resolves.toMatchObject({
+      stateRoot: ".ai/vcm",
+      claudeCommand: "claude"
+    });
+    await expect(fs.pathExists("/workspace/.ai/vcm/config.json")).resolves.toBe(false);
+  });
 });
 
-function createMemoryFs(existingPaths: Set<string>): FileSystemAdapter {
+function createMemoryFs(existingPaths: Set<string>, files = new Map<string, string>()): FileSystemAdapter {
   return {
     async pathExists(targetPath) {
-      return existingPaths.has(targetPath);
+      return existingPaths.has(targetPath) || files.has(targetPath);
     },
     async ensureDir(targetPath) {
       existingPaths.add(targetPath);
@@ -91,18 +111,27 @@ function createMemoryFs(existingPaths: Set<string>): FileSystemAdapter {
     async appendText(targetPath) {
       existingPaths.add(targetPath);
     },
-    async readJson() {
-      throw new Error("not implemented");
+    async readJson(targetPath) {
+      const value = files.get(targetPath);
+      if (value === undefined) {
+        throw new Error(`missing ${targetPath}`);
+      }
+      return JSON.parse(value);
     },
-    async writeJson(targetPath) {
+    async writeJson(targetPath, value) {
       existingPaths.add(targetPath);
+      files.set(targetPath, `${JSON.stringify(value, null, 2)}\n`);
     },
-    async writeJsonAtomic(targetPath) {
-      existingPaths.add(targetPath);
+    async writeJsonAtomic(targetPath, value) {
+      await this.writeJson(targetPath, value);
     },
     async ensureFile(targetPath) {
       existingPaths.add(targetPath);
       return true;
+    },
+    async removePath(targetPath) {
+      existingPaths.delete(targetPath);
+      files.delete(targetPath);
     }
   };
 }
@@ -127,7 +156,19 @@ function createGitAdapterStub(checkedRepos: string[], options: { failMetadata?: 
         throw new Error("status unavailable");
       }
       return false;
-    }
+    },
+    async getStatusPorcelain() {
+      return "";
+    },
+    async isIgnored() {
+      return true;
+    },
+    async branchExists() {
+      return false;
+    },
+    async createWorktree() {},
+    async removeWorktree() {},
+    async deleteBranch() {}
   };
 }
 
@@ -145,7 +186,14 @@ function createClaudeAdapterStub(): ClaudeAdapter {
   };
 }
 
-function createAppSettingsStub(): Pick<AppSettingsService, "getRecentRepositoryPaths" | "recordRecentRepositoryPath"> & {
+function createAppSettingsStub(fs = createMemoryFs(new Set())): Pick<
+  AppSettingsService,
+  | "getRecentRepositoryPaths"
+  | "recordRecentRepositoryPath"
+  | "loadProjectConfig"
+  | "saveProjectConfig"
+  | "getProjectConfigPath"
+> & {
   recordedPaths: string[];
 } {
   const recordedPaths: string[] = [];
@@ -157,6 +205,20 @@ function createAppSettingsStub(): Pick<AppSettingsService, "getRecentRepositoryP
     async recordRecentRepositoryPath(repoRoot) {
       recordedPaths.unshift(repoRoot);
       return recordedPaths;
+    },
+    async loadProjectConfig(repoRoot) {
+      const configPath = this.getProjectConfigPath(repoRoot);
+      if (!(await fs.pathExists(configPath))) {
+        return undefined;
+      }
+      return fs.readJson(configPath);
+    },
+    async saveProjectConfig(config) {
+      await fs.writeJsonAtomic(this.getProjectConfigPath(config.repoRoot), config);
+      return config;
+    },
+    getProjectConfigPath(repoRoot) {
+      return `/home/.vcm/projects/${getProjectId(repoRoot)}/config.json`;
     }
   };
 }

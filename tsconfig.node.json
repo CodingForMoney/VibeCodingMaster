@@ -10,6 +10,6 @@
     "forceConsistentCasingInFileNames": true,
     "skipLibCheck": true
   },
-  "include": ["src/main.ts", "src/backend/**/*.ts", "src/cli/**/*.ts", "src/shared/**/*.ts"],
+  "include": ["src/main.ts", "src/backend/**/*.ts", "src/shared/**/*.ts"],
   "exclude": ["dist", "dist-frontend", "node_modules", "tests"]
 }

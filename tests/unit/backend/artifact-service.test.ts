@@ -6,35 +6,35 @@ describe("createArtifactService", () => {
   it("prefers role-commands/<role>.md for role command paths", async () => {
     const fs = createMemoryFs();
     const service = createArtifactService(fs);
-    await fs.writeText("/repo/.ai/handoffs/tests-dir-cleanup/role-commands/coder.md", "# ready");
+    await fs.writeText("/repo/.ai/vcm/handoffs/role-commands/coder.md", "# ready");
 
     await expect(service.resolveRoleCommandPath({
       repoRoot: "/repo",
-      handoffDir: ".ai/handoffs/tests-dir-cleanup",
+      handoffDir: ".ai/vcm/handoffs",
       role: "coder"
-    })).resolves.toBe(".ai/handoffs/tests-dir-cleanup/role-commands/coder.md");
+    })).resolves.toBe(".ai/vcm/handoffs/role-commands/coder.md");
   });
 
   it("falls back to legacy role-commands/<role>-command.md files", async () => {
     const fs = createMemoryFs();
     const service = createArtifactService(fs);
-    await fs.writeText("/repo/.ai/handoffs/demo-task/role-commands/coder-command.md", "# legacy");
+    await fs.writeText("/repo/.ai/vcm/handoffs/role-commands/coder-command.md", "# legacy");
 
     await expect(service.resolveRoleCommandPath({
       repoRoot: "/repo",
-      handoffDir: ".ai/handoffs/demo-task",
+      handoffDir: ".ai/vcm/handoffs",
       role: "coder"
-    })).resolves.toBe(".ai/handoffs/demo-task/role-commands/coder-command.md");
+    })).resolves.toBe(".ai/vcm/handoffs/role-commands/coder-command.md");
   });
 
   it("rejects placeholder role commands before dispatch", async () => {
     const fs = createMemoryFs();
     const service = createArtifactService(fs);
-    await fs.writeText("/repo/.ai/handoffs/demo-task/role-commands/coder.md", "# coder\n\n## Objective\n\nTBD\n");
+    await fs.writeText("/repo/.ai/vcm/handoffs/role-commands/coder.md", "# coder\n\n## Objective\n\nTBD\n");
 
     await expect(service.readRoleCommand({
       repoRoot: "/repo",
-      handoffDir: ".ai/handoffs/demo-task",
+      handoffDir: ".ai/vcm/handoffs",
       role: "coder"
     })).rejects.toMatchObject({
       code: "ROLE_COMMAND_NOT_READY"
@@ -48,15 +48,15 @@ describe("createArtifactService", () => {
     const created = await service.createArtifactTemplates({
       repoRoot: "/repo",
       taskSlug: "demo-task",
-      handoffDir: ".ai/handoffs/demo-task"
+      handoffDir: ".ai/vcm/handoffs"
     });
     const summary = await service.listArtifacts({
       repoRoot: "/repo",
-      handoffDir: ".ai/handoffs/demo-task"
+      handoffDir: ".ai/vcm/handoffs"
     });
 
-    expect(created).toContain(".ai/handoffs/demo-task/docs-sync-report.md");
-    expect(summary.paths.docsSyncReportPath).toBe(".ai/handoffs/demo-task/docs-sync-report.md");
+    expect(created).toContain(".ai/vcm/handoffs/docs-sync-report.md");
+    expect(summary.paths.docsSyncReportPath).toBe(".ai/vcm/handoffs/docs-sync-report.md");
     expect(summary.checks.find((check) => check.kind === "docs-sync-report")).toMatchObject({
       status: "incomplete",
       hasPlaceholder: true

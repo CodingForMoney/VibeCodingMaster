@@ -12,10 +12,16 @@ export interface FileSystemAdapter {
   writeJson<T>(path: string, value: T): Promise<void>;
   writeJsonAtomic<T>(path: string, value: T): Promise<void>;
   ensureFile(path: string, content: string, options?: EnsureFileOptions): Promise<boolean>;
+  removePath?(targetPath: string, options?: RemovePathOptions): Promise<void>;
 }
 
 export interface EnsureFileOptions {
   overwrite?: boolean;
+}
+
+export interface RemovePathOptions {
+  recursive?: boolean;
+  force?: boolean;
 }
 
 export function createNodeFileSystemAdapter(): FileSystemAdapter {
@@ -64,6 +70,12 @@ export function createNodeFileSystemAdapter(): FileSystemAdapter {
 
       await this.writeText(targetPath, content);
       return true;
+    },
+    async removePath(targetPath, options = {}) {
+      await fs.rm(targetPath, {
+        recursive: options.recursive ?? false,
+        force: options.force ?? false
+      });
     }
   };
 }

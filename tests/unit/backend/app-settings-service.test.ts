@@ -1,73 +1,66 @@
 import { describe, expect, it } from "vitest";
 import type { FileSystemAdapter } from "../../../src/backend/adapters/filesystem.js";
-import { createAppSettingsService, type AppSettingsFile } from "../../../src/backend/services/app-settings-service.js";
+import {
+  createAppSettingsService,
+  getProjectId,
+  type AppProjectIndexFile,
+  type AppSettingsFile
+} from "../../../src/backend/services/app-settings-service.js";
 
 describe("app-settings-service", () => {
-  it("creates settings.json and migrates the legacy translation config", async () => {
+  it("creates an empty settings.json when no settings exist", async () => {
     const fs = createMemoryFs();
-    await fs.writeJsonAtomic("/translation.json", {
-      settings: {
-        apiKey: "sk-old-settings-key",
-        model: "cheap-translator"
-      },
-      secrets: {
-        apiKey: "sk-local-test"
-      }
-    });
     const service = createAppSettingsService({
       fs,
-      settingsPath: "/settings.json",
-      legacySettingsPath: "/old-settings.json",
-      legacyTranslationPath: "/translation.json"
+      settingsPath: "/settings.json"
     });
 
     const settings = await service.loadSettings();
     const stored = await fs.readJson<AppSettingsFile>("/settings.json");
 
-    expect(settings.translation?.settings.model).toBe("cheap-translator");
-    expect(settings.translation?.secrets.apiKey).toBe("sk-local-test");
-    expect(stored.translation?.secrets.apiKey).toBe("sk-local-test");
-    expect(stored.translation?.settings.apiKey).toBeUndefined();
-    expect(stored.recentRepositoryPaths).toEqual([]);
+    expect(settings).toEqual({
+      version: 1,
+      preferences: {
+        themeMode: "system",
+        roundCompletionAlerts: true
+      },
+      translation: undefined,
+      recentRepositoryPaths: []
+    });
+    expect(stored).toEqual(settings);
   });
 
-  it("migrates old app settings into the new settings path", async () => {
+  it("stores app preferences with system theme as the default", async () => {
     const fs = createMemoryFs();
-    await fs.writeJsonAtomic("/old-settings.json", {
-      version: 1,
-      translation: {
-        settings: {
-          model: "old-settings-model"
-        },
-        secrets: {
-          apiKey: "sk-old-settings"
-        }
-      },
-      recentRepositoryPaths: ["/repo/one", "/repo/two"]
-    });
     const service = createAppSettingsService({
       fs,
-      settingsPath: "/settings.json",
-      legacySettingsPath: "/old-settings.json",
-      legacyTranslationPath: "/translation.json"
+      settingsPath: "/settings.json"
     });
 
-    const settings = await service.loadSettings();
-    const stored = await fs.readJson<AppSettingsFile>("/settings.json");
+    await expect(service.getPreferences()).resolves.toEqual({
+      themeMode: "system",
+      roundCompletionAlerts: true
+    });
+    await expect(service.updatePreferences({
+      themeMode: "dark",
+      roundCompletionAlerts: false
+    })).resolves.toEqual({
+      themeMode: "dark",
+      roundCompletionAlerts: false
+    });
 
-    expect(settings.translation?.settings.model).toBe("old-settings-model");
-    expect(settings.translation?.secrets.apiKey).toBe("sk-old-settings");
-    expect(settings.recentRepositoryPaths).toEqual(["/repo/one", "/repo/two"]);
-    expect(stored).toEqual(settings);
+    const stored = await fs.readJson<AppSettingsFile>("/settings.json");
+    expect(stored.preferences).toEqual({
+      themeMode: "dark",
+      roundCompletionAlerts: false
+    });
   });
 
   it("keeps the five most recent repository paths with newest first", async () => {
     const fs = createMemoryFs();
     const service = createAppSettingsService({
       fs,
-      settingsPath: "/settings.json",
-      legacySettingsPath: "/old-settings.json",
-      legacyTranslationPath: "/translation.json"
+      settingsPath: "/settings.json"
     });
 
     await service.recordRecentRepositoryPath("/repo/one");
@@ -85,6 +78,42 @@ describe("app-settings-service", () => {
       "/repo/four",
       "/repo/two"
     ]);
+  });
+
+  it("stores project config under ~/.vcm projects state", async () => {
+    const fs = createMemoryFs();
+    const service = createAppSettingsService({
+      fs,
+      settingsPath: "/home/.vcm/settings.json"
+    });
+    const repoRoot = "/workspace/project";
+    const projectId = getProjectId(repoRoot);
+
+    await service.saveProjectConfig({
+      version: 1,
+      repoRoot,
+      defaultRoles: ["project-manager", "architect", "coder", "reviewer"],
+      handoffRoot: ".ai/vcm/handoffs",
+      stateRoot: ".ai/vcm",
+      terminalBackend: "node-pty",
+      claudeCommand: "claude-custom"
+    });
+
+    await expect(fs.readJson(`/home/.vcm/projects/${projectId}/config.json`)).resolves.toMatchObject({
+      repoRoot,
+      stateRoot: ".ai/vcm",
+      claudeCommand: "claude-custom"
+    });
+    await expect(service.loadProjectConfig(repoRoot)).resolves.toMatchObject({
+      claudeCommand: "claude-custom"
+    });
+
+    const index = await fs.readJson<AppProjectIndexFile>("/home/.vcm/projects/index.json");
+    expect(index.projects[0]).toMatchObject({
+      projectId,
+      repoRoot,
+      configPath: `/home/.vcm/projects/${projectId}/config.json`
+    });
   });
 });
 

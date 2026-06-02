@@ -13,6 +13,19 @@ export interface GitAdapter {
   isRepo(repoRoot: string): Promise<boolean>;
   getCurrentBranch(repoRoot: string): Promise<string>;
   isDirty(repoRoot: string): Promise<boolean>;
+  getStatusPorcelain(repoRoot: string): Promise<string>;
+  isIgnored(repoRoot: string, repoRelativePath: string): Promise<boolean>;
+  branchExists(repoRoot: string, branch: string): Promise<boolean>;
+  createWorktree(input: CreateGitWorktreeInput): Promise<void>;
+  removeWorktree(repoRoot: string, worktreePath: string, options?: { force?: boolean }): Promise<void>;
+  deleteBranch(repoRoot: string, branch: string, options?: { force?: boolean }): Promise<void>;
+}
+
+export interface CreateGitWorktreeInput {
+  repoRoot: string;
+  worktreePath: string;
+  branch: string;
+  baseRef?: string;
 }
 
 export function createGitAdapter(runner: CommandRunner): GitAdapter {
@@ -37,6 +50,9 @@ export function createGitAdapter(runner: CommandRunner): GitAdapter {
       return result.stdout.trim() || "detached";
     },
     async isDirty(repoRoot) {
+      return (await this.getStatusPorcelain(repoRoot)).trim().length > 0;
+    },
+    async getStatusPorcelain(repoRoot) {
       const result = await runGit(runner, repoRoot, ["status", "--porcelain"]);
       if (result.exitCode !== 0) {
         throw new VcmError({
@@ -47,7 +63,82 @@ export function createGitAdapter(runner: CommandRunner): GitAdapter {
         });
       }
 
-      return result.stdout.trim().length > 0;
+      return result.stdout;
+    },
+    async isIgnored(repoRoot, repoRelativePath) {
+      const result = await runGit(runner, repoRoot, ["check-ignore", "-q", "--", repoRelativePath]);
+      if (result.exitCode === 0) {
+        return true;
+      }
+      if (result.exitCode === 1) {
+        return false;
+      }
+      throw new VcmError({
+        code: "GIT_ERROR",
+        message: `Unable to check whether Git ignores ${repoRelativePath}.`,
+        statusCode: 400,
+        hint: result.stderr
+      });
+    },
+    async branchExists(repoRoot, branch) {
+      const result = await runGit(runner, repoRoot, ["show-ref", "--verify", "--quiet", `refs/heads/${branch}`]);
+      if (result.exitCode === 0) {
+        return true;
+      }
+      if (result.exitCode === 1) {
+        return false;
+      }
+      throw new VcmError({
+        code: "GIT_ERROR",
+        message: `Unable to check Git branch: ${branch}`,
+        statusCode: 400,
+        hint: result.stderr
+      });
+    },
+    async createWorktree(input) {
+      const result = await runGit(runner, input.repoRoot, [
+        "worktree",
+        "add",
+        "-b",
+        input.branch,
+        input.worktreePath,
+        input.baseRef ?? "HEAD"
+      ]);
+      if (result.exitCode !== 0) {
+        throw new VcmError({
+          code: "GIT_WORKTREE_CREATE_FAILED",
+          message: `Unable to create task worktree: ${input.worktreePath}`,
+          statusCode: 400,
+          hint: result.stderr
+        });
+      }
+    },
+    async removeWorktree(repoRoot, worktreePath, options = {}) {
+      const args = ["worktree", "remove"];
+      if (options.force) {
+        args.push("--force");
+      }
+      args.push(worktreePath);
+      const result = await runGit(runner, repoRoot, args);
+      if (result.exitCode !== 0) {
+        throw new VcmError({
+          code: "GIT_WORKTREE_REMOVE_FAILED",
+          message: `Unable to remove task worktree: ${worktreePath}`,
+          statusCode: 400,
+          hint: result.stderr
+        });
+      }
+    },
+    async deleteBranch(repoRoot, branch, options = {}) {
+      const result = await runGit(runner, repoRoot, ["branch", options.force ? "-D" : "-d", branch]);
+      if (result.exitCode !== 0) {
+        throw new VcmError({
+          code: "GIT_BRANCH_DELETE_FAILED",
+          message: `Unable to delete Git branch: ${branch}`,
+          statusCode: 400,
+          hint: result.stderr
+        });
+      }
     }
   };
 }

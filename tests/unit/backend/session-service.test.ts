@@ -53,10 +53,41 @@ describe("createSessionService", () => {
 
     expect(writes).toHaveLength(0);
     expect(runtimeInputs[0]?.env).toMatchObject({
+      VCM_API_URL: "http://127.0.0.1:4173",
       VCM_TASK_SLUG: "demo-task",
-      VCM_ROLE: "project-manager"
+      VCM_ROLE: "project-manager",
+      VCM_SESSION_ID: expect.any(String)
     });
   });
+
+  it("starts role sessions inside the task worktree when one exists", async () => {
+    const fs = createMemoryFs();
+    const runtimeInputs: CreateTerminalSessionInput[] = [];
+    const service = createTestSessionService(fs, runtimeInputs, [], {
+      worktreePath: "/repo/.claude/worktrees/demo-task"
+    });
+
+    const started = await service.startRoleSession("/repo", "demo-task", "architect");
+
+    expect(started.cwd).toBe("/repo/.claude/worktrees/demo-task");
+    expect(started.transcriptPath).toContain("-repo-.claude-worktrees-demo-task");
+    expect(runtimeInputs[0]?.cwd).toBe("/repo/.claude/worktrees/demo-task");
+    expect(runtimeInputs[0]?.logPath).toBe("/repo/.claude/worktrees/demo-task/.ai/vcm/handoffs/logs/architect.log");
+    await expect(fs.pathExists("/repo/.claude/worktrees/demo-task/.ai/vcm/sessions/demo-task.json"))
+      .resolves.toBe(true);
+    await expect(fs.pathExists("/repo/.ai/vcm/sessions/demo-task.json"))
+      .resolves.toBe(false);
+
+    const recoveredService = createTestSessionService(fs, [], [], {
+      worktreePath: "/repo/.claude/worktrees/demo-task"
+    });
+    await expect(recoveredService.listRoleSessions("/repo", "demo-task")).resolves.toMatchObject([{
+      role: "architect",
+      status: "resumable",
+      claudeSessionId: started.claudeSessionId
+    }]);
+  });
+
 
   it("restarts with a fresh Claude session instead of resuming the persisted one", async () => {
     const fs = createMemoryFs();
@@ -80,9 +111,45 @@ describe("createSessionService", () => {
     ]);
     expect(secondRuntimeInputs[0]?.args).not.toContain("--resume");
   });
+
+  it("records Claude hook activity separately from terminal process status", async () => {
+    const fs = createMemoryFs();
+    const runtimeInputs: CreateTerminalSessionInput[] = [];
+    const service = createTestSessionService(fs, runtimeInputs);
+    const started = await service.startRoleSession("/repo", "demo-task", "coder");
+
+    expect(started).toMatchObject({
+      status: "running",
+      activityStatus: "idle"
+    });
+
+    const running = await service.markRoleActivityRunning("/repo", "demo-task", "coder");
+    expect(running).toMatchObject({
+      status: "running",
+      activityStatus: "running",
+      lastPromptSubmittedAt: "2026-05-29T00:00:00.000Z"
+    });
+
+    const idle = await service.recordClaudeHookEvent("/repo", {
+      taskSlug: "demo-task",
+      role: "coder",
+      eventName: "Stop",
+      claudeSessionId: started.claudeSessionId
+    });
+    expect(idle).toMatchObject({
+      status: "running",
+      activityStatus: "idle",
+      lastStopAt: "2026-05-29T00:00:00.000Z"
+    });
+  });
 });
 
-function createTestSessionService(fs: FileSystemAdapter, runtimeInputs: CreateTerminalSessionInput[], writes: string[] = []) {
+function createTestSessionService(
+  fs: FileSystemAdapter,
+  runtimeInputs: CreateTerminalSessionInput[],
+  writes: string[] = [],
+  options: { worktreePath?: string } = {}
+) {
   return createSessionService({
     fs,
     runtime: createFakeRuntime(runtimeInputs, writes),
@@ -110,25 +177,25 @@ function createTestSessionService(fs: FileSystemAdapter, runtimeInputs: CreateTe
     artifactService: {
       getHandoffPaths() {
         return {
-          handoffDir: ".ai/handoffs/demo-task",
-          roleCommandsDir: ".ai/handoffs/demo-task/role-commands",
-          logsDir: ".ai/handoffs/demo-task/logs",
+          handoffDir: ".ai/vcm/handoffs",
+          roleCommandsDir: ".ai/vcm/handoffs/role-commands",
+          logsDir: ".ai/vcm/handoffs/logs",
           roleCommandPaths: {
-            architect: ".ai/handoffs/demo-task/role-commands/architect.md",
-            coder: ".ai/handoffs/demo-task/role-commands/coder.md",
-            reviewer: ".ai/handoffs/demo-task/role-commands/reviewer.md"
+            architect: ".ai/vcm/handoffs/role-commands/architect.md",
+            coder: ".ai/vcm/handoffs/role-commands/coder.md",
+            reviewer: ".ai/vcm/handoffs/role-commands/reviewer.md"
           },
           roleLogPaths: {
-            "project-manager": ".ai/handoffs/demo-task/logs/project-manager.log",
-            architect: ".ai/handoffs/demo-task/logs/architect.log",
-            coder: ".ai/handoffs/demo-task/logs/coder.log",
-            reviewer: ".ai/handoffs/demo-task/logs/reviewer.log"
+            "project-manager": ".ai/vcm/handoffs/logs/project-manager.log",
+            architect: ".ai/vcm/handoffs/logs/architect.log",
+            coder: ".ai/vcm/handoffs/logs/coder.log",
+            reviewer: ".ai/vcm/handoffs/logs/reviewer.log"
           },
-          architecturePlanPath: ".ai/handoffs/demo-task/architecture-plan.md",
-          implementationLogPath: ".ai/handoffs/demo-task/implementation-log.md",
-          validationLogPath: ".ai/handoffs/demo-task/validation-log.md",
-          reviewReportPath: ".ai/handoffs/demo-task/review-report.md",
-          docsSyncReportPath: ".ai/handoffs/demo-task/docs-sync-report.md"
+          architecturePlanPath: ".ai/vcm/handoffs/architecture-plan.md",
+          implementationLogPath: ".ai/vcm/handoffs/implementation-log.md",
+          validationLogPath: ".ai/vcm/handoffs/validation-log.md",
+          reviewReportPath: ".ai/vcm/handoffs/review-report.md",
+          docsSyncReportPath: ".ai/vcm/handoffs/docs-sync-report.md"
         };
       }
     } as never,
@@ -138,8 +205,8 @@ function createTestSessionService(fs: FileSystemAdapter, runtimeInputs: CreateTe
           version: 1,
           repoRoot: "/repo",
           defaultRoles: ["project-manager", "architect", "coder", "reviewer"],
-          handoffRoot: ".ai/handoffs",
-          stateRoot: ".vcm",
+          handoffRoot: ".ai/vcm/handoffs",
+          stateRoot: ".ai/vcm",
           terminalBackend: "node-pty",
           claudeCommand: "claude"
         };
@@ -153,8 +220,9 @@ function createTestSessionService(fs: FileSystemAdapter, runtimeInputs: CreateTe
           createdAt: "2026-05-29T00:00:00.000Z",
           updatedAt: "2026-05-29T00:00:00.000Z",
           repoRoot: "/repo",
+          worktreePath: options.worktreePath,
           branch: "feature",
-          handoffDir: ".ai/handoffs/demo-task",
+          handoffDir: ".ai/vcm/handoffs",
           status: "created"
         };
       },
@@ -165,12 +233,14 @@ function createTestSessionService(fs: FileSystemAdapter, runtimeInputs: CreateTe
           createdAt: "2026-05-29T00:00:00.000Z",
           updatedAt: "2026-05-29T00:00:00.000Z",
           repoRoot: "/repo",
+          worktreePath: options.worktreePath,
           branch: "feature",
-          handoffDir: ".ai/handoffs/demo-task",
+          handoffDir: ".ai/vcm/handoffs",
           status: "running"
         };
       }
     } as never,
+    apiUrl: "http://127.0.0.1:4173",
     now: () => "2026-05-29T00:00:00.000Z"
   });
 }

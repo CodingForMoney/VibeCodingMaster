@@ -6,6 +6,7 @@ import { createCommandDispatcher } from "../../../src/backend/services/command-d
 describe("createCommandDispatcher", () => {
   it("writes only a short role-command instruction to runtime", async () => {
     const writes: string[] = [];
+    const roleCommandRepoRoots: string[] = [];
     const runtime = {
       write(_sessionId: string, data: string) {
         writes.push(data);
@@ -24,7 +25,7 @@ describe("createCommandDispatcher", () => {
             permissionMode: "default",
             cwd: "/repo",
             terminalBackend: "node-pty",
-            logPath: ".ai/handoffs/demo-task/logs/architect.log",
+            logPath: ".ai/vcm/handoffs/logs/architect.log",
             updatedAt: "2026-05-29T00:00:00.000Z"
           };
         }
@@ -37,18 +38,21 @@ describe("createCommandDispatcher", () => {
             createdAt: "2026-05-29T00:00:00.000Z",
             updatedAt: "2026-05-29T00:00:00.000Z",
             repoRoot: "/repo",
+            worktreePath: "/repo/.claude/worktrees/demo-task",
             branch: "feature",
-            handoffDir: ".ai/handoffs/demo-task",
+            handoffDir: ".ai/vcm/handoffs",
             status: "created"
           };
         }
       } as never,
       artifactService: {
-        async readRoleCommand() {
+        async readRoleCommand(input: { repoRoot: string }) {
+          roleCommandRepoRoots.push(input.repoRoot);
           return "# long command body";
         },
-        async resolveRoleCommandPath() {
-          return ".ai/handoffs/demo-task/role-commands/architect.md";
+        async resolveRoleCommandPath(input: { repoRoot: string }) {
+          roleCommandRepoRoots.push(input.repoRoot);
+          return ".ai/vcm/handoffs/role-commands/architect.md";
         }
       } as never
     });
@@ -59,8 +63,15 @@ describe("createCommandDispatcher", () => {
       role: "architect" as DispatchableRole
     });
 
-    expect(result.instruction).toBe("Please read and execute the role command at: .ai/handoffs/demo-task/role-commands/architect.md");
-    expect(writes).toEqual([`${result.instruction}\r`]);
+    expect(result.instruction).toBe("Please read and execute the role command at: .ai/vcm/handoffs/role-commands/architect.md");
+    expect(writes).toEqual([
+      `\x1b[200~${result.instruction}\x1b[201~`,
+      "\r"
+    ]);
     expect(writes[0]).not.toContain("long command body");
+    expect(roleCommandRepoRoots).toEqual([
+      "/repo/.claude/worktrees/demo-task",
+      "/repo/.claude/worktrees/demo-task"
+    ]);
   });
 });
