@@ -12,13 +12,45 @@ export interface XtermViewProps {
 
 export function XtermView({ sessionId, active = true, onEvent }: XtermViewProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const clientRef = useRef<TerminalClient | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const terminalRef = useRef<Terminal | null>(null);
+  const activeRef = useRef(active);
   const onEventRef = useRef(onEvent);
+
+  function fitAndResize(options: { focus?: boolean } = {}): boolean {
+    const container = containerRef.current;
+    const client = clientRef.current;
+    const fitAddon = fitAddonRef.current;
+    const terminal = terminalRef.current;
+    if (!container || !client || !fitAddon || !terminal) {
+      return false;
+    }
+
+    const rect = container.getBoundingClientRect();
+    if (rect.width < MIN_VISIBLE_TERMINAL_WIDTH || rect.height < MIN_VISIBLE_TERMINAL_HEIGHT) {
+      return false;
+    }
+
+    fitAddon.fit();
+    if (terminal.cols < MIN_TERMINAL_COLS || terminal.rows < MIN_TERMINAL_ROWS) {
+      return false;
+    }
+
+    client.resize(terminal.cols, terminal.rows);
+    if (options.focus) {
+      terminal.focus();
+    }
+    return true;
+  }
 
   useEffect(() => {
     onEventRef.current = onEvent;
   }, [onEvent]);
+
+  useEffect(() => {
+    activeRef.current = active;
+  }, [active]);
 
   useEffect(() => {
     if (!containerRef.current) {
@@ -44,8 +76,6 @@ export function XtermView({ sessionId, active = true, onEvent }: XtermViewProps)
     terminal.open(containerRef.current);
     terminalRef.current = terminal;
     fitAddonRef.current = fitAddon;
-    fitAddon.fit();
-    terminal.focus();
 
     const client = new TerminalClient(sessionId, {
       onOutput(data) {
@@ -59,21 +89,44 @@ export function XtermView({ sessionId, active = true, onEvent }: XtermViewProps)
         onEventRef.current?.(message);
       }
     });
+    clientRef.current = client;
     const dataDisposable = terminal.onData((data) => {
       client.sendInput(data);
     });
+    let resizeFrame = 0;
+    let initialFrame = 0;
+    let initialRetry = 0;
+    const requestFitAndResize = () => {
+      if (resizeFrame) {
+        window.cancelAnimationFrame(resizeFrame);
+      }
+      resizeFrame = window.requestAnimationFrame(() => {
+        resizeFrame = 0;
+        fitAndResize({ focus: activeRef.current });
+      });
+    };
     const resizeObserver = new ResizeObserver(() => {
-      fitAddon.fit();
-      client.resize(terminal.cols, terminal.rows);
+      requestFitAndResize();
     });
     resizeObserver.observe(containerRef.current);
-    client.resize(terminal.cols, terminal.rows);
+    initialFrame = window.requestAnimationFrame(requestFitAndResize);
+    initialRetry = window.setTimeout(requestFitAndResize, 120);
 
     return () => {
+      if (resizeFrame) {
+        window.cancelAnimationFrame(resizeFrame);
+      }
+      if (initialFrame) {
+        window.cancelAnimationFrame(initialFrame);
+      }
+      if (initialRetry) {
+        window.clearTimeout(initialRetry);
+      }
       resizeObserver.disconnect();
       dataDisposable.dispose();
       client.close();
       terminal.dispose();
+      clientRef.current = null;
       terminalRef.current = null;
       fitAddonRef.current = null;
     };
@@ -84,22 +137,42 @@ export function XtermView({ sessionId, active = true, onEvent }: XtermViewProps)
       return;
     }
 
-    const frame = window.requestAnimationFrame(() => {
-      const terminal = terminalRef.current;
-      const fitAddon = fitAddonRef.current;
-      if (!terminal || !fitAddon) {
-        return;
+    const frames: number[] = [];
+    const timers: number[] = [];
+    frames.push(window.requestAnimationFrame(() => {
+      fitAndResize({ focus: true });
+      frames.push(window.requestAnimationFrame(() => fitAndResize({ focus: true })));
+    }));
+    timers.push(window.setTimeout(() => fitAndResize({ focus: true }), 160));
+    timers.push(window.setTimeout(() => fitAndResize({ focus: true }), 360));
+
+    return () => {
+      for (const frame of frames) {
+        window.cancelAnimationFrame(frame);
       }
-
-      fitAddon.fit();
-      terminal.focus();
-    });
-
-    return () => window.cancelAnimationFrame(frame);
+      for (const timer of timers) {
+        window.clearTimeout(timer);
+      }
+    };
   }, [active]);
+
+  useEffect(() => {
+    const onWindowResize = () => {
+      if (activeRef.current) {
+        fitAndResize();
+      }
+    };
+    window.addEventListener("resize", onWindowResize);
+    return () => window.removeEventListener("resize", onWindowResize);
+  }, []);
 
   return <div className="terminal-frame" ref={containerRef} onMouseDown={() => terminalRef.current?.focus()} />;
 }
+
+const MIN_VISIBLE_TERMINAL_WIDTH = 160;
+const MIN_VISIBLE_TERMINAL_HEIGHT = 80;
+const MIN_TERMINAL_COLS = 20;
+const MIN_TERMINAL_ROWS = 5;
 
 const CLAUDE_TERMINAL_THEME = {
   background: "#0d1117",

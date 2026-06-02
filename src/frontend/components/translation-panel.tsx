@@ -1,23 +1,27 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import ReactMarkdown from "react-markdown";
+import remarkGfm from "remark-gfm";
 import type { RoleName } from "../../shared/types/role.js";
 import type {
   TranslationEntry,
   TranslationPromptPreview,
+  TranslationSessionEvent,
+  TranslationSessionStatus,
   TranslationSettings,
-  TranslationWsMessage
 } from "../../shared/types/translation.js";
 import { apiClient } from "../state/api-client.js";
 import { TranslationSettingsModal } from "./translation-settings-modal.js";
 
-type TranslationPanelStatus = Extract<TranslationWsMessage, { type: "translation-status" }>["status"];
+type TranslationPanelStatus = TranslationSessionStatus;
 
 export interface TranslationPanelProps {
+  active?: boolean;
   taskSlug: string;
   role: RoleName;
   sessionId: string;
 }
 
-export function TranslationPanel({ taskSlug, role, sessionId }: TranslationPanelProps) {
+export function TranslationPanel({ active = true, taskSlug, role, sessionId }: TranslationPanelProps) {
   const [settings, setSettings] = useState<TranslationSettings | null>(null);
   const [entries, setEntries] = useState<TranslationEntry[]>([]);
   const [composer, setComposer] = useState("");
@@ -25,14 +29,21 @@ export function TranslationPanel({ taskSlug, role, sessionId }: TranslationPanel
   const [autoSendEnabled, setAutoSendEnabled] = useState(false);
   const [contextUsed, setContextUsed] = useState(false);
   const [status, setStatus] = useState<TranslationPanelStatus>("ready");
+  const [lastPollAt, setLastPollAt] = useState("");
   const [panelNowMs, setPanelNowMs] = useState(Date.now());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [showSettings, setShowSettings] = useState(false);
   const [promptPreviews, setPromptPreviews] = useState<TranslationPromptPreview[]>([]);
   const [testResult, setTestResult] = useState<Awaited<ReturnType<typeof apiClient.testTranslationProvider>> | undefined>();
-  const [socketRevision, setSocketRevision] = useState(0);
+  const [pollRevision, setPollRevision] = useState(0);
+  const activeRef = useRef(active);
+  const cursorRef = useRef(1);
   const bottomRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    activeRef.current = active;
+  }, [active]);
 
   useEffect(() => {
     void Promise.all([
@@ -42,9 +53,6 @@ export function TranslationPanel({ taskSlug, role, sessionId }: TranslationPanel
       .then(([next, previews]) => {
         setSettings(next);
         setPromptPreviews(previews);
-        if (!next.enabled) {
-          setShowSettings(true);
-        }
       })
       .catch((caught: Error) => setError(caught.message));
   }, []);
@@ -53,33 +61,71 @@ export function TranslationPanel({ taskSlug, role, sessionId }: TranslationPanel
     setEntries([]);
     setError("");
     setStatus("ready");
-    let active = true;
-    const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    const socket = new WebSocket(`${protocol}//${window.location.host}/ws/translation/${encodeURIComponent(sessionId)}`);
-    const handleMessage = (event: MessageEvent) => {
-      if (!active) {
+    setLastPollAt("");
+    cursorRef.current = 1;
+    let cancelled = false;
+    let timer: number | undefined;
+
+    const schedule = () => {
+      if (cancelled) {
         return;
       }
-      const message = JSON.parse(event.data as string) as TranslationWsMessage;
-      if (message.type === "translation-entry") {
-        setEntries((current) => upsertEntry(current, message.entry));
-      } else if (message.type === "translation-status") {
-        setStatus(message.status);
-      } else if (message.type === "translation-error") {
-        setError(message.message);
+      timer = window.setTimeout(tick, activeRef.current ? 200 : 1000);
+    };
+
+    const tick = async () => {
+      if (cancelled) {
+        return;
+      }
+      try {
+        const result = await apiClient.pollTranslationSession(sessionId, cursorRef.current);
+        if (cancelled) {
+          return;
+        }
+        applyTranslationEvents(result.events);
+        cursorRef.current = result.nextCursor;
+        setStatus(result.status);
+        if (activeRef.current) {
+          setLastPollAt(formatPollTimestamp(new Date().toISOString()));
+        }
+      } catch (caught) {
+        if (!cancelled) {
+          setError(caught instanceof Error ? caught.message : "Translation poll failed.");
+        }
+      } finally {
+        schedule();
       }
     };
-    socket.addEventListener("message", handleMessage);
+
+    void apiClient.startTranslationSession(taskSlug, role)
+      .then((result) => {
+        if (cancelled) {
+          return;
+        }
+        setStatus(result.status);
+        cursorRef.current = result.nextCursor;
+        void tick();
+      })
+      .catch((caught) => {
+        if (!cancelled) {
+          setError(caught instanceof Error ? caught.message : "Translation start failed.");
+        }
+      });
+
     return () => {
-      active = false;
-      socket.removeEventListener("message", handleMessage);
-      socket.close();
+      cancelled = true;
+      if (timer !== undefined) {
+        window.clearTimeout(timer);
+      }
     };
-  }, [sessionId, socketRevision]);
+  }, [sessionId, taskSlug, role, pollRevision]);
 
   useEffect(() => {
+    if (!active) {
+      return;
+    }
     bottomRef.current?.scrollIntoView({ block: "nearest" });
-  }, [entries.length]);
+  }, [active, entries.length]);
 
   const activeTranslationStartedAt = getActiveTranslationStartedAt(entries);
   useEffect(() => {
@@ -102,7 +148,7 @@ export function TranslationPanel({ taskSlug, role, sessionId }: TranslationPanel
     try {
       const result = await apiClient.translateUserInput(taskSlug, role, {
         text: composer,
-        mode: send ? "auto-send" : settings.inputMode,
+        mode: send ? "auto-send" : "review-before-send",
         useContext: settings.contextEnabled,
         send
       });
@@ -118,6 +164,27 @@ export function TranslationPanel({ taskSlug, role, sessionId }: TranslationPanel
       setError(caught instanceof Error ? caught.message : "Translation failed.");
     } finally {
       setBusy(false);
+    }
+  }
+
+  function applyTranslationEvents(events: TranslationSessionEvent[]) {
+    if (events.length === 0) {
+      return;
+    }
+
+    for (const event of events) {
+      if (event.type === "status") {
+        setStatus(event.status);
+      } else if (event.type === "error") {
+        setError(event.message);
+      }
+    }
+
+    const entryEvents = events.filter((event): event is Extract<TranslationSessionEvent, { type: "entry" }> =>
+      event.type === "entry"
+    );
+    if (entryEvents.length > 0) {
+      setEntries((current) => entryEvents.reduce((next, event) => upsertEntry(next, event.entry), current));
     }
   }
 
@@ -162,7 +229,7 @@ export function TranslationPanel({ taskSlug, role, sessionId }: TranslationPanel
       setSettings(saved);
       setPromptPreviews(previews);
       setShowSettings(false);
-      setSocketRevision((current) => current + 1);
+      setPollRevision((current) => current + 1);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Failed to save translation settings.");
     } finally {
@@ -184,19 +251,8 @@ export function TranslationPanel({ taskSlug, role, sessionId }: TranslationPanel
 
   async function clearPanel() {
     setEntries([]);
+    cursorRef.current = 1;
     await apiClient.clearTranslationSession(sessionId).catch((caught: Error) => setError(caught.message));
-  }
-
-  async function retryEntry(entry: TranslationEntry) {
-    setBusy(true);
-    try {
-      const retried = await apiClient.retryTranslation(sessionId, entry.id);
-      setEntries((current) => upsertEntry(current, retried));
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Retry failed.");
-    } finally {
-      setBusy(false);
-    }
   }
 
   if (!settings) {
@@ -223,8 +279,9 @@ export function TranslationPanel({ taskSlug, role, sessionId }: TranslationPanel
             <button type="button" onClick={() => void clearPanel()}>Clear</button>
           </div>
         </div>
-        <div>
+        <div className="translation-status-row">
           <p>{settings.model} · {panelStatus}{contextUsed ? " · context used" : ""}</p>
+          <p>{lastPollAt ? `poll ${lastPollAt}` : "poll -"}</p>
         </div>
       </header>
 
@@ -236,7 +293,6 @@ export function TranslationPanel({ taskSlug, role, sessionId }: TranslationPanel
           <TranslationEntryRow
             entry={entry}
             key={entry.id}
-            onRetry={entry.status === "failed" ? () => void retryEntry(entry) : undefined}
           />
         ))}
         <div ref={bottomRef} />
@@ -278,15 +334,27 @@ export function TranslationPanel({ taskSlug, role, sessionId }: TranslationPanel
   );
 }
 
-function TranslationEntryRow({ entry, onRetry }: { entry: TranslationEntry; onRetry?: () => void }) {
+function TranslationEntryRow({ entry }: { entry: TranslationEntry }) {
   const displayText = getTranslationEntryDisplayText(entry);
+  const isToolOutput = entry.sourceKind === "tool-output";
+  const isUserInput = entry.direction === "user-input-to-english";
+  const className = [
+    "translation-entry",
+    `is-${entry.sourceKind}`,
+    isUserInput ? "is-user-input" : ""
+  ].filter(Boolean).join(" ");
 
   return (
-    <article className={`translation-entry is-${entry.sourceKind}`}>
-      {entry.warning ? <p className="translation-warning">{entry.warning}</p> : null}
-      {entry.error ? <p className="translation-warning">{entry.error}</p> : null}
-      <pre>{displayText}</pre>
-      {onRetry ? <button type="button" onClick={onRetry}>Retry</button> : null}
+    <article className={className}>
+      {isToolOutput ? (
+        <pre>{displayText}</pre>
+      ) : (
+        <div className="translation-markdown">
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>{displayText}</ReactMarkdown>
+        </div>
+      )}
+      {entry.warning ? <p className="translation-entry-note">{entry.warning}</p> : null}
+      {entry.error ? <p className="translation-entry-note is-error">{entry.error}</p> : null}
     </article>
   );
 }
@@ -352,4 +420,12 @@ function formatElapsed(elapsedMs: number): string {
   const minutes = Math.floor(seconds / 60);
   const remainder = Math.floor(seconds % 60).toString().padStart(2, "0");
   return `${minutes}:${remainder}`;
+}
+
+function formatPollTimestamp(timestamp: string): string {
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) {
+    return timestamp;
+  }
+  return date.toLocaleTimeString();
 }

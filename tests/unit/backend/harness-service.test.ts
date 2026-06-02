@@ -9,8 +9,10 @@ describe("createHarnessService", () => {
 
     const status = await service.getHarnessStatus("/repo");
     expect(status.needsApply).toBe(true);
-    expect(status.plannedChanges).toHaveLength(5);
+    expect(status.plannedChanges).toHaveLength(7);
     expect(status.plannedChanges.map((change) => change.action)).toEqual([
+      "create",
+      "create",
       "create",
       "create",
       "create",
@@ -19,14 +21,25 @@ describe("createHarnessService", () => {
     ]);
 
     const result = await service.applyHarness("/repo");
-    expect(result.changedFiles).toHaveLength(5);
+    expect(result.changedFiles).toHaveLength(7);
 
     const nextStatus = await service.getHarnessStatus("/repo");
     expect(nextStatus.needsApply).toBe(false);
-    expect(nextStatus.files.map((file) => file.action)).toEqual(["ok", "ok", "ok", "ok", "ok"]);
+    expect(nextStatus.files.map((file) => file.action)).toEqual(["ok", "ok", "ok", "ok", "ok", "ok", "ok"]);
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("## VCM Shared Rules");
+    expect(await fs.readText("/repo/CLAUDE.md")).toContain("Use route files under .ai/vcm/handoffs/messages/");
+    expect(await fs.readText("/repo/CLAUDE.md")).toContain("After writing a route file for another role, end the current Claude Code turn");
+    expect(await fs.readText("/repo/.gitignore")).toContain("# VCM:BEGIN version=1");
+    expect(await fs.readText("/repo/.gitignore")).toContain(".ai/vcm/");
+    expect(await fs.readText("/repo/.gitignore")).toContain(".claude/worktrees/");
+    expect(await fs.readText("/repo/.gitignore")).not.toContain(".vcm/");
     expect(await fs.readText("/repo/.claude/agents/project-manager.md")).toContain("name: project-manager");
     expect(await fs.readText("/repo/.claude/agents/project-manager.md")).toContain("<!-- VCM:BEGIN version=1 -->");
+    expect(await fs.readText("/repo/.claude/agents/project-manager.md")).toContain("Assign work by writing or updating .ai/vcm/handoffs/messages/project-manager-architect.md");
+    expect(await fs.readText("/repo/.claude/agents/project-manager.md")).toContain("VCM orchestration is strictly sequential");
+    expect(await fs.readText("/repo/.claude/settings.json")).toContain("UserPromptSubmit");
+    expect(await fs.readText("/repo/.claude/settings.json")).toContain("Stop");
+    expect(await fs.readText("/repo/.claude/settings.json")).toContain("/api/hooks/claude-code");
   });
 
   it("inserts VCM rules into an existing file without overwriting user content", async () => {
@@ -48,6 +61,73 @@ describe("createHarnessService", () => {
     expect(content).toContain("Keep this project-specific note.");
     expect(content).toContain("<!-- VCM:BEGIN version=1 -->");
     expect(content).toContain("## VCM Shared Rules");
+  });
+
+  it("inserts VCM ignore rules into an existing .gitignore without overwriting user patterns", async () => {
+    const fs = createMemoryFs();
+    await fs.writeText("/repo/.gitignore", "node_modules/\ndist/\n");
+    const service = createHarnessService({ fs });
+
+    const status = await service.getHarnessStatus("/repo");
+    expect(status.files.find((file) => file.path === ".gitignore")).toMatchObject({
+      exists: true,
+      hasManagedBlock: false,
+      action: "insert"
+    });
+
+    await service.applyHarness("/repo");
+
+    const content = await fs.readText("/repo/.gitignore");
+    expect(content).toContain("node_modules/");
+    expect(content).toContain("dist/");
+    expect(content).toContain("# VCM:BEGIN version=1");
+    expect(content).toContain(".ai/vcm/");
+    expect(content).toContain(".claude/worktrees/");
+    expect(content).not.toContain("<!-- VCM:BEGIN");
+  });
+
+  it("replaces old VCM hook commands with direct HTTP hooks", async () => {
+    const fs = createMemoryFs();
+    await fs.writeText("/repo/.claude/settings.json", JSON.stringify({
+      hooks: {
+        UserPromptSubmit: [
+          {
+            hooks: [{
+              type: "command",
+              command: "vcmctl hook-event",
+              timeout: 5
+            }]
+          }
+        ],
+        Stop: [
+          {
+            hooks: [{
+              type: "command",
+              command: "vcmctl hook-event",
+              timeout: 5
+            }]
+          }
+        ],
+        PreToolUse: [
+          {
+            hooks: [{
+              type: "command",
+              command: "echo keep-user-hook"
+            }]
+          }
+        ]
+      }
+    }, null, 2));
+    const service = createHarnessService({ fs });
+
+    await service.applyHarness("/repo");
+
+    const settings = JSON.parse(await fs.readText("/repo/.claude/settings.json"));
+    expect(JSON.stringify(settings.hooks.UserPromptSubmit)).toContain("/api/hooks/claude-code");
+    expect(JSON.stringify(settings.hooks.Stop)).toContain("/api/hooks/claude-code");
+    expect(JSON.stringify(settings.hooks.UserPromptSubmit)).not.toContain("vcmctl");
+    expect(JSON.stringify(settings.hooks.Stop)).not.toContain("vcmctl");
+    expect(JSON.stringify(settings.hooks.PreToolUse)).toContain("echo keep-user-hook");
   });
 
   it("updates only the managed block when VCM rules drift", async () => {

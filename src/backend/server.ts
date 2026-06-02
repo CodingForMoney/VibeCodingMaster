@@ -1,5 +1,4 @@
 import path from "node:path";
-import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import Fastify, { type FastifyInstance } from "fastify";
 import fastifyStatic from "@fastify/static";
@@ -8,8 +7,9 @@ import { createArtifactService } from "./services/artifact-service.js";
 import { createClaudeAdapter } from "./adapters/claude-adapter.js";
 import { createCommandRunner } from "./adapters/command-runner.js";
 import { createCommandDispatcher, type CommandDispatcher } from "./services/command-dispatcher.js";
+import { createClaudeHookService, type ClaudeHookService } from "./services/claude-hook-service.js";
 import { createGitAdapter } from "./adapters/git-adapter.js";
-import { createAppSettingsService } from "./services/app-settings-service.js";
+import { createAppSettingsService, type AppSettingsService } from "./services/app-settings-service.js";
 import { createClaudeTranscriptService } from "./services/claude-transcript-service.js";
 import { createHarnessService, type HarnessService } from "./services/harness-service.js";
 import { createNodeFileSystemAdapter } from "./adapters/filesystem.js";
@@ -19,18 +19,21 @@ import { createProjectService, type ProjectService } from "./services/project-se
 import { createSessionRegistry } from "./runtime/session-registry.js";
 import { createSessionService, type SessionService } from "./services/session-service.js";
 import { createMessageService, type MessageService } from "./services/message-service.js";
+import { createRoundService, type RoundService } from "./services/round-service.js";
 import { createStatusService, type StatusService } from "./services/status-service.js";
 import { createTaskService, type TaskService } from "./services/task-service.js";
 import { createTranslationService, type TranslationService } from "./services/translation-service.js";
+import { registerAppSettingsRoutes } from "./api/app-settings-routes.js";
 import { registerArtifactRoutes } from "./api/artifact-routes.js";
+import { registerClaudeHookRoutes } from "./api/claude-hook-routes.js";
 import { registerHarnessRoutes } from "./api/harness-routes.js";
 import { registerMessageRoutes } from "./api/message-routes.js";
 import { registerProjectRoutes } from "./api/project-routes.js";
+import { registerRoundRoutes } from "./api/round-routes.js";
 import { registerSessionRoutes } from "./api/session-routes.js";
 import { registerTaskRoutes } from "./api/task-routes.js";
 import { registerTranslationRoutes } from "./api/translation-routes.js";
 import { registerTerminalWs } from "./ws/terminal-ws.js";
-import { registerTranslationWs } from "./ws/translation-ws.js";
 import { toVcmError } from "./errors.js";
 import type { TerminalRuntime } from "./runtime/terminal-runtime.js";
 
@@ -42,13 +45,16 @@ export interface CreateServerOptions {
 }
 
 export interface ServerDeps {
+  appSettings: AppSettingsService;
   projectService: ProjectService;
   taskService: TaskService;
   sessionService: SessionService;
   artifactService: ArtifactService;
   harnessService: HarnessService;
   commandDispatcher: CommandDispatcher;
+  claudeHookService: ClaudeHookService;
   messageService: MessageService;
+  roundService: RoundService;
   statusService: StatusService;
   translationService: TranslationService;
   runtime: TerminalRuntime;
@@ -70,6 +76,8 @@ export async function createServer(deps: ServerDeps, options: CreateServerOption
     });
   });
 
+  registerAppSettingsRoutes(app, { appSettings: deps.appSettings });
+  registerClaudeHookRoutes(app, { claudeHookService: deps.claudeHookService });
   registerProjectRoutes(app, { projectService: deps.projectService });
   registerHarnessRoutes(app, {
     projectService: deps.projectService,
@@ -78,12 +86,17 @@ export async function createServer(deps: ServerDeps, options: CreateServerOption
   registerTaskRoutes(app, {
     projectService: deps.projectService,
     taskService: deps.taskService,
-    statusService: deps.statusService
+    sessionService: deps.sessionService,
+    statusService: deps.statusService,
+    translationService: deps.translationService,
+    roundService: deps.roundService
   });
   registerSessionRoutes(app, {
     projectService: deps.projectService,
     sessionService: deps.sessionService,
-    commandDispatcher: deps.commandDispatcher
+    commandDispatcher: deps.commandDispatcher,
+    translationService: deps.translationService,
+    roundService: deps.roundService
   });
   registerArtifactRoutes(app, {
     projectService: deps.projectService,
@@ -95,13 +108,19 @@ export async function createServer(deps: ServerDeps, options: CreateServerOption
     taskService: deps.taskService,
     messageService: deps.messageService
   });
+  registerRoundRoutes(app, {
+    projectService: deps.projectService,
+    taskService: deps.taskService,
+    sessionService: deps.sessionService,
+    messageService: deps.messageService,
+    roundService: deps.roundService
+  });
   registerTranslationRoutes(app, {
     projectService: deps.projectService,
     taskService: deps.taskService,
     translationService: deps.translationService
   });
   registerTerminalWs(app, { runtime: deps.runtime });
-  registerTranslationWs(app, { translationService: deps.translationService });
 
   if (options.staticDir) {
     await app.register(fastifyStatic, {
@@ -135,7 +154,6 @@ export async function startServer(options: CreateServerOptions = {}): Promise<{ 
 
 export interface CreateDefaultServerDepsOptions {
   apiUrl?: string;
-  vcmctlCommand?: string;
 }
 
 export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions = {}): ServerDeps {
@@ -158,8 +176,7 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     artifactService,
     projectService,
     taskService,
-    apiUrl: options.apiUrl,
-    vcmctlCommand: options.vcmctlCommand ?? resolveVcmctlCommand()
+    apiUrl: options.apiUrl
   });
   const commandDispatcher = createCommandDispatcher({
     runtime,
@@ -178,23 +195,36 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     sessionService,
     taskService
   });
+  const claudeHookService = createClaudeHookService({
+    projectService,
+    taskService,
+    sessionService,
+    messageService
+  });
+  const transcripts = createClaudeTranscriptService();
+  const roundService = createRoundService();
   const translationService = createTranslationService({
     runtime,
     sessionRegistry: registry,
-    transcripts: createClaudeTranscriptService(),
+    transcripts,
     sessionService,
+    fs,
+    projectService,
     appSettings,
     provider: createOpenAiCompatibleTranslationProvider()
   });
 
   return {
+    appSettings,
     projectService,
     taskService,
     sessionService,
     artifactService,
     harnessService,
     commandDispatcher,
+    claudeHookService,
     messageService,
+    roundService,
     statusService,
     translationService,
     runtime
@@ -205,31 +235,6 @@ export function getDefaultStaticDir(): string {
   return path.join(getAppRoot(), "dist-frontend");
 }
 
-function resolveVcmctlCommand(): string {
-  const appRoot = getAppRoot();
-  const currentModulePath = fileURLToPath(import.meta.url);
-  const sourceCli = path.join(appRoot, "src", "cli", "vcmctl.ts");
-  const tsxCli = path.join(appRoot, "node_modules", "tsx", "dist", "cli.mjs");
-  if (currentModulePath.includes(`${path.sep}src${path.sep}`) && existsSync(tsxCli) && existsSync(sourceCli)) {
-    return `${quoteShellArg(process.execPath)} ${quoteShellArg(tsxCli)} ${quoteShellArg(sourceCli)}`;
-  }
-
-  const distCli = path.join(appRoot, "dist", "cli", "vcmctl.js");
-  if (existsSync(distCli)) {
-    return `${quoteShellArg(process.execPath)} ${quoteShellArg(distCli)}`;
-  }
-
-  if (existsSync(tsxCli) && existsSync(sourceCli)) {
-    return `${quoteShellArg(process.execPath)} ${quoteShellArg(tsxCli)} ${quoteShellArg(sourceCli)}`;
-  }
-
-  return "vcmctl";
-}
-
 function getAppRoot(): string {
   return path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
-}
-
-function quoteShellArg(value: string): string {
-  return `'${value.replace(/'/g, "'\\''")}'`;
 }

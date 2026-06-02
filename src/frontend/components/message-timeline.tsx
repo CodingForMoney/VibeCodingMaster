@@ -1,6 +1,5 @@
-import type { RoleName } from "../../shared/types/role.js";
+import { useState } from "react";
 import type { VcmOrchestrationState, VcmRoleMessage } from "../../shared/types/message.js";
-import { StatusBadge } from "./status-badge.js";
 
 export interface MessageTimelineProps {
   messages: VcmRoleMessage[];
@@ -10,18 +9,36 @@ export interface MessageTimelineProps {
   showControls?: boolean;
   showHeader?: boolean;
   onModeChange?(mode: VcmOrchestrationState["mode"]): void;
-  onPausedChange?(paused: boolean): void;
-  onStage(message: VcmRoleMessage): void;
-  onReject(message: VcmRoleMessage): void;
-  onOpenRole(role: RoleName): void;
+  onMarkAllDone?(): void;
 }
 
 export function getMessageCounts(messages: VcmRoleMessage[]) {
   return {
-    pending: messages.filter((message) => message.status === "pending_approval").length,
-    queued: messages.filter((message) => message.status === "queued").length,
-    delivered: messages.filter((message) => message.status === "delivered" || message.status === "staged").length
+    total: messages.length,
+    accepted: messages.filter((message) => message.acceptedAt).length,
+    delivered: messages.filter((message) => message.deliveredAt).length
   };
+}
+
+export interface MessageTimelineRecord {
+  message: VcmRoleMessage;
+  sequence: number;
+}
+
+export function getVisibleMessageRecords(
+  messages: VcmRoleMessage[],
+  maxMessages: number | null = 6
+): MessageTimelineRecord[] {
+  const chronological = [...messages]
+    .sort(compareMessageTimelineTimeAscending)
+    .map((message, index) => ({
+      message,
+      sequence: index + 1
+    }));
+  const visible = maxMessages === null
+    ? chronological
+    : chronological.slice(-maxMessages);
+  return [...visible].sort((left, right) => right.sequence - left.sequence);
 }
 
 export function MessageTimeline({
@@ -32,14 +49,18 @@ export function MessageTimeline({
   showControls = true,
   showHeader = true,
   onModeChange,
-  onPausedChange,
-  onStage,
-  onReject,
-  onOpenRole
+  onMarkAllDone
 }: MessageTimelineProps) {
+  const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const counts = getMessageCounts(messages);
   const mode = orchestration?.mode ?? "manual";
-  const visibleMessages = maxMessages === null ? messages : messages.slice(-maxMessages);
+  const visibleRecords = getVisibleMessageRecords(messages, maxMessages);
+
+  async function copyMessage(message: VcmRoleMessage) {
+    await writeClipboardText(message.body);
+    setCopiedMessageId(message.id);
+    window.setTimeout(() => setCopiedMessageId((current) => current === message.id ? null : current), 1200);
+  }
 
   return (
     <section className="message-panel">
@@ -48,10 +69,10 @@ export function MessageTimeline({
           <div>
             <h2>Messages</h2>
             <p className="muted">
-              {counts.pending} pending / {counts.queued} queued / {counts.delivered} delivered
+              {counts.total} total / {counts.accepted} accepted
             </p>
           </div>
-          {showControls && onModeChange && onPausedChange ? (
+          {showControls && onModeChange ? (
             <div className="message-controls">
               <label className="message-mode-toggle">
                 <input
@@ -62,10 +83,12 @@ export function MessageTimeline({
                 />
                 <span>Auto orchestration</span>
               </label>
-              <button type="button" disabled={busy || mode !== "auto"} onClick={() => onPausedChange(!orchestration?.paused)}>
-                {orchestration?.paused ? "Resume" : "Pause"}
-              </button>
             </div>
+          ) : null}
+          {showControls && onMarkAllDone ? (
+            <button type="button" disabled={busy} onClick={onMarkAllDone}>
+              Mark All Done
+            </button>
           ) : null}
         </div>
       ) : null}
@@ -74,37 +97,23 @@ export function MessageTimeline({
         <p className="muted">No role messages yet.</p>
       ) : (
         <ol className="message-list">
-          {visibleMessages.map((message) => {
-            const canStage = message.status === "pending_approval" || message.status === "queued";
-            const canReject = message.status === "pending_approval" || message.status === "queued";
+          {visibleRecords.map(({ message, sequence }) => {
             return (
-              <li className={`message-item message-${message.status}`} key={message.id}>
+              <li className="message-item" key={message.id}>
                 <div className="message-item-main">
                   <div className="message-meta">
+                    <span className="message-sequence">#{sequence}</span>
+                    <time dateTime={getMessageSortTime(message)}>{formatMessageTimestamp(getMessageSortTime(message))}</time>
                     <strong>{message.fromRole} {"->"} {message.toRole}</strong>
                     <span>{message.type}</span>
-                    <StatusBadge status={message.status} />
                   </div>
                   <p>{message.body}</p>
+                  {message.failureReason ? <span className="message-reason">{message.failureReason}</span> : null}
                   {message.bodyPath ? <span className="message-path">{message.bodyPath}</span> : null}
                 </div>
                 <div className="message-actions">
-                  <button type="button" onClick={() => onOpenRole(message.toRole)}>
-                    Open Role
-                  </button>
-                  <button
-                    type="button"
-                    disabled={busy || !canStage}
-                    onClick={() => onStage(message)}
-                  >
-                    Stage
-                  </button>
-                  <button
-                    type="button"
-                    disabled={busy || !canReject}
-                    onClick={() => onReject(message)}
-                  >
-                    Reject
+                  <button type="button" disabled={busy} onClick={() => void copyMessage(message)}>
+                    {copiedMessageId === message.id ? "Copied" : "Copy"}
                   </button>
                 </div>
               </li>
@@ -114,4 +123,54 @@ export function MessageTimeline({
       )}
     </section>
   );
+}
+
+function formatMessageTimestamp(timestamp: string): string {
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) {
+    return timestamp;
+  }
+  return date.toLocaleString(undefined, {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit"
+  });
+}
+
+function getMessageSortTime(message: VcmRoleMessage): string {
+  return message.acceptedAt
+    ?? message.deliveredAt
+    ?? message.dispatchingAt
+    ?? message.createdAt;
+}
+
+function compareMessageTimelineTimeAscending(left: VcmRoleMessage, right: VcmRoleMessage): number {
+  const time = getMessageSortTime(left).localeCompare(getMessageSortTime(right));
+  if (time !== 0) {
+    return time;
+  }
+  const created = left.createdAt.localeCompare(right.createdAt);
+  if (created !== 0) {
+    return created;
+  }
+  return left.id.localeCompare(right.id);
+}
+
+async function writeClipboardText(text: string): Promise<void> {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "true");
+  textarea.style.position = "fixed";
+  textarea.style.left = "-9999px";
+  document.body.appendChild(textarea);
+  textarea.select();
+  document.execCommand("copy");
+  textarea.remove();
 }

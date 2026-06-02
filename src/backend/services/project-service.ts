@@ -11,6 +11,9 @@ import type { FileSystemAdapter } from "../adapters/filesystem.js";
 import type { GitAdapter } from "../adapters/git-adapter.js";
 import type { AppSettingsService } from "./app-settings-service.js";
 
+const DEFAULT_HANDOFF_ROOT = ".ai/vcm/handoffs";
+const DEFAULT_STATE_ROOT = ".ai/vcm";
+
 export interface ProjectService {
   connectProject(input: ConnectProjectRequest): Promise<ProjectSummary>;
   getCurrentProject(): Promise<ProjectSummary | null>;
@@ -24,7 +27,14 @@ export interface ProjectServiceDeps {
   fs: FileSystemAdapter;
   git: GitAdapter;
   claude: ClaudeAdapter;
-  appSettings: Pick<AppSettingsService, "getRecentRepositoryPaths" | "recordRecentRepositoryPath">;
+  appSettings: Pick<
+    AppSettingsService,
+    | "getRecentRepositoryPaths"
+    | "recordRecentRepositoryPath"
+    | "loadProjectConfig"
+    | "saveProjectConfig"
+    | "getProjectConfigPath"
+  >;
 }
 
 export function createProjectService(deps: ProjectServiceDeps): ProjectService {
@@ -56,10 +66,10 @@ export function createProjectService(deps: ProjectServiceDeps): ProjectService {
         });
       }
 
-      const config = buildDefaultProjectConfig(repoRoot);
+      const config = await this.loadConfig(repoRoot);
       await deps.fs.ensureDir(path.join(repoRoot, config.handoffRoot));
       await deps.fs.ensureDir(path.join(repoRoot, config.stateRoot, "tasks"));
-      await deps.fs.ensureDir(path.join(repoRoot, config.stateRoot, "sessions"));
+      await deps.fs.ensureDir(path.join(repoRoot, ".claude", "worktrees"));
       await this.saveConfig(config, true);
 
       const warnings: string[] = [];
@@ -104,21 +114,23 @@ export function createProjectService(deps: ProjectServiceDeps): ProjectService {
       return deps.appSettings.getRecentRepositoryPaths();
     },
     async loadConfig(repoRoot) {
-      const configPath = this.getConfigPath(repoRoot);
-      if (!(await deps.fs.pathExists(configPath))) {
-        return buildDefaultProjectConfig(repoRoot);
+      const appConfig = await deps.appSettings.loadProjectConfig(repoRoot);
+      if (appConfig) {
+        return normalizeProjectConfig(appConfig, repoRoot);
       }
-      return deps.fs.readJson<ProjectConfig>(configPath);
+
+      return buildDefaultProjectConfig(repoRoot);
     },
     async saveConfig(config, force = false) {
-      const configPath = this.getConfigPath(config.repoRoot);
+      const normalizedConfig = normalizeProjectConfig(config, config.repoRoot);
+      const configPath = this.getConfigPath(normalizedConfig.repoRoot);
       if (!force && await deps.fs.pathExists(configPath)) {
         return;
       }
-      await deps.fs.writeJsonAtomic(configPath, config);
+      await deps.appSettings.saveProjectConfig(normalizedConfig);
     },
     getConfigPath(repoRoot) {
-      return path.join(repoRoot, ".vcm", "config.json");
+      return deps.appSettings.getProjectConfigPath(repoRoot);
     }
   };
 }
@@ -140,9 +152,22 @@ export function buildDefaultProjectConfig(repoRoot: string): ProjectConfig {
     version: 1,
     repoRoot,
     defaultRoles: [...ROLE_NAMES],
-    handoffRoot: ".ai/handoffs",
-    stateRoot: ".vcm",
+    handoffRoot: DEFAULT_HANDOFF_ROOT,
+    stateRoot: DEFAULT_STATE_ROOT,
     terminalBackend: "node-pty",
     claudeCommand: process.env.VCM_CLAUDE_COMMAND || "claude"
+  };
+}
+
+function normalizeProjectConfig(input: Partial<ProjectConfig>, repoRoot: string): ProjectConfig {
+  const fallback = buildDefaultProjectConfig(repoRoot);
+  return {
+    version: 1,
+    repoRoot,
+    defaultRoles: input.defaultRoles?.length ? input.defaultRoles : fallback.defaultRoles,
+    handoffRoot: DEFAULT_HANDOFF_ROOT,
+    stateRoot: DEFAULT_STATE_ROOT,
+    terminalBackend: "node-pty",
+    claudeCommand: input.claudeCommand || fallback.claudeCommand
   };
 }

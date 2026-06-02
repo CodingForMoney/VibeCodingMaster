@@ -1,5 +1,7 @@
 import type { RoleName, RoleStatus } from "./role.js";
 
+export type RoleActivityStatus = "idle" | "running";
+
 export type ClaudePermissionMode =
   | "default"
   | "bypassPermissions"
@@ -12,6 +14,7 @@ export interface RoleSessionRecord {
   taskSlug: string;
   role: RoleName;
   status: RoleStatus;
+  activityStatus?: RoleActivityStatus;
   command: string;
   permissionMode: ClaudePermissionMode;
   cwd: string;
@@ -23,6 +26,9 @@ export interface RoleSessionRecord {
   startedAt?: string;
   updatedAt: string;
   lastOutputAt?: string;
+  lastPromptSubmittedAt?: string;
+  lastStopAt?: string;
+  lastHookEventAt?: string;
   exitCode?: number | null;
 }
 

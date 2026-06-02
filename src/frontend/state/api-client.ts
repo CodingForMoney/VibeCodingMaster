@@ -1,21 +1,25 @@
 import type { DispatchRoleCommandResult, TaskStatusReport } from "../../shared/types/api.js";
+import type { AppPreferences, UpdateAppPreferencesRequest } from "../../shared/types/app-settings.js";
 import type { HarnessApplyResult, HarnessStatusReport } from "../../shared/types/harness.js";
 import type {
-  SendRoleMessageRequest,
-  SendRoleMessageResult,
   VcmOrchestrationMode,
   VcmOrchestrationState,
-  VcmRoleMessage
+  VcmRoleMessage,
+  MarkAllMessagesDoneResult,
+  DeleteMessageHistoryResult
 } from "../../shared/types/message.js";
 import type { ProjectSummary, ConnectProjectRequest } from "../../shared/types/project.js";
 import type { DispatchableRole, RoleName } from "../../shared/types/role.js";
+import type { VcmTaskRoundState } from "../../shared/types/round.js";
 import type { RoleSessionRecord, StartRoleSessionRequest } from "../../shared/types/session.js";
-import type { CreateTaskRequest, TaskRecord } from "../../shared/types/task.js";
+import type { CleanupTaskRequest, CleanupTaskResult, CreateTaskRequest, TaskRecord } from "../../shared/types/task.js";
 import type {
   SendTranslatedInputRequest,
   TranslateUserInputRequest,
   TranslateUserInputResult,
   TranslationEntry,
+  PollTranslationSessionResult,
+  StartTranslationSessionResult,
   TranslationPromptPreview,
   TranslationProviderTestResult,
   TranslationSecretSettings,
@@ -23,6 +27,15 @@ import type {
 } from "../../shared/types/translation.js";
 
 export const apiClient = {
+  getAppPreferences() {
+    return request<AppPreferences>("/api/settings/preferences");
+  },
+  updateAppPreferences(input: UpdateAppPreferencesRequest) {
+    return request<AppPreferences>("/api/settings/preferences", {
+      method: "PUT",
+      body: JSON.stringify(input)
+    });
+  },
   getCurrentProject() {
     return request<ProjectSummary | null>("/api/projects/current");
   },
@@ -40,6 +53,12 @@ export const apiClient = {
   },
   createTask(input: CreateTaskRequest) {
     return request<TaskRecord>("/api/tasks", {
+      method: "POST",
+      body: JSON.stringify(input)
+    });
+  },
+  cleanupTask(taskSlug: string, input: CleanupTaskRequest = {}) {
+    return request<CleanupTaskResult>(`/api/tasks/${encodeURIComponent(taskSlug)}/cleanup`, {
       method: "POST",
       body: JSON.stringify(input)
     });
@@ -89,30 +108,27 @@ export const apiClient = {
   listMessages(taskSlug: string) {
     return request<VcmRoleMessage[]>(`/api/tasks/${encodeURIComponent(taskSlug)}/messages`);
   },
-  sendRoleMessage(taskSlug: string, input: SendRoleMessageRequest) {
-    return request<SendRoleMessageResult>(`/api/tasks/${encodeURIComponent(taskSlug)}/messages`, {
-      method: "POST",
-      body: JSON.stringify(input)
-    });
-  },
-  stageMessage(taskSlug: string, messageId: string) {
-    return request<VcmRoleMessage>(`/api/tasks/${encodeURIComponent(taskSlug)}/messages/${messageId}/stage`, {
+  markAllMessagesDone(taskSlug: string) {
+    return request<MarkAllMessagesDoneResult>(`/api/tasks/${encodeURIComponent(taskSlug)}/messages/mark-all-done`, {
       method: "POST"
     });
   },
-  rejectMessage(taskSlug: string, messageId: string) {
-    return request<VcmRoleMessage>(`/api/tasks/${encodeURIComponent(taskSlug)}/messages/${messageId}/reject`, {
-      method: "POST"
+  deleteMessageHistory(taskSlug: string) {
+    return request<DeleteMessageHistoryResult>(`/api/tasks/${encodeURIComponent(taskSlug)}/messages/history`, {
+      method: "DELETE"
     });
   },
   getOrchestrationState(taskSlug: string) {
     return request<VcmOrchestrationState>(`/api/tasks/${encodeURIComponent(taskSlug)}/orchestration`);
   },
-  updateOrchestrationState(taskSlug: string, input: { mode?: VcmOrchestrationMode; paused?: boolean }) {
+  updateOrchestrationState(taskSlug: string, input: { mode?: VcmOrchestrationMode }) {
     return request<VcmOrchestrationState>(`/api/tasks/${encodeURIComponent(taskSlug)}/orchestration`, {
       method: "PUT",
       body: JSON.stringify(input)
     });
+  },
+  getTaskRoundState(taskSlug: string) {
+    return request<VcmTaskRoundState>(`/api/tasks/${encodeURIComponent(taskSlug)}/round`);
   },
   getTranslationSettings() {
     return request<TranslationSettings>("/api/translation/settings");
@@ -130,6 +146,18 @@ export const apiClient = {
     return request<TranslationProviderTestResult>("/api/translation/test", {
       method: "POST"
     });
+  },
+  startTranslationSession(taskSlug: string, role: RoleName) {
+    return request<StartTranslationSessionResult>(`/api/tasks/${encodeURIComponent(taskSlug)}/sessions/${role}/translation/start`, {
+      method: "POST"
+    });
+  },
+  pollTranslationSession(sessionId: string, after: number, limit?: number) {
+    const params = new URLSearchParams({ after: String(after) });
+    if (limit !== undefined) {
+      params.set("limit", String(limit));
+    }
+    return request<PollTranslationSessionResult>(`/api/translation/sessions/${encodeURIComponent(sessionId)}/events?${params.toString()}`);
   },
   translateUserInput(taskSlug: string, role: RoleName, input: TranslateUserInputRequest) {
     return request<TranslateUserInputResult>(`/api/tasks/${encodeURIComponent(taskSlug)}/sessions/${role}/translation/input`, {

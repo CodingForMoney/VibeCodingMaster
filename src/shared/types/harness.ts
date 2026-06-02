@@ -1,5 +1,7 @@
 export type HarnessFileKind =
   | "root-claude"
+  | "gitignore"
+  | "claude-settings"
   | "agent-project-manager"
   | "agent-architect"
   | "agent-coder"

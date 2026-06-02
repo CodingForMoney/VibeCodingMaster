@@ -4,12 +4,16 @@ import type { StartRoleSessionRequest } from "../../shared/types/session.js";
 import { VcmError } from "../errors.js";
 import type { CommandDispatcher } from "../services/command-dispatcher.js";
 import type { ProjectService } from "../services/project-service.js";
+import type { RoundService } from "../services/round-service.js";
 import type { SessionService } from "../services/session-service.js";
+import type { TranslationService } from "../services/translation-service.js";
 
 export interface SessionRouteDeps {
   projectService: ProjectService;
   sessionService: SessionService;
   commandDispatcher: CommandDispatcher;
+  translationService: Pick<TranslationService, "stopSession">;
+  roundService: Pick<RoundService, "stopSession">;
 }
 
 export function registerSessionRoutes(app: FastifyInstance, deps: SessionRouteDeps): void {
@@ -32,7 +36,10 @@ export function registerSessionRoutes(app: FastifyInstance, deps: SessionRouteDe
     async (request) => {
       const project = await requireCurrentProject(deps.projectService);
       const role = parseRole(request.params.role);
-      return deps.sessionService.stopRoleSession(project.repoRoot, request.params.taskSlug, role);
+      const session = await deps.sessionService.stopRoleSession(project.repoRoot, request.params.taskSlug, role);
+      await deps.translationService.stopSession(session.id);
+      deps.roundService.stopSession(session.id);
+      return session;
     }
   );
 
@@ -41,6 +48,11 @@ export function registerSessionRoutes(app: FastifyInstance, deps: SessionRouteDe
     async (request) => {
       const project = await requireCurrentProject(deps.projectService);
       const role = parseRole(request.params.role);
+      const existing = await deps.sessionService.getRoleSession(project.repoRoot, request.params.taskSlug, role);
+      if (existing) {
+        await deps.translationService.stopSession(existing.id, { clearCache: true });
+        deps.roundService.stopSession(existing.id);
+      }
       return deps.sessionService.restartRoleSession(project.repoRoot, request.params.taskSlug, role, request.body);
     }
   );

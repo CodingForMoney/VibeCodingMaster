@@ -16,6 +16,7 @@ import {
   renderArchitecturePlanTemplate,
   renderDocsSyncReportTemplate,
   renderImplementationLogTemplate,
+  renderMessageRouteTemplate,
   renderReviewReportTemplate,
   renderValidationLogTemplate
 } from "../templates/handoff.js";
@@ -23,6 +24,7 @@ import { renderRoleCommandTemplate } from "../templates/role-command.js";
 
 export interface ArtifactService {
   getHandoffPaths(repoRoot: string, handoffDir: string): HandoffPaths;
+  getMessageRoutePath(handoffDir: string, fromRole: RoleName, toRole: RoleName): string;
   ensureHandoffStructure(input: EnsureHandoffStructureInput): Promise<HandoffPaths>;
   createArtifactTemplates(input: CreateArtifactTemplatesInput): Promise<string[]>;
   listArtifacts(input: ListArtifactsInput): Promise<ArtifactSummary>;
@@ -78,17 +80,27 @@ const ARTIFACT_PATH_KEYS: Array<[ArtifactKind, keyof HandoffPaths]> = [
   ["docs-sync-report", "docsSyncReportPath"]
 ];
 const ROLE_COMMAND_PLACEHOLDER_PATTERN = /(^|\n)\s*(TBD|status:\s*draft)\s*(\n|$)/i;
+const DEFAULT_MESSAGE_ROUTES: Array<[RoleName, RoleName]> = [
+  ["project-manager", "architect"],
+  ["project-manager", "coder"],
+  ["project-manager", "reviewer"],
+  ["architect", "project-manager"],
+  ["coder", "project-manager"],
+  ["reviewer", "project-manager"]
+];
 
 export function createArtifactService(fs: FileSystemAdapter): ArtifactService {
   return {
     getHandoffPaths(_repoRoot, handoffDir) {
       const roleCommandsDir = path.posix.join(handoffDir, "role-commands");
       const logsDir = path.posix.join(handoffDir, "logs");
+      const messagesDir = path.posix.join(handoffDir, "messages");
 
       return {
         handoffDir,
         roleCommandsDir,
         logsDir,
+        messagesDir,
         roleCommandPaths: {
           architect: path.posix.join(roleCommandsDir, "architect.md"),
           coder: path.posix.join(roleCommandsDir, "coder.md"),
@@ -100,6 +112,7 @@ export function createArtifactService(fs: FileSystemAdapter): ArtifactService {
           coder: path.posix.join(logsDir, "coder.log"),
           reviewer: path.posix.join(logsDir, "reviewer.log")
         },
+        messageRoutePaths: getDefaultMessageRoutePaths(messagesDir),
         architecturePlanPath: path.posix.join(handoffDir, "architecture-plan.md"),
         implementationLogPath: path.posix.join(handoffDir, "implementation-log.md"),
         validationLogPath: path.posix.join(handoffDir, "validation-log.md"),
@@ -107,11 +120,15 @@ export function createArtifactService(fs: FileSystemAdapter): ArtifactService {
         docsSyncReportPath: path.posix.join(handoffDir, "docs-sync-report.md")
       };
     },
+    getMessageRoutePath(handoffDir, fromRole, toRole) {
+      return path.posix.join(handoffDir, "messages", `${fromRole}-${toRole}.md`);
+    },
     async ensureHandoffStructure(input) {
       const paths = this.getHandoffPaths(input.repoRoot, input.handoffDir);
       await fs.ensureDir(resolveRepoPath(input.repoRoot, paths.handoffDir));
       await fs.ensureDir(resolveRepoPath(input.repoRoot, paths.roleCommandsDir));
       await fs.ensureDir(resolveRepoPath(input.repoRoot, paths.logsDir));
+      await fs.ensureDir(resolveRepoPath(input.repoRoot, paths.messagesDir));
       return paths;
     },
     async createArtifactTemplates(input) {
@@ -124,7 +141,11 @@ export function createArtifactService(fs: FileSystemAdapter): ArtifactService {
         [paths.implementationLogPath, renderImplementationLogTemplate(input.taskSlug)],
         [paths.validationLogPath, renderValidationLogTemplate(input.taskSlug)],
         [paths.reviewReportPath, renderReviewReportTemplate(input.taskSlug)],
-        [paths.docsSyncReportPath, renderDocsSyncReportTemplate(input.taskSlug)]
+        [paths.docsSyncReportPath, renderDocsSyncReportTemplate(input.taskSlug)],
+        ...Object.values(paths.messageRoutePaths).map((messagePath): [string, string] => [
+          messagePath,
+          renderMessageRouteTemplate()
+        ])
       ];
       const created: string[] = [];
 
@@ -245,6 +266,15 @@ export function createArtifactService(fs: FileSystemAdapter): ArtifactService {
 
 function getLegacyRoleCommandPath(roleCommandsDir: string, role: DispatchableRole): string {
   return path.posix.join(roleCommandsDir, `${role}-command.md`);
+}
+
+function getDefaultMessageRoutePaths(messagesDir: string): Record<string, string> {
+  return Object.fromEntries(
+    DEFAULT_MESSAGE_ROUTES.map(([fromRole, toRole]) => [
+      `${fromRole}-${toRole}`,
+      path.posix.join(messagesDir, `${fromRole}-${toRole}.md`)
+    ])
+  );
 }
 
 async function readTextOrNull(fs: FileSystemAdapter, absolutePath: string): Promise<string | null> {

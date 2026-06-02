@@ -7,7 +7,6 @@ const requiredFiles = [
   "package.json",
   "scripts/fix-node-pty-spawn-helper.mjs",
   "dist/main.js",
-  "dist/cli/vcmctl.js",
   "dist/backend/server.js",
   "dist/backend/api/harness-routes.js",
   "dist/backend/runtime/node-pty-runtime.js",
@@ -40,14 +39,12 @@ async function main() {
   const pkg = JSON.parse(await readText("package.json"));
   assertArrayIncludes(pkg.files, requiredFileEntries, "package.json files");
   assertEqual(pkg.bin?.vcm, "dist/main.js", "package.json bin.vcm");
-  assertEqual(pkg.bin?.vcmctl, "dist/cli/vcmctl.js", "package.json bin.vcmctl");
 
   for (const file of requiredFiles) {
     await assertFile(file);
   }
 
   await assertStartsWith("dist/main.js", "#!/usr/bin/env node", "vcm bin shebang");
-  await assertStartsWith("dist/cli/vcmctl.js", "#!/usr/bin/env node", "vcmctl bin shebang");
 
   const server = await readText("dist/backend/server.js");
   assertIncludes(server, 'path.join(getAppRoot(), "dist-frontend")', "packaged static dir must resolve from app root");

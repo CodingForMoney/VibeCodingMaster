@@ -50,6 +50,18 @@ button:disabled {
   opacity: 0.55;
 }
 
+.danger-button {
+  border-color: #b84a45;
+  background: #fff1ee;
+  color: #8d211d;
+  font-weight: 750;
+}
+
+.danger-button:hover:not(:disabled) {
+  border-color: #8d211d;
+  background: #ffe2dc;
+}
+
 input,
 select,
 textarea:not(.xterm-helper-textarea) {
@@ -174,8 +186,7 @@ h2 {
 }
 
 .brand-header span,
-.muted,
-.workspace-branch {
+.muted {
   color: #667071;
   font-size: 13px;
 }
@@ -293,6 +304,31 @@ h2 {
   padding: 10px 12px;
 }
 
+.round-notice {
+  position: fixed;
+  right: 20px;
+  bottom: 20px;
+  z-index: 30;
+  display: grid;
+  gap: 2px;
+  min-width: 220px;
+  max-width: min(360px, calc(100vw - 40px));
+  border: 1px solid #2f6f73;
+  border-radius: 8px;
+  background: #e8f4f2;
+  color: #123f43;
+  box-shadow: 0 14px 32px rgba(31, 36, 43, 0.16);
+  padding: 10px 12px;
+}
+
+.round-notice strong {
+  font-size: 13px;
+}
+
+.round-notice span {
+  font-size: 12px;
+}
+
 .warnings {
   margin: 12px 0 0;
   padding-left: 26px;
@@ -376,6 +412,44 @@ h2 {
   gap: 8px;
 }
 
+.task-create-preview {
+  display: grid;
+  gap: 2px;
+  border: 1px solid #e0d6c7;
+  border-radius: 6px;
+  background: #f8f7f2;
+  padding: 6px 8px;
+}
+
+.task-create-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #1f242b;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.task-create-option input {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+}
+
+.task-create-preview span {
+  color: #255f3d;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.task-create-preview small {
+  overflow: hidden;
+  color: #687273;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .task-nav {
   display: grid;
   gap: 8px;
@@ -414,19 +488,20 @@ h2 {
   background: #e8f1ef;
 }
 
+.sidebar-settings .theme-mode-toggle span:last-child {
+  font-weight: 750;
+}
+
 .workspace-header {
   display: grid;
-  grid-template-columns: minmax(180px, auto) minmax(420px, 1fr) auto;
-  gap: 16px;
+  grid-template-columns: minmax(120px, max-content) minmax(420px, 1fr) auto;
+  gap: 10px;
   align-items: center;
   margin-bottom: 6px;
 }
 
 .workspace-title-line {
   display: flex;
-  flex-wrap: wrap;
-  gap: 10px;
-  align-items: baseline;
   min-width: 0;
 }
 
@@ -436,17 +511,12 @@ h2 {
   line-height: 1.15;
 }
 
-.workspace-branch {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.eyebrow {
-  color: #7a5c2f;
-  font-size: 12px;
-  font-weight: 700;
-  text-transform: uppercase;
+.workspace-header-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-end;
+  min-width: max-content;
 }
 
 .role-tabs {
@@ -469,56 +539,6 @@ h2 {
   min-height: 30px;
   padding: 4px 8px;
   text-align: left;
-}
-
-.workflow-panel {
-  display: grid;
-  gap: 8px;
-  margin: 0;
-}
-
-.workflow-summary p {
-  margin-bottom: 0;
-}
-
-.workflow-summary p {
-  color: #4f5558;
-  font-size: 13px;
-}
-
-.workflow-steps {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr);
-  gap: 6px;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-
-.workflow-steps li {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 6px;
-  align-items: center;
-  min-height: 28px;
-  border: 1px solid #ece5d9;
-  border-radius: 6px;
-  padding: 4px 6px;
-  background: #fffdfa;
-}
-
-.workflow-steps li.is-current {
-  border-color: #2f6f73;
-  background: #e8f1ef;
-}
-
-.workflow-steps span {
-  overflow: hidden;
-  color: #394246;
-  font-size: 12px;
-  font-weight: 650;
-  text-overflow: ellipsis;
-  white-space: nowrap;
 }
 
 .workspace-grid {
@@ -581,6 +601,7 @@ h2 {
   grid-template-rows: auto minmax(0, 1fr);
   gap: 8px;
   flex: 1;
+  height: 100%;
   min-height: 0;
 }
 
@@ -589,6 +610,14 @@ h2 {
   gap: 10px;
   align-items: center;
   justify-content: space-between;
+}
+
+.session-console-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-end;
 }
 
 .session-controls {
@@ -671,6 +700,8 @@ h2 {
 }
 
 .session-console-body {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
   min-width: 0;
   min-height: 0;
   height: 100%;
@@ -685,12 +716,15 @@ h2 {
 
 .terminal-pane,
 .translation-pane {
+  display: grid;
   min-width: 0;
   min-height: 0;
+  height: 100%;
 }
 
 .terminal-frame,
 .terminal-empty {
+  width: 100%;
   height: 100%;
   min-height: 0;
   border-radius: 6px;
@@ -730,7 +764,8 @@ h2 {
 }
 
 .translation-panel-titlebar,
-.translation-panel-actions {
+.translation-panel-actions,
+.translation-status-row {
   display: flex;
   flex-wrap: wrap;
   gap: 6px;
@@ -778,6 +813,15 @@ h2 {
   justify-content: flex-end;
 }
 
+.translation-status-row {
+  flex-wrap: nowrap;
+}
+
+.translation-status-row p:last-child {
+  flex: 0 0 auto;
+  text-align: right;
+}
+
 .translation-entry-list {
   display: grid;
   align-content: start;
@@ -798,6 +842,16 @@ h2 {
   padding: 0;
 }
 
+.translation-entry.is-user-input {
+  border-top: 4px solid #3a4149;
+  margin-top: 14px;
+  padding-top: 14px;
+}
+
+.translation-entry.is-user-input:first-child {
+  margin-top: 0;
+}
+
 .translation-entry pre {
   box-sizing: border-box;
   margin: 0;
@@ -813,6 +867,138 @@ h2 {
   color: #d6deeb;
 }
 
+.translation-markdown {
+  max-width: 100%;
+  min-width: 0;
+  color: #d6deeb;
+  font-size: 12px;
+  line-height: 1.55;
+  overflow-wrap: anywhere;
+}
+
+.translation-markdown > :first-child {
+  margin-top: 0;
+}
+
+.translation-markdown > :last-child {
+  margin-bottom: 0;
+}
+
+.translation-markdown p,
+.translation-markdown ul,
+.translation-markdown ol,
+.translation-markdown blockquote,
+.translation-markdown pre,
+.translation-markdown table {
+  margin: 0 0 8px;
+}
+
+.translation-markdown h1,
+.translation-markdown h2,
+.translation-markdown h3,
+.translation-markdown h4,
+.translation-markdown h5,
+.translation-markdown h6 {
+  margin: 10px 0 6px;
+  color: #f0f6fc;
+  font-weight: 700;
+  line-height: 1.25;
+}
+
+.translation-markdown h1 {
+  font-size: 17px;
+}
+
+.translation-markdown h2 {
+  font-size: 15px;
+}
+
+.translation-markdown h3,
+.translation-markdown h4,
+.translation-markdown h5,
+.translation-markdown h6 {
+  font-size: 13px;
+}
+
+.translation-markdown ul,
+.translation-markdown ol {
+  padding-left: 22px;
+}
+
+.translation-markdown li {
+  margin: 2px 0;
+}
+
+.translation-markdown .task-list-item {
+  list-style: none;
+}
+
+.translation-markdown input[type="checkbox"] {
+  width: 13px;
+  height: 13px;
+  margin: 0 6px 0 0;
+  accent-color: #56d364;
+}
+
+.translation-markdown blockquote {
+  border-left: 3px solid #3a4149;
+  color: #b7c0ca;
+  padding-left: 10px;
+}
+
+.translation-markdown a {
+  color: #79c0ff;
+}
+
+.translation-markdown code {
+  border-radius: 4px;
+  background: #161b22;
+  color: #f0f6fc;
+  padding: 1px 4px;
+  font-family: Menlo, Monaco, Consolas, monospace;
+  font-size: 0.95em;
+}
+
+.translation-markdown pre {
+  overflow-x: auto;
+  border: 1px solid #292d31;
+  border-radius: 6px;
+  background: #111316;
+  padding: 8px;
+  white-space: pre;
+}
+
+.translation-markdown pre code {
+  background: transparent;
+  padding: 0;
+}
+
+.translation-markdown table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+}
+
+.translation-markdown img {
+  max-width: 100%;
+  border-radius: 4px;
+}
+
+.translation-markdown th,
+.translation-markdown td {
+  border: 1px solid #30363d;
+  padding: 4px 6px;
+  text-align: left;
+  vertical-align: top;
+}
+
+.translation-markdown hr {
+  border: 0;
+  border-top: 1px solid #292d31;
+  margin: 10px 0;
+}
+
 .translation-entry.is-tool-output pre {
   display: block;
   overflow: hidden;
@@ -822,9 +1008,15 @@ h2 {
   width: 100%;
 }
 
-.translation-warning {
-  color: #ffab70;
-  margin-bottom: 6px;
+.translation-entry-note {
+  margin: 2px 0 0;
+  color: #6e7681;
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.translation-entry-note.is-error {
+  color: #a3715f;
 }
 
 .translation-composer {
@@ -910,7 +1102,7 @@ h2 {
 .translation-settings-modal {
   display: grid;
   gap: 12px;
-  width: min(760px, 100%);
+  width: min(980px, 100%);
   max-height: min(760px, 92vh);
   overflow: auto;
   border: 1px solid #d6d0c6;
@@ -973,10 +1165,20 @@ h2 {
   font-size: 12px;
 }
 
-.translation-prompt-editor-grid {
+.translation-prompt-stack {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 10px;
+}
+
+.translation-prompt-stack label {
+  display: grid;
+  gap: 4px;
+}
+
+.translation-prompt-stack span {
+  color: #4f5558;
+  font-size: 12px;
+  font-weight: 650;
 }
 
 .translation-settings-modal h2,
@@ -1068,6 +1270,7 @@ h2 {
 
 .message-controls,
 .message-mode-toggle,
+.modal-actions,
 .message-actions {
   display: flex;
   flex-wrap: wrap;
@@ -1112,10 +1315,23 @@ h2 {
   margin-bottom: 4px;
 }
 
+.message-meta time,
 .message-meta span:not(.status-badge),
+.message-reason,
 .message-path {
   color: #667071;
   font-size: 12px;
+}
+
+.message-sequence {
+  min-width: 32px;
+  color: #1f242b;
+  font-weight: 800;
+}
+
+.message-actions button {
+  min-height: 30px;
+  padding: 4px 10px;
 }
 
 .message-item p {
@@ -1126,6 +1342,7 @@ h2 {
   -webkit-line-clamp: 2;
 }
 
+.message-reason,
 .message-path {
   display: block;
   overflow: hidden;
@@ -1181,6 +1398,12 @@ h2 {
   color: #245334;
 }
 
+.status-idle {
+  border-color: #9aa3a8;
+  background: #edf0f1;
+  color: #465056;
+}
+
 .status-blocked,
 .status-crashed,
 .status-missing,
@@ -1200,16 +1423,12 @@ h2 {
 
 .status-exited,
 .status-done,
-.status-resumable,
-.status-staged,
-.status-delivered,
-.status-acknowledged {
+.status-resumable {
   border-color: #7b98b8;
   background: #e9f0f8;
   color: #2e4e70;
 }
 
-.status-pending_approval,
 .status-queued,
 .status-translating,
 .status-ready,
@@ -1223,6 +1442,8 @@ h2 {
 
 .status-rejected,
 .status-failed,
+.status-delivery_failed,
+.status-response_ready_missing_result,
 .status-cancelled,
 .status-blocked {
   border-color: #c46e5f;
@@ -1262,14 +1483,8 @@ h2 {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
-  .workflow-panel,
-  .workflow-steps {
-    grid-template-columns: 1fr;
-  }
-
   .session-console-body.has-translation,
-  .translation-settings-grid,
-  .translation-prompt-editor-grid {
+  .translation-settings-grid {
     grid-template-columns: 1fr;
   }
 
@@ -1302,4 +1517,243 @@ h2 {
     grid-template-columns: 1fr;
     width: 100%;
   }
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  background: #0d1117;
+  color: #e6edf3;
+}
+
+:root[data-theme="dark"] body,
+:root[data-theme="dark"] .app-main {
+  background: #0d1117;
+  color: #e6edf3;
+}
+
+:root[data-theme="dark"] button {
+  border-color: #3d4652;
+  background: #161b22;
+  color: #e6edf3;
+}
+
+:root[data-theme="dark"] button:hover:not(:disabled) {
+  border-color: #58a6ff;
+  background: #1f2937;
+}
+
+:root[data-theme="dark"] input,
+:root[data-theme="dark"] select,
+:root[data-theme="dark"] textarea:not(.xterm-helper-textarea) {
+  border-color: #3d4652;
+  background: #0d1117;
+  color: #e6edf3;
+}
+
+:root[data-theme="dark"] input::placeholder,
+:root[data-theme="dark"] textarea::placeholder {
+  color: #7d8590;
+}
+
+:root[data-theme="dark"] .danger-button {
+  border-color: #da7b72;
+  background: #2d1518;
+  color: #ffdcd7;
+}
+
+:root[data-theme="dark"] .danger-button:hover:not(:disabled) {
+  border-color: #ffa198;
+  background: #3d1f23;
+}
+
+:root[data-theme="dark"] .app-sidebar {
+  border-color: #30363d;
+  background: #0f141b;
+}
+
+:root[data-theme="dark"] .sidebar-toggle {
+  background: #161b22;
+}
+
+:root[data-theme="dark"] .brand-header span,
+:root[data-theme="dark"] .muted,
+:root[data-theme="dark"] .message-meta time,
+:root[data-theme="dark"] .message-meta span:not(.status-badge),
+:root[data-theme="dark"] .message-reason,
+:root[data-theme="dark"] .message-path {
+  color: #8b949e;
+}
+
+:root[data-theme="dark"] .sidebar-section,
+:root[data-theme="dark"] .session-console,
+:root[data-theme="dark"] .message-panel,
+:root[data-theme="dark"] .event-log,
+:root[data-theme="dark"] .empty-workspace,
+:root[data-theme="dark"] .translation-settings-modal,
+:root[data-theme="dark"] .message-modal,
+:root[data-theme="dark"] .event-modal {
+  border-color: #30363d;
+  background: #11161d;
+}
+
+:root[data-theme="dark"] .sidebar-section-toggle {
+  color: #e6edf3;
+}
+
+:root[data-theme="dark"] .sidebar-section-toggle:hover {
+  background: #161b22;
+}
+
+:root[data-theme="dark"] .sidebar-section-toggle[aria-expanded="true"],
+:root[data-theme="dark"] .translation-prompt-settings {
+  border-color: #30363d;
+}
+
+:root[data-theme="dark"] .project-summary dt,
+:root[data-theme="dark"] .permission-mode-field span,
+:root[data-theme="dark"] .translation-settings-grid span,
+:root[data-theme="dark"] .translation-prompt-stack span,
+:root[data-theme="dark"] .message-mode-toggle {
+  color: #b7c0ca;
+}
+
+:root[data-theme="dark"] .permission-mode-field small,
+:root[data-theme="dark"] .task-create-preview small {
+  color: #8b949e;
+}
+
+:root[data-theme="dark"] .warnings,
+:root[data-theme="dark"] .error-banner {
+  border-color: #da7b72;
+  background: #2d1518;
+  color: #ffdcd7;
+}
+
+:root[data-theme="dark"] .round-notice {
+  border-color: #56d4dd;
+  background: #10262b;
+  color: #d6fbff;
+  box-shadow: 0 14px 32px rgba(1, 4, 9, 0.48);
+}
+
+:root[data-theme="dark"] .harness-file-list li,
+:root[data-theme="dark"] .harness-changes,
+:root[data-theme="dark"] .harness-result,
+:root[data-theme="dark"] .task-create-preview,
+:root[data-theme="dark"] .message-item {
+  border-color: #30363d;
+  background: #0d1117;
+}
+
+:root[data-theme="dark"] .task-create-option {
+  color: #e6edf3;
+}
+
+:root[data-theme="dark"] .task-create-preview span {
+  color: #7ee787;
+}
+
+:root[data-theme="dark"] .message-sequence {
+  color: #f0f6fc;
+}
+
+:root[data-theme="dark"] .task-nav-item.is-active,
+:root[data-theme="dark"] .role-tab.is-active,
+:root[data-theme="dark"] .sidebar-settings .settings-toggle.is-active,
+:root[data-theme="dark"] .translation-toggle.is-active {
+  border-color: #56d4dd;
+  background: #10262b;
+  color: #d6fbff;
+}
+
+:root[data-theme="dark"] .translation-toggle {
+  border-color: #3d4652;
+  background: #161b22;
+  color: #b7c0ca;
+}
+
+:root[data-theme="dark"] .permission-mode-field select,
+:root[data-theme="dark"] .translation-settings-grid select,
+:root[data-theme="dark"] .translation-prompt-settings select {
+  border-color: #3d4652;
+  background: #0d1117;
+  color: #e6edf3;
+}
+
+:root[data-theme="dark"] .terminal-empty {
+  border-color: #30363d;
+}
+
+:root[data-theme="dark"] .modal-backdrop {
+  background: rgba(1, 4, 9, 0.72);
+}
+
+:root[data-theme="dark"] .message-modal .message-panel,
+:root[data-theme="dark"] .event-modal .event-log {
+  background: transparent;
+}
+
+:root[data-theme="dark"] .status-badge {
+  border-color: #3d4652;
+  background: #161b22;
+  color: #d6deeb;
+}
+
+:root[data-theme="dark"] .translation-test-result.is-ok,
+:root[data-theme="dark"] .status-running,
+:root[data-theme="dark"] .status-ok {
+  border-color: #3fb950;
+  background: #12261a;
+  color: #aff5b4;
+}
+
+:root[data-theme="dark"] .status-idle {
+  border-color: #69717d;
+  background: #20262f;
+  color: #d6deeb;
+}
+
+:root[data-theme="dark"] .translation-test-result.is-error,
+:root[data-theme="dark"] .status-blocked,
+:root[data-theme="dark"] .status-crashed,
+:root[data-theme="dark"] .status-missing,
+:root[data-theme="dark"] .status-empty,
+:root[data-theme="dark"] .status-rejected,
+:root[data-theme="dark"] .status-failed,
+:root[data-theme="dark"] .status-delivery_failed,
+:root[data-theme="dark"] .status-response_ready_missing_result,
+:root[data-theme="dark"] .status-cancelled {
+  border-color: #f85149;
+  background: #2d1518;
+  color: #ffdcd7;
+}
+
+:root[data-theme="dark"] .status-waiting,
+:root[data-theme="dark"] .status-starting,
+:root[data-theme="dark"] .status-incomplete,
+:root[data-theme="dark"] .status-queued,
+:root[data-theme="dark"] .status-translating,
+:root[data-theme="dark"] .status-ready,
+:root[data-theme="dark"] .status-create,
+:root[data-theme="dark"] .status-insert,
+:root[data-theme="dark"] .status-update {
+  border-color: #d29922;
+  background: #2d2208;
+  color: #f8e3a1;
+}
+
+:root[data-theme="dark"] .status-exited,
+:root[data-theme="dark"] .status-done,
+:root[data-theme="dark"] .status-resumable,
+:root[data-theme="dark"] .status-translated,
+:root[data-theme="dark"] .status-preserved {
+  border-color: #388bfd;
+  background: #10223a;
+  color: #c9e2ff;
+}
+
+:root[data-theme="dark"] .status-pending {
+  border-color: #3d4652;
+  background: #161b22;
+  color: #d6deeb;
 }

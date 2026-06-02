@@ -4,7 +4,7 @@ import type { DispatchableRole } from "../../shared/types/role.js";
 import { VcmError } from "../errors.js";
 import type { ArtifactService } from "../services/artifact-service.js";
 import type { ProjectService } from "../services/project-service.js";
-import type { TaskService } from "../services/task-service.js";
+import { getTaskRuntimeRepoRoot, type TaskService } from "../services/task-service.js";
 
 export interface ArtifactRouteDeps {
   projectService: ProjectService;
@@ -16,8 +16,9 @@ export function registerArtifactRoutes(app: FastifyInstance, deps: ArtifactRoute
   app.get<{ Params: { taskSlug: string } }>("/api/tasks/:taskSlug/artifacts", async (request) => {
     const project = await requireCurrentProject(deps.projectService);
     const task = await deps.taskService.loadTask(project.repoRoot, request.params.taskSlug);
+    const taskRepoRoot = getTaskRuntimeRepoRoot(task);
     return deps.artifactService.listArtifacts({
-      repoRoot: project.repoRoot,
+      repoRoot: taskRepoRoot,
       handoffDir: task.handoffDir
     });
   });
@@ -27,12 +28,13 @@ export function registerArtifactRoutes(app: FastifyInstance, deps: ArtifactRoute
     async (request) => {
       const project = await requireCurrentProject(deps.projectService);
       const task = await deps.taskService.loadTask(project.repoRoot, request.params.taskSlug);
-      const paths = deps.artifactService.getHandoffPaths(project.repoRoot, task.handoffDir);
+      const taskRepoRoot = getTaskRuntimeRepoRoot(task);
+      const paths = deps.artifactService.getHandoffPaths(taskRepoRoot, task.handoffDir);
       const artifactPath = artifactNameToPath(paths, request.params.artifactName);
       return {
         path: artifactPath,
         content: await deps.artifactService.readArtifact({
-          repoRoot: project.repoRoot,
+          repoRoot: taskRepoRoot,
           artifactPath
         })
       };
@@ -45,10 +47,11 @@ export function registerArtifactRoutes(app: FastifyInstance, deps: ArtifactRoute
       const project = await requireCurrentProject(deps.projectService);
       const role = parseDispatchableRole(request.params.role);
       const task = await deps.taskService.loadTask(project.repoRoot, request.params.taskSlug);
+      const taskRepoRoot = getTaskRuntimeRepoRoot(task);
       return {
         role,
         content: await deps.artifactService.readRoleCommand({
-          repoRoot: project.repoRoot,
+          repoRoot: taskRepoRoot,
           handoffDir: task.handoffDir,
           role
         })
@@ -62,8 +65,9 @@ export function registerArtifactRoutes(app: FastifyInstance, deps: ArtifactRoute
       const project = await requireCurrentProject(deps.projectService);
       const role = parseDispatchableRole(request.params.role);
       const task = await deps.taskService.loadTask(project.repoRoot, request.params.taskSlug);
+      const taskRepoRoot = getTaskRuntimeRepoRoot(task);
       await deps.artifactService.saveRoleCommand({
-        repoRoot: project.repoRoot,
+        repoRoot: taskRepoRoot,
         handoffDir: task.handoffDir,
         role,
         content: request.body.content
@@ -84,11 +88,12 @@ export function registerArtifactRoutes(app: FastifyInstance, deps: ArtifactRoute
         });
       }
       const task = await deps.taskService.loadTask(project.repoRoot, request.params.taskSlug);
-      const paths = deps.artifactService.getHandoffPaths(project.repoRoot, task.handoffDir);
+      const taskRepoRoot = getTaskRuntimeRepoRoot(task);
+      const paths = deps.artifactService.getHandoffPaths(taskRepoRoot, task.handoffDir);
       return {
         role: request.params.role,
         content: await deps.artifactService.readArtifact({
-          repoRoot: project.repoRoot,
+          repoRoot: taskRepoRoot,
           artifactPath: paths.roleLogPaths[request.params.role]
         })
       };

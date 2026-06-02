@@ -8,7 +8,7 @@ import type {
 } from "../../shared/types/translation.js";
 import { VcmError } from "../errors.js";
 import type { ProjectService } from "../services/project-service.js";
-import type { TaskService } from "../services/task-service.js";
+import { getTaskRuntimeRepoRoot, type TaskService } from "../services/task-service.js";
 import type { TranslationService } from "../services/translation-service.js";
 
 export interface TranslationRouteDeps {
@@ -35,14 +35,42 @@ export function registerTranslationRoutes(app: FastifyInstance, deps: Translatio
     return deps.translationService.testProvider();
   });
 
+  app.post<{ Params: { taskSlug: string; role: string } }>(
+    "/api/tasks/:taskSlug/sessions/:role/translation/start",
+    async (request) => {
+      const project = await requireCurrentProject(deps.projectService);
+      const role = parseRole(request.params.role);
+      const task = await deps.taskService.loadTask(project.repoRoot, request.params.taskSlug);
+      return deps.translationService.startSession({
+        repoRoot: project.repoRoot,
+        taskRepoRoot: getTaskRuntimeRepoRoot(task),
+        taskSlug: request.params.taskSlug,
+        role
+      });
+    }
+  );
+
+  app.get<{ Params: { sessionId: string }; Querystring: { after?: string; limit?: string } }>(
+    "/api/translation/sessions/:sessionId/events",
+    async (request) => {
+      await requireCurrentProject(deps.projectService);
+      return deps.translationService.pollSessionEvents(
+        request.params.sessionId,
+        Number(request.query.after ?? "1"),
+        request.query.limit === undefined ? undefined : Number(request.query.limit)
+      );
+    }
+  );
+
   app.post<{ Params: { taskSlug: string; role: string }; Body: TranslateUserInputRequest }>(
     "/api/tasks/:taskSlug/sessions/:role/translation/input",
     async (request) => {
       const project = await requireCurrentProject(deps.projectService);
       const role = parseRole(request.params.role);
-      await deps.taskService.loadTask(project.repoRoot, request.params.taskSlug);
+      const task = await deps.taskService.loadTask(project.repoRoot, request.params.taskSlug);
       return deps.translationService.translateUserInput({
         repoRoot: project.repoRoot,
+        taskRepoRoot: getTaskRuntimeRepoRoot(task),
         taskSlug: request.params.taskSlug,
         role,
         ...(request.body ?? { text: "" })
@@ -55,9 +83,10 @@ export function registerTranslationRoutes(app: FastifyInstance, deps: Translatio
     async (request) => {
       const project = await requireCurrentProject(deps.projectService);
       const role = parseRole(request.params.role);
-      await deps.taskService.loadTask(project.repoRoot, request.params.taskSlug);
+      const task = await deps.taskService.loadTask(project.repoRoot, request.params.taskSlug);
       await deps.translationService.sendTranslatedInput({
         repoRoot: project.repoRoot,
+        taskRepoRoot: getTaskRuntimeRepoRoot(task),
         taskSlug: request.params.taskSlug,
         role,
         englishText: request.body?.englishText ?? ""
@@ -68,7 +97,7 @@ export function registerTranslationRoutes(app: FastifyInstance, deps: Translatio
 
   app.post<{ Params: { sessionId: string } }>("/api/translation/sessions/:sessionId/clear", async (request) => {
     await requireCurrentProject(deps.projectService);
-    deps.translationService.clearSession(request.params.sessionId);
+    await deps.translationService.clearSession(request.params.sessionId);
     return { ok: true };
   });
 

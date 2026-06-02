@@ -110,3 +110,7 @@ TBD
 TBD
 `;
 }
+
+export function renderMessageRouteTemplate(): string {
+  return "";
+}

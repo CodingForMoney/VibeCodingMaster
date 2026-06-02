@@ -1,5 +1,11 @@
 import path from "node:path";
-import type { CreateTaskRequest, TaskRecord, TaskStatus } from "../../shared/types/task.js";
+import type {
+  CleanupTaskRequest,
+  CleanupTaskResult,
+  CreateTaskRequest,
+  TaskRecord,
+  TaskStatus
+} from "../../shared/types/task.js";
 import { assertValidTaskSlug } from "../../shared/validation/slug-check.js";
 import { VcmError } from "../errors.js";
 import type { FileSystemAdapter } from "../adapters/filesystem.js";
@@ -13,6 +19,7 @@ export interface TaskService {
   loadTask(repoRoot: string, taskSlug: string): Promise<TaskRecord>;
   saveTask(repoRoot: string, task: TaskRecord): Promise<void>;
   updateTaskStatus(repoRoot: string, taskSlug: string, status: TaskStatus): Promise<TaskRecord>;
+  cleanupTask(repoRoot: string, taskSlug: string, options?: CleanupTaskRequest): Promise<CleanupTaskResult>;
 }
 
 export interface TaskServiceDeps {
@@ -31,6 +38,13 @@ export function createTaskService(deps: TaskServiceDeps): TaskService {
       assertValidTaskSlug(input.taskSlug);
       const config = await deps.projectService.loadConfig(repoRoot);
       const taskPath = getTaskPath(repoRoot, config.stateRoot, input.taskSlug);
+      const shouldCreateWorktree = input.createWorktree !== false;
+      const taskBranch = shouldCreateWorktree
+        ? `feature/${input.taskSlug}`
+        : await deps.git.getCurrentBranch(repoRoot);
+      const worktreePath = shouldCreateWorktree
+        ? getTaskWorktreePath(repoRoot, input.taskSlug)
+        : undefined;
 
       if (await deps.fs.pathExists(taskPath)) {
         throw new VcmError({
@@ -39,8 +53,71 @@ export function createTaskService(deps: TaskServiceDeps): TaskService {
           statusCode: 409
         });
       }
+      if (!(await deps.git.isIgnored(repoRoot, `${config.stateRoot}/tasks/.probe`))) {
+        throw new VcmError({
+          code: "VCM_STATE_NOT_IGNORED",
+          message: `${config.stateRoot}/ is not ignored by Git.`,
+          statusCode: 409,
+          hint: "Apply VCM Harness first so .gitignore contains the VCM managed block."
+        });
+      }
+      if (shouldCreateWorktree && !(await deps.git.isIgnored(repoRoot, ".claude/worktrees/.probe"))) {
+        throw new VcmError({
+          code: "VCM_WORKTREES_NOT_IGNORED",
+          message: ".claude/worktrees/ is not ignored by Git.",
+          statusCode: 409,
+          hint: "Apply VCM Harness first so .gitignore ignores Claude-compatible task worktrees."
+        });
+      }
+      if (!shouldCreateWorktree) {
+        const activeInlineTask = await findActiveInlineTask(deps.fs, repoRoot, config.stateRoot);
+        if (activeInlineTask) {
+          throw new VcmError({
+            code: "INLINE_TASK_EXISTS",
+            message: `An inline task already exists: ${activeInlineTask.taskSlug}`,
+            statusCode: 409,
+            hint: "Close the existing inline task first, or enable Create worktree and branch for this task."
+          });
+        }
+      }
+      if (shouldCreateWorktree && worktreePath) {
+        if (await deps.git.branchExists(repoRoot, taskBranch)) {
+          throw new VcmError({
+            code: "TASK_BRANCH_EXISTS",
+            message: `Task branch already exists: ${taskBranch}`,
+            statusCode: 409,
+            hint: "Choose a different task name or clean up the existing branch."
+          });
+        }
+        if (await deps.fs.pathExists(worktreePath)) {
+          throw new VcmError({
+            code: "TASK_WORKTREE_EXISTS",
+            message: `Task worktree already exists: ${worktreePath}`,
+            statusCode: 409,
+            hint: "Choose a different task name or clean up the existing worktree."
+          });
+        }
+        const baseStatus = await deps.git.getStatusPorcelain(repoRoot);
+        if (baseStatus.trim()) {
+          throw new VcmError({
+            code: "BASE_REPO_DIRTY",
+            message: "The connected repository has uncommitted changes.",
+            statusCode: 409,
+            hint: "Commit, stash, or discard base repository changes before creating a task worktree."
+          });
+        }
+
+        await deps.fs.ensureDir(path.dirname(worktreePath));
+        await deps.git.createWorktree({
+          repoRoot,
+          branch: taskBranch,
+          worktreePath,
+          baseRef: "HEAD"
+        });
+      }
 
       const timestamp = now();
+      const taskRepoRoot = worktreePath ?? repoRoot;
       const task: TaskRecord = {
         version: 1,
         taskSlug: input.taskSlug,
@@ -48,19 +125,22 @@ export function createTaskService(deps: TaskServiceDeps): TaskService {
         createdAt: timestamp,
         updatedAt: timestamp,
         repoRoot,
-        branch: await deps.git.getCurrentBranch(repoRoot),
-        handoffDir: path.posix.join(config.handoffRoot, input.taskSlug),
+        worktreePath,
+        branch: taskBranch,
+        handoffDir: config.handoffRoot,
         status: "created",
-        specPath: input.specPath
+        specPath: input.specPath,
+        cleanupStatus: "active"
       };
 
+      await ensureTaskRuntimeStateDirs(deps.fs, taskRepoRoot, config.stateRoot);
       await deps.artifactService.ensureHandoffStructure({
-        repoRoot,
+        repoRoot: taskRepoRoot,
         taskSlug: input.taskSlug,
         handoffDir: task.handoffDir
       });
       await deps.artifactService.createArtifactTemplates({
-        repoRoot,
+        repoRoot: taskRepoRoot,
         taskSlug: input.taskSlug,
         handoffDir: task.handoffDir
       });
@@ -110,10 +190,113 @@ export function createTaskService(deps: TaskServiceDeps): TaskService {
       };
       await this.saveTask(repoRoot, updated);
       return updated;
+    },
+    async cleanupTask(repoRoot, taskSlug, options = {}) {
+      assertValidTaskSlug(taskSlug);
+      if (!deps.fs.removePath) {
+        throw new VcmError({
+          code: "FILESYSTEM_REMOVE_UNAVAILABLE",
+          message: "This VCM runtime cannot remove task files.",
+          statusCode: 500
+        });
+      }
+
+      const config = await deps.projectService.loadConfig(repoRoot);
+      const task = await this.loadTask(repoRoot, taskSlug);
+      const taskRepoRoot = getTaskRuntimeRepoRoot(task);
+      const statePaths = getTaskStatePaths(repoRoot, taskRepoRoot, config.stateRoot, config.handoffRoot, taskSlug);
+      const removedStatePaths: string[] = [];
+      const cleanedAt = now();
+
+      if (task.worktreePath) {
+        assertTaskWorktreePath(repoRoot, task.worktreePath);
+        await deps.git.removeWorktree(repoRoot, task.worktreePath, { force: options.force ?? true });
+      }
+
+      let deletedBranch: string | undefined;
+      if (task.worktreePath && (options.deleteBranch ?? true)) {
+        await deps.git.deleteBranch(repoRoot, task.branch, { force: options.forceDeleteBranch ?? true });
+        deletedBranch = task.branch;
+      }
+
+      for (const statePath of statePaths) {
+        await deps.fs.removePath(statePath, { recursive: true, force: true });
+        removedStatePaths.push(statePath);
+      }
+
+      return {
+        taskSlug,
+        removedWorktreePath: task.worktreePath,
+        removedStatePaths,
+        deletedBranch,
+        cleanedAt
+      };
     }
   };
 }
 
+export function getTaskRuntimeRepoRoot(task: TaskRecord): string {
+  return task.worktreePath ?? task.repoRoot;
+}
+
 function getTaskPath(repoRoot: string, stateRoot: string, taskSlug: string): string {
   return path.join(repoRoot, stateRoot, "tasks", `${taskSlug}.json`);
+}
+
+function getTaskWorktreePath(repoRoot: string, taskSlug: string): string {
+  return path.join(repoRoot, ".claude", "worktrees", taskSlug);
+}
+
+async function ensureTaskRuntimeStateDirs(fs: FileSystemAdapter, taskRepoRoot: string, stateRoot: string): Promise<void> {
+  await fs.ensureDir(path.join(taskRepoRoot, stateRoot, "sessions"));
+  await fs.ensureDir(path.join(taskRepoRoot, stateRoot, "messages"));
+  await fs.ensureDir(path.join(taskRepoRoot, stateRoot, "orchestration"));
+  await fs.ensureDir(path.join(taskRepoRoot, stateRoot, "translation"));
+}
+
+async function findActiveInlineTask(fs: FileSystemAdapter, repoRoot: string, stateRoot: string): Promise<TaskRecord | undefined> {
+  const tasksDir = path.join(repoRoot, stateRoot, "tasks");
+  if (!(await fs.pathExists(tasksDir))) {
+    return undefined;
+  }
+
+  const entries = await fs.readDir(tasksDir);
+  for (const entry of entries.filter((candidate) => candidate.endsWith(".json"))) {
+    const task = await fs.readJson<TaskRecord>(path.join(tasksDir, entry));
+    if (!task.worktreePath && task.cleanupStatus !== "cleaned") {
+      return task;
+    }
+  }
+  return undefined;
+}
+
+function getTaskStatePaths(
+  baseRepoRoot: string,
+  taskRepoRoot: string,
+  stateRoot: string,
+  handoffRoot: string,
+  taskSlug: string
+): string[] {
+  return [
+    path.join(baseRepoRoot, stateRoot, "tasks", `${taskSlug}.json`),
+    path.join(taskRepoRoot, stateRoot, "sessions", `${taskSlug}.json`),
+    path.join(taskRepoRoot, stateRoot, "messages", `${taskSlug}.jsonl`),
+    path.join(taskRepoRoot, stateRoot, "orchestration", `${taskSlug}.json`),
+    path.join(taskRepoRoot, stateRoot, "translation", taskSlug),
+    path.join(taskRepoRoot, handoffRoot)
+  ];
+}
+
+function assertTaskWorktreePath(repoRoot: string, worktreePath: string): void {
+  const worktreeRoot = path.resolve(repoRoot, ".claude", "worktrees");
+  const resolvedWorktreePath = path.resolve(worktreePath);
+  const relative = path.relative(worktreeRoot, resolvedWorktreePath);
+  if (relative.startsWith("..") || path.isAbsolute(relative) || relative === "") {
+    throw new VcmError({
+      code: "TASK_WORKTREE_PATH_INVALID",
+      message: `Refusing to clean up worktree outside ${worktreeRoot}.`,
+      statusCode: 400,
+      hint: resolvedWorktreePath
+    });
+  }
 }

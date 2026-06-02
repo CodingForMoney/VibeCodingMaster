@@ -1,4 +1,4 @@
-import { useState } from "react";
+import type { VcmOrchestrationMode } from "../../shared/types/message.js";
 import type { RoleName } from "../../shared/types/role.js";
 import type { ClaudePermissionMode, RoleSessionRecord } from "../../shared/types/session.js";
 import { XtermView } from "../terminal/xterm-view.js";
@@ -11,7 +11,10 @@ export interface SessionConsoleProps {
   permissionMode: ClaudePermissionMode;
   active?: boolean;
   busy?: boolean;
+  orchestrationMode: VcmOrchestrationMode;
+  translationEnabled: boolean;
   onPermissionModeChange(mode: ClaudePermissionMode): void;
+  onOrchestrationModeChange(mode: VcmOrchestrationMode): void;
   onStart(): void;
   onResume(): void;
   onStop(): void;
@@ -25,14 +28,17 @@ export function SessionConsole({
   permissionMode,
   active = true,
   busy,
+  orchestrationMode,
+  translationEnabled,
   onPermissionModeChange,
+  onOrchestrationModeChange,
   onStart,
   onResume,
   onStop,
   onRestart,
   onTerminalEvent
 }: SessionConsoleProps) {
-  const [translationEnabled, setTranslationEnabled] = useState(false);
+  const autoOrchestrationEnabled = orchestrationMode === "auto";
 
   return (
     <section className="session-console">
@@ -48,14 +54,18 @@ export function SessionConsole({
           onStop={onStop}
           onRestart={onRestart}
         />
-        <button
-          aria-pressed={translationEnabled}
-          className={`translation-toggle${translationEnabled ? " is-active" : ""}`}
-          type="button"
-          onClick={() => setTranslationEnabled((current) => !current)}
-        >
-          {translationEnabled ? "✅ Translate" : "× Translate"}
-        </button>
+        <div className="session-console-actions">
+          <button
+            aria-label={`Auto orchestration is ${autoOrchestrationEnabled ? "on" : "off"}`}
+            aria-pressed={autoOrchestrationEnabled}
+            className={`translation-toggle${autoOrchestrationEnabled ? " is-active" : ""}`}
+            disabled={busy}
+            type="button"
+            onClick={() => onOrchestrationModeChange(autoOrchestrationEnabled ? "manual" : "auto")}
+          >
+            {autoOrchestrationEnabled ? "✅ Auto orchestration" : "× Auto orchestration"}
+          </button>
+        </div>
       </div>
       {session?.status === "running" ? (
         <SessionConsoleBody
@@ -102,7 +112,7 @@ function SessionConsoleBody({
       </div>
       {translationEnabled ? (
         <div className="translation-pane">
-          <TranslationPanel key={session.id} taskSlug={taskSlug} role={role} sessionId={session.id} />
+          <TranslationPanel key={session.id} active={active} taskSlug={taskSlug} role={role} sessionId={session.id} />
         </div>
       ) : null}
     </div>

@@ -120,7 +120,48 @@ export interface TranslationPromptPreview {
   customized: boolean;
 }
 
+export type TranslationSessionStatus =
+  | "ready"
+  | "paused"
+  | "translating"
+  | "failed";
+
+export type TranslationSessionEvent =
+  | {
+      seq: number;
+      type: "entry";
+      createdAt: string;
+      entry: TranslationEntry;
+    }
+  | {
+      seq: number;
+      type: "status";
+      createdAt: string;
+      status: TranslationSessionStatus;
+    }
+  | {
+      seq: number;
+      type: "error";
+      createdAt: string;
+      id?: string;
+      message: string;
+    };
+
+export interface StartTranslationSessionResult {
+  sessionId: string;
+  status: TranslationSessionStatus;
+  nextCursor: number;
+}
+
+export interface PollTranslationSessionResult {
+  sessionId: string;
+  status: TranslationSessionStatus;
+  nextCursor: number;
+  events: TranslationSessionEvent[];
+}
+
 export type TranslationWsMessage =
   | { type: "translation-entry"; entry: TranslationEntry }
-  | { type: "translation-status"; status: "ready" | "paused" | "translating" | "failed" }
+  | { type: "translation-status"; status: TranslationSessionStatus }
+  | { type: "translation-poll"; checkedAt: string }
   | { type: "translation-error"; id?: string; message: string };

@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { ROLE_NAMES, isDispatchableRole } from "../../shared/constants.js";
+import type { ClaudeHookEventName } from "../../shared/types/claude-hook.js";
 import type { RoleName } from "../../shared/types/role.js";
 import type {
   ClaudePermissionMode,
@@ -17,7 +18,7 @@ import type { TerminalRuntime } from "../runtime/terminal-runtime.js";
 import type { ArtifactService } from "./artifact-service.js";
 import { claudeTranscriptPath } from "./claude-transcript-service.js";
 import type { ProjectService } from "./project-service.js";
-import type { TaskService } from "./task-service.js";
+import { getTaskRuntimeRepoRoot, type TaskService } from "./task-service.js";
 
 export interface SessionService {
   startRoleSession(repoRoot: string, taskSlug: string, role: RoleName, input?: StartRoleSessionRequest): Promise<RoleSessionRecord>;
@@ -26,6 +27,8 @@ export interface SessionService {
   restartRoleSession(repoRoot: string, taskSlug: string, role: RoleName, input?: StartRoleSessionRequest): Promise<RoleSessionRecord>;
   getRoleSession(repoRoot: string, taskSlug: string, role: RoleName): Promise<RoleSessionRecord | undefined>;
   listRoleSessions(repoRoot: string, taskSlug: string): Promise<RoleSessionRecord[]>;
+  recordClaudeHookEvent(repoRoot: string, input: RecordClaudeHookEventInput): Promise<RoleSessionRecord | undefined>;
+  markRoleActivityRunning(repoRoot: string, taskSlug: string, role: RoleName): Promise<RoleSessionRecord | undefined>;
 }
 
 export interface SessionServiceDeps {
@@ -37,11 +40,19 @@ export interface SessionServiceDeps {
   projectService: Pick<ProjectService, "loadConfig">;
   taskService: Pick<TaskService, "loadTask" | "updateTaskStatus">;
   apiUrl?: string;
-  vcmctlCommand?: string;
   now?: () => string;
 }
 
 type LaunchMode = "fresh" | "resume";
+
+export interface RecordClaudeHookEventInput {
+  taskSlug: string;
+  role: RoleName;
+  eventName: ClaudeHookEventName;
+  claudeSessionId?: string;
+  transcriptPath?: string;
+  cwd?: string;
+}
 
 export function createSessionService(deps: SessionServiceDeps): SessionService {
   const now = deps.now ?? (() => new Date().toISOString());
@@ -60,8 +71,9 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
 
     const config = await deps.projectService.loadConfig(repoRoot);
     const task = await deps.taskService.loadTask(repoRoot, taskSlug);
-    const paths = deps.artifactService.getHandoffPaths(repoRoot, task.handoffDir);
-    const persisted = await loadPersistedRoleRecord(deps.fs, repoRoot, config.stateRoot, taskSlug, role);
+    const taskRepoRoot = getTaskRuntimeRepoRoot(task);
+    const paths = deps.artifactService.getHandoffPaths(taskRepoRoot, task.handoffDir);
+    const persisted = await loadPersistedRoleRecord(deps.fs, taskRepoRoot, config.stateRoot, taskSlug, role);
     const permissionMode = input.permissionMode ?? persisted?.permissionMode ?? "default";
     const claudeSessionId = launchMode === "resume"
       ? persisted?.claudeSessionId
@@ -77,7 +89,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     }
     const transcriptPath = launchMode === "resume" && persisted?.transcriptPath
       ? persisted.transcriptPath
-      : claudeTranscriptPath(repoRoot, claudeSessionId);
+      : claudeTranscriptPath(taskRepoRoot, claudeSessionId);
 
     const startCommand = deps.claude.buildRoleStartCommand(
       role,
@@ -91,16 +103,16 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       role,
       command: startCommand.command,
       args: startCommand.args,
-      cwd: repoRoot,
+      cwd: taskRepoRoot,
       env: {
         VCM_API_URL: deps.apiUrl,
-        VCM_CTL_COMMAND: deps.vcmctlCommand,
         VCM_TASK_SLUG: taskSlug,
-        VCM_ROLE: role
+        VCM_ROLE: role,
+        VCM_SESSION_ID: claudeSessionId
       },
       cols: input.cols,
       rows: input.rows,
-      logPath: resolveRepoPath(repoRoot, paths.roleLogPaths[role])
+      logPath: resolveRepoPath(taskRepoRoot, paths.roleLogPaths[role])
     });
     const timestamp = now();
     const record: RoleSessionRecord = {
@@ -110,9 +122,10 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       taskSlug,
       role,
       status: runtimeSession.status,
+      activityStatus: "idle",
       command: startCommand.display,
       permissionMode,
-      cwd: repoRoot,
+      cwd: taskRepoRoot,
       terminalBackend: "node-pty",
       pid: runtimeSession.pid,
       logPath: paths.roleLogPaths[role],
@@ -127,7 +140,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     };
 
     deps.registry.upsert(record);
-    await persistTaskSession(deps.fs, repoRoot, config.stateRoot, record);
+    await persistTaskSession(deps.fs, taskRepoRoot, config.stateRoot, record);
     await deps.taskService.updateTaskStatus(repoRoot, taskSlug, "running");
     return record;
   }
@@ -156,11 +169,13 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       const updated: RoleSessionRecord = {
         ...existing,
         status: "exited",
+        activityStatus: "idle",
         updatedAt: now()
       };
       deps.registry.upsert(updated);
       const config = await deps.projectService.loadConfig(repoRoot);
-      await persistTaskSession(deps.fs, repoRoot, config.stateRoot, updated);
+      const task = await deps.taskService.loadTask(repoRoot, taskSlug);
+      await persistTaskSession(deps.fs, getTaskRuntimeRepoRoot(task), config.stateRoot, updated);
       return updated;
     },
     async restartRoleSession(repoRoot, taskSlug, role, input = {}) {
@@ -178,8 +193,10 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     },
     async getRoleSession(repoRoot, taskSlug, role) {
       const config = await deps.projectService.loadConfig(repoRoot);
+      const task = await deps.taskService.loadTask(repoRoot, taskSlug);
+      const taskRepoRoot = getTaskRuntimeRepoRoot(task);
       const record = deps.registry.getByRole(taskSlug, role)
-        ?? await loadPersistedRoleRecord(deps.fs, repoRoot, config.stateRoot, taskSlug, role);
+        ?? await loadPersistedRoleRecord(deps.fs, taskRepoRoot, config.stateRoot, taskSlug, role);
       if (!record) {
         return undefined;
       }
@@ -197,6 +214,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       return {
         ...record,
         status: runtimeSession.status,
+        activityStatus: record.activityStatus ?? "idle",
         pid: runtimeSession.pid,
         lastOutputAt: runtimeSession.lastOutputAt,
         exitCode: runtimeSession.exitCode
@@ -211,8 +229,65 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
         }
       }
       return sessions;
+    },
+    async recordClaudeHookEvent(repoRoot, input) {
+      const current = await this.getRoleSession(repoRoot, input.taskSlug, input.role);
+      if (!current || !matchesClaudeHookSession(current, input)) {
+        return undefined;
+      }
+
+      const timestamp = now();
+      const isStop = input.eventName === "Stop";
+      const updated: RoleSessionRecord = {
+        ...current,
+        activityStatus: isStop ? "idle" : "running",
+        lastHookEventAt: timestamp,
+        lastStopAt: isStop ? timestamp : current.lastStopAt,
+        lastPromptSubmittedAt: isStop ? current.lastPromptSubmittedAt : timestamp,
+        updatedAt: timestamp
+      };
+      deps.registry.upsert(updated);
+
+      const config = await deps.projectService.loadConfig(repoRoot);
+      const task = await deps.taskService.loadTask(repoRoot, input.taskSlug);
+      await persistTaskSession(deps.fs, getTaskRuntimeRepoRoot(task), config.stateRoot, updated);
+      return updated;
+    },
+    async markRoleActivityRunning(repoRoot, taskSlug, role) {
+      const current = await this.getRoleSession(repoRoot, taskSlug, role);
+      if (!current) {
+        return undefined;
+      }
+
+      const timestamp = now();
+      const updated: RoleSessionRecord = {
+        ...current,
+        activityStatus: "running",
+        lastPromptSubmittedAt: timestamp,
+        lastHookEventAt: timestamp,
+        updatedAt: timestamp
+      };
+      deps.registry.upsert(updated);
+
+      const config = await deps.projectService.loadConfig(repoRoot);
+      const task = await deps.taskService.loadTask(repoRoot, taskSlug);
+      await persistTaskSession(deps.fs, getTaskRuntimeRepoRoot(task), config.stateRoot, updated);
+      return updated;
     }
   };
+}
+
+function matchesClaudeHookSession(record: RoleSessionRecord, input: RecordClaudeHookEventInput): boolean {
+  if (input.claudeSessionId && record.claudeSessionId === input.claudeSessionId) {
+    return true;
+  }
+  if (input.transcriptPath && record.transcriptPath === input.transcriptPath) {
+    return true;
+  }
+  if (!input.claudeSessionId && !input.transcriptPath) {
+    return true;
+  }
+  return false;
 }
 
 function getRecoverableStatus(record: RoleSessionRecord): RoleSessionRecord["status"] {

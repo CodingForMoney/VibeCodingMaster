@@ -1,23 +1,20 @@
 import { FormEvent, type ReactNode, useEffect, useState } from "react";
-import type { TaskWorkflowReport } from "../../shared/types/api.js";
+import type { ThemeMode } from "../../shared/types/app-settings.js";
 import type { HarnessApplyResult, HarnessStatusReport } from "../../shared/types/harness.js";
 import type { VcmOrchestrationState, VcmRoleMessage } from "../../shared/types/message.js";
 import type { ProjectSummary } from "../../shared/types/project.js";
-import type { RoleName } from "../../shared/types/role.js";
 import type { TaskRecord } from "../../shared/types/task.js";
 import { EventLog } from "../components/event-log.js";
 import { HarnessPanel } from "../components/harness-panel.js";
 import { MessageTimeline, getMessageCounts } from "../components/message-timeline.js";
 import { RepoConnectForm } from "../components/repo-connect-form.js";
 import { TaskNav } from "../components/task-nav.js";
-import { WorkflowPanel } from "../components/workflow-panel.js";
 
 export interface ProjectDashboardProps {
   project: ProjectSummary | null;
   recentRepositoryPaths: string[];
   tasks: TaskRecord[];
   activeTaskSlug: string | null;
-  workflow: TaskWorkflowReport | null;
   messages: VcmRoleMessage[];
   orchestration: VcmOrchestrationState | null;
   events: string[];
@@ -27,12 +24,15 @@ export interface ProjectDashboardProps {
   onConnect(repoPath: string): Promise<void>;
   onRefreshHarness(): Promise<void>;
   onApplyHarness(): Promise<void>;
-  onCreateTask(input: { taskSlug: string; title?: string }): Promise<void>;
+  onCreateTask(input: { taskSlug: string; createWorktree?: boolean; title?: string }): Promise<void>;
   onSelectTask(taskSlug: string): void;
-  onOrchestrationModeChange(mode: VcmOrchestrationState["mode"]): void;
-  onStageMessage(message: VcmRoleMessage): void;
-  onRejectMessage(message: VcmRoleMessage): void;
-  onOpenMessageRole(role: RoleName): void;
+  themeMode: ThemeMode;
+  onThemeModeChange(themeMode: ThemeMode): void;
+  roundCompletionAlerts: boolean;
+  onRoundCompletionAlertsChange(enabled: boolean): void;
+  onTryRoundAlert(): void;
+  onMarkAllMessagesDone(taskSlug: string): void;
+  onDeleteMessageHistory(taskSlug: string): void;
 }
 
 export function ProjectDashboard({
@@ -40,7 +40,6 @@ export function ProjectDashboard({
   recentRepositoryPaths,
   tasks,
   activeTaskSlug,
-  workflow,
   messages,
   orchestration,
   events,
@@ -52,21 +51,26 @@ export function ProjectDashboard({
   onApplyHarness,
   onCreateTask,
   onSelectTask,
-  onOrchestrationModeChange,
-  onStageMessage,
-  onRejectMessage,
-  onOpenMessageRole
+  themeMode,
+  onThemeModeChange,
+  roundCompletionAlerts,
+  onRoundCompletionAlertsChange,
+  onTryRoundAlert,
+  onMarkAllMessagesDone,
+  onDeleteMessageHistory
 }: ProjectDashboardProps) {
   const [taskSlug, setTaskSlug] = useState("");
+  const [createWorktree, setCreateWorktree] = useState(true);
   const [showMessages, setShowMessages] = useState(false);
   const [showEvents, setShowEvents] = useState(false);
   const messageCounts = getMessageCounts(messages);
-  const orchestrationMode = orchestration?.mode ?? "manual";
+  const normalizedTaskSlug = taskSlug.trim();
 
   async function handleCreateTask(event: FormEvent) {
     event.preventDefault();
-    await onCreateTask({ taskSlug });
+    await onCreateTask({ taskSlug: normalizedTaskSlug, createWorktree });
     setTaskSlug("");
+    setCreateWorktree(true);
   }
 
   return (
@@ -112,38 +116,53 @@ export function ProjectDashboard({
         </SidebarSection>
       ) : null}
 
-      {activeTaskSlug ? (
-        <SidebarSection title="Workflow">
-          {workflow ? <WorkflowPanel workflow={workflow} /> : <p className="muted">Loading workflow...</p>}
-        </SidebarSection>
-      ) : null}
-
-      {activeTaskSlug ? (
-        <SidebarSection title="Settings">
-          <div className="sidebar-settings">
-            <button type="button" onClick={() => setShowMessages(true)}>
-              <span>Messages</span>
-              <span className="muted">
-                {messageCounts.pending} pending / {messageCounts.queued} queued
-              </span>
-            </button>
-            <button type="button" onClick={() => setShowEvents(true)}>
-              <span>Events</span>
-              <span className="muted">{events.length} total</span>
-            </button>
-            <button
-              aria-pressed={orchestrationMode === "auto"}
-              className={orchestrationMode === "auto" ? "settings-toggle is-active" : "settings-toggle"}
-              disabled={busy}
-              type="button"
-              onClick={() => onOrchestrationModeChange(orchestrationMode === "auto" ? "manual" : "auto")}
-            >
-              <span>Auto orchestration</span>
-              <span>{orchestrationMode === "auto" ? "on" : "off"}</span>
-            </button>
-          </div>
-        </SidebarSection>
-      ) : null}
+      <SidebarSection title="Settings">
+        <div className="sidebar-settings">
+          <button
+            aria-label={`Theme mode: ${getThemeModeLabel(themeMode)}`}
+            className="settings-toggle theme-mode-toggle"
+            disabled={busy}
+            title="Cycle theme: system, light, dark"
+            type="button"
+            onClick={() => onThemeModeChange(getNextThemeMode(themeMode))}
+          >
+            <span>Theme</span>
+            <span>{getThemeModeLabel(themeMode)}</span>
+          </button>
+          <button
+            aria-pressed={roundCompletionAlerts}
+            className={roundCompletionAlerts ? "settings-toggle is-active" : "settings-toggle"}
+            disabled={busy}
+            type="button"
+            onClick={() => onRoundCompletionAlertsChange(!roundCompletionAlerts)}
+          >
+            <span>Round alert</span>
+            <span>{roundCompletionAlerts ? "on" : "off"}</span>
+          </button>
+          <button
+            className="settings-toggle"
+            type="button"
+            onClick={onTryRoundAlert}
+          >
+            <span>Try alert</span>
+            <span>test</span>
+          </button>
+          {activeTaskSlug ? (
+            <>
+              <button type="button" onClick={() => setShowMessages(true)}>
+                <span>Messages</span>
+                <span className="muted">
+                  {messageCounts.total} total
+                </span>
+              </button>
+              <button type="button" onClick={() => setShowEvents(true)}>
+                <span>Events</span>
+                <span className="muted">{events.length} total</span>
+              </button>
+            </>
+          ) : null}
+        </div>
+      </SidebarSection>
 
       {project ? (
         <SidebarSection title="VCM Harness">
@@ -166,7 +185,25 @@ export function ProjectDashboard({
                 onChange={(event) => setTaskSlug(event.target.value)}
                 placeholder="task name"
               />
-              <button type="submit" disabled={busy || !taskSlug.trim()}>
+              <label className="task-create-option">
+                <input
+                  type="checkbox"
+                  checked={createWorktree}
+                  onChange={(event) => setCreateWorktree(event.target.checked)}
+                />
+                <span>Create worktree and branch</span>
+              </label>
+              {createWorktree ? (
+                <div className="task-create-preview">
+                  <small>branch: {normalizedTaskSlug ? `feature/${normalizedTaskSlug}` : "feature/<task>"}</small>
+                  <small>worktree: {normalizedTaskSlug ? `.claude/worktrees/${normalizedTaskSlug}` : ".claude/worktrees/<task>"}</small>
+                </div>
+              ) : (
+                <div className="task-create-preview">
+                  <small>uses current repository path and current branch</small>
+                </div>
+              )}
+              <button type="submit" disabled={busy || !normalizedTaskSlug}>
                 Create
               </button>
             </form>
@@ -186,9 +223,16 @@ export function ProjectDashboard({
           messages={messages}
           orchestration={orchestration}
           onClose={() => setShowMessages(false)}
-          onOpenRole={onOpenMessageRole}
-          onReject={onRejectMessage}
-          onStage={onStageMessage}
+          onMarkAllDone={() => {
+            if (activeTaskSlug) {
+              onMarkAllMessagesDone(activeTaskSlug);
+            }
+          }}
+          onDeleteMessageHistory={() => {
+            if (activeTaskSlug) {
+              onDeleteMessageHistory(activeTaskSlug);
+            }
+          }}
         />
       ) : null}
 
@@ -200,6 +244,26 @@ export function ProjectDashboard({
       ) : null}
     </div>
   );
+}
+
+function getNextThemeMode(themeMode: ThemeMode): ThemeMode {
+  if (themeMode === "system") {
+    return "light";
+  }
+  if (themeMode === "light") {
+    return "dark";
+  }
+  return "system";
+}
+
+function getThemeModeLabel(themeMode: ThemeMode): string {
+  if (themeMode === "system") {
+    return "System";
+  }
+  if (themeMode === "light") {
+    return "Light";
+  }
+  return "Dark";
 }
 
 function EventDialog({ events, onClose }: { events: string[]; onClose(): void }) {
@@ -224,19 +288,45 @@ function MessageDialog({
   messages,
   orchestration,
   onClose,
-  onOpenRole,
-  onReject,
-  onStage
+  onMarkAllDone,
+  onDeleteMessageHistory
 }: {
   busy?: boolean;
   messages: VcmRoleMessage[];
   orchestration: VcmOrchestrationState | null;
   onClose(): void;
-  onOpenRole(role: RoleName): void;
-  onReject(message: VcmRoleMessage): void;
-  onStage(message: VcmRoleMessage): void;
+  onMarkAllDone(): void;
+  onDeleteMessageHistory(): void;
 }) {
   const counts = getMessageCounts(messages);
+
+  function markAllDone() {
+    const confirmed = window.confirm(
+      [
+        "Clear all pending route-file messages?",
+        "",
+        "Use this only after you manually copied or handled stuck route-file messages.",
+        "VCM will clear non-empty handoff message files so Stop-hook orchestration can continue."
+      ].join("\n")
+    );
+    if (confirmed) {
+      onMarkAllDone();
+    }
+  }
+
+  function deleteMessageHistory() {
+    const confirmed = window.confirm(
+      [
+        `Delete ${counts.total} message histor${counts.total === 1 ? "y item" : "y items"}?`,
+        "",
+        "This removes message history from the Messages panel.",
+        "Pending route-file messages are not touched."
+      ].join("\n")
+    );
+    if (confirmed) {
+      onDeleteMessageHistory();
+    }
+  }
 
   return (
     <div className="modal-backdrop">
@@ -245,11 +335,15 @@ function MessageDialog({
           <div>
             <h2>Messages</h2>
             <p className="muted">
-              {counts.pending} pending / {counts.queued} queued / {counts.delivered} delivered
-              {orchestration ? ` · ${orchestration.mode}${orchestration.paused ? " paused" : ""}` : ""}
+              {counts.total} total / {counts.accepted} accepted
+              {orchestration ? ` · ${orchestration.mode}` : ""}
             </p>
           </div>
-          <button type="button" onClick={onClose}>Close</button>
+          <div className="modal-actions">
+            <button type="button" disabled={busy} onClick={markAllDone}>Mark All Done</button>
+            <button type="button" disabled={busy || counts.total === 0} onClick={deleteMessageHistory}>Delete All</button>
+            <button type="button" onClick={onClose}>Close</button>
+          </div>
         </header>
         <MessageTimeline
           busy={busy}
@@ -258,9 +352,6 @@ function MessageDialog({
           orchestration={orchestration}
           showControls={false}
           showHeader={false}
-          onOpenRole={onOpenRole}
-          onReject={onReject}
-          onStage={onStage}
         />
       </section>
     </div>

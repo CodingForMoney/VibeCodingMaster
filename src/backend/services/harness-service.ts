@@ -11,6 +11,7 @@ import type { FileSystemAdapter } from "../adapters/filesystem.js";
 import { renderArchitectHarnessRules } from "../templates/harness/architect-agent.js";
 import { renderCoderHarnessRules } from "../templates/harness/coder-agent.js";
 import { renderRootClaudeHarnessRules } from "../templates/harness/claude-root.js";
+import { renderGitignoreHarnessRules } from "../templates/harness/gitignore.js";
 import { renderProjectManagerHarnessRules } from "../templates/harness/project-manager-agent.js";
 import { renderReviewerHarnessRules } from "../templates/harness/reviewer-agent.js";
 
@@ -28,6 +29,7 @@ interface HarnessFileDefinition {
   path: string;
   title: string;
   frontmatter?: string;
+  commentStyle?: "html" | "hash";
   renderRules(): string;
 }
 
@@ -41,6 +43,10 @@ interface HarnessFileAnalysis {
 export const VCM_HARNESS_VERSION = 1;
 
 const MANAGED_BLOCK_PATTERN = /<!-- VCM:BEGIN(?:\s+version=(\d+))? -->[\s\S]*?<!-- VCM:END -->/m;
+const HASH_MANAGED_BLOCK_PATTERN = /# VCM:BEGIN(?:\s+version=(\d+))?\n[\s\S]*?# VCM:END/m;
+const CLAUDE_SETTINGS_PATH = ".claude/settings.json";
+const VCM_HOOK_COMMAND = `sh -c 'if [ -z "\${VCM_TASK_SLUG:-}" ] || [ -z "\${VCM_ROLE:-}" ] || [ -z "\${VCM_API_URL:-}" ]; then exit 0; fi; node -e '"'"'let s="";process.stdin.setEncoding("utf8");process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{let event={};try{event=s.trim()?JSON.parse(s):{};}catch{event={raw:s};}process.stdout.write(JSON.stringify({taskSlug:process.env.VCM_TASK_SLUG,role:process.env.VCM_ROLE,event}));});'"'"' | curl -fsS --max-time 2 -X POST "\${VCM_API_URL}/api/hooks/claude-code" -H "content-type: application/json" --data-binary @- >/dev/null || true'`;
+const VCM_HOOK_EVENTS = ["UserPromptSubmit", "Stop"] as const;
 
 const HARNESS_FILES: HarnessFileDefinition[] = [
   {
@@ -48,6 +54,13 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
     path: "CLAUDE.md",
     title: "CLAUDE.md",
     renderRules: renderRootClaudeHarnessRules
+  },
+  {
+    kind: "gitignore",
+    path: ".gitignore",
+    title: ".gitignore",
+    commentStyle: "hash",
+    renderRules: renderGitignoreHarnessRules
   },
   {
     kind: "agent-project-manager",
@@ -128,6 +141,7 @@ async function analyzeHarnessFiles(fs: FileSystemAdapter, repoRoot: string): Pro
   for (const definition of HARNESS_FILES) {
     analyses.push(await analyzeHarnessFile(fs, repoRoot, definition));
   }
+  analyses.push(await analyzeClaudeSettingsFile(fs, repoRoot));
 
   return analyses;
 }
@@ -138,7 +152,8 @@ async function analyzeHarnessFile(
   definition: HarnessFileDefinition
 ): Promise<HarnessFileAnalysis> {
   const absolutePath = resolveHarnessPath(repoRoot, definition.path);
-  const expectedBlock = renderManagedBlock(definition.renderRules());
+  const expectedBlock = renderManagedBlock(definition, definition.renderRules());
+  const managedBlockPattern = getManagedBlockPattern(definition);
   const exists = await fs.pathExists(absolutePath);
 
   if (!exists) {
@@ -161,7 +176,7 @@ async function analyzeHarnessFile(
   }
 
   const currentContent = await fs.readText(absolutePath);
-  const match = currentContent.match(MANAGED_BLOCK_PATTERN);
+  const match = currentContent.match(managedBlockPattern);
   if (!match) {
     return {
       definition,
@@ -206,7 +221,7 @@ async function analyzeHarnessFile(
         },
     nextContent: action === "ok"
       ? undefined
-      : currentContent.replace(MANAGED_BLOCK_PATTERN, expectedBlock)
+      : currentContent.replace(managedBlockPattern, expectedBlock)
   };
 }
 
@@ -227,8 +242,18 @@ function renderHarnessStatus(analyses: HarnessFileAnalysis[]): HarnessStatusRepo
   };
 }
 
-function renderManagedBlock(rules: string): string {
+function renderManagedBlock(definition: HarnessFileDefinition, rules: string): string {
+  if (definition.commentStyle === "hash") {
+    return `# VCM:BEGIN version=${VCM_HARNESS_VERSION}\n${rules.trimEnd()}\n# VCM:END`;
+  }
+
   return `<!-- VCM:BEGIN version=${VCM_HARNESS_VERSION} -->\n${rules.trimEnd()}\n<!-- VCM:END -->`;
+}
+
+function getManagedBlockPattern(definition: HarnessFileDefinition): RegExp {
+  return definition.commentStyle === "hash"
+    ? HASH_MANAGED_BLOCK_PATTERN
+    : MANAGED_BLOCK_PATTERN;
 }
 
 function renderNewHarnessFile(definition: HarnessFileDefinition, block: string): string {
@@ -236,6 +261,123 @@ function renderNewHarnessFile(definition: HarnessFileDefinition, block: string):
     ? `${definition.frontmatter.trimEnd()}\n\n`
     : "";
   return `${frontmatter}# ${definition.title}\n\n${block}\n`;
+}
+
+async function analyzeClaudeSettingsFile(fs: FileSystemAdapter, repoRoot: string): Promise<HarnessFileAnalysis> {
+  const definition: HarnessFileDefinition = {
+    kind: "claude-settings",
+    path: CLAUDE_SETTINGS_PATH,
+    title: "Claude Code Settings",
+    renderRules: () => ""
+  };
+  const absolutePath = resolveHarnessPath(repoRoot, CLAUDE_SETTINGS_PATH);
+  const exists = await fs.pathExists(absolutePath);
+  const current = exists
+    ? parseJsonObject(await fs.readText(absolutePath))
+    : {};
+  const next = withVcmClaudeHooks(current);
+  const currentContent = exists
+    ? `${JSON.stringify(current, null, 2)}\n`
+    : "";
+  const nextContent = `${JSON.stringify(next, null, 2)}\n`;
+  const action: HarnessFileAction = exists
+    ? currentContent === nextContent ? "ok" : "update"
+    : "create";
+
+  return {
+    definition,
+    status: {
+      kind: "claude-settings",
+      path: CLAUDE_SETTINGS_PATH,
+      exists,
+      hasManagedBlock: false,
+      action
+    },
+    plannedChange: action === "ok"
+      ? undefined
+      : {
+          path: CLAUDE_SETTINGS_PATH,
+          action,
+          reason: exists
+            ? "Claude Code hook settings do not contain the VCM UserPromptSubmit/Stop hook bridge."
+            : "Claude Code hook settings are missing; VCM will create them."
+        },
+    nextContent: action === "ok" ? undefined : nextContent
+  };
+}
+
+function parseJsonObject(content: string): Record<string, unknown> {
+  const parsed = JSON.parse(content) as unknown;
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return {};
+  }
+  return parsed as Record<string, unknown>;
+}
+
+function withVcmClaudeHooks(settings: Record<string, unknown>): Record<string, unknown> {
+  const hooks = isPlainObject(settings.hooks)
+    ? { ...settings.hooks }
+    : {};
+
+  for (const [eventName, value] of Object.entries(hooks)) {
+    if (!Array.isArray(value)) {
+      continue;
+    }
+    const cleaned = value.filter((entry) => !isVcmHookMatcher(entry));
+    if (cleaned.length > 0) {
+      hooks[eventName] = cleaned;
+    } else {
+      delete hooks[eventName];
+    }
+  }
+
+  for (const eventName of VCM_HOOK_EVENTS) {
+    const existingMatchers = Array.isArray(hooks[eventName])
+      ? hooks[eventName] as unknown[]
+      : [];
+    hooks[eventName] = [
+      ...existingMatchers.filter((entry) => !isVcmHookMatcher(entry)),
+      createVcmHookMatcher()
+    ];
+  }
+
+  return {
+    ...settings,
+    hooks
+  };
+}
+
+function createVcmHookMatcher() {
+  return {
+    hooks: [
+      {
+        type: "command",
+        command: VCM_HOOK_COMMAND,
+        timeout: 5
+      }
+    ]
+  };
+}
+
+function isVcmHookMatcher(value: unknown): boolean {
+  if (!isPlainObject(value) || !Array.isArray(value.hooks)) {
+    return false;
+  }
+  return value.hooks.some((hook) => {
+    if (!isPlainObject(hook)) {
+      return false;
+    }
+    return typeof hook.command === "string" && hook.command.includes("hook-event");
+  }) || value.hooks.some((hook) => {
+    if (!isPlainObject(hook)) {
+      return false;
+    }
+    return typeof hook.command === "string" && hook.command.includes("/api/hooks/claude-code");
+  });
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
 function renderAgentFrontmatter(name: string, description: string): string {

@@ -5,7 +5,6 @@ import type {
   TranslationProviderTestResult,
   TranslationSettings
 } from "../../shared/types/translation.js";
-import { TRANSLATION_PROMPT_KEYS } from "../../shared/types/translation.js";
 
 export interface TranslationSettingsModalProps {
   settings: TranslationSettings;
@@ -28,15 +27,11 @@ export function TranslationSettingsModal({
 }: TranslationSettingsModalProps) {
   const [draft, setDraft] = useState(settings);
   const [apiKey, setApiKey] = useState(settings.apiKey ?? "");
-  const [selectedPromptKey, setSelectedPromptKey] = useState<TranslationPromptKey>("zh-to-en");
 
   useEffect(() => {
     setDraft(settings);
     setApiKey(settings.apiKey ?? "");
   }, [settings]);
-
-  const selectedPromptPreview = promptPreviews.find((preview) => preview.key === selectedPromptKey);
-  const customPrompt = draft.prompts?.[selectedPromptKey] ?? "";
 
   return (
     <div className="modal-backdrop">
@@ -50,14 +45,6 @@ export function TranslationSettingsModal({
         </header>
 
         <div className="translation-settings-grid">
-          <label>
-            <span>Enable translation</span>
-            <input
-              checked={draft.enabled}
-              type="checkbox"
-              onChange={(event) => setDraft({ ...draft, enabled: event.target.checked })}
-            />
-          </label>
           <label>
             <span>Base URL</span>
             <input
@@ -94,37 +81,11 @@ export function TranslationSettingsModal({
             />
           </label>
           <label>
-            <span>Input mode</span>
-            <select
-              value={draft.inputMode}
-              onChange={(event) => setDraft({ ...draft, inputMode: event.target.value as TranslationSettings["inputMode"] })}
-            >
-              <option value="review-before-send">Review before send</option>
-              <option value="auto-send">Auto-send</option>
-            </select>
-          </label>
-          <label>
             <span>Use context</span>
             <input
               checked={draft.contextEnabled}
               type="checkbox"
               onChange={(event) => setDraft({ ...draft, contextEnabled: event.target.checked })}
-            />
-          </label>
-          <label>
-            <span>Translate output</span>
-            <input
-              checked={draft.translateOutput}
-              type="checkbox"
-              onChange={(event) => setDraft({ ...draft, translateOutput: event.target.checked })}
-            />
-          </label>
-          <label>
-            <span>Translate user input</span>
-            <input
-              checked={draft.translateUserInput}
-              type="checkbox"
-              onChange={(event) => setDraft({ ...draft, translateUserInput: event.target.checked })}
             />
           </label>
           <label>
@@ -153,50 +114,31 @@ export function TranslationSettingsModal({
           <header>
             <div>
               <h3>Translation Prompts</h3>
-              <p>cc-pm style prompt slots: zh-to-en, zh-to-en-with-context, en-to-zh.</p>
+              <p>Edit the three cc-pm style prompt slots directly.</p>
             </div>
-            <label>
-              <span>Prompt slot</span>
-              <select
-                value={selectedPromptKey}
-                onChange={(event) => setSelectedPromptKey(event.target.value as TranslationPromptKey)}
-              >
-                {TRANSLATION_PROMPT_KEYS.map((key) => {
-                  const preview = promptPreviews.find((candidate) => candidate.key === key);
-                  return <option key={key} value={key}>{preview?.label ?? key}</option>;
-                })}
-              </select>
-            </label>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={() => setDraft({ ...draft, prompts: undefined })}
+            >
+              Reset prompts
+            </button>
           </header>
 
-          <div className="translation-prompt-editor-grid">
-            <label>
-              <span>User prompt (empty = use default)</span>
-              <textarea
-                value={customPrompt}
-                onChange={(event) => setDraft({
-                  ...draft,
-                  prompts: updatePromptOverride(draft.prompts, selectedPromptKey, event.target.value)
-                })}
-                placeholder="Leave blank to use the default prompt."
-              />
-            </label>
-            <label>
-              <span>Default prompt (read-only)</span>
-              <textarea readOnly value={selectedPromptPreview?.defaultPrompt ?? ""} />
-            </label>
+          <div className="translation-prompt-stack">
+            {promptPreviews.map((preview) => (
+              <label key={preview.key}>
+                <span>{preview.label}</span>
+                <textarea
+                  value={getPromptValue(draft, preview)}
+                  onChange={(event) => setDraft({
+                    ...draft,
+                    prompts: updatePromptOverride(draft.prompts, preview.key, event.target.value, preview.defaultPrompt)
+                  })}
+                />
+              </label>
+            ))}
           </div>
-
-          <button
-            type="button"
-            disabled={busy || !customPrompt}
-            onClick={() => setDraft({
-              ...draft,
-              prompts: updatePromptOverride(draft.prompts, selectedPromptKey, "")
-            })}
-          >
-            Reset selected prompt
-          </button>
         </section>
 
         {testResult ? (
@@ -210,7 +152,13 @@ export function TranslationSettingsModal({
           <button
             type="button"
             disabled={busy}
-            onClick={() => void onSave(draft, apiKey.trim())}
+            onClick={() => void onSave({
+              ...draft,
+              enabled: true,
+              translateOutput: true,
+              translateUserInput: true,
+              inputMode: "review-before-send"
+            }, apiKey.trim())}
           >
             Save
           </button>
@@ -223,13 +171,18 @@ export function TranslationSettingsModal({
 function updatePromptOverride(
   prompts: TranslationSettings["prompts"],
   key: TranslationPromptKey,
-  value: string
+  value: string,
+  defaultPrompt: string
 ): TranslationSettings["prompts"] {
   const next = { ...(prompts ?? {}) };
-  if (value.trim()) {
+  if (value.trim() && value !== defaultPrompt) {
     next[key] = value;
   } else {
     delete next[key];
   }
   return Object.keys(next).length > 0 ? next : undefined;
+}
+
+function getPromptValue(settings: TranslationSettings, preview: TranslationPromptPreview): string {
+  return settings.prompts?.[preview.key] ?? preview.defaultPrompt;
 }
