@@ -1,0 +1,13 @@
+[workspace]
+resolver = "3"
+members = [
+  "foundation/config",
+  "foundation/identity",
+  "foundation/telemetry",
+  "domain/accounts",
+  "domain/catalog",
+  "domain/orders",
+  "application/api",
+  "application/reporting",
+  "application/worker",
+]

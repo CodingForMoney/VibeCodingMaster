@@ -54,6 +54,7 @@ describe("createSessionService", () => {
     expect(writes).toHaveLength(0);
     expect(runtimeInputs[0]?.env).toMatchObject({
       VCM_API_URL: "http://127.0.0.1:4173",
+      VCM_TASK_REPO_ROOT: "/repo",
       VCM_TASK_SLUG: "demo-task",
       VCM_ROLE: "project-manager",
       VCM_SESSION_ID: expect.any(String)
@@ -72,6 +73,9 @@ describe("createSessionService", () => {
     expect(started.cwd).toBe("/repo/.claude/worktrees/demo-task");
     expect(started.transcriptPath).toContain("-repo-.claude-worktrees-demo-task");
     expect(runtimeInputs[0]?.cwd).toBe("/repo/.claude/worktrees/demo-task");
+    expect(runtimeInputs[0]?.env).toMatchObject({
+      VCM_TASK_REPO_ROOT: "/repo/.claude/worktrees/demo-task"
+    });
     expect(runtimeInputs[0]?.logPath).toBe("/repo/.claude/worktrees/demo-task/.ai/vcm/handoffs/logs/architect.log");
     await expect(fs.pathExists("/repo/.claude/worktrees/demo-task/.ai/vcm/sessions/demo-task.json"))
       .resolves.toBe(true);
@@ -192,10 +196,10 @@ function createTestSessionService(
             reviewer: ".ai/vcm/handoffs/logs/reviewer.log"
           },
           architecturePlanPath: ".ai/vcm/handoffs/architecture-plan.md",
-          implementationLogPath: ".ai/vcm/handoffs/implementation-log.md",
-          validationLogPath: ".ai/vcm/handoffs/validation-log.md",
+          knownIssuesPath: ".ai/vcm/handoffs/known-issues.md",
           reviewReportPath: ".ai/vcm/handoffs/review-report.md",
-          docsSyncReportPath: ".ai/vcm/handoffs/docs-sync-report.md"
+          docsSyncReportPath: ".ai/vcm/handoffs/docs-sync-report.md",
+          finalAcceptancePath: ".ai/vcm/handoffs/final-acceptance.md"
         };
       }
     } as never,

@@ -1,7 +1,18 @@
 import type { DispatchableRole } from "../../shared/types/role.js";
 
-export function renderRoleCommandTemplate(taskSlug: string, role: DispatchableRole): string {
+export function renderRoleCommandTemplate(
+  taskSlug: string,
+  role: DispatchableRole,
+  taskRepoRoot = "$VCM_TASK_REPO_ROOT",
+  branch = "TBD"
+): string {
   return `# ${role} command for ${taskSlug}
+
+## Worktree
+
+Task repo root: ${taskRepoRoot}
+Branch: ${branch}
+Rule: only edit files under Task repo root.
 
 ## Objective
 

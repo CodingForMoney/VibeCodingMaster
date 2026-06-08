@@ -21,6 +21,7 @@ export interface ProjectService {
   loadConfig(repoRoot: string): Promise<ProjectConfig>;
   saveConfig(config: ProjectConfig, force?: boolean): Promise<void>;
   getConfigPath(repoRoot: string): string;
+  getProjectDataRoot(repoRoot: string): string;
 }
 
 export interface ProjectServiceDeps {
@@ -68,7 +69,7 @@ export function createProjectService(deps: ProjectServiceDeps): ProjectService {
 
       const config = await this.loadConfig(repoRoot);
       await deps.fs.ensureDir(path.join(repoRoot, config.handoffRoot));
-      await deps.fs.ensureDir(path.join(repoRoot, config.stateRoot, "tasks"));
+      await deps.fs.ensureDir(path.join(this.getProjectDataRoot(repoRoot), "tasks"));
       await deps.fs.ensureDir(path.join(repoRoot, ".claude", "worktrees"));
       await this.saveConfig(config, true);
 
@@ -131,6 +132,9 @@ export function createProjectService(deps: ProjectServiceDeps): ProjectService {
     },
     getConfigPath(repoRoot) {
       return deps.appSettings.getProjectConfigPath(repoRoot);
+    },
+    getProjectDataRoot(repoRoot) {
+      return path.dirname(deps.appSettings.getProjectConfigPath(repoRoot));
     }
   };
 }

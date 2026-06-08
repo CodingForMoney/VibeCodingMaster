@@ -32,10 +32,17 @@ describe("createTaskService", () => {
     });
     await expect(fileExists(path.join(task.worktreePath!, ".git"))).resolves.toBe(true);
     await expect(fileExists(path.join(task.worktreePath!, ".ai/vcm/handoffs/architecture-plan.md"))).resolves.toBe(true);
+    await expect(fileExists(path.join(task.worktreePath!, ".ai/vcm/handoffs/final-acceptance.md"))).resolves.toBe(true);
     await expect(fileExists(path.join(task.worktreePath!, ".ai/vcm/sessions"))).resolves.toBe(true);
     await expect(fileExists(path.join(task.worktreePath!, ".ai/vcm/messages"))).resolves.toBe(true);
     await expect(fileExists(path.join(task.worktreePath!, ".ai/vcm/orchestration"))).resolves.toBe(true);
     await expect(fileExists(path.join(task.worktreePath!, ".ai/vcm/translation"))).resolves.toBe(true);
+    await expect(fileExists(path.join(repoRoot, ".ai/vcm/tasks/demo-task.json"))).resolves.toBe(false);
+    await expect(fileExists(path.join(getAppProjectDataRoot(repoRoot), "tasks/demo-task.json"))).resolves.toBe(true);
+    await expect(readText(path.join(task.worktreePath!, ".ai/vcm/handoffs/role-commands/coder.md")))
+      .resolves.toContain(`Task repo root: ${task.worktreePath}`);
+    await expect(readText(path.join(task.worktreePath!, ".ai/vcm/handoffs/role-commands/coder.md")))
+      .resolves.toContain("Branch: feature/demo-task");
     await expect(readGit(repoRoot, ["status", "--porcelain"])).resolves.toBe("");
   });
 
@@ -48,12 +55,13 @@ describe("createTaskService", () => {
 
     expect(result.removedWorktreePath).toBe(task.worktreePath);
     expect(result.deletedBranch).toBe("feature/cleanup-task");
-    expect(result.removedStatePaths).toContain(path.join(repoRoot, ".ai/vcm/tasks/cleanup-task.json"));
+    expect(result.removedStatePaths).toContain(path.join(getAppProjectDataRoot(repoRoot), "tasks/cleanup-task.json"));
     expect(result.removedStatePaths).toContain(path.join(task.worktreePath!, ".ai/vcm/sessions/cleanup-task.json"));
     expect(result.removedStatePaths).toContain(path.join(task.worktreePath!, ".ai/vcm/handoffs"));
     expect(result.removedStatePaths).not.toContain(path.join(repoRoot, ".ai/vcm/sessions/cleanup-task.json"));
     await expect(fileExists(task.worktreePath!)).resolves.toBe(false);
     await expect(fileExists(path.join(repoRoot, ".ai/vcm/tasks/cleanup-task.json"))).resolves.toBe(false);
+    await expect(fileExists(path.join(getAppProjectDataRoot(repoRoot), "tasks/cleanup-task.json"))).resolves.toBe(false);
     await expect(gitExitCode(repoRoot, ["show-ref", "--verify", "--quiet", "refs/heads/feature/cleanup-task"]))
       .resolves.toBe(1);
   });
@@ -88,6 +96,7 @@ describe("createTaskService", () => {
     });
     expect(task.worktreePath).toBeUndefined();
     await expect(fileExists(path.join(repoRoot, ".ai/vcm/handoffs/architecture-plan.md"))).resolves.toBe(true);
+    await expect(fileExists(path.join(repoRoot, ".ai/vcm/handoffs/final-acceptance.md"))).resolves.toBe(true);
     await expect(fileExists(path.join(repoRoot, ".claude/worktrees/inline-task"))).resolves.toBe(false);
     await expect(gitExitCode(repoRoot, ["show-ref", "--verify", "--quiet", "refs/heads/feature/inline-task"]))
       .resolves.toBe(1);
@@ -171,10 +180,17 @@ function createService(repoRoot: string) {
     projectService: {
       async loadConfig() {
         return config;
+      },
+      getProjectDataRoot() {
+        return getAppProjectDataRoot(repoRoot);
       }
     },
     now: () => "2026-05-31T00:00:00.000Z"
   });
+}
+
+function getAppProjectDataRoot(repoRoot: string): string {
+  return path.join(path.dirname(repoRoot), `${path.basename(repoRoot)}-vcm-app`);
 }
 
 async function createTempGitRepo(
@@ -183,6 +199,7 @@ async function createTempGitRepo(
 ): Promise<string> {
   const repoRoot = await fs.mkdtemp(path.join(os.tmpdir(), "vcm-task-"));
   tempDirs.push(repoRoot);
+  tempDirs.push(getAppProjectDataRoot(repoRoot));
   await readGit(repoRoot, ["init", "-q"]);
   await readGit(repoRoot, ["config", "user.email", "test@example.com"]);
   await readGit(repoRoot, ["config", "user.name", "Test User"]);
@@ -220,4 +237,8 @@ async function fileExists(targetPath: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+async function readText(targetPath: string): Promise<string> {
+  return fs.readFile(targetPath, "utf8");
 }

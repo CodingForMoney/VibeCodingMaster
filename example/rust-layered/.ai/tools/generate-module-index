@@ -1,0 +1,153 @@
+#!/usr/bin/env python3
+import argparse
+import json
+import subprocess
+import sys
+from pathlib import Path
+
+
+def relative_path(path: Path, root: Path) -> str:
+    rel = path.resolve().relative_to(root.resolve())
+    return "." if str(rel) == "." else rel.as_posix()
+
+
+def load_cargo_metadata(root: Path) -> dict:
+    result = subprocess.run(
+        ["cargo", "metadata", "--format-version", "1", "--no-deps"],
+        cwd=root,
+        check=False,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+    )
+    if result.returncode != 0:
+        sys.stderr.write(result.stderr)
+        raise SystemExit(result.returncode)
+    return json.loads(result.stdout)
+
+
+def infer_layer(module_path: str) -> tuple[str, str]:
+    if module_path == ".":
+        return ("root", ".")
+    first = module_path.split("/", 1)[0]
+    return (first, first)
+
+
+def rust_files_under(module_dir: Path, workspace_root: Path, child: str) -> list[str]:
+    root = module_dir / child
+    if not root.is_dir():
+        return []
+    return sorted(
+        relative_path(path, workspace_root)
+        for path in root.rglob("*.rs")
+        if path.is_file()
+    )
+
+
+def build_index(root: Path) -> dict:
+    metadata = load_cargo_metadata(root)
+    workspace_root = Path(metadata["workspace_root"]).resolve()
+    workspace_member_ids = set(metadata["workspace_members"])
+    member_order = {member_id: index for index, member_id in enumerate(metadata["workspace_members"])}
+
+    packages = [
+        package
+        for package in metadata["packages"]
+        if package["id"] in workspace_member_ids
+    ]
+    packages.sort(key=lambda package: member_order[package["id"]])
+
+    workspace_names = {package["name"] for package in packages}
+    layers: list[dict] = []
+    layer_by_name: dict[str, dict] = {}
+
+    for package in packages:
+        manifest_path = Path(package["manifest_path"]).resolve()
+        module_dir = manifest_path.parent
+        module_path = relative_path(module_dir, workspace_root)
+        manifest_rel = relative_path(manifest_path, workspace_root)
+        layer_name, layer_path = infer_layer(module_path)
+
+        if layer_name not in layer_by_name:
+            layer = {
+                "name": layer_name,
+                "path": layer_path,
+                "modules": [],
+            }
+            layer_by_name[layer_name] = layer
+            layers.append(layer)
+
+        workspace_dependencies = sorted(
+            {
+                dependency["name"]
+                for dependency in package.get("dependencies", [])
+                if dependency.get("name") in workspace_names
+            }
+        )
+
+        layer_by_name[layer_name]["modules"].append(
+            {
+                "name": package["name"],
+                "path": module_path,
+                "manifest": manifest_rel,
+                "architectureDoc": f"{module_path}/ARCHITECTURE.md"
+                if module_path != "."
+                else "ARCHITECTURE.md",
+                "workspaceDependencies": workspace_dependencies,
+                "files": {
+                    "source": rust_files_under(module_dir, workspace_root, "src"),
+                    "tests": rust_files_under(module_dir, workspace_root, "tests"),
+                },
+            }
+        )
+
+    return {
+        "schemaVersion": 1,
+        "kind": "module-index",
+        "generatedBy": ".ai/tools/generate-module-index",
+        "workspace": {
+            "root": ".",
+            "manifest": "Cargo.toml",
+        },
+        "layerInference": {
+            "method": "path-first-segment",
+            "rootPackageLayer": "root",
+        },
+        "layers": layers,
+    }
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Generate .ai/generated/module-index.json from cargo metadata.")
+    parser.add_argument("--check", action="store_true", help="Fail if the generated module index differs from the current file.")
+    parser.add_argument("--print", action="store_true", help="Print generated JSON instead of writing it.")
+    parser.add_argument("--output", default=".ai/generated/module-index.json", help="Output path relative to the project root.")
+    args = parser.parse_args()
+
+    root = Path(__file__).resolve().parents[2]
+    generated = json.dumps(build_index(root), indent=2, sort_keys=False) + "\n"
+    output_path = root / args.output
+
+    if args.check:
+        if not output_path.is_file():
+            sys.stderr.write(f"Missing generated module index: {output_path.relative_to(root)}\n")
+            return 1
+        current = output_path.read_text()
+        if current != generated:
+            sys.stderr.write(f"Stale generated module index: {output_path.relative_to(root)}\n")
+            return 1
+        print("generate-module-index check passed")
+        return 0
+
+    if args.print:
+        sys.stdout.write(generated)
+        return 0
+
+    output_path.parent.mkdir(parents=True, exist_ok=True)
+    output_path.write_text(generated)
+    print(f"wrote {output_path.relative_to(root)}")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

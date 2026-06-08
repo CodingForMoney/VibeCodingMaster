@@ -1,0 +1,37 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh -c 'echo \"VCM harness: read CLAUDE.md and docs/ before editing.\"'",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh -c 'if [ -n \"${VCM_API_URL:-}\" ]; then echo \"VCM Stop hook placeholder active\" >/dev/null; fi'",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh -c 'if [ -n \"${VCM_API_URL:-}\" ]; then echo \"VCM UserPromptSubmit hook placeholder active\" >/dev/null; fi'",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

@@ -1,21 +1,42 @@
 export function renderRootClaudeHarnessRules(): string {
-  return `## VCM Shared Rules
+  return `## VCM Start Here
 
-- This repository uses VibeCodingMaster for multi-session Claude Code work.
-- User-facing work starts with the project-manager role.
-- Canonical task handoffs live under .ai/vcm/handoffs/ inside the current task runtime repo.
-- Use only the current task's handoff directory for task-specific artifacts.
-- Do not create or write task handoffs outside .ai/vcm/handoffs/ for the current task.
-- Use route files under .ai/vcm/handoffs/messages/ for role-to-role messaging instead of asking the user to copy prompts.
-- A role-to-role call is represented by exactly one file named <from-role>-<to-role>.md, such as project-manager-coder.md or coder-project-manager.md.
-- If you need to revise a not-yet-delivered message to the same target, update that route file instead of creating another message.
-- Non-PM roles only reply to project-manager; they do not message other roles directly.
-- Role messaging is turn-based: do not send more than one active message to the same target role.
-- After writing a route file for another role, end the current Claude Code turn. Treat the file write as the final coordination action of this turn.
-- Do not poll files, start shell loops, or keep the turn open waiting for another role's answer. VCM scans pending route files after your Stop hook and delivers later replies in a new turn.
-- Do not use Claude Code Task/Subagent for VCM role delegation; VCM owns the four role sessions and the message queue.
-- If new information arrives while a role is still processing, update the relevant handoff artifact or wait; do not spam the target role's terminal.
-- High-risk decisions involving schema, auth, permissions, payment, billing, security, data deletion, or unclear user intent must stop for project-manager/user approval.
-- Required workflow gates: architect plan -> coder implementation/validation -> reviewer review -> architect docs sync -> project-manager final acceptance/commit/PR.
+- Use the durable project docs below as role-relevant project truth.
+- Read module-local \`CLAUDE.md\` before editing a subdirectory if one exists.
+
+## VCM Durable Project Docs
+
+- \`docs/ARCHITECTURE.md\`: architecture, module/file responsibilities, data flow, state model, public behavior/contracts, dependency direction, security/data rules, and risks; architect-owned.
+- \`docs/TESTING.md\`: validation strategy, commands, validation levels, and known testing gaps; architect-owned with reviewer input.
+- \`docs/known-issues.md\`: durable cross-task known issues and accepted limitations; architect-owned promotion/update during docs sync.
+
+## VCM Task Flow
+
+- Code changes use the full route: \`project-manager -> architect -> coder -> reviewer -> architect docs sync -> project-manager final acceptance\`.
+- Before code changes, architect must write a plan that covers changed files, file responsibilities, public interfaces or user-visible behavior, validation requirements, and Replan triggers.
+- Docs-only changes may use: \`project-manager -> architect -> project-manager final acceptance\`.
+- Test-only or validation-only work may use: \`project-manager -> reviewer -> project-manager final acceptance\`.
+- If a docs/test/validation-only task reveals required code, architecture, public contract, dependency, durable-doc, or test-strategy changes, route back through the full code-change flow.
+- Keep role outputs under \`.ai/vcm/handoffs/\`.
+- Runtime task records and handoffs under \`.ai/vcm/\` are temporary. Durable facts must move into code, tests, PR text, commit history, or long-term docs.
+- Record current-task unresolved findings in \`.ai/vcm/handoffs/known-issues.md\`.
+- Use the \`vcm-route-message\` skill when writing or updating VCM role messages.
+- Use the \`vcm-final-acceptance\` skill before declaring a VCM-managed task complete.
+
+## VCM Validation Levels
+
+- L0 fast checks: format, lint, typecheck, boundary, dependency, or other cheap project checks.
+- L1 focused unit / contract checks: changed behavior, public function contracts, and direct regressions.
+- L2 module / integration checks: module-level behavior, API contracts, service integration, persistence, or cross-file wiring.
+- L3 smoke E2E checks: core user journeys or critical browser/API flows.
+- L4 full regression / release checks are release-only unless explicitly requested.
+- Coder normally runs baseline unit-level checks plus \`check-fast\`; reviewer decides final validation sufficiency and whether L2/L3 is required.
+
+## VCM Worktree Policy
+
+- Use one branch, one worktree, one handoff directory, and one PR or final patch per VCM-managed task.
+- Roles work sequentially in the same task worktree.
+- If \`git status\` shows uncommitted changes, commit them before handing off to another role.
+
 `;
 }

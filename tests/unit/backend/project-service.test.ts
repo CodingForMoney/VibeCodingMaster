@@ -81,23 +81,28 @@ describe("createProjectService", () => {
 
     const project = await service.connectProject({ repoPath: "/workspace" });
     const configPath = `/home/.vcm/projects/${getProjectId("/workspace")}/config.json`;
+    const tasksPath = `/home/.vcm/projects/${getProjectId("/workspace")}/tasks`;
 
     expect(project.config.claudeCommand).toBe("claude");
     await expect(fs.readJson(configPath)).resolves.toMatchObject({
       stateRoot: ".ai/vcm",
       claudeCommand: "claude"
     });
+    expect(fs.createdPaths).toContain(tasksPath);
+    expect(fs.createdPaths).not.toContain("/workspace/.ai/vcm/tasks");
     await expect(fs.pathExists("/workspace/.ai/vcm/config.json")).resolves.toBe(false);
   });
 });
 
-function createMemoryFs(existingPaths: Set<string>, files = new Map<string, string>()): FileSystemAdapter {
-  return {
+function createMemoryFs(existingPaths: Set<string>, files = new Map<string, string>()): FileSystemAdapter & { createdPaths: string[] } {
+  const adapter = {
+    createdPaths: [] as string[],
     async pathExists(targetPath) {
       return existingPaths.has(targetPath) || files.has(targetPath);
     },
     async ensureDir(targetPath) {
       existingPaths.add(targetPath);
+      this.createdPaths.push(targetPath);
     },
     async readDir() {
       return [];
@@ -134,6 +139,7 @@ function createMemoryFs(existingPaths: Set<string>, files = new Map<string, stri
       files.delete(targetPath);
     }
   };
+  return adapter;
 }
 
 function createGitAdapterStub(checkedRepos: string[], options: { failMetadata?: boolean } = {}): GitAdapter {

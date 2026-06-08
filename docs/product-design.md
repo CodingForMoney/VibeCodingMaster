@@ -163,7 +163,7 @@ The architect owns:
 - module boundaries
 - file responsibilities
 - public contracts
-- test contracts
+- verifiable behavior and behavior/contract proof points
 - Replan triggers
 - post-review docs sync and architecture drift checks
 
@@ -179,12 +179,10 @@ The coder owns:
 - implementation within the approved plan
 - direct unit/contract/regression tests
 - validation evidence
-- implementation log
 
 Outputs:
 
-- `.ai/vcm/handoffs/implementation-log.md`
-- `.ai/vcm/handoffs/validation-log.md`
+- `.ai/vcm/handoffs/known-issues.md`
 
 ### Reviewer
 
@@ -199,6 +197,7 @@ The reviewer owns:
 Output:
 
 - `.ai/vcm/handoffs/review-report.md`
+- `.ai/vcm/handoffs/known-issues.md`
 
 ## 6. Information Architecture
 
@@ -422,8 +421,7 @@ Each task creates:
     coder.log
     reviewer.log
   architecture-plan.md
-  implementation-log.md
-  validation-log.md
+  known-issues.md
   review-report.md
   docs-sync-report.md
   messages/
@@ -511,7 +509,7 @@ VCM Harness injects Claude Code hooks into `.claude/settings.json`:
 
 VCM uses `UserPromptSubmit` as the Claude Code acceptance signal. A successful PTY write only proves VCM delivered text to the embedded terminal; `UserPromptSubmit` proves Claude Code accepted the prompt.
 
-The injected role rules require asynchronous file messaging: after writing or updating a route file, the role must end the current Claude Code turn and wait for VCM to deliver a later reply. Roles must not poll files, start shell loops, or keep the turn open waiting for another role to answer, and they must not use Claude Code Task/Subagent for VCM role delegation.
+The injected role rules require asynchronous file messaging: after writing or updating a route file, the role must end the current Claude Code turn and wait for VCM to deliver a later reply. Roles should use `.claude/skills/vcm-route-message.md` to author route files. Roles must not poll files, start shell loops, keep the turn open waiting for another role to answer, paste directly into another role terminal, or use Claude Code Task/Subagent for VCM role delegation.
 
 There is no `vcmctl` in the target design. Hook entrypoints are direct HTTP from Claude Code hooks to the local VCM backend.
 

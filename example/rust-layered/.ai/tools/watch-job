@@ -1,0 +1,186 @@
+#!/usr/bin/env python3
+import argparse
+import json
+import os
+import signal
+import time
+from datetime import datetime, timezone
+from pathlib import Path
+
+
+def root_dir() -> Path:
+    return Path(__file__).resolve().parents[2]
+
+
+def parse_duration(value: str) -> float:
+    value = value.strip().lower()
+    if value.endswith("ms"):
+        return float(value[:-2]) / 1000
+    if value.endswith("s"):
+        return float(value[:-1])
+    if value.endswith("m"):
+        return float(value[:-1]) * 60
+    if value.endswith("h"):
+        return float(value[:-1]) * 3600
+    return float(value)
+
+
+def read_status(path: Path) -> dict:
+    return json.loads(path.read_text())
+
+
+def now_iso() -> str:
+    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
+
+
+def write_json(path: Path, data: dict) -> None:
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n")
+    tmp.replace(path)
+
+
+def started_duration(status: dict) -> float | None:
+    started_at = status.get("startedAt")
+    if not started_at:
+        return None
+    try:
+        started = datetime.fromisoformat(started_at.replace("Z", "+00:00"))
+    except ValueError:
+        return None
+    return round((datetime.now(timezone.utc) - started).total_seconds(), 3)
+
+
+def process_group_exists(pid: int) -> bool:
+    try:
+        os.killpg(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+
+
+def process_exists(pid: int) -> bool:
+    try:
+        os.kill(pid, 0)
+        return True
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+
+
+def stop_process(pid: int, signal_value: signal.Signals) -> str:
+    try:
+        os.killpg(pid, signal_value)
+        return "process-group"
+    except ProcessLookupError:
+        return "not-running"
+    except PermissionError:
+        try:
+            os.kill(pid, signal_value)
+            return "process"
+        except ProcessLookupError:
+            return "not-running"
+        except PermissionError:
+            return "permission-denied"
+
+
+def stop_process_group(pid: int) -> str:
+    if not process_group_exists(pid) and not process_exists(pid):
+        return "not-running"
+
+    mode = stop_process(pid, signal.SIGTERM)
+    if mode in {"not-running", "permission-denied"}:
+        return mode
+
+    deadline = time.time() + 2
+    while time.time() < deadline:
+        still_running = process_group_exists(pid) if mode == "process-group" else process_exists(pid)
+        if not still_running:
+            return f"terminated-{mode}"
+        time.sleep(0.1)
+
+    kill_mode = stop_process(pid, signal.SIGKILL)
+    if kill_mode == "not-running":
+        return f"terminated-{mode}"
+    if kill_mode == "permission-denied":
+        return "permission-denied"
+    return f"killed-{kill_mode}"
+
+
+def tail(path: Path, lines: int = 40) -> str:
+    if not path.is_file():
+        return ""
+    content = path.read_text(errors="replace").splitlines()
+    return "\n".join(content[-lines:])
+
+
+def print_summary(job_id: str, status: dict, directory: Path) -> None:
+    print(f"job: {job_id}")
+    print(f"status: {status.get('status')}")
+    print(f"exitCode: {status.get('exitCode')}")
+    print(f"durationSeconds: {status.get('durationSeconds')}")
+    if status.get("status") == "timeout":
+        print(f"timeoutSeconds: {status.get('timeoutSeconds')}")
+        print(f"processStopResult: {status.get('processStopResult')}")
+
+    if status.get("status") in {"failed", "timeout"}:
+        stdout_tail = tail(directory / "stdout.log")
+        stderr_tail = tail(directory / "stderr.log")
+        if stdout_tail:
+            print("\nstdout tail:")
+            print(stdout_tail)
+        if stderr_tail:
+            print("\nstderr tail:")
+            print(stderr_tail)
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="Watch a file-backed long-running validation job.")
+    parser.add_argument("job_id")
+    parser.add_argument("--timeout", default="10m")
+    parser.add_argument("--interval", default="1s")
+    args = parser.parse_args()
+
+    timeout = parse_duration(args.timeout)
+    interval = parse_duration(args.interval)
+    directory = root_dir() / ".ai/vcm/jobs" / args.job_id
+    status_path = directory / "status.json"
+
+    deadline = time.time() + timeout
+    last_status: dict | None = None
+
+    while time.time() <= deadline:
+        if status_path.is_file():
+            last_status = read_status(status_path)
+            if last_status.get("status") in {"success", "failed"}:
+                print_summary(args.job_id, last_status, directory)
+                return 0 if last_status.get("status") == "success" else 1
+        time.sleep(interval)
+
+    timeout_status = dict(last_status or {})
+    process_id = timeout_status.get("processId")
+    stop_result = "no-process-id"
+    if isinstance(process_id, int):
+        stop_result = stop_process_group(process_id)
+
+    timeout_status.update(
+        {
+            "jobId": args.job_id,
+            "status": "timeout",
+            "finishedAt": now_iso(),
+            "exitCode": None,
+            "durationSeconds": started_duration(timeout_status),
+            "timeoutSeconds": timeout,
+            "processStopResult": stop_result,
+        }
+    )
+    if directory.is_dir():
+        write_json(status_path, timeout_status)
+    print_summary(args.job_id, timeout_status, directory)
+    return 124
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

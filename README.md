@@ -171,13 +171,13 @@ The `Create worktree and branch` option is selected by default when creating a t
 
 VCM will not create worktrees per role. `project-manager`, `architect`, `coder`, and `reviewer` for the same task share the same task worktree.
 
-The user can turn this option off. In that mode, VCM creates the task metadata and handoff structure in the connected repository, records the current branch, and starts role sessions from the connected repository path.
+The user can turn this option off. In that mode, VCM creates app-local task metadata, creates the handoff structure in the connected repository, records the current branch, and starts role sessions from the connected repository path.
 
 VCM will not offer a separate `Create task worktree` button after a task exists, and a task should not be switched to another branch/worktree mode after creation.
 
 Because worktrees live under `.claude/worktrees/`, the connected repository must ignore both `.ai/vcm/` and `.claude/worktrees/`. Apply the VCM Harness before creating tasks so `.gitignore` contains the managed ignore block. The base repository must also be clean because the task branch/worktree is created from the connected repo's current `HEAD`.
 
-When a task is complete, VCM provides a red `Close Task` action. Closing a task shows a destructive confirmation, stops VCM-managed running role sessions for that task, then deletes the task worktree, deletes the task branch by default, removes the base task index entry, and removes task runtime metadata. VCM does not preflight running sessions or uncommitted changes before closing. Tasks created without a worktree only remove VCM metadata because they do not own a separate branch/worktree.
+When a task is complete, VCM provides a red `Close Task` action. Closing a task shows a destructive confirmation, stops VCM-managed running role sessions for that task, then deletes the task worktree, deletes the task branch by default, removes the app-local task record, and removes task runtime metadata. VCM does not preflight running sessions or uncommitted changes before closing. Tasks created without a worktree only remove VCM metadata because they do not own a separate branch/worktree.
 
 ## Sidebar UI
 
@@ -258,7 +258,7 @@ For `.gitignore`, VCM uses a gitignore-native managed block:
 # VCM:END
 ```
 
-`.ai/vcm/` is the active VCM local control area, and `.claude/worktrees/` is the Claude-compatible task worktree area. The base repo keeps the task index; each task runtime repo keeps its own session, message, orchestration, and translation state.
+`.ai/vcm/` is the active VCM local control area, and `.claude/worktrees/` is the Claude-compatible task worktree area. VCM keeps the task index in app-local project state under `~/.vcm/projects/`; each task runtime repo keeps its own session, message, orchestration, and translation state.
 
 VCM also JSON-merges `.claude/settings.json` to install Claude Code `UserPromptSubmit` and `Stop` hooks. The hooks post directly to the local VCM backend, so roles do not need a VCM CLI command to confirm delivery or report turn completion.
 
@@ -298,11 +298,10 @@ Runtime message and handoff files:
 .ai/vcm/messages/<task>.jsonl                 # under the task runtime repo
 .ai/vcm/orchestration/<task>.json             # under the task runtime repo
 .ai/vcm/handoffs/messages/<from-role>-<to-role>.md
-.ai/vcm/handoffs/role-commands/
 .ai/vcm/handoffs/logs/
 ```
 
-Each directed role route has exactly one message file. If a role changes its mind during one turn, it edits the same route file instead of creating another message. A blank file means no pending message; a non-empty file means pending work for VCM to submit.
+Each directed role route has exactly one message file. Route messages are the only dynamic task-dispatch files. If a role changes its mind during one turn, it edits the same route file instead of creating another message. A blank file means no pending message; a non-empty file means pending work for VCM to submit.
 
 ## Orchestration Modes
 
@@ -367,19 +366,17 @@ For a connected repository, VCM uses:
 
 ```text
 ~/.vcm/projects/<project-id>/config.json
-<baseRepoRoot>/.ai/vcm/tasks/<task>.json
+~/.vcm/projects/<project-id>/tasks/<task>.json
 <baseRepoRoot>/.claude/worktrees/<task>/
 <taskRepoRoot>/.ai/vcm/sessions/<task>.json
 <taskRepoRoot>/.ai/vcm/messages/<task>.jsonl
 <taskRepoRoot>/.ai/vcm/orchestration/<task>.json
 <taskRepoRoot>/.ai/vcm/translation/<task>/
 <taskRepoRoot>/.ai/vcm/handoffs/architecture-plan.md
-<taskRepoRoot>/.ai/vcm/handoffs/implementation-log.md
-<taskRepoRoot>/.ai/vcm/handoffs/validation-log.md
+<taskRepoRoot>/.ai/vcm/handoffs/known-issues.md
 <taskRepoRoot>/.ai/vcm/handoffs/review-report.md
 <taskRepoRoot>/.ai/vcm/handoffs/docs-sync-report.md
 <taskRepoRoot>/.ai/vcm/handoffs/messages/<from-role>-<to-role>.md
-<taskRepoRoot>/.ai/vcm/handoffs/role-commands/{architect,coder,reviewer}.md
 <taskRepoRoot>/.ai/vcm/handoffs/logs/{project-manager,architect,coder,reviewer}.log
 ```
 

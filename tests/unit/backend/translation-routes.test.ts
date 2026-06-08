@@ -158,6 +158,9 @@ function createProjectServiceThatShouldNotBeCalled(): ProjectService {
     },
     getConfigPath() {
       throw new Error("project service should not be used");
+    },
+    getProjectDataRoot() {
+      throw new Error("project service should not be used");
     }
   };
 }

@@ -1,0 +1,593 @@
+{
+  "schemaVersion": 1,
+  "kind": "public-surface",
+  "generatedBy": ".ai/tools/generate-public-surface",
+  "visibility": "crate-external",
+  "modules": [
+    {
+      "name": "foundation-config",
+      "items": [
+        {
+          "path": "module_name",
+          "kind": "fn",
+          "name": "module_name",
+          "source": {
+            "path": "foundation/config/src/lib.rs",
+            "line": 4
+          },
+          "signature": "pub fn module_name() -> &'static str"
+        },
+        {
+          "path": "module_summary",
+          "kind": "fn",
+          "name": "module_summary",
+          "source": {
+            "path": "foundation/config/src/lib.rs",
+            "line": 12
+          },
+          "signature": "pub fn module_summary() -> String"
+        },
+        {
+          "path": "model::default_resource",
+          "kind": "fn",
+          "name": "default_resource",
+          "source": {
+            "path": "foundation/config/src/model.rs",
+            "line": 1
+          },
+          "signature": "pub fn default_resource() -> &'static str"
+        },
+        {
+          "path": "model::resource_key",
+          "kind": "fn",
+          "name": "resource_key",
+          "source": {
+            "path": "foundation/config/src/model.rs",
+            "line": 5
+          },
+          "signature": "pub fn resource_key(id: &str) -> String"
+        },
+        {
+          "path": "ops::normalize",
+          "kind": "fn",
+          "name": "normalize",
+          "source": {
+            "path": "foundation/config/src/ops.rs",
+            "line": 1
+          },
+          "signature": "pub fn normalize(input: &str) -> String"
+        },
+        {
+          "path": "ops::describe",
+          "kind": "fn",
+          "name": "describe",
+          "source": {
+            "path": "foundation/config/src/ops.rs",
+            "line": 5
+          },
+          "signature": "pub fn describe(id: &str) -> String"
+        }
+      ]
+    },
+    {
+      "name": "foundation-identity",
+      "items": [
+        {
+          "path": "module_name",
+          "kind": "fn",
+          "name": "module_name",
+          "source": {
+            "path": "foundation/identity/src/lib.rs",
+            "line": 4
+          },
+          "signature": "pub fn module_name() -> &'static str"
+        },
+        {
+          "path": "module_summary",
+          "kind": "fn",
+          "name": "module_summary",
+          "source": {
+            "path": "foundation/identity/src/lib.rs",
+            "line": 12
+          },
+          "signature": "pub fn module_summary() -> String"
+        },
+        {
+          "path": "model::default_resource",
+          "kind": "fn",
+          "name": "default_resource",
+          "source": {
+            "path": "foundation/identity/src/model.rs",
+            "line": 1
+          },
+          "signature": "pub fn default_resource() -> &'static str"
+        },
+        {
+          "path": "model::resource_key",
+          "kind": "fn",
+          "name": "resource_key",
+          "source": {
+            "path": "foundation/identity/src/model.rs",
+            "line": 5
+          },
+          "signature": "pub fn resource_key(id: &str) -> String"
+        },
+        {
+          "path": "ops::normalize",
+          "kind": "fn",
+          "name": "normalize",
+          "source": {
+            "path": "foundation/identity/src/ops.rs",
+            "line": 1
+          },
+          "signature": "pub fn normalize(input: &str) -> String"
+        },
+        {
+          "path": "ops::describe",
+          "kind": "fn",
+          "name": "describe",
+          "source": {
+            "path": "foundation/identity/src/ops.rs",
+            "line": 5
+          },
+          "signature": "pub fn describe(id: &str) -> String"
+        }
+      ]
+    },
+    {
+      "name": "foundation-telemetry",
+      "items": [
+        {
+          "path": "module_name",
+          "kind": "fn",
+          "name": "module_name",
+          "source": {
+            "path": "foundation/telemetry/src/lib.rs",
+            "line": 4
+          },
+          "signature": "pub fn module_name() -> &'static str"
+        },
+        {
+          "path": "module_summary",
+          "kind": "fn",
+          "name": "module_summary",
+          "source": {
+            "path": "foundation/telemetry/src/lib.rs",
+            "line": 12
+          },
+          "signature": "pub fn module_summary() -> String"
+        },
+        {
+          "path": "model::default_resource",
+          "kind": "fn",
+          "name": "default_resource",
+          "source": {
+            "path": "foundation/telemetry/src/model.rs",
+            "line": 1
+          },
+          "signature": "pub fn default_resource() -> &'static str"
+        },
+        {
+          "path": "model::resource_key",
+          "kind": "fn",
+          "name": "resource_key",
+          "source": {
+            "path": "foundation/telemetry/src/model.rs",
+            "line": 5
+          },
+          "signature": "pub fn resource_key(id: &str) -> String"
+        },
+        {
+          "path": "ops::normalize",
+          "kind": "fn",
+          "name": "normalize",
+          "source": {
+            "path": "foundation/telemetry/src/ops.rs",
+            "line": 1
+          },
+          "signature": "pub fn normalize(input: &str) -> String"
+        },
+        {
+          "path": "ops::describe",
+          "kind": "fn",
+          "name": "describe",
+          "source": {
+            "path": "foundation/telemetry/src/ops.rs",
+            "line": 5
+          },
+          "signature": "pub fn describe(id: &str) -> String"
+        }
+      ]
+    },
+    {
+      "name": "domain-accounts",
+      "items": [
+        {
+          "path": "module_name",
+          "kind": "fn",
+          "name": "module_name",
+          "source": {
+            "path": "domain/accounts/src/lib.rs",
+            "line": 4
+          },
+          "signature": "pub fn module_name() -> &'static str"
+        },
+        {
+          "path": "module_summary",
+          "kind": "fn",
+          "name": "module_summary",
+          "source": {
+            "path": "domain/accounts/src/lib.rs",
+            "line": 12
+          },
+          "signature": "pub fn module_summary() -> String"
+        },
+        {
+          "path": "model::default_resource",
+          "kind": "fn",
+          "name": "default_resource",
+          "source": {
+            "path": "domain/accounts/src/model.rs",
+            "line": 1
+          },
+          "signature": "pub fn default_resource() -> &'static str"
+        },
+        {
+          "path": "model::resource_key",
+          "kind": "fn",
+          "name": "resource_key",
+          "source": {
+            "path": "domain/accounts/src/model.rs",
+            "line": 5
+          },
+          "signature": "pub fn resource_key(id: &str) -> String"
+        },
+        {
+          "path": "ops::normalize",
+          "kind": "fn",
+          "name": "normalize",
+          "source": {
+            "path": "domain/accounts/src/ops.rs",
+            "line": 1
+          },
+          "signature": "pub fn normalize(input: &str) -> String"
+        },
+        {
+          "path": "ops::describe",
+          "kind": "fn",
+          "name": "describe",
+          "source": {
+            "path": "domain/accounts/src/ops.rs",
+            "line": 5
+          },
+          "signature": "pub fn describe(id: &str) -> String"
+        }
+      ]
+    },
+    {
+      "name": "domain-catalog",
+      "items": [
+        {
+          "path": "module_name",
+          "kind": "fn",
+          "name": "module_name",
+          "source": {
+            "path": "domain/catalog/src/lib.rs",
+            "line": 4
+          },
+          "signature": "pub fn module_name() -> &'static str"
+        },
+        {
+          "path": "module_summary",
+          "kind": "fn",
+          "name": "module_summary",
+          "source": {
+            "path": "domain/catalog/src/lib.rs",
+            "line": 12
+          },
+          "signature": "pub fn module_summary() -> String"
+        },
+        {
+          "path": "model::default_resource",
+          "kind": "fn",
+          "name": "default_resource",
+          "source": {
+            "path": "domain/catalog/src/model.rs",
+            "line": 1
+          },
+          "signature": "pub fn default_resource() -> &'static str"
+        },
+        {
+          "path": "model::resource_key",
+          "kind": "fn",
+          "name": "resource_key",
+          "source": {
+            "path": "domain/catalog/src/model.rs",
+            "line": 5
+          },
+          "signature": "pub fn resource_key(id: &str) -> String"
+        },
+        {
+          "path": "ops::normalize",
+          "kind": "fn",
+          "name": "normalize",
+          "source": {
+            "path": "domain/catalog/src/ops.rs",
+            "line": 1
+          },
+          "signature": "pub fn normalize(input: &str) -> String"
+        },
+        {
+          "path": "ops::describe",
+          "kind": "fn",
+          "name": "describe",
+          "source": {
+            "path": "domain/catalog/src/ops.rs",
+            "line": 5
+          },
+          "signature": "pub fn describe(id: &str) -> String"
+        }
+      ]
+    },
+    {
+      "name": "domain-orders",
+      "items": [
+        {
+          "path": "module_name",
+          "kind": "fn",
+          "name": "module_name",
+          "source": {
+            "path": "domain/orders/src/lib.rs",
+            "line": 4
+          },
+          "signature": "pub fn module_name() -> &'static str"
+        },
+        {
+          "path": "module_summary",
+          "kind": "fn",
+          "name": "module_summary",
+          "source": {
+            "path": "domain/orders/src/lib.rs",
+            "line": 12
+          },
+          "signature": "pub fn module_summary() -> String"
+        },
+        {
+          "path": "model::default_resource",
+          "kind": "fn",
+          "name": "default_resource",
+          "source": {
+            "path": "domain/orders/src/model.rs",
+            "line": 1
+          },
+          "signature": "pub fn default_resource() -> &'static str"
+        },
+        {
+          "path": "model::resource_key",
+          "kind": "fn",
+          "name": "resource_key",
+          "source": {
+            "path": "domain/orders/src/model.rs",
+            "line": 5
+          },
+          "signature": "pub fn resource_key(id: &str) -> String"
+        },
+        {
+          "path": "ops::normalize",
+          "kind": "fn",
+          "name": "normalize",
+          "source": {
+            "path": "domain/orders/src/ops.rs",
+            "line": 1
+          },
+          "signature": "pub fn normalize(input: &str) -> String"
+        },
+        {
+          "path": "ops::describe",
+          "kind": "fn",
+          "name": "describe",
+          "source": {
+            "path": "domain/orders/src/ops.rs",
+            "line": 5
+          },
+          "signature": "pub fn describe(id: &str) -> String"
+        }
+      ]
+    },
+    {
+      "name": "application-api",
+      "items": [
+        {
+          "path": "module_name",
+          "kind": "fn",
+          "name": "module_name",
+          "source": {
+            "path": "application/api/src/lib.rs",
+            "line": 4
+          },
+          "signature": "pub fn module_name() -> &'static str"
+        },
+        {
+          "path": "module_summary",
+          "kind": "fn",
+          "name": "module_summary",
+          "source": {
+            "path": "application/api/src/lib.rs",
+            "line": 12
+          },
+          "signature": "pub fn module_summary() -> String"
+        },
+        {
+          "path": "model::default_resource",
+          "kind": "fn",
+          "name": "default_resource",
+          "source": {
+            "path": "application/api/src/model.rs",
+            "line": 1
+          },
+          "signature": "pub fn default_resource() -> &'static str"
+        },
+        {
+          "path": "model::resource_key",
+          "kind": "fn",
+          "name": "resource_key",
+          "source": {
+            "path": "application/api/src/model.rs",
+            "line": 5
+          },
+          "signature": "pub fn resource_key(id: &str) -> String"
+        },
+        {
+          "path": "ops::normalize",
+          "kind": "fn",
+          "name": "normalize",
+          "source": {
+            "path": "application/api/src/ops.rs",
+            "line": 1
+          },
+          "signature": "pub fn normalize(input: &str) -> String"
+        },
+        {
+          "path": "ops::describe",
+          "kind": "fn",
+          "name": "describe",
+          "source": {
+            "path": "application/api/src/ops.rs",
+            "line": 5
+          },
+          "signature": "pub fn describe(id: &str) -> String"
+        }
+      ]
+    },
+    {
+      "name": "application-reporting",
+      "items": [
+        {
+          "path": "module_name",
+          "kind": "fn",
+          "name": "module_name",
+          "source": {
+            "path": "application/reporting/src/lib.rs",
+            "line": 4
+          },
+          "signature": "pub fn module_name() -> &'static str"
+        },
+        {
+          "path": "module_summary",
+          "kind": "fn",
+          "name": "module_summary",
+          "source": {
+            "path": "application/reporting/src/lib.rs",
+            "line": 12
+          },
+          "signature": "pub fn module_summary() -> String"
+        },
+        {
+          "path": "model::default_resource",
+          "kind": "fn",
+          "name": "default_resource",
+          "source": {
+            "path": "application/reporting/src/model.rs",
+            "line": 1
+          },
+          "signature": "pub fn default_resource() -> &'static str"
+        },
+        {
+          "path": "model::resource_key",
+          "kind": "fn",
+          "name": "resource_key",
+          "source": {
+            "path": "application/reporting/src/model.rs",
+            "line": 5
+          },
+          "signature": "pub fn resource_key(id: &str) -> String"
+        },
+        {
+          "path": "ops::normalize",
+          "kind": "fn",
+          "name": "normalize",
+          "source": {
+            "path": "application/reporting/src/ops.rs",
+            "line": 1
+          },
+          "signature": "pub fn normalize(input: &str) -> String"
+        },
+        {
+          "path": "ops::describe",
+          "kind": "fn",
+          "name": "describe",
+          "source": {
+            "path": "application/reporting/src/ops.rs",
+            "line": 5
+          },
+          "signature": "pub fn describe(id: &str) -> String"
+        }
+      ]
+    },
+    {
+      "name": "application-worker",
+      "items": [
+        {
+          "path": "module_name",
+          "kind": "fn",
+          "name": "module_name",
+          "source": {
+            "path": "application/worker/src/lib.rs",
+            "line": 4
+          },
+          "signature": "pub fn module_name() -> &'static str"
+        },
+        {
+          "path": "module_summary",
+          "kind": "fn",
+          "name": "module_summary",
+          "source": {
+            "path": "application/worker/src/lib.rs",
+            "line": 12
+          },
+          "signature": "pub fn module_summary() -> String"
+        },
+        {
+          "path": "model::default_resource",
+          "kind": "fn",
+          "name": "default_resource",
+          "source": {
+            "path": "application/worker/src/model.rs",
+            "line": 1
+          },
+          "signature": "pub fn default_resource() -> &'static str"
+        },
+        {
+          "path": "model::resource_key",
+          "kind": "fn",
+          "name": "resource_key",
+          "source": {
+            "path": "application/worker/src/model.rs",
+            "line": 5
+          },
+          "signature": "pub fn resource_key(id: &str) -> String"
+        },
+        {
+          "path": "ops::normalize",
+          "kind": "fn",
+          "name": "normalize",
+          "source": {
+            "path": "application/worker/src/ops.rs",
+            "line": 1
+          },
+          "signature": "pub fn normalize(input: &str) -> String"
+        },
+        {
+          "path": "ops::describe",
+          "kind": "fn",
+          "name": "describe",
+          "source": {
+            "path": "application/worker/src/ops.rs",
+            "line": 5
+          },
+          "signature": "pub fn describe(id: &str) -> String"
+        }
+      ]
+    }
+  ]
+}

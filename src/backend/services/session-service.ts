@@ -106,6 +106,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       cwd: taskRepoRoot,
       env: {
         VCM_API_URL: deps.apiUrl,
+        VCM_TASK_REPO_ROOT: taskRepoRoot,
         VCM_TASK_SLUG: taskSlug,
         VCM_ROLE: role,
         VCM_SESSION_ID: claudeSessionId
@@ -305,9 +306,6 @@ function getRecoverableStatus(record: RoleSessionRecord): RoleSessionRecord["sta
 function getHandoffArtifactPath(paths: ReturnType<ArtifactService["getHandoffPaths"]>, role: RoleName): string | undefined {
   if (role === "architect") {
     return paths.architecturePlanPath;
-  }
-  if (role === "coder") {
-    return paths.implementationLogPath;
   }
   if (role === "reviewer") {
     return paths.reviewReportPath;

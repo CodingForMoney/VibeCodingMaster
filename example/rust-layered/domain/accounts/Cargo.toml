@@ -1,0 +1,11 @@
+[package]
+name = "domain-accounts"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+foundation-config = { path = "../../foundation/config" }
+foundation-identity = { path = "../../foundation/identity" }

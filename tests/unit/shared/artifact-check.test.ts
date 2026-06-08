@@ -28,29 +28,6 @@ Pass
     expect(result.hasPlaceholder).toBe(false);
   });
 
-  it("keeps placeholder artifacts incomplete", () => {
-    const result = checkMarkdownArtifact("implementation-log", "implementation-log.md", `
-# Implementation Log
-
-## Summary
-TBD
-
-## Files Changed
-TBD
-
-## Validation
-TBD
-
-## Deviations From Architecture Plan
-TBD
-
-## Follow-ups
-TBD
-`);
-    expect(result.status).toBe("incomplete");
-    expect(result.hasPlaceholder).toBe(true);
-  });
-
   it("supports docs sync reports", () => {
     const result = checkMarkdownArtifact("docs-sync-report", "docs-sync-report.md", `
 # Docs Sync Report
@@ -73,8 +50,55 @@ No changes.
 ## Remaining Documentation Risks
 None.
 
+## Known Issues Disposition
+No task issues to promote.
+
 ## Decision
 Pass.
+`);
+    expect(result.status).toBe("ok");
+  });
+
+  it("supports final acceptance reports", () => {
+    const result = checkMarkdownArtifact("final-acceptance", "final-acceptance.md", `
+# Final Acceptance
+
+## Decision
+accepted
+
+## Evidence Reviewed
+All handoffs.
+
+## Scope Traceability
+All changes traced.
+
+## Validation Summary
+Checks passed.
+
+## Review And Docs Sync
+Reviewer and docs sync complete.
+
+## Known Issues Disposition
+No task issues to promote.
+
+## Cleanup Readiness
+Ready.
+
+## Final User Summary
+Done.
+`);
+    expect(result.status).toBe("ok");
+  });
+
+  it("supports task-local known issues", () => {
+    const result = checkMarkdownArtifact("known-issues", "known-issues.md", `
+# Known Issues
+
+## Task Issues
+No unresolved task issues.
+
+## Escalation To Docs
+Nothing to promote.
 `);
     expect(result.status).toBe("ok");
   });

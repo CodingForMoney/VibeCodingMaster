@@ -172,8 +172,23 @@ function createProjectServiceStub(): ProjectService {
         terminalBackend: "node-pty",
         claudeCommand: "claude"
       };
+    },
+    getProjectDataRoot() {
+      return "/home/.vcm/projects/demo";
+    },
+    getConfigPath() {
+      return "/home/.vcm/projects/demo/config.json";
+    },
+    async connectProject() {
+      throw new Error("not used");
+    },
+    async getRecentRepositoryPaths() {
+      return [];
+    },
+    async saveConfig() {
+      throw new Error("not used");
     }
-  } as ProjectService;
+  };
 }
 
 function createTaskServiceStub() {

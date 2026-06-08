@@ -20,10 +20,10 @@ describe("createStatusService", () => {
         async listArtifacts(): Promise<ArtifactSummary> {
           return createArtifactSummary({
             "architecture-plan": "ok",
-            "implementation-log": "ok",
-            "validation-log": "ok",
+            "known-issues": "ok",
             "review-report": "ok",
-            "docs-sync-report": "incomplete"
+            "docs-sync-report": "incomplete",
+            "final-acceptance": "ok"
           });
         }
       } as never
@@ -57,6 +57,7 @@ function createArtifactSummary(statuses: Record<ArtifactSummary["checks"][number
       handoffDir: ".ai/vcm/handoffs",
       roleCommandsDir: ".ai/vcm/handoffs/role-commands",
       logsDir: ".ai/vcm/handoffs/logs",
+      messagesDir: ".ai/vcm/handoffs/messages",
       roleCommandPaths: {
         architect: ".ai/vcm/handoffs/role-commands/architect.md",
         coder: ".ai/vcm/handoffs/role-commands/coder.md",
@@ -68,11 +69,19 @@ function createArtifactSummary(statuses: Record<ArtifactSummary["checks"][number
         coder: ".ai/vcm/handoffs/logs/coder.log",
         reviewer: ".ai/vcm/handoffs/logs/reviewer.log"
       },
+      messageRoutePaths: {
+        "project-manager-architect": ".ai/vcm/handoffs/messages/project-manager-architect.md",
+        "project-manager-coder": ".ai/vcm/handoffs/messages/project-manager-coder.md",
+        "project-manager-reviewer": ".ai/vcm/handoffs/messages/project-manager-reviewer.md",
+        "architect-project-manager": ".ai/vcm/handoffs/messages/architect-project-manager.md",
+        "coder-project-manager": ".ai/vcm/handoffs/messages/coder-project-manager.md",
+        "reviewer-project-manager": ".ai/vcm/handoffs/messages/reviewer-project-manager.md"
+      },
       architecturePlanPath: ".ai/vcm/handoffs/architecture-plan.md",
-      implementationLogPath: ".ai/vcm/handoffs/implementation-log.md",
-      validationLogPath: ".ai/vcm/handoffs/validation-log.md",
+      knownIssuesPath: ".ai/vcm/handoffs/known-issues.md",
       reviewReportPath: ".ai/vcm/handoffs/review-report.md",
-      docsSyncReportPath: ".ai/vcm/handoffs/docs-sync-report.md"
+      docsSyncReportPath: ".ai/vcm/handoffs/docs-sync-report.md",
+      finalAcceptancePath: ".ai/vcm/handoffs/final-acceptance.md"
     },
     checks: Object.entries(statuses).map(([kind, status]) => ({
       kind: kind as ArtifactSummary["checks"][number]["kind"],

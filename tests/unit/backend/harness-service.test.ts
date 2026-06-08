@@ -9,8 +9,15 @@ describe("createHarnessService", () => {
 
     const status = await service.getHarnessStatus("/repo");
     expect(status.needsApply).toBe(true);
-    expect(status.plannedChanges).toHaveLength(7);
+    expect(status.plannedChanges).toHaveLength(14);
     expect(status.plannedChanges.map((change) => change.action)).toEqual([
+      "create",
+      "create",
+      "create",
+      "create",
+      "create",
+      "create",
+      "create",
       "create",
       "create",
       "create",
@@ -21,22 +28,43 @@ describe("createHarnessService", () => {
     ]);
 
     const result = await service.applyHarness("/repo");
-    expect(result.changedFiles).toHaveLength(7);
+    expect(result.changedFiles).toHaveLength(14);
 
     const nextStatus = await service.getHarnessStatus("/repo");
     expect(nextStatus.needsApply).toBe(false);
-    expect(nextStatus.files.map((file) => file.action)).toEqual(["ok", "ok", "ok", "ok", "ok", "ok", "ok"]);
-    expect(await fs.readText("/repo/CLAUDE.md")).toContain("## VCM Shared Rules");
-    expect(await fs.readText("/repo/CLAUDE.md")).toContain("Use route files under .ai/vcm/handoffs/messages/");
-    expect(await fs.readText("/repo/CLAUDE.md")).toContain("After writing a route file for another role, end the current Claude Code turn");
+    expect(nextStatus.files.map((file) => file.action)).toEqual(["ok", "ok", "ok", "ok", "ok", "ok", "ok", "ok", "ok", "ok", "ok", "ok", "ok", "ok"]);
+    expect(await fs.readText("/repo/CLAUDE.md")).toContain("## VCM Start Here");
+    expect(await fs.readText("/repo/CLAUDE.md")).toContain("## VCM Task Flow");
+    expect(await fs.readText("/repo/CLAUDE.md")).toContain("## VCM Worktree Policy");
     expect(await fs.readText("/repo/.gitignore")).toContain("# VCM:BEGIN version=1");
     expect(await fs.readText("/repo/.gitignore")).toContain(".ai/vcm/");
     expect(await fs.readText("/repo/.gitignore")).toContain(".claude/worktrees/");
     expect(await fs.readText("/repo/.gitignore")).not.toContain(".vcm/");
+    expect(await fs.readText("/repo/docs/known-issues.md")).toContain("## VCM Known Issues Policy");
+    expect(await fs.readText("/repo/docs/known-issues.md")).toContain(".ai/vcm/handoffs/known-issues.md");
+    expect(await fs.readText("/repo/.github/pull_request_template.md")).toContain("## Validation");
+    expect(await fs.readText("/repo/.github/pull_request_template.md")).toContain("Final acceptance completed");
+    expect(await fs.readText("/repo/.claude/skills/vcm-route-message.md")).toContain("## Purpose");
+    expect(await fs.readText("/repo/.claude/skills/vcm-route-message.md")).toContain("This skill writes a route file");
+    expect(await fs.readText("/repo/.claude/skills/vcm-route-message.md")).toContain("After writing or updating the route file, end the current Claude Code turn immediately.");
+    expect(await fs.readText("/repo/.claude/skills/vcm-final-acceptance.md")).toContain("## Scope Traceability Audit");
+    expect(await fs.readText("/repo/.claude/skills/vcm-final-acceptance.md")).toContain("Do not claim to prove that the diff is exactly equal to the task scope.");
+    expect(await fs.readText("/repo/.claude/skills/vcm-final-acceptance.md")).toContain(".ai/vcm/handoffs/final-acceptance.md");
+    expect(await fs.readText("/repo/.claude/skills/vcm-harness-bootstrap.md")).toContain("AI-assisted project understanding");
+    expect(await fs.readText("/repo/.claude/skills/vcm-harness-maintenance.md")).toContain("harness drift audit");
+    expect(await fs.readText("/repo/.claude/skills/vcm-long-running-validation.md")).toContain("## Protocol");
+    expect(await fs.readText("/repo/.claude/skills/vcm-long-running-validation.md")).toContain(".ai/tools/watch-job");
     expect(await fs.readText("/repo/.claude/agents/project-manager.md")).toContain("name: project-manager");
     expect(await fs.readText("/repo/.claude/agents/project-manager.md")).toContain("<!-- VCM:BEGIN version=1 -->");
-    expect(await fs.readText("/repo/.claude/agents/project-manager.md")).toContain("Assign work by writing or updating .ai/vcm/handoffs/messages/project-manager-architect.md");
-    expect(await fs.readText("/repo/.claude/agents/project-manager.md")).toContain("VCM orchestration is strictly sequential");
+    expect(await fs.readText("/repo/.claude/agents/project-manager.md")).toContain("Use the routes defined in `CLAUDE.md`");
+    expect(await fs.readText("/repo/.claude/agents/project-manager.md")).toContain("Do not perform technical analysis");
+    expect(await fs.readText("/repo/.claude/agents/project-manager.md")).toContain("Before dispatching a role, update that role's command");
+    expect(await fs.readText("/repo/.claude/agents/project-manager.md")).toContain("### PR Preparation");
+    expect(await fs.readText("/repo/.claude/agents/project-manager.md")).toContain(".github/pull_request_template.md");
+    expect(await fs.readText("/repo/.claude/agents/project-manager.md")).toContain("VCM_TASK_REPO_ROOT");
+    expect(await fs.readText("/repo/.claude/agents/project-manager.md")).toContain("Include the confirmed task repo root and branch in each role command `## Worktree` section");
+    expect(await fs.readText("/repo/.claude/agents/architect.md")).toContain("verifiable behavior, phase boundaries, behavior/contract proof points");
+    expect(await fs.readText("/repo/.claude/agents/architect.md")).toContain("Read `.ai/vcm/handoffs/known-issues.md` and promote confirmed unresolved issues to `docs/known-issues.md`.");
     expect(await fs.readText("/repo/.claude/settings.json")).toContain("UserPromptSubmit");
     expect(await fs.readText("/repo/.claude/settings.json")).toContain("Stop");
     expect(await fs.readText("/repo/.claude/settings.json")).toContain("/api/hooks/claude-code");
@@ -60,7 +88,7 @@ describe("createHarnessService", () => {
     expect(content).toContain("# Existing Rules");
     expect(content).toContain("Keep this project-specific note.");
     expect(content).toContain("<!-- VCM:BEGIN version=1 -->");
-    expect(content).toContain("## VCM Shared Rules");
+    expect(content).toContain("## VCM Start Here");
   });
 
   it("inserts VCM ignore rules into an existing .gitignore without overwriting user patterns", async () => {
@@ -161,7 +189,7 @@ describe("createHarnessService", () => {
     expect(content).toContain("After block.");
     expect(content).not.toContain("old managed rules");
     expect(content).toContain("<!-- VCM:BEGIN version=1 -->");
-    expect(content).toContain("## VCM Shared Rules");
+    expect(content).toContain("## VCM Start Here");
   });
 });
 

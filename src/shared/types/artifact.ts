@@ -2,10 +2,10 @@ import type { DispatchableRole, RoleName } from "./role.js";
 
 export type ArtifactKind =
   | "architecture-plan"
-  | "implementation-log"
-  | "validation-log"
+  | "known-issues"
   | "review-report"
-  | "docs-sync-report";
+  | "docs-sync-report"
+  | "final-acceptance";
 
 export interface HandoffPaths {
   handoffDir: string;
@@ -16,10 +16,10 @@ export interface HandoffPaths {
   roleLogPaths: Record<RoleName, string>;
   messageRoutePaths: Record<string, string>;
   architecturePlanPath: string;
-  implementationLogPath: string;
-  validationLogPath: string;
+  knownIssuesPath: string;
   reviewReportPath: string;
   docsSyncReportPath: string;
+  finalAcceptancePath: string;
 }
 
 export interface ArtifactCheckResult {

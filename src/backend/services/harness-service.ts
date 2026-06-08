@@ -12,8 +12,15 @@ import { renderArchitectHarnessRules } from "../templates/harness/architect-agen
 import { renderCoderHarnessRules } from "../templates/harness/coder-agent.js";
 import { renderRootClaudeHarnessRules } from "../templates/harness/claude-root.js";
 import { renderGitignoreHarnessRules } from "../templates/harness/gitignore.js";
+import { renderKnownIssuesDocHarnessRules } from "../templates/harness/known-issues-doc.js";
 import { renderProjectManagerHarnessRules } from "../templates/harness/project-manager-agent.js";
+import { renderPullRequestTemplateHarnessRules } from "../templates/harness/pull-request-template.js";
 import { renderReviewerHarnessRules } from "../templates/harness/reviewer-agent.js";
+import { renderVcmFinalAcceptanceSkillRules } from "../templates/harness/vcm-final-acceptance-skill.js";
+import { renderVcmHarnessBootstrapSkillRules } from "../templates/harness/vcm-harness-bootstrap-skill.js";
+import { renderVcmHarnessMaintenanceSkillRules } from "../templates/harness/vcm-harness-maintenance-skill.js";
+import { renderVcmLongRunningValidationSkillRules } from "../templates/harness/vcm-long-running-validation-skill.js";
+import { renderVcmRouteMessageSkillRules } from "../templates/harness/vcm-route-message-skill.js";
 
 export interface HarnessService {
   getHarnessStatus(repoRoot: string): Promise<HarnessStatusReport>;
@@ -63,6 +70,48 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
     renderRules: renderGitignoreHarnessRules
   },
   {
+    kind: "docs-known-issues",
+    path: "docs/known-issues.md",
+    title: "Known Issues",
+    renderRules: renderKnownIssuesDocHarnessRules
+  },
+  {
+    kind: "pull-request-template",
+    path: ".github/pull_request_template.md",
+    title: "Pull Request Template",
+    renderRules: renderPullRequestTemplateHarnessRules
+  },
+  {
+    kind: "skill-vcm-route-message",
+    path: ".claude/skills/vcm-route-message.md",
+    title: "VCM Route Message Skill",
+    renderRules: renderVcmRouteMessageSkillRules
+  },
+  {
+    kind: "skill-vcm-final-acceptance",
+    path: ".claude/skills/vcm-final-acceptance.md",
+    title: "VCM Final Acceptance Skill",
+    renderRules: renderVcmFinalAcceptanceSkillRules
+  },
+  {
+    kind: "skill-vcm-harness-bootstrap",
+    path: ".claude/skills/vcm-harness-bootstrap.md",
+    title: "VCM Harness Bootstrap Skill",
+    renderRules: renderVcmHarnessBootstrapSkillRules
+  },
+  {
+    kind: "skill-vcm-harness-maintenance",
+    path: ".claude/skills/vcm-harness-maintenance.md",
+    title: "VCM Harness Maintenance Skill",
+    renderRules: renderVcmHarnessMaintenanceSkillRules
+  },
+  {
+    kind: "skill-vcm-long-running-validation",
+    path: ".claude/skills/vcm-long-running-validation.md",
+    title: "VCM Long-Running Validation Skill",
+    renderRules: renderVcmLongRunningValidationSkillRules
+  },
+  {
     kind: "agent-project-manager",
     path: ".claude/agents/project-manager.md",
     title: "Project Manager Agent",
@@ -78,7 +127,7 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
     title: "Architect Agent",
     frontmatter: renderAgentFrontmatter(
       "architect",
-      "VCM architecture role for plans, module boundaries, public contracts, test contracts, and post-review docs sync."
+      "VCM architecture role for plans, module boundaries, public contracts, verifiable behavior, and docs sync."
     ),
     renderRules: renderArchitectHarnessRules
   },
@@ -88,7 +137,7 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
     title: "Coder Agent",
     frontmatter: renderAgentFrontmatter(
       "coder",
-      "VCM implementation role for scoped code changes, focused tests, implementation logs, and validation evidence."
+      "VCM implementation role for scoped code changes and focused tests."
     ),
     renderRules: renderCoderHarnessRules
   },

@@ -116,17 +116,17 @@ function artifactNameToPath(paths: ReturnType<ArtifactService["getHandoffPaths"]
   if (artifactName === "architecture-plan.md") {
     return paths.architecturePlanPath;
   }
-  if (artifactName === "implementation-log.md") {
-    return paths.implementationLogPath;
-  }
-  if (artifactName === "validation-log.md") {
-    return paths.validationLogPath;
+  if (artifactName === "known-issues.md") {
+    return paths.knownIssuesPath;
   }
   if (artifactName === "review-report.md") {
     return paths.reviewReportPath;
   }
   if (artifactName === "docs-sync-report.md") {
     return paths.docsSyncReportPath;
+  }
+  if (artifactName === "final-acceptance.md") {
+    return paths.finalAcceptancePath;
   }
   throw new VcmError({
     code: "ARTIFACT_UNKNOWN",
