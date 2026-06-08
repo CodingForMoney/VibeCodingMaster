@@ -1,3 +1,8 @@
+---
+name: vcm-route-message
+description: Use when a VCM role needs to hand off work, ask a question, report a result, report a blocker, or raise a finding to another VCM role.
+---
+
 # VCM Route Message Skill
 
 ## Purpose

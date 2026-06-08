@@ -1,3 +1,8 @@
+---
+name: vcm-harness-bootstrap
+description: Use when VCM needs AI-assisted project understanding to finish or refresh project-specific harness content.
+---
+
 # VCM Harness Bootstrap Skill
 
 ## Purpose

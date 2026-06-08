@@ -85,10 +85,14 @@ These entries match the current `example/rust-layered/.ai/vcm-harness-manifest.j
 | Core agent | `.claude/agents/coder.md` | managed-block | Long-term | Coder role rules. |
 | Core agent | `.claude/agents/reviewer.md` | managed-block | Long-term | Reviewer role rules. |
 | Skill directory | `.claude/skills/` | VCM-created directory | Conditional long-term | Keep while repo-local VCM skills are installed. |
-| Skill | `.claude/skills/vcm-route-message.md` | whole-file | Conditional long-term | Route-file authoring protocol. |
-| Skill | `.claude/skills/vcm-final-acceptance.md` | whole-file | Conditional long-term | PM final evidence audit. |
-| Skill | `.claude/skills/vcm-long-running-validation.md` | whole-file | Conditional long-term | Role-independent long-running command protocol. |
-| Skill | `.claude/skills/vcm-harness-bootstrap.md` | whole-file | Conditional long-term | AI-assisted project understanding procedure. |
+| Skill directory | `.claude/skills/vcm-route-message/` | VCM-created directory | Conditional long-term | Claude Code registration directory for the route-message skill. |
+| Skill directory | `.claude/skills/vcm-final-acceptance/` | VCM-created directory | Conditional long-term | Claude Code registration directory for the final-acceptance skill. |
+| Skill directory | `.claude/skills/vcm-long-running-validation/` | VCM-created directory | Conditional long-term | Claude Code registration directory for the long-running-validation skill. |
+| Skill directory | `.claude/skills/vcm-harness-bootstrap/` | VCM-created directory | Conditional long-term | Claude Code registration directory for the harness-bootstrap skill. |
+| Skill | `.claude/skills/vcm-route-message/SKILL.md` | whole-file | Conditional long-term | Route-file authoring protocol. |
+| Skill | `.claude/skills/vcm-final-acceptance/SKILL.md` | whole-file | Conditional long-term | PM final evidence audit. |
+| Skill | `.claude/skills/vcm-long-running-validation/SKILL.md` | whole-file | Conditional long-term | Role-independent long-running command protocol. |
+| Skill | `.claude/skills/vcm-harness-bootstrap/SKILL.md` | whole-file | Conditional long-term | AI-assisted project understanding procedure. |
 | Harness tool directory | `.ai/tools/` | VCM-created directory | Long-term | Repo-local harness tools. |
 | Generated-context tool | `.ai/tools/generate-module-index` | whole-file | Long-term | Generates `.ai/generated/module-index.json`. |
 | Generated-context tool | `.ai/tools/generate-public-surface` | whole-file | Long-term | Generates `.ai/generated/public-surface.json`. |

@@ -157,7 +157,39 @@
       "lifecycle": "conditional-long-term"
     },
     {
-      "path": ".claude/skills/vcm-final-acceptance.md",
+      "path": ".claude/skills/vcm-final-acceptance/",
+      "entryType": "directory",
+      "category": "skill-directory",
+      "ownership": "vcm-created",
+      "source": "vcm-template",
+      "lifecycle": "conditional-long-term"
+    },
+    {
+      "path": ".claude/skills/vcm-harness-bootstrap/",
+      "entryType": "directory",
+      "category": "skill-directory",
+      "ownership": "vcm-created",
+      "source": "vcm-template",
+      "lifecycle": "conditional-long-term"
+    },
+    {
+      "path": ".claude/skills/vcm-long-running-validation/",
+      "entryType": "directory",
+      "category": "skill-directory",
+      "ownership": "vcm-created",
+      "source": "vcm-template",
+      "lifecycle": "conditional-long-term"
+    },
+    {
+      "path": ".claude/skills/vcm-route-message/",
+      "entryType": "directory",
+      "category": "skill-directory",
+      "ownership": "vcm-created",
+      "source": "vcm-template",
+      "lifecycle": "conditional-long-term"
+    },
+    {
+      "path": ".claude/skills/vcm-final-acceptance/SKILL.md",
       "entryType": "file",
       "category": "skill",
       "ownership": "whole-file",
@@ -169,7 +201,7 @@
       }
     },
     {
-      "path": ".claude/skills/vcm-harness-bootstrap.md",
+      "path": ".claude/skills/vcm-harness-bootstrap/SKILL.md",
       "entryType": "file",
       "category": "skill",
       "ownership": "whole-file",
@@ -181,7 +213,7 @@
       }
     },
     {
-      "path": ".claude/skills/vcm-long-running-validation.md",
+      "path": ".claude/skills/vcm-long-running-validation/SKILL.md",
       "entryType": "file",
       "category": "skill",
       "ownership": "whole-file",
@@ -193,7 +225,7 @@
       }
     },
     {
-      "path": ".claude/skills/vcm-route-message.md",
+      "path": ".claude/skills/vcm-route-message/SKILL.md",
       "entryType": "file",
       "category": "skill",
       "ownership": "whole-file",

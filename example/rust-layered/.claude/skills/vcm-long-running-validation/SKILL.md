@@ -1,3 +1,8 @@
+---
+name: vcm-long-running-validation
+description: Use for builds, browser checks, E2E tests, release suites, or any validation command that may take long enough for shell-completion callbacks to become unreliable.
+---
+
 # VCM Long-Running Validation Skill
 
 Use this skill for builds, browser checks, E2E tests, release suites, or any command that may take long enough for shell-completion callbacks to become unreliable.

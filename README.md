@@ -245,10 +245,10 @@ CLAUDE.md
 .claude/agents/architect.md
 .claude/agents/coder.md
 .claude/agents/reviewer.md
-.claude/skills/vcm-route-message.md
-.claude/skills/vcm-final-acceptance.md
-.claude/skills/vcm-long-running-validation.md
-.claude/skills/vcm-harness-bootstrap.md
+.claude/skills/vcm-route-message/SKILL.md
+.claude/skills/vcm-final-acceptance/SKILL.md
+.claude/skills/vcm-long-running-validation/SKILL.md
+.claude/skills/vcm-harness-bootstrap/SKILL.md
 .ai/vcm-harness-manifest.json
 .ai/tools/generate-module-index
 .ai/tools/generate-public-surface
@@ -256,6 +256,9 @@ CLAUDE.md
 .ai/tools/watch-job
 .github/pull_request_template.md
 ```
+
+Repo-local skills are installed as `.claude/skills/<skill-name>/SKILL.md` so
+Claude Code can register them.
 
 If a managed-block file already exists, VCM preserves user-authored content and only inserts or replaces the VCM block:
 

@@ -109,29 +109,45 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
   },
   {
     kind: "skill-vcm-route-message",
-    path: ".claude/skills/vcm-route-message.md",
+    path: ".claude/skills/vcm-route-message/SKILL.md",
     title: "VCM Route Message Skill",
+    frontmatter: renderSkillFrontmatter(
+      "vcm-route-message",
+      "Use when a VCM role needs to hand off work, ask a question, report a result, report a blocker, or raise a finding to another VCM role."
+    ),
     ownership: "whole-file",
     renderRules: renderVcmRouteMessageSkillRules
   },
   {
     kind: "skill-vcm-final-acceptance",
-    path: ".claude/skills/vcm-final-acceptance.md",
+    path: ".claude/skills/vcm-final-acceptance/SKILL.md",
     title: "VCM Final Acceptance Skill",
+    frontmatter: renderSkillFrontmatter(
+      "vcm-final-acceptance",
+      "Use when project-manager is ready to decide whether a VCM-managed task can be accepted, returned for follow-up, or blocked for a decision."
+    ),
     ownership: "whole-file",
     renderRules: renderVcmFinalAcceptanceSkillRules
   },
   {
     kind: "skill-vcm-harness-bootstrap",
-    path: ".claude/skills/vcm-harness-bootstrap.md",
+    path: ".claude/skills/vcm-harness-bootstrap/SKILL.md",
     title: "VCM Harness Bootstrap Skill",
+    frontmatter: renderSkillFrontmatter(
+      "vcm-harness-bootstrap",
+      "Use when VCM needs AI-assisted project understanding to finish or refresh project-specific harness content."
+    ),
     ownership: "whole-file",
     renderRules: renderVcmHarnessBootstrapSkillRules
   },
   {
     kind: "skill-vcm-long-running-validation",
-    path: ".claude/skills/vcm-long-running-validation.md",
+    path: ".claude/skills/vcm-long-running-validation/SKILL.md",
     title: "VCM Long-Running Validation Skill",
+    frontmatter: renderSkillFrontmatter(
+      "vcm-long-running-validation",
+      "Use for builds, browser checks, E2E tests, release suites, or any validation command that may take long enough for shell-completion callbacks to become unreliable."
+    ),
     ownership: "whole-file",
     renderRules: renderVcmLongRunningValidationSkillRules
   },
@@ -576,6 +592,10 @@ function renderAgentFrontmatter(name: string, description: string): string {
   return `---\nname: ${name}\ndescription: ${description}\ntools: Read, Grep, Glob, Bash, Edit, Write\n---`;
 }
 
+function renderSkillFrontmatter(name: string, description: string): string {
+  return `---\nname: ${name}\ndescription: ${description}\n---`;
+}
+
 function resolveHarnessPath(repoRoot: string, relativePath: string): string {
   return path.join(repoRoot, relativePath);
 }
@@ -632,7 +652,7 @@ async function checkFixedHarness(fs: FileSystemAdapter, repoRoot: string): Promi
   const requiredPaths = [
     "CLAUDE.md",
     ".ai/vcm-harness-manifest.json",
-    ".claude/skills/vcm-harness-bootstrap.md",
+    ".claude/skills/vcm-harness-bootstrap/SKILL.md",
     ".ai/tools/generate-module-index",
     ".ai/tools/generate-public-surface"
   ];

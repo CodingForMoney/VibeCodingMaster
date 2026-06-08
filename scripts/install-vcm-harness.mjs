@@ -5,7 +5,7 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
-const HARNESS_VERSION = "0.2-fixed";
+const HARNESS_VERSION = "0.2.1-fixed";
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const MANIFEST_PATH = ".ai/vcm-harness-manifest.json";
 const HTML_BLOCK_PATTERN = /<!-- VCM:BEGIN(?:\s+version=\d+)? -->[\s\S]*?<!-- VCM:END -->/m;
@@ -383,10 +383,15 @@ const WHOLE_FILES = [
     templatePath: "scripts/harness-tools/generate-public-surface"
   },
   {
-    path: ".claude/skills/vcm-final-acceptance.md",
+    path: ".claude/skills/vcm-final-acceptance/SKILL.md",
     category: "skill",
     mode: 0o644,
-    content: `# VCM Final Acceptance Skill
+    content: `---
+name: vcm-final-acceptance
+description: Use when project-manager is ready to decide whether a VCM-managed task can be accepted, returned for follow-up, or blocked for a decision.
+---
+
+# VCM Final Acceptance Skill
 
 ## Purpose
 
@@ -504,10 +509,15 @@ The final user summary should be concise and include files changed, validation, 
 `
   },
   {
-    path: ".claude/skills/vcm-harness-bootstrap.md",
+    path: ".claude/skills/vcm-harness-bootstrap/SKILL.md",
     category: "skill",
     mode: 0o644,
-    content: `# VCM Harness Bootstrap Skill
+    content: `---
+name: vcm-harness-bootstrap
+description: Use when VCM needs AI-assisted project understanding to finish or refresh project-specific harness content.
+---
+
+# VCM Harness Bootstrap Skill
 
 ## Purpose
 
@@ -587,10 +597,15 @@ Include:
 `
   },
   {
-    path: ".claude/skills/vcm-long-running-validation.md",
+    path: ".claude/skills/vcm-long-running-validation/SKILL.md",
     category: "skill",
     mode: 0o644,
-    content: `# VCM Long-Running Validation Skill
+    content: `---
+name: vcm-long-running-validation
+description: Use for builds, browser checks, E2E tests, release suites, or any validation command that may take long enough for shell-completion callbacks to become unreliable.
+---
+
+# VCM Long-Running Validation Skill
 
 Use this skill for builds, browser checks, E2E tests, release suites, or any command that may take long enough for shell-completion callbacks to become unreliable.
 
@@ -644,10 +659,15 @@ On timeout:
 `
   },
   {
-    path: ".claude/skills/vcm-route-message.md",
+    path: ".claude/skills/vcm-route-message/SKILL.md",
     category: "skill",
     mode: 0o644,
-    content: `# VCM Route Message Skill
+    content: `---
+name: vcm-route-message
+description: Use when a VCM role needs to hand off work, ask a question, report a result, report a blocker, or raise a finding to another VCM role.
+---
+
+# VCM Route Message Skill
 
 ## Purpose
 
@@ -1079,6 +1099,25 @@ if __name__ == "__main__":
   }
 ];
 
+const LEGACY_FLAT_SKILL_FILES = [
+  {
+    path: ".claude/skills/vcm-final-acceptance.md",
+    replacementPath: ".claude/skills/vcm-final-acceptance/SKILL.md"
+  },
+  {
+    path: ".claude/skills/vcm-harness-bootstrap.md",
+    replacementPath: ".claude/skills/vcm-harness-bootstrap/SKILL.md"
+  },
+  {
+    path: ".claude/skills/vcm-long-running-validation.md",
+    replacementPath: ".claude/skills/vcm-long-running-validation/SKILL.md"
+  },
+  {
+    path: ".claude/skills/vcm-route-message.md",
+    replacementPath: ".claude/skills/vcm-route-message/SKILL.md"
+  }
+];
+
 async function main() {
   const args = parseArgs(process.argv.slice(2));
   if (args.help) {
@@ -1110,6 +1149,7 @@ async function main() {
   for (const file of WHOLE_FILES) {
     await installWholeFile({ projectRoot, file, dryRun, operations });
   }
+  await removeLegacyFlatSkillFiles({ projectRoot, dryRun, operations });
 
   printReport({ projectRoot, dryRun, operations });
 }
@@ -1260,6 +1300,10 @@ function fixedDirectories() {
   return [
     ".claude/agents/",
     ".claude/skills/",
+    ".claude/skills/vcm-final-acceptance/",
+    ".claude/skills/vcm-harness-bootstrap/",
+    ".claude/skills/vcm-long-running-validation/",
+    ".claude/skills/vcm-route-message/",
     ".ai/tools/",
     ".ai/generated/"
   ];
@@ -1270,6 +1314,9 @@ function directoryCategory(directory) {
     return "agent-directory";
   }
   if (directory === ".claude/skills/") {
+    return "skill-directory";
+  }
+  if (directory.startsWith(".claude/skills/")) {
     return "skill-directory";
   }
   if (directory === ".ai/generated/") {
@@ -1454,6 +1501,42 @@ async function installWholeFile({ projectRoot, file, dryRun, operations }) {
     operations,
     action: "write fixed VCM file"
   });
+}
+
+async function removeLegacyFlatSkillFiles({ projectRoot, dryRun, operations }) {
+  const wholeFilesByPath = new Map(WHOLE_FILES.map((file) => [file.path, file]));
+  for (const legacy of LEGACY_FLAT_SKILL_FILES) {
+    const targetPath = resolveInside(projectRoot, legacy.path);
+    const currentContent = await readOptionalText(targetPath);
+    if (currentContent === undefined) {
+      continue;
+    }
+
+    const replacement = wholeFilesByPath.get(legacy.replacementPath);
+    if (!replacement) {
+      operations.push(skip(legacy.path, "missing replacement skill definition"));
+      continue;
+    }
+
+    const replacementContent = ensureTrailingNewline(await wholeFileContent(replacement));
+    const legacyExpectedContent = ensureTrailingNewline(stripSkillFrontmatter(replacementContent));
+    if (currentContent !== replacementContent && currentContent !== legacyExpectedContent) {
+      operations.push(skip(legacy.path, "legacy flat skill file differs; left in place"));
+      continue;
+    }
+
+    if (dryRun) {
+      operations.push(plan(legacy.path, "delete legacy flat skill file"));
+      continue;
+    }
+
+    await fs.rm(targetPath, { force: true });
+    operations.push(done(legacy.path, "deleted legacy flat skill file"));
+  }
+}
+
+function stripSkillFrontmatter(content) {
+  return content.replace(/^---\n[\s\S]*?\n---\n\n/, "");
 }
 
 async function wholeFileContent(file) {

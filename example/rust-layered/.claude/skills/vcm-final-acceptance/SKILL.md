@@ -1,3 +1,8 @@
+---
+name: vcm-final-acceptance
+description: Use when project-manager is ready to decide whether a VCM-managed task can be accepted, returned for follow-up, or blocked for a decision.
+---
+
 # VCM Final Acceptance Skill
 
 ## Purpose
