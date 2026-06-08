@@ -1,6 +1,5 @@
 # VCM Route Message Skill
 
-<!-- VCM:BEGIN version=1 -->
 ## Purpose
 
 Use this skill when a VCM role needs to hand work, ask a question, report a result, report a blocker, or raise a finding to another VCM role.
@@ -84,4 +83,3 @@ VCM scans pending route files after the Stop hook and delivers later replies in 
 ## Recovery
 
 If delivery is manual, blocked, or the target role is busy, leave the route file non-empty. Do not clear it yourself unless the user or VCM controller has explicitly confirmed manual handling.
-<!-- VCM:END -->

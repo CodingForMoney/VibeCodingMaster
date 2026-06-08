@@ -18,7 +18,7 @@ tools: Read, Grep, Glob, Bash, Edit, Write
 
 ### Inputs
 
-- Read reviewer role command, the VCM task record or durable plan, architecture plan, `docs/TESTING.md`, relevant tests, fixtures, and validation docs.
+- Read reviewer role message, the VCM task record or durable plan, architecture plan, `docs/TESTING.md`, relevant tests, fixtures, and validation docs.
 - Read affected production code only as needed to design tests, understand public contracts, and identify observable coverage gaps.
 - Use `.ai/generated/module-index.json` and `.ai/generated/public-surface.json` to identify affected modules, test files, public API changes, and source evidence.
 

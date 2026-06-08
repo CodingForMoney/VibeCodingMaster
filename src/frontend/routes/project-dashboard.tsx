@@ -1,6 +1,10 @@
 import { FormEvent, type ReactNode, useEffect, useState } from "react";
 import type { ThemeMode } from "../../shared/types/app-settings.js";
-import type { HarnessApplyResult, HarnessStatusReport } from "../../shared/types/harness.js";
+import type {
+  HarnessApplyResult,
+  HarnessBootstrapStatusReport,
+  HarnessStatusReport
+} from "../../shared/types/harness.js";
 import type { VcmOrchestrationState, VcmRoleMessage } from "../../shared/types/message.js";
 import type { ProjectSummary } from "../../shared/types/project.js";
 import type { TaskRecord } from "../../shared/types/task.js";
@@ -19,11 +23,13 @@ export interface ProjectDashboardProps {
   orchestration: VcmOrchestrationState | null;
   events: string[];
   harnessStatus: HarnessStatusReport | null;
+  harnessBootstrapStatus: HarnessBootstrapStatusReport | null;
   harnessApplyResult?: HarnessApplyResult | null;
   busy?: boolean;
   onConnect(repoPath: string): Promise<void>;
   onRefreshHarness(): Promise<void>;
   onApplyHarness(): Promise<void>;
+  onStartHarnessBootstrap(): Promise<void>;
   onCreateTask(input: { taskSlug: string; createWorktree?: boolean; title?: string }): Promise<void>;
   onSelectTask(taskSlug: string): void;
   themeMode: ThemeMode;
@@ -44,11 +50,13 @@ export function ProjectDashboard({
   orchestration,
   events,
   harnessStatus,
+  harnessBootstrapStatus,
   harnessApplyResult,
   busy,
   onConnect,
   onRefreshHarness,
   onApplyHarness,
+  onStartHarnessBootstrap,
   onCreateTask,
   onSelectTask,
   themeMode,
@@ -168,10 +176,12 @@ export function ProjectDashboard({
         <SidebarSection title="VCM Harness">
           <HarnessPanel
             status={harnessStatus}
+            bootstrapStatus={harnessBootstrapStatus}
             applyResult={harnessApplyResult}
             busy={busy}
             onRefresh={onRefreshHarness}
             onApply={onApplyHarness}
+            onStartBootstrap={onStartHarnessBootstrap}
           />
         </SidebarSection>
       ) : null}

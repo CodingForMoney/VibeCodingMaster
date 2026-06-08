@@ -11,7 +11,7 @@ VCM is designed for long-running coding work where one Claude Code conversation 
 
 Each role runs as a real Claude Code process inside an embedded terminal. The GUI lets the user start, stop, resume, restart, switch, observe, and manually intervene in those sessions without juggling separate terminal windows.
 
-## Current V1 Capabilities
+## Current Capabilities
 
 - GUI-first task workspace.
 - Collapsible sidebar with repository connection, settings, harness status, task creation, and task list.
@@ -25,7 +25,9 @@ Each role runs as a real Claude Code process inside an embedded terminal. The GU
   - `--dangerously-skip-permissions`
 - PM-mediated role messaging through VCM-dispatched route files.
 - Manual and automatic orchestration modes.
-- VCM harness installer for `CLAUDE.md`, `.claude/agents/*.md`, and the VCM-managed `.gitignore` block.
+- Two-stage VCM harness setup: deterministic fixed install plus AI-assisted bootstrap.
+- VCM-managed root rules, four role agents, repo-local VCM skills, Claude Code hooks, generated-context tools, and PR template.
+- Rust generated context for module indexing and crate-external public surface indexing.
 - Translation panel powered by an OpenAI-compatible low-cost model.
 - Durable task state, session state, raw terminal logs, handoff artifacts, and message history.
 
@@ -134,14 +136,15 @@ Important container notes:
 1. Start VCM.
 2. Open the GUI.
 3. In the sidebar, open `Repository Path`, enter a repository path or choose one from `Recent`, then click `Connect`.
-4. Review `VCM Harness`; if files need install/update, click `Install / Update`.
-5. Review any changed harness files and commit them if they look right.
-6. Create a task from `New Task` with a single task name.
-7. Select the task from `Tasks`.
-8. Use the role tabs in the task header to switch between `Project Manager`, `Architect`, `Coder`, and `Reviewer`.
-9. Choose the permission mode for the active role.
-10. Click `Start`, `Resume`, `Restart`, or `Stop` as needed.
-11. Talk mostly to `project-manager`; let PM coordinate the other roles through VCM messaging.
+4. Review `VCM Harness`; if fixed files need install/update, click `Install / Update`.
+5. If bootstrap checks are incomplete, click `Run Bootstrap` and let the visible Claude Code bootstrap session fill project-specific docs and generated context.
+6. Review and commit harness changes when they look right.
+7. Create a task from `New Task` with a single task name.
+8. Select the task from `Tasks`.
+9. Use the role tabs in the task header to switch between `Project Manager`, `Architect`, `Coder`, and `Reviewer`.
+10. Choose the permission mode for the active role.
+11. Click `Start`, `Resume`, `Restart`, or `Stop` as needed.
+12. Talk mostly to `project-manager`; let PM coordinate the other roles through VCM messaging.
 
 The recommended flow is:
 
@@ -186,7 +189,7 @@ The left sidebar is intentionally compact and collapsible:
 - `Repository Path`: path input on one row; `Recent` and `Connect` on the next row.
 - `Repository`: connected path, branch, and working tree state. `Working tree: uncommitted changes` means `git status --porcelain` is not empty.
 - `Settings`: `Theme`, `Round alert`, `Try alert`, `Messages`, and `Events`.
-- `VCM Harness`: status for `CLAUDE.md`, role agent files, and `.gitignore`.
+- `VCM Harness`: fixed-install status, bootstrap completion checks, and the bootstrap terminal when one is running.
 - `New Task`: one `task name` input.
 - `Tasks`: task list and task status.
 
@@ -230,18 +233,31 @@ Translation behavior:
 
 ## Project Harness
 
-VCM works best when the connected repository contains VCM collaboration rules as normal project files. On first connect, VCM checks:
+VCM works best when the connected repository contains VCM collaboration rules as normal project files. Harness setup has two stages.
+
+Fixed install is deterministic. It installs or updates VCM-owned files and managed blocks:
 
 ```text
 CLAUDE.md
 .gitignore
+.claude/settings.json
 .claude/agents/project-manager.md
 .claude/agents/architect.md
 .claude/agents/coder.md
 .claude/agents/reviewer.md
+.claude/skills/vcm-route-message.md
+.claude/skills/vcm-final-acceptance.md
+.claude/skills/vcm-long-running-validation.md
+.claude/skills/vcm-harness-bootstrap.md
+.ai/vcm-harness-manifest.json
+.ai/tools/generate-module-index
+.ai/tools/generate-public-surface
+.ai/tools/run-long-check
+.ai/tools/watch-job
+.github/pull_request_template.md
 ```
 
-If a file is missing, VCM can create a recommended default. If a file already exists, VCM preserves user-authored content and only inserts or replaces a managed block:
+If a managed-block file already exists, VCM preserves user-authored content and only inserts or replaces the VCM block:
 
 ```md
 <!-- VCM:BEGIN version=1 -->
@@ -262,7 +278,20 @@ For `.gitignore`, VCM uses a gitignore-native managed block:
 
 VCM also JSON-merges `.claude/settings.json` to install Claude Code `UserPromptSubmit` and `Stop` hooks. The hooks post directly to the local VCM backend, so roles do not need a VCM CLI command to confirm delivery or report turn completion.
 
-After applying harness changes, VCM reports the exact files changed and reminds the user to review and commit them before starting long-running work.
+Bootstrap is AI-assisted. VCM starts a visible temporary Claude Code session in the connected repository and asks it to use the `vcm-harness-bootstrap` skill. Bootstrap fills project-specific content and generated context:
+
+```text
+CLAUDE.md project context outside the VCM managed block
+docs/ARCHITECTURE.md
+<module>/ARCHITECTURE.md
+docs/TESTING.md
+.ai/generated/module-index.json
+.ai/generated/public-surface.json
+```
+
+The generated-context tools currently target Rust projects. Non-Rust repositories can still install the fixed harness, but generated context should be treated as unsupported until project-specific generators exist.
+
+After applying harness changes or completing bootstrap, VCM reports the exact files changed or checks completed and reminds the user to review and commit them before starting long-running work.
 
 Role sessions learn VCM rules from `CLAUDE.md` and `.claude/agents/*.md`. VCM does not paste a long context block into the terminal at session start.
 
@@ -413,7 +442,7 @@ npm run build
 
 - VCM does not use tmux.
 - VCM does not auto-confirm Claude Code permission prompts.
-- VCM does not isolate roles with separate worktrees in V1.
+- VCM does not isolate roles with separate worktrees; roles for one task share one task worktree.
 - VCM does not translate Claude output from raw PTY output; translation reads Claude transcript JSONL files.
 - VCM does not write translation output into handoff artifacts unless a user or role explicitly copies it there.
 - Role file writes happen in the task worktree when a task has a worktree.
@@ -422,6 +451,7 @@ npm run build
 See also:
 
 - `docs/product-design.md`
-- `docs/v1-architecture-design.md`
-- `docs/v1-implementation-plan.md`
-- `docs/cc-best-practices.md`
+- `docs/v0.2-implementation-plan.md`
+- `docs/vcm-cc-best-practices.md`
+- `docs/full-harness-baseline.md`
+- `docs/cc-best-practices.md` is archived and no longer maintained.

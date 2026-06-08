@@ -11,7 +11,11 @@ import { createClaudeHookService, type ClaudeHookService } from "./services/clau
 import { createGitAdapter } from "./adapters/git-adapter.js";
 import { createAppSettingsService, type AppSettingsService } from "./services/app-settings-service.js";
 import { createClaudeTranscriptService } from "./services/claude-transcript-service.js";
-import { createHarnessService, type HarnessService } from "./services/harness-service.js";
+import {
+  createHarnessService,
+  createScriptFixedHarnessInstaller,
+  type HarnessService
+} from "./services/harness-service.js";
 import { createNodeFileSystemAdapter } from "./adapters/filesystem.js";
 import { createNodePtyTerminalRuntime } from "./runtime/node-pty-runtime.js";
 import { createOpenAiCompatibleTranslationProvider } from "./adapters/translation-provider.js";
@@ -165,8 +169,14 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
   const runtime = createNodePtyTerminalRuntime({ fs });
   const registry = createSessionRegistry();
   const artifactService = createArtifactService(fs);
-  const harnessService = createHarnessService({ fs });
   const projectService = createProjectService({ fs, git, claude, appSettings });
+  const harnessService = createHarnessService({
+    fs,
+    runtime,
+    projectService,
+    apiUrl: options.apiUrl,
+    runFixedInstaller: createScriptFixedHarnessInstaller(path.join(getAppRoot(), "scripts/install-vcm-harness.mjs"))
+  });
   const taskService = createTaskService({ fs, git, artifactService, projectService });
   const sessionService = createSessionService({
     fs,

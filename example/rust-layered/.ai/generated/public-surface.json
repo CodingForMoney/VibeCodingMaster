@@ -13,7 +13,7 @@
           "name": "module_name",
           "source": {
             "path": "foundation/config/src/lib.rs",
-            "line": 4
+            "line": 6
           },
           "signature": "pub fn module_name() -> &'static str"
         },
@@ -23,9 +23,19 @@
           "name": "module_summary",
           "source": {
             "path": "foundation/config/src/lib.rs",
-            "line": 12
+            "line": 14
           },
           "signature": "pub fn module_summary() -> String"
+        },
+        {
+          "path": "default_resource",
+          "kind": "fn",
+          "name": "default_resource",
+          "source": {
+            "path": "foundation/config/src/model.rs",
+            "line": 1
+          },
+          "signature": "pub fn default_resource() -> &'static str"
         },
         {
           "path": "model::default_resource",

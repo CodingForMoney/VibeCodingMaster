@@ -1,6 +1,12 @@
 import type { DispatchRoleCommandResult, TaskStatusReport } from "../../shared/types/api.js";
 import type { AppPreferences, UpdateAppPreferencesRequest } from "../../shared/types/app-settings.js";
-import type { HarnessApplyResult, HarnessStatusReport } from "../../shared/types/harness.js";
+import type {
+  HarnessApplyResult,
+  HarnessBootstrapStatusReport,
+  HarnessStatusReport,
+  StartHarnessBootstrapRequest,
+  StartHarnessBootstrapResult
+} from "../../shared/types/harness.js";
 import type {
   VcmOrchestrationMode,
   VcmOrchestrationState,
@@ -69,6 +75,15 @@ export const apiClient = {
   applyHarness() {
     return request<HarnessApplyResult>("/api/projects/harness/apply", {
       method: "POST"
+    });
+  },
+  getHarnessBootstrapStatus() {
+    return request<HarnessBootstrapStatusReport>("/api/projects/harness/bootstrap");
+  },
+  startHarnessBootstrap(input: StartHarnessBootstrapRequest = {}) {
+    return request<StartHarnessBootstrapResult>("/api/projects/harness/bootstrap/start", {
+      method: "POST",
+      body: JSON.stringify(input)
     });
   },
   getTaskStatus(taskSlug: string) {

@@ -31,7 +31,7 @@ up as permanent repository history.
 
 The current baseline is represented by `example/rust-layered`.
 
-Harness-managed repo files:
+Fixed installer files:
 
 ```text
 CLAUDE.md
@@ -45,16 +45,24 @@ CLAUDE.md
 .claude/skills/vcm-final-acceptance.md
 .claude/skills/vcm-long-running-validation.md
 .claude/skills/vcm-harness-bootstrap.md
-.claude/skills/vcm-harness-maintenance.md
 .ai/vcm-harness-manifest.json
 .ai/tools/generate-module-index
 .ai/tools/generate-public-surface
 .ai/tools/run-long-check
 .ai/tools/watch-job
-.ai/generated/module-index.json
-.ai/generated/public-surface.json
 .github/pull_request_template.md
 ```
+
+Derived bootstrap artifacts:
+
+```text
+.ai/generated/module-index.json
+.ai/generated/public-surface.json
+```
+
+The generated artifacts are tracked in the manifest as derived artifacts so VCM
+can clean or refresh them, but they are produced by generator tools during
+bootstrap or later maintenance work. They are not hand-authored fixed templates.
 
 Runtime roots:
 
@@ -162,6 +170,8 @@ Current runtime files and directories:
 .ai/vcm/handoffs/final-acceptance.md
 .ai/vcm/handoffs/known-issues.md
 .ai/vcm/jobs/<job-id>/
+.ai/vcm/bootstrap/session.json
+.ai/vcm/bootstrap/bootstrap.log
 ```
 
 App-local VCM task records live outside the connected repository:
@@ -285,6 +295,11 @@ source files, test files, and workspace dependencies.
 `public-surface.json` indexes crate-external Rust public APIs. It is a machine
 index, not an architecture document.
 
+Current generated-context support is Rust-only. The fixed installer provides
+Rust generator tools as the default baseline, but it does not generate trusted
+context by itself. Non-Rust projects must use project-specific generators before
+`.ai/generated/*` is considered reliable.
+
 There is no `test-map.json`. Rust unit tests live with source where appropriate;
 integration tests use Cargo's normal test layout. Test files are discoverable
 through `module-index.json`.
@@ -295,16 +310,19 @@ hand-edited as durable truth.
 
 ## 11. Harness Bootstrap
 
-`vcm-harness-bootstrap` is an AI-assisted project understanding procedure, not
-the deterministic installer.
+`vcm-harness-bootstrap` is the AI-assisted project understanding and refresh
+procedure. It is not the deterministic installer.
 
-It may read the repository and draft or refresh project-specific content such as:
+It may read the repository and create or refresh project-specific content such
+as:
 
+- `CLAUDE.md` project context outside the VCM managed block
 - `docs/ARCHITECTURE.md`
 - module-level `ARCHITECTURE.md`
 - `docs/TESTING.md`
 - `docs/known-issues.md`
-- generated-context recommendations
+- `.ai/generated/module-index.json`
+- `.ai/generated/public-surface.json`
 
 It must not edit product source, product tests, package manifests, lockfiles,
 deployment config, or secrets. It must not create new validation wrapper tools
@@ -313,27 +331,25 @@ during bootstrap.
 Important claims should be marked as verified, inferred, unknown, or needing
 human confirmation.
 
-## 12. Harness Maintenance
+VCM should launch bootstrap as a visible temporary Claude Code terminal, not as
+an invisible background task:
 
-`vcm-harness-maintenance` is an AI-assisted drift audit and cleanup recommendation
-procedure. It does not replace deterministic VCM upgrades, managed-block
-replacement, manifest migration, or uninstall.
+- run the deterministic fixed installer first
+- start Claude Code in the connected repository root without a role agent
+- set `VCM_TASK_REPO_ROOT`, `VCM_HARNESS_BOOTSTRAP=1`, `VCM_SESSION_ID`, and
+  `VCM_API_URL`
+- send a prompt that explicitly requires using `vcm-harness-bootstrap`
+- log terminal output under `.ai/vcm/bootstrap/bootstrap.log`
+- persist session metadata under `.ai/vcm/bootstrap/session.json`
+- mark bootstrap complete only when project context, generated context,
+  project architecture docs, module architecture docs, and testing docs are
+  present and non-empty
 
-It should inspect:
+The UI should expose both stages: fixed install status and bootstrap completion
+status. A failed or disconnected bootstrap terminal should be restartable
+without treating project-owned durable docs as VCM-owned manifest entries.
 
-- harness manifest drift
-- stale docs
-- obsolete file references
-- duplicate rules
-- missing owners
-- obsolete or missing harness tools
-- generated-context freshness
-- temporary runtime state cleanup candidates
-
-It should recommend deterministic VCM backend actions when managed files, hooks,
-manifest entries, or uninstall behavior need changes.
-
-## 13. Final Acceptance
+## 12. Final Acceptance
 
 `vcm-final-acceptance` is PM's final evidence audit. PM must not use it for
 technical design review, implementation review, source-code analysis, or test
@@ -351,7 +367,7 @@ Do not accept when required role evidence is missing, reviewer findings are
 unresolved, docs sync is missing for durable changes, known-issues disposition is
 missing, or unexplained high-risk files remain.
 
-## 14. Documentation Lifecycle
+## 13. Documentation Lifecycle
 
 Temporary files should be deleted after the task:
 
@@ -376,7 +392,7 @@ Durable facts should be moved into:
 Do not keep completed task notes as a permanent docs archive unless they remain
 valuable durable planning knowledge.
 
-## 15. Embedded Terminal
+## 14. Embedded Terminal
 
 The embedded terminal should run through backend-managed PTY/session services,
 not as front-end-only command execution. Frontend code displays and controls
@@ -386,7 +402,7 @@ to backend services.
 High-risk terminal work includes process lifecycle, cross-device control,
 gateway-submitted prompts, and command authorization.
 
-## 16. Mobile Gateway
+## 15. Mobile Gateway
 
 VCM 0.2 gateway should expose a conservative mobile command surface through
 Tencent iLink Bot API / Weixin DM.
@@ -412,7 +428,7 @@ Rules:
 - audit state-changing commands
 - treat gateway authorization and command parsing as high-risk code
 
-## 17. Minimum VCM Rules
+## 16. Minimum VCM Rules
 
 1.  Manifest records harness ownership only.
 2.  Project durable docs are project-owned.

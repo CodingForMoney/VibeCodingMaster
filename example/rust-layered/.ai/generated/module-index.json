@@ -7,7 +7,7 @@
     "manifest": "Cargo.toml"
   },
   "layerInference": {
-    "method": "path-first-segment",
+    "method": "path-first-segment-from-cargo-root",
     "rootPackageLayer": "root"
   },
   "layers": [

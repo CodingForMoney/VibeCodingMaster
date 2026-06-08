@@ -1,6 +1,8 @@
 pub mod model;
 pub mod ops;
 
+pub use model::default_resource;
+
 pub fn module_name() -> &'static str {
     "config"
 }

@@ -9,9 +9,8 @@ describe("createHarnessService", () => {
 
     const status = await service.getHarnessStatus("/repo");
     expect(status.needsApply).toBe(true);
-    expect(status.plannedChanges).toHaveLength(14);
+    expect(status.plannedChanges).toHaveLength(13);
     expect(status.plannedChanges.map((change) => change.action)).toEqual([
-      "create",
       "create",
       "create",
       "create",
@@ -28,11 +27,11 @@ describe("createHarnessService", () => {
     ]);
 
     const result = await service.applyHarness("/repo");
-    expect(result.changedFiles).toHaveLength(14);
+    expect(result.changedFiles).toHaveLength(13);
 
     const nextStatus = await service.getHarnessStatus("/repo");
     expect(nextStatus.needsApply).toBe(false);
-    expect(nextStatus.files.map((file) => file.action)).toEqual(["ok", "ok", "ok", "ok", "ok", "ok", "ok", "ok", "ok", "ok", "ok", "ok", "ok", "ok"]);
+    expect(nextStatus.files.map((file) => file.action)).toEqual(["ok", "ok", "ok", "ok", "ok", "ok", "ok", "ok", "ok", "ok", "ok", "ok", "ok"]);
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("## VCM Start Here");
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("## VCM Task Flow");
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("## VCM Worktree Policy");
@@ -51,7 +50,6 @@ describe("createHarnessService", () => {
     expect(await fs.readText("/repo/.claude/skills/vcm-final-acceptance.md")).toContain("Do not claim to prove that the diff is exactly equal to the task scope.");
     expect(await fs.readText("/repo/.claude/skills/vcm-final-acceptance.md")).toContain(".ai/vcm/handoffs/final-acceptance.md");
     expect(await fs.readText("/repo/.claude/skills/vcm-harness-bootstrap.md")).toContain("AI-assisted project understanding");
-    expect(await fs.readText("/repo/.claude/skills/vcm-harness-maintenance.md")).toContain("harness drift audit");
     expect(await fs.readText("/repo/.claude/skills/vcm-long-running-validation.md")).toContain("## Protocol");
     expect(await fs.readText("/repo/.claude/skills/vcm-long-running-validation.md")).toContain(".ai/tools/watch-job");
     expect(await fs.readText("/repo/.claude/agents/project-manager.md")).toContain("name: project-manager");

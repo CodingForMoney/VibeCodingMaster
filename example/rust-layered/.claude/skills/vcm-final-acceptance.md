@@ -1,6 +1,5 @@
 # VCM Final Acceptance Skill
 
-<!-- VCM:BEGIN version=1 -->
 ## Purpose
 
 Use this skill when project-manager is ready to decide whether a VCM-managed task can be accepted, returned for follow-up, or blocked for a decision.
@@ -114,4 +113,3 @@ accepted | accepted-with-known-risks | needs-coder-follow-up | needs-architect-r
 ```
 
 The final user summary should be concise and include files changed, validation, docs updates, open risks, and next action.
-<!-- VCM:END -->

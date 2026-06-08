@@ -1,6 +1,10 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ThemeMode } from "../shared/types/app-settings.js";
-import type { HarnessApplyResult, HarnessStatusReport } from "../shared/types/harness.js";
+import type {
+  HarnessApplyResult,
+  HarnessBootstrapStatusReport,
+  HarnessStatusReport
+} from "../shared/types/harness.js";
 import type { VcmOrchestrationState, VcmRoleMessage } from "../shared/types/message.js";
 import type { ProjectSummary } from "../shared/types/project.js";
 import type { RoleName } from "../shared/types/role.js";
@@ -16,6 +20,7 @@ export function App() {
   const [project, setProject] = useState<ProjectSummary | null>(null);
   const [recentRepositoryPaths, setRecentRepositoryPaths] = useState<string[]>([]);
   const [harnessStatus, setHarnessStatus] = useState<HarnessStatusReport | null>(null);
+  const [harnessBootstrapStatus, setHarnessBootstrapStatus] = useState<HarnessBootstrapStatusReport | null>(null);
   const [harnessApplyResult, setHarnessApplyResult] = useState<HarnessApplyResult | null>(null);
   const [tasks, setTasks] = useState<TaskRecord[]>([]);
   const [activeTaskSlug, setActiveTaskSlug] = useState<string | null>(null);
@@ -101,6 +106,12 @@ export function App() {
     return nextStatus;
   }
 
+  async function loadHarnessBootstrapStatus() {
+    const nextStatus = await apiClient.getHarnessBootstrapStatus();
+    setHarnessBootstrapStatus(nextStatus);
+    return nextStatus;
+  }
+
   async function loadRecentRepositoryPaths() {
     const nextPaths = await apiClient.getRecentRepositoryPaths();
     setRecentRepositoryPaths(nextPaths);
@@ -130,7 +141,8 @@ export function App() {
         if (currentProject) {
           await Promise.all([
             loadTasks(),
-            loadHarnessStatus()
+            loadHarnessStatus(),
+            loadHarnessBootstrapStatus()
           ]);
         }
       })
@@ -190,6 +202,7 @@ export function App() {
           orchestration={sidebarOrchestration}
           events={sidebarEvents}
           harnessStatus={harnessStatus}
+          harnessBootstrapStatus={harnessBootstrapStatus}
           harnessApplyResult={harnessApplyResult}
           busy={busy}
           onConnect={(repoPath) => withBusy(async () => {
@@ -199,17 +212,28 @@ export function App() {
             await Promise.all([
               loadTasks(),
               loadHarnessStatus(),
+              loadHarnessBootstrapStatus(),
               loadRecentRepositoryPaths()
             ]);
           })}
           onRefreshHarness={() => withBusy(async () => {
             setHarnessApplyResult(null);
-            await loadHarnessStatus();
+            await Promise.all([
+              loadHarnessStatus(),
+              loadHarnessBootstrapStatus()
+            ]);
           })}
           onApplyHarness={() => withBusy(async () => {
             const result = await apiClient.applyHarness();
             setHarnessApplyResult(result);
-            await loadHarnessStatus();
+            await Promise.all([
+              loadHarnessStatus(),
+              loadHarnessBootstrapStatus()
+            ]);
+          })}
+          onStartHarnessBootstrap={() => withBusy(async () => {
+            const result = await apiClient.startHarnessBootstrap();
+            setHarnessBootstrapStatus(result.status);
           })}
           onCreateTask={(input) => withBusy(async () => {
             const task = await apiClient.createTask(input);

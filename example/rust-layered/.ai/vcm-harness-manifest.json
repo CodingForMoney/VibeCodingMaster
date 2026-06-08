@@ -4,7 +4,7 @@
   "harnessVersion": "0.2-example",
   "installMode": "full-example",
   "installedAt": "2026-06-07T00:00:00Z",
-  "updatedAt": "2026-06-08T06:25:59Z",
+  "updatedAt": "2026-06-08T13:02:56.140Z",
   "runtimeRoots": [
     ".ai/vcm/",
     ".claude/worktrees/"
@@ -170,18 +170,6 @@
     },
     {
       "path": ".claude/skills/vcm-harness-bootstrap.md",
-      "entryType": "file",
-      "category": "skill",
-      "ownership": "whole-file",
-      "source": "vcm-template",
-      "lifecycle": "conditional-long-term",
-      "uninstall": {
-        "action": "delete-file-if-unchanged",
-        "requiresConfirmation": true
-      }
-    },
-    {
-      "path": ".claude/skills/vcm-harness-maintenance.md",
       "entryType": "file",
       "category": "skill",
       "ownership": "whole-file",

@@ -21,7 +21,7 @@ tools: Read, Grep, Glob, Bash, Edit, Write
 
 ### Planning Inputs
 
-- Read the role command, durable plans when present, relevant handoff artifacts, `docs/ARCHITECTURE.md`, affected `<module>/ARCHITECTURE.md` files when present, and affected project docs before planning.
+- Read the role message, durable plans when present, relevant handoff artifacts, `docs/ARCHITECTURE.md`, affected `<module>/ARCHITECTURE.md` files when present, and affected project docs before planning.
 - Read `.ai/generated/module-index.json` when planning module scope, file scope, dependency direction, or phased work.
 - Read `.ai/generated/public-surface.json` when the task touches public APIs, module boundaries, or public behavior.
 - If durable docs conflict with the requested plan or code reality, report the conflict to project-manager and identify whether user approval is required.

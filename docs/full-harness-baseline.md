@@ -32,6 +32,43 @@ The manifest should not list project-owned durable docs such as
 `docs/plans/`, or module-level `ARCHITECTURE.md` files as managed entries. It
 should not list `.ai/vcm/**` runtime files as managed entries either.
 
+## Install And Bootstrap Flow
+
+VCM 0.2 uses a two-stage harness setup:
+
+1. Fixed install: VCM runs the deterministic fixed installer. This creates or
+   updates VCM-owned managed blocks, whole-file skills, role agents, settings
+   hooks, harness tools, generated-context directories, the PR template, and
+   `.ai/vcm-harness-manifest.json`.
+2. AI bootstrap: VCM starts a temporary Claude Code terminal in the repository
+   root and instructs it to use `vcm-harness-bootstrap`. This fills
+   project-owned content and generated artifacts.
+
+The fixed install does not copy example project content. It may create blank
+durable doc templates when missing, but project-specific facts are added only by
+bootstrap or by later role work.
+
+Bootstrap should produce or refresh:
+
+```text
+CLAUDE.md project context outside the VCM managed block
+docs/ARCHITECTURE.md
+<module>/ARCHITECTURE.md
+docs/TESTING.md
+.ai/generated/module-index.json
+.ai/generated/public-surface.json
+```
+
+Bootstrap runtime metadata is temporary:
+
+```text
+.ai/vcm/bootstrap/session.json
+.ai/vcm/bootstrap/bootstrap.log
+```
+
+These files are runtime state, not manifest entries. They can be deleted after
+the generated artifacts and durable docs are complete.
+
 ## Current Manifest Entries
 
 These entries match the current `example/rust-layered/.ai/vcm-harness-manifest.json`.
@@ -52,7 +89,6 @@ These entries match the current `example/rust-layered/.ai/vcm-harness-manifest.j
 | Skill | `.claude/skills/vcm-final-acceptance.md` | whole-file | Conditional long-term | PM final evidence audit. |
 | Skill | `.claude/skills/vcm-long-running-validation.md` | whole-file | Conditional long-term | Role-independent long-running command protocol. |
 | Skill | `.claude/skills/vcm-harness-bootstrap.md` | whole-file | Conditional long-term | AI-assisted project understanding procedure. |
-| Skill | `.claude/skills/vcm-harness-maintenance.md` | whole-file | Conditional long-term | Harness drift audit procedure. |
 | Harness tool directory | `.ai/tools/` | VCM-created directory | Long-term | Repo-local harness tools. |
 | Generated-context tool | `.ai/tools/generate-module-index` | whole-file | Long-term | Generates `.ai/generated/module-index.json`. |
 | Generated-context tool | `.ai/tools/generate-public-surface` | whole-file | Long-term | Generates `.ai/generated/public-surface.json`. |
@@ -114,6 +150,8 @@ durable docs, PR text, or commit history.
 | Final acceptance | `.ai/vcm/handoffs/final-acceptance.md` | Task-temporary | PM final evidence-audit handoff for one executable task. |
 | Task known issues | `.ai/vcm/handoffs/known-issues.md` | Task-temporary | Promote unresolved durable findings to `docs/known-issues.md`, then delete. |
 | Long-running jobs | `.ai/vcm/jobs/<job-id>/` | Runtime cleanup | Status and logs from `run-long-check` / `watch-job`. |
+| Bootstrap session | `.ai/vcm/bootstrap/session.json` | Runtime cleanup | Last harness-bootstrap terminal metadata. |
+| Bootstrap log | `.ai/vcm/bootstrap/bootstrap.log` | Runtime cleanup | Terminal log for the harness-bootstrap session. |
 | App-local task records | `~/.vcm/projects/<project-id>/tasks/<task-slug>.json` | Runtime cleanup | VCM UI/lifecycle subtask records outside the connected repo. |
 
 Runtime state under `.ai/vcm/**` is excluded from manifest entries. The manifest
@@ -126,8 +164,7 @@ The current example installs these skills:
 - `vcm-route-message`: route-file write protocol.
 - `vcm-final-acceptance`: final PM evidence audit.
 - `vcm-long-running-validation`: role-independent long-running command protocol.
-- `vcm-harness-bootstrap`: one-time or occasional project-understanding procedure.
-- `vcm-harness-maintenance`: harness drift audit and cleanup recommendation procedure.
+- `vcm-harness-bootstrap`: one-time or occasional project-understanding, generated-context refresh, and durable-doc bootstrap procedure.
 
 The current example does not install a separate `vcm-docs-sync` skill. Docs sync
 is expressed in the architect role rules and writes
@@ -143,6 +180,10 @@ The current example keeps only four `.ai/tools/` files:
 .ai/tools/run-long-check
 .ai/tools/watch-job
 ```
+
+The generated-context tools currently support Rust projects only. The fixed
+installer may install them as the default Rust baseline, but non-Rust projects
+need project-specific generators before `.ai/generated/*` can be trusted.
 
 The current example intentionally does not install these old validation or
 discovery wrappers:
@@ -172,6 +213,15 @@ The current example has two generated artifacts:
 .ai/generated/module-index.json
 .ai/generated/public-surface.json
 ```
+
+Current support is Rust-only:
+
+- `generate-module-index` reads Cargo workspace structure, auto-detects a
+  direct child `cargoRoot` when the project root has no `Cargo.toml`, and
+  filters workspace member paths that do not contain a crate.
+- `generate-public-surface` indexes crate-external Rust `pub fn`,
+  `pub struct`, `pub enum`, and `pub trait` items, using `pub use` only to
+  resolve re-exported high-value API entries.
 
 There is no `test-map.json`. Test files are discoverable through
 `module-index.json` and Rust's normal Cargo test layout.

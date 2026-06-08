@@ -6,9 +6,12 @@ export function renderRootClaudeHarnessRules(): string {
 
 ## VCM Durable Project Docs
 
-- \`docs/ARCHITECTURE.md\`: architecture, module/file responsibilities, data flow, state model, public behavior/contracts, dependency direction, security/data rules, and risks; architect-owned.
-- \`docs/TESTING.md\`: validation strategy, commands, validation levels, and known testing gaps; architect-owned with reviewer input.
-- \`docs/known-issues.md\`: durable cross-task known issues and accepted limitations; architect-owned promotion/update during docs sync.
+- \`docs/ARCHITECTURE.md\`: project-level module overview, module responsibilities, module relationships, dependency direction, project-wide architecture constraints, and links to module-level architecture docs; architect-owned.
+- \`<module>/ARCHITECTURE.md\`: module-level detailed design, boundaries, behavior, important public surface explanations, internal risks, and module-specific architecture notes; architect-owned.
+- \`docs/TESTING.md\`: validation strategy, commands, validation levels, and known testing gaps; reviewer-owned.
+- \`docs/known-issues.md\`: durable known issues and accepted limitations; architect-owned.
+- \`.ai/generated/module-index.json\`: generated module index; use it to find layers, modules, manifests, module docs, source files, test files, and workspace dependencies.
+- \`.ai/generated/public-surface.json\`: generated crate-external public API index; use it to inspect module-to-module public interfaces and source evidence.
 
 ## VCM Task Flow
 

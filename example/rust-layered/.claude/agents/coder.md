@@ -12,14 +12,14 @@ tools: Read, Grep, Glob, Bash, Edit, Write
 
 ### Role Scope
 
-- Own implementation and baseline implementation tests inside the approved task scope, current phase, role command, and architecture plan.
+- Own implementation and baseline implementation tests inside the approved task scope, current phase, role message, and architecture plan.
 - Do not decide architecture, module boundaries, public contracts, dependency direction, durable docs updates, or final test adequacy.
 
 ### Inputs
 
-- Before editing, read the role command, the architecture plan, current phase when present, affected code/tests, and validation instructions from the role command or project docs.
-- Read durable architecture/module/security/dependency docs only when the architecture plan or role command references them.
-- Stop before editing when the architecture plan, role command, allowed write scope, public contract, or validation expectation is missing or unclear; reply to project-manager instead of inferring it.
+- Before editing, read the role message, the architecture plan, current phase when present, affected code/tests, and validation instructions from the role message or project docs.
+- Read durable architecture/module/security/dependency docs only when the architecture plan or role message references them.
+- Stop before editing when the architecture plan, role message, allowed write scope, public contract, or validation expectation is missing or unclear; reply to project-manager instead of inferring it.
 - Use `.ai/generated/module-index.json` to locate approved module source and test files.
 - Use `.ai/generated/public-surface.json` to avoid accidental public API drift.
 

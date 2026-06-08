@@ -1,4 +1,5 @@
 import type { FastifyInstance } from "fastify";
+import type { StartHarnessBootstrapRequest } from "../../shared/types/harness.js";
 import { VcmError } from "../errors.js";
 import type { HarnessService } from "../services/harness-service.js";
 import type { ProjectService } from "../services/project-service.js";
@@ -17,6 +18,16 @@ export function registerHarnessRoutes(app: FastifyInstance, deps: HarnessRouteDe
   app.post("/api/projects/harness/apply", async () => {
     const project = await requireCurrentProject(deps.projectService);
     return deps.harnessService.applyHarness(project.repoRoot);
+  });
+
+  app.get("/api/projects/harness/bootstrap", async () => {
+    const project = await requireCurrentProject(deps.projectService);
+    return deps.harnessService.getBootstrapStatus(project.repoRoot);
+  });
+
+  app.post<{ Body: StartHarnessBootstrapRequest }>("/api/projects/harness/bootstrap/start", async (request) => {
+    const project = await requireCurrentProject(deps.projectService);
+    return deps.harnessService.startHarnessBootstrap(project.repoRoot, request.body ?? {});
   });
 }
 

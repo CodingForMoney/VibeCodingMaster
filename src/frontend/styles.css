@@ -337,6 +337,11 @@ h2 {
 
 .harness-panel {
   display: grid;
+  gap: 10px;
+}
+
+.harness-stage {
+  display: grid;
   gap: 8px;
 }
 
@@ -405,6 +410,34 @@ h2 {
 .harness-result ul {
   margin: 0;
   padding-left: 18px;
+}
+
+.harness-bootstrap-session {
+  display: grid;
+  gap: 8px;
+  border: 1px solid #e0d6c7;
+  border-radius: 6px;
+  padding: 8px;
+  background: #f8f7f2;
+  font-size: 12px;
+}
+
+.harness-bootstrap-session > div:first-child {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.harness-bootstrap-session span:first-child {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.harness-bootstrap-terminal {
+  min-width: 0;
+  height: 280px;
 }
 
 .task-create form {
@@ -1639,6 +1672,7 @@ h2 {
 :root[data-theme="dark"] .harness-file-list li,
 :root[data-theme="dark"] .harness-changes,
 :root[data-theme="dark"] .harness-result,
+:root[data-theme="dark"] .harness-bootstrap-session,
 :root[data-theme="dark"] .task-create-preview,
 :root[data-theme="dark"] .message-item {
   border-color: #30363d;

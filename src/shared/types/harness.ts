@@ -6,7 +6,6 @@ export type HarnessFileKind =
   | "pull-request-template"
   | "skill-vcm-final-acceptance"
   | "skill-vcm-harness-bootstrap"
-  | "skill-vcm-harness-maintenance"
   | "skill-vcm-long-running-validation"
   | "skill-vcm-route-message"
   | "agent-project-manager"
@@ -15,6 +14,8 @@ export type HarnessFileKind =
   | "agent-reviewer";
 
 export type HarnessFileAction = "create" | "insert" | "update" | "ok";
+export type HarnessBootstrapCheckStatus = "ok" | "missing" | "incomplete" | "unknown";
+export type HarnessBootstrapStatus = "not_ready" | "not_started" | "incomplete" | "running" | "complete";
 
 export interface HarnessFileStatus {
   kind: HarnessFileKind;
@@ -43,4 +44,51 @@ export interface HarnessApplyResult {
   version: number;
   changedFiles: HarnessPlannedChange[];
   message: string;
+}
+
+export interface HarnessBootstrapCheck {
+  key:
+    | "fixed-harness"
+    | "project-context"
+    | "module-index"
+    | "public-surface"
+    | "project-architecture"
+    | "module-architecture"
+    | "testing-doc";
+  label: string;
+  status: HarnessBootstrapCheckStatus;
+  path?: string;
+  detail?: string;
+}
+
+export interface HarnessBootstrapSession {
+  id: string;
+  claudeSessionId: string;
+  status: "running" | "exited" | "crashed" | "resumable";
+  command: string;
+  cwd: string;
+  logPath: string;
+  startedAt?: string;
+  updatedAt: string;
+  lastOutputAt?: string;
+  exitCode?: number | null;
+}
+
+export interface HarnessBootstrapStatusReport {
+  status: HarnessBootstrapStatus;
+  canStart: boolean;
+  checks: HarnessBootstrapCheck[];
+  session?: HarnessBootstrapSession;
+  warnings: string[];
+}
+
+export interface StartHarnessBootstrapRequest {
+  cols?: number;
+  rows?: number;
+}
+
+export interface StartHarnessBootstrapResult {
+  status: HarnessBootstrapStatusReport;
+  session: HarnessBootstrapSession;
+  prompt: string;
 }
