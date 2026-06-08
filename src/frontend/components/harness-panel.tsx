@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import type {
   HarnessApplyResult,
   HarnessBootstrapStatusReport,
@@ -27,12 +27,17 @@ export function HarnessPanel({
   onStartBootstrap
 }: HarnessPanelProps) {
   const [showBootstrapTerminal, setShowBootstrapTerminal] = useState(false);
+  const bootstrapSession = bootstrapStatus?.session;
+
+  useEffect(() => {
+    if (!bootstrapSession) {
+      setShowBootstrapTerminal(false);
+    }
+  }, [bootstrapSession]);
 
   if (!status) {
     return null;
   }
-
-  const bootstrapSession = bootstrapStatus?.session;
 
   return (
     <section className="harness-panel">
@@ -105,15 +110,10 @@ export function HarnessPanel({
                 </div>
                 <button
                   type="button"
-                  onClick={() => setShowBootstrapTerminal((current) => !current)}
+                  onClick={() => setShowBootstrapTerminal(true)}
                 >
-                  {showBootstrapTerminal ? "Hide Terminal" : "Open Terminal"}
+                  Open Terminal
                 </button>
-                {showBootstrapTerminal ? (
-                  <div className="harness-bootstrap-terminal">
-                    <XtermView sessionId={bootstrapSession.id} active={showBootstrapTerminal} />
-                  </div>
-                ) : null}
               </div>
             ) : null}
           </>
@@ -164,6 +164,28 @@ export function HarnessPanel({
             <li key={warning}>{warning}</li>
           ))}
         </ul>
+      ) : null}
+
+      {showBootstrapTerminal && bootstrapSession ? (
+        <div className="harness-bootstrap-modal" role="dialog" aria-modal="true" aria-label="Harness bootstrap terminal">
+          <div className="harness-bootstrap-modal-surface">
+            <header className="harness-bootstrap-modal-header">
+              <div>
+                <strong>Harness Bootstrap Terminal</strong>
+                <p className="muted">{bootstrapSession.command}</p>
+              </div>
+              <div className="harness-bootstrap-modal-actions">
+                <StatusBadge status={bootstrapSession.status} />
+                <button type="button" onClick={() => setShowBootstrapTerminal(false)}>
+                  Close
+                </button>
+              </div>
+            </header>
+            <div className="harness-bootstrap-terminal">
+              <XtermView sessionId={bootstrapSession.id} active={showBootstrapTerminal} />
+            </div>
+          </div>
+        </div>
       ) : null}
     </section>
   );

@@ -435,9 +435,57 @@ h2 {
   white-space: nowrap;
 }
 
+.harness-bootstrap-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
+  background: rgba(31, 36, 43, 0.58);
+  padding: 14px;
+}
+
+.harness-bootstrap-modal-surface {
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 10px;
+  border: 1px solid #b9b0a1;
+  border-radius: 8px;
+  background: #fffdf8;
+  box-shadow: 0 22px 64px rgba(31, 36, 43, 0.28);
+  padding: 10px;
+}
+
+.harness-bootstrap-modal-header {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.harness-bootstrap-modal-header p {
+  max-width: min(720px, 70vw);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.harness-bootstrap-modal-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-end;
+}
+
 .harness-bootstrap-terminal {
   min-width: 0;
-  height: 280px;
+  min-height: 0;
+  display: grid;
 }
 
 .task-create form {
@@ -1552,6 +1600,11 @@ h2 {
   }
 }
 
+.harness-bootstrap-terminal .terminal-frame {
+  height: 100%;
+  min-height: 0;
+}
+
 :root[data-theme="dark"] {
   color-scheme: dark;
   background: #0d1117;
@@ -1677,6 +1730,16 @@ h2 {
 :root[data-theme="dark"] .message-item {
   border-color: #30363d;
   background: #0d1117;
+}
+
+:root[data-theme="dark"] .harness-bootstrap-modal {
+  background: rgba(1, 4, 9, 0.72);
+}
+
+:root[data-theme="dark"] .harness-bootstrap-modal-surface {
+  border-color: #30363d;
+  background: #0d1117;
+  box-shadow: 0 22px 64px rgba(1, 4, 9, 0.62);
 }
 
 :root[data-theme="dark"] .task-create-option {
