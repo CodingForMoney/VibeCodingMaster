@@ -56,18 +56,20 @@ export function App() {
 
   const startStrongFlowPauseAlarm = useCallback(() => {
     stopFlowPauseAlarm();
-    playFlowPauseSound();
-    flowPauseAlarmRef.current = window.setInterval(playFlowPauseSound, FLOW_PAUSE_CHIME_INTERVAL_MS);
+    void playFlowPauseSound();
+    flowPauseAlarmRef.current = window.setInterval(() => {
+      void playFlowPauseSound();
+    }, FLOW_PAUSE_CHIME_INTERVAL_MS);
   }, [stopFlowPauseAlarm]);
 
   const playWeakFlowPauseAlert = useCallback(() => {
     stopFlowPauseAlarm();
     setFlowPauseNotice(null);
     let playCount = 1;
-    playFlowPauseSound();
+    void playFlowPauseSound();
     flowPauseAlarmRef.current = window.setInterval(() => {
       playCount += 1;
-      playFlowPauseSound();
+      void playFlowPauseSound();
       if (playCount >= FLOW_PAUSE_WEAK_CHIME_COUNT && flowPauseAlarmRef.current !== null) {
         window.clearInterval(flowPauseAlarmRef.current);
         flowPauseAlarmRef.current = null;
@@ -304,6 +306,9 @@ export function App() {
           flowPauseAlerts={flowPauseAlerts}
           onFlowPauseAlertsChange={(enabled) => {
             setFlowPauseAlerts(enabled);
+            if (enabled) {
+              void primeFlowPauseAudio();
+            }
             void withBusy(async () => {
               const preferences = await apiClient.updateAppPreferences({ flowPauseAlerts: enabled });
               setThemeMode(preferences.themeMode);
@@ -383,6 +388,8 @@ type AudioContextWindow = Window & typeof globalThis & {
   webkitAudioContext?: typeof AudioContext;
 };
 
+let flowPauseAudioContext: AudioContext | null = null;
+
 function getFlowPauseDurationMs(roundState: VcmTaskRoundState): number {
   const startedAt = Date.parse(roundState.startedAt ?? "");
   const endedAt = Date.parse(roundState.lastStopAt ?? "");
@@ -392,14 +399,26 @@ function getFlowPauseDurationMs(roundState: VcmTaskRoundState): number {
   return Math.max(0, endedAt - startedAt);
 }
 
-function playFlowPauseSound(): void {
-  const AudioContextCtor = window.AudioContext ?? (window as AudioContextWindow).webkitAudioContext;
-  if (!AudioContextCtor) {
-    return;
+async function primeFlowPauseAudio(): Promise<boolean> {
+  const context = getFlowPauseAudioContext();
+  if (!context) {
+    return false;
+  }
+  return resumeFlowPauseAudioContext(context);
+}
+
+async function playFlowPauseSound(): Promise<boolean> {
+  const context = getFlowPauseAudioContext();
+  if (!context) {
+    return false;
+  }
+
+  const audioReady = await resumeFlowPauseAudioContext(context);
+  if (!audioReady) {
+    return false;
   }
 
   try {
-    const context = new AudioContextCtor();
     const masterGain = context.createGain();
     const startAt = context.currentTime + 0.025;
 
@@ -417,13 +436,46 @@ function playFlowPauseSound(): void {
       duration: 0.28,
       peakGain: 0.055
     });
-    void context.resume?.().catch(() => undefined);
     window.setTimeout(() => {
-      void context.close().catch(() => undefined);
+      masterGain.disconnect();
     }, 800);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function getFlowPauseAudioContext(): AudioContext | null {
+  const AudioContextCtor = window.AudioContext ?? (window as AudioContextWindow).webkitAudioContext;
+  if (!AudioContextCtor) {
+    return null;
+  }
+
+  try {
+    if (!flowPauseAudioContext || flowPauseAudioContext.state === "closed") {
+      flowPauseAudioContext = new AudioContextCtor();
+    }
+    return flowPauseAudioContext;
+  } catch {
+    return null;
+  }
+}
+
+async function resumeFlowPauseAudioContext(context: AudioContext): Promise<boolean> {
+  if (isFlowPauseAudioContextRunning(context)) {
+    return true;
+  }
+  try {
+    await context.resume();
+    return isFlowPauseAudioContextRunning(context);
   } catch {
     // Browser autoplay policy can block audio until the page has user activation.
+    return false;
   }
+}
+
+function isFlowPauseAudioContextRunning(context: AudioContext): boolean {
+  return context.state === "running";
 }
 
 function scheduleCompletionChimeNote(

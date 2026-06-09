@@ -212,7 +212,7 @@ The same file stores recent repository paths. The translation API key is stored 
 
 The sidebar `Settings` section also stores the UI theme preference in this file. The default is `system`, which follows the OS/browser color-scheme preference; users can cycle between `System`, `Light`, and `Dark`.
 
-The same sidebar also has a `Flow pause alert` toggle. It is on by default and controls the local alert that fires when VCM detects that the current role flow has stopped advancing. Short flows use a weak reminder: the soft two-note chime plays 3 times, 1.4 seconds apart. Flows lasting 10 minutes or longer use a strong reminder: VCM shows an alert dialog and repeats the chime until the user confirms it. The `Try alert` button always triggers the strong reminder for testing.
+The same sidebar also has a `Flow pause alert` toggle. It is on by default and controls the local alert that fires when VCM detects that the current role flow has stopped advancing. Short flows use a weak reminder: the soft two-note chime plays 3 times, 1.4 seconds apart. Flows lasting 10 minutes or longer use a strong reminder: VCM shows an alert dialog and repeats the chime until the user confirms it. The alert sound reuses one browser audio context so repeated reminders remain reliable in stricter browsers such as Safari. The `Try alert` button always triggers the strong reminder for testing.
 
 Translation behavior:
 

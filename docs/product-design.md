@@ -251,7 +251,7 @@ The old `Dirty: yes/no` label is not used. The UI uses `Working tree: clean` or 
 
 The default theme mode is `System`, which follows the OS/browser color-scheme preference. The entire application chrome, sidebar, forms, modals, status badges, and workspace panels must support both light and dark rendering. Embedded terminals keep their terminal-native dark styling.
 
-When `Flow pause alert` is on, VCM plays a short, soft, two-note local chime after a role flow stops advancing. If the flow lasted less than 10 minutes, the chime plays 3 times, 1.4 seconds apart, and stops. If the flow lasted 10 minutes or longer, VCM shows an in-app alert dialog and repeats the chime until the user confirms the dialog.
+When `Flow pause alert` is on, VCM plays a short, soft, two-note local chime after a role flow stops advancing. If the flow lasted less than 10 minutes, the chime plays 3 times, 1.4 seconds apart, and stops. If the flow lasted 10 minutes or longer, VCM shows an in-app alert dialog and repeats the chime until the user confirms the dialog. The alert sound must reuse one browser audio context after user activation instead of creating a fresh context for each repeat, because Safari can block repeated timer-driven playback when every repeat looks like a new autoplay attempt.
 `Try alert` must work even when no flow has just paused so the user can verify browser sound and notification behavior.
 
 There is no separate `Pause orchestration` or `Resume orchestration` control in the GUI. The current product model is one on/off toggle in the role console toolbar.
