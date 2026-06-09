@@ -9,9 +9,11 @@ Use this skill for builds, browser checks, E2E tests, release suites, or any com
 
 ## Rule
 
-Do not end the current turn only to wait for a long-running shell callback.
+Do not start background jobs.
 
-Use a bounded file-backed job instead.
+The only allowed background job is `.ai/tools/run-long-check` when used through this skill.
+
+This skill has a hard maximum timeout of 60 minutes. Do not run or suggest operations expected to exceed 60 minutes without user approval.
 
 ## Protocol
 
@@ -42,12 +44,15 @@ Example:
 
 Timeout is not "unknown". It is a command result.
 
+`watch-job` rejects timeouts over 60 minutes.
+
 On timeout:
 
 - summarize the latest log tail
 - record the timeout in `status.json`
 - report whether the timed-out process was stopped
 - do not mark the command as passed
+- do not continue the job in the background
 
 `watch-job` should attempt to stop the timed-out command process group. If termination cannot be confirmed, say so in the summary.
 

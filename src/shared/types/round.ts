@@ -10,7 +10,6 @@ export interface VcmTaskRoundState {
   taskSlug: string;
   status: VcmTaskRoundStatus;
   roundId?: string;
-  pauseId?: string;
   activeRole?: RoleName;
   startedAt?: string;
   lastPromptSubmittedAt?: string;

@@ -39,7 +39,7 @@ export function App() {
   const [systemPrefersDark, setSystemPrefersDark] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const notifiedFlowPauseRef = useRef<Record<string, string>>({});
+  const notifiedFlowPauseKeyRef = useRef<Record<string, string>>({});
   const flowPauseAlarmRef = useRef<number | null>(null);
   const activeTask = useMemo(
     () => selectActiveTask(tasks, activeTaskSlug),
@@ -54,8 +54,11 @@ export function App() {
     flowPauseAlarmRef.current = null;
   }, []);
 
-  const startStrongFlowPauseAlarm = useCallback(() => {
+  const startStrongFlowPauseAlarm = useCallback((options: { resetAudio?: boolean } = {}) => {
     stopFlowPauseAlarm();
+    if (options.resetAudio) {
+      resetFlowPauseAudioContext();
+    }
     void playFlowPauseSound();
     flowPauseAlarmRef.current = window.setInterval(() => {
       void playFlowPauseSound();
@@ -77,9 +80,13 @@ export function App() {
     }, FLOW_PAUSE_CHIME_INTERVAL_MS);
   }, [stopFlowPauseAlarm]);
 
-  const showStrongFlowPauseNotice = useCallback((text: string, id = `manual-${Date.now()}`) => {
+  const showStrongFlowPauseNotice = useCallback((
+    text: string,
+    id = `manual-${Date.now()}`,
+    options: { resetAudio?: boolean } = {}
+  ) => {
     setFlowPauseNotice({ id, text });
-    startStrongFlowPauseAlarm();
+    startStrongFlowPauseAlarm(options);
   }, [startStrongFlowPauseAlarm]);
 
   const confirmFlowPauseNotice = useCallback(() => {
@@ -110,26 +117,27 @@ export function App() {
       return;
     }
     setActiveRoundState({ taskSlug: roundState.taskSlug, roundState });
-    if (roundState.status !== "paused" || !roundState.pauseId) {
+    if (roundState.status !== "paused") {
       return;
     }
 
-    const previousPauseId = notifiedFlowPauseRef.current[roundState.taskSlug];
-    if (previousPauseId === roundState.pauseId) {
+    const pauseKey = getFlowPauseNotificationKey(roundState);
+    const previousPauseKey = notifiedFlowPauseKeyRef.current[roundState.taskSlug];
+    if (previousPauseKey === pauseKey) {
       return;
     }
 
-    notifiedFlowPauseRef.current[roundState.taskSlug] = roundState.pauseId;
     if (!flowPauseAlerts) {
       return;
     }
 
     const roleLabel = roundState.activeRole ?? "role";
     if (getFlowPauseDurationMs(roundState) >= FLOW_PAUSE_STRONG_ALERT_THRESHOLD_MS) {
-      showStrongFlowPauseNotice(`No new turn started after ${roleLabel} stopped.`, roundState.pauseId);
+      showStrongFlowPauseNotice(`No new turn started after ${roleLabel} stopped.`, pauseKey);
     } else {
       playWeakFlowPauseAlert();
     }
+    notifiedFlowPauseKeyRef.current[roundState.taskSlug] = pauseKey;
   }, [activeTask?.taskSlug, flowPauseAlerts, playWeakFlowPauseAlert, showStrongFlowPauseNotice]);
 
   async function loadTasks() {
@@ -316,7 +324,7 @@ export function App() {
             });
           }}
           onTryFlowPauseAlert={() => {
-            showStrongFlowPauseNotice("This is a test flow pause alert.");
+            showStrongFlowPauseNotice("This is a test flow pause alert.", undefined, { resetAudio: true });
           }}
           onMarkAllMessagesDone={(taskSlug) => {
             void withBusy(async () => {
@@ -392,11 +400,17 @@ let flowPauseAudioContext: AudioContext | null = null;
 
 function getFlowPauseDurationMs(roundState: VcmTaskRoundState): number {
   const startedAt = Date.parse(roundState.startedAt ?? "");
-  const endedAt = Date.parse(roundState.lastStopAt ?? "");
+  const endedAt = Date.parse(roundState.pausedAt ?? roundState.lastStopAt ?? "");
   if (!Number.isFinite(startedAt) || !Number.isFinite(endedAt)) {
     return 0;
   }
   return Math.max(0, endedAt - startedAt);
+}
+
+function getFlowPauseNotificationKey(roundState: VcmTaskRoundState): string {
+  const roundKey = roundState.roundId ?? roundState.startedAt ?? roundState.taskSlug;
+  const pausedKey = roundState.pausedAt ?? roundState.lastStopAt ?? "paused";
+  return `${roundKey}:${pausedKey}`;
 }
 
 async function primeFlowPauseAudio(): Promise<boolean> {
@@ -461,15 +475,33 @@ function getFlowPauseAudioContext(): AudioContext | null {
   }
 }
 
+function resetFlowPauseAudioContext(): void {
+  discardFlowPauseAudioContext(flowPauseAudioContext);
+}
+
+function discardFlowPauseAudioContext(context: AudioContext | null): void {
+  flowPauseAudioContext = null;
+  if (context && context.state !== "closed") {
+    void context.close().catch(() => undefined);
+  }
+}
+
 async function resumeFlowPauseAudioContext(context: AudioContext): Promise<boolean> {
   if (isFlowPauseAudioContextRunning(context)) {
     return true;
   }
   try {
     await context.resume();
-    return isFlowPauseAudioContextRunning(context);
+    const resumed = isFlowPauseAudioContextRunning(context);
+    if (!resumed && context === flowPauseAudioContext) {
+      discardFlowPauseAudioContext(context);
+    }
+    return resumed;
   } catch {
     // Browser autoplay policy can block audio until the page has user activation.
+    if (context === flowPauseAudioContext) {
+      discardFlowPauseAudioContext(context);
+    }
     return false;
   }
 }

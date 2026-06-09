@@ -356,7 +356,6 @@ function toTaskRoundState(state: PersistedRoundFile, updatedAt: string): VcmTask
     taskSlug: state.taskSlug,
     status: current.status,
     roundId: current.id,
-    pauseId: current.status === "paused" ? `${current.id}:${current.pausedAt ?? current.lastStopAt ?? ""}` : undefined,
     activeRole: current.activeRole,
     startedAt: current.startedAt,
     lastPromptSubmittedAt: current.lastPromptSubmittedAt,

@@ -280,6 +280,11 @@ This skill is role-independent. It only handles long-running command execution,
 bounded waiting, file-backed status, timeout, and log summaries. The caller
 decides where to record command evidence.
 
+VCM roles must not start background jobs. The only allowed background job is
+`.ai/tools/run-long-check` when used through `vcm-long-running-validation`.
+`vcm-long-running-validation` has a hard maximum timeout of 60 minutes; split
+larger validation/build work or ask the user before suggesting anything longer.
+
 ## 10. Generated Context
 
 The current example has two generated artifacts:

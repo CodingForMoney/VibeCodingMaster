@@ -253,6 +253,7 @@ The default theme mode is `System`, which follows the OS/browser color-scheme pr
 
 When `Flow pause alert` is on, VCM plays a short, soft, two-note local chime after a role flow stops advancing. If the flow lasted less than 10 minutes, the chime plays 3 times, 1.4 seconds apart, and stops. If the flow lasted 10 minutes or longer, VCM shows an in-app alert dialog and repeats the chime until the user confirms the dialog. The alert sound must reuse one browser audio context after user activation instead of creating a fresh context for each repeat, because Safari can block repeated timer-driven playback when every repeat looks like a new autoplay attempt.
 `Try alert` must work even when no flow has just paused so the user can verify browser sound and notification behavior.
+Safari may still require the user to manually set `Safari > Website Settings > Auto-Play > Allow All Auto-Play`; Chrome is the recommended browser for reliable repeated alert sound.
 
 There is no separate `Pause orchestration` or `Resume orchestration` control in the GUI. The current product model is one on/off toggle in the role console toolbar.
 
@@ -337,7 +338,7 @@ Task-level round state:
 - The normal pause transition is timer-driven from the `Stop` event. Round-state reads also settle expired deadlines as a recovery fallback after restarts, sleep, or missed timers.
 - The same round state stores total round count, prompt-submit count, stop count, and Claude Code active runtime. Active runtime is measured only between `UserPromptSubmit` and `Stop`, not during the settling window.
 
-The frontend polls this task-level round state and deduplicates `pauseId`. Flow duration is measured from the first `UserPromptSubmit` to the last `Stop`; the 10 second settle window is not counted. Pauses under 10 minutes trigger the weak 3-chime reminder at 1.4 second intervals. Pauses at or above 10 minutes trigger the strong alert dialog and repeating sound until confirmation.
+The frontend polls this task-level round state and deduplicates each paused round so the same paused state does not alert on every poll. Flow duration is measured from the first `UserPromptSubmit` to `pausedAt`, falling back to the last `Stop` when needed. Pauses under 10 minutes trigger the weak 3-chime reminder at 1.4 second intervals. Pauses at or above 10 minutes trigger the strong alert dialog and repeating sound until confirmation.
 
 ## 9. Session Lifecycle
 
@@ -515,6 +516,8 @@ VCM Harness injects Claude Code hooks into `.claude/settings.json`:
 VCM uses `UserPromptSubmit` as the Claude Code acceptance signal. A successful PTY write only proves VCM delivered text to the embedded terminal; `UserPromptSubmit` proves Claude Code accepted the prompt.
 
 The injected role rules require asynchronous file messaging: after writing or updating a route file, the role must end the current Claude Code turn and wait for VCM to deliver a later reply. Roles should use `.claude/skills/vcm-route-message/SKILL.md` to author route files. Roles must not poll files, start shell loops, keep the turn open waiting for another role to answer, paste directly into another role terminal, or use Claude Code Task/Subagent for VCM role delegation.
+
+Roles must not start background jobs. The only allowed background job is `.ai/tools/run-long-check` when used through `vcm-long-running-validation`; `watch-job` rejects timeouts over 60 minutes.
 
 There is no `vcmctl` in the target design. Hook entrypoints are direct HTTP from Claude Code hooks to the local VCM backend.
 

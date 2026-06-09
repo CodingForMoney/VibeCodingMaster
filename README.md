@@ -212,7 +212,7 @@ The same file stores recent repository paths. The translation API key is stored 
 
 The sidebar `Settings` section also stores the UI theme preference in this file. The default is `system`, which follows the OS/browser color-scheme preference; users can cycle between `System`, `Light`, and `Dark`.
 
-The same sidebar also has a `Flow pause alert` toggle. It is on by default and controls the local alert that fires when VCM detects that the current role flow has stopped advancing. Short flows use a weak reminder: the soft two-note chime plays 3 times, 1.4 seconds apart. Flows lasting 10 minutes or longer use a strong reminder: VCM shows an alert dialog and repeats the chime until the user confirms it. The alert sound reuses one browser audio context so repeated reminders remain reliable in stricter browsers such as Safari. The `Try alert` button always triggers the strong reminder for testing.
+The same sidebar also has a `Flow pause alert` toggle. It is on by default and controls the local alert that fires when VCM detects that the current role flow has stopped advancing. Short flows use a weak reminder: the soft two-note chime plays 3 times, 1.4 seconds apart. Flows lasting 10 minutes or longer use a strong reminder: VCM shows an alert dialog and repeats the chime until the user confirms it. The alert sound reuses one browser audio context so repeated reminders remain reliable in stricter browsers such as Safari. Safari users may still need to manually set `Safari > Website Settings > Auto-Play > Allow All Auto-Play`; Chrome is recommended for the most reliable alert sound behavior. The `Try alert` button always triggers the strong reminder for testing.
 
 Translation behavior:
 
@@ -262,6 +262,10 @@ CLAUDE.md
 
 Repo-local skills are installed as `.claude/skills/<skill-name>/SKILL.md` so
 Claude Code can register them.
+
+VCM roles must not start background jobs. The only allowed background job is
+`.ai/tools/run-long-check` when used through `vcm-long-running-validation`;
+`.ai/tools/watch-job` enforces a 60 minute maximum timeout.
 
 If a managed-block file already exists, VCM preserves user-authored content and only inserts or replaces the VCM block:
 
@@ -380,7 +384,7 @@ When a `Stop` hook fires, VCM marks the round as settling for 10 seconds. If ano
 
 The normal path is timer-driven: `Stop` starts a backend settle timer, and `UserPromptSubmit` cancels it. Reading the round state also checks expired deadlines as a recovery fallback after process restarts, sleep, or missed timers.
 
-When `Flow pause alert` is enabled, the frontend polls the task round state and deduplicates each pause id. Flow duration is measured from the first `UserPromptSubmit` to the last `Stop`; the 10 second settle window is not counted. If the paused flow lasted less than 10 minutes, it plays the local chime 3 times at 1.4 second intervals. If the paused flow lasted 10 minutes or longer, it shows a modal `Flow paused` alert and repeats the local chime until the user clicks `Confirm`. A pause can mean normal completion, user decision needed, dispatch failure, or another workflow interruption; the point is to get the user to look with the right amount of urgency.
+When `Flow pause alert` is enabled, the frontend polls the task round state and deduplicates each paused round so the same paused state does not alert on every poll. Flow duration is measured from the first `UserPromptSubmit` to `pausedAt`, falling back to the last `Stop` when needed. If the paused flow lasted less than 10 minutes, it plays the local chime 3 times at 1.4 second intervals. If the paused flow lasted 10 minutes or longer, it shows a modal `Flow paused` alert and repeats the local chime until the user clicks `Confirm`. A pause can mean normal completion, user decision needed, dispatch failure, or another workflow interruption; the point is to get the user to look with the right amount of urgency.
 
 ## Resume Behavior
 

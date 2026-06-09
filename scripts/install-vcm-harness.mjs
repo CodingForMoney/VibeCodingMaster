@@ -39,7 +39,16 @@ const MANAGED_FILES = [
 - Use the durable project docs below as role-relevant project truth.
 - Read module-local \`CLAUDE.md\` before editing a subdirectory if one exists.
 - Use \`vcm-route-message\` whenever a VCM role hands off work, asks another role a question, reports a result, reports a blocker, or raises a finding. Follow its write-then-stop rule.
-- Use \`vcm-long-running-validation\` for builds, browser checks, E2E tests, release suites, or any validation command that may take long enough for shell-completion callbacks to become unreliable. Do not end the current turn only to wait for a long-running shell callback.
+- Use \`vcm-long-running-validation\` for long-running validation. Follow the background job limits below.
+
+## VCM Background Jobs
+
+- Do not start background jobs.
+- The only allowed background job is \`.ai/tools/run-long-check\` when used through the \`vcm-long-running-validation\` skill.
+- \`vcm-long-running-validation\` has a hard maximum timeout of 60 minutes.
+- Do not run or suggest operations expected to exceed 60 minutes without user approval.
+- Design every single validation/build operation to complete within 60 minutes; split anything larger before running it.
+- Do not end the current turn only to wait for a long-running shell callback.
 
 ## VCM Durable Project Docs
 
@@ -613,9 +622,11 @@ Use this skill for builds, browser checks, E2E tests, release suites, or any com
 
 ## Rule
 
-Do not end the current turn only to wait for a long-running shell callback.
+Do not start background jobs.
 
-Use a bounded file-backed job instead.
+The only allowed background job is \`.ai/tools/run-long-check\` when used through this skill.
+
+This skill has a hard maximum timeout of 60 minutes. Do not run or suggest operations expected to exceed 60 minutes without user approval.
 
 ## Protocol
 
@@ -646,12 +657,15 @@ Example:
 
 Timeout is not "unknown". It is a command result.
 
+\`watch-job\` rejects timeouts over 60 minutes.
+
 On timeout:
 
 - summarize the latest log tail
 - record the timeout in \`status.json\`
 - report whether the timed-out process was stopped
 - do not mark the command as passed
+- do not continue the job in the background
 
 \`watch-job\` should attempt to stop the timed-out command process group. If termination cannot be confirmed, say so in the summary.
 
@@ -916,9 +930,13 @@ import argparse
 import json
 import os
 import signal
+import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+
+
+MAX_TIMEOUT_SECONDS = 60 * 60
 
 
 def root_dir() -> Path:
@@ -936,6 +954,16 @@ def parse_duration(value: str) -> float:
     if value.endswith("h"):
         return float(value[:-1]) * 3600
     return float(value)
+
+
+def validate_duration(name: str, value: float, maximum: float | None = None) -> bool:
+    if value <= 0:
+        print(f"error: {name} must be positive", file=sys.stderr)
+        return False
+    if maximum is not None and value > maximum:
+        print(f"error: {name} exceeds maximum 60m", file=sys.stderr)
+        return False
+    return True
 
 
 def read_status(path: Path) -> dict:
@@ -1056,8 +1084,16 @@ def main() -> int:
     parser.add_argument("--interval", default="1s")
     args = parser.parse_args()
 
-    timeout = parse_duration(args.timeout)
-    interval = parse_duration(args.interval)
+    try:
+        timeout = parse_duration(args.timeout)
+        interval = parse_duration(args.interval)
+    except ValueError as exc:
+        print(f"error: invalid duration: {exc}", file=sys.stderr)
+        return 2
+    if not validate_duration("timeout", timeout, MAX_TIMEOUT_SECONDS):
+        return 2
+    if not validate_duration("interval", interval):
+        return 2
     directory = root_dir() / ".ai/vcm/jobs" / args.job_id
     status_path = directory / "status.json"
 

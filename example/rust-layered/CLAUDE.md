@@ -15,8 +15,16 @@ This is a Rust workspace example for VCM harness experiments. It has three archi
 
 - Use the durable project docs below as role-relevant project truth.
 - Read module-local `CLAUDE.md` before editing a subdirectory if one exists.
-- Use `vcm-route-message` whenever a VCM role hands off work, asks another role a question, reports a result, reports a blocker, or raises a finding. Follow its write-then-stop rule.
-- Use `vcm-long-running-validation` for builds, browser checks, E2E tests, release suites, or any validation command that may take long enough for shell-completion callbacks to become unreliable. Do not end the current turn only to wait for a long-running shell callback.
+- Use `vcm-long-running-validation` for long-running validation. Follow the background job limits below.
+
+## VCM Background Jobs
+
+- Do not start background jobs.
+- The only allowed background job is `.ai/tools/run-long-check` when used through the `vcm-long-running-validation` skill.
+- `vcm-long-running-validation` has a hard maximum timeout of 60 minutes.
+- Do not run or suggest operations expected to exceed 60 minutes without user approval.
+- Design every single validation/build operation to complete within 60 minutes; split anything larger before running it.
+- Do not end the current turn only to wait for a long-running shell callback.
 
 ## VCM Durable Project Docs
 

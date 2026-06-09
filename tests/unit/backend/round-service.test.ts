@@ -87,7 +87,6 @@ describe("round-service", () => {
       currentRoundCcActiveMs: 2000,
       roles: ["project-manager", "coder"]
     });
-    expect(state.pauseId).toBeUndefined();
     expect(state.pausedAt).toBeUndefined();
     expect(state.settleDeadlineAt).toBeUndefined();
   });
@@ -135,7 +134,6 @@ describe("round-service", () => {
 
     expect(paused).toMatchObject({
       status: "paused",
-      pauseId: "round_1:2026-05-31T00:00:12.000Z",
       pausedAt: "2026-05-31T00:00:12.000Z",
       promptSubmitCount: 1,
       stopCount: 1,

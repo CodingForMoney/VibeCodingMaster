@@ -3,9 +3,13 @@ import argparse
 import json
 import os
 import signal
+import sys
 import time
 from datetime import datetime, timezone
 from pathlib import Path
+
+
+MAX_TIMEOUT_SECONDS = 60 * 60
 
 
 def root_dir() -> Path:
@@ -23,6 +27,16 @@ def parse_duration(value: str) -> float:
     if value.endswith("h"):
         return float(value[:-1]) * 3600
     return float(value)
+
+
+def validate_duration(name: str, value: float, maximum: float | None = None) -> bool:
+    if value <= 0:
+        print(f"error: {name} must be positive", file=sys.stderr)
+        return False
+    if maximum is not None and value > maximum:
+        print(f"error: {name} exceeds maximum 60m", file=sys.stderr)
+        return False
+    return True
 
 
 def read_status(path: Path) -> dict:
@@ -143,8 +157,16 @@ def main() -> int:
     parser.add_argument("--interval", default="1s")
     args = parser.parse_args()
 
-    timeout = parse_duration(args.timeout)
-    interval = parse_duration(args.interval)
+    try:
+        timeout = parse_duration(args.timeout)
+        interval = parse_duration(args.interval)
+    except ValueError as exc:
+        print(f"error: invalid duration: {exc}", file=sys.stderr)
+        return 2
+    if not validate_duration("timeout", timeout, MAX_TIMEOUT_SECONDS):
+        return 2
+    if not validate_duration("interval", interval):
+        return 2
     directory = root_dir() / ".ai/vcm/jobs" / args.job_id
     status_path = directory / "status.json"
 
