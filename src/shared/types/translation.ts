@@ -21,9 +21,16 @@ export const TRANSLATION_PROMPT_KEYS: readonly TranslationPromptKey[] = [
   "en-to-zh"
 ] as const;
 
+export const TRANSLATION_ENTRY_RETENTION_LIMIT = 500;
+
 export type TranslationSourceKind =
   | "prose"
-  | "tool-output";
+  | "tool-output"
+  | "conversation-boundary";
+
+export type TranslationConversationBoundaryKind =
+  | "start"
+  | "end";
 
 export type TranslationStatus =
   | "queued"
@@ -76,6 +83,9 @@ export interface TranslationEntry {
   translatedText: string;
   status: TranslationStatus;
   contextUsed: boolean;
+  boundaryKind?: TranslationConversationBoundaryKind;
+  conversationTurn?: number;
+  occurredAt?: string;
   warning?: string;
   error?: string;
   createdAt: string;
@@ -84,6 +94,22 @@ export interface TranslationEntry {
   provider: TranslationProviderType;
   model: string;
   tokenUsage?: TranslationTokenUsage;
+}
+
+export interface TranslationFailureItem {
+  translationId: string;
+  sessionId: string;
+  taskSlug: string;
+  role: RoleName;
+  sourceText: string;
+  error: string;
+  failedAt: string;
+  retryCount: number;
+  lastRetryAt?: string;
+}
+
+export interface TranslationFailuresResult {
+  failures: TranslationFailureItem[];
 }
 
 export interface TranslateUserInputRequest {
@@ -145,6 +171,12 @@ export type TranslationSessionEvent =
       createdAt: string;
       id?: string;
       message: string;
+    }
+  | {
+      seq: number;
+      type: "failures";
+      createdAt: string;
+      failures: TranslationFailureItem[];
     };
 
 export interface StartTranslationSessionResult {
@@ -164,4 +196,5 @@ export type TranslationWsMessage =
   | { type: "translation-entry"; entry: TranslationEntry }
   | { type: "translation-status"; status: TranslationSessionStatus }
   | { type: "translation-poll"; checkedAt: string }
-  | { type: "translation-error"; id?: string; message: string };
+  | { type: "translation-error"; id?: string; message: string }
+  | { type: "translation-failures"; failures: TranslationFailureItem[] };

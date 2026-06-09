@@ -3,8 +3,10 @@ import { isRoleName } from "../../shared/constants.js";
 import { VcmError } from "../errors.js";
 import type { MessageService } from "./message-service.js";
 import type { ProjectService } from "./project-service.js";
+import type { RoundService } from "./round-service.js";
 import type { SessionService } from "./session-service.js";
 import { getTaskRuntimeRepoRoot, type TaskService } from "./task-service.js";
+import type { TranslationService } from "./translation-service.js";
 
 export interface ClaudeHookService {
   handleHook(input: ClaudeHookRequest): Promise<ClaudeHookResult>;
@@ -16,6 +18,8 @@ export interface ClaudeHookServiceDeps {
   taskService: TaskService;
   sessionService: SessionService;
   messageService: MessageService;
+  roundService: RoundService;
+  translationService: Pick<TranslationService, "recordConversationBoundary">;
 }
 
 export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHookService {
@@ -63,6 +67,24 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
       transcriptPath: stringOrUndefined(input.event.transcript_path),
       cwd: stringOrUndefined(input.event.cwd)
     });
+    await deps.roundService.recordClaudeHookEvent({
+      stateRepoRoot: context.taskRepoRoot,
+      stateRoot: context.config.stateRoot,
+      taskSlug: input.taskSlug,
+      role: input.role,
+      eventName
+    });
+    if (session) {
+      await deps.translationService.recordConversationBoundary({
+        repoRoot: context.project.repoRoot,
+        taskRepoRoot: context.taskRepoRoot,
+        taskSlug: input.taskSlug,
+        role: input.role,
+        sessionId: session.id,
+        boundaryKind: "start",
+        occurredAt: session.lastPromptSubmittedAt ?? session.updatedAt
+      });
+    }
     const submitted = await deps.messageService.confirmPromptSubmitted({
       repoRoot: context.project.repoRoot,
       taskRepoRoot: context.taskRepoRoot,
@@ -101,6 +123,24 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
       transcriptPath: stringOrUndefined(input.event.transcript_path),
       cwd: stringOrUndefined(input.event.cwd)
     });
+    await deps.roundService.recordClaudeHookEvent({
+      stateRepoRoot: context.taskRepoRoot,
+      stateRoot: context.config.stateRoot,
+      taskSlug: input.taskSlug,
+      role: input.role,
+      eventName
+    });
+    if (session) {
+      await deps.translationService.recordConversationBoundary({
+        repoRoot: context.project.repoRoot,
+        taskRepoRoot: context.taskRepoRoot,
+        taskSlug: input.taskSlug,
+        role: input.role,
+        sessionId: session.id,
+        boundaryKind: "end",
+        occurredAt: session.lastStopAt ?? session.updatedAt
+      });
+    }
 
     const dispatched = await deps.messageService.scanAndDispatchPendingRouteFiles({
       repoRoot: context.project.repoRoot,

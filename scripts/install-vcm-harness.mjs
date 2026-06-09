@@ -297,6 +297,8 @@ const MANAGED_FILES = [
 
 - Validate behavior against the approved task scope, architecture plan, and public contracts through tests or observable behavior.
 - Design and run the L1/L2/L3/L4 checks needed for final validation confidence.
+- Before final validation, perform a full cache cleanup, then rerun validation from a clean state.
+- Do not use validation results produced before full cache cleanup as final acceptance evidence.
 - Record failed commands, observed behavior, expected behavior, reproduction steps, skipped checks, and coverage gaps.
 - If validation fails or expected behavior is unclear, report the evidence to project-manager; architect owns diagnosis and next-step routing.
 - Add or modify tests, fixtures, or test helpers needed for validation confidence.

@@ -24,14 +24,6 @@ describe("createClaudeAdapter", () => {
     });
   });
 
-  it("builds dangerously skip permissions as a dedicated flag", () => {
-    expect(adapter.buildRoleStartCommand("coder", "claude", "dangerously-skip-permissions")).toEqual({
-      command: "claude",
-      args: ["--agent", "coder", "--dangerously-skip-permissions"],
-      display: "claude --agent coder --dangerously-skip-permissions"
-    });
-  });
-
   it("builds resume commands with the persisted Claude session id", () => {
     expect(adapter.buildRoleStartCommand(
       "architect",
@@ -46,11 +38,11 @@ describe("createClaudeAdapter", () => {
     });
   });
 
-  it("keeps dangerously skip permissions on resume commands", () => {
+  it("keeps bypassPermissions on resume commands", () => {
     expect(adapter.buildRoleStartCommand(
       "coder",
       "claude",
-      "dangerously-skip-permissions",
+      "bypassPermissions",
       "00000000-0000-4000-8000-000000000003",
       true
     )).toEqual({
@@ -60,9 +52,10 @@ describe("createClaudeAdapter", () => {
         "coder",
         "--resume",
         "00000000-0000-4000-8000-000000000003",
-        "--dangerously-skip-permissions"
+        "--permission-mode",
+        "bypassPermissions"
       ],
-      display: "claude --agent coder --resume 00000000-0000-4000-8000-000000000003 --dangerously-skip-permissions"
+      display: "claude --agent coder --resume 00000000-0000-4000-8000-000000000003 --permission-mode bypassPermissions"
     });
   });
 });

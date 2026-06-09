@@ -24,6 +24,7 @@ import type {
   TranslateUserInputRequest,
   TranslateUserInputResult,
   TranslationEntry,
+  TranslationFailuresResult,
   PollTranslationSessionResult,
   StartTranslationSessionResult,
   TranslationPromptPreview,
@@ -193,6 +194,16 @@ export const apiClient = {
   },
   retryTranslation(sessionId: string, translationId: string) {
     return request<TranslationEntry>(`/api/translation/sessions/${encodeURIComponent(sessionId)}/retry/${encodeURIComponent(translationId)}`, {
+      method: "POST"
+    });
+  },
+  ignoreTranslationFailures(sessionId: string) {
+    return request<TranslationFailuresResult>(`/api/translation/sessions/${encodeURIComponent(sessionId)}/failures/ignore`, {
+      method: "POST"
+    });
+  },
+  retryTranslationFailures(sessionId: string) {
+    return request<TranslationFailuresResult>(`/api/translation/sessions/${encodeURIComponent(sessionId)}/failures/retry`, {
       method: "POST"
     });
   }

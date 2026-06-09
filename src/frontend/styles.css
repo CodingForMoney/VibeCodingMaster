@@ -112,6 +112,8 @@ h2 {
 
 .app-sidebar {
   position: relative;
+  display: flex;
+  flex-direction: column;
   min-width: 0;
   border-right: 1px solid #d3c9b8;
   background: #fbfaf6;
@@ -157,7 +159,18 @@ h2 {
 }
 
 .sidebar-content {
+  display: flex;
+  flex: 1;
   min-width: 0;
+  min-height: 0;
+}
+
+.project-dashboard {
+  display: flex;
+  flex: 1;
+  flex-direction: column;
+  width: 100%;
+  min-height: 100%;
 }
 
 .app-shell.is-sidebar-collapsed .sidebar-content {
@@ -304,29 +317,62 @@ h2 {
   padding: 10px 12px;
 }
 
-.round-notice {
+.flow-pause-alert-backdrop {
   position: fixed;
-  right: 20px;
-  bottom: 20px;
-  z-index: 30;
+  inset: 0;
+  z-index: 100;
   display: grid;
-  gap: 2px;
-  min-width: 220px;
-  max-width: min(360px, calc(100vw - 40px));
+  place-items: center;
+  background: rgba(31, 36, 43, 0.52);
+  padding: 20px;
+}
+
+.flow-pause-alert {
+  display: grid;
+  gap: 12px;
+  width: min(460px, 100%);
   border: 1px solid #2f6f73;
   border-radius: 8px;
   background: #e8f4f2;
   color: #123f43;
-  box-shadow: 0 14px 32px rgba(31, 36, 43, 0.16);
-  padding: 10px 12px;
+  box-shadow: 0 28px 72px rgba(31, 36, 43, 0.28);
+  padding: 22px;
 }
 
-.round-notice strong {
-  font-size: 13px;
-}
-
-.round-notice span {
+.flow-pause-alert-kicker {
+  margin: 0;
+  color: #2f6f73;
   font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.flow-pause-alert h2 {
+  margin: 0;
+  font-size: 24px;
+  line-height: 1.15;
+}
+
+.flow-pause-alert p {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.5;
+}
+
+.flow-pause-alert-hint {
+  color: #49666a;
+}
+
+.flow-pause-alert button {
+  justify-self: end;
+  min-width: 110px;
+  border: 1px solid #2f6f73;
+  background: #2f6f73;
+  color: #fffdf8;
+}
+
+.flow-pause-alert button:hover {
+  background: #245c60;
 }
 
 .warnings {
@@ -570,6 +616,78 @@ h2 {
 }
 
 .sidebar-settings .theme-mode-toggle span:last-child {
+  font-weight: 750;
+}
+
+.task-status-dock {
+  display: grid;
+  gap: 10px;
+  margin-top: auto;
+  border-top: 1px solid #d3c9b8;
+  padding-top: 10px;
+}
+
+.task-status-dock-title,
+.current-round-title {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.task-status-dock-title strong {
+  overflow: hidden;
+  font-size: 13px;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.task-status-stats {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  margin: 0;
+}
+
+.task-status-stats div,
+.current-round-status {
+  min-width: 0;
+  border: 1px solid #e0d6c7;
+  border-radius: 6px;
+  background: #fffdfa;
+}
+
+.task-status-stats div {
+  padding: 6px 7px;
+}
+
+.task-status-stats dt {
+  color: #6c6255;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.task-status-stats dd {
+  margin: 0;
+  overflow: hidden;
+  color: #1f242b;
+  font-size: 12px;
+  font-weight: 750;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.current-round-status {
+  display: grid;
+  gap: 8px;
+  padding: 8px;
+}
+
+.current-round-title span:first-child {
+  color: #3a4647;
+  font-size: 12px;
   font-weight: 750;
 }
 
@@ -921,6 +1039,23 @@ h2 {
   min-width: 0;
   max-width: 100%;
   padding: 0;
+}
+
+.translation-conversation-boundary {
+  display: grid;
+  grid-template-columns: minmax(18px, 1fr) auto auto auto minmax(18px, 1fr);
+  gap: 8px;
+  align-items: center;
+  color: #8b949e;
+  font-family: Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+.translation-boundary-dash {
+  min-width: 0;
+  border-top: 1px dashed #3a4149;
 }
 
 .translation-entry.is-user-input {
@@ -1472,6 +1607,7 @@ h2 {
   white-space: nowrap;
 }
 
+.status-active,
 .status-running,
 .status-ok {
   border-color: #6ea77e;
@@ -1479,6 +1615,7 @@ h2 {
   color: #245334;
 }
 
+.status-created,
 .status-idle {
   border-color: #9aa3a8;
   background: #edf0f1;
@@ -1494,6 +1631,8 @@ h2 {
   color: #6f2b21;
 }
 
+.status-planning,
+.status-settling,
 .status-waiting,
 .status-starting,
 .status-incomplete {
@@ -1504,6 +1643,7 @@ h2 {
 
 .status-exited,
 .status-done,
+.status-stopped,
 .status-resumable {
   border-color: #7b98b8;
   background: #e9f0f8;
@@ -1715,11 +1855,30 @@ h2 {
   color: #ffdcd7;
 }
 
-:root[data-theme="dark"] .round-notice {
+:root[data-theme="dark"] .flow-pause-alert-backdrop {
+  background: rgba(1, 4, 9, 0.72);
+}
+
+:root[data-theme="dark"] .flow-pause-alert {
   border-color: #56d4dd;
   background: #10262b;
   color: #d6fbff;
-  box-shadow: 0 14px 32px rgba(1, 4, 9, 0.48);
+  box-shadow: 0 28px 72px rgba(1, 4, 9, 0.62);
+}
+
+:root[data-theme="dark"] .flow-pause-alert-kicker,
+:root[data-theme="dark"] .flow-pause-alert-hint {
+  color: #9debf2;
+}
+
+:root[data-theme="dark"] .flow-pause-alert button {
+  border-color: #56d4dd;
+  background: #56d4dd;
+  color: #061114;
+}
+
+:root[data-theme="dark"] .flow-pause-alert button:hover {
+  background: #84f3fa;
 }
 
 :root[data-theme="dark"] .harness-file-list li,
@@ -1727,6 +1886,8 @@ h2 {
 :root[data-theme="dark"] .harness-result,
 :root[data-theme="dark"] .harness-bootstrap-session,
 :root[data-theme="dark"] .task-create-preview,
+:root[data-theme="dark"] .task-status-stats div,
+:root[data-theme="dark"] .current-round-status,
 :root[data-theme="dark"] .message-item {
   border-color: #30363d;
   background: #0d1117;
@@ -1746,8 +1907,21 @@ h2 {
   color: #e6edf3;
 }
 
+:root[data-theme="dark"] .task-status-dock {
+  border-color: #30363d;
+}
+
 :root[data-theme="dark"] .task-create-preview span {
   color: #7ee787;
+}
+
+:root[data-theme="dark"] .task-status-stats dt {
+  color: #8b949e;
+}
+
+:root[data-theme="dark"] .task-status-stats dd,
+:root[data-theme="dark"] .current-round-title span:first-child {
+  color: #e6edf3;
 }
 
 :root[data-theme="dark"] .message-sequence {
@@ -1797,6 +1971,7 @@ h2 {
 }
 
 :root[data-theme="dark"] .translation-test-result.is-ok,
+:root[data-theme="dark"] .status-active,
 :root[data-theme="dark"] .status-running,
 :root[data-theme="dark"] .status-ok {
   border-color: #3fb950;
@@ -1804,6 +1979,7 @@ h2 {
   color: #aff5b4;
 }
 
+:root[data-theme="dark"] .status-created,
 :root[data-theme="dark"] .status-idle {
   border-color: #69717d;
   background: #20262f;
@@ -1825,6 +2001,8 @@ h2 {
   color: #ffdcd7;
 }
 
+:root[data-theme="dark"] .status-planning,
+:root[data-theme="dark"] .status-settling,
 :root[data-theme="dark"] .status-waiting,
 :root[data-theme="dark"] .status-starting,
 :root[data-theme="dark"] .status-incomplete,
@@ -1841,6 +2019,7 @@ h2 {
 
 :root[data-theme="dark"] .status-exited,
 :root[data-theme="dark"] .status-done,
+:root[data-theme="dark"] .status-stopped,
 :root[data-theme="dark"] .status-resumable,
 :root[data-theme="dark"] .status-translated,
 :root[data-theme="dark"] .status-preserved {

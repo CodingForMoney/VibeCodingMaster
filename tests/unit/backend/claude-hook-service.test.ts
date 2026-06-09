@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest";
 import { createClaudeHookService } from "../../../src/backend/services/claude-hook-service.js";
 import type { MessageService } from "../../../src/backend/services/message-service.js";
 import type { ProjectService } from "../../../src/backend/services/project-service.js";
+import type { RoundService } from "../../../src/backend/services/round-service.js";
 import type { SessionService } from "../../../src/backend/services/session-service.js";
+import type { TranslationService } from "../../../src/backend/services/translation-service.js";
 import type { TaskRecord } from "../../../src/shared/types/task.js";
 
 describe("createClaudeHookService", () => {
@@ -46,7 +48,19 @@ describe("createClaudeHookService", () => {
             acceptedAt: "2026-06-01T00:00:01.000Z"
           };
         }
-      } as MessageService
+      } as MessageService,
+      roundService: {
+        async recordClaudeHookEvent(input) {
+          calls.push(`round:${input.eventName}:${input.role}`);
+          return {} as never;
+        }
+      } as RoundService,
+      translationService: {
+        async recordConversationBoundary(input) {
+          calls.push(`boundary:${input.boundaryKind}:${input.role}:${input.sessionId}`);
+          return undefined;
+        }
+      } as Pick<TranslationService, "recordConversationBoundary">
     });
 
     const result = await service.handleHook({
@@ -68,6 +82,8 @@ describe("createClaudeHookService", () => {
     });
     expect(calls).toEqual([
       "session:UserPromptSubmit:coder:claude_coder",
+      "round:UserPromptSubmit:coder",
+      "boundary:start:coder:runtime_coder",
       "confirm:demo-task:coder:true"
     ]);
   });
@@ -117,7 +133,19 @@ describe("createClaudeHookService", () => {
             }
           ];
         }
-      } as MessageService
+      } as MessageService,
+      roundService: {
+        async recordClaudeHookEvent(input) {
+          calls.push(`round:${input.eventName}:${input.role}`);
+          return {} as never;
+        }
+      } as RoundService,
+      translationService: {
+        async recordConversationBoundary(input) {
+          calls.push(`boundary:${input.boundaryKind}:${input.role}:${input.sessionId}`);
+          return undefined;
+        }
+      } as Pick<TranslationService, "recordConversationBoundary">
     });
 
     const result = await service.handleStopHook({
@@ -138,6 +166,8 @@ describe("createClaudeHookService", () => {
     });
     expect(calls).toEqual([
       "session:Stop:coder:claude_coder",
+      "round:Stop:coder",
+      "boundary:end:coder:runtime_coder",
       "scan:demo-task:coder:.ai/vcm/handoffs:/repo"
     ]);
   });

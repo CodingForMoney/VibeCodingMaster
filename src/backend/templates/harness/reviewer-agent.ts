@@ -23,6 +23,8 @@ export function renderReviewerHarnessRules(): string {
 
 - Independently design the test coverage needed to prove the implemented behavior, including missing cases beyond coder's baseline tests.
 - Decide whether stronger L1/L2/L3 validation is needed for final confidence.
+- Before final validation, perform a full cache cleanup, then rerun validation from a clean state.
+- Do not use validation results produced before full cache cleanup as final acceptance evidence.
 - Add or modify tests needed for test adequacy.
 - Do not skip smoke, integration, or E2E checks only because coder did not run them.
 

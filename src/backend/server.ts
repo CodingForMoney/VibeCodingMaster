@@ -115,8 +115,6 @@ export async function createServer(deps: ServerDeps, options: CreateServerOption
   registerRoundRoutes(app, {
     projectService: deps.projectService,
     taskService: deps.taskService,
-    sessionService: deps.sessionService,
-    messageService: deps.messageService,
     roundService: deps.roundService
   });
   registerTranslationRoutes(app, {
@@ -205,14 +203,8 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     sessionService,
     taskService
   });
-  const claudeHookService = createClaudeHookService({
-    projectService,
-    taskService,
-    sessionService,
-    messageService
-  });
+  const roundService = createRoundService({ fs });
   const transcripts = createClaudeTranscriptService();
-  const roundService = createRoundService();
   const translationService = createTranslationService({
     runtime,
     sessionRegistry: registry,
@@ -222,6 +214,14 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     projectService,
     appSettings,
     provider: createOpenAiCompatibleTranslationProvider()
+  });
+  const claudeHookService = createClaudeHookService({
+    projectService,
+    taskService,
+    sessionService,
+    messageService,
+    roundService,
+    translationService
   });
 
   return {

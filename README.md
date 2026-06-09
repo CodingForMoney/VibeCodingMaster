@@ -22,7 +22,6 @@ Each role runs as a real Claude Code process inside an embedded terminal. The GU
 - Permission mode selection before start, resume, or restart:
   - `default`
   - `bypassPermissions`
-  - `--dangerously-skip-permissions`
 - PM-mediated role messaging through VCM-dispatched route files.
 - Manual and automatic orchestration modes.
 - Two-stage VCM harness setup: deterministic fixed install plus AI-assisted bootstrap.
@@ -188,18 +187,20 @@ The left sidebar is intentionally compact and collapsible:
 
 - `Repository Path`: path input on one row; `Recent` and `Connect` on the next row.
 - `Repository`: connected path, branch, and working tree state. `Working tree: uncommitted changes` means `git status --porcelain` is not empty.
-- `Settings`: `Theme`, `Round alert`, `Try alert`, `Messages`, and `Events`.
+- `Settings`: `Theme`, `Flow pause alert`, `Try alert`, `Messages`, and `Events`.
 - `VCM Harness`: fixed-install status, bootstrap completion checks, and the bootstrap terminal when one is running.
 - `New Task`: one `task name` input.
 - `Tasks`: task list and task status.
 
 All sidebar sections are collapsed by default. When no task is selected, `Repository Path` opens by default.
 
+When VCM is connected to an active task, the bottom of the sidebar shows a task status dock. It stays outside the collapsible groups and shows the task title, task status, start time, total elapsed time, total flow-round count, and Claude Code active runtime. If a flow round is currently active or settling, the dock also shows that round's start time and Claude Code active runtime.
+
 ## Translation
 
 The task header has a global `Translate` button next to `Close Task`. It opens a translation panel beside the embedded terminal for the role consoles and keeps the same on/off setting while switching roles. The terminal and translation panel split the available width evenly.
 
-The task header does not include a manual `Refresh` button. Task status, role status, messages, orchestration state, and round completion state refresh automatically. The remaining `Refresh` button lives only in the sidebar `VCM Harness` section and is for rechecking harness files.
+The task header does not include a manual `Refresh` button. Task status, role status, messages, orchestration state, and flow pause state refresh automatically. The remaining `Refresh` button lives only in the sidebar `VCM Harness` section and is for rechecking harness files.
 
 Translation settings are local and stored in:
 
@@ -211,7 +212,7 @@ The same file stores recent repository paths. The translation API key is stored 
 
 The sidebar `Settings` section also stores the UI theme preference in this file. The default is `system`, which follows the OS/browser color-scheme preference; users can cycle between `System`, `Light`, and `Dark`.
 
-The same sidebar also has a `Round alert` toggle. It is on by default and controls the in-app prompt plus a soft two-note completion chime that fires when VCM detects that the current full conversation round is complete. The `Try alert` button triggers the same local prompt and sound for testing.
+The same sidebar also has a `Flow pause alert` toggle. It is on by default and controls the local alert that fires when VCM detects that the current role flow has stopped advancing. Short flows use a weak reminder: the soft two-note chime plays 3 times, 1.4 seconds apart. Flows lasting 10 minutes or longer use a strong reminder: VCM shows an alert dialog and repeats the chime until the user confirms it. The `Try alert` button always triggers the strong reminder for testing.
 
 Translation behavior:
 
@@ -222,6 +223,8 @@ Translation behavior:
 - VCM tails those transcript files in the backend. Closing the translation panel does not stop capture; the tailer stops only when the role session is stopped/restarted or the task is closed.
 - Translation events are cached under the task runtime repo at `.ai/vcm/translation/<task>/<role>/<session-id>.jsonl` and delivered to the frontend through HTTP polling.
 - The polling cursor is the next expected seq: `after=18` acknowledges seq `1..17` and returns seq `18+`; there is no snapshot mismatch error.
+- The translation panel retains the most recent 500 entries per role session in frontend/backend memory. Older entries are pruned from the live panel state and event cache to keep long sessions responsive.
+- Failed output translations are tracked in a backend failure list. When failures exist, the panel shows `Ignore N` and `Retry N`; retry reuses the original entry id so the failed row is replaced by the normal translating/translated flow. If an old failed entry is pruned by the 500-entry cap, its failure-list item is removed too.
 - Assistant prose is shown as English source while translating, then replaced by the translated Chinese result.
 - Assistant prose renders Markdown in the panel, including headings, lists, code fences, tables, and links.
 - Tool calls and tool results are preserved as dim one-line rows such as `● Bash({"command":"npm test"})`.
@@ -369,13 +372,15 @@ VCM Harness injects Claude Code `UserPromptSubmit` and `Stop` hooks into `.claud
 
 The implementation keeps only the active manual/auto orchestration mode. It does not expose pause/resume, stage/approve/reject, or a separate agent-facing message CLI.
 
-## Round Completion Alerts
+## Flow Pause Alerts
 
-VCM detects conversation completion from hook-driven role activity state, not PTY silence or message history. `UserPromptSubmit` marks a role `running`, and `Stop` marks that role `idle` with a stop timestamp.
+VCM detects flow pauses from Claude Code hook events, not PTY silence, message history, or pending route files. `UserPromptSubmit` starts a new flow round when none is active, or continues the current round when it fires within the settle window.
 
-For role chains, VCM waits for the final role to reach hook `Stop`. For example, if PM sends work to Coder and Coder sends a result back to PM, the round is not complete when Coder finishes; it is complete only after PM reaches `Stop` for the final response. Pending route files block completion because more dispatch work is waiting; message history does not define completion.
+When a `Stop` hook fires, VCM marks the round as settling for 10 seconds. If another `UserPromptSubmit` fires inside that window, the same round continues and VCM increments the prompt-submit count. If no new prompt is accepted before the deadline, VCM marks the round as `paused`.
 
-When `Round alert` is enabled, the frontend polls the task round state, deduplicates each completion id, shows a small `Round complete` prompt, and plays the local completion chime.
+The normal path is timer-driven: `Stop` starts a backend settle timer, and `UserPromptSubmit` cancels it. Reading the round state also checks expired deadlines as a recovery fallback after process restarts, sleep, or missed timers.
+
+When `Flow pause alert` is enabled, the frontend polls the task round state and deduplicates each pause id. Flow duration is measured from the first `UserPromptSubmit` to the last `Stop`; the 10 second settle window is not counted. If the paused flow lasted less than 10 minutes, it plays the local chime 3 times at 1.4 second intervals. If the paused flow lasted 10 minutes or longer, it shows a modal `Flow paused` alert and repeats the local chime until the user clicks `Confirm`. A pause can mean normal completion, user decision needed, dispatch failure, or another workflow interruption; the point is to get the user to look with the right amount of urgency.
 
 ## Resume Behavior
 
@@ -391,6 +396,8 @@ Session buttons behave as follows:
 - `Resume`: reuses the persisted Claude session id and builds `claude --agent <role> --resume <uuid>`.
 - `Restart`: stops the current process if needed, creates a new UUID, and starts a fresh Claude session.
 - `Stop`: stops the embedded terminal process and leaves the persisted Claude session id resumable.
+
+Embedded terminal output is still written to raw role log files under `.ai/vcm/handoffs/logs/`. When a browser reconnects to a running terminal, VCM replays only the tail of that log, capped at 2 MB, rather than streaming the entire historical log back into xterm. This keeps long sessions responsive while preserving full logs on disk until task cleanup.
 
 ## Local Project Files
 

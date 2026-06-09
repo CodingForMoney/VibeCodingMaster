@@ -7,6 +7,7 @@ import type {
 } from "../../shared/types/harness.js";
 import type { VcmOrchestrationState, VcmRoleMessage } from "../../shared/types/message.js";
 import type { ProjectSummary } from "../../shared/types/project.js";
+import type { VcmTaskRoundState } from "../../shared/types/round.js";
 import type { TaskRecord } from "../../shared/types/task.js";
 import { EventLog } from "../components/event-log.js";
 import { HarnessPanel } from "../components/harness-panel.js";
@@ -22,6 +23,7 @@ export interface ProjectDashboardProps {
   messages: VcmRoleMessage[];
   orchestration: VcmOrchestrationState | null;
   events: string[];
+  roundState: VcmTaskRoundState | null;
   harnessStatus: HarnessStatusReport | null;
   harnessBootstrapStatus: HarnessBootstrapStatusReport | null;
   harnessApplyResult?: HarnessApplyResult | null;
@@ -34,9 +36,9 @@ export interface ProjectDashboardProps {
   onSelectTask(taskSlug: string): void;
   themeMode: ThemeMode;
   onThemeModeChange(themeMode: ThemeMode): void;
-  roundCompletionAlerts: boolean;
-  onRoundCompletionAlertsChange(enabled: boolean): void;
-  onTryRoundAlert(): void;
+  flowPauseAlerts: boolean;
+  onFlowPauseAlertsChange(enabled: boolean): void;
+  onTryFlowPauseAlert(): void;
   onMarkAllMessagesDone(taskSlug: string): void;
   onDeleteMessageHistory(taskSlug: string): void;
 }
@@ -49,6 +51,7 @@ export function ProjectDashboard({
   messages,
   orchestration,
   events,
+  roundState,
   harnessStatus,
   harnessBootstrapStatus,
   harnessApplyResult,
@@ -61,9 +64,9 @@ export function ProjectDashboard({
   onSelectTask,
   themeMode,
   onThemeModeChange,
-  roundCompletionAlerts,
-  onRoundCompletionAlertsChange,
-  onTryRoundAlert,
+  flowPauseAlerts,
+  onFlowPauseAlertsChange,
+  onTryFlowPauseAlert,
   onMarkAllMessagesDone,
   onDeleteMessageHistory
 }: ProjectDashboardProps) {
@@ -73,6 +76,7 @@ export function ProjectDashboard({
   const [showEvents, setShowEvents] = useState(false);
   const messageCounts = getMessageCounts(messages);
   const normalizedTaskSlug = taskSlug.trim();
+  const activeTask = tasks.find((task) => task.taskSlug === activeTaskSlug) ?? null;
 
   async function handleCreateTask(event: FormEvent) {
     event.preventDefault();
@@ -138,19 +142,19 @@ export function ProjectDashboard({
             <span>{getThemeModeLabel(themeMode)}</span>
           </button>
           <button
-            aria-pressed={roundCompletionAlerts}
-            className={roundCompletionAlerts ? "settings-toggle is-active" : "settings-toggle"}
+            aria-pressed={flowPauseAlerts}
+            className={flowPauseAlerts ? "settings-toggle is-active" : "settings-toggle"}
             disabled={busy}
             type="button"
-            onClick={() => onRoundCompletionAlertsChange(!roundCompletionAlerts)}
+            onClick={() => onFlowPauseAlertsChange(!flowPauseAlerts)}
           >
-            <span>Round alert</span>
-            <span>{roundCompletionAlerts ? "on" : "off"}</span>
+            <span>Flow pause alert</span>
+            <span>{flowPauseAlerts ? "on" : "off"}</span>
           </button>
           <button
             className="settings-toggle"
             type="button"
-            onClick={onTryRoundAlert}
+            onClick={onTryFlowPauseAlert}
           >
             <span>Try alert</span>
             <span>test</span>
@@ -227,6 +231,10 @@ export function ProjectDashboard({
         </SidebarSection>
       ) : null}
 
+      {project && activeTask ? (
+        <TaskStatusDock task={activeTask} roundState={roundState} />
+      ) : null}
+
       {showMessages ? (
         <MessageDialog
           busy={busy}
@@ -254,6 +262,130 @@ export function ProjectDashboard({
       ) : null}
     </div>
   );
+}
+
+function TaskStatusDock({
+  roundState,
+  task
+}: {
+  roundState: VcmTaskRoundState | null;
+  task: TaskRecord;
+}) {
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  const showCurrentRound = Boolean(
+    roundState?.startedAt &&
+    (roundState.status === "active" || roundState.status === "settling")
+  );
+  const taskElapsedMs = getElapsedMs(task.createdAt, nowMs);
+  const totalCcActiveMs = getLiveCcActiveMs(roundState, roundState?.totalCcActiveMs ?? 0, nowMs);
+  const currentRoundCcActiveMs = showCurrentRound && roundState
+    ? getLiveCcActiveMs(roundState, roundState.currentRoundCcActiveMs, nowMs)
+    : 0;
+  const title = task.title?.trim() || task.taskSlug;
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNowMs(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  return (
+    <section className="task-status-dock" aria-label="Task status">
+      <div className="task-status-dock-title">
+        <strong title={title}>{title}</strong>
+        <span className={`status-badge status-${task.status}`}>{task.status}</span>
+      </div>
+
+      <dl className="task-status-stats">
+        <div>
+          <dt>Started</dt>
+          <dd>{formatTime(task.createdAt)}</dd>
+        </div>
+        <div>
+          <dt>Total</dt>
+          <dd>{formatDuration(taskElapsedMs)}</dd>
+        </div>
+        <div>
+          <dt>Rounds</dt>
+          <dd>{roundState?.totalRoundCount ?? 0}</dd>
+        </div>
+        <div>
+          <dt>CC runtime</dt>
+          <dd>{formatDuration(totalCcActiveMs)}</dd>
+        </div>
+      </dl>
+
+      {showCurrentRound && roundState ? (
+        <div className="current-round-status">
+          <div className="current-round-title">
+            <span>Current round</span>
+            <span className={`status-badge status-${roundState.status}`}>{roundState.status}</span>
+          </div>
+          <dl className="task-status-stats">
+            <div>
+              <dt>Started</dt>
+              <dd>{formatTime(roundState.startedAt)}</dd>
+            </div>
+            <div>
+              <dt>CC runtime</dt>
+              <dd>{formatDuration(currentRoundCcActiveMs)}</dd>
+            </div>
+          </dl>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+function getLiveCcActiveMs(
+  roundState: VcmTaskRoundState | null,
+  baseMs: number,
+  nowMs: number
+): number {
+  if (!roundState?.runningSince || roundState.status !== "active") {
+    return baseMs;
+  }
+  const updatedAtMs = Date.parse(roundState.updatedAt);
+  if (!Number.isFinite(updatedAtMs)) {
+    return baseMs;
+  }
+  return baseMs + Math.max(0, nowMs - updatedAtMs);
+}
+
+function getElapsedMs(startedAt: string, nowMs: number): number {
+  const startedAtMs = Date.parse(startedAt);
+  if (!Number.isFinite(startedAtMs)) {
+    return 0;
+  }
+  return Math.max(0, nowMs - startedAtMs);
+}
+
+function formatTime(value?: string): string {
+  if (!value) {
+    return "-";
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "-";
+  }
+  return new Intl.DateTimeFormat(undefined, {
+    hour: "2-digit",
+    minute: "2-digit"
+  }).format(date);
+}
+
+function formatDuration(milliseconds: number): string {
+  const totalSeconds = Math.max(0, Math.floor(milliseconds / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  if (hours > 0) {
+    return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`;
+  }
+  if (minutes > 0) {
+    return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
+  }
+  return `${seconds}s`;
 }
 
 function getNextThemeMode(themeMode: ThemeMode): ThemeMode {

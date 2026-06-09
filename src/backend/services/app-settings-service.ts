@@ -247,9 +247,12 @@ function normalizeSettingsFile(input: Partial<AppSettingsFile>): AppSettingsFile
 
 function normalizePreferences(input: unknown): AppPreferences {
   const candidate = isObject(input) ? input : {};
+  const rawFlowPauseAlerts = "flowPauseAlerts" in candidate
+    ? candidate.flowPauseAlerts
+    : candidate.roundCompletionAlerts;
   return {
     themeMode: normalizeThemeMode(candidate.themeMode),
-    roundCompletionAlerts: candidate.roundCompletionAlerts !== false
+    flowPauseAlerts: rawFlowPauseAlerts !== false
   };
 }
 

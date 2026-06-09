@@ -1017,8 +1017,6 @@ function buildClaudeStartCommand(
   const args = ["--session-id", claudeSessionId];
   if (permissionMode === "bypassPermissions") {
     args.push("--permission-mode", "bypassPermissions");
-  } else if (permissionMode === "dangerously-skip-permissions") {
-    args.push("--dangerously-skip-permissions");
   }
   return {
     command,

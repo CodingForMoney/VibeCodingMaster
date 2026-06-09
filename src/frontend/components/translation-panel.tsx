@@ -4,11 +4,13 @@ import remarkGfm from "remark-gfm";
 import type { RoleName } from "../../shared/types/role.js";
 import type {
   TranslationEntry,
+  TranslationFailureItem,
   TranslationPromptPreview,
   TranslationSessionEvent,
   TranslationSessionStatus,
   TranslationSettings,
 } from "../../shared/types/translation.js";
+import { TRANSLATION_ENTRY_RETENTION_LIMIT } from "../../shared/types/translation.js";
 import { apiClient } from "../state/api-client.js";
 import { TranslationSettingsModal } from "./translation-settings-modal.js";
 
@@ -24,6 +26,7 @@ export interface TranslationPanelProps {
 export function TranslationPanel({ active = true, taskSlug, role, sessionId }: TranslationPanelProps) {
   const [settings, setSettings] = useState<TranslationSettings | null>(null);
   const [entries, setEntries] = useState<TranslationEntry[]>([]);
+  const [failures, setFailures] = useState<TranslationFailureItem[]>([]);
   const [composer, setComposer] = useState("");
   const [composerIsEnglishDraft, setComposerIsEnglishDraft] = useState(false);
   const [autoSendEnabled, setAutoSendEnabled] = useState(false);
@@ -59,6 +62,7 @@ export function TranslationPanel({ active = true, taskSlug, role, sessionId }: T
 
   useEffect(() => {
     setEntries([]);
+    setFailures([]);
     setError("");
     setStatus("ready");
     setLastPollAt("");
@@ -177,6 +181,8 @@ export function TranslationPanel({ active = true, taskSlug, role, sessionId }: T
         setStatus(event.status);
       } else if (event.type === "error") {
         setError(event.message);
+      } else if (event.type === "failures") {
+        setFailures(event.failures);
       }
     }
 
@@ -184,7 +190,16 @@ export function TranslationPanel({ active = true, taskSlug, role, sessionId }: T
       event.type === "entry"
     );
     if (entryEvents.length > 0) {
-      setEntries((current) => entryEvents.reduce((next, event) => upsertEntry(next, event.entry), current));
+      setEntries((current) => {
+        const nextEntries = entryEvents.reduce((next, event) => upsertEntry(next, event.entry), current);
+        const trimmed = trimTranslationEntries(nextEntries);
+        if (trimmed.removedIds.size > 0) {
+          setFailures((currentFailures) =>
+            currentFailures.filter((failure) => !trimmed.removedIds.has(failure.translationId))
+          );
+        }
+        return trimmed.entries;
+      });
     }
   }
 
@@ -251,8 +266,35 @@ export function TranslationPanel({ active = true, taskSlug, role, sessionId }: T
 
   async function clearPanel() {
     setEntries([]);
+    setFailures([]);
     cursorRef.current = 1;
     await apiClient.clearTranslationSession(sessionId).catch((caught: Error) => setError(caught.message));
+  }
+
+  async function ignoreFailures() {
+    setBusy(true);
+    setError("");
+    try {
+      const result = await apiClient.ignoreTranslationFailures(sessionId);
+      setFailures(result.failures);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Failed to ignore translation failures.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function retryFailures() {
+    setBusy(true);
+    setError("");
+    try {
+      const result = await apiClient.retryTranslationFailures(sessionId);
+      setFailures(result.failures);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Failed to retry translation failures.");
+    } finally {
+      setBusy(false);
+    }
   }
 
   if (!settings) {
@@ -260,6 +302,7 @@ export function TranslationPanel({ active = true, taskSlug, role, sessionId }: T
   }
 
   const panelStatus = getPanelStatus(entries, status, panelNowMs);
+  const failureCount = failures.length;
 
   return (
     <aside className="translation-panel">
@@ -275,6 +318,16 @@ export function TranslationPanel({ active = true, taskSlug, role, sessionId }: T
             >
               {autoSendEnabled ? "✅ Auto-send" : "× Auto-send"}
             </button>
+            {failureCount > 0 ? (
+              <>
+                <button type="button" disabled={busy} onClick={() => void ignoreFailures()}>
+                  Ignore {failureCount}
+                </button>
+                <button type="button" disabled={busy} onClick={() => void retryFailures()}>
+                  Retry {failureCount}
+                </button>
+              </>
+            ) : null}
             <button type="button" onClick={() => setShowSettings(true)}>Settings</button>
             <button type="button" onClick={() => void clearPanel()}>Clear</button>
           </div>
@@ -335,6 +388,10 @@ export function TranslationPanel({ active = true, taskSlug, role, sessionId }: T
 }
 
 function TranslationEntryRow({ entry }: { entry: TranslationEntry }) {
+  if (entry.sourceKind === "conversation-boundary") {
+    return <ConversationBoundaryRow entry={entry} />;
+  }
+
   const displayText = getTranslationEntryDisplayText(entry);
   const isToolOutput = entry.sourceKind === "tool-output";
   const isUserInput = entry.direction === "user-input-to-english";
@@ -359,6 +416,22 @@ function TranslationEntryRow({ entry }: { entry: TranslationEntry }) {
   );
 }
 
+function ConversationBoundaryRow({ entry }: { entry: TranslationEntry }) {
+  const label = entry.boundaryKind === "end" ? "结束" : "开始";
+  const turn = entry.conversationTurn ?? 0;
+  const time = formatBoundaryTimestamp(entry.occurredAt ?? entry.createdAt);
+
+  return (
+    <div className="translation-conversation-boundary" aria-label={`${label} 第 ${turn} 轮 ${time}`}>
+      <span className="translation-boundary-dash" aria-hidden="true" />
+      <span>{label}</span>
+      <span>第 {turn} 轮</span>
+      <time>{time}</time>
+      <span className="translation-boundary-dash" aria-hidden="true" />
+    </div>
+  );
+}
+
 function getActiveTranslationStartedAt(entries: TranslationEntry[]): string | undefined {
   const activeEntry = entries.find(isActiveTranslation);
   return activeEntry?.translationStartedAt ?? activeEntry?.createdAt;
@@ -380,6 +453,36 @@ function getPanelStatus(entries: TranslationEntry[], fallbackStatus: Translation
 
 function isActiveTranslation(entry: TranslationEntry): boolean {
   return entry.status === "queued" || entry.status === "translating";
+}
+
+function trimTranslationEntries(entries: TranslationEntry[]): {
+  entries: TranslationEntry[];
+  removedIds: Set<string>;
+} {
+  const overflow = entries.length - TRANSLATION_ENTRY_RETENTION_LIMIT;
+  if (overflow <= 0) {
+    return { entries, removedIds: new Set() };
+  }
+
+  const removedIds = new Set<string>();
+  for (const entry of entries) {
+    if (removedIds.size >= overflow) {
+      break;
+    }
+    if (isActiveTranslation(entry)) {
+      continue;
+    }
+    removedIds.add(entry.id);
+  }
+
+  if (removedIds.size === 0) {
+    return { entries, removedIds };
+  }
+
+  return {
+    entries: entries.filter((entry) => !removedIds.has(entry.id)),
+    removedIds
+  };
 }
 
 function getEntryStartedMs(entry: TranslationEntry): number {
@@ -423,6 +526,14 @@ function formatElapsed(elapsedMs: number): string {
 }
 
 function formatPollTimestamp(timestamp: string): string {
+  const date = new Date(timestamp);
+  if (Number.isNaN(date.getTime())) {
+    return timestamp;
+  }
+  return date.toLocaleTimeString();
+}
+
+function formatBoundaryTimestamp(timestamp: string): string {
   const date = new Date(timestamp);
   if (Number.isNaN(date.getTime())) {
     return timestamp;

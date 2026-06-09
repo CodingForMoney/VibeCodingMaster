@@ -74,7 +74,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     const taskRepoRoot = getTaskRuntimeRepoRoot(task);
     const paths = deps.artifactService.getHandoffPaths(taskRepoRoot, task.handoffDir);
     const persisted = await loadPersistedRoleRecord(deps.fs, taskRepoRoot, config.stateRoot, taskSlug, role);
-    const permissionMode = input.permissionMode ?? persisted?.permissionMode ?? "default";
+    const permissionMode = normalizeClaudePermissionMode(input.permissionMode ?? persisted?.permissionMode);
     const claudeSessionId = launchMode === "resume"
       ? persisted?.claudeSessionId
       : randomUUID();
@@ -326,7 +326,13 @@ async function loadPersistedRoleRecord(
   }
 
   const current = await fs.readJson<TaskSessionRecord>(sessionPath);
-  return current.roles[role]?.record;
+  const record = current.roles[role]?.record;
+  return record
+    ? {
+        ...record,
+        permissionMode: normalizeClaudePermissionMode(record.permissionMode)
+      }
+    : undefined;
 }
 
 async function persistTaskSession(
@@ -377,4 +383,11 @@ function createEmptyTaskSessionRecord(taskSlug: string, updatedAt: string): Task
 
 function getTaskSessionPath(repoRoot: string, stateRoot: string, taskSlug: string): string {
   return path.join(repoRoot, stateRoot, "sessions", `${taskSlug}.json`);
+}
+
+function normalizeClaudePermissionMode(value: unknown): ClaudePermissionMode {
+  if (value === "bypassPermissions" || value === "dangerously-skip-permissions") {
+    return "bypassPermissions";
+  }
+  return "default";
 }

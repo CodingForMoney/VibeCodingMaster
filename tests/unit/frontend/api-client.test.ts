@@ -83,12 +83,12 @@ describe("apiClient", () => {
   it("updates app preferences", async () => {
     const fetchMock = mockFetch({
       themeMode: "dark",
-      roundCompletionAlerts: false
+      flowPauseAlerts: false
     });
 
     const preferences = await apiClient.updateAppPreferences({
       themeMode: "dark",
-      roundCompletionAlerts: false
+      flowPauseAlerts: false
     });
 
     const init = fetchMock.mock.calls[0]?.[1];
@@ -96,10 +96,10 @@ describe("apiClient", () => {
     expect(init?.method).toBe("PUT");
     expect(JSON.parse(String(init?.body))).toEqual({
       themeMode: "dark",
-      roundCompletionAlerts: false
+      flowPauseAlerts: false
     });
     expect(preferences.themeMode).toBe("dark");
-    expect(preferences.roundCompletionAlerts).toBe(false);
+    expect(preferences.flowPauseAlerts).toBe(false);
   });
 
   it("sends translation API keys in the settings request body", async () => {
@@ -116,11 +116,11 @@ describe("apiClient", () => {
       inputMode: "review-before-send",
       translateOutput: true,
       translateUserInput: true,
-      contextEnabled: true,
+      contextEnabled: false,
       preserveTechnicalTokens: true,
       skipCjkText: true,
       redactSecrets: true,
-      requestTimeoutMs: 15000,
+      requestTimeoutMs: 120000,
       temperature: 0.1
     });
 
@@ -169,6 +169,20 @@ describe("apiClient", () => {
     expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/tasks/demo-task/sessions/coder/translation/start");
     expect(fetchMock.mock.calls[0]?.[1]?.method).toBe("POST");
     expect(fetchMock.mock.calls[1]?.[0]).toBe("/api/translation/sessions/session-1/events?after=18&limit=100");
+  });
+
+  it("calls translation failure queue APIs with bodyless POST requests", async () => {
+    const fetchMock = mockFetch({ failures: [] });
+
+    await apiClient.ignoreTranslationFailures("session-1");
+    await apiClient.retryTranslationFailures("session-1");
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/translation/sessions/session-1/failures/ignore");
+    expect(fetchMock.mock.calls[0]?.[1]?.method).toBe("POST");
+    expect(fetchMock.mock.calls[0]?.[1]?.body).toBeUndefined();
+    expect(fetchMock.mock.calls[1]?.[0]).toBe("/api/translation/sessions/session-1/failures/retry");
+    expect(fetchMock.mock.calls[1]?.[1]?.method).toBe("POST");
+    expect(fetchMock.mock.calls[1]?.[1]?.body).toBeUndefined();
   });
 });
 

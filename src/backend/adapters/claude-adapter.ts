@@ -41,8 +41,6 @@ export function createClaudeAdapter(runner: CommandRunner): ClaudeAdapter {
       }
       if (permissionMode === "bypassPermissions") {
         args.push("--permission-mode", "bypassPermissions");
-      } else if (permissionMode === "dangerously-skip-permissions") {
-        args.push("--dangerously-skip-permissions");
       }
 
       return {

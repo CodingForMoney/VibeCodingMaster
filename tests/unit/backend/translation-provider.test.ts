@@ -18,11 +18,11 @@ const settings: TranslationSettings = {
   inputMode: "review-before-send",
   translateOutput: true,
   translateUserInput: true,
-  contextEnabled: true,
+  contextEnabled: false,
   preserveTechnicalTokens: true,
   skipCjkText: true,
   redactSecrets: true,
-  requestTimeoutMs: 15000,
+  requestTimeoutMs: 120000,
   temperature: 0.1
 };
 

@@ -116,6 +116,54 @@ describe("createSessionService", () => {
     expect(secondRuntimeInputs[0]?.args).not.toContain("--resume");
   });
 
+  it("normalizes legacy dangerously skip permission records to bypassPermissions", async () => {
+    const fs = createMemoryFs();
+    await fs.writeJson("/repo/.ai/vcm/sessions/demo-task.json", {
+      version: 1,
+      taskSlug: "demo-task",
+      updatedAt: "2026-05-29T00:00:00.000Z",
+      roles: {
+        "project-manager": { id: null, status: "not_started" },
+        architect: { id: null, status: "not_started" },
+        coder: {
+          id: "runtime_legacy",
+          claudeSessionId: "00000000-0000-4000-8000-000000000004",
+          status: "running",
+          record: {
+            id: "runtime_legacy",
+            claudeSessionId: "00000000-0000-4000-8000-000000000004",
+            taskSlug: "demo-task",
+            role: "coder",
+            status: "running",
+            activityStatus: "idle",
+            command: "claude --agent coder --dangerously-skip-permissions",
+            permissionMode: "dangerously-skip-permissions",
+            cwd: "/repo",
+            terminalBackend: "node-pty",
+            logPath: ".ai/vcm/handoffs/logs/coder.log",
+            updatedAt: "2026-05-29T00:00:00.000Z"
+          }
+        },
+        reviewer: { id: null, status: "not_started" }
+      }
+    });
+    const runtimeInputs: CreateTerminalSessionInput[] = [];
+    const service = createTestSessionService(fs, runtimeInputs);
+
+    const recovered = await service.getRoleSession("/repo", "demo-task", "coder");
+    expect(recovered?.permissionMode).toBe("bypassPermissions");
+
+    await service.resumeRoleSession("/repo", "demo-task", "coder");
+    expect(runtimeInputs[0]?.args).toEqual([
+      "--agent",
+      "coder",
+      "--resume",
+      "00000000-0000-4000-8000-000000000004",
+      "--permission-mode",
+      "bypassPermissions"
+    ]);
+  });
+
   it("records Claude hook activity separately from terminal process status", async () => {
     const fs = createMemoryFs();
     const runtimeInputs: CreateTerminalSessionInput[] = [];
@@ -172,8 +220,6 @@ function createTestSessionService(
         }
         if (permissionMode === "bypassPermissions") {
           args.push("--permission-mode", "bypassPermissions");
-        } else if (permissionMode === "dangerously-skip-permissions") {
-          args.push("--dangerously-skip-permissions");
         }
         return { command, args, display: `${command} ${args.join(" ")}` };
       }

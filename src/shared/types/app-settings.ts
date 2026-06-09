@@ -2,11 +2,12 @@ export type ThemeMode = "system" | "light" | "dark";
 
 export interface AppPreferences {
   themeMode: ThemeMode;
-  roundCompletionAlerts: boolean;
+  flowPauseAlerts: boolean;
 }
 
 export interface UpdateAppPreferencesRequest {
   themeMode?: ThemeMode;
+  flowPauseAlerts?: boolean;
   roundCompletionAlerts?: boolean;
 }
 

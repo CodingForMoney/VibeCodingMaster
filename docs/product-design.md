@@ -1,6 +1,6 @@
 # VibeCodingMaster Product Design
 
-Last updated: 2026-06-02
+Last updated: 2026-06-09
 
 This document describes the current product direction and implemented V1 behavior for VCM.
 
@@ -223,6 +223,8 @@ Sections:
 - `New Task`
 - `Tasks`
 
+The connected active task also has a bottom status dock. It is not a collapsible sidebar section. It stays at the bottom of the sidebar and shows the active task title, task status, task start time, total elapsed time, total flow-round count, and Claude Code active runtime. When the current round is active or settling, it also shows that round's start time and Claude Code active runtime.
+
 `Repository Path` layout:
 
 ```text
@@ -242,15 +244,15 @@ The old `Dirty: yes/no` label is not used. The UI uses `Working tree: clean` or 
 `Settings` contains:
 
 - `Theme` button, cycling through `System`, `Light`, and `Dark`.
-- `Round alert` button, on by default, controlling the completion prompt and soft two-note completion chime.
-- `Try alert` button, firing the same completion prompt and sound for local verification.
+- `Flow pause alert` button, on by default, controlling weak and strong pause reminders.
+- `Try alert` button, firing the strong pause alert dialog and sound for local verification.
 - `Messages` button, opening a modal list of role messages.
 - `Events` button, opening a modal list of runtime UI events for the current task.
 
 The default theme mode is `System`, which follows the OS/browser color-scheme preference. The entire application chrome, sidebar, forms, modals, status badges, and workspace panels must support both light and dark rendering. Embedded terminals keep their terminal-native dark styling.
 
-When `Round alert` is on, VCM shows a compact in-app prompt and plays a short, soft, two-note local chime after a full conversation round truly ends.
-`Try alert` must work even when no conversation has just completed so the user can verify browser sound and notification behavior.
+When `Flow pause alert` is on, VCM plays a short, soft, two-note local chime after a role flow stops advancing. If the flow lasted less than 10 minutes, the chime plays 3 times, 1.4 seconds apart, and stops. If the flow lasted 10 minutes or longer, VCM shows an in-app alert dialog and repeats the chime until the user confirms the dialog.
+`Try alert` must work even when no flow has just paused so the user can verify browser sound and notification behavior.
 
 There is no separate `Pause orchestration` or `Resume orchestration` control in the GUI. The current product model is one on/off toggle in the role console toolbar.
 
@@ -278,7 +280,7 @@ The task workspace header is one compact row:
 
 The header does not show `TASK WORKSPACE`, branch, or worktree path. Task branch/worktree details remain task metadata, but they are not first-row chrome.
 
-The task workspace does not show a manual `Refresh` button. Task status, role status, messages, orchestration state, and round completion state refresh automatically. The only remaining `Refresh` control is inside the sidebar `VCM Harness` section, where it rechecks managed project files.
+The task workspace does not show a manual `Refresh` button. Task status, role status, messages, orchestration state, and flow pause state refresh automatically. The only remaining `Refresh` control is inside the sidebar `VCM Harness` section, where it rechecks managed project files.
 
 Role tabs show the session status for each role.
 
@@ -300,7 +302,6 @@ Permission modes:
 
 - `default`
 - `bypassPermissions`
-- `--dangerously-skip-permissions`
 
 The permission mode applies on the next start/resume/restart. If a session is already running, changing the select does not mutate that live process.
 
@@ -316,24 +317,27 @@ When translation is on, the console splits horizontally:
 
 The split should stay close to 50/50 width. Both panes expand vertically to fill the remaining workspace height.
 
-## 8. Round Completion Detection
+## 8. Flow Pause Detection
 
-VCM detects answer completion from VCM's hook-driven role activity state, not from terminal silence or message history.
+VCM detects flow pauses from Claude Code hook events, not from terminal silence, message history, or pending route files.
 
 Backend role state:
 
 - VCM terminal submit: role becomes `running`.
 - `Stop`: role becomes `idle` and records `lastStopAt`.
-- The role tab and Round alert use the same activity state source.
+- The role tab and flow pause state both react to Claude Code hook events.
 
 Task-level round state:
 
-- The latest role with a real hook `Stop` is the completion source when no role is still running.
-- A PM -> Coder -> PM chain completes only when the final role, PM, reaches hook `Stop`.
-- Pending route files prevent completion because more role work is waiting, but message history does not define completion.
-- If no VCM role message is involved, the latest direct role `Stop` can still complete the round.
+- The first `UserPromptSubmit` starts a flow round.
+- Each later `UserPromptSubmit` inside the same flow increments `promptSubmitCount`.
+- `Stop` moves the round into a 10 second settling window.
+- A new `UserPromptSubmit` inside the window continues the same round.
+- If no new prompt is accepted before the deadline, the round becomes `paused`.
+- The normal pause transition is timer-driven from the `Stop` event. Round-state reads also settle expired deadlines as a recovery fallback after restarts, sleep, or missed timers.
+- The same round state stores total round count, prompt-submit count, stop count, and Claude Code active runtime. Active runtime is measured only between `UserPromptSubmit` and `Stop`, not during the settling window.
 
-The frontend polls this task-level round state. It deduplicates `completionId`, then shows the prompt and plays the sound only once per completed round.
+The frontend polls this task-level round state and deduplicates `pauseId`. Flow duration is measured from the first `UserPromptSubmit` to the last `Stop`; the 10 second settle window is not counted. Pauses under 10 minutes trigger the weak 3-chime reminder at 1.4 second intervals. Pauses at or above 10 minutes trigger the strong alert dialog and repeating sound until confirmation.
 
 ## 9. Session Lifecycle
 
@@ -350,7 +354,6 @@ Current command shapes:
 claude --agent <role> --session-id <uuid>
 claude --agent <role> --resume <uuid>
 claude --agent <role> --session-id <uuid> --permission-mode bypassPermissions
-claude --agent <role> --session-id <uuid> --dangerously-skip-permissions
 ```
 
 VCM persists:
@@ -364,6 +367,8 @@ VCM persists:
 - cwd
 - pid when running
 - log path
+
+Raw terminal output is appended to the role log path for recovery and debugging. The embedded terminal UI is bounded: xterm keeps a finite scrollback buffer, and reconnect/replay sends only the tail of the raw log, capped at 2 MB. The product must not replay an unbounded terminal log into the browser after a long-running session reconnects.
 
 ## 10. Harness Installation
 
@@ -588,6 +593,20 @@ Display behavior:
 Long translations do not block capture. Prose entries are pushed to the panel before provider translation starts. `tool_use` and `tool_result` entries are never added to the translation queue; they are displayed immediately.
 
 There is no keyword classifier that drops assistant text. A previous design skipped permission-looking or log-looking text; that is removed.
+
+### Translation Retention And Retry
+
+Translation display state is bounded for long sessions. VCM retains the most recent 500 translation entries per role session in frontend/backend memory. Older entries are pruned from the live panel state and from the backend event cache so reconnects do not replay unbounded translation history. Entries that are currently `queued` or `translating` are protected from pruning.
+
+Translation failures are tracked as a backend failure list, separate from the rendered entry list. The panel shows `Ignore N` and `Retry N` only when that list is non-empty.
+
+Failure behavior:
+
+- provider failure for Claude output `prose` adds a `TranslationFailureItem`.
+- `Retry N` retries the failure list and reuses the original translation entry id, so the existing failed row becomes `translating` and then `translated` on success.
+- `Ignore N` clears the failure list without deleting visible entries.
+- if retention pruning removes an old failed entry, VCM also removes the matching failure-list item so retry never targets a deleted entry.
+- `tool-output`, conversation boundary rows, and user-input translation failures are not part of the output retry list.
 
 ### User Input Translation
 

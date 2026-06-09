@@ -7,7 +7,10 @@ import type {
   StartTranslationSessionResult,
   TranslateUserInputRequest,
   TranslateUserInputResult,
+  TranslationConversationBoundaryKind,
   TranslationEntry,
+  TranslationFailureItem,
+  TranslationFailuresResult,
   TranslationPromptKey,
   TranslationPromptPreview,
   TranslationProviderTestResult,
@@ -19,7 +22,7 @@ import type {
   TranslationStatus,
   TranslationWsMessage
 } from "../../shared/types/translation.js";
-import { TRANSLATION_PROMPT_KEYS } from "../../shared/types/translation.js";
+import { TRANSLATION_ENTRY_RETENTION_LIMIT, TRANSLATION_PROMPT_KEYS } from "../../shared/types/translation.js";
 import type { TranslationProvider } from "../adapters/translation-provider.js";
 import { TranslationProviderError } from "../adapters/translation-provider.js";
 import type { FileSystemAdapter } from "../adapters/filesystem.js";
@@ -44,6 +47,7 @@ export interface TranslationService {
   testProvider(): Promise<TranslationProviderTestResult>;
   startSession(input: StartTranslationSessionServiceInput): Promise<StartTranslationSessionResult>;
   pollSessionEvents(sessionId: string, after: number, limit?: number): Promise<PollTranslationSessionResult>;
+  recordConversationBoundary(input: RecordTranslationConversationBoundaryInput): Promise<TranslationEntry | undefined>;
   translateUserInput(input: TranslateUserInputServiceInput): Promise<TranslateUserInputResult>;
   sendTranslatedInput(input: SendTranslatedInputServiceInput): Promise<void>;
   subscribeToSession(sessionId: string, listener: TranslationEventListener): Unsubscribe;
@@ -51,6 +55,8 @@ export interface TranslationService {
   stopSession(sessionId: string, options?: StopTranslationSessionOptions): Promise<void>;
   stopTask(repoRoot: string, taskSlug: string, options?: StopTranslationSessionOptions): Promise<void>;
   retryTranslation(sessionId: string, translationId: string): Promise<TranslationEntry>;
+  retryFailedTranslations(sessionId: string): Promise<TranslationFailuresResult>;
+  ignoreTranslationFailures(sessionId: string): Promise<TranslationFailuresResult>;
 }
 
 export interface StartTranslationSessionServiceInput {
@@ -58,6 +64,16 @@ export interface StartTranslationSessionServiceInput {
   taskRepoRoot?: string;
   taskSlug: string;
   role: RoleName;
+}
+
+export interface RecordTranslationConversationBoundaryInput {
+  repoRoot: string;
+  taskRepoRoot?: string;
+  taskSlug: string;
+  role: RoleName;
+  sessionId: string;
+  boundaryKind: TranslationConversationBoundaryKind;
+  occurredAt?: string;
 }
 
 export interface TranslateUserInputServiceInput extends TranslateUserInputRequest {
@@ -103,6 +119,7 @@ interface SessionState {
   unsubscribeTranscript?: Unsubscribe;
   seenTranscriptIds: Set<string>;
   entries: TranslationEntry[];
+  failures: Map<string, TranslationFailureItem>;
   lastAssistantText?: string;
   status: TranslationSessionStatus;
   events: TranslationSessionEvent[];
@@ -118,7 +135,8 @@ interface SessionState {
 type TranslationSessionEventInput =
   | { type: "entry"; entry: TranslationEntry }
   | { type: "status"; status: TranslationSessionStatus }
-  | { type: "error"; id?: string; message: string };
+  | { type: "error"; id?: string; message: string }
+  | { type: "failures"; failures: TranslationFailureItem[] };
 
 const DEFAULT_SETTINGS: TranslationSettings = {
   version: 1,
@@ -132,11 +150,11 @@ const DEFAULT_SETTINGS: TranslationSettings = {
   inputMode: "review-before-send",
   translateOutput: true,
   translateUserInput: true,
-  contextEnabled: true,
+  contextEnabled: false,
   preserveTechnicalTokens: true,
   skipCjkText: true,
   redactSecrets: true,
-  requestTimeoutMs: 15000,
+  requestTimeoutMs: 120000,
   temperature: 0.1
 };
 
@@ -183,6 +201,7 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
         listeners: new Set(),
         seenTranscriptIds: new Set(),
         entries: [],
+        failures: new Map(),
         status: "ready",
         events: [],
         nextSeq: 1
@@ -216,6 +235,12 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
     state.status = "failed";
     appendEvent(sessionId, { type: "error", id, message });
     emit(sessionId, { type: "translation-error", id, message });
+  }
+
+  function publishFailures(sessionId: string): void {
+    const failures = getFailureItems(getState(sessionId));
+    appendEvent(sessionId, { type: "failures", failures });
+    emit(sessionId, { type: "translation-failures", failures });
   }
 
   function appendEvent(
@@ -255,6 +280,7 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
     if (!state.cacheLoaded) {
       await loadCachedEvents(state);
       state.cacheLoaded = true;
+      pruneTranslationEntries(input.sessionId);
     }
 
     await deps.fs.ensureDir(path.dirname(cachePath));
@@ -288,6 +314,8 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
         state.status = event.status;
       } else if (event.type === "error") {
         state.status = "failed";
+      } else if (event.type === "failures") {
+        state.failures = new Map(event.failures.map((failure) => [failure.translationId, failure]));
       }
     }
   }
@@ -368,15 +396,30 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
     config: StoredTranslationConfig,
     entryId?: string
   ): boolean {
+    return startClaudeOutputTranslation(sessionId, rawText, config, {
+      entryId,
+      replaceExisting: false
+    }) !== undefined;
+  }
+
+  function startClaudeOutputTranslation(
+    sessionId: string,
+    rawText: string,
+    config: StoredTranslationConfig,
+    options: {
+      entryId?: string;
+      replaceExisting: boolean;
+    }
+  ): TranslationEntry | undefined {
     const session = deps.runtime.getSession(sessionId);
     const roleSession = deps.sessionRegistry.get(sessionId);
     if (!session && !roleSession) {
-      return false;
+      return undefined;
     }
 
     const { settings, secrets } = config;
     if (!rawText.trim()) {
-      return false;
+      return undefined;
     }
     const text = rawText;
 
@@ -390,12 +433,16 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
         settings,
         status: "translating",
         contextUsed: false,
-        id: entryId
+        id: options.entryId
       }),
       translationStartedAt: now()
     };
 
-    pushEntry(sessionId, baseEntry);
+    if (options.replaceExisting) {
+      replaceEntry(sessionId, baseEntry);
+    } else {
+      pushEntry(sessionId, baseEntry);
+    }
 
     const queue = queues.getQueue(sessionId);
     void queue.enqueue(async () => {
@@ -422,6 +469,7 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
           tokenUsage: result.tokenUsage
         };
         replaceEntry(sessionId, completed);
+        clearFailure(sessionId, completed.id);
         getState(sessionId).lastAssistantText = text;
         publishStatus(sessionId, "ready");
       } catch (error) {
@@ -432,16 +480,25 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
           completedAt: now()
         };
         replaceEntry(sessionId, failed);
+        recordFailure(sessionId, failed);
         publishStatus(sessionId, "failed");
       }
     }).catch((error) => {
       publishError(sessionId, error instanceof Error ? error.message : "Translation failed.");
     });
-    return true;
+    return baseEntry;
   }
 
   function pushEntry(sessionId: string, entry: TranslationEntry): void {
     getState(sessionId).entries.push(entry);
+    pruneTranslationEntries(sessionId, new Set([entry.id]));
+    publishEntry(sessionId, entry);
+  }
+
+  function upsertAndPublishEntry(sessionId: string, entry: TranslationEntry): void {
+    const state = getState(sessionId);
+    state.entries = upsertEntry(state.entries, entry);
+    pruneTranslationEntries(sessionId, new Set([entry.id]));
     publishEntry(sessionId, entry);
   }
 
@@ -476,8 +533,112 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
 
   function replaceEntry(sessionId: string, entry: TranslationEntry): void {
     const state = getState(sessionId);
-    state.entries = state.entries.map((current) => current.id === entry.id ? entry : current);
+    state.entries = upsertEntry(state.entries, entry);
+    pruneTranslationEntries(sessionId, new Set([entry.id]));
     publishEntry(sessionId, entry);
+  }
+
+  function recordFailure(sessionId: string, entry: TranslationEntry): void {
+    if (!isRetryableFailedEntry(entry)) {
+      return;
+    }
+
+    const state = getState(sessionId);
+    const existing = state.failures.get(entry.id);
+    state.failures.set(entry.id, {
+      translationId: entry.id,
+      sessionId,
+      taskSlug: entry.taskSlug,
+      role: entry.role,
+      sourceText: entry.sourceText,
+      error: entry.error ?? "Translation failed.",
+      failedAt: entry.completedAt ?? now(),
+      retryCount: existing?.retryCount ?? 0,
+      lastRetryAt: existing?.lastRetryAt
+    });
+    publishFailures(sessionId);
+  }
+
+  function clearFailure(sessionId: string, translationId: string): void {
+    const state = getState(sessionId);
+    if (state.failures.delete(translationId)) {
+      publishFailures(sessionId);
+    }
+  }
+
+  function pruneTranslationEntries(sessionId: string, protectedIds = new Set<string>()): void {
+    const state = getState(sessionId);
+    const overflow = state.entries.length - TRANSLATION_ENTRY_RETENTION_LIMIT;
+    if (overflow <= 0) {
+      return;
+    }
+
+    const removedIds = new Set<string>();
+    for (const entry of state.entries) {
+      if (removedIds.size >= overflow) {
+        break;
+      }
+      if (protectedIds.has(entry.id) || isActiveTranslationEntry(entry)) {
+        continue;
+      }
+      removedIds.add(entry.id);
+    }
+    if (removedIds.size === 0) {
+      return;
+    }
+
+    state.entries = state.entries.filter((entry) => !removedIds.has(entry.id));
+    state.events = pruneTranslationEntryEvents(state.events, removedIds);
+    void persistEvents(state);
+
+    let failuresChanged = false;
+    for (const entryId of removedIds) {
+      failuresChanged = state.failures.delete(entryId) || failuresChanged;
+    }
+    if (failuresChanged) {
+      publishFailures(sessionId);
+    }
+  }
+
+  function markFailureRetrying(sessionId: string, failure: TranslationFailureItem): TranslationFailureItem {
+    const retrying: TranslationFailureItem = {
+      ...failure,
+      retryCount: failure.retryCount + 1,
+      lastRetryAt: now()
+    };
+    getState(sessionId).failures.set(failure.translationId, retrying);
+    return retrying;
+  }
+
+  function retryOneTranslation(
+    sessionId: string,
+    original: TranslationEntry,
+    config: StoredTranslationConfig
+  ): TranslationEntry {
+    const state = getState(sessionId);
+    const existingFailure = state.failures.get(original.id) ?? {
+      translationId: original.id,
+      sessionId,
+      taskSlug: original.taskSlug,
+      role: original.role,
+      sourceText: original.sourceText,
+      error: original.error ?? "Translation failed.",
+      failedAt: original.completedAt ?? now(),
+      retryCount: 0
+    };
+    markFailureRetrying(sessionId, existingFailure);
+    const retrying = startClaudeOutputTranslation(sessionId, original.sourceText, config, {
+      entryId: original.id,
+      replaceExisting: true
+    });
+    if (!retrying) {
+      throw new VcmError({
+        code: "TRANSLATION_RETRY_UNSUPPORTED",
+        message: "Translation entry cannot be retried.",
+        statusCode: 400
+      });
+    }
+    return retrying;
   }
 
   function createEntry(input: {
@@ -492,6 +653,9 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
     id?: string;
     translatedText?: string;
     completedAt?: string;
+    boundaryKind?: TranslationConversationBoundaryKind;
+    conversationTurn?: number;
+    occurredAt?: string;
   }): TranslationEntry {
     return {
       id: input.id ?? id(),
@@ -505,6 +669,9 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
       translatedText: input.translatedText ?? "",
       status: input.status,
       contextUsed: input.contextUsed,
+      boundaryKind: input.boundaryKind,
+      conversationTurn: input.conversationTurn,
+      occurredAt: input.occurredAt,
       createdAt: now(),
       completedAt: input.completedAt,
       provider: input.settings.providerType,
@@ -593,6 +760,46 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
         nextCursor,
         events
       };
+    },
+    async recordConversationBoundary(input) {
+      const { settings } = await loadConfig();
+      const state = await prepareCache({
+        repoRoot: input.taskRepoRoot ?? input.repoRoot,
+        taskSlug: input.taskSlug,
+        role: input.role,
+        sessionId: input.sessionId
+      });
+      const conversationTurn = resolveConversationBoundaryTurn(state, input.boundaryKind);
+      if (conversationTurn === undefined) {
+        return undefined;
+      }
+
+      const entryId = `boundary:${input.sessionId}:${conversationTurn}:${input.boundaryKind}`;
+      const existing = state.entries.find((entry) => entry.id === entryId);
+      if (existing) {
+        return existing;
+      }
+
+      const occurredAt = input.occurredAt ?? now();
+      const sourceText = formatConversationBoundaryText(input.boundaryKind, conversationTurn, occurredAt);
+      const entry = createEntry({
+        taskSlug: input.taskSlug,
+        role: input.role,
+        direction: "cc-output-to-user",
+        sourceKind: "conversation-boundary",
+        sourceText,
+        settings,
+        status: "preserved",
+        contextUsed: false,
+        id: entryId,
+        translatedText: sourceText,
+        completedAt: occurredAt,
+        boundaryKind: input.boundaryKind,
+        conversationTurn,
+        occurredAt
+      });
+      upsertAndPublishEntry(input.sessionId, entry);
+      return entry;
     },
     async translateUserInput(input) {
       const { settings, secrets } = await loadConfig();
@@ -709,6 +916,7 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
       for (const entry of state.entries) {
         listener({ type: "translation-entry", entry });
       }
+      listener({ type: "translation-failures", failures: getFailureItems(state) });
 
       if (!state.unsubscribeTranscript) {
         if (!roleSession) {
@@ -732,6 +940,7 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
     async clearSession(sessionId) {
       const state = getState(sessionId);
       state.entries = [];
+      state.failures.clear();
       state.events = [];
       state.nextSeq = 1;
       queues.clearQueue(sessionId);
@@ -764,16 +973,47 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
           statusCode: 404
         });
       }
-      if (original.direction !== "cc-output-to-user") {
+      if (!isRetryableFailedEntry(original)) {
         throw new VcmError({
           code: "TRANSLATION_RETRY_UNSUPPORTED",
-          message: "Only Claude Code output translation entries can be retried.",
+          message: "Only failed Claude Code output prose translation entries can be retried.",
           statusCode: 400
         });
       }
       const config = await loadConfig();
-      processClaudeOutputText(sessionId, original.sourceText, config);
-      return state.entries[state.entries.length - 1] ?? original;
+      const retrying = retryOneTranslation(sessionId, original, config);
+      publishFailures(sessionId);
+      return retrying;
+    },
+    async retryFailedTranslations(sessionId) {
+      const state = getState(sessionId);
+      const failures = getFailureItems(state);
+      const config = await loadConfig();
+      let changed = false;
+
+      for (const failure of failures) {
+        const original = state.entries.find((entry) => entry.id === failure.translationId);
+        if (!original || !isRetryableFailedEntry(original)) {
+          state.failures.delete(failure.translationId);
+          changed = true;
+          continue;
+        }
+        retryOneTranslation(sessionId, original, config);
+        changed = true;
+      }
+
+      if (changed) {
+        publishFailures(sessionId);
+      }
+      return { failures: getFailureItems(state) };
+    },
+    async ignoreTranslationFailures(sessionId) {
+      const state = getState(sessionId);
+      if (state.failures.size > 0) {
+        state.failures.clear();
+        publishFailures(sessionId);
+      }
+      return { failures: [] };
     }
   };
 
@@ -851,6 +1091,111 @@ function formatUnknown(value: unknown): string {
   } catch {
     return String(value);
   }
+}
+
+function resolveConversationBoundaryTurn(
+  state: SessionState,
+  boundaryKind: TranslationConversationBoundaryKind
+): number | undefined {
+  const openTurn = getOpenConversationTurn(state);
+  if (boundaryKind === "start") {
+    return openTurn ?? getMaxConversationTurn(state) + 1;
+  }
+  return openTurn;
+}
+
+function getOpenConversationTurn(state: SessionState): number | undefined {
+  const startTurns = getBoundaryEntries(state)
+    .filter((entry) => entry.boundaryKind === "start")
+    .map((entry) => entry.conversationTurn)
+    .filter((turn): turn is number => typeof turn === "number" && Number.isFinite(turn))
+    .sort((left, right) => right - left);
+
+  return startTurns.find((turn) => !hasBoundaryEntry(state, turn, "end"));
+}
+
+function getMaxConversationTurn(state: SessionState): number {
+  return Math.max(
+    0,
+    ...getBoundaryEntries(state)
+      .map((entry) => entry.conversationTurn)
+      .filter((turn): turn is number => typeof turn === "number" && Number.isFinite(turn))
+  );
+}
+
+function hasBoundaryEntry(
+  state: SessionState,
+  conversationTurn: number,
+  boundaryKind: TranslationConversationBoundaryKind
+): boolean {
+  return getBoundaryEntries(state).some((entry) =>
+    entry.boundaryKind === boundaryKind &&
+    entry.conversationTurn === conversationTurn
+  );
+}
+
+function getBoundaryEntries(state: SessionState): TranslationEntry[] {
+  return state.entries.filter((entry) => entry.sourceKind === "conversation-boundary");
+}
+
+function getFailureItems(state: SessionState): TranslationFailureItem[] {
+  return Array.from(state.failures.values());
+}
+
+function isActiveTranslationEntry(entry: TranslationEntry): boolean {
+  return entry.status === "queued" || entry.status === "translating";
+}
+
+function isRetryableFailedEntry(entry: TranslationEntry): boolean {
+  return entry.status === "failed"
+    && entry.direction === "cc-output-to-user"
+    && entry.sourceKind === "prose";
+}
+
+function pruneTranslationEntryEvents(
+  events: TranslationSessionEvent[],
+  removedIds: Set<string>
+): TranslationSessionEvent[] {
+  const pruned: TranslationSessionEvent[] = [];
+  for (const event of events) {
+    if (event.type === "entry") {
+      if (!removedIds.has(event.entry.id)) {
+        pruned.push(event);
+      }
+      continue;
+    }
+    if (event.type === "failures") {
+      pruned.push({
+        ...event,
+        failures: event.failures.filter((failure) => !removedIds.has(failure.translationId))
+      });
+      continue;
+    }
+    pruned.push(event);
+  }
+  return pruned;
+}
+
+function formatConversationBoundaryText(
+  boundaryKind: TranslationConversationBoundaryKind,
+  conversationTurn: number,
+  occurredAt: string
+): string {
+  const label = boundaryKind === "start" ? "开始" : "结束";
+  return `-------${label}---第 ${conversationTurn} 轮----${formatBoundaryTime(occurredAt)}---------------`;
+}
+
+function formatBoundaryTime(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return value;
+  }
+  return new Intl.DateTimeFormat(undefined, {
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hour12: false
+  }).format(date);
 }
 
 function upsertEntry(entries: TranslationEntry[], entry: TranslationEntry): TranslationEntry[] {

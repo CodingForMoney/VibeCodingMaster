@@ -22,7 +22,7 @@ describe("app-settings-service", () => {
       version: 1,
       preferences: {
         themeMode: "system",
-        roundCompletionAlerts: true
+        flowPauseAlerts: true
       },
       translation: undefined,
       recentRepositoryPaths: []
@@ -39,20 +39,42 @@ describe("app-settings-service", () => {
 
     await expect(service.getPreferences()).resolves.toEqual({
       themeMode: "system",
-      roundCompletionAlerts: true
+      flowPauseAlerts: true
     });
     await expect(service.updatePreferences({
       themeMode: "dark",
-      roundCompletionAlerts: false
+      flowPauseAlerts: false
     })).resolves.toEqual({
       themeMode: "dark",
-      roundCompletionAlerts: false
+      flowPauseAlerts: false
     });
 
     const stored = await fs.readJson<AppSettingsFile>("/settings.json");
     expect(stored.preferences).toEqual({
       themeMode: "dark",
-      roundCompletionAlerts: false
+      flowPauseAlerts: false
+    });
+  });
+
+  it("migrates the old round completion alert preference", async () => {
+    const fs = createMemoryFs({
+      "/settings.json": {
+        version: 1,
+        preferences: {
+          themeMode: "dark",
+          roundCompletionAlerts: false
+        },
+        recentRepositoryPaths: []
+      }
+    });
+    const service = createAppSettingsService({
+      fs,
+      settingsPath: "/settings.json"
+    });
+
+    await expect(service.getPreferences()).resolves.toEqual({
+      themeMode: "dark",
+      flowPauseAlerts: false
     });
   });
 
@@ -117,8 +139,13 @@ describe("app-settings-service", () => {
   });
 });
 
-function createMemoryFs(): FileSystemAdapter {
-  const files = new Map<string, string>();
+function createMemoryFs(initialFiles: Record<string, unknown> = {}): FileSystemAdapter {
+  const files = new Map<string, string>(
+    Object.entries(initialFiles).map(([targetPath, value]) => [
+      targetPath,
+      typeof value === "string" ? value : `${JSON.stringify(value, null, 2)}\n`
+    ])
+  );
   return {
     async pathExists(targetPath) {
       return files.has(targetPath);

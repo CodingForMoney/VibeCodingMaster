@@ -16,6 +16,10 @@ import { apiClient } from "./state/api-client.js";
 import { ProjectDashboard } from "./routes/project-dashboard.js";
 import { TaskWorkspace } from "./routes/task-workspace.js";
 
+const FLOW_PAUSE_STRONG_ALERT_THRESHOLD_MS = 10 * 60 * 1000;
+const FLOW_PAUSE_CHIME_INTERVAL_MS = 1400;
+const FLOW_PAUSE_WEAK_CHIME_COUNT = 3;
+
 export function App() {
   const [project, setProject] = useState<ProjectSummary | null>(null);
   const [recentRepositoryPaths, setRecentRepositoryPaths] = useState<string[]>([]);
@@ -27,26 +31,59 @@ export function App() {
   const [activeMessages, setActiveMessages] = useState<{ taskSlug: string; messages: VcmRoleMessage[] } | null>(null);
   const [activeOrchestration, setActiveOrchestration] = useState<{ taskSlug: string; orchestration: VcmOrchestrationState } | null>(null);
   const [activeEvents, setActiveEvents] = useState<{ taskSlug: string; events: string[] } | null>(null);
+  const [activeRoundState, setActiveRoundState] = useState<{ taskSlug: string; roundState: VcmTaskRoundState } | null>(null);
   const [activeRole, setActiveRole] = useState<RoleName>("project-manager");
   const [themeMode, setThemeMode] = useState<ThemeMode>("system");
-  const [roundCompletionAlerts, setRoundCompletionAlerts] = useState(true);
-  const [roundNotice, setRoundNotice] = useState<{ id: string; text: string } | null>(null);
+  const [flowPauseAlerts, setFlowPauseAlerts] = useState(true);
+  const [flowPauseNotice, setFlowPauseNotice] = useState<{ id: string; text: string } | null>(null);
   const [systemPrefersDark, setSystemPrefersDark] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const notifiedRoundRef = useRef<Record<string, string>>({});
+  const notifiedFlowPauseRef = useRef<Record<string, string>>({});
+  const flowPauseAlarmRef = useRef<number | null>(null);
   const activeTask = useMemo(
     () => selectActiveTask(tasks, activeTaskSlug),
     [tasks, activeTaskSlug]
   );
 
-  const showRoundCompletionNotice = useCallback((text: string, id = `manual-${Date.now()}`) => {
-    setRoundNotice({ id, text });
-    playRoundCompletionSound();
-    window.setTimeout(() => {
-      setRoundNotice((current) => current?.id === id ? null : current);
-    }, 5000);
+  const stopFlowPauseAlarm = useCallback(() => {
+    if (flowPauseAlarmRef.current === null) {
+      return;
+    }
+    window.clearInterval(flowPauseAlarmRef.current);
+    flowPauseAlarmRef.current = null;
   }, []);
+
+  const startStrongFlowPauseAlarm = useCallback(() => {
+    stopFlowPauseAlarm();
+    playFlowPauseSound();
+    flowPauseAlarmRef.current = window.setInterval(playFlowPauseSound, FLOW_PAUSE_CHIME_INTERVAL_MS);
+  }, [stopFlowPauseAlarm]);
+
+  const playWeakFlowPauseAlert = useCallback(() => {
+    stopFlowPauseAlarm();
+    setFlowPauseNotice(null);
+    let playCount = 1;
+    playFlowPauseSound();
+    flowPauseAlarmRef.current = window.setInterval(() => {
+      playCount += 1;
+      playFlowPauseSound();
+      if (playCount >= FLOW_PAUSE_WEAK_CHIME_COUNT && flowPauseAlarmRef.current !== null) {
+        window.clearInterval(flowPauseAlarmRef.current);
+        flowPauseAlarmRef.current = null;
+      }
+    }, FLOW_PAUSE_CHIME_INTERVAL_MS);
+  }, [stopFlowPauseAlarm]);
+
+  const showStrongFlowPauseNotice = useCallback((text: string, id = `manual-${Date.now()}`) => {
+    setFlowPauseNotice({ id, text });
+    startStrongFlowPauseAlarm();
+  }, [startStrongFlowPauseAlarm]);
+
+  const confirmFlowPauseNotice = useCallback(() => {
+    stopFlowPauseAlarm();
+    setFlowPauseNotice(null);
+  }, [stopFlowPauseAlarm]);
 
   const handleMessagesChanged = useCallback((messages: VcmRoleMessage[]) => {
     if (activeTask?.taskSlug) {
@@ -70,23 +107,28 @@ export function App() {
     if (!activeTask?.taskSlug || roundState.taskSlug !== activeTask.taskSlug) {
       return;
     }
-    if (roundState.status !== "completed" || !roundState.completionId) {
+    setActiveRoundState({ taskSlug: roundState.taskSlug, roundState });
+    if (roundState.status !== "paused" || !roundState.pauseId) {
       return;
     }
 
-    const previousCompletionId = notifiedRoundRef.current[roundState.taskSlug];
-    if (previousCompletionId === roundState.completionId) {
+    const previousPauseId = notifiedFlowPauseRef.current[roundState.taskSlug];
+    if (previousPauseId === roundState.pauseId) {
       return;
     }
 
-    notifiedRoundRef.current[roundState.taskSlug] = roundState.completionId;
-    if (!roundCompletionAlerts) {
+    notifiedFlowPauseRef.current[roundState.taskSlug] = roundState.pauseId;
+    if (!flowPauseAlerts) {
       return;
     }
 
     const roleLabel = roundState.activeRole ?? "role";
-    showRoundCompletionNotice(`Round complete: ${roleLabel} finished.`, roundState.completionId);
-  }, [activeTask?.taskSlug, roundCompletionAlerts, showRoundCompletionNotice]);
+    if (getFlowPauseDurationMs(roundState) >= FLOW_PAUSE_STRONG_ALERT_THRESHOLD_MS) {
+      showStrongFlowPauseNotice(`No new turn started after ${roleLabel} stopped.`, roundState.pauseId);
+    } else {
+      playWeakFlowPauseAlert();
+    }
+  }, [activeTask?.taskSlug, flowPauseAlerts, playWeakFlowPauseAlert, showStrongFlowPauseNotice]);
 
   async function loadTasks() {
     const nextTasks = await apiClient.listTasks();
@@ -137,7 +179,7 @@ export function App() {
         setProject(currentProject);
         setRecentRepositoryPaths(recentPaths);
         setThemeMode(preferences.themeMode);
-        setRoundCompletionAlerts(preferences.roundCompletionAlerts);
+        setFlowPauseAlerts(preferences.flowPauseAlerts);
         if (currentProject) {
           await Promise.all([
             loadTasks(),
@@ -156,6 +198,10 @@ export function App() {
     query.addEventListener("change", updateSystemTheme);
     return () => query.removeEventListener("change", updateSystemTheme);
   }, []);
+
+  useEffect(() => {
+    return () => stopFlowPauseAlarm();
+  }, [stopFlowPauseAlarm]);
 
   useEffect(() => {
     const resolvedTheme = themeMode === "system"
@@ -189,6 +235,10 @@ export function App() {
     activeEvents && activeEvents.taskSlug === activeTask?.taskSlug
       ? activeEvents.events
       : [];
+  const sidebarRoundState =
+    activeRoundState && activeRoundState.taskSlug === activeTask?.taskSlug
+      ? activeRoundState.roundState
+      : null;
 
   return (
     <AppShell
@@ -201,6 +251,7 @@ export function App() {
           messages={sidebarMessages}
           orchestration={sidebarOrchestration}
           events={sidebarEvents}
+          roundState={sidebarRoundState}
           harnessStatus={harnessStatus}
           harnessBootstrapStatus={harnessBootstrapStatus}
           harnessApplyResult={harnessApplyResult}
@@ -247,20 +298,20 @@ export function App() {
             void withBusy(async () => {
               const preferences = await apiClient.updateAppPreferences({ themeMode: nextThemeMode });
               setThemeMode(preferences.themeMode);
-              setRoundCompletionAlerts(preferences.roundCompletionAlerts);
+              setFlowPauseAlerts(preferences.flowPauseAlerts);
             });
           }}
-          roundCompletionAlerts={roundCompletionAlerts}
-          onRoundCompletionAlertsChange={(enabled) => {
-            setRoundCompletionAlerts(enabled);
+          flowPauseAlerts={flowPauseAlerts}
+          onFlowPauseAlertsChange={(enabled) => {
+            setFlowPauseAlerts(enabled);
             void withBusy(async () => {
-              const preferences = await apiClient.updateAppPreferences({ roundCompletionAlerts: enabled });
+              const preferences = await apiClient.updateAppPreferences({ flowPauseAlerts: enabled });
               setThemeMode(preferences.themeMode);
-              setRoundCompletionAlerts(preferences.roundCompletionAlerts);
+              setFlowPauseAlerts(preferences.flowPauseAlerts);
             });
           }}
-          onTryRoundAlert={() => {
-            showRoundCompletionNotice("This is a test round completion alert.");
+          onTryFlowPauseAlert={() => {
+            showStrongFlowPauseNotice("This is a test flow pause alert.");
           }}
           onMarkAllMessagesDone={(taskSlug) => {
             void withBusy(async () => {
@@ -280,10 +331,25 @@ export function App() {
       )}
     >
       {error ? <div className="error-banner">{error}</div> : null}
-      {roundNotice ? (
-        <div className="round-notice" role="status">
-          <strong>Round complete</strong>
-          <span>{roundNotice.text}</span>
+      {flowPauseNotice ? (
+        <div className="flow-pause-alert-backdrop">
+          <section
+            aria-describedby="flow-pause-alert-body flow-pause-alert-hint"
+            aria-labelledby="flow-pause-alert-title"
+            aria-modal="true"
+            className="flow-pause-alert"
+            role="alertdialog"
+          >
+            <p className="flow-pause-alert-kicker">VCM needs attention</p>
+            <h2 id="flow-pause-alert-title">Flow paused</h2>
+            <p id="flow-pause-alert-body">{flowPauseNotice.text}</p>
+            <p id="flow-pause-alert-hint" className="flow-pause-alert-hint">
+              The task may be complete, waiting for your decision, or blocked by a workflow issue.
+            </p>
+            <button type="button" autoFocus onClick={confirmFlowPauseNotice}>
+              Confirm
+            </button>
+          </section>
         </div>
       ) : null}
       {project && activeTask ? (
@@ -317,7 +383,16 @@ type AudioContextWindow = Window & typeof globalThis & {
   webkitAudioContext?: typeof AudioContext;
 };
 
-function playRoundCompletionSound(): void {
+function getFlowPauseDurationMs(roundState: VcmTaskRoundState): number {
+  const startedAt = Date.parse(roundState.startedAt ?? "");
+  const endedAt = Date.parse(roundState.lastStopAt ?? "");
+  if (!Number.isFinite(startedAt) || !Number.isFinite(endedAt)) {
+    return 0;
+  }
+  return Math.max(0, endedAt - startedAt);
+}
+
+function playFlowPauseSound(): void {
   const AudioContextCtor = window.AudioContext ?? (window as AudioContextWindow).webkitAudioContext;
   if (!AudioContextCtor) {
     return;

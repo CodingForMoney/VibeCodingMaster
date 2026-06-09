@@ -46,7 +46,6 @@ export function SessionToolbar({
         >
           <option value="default">默认</option>
           <option value="bypassPermissions">bypassPermissions</option>
-          <option value="dangerously-skip-permissions">--dangerously-skip-permissions</option>
         </select>
       </label>
 
@@ -69,7 +68,5 @@ export function SessionToolbar({
 }
 
 function formatPermissionMode(permissionMode: ClaudePermissionMode): string {
-  return permissionMode === "dangerously-skip-permissions"
-    ? "--dangerously-skip-permissions"
-    : permissionMode;
+  return permissionMode;
 }

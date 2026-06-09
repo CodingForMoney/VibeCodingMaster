@@ -4,8 +4,7 @@ export type RoleActivityStatus = "idle" | "running";
 
 export type ClaudePermissionMode =
   | "default"
-  | "bypassPermissions"
-  | "dangerously-skip-permissions";
+  | "bypassPermissions";
 
 export interface RoleSessionRecord {
   id: string;
