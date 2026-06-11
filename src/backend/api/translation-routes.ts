@@ -108,6 +108,22 @@ export function registerTranslationRoutes(app: FastifyInstance, deps: Translatio
       return deps.translationService.retryTranslation(request.params.sessionId, request.params.translationId);
     }
   );
+
+  app.post<{ Params: { sessionId: string } }>(
+    "/api/translation/sessions/:sessionId/failures/ignore",
+    async (request) => {
+      await requireCurrentProject(deps.projectService);
+      return deps.translationService.ignoreTranslationFailures(request.params.sessionId);
+    }
+  );
+
+  app.post<{ Params: { sessionId: string } }>(
+    "/api/translation/sessions/:sessionId/failures/retry",
+    async (request) => {
+      await requireCurrentProject(deps.projectService);
+      return deps.translationService.retryFailedTranslations(request.params.sessionId);
+    }
+  );
 }
 
 function parseRole(role: string) {

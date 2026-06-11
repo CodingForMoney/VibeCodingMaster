@@ -1,8 +1,18 @@
 import { FormEvent, type ReactNode, useEffect, useState } from "react";
-import type { ThemeMode } from "../../shared/types/app-settings.js";
-import type { HarnessApplyResult, HarnessStatusReport } from "../../shared/types/harness.js";
+import type { LaunchTemplate, PermissionRequestMode, ThemeMode } from "../../shared/types/app-settings.js";
+import type {
+  HarnessApplyResult,
+  HarnessBootstrapStatusReport,
+  HarnessStatusReport
+} from "../../shared/types/harness.js";
+import type {
+  CheckGatewayQrLoginResult,
+  GatewayStatus,
+  StartGatewayQrLoginResult
+} from "../../shared/types/gateway.js";
 import type { VcmOrchestrationState, VcmRoleMessage } from "../../shared/types/message.js";
 import type { ProjectSummary } from "../../shared/types/project.js";
+import type { VcmSessionRoundState } from "../../shared/types/round.js";
 import type { TaskRecord } from "../../shared/types/task.js";
 import { EventLog } from "../components/event-log.js";
 import { HarnessPanel } from "../components/harness-panel.js";
@@ -18,19 +28,40 @@ export interface ProjectDashboardProps {
   messages: VcmRoleMessage[];
   orchestration: VcmOrchestrationState | null;
   events: string[];
+  roundState: VcmSessionRoundState | null;
   harnessStatus: HarnessStatusReport | null;
+  harnessBootstrapStatus: HarnessBootstrapStatusReport | null;
   harnessApplyResult?: HarnessApplyResult | null;
+  gatewayStatus: GatewayStatus | null;
+  gatewayQrLogin: StartGatewayQrLoginResult | null;
+  gatewayQrCheck: CheckGatewayQrLoginResult | null;
   busy?: boolean;
   onConnect(repoPath: string): Promise<void>;
+  onRefreshConnectedRepository(): Promise<void>;
+  onPullConnectedRepository(): Promise<void>;
   onRefreshHarness(): Promise<void>;
   onApplyHarness(): Promise<void>;
+  onStartHarnessBootstrap(): Promise<void>;
+  onRefreshGateway(): Promise<void>;
+  onGatewayEnabledChange(enabled: boolean): void;
+  onGatewayTranslationChange(enabled: boolean): void;
+  onStartGatewayQrLogin(): void;
+  onCheckGatewayQrLogin(): void;
+  onResetGatewayBinding(): void;
   onCreateTask(input: { taskSlug: string; createWorktree?: boolean; title?: string }): Promise<void>;
   onSelectTask(taskSlug: string): void;
   themeMode: ThemeMode;
   onThemeModeChange(themeMode: ThemeMode): void;
-  roundCompletionAlerts: boolean;
-  onRoundCompletionAlertsChange(enabled: boolean): void;
-  onTryRoundAlert(): void;
+  flowPauseAlerts: boolean;
+  onFlowPauseAlertsChange(enabled: boolean): void;
+  permissionRequestMode: PermissionRequestMode;
+  onPermissionRequestModeChange(mode: PermissionRequestMode): void;
+  launchTemplate: LaunchTemplate;
+  canSaveLaunchTemplate: boolean;
+  canOneClickStart: boolean;
+  onSaveLaunchTemplate(): void;
+  onOneClickStart(): void;
+  onTryFlowPauseAlert(): void;
   onMarkAllMessagesDone(taskSlug: string): void;
   onDeleteMessageHistory(taskSlug: string): void;
 }
@@ -43,19 +74,40 @@ export function ProjectDashboard({
   messages,
   orchestration,
   events,
+  roundState,
   harnessStatus,
+  harnessBootstrapStatus,
   harnessApplyResult,
+  gatewayStatus,
+  gatewayQrLogin,
+  gatewayQrCheck,
   busy,
   onConnect,
+  onRefreshConnectedRepository,
+  onPullConnectedRepository,
   onRefreshHarness,
   onApplyHarness,
+  onStartHarnessBootstrap,
+  onRefreshGateway,
+  onGatewayEnabledChange,
+  onGatewayTranslationChange,
+  onStartGatewayQrLogin,
+  onCheckGatewayQrLogin,
+  onResetGatewayBinding,
   onCreateTask,
   onSelectTask,
   themeMode,
   onThemeModeChange,
-  roundCompletionAlerts,
-  onRoundCompletionAlertsChange,
-  onTryRoundAlert,
+  flowPauseAlerts,
+  onFlowPauseAlertsChange,
+  permissionRequestMode,
+  onPermissionRequestModeChange,
+  launchTemplate,
+  canSaveLaunchTemplate,
+  canOneClickStart,
+  onSaveLaunchTemplate,
+  onOneClickStart,
+  onTryFlowPauseAlert,
   onMarkAllMessagesDone,
   onDeleteMessageHistory
 }: ProjectDashboardProps) {
@@ -65,6 +117,7 @@ export function ProjectDashboard({
   const [showEvents, setShowEvents] = useState(false);
   const messageCounts = getMessageCounts(messages);
   const normalizedTaskSlug = taskSlug.trim();
+  const activeTask = tasks.find((task) => task.taskSlug === activeTaskSlug) ?? null;
 
   async function handleCreateTask(event: FormEvent) {
     event.preventDefault();
@@ -89,30 +142,20 @@ export function ProjectDashboard({
       </SidebarSection>
 
       {project ? (
-        <SidebarSection title="Repository">
-          <div className="project-summary">
-            <dl>
-              <div>
-                <dt>Path</dt>
-                <dd>{project.repoRoot}</dd>
-              </div>
-              <div>
-                <dt>Branch</dt>
-                <dd>{project.branch}</dd>
-              </div>
-              <div>
-                <dt>Working tree</dt>
-                <dd>{project.isDirty ? "uncommitted changes" : "clean"}</dd>
-              </div>
-            </dl>
-            {project.warnings.length > 0 ? (
-              <ul className="warnings">
-                {project.warnings.map((warning) => (
-                  <li key={warning}>{warning}</li>
-                ))}
-              </ul>
-            ) : null}
-          </div>
+        <SidebarSection
+          title="Connected Repository"
+          onOpenChange={(open) => {
+            if (open) {
+              void onRefreshConnectedRepository();
+            }
+          }}
+        >
+          <ConnectedRepositoryPanel
+            activeTask={activeTask}
+            busy={busy}
+            project={project}
+            onPull={onPullConnectedRepository}
+          />
         </SidebarSection>
       ) : null}
 
@@ -130,23 +173,59 @@ export function ProjectDashboard({
             <span>{getThemeModeLabel(themeMode)}</span>
           </button>
           <button
-            aria-pressed={roundCompletionAlerts}
-            className={roundCompletionAlerts ? "settings-toggle is-active" : "settings-toggle"}
-            disabled={busy}
+            aria-pressed={!gatewayStatus?.enabled && flowPauseAlerts}
+            className={!gatewayStatus?.enabled && flowPauseAlerts ? "settings-toggle is-active" : "settings-toggle"}
+            disabled={busy || gatewayStatus?.enabled}
+            title={gatewayStatus?.enabled ? "Disabled while Gateway is on" : undefined}
             type="button"
-            onClick={() => onRoundCompletionAlertsChange(!roundCompletionAlerts)}
+            onClick={() => onFlowPauseAlertsChange(!flowPauseAlerts)}
           >
-            <span>Round alert</span>
-            <span>{roundCompletionAlerts ? "on" : "off"}</span>
+            <span>Flow pause alert</span>
+            <span>{gatewayStatus?.enabled ? "off" : flowPauseAlerts ? "on" : "off"}</span>
           </button>
           <button
             className="settings-toggle"
+            disabled={busy || gatewayStatus?.enabled}
+            title={gatewayStatus?.enabled ? "Disabled while Gateway is on" : undefined}
             type="button"
-            onClick={onTryRoundAlert}
+            onClick={onTryFlowPauseAlert}
           >
             <span>Try alert</span>
             <span>test</span>
           </button>
+          <label className="settings-select-row">
+            <span>Permission requests</span>
+            <select
+              value={permissionRequestMode}
+              disabled={busy}
+              onChange={(event) => onPermissionRequestModeChange(event.target.value as PermissionRequestMode)}
+            >
+              <option value="off">off</option>
+              <option value="allowAll">allow all</option>
+            </select>
+          </label>
+          <button
+            className="settings-toggle"
+            disabled={busy || !canSaveLaunchTemplate}
+            title="Save the current four role launch settings"
+            type="button"
+            onClick={onSaveLaunchTemplate}
+          >
+            <span>Save launch template</span>
+            <span>{canSaveLaunchTemplate ? "ready" : "needs 4 sessions"}</span>
+          </button>
+          {canOneClickStart ? (
+            <button
+              className="settings-toggle is-active"
+              disabled={busy}
+              title={getLaunchTemplateSummary(launchTemplate)}
+              type="button"
+              onClick={onOneClickStart}
+            >
+              <span>One-click start</span>
+              <span>{getLaunchTemplateBadge(launchTemplate)}</span>
+            </button>
+          ) : null}
           {activeTaskSlug ? (
             <>
               <button type="button" onClick={() => setShowMessages(true)}>
@@ -164,14 +243,38 @@ export function ProjectDashboard({
         </div>
       </SidebarSection>
 
+      <SidebarSection
+        title="Gateway"
+        onOpenChange={(open) => {
+          if (open) {
+            void onRefreshGateway();
+          }
+        }}
+      >
+        <GatewayPanel
+          busy={busy}
+          qrCheck={gatewayQrCheck}
+          qrLogin={gatewayQrLogin}
+          status={gatewayStatus}
+          onCheckQrLogin={onCheckGatewayQrLogin}
+          onEnabledChange={onGatewayEnabledChange}
+          onRefresh={onRefreshGateway}
+          onResetBinding={onResetGatewayBinding}
+          onStartQrLogin={onStartGatewayQrLogin}
+          onTranslationChange={onGatewayTranslationChange}
+        />
+      </SidebarSection>
+
       {project ? (
         <SidebarSection title="VCM Harness">
           <HarnessPanel
             status={harnessStatus}
+            bootstrapStatus={harnessBootstrapStatus}
             applyResult={harnessApplyResult}
             busy={busy}
             onRefresh={onRefreshHarness}
             onApply={onApplyHarness}
+            onStartBootstrap={onStartHarnessBootstrap}
           />
         </SidebarSection>
       ) : null}
@@ -217,6 +320,10 @@ export function ProjectDashboard({
         </SidebarSection>
       ) : null}
 
+      {project && activeTask ? (
+        <SessionStatusDock task={activeTask} roundState={roundState} />
+      ) : null}
+
       {showMessages ? (
         <MessageDialog
           busy={busy}
@@ -244,6 +351,379 @@ export function ProjectDashboard({
       ) : null}
     </div>
   );
+}
+
+function getLaunchTemplateBadge(template: LaunchTemplate): string {
+  const parts = [
+    template.autoOrchestration ? "auto" : "manual",
+    template.translationEnabled ? "tx" : "no tx"
+  ];
+  return parts.join(" + ");
+}
+
+function getLaunchTemplateSummary(template: LaunchTemplate): string {
+  const roles = Object.entries(template.roles)
+    .map(([role, config]) => `${role}: ${config.permissionMode} / ${config.model}`)
+    .join("; ");
+  return `Launch template: ${getLaunchTemplateBadge(template)}; ${roles}`;
+}
+
+function GatewayPanel({
+  busy,
+  onCheckQrLogin,
+  onEnabledChange,
+  onRefresh,
+  onResetBinding,
+  onStartQrLogin,
+  onTranslationChange,
+  qrCheck,
+  qrLogin,
+  status
+}: {
+  busy?: boolean;
+  onCheckQrLogin(): void;
+  onEnabledChange(enabled: boolean): void;
+  onRefresh(): Promise<void>;
+  onResetBinding(): void;
+  onStartQrLogin(): void;
+  onTranslationChange(enabled: boolean): void;
+  qrCheck: CheckGatewayQrLoginResult | null;
+  qrLogin: StartGatewayQrLoginResult | null;
+  status: GatewayStatus | null;
+}) {
+  const canEnable = Boolean(status?.binding.tokenConfigured);
+
+  return (
+    <div className="gateway-panel">
+      <dl>
+        <div>
+          <dt>Status</dt>
+          <dd>{status ? `${status.enabled ? "on" : "off"}${status.running ? " / polling" : ""}` : "not loaded"}</dd>
+        </div>
+        <div>
+          <dt>Binding</dt>
+          <dd>{formatGatewayBinding(status)}</dd>
+        </div>
+        <div>
+          <dt>Project</dt>
+          <dd>{status?.currentProjectId ?? "none"}</dd>
+        </div>
+        <div>
+          <dt>Task</dt>
+          <dd>{status?.currentTaskSlug ?? "none"}</dd>
+        </div>
+        <div>
+          <dt>Last poll</dt>
+          <dd>{formatGatewayPoll(status)}</dd>
+        </div>
+        <div>
+          <dt>Last message</dt>
+          <dd>{formatGatewayMessage(status)}</dd>
+        </div>
+      </dl>
+
+      <div className="gateway-actions">
+        <button
+          aria-pressed={Boolean(status?.enabled)}
+          className={status?.enabled ? "settings-toggle is-active" : "settings-toggle"}
+          disabled={busy || !status || (!status.enabled && !canEnable)}
+          title={canEnable ? "Enable or disable Weixin DM polling" : "Scan and confirm iLink login first"}
+          type="button"
+          onClick={() => status ? onEnabledChange(!status.enabled) : undefined}
+        >
+          <span>Gateway</span>
+          <span>{status?.enabled ? "on" : "off"}</span>
+        </button>
+        <button
+          aria-pressed={Boolean(status?.translationEnabled)}
+          className={status?.translationEnabled ? "settings-toggle is-active" : "settings-toggle"}
+          disabled={busy || !status}
+          type="button"
+          onClick={() => status ? onTranslationChange(!status.translationEnabled) : undefined}
+        >
+          <span>Translation</span>
+          <span>{status?.translationEnabled ? "on" : "off"}</span>
+        </button>
+        <button type="button" disabled={busy} onClick={onStartQrLogin}>Start QR Login</button>
+        <button type="button" disabled={busy || !qrLogin} onClick={onCheckQrLogin}>Check QR</button>
+        <button type="button" disabled={busy} onClick={() => void onRefresh()}>Refresh</button>
+        <button className="danger-button" type="button" disabled={busy || !status?.binding.tokenConfigured} onClick={onResetBinding}>
+          Reset Binding
+        </button>
+      </div>
+
+      {qrLogin ? (
+        <p className="muted">QR login started. Use the login dialog or Check QR.</p>
+      ) : null}
+      {qrCheck ? (
+        <p className="muted">
+          QR status: {qrCheck.status}{qrCheck.message ? ` · ${qrCheck.message}` : ""}
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+function formatGatewayBinding(status: GatewayStatus | null): string {
+  if (!status) {
+    return "not loaded";
+  }
+  if (!status.binding.tokenConfigured) {
+    return "not logged in";
+  }
+  return status.binding.boundUserId
+    ? `bound to ${status.binding.boundUserId}`
+    : "logged in, waiting for first DM";
+}
+
+function formatGatewayPoll(status: GatewayStatus | null): string {
+  if (!status) {
+    return "not loaded";
+  }
+  const checked = status.lastPollStatus.checkedAt ? ` at ${formatTime(status.lastPollStatus.checkedAt)}` : "";
+  const error = status.lastPollStatus.error ? ` · ${status.lastPollStatus.error}` : "";
+  return `${status.lastPollStatus.state}${checked}${error}`;
+}
+
+function formatGatewayMessage(status: GatewayStatus | null): string {
+  if (!status?.lastMessageStatus) {
+    return "none";
+  }
+  const message = status.lastMessageStatus;
+  const pieces = [
+    message.direction,
+    message.command,
+    message.result,
+    message.checkedAt ? formatTime(message.checkedAt) : undefined
+  ].filter(Boolean);
+  return pieces.join(" / ") || "none";
+}
+
+function ConnectedRepositoryPanel({
+  activeTask,
+  busy,
+  onPull,
+  project
+}: {
+  activeTask: TaskRecord | null;
+  busy?: boolean;
+  onPull(): Promise<void>;
+  project: ProjectSummary;
+}) {
+  const inlineTaskBlocksPull = Boolean(activeTask && !activeTask.worktreePath && activeTask.cleanupStatus !== "cleaned");
+  const pullDisabledReason = inlineTaskBlocksPull
+    ? `Inline task "${activeTask?.taskSlug}" uses the base repository.`
+    : project.pullDisabledReason;
+  const canPull = Boolean(project.canPull && !inlineTaskBlocksPull);
+
+  return (
+    <div className="project-summary">
+      <dl>
+        <div>
+          <dt>Base path</dt>
+          <dd>{project.repoRoot}</dd>
+        </div>
+        <div>
+          <dt>Branch</dt>
+          <dd>{formatBranchLabel(project)}</dd>
+        </div>
+        <div>
+          <dt>Remote</dt>
+          <dd>{project.upstreamBranch ?? "no upstream"}</dd>
+        </div>
+        <div>
+          <dt>Status</dt>
+          <dd>{formatBranchStatus(project)}</dd>
+        </div>
+        <div>
+          <dt>Commit</dt>
+          <dd>{project.shortHeadCommit ?? project.headCommit ?? "unknown"}</dd>
+        </div>
+        <div>
+          <dt>Working tree</dt>
+          <dd>{project.isDirty ? "uncommitted changes" : "clean"}</dd>
+        </div>
+      </dl>
+      <div className="connected-repo-actions">
+        <button
+          type="button"
+          disabled={busy || !canPull}
+          title={pullDisabledReason ?? "Pull latest changes with git pull --ff-only"}
+          onClick={() => void onPull()}
+        >
+          Pull
+        </button>
+        <span className="muted">
+          {project.checkedAt ? `checked ${formatTime(project.checkedAt)}` : "status not refreshed"}
+        </span>
+      </div>
+      {pullDisabledReason ? <p className="muted">{pullDisabledReason}</p> : null}
+      {project.warnings.length > 0 ? (
+        <ul className="warnings">
+          {project.warnings.map((warning) => (
+            <li key={warning}>{warning}</li>
+          ))}
+        </ul>
+      ) : null}
+    </div>
+  );
+}
+
+function formatBranchLabel(project: ProjectSummary): string {
+  return project.branch || "unknown";
+}
+
+function formatBranchStatus(project: ProjectSummary): string {
+  if (!project.upstreamBranch) {
+    return "no upstream";
+  }
+  const ahead = project.ahead ?? 0;
+  const behind = project.behind ?? 0;
+  if (ahead === 0 && behind === 0) {
+    return "up to date";
+  }
+  if (ahead > 0 && behind > 0) {
+    return `ahead ${ahead}, behind ${behind}`;
+  }
+  if (ahead > 0) {
+    return `ahead ${ahead}`;
+  }
+  return `behind ${behind}`;
+}
+
+function SessionStatusDock({
+  roundState,
+  task
+}: {
+  roundState: VcmSessionRoundState | null;
+  task: TaskRecord;
+}) {
+  const [nowMs, setNowMs] = useState(() => Date.now());
+  const showCurrentRound = Boolean(
+    roundState?.startedAt &&
+    roundState.status === "running"
+  );
+  const sessionElapsedMs = getElapsedMs(task.createdAt, nowMs);
+  const totalCcActiveMs = getLiveCcActiveMs(roundState, roundState?.totalCcActiveMs ?? 0, nowMs);
+  const currentRoundCcActiveMs = showCurrentRound && roundState
+    ? getLiveCcActiveMs(roundState, roundState.currentRoundCcActiveMs, nowMs)
+    : 0;
+  const currentRoundElapsedMs = showCurrentRound && roundState?.startedAt
+    ? getElapsedMs(roundState.startedAt, nowMs)
+    : 0;
+  const sessionTitle = task.title?.trim() || task.taskSlug;
+
+  useEffect(() => {
+    const timer = window.setInterval(() => setNowMs(Date.now()), 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  return (
+    <section className="task-status-dock" aria-label="VCM Session status">
+      <div className="task-status-dock-title">
+        <strong title={sessionTitle}>{sessionTitle}</strong>
+        <span className={`status-badge status-${task.status}`}>{task.status}</span>
+      </div>
+
+      <dl className="task-status-stats">
+        <div>
+          <dt>Session start</dt>
+          <dd>{formatTime(task.createdAt)}</dd>
+        </div>
+        <div>
+          <dt>Session total</dt>
+          <dd>{formatDuration(sessionElapsedMs)}</dd>
+        </div>
+        <div>
+          <dt>Rounds</dt>
+          <dd>{roundState?.totalRoundCount ?? 0}</dd>
+        </div>
+        <div>
+          <dt>CC runtime</dt>
+          <dd>{formatDuration(totalCcActiveMs)}</dd>
+        </div>
+      </dl>
+
+      {showCurrentRound && roundState ? (
+        <div className="current-round-status">
+          <div className="current-round-title">
+            <span>Current Round</span>
+            <span className={`status-badge status-${roundState.status}`}>{roundState.status}</span>
+          </div>
+          <dl className="task-status-stats">
+            <div>
+              <dt>Started</dt>
+              <dd>{formatTime(roundState.startedAt)}</dd>
+            </div>
+            <div>
+              <dt>Total</dt>
+              <dd>{formatDuration(currentRoundElapsedMs)}</dd>
+            </div>
+            <div>
+              <dt>CC runtime</dt>
+              <dd>{formatDuration(currentRoundCcActiveMs)}</dd>
+            </div>
+            <div>
+              <dt>Turn count</dt>
+              <dd>{roundState.turnCount}</dd>
+            </div>
+          </dl>
+        </div>
+      ) : null}
+    </section>
+  );
+}
+
+function getLiveCcActiveMs(
+  roundState: VcmSessionRoundState | null,
+  baseMs: number,
+  nowMs: number
+): number {
+  if (!roundState?.activeTurnStartedAt || roundState.status !== "running") {
+    return baseMs;
+  }
+  const updatedAtMs = Date.parse(roundState.updatedAt);
+  if (!Number.isFinite(updatedAtMs)) {
+    return baseMs;
+  }
+  return baseMs + Math.max(0, nowMs - updatedAtMs);
+}
+
+function getElapsedMs(startedAt: string, nowMs: number): number {
+  const startedAtMs = Date.parse(startedAt);
+  if (!Number.isFinite(startedAtMs)) {
+    return 0;
+  }
+  return Math.max(0, nowMs - startedAtMs);
+}
+
+function formatTime(value?: string): string {
+  if (!value) {
+    return "-";
+  }
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) {
+    return "-";
+  }
+  return new Intl.DateTimeFormat(undefined, {
+    hour: "2-digit",
+    minute: "2-digit"
+  }).format(date);
+}
+
+function formatDuration(milliseconds: number): string {
+  const totalSeconds = Math.max(0, Math.floor(milliseconds / 1000));
+  const hours = Math.floor(totalSeconds / 3600);
+  const minutes = Math.floor((totalSeconds % 3600) / 60);
+  const seconds = totalSeconds % 60;
+
+  if (hours > 0) {
+    return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`;
+  }
+  if (minutes > 0) {
+    return seconds > 0 ? `${minutes}m ${seconds}s` : `${minutes}m`;
+  }
+  return `${seconds}s`;
 }
 
 function getNextThemeMode(themeMode: ThemeMode): ThemeMode {
@@ -361,10 +841,12 @@ function MessageDialog({
 function SidebarSection({
   children,
   defaultOpen = false,
+  onOpenChange,
   title
 }: {
   children: ReactNode;
   defaultOpen?: boolean;
+  onOpenChange?(open: boolean): void;
   title: string;
 }) {
   const [open, setOpen] = useState(defaultOpen);
@@ -379,7 +861,13 @@ function SidebarSection({
         aria-expanded={open}
         className="sidebar-section-toggle"
         type="button"
-        onClick={() => setOpen((current) => !current)}
+        onClick={() => {
+          setOpen((current) => {
+            const nextOpen = !current;
+            onOpenChange?.(nextOpen);
+            return nextOpen;
+          });
+        }}
       >
         <span>{title}</span>
         <span aria-hidden="true" className="sidebar-section-chevron" />

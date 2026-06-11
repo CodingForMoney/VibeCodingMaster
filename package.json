@@ -1,6 +1,6 @@
 {
   "name": "vibe-coding-master",
-  "version": "0.0.17",
+  "version": "0.2.8",
   "description": "Local GUI session cockpit for Claude Code role sessions.",
   "type": "module",
   "files": [
@@ -24,6 +24,8 @@
     "fix:node-pty": "node scripts/fix-node-pty-spawn-helper.mjs",
     "postinstall": "node scripts/fix-node-pty-spawn-helper.mjs",
     "verify:package": "node scripts/verify-package.mjs",
+    "harness:install": "node scripts/install-vcm-harness.mjs",
+    "harness:uninstall": "node scripts/uninstall-vcm-harness.mjs",
     "prepack": "npm run build && npm run verify:package",
     "dev": "tsx src/main.ts --dev",
     "build": "npm run clean && tsc -p tsconfig.node.json && vite build",
@@ -41,6 +43,7 @@
     "execa": "^9.6.0",
     "fastify": "^5.3.3",
     "node-pty": "^1.0.0",
+    "qrcode-generator": "^2.0.4",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-markdown": "^10.1.0",

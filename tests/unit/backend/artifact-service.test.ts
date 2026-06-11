@@ -41,7 +41,7 @@ describe("createArtifactService", () => {
     });
   });
 
-  it("creates and checks docs sync report artifacts", async () => {
+  it("creates and checks docs sync and final acceptance artifacts", async () => {
     const fs = createMemoryFs();
     const service = createArtifactService(fs);
 
@@ -56,12 +56,31 @@ describe("createArtifactService", () => {
     });
 
     expect(created).toContain(".ai/vcm/handoffs/docs-sync-report.md");
+    expect(created).toContain(".ai/vcm/handoffs/final-acceptance.md");
+    expect(created).toContain(".ai/vcm/handoffs/known-issues.md");
     expect(summary.paths.docsSyncReportPath).toBe(".ai/vcm/handoffs/docs-sync-report.md");
+    expect(summary.paths.finalAcceptancePath).toBe(".ai/vcm/handoffs/final-acceptance.md");
+    expect(summary.paths.knownIssuesPath).toBe(".ai/vcm/handoffs/known-issues.md");
+    await expect(fs.readText("/repo/.ai/vcm/handoffs/role-commands/coder.md"))
+      .resolves.toContain("## Worktree");
+    await expect(fs.readText("/repo/.ai/vcm/handoffs/role-commands/coder.md"))
+      .resolves.toContain("Task repo root: /repo");
+    await expect(fs.readText("/repo/.ai/vcm/handoffs/role-commands/coder.md"))
+      .resolves.toContain("Rule: only edit files under Task repo root.");
     expect(summary.checks.find((check) => check.kind === "docs-sync-report")).toMatchObject({
       status: "incomplete",
       hasPlaceholder: true
     });
+    expect(summary.checks.find((check) => check.kind === "final-acceptance")).toMatchObject({
+      status: "incomplete",
+      hasPlaceholder: true
+    });
+    expect(summary.checks.find((check) => check.kind === "known-issues")).toMatchObject({
+      status: "ok",
+      hasPlaceholder: false
+    });
   });
+
 });
 
 function createMemoryFs(): FileSystemAdapter {

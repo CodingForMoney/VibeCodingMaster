@@ -3,8 +3,8 @@ import { ROLE_DEFINITIONS } from "../../shared/constants.js";
 import type { TaskStatusReport } from "../../shared/types/api.js";
 import type { VcmOrchestrationMode, VcmOrchestrationState, VcmRoleMessage } from "../../shared/types/message.js";
 import type { RoleName } from "../../shared/types/role.js";
-import type { VcmTaskRoundState } from "../../shared/types/round.js";
-import type { ClaudePermissionMode } from "../../shared/types/session.js";
+import type { VcmSessionRoundState } from "../../shared/types/round.js";
+import type { ClaudeModel, ClaudePermissionMode } from "../../shared/types/session.js";
 import type { TaskRecord } from "../../shared/types/task.js";
 import { RoleSessionTabs } from "../components/role-session-tabs.js";
 import { SessionConsole } from "../components/session-console.js";
@@ -15,26 +15,54 @@ import { selectAutoDispatchRole } from "../state/message-navigation.js";
 export interface TaskWorkspaceProps {
   task: TaskRecord;
   activeRole: RoleName;
+  translationEnabled: boolean;
+  refreshNonce?: number;
   onTaskChanged(): Promise<void>;
   onActiveRoleChange(role: RoleName): void;
+  onTranslationEnabledChange(enabled: boolean): void;
   onMessagesChanged?(messages: VcmRoleMessage[]): void;
   onOrchestrationChanged?(orchestration: VcmOrchestrationState): void;
-  onRoundStateChanged?(roundState: VcmTaskRoundState): void;
+  onRoundStateChanged?(roundState: VcmSessionRoundState): void;
   onEventsChanged?(events: string[]): void;
+  onLaunchStateChanged?(state: TaskWorkspaceLaunchState): void;
+}
+
+export interface TaskWorkspaceLaunchState {
+  taskSlug: string;
+  roles: Record<RoleName, {
+    permissionMode: ClaudePermissionMode;
+    model: ClaudeModel;
+  }>;
+  autoOrchestration: boolean;
+  translationEnabled: boolean;
+  statusLoaded: boolean;
+  sessionCount: number;
+  hasAnySession: boolean;
+  allRolesHaveSession: boolean;
 }
 
 export function TaskWorkspace({
   task,
   activeRole,
+  translationEnabled,
+  refreshNonce = 0,
   onTaskChanged,
   onActiveRoleChange,
+  onTranslationEnabledChange,
   onMessagesChanged,
   onOrchestrationChanged,
   onRoundStateChanged,
-  onEventsChanged
+  onEventsChanged,
+  onLaunchStateChanged
 }: TaskWorkspaceProps) {
   const [statusReport, setStatusReport] = useState<TaskStatusReport | null>(null);
   const [permissionModes, setPermissionModes] = useState<Record<RoleName, ClaudePermissionMode>>({
+    "project-manager": "default",
+    architect: "default",
+    coder: "default",
+    reviewer: "default"
+  });
+  const [models, setModels] = useState<Record<RoleName, ClaudeModel>>({
     "project-manager": "default",
     architect: "default",
     coder: "default",
@@ -44,7 +72,6 @@ export function TaskWorkspace({
   const [error, setError] = useState("");
   const [events, setEvents] = useState<string[]>([]);
   const [orchestration, setOrchestration] = useState<VcmOrchestrationState | null>(null);
-  const [translationEnabled, setTranslationEnabled] = useState(false);
   const messageSnapshotRef = useRef<{ taskSlug: string; messages: VcmRoleMessage[] } | null>(null);
 
   const applyMessageState = useCallback((nextMessages: VcmRoleMessage[], nextOrchestration: VcmOrchestrationState) => {
@@ -66,7 +93,7 @@ export function TaskWorkspace({
     }
   }, [onActiveRoleChange, onMessagesChanged, onOrchestrationChanged, task.taskSlug]);
 
-  const applyFetchedState = useCallback((nextStatusReport: TaskStatusReport, nextMessages: VcmRoleMessage[], nextOrchestration: VcmOrchestrationState, nextRoundState: VcmTaskRoundState) => {
+  const applyFetchedState = useCallback((nextStatusReport: TaskStatusReport, nextMessages: VcmRoleMessage[], nextOrchestration: VcmOrchestrationState, nextRoundState: VcmSessionRoundState) => {
     setStatusReport(nextStatusReport);
     applyMessageState(nextMessages, nextOrchestration);
     onRoundStateChanged?.(nextRoundState);
@@ -77,14 +104,14 @@ export function TaskWorkspace({
       apiClient.getTaskStatus(task.taskSlug),
       apiClient.listMessages(task.taskSlug),
       apiClient.getOrchestrationState(task.taskSlug),
-      apiClient.getTaskRoundState(task.taskSlug)
+      apiClient.getSessionRoundState(task.taskSlug)
     ]);
     applyFetchedState(nextStatusReport, nextMessages, nextOrchestration, nextRoundState);
   }, [applyFetchedState, task.taskSlug]);
 
   useEffect(() => {
     void refresh().catch((caught: Error) => setError(caught.message));
-  }, [refresh]);
+  }, [refresh, refreshNonce]);
 
   useEffect(() => {
     setEvents([]);
@@ -106,12 +133,58 @@ export function TaskWorkspace({
   }, [statusReport?.sessions]);
 
   useEffect(() => {
+    setModels((current) => {
+      let changed = false;
+      const next = { ...current };
+      for (const session of statusReport?.sessions ?? []) {
+        const sessionModel = session.model ?? "default";
+        if (next[session.role] !== sessionModel) {
+          next[session.role] = sessionModel;
+          changed = true;
+        }
+      }
+      return changed ? next : current;
+    });
+  }, [statusReport?.sessions]);
+
+  useEffect(() => {
+    const sessions = statusReport?.sessions ?? [];
+    const sessionRoles = new Set(sessions.map((session) => session.role));
+    const roles = {} as TaskWorkspaceLaunchState["roles"];
+    for (const definition of ROLE_DEFINITIONS) {
+      roles[definition.name] = {
+        permissionMode: permissionModes[definition.name],
+        model: models[definition.name]
+      };
+    }
+
+    onLaunchStateChanged?.({
+      taskSlug: task.taskSlug,
+      roles,
+      autoOrchestration: (orchestration?.mode ?? "manual") === "auto",
+      translationEnabled,
+      statusLoaded: Boolean(statusReport),
+      sessionCount: sessions.length,
+      hasAnySession: sessions.length > 0,
+      allRolesHaveSession: ROLE_DEFINITIONS.every((definition) => sessionRoles.has(definition.name))
+    });
+  }, [
+    models,
+    onLaunchStateChanged,
+    orchestration?.mode,
+    permissionModes,
+    statusReport,
+    task.taskSlug,
+    translationEnabled
+  ]);
+
+  useEffect(() => {
     const interval = window.setInterval(() => {
       void Promise.all([
         apiClient.getTaskStatus(task.taskSlug),
         apiClient.listMessages(task.taskSlug),
         apiClient.getOrchestrationState(task.taskSlug),
-        apiClient.getTaskRoundState(task.taskSlug)
+        apiClient.getSessionRoundState(task.taskSlug)
       ])
         .then(([nextStatusReport, nextMessages, nextOrchestration, nextRoundState]) => {
           applyFetchedState(nextStatusReport, nextMessages, nextOrchestration, nextRoundState);
@@ -231,6 +304,13 @@ export function TaskWorkspace({
     }));
   }
 
+  function setRoleModel(role: RoleName, model: ClaudeModel) {
+    setModels((current) => ({
+      ...current,
+      [role]: model
+    }));
+  }
+
   async function setOrchestrationMode(mode: VcmOrchestrationMode) {
     setBusy(true);
     setError("");
@@ -262,7 +342,7 @@ export function TaskWorkspace({
             aria-pressed={translationEnabled}
             className={`translation-toggle${translationEnabled ? " is-active" : ""}`}
             type="button"
-            onClick={() => setTranslationEnabled((current) => !current)}
+            onClick={() => onTranslationEnabledChange(!translationEnabled)}
           >
             {translationEnabled ? "✅ Translate" : "× Translate"}
           </button>
@@ -292,27 +372,31 @@ export function TaskWorkspace({
                     role={role}
                     session={session}
                     permissionMode={permissionModes[role]}
+                    model={models[role]}
                     active={isActive}
                     busy={busy}
                     orchestrationMode={orchestration?.mode ?? "manual"}
                     translationEnabled={translationEnabled}
                     onPermissionModeChange={(permissionMode) => setRolePermissionMode(role, permissionMode)}
+                    onModelChange={(model) => setRoleModel(role, model)}
                     onOrchestrationModeChange={(mode) => void setOrchestrationMode(mode)}
                     onStart={() => void runAction(async () => {
                       await apiClient.startRoleSession(task.taskSlug, role, {
                         cols: 100,
                         rows: 28,
-                        permissionMode: permissionModes[role]
+                        permissionMode: permissionModes[role],
+                        model: models[role]
                       });
-                      appendEvent(`started ${role} with ${permissionModes[role]}`);
+                      appendEvent(`started ${role} with ${permissionModes[role]} / ${models[role]}`);
                     })}
                     onResume={() => void runAction(async () => {
                       await apiClient.resumeRoleSession(task.taskSlug, role, {
                         cols: 100,
                         rows: 28,
-                        permissionMode: permissionModes[role]
+                        permissionMode: permissionModes[role],
+                        model: models[role]
                       });
-                      appendEvent(`resumed ${role} with ${permissionModes[role]}`);
+                      appendEvent(`resumed ${role} with ${permissionModes[role]} / ${models[role]}`);
                     })}
                     onStop={() => void runAction(async () => {
                       await apiClient.stopRoleSession(task.taskSlug, role);
@@ -322,9 +406,10 @@ export function TaskWorkspace({
                       await apiClient.restartRoleSession(task.taskSlug, role, {
                         cols: 100,
                         rows: 28,
-                        permissionMode: permissionModes[role]
+                        permissionMode: permissionModes[role],
+                        model: models[role]
                       });
-                      appendEvent(`restarted ${role} with ${permissionModes[role]}`);
+                      appendEvent(`restarted ${role} with ${permissionModes[role]} / ${models[role]}`);
                     })}
                     onTerminalEvent={(message) => appendEvent(`${definition.label}: ${message}`)}
                   />

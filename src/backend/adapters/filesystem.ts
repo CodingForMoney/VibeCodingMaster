@@ -6,6 +6,7 @@ export interface FileSystemAdapter {
   ensureDir(path: string): Promise<void>;
   readDir(path: string): Promise<string[]>;
   readText(path: string): Promise<string>;
+  readTextTail?(path: string, maxBytes: number): Promise<string>;
   writeText(path: string, content: string): Promise<void>;
   appendText(path: string, content: string): Promise<void>;
   readJson<T>(path: string): Promise<T>;
@@ -42,6 +43,19 @@ export function createNodeFileSystemAdapter(): FileSystemAdapter {
     },
     async readText(targetPath) {
       return fs.readFile(targetPath, "utf8");
+    },
+    async readTextTail(targetPath, maxBytes) {
+      const handle = await fs.open(targetPath, "r");
+      try {
+        const stat = await handle.stat();
+        const length = Math.min(Math.max(0, Math.floor(maxBytes)), stat.size);
+        const position = stat.size - length;
+        const buffer = Buffer.alloc(length);
+        await handle.read(buffer, 0, length, position);
+        return buffer.toString("utf8");
+      } finally {
+        await handle.close();
+      }
     },
     async writeText(targetPath, content) {
       await fs.mkdir(path.dirname(targetPath), { recursive: true });

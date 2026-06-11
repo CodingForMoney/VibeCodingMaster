@@ -1,0 +1,244 @@
+:root {
+  color-scheme: dark;
+  --bg: #111318;
+  --panel: #1f232b;
+  --panel-strong: #292f3a;
+  --grid: #2a303b;
+  --text: #f3f5f7;
+  --muted: #aeb7c4;
+  --green: #67d184;
+  --green-dark: #2f9b58;
+  --red: #f05f57;
+  --yellow: #f0c35a;
+  --blue: #6aa8ff;
+  --border: #3a4351;
+  --shadow: 0 24px 70px rgb(0 0 0 / 42%);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  min-height: 100vh;
+  margin: 0;
+  display: grid;
+  place-items: center;
+  padding: 28px;
+  background:
+    radial-gradient(circle at 20% 15%, rgb(106 168 255 / 16%), transparent 32%),
+    linear-gradient(135deg, #111318 0%, #17171e 46%, #14211c 100%);
+  color: var(--text);
+  overflow-x: hidden;
+  font-family:
+    Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    sans-serif;
+}
+
+button {
+  min-height: 44px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0 16px;
+  background: var(--panel-strong);
+  color: var(--text);
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  transition:
+    transform 140ms ease,
+    border-color 140ms ease,
+    background 140ms ease;
+}
+
+button:hover {
+  border-color: var(--blue);
+  background: #303846;
+}
+
+button:active {
+  transform: translateY(1px);
+}
+
+.game-shell {
+  width: min(calc(100vw - 56px), 920px);
+  max-width: 100%;
+  display: grid;
+  grid-template-columns: minmax(320px, 1fr) 280px;
+  gap: 20px;
+  align-items: stretch;
+}
+
+.play-area {
+  min-width: 0;
+  display: grid;
+  gap: 14px;
+}
+
+canvas {
+  display: block;
+  width: 100%;
+  min-width: 0;
+  max-width: 620px;
+  aspect-ratio: 1;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: #161b22;
+  box-shadow: var(--shadow);
+}
+
+.panel {
+  min-width: 0;
+  min-height: 100%;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 22px;
+  display: grid;
+  align-content: start;
+  gap: 22px;
+  background: linear-gradient(180deg, rgb(31 35 43 / 94%), rgb(24 28 34 / 94%));
+  box-shadow: var(--shadow);
+}
+
+.eyebrow {
+  margin: 0 0 6px;
+  color: var(--yellow);
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+h1 {
+  margin: 0;
+  font-size: 2.4rem;
+  line-height: 1;
+}
+
+.stats {
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(76px, 1fr));
+  gap: 10px;
+}
+
+.stats div {
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+  background: rgb(255 255 255 / 4%);
+}
+
+dt {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 700;
+}
+
+dd {
+  margin: 6px 0 0;
+  font-size: 1.5rem;
+  font-weight: 850;
+}
+
+.status {
+  min-height: 54px;
+  border-left: 4px solid var(--green);
+  border-radius: 8px;
+  padding: 14px;
+  background: rgb(103 209 132 / 10%);
+  color: var(--text);
+  font-weight: 700;
+}
+
+.status.is-ended {
+  border-color: var(--red);
+  background: rgb(240 95 87 / 10%);
+}
+
+.actions {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 10px;
+}
+
+.actions button {
+  width: 100%;
+  min-width: 0;
+}
+
+#start {
+  border-color: rgb(103 209 132 / 58%);
+  background: linear-gradient(180deg, var(--green), var(--green-dark));
+  color: #07130c;
+}
+
+.touch-pad {
+  width: min(100%, 300px);
+  margin-inline: auto;
+  display: none;
+  grid-template-columns: repeat(3, 1fr);
+  grid-template-areas:
+    ". up ."
+    "left down right";
+  gap: 8px;
+}
+
+.touch-button {
+  padding: 0 10px;
+}
+
+.touch-button.up {
+  grid-area: up;
+}
+
+.touch-button.left {
+  grid-area: left;
+}
+
+.touch-button.down {
+  grid-area: down;
+}
+
+.touch-button.right {
+  grid-area: right;
+}
+
+@media (max-width: 760px) {
+  body {
+    padding: 16px;
+    align-items: start;
+  }
+
+  .game-shell {
+    width: calc(100vw - 48px);
+    grid-template-columns: 1fr;
+  }
+
+  .panel {
+    order: -1;
+    padding: 16px;
+  }
+
+  .stats {
+    grid-template-columns: 1fr;
+  }
+
+  h1 {
+    font-size: 2rem;
+  }
+
+  .touch-pad {
+    display: grid;
+  }
+}
+
+@media (max-width: 420px) {
+  .stats {
+    grid-template-columns: 1fr;
+  }
+
+  .actions {
+    grid-template-columns: 1fr;
+  }
+}

@@ -22,6 +22,8 @@ export interface NodePtyRuntimeDeps {
   id?: () => string;
 }
 
+export const TERMINAL_REPLAY_TAIL_LIMIT_BYTES = 2 * 1024 * 1024;
+
 export function createNodePtyTerminalRuntime(deps: NodePtyRuntimeDeps): TerminalRuntime {
   const entries = new Map<string, RuntimeEntry>();
   const now = deps.now ?? (() => new Date().toISOString());
@@ -145,7 +147,7 @@ export function createNodePtyTerminalRuntime(deps: NodePtyRuntimeDeps): Terminal
       entry.listeners.add(listener);
 
       if (options.replay !== false) {
-        void deps.fs.readText(entry.input.logPath)
+        void readTerminalReplayText(deps.fs, entry.input.logPath)
           .then((data) => {
             if (!data || !entry.listeners.has(listener)) {
               return;
@@ -171,6 +173,32 @@ export function createNodePtyTerminalRuntime(deps: NodePtyRuntimeDeps): Terminal
       };
     }
   };
+}
+
+async function readTerminalReplayText(fs: FileSystemAdapter, logPath: string): Promise<string> {
+  const data = fs.readTextTail
+    ? await fs.readTextTail(logPath, TERMINAL_REPLAY_TAIL_LIMIT_BYTES)
+    : tailTerminalReplay(await fs.readText(logPath));
+  return tailTerminalReplay(data);
+}
+
+export function tailTerminalReplay(
+  data: string,
+  limitBytes = TERMINAL_REPLAY_TAIL_LIMIT_BYTES
+): string {
+  if (limitBytes <= 0 || Buffer.byteLength(data, "utf8") <= limitBytes) {
+    return data;
+  }
+
+  let start = Math.max(0, data.length - limitBytes);
+  let tail = data.slice(start);
+  while (Buffer.byteLength(tail, "utf8") > limitBytes && start < data.length) {
+    start += Math.max(1, Math.ceil((Buffer.byteLength(tail, "utf8") - limitBytes) / 4));
+    tail = data.slice(start);
+  }
+
+  const firstLineBreak = tail.indexOf("\n");
+  return firstLineBreak >= 0 ? tail.slice(firstLineBreak + 1) : tail;
 }
 
 export function buildPtyEnvironment(

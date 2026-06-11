@@ -23,37 +23,16 @@ TBD
 `;
 }
 
-export function renderImplementationLogTemplate(taskSlug: string): string {
-  return `# Implementation Log: ${taskSlug}
+export function renderKnownIssuesTemplate(taskSlug: string): string {
+  return `# Known Issues: ${taskSlug}
 
-## Summary
+## Task Issues
 
-TBD
+No unresolved task issues recorded yet.
 
-## Files Changed
+## Escalation To Docs
 
-TBD
-
-## Validation
-
-TBD
-
-## Deviations From Architecture Plan
-
-TBD
-
-## Follow-ups
-
-TBD
-`;
-}
-
-export function renderValidationLogTemplate(taskSlug: string): string {
-  return `# Validation Log: ${taskSlug}
-
-## Validation
-
-Not run yet.
+At task close, promote still-relevant confirmed issues to \`docs/known-issues.md\`; delete this task-local file with the rest of \`.ai/vcm/\` runtime state.
 `;
 }
 
@@ -105,7 +84,66 @@ TBD
 
 TBD
 
+## Known Issues Disposition
+
+TBD
+
 ## Decision
+
+TBD
+`;
+}
+
+export function renderFinalAcceptanceTemplate(taskSlug: string): string {
+  return `# Final Acceptance: ${taskSlug}
+
+## Decision
+
+TBD
+
+## Evidence Reviewed
+
+TBD
+
+## Scope Traceability
+
+### Expected Changes
+
+TBD
+
+### Supporting Changes
+
+TBD
+
+### Approved Deviations
+
+TBD
+
+### Unexplained Changes
+
+TBD
+
+### High-Risk Unexpected Changes
+
+TBD
+
+## Validation Summary
+
+TBD
+
+## Review And Docs Sync
+
+TBD
+
+## Known Issues Disposition
+
+TBD
+
+## Cleanup Readiness
+
+TBD
+
+## Final User Summary
 
 TBD
 `;

@@ -1,8 +1,18 @@
 import path from "node:path";
 import { homedir } from "node:os";
 import { createHash } from "node:crypto";
-import type { AppPreferences, ThemeMode } from "../../shared/types/app-settings.js";
+import { ROLE_NAMES } from "../../shared/constants.js";
+import {
+  createDefaultLaunchTemplate,
+  type AppPreferences,
+  type LaunchTemplate,
+  type PermissionRequestMode,
+  type RoleLaunchTemplateEntry,
+  type ThemeMode
+} from "../../shared/types/app-settings.js";
 import type { ProjectConfig } from "../../shared/types/project.js";
+import type { RoleName } from "../../shared/types/role.js";
+import { CLAUDE_MODEL_OPTIONS, type ClaudeModel, type ClaudePermissionMode } from "../../shared/types/session.js";
 import type { TranslationSecretSettings, TranslationSettings } from "../../shared/types/translation.js";
 import type { FileSystemAdapter } from "../adapters/filesystem.js";
 
@@ -247,9 +257,14 @@ function normalizeSettingsFile(input: Partial<AppSettingsFile>): AppSettingsFile
 
 function normalizePreferences(input: unknown): AppPreferences {
   const candidate = isObject(input) ? input : {};
+  const rawFlowPauseAlerts = "flowPauseAlerts" in candidate
+    ? candidate.flowPauseAlerts
+    : candidate.roundCompletionAlerts;
   return {
     themeMode: normalizeThemeMode(candidate.themeMode),
-    roundCompletionAlerts: candidate.roundCompletionAlerts !== false
+    flowPauseAlerts: rawFlowPauseAlerts !== false,
+    permissionRequestMode: normalizePermissionRequestMode(candidate.permissionRequestMode),
+    launchTemplate: normalizeLaunchTemplate(candidate.launchTemplate)
   };
 }
 
@@ -258,6 +273,62 @@ function normalizeThemeMode(input: unknown): ThemeMode {
     return input;
   }
   return "system";
+}
+
+function normalizePermissionRequestMode(input: unknown): PermissionRequestMode {
+  if (input === "allowAll") {
+    return input;
+  }
+  return "off";
+}
+
+function normalizeLaunchTemplate(input: unknown): LaunchTemplate {
+  const defaults = createDefaultLaunchTemplate();
+  if (!isObject(input)) {
+    return defaults;
+  }
+
+  const rawRoles = isObject(input.roles) ? input.roles : {};
+  const roles = {} as Record<RoleName, RoleLaunchTemplateEntry>;
+  for (const role of ROLE_NAMES) {
+    roles[role] = normalizeRoleLaunchTemplateEntry(rawRoles[role], defaults.roles[role]);
+  }
+
+  return {
+    version: 1,
+    roles,
+    autoOrchestration: input.autoOrchestration !== false,
+    translationEnabled: input.translationEnabled !== false
+  };
+}
+
+function normalizeRoleLaunchTemplateEntry(
+  input: unknown,
+  fallback: RoleLaunchTemplateEntry
+): RoleLaunchTemplateEntry {
+  const candidate = isObject(input) ? input : {};
+  return {
+    permissionMode: normalizeClaudePermissionMode(candidate.permissionMode, fallback.permissionMode),
+    model: normalizeClaudeModel(candidate.model, fallback.model)
+  };
+}
+
+function normalizeClaudePermissionMode(
+  input: unknown,
+  fallback: ClaudePermissionMode
+): ClaudePermissionMode {
+  if (input === "bypassPermissions" || input === "default") {
+    return input;
+  }
+  return fallback;
+}
+
+function normalizeClaudeModel(input: unknown, fallback: ClaudeModel): ClaudeModel {
+  if (typeof input !== "string") {
+    return fallback;
+  }
+  const model = CLAUDE_MODEL_OPTIONS.find((option) => option.value === input);
+  return model?.value ?? fallback;
 }
 
 function normalizeTranslationConfig(input: unknown): StoredTranslationConfig | undefined {

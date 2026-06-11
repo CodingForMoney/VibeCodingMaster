@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { buildPtyEnvironment } from "../../../src/backend/runtime/node-pty-runtime.js";
+import { buildPtyEnvironment, tailTerminalReplay } from "../../../src/backend/runtime/node-pty-runtime.js";
 
-describe("buildPtyEnvironment", () => {
+describe("node-pty-runtime", () => {
   it("announces truecolor terminal support and removes NO_COLOR", () => {
     const env = buildPtyEnvironment(
       {
@@ -42,5 +42,19 @@ describe("buildPtyEnvironment", () => {
     expect(env.COLORTERM).toBe("24bit");
     expect(env.FORCE_COLOR).toBe("2");
     expect(env.NO_COLOR).toBeUndefined();
+  });
+
+  it("limits replayed terminal logs to a tail window", () => {
+    const replay = tailTerminalReplay([
+      "old line 1",
+      "old line 2",
+      "recent line 1",
+      "recent line 2"
+    ].join("\n"), 28);
+
+    expect(replay).toBe([
+      "recent line 1",
+      "recent line 2"
+    ].join("\n"));
   });
 });

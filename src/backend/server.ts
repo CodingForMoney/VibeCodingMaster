@@ -11,10 +11,20 @@ import { createClaudeHookService, type ClaudeHookService } from "./services/clau
 import { createGitAdapter } from "./adapters/git-adapter.js";
 import { createAppSettingsService, type AppSettingsService } from "./services/app-settings-service.js";
 import { createClaudeTranscriptService } from "./services/claude-transcript-service.js";
-import { createHarnessService, type HarnessService } from "./services/harness-service.js";
+import {
+  createHarnessService,
+  createScriptFixedHarnessInstaller,
+  type HarnessService
+} from "./services/harness-service.js";
 import { createNodeFileSystemAdapter } from "./adapters/filesystem.js";
 import { createNodePtyTerminalRuntime } from "./runtime/node-pty-runtime.js";
 import { createOpenAiCompatibleTranslationProvider } from "./adapters/translation-provider.js";
+import { registerGatewayRoutes } from "./api/gateway-routes.js";
+import { createWeixinIlinkChannel } from "./gateway/channels/weixin-ilink-channel.js";
+import { createGatewayAuditLog } from "./gateway/gateway-audit-log.js";
+import { createGatewayService, type GatewayService } from "./gateway/gateway-service.js";
+import { createGatewaySettingsService } from "./gateway/gateway-settings-service.js";
+import { createJobGuardService } from "./services/job-guard-service.js";
 import { createProjectService, type ProjectService } from "./services/project-service.js";
 import { createSessionRegistry } from "./runtime/session-registry.js";
 import { createSessionService, type SessionService } from "./services/session-service.js";
@@ -57,6 +67,7 @@ export interface ServerDeps {
   roundService: RoundService;
   statusService: StatusService;
   translationService: TranslationService;
+  gatewayService: GatewayService;
   runtime: TerminalRuntime;
 }
 
@@ -111,8 +122,6 @@ export async function createServer(deps: ServerDeps, options: CreateServerOption
   registerRoundRoutes(app, {
     projectService: deps.projectService,
     taskService: deps.taskService,
-    sessionService: deps.sessionService,
-    messageService: deps.messageService,
     roundService: deps.roundService
   });
   registerTranslationRoutes(app, {
@@ -120,7 +129,15 @@ export async function createServer(deps: ServerDeps, options: CreateServerOption
     taskService: deps.taskService,
     translationService: deps.translationService
   });
+  registerGatewayRoutes(app, { gatewayService: deps.gatewayService });
   registerTerminalWs(app, { runtime: deps.runtime });
+
+  app.addHook("onReady", async () => {
+    await deps.gatewayService.start();
+  });
+  app.addHook("onClose", async () => {
+    deps.gatewayService.stop();
+  });
 
   if (options.staticDir) {
     await app.register(fastifyStatic, {
@@ -165,8 +182,14 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
   const runtime = createNodePtyTerminalRuntime({ fs });
   const registry = createSessionRegistry();
   const artifactService = createArtifactService(fs);
-  const harnessService = createHarnessService({ fs });
   const projectService = createProjectService({ fs, git, claude, appSettings });
+  const harnessService = createHarnessService({
+    fs,
+    runtime,
+    projectService,
+    apiUrl: options.apiUrl,
+    runFixedInstaller: createScriptFixedHarnessInstaller(path.join(getAppRoot(), "scripts/install-vcm-harness.mjs"))
+  });
   const taskService = createTaskService({ fs, git, artifactService, projectService });
   const sessionService = createSessionService({
     fs,
@@ -195,14 +218,13 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     sessionService,
     taskService
   });
-  const claudeHookService = createClaudeHookService({
-    projectService,
-    taskService,
-    sessionService,
-    messageService
+  const roundService = createRoundService({
+    fs,
+    onSessionStatusChange: async ({ repoRoot, taskSlug, status }) => {
+      await taskService.updateTaskStatus(repoRoot, taskSlug, status);
+    }
   });
   const transcripts = createClaudeTranscriptService();
-  const roundService = createRoundService();
   const translationService = createTranslationService({
     runtime,
     sessionRegistry: registry,
@@ -212,6 +234,36 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     projectService,
     appSettings,
     provider: createOpenAiCompatibleTranslationProvider()
+  });
+  const gatewaySettings = createGatewaySettingsService({ fs });
+  const gatewayAudit = createGatewayAuditLog({
+    fs,
+    auditPath: gatewaySettings.getAuditPath()
+  });
+  const gatewayService = createGatewayService({
+    fs,
+    settings: gatewaySettings,
+    audit: gatewayAudit,
+    channel: createWeixinIlinkChannel(),
+    projectService,
+    taskService,
+    sessionService,
+    messageService,
+    translationService,
+    roundService,
+    runtime,
+    appSettings
+  });
+  const claudeHookService = createClaudeHookService({
+    projectService,
+    taskService,
+    sessionService,
+    messageService,
+    roundService,
+    translationService,
+    appSettings,
+    gatewayService,
+    jobGuard: createJobGuardService()
   });
 
   return {
@@ -227,6 +279,7 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     roundService,
     statusService,
     translationService,
+    gatewayService,
     runtime
   };
 }

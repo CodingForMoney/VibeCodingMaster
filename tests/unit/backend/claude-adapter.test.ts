@@ -8,27 +8,41 @@ describe("createClaudeAdapter", () => {
     }
   });
 
-  it("builds the default role command without extra permission flags", () => {
+  it("builds the default role command with the default model", () => {
     expect(adapter.buildRoleStartCommand("coder", "claude", "default", "00000000-0000-4000-8000-000000000001")).toEqual({
       command: "claude",
-      args: ["--agent", "coder", "--session-id", "00000000-0000-4000-8000-000000000001"],
-      display: "claude --agent coder --session-id 00000000-0000-4000-8000-000000000001"
+      args: ["--agent", "coder", "--session-id", "00000000-0000-4000-8000-000000000001", "--model", "default"],
+      display: "claude --agent coder --session-id 00000000-0000-4000-8000-000000000001 --model default"
     });
   });
 
   it("builds bypassPermissions as a permission mode", () => {
     expect(adapter.buildRoleStartCommand("coder", "claude", "bypassPermissions")).toEqual({
       command: "claude",
-      args: ["--agent", "coder", "--permission-mode", "bypassPermissions"],
-      display: "claude --agent coder --permission-mode bypassPermissions"
+      args: ["--agent", "coder", "--model", "default", "--permission-mode", "bypassPermissions"],
+      display: "claude --agent coder --model default --permission-mode bypassPermissions"
     });
   });
 
-  it("builds dangerously skip permissions as a dedicated flag", () => {
-    expect(adapter.buildRoleStartCommand("coder", "claude", "dangerously-skip-permissions")).toEqual({
+  it("builds role commands with a selected model", () => {
+    expect(adapter.buildRoleStartCommand(
+      "coder",
+      "claude",
+      "default",
+      "00000000-0000-4000-8000-000000000001",
+      false,
+      "claude-opus-4-8[1m]"
+    )).toEqual({
       command: "claude",
-      args: ["--agent", "coder", "--dangerously-skip-permissions"],
-      display: "claude --agent coder --dangerously-skip-permissions"
+      args: [
+        "--agent",
+        "coder",
+        "--session-id",
+        "00000000-0000-4000-8000-000000000001",
+        "--model",
+        "claude-opus-4-8[1m]"
+      ],
+      display: "claude --agent coder --session-id 00000000-0000-4000-8000-000000000001 --model 'claude-opus-4-8[1m]'"
     });
   });
 
@@ -41,16 +55,16 @@ describe("createClaudeAdapter", () => {
       true
     )).toEqual({
       command: "claude",
-      args: ["--agent", "architect", "--resume", "00000000-0000-4000-8000-000000000002"],
-      display: "claude --agent architect --resume 00000000-0000-4000-8000-000000000002"
+      args: ["--agent", "architect", "--resume", "00000000-0000-4000-8000-000000000002", "--model", "default"],
+      display: "claude --agent architect --resume 00000000-0000-4000-8000-000000000002 --model default"
     });
   });
 
-  it("keeps dangerously skip permissions on resume commands", () => {
+  it("keeps bypassPermissions on resume commands", () => {
     expect(adapter.buildRoleStartCommand(
       "coder",
       "claude",
-      "dangerously-skip-permissions",
+      "bypassPermissions",
       "00000000-0000-4000-8000-000000000003",
       true
     )).toEqual({
@@ -60,9 +74,12 @@ describe("createClaudeAdapter", () => {
         "coder",
         "--resume",
         "00000000-0000-4000-8000-000000000003",
-        "--dangerously-skip-permissions"
+        "--model",
+        "default",
+        "--permission-mode",
+        "bypassPermissions"
       ],
-      display: "claude --agent coder --resume 00000000-0000-4000-8000-000000000003 --dangerously-skip-permissions"
+      display: "claude --agent coder --resume 00000000-0000-4000-8000-000000000003 --model default --permission-mode bypassPermissions"
     });
   });
 });

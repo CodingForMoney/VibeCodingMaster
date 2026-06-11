@@ -23,6 +23,7 @@ ${artifactRefs}
 
 Instructions:
 - Read the message and execute only within this VCM task.
+- If you write or update a VCM route file, use the vcm-route-message skill.
 - If you need to send a VCM message after handling this, write or update .ai/vcm/handoffs/messages/<your-role>-<target-role>.md.
 - Non-PM roles reply only to project-manager, for example ${routeFileExample}.
 - After writing a route file, end this Claude Code turn immediately.

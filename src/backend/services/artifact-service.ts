@@ -15,10 +15,10 @@ import {
 import {
   renderArchitecturePlanTemplate,
   renderDocsSyncReportTemplate,
-  renderImplementationLogTemplate,
+  renderFinalAcceptanceTemplate,
+  renderKnownIssuesTemplate,
   renderMessageRouteTemplate,
-  renderReviewReportTemplate,
-  renderValidationLogTemplate
+  renderReviewReportTemplate
 } from "../templates/handoff.js";
 import { renderRoleCommandTemplate } from "../templates/role-command.js";
 
@@ -43,6 +43,7 @@ export interface EnsureHandoffStructureInput {
 
 export interface CreateArtifactTemplatesInput extends EnsureHandoffStructureInput {
   overwrite?: boolean;
+  branch?: string;
 }
 
 export interface ListArtifactsInput {
@@ -74,10 +75,10 @@ export interface AppendRoleLogInput {
 
 const ARTIFACT_PATH_KEYS: Array<[ArtifactKind, keyof HandoffPaths]> = [
   ["architecture-plan", "architecturePlanPath"],
-  ["implementation-log", "implementationLogPath"],
-  ["validation-log", "validationLogPath"],
+  ["known-issues", "knownIssuesPath"],
   ["review-report", "reviewReportPath"],
-  ["docs-sync-report", "docsSyncReportPath"]
+  ["docs-sync-report", "docsSyncReportPath"],
+  ["final-acceptance", "finalAcceptancePath"]
 ];
 const ROLE_COMMAND_PLACEHOLDER_PATTERN = /(^|\n)\s*(TBD|status:\s*draft)\s*(\n|$)/i;
 const DEFAULT_MESSAGE_ROUTES: Array<[RoleName, RoleName]> = [
@@ -114,10 +115,10 @@ export function createArtifactService(fs: FileSystemAdapter): ArtifactService {
         },
         messageRoutePaths: getDefaultMessageRoutePaths(messagesDir),
         architecturePlanPath: path.posix.join(handoffDir, "architecture-plan.md"),
-        implementationLogPath: path.posix.join(handoffDir, "implementation-log.md"),
-        validationLogPath: path.posix.join(handoffDir, "validation-log.md"),
+        knownIssuesPath: path.posix.join(handoffDir, "known-issues.md"),
         reviewReportPath: path.posix.join(handoffDir, "review-report.md"),
-        docsSyncReportPath: path.posix.join(handoffDir, "docs-sync-report.md")
+        docsSyncReportPath: path.posix.join(handoffDir, "docs-sync-report.md"),
+        finalAcceptancePath: path.posix.join(handoffDir, "final-acceptance.md")
       };
     },
     getMessageRoutePath(handoffDir, fromRole, toRole) {
@@ -134,14 +135,14 @@ export function createArtifactService(fs: FileSystemAdapter): ArtifactService {
     async createArtifactTemplates(input) {
       const paths = await this.ensureHandoffStructure(input);
       const files: Array<[string, string]> = [
-        [paths.roleCommandPaths.architect, renderRoleCommandTemplate(input.taskSlug, "architect")],
-        [paths.roleCommandPaths.coder, renderRoleCommandTemplate(input.taskSlug, "coder")],
-        [paths.roleCommandPaths.reviewer, renderRoleCommandTemplate(input.taskSlug, "reviewer")],
+        [paths.roleCommandPaths.architect, renderRoleCommandTemplate(input.taskSlug, "architect", input.repoRoot, input.branch)],
+        [paths.roleCommandPaths.coder, renderRoleCommandTemplate(input.taskSlug, "coder", input.repoRoot, input.branch)],
+        [paths.roleCommandPaths.reviewer, renderRoleCommandTemplate(input.taskSlug, "reviewer", input.repoRoot, input.branch)],
         [paths.architecturePlanPath, renderArchitecturePlanTemplate(input.taskSlug)],
-        [paths.implementationLogPath, renderImplementationLogTemplate(input.taskSlug)],
-        [paths.validationLogPath, renderValidationLogTemplate(input.taskSlug)],
+        [paths.knownIssuesPath, renderKnownIssuesTemplate(input.taskSlug)],
         [paths.reviewReportPath, renderReviewReportTemplate(input.taskSlug)],
         [paths.docsSyncReportPath, renderDocsSyncReportTemplate(input.taskSlug)],
+        [paths.finalAcceptancePath, renderFinalAcceptanceTemplate(input.taskSlug)],
         ...Object.values(paths.messageRoutePaths).map((messagePath): [string, string] => [
           messagePath,
           renderMessageRouteTemplate()
@@ -242,7 +243,6 @@ export function createArtifactService(fs: FileSystemAdapter): ArtifactService {
           hint: `Ask project-manager to write the real instruction in ${primaryCommandPath}. Keep all files under ${input.handoffDir}.`
         });
       }
-
       return content;
     },
     async saveRoleCommand(input) {

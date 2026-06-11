@@ -1,4 +1,6 @@
-# Claude Code AI Coding Best Practices 
+# Claude Code AI Coding Best Practices
+
+> Archived: this document is kept for historical reference only. As of 2026-06-08, it is no longer maintained or updated. Current VCM-specific practice belongs in `docs/vcm-cc-best-practices.md`.
 
 Date: 2026-05-22
 
@@ -10,7 +12,7 @@ Core principle:
 Reliable loop:
 
 ```text
-task spec
+task brief
   -> file responsibilities / public function contracts
   -> small-step implementation
   -> layered testing
@@ -58,7 +60,7 @@ Behavioral guardrails:
 - Touch only files required by the task; do not clean up, format, or refactor adjacent code opportunistically.
 - When the current task replaces a mechanism, remove obsolete code, stale paths, dead branches, legacy adapters, and unused compatibility shims. Do not preserve backward compatibility with stale code unless the user explicitly asks for it.
 - Clean up only unused imports, variables, functions, or test leftovers created by the current change.
-- Report-but-don't-act: when noticing an issue outside the current task scope (unrelated dead code, doc drift, adjacent bug, architecture concern, security smell), record it in `.ai/state/known-issues.md` and continue; do not act on it without an explicit task.
+- Report-but-don't-act: when noticing an issue outside the current task scope, record it in the task-local handoff `known-issues.md`; promote it to `docs/known-issues.md` only if it remains confirmed and useful across tasks.
 - Every diff line must trace to the task goal, public contract, test contract, or required documentation sync.
 - For multi-step tasks, define the validation check for each step.
 
@@ -77,13 +79,16 @@ repo/
     TESTING.md
     SECURITY.md
     DEPENDENCY_RULES.md
-    exec-plans/
+    plans/
       active/
       completed/
 
   .claude/
     settings.json
     skills/
+      route-message.md
+      docs-sync.md
+      long-running-validation.md
     agents/
       project-manager.md
       architect.md
@@ -97,25 +102,24 @@ repo/
     commands/
 
   .ai/
-    vcm/                 # ignored local VCM control state
-      handoffs/
-        architecture-plan.md
-        implementation-log.md
-        validation-log.md
-        review-report.md
-    task-specs/
-    state/
-      progress.md
-      decisions.md
+    jobs/                # ignored runtime state for long-running validation jobs
+    handoffs/
+      role-commands/
+        architect.md
+        coder.md
+        reviewer.md
+      architecture-plan.md
+      implementation-log.md
       validation-log.md
       known-issues.md
-      scratch.md
+      review-report.md
+      docs-sync-report.md
     generated/
       module-index.json
       test-map.json
       public-surface.json
 
-  tools/
+  .ai/tools/
     check-fast
     check-changed
     check-module
@@ -126,13 +130,17 @@ repo/
     check-generated-artifacts
     check-docs-freshness
     check-agent-rules
+    run-long-check
+    watch-job
 ```
+
+`.ai/tools/` is the recommended durable harness tool root. It keeps AI validation and discovery entry points near `.ai/generated/` while avoiding collisions with project-owned root `tools/` directories.
 
 Required large-project baseline:
 
 For a large project, the harness is not a maturity ladder. Treat the structure above as the baseline before letting Claude Code make non-trivial changes.
 
-Missing pieces are not an accepted intermediate design. If a legacy project is missing part of the harness, record the gap in `.ai/state/known-issues.md` or an execution plan with owner, risk, and target date. High-risk work must wait until the relevant rules, role agents, docs, and validation commands exist.
+Missing pieces are not an accepted intermediate design. If a legacy project is missing part of the harness, record the gap in `docs/known-issues.md` or an execution plan with owner, risk, and target date. High-risk work must wait until the relevant rules, role agents, docs, and validation commands exist.
 
 Minimum baseline for non-trivial AI coding:
 
@@ -140,8 +148,9 @@ Minimum baseline for non-trivial AI coding:
 - module-local `CLAUDE.md` for edited modules
 - architecture, module map, testing, security, and dependency docs
 - role agents for project management/user communication, architecture/planning, coding, and independent review/testing
-- task specs, handoff artifacts, progress state, decisions, validation logs, known issues, and generated context artifacts
+- task briefs or long-running plans, handoff artifacts, task-local known issues, durable `docs/known-issues.md`, validation logs, and generated context artifacts
 - fast, changed-file, module, boundary, public-surface, contract-test, generated-artifact, docs-freshness, and agent-rule checks
+- project skills for repeated operations such as long-running validation
 - hooks or CI gates for protected files, validation, docs sync, public contracts, and test quality
 
 ## 3. `CLAUDE.md`
@@ -181,7 +190,7 @@ Root template:
 - `packages/`: shared libraries
 - `apps/`: user-facing applications
 - `docs/`: architecture, testing, security, module docs
-- `tools/`: validation and developer utilities
+- `.ai/tools/`: validation and developer utilities
 
 ## Start Here
 
@@ -192,15 +201,15 @@ Root template:
 
 ## Commands
 
-- Fast validation: `tools/check-fast`
-- Changed files validation: `tools/check-changed`
-- Module validation: `tools/check-module <module>`
+- Fast validation: `.ai/tools/check-fast`
+- Changed files validation: `.ai/tools/check-changed`
+- Module validation: `.ai/tools/check-module <module>`
 
 ## Role Entry Points
 
 Role-specific behavior lives in `.claude/agents/`.
 
-- Use `claude --agent project-manager` for user communication, task clarification, task specs, role routing, role commands, status summaries, and final acceptance.
+- Use `claude --agent project-manager` for user communication, task clarification, task briefs, role routing, role commands, status summaries, and final acceptance.
 - Use `claude --agent architect` for architecture plans, module boundaries, file responsibilities, public contracts, test contracts, phase plans, and post-review docs sync / architecture drift checks.
 - Use `claude --agent coder` for implementation and direct tests within an approved plan.
 - Use `claude --agent reviewer` for independent review, test adequacy, validation evidence, docs gap detection, and acceptance findings.
@@ -213,37 +222,39 @@ Role-specific behavior lives in `.claude/agents/`.
 - Default core roles are `project-manager`, `architect`, `coder`, and `reviewer`.
 - The `project-manager` role owns user communication, task routing, role commands, handoff verification, final status reporting, and PR preparation after required gates pass.
 - Do not let one coding session own architecture/plan decisions, implementation, final testing responsibility, and review.
-- Role outputs are exchanged through `.ai/vcm/handoffs/`, not through chat history.
+- Role outputs are exchanged through a task-local handoff directory, for example `.ai/handoffs/`, not through chat history.
 - Role messaging is turn-based. Keep at most one active message to the same target role.
-- Send role messages by writing or updating the fixed route file under `.ai/vcm/handoffs/messages/<from-role>-<to-role>.md`.
+- If the project installs a route-message skill, use it whenever writing or updating role message files.
+- Send role messages by writing or updating a fixed route file, for example `.ai/handoffs/messages/<from-role>-<to-role>.md`.
 - For a given target role, update the same route file instead of creating multiple fragmented messages.
 - After writing or updating a role message file, end the current Claude Code turn. Treat the file write as the final coordination action of that turn.
-- Do not poll message files, start shell loops, or keep the turn open waiting for another role's answer. VCM dispatches pending route files after Claude Code `Stop`.
-- Do not use Claude Code Task/Subagent for VCM role delegation; VCM owns the four long-running role sessions.
+- Do not poll message files, start shell loops, or keep the turn open waiting for another role's answer. The harness manager should dispatch pending route files after the role turn ends.
+- Do not end the current turn only to wait for a long-running shell callback. For long-running builds/tests, use the `long-running-validation` skill and the project long-task wrapper.
+- Do not use Claude Code Task/Subagent as the primary delegation mechanism for the main role chain; explicit role sessions own the long-running workflow.
 - If new information appears while a role is still processing, update the handoff artifact or wait instead of sending fragmented follow-up messages.
 - When the required role route includes `architect`, coding must not start until the architecture and plan artifact exists.
 - If the current session was not started with the required role, stop and ask the user to restart with `claude --agent <role>`; do not pretend to be that role inside the wrong session.
-- Critical global rules may be repeated in role agent files for defense in depth, but repeated rules must use stable rule IDs and be checked by `tools/check-agent-rules`. Do not maintain untracked manual copies.
+- Critical global rules may be repeated in role agent files for defense in depth, but repeated rules must use stable rule IDs and be checked by `.ai/tools/check-agent-rules`. Do not maintain untracked manual copies.
 
-## VCM Managed Harness Blocks
+## Harness-Managed Blocks
 
-If VibeCodingMaster or another harness manager maintains project rules, those rules must live in repo-local files and be reviewable in Git. Do not inject long-lived collaboration rules into a Claude Code terminal as ordinary input.
+If a harness manager maintains project rules, those rules must live in repo-local files and be reviewable in Git. Do not inject long-lived collaboration rules into a Claude Code terminal as ordinary input.
 
 Allowed managed block format:
 
 ```md
-<!-- VCM:BEGIN version=1 -->
-VCM-managed rules.
-<!-- VCM:END -->
+<!-- HARNESS:BEGIN version=1 -->
+Harness-managed rules.
+<!-- HARNESS:END -->
 ```
 
 Rules:
 
-- VCM may create missing `CLAUDE.md` and `.claude/agents/{project-manager,architect,coder,reviewer}.md` from recommended defaults.
-- If a file already exists, VCM may only insert or replace the VCM managed block.
-- VCM must not overwrite user-authored content outside managed blocks.
-- After applying harness changes, VCM must report changed files and recommend a user review/commit.
-- Session startup should pass environment variables and start the role agent; it should not paste a long VCM context into the terminal.
+- A harness manager may create missing `CLAUDE.md` and `.claude/agents/{project-manager,architect,coder,reviewer}.md` from recommended defaults.
+- If a file already exists, the harness manager may only insert or replace the harness-managed block.
+- The harness manager must not overwrite user-authored content outside managed blocks.
+- After applying harness changes, the harness manager must report changed files and recommend a user review/commit.
+- Session startup should pass environment variables and start the role agent; it should not paste a long harness context into the terminal.
 
 ## Default Behavior
 
@@ -252,7 +263,7 @@ Rules:
 - Prefer the simplest solution that satisfies the task; do not add speculative features, abstractions, configuration, or flexibility.
 - Touch only files required by the task; do not clean up or refactor unrelated code.
 - Clean up only unused code created by the current change.
-- Report-but-don't-act: record out-of-scope issues in `.ai/state/known-issues.md`; do not act on them.
+- Report-but-don't-act: record out-of-scope issues in the task-local handoff `known-issues.md`; do not act on them.
 - Every changed line must trace to the task goal, public contract, test contract, or required documentation sync.
 - For multi-step tasks, define the validation check for each step before implementing it.
 
@@ -266,12 +277,12 @@ Rules:
 
 ## Definition of Done
 
-- Diff is scoped to the task.
+- Changed files and meaningful hunks have traceable reasons.
 - Required validation passes.
 - New or modified public functions have contract tests.
 - Behavior changes have regression tests unless impractical.
 - Plan, architecture, public contract, test strategy, and module responsibility changes are reflected in docs after post-review architect docs sync.
-- Follow-ups are recorded in `.ai/state/known-issues.md` or the execution plan.
+- Follow-ups are recorded in the task-local handoff `known-issues.md`, `docs/known-issues.md`, or the execution plan.
 ```
 
 Large projects must have module-local `CLAUDE.md` files:
@@ -293,7 +304,7 @@ Module files should define:
 - historical pitfalls
 - high-risk behavior
 
-## 4. Task Specs and Planning Granularity
+## 4. Task Briefs and Planning Granularity
 
 Every task must define at least **file-level responsibilities**.
 
@@ -332,10 +343,12 @@ function internals: usually not fixed in advance
 
 Large tasks can start with modules, directories, file responsibilities, data flow, and dependency direction. Before each implementation phase, define the public function contracts involved in that phase.
 
-### 4.1 Task Spec Template
+Task briefs do not require a dedicated file for every task. For ordinary work, the brief may live in the issue, PR description, role command, or project-manager handoff. For large, multi-phase, or multi-day work, the durable plan lives under `docs/plans/active/<plan-name>.md`.
+
+### 4.1 Task Brief / Plan Template
 
 ```md
-# Task Spec
+# Task Brief / Plan
 
 ## Goal
 
@@ -567,7 +580,7 @@ Do not include:
 
 For large projects, the default execution model should be explicit role-based sessions, not dynamic role routing inside one generic Claude conversation.
 
-The user-facing task should start with a `project-manager` role session. The project manager owns user communication, route-file message preparation, severity classification, role routing, progress tracking, and process verification. It does not own architecture, coding, and independent review for the same non-trivial task.
+The user-facing task should start with a `project-manager` role session. The project manager owns user communication, route-file message preparation, task risk classification, role routing, progress tracking, and process verification. It does not own architecture, coding, and independent review for the same non-trivial task.
 
 Do not make one generic Claude session own architecture, planning, coding, final testing, and review for non-trivial work. That blurs responsibility and makes acceptance weak.
 
@@ -584,8 +597,8 @@ Project manager responsibilities:
 ```text
 communicate with user
   -> clarify task
-  -> turn user intent into a task brief / task spec
-  -> classify severity
+  -> turn user intent into a task brief / durable plan
+  -> classify task risk
   -> choose required role route
   -> prepare the next role command
   -> ensure handoff directory exists when needed
@@ -601,7 +614,7 @@ The project manager is a process owner, not an execution owner.
 
 It is also the communication bridge between the user and the role agents. The user should not need to know how to write a perfect Claude Code prompt. The project manager owns the conversion from user intent to precise agent instructions.
 
-It may route T0/T1 work to a lightweight coder flow when the task is small, scoped, and low risk. For non-trivial work, it coordinates role sessions and verifies the process.
+A shorter route is a per-task exception, not a baseline default. If the user explicitly approves one, the project manager records the exception and still verifies ownership, validation, and acceptance gates.
 
 Do not let the project manager:
 
@@ -619,7 +632,7 @@ A role command must include:
 
 ```text
 role identity
-task spec path
+task brief path
 required input artifacts
 allowed write scope
 public surface contract
@@ -634,26 +647,26 @@ Role command examples:
 
 ```text
 architect command:
-  read the task spec, architecture docs, module map, and relevant module-local CLAUDE.md
-  produce .ai/vcm/handoffs/architecture-plan.md
+  read the task brief, architecture docs, module map, and relevant module-local CLAUDE.md
+  produce .ai/handoffs/architecture-plan.md
   define file responsibilities, public contracts, test contracts, phases, validation, and Replan triggers
   do not edit production code
 
 coder command:
-  read the task spec and approved architecture-plan.md
+  read the task brief and approved architecture-plan.md
   implement only the approved phase and allowed files
   add or update direct contract/regression tests
   update implementation-log.md and validation-log.md
   stop if scope, public contract, architecture, or test strategy must change
 
 reviewer command:
-  read task spec, architecture-plan.md, implementation-log.md, validation-log.md, and git diff
+  read task brief, architecture-plan.md, implementation-log.md, validation-log.md, and git diff
   verify scope, architecture, public contract, tests, validation, and docs gaps
   write review-report.md
   only apply small, local, low-risk review-scoped fixes
 
 architect docs-sync command:
-  read task spec, architecture-plan.md, implementation-log.md, validation-log.md, review-report.md, and git diff
+  read task brief, architecture-plan.md, implementation-log.md, validation-log.md, review-report.md, and git diff
   verify whether the final code still matches the approved architecture and public contracts
   update architecture/module/testing/security docs when the code change made them stale
   write docs-sync-report.md with docs changed, docs intentionally unchanged, and remaining doc risks
@@ -683,20 +696,17 @@ The role is selected at session startup. The agent file defines that session's s
 
 If the current session was not started with the required role, stop and ask the user to restart with the correct `claude --agent <role>` command. Do not simulate a different role through a normal prompt.
 
-### 7.3 Task Severity Routing
+### 7.3 Task Routing
 
-This is not progressive adoption. The full harness exists by default; the role chain depends on task risk.
+This is not progressive adoption. The full harness exists by default, and the baseline does not define shortcut routes.
 
-All user-facing routes begin with `project-manager`. The project manager may hand off T0/T1 work to `coder` quickly, but it still owns status reporting and acceptance communication.
+All user-facing routes begin with `project-manager`. A shorter route requires explicit user approval recorded in the task evidence.
 
 | Task class | Examples | Required role route |
 | --- | --- | --- |
-| T0 trivial | copy, comments, docs typo, tiny config with no behavior change | `project-manager` -> `coder`; optional reviewer checklist; PM commit/PR |
-| T1 small scoped change | single-file bug, focused test addition, known-pattern fix | `project-manager` -> `coder` -> fresh review context or `reviewer` -> docs checklist; PM commit/PR |
-| T2 ordinary feature | bounded behavior, normal multi-file feature, ordinary PR | `project-manager` -> `architect` -> `coder` -> `reviewer` -> `architect` docs sync -> PM commit/PR |
-| T3 cross-module / architectural | cross-module change, module boundary change, refactor, new public surface | `project-manager` -> `architect` -> `coder` -> `reviewer` -> `architect` docs sync -> PM commit/PR |
-| T4 high-risk | auth, permission, payment, billing, schema, data deletion, public API/SDK, security-sensitive infrastructure | `project-manager` -> `architect` -> relevant specialist if needed -> `coder` -> `reviewer` -> `architect` docs sync -> human approval -> PM commit/PR |
-| T5 large rewrite / greenfield | new subsystem, major rewrite, migration across many modules | `project-manager` -> `architect`; then repeat `coder` -> `reviewer` -> `architect` docs sync per phase; PM commit/PR at phase or task boundary |
+| Normal managed task | bug fix, doc change, config change, feature, ordinary PR | `project-manager` -> `architect` -> `coder` -> `reviewer` -> `architect` docs sync -> PM commit/PR |
+| High-risk task | auth, permission, payment, billing, schema, data deletion, public API/SDK, security-sensitive infrastructure | `project-manager` -> `architect` -> relevant specialist if needed -> `coder` -> `reviewer` -> `architect` docs sync -> human approval -> PM commit/PR |
+| Large / multi-phase task | new subsystem, major rewrite, migration across many modules | `project-manager` -> `architect`; then repeat `coder` -> `reviewer` -> `architect` docs sync per phase; PM commit/PR at phase or task boundary |
 
 If classification is unclear, use the stricter route.
 
@@ -721,25 +731,25 @@ Role responsibilities:
 
 ```text
 project-manager
-  owns user communication, task clarification, task specs, role routing, and route-file message preparation
+  owns user communication, task clarification, task briefs, role routing, and route-file message preparation
   turns user input into an engineering task when needed
   summarizes role outputs back to the user
   creates and verifies handoff artifacts
   tracks progress, blockers, validation, docs sync, and Replan
-  outputs task specs, role commands, status summaries, and final acceptance reports
+  outputs task briefs, role commands, status summaries, and final acceptance reports
   must not own architecture, implementation, and independent review for the same non-trivial task
 
 architect
   owns architecture and plan
   defines module boundaries, file responsibilities, public contracts, dependency direction, risk, and phases
   owns post-review docs sync and architecture drift checks before PM final acceptance
-  outputs .ai/vcm/handoffs/architecture-plan.md
-  outputs .ai/vcm/handoffs/docs-sync-report.md when a post-review docs sync gate is required
+  outputs .ai/handoffs/architecture-plan.md
+  outputs .ai/handoffs/docs-sync-report.md when a post-review docs sync gate is required
   must not implement production code
 
 coder
   owns code changes and baseline tests required to complete the approved task
-  follows approved architecture-plan.md and task spec
+  follows approved architecture-plan.md and task brief
   outputs touched files, implementation notes, validation results, and follow-ups
   must write/update direct unit, contract, or regression tests needed for the changed behavior
   must not change module responsibilities, public contracts, architecture direction, or test strategy without Replan
@@ -750,7 +760,7 @@ reviewer
   checks, designs, and adds missing tests when needed
   may directly apply small, local, low-risk review fixes
   owns complex tests, E2E coverage, regression matrix, and release-level validation recommendations
-  outputs .ai/vcm/handoffs/review-report.md
+  outputs .ai/handoffs/review-report.md
   must escalate larger implementation issues to coder
   must escalate architecture, public contract, design, or documentation drift issues to architect
 ```
@@ -761,9 +771,9 @@ Prompt rules are not enough. Role separation must be backed by tool scope, permi
 
 | Role | Suggested tools | Write scope | Must not |
 | --- | --- | --- | --- |
-| `project-manager` | `Read`, `Grep`, `Glob`, `Bash`, `Edit`, `Write` | task specs, role commands, handoff metadata, status/progress/known-issues, final reports, PR description | implement non-trivial production code, approve without reviewer/docs-sync evidence, replace architect/coder/reviewer roles |
-| `architect` | `Read`, `Grep`, `Glob`, `Bash`, `Edit`, `Write` | architecture plan, docs sync report, task spec, approved architecture/module/testing/security docs | edit production code, rewrite tests, expand task scope |
-| `coder` | `Read`, `Grep`, `Glob`, `Bash`, `Edit`, `Write` | approved source files, baseline tests, validation log, implementation log | change scope, public contracts, module boundaries, or test strategy without Replan |
+| `project-manager` | `Read`, `Grep`, `Glob`, `Bash`, `Edit`, `Write` | task briefs, role commands, handoff metadata, status/progress/known-issues, final reports, PR description | implement non-trivial production code, write durable project docs, approve without reviewer/docs-sync evidence, replace architect/coder/reviewer roles |
+| `architect` | `Read`, `Grep`, `Glob`, `Bash`, `Edit`, `Write` | architecture plan, docs sync report, durable plan updates, approved architecture/module/testing/security/dependency docs | edit production code, rewrite tests, expand task scope |
+| `coder` | `Read`, `Grep`, `Glob`, `Bash`, `Edit`, `Write` | approved source files, baseline tests, validation log, implementation log | change scope, write durable project docs, change public contracts, module boundaries, or test strategy without Replan |
 | `reviewer` | `Read`, `Grep`, `Glob`, `Bash`, `Edit`, `Write` | review report, missing tests/fixtures, validation log, small review-scoped fixes | take over implementation, change architecture/public contracts, approve own implementation, weaken tests |
 | `security-specialist` | `Read`, `Grep`, `Glob`, `Bash`, `Edit`, `Write` | security review report and approved security tests | bypass approvals, edit production code without explicit scope |
 | `migration-specialist` | `Read`, `Grep`, `Glob`, `Bash`, `Edit`, `Write` | migration plan, migration tests, validation notes | run destructive migrations, change schema without approval |
@@ -772,8 +782,8 @@ Prompt rules are not enough. Role separation must be backed by tool scope, permi
 Recommended permission modes:
 
 ```text
-project-manager: default with write hooks limited to task specs, role commands, handoff metadata, state files, final reports, and PR description
-architect:  default with write hooks limited to architecture-plan.md, docs-sync-report.md, task specs, and approved docs
+project-manager: default with write hooks limited to task briefs, role commands, handoff metadata, state files, final reports, and PR description
+architect:  default with write hooks limited to architecture-plan.md, docs-sync-report.md, durable plan updates, and approved durable docs
 coder:      default or acceptEdits, but only inside approved scope
 reviewer:   default with production-code writes blocked except explicitly review-scoped small fixes; test writes allowed
 specialist: default with write hooks limited to specialist reports, tests, and approved files
@@ -788,7 +798,7 @@ Role sessions communicate through files, not memory from previous chats.
 Required handoff directory:
 
 ```text
-.ai/vcm/handoffs/
+.ai/handoffs/
   role-commands/
     architect.md
     coder.md
@@ -805,26 +815,26 @@ Each role session must start by reading the artifacts it depends on:
 ```text
 project-manager
   reads: user request, repo entry docs, task state, role outputs
-  writes: task spec, role commands, progress/status, known issues, final acceptance report
+  writes: task brief, role commands, progress/status, known issues, final acceptance report
 
 architect
-  reads: task request, task spec, ARCHITECTURE.md, MODULE_MAP.md, module-local CLAUDE.md, relevant source/tests
+  reads: task request, task brief, ARCHITECTURE.md, MODULE_MAP.md, module-local CLAUDE.md, relevant source/tests
   writes: architecture-plan.md
 
 architect docs sync
-  reads: task spec, architecture-plan.md, implementation-log.md, validation-log.md, review-report.md, git diff, relevant docs
+  reads: task brief, architecture-plan.md, implementation-log.md, validation-log.md, review-report.md, git diff, relevant docs
   writes: docs updates when needed, docs-sync-report.md
 
 coder
-  reads: task spec, architecture-plan.md, relevant module docs
+  reads: task brief, architecture-plan.md, relevant module docs
   writes: code, baseline tests, implementation-log.md, validation-log.md
 
 reviewer
-  reads: task spec, architecture-plan.md, implementation-log.md, validation-log.md, git diff
+  reads: task brief, architecture-plan.md, implementation-log.md, validation-log.md, git diff
   writes: review-report.md
 
 optional specialist
-  reads: task spec, architecture-plan.md, relevant source/tests
+  reads: task brief, architecture-plan.md, relevant source/tests
   writes: specialist report, approved tests, validation-log.md
 ```
 
@@ -882,7 +892,7 @@ escalate to architect:
   the implementation reveals that the architecture plan is invalid
 ```
 
-For a task with a handoff directory, `.ai/vcm/handoffs/validation-log.md` is the authoritative validation record for that task. `.ai/state/validation-log.md` is only a rolling index of recent validation results across tasks.
+For a task with a handoff directory, the task-level `validation-log.md` is the authoritative validation record for that task. Do not maintain a separate rolling validation log as durable truth; completed validation evidence should survive through tests, CI, commits, PR text, or explicitly preserved plans.
 
 For complex or high-risk work, the next role must not start until the required previous artifact exists and is coherent.
 
@@ -967,7 +977,7 @@ Worktree isolation is by task, not by role:
 ```text
 one task
   -> one branch: feature/<task-slug>
-  -> one worktree: .claude/worktrees/<task-slug>
+  -> one worktree: <task-worktree-root>/<task-slug>
   -> one handoff directory
   -> architect -> coder -> reviewer in sequence
 ```
@@ -1038,14 +1048,14 @@ You are the architecture and planning role for this project.
 
 # Required Inputs
 
-- task spec or user request
+- task brief or user request
 - `docs/ARCHITECTURE.md`
 - `docs/MODULE_MAP.md`
 - relevant module-local `CLAUDE.md`
 
 # Outputs
 
-- `.ai/vcm/handoffs/architecture-plan.md`
+- `.ai/handoffs/architecture-plan.md`
 
 # Do Not
 
@@ -1073,7 +1083,7 @@ project-manager.md
   required inputs:
     user request, repo entry docs, current task state, role outputs
   outputs:
-    task spec, role commands, progress/status updates, final acceptance report
+    task brief, role commands, progress/status updates, final acceptance report
   do not:
     implement non-trivial production code, replace architect/coder/reviewer, approve without reviewer evidence
   stop when:
@@ -1084,7 +1094,7 @@ architect.md
     tools: Read, Grep, Glob, Bash, Edit, Write
     permissionMode: default
   required inputs:
-    task spec, ARCHITECTURE.md, MODULE_MAP.md, module-local CLAUDE.md
+    task brief, ARCHITECTURE.md, MODULE_MAP.md, module-local CLAUDE.md
   outputs:
     architecture-plan.md
   do not:
@@ -1097,7 +1107,7 @@ coder.md
     tools: Read, Grep, Glob, Bash, Edit, Write
     permissionMode: default
   required inputs:
-    task spec, architecture-plan.md
+    task brief, architecture-plan.md
   outputs:
     code, baseline tests, implementation-log.md, validation-log.md
   do not:
@@ -1110,7 +1120,7 @@ reviewer.md
     tools: Read, Grep, Glob, Bash, Edit, Write
     permissionMode: default
   required inputs:
-    task spec, architecture-plan.md, implementation-log.md, validation-log.md, git diff
+    task brief, architecture-plan.md, implementation-log.md, validation-log.md, git diff
   outputs:
     review-report.md, missing tests/fixtures when needed, review-scoped small fixes, validation-log.md
   do not:
@@ -1145,7 +1155,7 @@ project-manager session
   -> final acceptance + commit + PR submission
 ```
 
-For small bug fixes or ordinary PRs, one coder session is acceptable if the task spec is clear, file responsibilities are explicit, public contracts are defined when needed, and validation is cheap.
+For small bug fixes or ordinary PRs, one coder session is acceptable if the task brief is clear, file responsibilities are explicit, public contracts are defined when needed, and validation is cheap.
 
 For complex features, cross-module changes, public API changes, schema changes, auth, payment, permissions, data deletion, or security-sensitive work, role sessions are required.
 
@@ -1187,12 +1197,14 @@ L4 full-regression:   nightly / release only
 ### 8.2 Commands
 
 ```text
-tools/check-fast
-tools/check-changed
-tools/check-module <module>
-tools/check-e2e-smoke [scope]
-tools/check-e2e-release
-tools/check-full
+.ai/tools/check-fast
+.ai/tools/check-changed
+.ai/tools/check-module <module>
+.ai/tools/check-e2e-smoke [scope]
+.ai/tools/check-e2e-release
+.ai/tools/check-full
+.ai/tools/run-long-check
+.ai/tools/watch-job
 ```
 
 What Claude should run:
@@ -1224,7 +1236,59 @@ release / major version / high-risk migration:
   L0 + L1 + L2 + L3 + L4
 ```
 
-### 8.3 Change-Aware Test Selection
+### 8.3 Long-Running Validation
+
+Do not end the current Claude Code turn only to wait for a long-running build or test callback. That callback-based waiting model is unreliable: the callback can be delayed, lost, or resumed with stale context.
+
+Use a project skill instead:
+
+```text
+.claude/skills/long-running-validation.md
+```
+
+The skill should instruct Claude to:
+
+```text
+1. Start the long-running command through `.ai/tools/run-long-check`.
+2. Write status and logs under `.ai/jobs/<job-id>/` or the harness-managed runtime job directory.
+3. Run `.ai/tools/watch-job` in the same turn with a bounded timeout.
+4. Exit with success, failure, or timeout.
+5. Read the final status and relevant log tail.
+6. Record the command, result, duration, and skipped/follow-up checks in validation-log.md.
+```
+
+Recommended job files:
+
+```text
+.ai/jobs/<job-id>/status.json
+.ai/jobs/<job-id>/stdout.log
+.ai/jobs/<job-id>/stderr.log
+```
+
+`status.json` should include:
+
+```json
+{
+  "jobId": "check-e2e-20260606-001",
+  "command": ".ai/tools/check-e2e-smoke --run",
+  "status": "running",
+  "startedAt": "2026-06-06T00:00:00Z",
+  "finishedAt": null,
+  "exitCode": null,
+  "stdoutPath": ".ai/jobs/check-e2e-20260606-001/stdout.log",
+  "stderrPath": ".ai/jobs/check-e2e-20260606-001/stderr.log"
+}
+```
+
+Rules:
+
+- The watcher must be bounded and exit on success, failure, or timeout.
+- Claude must not hand-write an infinite shell loop.
+- Claude must not rely on ending the conversation to receive a shell-completion callback.
+- Timeout is a result. Record it, summarize the log tail, and route the blocker through the normal handoff / Replan path.
+- Job state under `.ai/jobs/**` or the harness-managed runtime job directory is runtime state. Delete it during task close after useful facts are promoted.
+
+### 8.4 Change-Aware Test Selection
 
 Do not maintain a manual test map. Generate or verify a test map from source code, test naming conventions, coverage data, build metadata, and CI history.
 
@@ -1249,10 +1313,10 @@ Rules:
 
 - `.ai/generated/test-map.json` is a derived artifact, not a hand-edited source of truth.
 - Manual edits to generated test maps are forbidden.
-- `tools/check-generated-artifacts` fails in CI if the generated map is stale.
-- If the map cannot be generated reliably, `tools/check-changed` must fall back to code search, LSP, ownership metadata, and conservative module-level tests.
+- `.ai/tools/check-generated-artifacts` fails in CI if the generated map is stale.
+- If the map cannot be generated reliably, `.ai/tools/check-changed` must fall back to code search, LSP, ownership metadata, and conservative module-level tests.
 
-`tools/check-changed` should:
+`.ai/tools/check-changed` should:
 
 ```text
 git diff
@@ -1264,7 +1328,7 @@ git diff
   -> if critical user path changed, suggest L3
 ```
 
-### 8.4 E2E Tiers
+### 8.5 E2E Tiers
 
 ```text
 e2e/
@@ -1284,7 +1348,7 @@ e2e/
     upgrade-migration.spec.ts
 ```
 
-Smoke E2E: small, stable, core paths, runnable on every PR or high-risk change.  
+Smoke E2E: small, stable, core paths, runnable on every PR or high-risk change.
 Release E2E: complex combinations, historical incidents, cross-browser, slower but non-flaky, run before release or nightly.
 
 Test tags:
@@ -1294,7 +1358,7 @@ Test tags:
 @billing @auth @risk-high @public-api @contract
 ```
 
-### 8.5 Public Function Test Contract
+### 8.6 Public Function Test Contract
 
 Every new or modified public function must have tests covering its contract.
 
@@ -1332,7 +1396,7 @@ internal helper call counts
 local implementation steps
 ```
 
-### 8.6 Test Quality Red Lines
+### 8.7 Test Quality Red Lines
 
 Forbidden:
 
@@ -1368,8 +1432,8 @@ Recommended hooks:
 
 ```text
 Stop:
-  notify VCM that a role turn ended
-  trigger VCM to scan .ai/vcm/handoffs/messages/ for pending route files
+  notify the harness manager that a role turn ended
+  trigger the harness manager to scan task-local route files for pending messages
 
 PreToolUse:
   block protected files
@@ -1387,7 +1451,7 @@ PostToolUse:
 Stop:
   switch the role activity state to idle
   check project manager did not bypass required role route
-  check task severity and required role route
+  check task risk and required role route
   check required handoff artifacts exist
   check required validation
   check task-level validation-log.md updated when handoffs exist
@@ -1401,7 +1465,7 @@ SessionStart:
   show that task coordination should use `claude --agent project-manager`
   warn when a non-trivial task is running in an untagged session
   show current role and expected role for the task
-  show required handoff artifacts for the task severity
+  show required handoff artifacts for the required route
   inject current task state
   show recent failing checks
   show module owner and validation commands
@@ -1425,6 +1489,109 @@ db/migrations/
 Lockfiles and migrations are not permanently forbidden, but they require explicit approval.
 
 If you type the same long prompt for the third time, turn it into a skill or command.
+
+Skill placement:
+
+```text
+CLAUDE.md
+  -> short mandatory rules
+
+docs/AI_WORKFLOW.md
+  -> role route, gates, handoff protocol, acceptance policy
+
+.claude/agents/*.md
+  -> role ownership and stop conditions
+
+.claude/skills/*.md
+  -> reusable operating procedures
+
+.ai/tools/*
+  -> deterministic execution
+```
+
+Good skill candidates:
+
+- `route-message`
+- `long-running-validation`
+- `final-acceptance`
+- `docs-sync`
+- `replan`
+- `harness-bootstrap`
+- `harness-maintenance`
+- `known-issues-triage`
+- `task-cleanup`
+
+Hard constraints must not live only in skills. Role boundaries, default routes, high-risk approval rules, protected-file rules, route-file turn rules, and durable-doc ownership must remain in `CLAUDE.md`, `docs/AI_WORKFLOW.md`, role agent files, hooks, or CI checks.
+
+One-off or occasional procedures do not always need to be committed as repo-local skill files. Harness bootstrap and harness maintenance can be injected as temporary session procedures when their main purpose is to guide a single analysis/audit run. Keep deterministic installation, managed-block updates, hook merging, manifest migration, and uninstall logic in tools or backend code.
+
+### `route-message` Skill
+
+Use this skill when a role needs to hand work, ask a question, report a result, report a blocker, or raise a finding to another role.
+
+Hard rule for `CLAUDE.md` / `docs/AI_WORKFLOW.md`:
+
+```text
+When sending a role message, use the route-message skill.
+After writing the route file, end the current turn.
+Do not poll, loop, or wait for another role's answer.
+```
+
+Skill contract:
+
+- write or update exactly one route file under the task-local handoff messages directory
+- keep the filename as the authoritative route
+- use only the allowed message types for the route
+- include artifact references instead of copying long handoff documents
+- update an existing pending route file instead of creating fragmented follow-ups
+- leave backend delivery, history, target-idle checks, and route-file clearing to the harness manager
+
+The skill is an authoring procedure, not a transport. It must not paste directly into another role terminal or bypass the harness manager.
+
+### `long-running-validation` Skill
+
+Use this skill for builds, test suites, browser/E2E runs, or validation commands that may exceed the normal interactive shell timeout.
+
+Hard rule for `CLAUDE.md` / `docs/AI_WORKFLOW.md`:
+
+```text
+Do not end the current turn only to wait for a long-running shell callback.
+Use the long-running-validation skill and bounded job watcher.
+```
+
+Skill contract:
+
+- start the job through `.ai/tools/run-long-check`
+- write job status and logs under `.ai/jobs/<job-id>/` or the harness-managed runtime job directory
+- run `.ai/tools/watch-job` in the same turn
+- watcher exits on success, failure, or timeout
+- summarize the final status and log tail
+- record the result in the task `validation-log.md`
+- route failures or timeouts through the normal handoff / Replan path
+
+Do not implement this by asking Claude to keep an infinite loop open. The loop belongs inside the project tool, with a bounded timeout and clear output.
+
+### `docs-sync` Skill
+
+Use this skill after implementation and review, before final acceptance or PR preparation, when code changes may affect long-term project documentation.
+
+Hard rule for `CLAUDE.md` / `docs/AI_WORKFLOW.md`:
+
+```text
+The architecture/documentation owner performs docs sync after review.
+Final acceptance checks the docs-sync result; it does not replace it.
+```
+
+Skill contract:
+
+- read the task brief or durable plan, architecture plan, implementation evidence, validation evidence, review findings, current diff, and affected durable docs
+- check architecture, module boundaries, public contracts, validation strategy, security assumptions, dependency direction, and durable plan state
+- update long-term docs when implementation changed durable project truth
+- explicitly list docs reviewed and left unchanged
+- write a task-local docs-sync report with decision, evidence, docs updated, docs unchanged, remaining documentation risks, and final-acceptance notes
+- route architecture or contract drift back through the normal Replan path
+
+The skill may edit durable documentation, but it must not edit production code, tests, or generated artifacts unless a project-specific generator/check owns that output.
 
 Recommended subagents:
 
@@ -1451,7 +1618,7 @@ Default rule:
 ```text
 one task
   -> one branch: feature/<task-slug>
-  -> one worktree: .claude/worktrees/<task-slug>
+  -> one worktree: <task-worktree-root>/<task-slug>
   -> one handoff directory
   -> one PR
 ```
@@ -1491,18 +1658,18 @@ Branch rules:
 
 - never do AI implementation work directly on the main branch
 - one task branch should map to one task worktree
-- VCM-managed task branches should use `feature/<task-slug>`
-- VCM-managed task worktrees should live under `.claude/worktrees/<task-slug>`
-- `.gitignore` should contain a VCM managed block that ignores `.ai/vcm/` and `.claude/worktrees/`
+- harness-managed task branches should use a stable task naming convention, for example `feature/<task-slug>`
+- harness-managed task worktrees should live under a repo-local ignored worktree root
+- `.gitignore` should ignore harness runtime state and repo-local task worktrees
 - a task should not switch to a different branch/worktree after creation; create a new task instead
 - large work should use phase commits on the same task branch unless phases are independently releasable
 - if a task becomes too large, split it into child tasks with explicit branch and PR ownership
 
-Close Task rules:
+Task close rules:
 
-- after task completion, use VCM `Close Task` only when the user is ready to delete task-local state
-- for worktree-backed tasks, `Close Task` deletes the task worktree, deletes the task branch by default, and removes VCM task/session/message/orchestration/handoff metadata
-- `Close Task` stops VCM-managed running role sessions, but it does not check uncommitted changes; finish, commit, or preserve anything important before using it
+- after task completion, close the task only when the user is ready to delete task-local state
+- for worktree-backed tasks, task close may delete the task worktree, optionally delete the task branch, and remove task/session/message/orchestration/handoff metadata
+- task close may stop harness-managed running role sessions, but it must not silently discard uncommitted changes; finish, commit, or preserve anything important before using it
 
 Small commits:
 
@@ -1515,14 +1682,14 @@ Small commits:
 
 Diff discipline:
 
-- every changed file must trace to the task spec, architecture plan, implementation log, validation log, or reviewer fix
+- every changed file must trace to the task brief, architecture plan, implementation log, validation log, or reviewer fix
 - before handoff, coder must inspect `git diff` for unrelated changes, architecture drift, accidental formatting churn, generated artifacts, lockfiles, and migrations
 - before acceptance, reviewer must compare `git diff` against the architecture plan and public contracts
 - unrelated cleanup belongs in a separate task
 
 PR discipline:
 
-- PR description must link or summarize task spec, architecture plan, validation evidence, docs sync, and known risks
+- PR description must link or summarize task brief, architecture plan, validation evidence, docs sync, and known risks
 - draft PRs are preferred for large or phased work
 - PR review must check scope, architecture compliance, public contracts, test adequacy, docs sync, and whether the diff is appropriately small
 - final merge requires human accountability for product semantics, security boundaries, and business risk
@@ -1543,11 +1710,10 @@ Do not rely only on grep. In large codebases, grep easily finds the wrong symbol
 Provide:
 
 ```text
-tools/ai-context <module>
-tools/find-owner <path>
-tools/find-callers <symbol>
-tools/find-tests <path>
-tools/check-boundaries
+.ai/tools/find-owner <path>
+.ai/tools/find-callers <symbol>
+.ai/tools/find-tests <path>
+.ai/tools/check-boundaries
 ```
 
 If LSP, Sourcegraph, code search, or MCP is available, Claude should prefer them.
@@ -1582,7 +1748,7 @@ Example generated module index:
     "docs": ["docs/modules/billing.md"],
     "entrypoints": ["services/billing/invoice/calculator.ts"],
     "tests": ["tests/billing/invoice-calculator.test.ts"],
-    "commands": ["tools/check-module billing"],
+    "commands": [".ai/tools/check-module billing"],
     "rules": [
       "Use Money object for all amounts",
       "Do not import from payment/adapters/internal"
@@ -1595,15 +1761,15 @@ Rules:
 
 - generated artifacts are caches, not truth
 - manual edits to `.ai/generated/**` are forbidden
-- CI must run `tools/check-generated-artifacts`
+- CI must run `.ai/tools/check-generated-artifacts`
 - if a generated artifact is stale, Claude must regenerate it or fall back to live code search
 - if generated context conflicts with live code, live code wins
 
 Architecture boundaries must be mechanically checked:
 
 ```text
-tools/check-boundaries
-tools/check-generated-artifacts
+.ai/tools/check-boundaries
+.ai/tools/check-generated-artifacts
 ```
 
 and enforced in CI.
@@ -1612,52 +1778,50 @@ and enforced in CI.
 
 Long tasks cannot rely on chat context.
 
-State files:
+Task runtime and durable issue files:
 
 ```text
-.ai/state/
-  progress.md       — snapshot of all active tasks' current state
-  decisions.md      — architectural / design decisions with rationale (append-only)
-  validation-log.md — recent validation runs across tasks (rolling index, ~last 20)
-  known-issues.md   — deferred findings awaiting triage
-  scratch.md        — current session's working TODOs (cleared at task completion)
+.ai/handoffs/
+  validation-log.md — task-local validation evidence
+  known-issues.md   — task-local unresolved findings
+
+docs/known-issues.md — confirmed unresolved issues that must survive across tasks
 ```
 
 Validation log authority:
 
-- `.ai/vcm/handoffs/validation-log.md` is authoritative for one task.
-- `.ai/state/validation-log.md` is a rolling index across tasks and should point to the task-level log when one exists.
+- the task-level handoff `validation-log.md` is authoritative for one task.
+- completed validation evidence should not be copied into a separate rolling state file as current truth.
 - Final reports and review reports should cite the task-level validation log, not scattered chat output.
 
 Information lifetime determines where it lives:
 
 ```text
 within one session (phase breakdown, mid-implementation TODOs)
-  -> scratch.md
+  -> task-local scratch notes or role command updates
 
-across sessions of one task (progress, decisions)
-  -> exec-plan (if task has one) + decisions.md
-  -> otherwise progress.md + decisions.md
+across sessions of one task (progress, pending decisions)
+  -> durable plan current-state section when the plan should survive
+  -> otherwise task-local handoff/runtime state that is deleted at close
+
+durable architecture, testing, security, dependency, or module facts
+  -> docs/ARCHITECTURE.md, docs/TESTING.md, docs/SECURITY.md, docs/DEPENDENCY_RULES.md, docs/MODULE_MAP.md, or module-local CLAUDE.md
 
 across tasks (deferred findings, out-of-scope discoveries)
-  -> known-issues.md
+  -> docs/known-issues.md
 ```
 
-`progress.md` rules:
+Task-local state rules:
 
-- Snapshot, not log. Holds current status of every active task in one place.
-- One entry per active task; entry is rewritten in place, not appended.
-- When a task has an `exec-plan`, its detailed progress lives in the exec-plan's `current state`; `progress.md` keeps only a one-line pointer.
-- Completed tasks are removed from `progress.md`; their final state is preserved in the archived exec-plan or commit history.
+- Progress, scratch notes, pending decisions, and validation evidence are temporary task runtime state.
+- Completed task state is deleted or archived only when it still has real future value.
+- Durable architecture truth belongs in `docs/ARCHITECTURE.md`.
+- Durable testing decisions belong in `docs/TESTING.md`.
+- Durable security decisions belong in `docs/SECURITY.md`.
+- Durable dependency or module-boundary decisions belong in `docs/DEPENDENCY_RULES.md`, `docs/MODULE_MAP.md`, or module-local `CLAUDE.md`.
+- Rare historical rationale that should remain discoverable but does not fit the current-state docs may move to an optional ADR file, for example `docs/adr/<id>.md`.
 
-`scratch.md` rules:
-
-- Session-local working memory for multi-phase tasks: current phase, intermediate TODOs discovered mid-implementation, temporary notes.
-- Cleared when the task completes or when a fresh session starts.
-- Anything that must survive (decisions, deferred findings, progress) is promoted to `decisions.md`, `known-issues.md`, `progress.md`, or the exec-plan before clearing.
-- This file is the legitimate home for the working TODOs that `Stop` hook forbids inside source code.
-
-`known-issues.md` entry format:
+`docs/known-issues.md` entry format:
 
 ```md
 ## YYYY-MM-DD <one-line summary>
@@ -1683,13 +1847,13 @@ Open issues:
 Next step:
 ```
 
-For tasks longer than one day, create:
+For large, multi-phase, or multi-day tasks, create:
 
 ```text
-docs/exec-plans/active/<task-name>.md
+docs/plans/active/<plan-name>.md
 ```
 
-Execution plans include:
+Durable plans include:
 
 - background
 - goal
@@ -1699,7 +1863,7 @@ Execution plans include:
 - decision log
 - current state
 
-When a task has an exec-plan, `current state` in the exec-plan is the authoritative progress record; `progress.md` only points to it.
+When a task has a durable plan, `current state` in the plan is the authoritative progress record; task runtime state may point to it but should not duplicate it.
 
 ### 12.1 Documentation Sync Contract
 
@@ -1711,17 +1875,17 @@ Rule:
 
 Check:
 
-- task spec
-- execution plan
+- task brief
+- durable plan
 - `docs/ARCHITECTURE.md`
 - `docs/MODULE_MAP.md`
 - module docs
 - module-local `CLAUDE.md`
 - public surface contract
 - test plan / validation section
-- `.ai/state/decisions.md`
-- `.ai/state/progress.md`
-- `.ai/state/known-issues.md`
+- task-local pending decisions
+- task-local progress state
+- task-local known issues and `docs/known-issues.md`
 
 Final report must list:
 
@@ -1735,9 +1899,84 @@ Enforcement:
 
 - PR template must include a docs sync checklist covering plan, public contract, architecture, module docs, and test plan.
 - Stop hook checks that plan, public contract, or test strategy changes have matching doc updates before the session ends.
-- `tools/check-docs-freshness` runs in CI and fails the build when code touching tracked surfaces lands without corresponding doc updates.
+- `.ai/tools/check-docs-freshness` runs in CI and fails the build when code touching tracked surfaces lands without corresponding doc updates.
 
-### 12.2 Replan Protocol
+### 12.2 Documentation Lifecycle and Cleanup
+
+The rule is:
+
+> Temporary task documents must be deleted or archived when they stop being useful; long-term project documents must be updated when the task changes durable project truth.
+
+AI coding creates many coordination artifacts. Those artifacts are useful while a task is moving, but harmful after completion if they become stale pseudo-documentation. A clean repository should preserve durable knowledge, not every intermediate note.
+
+Documentation lifetime categories:
+
+```text
+runtime / disposable
+  -> route messages, raw logs, translation cache, session records, orchestration records
+
+task-local / temporary
+  -> task briefs, role commands, architecture-plan.md, implementation-log.md,
+     validation-log.md, known-issues.md, review-report.md, docs-sync-report.md,
+     scratch notes and decision staging entries
+
+durable / source of truth
+  -> ARCHITECTURE.md, MODULE_MAP.md, TESTING.md, SECURITY.md,
+     DEPENDENCY_RULES.md, module-local CLAUDE.md, accepted public contracts,
+     code, tests, commit messages, PR text
+
+archival / exceptional
+  -> completed plans or optional ADRs for large features, migrations,
+     incidents, or high-value historical rationale
+```
+
+Cleanup rules:
+
+- Harness runtime artifacts are not long-term project documentation. They should be removed by task close after the user has preserved anything important in durable docs, source, commit messages, or PR text.
+- Role route files under the task-local handoff messages directory are pending message queues. After dispatch, manual handling, or task close, they should be blank or deleted with the task state.
+- Raw terminal logs are recovery/debug evidence. They should not be retained as project knowledge after task close unless an incident review explicitly needs them.
+- Task briefs captured in role commands, handoffs, issues, or PR text are temporary unless the requirements remain useful as durable product or engineering knowledge. Large, multi-phase work should promote durable requirements into `docs/plans/active/<plan-name>.md`.
+- `architecture-plan.md` is a task handoff artifact. Durable architecture changes must be promoted to `docs/ARCHITECTURE.md`, `docs/MODULE_MAP.md`, `docs/DEPENDENCY_RULES.md`, or module-local `CLAUDE.md`.
+- `implementation-log.md`, `review-report.md`, and `docs-sync-report.md` are task evidence. They should not become long-term docs unless their findings are promoted to durable docs or PR text.
+- `validation-log.md` is useful evidence during acceptance. After merge, the durable facts are the passing tests, CI history, and PR/commit record; stale local validation logs should not be treated as current truth.
+- Pending decisions are task-local staging notes. Confirmed durable decisions should be moved into the appropriate long-term doc and then removed from task state.
+- `docs/known-issues.md` must be actively triaged. Fixed, rejected, obsolete, or no-longer-actionable issues should be removed or marked resolved with a short reason.
+- Completed plans should move to `docs/plans/completed/` only for work whose execution history remains useful. Routine tasks should not leave completed plans behind forever.
+
+Promotion rules:
+
+- Durable architecture facts go to `docs/ARCHITECTURE.md`.
+- Durable module ownership, file responsibility, or public surface facts go to `docs/MODULE_MAP.md` or module-local `CLAUDE.md`.
+- Durable testing policy, regression strategy, or E2E scope goes to `docs/TESTING.md`.
+- Durable security, auth, permission, privacy, or data-deletion policy goes to `docs/SECURITY.md`.
+- Durable dependency direction or forbidden-import rules go to `docs/DEPENDENCY_RULES.md`.
+- Durable public behavior belongs in code, tests, public contract docs, and PR text.
+- Deferred out-of-scope work goes to `docs/known-issues.md` only if it has owner-worthy future value; otherwise leave it out.
+
+Task close checklist:
+
+```text
+Before closing a task:
+  1. Promote durable facts into long-term docs, tests, source, PR text, or commit messages.
+  2. Remove or clear temporary route messages, scratch notes, and staging decisions.
+  3. Decide whether task brief and plan should be deleted, archived, or kept active.
+  4. Triage known-issues entries touched by the task.
+  5. Confirm no stale task artifact is being used as current project truth.
+```
+
+Final acceptance must state:
+
+```text
+Temporary docs removed:
+Temporary docs archived:
+Durable docs updated:
+Known stale docs:
+Cleanup exceptions:
+```
+
+Do not keep a document only because it was useful during the task. A document earns long-term residence only if it helps future humans or future AI sessions understand current project truth, durable rationale, or a still-open obligation.
+
+### 12.3 Replan Protocol
 
 Triggers:
 
@@ -1782,7 +2021,7 @@ Low-risk deviations may continue with a note:
 - private implementation detail changes
 - scope, public surface, architecture boundary, and test contract stay unchanged
 
-### 12.3 Design Change Control
+### 12.4 Design Change Control
 
 When a large feature is split into subtasks and a design defect is found midstream, do not default to full rollback, and do not continue because of sunk cost.
 
@@ -1794,7 +2033,7 @@ Freeze current implementation
   -> Record completed subtasks
   -> Identify design defect
   -> Assess impact radius
-  -> Classify severity
+  -> Classify task risk
   -> Compare options
   -> Preserve reusable assets
   -> Discard wrong boundaries/contracts/abstractions
@@ -1830,7 +2069,7 @@ B. Partial rollback + redesign
 C. Full rollback + rebuild
 ```
 
-Prefer preserving tests, fixtures, docs, clarified requirements, types, UI components, validated pure functions, and low-level tools.  
+Prefer preserving tests, fixtures, docs, clarified requirements, types, UI components, validated pure functions, and low-level tools.
 Prefer discarding wrong public APIs, wrong module boundaries, wrong data models, wrong permission models, wrong abstractions, and glue code built around the wrong design.
 
 Principle:
@@ -1857,8 +2096,8 @@ behavior is correct
 
 ## Scope
 
-- [ ] Diff is scoped to the task.
-- [ ] No unrelated refactor, rename, formatting churn, or cleanup.
+- [ ] Changed files and meaningful hunks have traceable reasons.
+- [ ] Unexplained refactor, rename, formatting churn, or cleanup was explained, reverted, approved, or routed for follow-up.
 - [ ] No forbidden files changed.
 - [ ] No unapproved dependency added.
 - [ ] No scope expansion without Replan.
@@ -1866,7 +2105,7 @@ behavior is correct
 ## Role / Handoff
 
 - [ ] The task used an explicit `project-manager` role session for user communication, routing, and status reporting.
-- [ ] Task severity was classified.
+- [ ] Task risk and required route were classified.
 - [ ] Required role route was followed or an exception was approved.
 - [ ] The project manager verified required handoff artifacts, validation evidence, docs sync, and remaining risks.
 - [ ] The project manager did not become the architect, coder, and reviewer for the same non-trivial task.
@@ -1877,10 +2116,10 @@ behavior is correct
 - [ ] Any reviewer direct fixes were small, local, low-risk, and review-scoped.
 - [ ] Larger implementation issues were returned to coder.
 - [ ] Architecture, public contract, dependency, schema, auth, permission, payment, or design issues were returned to architect.
-- [ ] For T2+ work, architect performed post-review docs sync / architecture drift check before final PM acceptance.
+- [ ] Architect performed post-review docs sync / architecture drift check before final PM acceptance.
 - [ ] Docs updates or a docs-sync-report explain why affected architecture/module/testing/security/dependency docs are current.
 - [ ] The project manager prepared final acceptance, commit, and PR only after reviewer and docs-sync gates passed or an exception was approved.
-- [ ] Task-level validation evidence is recorded in `.ai/vcm/handoffs/validation-log.md` when a handoff directory exists.
+- [ ] Task-level validation evidence is recorded in the task handoff `validation-log.md` when a handoff directory exists.
 
 ## Architecture
 
@@ -1889,7 +2128,7 @@ behavior is correct
 - [ ] Business logic stays in the correct layer.
 - [ ] Existing service/domain/repository APIs are reused where appropriate.
 - [ ] No duplicate parallel abstraction was introduced.
-- [ ] `tools/check-boundaries` passes.
+- [ ] `.ai/tools/check-boundaries` passes.
 
 ## Public Contract
 
@@ -1923,7 +2162,9 @@ behavior is correct
 - [ ] Module docs are updated if responsibilities changed.
 - [ ] Public surface contract is updated if public functions changed.
 - [ ] Test plan / validation section is updated if testing strategy changed.
-- [ ] Decisions and known issues are recorded.
+- [ ] Durable decisions are promoted into the appropriate long-term docs.
+- [ ] Temporary task documents, staging decisions, route messages, and scratch notes are removed, cleared, or intentionally archived.
+- [ ] Known issues are triaged: fixed/resolved entries are removed or marked resolved, and still-open entries remain actionable.
 - [ ] No known stale docs are left behind.
 
 ## Replan / Design Change
@@ -1936,10 +2177,10 @@ behavior is correct
 ### 13.2 Acceptance Flow
 
 ```text
-1. Project manager classifies task severity and required role route
+1. Project manager classifies task risk and required role route
 2. Verify required handoff artifacts exist
 3. Inspect diff scope
-4. Compare diff against task spec and architecture plan
+4. Compare diff against task brief and architecture plan
 5. Compare public surface against Public Surface Contract
 6. Review tests for contract and regression coverage
 7. Run or inspect validation evidence
@@ -1953,7 +2194,7 @@ behavior is correct
 Claude’s final report must include:
 
 ```text
-Task severity:
+Task risk and required route:
 Project manager decision:
 Role sessions used:
 Handoff artifacts:
@@ -1983,14 +2224,14 @@ Replan Required:
 Automation tools:
 
 ```text
-tools/check-boundaries
-tools/check-public-surface
-tools/check-contract-tests
-tools/check-docs-freshness
-tools/check-generated-artifacts
-tools/check-agent-rules
-tools/check-changed
-tools/check-e2e-smoke
+.ai/tools/check-boundaries
+.ai/tools/check-public-surface
+.ai/tools/check-contract-tests
+.ai/tools/check-docs-freshness
+.ai/tools/check-generated-artifacts
+.ai/tools/check-agent-rules
+.ai/tools/check-changed
+.ai/tools/check-e2e-smoke
 ```
 
 ## 14. MCP and Permissions
@@ -2048,7 +2289,7 @@ Allowed:
 Required check:
 
 ```text
-tools/check-generated-artifacts
+.ai/tools/check-generated-artifacts
 ```
 
 This check should fail when:
@@ -2070,7 +2311,7 @@ Rules:
 - critical repeated rules must have stable IDs, such as `RULE-SCOPE-001`, `RULE-ARCH-001`, `RULE-TEST-001`, `RULE-PERM-001`
 - root rule text is canonical unless a different canonical source is explicitly defined
 - role agent files should reference rule IDs or include generated rule snippets
-- `tools/check-agent-rules` must fail when repeated rule text, rule IDs, or required rule coverage drift
+- `.ai/tools/check-agent-rules` must fail when repeated rule text, rule IDs, or required rule coverage drift
 - do not copy long rule blocks manually into many files without a freshness check
 
 ### 15.3 Scaffolding Must Earn Its Keep
@@ -2149,11 +2390,11 @@ Monthly review:
 - Which checks should move into hooks?
 - Which checks, hooks, or role requirements can be simplified?
 
-`known-issues.md` triage (every monthly review):
+`docs/known-issues.md` triage (every monthly review):
 
 - For each unhandled entry, decide: promote to task, fold into a planned change, or dismiss.
-- Entries older than 90 days with no action are dismissed with a reason recorded in `decisions.md`.
-- `known-issues.md` is only useful if it stays small; an ever-growing file means triage is not happening.
+- Entries older than 90 days with no action are dismissed with a short reason recorded in `docs/known-issues.md` before removal, or in the relevant durable doc when the reason changes project policy.
+- `docs/known-issues.md` is only useful if it stays small; an ever-growing file means triage is not happening.
 
 ## 17. Minimum Team Rules
 
@@ -2170,7 +2411,7 @@ If you can only enforce 16 rules, enforce these:
 9. Ordinary tasks must define public function contracts.
 10. New or modified public functions must have contract tests.
 11. Code changes must run relevant validation.
-12. Architecture, public contract, or test strategy changes must sync docs.
+12. Architecture, public contract, or test strategy changes must sync durable docs, and completed task artifacts must be cleaned up.
 13. Manual indexes are not authoritative; generated context must be freshness-checked.
 14. AI review uses fresh context or a reviewer role session.
 15. High-risk actions require human approval.

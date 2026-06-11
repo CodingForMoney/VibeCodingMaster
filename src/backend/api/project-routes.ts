@@ -20,4 +20,8 @@ export function registerProjectRoutes(app: FastifyInstance, deps: ProjectRouteDe
   app.get("/api/projects/current", async () => {
     return deps.projectService.getCurrentProject();
   });
+
+  app.post("/api/projects/current/pull", async () => {
+    return deps.projectService.pullCurrentProject();
+  });
 }

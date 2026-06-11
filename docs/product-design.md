@@ -1,6 +1,6 @@
 # VibeCodingMaster Product Design
 
-Last updated: 2026-06-02
+Last updated: 2026-06-10
 
 This document describes the current product direction and implemented V1 behavior for VCM.
 
@@ -18,6 +18,26 @@ It helps a user run one engineering task through several explicit Claude Code ro
 The user should mostly talk to `project-manager`. The project manager coordinates the other roles through VCM messaging and durable handoff files. The user can still switch into any role session to inspect, guide, or interrupt.
 
 VCM is not a hosted SaaS product. It runs locally, connects to a local repository path, starts local Claude Code processes, and writes local task metadata into that repository.
+
+### 1.1 VCM Statistics Terminology
+
+VCM statistics use a task-level hierarchy:
+
+```text
+Session = n x Round = m x Turn
+```
+
+- `Session`: one VCM task. It is the statistics container for the whole task, from task creation until Close Task.
+- `Round`: one VCM conversation cycle. It starts with an accepted user prompt or VCM-delivered prompt, continues through sequential role orchestration, and ends when the final role turn stops and no next turn starts inside the 10 second stop window. In the normal orchestrated workflow, the final visible result comes back from `project-manager`.
+- `Turn`: one role-level Claude Code conversation. It starts when a prompt is submitted to one role session and ends when that role's Claude Code process emits `Stop`.
+
+Turns inside one Round are strictly sequential. VCM should finish one role Turn before starting the next role Turn in that Round.
+
+Session state is intentionally small: `created` means no Round has started yet, `running` means there is a current running Round, and `stopped` means there is no current running Round after at least one Round has stopped. Starting Claude Code role sessions does not make the VCM Session `running`.
+
+Round state is only `running` or `stopped`. After a `Stop` hook, the 10 second stop window still counts as `running`; the Round becomes `stopped` only when the timer expires without another `UserPromptSubmit`.
+
+This `Session` term is only for VCM statistics. It must not be confused with a Claude Code role session, terminal runtime session, or Claude transcript session id. VCM still runs one Claude Code role session per role inside one task-level VCM Session.
 
 ## 2. Product Goals
 
@@ -163,7 +183,7 @@ The architect owns:
 - module boundaries
 - file responsibilities
 - public contracts
-- test contracts
+- verifiable behavior and behavior/contract proof points
 - Replan triggers
 - post-review docs sync and architecture drift checks
 
@@ -179,12 +199,10 @@ The coder owns:
 - implementation within the approved plan
 - direct unit/contract/regression tests
 - validation evidence
-- implementation log
 
 Outputs:
 
-- `.ai/vcm/handoffs/implementation-log.md`
-- `.ai/vcm/handoffs/validation-log.md`
+- `.ai/vcm/handoffs/known-issues.md`
 
 ### Reviewer
 
@@ -199,6 +217,7 @@ The reviewer owns:
 Output:
 
 - `.ai/vcm/handoffs/review-report.md`
+- `.ai/vcm/handoffs/known-issues.md`
 
 ## 6. Information Architecture
 
@@ -218,11 +237,13 @@ All sidebar groups are collapsible and default to collapsed. When no task is sel
 Sections:
 
 - `Repository Path`
-- `Repository`
+- `Connected Repository`
 - `Settings`
 - `VCM Harness`
 - `New Task`
 - `Tasks`
+
+The connected active task also has a bottom status dock. It is not a collapsible sidebar section. It stays at the bottom of the sidebar and shows the active VCM Session title, task status, Session start time, total elapsed time, total Round count, and Claude Code active runtime. When the current Round is running, it also shows the Current Round start time, total elapsed time, Claude Code active runtime, and Turn count.
 
 `Repository Path` layout:
 
@@ -232,26 +253,43 @@ Repository Path
 [ Recent v                  ] [ Connect ]
 ```
 
-`Repository` shows:
+`Connected Repository` shows the connected base repository, not the active task
+worktree:
 
-- path
-- branch
-- working tree state
+- base repo path
+- current branch
+- upstream branch when configured
+- ahead/behind status relative to upstream
+- current commit hash
+- base repo working tree state
+- last checked time
+- a `Pull` button
 
-The old `Dirty: yes/no` label is not used. The UI uses `Working tree: clean` or `Working tree: uncommitted changes`.
+Opening this section refreshes the connected repository status through
+`GET /api/projects/current`. VCM does not poll this state at high frequency.
+
+The `Pull` button runs `git pull --ff-only` only against the connected base
+repository. It is disabled when the base repository has uncommitted changes,
+when the branch has no upstream, or when the active task is an inline task using
+the base repository directly. VCM does not stash, merge, or mutate task
+worktrees from this button.
+
+The old `Dirty: yes/no` label is not used. The UI uses `Working tree: clean` or
+`Working tree: uncommitted changes`.
 
 `Settings` contains:
 
 - `Theme` button, cycling through `System`, `Light`, and `Dark`.
-- `Round alert` button, on by default, controlling the completion prompt and soft two-note completion chime.
-- `Try alert` button, firing the same completion prompt and sound for local verification.
+- `Flow pause alert` button, on by default, controlling weak and strong pause reminders.
+- `Try alert` button, firing the strong pause alert dialog and sound for local verification.
 - `Messages` button, opening a modal list of role messages.
 - `Events` button, opening a modal list of runtime UI events for the current task.
 
 The default theme mode is `System`, which follows the OS/browser color-scheme preference. The entire application chrome, sidebar, forms, modals, status badges, and workspace panels must support both light and dark rendering. Embedded terminals keep their terminal-native dark styling.
 
-When `Round alert` is on, VCM shows a compact in-app prompt and plays a short, soft, two-note local chime after a full conversation round truly ends.
-`Try alert` must work even when no conversation has just completed so the user can verify browser sound and notification behavior.
+When `Flow pause alert` is on, VCM plays a short, soft, two-note local chime after a role flow stops advancing. If the flow lasted less than 2 minutes, the chime plays 3 times, 1.4 seconds apart, and stops. If the flow lasted 2 minutes or longer, VCM shows an in-app alert dialog and repeats the chime until the user confirms the dialog. The alert sound must reuse one browser audio context after user activation instead of creating a fresh context for each repeat, because Safari can block repeated timer-driven playback when every repeat looks like a new autoplay attempt.
+`Try alert` must work even when no flow has just stopped advancing so the user can verify browser sound and notification behavior.
+Safari may still require the user to manually set `Safari > Website Settings > Auto-Play > Allow All Auto-Play`; Chrome is the recommended browser for reliable repeated alert sound.
 
 There is no separate `Pause orchestration` or `Resume orchestration` control in the GUI. The current product model is one on/off toggle in the role console toolbar.
 
@@ -279,7 +317,7 @@ The task workspace header is one compact row:
 
 The header does not show `TASK WORKSPACE`, branch, or worktree path. Task branch/worktree details remain task metadata, but they are not first-row chrome.
 
-The task workspace does not show a manual `Refresh` button. Task status, role status, messages, orchestration state, and round completion state refresh automatically. The only remaining `Refresh` control is inside the sidebar `VCM Harness` section, where it rechecks managed project files.
+The task workspace does not show a manual `Refresh` button. Task status, role status, messages, orchestration state, and flow pause state refresh automatically. The only remaining `Refresh` control is inside the sidebar `VCM Harness` section, where it rechecks managed project files.
 
 Role tabs show the session status for each role.
 
@@ -301,7 +339,6 @@ Permission modes:
 
 - `default`
 - `bypassPermissions`
-- `--dangerously-skip-permissions`
 
 The permission mode applies on the next start/resume/restart. If a session is already running, changing the select does not mutate that live process.
 
@@ -317,24 +354,29 @@ When translation is on, the console splits horizontally:
 
 The split should stay close to 50/50 width. Both panes expand vertically to fill the remaining workspace height.
 
-## 8. Round Completion Detection
+## 8. Flow Pause Detection
 
-VCM detects answer completion from VCM's hook-driven role activity state, not from terminal silence or message history.
+VCM detects flow pauses from Claude Code hook events, not from terminal silence, message history, or pending route files.
 
 Backend role state:
 
 - VCM terminal submit: role becomes `running`.
-- `Stop`: role becomes `idle` and records `lastStopAt`.
-- The role tab and Round alert use the same activity state source.
+- `Stop`: role becomes `idle` and records `lastTurnEndedAt`.
+- The role tab and flow pause state both react to Claude Code hook events.
 
-Task-level round state:
+Task-level Round state:
 
-- The latest role with a real hook `Stop` is the completion source when no role is still running.
-- A PM -> Coder -> PM chain completes only when the final role, PM, reaches hook `Stop`.
-- Pending route files prevent completion because more role work is waiting, but message history does not define completion.
-- If no VCM role message is involved, the latest direct role `Stop` can still complete the round.
+- The first `UserPromptSubmit` starts a Round for the current VCM Session.
+- Each accepted `UserPromptSubmit` is the start of one Turn.
+- `Stop` ends the current Turn and starts a 10 second stop timer; during that timer, the Round is still `running`.
+- A new `UserPromptSubmit` inside the window continues the same Round and starts the next Turn.
+- If no new prompt is accepted before the deadline, the Round becomes `stopped`.
+- The stop transition is timer-driven from the `Stop` event. Round-state reads do not end a Round.
+- Before stopping, VCM checks `.ai/vcm/handoffs/messages`; if a pending route message exists and can be delivered, VCM retries delivery and extends the stop window instead of alerting.
+- The same Round state stores total Round count, Turn count, completed Turn count, and Claude Code active runtime. Active runtime is measured only between `UserPromptSubmit` and `Stop`, not during the stop window.
+- The Current Round dock shows both wall-clock Round duration and Claude Code active runtime. `Total` is `now - Round.startedAt`; `CC runtime` is the accumulated active runtime across Turns in that Round; `Turn count` is the number of accepted prompts in the Round.
 
-The frontend polls this task-level round state. It deduplicates `completionId`, then shows the prompt and plays the sound only once per completed round.
+The frontend polls this task-level Round state and deduplicates each stopped Round so the same stopped state does not alert on every poll. Flow duration is measured from the first `UserPromptSubmit` to `stoppedAt`, falling back to the last `Stop` when needed. Runs under 2 minutes trigger the weak 3-chime reminder at 1.4 second intervals. Runs at or above 2 minutes trigger the strong alert dialog and repeating sound until confirmation.
 
 ## 9. Session Lifecycle
 
@@ -351,7 +393,6 @@ Current command shapes:
 claude --agent <role> --session-id <uuid>
 claude --agent <role> --resume <uuid>
 claude --agent <role> --session-id <uuid> --permission-mode bypassPermissions
-claude --agent <role> --session-id <uuid> --dangerously-skip-permissions
 ```
 
 VCM persists:
@@ -365,6 +406,8 @@ VCM persists:
 - cwd
 - pid when running
 - log path
+
+Raw terminal output is appended to the role log path for recovery and debugging. The embedded terminal UI is bounded: xterm keeps a finite scrollback buffer, and reconnect/replay sends only the tail of the raw log, capped at 2 MB. The product must not replay an unbounded terminal log into the browser after a long-running session reconnects.
 
 ## 10. Harness Installation
 
@@ -422,8 +465,7 @@ Each task creates:
     coder.log
     reviewer.log
   architecture-plan.md
-  implementation-log.md
-  validation-log.md
+  known-issues.md
   review-report.md
   docs-sync-report.md
   messages/
@@ -474,7 +516,7 @@ Default route policy:
 
 Stop-triggered scan:
 
-- VCM injects Claude Code `UserPromptSubmit` and `Stop` hooks into `.claude/settings.json`.
+- VCM injects Claude Code `UserPromptSubmit`, `Stop`, and `PermissionRequest` hooks into `.claude/settings.json`.
 - The hooks do not call `vcmctl`; they POST directly to the local VCM backend.
 - When any role stops, VCM marks that role idle, then scans pending route files.
 - VCM scans the stopped role's outgoing files and also any pending files targeting newly idle roles, so messages that were blocked by a busy target can be delivered after that target stops.
@@ -508,10 +550,13 @@ VCM Harness injects Claude Code hooks into `.claude/settings.json`:
 
 - `UserPromptSubmit`: posts directly to the VCM backend, marks the role running, and confirms any matching VCM message by recording `acceptedAt`
 - `Stop`: posts directly to the VCM backend, marks the role idle, and triggers pending route-file dispatch
+- `PermissionRequest`: posts directly to the VCM backend and prints the backend response to stdout so Claude Code can consume an allow decision when the local VCM setting is enabled
 
 VCM uses `UserPromptSubmit` as the Claude Code acceptance signal. A successful PTY write only proves VCM delivered text to the embedded terminal; `UserPromptSubmit` proves Claude Code accepted the prompt.
 
-The injected role rules require asynchronous file messaging: after writing or updating a route file, the role must end the current Claude Code turn and wait for VCM to deliver a later reply. Roles must not poll files, start shell loops, or keep the turn open waiting for another role to answer, and they must not use Claude Code Task/Subagent for VCM role delegation.
+The injected role rules require asynchronous file messaging: after writing or updating a route file, the role must end the current Claude Code turn and wait for VCM to deliver a later reply. Roles should use `.claude/skills/vcm-route-message/SKILL.md` to author route files. Roles must not poll files, start shell loops, keep the turn open waiting for another role to answer, paste directly into another role terminal, or use Claude Code Task/Subagent for VCM role delegation.
+
+Roles must not run background Bash; a `PreToolUse` hook (`.ai/tools/vcm-bash-guard`) denies `run_in_background`, `nohup`, `setsid`, `disown`, and trailing `&`. The only sanctioned long-running mechanism is `.ai/tools/run-long-check` plus `.ai/tools/watch-job` through `vcm-long-running-validation`: the detached job worker enforces the 60 minute ceiling and a supervision lease that kills unwatched jobs, `watch-job` renews the lease in foreground windows of up to 8 minutes (exit `125` means call it again in the same turn), and the VCM backend blocks a role's turn-end while one of its validation jobs is still running.
 
 There is no `vcmctl` in the target design. Hook entrypoints are direct HTTP from Claude Code hooks to the local VCM backend.
 
@@ -591,6 +636,20 @@ Long translations do not block capture. Prose entries are pushed to the panel be
 
 There is no keyword classifier that drops assistant text. A previous design skipped permission-looking or log-looking text; that is removed.
 
+### Translation Retention And Retry
+
+Translation display state is bounded for long sessions. VCM retains the most recent 500 translation entries per role session in frontend/backend memory. Older entries are pruned from the live panel state and from the backend event cache so reconnects do not replay unbounded translation history. Entries that are currently `queued` or `translating` are protected from pruning.
+
+Translation failures are tracked as a backend failure list, separate from the rendered entry list. The panel shows `Ignore N` and `Retry N` only when that list is non-empty.
+
+Failure behavior:
+
+- provider failure for Claude output `prose` adds a `TranslationFailureItem`.
+- `Retry N` retries the failure list and reuses the original translation entry id, so the existing failed row becomes `translating` and then `translated` on success.
+- `Ignore N` clears the failure list without deleting visible entries.
+- if retention pruning removes an old failed entry, VCM also removes the matching failure-list item so retry never targets a deleted entry.
+- `tool-output`, conversation boundary rows, and user-input translation failures are not part of the output retry list.
+
 ### User Input Translation
 
 The composer has one textarea and one `Send English` button.
@@ -613,7 +672,32 @@ Translation panel `Auto-send` is separate from task `Auto orchestration`:
 
 Task `Auto orchestration` is a compact selected/unselected button in the role console toolbar. `Translate` is a global task header toggle next to `Close Task`; it opens/closes the translation split for all role consoles, so switching roles keeps the same translation setting.
 
-## 14. Local State
+## 14. Mobile Gateway
+
+VCM Gateway is a mobile Weixin DM bridge to the local desktop VCM instance.
+
+Gateway product rules:
+
+- DM only; group chat is not supported.
+- One mobile Weixin DM identity binds to one desktop VCM instance.
+- Binding is not tied to one project or one task.
+- The bound phone can select among the projects and tasks available to the
+  desktop VCM instance.
+- Plain mobile text is sent only to the current task's `project-manager`.
+- Gateway never sends directly to `architect`, `coder`, or `reviewer`.
+- Gateway can push PM assistant replies to Weixin whenever gateway is enabled,
+  even if that PM turn was started from desktop VCM.
+- When gateway translation is enabled, mobile Chinese input is translated to
+  English before PM receives it, and PM English replies are translated to
+  Chinese before Weixin receives them.
+- The PM prompt does not include the original Chinese text.
+- There is no multi-user allowlist. The security model is one bound DM identity.
+
+The first channel is Tencent iLink Bot API / Weixin DM. VCM uses QR login,
+`getupdates` long polling, and `sendmessage` text replies. Gateway details and
+implementation plan live in `docs/gateway-design.md`.
+
+## 15. Local State
 
 App-level settings:
 
@@ -624,8 +708,20 @@ App-level settings:
 Stored app-level settings include:
 
 - UI theme mode: `system`, `light`, or `dark`
+- flow pause alert preference
+- Claude Code permission request handling preference
 - translation provider settings and API key
 - recent repository paths
+
+Gateway state and audit logs:
+
+```text
+~/.vcm/gateway/settings.json
+~/.vcm/gateway/audit.jsonl
+```
+
+Gateway credentials, iLink tokens, DM binding identity, cursors, context tokens,
+and audit logs must stay outside connected repositories.
 
 Repository-level VCM state:
 
@@ -662,7 +758,7 @@ External Claude transcripts:
 ~/.claude/projects/<project-hash>/<claude-session-id>.jsonl
 ```
 
-## 15. Packaging Expectations
+## 16. Packaging Expectations
 
 Published npm packages must include built output:
 
@@ -681,7 +777,7 @@ npm run build && npm run verify:package
 
 This protects against publishing raw TypeScript bin files or missing frontend assets.
 
-## 16. Success Criteria
+## 17. Success Criteria
 
 VCM V1 is successful when:
 
@@ -692,6 +788,7 @@ VCM V1 is successful when:
 - Switching roles never loses the embedded terminal.
 - Restart creates a fresh Claude session; Resume reconnects to the persisted one.
 - Permission modes are reflected in the Claude command.
+- Sidebar settings include Claude Code permission request handling with `off` and `allow all`; `off` is the default.
 - Roles can route messages by writing fixed route files under `.ai/vcm/handoffs/messages/`.
 - Manual orchestration lets the user inspect pending route-file messages without auto-submitting Enter.
 - Auto orchestration can deliver pending route-file messages to idle running target roles.
@@ -699,6 +796,8 @@ VCM V1 is successful when:
 - Round completion detection waits for the final role in a chained conversation and can alert with prompt plus sound.
 - Translation settings save to `~/.vcm/settings.json`.
 - Translation reads Claude transcript JSONL reliably after start, resume, and restart.
+- Gateway can bind one Weixin DM identity to the desktop VCM instance, send
+  translated plain text to PM, and push translated PM replies back to Weixin.
 - Terminal and translation panel have equal, stable reading space.
 - Harness install/update preserves user content outside VCM managed blocks.
 - Completed tasks can cleanly remove their worktree and VCM task metadata without affecting other tasks.

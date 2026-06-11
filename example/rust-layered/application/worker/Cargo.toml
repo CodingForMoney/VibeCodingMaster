@@ -1,0 +1,11 @@
+[package]
+name = "application-worker"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+domain-orders = { path = "../../domain/orders" }
+foundation-telemetry = { path = "../../foundation/telemetry" }

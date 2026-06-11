@@ -1,7 +1,8 @@
 export function renderGitignoreHarnessRules(): string {
   return [
-    "# VCM local app state, task metadata, session records, and task worktrees.",
+    "# VCM runtime task metadata, handoffs, session records, logs, and task worktrees.",
     ".ai/vcm/",
-    ".claude/worktrees/"
+    ".claude/worktrees/",
+    ".ai/tools/__pycache__/"
   ].join("\n");
 }

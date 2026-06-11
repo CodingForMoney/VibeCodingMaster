@@ -12,9 +12,29 @@ import type { SessionService } from "../../../src/backend/services/session-servi
 import { formatTerminalPaste, normalizeTerminalSubmitText } from "../../../src/backend/runtime/terminal-submit.js";
 import { createTranslationService } from "../../../src/backend/services/translation-service.js";
 import type { RoleSessionRecord } from "../../../src/shared/types/session.js";
-import type { TranslationWsMessage } from "../../../src/shared/types/translation.js";
+import type { TranslationSessionEvent, TranslationWsMessage } from "../../../src/shared/types/translation.js";
+import { TRANSLATION_ENTRY_RETENTION_LIMIT } from "../../../src/shared/types/translation.js";
 
 describe("translation-service", () => {
+  it("uses conservative defaults for context and request timeout", async () => {
+    const service = createTranslationService({
+      appSettings: createAppSettingsService({
+        fs: createMemoryFs(),
+        settingsPath: "/settings.json",
+      }),
+      provider: createProviderStub(),
+      runtime: {} as TerminalRuntime,
+      sessionRegistry: createRegistryStub(),
+      transcripts: createTranscriptStub(),
+      sessionService: {} as SessionService
+    });
+
+    await expect(service.getSettings()).resolves.toMatchObject({
+      contextEnabled: false,
+      requestTimeoutMs: 120000
+    });
+  });
+
   it("formats translated input as bracketed paste before a separate enter", () => {
     expect(normalizeTerminalSubmitText("run tests\n")).toBe("run tests");
     expect(normalizeTerminalSubmitText("run tests\r")).toBe("run tests");
@@ -45,6 +65,109 @@ describe("translation-service", () => {
     expect(reloaded.apiKey).toBe("sk-local-test");
     expect(stored.translation?.secrets.apiKey).toBe("sk-local-test");
     expect(stored.translation?.settings.apiKey).toBeUndefined();
+  });
+
+  it("records conversation boundary entries with per-session turns", async () => {
+    const fs = createMemoryFs();
+    const roleSession = createRoleSessionRecord();
+    const service = createTranslationService({
+      appSettings: createAppSettingsService({
+        fs,
+        settingsPath: "/settings.json",
+      }),
+      provider: createProviderStub(),
+      runtime: createRuntimeStub([roleSession]),
+      sessionRegistry: createRegistryStub(roleSession),
+      transcripts: createTranscriptStub(),
+      sessionService: {} as SessionService,
+      fs,
+      projectService: createProjectServiceStub(),
+      now: createClock([
+        "2026-05-30T00:00:01.000Z",
+        "2026-05-30T00:00:02.000Z",
+        "2026-05-30T00:00:03.000Z",
+        "2026-05-30T00:00:04.000Z"
+      ])
+    });
+
+    await service.recordConversationBoundary({
+      repoRoot: "/repo",
+      taskSlug: "demo-task",
+      role: "coder",
+      sessionId: roleSession.id,
+      boundaryKind: "start",
+      occurredAt: "2026-05-30T00:00:01.000Z"
+    });
+    await service.recordConversationBoundary({
+      repoRoot: "/repo",
+      taskSlug: "demo-task",
+      role: "coder",
+      sessionId: roleSession.id,
+      boundaryKind: "start",
+      occurredAt: "2026-05-30T00:00:01.000Z"
+    });
+    await service.recordConversationBoundary({
+      repoRoot: "/repo",
+      taskSlug: "demo-task",
+      role: "coder",
+      sessionId: roleSession.id,
+      boundaryKind: "end",
+      occurredAt: "2026-05-30T00:00:03.000Z"
+    });
+    await service.recordConversationBoundary({
+      repoRoot: "/repo",
+      taskSlug: "demo-task",
+      role: "coder",
+      sessionId: roleSession.id,
+      boundaryKind: "end",
+      occurredAt: "2026-05-30T00:00:03.000Z"
+    });
+    await service.recordConversationBoundary({
+      repoRoot: "/repo",
+      taskSlug: "demo-task",
+      role: "coder",
+      sessionId: roleSession.id,
+      boundaryKind: "start",
+      occurredAt: "2026-05-30T00:00:05.000Z"
+    });
+
+    const result = await service.pollSessionEvents(roleSession.id, 1);
+    const entries = result.events
+      .filter((event): event is Extract<TranslationSessionEvent, { type: "entry" }> => event.type === "entry")
+      .map((event) => event.entry);
+
+    expect(entries).toHaveLength(3);
+    expect(entries.map((entry) => ({
+      id: entry.id,
+      sourceKind: entry.sourceKind,
+      boundaryKind: entry.boundaryKind,
+      conversationTurn: entry.conversationTurn,
+      occurredAt: entry.occurredAt
+    }))).toEqual([
+      {
+        id: `boundary:${roleSession.id}:1:start`,
+        sourceKind: "conversation-boundary",
+        boundaryKind: "start",
+        conversationTurn: 1,
+        occurredAt: "2026-05-30T00:00:01.000Z"
+      },
+      {
+        id: `boundary:${roleSession.id}:1:end`,
+        sourceKind: "conversation-boundary",
+        boundaryKind: "end",
+        conversationTurn: 1,
+        occurredAt: "2026-05-30T00:00:03.000Z"
+      },
+      {
+        id: `boundary:${roleSession.id}:2:start`,
+        sourceKind: "conversation-boundary",
+        boundaryKind: "start",
+        conversationTurn: 2,
+        occurredAt: "2026-05-30T00:00:05.000Z"
+      }
+    ]);
+    expect(entries[0]?.sourceText).toContain("开始---第 1 轮");
+    expect(entries[1]?.sourceText).toContain("结束---第 1 轮");
   });
 
   it("shows cleaned Claude output before replacing it with translated text", async () => {
@@ -99,6 +222,147 @@ describe("translation-service", () => {
       translatedText: "我找到了失败的测试。"
     });
     expect(entries.at(-1)?.entry.translationStartedAt).toBe("2026-05-30T00:00:01.000Z");
+  });
+
+  it("tracks failed output translations in a retry queue and retries by replacing the original entry", async () => {
+    const fs = createMemoryFs();
+    const appSettings = createAppSettingsService({
+      fs,
+      settingsPath: "/settings.json",
+    });
+    const runtime = createRuntimeStub();
+    const transcripts = createTranscriptStub();
+    const service = createTranslationService({
+      appSettings,
+      provider: createFailOnceProvider("重试成功。"),
+      runtime,
+      sessionRegistry: createRegistryStub(),
+      transcripts,
+      sessionService: {} as SessionService
+    });
+    await service.updateSettings({ enabled: true, translateOutput: true }, { apiKey: "sk-local-test" });
+
+    const messages: TranslationWsMessage[] = [];
+    service.subscribeToSession("session-1", (message) => messages.push(message));
+    transcripts.emit({
+      kind: "text",
+      id: "assistant-message-retry",
+      timestamp: "2026-05-30T00:00:00.000Z",
+      stopReason: "end_turn",
+      text: "Retry this failed translation."
+    });
+
+    await waitFor(() => messages.some((message) =>
+      message.type === "translation-failures" && message.failures.length === 1
+    ));
+
+    const failure = messages.find((message): message is Extract<TranslationWsMessage, { type: "translation-failures" }> =>
+      message.type === "translation-failures" && message.failures.length === 1
+    )?.failures[0];
+    expect(failure).toMatchObject({
+      translationId: "assistant-message-retry",
+      sessionId: "session-1",
+      sourceText: "Retry this failed translation.",
+      retryCount: 0
+    });
+
+    const retryResult = await service.retryFailedTranslations("session-1");
+    expect(retryResult.failures).toHaveLength(1);
+    expect(retryResult.failures[0]).toMatchObject({
+      translationId: "assistant-message-retry",
+      retryCount: 1
+    });
+
+    await waitFor(() => messages.some((message) =>
+      message.type === "translation-entry"
+      && message.entry.id === "assistant-message-retry"
+      && message.entry.status === "translated"
+    ));
+
+    const entryMessages = messages.filter((message): message is Extract<TranslationWsMessage, { type: "translation-entry" }> =>
+      message.type === "translation-entry" && message.entry.id === "assistant-message-retry"
+    );
+    const failedIndex = entryMessages.findIndex((message) => message.entry.status === "failed");
+    expect(failedIndex).toBeGreaterThanOrEqual(0);
+    expect(entryMessages.slice(failedIndex + 1).some((message) => message.entry.status === "translating")).toBe(true);
+    expect(entryMessages.at(-1)?.entry).toMatchObject({
+      id: "assistant-message-retry",
+      status: "translated",
+      sourceText: "Retry this failed translation.",
+      translatedText: "重试成功。"
+    });
+    expect(messages.some((message) =>
+      message.type === "translation-failures" && message.failures.length === 0
+    )).toBe(true);
+
+    const replayed: TranslationWsMessage[] = [];
+    service.subscribeToSession("session-1", (message) => replayed.push(message));
+    const replayedEntries = replayed.filter((message): message is Extract<TranslationWsMessage, { type: "translation-entry" }> =>
+      message.type === "translation-entry" && message.entry.id === "assistant-message-retry"
+    );
+    expect(replayedEntries).toHaveLength(1);
+    expect(replayedEntries[0]?.entry.status).toBe("translated");
+  });
+
+  it("caps retained translation entries and removes failure queue items for pruned failures", async () => {
+    const fs = createMemoryFs();
+    const appSettings = createAppSettingsService({
+      fs,
+      settingsPath: "/settings.json",
+    });
+    const runtime = createRuntimeStub();
+    const transcripts = createTranscriptStub();
+    const service = createTranslationService({
+      appSettings,
+      provider: createAlwaysFailProvider(),
+      runtime,
+      sessionRegistry: createRegistryStub(),
+      transcripts,
+      sessionService: {} as SessionService
+    });
+    await service.updateSettings({ enabled: true, translateOutput: true }, { apiKey: "sk-local-test" });
+
+    const messages: TranslationWsMessage[] = [];
+    service.subscribeToSession("session-1", (message) => messages.push(message));
+    transcripts.emit({
+      kind: "text",
+      id: "old-failed-entry",
+      timestamp: "2026-05-30T00:00:00.000Z",
+      stopReason: "end_turn",
+      text: "This old failure should be pruned."
+    });
+
+    await waitFor(() => messages.some((message) =>
+      message.type === "translation-failures" && message.failures.length === 1
+    ));
+
+    for (let index = 0; index < TRANSLATION_ENTRY_RETENTION_LIMIT; index += 1) {
+      transcripts.emit({
+        kind: "tool_use",
+        id: `tool-${index}`,
+        timestamp: "2026-05-30T00:00:01.000Z",
+        toolUse: {
+          name: "Bash",
+          input: { command: `echo ${index}` }
+        }
+      });
+    }
+
+    await waitFor(() => messages.some((message) =>
+      message.type === "translation-failures" && message.failures.length === 0
+    ));
+
+    const replayed: TranslationWsMessage[] = [];
+    service.subscribeToSession("session-1", (message) => replayed.push(message));
+    const replayedEntries = replayed.filter((message): message is Extract<TranslationWsMessage, { type: "translation-entry" }> =>
+      message.type === "translation-entry"
+    );
+    const replayedFailures = replayed.filter((message): message is Extract<TranslationWsMessage, { type: "translation-failures" }> =>
+      message.type === "translation-failures"
+    );
+    expect(replayedEntries).toHaveLength(TRANSLATION_ENTRY_RETENTION_LIMIT);
+    expect(replayedEntries.some((message) => message.entry.id === "old-failed-entry")).toBe(false);
+    expect(replayedFailures.at(-1)?.failures).toEqual([]);
   });
 
   it("shows user input before replacing it with translated text", async () => {
@@ -678,6 +942,33 @@ function createProviderStub(text = "translated", calls: unknown[] = []): Transla
     async translate(input) {
       calls.push(input);
       return { text, elapsedMs: 1 };
+    }
+  };
+}
+
+function createFailOnceProvider(text = "translated"): TranslationProvider {
+  let calls = 0;
+  return {
+    async testConnection(settings) {
+      return { ok: true, model: settings.model, elapsedMs: 1 };
+    },
+    async translate() {
+      calls += 1;
+      if (calls === 1) {
+        throw new Error("Provider temporarily failed.");
+      }
+      return { text, elapsedMs: 1 };
+    }
+  };
+}
+
+function createAlwaysFailProvider(): TranslationProvider {
+  return {
+    async testConnection(settings) {
+      return { ok: true, model: settings.model, elapsedMs: 1 };
+    },
+    async translate() {
+      throw new Error("Provider failed.");
     }
   };
 }

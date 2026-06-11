@@ -25,4 +25,27 @@ export interface ClaudeHookResult {
   sessionUpdated: boolean;
   dispatchedCount: number;
   acceptedMessageId?: string;
+  stopDecision?: ClaudeStopHookDecision;
+}
+
+export interface ClaudeStopHookDecision {
+  behavior: "block";
+  reason: string;
+}
+
+/**
+ * Claude Code Stop hook stdout contract: `{}` allows the stop; a block
+ * decision keeps the role turn alive and feeds the reason back to the model.
+ */
+export type ClaudeStopHookResponse =
+  | Record<string, never>
+  | { decision: "block"; reason: string };
+
+export interface ClaudePermissionRequestHookResult {
+  hookSpecificOutput: {
+    hookEventName: "PermissionRequest";
+    decision: {
+      behavior: "allow";
+    };
+  };
 }

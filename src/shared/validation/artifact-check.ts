@@ -8,15 +8,9 @@ const REQUIRED_HEADINGS: Record<ArtifactKind, readonly string[]> = {
     "Risks",
     "Stop Conditions"
   ],
-  "implementation-log": [
-    "Summary",
-    "Files Changed",
-    "Validation",
-    "Deviations From Architecture Plan",
-    "Follow-ups"
-  ],
-  "validation-log": [
-    "Validation"
+  "known-issues": [
+    "Task Issues",
+    "Escalation To Docs"
   ],
   "review-report": [
     "Summary",
@@ -31,7 +25,18 @@ const REQUIRED_HEADINGS: Record<ArtifactKind, readonly string[]> = {
     "Docs Reviewed And Left Unchanged",
     "Public Contract / Module Boundary Notes",
     "Remaining Documentation Risks",
+    "Known Issues Disposition",
     "Decision"
+  ],
+  "final-acceptance": [
+    "Decision",
+    "Evidence Reviewed",
+    "Scope Traceability",
+    "Validation Summary",
+    "Review And Docs Sync",
+    "Known Issues Disposition",
+    "Cleanup Readiness",
+    "Final User Summary"
   ]
 };
 

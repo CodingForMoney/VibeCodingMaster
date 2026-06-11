@@ -1,0 +1,203 @@
+{
+  "schemaVersion": 1,
+  "kind": "module-index",
+  "generatedBy": ".ai/tools/generate-module-index",
+  "workspace": {
+    "root": ".",
+    "manifest": "Cargo.toml"
+  },
+  "layerInference": {
+    "method": "path-first-segment-from-cargo-root",
+    "rootPackageLayer": "root"
+  },
+  "layers": [
+    {
+      "name": "foundation",
+      "path": "foundation",
+      "modules": [
+        {
+          "name": "foundation-config",
+          "path": "foundation/config",
+          "manifest": "foundation/config/Cargo.toml",
+          "architectureDoc": "foundation/config/ARCHITECTURE.md",
+          "workspaceDependencies": [],
+          "files": {
+            "source": [
+              "foundation/config/src/lib.rs",
+              "foundation/config/src/model.rs",
+              "foundation/config/src/ops.rs"
+            ],
+            "tests": [
+              "foundation/config/tests/basic.rs"
+            ]
+          }
+        },
+        {
+          "name": "foundation-identity",
+          "path": "foundation/identity",
+          "manifest": "foundation/identity/Cargo.toml",
+          "architectureDoc": "foundation/identity/ARCHITECTURE.md",
+          "workspaceDependencies": [],
+          "files": {
+            "source": [
+              "foundation/identity/src/lib.rs",
+              "foundation/identity/src/model.rs",
+              "foundation/identity/src/ops.rs"
+            ],
+            "tests": [
+              "foundation/identity/tests/basic.rs"
+            ]
+          }
+        },
+        {
+          "name": "foundation-telemetry",
+          "path": "foundation/telemetry",
+          "manifest": "foundation/telemetry/Cargo.toml",
+          "architectureDoc": "foundation/telemetry/ARCHITECTURE.md",
+          "workspaceDependencies": [],
+          "files": {
+            "source": [
+              "foundation/telemetry/src/lib.rs",
+              "foundation/telemetry/src/model.rs",
+              "foundation/telemetry/src/ops.rs"
+            ],
+            "tests": [
+              "foundation/telemetry/tests/basic.rs"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "domain",
+      "path": "domain",
+      "modules": [
+        {
+          "name": "domain-accounts",
+          "path": "domain/accounts",
+          "manifest": "domain/accounts/Cargo.toml",
+          "architectureDoc": "domain/accounts/ARCHITECTURE.md",
+          "workspaceDependencies": [
+            "foundation-config",
+            "foundation-identity"
+          ],
+          "files": {
+            "source": [
+              "domain/accounts/src/lib.rs",
+              "domain/accounts/src/model.rs",
+              "domain/accounts/src/ops.rs"
+            ],
+            "tests": [
+              "domain/accounts/tests/basic.rs"
+            ]
+          }
+        },
+        {
+          "name": "domain-catalog",
+          "path": "domain/catalog",
+          "manifest": "domain/catalog/Cargo.toml",
+          "architectureDoc": "domain/catalog/ARCHITECTURE.md",
+          "workspaceDependencies": [
+            "foundation-config"
+          ],
+          "files": {
+            "source": [
+              "domain/catalog/src/lib.rs",
+              "domain/catalog/src/model.rs",
+              "domain/catalog/src/ops.rs"
+            ],
+            "tests": [
+              "domain/catalog/tests/basic.rs"
+            ]
+          }
+        },
+        {
+          "name": "domain-orders",
+          "path": "domain/orders",
+          "manifest": "domain/orders/Cargo.toml",
+          "architectureDoc": "domain/orders/ARCHITECTURE.md",
+          "workspaceDependencies": [
+            "domain-catalog",
+            "foundation-identity"
+          ],
+          "files": {
+            "source": [
+              "domain/orders/src/lib.rs",
+              "domain/orders/src/model.rs",
+              "domain/orders/src/ops.rs"
+            ],
+            "tests": [
+              "domain/orders/tests/basic.rs"
+            ]
+          }
+        }
+      ]
+    },
+    {
+      "name": "application",
+      "path": "application",
+      "modules": [
+        {
+          "name": "application-api",
+          "path": "application/api",
+          "manifest": "application/api/Cargo.toml",
+          "architectureDoc": "application/api/ARCHITECTURE.md",
+          "workspaceDependencies": [
+            "domain-accounts",
+            "domain-catalog"
+          ],
+          "files": {
+            "source": [
+              "application/api/src/lib.rs",
+              "application/api/src/model.rs",
+              "application/api/src/ops.rs"
+            ],
+            "tests": [
+              "application/api/tests/basic.rs"
+            ]
+          }
+        },
+        {
+          "name": "application-reporting",
+          "path": "application/reporting",
+          "manifest": "application/reporting/Cargo.toml",
+          "architectureDoc": "application/reporting/ARCHITECTURE.md",
+          "workspaceDependencies": [
+            "domain-accounts",
+            "domain-orders"
+          ],
+          "files": {
+            "source": [
+              "application/reporting/src/lib.rs",
+              "application/reporting/src/model.rs",
+              "application/reporting/src/ops.rs"
+            ],
+            "tests": [
+              "application/reporting/tests/basic.rs"
+            ]
+          }
+        },
+        {
+          "name": "application-worker",
+          "path": "application/worker",
+          "manifest": "application/worker/Cargo.toml",
+          "architectureDoc": "application/worker/ARCHITECTURE.md",
+          "workspaceDependencies": [
+            "domain-orders",
+            "foundation-telemetry"
+          ],
+          "files": {
+            "source": [
+              "application/worker/src/lib.rs",
+              "application/worker/src/model.rs",
+              "application/worker/src/ops.rs"
+            ],
+            "tests": [
+              "application/worker/tests/basic.rs"
+            ]
+          }
+        }
+      ]
+    }
+  ]
+}

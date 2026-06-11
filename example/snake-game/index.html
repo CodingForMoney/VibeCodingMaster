@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Snake Example</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="game-shell">
+      <section class="play-area" aria-label="Snake game">
+        <canvas id="game" width="560" height="560" aria-label="Snake board"></canvas>
+        <div class="touch-pad" aria-label="Direction controls">
+          <button class="touch-button up" type="button" data-direction="up">Up</button>
+          <button class="touch-button left" type="button" data-direction="left">Left</button>
+          <button class="touch-button down" type="button" data-direction="down">Down</button>
+          <button class="touch-button right" type="button" data-direction="right">Right</button>
+        </div>
+      </section>
+
+      <aside class="panel" aria-label="Game status">
+        <div>
+          <p class="eyebrow">Example</p>
+          <h1>Snake</h1>
+        </div>
+
+        <dl class="stats">
+          <div>
+            <dt>Score</dt>
+            <dd id="score">0</dd>
+          </div>
+          <div>
+            <dt>Best</dt>
+            <dd id="best">0</dd>
+          </div>
+          <div>
+            <dt>Speed</dt>
+            <dd id="speed">1x</dd>
+          </div>
+        </dl>
+
+        <div id="status" class="status" role="status">Ready</div>
+
+        <div class="actions">
+          <button id="start" type="button">Start</button>
+          <button id="pause" type="button">Pause</button>
+          <button id="restart" type="button">Restart</button>
+        </div>
+      </aside>
+    </main>
+
+    <script src="./snake.js" defer></script>
+  </body>
+</html>

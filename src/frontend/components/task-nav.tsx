@@ -18,7 +18,7 @@ export function TaskNav({ tasks, activeTaskSlug, onSelect }: TaskNavProps) {
           onClick={() => onSelect(task.taskSlug)}
         >
           <span>{task.title || task.taskSlug}</span>
-          <StatusBadge status={task.status === "created" ? "unknown" : "running"} />
+          <StatusBadge status={task.status} />
         </button>
       ))}
     </nav>

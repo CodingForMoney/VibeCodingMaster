@@ -1,10 +1,7 @@
 export type TaskStatus =
   | "created"
-  | "planning"
   | "running"
-  | "blocked"
-  | "stopped"
-  | "done";
+  | "stopped";
 
 export interface TaskRecord {
   version: 1;

@@ -1,4 +1,8 @@
 import { describe, expect, it } from "vitest";
+import {
+  createDefaultLaunchTemplate,
+  type AppPreferences
+} from "../../../src/shared/types/app-settings.js";
 import type { FileSystemAdapter } from "../../../src/backend/adapters/filesystem.js";
 import {
   createAppSettingsService,
@@ -20,10 +24,7 @@ describe("app-settings-service", () => {
 
     expect(settings).toEqual({
       version: 1,
-      preferences: {
-        themeMode: "system",
-        roundCompletionAlerts: true
-      },
+      preferences: createDefaultPreferences(),
       translation: undefined,
       recentRepositoryPaths: []
     });
@@ -37,23 +38,68 @@ describe("app-settings-service", () => {
       settingsPath: "/settings.json"
     });
 
-    await expect(service.getPreferences()).resolves.toEqual({
-      themeMode: "system",
-      roundCompletionAlerts: true
-    });
+    await expect(service.getPreferences()).resolves.toEqual(createDefaultPreferences());
     await expect(service.updatePreferences({
       themeMode: "dark",
-      roundCompletionAlerts: false
-    })).resolves.toEqual({
+      flowPauseAlerts: false,
+      permissionRequestMode: "allowAll"
+    })).resolves.toEqual(createDefaultPreferences({
       themeMode: "dark",
-      roundCompletionAlerts: false
-    });
+      flowPauseAlerts: false,
+      permissionRequestMode: "allowAll"
+    }));
 
     const stored = await fs.readJson<AppSettingsFile>("/settings.json");
-    expect(stored.preferences).toEqual({
+    expect(stored.preferences).toEqual(createDefaultPreferences({
       themeMode: "dark",
-      roundCompletionAlerts: false
+      flowPauseAlerts: false,
+      permissionRequestMode: "allowAll"
+    }));
+  });
+
+  it("stores the role launch template", async () => {
+    const fs = createMemoryFs();
+    const service = createAppSettingsService({
+      fs,
+      settingsPath: "/settings.json"
     });
+    const launchTemplate = createDefaultLaunchTemplate();
+    launchTemplate.autoOrchestration = false;
+    launchTemplate.translationEnabled = false;
+    launchTemplate.roles.coder = {
+      permissionMode: "bypassPermissions",
+      model: "opus[1m]"
+    };
+
+    await expect(service.updatePreferences({ launchTemplate })).resolves.toEqual(createDefaultPreferences({
+      launchTemplate
+    }));
+
+    const stored = await fs.readJson<AppSettingsFile>("/settings.json");
+    expect(stored.preferences.launchTemplate).toEqual(launchTemplate);
+  });
+
+  it("migrates the old round completion alert preference", async () => {
+    const fs = createMemoryFs({
+      "/settings.json": {
+        version: 1,
+        preferences: {
+          themeMode: "dark",
+          roundCompletionAlerts: false
+        },
+        recentRepositoryPaths: []
+      }
+    });
+    const service = createAppSettingsService({
+      fs,
+      settingsPath: "/settings.json"
+    });
+
+    await expect(service.getPreferences()).resolves.toEqual(createDefaultPreferences({
+      themeMode: "dark",
+      flowPauseAlerts: false,
+      permissionRequestMode: "off"
+    }));
   });
 
   it("keeps the five most recent repository paths with newest first", async () => {
@@ -117,8 +163,23 @@ describe("app-settings-service", () => {
   });
 });
 
-function createMemoryFs(): FileSystemAdapter {
-  const files = new Map<string, string>();
+function createDefaultPreferences(overrides: Partial<AppPreferences> = {}): AppPreferences {
+  return {
+    themeMode: "system",
+    flowPauseAlerts: true,
+    permissionRequestMode: "off",
+    launchTemplate: createDefaultLaunchTemplate(),
+    ...overrides
+  };
+}
+
+function createMemoryFs(initialFiles: Record<string, unknown> = {}): FileSystemAdapter {
+  const files = new Map<string, string>(
+    Object.entries(initialFiles).map(([targetPath, value]) => [
+      targetPath,
+      typeof value === "string" ? value : `${JSON.stringify(value, null, 2)}\n`
+    ])
+  );
   return {
     async pathExists(targetPath) {
       return files.has(targetPath);

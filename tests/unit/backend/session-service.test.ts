@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ProjectConfig } from "../../../src/shared/types/project.js";
 import type { RoleName } from "../../../src/shared/types/role.js";
+import type { ClaudeModel } from "../../../src/shared/types/session.js";
 import type { CreateTerminalSessionInput, TerminalRuntime, TerminalSession } from "../../../src/backend/runtime/terminal-runtime.js";
 import { createSessionRegistry } from "../../../src/backend/runtime/session-registry.js";
 import { createSessionService } from "../../../src/backend/services/session-service.js";
@@ -39,7 +40,9 @@ describe("createSessionService", () => {
       "--agent",
       "architect",
       "--resume",
-      started.claudeSessionId
+      started.claudeSessionId,
+      "--model",
+      "default"
     ]);
   });
 
@@ -54,10 +57,31 @@ describe("createSessionService", () => {
     expect(writes).toHaveLength(0);
     expect(runtimeInputs[0]?.env).toMatchObject({
       VCM_API_URL: "http://127.0.0.1:4173",
+      VCM_TASK_REPO_ROOT: "/repo",
       VCM_TASK_SLUG: "demo-task",
       VCM_ROLE: "project-manager",
       VCM_SESSION_ID: expect.any(String)
     });
+  });
+
+  it("starts role sessions with the selected Claude model", async () => {
+    const fs = createMemoryFs();
+    const runtimeInputs: CreateTerminalSessionInput[] = [];
+    const service = createTestSessionService(fs, runtimeInputs);
+
+    const started = await service.startRoleSession("/repo", "demo-task", "coder", {
+      model: "claude-opus-4-8[1m]"
+    });
+
+    expect(started.model).toBe("claude-opus-4-8[1m]");
+    expect(runtimeInputs[0]?.args).toEqual([
+      "--agent",
+      "coder",
+      "--session-id",
+      started.claudeSessionId,
+      "--model",
+      "claude-opus-4-8[1m]"
+    ]);
   });
 
   it("starts role sessions inside the task worktree when one exists", async () => {
@@ -72,6 +96,9 @@ describe("createSessionService", () => {
     expect(started.cwd).toBe("/repo/.claude/worktrees/demo-task");
     expect(started.transcriptPath).toContain("-repo-.claude-worktrees-demo-task");
     expect(runtimeInputs[0]?.cwd).toBe("/repo/.claude/worktrees/demo-task");
+    expect(runtimeInputs[0]?.env).toMatchObject({
+      VCM_TASK_REPO_ROOT: "/repo/.claude/worktrees/demo-task"
+    });
     expect(runtimeInputs[0]?.logPath).toBe("/repo/.claude/worktrees/demo-task/.ai/vcm/handoffs/logs/architect.log");
     await expect(fs.pathExists("/repo/.claude/worktrees/demo-task/.ai/vcm/sessions/demo-task.json"))
       .resolves.toBe(true);
@@ -107,9 +134,61 @@ describe("createSessionService", () => {
       "--agent",
       "coder",
       "--session-id",
-      restarted.claudeSessionId
+      restarted.claudeSessionId,
+      "--model",
+      "default"
     ]);
     expect(secondRuntimeInputs[0]?.args).not.toContain("--resume");
+  });
+
+  it("normalizes legacy dangerously skip permission records to bypassPermissions", async () => {
+    const fs = createMemoryFs();
+    await fs.writeJson("/repo/.ai/vcm/sessions/demo-task.json", {
+      version: 1,
+      taskSlug: "demo-task",
+      updatedAt: "2026-05-29T00:00:00.000Z",
+      roles: {
+        "project-manager": { id: null, status: "not_started" },
+        architect: { id: null, status: "not_started" },
+        coder: {
+          id: "runtime_legacy",
+          claudeSessionId: "00000000-0000-4000-8000-000000000004",
+          status: "running",
+          record: {
+            id: "runtime_legacy",
+            claudeSessionId: "00000000-0000-4000-8000-000000000004",
+            taskSlug: "demo-task",
+            role: "coder",
+            status: "running",
+            activityStatus: "idle",
+            command: "claude --agent coder --dangerously-skip-permissions",
+            permissionMode: "dangerously-skip-permissions",
+            cwd: "/repo",
+            terminalBackend: "node-pty",
+            logPath: ".ai/vcm/handoffs/logs/coder.log",
+            updatedAt: "2026-05-29T00:00:00.000Z"
+          }
+        },
+        reviewer: { id: null, status: "not_started" }
+      }
+    });
+    const runtimeInputs: CreateTerminalSessionInput[] = [];
+    const service = createTestSessionService(fs, runtimeInputs);
+
+    const recovered = await service.getRoleSession("/repo", "demo-task", "coder");
+    expect(recovered?.permissionMode).toBe("bypassPermissions");
+
+    await service.resumeRoleSession("/repo", "demo-task", "coder");
+    expect(runtimeInputs[0]?.args).toEqual([
+      "--agent",
+      "coder",
+      "--resume",
+      "00000000-0000-4000-8000-000000000004",
+      "--model",
+      "default",
+      "--permission-mode",
+      "bypassPermissions"
+    ]);
   });
 
   it("records Claude hook activity separately from terminal process status", async () => {
@@ -127,7 +206,7 @@ describe("createSessionService", () => {
     expect(running).toMatchObject({
       status: "running",
       activityStatus: "running",
-      lastPromptSubmittedAt: "2026-05-29T00:00:00.000Z"
+      lastTurnStartedAt: "2026-05-29T00:00:00.000Z"
     });
 
     const idle = await service.recordClaudeHookEvent("/repo", {
@@ -139,7 +218,7 @@ describe("createSessionService", () => {
     expect(idle).toMatchObject({
       status: "running",
       activityStatus: "idle",
-      lastStopAt: "2026-05-29T00:00:00.000Z"
+      lastTurnEndedAt: "2026-05-29T00:00:00.000Z"
     });
   });
 });
@@ -161,15 +240,21 @@ function createTestSessionService(
       async getVersion() {
         return "2.1.156";
       },
-      buildRoleStartCommand(role: RoleName, command = "claude", permissionMode = "default", claudeSessionId?: string, resume = false) {
+      buildRoleStartCommand(
+        role: RoleName,
+        command = "claude",
+        permissionMode = "default",
+        claudeSessionId?: string,
+        resume = false,
+        model: ClaudeModel = "default"
+      ) {
         const args = ["--agent", role];
         if (claudeSessionId) {
           args.push(resume ? "--resume" : "--session-id", claudeSessionId);
         }
+        args.push("--model", model);
         if (permissionMode === "bypassPermissions") {
           args.push("--permission-mode", "bypassPermissions");
-        } else if (permissionMode === "dangerously-skip-permissions") {
-          args.push("--dangerously-skip-permissions");
         }
         return { command, args, display: `${command} ${args.join(" ")}` };
       }
@@ -192,10 +277,10 @@ function createTestSessionService(
             reviewer: ".ai/vcm/handoffs/logs/reviewer.log"
           },
           architecturePlanPath: ".ai/vcm/handoffs/architecture-plan.md",
-          implementationLogPath: ".ai/vcm/handoffs/implementation-log.md",
-          validationLogPath: ".ai/vcm/handoffs/validation-log.md",
+          knownIssuesPath: ".ai/vcm/handoffs/known-issues.md",
           reviewReportPath: ".ai/vcm/handoffs/review-report.md",
-          docsSyncReportPath: ".ai/vcm/handoffs/docs-sync-report.md"
+          docsSyncReportPath: ".ai/vcm/handoffs/docs-sync-report.md",
+          finalAcceptancePath: ".ai/vcm/handoffs/final-acceptance.md"
         };
       }
     } as never,

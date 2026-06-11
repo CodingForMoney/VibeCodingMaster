@@ -81,23 +81,44 @@ describe("createProjectService", () => {
 
     const project = await service.connectProject({ repoPath: "/workspace" });
     const configPath = `/home/.vcm/projects/${getProjectId("/workspace")}/config.json`;
+    const tasksPath = `/home/.vcm/projects/${getProjectId("/workspace")}/tasks`;
 
     expect(project.config.claudeCommand).toBe("claude");
     await expect(fs.readJson(configPath)).resolves.toMatchObject({
       stateRoot: ".ai/vcm",
       claudeCommand: "claude"
     });
+    expect(fs.createdPaths).toContain(tasksPath);
+    expect(fs.createdPaths).not.toContain("/workspace/.ai/vcm/tasks");
     await expect(fs.pathExists("/workspace/.ai/vcm/config.json")).resolves.toBe(false);
+  });
+
+  it("pulls the connected repository with fast-forward only", async () => {
+    const git = createGitAdapterStub([]);
+    const service = createProjectService({
+      fs: createMemoryFs(new Set(["/workspace"])),
+      git,
+      claude: createClaudeAdapterStub(),
+      appSettings: createAppSettingsStub()
+    });
+
+    await service.connectProject({ repoPath: "/workspace" });
+    const project = await service.pullCurrentProject();
+
+    expect(git.pullCalls).toEqual(["/workspace"]);
+    expect(project.canPull).toBe(true);
   });
 });
 
-function createMemoryFs(existingPaths: Set<string>, files = new Map<string, string>()): FileSystemAdapter {
-  return {
+function createMemoryFs(existingPaths: Set<string>, files = new Map<string, string>()): FileSystemAdapter & { createdPaths: string[] } {
+  const adapter = {
+    createdPaths: [] as string[],
     async pathExists(targetPath) {
       return existingPaths.has(targetPath) || files.has(targetPath);
     },
     async ensureDir(targetPath) {
       existingPaths.add(targetPath);
+      this.createdPaths.push(targetPath);
     },
     async readDir() {
       return [];
@@ -134,10 +155,16 @@ function createMemoryFs(existingPaths: Set<string>, files = new Map<string, stri
       files.delete(targetPath);
     }
   };
+  return adapter;
 }
 
-function createGitAdapterStub(checkedRepos: string[], options: { failMetadata?: boolean } = {}): GitAdapter {
+function createGitAdapterStub(
+  checkedRepos: string[],
+  options: { failMetadata?: boolean } = {}
+): GitAdapter & { pullCalls: string[] } {
+  const pullCalls: string[] = [];
   return {
+    pullCalls,
     async checkRepo(repoRoot) {
       checkedRepos.push(repoRoot);
       return { isRepo: true };
@@ -150,6 +177,18 @@ function createGitAdapterStub(checkedRepos: string[], options: { failMetadata?: 
         throw new Error("branch unavailable");
       }
       return "feature/devcontainer";
+    },
+    async getHeadCommit() {
+      return "abcdef1234567890";
+    },
+    async getUpstreamBranch() {
+      return "origin/feature/devcontainer";
+    },
+    async getAheadBehind() {
+      return {
+        ahead: 0,
+        behind: 0
+      };
     },
     async isDirty() {
       if (options.failMetadata) {
@@ -168,7 +207,14 @@ function createGitAdapterStub(checkedRepos: string[], options: { failMetadata?: 
     },
     async createWorktree() {},
     async removeWorktree() {},
-    async deleteBranch() {}
+    async deleteBranch() {},
+    async pullFastForward(repoRoot) {
+      pullCalls.push(repoRoot);
+      return {
+        stdout: "",
+        stderr: ""
+      };
+    }
   };
 }
 

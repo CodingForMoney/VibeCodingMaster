@@ -1,36 +1,28 @@
 import type { RoleName } from "./role.js";
 
-export type VcmRoleTurnStatus =
-  | "unknown"
-  | "idle"
-  | "answering"
-  | "using_tools"
-  | "waiting_user"
-  | "abnormal";
+export type VcmRoundStatus =
+  | "running"
+  | "stopped";
 
-export type VcmTaskRoundStatus =
-  | "idle"
-  | "active"
-  | "waiting_user"
-  | "completed";
-
-export interface VcmRoleTurnState {
-  role: RoleName;
-  sessionId?: string;
-  status: VcmRoleTurnStatus;
-  pendingToolUseCount: number;
-  lastActivityAt?: string;
-  lastAnswerEndedAt?: string;
-  reason?: string;
-}
-
-export interface VcmTaskRoundState {
+export interface VcmSessionRoundState {
   taskSlug: string;
-  status: VcmTaskRoundStatus;
+  status: VcmRoundStatus;
+  roundId?: string;
   activeRole?: RoleName;
-  completionId?: string;
-  completedAt?: string;
-  pendingRouteCount: number;
-  roles: VcmRoleTurnState[];
+  startedAt?: string;
+  lastTurnStartedAt?: string;
+  lastTurnEndedAt?: string;
+  settleDeadlineAt?: string;
+  stoppedAt?: string;
+  activeTurnStartedAt?: string;
+  roundSequence?: number;
+  turnCount: number;
+  completedTurnCount: number;
+  totalRoundCount: number;
+  totalTurnCount: number;
+  totalCompletedTurnCount: number;
+  totalCcActiveMs: number;
+  currentRoundCcActiveMs: number;
+  roles: RoleName[];
   updatedAt: string;
 }

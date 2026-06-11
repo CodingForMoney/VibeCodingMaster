@@ -1,0 +1,11 @@
+[package]
+name = "application-api"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+path = "src/lib.rs"
+
+[dependencies]
+domain-accounts = { path = "../../domain/accounts" }
+domain-catalog = { path = "../../domain/catalog" }

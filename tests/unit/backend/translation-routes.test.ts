@@ -18,11 +18,11 @@ const settings: TranslationSettings = {
   inputMode: "review-before-send",
   translateOutput: true,
   translateUserInput: true,
-  contextEnabled: true,
+  contextEnabled: false,
   preserveTechnicalTokens: true,
   skipCjkText: true,
   redactSecrets: true,
-  requestTimeoutMs: 15000,
+  requestTimeoutMs: 120000,
   temperature: 0.1
 };
 
@@ -50,6 +50,9 @@ describe("translation routes", () => {
         async testProvider() {
           return { ok: true, model: settings.model, elapsedMs: 1 };
         },
+        async recordConversationBoundary() {
+          return undefined;
+        },
         async translateUserInput() {
           throw new Error("not implemented");
         },
@@ -60,6 +63,12 @@ describe("translation routes", () => {
         clearSession() {},
         async retryTranslation() {
           throw new Error("not implemented");
+        },
+        async retryFailedTranslations() {
+          return { failures: [] };
+        },
+        async ignoreTranslationFailures() {
+          return { failures: [] };
         }
       } satisfies TranslationService
     });
@@ -108,6 +117,9 @@ describe("translation routes", () => {
         async testProvider() {
           return { ok: true, model: settings.model, elapsedMs: 1 };
         },
+        async recordConversationBoundary() {
+          return undefined;
+        },
         async translateUserInput() {
           throw new Error("not implemented");
         },
@@ -118,6 +130,12 @@ describe("translation routes", () => {
         clearSession() {},
         async retryTranslation() {
           throw new Error("not implemented");
+        },
+        async retryFailedTranslations() {
+          return { failures: [] };
+        },
+        async ignoreTranslationFailures() {
+          return { failures: [] };
         }
       } satisfies TranslationService
     });
@@ -157,6 +175,9 @@ function createProjectServiceThatShouldNotBeCalled(): ProjectService {
       throw new Error("project service should not be used");
     },
     getConfigPath() {
+      throw new Error("project service should not be used");
+    },
+    getProjectDataRoot() {
       throw new Error("project service should not be used");
     }
   };

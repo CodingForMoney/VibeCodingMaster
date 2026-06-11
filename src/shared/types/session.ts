@@ -4,8 +4,47 @@ export type RoleActivityStatus = "idle" | "running";
 
 export type ClaudePermissionMode =
   | "default"
-  | "bypassPermissions"
-  | "dangerously-skip-permissions";
+  | "bypassPermissions";
+
+export const CLAUDE_MODEL_OPTIONS = [
+  {
+    value: "default",
+    label: "Default",
+    description: "Account default"
+  },
+  {
+    value: "best",
+    label: "Best",
+    description: "Fable 5 or latest Opus"
+  },
+  {
+    value: "fable",
+    label: "Fable 5",
+    description: "1M context, v2.1.170+"
+  },
+  {
+    value: "opus",
+    label: "Opus",
+    description: "latest Opus"
+  },
+  {
+    value: "opus[1m]",
+    label: "Opus 1M",
+    description: "Force 1M context"
+  },
+  {
+    value: "claude-opus-4-8",
+    label: "Opus 4.8",
+    description: "Current Opus"
+  },
+  {
+    value: "claude-opus-4-8[1m]",
+    label: "Opus 4.8 1M",
+    description: "Opus 4.8 + 1M context"
+  }
+] as const;
+
+export type ClaudeModel = typeof CLAUDE_MODEL_OPTIONS[number]["value"];
 
 export interface RoleSessionRecord {
   id: string;
@@ -17,6 +56,7 @@ export interface RoleSessionRecord {
   activityStatus?: RoleActivityStatus;
   command: string;
   permissionMode: ClaudePermissionMode;
+  model?: ClaudeModel;
   cwd: string;
   terminalBackend: "node-pty";
   pid?: number;
@@ -26,8 +66,8 @@ export interface RoleSessionRecord {
   startedAt?: string;
   updatedAt: string;
   lastOutputAt?: string;
-  lastPromptSubmittedAt?: string;
-  lastStopAt?: string;
+  lastTurnStartedAt?: string;
+  lastTurnEndedAt?: string;
   lastHookEventAt?: string;
   exitCode?: number | null;
 }
@@ -51,4 +91,5 @@ export interface StartRoleSessionRequest {
   cols?: number;
   rows?: number;
   permissionMode?: ClaudePermissionMode;
+  model?: ClaudeModel;
 }

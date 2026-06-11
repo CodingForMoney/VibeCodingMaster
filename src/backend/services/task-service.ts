@@ -26,7 +26,7 @@ export interface TaskServiceDeps {
   fs: FileSystemAdapter;
   git: GitAdapter;
   artifactService: ArtifactService;
-  projectService: Pick<ProjectService, "loadConfig">;
+  projectService: Pick<ProjectService, "loadConfig" | "getProjectDataRoot">;
   now?: () => string;
 }
 
@@ -37,7 +37,8 @@ export function createTaskService(deps: TaskServiceDeps): TaskService {
     async createTask(repoRoot, input) {
       assertValidTaskSlug(input.taskSlug);
       const config = await deps.projectService.loadConfig(repoRoot);
-      const taskPath = getTaskPath(repoRoot, config.stateRoot, input.taskSlug);
+      const taskStoreRoot = deps.projectService.getProjectDataRoot(repoRoot);
+      const taskPath = getTaskPath(taskStoreRoot, input.taskSlug);
       const shouldCreateWorktree = input.createWorktree !== false;
       const taskBranch = shouldCreateWorktree
         ? `feature/${input.taskSlug}`
@@ -53,7 +54,7 @@ export function createTaskService(deps: TaskServiceDeps): TaskService {
           statusCode: 409
         });
       }
-      if (!(await deps.git.isIgnored(repoRoot, `${config.stateRoot}/tasks/.probe`))) {
+      if (!(await deps.git.isIgnored(repoRoot, `${config.stateRoot}/.probe`))) {
         throw new VcmError({
           code: "VCM_STATE_NOT_IGNORED",
           message: `${config.stateRoot}/ is not ignored by Git.`,
@@ -70,7 +71,7 @@ export function createTaskService(deps: TaskServiceDeps): TaskService {
         });
       }
       if (!shouldCreateWorktree) {
-        const activeInlineTask = await findActiveInlineTask(deps.fs, repoRoot, config.stateRoot);
+        const activeInlineTask = await findActiveInlineTask(deps.fs, taskStoreRoot);
         if (activeInlineTask) {
           throw new VcmError({
             code: "INLINE_TASK_EXISTS",
@@ -142,14 +143,14 @@ export function createTaskService(deps: TaskServiceDeps): TaskService {
       await deps.artifactService.createArtifactTemplates({
         repoRoot: taskRepoRoot,
         taskSlug: input.taskSlug,
-        handoffDir: task.handoffDir
+        handoffDir: task.handoffDir,
+        branch: task.branch
       });
       await this.saveTask(repoRoot, task);
       return task;
     },
     async listTasks(repoRoot) {
-      const config = await deps.projectService.loadConfig(repoRoot);
-      const tasksDir = path.join(repoRoot, config.stateRoot, "tasks");
+      const tasksDir = path.join(deps.projectService.getProjectDataRoot(repoRoot), "tasks");
       if (!(await deps.fs.pathExists(tasksDir))) {
         return [];
       }
@@ -157,15 +158,14 @@ export function createTaskService(deps: TaskServiceDeps): TaskService {
       const entries = await deps.fs.readDir(tasksDir);
       const tasks: TaskRecord[] = [];
       for (const entry of entries.filter((candidate) => candidate.endsWith(".json"))) {
-        tasks.push(await deps.fs.readJson<TaskRecord>(path.join(tasksDir, entry)));
+        tasks.push(normalizeTaskRecord(await deps.fs.readJson<Partial<TaskRecord>>(path.join(tasksDir, entry))));
       }
 
       return tasks.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
     },
     async loadTask(repoRoot, taskSlug) {
       assertValidTaskSlug(taskSlug);
-      const config = await deps.projectService.loadConfig(repoRoot);
-      const taskPath = getTaskPath(repoRoot, config.stateRoot, taskSlug);
+      const taskPath = getTaskPath(deps.projectService.getProjectDataRoot(repoRoot), taskSlug);
 
       if (!(await deps.fs.pathExists(taskPath))) {
         throw new VcmError({
@@ -175,11 +175,10 @@ export function createTaskService(deps: TaskServiceDeps): TaskService {
         });
       }
 
-      return deps.fs.readJson<TaskRecord>(taskPath);
+      return normalizeTaskRecord(await deps.fs.readJson<Partial<TaskRecord>>(taskPath));
     },
     async saveTask(repoRoot, task) {
-      const config = await deps.projectService.loadConfig(repoRoot);
-      await deps.fs.writeJsonAtomic(getTaskPath(repoRoot, config.stateRoot, task.taskSlug), task);
+      await deps.fs.writeJsonAtomic(getTaskPath(deps.projectService.getProjectDataRoot(repoRoot), task.taskSlug), task);
     },
     async updateTaskStatus(repoRoot, taskSlug, status) {
       const task = await this.loadTask(repoRoot, taskSlug);
@@ -204,7 +203,13 @@ export function createTaskService(deps: TaskServiceDeps): TaskService {
       const config = await deps.projectService.loadConfig(repoRoot);
       const task = await this.loadTask(repoRoot, taskSlug);
       const taskRepoRoot = getTaskRuntimeRepoRoot(task);
-      const statePaths = getTaskStatePaths(repoRoot, taskRepoRoot, config.stateRoot, config.handoffRoot, taskSlug);
+      const statePaths = getTaskStatePaths(
+        deps.projectService.getProjectDataRoot(repoRoot),
+        taskRepoRoot,
+        config.stateRoot,
+        config.handoffRoot,
+        taskSlug
+      );
       const removedStatePaths: string[] = [];
       const cleanedAt = now();
 
@@ -239,8 +244,8 @@ export function getTaskRuntimeRepoRoot(task: TaskRecord): string {
   return task.worktreePath ?? task.repoRoot;
 }
 
-function getTaskPath(repoRoot: string, stateRoot: string, taskSlug: string): string {
-  return path.join(repoRoot, stateRoot, "tasks", `${taskSlug}.json`);
+function getTaskPath(taskStoreRoot: string, taskSlug: string): string {
+  return path.join(taskStoreRoot, "tasks", `${taskSlug}.json`);
 }
 
 function getTaskWorktreePath(repoRoot: string, taskSlug: string): string {
@@ -254,15 +259,15 @@ async function ensureTaskRuntimeStateDirs(fs: FileSystemAdapter, taskRepoRoot: s
   await fs.ensureDir(path.join(taskRepoRoot, stateRoot, "translation"));
 }
 
-async function findActiveInlineTask(fs: FileSystemAdapter, repoRoot: string, stateRoot: string): Promise<TaskRecord | undefined> {
-  const tasksDir = path.join(repoRoot, stateRoot, "tasks");
+async function findActiveInlineTask(fs: FileSystemAdapter, taskStoreRoot: string): Promise<TaskRecord | undefined> {
+  const tasksDir = path.join(taskStoreRoot, "tasks");
   if (!(await fs.pathExists(tasksDir))) {
     return undefined;
   }
 
   const entries = await fs.readDir(tasksDir);
   for (const entry of entries.filter((candidate) => candidate.endsWith(".json"))) {
-    const task = await fs.readJson<TaskRecord>(path.join(tasksDir, entry));
+    const task = normalizeTaskRecord(await fs.readJson<Partial<TaskRecord>>(path.join(tasksDir, entry)));
     if (!task.worktreePath && task.cleanupStatus !== "cleaned") {
       return task;
     }
@@ -270,15 +275,46 @@ async function findActiveInlineTask(fs: FileSystemAdapter, repoRoot: string, sta
   return undefined;
 }
 
+function normalizeTaskRecord(input: Partial<TaskRecord>): TaskRecord {
+  return {
+    version: 1,
+    taskSlug: input.taskSlug ?? "",
+    title: input.title,
+    createdAt: input.createdAt ?? "",
+    updatedAt: input.updatedAt ?? input.createdAt ?? "",
+    repoRoot: input.repoRoot ?? "",
+    worktreePath: input.worktreePath,
+    branch: input.branch ?? "",
+    handoffDir: input.handoffDir ?? ".ai/vcm/handoffs",
+    status: normalizeTaskStatus(input.status),
+    specPath: input.specPath,
+    cleanupStatus: input.cleanupStatus,
+    cleanedAt: input.cleanedAt
+  };
+}
+
+function normalizeTaskStatus(value: unknown): TaskStatus {
+  if (value === "created" || value === "running" || value === "stopped") {
+    return value;
+  }
+  if (value === undefined || value === null) {
+    return "created";
+  }
+  if (value === "planning") {
+    return "created";
+  }
+  return "stopped";
+}
+
 function getTaskStatePaths(
-  baseRepoRoot: string,
+  taskStoreRoot: string,
   taskRepoRoot: string,
   stateRoot: string,
   handoffRoot: string,
   taskSlug: string
 ): string[] {
   return [
-    path.join(baseRepoRoot, stateRoot, "tasks", `${taskSlug}.json`),
+    getTaskPath(taskStoreRoot, taskSlug),
     path.join(taskRepoRoot, stateRoot, "sessions", `${taskSlug}.json`),
     path.join(taskRepoRoot, stateRoot, "messages", `${taskSlug}.jsonl`),
     path.join(taskRepoRoot, stateRoot, "orchestration", `${taskSlug}.json`),
