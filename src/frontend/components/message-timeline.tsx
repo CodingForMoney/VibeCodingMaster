@@ -53,7 +53,7 @@ export function MessageTimeline({
 }: MessageTimelineProps) {
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const counts = getMessageCounts(messages);
-  const mode = orchestration?.mode ?? "manual";
+  const mode = orchestration?.mode ?? "auto";
   const visibleRecords = getVisibleMessageRecords(messages, maxMessages);
 
   async function copyMessage(message: VcmRoleMessage) {

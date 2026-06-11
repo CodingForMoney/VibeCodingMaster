@@ -288,26 +288,22 @@ h2 {
   max-width: none;
 }
 
-.project-summary dl,
-.gateway-panel dl {
+.project-summary dl {
   display: grid;
   gap: 8px;
   margin: 0;
 }
 
-.project-summary div,
-.gateway-panel div {
+.project-summary div {
   min-width: 0;
 }
 
-.project-summary dt,
-.gateway-panel dt {
+.project-summary dt {
   color: #6c6255;
   font-size: 12px;
 }
 
-.project-summary dd,
-.gateway-panel dd {
+.project-summary dd {
   margin: 0;
   overflow-wrap: anywhere;
   font-size: 13px;
@@ -2005,7 +2001,6 @@ h2 {
 }
 
 :root[data-theme="dark"] .project-summary dt,
-:root[data-theme="dark"] .gateway-panel dt,
 :root[data-theme="dark"] .session-option-field span,
 :root[data-theme="dark"] .translation-settings-grid span,
 :root[data-theme="dark"] .translation-prompt-stack span,

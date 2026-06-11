@@ -1,6 +1,8 @@
 export type GatewayCommand =
   | { kind: "plain"; text: string }
   | { kind: "help" }
+  | { kind: "start" }
+  | { kind: "retry" }
   | { kind: "status" }
   | { kind: "projects" }
   | { kind: "use-project"; selector: string }
@@ -24,6 +26,10 @@ export function parseGatewayCommand(input: string): GatewayCommand {
   switch (name) {
     case "/help":
       return { kind: "help" };
+    case "/start":
+      return { kind: "start" };
+    case "/retry":
+      return { kind: "retry" };
     case "/status":
       return { kind: "status" };
     case "/projects":

@@ -46,7 +46,6 @@ export interface ProjectDashboardProps {
   onGatewayEnabledChange(enabled: boolean): void;
   onGatewayTranslationChange(enabled: boolean): void;
   onStartGatewayQrLogin(): void;
-  onCheckGatewayQrLogin(): void;
   onResetGatewayBinding(): void;
   onCreateTask(input: { taskSlug: string; createWorktree?: boolean; title?: string }): Promise<void>;
   onSelectTask(taskSlug: string): void;
@@ -92,7 +91,6 @@ export function ProjectDashboard({
   onGatewayEnabledChange,
   onGatewayTranslationChange,
   onStartGatewayQrLogin,
-  onCheckGatewayQrLogin,
   onResetGatewayBinding,
   onCreateTask,
   onSelectTask,
@@ -256,9 +254,7 @@ export function ProjectDashboard({
           qrCheck={gatewayQrCheck}
           qrLogin={gatewayQrLogin}
           status={gatewayStatus}
-          onCheckQrLogin={onCheckGatewayQrLogin}
           onEnabledChange={onGatewayEnabledChange}
-          onRefresh={onRefreshGateway}
           onResetBinding={onResetGatewayBinding}
           onStartQrLogin={onStartGatewayQrLogin}
           onTranslationChange={onGatewayTranslationChange}
@@ -370,9 +366,7 @@ function getLaunchTemplateSummary(template: LaunchTemplate): string {
 
 function GatewayPanel({
   busy,
-  onCheckQrLogin,
   onEnabledChange,
-  onRefresh,
   onResetBinding,
   onStartQrLogin,
   onTranslationChange,
@@ -381,9 +375,7 @@ function GatewayPanel({
   status
 }: {
   busy?: boolean;
-  onCheckQrLogin(): void;
   onEnabledChange(enabled: boolean): void;
-  onRefresh(): Promise<void>;
   onResetBinding(): void;
   onStartQrLogin(): void;
   onTranslationChange(enabled: boolean): void;
@@ -392,42 +384,16 @@ function GatewayPanel({
   status: GatewayStatus | null;
 }) {
   const canEnable = Boolean(status?.binding.tokenConfigured);
+  const isBound = Boolean(status?.binding.tokenConfigured);
 
   return (
     <div className="gateway-panel">
-      <dl>
-        <div>
-          <dt>Status</dt>
-          <dd>{status ? `${status.enabled ? "on" : "off"}${status.running ? " / polling" : ""}` : "not loaded"}</dd>
-        </div>
-        <div>
-          <dt>Binding</dt>
-          <dd>{formatGatewayBinding(status)}</dd>
-        </div>
-        <div>
-          <dt>Project</dt>
-          <dd>{status?.currentProjectId ?? "none"}</dd>
-        </div>
-        <div>
-          <dt>Task</dt>
-          <dd>{status?.currentTaskSlug ?? "none"}</dd>
-        </div>
-        <div>
-          <dt>Last poll</dt>
-          <dd>{formatGatewayPoll(status)}</dd>
-        </div>
-        <div>
-          <dt>Last message</dt>
-          <dd>{formatGatewayMessage(status)}</dd>
-        </div>
-      </dl>
-
       <div className="gateway-actions">
         <button
           aria-pressed={Boolean(status?.enabled)}
           className={status?.enabled ? "settings-toggle is-active" : "settings-toggle"}
           disabled={busy || !status || (!status.enabled && !canEnable)}
-          title={canEnable ? "Enable or disable Weixin DM polling" : "Scan and confirm iLink login first"}
+          title={canEnable ? "Enable or disable PM messages and task-changing Gateway commands" : "Scan and confirm iLink login first"}
           type="button"
           onClick={() => status ? onEnabledChange(!status.enabled) : undefined}
         >
@@ -444,16 +410,17 @@ function GatewayPanel({
           <span>Translation</span>
           <span>{status?.translationEnabled ? "on" : "off"}</span>
         </button>
-        <button type="button" disabled={busy} onClick={onStartQrLogin}>Start QR Login</button>
-        <button type="button" disabled={busy || !qrLogin} onClick={onCheckQrLogin}>Check QR</button>
-        <button type="button" disabled={busy} onClick={() => void onRefresh()}>Refresh</button>
-        <button className="danger-button" type="button" disabled={busy || !status?.binding.tokenConfigured} onClick={onResetBinding}>
-          Reset Binding
-        </button>
+        {isBound ? (
+          <button className="danger-button" type="button" disabled={busy} onClick={onResetBinding}>
+            Reset Binding
+          </button>
+        ) : (
+          <button type="button" disabled={busy} onClick={onStartQrLogin}>Start QR Login</button>
+        )}
       </div>
 
       {qrLogin ? (
-        <p className="muted">QR login started. Use the login dialog or Check QR.</p>
+        <p className="muted">QR login started. Use the login dialog to confirm binding.</p>
       ) : null}
       {qrCheck ? (
         <p className="muted">
@@ -462,41 +429,6 @@ function GatewayPanel({
       ) : null}
     </div>
   );
-}
-
-function formatGatewayBinding(status: GatewayStatus | null): string {
-  if (!status) {
-    return "not loaded";
-  }
-  if (!status.binding.tokenConfigured) {
-    return "not logged in";
-  }
-  return status.binding.boundUserId
-    ? `bound to ${status.binding.boundUserId}`
-    : "logged in, waiting for first DM";
-}
-
-function formatGatewayPoll(status: GatewayStatus | null): string {
-  if (!status) {
-    return "not loaded";
-  }
-  const checked = status.lastPollStatus.checkedAt ? ` at ${formatTime(status.lastPollStatus.checkedAt)}` : "";
-  const error = status.lastPollStatus.error ? ` · ${status.lastPollStatus.error}` : "";
-  return `${status.lastPollStatus.state}${checked}${error}`;
-}
-
-function formatGatewayMessage(status: GatewayStatus | null): string {
-  if (!status?.lastMessageStatus) {
-    return "none";
-  }
-  const message = status.lastMessageStatus;
-  const pieces = [
-    message.direction,
-    message.command,
-    message.result,
-    message.checkedAt ? formatTime(message.checkedAt) : undefined
-  ].filter(Boolean);
-  return pieces.join(" / ") || "none";
 }
 
 function ConnectedRepositoryPanel({

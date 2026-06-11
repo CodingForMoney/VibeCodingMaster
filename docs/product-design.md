@@ -670,7 +670,7 @@ Translation panel `Auto-send` is separate from task `Auto orchestration`:
 - `Auto-send` on: translate and send if there is no translation warning.
 - `Auto-send` off: translate to English draft and wait for user send.
 
-Task `Auto orchestration` is a compact selected/unselected button in the role console toolbar. `Translate` is a global task header toggle next to `Close Task`; it opens/closes the translation split for all role consoles, so switching roles keeps the same translation setting.
+Task `Auto orchestration` is a compact selected/unselected button in the role console toolbar. New tasks default to auto orchestration. `Translate` is a global task header toggle next to `Close Task`; it opens/closes the translation split for all role consoles, so switching roles keeps the same translation setting.
 
 ## 14. Mobile Gateway
 
@@ -683,6 +683,12 @@ Gateway product rules:
 - Binding is not tied to one project or one task.
 - The bound phone can select among the projects and tasks available to the
   desktop VCM instance.
+- After QR binding succeeds, VCM keeps a Gateway long-polling connection even
+  when Gateway is off; only `/help`, `/start`, `/status`, `/projects`, and
+  `/tasks` are accepted in that state. `/start` turns Gateway on from Weixin.
+- VCM caches the latest PM reply per task locally. When `/start` turns Gateway
+  on and the current task has a cached PM reply, the response includes that
+  latest PM reply so the mobile user can resume with context.
 - Plain mobile text is sent only to the current task's `project-manager`.
 - Gateway never sends directly to `architect`, `coder`, or `reviewer`.
 - Gateway can push PM assistant replies to Weixin whenever gateway is enabled,
@@ -690,6 +696,9 @@ Gateway product rules:
 - When gateway translation is enabled, mobile Chinese input is translated to
   English before PM receives it, and PM English replies are translated to
   Chinese before Weixin receives them.
+- If PM reply translation fails or times out, Gateway sends a translation
+  failure notice instead of the English source. The bound phone can send
+  `/retry` to retry the latest failed output translation kept in memory.
 - The PM prompt does not include the original Chinese text.
 - There is no multi-user allowlist. The security model is one bound DM identity.
 

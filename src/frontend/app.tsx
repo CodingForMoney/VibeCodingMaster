@@ -465,16 +465,6 @@ export function App() {
               await loadGatewayStatus();
             });
           }}
-          onCheckGatewayQrLogin={() => {
-            void withBusy(async () => {
-              const result = await apiClient.checkGatewayQrLogin();
-              setGatewayQrCheck(result);
-              if (result.status === "confirmed" || result.status === "binded_redirect") {
-                setGatewayQrModalOpen(false);
-              }
-              await loadGatewayStatus();
-            });
-          }}
           onResetGatewayBinding={() => {
             void withBusy(async () => {
               const nextStatus = await apiClient.resetGatewayBinding();
@@ -728,7 +718,7 @@ function GatewayQrLoginModal({
         <header>
           <div>
             <h2 id="gateway-qr-title">Weixin Gateway Login</h2>
-            <p className="muted">Scan with Weixin, confirm on the phone, then check the result.</p>
+            <p className="muted">Scan with Weixin, confirm on the phone, then click Confirm.</p>
           </div>
           <button type="button" onClick={onClose}>Close</button>
         </header>
@@ -762,8 +752,7 @@ function GatewayQrLoginModal({
         </div>
 
         <footer>
-          <button type="button" disabled={busy} onClick={onCheck}>Check QR</button>
-          <button type="button" onClick={onClose}>Done</button>
+          <button type="button" disabled={busy} onClick={onCheck}>Confirm</button>
         </footer>
       </section>
     </div>

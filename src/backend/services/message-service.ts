@@ -95,7 +95,7 @@ export function createMessageService(deps: MessageServiceDeps): MessageService {
     if (!(await deps.fs.pathExists(statePath))) {
       return {
         taskSlug: input.taskSlug,
-        mode: "manual",
+        mode: "auto",
         updatedAt: now()
       };
     }

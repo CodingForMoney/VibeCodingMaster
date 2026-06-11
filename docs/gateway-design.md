@@ -29,6 +29,12 @@ Product rules:
 - When the desktop UI has a current task selected, Gateway should adopt that
   project/task context automatically instead of requiring `/tasks` and
   `/use-task` first.
+- After QR binding succeeds, VCM keeps a long-polling Gateway connection even
+  when Gateway is disabled. Disabled Gateway accepts only `/help`, `/start`,
+  `/status`, `/projects`, and `/tasks`.
+- VCM stores the latest PM reply for each task in local Gateway state. When
+  `/start` enables Gateway and the current task has a cached PM reply, Gateway
+  returns that reply immediately so the phone user sees the current task state.
 - When Gateway is enabled, browser Flow pause alert should be forced off because
   Weixin becomes the notification path and browser modal alerts can block the
   workflow.
@@ -45,7 +51,9 @@ The short product sentence is:
 One phone DM binds to one desktop VCM; the phone can select project/task context,
 pull the connected base repository, create and initialize a task through the
 saved launch template, send ordinary messages to the current task's PM, receive
-translated PM replies, and close completed tasks while gateway is enabled.
+translated PM replies, and close completed tasks while gateway is enabled; when
+gateway is disabled, the bound phone can still run `/start` and read-only status
+commands.
 ```
 
 ## Binding Model
@@ -86,8 +94,9 @@ translation enabled/disabled
 saved launch template
 ```
 
-Plain text messages are sent to the PM session of the current task. If no
-project or task is selected, gateway replies with a short setup hint.
+Plain text messages are sent to the PM session of the current task only when
+Gateway is enabled. If no project or task is selected, gateway replies with a
+short setup hint.
 
 VCM normally runs one project and one task at a time. When Gateway is enabled,
 or when `/status` is called, VCM should refresh Gateway context from the
@@ -102,6 +111,8 @@ MVP commands:
 
 ```text
 /help
+/start
+/retry
 /status
 /projects
 /use-project <index-or-path>
@@ -116,7 +127,30 @@ MVP commands:
 ```
 
 Plain text that does not start with `/` is treated as a PM message for the
-current task.
+current task only when Gateway is enabled.
+
+When Gateway is disabled but still bound, only this subset is accepted:
+
+```text
+/help
+/start
+/status
+/projects
+/tasks
+```
+
+`/start` enables Gateway from the bound Weixin DM. If there is a current task
+and VCM has cached a latest PM reply for that task, `/start` includes that reply
+in the command response. All plain text, task-changing commands,
+project-changing commands, translation toggles, and repository pull commands
+require Gateway to be enabled.
+
+When Gateway output translation is enabled, PM replies are translated before
+being sent to Weixin. If translation fails or times out, Gateway sends a
+translation failure notice instead of the English source. The latest failed
+output translation is kept in memory only, and `/retry` retries that source
+content. Successful retry clears the memory item; failed retry keeps it for a
+later `/retry`.
 
 Task lifecycle commands:
 
@@ -621,8 +655,8 @@ Validation:
 
 ### Phase 3: Inbound Context Commands
 
-- Implement `/help`, `/status`, `/projects`, `/use-project`, `/tasks`,
-  `/use-task`, `/translate on`, and `/translate off`.
+- Implement `/help`, `/start`, `/retry`, `/status`, `/projects`,
+  `/use-project`, `/tasks`, `/use-task`, `/translate on`, and `/translate off`.
 - Implement bound identity check.
 - Implement persistent inbound message dedupe.
 - Reply with short command results through iLink.

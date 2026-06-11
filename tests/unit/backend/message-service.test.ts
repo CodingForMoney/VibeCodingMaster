@@ -10,8 +10,21 @@ import type { RoleSessionRecord } from "../../../src/shared/types/session.js";
 import type { TaskRecord } from "../../../src/shared/types/task.js";
 
 describe("createMessageService", () => {
+  it("defaults new task orchestration to auto mode", async () => {
+    const harness = createHarness(["coder"]);
+
+    await expect(harness.service.getOrchestrationState(harness.base)).resolves.toMatchObject({
+      taskSlug: "demo-task",
+      mode: "auto"
+    });
+  });
+
   it("keeps route-file messages pending in manual mode", async () => {
     const harness = createHarness(["coder"]);
+    await harness.service.updateOrchestrationState({
+      ...harness.base,
+      mode: "manual"
+    });
     await harness.writeRoute("project-manager-coder.md", "Implement the cleanup task.");
 
     const results = await harness.service.scanAndDispatchPendingRouteFiles(harness.base);
@@ -152,6 +165,10 @@ describe("createMessageService", () => {
 
   it("clears pending route files without mutating message history", async () => {
     const harness = createHarness(["coder"]);
+    await harness.service.updateOrchestrationState({
+      ...harness.base,
+      mode: "manual"
+    });
     await harness.writeRoute("project-manager-coder.md", "Manual recovery message.");
     await harness.service.scanAndDispatchPendingRouteFiles(harness.base);
 

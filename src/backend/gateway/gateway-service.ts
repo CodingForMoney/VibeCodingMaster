@@ -32,7 +32,11 @@ import type {
   WeixinIlinkChannel,
   WeixinIlinkUpdate
 } from "./channels/weixin-ilink-channel.js";
-import type { GatewaySettingsFile, GatewaySettingsService } from "./gateway-settings-service.js";
+import type {
+  GatewayLatestPmReply,
+  GatewaySettingsFile,
+  GatewaySettingsService
+} from "./gateway-settings-service.js";
 
 export interface GatewayService {
   start(): Promise<void>;
@@ -63,7 +67,7 @@ export interface GatewayServiceDeps {
   translationService: Pick<TranslationService, "translateUserInput" | "translateGatewayOutput" | "stopTask">;
   roundService: Pick<RoundService, "stopTask">;
   runtime: Pick<TerminalRuntime, "write">;
-  appSettings: Pick<AppSettingsService, "getPreferences">;
+  appSettings: Pick<AppSettingsService, "getPreferences" | "updatePreferences">;
   now?: () => string;
 }
 
@@ -80,6 +84,29 @@ interface TranscriptTextEvent {
   text: string;
 }
 
+interface LatestPmReplyCandidate {
+  transcriptEventId: string | null;
+  transcriptTimestamp: string | null;
+  text: string;
+  truncated: boolean;
+}
+
+interface LastFailedGatewayTranslation {
+  repoRoot: string;
+  taskSlug: string;
+  role: "project-manager";
+  sourceText: string;
+  failedAt: string;
+  error: string;
+  retryCount: number;
+}
+
+interface GatewayOutputRenderResult {
+  text: string;
+  translationFailed: boolean;
+  translationError?: string;
+}
+
 const DEFAULT_BASE_URL = "https://ilinkai.weixin.qq.com";
 const QR_LOGIN_TTL_MS = 8 * 60 * 1000;
 const CLOSE_CONFIRM_TTL_MS = 10 * 60 * 1000;
@@ -87,12 +114,22 @@ const POLL_ERROR_BACKOFF_MS = 2_000;
 const POLL_LONG_BACKOFF_MS = 30_000;
 const MAX_FAILURES_BEFORE_LONG_BACKOFF = 3;
 const DEFAULT_POLL_TIMEOUT_MS = 35_000;
+const MAX_LATEST_PM_REPLY_CHARS = 8_000;
+const GATEWAY_TRANSLATION_FAILURE_TEXT = "PM 回复已收到，但翻译失败。\n发送 /retry 重新翻译。";
+const COMMANDS_ALLOWED_WHEN_DISABLED = new Set<GatewayCommand["kind"]>([
+  "help",
+  "start",
+  "status",
+  "projects",
+  "tasks"
+]);
 
 export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
   const now = deps.now ?? (() => new Date().toISOString());
   let pollAbort: AbortController | null = null;
   let pollLoopPromise: Promise<void> | null = null;
   let qrLogin: QrLoginState | null = null;
+  let lastFailedTranslation: LastFailedGatewayTranslation | null = null;
 
   function isRunning(): boolean {
     return Boolean(pollAbort && !pollAbort.signal.aborted);
@@ -100,7 +137,7 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
 
   async function ensurePolling(): Promise<void> {
     const settings = await deps.settings.loadSettings();
-    if (!settings.enabled || !settings.binding.token || isRunning()) {
+    if (!settings.binding.token || isRunning()) {
       return;
     }
     pollAbort = new AbortController();
@@ -137,7 +174,7 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
     while (!signal.aborted) {
       const settings = await deps.settings.loadSettings();
       const account = toAccount(settings);
-      if (!settings.enabled || !account) {
+      if (!account) {
         await savePollStatus("idle");
         return;
       }
@@ -182,6 +219,13 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
         await deps.settings.saveSettings({
           ...settingsAfterError,
           enabled: expired ? false : settingsAfterError.enabled,
+          binding: expired
+            ? {
+                ...settingsAfterError.binding,
+                token: null,
+                getUpdatesBuf: ""
+              }
+            : settingsAfterError.binding,
           lastPollStatus: {
             state: expired ? "expired" : "error",
             checkedAt: now(),
@@ -257,7 +301,7 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
 
     const command = parseGatewayCommand(update.text);
     try {
-      const output = await executeCommand(command);
+      const output = await executeCommand(command, settings);
       await reply(await deps.settings.loadSettings(), update.fromUserId, output);
       await recordMessageStatus("inbound", "ok", update.text, undefined, command.kind);
       await deps.audit.record({
@@ -284,10 +328,22 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
     }
   }
 
-  async function executeCommand(command: GatewayCommand): Promise<string> {
+  async function executeCommand(command: GatewayCommand, settings: GatewaySettingsFile): Promise<string> {
+    if (!settings.enabled && !COMMANDS_ALLOWED_WHEN_DISABLED.has(command.kind)) {
+      return [
+        "Gateway is connected but off.",
+        "Available commands while off: /help, /start, /status, /projects, /tasks.",
+        "Turn Gateway on in desktop VCM to send PM messages or run task-changing commands."
+      ].join("\n");
+    }
+
     switch (command.kind) {
       case "help":
-        return helpText();
+        return helpText(settings.enabled);
+      case "start":
+        return startGateway();
+      case "retry":
+        return retryFailedTranslation();
       case "status":
         return statusText(await deps.settings.loadSettings());
       case "projects":
@@ -578,9 +634,13 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
       deleteBranch: Boolean(task.worktreePath),
       forceDeleteBranch: true
     });
+    clearFailedTranslation(project.repoRoot, taskSlug);
+    const latestPmReplies = { ...settings.latestPmReplies };
+    delete latestPmReplies[latestPmReplyKey(project.repoRoot, taskSlug)];
     await deps.settings.saveSettings({
       ...settings,
       currentTaskSlug: null,
+      latestPmReplies,
       pendingConfirmations: {
         ...settings.pendingConfirmations,
         closeTask: null
@@ -607,6 +667,31 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
   async function setGatewayTranslation(enabled: boolean): Promise<string> {
     const settings = await deps.settings.updateSettings({ translationEnabled: enabled });
     return `Gateway translation ${settings.translationEnabled ? "on" : "off"}.`;
+  }
+
+  async function startGateway(): Promise<string> {
+    const settings = await deps.settings.loadSettings();
+    if (!settings.binding.token) {
+      return "Gateway is not bound. Start QR login from desktop VCM first.";
+    }
+    if (settings.enabled) {
+      return "Gateway is already on.";
+    }
+    const enabled = await syncDesktopContext(await deps.settings.updateSettings({ enabled: true }));
+    await ensurePolling();
+    await deps.appSettings.updatePreferences({ flowPauseAlerts: false });
+    const lines = [
+      "Gateway started.",
+      "Full mobile commands and PM messages are now enabled.",
+      `Project: ${enabled.currentProjectId ?? "none"}`,
+      `Task: ${enabled.currentTaskSlug ?? "none"}`
+    ];
+    const latestReply = getLatestPmReply(enabled);
+    if (latestReply) {
+      const rendered = await renderLatestPmReply(enabled, latestReply);
+      lines.push("", "Latest PM reply:", rendered.text);
+    }
+    return lines.join("\n");
   }
 
   async function sendPlainTextToPm(text: string): Promise<string> {
@@ -709,14 +794,16 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
       void stopPolling();
     },
     async getStatus() {
-      return deps.settings.expose(await syncDesktopContext(await deps.settings.loadSettings()), isRunning());
+      const settings = await syncDesktopContext(await deps.settings.loadSettings());
+      await ensurePolling();
+      return deps.settings.expose(settings, isRunning());
     },
     async updateSettings(input) {
       let settings = await deps.settings.updateSettings(input);
       if (settings.enabled) {
         settings = await syncDesktopContext(settings);
       }
-      if (settings.enabled) {
+      if (settings.binding.token) {
         await ensurePolling();
       } else {
         await stopPolling();
@@ -725,6 +812,7 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
     },
     async resetBinding() {
       await stopPolling();
+      lastFailedTranslation = null;
       const settings = await deps.settings.resetBinding();
       return deps.settings.expose(settings, isRunning());
     },
@@ -781,6 +869,7 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
             updatedAt: now()
           });
           qrLogin = null;
+          await ensurePolling();
         }
       }
       return {
@@ -795,6 +884,17 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
       if (input.session.role !== "project-manager") {
         return;
       }
+
+      const transcriptPath = resolveExistingClaudeTranscriptPath(input.session);
+      if (!transcriptPath) {
+        return;
+      }
+      const events = await readTranscriptTextEvents(transcriptPath);
+      const latestReply = selectLatestTurnReply(events, input.session);
+      if (latestReply) {
+        await saveLatestPmReply(input, latestReply);
+      }
+
       const settings = await deps.settings.loadSettings();
       const account = toAccount(settings);
       const boundUserId = settings.binding.boundUserId;
@@ -802,13 +902,8 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
         return;
       }
 
-      const transcriptPath = resolveExistingClaudeTranscriptPath(input.session);
-      if (!transcriptPath) {
-        return;
-      }
       const cursorKey = `${input.taskSlug}:project-manager:${input.session.claudeSessionId}`;
       const cursor = settings.pushCursors[cursorKey];
-      const events = await readTranscriptTextEvents(transcriptPath);
       const nextEvents = selectEventsAfterCursor(events, cursor?.lastTranscriptEventId);
       if (nextEvents.length === 0) {
         return;
@@ -818,25 +913,18 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
         return;
       }
 
-      let output = text;
-      if (settings.translationEnabled) {
-        try {
-          output = await deps.translationService.translateGatewayOutput({
-            repoRoot: input.repoRoot,
-            taskSlug: input.taskSlug,
-            role: "project-manager",
-            text
-          });
-        } catch {
-          output = `${text}\n\n[Translation failed; original PM reply shown.]`;
-        }
-      }
+      const output = await renderGatewayPmOutput({
+        settings,
+        repoRoot: input.repoRoot,
+        taskSlug: input.taskSlug,
+        sourceText: text
+      });
 
       await deps.channel.sendText({
         account,
         toUserId: boundUserId,
         contextToken: settings.binding.contextTokens[boundUserId],
-        text: output
+        text: output.text
       });
       const lastEvent = nextEvents.at(-1);
       const current = await deps.settings.loadSettings();
@@ -852,20 +940,145 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
         lastMessageStatus: {
           checkedAt: now(),
           direction: "outbound",
-          result: "ok",
+          result: output.translationFailed ? "error" : "ok",
           command: "pm-stop",
-          preview: output.slice(0, 160)
+          preview: output.text.slice(0, 160),
+          error: output.translationError
         },
         updatedAt: now()
       });
       await deps.audit.record({
         type: "gateway.pm_push",
-        result: "ok",
+        result: output.translationFailed ? "error" : "ok",
         command: "pm-stop",
-        preview: output
+        preview: output.text,
+        error: output.translationError
       });
     }
   };
+
+  function getLatestPmReply(settings: GatewaySettingsFile): GatewayLatestPmReply | undefined {
+    if (!settings.currentProjectId || !settings.currentTaskSlug) {
+      return undefined;
+    }
+    return settings.latestPmReplies[latestPmReplyKey(settings.currentProjectId, settings.currentTaskSlug)];
+  }
+
+  async function renderLatestPmReply(
+    settings: GatewaySettingsFile,
+    reply: GatewayLatestPmReply
+  ): Promise<GatewayOutputRenderResult> {
+    const rendered = await renderGatewayPmOutput({
+      settings,
+      repoRoot: reply.repoRoot,
+      taskSlug: reply.taskSlug,
+      sourceText: reply.text
+    });
+    return {
+      ...rendered,
+      text: reply.truncated && !rendered.translationFailed ? `${rendered.text}\n\n[truncated]` : rendered.text
+    };
+  }
+
+  async function renderGatewayPmOutput(input: {
+    settings: GatewaySettingsFile;
+    repoRoot: string;
+    taskSlug: string;
+    sourceText: string;
+  }): Promise<GatewayOutputRenderResult> {
+    if (!input.settings.translationEnabled) {
+      clearFailedTranslation(input.repoRoot, input.taskSlug);
+      return {
+        text: input.sourceText,
+        translationFailed: false
+      };
+    }
+
+    try {
+      const text = await deps.translationService.translateGatewayOutput({
+        repoRoot: input.repoRoot,
+        taskSlug: input.taskSlug,
+        role: "project-manager",
+        text: input.sourceText
+      });
+      clearFailedTranslation(input.repoRoot, input.taskSlug);
+      return {
+        text,
+        translationFailed: false
+      };
+    } catch (error) {
+      const message = errorMessage(error);
+      lastFailedTranslation = {
+        repoRoot: input.repoRoot,
+        taskSlug: input.taskSlug,
+        role: "project-manager",
+        sourceText: input.sourceText,
+        failedAt: now(),
+        error: message,
+        retryCount: 0
+      };
+      return {
+        text: GATEWAY_TRANSLATION_FAILURE_TEXT,
+        translationFailed: true,
+        translationError: message
+      };
+    }
+  }
+
+  async function retryFailedTranslation(): Promise<string> {
+    if (!lastFailedTranslation) {
+      return "没有可重试的翻译失败内容。";
+    }
+
+    const failed = lastFailedTranslation;
+    try {
+      const text = await deps.translationService.translateGatewayOutput({
+        repoRoot: failed.repoRoot,
+        taskSlug: failed.taskSlug,
+        role: failed.role,
+        text: failed.sourceText
+      });
+      lastFailedTranslation = null;
+      return `重新翻译成功：\n\n${text}`;
+    } catch (error) {
+      lastFailedTranslation = {
+        ...failed,
+        failedAt: now(),
+        error: errorMessage(error),
+        retryCount: failed.retryCount + 1
+      };
+      return "重新翻译失败。\n稍后可继续发送 /retry。";
+    }
+  }
+
+  function clearFailedTranslation(repoRoot: string, taskSlug: string): void {
+    if (lastFailedTranslation?.repoRoot === repoRoot && lastFailedTranslation.taskSlug === taskSlug) {
+      lastFailedTranslation = null;
+    }
+  }
+
+  async function saveLatestPmReply(input: GatewayPmStopInput, reply: LatestPmReplyCandidate): Promise<void> {
+    const settings = await deps.settings.loadSettings();
+    const key = latestPmReplyKey(input.repoRoot, input.taskSlug);
+    await deps.settings.saveSettings({
+      ...settings,
+      latestPmReplies: {
+        ...settings.latestPmReplies,
+        [key]: {
+          repoRoot: input.repoRoot,
+          taskSlug: input.taskSlug,
+          sessionId: input.session.id,
+          claudeSessionId: input.session.claudeSessionId,
+          transcriptEventId: reply.transcriptEventId,
+          transcriptTimestamp: reply.transcriptTimestamp,
+          capturedAt: now(),
+          text: reply.text,
+          truncated: reply.truncated
+        }
+      },
+      updatedAt: now()
+    });
+  }
 }
 
 async function readTranscriptTextEvents(transcriptPath: string): Promise<TranscriptTextEvent[]> {
@@ -902,6 +1115,62 @@ function selectEventsAfterCursor(events: TranscriptTextEvent[], cursorId: string
   return events.slice(index + 1);
 }
 
+function selectLatestTurnReply(events: TranscriptTextEvent[], session: RoleSessionRecord): LatestPmReplyCandidate | undefined {
+  if (events.length === 0) {
+    return undefined;
+  }
+
+  const startMs = timestampMs(session.lastTurnStartedAt);
+  const endMs = timestampMs(session.lastTurnEndedAt);
+  const selected = startMs === undefined
+    ? events.slice(-1)
+    : events.filter((event) => {
+        const eventMs = timestampMs(event.timestamp);
+        return eventMs !== undefined
+          && eventMs >= startMs - 1_000
+          && (endMs === undefined || eventMs <= endMs + 1_000);
+      });
+  if (selected.length === 0) {
+    return undefined;
+  }
+
+  const text = selected.map((event) => event.text).join("\n\n").trim();
+  if (!text) {
+    return undefined;
+  }
+
+  const limited = limitLatestPmReply(text);
+  const lastEvent = selected.at(-1);
+  return {
+    transcriptEventId: lastEvent?.id ?? null,
+    transcriptTimestamp: lastEvent?.timestamp ?? null,
+    text: limited.text,
+    truncated: limited.truncated
+  };
+}
+
+function latestPmReplyKey(repoRoot: string, taskSlug: string): string {
+  return JSON.stringify([repoRoot, taskSlug]);
+}
+
+function limitLatestPmReply(text: string): { text: string; truncated: boolean } {
+  if (text.length <= MAX_LATEST_PM_REPLY_CHARS) {
+    return { text, truncated: false };
+  }
+  return {
+    text: text.slice(0, MAX_LATEST_PM_REPLY_CHARS).trimEnd(),
+    truncated: true
+  };
+}
+
+function timestampMs(value: string | undefined): number | undefined {
+  if (!value) {
+    return undefined;
+  }
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : undefined;
+}
+
 function projectsText(projects: string[]): string {
   if (projects.length === 0) {
     return "No recent projects. Connect a repository from desktop VCM first.";
@@ -909,9 +1178,25 @@ function projectsText(projects: string[]): string {
   return projects.map((repoPath, index) => `${index + 1}. ${repoPath}`).join("\n");
 }
 
-function helpText(): string {
+function helpText(enabled: boolean): string {
+  if (!enabled) {
+    return [
+      "VCM Gateway is connected but off.",
+      "Available commands:",
+      "/help",
+      "/start",
+      "/status",
+      "/projects",
+      "/tasks",
+      "Send /start to enable PM messages and task-changing commands."
+    ].join("\n");
+  }
+
   return [
     "VCM Gateway commands:",
+    "/help",
+    "/start",
+    "/retry",
     "/status",
     "/projects",
     "/use-project <index-or-path>",
