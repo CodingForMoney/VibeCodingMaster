@@ -3,7 +3,7 @@ import type { FileSystemAdapter } from "../../../src/backend/adapters/filesystem
 import { createRoundService } from "../../../src/backend/services/round-service.js";
 
 describe("round-service", () => {
-  it("starts a flow round on the first UserPromptSubmit", async () => {
+  it("starts a Round on the first UserPromptSubmit", async () => {
     const fs = createMemoryFs();
     const service = createRoundService({
       fs,
@@ -21,16 +21,16 @@ describe("round-service", () => {
 
     expect(state).toMatchObject({
       taskSlug: "demo-task",
-      status: "active",
+      status: "running",
       roundId: "round_1",
       activeRole: "project-manager",
       startedAt: "2026-05-31T00:00:00.000Z",
-      lastPromptSubmittedAt: "2026-05-31T00:00:00.000Z",
-      promptSubmitCount: 1,
-      stopCount: 0,
+      lastTurnStartedAt: "2026-05-31T00:00:00.000Z",
+      turnCount: 1,
+      completedTurnCount: 0,
       totalRoundCount: 1,
-      totalPromptSubmitCount: 1,
-      totalStopCount: 0,
+      totalTurnCount: 1,
+      totalCompletedTurnCount: 0,
       totalCcActiveMs: 0,
       currentRoundCcActiveMs: 0,
       roles: ["project-manager"]
@@ -73,31 +73,34 @@ describe("round-service", () => {
     });
 
     expect(state).toMatchObject({
-      status: "active",
+      status: "running",
       roundId: "round_1",
       activeRole: "coder",
       startedAt: "2026-05-31T00:00:00.000Z",
-      lastPromptSubmittedAt: "2026-05-31T00:00:08.000Z",
-      promptSubmitCount: 2,
-      stopCount: 1,
+      lastTurnStartedAt: "2026-05-31T00:00:08.000Z",
+      turnCount: 2,
+      completedTurnCount: 1,
       totalRoundCount: 1,
-      totalPromptSubmitCount: 2,
-      totalStopCount: 1,
+      totalTurnCount: 2,
+      totalCompletedTurnCount: 1,
       totalCcActiveMs: 2000,
       currentRoundCcActiveMs: 2000,
       roles: ["project-manager", "coder"]
     });
-    expect(state.pausedAt).toBeUndefined();
+    expect(state.stoppedAt).toBeUndefined();
     expect(state.settleDeadlineAt).toBeUndefined();
   });
 
-  it("pauses the round after Stop settles for ten seconds without a new prompt", async () => {
+  it("stops the round ten seconds after Stop when no new prompt arrives", async () => {
     const fs = createMemoryFs();
+    const timers = createManualTimers();
     let currentTime = "2026-05-31T00:00:00.000Z";
     const service = createRoundService({
       fs,
       now: () => currentTime,
-      id: () => "round_1"
+      id: () => "round_1",
+      setTimeout: timers.setTimeout,
+      clearTimeout: timers.clearTimeout
     });
 
     await service.recordClaudeHookEvent({
@@ -109,7 +112,7 @@ describe("round-service", () => {
     });
 
     currentTime = "2026-05-31T00:00:02.000Z";
-    const settling = await service.recordClaudeHookEvent({
+    const stopping = await service.recordClaudeHookEvent({
       stateRepoRoot: "/repo",
       stateRoot: ".ai/vcm",
       taskSlug: "demo-task",
@@ -117,35 +120,179 @@ describe("round-service", () => {
       eventName: "Stop"
     });
 
-    expect(settling).toMatchObject({
-      status: "settling",
-      lastStopAt: "2026-05-31T00:00:02.000Z",
+    expect(stopping).toMatchObject({
+      status: "running",
+      lastTurnEndedAt: "2026-05-31T00:00:02.000Z",
       settleDeadlineAt: "2026-05-31T00:00:12.000Z",
       totalCcActiveMs: 2000,
       currentRoundCcActiveMs: 2000
     });
 
     currentTime = "2026-05-31T00:00:12.000Z";
-    const paused = await service.getTaskRoundState({
+    timers.entries[0]?.callback();
+    await flushAsyncWork();
+    const stopped = await service.getSessionRoundState({
       stateRepoRoot: "/repo",
       stateRoot: ".ai/vcm",
       taskSlug: "demo-task"
     });
 
-    expect(paused).toMatchObject({
-      status: "paused",
-      pausedAt: "2026-05-31T00:00:12.000Z",
-      promptSubmitCount: 1,
-      stopCount: 1,
+    expect(stopped).toMatchObject({
+      status: "stopped",
+      stoppedAt: "2026-05-31T00:00:12.000Z",
+      turnCount: 1,
+      completedTurnCount: 1,
       totalRoundCount: 1,
-      totalPromptSubmitCount: 1,
-      totalStopCount: 1,
+      totalTurnCount: 1,
+      totalCompletedTurnCount: 1,
       totalCcActiveMs: 2000,
       currentRoundCcActiveMs: 2000
     });
   });
 
-  it("actively pauses from the Stop timer without waiting for a round-state poll", async () => {
+  it("updates Session status only when a Round starts or stops", async () => {
+    const fs = createMemoryFs();
+    const timers = createManualTimers();
+    const statusChanges: string[] = [];
+    let currentTime = "2026-05-31T00:00:00.000Z";
+    const service = createRoundService({
+      fs,
+      now: () => currentTime,
+      id: () => "round_1",
+      setTimeout: timers.setTimeout,
+      clearTimeout: timers.clearTimeout,
+      onSessionStatusChange: async (input) => {
+        statusChanges.push(`${input.taskSlug}:${input.status}`);
+      }
+    });
+
+    await service.recordClaudeHookEvent({
+      repoRoot: "/base",
+      stateRepoRoot: "/repo",
+      stateRoot: ".ai/vcm",
+      taskSlug: "demo-task",
+      role: "project-manager",
+      eventName: "UserPromptSubmit"
+    });
+    expect(statusChanges).toEqual(["demo-task:running"]);
+
+    currentTime = "2026-05-31T00:00:02.000Z";
+    await service.recordClaudeHookEvent({
+      repoRoot: "/base",
+      stateRepoRoot: "/repo",
+      stateRoot: ".ai/vcm",
+      taskSlug: "demo-task",
+      role: "project-manager",
+      eventName: "Stop"
+    });
+    expect(statusChanges).toEqual(["demo-task:running"]);
+
+    currentTime = "2026-05-31T00:00:12.000Z";
+    timers.entries[0]?.callback();
+    await flushAsyncWork();
+
+    expect(statusChanges).toEqual(["demo-task:running", "demo-task:stopped"]);
+  });
+
+  it("continues the running round when the Stop timer guard dispatches pending work", async () => {
+    const fs = createMemoryFs();
+    const timers = createManualTimers();
+    let currentTime = "2026-05-31T00:00:00.000Z";
+    let guardCalls = 0;
+    let resolveFirstGuard!: () => void;
+    const firstGuardRan = new Promise<void>((resolve) => {
+      resolveFirstGuard = resolve;
+    });
+    const guardInputs: Array<{
+      stateRepoRoot: string;
+      stateRoot: string;
+      taskSlug: string;
+      role: string;
+      roundId: string;
+      settleDeadlineAt: string;
+    }> = [];
+    const service = createRoundService({
+      fs,
+      now: () => currentTime,
+      id: () => "round_1",
+      setTimeout: timers.setTimeout,
+      clearTimeout: timers.clearTimeout
+    });
+
+    await service.recordClaudeHookEvent({
+      stateRepoRoot: "/repo",
+      stateRoot: ".ai/vcm",
+      taskSlug: "demo-task",
+      role: "project-manager",
+      eventName: "UserPromptSubmit"
+    });
+
+    currentTime = "2026-05-31T00:00:02.000Z";
+    await service.recordClaudeHookEvent({
+      stateRepoRoot: "/repo",
+      stateRoot: ".ai/vcm",
+      taskSlug: "demo-task",
+      role: "project-manager",
+      eventName: "Stop",
+      settleGuard: async (input) => {
+        guardCalls += 1;
+        guardInputs.push(input);
+        if (guardCalls === 1) {
+          resolveFirstGuard();
+        }
+        return guardCalls === 1
+          ? { action: "continue" }
+          : { action: "stop" };
+      }
+    });
+
+    currentTime = "2026-05-31T00:00:12.000Z";
+    timers.entries[0]?.callback();
+    await firstGuardRan;
+    await flushAsyncWork();
+
+    expect(timers.entries).toHaveLength(2);
+    expect(timers.entries[1]?.delayMs).toBe(10_000);
+    expect(guardInputs[0]).toMatchObject({
+      stateRepoRoot: "/repo",
+      stateRoot: ".ai/vcm",
+      taskSlug: "demo-task",
+      role: "project-manager",
+      roundId: "round_1",
+      settleDeadlineAt: "2026-05-31T00:00:12.000Z"
+    });
+    const retried = await service.getSessionRoundState({
+      stateRepoRoot: "/repo",
+      stateRoot: ".ai/vcm",
+      taskSlug: "demo-task"
+    });
+    expect(retried).toMatchObject({
+      status: "running",
+      settleDeadlineAt: "2026-05-31T00:00:22.000Z",
+      turnCount: 1,
+      completedTurnCount: 1
+    });
+    expect(retried.stoppedAt).toBeUndefined();
+
+    currentTime = "2026-05-31T00:00:22.000Z";
+    timers.entries[1]?.callback();
+    await flushAsyncWork();
+
+    expect(guardInputs[1]).toMatchObject({
+      settleDeadlineAt: "2026-05-31T00:00:22.000Z"
+    });
+    const stopped = await service.getSessionRoundState({
+      stateRepoRoot: "/repo",
+      stateRoot: ".ai/vcm",
+      taskSlug: "demo-task"
+    });
+    expect(stopped).toMatchObject({
+      status: "stopped",
+      stoppedAt: "2026-05-31T00:00:22.000Z"
+    });
+  });
+
+  it("actively stops from the Stop timer without waiting for a round-state poll", async () => {
     const fs = createMemoryFs();
     const timers = createManualTimers();
     let currentTime = "2026-05-31T00:00:00.000Z";
@@ -183,16 +330,16 @@ describe("round-service", () => {
     const persisted = await fs.readJson<{
       currentRound: {
         status: string;
-        pausedAt: string;
+        stoppedAt: string;
       };
     }>("/repo/.ai/vcm/rounds/demo-task.json");
     expect(persisted.currentRound).toMatchObject({
-      status: "paused",
-      pausedAt: "2026-05-31T00:00:12.000Z"
+      status: "stopped",
+      stoppedAt: "2026-05-31T00:00:12.000Z"
     });
   });
 
-  it("does not pause from a stale Stop timer after the round continues", async () => {
+  it("does not stop from a stale Stop timer after the round continues", async () => {
     const fs = createMemoryFs();
     const timers = createManualTimers();
     let currentTime = "2026-05-31T00:00:00.000Z";
@@ -239,24 +386,27 @@ describe("round-service", () => {
       currentRound: {
         status: string;
         activeRole: string;
-        promptSubmitCount: number;
+        turnCount: number;
       };
     }>("/repo/.ai/vcm/rounds/demo-task.json");
     expect(persisted.currentRound).toMatchObject({
-      status: "active",
+      status: "running",
       activeRole: "coder",
-      promptSubmitCount: 2
+      turnCount: 2
     });
   });
 
-  it("starts a new round after a paused round receives a new prompt", async () => {
+  it("starts a new round after a stopped round receives a new prompt", async () => {
     const fs = createMemoryFs();
     const ids = ["round_1", "round_2"];
+    const timers = createManualTimers();
     let currentTime = "2026-05-31T00:00:00.000Z";
     const service = createRoundService({
       fs,
       now: () => currentTime,
-      id: () => ids.shift() ?? "round_fallback"
+      id: () => ids.shift() ?? "round_fallback",
+      setTimeout: timers.setTimeout,
+      clearTimeout: timers.clearTimeout
     });
 
     await service.recordClaudeHookEvent({
@@ -275,11 +425,8 @@ describe("round-service", () => {
       eventName: "Stop"
     });
     currentTime = "2026-05-31T00:00:11.000Z";
-    await service.getTaskRoundState({
-      stateRepoRoot: "/repo",
-      stateRoot: ".ai/vcm",
-      taskSlug: "demo-task"
-    });
+    timers.entries[0]?.callback();
+    await flushAsyncWork();
 
     currentTime = "2026-05-31T00:00:20.000Z";
     const next = await service.recordClaudeHookEvent({
@@ -291,15 +438,15 @@ describe("round-service", () => {
     });
 
     expect(next).toMatchObject({
-      status: "active",
+      status: "running",
       roundId: "round_2",
       activeRole: "coder",
       startedAt: "2026-05-31T00:00:20.000Z",
-      promptSubmitCount: 1,
-      stopCount: 0,
+      turnCount: 1,
+      completedTurnCount: 0,
       totalRoundCount: 2,
-      totalPromptSubmitCount: 2,
-      totalStopCount: 1,
+      totalTurnCount: 2,
+      totalCompletedTurnCount: 1,
       totalCcActiveMs: 1000,
       currentRoundCcActiveMs: 0,
       roles: ["coder"]
@@ -324,15 +471,15 @@ describe("round-service", () => {
     });
 
     currentTime = "2026-05-31T00:00:03.000Z";
-    const state = await service.getTaskRoundState({
+    const state = await service.getSessionRoundState({
       stateRepoRoot: "/repo",
       stateRoot: ".ai/vcm",
       taskSlug: "demo-task"
     });
 
     expect(state).toMatchObject({
-      status: "active",
-      runningSince: "2026-05-31T00:00:00.000Z",
+      status: "running",
+      activeTurnStartedAt: "2026-05-31T00:00:00.000Z",
       totalCcActiveMs: 3000,
       currentRoundCcActiveMs: 3000
     });
@@ -383,12 +530,12 @@ describe("round-service", () => {
     });
 
     expect(state).toMatchObject({
-      status: "settling",
-      promptSubmitCount: 2,
-      stopCount: 2,
+      status: "running",
+      turnCount: 2,
+      completedTurnCount: 2,
       totalRoundCount: 1,
-      totalPromptSubmitCount: 2,
-      totalStopCount: 2,
+      totalTurnCount: 2,
+      totalCompletedTurnCount: 2,
       totalCcActiveMs: 15000,
       currentRoundCcActiveMs: 15000
     });

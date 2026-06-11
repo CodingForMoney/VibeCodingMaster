@@ -2,26 +2,41 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import type { ClaudeHookEventName } from "../../shared/types/claude-hook.js";
 import type { RoleName } from "../../shared/types/role.js";
-import type { VcmTaskRoundState } from "../../shared/types/round.js";
+import type { VcmSessionRoundState } from "../../shared/types/round.js";
+import type { TaskStatus } from "../../shared/types/task.js";
 import type { FileSystemAdapter } from "../adapters/filesystem.js";
 
 export interface RoundService {
-  getTaskRoundState(input: TaskRoundInput): Promise<VcmTaskRoundState>;
-  recordClaudeHookEvent(input: RecordRoundHookEventInput): Promise<VcmTaskRoundState>;
+  getSessionRoundState(input: SessionRoundInput): Promise<VcmSessionRoundState>;
+  recordClaudeHookEvent(input: RecordRoundHookEventInput): Promise<VcmSessionRoundState>;
   stopSession(sessionId: string): void;
   stopTask(taskSlug: string): void;
 }
 
-export interface TaskRoundInput {
+export interface SessionRoundInput {
+  repoRoot?: string;
   stateRepoRoot: string;
   stateRoot: string;
   taskSlug: string;
 }
 
-export interface RecordRoundHookEventInput extends TaskRoundInput {
+export interface RecordRoundHookEventInput extends SessionRoundInput {
   role: RoleName;
   eventName: ClaudeHookEventName;
+  settleGuard?: RoundSettleGuard;
 }
+
+export interface RoundSettleGuardInput extends SessionRoundInput {
+  role: RoleName;
+  roundId: string;
+  settleDeadlineAt: string;
+}
+
+export type RoundSettleGuardResult =
+  | { action: "stop" }
+  | { action: "continue"; reason?: string };
+
+export type RoundSettleGuard = (input: RoundSettleGuardInput) => Promise<RoundSettleGuardResult>;
 
 export interface RoundServiceDeps {
   fs: FileSystemAdapter;
@@ -30,16 +45,21 @@ export interface RoundServiceDeps {
   settleMs?: number;
   setTimeout?: (callback: () => void, delayMs: number) => unknown;
   clearTimeout?: (timer: unknown) => void;
+  onSessionStatusChange?: (input: {
+    repoRoot: string;
+    taskSlug: string;
+    status: TaskStatus;
+  }) => Promise<void>;
 }
 
 interface PersistedRoundFile {
   version: 1;
   taskSlug: string;
   currentRound?: PersistedRound;
-  lastPausedRound?: PersistedRound;
+  lastStoppedRound?: PersistedRound;
   totalRoundCount: number;
-  totalPromptSubmitCount: number;
-  totalStopCount: number;
+  totalTurnCount: number;
+  totalCompletedTurnCount: number;
   totalCcActiveMs: number;
   updatedAt: string;
 }
@@ -47,17 +67,17 @@ interface PersistedRoundFile {
 interface PersistedRound {
   id: string;
   sequence: number;
-  status: "active" | "settling" | "paused";
+  status: "running" | "stopped";
   activeRole: RoleName;
   startedAt: string;
-  lastPromptSubmittedAt?: string;
-  lastStopAt?: string;
+  lastTurnStartedAt?: string;
+  lastTurnEndedAt?: string;
   settleDeadlineAt?: string;
-  pausedAt?: string;
-  runningSince?: string;
+  stoppedAt?: string;
+  activeTurnStartedAt?: string;
   ccActiveMs: number;
-  promptSubmitCount: number;
-  stopCount: number;
+  turnCount: number;
+  completedTurnCount: number;
   roles: RoleName[];
 }
 
@@ -74,15 +94,15 @@ export function createRoundService(deps: RoundServiceDeps): RoundService {
   const taskLocks = new Map<string, Promise<unknown>>();
   const settleTimers = new Map<string, unknown>();
 
-  async function load(input: TaskRoundInput): Promise<PersistedRoundFile> {
+  async function load(input: SessionRoundInput): Promise<PersistedRoundFile> {
     const statePath = getRoundStatePath(input);
     if (!(await deps.fs.pathExists(statePath))) {
       return {
         version: 1,
         taskSlug: input.taskSlug,
         totalRoundCount: 0,
-        totalPromptSubmitCount: 0,
-        totalStopCount: 0,
+        totalTurnCount: 0,
+        totalCompletedTurnCount: 0,
         totalCcActiveMs: 0,
         updatedAt: now()
       };
@@ -90,13 +110,28 @@ export function createRoundService(deps: RoundServiceDeps): RoundService {
     return normalizeRoundFile(await deps.fs.readJson<Partial<PersistedRoundFile>>(statePath), input.taskSlug, now());
   }
 
-  async function save(input: TaskRoundInput, state: PersistedRoundFile): Promise<void> {
+  async function save(input: SessionRoundInput, state: PersistedRoundFile): Promise<void> {
     await deps.fs.writeJsonAtomic(getRoundStatePath(input), state);
   }
 
-  async function settleIfNeeded(input: TaskRoundInput, state: PersistedRoundFile, timestamp: string): Promise<PersistedRoundFile> {
+  async function updateSessionStatus(input: SessionRoundInput, status: TaskStatus): Promise<void> {
+    if (!input.repoRoot || !deps.onSessionStatusChange) {
+      return;
+    }
+    await deps.onSessionStatusChange({
+      repoRoot: input.repoRoot,
+      taskSlug: input.taskSlug,
+      status
+    });
+  }
+
+  async function settleIfNeeded(input: SessionRoundInput, state: PersistedRoundFile, timestamp: string): Promise<PersistedRoundFile> {
     const current = state.currentRound;
-    if (current?.status !== "settling" || !current.settleDeadlineAt) {
+    if (
+      current?.status !== "running" ||
+      !current.settleDeadlineAt ||
+      current.activeTurnStartedAt
+    ) {
       return state;
     }
 
@@ -104,37 +139,68 @@ export function createRoundService(deps: RoundServiceDeps): RoundService {
       return state;
     }
 
-    const paused: PersistedRound = {
+    const stopped: PersistedRound = {
       ...current,
-      status: "paused",
-      pausedAt: current.settleDeadlineAt
+      status: "stopped",
+      stoppedAt: current.settleDeadlineAt,
+      settleDeadlineAt: undefined
     };
     const next = {
       ...state,
-      currentRound: paused,
-      lastPausedRound: paused,
+      currentRound: stopped,
+      lastStoppedRound: stopped,
       updatedAt: timestamp
     };
     await save(input, next);
+    await updateSessionStatus(input, "stopped");
     return next;
   }
 
-  async function settleIfStillCurrent(input: TaskRoundInput, roundId: string, settleDeadlineAt: string): Promise<void> {
+  async function settleIfStillCurrent(
+    input: SessionRoundInput,
+    roundId: string,
+    settleDeadlineAt: string,
+    settleGuard?: RoundSettleGuard
+  ): Promise<void> {
     await withTaskLock(input, async () => {
       const state = await load(input);
       const current = state.currentRound;
       if (
         current?.id !== roundId ||
-        current.status !== "settling" ||
-        current.settleDeadlineAt !== settleDeadlineAt
+        current.status !== "running" ||
+        current.settleDeadlineAt !== settleDeadlineAt ||
+        current.activeTurnStartedAt
       ) {
         return;
       }
-      await settleIfNeeded(input, state, settleDeadlineAt);
+      const timestamp = maxIsoTimestamp(now(), settleDeadlineAt);
+      if (settleGuard) {
+        const decision = await runSettleGuard(settleGuard, {
+          ...input,
+          role: current.activeRole,
+          roundId,
+          settleDeadlineAt
+        });
+        if (decision.action === "continue") {
+          const nextRound = {
+            ...current,
+            settleDeadlineAt: addMilliseconds(timestamp, settleMs)
+          };
+          const next = {
+            ...state,
+            currentRound: nextRound,
+            updatedAt: timestamp
+          };
+          await save(input, next);
+          scheduleSettleTimer(input, nextRound, timestamp, settleGuard);
+          return;
+        }
+      }
+      await settleIfNeeded(input, state, timestamp);
     });
   }
 
-  function clearSettleTimer(input: TaskRoundInput): void {
+  function clearSettleTimer(input: SessionRoundInput): void {
     const key = getRoundStatePath(input);
     const timer = settleTimers.get(key);
     if (timer === undefined) {
@@ -154,8 +220,17 @@ export function createRoundService(deps: RoundServiceDeps): RoundService {
     }
   }
 
-  function scheduleSettleTimer(input: TaskRoundInput, round: PersistedRound, timestamp: string): void {
-    if (round.status !== "settling" || !round.settleDeadlineAt) {
+  function scheduleSettleTimer(
+    input: SessionRoundInput,
+    round: PersistedRound,
+    timestamp: string,
+    settleGuard?: RoundSettleGuard
+  ): void {
+    if (
+      round.status !== "running" ||
+      !round.settleDeadlineAt ||
+      round.activeTurnStartedAt
+    ) {
       clearSettleTimer(input);
       return;
     }
@@ -164,12 +239,12 @@ export function createRoundService(deps: RoundServiceDeps): RoundService {
     const delayMs = Math.max(0, new Date(round.settleDeadlineAt).getTime() - new Date(timestamp).getTime());
     const timer = setTimer(() => {
       settleTimers.delete(getRoundStatePath(input));
-      void settleIfStillCurrent(input, round.id, round.settleDeadlineAt ?? "").catch(() => undefined);
+      void settleIfStillCurrent(input, round.id, round.settleDeadlineAt ?? "", settleGuard).catch(() => undefined);
     }, delayMs);
     settleTimers.set(getRoundStatePath(input), timer);
   }
 
-  async function withTaskLock<T>(input: TaskRoundInput, run: () => Promise<T>): Promise<T> {
+  async function withTaskLock<T>(input: SessionRoundInput, run: () => Promise<T>): Promise<T> {
     const key = getRoundStatePath(input);
     const previous = taskLocks.get(key) ?? Promise.resolve();
     const next = previous.catch(() => undefined).then(run);
@@ -184,11 +259,10 @@ export function createRoundService(deps: RoundServiceDeps): RoundService {
   }
 
   return {
-    async getTaskRoundState(input) {
+    async getSessionRoundState(input) {
       return withTaskLock(input, async () => {
         const timestamp = now();
-        const state = await settleIfNeeded(input, await load(input), timestamp);
-        return toTaskRoundState(state, timestamp);
+        return toSessionRoundState(await load(input), timestamp);
       });
     },
     async recordClaudeHookEvent(input) {
@@ -196,7 +270,7 @@ export function createRoundService(deps: RoundServiceDeps): RoundService {
         const timestamp = now();
         const settled = await settleIfNeeded(input, await load(input), timestamp);
         const current = settled.currentRound;
-        const shouldStartNewRound = input.eventName === "UserPromptSubmit" && (!current || current.status === "paused");
+        const shouldStartNewRound = input.eventName === "UserPromptSubmit" && (!current || current.status === "stopped");
         const next = applyRoundHookEvent({
           state: settled,
           taskSlug: input.taskSlug,
@@ -209,10 +283,11 @@ export function createRoundService(deps: RoundServiceDeps): RoundService {
         await save(input, next);
         if (input.eventName === "UserPromptSubmit") {
           clearSettleTimer(input);
+          await updateSessionStatus(input, "running");
         } else if (next.currentRound) {
-          scheduleSettleTimer(input, next.currentRound, timestamp);
+          scheduleSettleTimer(input, next.currentRound, timestamp, input.settleGuard);
         }
-        return toTaskRoundState(next, timestamp);
+        return toSessionRoundState(next, timestamp);
       });
     },
     stopSession() {},
@@ -245,7 +320,7 @@ function applyPromptSubmitted(input: {
   roundId: string;
 }): PersistedRoundFile {
   const current = input.state.currentRound;
-  const shouldStartNewRound = !current || current.status === "paused";
+  const shouldStartNewRound = !current || current.status === "stopped";
   const totalRoundCount = shouldStartNewRound
     ? input.state.totalRoundCount + 1
     : input.state.totalRoundCount;
@@ -253,25 +328,25 @@ function applyPromptSubmitted(input: {
     ? {
         id: input.roundId,
         sequence: totalRoundCount,
-        status: "active",
+        status: "running",
         activeRole: input.role,
         startedAt: input.timestamp,
-        lastPromptSubmittedAt: input.timestamp,
-        runningSince: input.timestamp,
+        lastTurnStartedAt: input.timestamp,
+        activeTurnStartedAt: input.timestamp,
         ccActiveMs: 0,
-        promptSubmitCount: 1,
-        stopCount: 0,
+        turnCount: 1,
+        completedTurnCount: 0,
         roles: [input.role]
       }
     : {
         ...current,
-        status: "active",
+        status: "running",
         activeRole: input.role,
-        lastPromptSubmittedAt: input.timestamp,
+        lastTurnStartedAt: input.timestamp,
         settleDeadlineAt: undefined,
-        pausedAt: undefined,
-        runningSince: current.runningSince ?? input.timestamp,
-        promptSubmitCount: current.promptSubmitCount + 1,
+        stoppedAt: undefined,
+        activeTurnStartedAt: current.activeTurnStartedAt ?? input.timestamp,
+        turnCount: current.turnCount + 1,
         roles: appendUniqueRole(current.roles, input.role)
       };
 
@@ -280,8 +355,8 @@ function applyPromptSubmitted(input: {
     taskSlug: input.taskSlug,
     currentRound: nextRound,
     totalRoundCount,
-    totalPromptSubmitCount: input.state.totalPromptSubmitCount + 1,
-    totalStopCount: input.state.totalStopCount,
+    totalTurnCount: input.state.totalTurnCount + 1,
+    totalCompletedTurnCount: input.state.totalCompletedTurnCount,
     totalCcActiveMs: input.state.totalCcActiveMs,
     updatedAt: input.timestamp
   };
@@ -296,7 +371,7 @@ function applyStop(input: {
   settleMs: number;
 }): PersistedRoundFile {
   const current = input.state.currentRound;
-  if (!current || current.status === "paused") {
+  if (!current || current.status === "stopped" || !current.activeTurnStartedAt) {
     return {
       ...input.state,
       taskSlug: input.taskSlug,
@@ -304,18 +379,18 @@ function applyStop(input: {
     };
   }
 
-  const activeDurationMs = current.runningSince
-    ? getDurationMs(current.runningSince, input.timestamp)
+  const activeDurationMs = current.activeTurnStartedAt
+    ? getDurationMs(current.activeTurnStartedAt, input.timestamp)
     : 0;
   const nextRound: PersistedRound = {
     ...current,
-    status: "settling",
+    status: "running",
     activeRole: input.role,
-    lastStopAt: input.timestamp,
+    lastTurnEndedAt: input.timestamp,
     settleDeadlineAt: addMilliseconds(input.timestamp, input.settleMs),
-    runningSince: undefined,
+    activeTurnStartedAt: undefined,
     ccActiveMs: current.ccActiveMs + activeDurationMs,
-    stopCount: current.stopCount + 1,
+    completedTurnCount: current.completedTurnCount + 1,
     roles: appendUniqueRole(current.roles, input.role)
   };
 
@@ -323,23 +398,23 @@ function applyStop(input: {
     ...input.state,
     taskSlug: input.taskSlug,
     currentRound: nextRound,
-    totalStopCount: input.state.totalStopCount + 1,
+    totalCompletedTurnCount: input.state.totalCompletedTurnCount + 1,
     totalCcActiveMs: input.state.totalCcActiveMs + activeDurationMs,
     updatedAt: input.timestamp
   };
 }
 
-function toTaskRoundState(state: PersistedRoundFile, updatedAt: string): VcmTaskRoundState {
+function toSessionRoundState(state: PersistedRoundFile, updatedAt: string): VcmSessionRoundState {
   const current = state.currentRound;
   if (!current) {
     return {
       taskSlug: state.taskSlug,
-      status: "idle",
-      promptSubmitCount: 0,
-      stopCount: 0,
+      status: "stopped",
+      turnCount: 0,
+      completedTurnCount: 0,
       totalRoundCount: state.totalRoundCount,
-      totalPromptSubmitCount: state.totalPromptSubmitCount,
-      totalStopCount: state.totalStopCount,
+      totalTurnCount: state.totalTurnCount,
+      totalCompletedTurnCount: state.totalCompletedTurnCount,
       totalCcActiveMs: state.totalCcActiveMs,
       currentRoundCcActiveMs: 0,
       roles: [],
@@ -347,8 +422,8 @@ function toTaskRoundState(state: PersistedRoundFile, updatedAt: string): VcmTask
     };
   }
 
-  const activeDurationMs = current.runningSince
-    ? getDurationMs(current.runningSince, updatedAt)
+  const activeDurationMs = current.activeTurnStartedAt
+    ? getDurationMs(current.activeTurnStartedAt, updatedAt)
     : 0;
   const currentRoundCcActiveMs = current.ccActiveMs + activeDurationMs;
 
@@ -358,17 +433,17 @@ function toTaskRoundState(state: PersistedRoundFile, updatedAt: string): VcmTask
     roundId: current.id,
     activeRole: current.activeRole,
     startedAt: current.startedAt,
-    lastPromptSubmittedAt: current.lastPromptSubmittedAt,
-    lastStopAt: current.lastStopAt,
+    lastTurnStartedAt: current.lastTurnStartedAt,
+    lastTurnEndedAt: current.lastTurnEndedAt,
     settleDeadlineAt: current.settleDeadlineAt,
-    pausedAt: current.pausedAt,
-    runningSince: current.runningSince,
+    stoppedAt: current.stoppedAt,
+    activeTurnStartedAt: current.activeTurnStartedAt,
     roundSequence: current.sequence,
-    promptSubmitCount: current.promptSubmitCount,
-    stopCount: current.stopCount,
+    turnCount: current.turnCount,
+    completedTurnCount: current.completedTurnCount,
     totalRoundCount: state.totalRoundCount,
-    totalPromptSubmitCount: state.totalPromptSubmitCount,
-    totalStopCount: state.totalStopCount,
+    totalTurnCount: state.totalTurnCount,
+    totalCompletedTurnCount: state.totalCompletedTurnCount,
     totalCcActiveMs: state.totalCcActiveMs + activeDurationMs,
     currentRoundCcActiveMs,
     roles: current.roles,
@@ -377,14 +452,19 @@ function toTaskRoundState(state: PersistedRoundFile, updatedAt: string): VcmTask
 }
 
 function normalizeRoundFile(input: Partial<PersistedRoundFile>, taskSlug: string, updatedAt: string): PersistedRoundFile {
+  const legacy = input as Partial<PersistedRoundFile> & {
+    lastPausedRound?: PersistedRound;
+    totalPromptSubmitCount?: unknown;
+    totalStopCount?: unknown;
+  };
   return {
     version: 1,
     taskSlug,
     currentRound: normalizeRound(input.currentRound),
-    lastPausedRound: normalizeRound(input.lastPausedRound),
+    lastStoppedRound: normalizeRound(input.lastStoppedRound ?? legacy.lastPausedRound),
     totalRoundCount: normalizeNumber(input.totalRoundCount),
-    totalPromptSubmitCount: normalizeNumber(input.totalPromptSubmitCount),
-    totalStopCount: normalizeNumber(input.totalStopCount),
+    totalTurnCount: normalizeNumber(input.totalTurnCount ?? legacy.totalPromptSubmitCount),
+    totalCompletedTurnCount: normalizeNumber(input.totalCompletedTurnCount ?? legacy.totalStopCount),
     totalCcActiveMs: normalizeNumber(input.totalCcActiveMs),
     updatedAt: typeof input.updatedAt === "string" ? input.updatedAt : updatedAt
   };
@@ -394,25 +474,60 @@ function normalizeRound(input: PersistedRound | undefined): PersistedRound | und
   if (!input || typeof input.id !== "string") {
     return undefined;
   }
-  if (input.status !== "active" && input.status !== "settling" && input.status !== "paused") {
+  const status = normalizeRoundStatus(input.status);
+  if (!status) {
     return undefined;
   }
+  const legacy = input as PersistedRound & {
+    lastPromptSubmittedAt?: unknown;
+    lastStopAt?: unknown;
+    pausedAt?: unknown;
+    runningSince?: unknown;
+    promptSubmitCount?: unknown;
+    stopCount?: unknown;
+  };
   return {
     id: input.id,
     sequence: Number.isFinite(input.sequence) ? input.sequence : 1,
-    status: input.status,
+    status,
     activeRole: input.activeRole,
     startedAt: input.startedAt,
-    lastPromptSubmittedAt: input.lastPromptSubmittedAt,
-    lastStopAt: input.lastStopAt,
+    lastTurnStartedAt: typeof input.lastTurnStartedAt === "string"
+      ? input.lastTurnStartedAt
+      : typeof legacy.lastPromptSubmittedAt === "string"
+        ? legacy.lastPromptSubmittedAt
+        : undefined,
+    lastTurnEndedAt: typeof input.lastTurnEndedAt === "string"
+      ? input.lastTurnEndedAt
+      : typeof legacy.lastStopAt === "string"
+        ? legacy.lastStopAt
+        : undefined,
     settleDeadlineAt: input.settleDeadlineAt,
-    pausedAt: input.pausedAt,
-    runningSince: input.runningSince,
+    stoppedAt: typeof input.stoppedAt === "string"
+      ? input.stoppedAt
+      : typeof legacy.pausedAt === "string"
+        ? legacy.pausedAt
+        : undefined,
+    activeTurnStartedAt: typeof input.activeTurnStartedAt === "string"
+      ? input.activeTurnStartedAt
+      : typeof legacy.runningSince === "string"
+        ? legacy.runningSince
+        : undefined,
     ccActiveMs: Number.isFinite(input.ccActiveMs) ? input.ccActiveMs : 0,
-    promptSubmitCount: Number.isFinite(input.promptSubmitCount) ? input.promptSubmitCount : 0,
-    stopCount: Number.isFinite(input.stopCount) ? input.stopCount : 0,
+    turnCount: normalizeNumber(input.turnCount ?? legacy.promptSubmitCount),
+    completedTurnCount: normalizeNumber(input.completedTurnCount ?? legacy.stopCount),
     roles: Array.isArray(input.roles) ? input.roles : []
   };
+}
+
+function normalizeRoundStatus(value: unknown): PersistedRound["status"] | undefined {
+  if (value === "running" || value === "active" || value === "settling") {
+    return "running";
+  }
+  if (value === "stopped" || value === "paused") {
+    return "stopped";
+  }
+  return undefined;
 }
 
 function appendUniqueRole(roles: RoleName[], role: RoleName): RoleName[] {
@@ -421,6 +536,21 @@ function appendUniqueRole(roles: RoleName[], role: RoleName): RoleName[] {
 
 function addMilliseconds(value: string, milliseconds: number): string {
   return new Date(new Date(value).getTime() + milliseconds).toISOString();
+}
+
+function maxIsoTimestamp(left: string, right: string): string {
+  return Date.parse(left) >= Date.parse(right) ? left : right;
+}
+
+async function runSettleGuard(
+  settleGuard: RoundSettleGuard,
+  input: RoundSettleGuardInput
+): Promise<RoundSettleGuardResult> {
+  try {
+    return await settleGuard(input);
+  } catch {
+    return { action: "stop" };
+  }
 }
 
 function getDurationMs(start: string, end: string): number {
@@ -436,6 +566,6 @@ function normalizeNumber(value: unknown): number {
   return typeof value === "number" && Number.isFinite(value) ? value : 0;
 }
 
-function getRoundStatePath(input: TaskRoundInput): string {
+function getRoundStatePath(input: SessionRoundInput): string {
   return path.join(input.stateRepoRoot, input.stateRoot, "rounds", `${input.taskSlug}.json`);
 }

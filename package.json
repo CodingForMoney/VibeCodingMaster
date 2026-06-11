@@ -1,6 +1,6 @@
 {
   "name": "vibe-coding-master",
-  "version": "0.2.4",
+  "version": "0.2.7",
   "description": "Local GUI session cockpit for Claude Code role sessions.",
   "type": "module",
   "files": [
@@ -43,6 +43,7 @@
     "execa": "^9.6.0",
     "fastify": "^5.3.3",
     "node-pty": "^1.0.0",
+    "qrcode-generator": "^2.0.4",
     "react": "^19.1.0",
     "react-dom": "^19.1.0",
     "react-markdown": "^10.1.0",

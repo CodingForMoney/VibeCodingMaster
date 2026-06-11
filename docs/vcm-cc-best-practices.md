@@ -412,10 +412,24 @@ gateway-submitted prompts, and command authorization.
 VCM 0.2 gateway should expose a conservative mobile command surface through
 Tencent iLink Bot API / Weixin DM.
 
+Gateway product rules:
+
+- support Weixin DM only, not group chat
+- bind one mobile Weixin DM identity to one desktop VCM instance
+- do not bind gateway to a single project or task
+- let the bound phone select among the projects and tasks available to that VCM
+  instance
+- send ordinary mobile text only to the current task's `project-manager`
+- do not send gateway messages directly to architect, coder, or reviewer
+- when translation is enabled, send only translated English to PM and translated
+  Chinese back to Weixin
+- do not include the original Chinese text in PM prompts
+- use one bound DM identity; do not maintain a multi-user allowlist
+
 Gateway settings and secrets live in app-local state:
 
 ```text
-~/.vcm/settings.json
+~/.vcm/gateway/settings.json
 ```
 
 Gateway audit logs live outside connected repositories:
@@ -428,9 +442,9 @@ Rules:
 
 - do not expose the full embedded terminal over Weixin
 - do not store gateway credentials in connected repositories
-- authenticate and authorize allowed Weixin users
-- confirmation-gate state-changing or destructive commands
-- audit state-changing commands
+- reject or ignore messages outside the bound DM identity
+- keep the MVP PM-only and avoid approve/reject/start/stop workflow commands
+- audit gateway state changes and message handling with secrets redacted
 - treat gateway authorization and command parsing as high-risk code
 
 ## 16. Minimum VCM Rules

@@ -14,6 +14,14 @@ export interface ProjectSummary {
   repoRoot: string;
   branch: string;
   isDirty: boolean;
+  headCommit?: string;
+  shortHeadCommit?: string;
+  upstreamBranch?: string | null;
+  ahead?: number | null;
+  behind?: number | null;
+  canPull?: boolean;
+  pullDisabledReason?: string;
+  checkedAt?: string;
   config: ProjectConfig;
   warnings: string[];
 }

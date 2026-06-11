@@ -4,6 +4,7 @@ import { ROLE_NAMES, isDispatchableRole } from "../../shared/constants.js";
 import type { ClaudeHookEventName } from "../../shared/types/claude-hook.js";
 import type { RoleName } from "../../shared/types/role.js";
 import type {
+  ClaudeModel,
   ClaudePermissionMode,
   RoleSessionRecord,
   StartRoleSessionRequest,
@@ -38,7 +39,7 @@ export interface SessionServiceDeps {
   claude: ClaudeAdapter;
   artifactService: ArtifactService;
   projectService: Pick<ProjectService, "loadConfig">;
-  taskService: Pick<TaskService, "loadTask" | "updateTaskStatus">;
+  taskService: Pick<TaskService, "loadTask">;
   apiUrl?: string;
   now?: () => string;
 }
@@ -75,6 +76,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     const paths = deps.artifactService.getHandoffPaths(taskRepoRoot, task.handoffDir);
     const persisted = await loadPersistedRoleRecord(deps.fs, taskRepoRoot, config.stateRoot, taskSlug, role);
     const permissionMode = normalizeClaudePermissionMode(input.permissionMode ?? persisted?.permissionMode);
+    const model = normalizeClaudeModel(input.model ?? persisted?.model);
     const claudeSessionId = launchMode === "resume"
       ? persisted?.claudeSessionId
       : randomUUID();
@@ -96,7 +98,8 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       config.claudeCommand,
       permissionMode,
       claudeSessionId,
-      launchMode === "resume"
+      launchMode === "resume",
+      model
     );
     const runtimeSession = await deps.runtime.createSession({
       taskSlug,
@@ -126,6 +129,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       activityStatus: "idle",
       command: startCommand.display,
       permissionMode,
+      model,
       cwd: taskRepoRoot,
       terminalBackend: "node-pty",
       pid: runtimeSession.pid,
@@ -142,7 +146,6 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
 
     deps.registry.upsert(record);
     await persistTaskSession(deps.fs, taskRepoRoot, config.stateRoot, record);
-    await deps.taskService.updateTaskStatus(repoRoot, taskSlug, "running");
     return record;
   }
 
@@ -243,8 +246,8 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
         ...current,
         activityStatus: isStop ? "idle" : "running",
         lastHookEventAt: timestamp,
-        lastStopAt: isStop ? timestamp : current.lastStopAt,
-        lastPromptSubmittedAt: isStop ? current.lastPromptSubmittedAt : timestamp,
+        lastTurnEndedAt: isStop ? timestamp : current.lastTurnEndedAt,
+        lastTurnStartedAt: isStop ? current.lastTurnStartedAt : timestamp,
         updatedAt: timestamp
       };
       deps.registry.upsert(updated);
@@ -264,7 +267,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       const updated: RoleSessionRecord = {
         ...current,
         activityStatus: "running",
-        lastPromptSubmittedAt: timestamp,
+        lastTurnStartedAt: timestamp,
         lastHookEventAt: timestamp,
         updatedAt: timestamp
       };
@@ -327,10 +330,25 @@ async function loadPersistedRoleRecord(
 
   const current = await fs.readJson<TaskSessionRecord>(sessionPath);
   const record = current.roles[role]?.record;
+  const legacy = record as (RoleSessionRecord & {
+    lastPromptSubmittedAt?: unknown;
+    lastStopAt?: unknown;
+  }) | undefined;
   return record
     ? {
         ...record,
-        permissionMode: normalizeClaudePermissionMode(record.permissionMode)
+        lastTurnStartedAt: record.lastTurnStartedAt ?? (
+          typeof legacy?.lastPromptSubmittedAt === "string"
+            ? legacy.lastPromptSubmittedAt
+            : undefined
+        ),
+        lastTurnEndedAt: record.lastTurnEndedAt ?? (
+          typeof legacy?.lastStopAt === "string"
+            ? legacy.lastStopAt
+            : undefined
+        ),
+        permissionMode: normalizeClaudePermissionMode(record.permissionMode),
+        model: normalizeClaudeModel(record.model)
       }
     : undefined;
 }
@@ -388,6 +406,20 @@ function getTaskSessionPath(repoRoot: string, stateRoot: string, taskSlug: strin
 function normalizeClaudePermissionMode(value: unknown): ClaudePermissionMode {
   if (value === "bypassPermissions" || value === "dangerously-skip-permissions") {
     return "bypassPermissions";
+  }
+  return "default";
+}
+
+function normalizeClaudeModel(value: unknown): ClaudeModel {
+  if (
+    value === "best"
+    || value === "fable"
+    || value === "opus"
+    || value === "opus[1m]"
+    || value === "claude-opus-4-8"
+    || value === "claude-opus-4-8[1m]"
+  ) {
+    return value;
   }
   return "default";
 }

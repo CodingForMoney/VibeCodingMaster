@@ -69,7 +69,9 @@ describe("createHarnessService", () => {
     expect(await fs.readText("/repo/.claude/agents/architect.md")).toContain("Read `.ai/vcm/handoffs/known-issues.md` and promote confirmed unresolved issues to `docs/known-issues.md`.");
     expect(await fs.readText("/repo/.claude/settings.json")).toContain("UserPromptSubmit");
     expect(await fs.readText("/repo/.claude/settings.json")).toContain("Stop");
+    expect(await fs.readText("/repo/.claude/settings.json")).toContain("PermissionRequest");
     expect(await fs.readText("/repo/.claude/settings.json")).toContain("/api/hooks/claude-code");
+    expect(await fs.readText("/repo/.claude/settings.json")).toContain("/api/hooks/claude-code/permission-request");
   });
 
   it("inserts VCM rules into an existing file without overwriting user content", async () => {
@@ -155,6 +157,7 @@ describe("createHarnessService", () => {
     const settings = JSON.parse(await fs.readText("/repo/.claude/settings.json"));
     expect(JSON.stringify(settings.hooks.UserPromptSubmit)).toContain("/api/hooks/claude-code");
     expect(JSON.stringify(settings.hooks.Stop)).toContain("/api/hooks/claude-code");
+    expect(JSON.stringify(settings.hooks.PermissionRequest)).toContain("/api/hooks/claude-code/permission-request");
     expect(JSON.stringify(settings.hooks.UserPromptSubmit)).not.toContain("vcmctl");
     expect(JSON.stringify(settings.hooks.Stop)).not.toContain("vcmctl");
     expect(JSON.stringify(settings.hooks.PreToolUse)).toContain("echo keep-user-hook");

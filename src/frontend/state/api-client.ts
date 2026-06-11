@@ -1,6 +1,13 @@
 import type { DispatchRoleCommandResult, TaskStatusReport } from "../../shared/types/api.js";
 import type { AppPreferences, UpdateAppPreferencesRequest } from "../../shared/types/app-settings.js";
 import type {
+  CheckGatewayQrLoginRequest,
+  CheckGatewayQrLoginResult,
+  GatewayStatus,
+  StartGatewayQrLoginResult,
+  UpdateGatewaySettingsRequest
+} from "../../shared/types/gateway.js";
+import type {
   HarnessApplyResult,
   HarnessBootstrapStatusReport,
   HarnessStatusReport,
@@ -16,7 +23,7 @@ import type {
 } from "../../shared/types/message.js";
 import type { ProjectSummary, ConnectProjectRequest } from "../../shared/types/project.js";
 import type { DispatchableRole, RoleName } from "../../shared/types/role.js";
-import type { VcmTaskRoundState } from "../../shared/types/round.js";
+import type { VcmSessionRoundState } from "../../shared/types/round.js";
 import type { RoleSessionRecord, StartRoleSessionRequest } from "../../shared/types/session.js";
 import type { CleanupTaskRequest, CleanupTaskResult, CreateTaskRequest, TaskRecord } from "../../shared/types/task.js";
 import type {
@@ -45,6 +52,11 @@ export const apiClient = {
   },
   getCurrentProject() {
     return request<ProjectSummary | null>("/api/projects/current");
+  },
+  pullCurrentProject() {
+    return request<ProjectSummary>("/api/projects/current/pull", {
+      method: "POST"
+    });
   },
   getRecentRepositoryPaths() {
     return request<string[]>("/api/projects/recent");
@@ -143,8 +155,8 @@ export const apiClient = {
       body: JSON.stringify(input)
     });
   },
-  getTaskRoundState(taskSlug: string) {
-    return request<VcmTaskRoundState>(`/api/tasks/${encodeURIComponent(taskSlug)}/round`);
+  getSessionRoundState(taskSlug: string) {
+    return request<VcmSessionRoundState>(`/api/tasks/${encodeURIComponent(taskSlug)}/round`);
   },
   getTranslationSettings() {
     return request<TranslationSettings>("/api/translation/settings");
@@ -204,6 +216,31 @@ export const apiClient = {
   },
   retryTranslationFailures(sessionId: string) {
     return request<TranslationFailuresResult>(`/api/translation/sessions/${encodeURIComponent(sessionId)}/failures/retry`, {
+      method: "POST"
+    });
+  },
+  getGatewayStatus() {
+    return request<GatewayStatus>("/api/gateway/status");
+  },
+  updateGatewaySettings(input: UpdateGatewaySettingsRequest) {
+    return request<GatewayStatus>("/api/gateway/settings", {
+      method: "PUT",
+      body: JSON.stringify(input)
+    });
+  },
+  startGatewayQrLogin() {
+    return request<StartGatewayQrLoginResult>("/api/gateway/qr/start", {
+      method: "POST"
+    });
+  },
+  checkGatewayQrLogin(input: CheckGatewayQrLoginRequest = {}) {
+    return request<CheckGatewayQrLoginResult>("/api/gateway/qr/check", {
+      method: "POST",
+      body: JSON.stringify(input)
+    });
+  },
+  resetGatewayBinding() {
+    return request<GatewayStatus>("/api/gateway/binding/reset", {
       method: "POST"
     });
   }

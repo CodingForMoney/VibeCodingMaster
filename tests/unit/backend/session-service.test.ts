@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ProjectConfig } from "../../../src/shared/types/project.js";
 import type { RoleName } from "../../../src/shared/types/role.js";
+import type { ClaudeModel } from "../../../src/shared/types/session.js";
 import type { CreateTerminalSessionInput, TerminalRuntime, TerminalSession } from "../../../src/backend/runtime/terminal-runtime.js";
 import { createSessionRegistry } from "../../../src/backend/runtime/session-registry.js";
 import { createSessionService } from "../../../src/backend/services/session-service.js";
@@ -39,7 +40,9 @@ describe("createSessionService", () => {
       "--agent",
       "architect",
       "--resume",
-      started.claudeSessionId
+      started.claudeSessionId,
+      "--model",
+      "default"
     ]);
   });
 
@@ -59,6 +62,26 @@ describe("createSessionService", () => {
       VCM_ROLE: "project-manager",
       VCM_SESSION_ID: expect.any(String)
     });
+  });
+
+  it("starts role sessions with the selected Claude model", async () => {
+    const fs = createMemoryFs();
+    const runtimeInputs: CreateTerminalSessionInput[] = [];
+    const service = createTestSessionService(fs, runtimeInputs);
+
+    const started = await service.startRoleSession("/repo", "demo-task", "coder", {
+      model: "claude-opus-4-8[1m]"
+    });
+
+    expect(started.model).toBe("claude-opus-4-8[1m]");
+    expect(runtimeInputs[0]?.args).toEqual([
+      "--agent",
+      "coder",
+      "--session-id",
+      started.claudeSessionId,
+      "--model",
+      "claude-opus-4-8[1m]"
+    ]);
   });
 
   it("starts role sessions inside the task worktree when one exists", async () => {
@@ -111,7 +134,9 @@ describe("createSessionService", () => {
       "--agent",
       "coder",
       "--session-id",
-      restarted.claudeSessionId
+      restarted.claudeSessionId,
+      "--model",
+      "default"
     ]);
     expect(secondRuntimeInputs[0]?.args).not.toContain("--resume");
   });
@@ -159,6 +184,8 @@ describe("createSessionService", () => {
       "coder",
       "--resume",
       "00000000-0000-4000-8000-000000000004",
+      "--model",
+      "default",
       "--permission-mode",
       "bypassPermissions"
     ]);
@@ -179,7 +206,7 @@ describe("createSessionService", () => {
     expect(running).toMatchObject({
       status: "running",
       activityStatus: "running",
-      lastPromptSubmittedAt: "2026-05-29T00:00:00.000Z"
+      lastTurnStartedAt: "2026-05-29T00:00:00.000Z"
     });
 
     const idle = await service.recordClaudeHookEvent("/repo", {
@@ -191,7 +218,7 @@ describe("createSessionService", () => {
     expect(idle).toMatchObject({
       status: "running",
       activityStatus: "idle",
-      lastStopAt: "2026-05-29T00:00:00.000Z"
+      lastTurnEndedAt: "2026-05-29T00:00:00.000Z"
     });
   });
 });
@@ -213,11 +240,19 @@ function createTestSessionService(
       async getVersion() {
         return "2.1.156";
       },
-      buildRoleStartCommand(role: RoleName, command = "claude", permissionMode = "default", claudeSessionId?: string, resume = false) {
+      buildRoleStartCommand(
+        role: RoleName,
+        command = "claude",
+        permissionMode = "default",
+        claudeSessionId?: string,
+        resume = false,
+        model: ClaudeModel = "default"
+      ) {
         const args = ["--agent", role];
         if (claudeSessionId) {
           args.push(resume ? "--resume" : "--session-id", claudeSessionId);
         }
+        args.push("--model", model);
         if (permissionMode === "bypassPermissions") {
           args.push("--permission-mode", "bypassPermissions");
         }

@@ -26,3 +26,12 @@ export interface ClaudeHookResult {
   dispatchedCount: number;
   acceptedMessageId?: string;
 }
+
+export interface ClaudePermissionRequestHookResult {
+  hookSpecificOutput: {
+    hookEventName: "PermissionRequest";
+    decision: {
+      behavior: "allow";
+    };
+  };
+}

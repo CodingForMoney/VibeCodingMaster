@@ -12,6 +12,9 @@ export interface GitAdapter {
   checkRepo(repoRoot: string): Promise<GitRepoCheck>;
   isRepo(repoRoot: string): Promise<boolean>;
   getCurrentBranch(repoRoot: string): Promise<string>;
+  getHeadCommit(repoRoot: string): Promise<string>;
+  getUpstreamBranch(repoRoot: string): Promise<string | null>;
+  getAheadBehind(repoRoot: string, upstreamBranch: string): Promise<GitAheadBehind>;
   isDirty(repoRoot: string): Promise<boolean>;
   getStatusPorcelain(repoRoot: string): Promise<string>;
   isIgnored(repoRoot: string, repoRelativePath: string): Promise<boolean>;
@@ -19,6 +22,17 @@ export interface GitAdapter {
   createWorktree(input: CreateGitWorktreeInput): Promise<void>;
   removeWorktree(repoRoot: string, worktreePath: string, options?: { force?: boolean }): Promise<void>;
   deleteBranch(repoRoot: string, branch: string, options?: { force?: boolean }): Promise<void>;
+  pullFastForward(repoRoot: string): Promise<GitPullResult>;
+}
+
+export interface GitAheadBehind {
+  ahead: number;
+  behind: number;
+}
+
+export interface GitPullResult {
+  stdout: string;
+  stderr: string;
 }
 
 export interface CreateGitWorktreeInput {
@@ -48,6 +62,54 @@ export function createGitAdapter(runner: CommandRunner): GitAdapter {
       }
 
       return result.stdout.trim() || "detached";
+    },
+    async getHeadCommit(repoRoot) {
+      const result = await runGit(runner, repoRoot, ["rev-parse", "HEAD"]);
+      if (result.exitCode !== 0) {
+        throw new VcmError({
+          code: "GIT_ERROR",
+          message: "Unable to read current Git commit.",
+          statusCode: 400,
+          hint: result.stderr
+        });
+      }
+
+      return result.stdout.trim();
+    },
+    async getUpstreamBranch(repoRoot) {
+      const result = await runGit(runner, repoRoot, [
+        "rev-parse",
+        "--abbrev-ref",
+        "--symbolic-full-name",
+        "@{u}"
+      ]);
+      if (result.exitCode !== 0) {
+        return null;
+      }
+
+      return result.stdout.trim() || null;
+    },
+    async getAheadBehind(repoRoot, upstreamBranch) {
+      const result = await runGit(runner, repoRoot, [
+        "rev-list",
+        "--left-right",
+        "--count",
+        `HEAD...${upstreamBranch}`
+      ]);
+      if (result.exitCode !== 0) {
+        throw new VcmError({
+          code: "GIT_ERROR",
+          message: "Unable to read Git ahead/behind status.",
+          statusCode: 400,
+          hint: result.stderr
+        });
+      }
+
+      const [aheadValue, behindValue] = result.stdout.trim().split(/\s+/).map((value) => Number.parseInt(value, 10));
+      return {
+        ahead: Number.isFinite(aheadValue) ? aheadValue : 0,
+        behind: Number.isFinite(behindValue) ? behindValue : 0
+      };
     },
     async isDirty(repoRoot) {
       return (await this.getStatusPorcelain(repoRoot)).trim().length > 0;
@@ -139,6 +201,22 @@ export function createGitAdapter(runner: CommandRunner): GitAdapter {
           hint: result.stderr
         });
       }
+    },
+    async pullFastForward(repoRoot) {
+      const result = await runGit(runner, repoRoot, ["pull", "--ff-only"]);
+      if (result.exitCode !== 0) {
+        throw new VcmError({
+          code: "GIT_PULL_FAILED",
+          message: "Unable to pull connected repository with fast-forward only.",
+          statusCode: 409,
+          hint: result.stderr || result.stdout
+        });
+      }
+
+      return {
+        stdout: result.stdout,
+        stderr: result.stderr
+      };
     }
   };
 }

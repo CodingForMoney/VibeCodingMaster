@@ -158,7 +158,7 @@ export function createTaskService(deps: TaskServiceDeps): TaskService {
       const entries = await deps.fs.readDir(tasksDir);
       const tasks: TaskRecord[] = [];
       for (const entry of entries.filter((candidate) => candidate.endsWith(".json"))) {
-        tasks.push(await deps.fs.readJson<TaskRecord>(path.join(tasksDir, entry)));
+        tasks.push(normalizeTaskRecord(await deps.fs.readJson<Partial<TaskRecord>>(path.join(tasksDir, entry))));
       }
 
       return tasks.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
@@ -175,7 +175,7 @@ export function createTaskService(deps: TaskServiceDeps): TaskService {
         });
       }
 
-      return deps.fs.readJson<TaskRecord>(taskPath);
+      return normalizeTaskRecord(await deps.fs.readJson<Partial<TaskRecord>>(taskPath));
     },
     async saveTask(repoRoot, task) {
       await deps.fs.writeJsonAtomic(getTaskPath(deps.projectService.getProjectDataRoot(repoRoot), task.taskSlug), task);
@@ -267,12 +267,43 @@ async function findActiveInlineTask(fs: FileSystemAdapter, taskStoreRoot: string
 
   const entries = await fs.readDir(tasksDir);
   for (const entry of entries.filter((candidate) => candidate.endsWith(".json"))) {
-    const task = await fs.readJson<TaskRecord>(path.join(tasksDir, entry));
+    const task = normalizeTaskRecord(await fs.readJson<Partial<TaskRecord>>(path.join(tasksDir, entry)));
     if (!task.worktreePath && task.cleanupStatus !== "cleaned") {
       return task;
     }
   }
   return undefined;
+}
+
+function normalizeTaskRecord(input: Partial<TaskRecord>): TaskRecord {
+  return {
+    version: 1,
+    taskSlug: input.taskSlug ?? "",
+    title: input.title,
+    createdAt: input.createdAt ?? "",
+    updatedAt: input.updatedAt ?? input.createdAt ?? "",
+    repoRoot: input.repoRoot ?? "",
+    worktreePath: input.worktreePath,
+    branch: input.branch ?? "",
+    handoffDir: input.handoffDir ?? ".ai/vcm/handoffs",
+    status: normalizeTaskStatus(input.status),
+    specPath: input.specPath,
+    cleanupStatus: input.cleanupStatus,
+    cleanedAt: input.cleanedAt
+  };
+}
+
+function normalizeTaskStatus(value: unknown): TaskStatus {
+  if (value === "created" || value === "running" || value === "stopped") {
+    return value;
+  }
+  if (value === undefined || value === null) {
+    return "created";
+  }
+  if (value === "planning") {
+    return "created";
+  }
+  return "stopped";
 }
 
 function getTaskStatePaths(

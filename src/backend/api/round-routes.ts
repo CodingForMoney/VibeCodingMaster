@@ -16,7 +16,7 @@ export function registerRoundRoutes(app: FastifyInstance, deps: RoundRouteDeps):
     const config = await deps.projectService.loadConfig(project.repoRoot);
     const task = await deps.taskService.loadTask(project.repoRoot, request.params.taskSlug);
     const taskRepoRoot = getTaskRuntimeRepoRoot(task);
-    return deps.roundService.getTaskRoundState({
+    return deps.roundService.getSessionRoundState({
       stateRepoRoot: taskRepoRoot,
       stateRoot: config.stateRoot,
       taskSlug: request.params.taskSlug

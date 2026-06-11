@@ -16,6 +16,7 @@ Each role runs as a real Claude Code process inside an embedded terminal. The GU
 - GUI-first task workspace.
 - Collapsible sidebar with repository connection, settings, harness status, task creation, and task list.
 - Recent repository path dropdown, stored locally with the five most recent paths.
+- Connected repository status for the base repo, including branch, upstream status, commit hash, dirty state, and fast-forward-only pull.
 - Embedded Claude Code terminals powered by `node-pty` and `xterm.js`.
 - One Claude Code session per role, with role tabs in the task header.
 - Role session recovery through persisted Claude session ids and `claude --resume`.
@@ -28,6 +29,7 @@ Each role runs as a real Claude Code process inside an embedded terminal. The GU
 - VCM-managed root rules, four role agents, repo-local VCM skills, Claude Code hooks, generated-context tools, and PR template.
 - Rust generated context for module indexing and crate-external public surface indexing.
 - Translation panel powered by an OpenAI-compatible low-cost model.
+- Mobile Gateway through Tencent iLink Bot API / Weixin DM, for talking to PM and managing tasks from Weixin.
 - Durable task state, session state, raw terminal logs, handoff artifacts, and message history.
 
 ## Requirements
@@ -156,6 +158,26 @@ project-manager
   -> project-manager final acceptance, commit, and PR
 ```
 
+## VCM Runtime Terminology
+
+VCM statistics use three nested terms:
+
+```text
+Session = n x Round = m x Turn
+```
+
+- `Session`: the whole VCM task. It aggregates all statistics for that task, from task creation until the task is closed.
+- `Round`: one user-facing VCM conversation cycle. It starts when a user prompt or VCM-delivered prompt is accepted, continues through automatic role orchestration, and normally ends when the final `project-manager` result has stopped and no next role turn starts inside the 10 second stop window.
+- `Turn`: one role-level Claude Code conversation. A turn starts when VCM or the user submits a prompt to one role session and ends when that Claude Code process emits `Stop`.
+
+Turns inside one Round are strictly sequential. VCM should finish one role Turn before starting the next role Turn in that Round.
+
+Session state is intentionally small: `created` means no Round has started yet, `running` means there is a current running Round, and `stopped` means there is no current running Round after at least one Round has stopped. Starting Claude Code role sessions does not make the VCM Session `running`.
+
+Round state is only `running` or `stopped`. After a `Stop` hook, the 10 second stop window still counts as `running`; the Round becomes `stopped` only when the timer expires without another `UserPromptSubmit`.
+
+In this terminology, `Session` is a VCM statistics term. It is different from a Claude Code role session. VCM still runs one Claude Code role session per role, but the sidebar task statistics treat the task itself as the VCM Session.
+
 ## Task Worktree Management
 
 VCM uses task-level worktree management by default:
@@ -186,15 +208,139 @@ When a task is complete, VCM provides a red `Close Task` action. Closing a task 
 The left sidebar is intentionally compact and collapsible:
 
 - `Repository Path`: path input on one row; `Recent` and `Connect` on the next row.
-- `Repository`: connected path, branch, and working tree state. `Working tree: uncommitted changes` means `git status --porcelain` is not empty.
+- `Connected Repository`: connected base repo path, branch, upstream/ahead-behind status, commit hash, working tree state, and a `Pull` button.
 - `Settings`: `Theme`, `Flow pause alert`, `Try alert`, `Messages`, and `Events`.
+- `Gateway`: Weixin iLink binding, Gateway on/off, Gateway translation, QR login, and recent Gateway status.
 - `VCM Harness`: fixed-install status, bootstrap completion checks, and the bootstrap terminal when one is running.
 - `New Task`: one `task name` input.
 - `Tasks`: task list and task status.
 
 All sidebar sections are collapsed by default. When no task is selected, `Repository Path` opens by default.
 
-When VCM is connected to an active task, the bottom of the sidebar shows a task status dock. It stays outside the collapsible groups and shows the task title, task status, start time, total elapsed time, total flow-round count, and Claude Code active runtime. If a flow round is currently active or settling, the dock also shows that round's start time and Claude Code active runtime.
+Opening `Connected Repository` refreshes the base repo status through the
+backend. VCM does not poll it continuously. The `Pull` button runs
+`git pull --ff-only` against the connected base repo only. It is disabled when
+the base repo has uncommitted changes, when the current branch has no upstream,
+or when the active task is an inline task using the base repo directly. It does
+not stash, merge, or mutate task worktrees.
+
+When VCM is connected to an active task, the bottom of the sidebar shows a task status dock. It stays outside the collapsible groups and shows the active VCM Session title, task status, start time, total elapsed time, total Round count, and Claude Code active runtime. If a Round is currently running, the dock also shows the Current Round start time, total elapsed time, Claude Code active runtime, and Turn count.
+
+## Mobile Gateway
+
+VCM Gateway lets one Weixin DM identity bind to one desktop VCM instance. It is a mobile control surface for the current desktop VCM, not a remote terminal and not a group-chat bot.
+
+Gateway rules:
+
+- DM only; group chat is not supported.
+- One phone identity binds to one desktop VCM instance.
+- The phone can manage projects and tasks available to that desktop VCM instance.
+- When the desktop UI has an active task selected, Gateway uses that task automatically.
+- Plain text messages go only to the current task's `project-manager`.
+- Gateway never sends directly to `architect`, `coder`, or `reviewer`.
+- Gateway credentials and audit logs stay in local app state, not in connected repositories.
+
+Gateway state is stored locally under:
+
+```text
+~/.vcm/gateway/settings.json
+~/.vcm/gateway/audit.jsonl
+```
+
+### Bind Weixin
+
+1. Start VCM and open the GUI.
+2. Open the sidebar `Gateway` section.
+3. Click `Start QR Login`.
+4. VCM opens a global `Weixin Gateway Login` dialog with a QR code.
+5. Scan the QR code with Weixin and confirm login on the phone.
+6. Click `Check QR` in the dialog.
+7. After binding succeeds, close the dialog and turn `Gateway` on in the sidebar.
+
+`Start QR Login` creates a new Tencent iLink QR login session. `Check QR` asks iLink whether the QR code has been scanned and confirmed. If the QR code expires, click `Start QR Login` again.
+
+The `Gateway` toggle is disabled until a QR login has produced a usable iLink token. `Reset Binding` clears the stored token and bound Weixin identity so the desktop VCM can bind again.
+
+When Gateway is turned on, VCM automatically turns off the browser `Flow pause alert` and disables `Try alert`. Gateway becomes the notification path, so the browser should not show blocking flow-pause dialogs while the user is managing the task from Weixin.
+
+### Translation
+
+The Gateway section has its own `Translation` toggle.
+
+When Gateway translation is on:
+
+- Chinese Weixin input is translated to English before being submitted to PM.
+- The prompt sent to PM includes only the translated English text with a `[VCM Gateway]` marker.
+- The original Chinese text is not included in the PM prompt.
+- PM replies are translated back to Chinese before VCM sends them to Weixin.
+
+When Gateway translation is off, plain Weixin text is sent to PM as-is.
+
+### Commands
+
+After Gateway is bound and turned on, send commands in the bound Weixin DM:
+
+```text
+/help
+/status
+/projects
+/use-project <index-or-path>
+/pull-current
+/tasks
+/use-task <index-or-task-slug>
+/create-task <task-slug> [title]
+/close-task
+/close-task confirm <task-slug>
+/translate on
+/translate off
+```
+
+Plain text that does not start with `/` is sent as a message to the current task's PM session.
+
+In normal use, VCM runs one project and one task at a time. If the desktop UI has a task selected, turning Gateway on syncs that project/task into Gateway automatically. `/status` also refreshes this context, so the phone usually does not need to run `/tasks` and `/use-task` before sending a PM message.
+
+Typical mobile flow:
+
+```text
+/projects
+/use-project 1
+/pull-current
+/create-task mobile-demo "Implement mobile gateway smoke test"
+/status
+继续推进这个任务，先让 PM 安排下一步。
+/close-task
+/close-task confirm mobile-demo
+```
+
+### Command Behavior
+
+- `/status`: shows Gateway, binding, translation, current project, current task, and last poll status.
+- `/status` also adopts the current desktop project/task when one is selected.
+- `/projects`: lists the current/recent repositories known by the desktop VCM.
+- `/use-project <index-or-path>`: selects the Gateway's current project context.
+- `/pull-current`: runs the same fast-forward-only connected repository pull as the desktop `Pull` button.
+- `/tasks`: lists tasks for the selected project.
+- `/use-task <index-or-task-slug>`: selects the Gateway's current task context.
+- `/create-task <task-slug> [title]`: creates a worktree-backed task and starts the four role sessions using the saved launch template.
+- `/close-task`: starts a destructive close confirmation for the current task.
+- `/close-task confirm <task-slug>`: closes the task through VCM cleanup after exact slug confirmation.
+- `/translate on` and `/translate off`: changes Gateway translation for mobile messages.
+
+`/pull-current` only pulls the connected base repository. It does not pull task worktrees, stash local changes, merge divergent branches, or run arbitrary shell commands.
+
+`/create-task` uses the saved launch template from the desktop settings. The template controls permission mode, model, auto orchestration, and translation defaults for the four role sessions.
+
+`/close-task` is destructive. It stops VCM-managed role sessions and removes task-owned worktree/branch state according to the same cleanup behavior as the desktop `Close Task` action.
+
+### Troubleshooting
+
+- If the QR dialog does not appear, refresh the page and click `Start QR Login` again.
+- If the QR status stays `wait`, confirm the login on the phone and click `Check QR` again.
+- If the QR code expires, start a new QR login.
+- If `Gateway` cannot be enabled, bind Weixin first.
+- If messages are not received, check that Gateway is on, the iLink token has not expired, and the Weixin DM is the bound identity.
+- If plain text cannot be sent to PM, select a project and task first, and make sure the task's PM session is running and idle.
+- If PM replies are not pushed, check that Gateway is on and the PM session is producing normal Claude transcript output.
 
 ## Translation
 
@@ -212,7 +358,9 @@ The same file stores recent repository paths. The translation API key is stored 
 
 The sidebar `Settings` section also stores the UI theme preference in this file. The default is `system`, which follows the OS/browser color-scheme preference; users can cycle between `System`, `Light`, and `Dark`.
 
-The same sidebar also has a `Flow pause alert` toggle. It is on by default and controls the local alert that fires when VCM detects that the current role flow has stopped advancing. Short flows use a weak reminder: the soft two-note chime plays 3 times, 1.4 seconds apart. Flows lasting 10 minutes or longer use a strong reminder: VCM shows an alert dialog and repeats the chime until the user confirms it. The alert sound reuses one browser audio context so repeated reminders remain reliable in stricter browsers such as Safari. Safari users may still need to manually set `Safari > Website Settings > Auto-Play > Allow All Auto-Play`; Chrome is recommended for the most reliable alert sound behavior. The `Try alert` button always triggers the strong reminder for testing.
+The same sidebar also has a `Flow pause alert` toggle. It is on by default and controls the local alert that fires when VCM detects that the current role flow has stopped advancing. Short flows use a weak reminder: the soft two-note chime plays 3 times, 1.4 seconds apart. Flows lasting 2 minutes or longer use a strong reminder: VCM shows an alert dialog and repeats the chime until the user confirms it. The alert sound reuses one browser audio context so repeated reminders remain reliable in stricter browsers such as Safari. Safari users may still need to manually set `Safari > Website Settings > Auto-Play > Allow All Auto-Play`; Chrome is recommended for the most reliable alert sound behavior. The `Try alert` button always triggers the strong reminder for testing.
+
+When Gateway is on, `Flow pause alert` is forced off because mobile notifications are delivered through Weixin and browser alerts can block normal workflow progress.
 
 Translation behavior:
 
@@ -378,13 +526,15 @@ The implementation keeps only the active manual/auto orchestration mode. It does
 
 ## Flow Pause Alerts
 
-VCM detects flow pauses from Claude Code hook events, not PTY silence, message history, or pending route files. `UserPromptSubmit` starts a new flow round when none is active, or continues the current round when it fires within the settle window.
+VCM detects flow pauses from Claude Code hook events, not PTY silence, message history, or pending route files. `UserPromptSubmit` starts a new Round when there is no current running Round, or continues the current Round when it fires within the 10 second stop window.
 
-When a `Stop` hook fires, VCM marks the round as settling for 10 seconds. If another `UserPromptSubmit` fires inside that window, the same round continues and VCM increments the prompt-submit count. If no new prompt is accepted before the deadline, VCM marks the round as `paused`.
+When a `Stop` hook fires, VCM ends the current Turn and starts a 10 second timer. During that timer, the Round is still `running`. If another `UserPromptSubmit` fires inside that window, the same Round continues and VCM increments the Turn count. If no new prompt is accepted before the deadline, VCM marks the Round as `stopped`.
 
-The normal path is timer-driven: `Stop` starts a backend settle timer, and `UserPromptSubmit` cancels it. Reading the round state also checks expired deadlines as a recovery fallback after process restarts, sleep, or missed timers.
+The normal path is timer-driven: `Stop` starts a backend timer, and `UserPromptSubmit` cancels it.
 
-When `Flow pause alert` is enabled, the frontend polls the task round state and deduplicates each paused round so the same paused state does not alert on every poll. Flow duration is measured from the first `UserPromptSubmit` to `pausedAt`, falling back to the last `Stop` when needed. If the paused flow lasted less than 10 minutes, it plays the local chime 3 times at 1.4 second intervals. If the paused flow lasted 10 minutes or longer, it shows a modal `Flow paused` alert and repeats the local chime until the user clicks `Confirm`. A pause can mean normal completion, user decision needed, dispatch failure, or another workflow interruption; the point is to get the user to look with the right amount of urgency.
+When `Flow pause alert` is enabled, the frontend polls the task Round state and deduplicates each stopped Round so the same stopped state does not alert on every poll. Flow duration is measured from the first `UserPromptSubmit` to `stoppedAt`, falling back to the last `Stop` when needed. If the flow lasted less than 2 minutes, it plays the local chime 3 times at 1.4 second intervals. If the flow lasted 2 minutes or longer, it shows a modal alert and repeats the local chime until the user clicks `Confirm`. A stopped Round can mean normal completion, user decision needed, dispatch failure, or another workflow interruption; the point is to get the user to look with the right amount of urgency.
+
+The Current Round dock separates wall-clock Round duration from Claude Code active runtime. `Total` is `now - Round.startedAt`; `CC runtime` is only the accumulated time between each Turn's `UserPromptSubmit` and `Stop`; `Turn count` is the number of accepted prompts inside the current Round.
 
 ## Resume Behavior
 

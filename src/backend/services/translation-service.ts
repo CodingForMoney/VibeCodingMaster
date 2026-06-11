@@ -57,6 +57,7 @@ export interface TranslationService {
   retryTranslation(sessionId: string, translationId: string): Promise<TranslationEntry>;
   retryFailedTranslations(sessionId: string): Promise<TranslationFailuresResult>;
   ignoreTranslationFailures(sessionId: string): Promise<TranslationFailuresResult>;
+  translateGatewayOutput(input: TranslateGatewayOutputInput): Promise<string>;
 }
 
 export interface StartTranslationSessionServiceInput {
@@ -94,6 +95,13 @@ export type TranslationEventListener = (message: TranslationWsMessage) => void;
 
 export interface StopTranslationSessionOptions {
   clearCache?: boolean;
+}
+
+export interface TranslateGatewayOutputInput {
+  repoRoot: string;
+  taskSlug: string;
+  role: RoleName;
+  text: string;
 }
 
 export interface TranslationServiceDeps {
@@ -1014,6 +1022,21 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
         publishFailures(sessionId);
       }
       return { failures: [] };
+    },
+    async translateGatewayOutput(input) {
+      const { settings, secrets } = await loadConfig();
+      const prompt = buildTranslationPrompt({
+        direction: "cc-output-to-user",
+        text: input.text,
+        settings
+      });
+      const result = await deps.provider.translate({
+        settings,
+        secrets,
+        systemPrompt: prompt.systemPrompt,
+        userPrompt: prompt.userPrompt
+      });
+      return result.text.trim();
     }
   };
 

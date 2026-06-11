@@ -19,6 +19,11 @@ import {
 import { createNodeFileSystemAdapter } from "./adapters/filesystem.js";
 import { createNodePtyTerminalRuntime } from "./runtime/node-pty-runtime.js";
 import { createOpenAiCompatibleTranslationProvider } from "./adapters/translation-provider.js";
+import { registerGatewayRoutes } from "./api/gateway-routes.js";
+import { createWeixinIlinkChannel } from "./gateway/channels/weixin-ilink-channel.js";
+import { createGatewayAuditLog } from "./gateway/gateway-audit-log.js";
+import { createGatewayService, type GatewayService } from "./gateway/gateway-service.js";
+import { createGatewaySettingsService } from "./gateway/gateway-settings-service.js";
 import { createProjectService, type ProjectService } from "./services/project-service.js";
 import { createSessionRegistry } from "./runtime/session-registry.js";
 import { createSessionService, type SessionService } from "./services/session-service.js";
@@ -61,6 +66,7 @@ export interface ServerDeps {
   roundService: RoundService;
   statusService: StatusService;
   translationService: TranslationService;
+  gatewayService: GatewayService;
   runtime: TerminalRuntime;
 }
 
@@ -122,7 +128,15 @@ export async function createServer(deps: ServerDeps, options: CreateServerOption
     taskService: deps.taskService,
     translationService: deps.translationService
   });
+  registerGatewayRoutes(app, { gatewayService: deps.gatewayService });
   registerTerminalWs(app, { runtime: deps.runtime });
+
+  app.addHook("onReady", async () => {
+    await deps.gatewayService.start();
+  });
+  app.addHook("onClose", async () => {
+    deps.gatewayService.stop();
+  });
 
   if (options.staticDir) {
     await app.register(fastifyStatic, {
@@ -203,7 +217,12 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     sessionService,
     taskService
   });
-  const roundService = createRoundService({ fs });
+  const roundService = createRoundService({
+    fs,
+    onSessionStatusChange: async ({ repoRoot, taskSlug, status }) => {
+      await taskService.updateTaskStatus(repoRoot, taskSlug, status);
+    }
+  });
   const transcripts = createClaudeTranscriptService();
   const translationService = createTranslationService({
     runtime,
@@ -215,13 +234,34 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     appSettings,
     provider: createOpenAiCompatibleTranslationProvider()
   });
+  const gatewaySettings = createGatewaySettingsService({ fs });
+  const gatewayAudit = createGatewayAuditLog({
+    fs,
+    auditPath: gatewaySettings.getAuditPath()
+  });
+  const gatewayService = createGatewayService({
+    fs,
+    settings: gatewaySettings,
+    audit: gatewayAudit,
+    channel: createWeixinIlinkChannel(),
+    projectService,
+    taskService,
+    sessionService,
+    messageService,
+    translationService,
+    roundService,
+    runtime,
+    appSettings
+  });
   const claudeHookService = createClaudeHookService({
     projectService,
     taskService,
     sessionService,
     messageService,
     roundService,
-    translationService
+    translationService,
+    appSettings,
+    gatewayService
   });
 
   return {
@@ -237,6 +277,7 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     roundService,
     statusService,
     translationService,
+    gatewayService,
     runtime
   };
 }

@@ -1,6 +1,13 @@
-import type { ClaudeHookEventName, ClaudeHookRequest, ClaudeHookResult } from "../../shared/types/claude-hook.js";
+import type {
+  ClaudeHookEventName,
+  ClaudeHookRequest,
+  ClaudeHookResult,
+  ClaudePermissionRequestHookResult
+} from "../../shared/types/claude-hook.js";
 import { isRoleName } from "../../shared/constants.js";
 import { VcmError } from "../errors.js";
+import type { GatewayService } from "../gateway/gateway-service.js";
+import type { AppSettingsService } from "./app-settings-service.js";
 import type { MessageService } from "./message-service.js";
 import type { ProjectService } from "./project-service.js";
 import type { RoundService } from "./round-service.js";
@@ -11,6 +18,7 @@ import type { TranslationService } from "./translation-service.js";
 export interface ClaudeHookService {
   handleHook(input: ClaudeHookRequest): Promise<ClaudeHookResult>;
   handleStopHook(input: ClaudeHookRequest): Promise<ClaudeHookResult>;
+  handlePermissionRequestHook(input: ClaudeHookRequest): Promise<ClaudePermissionRequestHookResult | undefined>;
 }
 
 export interface ClaudeHookServiceDeps {
@@ -20,6 +28,8 @@ export interface ClaudeHookServiceDeps {
   messageService: MessageService;
   roundService: RoundService;
   translationService: Pick<TranslationService, "recordConversationBoundary">;
+  appSettings: Pick<AppSettingsService, "getPreferences">;
+  gatewayService?: Pick<GatewayService, "handlePmStop">;
 }
 
 export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHookService {
@@ -68,6 +78,7 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
       cwd: stringOrUndefined(input.event.cwd)
     });
     await deps.roundService.recordClaudeHookEvent({
+      repoRoot: context.project.repoRoot,
       stateRepoRoot: context.taskRepoRoot,
       stateRoot: context.config.stateRoot,
       taskSlug: input.taskSlug,
@@ -82,7 +93,7 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
         role: input.role,
         sessionId: session.id,
         boundaryKind: "start",
-        occurredAt: session.lastPromptSubmittedAt ?? session.updatedAt
+        occurredAt: session.lastTurnStartedAt ?? session.updatedAt
       });
     }
     const submitted = await deps.messageService.confirmPromptSubmitted({
@@ -114,6 +125,23 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
     }
 
     const context = await getHookContext(input);
+    const scopedRouteDispatchInput = {
+      repoRoot: context.project.repoRoot,
+      taskRepoRoot: context.taskRepoRoot,
+      stateRepoRoot: context.taskRepoRoot,
+      stateRoot: context.config.stateRoot,
+      handoffDir: context.task.handoffDir,
+      taskSlug: input.taskSlug,
+      stoppedRole: input.role
+    };
+    const settleRouteDispatchInput = {
+      repoRoot: context.project.repoRoot,
+      taskRepoRoot: context.taskRepoRoot,
+      stateRepoRoot: context.taskRepoRoot,
+      stateRoot: context.config.stateRoot,
+      handoffDir: context.task.handoffDir,
+      taskSlug: input.taskSlug
+    };
 
     const session = await deps.sessionService.recordClaudeHookEvent(context.project.repoRoot, {
       taskSlug: input.taskSlug,
@@ -124,11 +152,22 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
       cwd: stringOrUndefined(input.event.cwd)
     });
     await deps.roundService.recordClaudeHookEvent({
+      repoRoot: context.project.repoRoot,
       stateRepoRoot: context.taskRepoRoot,
       stateRoot: context.config.stateRoot,
       taskSlug: input.taskSlug,
       role: input.role,
-      eventName
+      eventName,
+      settleGuard: async () => {
+        const pending = await deps.messageService.listPendingRouteFiles(settleRouteDispatchInput);
+        if (pending.length === 0) {
+          return { action: "stop" };
+        }
+        const retried = await deps.messageService.scanAndDispatchPendingRouteFiles(settleRouteDispatchInput);
+        return retried.some((result) => result.delivered)
+          ? { action: "continue", reason: "pending route message dispatched" }
+          : { action: "stop" };
+      }
     });
     if (session) {
       await deps.translationService.recordConversationBoundary({
@@ -138,19 +177,18 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
         role: input.role,
         sessionId: session.id,
         boundaryKind: "end",
-        occurredAt: session.lastStopAt ?? session.updatedAt
+        occurredAt: session.lastTurnEndedAt ?? session.updatedAt
       });
     }
+    if (session && input.role === "project-manager") {
+      void deps.gatewayService?.handlePmStop({
+        repoRoot: context.project.repoRoot,
+        taskSlug: input.taskSlug,
+        session
+      }).catch(() => undefined);
+    }
 
-    const dispatched = await deps.messageService.scanAndDispatchPendingRouteFiles({
-      repoRoot: context.project.repoRoot,
-      taskRepoRoot: context.taskRepoRoot,
-      stateRepoRoot: context.taskRepoRoot,
-      stateRoot: context.config.stateRoot,
-      handoffDir: context.task.handoffDir,
-      taskSlug: input.taskSlug,
-      stoppedRole: input.role
-    });
+    const dispatched = await deps.messageService.scanAndDispatchPendingRouteFiles(scopedRouteDispatchInput);
 
     return {
       ok: true,
@@ -162,6 +200,39 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
     };
   }
 
+  async function handlePermissionRequestHook(input: ClaudeHookRequest): Promise<ClaudePermissionRequestHookResult | undefined> {
+    if (!isRoleName(input.role)) {
+      throw new VcmError({
+        code: "HOOK_ROLE_INVALID",
+        message: `Unknown hook role: ${input.role}`,
+        statusCode: 400
+      });
+    }
+    const eventName = input.event.hook_event_name;
+    if (eventName !== "PermissionRequest") {
+      throw new VcmError({
+        code: "HOOK_EVENT_UNSUPPORTED",
+        message: `Unsupported Claude Code permission hook event: ${String(eventName)}`,
+        statusCode: 400,
+        hint: "Use this endpoint for Claude Code PermissionRequest hooks only."
+      });
+    }
+
+    const preferences = await deps.appSettings.getPreferences();
+    if (preferences.permissionRequestMode !== "allowAll") {
+      return undefined;
+    }
+
+    return {
+      hookSpecificOutput: {
+        hookEventName: "PermissionRequest",
+        decision: {
+          behavior: "allow"
+        }
+      }
+    };
+  }
+
   return {
     async handleHook(input) {
       const eventName = parseHookEvent(input.event.hook_event_name);
@@ -170,7 +241,8 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
       }
       return handleStopHook(input);
     },
-    handleStopHook
+    handleStopHook,
+    handlePermissionRequestHook
   };
 }
 

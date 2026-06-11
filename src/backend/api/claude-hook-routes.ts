@@ -14,4 +14,12 @@ export function registerClaudeHookRoutes(app: FastifyInstance, deps: ClaudeHookR
   app.post<{ Body: ClaudeHookRequest }>("/api/hooks/claude-code/stop", async (request) => {
     return deps.claudeHookService.handleStopHook(request.body);
   });
+
+  app.post<{ Body: ClaudeHookRequest }>("/api/hooks/claude-code/permission-request", async (request, reply) => {
+    const result = await deps.claudeHookService.handlePermissionRequestHook(request.body);
+    if (!result) {
+      return reply.code(204).send();
+    }
+    return result;
+  });
 }

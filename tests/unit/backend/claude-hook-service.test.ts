@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { createClaudeHookService } from "../../../src/backend/services/claude-hook-service.js";
 import type { MessageService } from "../../../src/backend/services/message-service.js";
 import type { ProjectService } from "../../../src/backend/services/project-service.js";
-import type { RoundService } from "../../../src/backend/services/round-service.js";
+import type { RoundService, RoundSettleGuard } from "../../../src/backend/services/round-service.js";
 import type { SessionService } from "../../../src/backend/services/session-service.js";
 import type { TranslationService } from "../../../src/backend/services/translation-service.js";
 import type { TaskRecord } from "../../../src/shared/types/task.js";
@@ -60,7 +60,8 @@ describe("createClaudeHookService", () => {
           calls.push(`boundary:${input.boundaryKind}:${input.role}:${input.sessionId}`);
           return undefined;
         }
-      } as Pick<TranslationService, "recordConversationBoundary">
+      } as Pick<TranslationService, "recordConversationBoundary">,
+      appSettings: createAppSettingsStub()
     });
 
     const result = await service.handleHook({
@@ -90,6 +91,7 @@ describe("createClaudeHookService", () => {
 
   it("marks Stop activity idle and scans pending route files", async () => {
     const calls: string[] = [];
+    let capturedSettleGuard: RoundSettleGuard | undefined;
     const service = createClaudeHookService({
       projectService: createProjectServiceStub(),
       taskService: createTaskServiceStub(),
@@ -113,6 +115,21 @@ describe("createClaudeHookService", () => {
         }
       } as SessionService,
       messageService: {
+        async listPendingRouteFiles(input) {
+          calls.push(`list:${input.taskSlug}:${input.handoffDir}:${input.stateRepoRoot}`);
+          return [
+            {
+              path: ".ai/vcm/handoffs/messages/coder-project-manager.md",
+              fromRole: "coder",
+              toRole: "project-manager",
+              type: "result",
+              body: "Done.",
+              artifactRefs: [],
+              exists: true,
+              pending: true
+            }
+          ];
+        },
         async scanAndDispatchPendingRouteFiles(input) {
           calls.push(`scan:${input.taskSlug}:${input.stoppedRole}:${input.handoffDir}:${input.stateRepoRoot}`);
           return [
@@ -137,6 +154,7 @@ describe("createClaudeHookService", () => {
       roundService: {
         async recordClaudeHookEvent(input) {
           calls.push(`round:${input.eventName}:${input.role}`);
+          capturedSettleGuard = input.settleGuard;
           return {} as never;
         }
       } as RoundService,
@@ -145,7 +163,8 @@ describe("createClaudeHookService", () => {
           calls.push(`boundary:${input.boundaryKind}:${input.role}:${input.sessionId}`);
           return undefined;
         }
-      } as Pick<TranslationService, "recordConversationBoundary">
+      } as Pick<TranslationService, "recordConversationBoundary">,
+      appSettings: createAppSettingsStub("allowAll")
     });
 
     const result = await service.handleStopHook({
@@ -170,8 +189,90 @@ describe("createClaudeHookService", () => {
       "boundary:end:coder:runtime_coder",
       "scan:demo-task:coder:.ai/vcm/handoffs:/repo"
     ]);
+
+    calls.length = 0;
+    const settleDecision = await capturedSettleGuard?.({
+      stateRepoRoot: "/repo",
+      stateRoot: ".ai/vcm",
+      taskSlug: "demo-task",
+      role: "coder",
+      roundId: "round_1",
+      settleDeadlineAt: "2026-06-01T00:00:10.000Z"
+    });
+    expect(settleDecision).toMatchObject({ action: "continue" });
+    expect(calls).toEqual([
+      "list:demo-task:.ai/vcm/handoffs:/repo",
+      "scan:demo-task:undefined:.ai/vcm/handoffs:/repo"
+    ]);
+  });
+
+  it("allows Claude Code PermissionRequest hooks when the setting is allow all", async () => {
+    const service = createClaudeHookService({
+      projectService: createProjectServiceStub(),
+      taskService: createTaskServiceStub(),
+      sessionService: {} as SessionService,
+      messageService: {} as MessageService,
+      roundService: {} as RoundService,
+      translationService: {} as Pick<TranslationService, "recordConversationBoundary">,
+      appSettings: createAppSettingsStub("allowAll")
+    });
+
+    await expect(service.handlePermissionRequestHook({
+      taskSlug: "demo-task",
+      role: "coder",
+      event: {
+        hook_event_name: "PermissionRequest",
+        tool_name: "Bash",
+        tool_input: {
+          command: "npm test"
+        }
+      }
+    })).resolves.toEqual({
+      hookSpecificOutput: {
+        hookEventName: "PermissionRequest",
+        decision: {
+          behavior: "allow"
+        }
+      }
+    });
+  });
+
+  it("leaves Claude Code PermissionRequest hooks untouched when the setting is off", async () => {
+    const service = createClaudeHookService({
+      projectService: createProjectServiceStub(),
+      taskService: createTaskServiceStub(),
+      sessionService: {} as SessionService,
+      messageService: {} as MessageService,
+      roundService: {} as RoundService,
+      translationService: {} as Pick<TranslationService, "recordConversationBoundary">,
+      appSettings: createAppSettingsStub("off")
+    });
+
+    await expect(service.handlePermissionRequestHook({
+      taskSlug: "demo-task",
+      role: "coder",
+      event: {
+        hook_event_name: "PermissionRequest",
+        tool_name: "Bash",
+        tool_input: {
+          command: "npm test"
+        }
+      }
+    })).resolves.toBeUndefined();
   });
 });
+
+function createAppSettingsStub(permissionRequestMode: "off" | "allowAll" = "off") {
+  return {
+    async getPreferences() {
+      return {
+        themeMode: "system",
+        flowPauseAlerts: true,
+        permissionRequestMode
+      };
+    }
+  };
+}
 
 function createProjectServiceStub(): ProjectService {
   return {

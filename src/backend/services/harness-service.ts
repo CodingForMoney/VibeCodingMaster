@@ -79,7 +79,8 @@ const MANAGED_BLOCK_PATTERN = /<!-- VCM:BEGIN(?:\s+version=(\d+))? -->[\s\S]*?<!
 const HASH_MANAGED_BLOCK_PATTERN = /# VCM:BEGIN(?:\s+version=(\d+))?\n[\s\S]*?# VCM:END/m;
 const CLAUDE_SETTINGS_PATH = ".claude/settings.json";
 const VCM_HOOK_COMMAND = `sh -c 'if [ -z "\${VCM_TASK_SLUG:-}" ] || [ -z "\${VCM_ROLE:-}" ] || [ -z "\${VCM_API_URL:-}" ]; then exit 0; fi; node -e '"'"'let s="";process.stdin.setEncoding("utf8");process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{let event={};try{event=s.trim()?JSON.parse(s):{};}catch{event={raw:s};}process.stdout.write(JSON.stringify({taskSlug:process.env.VCM_TASK_SLUG,role:process.env.VCM_ROLE,event}));});'"'"' | curl -fsS --max-time 2 -X POST "\${VCM_API_URL}/api/hooks/claude-code" -H "content-type: application/json" --data-binary @- >/dev/null || true'`;
-const VCM_HOOK_EVENTS = ["UserPromptSubmit", "Stop"] as const;
+const VCM_PERMISSION_REQUEST_HOOK_COMMAND = `sh -c 'if [ -z "\${VCM_TASK_SLUG:-}" ] || [ -z "\${VCM_ROLE:-}" ] || [ -z "\${VCM_API_URL:-}" ]; then exit 0; fi; node -e '"'"'let s="";process.stdin.setEncoding("utf8");process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{let event={};try{event=s.trim()?JSON.parse(s):{};}catch{event={raw:s};}process.stdout.write(JSON.stringify({taskSlug:process.env.VCM_TASK_SLUG,role:process.env.VCM_ROLE,event}));});'"'"' | curl -fsS --max-time 5 -X POST "\${VCM_API_URL}/api/hooks/claude-code/permission-request" -H "content-type: application/json" --data-binary @- || true'`;
+const VCM_HOOK_EVENTS = ["UserPromptSubmit", "Stop", "PermissionRequest"] as const;
 
 const HARNESS_FILES: HarnessFileDefinition[] = [
   {
@@ -507,7 +508,7 @@ async function analyzeClaudeSettingsFile(fs: FileSystemAdapter, repoRoot: string
           path: CLAUDE_SETTINGS_PATH,
           action,
           reason: exists
-            ? "Claude Code hook settings do not contain the VCM UserPromptSubmit/Stop hook bridge."
+            ? "Claude Code hook settings do not contain the VCM hook bridge."
             : "Claude Code hook settings are missing; VCM will create them."
         },
     nextContent: action === "ok" ? undefined : nextContent
@@ -545,7 +546,7 @@ function withVcmClaudeHooks(settings: Record<string, unknown>): Record<string, u
       : [];
     hooks[eventName] = [
       ...existingMatchers.filter((entry) => !isVcmHookMatcher(entry)),
-      createVcmHookMatcher()
+      createVcmHookMatcher(eventName)
     ];
   }
 
@@ -555,12 +556,12 @@ function withVcmClaudeHooks(settings: Record<string, unknown>): Record<string, u
   };
 }
 
-function createVcmHookMatcher() {
+function createVcmHookMatcher(eventName: typeof VCM_HOOK_EVENTS[number]) {
   return {
     hooks: [
       {
         type: "command",
-        command: VCM_HOOK_COMMAND,
+        command: eventName === "PermissionRequest" ? VCM_PERMISSION_REQUEST_HOOK_COMMAND : VCM_HOOK_COMMAND,
         timeout: 5
       }
     ]

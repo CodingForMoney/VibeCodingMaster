@@ -48,6 +48,23 @@ describe("apiClient", () => {
     expect(paths).toEqual(["/workspace", "/repo"]);
   });
 
+  it("pulls the connected repository with a bodyless POST", async () => {
+    const fetchMock = mockFetch({
+      branch: "main",
+      isDirty: false,
+      repoRoot: "/repo",
+      warnings: []
+    });
+
+    await apiClient.pullCurrentProject();
+
+    const init = fetchMock.mock.calls[0]?.[1];
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/projects/current/pull");
+    expect(init?.method).toBe("POST");
+    expect(init?.body).toBeUndefined();
+    expect(new Headers(init?.headers).has("content-type")).toBe(false);
+  });
+
   it("marks all messages done with a bodyless POST", async () => {
     const fetchMock = mockFetch({
       taskSlug: "demo-task",
@@ -183,6 +200,63 @@ describe("apiClient", () => {
     expect(fetchMock.mock.calls[1]?.[0]).toBe("/api/translation/sessions/session-1/failures/retry");
     expect(fetchMock.mock.calls[1]?.[1]?.method).toBe("POST");
     expect(fetchMock.mock.calls[1]?.[1]?.body).toBeUndefined();
+  });
+
+  it("calls gateway status and settings APIs", async () => {
+    const fetchMock = mockFetch({
+      version: 1,
+      enabled: true,
+      running: true,
+      channel: "weixin-ilink",
+      translationEnabled: true,
+      currentProjectId: "/repo",
+      currentTaskSlug: "gateway-demo",
+      binding: {
+        accountId: "bot",
+        baseUrl: "https://ilinkai.weixin.qq.com",
+        boundUserId: "user",
+        loginUserId: "user",
+        tokenConfigured: true
+      },
+      pendingConfirmations: {},
+      lastPollStatus: { state: "running" },
+      lastMessageStatus: null,
+      updatedAt: "2026-06-10T00:00:00.000Z"
+    });
+
+    await apiClient.getGatewayStatus();
+    await apiClient.updateGatewaySettings({ enabled: false, translationEnabled: false });
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/gateway/status");
+    expect(fetchMock.mock.calls[1]?.[0]).toBe("/api/gateway/settings");
+    expect(fetchMock.mock.calls[1]?.[1]?.method).toBe("PUT");
+    expect(JSON.parse(String(fetchMock.mock.calls[1]?.[1]?.body))).toEqual({
+      enabled: false,
+      translationEnabled: false
+    });
+  });
+
+  it("calls gateway QR and binding APIs", async () => {
+    const fetchMock = mockFetch({
+      status: "wait",
+      qrcode: "qr",
+      qrcodeUrl: "data:image/png;base64,abc",
+      expiresAt: "2026-06-10T00:08:00.000Z"
+    });
+
+    await apiClient.startGatewayQrLogin();
+    await apiClient.checkGatewayQrLogin();
+    await apiClient.resetGatewayBinding();
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/gateway/qr/start");
+    expect(fetchMock.mock.calls[0]?.[1]?.method).toBe("POST");
+    expect(fetchMock.mock.calls[0]?.[1]?.body).toBeUndefined();
+    expect(fetchMock.mock.calls[1]?.[0]).toBe("/api/gateway/qr/check");
+    expect(fetchMock.mock.calls[1]?.[1]?.method).toBe("POST");
+    expect(fetchMock.mock.calls[1]?.[1]?.body).toBe(JSON.stringify({}));
+    expect(fetchMock.mock.calls[2]?.[0]).toBe("/api/gateway/binding/reset");
+    expect(fetchMock.mock.calls[2]?.[1]?.method).toBe("POST");
+    expect(fetchMock.mock.calls[2]?.[1]?.body).toBeUndefined();
   });
 });
 
