@@ -548,6 +548,7 @@ When it is on, VCM is in auto mode:
 - Just before terminal submission, VCM records `dispatchingAt`, waits briefly for the GUI to switch tabs, then writes to the embedded terminal.
 - After successful terminal write, VCM snapshots the delivered body as message history.
 - Claude Code `UserPromptSubmit` confirms that the prompt was accepted; VCM stores `acceptedAt` and clears the source route file if it still contains the same message.
+- If `UserPromptSubmit` does not confirm the auto-delivered message, VCM retries Enter from the backend PTY and finally records `failureReason` on the message if submission is still not confirmed.
 - When the GUI observes a newly dispatching auto message, it switches the active role tab to that message's target role before the message is submitted.
 - VCM enforces sequential turn-taking from hook state: a role that has accepted a prompt is busy until its `Stop` hook fires.
 - Additional pending files to a busy target role remain non-empty and are not written to that terminal.

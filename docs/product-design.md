@@ -802,6 +802,7 @@ VCM V1 is successful when:
 - Manual orchestration lets the user inspect pending route-file messages without auto-submitting Enter.
 - Auto orchestration can deliver pending route-file messages to idle running target roles.
 - Auto orchestration switches to the target role tab when VCM records `dispatchingAt`, before VCM submits the route-file message.
+- Auto orchestration treats `UserPromptSubmit` as the reliable acceptance confirmation; if confirmation does not arrive, backend PTY retries Enter and records a message `failureReason` after retry exhaustion.
 - Round completion detection waits for the final role in a chained conversation and can alert with prompt plus sound.
 - Translation settings save to `~/.vcm/settings.json`.
 - Translation reads Claude transcript JSONL reliably after start, resume, and restart.

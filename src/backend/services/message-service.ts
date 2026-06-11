@@ -77,17 +77,29 @@ export interface MessageServiceDeps {
   now?: () => string;
   id?: () => string;
   preDispatchSwitchDelayMs?: number;
+  autoDispatchEnterDelayMs?: number;
+  dispatchConfirmationEnabled?: boolean;
+  dispatchConfirmationRetryDelaysMs?: number[];
+  dispatchConfirmationFailureDelayMs?: number;
 }
 
 const PM_ROLE: RoleName = "project-manager";
 const PM_TO_ROLE_TYPES = new Set<VcmMessageType>(["task", "question", "review-request", "revise", "cancel"]);
 const ROLE_TO_PM_TYPES = new Set<VcmMessageType>(["result", "question", "blocked", "finding"]);
 const DEFAULT_PRE_DISPATCH_SWITCH_DELAY_MS = 500;
+const DEFAULT_AUTO_DISPATCH_ENTER_DELAY_MS = 500;
+const DEFAULT_DISPATCH_CONFIRMATION_RETRY_DELAYS_MS = [1500, 3000];
+const DEFAULT_DISPATCH_CONFIRMATION_FAILURE_DELAY_MS = 3000;
+const DISPATCH_NOT_CONFIRMED_REASON = "Auto orchestration pasted the message, but Claude Code did not confirm submission. Press Enter in the target terminal or resend the route message.";
 
 export function createMessageService(deps: MessageServiceDeps): MessageService {
   const now = deps.now ?? (() => new Date().toISOString());
   const id = deps.id ?? (() => `msg_${randomUUID()}`);
   const preDispatchSwitchDelayMs = deps.preDispatchSwitchDelayMs ?? DEFAULT_PRE_DISPATCH_SWITCH_DELAY_MS;
+  const autoDispatchEnterDelayMs = deps.autoDispatchEnterDelayMs ?? DEFAULT_AUTO_DISPATCH_ENTER_DELAY_MS;
+  const dispatchConfirmationEnabled = deps.dispatchConfirmationEnabled ?? true;
+  const dispatchConfirmationRetryDelaysMs = deps.dispatchConfirmationRetryDelaysMs ?? DEFAULT_DISPATCH_CONFIRMATION_RETRY_DELAYS_MS;
+  const dispatchConfirmationFailureDelayMs = deps.dispatchConfirmationFailureDelayMs ?? DEFAULT_DISPATCH_CONFIRMATION_FAILURE_DELAY_MS;
   const taskLocks = new Map<string, Promise<unknown>>();
 
   async function getOrchestrationState(input: OrchestrationStateInput): Promise<VcmOrchestrationState> {
@@ -192,8 +204,11 @@ export function createMessageService(deps: MessageServiceDeps): MessageService {
       ...message,
       deliveredAt: timestamp
     };
-    await submitTerminalInput(deps.runtime, session.id, renderMessageEnvelope(delivered));
+    await submitTerminalInput(deps.runtime, session.id, renderMessageEnvelope(delivered), {
+      enterDelayMs: autoDispatchEnterDelayMs
+    });
     await deps.sessionService.markRoleActivityRunning(input.repoRoot, input.taskSlug, routeFile.toRole);
+    scheduleDispatchConfirmation(input, delivered, session.id);
 
     return {
       message: delivered,
@@ -281,6 +296,65 @@ export function createMessageService(deps: MessageServiceDeps): MessageService {
       return next;
     }
   };
+
+  function scheduleDispatchConfirmation(
+    input: ScanPendingRouteFilesInput,
+    message: VcmRoleMessage,
+    sessionId: string
+  ): void {
+    if (!dispatchConfirmationEnabled) {
+      return;
+    }
+    void monitorDispatchConfirmation(input, message, sessionId).catch(() => undefined);
+  }
+
+  async function monitorDispatchConfirmation(
+    input: ScanPendingRouteFilesInput,
+    message: VcmRoleMessage,
+    sessionId: string
+  ): Promise<void> {
+    for (const retryDelayMs of dispatchConfirmationRetryDelaysMs) {
+      await delay(retryDelayMs);
+      const current = await readMessageById(input, message.id);
+      if (!current || current.acceptedAt) {
+        return;
+      }
+      try {
+        deps.runtime.write(sessionId, "\r");
+      } catch (error) {
+        await markDispatchConfirmationFailure(input, message.id, `Auto orchestration could not retry Enter: ${errorMessage(error)}`);
+        return;
+      }
+    }
+
+    await delay(dispatchConfirmationFailureDelayMs);
+    const current = await readMessageById(input, message.id);
+    if (!current || current.acceptedAt) {
+      return;
+    }
+    await markDispatchConfirmationFailure(input, message.id, DISPATCH_NOT_CONFIRMED_REASON);
+  }
+
+  async function readMessageById(input: ListMessagesInput, messageId: string): Promise<VcmRoleMessage | undefined> {
+    return withTaskLock(taskLocks, getMessagesPath(getStateRepoRoot(input), input.stateRoot, input.taskSlug), async () => {
+      const messages = await readLatestMessages(deps.fs, getMessagesPath(getStateRepoRoot(input), input.stateRoot, input.taskSlug));
+      return messages.find((message) => message.id === messageId);
+    });
+  }
+
+  async function markDispatchConfirmationFailure(input: ListMessagesInput, messageId: string, failureReason: string): Promise<void> {
+    await withTaskLock(taskLocks, getMessagesPath(getStateRepoRoot(input), input.stateRoot, input.taskSlug), async () => {
+      const messages = await readLatestMessages(deps.fs, getMessagesPath(getStateRepoRoot(input), input.stateRoot, input.taskSlug));
+      const current = messages.find((message) => message.id === messageId);
+      if (!current || current.acceptedAt) {
+        return;
+      }
+      await appendMessageSnapshot(deps.fs, input, {
+        ...current,
+        failureReason
+      });
+    });
+  }
 }
 
 interface RouteContext {
@@ -586,4 +660,8 @@ function delay(ms: number): Promise<void> {
     return Promise.resolve();
   }
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
