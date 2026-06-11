@@ -50,6 +50,7 @@ CLAUDE.md
 .ai/tools/generate-public-surface
 .ai/tools/run-long-check
 .ai/tools/watch-job
+.ai/tools/vcm-bash-guard
 .github/pull_request_template.md
 ```
 
@@ -280,10 +281,16 @@ This skill is role-independent. It only handles long-running command execution,
 bounded waiting, file-backed status, timeout, and log summaries. The caller
 decides where to record command evidence.
 
-VCM roles must not start background jobs. The only allowed background job is
-`.ai/tools/run-long-check` when used through `vcm-long-running-validation`.
-`vcm-long-running-validation` has a hard maximum timeout of 60 minutes; split
-larger validation/build work or ask the user before suggesting anything longer.
+VCM roles must not run background Bash; a `PreToolUse` hook
+(`.ai/tools/vcm-bash-guard`) denies `run_in_background`, `nohup`, `setsid`,
+`disown`, and trailing `&`. The only sanctioned long-running mechanism is
+`.ai/tools/run-long-check` plus `.ai/tools/watch-job` through
+`vcm-long-running-validation`. The job worker enforces a hard 60 minute
+ceiling and a supervision lease that kills unwatched jobs; `watch-job` watches
+in foreground windows of up to 8 minutes (exit `125` means watch again now),
+and the VCM backend blocks turn-end while a validation job is running. Split
+larger validation/build work or ask the user before suggesting anything longer
+than 60 minutes.
 
 ## 10. Generated Context
 

@@ -8,6 +8,7 @@ import { isRoleName } from "../../shared/constants.js";
 import { VcmError } from "../errors.js";
 import type { GatewayService } from "../gateway/gateway-service.js";
 import type { AppSettingsService } from "./app-settings-service.js";
+import type { JobGuardService } from "./job-guard-service.js";
 import type { MessageService } from "./message-service.js";
 import type { ProjectService } from "./project-service.js";
 import type { RoundService } from "./round-service.js";
@@ -30,6 +31,7 @@ export interface ClaudeHookServiceDeps {
   translationService: Pick<TranslationService, "recordConversationBoundary">;
   appSettings: Pick<AppSettingsService, "getPreferences">;
   gatewayService?: Pick<GatewayService, "handlePmStop">;
+  jobGuard?: Pick<JobGuardService, "evaluateStop" | "notePromptSubmitted">;
 }
 
 export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHookService {
@@ -69,6 +71,11 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
     }
 
     const context = await getHookContext(input);
+    deps.jobGuard?.notePromptSubmitted({
+      repoRoot: context.project.repoRoot,
+      taskSlug: input.taskSlug,
+      role: input.role
+    });
     const session = await deps.sessionService.recordClaudeHookEvent(context.project.repoRoot, {
       taskSlug: input.taskSlug,
       role: input.role,
@@ -118,13 +125,36 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
     };
   }
 
-  async function handleStopHook(input: ClaudeHookRequest): Promise<ClaudeHookResult> {
+  async function processStopHook(input: ClaudeHookRequest, options: { allowBlock: boolean }): Promise<ClaudeHookResult> {
     const eventName = parseHookEvent(input.event.hook_event_name ?? "Stop");
     if (eventName !== "Stop") {
       throwUnsupportedEvent(eventName);
     }
 
     const context = await getHookContext(input);
+
+    if (options.allowBlock && deps.jobGuard) {
+      const verdict = await deps.jobGuard.evaluateStop({
+        repoRoot: context.project.repoRoot,
+        taskSlug: input.taskSlug,
+        role: input.role,
+        taskRepoRoot: context.taskRepoRoot
+      });
+      if (verdict.behavior === "block") {
+        // The role turn stays alive: skip all turn-end bookkeeping so the
+        // round keeps running and no route dispatch happens yet.
+        return {
+          ok: true,
+          eventName,
+          taskSlug: input.taskSlug,
+          role: input.role,
+          sessionUpdated: false,
+          dispatchedCount: 0,
+          stopDecision: { behavior: "block", reason: verdict.reason }
+        };
+      }
+    }
+
     const scopedRouteDispatchInput = {
       repoRoot: context.project.repoRoot,
       taskRepoRoot: context.taskRepoRoot,
@@ -239,9 +269,13 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
       if (eventName === "UserPromptSubmit") {
         return handleUserPromptSubmitHook(input);
       }
-      return handleStopHook(input);
+      // Legacy combined endpoint: the installed hook discards the response,
+      // so a block decision could not be enforced. Never block here.
+      return processStopHook(input, { allowBlock: false });
     },
-    handleStopHook,
+    handleStopHook(input) {
+      return processStopHook(input, { allowBlock: true });
+    },
     handlePermissionRequestHook
   };
 }

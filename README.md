@@ -405,15 +405,28 @@ CLAUDE.md
 .ai/tools/generate-public-surface
 .ai/tools/run-long-check
 .ai/tools/watch-job
+.ai/tools/vcm-bash-guard
 .github/pull_request_template.md
 ```
 
 Repo-local skills are installed as `.claude/skills/<skill-name>/SKILL.md` so
 Claude Code can register them.
 
-VCM roles must not start background jobs. The only allowed background job is
-`.ai/tools/run-long-check` when used through `vcm-long-running-validation`;
-`.ai/tools/watch-job` enforces a 60 minute maximum timeout.
+VCM roles must not run background Bash. A `PreToolUse` hook
+(`.ai/tools/vcm-bash-guard`) denies `run_in_background`, `nohup`, `setsid`,
+`disown`, and trailing `&` calls in VCM role sessions. The only sanctioned
+long-running mechanism is `.ai/tools/run-long-check` plus
+`.ai/tools/watch-job` through `vcm-long-running-validation`:
+
+- The detached job worker itself enforces the job ceiling (`--timeout`, max 60
+  minutes) and a supervision lease: a job left without a live foreground
+  watcher for about 2 minutes is killed and recorded as `orphaned`.
+- `watch-job` renews the lease and watches in windows of up to 8 minutes; it
+  exits `125` while the job is still running instead of killing it, and the
+  role re-runs it in the same turn until a terminal result.
+- The VCM backend blocks a role from ending its turn while one of its
+  validation jobs is still running.
+- Only one validation job may be active at a time.
 
 If a managed-block file already exists, VCM preserves user-authored content and only inserts or replaces the VCM block:
 
@@ -434,7 +447,7 @@ For `.gitignore`, VCM uses a gitignore-native managed block:
 
 `.ai/vcm/` is the active VCM local control area, and `.claude/worktrees/` is the Claude-compatible task worktree area. VCM keeps the task index in app-local project state under `~/.vcm/projects/`; each task runtime repo keeps its own session, message, orchestration, and translation state.
 
-VCM also JSON-merges `.claude/settings.json` to install Claude Code `UserPromptSubmit` and `Stop` hooks. The hooks post directly to the local VCM backend, so roles do not need a VCM CLI command to confirm delivery or report turn completion.
+VCM also JSON-merges `.claude/settings.json` to install Claude Code `PreToolUse`, `UserPromptSubmit`, `Stop`, and `PermissionRequest` hooks plus a managed `env.BASH_DEFAULT_TIMEOUT_MS` so foreground watch windows fit inside the Bash tool timeout. The hooks post directly to the local VCM backend, so roles do not need a VCM CLI command to confirm delivery or report turn completion. The `Stop` hook forwards the backend response to Claude Code, which lets VCM block turn-end while a validation job is still running.
 
 Bootstrap is AI-assisted. VCM starts a visible temporary Claude Code session in the connected repository and asks it to use the `vcm-harness-bootstrap` skill. Bootstrap fills project-specific content and generated context:
 

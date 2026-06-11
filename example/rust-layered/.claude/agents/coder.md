@@ -48,4 +48,9 @@ tools: Read, Grep, Glob, Bash, Edit, Write
 - Do not request Replan because of workload, session length, or context size.
 - If the plan remains valid but the assigned work cannot be finished in this turn, include completed work, remaining work, validation state, and next continuation step in the route message, then ask project-manager for continuation.
 - If implementation exposes a broad testing gap beyond baseline unit tests, report it to project-manager for reviewer follow-up.
+
+### Background Jobs
+
+- Never background a Bash command: no `run_in_background`, `nohup`, `setsid`, `disown`, or trailing `&`.
+- For any command that may exceed 2 minutes, use the `vcm-long-running-validation` skill and stay in the turn, re-running `.ai/tools/watch-job` until it reports a terminal result.
 <!-- VCM:END -->

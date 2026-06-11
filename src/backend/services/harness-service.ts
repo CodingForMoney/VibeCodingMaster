@@ -21,7 +21,6 @@ import { renderArchitectHarnessRules } from "../templates/harness/architect-agen
 import { renderCoderHarnessRules } from "../templates/harness/coder-agent.js";
 import { renderRootClaudeHarnessRules } from "../templates/harness/claude-root.js";
 import { renderGitignoreHarnessRules } from "../templates/harness/gitignore.js";
-import { renderKnownIssuesDocHarnessRules } from "../templates/harness/known-issues-doc.js";
 import { renderProjectManagerHarnessRules } from "../templates/harness/project-manager-agent.js";
 import { renderPullRequestTemplateHarnessRules } from "../templates/harness/pull-request-template.js";
 import { renderReviewerHarnessRules } from "../templates/harness/reviewer-agent.js";
@@ -63,6 +62,7 @@ interface HarnessFileDefinition {
   frontmatter?: string;
   commentStyle?: "html" | "hash";
   ownership?: "managed-block" | "whole-file";
+  blankLineBeforeEnd?: boolean;
   renderRules(): string;
 }
 
@@ -79,14 +79,23 @@ const MANAGED_BLOCK_PATTERN = /<!-- VCM:BEGIN(?:\s+version=(\d+))? -->[\s\S]*?<!
 const HASH_MANAGED_BLOCK_PATTERN = /# VCM:BEGIN(?:\s+version=(\d+))?\n[\s\S]*?# VCM:END/m;
 const CLAUDE_SETTINGS_PATH = ".claude/settings.json";
 const VCM_HOOK_COMMAND = `sh -c 'if [ -z "\${VCM_TASK_SLUG:-}" ] || [ -z "\${VCM_ROLE:-}" ] || [ -z "\${VCM_API_URL:-}" ]; then exit 0; fi; node -e '"'"'let s="";process.stdin.setEncoding("utf8");process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{let event={};try{event=s.trim()?JSON.parse(s):{};}catch{event={raw:s};}process.stdout.write(JSON.stringify({taskSlug:process.env.VCM_TASK_SLUG,role:process.env.VCM_ROLE,event}));});'"'"' | curl -fsS --max-time 2 -X POST "\${VCM_API_URL}/api/hooks/claude-code" -H "content-type: application/json" --data-binary @- >/dev/null || true'`;
+const VCM_STOP_HOOK_COMMAND = `sh -c 'if [ -z "\${VCM_TASK_SLUG:-}" ] || [ -z "\${VCM_ROLE:-}" ] || [ -z "\${VCM_API_URL:-}" ]; then exit 0; fi; node -e '"'"'let s="";process.stdin.setEncoding("utf8");process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{let event={};try{event=s.trim()?JSON.parse(s):{};}catch{event={raw:s};}process.stdout.write(JSON.stringify({taskSlug:process.env.VCM_TASK_SLUG,role:process.env.VCM_ROLE,event}));});'"'"' | curl -fsS --max-time 5 -X POST "\${VCM_API_URL}/api/hooks/claude-code/stop" -H "content-type: application/json" --data-binary @- || true'`;
 const VCM_PERMISSION_REQUEST_HOOK_COMMAND = `sh -c 'if [ -z "\${VCM_TASK_SLUG:-}" ] || [ -z "\${VCM_ROLE:-}" ] || [ -z "\${VCM_API_URL:-}" ]; then exit 0; fi; node -e '"'"'let s="";process.stdin.setEncoding("utf8");process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{let event={};try{event=s.trim()?JSON.parse(s):{};}catch{event={raw:s};}process.stdout.write(JSON.stringify({taskSlug:process.env.VCM_TASK_SLUG,role:process.env.VCM_ROLE,event}));});'"'"' | curl -fsS --max-time 5 -X POST "\${VCM_API_URL}/api/hooks/claude-code/permission-request" -H "content-type: application/json" --data-binary @- || true'`;
-const VCM_HOOK_EVENTS = ["UserPromptSubmit", "Stop", "PermissionRequest"] as const;
+const VCM_BASH_GUARD_HOOK_COMMAND = `sh -c 'if [ -z "\${VCM_TASK_SLUG:-}" ] || [ -z "\${VCM_ROLE:-}" ]; then exit 0; fi; exec python3 "\${CLAUDE_PROJECT_DIR:-.}/.ai/tools/vcm-bash-guard"'`;
+const VCM_BASH_DEFAULT_TIMEOUT_MS = "600000";
+const VCM_HOOK_DEFINITIONS: ReadonlyArray<{ eventName: string; matcher?: string; command: string; timeout: number }> = [
+  { eventName: "PreToolUse", matcher: "Bash", command: VCM_BASH_GUARD_HOOK_COMMAND, timeout: 10 },
+  { eventName: "UserPromptSubmit", command: VCM_HOOK_COMMAND, timeout: 5 },
+  { eventName: "Stop", command: VCM_STOP_HOOK_COMMAND, timeout: 10 },
+  { eventName: "PermissionRequest", command: VCM_PERMISSION_REQUEST_HOOK_COMMAND, timeout: 5 }
+];
 
 const HARNESS_FILES: HarnessFileDefinition[] = [
   {
     kind: "root-claude",
     path: "CLAUDE.md",
     title: "CLAUDE.md",
+    blankLineBeforeEnd: true,
     renderRules: renderRootClaudeHarnessRules
   },
   {
@@ -95,12 +104,6 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
     title: ".gitignore",
     commentStyle: "hash",
     renderRules: renderGitignoreHarnessRules
-  },
-  {
-    kind: "docs-known-issues",
-    path: "docs/known-issues.md",
-    title: "Known Issues",
-    renderRules: renderKnownIssuesDocHarnessRules
   },
   {
     kind: "pull-request-template",
@@ -166,6 +169,7 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
     kind: "agent-architect",
     path: ".claude/agents/architect.md",
     title: "Architect Agent",
+    blankLineBeforeEnd: true,
     frontmatter: renderAgentFrontmatter(
       "architect",
       "VCM architecture role for plans, module boundaries, public contracts, verifiable behavior, and docs sync."
@@ -188,7 +192,7 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
     title: "Reviewer Agent",
     frontmatter: renderAgentFrontmatter(
       "reviewer",
-      "VCM independent review role for acceptance, test adequacy, scope checks, docs gaps, and risk findings."
+      "VCM independent review role for acceptance, test adequacy, scope checks, and risk findings."
     ),
     renderRules: renderReviewerHarnessRules
   }
@@ -448,11 +452,12 @@ function renderHarnessStatus(analyses: HarnessFileAnalysis[]): HarnessStatusRepo
 }
 
 function renderManagedBlock(definition: HarnessFileDefinition, rules: string): string {
+  const endSpacing = definition.blankLineBeforeEnd ? "\n\n" : "\n";
   if (definition.commentStyle === "hash") {
-    return `# VCM:BEGIN version=${VCM_HARNESS_VERSION}\n${rules.trimEnd()}\n# VCM:END`;
+    return `# VCM:BEGIN version=${VCM_HARNESS_VERSION}\n${rules.trimEnd()}${endSpacing}# VCM:END`;
   }
 
-  return `<!-- VCM:BEGIN version=${VCM_HARNESS_VERSION} -->\n${rules.trimEnd()}\n<!-- VCM:END -->`;
+  return `<!-- VCM:BEGIN version=${VCM_HARNESS_VERSION} -->\n${rules.trimEnd()}${endSpacing}<!-- VCM:END -->`;
 }
 
 function getManagedBlockPattern(definition: HarnessFileDefinition): RegExp {
@@ -540,31 +545,32 @@ function withVcmClaudeHooks(settings: Record<string, unknown>): Record<string, u
     }
   }
 
-  for (const eventName of VCM_HOOK_EVENTS) {
-    const existingMatchers = Array.isArray(hooks[eventName])
-      ? hooks[eventName] as unknown[]
+  for (const definition of VCM_HOOK_DEFINITIONS) {
+    const existingMatchers = Array.isArray(hooks[definition.eventName])
+      ? hooks[definition.eventName] as unknown[]
       : [];
-    hooks[eventName] = [
+    hooks[definition.eventName] = [
       ...existingMatchers.filter((entry) => !isVcmHookMatcher(entry)),
-      createVcmHookMatcher(eventName)
+      {
+        ...(definition.matcher ? { matcher: definition.matcher } : {}),
+        hooks: [
+          {
+            type: "command",
+            command: definition.command,
+            timeout: definition.timeout
+          }
+        ]
+      }
     ];
   }
 
+  const env = isPlainObject(settings.env) ? { ...settings.env } : {};
+  env.BASH_DEFAULT_TIMEOUT_MS = VCM_BASH_DEFAULT_TIMEOUT_MS;
+
   return {
     ...settings,
-    hooks
-  };
-}
-
-function createVcmHookMatcher(eventName: typeof VCM_HOOK_EVENTS[number]) {
-  return {
-    hooks: [
-      {
-        type: "command",
-        command: eventName === "PermissionRequest" ? VCM_PERMISSION_REQUEST_HOOK_COMMAND : VCM_HOOK_COMMAND,
-        timeout: 5
-      }
-    ]
+    hooks,
+    env
   };
 }
 
@@ -576,12 +582,12 @@ function isVcmHookMatcher(value: unknown): boolean {
     if (!isPlainObject(hook)) {
       return false;
     }
-    return typeof hook.command === "string" && hook.command.includes("hook-event");
-  }) || value.hooks.some((hook) => {
-    if (!isPlainObject(hook)) {
+    if (typeof hook.command !== "string") {
       return false;
     }
-    return typeof hook.command === "string" && hook.command.includes("/api/hooks/claude-code");
+    return hook.command.includes("VCM") ||
+      hook.command.includes("/api/hooks/claude-code") ||
+      hook.command.includes("hook-event");
   });
 }
 

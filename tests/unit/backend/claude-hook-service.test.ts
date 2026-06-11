@@ -206,6 +206,156 @@ describe("createClaudeHookService", () => {
     ]);
   });
 
+  it("blocks Stop and skips all turn-end bookkeeping while a validation job is running", async () => {
+    const calls: string[] = [];
+    const service = createClaudeHookService({
+      projectService: createProjectServiceStub(),
+      taskService: createTaskServiceStub(),
+      sessionService: {
+        async recordClaudeHookEvent() {
+          calls.push("session");
+          return undefined;
+        }
+      } as never,
+      messageService: {
+        async scanAndDispatchPendingRouteFiles() {
+          calls.push("scan");
+          return [];
+        }
+      } as never,
+      roundService: {
+        async recordClaudeHookEvent() {
+          calls.push("round");
+          return {} as never;
+        }
+      } as never,
+      translationService: {
+        async recordConversationBoundary() {
+          calls.push("boundary");
+        }
+      } as Pick<TranslationService, "recordConversationBoundary">,
+      appSettings: createAppSettingsStub(),
+      jobGuard: {
+        async evaluateStop(input) {
+          calls.push(`guard:${input.taskSlug}:${input.role}:${input.taskRepoRoot}`);
+          return {
+            behavior: "block",
+            reason: "VCM: validation job job-1 (running) is still running."
+          };
+        },
+        notePromptSubmitted() {
+          calls.push("guard-reset");
+        }
+      }
+    });
+
+    const result = await service.handleStopHook({
+      taskSlug: "demo-task",
+      role: "coder",
+      event: { hook_event_name: "Stop", session_id: "claude_coder" }
+    });
+
+    expect(result.stopDecision).toEqual({
+      behavior: "block",
+      reason: "VCM: validation job job-1 (running) is still running."
+    });
+    expect(result).toMatchObject({ ok: true, sessionUpdated: false, dispatchedCount: 0 });
+    expect(calls).toEqual(["guard:demo-task:coder:/repo"]);
+  });
+
+  it("never blocks Stop on the legacy combined endpoint", async () => {
+    const calls: string[] = [];
+    const service = createClaudeHookService({
+      projectService: createProjectServiceStub(),
+      taskService: createTaskServiceStub(),
+      sessionService: {
+        async recordClaudeHookEvent() {
+          calls.push("session");
+          return undefined;
+        }
+      } as never,
+      messageService: {
+        async scanAndDispatchPendingRouteFiles() {
+          calls.push("scan");
+          return [];
+        }
+      } as never,
+      roundService: {
+        async recordClaudeHookEvent() {
+          calls.push("round");
+          return {} as never;
+        }
+      } as never,
+      translationService: {
+        async recordConversationBoundary() {
+          calls.push("boundary");
+        }
+      } as Pick<TranslationService, "recordConversationBoundary">,
+      appSettings: createAppSettingsStub(),
+      jobGuard: {
+        async evaluateStop() {
+          calls.push("guard");
+          return { behavior: "block", reason: "should not be used" };
+        },
+        notePromptSubmitted() {
+          calls.push("guard-reset");
+        }
+      }
+    });
+
+    const result = await service.handleHook({
+      taskSlug: "demo-task",
+      role: "coder",
+      event: { hook_event_name: "Stop", session_id: "claude_coder" }
+    });
+
+    expect(result.stopDecision).toBeUndefined();
+    expect(calls).toEqual(["session", "round", "scan"]);
+  });
+
+  it("resets the job-guard block counter on UserPromptSubmit", async () => {
+    const calls: string[] = [];
+    const service = createClaudeHookService({
+      projectService: createProjectServiceStub(),
+      taskService: createTaskServiceStub(),
+      sessionService: {
+        async recordClaudeHookEvent() {
+          return undefined;
+        }
+      } as never,
+      messageService: {
+        async confirmPromptSubmitted() {
+          return undefined;
+        }
+      } as never,
+      roundService: {
+        async recordClaudeHookEvent() {
+          return {} as never;
+        }
+      } as never,
+      translationService: {
+        async recordConversationBoundary() {}
+      } as Pick<TranslationService, "recordConversationBoundary">,
+      appSettings: createAppSettingsStub(),
+      jobGuard: {
+        async evaluateStop() {
+          return { behavior: "allow" };
+        },
+        notePromptSubmitted(input) {
+          calls.push(`guard-reset:${input.repoRoot}:${input.taskSlug}:${input.role}`);
+        }
+      }
+    });
+
+    await service.handleHook({
+      taskSlug: "demo-task",
+      role: "coder",
+      event: { hook_event_name: "UserPromptSubmit", session_id: "claude_coder" }
+    });
+
+    expect(calls).toEqual(["guard-reset:/repo:demo-task:coder"]);
+  });
+
   it("allows Claude Code PermissionRequest hooks when the setting is allow all", async () => {
     const service = createClaudeHookService({
       projectService: createProjectServiceStub(),

@@ -556,7 +556,7 @@ VCM uses `UserPromptSubmit` as the Claude Code acceptance signal. A successful P
 
 The injected role rules require asynchronous file messaging: after writing or updating a route file, the role must end the current Claude Code turn and wait for VCM to deliver a later reply. Roles should use `.claude/skills/vcm-route-message/SKILL.md` to author route files. Roles must not poll files, start shell loops, keep the turn open waiting for another role to answer, paste directly into another role terminal, or use Claude Code Task/Subagent for VCM role delegation.
 
-Roles must not start background jobs. The only allowed background job is `.ai/tools/run-long-check` when used through `vcm-long-running-validation`; `watch-job` rejects timeouts over 60 minutes.
+Roles must not run background Bash; a `PreToolUse` hook (`.ai/tools/vcm-bash-guard`) denies `run_in_background`, `nohup`, `setsid`, `disown`, and trailing `&`. The only sanctioned long-running mechanism is `.ai/tools/run-long-check` plus `.ai/tools/watch-job` through `vcm-long-running-validation`: the detached job worker enforces the 60 minute ceiling and a supervision lease that kills unwatched jobs, `watch-job` renews the lease in foreground windows of up to 8 minutes (exit `125` means call it again in the same turn), and the VCM backend blocks a role's turn-end while one of its validation jobs is still running.
 
 There is no `vcmctl` in the target design. Hook entrypoints are direct HTTP from Claude Code hooks to the local VCM backend.
 

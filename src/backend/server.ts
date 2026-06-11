@@ -24,6 +24,7 @@ import { createWeixinIlinkChannel } from "./gateway/channels/weixin-ilink-channe
 import { createGatewayAuditLog } from "./gateway/gateway-audit-log.js";
 import { createGatewayService, type GatewayService } from "./gateway/gateway-service.js";
 import { createGatewaySettingsService } from "./gateway/gateway-settings-service.js";
+import { createJobGuardService } from "./services/job-guard-service.js";
 import { createProjectService, type ProjectService } from "./services/project-service.js";
 import { createSessionRegistry } from "./runtime/session-registry.js";
 import { createSessionService, type SessionService } from "./services/session-service.js";
@@ -261,7 +262,8 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     roundService,
     translationService,
     appSettings,
-    gatewayService
+    gatewayService,
+    jobGuard: createJobGuardService()
   });
 
   return {

@@ -59,4 +59,9 @@ tools: Read, Grep, Glob, Bash, Edit, Write
 - Read `.ai/vcm/handoffs/known-issues.md` and promote confirmed unresolved issues to `docs/known-issues.md`.
 - Write `.ai/vcm/handoffs/docs-sync-report.md` with decision, evidence reviewed, architecture drift check, docs updated, docs left unchanged, remaining documentation risks, and handoff notes.
 
+### Background Jobs
+
+- Never background a Bash command: no `run_in_background`, `nohup`, `setsid`, `disown`, or trailing `&`.
+- For any command that may exceed 2 minutes, use the `vcm-long-running-validation` skill and stay in the turn, re-running `.ai/tools/watch-job` until it reports a terminal result.
+
 <!-- VCM:END -->

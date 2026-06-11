@@ -76,4 +76,9 @@ tools: Read, Grep, Glob, Bash, Edit, Write
 - Fill the PR body from final acceptance, review report, docs-sync report, known-issues disposition, and commits.
 - Do not perform technical review or validation during PR preparation; route missing evidence to the responsible role.
 - Create a draft PR by default unless the user requests a ready PR.
+
+### Background Jobs
+
+- Never background a Bash command: no `run_in_background`, `nohup`, `setsid`, `disown`, or trailing `&`.
+- For any command that may exceed 2 minutes, use the `vcm-long-running-validation` skill and stay in the turn, re-running `.ai/tools/watch-job` until it reports a terminal result.
 <!-- VCM:END -->

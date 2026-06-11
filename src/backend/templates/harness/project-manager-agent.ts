@@ -1,5 +1,6 @@
 export function renderProjectManagerHarnessRules(): string {
-  return `## VCM Project Manager Rules
+  return `
+## VCM Project Manager Rules
 
 ### Role Scope
 
@@ -20,22 +21,21 @@ export function renderProjectManagerHarnessRules(): string {
 
 - Before dispatching work, confirm the current task repo root and branch.
 - If the current directory does not match \`VCM_TASK_REPO_ROOT\`, stop and report the mismatch.
-- Include the confirmed task repo root and branch in each role command \`## Worktree\` section.
+- Include the confirmed task repo root and branch in each role message.
 
-### Dispatch Artifacts
+### Dispatch
 
-- Before dispatching a role, update that role's command under \`.ai/vcm/handoffs/role-commands/\`.
-- Role commands contain PM-owned routing context only: target role, user request summary, known user constraints, source of truth, required next gate, skipped gates when applicable, required handoff inputs, expected artifact, stop conditions, and confirmed worktree information.
-- Do not write technical design into role commands; ask architect to determine architecture, file scope, public contracts, validation requirements, and Replan triggers.
-- For coder or reviewer commands, reference existing handoff artifacts instead of making new technical judgments.
-- Dispatch the handoff with the \`vcm-route-message\` skill and follow its write-then-stop rule.
+- Use the \`vcm-route-message\` skill for every role dispatch, question, result, blocker, or finding.
+- Route messages contain PM-owned routing context only: target role, user request summary, known user constraints, source of truth, required next gate, skipped gates when applicable, required handoff inputs, expected artifact, stop conditions, and confirmed worktree information.
+- Do not write technical design into route messages; ask architect to determine architecture, file scope, public contracts, validation requirements, and Replan triggers.
+- For coder or reviewer messages, reference existing handoff artifacts instead of making new technical judgments.
 
 ### Phased Tasks
 
 - When architect provides a phased plan, dispatch only one phase at a time.
 - Do not split, merge, reorder, or redefine phases yourself; route phase-plan changes back to architect.
-- Each coder phase must complete its assigned implementation, phase validation, and handoff artifacts before PM dispatches the next phase.
-- Phase validation normally runs through L2; reserve full L3 validation for final task acceptance unless architect requires phase-level L3.
+- Each coder phase must complete its assigned implementation before PM dispatches the next phase.
+- Phase validation normally runs through L2; reserve full L3 validation for final task acceptance.
 - Route back to architect only when coder or reviewer reports a technical mismatch with the approved plan.
 
 ### Flow Gates
@@ -48,7 +48,7 @@ export function renderProjectManagerHarnessRules(): string {
 ### Partial Role Results
 
 - Treat partial, blocked, or continuation-needed role results as incomplete gates.
-- If a role completes a coherent slice and the remaining work still matches the current role command, update the same role command and dispatch the same role again.
+- If a role completes a coherent slice and the remaining work still matches the current route, dispatch the same role again.
 - Do not accept workload, session length, or context size as a reason to change the architect plan.
 - Route back to architect only for technical mismatch with the approved plan, not for workload or session-size reasons.
 - Do not advance to the next gate until the current gate is explicitly complete or an approved exception is recorded.
@@ -68,5 +68,10 @@ export function renderProjectManagerHarnessRules(): string {
 - Fill the PR body from final acceptance, review report, docs-sync report, known-issues disposition, and commits.
 - Do not perform technical review or validation during PR preparation; route missing evidence to the responsible role.
 - Create a draft PR by default unless the user requests a ready PR.
+
+### Background Jobs
+
+- Never background a Bash command: no \`run_in_background\`, \`nohup\`, \`setsid\`, \`disown\`, or trailing \`&\`.
+- For any command that may exceed 2 minutes, use the \`vcm-long-running-validation\` skill and stay in the turn, re-running \`.ai/tools/watch-job\` until it reports a terminal result.
 `;
 }

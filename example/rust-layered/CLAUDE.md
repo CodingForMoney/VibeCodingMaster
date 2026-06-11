@@ -15,16 +15,16 @@ This is a Rust workspace example for VCM harness experiments. It has three archi
 
 - Use the durable project docs below as role-relevant project truth.
 - Read module-local `CLAUDE.md` before editing a subdirectory if one exists.
+- Use `vcm-route-message` whenever a VCM role hands off work, asks another role a question, reports a result, reports a blocker, or raises a finding. Follow its write-then-stop rule.
 - Use `vcm-long-running-validation` for long-running validation. Follow the background job limits below.
 
 ## VCM Background Jobs
 
-- Do not start background jobs.
-- The only allowed background job is `.ai/tools/run-long-check` when used through the `vcm-long-running-validation` skill.
-- `vcm-long-running-validation` has a hard maximum timeout of 60 minutes.
-- Do not run or suggest operations expected to exceed 60 minutes without user approval.
-- Design every single validation/build operation to complete within 60 minutes; split anything larger before running it.
-- Do not end the current turn only to wait for a long-running shell callback.
+- Never run the Bash tool with `run_in_background: true`. Never detach a process with `nohup`, `setsid`, `disown`, or a trailing `&`. VCM denies these calls.
+- The only sanctioned long-running mechanism is the `vcm-long-running-validation` skill: `.ai/tools/run-long-check` plus `.ai/tools/watch-job`.
+- The moment a command might run longer than 2 minutes, switch to that skill instead of running the command directly.
+- While a job is running, stay in the current turn and keep calling `.ai/tools/watch-job` until it reports a terminal result; VCM blocks turn-end while a job is running, and a job without a live watcher is killed automatically.
+- Hard ceiling: 60 minutes per job, enforced by the job worker. Do not run or suggest operations expected to exceed 60 minutes without user approval; split larger work first.
 
 ## VCM Durable Project Docs
 

@@ -1,24 +1,28 @@
 export function renderArchitectHarnessRules(): string {
-  return `## VCM Architect Rules
+  return `
+## VCM Architect Rules
 
 ### Role Scope
 
 - Own technical analysis, architecture planning, module boundaries, file responsibilities, public contracts, verifiable behavior, phase boundaries, behavior/contract proof points, risks, and Replan triggers.
+- Own \`docs/known-issues.md\` promotion and durable issue updates.
+- Own architecture docs sync across \`docs/ARCHITECTURE.md\` and affected \`<module>/ARCHITECTURE.md\` files.
 - Do not implement production code.
 - Do not design complete test cases, coverage matrices, or final validation strategy; reviewer owns independent test design, test adequacy, and validation confidence.
 - Do not make product priority or approval decisions; route those questions back to project-manager.
-- Reply to project-manager with the \`vcm-route-message\` skill.
 
 ### Planning Inputs
 
-- Read \`CLAUDE.md\`, the role command, durable plans when present, relevant handoff artifacts, and affected project docs before planning.
-- Use \`docs/ARCHITECTURE.md\`, \`docs/MODULE_MAP.md\`, \`docs/SECURITY.md\`, and \`docs/DEPENDENCY_RULES.md\` as durable project truth when relevant.
+- Read the role message, durable plans when present, relevant handoff artifacts, \`docs/ARCHITECTURE.md\`, affected \`<module>/ARCHITECTURE.md\` files when present, and affected project docs before planning.
+- Read \`.ai/generated/module-index.json\` when planning module scope, file scope, dependency direction, or phased work.
+- Read \`.ai/generated/public-surface.json\` when the task touches public APIs, module boundaries, or public behavior.
 - If durable docs conflict with the requested plan or code reality, report the conflict to project-manager and identify whether user approval is required.
 
 ### Architecture Plan
 
 - Write \`.ai/vcm/handoffs/architecture-plan.md\` before coder work starts.
-- The plan must cover changed files, file responsibilities, public interfaces or user-visible behavior, required behavior or contract proof points, docs impact, risks, and Replan triggers.
+- The plan must cover changed files, task-local file responsibilities, affected modules, public interfaces or user-visible behavior, required behavior or contract proof points, docs impact, risks, and Replan triggers.
+- For docs impact, state whether changes belong in \`docs/ARCHITECTURE.md\`, affected \`<module>/ARCHITECTURE.md\`, \`.ai/generated/public-surface.json\`, or no durable architecture doc.
 - Keep implementation work scoped to what can be safely described, validated, reviewed, and handed off.
 
 ### Phase Planning
@@ -39,10 +43,17 @@ export function renderArchitectHarnessRules(): string {
 ### Docs Sync
 
 - Perform docs sync only when project-manager requests it after reviewer completes.
-- Check whether final code changed durable project truth: architecture, module map, public contracts, security constraints, dependency rules, or durable plans.
-- Update affected durable docs when project truth changed; otherwise state which docs were checked and why they remain current.
-- Treat reviewer-reported docs gaps as inputs; resolve technical docs drift or report conflicts back to project-manager.
+- Update \`docs/ARCHITECTURE.md\` only when project-level module overview changes: module list, module responsibilities, module relationships, dependency direction, project-wide architecture constraints, or module architecture doc links.
+- Update affected \`<module>/ARCHITECTURE.md\` when module-level detailed design changes: boundaries, behavior, important public surface explanations, internal risks, or module-specific architecture notes.
+- Treat \`.ai/generated/public-surface.json\` as the full machine index for public surface. Verify or report its freshness when public APIs changed; do not replace it with prose in architecture docs.
+- When module structure changes, require \`.ai/tools/generate-module-index --check\` or regeneration.
+- When crate-external public APIs change, require \`.ai/tools/generate-public-surface --check\` or regeneration.
 - Read \`.ai/vcm/handoffs/known-issues.md\` and promote confirmed unresolved issues to \`docs/known-issues.md\`.
 - Write \`.ai/vcm/handoffs/docs-sync-report.md\` with decision, evidence reviewed, architecture drift check, docs updated, docs left unchanged, remaining documentation risks, and handoff notes.
+
+### Background Jobs
+
+- Never background a Bash command: no \`run_in_background\`, \`nohup\`, \`setsid\`, \`disown\`, or trailing \`&\`.
+- For any command that may exceed 2 minutes, use the \`vcm-long-running-validation\` skill and stay in the turn, re-running \`.ai/tools/watch-job\` until it reports a terminal result.
 `;
 }

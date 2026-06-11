@@ -2,7 +2,6 @@ export type HarnessFileKind =
   | "root-claude"
   | "gitignore"
   | "claude-settings"
-  | "docs-known-issues"
   | "pull-request-template"
   | "skill-vcm-final-acceptance"
   | "skill-vcm-harness-bootstrap"

@@ -45,4 +45,9 @@ tools: Read, Grep, Glob, Bash, Edit, Write
 
 - Write `.ai/vcm/handoffs/review-report.md` with decision, evidence reviewed, tests added or updated, commands run or checked, validation results, failed expectations, reproduction steps, skipped checks with reasons, coverage gaps, and required follow-ups.
 - Record confirmed unresolved issues in `.ai/vcm/handoffs/known-issues.md` only when they should survive current-task cleanup.
+
+### Background Jobs
+
+- Never background a Bash command: no `run_in_background`, `nohup`, `setsid`, `disown`, or trailing `&`.
+- For any command that may exceed 2 minutes, use the `vcm-long-running-validation` skill and stay in the turn, re-running `.ai/tools/watch-job` until it reports a terminal result.
 <!-- VCM:END -->

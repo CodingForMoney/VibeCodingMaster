@@ -232,7 +232,7 @@ async function removeOwnedJson({ projectRoot, entry, dryRun, operations, warning
     return;
   }
 
-  const nextValue = removeVcmHookMatchers(value, entry.jsonOwnership?.hookMatchers ?? ["VCM"]);
+  const nextValue = removeVcmOwnedSettings(value, entry.jsonOwnership ?? {});
   if (deepEqual(value, nextValue)) {
     operations.push(skip(entry.path, "no VCM-owned JSON values found"));
     return;
@@ -245,6 +245,23 @@ async function removeOwnedJson({ projectRoot, entry, dryRun, operations, warning
 
   await fs.writeFile(absolutePath, `${JSON.stringify(nextValue, null, 2)}\n`, "utf8");
   operations.push(done(entry.path, "removed VCM-owned JSON values"));
+}
+
+function removeVcmOwnedSettings(settings, jsonOwnership) {
+  const nextSettings = removeVcmHookMatchers(settings, jsonOwnership.hookMatchers ?? ["VCM"]);
+  const envKeys = Array.isArray(jsonOwnership.envKeys) ? jsonOwnership.envKeys : [];
+  if (envKeys.length > 0 && isPlainObject(nextSettings.env)) {
+    const env = { ...nextSettings.env };
+    for (const key of envKeys) {
+      delete env[key];
+    }
+    if (Object.keys(env).length > 0) {
+      nextSettings.env = env;
+    } else {
+      delete nextSettings.env;
+    }
+  }
+  return nextSettings;
 }
 
 function removeVcmHookMatchers(settings, hookMatchers) {

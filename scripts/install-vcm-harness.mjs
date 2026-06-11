@@ -5,13 +5,22 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 
-const HARNESS_VERSION = "0.2.1-fixed";
+const HARNESS_VERSION = "0.3.0-fixed";
 const SCRIPT_DIR = path.dirname(fileURLToPath(import.meta.url));
 const MANIFEST_PATH = ".ai/vcm-harness-manifest.json";
 const HTML_BLOCK_PATTERN = /<!-- VCM:BEGIN(?:\s+version=\d+)? -->[\s\S]*?<!-- VCM:END -->/m;
 const HASH_BLOCK_PATTERN = /# VCM:BEGIN(?:\s+version=\d+)?\n[\s\S]*?# VCM:END/m;
 const VCM_HOOK_COMMAND = `sh -c 'if [ -z "\${VCM_TASK_SLUG:-}" ] || [ -z "\${VCM_ROLE:-}" ] || [ -z "\${VCM_API_URL:-}" ]; then exit 0; fi; node -e '"'"'let s="";process.stdin.setEncoding("utf8");process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{let event={};try{event=s.trim()?JSON.parse(s):{};}catch{event={raw:s};}process.stdout.write(JSON.stringify({taskSlug:process.env.VCM_TASK_SLUG,role:process.env.VCM_ROLE,event}));});'"'"' | curl -fsS --max-time 2 -X POST "\${VCM_API_URL}/api/hooks/claude-code" -H "content-type: application/json" --data-binary @- >/dev/null || true'`;
+const VCM_STOP_HOOK_COMMAND = `sh -c 'if [ -z "\${VCM_TASK_SLUG:-}" ] || [ -z "\${VCM_ROLE:-}" ] || [ -z "\${VCM_API_URL:-}" ]; then exit 0; fi; node -e '"'"'let s="";process.stdin.setEncoding("utf8");process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{let event={};try{event=s.trim()?JSON.parse(s):{};}catch{event={raw:s};}process.stdout.write(JSON.stringify({taskSlug:process.env.VCM_TASK_SLUG,role:process.env.VCM_ROLE,event}));});'"'"' | curl -fsS --max-time 5 -X POST "\${VCM_API_URL}/api/hooks/claude-code/stop" -H "content-type: application/json" --data-binary @- || true'`;
 const VCM_PERMISSION_REQUEST_HOOK_COMMAND = `sh -c 'if [ -z "\${VCM_TASK_SLUG:-}" ] || [ -z "\${VCM_ROLE:-}" ] || [ -z "\${VCM_API_URL:-}" ]; then exit 0; fi; node -e '"'"'let s="";process.stdin.setEncoding("utf8");process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{let event={};try{event=s.trim()?JSON.parse(s):{};}catch{event={raw:s};}process.stdout.write(JSON.stringify({taskSlug:process.env.VCM_TASK_SLUG,role:process.env.VCM_ROLE,event}));});'"'"' | curl -fsS --max-time 5 -X POST "\${VCM_API_URL}/api/hooks/claude-code/permission-request" -H "content-type: application/json" --data-binary @- || true'`;
+const VCM_BASH_GUARD_HOOK_COMMAND = `sh -c 'if [ -z "\${VCM_TASK_SLUG:-}" ] || [ -z "\${VCM_ROLE:-}" ]; then exit 0; fi; exec python3 "\${CLAUDE_PROJECT_DIR:-.}/.ai/tools/vcm-bash-guard"'`;
+const VCM_BASH_DEFAULT_TIMEOUT_MS = "600000";
+const VCM_HOOK_DEFINITIONS = [
+  { eventName: "PreToolUse", matcher: "Bash", command: VCM_BASH_GUARD_HOOK_COMMAND, timeout: 10 },
+  { eventName: "UserPromptSubmit", command: VCM_HOOK_COMMAND, timeout: 5 },
+  { eventName: "Stop", command: VCM_STOP_HOOK_COMMAND, timeout: 10 },
+  { eventName: "PermissionRequest", command: VCM_PERMISSION_REQUEST_HOOK_COMMAND, timeout: 5 }
+];
 
 const AGENT_FRONTMATTER = {
   "project-manager": {
@@ -44,12 +53,11 @@ const MANAGED_FILES = [
 
 ## VCM Background Jobs
 
-- Do not start background jobs.
-- The only allowed background job is \`.ai/tools/run-long-check\` when used through the \`vcm-long-running-validation\` skill.
-- \`vcm-long-running-validation\` has a hard maximum timeout of 60 minutes.
-- Do not run or suggest operations expected to exceed 60 minutes without user approval.
-- Design every single validation/build operation to complete within 60 minutes; split anything larger before running it.
-- Do not end the current turn only to wait for a long-running shell callback.
+- Never run the Bash tool with \`run_in_background: true\`. Never detach a process with \`nohup\`, \`setsid\`, \`disown\`, or a trailing \`&\`. VCM denies these calls.
+- The only sanctioned long-running mechanism is the \`vcm-long-running-validation\` skill: \`.ai/tools/run-long-check\` plus \`.ai/tools/watch-job\`.
+- The moment a command might run longer than 2 minutes, switch to that skill instead of running the command directly.
+- While a job is running, stay in the current turn and keep calling \`.ai/tools/watch-job\` until it reports a terminal result; VCM blocks turn-end while a job is running, and a job without a live watcher is killed automatically.
+- Hard ceiling: 60 minutes per job, enforced by the job worker. Do not run or suggest operations expected to exceed 60 minutes without user approval; split larger work first.
 
 ## VCM Durable Project Docs
 
@@ -94,6 +102,7 @@ const MANAGED_FILES = [
     content: `# VCM runtime task metadata, handoffs, session records, logs, and task worktrees.
 .ai/vcm/
 .claude/worktrees/
+.ai/tools/__pycache__/
 `
   },
   {
@@ -171,6 +180,11 @@ const MANAGED_FILES = [
 - Fill the PR body from final acceptance, review report, docs-sync report, known-issues disposition, and commits.
 - Do not perform technical review or validation during PR preparation; route missing evidence to the responsible role.
 - Create a draft PR by default unless the user requests a ready PR.
+
+### Background Jobs
+
+- Never background a Bash command: no \`run_in_background\`, \`nohup\`, \`setsid\`, \`disown\`, or trailing \`&\`.
+- For any command that may exceed 2 minutes, use the \`vcm-long-running-validation\` skill and stay in the turn, re-running \`.ai/tools/watch-job\` until it reports a terminal result.
 `
   },
   {
@@ -231,6 +245,11 @@ const MANAGED_FILES = [
 - When crate-external public APIs change, require \`.ai/tools/generate-public-surface --check\` or regeneration.
 - Read \`.ai/vcm/handoffs/known-issues.md\` and promote confirmed unresolved issues to \`docs/known-issues.md\`.
 - Write \`.ai/vcm/handoffs/docs-sync-report.md\` with decision, evidence reviewed, architecture drift check, docs updated, docs left unchanged, remaining documentation risks, and handoff notes.
+
+### Background Jobs
+
+- Never background a Bash command: no \`run_in_background\`, \`nohup\`, \`setsid\`, \`disown\`, or trailing \`&\`.
+- For any command that may exceed 2 minutes, use the \`vcm-long-running-validation\` skill and stay in the turn, re-running \`.ai/tools/watch-job\` until it reports a terminal result.
 `
   },
   {
@@ -280,6 +299,11 @@ const MANAGED_FILES = [
 - Do not request Replan because of workload, session length, or context size.
 - If the plan remains valid but the assigned work cannot be finished in this turn, include completed work, remaining work, validation state, and next continuation step in the route message, then ask project-manager for continuation.
 - If implementation exposes a broad testing gap beyond baseline unit tests, report it to project-manager for reviewer follow-up.
+
+### Background Jobs
+
+- Never background a Bash command: no \`run_in_background\`, \`nohup\`, \`setsid\`, \`disown\`, or trailing \`&\`.
+- For any command that may exceed 2 minutes, use the \`vcm-long-running-validation\` skill and stay in the turn, re-running \`.ai/tools/watch-job\` until it reports a terminal result.
 `
   },
   {
@@ -326,6 +350,11 @@ const MANAGED_FILES = [
 
 - Write \`.ai/vcm/handoffs/review-report.md\` with decision, evidence reviewed, tests added or updated, commands run or checked, validation results, failed expectations, reproduction steps, skipped checks with reasons, coverage gaps, and required follow-ups.
 - Record confirmed unresolved issues in \`.ai/vcm/handoffs/known-issues.md\` only when they should survive current-task cleanup.
+
+### Background Jobs
+
+- Never background a Bash command: no \`run_in_background\`, \`nohup\`, \`setsid\`, \`disown\`, or trailing \`&\`.
+- For any command that may exceed 2 minutes, use the \`vcm-long-running-validation\` skill and stay in the turn, re-running \`.ai/tools/watch-job\` until it reports a terminal result.
 `
   },
   {
@@ -619,31 +648,52 @@ description: Use for builds, browser checks, E2E tests, release suites, or any v
 
 # VCM Long-Running Validation Skill
 
-Use this skill for builds, browser checks, E2E tests, release suites, or any command that may take long enough for shell-completion callbacks to become unreliable.
+Use this skill for builds, browser checks, E2E tests, release suites, or any command that may run longer than 2 minutes.
 
 ## Rule
 
-Do not start background jobs.
+Never run the Bash tool with \`run_in_background: true\`, and never detach a process with \`nohup\`, \`setsid\`, \`disown\`, or a trailing \`&\`. VCM denies these calls.
 
-The only allowed background job is \`.ai/tools/run-long-check\` when used through this skill.
+The only sanctioned long-running mechanism is \`.ai/tools/run-long-check\` plus \`.ai/tools/watch-job\` through this skill.
 
-This skill has a hard maximum timeout of 60 minutes. Do not run or suggest operations expected to exceed 60 minutes without user approval.
+The hard ceiling is 60 minutes per job, enforced by the job worker itself. Do not run or suggest operations expected to exceed 60 minutes without user approval; split larger work first.
 
 ## Protocol
 
-1. Start the command through \`.ai/tools/run-long-check\`.
-2. Write job state under \`.ai/vcm/jobs/<job-id>/\`.
-3. Run \`.ai/tools/watch-job <job-id> --timeout <duration>\` in the same turn.
-4. Treat success, failure, and timeout as explicit results.
-5. Read the final status and relevant log tail.
+1. Start the command with an explicit ceiling: \`.ai/tools/run-long-check --timeout <duration> -- <command>\`. Pick the ceiling from \`docs/TESTING.md\` guidance or a realistic estimate, never above 60m. The tool prints the job id and creates job state under \`.ai/vcm/jobs/<job-id>/\`.
+2. In the same turn, run \`.ai/tools/watch-job <job-id>\`. The default watch window is 8 minutes.
+3. If watch-job exits 125, the job is still running: run \`.ai/tools/watch-job <job-id>\` again immediately. Do not end the turn between windows.
+4. Repeat until watch-job reports a terminal result.
+5. Read the final status and the relevant log tail.
 6. Record command, result, duration, and required follow-up wherever the caller normally records command evidence.
 
 Example:
 
 \`\`\`bash
-.ai/tools/run-long-check -- cargo test --workspace
-.ai/tools/watch-job <job-id> --timeout 20m
+.ai/tools/run-long-check --timeout 30m -- cargo test --workspace
+.ai/tools/watch-job <job-id>
+.ai/tools/watch-job <job-id>   # repeat while the exit code is 125
 \`\`\`
+
+## Exit Codes
+
+Treat watch-job exit codes as explicit results:
+
+- \`0\`: success.
+- \`1\`: failed; read the log tails.
+- \`124\`: timeout; the job hit its ceiling and was killed; not passed.
+- \`125\`: still running; call watch-job again now.
+- \`4\`: orphaned or stale; the job lost foreground supervision and was killed, or its worker died; not passed.
+- \`2\`: usage error or unknown job id.
+
+## Supervision
+
+A running job requires a live foreground watcher:
+
+- watch-job renews the job supervision lease while it runs.
+- If no watcher renews the lease for about 2 minutes, the worker kills the command process group and records \`orphaned\`. A job cannot keep running unsupervised.
+- VCM also blocks ending the turn while a job is running. Stay in the turn and keep watching.
+- Only one validation job may run at a time; run-long-check refuses to start a second one.
 
 ## Job Files
 
@@ -652,23 +702,19 @@ Example:
 .ai/vcm/jobs/<job-id>/status.json
 .ai/vcm/jobs/<job-id>/stdout.log
 .ai/vcm/jobs/<job-id>/stderr.log
+.ai/vcm/jobs/<job-id>/lease
 \`\`\`
 
 ## Timeout
 
 Timeout is not "unknown". It is a command result.
 
-\`watch-job\` rejects timeouts over 60 minutes.
-
-On timeout:
+On timeout the worker stops the command process group and records \`timeout\` in \`status.json\`; watch-job reports it with exit code 124:
 
 - summarize the latest log tail
-- record the timeout in \`status.json\`
 - report whether the timed-out process was stopped
 - do not mark the command as passed
-- do not continue the job in the background
-
-\`watch-job\` should attempt to stop the timed-out command process group. If termination cannot be confirmed, say so in the summary.
+- do not retry in the background
 
 ## Cleanup
 
@@ -775,366 +821,19 @@ If delivery is manual, blocked, or the target role is busy, leave the route file
     path: ".ai/tools/run-long-check",
     category: "runtime-tool",
     mode: 0o755,
-    content: `#!/usr/bin/env python3
-import json
-import os
-import subprocess
-import sys
-import time
-import uuid
-from datetime import datetime, timezone
-from pathlib import Path
-
-
-def root_dir() -> Path:
-    return Path(__file__).resolve().parents[2]
-
-
-def now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-
-
-def write_json(path: Path, data: dict) -> None:
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(json.dumps(data, indent=2, sort_keys=True) + "\\n")
-    tmp.replace(path)
-
-
-def job_id() -> str:
-    timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
-    return f"{timestamp}-{uuid.uuid4().hex[:8]}"
-
-
-def start_job(command: list[str]) -> int:
-    root = root_dir()
-    job = job_id()
-    directory = root / ".ai/vcm/jobs" / job
-    directory.mkdir(parents=True, exist_ok=False)
-
-    (directory / "command.json").write_text(
-        json.dumps({"command": command, "cwd": "."}, indent=2, sort_keys=True) + "\\n"
-    )
-    write_json(
-        directory / "status.json",
-        {
-            "jobId": job,
-            "status": "queued",
-            "command": command,
-            "cwd": ".",
-            "startedAt": None,
-            "finishedAt": None,
-            "exitCode": None,
-            "durationSeconds": None,
-            "workerPid": None,
-            "processId": None,
-        },
-    )
-
-    subprocess.Popen(
-        [sys.executable, str(Path(__file__).resolve()), "--worker", job],
-        cwd=root,
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-        start_new_session=True,
-    )
-
-    print(f"job: {job}")
-    print(f"watch: .ai/tools/watch-job {job}")
-    return 0
-
-
-def run_worker(job: str) -> int:
-    root = root_dir()
-    directory = root / ".ai/vcm/jobs" / job
-    command_path = directory / "command.json"
-    status_path = directory / "status.json"
-
-    payload = json.loads(command_path.read_text())
-    command = payload["command"]
-    started = time.time()
-    started_at = now_iso()
-
-    with (directory / "stdout.log").open("wb") as stdout, (directory / "stderr.log").open("wb") as stderr:
-        process = subprocess.Popen(
-            command,
-            cwd=root,
-            stdout=stdout,
-            stderr=stderr,
-            start_new_session=True,
-        )
-        write_json(
-            status_path,
-            {
-                "jobId": job,
-                "status": "running",
-                "command": command,
-                "cwd": ".",
-                "startedAt": started_at,
-                "finishedAt": None,
-                "exitCode": None,
-                "durationSeconds": None,
-                "workerPid": os.getpid(),
-                "processId": process.pid,
-            },
-        )
-        exit_code = process.wait()
-
-    duration = round(time.time() - started, 3)
-    current = json.loads(status_path.read_text())
-    if current.get("status") == "timeout":
-        current["processExitCode"] = exit_code
-        current["processFinishedAt"] = now_iso()
-        current["processDurationSeconds"] = duration
-        write_json(status_path, current)
-        return 0
-
-    write_json(
-        status_path,
-        {
-            "jobId": job,
-            "status": "success" if exit_code == 0 else "failed",
-            "command": command,
-            "cwd": ".",
-            "startedAt": started_at,
-            "finishedAt": now_iso(),
-            "exitCode": exit_code,
-            "durationSeconds": duration,
-            "workerPid": os.getpid(),
-            "processId": process.pid,
-        },
-    )
-    return 0
-
-
-def main() -> int:
-    if len(sys.argv) >= 3 and sys.argv[1] == "--worker":
-        return run_worker(sys.argv[2])
-
-    if len(sys.argv) < 3 or sys.argv[1] != "--":
-        print("Usage: .ai/tools/run-long-check -- <command> [args...]", file=sys.stderr)
-        return 2
-
-    return start_job(sys.argv[2:])
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
-`
+    templatePath: "scripts/harness-tools/run-long-check"
   },
   {
     path: ".ai/tools/watch-job",
     category: "runtime-tool",
     mode: 0o755,
-    content: `#!/usr/bin/env python3
-import argparse
-import json
-import os
-import signal
-import sys
-import time
-from datetime import datetime, timezone
-from pathlib import Path
-
-
-MAX_TIMEOUT_SECONDS = 60 * 60
-
-
-def root_dir() -> Path:
-    return Path(__file__).resolve().parents[2]
-
-
-def parse_duration(value: str) -> float:
-    value = value.strip().lower()
-    if value.endswith("ms"):
-        return float(value[:-2]) / 1000
-    if value.endswith("s"):
-        return float(value[:-1])
-    if value.endswith("m"):
-        return float(value[:-1]) * 60
-    if value.endswith("h"):
-        return float(value[:-1]) * 3600
-    return float(value)
-
-
-def validate_duration(name: str, value: float, maximum: float | None = None) -> bool:
-    if value <= 0:
-        print(f"error: {name} must be positive", file=sys.stderr)
-        return False
-    if maximum is not None and value > maximum:
-        print(f"error: {name} exceeds maximum 60m", file=sys.stderr)
-        return False
-    return True
-
-
-def read_status(path: Path) -> dict:
-    return json.loads(path.read_text())
-
-
-def now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat().replace("+00:00", "Z")
-
-
-def write_json(path: Path, data: dict) -> None:
-    tmp = path.with_suffix(path.suffix + ".tmp")
-    tmp.write_text(json.dumps(data, indent=2, sort_keys=True) + "\\n")
-    tmp.replace(path)
-
-
-def started_duration(status: dict) -> float | None:
-    started_at = status.get("startedAt")
-    if not started_at:
-        return None
-    try:
-        started = datetime.fromisoformat(started_at.replace("Z", "+00:00"))
-    except ValueError:
-        return None
-    return round((datetime.now(timezone.utc) - started).total_seconds(), 3)
-
-
-def process_group_exists(pid: int) -> bool:
-    try:
-        os.killpg(pid, 0)
-        return True
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-
-
-def process_exists(pid: int) -> bool:
-    try:
-        os.kill(pid, 0)
-        return True
-    except ProcessLookupError:
-        return False
-    except PermissionError:
-        return True
-
-
-def stop_process(pid: int, signal_value: signal.Signals) -> str:
-    try:
-        os.killpg(pid, signal_value)
-        return "process-group"
-    except ProcessLookupError:
-        return "not-running"
-    except PermissionError:
-        try:
-            os.kill(pid, signal_value)
-            return "process"
-        except ProcessLookupError:
-            return "not-running"
-        except PermissionError:
-            return "permission-denied"
-
-
-def stop_process_group(pid: int) -> str:
-    if not process_group_exists(pid) and not process_exists(pid):
-        return "not-running"
-
-    mode = stop_process(pid, signal.SIGTERM)
-    if mode in {"not-running", "permission-denied"}:
-        return mode
-
-    deadline = time.time() + 2
-    while time.time() < deadline:
-        still_running = process_group_exists(pid) if mode == "process-group" else process_exists(pid)
-        if not still_running:
-            return f"terminated-{mode}"
-        time.sleep(0.1)
-
-    kill_mode = stop_process(pid, signal.SIGKILL)
-    if kill_mode == "not-running":
-        return f"terminated-{mode}"
-    if kill_mode == "permission-denied":
-        return "permission-denied"
-    return f"killed-{kill_mode}"
-
-
-def tail(path: Path, lines: int = 40) -> str:
-    if not path.is_file():
-        return ""
-    content = path.read_text(errors="replace").splitlines()
-    return "\\n".join(content[-lines:])
-
-
-def print_summary(job_id: str, status: dict, directory: Path) -> None:
-    print(f"job: {job_id}")
-    print(f"status: {status.get('status')}")
-    print(f"exitCode: {status.get('exitCode')}")
-    print(f"durationSeconds: {status.get('durationSeconds')}")
-    if status.get("status") == "timeout":
-        print(f"timeoutSeconds: {status.get('timeoutSeconds')}")
-        print(f"processStopResult: {status.get('processStopResult')}")
-
-    if status.get("status") in {"failed", "timeout"}:
-        stdout_tail = tail(directory / "stdout.log")
-        stderr_tail = tail(directory / "stderr.log")
-        if stdout_tail:
-            print("\\nstdout tail:")
-            print(stdout_tail)
-        if stderr_tail:
-            print("\\nstderr tail:")
-            print(stderr_tail)
-
-
-def main() -> int:
-    parser = argparse.ArgumentParser(description="Watch a file-backed long-running validation job.")
-    parser.add_argument("job_id")
-    parser.add_argument("--timeout", default="10m")
-    parser.add_argument("--interval", default="1s")
-    args = parser.parse_args()
-
-    try:
-        timeout = parse_duration(args.timeout)
-        interval = parse_duration(args.interval)
-    except ValueError as exc:
-        print(f"error: invalid duration: {exc}", file=sys.stderr)
-        return 2
-    if not validate_duration("timeout", timeout, MAX_TIMEOUT_SECONDS):
-        return 2
-    if not validate_duration("interval", interval):
-        return 2
-    directory = root_dir() / ".ai/vcm/jobs" / args.job_id
-    status_path = directory / "status.json"
-
-    deadline = time.time() + timeout
-    last_status: dict | None = None
-
-    while time.time() <= deadline:
-        if status_path.is_file():
-            last_status = read_status(status_path)
-            if last_status.get("status") in {"success", "failed"}:
-                print_summary(args.job_id, last_status, directory)
-                return 0 if last_status.get("status") == "success" else 1
-        time.sleep(interval)
-
-    timeout_status = dict(last_status or {})
-    process_id = timeout_status.get("processId")
-    stop_result = "no-process-id"
-    if isinstance(process_id, int):
-        stop_result = stop_process_group(process_id)
-
-    timeout_status.update(
-        {
-            "jobId": args.job_id,
-            "status": "timeout",
-            "finishedAt": now_iso(),
-            "exitCode": None,
-            "durationSeconds": started_duration(timeout_status),
-            "timeoutSeconds": timeout,
-            "processStopResult": stop_result,
-        }
-    )
-    if directory.is_dir():
-        write_json(status_path, timeout_status)
-    print_summary(args.job_id, timeout_status, directory)
-    return 124
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
-`
+    templatePath: "scripts/harness-tools/watch-job"
+  },
+  {
+    path: ".ai/tools/vcm-bash-guard",
+    category: "runtime-tool",
+    mode: 0o755,
+    templatePath: "scripts/harness-tools/vcm-bash-guard"
   }
 ];
 
@@ -1262,8 +961,9 @@ async function buildManifest(projectRoot) {
         source: "vcm-template",
         lifecycle: "long-term",
         jsonOwnership: {
-          topLevelKeys: ["hooks"],
-          hookMatchers: ["VCM"]
+          topLevelKeys: ["hooks", "env"],
+          hookMatchers: ["VCM"],
+          envKeys: ["BASH_DEFAULT_TIMEOUT_MS"]
         },
         uninstall: {
           action: "remove-owned-json-keys",
@@ -1481,15 +1181,16 @@ function mergeVcmHooks(settings) {
     }
   }
 
-  for (const eventName of ["UserPromptSubmit", "Stop", "PermissionRequest"]) {
-    hooks[eventName] = [
-      ...(Array.isArray(hooks[eventName]) ? hooks[eventName] : []),
+  for (const definition of VCM_HOOK_DEFINITIONS) {
+    hooks[definition.eventName] = [
+      ...(Array.isArray(hooks[definition.eventName]) ? hooks[definition.eventName] : []),
       {
+        ...(definition.matcher ? { matcher: definition.matcher } : {}),
         hooks: [
           {
             type: "command",
-            command: eventName === "PermissionRequest" ? VCM_PERMISSION_REQUEST_HOOK_COMMAND : VCM_HOOK_COMMAND,
-            timeout: 5
+            command: definition.command,
+            timeout: definition.timeout
           }
         ]
       }
@@ -1497,6 +1198,11 @@ function mergeVcmHooks(settings) {
   }
 
   next.hooks = hooks;
+
+  const env = isPlainObject(next.env) ? { ...next.env } : {};
+  env.BASH_DEFAULT_TIMEOUT_MS = VCM_BASH_DEFAULT_TIMEOUT_MS;
+  next.env = env;
+
   return next;
 }
 

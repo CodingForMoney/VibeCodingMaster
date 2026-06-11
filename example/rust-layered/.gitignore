@@ -1,8 +1,8 @@
 # VCM:BEGIN version=1
 # VCM runtime task metadata, handoffs, session records, logs, and task worktrees.
-# This example keeps .ai/vcm/ visible so readers can inspect runtime handoff artifacts.
-# .ai/vcm/
+.ai/vcm/
 .claude/worktrees/
+.ai/tools/__pycache__/
 # VCM:END
 
 /target/
