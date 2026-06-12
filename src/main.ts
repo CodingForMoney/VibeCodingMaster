@@ -11,9 +11,11 @@ import { getDefaultStaticDir, startServer } from "./backend/server.js";
 
 export interface MainOptions {
   dev?: boolean;
+  help?: boolean;
   host?: string;
   port?: number;
   open?: boolean;
+  version?: boolean;
 }
 
 export function parseMainArgs(argv: string[]): MainOptions {
@@ -21,8 +23,12 @@ export function parseMainArgs(argv: string[]): MainOptions {
   for (const arg of argv) {
     if (arg === "--dev") {
       options.dev = true;
+    } else if (arg === "--help" || arg === "-h") {
+      options.help = true;
     } else if (arg === "--open") {
       options.open = true;
+    } else if (arg === "--version" || arg === "-v") {
+      options.version = true;
     } else if (arg.startsWith("--host=")) {
       options.host = arg.slice("--host=".length);
     } else if (arg.startsWith("--port=")) {
@@ -34,6 +40,15 @@ export function parseMainArgs(argv: string[]): MainOptions {
 
 export async function main(argv = process.argv.slice(2)): Promise<void> {
   const options = parseMainArgs(argv);
+  if (options.version) {
+    console.log(readPackageVersion());
+    return;
+  }
+  if (options.help) {
+    console.log(renderHelp());
+    return;
+  }
+
   const backendPort = options.port ?? DEFAULT_BACKEND_PORT;
   const host = options.host ?? "127.0.0.1";
   const backend = await startServer({
@@ -70,6 +85,32 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
     await backend.close();
     process.exit(0);
   });
+}
+
+function readPackageVersion(): string {
+  const packageJsonPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "package.json");
+  try {
+    const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, "utf8")) as { version?: unknown };
+    if (typeof packageJson.version === "string" && packageJson.version.trim()) {
+      return packageJson.version;
+    }
+  } catch {
+    // Fall through to an explicit unknown version instead of starting the server.
+  }
+  return "unknown";
+}
+
+function renderHelp(): string {
+  return `Usage:
+  vcm [options]
+
+Options:
+  --host=<host>     Host to bind. Default: 127.0.0.1
+  --port=<port>     Backend port. Default: ${DEFAULT_BACKEND_PORT}
+  --open            Open behavior flag for compatible launchers.
+  --dev             Start with Vite dev frontend.
+  -v, --version     Print VCM version and exit.
+  -h, --help        Print this help and exit.`;
 }
 
 function isMainModule(): boolean {

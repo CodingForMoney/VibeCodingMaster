@@ -50,7 +50,16 @@ From npm:
 
 ```bash
 npm install -g vibe-coding-master
+vcm --version
 vcm
+```
+
+Useful CLI flags:
+
+```bash
+vcm --help
+vcm --version
+vcm --host=127.0.0.1 --port=4173
 ```
 
 From source:
