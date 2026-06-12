@@ -151,9 +151,9 @@ The recommended flow is:
 
 ```text
 project-manager
-  -> architect architecture plan
-  -> coder implementation and validation
-  -> reviewer independent review
+  -> architect architecture plan and code scaffolding
+  -> coder implementation and baseline unit checks
+  -> reviewer independent validation
   -> architect docs sync / architecture drift check
   -> project-manager final acceptance, commit, and PR
 ```
@@ -215,7 +215,7 @@ The left sidebar is intentionally compact and collapsible:
 - `New Task`: one `task name` input.
 - `Tasks`: task list and task status.
 
-All sidebar sections are collapsed by default. When no task is selected, `Repository Path` opens by default.
+All sidebar sections are collapsed by default. When no task is selected, `Repository Path` opens by default. The sidebar behaves as a single-open accordion: opening one section closes the previously open section, and clicking the open section collapses it.
 
 Opening `Connected Repository` refreshes the base repo status through the
 backend. VCM does not poll it continuously. The `Pull` button runs
@@ -393,6 +393,7 @@ Translation behavior:
 - Translation events are cached under the task runtime repo at `.ai/vcm/translation/<task>/<role>/<session-id>.jsonl` and delivered to the frontend through HTTP polling.
 - The polling cursor is the next expected seq: `after=18` acknowledges seq `1..17` and returns seq `18+`; there is no snapshot mismatch error.
 - The translation panel retains the most recent 500 entries per role session in frontend/backend memory. Older entries are pruned from the live panel state and event cache to keep long sessions responsive.
+- When new translation events arrive, the active translation panel automatically scrolls to the bottom so the latest output, retry result, or conversation boundary is visible.
 - Failed output translations are tracked in a backend failure list. When failures exist, the panel shows `Ignore N` and `Retry N`; retry reuses the original entry id so the failed row is replaced by the normal translating/translated flow. If an old failed entry is pruned by the 500-entry cap, its failure-list item is removed too.
 - Assistant prose is shown as English source while translating, then replaced by the translated Chinese result.
 - Assistant prose renders Markdown in the panel, including headings, lists, code fences, tables, and links.

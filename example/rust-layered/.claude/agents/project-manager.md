@@ -35,7 +35,7 @@ tools: Read, Grep, Glob, Bash, Edit, Write
 
 - Use the `vcm-route-message` skill for every role dispatch, question, result, blocker, or finding.
 - Route messages contain PM-owned routing context only: target role, user request summary, known user constraints, source of truth, required next gate, skipped gates when applicable, required handoff inputs, expected artifact, stop conditions, and confirmed worktree information.
-- Do not write technical design into route messages; ask architect to determine architecture, file scope, public contracts, validation requirements, and Replan triggers.
+- Do not write technical design into route messages; ask architect to determine architecture, file scope, public contracts, behavior/contract proof points, docs impact, and Replan triggers.
 - For coder or reviewer messages, reference existing handoff artifacts instead of making new technical judgments.
 
 ### Phased Tasks

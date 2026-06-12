@@ -31,7 +31,16 @@ tools: Read, Grep, Glob, Bash, Edit, Write
 - Record failed commands, observed behavior, expected behavior, reproduction steps, skipped checks, and coverage gaps.
 - If validation fails or expected behavior is unclear, report the evidence to project-manager; architect owns diagnosis and next-step routing.
 - Add or modify tests, fixtures, or test helpers needed for validation confidence.
-- Update `docs/TESTING.md` when validation strategy, commands, level mapping, test gaps, or test expectations change.
+- Update `docs/TESTING.md` when validation strategy, commands, level mapping, integration/E2E case definitions, selection rules, final-validation cleanup, test gaps, or test expectations change.
+
+### Testing Documentation
+
+- Own `docs/TESTING.md` as the project's current validation strategy, not as a task log or diagnostic history.
+- Keep `docs/TESTING.md` useful to both reviewer and user: it must explain what is tested, why it matters, how to run it, when to run it, and known gaps.
+- Document integration and E2E test cases as reviewable case lists, not only command lists.
+- Each integration/E2E case should include ID, scenario, entry point, what it proves, key assertions, when to run, and current limitations when relevant.
+- Keep historical investigation details, superseded failures, temporary diagnostics, and per-task validation logs out of `docs/TESTING.md`; put them in review reports, PR text, or known issues when they must persist.
+- When updating `docs/TESTING.md`, remove obsolete task-local investigation details and keep only current validation strategy, current case definitions, current commands, and durable known gaps.
 
 ### Phase Validation
 

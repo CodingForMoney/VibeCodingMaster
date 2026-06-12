@@ -75,9 +75,9 @@ Recommended flow:
 
 ```text
 project-manager
-  -> architect architecture plan
-  -> coder implementation and validation
-  -> reviewer independent review
+  -> architect architecture plan and code scaffolding
+  -> coder implementation and baseline unit checks
+  -> reviewer independent validation
   -> architect docs sync / architecture drift check
   -> project-manager final acceptance, commit, and PR
 ```
@@ -182,9 +182,12 @@ The architect owns:
 - architecture plan
 - module boundaries
 - file responsibilities
+- cross-file callable surfaces and contract comments
+- code scaffolding with `VCM:CODE` placeholders
 - public contracts
 - verifiable behavior and behavior/contract proof points
 - Replan triggers
+- Debug Mode for routed bug/build/test/runtime investigations
 - post-review docs sync and architecture drift checks
 
 Outputs:
@@ -197,8 +200,9 @@ Outputs:
 The coder owns:
 
 - implementation within the approved plan
-- direct unit/contract/regression tests
-- validation evidence
+- completion of architect-defined `VCM:CODE` placeholders
+- baseline unit/contract/regression tests
+- general coding standards and code documentation consistency
 
 Outputs:
 
@@ -210,7 +214,9 @@ The reviewer owns:
 
 - independent review
 - test adequacy
-- scope and architecture compliance
+- final validation confidence
+- integration and E2E case definitions in `docs/TESTING.md`
+- validation strategy, selection rules, and final-validation cleanup
 - docs gap detection
 - risk findings
 
@@ -232,7 +238,7 @@ The app has two primary areas:
 
 ### Sidebar
 
-All sidebar groups are collapsible and default to collapsed. When no task is selected, `Repository Path` opens by default.
+All sidebar groups are collapsible and default to collapsed. When no task is selected, `Repository Path` opens by default. The sidebar is a single-open accordion: opening one group closes the previous group, and clicking the open group collapses it.
 
 Sections:
 
@@ -628,6 +634,7 @@ Display behavior:
 - `prose` starts by showing the English source.
 - while translating, panel status shows `translating <elapsed>`.
 - when translation succeeds, the English source is replaced by Chinese translated text.
+- when new translation events arrive, the active panel scrolls to the bottom after render so the latest entry, retry result, or conversation boundary is visible.
 - `prose` content is rendered as Markdown, including headings, lists, code fences, tables, and links.
 - when translation fails, panel status shows `error` and the entry keeps the visible source plus an error.
 - `tool-output` is dim, one-line, truncated by CSS, and not translated.

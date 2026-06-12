@@ -40,9 +40,10 @@ export function TranslationPanel({ active = true, taskSlug, role, sessionId }: T
   const [promptPreviews, setPromptPreviews] = useState<TranslationPromptPreview[]>([]);
   const [testResult, setTestResult] = useState<Awaited<ReturnType<typeof apiClient.testTranslationProvider>> | undefined>();
   const [pollRevision, setPollRevision] = useState(0);
+  const [scrollRevision, setScrollRevision] = useState(0);
   const activeRef = useRef(active);
   const cursorRef = useRef(1);
-  const bottomRef = useRef<HTMLDivElement | null>(null);
+  const entryListRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     activeRef.current = active;
@@ -128,8 +129,16 @@ export function TranslationPanel({ active = true, taskSlug, role, sessionId }: T
     if (!active) {
       return;
     }
-    bottomRef.current?.scrollIntoView({ block: "nearest" });
-  }, [active, entries.length]);
+    const entryList = entryListRef.current;
+    if (!entryList) {
+      return;
+    }
+
+    const frame = window.requestAnimationFrame(() => {
+      entryList.scrollTop = entryList.scrollHeight;
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [active, scrollRevision]);
 
   const activeTranslationStartedAt = getActiveTranslationStartedAt(entries);
   useEffect(() => {
@@ -200,6 +209,7 @@ export function TranslationPanel({ active = true, taskSlug, role, sessionId }: T
         }
         return trimmed.entries;
       });
+      setScrollRevision((current) => current + 1);
     }
   }
 
@@ -340,7 +350,7 @@ export function TranslationPanel({ active = true, taskSlug, role, sessionId }: T
 
       {error ? <div className="error-banner">{error}</div> : null}
 
-      <div className="translation-entry-list">
+      <div className="translation-entry-list" ref={entryListRef}>
         {entries.length === 0 ? <p className="muted">Translated Claude Code output will appear here.</p> : null}
         {entries.map((entry) => (
           <TranslationEntryRow
@@ -348,7 +358,6 @@ export function TranslationPanel({ active = true, taskSlug, role, sessionId }: T
             key={entry.id}
           />
         ))}
-        <div ref={bottomRef} />
       </div>
 
       <div className="translation-composer">

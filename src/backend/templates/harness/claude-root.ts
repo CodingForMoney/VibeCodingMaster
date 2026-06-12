@@ -18,7 +18,7 @@ export function renderRootClaudeHarnessRules(): string {
 
 - \`docs/ARCHITECTURE.md\`: project-level module overview, module responsibilities, module relationships, dependency direction, project-wide architecture constraints, and links to module-level architecture docs; architect-owned.
 - \`<module>/ARCHITECTURE.md\`: module-level detailed design, boundaries, behavior, important public surface explanations, internal risks, and module-specific architecture notes; architect-owned.
-- \`docs/TESTING.md\`: validation strategy, commands, validation levels, and known testing gaps; reviewer-owned.
+- \`docs/TESTING.md\`: validation strategy, commands, validation levels, integration/E2E case definitions, final-validation cleanup, and known testing gaps; reviewer-owned.
 - \`docs/known-issues.md\`: durable known issues and accepted limitations; architect-owned.
 - \`.ai/generated/module-index.json\`: generated module index; use it to find layers, modules, manifests, module docs, source files, test files, and workspace dependencies.
 - \`.ai/generated/public-surface.json\`: generated crate-external public API index; use it to inspect module-to-module public interfaces and source evidence.
@@ -26,7 +26,7 @@ export function renderRootClaudeHarnessRules(): string {
 ## VCM Task Flow
 
 - Code changes use the full route: \`project-manager -> architect -> coder -> reviewer -> architect docs sync -> project-manager final acceptance\`.
-- Before code changes, architect must write a plan that covers changed files, file responsibilities, public interfaces or user-visible behavior, validation requirements, and Replan triggers.
+- Before code changes, architect must write an architecture plan and code scaffolding that cover file responsibilities, cross-file callable surfaces, user-visible behavior, docs impact, risks, and Replan triggers.
 - Docs-only changes may use: \`project-manager -> architect -> project-manager final acceptance\`.
 - Test-only or validation-only work may use: \`project-manager -> reviewer -> project-manager final acceptance\`.
 - If a docs/test/validation-only task reveals required code, architecture, public contract, dependency, durable-doc, or test-strategy changes, route back through the full code-change flow.
