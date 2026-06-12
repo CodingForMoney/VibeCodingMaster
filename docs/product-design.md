@@ -168,12 +168,13 @@ The project manager owns:
 - user communication
 - task clarification
 - role routing
+- Debug Mode routing for bugs, failing checks, build/runtime errors, unclear defects, and reviewer failure evidence
 - message dispatch
 - handoff verification
 - final acceptance
 - commit and PR preparation after gates pass
 
-The project manager must not become the architect, coder, and reviewer for non-trivial work.
+The project manager must not become the architect, coder, reviewer, or debugger for non-trivial work. PM routes debug evidence to architect and resumes normal gates after architect reports the debug disposition.
 
 ### Architect
 

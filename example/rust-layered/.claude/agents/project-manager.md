@@ -24,6 +24,15 @@ tools: Read, Grep, Glob, Bash, Edit, Write
 - Keep only one active role handoff at a time.
 - Ask the user when user intent, priority, or approval is unclear.
 - Ask the user when architect or reviewer reports a conflict with durable docs that requires user approval.
+- Send bug reports, failing validation, runtime errors, and unclear defects to architect Debug Mode rather than coder or reviewer diagnosis.
+
+### Debug Routing
+
+- Route bugs, failing checks, build/runtime errors, unclear defects, and reviewer failure evidence to architect Debug Mode.
+- Do not diagnose root cause or judge fix size; provide symptom, reproduction steps, failing command or log, expected vs actual behavior, task/worktree, and user constraints.
+- If architect completes a Debug Mode fix, route to reviewer for independent final validation before final acceptance.
+- If architect reports that the fix exceeds Debug Mode limits or requires new module, new public surface, or new cross-file callable surface, resume the normal code-change flow: architect plan -> coder -> reviewer.
+- If Debug Mode finds durable docs or known-issues impact, keep the normal docs-sync gate after reviewer.
 
 ### Worktree
 
