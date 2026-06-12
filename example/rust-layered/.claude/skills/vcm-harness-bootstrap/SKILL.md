@@ -65,7 +65,9 @@ This skill is an operating procedure. It does not replace the deterministic VCM 
 
 ### `docs/TESTING.md`
 
-- Document validation levels, project-native validation commands, unit/integration test placement, generated-context freshness checks, and known testing gaps.
+- Document validation levels, project-native validation commands, validation selection rules, final-validation cleanup, unit/integration test placement, generated-context freshness checks, and known testing gaps.
+- Document integration and E2E test cases as reviewable case lists. Each case should include ID, scenario, entry point, what it proves, key assertions, when to run, and current limitations when relevant.
+- Keep historical investigation details, superseded failures, temporary diagnostics, and per-task validation logs out of `docs/TESTING.md`.
 - Keep reviewer ownership of validation strategy and testing documentation clear.
 
 ## Final Summary

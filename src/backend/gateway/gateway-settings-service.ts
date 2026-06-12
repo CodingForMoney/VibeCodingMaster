@@ -23,6 +23,7 @@ export interface GatewaySettingsFile {
   };
   pendingConfirmations: GatewayPendingConfirmations;
   pushCursors: Record<string, GatewayPushCursor>;
+  latestPmReplies: Record<string, GatewayLatestPmReply>;
   lastPollStatus: GatewayPollStatus;
   lastMessageStatus: GatewayMessageStatus | null;
   updatedAt: string;
@@ -41,6 +42,18 @@ export interface GatewayBindingSettings {
 export interface GatewayPushCursor {
   lastTranscriptEventId: string | null;
   lastTranscriptTimestamp: string | null;
+}
+
+export interface GatewayLatestPmReply {
+  repoRoot: string;
+  taskSlug: string;
+  sessionId: string;
+  claudeSessionId: string;
+  transcriptEventId: string | null;
+  transcriptTimestamp: string | null;
+  capturedAt: string;
+  text: string;
+  truncated: boolean;
 }
 
 export interface GatewaySettingsService {
@@ -112,6 +125,7 @@ export function createGatewaySettingsService(deps: GatewaySettingsServiceDeps): 
           recentInboundMessageIds: []
         },
         pushCursors: {},
+        latestPmReplies: current.latestPmReplies,
         lastPollStatus: {
           state: "idle"
         },
@@ -157,6 +171,9 @@ export function normalizeSettings(input: Partial<GatewaySettingsFile>, timestamp
     ? input.pendingConfirmations as GatewayPendingConfirmations
     : {};
   const pushCursors = isObject(input.pushCursors) ? input.pushCursors as Record<string, GatewayPushCursor> : {};
+  const latestPmReplies = isObject(input.latestPmReplies)
+    ? input.latestPmReplies as Record<string, GatewayLatestPmReply>
+    : {};
 
   return {
     version: 1,
@@ -186,6 +203,7 @@ export function normalizeSettings(input: Partial<GatewaySettingsFile>, timestamp
       closeTask: normalizeCloseTaskConfirmation(pendingInput.closeTask)
     },
     pushCursors: normalizePushCursors(pushCursors),
+    latestPmReplies: normalizeLatestPmReplies(latestPmReplies),
     lastPollStatus: normalizePollStatus(input.lastPollStatus),
     lastMessageStatus: normalizeMessageStatus(input.lastMessageStatus),
     updatedAt: typeof input.updatedAt === "string" ? input.updatedAt : timestamp
@@ -226,6 +244,36 @@ function normalizePushCursors(input: Record<string, GatewayPushCursor>): Record<
     out[key] = {
       lastTranscriptEventId: normalizeNullableString(value.lastTranscriptEventId),
       lastTranscriptTimestamp: normalizeNullableString(value.lastTranscriptTimestamp)
+    };
+  }
+  return out;
+}
+
+function normalizeLatestPmReplies(input: Record<string, GatewayLatestPmReply>): Record<string, GatewayLatestPmReply> {
+  const out: Record<string, GatewayLatestPmReply> = {};
+  for (const [key, value] of Object.entries(input)) {
+    if (!isObject(value)) {
+      continue;
+    }
+    const repoRoot = normalizeNullableString(value.repoRoot);
+    const taskSlug = normalizeNullableString(value.taskSlug);
+    const sessionId = normalizeNullableString(value.sessionId);
+    const claudeSessionId = normalizeNullableString(value.claudeSessionId);
+    const capturedAt = normalizeNullableString(value.capturedAt);
+    const text = normalizeNullableString(value.text);
+    if (!repoRoot || !taskSlug || !sessionId || !claudeSessionId || !capturedAt || !text) {
+      continue;
+    }
+    out[key] = {
+      repoRoot,
+      taskSlug,
+      sessionId,
+      claudeSessionId,
+      transcriptEventId: normalizeNullableString(value.transcriptEventId),
+      transcriptTimestamp: normalizeNullableString(value.transcriptTimestamp),
+      capturedAt,
+      text,
+      truncated: value.truncated === true
     };
   }
   return out;

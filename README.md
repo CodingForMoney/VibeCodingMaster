@@ -50,7 +50,16 @@ From npm:
 
 ```bash
 npm install -g vibe-coding-master
+vcm --version
 vcm
+```
+
+Useful CLI flags:
+
+```bash
+vcm --help
+vcm --version
+vcm --host=127.0.0.1 --port=4173
 ```
 
 From source:
@@ -151,9 +160,9 @@ The recommended flow is:
 
 ```text
 project-manager
-  -> architect architecture plan
-  -> coder implementation and validation
-  -> reviewer independent review
+  -> architect architecture plan and code scaffolding
+  -> coder implementation and baseline unit checks
+  -> reviewer independent validation
   -> architect docs sync / architecture drift check
   -> project-manager final acceptance, commit, and PR
 ```
@@ -210,12 +219,12 @@ The left sidebar is intentionally compact and collapsible:
 - `Repository Path`: path input on one row; `Recent` and `Connect` on the next row.
 - `Connected Repository`: connected base repo path, branch, upstream/ahead-behind status, commit hash, working tree state, and a `Pull` button.
 - `Settings`: `Theme`, `Flow pause alert`, `Try alert`, `Messages`, and `Events`.
-- `Gateway`: Weixin iLink binding, Gateway on/off, Gateway translation, QR login, and recent Gateway status.
+- `Gateway`: Weixin iLink binding, Gateway on/off, Gateway translation, and QR login.
 - `VCM Harness`: fixed-install status, bootstrap completion checks, and the bootstrap terminal when one is running.
 - `New Task`: one `task name` input.
 - `Tasks`: task list and task status.
 
-All sidebar sections are collapsed by default. When no task is selected, `Repository Path` opens by default.
+All sidebar sections are collapsed by default. When no task is selected, `Repository Path` opens by default. The sidebar behaves as a single-open accordion: opening one section closes the previously open section, and clicking the open section collapses it.
 
 Opening `Connected Repository` refreshes the base repo status through the
 backend. VCM does not poll it continuously. The `Pull` button runs
@@ -236,6 +245,8 @@ Gateway rules:
 - One phone identity binds to one desktop VCM instance.
 - The phone can manage projects and tasks available to that desktop VCM instance.
 - When the desktop UI has an active task selected, Gateway uses that task automatically.
+- After binding, VCM keeps a lightweight Gateway connection for `/start` and read-only commands even when the `Gateway` toggle is off.
+- VCM caches the latest PM reply for each task locally, so `/start` can immediately return the current task's latest PM status when available.
 - Plain text messages go only to the current task's `project-manager`.
 - Gateway never sends directly to `architect`, `coder`, or `reviewer`.
 - Gateway credentials and audit logs stay in local app state, not in connected repositories.
@@ -254,12 +265,12 @@ Gateway state is stored locally under:
 3. Click `Start QR Login`.
 4. VCM opens a global `Weixin Gateway Login` dialog with a QR code.
 5. Scan the QR code with Weixin and confirm login on the phone.
-6. Click `Check QR` in the dialog.
+6. Click `Confirm` in the dialog.
 7. After binding succeeds, close the dialog and turn `Gateway` on in the sidebar.
 
-`Start QR Login` creates a new Tencent iLink QR login session. `Check QR` asks iLink whether the QR code has been scanned and confirmed. If the QR code expires, click `Start QR Login` again.
+`Start QR Login` is shown only when Gateway is not bound. It creates a new Tencent iLink QR login session and opens the QR dialog. The dialog `Confirm` button asks iLink whether the QR code has been scanned and confirmed. After binding succeeds, the sidebar shows `Reset Binding` instead of `Start QR Login`.
 
-The `Gateway` toggle is disabled until a QR login has produced a usable iLink token. `Reset Binding` clears the stored token and bound Weixin identity so the desktop VCM can bind again.
+The `Gateway` toggle is disabled until a QR login has produced a usable iLink token. After binding, VCM keeps receiving `/help`, `/start`, `/status`, `/projects`, and `/tasks` even when the toggle is off. Turning `Gateway` on, either from desktop or by sending `/start`, enables PM messages, task-changing commands, and PM reply push. `Reset Binding` clears the stored token and bound Weixin identity so the desktop VCM can bind again.
 
 When Gateway is turned on, VCM automatically turns off the browser `Flow pause alert` and disables `Try alert`. Gateway becomes the notification path, so the browser should not show blocking flow-pause dialogs while the user is managing the task from Weixin.
 
@@ -273,15 +284,30 @@ When Gateway translation is on:
 - The prompt sent to PM includes only the translated English text with a `[VCM Gateway]` marker.
 - The original Chinese text is not included in the PM prompt.
 - PM replies are translated back to Chinese before VCM sends them to Weixin.
+- If PM reply translation fails or times out, VCM sends a translation failure notice instead of the English source. The user can send `/retry` to retry the latest failed Gateway output translation.
 
 When Gateway translation is off, plain Weixin text is sent to PM as-is.
 
 ### Commands
 
-After Gateway is bound and turned on, send commands in the bound Weixin DM:
+After Gateway is bound, send commands in the bound Weixin DM.
+
+When `Gateway` is off, only these commands are accepted:
 
 ```text
 /help
+/start
+/status
+/projects
+/tasks
+```
+
+When `Gateway` is on, the full command set is accepted:
+
+```text
+/help
+/start
+/retry
 /status
 /projects
 /use-project <index-or-path>
@@ -295,7 +321,7 @@ After Gateway is bound and turned on, send commands in the bound Weixin DM:
 /translate off
 ```
 
-Plain text that does not start with `/` is sent as a message to the current task's PM session.
+Plain text that does not start with `/` is sent as a message to the current task's PM session only when `Gateway` is on.
 
 In normal use, VCM runs one project and one task at a time. If the desktop UI has a task selected, turning Gateway on syncs that project/task into Gateway automatically. `/status` also refreshes this context, so the phone usually does not need to run `/tasks` and `/use-task` before sending a PM message.
 
@@ -316,6 +342,8 @@ Typical mobile flow:
 
 - `/status`: shows Gateway, binding, translation, current project, current task, and last poll status.
 - `/status` also adopts the current desktop project/task when one is selected.
+- `/start`: turns Gateway on from the bound Weixin DM so full mobile task operations and PM messages are allowed. If the current task has a cached latest PM reply, `/start` includes it in the response.
+- `/retry`: retries the latest failed Gateway output translation in the current VCM process.
 - `/projects`: lists the current/recent repositories known by the desktop VCM.
 - `/use-project <index-or-path>`: selects the Gateway's current project context.
 - `/pull-current`: runs the same fast-forward-only connected repository pull as the desktop `Pull` button.
@@ -335,12 +363,14 @@ Typical mobile flow:
 ### Troubleshooting
 
 - If the QR dialog does not appear, refresh the page and click `Start QR Login` again.
-- If the QR status stays `wait`, confirm the login on the phone and click `Check QR` again.
+- If the QR status stays `wait`, confirm the login on the phone and click `Confirm` again.
 - If the QR code expires, start a new QR login.
 - If `Gateway` cannot be enabled, bind Weixin first.
-- If messages are not received, check that Gateway is on, the iLink token has not expired, and the Weixin DM is the bound identity.
+- If `/start` or read-only commands do not receive replies, check that the iLink token has not expired and the Weixin DM is the bound identity.
+- If PM messages or task-changing commands are rejected, check that Gateway is on.
 - If plain text cannot be sent to PM, select a project and task first, and make sure the task's PM session is running and idle.
 - If PM replies are not pushed, check that Gateway is on and the PM session is producing normal Claude transcript output.
+- If PM reply translation fails, send `/retry` from the bound Weixin DM. Retry state is memory-only and is cleared when VCM restarts.
 
 ## Translation
 
@@ -372,6 +402,7 @@ Translation behavior:
 - Translation events are cached under the task runtime repo at `.ai/vcm/translation/<task>/<role>/<session-id>.jsonl` and delivered to the frontend through HTTP polling.
 - The polling cursor is the next expected seq: `after=18` acknowledges seq `1..17` and returns seq `18+`; there is no snapshot mismatch error.
 - The translation panel retains the most recent 500 entries per role session in frontend/backend memory. Older entries are pruned from the live panel state and event cache to keep long sessions responsive.
+- When new translation events arrive, the active translation panel automatically scrolls to the bottom so the latest output, retry result, or conversation boundary is visible.
 - Failed output translations are tracked in a backend failure list. When failures exist, the panel shows `Ignore N` and `Retry N`; retry reuses the original entry id so the failed row is replaced by the normal translating/translated flow. If an old failed entry is pruned by the 500-entry cap, its failure-list item is removed too.
 - Assistant prose is shown as English source while translating, then replaced by the translated Chinese result.
 - Assistant prose renders Markdown in the panel, including headings, lists, code fences, tables, and links.
@@ -505,7 +536,7 @@ Each directed role route has exactly one message file. Route messages are the on
 
 ## Orchestration Modes
 
-VCM has a task-level `Auto orchestration` switch in the role console toolbar.
+VCM has a task-level `Auto orchestration` switch in the role console toolbar. New tasks default to auto orchestration.
 
 When it is off, VCM is in manual mode:
 
@@ -527,6 +558,7 @@ When it is on, VCM is in auto mode:
 - Just before terminal submission, VCM records `dispatchingAt`, waits briefly for the GUI to switch tabs, then writes to the embedded terminal.
 - After successful terminal write, VCM snapshots the delivered body as message history.
 - Claude Code `UserPromptSubmit` confirms that the prompt was accepted; VCM stores `acceptedAt` and clears the source route file if it still contains the same message.
+- If `UserPromptSubmit` does not confirm the auto-delivered message, VCM retries Enter from the backend PTY and finally records `failureReason` on the message if submission is still not confirmed.
 - When the GUI observes a newly dispatching auto message, it switches the active role tab to that message's target role before the message is submitted.
 - VCM enforces sequential turn-taking from hook state: a role that has accepted a prompt is busy until its `Stop` hook fires.
 - Additional pending files to a busy target role remain non-empty and are not written to that terminal.

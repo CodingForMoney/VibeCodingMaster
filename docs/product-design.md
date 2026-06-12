@@ -75,9 +75,9 @@ Recommended flow:
 
 ```text
 project-manager
-  -> architect architecture plan
-  -> coder implementation and validation
-  -> reviewer independent review
+  -> architect architecture plan and code scaffolding
+  -> coder implementation and baseline unit checks
+  -> reviewer independent validation
   -> architect docs sync / architecture drift check
   -> project-manager final acceptance, commit, and PR
 ```
@@ -168,12 +168,13 @@ The project manager owns:
 - user communication
 - task clarification
 - role routing
+- Debug Mode routing for bugs, failing checks, build/runtime errors, unclear defects, and reviewer failure evidence
 - message dispatch
 - handoff verification
 - final acceptance
 - commit and PR preparation after gates pass
 
-The project manager must not become the architect, coder, and reviewer for non-trivial work.
+The project manager must not become the architect, coder, reviewer, or debugger for non-trivial work. PM routes debug evidence to architect and resumes normal gates after architect reports the debug disposition.
 
 ### Architect
 
@@ -182,9 +183,12 @@ The architect owns:
 - architecture plan
 - module boundaries
 - file responsibilities
+- cross-file callable surfaces and contract comments
+- code scaffolding with `VCM:CODE` placeholders
 - public contracts
 - verifiable behavior and behavior/contract proof points
 - Replan triggers
+- Debug Mode for routed bug/build/test/runtime investigations
 - post-review docs sync and architecture drift checks
 
 Outputs:
@@ -197,8 +201,9 @@ Outputs:
 The coder owns:
 
 - implementation within the approved plan
-- direct unit/contract/regression tests
-- validation evidence
+- completion of architect-defined `VCM:CODE` placeholders
+- baseline unit/contract/regression tests
+- general coding standards and code documentation consistency
 
 Outputs:
 
@@ -210,7 +215,9 @@ The reviewer owns:
 
 - independent review
 - test adequacy
-- scope and architecture compliance
+- final validation confidence
+- integration and E2E case definitions in `docs/TESTING.md`
+- validation strategy, selection rules, and final-validation cleanup
 - docs gap detection
 - risk findings
 
@@ -232,7 +239,7 @@ The app has two primary areas:
 
 ### Sidebar
 
-All sidebar groups are collapsible and default to collapsed. When no task is selected, `Repository Path` opens by default.
+All sidebar groups are collapsible and default to collapsed. When no task is selected, `Repository Path` opens by default. The sidebar is a single-open accordion: opening one group closes the previous group, and clicking the open group collapses it.
 
 Sections:
 
@@ -628,6 +635,7 @@ Display behavior:
 - `prose` starts by showing the English source.
 - while translating, panel status shows `translating <elapsed>`.
 - when translation succeeds, the English source is replaced by Chinese translated text.
+- when new translation events arrive, the active panel scrolls to the bottom after render so the latest entry, retry result, or conversation boundary is visible.
 - `prose` content is rendered as Markdown, including headings, lists, code fences, tables, and links.
 - when translation fails, panel status shows `error` and the entry keeps the visible source plus an error.
 - `tool-output` is dim, one-line, truncated by CSS, and not translated.
@@ -670,7 +678,7 @@ Translation panel `Auto-send` is separate from task `Auto orchestration`:
 - `Auto-send` on: translate and send if there is no translation warning.
 - `Auto-send` off: translate to English draft and wait for user send.
 
-Task `Auto orchestration` is a compact selected/unselected button in the role console toolbar. `Translate` is a global task header toggle next to `Close Task`; it opens/closes the translation split for all role consoles, so switching roles keeps the same translation setting.
+Task `Auto orchestration` is a compact selected/unselected button in the role console toolbar. New tasks default to auto orchestration. `Translate` is a global task header toggle next to `Close Task`; it opens/closes the translation split for all role consoles, so switching roles keeps the same translation setting.
 
 ## 14. Mobile Gateway
 
@@ -683,6 +691,12 @@ Gateway product rules:
 - Binding is not tied to one project or one task.
 - The bound phone can select among the projects and tasks available to the
   desktop VCM instance.
+- After QR binding succeeds, VCM keeps a Gateway long-polling connection even
+  when Gateway is off; only `/help`, `/start`, `/status`, `/projects`, and
+  `/tasks` are accepted in that state. `/start` turns Gateway on from Weixin.
+- VCM caches the latest PM reply per task locally. When `/start` turns Gateway
+  on and the current task has a cached PM reply, the response includes that
+  latest PM reply so the mobile user can resume with context.
 - Plain mobile text is sent only to the current task's `project-manager`.
 - Gateway never sends directly to `architect`, `coder`, or `reviewer`.
 - Gateway can push PM assistant replies to Weixin whenever gateway is enabled,
@@ -690,6 +704,9 @@ Gateway product rules:
 - When gateway translation is enabled, mobile Chinese input is translated to
   English before PM receives it, and PM English replies are translated to
   Chinese before Weixin receives them.
+- If PM reply translation fails or times out, Gateway sends a translation
+  failure notice instead of the English source. The bound phone can send
+  `/retry` to retry the latest failed output translation kept in memory.
 - The PM prompt does not include the original Chinese text.
 - There is no multi-user allowlist. The security model is one bound DM identity.
 
@@ -793,6 +810,7 @@ VCM V1 is successful when:
 - Manual orchestration lets the user inspect pending route-file messages without auto-submitting Enter.
 - Auto orchestration can deliver pending route-file messages to idle running target roles.
 - Auto orchestration switches to the target role tab when VCM records `dispatchingAt`, before VCM submits the route-file message.
+- Auto orchestration treats `UserPromptSubmit` as the reliable acceptance confirmation; if confirmation does not arrive, backend PTY retries Enter and records a message `failureReason` after retry exhaustion.
 - Round completion detection waits for the final role in a chained conversation and can alert with prompt plus sound.
 - Translation settings save to `~/.vcm/settings.json`.
 - Translation reads Claude transcript JSONL reliably after start, resume, and restart.

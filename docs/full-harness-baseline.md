@@ -1,6 +1,6 @@
 # Full Harness Baseline
 
-Last updated: 2026-06-08
+Last updated: 2026-06-12
 
 Status: Temporary working document.
 
@@ -81,9 +81,9 @@ These entries match the current `example/rust-layered/.ai/vcm-harness-manifest.j
 | Claude settings | `.claude/settings.json` | json-merge | Long-term | VCM owns hook entries matching VCM command markers. |
 | Agent directory | `.claude/agents/` | VCM-created directory | Long-term | Contains the four core VCM role agents. |
 | Core agent | `.claude/agents/project-manager.md` | managed-block | Long-term | Project-manager role rules. |
-| Core agent | `.claude/agents/architect.md` | managed-block | Long-term | Architect role rules. |
-| Core agent | `.claude/agents/coder.md` | managed-block | Long-term | Coder role rules. |
-| Core agent | `.claude/agents/reviewer.md` | managed-block | Long-term | Reviewer role rules. |
+| Core agent | `.claude/agents/architect.md` | managed-block | Long-term | Architect role rules: plan document, code scaffolding, Debug Mode, docs sync. |
+| Core agent | `.claude/agents/coder.md` | managed-block | Long-term | Coder role rules: scaffold implementation, coding standards, baseline unit checks. |
+| Core agent | `.claude/agents/reviewer.md` | managed-block | Long-term | Reviewer role rules: independent validation, TESTING.md strategy, integration/E2E case lists. |
 | Skill directory | `.claude/skills/` | VCM-created directory | Conditional long-term | Keep while repo-local VCM skills are installed. |
 | Skill directory | `.claude/skills/vcm-route-message/` | VCM-created directory | Conditional long-term | Claude Code registration directory for the route-message skill. |
 | Skill directory | `.claude/skills/vcm-final-acceptance/` | VCM-created directory | Conditional long-term | Claude Code registration directory for the final-acceptance skill. |
@@ -124,7 +124,7 @@ VCM-owned harness and should not appear as manifest entries.
 | Project context | `CLAUDE.md` content outside VCM block | Project | Long-term | Rust-layered project facts and constraints. |
 | Project architecture | `docs/ARCHITECTURE.md` | Architect | Long-term | Project-level module overview, responsibilities, relationships, dependency direction, and links to module docs. |
 | Module architecture | `<module>/ARCHITECTURE.md` | Architect | Long-term | Module-level boundaries, behavior, important public surface explanations, and risks. |
-| Testing docs | `docs/TESTING.md` | Reviewer | Long-term | Validation levels, Rust commands, generated-context freshness checks, and testing gaps. |
+| Testing docs | `docs/TESTING.md` | Reviewer | Long-term | Validation levels, commands, selection rules, final-validation cleanup, integration/E2E case definitions, generated-context freshness checks, and testing gaps. |
 | Known issues | `docs/known-issues.md` | Architect | Rolling durable doc | Confirmed unresolved issues and accepted limitations. Remove fixed, rejected, or obsolete entries. |
 | Durable plans | `docs/plans/` | Project | Conditional long-term | Durable plans only when a large task needs them. Completed routine plans should be deleted after durable facts are promoted. |
 

@@ -15,6 +15,25 @@ tools: Read, Grep, Glob, Bash, Edit, Write
 - Own implementation and baseline implementation tests inside the approved task scope, current phase, role message, and architecture plan.
 - Do not decide architecture, module boundaries, public contracts, dependency direction, durable docs updates, or final test adequacy.
 
+### Coder Implementation Discipline
+
+- Implement the architect-defined scaffold exactly; do not change file responsibilities, callable-surface signatures, or architect-defined contract intent unless the architecture plan explicitly allows it.
+- Implement every `VCM:CODE` placeholder and remove all `VCM:CODE` markers before handoff.
+- Do not fake completion: no hardcoded success, disabled logic, swallowed errors, test-only shortcuts, or silent fallback that hides failure.
+- Keep the diff inside approved scope: no unrelated rewrites, drive-by refactors, renamed symbols, moved files, or formatting churn.
+- Preserve existing behavior unless the architecture plan explicitly changes it; keep existing call sites and shared code paths working.
+- Maintain code documentation: preserve architect-written comments, add comments for non-obvious implementation logic, remove stale/debug/TODO comments, and keep code and comments consistent.
+
+### General Coding Standards
+
+- Do not use magic values; name unexplained numbers, strings, states, commands, roles, event names, error codes, and protocol values with constants, enums, or domain types.
+- Use meaningful names everywhere; functions must describe behavior, booleans must read as true/false conditions, and vague or single-letter names are not allowed except for tiny conventional scopes.
+- Keep functions short and focused: no new or substantially changed function may exceed 50 logical lines, excluding blank lines and comments. Split longer logic into well-named private helpers.
+- Make error handling explicit; do not swallow errors, ignore fallible results, return fake success, or hide failure behind silent fallback.
+- Validate boundary inputs before using them in indexing, parsing, IO, network calls, database calls, or state transitions.
+- Avoid hidden global state and implicit side effects; make mutation, IO, caching, retries, and external calls visible from the code structure.
+- Keep formatting consistent with the existing project style; do not introduce unrelated formatting churn.
+
 ### Inputs
 
 - Before editing, read the role message, the architecture plan, current phase when present, affected code/tests, and validation instructions from the role message or project docs.

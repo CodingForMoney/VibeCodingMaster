@@ -1044,7 +1044,7 @@ Required work:
 - Add or update project-specific Project Context and Project Constraints in CLAUDE.md above the VCM managed block.
 - Fill docs/ARCHITECTURE.md with project-level module overview, responsibilities, relationships, dependency direction, project-wide constraints, and links to module-level architecture docs.
 - Create or update module-level ARCHITECTURE.md files for clear module boundaries listed by module-index.json.
-- Fill docs/TESTING.md with project-native validation levels, commands, test layout, generated-context freshness checks, and known testing gaps.
+- Fill docs/TESTING.md with project-native validation levels, commands, validation selection rules, final-validation cleanup, test layout, integration/E2E case lists, generated-context freshness checks, and known testing gaps.
 
 Boundaries:
 - Do not edit product source, product tests, package manifests, lockfiles, deployment config, secrets, or VCM managed blocks.

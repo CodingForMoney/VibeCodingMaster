@@ -161,7 +161,7 @@ export function TaskWorkspace({
     onLaunchStateChanged?.({
       taskSlug: task.taskSlug,
       roles,
-      autoOrchestration: (orchestration?.mode ?? "manual") === "auto",
+      autoOrchestration: (orchestration?.mode ?? "auto") === "auto",
       translationEnabled,
       statusLoaded: Boolean(statusReport),
       sessionCount: sessions.length,
@@ -375,7 +375,7 @@ export function TaskWorkspace({
                     model={models[role]}
                     active={isActive}
                     busy={busy}
-                    orchestrationMode={orchestration?.mode ?? "manual"}
+                    orchestrationMode={orchestration?.mode ?? "auto"}
                     translationEnabled={translationEnabled}
                     onPermissionModeChange={(permissionMode) => setRolePermissionMode(role, permissionMode)}
                     onModelChange={(model) => setRoleModel(role, model)}

@@ -16,6 +16,8 @@ describe("parseGatewayCommand", () => {
   });
 
   it("parses project, task, pull, and translation commands", () => {
+    expect(parseGatewayCommand("/start")).toEqual({ kind: "start" });
+    expect(parseGatewayCommand("/retry")).toEqual({ kind: "retry" });
     expect(parseGatewayCommand("/use-project \"/repo with spaces\"")).toEqual({
       kind: "use-project",
       selector: "/repo with spaces"

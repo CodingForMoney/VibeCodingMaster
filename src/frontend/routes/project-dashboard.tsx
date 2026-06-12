@@ -20,6 +20,15 @@ import { MessageTimeline, getMessageCounts } from "../components/message-timelin
 import { RepoConnectForm } from "../components/repo-connect-form.js";
 import { TaskNav } from "../components/task-nav.js";
 
+type SidebarSectionId =
+  | "repository-path"
+  | "connected-repository"
+  | "settings"
+  | "gateway"
+  | "vcm-harness"
+  | "new-task"
+  | "tasks";
+
 export interface ProjectDashboardProps {
   project: ProjectSummary | null;
   recentRepositoryPaths: string[];
@@ -46,7 +55,6 @@ export interface ProjectDashboardProps {
   onGatewayEnabledChange(enabled: boolean): void;
   onGatewayTranslationChange(enabled: boolean): void;
   onStartGatewayQrLogin(): void;
-  onCheckGatewayQrLogin(): void;
   onResetGatewayBinding(): void;
   onCreateTask(input: { taskSlug: string; createWorktree?: boolean; title?: string }): Promise<void>;
   onSelectTask(taskSlug: string): void;
@@ -92,7 +100,6 @@ export function ProjectDashboard({
   onGatewayEnabledChange,
   onGatewayTranslationChange,
   onStartGatewayQrLogin,
-  onCheckGatewayQrLogin,
   onResetGatewayBinding,
   onCreateTask,
   onSelectTask,
@@ -115,9 +122,28 @@ export function ProjectDashboard({
   const [createWorktree, setCreateWorktree] = useState(true);
   const [showMessages, setShowMessages] = useState(false);
   const [showEvents, setShowEvents] = useState(false);
+  const [openSidebarSection, setOpenSidebarSection] = useState<SidebarSectionId | null>(
+    () => activeTaskSlug ? null : "repository-path"
+  );
   const messageCounts = getMessageCounts(messages);
   const normalizedTaskSlug = taskSlug.trim();
   const activeTask = tasks.find((task) => task.taskSlug === activeTaskSlug) ?? null;
+
+  useEffect(() => {
+    setOpenSidebarSection((current) => {
+      if (activeTaskSlug && current === "repository-path") {
+        return null;
+      }
+      if (!activeTaskSlug && current === null) {
+        return "repository-path";
+      }
+      return current;
+    });
+  }, [activeTaskSlug]);
+
+  function handleSidebarSectionChange(sectionId: SidebarSectionId, open: boolean) {
+    setOpenSidebarSection(open ? sectionId : null);
+  }
 
   async function handleCreateTask(event: FormEvent) {
     event.preventDefault();
@@ -132,7 +158,11 @@ export function ProjectDashboard({
         <strong>VibeCodingMaster</strong>
       </header>
 
-      <SidebarSection title="Repository Path" defaultOpen={!activeTaskSlug}>
+      <SidebarSection
+        title="Repository Path"
+        open={openSidebarSection === "repository-path"}
+        onOpenChange={(open) => handleSidebarSectionChange("repository-path", open)}
+      >
         <RepoConnectForm
           defaultPath={project?.repoRoot ?? ""}
           recentPaths={recentRepositoryPaths}
@@ -144,7 +174,9 @@ export function ProjectDashboard({
       {project ? (
         <SidebarSection
           title="Connected Repository"
+          open={openSidebarSection === "connected-repository"}
           onOpenChange={(open) => {
+            handleSidebarSectionChange("connected-repository", open);
             if (open) {
               void onRefreshConnectedRepository();
             }
@@ -159,7 +191,11 @@ export function ProjectDashboard({
         </SidebarSection>
       ) : null}
 
-      <SidebarSection title="Settings">
+      <SidebarSection
+        title="Settings"
+        open={openSidebarSection === "settings"}
+        onOpenChange={(open) => handleSidebarSectionChange("settings", open)}
+      >
         <div className="sidebar-settings">
           <button
             aria-label={`Theme mode: ${getThemeModeLabel(themeMode)}`}
@@ -245,7 +281,9 @@ export function ProjectDashboard({
 
       <SidebarSection
         title="Gateway"
+        open={openSidebarSection === "gateway"}
         onOpenChange={(open) => {
+          handleSidebarSectionChange("gateway", open);
           if (open) {
             void onRefreshGateway();
           }
@@ -256,9 +294,7 @@ export function ProjectDashboard({
           qrCheck={gatewayQrCheck}
           qrLogin={gatewayQrLogin}
           status={gatewayStatus}
-          onCheckQrLogin={onCheckGatewayQrLogin}
           onEnabledChange={onGatewayEnabledChange}
-          onRefresh={onRefreshGateway}
           onResetBinding={onResetGatewayBinding}
           onStartQrLogin={onStartGatewayQrLogin}
           onTranslationChange={onGatewayTranslationChange}
@@ -266,7 +302,11 @@ export function ProjectDashboard({
       </SidebarSection>
 
       {project ? (
-        <SidebarSection title="VCM Harness">
+        <SidebarSection
+          title="VCM Harness"
+          open={openSidebarSection === "vcm-harness"}
+          onOpenChange={(open) => handleSidebarSectionChange("vcm-harness", open)}
+        >
           <HarnessPanel
             status={harnessStatus}
             bootstrapStatus={harnessBootstrapStatus}
@@ -280,7 +320,11 @@ export function ProjectDashboard({
       ) : null}
 
       {project ? (
-        <SidebarSection title="New Task">
+        <SidebarSection
+          title="New Task"
+          open={openSidebarSection === "new-task"}
+          onOpenChange={(open) => handleSidebarSectionChange("new-task", open)}
+        >
           <div className="task-create">
             <form onSubmit={handleCreateTask}>
               <input
@@ -315,7 +359,11 @@ export function ProjectDashboard({
       ) : null}
 
       {tasks.length > 0 ? (
-        <SidebarSection title="Tasks">
+        <SidebarSection
+          title="Tasks"
+          open={openSidebarSection === "tasks"}
+          onOpenChange={(open) => handleSidebarSectionChange("tasks", open)}
+        >
           <TaskNav tasks={tasks} activeTaskSlug={activeTaskSlug} onSelect={onSelectTask} />
         </SidebarSection>
       ) : null}
@@ -370,9 +418,7 @@ function getLaunchTemplateSummary(template: LaunchTemplate): string {
 
 function GatewayPanel({
   busy,
-  onCheckQrLogin,
   onEnabledChange,
-  onRefresh,
   onResetBinding,
   onStartQrLogin,
   onTranslationChange,
@@ -381,9 +427,7 @@ function GatewayPanel({
   status
 }: {
   busy?: boolean;
-  onCheckQrLogin(): void;
   onEnabledChange(enabled: boolean): void;
-  onRefresh(): Promise<void>;
   onResetBinding(): void;
   onStartQrLogin(): void;
   onTranslationChange(enabled: boolean): void;
@@ -392,42 +436,16 @@ function GatewayPanel({
   status: GatewayStatus | null;
 }) {
   const canEnable = Boolean(status?.binding.tokenConfigured);
+  const isBound = Boolean(status?.binding.tokenConfigured);
 
   return (
     <div className="gateway-panel">
-      <dl>
-        <div>
-          <dt>Status</dt>
-          <dd>{status ? `${status.enabled ? "on" : "off"}${status.running ? " / polling" : ""}` : "not loaded"}</dd>
-        </div>
-        <div>
-          <dt>Binding</dt>
-          <dd>{formatGatewayBinding(status)}</dd>
-        </div>
-        <div>
-          <dt>Project</dt>
-          <dd>{status?.currentProjectId ?? "none"}</dd>
-        </div>
-        <div>
-          <dt>Task</dt>
-          <dd>{status?.currentTaskSlug ?? "none"}</dd>
-        </div>
-        <div>
-          <dt>Last poll</dt>
-          <dd>{formatGatewayPoll(status)}</dd>
-        </div>
-        <div>
-          <dt>Last message</dt>
-          <dd>{formatGatewayMessage(status)}</dd>
-        </div>
-      </dl>
-
       <div className="gateway-actions">
         <button
           aria-pressed={Boolean(status?.enabled)}
           className={status?.enabled ? "settings-toggle is-active" : "settings-toggle"}
           disabled={busy || !status || (!status.enabled && !canEnable)}
-          title={canEnable ? "Enable or disable Weixin DM polling" : "Scan and confirm iLink login first"}
+          title={canEnable ? "Enable or disable PM messages and task-changing Gateway commands" : "Scan and confirm iLink login first"}
           type="button"
           onClick={() => status ? onEnabledChange(!status.enabled) : undefined}
         >
@@ -444,16 +462,17 @@ function GatewayPanel({
           <span>Translation</span>
           <span>{status?.translationEnabled ? "on" : "off"}</span>
         </button>
-        <button type="button" disabled={busy} onClick={onStartQrLogin}>Start QR Login</button>
-        <button type="button" disabled={busy || !qrLogin} onClick={onCheckQrLogin}>Check QR</button>
-        <button type="button" disabled={busy} onClick={() => void onRefresh()}>Refresh</button>
-        <button className="danger-button" type="button" disabled={busy || !status?.binding.tokenConfigured} onClick={onResetBinding}>
-          Reset Binding
-        </button>
+        {isBound ? (
+          <button className="danger-button" type="button" disabled={busy} onClick={onResetBinding}>
+            Reset Binding
+          </button>
+        ) : (
+          <button type="button" disabled={busy} onClick={onStartQrLogin}>Start QR Login</button>
+        )}
       </div>
 
       {qrLogin ? (
-        <p className="muted">QR login started. Use the login dialog or Check QR.</p>
+        <p className="muted">QR login started. Use the login dialog to confirm binding.</p>
       ) : null}
       {qrCheck ? (
         <p className="muted">
@@ -462,41 +481,6 @@ function GatewayPanel({
       ) : null}
     </div>
   );
-}
-
-function formatGatewayBinding(status: GatewayStatus | null): string {
-  if (!status) {
-    return "not loaded";
-  }
-  if (!status.binding.tokenConfigured) {
-    return "not logged in";
-  }
-  return status.binding.boundUserId
-    ? `bound to ${status.binding.boundUserId}`
-    : "logged in, waiting for first DM";
-}
-
-function formatGatewayPoll(status: GatewayStatus | null): string {
-  if (!status) {
-    return "not loaded";
-  }
-  const checked = status.lastPollStatus.checkedAt ? ` at ${formatTime(status.lastPollStatus.checkedAt)}` : "";
-  const error = status.lastPollStatus.error ? ` · ${status.lastPollStatus.error}` : "";
-  return `${status.lastPollStatus.state}${checked}${error}`;
-}
-
-function formatGatewayMessage(status: GatewayStatus | null): string {
-  if (!status?.lastMessageStatus) {
-    return "none";
-  }
-  const message = status.lastMessageStatus;
-  const pieces = [
-    message.direction,
-    message.command,
-    message.result,
-    message.checkedAt ? formatTime(message.checkedAt) : undefined
-  ].filter(Boolean);
-  return pieces.join(" / ") || "none";
 }
 
 function ConnectedRepositoryPanel({
@@ -840,21 +824,15 @@ function MessageDialog({
 
 function SidebarSection({
   children,
-  defaultOpen = false,
   onOpenChange,
+  open,
   title
 }: {
   children: ReactNode;
-  defaultOpen?: boolean;
   onOpenChange?(open: boolean): void;
+  open: boolean;
   title: string;
 }) {
-  const [open, setOpen] = useState(defaultOpen);
-
-  useEffect(() => {
-    setOpen(defaultOpen);
-  }, [defaultOpen]);
-
   return (
     <section className="sidebar-section">
       <button
@@ -862,11 +840,7 @@ function SidebarSection({
         className="sidebar-section-toggle"
         type="button"
         onClick={() => {
-          setOpen((current) => {
-            const nextOpen = !current;
-            onOpenChange?.(nextOpen);
-            return nextOpen;
-          });
+          onOpenChange?.(!open);
         }}
       >
         <span>{title}</span>

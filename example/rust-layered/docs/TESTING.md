@@ -5,7 +5,7 @@ Owner: reviewer
 
 ## Purpose
 
-`docs/TESTING.md` is the durable testing source of truth for this Rust workspace. Reviewer owns validation strategy, validation commands, validation levels, and known testing gaps.
+`docs/TESTING.md` is the durable testing source of truth for this Rust workspace. Reviewer owns validation strategy, validation commands, validation levels, integration/E2E case definitions, final-validation cleanup, and known testing gaps.
 
 ## Validation Levels
 
@@ -42,6 +42,24 @@ Choose the smallest command that gives the needed confidence for the role and ta
 - Reviewer owns integration test design and maintenance.
 - This project does not use `test-map.json`; changed files map to crates through `.ai/generated/module-index.json`.
 
+## Integration Test Cases
+
+| ID | Scenario | Entry point | What it proves | Key assertions | When to run | Current limitations |
+| --- | --- | --- | --- | --- | --- | --- |
+| INT-001 | Crate public behavior smoke | `cargo test -p <crate>` | A crate's public API and integration test file compile and run together. | The crate integration test passes and can call the crate through its public surface. | Run for changed crates or crate-external public API changes. | Current examples are intentionally minimal one-case smoke tests. |
+
+## E2E Test Cases
+
+| ID | Scenario | Entry point | What it proves | Key assertions | When to run | Current limitations |
+| --- | --- | --- | --- | --- | --- | --- |
+| E2E-001 | Application smoke | Not configured | No current project-level app journey exists in this example. | Not applicable. | Add before accepting application-level behavior changes. | L3 smoke E2E is intentionally absent in this harness example. |
+
+## Final Validation Cleanup
+
+- Before reviewer final validation, remove stale build/test artifacts when the project has such caches.
+- This example has no special cache cleanup beyond using fresh Rust commands in the current worktree.
+- Do not use results from before cleanup as final acceptance evidence when cache cleanup is required.
+
 ### Generated Context
 
 Run:
@@ -70,6 +88,6 @@ Regenerate without `--check` after module, manifest, source-file, test-file, or 
 
 - Each crate has colocated unit coverage for `module_summary()` and one basic integration test; broader behavior coverage is still minimal.
 - `module-index.json` and `public-surface.json` are generated context artifacts, not validation wrappers.
-- No L3/L4 smoke or release validation is configured.
+- No real L3/L4 smoke or release validation is configured; `E2E-001` documents the missing project-level application journey.
 
 Record durable unresolved testing gaps in `docs/known-issues.md` when they must survive task cleanup.

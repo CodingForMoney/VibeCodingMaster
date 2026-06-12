@@ -10,8 +10,21 @@ import type { RoleSessionRecord } from "../../../src/shared/types/session.js";
 import type { TaskRecord } from "../../../src/shared/types/task.js";
 
 describe("createMessageService", () => {
+  it("defaults new task orchestration to auto mode", async () => {
+    const harness = createHarness(["coder"]);
+
+    await expect(harness.service.getOrchestrationState(harness.base)).resolves.toMatchObject({
+      taskSlug: "demo-task",
+      mode: "auto"
+    });
+  });
+
   it("keeps route-file messages pending in manual mode", async () => {
     const harness = createHarness(["coder"]);
+    await harness.service.updateOrchestrationState({
+      ...harness.base,
+      mode: "manual"
+    });
     await harness.writeRoute("project-manager-coder.md", "Implement the cleanup task.");
 
     const results = await harness.service.scanAndDispatchPendingRouteFiles(harness.base);
@@ -102,6 +115,40 @@ describe("createMessageService", () => {
     });
   });
 
+  it("retries Enter and marks auto dispatch failure when submission is not confirmed", async () => {
+    const harness = createHarness(["coder"], {
+      dispatchConfirmationEnabled: true,
+      dispatchConfirmationRetryDelaysMs: [1, 1],
+      dispatchConfirmationFailureDelayMs: 1
+    });
+    await harness.service.updateOrchestrationState({
+      ...harness.base,
+      mode: "auto"
+    });
+    await harness.writeRoute("project-manager-coder.md", "Handle this task.");
+
+    await harness.service.scanAndDispatchPendingRouteFiles({
+      ...harness.base,
+      stoppedRole: "project-manager"
+    });
+
+    await waitFor(async () => {
+      const messages = await harness.service.listMessages(harness.base);
+      return Boolean(messages[0]?.failureReason);
+    });
+
+    expect(harness.writes).toHaveLength(4);
+    expect(harness.writes[0]).toContain("[VCM MESSAGE]");
+    expect(harness.writes.slice(1)).toEqual(["\r", "\r", "\r"]);
+    const messages = await harness.service.listMessages(harness.base);
+    expect(messages[0]).toMatchObject({
+      id: "msg_1",
+      deliveredAt: "2026-05-29T00:00:00.000Z",
+      failureReason: expect.stringContaining("did not confirm submission")
+    });
+    await expect(harness.readRoute("project-manager-coder.md")).resolves.toBe("Handle this task.");
+  });
+
   it("keeps same-target route files pending until the active target emits Stop", async () => {
     const harness = createHarness(["coder"]);
     await harness.service.updateOrchestrationState({
@@ -152,6 +199,10 @@ describe("createMessageService", () => {
 
   it("clears pending route files without mutating message history", async () => {
     const harness = createHarness(["coder"]);
+    await harness.service.updateOrchestrationState({
+      ...harness.base,
+      mode: "manual"
+    });
     await harness.writeRoute("project-manager-coder.md", "Manual recovery message.");
     await harness.service.scanAndDispatchPendingRouteFiles(harness.base);
 
@@ -193,7 +244,12 @@ describe("createMessageService", () => {
   });
 });
 
-function createHarness(runningRoles: RoleName[], options: { taskRepoRoot?: string } = {}) {
+function createHarness(runningRoles: RoleName[], options: {
+  taskRepoRoot?: string;
+  dispatchConfirmationEnabled?: boolean;
+  dispatchConfirmationRetryDelaysMs?: number[];
+  dispatchConfirmationFailureDelayMs?: number;
+} = {}) {
   const fs = createMemoryFs();
   const writes: string[] = [];
   const runningMarks: RoleName[] = [];
@@ -220,7 +276,11 @@ function createHarness(runningRoles: RoleName[], options: { taskRepoRoot?: strin
     },
     now: () => "2026-05-29T00:00:00.000Z",
     id: () => `msg_${nextId++}`,
-    preDispatchSwitchDelayMs: 0
+    preDispatchSwitchDelayMs: 0,
+    autoDispatchEnterDelayMs: 0,
+    dispatchConfirmationEnabled: options.dispatchConfirmationEnabled ?? false,
+    dispatchConfirmationRetryDelaysMs: options.dispatchConfirmationRetryDelaysMs,
+    dispatchConfirmationFailureDelayMs: options.dispatchConfirmationFailureDelayMs
   });
   const taskRepoRoot = options.taskRepoRoot ?? "/repo";
 
@@ -402,4 +462,14 @@ function createMemoryFs(): FileSystemAdapter {
       return true;
     }
   };
+}
+
+async function waitFor(predicate: () => boolean | Promise<boolean>): Promise<void> {
+  const deadline = Date.now() + 1000;
+  while (!(await predicate())) {
+    if (Date.now() > deadline) {
+      throw new Error("Timed out waiting for condition.");
+    }
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
 }

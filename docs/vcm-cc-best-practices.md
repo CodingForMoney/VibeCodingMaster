@@ -192,14 +192,19 @@ VCM uses four core roles:
   asks the user for product or approval decisions, and performs final evidence
   acceptance. It does not perform technical analysis.
 - `architect`: technical planner and docs-sync owner. It defines module/file
-  responsibilities, public contracts, phase boundaries, risks, and durable docs
-  updates.
+  responsibilities, cross-file callable surfaces, public contracts, phase
+  boundaries, risks, and durable docs updates. Before coder work starts,
+  architect writes the plan and materializes it in code scaffolding with
+  contract comments and `VCM:CODE` placeholders.
 - `coder`: implementation owner. It changes production code and baseline unit
-  tests within the approved plan. It does not change architecture or durable
-  docs.
+  tests within the approved plan. It follows the architect-defined scaffold,
+  implements and removes `VCM:CODE` placeholders, follows general coding
+  standards, and does not change architecture or durable docs.
 - `reviewer`: independent validation owner. It reads code as needed, writes or
   updates tests, owns `docs/TESTING.md`, and decides validation sufficiency.
-  Production fixes go back to coder; design conflicts go back to architect.
+  `docs/TESTING.md` must be current validation strategy, not a task log, and
+  must include reviewable integration/E2E case lists. Production fixes go back
+  to coder; design conflicts go back to architect.
 
 Roles work sequentially in one task worktree. If `git status` shows uncommitted
 changes, commit them before handing off to another role.
@@ -231,6 +236,39 @@ Complex tasks may be split by architect into phases. PM dispatches one
 architect-defined phase at a time and must not split, merge, reorder, or redefine
 phases. A role may return partial completed work and ask PM for continuation, but
 workload or context size is not a valid reason to change the architect plan.
+
+## 7.1 Architecture Plan And Code Scaffolding
+
+For code changes, the architect plan is not only a markdown handoff. It is a
+plan document plus code scaffolding.
+
+The plan document defines affected modules, changed or created files, file
+responsibilities, why each file is in scope, user-visible behavior changes,
+non-private cross-file callable surfaces, docs impact, risks, and Replan
+triggers.
+
+Code scaffolding materializes that plan in the repository before coder work
+starts:
+
+- new modules or files are created when needed
+- file-level responsibilities, logic boundaries, collaborators, and non-goals
+  are documented in code
+- new or changed non-private callable surfaces are defined directly in code with
+  signature shape and contract comments
+- incomplete implementation bodies are marked with `VCM:CODE`
+
+Coder implements the marked placeholders and may add private helpers, but cannot
+change file responsibilities, callable-surface signatures, or contract intent
+without architect replan.
+
+Architect may also enter Debug Mode when PM routes bugs, failing tests,
+build/runtime failures, or unclear defects. Debug Mode allows architect to read
+source/tests, edit code, add temporary diagnostics, write focused verification,
+and run tests until the root cause is known. Architect may directly finish only
+localized fixes that add no new module, add no new public or cross-file callable
+surface, and stay under 500 changed production-code lines. Architect-run
+validation is diagnostic evidence, not final acceptance; reviewer still performs
+independent final validation.
 
 ## 8. Route Messages
 
@@ -269,6 +307,14 @@ The current Rust example does not use fixed `check-fast`, `check-changed`, or
 `check-module` wrappers. Coder and reviewer use native Rust commands such as
 `cargo test`, `cargo test -p <crate>`, `cargo check`, or project-specific
 commands documented in `docs/TESTING.md`.
+
+Reviewer owns `docs/TESTING.md` as the current validation strategy, not as a
+task log or diagnostic history. It must explain what is tested, why it matters,
+how to run it, when to run it, and known gaps. Integration and E2E tests should
+be documented as reviewable case lists with ID, scenario, entry point, what the
+case proves, key assertions, when to run, and current limitations when relevant.
+Superseded failures, temporary diagnostics, and per-task validation logs belong
+in review reports, PR text, or durable known issues when they must persist.
 
 Long-running commands use `vcm-long-running-validation`, backed by:
 
@@ -468,8 +514,8 @@ Rules:
 10. No fixed `check-*` wrappers by default.
 11. Use native project commands for validation.
 12. Use generated context only when it has a real generator.
-13. Coder owns implementation and baseline unit checks.
-14. Reviewer owns independent validation and `docs/TESTING.md`.
-15. Architect owns architecture planning and durable architecture docs.
+13. Coder owns implementation, baseline unit checks, scaffold completion, and general coding standards.
+14. Reviewer owns independent validation and `docs/TESTING.md` as current testing strategy with integration/E2E case lists.
+15. Architect owns architecture planning, code scaffolding, Debug Mode, and durable architecture docs.
 16. PM owns routing and final evidence acceptance, not technical analysis.
 17. Temporary documents are deleted; durable documents are updated.
