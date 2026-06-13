@@ -509,8 +509,25 @@ function renderHarnessStatus(analyses: HarnessFileAnalysis[]): HarnessStatusRepo
     .map((analysis) => analysis.plannedChange)
     .filter((change): change is HarnessPlannedChange => Boolean(change));
 
+  // Derive `initialized`: the VCM harness is considered installed when at least one
+  // VCM-exclusive marker is present (per analysis):
+  //   - status.hasManagedBlock === true (a managed block already lives in the file), OR
+  //   - definition.ownership is "whole-file" | "raw-file" AND status.exists === true
+  //     (a VCM-owned file lives at a VCM-exclusive path).
+  // A pre-existing claude-settings (default "managed-block" ownership, no managed block)
+  // or a non-VCM CLAUDE.md/.gitignore (action "insert", hasManagedBlock === false) is
+  // intentionally NOT counted as initialized.
+  const initialized = analyses.some(
+    (analysis) =>
+      analysis.status.hasManagedBlock ||
+      ((analysis.definition.ownership === "whole-file" ||
+        analysis.definition.ownership === "raw-file") &&
+        analysis.status.exists)
+  );
+
   return {
     version: VCM_HARNESS_VERSION,
+    initialized,
     files,
     needsApply: plannedChanges.length > 0,
     plannedChanges,
