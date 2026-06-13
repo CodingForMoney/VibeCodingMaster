@@ -1,0 +1,107 @@
+#!/usr/bin/env python3
+"""VCM PreToolUse guard: deny background Bash inside VCM role sessions.
+
+Reads the Claude Code PreToolUse hook payload on stdin. When the Bash tool
+call would start background work (run_in_background, nohup, setsid, disown,
+or a lone '&'), it prints a deny decision that redirects the role to the
+vcm-long-running-validation skill. Anything else is allowed by staying
+silent.
+
+Quoted payloads of `sh -c` / `bash -lc` style invocations are executable
+shell code, so they are scanned recursively. `.ai/tools/run-long-check` is the
+only sanctioned detached worker; the command it runs must still stay in the
+supervised foreground process group.
+"""
+import json
+import re
+import sys
+
+SKILL_HINT = (
+    "Use the vcm-long-running-validation skill instead: "
+    "`.ai/tools/run-long-check --timeout <duration> -- <command>` then "
+    "`.ai/tools/watch-job <job-id>` in the same turn, repeating watch-job "
+    "until it reports a terminal result."
+)
+
+MAX_NESTED_SHELL_DEPTH = 3
+QUOTED = re.compile(r"'([^']*)'|\"([^\"]*)\"")
+SHELL_DASH_C = re.compile(r"(?:^|[\s;&|(])(?:sh|bash|zsh|dash|ksh)\s+(?:-\w+\s+)*-\w*c\w*(?:\s|$)")
+
+
+def strip_quoted(command: str) -> str:
+    return QUOTED.sub(" ", command)
+
+
+def quoted_segments(command: str) -> list[str]:
+    return [single or double for single, double in QUOTED.findall(command)]
+
+
+def unquoted_ampersand(command_without_quotes: str) -> bool:
+    cleaned = re.sub(r"\d*>&\d*", " ", command_without_quotes)
+    cleaned = re.sub(r"<&\d*", " ", cleaned)
+    cleaned = cleaned.replace("&&", " ")
+    return bool(re.search(r"&\s*(?:$|[;\n)])", cleaned) or re.search(r"\s&\s", cleaned))
+
+
+def scan_shell_command(command: str, depth: int = 0) -> list[str]:
+    reasons = []
+    stripped = strip_quoted(command)
+    if re.search(r"(?:^|[\s;&|(])(?:nohup|setsid)(?:\s|$)", stripped):
+        reasons.append("nohup/setsid detach is forbidden")
+    if re.search(r"(?:^|[\s;&|(])disown(?:\s|$)", stripped):
+        reasons.append("disown is forbidden")
+    if unquoted_ampersand(stripped):
+        reasons.append("'&' background execution is forbidden")
+
+    # `sh -c '...'` quoted payloads are shell code, not plain strings.
+    if depth < MAX_NESTED_SHELL_DEPTH and SHELL_DASH_C.search(stripped):
+        for segment in quoted_segments(command):
+            reasons.extend(scan_shell_command(segment, depth + 1))
+    return reasons
+
+
+def background_reasons(tool_input: dict) -> list[str]:
+    reasons = []
+    if tool_input.get("run_in_background"):
+        reasons.append("Bash run_in_background is forbidden")
+
+    command = tool_input.get("command")
+    command = command if isinstance(command, str) else ""
+
+    reasons.extend(scan_shell_command(command))
+    return list(dict.fromkeys(reasons))
+
+
+def main() -> int:
+    raw = sys.stdin.read()
+    try:
+        payload = json.loads(raw) if raw.strip() else {}
+    except ValueError:
+        return 0
+    if payload.get("tool_name") != "Bash":
+        return 0
+
+    tool_input = payload.get("tool_input")
+    tool_input = tool_input if isinstance(tool_input, dict) else {}
+    reasons = background_reasons(tool_input)
+    if not reasons:
+        return 0
+
+    print(
+        json.dumps(
+            {
+                "hookSpecificOutput": {
+                    "hookEventName": "PreToolUse",
+                    "permissionDecision": "deny",
+                    "permissionDecisionReason": (
+                        "VCM forbids background Bash (" + "; ".join(reasons) + "). " + SKILL_HINT
+                    ),
+                }
+            }
+        )
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

@@ -1,0 +1,27 @@
+model = "gpt-5.5"
+model_reasoning_effort = "xhigh"
+approval_policy = "never"
+default_permissions = "vcm_codex_reviewer"
+
+[vcm.codex_review]
+enabled = true
+required_gates = [
+  "architecture-plan",
+  "validation-adequacy",
+  "final-diff",
+]
+
+[permissions.vcm_codex_reviewer.workspace_roots]
+"../.." = true
+
+[permissions.vcm_codex_reviewer.filesystem]
+":minimal" = "read"
+
+[permissions.vcm_codex_reviewer.filesystem.":workspace_roots"]
+"." = "read"
+".ai/codex" = "read"
+".ai/vcm/codex-reviews" = "write"
+"**/*.env" = "deny"
+
+[permissions.vcm_codex_reviewer.network]
+enabled = false
