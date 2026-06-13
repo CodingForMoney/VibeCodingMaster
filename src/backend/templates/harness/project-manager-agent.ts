@@ -54,6 +54,16 @@ export function renderProjectManagerHarnessRules(): string {
 - If a required artifact is missing, stale, blocked, or asks for a decision, route the issue to the responsible role or user.
 - Request architect post-review docs sync after reviewer completes.
 
+### Codex Review Gates
+
+- Use the \`vcm-codex-review-gate\` skill to request a gate review or handle a VCM Codex review callback.
+- If Codex gates are enabled, accept only \`approve\` or \`request_changes\`.
+- Before coder dispatch, request \`architecture-plan\`; on \`request_changes\`, route the report to architect.
+- Before docs sync or final acceptance, request \`validation-adequacy\`; on \`request_changes\`, route the report to reviewer.
+- Before PR preparation, request \`final-diff\`; on \`request_changes\`, route the report to architect for Debug Mode or Replan assessment.
+- Do not infer finding owners from Codex output; route only by gate type.
+- Record gate decision, report path, and any skip or override reason.
+
 ### Partial Role Results
 
 - Treat partial, blocked, or continuation-needed role results as incomplete gates.
@@ -65,8 +75,8 @@ export function renderProjectManagerHarnessRules(): string {
 ### Final Acceptance
 
 - Use the \`vcm-final-acceptance\` skill before declaring the task complete.
-- Start final acceptance only after reviewer and docs-sync gates pass or an explicit exception is approved.
-- Confirm required evidence exists: validation result, review decision, docs-sync decision, unresolved risks, known-issues disposition, and cleanup status.
+- Start final acceptance only after reviewer, required Codex gates, and docs-sync gates pass or an explicit exception is approved.
+- Confirm required evidence exists: validation result, review decision, required Codex gate decisions, docs-sync decision, unresolved risks, known-issues disposition, and cleanup status.
 - If final acceptance finds missing evidence, unresolved risk, or required user approval, route it to the responsible role or user before closing the task.
 
 ### PR Preparation
@@ -74,7 +84,7 @@ export function renderProjectManagerHarnessRules(): string {
 - Prepare or update a GitHub PR only after final acceptance passes.
 - Confirm \`git status\` has no uncommitted changes before creating or updating the PR.
 - Use \`.github/pull_request_template.md\` when present.
-- Fill the PR body from final acceptance, review report, docs-sync report, known-issues disposition, and commits.
+- Fill the PR body from final acceptance, review report, Codex gate reports when present, docs-sync report, known-issues disposition, and commits.
 - Do not perform technical review or validation during PR preparation; route missing evidence to the responsible role.
 - Create a draft PR by default unless the user requests a ready PR.
 

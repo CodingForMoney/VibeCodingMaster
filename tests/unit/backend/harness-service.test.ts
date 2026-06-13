@@ -9,15 +9,15 @@ describe("createHarnessService", () => {
 
     const status = await service.getHarnessStatus("/repo");
     expect(status.needsApply).toBe(true);
-    expect(status.plannedChanges).toHaveLength(12);
-    expect(status.plannedChanges.map((change) => change.action)).toEqual(Array(12).fill("create"));
+    expect(status.plannedChanges).toHaveLength(20);
+    expect(status.plannedChanges.map((change) => change.action)).toEqual(Array(20).fill("create"));
 
     const result = await service.applyHarness("/repo");
-    expect(result.changedFiles).toHaveLength(12);
+    expect(result.changedFiles).toHaveLength(20);
 
     const nextStatus = await service.getHarnessStatus("/repo");
     expect(nextStatus.needsApply).toBe(false);
-    expect(nextStatus.files.map((file) => file.action)).toEqual(Array(12).fill("ok"));
+    expect(nextStatus.files.map((file) => file.action)).toEqual(Array(20).fill("ok"));
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("## VCM Start Here");
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("## VCM Task Flow");
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("## VCM Worktree Policy");
@@ -40,6 +40,8 @@ describe("createHarnessService", () => {
     expect(await fs.readText("/repo/.claude/skills/vcm-long-running-validation/SKILL.md")).toContain("name: vcm-long-running-validation");
     expect(await fs.readText("/repo/.claude/skills/vcm-long-running-validation/SKILL.md")).toContain("## Protocol");
     expect(await fs.readText("/repo/.claude/skills/vcm-long-running-validation/SKILL.md")).toContain(".ai/tools/watch-job");
+    expect(await fs.readText("/repo/.claude/skills/vcm-codex-review-gate/SKILL.md")).toContain("name: vcm-codex-review-gate");
+    expect(await fs.readText("/repo/.claude/skills/vcm-codex-review-gate/SKILL.md")).toContain("Do not run `codex exec` yourself");
     expect(await fs.readText("/repo/.claude/agents/project-manager.md")).toContain("name: project-manager");
     expect(await fs.readText("/repo/.claude/agents/project-manager.md")).toContain("<!-- VCM:BEGIN version=1 -->");
     expect(await fs.readText("/repo/.claude/agents/project-manager.md")).toContain("Use the routes defined in `CLAUDE.md`");
@@ -50,8 +52,16 @@ describe("createHarnessService", () => {
     expect(await fs.readText("/repo/.claude/agents/project-manager.md")).toContain(".github/pull_request_template.md");
     expect(await fs.readText("/repo/.claude/agents/project-manager.md")).toContain("VCM_TASK_REPO_ROOT");
     expect(await fs.readText("/repo/.claude/agents/project-manager.md")).toContain("Include the confirmed task repo root and branch in each role message");
+    expect(await fs.readText("/repo/.claude/agents/project-manager.md")).toContain("### Codex Review Gates");
     expect(await fs.readText("/repo/.claude/agents/architect.md")).toContain("verifiable behavior, phase boundaries, behavior/contract proof points");
     expect(await fs.readText("/repo/.claude/agents/architect.md")).toContain("Read `.ai/vcm/handoffs/known-issues.md` and promote confirmed unresolved issues to `docs/known-issues.md`.");
+    expect(await fs.readText("/repo/.ai/codex/AGENTS.md")).toContain("You are VCM `codex-reviewer`");
+    expect(await fs.readText("/repo/.ai/codex/config.toml")).toContain("[vcm.codex_review]");
+    expect(await fs.readText("/repo/.ai/codex/prompts/architecture-plan-gate.md")).toContain("Codex Gate: architecture-plan");
+    expect(await fs.readText("/repo/.ai/codex/prompts/validation-adequacy-gate.md")).toContain("Codex Gate: validation-adequacy");
+    expect(await fs.readText("/repo/.ai/codex/prompts/final-diff-gate.md")).toContain("Codex Gate: final-diff");
+    expect(await fs.readText("/repo/.ai/codex/schemas/codex-review-result.schema.json")).toContain("VCM Codex Review Result");
+    expect(await fs.readText("/repo/.ai/tools/request-codex-review")).toContain("Request a VCM-managed Codex Review Gate");
     expect(await fs.readText("/repo/.claude/settings.json")).toContain("UserPromptSubmit");
     expect(await fs.readText("/repo/.claude/settings.json")).toContain("Stop");
     expect(await fs.readText("/repo/.claude/settings.json")).toContain("PermissionRequest");

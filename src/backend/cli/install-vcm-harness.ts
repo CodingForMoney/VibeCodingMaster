@@ -7,6 +7,16 @@ import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { renderArchitectHarnessRules } from "../templates/harness/architect-agent.js";
 import { renderCoderHarnessRules } from "../templates/harness/coder-agent.js";
+import {
+  renderCodexAgentsHarnessRules,
+  renderCodexArchitecturePlanPrompt,
+  renderCodexConfigHarnessRules,
+  renderCodexFinalDiffPrompt,
+  renderCodexReviewResultSchema,
+  renderCodexValidationAdequacyPrompt,
+  renderRequestCodexReviewTool,
+  renderVcmCodexReviewGateSkillRules
+} from "../templates/harness/codex-review.js";
 import { renderRootClaudeHarnessRules } from "../templates/harness/claude-root.js";
 import { renderGitignoreHarnessRules } from "../templates/harness/gitignore.js";
 import { renderProjectManagerHarnessRules } from "../templates/harness/project-manager-agent.js";
@@ -105,6 +115,13 @@ const MANAGED_FILES = [
     commentStyle: "html",
     category: "pull-request-template",
     content: renderPullRequestTemplateHarnessRules()
+  },
+  {
+    path: ".ai/codex/AGENTS.md",
+    title: "VCM Codex Reviewer",
+    commentStyle: "html",
+    category: "codex-reviewer-agent",
+    content: renderCodexAgentsHarnessRules()
   }
 ];
 
@@ -179,6 +196,53 @@ const WHOLE_FILES = [
       "Use when a VCM role needs to hand off work, ask a question, report a result, report a blocker, or raise a finding to another VCM role.",
       renderVcmRouteMessageSkillRules()
     )
+  },
+  {
+    path: ".claude/skills/vcm-codex-review-gate/SKILL.md",
+    category: "skill",
+    mode: 0o644,
+    content: renderSkillFile(
+      "VCM Codex Review Gate Skill",
+      "vcm-codex-review-gate",
+      "Use when project-manager reaches a Codex Review Gate or receives a VCM Codex Review callback.",
+      renderVcmCodexReviewGateSkillRules()
+    )
+  },
+  {
+    path: ".ai/codex/config.toml",
+    category: "codex-review-config",
+    mode: 0o644,
+    content: renderCodexConfigHarnessRules()
+  },
+  {
+    path: ".ai/codex/prompts/architecture-plan-gate.md",
+    category: "codex-review-prompt",
+    mode: 0o644,
+    content: renderCodexArchitecturePlanPrompt()
+  },
+  {
+    path: ".ai/codex/prompts/validation-adequacy-gate.md",
+    category: "codex-review-prompt",
+    mode: 0o644,
+    content: renderCodexValidationAdequacyPrompt()
+  },
+  {
+    path: ".ai/codex/prompts/final-diff-gate.md",
+    category: "codex-review-prompt",
+    mode: 0o644,
+    content: renderCodexFinalDiffPrompt()
+  },
+  {
+    path: ".ai/codex/schemas/codex-review-result.schema.json",
+    category: "codex-review-schema",
+    mode: 0o644,
+    content: renderCodexReviewResultSchema()
+  },
+  {
+    path: ".ai/tools/request-codex-review",
+    category: "runtime-tool",
+    mode: 0o755,
+    content: renderRequestCodexReviewTool()
   },
   {
     path: ".ai/tools/run-long-check",
@@ -406,6 +470,11 @@ function fixedDirectories() {
     ".claude/skills/vcm-harness-bootstrap/",
     ".claude/skills/vcm-long-running-validation/",
     ".claude/skills/vcm-route-message/",
+    ".claude/skills/vcm-codex-review-gate/",
+    ".ai/codex/",
+    ".ai/codex/prompts/",
+    ".ai/codex/schemas/",
+    ".ai/vcm/codex-reviews/",
     ".ai/tools/",
     ".ai/generated/"
   ];

@@ -11,6 +11,7 @@ import { createClaudeHookService, type ClaudeHookService } from "./services/clau
 import { createGitAdapter } from "./adapters/git-adapter.js";
 import { createAppSettingsService, type AppSettingsService } from "./services/app-settings-service.js";
 import { createClaudeTranscriptService } from "./services/claude-transcript-service.js";
+import { createCodexReviewService, type CodexReviewService } from "./services/codex-review-service.js";
 import {
   createHarnessService,
   createScriptFixedHarnessInstaller,
@@ -36,6 +37,7 @@ import { createTranslationService, type TranslationService } from "./services/tr
 import { registerAppSettingsRoutes } from "./api/app-settings-routes.js";
 import { registerArtifactRoutes } from "./api/artifact-routes.js";
 import { registerClaudeHookRoutes } from "./api/claude-hook-routes.js";
+import { registerCodexReviewRoutes } from "./api/codex-review-routes.js";
 import { registerHarnessRoutes } from "./api/harness-routes.js";
 import { registerMessageRoutes } from "./api/message-routes.js";
 import { registerProjectRoutes } from "./api/project-routes.js";
@@ -64,6 +66,7 @@ export interface ServerDeps {
   commandDispatcher: CommandDispatcher;
   claudeHookService: ClaudeHookService;
   messageService: MessageService;
+  codexReviewService: CodexReviewService;
   roundService: RoundService;
   statusService: StatusService;
   translationService: TranslationService;
@@ -89,6 +92,10 @@ export async function createServer(deps: ServerDeps, options: CreateServerOption
 
   registerAppSettingsRoutes(app, { appSettings: deps.appSettings });
   registerClaudeHookRoutes(app, { claudeHookService: deps.claudeHookService });
+  registerCodexReviewRoutes(app, {
+    projectService: deps.projectService,
+    codexReviewService: deps.codexReviewService
+  });
   registerProjectRoutes(app, { projectService: deps.projectService });
   registerHarnessRoutes(app, {
     projectService: deps.projectService,
@@ -218,6 +225,14 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     sessionService,
     taskService
   });
+  const codexReviewService = createCodexReviewService({
+    fs,
+    runner,
+    runtime,
+    projectService,
+    taskService,
+    sessionService
+  });
   const roundService = createRoundService({
     fs,
     onSessionStatusChange: async ({ repoRoot, taskSlug, status }) => {
@@ -276,6 +291,7 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     commandDispatcher,
     claudeHookService,
     messageService,
+    codexReviewService,
     roundService,
     statusService,
     translationService,

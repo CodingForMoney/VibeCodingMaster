@@ -4,7 +4,7 @@
   "harnessVersion": "0.3.0-fixed",
   "installMode": "fixed",
   "installedAt": "2026-06-07T00:00:00Z",
-  "updatedAt": "2026-06-11T03:04:25.112Z",
+  "updatedAt": "2026-06-13T13:57:35.210Z",
   "runtimeRoots": [
     ".ai/vcm/",
     ".claude/worktrees/"
@@ -138,6 +138,23 @@
       }
     },
     {
+      "path": ".ai/codex/AGENTS.md",
+      "entryType": "file",
+      "category": "codex-reviewer-agent",
+      "ownership": "managed-block",
+      "source": "vcm-template",
+      "lifecycle": "long-term",
+      "marker": {
+        "type": "html",
+        "begin": "<!-- VCM:BEGIN version=1 -->",
+        "end": "<!-- VCM:END -->"
+      },
+      "uninstall": {
+        "action": "remove-managed-block",
+        "requiresConfirmation": false
+      }
+    },
+    {
       "path": ".claude/settings.json",
       "entryType": "file",
       "category": "claude-settings",
@@ -205,6 +222,46 @@
       "path": ".claude/skills/vcm-route-message/",
       "entryType": "directory",
       "category": "skill-directory",
+      "ownership": "vcm-created",
+      "source": "vcm-template",
+      "lifecycle": "long-term"
+    },
+    {
+      "path": ".claude/skills/vcm-codex-review-gate/",
+      "entryType": "directory",
+      "category": "skill-directory",
+      "ownership": "vcm-created",
+      "source": "vcm-template",
+      "lifecycle": "long-term"
+    },
+    {
+      "path": ".ai/codex/",
+      "entryType": "directory",
+      "category": "harness-tool-directory",
+      "ownership": "vcm-created",
+      "source": "vcm-template",
+      "lifecycle": "long-term"
+    },
+    {
+      "path": ".ai/codex/prompts/",
+      "entryType": "directory",
+      "category": "harness-tool-directory",
+      "ownership": "vcm-created",
+      "source": "vcm-template",
+      "lifecycle": "long-term"
+    },
+    {
+      "path": ".ai/codex/schemas/",
+      "entryType": "directory",
+      "category": "harness-tool-directory",
+      "ownership": "vcm-created",
+      "source": "vcm-template",
+      "lifecycle": "long-term"
+    },
+    {
+      "path": ".ai/vcm/codex-reviews/",
+      "entryType": "directory",
+      "category": "harness-tool-directory",
       "ownership": "vcm-created",
       "source": "vcm-template",
       "lifecycle": "long-term"
@@ -292,6 +349,90 @@
       "ownership": "whole-file",
       "source": "vcm-template",
       "lifecycle": "long-term",
+      "uninstall": {
+        "action": "delete-file-if-unchanged",
+        "requiresConfirmation": false
+      }
+    },
+    {
+      "path": ".claude/skills/vcm-codex-review-gate/SKILL.md",
+      "entryType": "file",
+      "category": "skill",
+      "ownership": "whole-file",
+      "source": "vcm-template",
+      "lifecycle": "long-term",
+      "uninstall": {
+        "action": "delete-file-if-unchanged",
+        "requiresConfirmation": false
+      }
+    },
+    {
+      "path": ".ai/codex/config.toml",
+      "entryType": "file",
+      "category": "codex-review-config",
+      "ownership": "whole-file",
+      "source": "vcm-template",
+      "lifecycle": "long-term",
+      "uninstall": {
+        "action": "delete-file-if-unchanged",
+        "requiresConfirmation": false
+      }
+    },
+    {
+      "path": ".ai/codex/prompts/architecture-plan-gate.md",
+      "entryType": "file",
+      "category": "codex-review-prompt",
+      "ownership": "whole-file",
+      "source": "vcm-template",
+      "lifecycle": "long-term",
+      "uninstall": {
+        "action": "delete-file-if-unchanged",
+        "requiresConfirmation": false
+      }
+    },
+    {
+      "path": ".ai/codex/prompts/validation-adequacy-gate.md",
+      "entryType": "file",
+      "category": "codex-review-prompt",
+      "ownership": "whole-file",
+      "source": "vcm-template",
+      "lifecycle": "long-term",
+      "uninstall": {
+        "action": "delete-file-if-unchanged",
+        "requiresConfirmation": false
+      }
+    },
+    {
+      "path": ".ai/codex/prompts/final-diff-gate.md",
+      "entryType": "file",
+      "category": "codex-review-prompt",
+      "ownership": "whole-file",
+      "source": "vcm-template",
+      "lifecycle": "long-term",
+      "uninstall": {
+        "action": "delete-file-if-unchanged",
+        "requiresConfirmation": false
+      }
+    },
+    {
+      "path": ".ai/codex/schemas/codex-review-result.schema.json",
+      "entryType": "file",
+      "category": "codex-review-schema",
+      "ownership": "whole-file",
+      "source": "vcm-template",
+      "lifecycle": "long-term",
+      "uninstall": {
+        "action": "delete-file-if-unchanged",
+        "requiresConfirmation": false
+      }
+    },
+    {
+      "path": ".ai/tools/request-codex-review",
+      "entryType": "file",
+      "category": "runtime-tool",
+      "ownership": "whole-file",
+      "source": "vcm-template",
+      "lifecycle": "conditional-long-term",
       "uninstall": {
         "action": "delete-file-if-unchanged",
         "requiresConfirmation": false

@@ -1,6 +1,6 @@
 # VibeCodingMaster Product Design
 
-Last updated: 2026-06-10
+Last updated: 2026-06-13
 
 This document describes the current product direction and implemented V1 behavior for VCM.
 
@@ -82,7 +82,36 @@ project-manager
   -> project-manager final acceptance, commit, and PR
 ```
 
-### 4.1 Task Worktree Model
+### 4.1 Codex Review Gates
+
+For complex tasks, VCM supports optional Codex Review Gates as an independent
+cross-model review layer. Claude Code remains the role execution engine, but
+Codex reviews three high-value handoff points:
+
+```text
+architect architecture plan
+  -> Codex reviews plan quality before coder starts
+
+reviewer review-report
+  -> Codex reviews validation adequacy before final acceptance
+
+final task diff
+  -> Codex reviews code and PR readiness before PR preparation
+```
+
+Each gate returns `approve` or `request_changes`. PM triggers gates through the
+`vcm-codex-review-gate` skill at the three workflow points; VCM owns the Codex
+Review switch, gate state, Codex CLI / adapter execution, and PM callback after
+review completes. Codex writes reports under `.ai/vcm/codex-reviews/`.
+Architecture-plan findings return to architect, validation-adequacy findings
+return to reviewer, and final-diff findings go to architect first for
+assessment. Codex reviewer role configuration lives under `.ai/codex/`,
+including `.ai/codex/AGENTS.md` and `.ai/codex/config.toml`, so VCM does not
+require a root-level `AGENTS.md`.
+
+The detailed design lives in `docs/codex-review-gates.md`.
+
+### 4.2 Task Worktree Model
 
 Task-level worktree management is the recommended default model for multi-task parallelism:
 

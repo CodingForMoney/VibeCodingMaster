@@ -849,6 +849,7 @@ h2 {
 
 .session-console,
 .message-panel,
+.codex-review-panel,
 .event-log,
 .empty-workspace {
   border: 1px solid #d6d0c6;
@@ -872,6 +873,95 @@ h2 {
   flex: 1;
   height: 100%;
   min-height: 0;
+}
+
+.codex-review-panel {
+  display: grid;
+  gap: 8px;
+  padding: 8px 10px;
+}
+
+.codex-review-panel-header,
+.codex-review-gate-main,
+.codex-review-actions {
+  display: flex;
+  align-items: center;
+}
+
+.codex-review-panel-header {
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.codex-review-panel-header h2 {
+  margin: 0;
+}
+
+.codex-review-panel-header span,
+.codex-review-gate-meta,
+.codex-review-callback,
+.codex-review-decision {
+  color: #667071;
+  font-size: 12px;
+}
+
+.codex-review-gates {
+  display: grid;
+  gap: 6px;
+}
+
+.codex-review-gate {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.8fr) minmax(240px, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+  border-top: 1px solid #ede5d8;
+  padding-top: 6px;
+}
+
+.codex-review-gate:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.codex-review-gate-main {
+  gap: 8px;
+  min-width: 0;
+}
+
+.codex-review-gate-main strong,
+.codex-review-gate-meta span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.codex-review-gate-main strong {
+  min-width: 0;
+  font-size: 13px;
+}
+
+.codex-review-gate-meta {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 6px;
+  min-width: 0;
+}
+
+.codex-review-error {
+  grid-column: 1 / -1;
+  color: #8d211d;
+}
+
+.codex-review-actions {
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.codex-review-actions button {
+  min-height: 28px;
+  padding: 4px 8px;
 }
 
 .session-console-top {
@@ -1767,7 +1857,8 @@ h2 {
 }
 
 .status-created,
-.status-idle {
+.status-idle,
+.status-disabled {
   border-color: #9aa3a8;
   background: #edf0f1;
   color: #465056;
@@ -1793,7 +1884,10 @@ h2 {
 .status-exited,
 .status-done,
 .status-stopped,
-.status-resumable {
+.status-resumable,
+.status-skipped,
+.status-overridden,
+.status-not_required {
   border-color: #7b98b8;
   background: #e9f0f8;
   color: #2e4e70;
@@ -1854,7 +1948,8 @@ h2 {
   }
 
   .session-console-body.has-translation,
-  .translation-settings-grid {
+  .translation-settings-grid,
+  .codex-review-gate {
     grid-template-columns: 1fr;
   }
 
@@ -1961,6 +2056,7 @@ h2 {
 
 :root[data-theme="dark"] .sidebar-section,
 :root[data-theme="dark"] .session-console,
+:root[data-theme="dark"] .codex-review-panel,
 :root[data-theme="dark"] .message-panel,
 :root[data-theme="dark"] .event-log,
 :root[data-theme="dark"] .empty-workspace,
@@ -2090,6 +2186,21 @@ h2 {
   color: #e6edf3;
 }
 
+:root[data-theme="dark"] .codex-review-gate {
+  border-color: #30363d;
+}
+
+:root[data-theme="dark"] .codex-review-panel-header span,
+:root[data-theme="dark"] .codex-review-gate-meta,
+:root[data-theme="dark"] .codex-review-callback,
+:root[data-theme="dark"] .codex-review-decision {
+  color: #8b949e;
+}
+
+:root[data-theme="dark"] .codex-review-error {
+  color: #ffa198;
+}
+
 :root[data-theme="dark"] .message-sequence {
   color: #f0f6fc;
 }
@@ -2152,7 +2263,8 @@ h2 {
 }
 
 :root[data-theme="dark"] .status-created,
-:root[data-theme="dark"] .status-idle {
+:root[data-theme="dark"] .status-idle,
+:root[data-theme="dark"] .status-disabled {
   border-color: #69717d;
   background: #20262f;
   color: #d6deeb;
@@ -2191,6 +2303,9 @@ h2 {
 :root[data-theme="dark"] .status-done,
 :root[data-theme="dark"] .status-stopped,
 :root[data-theme="dark"] .status-resumable,
+:root[data-theme="dark"] .status-skipped,
+:root[data-theme="dark"] .status-overridden,
+:root[data-theme="dark"] .status-not_required,
 :root[data-theme="dark"] .status-translated,
 :root[data-theme="dark"] .status-preserved {
   border-color: #388bfd;

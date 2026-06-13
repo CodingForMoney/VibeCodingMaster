@@ -19,6 +19,16 @@ import type { ClaudePermissionMode } from "../../shared/types/session.js";
 import type { FileSystemAdapter } from "../adapters/filesystem.js";
 import { renderArchitectHarnessRules } from "../templates/harness/architect-agent.js";
 import { renderCoderHarnessRules } from "../templates/harness/coder-agent.js";
+import {
+  renderCodexAgentsHarnessRules,
+  renderCodexArchitecturePlanPrompt,
+  renderCodexConfigHarnessRules,
+  renderCodexFinalDiffPrompt,
+  renderCodexReviewResultSchema,
+  renderCodexValidationAdequacyPrompt,
+  renderRequestCodexReviewTool,
+  renderVcmCodexReviewGateSkillRules
+} from "../templates/harness/codex-review.js";
 import { renderRootClaudeHarnessRules } from "../templates/harness/claude-root.js";
 import { renderGitignoreHarnessRules } from "../templates/harness/gitignore.js";
 import { renderProjectManagerHarnessRules } from "../templates/harness/project-manager-agent.js";
@@ -61,7 +71,7 @@ interface HarnessFileDefinition {
   title: string;
   frontmatter?: string;
   commentStyle?: "html" | "hash";
-  ownership?: "managed-block" | "whole-file";
+  ownership?: "managed-block" | "whole-file" | "raw-file";
   blankLineBeforeEnd?: boolean;
   renderRules(): string;
 }
@@ -154,6 +164,65 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
     ),
     ownership: "whole-file",
     renderRules: renderVcmLongRunningValidationSkillRules
+  },
+  {
+    kind: "skill-vcm-codex-review-gate",
+    path: ".claude/skills/vcm-codex-review-gate/SKILL.md",
+    title: "VCM Codex Review Gate Skill",
+    frontmatter: renderSkillFrontmatter(
+      "vcm-codex-review-gate",
+      "Use when project-manager reaches a Codex Review Gate or receives a VCM Codex Review callback."
+    ),
+    ownership: "whole-file",
+    renderRules: renderVcmCodexReviewGateSkillRules
+  },
+  {
+    kind: "codex-agents",
+    path: ".ai/codex/AGENTS.md",
+    title: "VCM Codex Reviewer",
+    renderRules: renderCodexAgentsHarnessRules
+  },
+  {
+    kind: "codex-config",
+    path: ".ai/codex/config.toml",
+    title: "VCM Codex Config",
+    ownership: "raw-file",
+    renderRules: renderCodexConfigHarnessRules
+  },
+  {
+    kind: "codex-prompt-architecture-plan",
+    path: ".ai/codex/prompts/architecture-plan-gate.md",
+    title: "Codex Architecture Plan Gate Prompt",
+    ownership: "raw-file",
+    renderRules: renderCodexArchitecturePlanPrompt
+  },
+  {
+    kind: "codex-prompt-validation-adequacy",
+    path: ".ai/codex/prompts/validation-adequacy-gate.md",
+    title: "Codex Validation Adequacy Gate Prompt",
+    ownership: "raw-file",
+    renderRules: renderCodexValidationAdequacyPrompt
+  },
+  {
+    kind: "codex-prompt-final-diff",
+    path: ".ai/codex/prompts/final-diff-gate.md",
+    title: "Codex Final Diff Gate Prompt",
+    ownership: "raw-file",
+    renderRules: renderCodexFinalDiffPrompt
+  },
+  {
+    kind: "codex-review-schema",
+    path: ".ai/codex/schemas/codex-review-result.schema.json",
+    title: "Codex Review Result Schema",
+    ownership: "raw-file",
+    renderRules: renderCodexReviewResultSchema
+  },
+  {
+    kind: "tool-request-codex-review",
+    path: ".ai/tools/request-codex-review",
+    title: "Request Codex Review Tool",
+    ownership: "raw-file",
+    renderRules: renderRequestCodexReviewTool
   },
   {
     kind: "agent-project-manager",
@@ -328,13 +397,13 @@ async function analyzeHarnessFile(
   definition: HarnessFileDefinition
 ): Promise<HarnessFileAnalysis> {
   const absolutePath = resolveHarnessPath(repoRoot, definition.path);
-  const expectedContent = definition.ownership === "whole-file"
+  const expectedContent = definition.ownership === "whole-file" || definition.ownership === "raw-file"
     ? renderWholeHarnessFile(definition)
     : undefined;
-  const expectedBlock = definition.ownership === "whole-file"
+  const expectedBlock = definition.ownership === "whole-file" || definition.ownership === "raw-file"
     ? undefined
     : renderManagedBlock(definition, definition.renderRules());
-  const managedBlockPattern = definition.ownership === "whole-file"
+  const managedBlockPattern = definition.ownership === "whole-file" || definition.ownership === "raw-file"
     ? undefined
     : getManagedBlockPattern(definition);
   const exists = await fs.pathExists(absolutePath);
@@ -474,6 +543,9 @@ function renderNewHarnessFile(definition: HarnessFileDefinition, block: string):
 }
 
 function renderWholeHarnessFile(definition: HarnessFileDefinition): string {
+  if (definition.ownership === "raw-file") {
+    return ensureTrailingNewline(definition.renderRules().trimEnd());
+  }
   return ensureTrailingNewline(renderNewHarnessFile(definition, definition.renderRules().trimEnd()));
 }
 

@@ -15,6 +15,13 @@ import type {
   StartHarnessBootstrapResult
 } from "../../shared/types/harness.js";
 import type {
+  CodexReviewExceptionRequest,
+  CodexReviewGate,
+  CodexReviewIndex,
+  CodexReviewReport,
+  CodexReviewRequestResult
+} from "../../shared/types/codex-review.js";
+import type {
   VcmOrchestrationMode,
   VcmOrchestrationState,
   VcmRoleMessage,
@@ -157,6 +164,34 @@ export const apiClient = {
   },
   getSessionRoundState(taskSlug: string) {
     return request<VcmSessionRoundState>(`/api/tasks/${encodeURIComponent(taskSlug)}/round`);
+  },
+  getCodexReviewState(taskSlug: string) {
+    return request<CodexReviewIndex>(`/api/tasks/${encodeURIComponent(taskSlug)}/codex-review`);
+  },
+  requestCodexReviewGate(taskSlug: string, gate: CodexReviewGate) {
+    return request<CodexReviewRequestResult>(`/api/tasks/${encodeURIComponent(taskSlug)}/codex-review/${gate}/request`, {
+      method: "POST"
+    });
+  },
+  retryCodexReviewGate(taskSlug: string, gate: CodexReviewGate) {
+    return request<CodexReviewRequestResult>(`/api/tasks/${encodeURIComponent(taskSlug)}/codex-review/${gate}/retry`, {
+      method: "POST"
+    });
+  },
+  skipCodexReviewGate(taskSlug: string, gate: CodexReviewGate, input: CodexReviewExceptionRequest) {
+    return request<CodexReviewIndex>(`/api/tasks/${encodeURIComponent(taskSlug)}/codex-review/${gate}/skip`, {
+      method: "POST",
+      body: JSON.stringify(input)
+    });
+  },
+  overrideCodexReviewGate(taskSlug: string, gate: CodexReviewGate, input: CodexReviewExceptionRequest) {
+    return request<CodexReviewIndex>(`/api/tasks/${encodeURIComponent(taskSlug)}/codex-review/${gate}/override`, {
+      method: "POST",
+      body: JSON.stringify(input)
+    });
+  },
+  getCodexReviewReport(taskSlug: string, gate: CodexReviewGate) {
+    return request<CodexReviewReport>(`/api/tasks/${encodeURIComponent(taskSlug)}/codex-review/${gate}/report`);
   },
   getTranslationSettings() {
     return request<TranslationSettings>("/api/translation/settings");
