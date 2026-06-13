@@ -1,19 +1,20 @@
 import type { RoleName } from "../../shared/types/role.js";
 import {
   CLAUDE_MODEL_OPTIONS,
-  type ClaudeModel,
+  CODEX_MODEL_OPTIONS,
   type ClaudePermissionMode,
-  type RoleSessionRecord
+  type RoleSessionRecord,
+  type SessionModel
 } from "../../shared/types/session.js";
 
 export interface SessionToolbarProps {
   role: RoleName;
   session?: RoleSessionRecord;
   permissionMode: ClaudePermissionMode;
-  model: ClaudeModel;
+  model: SessionModel;
   busy?: boolean;
   onPermissionModeChange(mode: ClaudePermissionMode): void;
-  onModelChange(model: ClaudeModel): void;
+  onModelChange(model: SessionModel): void;
   onStart(): void;
   onResume(): void;
   onStop(): void;
@@ -36,44 +37,48 @@ export function SessionToolbar({
   const isRunning = session?.status === "running";
   const canResume = Boolean(session?.claudeSessionId && !isRunning);
   const canStart = !isRunning && !session?.claudeSessionId;
+  const isCodexReviewer = role === "codex-reviewer";
   const modeWillChange = Boolean(session && session.permissionMode !== permissionMode);
   const sessionModel = session?.model ?? "default";
   const modelWillChange = Boolean(session && sessionModel !== model);
+  const modelOptions = isCodexReviewer ? CODEX_MODEL_OPTIONS : CLAUDE_MODEL_OPTIONS;
 
   return (
     <div className="session-controls">
-      <label className="session-option-field permission-mode-field">
-        <span>
-          Permission
-          <small>
-            {session
-              ? `current: ${formatPermissionMode(session.permissionMode)}${modeWillChange ? " / next launch" : ""}`
-              : "applies on start"}
-          </small>
-        </span>
-        <select
-          value={permissionMode}
-          onChange={(event) => onPermissionModeChange(event.target.value as ClaudePermissionMode)}
-        >
-          <option value="default">默认</option>
-          <option value="bypassPermissions">bypassPermissions</option>
-        </select>
-      </label>
+      {isCodexReviewer ? null : (
+        <label className="session-option-field permission-mode-field">
+          <span>
+            Permission
+            <small>
+              {session
+                ? `current: ${formatPermissionMode(session.permissionMode)}${modeWillChange ? " / next launch" : ""}`
+                : "applies on start"}
+            </small>
+          </span>
+          <select
+            value={permissionMode}
+            onChange={(event) => onPermissionModeChange(event.target.value as ClaudePermissionMode)}
+          >
+            <option value="default">默认</option>
+            <option value="bypassPermissions">bypassPermissions</option>
+          </select>
+        </label>
+      )}
 
       <label className="session-option-field model-field">
         <span>
           Model
           <small>
             {session
-              ? `current: ${formatClaudeModel(sessionModel)}${modelWillChange ? " / next launch" : ""}`
+              ? `current: ${formatSessionModel(sessionModel, isCodexReviewer)}${modelWillChange ? " / next launch" : ""}`
               : "applies on start"}
           </small>
         </span>
         <select
           value={model}
-          onChange={(event) => onModelChange(event.target.value as ClaudeModel)}
+          onChange={(event) => onModelChange(event.target.value as SessionModel)}
         >
-          {CLAUDE_MODEL_OPTIONS.map((option) => (
+          {modelOptions.map((option) => (
             <option key={option.value} value={option.value}>
               {option.label}
             </option>
@@ -103,6 +108,9 @@ function formatPermissionMode(permissionMode: ClaudePermissionMode): string {
   return permissionMode;
 }
 
-function formatClaudeModel(model: ClaudeModel): string {
+function formatSessionModel(model: SessionModel, isCodexReviewer: boolean): string {
+  if (isCodexReviewer) {
+    return CODEX_MODEL_OPTIONS.find((option) => option.value === model)?.label ?? model;
+  }
   return CLAUDE_MODEL_OPTIONS.find((option) => option.value === model)?.label ?? model;
 }

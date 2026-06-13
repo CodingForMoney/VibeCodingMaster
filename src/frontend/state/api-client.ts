@@ -19,7 +19,8 @@ import type {
   CodexReviewGate,
   CodexReviewIndex,
   CodexReviewReport,
-  CodexReviewRequestResult
+  CodexReviewRequestResult,
+  CodexReviewSettingsUpdateRequest
 } from "../../shared/types/codex-review.js";
 import type {
   VcmOrchestrationMode,
@@ -167,6 +168,12 @@ export const apiClient = {
   },
   getCodexReviewState(taskSlug: string) {
     return request<CodexReviewIndex>(`/api/tasks/${encodeURIComponent(taskSlug)}/codex-review`);
+  },
+  updateCodexReviewSettings(taskSlug: string, input: CodexReviewSettingsUpdateRequest) {
+    return request<CodexReviewIndex>(`/api/tasks/${encodeURIComponent(taskSlug)}/codex-review/settings`, {
+      method: "PUT",
+      body: JSON.stringify(input)
+    });
   },
   requestCodexReviewGate(taskSlug: string, gate: CodexReviewGate) {
     return request<CodexReviewRequestResult>(`/api/tasks/${encodeURIComponent(taskSlug)}/codex-review/${gate}/request`, {

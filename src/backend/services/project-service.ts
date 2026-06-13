@@ -1,5 +1,5 @@
 import path from "node:path";
-import { ROLE_NAMES } from "../../shared/constants.js";
+import { VCM_ROLE_NAMES } from "../../shared/constants.js";
 import type {
   ConnectProjectRequest,
   ProjectConfig,
@@ -236,7 +236,7 @@ export function buildDefaultProjectConfig(repoRoot: string): ProjectConfig {
   return {
     version: 1,
     repoRoot,
-    defaultRoles: [...ROLE_NAMES],
+    defaultRoles: [...VCM_ROLE_NAMES],
     handoffRoot: DEFAULT_HANDOFF_ROOT,
     stateRoot: DEFAULT_STATE_ROOT,
     terminalBackend: "node-pty",

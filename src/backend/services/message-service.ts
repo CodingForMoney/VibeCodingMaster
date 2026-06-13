@@ -11,8 +11,8 @@ import type {
   VcmRouteFile,
   VcmRouteFileDispatchResult
 } from "../../shared/types/message.js";
-import type { RoleName } from "../../shared/types/role.js";
-import { ROLE_NAMES, isRoleName } from "../../shared/constants.js";
+import type { RoleName, VcmRoleName } from "../../shared/types/role.js";
+import { VCM_ROLE_NAMES, isVcmRoleName } from "../../shared/constants.js";
 import { VcmError } from "../errors.js";
 import { resolveRepoPath } from "../adapters/filesystem.js";
 import type { FileSystemAdapter } from "../adapters/filesystem.js";
@@ -83,7 +83,7 @@ export interface MessageServiceDeps {
   dispatchConfirmationFailureDelayMs?: number;
 }
 
-const PM_ROLE: RoleName = "project-manager";
+const PM_ROLE: VcmRoleName = "project-manager";
 const PM_TO_ROLE_TYPES = new Set<VcmMessageType>(["task", "question", "review-request", "revise", "cancel"]);
 const ROLE_TO_PM_TYPES = new Set<VcmMessageType>(["result", "question", "blocked", "finding"]);
 const DEFAULT_PRE_DISPATCH_SWITCH_DELAY_MS = 500;
@@ -404,9 +404,9 @@ async function listRouteFiles(fs: FileSystemAdapter, input: RouteContext): Promi
   return routeFiles;
 }
 
-function parseRouteFileName(fileName: string): { fromRole: RoleName; toRole: RoleName } | undefined {
-  for (const fromRole of ROLE_NAMES) {
-    for (const toRole of ROLE_NAMES) {
+function parseRouteFileName(fileName: string): { fromRole: VcmRoleName; toRole: VcmRoleName } | undefined {
+  for (const fromRole of VCM_ROLE_NAMES) {
+    for (const toRole of VCM_ROLE_NAMES) {
       if (fromRole === toRole) {
         continue;
       }
@@ -418,7 +418,7 @@ function parseRouteFileName(fileName: string): { fromRole: RoleName; toRole: Rol
   return undefined;
 }
 
-function parseRouteFileContent(content: string, fromRole: RoleName, toRole: RoleName): {
+function parseRouteFileContent(content: string, fromRole: VcmRoleName, toRole: VcmRoleName): {
   type: VcmMessageType;
   body: string;
   artifactRefs: string[];
@@ -486,7 +486,7 @@ function parseArtifactRefs(frontmatter: Record<string, string>): string[] {
     .filter(Boolean);
 }
 
-function getDefaultMessageType(fromRole: RoleName, toRole: RoleName): VcmMessageType {
+function getDefaultMessageType(fromRole: VcmRoleName, toRole: VcmRoleName): VcmMessageType {
   if (fromRole === PM_ROLE && toRole !== PM_ROLE) {
     return "task";
   }
@@ -506,8 +506,8 @@ function selectDispatchCandidates(routeFiles: VcmRouteFile[], stoppedRole?: Role
   });
 }
 
-function validateMessagePolicy(fromRole: VcmMessageActor, toRole: RoleName, type: VcmMessageType): void {
-  if (!ROLE_NAMES.includes(toRole)) {
+function validateMessagePolicy(fromRole: VcmMessageActor, toRole: VcmRoleName, type: VcmMessageType): void {
+  if (!VCM_ROLE_NAMES.includes(toRole)) {
     throw new VcmError({
       code: "MESSAGE_TARGET_UNKNOWN",
       message: `Unknown target role: ${toRole}`,
@@ -515,7 +515,7 @@ function validateMessagePolicy(fromRole: VcmMessageActor, toRole: RoleName, type
     });
   }
 
-  if (!isRoleName(String(fromRole))) {
+  if (!isVcmRoleName(String(fromRole))) {
     throw new VcmError({
       code: "MESSAGE_SENDER_UNKNOWN",
       message: `Unknown sender role: ${fromRole}`,
@@ -582,7 +582,8 @@ async function clearRouteFileIfStillMatchesMessage(
   input: { repoRoot: string; taskRepoRoot?: string },
   message: VcmRoleMessage
 ): Promise<void> {
-  if (!message.routePath || !isRoleName(String(message.fromRole))) {
+  const fromRole = message.fromRole;
+  if (!message.routePath || !isVcmRoleName(fromRole)) {
     return;
   }
 
@@ -592,7 +593,7 @@ async function clearRouteFileIfStillMatchesMessage(
   }
 
   const routeContent = await fs.readText(absolutePath);
-  const parsed = parseRouteFileContent(routeContent, message.fromRole as RoleName, message.toRole);
+  const parsed = parseRouteFileContent(routeContent, fromRole, message.toRole);
   if (
     parsed.body.trim() === message.body.trim() &&
     parsed.type === message.type &&

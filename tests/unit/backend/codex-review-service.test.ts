@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -26,13 +26,16 @@ describe("codex-review-service", () => {
     const runnerCalls: Array<{ command: string; args: string[]; options?: CommandRunnerOptions }> = [];
     const runner = createRunner(tmpRepo, runnerCalls);
     const writes: string[] = [];
+    const sessionStarts: string[] = [];
     const service = createCodexReviewService({
       fs: createNodeFileSystemAdapter(),
       runner,
-      runtime: createRuntime(writes),
+      runtime: createRuntime(tmpRepo, writes),
       projectService: createProjectService(),
       taskService: createTaskService(tmpRepo),
-      sessionService: createSessionService()
+      sessionService: createSessionService(sessionStarts),
+      reportPollIntervalMs: 5,
+      reportTimeoutMs: 500
     });
 
     const result = await service.requestReviewGate(tmpRepo, "demo-task", "architecture-plan");
@@ -51,15 +54,9 @@ describe("codex-review-service", () => {
     expect(record.callbackStatus).toBe("sent");
     expect(record.reportPath).toBe(".ai/vcm/codex-reviews/architecture-plan-review.md");
 
-    const codexCall = runnerCalls.find((call) => call.command === "codex");
-    expect(codexCall?.args).toContain("--ask-for-approval");
-    expect(codexCall?.args).toContain("never");
-    expect(codexCall?.args).toContain("--cd");
-    expect(codexCall?.args).toContain(path.join(tmpRepo, ".ai/codex"));
-    expect(codexCall?.args).toContain("--add-dir");
-    expect(codexCall?.args).toContain(path.join(tmpRepo, ".ai/vcm/codex-reviews"));
-    expect(codexCall?.args).toContain("--config");
-    expect(codexCall?.args).toContain('model_reasoning_effort="xhigh"');
+    expect(runnerCalls.some((call) => call.command === "codex")).toBe(false);
+    expect(sessionStarts).toEqual(["codex-reviewer"]);
+    expect(writes.find((write) => write.includes("Codex Gate"))).toContain("Report path from this working directory: ../vcm/codex-reviews/architecture-plan-review.md");
     expect(writes.join("")).toContain("[VCM CODEX REVIEW CALLBACK]");
     expect(writes.join("")).toContain("decision: request_changes");
   });
@@ -71,7 +68,7 @@ describe("codex-review-service", () => {
     const service = createCodexReviewService({
       fs: createNodeFileSystemAdapter(),
       runner: createRunner(tmpRepo, runnerCalls),
-      runtime: createRuntime([]),
+      runtime: createRuntime(tmpRepo, []),
       projectService: createProjectService(),
       taskService: createTaskService(tmpRepo),
       sessionService: createSessionService()
@@ -81,6 +78,42 @@ describe("codex-review-service", () => {
 
     expect(result.status).toBe("disabled");
     expect(runnerCalls.some((call) => call.command === "codex")).toBe(false);
+  });
+
+  it("updates gate settings from disabled state without enabling stale gates", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-codex-review-settings-"));
+    await writeHarnessFiles(tmpRepo, { enabled: false });
+    const service = createCodexReviewService({
+      fs: createNodeFileSystemAdapter(),
+      runner: createRunner(tmpRepo, []),
+      runtime: createRuntime(tmpRepo, []),
+      projectService: createProjectService(),
+      taskService: createTaskService(tmpRepo),
+      sessionService: createSessionService()
+    });
+
+    const state = await service.updateSettings(tmpRepo, "demo-task", {
+      gates: { "architecture-plan": true }
+    });
+    const config = await readFile(path.join(tmpRepo, ".ai/codex/config.toml"), "utf8");
+
+    expect(state.enabled).toBe(true);
+    expect(state.gates["architecture-plan"].required).toBe(true);
+    expect(state.gates["validation-adequacy"].required).toBe(false);
+    expect(state.gates["final-diff"].required).toBe(false);
+    expect(config).toContain("enabled = true");
+    expect(config).toContain('"architecture-plan"');
+    expect(config).not.toContain('"validation-adequacy"');
+    expect(config).not.toContain('"final-diff"');
+
+    const disabledState = await service.updateSettings(tmpRepo, "demo-task", {
+      gates: { "architecture-plan": false }
+    });
+    const disabledConfig = await readFile(path.join(tmpRepo, ".ai/codex/config.toml"), "utf8");
+
+    expect(disabledState.enabled).toBe(false);
+    expect(disabledConfig).toContain("enabled = false");
+    expect(disabledConfig).toContain("required_gates = []");
   });
 });
 
@@ -137,10 +170,44 @@ function createRunner(
   };
 }
 
-function createRuntime(writes: string[]): TerminalRuntime {
+function createRuntime(repoRoot: string, writes: string[]): TerminalRuntime {
   return {
-    write(_sessionId, data) {
+    write(sessionId, data) {
       writes.push(data);
+      if (sessionId !== "codex-session" || !data.includes("Gate:")) {
+        return;
+      }
+      const gate = /Gate:\s*([a-z-]+)/.exec(data)?.[1] ?? "architecture-plan";
+      const requestId = /Request:\s*([a-z0-9_.-]+)/i.exec(data)?.[1] ?? "request-id";
+      void writeFile(
+        path.join(repoRoot, ".ai/vcm/codex-reviews", `${gate}-review.md`),
+        [
+          `Gate: ${gate}`,
+          `Request: ${requestId}`,
+          "Decision: request_changes",
+          "Summary: Missing proof point.",
+          "",
+          "severity: high",
+          "title: Missing proof point",
+          "evidence: plan has no proof",
+          "expected: proof point exists",
+          "gap: no proof",
+          "risk: coder ambiguity"
+        ].join("\n"),
+        "utf8"
+      );
+    },
+    getSession(sessionId) {
+      return sessionId === "pm-session" || sessionId === "codex-session"
+        ? {
+            id: sessionId,
+            taskSlug: "demo-task",
+            role: sessionId === "codex-session" ? "codex-reviewer" : "project-manager",
+            status: "running",
+            startedAt: "2026-06-13T00:00:00.000Z",
+            exitCode: null
+          }
+        : undefined;
     }
   } as TerminalRuntime;
 }
@@ -174,8 +241,8 @@ function createTaskService(repoRoot: string) {
   };
 }
 
-function createSessionService() {
-  const session: RoleSessionRecord = {
+function createSessionService(starts: string[] = []) {
+  const pmSession: RoleSessionRecord = {
     id: "pm-session",
     claudeSessionId: "claude-session",
     taskSlug: "demo-task",
@@ -189,11 +256,40 @@ function createSessionService() {
     logPath: ".ai/vcm/handoffs/logs/project-manager.log",
     updatedAt: "2026-06-13T00:00:00.000Z"
   };
+  const codexSession: RoleSessionRecord = {
+    id: "codex-session",
+    claudeSessionId: "codex-session-id",
+    taskSlug: "demo-task",
+    role: "codex-reviewer",
+    status: "running",
+    activityStatus: "idle",
+    command: "codex",
+    permissionMode: "default",
+    model: "gpt-5.5",
+    cwd: "/repo/.ai/codex",
+    terminalBackend: "node-pty",
+    logPath: ".ai/vcm/handoffs/logs/codex-reviewer.log",
+    updatedAt: "2026-06-13T00:00:00.000Z"
+  };
+  const sessions = new Map<string, RoleSessionRecord>([
+    ["project-manager", pmSession]
+  ]);
   return {
-    async getRoleSession() {
-      return session;
+    async getRoleSession(_repoRoot: string, _taskSlug: string, role: string) {
+      return sessions.get(role);
     },
-    async markRoleActivityRunning() {
+    async resumeRoleSession(_repoRoot: string, _taskSlug: string, role: string) {
+      starts.push(`resume:${role}`);
+      sessions.set(role, codexSession);
+      return codexSession;
+    },
+    async startRoleSession(_repoRoot: string, _taskSlug: string, role: string) {
+      starts.push(role);
+      sessions.set(role, codexSession);
+      return codexSession;
+    },
+    async markRoleActivityRunning(_repoRoot: string, _taskSlug: string, role: string) {
+      const session = sessions.get(role) ?? pmSession;
       return {
         ...session,
         activityStatus: "running"

@@ -1,6 +1,6 @@
 import type { VcmOrchestrationMode } from "../../shared/types/message.js";
 import type { RoleName } from "../../shared/types/role.js";
-import type { ClaudeModel, ClaudePermissionMode, RoleSessionRecord } from "../../shared/types/session.js";
+import type { ClaudePermissionMode, RoleSessionRecord, SessionModel } from "../../shared/types/session.js";
 import { XtermView } from "../terminal/xterm-view.js";
 import { SessionToolbar } from "./session-toolbar.js";
 import { TranslationPanel } from "./translation-panel.js";
@@ -9,13 +9,13 @@ export interface SessionConsoleProps {
   role: RoleName;
   session?: RoleSessionRecord;
   permissionMode: ClaudePermissionMode;
-  model: ClaudeModel;
+  model: SessionModel;
   active?: boolean;
   busy?: boolean;
   orchestrationMode: VcmOrchestrationMode;
   translationEnabled: boolean;
   onPermissionModeChange(mode: ClaudePermissionMode): void;
-  onModelChange(model: ClaudeModel): void;
+  onModelChange(model: SessionModel): void;
   onOrchestrationModeChange(mode: VcmOrchestrationMode): void;
   onStart(): void;
   onResume(): void;
@@ -43,6 +43,7 @@ export function SessionConsole({
   onTerminalEvent
 }: SessionConsoleProps) {
   const autoOrchestrationEnabled = orchestrationMode === "auto";
+  const isCodexReviewer = role === "codex-reviewer";
 
   return (
     <section className="session-console">
@@ -60,18 +61,20 @@ export function SessionConsole({
           onStop={onStop}
           onRestart={onRestart}
         />
-        <div className="session-console-actions">
-          <button
-            aria-label={`Auto orchestration is ${autoOrchestrationEnabled ? "on" : "off"}`}
-            aria-pressed={autoOrchestrationEnabled}
-            className={`translation-toggle${autoOrchestrationEnabled ? " is-active" : ""}`}
-            disabled={busy}
-            type="button"
-            onClick={() => onOrchestrationModeChange(autoOrchestrationEnabled ? "manual" : "auto")}
-          >
-            {autoOrchestrationEnabled ? "✅ Auto orchestration" : "× Auto orchestration"}
-          </button>
-        </div>
+        {isCodexReviewer ? null : (
+          <div className="session-console-actions">
+            <button
+              aria-label={`Auto orchestration is ${autoOrchestrationEnabled ? "on" : "off"}`}
+              aria-pressed={autoOrchestrationEnabled}
+              className={`translation-toggle${autoOrchestrationEnabled ? " is-active" : ""}`}
+              disabled={busy}
+              type="button"
+              onClick={() => onOrchestrationModeChange(autoOrchestrationEnabled ? "manual" : "auto")}
+            >
+              {autoOrchestrationEnabled ? "✅ Auto orchestration" : "× Auto orchestration"}
+            </button>
+          </div>
+        )}
       </div>
       {session?.status === "running" ? (
         <SessionConsoleBody
@@ -80,13 +83,17 @@ export function SessionConsole({
           role={role}
           session={session}
           taskSlug={session.taskSlug}
-          translationEnabled={translationEnabled}
+          translationEnabled={!isCodexReviewer && translationEnabled}
         />
       ) : (
         <div className="terminal-empty">
           <strong>{role}</strong>
           <span>
-            {session?.claudeSessionId
+            {isCodexReviewer
+              ? session?.claudeSessionId
+                ? "Resume this role to reconnect the Codex Reviewer terminal."
+                : "Start this role to open an embedded Codex Reviewer terminal."
+              : session?.claudeSessionId
               ? "Resume this role to reconnect its Claude Code conversation."
               : "Start this role to open an embedded Claude Code terminal."}
           </span>

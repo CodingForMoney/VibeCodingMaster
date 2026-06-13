@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { ROLE_DEFINITIONS } from "../../shared/constants.js";
+import { VCM_ROLE_DEFINITIONS } from "../../shared/constants.js";
 import type {
   CheckGatewayQrLoginRequest,
   CheckGatewayQrLoginResult,
@@ -525,7 +525,7 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
     });
 
     const startedRoles: string[] = [];
-    for (const definition of ROLE_DEFINITIONS) {
+    for (const definition of VCM_ROLE_DEFINITIONS) {
       const roleTemplate = template.roles[definition.name];
       try {
         await deps.sessionService.startRoleSession(project.repoRoot, task.taskSlug, definition.name, {

@@ -7,7 +7,7 @@ import {
   type PermissionRequestMode,
   type ThemeMode
 } from "../shared/types/app-settings.js";
-import { ROLE_DEFINITIONS } from "../shared/constants.js";
+import { VCM_ROLE_DEFINITIONS } from "../shared/constants.js";
 import type {
   HarnessApplyResult,
   HarnessBootstrapStatusReport,
@@ -18,6 +18,7 @@ import type {
   GatewayStatus,
   StartGatewayQrLoginResult
 } from "../shared/types/gateway.js";
+import type { CodexReviewGate, CodexReviewIndex } from "../shared/types/codex-review.js";
 import type { VcmOrchestrationState, VcmRoleMessage } from "../shared/types/message.js";
 import type { ProjectSummary } from "../shared/types/project.js";
 import type { RoleName } from "../shared/types/role.js";
@@ -49,6 +50,7 @@ export function App() {
   const [activeOrchestration, setActiveOrchestration] = useState<{ taskSlug: string; orchestration: VcmOrchestrationState } | null>(null);
   const [activeEvents, setActiveEvents] = useState<{ taskSlug: string; events: string[] } | null>(null);
   const [activeSessionRoundState, setActiveSessionRoundState] = useState<{ taskSlug: string; roundState: VcmSessionRoundState } | null>(null);
+  const [activeCodexReview, setActiveCodexReview] = useState<{ taskSlug: string; state: CodexReviewIndex } | null>(null);
   const [activeRole, setActiveRole] = useState<RoleName>("project-manager");
   const [themeMode, setThemeMode] = useState<ThemeMode>("system");
   const [flowPauseAlerts, setFlowPauseAlerts] = useState(true);
@@ -247,6 +249,12 @@ export function App() {
     setActiveOrchestration({ taskSlug, orchestration });
   }
 
+  async function refreshCodexReviewState(taskSlug: string) {
+    const state = await apiClient.getCodexReviewState(taskSlug);
+    setActiveCodexReview({ taskSlug, state });
+    return state;
+  }
+
   useEffect(() => {
     Promise.all([
       apiClient.getCurrentProject(),
@@ -338,6 +346,28 @@ export function App() {
     project?.repoRoot
   ]);
 
+  useEffect(() => {
+    if (!activeTask?.taskSlug) {
+      setActiveCodexReview(null);
+      return;
+    }
+
+    void refreshCodexReviewState(activeTask.taskSlug).catch((caught: Error) => setError(caught.message));
+  }, [activeTask?.taskSlug]);
+
+  useEffect(() => {
+    if (!activeTask?.taskSlug) {
+      return;
+    }
+
+    const taskSlug = activeTask.taskSlug;
+    const interval = window.setInterval(() => {
+      void refreshCodexReviewState(taskSlug).catch((caught: Error) => setError(caught.message));
+    }, 3000);
+
+    return () => window.clearInterval(interval);
+  }, [activeTask?.taskSlug]);
+
   async function withBusy(action: () => Promise<void>) {
     setBusy(true);
     setError("");
@@ -366,6 +396,13 @@ export function App() {
     activeSessionRoundState && activeSessionRoundState.taskSlug === activeTask?.taskSlug
       ? activeSessionRoundState.roundState
       : null;
+  const sidebarCodexReview =
+    activeCodexReview && activeCodexReview.taskSlug === activeTask?.taskSlug
+      ? activeCodexReview.state
+      : null;
+  const codexReviewerEnabled = Boolean(
+    sidebarCodexReview && Object.values(sidebarCodexReview.gates).some((gate) => gate.required)
+  );
 
   return (
     <AppShell
@@ -379,6 +416,7 @@ export function App() {
           orchestration={sidebarOrchestration}
           events={sidebarEvents}
           roundState={sidebarRoundState}
+          codexReview={sidebarCodexReview}
           harnessStatus={harnessStatus}
           harnessBootstrapStatus={harnessBootstrapStatus}
           harnessApplyResult={harnessApplyResult}
@@ -474,10 +512,22 @@ export function App() {
               setGatewayQrModalOpen(false);
             });
           }}
+          onCodexGateEnabledChange={(gate: CodexReviewGate, enabled) => {
+            void withBusy(async () => {
+              if (!activeTask) {
+                throw new Error("Create or select a task before changing Codex Review Gates.");
+              }
+              const state = await apiClient.updateCodexReviewSettings(activeTask.taskSlug, {
+                gates: { [gate]: enabled }
+              });
+              setActiveCodexReview({ taskSlug: activeTask.taskSlug, state });
+            });
+          }}
           onCreateTask={(input) => withBusy(async () => {
             const task = await apiClient.createTask(input);
             await loadTasks();
             setActiveTaskSlug(task.taskSlug);
+            await refreshCodexReviewState(task.taskSlug);
           })}
           onSelectTask={setActiveTaskSlug}
           themeMode={themeMode}
@@ -554,7 +604,7 @@ export function App() {
                 orchestration: nextOrchestration
               });
 
-              for (const definition of ROLE_DEFINITIONS) {
+              for (const definition of VCM_ROLE_DEFINITIONS) {
                 const roleTemplate = launchTemplate.roles[definition.name];
                 await apiClient.startRoleSession(activeTask.taskSlug, definition.name, {
                   cols: 100,
@@ -634,6 +684,7 @@ export function App() {
         <TaskWorkspace
           task={activeTask}
           activeRole={activeRole}
+          codexReviewerEnabled={codexReviewerEnabled}
           translationEnabled={activeTranslationEnabled}
           refreshNonce={workspaceRefreshNonce}
           onTaskChanged={async () => {

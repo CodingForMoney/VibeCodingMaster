@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { isRoleName } from "../../shared/constants.js";
+import { isVcmRoleName } from "../../shared/constants.js";
 import type {
   SendTranslatedInputRequest,
   TranslateUserInputRequest,
@@ -127,7 +127,7 @@ export function registerTranslationRoutes(app: FastifyInstance, deps: Translatio
 }
 
 function parseRole(role: string) {
-  if (!isRoleName(role)) {
+  if (!isVcmRoleName(role)) {
     throw new VcmError({
       code: "UNKNOWN_ROLE",
       message: `Unknown role: ${role}`,

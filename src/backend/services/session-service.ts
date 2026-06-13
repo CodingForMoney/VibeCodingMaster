@@ -6,7 +6,9 @@ import type { RoleName } from "../../shared/types/role.js";
 import type {
   ClaudeModel,
   ClaudePermissionMode,
+  CodexModel,
   RoleSessionRecord,
+  SessionModel,
   StartRoleSessionRequest,
   TaskSessionRecord
 } from "../../shared/types/session.js";
@@ -46,6 +48,11 @@ export interface SessionServiceDeps {
 
 type LaunchMode = "fresh" | "resume";
 
+const CODEX_REVIEWER_ROLE: RoleName = "codex-reviewer";
+const CODEX_DIR = ".ai/codex";
+const CODEX_REVIEW_DIR = ".ai/vcm/codex-reviews";
+const CODEX_CONFIG_PATH = ".ai/codex/config.toml";
+
 export interface RecordClaudeHookEventInput {
   taskSlug: string;
   role: RoleName;
@@ -75,8 +82,11 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     const taskRepoRoot = getTaskRuntimeRepoRoot(task);
     const paths = deps.artifactService.getHandoffPaths(taskRepoRoot, task.handoffDir);
     const persisted = await loadPersistedRoleRecord(deps.fs, taskRepoRoot, config.stateRoot, taskSlug, role);
+    const isCodexReviewer = role === CODEX_REVIEWER_ROLE;
     const permissionMode = normalizeClaudePermissionMode(input.permissionMode ?? persisted?.permissionMode);
-    const model = normalizeClaudeModel(input.model ?? persisted?.model);
+    const model: SessionModel = isCodexReviewer
+      ? normalizeCodexModel(input.model ?? persisted?.model)
+      : normalizeClaudeModel(input.model ?? persisted?.model);
     const claudeSessionId = launchMode === "resume"
       ? persisted?.claudeSessionId
       : randomUUID();
@@ -84,29 +94,34 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     if (!claudeSessionId) {
       throw new VcmError({
         code: "CLAUDE_SESSION_MISSING",
-        message: `${role} does not have a Claude session id to resume.`,
+        message: `${role} does not have a session id to resume.`,
         statusCode: 409,
         hint: "Start the role once before using Resume."
       });
     }
     const transcriptPath = launchMode === "resume" && persisted?.transcriptPath
       ? persisted.transcriptPath
-      : claudeTranscriptPath(taskRepoRoot, claudeSessionId);
+      : isCodexReviewer ? undefined : claudeTranscriptPath(taskRepoRoot, claudeSessionId);
 
-    const startCommand = deps.claude.buildRoleStartCommand(
-      role,
-      config.claudeCommand,
-      permissionMode,
-      claudeSessionId,
-      launchMode === "resume",
-      model
-    );
+    const startCommand = isCodexReviewer
+      ? await buildCodexReviewerStartCommand(deps.fs, taskRepoRoot, launchMode, model as CodexModel)
+      : {
+          ...deps.claude.buildRoleStartCommand(
+            role,
+            config.claudeCommand,
+            permissionMode,
+            claudeSessionId,
+            launchMode === "resume",
+            model as ClaudeModel
+          ),
+          cwd: taskRepoRoot
+        };
     const runtimeSession = await deps.runtime.createSession({
       taskSlug,
       role,
       command: startCommand.command,
       args: startCommand.args,
-      cwd: taskRepoRoot,
+      cwd: startCommand.cwd,
       env: {
         VCM_API_URL: deps.apiUrl,
         VCM_TASK_REPO_ROOT: taskRepoRoot,
@@ -130,7 +145,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       command: startCommand.display,
       permissionMode,
       model,
-      cwd: taskRepoRoot,
+      cwd: startCommand.cwd,
       terminalBackend: "node-pty",
       pid: runtimeSession.pid,
       logPath: paths.roleLogPaths[role],
@@ -281,6 +296,78 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
   };
 }
 
+async function buildCodexReviewerStartCommand(
+  fs: FileSystemAdapter,
+  taskRepoRoot: string,
+  launchMode: LaunchMode,
+  selectedModel: CodexModel
+): Promise<{ command: string; args: string[]; display: string; cwd: string }> {
+  const codexDir = resolveRepoPath(taskRepoRoot, CODEX_DIR);
+  const reviewDir = resolveRepoPath(taskRepoRoot, CODEX_REVIEW_DIR);
+  if (!(await fs.pathExists(codexDir))) {
+    throw new VcmError({
+      code: "CODEX_REVIEW_CONFIG_MISSING",
+      message: `${CODEX_DIR} does not exist.`,
+      statusCode: 409,
+      hint: "Apply the VCM harness before starting Codex Reviewer."
+    });
+  }
+
+  await fs.ensureDir(reviewDir);
+  const config = await loadCodexSessionConfig(fs, taskRepoRoot);
+  const model = selectedModel === "default"
+    ? config.model
+    : selectedModel;
+  const args = launchMode === "resume"
+    ? ["resume", "--last"]
+    : [];
+  args.push(
+    "--cd",
+    codexDir,
+    "--add-dir",
+    reviewDir,
+    "--sandbox",
+    "workspace-write",
+    "--ask-for-approval",
+    "never"
+  );
+  if (model && model !== "default") {
+    args.push("--model", model);
+  }
+  if (config.modelReasoningEffort) {
+    args.push("--config", `model_reasoning_effort="${config.modelReasoningEffort}"`);
+  }
+
+  return {
+    command: config.command,
+    args,
+    cwd: taskRepoRoot,
+    display: [config.command, ...args].map(formatDisplayArg).join(" ")
+  };
+}
+
+async function loadCodexSessionConfig(
+  fs: FileSystemAdapter,
+  taskRepoRoot: string
+): Promise<{ command: string; model?: string; modelReasoningEffort?: string }> {
+  const configPath = resolveRepoPath(taskRepoRoot, CODEX_CONFIG_PATH);
+  if (!(await fs.pathExists(configPath))) {
+    return {
+      command: "codex",
+      model: "gpt-5.5",
+      modelReasoningEffort: "xhigh"
+    };
+  }
+
+  const content = await fs.readText(configPath);
+  const reviewSection = extractTomlSection(content, "vcm.codex_review");
+  return {
+    command: parseTomlString(reviewSection, "command") ?? "codex",
+    model: parseTomlString(content, "model") ?? "gpt-5.5",
+    modelReasoningEffort: parseTomlString(content, "model_reasoning_effort") ?? "xhigh"
+  };
+}
+
 function matchesClaudeHookSession(record: RoleSessionRecord, input: RecordClaudeHookEventInput): boolean {
   if (input.claudeSessionId && record.claudeSessionId === input.claudeSessionId) {
     return true;
@@ -348,7 +435,9 @@ async function loadPersistedRoleRecord(
             : undefined
         ),
         permissionMode: normalizeClaudePermissionMode(record.permissionMode),
-        model: normalizeClaudeModel(record.model)
+        model: record.role === CODEX_REVIEWER_ROLE
+          ? normalizeCodexModel(record.model)
+          : normalizeClaudeModel(record.model)
       }
     : undefined;
 }
@@ -422,4 +511,46 @@ function normalizeClaudeModel(value: unknown): ClaudeModel {
     return value;
   }
   return "default";
+}
+
+function normalizeCodexModel(value: unknown): CodexModel {
+  if (value === "default" || value === "gpt-5.5") {
+    return value;
+  }
+  return "gpt-5.5";
+}
+
+function extractTomlSection(content: string, sectionName: string): string {
+  const lines = content.split(/\r?\n/);
+  const header = `[${sectionName}]`;
+  const start = lines.findIndex((line) => line.trim() === header);
+  if (start < 0) {
+    return "";
+  }
+
+  const section: string[] = [];
+  for (let index = start + 1; index < lines.length; index += 1) {
+    const line = lines[index];
+    if (/^\s*\[[^\]]+\]\s*$/.test(line)) {
+      break;
+    }
+    section.push(line);
+  }
+  return section.join("\n");
+}
+
+function parseTomlString(content: string, key: string): string | undefined {
+  const pattern = new RegExp(`^\\s*${escapeRegExp(key)}\\s*=\\s*"([^"]*)"\\s*$`, "m");
+  return pattern.exec(content)?.[1];
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function formatDisplayArg(value: string): string {
+  if (/^[A-Za-z0-9_./:=@+-]+$/.test(value)) {
+    return value;
+  }
+  return `'${value.replaceAll("'", "'\\''")}'`;
 }

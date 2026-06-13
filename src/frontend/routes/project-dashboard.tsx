@@ -10,6 +10,7 @@ import type {
   GatewayStatus,
   StartGatewayQrLoginResult
 } from "../../shared/types/gateway.js";
+import { CODEX_REVIEW_GATES, type CodexReviewGate, type CodexReviewIndex } from "../../shared/types/codex-review.js";
 import type { VcmOrchestrationState, VcmRoleMessage } from "../../shared/types/message.js";
 import type { ProjectSummary } from "../../shared/types/project.js";
 import type { VcmSessionRoundState } from "../../shared/types/round.js";
@@ -24,6 +25,7 @@ type SidebarSectionId =
   | "repository-path"
   | "connected-repository"
   | "settings"
+  | "codex-review-gates"
   | "gateway"
   | "vcm-harness"
   | "new-task"
@@ -38,6 +40,7 @@ export interface ProjectDashboardProps {
   orchestration: VcmOrchestrationState | null;
   events: string[];
   roundState: VcmSessionRoundState | null;
+  codexReview: CodexReviewIndex | null;
   harnessStatus: HarnessStatusReport | null;
   harnessBootstrapStatus: HarnessBootstrapStatusReport | null;
   harnessApplyResult?: HarnessApplyResult | null;
@@ -56,6 +59,7 @@ export interface ProjectDashboardProps {
   onGatewayTranslationChange(enabled: boolean): void;
   onStartGatewayQrLogin(): void;
   onResetGatewayBinding(): void;
+  onCodexGateEnabledChange(gate: CodexReviewGate, enabled: boolean): void;
   onCreateTask(input: { taskSlug: string; createWorktree?: boolean; title?: string }): Promise<void>;
   onSelectTask(taskSlug: string): void;
   themeMode: ThemeMode;
@@ -83,6 +87,7 @@ export function ProjectDashboard({
   orchestration,
   events,
   roundState,
+  codexReview,
   harnessStatus,
   harnessBootstrapStatus,
   harnessApplyResult,
@@ -101,6 +106,7 @@ export function ProjectDashboard({
   onGatewayTranslationChange,
   onStartGatewayQrLogin,
   onResetGatewayBinding,
+  onCodexGateEnabledChange,
   onCreateTask,
   onSelectTask,
   themeMode,
@@ -279,6 +285,20 @@ export function ProjectDashboard({
         </div>
       </SidebarSection>
 
+      {project && activeTaskSlug ? (
+        <SidebarSection
+          title="Codex Review Gates"
+          open={openSidebarSection === "codex-review-gates"}
+          onOpenChange={(open) => handleSidebarSectionChange("codex-review-gates", open)}
+        >
+          <CodexReviewGateSettings
+            busy={busy}
+            state={codexReview}
+            onGateEnabledChange={onCodexGateEnabledChange}
+          />
+        </SidebarSection>
+      ) : null}
+
       <SidebarSection
         title="Gateway"
         open={openSidebarSection === "gateway"}
@@ -414,6 +434,51 @@ function getLaunchTemplateSummary(template: LaunchTemplate): string {
     .map(([role, config]) => `${role}: ${config.permissionMode} / ${config.model}`)
     .join("; ");
   return `Launch template: ${getLaunchTemplateBadge(template)}; ${roles}`;
+}
+
+function CodexReviewGateSettings({
+  busy,
+  onGateEnabledChange,
+  state
+}: {
+  busy?: boolean;
+  onGateEnabledChange(gate: CodexReviewGate, enabled: boolean): void;
+  state: CodexReviewIndex | null;
+}) {
+  return (
+    <div className="sidebar-settings">
+      {CODEX_REVIEW_GATES.map((gate) => {
+        const record = state?.gates[gate];
+        const enabled = Boolean(record?.required);
+        return (
+          <button
+            aria-pressed={enabled}
+            className={enabled ? "settings-toggle is-active" : "settings-toggle"}
+            disabled={busy || !state}
+            key={gate}
+            title={record?.status ? `status: ${record.status}` : undefined}
+            type="button"
+            onClick={() => onGateEnabledChange(gate, !enabled)}
+          >
+            <span>{getCodexGateLabel(gate)}</span>
+            <span>{enabled ? "on" : "off"}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function getCodexGateLabel(gate: CodexReviewGate): string {
+  switch (gate) {
+    case "architecture-plan":
+      return "Architecture plan";
+    case "validation-adequacy":
+      return "Validation adequacy";
+    case "final-diff":
+      return "Final diff";
+  }
+  return gate;
 }
 
 function GatewayPanel({

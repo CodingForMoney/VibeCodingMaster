@@ -46,6 +46,22 @@ export const CLAUDE_MODEL_OPTIONS = [
 
 export type ClaudeModel = typeof CLAUDE_MODEL_OPTIONS[number]["value"];
 
+export const CODEX_MODEL_OPTIONS = [
+  {
+    value: "gpt-5.5",
+    label: "GPT-5.5",
+    description: "Strong Codex reviewer default"
+  },
+  {
+    value: "default",
+    label: "Default",
+    description: "Codex account default"
+  }
+] as const;
+
+export type CodexModel = typeof CODEX_MODEL_OPTIONS[number]["value"];
+export type SessionModel = ClaudeModel | CodexModel;
+
 export interface RoleSessionRecord {
   id: string;
   claudeSessionId: string;
@@ -56,7 +72,7 @@ export interface RoleSessionRecord {
   activityStatus?: RoleActivityStatus;
   command: string;
   permissionMode: ClaudePermissionMode;
-  model?: ClaudeModel;
+  model?: SessionModel;
   cwd: string;
   terminalBackend: "node-pty";
   pid?: number;
@@ -76,7 +92,7 @@ export interface TaskSessionRecord {
   version: 1;
   taskSlug: string;
   updatedAt: string;
-  roles: Record<RoleName, RoleSessionPointer>;
+  roles: Partial<Record<RoleName, RoleSessionPointer>>;
 }
 
 export interface RoleSessionPointer {
@@ -91,5 +107,5 @@ export interface StartRoleSessionRequest {
   cols?: number;
   rows?: number;
   permissionMode?: ClaudePermissionMode;
-  model?: ClaudeModel;
+  model?: SessionModel;
 }

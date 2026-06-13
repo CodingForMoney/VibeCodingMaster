@@ -1,8 +1,12 @@
-export type RoleName =
+export type VcmRoleName =
   | "project-manager"
   | "architect"
   | "coder"
   | "reviewer";
+
+export type CodexReviewerRoleName = "codex-reviewer";
+
+export type RoleName = VcmRoleName | CodexReviewerRoleName;
 
 export type DispatchableRole =
   | "architect"
@@ -22,8 +26,8 @@ export type RoleStatus =
   | "missing"
   | "unknown";
 
-export interface RoleDefinition {
-  name: RoleName;
+export interface RoleDefinition<TName extends RoleName = RoleName> {
+  name: TName;
   label: string;
   commandAgent: string;
   dispatchable: boolean;

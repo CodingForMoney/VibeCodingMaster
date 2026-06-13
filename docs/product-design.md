@@ -101,8 +101,14 @@ final task diff
 
 Each gate returns `approve` or `request_changes`. PM triggers gates through the
 `vcm-codex-review-gate` skill at the three workflow points; VCM owns the Codex
-Review switch, gate state, Codex CLI / adapter execution, and PM callback after
-review completes. Codex writes reports under `.ai/vcm/codex-reviews/`.
+Review sidebar toggles, gate state, Codex CLI / adapter execution, and PM
+callback after review completes. Codex writes reports under
+`.ai/vcm/codex-reviews/`. All three gate toggles default to off.
+When any gate is on, or when a Codex Reviewer session already exists, the task
+workspace shows `Codex Reviewer` as a fifth terminal role with Codex model
+selection. VCM sends gate prompts into this long-lived terminal session so the
+review can be challenged or clarified afterward; the role remains outside PM
+routing and Claude Code auto orchestration.
 Architecture-plan findings return to architect, validation-adequacy findings
 return to reviewer, and final-diff findings go to architect first for
 assessment. Codex reviewer role configuration lives under `.ai/codex/`,

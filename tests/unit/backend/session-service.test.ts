@@ -84,6 +84,46 @@ describe("createSessionService", () => {
     ]);
   });
 
+  it("starts Codex Reviewer sessions with Codex CLI from .ai/codex", async () => {
+    const fs = createMemoryFs();
+    await fs.writeText("/repo/.ai/codex", "");
+    await fs.writeText("/repo/.ai/codex/config.toml", `model = "gpt-5.5"
+model_reasoning_effort = "xhigh"
+
+[vcm.codex_review]
+enabled = true
+required_gates = ["architecture-plan"]
+`);
+    const runtimeInputs: CreateTerminalSessionInput[] = [];
+    const service = createTestSessionService(fs, runtimeInputs);
+
+    const started = await service.startRoleSession("/repo", "demo-task", "codex-reviewer", {
+      model: "gpt-5.5"
+    });
+
+    expect(started.role).toBe("codex-reviewer");
+    expect(started.model).toBe("gpt-5.5");
+    expect(started.transcriptPath).toBeUndefined();
+    expect(started.command).toContain("codex --cd /repo/.ai/codex");
+    expect(runtimeInputs[0]?.command).toBe("codex");
+    expect(runtimeInputs[0]?.cwd).toBe("/repo");
+    expect(runtimeInputs[0]?.args).toEqual([
+      "--cd",
+      "/repo/.ai/codex",
+      "--add-dir",
+      "/repo/.ai/vcm/codex-reviews",
+      "--sandbox",
+      "workspace-write",
+      "--ask-for-approval",
+      "never",
+      "--model",
+      "gpt-5.5",
+      "--config",
+      'model_reasoning_effort="xhigh"'
+    ]);
+    expect(runtimeInputs[0]?.logPath).toBe("/repo/.ai/vcm/handoffs/logs/codex-reviewer.log");
+  });
+
   it("starts role sessions inside the task worktree when one exists", async () => {
     const fs = createMemoryFs();
     const runtimeInputs: CreateTerminalSessionInput[] = [];
@@ -274,7 +314,8 @@ function createTestSessionService(
             "project-manager": ".ai/vcm/handoffs/logs/project-manager.log",
             architect: ".ai/vcm/handoffs/logs/architect.log",
             coder: ".ai/vcm/handoffs/logs/coder.log",
-            reviewer: ".ai/vcm/handoffs/logs/reviewer.log"
+            reviewer: ".ai/vcm/handoffs/logs/reviewer.log",
+            "codex-reviewer": ".ai/vcm/handoffs/logs/codex-reviewer.log"
           },
           architecturePlanPath: ".ai/vcm/handoffs/architecture-plan.md",
           knownIssuesPath: ".ai/vcm/handoffs/known-issues.md",

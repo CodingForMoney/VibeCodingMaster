@@ -4,12 +4,8 @@ approval_policy = "never"
 default_permissions = "vcm_codex_reviewer"
 
 [vcm.codex_review]
-enabled = true
-required_gates = [
-  "architecture-plan",
-  "validation-adequacy",
-  "final-diff",
-]
+enabled = false
+required_gates = []
 
 [permissions.vcm_codex_reviewer.workspace_roots]
 "../.." = true

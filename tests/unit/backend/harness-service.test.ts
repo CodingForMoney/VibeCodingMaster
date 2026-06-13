@@ -56,7 +56,10 @@ describe("createHarnessService", () => {
     expect(await fs.readText("/repo/.claude/agents/architect.md")).toContain("verifiable behavior, phase boundaries, behavior/contract proof points");
     expect(await fs.readText("/repo/.claude/agents/architect.md")).toContain("Read `.ai/vcm/handoffs/known-issues.md` and promote confirmed unresolved issues to `docs/known-issues.md`.");
     expect(await fs.readText("/repo/.ai/codex/AGENTS.md")).toContain("You are VCM `codex-reviewer`");
-    expect(await fs.readText("/repo/.ai/codex/config.toml")).toContain("[vcm.codex_review]");
+    const codexConfig = await fs.readText("/repo/.ai/codex/config.toml");
+    expect(codexConfig).toContain("[vcm.codex_review]");
+    expect(codexConfig).toContain("enabled = false");
+    expect(codexConfig).toContain("required_gates = []");
     expect(await fs.readText("/repo/.ai/codex/prompts/architecture-plan-gate.md")).toContain("Codex Gate: architecture-plan");
     expect(await fs.readText("/repo/.ai/codex/prompts/validation-adequacy-gate.md")).toContain("Codex Gate: validation-adequacy");
     expect(await fs.readText("/repo/.ai/codex/prompts/final-diff-gate.md")).toContain("Codex Gate: final-diff");

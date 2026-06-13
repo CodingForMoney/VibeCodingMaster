@@ -67,7 +67,8 @@ function createArtifactSummary(statuses: Record<ArtifactSummary["checks"][number
         "project-manager": ".ai/vcm/handoffs/logs/project-manager.log",
         architect: ".ai/vcm/handoffs/logs/architect.log",
         coder: ".ai/vcm/handoffs/logs/coder.log",
-        reviewer: ".ai/vcm/handoffs/logs/reviewer.log"
+        reviewer: ".ai/vcm/handoffs/logs/reviewer.log",
+        "codex-reviewer": ".ai/vcm/handoffs/logs/codex-reviewer.log"
       },
       messageRoutePaths: {
         "project-manager-architect": ".ai/vcm/handoffs/messages/project-manager-architect.md",

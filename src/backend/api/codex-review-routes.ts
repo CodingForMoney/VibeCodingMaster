@@ -1,5 +1,8 @@
 import type { FastifyInstance } from "fastify";
-import type { CodexReviewExceptionRequest } from "../../shared/types/codex-review.js";
+import type {
+  CodexReviewExceptionRequest,
+  CodexReviewSettingsUpdateRequest
+} from "../../shared/types/codex-review.js";
 import { VcmError } from "../errors.js";
 import { isCodexReviewGate, type CodexReviewService } from "../services/codex-review-service.js";
 import type { ProjectService } from "../services/project-service.js";
@@ -14,6 +17,14 @@ export function registerCodexReviewRoutes(app: FastifyInstance, deps: CodexRevie
     const project = await requireCurrentProject(deps.projectService);
     return deps.codexReviewService.getState(project.repoRoot, request.params.taskSlug);
   });
+
+  app.put<{ Params: { taskSlug: string }; Body: CodexReviewSettingsUpdateRequest }>(
+    "/api/tasks/:taskSlug/codex-review/settings",
+    async (request) => {
+      const project = await requireCurrentProject(deps.projectService);
+      return deps.codexReviewService.updateSettings(project.repoRoot, request.params.taskSlug, request.body);
+    }
+  );
 
   app.post<{ Params: { taskSlug: string; gate: string } }>(
     "/api/tasks/:taskSlug/codex-review/:gate/request",

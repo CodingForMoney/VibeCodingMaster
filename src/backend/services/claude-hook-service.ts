@@ -4,7 +4,7 @@ import type {
   ClaudeHookResult,
   ClaudePermissionRequestHookResult
 } from "../../shared/types/claude-hook.js";
-import { isRoleName } from "../../shared/constants.js";
+import { isVcmRoleName } from "../../shared/constants.js";
 import { VcmError } from "../errors.js";
 import type { GatewayService } from "../gateway/gateway-service.js";
 import type { AppSettingsService } from "./app-settings-service.js";
@@ -36,7 +36,7 @@ export interface ClaudeHookServiceDeps {
 
 export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHookService {
   async function getHookContext(input: ClaudeHookRequest) {
-    if (!isRoleName(input.role)) {
+    if (!isVcmRoleName(input.role)) {
       throw new VcmError({
         code: "HOOK_ROLE_INVALID",
         message: `Unknown hook role: ${input.role}`,
@@ -231,7 +231,7 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
   }
 
   async function handlePermissionRequestHook(input: ClaudeHookRequest): Promise<ClaudePermissionRequestHookResult | undefined> {
-    if (!isRoleName(input.role)) {
+    if (!isVcmRoleName(input.role)) {
       throw new VcmError({
         code: "HOOK_ROLE_INVALID",
         message: `Unknown hook role: ${input.role}`,

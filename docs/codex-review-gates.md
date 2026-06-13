@@ -85,9 +85,12 @@ review state and asks VCM to start a review when the gate is enabled, required,
 and not already approved for the current input.
 
 VCM owns execution. When review starts, the VCM flow remains running and enters
-a Codex review stage. VCM runs Codex CLI / adapter, records state, validates the
-report shape, and calls PM back when review finishes. PM then reads the report
-and continues or routes by gate type.
+a Codex review stage. VCM ensures the long-lived `codex-reviewer` embedded
+terminal session is running, sends the gate prompt into that session, records
+state, validates the report shape, and calls PM back when review finishes. PM
+then reads the report and continues or routes by gate type. The same Codex
+Reviewer terminal remains available after the gate so the user or PM can
+continue discussing, challenging, or confirming the review result in context.
 Codex execution failure is VCM/tool failure, not `request_changes`; VCM offers
 retry, skip, or override and records the chosen exception state.
 
@@ -97,6 +100,7 @@ PM reaches gate trigger
   -> skill checks VCM Codex gate state
   -> skill requests VCM start review
   -> VCM state = codex-review:running
+  -> VCM sends gate prompt to Codex Reviewer terminal
   -> Codex Reviewer writes report
   -> VCM records completed / failed / skipped / overridden
   -> VCM emits Codex review callback to PM
@@ -386,6 +390,7 @@ Implemented API:
 
 ```text
 GET  /api/tasks/:taskSlug/codex-review
+PUT  /api/tasks/:taskSlug/codex-review/settings
 POST /api/tasks/:taskSlug/codex-review/:gate/request
 POST /api/tasks/:taskSlug/codex-review/:gate/retry
 POST /api/tasks/:taskSlug/codex-review/:gate/skip
@@ -433,29 +438,30 @@ prevents interactive permission prompts; execution failures are recorded as
 
 ## 10. UI Shape
 
-Add a `Review Gates` panel to the task workspace or sidebar task details.
+Add a `Codex Review Gates` group to the left sidebar. It is visible for the
+connected active task and contains three independent toggles:
 
-Display one row per gate:
+- Architecture Plan
+- Validation Adequacy
+- Final Diff
 
-```text
-Architecture Plan       pending | running | approve | request_changes
-Validation Adequacy     pending | running | approve | request_changes
-Final Diff              pending | running | approve | request_changes
-```
+All three toggles default to `off`. Turning on any gate writes it into
+`.ai/codex/config.toml` under `[vcm.codex_review].required_gates` and sets
+`enabled = true`. Turning all gates off writes `enabled = false` and
+`required_gates = []`.
 
-Each row should expose:
+The task workspace must not show a separate Codex Review Gates panel. The UI
+does not expose manual `Run`, `Run Again`, `Retry`, `Skip`, or `Override`
+buttons for gates; PM triggers reviews through the `vcm-codex-review-gate`
+skill, and VCM handles execution failures through its managed retry / skip /
+override path.
 
-- `Run`
-- `Run Again`
-- `Retry` on failed gates
-- `Skip` on failed gates
-- `Override` on failed gates
-
-The task header or sidebar dock can show a compact summary:
-
-```text
-Codex Gates: 2/3 approved, 1 changes requested
-```
+When at least one gate toggle is on, or when the task already has a saved Codex
+Reviewer session, the task workspace role tabs include a fifth role, `Codex
+Reviewer`. It uses the same embedded terminal surface as the Claude Code roles,
+but starts Codex CLI from `.ai/codex`, uses the Codex model selector, and is not
+part of PM message routing, auto orchestration, translation, or one-click
+four-role Claude startup.
 
 ## 11. Project-Manager Rules
 
@@ -487,9 +493,9 @@ The first implementation is intentionally small:
 1. Add `.ai/codex/AGENTS.md` and `.ai/codex/config.toml` as VCM-managed Codex
    reviewer runtime files.
 2. Add `vcm-codex-review-gate` as the PM-facing skill / protocol entry.
-3. Add backend APIs to request, run, retry, skip, override, list, and read gate
-   reports.
-4. Add manual UI controls for retry, skip, and override on failed gates.
+3. Add backend APIs to configure, request, run, retry, skip, override, list,
+   and read gate reports.
+4. Add sidebar toggles for the three gate enablement options.
 5. Add project-manager and final-acceptance harness rules that require checking
    Codex gate reports for complex tasks.
 6. Keep gate triggering PM-driven at first.

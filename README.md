@@ -11,6 +11,8 @@ VCM is designed for long-running coding work where one Claude Code conversation 
 
 Each role runs as a real Claude Code process inside an embedded terminal. The GUI lets the user start, stop, resume, restart, switch, observe, and manually intervene in those sessions without juggling separate terminal windows.
 
+When Codex Review Gates are enabled for a task, or when a Codex Reviewer session already exists, the workspace can also show a fifth `Codex Reviewer` terminal role. It runs Codex CLI from `.ai/codex` with a Codex model selector, receives gate prompts in the same long-lived terminal session, and stays outside the normal Claude Code PM routing flow.
+
 ## Current Capabilities
 
 - GUI-first task workspace.
@@ -19,6 +21,7 @@ Each role runs as a real Claude Code process inside an embedded terminal. The GU
 - Connected repository status for the base repo, including branch, upstream status, commit hash, dirty state, and fast-forward-only pull.
 - Embedded Claude Code terminals powered by `node-pty` and `xterm.js`.
 - One Claude Code session per role, with role tabs in the task header.
+- Optional Codex Reviewer terminal role when any Codex Review Gate is enabled.
 - Role session recovery through persisted Claude session ids and `claude --resume`.
 - Permission mode selection before start, resume, or restart:
   - `default`

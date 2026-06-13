@@ -1,7 +1,7 @@
 import path from "node:path";
 import { homedir } from "node:os";
 import { createHash } from "node:crypto";
-import { ROLE_NAMES } from "../../shared/constants.js";
+import { VCM_ROLE_NAMES } from "../../shared/constants.js";
 import {
   createDefaultLaunchTemplate,
   type AppPreferences,
@@ -11,7 +11,7 @@ import {
   type ThemeMode
 } from "../../shared/types/app-settings.js";
 import type { ProjectConfig } from "../../shared/types/project.js";
-import type { RoleName } from "../../shared/types/role.js";
+import type { VcmRoleName } from "../../shared/types/role.js";
 import { CLAUDE_MODEL_OPTIONS, type ClaudeModel, type ClaudePermissionMode } from "../../shared/types/session.js";
 import type { TranslationSecretSettings, TranslationSettings } from "../../shared/types/translation.js";
 import type { FileSystemAdapter } from "../adapters/filesystem.js";
@@ -289,8 +289,8 @@ function normalizeLaunchTemplate(input: unknown): LaunchTemplate {
   }
 
   const rawRoles = isObject(input.roles) ? input.roles : {};
-  const roles = {} as Record<RoleName, RoleLaunchTemplateEntry>;
-  for (const role of ROLE_NAMES) {
+  const roles = {} as Record<VcmRoleName, RoleLaunchTemplateEntry>;
+  for (const role of VCM_ROLE_NAMES) {
     roles[role] = normalizeRoleLaunchTemplateEntry(rawRoles[role], defaults.roles[role]);
   }
 

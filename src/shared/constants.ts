@@ -1,9 +1,9 @@
-import type { DispatchableRole, RoleDefinition, RoleName } from "./types/role.js";
+import type { CodexReviewerRoleName, DispatchableRole, RoleDefinition, RoleName, VcmRoleName } from "./types/role.js";
 
 export const DEFAULT_BACKEND_PORT = 4173;
 export const DEFAULT_FRONTEND_PORT = 5173;
 
-export const ROLE_DEFINITIONS: readonly RoleDefinition[] = [
+export const VCM_ROLE_DEFINITIONS: readonly RoleDefinition<VcmRoleName>[] = [
   {
     name: "project-manager",
     label: "Project Manager",
@@ -30,6 +30,19 @@ export const ROLE_DEFINITIONS: readonly RoleDefinition[] = [
   }
 ] as const;
 
+export const CODEX_REVIEWER_ROLE_DEFINITION: RoleDefinition<CodexReviewerRoleName> = {
+  name: "codex-reviewer",
+  label: "Codex Reviewer",
+  commandAgent: "codex-reviewer",
+  dispatchable: false
+};
+
+export const ROLE_DEFINITIONS: readonly RoleDefinition[] = [
+  ...VCM_ROLE_DEFINITIONS,
+  CODEX_REVIEWER_ROLE_DEFINITION
+] as const;
+
+export const VCM_ROLE_NAMES = VCM_ROLE_DEFINITIONS.map((role) => role.name) as readonly VcmRoleName[];
 export const ROLE_NAMES = ROLE_DEFINITIONS.map((role) => role.name) as readonly RoleName[];
 export const DISPATCHABLE_ROLES = ROLE_DEFINITIONS
   .filter((role) => role.dispatchable)
@@ -37,6 +50,10 @@ export const DISPATCHABLE_ROLES = ROLE_DEFINITIONS
 
 export function isRoleName(value: string): value is RoleName {
   return ROLE_NAMES.includes(value as RoleName);
+}
+
+export function isVcmRoleName(value: string): value is VcmRoleName {
+  return VCM_ROLE_NAMES.includes(value as VcmRoleName);
 }
 
 export function isDispatchableRole(value: string): value is DispatchableRole {

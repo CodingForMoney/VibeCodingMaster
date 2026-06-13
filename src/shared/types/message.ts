@@ -1,6 +1,6 @@
-import type { RoleName } from "./role.js";
+import type { VcmRoleName } from "./role.js";
 
-export type VcmMessageActor = RoleName | "user";
+export type VcmMessageActor = VcmRoleName | "user";
 
 export type VcmMessageType =
   | "user-request"
@@ -19,7 +19,7 @@ export interface VcmRoleMessage {
   id: string;
   taskSlug: string;
   fromRole: VcmMessageActor;
-  toRole: RoleName;
+  toRole: VcmRoleName;
   type: VcmMessageType;
   body: string;
   artifactRefs: string[];
@@ -41,8 +41,8 @@ export interface VcmOrchestrationState {
 
 export interface VcmRouteFile {
   path: string;
-  fromRole: RoleName;
-  toRole: RoleName;
+  fromRole: VcmRoleName;
+  toRole: VcmRoleName;
   type: VcmMessageType;
   body: string;
   artifactRefs: string[];

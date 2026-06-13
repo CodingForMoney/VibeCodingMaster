@@ -1,15 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ROLE_DEFINITIONS } from "../../shared/constants.js";
-import { CODEX_REVIEW_GATES, type CodexReviewGate, type CodexReviewIndex } from "../../shared/types/codex-review.js";
+import { CODEX_REVIEWER_ROLE_DEFINITION, VCM_ROLE_DEFINITIONS } from "../../shared/constants.js";
 import type { TaskStatusReport } from "../../shared/types/api.js";
 import type { VcmOrchestrationMode, VcmOrchestrationState, VcmRoleMessage } from "../../shared/types/message.js";
-import type { RoleName } from "../../shared/types/role.js";
+import type { RoleDefinition, RoleName, VcmRoleName } from "../../shared/types/role.js";
 import type { VcmSessionRoundState } from "../../shared/types/round.js";
-import type { ClaudeModel, ClaudePermissionMode } from "../../shared/types/session.js";
+import type { ClaudeModel, ClaudePermissionMode, SessionModel } from "../../shared/types/session.js";
 import type { TaskRecord } from "../../shared/types/task.js";
 import { RoleSessionTabs } from "../components/role-session-tabs.js";
 import { SessionConsole } from "../components/session-console.js";
-import { StatusBadge } from "../components/status-badge.js";
 import { getSessionForRole } from "../state/session-store.js";
 import { apiClient } from "../state/api-client.js";
 import { selectAutoDispatchRole } from "../state/message-navigation.js";
@@ -17,6 +15,7 @@ import { selectAutoDispatchRole } from "../state/message-navigation.js";
 export interface TaskWorkspaceProps {
   task: TaskRecord;
   activeRole: RoleName;
+  codexReviewerEnabled: boolean;
   translationEnabled: boolean;
   refreshNonce?: number;
   onTaskChanged(): Promise<void>;
@@ -31,7 +30,7 @@ export interface TaskWorkspaceProps {
 
 export interface TaskWorkspaceLaunchState {
   taskSlug: string;
-  roles: Record<RoleName, {
+  roles: Record<VcmRoleName, {
     permissionMode: ClaudePermissionMode;
     model: ClaudeModel;
   }>;
@@ -46,6 +45,7 @@ export interface TaskWorkspaceLaunchState {
 export function TaskWorkspace({
   task,
   activeRole,
+  codexReviewerEnabled,
   translationEnabled,
   refreshNonce = 0,
   onTaskChanged,
@@ -62,20 +62,28 @@ export function TaskWorkspace({
     "project-manager": "default",
     architect: "default",
     coder: "default",
-    reviewer: "default"
+    reviewer: "default",
+    "codex-reviewer": "default"
   });
-  const [models, setModels] = useState<Record<RoleName, ClaudeModel>>({
+  const [models, setModels] = useState<Record<RoleName, SessionModel>>({
     "project-manager": "default",
     architect: "default",
     coder: "default",
-    reviewer: "default"
+    reviewer: "default",
+    "codex-reviewer": "gpt-5.5"
   });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [events, setEvents] = useState<string[]>([]);
   const [orchestration, setOrchestration] = useState<VcmOrchestrationState | null>(null);
-  const [codexReview, setCodexReview] = useState<CodexReviewIndex | null>(null);
   const messageSnapshotRef = useRef<{ taskSlug: string; messages: VcmRoleMessage[] } | null>(null);
+  const hasCodexReviewerSession = Boolean(
+    statusReport?.sessions.some((session) => session.role === "codex-reviewer")
+  );
+  const codexReviewerVisible = codexReviewerEnabled || hasCodexReviewerSession;
+  const visibleRoleDefinitions: readonly RoleDefinition[] = codexReviewerVisible
+    ? [...VCM_ROLE_DEFINITIONS, CODEX_REVIEWER_ROLE_DEFINITION]
+    : VCM_ROLE_DEFINITIONS;
 
   const applyMessageState = useCallback((nextMessages: VcmRoleMessage[], nextOrchestration: VcmOrchestrationState) => {
     const previousMessages = messageSnapshotRef.current?.taskSlug === task.taskSlug
@@ -96,22 +104,20 @@ export function TaskWorkspace({
     }
   }, [onActiveRoleChange, onMessagesChanged, onOrchestrationChanged, task.taskSlug]);
 
-  const applyFetchedState = useCallback((nextStatusReport: TaskStatusReport, nextMessages: VcmRoleMessage[], nextOrchestration: VcmOrchestrationState, nextRoundState: VcmSessionRoundState, nextCodexReview: CodexReviewIndex) => {
+  const applyFetchedState = useCallback((nextStatusReport: TaskStatusReport, nextMessages: VcmRoleMessage[], nextOrchestration: VcmOrchestrationState, nextRoundState: VcmSessionRoundState) => {
     setStatusReport(nextStatusReport);
-    setCodexReview(nextCodexReview);
     applyMessageState(nextMessages, nextOrchestration);
     onRoundStateChanged?.(nextRoundState);
   }, [applyMessageState, onRoundStateChanged]);
 
   const refresh = useCallback(async () => {
-    const [nextStatusReport, nextMessages, nextOrchestration, nextRoundState, nextCodexReview] = await Promise.all([
+    const [nextStatusReport, nextMessages, nextOrchestration, nextRoundState] = await Promise.all([
       apiClient.getTaskStatus(task.taskSlug),
       apiClient.listMessages(task.taskSlug),
       apiClient.getOrchestrationState(task.taskSlug),
-      apiClient.getSessionRoundState(task.taskSlug),
-      apiClient.getCodexReviewState(task.taskSlug)
+      apiClient.getSessionRoundState(task.taskSlug)
     ]);
-    applyFetchedState(nextStatusReport, nextMessages, nextOrchestration, nextRoundState, nextCodexReview);
+    applyFetchedState(nextStatusReport, nextMessages, nextOrchestration, nextRoundState);
   }, [applyFetchedState, task.taskSlug]);
 
   useEffect(() => {
@@ -122,6 +128,12 @@ export function TaskWorkspace({
     setEvents([]);
     onEventsChanged?.([]);
   }, [onEventsChanged, task.taskSlug]);
+
+  useEffect(() => {
+    if (statusReport && !codexReviewerVisible && activeRole === "codex-reviewer") {
+      onActiveRoleChange("project-manager");
+    }
+  }, [activeRole, codexReviewerVisible, onActiveRoleChange, statusReport]);
 
   useEffect(() => {
     setPermissionModes((current) => {
@@ -154,12 +166,13 @@ export function TaskWorkspace({
 
   useEffect(() => {
     const sessions = statusReport?.sessions ?? [];
-    const sessionRoles = new Set(sessions.map((session) => session.role));
+    const vcmSessions = sessions.filter((session) => session.role !== "codex-reviewer");
+    const sessionRoles = new Set(vcmSessions.map((session) => session.role));
     const roles = {} as TaskWorkspaceLaunchState["roles"];
-    for (const definition of ROLE_DEFINITIONS) {
+    for (const definition of VCM_ROLE_DEFINITIONS) {
       roles[definition.name] = {
         permissionMode: permissionModes[definition.name],
-        model: models[definition.name]
+        model: models[definition.name] as ClaudeModel
       };
     }
 
@@ -169,9 +182,9 @@ export function TaskWorkspace({
       autoOrchestration: (orchestration?.mode ?? "auto") === "auto",
       translationEnabled,
       statusLoaded: Boolean(statusReport),
-      sessionCount: sessions.length,
-      hasAnySession: sessions.length > 0,
-      allRolesHaveSession: ROLE_DEFINITIONS.every((definition) => sessionRoles.has(definition.name))
+      sessionCount: vcmSessions.length,
+      hasAnySession: vcmSessions.length > 0,
+      allRolesHaveSession: VCM_ROLE_DEFINITIONS.every((definition) => sessionRoles.has(definition.name))
     });
   }, [
     models,
@@ -189,11 +202,10 @@ export function TaskWorkspace({
         apiClient.getTaskStatus(task.taskSlug),
         apiClient.listMessages(task.taskSlug),
         apiClient.getOrchestrationState(task.taskSlug),
-        apiClient.getSessionRoundState(task.taskSlug),
-        apiClient.getCodexReviewState(task.taskSlug)
+        apiClient.getSessionRoundState(task.taskSlug)
       ])
-        .then(([nextStatusReport, nextMessages, nextOrchestration, nextRoundState, nextCodexReview]) => {
-          applyFetchedState(nextStatusReport, nextMessages, nextOrchestration, nextRoundState, nextCodexReview);
+        .then(([nextStatusReport, nextMessages, nextOrchestration, nextRoundState]) => {
+          applyFetchedState(nextStatusReport, nextMessages, nextOrchestration, nextRoundState);
         })
         .catch((caught: Error) => setError(caught.message));
     }, 3000);
@@ -310,7 +322,7 @@ export function TaskWorkspace({
     }));
   }
 
-  function setRoleModel(role: RoleName, model: ClaudeModel) {
+  function setRoleModel(role: RoleName, model: SessionModel) {
     setModels((current) => ({
       ...current,
       [role]: model
@@ -332,44 +344,6 @@ export function TaskWorkspace({
     }
   }
 
-  async function requestCodexReview(gate: CodexReviewGate) {
-    await runAction(async () => {
-      const result = await apiClient.requestCodexReviewGate(task.taskSlug, gate);
-      appendEvent(`codex ${gate}: ${result.status}`);
-    });
-  }
-
-  async function retryCodexReview(gate: CodexReviewGate) {
-    await runAction(async () => {
-      const result = await apiClient.retryCodexReviewGate(task.taskSlug, gate);
-      appendEvent(`codex ${gate}: retry ${result.status}`);
-    });
-  }
-
-  async function skipCodexReview(gate: CodexReviewGate) {
-    const reason = window.prompt(`Skip Codex review gate "${gate}"? Enter the reason.`);
-    if (!reason?.trim()) {
-      return;
-    }
-    await runAction(async () => {
-      const next = await apiClient.skipCodexReviewGate(task.taskSlug, gate, { reason });
-      setCodexReview(next);
-      appendEvent(`codex ${gate}: skipped`);
-    });
-  }
-
-  async function overrideCodexReview(gate: CodexReviewGate) {
-    const reason = window.prompt(`Override Codex review gate "${gate}"? Enter the reason.`);
-    if (!reason?.trim()) {
-      return;
-    }
-    await runAction(async () => {
-      const next = await apiClient.overrideCodexReviewGate(task.taskSlug, gate, { reason });
-      setCodexReview(next);
-      appendEvent(`codex ${gate}: overridden`);
-    });
-  }
-
   return (
     <div className="task-workspace">
       <header className="workspace-header">
@@ -378,6 +352,7 @@ export function TaskWorkspace({
         </div>
         <RoleSessionTabs
           activeRole={activeRole}
+          roles={visibleRoleDefinitions}
           sessions={statusReport?.sessions ?? []}
           onSelect={onActiveRoleChange}
         />
@@ -398,57 +373,10 @@ export function TaskWorkspace({
 
       {error ? <div className="error-banner">{error}</div> : null}
 
-      {codexReview ? (
-        <section className="codex-review-panel">
-          <div className="codex-review-panel-header">
-            <h2>Codex Review Gates</h2>
-            <span>{codexReview.enabled ? "enabled" : "disabled"}</span>
-          </div>
-          <div className="codex-review-gates">
-            {CODEX_REVIEW_GATES.map((gate) => {
-              const record = codexReview.gates[gate];
-              const canRequest = codexReview.enabled
-                && record.required
-                && record.status !== "running";
-              const canHandleFailure = record.status === "failed";
-              return (
-                <div className="codex-review-gate" key={gate}>
-                  <div className="codex-review-gate-main">
-                    <strong>{formatCodexGate(gate)}</strong>
-                    <StatusBadge status={record.status} />
-                    {record.decision ? <span className="codex-review-decision">{record.decision}</span> : null}
-                    {record.callbackStatus && record.callbackStatus !== "not_sent" ? (
-                      <span className="codex-review-callback">callback {record.callbackStatus}</span>
-                    ) : null}
-                  </div>
-                  <div className="codex-review-gate-meta">
-                    <span>{record.required ? "required" : "optional"}</span>
-                    <span>{record.reportPath}</span>
-                    {record.error ? <span className="codex-review-error">{record.error}</span> : null}
-                  </div>
-                  <div className="codex-review-actions">
-                    <button type="button" disabled={busy || !canRequest} onClick={() => void requestCodexReview(gate)}>
-                      {record.status === "completed" || record.status === "failed" ? "Run Again" : "Run"}
-                    </button>
-                    {canHandleFailure ? (
-                      <>
-                        <button type="button" disabled={busy} onClick={() => void retryCodexReview(gate)}>Retry</button>
-                        <button type="button" disabled={busy} onClick={() => void skipCodexReview(gate)}>Skip</button>
-                        <button type="button" disabled={busy} onClick={() => void overrideCodexReview(gate)}>Override</button>
-                      </>
-                    ) : null}
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-        </section>
-      ) : null}
-
       <div className="workspace-grid">
         <div className="workspace-main">
           <div className="role-console-stack">
-            {ROLE_DEFINITIONS.map((definition) => {
+            {visibleRoleDefinitions.map((definition) => {
               const role = definition.name;
               const isActive = role === activeRole;
               const session = getSessionForRole(statusReport?.sessions ?? [], role);
@@ -512,8 +440,4 @@ export function TaskWorkspace({
       </div>
     </div>
   );
-}
-
-function formatCodexGate(gate: CodexReviewGate): string {
-  return gate.split("-").map((part) => part.charAt(0).toUpperCase() + part.slice(1)).join(" ");
 }

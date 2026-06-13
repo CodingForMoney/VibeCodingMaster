@@ -88,6 +88,10 @@ export interface CodexReviewRequestResult {
   message?: string;
 }
 
+export interface CodexReviewSettingsUpdateRequest {
+  gates: Partial<Record<CodexReviewGate, boolean>>;
+}
+
 export interface CodexReviewExceptionRequest {
   reason: string;
 }
