@@ -9,6 +9,8 @@ describe("createHarnessService", () => {
 
     const status = await service.getHarnessStatus("/repo");
     expect(status.needsApply).toBe(true);
+    // B1: a fresh repo with every harness file missing is not yet initialized.
+    expect(status.initialized).toBe(false);
     expect(status.plannedChanges).toHaveLength(20);
     expect(status.plannedChanges.map((change) => change.action)).toEqual(Array(20).fill("create"));
 
@@ -17,6 +19,8 @@ describe("createHarnessService", () => {
 
     const nextStatus = await service.getHarnessStatus("/repo");
     expect(nextStatus.needsApply).toBe(false);
+    // B2: once the harness is applied, VCM markers exist -> initialized.
+    expect(nextStatus.initialized).toBe(true);
     expect(nextStatus.files.map((file) => file.action)).toEqual(Array(20).fill("ok"));
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("## VCM Start Here");
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("## VCM Task Flow");
@@ -87,6 +91,8 @@ describe("createHarnessService", () => {
       hasManagedBlock: false,
       action: "insert"
     });
+    // B3: a pre-existing non-VCM CLAUDE.md (insert, no managed block) is not initialized.
+    expect(status.initialized).toBe(false);
 
     await service.applyHarness("/repo");
 
@@ -154,6 +160,10 @@ describe("createHarnessService", () => {
     }, null, 2));
     const service = createHarnessService({ fs });
 
+    // B4: a pre-existing .claude/settings.json without VCM markers is not initialized.
+    const status = await service.getHarnessStatus("/repo");
+    expect(status.initialized).toBe(false);
+
     await service.applyHarness("/repo");
 
     const settings = JSON.parse(await fs.readText("/repo/.claude/settings.json"));
@@ -188,6 +198,9 @@ describe("createHarnessService", () => {
       managedVersion: 0,
       action: "update"
     });
+    // B5: a drifted managed block is still a VCM marker -> initialized with pending updates.
+    expect(status.initialized).toBe(true);
+    expect(status.needsApply).toBe(true);
 
     await service.applyHarness("/repo");
 

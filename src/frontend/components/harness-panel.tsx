@@ -41,34 +41,69 @@ export function HarnessPanel({
 
   return (
     <section className="harness-panel">
+      {/*
+        Fixed install stage — three mutually exclusive states driven by
+        status.initialized and status.needsApply (see HarnessStatusReport):
+
+          State A  !status.initialized
+            -> No file list. Only an "Initialize" button (calls onApply).
+               Header subtitle: "Not initialized".
+          State B  status.initialized && status.needsApply
+            -> "Files to update" list built from status.plannedChanges
+               (path + action via StatusBadge) + "Update" button (calls onApply)
+               + "Refresh" button (calls onRefresh).
+            Header subtitle: `${status.plannedChanges.length} pending updates`.
+          State C  status.initialized && !status.needsApply
+            -> No file list, no apply button. "Up to date" indicator +
+               "Refresh" button (calls onRefresh).
+
+        Bootstrap stage below and the applyResult/warnings blocks are out of scope.
+      */}
       <div className="harness-stage">
         <div className="harness-panel-header">
           <div>
             <strong>Fixed install</strong>
             <p className="muted">
-              {status.needsApply
-                ? `${status.plannedChanges.length} planned changes`
-                : "up to date"}
+              {!status.initialized
+                ? "Not initialized"
+                : status.needsApply
+                  ? `${status.plannedChanges.length} pending updates`
+                  : "Up to date"}
             </p>
           </div>
           <div className="harness-actions">
-            <button type="button" disabled={busy} onClick={() => void onRefresh()}>
-              Refresh
-            </button>
-            <button type="button" disabled={busy || !status.needsApply} onClick={() => void onApply()}>
-              Install / Update
-            </button>
+            {!status.initialized ? (
+              <button type="button" disabled={busy} onClick={() => void onApply()}>
+                Initialize
+              </button>
+            ) : (
+              <>
+                <button type="button" disabled={busy} onClick={() => void onRefresh()}>
+                  Refresh
+                </button>
+                {status.needsApply ? (
+                  <button type="button" disabled={busy} onClick={() => void onApply()}>
+                    Update
+                  </button>
+                ) : null}
+              </>
+            )}
           </div>
         </div>
 
-        <ol className="harness-file-list">
-          {status.files.map((file) => (
-            <li key={file.path}>
-              <span>{file.path}</span>
-              <StatusBadge status={file.action} />
-            </li>
-          ))}
-        </ol>
+        {status.initialized && status.needsApply ? (
+          <>
+            <h3 className="harness-file-list-title">Files to update</h3>
+            <ol className="harness-file-list">
+              {status.plannedChanges.map((change) => (
+                <li key={`${change.path}:${change.action}`}>
+                  <span>{change.path}</span>
+                  <StatusBadge status={change.action} />
+                </li>
+              ))}
+            </ol>
+          </>
+        ) : null}
       </div>
 
       <div className="harness-stage">
@@ -121,19 +156,6 @@ export function HarnessPanel({
           <p className="muted">Refresh harness status to load bootstrap checks.</p>
         )}
       </div>
-
-      {status.plannedChanges.length > 0 ? (
-        <div className="harness-changes">
-          <h3>Planned Changes</h3>
-          <ul>
-            {status.plannedChanges.map((change) => (
-              <li key={`${change.path}:${change.action}`}>
-                <strong>{change.action}</strong> {change.path}
-              </li>
-            ))}
-          </ul>
-        </div>
-      ) : null}
 
       {applyResult ? (
         <div className="harness-result">

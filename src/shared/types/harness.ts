@@ -41,6 +41,21 @@ export interface HarnessPlannedChange {
 
 export interface HarnessStatusReport {
   version: number;
+  /**
+   * Whether the VCM harness has already been installed in the target repo.
+   *
+   * Single source of truth for the UI "project initialized" judgement. Derived
+   * by the backend (see renderHarnessStatus in harness-service.ts): true when at
+   * least one VCM-exclusive marker is present (a managed block exists, or a
+   * VCM-owned whole-file/raw-file harness file exists). Independent of needsApply:
+   * an initialized project may still have pending updates.
+   *
+   * UI contract (HarnessPanel "Fixed install" stage):
+   * - initialized === false              -> hide file list, show only "Initialize".
+   * - initialized && needsApply          -> show update file list + "Update" button.
+   * - initialized && !needsApply         -> show "Up to date", no file list, no apply button.
+   */
+  initialized: boolean;
   files: HarnessFileStatus[];
   needsApply: boolean;
   plannedChanges: HarnessPlannedChange[];
