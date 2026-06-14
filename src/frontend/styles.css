@@ -916,6 +916,10 @@ h2 {
   grid-template-columns: auto minmax(190px, 260px);
 }
 
+.effort-field {
+  grid-template-columns: auto minmax(120px, 160px);
+}
+
 .session-option-field span {
   color: #5f6a6c;
   font-size: 13px;

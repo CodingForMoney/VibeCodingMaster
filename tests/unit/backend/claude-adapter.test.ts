@@ -46,6 +46,31 @@ describe("createClaudeAdapter", () => {
     });
   });
 
+  it("adds effort when one is selected", () => {
+    expect(adapter.buildRoleStartCommand(
+      "architect",
+      "claude",
+      "default",
+      "00000000-0000-4000-8000-000000000001",
+      false,
+      "opus",
+      "xhigh"
+    )).toEqual({
+      command: "claude",
+      args: [
+        "--agent",
+        "architect",
+        "--session-id",
+        "00000000-0000-4000-8000-000000000001",
+        "--model",
+        "opus",
+        "--effort",
+        "xhigh"
+      ],
+      display: "claude --agent architect --session-id 00000000-0000-4000-8000-000000000001 --model opus --effort xhigh"
+    });
+  });
+
   it("builds resume commands with the persisted Claude session id", () => {
     expect(adapter.buildRoleStartCommand(
       "architect",

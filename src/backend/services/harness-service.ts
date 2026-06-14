@@ -22,8 +22,10 @@ import { renderCoderHarnessRules } from "../templates/harness/coder-agent.js";
 import {
   renderCodexAgentsHarnessRules,
   renderCodexArchitecturePlanPrompt,
+  renderCodexCliConfigHarnessRules,
   renderCodexConfigHarnessRules,
   renderCodexFinalDiffPrompt,
+  renderCodexHooksHarnessRules,
   renderCodexReviewResultSchema,
   renderCodexValidationAdequacyPrompt,
   renderRequestCodexReviewTool,
@@ -188,6 +190,20 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
     title: "VCM Codex Config",
     ownership: "raw-file",
     renderRules: renderCodexConfigHarnessRules
+  },
+  {
+    kind: "codex-cli-config",
+    path: ".ai/codex/.codex/config.toml",
+    title: "VCM Codex CLI Config",
+    ownership: "raw-file",
+    renderRules: renderCodexCliConfigHarnessRules
+  },
+  {
+    kind: "codex-hooks",
+    path: ".ai/codex/.codex/hooks.json",
+    title: "VCM Codex Hooks",
+    ownership: "raw-file",
+    renderRules: renderCodexHooksHarnessRules
   },
   {
     kind: "codex-prompt-architecture-plan",

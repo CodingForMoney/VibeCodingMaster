@@ -10,6 +10,8 @@ export type HarnessFileKind =
   | "skill-vcm-codex-review-gate"
   | "codex-agents"
   | "codex-config"
+  | "codex-cli-config"
+  | "codex-hooks"
   | "codex-prompt-architecture-plan"
   | "codex-prompt-validation-adequacy"
   | "codex-prompt-final-diff"

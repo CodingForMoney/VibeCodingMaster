@@ -2,8 +2,10 @@ import type { RoleName } from "../../shared/types/role.js";
 import {
   CLAUDE_MODEL_OPTIONS,
   CODEX_MODEL_OPTIONS,
+  SESSION_EFFORT_OPTIONS,
   type ClaudePermissionMode,
   type RoleSessionRecord,
+  type SessionEffort,
   type SessionModel
 } from "../../shared/types/session.js";
 
@@ -12,9 +14,11 @@ export interface SessionToolbarProps {
   session?: RoleSessionRecord;
   permissionMode: ClaudePermissionMode;
   model: SessionModel;
+  effort: SessionEffort;
   busy?: boolean;
   onPermissionModeChange(mode: ClaudePermissionMode): void;
   onModelChange(model: SessionModel): void;
+  onEffortChange(effort: SessionEffort): void;
   onStart(): void;
   onResume(): void;
   onStop(): void;
@@ -26,9 +30,11 @@ export function SessionToolbar({
   session,
   permissionMode,
   model,
+  effort,
   busy = false,
   onPermissionModeChange,
   onModelChange,
+  onEffortChange,
   onStart,
   onResume,
   onStop,
@@ -41,6 +47,8 @@ export function SessionToolbar({
   const modeWillChange = Boolean(session && session.permissionMode !== permissionMode);
   const sessionModel = session?.model ?? "default";
   const modelWillChange = Boolean(session && sessionModel !== model);
+  const sessionEffort = session?.effort ?? "default";
+  const effortWillChange = Boolean(session && sessionEffort !== effort);
   const modelOptions = isCodexReviewer ? CODEX_MODEL_OPTIONS : CLAUDE_MODEL_OPTIONS;
 
   return (
@@ -86,6 +94,27 @@ export function SessionToolbar({
         </select>
       </label>
 
+      <label className="session-option-field effort-field">
+        <span>
+          Effort
+          <small>
+            {session
+              ? `current: ${formatSessionEffort(sessionEffort)}${effortWillChange ? " / next launch" : ""}`
+              : "applies on start"}
+          </small>
+        </span>
+        <select
+          value={effort}
+          onChange={(event) => onEffortChange(event.target.value as SessionEffort)}
+        >
+          {SESSION_EFFORT_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+      </label>
+
       <div className="session-toolbar">
         <button type="button" disabled={busy || !canStart} onClick={onStart}>
           Start
@@ -113,4 +142,8 @@ function formatSessionModel(model: SessionModel, isCodexReviewer: boolean): stri
     return CODEX_MODEL_OPTIONS.find((option) => option.value === model)?.label ?? model;
   }
   return CLAUDE_MODEL_OPTIONS.find((option) => option.value === model)?.label ?? model;
+}
+
+function formatSessionEffort(effort: SessionEffort): string {
+  return SESSION_EFFORT_OPTIONS.find((option) => option.value === effort)?.label ?? effort;
 }

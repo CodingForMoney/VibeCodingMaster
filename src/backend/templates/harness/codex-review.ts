@@ -116,6 +116,43 @@ required_gates = []
 enabled = false`;
 }
 
+export function renderCodexCliConfigHarnessRules(): string {
+  return `[features]
+hooks = true`;
+}
+
+export function renderCodexHooksHarnessRules(): string {
+  const eventScript = "let s=\"\";process.stdin.setEncoding(\"utf8\");process.stdin.on(\"data\",d=>s+=d);process.stdin.on(\"end\",()=>{let event={};try{event=s.trim()?JSON.parse(s):{};}catch{event={raw:s};}process.stdout.write(JSON.stringify({taskSlug:process.env.VCM_TASK_SLUG,role:process.env.VCM_ROLE,event}));});";
+  const userPromptCommand = `sh -c 'if [ -z "\${VCM_TASK_SLUG:-}" ] || [ -z "\${VCM_ROLE:-}" ] || [ -z "\${VCM_API_URL:-}" ]; then exit 0; fi; node -e '"'"'${eventScript}'"'"' | curl -fsS --max-time 2 -X POST "\${VCM_API_URL}/api/hooks/codex-reviewer" -H "content-type: application/json" --data-binary @- >/dev/null || true'`;
+  const stopCommand = `sh -c 'if [ -z "\${VCM_TASK_SLUG:-}" ] || [ -z "\${VCM_ROLE:-}" ] || [ -z "\${VCM_API_URL:-}" ]; then printf "{}"; exit 0; fi; node -e '"'"'${eventScript}'"'"' | curl -fsS --max-time 5 -X POST "\${VCM_API_URL}/api/hooks/codex-reviewer/stop" -H "content-type: application/json" --data-binary @- || printf "{}"'`;
+  return JSON.stringify({
+    hooks: {
+      UserPromptSubmit: [
+        {
+          hooks: [
+            {
+              type: "command",
+              command: userPromptCommand,
+              timeout: 5
+            }
+          ]
+        }
+      ],
+      Stop: [
+        {
+          hooks: [
+            {
+              type: "command",
+              command: stopCommand,
+              timeout: 10
+            }
+          ]
+        }
+      ]
+    }
+  }, null, 2);
+}
+
 export function renderCodexArchitecturePlanPrompt(): string {
   return `# Codex Gate: architecture-plan
 

@@ -1,6 +1,6 @@
 # Codex Review Gates
 
-Last updated: 2026-06-13
+Last updated: 2026-06-14
 
 This document defines the Codex Review Gates feature for VCM.
 
@@ -41,7 +41,7 @@ The product outcome is higher task accuracy through earlier detection of:
 
 The first version should not:
 
-- require the fifth role to be an always-running embedded terminal
+- require every task to start Codex Reviewer manually
 - let Codex edit repository files directly
 - automatically accept, reject, route, or replan a task
 - replace human approval for high-risk decisions
@@ -312,6 +312,8 @@ role. It should contain:
 ```text
 .ai/codex/AGENTS.md
 .ai/codex/config.toml
+.ai/codex/.codex/config.toml
+.ai/codex/.codex/hooks.json
 .ai/codex/prompts/architecture-plan-gate.md
 .ai/codex/prompts/validation-adequacy-gate.md
 .ai/codex/prompts/final-diff-gate.md
@@ -339,6 +341,22 @@ natively discover arbitrary `.ai/codex/config.toml` files the way it discovers
 `$CODEX_HOME/config.toml` or layered `$CODEX_HOME/<profile>.config.toml` files,
 so the VCM Codex adapter reads this file and maps supported keys to the Codex
 CLI invocation.
+
+`.ai/codex/.codex/config.toml` and `.ai/codex/.codex/hooks.json` are the
+Codex CLI project-level hook configuration. Because VCM starts Codex with
+`.ai/codex` as the current Codex project, this nested `.codex` directory is
+discovered by the interactive Codex CLI. The config enables hooks, and the
+hooks post `UserPromptSubmit` and `Stop` events to VCM:
+
+```text
+POST /api/hooks/codex-reviewer
+POST /api/hooks/codex-reviewer/stop
+```
+
+The hook payload records Codex's own session id, transcript path, cwd, and hook
+event name. VCM stores those events on the `codex-reviewer` role session and in
+the shared Round state, so a Codex review keeps the VCM flow running until the
+Codex `Stop` event is observed and the normal settle timer completes.
 
 VCM should start Codex from `.ai/codex` so that `.ai/codex/AGENTS.md` is
 discovered naturally. Because the current session root is then `.ai/codex`, the
@@ -382,8 +400,11 @@ Implemented files:
 
 ```text
 src/shared/types/codex-review.ts
+src/shared/types/codex-hook.ts
 src/backend/services/codex-review-service.ts
+src/backend/services/codex-hook-service.ts
 src/backend/api/codex-review-routes.ts
+src/backend/api/codex-hook-routes.ts
 ```
 
 Implemented API:
@@ -396,6 +417,8 @@ POST /api/tasks/:taskSlug/codex-review/:gate/retry
 POST /api/tasks/:taskSlug/codex-review/:gate/skip
 POST /api/tasks/:taskSlug/codex-review/:gate/override
 GET  /api/tasks/:taskSlug/codex-review/:gate/report
+POST /api/hooks/codex-reviewer
+POST /api/hooks/codex-reviewer/stop
 ```
 
 Provider implementations should be swappable:
@@ -415,26 +438,30 @@ When a review starts, VCM keeps the task flow running in a Codex review stage.
 When the provider finishes, VCM emits a Codex review callback to PM with gate,
 status, decision, report path, and any failure or exception metadata.
 
-The Codex CLI provider starts Codex with `.ai/codex` as the active Codex
-reviewer context. Current implementation shape:
+The Codex CLI provider uses the long-lived embedded terminal session, not
+`codex exec`, because VCM needs Codex `UserPromptSubmit` and `Stop` hook events
+and the user may continue discussing the review after the report is written.
+Current implementation shape for a fresh terminal:
 
 ```bash
-codex exec \
+codex \
   --cd <taskRepoRoot>/.ai/codex \
   --add-dir <taskRepoRoot>/.ai/vcm/codex-reviews \
   --sandbox workspace-write \
   --ask-for-approval never \
-  --skip-git-repo-check \
-  --output-last-message <taskRepoRoot>/.ai/vcm/codex-reviews/logs/<request-id>.last-message.txt \
+  --dangerously-bypass-hook-trust \
   --model <model-from-.ai/codex/config.toml> \
-  "<gate prompt>"
+  --config model_reasoning_effort="<effort-from-.ai/codex/config.toml>"
 ```
 
 Starting from `.ai/codex` causes Codex to load `.ai/codex/AGENTS.md` through
-its normal `AGENTS.md` discovery path. VCM validates the report path, request
-id, and decision before marking a gate completed. `--ask-for-approval never`
-prevents interactive permission prompts; execution failures are recorded as
-`failed` so the user can retry, skip, or override.
+its normal `AGENTS.md` discovery path and `.ai/codex/.codex/hooks.json` through
+the Codex project hook path. VCM sends the gate prompt into this terminal,
+validates the report path, request id, and decision before marking a gate
+completed, then callbacks PM. `--ask-for-approval never` and the VCM-owned hook
+trust bypass prevent Codex from pausing at permission or hook trust prompts;
+execution failures are recorded as `failed` so the user can retry, skip, or
+override.
 
 ## 10. UI Shape
 
@@ -459,9 +486,12 @@ override path.
 When at least one gate toggle is on, or when the task already has a saved Codex
 Reviewer session, the task workspace role tabs include a fifth role, `Codex
 Reviewer`. It uses the same embedded terminal surface as the Claude Code roles,
-but starts Codex CLI from `.ai/codex`, uses the Codex model selector, and is not
-part of PM message routing, auto orchestration, translation, or one-click
-four-role Claude startup.
+but starts Codex CLI from `.ai/codex`, uses Codex model and effort selectors,
+and is not part of PM message routing, auto orchestration, or translation. The
+saved launch template still stores the four Claude Code role settings; when a
+Codex gate is enabled and no task sessions exist yet, One-click start launches
+those four Claude Code roles plus `codex-reviewer` with the Codex Reviewer
+defaults.
 
 ## 11. Project-Manager Rules
 
@@ -490,16 +520,18 @@ Rules:
 
 The first implementation is intentionally small:
 
-1. Add `.ai/codex/AGENTS.md` and `.ai/codex/config.toml` as VCM-managed Codex
-   reviewer runtime files.
+1. Add `.ai/codex/AGENTS.md`, `.ai/codex/config.toml`, and
+   `.ai/codex/.codex/*` as VCM-managed Codex reviewer runtime files.
 2. Add `vcm-codex-review-gate` as the PM-facing skill / protocol entry.
 3. Add backend APIs to configure, request, run, retry, skip, override, list,
    and read gate reports.
 4. Add sidebar toggles for the three gate enablement options.
 5. Add project-manager and final-acceptance harness rules that require checking
    Codex gate reports for complex tasks.
-6. Keep gate triggering PM-driven at first.
-7. Do not automatically route roles from Codex findings in the first version.
+6. Add Codex hook endpoints so the fifth role participates in VCM session and
+   Round state.
+7. Keep gate triggering PM-driven at first.
+8. Do not automatically route roles from Codex findings in the first version.
 
 Later versions can add automatic PM routing, provider selection, stricter
 provider-level read/write policies where supported by Codex CLI, and risk-based

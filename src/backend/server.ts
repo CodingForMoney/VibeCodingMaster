@@ -8,6 +8,7 @@ import { createClaudeAdapter } from "./adapters/claude-adapter.js";
 import { createCommandRunner } from "./adapters/command-runner.js";
 import { createCommandDispatcher, type CommandDispatcher } from "./services/command-dispatcher.js";
 import { createClaudeHookService, type ClaudeHookService } from "./services/claude-hook-service.js";
+import { createCodexHookService, type CodexHookService } from "./services/codex-hook-service.js";
 import { createGitAdapter } from "./adapters/git-adapter.js";
 import { createAppSettingsService, type AppSettingsService } from "./services/app-settings-service.js";
 import { createClaudeTranscriptService } from "./services/claude-transcript-service.js";
@@ -37,6 +38,7 @@ import { createTranslationService, type TranslationService } from "./services/tr
 import { registerAppSettingsRoutes } from "./api/app-settings-routes.js";
 import { registerArtifactRoutes } from "./api/artifact-routes.js";
 import { registerClaudeHookRoutes } from "./api/claude-hook-routes.js";
+import { registerCodexHookRoutes } from "./api/codex-hook-routes.js";
 import { registerCodexReviewRoutes } from "./api/codex-review-routes.js";
 import { registerHarnessRoutes } from "./api/harness-routes.js";
 import { registerMessageRoutes } from "./api/message-routes.js";
@@ -65,6 +67,7 @@ export interface ServerDeps {
   harnessService: HarnessService;
   commandDispatcher: CommandDispatcher;
   claudeHookService: ClaudeHookService;
+  codexHookService: CodexHookService;
   messageService: MessageService;
   codexReviewService: CodexReviewService;
   roundService: RoundService;
@@ -92,6 +95,7 @@ export async function createServer(deps: ServerDeps, options: CreateServerOption
 
   registerAppSettingsRoutes(app, { appSettings: deps.appSettings });
   registerClaudeHookRoutes(app, { claudeHookService: deps.claudeHookService });
+  registerCodexHookRoutes(app, { codexHookService: deps.codexHookService });
   registerCodexReviewRoutes(app, {
     projectService: deps.projectService,
     codexReviewService: deps.codexReviewService
@@ -280,6 +284,12 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     gatewayService,
     jobGuard: createJobGuardService()
   });
+  const codexHookService = createCodexHookService({
+    projectService,
+    taskService,
+    sessionService,
+    roundService
+  });
 
   return {
     appSettings,
@@ -290,6 +300,7 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     harnessService,
     commandDispatcher,
     claudeHookService,
+    codexHookService,
     messageService,
     codexReviewService,
     roundService,

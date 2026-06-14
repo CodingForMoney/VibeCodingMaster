@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { ProjectConfig } from "../../../src/shared/types/project.js";
 import type { RoleName } from "../../../src/shared/types/role.js";
-import type { ClaudeModel } from "../../../src/shared/types/session.js";
+import type { ClaudeModel, SessionEffort } from "../../../src/shared/types/session.js";
 import type { CreateTerminalSessionInput, TerminalRuntime, TerminalSession } from "../../../src/backend/runtime/terminal-runtime.js";
 import { createSessionRegistry } from "../../../src/backend/runtime/session-registry.js";
 import { createSessionService } from "../../../src/backend/services/session-service.js";
@@ -84,6 +84,28 @@ describe("createSessionService", () => {
     ]);
   });
 
+  it("starts role sessions with the selected Claude effort", async () => {
+    const fs = createMemoryFs();
+    const runtimeInputs: CreateTerminalSessionInput[] = [];
+    const service = createTestSessionService(fs, runtimeInputs);
+
+    const started = await service.startRoleSession("/repo", "demo-task", "architect", {
+      effort: "high"
+    });
+
+    expect(started.effort).toBe("high");
+    expect(runtimeInputs[0]?.args).toEqual([
+      "--agent",
+      "architect",
+      "--session-id",
+      started.claudeSessionId,
+      "--model",
+      "default",
+      "--effort",
+      "high"
+    ]);
+  });
+
   it("starts Codex Reviewer sessions with Codex CLI from .ai/codex", async () => {
     const fs = createMemoryFs();
     await fs.writeText("/repo/.ai/codex", "");
@@ -116,12 +138,31 @@ required_gates = ["architecture-plan"]
       "workspace-write",
       "--ask-for-approval",
       "never",
+      "--dangerously-bypass-hook-trust",
       "--model",
       "gpt-5.5",
       "--config",
       'model_reasoning_effort="xhigh"'
     ]);
     expect(runtimeInputs[0]?.logPath).toBe("/repo/.ai/vcm/handoffs/logs/codex-reviewer.log");
+  });
+
+  it("overrides Codex Reviewer reasoning effort from the launch request", async () => {
+    const fs = createMemoryFs();
+    await fs.writeText("/repo/.ai/codex", "");
+    await fs.writeText("/repo/.ai/codex/config.toml", `model = "gpt-5.5"
+model_reasoning_effort = "xhigh"`);
+    const runtimeInputs: CreateTerminalSessionInput[] = [];
+    const service = createTestSessionService(fs, runtimeInputs);
+
+    const started = await service.startRoleSession("/repo", "demo-task", "codex-reviewer", {
+      model: "gpt-5.5",
+      effort: "high"
+    });
+
+    expect(started.effort).toBe("high");
+    expect(runtimeInputs[0]?.args).toContain('model_reasoning_effort="high"');
+    expect(runtimeInputs[0]?.args).not.toContain('model_reasoning_effort="xhigh"');
   });
 
   it("starts role sessions inside the task worktree when one exists", async () => {
@@ -261,6 +302,46 @@ required_gates = ["architecture-plan"]
       lastTurnEndedAt: "2026-05-29T00:00:00.000Z"
     });
   });
+
+  it("records Codex hook activity even when Codex reports its own session id", async () => {
+    const fs = createMemoryFs();
+    await fs.writeText("/repo/.ai/codex", "");
+    await fs.writeText("/repo/.ai/codex/config.toml", `model = "gpt-5.5"`);
+    const service = createTestSessionService(fs, []);
+    const started = await service.startRoleSession("/repo", "demo-task", "codex-reviewer");
+
+    expect(started.claudeSessionId).not.toBe("codex_session_123");
+
+    const running = await service.recordRoleHookEvent("/repo", {
+      taskSlug: "demo-task",
+      role: "codex-reviewer",
+      eventName: "UserPromptSubmit",
+      sessionId: "codex_session_123",
+      transcriptPath: "/Users/sheldon/.codex/sessions/rollout.jsonl",
+      cwd: "/repo/.ai/codex",
+      allowSessionMismatch: true
+    });
+    expect(running).toMatchObject({
+      role: "codex-reviewer",
+      claudeSessionId: "codex_session_123",
+      transcriptPath: "/Users/sheldon/.codex/sessions/rollout.jsonl",
+      cwd: "/repo/.ai/codex",
+      activityStatus: "running",
+      lastTurnStartedAt: "2026-05-29T00:00:00.000Z"
+    });
+
+    const idle = await service.recordRoleHookEvent("/repo", {
+      taskSlug: "demo-task",
+      role: "codex-reviewer",
+      eventName: "Stop",
+      sessionId: "codex_session_123",
+      allowSessionMismatch: true
+    });
+    expect(idle).toMatchObject({
+      activityStatus: "idle",
+      lastTurnEndedAt: "2026-05-29T00:00:00.000Z"
+    });
+  });
 });
 
 function createTestSessionService(
@@ -286,13 +367,17 @@ function createTestSessionService(
         permissionMode = "default",
         claudeSessionId?: string,
         resume = false,
-        model: ClaudeModel = "default"
+        model: ClaudeModel = "default",
+        effort: SessionEffort = "default"
       ) {
         const args = ["--agent", role];
         if (claudeSessionId) {
           args.push(resume ? "--resume" : "--session-id", claudeSessionId);
         }
         args.push("--model", model);
+        if (effort !== "default") {
+          args.push("--effort", effort);
+        }
         if (permissionMode === "bypassPermissions") {
           args.push("--permission-mode", "bypassPermissions");
         }

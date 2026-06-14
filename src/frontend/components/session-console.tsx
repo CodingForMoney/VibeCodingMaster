@@ -1,6 +1,6 @@
 import type { VcmOrchestrationMode } from "../../shared/types/message.js";
 import type { RoleName } from "../../shared/types/role.js";
-import type { ClaudePermissionMode, RoleSessionRecord, SessionModel } from "../../shared/types/session.js";
+import type { ClaudePermissionMode, RoleSessionRecord, SessionEffort, SessionModel } from "../../shared/types/session.js";
 import { XtermView } from "../terminal/xterm-view.js";
 import { SessionToolbar } from "./session-toolbar.js";
 import { TranslationPanel } from "./translation-panel.js";
@@ -10,12 +10,14 @@ export interface SessionConsoleProps {
   session?: RoleSessionRecord;
   permissionMode: ClaudePermissionMode;
   model: SessionModel;
+  effort: SessionEffort;
   active?: boolean;
   busy?: boolean;
   orchestrationMode: VcmOrchestrationMode;
   translationEnabled: boolean;
   onPermissionModeChange(mode: ClaudePermissionMode): void;
   onModelChange(model: SessionModel): void;
+  onEffortChange(effort: SessionEffort): void;
   onOrchestrationModeChange(mode: VcmOrchestrationMode): void;
   onStart(): void;
   onResume(): void;
@@ -29,12 +31,14 @@ export function SessionConsole({
   session,
   permissionMode,
   model,
+  effort,
   active = true,
   busy,
   orchestrationMode,
   translationEnabled,
   onPermissionModeChange,
   onModelChange,
+  onEffortChange,
   onOrchestrationModeChange,
   onStart,
   onResume,
@@ -53,9 +57,11 @@ export function SessionConsole({
           session={session}
           permissionMode={permissionMode}
           model={model}
+          effort={effort}
           busy={busy}
           onPermissionModeChange={onPermissionModeChange}
           onModelChange={onModelChange}
+          onEffortChange={onEffortChange}
           onStart={onStart}
           onResume={onResume}
           onStop={onStop}

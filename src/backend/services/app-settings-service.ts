@@ -12,7 +12,13 @@ import {
 } from "../../shared/types/app-settings.js";
 import type { ProjectConfig } from "../../shared/types/project.js";
 import type { VcmRoleName } from "../../shared/types/role.js";
-import { CLAUDE_MODEL_OPTIONS, type ClaudeModel, type ClaudePermissionMode } from "../../shared/types/session.js";
+import {
+  CLAUDE_MODEL_OPTIONS,
+  SESSION_EFFORT_OPTIONS,
+  type ClaudeModel,
+  type ClaudePermissionMode,
+  type SessionEffort
+} from "../../shared/types/session.js";
 import type { TranslationSecretSettings, TranslationSettings } from "../../shared/types/translation.js";
 import type { FileSystemAdapter } from "../adapters/filesystem.js";
 
@@ -309,7 +315,8 @@ function normalizeRoleLaunchTemplateEntry(
   const candidate = isObject(input) ? input : {};
   return {
     permissionMode: normalizeClaudePermissionMode(candidate.permissionMode, fallback.permissionMode),
-    model: normalizeClaudeModel(candidate.model, fallback.model)
+    model: normalizeClaudeModel(candidate.model, fallback.model),
+    effort: normalizeSessionEffort(candidate.effort, fallback.effort)
   };
 }
 
@@ -329,6 +336,14 @@ function normalizeClaudeModel(input: unknown, fallback: ClaudeModel): ClaudeMode
   }
   const model = CLAUDE_MODEL_OPTIONS.find((option) => option.value === input);
   return model?.value ?? fallback;
+}
+
+function normalizeSessionEffort(input: unknown, fallback: SessionEffort): SessionEffort {
+  if (typeof input !== "string") {
+    return fallback;
+  }
+  const effort = SESSION_EFFORT_OPTIONS.find((option) => option.value === input);
+  return effort?.value ?? fallback;
 }
 
 function normalizeTranslationConfig(input: unknown): StoredTranslationConfig | undefined {

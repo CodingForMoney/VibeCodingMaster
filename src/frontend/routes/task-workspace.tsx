@@ -4,7 +4,7 @@ import type { TaskStatusReport } from "../../shared/types/api.js";
 import type { VcmOrchestrationMode, VcmOrchestrationState, VcmRoleMessage } from "../../shared/types/message.js";
 import type { RoleDefinition, RoleName, VcmRoleName } from "../../shared/types/role.js";
 import type { VcmSessionRoundState } from "../../shared/types/round.js";
-import type { ClaudeModel, ClaudePermissionMode, SessionModel } from "../../shared/types/session.js";
+import type { ClaudeModel, ClaudePermissionMode, SessionEffort, SessionModel } from "../../shared/types/session.js";
 import type { TaskRecord } from "../../shared/types/task.js";
 import { RoleSessionTabs } from "../components/role-session-tabs.js";
 import { SessionConsole } from "../components/session-console.js";
@@ -33,6 +33,7 @@ export interface TaskWorkspaceLaunchState {
   roles: Record<VcmRoleName, {
     permissionMode: ClaudePermissionMode;
     model: ClaudeModel;
+    effort: SessionEffort;
   }>;
   autoOrchestration: boolean;
   translationEnabled: boolean;
@@ -71,6 +72,13 @@ export function TaskWorkspace({
     coder: "default",
     reviewer: "default",
     "codex-reviewer": "gpt-5.5"
+  });
+  const [efforts, setEfforts] = useState<Record<RoleName, SessionEffort>>({
+    "project-manager": "default",
+    architect: "default",
+    coder: "default",
+    reviewer: "default",
+    "codex-reviewer": "xhigh"
   });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -165,6 +173,21 @@ export function TaskWorkspace({
   }, [statusReport?.sessions]);
 
   useEffect(() => {
+    setEfforts((current) => {
+      let changed = false;
+      const next = { ...current };
+      for (const session of statusReport?.sessions ?? []) {
+        const sessionEffort = session.effort ?? "default";
+        if (next[session.role] !== sessionEffort) {
+          next[session.role] = sessionEffort;
+          changed = true;
+        }
+      }
+      return changed ? next : current;
+    });
+  }, [statusReport?.sessions]);
+
+  useEffect(() => {
     const sessions = statusReport?.sessions ?? [];
     const vcmSessions = sessions.filter((session) => session.role !== "codex-reviewer");
     const sessionRoles = new Set(vcmSessions.map((session) => session.role));
@@ -172,7 +195,8 @@ export function TaskWorkspace({
     for (const definition of VCM_ROLE_DEFINITIONS) {
       roles[definition.name] = {
         permissionMode: permissionModes[definition.name],
-        model: models[definition.name] as ClaudeModel
+        model: models[definition.name] as ClaudeModel,
+        effort: efforts[definition.name]
       };
     }
 
@@ -182,12 +206,13 @@ export function TaskWorkspace({
       autoOrchestration: (orchestration?.mode ?? "auto") === "auto",
       translationEnabled,
       statusLoaded: Boolean(statusReport),
-      sessionCount: vcmSessions.length,
-      hasAnySession: vcmSessions.length > 0,
+      sessionCount: sessions.length,
+      hasAnySession: sessions.length > 0,
       allRolesHaveSession: VCM_ROLE_DEFINITIONS.every((definition) => sessionRoles.has(definition.name))
     });
   }, [
     models,
+    efforts,
     onLaunchStateChanged,
     orchestration?.mode,
     permissionModes,
@@ -329,6 +354,13 @@ export function TaskWorkspace({
     }));
   }
 
+  function setRoleEffort(role: RoleName, effort: SessionEffort) {
+    setEfforts((current) => ({
+      ...current,
+      [role]: effort
+    }));
+  }
+
   async function setOrchestrationMode(mode: VcmOrchestrationMode) {
     setBusy(true);
     setError("");
@@ -392,30 +424,34 @@ export function TaskWorkspace({
                     session={session}
                     permissionMode={permissionModes[role]}
                     model={models[role]}
+                    effort={efforts[role]}
                     active={isActive}
                     busy={busy}
                     orchestrationMode={orchestration?.mode ?? "auto"}
                     translationEnabled={translationEnabled}
                     onPermissionModeChange={(permissionMode) => setRolePermissionMode(role, permissionMode)}
                     onModelChange={(model) => setRoleModel(role, model)}
+                    onEffortChange={(effort) => setRoleEffort(role, effort)}
                     onOrchestrationModeChange={(mode) => void setOrchestrationMode(mode)}
                     onStart={() => void runAction(async () => {
                       await apiClient.startRoleSession(task.taskSlug, role, {
                         cols: 100,
                         rows: 28,
                         permissionMode: permissionModes[role],
-                        model: models[role]
+                        model: models[role],
+                        effort: efforts[role]
                       });
-                      appendEvent(`started ${role} with ${permissionModes[role]} / ${models[role]}`);
+                      appendEvent(`started ${role} with ${permissionModes[role]} / ${models[role]} / ${efforts[role]}`);
                     })}
                     onResume={() => void runAction(async () => {
                       await apiClient.resumeRoleSession(task.taskSlug, role, {
                         cols: 100,
                         rows: 28,
                         permissionMode: permissionModes[role],
-                        model: models[role]
+                        model: models[role],
+                        effort: efforts[role]
                       });
-                      appendEvent(`resumed ${role} with ${permissionModes[role]} / ${models[role]}`);
+                      appendEvent(`resumed ${role} with ${permissionModes[role]} / ${models[role]} / ${efforts[role]}`);
                     })}
                     onStop={() => void runAction(async () => {
                       await apiClient.stopRoleSession(task.taskSlug, role);
@@ -426,9 +462,10 @@ export function TaskWorkspace({
                         cols: 100,
                         rows: 28,
                         permissionMode: permissionModes[role],
-                        model: models[role]
+                        model: models[role],
+                        effort: efforts[role]
                       });
-                      appendEvent(`restarted ${role} with ${permissionModes[role]} / ${models[role]}`);
+                      appendEvent(`restarted ${role} with ${permissionModes[role]} / ${models[role]} / ${efforts[role]}`);
                     })}
                     onTerminalEvent={(message) => appendEvent(`${definition.label}: ${message}`)}
                   />

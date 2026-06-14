@@ -68,7 +68,8 @@ describe("app-settings-service", () => {
     launchTemplate.translationEnabled = false;
     launchTemplate.roles.coder = {
       permissionMode: "bypassPermissions",
-      model: "opus[1m]"
+      model: "opus[1m]",
+      effort: "high"
     };
 
     await expect(service.updatePreferences({ launchTemplate })).resolves.toEqual(createDefaultPreferences({

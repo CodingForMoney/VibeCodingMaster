@@ -661,6 +661,8 @@ async function computeInputHash(
     "CLAUDE.md",
     ".ai/codex/AGENTS.md",
     ".ai/codex/config.toml",
+    ".ai/codex/.codex/config.toml",
+    ".ai/codex/.codex/hooks.json",
     promptPathForGate(gate)
   ];
 

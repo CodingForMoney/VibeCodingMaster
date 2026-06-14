@@ -163,7 +163,8 @@ Task lifecycle commands:
   selects it as the mobile current task, applies the saved launch template, and
   starts the four role sessions (`project-manager`, `architect`, `coder`,
   `reviewer`) through the same one-click-start path as the desktop UI. The saved
-  template controls permission mode, model, auto orchestration, and translation.
+  template controls permission mode, model, effort, auto orchestration, and
+  translation.
   If no template has been saved, VCM uses the default launch template.
 - `/close-task` starts a destructive confirmation flow for the current task.
   Gateway replies with the exact confirmation command.
@@ -249,7 +250,7 @@ Rules:
   -> load saved launch template from app preferences
   -> set orchestration from template
   -> set gateway/desktop translation state from template
-  -> start four role sessions with template permission/model
+  -> start four role sessions with template permission/model/effort
   -> switch mobile current role to project-manager
   -> reply with task slug, branch, worktree, template summary, and session status
 ```
@@ -584,8 +585,8 @@ Service dependencies:
   Task cleanup.
 - `SessionService`: PM session state, Claude session metadata, and role session
   start for launch-template initialization.
-- `AppSettingsService`: saved launch template with permission mode, model, auto
-  orchestration, and translation defaults.
+- `AppSettingsService`: saved launch template with permission mode, model,
+  effort, auto orchestration, and translation defaults.
 - `MessageService` / orchestration state service: set the newly created task to
   template auto/manual orchestration mode.
 - `TerminalRuntime`: controlled PM terminal submission.

@@ -8,6 +8,7 @@ import type {
   ClaudePermissionMode,
   CodexModel,
   RoleSessionRecord,
+  SessionEffort,
   SessionModel,
   StartRoleSessionRequest,
   TaskSessionRecord
@@ -30,6 +31,7 @@ export interface SessionService {
   restartRoleSession(repoRoot: string, taskSlug: string, role: RoleName, input?: StartRoleSessionRequest): Promise<RoleSessionRecord>;
   getRoleSession(repoRoot: string, taskSlug: string, role: RoleName): Promise<RoleSessionRecord | undefined>;
   listRoleSessions(repoRoot: string, taskSlug: string): Promise<RoleSessionRecord[]>;
+  recordRoleHookEvent(repoRoot: string, input: RecordRoleHookEventInput): Promise<RoleSessionRecord | undefined>;
   recordClaudeHookEvent(repoRoot: string, input: RecordClaudeHookEventInput): Promise<RoleSessionRecord | undefined>;
   markRoleActivityRunning(repoRoot: string, taskSlug: string, role: RoleName): Promise<RoleSessionRecord | undefined>;
 }
@@ -62,6 +64,16 @@ export interface RecordClaudeHookEventInput {
   cwd?: string;
 }
 
+export interface RecordRoleHookEventInput {
+  taskSlug: string;
+  role: RoleName;
+  eventName: ClaudeHookEventName;
+  sessionId?: string;
+  transcriptPath?: string;
+  cwd?: string;
+  allowSessionMismatch?: boolean;
+}
+
 export function createSessionService(deps: SessionServiceDeps): SessionService {
   const now = deps.now ?? (() => new Date().toISOString());
 
@@ -87,6 +99,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     const model: SessionModel = isCodexReviewer
       ? normalizeCodexModel(input.model ?? persisted?.model)
       : normalizeClaudeModel(input.model ?? persisted?.model);
+    const effort = normalizeSessionEffort(input.effort ?? persisted?.effort);
     const claudeSessionId = launchMode === "resume"
       ? persisted?.claudeSessionId
       : randomUUID();
@@ -104,7 +117,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       : isCodexReviewer ? undefined : claudeTranscriptPath(taskRepoRoot, claudeSessionId);
 
     const startCommand = isCodexReviewer
-      ? await buildCodexReviewerStartCommand(deps.fs, taskRepoRoot, launchMode, model as CodexModel)
+      ? await buildCodexReviewerStartCommand(deps.fs, taskRepoRoot, launchMode, model as CodexModel, effort)
       : {
           ...deps.claude.buildRoleStartCommand(
             role,
@@ -112,7 +125,8 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
             permissionMode,
             claudeSessionId,
             launchMode === "resume",
-            model as ClaudeModel
+            model as ClaudeModel,
+            effort
           ),
           cwd: taskRepoRoot
         };
@@ -145,6 +159,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       command: startCommand.display,
       permissionMode,
       model,
+      effort,
       cwd: startCommand.cwd,
       terminalBackend: "node-pty",
       pid: runtimeSession.pid,
@@ -249,9 +264,9 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       }
       return sessions;
     },
-    async recordClaudeHookEvent(repoRoot, input) {
+    async recordRoleHookEvent(repoRoot, input) {
       const current = await this.getRoleSession(repoRoot, input.taskSlug, input.role);
-      if (!current || !matchesClaudeHookSession(current, input)) {
+      if (!current || (!input.allowSessionMismatch && !matchesRoleHookSession(current, input))) {
         return undefined;
       }
 
@@ -259,6 +274,9 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       const isStop = input.eventName === "Stop";
       const updated: RoleSessionRecord = {
         ...current,
+        claudeSessionId: input.sessionId ?? current.claudeSessionId,
+        transcriptPath: input.transcriptPath ?? current.transcriptPath,
+        cwd: input.cwd ?? current.cwd,
         activityStatus: isStop ? "idle" : "running",
         lastHookEventAt: timestamp,
         lastTurnEndedAt: isStop ? timestamp : current.lastTurnEndedAt,
@@ -271,6 +289,16 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       const task = await deps.taskService.loadTask(repoRoot, input.taskSlug);
       await persistTaskSession(deps.fs, getTaskRuntimeRepoRoot(task), config.stateRoot, updated);
       return updated;
+    },
+    recordClaudeHookEvent(repoRoot, input) {
+      return this.recordRoleHookEvent(repoRoot, {
+        taskSlug: input.taskSlug,
+        role: input.role,
+        eventName: input.eventName,
+        sessionId: input.claudeSessionId,
+        transcriptPath: input.transcriptPath,
+        cwd: input.cwd
+      });
     },
     async markRoleActivityRunning(repoRoot, taskSlug, role) {
       const current = await this.getRoleSession(repoRoot, taskSlug, role);
@@ -300,7 +328,8 @@ async function buildCodexReviewerStartCommand(
   fs: FileSystemAdapter,
   taskRepoRoot: string,
   launchMode: LaunchMode,
-  selectedModel: CodexModel
+  selectedModel: CodexModel,
+  selectedEffort: SessionEffort
 ): Promise<{ command: string; args: string[]; display: string; cwd: string }> {
   const codexDir = resolveRepoPath(taskRepoRoot, CODEX_DIR);
   const reviewDir = resolveRepoPath(taskRepoRoot, CODEX_REVIEW_DIR);
@@ -318,6 +347,9 @@ async function buildCodexReviewerStartCommand(
   const model = selectedModel === "default"
     ? config.model
     : selectedModel;
+  const modelReasoningEffort = selectedEffort === "default"
+    ? config.modelReasoningEffort
+    : selectedEffort;
   const args = launchMode === "resume"
     ? ["resume", "--last"]
     : [];
@@ -329,13 +361,14 @@ async function buildCodexReviewerStartCommand(
     "--sandbox",
     "workspace-write",
     "--ask-for-approval",
-    "never"
+    "never",
+    "--dangerously-bypass-hook-trust"
   );
   if (model && model !== "default") {
     args.push("--model", model);
   }
-  if (config.modelReasoningEffort) {
-    args.push("--config", `model_reasoning_effort="${config.modelReasoningEffort}"`);
+  if (modelReasoningEffort && modelReasoningEffort !== "default") {
+    args.push("--config", `model_reasoning_effort="${modelReasoningEffort}"`);
   }
 
   return {
@@ -368,14 +401,14 @@ async function loadCodexSessionConfig(
   };
 }
 
-function matchesClaudeHookSession(record: RoleSessionRecord, input: RecordClaudeHookEventInput): boolean {
-  if (input.claudeSessionId && record.claudeSessionId === input.claudeSessionId) {
+function matchesRoleHookSession(record: RoleSessionRecord, input: RecordRoleHookEventInput): boolean {
+  if (input.sessionId && record.claudeSessionId === input.sessionId) {
     return true;
   }
   if (input.transcriptPath && record.transcriptPath === input.transcriptPath) {
     return true;
   }
-  if (!input.claudeSessionId && !input.transcriptPath) {
+  if (!input.sessionId && !input.transcriptPath) {
     return true;
   }
   return false;
@@ -437,7 +470,8 @@ async function loadPersistedRoleRecord(
         permissionMode: normalizeClaudePermissionMode(record.permissionMode),
         model: record.role === CODEX_REVIEWER_ROLE
           ? normalizeCodexModel(record.model)
-          : normalizeClaudeModel(record.model)
+          : normalizeClaudeModel(record.model),
+        effort: normalizeSessionEffort(record.effort)
       }
     : undefined;
 }
@@ -518,6 +552,19 @@ function normalizeCodexModel(value: unknown): CodexModel {
     return value;
   }
   return "gpt-5.5";
+}
+
+function normalizeSessionEffort(value: unknown): SessionEffort {
+  if (
+    value === "low"
+    || value === "medium"
+    || value === "high"
+    || value === "xhigh"
+    || value === "max"
+  ) {
+    return value;
+  }
+  return "default";
 }
 
 function extractTomlSection(content: string, sectionName: string): string {

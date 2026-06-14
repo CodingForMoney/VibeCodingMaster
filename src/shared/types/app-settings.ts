@@ -1,6 +1,6 @@
 import { VCM_ROLE_NAMES } from "../constants.js";
 import type { VcmRoleName } from "./role.js";
-import type { ClaudeModel, ClaudePermissionMode } from "./session.js";
+import type { ClaudeModel, ClaudePermissionMode, SessionEffort } from "./session.js";
 
 export type ThemeMode = "system" | "light" | "dark";
 export type PermissionRequestMode = "off" | "allowAll";
@@ -8,6 +8,7 @@ export type PermissionRequestMode = "off" | "allowAll";
 export interface RoleLaunchTemplateEntry {
   permissionMode: ClaudePermissionMode;
   model: ClaudeModel;
+  effort: SessionEffort;
 }
 
 export interface LaunchTemplate {
@@ -40,7 +41,8 @@ export function createDefaultLaunchTemplate(): LaunchTemplate {
   for (const role of VCM_ROLE_NAMES) {
     roles[role] = {
       permissionMode: "default",
-      model: "default"
+      model: "default",
+      effort: "default"
     };
   }
 

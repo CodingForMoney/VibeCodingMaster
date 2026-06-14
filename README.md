@@ -11,7 +11,7 @@ VCM is designed for long-running coding work where one Claude Code conversation 
 
 Each role runs as a real Claude Code process inside an embedded terminal. The GUI lets the user start, stop, resume, restart, switch, observe, and manually intervene in those sessions without juggling separate terminal windows.
 
-When Codex Review Gates are enabled for a task, or when a Codex Reviewer session already exists, the workspace can also show a fifth `Codex Reviewer` terminal role. It runs Codex CLI from `.ai/codex` with a Codex model selector, receives gate prompts in the same long-lived terminal session, and stays outside the normal Claude Code PM routing flow.
+When Codex Review Gates are enabled for a task, or when a Codex Reviewer session already exists, the workspace can also show a fifth `Codex Reviewer` terminal role. It runs Codex CLI from `.ai/codex` with Codex model and effort selectors, receives gate prompts in the same long-lived terminal session, reports hook state back to VCM, and stays outside the normal Claude Code PM routing flow.
 
 ## Current Capabilities
 
@@ -29,7 +29,7 @@ When Codex Review Gates are enabled for a task, or when a Codex Reviewer session
 - PM-mediated role messaging through VCM-dispatched route files.
 - Manual and automatic orchestration modes.
 - Two-stage VCM harness setup: deterministic fixed install plus AI-assisted bootstrap.
-- VCM-managed root rules, four role agents, repo-local VCM skills, Claude Code hooks, generated-context tools, and PR template.
+- VCM-managed root rules, four role agents, repo-local VCM skills, Claude Code hooks, Codex Reviewer hooks, generated-context tools, and PR template.
 - Rust generated context for module indexing and crate-external public surface indexing.
 - Translation panel powered by an OpenAI-compatible low-cost model.
 - Mobile Gateway through Tencent iLink Bot API / Weixin DM, for talking to PM and managing tasks from Weixin.
@@ -236,7 +236,7 @@ the base repo has uncommitted changes, when the current branch has no upstream,
 or when the active task is an inline task using the base repo directly. It does
 not stash, merge, or mutate task worktrees.
 
-When VCM is connected to an active task, the bottom of the sidebar shows a task status dock. It stays outside the collapsible groups and shows the active VCM Session title, task status, start time, total elapsed time, total Round count, and Claude Code active runtime. If a Round is currently running, the dock also shows the Current Round start time, total elapsed time, Claude Code active runtime, and Turn count.
+When VCM is connected to an active task, the bottom of the sidebar shows a task status dock. It stays outside the collapsible groups and shows the active VCM Session title, task status, start time, total elapsed time, total Round count, and role active runtime. If a Round is currently running, the dock also shows the Current Round start time, total elapsed time, role active runtime, and Turn count.
 
 ## Mobile Gateway
 
@@ -359,7 +359,7 @@ Typical mobile flow:
 
 `/pull-current` only pulls the connected base repository. It does not pull task worktrees, stash local changes, merge divergent branches, or run arbitrary shell commands.
 
-`/create-task` uses the saved launch template from the desktop settings. The template controls permission mode, model, auto orchestration, and translation defaults for the four role sessions.
+`/create-task` uses the saved launch template from the desktop settings. The template controls permission mode, model, effort, auto orchestration, and translation defaults for the four role sessions.
 
 `/close-task` is destructive. It stops VCM-managed role sessions and removes task-owned worktree/branch state according to the same cleanup behavior as the desktop `Close Task` action.
 
@@ -481,7 +481,7 @@ For `.gitignore`, VCM uses a gitignore-native managed block:
 
 `.ai/vcm/` is the active VCM local control area, and `.claude/worktrees/` is the Claude-compatible task worktree area. VCM keeps the task index in app-local project state under `~/.vcm/projects/`; each task runtime repo keeps its own session, message, orchestration, and translation state.
 
-VCM also JSON-merges `.claude/settings.json` to install Claude Code `PreToolUse`, `UserPromptSubmit`, `Stop`, and `PermissionRequest` hooks plus a managed `env.BASH_DEFAULT_TIMEOUT_MS` so foreground watch windows fit inside the Bash tool timeout. The hooks post directly to the local VCM backend, so roles do not need a VCM CLI command to confirm delivery or report turn completion. The `Stop` hook forwards the backend response to Claude Code, which lets VCM block turn-end while a validation job is still running.
+VCM also JSON-merges `.claude/settings.json` to install Claude Code `PreToolUse`, `UserPromptSubmit`, `Stop`, and `PermissionRequest` hooks plus a managed `env.BASH_DEFAULT_TIMEOUT_MS` so foreground watch windows fit inside the Bash tool timeout. The hooks post directly to the local VCM backend, so roles do not need a VCM CLI command to confirm delivery or report turn completion. The `Stop` hook forwards the backend response to Claude Code, which lets VCM block turn-end while a validation job is still running. When Codex Review Gates are installed, VCM also writes `.ai/codex/.codex/config.toml` and `.ai/codex/.codex/hooks.json` so the embedded Codex Reviewer terminal can POST `UserPromptSubmit` and `Stop` events back to VCM.
 
 Bootstrap is AI-assisted. VCM starts a visible temporary Claude Code session in the connected repository and asks it to use the `vcm-harness-bootstrap` skill. Bootstrap fills project-specific content and generated context:
 
@@ -568,7 +568,7 @@ When it is on, VCM is in auto mode:
 - When the target role later reaches `Stop`, VCM scans again and may deliver the next pending route file.
 - If auto orchestration gets stuck after a manual copy/paste recovery, `Mark All Done` clears pending route files. It does not mutate message history.
 
-VCM Harness injects Claude Code `UserPromptSubmit` and `Stop` hooks into `.claude/settings.json`. Role tabs become `running` when Claude Code accepts a prompt and `idle` after `Stop`; VCM also marks a role `running` immediately after it writes a message to that embedded terminal. The terminal process status is still tracked separately. The injected role rules require a role to end its turn after writing or updating a message route file, rather than polling, looping, or waiting for another role inside the same Claude Code turn.
+VCM Harness injects Claude Code `UserPromptSubmit` and `Stop` hooks into `.claude/settings.json`, and Codex Reviewer hooks into `.ai/codex/.codex/hooks.json`. Role tabs become `running` when Claude Code or Codex accepts a prompt and `idle` after `Stop`; VCM also marks a role `running` immediately after it writes a message to that embedded terminal. The terminal process status is still tracked separately. Claude role rules require a role to end its turn after writing or updating a message route file, rather than polling, looping, or waiting for another role inside the same Claude Code turn; Codex Reviewer does not dispatch route files.
 
 The implementation keeps only the active manual/auto orchestration mode. It does not expose pause/resume, stage/approve/reject, or a separate agent-facing message CLI.
 
@@ -582,7 +582,7 @@ The normal path is timer-driven: `Stop` starts a backend timer, and `UserPromptS
 
 When `Flow pause alert` is enabled, the frontend polls the task Round state and deduplicates each stopped Round so the same stopped state does not alert on every poll. Flow duration is measured from the first `UserPromptSubmit` to `stoppedAt`, falling back to the last `Stop` when needed. If the flow lasted less than 2 minutes, it plays the local chime 3 times at 1.4 second intervals. If the flow lasted 2 minutes or longer, it shows a modal alert and repeats the local chime until the user clicks `Confirm`. A stopped Round can mean normal completion, user decision needed, dispatch failure, or another workflow interruption; the point is to get the user to look with the right amount of urgency.
 
-The Current Round dock separates wall-clock Round duration from Claude Code active runtime. `Total` is `now - Round.startedAt`; `CC runtime` is only the accumulated time between each Turn's `UserPromptSubmit` and `Stop`; `Turn count` is the number of accepted prompts inside the current Round.
+The Current Round dock separates wall-clock Round duration from role active runtime. `Total` is `now - Round.startedAt`; `Role runtime` is only the accumulated time between each Turn's `UserPromptSubmit` and `Stop`; `Turn count` is the number of accepted prompts inside the current Round.
 
 ## Resume Behavior
 

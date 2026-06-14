@@ -37,6 +37,47 @@ describe("round-service", () => {
     });
   });
 
+  it("records Codex Reviewer turns through the provider-neutral hook path", async () => {
+    const fs = createMemoryFs();
+    let currentTime = "2026-05-31T00:00:00.000Z";
+    const service = createRoundService({
+      fs,
+      now: () => currentTime,
+      id: () => "round_1"
+    });
+
+    const started = await service.recordRoleTurnEvent({
+      stateRepoRoot: "/repo",
+      stateRoot: ".ai/vcm",
+      taskSlug: "demo-task",
+      role: "codex-reviewer",
+      eventName: "UserPromptSubmit"
+    });
+    expect(started).toMatchObject({
+      status: "running",
+      activeRole: "codex-reviewer",
+      roles: ["codex-reviewer"],
+      totalTurnCount: 1
+    });
+
+    currentTime = "2026-05-31T00:00:03.000Z";
+    const stopped = await service.recordRoleTurnEvent({
+      stateRepoRoot: "/repo",
+      stateRoot: ".ai/vcm",
+      taskSlug: "demo-task",
+      role: "codex-reviewer",
+      eventName: "Stop"
+    });
+    expect(stopped).toMatchObject({
+      status: "running",
+      activeRole: "codex-reviewer",
+      completedTurnCount: 1,
+      totalCompletedTurnCount: 1,
+      totalCcActiveMs: 3000,
+      settleDeadlineAt: "2026-05-31T00:00:13.000Z"
+    });
+  });
+
   it("continues the same round when another prompt starts inside the settle window", async () => {
     const fs = createMemoryFs();
     let currentTime = "2026-05-31T00:00:00.000Z";

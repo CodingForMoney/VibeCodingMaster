@@ -62,6 +62,41 @@ export const CODEX_MODEL_OPTIONS = [
 export type CodexModel = typeof CODEX_MODEL_OPTIONS[number]["value"];
 export type SessionModel = ClaudeModel | CodexModel;
 
+export const SESSION_EFFORT_OPTIONS = [
+  {
+    value: "default",
+    label: "Default",
+    description: "CLI or project default"
+  },
+  {
+    value: "low",
+    label: "Low",
+    description: "Fastest reasoning"
+  },
+  {
+    value: "medium",
+    label: "Medium",
+    description: "Balanced reasoning"
+  },
+  {
+    value: "high",
+    label: "High",
+    description: "Deeper reasoning"
+  },
+  {
+    value: "xhigh",
+    label: "XHigh",
+    description: "Extra high reasoning"
+  },
+  {
+    value: "max",
+    label: "Max",
+    description: "Maximum reasoning"
+  }
+] as const;
+
+export type SessionEffort = typeof SESSION_EFFORT_OPTIONS[number]["value"];
+
 export interface RoleSessionRecord {
   id: string;
   claudeSessionId: string;
@@ -73,6 +108,7 @@ export interface RoleSessionRecord {
   command: string;
   permissionMode: ClaudePermissionMode;
   model?: SessionModel;
+  effort?: SessionEffort;
   cwd: string;
   terminalBackend: "node-pty";
   pid?: number;
@@ -108,4 +144,5 @@ export interface StartRoleSessionRequest {
   rows?: number;
   permissionMode?: ClaudePermissionMode;
   model?: SessionModel;
+  effort?: SessionEffort;
 }

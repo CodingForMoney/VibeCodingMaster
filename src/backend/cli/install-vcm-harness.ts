@@ -10,8 +10,10 @@ import { renderCoderHarnessRules } from "../templates/harness/coder-agent.js";
 import {
   renderCodexAgentsHarnessRules,
   renderCodexArchitecturePlanPrompt,
+  renderCodexCliConfigHarnessRules,
   renderCodexConfigHarnessRules,
   renderCodexFinalDiffPrompt,
+  renderCodexHooksHarnessRules,
   renderCodexReviewResultSchema,
   renderCodexValidationAdequacyPrompt,
   renderRequestCodexReviewTool,
@@ -213,6 +215,18 @@ const WHOLE_FILES = [
     category: "codex-review-config",
     mode: 0o644,
     content: renderCodexConfigHarnessRules()
+  },
+  {
+    path: ".ai/codex/.codex/config.toml",
+    category: "codex-review-hooks",
+    mode: 0o644,
+    content: renderCodexCliConfigHarnessRules()
+  },
+  {
+    path: ".ai/codex/.codex/hooks.json",
+    category: "codex-review-hooks",
+    mode: 0o644,
+    content: renderCodexHooksHarnessRules()
   },
   {
     path: ".ai/codex/prompts/architecture-plan-gate.md",
@@ -472,6 +486,7 @@ function fixedDirectories() {
     ".claude/skills/vcm-route-message/",
     ".claude/skills/vcm-codex-review-gate/",
     ".ai/codex/",
+    ".ai/codex/.codex/",
     ".ai/codex/prompts/",
     ".ai/codex/schemas/",
     ".ai/vcm/codex-reviews/",

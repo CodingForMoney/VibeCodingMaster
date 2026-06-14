@@ -372,6 +372,9 @@ function createFakeSessionService(
     async listRoleSessions() {
       return [];
     },
+    async recordRoleHookEvent() {
+      return undefined;
+    },
     async recordClaudeHookEvent() {
       return undefined;
     },

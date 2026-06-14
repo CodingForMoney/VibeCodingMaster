@@ -431,7 +431,7 @@ function getLaunchTemplateBadge(template: LaunchTemplate): string {
 
 function getLaunchTemplateSummary(template: LaunchTemplate): string {
   const roles = Object.entries(template.roles)
-    .map(([role, config]) => `${role}: ${config.permissionMode} / ${config.model}`)
+    .map(([role, config]) => `${role}: ${config.permissionMode} / ${config.model} / ${config.effort}`)
     .join("; ");
   return `Launch template: ${getLaunchTemplateBadge(template)}; ${roles}`;
 }
@@ -688,7 +688,7 @@ function SessionStatusDock({
           <dd>{roundState?.totalRoundCount ?? 0}</dd>
         </div>
         <div>
-          <dt>CC runtime</dt>
+          <dt>Role runtime</dt>
           <dd>{formatDuration(totalCcActiveMs)}</dd>
         </div>
       </dl>
@@ -709,7 +709,7 @@ function SessionStatusDock({
               <dd>{formatDuration(currentRoundElapsedMs)}</dd>
             </div>
             <div>
-              <dt>CC runtime</dt>
+              <dt>Role runtime</dt>
               <dd>{formatDuration(currentRoundCcActiveMs)}</dd>
             </div>
             <div>

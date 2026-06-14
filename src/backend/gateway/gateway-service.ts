@@ -532,7 +532,8 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
           cols: 100,
           rows: 28,
           permissionMode: roleTemplate.permissionMode,
-          model: roleTemplate.model
+          model: roleTemplate.model,
+          effort: roleTemplate.effort
         });
         startedRoles.push(definition.name);
       } catch (error) {

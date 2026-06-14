@@ -7,7 +7,6 @@ import {
   type PermissionRequestMode,
   type ThemeMode
 } from "../shared/types/app-settings.js";
-import { VCM_ROLE_DEFINITIONS } from "../shared/constants.js";
 import type {
   HarnessApplyResult,
   HarnessBootstrapStatusReport,
@@ -27,6 +26,7 @@ import type { TaskRecord } from "../shared/types/task.js";
 import { AppShell } from "./components/app-shell.js";
 import { selectActiveTask } from "./state/app-store.js";
 import { apiClient } from "./state/api-client.js";
+import { buildOneClickRoleLaunches } from "./state/one-click-start.js";
 import { ProjectDashboard } from "./routes/project-dashboard.js";
 import { TaskWorkspace, type TaskWorkspaceLaunchState } from "./routes/task-workspace.js";
 
@@ -604,13 +604,14 @@ export function App() {
                 orchestration: nextOrchestration
               });
 
-              for (const definition of VCM_ROLE_DEFINITIONS) {
-                const roleTemplate = launchTemplate.roles[definition.name];
-                await apiClient.startRoleSession(activeTask.taskSlug, definition.name, {
+              const roleLaunches = buildOneClickRoleLaunches(launchTemplate, { codexReviewerEnabled });
+              for (const roleLaunch of roleLaunches) {
+                await apiClient.startRoleSession(activeTask.taskSlug, roleLaunch.role, {
                   cols: 100,
                   rows: 28,
-                  permissionMode: roleTemplate.permissionMode,
-                  model: roleTemplate.model
+                  permissionMode: roleLaunch.permissionMode,
+                  model: roleLaunch.model,
+                  effort: roleLaunch.effort
                 });
               }
 

@@ -8,6 +8,7 @@ import type { FileSystemAdapter } from "../adapters/filesystem.js";
 
 export interface RoundService {
   getSessionRoundState(input: SessionRoundInput): Promise<VcmSessionRoundState>;
+  recordRoleTurnEvent(input: RecordRoundHookEventInput): Promise<VcmSessionRoundState>;
   recordClaudeHookEvent(input: RecordRoundHookEventInput): Promise<VcmSessionRoundState>;
   stopSession(sessionId: string): void;
   stopTask(taskSlug: string): void;
@@ -244,6 +245,32 @@ export function createRoundService(deps: RoundServiceDeps): RoundService {
     settleTimers.set(getRoundStatePath(input), timer);
   }
 
+  async function recordRoleTurnEvent(input: RecordRoundHookEventInput): Promise<VcmSessionRoundState> {
+    return withTaskLock(input, async () => {
+      const timestamp = now();
+      const settled = await settleIfNeeded(input, await load(input), timestamp);
+      const current = settled.currentRound;
+      const shouldStartNewRound = input.eventName === "UserPromptSubmit" && (!current || current.status === "stopped");
+      const next = applyRoundHookEvent({
+        state: settled,
+        taskSlug: input.taskSlug,
+        role: input.role,
+        eventName: input.eventName,
+        timestamp,
+        roundId: shouldStartNewRound ? id() : current?.id ?? "",
+        settleMs
+      });
+      await save(input, next);
+      if (input.eventName === "UserPromptSubmit") {
+        clearSettleTimer(input);
+        await updateSessionStatus(input, "running");
+      } else if (next.currentRound) {
+        scheduleSettleTimer(input, next.currentRound, timestamp, input.settleGuard);
+      }
+      return toSessionRoundState(next, timestamp);
+    });
+  }
+
   async function withTaskLock<T>(input: SessionRoundInput, run: () => Promise<T>): Promise<T> {
     const key = getRoundStatePath(input);
     const previous = taskLocks.get(key) ?? Promise.resolve();
@@ -265,30 +292,9 @@ export function createRoundService(deps: RoundServiceDeps): RoundService {
         return toSessionRoundState(await load(input), timestamp);
       });
     },
-    async recordClaudeHookEvent(input) {
-      return withTaskLock(input, async () => {
-        const timestamp = now();
-        const settled = await settleIfNeeded(input, await load(input), timestamp);
-        const current = settled.currentRound;
-        const shouldStartNewRound = input.eventName === "UserPromptSubmit" && (!current || current.status === "stopped");
-        const next = applyRoundHookEvent({
-          state: settled,
-          taskSlug: input.taskSlug,
-          role: input.role,
-          eventName: input.eventName,
-          timestamp,
-          roundId: shouldStartNewRound ? id() : current?.id ?? "",
-          settleMs
-        });
-        await save(input, next);
-        if (input.eventName === "UserPromptSubmit") {
-          clearSettleTimer(input);
-          await updateSessionStatus(input, "running");
-        } else if (next.currentRound) {
-          scheduleSettleTimer(input, next.currentRound, timestamp, input.settleGuard);
-        }
-        return toSessionRoundState(next, timestamp);
-      });
+    recordRoleTurnEvent,
+    recordClaudeHookEvent(input) {
+      return recordRoleTurnEvent(input);
     },
     stopSession() {},
     stopTask(taskSlug) {

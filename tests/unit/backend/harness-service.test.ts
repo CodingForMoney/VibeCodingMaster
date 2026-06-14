@@ -11,17 +11,17 @@ describe("createHarnessService", () => {
     expect(status.needsApply).toBe(true);
     // B1: a fresh repo with every harness file missing is not yet initialized.
     expect(status.initialized).toBe(false);
-    expect(status.plannedChanges).toHaveLength(20);
-    expect(status.plannedChanges.map((change) => change.action)).toEqual(Array(20).fill("create"));
+    expect(status.plannedChanges).toHaveLength(22);
+    expect(status.plannedChanges.map((change) => change.action)).toEqual(Array(22).fill("create"));
 
     const result = await service.applyHarness("/repo");
-    expect(result.changedFiles).toHaveLength(20);
+    expect(result.changedFiles).toHaveLength(22);
 
     const nextStatus = await service.getHarnessStatus("/repo");
     expect(nextStatus.needsApply).toBe(false);
     // B2: once the harness is applied, VCM markers exist -> initialized.
     expect(nextStatus.initialized).toBe(true);
-    expect(nextStatus.files.map((file) => file.action)).toEqual(Array(20).fill("ok"));
+    expect(nextStatus.files.map((file) => file.action)).toEqual(Array(22).fill("ok"));
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("## VCM Start Here");
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("## VCM Task Flow");
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("## VCM Worktree Policy");
@@ -64,6 +64,12 @@ describe("createHarnessService", () => {
     expect(codexConfig).toContain("[vcm.codex_review]");
     expect(codexConfig).toContain("enabled = false");
     expect(codexConfig).toContain("required_gates = []");
+    expect(await fs.readText("/repo/.ai/codex/.codex/config.toml")).toContain("hooks = true");
+    const codexHooks = await fs.readText("/repo/.ai/codex/.codex/hooks.json");
+    expect(codexHooks).toContain("UserPromptSubmit");
+    expect(codexHooks).toContain("Stop");
+    expect(codexHooks).toContain("/api/hooks/codex-reviewer");
+    expect(codexHooks).toContain("/api/hooks/codex-reviewer/stop");
     expect(await fs.readText("/repo/.ai/codex/prompts/architecture-plan-gate.md")).toContain("Codex Gate: architecture-plan");
     expect(await fs.readText("/repo/.ai/codex/prompts/validation-adequacy-gate.md")).toContain("Codex Gate: validation-adequacy");
     expect(await fs.readText("/repo/.ai/codex/prompts/final-diff-gate.md")).toContain("Codex Gate: final-diff");
