@@ -62,7 +62,7 @@ export const CODEX_MODEL_OPTIONS = [
 export type CodexModel = typeof CODEX_MODEL_OPTIONS[number]["value"];
 export type SessionModel = ClaudeModel | CodexModel;
 
-export const SESSION_EFFORT_OPTIONS = [
+export const CODEX_EFFORT_OPTIONS = [
   {
     value: "default",
     label: "Default",
@@ -94,6 +94,17 @@ export const SESSION_EFFORT_OPTIONS = [
     description: "Maximum reasoning"
   }
 ] as const;
+
+export const CLAUDE_EFFORT_OPTIONS = [
+  ...CODEX_EFFORT_OPTIONS,
+  {
+    value: "ultracode",
+    label: "Ultracode",
+    description: "Claude Code dynamic workflows with xhigh reasoning"
+  }
+] as const;
+
+export const SESSION_EFFORT_OPTIONS = CLAUDE_EFFORT_OPTIONS;
 
 export type SessionEffort = typeof SESSION_EFFORT_OPTIONS[number]["value"];
 

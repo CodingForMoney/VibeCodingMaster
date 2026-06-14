@@ -229,19 +229,22 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     sessionService,
     taskService
   });
+  const roundService = createRoundService({
+    fs,
+    sessionService,
+    onSessionStatusChange: async ({ repoRoot, taskSlug, status }) => {
+      await taskService.updateTaskStatus(repoRoot, taskSlug, status);
+    }
+  });
   const codexReviewService = createCodexReviewService({
     fs,
     runner,
     runtime,
     projectService,
     taskService,
-    sessionService
-  });
-  const roundService = createRoundService({
-    fs,
-    onSessionStatusChange: async ({ repoRoot, taskSlug, status }) => {
-      await taskService.updateTaskStatus(repoRoot, taskSlug, status);
-    }
+    appSettings,
+    sessionService,
+    roundService
   });
   const transcripts = createClaudeTranscriptService();
   const translationService = createTranslationService({

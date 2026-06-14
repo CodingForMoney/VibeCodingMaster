@@ -21,24 +21,28 @@ export function renderArchitectHarnessRules(): string {
 
 ### Architecture Plan
 
-- Before coder work starts, write \`.ai/vcm/handoffs/architecture-plan.md\` and materialize the plan in code scaffolding.
+- Before coder work starts, write \`.ai/vcm/handoffs/architecture-plan.md\`, choose the minimum necessary code scaffolding, and include a Scaffold Manifest for task-specific context and coder guidance.
 
 #### Plan Document
 
 - Define the expected implementation scope: affected modules, changed or created files, each file's responsibility, why it is in scope, and user-visible behavior changes.
 - Define every non-private callable surface intended for use outside its file: visibility, signature shape, responsibility, expected callers, behavior contract, side effects, and error boundaries.
+- Include a \`Scaffold Manifest\` for task-specific file context: file action, why the file is in scope, coder work, allowed implementation freedom, expected \`VCM:CODE\` placeholders, durable code comment needs, proof points, and Replan triggers.
+- Put task context, phase notes, handoff instructions, temporary rationale, and coder guidance in the \`Scaffold Manifest\`, not in source-code comments.
 - Cover architecture docs impact, known risks, and Replan triggers.
 - For docs impact, state whether changes belong in \`docs/ARCHITECTURE.md\`, affected \`<module>/ARCHITECTURE.md\`, \`.ai/generated/public-surface.json\`, or no durable architecture doc.
 
 #### Code Scaffolding
 
-- Create or update module/file scaffolding so file responsibilities, logic boundaries, collaborators, and non-goals are documented in code.
-- When changing an existing file, update only the affected in-code scaffold: responsibility, boundary, collaborators, non-goals, or callable surfaces; do not rewrite unrelated file comments.
+- Create or update only the minimum module/file scaffolding needed to make boundaries, callable surfaces, and placeholders unambiguous.
+- Source-code comments must describe durable behavior, contracts, invariants, error boundaries, or non-obvious logic that should remain useful after the task is complete.
+- Do not put task-specific context, phase notes, handoff instructions, temporary plan rationale, or coder guidance in source-code comments.
+- When changing an existing file, update only affected durable comments or callable surfaces; do not rewrite unrelated file comments.
 - Define every new or changed non-private callable surface directly in code with its signature shape and contract comment.
 - When changing an existing non-private callable surface, update its signature and contract comment in code before coder work starts; leave \`VCM:CODE\` only where implementation must change.
 - Non-private callable surface includes any function, method, type, trait, enum, constant, re-export, or similar symbol that another file can call or depend on.
 - Mark incomplete implementation bodies with \`VCM:CODE\`; coder must implement them and remove the markers before handoff.
-- Architect scaffolding may include modules, files, signatures, type shapes, comments, and placeholder bodies, but not real business implementation beyond minimal scaffold code.
+- Architect scaffolding may include modules, files, signatures, type shapes, durable comments, and placeholder bodies, but not real business implementation beyond minimal scaffold code.
 - Coder may add private implementation helpers, but must not add or change cross-file callable surface without architect replan.
 
 ### Phase Planning

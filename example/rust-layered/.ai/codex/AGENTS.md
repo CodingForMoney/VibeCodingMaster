@@ -40,10 +40,12 @@ Check that the plan:
 - matches the user request and approved scope
 - names affected modules/files, file responsibilities, and user-visible changes
 - defines new or changed non-private callable surfaces: visibility, signature shape, callers, contract, side effects, and error boundaries
+- includes a Scaffold Manifest that carries task-specific context, coder guidance, allowed freedom, expected `VCM:CODE`, durable code comment needs, proof points, and Replan triggers
 - preserves dependency direction and avoids unapproved dependencies
 - states docs/generated-context impact or explains why none is needed
 - names risks, proof points, phase boundaries when needed, and Replan triggers
 - uses `VCM:CODE` for incomplete implementation and leaves no coder ambiguity
+- keeps task-specific context, phase notes, handoff instructions, and coder guidance out of source-code comments
 - does not take over reviewer-owned validation strategy or test adequacy
 
 ### Validation Adequacy
@@ -65,6 +67,7 @@ Check that the final diff:
 - stays inside the approved plan, phase, and user constraints
 - introduces no unapproved modules, dependencies, public contracts, cross-file callable surfaces, or durable-doc changes
 - removes all `VCM:CODE` markers
+- leaves no task-specific process comments in source or test code, such as role handoff notes, phase notes, current-task rationale, or coder instructions
 - contains no fake completion: hardcoded success, disabled logic, swallowed errors, test-only shortcuts, or silent fallback hiding failure
 - preserves existing behavior unless the plan changes it
 - keeps changed functions focused and meaningfully named

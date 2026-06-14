@@ -904,6 +904,7 @@ Handoff artifact schemas:
 ## Architecture Summary
 ## Task Classification
 ## Required Role Route
+## Scaffold Manifest
 ## Modules / Files
 ## File Responsibilities
 ## Public Surface Contract

@@ -109,18 +109,13 @@ describe("createSessionService", () => {
   it("starts Codex Reviewer sessions with Codex CLI from .ai/codex", async () => {
     const fs = createMemoryFs();
     await fs.writeText("/repo/.ai/codex", "");
-    await fs.writeText("/repo/.ai/codex/config.toml", `model = "gpt-5.5"
-model_reasoning_effort = "xhigh"
-
-[vcm.codex_review]
-enabled = true
-required_gates = ["architecture-plan"]
-`);
+    await fs.writeText("/repo/.ai/codex/config.toml", `approval_policy = "never"`);
     const runtimeInputs: CreateTerminalSessionInput[] = [];
     const service = createTestSessionService(fs, runtimeInputs);
 
     const started = await service.startRoleSession("/repo", "demo-task", "codex-reviewer", {
-      model: "gpt-5.5"
+      model: "gpt-5.5",
+      effort: "xhigh"
     });
 
     expect(started.role).toBe("codex-reviewer");
@@ -139,6 +134,7 @@ required_gates = ["architecture-plan"]
       "--ask-for-approval",
       "never",
       "--dangerously-bypass-hook-trust",
+      "--search",
       "--model",
       "gpt-5.5",
       "--config",
@@ -150,8 +146,7 @@ required_gates = ["architecture-plan"]
   it("overrides Codex Reviewer reasoning effort from the launch request", async () => {
     const fs = createMemoryFs();
     await fs.writeText("/repo/.ai/codex", "");
-    await fs.writeText("/repo/.ai/codex/config.toml", `model = "gpt-5.5"
-model_reasoning_effort = "xhigh"`);
+    await fs.writeText("/repo/.ai/codex/config.toml", `approval_policy = "never"`);
     const runtimeInputs: CreateTerminalSessionInput[] = [];
     const service = createTestSessionService(fs, runtimeInputs);
 
@@ -163,6 +158,39 @@ model_reasoning_effort = "xhigh"`);
     expect(started.effort).toBe("high");
     expect(runtimeInputs[0]?.args).toContain('model_reasoning_effort="high"');
     expect(runtimeInputs[0]?.args).not.toContain('model_reasoning_effort="xhigh"');
+  });
+
+  it("does not pass Claude ultracode as Codex reasoning effort", async () => {
+    const fs = createMemoryFs();
+    await fs.writeText("/repo/.ai/codex", "");
+    await fs.writeText("/repo/.ai/codex/config.toml", `approval_policy = "never"`);
+    const runtimeInputs: CreateTerminalSessionInput[] = [];
+    const service = createTestSessionService(fs, runtimeInputs);
+
+    const started = await service.startRoleSession("/repo", "demo-task", "codex-reviewer", {
+      model: "gpt-5.5",
+      effort: "ultracode"
+    });
+
+    expect(started.effort).toBe("default");
+    expect(runtimeInputs[0]?.args).not.toContain('model_reasoning_effort="ultracode"');
+    expect(runtimeInputs[0]?.args).not.toContain("--config");
+  });
+
+  it("starts Claude Code sessions with ultracode settings", async () => {
+    const fs = createMemoryFs();
+    const runtimeInputs: CreateTerminalSessionInput[] = [];
+    const service = createTestSessionService(fs, runtimeInputs);
+
+    const started = await service.startRoleSession("/repo", "demo-task", "architect", {
+      model: "fable",
+      effort: "ultracode"
+    });
+
+    expect(started.effort).toBe("ultracode");
+    expect(runtimeInputs[0]?.args).toContain("--settings");
+    expect(runtimeInputs[0]?.args).toContain("{\"ultracode\":true}");
+    expect(runtimeInputs[0]?.args).not.toContain("--effort");
   });
 
   it("starts role sessions inside the task worktree when one exists", async () => {
@@ -290,6 +318,14 @@ model_reasoning_effort = "xhigh"`);
       lastTurnStartedAt: "2026-05-29T00:00:00.000Z"
     });
 
+    const manuallyIdle = await service.markRoleActivityIdle("/repo", "demo-task", "coder");
+    expect(manuallyIdle).toMatchObject({
+      status: "running",
+      activityStatus: "idle",
+      lastTurnEndedAt: "2026-05-29T00:00:00.000Z"
+    });
+
+    await service.markRoleActivityRunning("/repo", "demo-task", "coder");
     const idle = await service.recordClaudeHookEvent("/repo", {
       taskSlug: "demo-task",
       role: "coder",
@@ -306,7 +342,7 @@ model_reasoning_effort = "xhigh"`);
   it("records Codex hook activity even when Codex reports its own session id", async () => {
     const fs = createMemoryFs();
     await fs.writeText("/repo/.ai/codex", "");
-    await fs.writeText("/repo/.ai/codex/config.toml", `model = "gpt-5.5"`);
+    await fs.writeText("/repo/.ai/codex/config.toml", `approval_policy = "never"`);
     const service = createTestSessionService(fs, []);
     const started = await service.startRoleSession("/repo", "demo-task", "codex-reviewer");
 
@@ -375,7 +411,9 @@ function createTestSessionService(
           args.push(resume ? "--resume" : "--session-id", claudeSessionId);
         }
         args.push("--model", model);
-        if (effort !== "default") {
+        if (effort === "ultracode") {
+          args.push("--settings", JSON.stringify({ ultracode: true }));
+        } else if (effort !== "default") {
           args.push("--effort", effort);
         }
         if (permissionMode === "bypassPermissions") {

@@ -31,10 +31,12 @@ Check that the plan:
 - matches the user request and approved scope
 - names affected modules/files, file responsibilities, and user-visible changes
 - defines new or changed non-private callable surfaces: visibility, signature shape, callers, contract, side effects, and error boundaries
+- includes a Scaffold Manifest that carries task-specific context, coder guidance, allowed freedom, expected \`VCM:CODE\`, durable code comment needs, proof points, and Replan triggers
 - preserves dependency direction and avoids unapproved dependencies
 - states docs/generated-context impact or explains why none is needed
 - names risks, proof points, phase boundaries when needed, and Replan triggers
 - uses \`VCM:CODE\` for incomplete implementation and leaves no coder ambiguity
+- keeps task-specific context, phase notes, handoff instructions, and coder guidance out of source-code comments
 - does not take over reviewer-owned validation strategy or test adequacy
 
 ### Validation Adequacy
@@ -56,6 +58,7 @@ Check that the final diff:
 - stays inside the approved plan, phase, and user constraints
 - introduces no unapproved modules, dependencies, public contracts, cross-file callable surfaces, or durable-doc changes
 - removes all \`VCM:CODE\` markers
+- leaves no task-specific process comments in source or test code, such as role handoff notes, phase notes, current-task rationale, or coder instructions
 - contains no fake completion: hardcoded success, disabled logic, swallowed errors, test-only shortcuts, or silent fallback hiding failure
 - preserves existing behavior unless the plan changes it
 - keeps changed functions focused and meaningfully named
@@ -91,14 +94,10 @@ Summary: <one or two sentences>
 }
 
 export function renderCodexConfigHarnessRules(): string {
-  return `model = "gpt-5.5"
-model_reasoning_effort = "xhigh"
+  return `# VCM reads this file before launching the Codex Reviewer terminal.
+# Codex CLI project hooks live in .ai/codex/.codex/.
 approval_policy = "never"
 default_permissions = "vcm_codex_reviewer"
-
-[vcm.codex_review]
-enabled = false
-required_gates = []
 
 [permissions.vcm_codex_reviewer.workspace_roots]
 "../.." = true
@@ -113,7 +112,7 @@ required_gates = []
 "**/*.env" = "deny"
 
 [permissions.vcm_codex_reviewer.network]
-enabled = false`;
+enabled = true`;
 }
 
 export function renderCodexCliConfigHarnessRules(): string {
@@ -165,6 +164,7 @@ Review whether the architecture plan is ready for coder implementation.
 - \`../../.claude/agents/coder.md\`
 - \`../../.claude/agents/reviewer.md\`
 - \`../../.ai/vcm/handoffs/architecture-plan.md\`
+- current git status and scaffold diff from \`../..\`
 - \`../../.ai/generated/module-index.json\`
 - \`../../.ai/generated/public-surface.json\`
 
@@ -371,11 +371,6 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-try:
-    import tomllib
-except ModuleNotFoundError:
-    tomllib = None
-
 
 GATES = ("architecture-plan", "validation-adequacy", "final-diff")
 REPORTS = {
@@ -473,20 +468,6 @@ def write_json(path: Path, data: dict) -> None:
     tmp.replace(path)
 
 
-def load_config(root: Path) -> dict:
-    path = root / ".ai/codex/config.toml"
-    if not path.is_file() or tomllib is None:
-        return {}
-    return tomllib.loads(path.read_text())
-
-
-def codex_review_config(root: Path) -> dict:
-    config = load_config(root)
-    vcm = config.get("vcm", {})
-    review = vcm.get("codex_review", {}) if isinstance(vcm, dict) else {}
-    return review if isinstance(review, dict) else {}
-
-
 def command_output(root: Path, command: list[str]) -> bytes:
     result = subprocess.run(
         command,
@@ -527,11 +508,11 @@ def request_id(gate: str) -> str:
 
 def local_request(gate: str) -> int:
     root = root_dir()
-    review_config = codex_review_config(root)
-    enabled = bool(review_config.get("enabled", False))
-    required = set(review_config.get("required_gates", []))
     index_path = root / ".ai/vcm/codex-reviews/index.json"
     index = read_json(index_path)
+    enabled = bool(index.get("enabled", False))
+    gate_record = index.get("gates", {}).get(gate, {}) if isinstance(index.get("gates"), dict) else {}
+    required = bool(gate_record.get("required", False)) if isinstance(gate_record, dict) else False
     index.update({"version": 1, "enabled": enabled})
     index.setdefault("gates", {})
 
@@ -541,7 +522,7 @@ def local_request(gate: str) -> int:
         print_result("disabled", gate=gate)
         return 0
 
-    if gate not in required:
+    if not required:
         gate_record = index["gates"].setdefault(gate, {})
         gate_record.update({"required": False, "status": "not_required", "updatedAt": now_iso()})
         write_json(index_path, index)

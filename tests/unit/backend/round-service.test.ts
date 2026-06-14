@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { FileSystemAdapter } from "../../../src/backend/adapters/filesystem.js";
 import { createRoundService } from "../../../src/backend/services/round-service.js";
+import type { RoleSessionRecord } from "../../../src/shared/types/session.js";
 
 describe("round-service", () => {
   it("starts a Round on the first UserPromptSubmit", async () => {
@@ -75,6 +76,113 @@ describe("round-service", () => {
       totalCompletedTurnCount: 1,
       totalCcActiveMs: 3000,
       settleDeadlineAt: "2026-05-31T00:00:13.000Z"
+    });
+  });
+
+  it("deduplicates a Codex Reviewer prompt when VCM marked the turn before the hook arrives", async () => {
+    const fs = createMemoryFs();
+    let currentTime = "2026-05-31T00:00:00.000Z";
+    const service = createRoundService({
+      fs,
+      now: () => currentTime,
+      id: () => "round_1"
+    });
+
+    await service.recordRoleTurnEvent({
+      stateRepoRoot: "/repo",
+      stateRoot: ".ai/vcm",
+      taskSlug: "demo-task",
+      role: "codex-reviewer",
+      eventName: "UserPromptSubmit"
+    });
+
+    currentTime = "2026-05-31T00:00:01.000Z";
+    const duplicate = await service.recordRoleTurnEvent({
+      stateRepoRoot: "/repo",
+      stateRoot: ".ai/vcm",
+      taskSlug: "demo-task",
+      role: "codex-reviewer",
+      eventName: "UserPromptSubmit"
+    });
+
+    expect(duplicate).toMatchObject({
+      status: "running",
+      activeRole: "codex-reviewer",
+      activeTurnStartedAt: "2026-05-31T00:00:00.000Z",
+      turnCount: 1,
+      totalTurnCount: 1,
+      roles: ["codex-reviewer"]
+    });
+
+    currentTime = "2026-05-31T00:00:03.000Z";
+    const stopped = await service.recordRoleTurnEvent({
+      stateRepoRoot: "/repo",
+      stateRoot: ".ai/vcm",
+      taskSlug: "demo-task",
+      role: "codex-reviewer",
+      eventName: "Stop"
+    });
+
+    expect(stopped).toMatchObject({
+      completedTurnCount: 1,
+      totalCompletedTurnCount: 1,
+      totalCcActiveMs: 3000
+    });
+  });
+
+  it("ignores a stale Codex Reviewer Stop after another role has started", async () => {
+    const fs = createMemoryFs();
+    let currentTime = "2026-05-31T00:00:00.000Z";
+    const service = createRoundService({
+      fs,
+      now: () => currentTime,
+      id: () => "round_1"
+    });
+
+    await service.recordRoleTurnEvent({
+      stateRepoRoot: "/repo",
+      stateRoot: ".ai/vcm",
+      taskSlug: "demo-task",
+      role: "codex-reviewer",
+      eventName: "UserPromptSubmit"
+    });
+
+    currentTime = "2026-05-31T00:00:02.000Z";
+    await service.recordRoleTurnEvent({
+      stateRepoRoot: "/repo",
+      stateRoot: ".ai/vcm",
+      taskSlug: "demo-task",
+      role: "codex-reviewer",
+      eventName: "Stop"
+    });
+
+    currentTime = "2026-05-31T00:00:03.000Z";
+    await service.recordRoleTurnEvent({
+      stateRepoRoot: "/repo",
+      stateRoot: ".ai/vcm",
+      taskSlug: "demo-task",
+      role: "project-manager",
+      eventName: "UserPromptSubmit"
+    });
+
+    currentTime = "2026-05-31T00:00:04.000Z";
+    const staleStop = await service.recordRoleTurnEvent({
+      stateRepoRoot: "/repo",
+      stateRoot: ".ai/vcm",
+      taskSlug: "demo-task",
+      role: "codex-reviewer",
+      eventName: "Stop"
+    });
+
+    expect(staleStop).toMatchObject({
+      status: "running",
+      activeRole: "project-manager",
+      activeTurnStartedAt: "2026-05-31T00:00:03.000Z",
+      turnCount: 2,
+      completedTurnCount: 1,
+      totalCompletedTurnCount: 1,
+      totalCcActiveMs: 3000,
+      currentRoundCcActiveMs: 3000
     });
   });
 
@@ -189,6 +297,89 @@ describe("round-service", () => {
       totalCcActiveMs: 2000,
       currentRoundCcActiveMs: 2000
     });
+  });
+
+  it("keeps the round running when a role session is active during the settle window", async () => {
+    const fs = createMemoryFs();
+    const timers = createManualTimers();
+    const sessions: RoleSessionRecord[] = [];
+    let currentTime = "2026-05-31T00:00:00.000Z";
+    const service = createRoundService({
+      fs,
+      sessionService: {
+        async listRoleSessions() {
+          return sessions;
+        }
+      },
+      now: () => currentTime,
+      id: () => "round_1",
+      setTimeout: timers.setTimeout,
+      clearTimeout: timers.clearTimeout
+    });
+
+    await service.recordClaudeHookEvent({
+      repoRoot: "/base",
+      stateRepoRoot: "/repo",
+      stateRoot: ".ai/vcm",
+      taskSlug: "demo-task",
+      role: "project-manager",
+      eventName: "UserPromptSubmit"
+    });
+
+    currentTime = "2026-05-31T00:00:02.000Z";
+    await service.recordClaudeHookEvent({
+      repoRoot: "/base",
+      stateRepoRoot: "/repo",
+      stateRoot: ".ai/vcm",
+      taskSlug: "demo-task",
+      role: "project-manager",
+      eventName: "Stop"
+    });
+
+    sessions.push(createRoleSession("codex-reviewer", {
+      activityStatus: "running",
+      lastTurnStartedAt: "2026-05-31T00:00:03.000Z"
+    }));
+    currentTime = "2026-05-31T00:00:03.000Z";
+    const active = await service.getSessionRoundState({
+      repoRoot: "/base",
+      stateRepoRoot: "/repo",
+      stateRoot: ".ai/vcm",
+      taskSlug: "demo-task"
+    });
+
+    expect(active).toMatchObject({
+      status: "running",
+      activeRole: "codex-reviewer",
+      activeTurnStartedAt: "2026-05-31T00:00:03.000Z",
+      settleDeadlineAt: undefined,
+      turnCount: 2,
+      completedTurnCount: 1,
+      totalTurnCount: 2,
+      totalCompletedTurnCount: 1,
+      totalCcActiveMs: 2000,
+      currentRoundCcActiveMs: 2000,
+      roles: ["project-manager", "codex-reviewer"]
+    });
+
+    currentTime = "2026-05-31T00:00:12.000Z";
+    timers.entries[0]?.callback();
+    await flushAsyncWork();
+    const afterStaleTimer = await service.getSessionRoundState({
+      repoRoot: "/base",
+      stateRepoRoot: "/repo",
+      stateRoot: ".ai/vcm",
+      taskSlug: "demo-task"
+    });
+
+    expect(afterStaleTimer).toMatchObject({
+      status: "running",
+      activeRole: "codex-reviewer",
+      activeTurnStartedAt: "2026-05-31T00:00:03.000Z",
+      totalCcActiveMs: 11000,
+      currentRoundCcActiveMs: 11000
+    });
+    expect(afterStaleTimer.stoppedAt).toBeUndefined();
   });
 
   it("updates Session status only when a Round starts or stops", async () => {
@@ -650,8 +841,26 @@ function createManualTimers() {
   };
 }
 
+function createRoleSession(role: RoleSessionRecord["role"], patch: Partial<RoleSessionRecord> = {}): RoleSessionRecord {
+  return {
+    id: `${role}-session`,
+    claudeSessionId: `${role}-claude-session`,
+    taskSlug: "demo-task",
+    role,
+    status: "running",
+    activityStatus: "idle",
+    command: role === "codex-reviewer" ? "codex" : `claude --agent ${role}`,
+    permissionMode: "default",
+    cwd: "/repo",
+    terminalBackend: "node-pty",
+    logPath: `.ai/vcm/handoffs/logs/${role}.log`,
+    updatedAt: "2026-05-31T00:00:00.000Z",
+    ...patch
+  };
+}
+
 async function flushAsyncWork(): Promise<void> {
-  for (let index = 0; index < 10; index += 1) {
+  for (let index = 0; index < 50; index += 1) {
     await Promise.resolve();
   }
 }

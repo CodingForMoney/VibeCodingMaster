@@ -162,6 +162,39 @@ describe("app-settings-service", () => {
       configPath: `/home/.vcm/projects/${projectId}/config.json`
     });
   });
+
+  it("stores Codex Review Gate switches in ~/.vcm/settings.json", async () => {
+    const fs = createMemoryFs();
+    const service = createAppSettingsService({
+      fs,
+      settingsPath: "/home/.vcm/settings.json"
+    });
+    const repoRoot = "/workspace/project";
+
+    await expect(service.getCodexReviewSettings(repoRoot, "demo-task")).resolves.toEqual({
+      enabled: false,
+      requiredGates: []
+    });
+
+    await expect(service.updateCodexReviewSettings(repoRoot, "demo-task", [
+      "final-diff",
+      "architecture-plan",
+      "final-diff"
+    ])).resolves.toEqual({
+      enabled: true,
+      requiredGates: ["architecture-plan", "final-diff"]
+    });
+
+    const stored = await fs.readJson<AppSettingsFile>("/home/.vcm/settings.json");
+    expect(stored.codexReview).toMatchObject({
+      requiredGates: ["architecture-plan", "final-diff"]
+    });
+    expect(stored.codexReview).not.toHaveProperty("projects");
+    await expect(service.getCodexReviewSettings("/workspace/another-project", "another-task")).resolves.toEqual({
+      enabled: true,
+      requiredGates: ["architecture-plan", "final-diff"]
+    });
+  });
 });
 
 function createDefaultPreferences(overrides: Partial<AppPreferences> = {}): AppPreferences {

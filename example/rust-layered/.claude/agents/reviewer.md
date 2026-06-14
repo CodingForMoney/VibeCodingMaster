@@ -31,6 +31,7 @@ tools: Read, Grep, Glob, Bash, Edit, Write
 - Record failed commands, observed behavior, expected behavior, reproduction steps, skipped checks, and coverage gaps.
 - If validation fails or expected behavior is unclear, report the evidence to project-manager; architect owns diagnosis and next-step routing.
 - Add or modify tests, fixtures, or test helpers needed for validation confidence.
+- If task-specific process comments appear in changed code while reviewing behavior, report them as a maintainability gap; task context belongs in handoff artifacts, not durable code comments.
 - Update `docs/TESTING.md` when validation strategy, commands, level mapping, integration/E2E case definitions, selection rules, final-validation cleanup, test gaps, or test expectations change.
 
 ### Testing Documentation

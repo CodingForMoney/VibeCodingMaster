@@ -81,7 +81,7 @@ These entries match the current `example/rust-layered/.ai/vcm-harness-manifest.j
 | Claude settings | `.claude/settings.json` | json-merge | Long-term | VCM owns hook entries matching VCM command markers. |
 | Agent directory | `.claude/agents/` | VCM-created directory | Long-term | Contains the four core VCM role agents. |
 | Core agent | `.claude/agents/project-manager.md` | managed-block | Long-term | Project-manager role rules. |
-| Core agent | `.claude/agents/architect.md` | managed-block | Long-term | Architect role rules: plan document, code scaffolding, Debug Mode, docs sync. |
+| Core agent | `.claude/agents/architect.md` | managed-block | Long-term | Architect role rules: plan document, Scaffold Manifest, code scaffolding, Debug Mode, docs sync. |
 | Core agent | `.claude/agents/coder.md` | managed-block | Long-term | Coder role rules: scaffold implementation, coding standards, baseline unit checks. |
 | Core agent | `.claude/agents/reviewer.md` | managed-block | Long-term | Reviewer role rules: independent validation, TESTING.md strategy, integration/E2E case lists. |
 | Skill directory | `.claude/skills/` | VCM-created directory | Conditional long-term | Keep while repo-local VCM skills are installed. |

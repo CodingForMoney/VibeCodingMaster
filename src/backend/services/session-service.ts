@@ -34,6 +34,7 @@ export interface SessionService {
   recordRoleHookEvent(repoRoot: string, input: RecordRoleHookEventInput): Promise<RoleSessionRecord | undefined>;
   recordClaudeHookEvent(repoRoot: string, input: RecordClaudeHookEventInput): Promise<RoleSessionRecord | undefined>;
   markRoleActivityRunning(repoRoot: string, taskSlug: string, role: RoleName): Promise<RoleSessionRecord | undefined>;
+  markRoleActivityIdle(repoRoot: string, taskSlug: string, role: RoleName): Promise<RoleSessionRecord | undefined>;
 }
 
 export interface SessionServiceDeps {
@@ -99,7 +100,9 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     const model: SessionModel = isCodexReviewer
       ? normalizeCodexModel(input.model ?? persisted?.model)
       : normalizeClaudeModel(input.model ?? persisted?.model);
-    const effort = normalizeSessionEffort(input.effort ?? persisted?.effort);
+    const effort = isCodexReviewer
+      ? normalizeCodexEffort(input.effort ?? persisted?.effort)
+      : normalizeClaudeEffort(input.effort ?? persisted?.effort);
     const claudeSessionId = launchMode === "resume"
       ? persisted?.claudeSessionId
       : randomUUID();
@@ -320,6 +323,26 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       const task = await deps.taskService.loadTask(repoRoot, taskSlug);
       await persistTaskSession(deps.fs, getTaskRuntimeRepoRoot(task), config.stateRoot, updated);
       return updated;
+    },
+    async markRoleActivityIdle(repoRoot, taskSlug, role) {
+      const current = await this.getRoleSession(repoRoot, taskSlug, role);
+      if (!current) {
+        return undefined;
+      }
+
+      const timestamp = now();
+      const updated: RoleSessionRecord = {
+        ...current,
+        activityStatus: "idle",
+        lastTurnEndedAt: timestamp,
+        updatedAt: timestamp
+      };
+      deps.registry.upsert(updated);
+
+      const config = await deps.projectService.loadConfig(repoRoot);
+      const task = await deps.taskService.loadTask(repoRoot, taskSlug);
+      await persistTaskSession(deps.fs, getTaskRuntimeRepoRoot(task), config.stateRoot, updated);
+      return updated;
     }
   };
 }
@@ -344,12 +367,6 @@ async function buildCodexReviewerStartCommand(
 
   await fs.ensureDir(reviewDir);
   const config = await loadCodexSessionConfig(fs, taskRepoRoot);
-  const model = selectedModel === "default"
-    ? config.model
-    : selectedModel;
-  const modelReasoningEffort = selectedEffort === "default"
-    ? config.modelReasoningEffort
-    : selectedEffort;
   const args = launchMode === "resume"
     ? ["resume", "--last"]
     : [];
@@ -362,13 +379,14 @@ async function buildCodexReviewerStartCommand(
     "workspace-write",
     "--ask-for-approval",
     "never",
-    "--dangerously-bypass-hook-trust"
+    "--dangerously-bypass-hook-trust",
+    "--search"
   );
-  if (model && model !== "default") {
-    args.push("--model", model);
+  if (selectedModel !== "default") {
+    args.push("--model", selectedModel);
   }
-  if (modelReasoningEffort && modelReasoningEffort !== "default") {
-    args.push("--config", `model_reasoning_effort="${modelReasoningEffort}"`);
+  if (selectedEffort !== "default") {
+    args.push("--config", `model_reasoning_effort="${selectedEffort}"`);
   }
 
   return {
@@ -382,22 +400,18 @@ async function buildCodexReviewerStartCommand(
 async function loadCodexSessionConfig(
   fs: FileSystemAdapter,
   taskRepoRoot: string
-): Promise<{ command: string; model?: string; modelReasoningEffort?: string }> {
+): Promise<{ command: string }> {
   const configPath = resolveRepoPath(taskRepoRoot, CODEX_CONFIG_PATH);
   if (!(await fs.pathExists(configPath))) {
     return {
-      command: "codex",
-      model: "gpt-5.5",
-      modelReasoningEffort: "xhigh"
+      command: "codex"
     };
   }
 
   const content = await fs.readText(configPath);
   const reviewSection = extractTomlSection(content, "vcm.codex_review");
   return {
-    command: parseTomlString(reviewSection, "command") ?? "codex",
-    model: parseTomlString(content, "model") ?? "gpt-5.5",
-    modelReasoningEffort: parseTomlString(content, "model_reasoning_effort") ?? "xhigh"
+    command: parseTomlString(content, "command") ?? parseTomlString(reviewSection, "command") ?? "codex"
   };
 }
 
@@ -471,7 +485,9 @@ async function loadPersistedRoleRecord(
         model: record.role === CODEX_REVIEWER_ROLE
           ? normalizeCodexModel(record.model)
           : normalizeClaudeModel(record.model),
-        effort: normalizeSessionEffort(record.effort)
+        effort: record.role === CODEX_REVIEWER_ROLE
+          ? normalizeCodexEffort(record.effort)
+          : normalizeClaudeEffort(record.effort)
       }
     : undefined;
 }
@@ -554,7 +570,21 @@ function normalizeCodexModel(value: unknown): CodexModel {
   return "gpt-5.5";
 }
 
-function normalizeSessionEffort(value: unknown): SessionEffort {
+function normalizeClaudeEffort(value: unknown): SessionEffort {
+  if (
+    value === "low"
+    || value === "medium"
+    || value === "high"
+    || value === "xhigh"
+    || value === "max"
+    || value === "ultracode"
+  ) {
+    return value;
+  }
+  return "default";
+}
+
+function normalizeCodexEffort(value: unknown): SessionEffort {
   if (
     value === "low"
     || value === "medium"

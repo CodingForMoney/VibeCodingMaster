@@ -13,11 +13,6 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-try:
-    import tomllib
-except ModuleNotFoundError:
-    tomllib = None
-
 
 GATES = ("architecture-plan", "validation-adequacy", "final-diff")
 REPORTS = {
@@ -115,20 +110,6 @@ def write_json(path: Path, data: dict) -> None:
     tmp.replace(path)
 
 
-def load_config(root: Path) -> dict:
-    path = root / ".ai/codex/config.toml"
-    if not path.is_file() or tomllib is None:
-        return {}
-    return tomllib.loads(path.read_text())
-
-
-def codex_review_config(root: Path) -> dict:
-    config = load_config(root)
-    vcm = config.get("vcm", {})
-    review = vcm.get("codex_review", {}) if isinstance(vcm, dict) else {}
-    return review if isinstance(review, dict) else {}
-
-
 def command_output(root: Path, command: list[str]) -> bytes:
     result = subprocess.run(
         command,
@@ -169,11 +150,11 @@ def request_id(gate: str) -> str:
 
 def local_request(gate: str) -> int:
     root = root_dir()
-    review_config = codex_review_config(root)
-    enabled = bool(review_config.get("enabled", False))
-    required = set(review_config.get("required_gates", []))
     index_path = root / ".ai/vcm/codex-reviews/index.json"
     index = read_json(index_path)
+    enabled = bool(index.get("enabled", False))
+    gate_record = index.get("gates", {}).get(gate, {}) if isinstance(index.get("gates"), dict) else {}
+    required = bool(gate_record.get("required", False)) if isinstance(gate_record, dict) else False
     index.update({"version": 1, "enabled": enabled})
     index.setdefault("gates", {})
 
@@ -183,7 +164,7 @@ def local_request(gate: str) -> int:
         print_result("disabled", gate=gate)
         return 0
 
-    if gate not in required:
+    if not required:
         gate_record = index["gates"].setdefault(gate, {})
         gate_record.update({"required": False, "status": "not_required", "updatedAt": now_iso()})
         write_json(index_path, index)

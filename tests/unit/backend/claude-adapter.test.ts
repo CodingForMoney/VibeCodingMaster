@@ -71,6 +71,31 @@ describe("createClaudeAdapter", () => {
     });
   });
 
+  it("sets ultracode through session settings instead of --effort", () => {
+    expect(adapter.buildRoleStartCommand(
+      "architect",
+      "claude",
+      "default",
+      "00000000-0000-4000-8000-000000000001",
+      false,
+      "fable",
+      "ultracode"
+    )).toEqual({
+      command: "claude",
+      args: [
+        "--agent",
+        "architect",
+        "--session-id",
+        "00000000-0000-4000-8000-000000000001",
+        "--model",
+        "fable",
+        "--settings",
+        "{\"ultracode\":true}"
+      ],
+      display: "claude --agent architect --session-id 00000000-0000-4000-8000-000000000001 --model fable --settings '{\"ultracode\":true}'"
+    });
+  });
+
   it("builds resume commands with the persisted Claude session id", () => {
     expect(adapter.buildRoleStartCommand(
       "architect",

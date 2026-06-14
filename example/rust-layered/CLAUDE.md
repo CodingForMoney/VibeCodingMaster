@@ -39,7 +39,7 @@ This is a Rust workspace example for VCM harness experiments. It has three archi
 ## VCM Task Flow
 
 - Code changes use the full route: `project-manager -> architect -> coder -> reviewer -> architect docs sync -> project-manager final acceptance`.
-- Before code changes, architect must write an architecture plan and code scaffolding that cover file responsibilities, cross-file callable surfaces, user-visible behavior, docs impact, risks, and Replan triggers.
+- Before code changes, architect must write an architecture plan with a Scaffold Manifest and minimum necessary code scaffolding that cover file responsibilities, cross-file callable surfaces, user-visible behavior, docs impact, risks, and Replan triggers.
 - Docs-only changes may use: `project-manager -> architect -> project-manager final acceptance`.
 - Test-only or validation-only work may use: `project-manager -> reviewer -> project-manager final acceptance`.
 - If a docs/test/validation-only task reveals required code, architecture, public contract, dependency, durable-doc, or test-strategy changes, route back through the full code-change flow.

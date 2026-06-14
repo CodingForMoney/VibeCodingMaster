@@ -6,6 +6,7 @@ import { createNodeFileSystemAdapter } from "../../../src/backend/adapters/files
 import type { CommandResult, CommandRunner, CommandRunnerOptions } from "../../../src/backend/adapters/command-runner.js";
 import type { TerminalRuntime } from "../../../src/backend/runtime/terminal-runtime.js";
 import { createCodexReviewService } from "../../../src/backend/services/codex-review-service.js";
+import type { CodexReviewGate } from "../../../src/shared/types/codex-review.js";
 import type { RoleSessionRecord } from "../../../src/shared/types/session.js";
 import type { TaskRecord } from "../../../src/shared/types/task.js";
 
@@ -21,19 +22,23 @@ afterEach(async () => {
 describe("codex-review-service", () => {
   it("runs a requested gate, records the report decision, and calls back project-manager", async () => {
     tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-codex-review-"));
-    await writeHarnessFiles(tmpRepo, { enabled: true });
+    await writeHarnessFiles(tmpRepo);
 
     const runnerCalls: Array<{ command: string; args: string[]; options?: CommandRunnerOptions }> = [];
     const runner = createRunner(tmpRepo, runnerCalls);
     const writes: string[] = [];
     const sessionStarts: string[] = [];
+    const activityCalls: string[] = [];
+    const roundCalls: string[] = [];
     const service = createCodexReviewService({
       fs: createNodeFileSystemAdapter(),
       runner,
       runtime: createRuntime(tmpRepo, writes),
       projectService: createProjectService(),
       taskService: createTaskService(tmpRepo),
-      sessionService: createSessionService(sessionStarts),
+      appSettings: createAppSettings(["architecture-plan", "validation-adequacy", "final-diff"]),
+      sessionService: createSessionService(sessionStarts, activityCalls),
+      roundService: createRoundService(roundCalls),
       reportPollIntervalMs: 5,
       reportTimeoutMs: 500
     });
@@ -55,7 +60,19 @@ describe("codex-review-service", () => {
     expect(record.reportPath).toBe(".ai/vcm/codex-reviews/architecture-plan-review.md");
 
     expect(runnerCalls.some((call) => call.command === "codex")).toBe(false);
+    expect(runnerCalls.some((call) => call.command === "git" && call.args.join(" ") === "status --porcelain=v1")).toBe(true);
+    expect(runnerCalls.some((call) => call.command === "git" && call.args.join(" ") === "diff --binary")).toBe(true);
     expect(sessionStarts).toEqual(["codex-reviewer"]);
+    expect(activityCalls).toEqual([
+      "running:codex-reviewer",
+      "idle:codex-reviewer",
+      "running:project-manager"
+    ]);
+    expect(roundCalls).toEqual([
+      "round:UserPromptSubmit:codex-reviewer",
+      "round:Stop:codex-reviewer",
+      "round:UserPromptSubmit:project-manager"
+    ]);
     expect(writes.find((write) => write.includes("Codex Gate"))).toContain("Report path from this working directory: ../vcm/codex-reviews/architecture-plan-review.md");
     expect(writes.join("")).toContain("[VCM CODEX REVIEW CALLBACK]");
     expect(writes.join("")).toContain("decision: request_changes");
@@ -63,7 +80,7 @@ describe("codex-review-service", () => {
 
   it("does not run Codex when the project switch is disabled", async () => {
     tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-codex-review-disabled-"));
-    await writeHarnessFiles(tmpRepo, { enabled: false });
+    await writeHarnessFiles(tmpRepo);
     const runnerCalls: Array<{ command: string; args: string[]; options?: CommandRunnerOptions }> = [];
     const service = createCodexReviewService({
       fs: createNodeFileSystemAdapter(),
@@ -71,7 +88,9 @@ describe("codex-review-service", () => {
       runtime: createRuntime(tmpRepo, []),
       projectService: createProjectService(),
       taskService: createTaskService(tmpRepo),
-      sessionService: createSessionService()
+      appSettings: createAppSettings([]),
+      sessionService: createSessionService(),
+      roundService: createRoundService()
     });
 
     const result = await service.requestReviewGate(tmpRepo, "demo-task", "architecture-plan");
@@ -82,14 +101,17 @@ describe("codex-review-service", () => {
 
   it("updates gate settings from disabled state without enabling stale gates", async () => {
     tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-codex-review-settings-"));
-    await writeHarnessFiles(tmpRepo, { enabled: false });
+    await writeHarnessFiles(tmpRepo);
+    const appSettings = createAppSettings([]);
     const service = createCodexReviewService({
       fs: createNodeFileSystemAdapter(),
       runner: createRunner(tmpRepo, []),
       runtime: createRuntime(tmpRepo, []),
       projectService: createProjectService(),
       taskService: createTaskService(tmpRepo),
-      sessionService: createSessionService()
+      appSettings,
+      sessionService: createSessionService(),
+      roundService: createRoundService()
     });
 
     const state = await service.updateSettings(tmpRepo, "demo-task", {
@@ -101,10 +123,9 @@ describe("codex-review-service", () => {
     expect(state.gates["architecture-plan"].required).toBe(true);
     expect(state.gates["validation-adequacy"].required).toBe(false);
     expect(state.gates["final-diff"].required).toBe(false);
-    expect(config).toContain("enabled = true");
-    expect(config).toContain('"architecture-plan"');
-    expect(config).not.toContain('"validation-adequacy"');
-    expect(config).not.toContain('"final-diff"');
+    expect(config).toContain("approval_policy = \"never\"");
+    expect(config).not.toContain("[vcm.codex_review]");
+    expect(appSettings.getStoredRequiredGates()).toEqual(["architecture-plan"]);
 
     const disabledState = await service.updateSettings(tmpRepo, "demo-task", {
       gates: { "architecture-plan": false }
@@ -112,24 +133,20 @@ describe("codex-review-service", () => {
     const disabledConfig = await readFile(path.join(tmpRepo, ".ai/codex/config.toml"), "utf8");
 
     expect(disabledState.enabled).toBe(false);
-    expect(disabledConfig).toContain("enabled = false");
-    expect(disabledConfig).toContain("required_gates = []");
+    expect(disabledConfig).toContain("approval_policy = \"never\"");
+    expect(disabledConfig).not.toContain("[vcm.codex_review]");
+    expect(appSettings.getStoredRequiredGates()).toEqual([]);
   });
 });
 
-async function writeHarnessFiles(repoRoot: string, options: { enabled: boolean }): Promise<void> {
+async function writeHarnessFiles(repoRoot: string): Promise<void> {
   await mkdir(path.join(repoRoot, ".ai/codex/prompts"), { recursive: true });
   await mkdir(path.join(repoRoot, ".ai/vcm/handoffs"), { recursive: true });
   await writeFile(path.join(repoRoot, "CLAUDE.md"), "# CLAUDE\n", "utf8");
   await writeFile(path.join(repoRoot, ".ai/codex/AGENTS.md"), "# VCM Codex Reviewer\n", "utf8");
   await writeFile(path.join(repoRoot, ".ai/codex/prompts/architecture-plan-gate.md"), "# Codex Gate\n", "utf8");
   await writeFile(path.join(repoRoot, ".ai/vcm/handoffs/architecture-plan.md"), "# Architecture Plan\n", "utf8");
-  await writeFile(path.join(repoRoot, ".ai/codex/config.toml"), `model = "test-model"
-model_reasoning_effort = "xhigh"
-
-[vcm.codex_review]
-enabled = ${options.enabled ? "true" : "false"}
-required_gates = ["architecture-plan", "validation-adequacy", "final-diff"]
+  await writeFile(path.join(repoRoot, ".ai/codex/config.toml"), `approval_policy = "never"
 `, "utf8");
 }
 
@@ -241,7 +258,7 @@ function createTaskService(repoRoot: string) {
   };
 }
 
-function createSessionService(starts: string[] = []) {
+function createSessionService(starts: string[] = [], activityCalls: string[] = []) {
   const pmSession: RoleSessionRecord = {
     id: "pm-session",
     claudeSessionId: "claude-session",
@@ -290,10 +307,54 @@ function createSessionService(starts: string[] = []) {
     },
     async markRoleActivityRunning(_repoRoot: string, _taskSlug: string, role: string) {
       const session = sessions.get(role) ?? pmSession;
-      return {
+      activityCalls.push(`running:${role}`);
+      const updated = {
         ...session,
-        activityStatus: "running"
+        activityStatus: "running" as const
       };
+      sessions.set(role, updated);
+      return updated;
+    },
+    async markRoleActivityIdle(_repoRoot: string, _taskSlug: string, role: string) {
+      const session = sessions.get(role) ?? pmSession;
+      activityCalls.push(`idle:${role}`);
+      const updated = {
+        ...session,
+        activityStatus: "idle" as const
+      };
+      sessions.set(role, updated);
+      return updated;
+    }
+  };
+}
+
+function createRoundService(calls: string[] = []) {
+  return {
+    async recordRoleTurnEvent(input: { eventName: string; role: string }) {
+      calls.push(`round:${input.eventName}:${input.role}`);
+      return {} as never;
+    }
+  };
+}
+
+function createAppSettings(initialRequiredGates: CodexReviewGate[] = []) {
+  let requiredGates = [...initialRequiredGates];
+  return {
+    async getCodexReviewSettings() {
+      return {
+        enabled: requiredGates.length > 0,
+        requiredGates
+      };
+    },
+    async updateCodexReviewSettings(_repoRoot: string, _taskSlug: string, nextRequiredGates: CodexReviewGate[]) {
+      requiredGates = [...nextRequiredGates];
+      return {
+        enabled: requiredGates.length > 0,
+        requiredGates
+      };
+    },
+    getStoredRequiredGates() {
+      return requiredGates;
     }
   };
 }

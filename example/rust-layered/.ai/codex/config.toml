@@ -1,11 +1,7 @@
-model = "gpt-5.5"
-model_reasoning_effort = "xhigh"
+# VCM reads this file before launching the Codex Reviewer terminal.
+# Codex CLI project hooks live in .ai/codex/.codex/.
 approval_policy = "never"
 default_permissions = "vcm_codex_reviewer"
-
-[vcm.codex_review]
-enabled = false
-required_gates = []
 
 [permissions.vcm_codex_reviewer.workspace_roots]
 "../.." = true
@@ -20,4 +16,4 @@ required_gates = []
 "**/*.env" = "deny"
 
 [permissions.vcm_codex_reviewer.network]
-enabled = false
+enabled = true

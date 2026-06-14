@@ -61,9 +61,12 @@ describe("createHarnessService", () => {
     expect(await fs.readText("/repo/.claude/agents/architect.md")).toContain("Read `.ai/vcm/handoffs/known-issues.md` and promote confirmed unresolved issues to `docs/known-issues.md`.");
     expect(await fs.readText("/repo/.ai/codex/AGENTS.md")).toContain("You are VCM `codex-reviewer`");
     const codexConfig = await fs.readText("/repo/.ai/codex/config.toml");
-    expect(codexConfig).toContain("[vcm.codex_review]");
-    expect(codexConfig).toContain("enabled = false");
-    expect(codexConfig).toContain("required_gates = []");
+    expect(codexConfig).not.toContain("command = \"codex\"");
+    expect(codexConfig).not.toContain("model = ");
+    expect(codexConfig).not.toContain("model_reasoning_effort");
+    expect(codexConfig).toContain("enabled = true");
+    expect(codexConfig).not.toContain("[vcm.codex_review]");
+    expect(codexConfig).not.toContain("required_gates");
     expect(await fs.readText("/repo/.ai/codex/.codex/config.toml")).toContain("hooks = true");
     const codexHooks = await fs.readText("/repo/.ai/codex/.codex/hooks.json");
     expect(codexHooks).toContain("UserPromptSubmit");

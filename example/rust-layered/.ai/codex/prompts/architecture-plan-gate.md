@@ -9,6 +9,7 @@ Review whether the architecture plan is ready for coder implementation.
 - `../../.claude/agents/coder.md`
 - `../../.claude/agents/reviewer.md`
 - `../../.ai/vcm/handoffs/architecture-plan.md`
+- current git status and scaffold diff from `../..`
 - `../../.ai/generated/module-index.json`
 - `../../.ai/generated/public-surface.json`
 

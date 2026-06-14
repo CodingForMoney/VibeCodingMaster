@@ -163,7 +163,7 @@ The recommended flow is:
 
 ```text
 project-manager
-  -> architect architecture plan and code scaffolding
+  -> architect architecture plan, Scaffold Manifest, and code scaffolding
   -> coder implementation and baseline unit checks
   -> reviewer independent validation
   -> architect docs sync / architecture drift check

@@ -28,6 +28,31 @@ Pass
     expect(result.hasPlaceholder).toBe(false);
   });
 
+  it("requires Scaffold Manifest in architecture plans", () => {
+    const result = checkMarkdownArtifact("architecture-plan", "architecture-plan.md", `
+# Architecture Plan
+
+## Context
+Ready.
+
+## Architecture Decision
+Use the existing boundary.
+
+## Scaffold Manifest
+No code scaffold needed.
+
+## Implementation Plan
+One scoped change.
+
+## Risks
+None.
+
+## Stop Conditions
+Public contract drift.
+`);
+    expect(result.status).toBe("ok");
+  });
+
   it("supports docs sync reports", () => {
     const result = checkMarkdownArtifact("docs-sync-report", "docs-sync-report.md", `
 # Docs Sync Report

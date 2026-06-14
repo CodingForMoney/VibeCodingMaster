@@ -1,6 +1,8 @@
 import type { RoleName } from "../../shared/types/role.js";
 import {
+  CLAUDE_EFFORT_OPTIONS,
   CLAUDE_MODEL_OPTIONS,
+  CODEX_EFFORT_OPTIONS,
   CODEX_MODEL_OPTIONS,
   SESSION_EFFORT_OPTIONS,
   type ClaudePermissionMode,
@@ -50,6 +52,7 @@ export function SessionToolbar({
   const sessionEffort = session?.effort ?? "default";
   const effortWillChange = Boolean(session && sessionEffort !== effort);
   const modelOptions = isCodexReviewer ? CODEX_MODEL_OPTIONS : CLAUDE_MODEL_OPTIONS;
+  const effortOptions = isCodexReviewer ? CODEX_EFFORT_OPTIONS : CLAUDE_EFFORT_OPTIONS;
 
   return (
     <div className="session-controls">
@@ -107,7 +110,7 @@ export function SessionToolbar({
           value={effort}
           onChange={(event) => onEffortChange(event.target.value as SessionEffort)}
         >
-          {SESSION_EFFORT_OPTIONS.map((option) => (
+          {effortOptions.map((option) => (
             <option key={option.value} value={option.value}>
               {option.label}
             </option>

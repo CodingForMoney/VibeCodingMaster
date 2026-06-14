@@ -1,13 +1,6 @@
-model = "gpt-5.5"
-model_reasoning_effort = "xhigh"
 approval_policy = "never"
 default_permissions = "vcm_codex_reviewer"
 
-[vcm.codex_review]
-enabled = true
-required_gates = [
-  "architecture-plan",
-]
 [permissions.vcm_codex_reviewer.workspace_roots]
 "../.." = true
 
@@ -21,4 +14,4 @@ required_gates = [
 "**/*.env" = "deny"
 
 [permissions.vcm_codex_reviewer.network]
-enabled = false
+enabled = true

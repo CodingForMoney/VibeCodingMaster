@@ -42,7 +42,9 @@ export function createClaudeAdapter(runner: CommandRunner): ClaudeAdapter {
         args.push(resume ? "--resume" : "--session-id", claudeSessionId);
       }
       args.push("--model", model);
-      if (effort !== "default") {
+      if (effort === "ultracode") {
+        args.push("--settings", JSON.stringify({ ultracode: true }));
+      } else if (effort !== "default") {
         args.push("--effort", effort);
       }
       if (permissionMode === "bypassPermissions") {

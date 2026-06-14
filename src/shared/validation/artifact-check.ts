@@ -4,6 +4,7 @@ const REQUIRED_HEADINGS: Record<ArtifactKind, readonly string[]> = {
   "architecture-plan": [
     "Context",
     "Architecture Decision",
+    "Scaffold Manifest",
     "Implementation Plan",
     "Risks",
     "Stop Conditions"

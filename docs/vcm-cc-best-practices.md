@@ -194,8 +194,9 @@ VCM uses four core roles:
 - `architect`: technical planner and docs-sync owner. It defines module/file
   responsibilities, cross-file callable surfaces, public contracts, phase
   boundaries, risks, and durable docs updates. Before coder work starts,
-  architect writes the plan and materializes it in code scaffolding with
-  contract comments and `VCM:CODE` placeholders.
+  architect writes the plan with a Scaffold Manifest and materializes only the
+  minimum necessary code scaffolding with durable contract comments and
+  `VCM:CODE` placeholders.
 - `coder`: implementation owner. It changes production code and baseline unit
   tests within the approved plan. It follows the architect-defined scaffold,
   implements and removes `VCM:CODE` placeholders, follows general coding
@@ -240,19 +241,28 @@ workload or context size is not a valid reason to change the architect plan.
 ## 7.1 Architecture Plan And Code Scaffolding
 
 For code changes, the architect plan is not only a markdown handoff. It is a
-plan document plus code scaffolding.
+plan document plus a Scaffold Manifest and the minimum necessary code
+scaffolding.
 
 The plan document defines affected modules, changed or created files, file
 responsibilities, why each file is in scope, user-visible behavior changes,
 non-private cross-file callable surfaces, docs impact, risks, and Replan
 triggers.
 
+The Scaffold Manifest carries task-specific file context for the current handoff:
+why a file is in scope, what coder should implement, allowed implementation
+freedom, expected `VCM:CODE` placeholders, durable code comment needs, proof
+points, and Replan triggers. Task context, phase notes, handoff instructions,
+temporary rationale, and coder guidance belong in the Scaffold Manifest, not in
+source-code comments.
+
 Code scaffolding materializes that plan in the repository before coder work
 starts:
 
 - new modules or files are created when needed
-- file-level responsibilities, logic boundaries, collaborators, and non-goals
-  are documented in code
+- durable behavior, contracts, invariants, error boundaries, or non-obvious
+  logic are documented in code only when they should remain useful after the
+  task is complete
 - new or changed non-private callable surfaces are defined directly in code with
   signature shape and contract comments
 - incomplete implementation bodies are marked with `VCM:CODE`

@@ -21,8 +21,9 @@ import type { FileSystemAdapter } from "../adapters/filesystem.js";
 import type { CommandRunner } from "../adapters/command-runner.js";
 import type { TerminalRuntime } from "../runtime/terminal-runtime.js";
 import { submitTerminalInput } from "../runtime/terminal-submit.js";
-import { renderCodexConfigHarnessRules } from "../templates/harness/codex-review.js";
+import type { AppCodexReviewSettings, AppSettingsService } from "./app-settings-service.js";
 import type { ProjectService } from "./project-service.js";
+import type { RoundService } from "./round-service.js";
 import type { SessionService } from "./session-service.js";
 import { getTaskRuntimeRepoRoot, type TaskService } from "./task-service.js";
 
@@ -42,7 +43,9 @@ export interface CodexReviewServiceDeps {
   runtime: TerminalRuntime;
   projectService: Pick<ProjectService, "loadConfig">;
   taskService: Pick<TaskService, "loadTask">;
-  sessionService: Pick<SessionService, "getRoleSession" | "markRoleActivityRunning" | "resumeRoleSession" | "startRoleSession">;
+  appSettings: Pick<AppSettingsService, "getCodexReviewSettings" | "updateCodexReviewSettings">;
+  sessionService: Pick<SessionService, "getRoleSession" | "markRoleActivityIdle" | "markRoleActivityRunning" | "resumeRoleSession" | "startRoleSession">;
+  roundService: Pick<RoundService, "recordRoleTurnEvent">;
   reportPollIntervalMs?: number;
   reportTimeoutMs?: number;
   now?: () => string;
@@ -51,9 +54,6 @@ export interface CodexReviewServiceDeps {
 interface CodexReviewRuntimeConfig {
   enabled: boolean;
   requiredGates: CodexReviewGate[];
-  model?: string;
-  modelReasoningEffort?: string;
-  command: string;
 }
 
 interface ReviewContext {
@@ -105,12 +105,13 @@ export function createCodexReviewService(deps: CodexReviewServiceDeps): CodexRev
     const projectConfig = await deps.projectService.loadConfig(repoRoot);
     const task = await deps.taskService.loadTask(repoRoot, taskSlug);
     const taskRepoRoot = getTaskRuntimeRepoRoot(task);
+    const reviewSettings = await deps.appSettings.getCodexReviewSettings(repoRoot, taskSlug);
     return {
       repoRoot,
       taskSlug,
       taskRepoRoot,
       stateRoot: projectConfig.stateRoot,
-      config: await loadRuntimeConfig(deps.fs, taskRepoRoot)
+      config: loadRuntimeConfig(reviewSettings)
     };
   }
 
@@ -231,6 +232,7 @@ export function createCodexReviewService(deps: CodexReviewServiceDeps): CodexRev
       return;
     }
     activeRuns.add(runKey);
+    let codexTurnStarted = false;
     try {
       const timestamp = now();
       await updateGateRecord(context, gate, {
@@ -255,14 +257,25 @@ export function createCodexReviewService(deps: CodexReviewServiceDeps): CodexRev
       }
 
       const session = await ensureCodexReviewerSession(context);
-      await deps.sessionService.markRoleActivityRunning(context.repoRoot, context.taskSlug, CODEX_REVIEWER_ROLE);
       await submitTerminalInput(deps.runtime, session.id, prompt);
+      await deps.sessionService.markRoleActivityRunning(context.repoRoot, context.taskSlug, CODEX_REVIEWER_ROLE);
+      await deps.roundService.recordRoleTurnEvent({
+        repoRoot: context.repoRoot,
+        stateRepoRoot: context.taskRepoRoot,
+        stateRoot: context.stateRoot,
+        taskSlug: context.taskSlug,
+        role: CODEX_REVIEWER_ROLE,
+        eventName: "UserPromptSubmit"
+      });
+      codexTurnStarted = true;
 
       const parsed = await waitForGateReport(deps.fs, context.taskRepoRoot, gate, requestId, now(), {
         intervalMs: reportPollIntervalMs,
         timeoutMs: reportTimeoutMs
       });
       const completedAt = now();
+      await recordCodexReviewerTurnStop(context, codexTurnStarted);
+      codexTurnStarted = false;
       await updateGateRecord(context, gate, {
         status: "completed",
         decision: parsed.decision,
@@ -283,6 +296,8 @@ export function createCodexReviewService(deps: CodexReviewServiceDeps): CodexRev
     } catch (error) {
       const timestamp = now();
       const message = errorMessage(error);
+      await recordCodexReviewerTurnStop(context, codexTurnStarted);
+      codexTurnStarted = false;
       await updateGateRecord(context, gate, {
         status: "failed",
         error: message,
@@ -299,6 +314,21 @@ export function createCodexReviewService(deps: CodexReviewServiceDeps): CodexRev
     } finally {
       activeRuns.delete(runKey);
     }
+  }
+
+  async function recordCodexReviewerTurnStop(context: ReviewContext, shouldRecord: boolean): Promise<void> {
+    if (!shouldRecord) {
+      return;
+    }
+    await deps.sessionService.markRoleActivityIdle(context.repoRoot, context.taskSlug, CODEX_REVIEWER_ROLE);
+    await deps.roundService.recordRoleTurnEvent({
+      repoRoot: context.repoRoot,
+      stateRepoRoot: context.taskRepoRoot,
+      stateRoot: context.stateRoot,
+      taskSlug: context.taskSlug,
+      role: CODEX_REVIEWER_ROLE,
+      eventName: "Stop"
+    });
   }
 
   async function ensureCodexReviewerSession(context: ReviewContext) {
@@ -368,6 +398,14 @@ export function createCodexReviewService(deps: CodexReviewServiceDeps): CodexRev
     try {
       await submitTerminalInput(deps.runtime, session.id, prompt);
       await deps.sessionService.markRoleActivityRunning(context.repoRoot, context.taskSlug, "project-manager");
+      await deps.roundService.recordRoleTurnEvent({
+        repoRoot: context.repoRoot,
+        stateRepoRoot: context.taskRepoRoot,
+        stateRoot: context.stateRoot,
+        taskSlug: context.taskSlug,
+        role: "project-manager",
+        eventName: "UserPromptSubmit"
+      });
       await updateGateRecord(context, gate, {
         callbackStatus: "sent",
         callbackError: undefined,
@@ -388,8 +426,8 @@ export function createCodexReviewService(deps: CodexReviewServiceDeps): CodexRev
       return loadIndex(deps.fs, context, now());
     },
     async updateSettings(repoRoot, taskSlug, input) {
-      const context = await getContext(repoRoot, taskSlug);
-      const requiredGates = new Set(context.config.enabled ? context.config.requiredGates : []);
+      const currentSettings = await deps.appSettings.getCodexReviewSettings(repoRoot, taskSlug);
+      const requiredGates = new Set(currentSettings.requiredGates);
       for (const [gate, enabled] of Object.entries(input?.gates ?? {})) {
         if (!isCodexReviewGate(gate)) {
           continue;
@@ -400,7 +438,7 @@ export function createCodexReviewService(deps: CodexReviewServiceDeps): CodexRev
           requiredGates.delete(gate);
         }
       }
-      await writeRuntimeConfigSettings(deps.fs, context.taskRepoRoot, [...requiredGates]);
+      await deps.appSettings.updateCodexReviewSettings(repoRoot, taskSlug, [...requiredGates]);
       const nextContext = await getContext(repoRoot, taskSlug);
       const index = await loadIndex(deps.fs, nextContext, now());
       await saveIndex(deps.fs, nextContext.taskRepoRoot, {
@@ -476,85 +514,11 @@ export function isCodexReviewGate(value: string): value is CodexReviewGate {
   return CODEX_REVIEW_GATES.includes(value as CodexReviewGate);
 }
 
-async function loadRuntimeConfig(fs: FileSystemAdapter, taskRepoRoot: string): Promise<CodexReviewRuntimeConfig> {
-  const configPath = resolveRepoPath(taskRepoRoot, CODEX_CONFIG_PATH);
-  if (!(await fs.pathExists(configPath))) {
-    return {
-      enabled: false,
-      requiredGates: [],
-      command: "codex"
-    };
-  }
-
-  const content = await fs.readText(configPath);
-  const section = extractTomlSection(content, "vcm.codex_review");
-  const enabled = parseTomlBoolean(section, "enabled") ?? false;
-  const parsedGates = parseTomlStringArray(section, "required_gates").filter(isCodexReviewGate);
+function loadRuntimeConfig(reviewSettings: AppCodexReviewSettings): CodexReviewRuntimeConfig {
   return {
-    enabled,
-    requiredGates: parsedGates.length > 0 ? parsedGates : enabled ? [...CODEX_REVIEW_GATES] : [],
-    model: parseTomlString(content, "model"),
-    modelReasoningEffort: parseTomlString(content, "model_reasoning_effort"),
-    command: parseTomlString(section, "command") ?? "codex"
+    enabled: reviewSettings.enabled,
+    requiredGates: reviewSettings.requiredGates
   };
-}
-
-async function writeRuntimeConfigSettings(
-  fs: FileSystemAdapter,
-  taskRepoRoot: string,
-  requiredGates: CodexReviewGate[]
-): Promise<void> {
-  const configPath = resolveRepoPath(taskRepoRoot, CODEX_CONFIG_PATH);
-  const current = await fs.pathExists(configPath)
-    ? await fs.readText(configPath)
-    : renderCodexConfigHarnessRules();
-  const section = renderCodexReviewSettingsSection(requiredGates);
-  const next = replaceTomlSection(current, "vcm.codex_review", section);
-  await fs.writeText(configPath, next);
-}
-
-function renderCodexReviewSettingsSection(requiredGates: CodexReviewGate[]): string {
-  if (requiredGates.length === 0) {
-    return [
-      "[vcm.codex_review]",
-      "enabled = false",
-      "required_gates = []"
-    ].join("\n");
-  }
-
-  const lines = [
-    "[vcm.codex_review]",
-    "enabled = true",
-    "required_gates = [",
-    ...CODEX_REVIEW_GATES
-      .filter((gate) => requiredGates.includes(gate))
-      .map((gate) => `  "${gate}",`),
-    "]"
-  ];
-  return lines.join("\n");
-}
-
-function replaceTomlSection(content: string, sectionName: string, nextSection: string): string {
-  const lines = content.replace(/\s+$/g, "").split(/\r?\n/);
-  const header = `[${sectionName}]`;
-  const start = lines.findIndex((line) => line.trim() === header);
-  if (start < 0) {
-    return `${lines.join("\n").trimEnd()}\n\n${nextSection}\n`;
-  }
-
-  let end = lines.length;
-  for (let index = start + 1; index < lines.length; index += 1) {
-    if (/^\s*\[[^\]]+\]\s*$/.test(lines[index])) {
-      end = index;
-      break;
-    }
-  }
-
-  return [
-    ...lines.slice(0, start),
-    nextSection,
-    ...lines.slice(end)
-  ].join("\n").trimEnd() + "\n";
 }
 
 async function loadIndex(fs: FileSystemAdapter, context: ReviewContext, timestamp: string): Promise<CodexReviewIndex> {
@@ -676,7 +640,7 @@ async function computeInputHash(
     }
   }
 
-  if (gate === "final-diff") {
+  if (gate === "architecture-plan" || gate === "final-diff") {
     digest.update(await commandStdout(deps.runner, taskRepoRoot, ["status", "--porcelain=v1"]));
     digest.update(await commandStdout(deps.runner, taskRepoRoot, ["diff", "--binary"]));
     digest.update(await commandStdout(deps.runner, taskRepoRoot, ["diff", "--cached", "--binary"]));
@@ -862,45 +826,6 @@ async function readJsonOrNull<T>(fs: FileSystemAdapter, targetPath: string): Pro
   } catch {
     return null;
   }
-}
-
-function extractTomlSection(content: string, sectionName: string): string {
-  const lines = content.split(/\r?\n/);
-  const sectionHeader = `[${sectionName}]`;
-  const collected: string[] = [];
-  let inSection = false;
-  for (const line of lines) {
-    const trimmed = line.trim();
-    if (/^\[[^\]]+\]$/.test(trimmed)) {
-      if (inSection) {
-        break;
-      }
-      inSection = trimmed === sectionHeader;
-      continue;
-    }
-    if (inSection) {
-      collected.push(line);
-    }
-  }
-  return collected.join("\n");
-}
-
-function parseTomlBoolean(section: string, key: string): boolean | undefined {
-  const match = section.match(new RegExp(`^\\s*${escapeRegex(key)}\\s*=\\s*(true|false)\\s*(?:#.*)?$`, "mi"));
-  return match ? match[1] === "true" : undefined;
-}
-
-function parseTomlString(content: string, key: string): string | undefined {
-  const match = content.match(new RegExp(`^\\s*${escapeRegex(key)}\\s*=\\s*"([^"]*)"\\s*(?:#.*)?$`, "mi"));
-  return match?.[1];
-}
-
-function parseTomlStringArray(section: string, key: string): string[] {
-  const match = section.match(new RegExp(`${escapeRegex(key)}\\s*=\\s*\\[([\\s\\S]*?)\\]`, "m"));
-  if (!match) {
-    return [];
-  }
-  return [...match[1].matchAll(/"([^"]+)"/g)].map((candidate) => candidate[1]);
 }
 
 function matchField(content: string, field: string): string | undefined {

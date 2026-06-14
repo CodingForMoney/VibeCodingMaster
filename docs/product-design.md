@@ -75,7 +75,7 @@ Recommended flow:
 
 ```text
 project-manager
-  -> architect architecture plan and code scaffolding
+  -> architect architecture plan, Scaffold Manifest, and code scaffolding
   -> coder implementation and baseline unit checks
   -> reviewer independent validation
   -> architect docs sync / architecture drift check
@@ -219,6 +219,7 @@ The project manager must not become the architect, coder, reviewer, or debugger 
 The architect owns:
 
 - architecture plan
+- Scaffold Manifest for task-specific file context and coder guidance
 - module boundaries
 - file responsibilities
 - cross-file callable surfaces and contract comments

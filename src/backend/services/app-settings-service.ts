@@ -2,6 +2,7 @@ import path from "node:path";
 import { homedir } from "node:os";
 import { createHash } from "node:crypto";
 import { VCM_ROLE_NAMES } from "../../shared/constants.js";
+import { CODEX_REVIEW_GATES, type CodexReviewGate } from "../../shared/types/codex-review.js";
 import {
   createDefaultLaunchTemplate,
   type AppPreferences,
@@ -31,6 +32,7 @@ export interface AppSettingsFile {
   version: 1;
   preferences: AppPreferences;
   translation?: StoredTranslationConfig;
+  codexReview?: AppCodexReviewSettingsState;
   recentRepositoryPaths: string[];
 }
 
@@ -46,6 +48,17 @@ export interface AppProjectIndexFile {
   projects: AppProjectIndexEntry[];
 }
 
+export interface AppCodexReviewSettingsState {
+  version: 1;
+  requiredGates: CodexReviewGate[];
+  updatedAt: string;
+}
+
+export interface AppCodexReviewSettings {
+  enabled: boolean;
+  requiredGates: CodexReviewGate[];
+}
+
 export interface AppSettingsService {
   loadSettings(): Promise<AppSettingsFile>;
   getPreferences(): Promise<AppPreferences>;
@@ -57,6 +70,8 @@ export interface AppSettingsService {
   loadProjectIndex(): Promise<AppProjectIndexFile>;
   loadProjectConfig(repoRoot: string): Promise<Partial<ProjectConfig> | undefined>;
   saveProjectConfig(config: ProjectConfig): Promise<ProjectConfig>;
+  getCodexReviewSettings(repoRoot: string, taskSlug: string): Promise<AppCodexReviewSettings>;
+  updateCodexReviewSettings(repoRoot: string, taskSlug: string, requiredGates: CodexReviewGate[]): Promise<AppCodexReviewSettings>;
   getSettingsPath(): string;
   getProjectIndexPath(): string;
   getProjectConfigPath(repoRoot: string): string;
@@ -204,6 +219,32 @@ export function createAppSettingsService(deps: AppSettingsServiceDeps): AppSetti
       });
       return config;
     },
+    async getCodexReviewSettings() {
+      const settings = await loadSettings();
+      const requiredGates = normalizeCodexReviewGates(settings.codexReview?.requiredGates);
+      return {
+        enabled: requiredGates.length > 0,
+        requiredGates
+      };
+    },
+    async updateCodexReviewSettings(_repoRoot, _taskSlug, requiredGates) {
+      const current = await loadSettings();
+      const normalizedRequiredGates = normalizeCodexReviewGates(requiredGates);
+      const timestamp = new Date().toISOString();
+      const nextCodexReview: AppCodexReviewSettingsState = {
+        version: 1,
+        requiredGates: normalizedRequiredGates,
+        updatedAt: timestamp
+      };
+      await saveSettings({
+        ...current,
+        codexReview: normalizeCodexReviewSettingsState(nextCodexReview)
+      });
+      return {
+        enabled: normalizedRequiredGates.length > 0,
+        requiredGates: normalizedRequiredGates
+      };
+    },
     getSettingsPath() {
       return settingsPath;
     },
@@ -252,13 +293,44 @@ function normalizeProjectIndexFile(input: Partial<AppProjectIndexFile>): AppProj
   };
 }
 
-function normalizeSettingsFile(input: Partial<AppSettingsFile>): AppSettingsFile {
+function normalizeCodexReviewSettingsState(input: unknown): AppCodexReviewSettingsState | undefined {
+  if (!isObject(input)) {
+    return undefined;
+  }
+
   return {
+    version: 1,
+    requiredGates: normalizeCodexReviewGates(input.requiredGates),
+    updatedAt: typeof input.updatedAt === "string" ? input.updatedAt : new Date(0).toISOString()
+  };
+}
+
+function normalizeCodexReviewGates(input: unknown): CodexReviewGate[] {
+  if (!Array.isArray(input)) {
+    return [];
+  }
+  const gates: CodexReviewGate[] = [];
+  for (const value of input) {
+    if (!CODEX_REVIEW_GATES.includes(value as CodexReviewGate) || gates.includes(value as CodexReviewGate)) {
+      continue;
+    }
+    gates.push(value as CodexReviewGate);
+  }
+  return CODEX_REVIEW_GATES.filter((gate) => gates.includes(gate));
+}
+
+function normalizeSettingsFile(input: Partial<AppSettingsFile>): AppSettingsFile {
+  const settings: AppSettingsFile = {
     version: 1,
     preferences: normalizePreferences(input.preferences),
     translation: normalizeTranslationConfig(input.translation),
     recentRepositoryPaths: normalizeRecentRepositoryPaths(input.recentRepositoryPaths)
   };
+  const codexReview = normalizeCodexReviewSettingsState(input.codexReview);
+  if (codexReview) {
+    settings.codexReview = codexReview;
+  }
+  return settings;
 }
 
 function normalizePreferences(input: unknown): AppPreferences {

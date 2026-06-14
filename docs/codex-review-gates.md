@@ -123,6 +123,7 @@ Recommended inputs:
 - original user request
 - project-manager route message or durable task plan when present
 - architecture plan
+- Scaffold Manifest and any architect-created scaffold diff
 - relevant durable architecture docs
 - `docs/TESTING.md` when the plan depends on validation strategy
 - changed file list when architect created scaffolding
@@ -132,6 +133,8 @@ Codex should review whether:
 - the plan matches the user request
 - the architecture boundaries are clear and compatible with the existing repo
 - file responsibilities and public contracts are specific enough for coder
+- the Scaffold Manifest carries task-specific context and coder guidance instead
+  of putting that information in source-code comments
 - the plan avoids unnecessary scope expansion
 - risks, dependencies, migrations, permissions, data, and error paths are named
 - acceptance and validation evidence can be produced
@@ -215,6 +218,8 @@ Codex should review whether:
 - the final diff satisfies the user request
 - the implementation contains correctness bugs or behavior regressions
 - the code follows existing project conventions
+- source and test comments contain no task-specific process notes, phase notes,
+  current-task rationale, or coder instructions
 - tests and implementation remain aligned
 - durable docs and generated artifacts are consistent with the diff
 - files outside the expected scope are explained
@@ -300,11 +305,17 @@ Codex review outputs live under:
 .ai/vcm/codex-reviews/requests/<request-id>.json
 ```
 
-VCM owns `.ai/vcm/codex-reviews/index.json`. It records the enablement marker,
-active gate, gate status, report path, decision, input hash, execution error,
-skip / override reason, and timestamps. PM reads this state through VCM turn
-context or the `vcm-codex-review-gate` skill; PM must not infer Codex state from
-report files alone.
+VCM stores Codex Review Gate switches outside the repository in the global
+`~/.vcm/settings.json` file as one VCM-wide selected gate list. The
+project-local `.ai/codex/config.toml` must not store gate enablement, VCM must
+not key these switches by project or task, and VCM must not create a separate
+Codex review settings file for them.
+
+VCM owns `.ai/vcm/codex-reviews/index.json` as task runtime state. It mirrors
+the global settings enablement marker, active gate, gate status, report path,
+decision, input hash, execution error, skip / override reason, and timestamps.
+PM reads this state through VCM turn context or the `vcm-codex-review-gate`
+skill; PM must not infer Codex state from report files alone.
 
 The `.ai/codex/` directory is VCM-managed runtime configuration for the fifth
 role. It should contain:
@@ -336,11 +347,9 @@ The managed block should include the Codex reviewer role, evidence sources,
 three gate-specific review criteria, finding format, and write constraints.
 Project-local custom notes may live outside the block.
 
-`.ai/codex/config.toml` is VCM-owned launch configuration. Codex does not
-natively discover arbitrary `.ai/codex/config.toml` files the way it discovers
-`$CODEX_HOME/config.toml` or layered `$CODEX_HOME/<profile>.config.toml` files,
-so the VCM Codex adapter reads this file and maps supported keys to the Codex
-CLI invocation.
+`.ai/codex/config.toml` is stable VCM-owned Codex Reviewer permission
+configuration. It must not contain Codex Review Gate switches, default
+`command = "codex"` boilerplate, or model / effort values that the VCM UI owns.
 
 `.ai/codex/.codex/config.toml` and `.ai/codex/.codex/hooks.json` are the
 Codex CLI project-level hook configuration. Because VCM starts Codex with
@@ -375,6 +384,9 @@ root using a relative path:
 ".ai/codex" = "read"
 ".ai/vcm/codex-reviews" = "write"
 "**/*.env" = "deny"
+
+[permissions.vcm_codex_reviewer.network]
+enabled = true
 ```
 
 With `--cd <taskRepoRoot>/.ai/codex`, `../..` points back to
@@ -450,9 +462,15 @@ codex \
   --sandbox workspace-write \
   --ask-for-approval never \
   --dangerously-bypass-hook-trust \
-  --model <model-from-.ai/codex/config.toml> \
-  --config model_reasoning_effort="<effort-from-.ai/codex/config.toml>"
+  --search \
+  --model <model-selected-in-VCM-UI> \
+  --config model_reasoning_effort="<effort-selected-in-VCM-UI>"
 ```
+
+VCM omits `--model` or `model_reasoning_effort` when the user selects
+`Default`, letting Codex CLI use its account or CLI default. `--search` enables
+Codex CLI's native web search tool for reviewer checks that need current
+external context.
 
 Starting from `.ai/codex` causes Codex to load `.ai/codex/AGENTS.md` through
 its normal `AGENTS.md` discovery path and `.ai/codex/.codex/hooks.json` through
@@ -472,10 +490,11 @@ connected active task and contains three independent toggles:
 - Validation Adequacy
 - Final Diff
 
-All three toggles default to `off`. Turning on any gate writes it into
-`.ai/codex/config.toml` under `[vcm.codex_review].required_gates` and sets
-`enabled = true`. Turning all gates off writes `enabled = false` and
-`required_gates = []`.
+All three toggles default to `off`. Turning on any gate writes the selected
+global gate list to `~/.vcm/settings.json`. Turning all gates off stores an
+empty selected gate list. VCM then mirrors this global setting into the active
+task's `.ai/vcm/codex-reviews/index.json` as runtime state for PM/tool
+consumption.
 
 The task workspace must not show a separate Codex Review Gates panel. The UI
 does not expose manual `Run`, `Run Again`, `Retry`, `Skip`, or `Override`
