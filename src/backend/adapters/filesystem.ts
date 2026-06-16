@@ -1,5 +1,6 @@
 import fs from "node:fs/promises";
 import path from "node:path";
+import { isOpenFileLimitError } from "../errors.js";
 
 export interface FileSystemAdapter {
   pathExists(path: string): Promise<boolean>;
@@ -107,7 +108,7 @@ export function createNodeFileSystemAdapter(): FileSystemAdapter {
   };
 }
 
-const DEFAULT_FILE_OPERATION_CONCURRENCY = 32;
+const DEFAULT_FILE_OPERATION_CONCURRENCY = 8;
 const OPEN_FILE_RETRY_DELAYS_MS = [25, 50, 100, 200, 400, 800];
 
 type FileOperationRunner = <T>(operation: () => Promise<T>) => Promise<T>;
@@ -158,11 +159,6 @@ async function retryOpenFileLimit<T>(operation: () => Promise<T>): Promise<T> {
       await delay(delayMs);
     }
   }
-}
-
-function isOpenFileLimitError(error: unknown): boolean {
-  const code = getErrorCode(error);
-  return code === "EMFILE" || code === "ENFILE";
 }
 
 function isMissingPathError(error: unknown): boolean {

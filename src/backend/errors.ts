@@ -38,3 +38,10 @@ export function toVcmError(error: unknown): VcmError {
     statusCode: 500
   });
 }
+
+export function isOpenFileLimitError(error: unknown): boolean {
+  const code = typeof error === "object" && error !== null && "code" in error
+    ? String((error as { code?: unknown }).code)
+    : undefined;
+  return code === "EMFILE" || code === "ENFILE";
+}

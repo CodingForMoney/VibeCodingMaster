@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import type { VcmOrchestrationMode } from "../../shared/types/message.js";
-import { VcmError } from "../errors.js";
+import { isOpenFileLimitError, VcmError } from "../errors.js";
 import type { MessageService } from "../services/message-service.js";
 import type { ProjectService } from "../services/project-service.js";
 import { getTaskRuntimeRepoRoot, type TaskService } from "../services/task-service.js";
@@ -40,7 +40,19 @@ export function registerMessageRoutes(app: FastifyInstance, deps: MessageRouteDe
 
   app.get<{ Params: { taskSlug: string } }>("/api/tasks/:taskSlug/orchestration", async (request) => {
     const context = await getRouteContext(deps, request.params.taskSlug);
-    return deps.messageService.getOrchestrationState(context);
+    try {
+      return await deps.messageService.getOrchestrationState(context);
+    } catch (error) {
+      if (isOpenFileLimitError(error)) {
+        return {
+          taskSlug: request.params.taskSlug,
+          mode: "auto",
+          updatedAt: new Date().toISOString(),
+          warning: `Backend open-files limit reached while reading orchestration state: ${errorMessage(error)}`
+        };
+      }
+      throw error;
+    }
   });
 
   app.put<{ Params: { taskSlug: string }; Body: { mode?: VcmOrchestrationMode } }>(
@@ -60,6 +72,10 @@ export function registerMessageRoutes(app: FastifyInstance, deps: MessageRouteDe
       });
     }
   );
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 async function getRouteContext(deps: MessageRouteDeps, taskSlug: string) {
