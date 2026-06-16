@@ -22,6 +22,7 @@ import { createNodeFileSystemAdapter } from "./adapters/filesystem.js";
 import { createNodePtyTerminalRuntime } from "./runtime/node-pty-runtime.js";
 import { createOpenAiCompatibleTranslationProvider } from "./adapters/translation-provider.js";
 import { registerGatewayRoutes } from "./api/gateway-routes.js";
+import { registerDiagnosticsRoutes } from "./api/diagnostics-routes.js";
 import { createWeixinIlinkChannel } from "./gateway/channels/weixin-ilink-channel.js";
 import { createGatewayAuditLog } from "./gateway/gateway-audit-log.js";
 import { createGatewayService, type GatewayService } from "./gateway/gateway-service.js";
@@ -35,6 +36,7 @@ import { createRoundService, type RoundService } from "./services/round-service.
 import { createStatusService, type StatusService } from "./services/status-service.js";
 import { createTaskService, type TaskService } from "./services/task-service.js";
 import { createTranslationService, type TranslationService } from "./services/translation-service.js";
+import { createDiagnosticsService, type DiagnosticsService } from "./services/diagnostics-service.js";
 import { registerAppSettingsRoutes } from "./api/app-settings-routes.js";
 import { registerArtifactRoutes } from "./api/artifact-routes.js";
 import { registerClaudeHookRoutes } from "./api/claude-hook-routes.js";
@@ -75,6 +77,7 @@ export interface ServerDeps {
   translationService: TranslationService;
   gatewayService: GatewayService;
   runtime: TerminalRuntime;
+  diagnosticsService: DiagnosticsService;
 }
 
 export async function createServer(deps: ServerDeps, options: CreateServerOptions = {}): Promise<FastifyInstance> {
@@ -88,11 +91,13 @@ export async function createServer(deps: ServerDeps, options: CreateServerOption
       error: {
         code: vcmError.code,
         message: vcmError.message,
-        hint: vcmError.hint
+        hint: vcmError.hint,
+        runtime: deps.diagnosticsService.getErrorRuntimeInfo()
       }
     });
   });
 
+  registerDiagnosticsRoutes(app, { diagnosticsService: deps.diagnosticsService });
   registerAppSettingsRoutes(app, { appSettings: deps.appSettings });
   registerClaudeHookRoutes(app, { claudeHookService: deps.claudeHookService });
   registerCodexHookRoutes(app, { codexHookService: deps.codexHookService });
@@ -193,7 +198,7 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
   const runtime = createNodePtyTerminalRuntime({ fs });
   const registry = createSessionRegistry();
   const artifactService = createArtifactService(fs);
-  const projectService = createProjectService({ fs, git, claude, appSettings });
+  const projectService = createProjectService({ fs, git, appSettings });
   const harnessService = createHarnessService({
     fs,
     runtime,
@@ -293,6 +298,12 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     sessionService,
     roundService
   });
+  const diagnosticsService = createDiagnosticsService({
+    appRoot: getAppRoot(),
+    runtime,
+    gatewayService,
+    translationService
+  });
 
   return {
     appSettings,
@@ -310,7 +321,8 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     statusService,
     translationService,
     gatewayService,
-    runtime
+    runtime,
+    diagnosticsService
   };
 }
 

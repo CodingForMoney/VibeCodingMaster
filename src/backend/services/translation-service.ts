@@ -2,6 +2,9 @@ import path from "node:path";
 import type { RoleName } from "../../shared/types/role.js";
 import type { RoleSessionRecord } from "../../shared/types/session.js";
 import type {
+  TranslationDiagnostics
+} from "../../shared/types/diagnostics.js";
+import type {
   PollTranslationSessionResult,
   SendTranslatedInputRequest,
   StartTranslationSessionResult,
@@ -58,6 +61,7 @@ export interface TranslationService {
   retryFailedTranslations(sessionId: string): Promise<TranslationFailuresResult>;
   ignoreTranslationFailures(sessionId: string): Promise<TranslationFailuresResult>;
   translateGatewayOutput(input: TranslateGatewayOutputInput): Promise<string>;
+  getDiagnostics(): TranslationDiagnostics;
 }
 
 export interface StartTranslationSessionServiceInput {
@@ -1041,6 +1045,21 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
         userPrompt: prompt.userPrompt
       });
       return result.text.trim();
+    },
+    getDiagnostics() {
+      let transcriptWatchers = 0;
+      let listeners = 0;
+      for (const state of sessionStates.values()) {
+        if (state.unsubscribeTranscript) {
+          transcriptWatchers += 1;
+        }
+        listeners += state.listeners.size;
+      }
+      return {
+        sessions: sessionStates.size,
+        transcriptWatchers,
+        listeners
+      };
     }
   };
 

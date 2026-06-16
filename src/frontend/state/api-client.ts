@@ -7,6 +7,7 @@ import type {
   StartGatewayQrLoginResult,
   UpdateGatewaySettingsRequest
 } from "../../shared/types/gateway.js";
+import type { RuntimeDiagnostics } from "../../shared/types/diagnostics.js";
 import type {
   HarnessApplyResult,
   HarnessBootstrapStatusReport,
@@ -57,6 +58,9 @@ export const apiClient = {
       method: "PUT",
       body: JSON.stringify(input)
     });
+  },
+  getRuntimeDiagnostics() {
+    return request<RuntimeDiagnostics>("/api/diagnostics/runtime");
   },
   getCurrentProject() {
     return request<ProjectSummary | null>("/api/projects/current");
@@ -305,11 +309,25 @@ async function request<T>(url: string, init: RequestInit = {}): Promise<T> {
   });
 
   if (!response.ok) {
-    const payload = await response.json().catch(() => null) as { error?: { message?: string; hint?: string } } | null;
+    const payload = await response.json().catch(() => null) as {
+      error?: {
+        message?: string;
+        hint?: string;
+        runtime?: {
+          version?: string;
+          pid?: number;
+          cwd?: string;
+        };
+      };
+    } | null;
     const message = payload?.error?.hint
       ? `${payload.error.message} ${payload.error.hint}`
       : payload?.error?.message ?? `Request failed: ${response.status}`;
-    throw new Error(message);
+    const runtime = payload?.error?.runtime;
+    const runtimeSuffix = runtime
+      ? ` [backend ${runtime.version ?? "unknown"} pid=${runtime.pid ?? "unknown"} cwd=${runtime.cwd ?? "unknown"}]`
+      : "";
+    throw new Error(`${message}${runtimeSuffix}`);
   }
 
   return response.json() as Promise<T>;

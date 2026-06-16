@@ -6,7 +6,6 @@ import type {
   ProjectSummary
 } from "../../shared/types/project.js";
 import { VcmError } from "../errors.js";
-import type { ClaudeAdapter } from "../adapters/claude-adapter.js";
 import type { FileSystemAdapter } from "../adapters/filesystem.js";
 import type { GitAdapter } from "../adapters/git-adapter.js";
 import type { AppSettingsService } from "./app-settings-service.js";
@@ -28,7 +27,6 @@ export interface ProjectService {
 export interface ProjectServiceDeps {
   fs: FileSystemAdapter;
   git: GitAdapter;
-  claude: ClaudeAdapter;
   appSettings: Pick<
     AppSettingsService,
     | "getRecentRepositoryPaths"
@@ -184,10 +182,6 @@ export function createProjectService(deps: ProjectServiceDeps): ProjectService {
       } catch (caught) {
         warnings.push(`Unable to read Git ahead/behind status. ${getErrorHint(caught)}`);
       }
-    }
-
-    if (!(await deps.claude.isAvailable(config.claudeCommand))) {
-      warnings.push("Claude Code command is not available. You can still inspect artifacts, but sessions will not start.");
     }
 
     const pullDisabledReason = getPullDisabledReason({ isDirty, upstreamBranch });

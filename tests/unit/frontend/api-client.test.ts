@@ -48,6 +48,49 @@ describe("apiClient", () => {
     expect(paths).toEqual(["/workspace", "/repo"]);
   });
 
+  it("loads runtime diagnostics", async () => {
+    const fetchMock = mockFetch({
+      version: "0.3.6",
+      pid: 123,
+      cwd: "/workspace",
+      execPath: "/usr/bin/node",
+      nodeVersion: "v20.20.2",
+      platform: "linux",
+      arch: "x64",
+      uptimeSeconds: 12,
+      fdCount: 42,
+      openFilesLimit: { soft: "1024", hard: "1048576" },
+      runtimeSessions: { total: 0, running: 0 },
+      gateway: { polling: false },
+      translation: { sessions: 0, transcriptWatchers: 0, listeners: 0 }
+    });
+
+    const diagnostics = await apiClient.getRuntimeDiagnostics();
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/diagnostics/runtime");
+    expect(diagnostics.pid).toBe(123);
+  });
+
+  it("adds backend runtime info to API errors", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      error: {
+        message: "boom",
+        runtime: {
+          version: "0.3.6",
+          pid: 123,
+          cwd: "/workspace"
+        }
+      }
+    }), {
+      headers: { "content-type": "application/json" },
+      status: 500
+    })));
+
+    await expect(apiClient.getCurrentProject()).rejects.toThrow(
+      "boom [backend 0.3.6 pid=123 cwd=/workspace]"
+    );
+  });
+
   it("pulls the connected repository with a bodyless POST", async () => {
     const fetchMock = mockFetch({
       branch: "main",

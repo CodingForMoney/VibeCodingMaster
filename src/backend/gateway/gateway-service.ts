@@ -1,6 +1,9 @@
 import { readFile } from "node:fs/promises";
 import { VCM_ROLE_DEFINITIONS } from "../../shared/constants.js";
 import type {
+  GatewayDiagnostics
+} from "../../shared/types/diagnostics.js";
+import type {
   CheckGatewayQrLoginRequest,
   CheckGatewayQrLoginResult,
   GatewayStatus,
@@ -47,6 +50,7 @@ export interface GatewayService {
   startQrLogin(): Promise<StartGatewayQrLoginResult>;
   checkQrLogin(input?: CheckGatewayQrLoginRequest): Promise<CheckGatewayQrLoginResult>;
   handlePmStop(input: GatewayPmStopInput): Promise<void>;
+  getDiagnostics(): GatewayDiagnostics;
 }
 
 export interface GatewayPmStopInput {
@@ -981,6 +985,11 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
         preview: output.text,
         error: output.translationError
       });
+    },
+    getDiagnostics() {
+      return {
+        polling: isRunning()
+      };
     }
   };
 
