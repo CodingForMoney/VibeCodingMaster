@@ -101,6 +101,12 @@ export function registerTranslationRoutes(app: FastifyInstance, deps: Translatio
     return { ok: true };
   });
 
+  app.post<{ Params: { sessionId: string } }>("/api/translation/sessions/:sessionId/stop", async (request) => {
+    await requireCurrentProject(deps.projectService);
+    await deps.translationService.stopSession(request.params.sessionId);
+    return { ok: true };
+  });
+
   app.post<{ Params: { sessionId: string; translationId: string } }>(
     "/api/translation/sessions/:sessionId/retry/:translationId",
     async (request) => {

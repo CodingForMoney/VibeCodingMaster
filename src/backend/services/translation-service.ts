@@ -943,6 +943,10 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
 
       return () => {
         state.listeners.delete(listener);
+        if (state.listeners.size === 0 && state.unsubscribeTranscript) {
+          state.unsubscribeTranscript();
+          state.unsubscribeTranscript = undefined;
+        }
       };
     },
     async clearSession(sessionId) {

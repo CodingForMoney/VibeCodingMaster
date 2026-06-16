@@ -40,7 +40,7 @@ import type {
 
 export interface GatewayService {
   start(): Promise<void>;
-  stop(): void;
+  stop(): Promise<void>;
   getStatus(): Promise<GatewayStatus>;
   updateSettings(input: UpdateGatewaySettingsRequest): Promise<GatewayStatus>;
   resetBinding(): Promise<GatewayStatus>;
@@ -128,6 +128,7 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
   const now = deps.now ?? (() => new Date().toISOString());
   let pollAbort: AbortController | null = null;
   let pollLoopPromise: Promise<void> | null = null;
+  let pollStartingPromise: Promise<void> | null = null;
   let qrLogin: QrLoginState | null = null;
   let lastFailedTranslation: LastFailedGatewayTranslation | null = null;
 
@@ -136,23 +137,48 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
   }
 
   async function ensurePolling(): Promise<void> {
-    const settings = await deps.settings.loadSettings();
-    if (!settings.binding.token || isRunning()) {
+    if (isRunning()) {
       return;
     }
-    pollAbort = new AbortController();
-    pollLoopPromise = pollLoop(pollAbort.signal).finally(() => {
-      pollAbort = null;
-      pollLoopPromise = null;
+    if (pollStartingPromise) {
+      await pollStartingPromise;
+      return;
+    }
+
+    pollStartingPromise = (async () => {
+      const settings = await deps.settings.loadSettings();
+      if (!settings.binding.token || isRunning()) {
+        return;
+      }
+      const controller = new AbortController();
+      pollAbort = controller;
+      const loop = pollLoop(controller.signal).finally(() => {
+        if (pollAbort === controller) {
+          pollAbort = null;
+        }
+        if (pollLoopPromise === loop) {
+          pollLoopPromise = null;
+        }
+      });
+      pollLoopPromise = loop;
+    })().finally(() => {
+      pollStartingPromise = null;
     });
+
+    await pollStartingPromise;
   }
 
   async function stopPolling(): Promise<void> {
+    await pollStartingPromise?.catch(() => undefined);
     if (!pollAbort) {
       return;
     }
-    pollAbort.abort();
+    const controller = pollAbort;
+    controller.abort();
     await pollLoopPromise?.catch(() => undefined);
+    if (pollAbort === controller) {
+      pollAbort = null;
+    }
   }
 
   function toAccount(settings: GatewaySettingsFile): WeixinIlinkAccount | undefined {
@@ -792,7 +818,7 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
       await ensurePolling();
     },
     stop() {
-      void stopPolling();
+      return stopPolling();
     },
     async getStatus() {
       const settings = await syncDesktopContext(await deps.settings.loadSettings());

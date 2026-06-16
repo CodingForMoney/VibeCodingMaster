@@ -122,6 +122,7 @@ export function TranslationPanel({ active = true, taskSlug, role, sessionId }: T
       if (timer !== undefined) {
         window.clearTimeout(timer);
       }
+      void apiClient.stopTranslationSession(sessionId).catch(() => undefined);
     };
   }, [sessionId, taskSlug, role, pollRevision]);
 

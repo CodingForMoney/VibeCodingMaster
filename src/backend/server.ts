@@ -147,7 +147,7 @@ export async function createServer(deps: ServerDeps, options: CreateServerOption
     await deps.gatewayService.start();
   });
   app.addHook("onClose", async () => {
-    deps.gatewayService.stop();
+    await deps.gatewayService.stop();
   });
 
   if (options.staticDir) {

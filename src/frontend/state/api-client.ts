@@ -246,6 +246,11 @@ export const apiClient = {
       method: "POST"
     });
   },
+  stopTranslationSession(sessionId: string) {
+    return request<{ ok: true }>(`/api/translation/sessions/${encodeURIComponent(sessionId)}/stop`, {
+      method: "POST"
+    });
+  },
   retryTranslation(sessionId: string, translationId: string) {
     return request<TranslationEntry>(`/api/translation/sessions/${encodeURIComponent(sessionId)}/retry/${encodeURIComponent(translationId)}`, {
       method: "POST"
