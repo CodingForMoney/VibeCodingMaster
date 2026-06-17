@@ -36,6 +36,50 @@ describe("createStatusService", () => {
     expect(report.artifacts.checks).toHaveLength(5);
     expect(report.warnings).toContain(".ai/vcm/handoffs/docs-sync-report.md: incomplete");
   });
+
+  it("keeps recoverable sessions when artifact status hits the open-files limit", async () => {
+    const service = createStatusService({
+      taskService: {
+        async loadTask(): Promise<TaskRecord> {
+          return createTask();
+        }
+      } as never,
+      sessionService: {
+        async listRoleSessions() {
+          return [{
+            id: "runtime-coder",
+            claudeSessionId: "claude-coder-session",
+            taskSlug: "demo-task",
+            role: "coder",
+            status: "resumable",
+            command: "claude --agent coder",
+            permissionMode: "default",
+            cwd: "/repo",
+            terminalBackend: "node-pty",
+            logPath: ".ai/vcm/handoffs/logs/coder.log",
+            updatedAt: "2026-05-30T00:00:00.000Z",
+            exitCode: null
+          }];
+        }
+      } as never,
+      artifactService: {
+        async listArtifacts(): Promise<ArtifactSummary> {
+          throw Object.assign(new Error("EMFILE: too many open files"), {
+            code: "EMFILE"
+          });
+        }
+      } as never
+    });
+
+    const report = await service.getTaskStatus("/repo", "demo-task");
+
+    expect(report.sessions).toMatchObject([{
+      role: "coder",
+      claudeSessionId: "claude-coder-session",
+      status: "resumable"
+    }]);
+    expect(report.warnings[0]).toContain("Artifacts are temporarily unavailable");
+  });
 });
 
 function createTask(): TaskRecord {

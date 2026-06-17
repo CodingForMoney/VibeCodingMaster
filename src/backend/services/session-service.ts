@@ -238,29 +238,20 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
         return undefined;
       }
 
-      const runtimeSession = deps.runtime.getSession(record.id);
-      if (!runtimeSession) {
-        return {
-          ...record,
-          status: getRecoverableStatus(record),
-          pid: undefined,
-          exitCode: record.exitCode ?? null
-        };
-      }
-
-      return {
-        ...record,
-        status: runtimeSession.status,
-        activityStatus: record.activityStatus ?? "idle",
-        pid: runtimeSession.pid,
-        lastOutputAt: runtimeSession.lastOutputAt,
-        exitCode: runtimeSession.exitCode
-      };
+      return toRoleSessionRecordView(record, deps.runtime);
     },
     async listRoleSessions(repoRoot, taskSlug) {
       const sessions: RoleSessionRecord[] = [];
+      const config = await deps.projectService.loadConfig(repoRoot);
+      const task = await deps.taskService.loadTask(repoRoot, taskSlug);
+      const taskRepoRoot = getTaskRuntimeRepoRoot(task);
+      const persistedTaskSession = await loadPersistedTaskSessionRecord(deps.fs, taskRepoRoot, config.stateRoot, taskSlug);
       for (const role of ROLE_NAMES) {
-        const session = await this.getRoleSession(repoRoot, taskSlug, role);
+        const session = toRoleSessionRecordView(
+          deps.registry.getByRole(taskSlug, role)
+            ?? normalizePersistedRoleRecord(persistedTaskSession?.roles[role]?.record),
+          deps.runtime
+        );
         if (session) {
           sessions.push(session);
         }
@@ -344,6 +335,34 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       await persistTaskSession(deps.fs, getTaskRuntimeRepoRoot(task), config.stateRoot, updated);
       return updated;
     }
+  };
+}
+
+function toRoleSessionRecordView(
+  record: RoleSessionRecord | undefined,
+  runtime: TerminalRuntime
+): RoleSessionRecord | undefined {
+  if (!record) {
+    return undefined;
+  }
+
+  const runtimeSession = runtime.getSession(record.id);
+  if (!runtimeSession) {
+    return {
+      ...record,
+      status: getRecoverableStatus(record),
+      pid: undefined,
+      exitCode: record.exitCode ?? null
+    };
+  }
+
+  return {
+    ...record,
+    status: runtimeSession.status,
+    activityStatus: record.activityStatus ?? "idle",
+    pid: runtimeSession.pid,
+    lastOutputAt: runtimeSession.lastOutputAt,
+    exitCode: runtimeSession.exitCode
   };
 }
 
@@ -457,13 +476,25 @@ async function loadPersistedRoleRecord(
   taskSlug: string,
   role: RoleName
 ): Promise<RoleSessionRecord | undefined> {
+  const current = await loadPersistedTaskSessionRecord(fs, repoRoot, stateRoot, taskSlug);
+  return normalizePersistedRoleRecord(current?.roles[role]?.record);
+}
+
+async function loadPersistedTaskSessionRecord(
+  fs: FileSystemAdapter,
+  repoRoot: string,
+  stateRoot: string,
+  taskSlug: string
+): Promise<TaskSessionRecord | undefined> {
   const sessionPath = getTaskSessionPath(repoRoot, stateRoot, taskSlug);
   if (!(await fs.pathExists(sessionPath))) {
     return undefined;
   }
 
-  const current = await fs.readJson<TaskSessionRecord>(sessionPath);
-  const record = current.roles[role]?.record;
+  return fs.readJson<TaskSessionRecord>(sessionPath);
+}
+
+function normalizePersistedRoleRecord(record: RoleSessionRecord | undefined): RoleSessionRecord | undefined {
   const legacy = record as (RoleSessionRecord & {
     lastPromptSubmittedAt?: unknown;
     lastStopAt?: unknown;
