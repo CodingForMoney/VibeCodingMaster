@@ -157,7 +157,7 @@ durable docs, PR text, or commit history.
 | Long-running jobs | `.ai/vcm/jobs/<job-id>/` | Runtime cleanup | Status and logs from `run-long-check` / `watch-job`. |
 | Bootstrap session | `.ai/vcm/bootstrap/session.json` | Runtime cleanup | Last harness-bootstrap terminal metadata. |
 | Bootstrap log | `.ai/vcm/bootstrap/bootstrap.log` | Runtime cleanup | Terminal log for the harness-bootstrap session. |
-| App-local task records | `~/.vcm/projects/<project-id>/tasks/<task-slug>.json` | Runtime cleanup | VCM UI/lifecycle subtask records outside the connected repo. |
+| App-local task records | `<vcmDataDir>/projects/<project-id>/tasks/<task-slug>.json` | Runtime cleanup | VCM UI/lifecycle subtask records outside the connected repo. |
 
 Runtime state under `.ai/vcm/**` is excluded from manifest entries. The manifest
 records `.ai/vcm/` only as a runtime root.

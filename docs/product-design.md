@@ -622,7 +622,7 @@ Translation is a local assistant layer beside the role terminal.
 Settings are saved in:
 
 ```text
-~/.vcm/settings.json
+<vcmDataDir>/settings.json
 ```
 
 The settings file stores:
@@ -765,7 +765,7 @@ implementation plan live in `docs/gateway-design.md`.
 App-level settings:
 
 ```text
-~/.vcm/settings.json
+<vcmDataDir>/settings.json
 ```
 
 Stored app-level settings include:
@@ -779,12 +779,13 @@ Stored app-level settings include:
 Gateway state and audit logs:
 
 ```text
-~/.vcm/gateway/settings.json
-~/.vcm/gateway/audit.jsonl
+<vcmDataDir>/gateway/settings.json
+<vcmDataDir>/gateway/audit.jsonl
 ```
 
 Gateway credentials, iLink tokens, DM binding identity, cursors, context tokens,
-and audit logs must stay outside connected repositories.
+and audit logs live under `vcmDataDir`. VCM resolves `vcmDataDir` from
+`VCM_DATA_DIR`; if it is unset or empty, VCM uses `~/.vcm`.
 
 Repository-level VCM state:
 
@@ -796,11 +797,11 @@ Repository-level VCM state:
 Project config:
 
 ```text
-~/.vcm/projects/<project-id>/config.json
-~/.vcm/projects/index.json
+<vcmDataDir>/projects/<project-id>/config.json
+<vcmDataDir>/projects/index.json
 ```
 
-The base repository's `.ai/vcm/` directory stores the task index, while `.claude/worktrees/` stores nested task worktrees. Long-lived project config is stored under `~/.vcm` so it survives outside Git-ignored repo state.
+The base repository's `.ai/vcm/` directory stores task-local runtime state, while `.claude/worktrees/` stores nested task worktrees. Long-lived project config is stored under `vcmDataDir`. In Dev Containers, set `VCM_DATA_DIR=/workspace/.ai/vcm` through `containerEnv` so VCM app state survives container rebuilds.
 
 Task worktree local files:
 
@@ -858,7 +859,7 @@ VCM V1 is successful when:
 - Auto orchestration switches to the target role tab when VCM records `dispatchingAt`, before VCM submits the route-file message.
 - Auto orchestration treats `UserPromptSubmit` as the reliable acceptance confirmation; if confirmation does not arrive, backend PTY retries Enter and records a message `failureReason` after retry exhaustion.
 - Round completion detection waits for the final role in a chained conversation and can alert with prompt plus sound.
-- Translation settings save to `~/.vcm/settings.json`.
+- Translation settings save to `<vcmDataDir>/settings.json`.
 - Translation reads Claude transcript JSONL reliably after start, resume, and restart.
 - Gateway can bind one Weixin DM identity to the desktop VCM instance, send
   translated plain text to PM, and push translated PM replies back to Weixin.

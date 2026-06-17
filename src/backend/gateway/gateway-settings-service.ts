@@ -1,5 +1,4 @@
 import path from "node:path";
-import { homedir } from "node:os";
 import type {
   GatewayChannel,
   GatewayMessageStatus,
@@ -9,6 +8,7 @@ import type {
   UpdateGatewaySettingsRequest
 } from "../../shared/types/gateway.js";
 import type { FileSystemAdapter } from "../adapters/filesystem.js";
+import { resolveVcmDataDir } from "../vcm-data-dir.js";
 
 export interface GatewaySettingsFile {
   version: 1;
@@ -77,8 +77,9 @@ const DEFAULT_BASE_URL = "https://ilinkai.weixin.qq.com";
 const MAX_DEDUPE_IDS = 1000;
 
 export function createGatewaySettingsService(deps: GatewaySettingsServiceDeps): GatewaySettingsService {
-  const settingsPath = deps.settingsPath ?? path.join(homedir(), ".vcm", "gateway", "settings.json");
-  const auditPath = deps.auditPath ?? path.join(homedir(), ".vcm", "gateway", "audit.jsonl");
+  const dataDir = resolveVcmDataDir();
+  const settingsPath = deps.settingsPath ?? path.join(dataDir, "gateway", "settings.json");
+  const auditPath = deps.auditPath ?? path.join(dataDir, "gateway", "audit.jsonl");
   const now = deps.now ?? (() => new Date().toISOString());
   let cachedSettings: GatewaySettingsFile | null = null;
 

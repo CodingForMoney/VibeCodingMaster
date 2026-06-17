@@ -257,8 +257,8 @@ Gateway rules:
 Gateway state is stored locally under:
 
 ```text
-~/.vcm/gateway/settings.json
-~/.vcm/gateway/audit.jsonl
+<vcmDataDir>/gateway/settings.json
+<vcmDataDir>/gateway/audit.jsonl
 ```
 
 ### Bind Weixin
@@ -384,10 +384,12 @@ The task header does not include a manual `Refresh` button. Task status, role st
 Translation settings are local and stored in:
 
 ```text
-~/.vcm/settings.json
+<vcmDataDir>/settings.json
 ```
 
 The same file stores recent repository paths. The translation API key is stored locally under `translation.secrets.apiKey`; it is not written to the connected repository, `.ai/vcm/handoffs`, raw terminal logs, or git diffs.
+
+VCM resolves `vcmDataDir` from `VCM_DATA_DIR`. If `VCM_DATA_DIR` is unset or empty, VCM uses `~/.vcm`. In Dev Containers, set `VCM_DATA_DIR=/workspace/.ai/vcm` through `containerEnv` so VCM app state survives container rebuilds.
 
 The sidebar `Settings` section also stores the UI theme preference in this file. The default is `system`, which follows the OS/browser color-scheme preference; users can cycle between `System`, `Light`, and `Dark`.
 
@@ -479,7 +481,7 @@ For `.gitignore`, VCM uses a gitignore-native managed block:
 # VCM:END
 ```
 
-`.ai/vcm/` is the active VCM local control area, and `.claude/worktrees/` is the Claude-compatible task worktree area. VCM keeps the task index in app-local project state under `~/.vcm/projects/`; each task runtime repo keeps its own session, message, orchestration, and translation state.
+`.ai/vcm/` is the active VCM local control area, and `.claude/worktrees/` is the Claude-compatible task worktree area. VCM keeps the task index in app-local project state under `<vcmDataDir>/projects/`; each task runtime repo keeps its own session, message, orchestration, and translation state.
 
 VCM also JSON-merges `.claude/settings.json` to install Claude Code `PreToolUse`, `UserPromptSubmit`, `Stop`, and `PermissionRequest` hooks plus a managed `env.BASH_DEFAULT_TIMEOUT_MS` so foreground watch windows fit inside the Bash tool timeout. The hooks post directly to the local VCM backend, so roles do not need a VCM CLI command to confirm delivery or report turn completion. The `Stop` hook forwards the backend response to Claude Code, which lets VCM block turn-end while a validation job is still running. When Codex Review Gates are installed, VCM also writes `.ai/codex/.codex/config.toml` and `.ai/codex/.codex/hooks.json` so the embedded Codex Reviewer terminal can POST `UserPromptSubmit` and `Stop` events back to VCM.
 
@@ -606,8 +608,8 @@ Embedded terminal output is still written to raw role log files under `.ai/vcm/h
 For a connected repository, VCM uses:
 
 ```text
-~/.vcm/projects/<project-id>/config.json
-~/.vcm/projects/<project-id>/tasks/<task>.json
+<vcmDataDir>/projects/<project-id>/config.json
+<vcmDataDir>/projects/<project-id>/tasks/<task>.json
 <baseRepoRoot>/.claude/worktrees/<task>/
 <taskRepoRoot>/.ai/vcm/sessions/<task>.json
 <taskRepoRoot>/.ai/vcm/messages/<task>.jsonl
@@ -621,7 +623,17 @@ For a connected repository, VCM uses:
 <taskRepoRoot>/.ai/vcm/handoffs/logs/{project-manager,architect,coder,reviewer}.log
 ```
 
-The project config is stored under `~/.vcm` so it is durable local app state and is not hidden inside a Git-ignored repository directory. For worktree-backed tasks, `taskRepoRoot` is `<baseRepoRoot>/.claude/worktrees/<task>`; for inline tasks, `taskRepoRoot` is the connected base repo.
+The project config is stored under `vcmDataDir` so it is durable local app state. `vcmDataDir` is `VCM_DATA_DIR` when set, otherwise `~/.vcm`. For Dev Containers, prefer:
+
+```json
+{
+  "containerEnv": {
+    "VCM_DATA_DIR": "/workspace/.ai/vcm"
+  }
+}
+```
+
+For worktree-backed tasks, `taskRepoRoot` is `<baseRepoRoot>/.claude/worktrees/<task>`; for inline tasks, `taskRepoRoot` is the connected base repo.
 
 Because handoffs are scoped to `taskRepoRoot` without an extra task-name directory, VCM allows only one active inline task per connected repository. Use the default worktree mode for parallel tasks.
 

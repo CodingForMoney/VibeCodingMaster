@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createDefaultLaunchTemplate,
   type AppPreferences
@@ -12,6 +12,21 @@ import {
 } from "../../../src/backend/services/app-settings-service.js";
 
 describe("app-settings-service", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("uses VCM_DATA_DIR for the default app settings root", () => {
+    vi.stubEnv("VCM_DATA_DIR", "/workspace/.ai/vcm");
+    const service = createAppSettingsService({
+      fs: createMemoryFs()
+    });
+
+    expect(service.getSettingsPath()).toBe("/workspace/.ai/vcm/settings.json");
+    expect(service.getProjectIndexPath()).toBe("/workspace/.ai/vcm/projects/index.json");
+    expect(service.getProjectConfigPath("/workspace/project")).toMatch(/^\/workspace\/\.ai\/vcm\/projects\/.+\/config\.json$/);
+  });
+
   it("creates an empty settings.json when no settings exist", async () => {
     const fs = createMemoryFs();
     const service = createAppSettingsService({
@@ -127,7 +142,7 @@ describe("app-settings-service", () => {
     ]);
   });
 
-  it("stores project config under ~/.vcm projects state", async () => {
+  it("stores project config under app-local projects state", async () => {
     const fs = createMemoryFs();
     const service = createAppSettingsService({
       fs,
@@ -163,7 +178,7 @@ describe("app-settings-service", () => {
     });
   });
 
-  it("stores Codex Review Gate switches in ~/.vcm/settings.json", async () => {
+  it("stores Codex Review Gate switches in settings.json", async () => {
     const fs = createMemoryFs();
     const service = createAppSettingsService({
       fs,

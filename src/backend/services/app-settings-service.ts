@@ -1,5 +1,4 @@
 import path from "node:path";
-import { homedir } from "node:os";
 import { createHash } from "node:crypto";
 import { VCM_ROLE_NAMES } from "../../shared/constants.js";
 import { CODEX_REVIEW_GATES, type CodexReviewGate } from "../../shared/types/codex-review.js";
@@ -22,6 +21,7 @@ import {
 } from "../../shared/types/session.js";
 import type { TranslationSecretSettings, TranslationSettings } from "../../shared/types/translation.js";
 import type { FileSystemAdapter } from "../adapters/filesystem.js";
+import { resolveVcmDataDir } from "../vcm-data-dir.js";
 
 export interface StoredTranslationConfig {
   settings: Partial<TranslationSettings>;
@@ -85,7 +85,7 @@ export interface AppSettingsServiceDeps {
 const MAX_RECENT_REPOSITORIES = 5;
 
 export function createAppSettingsService(deps: AppSettingsServiceDeps): AppSettingsService {
-  const settingsPath = deps.settingsPath ?? path.join(homedir(), ".vcm", "settings.json");
+  const settingsPath = deps.settingsPath ?? path.join(resolveVcmDataDir(), "settings.json");
   const settingsRoot = path.dirname(settingsPath);
   const projectIndexPath = path.join(settingsRoot, "projects", "index.json");
   let cachedSettings: AppSettingsFile | null = null;

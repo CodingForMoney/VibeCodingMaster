@@ -306,7 +306,7 @@ Codex review outputs live under:
 ```
 
 VCM stores Codex Review Gate switches outside the repository in the global
-`~/.vcm/settings.json` file as one VCM-wide selected gate list. The
+`<vcmDataDir>/settings.json` file as one VCM-wide selected gate list. The
 project-local `.ai/codex/config.toml` must not store gate enablement, VCM must
 not key these switches by project or task, and VCM must not create a separate
 Codex review settings file for them.
@@ -491,7 +491,7 @@ connected active task and contains three independent toggles:
 - Final Diff
 
 All three toggles default to `off`. Turning on any gate writes the selected
-global gate list to `~/.vcm/settings.json`. Turning all gates off stores an
+global gate list to `<vcmDataDir>/settings.json`. Turning all gates off stores an
 empty selected gate list. VCM then mirrors this global setting into the active
 task's `.ai/vcm/codex-reviews/index.json` as runtime state for PM/tool
 consumption.

@@ -178,7 +178,7 @@ Current runtime files and directories:
 App-local VCM task records live outside the connected repository:
 
 ```text
-~/.vcm/projects/<project-id>/tasks/<task-slug>.json
+<vcmDataDir>/projects/<project-id>/tasks/<task-slug>.json
 ```
 
 Runtime state is deleted during task cleanup after useful facts are promoted to
@@ -492,13 +492,13 @@ Gateway product rules:
 Gateway settings and secrets live in app-local state:
 
 ```text
-~/.vcm/gateway/settings.json
+<vcmDataDir>/gateway/settings.json
 ```
 
 Gateway audit logs live outside connected repositories:
 
 ```text
-~/.vcm/gateway/audit.jsonl
+<vcmDataDir>/gateway/audit.jsonl
 ```
 
 Rules:

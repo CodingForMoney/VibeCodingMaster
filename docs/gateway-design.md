@@ -491,9 +491,12 @@ Gateway state must live outside connected repositories.
 Recommended files:
 
 ```text
-~/.vcm/gateway/settings.json
-~/.vcm/gateway/audit.jsonl
+<vcmDataDir>/gateway/settings.json
+<vcmDataDir>/gateway/audit.jsonl
 ```
+
+VCM resolves `vcmDataDir` from `VCM_DATA_DIR`; when it is unset or empty, VCM
+uses `~/.vcm`.
 
 Settings shape:
 
@@ -631,7 +634,7 @@ The user should be able to:
 - Add `src/backend/api/gateway-routes.ts`.
 - Add desktop UI controls for enable/disable, translation, binding status, and
   current project/task.
-- Store settings under `~/.vcm/gateway/settings.json`.
+- Store settings under `<vcmDataDir>/gateway/settings.json`.
 
 Validation:
 
@@ -761,7 +764,7 @@ task. It should still avoid arbitrary terminal control, approve/reject gates,
 role-specific start/stop controls, shell commands, and direct non-PM prompts.
 
 The third risk is token and message leakage. Gateway credentials and audit logs
-must stay under `~/.vcm/gateway`, with secrets redacted from logs and never
+must stay under `<vcmDataDir>/gateway`, with secrets redacted from logs and never
 written into connected repositories.
 
 The fourth risk is queueing. MVP should not queue multiple arbitrary user
