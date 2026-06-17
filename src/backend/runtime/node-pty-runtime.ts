@@ -100,13 +100,9 @@ export function createNodePtyTerminalRuntime(deps: NodePtyRuntimeDeps): Terminal
     });
 
     child.onExit(({ exitCode }) => {
-      if (entry.disposed) {
+      if (!disposeEntry(entries, entry, exitCode === 0 ? "exited" : "crashed", exitCode)) {
         return;
       }
-      entry.disposed = true;
-      entry.session.status = exitCode === 0 ? "exited" : "crashed";
-      entry.session.exitCode = exitCode;
-      void entry.logWriter.close();
       emit(entry, {
         sessionId: session.id,
         taskSlug: input.taskSlug,
@@ -114,6 +110,7 @@ export function createNodePtyTerminalRuntime(deps: NodePtyRuntimeDeps): Terminal
         type: "exit",
         exitCode
       });
+      entry.listeners.clear();
     });
 
     return { ...session };
@@ -157,15 +154,24 @@ export function createNodePtyTerminalRuntime(deps: NodePtyRuntimeDeps): Terminal
     },
     async stop(sessionId) {
       const entry = getEntry(entries, sessionId);
-      entry.disposed = true;
-      entry.session.status = "exited";
       entry.process.kill();
+      if (disposeEntry(entries, entry, "exited", entry.session.exitCode ?? null)) {
+        emit(entry, {
+          sessionId,
+          taskSlug: entry.session.taskSlug,
+          role: entry.session.role,
+          type: "exit",
+          exitCode: entry.session.exitCode ?? null
+        });
+        entry.listeners.clear();
+      }
       await entry.logWriter.close();
     },
     async restart(sessionId) {
       const entry = getEntry(entries, sessionId);
-      entry.disposed = true;
       entry.process.kill();
+      disposeEntry(entries, entry, "exited", entry.session.exitCode ?? null);
+      entry.listeners.clear();
       await entry.logWriter.close();
       return create(entry.input, sessionId);
     },
@@ -200,6 +206,23 @@ export function createNodePtyTerminalRuntime(deps: NodePtyRuntimeDeps): Terminal
       };
     }
   };
+}
+
+function disposeEntry(
+  entries: Map<string, RuntimeEntry>,
+  entry: RuntimeEntry,
+  status: TerminalSession["status"],
+  exitCode: number | null
+): boolean {
+  if (entry.disposed) {
+    return false;
+  }
+  entry.disposed = true;
+  entry.session.status = status;
+  entry.session.exitCode = exitCode;
+  void entry.logWriter.close();
+  entries.delete(entry.session.id);
+  return true;
 }
 
 export function createTerminalLogWriter(

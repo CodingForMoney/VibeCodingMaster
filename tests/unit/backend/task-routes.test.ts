@@ -103,6 +103,69 @@ describe("task routes", () => {
 
     await app.close();
   });
+
+  it("degrades task status when the backend hits the open-files limit", async () => {
+    const app = Fastify({ logger: false });
+
+    registerTaskRoutes(app, {
+      projectService: {
+        async getCurrentProject() {
+          return {
+            repoRoot: "/repo"
+          };
+        }
+      } as never,
+      taskService: {
+        async listTasks() {
+          return [];
+        },
+        async createTask() {
+          return createTask();
+        },
+        async loadTask() {
+          return createTask();
+        },
+        async cleanupTask() {
+          throw new Error("not used");
+        }
+      } as never,
+      sessionService: {
+        async listRoleSessions() {
+          return [];
+        },
+        async stopRoleSession() {
+          throw new Error("not used");
+        }
+      },
+      statusService: {
+        async getTaskStatus() {
+          throw Object.assign(new Error("EMFILE: too many open files"), {
+            code: "EMFILE"
+          });
+        }
+      } as never,
+      translationService: {
+        async stopTask() {
+          throw new Error("not used");
+        }
+      },
+      roundService: {
+        stopTask() {}
+      }
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/tasks/demo-task/status"
+    });
+
+    expect(response.statusCode).toBe(200);
+    const payload = response.json();
+    expect(payload.task.taskSlug).toBe("demo-task");
+    expect(payload.sessions).toEqual([]);
+    expect(payload.warnings[0]).toContain("open-files limit");
+    await app.close();
+  });
 });
 
 function createTask(input: Partial<TaskRecord> = {}): TaskRecord {

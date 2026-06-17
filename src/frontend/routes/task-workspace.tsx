@@ -12,6 +12,8 @@ import { getSessionForRole } from "../state/session-store.js";
 import { apiClient } from "../state/api-client.js";
 import { selectAutoDispatchRole } from "../state/message-navigation.js";
 
+const TASK_MESSAGE_STATE_POLL_INTERVAL_MS = 2000;
+
 export interface TaskWorkspaceProps {
   task: TaskRecord;
   activeRole: RoleName;
@@ -264,7 +266,7 @@ export function TaskWorkspace({
         .finally(() => {
           inFlight = false;
         });
-    }, 200);
+    }, TASK_MESSAGE_STATE_POLL_INTERVAL_MS);
 
     return () => {
       cancelled = true;

@@ -13,13 +13,23 @@ export interface MessageRouteDeps {
 
 export function registerMessageRoutes(app: FastifyInstance, deps: MessageRouteDeps): void {
   app.get<{ Params: { taskSlug: string } }>("/api/tasks/:taskSlug/messages", async (request) => {
-    const context = await getRouteContext(deps, request.params.taskSlug);
-    return deps.messageService.listMessages(context);
+    return withOpenFileLimitFallback(
+      async () => {
+        const context = await getRouteContext(deps, request.params.taskSlug);
+        return deps.messageService.listMessages(context);
+      },
+      () => []
+    );
   });
 
   app.get<{ Params: { taskSlug: string } }>("/api/tasks/:taskSlug/messages/pending-routes", async (request) => {
-    const context = await getRouteContext(deps, request.params.taskSlug);
-    return deps.messageService.listPendingRouteFiles(context);
+    return withOpenFileLimitFallback(
+      async () => {
+        const context = await getRouteContext(deps, request.params.taskSlug);
+        return deps.messageService.listPendingRouteFiles(context);
+      },
+      () => []
+    );
   });
 
   app.post<{ Params: { taskSlug: string } }>(
@@ -39,20 +49,18 @@ export function registerMessageRoutes(app: FastifyInstance, deps: MessageRouteDe
   });
 
   app.get<{ Params: { taskSlug: string } }>("/api/tasks/:taskSlug/orchestration", async (request) => {
-    const context = await getRouteContext(deps, request.params.taskSlug);
-    try {
-      return await deps.messageService.getOrchestrationState(context);
-    } catch (error) {
-      if (isOpenFileLimitError(error)) {
-        return {
-          taskSlug: request.params.taskSlug,
-          mode: "auto",
-          updatedAt: new Date().toISOString(),
-          warning: `Backend open-files limit reached while reading orchestration state: ${errorMessage(error)}`
-        };
-      }
-      throw error;
-    }
+    return withOpenFileLimitFallback(
+      async () => {
+        const context = await getRouteContext(deps, request.params.taskSlug);
+        return deps.messageService.getOrchestrationState(context);
+      },
+      (error) => ({
+        taskSlug: request.params.taskSlug,
+        mode: "auto" as const,
+        updatedAt: new Date().toISOString(),
+        warning: `Backend open-files limit reached while reading orchestration state: ${errorMessage(error)}`
+      })
+    );
   });
 
   app.put<{ Params: { taskSlug: string }; Body: { mode?: VcmOrchestrationMode } }>(
@@ -76,6 +84,20 @@ export function registerMessageRoutes(app: FastifyInstance, deps: MessageRouteDe
 
 function errorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
+}
+
+async function withOpenFileLimitFallback<T>(
+  run: () => Promise<T>,
+  fallback: (error: unknown) => T
+): Promise<T> {
+  try {
+    return await run();
+  } catch (error) {
+    if (isOpenFileLimitError(error)) {
+      return fallback(error);
+    }
+    throw error;
+  }
 }
 
 async function getRouteContext(deps: MessageRouteDeps, taskSlug: string) {
