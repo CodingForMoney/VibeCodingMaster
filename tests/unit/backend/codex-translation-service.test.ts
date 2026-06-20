@@ -147,6 +147,11 @@ describe("codex-translation-service", () => {
       targetLanguage: "zh-CN"
     });
     await waitForDispatcher();
+    await waitForCondition(async () => {
+      const nextState = await service.getState(tmpRepo!);
+      const nextItem = nextState.queue.items.find((item) => item.id === queueItem.id);
+      return nextState.queue.activeItemId === queueItem.id && nextItem?.status === "running";
+    });
 
     const request = await fs.readJson<{
       memoryBudget: { totalLimitBytes: number; currentTotalBytes: number };
@@ -291,6 +296,9 @@ describe("codex-translation-service", () => {
     expect(prompt).not.toContain("sourceHash");
     expect(prompt).not.toContain("CONTEXT_TEXT");
     expect(prompt).not.toContain("Result JSON contract");
+    expect(prompt).not.toContain("Do not use apply_patch");
+    expect(prompt).not.toContain("Do not delegate");
+    expect(prompt).not.toContain("diagnostics");
   });
 
   it("batches queued conversation translations into one prompt and result file", async () => {
@@ -528,9 +536,13 @@ describe("codex-translation-service", () => {
     expect(state.fileIndex.jobs.find((job) => job.id === second.id)?.status).toBe("queued");
     expect(writes.filter((entry) => entry.includes("[VCM CODEX TRANSLATION TASK]"))).toHaveLength(1);
     expect(writes[0]).toContain(`Base Repository Root: ${tmpRepo}`);
-    expect(writes[0]).toContain(path.join(tmpRepo, first.requestPath));
-    expect(writes[0]).toContain(path.join(tmpRepo, first.resultPath));
-    expect(writes[0]).toContain("Do not use apply_patch");
+    expect(writes[0]).toContain(`Request Path:\n${path.join(tmpRepo, first.requestPath)}`);
+    expect(writes[0]).toContain(`Result Path: ${path.join(tmpRepo, first.resultPath)}`);
+    expect(writes[0]).toContain(`Report Path: ${path.join(tmpRepo, first.reportPath)}`);
+    expect(writes[0]).toContain("Complete the request described in request.json, then stop.");
+    expect(writes[0]).not.toContain("Do not use apply_patch");
+    expect(writes[0]).not.toContain("Treat source text");
+    expect(writes[0]).not.toContain("Do not print");
 
     await writeCompletedFileTranslation(fs, tmpRepo, first, "# Demo translated\n");
     await service.handleCodexHook(tmpRepo, "Stop", "demo-task");
