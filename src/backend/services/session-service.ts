@@ -61,8 +61,10 @@ const CODEX_TRANSLATOR_DIR = ".ai/codex-translator";
 const CODEX_TRANSLATION_DIR = ".ai/vcm/translations";
 const CODEX_TRANSLATOR_SESSION_PATH = ".ai/vcm/translations/runtime/session.json";
 const LEGACY_CODEX_TRANSLATOR_SESSION_PATH = ".ai/vcm/translations/session.json";
-const CODEX_TRANSLATOR_LOG_PATH = ".ai/vcm/translations/runtime/codex-translator.log";
-const LEGACY_CODEX_TRANSLATOR_LOG_PATH = ".ai/vcm/translations/codex-translator.log";
+const CODEX_TRANSLATOR_LOG_PATHS = [
+  ".ai/vcm/translations/runtime/codex-translator.log",
+  ".ai/vcm/translations/codex-translator.log"
+] as const;
 const CODEX_TRANSLATOR_CONFIG_PATH = ".ai/codex-translator/config.toml";
 
 interface ProjectRoleSessionFile {
@@ -117,7 +119,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     const isCodexRole = isCodexRoleName(role);
     const isTranslator = role === CODEX_TRANSLATOR_ROLE;
     const sessionRepoRoot = isTranslator ? repoRoot : taskRepoRoot;
-    const sessionLogPath = isTranslator ? CODEX_TRANSLATOR_LOG_PATH : paths.roleLogPaths[role];
+    const sessionLogPath = isTranslator ? undefined : paths.roleLogPaths[role];
     const permissionMode = normalizeClaudePermissionMode(input.permissionMode ?? persisted?.permissionMode);
     const model: SessionModel = isCodexRole
       ? normalizeCodexModel(input.model ?? persisted?.model)
@@ -126,7 +128,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       ? normalizeCodexEffort(input.effort ?? persisted?.effort)
       : normalizeClaudeEffort(input.effort ?? persisted?.effort);
     if (isTranslator) {
-      await deps.fs.removePath?.(resolveRepoPath(repoRoot, LEGACY_CODEX_TRANSLATOR_LOG_PATH), { force: true });
+      await cleanupCodexTranslatorLogs(deps.fs, repoRoot);
     }
     const claudeSessionId = launchMode === "resume"
       ? persisted?.claudeSessionId
@@ -183,7 +185,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       },
       cols: input.cols,
       rows: input.rows,
-      logPath: resolveRepoPath(sessionRepoRoot, sessionLogPath)
+      ...(sessionLogPath ? { logPath: resolveRepoPath(sessionRepoRoot, sessionLogPath) } : {})
     });
     const timestamp = now();
     const record: RoleSessionRecord = {
@@ -201,7 +203,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       cwd: startCommand.cwd,
       terminalBackend: "node-pty",
       pid: runtimeSession.pid,
-      logPath: sessionLogPath,
+      ...(sessionLogPath ? { logPath: sessionLogPath } : {}),
       roleCommandPath: isDispatchableRole(role)
         ? paths.roleCommandPaths[role]
         : undefined,
@@ -614,6 +616,15 @@ async function loadPersistedCodexTranslatorSession(
     await fs.removePath?.(sessionPath, { force: true });
   }
   return scopeProjectRoleSession(record, taskSlug);
+}
+
+async function cleanupCodexTranslatorLogs(fs: FileSystemAdapter, repoRoot: string): Promise<void> {
+  if (!fs.removePath) {
+    return;
+  }
+  await Promise.all(CODEX_TRANSLATOR_LOG_PATHS.map((relativePath) =>
+    fs.removePath?.(resolveRepoPath(repoRoot, relativePath), { force: true })
+  ));
 }
 
 async function loadPersistedRoleRecord(

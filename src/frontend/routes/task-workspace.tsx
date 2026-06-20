@@ -390,6 +390,8 @@ export function TaskWorkspace({
     }
   }
 
+  const autoOrchestrationEnabled = (orchestration?.mode ?? "auto") === "auto";
+
   return (
     <div className="task-workspace">
       <header className="workspace-header">
@@ -403,6 +405,17 @@ export function TaskWorkspace({
           onSelect={onActiveRoleChange}
         />
         <div className="workspace-header-actions">
+          <button
+            aria-label={`Auto orchestration is ${autoOrchestrationEnabled ? "on" : "off"}`}
+            aria-pressed={autoOrchestrationEnabled}
+            className={`orchestration-toggle${autoOrchestrationEnabled ? " is-active" : ""}`}
+            disabled={busy}
+            type="button"
+            onClick={() => void setOrchestrationMode(autoOrchestrationEnabled ? "manual" : "auto")}
+          >
+            <span>Auto orchestration</span>
+            <strong>{autoOrchestrationEnabled ? "on" : "off"}</strong>
+          </button>
           <button className="danger-button" type="button" disabled={busy} onClick={() => void closeTask()}>
             Close Task
           </button>
@@ -433,14 +446,12 @@ export function TaskWorkspace({
                     effort={efforts[role]}
                     active={isActive}
                     busy={busy}
-                    orchestrationMode={orchestration?.mode ?? "auto"}
                     translationEnabled={translationEnabled}
                     translationAutoSendEnabled={translationAutoSendEnabled}
                     translationTargetLanguage={translationTargetLanguage}
                     onPermissionModeChange={(permissionMode) => setRolePermissionMode(role, permissionMode)}
                     onModelChange={(model) => setRoleModel(role, model)}
                     onEffortChange={(effort) => setRoleEffort(role, effort)}
-                    onOrchestrationModeChange={(mode) => void setOrchestrationMode(mode)}
                     onStart={() => void runAction(async () => {
                       await apiClient.startRoleSession(task.taskSlug, role, {
                         cols: 100,

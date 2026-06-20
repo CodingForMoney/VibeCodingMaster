@@ -73,7 +73,11 @@ describe("createHarnessService", () => {
     expect(codexHooks).toContain("Stop");
     expect(codexHooks).toContain("/api/hooks/codex-reviewer");
     expect(codexHooks).toContain("/api/hooks/codex-reviewer/stop");
-    expect(await fs.readText("/repo/.ai/codex-translator/AGENTS.md")).toContain("You are VCM `codex-translator`");
+    const translatorAgents = await fs.readText("/repo/.ai/codex-translator/AGENTS.md");
+    expect(translatorAgents).toContain("You are VCM `codex-translator`");
+    expect(translatorAgents).toContain("Use the Codex model itself to translate");
+    expect(translatorAgents).toContain("Do not call, probe, benchmark, or test external translation services");
+    expect(translatorAgents).toMatch(/Do not create a fake, placeholder, deterministic, or partial\s+success artifact/);
     expect(await fs.readText("/repo/.ai/codex-translator/config.toml")).toContain("vcm_codex_translator");
     const translatorHooks = await fs.readText("/repo/.ai/codex-translator/.codex/hooks.json");
     expect(translatorHooks).toContain("/api/hooks/codex-translator");

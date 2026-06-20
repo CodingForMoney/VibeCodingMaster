@@ -1,4 +1,3 @@
-import type { VcmOrchestrationMode } from "../../shared/types/message.js";
 import { isCodexRoleName } from "../../shared/constants.js";
 import type { TranslationTargetLanguage } from "../../shared/types/app-settings.js";
 import type { RoleName } from "../../shared/types/role.js";
@@ -15,14 +14,12 @@ export interface SessionConsoleProps {
   effort: SessionEffort;
   active?: boolean;
   busy?: boolean;
-  orchestrationMode: VcmOrchestrationMode;
   translationEnabled: boolean;
   translationAutoSendEnabled: boolean;
   translationTargetLanguage: TranslationTargetLanguage;
   onPermissionModeChange(mode: ClaudePermissionMode): void;
   onModelChange(model: SessionModel): void;
   onEffortChange(effort: SessionEffort): void;
-  onOrchestrationModeChange(mode: VcmOrchestrationMode): void;
   onStart(): void;
   onResume(): void;
   onStop(): void;
@@ -38,122 +35,71 @@ export function SessionConsole({
   effort,
   active = true,
   busy,
-  orchestrationMode,
   translationEnabled,
   translationAutoSendEnabled,
   translationTargetLanguage,
   onPermissionModeChange,
   onModelChange,
   onEffortChange,
-  onOrchestrationModeChange,
   onStart,
   onResume,
   onStop,
   onRestart,
   onTerminalEvent
 }: SessionConsoleProps) {
-  const autoOrchestrationEnabled = orchestrationMode === "auto";
   const isCodexRole = isCodexRoleName(role);
+  const showTranslation = !isCodexRole && translationEnabled && session?.status === "running";
 
   return (
     <section className="session-console">
-      <div className="session-console-top">
-        <SessionToolbar
-          role={role}
-          session={session}
-          permissionMode={permissionMode}
-          model={model}
-          effort={effort}
-          busy={busy}
-          onPermissionModeChange={onPermissionModeChange}
-          onModelChange={onModelChange}
-          onEffortChange={onEffortChange}
-          onStart={onStart}
-          onResume={onResume}
-          onStop={onStop}
-          onRestart={onRestart}
-        />
-        {isCodexRole ? null : (
-          <div className="session-console-actions">
-            <button
-              aria-label={`Auto orchestration is ${autoOrchestrationEnabled ? "on" : "off"}`}
-              aria-pressed={autoOrchestrationEnabled}
-              className={`translation-toggle${autoOrchestrationEnabled ? " is-active" : ""}`}
-              disabled={busy}
-              type="button"
-              onClick={() => onOrchestrationModeChange(autoOrchestrationEnabled ? "manual" : "auto")}
-            >
-              {autoOrchestrationEnabled ? "✅ Auto orchestration" : "× Auto orchestration"}
-            </button>
-          </div>
-        )}
-      </div>
-      {session?.status === "running" ? (
-        <SessionConsoleBody
-          active={active}
-          onTerminalEvent={onTerminalEvent}
-          role={role}
-          session={session}
-          taskSlug={session.taskSlug}
-          translationEnabled={!isCodexRole && translationEnabled}
-          translationAutoSendEnabled={translationAutoSendEnabled}
-          translationTargetLanguage={translationTargetLanguage}
-        />
-      ) : (
-        <div className="terminal-empty">
-          <strong>{role}</strong>
-          <span>
-            {isCodexRole
-              ? session?.claudeSessionId
-                ? `Resume this role to reconnect the ${role === "codex-translator" ? "Codex Translator" : "Codex Reviewer"} terminal.`
-                : `Start this role to open an embedded ${role === "codex-translator" ? "Codex Translator" : "Codex Reviewer"} terminal.`
-              : session?.claudeSessionId
-              ? "Resume this role to reconnect its Claude Code conversation."
-              : "Start this role to open an embedded Claude Code terminal."}
-          </span>
-        </div>
-      )}
-    </section>
-  );
-}
-
-function SessionConsoleBody({
-  active,
-  onTerminalEvent,
-  role,
-  session,
-  taskSlug,
-  translationEnabled,
-  translationAutoSendEnabled,
-  translationTargetLanguage
-}: {
-  active: boolean;
-  onTerminalEvent(message: string): void;
-  role: RoleName;
-  session: RoleSessionRecord;
-  taskSlug: string;
-  translationEnabled: boolean;
-  translationAutoSendEnabled: boolean;
-  translationTargetLanguage: TranslationTargetLanguage;
-}) {
-  return (
-    <div className={translationEnabled ? "session-console-body has-translation" : "session-console-body"}>
-      <div className="terminal-pane">
-        <XtermView key={session.id} sessionId={session.id} active={active} onEvent={onTerminalEvent} />
-      </div>
-      {translationEnabled ? (
-        <div className="translation-pane">
-          <TranslationPanel
-            key={session.id}
-            active={active}
-            autoSendEnabled={translationAutoSendEnabled}
-            targetLanguage={translationTargetLanguage}
-            taskSlug={taskSlug}
+      <div className={showTranslation ? "session-console-body has-translation" : "session-console-body"}>
+        <div className="terminal-pane">
+          <SessionToolbar
             role={role}
-            sessionId={session.id}
+            session={session}
+            permissionMode={permissionMode}
+            model={model}
+            effort={effort}
+            busy={busy}
+            onPermissionModeChange={onPermissionModeChange}
+            onModelChange={onModelChange}
+            onEffortChange={onEffortChange}
+            onStart={onStart}
+            onResume={onResume}
+            onStop={onStop}
+            onRestart={onRestart}
           />
+          {session?.status === "running" ? (
+            <XtermView key={session.id} sessionId={session.id} active={active} onEvent={onTerminalEvent} />
+          ) : (
+            <div className="terminal-empty">
+              <strong>{role}</strong>
+              <span>
+                {isCodexRole
+                  ? session?.claudeSessionId
+                    ? `Resume this role to reconnect the ${role === "codex-translator" ? "Codex Translator" : "Codex Reviewer"} terminal.`
+                    : `Start this role to open an embedded ${role === "codex-translator" ? "Codex Translator" : "Codex Reviewer"} terminal.`
+                  : session?.claudeSessionId
+                  ? "Resume this role to reconnect its Claude Code conversation."
+                  : "Start this role to open an embedded Claude Code terminal."}
+              </span>
+            </div>
+          )}
         </div>
-      ) : null}
-    </div>
+        {showTranslation ? (
+          <div className="translation-pane">
+            <TranslationPanel
+              key={session.id}
+              active={active}
+              autoSendEnabled={translationAutoSendEnabled}
+              targetLanguage={translationTargetLanguage}
+              taskSlug={session.taskSlug}
+              role={role}
+              sessionId={session.id}
+            />
+          </div>
+        ) : null}
+      </div>
+    </section>
   );
 }

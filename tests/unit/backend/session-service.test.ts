@@ -207,6 +207,8 @@ describe("createSessionService", () => {
     const fs = createMemoryFs();
     await fs.writeText("/repo/.ai/codex-translator", "");
     await fs.writeText("/repo/.ai/codex-translator/config.toml", `approval_policy = "never"`);
+    await fs.writeText("/repo/.ai/vcm/translations/runtime/codex-translator.log", "old runtime log");
+    await fs.writeText("/repo/.ai/vcm/translations/codex-translator.log", "old legacy log");
     const firstRuntimeInputs: CreateTerminalSessionInput[] = [];
     const firstService = createTestSessionService(fs, firstRuntimeInputs, [], {
       worktreePath: "/repo/.claude/worktrees/demo-task"
@@ -217,14 +219,16 @@ describe("createSessionService", () => {
       effort: "xhigh"
     });
 
-    expect(started.logPath).toBe(".ai/vcm/translations/runtime/codex-translator.log");
+    expect(started.logPath).toBeUndefined();
     expect(firstRuntimeInputs[0]?.cwd).toBe("/repo");
     expect(firstRuntimeInputs[0]?.env).toMatchObject({
       VCM_TASK_REPO_ROOT: "/repo",
       VCM_TASK_SLUG: "demo-task",
       VCM_ROLE: "codex-translator"
     });
-    expect(firstRuntimeInputs[0]?.logPath).toBe("/repo/.ai/vcm/translations/runtime/codex-translator.log");
+    expect(firstRuntimeInputs[0]?.logPath).toBeUndefined();
+    await expect(fs.pathExists("/repo/.ai/vcm/translations/runtime/codex-translator.log")).resolves.toBe(false);
+    await expect(fs.pathExists("/repo/.ai/vcm/translations/codex-translator.log")).resolves.toBe(false);
     await expect(fs.pathExists("/repo/.ai/vcm/translations/runtime/session.json")).resolves.toBe(true);
     await expect(fs.pathExists("/repo/.claude/worktrees/demo-task/.ai/vcm/sessions/demo-task.json"))
       .resolves.toBe(false);
@@ -247,9 +251,9 @@ describe("createSessionService", () => {
       role: "codex-translator",
       taskSlug: "next-task",
       status: "resumable",
-      claudeSessionId: "codex-translator-real-session",
-      logPath: ".ai/vcm/translations/runtime/codex-translator.log"
+      claudeSessionId: "codex-translator-real-session"
     });
+    expect(recovered?.logPath).toBeUndefined();
 
     const resumed = await secondService.resumeRoleSession("/repo", "next-task", "codex-translator");
     expect(resumed.claudeSessionId).toBe("codex-translator-real-session");
@@ -757,6 +761,9 @@ function createMemoryFs(): FileSystemAdapter {
       }
       files.set(targetPath, content);
       return true;
+    },
+    async removePath(targetPath) {
+      files.delete(targetPath);
     }
   };
 }

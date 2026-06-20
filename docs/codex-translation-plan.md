@@ -115,7 +115,6 @@ Recommended layout:
   runtime/
     queue.json
     session.json
-    codex-translator.log
     bootstrap/
       runs/
         <bootstrap-id>/
@@ -316,9 +315,10 @@ Bootstrap should be rerunnable. A rerun creates a new bootstrap id and preserves
 previous reports. Codex may append new memory entries, but user corrections in
 memory files override automatic bootstrap entries.
 
-## 7. File Index And De-duplication
+## 7. File Index And Replacement
 
-`index.json` prevents duplicate translation and supports resume.
+`index.json` tracks file translation jobs, completed-output replacement, and
+resume state.
 
 Suggested schema shape:
 
@@ -344,7 +344,7 @@ Suggested schema shape:
       "codexSessionId": "...",
       "model": "gpt-5.5",
       "effort": "medium",
-      "resultPath": ".ai/vcm/translations/files/completed/whitepaper-v0-8-zh-cn-file-whitepaper-v0-8-20260614-001.md",
+      "resultPath": ".ai/vcm/translations/files/completed/whitepaper-v0-8-zh-cn-default-technical-whitepaper-<source-path-hash>.md",
       "reportPath": ".ai/vcm/translations/runtime/files/jobs/whitepaper-v0-8-zh-20260614-001/report.md",
       "createdAt": "2026-06-14T00:00:00.000Z",
       "updatedAt": "2026-06-14T00:00:00.000Z",
@@ -357,19 +357,23 @@ Suggested schema shape:
 `sourcePath`, `resultPath`, and `reportPath` are relative to `<baseRepoRoot>`.
 They are not relative to a task worktree.
 
-De-duplication rules:
+Replacement rules:
 
-- If the same `dedupeKey` has a completed job, VCM should show the existing
-  translation instead of starting a new one.
-- If the source hash changed, VCM must create a new job.
+- Selecting `Translate` always creates a new file translation job for the
+  chosen source file and target language.
+- If a completed translation already exists for the same `sourcePath`,
+  `targetLanguage`, and `translationProfile`, VCM keeps it visible until the new
+  job completes successfully.
+- After the new job passes validation, VCM replaces the completed output for
+  that same file/language/profile and removes the superseded job from
+  `files/index.json`.
+- If the new job fails, is interrupted, or needs review, the previous completed
+  output remains intact.
 - If the same file is selected from a task worktree, VCM should normalize the
   source path back to the base repo path when possible; the long-term job still
   belongs to `<baseRepoRoot>/.ai/vcm/translations/files/completed/`.
-- If only memory files changed, VCM should ask whether to reuse the old
-  translation, re-run consistency review, or retranslate.
 - Failed or interrupted jobs can be resumed when `progress.json` has enough
   section state.
-- Force retranslate should create a new job id and preserve the old result.
 
 ## 8. Codex Translator Role
 
@@ -483,6 +487,14 @@ It must:
   result files; do not create extra logs, scratch files, alternate outputs, or
   helper artifacts
 
+Codex Translator must use the Codex model itself as the translation engine. It
+must not look for local translation packages, call public translation endpoints,
+probe services such as Google Translate or LibreTranslate, send source/project
+content to third-party services, or create deterministic/placeholder fallback
+translations. If Codex cannot complete the assigned translation with the model
+and permitted local file reads/writes, it should stop and write diagnostics to
+the assigned report path instead of producing a fake success artifact.
+
 Every file-translation chunk prompt must wrap source text in a clear data
 boundary:
 
@@ -589,7 +601,6 @@ All translation work enters the same VCM-managed queue:
 - bootstrap runs
 - retry requests
 - resume requests
-- force-retranslate requests
 
 Queue rules:
 
@@ -634,7 +645,7 @@ Suggested queue item shape:
   "items": [
     {
       "id": "queue-item-001",
-      "type": "bootstrap | file | conversation | retry | resume | force-retranslate",
+      "type": "bootstrap | file | conversation | retry | resume",
       "status": "running",
       "targetLanguage": "zh-CN",
       "jobId": "whitepaper-v0-8-zh-20260614-001",
@@ -662,9 +673,7 @@ Recommended flow:
 ```text
 User selects source file and target language
   -> VCM computes file metadata and source hash
-  -> VCM checks .ai/vcm/translations/files/index.json
-  -> if completed duplicate exists, show existing result
-  -> else create translation job
+  -> VCM creates a new translation job
   -> VCM enqueues the file translation job
   -> when the job reaches the queue head, VCM starts or resumes Codex Translator
   -> VCM sends job prompt to Codex Translator
@@ -673,6 +682,8 @@ User selects source file and target language
   -> Codex writes runtime report.md
   -> VCM validates the runtime output/report
   -> VCM moves completed output into files/completed/
+  -> if an older completed output exists for the same file/language/profile,
+     VCM replaces it after validation
   -> VCM deletes the runtime job directory
   -> VCM marks job completed / failed / interrupted
   -> VCM starts the next queued translation task
@@ -919,8 +930,7 @@ Resume behavior:
 - If the terminal was stopped, resume the Codex session id when possible.
 - If the session cannot resume, start a new Codex Translator session and reload
   memory plus runtime `request.json`, `progress.json`, and partial `output.md`.
-- Never overwrite a completed output unless the job is explicitly marked as
-  force-retranslate.
+- Never replace a completed output until the new job has passed validation.
 
 Cancellation and interruption behavior:
 
@@ -972,7 +982,6 @@ Controls in the file translation view:
 - model
 - effort
 - `Resume`
-- `Force retranslate`
 - `Promote`
 
 Promote behavior:
@@ -1040,8 +1049,7 @@ New backend pieces:
   - validate file and conversation result files
   - record promote metadata when users export translations into the repo tree
 - translation queue service
-  - enqueue bootstrap, file, conversation, retry, resume, and
-    force-retranslate tasks
+  - enqueue bootstrap, file, conversation, retry, and resume tasks
   - persist `runtime/queue.json`
   - persist queue item status
   - ensure only one active Codex Translator task at a time
@@ -1179,7 +1187,8 @@ durable under `translations/files/completed/`.
   completed.
 - Add shared queue status for file and conversation translation tasks.
 - Add Codex Translator terminal surface.
-- Add duplicate detection and force retranslate UX.
+- Replace older completed file translations after a new translation for the
+  same file/language/profile completes successfully.
 - Add cancel, skip, manual resolve, and promote actions.
 - Reuse the existing role-console translation panel for conversation
   translation results.

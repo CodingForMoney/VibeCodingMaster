@@ -871,59 +871,52 @@ h2 {
 }
 
 .session-console {
-  display: grid;
-  grid-template-rows: auto minmax(0, 1fr);
-  gap: 8px;
+  display: flex;
+  flex-direction: column;
   flex: 1;
   height: 100%;
   min-height: 0;
 }
 
-.session-console-top {
-  display: flex;
-  gap: 10px;
-  align-items: center;
-  justify-content: space-between;
-}
-
-.session-console-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  align-items: center;
-  justify-content: flex-end;
-}
-
 .session-controls {
   display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
+  flex-wrap: nowrap;
+  gap: 6px;
   align-items: center;
   justify-content: flex-start;
-  margin: 0 0 8px;
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
 }
 
 .session-option-field {
   display: grid;
-  grid-template-columns: auto minmax(180px, 260px);
-  gap: 8px;
+  grid-template-columns: auto minmax(120px, 1fr);
+  flex: 0 1 210px;
+  gap: 5px;
   align-items: center;
-  width: fit-content;
-  max-width: 100%;
+  min-width: 0;
+}
+
+.permission-mode-field {
+  flex-basis: 250px;
 }
 
 .model-field {
-  grid-template-columns: auto minmax(190px, 260px);
+  flex-basis: 220px;
 }
 
 .effort-field {
-  grid-template-columns: auto minmax(120px, 160px);
+  grid-template-columns: auto minmax(92px, 1fr);
+  flex-basis: 150px;
 }
 
 .session-option-field span {
   color: #5f6a6c;
-  font-size: 13px;
+  font-size: 11px;
   font-weight: 650;
+  line-height: 1;
+  white-space: nowrap;
 }
 
 .session-option-field small {
@@ -936,32 +929,37 @@ h2 {
 
 .session-option-field select {
   width: 100%;
-  min-height: 30px;
+  min-width: 0;
+  min-height: 26px;
   border: 1px solid #b9b0a1;
   border-radius: 6px;
   background: #fffdf8;
   color: #202326;
-  padding: 4px 8px;
+  padding: 2px 7px;
+  font-size: 12px;
 }
 
 .session-toolbar {
   display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
+  gap: 5px;
   margin-left: auto;
   justify-content: flex-end;
 }
 
 .session-toolbar button {
-  min-height: 30px;
-  padding: 4px 9px;
+  min-height: 26px;
+  padding: 2px 8px;
+  font-size: 12px;
 }
 
-.translation-toggle {
+.orchestration-toggle {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 28px;
+  gap: 8px;
+  min-height: 30px;
   border: 1px solid #b5bec4;
   border-radius: 6px;
   background: #fffefa;
@@ -972,7 +970,12 @@ h2 {
   white-space: nowrap;
 }
 
-.translation-toggle.is-active {
+.orchestration-toggle strong {
+  font-size: 11px;
+  text-transform: uppercase;
+}
+
+.orchestration-toggle.is-active {
   border-color: #2f7e84;
   background: #e8f4f2;
   color: #145e64;
@@ -981,6 +984,7 @@ h2 {
 .session-console-body {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
+  flex: 1;
   min-width: 0;
   min-height: 0;
   height: 100%;
@@ -999,6 +1003,15 @@ h2 {
   min-width: 0;
   min-height: 0;
   height: 100%;
+}
+
+.terminal-pane {
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 8px;
+}
+
+.translation-pane {
+  grid-template-rows: minmax(0, 1fr);
 }
 
 .terminal-frame,
@@ -2088,6 +2101,12 @@ h2 {
     grid-template-columns: 1fr;
   }
 
+  .session-controls,
+  .session-toolbar {
+    flex-wrap: wrap;
+    overflow: visible;
+  }
+
   .file-translation-modal {
     width: 95vw;
     height: 95vh;
@@ -2374,13 +2393,13 @@ h2 {
 :root[data-theme="dark"] .role-tab.is-active,
 :root[data-theme="dark"] .sidebar-settings .settings-toggle.is-active,
 :root[data-theme="dark"] .gateway-actions .settings-toggle.is-active,
-:root[data-theme="dark"] .translation-toggle.is-active {
+:root[data-theme="dark"] .orchestration-toggle.is-active {
   border-color: #56d4dd;
   background: #10262b;
   color: #d6fbff;
 }
 
-:root[data-theme="dark"] .translation-toggle {
+:root[data-theme="dark"] .orchestration-toggle {
   border-color: #3d4652;
   background: #161b22;
   color: #b7c0ca;

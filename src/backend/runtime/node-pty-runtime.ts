@@ -49,7 +49,9 @@ export function createNodePtyTerminalRuntime(deps: NodePtyRuntimeDeps): Terminal
   };
 
   const create = async (input: CreateTerminalSessionInput, sessionId = id()): Promise<TerminalSession> => {
-    await deps.fs.ensureDir(input.logPath.replace(/[/\\][^/\\]+$/, ""));
+    if (input.logPath) {
+      await deps.fs.ensureDir(input.logPath.replace(/[/\\][^/\\]+$/, ""));
+    }
 
     const child = pty.spawn(input.command, input.args, {
       cwd: input.cwd,
@@ -69,11 +71,13 @@ export function createNodePtyTerminalRuntime(deps: NodePtyRuntimeDeps): Terminal
       exitCode: null
     };
 
-    const logWriter = createTerminalLogWriter(
-      deps.fs,
-      input.logPath,
-      deps.onLogWriteError ?? defaultLogWriteErrorHandler
-    );
+    const logWriter = input.logPath
+      ? createTerminalLogWriter(
+          deps.fs,
+          input.logPath,
+          deps.onLogWriteError ?? defaultLogWriteErrorHandler
+        )
+      : createNoopTerminalLogWriter();
     const entry: RuntimeEntry = {
       input,
       session,
@@ -179,7 +183,7 @@ export function createNodePtyTerminalRuntime(deps: NodePtyRuntimeDeps): Terminal
       const entry = getEntry(entries, sessionId);
       entry.listeners.add(listener);
 
-      if (options.replay !== false) {
+      if (options.replay !== false && entry.input.logPath) {
         void readTerminalReplayText(deps.fs, entry.input.logPath)
           .then((data) => {
             if (!data || !entry.listeners.has(listener)) {
@@ -223,6 +227,13 @@ function disposeEntry(
   void entry.logWriter.close();
   entries.delete(entry.session.id);
   return true;
+}
+
+function createNoopTerminalLogWriter(): TerminalLogWriter {
+  return {
+    append() {},
+    async close() {}
+  };
 }
 
 export function createTerminalLogWriter(

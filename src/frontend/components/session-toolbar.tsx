@@ -5,7 +5,6 @@ import {
   CLAUDE_MODEL_OPTIONS,
   CODEX_EFFORT_OPTIONS,
   CODEX_MODEL_OPTIONS,
-  SESSION_EFFORT_OPTIONS,
   type ClaudePermissionMode,
   type RoleSessionRecord,
   type SessionEffort,
@@ -47,11 +46,6 @@ export function SessionToolbar({
   const canResume = Boolean(session?.claudeSessionId && !isRunning);
   const canStart = !isRunning && !session?.claudeSessionId;
   const isCodexRole = isCodexRoleName(role);
-  const modeWillChange = Boolean(session && session.permissionMode !== permissionMode);
-  const sessionModel = session?.model ?? "default";
-  const modelWillChange = Boolean(session && sessionModel !== model);
-  const sessionEffort = session?.effort ?? "default";
-  const effortWillChange = Boolean(session && sessionEffort !== effort);
   const modelOptions = isCodexRole ? CODEX_MODEL_OPTIONS : CLAUDE_MODEL_OPTIONS;
   const effortOptions = isCodexRole ? CODEX_EFFORT_OPTIONS : CLAUDE_EFFORT_OPTIONS;
 
@@ -61,11 +55,6 @@ export function SessionToolbar({
         <label className="session-option-field permission-mode-field">
           <span>
             Permission
-            <small>
-              {session
-                ? `current: ${formatPermissionMode(session.permissionMode)}${modeWillChange ? " / next launch" : ""}`
-                : "applies on start"}
-            </small>
           </span>
           <select
             value={permissionMode}
@@ -80,11 +69,6 @@ export function SessionToolbar({
       <label className="session-option-field model-field">
         <span>
           Model
-          <small>
-            {session
-              ? `current: ${formatSessionModel(sessionModel, isCodexRole)}${modelWillChange ? " / next launch" : ""}`
-              : "applies on start"}
-          </small>
         </span>
         <select
           value={model}
@@ -101,11 +85,6 @@ export function SessionToolbar({
       <label className="session-option-field effort-field">
         <span>
           Effort
-          <small>
-            {session
-              ? `current: ${formatSessionEffort(sessionEffort)}${effortWillChange ? " / next launch" : ""}`
-              : "applies on start"}
-          </small>
         </span>
         <select
           value={effort}
@@ -135,19 +114,4 @@ export function SessionToolbar({
       </div>
     </div>
   );
-}
-
-function formatPermissionMode(permissionMode: ClaudePermissionMode): string {
-  return permissionMode;
-}
-
-function formatSessionModel(model: SessionModel, isCodexRole: boolean): string {
-  if (isCodexRole) {
-    return CODEX_MODEL_OPTIONS.find((option) => option.value === model)?.label ?? model;
-  }
-  return CLAUDE_MODEL_OPTIONS.find((option) => option.value === model)?.label ?? model;
-}
-
-function formatSessionEffort(effort: SessionEffort): string {
-  return SESSION_EFFORT_OPTIONS.find((option) => option.value === effort)?.label ?? effort;
 }

@@ -55,6 +55,20 @@ describe("codex-translation-service", () => {
     expect(state.fileIndex.jobs[0]?.id).toBe(job.id);
   });
 
+  it("removes obsolete Codex Translator terminal logs from the translation runtime", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-codex-translation-logs-"));
+    await mkdir(path.join(tmpRepo, ".ai/vcm/translations/runtime"), { recursive: true });
+    await writeFile(path.join(tmpRepo, ".ai/vcm/translations/runtime/codex-translator.log"), "runtime log", "utf8");
+    await writeFile(path.join(tmpRepo, ".ai/vcm/translations/codex-translator.log"), "legacy log", "utf8");
+    const fs = createNodeFileSystemAdapter();
+    const service = createCodexTranslationService({ fs });
+
+    await service.getState(tmpRepo);
+
+    await expect(fs.pathExists(path.join(tmpRepo, ".ai/vcm/translations/runtime/codex-translator.log"))).resolves.toBe(false);
+    await expect(fs.pathExists(path.join(tmpRepo, ".ai/vcm/translations/codex-translator.log"))).resolves.toBe(false);
+  });
+
   it("creates bootstrap runs and memory files", async () => {
     tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-codex-bootstrap-"));
     await writeFile(path.join(tmpRepo, "README.md"), "# Demo\n", "utf8");
@@ -351,6 +365,62 @@ describe("codex-translation-service", () => {
       .rejects.toMatchObject({
         code: "TRANSLATION_PROMOTE_SOURCE_OVERWRITE"
       });
+  });
+
+  it("retranslates files through the normal translate flow and replaces completed output", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-codex-retranslate-"));
+    await writeFile(path.join(tmpRepo, "README.md"), "# Demo\n\nHello project.\n", "utf8");
+    const fs = createNodeFileSystemAdapter();
+    const writes: string[] = [];
+    const service = createCodexTranslationService({
+      fs,
+      runtime: createRuntimeStub(writes),
+      sessionService: createTranslatorSessionService([])
+    });
+
+    const first = await service.createFileJob(tmpRepo, {
+      taskSlug: "demo-task",
+      sourcePath: "README.md",
+      targetLanguage: "zh-CN"
+    });
+    await waitForDispatcher();
+    await fs.writeText(path.join(tmpRepo, first.resultPath), "# 旧译文\n");
+    await service.handleCodexHook(tmpRepo, "Stop", "demo-task");
+
+    let state = await service.getState(tmpRepo);
+    const firstCompleted = state.fileIndex.jobs.find((job) => job.id === first.id);
+    expect(firstCompleted?.status).toBe("completed");
+    expect(firstCompleted?.resultPath).toContain(".ai/vcm/translations/files/completed/");
+    expect(await fs.readText(path.join(tmpRepo, firstCompleted!.resultPath))).toBe("# 旧译文\n");
+
+    await writeFile(path.join(tmpRepo, "README.md"), "# Demo\n\nHello updated project.\n", "utf8");
+    const second = await service.createFileJob(tmpRepo, {
+      taskSlug: "demo-task",
+      sourcePath: "README.md",
+      targetLanguage: "zh-CN"
+    });
+    expect(second.id).not.toBe(first.id);
+    await waitForCondition(async () => {
+      const nextState = await service.getState(tmpRepo!);
+      return nextState.queue.activeItemId === second.queueItemId &&
+        nextState.fileIndex.jobs.find((job) => job.id === second.id)?.status === "running";
+    });
+
+    await fs.writeText(path.join(tmpRepo, second.resultPath), "# 新译文\n");
+    await service.handleCodexHook(tmpRepo, "Stop", "demo-task");
+    state = await service.getState(tmpRepo);
+
+    const completedJobs = state.fileIndex.jobs.filter((job) =>
+      job.sourcePath === "README.md" &&
+      job.targetLanguage === "zh-CN" &&
+      job.translationProfile === "default" &&
+      job.status === "completed"
+    );
+    expect(completedJobs.map((job) => job.id)).toEqual([second.id]);
+    expect(completedJobs[0]?.resultPath).toBe(firstCompleted?.resultPath);
+    expect(await fs.readText(path.join(tmpRepo, completedJobs[0]!.resultPath))).toBe("# 新译文\n");
+    expect(state.fileIndex.jobs.some((job) => job.id === first.id)).toBe(false);
+    expect(state.queue.items.some((item) => item.id === first.queueItemId || item.id === second.queueItemId)).toBe(false);
   });
 
   it("keeps the queue single-threaded and dispatches the next item after Stop", async () => {
