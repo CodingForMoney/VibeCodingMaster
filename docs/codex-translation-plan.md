@@ -364,7 +364,27 @@ management pattern:
 - persisted Codex session id
 - long-lived terminal session for follow-up discussion
 
-Session identity is fixed by base repository and target language:
+VCM persists the active translator session at:
+
+```text
+<baseRepoRoot>/.ai/vcm/translations/session.json
+```
+
+This record is project-level state, not task-level state. It stores the Codex
+session id, selected model, selected effort, terminal cwd, log path, and hook
+activity state needed to show `Resume` after VCM restarts or after the user opens
+another task. The embedded terminal `Restart` control must stop the current
+runtime process, create a fresh Codex session id, overwrite this record, and keep
+old translation outputs intact.
+
+When a Codex hook has captured the real Codex `session_id`, `Resume` must run
+`codex resume <session_id>` so it reconnects the same translator conversation.
+Before the first hook captures a real id, VCM may fall back to `codex resume
+--last`.
+
+Session identity is fixed by base repository. If VCM later supports multiple
+parallel target-language translator sessions, split this file into a
+target-language keyed session directory:
 
 - one Codex Translator session per `<baseRepoRoot> + targetLanguage`
 - different target languages must use different sessions to avoid terminology

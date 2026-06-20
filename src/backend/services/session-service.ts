@@ -59,7 +59,16 @@ const CODEX_REVIEW_DIR = ".ai/vcm/codex-reviews";
 const CODEX_CONFIG_PATH = ".ai/codex/config.toml";
 const CODEX_TRANSLATOR_DIR = ".ai/codex-translator";
 const CODEX_TRANSLATION_DIR = ".ai/vcm/translations";
+const CODEX_TRANSLATOR_SESSION_PATH = ".ai/vcm/translations/session.json";
+const CODEX_TRANSLATOR_LOG_PATH = ".ai/vcm/translations/codex-translator.log";
 const CODEX_TRANSLATOR_CONFIG_PATH = ".ai/codex-translator/config.toml";
+
+interface ProjectRoleSessionFile {
+  version: 1;
+  role: RoleName;
+  updatedAt: string;
+  record: RoleSessionRecord;
+}
 
 export interface RecordClaudeHookEventInput {
   taskSlug: string;
@@ -90,7 +99,10 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     input: StartRoleSessionRequest,
     launchMode: LaunchMode
   ): Promise<RoleSessionRecord> {
-    const live = deps.registry.getByRole(taskSlug, role);
+    const live = toRoleSessionRecordView(
+      getRegisteredRoleSession(deps.registry, deps.runtime, taskSlug, role),
+      deps.runtime
+    );
     if (live && live.status === "running") {
       return live;
     }
@@ -99,8 +111,11 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     const task = await deps.taskService.loadTask(repoRoot, taskSlug);
     const taskRepoRoot = getTaskRuntimeRepoRoot(task);
     const paths = deps.artifactService.getHandoffPaths(taskRepoRoot, task.handoffDir);
-    const persisted = await loadPersistedRoleRecord(deps.fs, taskRepoRoot, config.stateRoot, taskSlug, role);
+    const persisted = await loadPersistedRoleRecordForRole(deps.fs, repoRoot, taskRepoRoot, config.stateRoot, taskSlug, role);
     const isCodexRole = isCodexRoleName(role);
+    const isTranslator = role === CODEX_TRANSLATOR_ROLE;
+    const sessionRepoRoot = isTranslator ? repoRoot : taskRepoRoot;
+    const sessionLogPath = isTranslator ? CODEX_TRANSLATOR_LOG_PATH : paths.roleLogPaths[role];
     const permissionMode = normalizeClaudePermissionMode(input.permissionMode ?? persisted?.permissionMode);
     const model: SessionModel = isCodexRole
       ? normalizeCodexModel(input.model ?? persisted?.model)
@@ -133,7 +148,8 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
           launchMode,
           model as CodexModel,
           effort,
-          deps.sandboxMode
+          deps.sandboxMode,
+          launchMode === "resume" && hasCapturedCodexSession(persisted) ? claudeSessionId : undefined
         )
       : {
           ...deps.claude.buildRoleStartCommand(
@@ -155,14 +171,14 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       cwd: startCommand.cwd,
       env: {
         VCM_API_URL: deps.apiUrl,
-        VCM_TASK_REPO_ROOT: taskRepoRoot,
+        VCM_TASK_REPO_ROOT: sessionRepoRoot,
         VCM_TASK_SLUG: taskSlug,
         VCM_ROLE: role,
         VCM_SESSION_ID: claudeSessionId
       },
       cols: input.cols,
       rows: input.rows,
-      logPath: resolveRepoPath(taskRepoRoot, paths.roleLogPaths[role])
+      logPath: resolveRepoPath(sessionRepoRoot, sessionLogPath)
     });
     const timestamp = now();
     const record: RoleSessionRecord = {
@@ -180,7 +196,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       cwd: startCommand.cwd,
       terminalBackend: "node-pty",
       pid: runtimeSession.pid,
-      logPath: paths.roleLogPaths[role],
+      logPath: sessionLogPath,
       roleCommandPath: isDispatchableRole(role)
         ? paths.roleCommandPaths[role]
         : undefined,
@@ -192,7 +208,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     };
 
     deps.registry.upsert(record);
-    await persistTaskSession(deps.fs, taskRepoRoot, config.stateRoot, record);
+    await persistRoleSessionRecord(deps.fs, repoRoot, taskRepoRoot, config.stateRoot, record);
     return record;
   }
 
@@ -226,7 +242,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       deps.registry.upsert(updated);
       const config = await deps.projectService.loadConfig(repoRoot);
       const task = await deps.taskService.loadTask(repoRoot, taskSlug);
-      await persistTaskSession(deps.fs, getTaskRuntimeRepoRoot(task), config.stateRoot, updated);
+      await persistRoleSessionRecord(deps.fs, repoRoot, getTaskRuntimeRepoRoot(task), config.stateRoot, updated);
       return updated;
     },
     async restartRoleSession(repoRoot, taskSlug, role, input = {}) {
@@ -246,8 +262,8 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       const config = await deps.projectService.loadConfig(repoRoot);
       const task = await deps.taskService.loadTask(repoRoot, taskSlug);
       const taskRepoRoot = getTaskRuntimeRepoRoot(task);
-      const record = deps.registry.getByRole(taskSlug, role)
-        ?? await loadPersistedRoleRecord(deps.fs, taskRepoRoot, config.stateRoot, taskSlug, role);
+      const record = getRegisteredRoleSession(deps.registry, deps.runtime, taskSlug, role)
+        ?? await loadPersistedRoleRecordForRole(deps.fs, repoRoot, taskRepoRoot, config.stateRoot, taskSlug, role);
       if (!record) {
         return undefined;
       }
@@ -261,9 +277,13 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       const taskRepoRoot = getTaskRuntimeRepoRoot(task);
       const persistedTaskSession = await loadPersistedTaskSessionRecord(deps.fs, taskRepoRoot, config.stateRoot, taskSlug);
       for (const role of ROLE_NAMES) {
+        const record = role === CODEX_TRANSLATOR_ROLE
+          ? getRegisteredRoleSession(deps.registry, deps.runtime, taskSlug, role)
+            ?? await loadPersistedCodexTranslatorSession(deps.fs, repoRoot, taskSlug)
+          : deps.registry.getByRole(taskSlug, role)
+            ?? normalizePersistedRoleRecord(persistedTaskSession?.roles[role]?.record);
         const session = toRoleSessionRecordView(
-          deps.registry.getByRole(taskSlug, role)
-            ?? normalizePersistedRoleRecord(persistedTaskSession?.roles[role]?.record),
+          record,
           deps.runtime
         );
         if (session) {
@@ -295,7 +315,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
 
       const config = await deps.projectService.loadConfig(repoRoot);
       const task = await deps.taskService.loadTask(repoRoot, input.taskSlug);
-      await persistTaskSession(deps.fs, getTaskRuntimeRepoRoot(task), config.stateRoot, updated);
+      await persistRoleSessionRecord(deps.fs, repoRoot, getTaskRuntimeRepoRoot(task), config.stateRoot, updated);
       return updated;
     },
     recordClaudeHookEvent(repoRoot, input) {
@@ -326,7 +346,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
 
       const config = await deps.projectService.loadConfig(repoRoot);
       const task = await deps.taskService.loadTask(repoRoot, taskSlug);
-      await persistTaskSession(deps.fs, getTaskRuntimeRepoRoot(task), config.stateRoot, updated);
+      await persistRoleSessionRecord(deps.fs, repoRoot, getTaskRuntimeRepoRoot(task), config.stateRoot, updated);
       return updated;
     },
     async markRoleActivityIdle(repoRoot, taskSlug, role) {
@@ -346,7 +366,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
 
       const config = await deps.projectService.loadConfig(repoRoot);
       const task = await deps.taskService.loadTask(repoRoot, taskSlug);
-      await persistTaskSession(deps.fs, getTaskRuntimeRepoRoot(task), config.stateRoot, updated);
+      await persistRoleSessionRecord(deps.fs, repoRoot, getTaskRuntimeRepoRoot(task), config.stateRoot, updated);
       return updated;
     }
   };
@@ -388,7 +408,8 @@ async function buildCodexStartCommand(
   launchMode: LaunchMode,
   selectedModel: CodexModel,
   selectedEffort: SessionEffort,
-  sandboxMode: string | undefined
+  sandboxMode: string | undefined,
+  resumeSessionId?: string
 ): Promise<{ command: string; args: string[]; display: string; cwd: string }> {
   const isTranslator = role === CODEX_TRANSLATOR_ROLE;
   const codexDir = resolveRepoPath(isTranslator ? baseRepoRoot : taskRepoRoot, isTranslator ? CODEX_TRANSLATOR_DIR : CODEX_DIR);
@@ -405,7 +426,7 @@ async function buildCodexStartCommand(
   await fs.ensureDir(outputDir);
   const config = await loadCodexSessionConfig(fs, isTranslator ? baseRepoRoot : taskRepoRoot, isTranslator ? CODEX_TRANSLATOR_CONFIG_PATH : CODEX_CONFIG_PATH);
   const args = launchMode === "resume"
-    ? ["resume", "--last"]
+    ? resumeSessionId ? ["resume", resumeSessionId] : ["resume", "--last"]
     : [];
   args.push("--cd", codexDir);
   if (isDevContainerSandbox(sandboxMode)) {
@@ -440,6 +461,10 @@ async function buildCodexStartCommand(
     cwd: isTranslator ? baseRepoRoot : taskRepoRoot,
     display: [config.command, ...args].map(formatDisplayArg).join(" ")
   };
+}
+
+function hasCapturedCodexSession(record: RoleSessionRecord | undefined): boolean {
+  return Boolean(record?.lastHookEventAt || record?.transcriptPath);
 }
 
 function isDevContainerSandbox(value: string | undefined): boolean {
@@ -498,6 +523,68 @@ function getHandoffArtifactPath(paths: ReturnType<ArtifactService["getHandoffPat
     return paths.reviewReportPath;
   }
   return undefined;
+}
+
+function getRegisteredRoleSession(
+  registry: SessionRegistry,
+  runtime: TerminalRuntime,
+  taskSlug: string,
+  role: RoleName
+): RoleSessionRecord | undefined {
+  if (role !== CODEX_TRANSLATOR_ROLE) {
+    return registry.getByRole(taskSlug, role);
+  }
+
+  const candidates = registry.list().filter((session) => session.role === role);
+  const live = candidates.find((session) => runtime.getSession(session.id)?.status === "running");
+  const scoped = live
+    ?? candidates.find((session) => session.taskSlug === taskSlug)
+    ?? candidates.sort(compareSessionUpdatedAtDesc)[0];
+  return scopeProjectRoleSession(scoped, taskSlug);
+}
+
+function compareSessionUpdatedAtDesc(left: RoleSessionRecord, right: RoleSessionRecord): number {
+  return (right.updatedAt ?? "").localeCompare(left.updatedAt ?? "");
+}
+
+function scopeProjectRoleSession(record: RoleSessionRecord | undefined, taskSlug: string): RoleSessionRecord | undefined {
+  if (!record || record.role !== CODEX_TRANSLATOR_ROLE) {
+    return record;
+  }
+  return {
+    ...record,
+    taskSlug
+  };
+}
+
+async function loadPersistedRoleRecordForRole(
+  fs: FileSystemAdapter,
+  baseRepoRoot: string,
+  taskRepoRoot: string,
+  stateRoot: string,
+  taskSlug: string,
+  role: RoleName
+): Promise<RoleSessionRecord | undefined> {
+  if (role === CODEX_TRANSLATOR_ROLE) {
+    return loadPersistedCodexTranslatorSession(fs, baseRepoRoot, taskSlug);
+  }
+
+  return loadPersistedRoleRecord(fs, taskRepoRoot, stateRoot, taskSlug, role);
+}
+
+async function loadPersistedCodexTranslatorSession(
+  fs: FileSystemAdapter,
+  repoRoot: string,
+  taskSlug: string
+): Promise<RoleSessionRecord | undefined> {
+  const sessionPath = resolveRepoPath(repoRoot, CODEX_TRANSLATOR_SESSION_PATH);
+  if (!(await fs.pathExists(sessionPath))) {
+    return undefined;
+  }
+
+  const payload = await fs.readJson<ProjectRoleSessionFile | RoleSessionRecord>(sessionPath);
+  const record = normalizePersistedRoleRecord(isProjectRoleSessionFile(payload) ? payload.record : payload);
+  return scopeProjectRoleSession(record, taskSlug);
 }
 
 async function loadPersistedRoleRecord(
@@ -584,6 +671,44 @@ async function persistTaskSession(
       }
     }
   });
+}
+
+async function persistRoleSessionRecord(
+  fs: FileSystemAdapter,
+  baseRepoRoot: string,
+  taskRepoRoot: string,
+  stateRoot: string,
+  session: RoleSessionRecord
+): Promise<void> {
+  if (session.role === CODEX_TRANSLATOR_ROLE) {
+    await persistCodexTranslatorSession(fs, baseRepoRoot, session);
+    return;
+  }
+
+  await persistTaskSession(fs, taskRepoRoot, stateRoot, session);
+}
+
+async function persistCodexTranslatorSession(
+  fs: FileSystemAdapter,
+  repoRoot: string,
+  session: RoleSessionRecord
+): Promise<void> {
+  await fs.writeJsonAtomic<ProjectRoleSessionFile>(
+    resolveRepoPath(repoRoot, CODEX_TRANSLATOR_SESSION_PATH),
+    {
+      version: 1,
+      role: session.role,
+      updatedAt: session.updatedAt,
+      record: {
+        ...session,
+        taskSlug: session.taskSlug
+      }
+    }
+  );
+}
+
+function isProjectRoleSessionFile(value: ProjectRoleSessionFile | RoleSessionRecord): value is ProjectRoleSessionFile {
+  return "record" in value && typeof value.record === "object" && value.record !== null;
 }
 
 function createEmptyTaskSessionRecord(taskSlug: string, updatedAt: string): TaskSessionRecord {

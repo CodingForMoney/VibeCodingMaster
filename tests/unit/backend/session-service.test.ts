@@ -174,6 +174,76 @@ describe("createSessionService", () => {
     expect(runtimeInputs[0]?.args).not.toContain("--ask-for-approval");
   });
 
+  it("persists Codex Translator sessions at the project translation root", async () => {
+    const fs = createMemoryFs();
+    await fs.writeText("/repo/.ai/codex-translator", "");
+    await fs.writeText("/repo/.ai/codex-translator/config.toml", `approval_policy = "never"`);
+    const firstRuntimeInputs: CreateTerminalSessionInput[] = [];
+    const firstService = createTestSessionService(fs, firstRuntimeInputs, [], {
+      worktreePath: "/repo/.claude/worktrees/demo-task"
+    });
+
+    const started = await firstService.startRoleSession("/repo", "demo-task", "codex-translator", {
+      model: "gpt-5.5",
+      effort: "xhigh"
+    });
+
+    expect(started.logPath).toBe(".ai/vcm/translations/codex-translator.log");
+    expect(firstRuntimeInputs[0]?.cwd).toBe("/repo");
+    expect(firstRuntimeInputs[0]?.env).toMatchObject({
+      VCM_TASK_REPO_ROOT: "/repo",
+      VCM_TASK_SLUG: "demo-task",
+      VCM_ROLE: "codex-translator"
+    });
+    expect(firstRuntimeInputs[0]?.logPath).toBe("/repo/.ai/vcm/translations/codex-translator.log");
+    await expect(fs.pathExists("/repo/.ai/vcm/translations/session.json")).resolves.toBe(true);
+    await expect(fs.pathExists("/repo/.claude/worktrees/demo-task/.ai/vcm/sessions/demo-task.json"))
+      .resolves.toBe(false);
+
+    const hooked = await firstService.recordRoleHookEvent("/repo", {
+      taskSlug: "demo-task",
+      role: "codex-translator",
+      eventName: "UserPromptSubmit",
+      sessionId: "codex-translator-real-session",
+      transcriptPath: "/Users/sheldon/.codex/sessions/codex-translator-real-session.jsonl",
+      cwd: "/repo/.ai/codex-translator",
+      allowSessionMismatch: true
+    });
+    expect(hooked?.claudeSessionId).toBe("codex-translator-real-session");
+
+    const secondRuntimeInputs: CreateTerminalSessionInput[] = [];
+    const secondService = createTestSessionService(fs, secondRuntimeInputs);
+    const recovered = await secondService.getRoleSession("/repo", "next-task", "codex-translator");
+    expect(recovered).toMatchObject({
+      role: "codex-translator",
+      taskSlug: "next-task",
+      status: "resumable",
+      claudeSessionId: "codex-translator-real-session",
+      logPath: ".ai/vcm/translations/codex-translator.log"
+    });
+
+    const resumed = await secondService.resumeRoleSession("/repo", "next-task", "codex-translator");
+    expect(resumed.claudeSessionId).toBe("codex-translator-real-session");
+    expect(secondRuntimeInputs[0]?.args).toEqual([
+      "resume",
+      "codex-translator-real-session",
+      "--cd",
+      "/repo/.ai/codex-translator",
+      "--add-dir",
+      "/repo",
+      "--sandbox",
+      "workspace-write",
+      "--ask-for-approval",
+      "never",
+      "--dangerously-bypass-hook-trust",
+      "--search",
+      "--model",
+      "gpt-5.5",
+      "--config",
+      'model_reasoning_effort="xhigh"'
+    ]);
+  });
+
   it("overrides Codex Reviewer reasoning effort from the launch request", async () => {
     const fs = createMemoryFs();
     await fs.writeText("/repo/.ai/codex", "");
