@@ -28,7 +28,11 @@ describe("codex-translation-service", () => {
       sourcePath: "README.md",
       targetLanguage: "zh-CN"
     });
-    const request = await fs.readJson<{ baseRepoRoot: string; absolutePaths: { sourcePath: string; resultPath: string } }>(
+    const request = await fs.readJson<{
+      baseRepoRoot: string;
+      absolutePaths: { sourcePath: string; resultPath: string; finalResultPath: string };
+      outputContract: { stagingResultPath: string; finalResultPath: string };
+    }>(
       path.join(tmpRepo, job.requestPath)
     );
     const state = await service.getState(tmpRepo);
@@ -37,7 +41,10 @@ describe("codex-translation-service", () => {
     expect(request.baseRepoRoot).toBe(tmpRepo);
     expect(request.absolutePaths.sourcePath).toBe(path.join(tmpRepo, "README.md"));
     expect(request.absolutePaths.resultPath).toBe(path.join(tmpRepo, job.resultPath));
-    expect(job.resultPath).toContain(".ai/vcm/translations/files/jobs/");
+    expect(request.absolutePaths.finalResultPath).toContain(path.join(tmpRepo, ".ai/vcm/translations/files/completed/"));
+    expect(request.outputContract.stagingResultPath).toBe(job.resultPath);
+    expect(request.outputContract.finalResultPath).toContain(".ai/vcm/translations/files/completed/");
+    expect(job.resultPath).toContain(".ai/vcm/translations/runtime/files/jobs/");
     expect(state.queue.items).toHaveLength(1);
     expect(state.queue.items[0]).toMatchObject({
       type: "file",
@@ -78,7 +85,7 @@ describe("codex-translation-service", () => {
     tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-codex-conversation-"));
     const fs = createNodeFileSystemAdapter();
     const service = createCodexTranslationService({ fs });
-    const resultPath = ".ai/vcm/translations/conversations/demo-task/codex-translator/results/result.json";
+    const resultPath = ".ai/vcm/translations/runtime/conversations/demo-task/codex-translator/results/result.json";
     await fs.writeJson(path.join(tmpRepo, resultPath), {
       version: 1,
       id: "result",
@@ -118,7 +125,7 @@ describe("codex-translation-service", () => {
     );
     const state = await service.getState(tmpRepo);
 
-    expect(job.resultPath).toContain(".ai/vcm/translations/conversations/demo-task/coder/jobs/");
+    expect(job.resultPath).toContain(".ai/vcm/translations/runtime/conversations/demo-task/coder/jobs/");
     expect(request.baseRepoRoot).toBe(tmpRepo);
     expect(request.outputContract.resultPath).toBe(job.resultPath);
     expect(request.outputContract.absoluteResultPath).toBe(path.join(tmpRepo, job.resultPath));
@@ -129,6 +136,37 @@ describe("codex-translation-service", () => {
       jobId: job.id,
       expectedResultPath: job.resultPath
     });
+  });
+
+  it("dispatches conversation translation with inline source text and file output", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-codex-conversation-inline-"));
+    const fs = createNodeFileSystemAdapter();
+    const writes: string[] = [];
+    const service = createCodexTranslationService({
+      fs,
+      runtime: createRuntimeStub(writes),
+      sessionService: createTranslatorSessionService([])
+    });
+
+    const job = await service.createConversationJob(tmpRepo, {
+      taskSlug: "demo-task",
+      role: "coder",
+      direction: "user-input-to-english",
+      sourceText: "请检查失败的测试。",
+      sourceLanguage: "auto",
+      targetLanguage: "en",
+      contextText: "The user is asking a coding agent to inspect a failing test."
+    });
+    await waitForDispatcher();
+
+    const prompt = writes.find((entry) => entry.includes("[VCM CODEX TRANSLATION TASK]"));
+    expect(prompt).toContain("Type: conversation");
+    expect(prompt).toContain("The source text is included directly in this prompt.");
+    expect(prompt).not.toContain("Read the request file from this absolute path");
+    expect(prompt).toContain(path.join(tmpRepo, job.resultPath));
+    expect(prompt).toContain(`"sourceHash": "${job.sourceHash}"`);
+    expect(prompt).toContain("<SOURCE_TEXT>\n请检查失败的测试。\n</SOURCE_TEXT>");
+    expect(prompt).toContain("<CONTEXT_TEXT>\nThe user is asking a coding agent to inspect a failing test.\n</CONTEXT_TEXT>");
   });
 
   it("browses translatable source files and filters generated state", async () => {
@@ -168,6 +206,7 @@ describe("codex-translation-service", () => {
     index.jobs[0] = { ...index.jobs[0], status: "completed" };
     await fs.writeJsonAtomic(indexPath, index);
     await fs.writeText(path.join(tmpRepo, job.resultPath), "# Demo translated\n");
+    await service.getState(tmpRepo);
 
     await expect(service.promoteFileJob(tmpRepo, job.id, "README.md"))
       .rejects.toMatchObject({
@@ -216,8 +255,15 @@ describe("codex-translation-service", () => {
     await waitForDispatcher();
 
     state = await service.getState(tmpRepo);
+    const completedFirst = state.fileIndex.jobs.find((job) => job.id === first.id);
     expect(state.queue.activeItemId).toBe(second.queueItemId);
-    expect(state.fileIndex.jobs.find((job) => job.id === first.id)?.status).toBe("completed");
+    expect(completedFirst?.status).toBe("completed");
+    expect(completedFirst?.resultPath).toContain(".ai/vcm/translations/files/completed/");
+    expect(await fs.pathExists(path.join(tmpRepo, completedFirst!.resultPath))).toBe(true);
+    expect(await fs.pathExists(path.join(tmpRepo, first.requestPath))).toBe(false);
+    expect(await fs.pathExists(path.join(tmpRepo, first.progressPath))).toBe(false);
+    expect(await fs.pathExists(path.join(tmpRepo, first.reportPath))).toBe(false);
+    expect(state.queue.items.some((item) => item.id === first.queueItemId)).toBe(false);
     expect(state.fileIndex.jobs.find((job) => job.id === second.id)?.status).toBe("running");
     expect(starts).toEqual(["start:codex-translator"]);
     expect(writes.filter((entry) => entry.includes("[VCM CODEX TRANSLATION TASK]"))).toHaveLength(2);

@@ -174,7 +174,26 @@ describe("createSessionService", () => {
     expect(runtimeInputs[0]?.args).not.toContain("--ask-for-approval");
   });
 
-  it("persists Codex Translator sessions at the project translation root", async () => {
+  it("treats container sandbox aliases as Codex sandbox bypass modes", async () => {
+    const fs = createMemoryFs();
+    await fs.writeText("/repo/.ai/codex", "");
+    await fs.writeText("/repo/.ai/codex/config.toml", `approval_policy = "never"`);
+    const runtimeInputs: CreateTerminalSessionInput[] = [];
+    const service = createTestSessionService(fs, runtimeInputs, [], {
+      sandboxMode: "docker"
+    });
+
+    await service.startRoleSession("/repo", "demo-task", "codex-reviewer", {
+      model: "gpt-5.5",
+      effort: "xhigh"
+    });
+
+    expect(runtimeInputs[0]?.args).toContain("--dangerously-bypass-approvals-and-sandbox");
+    expect(runtimeInputs[0]?.args).not.toContain("--sandbox");
+    expect(runtimeInputs[0]?.args).not.toContain("--add-dir");
+  });
+
+  it("persists Codex Translator sessions under project translation runtime state", async () => {
     const fs = createMemoryFs();
     await fs.writeText("/repo/.ai/codex-translator", "");
     await fs.writeText("/repo/.ai/codex-translator/config.toml", `approval_policy = "never"`);
@@ -188,15 +207,15 @@ describe("createSessionService", () => {
       effort: "xhigh"
     });
 
-    expect(started.logPath).toBe(".ai/vcm/translations/codex-translator.log");
+    expect(started.logPath).toBe(".ai/vcm/translations/runtime/codex-translator.log");
     expect(firstRuntimeInputs[0]?.cwd).toBe("/repo");
     expect(firstRuntimeInputs[0]?.env).toMatchObject({
       VCM_TASK_REPO_ROOT: "/repo",
       VCM_TASK_SLUG: "demo-task",
       VCM_ROLE: "codex-translator"
     });
-    expect(firstRuntimeInputs[0]?.logPath).toBe("/repo/.ai/vcm/translations/codex-translator.log");
-    await expect(fs.pathExists("/repo/.ai/vcm/translations/session.json")).resolves.toBe(true);
+    expect(firstRuntimeInputs[0]?.logPath).toBe("/repo/.ai/vcm/translations/runtime/codex-translator.log");
+    await expect(fs.pathExists("/repo/.ai/vcm/translations/runtime/session.json")).resolves.toBe(true);
     await expect(fs.pathExists("/repo/.claude/worktrees/demo-task/.ai/vcm/sessions/demo-task.json"))
       .resolves.toBe(false);
 
@@ -219,7 +238,7 @@ describe("createSessionService", () => {
       taskSlug: "next-task",
       status: "resumable",
       claudeSessionId: "codex-translator-real-session",
-      logPath: ".ai/vcm/translations/codex-translator.log"
+      logPath: ".ai/vcm/translations/runtime/codex-translator.log"
     });
 
     const resumed = await secondService.resumeRoleSession("/repo", "next-task", "codex-translator");

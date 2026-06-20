@@ -1374,18 +1374,21 @@ function getTranslationCachePath(
 
 function normalizeSettings(input: Partial<TranslationSettings>): TranslationSettings {
   const { apiKey: _apiKey, ...settings } = input;
-    return {
-      ...DEFAULT_SETTINGS,
-      ...settings,
-      version: 1,
-      enabled: true,
-      providerType: "openai-compatible",
-      workingLanguage: "en",
-      inputMode: "review-before-send",
-      translateOutput: true,
-      translateUserInput: true,
-      requestTimeoutMs: clampNumber(input.requestTimeoutMs, 3000, 120000, DEFAULT_SETTINGS.requestTimeoutMs),
-      temperature: clampNumber(input.temperature, 0, 1, DEFAULT_SETTINGS.temperature),
+  return {
+    ...DEFAULT_SETTINGS,
+    ...settings,
+    version: 1,
+    enabled: true,
+    providerType: "openai-compatible",
+    sourceLanguage: DEFAULT_SETTINGS.sourceLanguage,
+    targetLanguage: DEFAULT_SETTINGS.targetLanguage,
+    workingLanguage: "en",
+    inputMode: "review-before-send",
+    translateOutput: true,
+    translateUserInput: true,
+    contextEnabled: false,
+    requestTimeoutMs: DEFAULT_SETTINGS.requestTimeoutMs,
+    temperature: clampNumber(input.temperature, 0, 1, DEFAULT_SETTINGS.temperature),
     prompts: normalizePromptMap(input.prompts)
   };
 }

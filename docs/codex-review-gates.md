@@ -467,10 +467,12 @@ codex \
   --config model_reasoning_effort="<effort-selected-in-VCM-UI>"
 ```
 
-When VCM runs inside a Dev Container with `VCM_SANDBOX=devcontainer`, the
-container is the security boundary. VCM then starts Codex Reviewer without
-Codex's nested filesystem sandbox to avoid Linux container `bwrap` and
-`apply_patch` write failures:
+When VCM runs inside a Dev Container, Docker, Podman, Kubernetes, or Codespaces
+environment, the container is the security boundary. VCM auto-detects that
+environment and starts Codex Reviewer without Codex's nested filesystem sandbox
+to avoid Linux container `bwrap` and `apply_patch` write failures.
+`VCM_SANDBOX=devcontainer` remains an explicit override for environments that
+cannot be auto-detected:
 
 ```bash
 codex \

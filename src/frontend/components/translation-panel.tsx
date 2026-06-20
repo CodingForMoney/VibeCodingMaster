@@ -9,14 +9,14 @@ import type {
   TranslationEntry,
   TranslationFailureItem,
   TranslationSessionEvent,
-  TranslationSessionStatus,
-  TranslationSettings,
+  TranslationSessionStatus
 } from "../../shared/types/translation.js";
 import { TRANSLATION_ENTRY_RETENTION_LIMIT } from "../../shared/types/translation.js";
 import { apiClient } from "../state/api-client.js";
-import { TranslationSettingsModal } from "./translation-settings-modal.js";
 
 type TranslationPanelStatus = TranslationSessionStatus;
+const DEFAULT_TARGET_LANGUAGE = "zh-CN";
+const TRANSLATION_MODE_LABEL = "中英互译";
 
 export interface TranslationPanelProps {
   active?: boolean;
@@ -26,19 +26,16 @@ export interface TranslationPanelProps {
 }
 
 export function TranslationPanel({ active = true, taskSlug, role, sessionId }: TranslationPanelProps) {
-  const [settings, setSettings] = useState<TranslationSettings | null>(null);
   const [entries, setEntries] = useState<TranslationEntry[]>([]);
   const [failures, setFailures] = useState<TranslationFailureItem[]>([]);
   const [composer, setComposer] = useState("");
   const [composerIsEnglishDraft, setComposerIsEnglishDraft] = useState(false);
   const [autoSendEnabled, setAutoSendEnabled] = useState(false);
-  const [contextUsed, setContextUsed] = useState(false);
   const [status, setStatus] = useState<TranslationPanelStatus>("ready");
   const [lastPollAt, setLastPollAt] = useState("");
   const [panelNowMs, setPanelNowMs] = useState(Date.now());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [showSettings, setShowSettings] = useState(false);
   const [fileTranslationOpen, setFileTranslationOpen] = useState(false);
   const [codexState, setCodexState] = useState<CodexTranslationState | null>(null);
   const [selectedFileJobId, setSelectedFileJobId] = useState<string>("");
@@ -49,9 +46,7 @@ export function TranslationPanel({ active = true, taskSlug, role, sessionId }: T
   const [fileBrowserPath, setFileBrowserPath] = useState("");
   const [fileBrowserQuery, setFileBrowserQuery] = useState("");
   const [fileBrowserSelectedPath, setFileBrowserSelectedPath] = useState("");
-  const [fileBrowserTargetLanguage, setFileBrowserTargetLanguage] = useState("zh-CN");
   const [fileBrowserBusy, setFileBrowserBusy] = useState(false);
-  const [pollRevision, setPollRevision] = useState(0);
   const [scrollRevision, setScrollRevision] = useState(0);
   const activeRef = useRef(active);
   const cursorRef = useRef(1);
@@ -60,14 +55,6 @@ export function TranslationPanel({ active = true, taskSlug, role, sessionId }: T
   useEffect(() => {
     activeRef.current = active;
   }, [active]);
-
-  useEffect(() => {
-    void apiClient.getTranslationSettings()
-      .then((next) => {
-        setSettings(next);
-      })
-      .catch((caught: Error) => setError(caught.message));
-  }, []);
 
   useEffect(() => {
     if (!fileTranslationOpen) {
@@ -156,7 +143,7 @@ export function TranslationPanel({ active = true, taskSlug, role, sessionId }: T
       }
       void apiClient.stopTranslationSession(sessionId).catch(() => undefined);
     };
-  }, [sessionId, taskSlug, role, pollRevision]);
+  }, [sessionId, taskSlug, role]);
 
   useEffect(() => {
     if (!active) {
@@ -185,9 +172,6 @@ export function TranslationPanel({ active = true, taskSlug, role, sessionId }: T
   }, [activeTranslationStartedAt]);
 
   async function translateInput(send = false) {
-    if (!settings) {
-      return;
-    }
     setBusy(true);
     setError("");
     setComposerIsEnglishDraft(false);
@@ -195,10 +179,9 @@ export function TranslationPanel({ active = true, taskSlug, role, sessionId }: T
       const result = await apiClient.translateUserInput(taskSlug, role, {
         text: composer,
         mode: send ? "auto-send" : "review-before-send",
-        useContext: settings.contextEnabled,
+        useContext: false,
         send
       });
-      setContextUsed(result.contextUsed);
       if (result.sent) {
         setComposer("");
         setComposerIsEnglishDraft(false);
@@ -256,7 +239,6 @@ export function TranslationPanel({ active = true, taskSlug, role, sessionId }: T
       await apiClient.sendTranslatedInput(taskSlug, role, { englishText: composer });
       setComposer("");
       setComposerIsEnglishDraft(false);
-      setContextUsed(false);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Failed to send English input.");
     } finally {
@@ -275,21 +257,6 @@ export function TranslationPanel({ active = true, taskSlug, role, sessionId }: T
       } else {
         void translateInput(autoSendEnabled);
       }
-    }
-  }
-
-  async function saveSettings(next: Partial<TranslationSettings>, apiKey?: string) {
-    setBusy(true);
-    setError("");
-    try {
-      const saved = await apiClient.updateTranslationSettings({ ...next, ...(apiKey !== undefined ? { apiKey } : {}) });
-      setSettings(saved);
-      setShowSettings(false);
-      setPollRevision((current) => current + 1);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Failed to save translation settings.");
-    } finally {
-      setBusy(false);
     }
   }
 
@@ -357,7 +324,6 @@ export function TranslationPanel({ active = true, taskSlug, role, sessionId }: T
 
   async function openFileBrowser() {
     setFileBrowserOpen(true);
-    setFileBrowserTargetLanguage(settings?.targetLanguage ?? "zh-CN");
     await loadFileBrowser(fileBrowserPath, fileBrowserQuery);
   }
 
@@ -391,7 +357,7 @@ export function TranslationPanel({ active = true, taskSlug, role, sessionId }: T
       const job = await apiClient.createCodexFileTranslation({
         taskSlug,
         sourcePath: normalizedSourcePath,
-        targetLanguage: fileBrowserTargetLanguage.trim() || settings?.targetLanguage || "zh-CN"
+        targetLanguage: DEFAULT_TARGET_LANGUAGE
       });
       setFileBrowserOpen(false);
       await refreshCodexTranslationState();
@@ -409,7 +375,7 @@ export function TranslationPanel({ active = true, taskSlug, role, sessionId }: T
     try {
       await apiClient.createCodexBootstrap({
         taskSlug,
-        targetLanguage: settings?.targetLanguage ?? "zh-CN"
+        targetLanguage: DEFAULT_TARGET_LANGUAGE
       });
       await refreshCodexTranslationState();
     } catch (caught) {
@@ -439,10 +405,6 @@ export function TranslationPanel({ active = true, taskSlug, role, sessionId }: T
     }
   }
 
-  if (!settings) {
-    return <aside className="translation-panel"><p className="muted">Loading translation settings...</p></aside>;
-  }
-
   const panelStatus = getPanelStatus(entries, status, panelNowMs);
   const failureCount = failures.length;
 
@@ -470,11 +432,10 @@ export function TranslationPanel({ active = true, taskSlug, role, sessionId }: T
                 </button>
               </>
             ) : null}
-            <button type="button" onClick={() => setShowSettings(true)}>Settings</button>
             <button
               aria-pressed={fileTranslationOpen}
               type="button"
-              onClick={() => setFileTranslationOpen((current) => !current)}
+              onClick={() => setFileTranslationOpen(true)}
             >
               File
             </button>
@@ -482,27 +443,12 @@ export function TranslationPanel({ active = true, taskSlug, role, sessionId }: T
           </div>
         </div>
         <div className="translation-status-row">
-          <p>Codex · {settings.targetLanguage} · {panelStatus}{contextUsed ? " · context used" : ""}</p>
+          <p>Codex · {TRANSLATION_MODE_LABEL} · {panelStatus}</p>
           <p>{lastPollAt ? `poll ${lastPollAt}` : "poll -"}</p>
         </div>
       </header>
 
       {error ? <div className="error-banner">{error}</div> : null}
-
-      {fileTranslationOpen ? (
-        <FileTranslationPanel
-          busy={busy}
-          state={codexState}
-          selectedJobId={selectedFileJobId}
-          output={selectedFileOutput}
-          report={selectedFileReport}
-          onBootstrap={() => void createBootstrap()}
-          onRefresh={() => void refreshCodexTranslationState()}
-          onSelectJob={(jobId) => void selectFileJob(jobId)}
-          onTranslate={() => void openFileBrowser()}
-          onPromote={() => void promoteSelectedFile()}
-        />
-      ) : null}
 
       <div className="translation-entry-list" ref={entryListRef}>
         {entries.length === 0 ? <p className="muted">Translated Claude Code output will appear here.</p> : null}
@@ -535,13 +481,25 @@ export function TranslationPanel({ active = true, taskSlug, role, sessionId }: T
         </div>
       </div>
 
-      {showSettings ? (
-        <TranslationSettingsModal
-          settings={settings}
-          busy={busy}
-          onSave={saveSettings}
-          onClose={() => setShowSettings(false)}
-        />
+      {fileTranslationOpen ? (
+        <div className="modal-backdrop file-translation-backdrop">
+          <FileTranslationPanel
+            busy={busy}
+            state={codexState}
+            selectedJobId={selectedFileJobId}
+            output={selectedFileOutput}
+            report={selectedFileReport}
+            onBootstrap={() => void createBootstrap()}
+            onClose={() => {
+              setFileTranslationOpen(false);
+              setFileBrowserOpen(false);
+            }}
+            onRefresh={() => void refreshCodexTranslationState()}
+            onSelectJob={(jobId) => void selectFileJob(jobId)}
+            onTranslate={() => void openFileBrowser()}
+            onPromote={() => void promoteSelectedFile()}
+          />
+        </div>
       ) : null}
 
       {fileBrowserOpen ? (
@@ -551,12 +509,10 @@ export function TranslationPanel({ active = true, taskSlug, role, sessionId }: T
           currentPath={fileBrowserPath}
           query={fileBrowserQuery}
           selectedPath={fileBrowserSelectedPath}
-          targetLanguage={fileBrowserTargetLanguage}
           onBrowse={(nextPath, nextQuery) => void loadFileBrowser(nextPath, nextQuery)}
           onClose={() => setFileBrowserOpen(false)}
           onQueryChange={setFileBrowserQuery}
           onSelectPath={setFileBrowserSelectedPath}
-          onTargetLanguageChange={setFileBrowserTargetLanguage}
           onTranslate={() => void createFileTranslation()}
         />
       ) : null}
@@ -570,12 +526,10 @@ function TranslationSourceFileBrowserModal({
   currentPath,
   query,
   selectedPath,
-  targetLanguage,
   onBrowse,
   onClose,
   onQueryChange,
   onSelectPath,
-  onTargetLanguageChange,
   onTranslate
 }: {
   busy: boolean;
@@ -583,12 +537,10 @@ function TranslationSourceFileBrowserModal({
   currentPath: string;
   query: string;
   selectedPath: string;
-  targetLanguage: string;
   onBrowse(path: string, query?: string): void;
   onClose(): void;
   onQueryChange(query: string): void;
   onSelectPath(path: string): void;
-  onTargetLanguageChange(language: string): void;
   onTranslate(): void;
 }) {
   const entries = state?.entries ?? [];
@@ -596,7 +548,7 @@ function TranslationSourceFileBrowserModal({
   const fileEntries = entries.filter((entry) => entry.type === "file");
 
   return (
-    <div className="modal-backdrop">
+    <div className="modal-backdrop translation-file-browser-backdrop">
       <section className="translation-file-browser-modal" role="dialog" aria-modal="true" aria-label="Select Source File">
         <header>
           <div>
@@ -677,13 +629,6 @@ function TranslationSourceFileBrowserModal({
                 onChange={(event) => onSelectPath(event.target.value)}
               />
             </label>
-            <label>
-              <span>Target language</span>
-              <input
-                value={targetLanguage}
-                onChange={(event) => onTargetLanguageChange(event.target.value)}
-              />
-            </label>
             <button type="button" disabled={busy || !selectedPath.trim()} onClick={onTranslate}>
               Translate File
             </button>
@@ -727,6 +672,7 @@ function FileTranslationPanel({
   output,
   report,
   onBootstrap,
+  onClose,
   onRefresh,
   onSelectJob,
   onTranslate,
@@ -738,6 +684,7 @@ function FileTranslationPanel({
   output: string;
   report: string;
   onBootstrap(): void;
+  onClose(): void;
   onRefresh(): void;
   onSelectJob(jobId: string): void;
   onTranslate(): void;
@@ -747,13 +694,20 @@ function FileTranslationPanel({
   const selectedJob = jobs.find((job) => job.id === selectedJobId);
 
   return (
-    <section className="file-translation-panel">
-      <div className="file-translation-toolbar">
-        <button type="button" disabled={busy} onClick={onTranslate}>Translate</button>
-        <button type="button" disabled={busy} onClick={onBootstrap}>Bootstrap</button>
-        <button type="button" disabled={busy} onClick={onRefresh}>Refresh</button>
-        <button type="button" disabled={busy || !selectedJob} onClick={onPromote}>Promote</button>
-      </div>
+    <section className="file-translation-modal" role="dialog" aria-modal="true" aria-label="File Translation">
+      <header className="file-translation-header">
+        <div>
+          <h2>File Translation</h2>
+          <p>Codex · 中英互译</p>
+        </div>
+        <div className="file-translation-toolbar">
+          <button type="button" disabled={busy} onClick={onTranslate}>Translate</button>
+          <button type="button" disabled={busy} onClick={onBootstrap}>Bootstrap</button>
+          <button type="button" disabled={busy} onClick={onRefresh}>Refresh</button>
+          <button type="button" disabled={busy || !selectedJob} onClick={onPromote}>Promote</button>
+          <button type="button" onClick={onClose}>Close</button>
+        </div>
+      </header>
       {!state?.memoryInitialized ? (
         <p className="translation-entry-note">Translation memory is not initialized. Run Bootstrap before important file translations.</p>
       ) : null}

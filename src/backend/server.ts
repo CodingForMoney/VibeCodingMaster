@@ -28,6 +28,7 @@ import { createWeixinIlinkChannel } from "./gateway/channels/weixin-ilink-channe
 import { createGatewayAuditLog } from "./gateway/gateway-audit-log.js";
 import { createGatewayService, type GatewayService } from "./gateway/gateway-service.js";
 import { createGatewaySettingsService } from "./gateway/gateway-settings-service.js";
+import { resolveCodexSandboxMode } from "./codex-sandbox-mode.js";
 import { createJobGuardService } from "./services/job-guard-service.js";
 import { createProjectService, type ProjectService } from "./services/project-service.js";
 import { createSessionRegistry } from "./runtime/session-registry.js";
@@ -223,7 +224,7 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     projectService,
     taskService,
     apiUrl: options.apiUrl,
-    sandboxMode: process.env.VCM_SANDBOX
+    sandboxMode: resolveCodexSandboxMode(process.env)
   });
   const commandDispatcher = createCommandDispatcher({
     runtime,

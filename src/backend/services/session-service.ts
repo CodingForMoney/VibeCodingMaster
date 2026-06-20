@@ -59,8 +59,10 @@ const CODEX_REVIEW_DIR = ".ai/vcm/codex-reviews";
 const CODEX_CONFIG_PATH = ".ai/codex/config.toml";
 const CODEX_TRANSLATOR_DIR = ".ai/codex-translator";
 const CODEX_TRANSLATION_DIR = ".ai/vcm/translations";
-const CODEX_TRANSLATOR_SESSION_PATH = ".ai/vcm/translations/session.json";
-const CODEX_TRANSLATOR_LOG_PATH = ".ai/vcm/translations/codex-translator.log";
+const CODEX_TRANSLATOR_SESSION_PATH = ".ai/vcm/translations/runtime/session.json";
+const LEGACY_CODEX_TRANSLATOR_SESSION_PATH = ".ai/vcm/translations/session.json";
+const CODEX_TRANSLATOR_LOG_PATH = ".ai/vcm/translations/runtime/codex-translator.log";
+const LEGACY_CODEX_TRANSLATOR_LOG_PATH = ".ai/vcm/translations/codex-translator.log";
 const CODEX_TRANSLATOR_CONFIG_PATH = ".ai/codex-translator/config.toml";
 
 interface ProjectRoleSessionFile {
@@ -123,6 +125,9 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     const effort = isCodexRole
       ? normalizeCodexEffort(input.effort ?? persisted?.effort)
       : normalizeClaudeEffort(input.effort ?? persisted?.effort);
+    if (isTranslator) {
+      await deps.fs.removePath?.(resolveRepoPath(repoRoot, LEGACY_CODEX_TRANSLATOR_LOG_PATH), { force: true });
+    }
     const claudeSessionId = launchMode === "resume"
       ? persisted?.claudeSessionId
       : randomUUID();
@@ -468,7 +473,17 @@ function hasCapturedCodexSession(record: RoleSessionRecord | undefined): boolean
 }
 
 function isDevContainerSandbox(value: string | undefined): boolean {
-  return value?.toLowerCase() === "devcontainer";
+  const normalized = value?.toLowerCase().replace(/[\s_-]+/g, "");
+  return normalized === "devcontainer" ||
+    normalized === "container" ||
+    normalized === "docker" ||
+    normalized === "podman" ||
+    normalized === "codespaces" ||
+    normalized === "bypass" ||
+    normalized === "nosandbox" ||
+    normalized === "disabled" ||
+    normalized === "off" ||
+    normalized === "none";
 }
 
 async function loadCodexSessionConfig(
@@ -577,13 +592,27 @@ async function loadPersistedCodexTranslatorSession(
   repoRoot: string,
   taskSlug: string
 ): Promise<RoleSessionRecord | undefined> {
-  const sessionPath = resolveRepoPath(repoRoot, CODEX_TRANSLATOR_SESSION_PATH);
+  let sessionPath = resolveRepoPath(repoRoot, CODEX_TRANSLATOR_SESSION_PATH);
   if (!(await fs.pathExists(sessionPath))) {
-    return undefined;
+    const legacySessionPath = resolveRepoPath(repoRoot, LEGACY_CODEX_TRANSLATOR_SESSION_PATH);
+    if (!(await fs.pathExists(legacySessionPath))) {
+      return undefined;
+    }
+    sessionPath = legacySessionPath;
   }
 
   const payload = await fs.readJson<ProjectRoleSessionFile | RoleSessionRecord>(sessionPath);
   const record = normalizePersistedRoleRecord(isProjectRoleSessionFile(payload) ? payload.record : payload);
+  if (!record) {
+    return undefined;
+  }
+  if (sessionPath.endsWith(LEGACY_CODEX_TRANSLATOR_SESSION_PATH)) {
+    await persistCodexTranslatorSession(fs, repoRoot, {
+      ...record,
+      taskSlug
+    });
+    await fs.removePath?.(sessionPath, { force: true });
+  }
   return scopeProjectRoleSession(record, taskSlug);
 }
 

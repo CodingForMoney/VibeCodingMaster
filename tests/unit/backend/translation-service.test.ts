@@ -17,7 +17,7 @@ import type { TranslationSessionEvent, TranslationWsMessage } from "../../../src
 import { TRANSLATION_ENTRY_RETENTION_LIMIT } from "../../../src/shared/types/translation.js";
 
 describe("translation-service", () => {
-  it("uses conservative defaults for context and request timeout", async () => {
+  it("uses fixed defaults for language direction, context, and request timeout", async () => {
     const service = createTranslationService({
       appSettings: createAppSettingsService({
         fs: createMemoryFs(),
@@ -31,6 +31,20 @@ describe("translation-service", () => {
     });
 
     await expect(service.getSettings()).resolves.toMatchObject({
+      sourceLanguage: "auto",
+      targetLanguage: "zh-CN",
+      contextEnabled: false,
+      requestTimeoutMs: 120000
+    });
+
+    await expect(service.updateSettings({
+      sourceLanguage: "ja",
+      targetLanguage: "fr",
+      contextEnabled: true,
+      requestTimeoutMs: 3000
+    })).resolves.toMatchObject({
+      sourceLanguage: "auto",
+      targetLanguage: "zh-CN",
       contextEnabled: false,
       requestTimeoutMs: 120000
     });
@@ -1031,9 +1045,9 @@ function createCodexTranslationServiceStub(calls: unknown[], translatedText: str
         sourceHash: "sha256:conversation-source",
         sourceLanguage: input.sourceLanguage,
         targetLanguage: input.targetLanguage,
-        requestPath: ".ai/vcm/translations/conversations/demo-task/coder/jobs/conversation-1/request.json",
-        resultPath: ".ai/vcm/translations/conversations/demo-task/coder/jobs/conversation-1/result.json",
-        reportPath: ".ai/vcm/translations/conversations/demo-task/coder/jobs/conversation-1/report.md",
+        requestPath: ".ai/vcm/translations/runtime/conversations/demo-task/coder/jobs/conversation-1/request.json",
+        resultPath: ".ai/vcm/translations/runtime/conversations/demo-task/coder/jobs/conversation-1/result.json",
+        reportPath: ".ai/vcm/translations/runtime/conversations/demo-task/coder/jobs/conversation-1/report.md",
         queueItemId: "queue-conversation-1",
         createdAt: timestamp,
         updatedAt: timestamp
@@ -1062,9 +1076,9 @@ function createCodexTranslationServiceStub(calls: unknown[], translatedText: str
             type: "conversation",
             status: "completed",
             targetLanguage: "en",
-            requestPath: ".ai/vcm/translations/conversations/demo-task/coder/jobs/conversation-1/request.json",
-            expectedResultPath: ".ai/vcm/translations/conversations/demo-task/coder/jobs/conversation-1/result.json",
-            reportPath: ".ai/vcm/translations/conversations/demo-task/coder/jobs/conversation-1/report.md",
+            requestPath: ".ai/vcm/translations/runtime/conversations/demo-task/coder/jobs/conversation-1/request.json",
+            expectedResultPath: ".ai/vcm/translations/runtime/conversations/demo-task/coder/jobs/conversation-1/result.json",
+            reportPath: ".ai/vcm/translations/runtime/conversations/demo-task/coder/jobs/conversation-1/report.md",
             createdAt: timestamp,
             updatedAt: timestamp
           }]
