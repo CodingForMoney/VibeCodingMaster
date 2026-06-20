@@ -119,7 +119,7 @@ export interface TranslationServiceDeps {
   codexTranslationService?: Pick<CodexTranslationService, "createConversationJob" | "validateConversationResult" | "getState">;
   fs?: FileSystemAdapter;
   projectService?: Pick<ProjectService, "loadConfig">;
-  appSettings: Pick<AppSettingsService, "getTranslationConfig" | "updateTranslationConfig">;
+  appSettings: Pick<AppSettingsService, "getPreferences" | "getTranslationConfig" | "updateTranslationConfig">;
   now?: () => string;
   id?: () => string;
 }
@@ -185,16 +185,20 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
 
   async function loadConfig(): Promise<StoredTranslationConfig> {
     if (cachedConfig) {
+      const preferences = await deps.appSettings.getPreferences();
+      cachedConfig = withTargetLanguagePreference(cachedConfig, preferences.translationTargetLanguage);
       return cachedConfig;
     }
     const storedConfig = await deps.appSettings.getTranslationConfig();
     if (!storedConfig) {
-      cachedConfig = { settings: DEFAULT_SETTINGS, secrets: {} };
+      const preferences = await deps.appSettings.getPreferences();
+      cachedConfig = withTargetLanguagePreference({ settings: DEFAULT_SETTINGS, secrets: {} }, preferences.translationTargetLanguage);
       return cachedConfig;
     }
 
     const rawSettings: Partial<TranslationSettings> = storedConfig.settings ?? {};
     const apiKey = storedConfig.secrets?.apiKey ?? rawSettings.apiKey;
+    const preferences = await deps.appSettings.getPreferences();
     cachedConfig = {
       settings: normalizeSettings(rawSettings),
       secrets: {
@@ -202,12 +206,15 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
         ...(apiKey !== undefined ? { apiKey } : {})
       }
     };
+    cachedConfig = withTargetLanguagePreference(cachedConfig, preferences.translationTargetLanguage);
     return cachedConfig;
   }
 
-  async function saveConfig(config: StoredTranslationConfig): Promise<void> {
-    cachedConfig = config;
-    await deps.appSettings.updateTranslationConfig(config);
+  async function saveConfig(config: StoredTranslationConfig): Promise<StoredTranslationConfig> {
+    const preferences = await deps.appSettings.getPreferences();
+    cachedConfig = withTargetLanguagePreference(config, preferences.translationTargetLanguage);
+    await deps.appSettings.updateTranslationConfig(cachedConfig);
+    return cachedConfig;
   }
 
   function getState(sessionId: string): SessionState {
@@ -729,8 +736,8 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
           ...(secrets?.apiKey !== undefined ? { apiKey: secrets.apiKey } : {})
         }
       };
-      await saveConfig(next);
-      return exposeSettings(next.settings, next.secrets);
+      const saved = await saveConfig(next);
+      return exposeSettings(saved.settings, saved.secrets);
     },
     async getPromptPreviews() {
       const { settings } = await loadConfig();
@@ -1390,6 +1397,16 @@ function normalizeSettings(input: Partial<TranslationSettings>): TranslationSett
     requestTimeoutMs: DEFAULT_SETTINGS.requestTimeoutMs,
     temperature: clampNumber(input.temperature, 0, 1, DEFAULT_SETTINGS.temperature),
     prompts: normalizePromptMap(input.prompts)
+  };
+}
+
+function withTargetLanguagePreference(config: StoredTranslationConfig, targetLanguage: string): StoredTranslationConfig {
+  return {
+    ...config,
+    settings: {
+      ...config.settings,
+      targetLanguage
+    }
   };
 }
 

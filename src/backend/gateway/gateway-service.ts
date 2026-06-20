@@ -572,7 +572,7 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
           ...settings,
           currentProjectId: project.repoRoot,
           currentTaskSlug: task.taskSlug,
-          translationEnabled: template.translationEnabled,
+          translationEnabled: preferences.translationEnabled,
           updatedAt: now()
         });
         throw new VcmError({
@@ -589,7 +589,7 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
       ...settings,
       currentProjectId: project.repoRoot,
       currentTaskSlug: task.taskSlug,
-      translationEnabled: template.translationEnabled,
+      translationEnabled: preferences.translationEnabled,
       updatedAt: now()
     });
 
@@ -598,7 +598,7 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
       `branch: ${task.branch}`,
       `worktree: ${task.worktreePath ?? task.repoRoot}`,
       `orchestration: ${template.autoOrchestration ? "auto" : "manual"}`,
-      `translation: ${template.translationEnabled ? "on" : "off"}`,
+      `translation: ${preferences.translationEnabled ? "on" : "off"}`,
       `sessions: ${startedRoles.join(", ")}`
     ].join("\n");
   }

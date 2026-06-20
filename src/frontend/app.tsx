@@ -2,9 +2,11 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import qrcode from "qrcode-generator";
 import {
   createDefaultLaunchTemplate,
+  DEFAULT_TRANSLATION_TARGET_LANGUAGE,
   type AppPreferences,
   type LaunchTemplate,
   type PermissionRequestMode,
+  type TranslationTargetLanguage,
   type ThemeMode
 } from "../shared/types/app-settings.js";
 import type {
@@ -24,6 +26,7 @@ import type { RoleName } from "../shared/types/role.js";
 import type { VcmSessionRoundState } from "../shared/types/round.js";
 import type { TaskRecord } from "../shared/types/task.js";
 import { AppShell } from "./components/app-shell.js";
+import { FileTranslationModalHost } from "./components/translation-panel.js";
 import { selectActiveTask } from "./state/app-store.js";
 import { apiClient } from "./state/api-client.js";
 import { buildOneClickRoleLaunches } from "./state/one-click-start.js";
@@ -33,7 +36,6 @@ import { TaskWorkspace, type TaskWorkspaceLaunchState } from "./routes/task-work
 const FLOW_PAUSE_STRONG_ALERT_THRESHOLD_MS = 2 * 60 * 1000;
 const FLOW_PAUSE_CHIME_INTERVAL_MS = 1400;
 const FLOW_PAUSE_WEAK_CHIME_COUNT = 3;
-
 export function App() {
   const [project, setProject] = useState<ProjectSummary | null>(null);
   const [recentRepositoryPaths, setRecentRepositoryPaths] = useState<string[]>([]);
@@ -55,9 +57,12 @@ export function App() {
   const [themeMode, setThemeMode] = useState<ThemeMode>("system");
   const [flowPauseAlerts, setFlowPauseAlerts] = useState(true);
   const [permissionRequestMode, setPermissionRequestMode] = useState<PermissionRequestMode>("off");
+  const [translationEnabled, setTranslationEnabled] = useState(false);
+  const [translationAutoSendEnabled, setTranslationAutoSendEnabled] = useState(false);
+  const [translationTargetLanguage, setTranslationTargetLanguage] = useState<TranslationTargetLanguage>(DEFAULT_TRANSLATION_TARGET_LANGUAGE);
+  const [fileTranslationOpen, setFileTranslationOpen] = useState(false);
   const [launchTemplate, setLaunchTemplate] = useState<LaunchTemplate>(() => createDefaultLaunchTemplate());
   const [activeLaunchState, setActiveLaunchState] = useState<TaskWorkspaceLaunchState | null>(null);
-  const [translationEnabledByTask, setTranslationEnabledByTask] = useState<Record<string, boolean>>({});
   const [workspaceRefreshNonce, setWorkspaceRefreshNonce] = useState(0);
   const [flowPauseNotice, setFlowPauseNotice] = useState<{ id: string; text: string } | null>(null);
   const [systemPrefersDark, setSystemPrefersDark] = useState(false);
@@ -70,9 +75,6 @@ export function App() {
     () => selectActiveTask(tasks, activeTaskSlug),
     [tasks, activeTaskSlug]
   );
-  const activeTranslationEnabled = activeTask
-    ? translationEnabledByTask[activeTask.taskSlug] ?? false
-    : false;
   const activeTaskLaunchState = activeLaunchState?.taskSlug === activeTask?.taskSlug
     ? activeLaunchState
     : null;
@@ -83,6 +85,9 @@ export function App() {
     setThemeMode(preferences.themeMode);
     setFlowPauseAlerts(preferences.flowPauseAlerts);
     setPermissionRequestMode(preferences.permissionRequestMode);
+    setTranslationEnabled(preferences.translationEnabled);
+    setTranslationAutoSendEnabled(preferences.translationAutoSendEnabled);
+    setTranslationTargetLanguage(preferences.translationTargetLanguage);
     setLaunchTemplate(preferences.launchTemplate);
   }, []);
 
@@ -195,7 +200,6 @@ export function App() {
         current.hasAnySession === launchState.hasAnySession &&
         current.allRolesHaveSession === launchState.allRolesHaveSession &&
         current.autoOrchestration === launchState.autoOrchestration &&
-        current.translationEnabled === launchState.translationEnabled &&
         JSON.stringify(current.roles) === JSON.stringify(launchState.roles)
       ) {
         return current;
@@ -417,6 +421,9 @@ export function App() {
           events={sidebarEvents}
           roundState={sidebarRoundState}
           codexReview={sidebarCodexReview}
+          translationEnabled={translationEnabled}
+          translationAutoSendEnabled={translationAutoSendEnabled}
+          translationTargetLanguage={translationTargetLanguage}
           harnessStatus={harnessStatus}
           harnessBootstrapStatus={harnessBootstrapStatus}
           harnessApplyResult={harnessApplyResult}
@@ -523,6 +530,39 @@ export function App() {
               setActiveCodexReview({ taskSlug: activeTask.taskSlug, state });
             });
           }}
+          onTranslationEnabledChange={(enabled) => {
+            setTranslationEnabled(enabled);
+            void withBusy(async () => {
+              const preferences = await apiClient.updateAppPreferences({ translationEnabled: enabled });
+              applyPreferences(preferences);
+            });
+          }}
+          onTranslationAutoSendChange={(enabled) => {
+            setTranslationAutoSendEnabled(enabled);
+            void withBusy(async () => {
+              const preferences = await apiClient.updateAppPreferences({ translationAutoSendEnabled: enabled });
+              applyPreferences(preferences);
+            });
+          }}
+          onTranslationTargetLanguageChange={(targetLanguage) => {
+            setTranslationTargetLanguage(targetLanguage);
+            void withBusy(async () => {
+              const preferences = await apiClient.updateAppPreferences({ translationTargetLanguage: targetLanguage });
+              applyPreferences(preferences);
+            });
+          }}
+          onOpenFileTranslation={() => setFileTranslationOpen(true)}
+          onCreateTranslationBootstrap={() => {
+            void withBusy(async () => {
+              if (!activeTask) {
+                throw new Error("Create or select a task before running Translation Bootstrap.");
+              }
+              await apiClient.createCodexBootstrap({
+                taskSlug: activeTask.taskSlug,
+                targetLanguage: translationTargetLanguage
+              });
+            });
+          }}
           onCreateTask={(input) => withBusy(async () => {
             const task = await apiClient.createTask(input);
             await loadTasks();
@@ -574,8 +614,7 @@ export function App() {
                 launchTemplate: {
                   version: 1,
                   roles: activeTaskLaunchState.roles,
-                  autoOrchestration: activeTaskLaunchState.autoOrchestration,
-                  translationEnabled: activeTaskLaunchState.translationEnabled
+                  autoOrchestration: activeTaskLaunchState.autoOrchestration
                 }
               });
               applyPreferences(preferences);
@@ -592,10 +631,6 @@ export function App() {
                 throw new Error("One-click start is only available before any role session has started.");
               }
 
-              setTranslationEnabledByTask((current) => ({
-                ...current,
-                [activeTask.taskSlug]: launchTemplate.translationEnabled
-              }));
               const nextOrchestration = await apiClient.updateOrchestrationState(activeTask.taskSlug, {
                 mode: launchTemplate.autoOrchestration ? "auto" : "manual"
               });
@@ -686,18 +721,14 @@ export function App() {
           task={activeTask}
           activeRole={activeRole}
           codexReviewerEnabled={codexReviewerEnabled}
-          translationEnabled={activeTranslationEnabled}
+          translationEnabled={translationEnabled}
+          translationAutoSendEnabled={translationAutoSendEnabled}
+          translationTargetLanguage={translationTargetLanguage}
           refreshNonce={workspaceRefreshNonce}
           onTaskChanged={async () => {
             await loadTasks();
           }}
           onActiveRoleChange={setActiveRole}
-          onTranslationEnabledChange={(enabled) => {
-            setTranslationEnabledByTask((current) => ({
-              ...current,
-              [activeTask.taskSlug]: enabled
-            }));
-          }}
           onMessagesChanged={handleMessagesChanged}
           onOrchestrationChanged={handleOrchestrationChanged}
           onRoundStateChanged={handleRoundStateChanged}
@@ -714,6 +745,12 @@ export function App() {
           </p>
         </section>
       )}
+      <FileTranslationModalHost
+        open={fileTranslationOpen}
+        taskSlug={activeTask?.taskSlug ?? null}
+        targetLanguage={translationTargetLanguage}
+        onClose={() => setFileTranslationOpen(false)}
+      />
     </AppShell>
   );
 }

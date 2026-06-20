@@ -57,18 +57,27 @@ describe("app-settings-service", () => {
     await expect(service.updatePreferences({
       themeMode: "dark",
       flowPauseAlerts: false,
-      permissionRequestMode: "allowAll"
+      permissionRequestMode: "allowAll",
+      translationEnabled: true,
+      translationAutoSendEnabled: true,
+      translationTargetLanguage: "ja"
     })).resolves.toEqual(createDefaultPreferences({
       themeMode: "dark",
       flowPauseAlerts: false,
-      permissionRequestMode: "allowAll"
+      permissionRequestMode: "allowAll",
+      translationEnabled: true,
+      translationAutoSendEnabled: true,
+      translationTargetLanguage: "ja"
     }));
 
     const stored = await fs.readJson<AppSettingsFile>("/settings.json");
     expect(stored.preferences).toEqual(createDefaultPreferences({
       themeMode: "dark",
       flowPauseAlerts: false,
-      permissionRequestMode: "allowAll"
+      permissionRequestMode: "allowAll",
+      translationEnabled: true,
+      translationAutoSendEnabled: true,
+      translationTargetLanguage: "ja"
     }));
   });
 
@@ -80,7 +89,6 @@ describe("app-settings-service", () => {
     });
     const launchTemplate = createDefaultLaunchTemplate();
     launchTemplate.autoOrchestration = false;
-    launchTemplate.translationEnabled = false;
     launchTemplate.roles.coder = {
       permissionMode: "bypassPermissions",
       model: "opus[1m]",
@@ -217,6 +225,9 @@ function createDefaultPreferences(overrides: Partial<AppPreferences> = {}): AppP
     themeMode: "system",
     flowPauseAlerts: true,
     permissionRequestMode: "off",
+    translationEnabled: false,
+    translationAutoSendEnabled: false,
+    translationTargetLanguage: "zh-CN",
     launchTemplate: createDefaultLaunchTemplate(),
     ...overrides
   };

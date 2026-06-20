@@ -1049,8 +1049,8 @@ h2 {
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr);
   gap: 12px;
-  width: min(1440px, calc(100vw - 32px));
-  height: min(960px, calc(100vh - 32px));
+  width: 95vw;
+  height: 95vh;
   min-height: 0;
   min-width: 0;
   overflow: hidden;
@@ -1396,12 +1396,6 @@ h2 {
 .translation-composer-actions button:hover:not(:disabled) {
   border-color: #58a6ff;
   background: #1f2937;
-}
-
-.translation-panel-actions .auto-send-toggle.is-active {
-  border-color: #56d364;
-  background: #12261a;
-  color: #d6deeb;
 }
 
 .translation-panel-actions {
@@ -2095,8 +2089,8 @@ h2 {
   }
 
   .file-translation-modal {
-    width: calc(100vw - 20px);
-    height: calc(100vh - 20px);
+    width: 95vw;
+    height: 95vh;
     padding: 10px;
   }
 

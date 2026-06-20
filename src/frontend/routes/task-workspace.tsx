@@ -5,6 +5,7 @@ import type { VcmOrchestrationMode, VcmOrchestrationState, VcmRoleMessage } from
 import type { RoleDefinition, RoleName, VcmRoleName } from "../../shared/types/role.js";
 import type { VcmSessionRoundState } from "../../shared/types/round.js";
 import type { ClaudeModel, ClaudePermissionMode, SessionEffort, SessionModel } from "../../shared/types/session.js";
+import type { TranslationTargetLanguage } from "../../shared/types/app-settings.js";
 import type { TaskRecord } from "../../shared/types/task.js";
 import { RoleSessionTabs } from "../components/role-session-tabs.js";
 import { SessionConsole } from "../components/session-console.js";
@@ -19,10 +20,11 @@ export interface TaskWorkspaceProps {
   activeRole: RoleName;
   codexReviewerEnabled: boolean;
   translationEnabled: boolean;
+  translationAutoSendEnabled: boolean;
+  translationTargetLanguage: TranslationTargetLanguage;
   refreshNonce?: number;
   onTaskChanged(): Promise<void>;
   onActiveRoleChange(role: RoleName): void;
-  onTranslationEnabledChange(enabled: boolean): void;
   onMessagesChanged?(messages: VcmRoleMessage[]): void;
   onOrchestrationChanged?(orchestration: VcmOrchestrationState): void;
   onRoundStateChanged?(roundState: VcmSessionRoundState): void;
@@ -38,7 +40,6 @@ export interface TaskWorkspaceLaunchState {
     effort: SessionEffort;
   }>;
   autoOrchestration: boolean;
-  translationEnabled: boolean;
   statusLoaded: boolean;
   sessionCount: number;
   hasAnySession: boolean;
@@ -50,10 +51,11 @@ export function TaskWorkspace({
   activeRole,
   codexReviewerEnabled,
   translationEnabled,
+  translationAutoSendEnabled,
+  translationTargetLanguage,
   refreshNonce = 0,
   onTaskChanged,
   onActiveRoleChange,
-  onTranslationEnabledChange,
   onMessagesChanged,
   onOrchestrationChanged,
   onRoundStateChanged,
@@ -218,7 +220,6 @@ export function TaskWorkspace({
       taskSlug: task.taskSlug,
       roles,
       autoOrchestration: (orchestration?.mode ?? "auto") === "auto",
-      translationEnabled,
       statusLoaded: Boolean(statusReport),
       sessionCount: sessions.length,
       hasAnySession: sessions.length > 0,
@@ -231,8 +232,7 @@ export function TaskWorkspace({
     orchestration?.mode,
     permissionModes,
     statusReport,
-    task.taskSlug,
-    translationEnabled
+    task.taskSlug
   ]);
 
   useEffect(() => {
@@ -403,14 +403,6 @@ export function TaskWorkspace({
           onSelect={onActiveRoleChange}
         />
         <div className="workspace-header-actions">
-          <button
-            aria-pressed={translationEnabled}
-            className={`translation-toggle${translationEnabled ? " is-active" : ""}`}
-            type="button"
-            onClick={() => onTranslationEnabledChange(!translationEnabled)}
-          >
-            {translationEnabled ? "✅ Translate" : "× Translate"}
-          </button>
           <button className="danger-button" type="button" disabled={busy} onClick={() => void closeTask()}>
             Close Task
           </button>
@@ -443,6 +435,8 @@ export function TaskWorkspace({
                     busy={busy}
                     orchestrationMode={orchestration?.mode ?? "auto"}
                     translationEnabled={translationEnabled}
+                    translationAutoSendEnabled={translationAutoSendEnabled}
+                    translationTargetLanguage={translationTargetLanguage}
                     onPermissionModeChange={(permissionMode) => setRolePermissionMode(role, permissionMode)}
                     onModelChange={(model) => setRoleModel(role, model)}
                     onEffortChange={(effort) => setRoleEffort(role, effort)}

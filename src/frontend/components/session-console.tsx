@@ -1,5 +1,6 @@
 import type { VcmOrchestrationMode } from "../../shared/types/message.js";
 import { isCodexRoleName } from "../../shared/constants.js";
+import type { TranslationTargetLanguage } from "../../shared/types/app-settings.js";
 import type { RoleName } from "../../shared/types/role.js";
 import type { ClaudePermissionMode, RoleSessionRecord, SessionEffort, SessionModel } from "../../shared/types/session.js";
 import { XtermView } from "../terminal/xterm-view.js";
@@ -16,6 +17,8 @@ export interface SessionConsoleProps {
   busy?: boolean;
   orchestrationMode: VcmOrchestrationMode;
   translationEnabled: boolean;
+  translationAutoSendEnabled: boolean;
+  translationTargetLanguage: TranslationTargetLanguage;
   onPermissionModeChange(mode: ClaudePermissionMode): void;
   onModelChange(model: SessionModel): void;
   onEffortChange(effort: SessionEffort): void;
@@ -37,6 +40,8 @@ export function SessionConsole({
   busy,
   orchestrationMode,
   translationEnabled,
+  translationAutoSendEnabled,
+  translationTargetLanguage,
   onPermissionModeChange,
   onModelChange,
   onEffortChange,
@@ -91,6 +96,8 @@ export function SessionConsole({
           session={session}
           taskSlug={session.taskSlug}
           translationEnabled={!isCodexRole && translationEnabled}
+          translationAutoSendEnabled={translationAutoSendEnabled}
+          translationTargetLanguage={translationTargetLanguage}
         />
       ) : (
         <div className="terminal-empty">
@@ -116,7 +123,9 @@ function SessionConsoleBody({
   role,
   session,
   taskSlug,
-  translationEnabled
+  translationEnabled,
+  translationAutoSendEnabled,
+  translationTargetLanguage
 }: {
   active: boolean;
   onTerminalEvent(message: string): void;
@@ -124,6 +133,8 @@ function SessionConsoleBody({
   session: RoleSessionRecord;
   taskSlug: string;
   translationEnabled: boolean;
+  translationAutoSendEnabled: boolean;
+  translationTargetLanguage: TranslationTargetLanguage;
 }) {
   return (
     <div className={translationEnabled ? "session-console-body has-translation" : "session-console-body"}>
@@ -132,7 +143,15 @@ function SessionConsoleBody({
       </div>
       {translationEnabled ? (
         <div className="translation-pane">
-          <TranslationPanel key={session.id} active={active} taskSlug={taskSlug} role={role} sessionId={session.id} />
+          <TranslationPanel
+            key={session.id}
+            active={active}
+            autoSendEnabled={translationAutoSendEnabled}
+            targetLanguage={translationTargetLanguage}
+            taskSlug={taskSlug}
+            role={role}
+            sessionId={session.id}
+          />
         </div>
       ) : null}
     </div>

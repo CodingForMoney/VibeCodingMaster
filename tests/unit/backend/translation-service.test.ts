@@ -50,6 +50,29 @@ describe("translation-service", () => {
     });
   });
 
+  it("uses the global translation target language preference", async () => {
+    const appSettings = createAppSettingsService({
+      fs: createMemoryFs(),
+      settingsPath: "/settings.json",
+    });
+    await appSettings.updatePreferences({ translationTargetLanguage: "ja" });
+    const service = createTranslationService({
+      appSettings,
+      provider: createProviderStub(),
+      runtime: {} as TerminalRuntime,
+      sessionRegistry: createRegistryStub(),
+      transcripts: createTranscriptStub(),
+      sessionService: {} as SessionService
+    });
+
+    await expect(service.getSettings()).resolves.toMatchObject({
+      targetLanguage: "ja"
+    });
+    await expect(service.updateSettings({ targetLanguage: "fr" })).resolves.toMatchObject({
+      targetLanguage: "ja"
+    });
+  });
+
   it("formats translated input as bracketed paste before a separate enter", () => {
     expect(normalizeTerminalSubmitText("run tests\n")).toBe("run tests");
     expect(normalizeTerminalSubmitText("run tests\r")).toBe("run tests");
@@ -363,9 +386,10 @@ describe("translation-service", () => {
       });
     }
 
-    await waitFor(() => messages.some((message) =>
-      message.type === "translation-failures" && message.failures.length === 0
-    ));
+    await waitFor(() =>
+      messages.filter((message) => message.type === "translation-entry").length >= TRANSLATION_ENTRY_RETENTION_LIMIT &&
+      messages.some((message) => message.type === "translation-failures" && message.failures.length === 0)
+    );
 
     const replayed: TranslationWsMessage[] = [];
     service.subscribeToSession("session-1", (message) => replayed.push(message));

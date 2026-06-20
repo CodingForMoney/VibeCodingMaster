@@ -1,5 +1,11 @@
 import { FormEvent, type ReactNode, useEffect, useState } from "react";
-import type { LaunchTemplate, PermissionRequestMode, ThemeMode } from "../../shared/types/app-settings.js";
+import {
+  TRANSLATION_TARGET_LANGUAGE_OPTIONS,
+  type LaunchTemplate,
+  type PermissionRequestMode,
+  type ThemeMode,
+  type TranslationTargetLanguage
+} from "../../shared/types/app-settings.js";
 import type {
   HarnessApplyResult,
   HarnessBootstrapStatusReport,
@@ -25,6 +31,7 @@ type SidebarSectionId =
   | "repository-path"
   | "connected-repository"
   | "settings"
+  | "translation"
   | "codex-review-gates"
   | "gateway"
   | "vcm-harness"
@@ -41,6 +48,9 @@ export interface ProjectDashboardProps {
   events: string[];
   roundState: VcmSessionRoundState | null;
   codexReview: CodexReviewIndex | null;
+  translationEnabled: boolean;
+  translationAutoSendEnabled: boolean;
+  translationTargetLanguage: TranslationTargetLanguage;
   harnessStatus: HarnessStatusReport | null;
   harnessBootstrapStatus: HarnessBootstrapStatusReport | null;
   harnessApplyResult?: HarnessApplyResult | null;
@@ -60,6 +70,11 @@ export interface ProjectDashboardProps {
   onStartGatewayQrLogin(): void;
   onResetGatewayBinding(): void;
   onCodexGateEnabledChange(gate: CodexReviewGate, enabled: boolean): void;
+  onTranslationEnabledChange(enabled: boolean): void;
+  onTranslationAutoSendChange(enabled: boolean): void;
+  onTranslationTargetLanguageChange(targetLanguage: TranslationTargetLanguage): void;
+  onOpenFileTranslation(): void;
+  onCreateTranslationBootstrap(): void;
   onCreateTask(input: { taskSlug: string; createWorktree?: boolean; title?: string }): Promise<void>;
   onSelectTask(taskSlug: string): void;
   themeMode: ThemeMode;
@@ -88,6 +103,9 @@ export function ProjectDashboard({
   events,
   roundState,
   codexReview,
+  translationEnabled,
+  translationAutoSendEnabled,
+  translationTargetLanguage,
   harnessStatus,
   harnessBootstrapStatus,
   harnessApplyResult,
@@ -107,6 +125,11 @@ export function ProjectDashboard({
   onStartGatewayQrLogin,
   onResetGatewayBinding,
   onCodexGateEnabledChange,
+  onTranslationEnabledChange,
+  onTranslationAutoSendChange,
+  onTranslationTargetLanguageChange,
+  onOpenFileTranslation,
+  onCreateTranslationBootstrap,
   onCreateTask,
   onSelectTask,
   themeMode,
@@ -285,6 +308,25 @@ export function ProjectDashboard({
         </div>
       </SidebarSection>
 
+      <SidebarSection
+        title="Translation"
+        open={openSidebarSection === "translation"}
+        onOpenChange={(open) => handleSidebarSectionChange("translation", open)}
+      >
+        <TranslationSettingsPanel
+          busy={busy}
+          enabled={translationEnabled}
+          autoSendEnabled={translationAutoSendEnabled}
+          targetLanguage={translationTargetLanguage}
+          fileTranslationAvailable={Boolean(project && activeTaskSlug)}
+          onAutoSendChange={onTranslationAutoSendChange}
+          onCreateBootstrap={onCreateTranslationBootstrap}
+          onEnabledChange={onTranslationEnabledChange}
+          onTargetLanguageChange={onTranslationTargetLanguageChange}
+          onOpenFileTranslation={onOpenFileTranslation}
+        />
+      </SidebarSection>
+
       {project && activeTaskSlug ? (
         <SidebarSection
           title="Codex Review Gates"
@@ -423,8 +465,7 @@ export function ProjectDashboard({
 
 function getLaunchTemplateBadge(template: LaunchTemplate): string {
   const parts = [
-    template.autoOrchestration ? "auto" : "manual",
-    template.translationEnabled ? "tx" : "no tx"
+    template.autoOrchestration ? "auto" : "manual"
   ];
   return parts.join(" + ");
 }
@@ -434,6 +475,89 @@ function getLaunchTemplateSummary(template: LaunchTemplate): string {
     .map(([role, config]) => `${role}: ${config.permissionMode} / ${config.model} / ${config.effort}`)
     .join("; ");
   return `Launch template: ${getLaunchTemplateBadge(template)}; ${roles}`;
+}
+
+function TranslationSettingsPanel({
+  autoSendEnabled,
+  busy,
+  enabled,
+  fileTranslationAvailable,
+  targetLanguage,
+  onAutoSendChange,
+  onCreateBootstrap,
+  onEnabledChange,
+  onTargetLanguageChange,
+  onOpenFileTranslation
+}: {
+  autoSendEnabled: boolean;
+  busy?: boolean;
+  enabled: boolean;
+  fileTranslationAvailable: boolean;
+  targetLanguage: TranslationTargetLanguage;
+  onAutoSendChange(enabled: boolean): void;
+  onCreateBootstrap(): void;
+  onEnabledChange(enabled: boolean): void;
+  onTargetLanguageChange(targetLanguage: TranslationTargetLanguage): void;
+  onOpenFileTranslation(): void;
+}) {
+  return (
+    <div className="sidebar-settings">
+      <button
+        aria-pressed={enabled}
+        className={enabled ? "settings-toggle is-active" : "settings-toggle"}
+        disabled={busy}
+        type="button"
+        onClick={() => onEnabledChange(!enabled)}
+      >
+        <span>Conversation translation</span>
+        <span>{enabled ? "on" : "off"}</span>
+      </button>
+      <button
+        aria-pressed={autoSendEnabled}
+        className={autoSendEnabled ? "settings-toggle is-active" : "settings-toggle"}
+        disabled={busy}
+        type="button"
+        onClick={() => onAutoSendChange(!autoSendEnabled)}
+      >
+        <span>Auto-send</span>
+        <span>{autoSendEnabled ? "on" : "off"}</span>
+      </button>
+      <label className="settings-select-row">
+        <span>Language</span>
+        <select
+          value={targetLanguage}
+          disabled={busy}
+          onChange={(event) => onTargetLanguageChange(event.target.value as TranslationTargetLanguage)}
+        >
+          {TRANSLATION_TARGET_LANGUAGE_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+      </label>
+      <button
+        className="settings-toggle"
+        disabled={busy || !fileTranslationAvailable}
+        title={fileTranslationAvailable ? "Open file translation" : "Create or select a task first"}
+        type="button"
+        onClick={onOpenFileTranslation}
+      >
+        <span>File translation</span>
+        <span>open</span>
+      </button>
+      <button
+        className="settings-toggle"
+        disabled={busy || !fileTranslationAvailable}
+        title={fileTranslationAvailable ? "Run translation bootstrap" : "Create or select a task first"}
+        type="button"
+        onClick={onCreateBootstrap}
+      >
+        <span>Bootstrap</span>
+        <span>run</span>
+      </button>
+    </div>
+  );
 }
 
 function CodexReviewGateSettings({

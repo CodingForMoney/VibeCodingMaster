@@ -4,10 +4,13 @@ import { VCM_ROLE_NAMES } from "../../shared/constants.js";
 import { CODEX_REVIEW_GATES, type CodexReviewGate } from "../../shared/types/codex-review.js";
 import {
   createDefaultLaunchTemplate,
+  DEFAULT_TRANSLATION_TARGET_LANGUAGE,
+  TRANSLATION_TARGET_LANGUAGE_OPTIONS,
   type AppPreferences,
   type LaunchTemplate,
   type PermissionRequestMode,
   type RoleLaunchTemplateEntry,
+  type TranslationTargetLanguage,
   type ThemeMode
 } from "../../shared/types/app-settings.js";
 import type { ProjectConfig } from "../../shared/types/project.js";
@@ -342,6 +345,9 @@ function normalizePreferences(input: unknown): AppPreferences {
     themeMode: normalizeThemeMode(candidate.themeMode),
     flowPauseAlerts: rawFlowPauseAlerts !== false,
     permissionRequestMode: normalizePermissionRequestMode(candidate.permissionRequestMode),
+    translationEnabled: candidate.translationEnabled === true,
+    translationAutoSendEnabled: candidate.translationAutoSendEnabled === true,
+    translationTargetLanguage: normalizeTranslationTargetLanguage(candidate.translationTargetLanguage),
     launchTemplate: normalizeLaunchTemplate(candidate.launchTemplate)
   };
 }
@@ -360,6 +366,11 @@ function normalizePermissionRequestMode(input: unknown): PermissionRequestMode {
   return "off";
 }
 
+function normalizeTranslationTargetLanguage(input: unknown): TranslationTargetLanguage {
+  const option = TRANSLATION_TARGET_LANGUAGE_OPTIONS.find((current) => current.value === input);
+  return option?.value ?? DEFAULT_TRANSLATION_TARGET_LANGUAGE;
+}
+
 function normalizeLaunchTemplate(input: unknown): LaunchTemplate {
   const defaults = createDefaultLaunchTemplate();
   if (!isObject(input)) {
@@ -375,8 +386,7 @@ function normalizeLaunchTemplate(input: unknown): LaunchTemplate {
   return {
     version: 1,
     roles,
-    autoOrchestration: input.autoOrchestration !== false,
-    translationEnabled: input.translationEnabled !== false
+    autoOrchestration: input.autoOrchestration !== false
   };
 }
 
