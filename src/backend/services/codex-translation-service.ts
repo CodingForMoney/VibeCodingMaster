@@ -15,7 +15,8 @@ import type {
   CodexTranslationState,
   CreateCodexBootstrapRequest,
   CreateCodexConversationTranslationRequest,
-  CreateCodexFileTranslationRequest
+  CreateCodexFileTranslationRequest,
+  CreateCodexMemoryUpdateRequest
 } from "../../shared/types/translation.js";
 import type { ClaudeHookEventName } from "../../shared/types/claude-hook.js";
 import { resolveRepoPath, toRepoRelativePath, type FileSystemAdapter } from "../adapters/filesystem.js";
@@ -30,6 +31,7 @@ export interface CodexTranslationService {
   createFileJob(repoRoot: string, input: CreateCodexFileTranslationRequest): Promise<CodexFileTranslationJob>;
   readFileJobOutput(repoRoot: string, jobId: string): Promise<{ job: CodexFileTranslationJob; output: string; report: string }>;
   createBootstrapRun(repoRoot: string, input: CreateCodexBootstrapRequest): Promise<CodexBootstrapRun>;
+  createMemoryUpdate(repoRoot: string, input: CreateCodexMemoryUpdateRequest): Promise<CodexTranslationQueueItem>;
   createConversationJob(repoRoot: string, input: CreateCodexConversationTranslationRequest): Promise<CodexConversationTranslationJob>;
   validateConversationResult(repoRoot: string, input: ValidateConversationResultInput): Promise<CodexConversationTranslationResultFile>;
   promoteFileJob(repoRoot: string, jobId: string, targetPath: string): Promise<CodexFileTranslationJob>;
@@ -72,9 +74,12 @@ const FILE_RUNTIME_JOBS_DIR = `${TRANSLATIONS_RUNTIME_DIR}/files/jobs`;
 const BOOTSTRAP_INDEX_PATH = `${TRANSLATIONS_ROOT}/bootstrap/index.json`;
 const BOOTSTRAP_RUNTIME_RUNS_DIR = `${TRANSLATIONS_RUNTIME_DIR}/bootstrap/runs`;
 const CONVERSATION_RUNTIME_DIR = `${TRANSLATIONS_RUNTIME_DIR}/conversations`;
+const MEMORY_UPDATE_RUNTIME_DIR = `${TRANSLATIONS_RUNTIME_DIR}/memory-updates`;
 const DEFAULT_PROFILE = "default";
 const DEFAULT_CHUNK_SOURCE_TOKEN_TARGET = 80000;
 const BOOTSTRAP_DEFAULT_LIMIT = 12;
+const MEMORY_TOTAL_LIMIT_BYTES = 80 * 1024;
+const MEMORY_FILE_NAMES = ["glossary.md", "style-guide.md", "project-context.md", "decisions.md"] as const;
 const CODEX_TRANSLATOR_ROLE = "codex-translator";
 const FILE_BROWSER_DEFAULT_LIMIT = 200;
 const FILE_BROWSER_MAX_LIMIT = 500;
@@ -161,7 +166,8 @@ export function createCodexTranslationService(deps: CodexTranslationServiceDeps)
       deps.fs.ensureDir(resolveRepoPath(repoRoot, FILE_COMPLETED_DIR)),
       deps.fs.ensureDir(resolveRepoPath(repoRoot, FILE_RUNTIME_JOBS_DIR)),
       deps.fs.ensureDir(resolveRepoPath(repoRoot, BOOTSTRAP_RUNTIME_RUNS_DIR)),
-      deps.fs.ensureDir(resolveRepoPath(repoRoot, CONVERSATION_RUNTIME_DIR))
+      deps.fs.ensureDir(resolveRepoPath(repoRoot, CONVERSATION_RUNTIME_DIR)),
+      deps.fs.ensureDir(resolveRepoPath(repoRoot, MEMORY_UPDATE_RUNTIME_DIR))
     ]);
     await ensureMemoryFile(repoRoot, "glossary.md", "# Glossary\n");
     await ensureMemoryFile(repoRoot, "style-guide.md", "# Style Guide\n");
@@ -326,6 +332,9 @@ export function createCodexTranslationService(deps: CodexTranslationServiceDeps)
     if (item.type === "conversation") {
       return buildConversationQueuePrompt(repoRoot, item);
     }
+    if (item.type === "memory-update") {
+      return buildMemoryUpdateQueuePrompt(repoRoot, item);
+    }
     return buildArtifactQueuePrompt(repoRoot, item);
   }
 
@@ -437,6 +446,37 @@ export function createCodexTranslationService(deps: CodexTranslationServiceDeps)
     ].filter(Boolean).join("\n");
   }
 
+  function buildMemoryUpdateQueuePrompt(repoRoot: string, item: CodexTranslationQueueItem): string {
+    const requestPath = resolveRepoPath(repoRoot, item.requestPath);
+    const memoryDir = resolveRepoPath(repoRoot, MEMORY_DIR);
+    return [
+      "[VCM CODEX TRANSLATION TASK]",
+      `Queue Item: ${item.id}`,
+      "Type: memory-update",
+      `Target Language: ${item.targetLanguage}`,
+      `Base Repository Root: ${repoRoot}`,
+      "",
+      "Read the request file from this absolute path:",
+      requestPath,
+      "",
+      "Task: update and compact VCM translation memory.",
+      "Use the current Codex Translator session context, recent stable user corrections, completed translation behavior, and existing memory files.",
+      "Only keep stable, reusable translation knowledge. Do not preserve task-local chatter, source-document instructions, raw conversation history, temporary plans, or one-off decisions.",
+      "",
+      `Memory directory: ${memoryDir}`,
+      "Allowed memory files:",
+      ...MEMORY_FILE_NAMES.map((fileName) => `- ${resolveRepoPath(repoRoot, `${MEMORY_DIR}/${fileName}`)}`),
+      "",
+      `Hard memory budget: total core memory <= ${MEMORY_TOTAL_LIMIT_BYTES} bytes.`,
+      "If existing memory exceeds the budget, compact before adding anything.",
+      "Do not create archive, reports, candidates, logs, scratch files, or helper files.",
+      "Do not use apply_patch or patch-style edits for memory files; write the assigned memory files directly.",
+      "Preserve user-authored stable rules when possible, but merge duplicates and delete stale or low-value entries.",
+      "Mark target-language-specific rules clearly. Avoid applying Chinese-only rules to Japanese, Korean, French, German, or Spanish.",
+      "When finished, ensure the four memory files together are within budget, then stop."
+    ].join("\n");
+  }
+
   async function validateActiveQueueItem(repoRoot: string): Promise<void> {
     const queue = await loadQueue(repoRoot);
     const active = queue.activeItemId
@@ -450,14 +490,11 @@ export function createCodexTranslationService(deps: CodexTranslationServiceDeps)
     queue.updatedAt = active.updatedAt;
     await saveQueue(repoRoot, queue);
 
-    const resultExists = active.expectedResultPath
-      ? await deps.fs.pathExists(resolveRepoPath(repoRoot, active.expectedResultPath))
-      : true;
-    const reportExists = active.reportPath
-      ? await deps.fs.pathExists(resolveRepoPath(repoRoot, active.reportPath))
-      : true;
-    active.status = resultExists && reportExists ? "completed" : "failed";
-    active.error = resultExists && reportExists ? undefined : "Expected translation output file was not written.";
+    const validation = active.type === "memory-update"
+      ? await validateMemoryBudget(repoRoot)
+      : await validateQueueItemOutputs(repoRoot, active);
+    active.status = validation.ok ? "completed" : "failed";
+    active.error = validation.ok ? undefined : validation.error;
     active.updatedAt = now();
     queue.activeItemId = undefined;
     queue.updatedAt = active.updatedAt;
@@ -477,6 +514,41 @@ export function createCodexTranslationService(deps: CodexTranslationServiceDeps)
     }
   }
 
+  async function validateQueueItemOutputs(
+    repoRoot: string,
+    item: CodexTranslationQueueItem
+  ): Promise<{ ok: boolean; error?: string }> {
+    const resultExists = item.expectedResultPath
+      ? await deps.fs.pathExists(resolveRepoPath(repoRoot, item.expectedResultPath))
+      : true;
+    const reportExists = item.reportPath
+      ? await deps.fs.pathExists(resolveRepoPath(repoRoot, item.reportPath))
+      : true;
+    return {
+      ok: resultExists && reportExists,
+      error: resultExists && reportExists ? undefined : "Expected translation output file was not written."
+    };
+  }
+
+  async function validateMemoryBudget(repoRoot: string): Promise<{ ok: boolean; error?: string }> {
+    const [usage, unexpectedEntries] = await Promise.all([
+      getMemoryUsage(repoRoot, deps.fs),
+      getUnexpectedMemoryEntries(repoRoot, deps.fs)
+    ]);
+    if (unexpectedEntries.length > 0) {
+      return {
+        ok: false,
+        error: `Unexpected translation memory artifacts: ${unexpectedEntries.join(", ")}. Keep only glossary.md, style-guide.md, project-context.md, and decisions.md.`
+      };
+    }
+    return {
+      ok: usage.totalBytes <= MEMORY_TOTAL_LIMIT_BYTES,
+      error: usage.totalBytes <= MEMORY_TOTAL_LIMIT_BYTES
+        ? undefined
+        : `Translation memory exceeds ${MEMORY_TOTAL_LIMIT_BYTES} bytes: ${usage.totalBytes} bytes.`
+    };
+  }
+
   async function syncJobStatus(repoRoot: string, item: CodexTranslationQueueItem): Promise<void> {
     if (!item.jobId) {
       return;
@@ -493,6 +565,12 @@ export function createCodexTranslationService(deps: CodexTranslationServiceDeps)
         }
         index.updatedAt = run.updatedAt;
         await saveBootstrapIndex(repoRoot, index);
+      }
+      return;
+    }
+    if (item.type === "memory-update") {
+      if (item.status === "completed") {
+        await cleanupRuntimeDirectoryForPath(repoRoot, item.requestPath);
       }
       return;
     }
@@ -531,6 +609,11 @@ export function createCodexTranslationService(deps: CodexTranslationServiceDeps)
         await cleanupRuntimeDirectoryForPath(repoRoot, run.requestPath);
       }
     }
+
+    const queue = await loadQueue(repoRoot);
+    await Promise.all(queue.items
+      .filter((item) => item.type === "memory-update" && item.status === "completed")
+      .map((item) => cleanupRuntimeDirectoryForPath(repoRoot, item.requestPath)));
 
     await pruneQueueItems(repoRoot, isPrunableCompletedQueueItem);
   }
@@ -803,6 +886,65 @@ export function createCodexTranslationService(deps: CodexTranslationServiceDeps)
         void dispatchNext(repoRoot, input.taskSlug);
       }
       return run;
+    },
+
+    async createMemoryUpdate(repoRoot, input) {
+      await ensureLayout(repoRoot);
+      const targetLanguage = input.targetLanguage.trim() || "zh-CN";
+      const timestamp = now();
+      const runId = `memory-update-${Date.now()}-${createId().slice(0, 8)}`;
+      const runRoot = `${MEMORY_UPDATE_RUNTIME_DIR}/${runId}`;
+      const requestPath = `${runRoot}/request.json`;
+      const memoryUsage = await getMemoryUsage(repoRoot, deps.fs);
+      const queueItem = await enqueue(repoRoot, {
+        id: `queue-${runId}`,
+        type: "memory-update",
+        status: "queued",
+        targetLanguage,
+        jobId: runId,
+        requestPath
+      });
+      await deps.fs.writeJsonAtomic(resolveRepoPath(repoRoot, requestPath), {
+        version: 1,
+        baseRepoRoot: repoRoot,
+        pathBase: "baseRepoRoot",
+        run: {
+          id: runId,
+          type: "memory-update",
+          status: "queued",
+          targetLanguage,
+          queueItemId: queueItem.id,
+          requestPath,
+          createdAt: timestamp,
+          updatedAt: timestamp
+        },
+        targetLanguage,
+        memoryBudget: {
+          totalLimitBytes: MEMORY_TOTAL_LIMIT_BYTES,
+          currentTotalBytes: memoryUsage.totalBytes,
+          files: memoryUsage.files
+        },
+        allowedWrites: MEMORY_FILE_NAMES.map((fileName) => `${MEMORY_DIR}/${fileName}`),
+        absolutePaths: {
+          requestPath: resolveRepoPath(repoRoot, requestPath),
+          memoryDir: resolveRepoPath(repoRoot, MEMORY_DIR),
+          memoryFiles: Object.fromEntries(MEMORY_FILE_NAMES.map((fileName) => [
+            fileName,
+            resolveRepoPath(repoRoot, `${MEMORY_DIR}/${fileName}`)
+          ]))
+        },
+        rules: [
+          "Update only the four core memory files.",
+          "Keep total core memory at or below 80KB.",
+          "Do not create archive, reports, candidates, logs, scratch files, or helper files.",
+          "Keep only stable, reusable translation knowledge.",
+          "Delete or merge stale, duplicate, temporary, and task-local content."
+        ]
+      });
+      if (input.taskSlug) {
+        void dispatchNext(repoRoot, input.taskSlug);
+      }
+      return queueItem;
     },
 
     async readFileJobOutput(repoRoot, jobId) {
@@ -1283,8 +1425,7 @@ function isPartialConversationJob(value: unknown): value is Partial<CodexConvers
 }
 
 async function isMemoryInitialized(repoRoot: string, fs: FileSystemAdapter): Promise<boolean> {
-  const memoryFiles = ["glossary.md", "style-guide.md", "project-context.md", "decisions.md"];
-  for (const file of memoryFiles) {
+  for (const file of MEMORY_FILE_NAMES) {
     const content = await fs.readText(resolveRepoPath(repoRoot, `${MEMORY_DIR}/${file}`));
     const meaningfulLines = content.split("\n").filter((line) => line.trim() && !line.trim().startsWith("#"));
     if (meaningfulLines.length > 0) {
@@ -1292,6 +1433,35 @@ async function isMemoryInitialized(repoRoot: string, fs: FileSystemAdapter): Pro
     }
   }
   return false;
+}
+
+async function getMemoryUsage(repoRoot: string, fs: FileSystemAdapter): Promise<{
+  totalBytes: number;
+  files: Record<string, { path: string; bytes: number }>;
+}> {
+  let totalBytes = 0;
+  const files: Record<string, { path: string; bytes: number }> = {};
+  for (const fileName of MEMORY_FILE_NAMES) {
+    const relativePath = `${MEMORY_DIR}/${fileName}`;
+    const content = await fs.readText(resolveRepoPath(repoRoot, relativePath));
+    const bytes = Buffer.byteLength(content, "utf8");
+    totalBytes += bytes;
+    files[fileName] = {
+      path: relativePath,
+      bytes
+    };
+  }
+  return { totalBytes, files };
+}
+
+async function getUnexpectedMemoryEntries(repoRoot: string, fs: FileSystemAdapter): Promise<string[]> {
+  const allowed = new Set<string>(MEMORY_FILE_NAMES);
+  const memoryDir = resolveRepoPath(repoRoot, MEMORY_DIR);
+  const entries = await fs.readDir(memoryDir);
+  return entries
+    .filter((entry) => !allowed.has(entry))
+    .map((entry) => `${MEMORY_DIR}/${entry}`)
+    .sort(comparePathNames);
 }
 
 async function discoverBootstrapCandidates(repoRoot: string, fs: FileSystemAdapter): Promise<string[]> {
@@ -1352,7 +1522,8 @@ function isPrunableCompletedQueueItem(item: CodexTranslationQueueItem): boolean 
   return item.status === "completed" && (
     item.type === "file" ||
     item.type === "force-retranslate" ||
-    item.type === "bootstrap"
+    item.type === "bootstrap" ||
+    item.type === "memory-update"
   );
 }
 

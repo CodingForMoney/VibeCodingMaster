@@ -203,6 +203,7 @@ export type CodexTranslationQueueItemType =
   | "bootstrap"
   | "file"
   | "conversation"
+  | "memory-update"
   | "retry"
   | "resume"
   | "force-retranslate";
@@ -334,6 +335,11 @@ export interface CreateCodexBootstrapRequest {
   taskSlug?: string;
   targetLanguage: string;
   candidatePaths?: string[];
+}
+
+export interface CreateCodexMemoryUpdateRequest {
+  taskSlug?: string;
+  targetLanguage: string;
 }
 
 export interface CodexConversationTranslationJob {

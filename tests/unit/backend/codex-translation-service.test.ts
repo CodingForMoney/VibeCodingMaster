@@ -81,6 +81,83 @@ describe("codex-translation-service", () => {
     });
   });
 
+  it("queues compact memory updates through the Codex Translator session", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-codex-memory-update-"));
+    const fs = createNodeFileSystemAdapter();
+    const writes: string[] = [];
+    const service = createCodexTranslationService({
+      fs,
+      runtime: createRuntimeStub(writes),
+      sessionService: createTranslatorSessionService([])
+    });
+
+    const queueItem = await service.createMemoryUpdate(tmpRepo, {
+      taskSlug: "demo-task",
+      targetLanguage: "zh-CN"
+    });
+    await waitForDispatcher();
+
+    const request = await fs.readJson<{
+      memoryBudget: { totalLimitBytes: number; currentTotalBytes: number };
+      allowedWrites: string[];
+      absolutePaths: { memoryFiles: Record<string, string> };
+    }>(path.join(tmpRepo, queueItem.requestPath));
+    let state = await service.getState(tmpRepo);
+    const activeItem = state.queue.items.find((item) => item.id === queueItem.id);
+    const prompt = writes.find((entry) => entry.includes("[VCM CODEX TRANSLATION TASK]"));
+
+    expect(queueItem.type).toBe("memory-update");
+    expect(state.queue.activeItemId).toBe(queueItem.id);
+    expect(activeItem?.status).toBe("running");
+    expect(request.memoryBudget.totalLimitBytes).toBe(80 * 1024);
+    expect(request.memoryBudget.currentTotalBytes).toBeGreaterThan(0);
+    expect(request.allowedWrites).toEqual([
+      ".ai/vcm/translations/memory/glossary.md",
+      ".ai/vcm/translations/memory/style-guide.md",
+      ".ai/vcm/translations/memory/project-context.md",
+      ".ai/vcm/translations/memory/decisions.md"
+    ]);
+    expect(request.absolutePaths.memoryFiles["glossary.md"]).toBe(path.join(tmpRepo, ".ai/vcm/translations/memory/glossary.md"));
+    expect(prompt).toContain("Type: memory-update");
+    expect(prompt).toContain("Hard memory budget: total core memory <= 81920 bytes.");
+    expect(prompt).toContain("Do not create archive, reports, candidates");
+    expect(prompt).toContain("Do not use apply_patch");
+    expect(await fs.pathExists(path.join(tmpRepo, queueItem.requestPath))).toBe(true);
+
+    await service.handleCodexHook(tmpRepo, "Stop", "demo-task");
+    await waitForDispatcher();
+
+    state = await service.getState(tmpRepo);
+    expect(state.queue.activeItemId).toBeUndefined();
+    expect(state.queue.items.some((item) => item.id === queueItem.id)).toBe(false);
+    expect(await fs.pathExists(path.join(tmpRepo, queueItem.requestPath))).toBe(false);
+  });
+
+  it("fails memory updates that leave non-core memory artifacts", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-codex-memory-extra-"));
+    const fs = createNodeFileSystemAdapter();
+    const service = createCodexTranslationService({
+      fs,
+      runtime: createRuntimeStub([]),
+      sessionService: createTranslatorSessionService([])
+    });
+
+    const queueItem = await service.createMemoryUpdate(tmpRepo, {
+      taskSlug: "demo-task",
+      targetLanguage: "zh-CN"
+    });
+    await waitForDispatcher();
+    await fs.writeText(path.join(tmpRepo, ".ai/vcm/translations/memory/report.md"), "# Extra report\n");
+
+    await service.handleCodexHook(tmpRepo, "Stop", "demo-task");
+
+    const state = await service.getState(tmpRepo);
+    const failedItem = state.queue.items.find((item) => item.id === queueItem.id);
+    expect(failedItem?.status).toBe("failed");
+    expect(failedItem?.error).toContain("Unexpected translation memory artifacts");
+    expect(await fs.pathExists(path.join(tmpRepo, queueItem.requestPath))).toBe(true);
+  });
+
   it("validates conversation result files", async () => {
     tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-codex-conversation-"));
     const fs = createNodeFileSystemAdapter();
@@ -238,7 +315,13 @@ describe("codex-translation-service", () => {
       sourcePath: "GUIDE.md",
       targetLanguage: "zh-CN"
     });
-    await waitForDispatcher();
+    await waitForCondition(async () => {
+      const queuedState = await service.getState(tmpRepo!);
+      return queuedState.queue.activeItemId === first.queueItemId &&
+        queuedState.fileIndex.jobs.find((job) => job.id === first.id)?.status === "running" &&
+        queuedState.fileIndex.jobs.find((job) => job.id === second.id)?.status === "queued" &&
+        writes.filter((entry) => entry.includes("[VCM CODEX TRANSLATION TASK]")).length === 1;
+    });
 
     let state = await service.getState(tmpRepo);
     expect(state.queue.activeItemId).toBe(first.queueItemId);
@@ -252,7 +335,13 @@ describe("codex-translation-service", () => {
 
     await fs.writeText(path.join(tmpRepo, first.resultPath), "# Demo translated\n");
     await service.handleCodexHook(tmpRepo, "Stop", "demo-task");
-    await waitForDispatcher();
+    await waitForCondition(async () => {
+      const nextState = await service.getState(tmpRepo!);
+      return nextState.queue.activeItemId === second.queueItemId &&
+        nextState.fileIndex.jobs.find((job) => job.id === first.id)?.status === "completed" &&
+        nextState.fileIndex.jobs.find((job) => job.id === second.id)?.status === "running" &&
+        writes.filter((entry) => entry.includes("[VCM CODEX TRANSLATION TASK]")).length === 2;
+    });
 
     state = await service.getState(tmpRepo);
     const completedFirst = state.fileIndex.jobs.find((job) => job.id === first.id);
@@ -344,4 +433,14 @@ function createTranslatorSessionService(starts: string[]): Pick<SessionService, 
 
 function waitForDispatcher(): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, 90));
+}
+
+async function waitForCondition(predicate: () => boolean | Promise<boolean>): Promise<void> {
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    if (await predicate()) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error("Timed out waiting for Codex translation dispatcher.");
 }

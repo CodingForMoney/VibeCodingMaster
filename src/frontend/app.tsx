@@ -563,6 +563,17 @@ export function App() {
               });
             });
           }}
+          onUpdateTranslationMemory={() => {
+            void withBusy(async () => {
+              if (!activeTask) {
+                throw new Error("Create or select a task before updating translation memory.");
+              }
+              await apiClient.createCodexMemoryUpdate({
+                taskSlug: activeTask.taskSlug,
+                targetLanguage: translationTargetLanguage
+              });
+            });
+          }}
           onCreateTask={(input) => withBusy(async () => {
             const task = await apiClient.createTask(input);
             await loadTasks();

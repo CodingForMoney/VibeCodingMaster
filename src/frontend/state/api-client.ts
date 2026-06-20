@@ -38,10 +38,12 @@ import type { CleanupTaskRequest, CleanupTaskResult, CreateTaskRequest, TaskReco
 import type {
   CodexBootstrapRun,
   CodexFileTranslationJob,
+  CodexTranslationQueueItem,
   CodexTranslationSourceFileBrowserResult,
   CodexTranslationState,
   CreateCodexBootstrapRequest,
   CreateCodexFileTranslationRequest,
+  CreateCodexMemoryUpdateRequest,
   SendTranslatedInputRequest,
   TranslateUserInputRequest,
   TranslateUserInputResult,
@@ -304,6 +306,12 @@ export const apiClient = {
   },
   createCodexBootstrap(input: CreateCodexBootstrapRequest) {
     return request<CodexBootstrapRun>("/api/translation/codex/bootstrap", {
+      method: "POST",
+      body: JSON.stringify(input)
+    });
+  },
+  createCodexMemoryUpdate(input: CreateCodexMemoryUpdateRequest) {
+    return request<CodexTranslationQueueItem>("/api/translation/codex/memory-update", {
       method: "POST",
       body: JSON.stringify(input)
     });

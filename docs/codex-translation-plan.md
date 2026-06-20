@@ -166,7 +166,7 @@ be computed from `getTaskRuntimeRepoRoot()` or any task worktree root.
 
 Translation memory should be explicit files, not just model memory.
 
-Recommended files:
+Core files:
 
 - `translations/memory/glossary.md`: approved translations for project terms,
   product names, protocol names, module names, acronyms, and phrases.
@@ -177,6 +177,16 @@ Recommended files:
   translation accuracy.
 - `translations/memory/decisions.md`: dated translation decisions and exceptions.
 
+VCM must keep translation memory compact and predictable:
+
+- the four core files are the only long-term memory files
+- the four core files together must stay at or below `80KB`
+- no archive, reports, candidates, scratch, log, or helper files should be
+  created under `translations/memory/`
+- runtime request files for memory work are allowed under
+  `translations/runtime/memory-updates/`, and VCM deletes them after successful
+  completion
+
 Codex Translator must read these files before each file translation job and may
 use them for conversation translation. It may update them only when it discovers
 a stable convention that should affect future translations. It must not store
@@ -184,10 +194,19 @@ transient task chatter, progress notes, or failed attempts in memory files.
 
 Memory updates are automatic by default. Codex Translator may append stable
 terms, style conventions, project context, and translation decisions to the
-appropriate memory file without a separate approval step. Every automatic memory
-change must be summarized in the current job `report.md` or conversation debug
-metadata so the user can inspect it later. The user may directly edit memory
-files or ask Codex Translator to revise them in the embedded terminal.
+appropriate memory file without a separate approval step, but it must compact
+duplicates and stay within the `80KB` core-memory budget. The user may directly
+edit memory files, ask Codex Translator to revise them in the embedded terminal,
+or use the sidebar `Update memory` action to queue a dedicated memory
+compaction pass.
+
+The manual `Update memory` action is a single-threaded Codex Translator queue
+item. It asks the long-lived translator session to use its current context,
+recent stable user corrections, completed translation behavior, and existing
+memory files to rewrite only the four core memory files. It must not create a
+separate report or archive. On the Codex `Stop` hook, VCM validates that the
+core memory total is at most `80KB` and that the memory directory contains no
+non-core artifacts before marking the queue item complete.
 
 Memory file format rules:
 
@@ -196,9 +215,9 @@ Memory file format rules:
   translation, or conversation translation.
 - User-edited entries have highest priority. Codex Translator must not overwrite
   them automatically.
-- If Codex finds a conflict with a user-edited entry, it should append a
-  candidate note or write the conflict to the current report instead of changing
-  the user entry.
+- If Codex finds a conflict with a user-edited entry, it should leave the user
+  entry unchanged and mention the conflict only in the active runtime output or
+  terminal discussion.
 - Duplicate terms should be merged only when the existing entry is automatic
   and the meaning is clearly the same.
 - `decisions.md` entries should explain the reason for the decision, not just

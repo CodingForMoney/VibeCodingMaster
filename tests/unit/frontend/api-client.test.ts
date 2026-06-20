@@ -262,6 +262,29 @@ describe("apiClient", () => {
     expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/translation/codex/source-files?path=docs%2Fspecs&query=white+paper&limit=25");
   });
 
+  it("queues Codex translation memory updates", async () => {
+    const fetchMock = mockFetch({
+      id: "queue-memory-update",
+      type: "memory-update",
+      status: "queued",
+      targetLanguage: "zh-CN",
+      jobId: "memory-update-1",
+      requestPath: ".ai/vcm/translations/runtime/memory-updates/memory-update-1/request.json"
+    });
+
+    await apiClient.createCodexMemoryUpdate({
+      taskSlug: "demo-task",
+      targetLanguage: "zh-CN"
+    });
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/translation/codex/memory-update");
+    expect(fetchMock.mock.calls[0]?.[1]?.method).toBe("POST");
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
+      taskSlug: "demo-task",
+      targetLanguage: "zh-CN"
+    });
+  });
+
   it("calls gateway status and settings APIs", async () => {
     const fetchMock = mockFetch({
       version: 1,

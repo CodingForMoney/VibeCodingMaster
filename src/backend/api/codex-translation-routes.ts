@@ -1,7 +1,8 @@
 import type { FastifyInstance } from "fastify";
 import type {
   CreateCodexBootstrapRequest,
-  CreateCodexFileTranslationRequest
+  CreateCodexFileTranslationRequest,
+  CreateCodexMemoryUpdateRequest
 } from "../../shared/types/translation.js";
 import { VcmError } from "../errors.js";
 import type { CodexTranslationService } from "../services/codex-translation-service.js";
@@ -38,6 +39,11 @@ export function registerCodexTranslationRoutes(app: FastifyInstance, deps: Codex
   app.post<{ Body: CreateCodexBootstrapRequest }>("/api/translation/codex/bootstrap", async (request) => {
     const project = await requireCurrentProject(deps.projectService);
     return deps.codexTranslationService.createBootstrapRun(project.repoRoot, request.body);
+  });
+
+  app.post<{ Body: CreateCodexMemoryUpdateRequest }>("/api/translation/codex/memory-update", async (request) => {
+    const project = await requireCurrentProject(deps.projectService);
+    return deps.codexTranslationService.createMemoryUpdate(project.repoRoot, request.body);
   });
 
   app.get<{ Params: { jobId: string } }>("/api/translation/codex/files/:jobId", async (request) => {

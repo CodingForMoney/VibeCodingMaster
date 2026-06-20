@@ -75,6 +75,7 @@ export interface ProjectDashboardProps {
   onTranslationTargetLanguageChange(targetLanguage: TranslationTargetLanguage): void;
   onOpenFileTranslation(): void;
   onCreateTranslationBootstrap(): void;
+  onUpdateTranslationMemory(): void;
   onCreateTask(input: { taskSlug: string; createWorktree?: boolean; title?: string }): Promise<void>;
   onSelectTask(taskSlug: string): void;
   themeMode: ThemeMode;
@@ -130,6 +131,7 @@ export function ProjectDashboard({
   onTranslationTargetLanguageChange,
   onOpenFileTranslation,
   onCreateTranslationBootstrap,
+  onUpdateTranslationMemory,
   onCreateTask,
   onSelectTask,
   themeMode,
@@ -322,6 +324,7 @@ export function ProjectDashboard({
           onAutoSendChange={onTranslationAutoSendChange}
           onCreateBootstrap={onCreateTranslationBootstrap}
           onEnabledChange={onTranslationEnabledChange}
+          onUpdateMemory={onUpdateTranslationMemory}
           onTargetLanguageChange={onTranslationTargetLanguageChange}
           onOpenFileTranslation={onOpenFileTranslation}
         />
@@ -486,6 +489,7 @@ function TranslationSettingsPanel({
   onAutoSendChange,
   onCreateBootstrap,
   onEnabledChange,
+  onUpdateMemory,
   onTargetLanguageChange,
   onOpenFileTranslation
 }: {
@@ -497,6 +501,7 @@ function TranslationSettingsPanel({
   onAutoSendChange(enabled: boolean): void;
   onCreateBootstrap(): void;
   onEnabledChange(enabled: boolean): void;
+  onUpdateMemory(): void;
   onTargetLanguageChange(targetLanguage: TranslationTargetLanguage): void;
   onOpenFileTranslation(): void;
 }) {
@@ -554,6 +559,16 @@ function TranslationSettingsPanel({
         onClick={onCreateBootstrap}
       >
         <span>Bootstrap</span>
+        <span>run</span>
+      </button>
+      <button
+        className="settings-toggle"
+        disabled={busy || !fileTranslationAvailable}
+        title={fileTranslationAvailable ? "Compact and update translation memory" : "Create or select a task first"}
+        type="button"
+        onClick={onUpdateMemory}
+      >
+        <span>Update memory</span>
         <span>run</span>
       </button>
     </div>
