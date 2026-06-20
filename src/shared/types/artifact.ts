@@ -13,7 +13,7 @@ export interface HandoffPaths {
   logsDir: string;
   messagesDir: string;
   roleCommandPaths: Record<DispatchableRole, string>;
-  roleLogPaths: Record<RoleName, string>;
+  roleLogPaths: Partial<Record<RoleName, string>>;
   messageRoutePaths: Record<string, string>;
   architecturePlanPath: string;
   knownIssuesPath: string;

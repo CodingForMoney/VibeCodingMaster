@@ -3,7 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
-import { getDefaultStaticDir } from "../../../src/backend/server.js";
+import { createServer, getDefaultStaticDir, type ServerDeps } from "../../../src/backend/server.js";
 
 describe("getDefaultStaticDir", () => {
   const originalCwd = process.cwd();
@@ -24,6 +24,65 @@ describe("getDefaultStaticDir", () => {
   });
 });
 
+describe("createServer", () => {
+  it("cleans translation runtime for recent repositories on startup", async () => {
+    const calls: string[] = [];
+    const app = await createServer(createServerDepsStub(calls));
+
+    await app.ready();
+    await app.close();
+
+    expect(calls).toEqual([
+      "cleanup:/repo-one",
+      "cleanup:/repo-two",
+      "gateway:start",
+      "gateway:stop"
+    ]);
+  });
+});
+
 function getRepoRoot(): string {
   return path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
+}
+
+function createServerDepsStub(calls: string[]): ServerDeps {
+  return {
+    appSettings: {} as never,
+    projectService: {
+      async getRecentRepositoryPaths() {
+        return ["/repo-one", "/repo-two"];
+      }
+    } as never,
+    taskService: {} as never,
+    sessionService: {} as never,
+    artifactService: {} as never,
+    harnessService: {} as never,
+    commandDispatcher: {} as never,
+    claudeHookService: {} as never,
+    codexHookService: {} as never,
+    messageService: {} as never,
+    codexReviewService: {} as never,
+    codexTranslationService: {
+      async cleanupStartupRuntime(repoRoot: string) {
+        calls.push(`cleanup:${repoRoot}`);
+      }
+    } as never,
+    roundService: {} as never,
+    statusService: {} as never,
+    translationService: {} as never,
+    gatewayService: {
+      async start() {
+        calls.push("gateway:start");
+      },
+      async stop() {
+        calls.push("gateway:stop");
+      }
+    } as never,
+    runtime: {} as never,
+    diagnosticsService: {
+      getErrorRuntimeInfo() {
+        return {};
+      }
+    } as never
+  };
 }

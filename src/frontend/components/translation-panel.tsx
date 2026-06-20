@@ -396,8 +396,15 @@ export function FileTranslationModalHost({
     try {
       const next = await apiClient.getCodexTranslationState();
       setCodexState(next);
-      if (!selectedFileJobId && next.fileIndex.jobs[0]) {
+      const selectedStillVisible = selectedFileJobId
+        ? next.fileIndex.jobs.some((job) => job.id === selectedFileJobId)
+        : false;
+      if ((!selectedFileJobId || !selectedStillVisible) && next.fileIndex.jobs[0]) {
         void selectFileJob(next.fileIndex.jobs[0].id);
+      } else if (!next.fileIndex.jobs[0]) {
+        setSelectedFileJobId("");
+        setSelectedFileOutput("");
+        setSelectedFileReport("");
       } else if (refreshSelected && selectedFileJobId) {
         const result = await apiClient.readCodexFileTranslation(selectedFileJobId);
         setSelectedFileOutput(result.output);

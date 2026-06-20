@@ -207,8 +207,6 @@ describe("createSessionService", () => {
     const fs = createMemoryFs();
     await fs.writeText("/repo/.ai/codex-translator", "");
     await fs.writeText("/repo/.ai/codex-translator/config.toml", `approval_policy = "never"`);
-    await fs.writeText("/repo/.ai/vcm/translations/runtime/codex-translator.log", "old runtime log");
-    await fs.writeText("/repo/.ai/vcm/translations/codex-translator.log", "old legacy log");
     const firstRuntimeInputs: CreateTerminalSessionInput[] = [];
     const firstService = createTestSessionService(fs, firstRuntimeInputs, [], {
       worktreePath: "/repo/.claude/worktrees/demo-task"
@@ -227,8 +225,6 @@ describe("createSessionService", () => {
       VCM_ROLE: "codex-translator"
     });
     expect(firstRuntimeInputs[0]?.logPath).toBeUndefined();
-    await expect(fs.pathExists("/repo/.ai/vcm/translations/runtime/codex-translator.log")).resolves.toBe(false);
-    await expect(fs.pathExists("/repo/.ai/vcm/translations/codex-translator.log")).resolves.toBe(false);
     await expect(fs.pathExists("/repo/.ai/vcm/translations/runtime/session.json")).resolves.toBe(true);
     await expect(fs.pathExists("/repo/.claude/worktrees/demo-task/.ai/vcm/sessions/demo-task.json"))
       .resolves.toBe(false);

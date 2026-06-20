@@ -112,7 +112,10 @@ export async function createServer(deps: ServerDeps, options: CreateServerOption
     projectService: deps.projectService,
     codexTranslationService: deps.codexTranslationService
   });
-  registerProjectRoutes(app, { projectService: deps.projectService });
+  registerProjectRoutes(app, {
+    projectService: deps.projectService,
+    codexTranslationService: deps.codexTranslationService
+  });
   registerHarnessRoutes(app, {
     projectService: deps.projectService,
     harnessService: deps.harnessService
@@ -156,6 +159,7 @@ export async function createServer(deps: ServerDeps, options: CreateServerOption
   registerTerminalWs(app, { runtime: deps.runtime });
 
   app.addHook("onReady", async () => {
+    await cleanupRecentTranslationRuntime(deps);
     await deps.gatewayService.start();
   });
   app.addHook("onClose", async () => {
@@ -173,6 +177,13 @@ export async function createServer(deps: ServerDeps, options: CreateServerOption
   }
 
   return app;
+}
+
+async function cleanupRecentTranslationRuntime(deps: Pick<ServerDeps, "projectService" | "codexTranslationService">): Promise<void> {
+  const repoRoots = await deps.projectService.getRecentRepositoryPaths();
+  await Promise.all(repoRoots.map((repoRoot) =>
+    deps.codexTranslationService.cleanupStartupRuntime(repoRoot)
+  ));
 }
 
 export async function startServer(options: CreateServerOptions = {}): Promise<{ url: string; close(): Promise<void> }> {

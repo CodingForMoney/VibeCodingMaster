@@ -90,11 +90,18 @@ export function registerArtifactRoutes(app: FastifyInstance, deps: ArtifactRoute
       const task = await deps.taskService.loadTask(project.repoRoot, request.params.taskSlug);
       const taskRepoRoot = getTaskRuntimeRepoRoot(task);
       const paths = deps.artifactService.getHandoffPaths(taskRepoRoot, task.handoffDir);
+      const artifactPath = paths.roleLogPaths[request.params.role];
+      if (!artifactPath) {
+        return {
+          role: request.params.role,
+          content: ""
+        };
+      }
       return {
         role: request.params.role,
         content: await deps.artifactService.readArtifact({
           repoRoot: taskRepoRoot,
-          artifactPath: paths.roleLogPaths[request.params.role]
+          artifactPath
         })
       };
     }

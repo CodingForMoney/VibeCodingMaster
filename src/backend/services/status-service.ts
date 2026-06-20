@@ -77,8 +77,10 @@ function degradedArtifactSummary(handoffDir: string): ArtifactSummary {
         DISPATCHABLE_ROLES.map((role) => [role, `${roleCommandsDir}/${role}.md`])
       ) as Record<DispatchableRole, string>,
       roleLogPaths: Object.fromEntries(
-        ROLE_NAMES.map((role: RoleName) => [role, `${logsDir}/${role}.log`])
-      ) as Record<RoleName, string>,
+        ROLE_NAMES
+          .filter((role) => role !== "codex-translator")
+          .map((role: RoleName) => [role, `${logsDir}/${role}.log`])
+      ) as Partial<Record<RoleName, string>>,
       messageRoutePaths: {},
       architecturePlanPath: `${handoffDir}/architecture-plan.md`,
       knownIssuesPath: `${handoffDir}/known-issues.md`,

@@ -36,7 +36,7 @@ conversation translation. It should:
   `<baseRepoRoot>/.ai/vcm/translations/`
 - write only the exact output paths assigned by VCM
 - record file metadata so unchanged files are not translated repeatedly
-- support resume/retry after interruption
+- support retry or retranslation after interruption
 - produce a translation report with required light QA checks
 - translate short conversation items sent by VCM and write the translated text to
   VCM-assigned temporary result files
@@ -69,7 +69,7 @@ Codex session translation improves this because:
 - the session can inspect the whole repository and the whole source document
 - Codex can keep a long conversation state and use its normal context
   compaction behavior
-- durable memory files can preserve decisions across session compaction,
+- durable memory files can preserve decisions across session compaction, VCM
   restarts, and future translation jobs
 - translation output can be written to files instead of returned through one
   very large API response
@@ -92,9 +92,9 @@ model. Their lifecycles are still different:
 
 | Translation type | Purpose | Root | Lifecycle | Cleanup |
 | --- | --- | --- | --- | --- |
-| Translation bootstrap | First-run project understanding and memory initialization | `<baseRepoRoot>/.ai/vcm/translations/bootstrap/` plus temporary runtime files | Long-term index and memory, temporary run files | Runtime files are deleted after completion |
-| File translation | Project documents, whitepapers, specs, long-form artifacts | `<baseRepoRoot>/.ai/vcm/translations/files/completed/` | Long-term project-local state | Completed outputs survive; request/progress/report files are deleted after completion |
-| Conversation translation | Role console output, user prompt translation, gateway replies | `<baseRepoRoot>/.ai/vcm/translations/runtime/conversations/<taskSlug>/...` | Task-scoped runtime cache | Deleted after the translated result is consumed |
+| Translation bootstrap | First-run project understanding and memory initialization | `<baseRepoRoot>/.ai/vcm/translations/bootstrap/` plus temporary runtime files | Long-term index and memory, temporary run files | Runtime files are deleted on VCM startup and after completion |
+| File translation | Project documents, whitepapers, specs, long-form artifacts | `<baseRepoRoot>/.ai/vcm/translations/files/completed/` | Long-term project-local state | Completed outputs survive; request/progress/report/chunk files are deleted on VCM startup and after completion |
+| Conversation translation | Role console output, user prompt translation, gateway replies | `<baseRepoRoot>/.ai/vcm/translations/runtime/conversations/<taskSlug>/...` | Task-scoped runtime cache | Deleted on VCM startup or after the translated result is consumed |
 | Translation memory | Shared terminology and style rules | `<baseRepoRoot>/.ai/vcm/translations/memory/` | Long-term project-local state | Survives task cleanup and worktree deletion |
 
 Recommended layout:
@@ -138,9 +138,10 @@ Recommended layout:
               report.md
 ```
 
-Files under `runtime/` are working state. Completed file translations are
-moved into `files/completed/`; the matching runtime job directory is deleted
-after validation.
+Files under `runtime/` are temporary working state. VCM deletes the entire
+`translations/runtime/` tree on startup for recent or connected projects.
+Completed file translations are moved into `files/completed/`; the matching
+runtime job directory is also deleted after validation.
 
 The root is intentionally under `<baseRepoRoot>`, not `<taskRepoRoot>`. In
 worktree-backed tasks, `<taskRepoRoot>` points at
@@ -148,9 +149,10 @@ worktree-backed tasks, `<taskRepoRoot>` points at
 closed. Translation state must not be split between the base repo and task
 worktrees.
 
-Conversation translation entries are temporary. VCM should remove only matching
-runtime conversation files after their result JSON has been consumed. It must
-not remove `translations/files/completed/` or `translations/memory/`.
+Conversation translation entries are temporary. VCM removes matching runtime
+conversation files after their result JSON has been consumed and removes all
+runtime conversation files on startup. Startup cleanup must not remove
+`translations/files/completed/` or `translations/memory/`.
 
 All translation state is local VCM state and is normally ignored by git through
 `.ai/vcm/`. If the user wants a translated file committed to the project, VCM
@@ -312,13 +314,16 @@ User enables translation
 ```
 
 Bootstrap should be rerunnable. A rerun creates a new bootstrap id and preserves
-previous reports. Codex may append new memory entries, but user corrections in
-memory files override automatic bootstrap entries.
+durable memory files and completed-run index history; runtime reports are
+temporary. Codex may append new memory entries, but user corrections in memory
+files override automatic bootstrap entries.
 
 ## 7. File Index And Replacement
 
-`index.json` tracks file translation jobs, completed-output replacement, and
-resume state.
+`index.json` is the durable completed-translation index. It records only file
+translations that passed validation and were moved into `files/completed/`.
+Queued, running, failed, interrupted, and `needs_review` jobs stay under
+`runtime/` and must not be written to this index.
 
 Suggested schema shape:
 
@@ -362,18 +367,19 @@ Replacement rules:
 - Selecting `Translate` always creates a new file translation job for the
   chosen source file and target language.
 - If a completed translation already exists for the same `sourcePath`,
-  `targetLanguage`, and `translationProfile`, VCM keeps it visible until the new
-  job completes successfully.
-- After the new job passes validation, VCM replaces the completed output for
-  that same file/language/profile and removes the superseded job from
+  `targetLanguage`, and `translationProfile`, VCM keeps the old completed file
+  and index entry on disk until the new job completes successfully. During the
+  run, the UI may show the latest runtime job by merging `runtime/queue.json`
+  with `files/index.json`, but the durable index itself is unchanged.
+- After the new job passes validation, VCM writes the completed output for that
+  same file/language/profile, then replaces the superseded entry in
   `files/index.json`.
 - If the new job fails, is interrupted, or needs review, the previous completed
   output remains intact.
 - If the same file is selected from a task worktree, VCM should normalize the
   source path back to the base repo path when possible; the long-term job still
   belongs to `<baseRepoRoot>/.ai/vcm/translations/files/completed/`.
-- Failed or interrupted jobs can be resumed when `progress.json` has enough
-  section state.
+- Failed or interrupted jobs can be retried by creating a new translation job.
 
 ## 8. Codex Translator Role
 
@@ -396,26 +402,27 @@ management pattern:
 - start/resume/restart/stop terminal controls
 - model and effort selectors
 - hook-based running/idle state
-- persisted Codex session id
-- long-lived terminal session for follow-up discussion
+- runtime Codex session id for the current VCM process
+- long-lived terminal session for follow-up discussion until VCM is restarted
 
-VCM persists the active translator session at:
+VCM stores the active translator session runtime record at:
 
 ```text
 <baseRepoRoot>/.ai/vcm/translations/runtime/session.json
 ```
 
-This record is project-level state, not task-level state. It stores the Codex
-session id, selected model, selected effort, terminal cwd, log path, and hook
-activity state needed to show `Resume` after VCM restarts or after the user opens
-another task. The embedded terminal `Restart` control must stop the current
-runtime process, create a fresh Codex session id, overwrite this record, and keep
-old translation outputs intact.
+This record is project-level runtime state, not task-level durable state. It
+stores the Codex session id, selected model, selected effort, terminal cwd, and
+hook activity state for the current VCM process. VCM deletes
+`translations/runtime/` on startup, so this record must not be used for restart
+recovery. The embedded terminal `Restart` control must stop the current runtime
+process, create a fresh Codex session id, overwrite this record, and keep old
+translation outputs intact.
 
-When a Codex hook has captured the real Codex `session_id`, `Resume` must run
-`codex resume <session_id>` so it reconnects the same translator conversation.
-Before the first hook captures a real id, VCM may fall back to `codex resume
---last`.
+When a Codex hook has captured the real Codex `session_id`, `Resume` may run
+`codex resume <session_id>` during the same VCM runtime. After VCM restarts,
+the user should start a fresh translator session and rely on durable memory
+files plus completed translations.
 
 Session identity is fixed by base repository. If VCM later supports multiple
 parallel target-language translator sessions, split this file into a
@@ -600,7 +607,7 @@ All translation work enters the same VCM-managed queue:
 - conversation translation requests
 - bootstrap runs
 - retry requests
-- resume requests
+- retranslation requests
 
 Queue rules:
 
@@ -645,7 +652,7 @@ Suggested queue item shape:
   "items": [
     {
       "id": "queue-item-001",
-      "type": "bootstrap | file | conversation | retry | resume",
+      "type": "bootstrap | file | conversation | retry | force-retranslate",
       "status": "running",
       "targetLanguage": "zh-CN",
       "jobId": "whitepaper-v0-8-zh-20260614-001",
@@ -733,8 +740,8 @@ Completion rule:
   structure, corrupted code blocks, invalid result metadata, or unresolved risky
   choices, mark the job `needs_review`.
 - If required output files are missing or unreadable, mark the job `failed`.
-- `needs_review` jobs remain visible in the file list and can be resumed,
-  retried, or manually resolved.
+- `needs_review` jobs remain visible in the file list during the current VCM
+  runtime and can be retried or manually resolved.
 
 ## 14. Conversation Translation Workflow
 
@@ -936,10 +943,13 @@ on one giant prompt or one giant assistant response to translate the entire file
 
 Resume behavior:
 
-- If Codex session is still available, continue in the same session.
-- If the terminal was stopped, resume the Codex session id when possible.
-- If the session cannot resume, start a new Codex Translator session and reload
-  memory plus runtime `request.json`, `progress.json`, and partial `output.md`.
+- If Codex session is still available in the current VCM process, continue in
+  the same session.
+- If the terminal was stopped during the same VCM process, resume the Codex
+  session id when possible.
+- After VCM restarts, do not resume runtime jobs or partial runtime outputs.
+  Start a fresh Codex Translator session and requeue the translation from the
+  durable source file or conversation source.
 - Never replace a completed output until the new job has passed validation.
 
 Cancellation and interruption behavior:
@@ -948,10 +958,11 @@ Cancellation and interruption behavior:
   leave its request files for debugging.
 - If the user stops Codex Translator, closes VCM, or the hook flow does not
   return, mark the active item `interrupted` on the next state reconciliation.
-- On VCM restart, reload `runtime/queue.json`; any item left in `dispatching`,
-  `running`, or `validating` without a confirmed result becomes `interrupted`.
-- Interrupted file jobs can be resumed from `progress.json` and partial
-  `output.md` when available.
+- On VCM startup, delete `translations/runtime/` entirely. Do not resume
+  queued, dispatching, running, validating, failed, or interrupted runtime
+  jobs from a previous process.
+- Startup cleanup also removes file-index entries that do not point at a
+  validated completed output under `translations/files/completed/`.
 - Interrupted conversation translation requests should normally be retried from
   the original request file because they are short and temporary.
 - Manual resolve can mark an item completed only after the expected result file
@@ -974,13 +985,16 @@ Recommended UI:
   - right pane: selected translated file content preview
 - The view has a `Translate` action. Clicking it opens a file picker or path
   selector and creates a file translation job for the chosen file.
-- Selecting an item in the left pane loads the completed translated Markdown
-  output in the right pane. Runtime reports are only retained while a job is
-  queued, running, failed, or interrupted.
+- Selecting a completed item in the left pane loads the completed translated
+  Markdown output in the right pane. Runtime reports are only retained while a
+  job is queued, running, failed, or interrupted.
 - Existing translated files come from
-  `<baseRepoRoot>/.ai/vcm/translations/files/index.json`.
-- Active and queued jobs should appear in the left pane with status such as
-  queued, translating, QA, completed, failed, or interrupted.
+  `<baseRepoRoot>/.ai/vcm/translations/files/index.json`; active and queued
+  jobs are derived from `runtime/queue.json` and their runtime `request.json`
+  files.
+- The merged list should show at most one row for each
+  `sourcePath + targetLanguage + translationProfile`; runtime rows win over
+  completed rows while a retranslation is in progress.
 
 Controls in the file translation view:
 
@@ -1059,11 +1073,12 @@ New backend pieces:
   - validate file and conversation result files
   - record promote metadata when users export translations into the repo tree
 - translation queue service
-  - enqueue bootstrap, file, conversation, retry, and resume tasks
+  - enqueue bootstrap, file, conversation, retry, and retranslation tasks
   - persist `runtime/queue.json`
   - persist queue item status
   - ensure only one active Codex Translator task at a time
-  - restore interrupted state after VCM restart
+  - delete startup runtime state instead of restoring interrupted state after
+    VCM restart
   - advance the queue only after hook completion and result-file validation
 - start/resume Codex Translator
 - send job prompt
@@ -1081,7 +1096,7 @@ New backend pieces:
   - create job
   - get job status
   - read result/report
-  - resume/retry/force retranslate
+  - retry/force retranslate
   - cancel/skip/manual resolve queue items
   - promote completed translations into explicit user-selected repo paths
   - get conversation translation request status when needed for debugging
@@ -1143,6 +1158,8 @@ durable under `translations/files/completed/`.
 - Add the unified `.ai/vcm/translations/` directory contract, including
   `runtime/queue.json`, `memory/`, `bootstrap/`, `files/completed/`, and
   `runtime/conversations/`.
+- Define `runtime/` as startup-cleaned temporary state; only memory, completed
+  files, and durable indexes survive VCM restart.
 - Define index, request, progress, report, queue, and conversation result
   schemas.
 - Define memory file format, bootstrap candidate discovery, scan budgets, and
@@ -1158,10 +1175,10 @@ durable under `translations/files/completed/`.
 
 - Implement bootstrap state, candidate discovery, and bootstrap run creation.
 - Implement source hash and de-duplication.
-- Implement job create/list/read/resume.
+- Implement job create/list/read/retranslate.
 - Implement the shared translation queue and persist `runtime/queue.json`.
 - Implement result-file validation for file and conversation translation.
-- Implement interrupted-state reconciliation on VCM restart.
+- Implement startup runtime cleanup and durable-index pruning on VCM restart.
 - Persist completed file outputs under
   `<baseRepoRoot>/.ai/vcm/translations/files/completed/`.
 - Persist active queue, file/bootstrap request files, and conversation
@@ -1174,8 +1191,8 @@ durable under `translations/files/completed/`.
 ### Phase 3: Codex Session Integration
 
 - Add `codex-translator` role/session support.
-- Persist session identity by `<baseRepoRoot> + targetLanguage`; do not split
-  sessions by translation profile.
+- Keep session identity as current-process runtime state by `<baseRepoRoot> +
+  targetLanguage`; do not split sessions by translation profile.
 - Reuse Codex embedded terminal startup with model/effort selectors.
 - Add hook endpoints and running/idle tracking.
 - Send translation job prompts into the long-lived Codex session.
@@ -1191,7 +1208,8 @@ durable under `translations/files/completed/`.
 - Add a file-translation button to the existing translation panel.
 - Add the file translation modal.
 - Add first-use bootstrap recommendation and bootstrap controls.
-- Add the translated-file left pane backed by `files/index.json`.
+- Add the translated-file left pane backed by completed entries from
+  `files/index.json` plus active runtime file jobs from the queue.
 - Add the translated-content right pane backed by completed output files.
 - Show selected job status; show runtime report details only while a job is not
   completed.
@@ -1219,11 +1237,11 @@ durable under `translations/files/completed/`.
   conversation or file translation.
 - Add bootstrap tests for candidate discovery, memory writes, queue ordering,
   and rerun behavior.
-- Add queue status-machine tests, including interrupted restart recovery.
+- Add queue status-machine tests, including startup runtime cleanup.
 - Add conversation result text validation tests.
 - Add memory priority tests proving user entries override automatic entries.
 - Add promote tests proving source files are not overwritten by default.
-- Add resume tests with partial output.
+- Add retry/retranslation tests after failed or interrupted work.
 - Test with `docs/whitepaper-v0.8.md` scale files.
 
 ## 21. Resolved Decisions

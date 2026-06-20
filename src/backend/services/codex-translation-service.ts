@@ -26,6 +26,7 @@ import type { TerminalRuntime } from "../runtime/terminal-runtime.js";
 import type { SessionService } from "./session-service.js";
 
 export interface CodexTranslationService {
+  cleanupStartupRuntime(repoRoot: string): Promise<void>;
   getState(repoRoot: string): Promise<CodexTranslationState>;
   browseSourceFiles(repoRoot: string, input?: BrowseCodexTranslationSourceFilesRequest): Promise<CodexTranslationSourceFileBrowserResult>;
   createFileJob(repoRoot: string, input: CreateCodexFileTranslationRequest): Promise<CodexFileTranslationJob>;
@@ -75,6 +76,7 @@ interface CodexFileTranslationChunk {
 }
 
 interface CodexFileTranslationRequestFile {
+  job?: CodexFileTranslationJob;
   chunks?: CodexFileTranslationChunk[];
 }
 
@@ -82,7 +84,6 @@ const TRANSLATIONS_ROOT = ".ai/vcm/translations";
 const TRANSLATIONS_RUNTIME_DIR = `${TRANSLATIONS_ROOT}/runtime`;
 const MEMORY_DIR = `${TRANSLATIONS_ROOT}/memory`;
 const QUEUE_PATH = `${TRANSLATIONS_RUNTIME_DIR}/queue.json`;
-const LEGACY_QUEUE_PATH = `${TRANSLATIONS_ROOT}/queue.json`;
 const FILE_INDEX_PATH = `${TRANSLATIONS_ROOT}/files/index.json`;
 const FILE_COMPLETED_DIR = `${TRANSLATIONS_ROOT}/files/completed`;
 const FILE_RUNTIME_JOBS_DIR = `${TRANSLATIONS_RUNTIME_DIR}/files/jobs`;
@@ -90,10 +91,6 @@ const BOOTSTRAP_INDEX_PATH = `${TRANSLATIONS_ROOT}/bootstrap/index.json`;
 const BOOTSTRAP_RUNTIME_RUNS_DIR = `${TRANSLATIONS_RUNTIME_DIR}/bootstrap/runs`;
 const CONVERSATION_RUNTIME_DIR = `${TRANSLATIONS_RUNTIME_DIR}/conversations`;
 const MEMORY_UPDATE_RUNTIME_DIR = `${TRANSLATIONS_RUNTIME_DIR}/memory-updates`;
-const TRANSLATOR_LOG_PATHS = [
-  `${TRANSLATIONS_RUNTIME_DIR}/codex-translator.log`,
-  `${TRANSLATIONS_ROOT}/codex-translator.log`
-] as const;
 const DEFAULT_PROFILE = "default";
 const DEFAULT_CHUNK_SOURCE_TOKEN_TARGET = 80000;
 const BOOTSTRAP_DEFAULT_LIMIT = 12;
@@ -192,7 +189,6 @@ export function createCodexTranslationService(deps: CodexTranslationServiceDeps)
     await ensureMemoryFile(repoRoot, "style-guide.md", "# Style Guide\n");
     await ensureMemoryFile(repoRoot, "project-context.md", "# Project Context\n");
     await ensureMemoryFile(repoRoot, "decisions.md", "# Decisions\n");
-    await cleanupTranslatorLogs(repoRoot);
   }
 
   async function ensureMemoryFile(repoRoot: string, fileName: string, content: string): Promise<void> {
@@ -209,20 +205,9 @@ export function createCodexTranslationService(deps: CodexTranslationServiceDeps)
     });
   }
 
-  async function cleanupTranslatorLogs(repoRoot: string): Promise<void> {
-    await Promise.all(TRANSLATOR_LOG_PATHS.map((relativePath) => removeRepoPath(repoRoot, relativePath)));
-  }
-
   async function loadQueue(repoRoot: string): Promise<CodexTranslationQueueState> {
     const queuePath = resolveRepoPath(repoRoot, QUEUE_PATH);
     if (!(await deps.fs.pathExists(queuePath))) {
-      const legacyQueuePath = resolveRepoPath(repoRoot, LEGACY_QUEUE_PATH);
-      if (await deps.fs.pathExists(legacyQueuePath)) {
-        const migrated = normalizeQueue(await deps.fs.readJson<Partial<CodexTranslationQueueState>>(legacyQueuePath));
-        await deps.fs.writeJsonAtomic(queuePath, migrated);
-        await removeRepoPath(repoRoot, LEGACY_QUEUE_PATH);
-        return migrated;
-      }
       return {
         version: 1,
         updatedAt: now(),
@@ -234,7 +219,6 @@ export function createCodexTranslationService(deps: CodexTranslationServiceDeps)
 
   async function saveQueue(repoRoot: string, queue: CodexTranslationQueueState): Promise<void> {
     await deps.fs.writeJsonAtomic(resolveRepoPath(repoRoot, QUEUE_PATH), queue);
-    await removeRepoPath(repoRoot, LEGACY_QUEUE_PATH);
   }
 
   async function loadFileIndex(repoRoot: string): Promise<CodexFileTranslationIndex> {
@@ -707,11 +691,53 @@ export function createCodexTranslationService(deps: CodexTranslationServiceDeps)
     try {
       const request = await deps.fs.readJson<Partial<CodexFileTranslationRequestFile>>(resolveRepoPath(repoRoot, requestPath));
       return {
+        job: isFileJob(request.job) ? request.job : undefined,
         chunks: Array.isArray(request.chunks) ? request.chunks.filter(isFileTranslationChunk) : []
       };
     } catch {
       return {};
     }
+  }
+
+  async function loadRuntimeFileJob(repoRoot: string, item: CodexTranslationQueueItem): Promise<CodexFileTranslationJob | undefined> {
+    if (!isFileTranslationQueueItem(item)) {
+      return undefined;
+    }
+    const request = await loadFileTranslationRequest(repoRoot, item.requestPath);
+    if (!request.job) {
+      return undefined;
+    }
+    return {
+      ...request.job,
+      status: toFileJobStatus(item.status),
+      queueItemId: item.id,
+      updatedAt: item.updatedAt
+    };
+  }
+
+  async function loadRuntimeFileJobs(
+    repoRoot: string,
+    queue?: CodexTranslationQueueState
+  ): Promise<CodexFileTranslationJob[]> {
+    const sourceQueue = queue ?? await loadQueue(repoRoot);
+    const jobs = await Promise.all(
+      sourceQueue.items
+        .filter(isFileTranslationQueueItem)
+        .filter((item) => item.status !== "completed")
+        .map((item) => loadRuntimeFileJob(repoRoot, item))
+    );
+    return jobs
+      .filter((job): job is CodexFileTranslationJob => Boolean(job))
+      .sort(compareFileJobUpdatedAtDesc);
+  }
+
+  async function findRuntimeFileJobById(repoRoot: string, jobId: string): Promise<CodexFileTranslationJob | undefined> {
+    const queue = await loadQueue(repoRoot);
+    const item = queue.items.find((candidate) =>
+      isFileTranslationQueueItem(candidate) &&
+      candidate.jobId === jobId
+    );
+    return item ? loadRuntimeFileJob(repoRoot, item) : undefined;
   }
 
   async function validateMemoryBudget(repoRoot: string): Promise<{ ok: boolean; error?: string }> {
@@ -762,19 +788,30 @@ export function createCodexTranslationService(deps: CodexTranslationServiceDeps)
       return;
     }
 
-    const index = await loadFileIndex(repoRoot);
-    const job = index.jobs.find((candidate) => candidate.id === item.jobId);
-    if (job) {
-      job.status = item.status === "needs_review" ? "needs_review" : item.status as CodexFileTranslationJob["status"];
-      job.updatedAt = now();
-      if (item.status === "completed") {
-        await finalizeCompletedFileJob(repoRoot, job);
-        job.completedAt = job.updatedAt;
-        await cleanupSupersededCompletedFileJobs(repoRoot, index);
-      }
-      index.updatedAt = job.updatedAt;
-      await saveFileIndex(repoRoot, index);
+    if (!isFileTranslationQueueItem(item) || item.status !== "completed") {
+      return;
     }
+
+    const runtimeJob = await loadRuntimeFileJob(repoRoot, item);
+    if (!runtimeJob) {
+      return;
+    }
+    const completedAt = now();
+    const completedJob: CodexFileTranslationJob = {
+      ...runtimeJob,
+      status: "completed",
+      updatedAt: completedAt,
+      completedAt
+    };
+    await finalizeCompletedFileJob(repoRoot, completedJob);
+    const index = await loadFileIndex(repoRoot);
+    index.jobs = [
+      completedJob,
+      ...index.jobs.filter((job) => job.id !== completedJob.id)
+    ];
+    await cleanupSupersededCompletedFileJobs(repoRoot, index);
+    index.updatedAt = completedAt;
+    await saveFileIndex(repoRoot, index);
   }
 
   async function cleanupCompletedRuntime(repoRoot: string): Promise<void> {
@@ -809,6 +846,50 @@ export function createCodexTranslationService(deps: CodexTranslationServiceDeps)
       .map((item) => cleanupRuntimeDirectoryForPath(repoRoot, item.requestPath)));
 
     await pruneQueueItems(repoRoot, isPrunableCompletedQueueItem);
+  }
+
+  async function cleanupStartupFileIndex(repoRoot: string): Promise<void> {
+    const indexPath = resolveRepoPath(repoRoot, FILE_INDEX_PATH);
+    if (!(await deps.fs.pathExists(indexPath))) {
+      return;
+    }
+    const index = await loadFileIndex(repoRoot);
+    const seenKeys = new Set<string>();
+    const jobs: CodexFileTranslationJob[] = [];
+    for (const job of index.jobs) {
+      if (job.status !== "completed" || !isCompletedFileResultPath(job.resultPath)) {
+        continue;
+      }
+      const key = fileTranslationReplacementKey(job);
+      if (seenKeys.has(key)) {
+        continue;
+      }
+      if (await deps.fs.pathExists(resolveRepoPath(repoRoot, job.resultPath))) {
+        seenKeys.add(key);
+        jobs.push(job);
+      }
+    }
+    if (jobs.length === index.jobs.length) {
+      return;
+    }
+    index.jobs = jobs;
+    index.updatedAt = now();
+    await saveFileIndex(repoRoot, index);
+  }
+
+  async function cleanupStartupBootstrapIndex(repoRoot: string): Promise<void> {
+    const indexPath = resolveRepoPath(repoRoot, BOOTSTRAP_INDEX_PATH);
+    if (!(await deps.fs.pathExists(indexPath))) {
+      return;
+    }
+    const index = await loadBootstrapIndex(repoRoot);
+    const runs = index.runs.filter((run) => run.status === "completed");
+    if (runs.length === index.runs.length) {
+      return;
+    }
+    index.runs = runs;
+    index.updatedAt = now();
+    await saveBootstrapIndex(repoRoot, index);
   }
 
   async function finalizeCompletedFileJob(repoRoot: string, job: CodexFileTranslationJob): Promise<boolean> {
@@ -899,6 +980,12 @@ export function createCodexTranslationService(deps: CodexTranslationServiceDeps)
   }
 
   return {
+    async cleanupStartupRuntime(repoRoot) {
+      await removeRepoPath(repoRoot, TRANSLATIONS_RUNTIME_DIR, true);
+      await cleanupStartupFileIndex(repoRoot);
+      await cleanupStartupBootstrapIndex(repoRoot);
+    },
+
     async getState(repoRoot) {
       await ensureLayout(repoRoot);
       await cleanupCompletedRuntime(repoRoot);
@@ -908,9 +995,13 @@ export function createCodexTranslationService(deps: CodexTranslationServiceDeps)
         loadBootstrapIndex(repoRoot),
         isMemoryInitialized(repoRoot, deps.fs)
       ]);
+      const runtimeFileJobs = await loadRuntimeFileJobs(repoRoot, queue);
       return {
         queue,
-        fileIndex,
+        fileIndex: visibleFileTranslationIndex({
+          ...fileIndex,
+          jobs: [...runtimeFileJobs, ...fileIndex.jobs]
+        }),
         bootstrapIndex,
         memoryInitialized
       };
@@ -974,7 +1065,17 @@ export function createCodexTranslationService(deps: CodexTranslationServiceDeps)
       const targetLanguage = input.targetLanguage.trim() || "zh-CN";
       const profile = input.translationProfile?.trim() || DEFAULT_PROFILE;
       const dedupeKey = sha256(`${sourceHash}|${targetLanguage}|${profile}`);
-      const index = await loadFileIndex(repoRoot);
+      const replacementKey = fileTranslationReplacementKeyFromParts(sourcePath, targetLanguage, profile);
+      const activeExisting = (await loadRuntimeFileJobs(repoRoot)).find((job) =>
+        fileTranslationReplacementKey(job) === replacementKey &&
+        isActiveFileTranslationJobStatus(job.status)
+      );
+      if (activeExisting) {
+        if (input.taskSlug) {
+          void dispatchNext(repoRoot, input.taskSlug);
+        }
+        return activeExisting;
+      }
 
       const timestamp = now();
       const jobId = `file-${safeId(path.basename(sourcePath, path.extname(sourcePath)))}-${Date.now()}-${createId().slice(0, 8)}`;
@@ -1073,9 +1174,6 @@ export function createCodexTranslationService(deps: CodexTranslationServiceDeps)
         lastUpdatedAt: timestamp
       });
       await deps.fs.writeText(resolveRepoPath(repoRoot, job.reportPath), `# Translation Report\n\nStatus: queued\nJob: ${jobId}\n`);
-      index.jobs = [job, ...index.jobs];
-      index.updatedAt = timestamp;
-      await saveFileIndex(repoRoot, index);
       if (input.taskSlug) {
         void dispatchNext(repoRoot, input.taskSlug);
       }
@@ -1205,7 +1303,8 @@ export function createCodexTranslationService(deps: CodexTranslationServiceDeps)
     async readFileJobOutput(repoRoot, jobId) {
       await ensureLayout(repoRoot);
       const index = await loadFileIndex(repoRoot);
-      const job = index.jobs.find((candidate) => candidate.id === jobId);
+      const job = index.jobs.find((candidate) => candidate.id === jobId)
+        ?? await findRuntimeFileJobById(repoRoot, jobId);
       if (!job) {
         throw new VcmError({
           code: "TRANSLATION_JOB_MISSING",
@@ -1848,11 +1947,66 @@ function completedFileResultPath(sourcePath: string, targetLanguage: string, tra
 }
 
 function fileTranslationReplacementKey(job: CodexFileTranslationJob): string {
+  return fileTranslationReplacementKeyFromParts(job.sourcePath, job.targetLanguage, job.translationProfile);
+}
+
+function fileTranslationReplacementKeyFromParts(sourcePath: string, targetLanguage: string, translationProfile: string): string {
   return [
-    normalizeRepoRelative(job.sourcePath),
-    job.targetLanguage.trim(),
-    (job.translationProfile || DEFAULT_PROFILE).trim()
+    normalizeRepoRelative(sourcePath),
+    targetLanguage.trim(),
+    (translationProfile || DEFAULT_PROFILE).trim()
   ].join("\0");
+}
+
+function isActiveFileTranslationJobStatus(status: CodexFileTranslationJob["status"]): boolean {
+  return status === "queued" || status === "running" || status === "validating";
+}
+
+function isFileTranslationQueueItem(item: CodexTranslationQueueItem): boolean {
+  return item.type === "file" || item.type === "force-retranslate";
+}
+
+function toFileJobStatus(status: CodexTranslationQueueItem["status"]): CodexFileTranslationJob["status"] {
+  if (status === "dispatching") {
+    return "running";
+  }
+  return status === "completed" ||
+    status === "queued" ||
+    status === "running" ||
+    status === "validating" ||
+    status === "needs_review" ||
+    status === "failed" ||
+    status === "interrupted" ||
+    status === "skipped" ||
+    status === "cancelled"
+    ? status
+    : "failed";
+}
+
+function compareFileJobUpdatedAtDesc(left: CodexFileTranslationJob, right: CodexFileTranslationJob): number {
+  return (right.updatedAt ?? "").localeCompare(left.updatedAt ?? "");
+}
+
+function isCompletedFileResultPath(relativePath: string): boolean {
+  const normalized = normalizeRepoRelative(relativePath);
+  return normalized.startsWith(`${FILE_COMPLETED_DIR}/`);
+}
+
+function visibleFileTranslationIndex(index: CodexFileTranslationIndex): CodexFileTranslationIndex {
+  const seenKeys = new Set<string>();
+  const jobs: CodexFileTranslationJob[] = [];
+  for (const job of index.jobs) {
+    const key = fileTranslationReplacementKey(job);
+    if (seenKeys.has(key)) {
+      continue;
+    }
+    seenKeys.add(key);
+    jobs.push(job);
+  }
+  return {
+    ...index,
+    jobs
+  };
 }
 
 function retainedCompletedFileJobIds(index: CodexFileTranslationIndex): Set<string> {
@@ -1883,10 +2037,7 @@ function isPrunableCompletedQueueItem(item: CodexTranslationQueueItem): boolean 
 
 function isTranslationRuntimeDirectory(relativePath: string): boolean {
   const normalized = normalizeRepoRelative(relativePath);
-  return normalized.startsWith(`${TRANSLATIONS_RUNTIME_DIR}/`) ||
-    normalized.startsWith(`${TRANSLATIONS_ROOT}/files/jobs/`) ||
-    normalized.startsWith(`${TRANSLATIONS_ROOT}/bootstrap/runs/`) ||
-    normalized.startsWith(`${TRANSLATIONS_ROOT}/conversations/`);
+  return normalized.startsWith(`${TRANSLATIONS_RUNTIME_DIR}/`);
 }
 
 async function readStandaloneConversationResult(
