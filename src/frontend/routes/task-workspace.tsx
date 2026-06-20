@@ -85,7 +85,7 @@ export function TaskWorkspace({
     coder: "default",
     reviewer: "default",
     "codex-reviewer": "xhigh",
-    "codex-translator": "xhigh"
+    "codex-translator": "medium"
   });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");

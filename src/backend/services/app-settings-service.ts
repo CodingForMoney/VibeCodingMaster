@@ -4,12 +4,15 @@ import { VCM_ROLE_NAMES } from "../../shared/constants.js";
 import { CODEX_REVIEW_GATES, type CodexReviewGate } from "../../shared/types/codex-review.js";
 import {
   createDefaultLaunchTemplate,
+  DEFAULT_TRANSLATION_OUTPUT_MODE,
   DEFAULT_TRANSLATION_TARGET_LANGUAGE,
+  TRANSLATION_OUTPUT_MODE_OPTIONS,
   TRANSLATION_TARGET_LANGUAGE_OPTIONS,
   type AppPreferences,
   type LaunchTemplate,
   type PermissionRequestMode,
   type RoleLaunchTemplateEntry,
+  type TranslationOutputMode,
   type TranslationTargetLanguage,
   type ThemeMode
 } from "../../shared/types/app-settings.js";
@@ -22,19 +25,12 @@ import {
   type ClaudePermissionMode,
   type SessionEffort
 } from "../../shared/types/session.js";
-import type { TranslationSecretSettings, TranslationSettings } from "../../shared/types/translation.js";
 import type { FileSystemAdapter } from "../adapters/filesystem.js";
 import { resolveVcmDataDir } from "../vcm-data-dir.js";
-
-export interface StoredTranslationConfig {
-  settings: Partial<TranslationSettings>;
-  secrets: TranslationSecretSettings;
-}
 
 export interface AppSettingsFile {
   version: 1;
   preferences: AppPreferences;
-  translation?: StoredTranslationConfig;
   codexReview?: AppCodexReviewSettingsState;
   recentRepositoryPaths: string[];
 }
@@ -66,8 +62,6 @@ export interface AppSettingsService {
   loadSettings(): Promise<AppSettingsFile>;
   getPreferences(): Promise<AppPreferences>;
   updatePreferences(input: Partial<AppPreferences>): Promise<AppPreferences>;
-  updateTranslationConfig(config: StoredTranslationConfig): Promise<StoredTranslationConfig>;
-  getTranslationConfig(): Promise<StoredTranslationConfig | undefined>;
   getRecentRepositoryPaths(): Promise<string[]>;
   recordRecentRepositoryPath(repoRoot: string): Promise<string[]>;
   loadProjectIndex(): Promise<AppProjectIndexFile>;
@@ -160,18 +154,6 @@ export function createAppSettingsService(deps: AppSettingsServiceDeps): AppSetti
         preferences
       });
       return preferences;
-    },
-    async updateTranslationConfig(config) {
-      const current = await loadSettings();
-      const translation = normalizeTranslationConfig(config) ?? { settings: {}, secrets: {} };
-      await saveSettings({
-        ...current,
-        translation
-      });
-      return translation;
-    },
-    async getTranslationConfig() {
-      return (await loadSettings()).translation;
     },
     async getRecentRepositoryPaths() {
       return (await loadSettings()).recentRepositoryPaths;
@@ -326,7 +308,6 @@ function normalizeSettingsFile(input: Partial<AppSettingsFile>): AppSettingsFile
   const settings: AppSettingsFile = {
     version: 1,
     preferences: normalizePreferences(input.preferences),
-    translation: normalizeTranslationConfig(input.translation),
     recentRepositoryPaths: normalizeRecentRepositoryPaths(input.recentRepositoryPaths)
   };
   const codexReview = normalizeCodexReviewSettingsState(input.codexReview);
@@ -348,6 +329,7 @@ function normalizePreferences(input: unknown): AppPreferences {
     translationEnabled: candidate.translationEnabled === true,
     translationAutoSendEnabled: candidate.translationAutoSendEnabled === true,
     translationTargetLanguage: normalizeTranslationTargetLanguage(candidate.translationTargetLanguage),
+    translationOutputMode: normalizeTranslationOutputMode(candidate.translationOutputMode),
     launchTemplate: normalizeLaunchTemplate(candidate.launchTemplate)
   };
 }
@@ -369,6 +351,11 @@ function normalizePermissionRequestMode(input: unknown): PermissionRequestMode {
 function normalizeTranslationTargetLanguage(input: unknown): TranslationTargetLanguage {
   const option = TRANSLATION_TARGET_LANGUAGE_OPTIONS.find((current) => current.value === input);
   return option?.value ?? DEFAULT_TRANSLATION_TARGET_LANGUAGE;
+}
+
+function normalizeTranslationOutputMode(input: unknown): TranslationOutputMode {
+  const option = TRANSLATION_OUTPUT_MODE_OPTIONS.find((current) => current.value === input);
+  return option?.value ?? DEFAULT_TRANSLATION_OUTPUT_MODE;
 }
 
 function normalizeLaunchTemplate(input: unknown): LaunchTemplate {
@@ -426,25 +413,6 @@ function normalizeSessionEffort(input: unknown, fallback: SessionEffort): Sessio
   }
   const effort = SESSION_EFFORT_OPTIONS.find((option) => option.value === input);
   return effort?.value ?? fallback;
-}
-
-function normalizeTranslationConfig(input: unknown): StoredTranslationConfig | undefined {
-  if (!input || typeof input !== "object") {
-    return undefined;
-  }
-
-  const candidate = input as Partial<StoredTranslationConfig>;
-  const rawSettings = isObject(candidate.settings) ? candidate.settings as Partial<TranslationSettings> : {};
-  const rawSecrets = isObject(candidate.secrets) ? candidate.secrets as TranslationSecretSettings : {};
-  const { apiKey: settingsApiKey, ...settings } = rawSettings;
-  const apiKey = rawSecrets.apiKey ?? settingsApiKey;
-  return {
-    settings,
-    secrets: {
-      ...rawSecrets,
-      ...(apiKey !== undefined ? { apiKey } : {})
-    }
-  };
 }
 
 function normalizeRecentRepositoryPaths(input: unknown): string[] {

@@ -19,6 +19,7 @@ import { TRANSLATION_ENTRY_RETENTION_LIMIT } from "../../shared/types/translatio
 import { apiClient } from "../state/api-client.js";
 
 type TranslationPanelStatus = TranslationSessionStatus;
+const TRANSLATED_COMPOSER_SEPARATOR = "\n\n--- Translation ---\n";
 
 export interface TranslationPanelProps {
   active?: boolean;
@@ -147,12 +148,13 @@ export function TranslationPanel({
   }, [activeTranslationStartedAt]);
 
   async function translateInput(send = false) {
+    const sourceText = composer;
     setBusy(true);
     setError("");
     setComposerIsEnglishDraft(false);
     try {
       const result = await apiClient.translateUserInput(taskSlug, role, {
-        text: composer,
+        text: sourceText,
         mode: send ? "auto-send" : "review-before-send",
         useContext: false,
         send
@@ -161,7 +163,7 @@ export function TranslationPanel({
         setComposer("");
         setComposerIsEnglishDraft(false);
       } else {
-        setComposer(result.englishPreview);
+        setComposer(formatTranslatedComposerDraft(sourceText, result.englishPreview));
         setComposerIsEnglishDraft(true);
       }
     } catch (caught) {
@@ -205,13 +207,14 @@ export function TranslationPanel({
   }
 
   async function sendEnglish() {
-    if (!composer.trim()) {
+    const englishText = composerIsEnglishDraft ? extractTranslatedComposerDraft(composer) : composer;
+    if (!englishText.trim()) {
       return;
     }
     setBusy(true);
     setError("");
     try {
-      await apiClient.sendTranslatedInput(taskSlug, role, { englishText: composer });
+      await apiClient.sendTranslatedInput(taskSlug, role, { englishText });
       setComposer("");
       setComposerIsEnglishDraft(false);
     } catch (caught) {
@@ -314,7 +317,7 @@ export function TranslationPanel({
             value={composer}
             onChange={(event) => {
               setComposer(event.target.value);
-              if (!event.target.value.trim()) {
+              if (!event.target.value.trim() || (composerIsEnglishDraft && !hasTranslatedComposerDraft(event.target.value))) {
                 setComposerIsEnglishDraft(false);
               }
             }}
@@ -322,7 +325,11 @@ export function TranslationPanel({
             placeholder="输入中文，先翻译成英文工程指令..."
           />
           <div className="translation-composer-actions">
-            <button type="button" disabled={busy || !composerIsEnglishDraft || !composer.trim()} onClick={() => void sendEnglish()}>
+            <button
+              type="button"
+              disabled={busy || !composerIsEnglishDraft || !extractTranslatedComposerDraft(composer).trim()}
+              onClick={() => void sendEnglish()}
+            >
               Send English
             </button>
           </div>
@@ -834,10 +841,29 @@ function getTranslationEntryDisplayText(entry: TranslationEntry): string {
   }
 
   if (entry.status === "translated") {
+    if (entry.direction === "user-input-to-english") {
+      return formatTranslatedComposerDraft(entry.sourceText, entry.translatedText);
+    }
     return entry.translatedText;
   }
 
   return entry.translatedText || entry.sourceText;
+}
+
+export function formatTranslatedComposerDraft(sourceText: string, translatedText: string): string {
+  return `${sourceText.trimEnd()}${TRANSLATED_COMPOSER_SEPARATOR}${translatedText.trimStart()}`;
+}
+
+export function hasTranslatedComposerDraft(composerText: string): boolean {
+  return composerText.includes(TRANSLATED_COMPOSER_SEPARATOR);
+}
+
+export function extractTranslatedComposerDraft(composerText: string): string {
+  const separatorIndex = composerText.indexOf(TRANSLATED_COMPOSER_SEPARATOR);
+  if (separatorIndex === -1) {
+    return composerText;
+  }
+  return composerText.slice(separatorIndex + TRANSLATED_COMPOSER_SEPARATOR.length);
 }
 
 function upsertEntry(entries: TranslationEntry[], entry: TranslationEntry): TranslationEntry[] {

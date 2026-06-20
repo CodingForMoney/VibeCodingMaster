@@ -162,17 +162,8 @@ describe("codex-translation-service", () => {
     tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-codex-conversation-"));
     const fs = createNodeFileSystemAdapter();
     const service = createCodexTranslationService({ fs });
-    const resultPath = ".ai/vcm/translations/runtime/conversations/demo-task/codex-translator/results/result.json";
-    await fs.writeJson(path.join(tmpRepo, resultPath), {
-      version: 1,
-      id: "result",
-      status: "completed",
-      sourceHash: "sha256:abc",
-      sourceLanguage: "en",
-      targetLanguage: "zh-CN",
-      translatedText: "你好",
-      notes: []
-    });
+    const resultPath = ".ai/vcm/translations/runtime/conversations/demo-task/codex-translator/results/result.txt";
+    await fs.writeText(path.join(tmpRepo, resultPath), "你好");
 
     const result = await service.validateConversationResult(tmpRepo, {
       taskSlug: "demo-task",
@@ -182,6 +173,8 @@ describe("codex-translation-service", () => {
     });
 
     expect(result.translatedText).toBe("你好");
+    expect(result.sourceHash).toBe("sha256:abc");
+    expect(result.targetLanguage).toBe("zh-CN");
   });
 
   it("creates conversation jobs with a temporary result file contract", async () => {
@@ -207,12 +200,15 @@ describe("codex-translation-service", () => {
     expect(request.outputContract.resultPath).toBe(job.resultPath);
     expect(request.outputContract.absoluteResultPath).toBe(path.join(tmpRepo, job.resultPath));
     expect(request.sourceText).toBe("请检查失败的测试。");
+    expect(job.resultPath).toMatch(/result\.txt$/);
+    expect(job.reportPath).toBeUndefined();
     expect(state.queue.items[0]).toMatchObject({
       type: "conversation",
       status: "queued",
       jobId: job.id,
       expectedResultPath: job.resultPath
     });
+    expect(state.queue.items[0]?.reportPath).toBeUndefined();
   });
 
   it("dispatches conversation translation with inline source text and file output", async () => {
@@ -236,14 +232,80 @@ describe("codex-translation-service", () => {
     });
     await waitForDispatcher();
 
-    const prompt = writes.find((entry) => entry.includes("[VCM CODEX TRANSLATION TASK]"));
-    expect(prompt).toContain("Type: conversation");
-    expect(prompt).toContain("The source text is included directly in this prompt.");
-    expect(prompt).not.toContain("Read the request file from this absolute path");
-    expect(prompt).toContain(path.join(tmpRepo, job.resultPath));
-    expect(prompt).toContain(`"sourceHash": "${job.sourceHash}"`);
-    expect(prompt).toContain("<SOURCE_TEXT>\n请检查失败的测试。\n</SOURCE_TEXT>");
-    expect(prompt).toContain("<CONTEXT_TEXT>\nThe user is asking a coding agent to inspect a failing test.\n</CONTEXT_TEXT>");
+    const prompt = writes.find((entry) => entry.includes("Translate each <VCM_TEXT> item"));
+    expect(prompt).toContain("Translate each <VCM_TEXT> item from auto to en.");
+    expect(prompt).toContain("Result Path:");
+    expect(prompt).toContain("<VCM_TEXT1>\n请检查失败的测试。\n</VCM_TEXT1>");
+    expect(prompt).toContain("<VCM_RESULT1>");
+    expect(prompt).not.toContain("sourceHash");
+    expect(prompt).not.toContain("CONTEXT_TEXT");
+    expect(prompt).not.toContain("Result JSON contract");
+  });
+
+  it("batches queued conversation translations into one prompt and result file", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-codex-conversation-batch-"));
+    const fs = createNodeFileSystemAdapter();
+    const writes: string[] = [];
+    const service = createCodexTranslationService({
+      fs,
+      runtime: createRuntimeStub(writes),
+      sessionService: createTranslatorSessionService([])
+    });
+
+    const first = await service.createConversationJob(tmpRepo, {
+      taskSlug: "demo-task",
+      role: "coder",
+      direction: "cc-output-to-user",
+      sourceText: "First output.",
+      sourceLanguage: "en",
+      targetLanguage: "zh-CN",
+      deferDispatch: true
+    });
+    const second = await service.createConversationJob(tmpRepo, {
+      taskSlug: "demo-task",
+      role: "coder",
+      direction: "cc-output-to-user",
+      sourceText: "Second output.",
+      sourceLanguage: "en",
+      targetLanguage: "zh-CN"
+    });
+    await waitForDispatcher();
+
+    const state = await service.getState(tmpRepo);
+    const firstItem = state.queue.items.find((item) => item.id === first.queueItemId);
+    const secondItem = state.queue.items.find((item) => item.id === second.queueItemId);
+    const prompt = writes.find((entry) => entry.includes("Translate each <VCM_TEXT> item"));
+
+    expect(writes.filter((entry) => entry.includes("Translate each <VCM_TEXT> item"))).toHaveLength(1);
+    expect(prompt).toContain("<VCM_TEXT1>\nFirst output.\n</VCM_TEXT1>");
+    expect(prompt).toContain("<VCM_TEXT2>\nSecond output.\n</VCM_TEXT2>");
+    expect(firstItem?.batchId).toBeTruthy();
+    expect(firstItem?.batchId).toBe(secondItem?.batchId);
+    expect(firstItem?.batchIndex).toBe(1);
+    expect(secondItem?.batchIndex).toBe(2);
+    expect(firstItem?.batchResultPath).toBe(secondItem?.batchResultPath);
+
+    await fs.writeText(path.join(tmpRepo, firstItem!.batchResultPath!), [
+      "<VCM_RESULT1>",
+      "第一段译文",
+      "<VCM_RESULT2>",
+      "第二段译文"
+    ].join("\n"));
+    await service.handleCodexHook(tmpRepo, "Stop", "demo-task");
+
+    await expect(service.validateConversationResult(tmpRepo, {
+      taskSlug: "demo-task",
+      resultPath: first.resultPath,
+      sourceHash: first.sourceHash,
+      targetLanguage: "zh-CN"
+    })).resolves.toMatchObject({ translatedText: "第一段译文" });
+    await expect(service.validateConversationResult(tmpRepo, {
+      taskSlug: "demo-task",
+      resultPath: second.resultPath,
+      sourceHash: second.sourceHash,
+      targetLanguage: "zh-CN"
+    })).resolves.toMatchObject({ translatedText: "第二段译文" });
+    expect(await fs.pathExists(path.join(tmpRepo, firstItem!.batchResultPath!))).toBe(false);
   });
 
   it("browses translatable source files and filters generated state", async () => {
@@ -354,7 +416,7 @@ describe("codex-translation-service", () => {
     expect(await fs.pathExists(path.join(tmpRepo, first.reportPath))).toBe(false);
     expect(state.queue.items.some((item) => item.id === first.queueItemId)).toBe(false);
     expect(state.fileIndex.jobs.find((job) => job.id === second.id)?.status).toBe("running");
-    expect(starts).toEqual(["start:codex-translator"]);
+    expect(starts).toEqual(["start:codex-translator:gpt-5.5:medium"]);
     expect(writes.filter((entry) => entry.includes("[VCM CODEX TRANSLATION TASK]"))).toHaveLength(2);
   });
 });
@@ -408,7 +470,7 @@ function createTranslatorSessionService(starts: string[]): Pick<SessionService, 
     command: "codex",
     permissionMode: "default",
     model: "gpt-5.5",
-    effort: "xhigh",
+    effort: "medium",
     cwd: "/repo/.ai/codex-translator",
     terminalBackend: "node-pty",
     logPath: ".ai/vcm/handoffs/logs/codex-translator.log",
@@ -418,14 +480,22 @@ function createTranslatorSessionService(starts: string[]): Pick<SessionService, 
     async getRoleSession() {
       return session;
     },
-    async resumeRoleSession() {
-      starts.push("resume:codex-translator");
-      session = createSession();
+    async resumeRoleSession(_repoRoot, _taskSlug, _role, input = {}) {
+      starts.push(`resume:codex-translator:${input.model ?? "default"}:${input.effort ?? "default"}`);
+      session = {
+        ...createSession(),
+        model: input.model ?? "gpt-5.5",
+        effort: input.effort ?? "medium"
+      };
       return session;
     },
-    async startRoleSession() {
-      starts.push("start:codex-translator");
-      session = createSession();
+    async startRoleSession(_repoRoot, _taskSlug, _role, input = {}) {
+      starts.push(`start:codex-translator:${input.model ?? "default"}:${input.effort ?? "default"}`);
+      session = {
+        ...createSession(),
+        model: input.model ?? "gpt-5.5",
+        effort: input.effort ?? "medium"
+      };
       return session;
     }
   };
@@ -436,7 +506,7 @@ function waitForDispatcher(): Promise<void> {
 }
 
 async function waitForCondition(predicate: () => boolean | Promise<boolean>): Promise<void> {
-  for (let attempt = 0; attempt < 40; attempt += 1) {
+  for (let attempt = 0; attempt < 120; attempt += 1) {
     if (await predicate()) {
       return;
     }

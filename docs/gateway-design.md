@@ -594,8 +594,8 @@ Service dependencies:
   template auto/manual orchestration mode.
 - `TerminalRuntime`: controlled PM terminal submission.
 - `ClaudeTranscriptService`: PM assistant output extraction.
-- `TranslationService` / translation provider: inbound Chinese-to-English and
-  outbound English-to-Chinese translation.
+- `TranslationService` / Codex Translator: inbound Chinese-to-English and
+  outbound target-language translation.
 - `ClaudeHookService` or hook event integration: trigger PM reply push after PM
   `Stop`.
 

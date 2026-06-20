@@ -806,7 +806,6 @@ function normalizeCodexEffort(value: unknown): SessionEffort {
     || value === "medium"
     || value === "high"
     || value === "xhigh"
-    || value === "max"
   ) {
     return value;
   }

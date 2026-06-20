@@ -1,13 +1,23 @@
 import { describe, expect, it } from "vitest";
 import type { ProjectConfig } from "../../../src/shared/types/project.js";
 import type { RoleName } from "../../../src/shared/types/role.js";
-import type { ClaudeModel, SessionEffort } from "../../../src/shared/types/session.js";
+import {
+  CLAUDE_EFFORT_OPTIONS,
+  CODEX_EFFORT_OPTIONS,
+  type ClaudeModel,
+  type SessionEffort
+} from "../../../src/shared/types/session.js";
 import type { CreateTerminalSessionInput, TerminalRuntime, TerminalSession } from "../../../src/backend/runtime/terminal-runtime.js";
 import { createSessionRegistry } from "../../../src/backend/runtime/session-registry.js";
 import { createSessionService } from "../../../src/backend/services/session-service.js";
 import type { FileSystemAdapter } from "../../../src/backend/adapters/filesystem.js";
 
 describe("createSessionService", () => {
+  it("keeps Max effort for Claude but not Codex options", () => {
+    expect(CODEX_EFFORT_OPTIONS.map((option) => option.value)).not.toContain("max");
+    expect(CLAUDE_EFFORT_OPTIONS.map((option) => option.value)).toContain("max");
+  });
+
   it("persists Claude session ids and resumes them after registry loss", async () => {
     const fs = createMemoryFs();
     const firstRuntimeInputs: CreateTerminalSessionInput[] = [];
@@ -325,6 +335,23 @@ describe("createSessionService", () => {
 
     expect(started.effort).toBe("default");
     expect(runtimeInputs[0]?.args).not.toContain('model_reasoning_effort="ultracode"');
+    expect(runtimeInputs[0]?.args).not.toContain("--config");
+  });
+
+  it("does not pass Max as Codex reasoning effort", async () => {
+    const fs = createMemoryFs();
+    await fs.writeText("/repo/.ai/codex", "");
+    await fs.writeText("/repo/.ai/codex/config.toml", `approval_policy = "never"`);
+    const runtimeInputs: CreateTerminalSessionInput[] = [];
+    const service = createTestSessionService(fs, runtimeInputs);
+
+    const started = await service.startRoleSession("/repo", "demo-task", "codex-reviewer", {
+      model: "gpt-5.5",
+      effort: "max"
+    });
+
+    expect(started.effort).toBe("default");
+    expect(runtimeInputs[0]?.args).not.toContain('model_reasoning_effort="max"');
     expect(runtimeInputs[0]?.args).not.toContain("--config");
   });
 

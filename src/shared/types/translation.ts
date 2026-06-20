@@ -1,6 +1,6 @@
 import type { RoleName } from "./role.js";
 
-export type TranslationProviderType = "openai-compatible";
+export type TranslationProviderType = "codex";
 
 export type TranslationDirection =
   | "user-input-to-english"
@@ -9,17 +9,6 @@ export type TranslationDirection =
 export type TranslationInputMode =
   | "review-before-send"
   | "auto-send";
-
-export type TranslationPromptKey =
-  | "zh-to-en"
-  | "zh-to-en-with-context"
-  | "en-to-zh";
-
-export const TRANSLATION_PROMPT_KEYS: readonly TranslationPromptKey[] = [
-  "zh-to-en",
-  "zh-to-en-with-context",
-  "en-to-zh"
-] as const;
 
 export const TRANSLATION_ENTRY_RETENTION_LIMIT = 500;
 
@@ -38,32 +27,6 @@ export type TranslationStatus =
   | "translated"
   | "failed"
   | "preserved";
-
-export interface TranslationSettings {
-  version: 1;
-  enabled: boolean;
-  providerType: TranslationProviderType;
-  baseUrl: string;
-  apiKey?: string;
-  model: string;
-  sourceLanguage: "auto" | string;
-  targetLanguage: string;
-  workingLanguage: "en";
-  inputMode: TranslationInputMode;
-  translateOutput: boolean;
-  translateUserInput: boolean;
-  contextEnabled: boolean;
-  preserveTechnicalTokens: boolean;
-  skipCjkText: boolean;
-  redactSecrets: boolean;
-  requestTimeoutMs: number;
-  temperature: number;
-  prompts?: Partial<Record<TranslationPromptKey, string>>;
-}
-
-export interface TranslationSecretSettings {
-  apiKey?: string;
-}
 
 export interface TranslationTokenUsage {
   input: number;
@@ -129,21 +92,6 @@ export interface TranslateUserInputResult {
 
 export interface SendTranslatedInputRequest {
   englishText: string;
-}
-
-export interface TranslationProviderTestResult {
-  ok: boolean;
-  model: string;
-  elapsedMs: number;
-  error?: string;
-}
-
-export interface TranslationPromptPreview {
-  key: TranslationPromptKey;
-  label: string;
-  defaultPrompt: string;
-  userPrompt: string;
-  customized: boolean;
 }
 
 export type TranslationSessionStatus =
@@ -229,6 +177,10 @@ export interface CodexTranslationQueueItem {
   requestPath: string;
   expectedResultPath?: string;
   reportPath?: string;
+  batchId?: string;
+  batchResultPath?: string;
+  batchIndex?: number;
+  translatedText?: string;
   error?: string;
   createdAt: string;
   updatedAt: string;
@@ -352,7 +304,7 @@ export interface CodexConversationTranslationJob {
   targetLanguage: string;
   requestPath: string;
   resultPath: string;
-  reportPath: string;
+  reportPath?: string;
   queueItemId?: string;
   createdAt: string;
   updatedAt: string;
@@ -367,6 +319,7 @@ export interface CreateCodexConversationTranslationRequest {
   targetLanguage: string;
   contextText?: string;
   translationProfile?: string;
+  deferDispatch?: boolean;
 }
 
 export interface CodexTranslationState {

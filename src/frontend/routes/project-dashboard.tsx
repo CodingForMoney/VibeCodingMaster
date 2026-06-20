@@ -1,9 +1,11 @@
 import { FormEvent, type ReactNode, useEffect, useState } from "react";
 import {
+  TRANSLATION_OUTPUT_MODE_OPTIONS,
   TRANSLATION_TARGET_LANGUAGE_OPTIONS,
   type LaunchTemplate,
   type PermissionRequestMode,
   type ThemeMode,
+  type TranslationOutputMode,
   type TranslationTargetLanguage
 } from "../../shared/types/app-settings.js";
 import type {
@@ -51,6 +53,7 @@ export interface ProjectDashboardProps {
   translationEnabled: boolean;
   translationAutoSendEnabled: boolean;
   translationTargetLanguage: TranslationTargetLanguage;
+  translationOutputMode: TranslationOutputMode;
   harnessStatus: HarnessStatusReport | null;
   harnessBootstrapStatus: HarnessBootstrapStatusReport | null;
   harnessApplyResult?: HarnessApplyResult | null;
@@ -73,6 +76,7 @@ export interface ProjectDashboardProps {
   onTranslationEnabledChange(enabled: boolean): void;
   onTranslationAutoSendChange(enabled: boolean): void;
   onTranslationTargetLanguageChange(targetLanguage: TranslationTargetLanguage): void;
+  onTranslationOutputModeChange(outputMode: TranslationOutputMode): void;
   onOpenFileTranslation(): void;
   onCreateTranslationBootstrap(): void;
   onUpdateTranslationMemory(): void;
@@ -107,6 +111,7 @@ export function ProjectDashboard({
   translationEnabled,
   translationAutoSendEnabled,
   translationTargetLanguage,
+  translationOutputMode,
   harnessStatus,
   harnessBootstrapStatus,
   harnessApplyResult,
@@ -129,6 +134,7 @@ export function ProjectDashboard({
   onTranslationEnabledChange,
   onTranslationAutoSendChange,
   onTranslationTargetLanguageChange,
+  onTranslationOutputModeChange,
   onOpenFileTranslation,
   onCreateTranslationBootstrap,
   onUpdateTranslationMemory,
@@ -315,17 +321,19 @@ export function ProjectDashboard({
         open={openSidebarSection === "translation"}
         onOpenChange={(open) => handleSidebarSectionChange("translation", open)}
       >
-        <TranslationSettingsPanel
+        <TranslationControlsPanel
           busy={busy}
           enabled={translationEnabled}
           autoSendEnabled={translationAutoSendEnabled}
           targetLanguage={translationTargetLanguage}
+          outputMode={translationOutputMode}
           fileTranslationAvailable={Boolean(project && activeTaskSlug)}
           onAutoSendChange={onTranslationAutoSendChange}
           onCreateBootstrap={onCreateTranslationBootstrap}
           onEnabledChange={onTranslationEnabledChange}
           onUpdateMemory={onUpdateTranslationMemory}
           onTargetLanguageChange={onTranslationTargetLanguageChange}
+          onOutputModeChange={onTranslationOutputModeChange}
           onOpenFileTranslation={onOpenFileTranslation}
         />
       </SidebarSection>
@@ -480,16 +488,18 @@ function getLaunchTemplateSummary(template: LaunchTemplate): string {
   return `Launch template: ${getLaunchTemplateBadge(template)}; ${roles}`;
 }
 
-function TranslationSettingsPanel({
+function TranslationControlsPanel({
   autoSendEnabled,
   busy,
   enabled,
   fileTranslationAvailable,
+  outputMode,
   targetLanguage,
   onAutoSendChange,
   onCreateBootstrap,
   onEnabledChange,
   onUpdateMemory,
+  onOutputModeChange,
   onTargetLanguageChange,
   onOpenFileTranslation
 }: {
@@ -497,11 +507,13 @@ function TranslationSettingsPanel({
   busy?: boolean;
   enabled: boolean;
   fileTranslationAvailable: boolean;
+  outputMode: TranslationOutputMode;
   targetLanguage: TranslationTargetLanguage;
   onAutoSendChange(enabled: boolean): void;
   onCreateBootstrap(): void;
   onEnabledChange(enabled: boolean): void;
   onUpdateMemory(): void;
+  onOutputModeChange(outputMode: TranslationOutputMode): void;
   onTargetLanguageChange(targetLanguage: TranslationTargetLanguage): void;
   onOpenFileTranslation(): void;
 }) {
@@ -535,6 +547,20 @@ function TranslationSettingsPanel({
           onChange={(event) => onTargetLanguageChange(event.target.value as TranslationTargetLanguage)}
         >
           {TRANSLATION_TARGET_LANGUAGE_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="settings-select-row">
+        <span>Output</span>
+        <select
+          value={outputMode}
+          disabled={busy}
+          onChange={(event) => onOutputModeChange(event.target.value as TranslationOutputMode)}
+        >
+          {TRANSLATION_OUTPUT_MODE_OPTIONS.map((option) => (
             <option key={option.value} value={option.value}>
               {option.label}
             </option>

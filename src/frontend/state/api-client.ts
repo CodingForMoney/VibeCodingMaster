@@ -50,11 +50,7 @@ import type {
   TranslationEntry,
   TranslationFailuresResult,
   PollTranslationSessionResult,
-  StartTranslationSessionResult,
-  TranslationPromptPreview,
-  TranslationProviderTestResult,
-  TranslationSecretSettings,
-  TranslationSettings
+  StartTranslationSessionResult
 } from "../../shared/types/translation.js";
 
 export const apiClient = {
@@ -211,23 +207,6 @@ export const apiClient = {
   },
   getCodexReviewReport(taskSlug: string, gate: CodexReviewGate) {
     return request<CodexReviewReport>(`/api/tasks/${encodeURIComponent(taskSlug)}/codex-review/${gate}/report`);
-  },
-  getTranslationSettings() {
-    return request<TranslationSettings>("/api/translation/settings");
-  },
-  updateTranslationSettings(input: Partial<TranslationSettings> & TranslationSecretSettings) {
-    return request<TranslationSettings>("/api/translation/settings", {
-      method: "PUT",
-      body: JSON.stringify(input)
-    });
-  },
-  getTranslationPrompts() {
-    return request<TranslationPromptPreview[]>("/api/translation/prompts");
-  },
-  testTranslationProvider() {
-    return request<TranslationProviderTestResult>("/api/translation/test", {
-      method: "POST"
-    });
   },
   startTranslationSession(taskSlug: string, role: RoleName) {
     return request<StartTranslationSessionResult>(`/api/tasks/${encodeURIComponent(taskSlug)}/sessions/${role}/translation/start`, {

@@ -617,7 +617,7 @@ There is no `vcmctl` in the target design. Hook entrypoints are direct HTTP from
 
 Translation is a local assistant layer beside the role terminal.
 
-### Provider Settings
+### Translation Controls
 
 Settings are saved in:
 
@@ -627,23 +627,22 @@ Settings are saved in:
 
 The settings file stores:
 
-- translation provider settings
-- translation API key
+- global translation enablement
+- global translation auto-send preference
+- global translation target language
 - recent repository paths
 
-The API key input is a normal text input. The file is local to the user's machine/runtime.
+Translation work is routed through the long-lived Codex Translator session. VCM no longer exposes API-key, provider, or prompt-slot settings for the old API-backed translation path.
 
-Provider type:
+Sidebar controls:
 
-- OpenAI-compatible chat completions
-
-Prompt slots:
-
-- `zh-to-en`
-- `zh-to-en-with-context`
-- `en-to-zh`
-
-The settings modal shows all three prompt slots as direct editors. `Reset prompts` restores every prompt to its built-in default. The modal does not include separate enable/output/input-mode switches; opening the task header `Translate` panel is the translation on/off control, and the panel-level `Auto-send` toggle controls whether translated user input is submitted automatically.
+- Conversation translation on/off
+- Auto-send on/off
+- Target language
+- Output mode: final summary or all output
+- File translation
+- Bootstrap
+- Update memory
 
 ### Claude Output Translation
 
@@ -669,16 +668,17 @@ The frontend does not subscribe through WebSocket. It polls the backend with a c
 
 Transcript event handling:
 
-- assistant text -> `prose` -> translated
-- AskUserQuestion tool -> formatted `prose` -> translated
-- TodoWrite tool -> formatted `prose` -> translated
-- Agent/Task tool -> formatted `prose` -> translated
+- assistant text with `stopReason=end_turn` -> `prose` -> translated
+- assistant text with other stop reasons -> `prose` -> preserved by default, translated only in `all output` mode
+- AskUserQuestion tool -> formatted `prose` -> preserved by default, translated only in `all output` mode
+- TodoWrite tool -> formatted `prose` -> preserved by default, translated only in `all output` mode
+- Agent/Task tool -> formatted `prose` -> preserved by default, translated only in `all output` mode
 - normal tool_use -> `tool-output` -> preserved
 - tool_result -> `tool-output` -> preserved
 
 Display behavior:
 
-- `prose` starts by showing the English source.
+- `prose` starts by showing the English source as queued.
 - while translating, panel status shows `translating <elapsed>`.
 - when translation succeeds, the English source is replaced by Chinese translated text.
 - when new translation events arrive, the active panel scrolls to the bottom after render so the latest entry, retry result, or conversation boundary is visible.
@@ -686,7 +686,7 @@ Display behavior:
 - when translation fails, panel status shows `error` and the entry keeps the visible source plus an error.
 - `tool-output` is dim, one-line, truncated by CSS, and not translated.
 
-Long translations do not block capture. Prose entries are pushed to the panel before provider translation starts. `tool_use` and `tool_result` entries are never added to the translation queue; they are displayed immediately.
+Long translations do not block capture. Translatable prose entries are pushed to the panel before Codex translation starts. Claude Code prose output waits up to 10 seconds so adjacent entries can be batched into one Codex prompt and one temporary result file. When an `end_turn` assistant text arrives, VCM adds it to the current batch and flushes the batch immediately. The default output mode is `final summary`, which translates only `end_turn` assistant text to save Codex quota. In `all output` mode, intermediate assistant text and structured question/todo/agent events are also translated. `tool_use` and `tool_result` entries are never added to the translation queue; they are displayed immediately.
 
 There is no keyword classifier that drops assistant text. A previous design skipped permission-looking or log-looking text; that is removed.
 
@@ -713,7 +713,7 @@ Keyboard behavior:
 - `Enter`: translate current Chinese text, or send the current English draft.
 - `Shift+Enter`: insert newline.
 
-After translation succeeds, the English draft replaces the original Chinese text in the same textarea.
+After translation succeeds, the English draft is appended after the original Chinese text in the same textarea.
 
 The translated user input is also shown in the translation panel as a conversation boundary. User-input entries have a thick divider and larger top spacing so the next Claude output reads as the answer to that prompt.
 
@@ -773,7 +773,7 @@ Stored app-level settings include:
 - UI theme mode: `system`, `light`, or `dark`
 - flow pause alert preference
 - Claude Code permission request handling preference
-- translation provider settings and API key
+- global translation preferences
 - recent repository paths
 
 Gateway state and audit logs:

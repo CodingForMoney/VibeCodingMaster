@@ -21,7 +21,6 @@ import {
 } from "./services/harness-service.js";
 import { createNodeFileSystemAdapter } from "./adapters/filesystem.js";
 import { createNodePtyTerminalRuntime } from "./runtime/node-pty-runtime.js";
-import { createOpenAiCompatibleTranslationProvider } from "./adapters/translation-provider.js";
 import { registerGatewayRoutes } from "./api/gateway-routes.js";
 import { registerDiagnosticsRoutes } from "./api/diagnostics-routes.js";
 import { createWeixinIlinkChannel } from "./gateway/channels/weixin-ilink-channel.js";
@@ -274,8 +273,7 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     codexTranslationService,
     fs,
     projectService,
-    appSettings,
-    provider: createOpenAiCompatibleTranslationProvider()
+    appSettings
   });
   const gatewaySettings = createGatewaySettingsService({ fs });
   const gatewayAudit = createGatewayAuditLog({

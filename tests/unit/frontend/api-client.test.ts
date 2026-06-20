@@ -162,59 +162,6 @@ describe("apiClient", () => {
     expect(preferences.flowPauseAlerts).toBe(false);
   });
 
-  it("sends translation API keys in the settings request body", async () => {
-    const fetchMock = mockFetch({
-      version: 1,
-      enabled: true,
-      providerType: "openai-compatible",
-      baseUrl: "https://api.example.com/v1",
-      apiKey: "sk-local-test",
-      model: "cheap-translator",
-      sourceLanguage: "auto",
-      targetLanguage: "zh-CN",
-      workingLanguage: "en",
-      inputMode: "review-before-send",
-      translateOutput: true,
-      translateUserInput: true,
-      contextEnabled: false,
-      preserveTechnicalTokens: true,
-      skipCjkText: true,
-      redactSecrets: true,
-      requestTimeoutMs: 120000,
-      temperature: 0.1
-    });
-
-    await apiClient.updateTranslationSettings({
-      enabled: true,
-      model: "cheap-translator",
-      apiKey: "sk-local-test"
-    });
-
-    const init = fetchMock.mock.calls[0]?.[1];
-    expect(init?.method).toBe("PUT");
-    expect(JSON.parse(String(init?.body))).toMatchObject({
-      enabled: true,
-      model: "cheap-translator",
-      apiKey: "sk-local-test"
-    });
-    expect(new Headers(init?.headers).get("content-type")).toBe("application/json");
-  });
-
-  it("loads translation prompt previews", async () => {
-    const fetchMock = mockFetch([{
-      key: "zh-to-en",
-      label: "zh-to-en",
-      defaultPrompt: "DEFAULT",
-      userPrompt: "USER",
-      customized: true
-    }]);
-
-    const prompts = await apiClient.getTranslationPrompts();
-
-    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/translation/prompts");
-    expect(prompts[0]?.userPrompt).toBe("USER");
-  });
-
   it("starts and polls translation sessions through HTTP APIs", async () => {
     const fetchMock = mockFetch({
       sessionId: "session-1",

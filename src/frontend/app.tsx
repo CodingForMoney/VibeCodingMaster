@@ -2,10 +2,12 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import qrcode from "qrcode-generator";
 import {
   createDefaultLaunchTemplate,
+  DEFAULT_TRANSLATION_OUTPUT_MODE,
   DEFAULT_TRANSLATION_TARGET_LANGUAGE,
   type AppPreferences,
   type LaunchTemplate,
   type PermissionRequestMode,
+  type TranslationOutputMode,
   type TranslationTargetLanguage,
   type ThemeMode
 } from "../shared/types/app-settings.js";
@@ -60,6 +62,7 @@ export function App() {
   const [translationEnabled, setTranslationEnabled] = useState(false);
   const [translationAutoSendEnabled, setTranslationAutoSendEnabled] = useState(false);
   const [translationTargetLanguage, setTranslationTargetLanguage] = useState<TranslationTargetLanguage>(DEFAULT_TRANSLATION_TARGET_LANGUAGE);
+  const [translationOutputMode, setTranslationOutputMode] = useState<TranslationOutputMode>(DEFAULT_TRANSLATION_OUTPUT_MODE);
   const [fileTranslationOpen, setFileTranslationOpen] = useState(false);
   const [launchTemplate, setLaunchTemplate] = useState<LaunchTemplate>(() => createDefaultLaunchTemplate());
   const [activeLaunchState, setActiveLaunchState] = useState<TaskWorkspaceLaunchState | null>(null);
@@ -88,6 +91,7 @@ export function App() {
     setTranslationEnabled(preferences.translationEnabled);
     setTranslationAutoSendEnabled(preferences.translationAutoSendEnabled);
     setTranslationTargetLanguage(preferences.translationTargetLanguage);
+    setTranslationOutputMode(preferences.translationOutputMode);
     setLaunchTemplate(preferences.launchTemplate);
   }, []);
 
@@ -424,6 +428,7 @@ export function App() {
           translationEnabled={translationEnabled}
           translationAutoSendEnabled={translationAutoSendEnabled}
           translationTargetLanguage={translationTargetLanguage}
+          translationOutputMode={translationOutputMode}
           harnessStatus={harnessStatus}
           harnessBootstrapStatus={harnessBootstrapStatus}
           harnessApplyResult={harnessApplyResult}
@@ -548,6 +553,13 @@ export function App() {
             setTranslationTargetLanguage(targetLanguage);
             void withBusy(async () => {
               const preferences = await apiClient.updateAppPreferences({ translationTargetLanguage: targetLanguage });
+              applyPreferences(preferences);
+            });
+          }}
+          onTranslationOutputModeChange={(outputMode) => {
+            setTranslationOutputMode(outputMode);
+            void withBusy(async () => {
+              const preferences = await apiClient.updateAppPreferences({ translationOutputMode: outputMode });
               applyPreferences(preferences);
             });
           }}

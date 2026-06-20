@@ -31,7 +31,7 @@ When Codex Review Gates are enabled for a task, or when a Codex Reviewer session
 - Two-stage VCM harness setup: deterministic fixed install plus AI-assisted bootstrap.
 - VCM-managed root rules, four role agents, repo-local VCM skills, Claude Code hooks, Codex Reviewer hooks, generated-context tools, and PR template.
 - Rust generated context for module indexing and crate-external public surface indexing.
-- Translation panel powered by an OpenAI-compatible low-cost model.
+- Translation panel powered by the long-lived Codex Translator session.
 - Mobile Gateway through Tencent iLink Bot API / Weixin DM, for talking to PM and managing tasks from Weixin.
 - Durable task state, session state, raw terminal logs, handoff artifacts, and message history.
 
@@ -139,7 +139,7 @@ Important container notes:
 
 - Install Claude Code inside the container, or make `claude` available in the container `PATH`.
 - Make sure Claude Code authentication works inside the container.
-- Make sure the container has network access to Claude services and to the translation provider if translation is enabled.
+- Make sure the container has network access to Claude services and any configured Codex model endpoints if translation is enabled.
 - VCM accepts normal Git repositories by checking `.git` directly. It also supports `.git` files that point to worktree gitdirs.
 - VCM uses per-command `git -c safe.directory=...` for Git metadata reads and does not require global `git config --global --add safe.directory`.
 - Set `VCM_SANDBOX=devcontainer` so VCM-managed Codex Reviewer and Codex Translator sessions rely on the container boundary and do not start Codex's nested Linux sandbox.
@@ -388,7 +388,7 @@ Translation settings are local and stored in:
 <vcmDataDir>/settings.json
 ```
 
-The same file stores recent repository paths. The translation API key is stored locally under `translation.secrets.apiKey`; it is not written to the connected repository, `.ai/vcm/handoffs`, raw terminal logs, or git diffs.
+The same file stores recent repository paths and global translation preferences such as enablement, auto-send, and target language.
 
 VCM resolves `vcmDataDir` from `VCM_DATA_DIR`. If `VCM_DATA_DIR` is unset or empty, VCM uses `~/.vcm`. In Dev Containers, set `VCM_DATA_DIR=/workspace/.ai/vcm` and `VCM_SANDBOX=devcontainer` through `containerEnv` so VCM app state survives container rebuilds and VCM-managed Codex Reviewer and Codex Translator sessions do not run a nested Codex sandbox.
 
@@ -400,10 +400,11 @@ When Gateway is on, `Flow pause alert` is forced off because mobile notification
 
 Translation behavior:
 
-- Provider type is OpenAI-compatible chat completions.
-- Prompt slots are `zh-to-en`, `zh-to-en-with-context`, and `en-to-zh`.
-- The settings modal shows all three prompt slots as direct editors and includes `Reset prompts` to restore the built-in defaults.
+- Conversation translation is routed through the Codex Translator session and result files.
+- Global translation controls live in the sidebar Translation section: enablement, auto-send, target language, bootstrap, memory update, and file translation.
+- File and conversation translation share `<baseRepoRoot>/.ai/vcm/translations/`; conversation result files are temporary runtime artifacts.
 - Claude Code output translation reads semantic Claude transcript JSONL files under `~/.claude/projects`, not raw PTY output.
+- Claude Code prose output waits 10 seconds before dispatch so adjacent output can be translated in one Codex batch.
 - VCM tails those transcript files in the backend. Closing the translation panel does not stop capture; the tailer stops only when the role session is stopped/restarted or the task is closed.
 - Translation events are cached under the task runtime repo at `.ai/vcm/translation/<task>/<role>/<session-id>.jsonl` and delivered to the frontend through HTTP polling.
 - The polling cursor is the next expected seq: `after=18` acknowledges seq `1..17` and returns seq `18+`; there is no snapshot mismatch error.
@@ -414,7 +415,7 @@ Translation behavior:
 - Assistant prose renders Markdown in the panel, including headings, lists, code fences, tables, and links.
 - Tool calls and tool results are preserved as dim one-line rows such as `● Bash({"command":"npm test"})`.
 - User input uses one textarea. Press `Enter` to translate or send the current English draft; press `Shift+Enter` for a newline.
-- After user input is translated, the English draft replaces the original text in the same textarea.
+- After user input is translated, the translated draft is appended after the original text in the same textarea.
 - `Send English` writes the current English draft to the active embedded terminal and submits it.
 - Automatic terminal submission uses bracketed paste first, then sends Enter separately for Claude Code TUI reliability.
 - The translation panel `Auto-send` toggle sends the translated draft automatically when translation succeeds without warnings.

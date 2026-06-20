@@ -40,7 +40,6 @@ describe("app-settings-service", () => {
     expect(settings).toEqual({
       version: 1,
       preferences: createDefaultPreferences(),
-      translation: undefined,
       recentRepositoryPaths: []
     });
     expect(stored).toEqual(settings);
@@ -60,14 +59,16 @@ describe("app-settings-service", () => {
       permissionRequestMode: "allowAll",
       translationEnabled: true,
       translationAutoSendEnabled: true,
-      translationTargetLanguage: "ja"
+      translationTargetLanguage: "ja",
+      translationOutputMode: "all"
     })).resolves.toEqual(createDefaultPreferences({
       themeMode: "dark",
       flowPauseAlerts: false,
       permissionRequestMode: "allowAll",
       translationEnabled: true,
       translationAutoSendEnabled: true,
-      translationTargetLanguage: "ja"
+      translationTargetLanguage: "ja",
+      translationOutputMode: "all"
     }));
 
     const stored = await fs.readJson<AppSettingsFile>("/settings.json");
@@ -77,7 +78,8 @@ describe("app-settings-service", () => {
       permissionRequestMode: "allowAll",
       translationEnabled: true,
       translationAutoSendEnabled: true,
-      translationTargetLanguage: "ja"
+      translationTargetLanguage: "ja",
+      translationOutputMode: "all"
     }));
   });
 
@@ -228,6 +230,7 @@ function createDefaultPreferences(overrides: Partial<AppPreferences> = {}): AppP
     translationEnabled: false,
     translationAutoSendEnabled: false,
     translationTargetLanguage: "zh-CN",
+    translationOutputMode: "final-only",
     launchTemplate: createDefaultLaunchTemplate(),
     ...overrides
   };

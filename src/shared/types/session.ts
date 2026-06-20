@@ -87,16 +87,16 @@ export const CODEX_EFFORT_OPTIONS = [
     value: "xhigh",
     label: "XHigh",
     description: "Extra high reasoning"
-  },
-  {
-    value: "max",
-    label: "Max",
-    description: "Maximum reasoning"
   }
 ] as const;
 
 export const CLAUDE_EFFORT_OPTIONS = [
   ...CODEX_EFFORT_OPTIONS,
+  {
+    value: "max",
+    label: "Max",
+    description: "Maximum reasoning"
+  },
   {
     value: "ultracode",
     label: "Ultracode",

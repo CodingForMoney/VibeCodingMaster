@@ -15,26 +15,21 @@ import type {
   TranslationEntry,
   TranslationFailureItem,
   TranslationFailuresResult,
-  TranslationPromptKey,
-  TranslationPromptPreview,
-  TranslationProviderTestResult,
-  TranslationSecretSettings,
+  TranslationInputMode,
   TranslationSessionEvent,
   TranslationSessionStatus,
-  TranslationSettings,
   TranslationSourceKind,
   TranslationStatus,
   TranslationWsMessage
 } from "../../shared/types/translation.js";
-import { TRANSLATION_ENTRY_RETENTION_LIMIT, TRANSLATION_PROMPT_KEYS } from "../../shared/types/translation.js";
-import type { TranslationProvider } from "../adapters/translation-provider.js";
-import { TranslationProviderError } from "../adapters/translation-provider.js";
+import { TRANSLATION_ENTRY_RETENTION_LIMIT } from "../../shared/types/translation.js";
 import type { FileSystemAdapter } from "../adapters/filesystem.js";
 import { VcmError } from "../errors.js";
 import type { TerminalRuntime, Unsubscribe } from "../runtime/terminal-runtime.js";
 import type { SessionRegistry } from "../runtime/session-registry.js";
 import { submitTerminalInput } from "../runtime/terminal-submit.js";
 import type { AppSettingsService } from "./app-settings-service.js";
+import type { TranslationOutputMode } from "../../shared/types/app-settings.js";
 import {
   type ClaudeTranscriptEvent,
   type ClaudeTranscriptService
@@ -42,14 +37,9 @@ import {
 import type { CodexTranslationService } from "./codex-translation-service.js";
 import type { ProjectService } from "./project-service.js";
 import type { SessionService } from "./session-service.js";
-import { buildTranslationPrompt, getTranslationPromptPreviews, parseTranslationWarning } from "./translation-prompts.js";
 import { createTranslationQueueRegistry } from "./translation-queue.js";
 
 export interface TranslationService {
-  getSettings(): Promise<TranslationSettings>;
-  updateSettings(input: Partial<TranslationSettings>, secrets?: TranslationSecretSettings): Promise<TranslationSettings>;
-  getPromptPreviews(): Promise<TranslationPromptPreview[]>;
-  testProvider(): Promise<TranslationProviderTestResult>;
   startSession(input: StartTranslationSessionServiceInput): Promise<StartTranslationSessionResult>;
   pollSessionEvents(sessionId: string, after: number, limit?: number): Promise<PollTranslationSessionResult>;
   recordConversationBoundary(input: RecordTranslationConversationBoundaryInput): Promise<TranslationEntry | undefined>;
@@ -111,7 +101,6 @@ export interface TranslateGatewayOutputInput {
 }
 
 export interface TranslationServiceDeps {
-  provider: TranslationProvider;
   runtime: TerminalRuntime;
   sessionRegistry: Pick<SessionRegistry, "get">;
   transcripts: ClaudeTranscriptService;
@@ -119,14 +108,19 @@ export interface TranslationServiceDeps {
   codexTranslationService?: Pick<CodexTranslationService, "createConversationJob" | "validateConversationResult" | "getState">;
   fs?: FileSystemAdapter;
   projectService?: Pick<ProjectService, "loadConfig">;
-  appSettings: Pick<AppSettingsService, "getPreferences" | "getTranslationConfig" | "updateTranslationConfig">;
+  appSettings: Pick<AppSettingsService, "getPreferences">;
   now?: () => string;
   id?: () => string;
+  outputBatchDelayMs?: number;
 }
 
-interface StoredTranslationConfig {
-  settings: TranslationSettings;
-  secrets: TranslationSecretSettings;
+interface TranslationRuntimeConfig {
+  sourceLanguage: string;
+  targetLanguage: string;
+  inputMode: TranslationInputMode;
+  outputMode: TranslationOutputMode;
+  contextEnabled: boolean;
+  requestTimeoutMs: number;
 }
 
 interface SessionState {
@@ -135,6 +129,7 @@ interface SessionState {
   seenTranscriptIds: Set<string>;
   entries: TranslationEntry[];
   failures: Map<string, TranslationFailureItem>;
+  outputBatch?: PendingOutputTranslationBatch;
   lastAssistantText?: string;
   status: TranslationSessionStatus;
   events: TranslationSessionEvent[];
@@ -148,73 +143,52 @@ interface SessionState {
   persistChain?: Promise<void>;
 }
 
+interface PendingOutputTranslation {
+  entry: TranslationEntry;
+  repoRoot?: string;
+  sourceLanguage: string;
+  targetLanguage: string;
+  config: TranslationRuntimeConfig;
+}
+
+interface PendingOutputTranslationBatch {
+  timer?: ReturnType<typeof setTimeout>;
+  items: PendingOutputTranslation[];
+}
+
 type TranslationSessionEventInput =
   | { type: "entry"; entry: TranslationEntry }
   | { type: "status"; status: TranslationSessionStatus }
   | { type: "error"; id?: string; message: string }
   | { type: "failures"; failures: TranslationFailureItem[] };
 
-const DEFAULT_SETTINGS: TranslationSettings = {
-  version: 1,
-  enabled: true,
-  providerType: "openai-compatible",
-  baseUrl: "https://api.openai.com/v1",
-  model: "gpt-4o-mini",
-  sourceLanguage: "auto",
-  targetLanguage: "zh-CN",
-  workingLanguage: "en",
-  inputMode: "review-before-send",
-  translateOutput: true,
-  translateUserInput: true,
-  contextEnabled: false,
-  preserveTechnicalTokens: true,
-  skipCjkText: true,
-  redactSecrets: true,
-  requestTimeoutMs: 120000,
-  temperature: 0.1
-};
+const TRANSLATION_SOURCE_LANGUAGE = "auto";
+const TRANSLATION_INPUT_MODE: TranslationInputMode = "review-before-send";
+const TRANSLATION_CONTEXT_ENABLED = false;
+const TRANSLATION_TIMEOUT_MS = 120000;
+const TRANSLATION_PROVIDER = "codex";
+const TRANSLATION_MODEL = "codex-translator";
+const OUTPUT_TRANSLATION_BATCH_DELAY_MS = 10000;
 
 const TRANSCRIPT_REPLAY_GRACE_MS = 5000;
 
 export function createTranslationService(deps: TranslationServiceDeps): TranslationService {
   const now = deps.now ?? (() => new Date().toISOString());
   const id = deps.id ?? (() => `tr_${Date.now()}_${Math.random().toString(16).slice(2)}`);
+  const outputBatchDelayMs = Math.max(0, deps.outputBatchDelayMs ?? OUTPUT_TRANSLATION_BATCH_DELAY_MS);
   const queues = createTranslationQueueRegistry();
   const sessionStates = new Map<string, SessionState>();
-  let cachedConfig: StoredTranslationConfig | null = null;
 
-  async function loadConfig(): Promise<StoredTranslationConfig> {
-    if (cachedConfig) {
-      const preferences = await deps.appSettings.getPreferences();
-      cachedConfig = withTargetLanguagePreference(cachedConfig, preferences.translationTargetLanguage);
-      return cachedConfig;
-    }
-    const storedConfig = await deps.appSettings.getTranslationConfig();
-    if (!storedConfig) {
-      const preferences = await deps.appSettings.getPreferences();
-      cachedConfig = withTargetLanguagePreference({ settings: DEFAULT_SETTINGS, secrets: {} }, preferences.translationTargetLanguage);
-      return cachedConfig;
-    }
-
-    const rawSettings: Partial<TranslationSettings> = storedConfig.settings ?? {};
-    const apiKey = storedConfig.secrets?.apiKey ?? rawSettings.apiKey;
+  async function loadConfig(): Promise<TranslationRuntimeConfig> {
     const preferences = await deps.appSettings.getPreferences();
-    cachedConfig = {
-      settings: normalizeSettings(rawSettings),
-      secrets: {
-        ...(storedConfig.secrets ?? {}),
-        ...(apiKey !== undefined ? { apiKey } : {})
-      }
+    return {
+      sourceLanguage: TRANSLATION_SOURCE_LANGUAGE,
+      targetLanguage: preferences.translationTargetLanguage,
+      inputMode: TRANSLATION_INPUT_MODE,
+      outputMode: preferences.translationOutputMode,
+      contextEnabled: TRANSLATION_CONTEXT_ENABLED,
+      requestTimeoutMs: TRANSLATION_TIMEOUT_MS
     };
-    cachedConfig = withTargetLanguagePreference(cachedConfig, preferences.translationTargetLanguage);
-    return cachedConfig;
-  }
-
-  async function saveConfig(config: StoredTranslationConfig): Promise<StoredTranslationConfig> {
-    const preferences = await deps.appSettings.getPreferences();
-    cachedConfig = withTargetLanguagePreference(config, preferences.translationTargetLanguage);
-    await deps.appSettings.updateTranslationConfig(cachedConfig);
-    return cachedConfig;
   }
 
   function getState(sessionId: string): SessionState {
@@ -396,18 +370,25 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
     }
 
     const config = await loadConfig();
-    const { settings } = config;
 
     let displayed = false;
     if (event.kind === "text") {
-      displayed = processClaudeOutputText(sessionId, event.text, config, event.id);
-      if (displayed) {
+      const shouldTranslate = config.outputMode === "all" || event.stopReason === "end_turn";
+      displayed = shouldTranslate
+        ? processClaudeOutputText(sessionId, event.text, config, event.id, {
+          flushImmediately: event.stopReason === "end_turn"
+        })
+        : pushPreservedProseEntry(sessionId, event.id, event.text, config);
+      if (displayed && shouldTranslate) {
         state.lastAssistantText = event.text;
       }
     } else if (event.kind === "question" || event.kind === "todo" || event.kind === "agent") {
-      displayed = processClaudeOutputText(sessionId, formatStructuredTranscriptEvent(event), config, event.id);
+      const formatted = formatStructuredTranscriptEvent(event);
+      displayed = config.outputMode === "all"
+        ? processClaudeOutputText(sessionId, formatted, config, event.id)
+        : pushPreservedProseEntry(sessionId, event.id, formatted, config);
     } else if (event.kind === "tool_use" || event.kind === "tool_result") {
-      displayed = pushPreservedTranscriptEntry(sessionId, event.id, formatRawTranscriptEvent(event), settings);
+      displayed = pushPreservedTranscriptEntry(sessionId, event.id, formatRawTranscriptEvent(event), config);
     }
 
     if (displayed) {
@@ -418,22 +399,25 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
   function processClaudeOutputText(
     sessionId: string,
     rawText: string,
-    config: StoredTranslationConfig,
-    entryId?: string
+    config: TranslationRuntimeConfig,
+    entryId?: string,
+    options: { flushImmediately?: boolean } = {}
   ): boolean {
     return startClaudeOutputTranslation(sessionId, rawText, config, {
       entryId,
-      replaceExisting: false
+      replaceExisting: false,
+      flushImmediately: options.flushImmediately === true
     }) !== undefined;
   }
 
   function startClaudeOutputTranslation(
     sessionId: string,
     rawText: string,
-    config: StoredTranslationConfig,
+    config: TranslationRuntimeConfig,
     options: {
       entryId?: string;
       replaceExisting: boolean;
+      flushImmediately?: boolean;
     }
   ): TranslationEntry | undefined {
     const session = deps.runtime.getSession(sessionId);
@@ -442,7 +426,6 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
       return undefined;
     }
 
-    const { settings, secrets } = config;
     if (!rawText.trim()) {
       return undefined;
     }
@@ -455,12 +438,11 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
         direction: "cc-output-to-user",
         sourceKind: "prose",
         sourceText: text,
-        settings,
-        status: "translating",
+        config,
+        status: "queued",
         contextUsed: false,
         id: options.entryId
-      }),
-      translationStartedAt: now()
+      })
     };
 
     if (options.replaceExisting) {
@@ -469,49 +451,124 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
       pushEntry(sessionId, baseEntry);
     }
 
+    scheduleClaudeOutputTranslation(sessionId, {
+      entry: baseEntry,
+      repoRoot: getState(sessionId).baseRepoRoot ?? roleSession?.cwd,
+      sourceLanguage: "en",
+      targetLanguage: config.targetLanguage,
+      config
+    }, options.replaceExisting || options.flushImmediately === true ? 0 : outputBatchDelayMs);
+    return baseEntry;
+  }
+
+  function scheduleClaudeOutputTranslation(
+    sessionId: string,
+    pending: PendingOutputTranslation,
+    delayMs: number
+  ): void {
+    const state = getState(sessionId);
+    if (!state.outputBatch) {
+      state.outputBatch = { items: [] };
+    }
+    state.outputBatch.items.push(pending);
+    if (state.outputBatch.timer) {
+      clearTimeout(state.outputBatch.timer);
+      state.outputBatch.timer = undefined;
+    }
+    if (delayMs <= 0) {
+      void flushClaudeOutputTranslations(sessionId).catch((error) => {
+        publishError(sessionId, error instanceof Error ? error.message : "Translation failed.");
+      });
+      return;
+    }
+    state.outputBatch.timer = setTimeout(() => {
+      void flushClaudeOutputTranslations(sessionId).catch((error) => {
+        publishError(sessionId, error instanceof Error ? error.message : "Translation failed.");
+      });
+    }, delayMs);
+  }
+
+  async function flushClaudeOutputTranslations(sessionId: string): Promise<void> {
+    const state = getState(sessionId);
+    const batch = state.outputBatch;
+    if (!batch || batch.items.length === 0) {
+      return;
+    }
+    if (batch.timer) {
+      clearTimeout(batch.timer);
+    }
+    state.outputBatch = undefined;
+    const items = batch.items;
     const queue = queues.getQueue(sessionId);
     void queue.enqueue(async () => {
       publishStatus(sessionId, "translating");
-
-      try {
-        const translation = await translateText({
-          repoRoot: getState(sessionId).baseRepoRoot,
-          taskSlug: baseEntry.taskSlug,
-          role: baseEntry.role,
-          direction: "cc-output-to-user",
-          text,
-          sourceKind: "prose",
-          sourceLanguage: "en",
-          targetLanguage: settings.targetLanguage,
-          settings,
-          secrets
+      for (const item of items) {
+        replaceEntry(sessionId, {
+          ...item.entry,
+          status: "translating",
+          translationStartedAt: now()
         });
-        const completed = {
-          ...baseEntry,
-          status: "translated" as TranslationStatus,
-          translatedText: translation.text,
-          completedAt: now(),
-          tokenUsage: translation.tokenUsage
-        };
-        replaceEntry(sessionId, completed);
-        clearFailure(sessionId, completed.id);
-        getState(sessionId).lastAssistantText = text;
-        publishStatus(sessionId, "ready");
-      } catch (error) {
-        const failed = {
-          ...baseEntry,
-          status: "failed" as TranslationStatus,
-          error: error instanceof Error ? error.message : "Translation failed.",
-          completedAt: now()
-        };
-        replaceEntry(sessionId, failed);
-        recordFailure(sessionId, failed);
-        publishStatus(sessionId, "failed");
       }
+
+      let hasFailure = false;
+      try {
+        const jobs: Array<{ item: PendingOutputTranslation; job: CodexConversationTranslationJob }> = [];
+        for (let index = 0; index < items.length; index += 1) {
+          const item = items[index]!;
+          const job = await createCodexConversationJob({
+            repoRoot: item.repoRoot,
+            taskSlug: item.entry.taskSlug,
+            role: item.entry.role,
+            direction: "cc-output-to-user",
+            text: item.entry.sourceText,
+            sourceKind: "prose",
+            sourceLanguage: item.sourceLanguage,
+            targetLanguage: item.targetLanguage,
+            config: item.config,
+            deferDispatch: index < items.length - 1
+          });
+          jobs.push({ item, job });
+        }
+
+        for (const { item, job } of jobs) {
+          try {
+            const result = await waitForCodexConversationResult(item.repoRoot!, job, item.config.requestTimeoutMs);
+            const completed = {
+              ...item.entry,
+              status: "translated" as TranslationStatus,
+              translatedText: result.translatedText,
+              translationStartedAt: item.entry.translationStartedAt ?? now(),
+              completedAt: now()
+            };
+            replaceEntry(sessionId, completed);
+            clearFailure(sessionId, completed.id);
+            getState(sessionId).lastAssistantText = item.entry.sourceText;
+          } catch (error) {
+            hasFailure = true;
+            markOutputTranslationFailed(sessionId, item.entry, error);
+          }
+        }
+      } catch (error) {
+        hasFailure = true;
+        for (const item of items) {
+          markOutputTranslationFailed(sessionId, item.entry, error);
+        }
+      }
+      publishStatus(sessionId, hasFailure ? "failed" : "ready");
     }).catch((error) => {
       publishError(sessionId, error instanceof Error ? error.message : "Translation failed.");
     });
-    return baseEntry;
+  }
+
+  function markOutputTranslationFailed(sessionId: string, entry: TranslationEntry, error: unknown): void {
+    const failed = {
+      ...entry,
+      status: "failed" as TranslationStatus,
+      error: error instanceof Error ? error.message : "Translation failed.",
+      completedAt: now()
+    };
+    replaceEntry(sessionId, failed);
+    recordFailure(sessionId, failed);
   }
 
   function pushEntry(sessionId: string, entry: TranslationEntry): void {
@@ -531,8 +588,31 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
     sessionId: string,
     entryId: string,
     sourceText: string,
-    settings: TranslationSettings
+    config: TranslationRuntimeConfig
   ): boolean {
+    return pushPreservedOutputEntry(sessionId, entryId, sourceText, "tool-output", config);
+  }
+
+  function pushPreservedProseEntry(
+    sessionId: string,
+    entryId: string,
+    sourceText: string,
+    config: TranslationRuntimeConfig
+  ): boolean {
+    return pushPreservedOutputEntry(sessionId, entryId, sourceText, "prose", config);
+  }
+
+  function pushPreservedOutputEntry(
+    sessionId: string,
+    entryId: string,
+    sourceText: string,
+    sourceKind: TranslationSourceKind,
+    config: TranslationRuntimeConfig
+  ): boolean {
+    if (!sourceText.trim()) {
+      return false;
+    }
+
     const session = deps.runtime.getSession(sessionId);
     const roleSession = deps.sessionRegistry.get(sessionId);
     if (!session && !roleSession) {
@@ -543,9 +623,9 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
       taskSlug: roleSession?.taskSlug ?? session!.taskSlug,
       role: roleSession?.role ?? session!.role,
       direction: "cc-output-to-user",
-      sourceKind: "tool-output",
+      sourceKind,
       sourceText,
-      settings,
+      config,
       status: "preserved",
       contextUsed: false,
       id: entryId,
@@ -638,7 +718,7 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
   function retryOneTranslation(
     sessionId: string,
     original: TranslationEntry,
-    config: StoredTranslationConfig
+    config: TranslationRuntimeConfig
   ): TranslationEntry {
     const state = getState(sessionId);
     const existingFailure = state.failures.get(original.id) ?? {
@@ -672,7 +752,7 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
     direction: TranslationEntry["direction"];
     sourceKind: TranslationSourceKind;
     sourceText: string;
-    settings: TranslationSettings;
+    config: TranslationRuntimeConfig;
     status: TranslationStatus;
     contextUsed: boolean;
     id?: string;
@@ -688,8 +768,8 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
       role: input.role,
       direction: input.direction,
       sourceKind: input.sourceKind,
-      sourceLanguage: input.direction === "user-input-to-english" ? input.settings.sourceLanguage : "en",
-      targetLanguage: input.direction === "user-input-to-english" ? "en" : input.settings.targetLanguage,
+      sourceLanguage: input.direction === "user-input-to-english" ? input.config.sourceLanguage : "en",
+      targetLanguage: input.direction === "user-input-to-english" ? "en" : input.config.targetLanguage,
       sourceText: input.sourceText,
       translatedText: input.translatedText ?? "",
       status: input.status,
@@ -699,8 +779,8 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
       occurredAt: input.occurredAt,
       createdAt: now(),
       completedAt: input.completedAt,
-      provider: input.settings.providerType,
-      model: input.settings.model
+      provider: TRANSLATION_PROVIDER,
+      model: TRANSLATION_MODEL
     };
   }
 
@@ -713,6 +793,10 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
       state.unsubscribeTranscript();
       state.unsubscribeTranscript = undefined;
     }
+    if (state.outputBatch?.timer) {
+      clearTimeout(state.outputBatch.timer);
+    }
+    state.outputBatch = undefined;
     queues.clearQueue(sessionId);
     if (options.clearCache && state.cachePath && deps.fs?.removePath) {
       await deps.fs.removePath(state.cachePath, { force: true });
@@ -723,30 +807,6 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
   }
 
   return {
-    async getSettings() {
-      const { settings, secrets } = await loadConfig();
-      return exposeSettings(settings, secrets);
-    },
-    async updateSettings(input, secrets) {
-      const current = await loadConfig();
-      const next = {
-        settings: normalizeSettings({ ...current.settings, ...input }),
-        secrets: {
-          ...current.secrets,
-          ...(secrets?.apiKey !== undefined ? { apiKey: secrets.apiKey } : {})
-        }
-      };
-      const saved = await saveConfig(next);
-      return exposeSettings(saved.settings, saved.secrets);
-    },
-    async getPromptPreviews() {
-      const { settings } = await loadConfig();
-      return getTranslationPromptPreviews(settings);
-    },
-    async testProvider() {
-      const { settings, secrets } = await loadConfig();
-      return deps.provider.testConnection(settings, secrets);
-    },
     async startSession(input) {
       const roleSession = await deps.sessionService.getRoleSession(input.repoRoot, input.taskSlug, input.role);
       if (!roleSession || roleSession.status !== "running") {
@@ -788,7 +848,7 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
       };
     },
     async recordConversationBoundary(input) {
-      const { settings } = await loadConfig();
+      const config = await loadConfig();
       const state = await prepareCache({
         repoRoot: input.taskRepoRoot ?? input.repoRoot,
         baseRepoRoot: input.repoRoot,
@@ -815,7 +875,7 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
         direction: "cc-output-to-user",
         sourceKind: "conversation-boundary",
         sourceText,
-        settings,
+        config,
         status: "preserved",
         contextUsed: false,
         id: entryId,
@@ -829,7 +889,7 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
       return entry;
     },
     async translateUserInput(input) {
-      const { settings, secrets } = await loadConfig();
+      const config = await loadConfig();
       if (!input.text.trim()) {
         throw new VcmError({
           code: "TRANSLATION_INPUT_EMPTY",
@@ -849,7 +909,7 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
         });
       }
       const sessionState = roleSession ? getState(roleSession.id) : undefined;
-      const contextText = settings.contextEnabled && input.useContext !== false
+      const contextText = config.contextEnabled && input.useContext !== false
         ? sessionState?.lastAssistantText
         : undefined;
       const entry: TranslationEntry = {
@@ -859,7 +919,7 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
           direction: "user-input-to-english",
           sourceKind: "prose",
           sourceText: input.text,
-          settings,
+          config,
           status: "translating",
           contextUsed: Boolean(contextText)
         }),
@@ -877,25 +937,23 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
           direction: "user-input-to-english",
           text: input.text,
           sourceKind: "prose",
-          sourceLanguage: settings.sourceLanguage,
+          sourceLanguage: config.sourceLanguage,
           targetLanguage: "en",
           contextText,
-          settings,
-          secrets
+          config
         });
         const completed: TranslationEntry = {
           ...entry,
           status: "translated",
           translatedText: translation.text,
           warning: translation.warning,
-          completedAt: now(),
-          tokenUsage: translation.tokenUsage
+          completedAt: now()
         };
         if (roleSession) {
           replaceEntry(roleSession.id, completed);
         }
 
-        const mode = input.mode ?? settings.inputMode;
+        const mode = input.mode ?? config.inputMode;
         const shouldSend = input.send === true && mode === "auto-send" && !translation.warning;
         if (shouldSend) {
           await writeToCurrentRole(input.repoRoot, input.taskSlug, input.role, translation.text);
@@ -957,9 +1015,7 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
         }
       }
 
-      void loadConfig().then(({ settings }) => {
-        listener({ type: "translation-status", status: "ready" });
-      });
+      listener({ type: "translation-status", status: "ready" });
 
       return () => {
         state.listeners.delete(listener);
@@ -975,6 +1031,10 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
       state.failures.clear();
       state.events = [];
       state.nextSeq = 1;
+      if (state.outputBatch?.timer) {
+        clearTimeout(state.outputBatch.timer);
+      }
+      state.outputBatch = undefined;
       queues.clearQueue(sessionId);
       await persistEvents(state);
     },
@@ -1048,7 +1108,7 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
       return { failures: [] };
     },
     async translateGatewayOutput(input) {
-      const { settings, secrets } = await loadConfig();
+      const config = await loadConfig();
       const translation = await translateText({
         repoRoot: input.repoRoot,
         taskSlug: input.taskSlug,
@@ -1057,9 +1117,8 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
         text: input.text,
         sourceKind: "prose",
         sourceLanguage: "en",
-        targetLanguage: settings.targetLanguage,
-        settings,
-        secrets
+        targetLanguage: config.targetLanguage,
+        config
       });
       return translation.text.trim();
     },
@@ -1102,44 +1161,53 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
     sourceLanguage: string;
     targetLanguage: string;
     contextText?: string;
-    settings: TranslationSettings;
-    secrets: TranslationSecretSettings;
-  }): Promise<{ text: string; warning?: string; tokenUsage?: TranslationEntry["tokenUsage"] }> {
-    if (deps.codexTranslationService && input.repoRoot) {
-      const job = await deps.codexTranslationService.createConversationJob(input.repoRoot, {
-        taskSlug: input.taskSlug,
-        role: input.role,
-        direction: input.direction,
-        sourceText: input.text,
-        sourceLanguage: input.sourceLanguage,
-        targetLanguage: input.targetLanguage,
-        contextText: input.contextText
+    config: TranslationRuntimeConfig;
+  }): Promise<{ text: string; warning?: string }> {
+    const job = await createCodexConversationJob(input);
+    const result = await waitForCodexConversationResult(input.repoRoot!, job, input.config.requestTimeoutMs);
+    return {
+      text: result.translatedText
+    };
+  }
+
+  async function createCodexConversationJob(input: {
+    repoRoot?: string;
+    taskSlug: string;
+    role: RoleName;
+    direction: TranslationEntry["direction"];
+    text: string;
+    sourceKind?: TranslationSourceKind;
+    sourceLanguage: string;
+    targetLanguage: string;
+    contextText?: string;
+    config: TranslationRuntimeConfig;
+    deferDispatch?: boolean;
+  }): Promise<CodexConversationTranslationJob> {
+    if (!deps.codexTranslationService) {
+      throw new VcmError({
+        code: "CODEX_TRANSLATION_UNAVAILABLE",
+        message: "Codex translation service is unavailable.",
+        statusCode: 500
       });
-      const result = await waitForCodexConversationResult(input.repoRoot, job, input.settings.requestTimeoutMs);
-      return {
-        text: result.translatedText
-      };
+    }
+    if (!input.repoRoot) {
+      throw new VcmError({
+        code: "TRANSLATION_REPO_ROOT_MISSING",
+        message: "Codex translation requires a base repository root.",
+        statusCode: 500
+      });
     }
 
-    const prompt = buildTranslationPrompt({
+    return deps.codexTranslationService.createConversationJob(input.repoRoot, {
+      taskSlug: input.taskSlug,
+      role: input.role,
       direction: input.direction,
-      text: input.text,
-      sourceKind: input.sourceKind,
+      sourceText: input.text,
+      sourceLanguage: input.sourceLanguage,
+      targetLanguage: input.targetLanguage,
       contextText: input.contextText,
-      settings: input.settings
+      deferDispatch: input.deferDispatch
     });
-    const result = await deps.provider.translate({
-      settings: input.settings,
-      secrets: input.secrets,
-      systemPrompt: prompt.systemPrompt,
-      userPrompt: prompt.userPrompt
-    });
-    const parsed = prompt.parseWarning ? parseTranslationWarning(result.text) : { text: result.text };
-    return {
-      text: parsed.text,
-      warning: parsed.warning,
-      tokenUsage: result.tokenUsage
-    };
   }
 
   async function waitForCodexConversationResult(
@@ -1379,89 +1447,6 @@ function getTranslationCachePath(
   return path.join(repoRoot, stateRoot, "translation", taskSlug, role, `${sessionId}.jsonl`);
 }
 
-function normalizeSettings(input: Partial<TranslationSettings>): TranslationSettings {
-  const { apiKey: _apiKey, ...settings } = input;
-  return {
-    ...DEFAULT_SETTINGS,
-    ...settings,
-    version: 1,
-    enabled: true,
-    providerType: "openai-compatible",
-    sourceLanguage: DEFAULT_SETTINGS.sourceLanguage,
-    targetLanguage: DEFAULT_SETTINGS.targetLanguage,
-    workingLanguage: "en",
-    inputMode: "review-before-send",
-    translateOutput: true,
-    translateUserInput: true,
-    contextEnabled: false,
-    requestTimeoutMs: DEFAULT_SETTINGS.requestTimeoutMs,
-    temperature: clampNumber(input.temperature, 0, 1, DEFAULT_SETTINGS.temperature),
-    prompts: normalizePromptMap(input.prompts)
-  };
-}
-
-function withTargetLanguagePreference(config: StoredTranslationConfig, targetLanguage: string): StoredTranslationConfig {
-  return {
-    ...config,
-    settings: {
-      ...config.settings,
-      targetLanguage
-    }
-  };
-}
-
-function exposeSettings(settings: TranslationSettings, secrets: TranslationSecretSettings): TranslationSettings {
-  return {
-    ...settings,
-    apiKey: secrets.apiKey ?? ""
-  };
-}
-
-function normalizePromptMap(
-  input: TranslationSettings["prompts"]
-): TranslationSettings["prompts"] {
-  if (!input || typeof input !== "object") {
-    return undefined;
-  }
-
-  const prompts: TranslationSettings["prompts"] = {};
-  for (const [key, value] of Object.entries(input)) {
-    const normalizedKey = normalizePromptKey(key);
-    if (normalizedKey && typeof value === "string" && value.trim()) {
-      prompts[normalizedKey] = value;
-    }
-  }
-
-  return Object.keys(prompts).length > 0 ? prompts : undefined;
-}
-
-function normalizePromptKey(key: string): TranslationPromptKey | undefined {
-  if (TRANSLATION_PROMPT_KEYS.includes(key as TranslationPromptKey)) {
-    return key as TranslationPromptKey;
-  }
-
-  if (key === "user-input-to-english") {
-    return "zh-to-en";
-  }
-  if (key === "user-input-to-english-with-context") {
-    return "zh-to-en-with-context";
-  }
-  if (key === "cc-output-to-user") {
-    return "en-to-zh";
-  }
-  return undefined;
-}
-
-function clampNumber(value: unknown, min: number, max: number, fallback: number): number {
-  if (typeof value !== "number" || !Number.isFinite(value)) {
-    return fallback;
-  }
-  return Math.min(max, Math.max(min, value));
-}
-
 function normalizeTranslationError(error: unknown): string {
-  if (error instanceof TranslationProviderError) {
-    return `${error.code}: ${error.message}`;
-  }
   return error instanceof Error ? error.message : "Translation failed.";
 }

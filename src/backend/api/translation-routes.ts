@@ -2,9 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { isVcmRoleName } from "../../shared/constants.js";
 import type {
   SendTranslatedInputRequest,
-  TranslateUserInputRequest,
-  TranslationSecretSettings,
-  TranslationSettings
+  TranslateUserInputRequest
 } from "../../shared/types/translation.js";
 import { VcmError } from "../errors.js";
 import type { ProjectService } from "../services/project-service.js";
@@ -18,23 +16,6 @@ export interface TranslationRouteDeps {
 }
 
 export function registerTranslationRoutes(app: FastifyInstance, deps: TranslationRouteDeps): void {
-  app.get("/api/translation/settings", async () => {
-    return deps.translationService.getSettings();
-  });
-
-  app.put<{ Body: Partial<TranslationSettings> & TranslationSecretSettings }>("/api/translation/settings", async (request) => {
-    const { apiKey, ...settings } = request.body ?? {};
-    return deps.translationService.updateSettings(settings, apiKey !== undefined ? { apiKey } : undefined);
-  });
-
-  app.get("/api/translation/prompts", async () => {
-    return deps.translationService.getPromptPreviews();
-  });
-
-  app.post("/api/translation/test", async () => {
-    return deps.translationService.testProvider();
-  });
-
   app.post<{ Params: { taskSlug: string; role: string } }>(
     "/api/tasks/:taskSlug/sessions/:role/translation/start",
     async (request) => {
