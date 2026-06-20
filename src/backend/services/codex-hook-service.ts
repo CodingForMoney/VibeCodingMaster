@@ -73,14 +73,16 @@ export function createCodexHookService(deps: CodexHookServiceDeps): CodexHookSer
       cwd: stringOrUndefined(input.event.cwd),
       allowSessionMismatch: true
     });
-    await deps.roundService.recordRoleTurnEvent({
-      repoRoot: context.project.repoRoot,
-      stateRepoRoot: context.taskRepoRoot,
-      stateRoot: context.config.stateRoot,
-      taskSlug: input.taskSlug,
-      role: input.role,
-      eventName
-    });
+    if (input.role === "codex-reviewer") {
+      await deps.roundService.recordRoleTurnEvent({
+        repoRoot: context.project.repoRoot,
+        stateRepoRoot: context.taskRepoRoot,
+        stateRoot: context.config.stateRoot,
+        taskSlug: input.taskSlug,
+        role: input.role,
+        eventName
+      });
+    }
     if (input.role === "codex-translator") {
       await deps.codexTranslationService?.handleCodexHook(context.project.repoRoot, eventName, input.taskSlug);
     }

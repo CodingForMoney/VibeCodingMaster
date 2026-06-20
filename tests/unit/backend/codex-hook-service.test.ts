@@ -112,7 +112,7 @@ describe("createCodexHookService", () => {
     ]);
   });
 
-  it("forwards Codex Translator hooks to the translation queue", async () => {
+  it("forwards Codex Translator hooks to the translation queue without touching round state", async () => {
     const calls: string[] = [];
     const service = createCodexHookService({
       projectService: createProjectServiceStub(),
@@ -153,7 +153,6 @@ describe("createCodexHookService", () => {
     });
     expect(calls).toEqual([
       "session:Stop:codex-translator:codex_translator_session",
-      "round:Stop:codex-translator",
       "translation:/repo:Stop:demo-task"
     ]);
   });
