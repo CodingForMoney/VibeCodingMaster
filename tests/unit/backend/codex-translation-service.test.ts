@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { createNodeFileSystemAdapter } from "../../../src/backend/adapters/filesystem.js";
+import { createNodeFileSystemAdapter, type FileSystemAdapter } from "../../../src/backend/adapters/filesystem.js";
 import type { TerminalRuntime } from "../../../src/backend/runtime/terminal-runtime.js";
 import { createCodexTranslationService } from "../../../src/backend/services/codex-translation-service.js";
 import type { SessionService } from "../../../src/backend/services/session-service.js";
@@ -32,6 +32,8 @@ describe("codex-translation-service", () => {
       baseRepoRoot: string;
       absolutePaths: { sourcePath: string; resultPath: string; finalResultPath: string };
       outputContract: { stagingResultPath: string; finalResultPath: string };
+      chunking: { strategy: string; chunkCount: number };
+      chunks: Array<{ index: number; sourcePath: string; translatedPath: string; sourceHash: string }>;
     }>(
       path.join(tmpRepo, job.requestPath)
     );
@@ -44,6 +46,14 @@ describe("codex-translation-service", () => {
     expect(request.absolutePaths.finalResultPath).toContain(path.join(tmpRepo, ".ai/vcm/translations/files/completed/"));
     expect(request.outputContract.stagingResultPath).toBe(job.resultPath);
     expect(request.outputContract.finalResultPath).toContain(".ai/vcm/translations/files/completed/");
+    expect(request.chunking).toMatchObject({ strategy: "line-boundary", chunkCount: 1 });
+    expect(request.chunks).toHaveLength(1);
+    expect(request.chunks[0]).toMatchObject({
+      index: 1,
+      sourcePath: expect.stringContaining("/chunks/0001.source.md"),
+      translatedPath: expect.stringContaining("/chunks/0001.translated.md")
+    });
+    expect(await fs.readText(path.join(tmpRepo, request.chunks[0]!.sourcePath))).toBe("# Demo\n\nHello project.\n");
     expect(job.resultPath).toContain(".ai/vcm/translations/runtime/files/jobs/");
     expect(state.queue.items).toHaveLength(1);
     expect(state.queue.items[0]).toMatchObject({
@@ -67,6 +77,33 @@ describe("codex-translation-service", () => {
 
     await expect(fs.pathExists(path.join(tmpRepo, ".ai/vcm/translations/runtime/codex-translator.log"))).resolves.toBe(false);
     await expect(fs.pathExists(path.join(tmpRepo, ".ai/vcm/translations/codex-translator.log"))).resolves.toBe(false);
+  });
+
+  it("splits large file translation sources into VCM-managed chunk files", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-codex-translation-chunks-"));
+    const source = Array.from({ length: 120 }, (_, index) => `## Section ${index + 1}\n\n${"Long sentence. ".repeat(12)}\n`).join("\n");
+    await writeFile(path.join(tmpRepo, "WHITEPAPER.md"), source, "utf8");
+    const fs = createNodeFileSystemAdapter();
+    const service = createCodexTranslationService({ fs });
+
+    const job = await service.createFileJob(tmpRepo, {
+      sourcePath: "WHITEPAPER.md",
+      targetLanguage: "zh-CN",
+      chunkSourceTokenTarget: 1000
+    });
+    const request = await fs.readJson<{
+      sourceText?: string;
+      chunking: { chunkCount: number };
+      chunks: Array<{ index: number; sourcePath: string; translatedPath: string; sourceBytes: number }>;
+    }>(path.join(tmpRepo, job.requestPath));
+
+    expect(request.sourceText).toBeUndefined();
+    expect(request.chunking.chunkCount).toBeGreaterThan(1);
+    expect(request.chunks.length).toBe(request.chunking.chunkCount);
+    expect(request.chunks[0]?.index).toBe(1);
+    expect(request.chunks[0]?.translatedPath).toContain("/chunks/0001.translated.md");
+    expect(await fs.readText(path.join(tmpRepo, request.chunks[0]!.sourcePath))).toContain("## Section 1");
+    expect(request.chunks.every((chunk) => chunk.sourceBytes > 0)).toBe(true);
   });
 
   it("creates bootstrap runs and memory files", async () => {
@@ -384,7 +421,7 @@ describe("codex-translation-service", () => {
       targetLanguage: "zh-CN"
     });
     await waitForDispatcher();
-    await fs.writeText(path.join(tmpRepo, first.resultPath), "# 旧译文\n");
+    await writeCompletedFileTranslation(fs, tmpRepo, first, "# 旧译文\n");
     await service.handleCodexHook(tmpRepo, "Stop", "demo-task");
 
     let state = await service.getState(tmpRepo);
@@ -406,7 +443,7 @@ describe("codex-translation-service", () => {
         nextState.fileIndex.jobs.find((job) => job.id === second.id)?.status === "running";
     });
 
-    await fs.writeText(path.join(tmpRepo, second.resultPath), "# 新译文\n");
+    await writeCompletedFileTranslation(fs, tmpRepo, second, "# 新译文\n");
     await service.handleCodexHook(tmpRepo, "Stop", "demo-task");
     state = await service.getState(tmpRepo);
 
@@ -421,6 +458,36 @@ describe("codex-translation-service", () => {
     expect(await fs.readText(path.join(tmpRepo, completedJobs[0]!.resultPath))).toBe("# 新译文\n");
     expect(state.fileIndex.jobs.some((job) => job.id === first.id)).toBe(false);
     expect(state.queue.items.some((item) => item.id === first.queueItemId || item.id === second.queueItemId)).toBe(false);
+  });
+
+  it("fails file translations that only write empty output and diagnostics", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-codex-empty-output-"));
+    await writeFile(path.join(tmpRepo, "README.md"), "# Demo\n\nHello project.\n", "utf8");
+    const fs = createNodeFileSystemAdapter();
+    const service = createCodexTranslationService({
+      fs,
+      runtime: createRuntimeStub([]),
+      sessionService: createTranslatorSessionService([])
+    });
+
+    const job = await service.createFileJob(tmpRepo, {
+      taskSlug: "demo-task",
+      sourcePath: "README.md",
+      targetLanguage: "zh-CN"
+    });
+    await waitForDispatcher();
+    await fs.writeText(path.join(tmpRepo, job.resultPath), "");
+    await fs.writeText(path.join(tmpRepo, job.reportPath), "# Translation Diagnostics\n\nStatus: blocked\nReason: not enough context.\n");
+
+    await service.handleCodexHook(tmpRepo, "Stop", "demo-task");
+
+    const state = await service.getState(tmpRepo);
+    const failedJob = state.fileIndex.jobs.find((candidate) => candidate.id === job.id);
+    const failedQueueItem = state.queue.items.find((item) => item.id === job.queueItemId);
+    expect(failedJob?.status).toBe("failed");
+    expect(failedQueueItem?.status).toBe("failed");
+    expect(failedQueueItem?.error).toBe("Translation output is empty.");
+    expect(await fs.pathExists(path.join(tmpRepo, job.requestPath))).toBe(true);
   });
 
   it("keeps the queue single-threaded and dispatches the next item after Stop", async () => {
@@ -465,7 +532,7 @@ describe("codex-translation-service", () => {
     expect(writes[0]).toContain(path.join(tmpRepo, first.resultPath));
     expect(writes[0]).toContain("Do not use apply_patch");
 
-    await fs.writeText(path.join(tmpRepo, first.resultPath), "# Demo translated\n");
+    await writeCompletedFileTranslation(fs, tmpRepo, first, "# Demo translated\n");
     await service.handleCodexHook(tmpRepo, "Stop", "demo-task");
     await waitForCondition(async () => {
       const nextState = await service.getState(tmpRepo!);
@@ -526,6 +593,20 @@ function createRuntimeStub(writes: string[]): TerminalRuntime {
       return () => {};
     }
   };
+}
+
+async function writeCompletedFileTranslation(
+  fs: FileSystemAdapter,
+  repoRoot: string,
+  job: { requestPath: string; resultPath: string; reportPath: string },
+  output: string
+): Promise<void> {
+  const request = await fs.readJson<{ chunks?: Array<{ translatedPath: string }> }>(path.join(repoRoot, job.requestPath));
+  await Promise.all((request.chunks ?? []).map((chunk, index) =>
+    fs.writeText(path.join(repoRoot, chunk.translatedPath), `${output.trimEnd()}\n\n<!-- chunk ${index + 1} -->\n`)
+  ));
+  await fs.writeText(path.join(repoRoot, job.resultPath), output);
+  await fs.writeText(path.join(repoRoot, job.reportPath), "# Translation Report\n\nStatus: completed\n");
 }
 
 function createTranslatorSessionService(starts: string[]): Pick<SessionService, "getRoleSession" | "resumeRoleSession" | "startRoleSession"> {
