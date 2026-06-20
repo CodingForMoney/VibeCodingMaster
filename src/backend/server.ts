@@ -13,6 +13,7 @@ import { createGitAdapter } from "./adapters/git-adapter.js";
 import { createAppSettingsService, type AppSettingsService } from "./services/app-settings-service.js";
 import { createClaudeTranscriptService } from "./services/claude-transcript-service.js";
 import { createCodexReviewService, type CodexReviewService } from "./services/codex-review-service.js";
+import { createCodexTranslationService, type CodexTranslationService } from "./services/codex-translation-service.js";
 import {
   createHarnessService,
   createScriptFixedHarnessInstaller,
@@ -42,6 +43,7 @@ import { registerArtifactRoutes } from "./api/artifact-routes.js";
 import { registerClaudeHookRoutes } from "./api/claude-hook-routes.js";
 import { registerCodexHookRoutes } from "./api/codex-hook-routes.js";
 import { registerCodexReviewRoutes } from "./api/codex-review-routes.js";
+import { registerCodexTranslationRoutes } from "./api/codex-translation-routes.js";
 import { registerHarnessRoutes } from "./api/harness-routes.js";
 import { registerMessageRoutes } from "./api/message-routes.js";
 import { registerProjectRoutes } from "./api/project-routes.js";
@@ -72,6 +74,7 @@ export interface ServerDeps {
   codexHookService: CodexHookService;
   messageService: MessageService;
   codexReviewService: CodexReviewService;
+  codexTranslationService: CodexTranslationService;
   roundService: RoundService;
   statusService: StatusService;
   translationService: TranslationService;
@@ -104,6 +107,10 @@ export async function createServer(deps: ServerDeps, options: CreateServerOption
   registerCodexReviewRoutes(app, {
     projectService: deps.projectService,
     codexReviewService: deps.codexReviewService
+  });
+  registerCodexTranslationRoutes(app, {
+    projectService: deps.projectService,
+    codexTranslationService: deps.codexTranslationService
   });
   registerProjectRoutes(app, { projectService: deps.projectService });
   registerHarnessRoutes(app, {
@@ -215,7 +222,8 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     artifactService,
     projectService,
     taskService,
-    apiUrl: options.apiUrl
+    apiUrl: options.apiUrl,
+    sandboxMode: process.env.VCM_SANDBOX
   });
   const commandDispatcher = createCommandDispatcher({
     runtime,
@@ -251,12 +259,18 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     sessionService,
     roundService
   });
+  const codexTranslationService = createCodexTranslationService({
+    fs,
+    runtime,
+    sessionService
+  });
   const transcripts = createClaudeTranscriptService();
   const translationService = createTranslationService({
     runtime,
     sessionRegistry: registry,
     transcripts,
     sessionService,
+    codexTranslationService,
     fs,
     projectService,
     appSettings,
@@ -296,7 +310,8 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     projectService,
     taskService,
     sessionService,
-    roundService
+    roundService,
+    codexTranslationService
   });
   const diagnosticsService = createDiagnosticsService({
     appRoot: getAppRoot(),
@@ -317,6 +332,7 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     codexHookService,
     messageService,
     codexReviewService,
+    codexTranslationService,
     roundService,
     statusService,
     translationService,

@@ -142,6 +142,7 @@ Important container notes:
 - Make sure the container has network access to Claude services and to the translation provider if translation is enabled.
 - VCM accepts normal Git repositories by checking `.git` directly. It also supports `.git` files that point to worktree gitdirs.
 - VCM uses per-command `git -c safe.directory=...` for Git metadata reads and does not require global `git config --global --add safe.directory`.
+- Set `VCM_SANDBOX=devcontainer` so VCM-managed Codex Reviewer sessions rely on the container boundary and do not start Codex's nested Linux sandbox.
 - Treat the container as the sandbox boundary, especially when using relaxed Claude Code permission modes.
 
 ## Basic Usage
@@ -389,7 +390,7 @@ Translation settings are local and stored in:
 
 The same file stores recent repository paths. The translation API key is stored locally under `translation.secrets.apiKey`; it is not written to the connected repository, `.ai/vcm/handoffs`, raw terminal logs, or git diffs.
 
-VCM resolves `vcmDataDir` from `VCM_DATA_DIR`. If `VCM_DATA_DIR` is unset or empty, VCM uses `~/.vcm`. In Dev Containers, set `VCM_DATA_DIR=/workspace/.ai/vcm` through `containerEnv` so VCM app state survives container rebuilds.
+VCM resolves `vcmDataDir` from `VCM_DATA_DIR`. If `VCM_DATA_DIR` is unset or empty, VCM uses `~/.vcm`. In Dev Containers, set `VCM_DATA_DIR=/workspace/.ai/vcm` and `VCM_SANDBOX=devcontainer` through `containerEnv` so VCM app state survives container rebuilds and VCM-managed Codex Reviewer sessions do not run a nested Codex sandbox.
 
 The sidebar `Settings` section also stores the UI theme preference in this file. The default is `system`, which follows the OS/browser color-scheme preference; users can cycle between `System`, `Light`, and `Dark`.
 

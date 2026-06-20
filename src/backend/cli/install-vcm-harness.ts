@@ -15,6 +15,8 @@ import {
   renderCodexFinalDiffPrompt,
   renderCodexHooksHarnessRules,
   renderCodexReviewResultSchema,
+  renderCodexTranslatorAgentsHarnessRules,
+  renderCodexTranslatorConfigHarnessRules,
   renderCodexValidationAdequacyPrompt,
   renderRequestCodexReviewTool,
   renderVcmCodexReviewGateSkillRules
@@ -124,6 +126,13 @@ const MANAGED_FILES = [
     commentStyle: "html",
     category: "codex-reviewer-agent",
     content: renderCodexAgentsHarnessRules()
+  },
+  {
+    path: ".ai/codex-translator/AGENTS.md",
+    title: "VCM Codex Translator",
+    commentStyle: "html",
+    category: "codex-translator-agent",
+    content: renderCodexTranslatorAgentsHarnessRules()
   }
 ];
 
@@ -227,6 +236,24 @@ const WHOLE_FILES = [
     category: "codex-review-hooks",
     mode: 0o644,
     content: renderCodexHooksHarnessRules()
+  },
+  {
+    path: ".ai/codex-translator/config.toml",
+    category: "codex-translator-config",
+    mode: 0o644,
+    content: renderCodexTranslatorConfigHarnessRules()
+  },
+  {
+    path: ".ai/codex-translator/.codex/config.toml",
+    category: "codex-translator-hooks",
+    mode: 0o644,
+    content: renderCodexCliConfigHarnessRules()
+  },
+  {
+    path: ".ai/codex-translator/.codex/hooks.json",
+    category: "codex-translator-hooks",
+    mode: 0o644,
+    content: renderCodexHooksHarnessRules("codex-translator")
   },
   {
     path: ".ai/codex/prompts/architecture-plan-gate.md",
@@ -489,6 +516,9 @@ function fixedDirectories() {
     ".ai/codex/.codex/",
     ".ai/codex/prompts/",
     ".ai/codex/schemas/",
+    ".ai/codex-translator/",
+    ".ai/codex-translator/.codex/",
+    ".ai/vcm/translations/",
     ".ai/vcm/codex-reviews/",
     ".ai/tools/",
     ".ai/generated/"

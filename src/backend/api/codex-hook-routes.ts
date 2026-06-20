@@ -18,4 +18,13 @@ export function registerCodexHookRoutes(app: FastifyInstance, deps: CodexHookRou
     await deps.codexHookService.handleStopHook(request.body);
     return {};
   });
+
+  app.post<{ Body: CodexHookRequest }>("/api/hooks/codex-translator", async (request) => {
+    return deps.codexHookService.handleHook(request.body);
+  });
+
+  app.post<{ Body: CodexHookRequest }>("/api/hooks/codex-translator/stop", async (request): Promise<CodexStopHookResponse> => {
+    await deps.codexHookService.handleStopHook(request.body);
+    return {};
+  });
 }

@@ -5,6 +5,7 @@ import type {
   TranslationDiagnostics
 } from "../../shared/types/diagnostics.js";
 import type {
+  CodexConversationTranslationJob,
   PollTranslationSessionResult,
   SendTranslatedInputRequest,
   StartTranslationSessionResult,
@@ -38,6 +39,7 @@ import {
   type ClaudeTranscriptEvent,
   type ClaudeTranscriptService
 } from "./claude-transcript-service.js";
+import type { CodexTranslationService } from "./codex-translation-service.js";
 import type { ProjectService } from "./project-service.js";
 import type { SessionService } from "./session-service.js";
 import { buildTranslationPrompt, getTranslationPromptPreviews, parseTranslationWarning } from "./translation-prompts.js";
@@ -114,6 +116,7 @@ export interface TranslationServiceDeps {
   sessionRegistry: Pick<SessionRegistry, "get">;
   transcripts: ClaudeTranscriptService;
   sessionService: SessionService;
+  codexTranslationService?: Pick<CodexTranslationService, "createConversationJob" | "validateConversationResult" | "getState">;
   fs?: FileSystemAdapter;
   projectService?: Pick<ProjectService, "loadConfig">;
   appSettings: Pick<AppSettingsService, "getTranslationConfig" | "updateTranslationConfig">;
@@ -137,6 +140,7 @@ interface SessionState {
   events: TranslationSessionEvent[];
   nextSeq: number;
   repoRoot?: string;
+  baseRepoRoot?: string;
   taskSlug?: string;
   role?: RoleName;
   cachePath?: string;
@@ -272,12 +276,14 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
 
   async function prepareCache(input: {
     repoRoot: string;
+    baseRepoRoot?: string;
     taskSlug: string;
     role: RoleName;
     sessionId: string;
   }): Promise<SessionState> {
     const state = getState(input.sessionId);
     state.repoRoot = input.repoRoot;
+    state.baseRepoRoot = input.baseRepoRoot ?? input.repoRoot;
     state.taskSlug = input.taskSlug;
     state.role = input.role;
 
@@ -461,24 +467,24 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
       publishStatus(sessionId, "translating");
 
       try {
-        const prompt = buildTranslationPrompt({
+        const translation = await translateText({
+          repoRoot: getState(sessionId).baseRepoRoot,
+          taskSlug: baseEntry.taskSlug,
+          role: baseEntry.role,
           direction: "cc-output-to-user",
           text,
           sourceKind: "prose",
-          settings
-        });
-        const result = await deps.provider.translate({
+          sourceLanguage: "en",
+          targetLanguage: settings.targetLanguage,
           settings,
-          secrets,
-          systemPrompt: prompt.systemPrompt,
-          userPrompt: prompt.userPrompt
+          secrets
         });
         const completed = {
           ...baseEntry,
           status: "translated" as TranslationStatus,
-          translatedText: result.text,
+          translatedText: translation.text,
           completedAt: now(),
-          tokenUsage: result.tokenUsage
+          tokenUsage: translation.tokenUsage
         };
         replaceEntry(sessionId, completed);
         clearFailure(sessionId, completed.id);
@@ -746,6 +752,7 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
 
       const state = await prepareCache({
         repoRoot: input.taskRepoRoot ?? input.repoRoot,
+        baseRepoRoot: input.repoRoot,
         taskSlug: input.taskSlug,
         role: input.role,
         sessionId: roleSession.id
@@ -777,6 +784,7 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
       const { settings } = await loadConfig();
       const state = await prepareCache({
         repoRoot: input.taskRepoRoot ?? input.repoRoot,
+        baseRepoRoot: input.repoRoot,
         taskSlug: input.taskSlug,
         role: input.role,
         sessionId: input.sessionId
@@ -827,6 +835,7 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
       if (roleSession) {
         await prepareCache({
           repoRoot: input.taskRepoRoot ?? input.repoRoot,
+          baseRepoRoot: input.repoRoot,
           taskSlug: input.taskSlug,
           role: input.role,
           sessionId: roleSession.id
@@ -836,12 +845,6 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
       const contextText = settings.contextEnabled && input.useContext !== false
         ? sessionState?.lastAssistantText
         : undefined;
-      const prompt = buildTranslationPrompt({
-        direction: "user-input-to-english",
-        text: input.text,
-        contextText,
-        settings
-      });
       const entry: TranslationEntry = {
         ...createEntry({
           taskSlug: input.taskSlug,
@@ -860,36 +863,42 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
       }
 
       try {
-        const result = await deps.provider.translate({
+        const translation = await translateText({
+          repoRoot: input.repoRoot,
+          taskSlug: input.taskSlug,
+          role: input.role,
+          direction: "user-input-to-english",
+          text: input.text,
+          sourceKind: "prose",
+          sourceLanguage: settings.sourceLanguage,
+          targetLanguage: "en",
+          contextText,
           settings,
-          secrets,
-          systemPrompt: prompt.systemPrompt,
-          userPrompt: prompt.userPrompt
+          secrets
         });
-        const parsed = prompt.parseWarning ? parseTranslationWarning(result.text) : { text: result.text };
         const completed: TranslationEntry = {
           ...entry,
           status: "translated",
-          translatedText: parsed.text,
-          warning: parsed.warning,
+          translatedText: translation.text,
+          warning: translation.warning,
           completedAt: now(),
-          tokenUsage: result.tokenUsage
+          tokenUsage: translation.tokenUsage
         };
         if (roleSession) {
           replaceEntry(roleSession.id, completed);
         }
 
         const mode = input.mode ?? settings.inputMode;
-        const shouldSend = input.send === true && mode === "auto-send" && !parsed.warning;
+        const shouldSend = input.send === true && mode === "auto-send" && !translation.warning;
         if (shouldSend) {
-          await writeToCurrentRole(input.repoRoot, input.taskSlug, input.role, parsed.text);
+          await writeToCurrentRole(input.repoRoot, input.taskSlug, input.role, translation.text);
         }
 
         return {
           translation: completed,
-          englishPreview: parsed.text,
+          englishPreview: translation.text,
           contextUsed: Boolean(contextText),
-          requiresReview: mode === "review-before-send" || Boolean(parsed.warning),
+          requiresReview: mode === "review-before-send" || Boolean(translation.warning),
           sent: shouldSend
         };
       } catch (error) {
@@ -1033,18 +1042,19 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
     },
     async translateGatewayOutput(input) {
       const { settings, secrets } = await loadConfig();
-      const prompt = buildTranslationPrompt({
+      const translation = await translateText({
+        repoRoot: input.repoRoot,
+        taskSlug: input.taskSlug,
+        role: input.role,
         direction: "cc-output-to-user",
         text: input.text,
-        settings
-      });
-      const result = await deps.provider.translate({
+        sourceKind: "prose",
+        sourceLanguage: "en",
+        targetLanguage: settings.targetLanguage,
         settings,
-        secrets,
-        systemPrompt: prompt.systemPrompt,
-        userPrompt: prompt.userPrompt
+        secrets
       });
-      return result.text.trim();
+      return translation.text.trim();
     },
     getDiagnostics() {
       let transcriptWatchers = 0;
@@ -1074,6 +1084,105 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
     }
     await submitTerminalInput(deps.runtime, record.id, text);
   }
+
+  async function translateText(input: {
+    repoRoot?: string;
+    taskSlug: string;
+    role: RoleName;
+    direction: TranslationEntry["direction"];
+    text: string;
+    sourceKind?: TranslationSourceKind;
+    sourceLanguage: string;
+    targetLanguage: string;
+    contextText?: string;
+    settings: TranslationSettings;
+    secrets: TranslationSecretSettings;
+  }): Promise<{ text: string; warning?: string; tokenUsage?: TranslationEntry["tokenUsage"] }> {
+    if (deps.codexTranslationService && input.repoRoot) {
+      const job = await deps.codexTranslationService.createConversationJob(input.repoRoot, {
+        taskSlug: input.taskSlug,
+        role: input.role,
+        direction: input.direction,
+        sourceText: input.text,
+        sourceLanguage: input.sourceLanguage,
+        targetLanguage: input.targetLanguage,
+        contextText: input.contextText
+      });
+      const result = await waitForCodexConversationResult(input.repoRoot, job, input.settings.requestTimeoutMs);
+      return {
+        text: result.translatedText
+      };
+    }
+
+    const prompt = buildTranslationPrompt({
+      direction: input.direction,
+      text: input.text,
+      sourceKind: input.sourceKind,
+      contextText: input.contextText,
+      settings: input.settings
+    });
+    const result = await deps.provider.translate({
+      settings: input.settings,
+      secrets: input.secrets,
+      systemPrompt: prompt.systemPrompt,
+      userPrompt: prompt.userPrompt
+    });
+    const parsed = prompt.parseWarning ? parseTranslationWarning(result.text) : { text: result.text };
+    return {
+      text: parsed.text,
+      warning: parsed.warning,
+      tokenUsage: result.tokenUsage
+    };
+  }
+
+  async function waitForCodexConversationResult(
+    repoRoot: string,
+    job: CodexConversationTranslationJob,
+    timeoutMs: number
+  ) {
+    const deadline = Date.now() + timeoutMs;
+    let lastError: unknown;
+    while (Date.now() <= deadline) {
+      const state = await deps.codexTranslationService!.getState(repoRoot);
+      const item = job.queueItemId
+        ? state.queue.items.find((candidate) => candidate.id === job.queueItemId)
+        : undefined;
+      if (item && ["failed", "cancelled", "interrupted", "skipped"].includes(item.status)) {
+        throw new VcmError({
+          code: "TRANSLATION_FAILED",
+          message: item.error ?? "Codex translation failed.",
+          statusCode: 502
+        });
+      }
+      if (item && item.status !== "completed") {
+        await delay(Math.min(500, Math.max(25, timeoutMs)));
+        continue;
+      }
+      try {
+        return await deps.codexTranslationService!.validateConversationResult(repoRoot, {
+          taskSlug: job.taskSlug,
+          resultPath: job.resultPath,
+          sourceHash: job.sourceHash,
+          targetLanguage: job.targetLanguage
+        });
+      } catch (error) {
+        lastError = error;
+        if (item?.status === "completed") {
+          throw error;
+        }
+      }
+      await delay(Math.min(500, Math.max(25, timeoutMs)));
+    }
+    throw new VcmError({
+      code: "TRANSLATION_TIMEOUT",
+      message: lastError instanceof Error ? `Codex translation timed out: ${lastError.message}` : "Codex translation timed out.",
+      statusCode: 504
+    });
+  }
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function getTranscriptReplaySince(roleSession: RoleSessionRecord): string | undefined {

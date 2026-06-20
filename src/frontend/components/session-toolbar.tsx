@@ -1,4 +1,5 @@
 import type { RoleName } from "../../shared/types/role.js";
+import { isCodexRoleName } from "../../shared/constants.js";
 import {
   CLAUDE_EFFORT_OPTIONS,
   CLAUDE_MODEL_OPTIONS,
@@ -45,18 +46,18 @@ export function SessionToolbar({
   const isRunning = session?.status === "running";
   const canResume = Boolean(session?.claudeSessionId && !isRunning);
   const canStart = !isRunning && !session?.claudeSessionId;
-  const isCodexReviewer = role === "codex-reviewer";
+  const isCodexRole = isCodexRoleName(role);
   const modeWillChange = Boolean(session && session.permissionMode !== permissionMode);
   const sessionModel = session?.model ?? "default";
   const modelWillChange = Boolean(session && sessionModel !== model);
   const sessionEffort = session?.effort ?? "default";
   const effortWillChange = Boolean(session && sessionEffort !== effort);
-  const modelOptions = isCodexReviewer ? CODEX_MODEL_OPTIONS : CLAUDE_MODEL_OPTIONS;
-  const effortOptions = isCodexReviewer ? CODEX_EFFORT_OPTIONS : CLAUDE_EFFORT_OPTIONS;
+  const modelOptions = isCodexRole ? CODEX_MODEL_OPTIONS : CLAUDE_MODEL_OPTIONS;
+  const effortOptions = isCodexRole ? CODEX_EFFORT_OPTIONS : CLAUDE_EFFORT_OPTIONS;
 
   return (
     <div className="session-controls">
-      {isCodexReviewer ? null : (
+      {isCodexRole ? null : (
         <label className="session-option-field permission-mode-field">
           <span>
             Permission
@@ -81,7 +82,7 @@ export function SessionToolbar({
           Model
           <small>
             {session
-              ? `current: ${formatSessionModel(sessionModel, isCodexReviewer)}${modelWillChange ? " / next launch" : ""}`
+              ? `current: ${formatSessionModel(sessionModel, isCodexRole)}${modelWillChange ? " / next launch" : ""}`
               : "applies on start"}
           </small>
         </span>
@@ -140,8 +141,8 @@ function formatPermissionMode(permissionMode: ClaudePermissionMode): string {
   return permissionMode;
 }
 
-function formatSessionModel(model: SessionModel, isCodexReviewer: boolean): string {
-  if (isCodexReviewer) {
+function formatSessionModel(model: SessionModel, isCodexRole: boolean): string {
+  if (isCodexRole) {
     return CODEX_MODEL_OPTIONS.find((option) => option.value === model)?.label ?? model;
   }
   return CLAUDE_MODEL_OPTIONS.find((option) => option.value === model)?.label ?? model;

@@ -36,6 +36,12 @@ import type { VcmSessionRoundState } from "../../shared/types/round.js";
 import type { RoleSessionRecord, StartRoleSessionRequest } from "../../shared/types/session.js";
 import type { CleanupTaskRequest, CleanupTaskResult, CreateTaskRequest, TaskRecord } from "../../shared/types/task.js";
 import type {
+  CodexBootstrapRun,
+  CodexFileTranslationJob,
+  CodexTranslationSourceFileBrowserResult,
+  CodexTranslationState,
+  CreateCodexBootstrapRequest,
+  CreateCodexFileTranslationRequest,
   SendTranslatedInputRequest,
   TranslateUserInputRequest,
   TranslateUserInputResult,
@@ -268,6 +274,44 @@ export const apiClient = {
   retryTranslationFailures(sessionId: string) {
     return request<TranslationFailuresResult>(`/api/translation/sessions/${encodeURIComponent(sessionId)}/failures/retry`, {
       method: "POST"
+    });
+  },
+  getCodexTranslationState() {
+    return request<CodexTranslationState>("/api/translation/codex/state");
+  },
+  browseCodexTranslationSourceFiles(input: { path?: string; query?: string; limit?: number } = {}) {
+    const params = new URLSearchParams();
+    if (input.path) {
+      params.set("path", input.path);
+    }
+    if (input.query) {
+      params.set("query", input.query);
+    }
+    if (input.limit !== undefined) {
+      params.set("limit", String(input.limit));
+    }
+    const suffix = params.toString() ? `?${params.toString()}` : "";
+    return request<CodexTranslationSourceFileBrowserResult>(`/api/translation/codex/source-files${suffix}`);
+  },
+  createCodexFileTranslation(input: CreateCodexFileTranslationRequest) {
+    return request<CodexFileTranslationJob>("/api/translation/codex/files", {
+      method: "POST",
+      body: JSON.stringify(input)
+    });
+  },
+  readCodexFileTranslation(jobId: string) {
+    return request<{ job: CodexFileTranslationJob; output: string; report: string }>(`/api/translation/codex/files/${encodeURIComponent(jobId)}`);
+  },
+  createCodexBootstrap(input: CreateCodexBootstrapRequest) {
+    return request<CodexBootstrapRun>("/api/translation/codex/bootstrap", {
+      method: "POST",
+      body: JSON.stringify(input)
+    });
+  },
+  promoteCodexTranslation(jobId: string, targetPath: string) {
+    return request<CodexFileTranslationJob>(`/api/translation/codex/files/${encodeURIComponent(jobId)}/promote`, {
+      method: "POST",
+      body: JSON.stringify({ targetPath })
     });
   },
   getGatewayStatus() {

@@ -112,7 +112,53 @@ describe("createCodexHookService", () => {
     ]);
   });
 
-  it("rejects non-Codex Reviewer roles", async () => {
+  it("forwards Codex Translator hooks to the translation queue", async () => {
+    const calls: string[] = [];
+    const service = createCodexHookService({
+      projectService: createProjectServiceStub(),
+      taskService: createTaskServiceStub(),
+      sessionService: {
+        async recordRoleHookEvent(_repoRoot, input) {
+          calls.push(`session:${input.eventName}:${input.role}:${input.sessionId}`);
+          return undefined;
+        }
+      } as Pick<SessionService, "recordRoleHookEvent">,
+      roundService: {
+        async recordRoleTurnEvent(input) {
+          calls.push(`round:${input.eventName}:${input.role}`);
+          return {} as never;
+        }
+      } as Pick<RoundService, "recordRoleTurnEvent">,
+      codexTranslationService: {
+        async handleCodexHook(repoRoot, eventName, taskSlug) {
+          calls.push(`translation:${repoRoot}:${eventName}:${taskSlug}`);
+        }
+      }
+    });
+
+    const result = await service.handleStopHook({
+      taskSlug: "demo-task",
+      role: "codex-translator",
+      event: {
+        hook_event_name: "Stop",
+        session_id: "codex_translator_session"
+      }
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      eventName: "Stop",
+      role: "codex-translator",
+      sessionUpdated: false
+    });
+    expect(calls).toEqual([
+      "session:Stop:codex-translator:codex_translator_session",
+      "round:Stop:codex-translator",
+      "translation:/repo:Stop:demo-task"
+    ]);
+  });
+
+  it("rejects non-Codex roles", async () => {
     const service = createCodexHookService({
       projectService: createProjectServiceStub(),
       taskService: createTaskServiceStub(),

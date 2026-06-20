@@ -245,6 +245,23 @@ describe("apiClient", () => {
     expect(fetchMock.mock.calls[1]?.[1]?.body).toBeUndefined();
   });
 
+  it("browses Codex translation source files with encoded query params", async () => {
+    const fetchMock = mockFetch({
+      currentPath: "docs/specs",
+      query: "white paper",
+      entries: [],
+      truncated: false
+    });
+
+    await apiClient.browseCodexTranslationSourceFiles({
+      path: "docs/specs",
+      query: "white paper",
+      limit: 25
+    });
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/translation/codex/source-files?path=docs%2Fspecs&query=white+paper&limit=25");
+  });
+
   it("calls gateway status and settings APIs", async () => {
     const fetchMock = mockFetch({
       version: 1,

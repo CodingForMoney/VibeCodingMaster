@@ -1,4 +1,5 @@
 import type { VcmOrchestrationMode } from "../../shared/types/message.js";
+import { isCodexRoleName } from "../../shared/constants.js";
 import type { RoleName } from "../../shared/types/role.js";
 import type { ClaudePermissionMode, RoleSessionRecord, SessionEffort, SessionModel } from "../../shared/types/session.js";
 import { XtermView } from "../terminal/xterm-view.js";
@@ -47,7 +48,7 @@ export function SessionConsole({
   onTerminalEvent
 }: SessionConsoleProps) {
   const autoOrchestrationEnabled = orchestrationMode === "auto";
-  const isCodexReviewer = role === "codex-reviewer";
+  const isCodexRole = isCodexRoleName(role);
 
   return (
     <section className="session-console">
@@ -67,7 +68,7 @@ export function SessionConsole({
           onStop={onStop}
           onRestart={onRestart}
         />
-        {isCodexReviewer ? null : (
+        {isCodexRole ? null : (
           <div className="session-console-actions">
             <button
               aria-label={`Auto orchestration is ${autoOrchestrationEnabled ? "on" : "off"}`}
@@ -89,16 +90,16 @@ export function SessionConsole({
           role={role}
           session={session}
           taskSlug={session.taskSlug}
-          translationEnabled={!isCodexReviewer && translationEnabled}
+          translationEnabled={!isCodexRole && translationEnabled}
         />
       ) : (
         <div className="terminal-empty">
           <strong>{role}</strong>
           <span>
-            {isCodexReviewer
+            {isCodexRole
               ? session?.claudeSessionId
-                ? "Resume this role to reconnect the Codex Reviewer terminal."
-                : "Start this role to open an embedded Codex Reviewer terminal."
+                ? `Resume this role to reconnect the ${role === "codex-translator" ? "Codex Translator" : "Codex Reviewer"} terminal.`
+                : `Start this role to open an embedded ${role === "codex-translator" ? "Codex Translator" : "Codex Reviewer"} terminal.`
               : session?.claudeSessionId
               ? "Resume this role to reconnect its Claude Code conversation."
               : "Start this role to open an embedded Claude Code terminal."}

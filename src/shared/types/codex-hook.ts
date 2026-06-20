@@ -1,4 +1,4 @@
-import type { CodexReviewerRoleName } from "./role.js";
+import type { CodexRoleName } from "./role.js";
 import type { ClaudeHookEventName } from "./claude-hook.js";
 
 export interface CodexHookPayload {
@@ -16,7 +16,7 @@ export interface CodexHookPayload {
 
 export interface CodexHookRequest {
   taskSlug: string;
-  role: CodexReviewerRoleName;
+  role: CodexRoleName;
   event: CodexHookPayload;
 }
 
@@ -24,7 +24,7 @@ export interface CodexHookResult {
   ok: true;
   eventName: ClaudeHookEventName;
   taskSlug: string;
-  role: CodexReviewerRoleName;
+  role: CodexRoleName;
   sessionUpdated: boolean;
 }
 

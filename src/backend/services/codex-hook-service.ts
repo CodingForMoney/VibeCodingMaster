@@ -2,11 +2,13 @@ import type {
   CodexHookRequest,
   CodexHookResult
 } from "../../shared/types/codex-hook.js";
+import { isCodexRoleName } from "../../shared/constants.js";
 import type { ClaudeHookEventName } from "../../shared/types/claude-hook.js";
 import { VcmError } from "../errors.js";
 import type { ProjectService } from "./project-service.js";
 import type { RoundService } from "./round-service.js";
 import type { SessionService } from "./session-service.js";
+import type { CodexTranslationService } from "./codex-translation-service.js";
 import { getTaskRuntimeRepoRoot, type TaskService } from "./task-service.js";
 
 export interface CodexHookService {
@@ -19,13 +21,12 @@ export interface CodexHookServiceDeps {
   taskService: TaskService;
   sessionService: Pick<SessionService, "recordRoleHookEvent">;
   roundService: Pick<RoundService, "recordRoleTurnEvent">;
+  codexTranslationService?: Pick<CodexTranslationService, "handleCodexHook">;
 }
-
-const CODEX_REVIEWER_ROLE = "codex-reviewer";
 
 export function createCodexHookService(deps: CodexHookServiceDeps): CodexHookService {
   async function getHookContext(input: CodexHookRequest) {
-    if (input.role !== CODEX_REVIEWER_ROLE) {
+    if (!isCodexRoleName(input.role)) {
       throw new VcmError({
         code: "CODEX_HOOK_ROLE_INVALID",
         message: `Unknown Codex hook role: ${input.role}`,
@@ -37,7 +38,7 @@ export function createCodexHookService(deps: CodexHookServiceDeps): CodexHookSer
     if (!project) {
       throw new VcmError({
         code: "PROJECT_NOT_CONNECTED",
-        message: "Connect a repository before accepting Codex Reviewer hooks.",
+        message: "Connect a repository before accepting Codex hooks.",
         statusCode: 409
       });
     }
@@ -57,7 +58,7 @@ export function createCodexHookService(deps: CodexHookServiceDeps): CodexHookSer
     if (eventName !== expectedEventName) {
       throw new VcmError({
         code: "CODEX_HOOK_EVENT_UNSUPPORTED",
-        message: `Unsupported Codex Reviewer hook event for this endpoint: ${eventName}`,
+        message: `Unsupported Codex hook event for this endpoint: ${eventName}`,
         statusCode: 400
       });
     }
@@ -65,7 +66,7 @@ export function createCodexHookService(deps: CodexHookServiceDeps): CodexHookSer
     const context = await getHookContext(input);
     const session = await deps.sessionService.recordRoleHookEvent(context.project.repoRoot, {
       taskSlug: input.taskSlug,
-      role: CODEX_REVIEWER_ROLE,
+      role: input.role,
       eventName,
       sessionId: stringOrUndefined(input.event.session_id),
       transcriptPath: stringOrUndefined(input.event.transcript_path),
@@ -77,15 +78,18 @@ export function createCodexHookService(deps: CodexHookServiceDeps): CodexHookSer
       stateRepoRoot: context.taskRepoRoot,
       stateRoot: context.config.stateRoot,
       taskSlug: input.taskSlug,
-      role: CODEX_REVIEWER_ROLE,
+      role: input.role,
       eventName
     });
+    if (input.role === "codex-translator") {
+      await deps.codexTranslationService?.handleCodexHook(context.project.repoRoot, eventName, input.taskSlug);
+    }
 
     return {
       ok: true,
       eventName,
       taskSlug: input.taskSlug,
-      role: CODEX_REVIEWER_ROLE,
+      role: input.role,
       sessionUpdated: Boolean(session)
     };
   }
@@ -106,9 +110,9 @@ function parseHookEvent(value: unknown): ClaudeHookEventName {
   }
   throw new VcmError({
     code: "CODEX_HOOK_EVENT_UNSUPPORTED",
-    message: `Unsupported Codex Reviewer hook event: ${String(value)}`,
+    message: `Unsupported Codex hook event: ${String(value)}`,
     statusCode: 400,
-    hint: "VCM accepts Codex Reviewer UserPromptSubmit and Stop hooks only."
+    hint: "VCM accepts Codex UserPromptSubmit and Stop hooks only."
   });
 }
 

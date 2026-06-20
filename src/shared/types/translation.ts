@@ -198,3 +198,185 @@ export type TranslationWsMessage =
   | { type: "translation-poll"; checkedAt: string }
   | { type: "translation-error"; id?: string; message: string }
   | { type: "translation-failures"; failures: TranslationFailureItem[] };
+
+export type CodexTranslationQueueItemType =
+  | "bootstrap"
+  | "file"
+  | "conversation"
+  | "retry"
+  | "resume"
+  | "force-retranslate";
+
+export type CodexTranslationQueueItemStatus =
+  | "queued"
+  | "dispatching"
+  | "running"
+  | "validating"
+  | "completed"
+  | "needs_review"
+  | "failed"
+  | "interrupted"
+  | "skipped"
+  | "cancelled";
+
+export interface CodexTranslationQueueItem {
+  id: string;
+  type: CodexTranslationQueueItemType;
+  status: CodexTranslationQueueItemStatus;
+  targetLanguage: string;
+  jobId?: string;
+  requestPath: string;
+  expectedResultPath?: string;
+  reportPath?: string;
+  error?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CodexTranslationQueueState {
+  version: 1;
+  activeItemId?: string;
+  updatedAt: string;
+  items: CodexTranslationQueueItem[];
+}
+
+export type CodexFileTranslationJobStatus =
+  | "queued"
+  | "running"
+  | "validating"
+  | "completed"
+  | "needs_review"
+  | "failed"
+  | "interrupted"
+  | "skipped"
+  | "cancelled";
+
+export interface CodexFileTranslationJob {
+  id: string;
+  sourcePath: string;
+  sourceHash: string;
+  sourceBytes: number;
+  sourceMtimeMs?: number;
+  targetLanguage: string;
+  translationProfile: string;
+  chunkSourceTokenTarget: number;
+  dedupeKey: string;
+  status: CodexFileTranslationJobStatus;
+  requestPath: string;
+  progressPath: string;
+  resultPath: string;
+  reportPath: string;
+  queueItemId?: string;
+  createdAt: string;
+  updatedAt: string;
+  completedAt?: string;
+}
+
+export interface CodexFileTranslationIndex {
+  version: 1;
+  updatedAt: string;
+  jobs: CodexFileTranslationJob[];
+}
+
+export interface CodexBootstrapRun {
+  id: string;
+  status: CodexTranslationQueueItemStatus;
+  targetLanguage: string;
+  candidatePaths: string[];
+  requestPath: string;
+  reportPath: string;
+  sampleTranslationsPath?: string;
+  queueItemId?: string;
+  createdAt: string;
+  updatedAt: string;
+  completedAt?: string;
+}
+
+export interface CodexBootstrapIndex {
+  version: 1;
+  updatedAt: string;
+  runs: CodexBootstrapRun[];
+}
+
+export interface CreateCodexFileTranslationRequest {
+  taskSlug?: string;
+  sourcePath: string;
+  targetLanguage: string;
+  translationProfile?: string;
+  chunkSourceTokenTarget?: number;
+  force?: boolean;
+}
+
+export interface BrowseCodexTranslationSourceFilesRequest {
+  path?: string;
+  query?: string;
+  limit?: number;
+}
+
+export interface CodexTranslationSourceFileEntry {
+  name: string;
+  path: string;
+  type: "directory" | "file";
+  selectable: boolean;
+  extension?: string;
+  reason?: string;
+}
+
+export interface CodexTranslationSourceFileBrowserResult {
+  currentPath: string;
+  parentPath?: string;
+  query?: string;
+  entries: CodexTranslationSourceFileEntry[];
+  truncated: boolean;
+}
+
+export interface CreateCodexBootstrapRequest {
+  taskSlug?: string;
+  targetLanguage: string;
+  candidatePaths?: string[];
+}
+
+export interface CodexConversationTranslationJob {
+  id: string;
+  taskSlug: string;
+  role: RoleName;
+  direction: TranslationDirection;
+  sourceHash: string;
+  sourceLanguage: string;
+  targetLanguage: string;
+  requestPath: string;
+  resultPath: string;
+  reportPath: string;
+  queueItemId?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateCodexConversationTranslationRequest {
+  taskSlug: string;
+  role: RoleName;
+  direction: TranslationDirection;
+  sourceText: string;
+  sourceLanguage: string;
+  targetLanguage: string;
+  contextText?: string;
+  translationProfile?: string;
+}
+
+export interface CodexTranslationState {
+  queue: CodexTranslationQueueState;
+  fileIndex: CodexFileTranslationIndex;
+  bootstrapIndex: CodexBootstrapIndex;
+  memoryInitialized: boolean;
+}
+
+export interface CodexConversationTranslationResultFile {
+  version: 1;
+  id: string;
+  status: "completed" | "failed" | "needs_review";
+  sourceHash: string;
+  sourceLanguage: string;
+  targetLanguage: string;
+  translatedText: string;
+  notes: string[];
+}

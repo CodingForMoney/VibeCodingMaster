@@ -143,6 +143,37 @@ describe("createSessionService", () => {
     expect(runtimeInputs[0]?.logPath).toBe("/repo/.ai/vcm/handoffs/logs/codex-reviewer.log");
   });
 
+  it("starts Codex Reviewer without nested Codex sandbox inside devContainer", async () => {
+    const fs = createMemoryFs();
+    await fs.writeText("/repo/.ai/codex", "");
+    await fs.writeText("/repo/.ai/codex/config.toml", `approval_policy = "never"`);
+    const runtimeInputs: CreateTerminalSessionInput[] = [];
+    const service = createTestSessionService(fs, runtimeInputs, [], {
+      sandboxMode: "devcontainer"
+    });
+
+    const started = await service.startRoleSession("/repo", "demo-task", "codex-reviewer", {
+      model: "gpt-5.5",
+      effort: "xhigh"
+    });
+
+    expect(started.command).toContain("--dangerously-bypass-approvals-and-sandbox");
+    expect(runtimeInputs[0]?.args).toEqual([
+      "--cd",
+      "/repo/.ai/codex",
+      "--dangerously-bypass-approvals-and-sandbox",
+      "--dangerously-bypass-hook-trust",
+      "--search",
+      "--model",
+      "gpt-5.5",
+      "--config",
+      'model_reasoning_effort="xhigh"'
+    ]);
+    expect(runtimeInputs[0]?.args).not.toContain("--sandbox");
+    expect(runtimeInputs[0]?.args).not.toContain("--add-dir");
+    expect(runtimeInputs[0]?.args).not.toContain("--ask-for-approval");
+  });
+
   it("overrides Codex Reviewer reasoning effort from the launch request", async () => {
     const fs = createMemoryFs();
     await fs.writeText("/repo/.ai/codex", "");
@@ -384,7 +415,7 @@ function createTestSessionService(
   fs: FileSystemAdapter,
   runtimeInputs: CreateTerminalSessionInput[],
   writes: string[] = [],
-  options: { worktreePath?: string } = {}
+  options: { sandboxMode?: string; worktreePath?: string } = {}
 ) {
   return createSessionService({
     fs,
@@ -490,6 +521,7 @@ function createTestSessionService(
       }
     } as never,
     apiUrl: "http://127.0.0.1:4173",
+    sandboxMode: options.sandboxMode,
     now: () => "2026-05-29T00:00:00.000Z"
   });
 }

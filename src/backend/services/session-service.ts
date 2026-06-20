@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import path from "node:path";
-import { ROLE_NAMES, isDispatchableRole } from "../../shared/constants.js";
+import { ROLE_NAMES, isCodexRoleName, isDispatchableRole } from "../../shared/constants.js";
 import type { ClaudeHookEventName } from "../../shared/types/claude-hook.js";
 import type { RoleName } from "../../shared/types/role.js";
 import type {
@@ -46,15 +46,20 @@ export interface SessionServiceDeps {
   projectService: Pick<ProjectService, "loadConfig">;
   taskService: Pick<TaskService, "loadTask">;
   apiUrl?: string;
+  sandboxMode?: string;
   now?: () => string;
 }
 
 type LaunchMode = "fresh" | "resume";
 
 const CODEX_REVIEWER_ROLE: RoleName = "codex-reviewer";
+const CODEX_TRANSLATOR_ROLE: RoleName = "codex-translator";
 const CODEX_DIR = ".ai/codex";
 const CODEX_REVIEW_DIR = ".ai/vcm/codex-reviews";
 const CODEX_CONFIG_PATH = ".ai/codex/config.toml";
+const CODEX_TRANSLATOR_DIR = ".ai/codex-translator";
+const CODEX_TRANSLATION_DIR = ".ai/vcm/translations";
+const CODEX_TRANSLATOR_CONFIG_PATH = ".ai/codex-translator/config.toml";
 
 export interface RecordClaudeHookEventInput {
   taskSlug: string;
@@ -95,12 +100,12 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     const taskRepoRoot = getTaskRuntimeRepoRoot(task);
     const paths = deps.artifactService.getHandoffPaths(taskRepoRoot, task.handoffDir);
     const persisted = await loadPersistedRoleRecord(deps.fs, taskRepoRoot, config.stateRoot, taskSlug, role);
-    const isCodexReviewer = role === CODEX_REVIEWER_ROLE;
+    const isCodexRole = isCodexRoleName(role);
     const permissionMode = normalizeClaudePermissionMode(input.permissionMode ?? persisted?.permissionMode);
-    const model: SessionModel = isCodexReviewer
+    const model: SessionModel = isCodexRole
       ? normalizeCodexModel(input.model ?? persisted?.model)
       : normalizeClaudeModel(input.model ?? persisted?.model);
-    const effort = isCodexReviewer
+    const effort = isCodexRole
       ? normalizeCodexEffort(input.effort ?? persisted?.effort)
       : normalizeClaudeEffort(input.effort ?? persisted?.effort);
     const claudeSessionId = launchMode === "resume"
@@ -117,10 +122,19 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     }
     const transcriptPath = launchMode === "resume" && persisted?.transcriptPath
       ? persisted.transcriptPath
-      : isCodexReviewer ? undefined : claudeTranscriptPath(taskRepoRoot, claudeSessionId);
+      : isCodexRole ? undefined : claudeTranscriptPath(taskRepoRoot, claudeSessionId);
 
-    const startCommand = isCodexReviewer
-      ? await buildCodexReviewerStartCommand(deps.fs, taskRepoRoot, launchMode, model as CodexModel, effort)
+    const startCommand = isCodexRole
+      ? await buildCodexStartCommand(
+          deps.fs,
+          repoRoot,
+          taskRepoRoot,
+          role,
+          launchMode,
+          model as CodexModel,
+          effort,
+          deps.sandboxMode
+        )
       : {
           ...deps.claude.buildRoleStartCommand(
             role,
@@ -366,38 +380,50 @@ function toRoleSessionRecordView(
   };
 }
 
-async function buildCodexReviewerStartCommand(
+async function buildCodexStartCommand(
   fs: FileSystemAdapter,
+  baseRepoRoot: string,
   taskRepoRoot: string,
+  role: RoleName,
   launchMode: LaunchMode,
   selectedModel: CodexModel,
-  selectedEffort: SessionEffort
+  selectedEffort: SessionEffort,
+  sandboxMode: string | undefined
 ): Promise<{ command: string; args: string[]; display: string; cwd: string }> {
-  const codexDir = resolveRepoPath(taskRepoRoot, CODEX_DIR);
-  const reviewDir = resolveRepoPath(taskRepoRoot, CODEX_REVIEW_DIR);
+  const isTranslator = role === CODEX_TRANSLATOR_ROLE;
+  const codexDir = resolveRepoPath(isTranslator ? baseRepoRoot : taskRepoRoot, isTranslator ? CODEX_TRANSLATOR_DIR : CODEX_DIR);
+  const outputDir = resolveRepoPath(isTranslator ? baseRepoRoot : taskRepoRoot, isTranslator ? CODEX_TRANSLATION_DIR : CODEX_REVIEW_DIR);
   if (!(await fs.pathExists(codexDir))) {
     throw new VcmError({
-      code: "CODEX_REVIEW_CONFIG_MISSING",
-      message: `${CODEX_DIR} does not exist.`,
+      code: isTranslator ? "CODEX_TRANSLATOR_CONFIG_MISSING" : "CODEX_REVIEW_CONFIG_MISSING",
+      message: `${isTranslator ? CODEX_TRANSLATOR_DIR : CODEX_DIR} does not exist.`,
       statusCode: 409,
-      hint: "Apply the VCM harness before starting Codex Reviewer."
+      hint: `Apply the VCM harness before starting ${isTranslator ? "Codex Translator" : "Codex Reviewer"}.`
     });
   }
 
-  await fs.ensureDir(reviewDir);
-  const config = await loadCodexSessionConfig(fs, taskRepoRoot);
+  await fs.ensureDir(outputDir);
+  const config = await loadCodexSessionConfig(fs, isTranslator ? baseRepoRoot : taskRepoRoot, isTranslator ? CODEX_TRANSLATOR_CONFIG_PATH : CODEX_CONFIG_PATH);
   const args = launchMode === "resume"
     ? ["resume", "--last"]
     : [];
+  args.push("--cd", codexDir);
+  if (isDevContainerSandbox(sandboxMode)) {
+    args.push("--dangerously-bypass-approvals-and-sandbox");
+  } else {
+    if (isTranslator) {
+      args.push("--add-dir", baseRepoRoot);
+    } else {
+      args.push("--add-dir", outputDir);
+    }
+    args.push(
+      "--sandbox",
+      "workspace-write",
+      "--ask-for-approval",
+      "never"
+    );
+  }
   args.push(
-    "--cd",
-    codexDir,
-    "--add-dir",
-    reviewDir,
-    "--sandbox",
-    "workspace-write",
-    "--ask-for-approval",
-    "never",
     "--dangerously-bypass-hook-trust",
     "--search"
   );
@@ -411,16 +437,21 @@ async function buildCodexReviewerStartCommand(
   return {
     command: config.command,
     args,
-    cwd: taskRepoRoot,
+    cwd: isTranslator ? baseRepoRoot : taskRepoRoot,
     display: [config.command, ...args].map(formatDisplayArg).join(" ")
   };
 }
 
+function isDevContainerSandbox(value: string | undefined): boolean {
+  return value?.toLowerCase() === "devcontainer";
+}
+
 async function loadCodexSessionConfig(
   fs: FileSystemAdapter,
-  taskRepoRoot: string
+  repoRoot: string,
+  configRelativePath: string
 ): Promise<{ command: string }> {
-  const configPath = resolveRepoPath(taskRepoRoot, CODEX_CONFIG_PATH);
+  const configPath = resolveRepoPath(repoRoot, configRelativePath);
   if (!(await fs.pathExists(configPath))) {
     return {
       command: "codex"
@@ -513,10 +544,10 @@ function normalizePersistedRoleRecord(record: RoleSessionRecord | undefined): Ro
             : undefined
         ),
         permissionMode: normalizeClaudePermissionMode(record.permissionMode),
-        model: record.role === CODEX_REVIEWER_ROLE
+        model: isCodexRoleName(record.role)
           ? normalizeCodexModel(record.model)
           : normalizeClaudeModel(record.model),
-        effort: record.role === CODEX_REVIEWER_ROLE
+        effort: isCodexRoleName(record.role)
           ? normalizeCodexEffort(record.effort)
           : normalizeClaudeEffort(record.effort)
       }

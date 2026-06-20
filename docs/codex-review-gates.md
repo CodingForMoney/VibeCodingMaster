@@ -453,7 +453,7 @@ status, decision, report path, and any failure or exception metadata.
 The Codex CLI provider uses the long-lived embedded terminal session, not
 `codex exec`, because VCM needs Codex `UserPromptSubmit` and `Stop` hook events
 and the user may continue discussing the review after the report is written.
-Current implementation shape for a fresh terminal:
+Default local implementation shape for a fresh terminal:
 
 ```bash
 codex \
@@ -467,6 +467,24 @@ codex \
   --config model_reasoning_effort="<effort-selected-in-VCM-UI>"
 ```
 
+When VCM runs inside a Dev Container with `VCM_SANDBOX=devcontainer`, the
+container is the security boundary. VCM then starts Codex Reviewer without
+Codex's nested filesystem sandbox to avoid Linux container `bwrap` and
+`apply_patch` write failures:
+
+```bash
+codex \
+  --cd <taskRepoRoot>/.ai/codex \
+  --dangerously-bypass-approvals-and-sandbox \
+  --dangerously-bypass-hook-trust \
+  --search \
+  --model <model-selected-in-VCM-UI> \
+  --config model_reasoning_effort="<effort-selected-in-VCM-UI>"
+```
+
+Use this mode only when VCM, Codex, Claude Code, and the target repository all
+run inside the same trusted container or VM boundary.
+
 VCM omits `--model` or `model_reasoning_effort` when the user selects
 `Default`, letting Codex CLI use its account or CLI default. `--search` enables
 Codex CLI's native web search tool for reviewer checks that need current
@@ -476,10 +494,11 @@ Starting from `.ai/codex` causes Codex to load `.ai/codex/AGENTS.md` through
 its normal `AGENTS.md` discovery path and `.ai/codex/.codex/hooks.json` through
 the Codex project hook path. VCM sends the gate prompt into this terminal,
 validates the report path, request id, and decision before marking a gate
-completed, then callbacks PM. `--ask-for-approval never` and the VCM-owned hook
-trust bypass prevent Codex from pausing at permission or hook trust prompts;
-execution failures are recorded as `failed` so the user can retry, skip, or
-override.
+completed, then callbacks PM. In default local mode, `--ask-for-approval never`
+and the VCM-owned hook trust bypass prevent Codex from pausing at permission or
+hook trust prompts; in Dev Container mode, the Codex approval and sandbox bypass
+does the same while relying on the container boundary. Execution failures are
+recorded as `failed` so the user can retry, skip, or override.
 
 ## 10. UI Shape
 

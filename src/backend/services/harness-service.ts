@@ -27,6 +27,8 @@ import {
   renderCodexFinalDiffPrompt,
   renderCodexHooksHarnessRules,
   renderCodexReviewResultSchema,
+  renderCodexTranslatorAgentsHarnessRules,
+  renderCodexTranslatorConfigHarnessRules,
   renderCodexValidationAdequacyPrompt,
   renderRequestCodexReviewTool,
   renderVcmCodexReviewGateSkillRules
@@ -204,6 +206,33 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
     title: "VCM Codex Hooks",
     ownership: "raw-file",
     renderRules: renderCodexHooksHarnessRules
+  },
+  {
+    kind: "codex-translator-agents",
+    path: ".ai/codex-translator/AGENTS.md",
+    title: "VCM Codex Translator",
+    renderRules: renderCodexTranslatorAgentsHarnessRules
+  },
+  {
+    kind: "codex-translator-config",
+    path: ".ai/codex-translator/config.toml",
+    title: "VCM Codex Translator Config",
+    ownership: "raw-file",
+    renderRules: renderCodexTranslatorConfigHarnessRules
+  },
+  {
+    kind: "codex-translator-cli-config",
+    path: ".ai/codex-translator/.codex/config.toml",
+    title: "VCM Codex Translator CLI Config",
+    ownership: "raw-file",
+    renderRules: renderCodexCliConfigHarnessRules
+  },
+  {
+    kind: "codex-translator-hooks",
+    path: ".ai/codex-translator/.codex/hooks.json",
+    title: "VCM Codex Translator Hooks",
+    ownership: "raw-file",
+    renderRules: () => renderCodexHooksHarnessRules("codex-translator")
   },
   {
     kind: "codex-prompt-architecture-plan",

@@ -1026,7 +1026,7 @@ h2 {
 
 .translation-panel {
   display: grid;
-  grid-template-rows: auto minmax(0, 1fr) auto;
+  grid-template-rows: auto auto minmax(0, 1fr) auto;
   gap: 8px;
   height: 100%;
   min-height: 0;
@@ -1039,6 +1039,264 @@ h2 {
   width: 100%;
   overflow: hidden;
   font-family: Menlo, Monaco, Consolas, monospace;
+}
+
+.file-translation-panel {
+  display: grid;
+  gap: 8px;
+  min-height: 220px;
+  max-height: 42vh;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid #292d31;
+  border-radius: 6px;
+  background: #0b0f14;
+  padding: 8px;
+}
+
+.file-translation-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.file-translation-toolbar button {
+  border-color: #3a4149;
+  background: #161b22;
+  color: #d6deeb;
+  min-height: 26px;
+  padding: 2px 8px;
+  font-size: 12px;
+}
+
+.file-translation-layout {
+  display: grid;
+  grid-template-columns: minmax(140px, 0.42fr) minmax(0, 1fr);
+  gap: 8px;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.file-translation-list,
+.file-translation-preview {
+  min-height: 0;
+  min-width: 0;
+  overflow: auto;
+  border: 1px solid #292d31;
+  border-radius: 6px;
+  padding: 8px;
+}
+
+.file-translation-list {
+  display: grid;
+  align-content: start;
+  gap: 6px;
+}
+
+.file-translation-item {
+  display: grid;
+  gap: 3px;
+  width: 100%;
+  min-width: 0;
+  border: 1px solid #292d31;
+  border-radius: 6px;
+  background: #111820;
+  color: #d6deeb;
+  padding: 6px;
+  text-align: left;
+}
+
+.file-translation-item strong,
+.file-translation-item span {
+  overflow-wrap: anywhere;
+}
+
+.file-translation-item span {
+  color: #8b949e;
+  font-size: 11px;
+}
+
+.file-translation-item.is-active {
+  border-color: #58a6ff;
+  background: #142033;
+}
+
+.file-translation-preview header {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 6px;
+  margin-bottom: 8px;
+  color: #8b949e;
+  font-size: 12px;
+}
+
+.translation-file-browser-modal {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  gap: 12px;
+  width: min(880px, calc(100vw - 32px));
+  max-height: min(760px, calc(100vh - 48px));
+  min-height: 520px;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  background: #0d1117;
+  color: #d6deeb;
+  padding: 14px;
+  box-shadow: 0 24px 70px rgb(0 0 0 / 48%);
+  font-family: Menlo, Monaco, Consolas, monospace;
+}
+
+.translation-file-browser-modal header,
+.translation-file-browser-controls,
+.translation-file-browser-nav,
+.translation-file-browser-search {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  min-width: 0;
+}
+
+.translation-file-browser-modal header {
+  justify-content: space-between;
+}
+
+.translation-file-browser-modal h2,
+.translation-file-browser-modal h3,
+.translation-file-browser-modal p {
+  margin-bottom: 0;
+}
+
+.translation-file-browser-modal h2 {
+  font-size: 17px;
+}
+
+.translation-file-browser-modal h3 {
+  color: #8b949e;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.translation-file-browser-modal p {
+  color: #8b949e;
+  font-size: 12px;
+  overflow-wrap: anywhere;
+}
+
+.translation-file-browser-controls {
+  justify-content: space-between;
+}
+
+.translation-file-browser-search {
+  flex: 1 1 320px;
+  justify-content: flex-end;
+}
+
+.translation-file-browser-search input {
+  flex: 1 1 180px;
+  min-width: 0;
+}
+
+.translation-file-browser-modal button,
+.translation-file-browser-modal input {
+  border: 1px solid #3a4149;
+  border-radius: 6px;
+  background: #111820;
+  color: #d6deeb;
+  min-height: 30px;
+  padding: 4px 8px;
+  font: inherit;
+  font-size: 12px;
+}
+
+.translation-file-browser-modal button:hover:not(:disabled) {
+  border-color: #58a6ff;
+  background: #162235;
+}
+
+.translation-file-browser-layout {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) minmax(220px, 0.42fr);
+  gap: 10px;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.translation-file-browser-list,
+.translation-file-browser-selection {
+  min-height: 0;
+  min-width: 0;
+  overflow: auto;
+  border: 1px solid #292d31;
+  border-radius: 6px;
+  background: #0b0f14;
+  padding: 10px;
+}
+
+.translation-file-browser-group {
+  display: grid;
+  align-content: start;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.translation-file-browser-entry {
+  display: grid;
+  grid-template-columns: 38px minmax(0, 1fr);
+  gap: 3px 8px;
+  width: 100%;
+  min-width: 0;
+  text-align: left;
+}
+
+.translation-file-browser-entry span {
+  grid-row: span 2;
+  align-self: center;
+  color: #8b949e;
+  font-size: 11px;
+}
+
+.translation-file-browser-entry strong,
+.translation-file-browser-entry small {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.translation-file-browser-entry small {
+  color: #8b949e;
+}
+
+.translation-file-browser-entry.is-selected {
+  border-color: #58a6ff;
+  background: #142033;
+}
+
+.translation-file-browser-selection {
+  display: grid;
+  align-content: start;
+  gap: 12px;
+}
+
+.translation-file-browser-selection label {
+  display: grid;
+  gap: 5px;
+}
+
+.translation-file-browser-selection span {
+  color: #8b949e;
+  font-size: 12px;
+}
+
+.translation-file-browser-selection input {
+  width: 100%;
+  min-width: 0;
 }
 
 .translation-panel-header {
@@ -1867,8 +2125,13 @@ h2 {
   }
 
   .session-console-body.has-translation,
-  .translation-settings-grid {
+  .translation-settings-grid,
+  .translation-file-browser-layout {
     grid-template-columns: 1fr;
+  }
+
+  .translation-file-browser-modal {
+    min-height: 0;
   }
 
 }
@@ -1899,6 +2162,18 @@ h2 {
   .session-option-field {
     grid-template-columns: 1fr;
     width: 100%;
+  }
+
+  .translation-file-browser-modal {
+    width: calc(100vw - 20px);
+    max-height: calc(100vh - 20px);
+    padding: 10px;
+  }
+
+  .translation-file-browser-controls,
+  .translation-file-browser-search {
+    display: grid;
+    grid-template-columns: 1fr;
   }
 }
 

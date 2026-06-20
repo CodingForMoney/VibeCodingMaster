@@ -8,6 +8,7 @@ import type {
   ClaudeTranscriptService,
   ClaudeTranscriptSubscribeOptions
 } from "../../../src/backend/services/claude-transcript-service.js";
+import type { CodexTranslationService } from "../../../src/backend/services/codex-translation-service.js";
 import type { SessionService } from "../../../src/backend/services/session-service.js";
 import { formatTerminalPaste, normalizeTerminalSubmitText } from "../../../src/backend/runtime/terminal-submit.js";
 import { createTranslationService } from "../../../src/backend/services/translation-service.js";
@@ -415,6 +416,50 @@ describe("translation-service", () => {
       sourceText: "请检查失败的测试。",
       translatedText: "Please inspect the failing test."
     });
+  });
+
+  it("uses Codex conversation jobs for user input translation when available", async () => {
+    const fs = createMemoryFs();
+    const appSettings = createAppSettingsService({
+      fs,
+      settingsPath: "/settings.json",
+    });
+    const roleSession = createRoleSessionRecord();
+    const codexCalls: unknown[] = [];
+    const service = createTranslationService({
+      appSettings,
+      provider: createAlwaysFailProvider(),
+      codexTranslationService: createCodexTranslationServiceStub(codexCalls, "Please inspect the failing test."),
+      runtime: createRuntimeStub(),
+      sessionRegistry: createRegistryStub(roleSession),
+      transcripts: createTranscriptStub(),
+      sessionService: {
+        async getRoleSession() {
+          return roleSession;
+        }
+      } as SessionService
+    });
+    await service.updateSettings({ enabled: true, translateUserInput: true }, { apiKey: "sk-local-test" });
+
+    const result = await service.translateUserInput({
+      repoRoot: "/repo",
+      taskSlug: "demo-task",
+      role: "coder",
+      text: "请检查失败的测试。",
+      send: false
+    });
+
+    expect(result.englishPreview).toBe("Please inspect the failing test.");
+    expect(codexCalls).toEqual([
+      expect.objectContaining({
+        repoRoot: "/repo",
+        taskSlug: "demo-task",
+        role: "coder",
+        direction: "user-input-to-english",
+        sourceText: "请检查失败的测试。",
+        targetLanguage: "en"
+      })
+    ]);
   });
 
   it("sends translated input by pasting first and pressing enter separately", async () => {
@@ -969,6 +1014,73 @@ function createAlwaysFailProvider(): TranslationProvider {
     },
     async translate() {
       throw new Error("Provider failed.");
+    }
+  };
+}
+
+function createCodexTranslationServiceStub(calls: unknown[], translatedText: string): Pick<CodexTranslationService, "createConversationJob" | "validateConversationResult" | "getState"> {
+  const timestamp = "2026-05-30T00:00:00.000Z";
+  return {
+    async createConversationJob(repoRoot, input) {
+      calls.push({ repoRoot, ...input });
+      return {
+        id: "conversation-1",
+        taskSlug: input.taskSlug,
+        role: input.role,
+        direction: input.direction,
+        sourceHash: "sha256:conversation-source",
+        sourceLanguage: input.sourceLanguage,
+        targetLanguage: input.targetLanguage,
+        requestPath: ".ai/vcm/translations/conversations/demo-task/coder/jobs/conversation-1/request.json",
+        resultPath: ".ai/vcm/translations/conversations/demo-task/coder/jobs/conversation-1/result.json",
+        reportPath: ".ai/vcm/translations/conversations/demo-task/coder/jobs/conversation-1/report.md",
+        queueItemId: "queue-conversation-1",
+        createdAt: timestamp,
+        updatedAt: timestamp
+      };
+    },
+    async validateConversationResult(_repoRoot, input) {
+      return {
+        version: 1,
+        id: "conversation-1",
+        status: "completed",
+        sourceHash: input.sourceHash,
+        sourceLanguage: "auto",
+        targetLanguage: input.targetLanguage,
+        translatedText,
+        notes: []
+      };
+    },
+    async getState() {
+      return {
+        queue: {
+          version: 1,
+          activeItemId: undefined,
+          updatedAt: timestamp,
+          items: [{
+            id: "queue-conversation-1",
+            type: "conversation",
+            status: "completed",
+            targetLanguage: "en",
+            requestPath: ".ai/vcm/translations/conversations/demo-task/coder/jobs/conversation-1/request.json",
+            expectedResultPath: ".ai/vcm/translations/conversations/demo-task/coder/jobs/conversation-1/result.json",
+            reportPath: ".ai/vcm/translations/conversations/demo-task/coder/jobs/conversation-1/report.md",
+            createdAt: timestamp,
+            updatedAt: timestamp
+          }]
+        },
+        fileIndex: {
+          version: 1,
+          updatedAt: timestamp,
+          jobs: []
+        },
+        bootstrapIndex: {
+          version: 1,
+          updatedAt: timestamp,
+          runs: []
+        },
+        memoryInitialized: true
+      };
     }
   };
 }

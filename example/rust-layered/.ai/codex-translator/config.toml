@@ -1,0 +1,19 @@
+# VCM reads this file before launching the Codex Translator terminal.
+# Codex CLI project hooks live in .ai/codex-translator/.codex/.
+approval_policy = "never"
+default_permissions = "vcm_codex_translator"
+
+[permissions.vcm_codex_translator.workspace_roots]
+"../.." = true
+
+[permissions.vcm_codex_translator.filesystem]
+":minimal" = "read"
+
+[permissions.vcm_codex_translator.filesystem.":workspace_roots"]
+"." = "read"
+".ai/codex-translator" = "read"
+".ai/vcm/translations" = "write"
+"**/*.env" = "deny"
+
+[permissions.vcm_codex_translator.network]
+enabled = true

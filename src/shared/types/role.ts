@@ -5,8 +5,10 @@ export type VcmRoleName =
   | "reviewer";
 
 export type CodexReviewerRoleName = "codex-reviewer";
+export type CodexTranslatorRoleName = "codex-translator";
+export type CodexRoleName = CodexReviewerRoleName | CodexTranslatorRoleName;
 
-export type RoleName = VcmRoleName | CodexReviewerRoleName;
+export type RoleName = VcmRoleName | CodexRoleName;
 
 export type DispatchableRole =
   | "architect"

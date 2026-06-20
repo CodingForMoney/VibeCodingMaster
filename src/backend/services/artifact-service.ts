@@ -112,7 +112,8 @@ export function createArtifactService(fs: FileSystemAdapter): ArtifactService {
           architect: path.posix.join(logsDir, "architect.log"),
           coder: path.posix.join(logsDir, "coder.log"),
           reviewer: path.posix.join(logsDir, "reviewer.log"),
-          "codex-reviewer": path.posix.join(logsDir, "codex-reviewer.log")
+          "codex-reviewer": path.posix.join(logsDir, "codex-reviewer.log"),
+          "codex-translator": path.posix.join(logsDir, "codex-translator.log")
         },
         messageRoutePaths: getDefaultMessageRoutePaths(messagesDir),
         architecturePlanPath: path.posix.join(handoffDir, "architecture-plan.md"),
