@@ -21,15 +21,22 @@ describe("codex-translation-service", () => {
   it("creates project translation layout, file jobs, and queue items", async () => {
     tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-codex-translation-"));
     await writeFile(path.join(tmpRepo, "README.md"), "# Demo\n\nHello project.\n", "utf8");
-    const service = createCodexTranslationService({ fs: createNodeFileSystemAdapter() });
+    const fs = createNodeFileSystemAdapter();
+    const service = createCodexTranslationService({ fs });
 
     const job = await service.createFileJob(tmpRepo, {
       sourcePath: "README.md",
       targetLanguage: "zh-CN"
     });
+    const request = await fs.readJson<{ baseRepoRoot: string; absolutePaths: { sourcePath: string; resultPath: string } }>(
+      path.join(tmpRepo, job.requestPath)
+    );
     const state = await service.getState(tmpRepo);
 
     expect(job.status).toBe("queued");
+    expect(request.baseRepoRoot).toBe(tmpRepo);
+    expect(request.absolutePaths.sourcePath).toBe(path.join(tmpRepo, "README.md"));
+    expect(request.absolutePaths.resultPath).toBe(path.join(tmpRepo, job.resultPath));
     expect(job.resultPath).toContain(".ai/vcm/translations/files/jobs/");
     expect(state.queue.items).toHaveLength(1);
     expect(state.queue.items[0]).toMatchObject({
@@ -44,14 +51,22 @@ describe("codex-translation-service", () => {
   it("creates bootstrap runs and memory files", async () => {
     tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-codex-bootstrap-"));
     await writeFile(path.join(tmpRepo, "README.md"), "# Demo\n", "utf8");
-    const service = createCodexTranslationService({ fs: createNodeFileSystemAdapter() });
+    const fs = createNodeFileSystemAdapter();
+    const service = createCodexTranslationService({ fs });
 
     const run = await service.createBootstrapRun(tmpRepo, {
       targetLanguage: "zh-CN"
     });
+    const request = await fs.readJson<{ baseRepoRoot: string; absolutePaths: { memoryDir: string; reportPath: string; candidatePaths: string[] } }>(
+      path.join(tmpRepo, run.requestPath)
+    );
     const state = await service.getState(tmpRepo);
 
     expect(run.candidatePaths).toContain("README.md");
+    expect(request.baseRepoRoot).toBe(tmpRepo);
+    expect(request.absolutePaths.memoryDir).toBe(path.join(tmpRepo, ".ai/vcm/translations/memory"));
+    expect(request.absolutePaths.reportPath).toBe(path.join(tmpRepo, run.reportPath));
+    expect(request.absolutePaths.candidatePaths).toContain(path.join(tmpRepo, "README.md"));
     expect(state.bootstrapIndex.runs[0]?.id).toBe(run.id);
     expect(state.queue.items[0]).toMatchObject({
       type: "bootstrap",
@@ -98,13 +113,15 @@ describe("codex-translation-service", () => {
       sourceLanguage: "auto",
       targetLanguage: "en"
     });
-    const request = await fs.readJson<{ outputContract: { resultPath: string }; sourceText: string }>(
+    const request = await fs.readJson<{ baseRepoRoot: string; outputContract: { resultPath: string; absoluteResultPath: string }; sourceText: string }>(
       path.join(tmpRepo, job.requestPath)
     );
     const state = await service.getState(tmpRepo);
 
     expect(job.resultPath).toContain(".ai/vcm/translations/conversations/demo-task/coder/jobs/");
+    expect(request.baseRepoRoot).toBe(tmpRepo);
     expect(request.outputContract.resultPath).toBe(job.resultPath);
+    expect(request.outputContract.absoluteResultPath).toBe(path.join(tmpRepo, job.resultPath));
     expect(request.sourceText).toBe("请检查失败的测试。");
     expect(state.queue.items[0]).toMatchObject({
       type: "conversation",
@@ -189,6 +206,10 @@ describe("codex-translation-service", () => {
     expect(state.fileIndex.jobs.find((job) => job.id === first.id)?.status).toBe("running");
     expect(state.fileIndex.jobs.find((job) => job.id === second.id)?.status).toBe("queued");
     expect(writes.filter((entry) => entry.includes("[VCM CODEX TRANSLATION TASK]"))).toHaveLength(1);
+    expect(writes[0]).toContain(`Base Repository Root: ${tmpRepo}`);
+    expect(writes[0]).toContain(path.join(tmpRepo, first.requestPath));
+    expect(writes[0]).toContain(path.join(tmpRepo, first.resultPath));
+    expect(writes[0]).toContain("Do not use apply_patch");
 
     await fs.writeText(path.join(tmpRepo, first.resultPath), "# Demo translated\n");
     await service.handleCodexHook(tmpRepo, "Stop", "demo-task");

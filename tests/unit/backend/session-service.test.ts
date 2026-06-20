@@ -244,6 +244,37 @@ describe("createSessionService", () => {
     ]);
   });
 
+  it("starts Codex Translator without nested Codex sandbox inside devContainer", async () => {
+    const fs = createMemoryFs();
+    await fs.writeText("/repo/.ai/codex-translator", "");
+    await fs.writeText("/repo/.ai/codex-translator/config.toml", `approval_policy = "never"`);
+    const runtimeInputs: CreateTerminalSessionInput[] = [];
+    const service = createTestSessionService(fs, runtimeInputs, [], {
+      sandboxMode: "devcontainer"
+    });
+
+    const started = await service.startRoleSession("/repo", "demo-task", "codex-translator", {
+      model: "gpt-5.5",
+      effort: "xhigh"
+    });
+
+    expect(started.command).toContain("--dangerously-bypass-approvals-and-sandbox");
+    expect(runtimeInputs[0]?.args).toEqual([
+      "--cd",
+      "/repo/.ai/codex-translator",
+      "--dangerously-bypass-approvals-and-sandbox",
+      "--dangerously-bypass-hook-trust",
+      "--search",
+      "--model",
+      "gpt-5.5",
+      "--config",
+      'model_reasoning_effort="xhigh"'
+    ]);
+    expect(runtimeInputs[0]?.args).not.toContain("--sandbox");
+    expect(runtimeInputs[0]?.args).not.toContain("--add-dir");
+    expect(runtimeInputs[0]?.args).not.toContain("--ask-for-approval");
+  });
+
   it("overrides Codex Reviewer reasoning effort from the launch request", async () => {
     const fs = createMemoryFs();
     await fs.writeText("/repo/.ai/codex", "");
