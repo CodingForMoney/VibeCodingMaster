@@ -376,16 +376,18 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       }
 
       const timestamp = now();
-      const isStop = input.eventName === "Stop";
+      const isTurnEnd = isTurnEndHook(input.eventName);
+      const isCompact = isCompactHook(input.eventName);
       const updated: RoleSessionRecord = {
         ...current,
         claudeSessionId: input.sessionId ?? current.claudeSessionId,
         transcriptPath: input.transcriptPath ?? current.transcriptPath,
         cwd: input.cwd ?? current.cwd,
-        activityStatus: isStop ? "idle" : "running",
+        activityStatus: isTurnEnd ? "idle" : isCompact ? current.activityStatus : "running",
         lastHookEventAt: timestamp,
-        lastTurnEndedAt: isStop ? timestamp : current.lastTurnEndedAt,
-        lastTurnStartedAt: isStop ? current.lastTurnStartedAt : timestamp,
+        lastTurnEndedAt: isTurnEnd ? timestamp : current.lastTurnEndedAt,
+        lastTurnStartedAt: isTurnEnd || isCompact ? current.lastTurnStartedAt : timestamp,
+        lastCompactAt: isCompact ? timestamp : current.lastCompactAt,
         updatedAt: timestamp
       };
       deps.registry.upsert(updated);
@@ -504,16 +506,18 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       }
 
       const timestamp = now();
-      const isStop = input.eventName === "Stop";
+      const isTurnEnd = isTurnEndHook(input.eventName);
+      const isCompact = isCompactHook(input.eventName);
       const updated: RoleSessionRecord = {
         ...current,
         claudeSessionId: input.sessionId ?? current.claudeSessionId,
         transcriptPath: input.transcriptPath ?? current.transcriptPath,
         cwd: input.cwd ?? current.cwd,
-        activityStatus: isStop ? "idle" : "running",
+        activityStatus: isTurnEnd ? "idle" : isCompact ? current.activityStatus : "running",
         lastHookEventAt: timestamp,
-        lastTurnEndedAt: isStop ? timestamp : current.lastTurnEndedAt,
-        lastTurnStartedAt: isStop ? current.lastTurnStartedAt : timestamp,
+        lastTurnEndedAt: isTurnEnd ? timestamp : current.lastTurnEndedAt,
+        lastTurnStartedAt: isTurnEnd || isCompact ? current.lastTurnStartedAt : timestamp,
+        lastCompactAt: isCompact ? timestamp : current.lastCompactAt,
         updatedAt: timestamp
       };
       deps.registry.upsert(updated);
@@ -716,6 +720,14 @@ function matchesRoleHookSession(record: RoleSessionRecord, input: RecordRoleHook
     return true;
   }
   return false;
+}
+
+function isTurnEndHook(eventName: ClaudeHookEventName): boolean {
+  return eventName === "Stop" || eventName === "StopFailure";
+}
+
+function isCompactHook(eventName: ClaudeHookEventName): boolean {
+  return eventName === "PostCompact";
 }
 
 function getRecoverableStatus(record: RoleSessionRecord): RoleSessionRecord["status"] {

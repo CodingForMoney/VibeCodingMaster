@@ -1,6 +1,6 @@
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import type { ClaudeHookEventName } from "../../shared/types/claude-hook.js";
+import type { ClaudeTurnHookEventName } from "../../shared/types/claude-hook.js";
 import type { RoleName } from "../../shared/types/role.js";
 import type { VcmSessionRoundState } from "../../shared/types/round.js";
 import type { RoleSessionRecord } from "../../shared/types/session.js";
@@ -25,7 +25,7 @@ export interface SessionRoundInput {
 
 export interface RecordRoundHookEventInput extends SessionRoundInput {
   role: RoleName;
-  eventName: ClaudeHookEventName;
+  eventName: ClaudeTurnHookEventName;
   settleGuard?: RoundSettleGuard;
 }
 
@@ -377,7 +377,7 @@ export function applyRoundHookEvent(input: {
   state: PersistedRoundFile;
   taskSlug: string;
   role: RoleName;
-  eventName: ClaudeHookEventName;
+  eventName: ClaudeTurnHookEventName;
   timestamp: string;
   roundId: string;
   settleMs: number;

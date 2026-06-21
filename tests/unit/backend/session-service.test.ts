@@ -511,6 +511,34 @@ describe("createSessionService", () => {
       activityStatus: "idle",
       lastTurnEndedAt: "2026-05-29T00:00:00.000Z"
     });
+
+    await service.markRoleActivityRunning("/repo", "demo-task", "coder");
+    const failed = await service.recordClaudeHookEvent("/repo", {
+      taskSlug: "demo-task",
+      role: "coder",
+      eventName: "StopFailure",
+      claudeSessionId: started.claudeSessionId
+    });
+    expect(failed).toMatchObject({
+      status: "running",
+      activityStatus: "idle",
+      lastTurnEndedAt: "2026-05-29T00:00:00.000Z"
+    });
+
+    await service.markRoleActivityRunning("/repo", "demo-task", "coder");
+    const compacted = await service.recordClaudeHookEvent("/repo", {
+      taskSlug: "demo-task",
+      role: "coder",
+      eventName: "PostCompact",
+      claudeSessionId: started.claudeSessionId,
+      transcriptPath: "/Users/sheldon/.claude/projects/demo/compact.jsonl"
+    });
+    expect(compacted).toMatchObject({
+      status: "running",
+      activityStatus: "running",
+      transcriptPath: "/Users/sheldon/.claude/projects/demo/compact.jsonl",
+      lastCompactAt: "2026-05-29T00:00:00.000Z"
+    });
   });
 
   it("records Codex hook activity even when Codex reports its own session id", async () => {

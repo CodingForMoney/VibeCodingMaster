@@ -79,6 +79,43 @@ describe("round-service", () => {
     });
   });
 
+  it("records StopFailure as a failed turn end that enters settle", async () => {
+    const fs = createMemoryFs();
+    let currentTime = "2026-05-31T00:00:00.000Z";
+    const service = createRoundService({
+      fs,
+      now: () => currentTime,
+      id: () => "round_1"
+    });
+
+    await service.recordClaudeHookEvent({
+      stateRepoRoot: "/repo",
+      stateRoot: ".ai/vcm",
+      taskSlug: "demo-task",
+      role: "coder",
+      eventName: "UserPromptSubmit"
+    });
+
+    currentTime = "2026-05-31T00:00:04.000Z";
+    const failed = await service.recordClaudeHookEvent({
+      stateRepoRoot: "/repo",
+      stateRoot: ".ai/vcm",
+      taskSlug: "demo-task",
+      role: "coder",
+      eventName: "StopFailure"
+    });
+
+    expect(failed).toMatchObject({
+      status: "running",
+      activeRole: "coder",
+      activeTurnStartedAt: undefined,
+      completedTurnCount: 1,
+      totalCompletedTurnCount: 1,
+      totalCcActiveMs: 4000,
+      settleDeadlineAt: "2026-05-31T00:00:14.000Z"
+    });
+  });
+
   it("deduplicates a Codex Reviewer prompt when VCM marked the turn before the hook arrives", async () => {
     const fs = createMemoryFs();
     let currentTime = "2026-05-31T00:00:00.000Z";

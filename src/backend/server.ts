@@ -316,6 +316,7 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     roundService,
     translationService,
     appSettings,
+    runtime,
     gatewayService,
     jobGuard: createJobGuardService()
   });

@@ -131,6 +131,7 @@ export interface RoleSessionRecord {
   lastTurnStartedAt?: string;
   lastTurnEndedAt?: string;
   lastHookEventAt?: string;
+  lastCompactAt?: string;
   exitCode?: number | null;
 }
 

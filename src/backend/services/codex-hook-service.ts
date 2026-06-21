@@ -3,7 +3,7 @@ import type {
   CodexHookResult
 } from "../../shared/types/codex-hook.js";
 import { isCodexRoleName } from "../../shared/constants.js";
-import type { ClaudeHookEventName } from "../../shared/types/claude-hook.js";
+import type { ClaudeTurnHookEventName } from "../../shared/types/claude-hook.js";
 import { VcmError } from "../errors.js";
 import type { ProjectService } from "./project-service.js";
 import type { RoundService } from "./round-service.js";
@@ -61,7 +61,7 @@ export function createCodexHookService(deps: CodexHookServiceDeps): CodexHookSer
     };
   }
 
-  async function processHook(input: CodexHookRequest, expectedEventName: ClaudeHookEventName): Promise<CodexHookResult> {
+  async function processHook(input: CodexHookRequest, expectedEventName: ClaudeTurnHookEventName): Promise<CodexHookResult> {
     const eventName = parseHookEvent(input.event.hook_event_name);
     if (eventName !== expectedEventName) {
       throw new VcmError({
@@ -128,7 +128,7 @@ export function createCodexHookService(deps: CodexHookServiceDeps): CodexHookSer
   };
 }
 
-function parseHookEvent(value: unknown): ClaudeHookEventName {
+function parseHookEvent(value: unknown): ClaudeTurnHookEventName {
   if (value === "UserPromptSubmit" || value === "Stop") {
     return value;
   }

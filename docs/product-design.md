@@ -29,13 +29,13 @@ Session = n x Round = m x Turn
 
 - `Session`: one VCM task. It is the statistics container for the whole task, from task creation until Close Task.
 - `Round`: one VCM conversation cycle. It starts with an accepted user prompt or VCM-delivered prompt, continues through sequential role orchestration, and ends when the final role turn stops and no next turn starts inside the 10 second stop window. In the normal orchestrated workflow, the final visible result comes back from `project-manager`.
-- `Turn`: one role-level Claude Code conversation. It starts when a prompt is submitted to one role session and ends when that role's Claude Code process emits `Stop`.
+- `Turn`: one role-level Claude Code conversation. It starts when a prompt is submitted to one role session and ends when that role's Claude Code process emits `Stop` or `StopFailure`.
 
 Turns inside one Round are strictly sequential. VCM should finish one role Turn before starting the next role Turn in that Round.
 
 Session state is intentionally small: `created` means no Round has started yet, `running` means there is a current running Round, and `stopped` means there is no current running Round after at least one Round has stopped. Starting Claude Code role sessions does not make the VCM Session `running`.
 
-Round state is only `running` or `stopped`. After a `Stop` hook, the 10 second stop window still counts as `running`; the Round becomes `stopped` only when the timer expires without another `UserPromptSubmit`.
+Round state is only `running` or `stopped`. After a turn-end hook, the 10 second stop window still counts as `running`; the Round becomes `stopped` only when the timer expires without another `UserPromptSubmit`.
 
 This `Session` term is only for VCM statistics. It must not be confused with a Claude Code role session, terminal runtime session, or Claude transcript session id. VCM still runs one Claude Code role session per role inside one task-level VCM Session.
 
@@ -395,6 +395,8 @@ Backend role state:
 
 - VCM terminal submit: role becomes `running`.
 - `Stop`: role becomes `idle` and records `lastTurnEndedAt`.
+- `PostCompact`: refreshes role session metadata and records `lastCompactAt` without changing `running`/`idle`.
+- `StopFailure`: first checks completion evidence. If the role already wrote an outgoing route file, VCM marks the role idle and dispatches normally. If not, VCM sends a recovery prompt to the same role without marking it idle.
 - The role tab and flow pause state both react to Claude Code and Codex Reviewer hook events.
 
 Task-level Round state:
@@ -402,14 +404,15 @@ Task-level Round state:
 - The first `UserPromptSubmit` starts a Round for the current VCM Session.
 - Each accepted `UserPromptSubmit` is the start of one Turn.
 - `Stop` ends the current Turn and starts a 10 second stop timer; during that timer, the Round is still `running`.
+- `StopFailure` ends the Turn only after VCM decides the role completed or recovery is unavailable. When recovery is sent, the existing Turn stays running.
 - A new `UserPromptSubmit` inside the window continues the same Round and starts the next Turn.
 - If no new prompt is accepted before the deadline, the Round becomes `stopped`.
-- The stop transition is timer-driven from the `Stop` event. Round-state reads do not end a Round.
+- The stop transition is timer-driven from the turn-end event. Round-state reads do not end a Round.
 - Before stopping, VCM checks `.ai/vcm/handoffs/messages`; if a pending route message exists and can be delivered, VCM retries delivery and extends the stop window instead of alerting.
-- The same Round state stores total Round count, Turn count, completed Turn count, and role active runtime. Active runtime is measured only between `UserPromptSubmit` and `Stop`, not during the stop window.
+- The same Round state stores total Round count, Turn count, completed Turn count, and role active runtime. Active runtime is measured only between `UserPromptSubmit` and the turn-end event, not during the stop window.
 - The Round dock shows both wall-clock Round duration and role active runtime. For a running Round, `Total` is `now - Round.startedAt`; for a stopped Round, it is `stoppedAt - Round.startedAt`. `Role runtime` is the accumulated active runtime across Turns in that Round; `Turn count` is the number of accepted prompts in the Round.
 
-The frontend polls this task-level Round state and deduplicates each stopped Round so the same stopped state does not alert on every poll. Flow duration is measured from the first `UserPromptSubmit` to `stoppedAt`, falling back to the last `Stop` when needed. Runs under 2 minutes trigger the weak 3-chime reminder at 1.4 second intervals. Runs at or above 2 minutes trigger the strong alert dialog and repeating sound until confirmation.
+The frontend polls this task-level Round state and deduplicates each stopped Round so the same stopped state does not alert on every poll. Flow duration is measured from the first `UserPromptSubmit` to `stoppedAt`, falling back to the last turn-end timestamp when needed. Runs under 2 minutes trigger the weak 3-chime reminder at 1.4 second intervals. Runs at or above 2 minutes trigger the strong alert dialog and repeating sound until confirmation.
 
 ## 9. Session Lifecycle
 
@@ -542,9 +545,9 @@ Default route policy:
 - Peer routes such as `coder-reviewer.md` may exist for explicit task designs, but VCM still serializes delivery per target role.
 - `user` talks to `project-manager` through the normal active terminal or translation composer, not through a route file.
 
-Claude Stop-triggered scan:
+Claude turn-end scan:
 
-- VCM injects Claude Code `UserPromptSubmit`, `Stop`, and `PermissionRequest` hooks into `.claude/settings.json`.
+- VCM injects Claude Code `UserPromptSubmit`, `Stop`, `StopFailure`, `PostCompact`, and `PermissionRequest` hooks into `.claude/settings.json`.
 - The hooks do not call `vcmctl`; they POST directly to the local VCM backend.
 - When a Claude Code role stops, VCM marks that role idle, then scans pending route files.
 - VCM scans the stopped role's outgoing files and also any pending files targeting newly idle roles, so messages that were blocked by a busy target can be delivered after that target stops.
@@ -578,6 +581,8 @@ VCM Harness injects Claude Code hooks into `.claude/settings.json`:
 
 - `UserPromptSubmit`: posts directly to the VCM backend, marks the role running, and confirms any matching VCM message by recording `acceptedAt`
 - `Stop`: posts directly to the VCM backend, marks the role idle, and triggers pending route-file dispatch
+- `StopFailure`: posts directly to the VCM backend; VCM checks for outgoing route-file completion evidence before marking idle. If no evidence exists, VCM sends a same-role recovery prompt and keeps the Turn running.
+- `PostCompact`: posts directly to the VCM backend, refreshes `session_id`/`transcript_path`/`cwd`, and records `lastCompactAt`
 - `PermissionRequest`: posts directly to the VCM backend and prints the backend response to stdout so Claude Code can consume an allow decision when the local VCM setting is enabled
 
 VCM uses `UserPromptSubmit` as the Claude Code acceptance signal. A successful PTY write only proves VCM delivered text to the embedded terminal; `UserPromptSubmit` proves Claude Code accepted the prompt.

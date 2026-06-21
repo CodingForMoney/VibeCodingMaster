@@ -89,6 +89,8 @@ describe("createHarnessService", () => {
     expect(await fs.readText("/repo/.ai/tools/request-codex-review")).toContain("Request a VCM-managed Codex Review Gate");
     expect(await fs.readText("/repo/.claude/settings.json")).toContain("UserPromptSubmit");
     expect(await fs.readText("/repo/.claude/settings.json")).toContain("Stop");
+    expect(await fs.readText("/repo/.claude/settings.json")).toContain("StopFailure");
+    expect(await fs.readText("/repo/.claude/settings.json")).toContain("PostCompact");
     expect(await fs.readText("/repo/.claude/settings.json")).toContain("PermissionRequest");
     expect(await fs.readText("/repo/.claude/settings.json")).toContain("PreToolUse");
     expect(await fs.readText("/repo/.claude/settings.json")).toContain("vcm-bash-guard");
@@ -187,6 +189,8 @@ describe("createHarnessService", () => {
     const settings = JSON.parse(await fs.readText("/repo/.claude/settings.json"));
     expect(JSON.stringify(settings.hooks.UserPromptSubmit)).toContain("/api/hooks/claude-code");
     expect(JSON.stringify(settings.hooks.Stop)).toContain("/api/hooks/claude-code");
+    expect(JSON.stringify(settings.hooks.StopFailure)).toContain("/api/hooks/claude-code");
+    expect(JSON.stringify(settings.hooks.PostCompact)).toContain("/api/hooks/claude-code");
     expect(JSON.stringify(settings.hooks.PermissionRequest)).toContain("/api/hooks/claude-code/permission-request");
     expect(JSON.stringify(settings.hooks.UserPromptSubmit)).not.toContain("vcmctl");
     expect(JSON.stringify(settings.hooks.Stop)).not.toContain("vcmctl");

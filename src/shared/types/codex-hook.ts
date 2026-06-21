@@ -1,5 +1,5 @@
 import type { CodexRoleName } from "./role.js";
-import type { ClaudeHookEventName } from "./claude-hook.js";
+import type { ClaudeTurnHookEventName } from "./claude-hook.js";
 
 export interface CodexHookPayload {
   hook_event_name?: string;
@@ -22,7 +22,7 @@ export interface CodexHookRequest {
 
 export interface CodexHookResult {
   ok: true;
-  eventName: ClaudeHookEventName;
+  eventName: ClaudeTurnHookEventName;
   taskSlug: string;
   role: CodexRoleName;
   sessionUpdated: boolean;
