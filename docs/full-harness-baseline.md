@@ -148,7 +148,6 @@ durable docs, PR text, or commit history.
 | Worktrees | `.claude/worktrees/<task-slug>/` | Runtime cleanup | One task worktree shared by all roles. |
 | Handoff root | `.ai/vcm/handoffs/` | Runtime cleanup | Role artifacts and route files for the active task. |
 | Route messages | `.ai/vcm/handoffs/messages/<from-role>-<to-role>.md` | Runtime cleanup | Pending route files written by `vcm-route-message`. |
-| Handoff logs | `.ai/vcm/handoffs/logs/` | Runtime cleanup | Debug/recovery logs, not durable project truth. |
 | Architecture plan | `.ai/vcm/handoffs/architecture-plan.md` | Task-temporary | Architect handoff for one executable task. |
 | Review report | `.ai/vcm/handoffs/review-report.md` | Task-temporary | Reviewer handoff for one executable task. |
 | Docs sync report | `.ai/vcm/handoffs/docs-sync-report.md` | Task-temporary | Architect docs-sync handoff for one executable task. |

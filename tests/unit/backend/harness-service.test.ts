@@ -229,6 +229,114 @@ describe("createHarnessService", () => {
     expect(content).toContain("<!-- VCM:BEGIN version=1 -->");
     expect(content).toContain("## VCM Start Here");
   });
+
+  it("commits provided harness files and rebases the task worktree onto the new base commit", async () => {
+    const fs = createMemoryFs();
+    const calls: string[] = [];
+    const service = createHarnessService({
+      fs,
+      git: {
+        async getCurrentBranch(repoRoot) {
+          calls.push(`branch:${repoRoot}`);
+          return repoRoot.endsWith("/demo") ? "feature/demo" : "main";
+        },
+        async getHeadCommit(repoRoot) {
+          calls.push(`head:${repoRoot}`);
+          return calls.filter((call) => call === "head:/repo").length > 1 ? "base2222222" : "base1111111";
+        },
+        async getStatusPorcelain(repoRoot) {
+          calls.push(`status:${repoRoot}`);
+          return "";
+        },
+        async getStagedStatus(repoRoot) {
+          calls.push(`staged:${repoRoot}`);
+          return calls.filter((call) => call === "staged:/repo").length > 1 ? "M\tCLAUDE.md\n" : "";
+        },
+        async addPaths(repoRoot, paths) {
+          calls.push(`add:${repoRoot}:${paths.join(",")}`);
+        },
+        async commit(repoRoot, message) {
+          calls.push(`commit:${repoRoot}:${message}`);
+          return "base2222222";
+        },
+        async rebase(repoRoot, upstream) {
+          calls.push(`rebase:${repoRoot}:${upstream}`);
+          return { stdout: "", stderr: "" };
+        }
+      }
+    });
+
+    const result = await service.commitAndRebaseTask("/repo", {
+      taskSlug: "demo",
+      branch: "feature/demo",
+      worktreePath: "/repo/.claude/worktrees/demo",
+      changedFiles: [
+        { path: "CLAUDE.md", action: "update", reason: "updated" },
+        { path: "./CLAUDE.md", action: "update", reason: "duplicate" },
+        { path: ".claude/settings.json", action: "update", reason: "updated" }
+      ]
+    });
+
+    expect(result).toMatchObject({
+      taskSlug: "demo",
+      branch: "feature/demo",
+      baseBranch: "main",
+      baseCommitBefore: "base1111111",
+      baseCommitAfter: "base2222222",
+      harnessCommit: "base2222222",
+      committed: true,
+      rebased: true
+    });
+    expect(result.changedFiles.map((change) => change.path)).toEqual(["CLAUDE.md", ".claude/settings.json"]);
+    expect(calls).toEqual([
+      "branch:/repo/.claude/worktrees/demo",
+      "status:/repo/.claude/worktrees/demo",
+      "staged:/repo",
+      "branch:/repo",
+      "head:/repo",
+      "add:/repo:CLAUDE.md,.claude/settings.json",
+      "staged:/repo",
+      "commit:/repo:chore: update VCM harness",
+      "head:/repo",
+      "rebase:/repo/.claude/worktrees/demo:base2222222"
+    ]);
+  });
+
+  it("refuses to commit and rebase when the task worktree is dirty", async () => {
+    const service = createHarnessService({
+      fs: createMemoryFs(),
+      git: {
+        async getCurrentBranch() {
+          return "feature/demo";
+        },
+        async getHeadCommit() {
+          return "base1111111";
+        },
+        async getStatusPorcelain() {
+          return "M src/app.ts\n";
+        },
+        async getStagedStatus() {
+          return "";
+        },
+        async addPaths() {},
+        async commit() {
+          return "base2222222";
+        },
+        async rebase() {
+          return { stdout: "", stderr: "" };
+        }
+      }
+    });
+
+    await expect(service.commitAndRebaseTask("/repo", {
+      taskSlug: "demo",
+      branch: "feature/demo",
+      worktreePath: "/repo/.claude/worktrees/demo",
+      changedFiles: [{ path: "CLAUDE.md", action: "update", reason: "updated" }]
+    })).rejects.toMatchObject({
+      code: "HARNESS_TASK_DIRTY"
+    });
+  });
 });
 
 function createMemoryFs(): FileSystemAdapter {

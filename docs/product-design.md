@@ -47,7 +47,7 @@ VCM V1 must make multi-session Claude Code work visible and recoverable:
 - Create a named task with its own branch and task-level worktree by default.
 - Start, stop, restart, and resume one Claude Code session per role.
 - Keep role terminals embedded in one GUI.
-- Preserve task state, session state, handoff files, message history, and raw terminal logs.
+- Preserve task state, session state, handoff files, and message history.
 - Let roles communicate through a PM-mediated message bus.
 - Let users choose between manual message approval and auto orchestration.
 - Install or update VCM role rules into `CLAUDE.md` and `.claude/agents/*.md`.
@@ -122,7 +122,7 @@ The detailed design lives in `docs/codex-review-gates.md`.
 
 ### 4.2 Task Worktree Model
 
-Task-level worktree management is the recommended default model for multi-task parallelism:
+Task-level worktree management is the required model for all tasks:
 
 ```text
 one task
@@ -134,9 +134,7 @@ one task
 
 VCM must not create worktrees per role. `project-manager`, `architect`, `coder`, and `reviewer` for the same task all run in the same task worktree and hand off sequentially.
 
-When the user creates a task, `Create worktree and branch` is selected by default. With that option selected, VCM creates the branch and worktree immediately. If the user clears the option, VCM creates the task in the currently connected repository path and records the current branch.
-
-There is no separate later button named `Create task worktree`, and a task cannot be switched between worktree and non-worktree mode after creation.
+When the user creates a task, VCM always creates the branch and worktree immediately. Tasks never run directly in the connected base repository, and there is no separate later button named `Create task worktree`.
 
 Branch naming:
 
@@ -168,17 +166,13 @@ New Task submit
   -> validate task name
   -> verify .ai/vcm/ is ignored
   -> verify .claude/worktrees/ is ignored
-	  -> if Create worktree and branch is selected:
-	       -> derive branch feature/<task-name>
-	       -> derive worktree path .claude/worktrees/<task-name>
-	       -> verify the base repo is clean
-	       -> git worktree add -b feature/<task-name> .claude/worktrees/<task-name> <base-ref>
-	  -> otherwise:
-	       -> use the connected repo path and current branch
-	       -> reject if another inline task is already active
+  -> derive branch feature/<task-name>
+  -> derive worktree path .claude/worktrees/<task-name>
+  -> verify the base repo is clean
+  -> git worktree add -b feature/<task-name> .claude/worktrees/<task-name> <base-ref>
   -> create task metadata
-  -> create handoff structure inside the task runtime repo
-  -> open the task workspace with role session cwd = task runtime repo
+  -> create handoff structure inside the task worktree
+  -> open the task workspace with role session cwd = task worktree
 ```
 
 Task close flow:
@@ -189,13 +183,11 @@ user clicks red Close Task
   -> stop VCM-managed running role sessions for the task
   -> explain that VCM deletes the task worktree and task branch
   -> explain that VCM does not check running sessions or uncommitted changes
-  -> remove git worktree when the task owns one
-  -> delete the task branch by default when the task owns one
+  -> remove git worktree
+  -> delete the task branch
   -> remove VCM task metadata from the base repo
-  -> remove task runtime metadata from the task runtime repo
+  -> remove task runtime metadata from the task worktree
 ```
-
-Tasks created without a worktree do not own a separate branch/worktree, so Close Task stops VCM-managed running role sessions and removes only VCM metadata for those tasks.
 
 ## 5. Roles
 
@@ -316,8 +308,7 @@ Opening this section refreshes the connected repository status through
 
 The `Pull` button runs `git pull --ff-only` only against the connected base
 repository. It is disabled when the base repository has uncommitted changes,
-when the branch has no upstream, or when the active task is an inline task using
-the base repository directly. VCM does not stash, merge, or mutate task
+or when the branch has no upstream. VCM does not stash, merge, or mutate task
 worktrees from this button.
 
 The old `Dirty: yes/no` label is not used. The UI uses `Working tree: clean` or
@@ -344,14 +335,10 @@ There is no separate `Pause orchestration` or `Resume orchestration` control in 
 `New Task` contains:
 
 - `task name`
-- a `Create worktree and branch` checkbox, selected by default
-- generated branch preview when selected: `feature/<task-name>`
-- generated worktree preview when selected: `.claude/worktrees/<task-name>`
-- current repository/current branch note when cleared
+- generated branch preview: `feature/<task-name>`
+- generated worktree preview: `.claude/worktrees/<task-name>`
 
 There is no optional title input in the current UI.
-
-The worktree/branch path is the recommended VCM task model, but the user may clear the checkbox for an inline task. VCM should not require a separate worktree creation action later.
 
 ### Task Workspace
 
@@ -491,7 +478,7 @@ For `.gitignore`, VCM uses hash comments:
 
 VCM must preserve all user-authored content outside the managed block.
 
-After applying harness changes, the UI tells the user what changed and recommends reviewing and committing those files.
+After applying harness changes in the base repo, the UI shows the changed files. When a task is active, the result area also shows `Commit & rebase task`: VCM stages only the changed harness files, creates a `chore: update VCM harness` commit in the base repo, and rebases the active task branch onto that commit. If the task worktree is dirty or the base repo already has staged changes, VCM stops and asks the user to clean up first.
 
 Role sessions get VCM behavior from `CLAUDE.md` and `.claude/agents/*.md`, not from a pasted startup context.
 
@@ -505,11 +492,6 @@ Each task creates:
     architect.md
     coder.md
     reviewer.md
-  logs/
-    project-manager.log
-    architect.log
-    coder.log
-    reviewer.log
   architecture-plan.md
   known-issues.md
   review-report.md
@@ -814,8 +796,6 @@ Task worktree local files:
 .claude/worktrees/<task>/.ai/vcm/handoffs/messages/<from-role>-<to-role>.md
 ```
 
-For tasks created without a worktree, the task runtime repo is the connected base repo, so the runtime state resolves under the base repo's `.ai/vcm/`. Because `.ai/vcm/handoffs/` has no task-name segment, VCM allows only one active inline task in a connected repo.
-
 External Claude transcripts:
 
 ```text
@@ -846,9 +826,8 @@ This protects against publishing raw TypeScript bin files or missing frontend as
 VCM V1 is successful when:
 
 - A user can connect a repo without global Git safe-directory setup.
-- A user can create a default task, which creates `feature/<task>` and `.claude/worktrees/<task>`.
-- A user can clear `Create worktree and branch` and create a task in the connected repo/current branch.
-- A user can start all four role sessions in the task runtime repo.
+- A user can create a task, which creates `feature/<task>` and `.claude/worktrees/<task>`.
+- A user can start all four role sessions in the task worktree.
 - Switching roles never loses the embedded terminal.
 - Restart creates a fresh Claude session; Resume reconnects to the persisted one.
 - Permission modes are reflected in the Claude command.

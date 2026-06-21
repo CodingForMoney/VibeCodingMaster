@@ -164,7 +164,6 @@ Current runtime files and directories:
 ```text
 .ai/vcm/handoffs/
 .ai/vcm/handoffs/messages/
-.ai/vcm/handoffs/logs/
 .ai/vcm/handoffs/architecture-plan.md
 .ai/vcm/handoffs/review-report.md
 .ai/vcm/handoffs/docs-sync-report.md

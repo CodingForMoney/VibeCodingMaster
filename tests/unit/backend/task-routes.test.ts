@@ -175,6 +175,7 @@ function createTask(input: Partial<TaskRecord> = {}): TaskRecord {
     createdAt: "2026-05-31T00:00:00.000Z",
     updatedAt: "2026-05-31T00:00:00.000Z",
     repoRoot: "/repo",
+    worktreePath: "/repo/.claude/worktrees/demo-task",
     branch: "feature/demo-task",
     handoffDir: ".ai/vcm/handoffs",
     status: "running",
@@ -196,7 +197,6 @@ function createSession(role: RoleName, status: RoleStatus): RoleSessionRecord {
     cwd: "/repo/.claude/worktrees/demo-task",
     terminalBackend: "node-pty",
     pid: status === "running" ? 123 : undefined,
-    logPath: `.ai/vcm/handoffs/logs/${role}.log`,
     updatedAt: "2026-05-31T00:00:00.000Z",
     exitCode: null
   };

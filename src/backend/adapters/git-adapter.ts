@@ -17,8 +17,12 @@ export interface GitAdapter {
   getAheadBehind(repoRoot: string, upstreamBranch: string): Promise<GitAheadBehind>;
   isDirty(repoRoot: string): Promise<boolean>;
   getStatusPorcelain(repoRoot: string): Promise<string>;
+  getStagedStatus(repoRoot: string): Promise<string>;
   isIgnored(repoRoot: string, repoRelativePath: string): Promise<boolean>;
   branchExists(repoRoot: string, branch: string): Promise<boolean>;
+  addPaths(repoRoot: string, paths: string[]): Promise<void>;
+  commit(repoRoot: string, message: string): Promise<string>;
+  rebase(repoRoot: string, upstream: string): Promise<GitRebaseResult>;
   createWorktree(input: CreateGitWorktreeInput): Promise<void>;
   removeWorktree(repoRoot: string, worktreePath: string, options?: { force?: boolean }): Promise<void>;
   deleteBranch(repoRoot: string, branch: string, options?: { force?: boolean }): Promise<void>;
@@ -31,6 +35,11 @@ export interface GitAheadBehind {
 }
 
 export interface GitPullResult {
+  stdout: string;
+  stderr: string;
+}
+
+export interface GitRebaseResult {
   stdout: string;
   stderr: string;
 }
@@ -127,6 +136,19 @@ export function createGitAdapter(runner: CommandRunner): GitAdapter {
 
       return result.stdout;
     },
+    async getStagedStatus(repoRoot) {
+      const result = await runGit(runner, repoRoot, ["diff", "--cached", "--name-status"]);
+      if (result.exitCode !== 0) {
+        throw new VcmError({
+          code: "GIT_ERROR",
+          message: "Unable to read staged Git changes.",
+          statusCode: 400,
+          hint: result.stderr
+        });
+      }
+
+      return result.stdout;
+    },
     async isIgnored(repoRoot, repoRelativePath) {
       const result = await runGit(runner, repoRoot, ["check-ignore", "-q", "--", repoRelativePath]);
       if (result.exitCode === 0) {
@@ -156,6 +178,49 @@ export function createGitAdapter(runner: CommandRunner): GitAdapter {
         statusCode: 400,
         hint: result.stderr
       });
+    },
+    async addPaths(repoRoot, paths) {
+      if (paths.length === 0) {
+        return;
+      }
+      const result = await runGit(runner, repoRoot, ["add", "--", ...paths]);
+      if (result.exitCode !== 0) {
+        throw new VcmError({
+          code: "GIT_ADD_FAILED",
+          message: "Unable to stage harness changes.",
+          statusCode: 409,
+          hint: result.stderr || result.stdout
+        });
+      }
+    },
+    async commit(repoRoot, message) {
+      const result = await runGit(runner, repoRoot, ["commit", "-m", message]);
+      if (result.exitCode !== 0) {
+        throw new VcmError({
+          code: "GIT_COMMIT_FAILED",
+          message: "Unable to commit harness changes.",
+          statusCode: 409,
+          hint: result.stderr || result.stdout
+        });
+      }
+
+      return this.getHeadCommit(repoRoot);
+    },
+    async rebase(repoRoot, upstream) {
+      const result = await runGit(runner, repoRoot, ["rebase", upstream]);
+      if (result.exitCode !== 0) {
+        throw new VcmError({
+          code: "GIT_REBASE_FAILED",
+          message: "Unable to rebase task branch onto the harness commit.",
+          statusCode: 409,
+          hint: result.stderr || result.stdout
+        });
+      }
+
+      return {
+        stdout: result.stdout,
+        stderr: result.stderr
+      };
     },
     async createWorktree(input) {
       const result = await runGit(runner, input.repoRoot, [

@@ -9,6 +9,7 @@ import {
   type TranslationTargetLanguage
 } from "../../shared/types/app-settings.js";
 import type {
+  CommitAndRebaseHarnessTaskResult,
   HarnessApplyResult,
   HarnessBootstrapStatusReport,
   HarnessStatusReport
@@ -59,6 +60,7 @@ export interface ProjectDashboardProps {
   harnessStatus: HarnessStatusReport | null;
   harnessBootstrapStatus: HarnessBootstrapStatusReport | null;
   harnessApplyResult?: HarnessApplyResult | null;
+  harnessTaskSyncResult?: CommitAndRebaseHarnessTaskResult | null;
   gatewayStatus: GatewayStatus | null;
   gatewayQrLogin: StartGatewayQrLoginResult | null;
   gatewayQrCheck: CheckGatewayQrLoginResult | null;
@@ -68,6 +70,7 @@ export interface ProjectDashboardProps {
   onPullConnectedRepository(): Promise<void>;
   onRefreshHarness(): Promise<void>;
   onApplyHarness(): Promise<void>;
+  onCommitAndRebaseHarnessTask(): Promise<void>;
   onStartHarnessBootstrap(): Promise<void>;
   onRefreshGateway(): Promise<void>;
   onGatewayEnabledChange(enabled: boolean): void;
@@ -83,7 +86,7 @@ export interface ProjectDashboardProps {
   onOpenTranslatorSession(): void;
   onCreateTranslationBootstrap(): void;
   onUpdateTranslationMemory(): void;
-  onCreateTask(input: { taskSlug: string; createWorktree?: boolean; title?: string }): Promise<void>;
+  onCreateTask(input: { taskSlug: string; title?: string }): Promise<void>;
   onSelectTask(taskSlug: string): void;
   themeMode: ThemeMode;
   onThemeModeChange(themeMode: ThemeMode): void;
@@ -119,6 +122,7 @@ export function ProjectDashboard({
   harnessStatus,
   harnessBootstrapStatus,
   harnessApplyResult,
+  harnessTaskSyncResult,
   gatewayStatus,
   gatewayQrLogin,
   gatewayQrCheck,
@@ -128,6 +132,7 @@ export function ProjectDashboard({
   onPullConnectedRepository,
   onRefreshHarness,
   onApplyHarness,
+  onCommitAndRebaseHarnessTask,
   onStartHarnessBootstrap,
   onRefreshGateway,
   onGatewayEnabledChange,
@@ -161,7 +166,6 @@ export function ProjectDashboard({
   onDeleteMessageHistory
 }: ProjectDashboardProps) {
   const [taskSlug, setTaskSlug] = useState("");
-  const [createWorktree, setCreateWorktree] = useState(true);
   const [showMessages, setShowMessages] = useState(false);
   const [showEvents, setShowEvents] = useState(false);
   const [openSidebarSection, setOpenSidebarSection] = useState<SidebarSectionId | null>(
@@ -189,9 +193,8 @@ export function ProjectDashboard({
 
   async function handleCreateTask(event: FormEvent) {
     event.preventDefault();
-    await onCreateTask({ taskSlug: normalizedTaskSlug, createWorktree });
+    await onCreateTask({ taskSlug: normalizedTaskSlug });
     setTaskSlug("");
-    setCreateWorktree(true);
   }
 
   return (
@@ -225,7 +228,6 @@ export function ProjectDashboard({
           }}
         >
           <ConnectedRepositoryPanel
-            activeTask={activeTask}
             busy={busy}
             project={project}
             onPull={onPullConnectedRepository}
@@ -391,9 +393,12 @@ export function ProjectDashboard({
             status={harnessStatus}
             bootstrapStatus={harnessBootstrapStatus}
             applyResult={harnessApplyResult}
+            taskSyncResult={harnessTaskSyncResult}
+            canCommitAndRebaseTask={Boolean(harnessApplyResult?.changedFiles.length && activeTask)}
             busy={busy}
             onRefresh={onRefreshHarness}
             onApply={onApplyHarness}
+            onCommitAndRebaseTask={onCommitAndRebaseHarnessTask}
             onStartBootstrap={onStartHarnessBootstrap}
           />
         </SidebarSection>
@@ -412,24 +417,10 @@ export function ProjectDashboard({
                 onChange={(event) => setTaskSlug(event.target.value)}
                 placeholder="task name"
               />
-              <label className="task-create-option">
-                <input
-                  type="checkbox"
-                  checked={createWorktree}
-                  onChange={(event) => setCreateWorktree(event.target.checked)}
-                />
-                <span>Create worktree and branch</span>
-              </label>
-              {createWorktree ? (
-                <div className="task-create-preview">
-                  <small>branch: {normalizedTaskSlug ? `feature/${normalizedTaskSlug}` : "feature/<task>"}</small>
-                  <small>worktree: {normalizedTaskSlug ? `.claude/worktrees/${normalizedTaskSlug}` : ".claude/worktrees/<task>"}</small>
-                </div>
-              ) : (
-                <div className="task-create-preview">
-                  <small>uses current repository path and current branch</small>
-                </div>
-              )}
+              <div className="task-create-preview">
+                <small>branch: {normalizedTaskSlug ? `feature/${normalizedTaskSlug}` : "feature/<task>"}</small>
+                <small>worktree: {normalizedTaskSlug ? `.claude/worktrees/${normalizedTaskSlug}` : ".claude/worktrees/<task>"}</small>
+              </div>
               <button type="submit" disabled={busy || !normalizedTaskSlug}>
                 Create
               </button>
@@ -749,21 +740,16 @@ function GatewayPanel({
 }
 
 function ConnectedRepositoryPanel({
-  activeTask,
   busy,
   onPull,
   project
 }: {
-  activeTask: TaskRecord | null;
   busy?: boolean;
   onPull(): Promise<void>;
   project: ProjectSummary;
 }) {
-  const inlineTaskBlocksPull = Boolean(activeTask && !activeTask.worktreePath && activeTask.cleanupStatus !== "cleaned");
-  const pullDisabledReason = inlineTaskBlocksPull
-    ? `Inline task "${activeTask?.taskSlug}" uses the base repository.`
-    : project.pullDisabledReason;
-  const canPull = Boolean(project.canPull && !inlineTaskBlocksPull);
+  const pullDisabledReason = project.pullDisabledReason;
+  const canPull = Boolean(project.canPull);
 
   return (
     <div className="project-summary">

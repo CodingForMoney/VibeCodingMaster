@@ -74,6 +74,24 @@ export interface HarnessApplyResult {
   message: string;
 }
 
+export interface CommitAndRebaseHarnessTaskRequest {
+  changedFiles: HarnessPlannedChange[];
+}
+
+export interface CommitAndRebaseHarnessTaskResult {
+  taskSlug: string;
+  branch: string;
+  worktreePath: string;
+  baseBranch: string;
+  baseCommitBefore: string;
+  baseCommitAfter: string;
+  harnessCommit?: string;
+  committed: boolean;
+  rebased: boolean;
+  changedFiles: HarnessPlannedChange[];
+  message: string;
+}
+
 export interface HarnessBootstrapCheck {
   key:
     | "fixed-harness"

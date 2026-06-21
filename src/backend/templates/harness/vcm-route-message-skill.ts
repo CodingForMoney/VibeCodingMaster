@@ -33,6 +33,12 @@ If the same route file already contains a not-yet-delivered message, update that
 
 ## Message Format
 
+Use the smallest body that is complete. Include artifact refs instead of copying long documents.
+
+For simple user relay, use a lightweight body instead of the formal dispatch format.
+
+For formal dispatch, blocker, finding, review, or gate routing, use:
+
 \`\`\`md
 ---
 type: task
@@ -54,9 +60,9 @@ Expected next action:
 ...
 \`\`\`
 
-Use the smallest body that is complete. Include artifact refs instead of copying long documents.
+## Formal Body Content
 
-## Required Body Content
+Formal messages should include:
 
 - why this message exists
 - what the target role should do or what result is being reported

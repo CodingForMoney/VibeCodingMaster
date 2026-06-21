@@ -119,7 +119,8 @@ export async function createServer(deps: ServerDeps, options: CreateServerOption
   });
   registerHarnessRoutes(app, {
     projectService: deps.projectService,
-    harnessService: deps.harnessService
+    harnessService: deps.harnessService,
+    taskService: deps.taskService
   });
   registerTaskRoutes(app, {
     projectService: deps.projectService,
@@ -220,6 +221,7 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
   const projectService = createProjectService({ fs, git, appSettings });
   const harnessService = createHarnessService({
     fs,
+    git,
     runtime,
     projectService,
     apiUrl: options.apiUrl,

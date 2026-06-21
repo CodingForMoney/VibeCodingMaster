@@ -34,7 +34,6 @@ describe("createCodexHookService", () => {
             permissionMode: "default",
             cwd: input.cwd ?? "/repo/.ai/codex",
             terminalBackend: "node-pty",
-            logPath: ".ai/vcm/handoffs/logs/codex-reviewer.log",
             updatedAt: "2026-06-14T00:00:00.000Z"
           };
         }

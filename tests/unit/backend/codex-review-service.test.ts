@@ -140,14 +140,22 @@ describe("codex-review-service", () => {
 });
 
 async function writeHarnessFiles(repoRoot: string): Promise<void> {
-  await mkdir(path.join(repoRoot, ".ai/codex/prompts"), { recursive: true });
-  await mkdir(path.join(repoRoot, ".ai/vcm/handoffs"), { recursive: true });
+  const taskRepoRoot = taskWorktree(repoRoot);
+  await mkdir(path.join(taskRepoRoot, ".ai/codex/prompts"), { recursive: true });
+  await mkdir(path.join(taskRepoRoot, ".ai/vcm/handoffs"), { recursive: true });
   await writeFile(path.join(repoRoot, "CLAUDE.md"), "# CLAUDE\n", "utf8");
-  await writeFile(path.join(repoRoot, ".ai/codex/AGENTS.md"), "# VCM Codex Reviewer\n", "utf8");
-  await writeFile(path.join(repoRoot, ".ai/codex/prompts/architecture-plan-gate.md"), "# Codex Gate\n", "utf8");
-  await writeFile(path.join(repoRoot, ".ai/vcm/handoffs/architecture-plan.md"), "# Architecture Plan\n", "utf8");
+  await mkdir(path.join(repoRoot, ".ai/codex"), { recursive: true });
+  await writeFile(path.join(taskRepoRoot, ".ai/codex/AGENTS.md"), "# VCM Codex Reviewer\n", "utf8");
+  await writeFile(path.join(taskRepoRoot, ".ai/codex/prompts/architecture-plan-gate.md"), "# Codex Gate\n", "utf8");
+  await writeFile(path.join(taskRepoRoot, ".ai/vcm/handoffs/architecture-plan.md"), "# Architecture Plan\n", "utf8");
   await writeFile(path.join(repoRoot, ".ai/codex/config.toml"), `approval_policy = "never"
 `, "utf8");
+  await writeFile(path.join(taskRepoRoot, ".ai/codex/config.toml"), `approval_policy = "never"
+`, "utf8");
+}
+
+function taskWorktree(repoRoot: string): string {
+  return path.join(repoRoot, ".claude/worktrees/demo-task");
 }
 
 function createRunner(
@@ -164,7 +172,7 @@ function createRunner(
         const gate = options?.env?.VCM_CODEX_REVIEW_GATE ?? "architecture-plan";
         const requestId = options?.env?.VCM_CODEX_REVIEW_REQUEST_ID ?? "request-id";
         await writeFile(
-          path.join(repoRoot, ".ai/vcm/codex-reviews", `${gate}-review.md`),
+          path.join(taskWorktree(repoRoot), ".ai/vcm/codex-reviews", `${gate}-review.md`),
           [
             `Gate: ${gate}`,
             `Request: ${requestId}`,
@@ -197,7 +205,7 @@ function createRuntime(repoRoot: string, writes: string[]): TerminalRuntime {
       const gate = /Gate:\s*([a-z-]+)/.exec(data)?.[1] ?? "architecture-plan";
       const requestId = /Request:\s*([a-z0-9_.-]+)/i.exec(data)?.[1] ?? "request-id";
       void writeFile(
-        path.join(repoRoot, ".ai/vcm/codex-reviews", `${gate}-review.md`),
+        path.join(taskWorktree(repoRoot), ".ai/vcm/codex-reviews", `${gate}-review.md`),
         [
           `Gate: ${gate}`,
           `Request: ${requestId}`,
@@ -250,6 +258,7 @@ function createTaskService(repoRoot: string) {
         createdAt: "2026-06-13T00:00:00.000Z",
         updatedAt: "2026-06-13T00:00:00.000Z",
         repoRoot,
+        worktreePath: taskWorktree(repoRoot),
         branch: "feature/demo-task",
         handoffDir: ".ai/vcm/handoffs",
         status: "running"
@@ -270,7 +279,6 @@ function createSessionService(starts: string[] = [], activityCalls: string[] = [
     permissionMode: "default",
     cwd: "/repo",
     terminalBackend: "node-pty",
-    logPath: ".ai/vcm/handoffs/logs/project-manager.log",
     updatedAt: "2026-06-13T00:00:00.000Z"
   };
   const codexSession: RoleSessionRecord = {
@@ -283,9 +291,8 @@ function createSessionService(starts: string[] = [], activityCalls: string[] = [
     command: "codex",
     permissionMode: "default",
     model: "gpt-5.5",
-    cwd: "/repo/.ai/codex",
+    cwd: "/repo/.claude/worktrees/demo-task/.ai/codex",
     terminalBackend: "node-pty",
-    logPath: ".ai/vcm/handoffs/logs/codex-reviewer.log",
     updatedAt: "2026-06-13T00:00:00.000Z"
   };
   const sessions = new Map<string, RoleSessionRecord>([

@@ -56,7 +56,6 @@ describe("createStatusService", () => {
             permissionMode: "default",
             cwd: "/repo",
             terminalBackend: "node-pty",
-            logPath: ".ai/vcm/handoffs/logs/coder.log",
             updatedAt: "2026-05-30T00:00:00.000Z",
             exitCode: null
           }];
@@ -89,6 +88,7 @@ function createTask(): TaskRecord {
     createdAt: "2026-05-30T00:00:00.000Z",
     updatedAt: "2026-05-30T00:00:00.000Z",
     repoRoot: "/repo",
+    worktreePath: "/repo/.claude/worktrees/demo-task",
     branch: "feature/vcm",
     handoffDir: ".ai/vcm/handoffs",
     status: "running"
@@ -100,19 +100,11 @@ function createArtifactSummary(statuses: Record<ArtifactSummary["checks"][number
     paths: {
       handoffDir: ".ai/vcm/handoffs",
       roleCommandsDir: ".ai/vcm/handoffs/role-commands",
-      logsDir: ".ai/vcm/handoffs/logs",
       messagesDir: ".ai/vcm/handoffs/messages",
       roleCommandPaths: {
         architect: ".ai/vcm/handoffs/role-commands/architect.md",
         coder: ".ai/vcm/handoffs/role-commands/coder.md",
         reviewer: ".ai/vcm/handoffs/role-commands/reviewer.md"
-      },
-      roleLogPaths: {
-        "project-manager": ".ai/vcm/handoffs/logs/project-manager.log",
-        architect: ".ai/vcm/handoffs/logs/architect.log",
-        coder: ".ai/vcm/handoffs/logs/coder.log",
-        reviewer: ".ai/vcm/handoffs/logs/reviewer.log",
-        "codex-reviewer": ".ai/vcm/handoffs/logs/codex-reviewer.log"
       },
       messageRoutePaths: {
         "project-manager-architect": ".ai/vcm/handoffs/messages/project-manager-architect.md",

@@ -1,7 +1,7 @@
-import { DISPATCHABLE_ROLES, ROLE_NAMES } from "../../shared/constants.js";
+import { DISPATCHABLE_ROLES } from "../../shared/constants.js";
 import type { ArtifactSummary } from "../../shared/types/artifact.js";
 import type { TaskStatusReport } from "../../shared/types/api.js";
-import type { DispatchableRole, RoleName } from "../../shared/types/role.js";
+import type { DispatchableRole } from "../../shared/types/role.js";
 import type { RoleSessionRecord } from "../../shared/types/session.js";
 import type { ArtifactService } from "./artifact-service.js";
 import { isOpenFileLimitError } from "../errors.js";
@@ -65,22 +65,15 @@ export function createStatusService(deps: StatusServiceDeps): StatusService {
 
 function degradedArtifactSummary(handoffDir: string): ArtifactSummary {
   const roleCommandsDir = `${handoffDir}/role-commands`;
-  const logsDir = `${handoffDir}/logs`;
   const messagesDir = `${handoffDir}/messages`;
   return {
     paths: {
       handoffDir,
       roleCommandsDir,
-      logsDir,
       messagesDir,
       roleCommandPaths: Object.fromEntries(
         DISPATCHABLE_ROLES.map((role) => [role, `${roleCommandsDir}/${role}.md`])
       ) as Record<DispatchableRole, string>,
-      roleLogPaths: Object.fromEntries(
-        ROLE_NAMES
-          .filter((role) => role !== "codex-translator")
-          .map((role: RoleName) => [role, `${logsDir}/${role}.log`])
-      ) as Partial<Record<RoleName, string>>,
       messageRoutePaths: {},
       architecturePlanPath: `${handoffDir}/architecture-plan.md`,
       knownIssuesPath: `${handoffDir}/known-issues.md`,

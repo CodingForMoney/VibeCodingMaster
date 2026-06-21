@@ -76,7 +76,7 @@ describe("node-pty-runtime", () => {
           activeWrites -= 1;
         }
       },
-      "/repo/.ai/vcm/handoffs/logs/project-manager.log",
+      "/repo/.tmp/terminal/project-manager.log",
       () => undefined
     );
 
@@ -102,7 +102,7 @@ describe("node-pty-runtime", () => {
           writes.push(content);
         }
       },
-      "/repo/.ai/vcm/handoffs/logs/project-manager.log",
+      "/repo/.tmp/terminal/project-manager.log",
       (error) => errors.push(error)
     );
 
@@ -124,7 +124,7 @@ describe("node-pty-runtime", () => {
           writes.push(content);
         }
       },
-      "/repo/.ai/vcm/handoffs/logs/project-manager.log",
+      "/repo/.tmp/terminal/project-manager.log",
       () => undefined
     );
 

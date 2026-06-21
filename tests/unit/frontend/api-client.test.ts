@@ -108,6 +108,32 @@ describe("apiClient", () => {
     expect(new Headers(init?.headers).has("content-type")).toBe(false);
   });
 
+  it("commits harness changes and rebases a task branch", async () => {
+    const fetchMock = mockFetch({
+      taskSlug: "demo-task",
+      branch: "feature/demo-task",
+      worktreePath: "/repo/.claude/worktrees/demo-task",
+      baseBranch: "main",
+      baseCommitBefore: "abc",
+      baseCommitAfter: "def",
+      committed: true,
+      rebased: true,
+      changedFiles: [],
+      message: "done"
+    });
+
+    await apiClient.commitAndRebaseHarnessTask("demo-task", {
+      changedFiles: [{ path: "CLAUDE.md", action: "update", reason: "updated" }]
+    });
+
+    const init = fetchMock.mock.calls[0]?.[1];
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/projects/harness/tasks/demo-task/commit-and-rebase");
+    expect(init?.method).toBe("POST");
+    expect(JSON.parse(String(init?.body))).toEqual({
+      changedFiles: [{ path: "CLAUDE.md", action: "update", reason: "updated" }]
+    });
+  });
+
   it("marks all messages done with a bodyless POST", async () => {
     const fetchMock = mockFetch({
       taskSlug: "demo-task",

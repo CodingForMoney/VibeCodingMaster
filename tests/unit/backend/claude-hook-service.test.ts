@@ -27,7 +27,6 @@ describe("createClaudeHookService", () => {
             permissionMode: "default",
             cwd: "/repo",
             terminalBackend: "node-pty",
-            logPath: ".ai/vcm/handoffs/logs/coder.log",
             updatedAt: "2026-06-01T00:00:00.000Z"
           };
         }
@@ -109,7 +108,6 @@ describe("createClaudeHookService", () => {
             permissionMode: "default",
             cwd: "/repo",
             terminalBackend: "node-pty",
-            logPath: ".ai/vcm/handoffs/logs/coder.log",
             updatedAt: "2026-06-01T00:00:00.000Z"
           };
         }
@@ -187,7 +185,7 @@ describe("createClaudeHookService", () => {
       "session:Stop:coder:claude_coder",
       "round:Stop:coder",
       "boundary:end:coder:runtime_coder",
-      "scan:demo-task:coder:.ai/vcm/handoffs:/repo"
+      "scan:demo-task:coder:.ai/vcm/handoffs:/repo/.claude/worktrees/demo-task"
     ]);
 
     calls.length = 0;
@@ -201,8 +199,8 @@ describe("createClaudeHookService", () => {
     });
     expect(settleDecision).toMatchObject({ action: "continue" });
     expect(calls).toEqual([
-      "list:demo-task:.ai/vcm/handoffs:/repo",
-      "scan:demo-task:undefined:.ai/vcm/handoffs:/repo"
+      "list:demo-task:.ai/vcm/handoffs:/repo/.claude/worktrees/demo-task",
+      "scan:demo-task:undefined:.ai/vcm/handoffs:/repo/.claude/worktrees/demo-task"
     ]);
   });
 
@@ -260,7 +258,7 @@ describe("createClaudeHookService", () => {
       reason: "VCM: validation job job-1 (running) is still running."
     });
     expect(result).toMatchObject({ ok: true, sessionUpdated: false, dispatchedCount: 0 });
-    expect(calls).toEqual(["guard:demo-task:coder:/repo"]);
+    expect(calls).toEqual(["guard:demo-task:coder:/repo/.claude/worktrees/demo-task"]);
   });
 
   it("never blocks Stop on the legacy combined endpoint", async () => {
@@ -481,6 +479,7 @@ function createTaskServiceStub() {
         createdAt: "2026-06-01T00:00:00.000Z",
         updatedAt: "2026-06-01T00:00:00.000Z",
         repoRoot: "/repo",
+        worktreePath: "/repo/.claude/worktrees/demo-task",
         branch: "feature/demo-task",
         handoffDir: ".ai/vcm/handoffs",
         status: "running"

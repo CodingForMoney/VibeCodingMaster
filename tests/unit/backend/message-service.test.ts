@@ -267,10 +267,10 @@ function createHarness(runningRoles: RoleName[], options: {
           createdAt: "2026-05-29T00:00:00.000Z",
           updatedAt: "2026-05-29T00:00:00.000Z",
           repoRoot: "/repo",
+          worktreePath: options.taskRepoRoot ?? "/repo/.claude/worktrees/demo-task",
           branch: "feature/vcm",
           handoffDir: ".ai/vcm/handoffs",
-          status: "running",
-          worktreePath: options.taskRepoRoot
+          status: "running"
         };
       }
     },
@@ -402,7 +402,6 @@ function createRoleSession(
     permissionMode: "default",
     cwd: "/repo",
     terminalBackend: "node-pty",
-    logPath: `.ai/vcm/handoffs/logs/${role}.log`,
     startedAt: "2026-05-29T00:00:00.000Z",
     updatedAt: "2026-05-29T00:00:00.000Z",
     exitCode: null

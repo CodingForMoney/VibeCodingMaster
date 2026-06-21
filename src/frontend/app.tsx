@@ -12,6 +12,7 @@ import {
   type ThemeMode
 } from "../shared/types/app-settings.js";
 import type {
+  CommitAndRebaseHarnessTaskResult,
   HarnessApplyResult,
   HarnessBootstrapStatusReport,
   HarnessStatusReport
@@ -46,6 +47,7 @@ export function App() {
   const [harnessStatus, setHarnessStatus] = useState<HarnessStatusReport | null>(null);
   const [harnessBootstrapStatus, setHarnessBootstrapStatus] = useState<HarnessBootstrapStatusReport | null>(null);
   const [harnessApplyResult, setHarnessApplyResult] = useState<HarnessApplyResult | null>(null);
+  const [harnessTaskSyncResult, setHarnessTaskSyncResult] = useState<CommitAndRebaseHarnessTaskResult | null>(null);
   const [gatewayStatus, setGatewayStatus] = useState<GatewayStatus | null>(null);
   const [gatewayQrLogin, setGatewayQrLogin] = useState<StartGatewayQrLoginResult | null>(null);
   const [gatewayQrCheck, setGatewayQrCheck] = useState<CheckGatewayQrLoginResult | null>(null);
@@ -498,6 +500,7 @@ export function App() {
           harnessStatus={harnessStatus}
           harnessBootstrapStatus={harnessBootstrapStatus}
           harnessApplyResult={harnessApplyResult}
+          harnessTaskSyncResult={harnessTaskSyncResult}
           gatewayStatus={gatewayStatus}
           gatewayQrLogin={gatewayQrLogin}
           gatewayQrCheck={gatewayQrCheck}
@@ -506,6 +509,7 @@ export function App() {
             const nextProject = await apiClient.connectProject({ repoPath });
             setProject(nextProject);
             setHarnessApplyResult(null);
+            setHarnessTaskSyncResult(null);
             await Promise.all([
               loadTasks(),
               loadHarnessStatus(),
@@ -523,18 +527,35 @@ export function App() {
           })}
           onRefreshHarness={() => withBusy(async () => {
             setHarnessApplyResult(null);
+            setHarnessTaskSyncResult(null);
             await Promise.all([
               loadHarnessStatus(),
               loadHarnessBootstrapStatus()
             ]);
           })}
           onApplyHarness={() => withBusy(async () => {
+            setHarnessTaskSyncResult(null);
             const result = await apiClient.applyHarness();
             setHarnessApplyResult(result);
             await Promise.all([
               loadHarnessStatus(),
               loadHarnessBootstrapStatus()
             ]);
+          })}
+          onCommitAndRebaseHarnessTask={() => withBusy(async () => {
+            if (!activeTask) {
+              throw new Error("Select a task before using Commit & rebase task.");
+            }
+            if (!harnessApplyResult?.changedFiles.length) {
+              throw new Error("Apply a harness update before using Commit & rebase task.");
+            }
+            const result = await apiClient.commitAndRebaseHarnessTask(activeTask.taskSlug, {
+              changedFiles: harnessApplyResult.changedFiles
+            });
+            setHarnessTaskSyncResult(result);
+            const nextProject = await apiClient.getCurrentProject();
+            setProject(nextProject);
+            await loadTasks();
           })}
           onStartHarnessBootstrap={() => withBusy(async () => {
             const result = await apiClient.startHarnessBootstrap();
@@ -830,8 +851,8 @@ export function App() {
           <h1>{project ? "Create a task to open the workspace" : "Connect a repository to begin"}</h1>
           <p>
             {project
-              ? "Tasks create local role commands, logs, and handoff artifacts for the selected repository."
-              : "VibeCodingMaster will create a local task workspace, role sessions, logs, and handoff artifacts."}
+              ? "Tasks create local role commands and handoff artifacts for the selected repository."
+              : "VibeCodingMaster will create a local task workspace, role sessions, and handoff artifacts."}
           </p>
         </section>
       )}

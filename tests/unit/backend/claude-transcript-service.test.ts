@@ -309,7 +309,6 @@ function createRoleSessionRecord(overrides: Partial<RoleSessionRecord> = {}): Ro
     permissionMode: "default",
     cwd: "/repo",
     terminalBackend: "node-pty",
-    logPath: ".ai/vcm/handoffs/logs/project-manager.log",
     updatedAt: "2026-05-30T00:00:00.000Z",
     ...overrides
   };

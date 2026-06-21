@@ -157,9 +157,8 @@ Task lifecycle commands:
 - `/pull-current` calls `POST /api/projects/current/pull` for the selected
   desktop VCM project. It runs the same connected-repository fast-forward-only
   pull as the desktop button. It must fail if the base repo has uncommitted
-  changes, if the branch has no upstream, or if the current active task is an
-  inline task using the base repo directly.
-- `/create-task <task-slug> [title]` creates a normal worktree-backed task,
+  changes or if the branch has no upstream.
+- `/create-task <task-slug> [title]` creates a task worktree,
   selects it as the mobile current task, applies the saved launch template, and
   starts the four role sessions (`project-manager`, `architect`, `coder`,
   `reviewer`) through the same one-click-start path as the desktop UI. The saved
@@ -245,7 +244,7 @@ Rules:
 ```text
 /create-task <task-slug> [title]
   -> require current project
-  -> create a normal worktree-backed task through existing task service/API
+  -> create a task branch and worktree through existing task service/API
   -> select it as gateway current task
   -> load saved launch template from app preferences
   -> set orchestration from template
@@ -258,8 +257,6 @@ Rules:
 Rules:
 
 - Use the same task creation validation as desktop VCM.
-- Default to `createWorktree: true`. Gateway should not create inline tasks in
-  the MVP, because inline tasks make mobile pull/cleanup semantics harder.
 - Use the same one-click-start semantics as desktop VCM: only start from a newly
   created task with no existing role sessions.
 - If one role session fails to start, reply with the role that failed and leave
@@ -341,9 +338,8 @@ If no task is selected:
 No task is selected. Use /tasks and /use-task first.
 ```
 
-If `/pull-current` cannot run because the base repo is dirty, has no upstream,
-or is blocked by an inline task, reply with the same VCM reason shown in the
-desktop Connected Repository section.
+If `/pull-current` cannot run because the base repo is dirty or has no upstream,
+reply with the same VCM reason shown in the desktop Connected Repository section.
 
 If `/create-task` fails task validation, reply with the VCM error and hint.
 Common examples are invalid task slug, dirty base repo, existing task branch, or
@@ -674,7 +670,7 @@ Validation:
 
 - Implement `/pull-current` by calling the connected repository pull path:
   `POST /api/projects/current/pull` or the equivalent project service method.
-- Implement `/create-task <task-slug> [title]` by creating a worktree-backed
+- Implement `/create-task <task-slug> [title]` by creating a task worktree
   task, selecting it as mobile current task, applying the saved launch template,
   setting orchestration mode, setting translation state, and starting the four
   role sessions.
@@ -688,7 +684,7 @@ Validation:
 - Parser tests for `/pull-current`, `/create-task`, `/close-task`, and
   confirmation mismatch.
 - Service tests for pull success and pull-blocked reasons.
-- Service tests that task creation uses `createWorktree: true` and launch
+- Service tests that task creation creates a task worktree and uses launch
   template role settings.
 - Service tests for partial role-session start failure reporting.
 - Service tests that Close Task calls the existing cleanup path only after exact
@@ -781,8 +777,8 @@ Gateway MVP is complete when:
 - Bound phone can list and select current project/task context.
 - Bound phone can run `/pull-current` to update the connected base repository
   through VCM's fast-forward-only pull path.
-- Bound phone can run `/create-task <task-slug> [title]` to create a
-  worktree-backed task, select it, apply the saved launch template, and start
+- Bound phone can run `/create-task <task-slug> [title]` to create a task
+  worktree, select it, apply the saved launch template, and start
   the four role sessions.
 - Bound phone can send Chinese plain text to current task PM.
 - PM receives only the translated English prompt, without original Chinese.

@@ -123,7 +123,6 @@ export interface RoleSessionRecord {
   cwd: string;
   terminalBackend: "node-pty";
   pid?: number;
-  logPath?: string;
   roleCommandPath?: string;
   handoffArtifactPath?: string;
   startedAt?: string;

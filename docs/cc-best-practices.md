@@ -1669,7 +1669,7 @@ Branch rules:
 Task close rules:
 
 - after task completion, close the task only when the user is ready to delete task-local state
-- for worktree-backed tasks, task close may delete the task worktree, optionally delete the task branch, and remove task/session/message/orchestration/handoff metadata
+- task close deletes the task worktree, deletes the task branch, and removes task/session/message/orchestration/handoff metadata
 - task close may stop harness-managed running role sessions, but it must not silently discard uncommitted changes; finish, commit, or preserve anything important before using it
 
 Small commits:

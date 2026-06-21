@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import type {
+  CommitAndRebaseHarnessTaskResult,
   HarnessApplyResult,
   HarnessBootstrapStatusReport,
   HarnessStatusReport
@@ -11,9 +12,12 @@ export interface HarnessPanelProps {
   status: HarnessStatusReport | null;
   bootstrapStatus: HarnessBootstrapStatusReport | null;
   applyResult?: HarnessApplyResult | null;
+  taskSyncResult?: CommitAndRebaseHarnessTaskResult | null;
+  canCommitAndRebaseTask?: boolean;
   busy?: boolean;
   onRefresh(): Promise<void>;
   onApply(): Promise<void>;
+  onCommitAndRebaseTask(): Promise<void>;
   onStartBootstrap(): Promise<void>;
 }
 
@@ -21,9 +25,12 @@ export function HarnessPanel({
   status,
   bootstrapStatus,
   applyResult,
+  taskSyncResult,
+  canCommitAndRebaseTask = false,
   busy = false,
   onRefresh,
   onApply,
+  onCommitAndRebaseTask,
   onStartBootstrap
 }: HarnessPanelProps) {
   const [showBootstrapTerminal, setShowBootstrapTerminal] = useState(false);
@@ -161,13 +168,27 @@ export function HarnessPanel({
         <div className="harness-result">
           <p>{applyResult.message}</p>
           {applyResult.changedFiles.length > 0 ? (
-            <ul>
-              {applyResult.changedFiles.map((change) => (
-                <li key={`${change.path}:${change.action}`}>
-                  <strong>{change.action}</strong> {change.path}
-                </li>
-              ))}
-            </ul>
+            <>
+              <ul>
+                {applyResult.changedFiles.map((change) => (
+                  <li key={`${change.path}:${change.action}`}>
+                    <strong>{change.action}</strong> {change.path}
+                  </li>
+                ))}
+              </ul>
+              {canCommitAndRebaseTask && !taskSyncResult ? (
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void onCommitAndRebaseTask()}
+                >
+                  Commit &amp; rebase task
+                </button>
+              ) : null}
+            </>
+          ) : null}
+          {taskSyncResult ? (
+            <p className="muted">{taskSyncResult.message}</p>
           ) : null}
         </div>
       ) : null}

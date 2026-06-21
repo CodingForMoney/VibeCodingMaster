@@ -17,8 +17,10 @@ const { HarnessPanel } = await import("../../../src/frontend/components/harness-
 const baseProps = {
   bootstrapStatus: null,
   applyResult: null,
+  taskSyncResult: null,
   onRefresh: async () => {},
   onApply: async () => {},
+  onCommitAndRebaseTask: async () => {},
   onStartBootstrap: async () => {}
 };
 
@@ -125,5 +127,23 @@ describe("HarnessPanel fixed-install three-state UI", () => {
 
     const stateCHtml = render(makeStatus({ initialized: true, needsApply: false }), true);
     expect(stateCHtml).toContain('disabled="">Refresh</button>');
+  });
+
+  it("shows Commit & rebase task after harness apply when a worktree task is active", () => {
+    const html = renderToStaticMarkup(
+      createElement(HarnessPanel, {
+        ...baseProps,
+        status: makeStatus({ initialized: true, needsApply: false }),
+        applyResult: {
+          version: 1,
+          changedFiles: [change("CLAUDE.md", "update")],
+          message: "VCM Harness updated."
+        },
+        canCommitAndRebaseTask: true
+      } as never)
+    );
+
+    expect(html).toContain("VCM Harness updated.");
+    expect(html).toContain("Commit &amp; rebase task</button>");
   });
 });

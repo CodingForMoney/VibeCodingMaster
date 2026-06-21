@@ -3,6 +3,7 @@ import { execFile } from "node:child_process";
 import path from "node:path";
 import { promisify } from "node:util";
 import type {
+  CommitAndRebaseHarnessTaskResult,
   HarnessApplyResult,
   HarnessBootstrapCheck,
   HarnessBootstrapSession,
@@ -16,6 +17,7 @@ import type {
   StartHarnessBootstrapResult
 } from "../../shared/types/harness.js";
 import type { ClaudePermissionMode } from "../../shared/types/session.js";
+import type { GitAdapter } from "../adapters/git-adapter.js";
 import type { FileSystemAdapter } from "../adapters/filesystem.js";
 import { renderArchitectHarnessRules } from "../templates/harness/architect-agent.js";
 import { renderCoderHarnessRules } from "../templates/harness/coder-agent.js";
@@ -56,17 +58,26 @@ const BOOTSTRAP_SESSION_PATH = ".ai/vcm/bootstrap/session.json";
 export interface HarnessService {
   getHarnessStatus(repoRoot: string): Promise<HarnessStatusReport>;
   applyHarness(repoRoot: string): Promise<HarnessApplyResult>;
+  commitAndRebaseTask(repoRoot: string, input: CommitAndRebaseHarnessTaskInput): Promise<CommitAndRebaseHarnessTaskResult>;
   getBootstrapStatus(repoRoot: string): Promise<HarnessBootstrapStatusReport>;
   startHarnessBootstrap(repoRoot: string, input?: StartHarnessBootstrapRequest): Promise<StartHarnessBootstrapResult>;
 }
 
 export interface HarnessServiceDeps {
   fs: FileSystemAdapter;
+  git?: Pick<GitAdapter, "addPaths" | "commit" | "getCurrentBranch" | "getHeadCommit" | "getStagedStatus" | "getStatusPorcelain" | "rebase">;
   runtime?: TerminalRuntime;
   projectService?: Pick<ProjectService, "loadConfig">;
   apiUrl?: string;
   now?: () => string;
   runFixedInstaller?: (repoRoot: string) => Promise<HarnessApplyResult>;
+}
+
+export interface CommitAndRebaseHarnessTaskInput {
+  taskSlug: string;
+  branch: string;
+  worktreePath: string;
+  changedFiles: HarnessPlannedChange[];
 }
 
 interface HarnessFileDefinition {
@@ -346,6 +357,79 @@ export function createHarnessService(deps: HarnessServiceDeps): HarnessService {
           : "VCM Harness updated. Review these files and commit the harness changes before starting long-running work."
       };
     },
+    async commitAndRebaseTask(repoRoot, input) {
+      if (!deps.git) {
+        throw new VcmError({
+          code: "HARNESS_GIT_UNAVAILABLE",
+          message: "Git-backed harness sync is not available in this VCM runtime.",
+          statusCode: 501
+        });
+      }
+      const changedFiles = dedupeHarnessChanges(input.changedFiles);
+      const changedPaths = changedFiles.map((change) => change.path);
+      const taskBranch = await deps.git.getCurrentBranch(input.worktreePath);
+      if (taskBranch !== input.branch) {
+        throw new VcmError({
+          code: "HARNESS_TASK_BRANCH_MISMATCH",
+          message: "The selected task worktree is not on its recorded task branch.",
+          statusCode: 409,
+          hint: `Expected ${input.branch}, found ${taskBranch}.`
+        });
+      }
+
+      const taskStatus = await deps.git.getStatusPorcelain(input.worktreePath);
+      if (taskStatus.trim()) {
+        throw new VcmError({
+          code: "HARNESS_TASK_DIRTY",
+          message: "The selected task worktree has uncommitted changes.",
+          statusCode: 409,
+          hint: "Commit or clean the task worktree before rebasing it onto the harness commit."
+        });
+      }
+
+      const preExistingStaged = await deps.git.getStagedStatus(repoRoot);
+      if (preExistingStaged.trim()) {
+        throw new VcmError({
+          code: "HARNESS_BASE_STAGED_CHANGES",
+          message: "The connected repository already has staged changes.",
+          statusCode: 409,
+          hint: "Commit, unstage, or clean existing staged changes before using Commit & rebase task."
+        });
+      }
+
+      const baseBranch = await deps.git.getCurrentBranch(repoRoot);
+      const baseCommitBefore = await deps.git.getHeadCommit(repoRoot);
+      let harnessCommit: string | undefined;
+      let committed = false;
+
+      if (changedPaths.length > 0) {
+        await deps.git.addPaths(repoRoot, changedPaths);
+        const stagedHarnessChanges = await deps.git.getStagedStatus(repoRoot);
+        if (stagedHarnessChanges.trim()) {
+          harnessCommit = await deps.git.commit(repoRoot, "chore: update VCM harness");
+          committed = true;
+        }
+      }
+
+      const baseCommitAfter = await deps.git.getHeadCommit(repoRoot);
+      await deps.git.rebase(input.worktreePath, baseCommitAfter);
+
+      return {
+        taskSlug: input.taskSlug,
+        branch: input.branch,
+        worktreePath: input.worktreePath,
+        baseBranch,
+        baseCommitBefore,
+        baseCommitAfter,
+        harnessCommit,
+        committed,
+        rebased: true,
+        changedFiles,
+        message: committed
+          ? `Committed VCM harness update ${shortCommit(baseCommitAfter)} on ${baseBranch} and rebased ${input.branch}.`
+          : `No new harness commit was needed; rebased ${input.branch} onto ${shortCommit(baseCommitAfter)}.`
+      };
+    },
     async getBootstrapStatus(repoRoot) {
       return getHarnessBootstrapStatus(deps, repoRoot, now);
     },
@@ -423,6 +507,49 @@ export function createHarnessService(deps: HarnessServiceDeps): HarnessService {
       };
     }
   };
+}
+
+function dedupeHarnessChanges(changedFiles: HarnessPlannedChange[]): HarnessPlannedChange[] {
+  const seen = new Set<string>();
+  const changes: HarnessPlannedChange[] = [];
+  for (const change of changedFiles) {
+    const normalizedPath = normalizeHarnessGitPath(change.path);
+    if (seen.has(normalizedPath)) {
+      continue;
+    }
+    seen.add(normalizedPath);
+    changes.push({
+      ...change,
+      path: normalizedPath
+    });
+  }
+  return changes;
+}
+
+function normalizeHarnessGitPath(value: string): string {
+  if (!value || value.includes("\0") || path.posix.isAbsolute(value)) {
+    throw new VcmError({
+      code: "HARNESS_CHANGED_PATH_INVALID",
+      message: "Harness changed file path is invalid.",
+      statusCode: 400,
+      hint: value
+    });
+  }
+
+  const normalized = path.posix.normalize(value).replace(/^\.\//, "");
+  if (normalized === "." || normalized.startsWith("../")) {
+    throw new VcmError({
+      code: "HARNESS_CHANGED_PATH_INVALID",
+      message: "Harness changed file path must stay inside the repository.",
+      statusCode: 400,
+      hint: value
+    });
+  }
+  return normalized;
+}
+
+function shortCommit(commit: string): string {
+  return commit.slice(0, 7);
 }
 
 async function analyzeHarnessFiles(fs: FileSystemAdapter, repoRoot: string): Promise<HarnessFileAnalysis[]> {

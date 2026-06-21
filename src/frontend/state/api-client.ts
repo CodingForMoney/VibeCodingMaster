@@ -9,6 +9,8 @@ import type {
 } from "../../shared/types/gateway.js";
 import type { RuntimeDiagnostics } from "../../shared/types/diagnostics.js";
 import type {
+  CommitAndRebaseHarnessTaskRequest,
+  CommitAndRebaseHarnessTaskResult,
   HarnessApplyResult,
   HarnessBootstrapStatusReport,
   HarnessStatusReport,
@@ -105,6 +107,15 @@ export const apiClient = {
     return request<HarnessApplyResult>("/api/projects/harness/apply", {
       method: "POST"
     });
+  },
+  commitAndRebaseHarnessTask(taskSlug: string, input: CommitAndRebaseHarnessTaskRequest) {
+    return request<CommitAndRebaseHarnessTaskResult>(
+      `/api/projects/harness/tasks/${encodeURIComponent(taskSlug)}/commit-and-rebase`,
+      {
+        method: "POST",
+        body: JSON.stringify(input)
+      }
+    );
   },
   getHarnessBootstrapStatus() {
     return request<HarnessBootstrapStatusReport>("/api/projects/harness/bootstrap");

@@ -853,7 +853,6 @@ function createRoleSession(role: RoleSessionRecord["role"], patch: Partial<RoleS
     permissionMode: "default",
     cwd: "/repo",
     terminalBackend: "node-pty",
-    logPath: `.ai/vcm/handoffs/logs/${role}.log`,
     updatedAt: "2026-05-31T00:00:00.000Z",
     ...patch
   };

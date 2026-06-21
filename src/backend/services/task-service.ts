@@ -39,13 +39,8 @@ export function createTaskService(deps: TaskServiceDeps): TaskService {
       const config = await deps.projectService.loadConfig(repoRoot);
       const taskStoreRoot = deps.projectService.getProjectDataRoot(repoRoot);
       const taskPath = getTaskPath(taskStoreRoot, input.taskSlug);
-      const shouldCreateWorktree = input.createWorktree !== false;
-      const taskBranch = shouldCreateWorktree
-        ? `feature/${input.taskSlug}`
-        : await deps.git.getCurrentBranch(repoRoot);
-      const worktreePath = shouldCreateWorktree
-        ? getTaskWorktreePath(repoRoot, input.taskSlug)
-        : undefined;
+      const taskBranch = `feature/${input.taskSlug}`;
+      const worktreePath = getTaskWorktreePath(repoRoot, input.taskSlug);
 
       if (await deps.fs.pathExists(taskPath)) {
         throw new VcmError({
@@ -62,7 +57,7 @@ export function createTaskService(deps: TaskServiceDeps): TaskService {
           hint: "Apply VCM Harness first so .gitignore contains the VCM managed block."
         });
       }
-      if (shouldCreateWorktree && !(await deps.git.isIgnored(repoRoot, ".claude/worktrees/.probe"))) {
+      if (!(await deps.git.isIgnored(repoRoot, ".claude/worktrees/.probe"))) {
         throw new VcmError({
           code: "VCM_WORKTREES_NOT_IGNORED",
           message: ".claude/worktrees/ is not ignored by Git.",
@@ -70,55 +65,41 @@ export function createTaskService(deps: TaskServiceDeps): TaskService {
           hint: "Apply VCM Harness first so .gitignore ignores Claude-compatible task worktrees."
         });
       }
-      if (!shouldCreateWorktree) {
-        const activeInlineTask = await findActiveInlineTask(deps.fs, taskStoreRoot);
-        if (activeInlineTask) {
-          throw new VcmError({
-            code: "INLINE_TASK_EXISTS",
-            message: `An inline task already exists: ${activeInlineTask.taskSlug}`,
-            statusCode: 409,
-            hint: "Close the existing inline task first, or enable Create worktree and branch for this task."
-          });
-        }
+      if (await deps.git.branchExists(repoRoot, taskBranch)) {
+        throw new VcmError({
+          code: "TASK_BRANCH_EXISTS",
+          message: `Task branch already exists: ${taskBranch}`,
+          statusCode: 409,
+          hint: "Choose a different task name or clean up the existing branch."
+        });
       }
-      if (shouldCreateWorktree && worktreePath) {
-        if (await deps.git.branchExists(repoRoot, taskBranch)) {
-          throw new VcmError({
-            code: "TASK_BRANCH_EXISTS",
-            message: `Task branch already exists: ${taskBranch}`,
-            statusCode: 409,
-            hint: "Choose a different task name or clean up the existing branch."
-          });
-        }
-        if (await deps.fs.pathExists(worktreePath)) {
-          throw new VcmError({
-            code: "TASK_WORKTREE_EXISTS",
-            message: `Task worktree already exists: ${worktreePath}`,
-            statusCode: 409,
-            hint: "Choose a different task name or clean up the existing worktree."
-          });
-        }
-        const baseStatus = await deps.git.getStatusPorcelain(repoRoot);
-        if (baseStatus.trim()) {
-          throw new VcmError({
-            code: "BASE_REPO_DIRTY",
-            message: "The connected repository has uncommitted changes.",
-            statusCode: 409,
-            hint: "Commit, stash, or discard base repository changes before creating a task worktree."
-          });
-        }
-
-        await deps.fs.ensureDir(path.dirname(worktreePath));
-        await deps.git.createWorktree({
-          repoRoot,
-          branch: taskBranch,
-          worktreePath,
-          baseRef: "HEAD"
+      if (await deps.fs.pathExists(worktreePath)) {
+        throw new VcmError({
+          code: "TASK_WORKTREE_EXISTS",
+          message: `Task worktree already exists: ${worktreePath}`,
+          statusCode: 409,
+          hint: "Choose a different task name or clean up the existing worktree."
+        });
+      }
+      const baseStatus = await deps.git.getStatusPorcelain(repoRoot);
+      if (baseStatus.trim()) {
+        throw new VcmError({
+          code: "BASE_REPO_DIRTY",
+          message: "The connected repository has uncommitted changes.",
+          statusCode: 409,
+          hint: "Commit, stash, or discard base repository changes before creating a task worktree."
         });
       }
 
       const timestamp = now();
-      const taskRepoRoot = worktreePath ?? repoRoot;
+      await deps.fs.ensureDir(path.dirname(worktreePath));
+      await deps.git.createWorktree({
+        repoRoot,
+        branch: taskBranch,
+        worktreePath,
+        baseRef: "HEAD"
+      });
+
       const task: TaskRecord = {
         version: 1,
         taskSlug: input.taskSlug,
@@ -134,14 +115,14 @@ export function createTaskService(deps: TaskServiceDeps): TaskService {
         cleanupStatus: "active"
       };
 
-      await ensureTaskRuntimeStateDirs(deps.fs, taskRepoRoot, config.stateRoot);
+      await ensureTaskRuntimeStateDirs(deps.fs, worktreePath, config.stateRoot);
       await deps.artifactService.ensureHandoffStructure({
-        repoRoot: taskRepoRoot,
+        repoRoot: worktreePath,
         taskSlug: input.taskSlug,
         handoffDir: task.handoffDir
       });
       await deps.artifactService.createArtifactTemplates({
-        repoRoot: taskRepoRoot,
+        repoRoot: worktreePath,
         taskSlug: input.taskSlug,
         handoffDir: task.handoffDir,
         branch: task.branch
@@ -158,7 +139,7 @@ export function createTaskService(deps: TaskServiceDeps): TaskService {
       const entries = await deps.fs.readDir(tasksDir);
       const tasks: TaskRecord[] = [];
       for (const entry of entries.filter((candidate) => candidate.endsWith(".json"))) {
-        tasks.push(normalizeTaskRecord(await deps.fs.readJson<Partial<TaskRecord>>(path.join(tasksDir, entry))));
+        tasks.push(await deps.fs.readJson<TaskRecord>(path.join(tasksDir, entry)));
       }
 
       return tasks.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
@@ -175,7 +156,7 @@ export function createTaskService(deps: TaskServiceDeps): TaskService {
         });
       }
 
-      return normalizeTaskRecord(await deps.fs.readJson<Partial<TaskRecord>>(taskPath));
+      return deps.fs.readJson<TaskRecord>(taskPath);
     },
     async saveTask(repoRoot, task) {
       await deps.fs.writeJsonAtomic(getTaskPath(deps.projectService.getProjectDataRoot(repoRoot), task.taskSlug), task);
@@ -213,16 +194,9 @@ export function createTaskService(deps: TaskServiceDeps): TaskService {
       const removedStatePaths: string[] = [];
       const cleanedAt = now();
 
-      if (task.worktreePath) {
-        assertTaskWorktreePath(repoRoot, task.worktreePath);
-        await deps.git.removeWorktree(repoRoot, task.worktreePath, { force: options.force ?? true });
-      }
-
-      let deletedBranch: string | undefined;
-      if (task.worktreePath && (options.deleteBranch ?? true)) {
-        await deps.git.deleteBranch(repoRoot, task.branch, { force: options.forceDeleteBranch ?? true });
-        deletedBranch = task.branch;
-      }
+      assertTaskWorktreePath(repoRoot, task.worktreePath);
+      await deps.git.removeWorktree(repoRoot, task.worktreePath, { force: options.force ?? true });
+      await deps.git.deleteBranch(repoRoot, task.branch, { force: options.forceDeleteBranch ?? true });
 
       for (const statePath of statePaths) {
         await deps.fs.removePath(statePath, { recursive: true, force: true });
@@ -233,7 +207,7 @@ export function createTaskService(deps: TaskServiceDeps): TaskService {
         taskSlug,
         removedWorktreePath: task.worktreePath,
         removedStatePaths,
-        deletedBranch,
+        deletedBranch: task.branch,
         cleanedAt
       };
     }
@@ -241,7 +215,7 @@ export function createTaskService(deps: TaskServiceDeps): TaskService {
 }
 
 export function getTaskRuntimeRepoRoot(task: TaskRecord): string {
-  return task.worktreePath ?? task.repoRoot;
+  return task.worktreePath;
 }
 
 function getTaskPath(taskStoreRoot: string, taskSlug: string): string {
@@ -258,53 +232,6 @@ async function ensureTaskRuntimeStateDirs(fs: FileSystemAdapter, taskRepoRoot: s
   await fs.ensureDir(path.join(taskRepoRoot, stateRoot, "orchestration"));
   await fs.ensureDir(path.join(taskRepoRoot, stateRoot, "translation"));
   await fs.ensureDir(path.join(taskRepoRoot, stateRoot, "codex-reviews"));
-}
-
-async function findActiveInlineTask(fs: FileSystemAdapter, taskStoreRoot: string): Promise<TaskRecord | undefined> {
-  const tasksDir = path.join(taskStoreRoot, "tasks");
-  if (!(await fs.pathExists(tasksDir))) {
-    return undefined;
-  }
-
-  const entries = await fs.readDir(tasksDir);
-  for (const entry of entries.filter((candidate) => candidate.endsWith(".json"))) {
-    const task = normalizeTaskRecord(await fs.readJson<Partial<TaskRecord>>(path.join(tasksDir, entry)));
-    if (!task.worktreePath && task.cleanupStatus !== "cleaned") {
-      return task;
-    }
-  }
-  return undefined;
-}
-
-function normalizeTaskRecord(input: Partial<TaskRecord>): TaskRecord {
-  return {
-    version: 1,
-    taskSlug: input.taskSlug ?? "",
-    title: input.title,
-    createdAt: input.createdAt ?? "",
-    updatedAt: input.updatedAt ?? input.createdAt ?? "",
-    repoRoot: input.repoRoot ?? "",
-    worktreePath: input.worktreePath,
-    branch: input.branch ?? "",
-    handoffDir: input.handoffDir ?? ".ai/vcm/handoffs",
-    status: normalizeTaskStatus(input.status),
-    specPath: input.specPath,
-    cleanupStatus: input.cleanupStatus,
-    cleanedAt: input.cleanedAt
-  };
-}
-
-function normalizeTaskStatus(value: unknown): TaskStatus {
-  if (value === "created" || value === "running" || value === "stopped") {
-    return value;
-  }
-  if (value === undefined || value === null) {
-    return "created";
-  }
-  if (value === "planning") {
-    return "created";
-  }
-  return "stopped";
 }
 
 function getTaskStatePaths(

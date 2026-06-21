@@ -319,27 +319,17 @@ export function TaskWorkspace({
   }
 
   async function closeTask() {
-    const closeMessage = task.worktreePath
-      ? [
-          `Close task "${task.taskSlug}"?`,
-          "",
-          "This is destructive:",
-          "- stops VCM-managed running role sessions for this task",
-          `- deletes the task worktree: ${task.worktreePath}`,
-          `- deletes the Git branch: ${task.branch}`,
-          "- deletes VCM task/session/message/orchestration state",
-          "",
-          "VCM will not check running sessions or uncommitted changes before closing."
-        ].join("\n")
-      : [
-          `Close task "${task.taskSlug}"?`,
-          "",
-          "This task was created without a separate worktree/branch.",
-          "VCM will stop VCM-managed running role sessions for this task.",
-          "VCM will delete task/session/message/orchestration state only.",
-          "",
-          "VCM will not check running sessions or uncommitted changes before closing."
-        ].join("\n");
+    const closeMessage = [
+      `Close task "${task.taskSlug}"?`,
+      "",
+      "This is destructive:",
+      "- stops VCM-managed running role sessions for this task",
+      `- deletes the task worktree: ${task.worktreePath}`,
+      `- deletes the Git branch: ${task.branch}`,
+      "- deletes VCM task/session/message/orchestration state",
+      "",
+      "VCM will not check running sessions or uncommitted changes before closing."
+    ].join("\n");
     const confirmed = window.confirm(
       closeMessage
     );
@@ -352,7 +342,6 @@ export function TaskWorkspace({
     try {
       await apiClient.cleanupTask(task.taskSlug, {
         force: true,
-        deleteBranch: Boolean(task.worktreePath),
         forceDeleteBranch: true
       });
       appendEvent(`closed ${task.taskSlug}`);

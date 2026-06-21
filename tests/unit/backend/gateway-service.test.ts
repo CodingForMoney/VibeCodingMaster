@@ -275,7 +275,9 @@ function createService(input: {
       async cleanupTask() {
         return {
           taskSlug: task.taskSlug,
+          removedWorktreePath: task.worktreePath,
           removedStatePaths: [],
+          deletedBranch: task.branch,
           cleanedAt: NOW
         };
       }
@@ -517,7 +519,6 @@ function createPmSession(transcriptPath: string): RoleSessionRecord {
     permissionMode: "default",
     cwd: "/repo",
     terminalBackend: "node-pty",
-    logPath: "/tmp/pm-session.log",
     startedAt: "2026-06-11T00:00:00.000Z",
     updatedAt: NOW,
     lastTurnStartedAt: "2026-06-11T00:00:00.000Z",

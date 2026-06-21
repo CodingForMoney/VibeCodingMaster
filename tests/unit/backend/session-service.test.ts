@@ -12,6 +12,8 @@ import { createSessionRegistry } from "../../../src/backend/runtime/session-regi
 import { createSessionService } from "../../../src/backend/services/session-service.js";
 import type { FileSystemAdapter } from "../../../src/backend/adapters/filesystem.js";
 
+const TASK_WORKTREE = "/repo/.claude/worktrees/demo-task";
+
 describe("createSessionService", () => {
   it("keeps Max effort for Claude but not Codex options", () => {
     expect(CODEX_EFFORT_OPTIONS.map((option) => option.value)).not.toContain("max");
@@ -27,7 +29,7 @@ describe("createSessionService", () => {
       permissionMode: "default"
     });
     expect(started.claudeSessionId).toMatch(/^[0-9a-f-]{36}$/);
-    expect(started.transcriptPath).toMatch(/\.claude\/projects\/-repo\/[0-9a-f-]{36}\.jsonl$/);
+    expect(started.transcriptPath).toMatch(/\.claude\/projects\/-repo-\.claude-worktrees-demo-task\/[0-9a-f-]{36}\.jsonl$/);
     expect(started.command).toContain("--session-id");
     expect(firstRuntimeInputs[0]?.args).toContain("--session-id");
 
@@ -67,7 +69,7 @@ describe("createSessionService", () => {
     expect(writes).toHaveLength(0);
     expect(runtimeInputs[0]?.env).toMatchObject({
       VCM_API_URL: "http://127.0.0.1:4173",
-      VCM_TASK_REPO_ROOT: "/repo",
+      VCM_TASK_REPO_ROOT: TASK_WORKTREE,
       VCM_TASK_SLUG: "demo-task",
       VCM_ROLE: "project-manager",
       VCM_SESSION_ID: expect.any(String)
@@ -118,8 +120,8 @@ describe("createSessionService", () => {
 
   it("starts Codex Reviewer sessions with Codex CLI from .ai/codex", async () => {
     const fs = createMemoryFs();
-    await fs.writeText("/repo/.ai/codex", "");
-    await fs.writeText("/repo/.ai/codex/config.toml", `approval_policy = "never"`);
+    await fs.writeText(`${TASK_WORKTREE}/.ai/codex`, "");
+    await fs.writeText(`${TASK_WORKTREE}/.ai/codex/config.toml`, `approval_policy = "never"`);
     const runtimeInputs: CreateTerminalSessionInput[] = [];
     const service = createTestSessionService(fs, runtimeInputs);
 
@@ -131,14 +133,14 @@ describe("createSessionService", () => {
     expect(started.role).toBe("codex-reviewer");
     expect(started.model).toBe("gpt-5.5");
     expect(started.transcriptPath).toBeUndefined();
-    expect(started.command).toContain("codex --cd /repo/.ai/codex");
+    expect(started.command).toContain(`codex --cd ${TASK_WORKTREE}/.ai/codex`);
     expect(runtimeInputs[0]?.command).toBe("codex");
-    expect(runtimeInputs[0]?.cwd).toBe("/repo");
+    expect(runtimeInputs[0]?.cwd).toBe(TASK_WORKTREE);
     expect(runtimeInputs[0]?.args).toEqual([
       "--cd",
-      "/repo/.ai/codex",
+      `${TASK_WORKTREE}/.ai/codex`,
       "--add-dir",
-      "/repo/.ai/vcm/codex-reviews",
+      `${TASK_WORKTREE}/.ai/vcm/codex-reviews`,
       "--sandbox",
       "workspace-write",
       "--ask-for-approval",
@@ -150,13 +152,13 @@ describe("createSessionService", () => {
       "--config",
       'model_reasoning_effort="xhigh"'
     ]);
-    expect(runtimeInputs[0]?.logPath).toBe("/repo/.ai/vcm/handoffs/logs/codex-reviewer.log");
+    expect(runtimeInputs[0]?.logPath).toBeUndefined();
   });
 
   it("starts Codex Reviewer without nested Codex sandbox inside devContainer", async () => {
     const fs = createMemoryFs();
-    await fs.writeText("/repo/.ai/codex", "");
-    await fs.writeText("/repo/.ai/codex/config.toml", `approval_policy = "never"`);
+    await fs.writeText(`${TASK_WORKTREE}/.ai/codex`, "");
+    await fs.writeText(`${TASK_WORKTREE}/.ai/codex/config.toml`, `approval_policy = "never"`);
     const runtimeInputs: CreateTerminalSessionInput[] = [];
     const service = createTestSessionService(fs, runtimeInputs, [], {
       sandboxMode: "devcontainer"
@@ -170,7 +172,7 @@ describe("createSessionService", () => {
     expect(started.command).toContain("--dangerously-bypass-approvals-and-sandbox");
     expect(runtimeInputs[0]?.args).toEqual([
       "--cd",
-      "/repo/.ai/codex",
+      `${TASK_WORKTREE}/.ai/codex`,
       "--dangerously-bypass-approvals-and-sandbox",
       "--dangerously-bypass-hook-trust",
       "--search",
@@ -186,8 +188,8 @@ describe("createSessionService", () => {
 
   it("treats container sandbox aliases as Codex sandbox bypass modes", async () => {
     const fs = createMemoryFs();
-    await fs.writeText("/repo/.ai/codex", "");
-    await fs.writeText("/repo/.ai/codex/config.toml", `approval_policy = "never"`);
+    await fs.writeText(`${TASK_WORKTREE}/.ai/codex`, "");
+    await fs.writeText(`${TASK_WORKTREE}/.ai/codex/config.toml`, `approval_policy = "never"`);
     const runtimeInputs: CreateTerminalSessionInput[] = [];
     const service = createTestSessionService(fs, runtimeInputs, [], {
       sandboxMode: "docker"
@@ -209,7 +211,7 @@ describe("createSessionService", () => {
     await fs.writeText("/repo/.ai/codex-translator/config.toml", `approval_policy = "never"`);
     const firstRuntimeInputs: CreateTerminalSessionInput[] = [];
     const firstService = createTestSessionService(fs, firstRuntimeInputs, [], {
-      worktreePath: "/repo/.claude/worktrees/demo-task"
+      worktreePath: TASK_WORKTREE
     });
 
     const started = await firstService.startProjectTranslatorSession("/repo", {
@@ -218,7 +220,6 @@ describe("createSessionService", () => {
     });
 
     expect(started.taskSlug).toBe("__project__");
-    expect(started.logPath).toBeUndefined();
     expect(firstRuntimeInputs[0]?.cwd).toBe("/repo");
     expect(firstRuntimeInputs[0]?.env).toMatchObject({
       VCM_TASK_REPO_ROOT: "/repo",
@@ -247,8 +248,6 @@ describe("createSessionService", () => {
       status: "resumable",
       claudeSessionId: "codex-translator-real-session"
     });
-    expect(recovered?.logPath).toBeUndefined();
-
     const resumed = await secondService.resumeProjectTranslatorSession("/repo");
     expect(resumed.claudeSessionId).toBe("codex-translator-real-session");
     expect(secondRuntimeInputs[0]?.args).toEqual([
@@ -304,8 +303,8 @@ describe("createSessionService", () => {
 
   it("overrides Codex Reviewer reasoning effort from the launch request", async () => {
     const fs = createMemoryFs();
-    await fs.writeText("/repo/.ai/codex", "");
-    await fs.writeText("/repo/.ai/codex/config.toml", `approval_policy = "never"`);
+    await fs.writeText(`${TASK_WORKTREE}/.ai/codex`, "");
+    await fs.writeText(`${TASK_WORKTREE}/.ai/codex/config.toml`, `approval_policy = "never"`);
     const runtimeInputs: CreateTerminalSessionInput[] = [];
     const service = createTestSessionService(fs, runtimeInputs);
 
@@ -321,8 +320,8 @@ describe("createSessionService", () => {
 
   it("does not pass Claude ultracode as Codex reasoning effort", async () => {
     const fs = createMemoryFs();
-    await fs.writeText("/repo/.ai/codex", "");
-    await fs.writeText("/repo/.ai/codex/config.toml", `approval_policy = "never"`);
+    await fs.writeText(`${TASK_WORKTREE}/.ai/codex`, "");
+    await fs.writeText(`${TASK_WORKTREE}/.ai/codex/config.toml`, `approval_policy = "never"`);
     const runtimeInputs: CreateTerminalSessionInput[] = [];
     const service = createTestSessionService(fs, runtimeInputs);
 
@@ -338,8 +337,8 @@ describe("createSessionService", () => {
 
   it("does not pass Max as Codex reasoning effort", async () => {
     const fs = createMemoryFs();
-    await fs.writeText("/repo/.ai/codex", "");
-    await fs.writeText("/repo/.ai/codex/config.toml", `approval_policy = "never"`);
+    await fs.writeText(`${TASK_WORKTREE}/.ai/codex`, "");
+    await fs.writeText(`${TASK_WORKTREE}/.ai/codex/config.toml`, `approval_policy = "never"`);
     const runtimeInputs: CreateTerminalSessionInput[] = [];
     const service = createTestSessionService(fs, runtimeInputs);
 
@@ -384,7 +383,7 @@ describe("createSessionService", () => {
     expect(runtimeInputs[0]?.env).toMatchObject({
       VCM_TASK_REPO_ROOT: "/repo/.claude/worktrees/demo-task"
     });
-    expect(runtimeInputs[0]?.logPath).toBe("/repo/.claude/worktrees/demo-task/.ai/vcm/handoffs/logs/architect.log");
+    expect(runtimeInputs[0]?.logPath).toBeUndefined();
     await expect(fs.pathExists("/repo/.claude/worktrees/demo-task/.ai/vcm/sessions/demo-task.json"))
       .resolves.toBe(true);
     await expect(fs.pathExists("/repo/.ai/vcm/sessions/demo-task.json"))
@@ -428,7 +427,7 @@ describe("createSessionService", () => {
 
   it("normalizes legacy dangerously skip permission records to bypassPermissions", async () => {
     const fs = createMemoryFs();
-    await fs.writeJson("/repo/.ai/vcm/sessions/demo-task.json", {
+    await fs.writeJson(`${TASK_WORKTREE}/.ai/vcm/sessions/demo-task.json`, {
       version: 1,
       taskSlug: "demo-task",
       updatedAt: "2026-05-29T00:00:00.000Z",
@@ -448,9 +447,8 @@ describe("createSessionService", () => {
             activityStatus: "idle",
             command: "claude --agent coder --dangerously-skip-permissions",
             permissionMode: "dangerously-skip-permissions",
-            cwd: "/repo",
+            cwd: TASK_WORKTREE,
             terminalBackend: "node-pty",
-            logPath: ".ai/vcm/handoffs/logs/coder.log",
             updatedAt: "2026-05-29T00:00:00.000Z"
           }
         },
@@ -517,8 +515,8 @@ describe("createSessionService", () => {
 
   it("records Codex hook activity even when Codex reports its own session id", async () => {
     const fs = createMemoryFs();
-    await fs.writeText("/repo/.ai/codex", "");
-    await fs.writeText("/repo/.ai/codex/config.toml", `approval_policy = "never"`);
+    await fs.writeText(`${TASK_WORKTREE}/.ai/codex`, "");
+    await fs.writeText(`${TASK_WORKTREE}/.ai/codex/config.toml`, `approval_policy = "never"`);
     const service = createTestSessionService(fs, []);
     const started = await service.startRoleSession("/repo", "demo-task", "codex-reviewer");
 
@@ -562,6 +560,7 @@ function createTestSessionService(
   writes: string[] = [],
   options: { sandboxMode?: string; worktreePath?: string } = {}
 ) {
+  const worktreePath = options.worktreePath ?? TASK_WORKTREE;
   return createSessionService({
     fs,
     runtime: createFakeRuntime(runtimeInputs, writes),
@@ -603,18 +602,11 @@ function createTestSessionService(
         return {
           handoffDir: ".ai/vcm/handoffs",
           roleCommandsDir: ".ai/vcm/handoffs/role-commands",
-          logsDir: ".ai/vcm/handoffs/logs",
+          messagesDir: ".ai/vcm/handoffs/messages",
           roleCommandPaths: {
             architect: ".ai/vcm/handoffs/role-commands/architect.md",
             coder: ".ai/vcm/handoffs/role-commands/coder.md",
             reviewer: ".ai/vcm/handoffs/role-commands/reviewer.md"
-          },
-          roleLogPaths: {
-            "project-manager": ".ai/vcm/handoffs/logs/project-manager.log",
-            architect: ".ai/vcm/handoffs/logs/architect.log",
-            coder: ".ai/vcm/handoffs/logs/coder.log",
-            reviewer: ".ai/vcm/handoffs/logs/reviewer.log",
-            "codex-reviewer": ".ai/vcm/handoffs/logs/codex-reviewer.log"
           },
           architecturePlanPath: ".ai/vcm/handoffs/architecture-plan.md",
           knownIssuesPath: ".ai/vcm/handoffs/known-issues.md",
@@ -645,7 +637,7 @@ function createTestSessionService(
           createdAt: "2026-05-29T00:00:00.000Z",
           updatedAt: "2026-05-29T00:00:00.000Z",
           repoRoot: "/repo",
-          worktreePath: options.worktreePath,
+          worktreePath,
           branch: "feature",
           handoffDir: ".ai/vcm/handoffs",
           status: "created"
@@ -658,7 +650,7 @@ function createTestSessionService(
           createdAt: "2026-05-29T00:00:00.000Z",
           updatedAt: "2026-05-29T00:00:00.000Z",
           repoRoot: "/repo",
-          worktreePath: options.worktreePath,
+          worktreePath,
           branch: "feature",
           handoffDir: ".ai/vcm/handoffs",
           status: "running"

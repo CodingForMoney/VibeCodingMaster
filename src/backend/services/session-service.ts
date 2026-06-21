@@ -129,7 +129,6 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     const isCodexRole = isCodexRoleName(role);
     const isTranslator = role === CODEX_TRANSLATOR_ROLE;
     const sessionRepoRoot = isTranslator ? repoRoot : taskRepoRoot;
-    const sessionLogPath = isTranslator ? undefined : paths.roleLogPaths[role];
     const permissionMode = normalizeClaudePermissionMode(input.permissionMode ?? persisted?.permissionMode);
     const model: SessionModel = isCodexRole
       ? normalizeCodexModel(input.model ?? persisted?.model)
@@ -191,8 +190,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
         VCM_SESSION_ID: claudeSessionId
       },
       cols: input.cols,
-      rows: input.rows,
-      ...(sessionLogPath ? { logPath: resolveRepoPath(sessionRepoRoot, sessionLogPath) } : {})
+      rows: input.rows
     });
     const timestamp = now();
     const record: RoleSessionRecord = {
@@ -210,7 +208,6 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       cwd: startCommand.cwd,
       terminalBackend: "node-pty",
       pid: runtimeSession.pid,
-      ...(sessionLogPath ? { logPath: sessionLogPath } : {}),
       roleCommandPath: isDispatchableRole(role)
         ? paths.roleCommandPaths[role]
         : undefined,

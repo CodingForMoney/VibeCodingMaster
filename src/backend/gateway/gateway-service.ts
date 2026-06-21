@@ -482,17 +482,6 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
 
   async function pullCurrent(): Promise<string> {
     const project = await ensureProject();
-    const settings = await syncDesktopContext(await deps.settings.loadSettings());
-    if (settings.currentTaskSlug) {
-      const task = await deps.taskService.loadTask(project.repoRoot, settings.currentTaskSlug);
-      if (!task.worktreePath && task.cleanupStatus !== "cleaned") {
-        throw new VcmError({
-          code: "GATEWAY_PULL_BLOCKED_BY_INLINE_TASK",
-          message: `Inline task "${task.taskSlug}" uses the base repository.`,
-          statusCode: 409
-        });
-      }
-    }
     const pulled = await deps.projectService.pullCurrentProject();
     return [
       "Connected repository updated.",
@@ -508,7 +497,7 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
     if (tasks.length === 0) {
       return "No tasks. Use /create-task <task-slug> [title] to create one.";
     }
-    return tasks.map((task, index) => `${index + 1}. ${task.taskSlug} [${task.status}] ${task.worktreePath ? "worktree" : "inline"}`).join("\n");
+    return tasks.map((task, index) => `${index + 1}. ${task.taskSlug} [${task.status}] ${task.branch}`).join("\n");
   }
 
   async function useTask(selector: string): Promise<string> {
@@ -538,8 +527,7 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
     const project = await ensureProject();
     const task = await deps.taskService.createTask(project.repoRoot, {
       taskSlug,
-      title,
-      createWorktree: true
+      title
     });
     const config = await deps.projectService.loadConfig(project.repoRoot);
     const taskRepoRoot = getTaskRuntimeRepoRoot(task);
@@ -596,7 +584,7 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
     return [
       `Task created and initialized: ${task.taskSlug}`,
       `branch: ${task.branch}`,
-      `worktree: ${task.worktreePath ?? task.repoRoot}`,
+      `worktree: ${task.worktreePath}`,
       `orchestration: ${template.autoOrchestration ? "auto" : "manual"}`,
       `translation: ${preferences.translationEnabled ? "on" : "off"}`,
       `sessions: ${startedRoles.join(", ")}`
@@ -662,7 +650,6 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
     deps.roundService.stopTask(taskSlug);
     const result = await deps.taskService.cleanupTask(project.repoRoot, taskSlug, {
       force: true,
-      deleteBranch: Boolean(task.worktreePath),
       forceDeleteBranch: true
     });
     clearFailedTranslation(project.repoRoot, taskSlug);
