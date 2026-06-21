@@ -11,17 +11,17 @@ describe("createHarnessService", () => {
     expect(status.needsApply).toBe(true);
     // B1: a fresh repo with every harness file missing is not yet initialized.
     expect(status.initialized).toBe(false);
-    expect(status.plannedChanges).toHaveLength(26);
-    expect(status.plannedChanges.map((change) => change.action)).toEqual(Array(26).fill("create"));
+    expect(status.plannedChanges).toHaveLength(19);
+    expect(status.plannedChanges.map((change) => change.action)).toEqual(Array(19).fill("create"));
 
     const result = await service.applyHarness("/repo");
-    expect(result.changedFiles).toHaveLength(26);
+    expect(result.changedFiles).toHaveLength(19);
 
     const nextStatus = await service.getHarnessStatus("/repo");
     expect(nextStatus.needsApply).toBe(false);
     // B2: once the harness is applied, VCM markers exist -> initialized.
     expect(nextStatus.initialized).toBe(true);
-    expect(nextStatus.files.map((file) => file.action)).toEqual(Array(26).fill("ok"));
+    expect(nextStatus.files.map((file) => file.action)).toEqual(Array(19).fill("ok"));
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("## VCM Start Here");
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("## VCM Task Flow");
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("## VCM Worktree Policy");
@@ -44,8 +44,8 @@ describe("createHarnessService", () => {
     expect(await fs.readText("/repo/.claude/skills/vcm-long-running-validation/SKILL.md")).toContain("name: vcm-long-running-validation");
     expect(await fs.readText("/repo/.claude/skills/vcm-long-running-validation/SKILL.md")).toContain("## Protocol");
     expect(await fs.readText("/repo/.claude/skills/vcm-long-running-validation/SKILL.md")).toContain(".ai/tools/watch-job");
-    expect(await fs.readText("/repo/.claude/skills/vcm-codex-review-gate/SKILL.md")).toContain("name: vcm-codex-review-gate");
-    expect(await fs.readText("/repo/.claude/skills/vcm-codex-review-gate/SKILL.md")).toContain("Do not run `codex exec` yourself");
+    expect(await fs.readText("/repo/.claude/skills/vcm-gate-review/SKILL.md")).toContain("name: vcm-gate-review");
+    expect(await fs.readText("/repo/.claude/skills/vcm-gate-review/SKILL.md")).toContain(".ai/tools/request-gate-review");
     expect(await fs.readText("/repo/.claude/agents/project-manager.md")).toContain("name: project-manager");
     expect(await fs.readText("/repo/.claude/agents/project-manager.md")).toContain("<!-- VCM:BEGIN version=1 -->");
     expect(await fs.readText("/repo/.claude/agents/project-manager.md")).toContain("Use the routes defined in `CLAUDE.md`");
@@ -56,23 +56,12 @@ describe("createHarnessService", () => {
     expect(await fs.readText("/repo/.claude/agents/project-manager.md")).toContain(".github/pull_request_template.md");
     expect(await fs.readText("/repo/.claude/agents/project-manager.md")).toContain("VCM_TASK_REPO_ROOT");
     expect(await fs.readText("/repo/.claude/agents/project-manager.md")).toContain("Include the confirmed task repo root and branch in each role message");
-    expect(await fs.readText("/repo/.claude/agents/project-manager.md")).toContain("### Codex Review Gates");
+    expect(await fs.readText("/repo/.claude/agents/project-manager.md")).toContain("### Gate Review Gates");
     expect(await fs.readText("/repo/.claude/agents/architect.md")).toContain("verifiable behavior, phase boundaries, behavior/contract proof points");
     expect(await fs.readText("/repo/.claude/agents/architect.md")).toContain("Read `.ai/vcm/handoffs/known-issues.md` and promote confirmed unresolved issues to `docs/known-issues.md`.");
-    expect(await fs.readText("/repo/.ai/codex/AGENTS.md")).toContain("You are VCM `codex-reviewer`");
-    const codexConfig = await fs.readText("/repo/.ai/codex/config.toml");
-    expect(codexConfig).not.toContain("command = \"codex\"");
-    expect(codexConfig).not.toContain("model = ");
-    expect(codexConfig).not.toContain("model_reasoning_effort");
-    expect(codexConfig).toContain("enabled = true");
-    expect(codexConfig).not.toContain("[vcm.codex_review]");
-    expect(codexConfig).not.toContain("required_gates");
-    expect(await fs.readText("/repo/.ai/codex/.codex/config.toml")).toContain("hooks = true");
-    const codexHooks = await fs.readText("/repo/.ai/codex/.codex/hooks.json");
-    expect(codexHooks).toContain("UserPromptSubmit");
-    expect(codexHooks).toContain("Stop");
-    expect(codexHooks).toContain("/api/hooks/codex-reviewer");
-    expect(codexHooks).toContain("/api/hooks/codex-reviewer/stop");
+    expect(await fs.readText("/repo/.claude/agents/gate-reviewer.md")).toContain("name: gate-reviewer");
+    expect(await fs.readText("/repo/.claude/agents/gate-reviewer.md")).toContain("You are VCM `gate-reviewer`");
+    expect(await fs.readText("/repo/.claude/agents/gate-reviewer.md")).toContain("Use the task and worktree paths named there");
     const translatorAgents = await fs.readText("/repo/.ai/codex-translator/AGENTS.md");
     expect(translatorAgents).toContain("You are VCM `codex-translator`");
     expect(translatorAgents).toContain("follow the VCM chunk manifest");
@@ -82,11 +71,7 @@ describe("createHarnessService", () => {
     const translatorHooks = await fs.readText("/repo/.ai/codex-translator/.codex/hooks.json");
     expect(translatorHooks).toContain("/api/hooks/codex-translator");
     expect(translatorHooks).toContain("/api/hooks/codex-translator/stop");
-    expect(await fs.readText("/repo/.ai/codex/prompts/architecture-plan-gate.md")).toContain("Codex Gate: architecture-plan");
-    expect(await fs.readText("/repo/.ai/codex/prompts/validation-adequacy-gate.md")).toContain("Codex Gate: validation-adequacy");
-    expect(await fs.readText("/repo/.ai/codex/prompts/final-diff-gate.md")).toContain("Codex Gate: final-diff");
-    expect(await fs.readText("/repo/.ai/codex/schemas/codex-review-result.schema.json")).toContain("VCM Codex Review Result");
-    expect(await fs.readText("/repo/.ai/tools/request-codex-review")).toContain("Request a VCM-managed Codex Review Gate");
+    expect(await fs.readText("/repo/.ai/tools/request-gate-review")).toContain("Request a VCM-managed Gate Review Gate");
     expect(await fs.readText("/repo/.claude/settings.json")).toContain("UserPromptSubmit");
     expect(await fs.readText("/repo/.claude/settings.json")).toContain("Stop");
     expect(await fs.readText("/repo/.claude/settings.json")).toContain("StopFailure");

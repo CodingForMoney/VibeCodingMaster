@@ -61,7 +61,7 @@ function createServerDepsStub(calls: string[]): ServerDeps {
     claudeHookService: {} as never,
     codexHookService: {} as never,
     messageService: {} as never,
-    codexReviewService: {} as never,
+    gateReviewService: {} as never,
     codexTranslationService: {
       async cleanupStartupRuntime(repoRoot: string) {
         calls.push(`cleanup:${repoRoot}`);

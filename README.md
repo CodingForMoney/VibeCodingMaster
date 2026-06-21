@@ -11,7 +11,7 @@ VCM is designed for long-running coding work where one Claude Code conversation 
 
 Each role runs as a real Claude Code process inside an embedded terminal. The GUI lets the user start, stop, resume, restart, switch, observe, and manually intervene in those sessions without juggling separate terminal windows.
 
-When Codex Review Gates are enabled for a task, or when a Codex Reviewer session already exists, the workspace can also show a fifth `Codex Reviewer` terminal role. It runs Codex CLI from `.ai/codex` with Codex model and effort selectors, receives gate prompts in the same long-lived terminal session, reports hook state back to VCM, and stays outside the normal Claude Code PM routing flow.
+When Gate Review Gates are enabled for a task, or when a Gate Reviewer session already exists, the workspace can also show a fifth `Gate Reviewer` terminal role. It runs Claude Code as a project-scoped long-lived review session, receives short gate prompts that include the current task and worktree path, writes reports under the task worktree, and stays outside normal PM role routing.
 
 ## Current Capabilities
 
@@ -21,7 +21,7 @@ When Codex Review Gates are enabled for a task, or when a Codex Reviewer session
 - Connected repository status for the base repo, including branch, upstream status, commit hash, dirty state, and fast-forward-only pull.
 - Embedded Claude Code terminals powered by `node-pty` and `xterm.js`.
 - One Claude Code session per role, with role tabs in the task header.
-- Optional Codex Reviewer terminal role when any Codex Review Gate is enabled.
+- Optional Gate Reviewer terminal role when any Gate Review Gate is enabled.
 - Role session recovery through persisted Claude session ids and `claude --resume`.
 - Permission mode selection before start, resume, or restart:
   - `default`
@@ -29,7 +29,7 @@ When Codex Review Gates are enabled for a task, or when a Codex Reviewer session
 - PM-mediated role messaging through VCM-dispatched route files.
 - Manual and automatic orchestration modes.
 - Two-stage VCM harness setup: deterministic fixed install plus AI-assisted bootstrap.
-- VCM-managed root rules, four role agents, repo-local VCM skills, Claude Code hooks, Codex Reviewer hooks, generated-context tools, and PR template.
+- VCM-managed root rules, role agents, repo-local VCM skills, Claude Code hooks, generated-context tools, and PR template.
 - Rust generated context for module indexing and crate-external public surface indexing.
 - Translation panel powered by the long-lived Codex Translator session.
 - Mobile Gateway through Tencent iLink Bot API / Weixin DM, for talking to PM and managing tasks from Weixin.
@@ -142,7 +142,7 @@ Important container notes:
 - Make sure the container has network access to Claude services and any configured Codex model endpoints if translation is enabled.
 - VCM accepts normal Git repositories by checking `.git` directly. It also supports `.git` files that point to worktree gitdirs.
 - VCM uses per-command `git -c safe.directory=...` for Git metadata reads and does not require global `git config --global --add safe.directory`.
-- Set `VCM_SANDBOX=devcontainer` so VCM-managed Codex Reviewer and Codex Translator sessions rely on the container boundary and do not start Codex's nested Linux sandbox.
+- Set `VCM_SANDBOX=devcontainer` so VCM-managed Codex Translator sessions rely on the container boundary and do not start Codex's nested Linux sandbox.
 - Treat the container as the sandbox boundary, especially when using relaxed Claude Code permission modes.
 
 ## Basic Usage
@@ -390,7 +390,7 @@ Translation settings are local and stored in:
 
 The same file stores recent repository paths and global translation preferences such as enablement, auto-send, and target language.
 
-VCM resolves `vcmDataDir` from `VCM_DATA_DIR`. If `VCM_DATA_DIR` is unset or empty, VCM uses `~/.vcm`. In Dev Containers, set `VCM_DATA_DIR=/workspace/.ai/vcm` and `VCM_SANDBOX=devcontainer` through `containerEnv` so VCM app state survives container rebuilds and VCM-managed Codex Reviewer and Codex Translator sessions do not run a nested Codex sandbox.
+VCM resolves `vcmDataDir` from `VCM_DATA_DIR`. If `VCM_DATA_DIR` is unset or empty, VCM uses `~/.vcm`. In Dev Containers, set `VCM_DATA_DIR=/workspace/.ai/vcm` and `VCM_SANDBOX=devcontainer` through `containerEnv` so VCM app state survives container rebuilds and VCM-managed Codex Translator sessions do not run a nested Codex sandbox.
 
 The sidebar `Settings` section also stores the UI theme preference in this file. The default is `system`, which follows the OS/browser color-scheme preference; users can cycle between `System`, `Light`, and `Dark`.
 
@@ -485,7 +485,7 @@ For `.gitignore`, VCM uses a gitignore-native managed block:
 
 `.ai/vcm/` is the active VCM local control area, and `.claude/worktrees/` is the Claude-compatible task worktree area. VCM keeps the task index in app-local project state under `<vcmDataDir>/projects/`; each task runtime repo keeps its own session, message, orchestration, and translation state.
 
-VCM also JSON-merges `.claude/settings.json` to install Claude Code `PreToolUse`, `UserPromptSubmit`, `Stop`, and `PermissionRequest` hooks plus a managed `env.BASH_DEFAULT_TIMEOUT_MS` so foreground watch windows fit inside the Bash tool timeout. The hooks post directly to the local VCM backend, so roles do not need a VCM CLI command to confirm delivery or report turn completion. The `Stop` hook forwards the backend response to Claude Code, which lets VCM block turn-end while a validation job is still running. When Codex Review Gates are installed, VCM also writes `.ai/codex/.codex/config.toml` and `.ai/codex/.codex/hooks.json` so the embedded Codex Reviewer terminal can POST `UserPromptSubmit` and `Stop` events back to VCM.
+VCM also JSON-merges `.claude/settings.json` to install Claude Code `PreToolUse`, `UserPromptSubmit`, `Stop`, and `PermissionRequest` hooks plus a managed `env.BASH_DEFAULT_TIMEOUT_MS` so foreground watch windows fit inside the Bash tool timeout. The hooks post directly to the local VCM backend, so roles do not need a VCM CLI command to confirm delivery or report turn completion. The `Stop` hook forwards the backend response to Claude Code, which lets VCM block turn-end while a validation job is still running.
 
 Bootstrap is AI-assisted. VCM starts a visible temporary Claude Code session in the connected repository and asks it to use the `vcm-harness-bootstrap` skill. Bootstrap fills project-specific content and generated context:
 
@@ -572,7 +572,7 @@ When it is on, VCM is in auto mode:
 - When the target role later reaches `Stop`, VCM scans again and may deliver the next pending route file.
 - If auto orchestration gets stuck after a manual copy/paste recovery, `Mark All Done` clears pending route files. It does not mutate message history.
 
-VCM Harness injects Claude Code `UserPromptSubmit` and `Stop` hooks into `.claude/settings.json`, and Codex Reviewer hooks into `.ai/codex/.codex/hooks.json`. Role tabs become `running` when Claude Code or Codex accepts a prompt and `idle` after `Stop`; VCM also marks a role `running` immediately after it writes a message to that embedded terminal. The terminal process status is still tracked separately. Claude role rules require a role to end its turn after writing or updating a message route file, rather than polling, looping, or waiting for another role inside the same Claude Code turn; Codex Reviewer does not dispatch route files.
+VCM Harness injects Claude Code `UserPromptSubmit` and `Stop` hooks into `.claude/settings.json`. Role tabs become `running` when Claude Code accepts a prompt and `idle` after `Stop`; VCM also marks a role `running` immediately after it writes a message to that embedded terminal. Gate Reviewer is a Claude Code role, but VCM triggers and settles gate turns directly around the gate prompt and report callback. The terminal process status is still tracked separately. Claude role rules require a role to end its turn after writing or updating a message route file, rather than polling, looping, or waiting for another role inside the same Claude Code turn.
 
 The implementation keeps only the active manual/auto orchestration mode. It does not expose pause/resume, stage/approve/reject, or a separate agent-facing message CLI.
 

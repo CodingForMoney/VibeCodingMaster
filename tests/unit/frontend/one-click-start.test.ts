@@ -11,7 +11,7 @@ describe("buildOneClickRoleLaunches", () => {
       effort: "high"
     };
 
-    expect(buildOneClickRoleLaunches(template, { codexReviewerEnabled: false })).toEqual([
+    expect(buildOneClickRoleLaunches(template, { gateReviewerEnabled: false })).toEqual([
       {
         role: "project-manager",
         permissionMode: "default",
@@ -39,9 +39,9 @@ describe("buildOneClickRoleLaunches", () => {
     ]);
   });
 
-  it("adds Codex Reviewer when Codex review gates are enabled", () => {
+  it("adds Gate Reviewer when Gate review gates are enabled", () => {
     const launches = buildOneClickRoleLaunches(createDefaultLaunchTemplate(), {
-      codexReviewerEnabled: true
+      gateReviewerEnabled: true
     });
 
     expect(launches.map((launch) => launch.role)).toEqual([
@@ -49,13 +49,13 @@ describe("buildOneClickRoleLaunches", () => {
       "architect",
       "coder",
       "reviewer",
-      "codex-reviewer"
+      "gate-reviewer"
     ]);
     expect(launches.at(-1)).toEqual({
-      role: "codex-reviewer",
+      role: "gate-reviewer",
       permissionMode: "default",
-      model: "gpt-5.5",
-      effort: "xhigh"
+      model: "default",
+      effort: "default"
     });
   });
 });

@@ -19,7 +19,7 @@ import type {
   GatewayStatus,
   StartGatewayQrLoginResult
 } from "../../shared/types/gateway.js";
-import { CODEX_REVIEW_GATES, type CodexReviewGate, type CodexReviewIndex } from "../../shared/types/codex-review.js";
+import { GATE_REVIEW_GATES, type GateReviewGate, type GateReviewIndex } from "../../shared/types/gate-review.js";
 import type { VcmOrchestrationState, VcmRoleMessage } from "../../shared/types/message.js";
 import type { ProjectSummary } from "../../shared/types/project.js";
 import type { VcmSessionRoundState } from "../../shared/types/round.js";
@@ -36,7 +36,7 @@ type SidebarSectionId =
   | "connected-repository"
   | "settings"
   | "translation"
-  | "codex-review-gates"
+  | "gate-review-gates"
   | "gateway"
   | "vcm-harness"
   | "new-task"
@@ -51,7 +51,7 @@ export interface ProjectDashboardProps {
   orchestration: VcmOrchestrationState | null;
   events: string[];
   roundState: VcmSessionRoundState | null;
-  codexReview: CodexReviewIndex | null;
+  gateReview: GateReviewIndex | null;
   translationEnabled: boolean;
   translationAutoSendEnabled: boolean;
   translationTargetLanguage: TranslationTargetLanguage;
@@ -77,7 +77,7 @@ export interface ProjectDashboardProps {
   onGatewayTranslationChange(enabled: boolean): void;
   onStartGatewayQrLogin(): void;
   onResetGatewayBinding(): void;
-  onCodexGateEnabledChange(gate: CodexReviewGate, enabled: boolean): void;
+  onGateReviewGateEnabledChange(gate: GateReviewGate, enabled: boolean): void;
   onTranslationEnabledChange(enabled: boolean): void;
   onTranslationAutoSendChange(enabled: boolean): void;
   onTranslationTargetLanguageChange(targetLanguage: TranslationTargetLanguage): void;
@@ -113,7 +113,7 @@ export function ProjectDashboard({
   orchestration,
   events,
   roundState,
-  codexReview,
+  gateReview,
   translationEnabled,
   translationAutoSendEnabled,
   translationTargetLanguage,
@@ -139,7 +139,7 @@ export function ProjectDashboard({
   onGatewayTranslationChange,
   onStartGatewayQrLogin,
   onResetGatewayBinding,
-  onCodexGateEnabledChange,
+  onGateReviewGateEnabledChange,
   onTranslationEnabledChange,
   onTranslationAutoSendChange,
   onTranslationTargetLanguageChange,
@@ -349,14 +349,14 @@ export function ProjectDashboard({
 
       {project && activeTaskSlug ? (
         <SidebarSection
-          title="Codex Review Gates"
-          open={openSidebarSection === "codex-review-gates"}
-          onOpenChange={(open) => handleSidebarSectionChange("codex-review-gates", open)}
+          title="Gate Review Gates"
+          open={openSidebarSection === "gate-review-gates"}
+          onOpenChange={(open) => handleSidebarSectionChange("gate-review-gates", open)}
         >
-          <CodexReviewGateSettings
+          <GateReviewGateSettings
             busy={busy}
-            state={codexReview}
-            onGateEnabledChange={onCodexGateEnabledChange}
+            state={gateReview}
+            onGateEnabledChange={onGateReviewGateEnabledChange}
           />
         </SidebarSection>
       ) : null}
@@ -627,18 +627,18 @@ function getTranslatorSessionStatus(session: RoleSessionRecord | null): string {
   return session.status;
 }
 
-function CodexReviewGateSettings({
+function GateReviewGateSettings({
   busy,
   onGateEnabledChange,
   state
 }: {
   busy?: boolean;
-  onGateEnabledChange(gate: CodexReviewGate, enabled: boolean): void;
-  state: CodexReviewIndex | null;
+  onGateEnabledChange(gate: GateReviewGate, enabled: boolean): void;
+  state: GateReviewIndex | null;
 }) {
   return (
     <div className="sidebar-settings">
-      {CODEX_REVIEW_GATES.map((gate) => {
+      {GATE_REVIEW_GATES.map((gate) => {
         const record = state?.gates[gate];
         const enabled = Boolean(record?.required);
         return (
@@ -651,7 +651,7 @@ function CodexReviewGateSettings({
             type="button"
             onClick={() => onGateEnabledChange(gate, !enabled)}
           >
-            <span>{getCodexGateLabel(gate)}</span>
+            <span>{getGateReviewGateLabel(gate)}</span>
             <span>{enabled ? "on" : "off"}</span>
           </button>
         );
@@ -660,7 +660,7 @@ function CodexReviewGateSettings({
   );
 }
 
-function getCodexGateLabel(gate: CodexReviewGate): string {
+function getGateReviewGateLabel(gate: GateReviewGate): string {
   switch (gate) {
     case "architecture-plan":
       return "Architecture plan";

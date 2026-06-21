@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import path from "node:path";
-import { ROLE_NAMES, isCodexRoleName, isDispatchableRole } from "../../shared/constants.js";
+import { VCM_ROLE_NAMES, isCodexRoleName, isDispatchableRole } from "../../shared/constants.js";
 import type { ClaudeHookEventName } from "../../shared/types/claude-hook.js";
 import type { RoleName } from "../../shared/types/role.js";
 import type {
@@ -25,6 +25,12 @@ import type { ProjectService } from "./project-service.js";
 import { getTaskRuntimeRepoRoot, type TaskService } from "./task-service.js";
 
 export interface SessionService {
+  startProjectGateReviewerSession(repoRoot: string, input?: StartRoleSessionRequest): Promise<RoleSessionRecord>;
+  resumeProjectGateReviewerSession(repoRoot: string, input?: StartRoleSessionRequest): Promise<RoleSessionRecord>;
+  stopProjectGateReviewerSession(repoRoot: string): Promise<RoleSessionRecord>;
+  restartProjectGateReviewerSession(repoRoot: string, input?: StartRoleSessionRequest): Promise<RoleSessionRecord>;
+  getProjectGateReviewerSession(repoRoot: string): Promise<RoleSessionRecord | undefined>;
+  ensureProjectGateReviewerSession(repoRoot: string, input?: StartRoleSessionRequest): Promise<RoleSessionRecord>;
   startProjectTranslatorSession(repoRoot: string, input?: StartRoleSessionRequest): Promise<RoleSessionRecord>;
   resumeProjectTranslatorSession(repoRoot: string, input?: StartRoleSessionRequest): Promise<RoleSessionRecord>;
   stopProjectTranslatorSession(repoRoot: string): Promise<RoleSessionRecord>;
@@ -59,16 +65,15 @@ export interface SessionServiceDeps {
 
 type LaunchMode = "fresh" | "resume";
 
-const CODEX_REVIEWER_ROLE: RoleName = "codex-reviewer";
+const GATE_REVIEWER_ROLE: RoleName = "gate-reviewer";
 const CODEX_TRANSLATOR_ROLE: RoleName = "codex-translator";
-const CODEX_DIR = ".ai/codex";
-const CODEX_REVIEW_DIR = ".ai/vcm/codex-reviews";
-const CODEX_CONFIG_PATH = ".ai/codex/config.toml";
 const CODEX_TRANSLATOR_DIR = ".ai/codex-translator";
 const CODEX_TRANSLATION_DIR = ".ai/vcm/translations";
 const CODEX_TRANSLATOR_SESSION_PATH = ".ai/vcm/translations/session.json";
 const CODEX_TRANSLATOR_CONFIG_PATH = ".ai/codex-translator/config.toml";
+const GATE_REVIEWER_SESSION_PATH = ".ai/vcm/gate-reviewer/session.json";
 const PROJECT_TRANSLATOR_SCOPE = "__project__";
+const PROJECT_GATE_REVIEWER_SCOPE = "__project_gate_reviewer__";
 
 interface ProjectRoleSessionFile {
   version: 1;
@@ -223,6 +228,95 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     return record;
   }
 
+  async function launchProjectGateReviewerSession(
+    repoRoot: string,
+    input: StartRoleSessionRequest,
+    launchMode: LaunchMode
+  ): Promise<RoleSessionRecord> {
+    const live = toRoleSessionRecordView(
+      getRegisteredProjectGateReviewerSession(deps.registry, deps.runtime),
+      deps.runtime
+    );
+    if (live && live.status === "running") {
+      return live;
+    }
+
+    const config = await deps.projectService.loadConfig(repoRoot);
+    const persisted = await loadPersistedProjectGateReviewerSession(deps.fs, repoRoot);
+    const permissionMode = normalizeClaudePermissionMode(input.permissionMode ?? persisted?.permissionMode);
+    const model = normalizeClaudeModel(input.model ?? persisted?.model);
+    const effort = normalizeClaudeEffort(input.effort ?? persisted?.effort);
+    const claudeSessionId = launchMode === "resume"
+      ? persisted?.claudeSessionId
+      : randomUUID();
+
+    if (!claudeSessionId) {
+      throw new VcmError({
+        code: "GATE_REVIEWER_SESSION_MISSING",
+        message: "Gate Reviewer does not have a session id to resume.",
+        statusCode: 409,
+        hint: "Start Gate Reviewer once before using Resume."
+      });
+    }
+
+    const transcriptPath = launchMode === "resume" && persisted?.transcriptPath
+      ? persisted.transcriptPath
+      : claudeTranscriptPath(repoRoot, claudeSessionId);
+    const startCommand = {
+      ...deps.claude.buildRoleStartCommand(
+        GATE_REVIEWER_ROLE,
+        config.claudeCommand,
+        permissionMode,
+        claudeSessionId,
+        launchMode === "resume",
+        model,
+        effort
+      ),
+      cwd: repoRoot
+    };
+    const runtimeSession = await deps.runtime.createSession({
+      taskSlug: PROJECT_GATE_REVIEWER_SCOPE,
+      role: GATE_REVIEWER_ROLE,
+      command: startCommand.command,
+      args: startCommand.args,
+      cwd: startCommand.cwd,
+      env: {
+        VCM_API_URL: deps.apiUrl,
+        VCM_TASK_REPO_ROOT: repoRoot,
+        VCM_TASK_SLUG: PROJECT_GATE_REVIEWER_SCOPE,
+        VCM_ROLE: GATE_REVIEWER_ROLE,
+        VCM_SESSION_ID: claudeSessionId
+      },
+      cols: input.cols,
+      rows: input.rows
+    });
+    const timestamp = now();
+    const record: RoleSessionRecord = {
+      id: runtimeSession.id,
+      claudeSessionId,
+      transcriptPath,
+      taskSlug: PROJECT_GATE_REVIEWER_SCOPE,
+      role: GATE_REVIEWER_ROLE,
+      status: runtimeSession.status,
+      activityStatus: "idle",
+      command: startCommand.display,
+      permissionMode,
+      model,
+      effort,
+      cwd: startCommand.cwd,
+      terminalBackend: "node-pty",
+      pid: runtimeSession.pid,
+      startedAt: runtimeSession.startedAt,
+      updatedAt: timestamp,
+      lastOutputAt: runtimeSession.lastOutputAt,
+      exitCode: runtimeSession.exitCode
+    };
+
+    deps.registry.upsert(record);
+    await persistProjectGateReviewerSession(deps.fs, repoRoot, record);
+    return record;
+  }
+
   async function launchProjectTranslatorSession(
     repoRoot: string,
     input: StartRoleSessionRequest,
@@ -306,6 +400,71 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
   }
 
   return {
+    startProjectGateReviewerSession(repoRoot, input = {}) {
+      return launchProjectGateReviewerSession(repoRoot, input, "fresh");
+    },
+    resumeProjectGateReviewerSession(repoRoot, input = {}) {
+      return launchProjectGateReviewerSession(repoRoot, input, "resume");
+    },
+    async stopProjectGateReviewerSession(repoRoot) {
+      const existing = await this.getProjectGateReviewerSession(repoRoot);
+      if (!existing) {
+        throw new VcmError({
+          code: "SESSION_MISSING",
+          message: "Gate Reviewer session has not been started.",
+          statusCode: 404
+        });
+      }
+
+      if (deps.runtime.getSession(existing.id)) {
+        await deps.runtime.stop(existing.id);
+      }
+
+      const updated: RoleSessionRecord = {
+        ...existing,
+        taskSlug: PROJECT_GATE_REVIEWER_SCOPE,
+        status: "exited",
+        activityStatus: "idle",
+        updatedAt: now()
+      };
+      deps.registry.upsert(updated);
+      await persistProjectGateReviewerSession(deps.fs, repoRoot, updated);
+      return updated;
+    },
+    async restartProjectGateReviewerSession(repoRoot, input = {}) {
+      const existing = await this.getProjectGateReviewerSession(repoRoot);
+      if (!existing) {
+        return launchProjectGateReviewerSession(repoRoot, input, "fresh");
+      }
+
+      if (deps.runtime.getSession(existing.id)) {
+        await deps.runtime.stop(existing.id);
+      }
+      deps.registry.remove(existing.id);
+
+      return launchProjectGateReviewerSession(repoRoot, input, "fresh");
+    },
+    async getProjectGateReviewerSession(repoRoot) {
+      const record = getRegisteredProjectGateReviewerSession(deps.registry, deps.runtime)
+        ?? await loadPersistedProjectGateReviewerSession(deps.fs, repoRoot);
+      return toRoleSessionRecordView(record, deps.runtime);
+    },
+    async ensureProjectGateReviewerSession(repoRoot, input = {}) {
+      const existing = await this.getProjectGateReviewerSession(repoRoot);
+      if (existing?.status === "running") {
+        return existing;
+      }
+      if (existing?.claudeSessionId) {
+        return this.resumeProjectGateReviewerSession(repoRoot, {
+          permissionMode: input.permissionMode ?? existing.permissionMode,
+          model: input.model ?? existing.model,
+          effort: input.effort ?? existing.effort,
+          cols: input.cols,
+          rows: input.rows
+        });
+      }
+      return this.startProjectGateReviewerSession(repoRoot, input);
+    },
     startProjectTranslatorSession(repoRoot, input = {}) {
       return launchProjectTranslatorSession(repoRoot, input, "fresh");
     },
@@ -395,6 +554,10 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       return updated;
     },
     startRoleSession(repoRoot, taskSlug, role, input = {}) {
+      if (role === GATE_REVIEWER_ROLE) {
+        return this.startProjectGateReviewerSession(repoRoot, input)
+          .then((session) => scopeProjectRoleSession(session, taskSlug)!);
+      }
       if (role === CODEX_TRANSLATOR_ROLE) {
         void taskSlug;
         return this.startProjectTranslatorSession(repoRoot, input);
@@ -402,6 +565,10 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       return launchRoleSession(repoRoot, taskSlug, role, input, "fresh");
     },
     resumeRoleSession(repoRoot, taskSlug, role, input = {}) {
+      if (role === GATE_REVIEWER_ROLE) {
+        return this.resumeProjectGateReviewerSession(repoRoot, input)
+          .then((session) => scopeProjectRoleSession(session, taskSlug)!);
+      }
       if (role === CODEX_TRANSLATOR_ROLE) {
         void taskSlug;
         return this.resumeProjectTranslatorSession(repoRoot, input);
@@ -409,6 +576,9 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       return launchRoleSession(repoRoot, taskSlug, role, input, "resume");
     },
     async stopRoleSession(repoRoot, taskSlug, role) {
+      if (role === GATE_REVIEWER_ROLE) {
+        return scopeProjectRoleSession(await this.stopProjectGateReviewerSession(repoRoot), taskSlug)!;
+      }
       if (role === CODEX_TRANSLATOR_ROLE) {
         void taskSlug;
         return this.stopProjectTranslatorSession(repoRoot);
@@ -439,6 +609,9 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       return updated;
     },
     async restartRoleSession(repoRoot, taskSlug, role, input = {}) {
+      if (role === GATE_REVIEWER_ROLE) {
+        return scopeProjectRoleSession(await this.restartProjectGateReviewerSession(repoRoot, input), taskSlug)!;
+      }
       if (role === CODEX_TRANSLATOR_ROLE) {
         void taskSlug;
         return this.restartProjectTranslatorSession(repoRoot, input);
@@ -456,6 +629,9 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       return launchRoleSession(repoRoot, taskSlug, role, input, "fresh");
     },
     async getRoleSession(repoRoot, taskSlug, role) {
+      if (role === GATE_REVIEWER_ROLE) {
+        return scopeProjectRoleSession(await this.getProjectGateReviewerSession(repoRoot), taskSlug);
+      }
       if (role === CODEX_TRANSLATOR_ROLE) {
         void taskSlug;
         return this.getProjectTranslatorSession(repoRoot);
@@ -477,7 +653,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       const task = await deps.taskService.loadTask(repoRoot, taskSlug);
       const taskRepoRoot = getTaskRuntimeRepoRoot(task);
       const persistedTaskSession = await loadPersistedTaskSessionRecord(deps.fs, taskRepoRoot, config.stateRoot, taskSlug);
-      for (const role of ROLE_NAMES.filter((candidate) => candidate !== CODEX_TRANSLATOR_ROLE)) {
+      for (const role of VCM_ROLE_NAMES) {
         const record = deps.registry.getByRole(taskSlug, role)
           ?? normalizePersistedRoleRecord(persistedTaskSession?.roles[role]?.record);
         const session = toRoleSessionRecordView(
@@ -488,9 +664,38 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
           sessions.push(session);
         }
       }
+      const gateReviewerSession = scopeProjectRoleSession(await this.getProjectGateReviewerSession(repoRoot), taskSlug);
+      if (gateReviewerSession) {
+        sessions.push(gateReviewerSession);
+      }
       return sessions;
     },
     async recordRoleHookEvent(repoRoot, input) {
+      if (input.role === GATE_REVIEWER_ROLE) {
+        const current = await this.getProjectGateReviewerSession(repoRoot);
+        if (!current || (!input.allowSessionMismatch && !matchesRoleHookSession(current, input))) {
+          return undefined;
+        }
+        const timestamp = now();
+        const isTurnEnd = isTurnEndHook(input.eventName);
+        const isCompact = isCompactHook(input.eventName);
+        const updated: RoleSessionRecord = {
+          ...current,
+          taskSlug: PROJECT_GATE_REVIEWER_SCOPE,
+          claudeSessionId: input.sessionId ?? current.claudeSessionId,
+          transcriptPath: input.transcriptPath ?? current.transcriptPath,
+          cwd: input.cwd ?? current.cwd,
+          activityStatus: isTurnEnd ? "idle" : isCompact ? current.activityStatus : "running",
+          lastHookEventAt: timestamp,
+          lastTurnEndedAt: isTurnEnd ? timestamp : current.lastTurnEndedAt,
+          lastTurnStartedAt: isTurnEnd || isCompact ? current.lastTurnStartedAt : timestamp,
+          lastCompactAt: isCompact ? timestamp : current.lastCompactAt,
+          updatedAt: timestamp
+        };
+        deps.registry.upsert(updated);
+        await persistProjectGateReviewerSession(deps.fs, repoRoot, updated);
+        return scopeProjectRoleSession(updated, input.taskSlug);
+      }
       if (input.role === CODEX_TRANSLATOR_ROLE) {
         void input.taskSlug;
         return this.recordProjectTranslatorHookEvent(repoRoot, {
@@ -551,6 +756,16 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
         lastHookEventAt: timestamp,
         updatedAt: timestamp
       };
+      if (role === GATE_REVIEWER_ROLE) {
+        const persisted = {
+          ...updated,
+          taskSlug: PROJECT_GATE_REVIEWER_SCOPE
+        };
+        deps.registry.upsert(persisted);
+        await persistProjectGateReviewerSession(deps.fs, repoRoot, persisted);
+        return updated;
+      }
+
       deps.registry.upsert(updated);
 
       const config = await deps.projectService.loadConfig(repoRoot);
@@ -571,6 +786,16 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
         lastTurnEndedAt: timestamp,
         updatedAt: timestamp
       };
+      if (role === GATE_REVIEWER_ROLE) {
+        const persisted = {
+          ...updated,
+          taskSlug: PROJECT_GATE_REVIEWER_SCOPE
+        };
+        deps.registry.upsert(persisted);
+        await persistProjectGateReviewerSession(deps.fs, repoRoot, persisted);
+        return updated;
+      }
+
       deps.registry.upsert(updated);
 
       const config = await deps.projectService.loadConfig(repoRoot);
@@ -612,7 +837,7 @@ function toRoleSessionRecordView(
 async function buildCodexStartCommand(
   fs: FileSystemAdapter,
   baseRepoRoot: string,
-  taskRepoRoot: string,
+  _taskRepoRoot: string,
   role: RoleName,
   launchMode: LaunchMode,
   selectedModel: CodexModel,
@@ -621,19 +846,26 @@ async function buildCodexStartCommand(
   resumeSessionId?: string
 ): Promise<{ command: string; args: string[]; display: string; cwd: string }> {
   const isTranslator = role === CODEX_TRANSLATOR_ROLE;
-  const codexDir = resolveRepoPath(isTranslator ? baseRepoRoot : taskRepoRoot, isTranslator ? CODEX_TRANSLATOR_DIR : CODEX_DIR);
-  const outputDir = resolveRepoPath(isTranslator ? baseRepoRoot : taskRepoRoot, isTranslator ? CODEX_TRANSLATION_DIR : CODEX_REVIEW_DIR);
+  if (!isTranslator) {
+    throw new VcmError({
+      code: "CODEX_ROLE_UNSUPPORTED",
+      message: `${role} is not a Codex role.`,
+      statusCode: 400
+    });
+  }
+  const codexDir = resolveRepoPath(baseRepoRoot, CODEX_TRANSLATOR_DIR);
+  const outputDir = resolveRepoPath(baseRepoRoot, CODEX_TRANSLATION_DIR);
   if (!(await fs.pathExists(codexDir))) {
     throw new VcmError({
-      code: isTranslator ? "CODEX_TRANSLATOR_CONFIG_MISSING" : "CODEX_REVIEW_CONFIG_MISSING",
-      message: `${isTranslator ? CODEX_TRANSLATOR_DIR : CODEX_DIR} does not exist.`,
+      code: "CODEX_TRANSLATOR_CONFIG_MISSING",
+      message: `${CODEX_TRANSLATOR_DIR} does not exist.`,
       statusCode: 409,
-      hint: `Apply the VCM harness before starting ${isTranslator ? "Codex Translator" : "Codex Reviewer"}.`
+      hint: "Apply the VCM harness before starting Codex Translator."
     });
   }
 
   await fs.ensureDir(outputDir);
-  const config = await loadCodexSessionConfig(fs, isTranslator ? baseRepoRoot : taskRepoRoot, isTranslator ? CODEX_TRANSLATOR_CONFIG_PATH : CODEX_CONFIG_PATH);
+  const config = await loadCodexSessionConfig(fs, baseRepoRoot, CODEX_TRANSLATOR_CONFIG_PATH);
   const args = launchMode === "resume"
     ? resumeSessionId ? ["resume", resumeSessionId] : ["resume", "--last"]
     : [];
@@ -641,11 +873,7 @@ async function buildCodexStartCommand(
   if (isDevContainerSandbox(sandboxMode)) {
     args.push("--dangerously-bypass-approvals-and-sandbox");
   } else {
-    if (isTranslator) {
-      args.push("--add-dir", baseRepoRoot);
-    } else {
-      args.push("--add-dir", outputDir);
-    }
+    args.push("--add-dir", baseRepoRoot);
     args.push(
       "--sandbox",
       "workspace-write",
@@ -667,7 +895,7 @@ async function buildCodexStartCommand(
   return {
     command: config.command,
     args,
-    cwd: isTranslator ? baseRepoRoot : taskRepoRoot,
+    cwd: baseRepoRoot,
     display: [config.command, ...args].map(formatDisplayArg).join(" ")
   };
 }
@@ -703,9 +931,8 @@ async function loadCodexSessionConfig(
   }
 
   const content = await fs.readText(configPath);
-  const reviewSection = extractTomlSection(content, "vcm.codex_review");
   return {
-    command: parseTomlString(content, "command") ?? parseTomlString(reviewSection, "command") ?? "codex"
+    command: parseTomlString(content, "command") ?? "codex"
   };
 }
 
@@ -758,7 +985,7 @@ function getRegisteredRoleSession(
   taskSlug: string,
   role: RoleName
 ): RoleSessionRecord | undefined {
-  if (role !== CODEX_TRANSLATOR_ROLE) {
+  if (role !== CODEX_TRANSLATOR_ROLE && role !== GATE_REVIEWER_ROLE) {
     return registry.getByRole(taskSlug, role);
   }
 
@@ -768,6 +995,15 @@ function getRegisteredRoleSession(
     ?? candidates.find((session) => session.taskSlug === taskSlug)
     ?? candidates.sort(compareSessionUpdatedAtDesc)[0];
   return scopeProjectRoleSession(scoped, taskSlug);
+}
+
+function getRegisteredProjectGateReviewerSession(
+  registry: SessionRegistry,
+  runtime: TerminalRuntime
+): RoleSessionRecord | undefined {
+  const candidates = registry.list().filter((session) => session.role === GATE_REVIEWER_ROLE);
+  const live = candidates.find((session) => runtime.getSession(session.id)?.status === "running");
+  return live ?? candidates.sort(compareSessionUpdatedAtDesc)[0];
 }
 
 function getRegisteredProjectTranslatorSession(
@@ -784,7 +1020,7 @@ function compareSessionUpdatedAtDesc(left: RoleSessionRecord, right: RoleSession
 }
 
 function scopeProjectRoleSession(record: RoleSessionRecord | undefined, taskSlug: string): RoleSessionRecord | undefined {
-  if (!record || record.role !== CODEX_TRANSLATOR_ROLE) {
+  if (!record || (record.role !== CODEX_TRANSLATOR_ROLE && record.role !== GATE_REVIEWER_ROLE)) {
     return record;
   }
   return {
@@ -801,12 +1037,36 @@ async function loadPersistedRoleRecordForRole(
   taskSlug: string,
   role: RoleName
 ): Promise<RoleSessionRecord | undefined> {
+  if (role === GATE_REVIEWER_ROLE) {
+    void taskSlug;
+    return loadPersistedProjectGateReviewerSession(fs, baseRepoRoot);
+  }
   if (role === CODEX_TRANSLATOR_ROLE) {
     void taskSlug;
     return loadPersistedCodexTranslatorSession(fs, baseRepoRoot);
   }
 
   return loadPersistedRoleRecord(fs, taskRepoRoot, stateRoot, taskSlug, role);
+}
+
+async function loadPersistedProjectGateReviewerSession(
+  fs: FileSystemAdapter,
+  repoRoot: string
+): Promise<RoleSessionRecord | undefined> {
+  const sessionPath = resolveRepoPath(repoRoot, GATE_REVIEWER_SESSION_PATH);
+  if (!(await fs.pathExists(sessionPath))) {
+    return undefined;
+  }
+
+  const payload = await fs.readJson<ProjectRoleSessionFile | RoleSessionRecord>(sessionPath);
+  const record = normalizePersistedRoleRecord(isProjectRoleSessionFile(payload) ? payload.record : payload);
+  if (!record) {
+    return undefined;
+  }
+  return {
+    ...record,
+    taskSlug: PROJECT_GATE_REVIEWER_SCOPE
+  };
 }
 
 async function loadPersistedCodexTranslatorSession(
@@ -922,12 +1182,35 @@ async function persistRoleSessionRecord(
   stateRoot: string,
   session: RoleSessionRecord
 ): Promise<void> {
+  if (session.role === GATE_REVIEWER_ROLE) {
+    await persistProjectGateReviewerSession(fs, baseRepoRoot, session);
+    return;
+  }
   if (session.role === CODEX_TRANSLATOR_ROLE) {
     await persistCodexTranslatorSession(fs, baseRepoRoot, session);
     return;
   }
 
   await persistTaskSession(fs, taskRepoRoot, stateRoot, session);
+}
+
+async function persistProjectGateReviewerSession(
+  fs: FileSystemAdapter,
+  repoRoot: string,
+  session: RoleSessionRecord
+): Promise<void> {
+  await fs.writeJsonAtomic<ProjectRoleSessionFile>(
+    resolveRepoPath(repoRoot, GATE_REVIEWER_SESSION_PATH),
+    {
+      version: 1,
+      role: session.role,
+      updatedAt: session.updatedAt,
+      record: {
+        ...session,
+        taskSlug: PROJECT_GATE_REVIEWER_SCOPE
+      }
+    }
+  );
 }
 
 async function persistCodexTranslatorSession(
@@ -1023,25 +1306,6 @@ function normalizeCodexEffort(value: unknown): SessionEffort {
     return value;
   }
   return "default";
-}
-
-function extractTomlSection(content: string, sectionName: string): string {
-  const lines = content.split(/\r?\n/);
-  const header = `[${sectionName}]`;
-  const start = lines.findIndex((line) => line.trim() === header);
-  if (start < 0) {
-    return "";
-  }
-
-  const section: string[] = [];
-  for (let index = start + 1; index < lines.length; index += 1) {
-    const line = lines[index];
-    if (/^\s*\[[^\]]+\]\s*$/.test(line)) {
-      break;
-    }
-    section.push(line);
-  }
-  return section.join("\n");
 }
 
 function parseTomlString(content: string, key: string): string | undefined {

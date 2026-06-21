@@ -231,7 +231,7 @@ async function ensureTaskRuntimeStateDirs(fs: FileSystemAdapter, taskRepoRoot: s
   await fs.ensureDir(path.join(taskRepoRoot, stateRoot, "messages"));
   await fs.ensureDir(path.join(taskRepoRoot, stateRoot, "orchestration"));
   await fs.ensureDir(path.join(taskRepoRoot, stateRoot, "translation"));
-  await fs.ensureDir(path.join(taskRepoRoot, stateRoot, "codex-reviews"));
+  await fs.ensureDir(path.join(taskRepoRoot, stateRoot, "gate-reviews"));
 }
 
 function getTaskStatePaths(
@@ -247,7 +247,7 @@ function getTaskStatePaths(
     path.join(taskRepoRoot, stateRoot, "messages", `${taskSlug}.jsonl`),
     path.join(taskRepoRoot, stateRoot, "orchestration", `${taskSlug}.json`),
     path.join(taskRepoRoot, stateRoot, "translation", taskSlug),
-    path.join(taskRepoRoot, stateRoot, "codex-reviews"),
+    path.join(taskRepoRoot, stateRoot, "gate-reviews"),
     path.join(taskRepoRoot, handoffRoot)
   ];
 }

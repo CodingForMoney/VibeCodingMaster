@@ -1,81 +1,24 @@
-export function renderCodexAgentsHarnessRules(): string {
+export function renderGateReviewerAgentRules(): string {
   return `## Role
 
-You are VCM \`codex-reviewer\`: an independent gate reviewer.
+You are VCM \`gate-reviewer\`.
 
-Review only the requested gate evidence. Decide whether the gate can pass:
+Review only the gate in the VCM prompt. Use the task and worktree paths named there. Project memory may orient you, but only current worktree evidence can decide the gate.
 
-- \`approve\`: no finding prevents the gate from passing.
-- \`request_changes\`: one or more findings mean the gate should not pass yet.
+Return only:
 
-Missing, stale, contradictory, or incomplete evidence is a finding. Do not decide who should fix a finding, how VCM should route it, or whether the user must intervene.
+- \`approve\`: no gate-blocking finding.
+- \`request_changes\`: evidence is missing, stale, contradictory, incomplete, or unsafe.
 
-## Evidence
+## Checks
 
-Use relevant evidence from:
+- \`architecture-plan\`: scope, affected files/contracts, Scaffold Manifest, dependencies, docs/generated context, proof points, Replan triggers, no task-only source comments.
+- \`validation-adequacy\`: review report covers the plan, public contracts, validation level, commands/results, skips/gaps/risks, final cleanup, durable testing docs impact.
+- \`final-diff\`: diff matches plan, no unapproved surface/dependency/docs, no \`VCM:CODE\`, no task-process comments, meaningful tests, fallible paths handled.
 
-- \`CLAUDE.md\`
-- \`.claude/agents/architect.md\`
-- \`.claude/agents/coder.md\`
-- \`.claude/agents/reviewer.md\`
-- \`.ai/generated/module-index.json\`
-- \`.ai/generated/public-surface.json\`
-- \`.ai/vcm/handoffs/**\`
+## Output
 
-## Gate Checks
-
-### Architecture Plan
-
-Check that the plan:
-
-- matches the user request and approved scope
-- names affected modules/files, file responsibilities, and user-visible changes
-- defines new or changed non-private callable surfaces: visibility, signature shape, callers, contract, side effects, and error boundaries
-- includes a Scaffold Manifest that carries task-specific context, coder guidance, allowed freedom, expected \`VCM:CODE\`, durable code comment needs, proof points, and Replan triggers
-- preserves dependency direction and avoids unapproved dependencies
-- states docs/generated-context impact or explains why none is needed
-- names risks, proof points, phase boundaries when needed, and Replan triggers
-- uses \`VCM:CODE\` for incomplete implementation and leaves no coder ambiguity
-- keeps task-specific context, phase notes, handoff instructions, and coder guidance out of source-code comments
-- does not take over reviewer-owned validation strategy or test adequacy
-
-### Validation Adequacy
-
-Check that the review report:
-
-- validates approved scope, architecture plan, and public contracts
-- uses appropriate L1/L2/L3/L4 validation depth
-- records evidence, commands, results, failures, skipped checks, gaps, and follow-ups
-- performs clean final validation after cache cleanup when final validation is required
-- justifies skipped checks and explains residual validation risk
-- updates \`docs/TESTING.md\` when durable validation strategy or gaps changed
-- keeps production-code reading limited to behavior, test seams, fixtures, and coverage gaps
-
-### Final Diff
-
-Check that the final diff:
-
-- stays inside the approved plan, phase, and user constraints
-- introduces no unapproved modules, dependencies, public contracts, cross-file callable surfaces, or durable-doc changes
-- removes all \`VCM:CODE\` markers
-- leaves no task-specific process comments in source or test code, such as role handoff notes, phase notes, current-task rationale, or coder instructions
-- contains no fake completion: hardcoded success, disabled logic, swallowed errors, test-only shortcuts, or silent fallback hiding failure
-- preserves existing behavior unless the plan changes it
-- keeps changed functions focused and meaningfully named
-- validates boundary inputs and handles fallible operations explicitly
-- does not weaken, delete, or skip tests to pass validation
-- verifies or regenerates generated context when module structure or public APIs change
-- includes docs-sync and known-issues disposition when applicable
-
-## Findings
-
-For each finding, report severity, title, evidence, expected, gap, and risk.
-
-Use \`request_changes\` for unresolved \`critical\` or \`high\` findings, and for \`medium\` findings that affect correctness, validation confidence, or maintainability. \`low\` findings do not prevent approval unless they reveal a gate-impacting pattern.
-
-## Report Format
-
-Begin the report with:
+Write only the assigned report under \`.ai/vcm/gate-reviews/\`. Start with:
 
 \`\`\`text
 Gate: <gate>
@@ -84,35 +27,9 @@ Decision: approve|request_changes
 Summary: <one or two sentences>
 \`\`\`
 
-## Constraints
+Findings must include severity, title, evidence, expected, gap, and risk.
 
-- Write only under \`.ai/vcm/codex-reviews/\` when asked to write output.
-- Do not edit production code, tests, durable docs, Claude role files, route files, or handoff artifacts.
-- Do not write \`.ai/vcm/handoffs/messages/\`.
-- Do not run long validation jobs unless the gate prompt explicitly asks for command execution.
-- Do not request broader filesystem or network permissions.`;
-}
-
-export function renderCodexConfigHarnessRules(): string {
-  return `# VCM reads this file before launching the Codex Reviewer terminal.
-# Codex CLI project hooks live in .ai/codex/.codex/.
-approval_policy = "never"
-default_permissions = "vcm_codex_reviewer"
-
-[permissions.vcm_codex_reviewer.workspace_roots]
-"../.." = true
-
-[permissions.vcm_codex_reviewer.filesystem]
-":minimal" = "read"
-
-[permissions.vcm_codex_reviewer.filesystem.":workspace_roots"]
-"." = "read"
-".ai/codex" = "read"
-".ai/vcm/codex-reviews" = "write"
-"**/*.env" = "deny"
-
-[permissions.vcm_codex_reviewer.network]
-enabled = true`;
+Do not edit code, tests, durable docs, role files, route files, or handoff artifacts. Do not choose owners, fixes, Replan, or user-intervention needs.`;
 }
 
 export function renderCodexCliConfigHarnessRules(): string {
@@ -120,7 +37,7 @@ export function renderCodexCliConfigHarnessRules(): string {
 hooks = true`;
 }
 
-export function renderCodexHooksHarnessRules(role = "codex-reviewer"): string {
+export function renderCodexHooksHarnessRules(role = "codex-translator"): string {
   const eventScript = "let s=\"\";process.stdin.setEncoding(\"utf8\");process.stdin.on(\"data\",d=>s+=d);process.stdin.on(\"end\",()=>{let event={};try{event=s.trim()?JSON.parse(s):{};}catch{event={raw:s};}process.stdout.write(JSON.stringify({taskSlug:process.env.VCM_TASK_SLUG,role:process.env.VCM_ROLE,event}));});";
   const userPromptCommand = `sh -c 'if [ -z "\${VCM_TASK_SLUG:-}" ] || [ -z "\${VCM_ROLE:-}" ] || [ -z "\${VCM_API_URL:-}" ]; then exit 0; fi; node -e '"'"'${eventScript}'"'"' | curl -fsS --max-time 2 -X POST "\${VCM_API_URL}/api/hooks/${role}" -H "content-type: application/json" --data-binary @- >/dev/null || true'`;
   const stopCommand = `sh -c 'if [ -z "\${VCM_TASK_SLUG:-}" ] || [ -z "\${VCM_ROLE:-}" ] || [ -z "\${VCM_API_URL:-}" ]; then printf "{}"; exit 0; fi; node -e '"'"'${eventScript}'"'"' | curl -fsS --max-time 5 -X POST "\${VCM_API_URL}/api/hooks/${role}/stop" -H "content-type: application/json" --data-binary @- || printf "{}"'`;
@@ -226,174 +143,10 @@ default_permissions = "vcm_codex_translator"
 enabled = true`;
 }
 
-export function renderCodexArchitecturePlanPrompt(): string {
-  return `# Codex Gate: architecture-plan
-
-Review whether the architecture plan is ready for coder implementation.
-
-## Required Evidence
-
-- \`../../CLAUDE.md\`
-- \`../../.claude/agents/architect.md\`
-- \`../../.claude/agents/coder.md\`
-- \`../../.claude/agents/reviewer.md\`
-- \`../../.ai/vcm/handoffs/architecture-plan.md\`
-- current git status and scaffold diff from \`../..\`
-- \`../../.ai/generated/module-index.json\`
-- \`../../.ai/generated/public-surface.json\`
-
-## Task
-
-Check the plan against the VCM Codex Reviewer rules in \`AGENTS.md\`.
-
-Write exactly one Markdown report:
-
-\`\`\`text
-../vcm/codex-reviews/architecture-plan-review.md
-\`\`\`
-
-The report decision must be exactly \`approve\` or \`request_changes\`.
-Do not modify any other file.`;
-}
-
-export function renderCodexValidationAdequacyPrompt(): string {
-  return `# Codex Gate: validation-adequacy
-
-Review whether the reviewer report provides enough validation evidence for the task to continue toward docs sync or final acceptance.
-
-## Required Evidence
-
-- \`../../CLAUDE.md\`
-- \`../../.claude/agents/reviewer.md\`
-- \`../../.ai/vcm/handoffs/architecture-plan.md\`
-- \`../../.ai/vcm/handoffs/review-report.md\`
-- \`../../docs/TESTING.md\`
-- \`../../.ai/generated/module-index.json\`
-- \`../../.ai/generated/public-surface.json\`
-
-## Task
-
-Check validation adequacy against the VCM Codex Reviewer rules in \`AGENTS.md\`.
-
-Write exactly one Markdown report:
-
-\`\`\`text
-../vcm/codex-reviews/validation-adequacy-review.md
-\`\`\`
-
-The report decision must be exactly \`approve\` or \`request_changes\`.
-Do not modify any other file.`;
-}
-
-export function renderCodexFinalDiffPrompt(): string {
-  return `# Codex Gate: final-diff
-
-Review whether the final task diff is ready for PR preparation.
-
-## Required Evidence
-
-- \`../../CLAUDE.md\`
-- \`../../.claude/agents/architect.md\`
-- \`../../.claude/agents/coder.md\`
-- \`../../.claude/agents/reviewer.md\`
-- \`../../.ai/vcm/handoffs/architecture-plan.md\`
-- \`../../.ai/vcm/handoffs/review-report.md\`
-- \`../../.ai/vcm/handoffs/docs-sync-report.md\`
-- \`../../.ai/vcm/handoffs/final-acceptance.md\`
-- current git status and diff from \`../..\`
-- \`../../.ai/generated/module-index.json\`
-- \`../../.ai/generated/public-surface.json\`
-
-## Task
-
-Check the final diff against the VCM Codex Reviewer rules in \`AGENTS.md\`.
-
-Write exactly one Markdown report:
-
-\`\`\`text
-../vcm/codex-reviews/final-diff-review.md
-\`\`\`
-
-The report decision must be exactly \`approve\` or \`request_changes\`.
-Do not modify any other file.`;
-}
-
-export function renderCodexReviewResultSchema(): string {
-  return `{
-  "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "title": "VCM Codex Review Result",
-  "type": "object",
-  "additionalProperties": false,
-  "required": ["gate", "decision", "summary", "findings", "inputsReviewed"],
-  "properties": {
-    "gate": {
-      "type": "string",
-      "enum": ["architecture-plan", "validation-adequacy", "final-diff"]
-    },
-    "decision": {
-      "type": "string",
-      "enum": ["approve", "request_changes"]
-    },
-    "summary": {
-      "type": "string"
-    },
-    "findings": {
-      "type": "array",
-      "items": {
-        "type": "object",
-        "additionalProperties": false,
-        "required": ["severity", "title", "evidence", "expected", "gap", "risk"],
-        "properties": {
-          "severity": {
-            "type": "string",
-            "enum": ["critical", "high", "medium", "low"]
-          },
-          "title": {
-            "type": "string"
-          },
-          "file": {
-            "type": "string"
-          },
-          "line": {
-            "type": "integer",
-            "minimum": 1
-          },
-          "evidence": {
-            "type": "string"
-          },
-          "expected": {
-            "type": "string"
-          },
-          "gap": {
-            "type": "string"
-          },
-          "risk": {
-            "type": "string"
-          }
-        }
-      }
-    },
-    "residualRisks": {
-      "type": "array",
-      "items": {
-        "type": "string"
-      },
-      "default": []
-    },
-    "inputsReviewed": {
-      "type": "array",
-      "items": {
-        "type": "string"
-      }
-    }
-  }
-}`;
-}
-
-export function renderVcmCodexReviewGateSkillRules(): string {
+export function renderVcmGateReviewSkillRules(): string {
   return `## Purpose
 
-Use this skill when project-manager reaches a VCM Codex Review Gate or receives a VCM Codex Review callback.
+Use this skill when project-manager reaches a VCM Gate Review or receives a VCM Gate Review callback.
 
 ## Trigger Points
 
@@ -406,7 +159,7 @@ Use this skill when project-manager reaches a VCM Codex Review Gate or receives 
 Run:
 
 \`\`\`sh
-.ai/tools/request-codex-review --gate <architecture-plan|validation-adequacy|final-diff>
+.ai/tools/request-gate-review --gate <architecture-plan|validation-adequacy|final-diff>
 \`\`\`
 
 Interpret the first output line:
@@ -415,23 +168,21 @@ Interpret the first output line:
 - \`started\` or \`running\`: stop this turn and wait for the VCM callback.
 - \`failed_to_start\`: report the failure to the user.
 
-Do not run \`codex exec\` yourself. VCM owns the Codex adapter and gate state.
-
 ## Callback
 
-When VCM sends \`[VCM CODEX REVIEW CALLBACK]\`, read the named report path.
+When VCM sends \`[VCM GATE REVIEW CALLBACK]\`, read the named report path.
 
 - \`approve\`: continue to the next normal VCM gate.
 - \`request_changes\`: summarize the findings and route follow-up through the responsible VCM role.
 - \`failed\`: stop and ask the user to retry, skip, or override in VCM.
 - \`skipped\` or \`overridden\`: record the exception reason in PM context and continue only as appropriate.
 
-Do not ask Codex Reviewer to choose owners, fixes, Replan, or user-intervention needs. PM routes those decisions through normal VCM responsibilities.`;
+Do not ask Gate Reviewer to choose owners, fixes, Replan, or user-intervention needs. PM routes those decisions through normal VCM responsibilities.`;
 }
 
-export function renderRequestCodexReviewTool(): string {
+export function renderRequestGateReviewTool(): string {
   return `#!/usr/bin/env python3
-"""Request a VCM-managed Codex Review Gate."""
+"""Request a VCM-managed Gate Review Gate."""
 import argparse
 import hashlib
 import json
@@ -448,9 +199,9 @@ from pathlib import Path
 
 GATES = ("architecture-plan", "validation-adequacy", "final-diff")
 REPORTS = {
-    "architecture-plan": ".ai/vcm/codex-reviews/architecture-plan-review.md",
-    "validation-adequacy": ".ai/vcm/codex-reviews/validation-adequacy-review.md",
-    "final-diff": ".ai/vcm/codex-reviews/final-diff-review.md",
+    "architecture-plan": ".ai/vcm/gate-reviews/architecture-plan-review.md",
+    "validation-adequacy": ".ai/vcm/gate-reviews/validation-adequacy-review.md",
+    "final-diff": ".ai/vcm/gate-reviews/final-diff-review.md",
 }
 SOURCE_ARTIFACTS = {
     "architecture-plan": [".ai/vcm/handoffs/architecture-plan.md"],
@@ -492,7 +243,7 @@ def call_vcm_api(gate: str) -> int | None:
         base_url.rstrip("/")
         + "/api/tasks/"
         + urllib.parse.quote(task_slug, safe="")
-        + "/codex-review/"
+        + "/gate-review/"
         + urllib.parse.quote(gate, safe="")
         + "/request"
     )
@@ -557,9 +308,9 @@ def input_hash(root: Path, gate: str) -> str:
     digest = hashlib.sha256()
     common = [
         "CLAUDE.md",
-        ".ai/codex/AGENTS.md",
-        ".ai/codex/config.toml",
-        f".ai/codex/prompts/{gate}-gate.md",
+        ".claude/agents/gate-reviewer.md",
+        ".claude/skills/vcm-gate-review/SKILL.md",
+        ".ai/tools/request-gate-review",
     ]
     for relative in common + SOURCE_ARTIFACTS[gate]:
         path = root / relative
@@ -568,7 +319,7 @@ def input_hash(root: Path, gate: str) -> str:
             digest.update(path.read_bytes())
         else:
             digest.update(b"<missing>")
-    if gate == "final-diff":
+    if gate in ("architecture-plan", "final-diff"):
         digest.update(command_output(root, ["git", "status", "--porcelain=v1"]))
         digest.update(command_output(root, ["git", "diff", "--binary"]))
         digest.update(command_output(root, ["git", "diff", "--cached", "--binary"]))
@@ -582,7 +333,7 @@ def request_id(gate: str) -> str:
 
 def local_request(gate: str) -> int:
     root = root_dir()
-    index_path = root / ".ai/vcm/codex-reviews/index.json"
+    index_path = root / ".ai/vcm/gate-reviews/index.json"
     index = read_json(index_path)
     enabled = bool(index.get("enabled", False))
     gate_record = index.get("gates", {}).get(gate, {}) if isinstance(index.get("gates"), dict) else {}
@@ -614,7 +365,8 @@ def local_request(gate: str) -> int:
         return 0
 
     rid = request_id(gate)
-    request_path = root / ".ai/vcm/codex-reviews/requests" / f"{rid}.json"
+    request_path = root / ".ai/vcm/gate-reviews/requests" / f"{rid}.json"
+    prompt_path = f".ai/vcm/gate-reviews/requests/{rid}.prompt.md"
     report_path = REPORTS[gate]
     requested_at = now_iso()
     write_json(request_path, {
@@ -625,7 +377,7 @@ def local_request(gate: str) -> int:
         "requestedAt": requested_at,
         "inputHash": current_hash,
         "reportPath": report_path,
-        "promptPath": f".ai/codex/prompts/{gate}-gate.md",
+        "promptPath": prompt_path,
     })
 
     index["activeGate"] = gate
@@ -635,7 +387,7 @@ def local_request(gate: str) -> int:
         "status": "running",
         "decision": None,
         "reportPath": report_path,
-        "promptPath": f".ai/codex/prompts/{gate}-gate.md",
+        "promptPath": prompt_path,
         "inputHash": current_hash,
         "requestId": rid,
         "requestPath": request_path.relative_to(root).as_posix(),

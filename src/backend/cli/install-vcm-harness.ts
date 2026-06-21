@@ -8,19 +8,14 @@ import { fileURLToPath } from "node:url";
 import { renderArchitectHarnessRules } from "../templates/harness/architect-agent.js";
 import { renderCoderHarnessRules } from "../templates/harness/coder-agent.js";
 import {
-  renderCodexAgentsHarnessRules,
-  renderCodexArchitecturePlanPrompt,
   renderCodexCliConfigHarnessRules,
-  renderCodexConfigHarnessRules,
-  renderCodexFinalDiffPrompt,
   renderCodexHooksHarnessRules,
-  renderCodexReviewResultSchema,
   renderCodexTranslatorAgentsHarnessRules,
   renderCodexTranslatorConfigHarnessRules,
-  renderCodexValidationAdequacyPrompt,
-  renderRequestCodexReviewTool,
-  renderVcmCodexReviewGateSkillRules
-} from "../templates/harness/codex-review.js";
+  renderGateReviewerAgentRules,
+  renderRequestGateReviewTool,
+  renderVcmGateReviewSkillRules
+} from "../templates/harness/gate-review.js";
 import { renderRootClaudeHarnessRules } from "../templates/harness/claude-root.js";
 import { renderGitignoreHarnessRules } from "../templates/harness/gitignore.js";
 import { renderProjectManagerHarnessRules } from "../templates/harness/project-manager-agent.js";
@@ -63,6 +58,9 @@ const AGENT_FRONTMATTER = {
   },
   reviewer: {
     description: "VCM independent review role for acceptance, test adequacy, scope checks, and risk findings."
+  },
+  "gate-reviewer": {
+    description: "VCM independent gate review role for architecture plans, validation adequacy, and final diffs."
   }
 };
 
@@ -123,11 +121,12 @@ const MANAGED_FILES = [
     content: renderPullRequestTemplateHarnessRules()
   },
   {
-    path: ".ai/codex/AGENTS.md",
-    title: "VCM Codex Reviewer",
+    path: ".claude/agents/gate-reviewer.md",
+    title: "Gate Reviewer Agent",
+    agentName: "gate-reviewer",
     commentStyle: "html",
-    category: "codex-reviewer-agent",
-    content: renderCodexAgentsHarnessRules()
+    category: "gate-reviewer-agent",
+    content: renderGateReviewerAgentRules()
   },
   {
     path: ".ai/codex-translator/AGENTS.md",
@@ -211,33 +210,15 @@ const WHOLE_FILES = [
     )
   },
   {
-    path: ".claude/skills/vcm-codex-review-gate/SKILL.md",
+    path: ".claude/skills/vcm-gate-review/SKILL.md",
     category: "skill",
     mode: 0o644,
     content: renderSkillFile(
-      "VCM Codex Review Gate Skill",
-      "vcm-codex-review-gate",
-      "Use when project-manager reaches a Codex Review Gate or receives a VCM Codex Review callback.",
-      renderVcmCodexReviewGateSkillRules()
+      "VCM Gate Review Skill",
+      "vcm-gate-review",
+      "Use when project-manager reaches a Gate Review trigger or receives a VCM Gate Review callback.",
+      renderVcmGateReviewSkillRules()
     )
-  },
-  {
-    path: ".ai/codex/config.toml",
-    category: "codex-review-config",
-    mode: 0o644,
-    content: renderCodexConfigHarnessRules()
-  },
-  {
-    path: ".ai/codex/.codex/config.toml",
-    category: "codex-review-hooks",
-    mode: 0o644,
-    content: renderCodexCliConfigHarnessRules()
-  },
-  {
-    path: ".ai/codex/.codex/hooks.json",
-    category: "codex-review-hooks",
-    mode: 0o644,
-    content: renderCodexHooksHarnessRules()
   },
   {
     path: ".ai/codex-translator/config.toml",
@@ -258,34 +239,10 @@ const WHOLE_FILES = [
     content: renderCodexHooksHarnessRules("codex-translator")
   },
   {
-    path: ".ai/codex/prompts/architecture-plan-gate.md",
-    category: "codex-review-prompt",
-    mode: 0o644,
-    content: renderCodexArchitecturePlanPrompt()
-  },
-  {
-    path: ".ai/codex/prompts/validation-adequacy-gate.md",
-    category: "codex-review-prompt",
-    mode: 0o644,
-    content: renderCodexValidationAdequacyPrompt()
-  },
-  {
-    path: ".ai/codex/prompts/final-diff-gate.md",
-    category: "codex-review-prompt",
-    mode: 0o644,
-    content: renderCodexFinalDiffPrompt()
-  },
-  {
-    path: ".ai/codex/schemas/codex-review-result.schema.json",
-    category: "codex-review-schema",
-    mode: 0o644,
-    content: renderCodexReviewResultSchema()
-  },
-  {
-    path: ".ai/tools/request-codex-review",
+    path: ".ai/tools/request-gate-review",
     category: "runtime-tool",
     mode: 0o755,
-    content: renderRequestCodexReviewTool()
+    content: renderRequestGateReviewTool()
   },
   {
     path: ".ai/tools/run-long-check",
@@ -513,15 +470,11 @@ function fixedDirectories() {
     ".claude/skills/vcm-harness-bootstrap/",
     ".claude/skills/vcm-long-running-validation/",
     ".claude/skills/vcm-route-message/",
-    ".claude/skills/vcm-codex-review-gate/",
-    ".ai/codex/",
-    ".ai/codex/.codex/",
-    ".ai/codex/prompts/",
-    ".ai/codex/schemas/",
+    ".claude/skills/vcm-gate-review/",
     ".ai/codex-translator/",
     ".ai/codex-translator/.codex/",
     ".ai/vcm/translations/",
-    ".ai/vcm/codex-reviews/",
+    ".ai/vcm/gate-reviews/",
     ".ai/tools/",
     ".ai/generated/"
   ];

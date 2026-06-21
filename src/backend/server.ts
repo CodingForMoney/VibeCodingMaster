@@ -12,7 +12,7 @@ import { createCodexHookService, type CodexHookService } from "./services/codex-
 import { createGitAdapter } from "./adapters/git-adapter.js";
 import { createAppSettingsService, type AppSettingsService } from "./services/app-settings-service.js";
 import { createClaudeTranscriptService } from "./services/claude-transcript-service.js";
-import { createCodexReviewService, type CodexReviewService } from "./services/codex-review-service.js";
+import { createGateReviewService, type GateReviewService } from "./services/gate-review-service.js";
 import { createCodexTranslationService, type CodexTranslationService } from "./services/codex-translation-service.js";
 import {
   createHarnessService,
@@ -42,7 +42,7 @@ import { registerAppSettingsRoutes } from "./api/app-settings-routes.js";
 import { registerArtifactRoutes } from "./api/artifact-routes.js";
 import { registerClaudeHookRoutes } from "./api/claude-hook-routes.js";
 import { registerCodexHookRoutes } from "./api/codex-hook-routes.js";
-import { registerCodexReviewRoutes } from "./api/codex-review-routes.js";
+import { registerGateReviewRoutes } from "./api/gate-review-routes.js";
 import { registerCodexTranslationRoutes } from "./api/codex-translation-routes.js";
 import { registerHarnessRoutes } from "./api/harness-routes.js";
 import { registerMessageRoutes } from "./api/message-routes.js";
@@ -73,7 +73,7 @@ export interface ServerDeps {
   claudeHookService: ClaudeHookService;
   codexHookService: CodexHookService;
   messageService: MessageService;
-  codexReviewService: CodexReviewService;
+  gateReviewService: GateReviewService;
   codexTranslationService: CodexTranslationService;
   roundService: RoundService;
   statusService: StatusService;
@@ -104,9 +104,9 @@ export async function createServer(deps: ServerDeps, options: CreateServerOption
   registerAppSettingsRoutes(app, { appSettings: deps.appSettings });
   registerClaudeHookRoutes(app, { claudeHookService: deps.claudeHookService });
   registerCodexHookRoutes(app, { codexHookService: deps.codexHookService });
-  registerCodexReviewRoutes(app, {
+  registerGateReviewRoutes(app, {
     projectService: deps.projectService,
-    codexReviewService: deps.codexReviewService
+    gateReviewService: deps.gateReviewService
   });
   registerCodexTranslationRoutes(app, {
     projectService: deps.projectService,
@@ -263,7 +263,7 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
       await taskService.updateTaskStatus(repoRoot, taskSlug, status);
     }
   });
-  const codexReviewService = createCodexReviewService({
+  const gateReviewService = createGateReviewService({
     fs,
     runner,
     runtime,
@@ -322,9 +322,7 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
   });
   const codexHookService = createCodexHookService({
     projectService,
-    taskService,
     sessionService,
-    roundService,
     codexTranslationService
   });
   const diagnosticsService = createDiagnosticsService({
@@ -345,7 +343,7 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     claudeHookService,
     codexHookService,
     messageService,
-    codexReviewService,
+    gateReviewService,
     codexTranslationService,
     roundService,
     statusService,

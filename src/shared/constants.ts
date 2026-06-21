@@ -1,4 +1,4 @@
-import type { CodexReviewerRoleName, CodexRoleName, CodexTranslatorRoleName, DispatchableRole, RoleDefinition, RoleName, VcmRoleName } from "./types/role.js";
+import type { CodexRoleName, CodexTranslatorRoleName, DispatchableRole, GateReviewerRoleName, RoleDefinition, RoleName, VcmRoleName } from "./types/role.js";
 
 export const DEFAULT_BACKEND_PORT = 4173;
 export const DEFAULT_FRONTEND_PORT = 5173;
@@ -30,10 +30,10 @@ export const VCM_ROLE_DEFINITIONS: readonly RoleDefinition<VcmRoleName>[] = [
   }
 ] as const;
 
-export const CODEX_REVIEWER_ROLE_DEFINITION: RoleDefinition<CodexReviewerRoleName> = {
-  name: "codex-reviewer",
-  label: "Codex Reviewer",
-  commandAgent: "codex-reviewer",
+export const GATE_REVIEWER_ROLE_DEFINITION: RoleDefinition<GateReviewerRoleName> = {
+  name: "gate-reviewer",
+  label: "Gate Reviewer",
+  commandAgent: "gate-reviewer",
   dispatchable: false
 };
 
@@ -45,12 +45,12 @@ export const CODEX_TRANSLATOR_ROLE_DEFINITION: RoleDefinition<CodexTranslatorRol
 };
 
 export const CODEX_ROLE_DEFINITIONS: readonly RoleDefinition<CodexRoleName>[] = [
-  CODEX_REVIEWER_ROLE_DEFINITION,
   CODEX_TRANSLATOR_ROLE_DEFINITION
 ] as const;
 
 export const ROLE_DEFINITIONS: readonly RoleDefinition[] = [
   ...VCM_ROLE_DEFINITIONS,
+  GATE_REVIEWER_ROLE_DEFINITION,
   ...CODEX_ROLE_DEFINITIONS
 ] as const;
 
@@ -67,6 +67,10 @@ export function isRoleName(value: string): value is RoleName {
 
 export function isVcmRoleName(value: string): value is VcmRoleName {
   return VCM_ROLE_NAMES.includes(value as VcmRoleName);
+}
+
+export function isGateReviewerRoleName(value: string): value is GateReviewerRoleName {
+  return value === GATE_REVIEWER_ROLE_DEFINITION.name;
 }
 
 export function isCodexRoleName(value: string): value is CodexRoleName {

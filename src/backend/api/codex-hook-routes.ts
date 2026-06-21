@@ -10,15 +10,6 @@ export interface CodexHookRouteDeps {
 }
 
 export function registerCodexHookRoutes(app: FastifyInstance, deps: CodexHookRouteDeps): void {
-  app.post<{ Body: CodexHookRequest }>("/api/hooks/codex-reviewer", async (request) => {
-    return deps.codexHookService.handleHook(request.body);
-  });
-
-  app.post<{ Body: CodexHookRequest }>("/api/hooks/codex-reviewer/stop", async (request): Promise<CodexStopHookResponse> => {
-    await deps.codexHookService.handleStopHook(request.body);
-    return {};
-  });
-
   app.post<{ Body: CodexHookRequest }>("/api/hooks/codex-translator", async (request) => {
     return deps.codexHookService.handleHook(request.body);
   });

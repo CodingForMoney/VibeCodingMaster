@@ -432,7 +432,7 @@ target-language keyed session directory:
 - the persisted session id should be associated with the base repository,
   target language, selected model, selected effort, and harness path
 
-The role must not use Codex Reviewer prompts or permissions.
+The role must not use Gate Reviewer prompts or permissions.
 
 Codex Translator should have durable instructions for both modes:
 
@@ -464,10 +464,10 @@ should be a separate explicit user action.
 
 When VCM runs inside a Dev Container, Docker, Podman, Kubernetes, or Codespaces
 environment, the container is the sandbox boundary. VCM should auto-detect that
-environment and start Codex Translator with Codex's nested sandbox disabled,
-matching Codex Reviewer, to avoid Linux container `bwrap` and `apply_patch`
-failures caused by double sandboxing. `VCM_SANDBOX=devcontainer` remains an
-explicit override for environments that cannot be auto-detected.
+environment and start Codex Translator with Codex's nested sandbox disabled to
+avoid Linux container `bwrap` and `apply_patch` failures caused by double
+sandboxing. `VCM_SANDBOX=devcontainer` remains an explicit override for
+environments that cannot be auto-detected.
 
 ## 10. Source Content Safety
 
@@ -1097,7 +1097,7 @@ New backend pieces:
   - promote completed translations into explicit user-selected repo paths
   - get conversation translation request status when needed for debugging
 - translator hook service
-  - same running/idle tracking pattern as Codex Reviewer
+  - project-scoped running/idle tracking for the Codex Translator session
   - update the active queue item on `UserPromptSubmit` and `Stop`
   - persist `session_id`, `turn_id`, `transcript_path`, and
     `last_assistant_message` diagnostics
@@ -1108,9 +1108,9 @@ POST /api/hooks/codex-translator
 POST /api/hooks/codex-translator/stop
 ```
 
-The existing Codex Reviewer services should not be overloaded with translation
-logic. Shared utility code is fine, but role state, directories, prompts, and
-permissions should remain separate.
+Gate Reviewer services should not be overloaded with translation logic. Shared
+utility code is fine, but role state, directories, prompts, and permissions
+should remain separate.
 
 ## 19. Relationship To Existing Translation
 

@@ -22,19 +22,14 @@ import type { FileSystemAdapter } from "../adapters/filesystem.js";
 import { renderArchitectHarnessRules } from "../templates/harness/architect-agent.js";
 import { renderCoderHarnessRules } from "../templates/harness/coder-agent.js";
 import {
-  renderCodexAgentsHarnessRules,
-  renderCodexArchitecturePlanPrompt,
   renderCodexCliConfigHarnessRules,
-  renderCodexConfigHarnessRules,
-  renderCodexFinalDiffPrompt,
   renderCodexHooksHarnessRules,
-  renderCodexReviewResultSchema,
   renderCodexTranslatorAgentsHarnessRules,
   renderCodexTranslatorConfigHarnessRules,
-  renderCodexValidationAdequacyPrompt,
-  renderRequestCodexReviewTool,
-  renderVcmCodexReviewGateSkillRules
-} from "../templates/harness/codex-review.js";
+  renderGateReviewerAgentRules,
+  renderRequestGateReviewTool,
+  renderVcmGateReviewSkillRules
+} from "../templates/harness/gate-review.js";
 import { renderRootClaudeHarnessRules } from "../templates/harness/claude-root.js";
 import { renderGitignoreHarnessRules } from "../templates/harness/gitignore.js";
 import { renderProjectManagerHarnessRules } from "../templates/harness/project-manager-agent.js";
@@ -183,42 +178,25 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
     renderRules: renderVcmLongRunningValidationSkillRules
   },
   {
-    kind: "skill-vcm-codex-review-gate",
-    path: ".claude/skills/vcm-codex-review-gate/SKILL.md",
-    title: "VCM Codex Review Gate Skill",
+    kind: "skill-vcm-gate-review",
+    path: ".claude/skills/vcm-gate-review/SKILL.md",
+    title: "VCM Gate Review Skill",
     frontmatter: renderSkillFrontmatter(
-      "vcm-codex-review-gate",
-      "Use when project-manager reaches a Codex Review Gate or receives a VCM Codex Review callback."
+      "vcm-gate-review",
+      "Use when project-manager reaches a Gate Review trigger or receives a VCM Gate Review callback."
     ),
     ownership: "whole-file",
-    renderRules: renderVcmCodexReviewGateSkillRules
+    renderRules: renderVcmGateReviewSkillRules
   },
   {
-    kind: "codex-agents",
-    path: ".ai/codex/AGENTS.md",
-    title: "VCM Codex Reviewer",
-    renderRules: renderCodexAgentsHarnessRules
-  },
-  {
-    kind: "codex-config",
-    path: ".ai/codex/config.toml",
-    title: "VCM Codex Config",
-    ownership: "raw-file",
-    renderRules: renderCodexConfigHarnessRules
-  },
-  {
-    kind: "codex-cli-config",
-    path: ".ai/codex/.codex/config.toml",
-    title: "VCM Codex CLI Config",
-    ownership: "raw-file",
-    renderRules: renderCodexCliConfigHarnessRules
-  },
-  {
-    kind: "codex-hooks",
-    path: ".ai/codex/.codex/hooks.json",
-    title: "VCM Codex Hooks",
-    ownership: "raw-file",
-    renderRules: renderCodexHooksHarnessRules
+    kind: "agent-gate-reviewer",
+    path: ".claude/agents/gate-reviewer.md",
+    title: "Gate Reviewer Agent",
+    frontmatter: renderAgentFrontmatter(
+      "gate-reviewer",
+      "VCM independent gate review role for architecture plans, validation adequacy, and final diffs."
+    ),
+    renderRules: renderGateReviewerAgentRules
   },
   {
     kind: "codex-translator-agents",
@@ -248,39 +226,11 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
     renderRules: () => renderCodexHooksHarnessRules("codex-translator")
   },
   {
-    kind: "codex-prompt-architecture-plan",
-    path: ".ai/codex/prompts/architecture-plan-gate.md",
-    title: "Codex Architecture Plan Gate Prompt",
+    kind: "tool-request-gate-review",
+    path: ".ai/tools/request-gate-review",
+    title: "Request Gate Review Tool",
     ownership: "raw-file",
-    renderRules: renderCodexArchitecturePlanPrompt
-  },
-  {
-    kind: "codex-prompt-validation-adequacy",
-    path: ".ai/codex/prompts/validation-adequacy-gate.md",
-    title: "Codex Validation Adequacy Gate Prompt",
-    ownership: "raw-file",
-    renderRules: renderCodexValidationAdequacyPrompt
-  },
-  {
-    kind: "codex-prompt-final-diff",
-    path: ".ai/codex/prompts/final-diff-gate.md",
-    title: "Codex Final Diff Gate Prompt",
-    ownership: "raw-file",
-    renderRules: renderCodexFinalDiffPrompt
-  },
-  {
-    kind: "codex-review-schema",
-    path: ".ai/codex/schemas/codex-review-result.schema.json",
-    title: "Codex Review Result Schema",
-    ownership: "raw-file",
-    renderRules: renderCodexReviewResultSchema
-  },
-  {
-    kind: "tool-request-codex-review",
-    path: ".ai/tools/request-codex-review",
-    title: "Request Codex Review Tool",
-    ownership: "raw-file",
-    renderRules: renderRequestCodexReviewTool
+    renderRules: renderRequestGateReviewTool
   },
   {
     kind: "agent-project-manager",

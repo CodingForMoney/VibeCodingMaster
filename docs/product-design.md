@@ -1,6 +1,6 @@
 # VibeCodingMaster Product Design
 
-Last updated: 2026-06-13
+Last updated: 2026-06-21
 
 This document describes the current product direction and implemented V1 behavior for VCM.
 
@@ -82,43 +82,40 @@ project-manager
   -> project-manager final acceptance, commit, and PR
 ```
 
-### 4.1 Codex Review Gates
+### 4.1 Gate Review Gates
 
-For complex tasks, VCM supports optional Codex Review Gates as an independent
-cross-model review layer. Claude Code remains the role execution engine, but
-Codex reviews three high-value handoff points:
+For complex tasks, VCM supports optional Gate Review Gates through an
+independent `gate-reviewer` Claude Code role. The reviewer uses a
+project-scoped long-lived session, but every gate prompt names the current task
+and task worktree so task evidence stays explicit.
 
 ```text
 architect architecture plan
-  -> Codex reviews plan quality before coder starts
+  -> Gate Reviewer checks plan quality before coder starts
 
 reviewer review-report
-  -> Codex reviews validation adequacy before final acceptance
+  -> Gate Reviewer checks validation adequacy before final acceptance
 
 final task diff
-  -> Codex reviews code and PR readiness before PR preparation
+  -> Gate Reviewer checks code and PR readiness before PR preparation
 ```
 
 Each gate returns `approve` or `request_changes`. PM triggers gates through the
-`vcm-codex-review-gate` skill at the three workflow points; VCM owns the Codex
-Review sidebar toggles, gate state, Codex CLI / adapter execution, and PM
-callback after review completes. Codex writes reports under
-`.ai/vcm/codex-reviews/`. All three gate toggles default to off.
-When any gate is on, or when a Codex Reviewer session already exists, the task
-workspace shows `Codex Reviewer` as a fifth terminal role with Codex model and
-effort selection. VCM sends gate prompts into this long-lived terminal session
-so the review can be challenged or clarified afterward; the role remains
-outside PM routing and Claude Code auto orchestration. Codex Reviewer
-`UserPromptSubmit` and `Stop` hooks post back to VCM from
-`.ai/codex/.codex/hooks.json`, so the fifth role participates in session and
-Round state while a gate is running.
+`vcm-gate-review` skill at the three workflow points; VCM owns the sidebar
+toggles, gate state, Gate Reviewer session, report polling, and PM callback.
+Reports are task-scoped under `.ai/vcm/gate-reviews/`. All three gate toggles
+default to off.
+
+When any gate is on, or when a Gate Reviewer session already exists, the task
+workspace shows `Gate Reviewer` as a fifth terminal role. VCM sends a short gate
+prompt into that session and manually marks the role/Round running until the
+assigned report is valid. The role remains outside PM routing and normal
+auto-orchestration.
 Architecture-plan findings return to architect, validation-adequacy findings
 return to reviewer, and final-diff findings go to architect first for
-assessment. Codex reviewer role configuration lives under `.ai/codex/`,
-including `.ai/codex/AGENTS.md` and `.ai/codex/config.toml`, so VCM does not
-require a root-level `AGENTS.md`.
+assessment. Gate Reviewer role rules live in `.claude/agents/gate-reviewer.md`.
 
-The detailed design lives in `docs/codex-review-gates.md`.
+The detailed design lives in `docs/gate-review-gates.md`.
 
 ### 4.2 Task Worktree Model
 
@@ -389,7 +386,7 @@ The split should stay close to 50/50 width. Both panes expand vertically to fill
 
 ## 8. Flow Pause Detection
 
-VCM detects flow pauses from role hook events, not from terminal silence, message history, or pending route files. Claude Code roles report through `.claude/settings.json`; Codex Reviewer reports through `.ai/codex/.codex/hooks.json`.
+VCM detects flow pauses from role hook events, not from terminal silence, message history, or pending route files. Claude Code roles report through `.claude/settings.json`; VCM directly records Gate Reviewer turns while a gate prompt is active.
 
 Backend role state:
 
@@ -397,7 +394,7 @@ Backend role state:
 - `Stop`: role becomes `idle` and records `lastTurnEndedAt`.
 - `PostCompact`: refreshes role session metadata and records `lastCompactAt` without changing `running`/`idle`.
 - `StopFailure`: first checks completion evidence. If the role already wrote an outgoing route file, VCM marks the role idle and dispatches normally. If not, VCM sends a recovery prompt to the same role without marking it idle.
-- The role tab and flow pause state both react to Claude Code and Codex Reviewer hook events.
+- The role tab and flow pause state react to Claude Code hook events plus VCM-recorded Gate Reviewer gate turns.
 
 Task-level Round state:
 
@@ -587,18 +584,13 @@ VCM Harness injects Claude Code hooks into `.claude/settings.json`:
 
 VCM uses `UserPromptSubmit` as the Claude Code acceptance signal. A successful PTY write only proves VCM delivered text to the embedded terminal; `UserPromptSubmit` proves Claude Code accepted the prompt.
 
-VCM Harness also injects Codex Reviewer hooks into `.ai/codex/.codex/hooks.json`:
-
-- `UserPromptSubmit`: posts directly to `/api/hooks/codex-reviewer`, marks the fifth role running, and starts or continues the shared Round state
-- `Stop`: posts directly to `/api/hooks/codex-reviewer/stop`, marks the fifth role idle, and lets the Round settle normally
-
-Codex Reviewer hooks do not dispatch route files. PM receives Codex review completion through the Codex Review Gate callback managed by VCM.
+Gate Reviewer does not dispatch route files. PM receives Gate Review completion through the Gate Review callback managed by VCM.
 
 The injected role rules require asynchronous file messaging: after writing or updating a route file, the role must end the current Claude Code turn and wait for VCM to deliver a later reply. Roles should use `.claude/skills/vcm-route-message/SKILL.md` to author route files. Roles must not poll files, start shell loops, keep the turn open waiting for another role to answer, paste directly into another role terminal, or use Claude Code Task/Subagent for VCM role delegation.
 
 Roles must not run background Bash; a `PreToolUse` hook (`.ai/tools/vcm-bash-guard`) denies `run_in_background`, `nohup`, `setsid`, `disown`, and trailing `&`. The only sanctioned long-running mechanism is `.ai/tools/run-long-check` plus `.ai/tools/watch-job` through `vcm-long-running-validation`: the detached job worker enforces the 60 minute ceiling and a supervision lease that kills unwatched jobs, `watch-job` renews the lease in foreground windows of up to 8 minutes (exit `125` means call it again in the same turn), and the VCM backend blocks a role's turn-end while one of its validation jobs is still running.
 
-There is no `vcmctl` in the target design. Hook entrypoints are direct HTTP from Claude Code and Codex Reviewer hooks to the local VCM backend.
+There is no `vcmctl` in the target design. Hook entrypoints are direct HTTP from Claude Code hooks to the local VCM backend.
 
 ## 13. Translation
 

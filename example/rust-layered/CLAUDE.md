@@ -17,7 +17,7 @@ This is a Rust workspace example for VCM harness experiments. It has three archi
 - Read module-local `CLAUDE.md` before editing a subdirectory if one exists.
 - Use `vcm-route-message` whenever a VCM role hands off work, asks another role a question, reports a result, reports a blocker, or raises a finding. Follow its write-then-stop rule.
 - Use `vcm-long-running-validation` for long-running validation. Follow the background job limits below.
-- Project-manager uses `vcm-codex-review-gate` at enabled Codex Review Gate trigger points and on VCM Codex review callbacks.
+- Project-manager uses `vcm-gate-review` at enabled Gate Review trigger points and on VCM Gate Review callbacks.
 
 ## VCM Background Jobs
 
@@ -44,7 +44,7 @@ This is a Rust workspace example for VCM harness experiments. It has three archi
 - Test-only or validation-only work may use: `project-manager -> reviewer -> project-manager final acceptance`.
 - If a docs/test/validation-only task reveals required code, architecture, public contract, dependency, durable-doc, or test-strategy changes, route back through the full code-change flow.
 - Keep role outputs under `.ai/vcm/handoffs/`.
-- Codex Review Gate reports live under `.ai/vcm/codex-reviews/` and are VCM-managed task evidence.
+- Gate Review reports live under `.ai/vcm/gate-reviews/` and are VCM-managed task evidence.
 - Runtime task records and handoffs under `.ai/vcm/` are temporary. Durable facts must move into code, tests, PR text, commit history, or long-term docs.
 - Record current-task unresolved findings in `.ai/vcm/handoffs/known-issues.md`.
 

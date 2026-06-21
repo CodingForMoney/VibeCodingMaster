@@ -1,12 +1,12 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { createNodeFileSystemAdapter } from "../../../src/backend/adapters/filesystem.js";
 import type { CommandResult, CommandRunner, CommandRunnerOptions } from "../../../src/backend/adapters/command-runner.js";
 import type { TerminalRuntime } from "../../../src/backend/runtime/terminal-runtime.js";
-import { createCodexReviewService } from "../../../src/backend/services/codex-review-service.js";
-import type { CodexReviewGate } from "../../../src/shared/types/codex-review.js";
+import { createGateReviewService } from "../../../src/backend/services/gate-review-service.js";
+import type { GateReviewGate } from "../../../src/shared/types/gate-review.js";
 import type { RoleSessionRecord } from "../../../src/shared/types/session.js";
 import type { TaskRecord } from "../../../src/shared/types/task.js";
 
@@ -19,9 +19,9 @@ afterEach(async () => {
   }
 });
 
-describe("codex-review-service", () => {
+describe("gate-review-service", () => {
   it("runs a requested gate, records the report decision, and calls back project-manager", async () => {
-    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-codex-review-"));
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-gate-review-"));
     await writeHarnessFiles(tmpRepo);
 
     const runnerCalls: Array<{ command: string; args: string[]; options?: CommandRunnerOptions }> = [];
@@ -30,7 +30,7 @@ describe("codex-review-service", () => {
     const sessionStarts: string[] = [];
     const activityCalls: string[] = [];
     const roundCalls: string[] = [];
-    const service = createCodexReviewService({
+    const service = createGateReviewService({
       fs: createNodeFileSystemAdapter(),
       runner,
       runtime: createRuntime(tmpRepo, writes),
@@ -57,32 +57,36 @@ describe("codex-review-service", () => {
     expect(state.activeGate).toBeNull();
     expect(record.decision).toBe("request_changes");
     expect(record.callbackStatus).toBe("sent");
-    expect(record.reportPath).toBe(".ai/vcm/codex-reviews/architecture-plan-review.md");
+    expect(record.reportPath).toBe(".ai/vcm/gate-reviews/architecture-plan-review.md");
 
     expect(runnerCalls.some((call) => call.command === "codex")).toBe(false);
     expect(runnerCalls.some((call) => call.command === "git" && call.args.join(" ") === "status --porcelain=v1")).toBe(true);
     expect(runnerCalls.some((call) => call.command === "git" && call.args.join(" ") === "diff --binary")).toBe(true);
-    expect(sessionStarts).toEqual(["codex-reviewer"]);
+    expect(sessionStarts).toEqual(["gate-reviewer"]);
     expect(activityCalls).toEqual([
-      "running:codex-reviewer",
-      "idle:codex-reviewer",
+      "running:gate-reviewer",
+      "idle:gate-reviewer",
       "running:project-manager"
     ]);
     expect(roundCalls).toEqual([
-      "round:UserPromptSubmit:codex-reviewer",
-      "round:Stop:codex-reviewer",
+      "round:UserPromptSubmit:gate-reviewer",
+      "round:Stop:gate-reviewer",
       "round:UserPromptSubmit:project-manager"
     ]);
-    expect(writes.find((write) => write.includes("Codex Gate"))).toContain("Report path from this working directory: ../vcm/codex-reviews/architecture-plan-review.md");
-    expect(writes.join("")).toContain("[VCM CODEX REVIEW CALLBACK]");
+    const gatePrompt = writes.find((write) => write.includes("[VCM GATE REVIEW]")) ?? "";
+    expect(gatePrompt).toContain("Task: demo-task");
+    expect(gatePrompt).toContain(`Worktree: ${taskWorktree(tmpRepo)}`);
+    expect(gatePrompt).toContain(`Report: ${path.join(taskWorktree(tmpRepo), ".ai/vcm/gate-reviews/architecture-plan-review.md")}`);
+    expect(gatePrompt).not.toContain("Findings, when present");
+    expect(writes.join("")).toContain("[VCM GATE REVIEW CALLBACK]");
     expect(writes.join("")).toContain("decision: request_changes");
   });
 
-  it("does not run Codex when the project switch is disabled", async () => {
-    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-codex-review-disabled-"));
+  it("does not start Gate Reviewer when the project switch is disabled", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-gate-review-disabled-"));
     await writeHarnessFiles(tmpRepo);
     const runnerCalls: Array<{ command: string; args: string[]; options?: CommandRunnerOptions }> = [];
-    const service = createCodexReviewService({
+    const service = createGateReviewService({
       fs: createNodeFileSystemAdapter(),
       runner: createRunner(tmpRepo, runnerCalls),
       runtime: createRuntime(tmpRepo, []),
@@ -100,10 +104,10 @@ describe("codex-review-service", () => {
   });
 
   it("updates gate settings from disabled state without enabling stale gates", async () => {
-    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-codex-review-settings-"));
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-gate-review-settings-"));
     await writeHarnessFiles(tmpRepo);
     const appSettings = createAppSettings([]);
-    const service = createCodexReviewService({
+    const service = createGateReviewService({
       fs: createNodeFileSystemAdapter(),
       runner: createRunner(tmpRepo, []),
       runtime: createRuntime(tmpRepo, []),
@@ -117,41 +121,36 @@ describe("codex-review-service", () => {
     const state = await service.updateSettings(tmpRepo, "demo-task", {
       gates: { "architecture-plan": true }
     });
-    const config = await readFile(path.join(tmpRepo, ".ai/codex/config.toml"), "utf8");
 
     expect(state.enabled).toBe(true);
     expect(state.gates["architecture-plan"].required).toBe(true);
     expect(state.gates["validation-adequacy"].required).toBe(false);
     expect(state.gates["final-diff"].required).toBe(false);
-    expect(config).toContain("approval_policy = \"never\"");
-    expect(config).not.toContain("[vcm.codex_review]");
     expect(appSettings.getStoredRequiredGates()).toEqual(["architecture-plan"]);
 
     const disabledState = await service.updateSettings(tmpRepo, "demo-task", {
       gates: { "architecture-plan": false }
     });
-    const disabledConfig = await readFile(path.join(tmpRepo, ".ai/codex/config.toml"), "utf8");
 
     expect(disabledState.enabled).toBe(false);
-    expect(disabledConfig).toContain("approval_policy = \"never\"");
-    expect(disabledConfig).not.toContain("[vcm.codex_review]");
     expect(appSettings.getStoredRequiredGates()).toEqual([]);
   });
 });
 
 async function writeHarnessFiles(repoRoot: string): Promise<void> {
   const taskRepoRoot = taskWorktree(repoRoot);
-  await mkdir(path.join(taskRepoRoot, ".ai/codex/prompts"), { recursive: true });
+  await mkdir(path.join(repoRoot, ".claude/agents"), { recursive: true });
+  await mkdir(path.join(taskRepoRoot, ".claude/agents"), { recursive: true });
+  await mkdir(path.join(taskRepoRoot, ".claude/skills/vcm-gate-review"), { recursive: true });
+  await mkdir(path.join(taskRepoRoot, ".ai/tools"), { recursive: true });
   await mkdir(path.join(taskRepoRoot, ".ai/vcm/handoffs"), { recursive: true });
   await writeFile(path.join(repoRoot, "CLAUDE.md"), "# CLAUDE\n", "utf8");
-  await mkdir(path.join(repoRoot, ".ai/codex"), { recursive: true });
-  await writeFile(path.join(taskRepoRoot, ".ai/codex/AGENTS.md"), "# VCM Codex Reviewer\n", "utf8");
-  await writeFile(path.join(taskRepoRoot, ".ai/codex/prompts/architecture-plan-gate.md"), "# Codex Gate\n", "utf8");
+  await writeFile(path.join(repoRoot, ".claude/agents/gate-reviewer.md"), "# VCM Gate Reviewer\n", "utf8");
+  await writeFile(path.join(taskRepoRoot, "CLAUDE.md"), "# CLAUDE\n", "utf8");
+  await writeFile(path.join(taskRepoRoot, ".claude/agents/gate-reviewer.md"), "# VCM Gate Reviewer\n", "utf8");
+  await writeFile(path.join(taskRepoRoot, ".claude/skills/vcm-gate-review/SKILL.md"), "# Gate Review Skill\n", "utf8");
+  await writeFile(path.join(taskRepoRoot, ".ai/tools/request-gate-review"), "#!/usr/bin/env python3\n", "utf8");
   await writeFile(path.join(taskRepoRoot, ".ai/vcm/handoffs/architecture-plan.md"), "# Architecture Plan\n", "utf8");
-  await writeFile(path.join(repoRoot, ".ai/codex/config.toml"), `approval_policy = "never"
-`, "utf8");
-  await writeFile(path.join(taskRepoRoot, ".ai/codex/config.toml"), `approval_policy = "never"
-`, "utf8");
 }
 
 function taskWorktree(repoRoot: string): string {
@@ -168,28 +167,6 @@ function createRunner(
       if (command === "git") {
         return { stdout: "", stderr: "", exitCode: 0 };
       }
-      if (command === "codex") {
-        const gate = options?.env?.VCM_CODEX_REVIEW_GATE ?? "architecture-plan";
-        const requestId = options?.env?.VCM_CODEX_REVIEW_REQUEST_ID ?? "request-id";
-        await writeFile(
-          path.join(taskWorktree(repoRoot), ".ai/vcm/codex-reviews", `${gate}-review.md`),
-          [
-            `Gate: ${gate}`,
-            `Request: ${requestId}`,
-            "Decision: request_changes",
-            "Summary: Missing proof point.",
-            "",
-            "severity: high",
-            "title: Missing proof point",
-            "evidence: plan has no proof",
-            "expected: proof point exists",
-            "gap: no proof",
-            "risk: coder ambiguity"
-          ].join("\n"),
-          "utf8"
-        );
-        return { stdout: "ok", stderr: "", exitCode: 0 };
-      }
       return { stdout: "", stderr: `unexpected command: ${command}`, exitCode: 1 };
     }
   };
@@ -199,13 +176,13 @@ function createRuntime(repoRoot: string, writes: string[]): TerminalRuntime {
   return {
     write(sessionId, data) {
       writes.push(data);
-      if (sessionId !== "codex-session" || !data.includes("Gate:")) {
+      if (sessionId !== "gate-session" || !data.includes("Gate:")) {
         return;
       }
       const gate = /Gate:\s*([a-z-]+)/.exec(data)?.[1] ?? "architecture-plan";
       const requestId = /Request:\s*([a-z0-9_.-]+)/i.exec(data)?.[1] ?? "request-id";
       void writeFile(
-        path.join(taskWorktree(repoRoot), ".ai/vcm/codex-reviews", `${gate}-review.md`),
+        path.join(taskWorktree(repoRoot), ".ai/vcm/gate-reviews", `${gate}-review.md`),
         [
           `Gate: ${gate}`,
           `Request: ${requestId}`,
@@ -223,11 +200,11 @@ function createRuntime(repoRoot: string, writes: string[]): TerminalRuntime {
       );
     },
     getSession(sessionId) {
-      return sessionId === "pm-session" || sessionId === "codex-session"
+      return sessionId === "pm-session" || sessionId === "gate-session"
         ? {
             id: sessionId,
             taskSlug: "demo-task",
-            role: sessionId === "codex-session" ? "codex-reviewer" : "project-manager",
+            role: sessionId === "gate-session" ? "gate-reviewer" : "project-manager",
             status: "running",
             startedAt: "2026-06-13T00:00:00.000Z",
             exitCode: null
@@ -281,17 +258,17 @@ function createSessionService(starts: string[] = [], activityCalls: string[] = [
     terminalBackend: "node-pty",
     updatedAt: "2026-06-13T00:00:00.000Z"
   };
-  const codexSession: RoleSessionRecord = {
-    id: "codex-session",
-    claudeSessionId: "codex-session-id",
+  const gateSession: RoleSessionRecord = {
+    id: "gate-session",
+    claudeSessionId: "gate-session-id",
     taskSlug: "demo-task",
-    role: "codex-reviewer",
+    role: "gate-reviewer",
     status: "running",
     activityStatus: "idle",
-    command: "codex",
+    command: "claude --agent gate-reviewer",
     permissionMode: "default",
-    model: "gpt-5.5",
-    cwd: "/repo/.claude/worktrees/demo-task/.ai/codex",
+    model: "default",
+    cwd: "/repo",
     terminalBackend: "node-pty",
     updatedAt: "2026-06-13T00:00:00.000Z"
   };
@@ -304,13 +281,13 @@ function createSessionService(starts: string[] = [], activityCalls: string[] = [
     },
     async resumeRoleSession(_repoRoot: string, _taskSlug: string, role: string) {
       starts.push(`resume:${role}`);
-      sessions.set(role, codexSession);
-      return codexSession;
+      sessions.set(role, gateSession);
+      return gateSession;
     },
     async startRoleSession(_repoRoot: string, _taskSlug: string, role: string) {
       starts.push(role);
-      sessions.set(role, codexSession);
-      return codexSession;
+      sessions.set(role, gateSession);
+      return gateSession;
     },
     async markRoleActivityRunning(_repoRoot: string, _taskSlug: string, role: string) {
       const session = sessions.get(role) ?? pmSession;
@@ -344,16 +321,16 @@ function createRoundService(calls: string[] = []) {
   };
 }
 
-function createAppSettings(initialRequiredGates: CodexReviewGate[] = []) {
+function createAppSettings(initialRequiredGates: GateReviewGate[] = []) {
   let requiredGates = [...initialRequiredGates];
   return {
-    async getCodexReviewSettings() {
+    async getGateReviewSettings() {
       return {
         enabled: requiredGates.length > 0,
         requiredGates
       };
     },
-    async updateCodexReviewSettings(_repoRoot: string, _taskSlug: string, nextRequiredGates: CodexReviewGate[]) {
+    async updateGateReviewSettings(_repoRoot: string, _taskSlug: string, nextRequiredGates: GateReviewGate[]) {
       requiredGates = [...nextRequiredGates];
       return {
         enabled: requiredGates.length > 0,

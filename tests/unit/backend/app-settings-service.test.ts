@@ -188,7 +188,7 @@ describe("app-settings-service", () => {
     });
   });
 
-  it("stores Codex Review Gate switches in settings.json", async () => {
+  it("stores Gate Review Gate switches in settings.json", async () => {
     const fs = createMemoryFs();
     const service = createAppSettingsService({
       fs,
@@ -196,12 +196,12 @@ describe("app-settings-service", () => {
     });
     const repoRoot = "/workspace/project";
 
-    await expect(service.getCodexReviewSettings(repoRoot, "demo-task")).resolves.toEqual({
+    await expect(service.getGateReviewSettings(repoRoot, "demo-task")).resolves.toEqual({
       enabled: false,
       requiredGates: []
     });
 
-    await expect(service.updateCodexReviewSettings(repoRoot, "demo-task", [
+    await expect(service.updateGateReviewSettings(repoRoot, "demo-task", [
       "final-diff",
       "architecture-plan",
       "final-diff"
@@ -211,11 +211,11 @@ describe("app-settings-service", () => {
     });
 
     const stored = await fs.readJson<AppSettingsFile>("/home/.vcm/settings.json");
-    expect(stored.codexReview).toMatchObject({
+    expect(stored.gateReview).toMatchObject({
       requiredGates: ["architecture-plan", "final-diff"]
     });
-    expect(stored.codexReview).not.toHaveProperty("projects");
-    await expect(service.getCodexReviewSettings("/workspace/another-project", "another-task")).resolves.toEqual({
+    expect(stored.gateReview).not.toHaveProperty("projects");
+    await expect(service.getGateReviewSettings("/workspace/another-project", "another-task")).resolves.toEqual({
       enabled: true,
       requiredGates: ["architecture-plan", "final-diff"]
     });

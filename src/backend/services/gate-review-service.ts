@@ -1,49 +1,49 @@
 import { createHash, randomUUID } from "node:crypto";
 import path from "node:path";
 import {
-  CODEX_REVIEW_GATES,
-  type CodexReviewDecision,
-  type CodexReviewCallbackStatus,
-  type CodexReviewExceptionRequest,
-  type CodexReviewFinding,
-  type CodexReviewGate,
-  type CodexReviewGateRecord,
-  type CodexReviewGateStatus,
-  type CodexReviewIndex,
-  type CodexReviewSettingsUpdateRequest,
-  type CodexReviewReport,
-  type CodexReviewRequestResult,
-  type CodexReviewSeverity
-} from "../../shared/types/codex-review.js";
+  GATE_REVIEW_GATES,
+  type GateReviewDecision,
+  type GateReviewCallbackStatus,
+  type GateReviewExceptionRequest,
+  type GateReviewFinding,
+  type GateReviewGate,
+  type GateReviewGateRecord,
+  type GateReviewGateStatus,
+  type GateReviewIndex,
+  type GateReviewSettingsUpdateRequest,
+  type GateReviewReport,
+  type GateReviewRequestResult,
+  type GateReviewSeverity
+} from "../../shared/types/gate-review.js";
 import { VcmError } from "../errors.js";
 import { resolveRepoPath } from "../adapters/filesystem.js";
 import type { FileSystemAdapter } from "../adapters/filesystem.js";
 import type { CommandRunner } from "../adapters/command-runner.js";
 import type { TerminalRuntime } from "../runtime/terminal-runtime.js";
 import { submitTerminalInput } from "../runtime/terminal-submit.js";
-import type { AppCodexReviewSettings, AppSettingsService } from "./app-settings-service.js";
+import type { AppGateReviewSettings, AppSettingsService } from "./app-settings-service.js";
 import type { ProjectService } from "./project-service.js";
 import type { RoundService } from "./round-service.js";
 import type { SessionService } from "./session-service.js";
 import { getTaskRuntimeRepoRoot, type TaskService } from "./task-service.js";
 
-export interface CodexReviewService {
-  getState(repoRoot: string, taskSlug: string): Promise<CodexReviewIndex>;
-  updateSettings(repoRoot: string, taskSlug: string, input: CodexReviewSettingsUpdateRequest): Promise<CodexReviewIndex>;
-  requestReviewGate(repoRoot: string, taskSlug: string, gate: CodexReviewGate): Promise<CodexReviewRequestResult>;
-  retryReviewGate(repoRoot: string, taskSlug: string, gate: CodexReviewGate): Promise<CodexReviewRequestResult>;
-  skipReviewGate(repoRoot: string, taskSlug: string, gate: CodexReviewGate, input: CodexReviewExceptionRequest): Promise<CodexReviewIndex>;
-  overrideReviewGate(repoRoot: string, taskSlug: string, gate: CodexReviewGate, input: CodexReviewExceptionRequest): Promise<CodexReviewIndex>;
-  readReport(repoRoot: string, taskSlug: string, gate: CodexReviewGate): Promise<CodexReviewReport>;
+export interface GateReviewService {
+  getState(repoRoot: string, taskSlug: string): Promise<GateReviewIndex>;
+  updateSettings(repoRoot: string, taskSlug: string, input: GateReviewSettingsUpdateRequest): Promise<GateReviewIndex>;
+  requestReviewGate(repoRoot: string, taskSlug: string, gate: GateReviewGate): Promise<GateReviewRequestResult>;
+  retryReviewGate(repoRoot: string, taskSlug: string, gate: GateReviewGate): Promise<GateReviewRequestResult>;
+  skipReviewGate(repoRoot: string, taskSlug: string, gate: GateReviewGate, input: GateReviewExceptionRequest): Promise<GateReviewIndex>;
+  overrideReviewGate(repoRoot: string, taskSlug: string, gate: GateReviewGate, input: GateReviewExceptionRequest): Promise<GateReviewIndex>;
+  readReport(repoRoot: string, taskSlug: string, gate: GateReviewGate): Promise<GateReviewReport>;
 }
 
-export interface CodexReviewServiceDeps {
+export interface GateReviewServiceDeps {
   fs: FileSystemAdapter;
   runner: CommandRunner;
   runtime: TerminalRuntime;
   projectService: Pick<ProjectService, "loadConfig">;
   taskService: Pick<TaskService, "loadTask">;
-  appSettings: Pick<AppSettingsService, "getCodexReviewSettings" | "updateCodexReviewSettings">;
+  appSettings: Pick<AppSettingsService, "getGateReviewSettings" | "updateGateReviewSettings">;
   sessionService: Pick<SessionService, "getRoleSession" | "markRoleActivityIdle" | "markRoleActivityRunning" | "resumeRoleSession" | "startRoleSession">;
   roundService: Pick<RoundService, "recordRoleTurnEvent">;
   reportPollIntervalMs?: number;
@@ -51,9 +51,9 @@ export interface CodexReviewServiceDeps {
   now?: () => string;
 }
 
-interface CodexReviewRuntimeConfig {
+interface GateReviewRuntimeConfig {
   enabled: boolean;
-  requiredGates: CodexReviewGate[];
+  requiredGates: GateReviewGate[];
 }
 
 interface ReviewContext {
@@ -61,24 +61,23 @@ interface ReviewContext {
   taskSlug: string;
   taskRepoRoot: string;
   stateRoot: string;
-  config: CodexReviewRuntimeConfig;
+  config: GateReviewRuntimeConfig;
 }
 
-interface ParsedReport extends CodexReviewReport {
-  decision: CodexReviewDecision;
+interface ParsedReport extends GateReviewReport {
+  decision: GateReviewDecision;
 }
 
-const CODEX_DIR = ".ai/codex";
-const CODEX_CONFIG_PATH = ".ai/codex/config.toml";
-const CODEX_REVIEW_DIR = ".ai/vcm/codex-reviews";
-const REQUESTS_DIR = ".ai/vcm/codex-reviews/requests";
-const CODEX_REVIEW_VERSION = 1;
-const CODEX_REVIEWER_ROLE = "codex-reviewer";
+const GATE_REVIEW_AGENT_PATH = ".claude/agents/gate-reviewer.md";
+const GATE_REVIEW_DIR = ".ai/vcm/gate-reviews";
+const REQUESTS_DIR = ".ai/vcm/gate-reviews/requests";
+const GATE_REVIEW_VERSION = 1;
+const GATE_REVIEWER_ROLE = "gate-reviewer";
 const DEFAULT_REPORT_POLL_INTERVAL_MS = 1000;
 const DEFAULT_REPORT_TIMEOUT_MS = 30 * 60 * 1000;
 const activeRuns = new Set<string>();
 
-const SOURCE_ARTIFACTS: Record<CodexReviewGate, string[]> = {
+const SOURCE_ARTIFACTS: Record<GateReviewGate, string[]> = {
   "architecture-plan": [
     ".ai/vcm/handoffs/architecture-plan.md"
   ],
@@ -94,9 +93,9 @@ const SOURCE_ARTIFACTS: Record<CodexReviewGate, string[]> = {
   ]
 };
 
-const VALID_SEVERITIES = new Set<CodexReviewSeverity>(["critical", "high", "medium", "low"]);
+const VALID_SEVERITIES = new Set<GateReviewSeverity>(["critical", "high", "medium", "low"]);
 
-export function createCodexReviewService(deps: CodexReviewServiceDeps): CodexReviewService {
+export function createGateReviewService(deps: GateReviewServiceDeps): GateReviewService {
   const now = deps.now ?? (() => new Date().toISOString());
   const reportPollIntervalMs = deps.reportPollIntervalMs ?? DEFAULT_REPORT_POLL_INTERVAL_MS;
   const reportTimeoutMs = deps.reportTimeoutMs ?? DEFAULT_REPORT_TIMEOUT_MS;
@@ -105,7 +104,7 @@ export function createCodexReviewService(deps: CodexReviewServiceDeps): CodexRev
     const projectConfig = await deps.projectService.loadConfig(repoRoot);
     const task = await deps.taskService.loadTask(repoRoot, taskSlug);
     const taskRepoRoot = getTaskRuntimeRepoRoot(task);
-    const reviewSettings = await deps.appSettings.getCodexReviewSettings(repoRoot, taskSlug);
+    const reviewSettings = await deps.appSettings.getGateReviewSettings(repoRoot, taskSlug);
     return {
       repoRoot,
       taskSlug,
@@ -118,9 +117,9 @@ export function createCodexReviewService(deps: CodexReviewServiceDeps): CodexRev
   async function requestReviewGateInternal(
     repoRoot: string,
     taskSlug: string,
-    gate: CodexReviewGate,
+    gate: GateReviewGate,
     options: { force?: boolean } = {}
-  ): Promise<CodexReviewRequestResult> {
+  ): Promise<GateReviewRequestResult> {
     const context = await getContext(repoRoot, taskSlug);
     let index = await loadIndex(deps.fs, context, now());
     const record = index.gates[gate];
@@ -133,7 +132,7 @@ export function createCodexReviewService(deps: CodexReviewServiceDeps): CodexRev
         error: undefined
       }, now());
       await saveIndex(deps.fs, context.taskRepoRoot, index);
-      return { status: "disabled", gate, record: index.gates[gate], message: "Codex review is disabled." };
+      return { status: "disabled", gate, record: index.gates[gate], message: "Gate review is disabled." };
     }
 
     if (!record.required) {
@@ -151,12 +150,12 @@ export function createCodexReviewService(deps: CodexReviewServiceDeps): CodexRev
         status: "running",
         gate,
         record,
-        message: `Codex review is already running for ${index.activeGate}.`
+        message: `Gate review is already running for ${index.activeGate}.`
       };
     }
 
     if (record.status === "running" && !options.force) {
-      return { status: "running", gate, record, message: "Codex review is already running." };
+      return { status: "running", gate, record, message: "Gate review is already running." };
     }
 
     const inputHash = await computeInputHash(deps, context.taskRepoRoot, gate);
@@ -170,14 +169,15 @@ export function createCodexReviewService(deps: CodexReviewServiceDeps): CodexRev
         status: "already_approved",
         gate,
         record,
-        message: "Codex review already approved the current inputs."
+        message: "Gate review already approved the current inputs."
       };
     }
 
     const timestamp = now();
     const requestId = createRequestId(gate);
     const requestPath = path.posix.join(REQUESTS_DIR, `${requestId}.json`);
-    const nextRecord: CodexReviewGateRecord = {
+    const promptPath = path.posix.join(REQUESTS_DIR, `${requestId}.prompt.md`);
+    const nextRecord: GateReviewGateRecord = {
       ...record,
       status: "running",
       decision: undefined,
@@ -185,6 +185,7 @@ export function createCodexReviewService(deps: CodexReviewServiceDeps): CodexRev
       exceptionReason: undefined,
       requestId,
       requestPath,
+      promptPath,
       inputHash,
       requestedAt: timestamp,
       startedAt: undefined,
@@ -203,7 +204,7 @@ export function createCodexReviewService(deps: CodexReviewServiceDeps): CodexRev
       updatedAt: timestamp
     };
     await deps.fs.writeJsonAtomic(resolveRepoPath(context.taskRepoRoot, requestPath), {
-      version: CODEX_REVIEW_VERSION,
+      version: GATE_REVIEW_VERSION,
       requestId,
       gate,
       status: "requested",
@@ -214,25 +215,25 @@ export function createCodexReviewService(deps: CodexReviewServiceDeps): CodexRev
     });
     await saveIndex(deps.fs, context.taskRepoRoot, index);
 
-    void runCodexReview(context, gate, requestId).catch(() => {
-      // runCodexReview records failures in the persisted gate state.
+    void runGateReview(context, gate, requestId).catch(() => {
+      // runGateReview records failures in the persisted gate state.
     });
 
     return {
       status: "started",
       gate,
       record: nextRecord,
-      message: "Codex review started."
+      message: "Gate review started."
     };
   }
 
-  async function runCodexReview(context: ReviewContext, gate: CodexReviewGate, requestId: string): Promise<void> {
+  async function runGateReview(context: ReviewContext, gate: GateReviewGate, requestId: string): Promise<void> {
     const runKey = `${context.taskRepoRoot}:${context.taskSlug}:${gate}`;
     if (activeRuns.has(runKey)) {
       return;
     }
     activeRuns.add(runKey);
-    let codexTurnStarted = false;
+    let gateTurnStarted = false;
     try {
       const timestamp = now();
       await updateGateRecord(context, gate, {
@@ -242,40 +243,42 @@ export function createCodexReviewService(deps: CodexReviewServiceDeps): CodexRev
       });
       await updateRequestStatus(deps.fs, context, requestId, "running", { startedAt: timestamp });
 
-      const codexDir = resolveRepoPath(context.taskRepoRoot, CODEX_DIR);
-      const reviewDir = resolveRepoPath(context.taskRepoRoot, CODEX_REVIEW_DIR);
-      const prompt = await buildCodexPrompt(deps.fs, context.taskRepoRoot, gate, requestId);
+      const reviewDir = resolveRepoPath(context.taskRepoRoot, GATE_REVIEW_DIR);
+      const agentPath = resolveRepoPath(context.repoRoot, GATE_REVIEW_AGENT_PATH);
+      const prompt = buildGatePrompt(context, gate, requestId);
       await deps.fs.ensureDir(reviewDir);
+      await deps.fs.ensureDir(resolveRepoPath(context.taskRepoRoot, REQUESTS_DIR));
+      await deps.fs.writeText(resolveRepoPath(context.taskRepoRoot, promptPathForRequest(requestId)), prompt);
 
-      if (!(await deps.fs.pathExists(codexDir))) {
+      if (!(await deps.fs.pathExists(agentPath))) {
         throw new VcmError({
-          code: "CODEX_REVIEW_CONFIG_MISSING",
-          message: `${CODEX_DIR} does not exist.`,
+          code: "GATE_REVIEW_AGENT_MISSING",
+          message: `${GATE_REVIEW_AGENT_PATH} does not exist.`,
           statusCode: 409,
-          hint: "Apply the VCM harness before requesting Codex review gates."
+          hint: "Apply the VCM harness before requesting Gate Review Gates."
         });
       }
 
-      const session = await ensureCodexReviewerSession(context);
+      const session = await ensureGateReviewerSession(context);
       await submitTerminalInput(deps.runtime, session.id, prompt);
-      await deps.sessionService.markRoleActivityRunning(context.repoRoot, context.taskSlug, CODEX_REVIEWER_ROLE);
+      await deps.sessionService.markRoleActivityRunning(context.repoRoot, context.taskSlug, GATE_REVIEWER_ROLE);
       await deps.roundService.recordRoleTurnEvent({
         repoRoot: context.repoRoot,
         stateRepoRoot: context.taskRepoRoot,
         stateRoot: context.stateRoot,
         taskSlug: context.taskSlug,
-        role: CODEX_REVIEWER_ROLE,
+        role: GATE_REVIEWER_ROLE,
         eventName: "UserPromptSubmit"
       });
-      codexTurnStarted = true;
+      gateTurnStarted = true;
 
       const parsed = await waitForGateReport(deps.fs, context.taskRepoRoot, gate, requestId, now(), {
         intervalMs: reportPollIntervalMs,
         timeoutMs: reportTimeoutMs
       });
       const completedAt = now();
-      await recordCodexReviewerTurnStop(context, codexTurnStarted);
-      codexTurnStarted = false;
+      await recordGateReviewerTurnStop(context, gateTurnStarted);
+      gateTurnStarted = false;
       await updateGateRecord(context, gate, {
         status: "completed",
         decision: parsed.decision,
@@ -296,8 +299,8 @@ export function createCodexReviewService(deps: CodexReviewServiceDeps): CodexRev
     } catch (error) {
       const timestamp = now();
       const message = errorMessage(error);
-      await recordCodexReviewerTurnStop(context, codexTurnStarted);
-      codexTurnStarted = false;
+      await recordGateReviewerTurnStop(context, gateTurnStarted);
+      gateTurnStarted = false;
       await updateGateRecord(context, gate, {
         status: "failed",
         error: message,
@@ -316,40 +319,40 @@ export function createCodexReviewService(deps: CodexReviewServiceDeps): CodexRev
     }
   }
 
-  async function recordCodexReviewerTurnStop(context: ReviewContext, shouldRecord: boolean): Promise<void> {
+  async function recordGateReviewerTurnStop(context: ReviewContext, shouldRecord: boolean): Promise<void> {
     if (!shouldRecord) {
       return;
     }
-    await deps.sessionService.markRoleActivityIdle(context.repoRoot, context.taskSlug, CODEX_REVIEWER_ROLE);
+    await deps.sessionService.markRoleActivityIdle(context.repoRoot, context.taskSlug, GATE_REVIEWER_ROLE);
     await deps.roundService.recordRoleTurnEvent({
       repoRoot: context.repoRoot,
       stateRepoRoot: context.taskRepoRoot,
       stateRoot: context.stateRoot,
       taskSlug: context.taskSlug,
-      role: CODEX_REVIEWER_ROLE,
+      role: GATE_REVIEWER_ROLE,
       eventName: "Stop"
     });
   }
 
-  async function ensureCodexReviewerSession(context: ReviewContext) {
-    const existing = await deps.sessionService.getRoleSession(context.repoRoot, context.taskSlug, CODEX_REVIEWER_ROLE);
+  async function ensureGateReviewerSession(context: ReviewContext) {
+    const existing = await deps.sessionService.getRoleSession(context.repoRoot, context.taskSlug, GATE_REVIEWER_ROLE);
     if (existing?.status === "running" && deps.runtime.getSession(existing.id)) {
       return existing;
     }
 
     if (existing?.claudeSessionId) {
       try {
-        return await deps.sessionService.resumeRoleSession(context.repoRoot, context.taskSlug, CODEX_REVIEWER_ROLE, {
+        return await deps.sessionService.resumeRoleSession(context.repoRoot, context.taskSlug, GATE_REVIEWER_ROLE, {
           cols: 100,
           rows: 28,
           model: "default"
         });
       } catch {
-        // Fall through to a fresh Codex Reviewer terminal if the saved session cannot be resumed.
+        // Fall through to a fresh Gate Reviewer terminal if the saved session cannot be resumed.
       }
     }
 
-    return deps.sessionService.startRoleSession(context.repoRoot, context.taskSlug, CODEX_REVIEWER_ROLE, {
+    return deps.sessionService.startRoleSession(context.repoRoot, context.taskSlug, GATE_REVIEWER_ROLE, {
       cols: 100,
       rows: 28,
       model: "default"
@@ -358,10 +361,10 @@ export function createCodexReviewService(deps: CodexReviewServiceDeps): CodexRev
 
   async function updateGateRecord(
     context: ReviewContext,
-    gate: CodexReviewGate,
-    patch: Partial<CodexReviewGateRecord>,
+    gate: GateReviewGate,
+    patch: Partial<GateReviewGateRecord>,
     options: { clearActiveGate?: boolean } = {}
-  ): Promise<CodexReviewIndex> {
+  ): Promise<GateReviewIndex> {
     const index = await loadIndex(deps.fs, context, now());
     const next = applyGateState(index, gate, patch, now(), options.clearActiveGate);
     await saveIndex(deps.fs, context.taskRepoRoot, next);
@@ -370,9 +373,9 @@ export function createCodexReviewService(deps: CodexReviewServiceDeps): CodexRev
 
   async function callbackProjectManager(
     context: ReviewContext,
-    gate: CodexReviewGate,
-    status: CodexReviewGateStatus,
-    decision: CodexReviewDecision | undefined,
+    gate: GateReviewGate,
+    status: GateReviewGateStatus,
+    decision: GateReviewDecision | undefined,
     reportPath: string,
     error?: string
   ): Promise<void> {
@@ -426,10 +429,10 @@ export function createCodexReviewService(deps: CodexReviewServiceDeps): CodexRev
       return loadIndex(deps.fs, context, now());
     },
     async updateSettings(repoRoot, taskSlug, input) {
-      const currentSettings = await deps.appSettings.getCodexReviewSettings(repoRoot, taskSlug);
+      const currentSettings = await deps.appSettings.getGateReviewSettings(repoRoot, taskSlug);
       const requiredGates = new Set(currentSettings.requiredGates);
       for (const [gate, enabled] of Object.entries(input?.gates ?? {})) {
-        if (!isCodexReviewGate(gate)) {
+        if (!isGateReviewGate(gate)) {
           continue;
         }
         if (enabled) {
@@ -438,7 +441,7 @@ export function createCodexReviewService(deps: CodexReviewServiceDeps): CodexRev
           requiredGates.delete(gate);
         }
       }
-      await deps.appSettings.updateCodexReviewSettings(repoRoot, taskSlug, [...requiredGates]);
+      await deps.appSettings.updateGateReviewSettings(repoRoot, taskSlug, [...requiredGates]);
       const nextContext = await getContext(repoRoot, taskSlug);
       const index = await loadIndex(deps.fs, nextContext, now());
       await saveIndex(deps.fs, nextContext.taskRepoRoot, {
@@ -459,10 +462,10 @@ export function createCodexReviewService(deps: CodexReviewServiceDeps): CodexRev
       const current = await loadIndex(deps.fs, context, now());
       if (current.gates[gate].status === "running") {
         throw new VcmError({
-          code: "CODEX_REVIEW_RUNNING",
-          message: "Cannot skip a running Codex review gate.",
+          code: "GATE_REVIEW_RUNNING",
+          message: "Cannot skip a running Gate review gate.",
           statusCode: 409,
-          hint: "Wait for the Codex run to finish, then choose retry, skip, or override."
+          hint: "Wait for the gate review to finish, then choose retry, skip, or override."
         });
       }
       const index = await updateGateRecord(context, gate, {
@@ -484,10 +487,10 @@ export function createCodexReviewService(deps: CodexReviewServiceDeps): CodexRev
       const current = await loadIndex(deps.fs, context, now());
       if (current.gates[gate].status === "running") {
         throw new VcmError({
-          code: "CODEX_REVIEW_RUNNING",
-          message: "Cannot override a running Codex review gate.",
+          code: "GATE_REVIEW_RUNNING",
+          message: "Cannot override a running Gate review gate.",
           statusCode: 409,
-          hint: "Wait for the Codex run to finish, then choose retry, skip, or override."
+          hint: "Wait for the gate review to finish, then choose retry, skip, or override."
         });
       }
       const index = await updateGateRecord(context, gate, {
@@ -510,38 +513,38 @@ export function createCodexReviewService(deps: CodexReviewServiceDeps): CodexRev
   };
 }
 
-export function isCodexReviewGate(value: string): value is CodexReviewGate {
-  return CODEX_REVIEW_GATES.includes(value as CodexReviewGate);
+export function isGateReviewGate(value: string): value is GateReviewGate {
+  return GATE_REVIEW_GATES.includes(value as GateReviewGate);
 }
 
-function loadRuntimeConfig(reviewSettings: AppCodexReviewSettings): CodexReviewRuntimeConfig {
+function loadRuntimeConfig(reviewSettings: AppGateReviewSettings): GateReviewRuntimeConfig {
   return {
     enabled: reviewSettings.enabled,
     requiredGates: reviewSettings.requiredGates
   };
 }
 
-async function loadIndex(fs: FileSystemAdapter, context: ReviewContext, timestamp: string): Promise<CodexReviewIndex> {
+async function loadIndex(fs: FileSystemAdapter, context: ReviewContext, timestamp: string): Promise<GateReviewIndex> {
   const indexPath = getIndexPath(context.taskRepoRoot);
-  const raw = await readJsonOrNull<Partial<CodexReviewIndex>>(fs, indexPath);
+  const raw = await readJsonOrNull<Partial<GateReviewIndex>>(fs, indexPath);
   return normalizeIndex(raw, context.config, timestamp);
 }
 
 function normalizeIndex(
-  raw: Partial<CodexReviewIndex> | null,
-  config: CodexReviewRuntimeConfig,
+  raw: Partial<GateReviewIndex> | null,
+  config: GateReviewRuntimeConfig,
   timestamp: string
-): CodexReviewIndex {
+): GateReviewIndex {
   const existingGates = raw?.gates && typeof raw.gates === "object"
-    ? raw.gates as Partial<Record<CodexReviewGate, Partial<CodexReviewGateRecord>>>
+    ? raw.gates as Partial<Record<GateReviewGate, Partial<GateReviewGateRecord>>>
     : {};
-  const gates = {} as Record<CodexReviewGate, CodexReviewGateRecord>;
+  const gates = {} as Record<GateReviewGate, GateReviewGateRecord>;
   const requiredSet = new Set(config.enabled ? config.requiredGates : []);
 
-  for (const gate of CODEX_REVIEW_GATES) {
-    const existing = existingGates[gate] as Partial<CodexReviewGateRecord> | undefined;
+  for (const gate of GATE_REVIEW_GATES) {
+    const existing = existingGates[gate] as Partial<GateReviewGateRecord> | undefined;
     const required = requiredSet.has(gate);
-    const fallbackStatus: CodexReviewGateStatus = config.enabled
+    const fallbackStatus: GateReviewGateStatus = config.enabled
       ? required ? "pending" : "not_required"
       : "disabled";
     const existingStatus = normalizeGateStatus(existing?.status);
@@ -572,12 +575,12 @@ function normalizeIndex(
     };
   }
 
-  const activeGate = isCodexReviewGate(String(raw?.activeGate)) && gates[raw?.activeGate as CodexReviewGate].status === "running"
-    ? raw?.activeGate as CodexReviewGate
+  const activeGate = isGateReviewGate(String(raw?.activeGate)) && gates[raw?.activeGate as GateReviewGate].status === "running"
+    ? raw?.activeGate as GateReviewGate
     : null;
 
   return {
-    version: CODEX_REVIEW_VERSION,
+    version: GATE_REVIEW_VERSION,
     enabled: config.enabled,
     activeGate,
     gates,
@@ -586,12 +589,12 @@ function normalizeIndex(
 }
 
 function applyGateState(
-  index: CodexReviewIndex,
-  gate: CodexReviewGate,
-  patch: Partial<CodexReviewGateRecord>,
+  index: GateReviewIndex,
+  gate: GateReviewGate,
+  patch: Partial<GateReviewGateRecord>,
   timestamp: string,
   clearActiveGate = false
-): CodexReviewIndex {
+): GateReviewIndex {
   const record = {
     ...index.gates[gate],
     ...patch,
@@ -611,23 +614,21 @@ function applyGateState(
   };
 }
 
-async function saveIndex(fs: FileSystemAdapter, taskRepoRoot: string, index: CodexReviewIndex): Promise<void> {
+async function saveIndex(fs: FileSystemAdapter, taskRepoRoot: string, index: GateReviewIndex): Promise<void> {
   await fs.writeJsonAtomic(getIndexPath(taskRepoRoot), index);
 }
 
 async function computeInputHash(
-  deps: Pick<CodexReviewServiceDeps, "fs" | "runner">,
+  deps: Pick<GateReviewServiceDeps, "fs" | "runner">,
   taskRepoRoot: string,
-  gate: CodexReviewGate
+  gate: GateReviewGate
 ): Promise<string> {
   const digest = createHash("sha256");
   const common = [
     "CLAUDE.md",
-    ".ai/codex/AGENTS.md",
-    ".ai/codex/config.toml",
-    ".ai/codex/.codex/config.toml",
-    ".ai/codex/.codex/hooks.json",
-    promptPathForGate(gate)
+    ".claude/agents/gate-reviewer.md",
+    ".claude/skills/vcm-gate-review/SKILL.md",
+    ".ai/tools/request-gate-review"
   ];
 
   for (const relativePath of [...common, ...SOURCE_ARTIFACTS[gate]]) {
@@ -654,47 +655,42 @@ async function commandStdout(runner: CommandRunner, cwd: string, args: string[])
   return result.exitCode === 0 ? result.stdout : "";
 }
 
-async function buildCodexPrompt(
-  fs: FileSystemAdapter,
-  taskRepoRoot: string,
-  gate: CodexReviewGate,
+function buildGatePrompt(
+  context: ReviewContext,
+  gate: GateReviewGate,
   requestId: string
-): Promise<string> {
-  const promptPath = resolveRepoPath(taskRepoRoot, promptPathForGate(gate));
-  if (!(await fs.pathExists(promptPath))) {
-    throw new VcmError({
-      code: "CODEX_REVIEW_PROMPT_MISSING",
-      message: `Codex review prompt is missing: ${promptPathForGate(gate)}`,
-      statusCode: 409,
-      hint: "Apply the VCM harness before requesting Codex review gates."
-    });
-  }
+): string {
+  const reportPath = reportPathForGate(gate);
+  const absoluteReportPath = resolveRepoPath(context.taskRepoRoot, reportPath);
+  const evidence = SOURCE_ARTIFACTS[gate]
+    .map((relativePath) => `- ${relativePath}`)
+    .join("\n");
+  const gitLine = gate === "architecture-plan" || gate === "final-diff"
+    ? "\nDiff: inspect git status/diff in Worktree."
+    : "";
 
-  const basePrompt = await fs.readText(promptPath);
-  const reportPath = path.posix.relative(CODEX_DIR, reportPathForGate(gate));
-  return `${basePrompt.trimEnd()}
+  return `[VCM GATE REVIEW]
+Task: ${context.taskSlug}
+Worktree: ${context.taskRepoRoot}
+Gate: ${gate}
+Request: ${requestId}
+Report: ${absoluteReportPath}
 
-## VCM Runtime Contract
+Evidence:
+${evidence}${gitLine}
 
-- Gate: ${gate}
-- Request: ${requestId}
-- Report path from this working directory: ${reportPath}
-
-Your report must begin with these exact fields:
-
-\`\`\`text
+Write only Report. Start exactly:
 Gate: ${gate}
 Request: ${requestId}
 Decision: approve|request_changes
-\`\`\`
-
-Write only that report file. Do not edit any other file.`;
+Summary: <one or two sentences>
+[/VCM GATE REVIEW]`;
 }
 
 async function waitForGateReport(
   fs: FileSystemAdapter,
   taskRepoRoot: string,
-  gate: CodexReviewGate,
+  gate: GateReviewGate,
   requestId: string,
   timestamp: string,
   options: { intervalMs: number; timeoutMs: number }
@@ -716,8 +712,8 @@ async function waitForGateReport(
 
   const detail = errorMessage(lastError);
   throw new VcmError({
-    code: "CODEX_REVIEW_REPORT_TIMEOUT",
-    message: `Codex Reviewer did not produce a valid ${gate} report within ${Math.round(options.timeoutMs / 1000)}s.`,
+    code: "GATE_REVIEW_REPORT_TIMEOUT",
+    message: `Gate Reviewer did not produce a valid ${gate} report within ${Math.round(options.timeoutMs / 1000)}s.`,
     statusCode: 504,
     hint: detail
   });
@@ -726,7 +722,7 @@ async function waitForGateReport(
 async function parseGateReport(
   fs: FileSystemAdapter,
   taskRepoRoot: string,
-  gate: CodexReviewGate,
+  gate: GateReviewGate,
   requestId: string | undefined,
   timestamp: string
 ): Promise<ParsedReport> {
@@ -734,8 +730,8 @@ async function parseGateReport(
   const absolutePath = resolveRepoPath(taskRepoRoot, reportPath);
   if (!(await fs.pathExists(absolutePath))) {
     throw new VcmError({
-      code: "CODEX_REVIEW_REPORT_MISSING",
-      message: `Codex review report was not written: ${reportPath}`,
+      code: "GATE_REVIEW_REPORT_MISSING",
+      message: `Gate review report was not written: ${reportPath}`,
       statusCode: 500
     });
   }
@@ -744,8 +740,8 @@ async function parseGateReport(
   const parsedGate = matchField(content, "Gate");
   if (parsedGate && parsedGate !== gate) {
     throw new VcmError({
-      code: "CODEX_REVIEW_REPORT_GATE_MISMATCH",
-      message: `Codex review report gate is ${parsedGate}, expected ${gate}.`,
+      code: "GATE_REVIEW_REPORT_GATE_MISMATCH",
+      message: `Gate review report gate is ${parsedGate}, expected ${gate}.`,
       statusCode: 500
     });
   }
@@ -753,8 +749,8 @@ async function parseGateReport(
   const parsedRequest = matchField(content, "Request");
   if (requestId && parsedRequest !== requestId) {
     throw new VcmError({
-      code: "CODEX_REVIEW_REPORT_STALE",
-      message: `Codex review report request is ${parsedRequest ?? "missing"}, expected ${requestId}.`,
+      code: "GATE_REVIEW_REPORT_STALE",
+      message: `Gate review report request is ${parsedRequest ?? "missing"}, expected ${requestId}.`,
       statusCode: 500
     });
   }
@@ -762,8 +758,8 @@ async function parseGateReport(
   const decision = normalizeDecision(matchField(content, "Decision"));
   if (!decision) {
     throw new VcmError({
-      code: "CODEX_REVIEW_DECISION_MISSING",
-      message: `Codex review report must contain Decision: approve or Decision: request_changes.`,
+      code: "GATE_REVIEW_DECISION_MISSING",
+      message: `Gate review report must contain Decision: approve or Decision: request_changes.`,
       statusCode: 500
     });
   }
@@ -789,7 +785,7 @@ async function updateRequestStatus(
 ): Promise<void> {
   const requestPath = resolveRepoPath(context.taskRepoRoot, path.posix.join(REQUESTS_DIR, `${requestId}.json`));
   const current = await readJsonOrNull<Record<string, unknown>>(fs, requestPath) ?? {
-    version: CODEX_REVIEW_VERSION,
+    version: GATE_REVIEW_VERSION,
     requestId
   };
   await fs.writeJsonAtomic(requestPath, {
@@ -800,19 +796,23 @@ async function updateRequestStatus(
   });
 }
 
-function reportPathForGate(gate: CodexReviewGate): string {
-  return path.posix.join(CODEX_REVIEW_DIR, `${gate}-review.md`);
+function reportPathForGate(gate: GateReviewGate): string {
+  return path.posix.join(GATE_REVIEW_DIR, `${gate}-review.md`);
 }
 
-function promptPathForGate(gate: CodexReviewGate): string {
-  return path.posix.join(CODEX_DIR, "prompts", `${gate}-gate.md`);
+function promptPathForRequest(requestId: string): string {
+  return path.posix.join(REQUESTS_DIR, `${requestId}.prompt.md`);
+}
+
+function promptPathForGate(gate: GateReviewGate): string {
+  return path.posix.join(GATE_REVIEW_DIR, "prompts", `${gate}-gate.md`);
 }
 
 function getIndexPath(taskRepoRoot: string): string {
-  return resolveRepoPath(taskRepoRoot, path.posix.join(CODEX_REVIEW_DIR, "index.json"));
+  return resolveRepoPath(taskRepoRoot, path.posix.join(GATE_REVIEW_DIR, "index.json"));
 }
 
-function createRequestId(gate: CodexReviewGate): string {
+function createRequestId(gate: GateReviewGate): string {
   const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d{3}Z$/, "Z");
   return `${stamp}-${gate}-${randomUUID().slice(0, 8)}`;
 }
@@ -842,8 +842,8 @@ function extractSummary(content: string): string | undefined {
   return section?.[1]?.trim() || undefined;
 }
 
-function extractFindings(content: string): CodexReviewFinding[] {
-  const findings: CodexReviewFinding[] = [];
+function extractFindings(content: string): GateReviewFinding[] {
+  const findings: GateReviewFinding[] = [];
   const blocks = content.split(/\n(?=#{2,4}\s+|-+\s*severity\s*:|severity\s*:)/i);
   for (const block of blocks) {
     const severity = normalizeSeverity(matchField(block, "severity"));
@@ -865,7 +865,7 @@ function extractFindings(content: string): CodexReviewFinding[] {
   return findings;
 }
 
-function normalizeGateStatus(value: unknown): CodexReviewGateStatus | undefined {
+function normalizeGateStatus(value: unknown): GateReviewGateStatus | undefined {
   return typeof value === "string" && [
     "disabled",
     "not_required",
@@ -876,32 +876,32 @@ function normalizeGateStatus(value: unknown): CodexReviewGateStatus | undefined 
     "skipped",
     "overridden"
   ].includes(value)
-    ? value as CodexReviewGateStatus
+    ? value as GateReviewGateStatus
     : undefined;
 }
 
-function normalizeDecision(value: unknown): CodexReviewDecision | undefined {
+function normalizeDecision(value: unknown): GateReviewDecision | undefined {
   return value === "approve" || value === "request_changes" ? value : undefined;
 }
 
-function normalizeSeverity(value: unknown): CodexReviewSeverity | undefined {
+function normalizeSeverity(value: unknown): GateReviewSeverity | undefined {
   const normalized = typeof value === "string" ? value.toLowerCase() : "";
-  return VALID_SEVERITIES.has(normalized as CodexReviewSeverity)
-    ? normalized as CodexReviewSeverity
+  return VALID_SEVERITIES.has(normalized as GateReviewSeverity)
+    ? normalized as GateReviewSeverity
     : undefined;
 }
 
-function normalizeCallbackStatus(value: unknown): CodexReviewCallbackStatus | undefined {
+function normalizeCallbackStatus(value: unknown): GateReviewCallbackStatus | undefined {
   return value === "not_sent" || value === "sent" || value === "skipped" || value === "failed"
     ? value
     : undefined;
 }
 
-function isFinding(value: unknown): value is CodexReviewFinding {
+function isFinding(value: unknown): value is GateReviewFinding {
   if (!value || typeof value !== "object") {
     return false;
   }
-  const candidate = value as CodexReviewFinding;
+  const candidate = value as GateReviewFinding;
   return Boolean(normalizeSeverity(candidate.severity) && candidate.title);
 }
 
@@ -916,7 +916,7 @@ function parsePositiveInteger(value: string | undefined): number | undefined {
 function assertExceptionReason(reason: string | undefined): void {
   if (!reason?.trim()) {
     throw new VcmError({
-      code: "CODEX_REVIEW_REASON_REQUIRED",
+      code: "GATE_REVIEW_REASON_REQUIRED",
       message: "A reason is required.",
       statusCode: 400
     });
@@ -925,14 +925,14 @@ function assertExceptionReason(reason: string | undefined): void {
 
 function renderProjectManagerCallback(input: {
   taskSlug: string;
-  gate: CodexReviewGate;
-  status: CodexReviewGateStatus;
-  decision?: CodexReviewDecision;
+  gate: GateReviewGate;
+  status: GateReviewGateStatus;
+  decision?: GateReviewDecision;
   reportPath: string;
   error?: string;
 }): string {
   const lines = [
-    "[VCM CODEX REVIEW CALLBACK]",
+    "[VCM GATE REVIEW CALLBACK]",
     `task: ${input.taskSlug}`,
     `gate: ${input.gate}`,
     `status: ${input.status}`,
@@ -940,11 +940,11 @@ function renderProjectManagerCallback(input: {
     `report: ${input.reportPath}`,
     ...(input.error ? [`error: ${input.error}`] : []),
     "",
-    "Use the vcm-codex-review-gate skill to handle this callback.",
+    "Use the vcm-gate-review skill to handle this callback.",
     "If status is completed and decision is approve, continue the VCM flow.",
     "If decision is request_changes, analyze the report and route follow-up through the normal VCM roles.",
     "If status is failed, stop and ask the user to retry, skip, or override in VCM.",
-    "[/VCM CODEX REVIEW CALLBACK]"
+    "[/VCM GATE REVIEW CALLBACK]"
   ];
   return lines.join("\n");
 }
@@ -956,15 +956,15 @@ function errorMessage(error: unknown): string {
   if (error instanceof Error) {
     return error.message;
   }
-  return "Unknown Codex review error.";
+  return "Unknown Gate review error.";
 }
 
 function isPendingReportError(error: unknown): boolean {
   return error instanceof VcmError && [
-    "CODEX_REVIEW_DECISION_MISSING",
-    "CODEX_REVIEW_REPORT_GATE_MISMATCH",
-    "CODEX_REVIEW_REPORT_MISSING",
-    "CODEX_REVIEW_REPORT_STALE"
+    "GATE_REVIEW_DECISION_MISSING",
+    "GATE_REVIEW_REPORT_GATE_MISMATCH",
+    "GATE_REVIEW_REPORT_MISSING",
+    "GATE_REVIEW_REPORT_STALE"
   ].includes(error.code);
 }
 

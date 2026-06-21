@@ -6,10 +6,8 @@ import { isCodexRoleName } from "../../shared/constants.js";
 import type { ClaudeTurnHookEventName } from "../../shared/types/claude-hook.js";
 import { VcmError } from "../errors.js";
 import type { ProjectService } from "./project-service.js";
-import type { RoundService } from "./round-service.js";
 import type { SessionService } from "./session-service.js";
 import type { CodexTranslationService } from "./codex-translation-service.js";
-import { getTaskRuntimeRepoRoot, type TaskService } from "./task-service.js";
 
 export interface CodexHookService {
   handleHook(input: CodexHookRequest): Promise<CodexHookResult>;
@@ -18,9 +16,7 @@ export interface CodexHookService {
 
 export interface CodexHookServiceDeps {
   projectService: ProjectService;
-  taskService: TaskService;
-  sessionService: Pick<SessionService, "recordRoleHookEvent" | "recordProjectTranslatorHookEvent">;
-  roundService: Pick<RoundService, "recordRoleTurnEvent">;
+  sessionService: Pick<SessionService, "recordProjectTranslatorHookEvent">;
   codexTranslationService?: Pick<CodexTranslationService, "handleCodexHook">;
 }
 
@@ -42,22 +38,8 @@ export function createCodexHookService(deps: CodexHookServiceDeps): CodexHookSer
         statusCode: 409
       });
     }
-    if (input.role === "codex-translator") {
-      return {
-        project,
-        config: undefined,
-        taskRepoRoot: undefined
-      };
-    }
-
-    const config = await deps.projectService.loadConfig(project.repoRoot);
-    const task = await deps.taskService.loadTask(project.repoRoot, input.taskSlug);
-    const taskRepoRoot = getTaskRuntimeRepoRoot(task);
-
     return {
-      project,
-      config,
-      taskRepoRoot
+      project
     };
   }
 
@@ -72,42 +54,13 @@ export function createCodexHookService(deps: CodexHookServiceDeps): CodexHookSer
     }
 
     const context = await getHookContext(input);
-    const session = input.role === "codex-translator"
-      ? await deps.sessionService.recordProjectTranslatorHookEvent(context.project.repoRoot, {
-          eventName,
-          sessionId: stringOrUndefined(input.event.session_id),
-          transcriptPath: stringOrUndefined(input.event.transcript_path),
-          cwd: stringOrUndefined(input.event.cwd)
-        })
-      : await deps.sessionService.recordRoleHookEvent(context.project.repoRoot, {
-          taskSlug: input.taskSlug,
-          role: input.role,
-          eventName,
-          sessionId: stringOrUndefined(input.event.session_id),
-          transcriptPath: stringOrUndefined(input.event.transcript_path),
-          cwd: stringOrUndefined(input.event.cwd),
-          allowSessionMismatch: true
-        });
-    if (input.role === "codex-reviewer") {
-      if (!context.config || !context.taskRepoRoot) {
-        throw new VcmError({
-          code: "CODEX_HOOK_TASK_CONTEXT_MISSING",
-          message: "Codex Reviewer hook is missing task context.",
-          statusCode: 500
-        });
-      }
-      await deps.roundService.recordRoleTurnEvent({
-        repoRoot: context.project.repoRoot,
-        stateRepoRoot: context.taskRepoRoot,
-        stateRoot: context.config.stateRoot,
-        taskSlug: input.taskSlug,
-        role: input.role,
-        eventName
-      });
-    }
-    if (input.role === "codex-translator") {
-      await deps.codexTranslationService?.handleCodexHook(context.project.repoRoot, eventName, input.taskSlug);
-    }
+    const session = await deps.sessionService.recordProjectTranslatorHookEvent(context.project.repoRoot, {
+      eventName,
+      sessionId: stringOrUndefined(input.event.session_id),
+      transcriptPath: stringOrUndefined(input.event.transcript_path),
+      cwd: stringOrUndefined(input.event.cwd)
+    });
+    await deps.codexTranslationService?.handleCodexHook(context.project.repoRoot, eventName, input.taskSlug);
 
     return {
       ok: true,

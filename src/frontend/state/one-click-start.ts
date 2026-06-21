@@ -10,16 +10,16 @@ export interface OneClickRoleLaunch {
   effort: SessionEffort;
 }
 
-const DEFAULT_CODEX_REVIEWER_LAUNCH: OneClickRoleLaunch = {
-  role: "codex-reviewer",
+const DEFAULT_GATE_REVIEWER_LAUNCH: OneClickRoleLaunch = {
+  role: "gate-reviewer",
   permissionMode: "default",
-  model: "gpt-5.5",
-  effort: "xhigh"
+  model: "default",
+  effort: "default"
 };
 
 export function buildOneClickRoleLaunches(
   launchTemplate: LaunchTemplate,
-  input: { codexReviewerEnabled: boolean }
+  input: { gateReviewerEnabled: boolean }
 ): OneClickRoleLaunch[] {
   const launches: OneClickRoleLaunch[] = VCM_ROLE_DEFINITIONS.map((definition) => ({
     role: definition.name,
@@ -28,8 +28,8 @@ export function buildOneClickRoleLaunches(
     effort: launchTemplate.roles[definition.name].effort
   }));
 
-  if (input.codexReviewerEnabled) {
-    launches.push(DEFAULT_CODEX_REVIEWER_LAUNCH);
+  if (input.gateReviewerEnabled) {
+    launches.push(DEFAULT_GATE_REVIEWER_LAUNCH);
   }
 
   return launches;

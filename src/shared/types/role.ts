@@ -4,11 +4,11 @@ export type VcmRoleName =
   | "coder"
   | "reviewer";
 
-export type CodexReviewerRoleName = "codex-reviewer";
+export type GateReviewerRoleName = "gate-reviewer";
 export type CodexTranslatorRoleName = "codex-translator";
-export type CodexRoleName = CodexReviewerRoleName | CodexTranslatorRoleName;
+export type CodexRoleName = CodexTranslatorRoleName;
 
-export type RoleName = VcmRoleName | CodexRoleName;
+export type RoleName = VcmRoleName | GateReviewerRoleName | CodexRoleName;
 
 export type DispatchableRole =
   | "architect"

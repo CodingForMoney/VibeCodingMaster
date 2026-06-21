@@ -4,7 +4,7 @@ import { registerCodexHookRoutes } from "../../../src/backend/api/codex-hook-rou
 import type { CodexHookService } from "../../../src/backend/services/codex-hook-service.js";
 
 describe("codex hook routes", () => {
-  it("returns the empty Stop hook contract after recording Codex Stop", async () => {
+  it("returns the empty Stop hook contract after recording Codex Translator Stop", async () => {
     const calls: string[] = [];
     const app = Fastify({ logger: false });
     registerCodexHookRoutes(app, {
@@ -27,17 +27,17 @@ describe("codex hook routes", () => {
 
     const response = await app.inject({
       method: "POST",
-      url: "/api/hooks/codex-reviewer/stop",
+      url: "/api/hooks/codex-translator/stop",
       payload: {
         taskSlug: "demo-task",
-        role: "codex-reviewer",
+        role: "codex-translator",
         event: { hook_event_name: "Stop" }
       }
     });
 
     expect(response.statusCode).toBe(200);
     expect(response.json()).toEqual({});
-    expect(calls).toEqual(["demo-task:codex-reviewer:Stop"]);
+    expect(calls).toEqual(["demo-task:codex-translator:Stop"]);
     await app.close();
   });
 });

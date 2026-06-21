@@ -22,13 +22,14 @@ import type {
   GatewayStatus,
   StartGatewayQrLoginResult
 } from "../shared/types/gateway.js";
-import type { CodexReviewGate, CodexReviewIndex } from "../shared/types/codex-review.js";
+import type { GateReviewGate, GateReviewIndex } from "../shared/types/gate-review.js";
 import type { VcmOrchestrationState, VcmRoleMessage } from "../shared/types/message.js";
 import type { ProjectSummary } from "../shared/types/project.js";
 import type { RoleName } from "../shared/types/role.js";
 import type { VcmSessionRoundState } from "../shared/types/round.js";
 import type { RoleSessionRecord, SessionEffort, SessionModel } from "../shared/types/session.js";
 import type { TaskRecord } from "../shared/types/task.js";
+import { isVcmRoleName } from "../shared/constants.js";
 import { AppShell } from "./components/app-shell.js";
 import { CodexTranslatorSessionModal } from "./components/codex-translator-session-modal.js";
 import { FileTranslationModalHost } from "./components/translation-panel.js";
@@ -58,7 +59,7 @@ export function App() {
   const [activeOrchestration, setActiveOrchestration] = useState<{ taskSlug: string; orchestration: VcmOrchestrationState } | null>(null);
   const [activeEvents, setActiveEvents] = useState<{ taskSlug: string; events: string[] } | null>(null);
   const [activeSessionRoundState, setActiveSessionRoundState] = useState<{ taskSlug: string; roundState: VcmSessionRoundState } | null>(null);
-  const [activeCodexReview, setActiveCodexReview] = useState<{ taskSlug: string; state: CodexReviewIndex } | null>(null);
+  const [activeGateReview, setActiveGateReview] = useState<{ taskSlug: string; state: GateReviewIndex } | null>(null);
   const [activeRole, setActiveRole] = useState<RoleName>("project-manager");
   const [themeMode, setThemeMode] = useState<ThemeMode>("system");
   const [flowPauseAlerts, setFlowPauseAlerts] = useState(true);
@@ -266,9 +267,9 @@ export function App() {
     setActiveOrchestration({ taskSlug, orchestration });
   }
 
-  async function refreshCodexReviewState(taskSlug: string) {
-    const state = await apiClient.getCodexReviewState(taskSlug);
-    setActiveCodexReview({ taskSlug, state });
+  async function refreshGateReviewState(taskSlug: string) {
+    const state = await apiClient.getGateReviewState(taskSlug);
+    setActiveGateReview({ taskSlug, state });
     return state;
   }
 
@@ -377,11 +378,11 @@ export function App() {
 
   useEffect(() => {
     if (!activeTask?.taskSlug) {
-      setActiveCodexReview(null);
+      setActiveGateReview(null);
       return;
     }
 
-    void refreshCodexReviewState(activeTask.taskSlug).catch((caught: Error) => setError(caught.message));
+    void refreshGateReviewState(activeTask.taskSlug).catch((caught: Error) => setError(caught.message));
   }, [activeTask?.taskSlug]);
 
   useEffect(() => {
@@ -437,7 +438,7 @@ export function App() {
 
     const taskSlug = activeTask.taskSlug;
     const interval = window.setInterval(() => {
-      void refreshCodexReviewState(taskSlug).catch((caught: Error) => setError(caught.message));
+      void refreshGateReviewState(taskSlug).catch((caught: Error) => setError(caught.message));
     }, 3000);
 
     return () => window.clearInterval(interval);
@@ -471,12 +472,12 @@ export function App() {
     activeSessionRoundState && activeSessionRoundState.taskSlug === activeTask?.taskSlug
       ? activeSessionRoundState.roundState
       : null;
-  const sidebarCodexReview =
-    activeCodexReview && activeCodexReview.taskSlug === activeTask?.taskSlug
-      ? activeCodexReview.state
+  const sidebarGateReview =
+    activeGateReview && activeGateReview.taskSlug === activeTask?.taskSlug
+      ? activeGateReview.state
       : null;
-  const codexReviewerEnabled = Boolean(
-    sidebarCodexReview && Object.values(sidebarCodexReview.gates).some((gate) => gate.required)
+  const gateReviewerEnabled = Boolean(
+    sidebarGateReview && Object.values(sidebarGateReview.gates).some((gate) => gate.required)
   );
 
   return (
@@ -491,7 +492,7 @@ export function App() {
           orchestration={sidebarOrchestration}
           events={sidebarEvents}
           roundState={sidebarRoundState}
-          codexReview={sidebarCodexReview}
+          gateReview={sidebarGateReview}
           translationEnabled={translationEnabled}
           translationAutoSendEnabled={translationAutoSendEnabled}
           translationTargetLanguage={translationTargetLanguage}
@@ -611,15 +612,15 @@ export function App() {
               setGatewayQrModalOpen(false);
             });
           }}
-          onCodexGateEnabledChange={(gate: CodexReviewGate, enabled) => {
+          onGateReviewGateEnabledChange={(gate: GateReviewGate, enabled) => {
             void withBusy(async () => {
               if (!activeTask) {
-                throw new Error("Create or select a task before changing Codex Review Gates.");
+                throw new Error("Create or select a task before changing Gate Review Gates.");
               }
-              const state = await apiClient.updateCodexReviewSettings(activeTask.taskSlug, {
+              const state = await apiClient.updateGateReviewSettings(activeTask.taskSlug, {
                 gates: { [gate]: enabled }
               });
-              setActiveCodexReview({ taskSlug: activeTask.taskSlug, state });
+              setActiveGateReview({ taskSlug: activeTask.taskSlug, state });
             });
           }}
           onTranslationEnabledChange={(enabled) => {
@@ -678,7 +679,7 @@ export function App() {
             const task = await apiClient.createTask(input);
             await loadTasks();
             setActiveTaskSlug(task.taskSlug);
-            await refreshCodexReviewState(task.taskSlug);
+            await refreshGateReviewState(task.taskSlug);
           })}
           onSelectTask={setActiveTaskSlug}
           themeMode={themeMode}
@@ -738,7 +739,7 @@ export function App() {
               }
 
               const status = await apiClient.getTaskStatus(activeTask.taskSlug);
-              if (status.sessions.length > 0) {
+              if (status.sessions.some((session) => isVcmRoleName(session.role))) {
                 throw new Error("One-click start is only available before any role session has started.");
               }
 
@@ -750,15 +751,24 @@ export function App() {
                 orchestration: nextOrchestration
               });
 
-              const roleLaunches = buildOneClickRoleLaunches(launchTemplate, { codexReviewerEnabled });
+              const roleLaunches = buildOneClickRoleLaunches(launchTemplate, { gateReviewerEnabled });
               for (const roleLaunch of roleLaunches) {
-                await apiClient.startRoleSession(activeTask.taskSlug, roleLaunch.role, {
+                const sessionInput = {
                   cols: 100,
                   rows: 28,
                   permissionMode: roleLaunch.permissionMode,
                   model: roleLaunch.model,
                   effort: roleLaunch.effort
-                });
+                };
+                const existingSession = status.sessions.find((session) => session.role === roleLaunch.role);
+                if (existingSession?.status === "running") {
+                  continue;
+                }
+                if (existingSession?.claudeSessionId) {
+                  await apiClient.resumeRoleSession(activeTask.taskSlug, roleLaunch.role, sessionInput);
+                } else {
+                  await apiClient.startRoleSession(activeTask.taskSlug, roleLaunch.role, sessionInput);
+                }
               }
 
               setActiveRole("project-manager");
@@ -831,7 +841,7 @@ export function App() {
         <TaskWorkspace
           task={activeTask}
           activeRole={activeRole}
-          codexReviewerEnabled={codexReviewerEnabled}
+          gateReviewerEnabled={gateReviewerEnabled}
           translationEnabled={translationEnabled}
           translationAutoSendEnabled={translationAutoSendEnabled}
           translationTargetLanguage={translationTargetLanguage}
