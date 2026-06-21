@@ -44,7 +44,7 @@ This `Session` term is only for VCM statistics. It must not be confused with a C
 VCM V1 must make multi-session Claude Code work visible and recoverable:
 
 - Connect a local Git repository.
-- Create a named task with its own branch and task-level worktree by default.
+- Create a named task with its own branch and task-level worktree.
 - Start, stop, restart, and resume one Claude Code session per role.
 - Keep role terminals embedded in one GUI.
 - Preserve task state, session state, handoff files, and message history.
@@ -274,6 +274,9 @@ Sections:
 - `Repository Path`
 - `Connected Repository`
 - `Settings`
+- `Translation`
+- `Gate Review Gates`
+- `Gateway`
 - `VCM Harness`
 - `New Task`
 - `Tasks`
@@ -327,6 +330,24 @@ Safari may still require the user to manually set `Safari > Website Settings > A
 
 There is no separate `Pause orchestration` or `Resume orchestration` control in the GUI. The current product model is one on/off toggle in the role console toolbar.
 
+`Translation` contains:
+
+- `Conversation translation`
+- `Auto-send`
+- `Language`
+- `Reply scope`
+- `File translation`
+- `Bootstrap`
+- `Update memory`
+- `Session status`
+- `Open Session`
+
+`Gate Review Gates` contains three independent switches:
+
+- `Architecture plan`
+- `Validation adequacy`
+- `Final diff`
+
 `VCM Harness` shows whether VCM managed blocks are installed/up to date in the project rules files and `.gitignore`.
 
 `New Task` contains:
@@ -342,14 +363,16 @@ There is no optional title input in the current UI.
 The task workspace header is one compact row:
 
 ```text
-<task>  [Project Manager] [Architect] [Coder] [Reviewer]  [Translate] [Close Task]
+<task>  [Project Manager] [Architect] [Coder] [Reviewer] [Gate Reviewer?]  [Auto orchestration] [Close Task]
 ```
 
 The header does not show `TASK WORKSPACE`, branch, or worktree path. Task branch/worktree details remain task metadata, but they are not first-row chrome.
 
 The task workspace does not show a manual `Refresh` button. Task status, role status, messages, orchestration state, and flow pause state refresh automatically. The only remaining `Refresh` control is inside the sidebar `VCM Harness` section, where it rechecks managed project files.
 
-Role tabs show the session status for each role.
+Role tabs show the session status for each visible role. `Gate Reviewer` appears
+only when a Gate Review switch is enabled or a Gate Reviewer session already
+exists.
 
 The main task workspace only renders the active role console. Messages and Events are opened from the sidebar.
 
@@ -703,7 +726,11 @@ Translation panel `Auto-send` is separate from task `Auto orchestration`:
 - `Auto-send` on: translate and send if there is no translation warning.
 - `Auto-send` off: translate to English draft and wait for user send.
 
-Task `Auto orchestration` is a compact selected/unselected button in the role console toolbar. New tasks default to auto orchestration. `Translate` is a global task header toggle next to `Close Task`; it opens/closes the translation split for all role consoles, so switching roles keeps the same translation setting.
+Task `Auto orchestration` is a compact selected/unselected button in the task
+workspace header next to `Close Task`. New tasks default to auto orchestration.
+Conversation translation is controlled by the sidebar `Translation` group; when
+enabled, each running core VCM role console shows the translation split, so
+switching roles keeps the same global translation setting.
 
 ## 14. Mobile Gateway
 
@@ -769,7 +796,6 @@ and audit logs live under `vcmDataDir`. VCM resolves `vcmDataDir` from
 Repository-level VCM state:
 
 ```text
-.ai/vcm/tasks/<task>.json
 .claude/worktrees/<task>/
 ```
 
@@ -789,8 +815,18 @@ Task worktree local files:
 .claude/worktrees/<task>/.ai/vcm/messages/<task>.jsonl
 .claude/worktrees/<task>/.ai/vcm/orchestration/<task>.json
 .claude/worktrees/<task>/.ai/vcm/translation/<task>/
+.claude/worktrees/<task>/.ai/vcm/gate-reviews/
 .claude/worktrees/<task>/.ai/vcm/handoffs/
 .claude/worktrees/<task>/.ai/vcm/handoffs/messages/<from-role>-<to-role>.md
+```
+
+Project-scoped local files:
+
+```text
+.ai/vcm/gate-reviewer/session.json
+.ai/vcm/translations/
+.ai/vcm/bootstrap/session.json
+.ai/vcm/bootstrap/bootstrap.log
 ```
 
 External Claude transcripts:

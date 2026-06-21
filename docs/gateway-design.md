@@ -161,9 +161,8 @@ Task lifecycle commands:
 - `/create-task <task-slug> [title]` creates a task worktree,
   selects it as the mobile current task, applies the saved launch template, and
   starts the four role sessions (`project-manager`, `architect`, `coder`,
-  `reviewer`) through the same one-click-start path as the desktop UI. The saved
-  template controls permission mode, model, effort, auto orchestration, and
-  translation.
+  `reviewer`) using the saved desktop launch-template values. The saved template
+  controls permission mode, model, effort, and auto orchestration.
   If no template has been saved, VCM uses the default launch template.
 - `/close-task` starts a destructive confirmation flow for the current task.
   Gateway replies with the exact confirmation command.
@@ -248,7 +247,6 @@ Rules:
   -> select it as gateway current task
   -> load saved launch template from app preferences
   -> set orchestration from template
-  -> set gateway/desktop translation state from template
   -> start four role sessions with template permission/model/effort
   -> switch mobile current role to project-manager
   -> reply with task slug, branch, worktree, template summary, and session status
@@ -585,7 +583,7 @@ Service dependencies:
 - `SessionService`: PM session state, Claude session metadata, and role session
   start for launch-template initialization.
 - `AppSettingsService`: saved launch template with permission mode, model,
-  effort, auto orchestration, and translation defaults.
+  effort, auto orchestration, plus the global Gateway translation preference.
 - `MessageService` / orchestration state service: set the newly created task to
   template auto/manual orchestration mode.
 - `TerminalRuntime`: controlled PM terminal submission.
@@ -672,8 +670,8 @@ Validation:
   `POST /api/projects/current/pull` or the equivalent project service method.
 - Implement `/create-task <task-slug> [title]` by creating a task worktree
   task, selecting it as mobile current task, applying the saved launch template,
-  setting orchestration mode, setting translation state, and starting the four
-  role sessions.
+  setting orchestration mode, applying the global Gateway translation state, and
+  starting the four core role sessions.
 - Implement `/close-task` and `/close-task confirm <task-slug>` as a two-step
   destructive confirmation around the same Close Task cleanup path as desktop
   VCM.
@@ -779,7 +777,7 @@ Gateway MVP is complete when:
   through VCM's fast-forward-only pull path.
 - Bound phone can run `/create-task <task-slug> [title]` to create a task
   worktree, select it, apply the saved launch template, and start
-  the four role sessions.
+  the four core role sessions.
 - Bound phone can send Chinese plain text to current task PM.
 - PM receives only the translated English prompt, without original Chinese.
 - Gateway can push PM assistant replies to Weixin whenever enabled.

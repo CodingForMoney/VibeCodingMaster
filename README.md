@@ -33,7 +33,7 @@ When Gate Review Gates are enabled for a task, or when a Gate Reviewer session a
 - Rust generated context for module indexing and crate-external public surface indexing.
 - Translation panel powered by the long-lived Codex Translator session.
 - Mobile Gateway through Tencent iLink Bot API / Weixin DM, for talking to PM and managing tasks from Weixin.
-- Durable task state, session state, raw terminal logs, handoff artifacts, and message history.
+- Durable task state, role session state, handoff artifacts, and message history.
 
 ## Requirements
 
@@ -193,13 +193,11 @@ In this terminology, `Session` is a VCM statistics term. It is different from a 
 
 ## Task Worktree Management
 
-VCM uses task-level worktree management by default:
+VCM uses task-level worktree management for every task:
 
 ```text
 one task = one branch + one git worktree + one handoff directory + one role-session set
 ```
-
-The `Create worktree and branch` option is selected by default when creating a task:
 
 - task name: `<task>`
 - branch: `feature/<task>`
@@ -208,13 +206,11 @@ The `Create worktree and branch` option is selected by default when creating a t
 
 VCM will not create worktrees per role. `project-manager`, `architect`, `coder`, and `reviewer` for the same task share the same task worktree.
 
-The user can turn this option off. In that mode, VCM creates app-local task metadata, creates the handoff structure in the connected repository, records the current branch, and starts role sessions from the connected repository path.
-
 VCM will not offer a separate `Create task worktree` button after a task exists, and a task should not be switched to another branch/worktree mode after creation.
 
 Because worktrees live under `.claude/worktrees/`, the connected repository must ignore both `.ai/vcm/` and `.claude/worktrees/`. Apply the VCM Harness before creating tasks so `.gitignore` contains the managed ignore block. The base repository must also be clean because the task branch/worktree is created from the connected repo's current `HEAD`.
 
-When a task is complete, VCM provides a red `Close Task` action. Closing a task shows a destructive confirmation, stops VCM-managed running role sessions for that task, then deletes the task worktree, deletes the task branch by default, removes the app-local task record, and removes task runtime metadata. VCM does not preflight running sessions or uncommitted changes before closing. Tasks created without a worktree only remove VCM metadata because they do not own a separate branch/worktree.
+When a task is complete, VCM provides a red `Close Task` action. Closing a task shows a destructive confirmation, stops VCM-managed running role sessions for that task, then deletes the task worktree, deletes the task branch by default, removes the app-local task record, and removes task runtime metadata. VCM does not preflight running sessions or uncommitted changes before closing. Project-scoped Gate Reviewer and Codex Translator sessions are not task-owned and are not stopped by Close Task.
 
 ## Sidebar UI
 
@@ -223,6 +219,8 @@ The left sidebar is intentionally compact and collapsible:
 - `Repository Path`: path input on one row; `Recent` and `Connect` on the next row.
 - `Connected Repository`: connected base repo path, branch, upstream/ahead-behind status, commit hash, working tree state, and a `Pull` button.
 - `Settings`: `Theme`, `Flow pause alert`, `Try alert`, `Messages`, and `Events`.
+- `Translation`: global conversation translation, auto-send, target language, output scope, file translation, bootstrap, memory update, session status, and Codex Translator session access.
+- `Gate Review Gates`: global gate switches for architecture plan, validation adequacy, and final diff.
 - `Gateway`: Weixin iLink binding, Gateway on/off, Gateway translation, and QR login.
 - `VCM Harness`: fixed-install status, bootstrap completion checks, and the bootstrap terminal when one is running.
 - `New Task`: one `task name` input.
@@ -233,9 +231,8 @@ All sidebar sections are collapsed by default. When no task is selected, `Reposi
 Opening `Connected Repository` refreshes the base repo status through the
 backend. VCM does not poll it continuously. The `Pull` button runs
 `git pull --ff-only` against the connected base repo only. It is disabled when
-the base repo has uncommitted changes, when the current branch has no upstream,
-or when the active task is an inline task using the base repo directly. It does
-not stash, merge, or mutate task worktrees.
+the base repo has uncommitted changes or when the current branch has no
+upstream. It does not stash, merge, or mutate task worktrees.
 
 When VCM is connected to an active task, the bottom of the sidebar shows a task status dock. It stays outside the collapsible groups and shows the active VCM Session title, task status, start time, total elapsed time, total Round count, and role active runtime. The dock also shows the Current Round while it is running, or the Last Round after a flow pause, including start time, total elapsed time, role active runtime, Turn count, and Round status.
 
@@ -360,7 +357,7 @@ Typical mobile flow:
 
 `/pull-current` only pulls the connected base repository. It does not pull task worktrees, stash local changes, merge divergent branches, or run arbitrary shell commands.
 
-`/create-task` uses the saved launch template from the desktop settings. The template controls permission mode, model, effort, auto orchestration, and translation defaults for the four role sessions.
+`/create-task` uses the saved launch template from the desktop settings. The template controls permission mode, model, effort, and auto orchestration for the four core role sessions. Gateway translation uses the global Gateway translation setting, not the launch template.
 
 `/close-task` is destructive. It stops VCM-managed role sessions and removes task-owned worktree/branch state according to the same cleanup behavior as the desktop `Close Task` action.
 
@@ -378,7 +375,7 @@ Typical mobile flow:
 
 ## Translation
 
-The task header has a global `Translate` button next to `Close Task`. It opens a translation panel beside the embedded terminal for the role consoles and keeps the same on/off setting while switching roles. The terminal and translation panel split the available width evenly.
+Translation is controlled from the sidebar `Translation` group. When conversation translation is enabled, each running core VCM role console shows a translation panel beside the embedded terminal. The terminal and translation panel split the available width evenly.
 
 The task header does not include a manual `Refresh` button. Task status, role status, messages, orchestration state, and flow pause state refresh automatically. The remaining `Refresh` button lives only in the sidebar `VCM Harness` section and is for rechecking harness files.
 
@@ -401,7 +398,7 @@ When Gateway is on, `Flow pause alert` is forced off because mobile notification
 Translation behavior:
 
 - Conversation translation is routed through the Codex Translator session and result files.
-- Global translation controls live in the sidebar Translation section: enablement, auto-send, target language, bootstrap, memory update, and file translation.
+- Global translation controls live in the sidebar Translation section: enablement, auto-send, target language, output scope, bootstrap, memory update, file translation, session status, and `Open Session`.
 - File and conversation translation share `<baseRepoRoot>/.ai/vcm/translations/`; conversation result files are temporary runtime artifacts.
 - Claude Code output translation reads semantic Claude transcript JSONL files under `~/.claude/projects`, not raw PTY output.
 - Claude Code prose output waits 10 seconds before dispatch so adjacent output can be translated in one Codex batch.
@@ -415,10 +412,10 @@ Translation behavior:
 - Assistant prose renders Markdown in the panel, including headings, lists, code fences, tables, and links.
 - Tool calls and tool results are preserved as dim one-line rows such as `● Bash({"command":"npm test"})`.
 - User input uses one textarea. Press `Enter` to translate or send the current English draft; press `Shift+Enter` for a newline.
-- After user input is translated, the translated draft is appended after the original text in the same textarea.
+- After user input is translated, the English draft is appended after the original source text in the same textarea.
 - `Send English` writes the current English draft to the active embedded terminal and submits it.
 - Automatic terminal submission uses bracketed paste first, then sends Enter separately for Claude Code TUI reliability.
-- The translation panel `Auto-send` toggle sends the translated draft automatically when translation succeeds without warnings.
+- The sidebar `Auto-send` toggle sends the translated draft automatically when translation succeeds without warnings.
 
 ## Project Harness
 
@@ -438,7 +435,13 @@ CLAUDE.md
 .claude/skills/vcm-final-acceptance/SKILL.md
 .claude/skills/vcm-long-running-validation/SKILL.md
 .claude/skills/vcm-harness-bootstrap/SKILL.md
-.ai/vcm-harness-manifest.json
+.claude/skills/vcm-gate-review/SKILL.md
+.claude/agents/gate-reviewer.md
+.ai/codex-translator/AGENTS.md
+.ai/codex-translator/config.toml
+.ai/codex-translator/.codex/config.toml
+.ai/codex-translator/.codex/hooks.json
+.ai/tools/request-gate-review
 .ai/tools/generate-module-index
 .ai/tools/generate-public-surface
 .ai/tools/run-long-check
@@ -536,7 +539,6 @@ Runtime message and handoff files:
 .ai/vcm/messages/<task>.jsonl                 # under the task runtime repo
 .ai/vcm/orchestration/<task>.json             # under the task runtime repo
 .ai/vcm/handoffs/messages/<from-role>-<to-role>.md
-.ai/vcm/handoffs/logs/
 ```
 
 Each directed role route has exactly one message file. Route messages are the only dynamic task-dispatch files. If a role changes its mind during one turn, it edits the same route file instead of creating another message. A blank file means no pending message; a non-empty file means pending work for VCM to submit.
@@ -603,7 +605,7 @@ Session buttons behave as follows:
 - `Restart`: stops the current process if needed, creates a new UUID, and starts a fresh Claude session.
 - `Stop`: stops the embedded terminal process and leaves the persisted Claude session id resumable.
 
-Embedded terminal output is still written to raw role log files under `.ai/vcm/handoffs/logs/`. When a browser reconnects to a running terminal, VCM replays only the tail of that log, capped at 2 MB, rather than streaming the entire historical log back into xterm. This keeps long sessions responsive while preserving full logs on disk until task cleanup.
+Ordinary VCM role sessions do not persist raw terminal logs under handoff state. Claude Code transcript JSONL files under `~/.claude/projects/` are the semantic record used for output translation and recovery.
 
 ## Local Project Files
 
@@ -622,7 +624,9 @@ For a connected repository, VCM uses:
 <taskRepoRoot>/.ai/vcm/handoffs/review-report.md
 <taskRepoRoot>/.ai/vcm/handoffs/docs-sync-report.md
 <taskRepoRoot>/.ai/vcm/handoffs/messages/<from-role>-<to-role>.md
-<taskRepoRoot>/.ai/vcm/handoffs/logs/{project-manager,architect,coder,reviewer}.log
+<taskRepoRoot>/.ai/vcm/gate-reviews/
+<baseRepoRoot>/.ai/vcm/gate-reviewer/session.json
+<baseRepoRoot>/.ai/vcm/translations/
 ```
 
 The project config is stored under `vcmDataDir` so it is durable local app state. `vcmDataDir` is `VCM_DATA_DIR` when set, otherwise `~/.vcm`. For Dev Containers, prefer:
@@ -635,9 +639,7 @@ The project config is stored under `vcmDataDir` so it is durable local app state
 }
 ```
 
-For worktree-backed tasks, `taskRepoRoot` is `<baseRepoRoot>/.claude/worktrees/<task>`; for inline tasks, `taskRepoRoot` is the connected base repo.
-
-Because handoffs are scoped to `taskRepoRoot` without an extra task-name directory, VCM allows only one active inline task per connected repository. Use the default worktree mode for parallel tasks.
+For every task, `taskRepoRoot` is `<baseRepoRoot>/.claude/worktrees/<task>`.
 
 ## Packaging
 
@@ -680,4 +682,6 @@ See also:
 - `docs/v0.2-implementation-plan.md`
 - `docs/vcm-cc-best-practices.md`
 - `docs/full-harness-baseline.md`
+- `docs/gate-review-gates.md`
+- `docs/codex-translation-plan.md`
 - `docs/cc-best-practices.md` is archived and no longer maintained.

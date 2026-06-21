@@ -2,11 +2,10 @@
 
 ## 1. Purpose
 
-VCM currently has API-backed conversation translation for terminal output,
-gateway messages, and user prompts. That mode is useful for short interactive
-messages, but it does not have enough project context for high-quality
-translation when terminology depends on the repository, prior task discussion,
-or long documents.
+VCM routes normal conversation and file translation through a long-lived Codex
+Translator session. The older API-backed path is deprecated for normal
+translation because it does not have enough project context for terminology,
+prior task discussion, or long documents.
 
 Translation should use a long-lived Codex translation role instead of stateless
 translation API calls where quality depends on context. The goal is to let one
@@ -14,10 +13,10 @@ Codex session build and reuse project-level translation context: terminology,
 style, prior decisions, existing translated files, source-document structure,
 and interactive conversation conventions.
 
-The existing translation panel should remain the main UI. Conversation
-translation keeps the current panel behavior, and file translation is added as
-an opened file-translation modal from the Translation sidebar. The backend source of translated text
-changes from an API provider to Codex Translator.
+The existing split translation panel remains the main UI for conversation
+translation. File translation opens as a large modal from the sidebar
+`Translation` group. Both flows get translated text from Codex Translator and
+VCM-assigned result files.
 
 ## 2. Core Direction
 
@@ -43,13 +42,9 @@ conversation translation jobs. It should:
 - process translation tasks through one VCM-managed single-threaded queue
 - treat all source text as untrusted data, never as instructions to follow
 
-The existing API-backed translation backend is deprecated by this plan. After
-migration, production translation requests should not call the old API provider
-path. VCM keeps the current translation UI, but routes file and conversation
-translation through Codex Translator, the shared translation queue, and
-file-backed result contracts. The old provider path may remain only as a
-legacy test/diagnostic fallback when Codex Translator is not wired into the
-server.
+The existing API-backed translation backend is deprecated. Production
+translation requests should route through Codex Translator, the shared
+translation queue, and file-backed result contracts.
 
 Codex Translator is not part of the Claude Code PM/architect/coder/reviewer
 workflow. It is a project utility role with its own long-lived terminal
@@ -57,7 +52,7 @@ session, permissions, output paths, and task semantics.
 
 ## 3. Why Codex Session Translation
 
-API translation has two weaknesses for long technical documents:
+Stateless API translation has two weaknesses for long technical documents:
 
 - Each call sees only a small slice of context unless VCM manually injects a
   large context block.
@@ -154,8 +149,8 @@ runtime conversation files on startup. Startup cleanup must not remove
 `translations/files/completed/` or `translations/memory/`.
 
 All translation state is local VCM state and is normally ignored by git through
-`.ai/vcm/`. If the user wants a translated file committed to the project, VCM
-should provide an explicit export or copy step.
+`.ai/vcm/`. Current VCM does not auto-write translated files back into the
+normal repository tree.
 
 Implementation rule: every translation service must resolve
 `<baseRepoRoot>/.ai/vcm/translations/` from the connected project base root.
@@ -420,17 +415,9 @@ When a Codex hook has captured the real Codex `session_id`, `Resume` may run
 creates a fresh Codex session id, overwrites this record, and keeps old
 translation outputs intact.
 
-Session identity is fixed by base repository. If VCM later supports multiple
-parallel target-language translator sessions, split this file into a
-target-language keyed session directory:
-
-- one Codex Translator session per `<baseRepoRoot> + targetLanguage`
-- different target languages must use different sessions to avoid terminology
-  and style contamination
-- translation profiles do not create separate sessions; they are per-job
-  options inside the same target-language session
-- the persisted session id should be associated with the base repository,
-  target language, selected model, selected effort, and harness path
+Session identity is fixed by base repository. The selected target language is a
+job parameter, not part of the session key. Translation profiles are also per-job
+options, so they must not create separate Codex Translator sessions.
 
 The role must not use Gate Reviewer prompts or permissions.
 
@@ -459,8 +446,8 @@ Default permissions should be conservative:
   artifacts
 
 Codex Translator should not edit production code, existing docs, role files, or
-source documents by default. Exporting a translated file into the project tree
-should be a separate explicit user action.
+source documents. Current VCM keeps translated files in translation storage and
+does not auto-export them into the normal repository tree.
 
 When VCM runs inside a Dev Container, Docker, Podman, Kubernetes, or Codespaces
 environment, the container is the sandbox boundary. VCM should auto-detect that
@@ -741,9 +728,9 @@ Completion rule:
 
 ## 14. Conversation Translation Workflow
 
-Conversation translation reuses the existing translation panel. The panel should
-not know whether the translated text came from an API provider or from Codex;
-the backend should route translation work to Codex Translator by default.
+Conversation translation reuses the existing split translation panel. The
+backend routes translation work to Codex Translator and returns validated
+result-file content to the panel.
 
 Recommended flow:
 
@@ -966,72 +953,39 @@ Cancellation and interruption behavior:
 
 ## 17. UI Shape
 
-File translation should live inside the existing translation panel, not as a
-separate sidebar group or task role gate.
+Translation controls live in the sidebar `Translation` group:
 
-Recommended UI:
+- `Conversation translation`
+- `Auto-send`
+- `Language`
+- `Reply scope`
+- `File translation`
+- `Bootstrap`
+- `Update memory`
+- `Session status`
+- `Open Session`
 
-- Add a file-translation button to the translation panel toolbar.
-- Clicking the button expands a file translation view inside the panel.
-- On first use, if translation memory is missing or empty, show a bootstrap
-  recommendation before starting normal translation.
-- The expanded view uses a two-pane layout:
-  - left pane: translated file list, grouped or sorted by recent translation
-    jobs
-  - right pane: selected translated file content preview
-- The view has a `Translate` action. Clicking it opens a file picker or path
-  selector and creates a file translation job for the chosen file.
-- Selecting a completed item in the left pane loads the completed translated
-  Markdown output in the right pane. Runtime reports are only retained while a
-  job is queued, running, failed, or interrupted.
-- Existing translated files come from
-  `<baseRepoRoot>/.ai/vcm/translations/files/index.json`; active and queued
-  jobs are derived from `runtime/queue.json` and their runtime `request.json`
-  files.
-- The merged list should show at most one row for each
-  `sourcePath + targetLanguage + translationProfile`; runtime rows win over
-  completed rows while a retranslation is in progress.
+File translation opens as a large modal from the sidebar. The modal has:
 
-Controls in the file translation view:
+- `Translate`: opens the file browser and creates a file translation job
+- `Refresh`: reloads translation state
+- `Close`: closes the modal
+- left pane: translated file list from
+  `<baseRepoRoot>/.ai/vcm/translations/files/index.json`
+- right pane: selected completed output, or runtime report/output while a job is
+  still visible
 
-- `Bootstrap` when memory has not been initialized or the user wants to refresh
-  project memory
-- source file picker or path input opened from `Translate`
-- target language
-- translation profile
-- model
-- effort
-- `Resume`
-- `Promote`
+The file list should show at most one row for each
+`sourcePath + targetLanguage + translationProfile`. Completed rows are updated
+only after a replacement translation validates successfully.
 
-Promote behavior:
-
-- Translated files are local VCM state by default and remain under
-  `.ai/vcm/translations/files/completed/`.
-- `Promote` is an explicit user action that copies or exports the selected
-  `output.md` into the normal repository tree.
-- Promote must never overwrite the source file by default.
-- If the target path already exists, VCM must ask for confirmation or require a
-  new target path.
-- Promotion should record source job id, source hash, target path, and
-  timestamp in index metadata if durable audit metadata is needed. It must not
-  recreate cleaned runtime report files.
-
-Status shown for the selected file:
-
-- current Codex Translator session
-- active or last job status
-- completed sections
-- output path
-- report path
-- queue position when waiting
-
-When a file translation job exists, the workspace should expose a `Codex
-Translator` embedded terminal role so the user can discuss terminology, challenge
-translation choices, or ask for focused revisions after the automated pass.
-Follow-up discussion may result in updates to `glossary.md`, `style-guide.md`,
-`project-context.md`, or `decisions.md`; those updates remain normal editable
-project-local files under the translation memory directory.
+The task role tab bar must not show Codex Translator. `Open Session` opens the
+project-scoped Codex Translator terminal modal when the user needs to inspect
+status, change model/effort, restart the translator session, discuss
+terminology, challenge translation choices, or ask for focused memory updates.
+Follow-up discussion may update `glossary.md`, `style-guide.md`,
+`project-context.md`, or `decisions.md`; those updates remain project-local
+translation memory files.
 
 For conversation translation, keep the existing split translation panel. The
 visible behavior should remain:
@@ -1067,7 +1021,6 @@ New backend pieces:
   - resolve base repo root and reject task-worktree output paths
   - load/update index
   - validate file and conversation result files
-  - record promote metadata when users export translations into the repo tree
 - translation queue service
   - enqueue bootstrap, file, conversation, retry, and retranslation tasks
   - persist `runtime/queue.json`
@@ -1094,7 +1047,6 @@ New backend pieces:
   - read result/report
   - retry/force retranslate
   - cancel/skip/manual resolve queue items
-  - promote completed translations into explicit user-selected repo paths
   - get conversation translation request status when needed for debugging
 - translator hook service
   - project-scoped running/idle tracking for the Codex Translator session
@@ -1129,9 +1081,8 @@ Deprecated API translation behavior:
 
 - no normal translation request should call the old API translation provider
 - no hidden API translation path should run after Codex Translator failures
-- retry / skip / cancel / manual resolve UI may exist, but it must not perform
-  hidden API translation
-- old API settings should be removed or marked legacy during migration
+- retry and retranslation must stay on the Codex queue
+- old API settings should not be exposed in the current translation UI
 - tests should verify that conversation translation uses the Codex queue and
   result files instead of the old API provider
 
@@ -1187,8 +1138,8 @@ durable under `translations/files/completed/`.
 ### Phase 3: Codex Session Integration
 
 - Add project-scoped `codex-translator` session support.
-- Keep session identity by `<baseRepoRoot> + targetLanguage`; do not split
-  sessions by task, worktree, source role, or translation profile.
+- Keep session identity by `<baseRepoRoot>`; do not split sessions by task,
+  worktree, source role, target language, or translation profile.
 - Persist the translator session record at `.ai/vcm/translations/session.json`
   so VCM can resume it after reconnecting to the project.
 - Reuse Codex embedded terminal startup with model/effort selectors in the
@@ -1196,17 +1147,18 @@ durable under `translations/files/completed/`.
 - Add hook endpoints and running/idle tracking.
 - Send translation job prompts into the long-lived Codex session.
 - Ensure hook completion advances only the active queue item.
-- Replace and deprecate the existing API-backed conversation translation backend
-  with Codex Translator routing.
+- Route conversation translation through Codex Translator.
 - Capture conversation translation output by reading the VCM-assigned temporary
   result file after the `Stop` hook.
 - Persist `transcript_path` for debugging and recovery parsing.
 
 ### Phase 4: UI
 
-- Add a file-translation button to the existing translation panel.
-- Add the file translation modal.
-- Add first-use bootstrap recommendation and bootstrap controls.
+- Add Translation sidebar controls for conversation translation, auto-send,
+  language, reply scope, file translation, bootstrap, memory update, session
+  status, and `Open Session`.
+- Add the file translation modal opened from the sidebar.
+- Add first-use bootstrap recommendation and sidebar bootstrap controls.
 - Add the translated-file left pane backed by completed entries from
   `files/index.json` plus active runtime file jobs from the queue.
 - Add the translated-content right pane backed by completed output files.
@@ -1219,11 +1171,10 @@ durable under `translations/files/completed/`.
   in the opened translator session modal.
 - Replace older completed file translations after a new translation for the
   same file/language/profile completes successfully.
-- Add cancel, skip, manual resolve, and promote actions.
 - Reuse the existing role-console translation panel for conversation
   translation results.
-- Keep the existing translation panel behavior while changing the backend source
-  from API calls to Codex Translator.
+- Keep the existing translation panel behavior while using Codex Translator as
+  the backend source.
 
 ### Phase 5: QA And Recovery
 
@@ -1242,24 +1193,21 @@ durable under `translations/files/completed/`.
 - Add queue status-machine tests, including startup runtime cleanup.
 - Add conversation result text validation tests.
 - Add memory priority tests proving user entries override automatic entries.
-- Add promote tests proving source files are not overwritten by default.
 - Add retry/retranslation tests after failed or interrupted work.
 - Test with `docs/whitepaper-v0.8.md` scale files.
 
 ## 21. Resolved Decisions
 
-- Generated translations stay under `.ai/vcm/translations/files/completed/`
-  until the user explicitly promotes them.
-- Promote writes to a user-selected repository path and must not overwrite the
-  source file by default.
-- Codex Translator sessions are keyed by `<baseRepoRoot> + targetLanguage`.
-  Translation profiles do not create separate sessions.
+- Generated file translations stay under
+  `.ai/vcm/translations/files/completed/`.
+- Codex Translator sessions are keyed by `<baseRepoRoot>`. Target language and
+  translation profile are per-job settings and do not create separate sessions.
 - Completed translations are local VCM state by default. Commit-ready repository
-  files require explicit promotion.
+  files require explicit manual user action outside the current translation UI.
 
 ## 22. Recommended Defaults
 
-- One Codex Translator session per base repository and target language.
+- One Codex Translator session per base repository.
 - Do not create separate Codex Translator sessions for translation profiles.
 - Use one VCM-managed single-threaded translation queue per Codex Translator
   session.
@@ -1308,8 +1256,7 @@ durable under `translations/files/completed/`.
   files directly to VCM-provided absolute paths.
 - Treat all source text as untrusted data and translate source instructions as
   content, never as commands to follow.
-- Require explicit user action to export or promote a translation into the
-  normal repository tree.
+- Do not auto-write translation results into the normal repository tree.
 - Let Codex automatically append stable entries to translation memory files,
   and require every file-translation memory update to be summarized in
   the current runtime `report.md`.
