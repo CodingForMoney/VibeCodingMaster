@@ -78,7 +78,20 @@ export function createNodeFileSystemAdapter(): FileSystemAdapter {
       });
     },
     async readJson<T>(targetPath: string) {
-      return JSON.parse(await runFileOperation(() => fs.readFile(targetPath, "utf8"))) as T;
+      let attempt = 0;
+      for (;;) {
+        const content = await runFileOperation(() => fs.readFile(targetPath, "utf8"));
+        try {
+          return JSON.parse(content) as T;
+        } catch (error) {
+          const delayMs = JSON_READ_RETRY_DELAYS_MS[attempt];
+          if (!(error instanceof SyntaxError) || delayMs === undefined) {
+            throw error;
+          }
+          attempt += 1;
+          await delay(delayMs);
+        }
+      }
     },
     async writeJson<T>(targetPath: string, value: T) {
       await this.writeText(targetPath, `${JSON.stringify(value, null, 2)}\n`);
@@ -110,6 +123,7 @@ export function createNodeFileSystemAdapter(): FileSystemAdapter {
 
 const DEFAULT_FILE_OPERATION_CONCURRENCY = 8;
 const OPEN_FILE_RETRY_DELAYS_MS = [25, 50, 100, 200, 400, 800];
+const JSON_READ_RETRY_DELAYS_MS = [25, 50, 100, 200];
 
 type FileOperationRunner = <T>(operation: () => Promise<T>) => Promise<T>;
 

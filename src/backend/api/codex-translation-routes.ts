@@ -27,7 +27,9 @@ export interface CodexTranslationRouteDeps {
 export function registerCodexTranslationRoutes(app: FastifyInstance, deps: CodexTranslationRouteDeps): void {
   app.get("/api/translation/codex/state", async () => {
     const project = await requireCurrentProject(deps.projectService);
-    return deps.codexTranslationService.getState(project.repoRoot);
+    return deps.codexTranslationService.getState(project.repoRoot, {
+      visibility: "public"
+    });
   });
 
   app.get("/api/translation/codex/session", async () => {

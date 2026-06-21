@@ -28,7 +28,7 @@ import type { RoleSessionRecord } from "../../shared/types/session.js";
 
 export interface CodexTranslationService {
   cleanupStartupRuntime(repoRoot: string): Promise<void>;
-  getState(repoRoot: string): Promise<CodexTranslationState>;
+  getState(repoRoot: string, options?: GetCodexTranslationStateOptions): Promise<CodexTranslationState>;
   browseSourceFiles(repoRoot: string, input?: BrowseCodexTranslationSourceFilesRequest): Promise<CodexTranslationSourceFileBrowserResult>;
   createFileJob(repoRoot: string, input: CreateCodexFileTranslationRequest): Promise<CodexFileTranslationJob>;
   readFileJobOutput(repoRoot: string, jobId: string): Promise<{ job: CodexFileTranslationJob; output: string; report: string }>;
@@ -47,6 +47,10 @@ export interface CodexTranslationServiceDeps {
   sessionService?: Pick<SessionService, "ensureProjectTranslatorSession">;
   now?: () => string;
   id?: () => string;
+}
+
+export interface GetCodexTranslationStateOptions {
+  visibility?: "internal" | "public";
 }
 
 export interface ValidateConversationResultInput {
@@ -977,7 +981,7 @@ export function createCodexTranslationService(deps: CodexTranslationServiceDeps)
       await cleanupStartupBootstrapIndex(repoRoot);
     },
 
-    async getState(repoRoot) {
+    async getState(repoRoot, options = {}) {
       await ensureLayout(repoRoot);
       await cleanupCompletedRuntime(repoRoot);
       const [queue, fileIndex, bootstrapIndex, memoryInitialized] = await Promise.all([
@@ -987,7 +991,7 @@ export function createCodexTranslationService(deps: CodexTranslationServiceDeps)
         isMemoryInitialized(repoRoot, deps.fs)
       ]);
       const runtimeFileJobs = await loadRuntimeFileJobs(repoRoot, queue);
-      return {
+      const state = {
         queue,
         fileIndex: visibleFileTranslationIndex({
           ...fileIndex,
@@ -996,6 +1000,7 @@ export function createCodexTranslationService(deps: CodexTranslationServiceDeps)
         bootstrapIndex,
         memoryInitialized
       };
+      return options.visibility === "public" ? toPublicTranslationState(state) : state;
     },
 
     async browseSourceFiles(repoRoot, input = {}) {
@@ -2012,6 +2017,28 @@ function isPrunableCompletedQueueItem(item: CodexTranslationQueueItem): boolean 
     item.type === "bootstrap" ||
     item.type === "memory-update"
   );
+}
+
+function toPublicTranslationState(state: CodexTranslationState): CodexTranslationState {
+  const items = state.queue.items
+    .filter((item) => item.type !== "conversation")
+    .map(toPublicQueueItem);
+  const activeItemId = state.queue.activeItemId && items.some((item) => item.id === state.queue.activeItemId)
+    ? state.queue.activeItemId
+    : undefined;
+  return {
+    ...state,
+    queue: {
+      ...state.queue,
+      activeItemId,
+      items
+    }
+  };
+}
+
+function toPublicQueueItem(item: CodexTranslationQueueItem): CodexTranslationQueueItem {
+  const { translatedText: _translatedText, ...publicItem } = item;
+  return publicItem;
 }
 
 function isTranslationRuntimeDirectory(relativePath: string): boolean {

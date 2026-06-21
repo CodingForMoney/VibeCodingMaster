@@ -391,6 +391,12 @@ describe("codex-translation-service", () => {
     ].join("\n"));
     await service.handleCodexHook(tmpRepo, "Stop", "demo-task");
 
+    const internalState = await service.getState(tmpRepo);
+    const publicState = await service.getState(tmpRepo, { visibility: "public" });
+    expect(internalState.queue.items.filter((item) => item.type === "conversation")).toHaveLength(2);
+    expect(publicState.queue.items.filter((item) => item.type === "conversation")).toHaveLength(0);
+    expect(publicState.queue.activeItemId).toBeUndefined();
+
     await expect(service.validateConversationResult(tmpRepo, {
       resultPath: first.resultPath,
       sourceHash: first.sourceHash,
