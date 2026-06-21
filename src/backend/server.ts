@@ -110,7 +110,8 @@ export async function createServer(deps: ServerDeps, options: CreateServerOption
   });
   registerCodexTranslationRoutes(app, {
     projectService: deps.projectService,
-    codexTranslationService: deps.codexTranslationService
+    codexTranslationService: deps.codexTranslationService,
+    sessionService: deps.sessionService
   });
   registerProjectRoutes(app, {
     projectService: deps.projectService,

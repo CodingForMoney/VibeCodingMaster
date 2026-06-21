@@ -194,13 +194,14 @@ VCM uses four core roles:
 - `architect`: technical planner and docs-sync owner. It defines module/file
   responsibilities, cross-file callable surfaces, public contracts, phase
   boundaries, risks, and durable docs updates. Before coder work starts,
-  architect writes the plan with a Scaffold Manifest and materializes only the
-  minimum necessary code scaffolding with durable contract comments and
-  `VCM:CODE` placeholders.
+  architect writes the plan with a Scaffold Manifest whose rows have stable
+  IDs, and materializes only the minimum necessary code scaffolding with
+  durable contract comments and `VCM:CODE <ID>` placeholders.
 - `coder`: implementation owner. It changes production code and baseline unit
   tests within the approved plan. It follows the architect-defined scaffold,
-  implements and removes `VCM:CODE` placeholders, follows general coding
-  standards, and does not change architecture or durable docs.
+  implements and removes `VCM:CODE` placeholders, reports Scaffold Completion
+  by ID in handoff, follows general coding standards, and does not change
+  architecture or durable docs.
 - `reviewer`: independent validation owner. It reads code as needed, writes or
   updates tests, owns `docs/TESTING.md`, and decides validation sufficiency.
   `docs/TESTING.md` must be current validation strategy, not a task log, and
@@ -250,11 +251,11 @@ non-private cross-file callable surfaces, docs impact, risks, and Replan
 triggers.
 
 The Scaffold Manifest carries task-specific file context for the current handoff:
-why a file is in scope, what coder should implement, allowed implementation
-freedom, expected `VCM:CODE` placeholders, durable code comment needs, proof
-points, and Replan triggers. Task context, phase notes, handoff instructions,
-temporary rationale, and coder guidance belong in the Scaffold Manifest, not in
-source-code comments.
+stable row ID, why a file is in scope, what coder should implement, allowed
+implementation freedom, expected `VCM:CODE` placeholders, durable code comment
+needs, proof points, and Replan triggers. Task context, phase notes, handoff
+instructions, temporary rationale, and coder guidance belong in the Scaffold
+Manifest, not in source-code comments.
 
 Code scaffolding materializes that plan in the repository before coder work
 starts:
@@ -265,11 +266,13 @@ starts:
   task is complete
 - new or changed non-private callable surfaces are defined directly in code with
   signature shape and contract comments
-- incomplete implementation bodies are marked with `VCM:CODE`
+- incomplete implementation bodies are marked with `VCM:CODE <Scaffold Manifest ID>`
 
 Coder implements the marked placeholders and may add private helpers, but cannot
 change file responsibilities, callable-surface signatures, or contract intent
-without architect replan.
+without architect replan. Coder handoff reports Scaffold Completion by manifest
+ID, including completed markers, remaining markers if any, private helpers
+added, manifest deviations, and whether Replan is needed.
 
 Architect may also enter Debug Mode when PM routes bugs, failing tests,
 build/runtime failures, or unclear defects. Debug Mode allows architect to read

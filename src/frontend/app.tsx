@@ -26,8 +26,10 @@ import type { VcmOrchestrationState, VcmRoleMessage } from "../shared/types/mess
 import type { ProjectSummary } from "../shared/types/project.js";
 import type { RoleName } from "../shared/types/role.js";
 import type { VcmSessionRoundState } from "../shared/types/round.js";
+import type { RoleSessionRecord, SessionEffort, SessionModel } from "../shared/types/session.js";
 import type { TaskRecord } from "../shared/types/task.js";
 import { AppShell } from "./components/app-shell.js";
+import { CodexTranslatorSessionModal } from "./components/codex-translator-session-modal.js";
 import { FileTranslationModalHost } from "./components/translation-panel.js";
 import { selectActiveTask } from "./state/app-store.js";
 import { apiClient } from "./state/api-client.js";
@@ -64,6 +66,10 @@ export function App() {
   const [translationTargetLanguage, setTranslationTargetLanguage] = useState<TranslationTargetLanguage>(DEFAULT_TRANSLATION_TARGET_LANGUAGE);
   const [translationOutputMode, setTranslationOutputMode] = useState<TranslationOutputMode>(DEFAULT_TRANSLATION_OUTPUT_MODE);
   const [fileTranslationOpen, setFileTranslationOpen] = useState(false);
+  const [translatorSessionOpen, setTranslatorSessionOpen] = useState(false);
+  const [translatorSession, setTranslatorSession] = useState<RoleSessionRecord | null>(null);
+  const [translatorModel, setTranslatorModel] = useState<SessionModel>("gpt-5.5");
+  const [translatorEffort, setTranslatorEffort] = useState<SessionEffort>("medium");
   const [launchTemplate, setLaunchTemplate] = useState<LaunchTemplate>(() => createDefaultLaunchTemplate());
   const [activeLaunchState, setActiveLaunchState] = useState<TaskWorkspaceLaunchState | null>(null);
   const [workspaceRefreshNonce, setWorkspaceRefreshNonce] = useState(0);
@@ -74,6 +80,7 @@ export function App() {
   const notifiedFlowPauseKeyRef = useRef<Record<string, string>>({});
   const flowPauseAlarmRef = useRef<number | null>(null);
   const gatewayContextSyncKeyRef = useRef("");
+  const translatorEnsureKeyRef = useRef("");
   const activeTask = useMemo(
     () => selectActiveTask(tasks, activeTaskSlug),
     [tasks, activeTaskSlug]
@@ -181,6 +188,7 @@ export function App() {
     if (previousPauseKey === pauseKey) {
       return;
     }
+    notifiedFlowPauseKeyRef.current[roundState.taskSlug] = pauseKey;
 
     if (!flowPauseAlerts) {
       return;
@@ -192,7 +200,6 @@ export function App() {
     } else {
       playWeakFlowPauseAlert();
     }
-    notifiedFlowPauseKeyRef.current[roundState.taskSlug] = pauseKey;
   }, [activeTask?.taskSlug, flowPauseAlerts, playWeakFlowPauseAlert, showStrongFlowPauseNotice]);
 
   const handleLaunchStateChanged = useCallback((launchState: TaskWorkspaceLaunchState) => {
@@ -261,6 +268,18 @@ export function App() {
     const state = await apiClient.getCodexReviewState(taskSlug);
     setActiveCodexReview({ taskSlug, state });
     return state;
+  }
+
+  async function refreshTranslatorSession() {
+    const session = await apiClient.getCodexTranslatorSession();
+    setTranslatorSession(session);
+    if (session?.model) {
+      setTranslatorModel(session.model);
+    }
+    if (session?.effort) {
+      setTranslatorEffort(session.effort);
+    }
+    return session;
   }
 
   useEffect(() => {
@@ -364,6 +383,52 @@ export function App() {
   }, [activeTask?.taskSlug]);
 
   useEffect(() => {
+    translatorEnsureKeyRef.current = "";
+    setTranslatorSession(null);
+  }, [project?.repoRoot]);
+
+  useEffect(() => {
+    if (!project) {
+      return;
+    }
+
+    void refreshTranslatorSession().catch((caught: Error) => setError(caught.message));
+    const interval = window.setInterval(() => {
+      void refreshTranslatorSession().catch((caught: Error) => setError(caught.message));
+    }, 3000);
+    return () => window.clearInterval(interval);
+  }, [project?.repoRoot]);
+
+  useEffect(() => {
+    if (!project || !translationEnabled) {
+      return;
+    }
+
+    const ensureKey = project.repoRoot;
+    if (translatorEnsureKeyRef.current === ensureKey && translatorSession?.status === "running") {
+      return;
+    }
+    translatorEnsureKeyRef.current = ensureKey;
+    void apiClient.ensureCodexTranslatorSession({
+      model: translatorModel,
+      effort: translatorEffort
+    })
+      .then((session) => {
+        setTranslatorSession(session);
+        if (session.model) {
+          setTranslatorModel(session.model);
+        }
+        if (session.effort) {
+          setTranslatorEffort(session.effort);
+        }
+      })
+      .catch((caught: Error) => {
+        translatorEnsureKeyRef.current = "";
+        setError(caught.message);
+      });
+  }, [project?.repoRoot, translationEnabled]);
+
+  useEffect(() => {
     if (!activeTask?.taskSlug) {
       return;
     }
@@ -429,6 +494,7 @@ export function App() {
           translationAutoSendEnabled={translationAutoSendEnabled}
           translationTargetLanguage={translationTargetLanguage}
           translationOutputMode={translationOutputMode}
+          translatorSession={translatorSession}
           harnessStatus={harnessStatus}
           harnessBootstrapStatus={harnessBootstrapStatus}
           harnessApplyResult={harnessApplyResult}
@@ -564,26 +630,27 @@ export function App() {
             });
           }}
           onOpenFileTranslation={() => setFileTranslationOpen(true)}
+          onOpenTranslatorSession={() => setTranslatorSessionOpen(true)}
           onCreateTranslationBootstrap={() => {
             void withBusy(async () => {
-              if (!activeTask) {
-                throw new Error("Create or select a task before running Translation Bootstrap.");
+              if (!project) {
+                throw new Error("Connect a repository before running Translation Bootstrap.");
               }
               await apiClient.createCodexBootstrap({
-                taskSlug: activeTask.taskSlug,
                 targetLanguage: translationTargetLanguage
               });
+              await refreshTranslatorSession();
             });
           }}
           onUpdateTranslationMemory={() => {
             void withBusy(async () => {
-              if (!activeTask) {
-                throw new Error("Create or select a task before updating translation memory.");
+              if (!project) {
+                throw new Error("Connect a repository before updating translation memory.");
               }
               await apiClient.createCodexMemoryUpdate({
-                taskSlug: activeTask.taskSlug,
                 targetLanguage: translationTargetLanguage
               });
+              await refreshTranslatorSession();
             });
           }}
           onCreateTask={(input) => withBusy(async () => {
@@ -770,9 +837,57 @@ export function App() {
       )}
       <FileTranslationModalHost
         open={fileTranslationOpen}
-        taskSlug={activeTask?.taskSlug ?? null}
         targetLanguage={translationTargetLanguage}
         onClose={() => setFileTranslationOpen(false)}
+      />
+      <CodexTranslatorSessionModal
+        open={translatorSessionOpen}
+        busy={busy}
+        session={translatorSession}
+        model={translatorModel}
+        effort={translatorEffort}
+        onClose={() => setTranslatorSessionOpen(false)}
+        onModelChange={setTranslatorModel}
+        onEffortChange={setTranslatorEffort}
+        onStart={() => {
+          void withBusy(async () => {
+            const session = await apiClient.startCodexTranslatorSession({
+              cols: 100,
+              rows: 28,
+              model: translatorModel,
+              effort: translatorEffort
+            });
+            setTranslatorSession(session);
+          });
+        }}
+        onResume={() => {
+          void withBusy(async () => {
+            const session = await apiClient.resumeCodexTranslatorSession({
+              cols: 100,
+              rows: 28,
+              model: translatorModel,
+              effort: translatorEffort
+            });
+            setTranslatorSession(session);
+          });
+        }}
+        onRestart={() => {
+          void withBusy(async () => {
+            const session = await apiClient.restartCodexTranslatorSession({
+              cols: 100,
+              rows: 28,
+              model: translatorModel,
+              effort: translatorEffort
+            });
+            setTranslatorSession(session);
+          });
+        }}
+        onStop={() => {
+          void withBusy(async () => {
+            const session = await apiClient.stopCodexTranslatorSession();
+            setTranslatorSession(session);
+          });
+        }}
       />
     </AppShell>
   );

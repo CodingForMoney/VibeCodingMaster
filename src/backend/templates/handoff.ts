@@ -15,9 +15,9 @@ Task-specific context and coder guidance go here, not in source-code comments.
 Source-code comments should only describe durable behavior, contracts, invariants,
 error boundaries, or non-obvious logic that should remain useful after this task.
 
-| File | Action | Task Context | Durable Code Comment Needed | Coder Work | Allowed Freedom | VCM:CODE | Proof Point | Replan Trigger |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD |
+| ID | File | Action | Task Context | Durable Code Comment Needed | Coder Work | Allowed Freedom | VCM:CODE | Proof Point | Replan Trigger |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| SCF-001 | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD |
 
 ## Implementation Plan
 

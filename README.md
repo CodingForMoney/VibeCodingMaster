@@ -237,7 +237,7 @@ the base repo has uncommitted changes, when the current branch has no upstream,
 or when the active task is an inline task using the base repo directly. It does
 not stash, merge, or mutate task worktrees.
 
-When VCM is connected to an active task, the bottom of the sidebar shows a task status dock. It stays outside the collapsible groups and shows the active VCM Session title, task status, start time, total elapsed time, total Round count, and role active runtime. If a Round is currently running, the dock also shows the Current Round start time, total elapsed time, role active runtime, and Turn count.
+When VCM is connected to an active task, the bottom of the sidebar shows a task status dock. It stays outside the collapsible groups and shows the active VCM Session title, task status, start time, total elapsed time, total Round count, and role active runtime. The dock also shows the Current Round while it is running, or the Last Round after a flow pause, including start time, total elapsed time, role active runtime, Turn count, and Round status.
 
 ## Mobile Gateway
 
@@ -586,7 +586,7 @@ The normal path is timer-driven: `Stop` starts a backend timer, and `UserPromptS
 
 When `Flow pause alert` is enabled, the frontend polls the task Round state and deduplicates each stopped Round so the same stopped state does not alert on every poll. Flow duration is measured from the first `UserPromptSubmit` to `stoppedAt`, falling back to the last `Stop` when needed. If the flow lasted less than 2 minutes, it plays the local chime 3 times at 1.4 second intervals. If the flow lasted 2 minutes or longer, it shows a modal alert and repeats the local chime until the user clicks `Confirm`. A stopped Round can mean normal completion, user decision needed, dispatch failure, or another workflow interruption; the point is to get the user to look with the right amount of urgency.
 
-The Current Round dock separates wall-clock Round duration from role active runtime. `Total` is `now - Round.startedAt`; `Role runtime` is only the accumulated time between each Turn's `UserPromptSubmit` and `Stop`; `Turn count` is the number of accepted prompts inside the current Round.
+The Round dock separates wall-clock Round duration from role active runtime. For a running Round, `Total` is `now - Round.startedAt`; for a stopped Round, it is `stoppedAt - Round.startedAt`. `Role runtime` is only the accumulated time between each Turn's `UserPromptSubmit` and `Stop`; `Turn count` is the number of accepted prompts inside the Round.
 
 ## Resume Behavior
 

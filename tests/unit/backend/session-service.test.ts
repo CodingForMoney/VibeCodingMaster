@@ -212,46 +212,44 @@ describe("createSessionService", () => {
       worktreePath: "/repo/.claude/worktrees/demo-task"
     });
 
-    const started = await firstService.startRoleSession("/repo", "demo-task", "codex-translator", {
+    const started = await firstService.startProjectTranslatorSession("/repo", {
       model: "gpt-5.5",
       effort: "xhigh"
     });
 
+    expect(started.taskSlug).toBe("__project__");
     expect(started.logPath).toBeUndefined();
     expect(firstRuntimeInputs[0]?.cwd).toBe("/repo");
     expect(firstRuntimeInputs[0]?.env).toMatchObject({
       VCM_TASK_REPO_ROOT: "/repo",
-      VCM_TASK_SLUG: "demo-task",
+      VCM_TASK_SLUG: "__project__",
       VCM_ROLE: "codex-translator"
     });
     expect(firstRuntimeInputs[0]?.logPath).toBeUndefined();
-    await expect(fs.pathExists("/repo/.ai/vcm/translations/runtime/session.json")).resolves.toBe(true);
+    await expect(fs.pathExists("/repo/.ai/vcm/translations/session.json")).resolves.toBe(true);
     await expect(fs.pathExists("/repo/.claude/worktrees/demo-task/.ai/vcm/sessions/demo-task.json"))
       .resolves.toBe(false);
 
-    const hooked = await firstService.recordRoleHookEvent("/repo", {
-      taskSlug: "demo-task",
-      role: "codex-translator",
+    const hooked = await firstService.recordProjectTranslatorHookEvent("/repo", {
       eventName: "UserPromptSubmit",
       sessionId: "codex-translator-real-session",
       transcriptPath: "/Users/sheldon/.codex/sessions/codex-translator-real-session.jsonl",
-      cwd: "/repo/.ai/codex-translator",
-      allowSessionMismatch: true
+      cwd: "/repo/.ai/codex-translator"
     });
     expect(hooked?.claudeSessionId).toBe("codex-translator-real-session");
 
     const secondRuntimeInputs: CreateTerminalSessionInput[] = [];
     const secondService = createTestSessionService(fs, secondRuntimeInputs);
-    const recovered = await secondService.getRoleSession("/repo", "next-task", "codex-translator");
+    const recovered = await secondService.getProjectTranslatorSession("/repo");
     expect(recovered).toMatchObject({
       role: "codex-translator",
-      taskSlug: "next-task",
+      taskSlug: "__project__",
       status: "resumable",
       claudeSessionId: "codex-translator-real-session"
     });
     expect(recovered?.logPath).toBeUndefined();
 
-    const resumed = await secondService.resumeRoleSession("/repo", "next-task", "codex-translator");
+    const resumed = await secondService.resumeProjectTranslatorSession("/repo");
     expect(resumed.claudeSessionId).toBe("codex-translator-real-session");
     expect(secondRuntimeInputs[0]?.args).toEqual([
       "resume",
@@ -282,7 +280,7 @@ describe("createSessionService", () => {
       sandboxMode: "devcontainer"
     });
 
-    const started = await service.startRoleSession("/repo", "demo-task", "codex-translator", {
+    const started = await service.startProjectTranslatorSession("/repo", {
       model: "gpt-5.5",
       effort: "xhigh"
     });

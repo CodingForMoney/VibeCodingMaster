@@ -346,12 +346,10 @@ function getTranslationTargetLanguageLabel(targetLanguage: TranslationTargetLang
 
 export function FileTranslationModalHost({
   open,
-  taskSlug,
   targetLanguage,
   onClose
 }: {
   open: boolean;
-  taskSlug: string | null;
   targetLanguage: TranslationTargetLanguage;
   onClose(): void;
 }) {
@@ -454,14 +452,13 @@ export function FileTranslationModalHost({
 
   async function createFileTranslation(sourcePath = fileBrowserSelectedPath) {
     const normalizedSourcePath = sourcePath.trim();
-    if (!normalizedSourcePath || !taskSlug) {
+    if (!normalizedSourcePath) {
       return;
     }
     setBusy(true);
     setError("");
     try {
       const job = await apiClient.createCodexFileTranslation({
-        taskSlug,
         sourcePath: normalizedSourcePath,
         targetLanguage
       });

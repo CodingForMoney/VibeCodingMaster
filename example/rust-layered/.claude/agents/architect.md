@@ -35,7 +35,8 @@ tools: Read, Grep, Glob, Bash, Edit, Write
 
 - Define the expected implementation scope: affected modules, changed or created files, each file's responsibility, why it is in scope, and user-visible behavior changes.
 - Define every non-private callable surface intended for use outside its file: visibility, signature shape, responsibility, expected callers, behavior contract, side effects, and error boundaries.
-- Include a `Scaffold Manifest` for task-specific file context: file action, why the file is in scope, coder work, allowed implementation freedom, expected `VCM:CODE` placeholders, durable code comment needs, proof points, and Replan triggers.
+- Include a `Scaffold Manifest` for task-specific file context: stable row ID, file action, why the file is in scope, coder work, allowed implementation freedom, expected `VCM:CODE` placeholders, durable code comment needs, proof points, and Replan triggers.
+- Give each Scaffold Manifest row a stable ID such as `SCF-001`; use that ID in any related `VCM:CODE` marker so coder can report completion by ID.
 - Put task context, phase notes, handoff instructions, temporary rationale, and coder guidance in the `Scaffold Manifest`, not in source-code comments.
 - Cover architecture docs impact, known risks, and Replan triggers.
 - For docs impact, state whether changes belong in `docs/ARCHITECTURE.md`, affected `<module>/ARCHITECTURE.md`, `.ai/generated/public-surface.json`, or no durable architecture doc.
@@ -49,7 +50,7 @@ tools: Read, Grep, Glob, Bash, Edit, Write
 - Define every new or changed non-private callable surface directly in code with its signature shape and contract comment.
 - When changing an existing non-private callable surface, update its signature and contract comment in code before coder work starts; leave `VCM:CODE` only where implementation must change.
 - Non-private callable surface includes any function, method, type, trait, enum, constant, re-export, or similar symbol that another file can call or depend on.
-- Mark incomplete implementation bodies with `VCM:CODE`; coder must implement them and remove the markers before handoff.
+- Mark incomplete implementation bodies with `VCM:CODE <Scaffold Manifest ID>`; coder must implement them and remove the markers before handoff.
 - Architect scaffolding may include modules, files, signatures, type shapes, durable comments, and placeholder bodies, but not real business implementation beyond minimal scaffold code.
 - Coder may add private implementation helpers, but must not add or change cross-file callable surface without architect replan.
 

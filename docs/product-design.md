@@ -219,11 +219,11 @@ The project manager must not become the architect, coder, reviewer, or debugger 
 The architect owns:
 
 - architecture plan
-- Scaffold Manifest for task-specific file context and coder guidance
+- Scaffold Manifest with stable row IDs for task-specific file context and coder guidance
 - module boundaries
 - file responsibilities
 - cross-file callable surfaces and contract comments
-- code scaffolding with `VCM:CODE` placeholders
+- code scaffolding with `VCM:CODE <ID>` placeholders
 - public contracts
 - verifiable behavior and behavior/contract proof points
 - Replan triggers
@@ -240,7 +240,7 @@ Outputs:
 The coder owns:
 
 - implementation within the approved plan
-- completion of architect-defined `VCM:CODE` placeholders
+- completion of architect-defined `VCM:CODE` placeholders and Scaffold Completion handoff by ID
 - baseline unit/contract/regression tests
 - general coding standards and code documentation consistency
 
@@ -289,7 +289,7 @@ Sections:
 - `New Task`
 - `Tasks`
 
-The connected active task also has a bottom status dock. It is not a collapsible sidebar section. It stays at the bottom of the sidebar and shows the active VCM Session title, task status, Session start time, total elapsed time, total Round count, and role active runtime. When the current Round is running, it also shows the Current Round start time, total elapsed time, role active runtime, and Turn count.
+The connected active task also has a bottom status dock. It is not a collapsible sidebar section. It stays at the bottom of the sidebar and shows the active VCM Session title, task status, Session start time, total elapsed time, total Round count, and role active runtime. It also shows the Current Round while a Round is running, or the Last Round after a flow pause, including start time, total elapsed time, role active runtime, Turn count, and Round status.
 
 `Repository Path` layout:
 
@@ -420,7 +420,7 @@ Task-level Round state:
 - The stop transition is timer-driven from the `Stop` event. Round-state reads do not end a Round.
 - Before stopping, VCM checks `.ai/vcm/handoffs/messages`; if a pending route message exists and can be delivered, VCM retries delivery and extends the stop window instead of alerting.
 - The same Round state stores total Round count, Turn count, completed Turn count, and role active runtime. Active runtime is measured only between `UserPromptSubmit` and `Stop`, not during the stop window.
-- The Current Round dock shows both wall-clock Round duration and role active runtime. `Total` is `now - Round.startedAt`; `Role runtime` is the accumulated active runtime across Turns in that Round; `Turn count` is the number of accepted prompts in the Round.
+- The Round dock shows both wall-clock Round duration and role active runtime. For a running Round, `Total` is `now - Round.startedAt`; for a stopped Round, it is `stoppedAt - Round.startedAt`. `Role runtime` is the accumulated active runtime across Turns in that Round; `Turn count` is the number of accepted prompts in the Round.
 
 The frontend polls this task-level Round state and deduplicates each stopped Round so the same stopped state does not alert on every poll. Flow duration is measured from the first `UserPromptSubmit` to `stoppedAt`, falling back to the last `Stop` when needed. Runs under 2 minutes trigger the weak 3-chime reminder at 1.4 second intervals. Runs at or above 2 minutes trigger the strong alert dialog and repeating sound until confirmation.
 

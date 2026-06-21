@@ -16,7 +16,7 @@ and interactive conversation conventions.
 
 The existing translation panel should remain the main UI. Conversation
 translation keeps the current panel behavior, and file translation is added as
-an expandable mode inside the same panel. The backend source of translated text
+an opened file-translation modal from the Translation sidebar. The backend source of translated text
 changes from an API provider to Codex Translator.
 
 ## 2. Core Direction
@@ -27,8 +27,8 @@ Add a new Codex role:
 codex-translator
 ```
 
-The role is responsible for both project-level file translation and task-level
-conversation translation. It should:
+The role is responsible for both project-level file translation and temporary
+conversation translation jobs. It should:
 
 - read the target source file and relevant project context
 - maintain durable translation memory files
@@ -52,8 +52,8 @@ legacy test/diagnostic fallback when Codex Translator is not wired into the
 server.
 
 Codex Translator is not part of the Claude Code PM/architect/coder/reviewer
-workflow. It is a project utility role, like Codex Reviewer in terminal shape,
-but with different permissions, output paths, and task semantics.
+workflow. It is a project utility role with its own long-lived terminal
+session, permissions, output paths, and task semantics.
 
 ## 3. Why Codex Session Translation
 
@@ -94,13 +94,15 @@ model. Their lifecycles are still different:
 | --- | --- | --- | --- | --- |
 | Translation bootstrap | First-run project understanding and memory initialization | `<baseRepoRoot>/.ai/vcm/translations/bootstrap/` plus temporary runtime files | Long-term index and memory, temporary run files | Runtime files are deleted on VCM startup and after completion |
 | File translation | Project documents, whitepapers, specs, long-form artifacts | `<baseRepoRoot>/.ai/vcm/translations/files/completed/` | Long-term project-local state | Completed outputs survive; request/progress/report/chunk files are deleted on VCM startup and after completion |
-| Conversation translation | Role console output, user prompt translation, gateway replies | `<baseRepoRoot>/.ai/vcm/translations/runtime/conversations/<taskSlug>/...` | Task-scoped runtime cache | Deleted on VCM startup or after the translated result is consumed |
+| Conversation translation | Role console output, user prompt translation, gateway replies | `<baseRepoRoot>/.ai/vcm/translations/runtime/conversations/...` | Project-level runtime cache | Deleted on VCM startup or after the translated result is consumed |
 | Translation memory | Shared terminology and style rules | `<baseRepoRoot>/.ai/vcm/translations/memory/` | Long-term project-local state | Survives task cleanup and worktree deletion |
+| Translator session | Long-lived Codex Translator terminal/session metadata | `<baseRepoRoot>/.ai/vcm/translations/session.json` | Project-level durable state | Survives VCM startup cleanup so VCM can resume the prior Codex session |
 
 Recommended layout:
 
 ```text
 <baseRepoRoot>/.ai/vcm/translations/
+  session.json
   memory/
     glossary.md
     style-guide.md
@@ -114,7 +116,6 @@ Recommended layout:
       <translated-file-id>.md
   runtime/
     queue.json
-    session.json
     bootstrap/
       runs/
         <bootstrap-id>/
@@ -129,13 +130,11 @@ Recommended layout:
           output.md
           report.md
     conversations/
-      <taskSlug>/
-        <role>/
-          jobs/
-            <translation-id>/
-              request.json
-              result.txt
-              report.md
+      jobs/
+        <translation-id>/
+          request.json
+          result.txt
+          report.md
 ```
 
 Files under `runtime/` are temporary working state. VCM deletes the entire
@@ -160,8 +159,8 @@ should provide an explicit export or copy step.
 
 Implementation rule: every translation service must resolve
 `<baseRepoRoot>/.ai/vcm/translations/` from the connected project base root.
-`taskSlug` may namespace conversation cache entries, but storage paths must not
-be computed from `getTaskRuntimeRepoRoot()` or any task worktree root.
+Conversation translation runtime paths must not be namespaced by task, source
+role, or task worktree root.
 
 ## 5. Translation Memory
 
@@ -336,7 +335,6 @@ Suggested schema shape:
       "id": "whitepaper-v0-8-zh-20260614-001",
       "sourcePath": "docs/whitepaper-v0.8.md",
       "baseRepoRoot": "/absolute/base/repo/root",
-      "taskSlug": null,
       "sourceHash": "sha256:...",
       "sourceBytes": 449958,
       "sourceMtimeMs": 1790000000000,
@@ -405,24 +403,22 @@ management pattern:
 - runtime Codex session id for the current VCM process
 - long-lived terminal session for follow-up discussion until VCM is restarted
 
-VCM stores the active translator session runtime record at:
+VCM stores the active translator session record at:
 
 ```text
-<baseRepoRoot>/.ai/vcm/translations/runtime/session.json
+<baseRepoRoot>/.ai/vcm/translations/session.json
 ```
 
-This record is project-level runtime state, not task-level durable state. It
+This record is project-level durable session metadata, not task-level state. It
 stores the Codex session id, selected model, selected effort, terminal cwd, and
-hook activity state for the current VCM process. VCM deletes
-`translations/runtime/` on startup, so this record must not be used for restart
-recovery. The embedded terminal `Restart` control must stop the current runtime
-process, create a fresh Codex session id, overwrite this record, and keep old
-translation outputs intact.
+hook activity state. VCM deletes `translations/runtime/` on startup, but must
+keep this session record so reconnecting to a project can resume the previous
+Codex Translator session when translation is enabled.
 
 When a Codex hook has captured the real Codex `session_id`, `Resume` may run
-`codex resume <session_id>` during the same VCM runtime. After VCM restarts,
-the user should start a fresh translator session and rely on durable memory
-files plus completed translations.
+`codex resume <session_id>`. `Restart` stops the current runtime process,
+creates a fresh Codex session id, overwrites this record, and keeps old
+translation outputs intact.
 
 Session identity is fixed by base repository. If VCM later supports multiple
 parallel target-language translator sessions, split this file into a
@@ -569,7 +565,7 @@ Output contract:
   prompt because conversation snippets are normally short.
 - VCM still creates a temporary result file path before sending the prompt, for
   example
-  `translations/runtime/conversations/<taskSlug>/<role>/jobs/<translation-id>/result.txt`.
+  `translations/runtime/conversations/jobs/<translation-id>/result.txt`.
 - Codex Translator writes the translated text to that assigned result file.
 - `Stop` marks the turn as finished; after `Stop`, VCM reads and validates the
   assigned result file.
@@ -808,7 +804,7 @@ Result handling:
   result channel for that batch.
 - VCM creates temporary runtime metadata and the result file contract under the
   unified project translation root:
-  `<baseRepoRoot>/.ai/vcm/translations/runtime/conversations/<taskSlug>/...`.
+  `<baseRepoRoot>/.ai/vcm/translations/runtime/conversations/...`.
 - The terminal response should only report completion, status, or diagnostics;
   it must not print the full translated text.
 - Conversation batch result files are plain text with exact numbered
@@ -1146,7 +1142,7 @@ Conversation translation and file translation may share translation settings UI
 concepts such as target language and style. They share
 `<baseRepoRoot>/.ai/vcm/translations/` and `translations/memory/`, but runtime
 state stays under `translations/runtime/`: conversation results are temporary
-under `runtime/conversations/<taskSlug>/`, while completed file results are
+under `runtime/conversations/`, while completed file results are
 durable under `translations/files/completed/`.
 
 ## 20. Implementation Phases
@@ -1190,10 +1186,13 @@ durable under `translations/files/completed/`.
 
 ### Phase 3: Codex Session Integration
 
-- Add `codex-translator` role/session support.
-- Keep session identity as current-process runtime state by `<baseRepoRoot> +
-  targetLanguage`; do not split sessions by translation profile.
-- Reuse Codex embedded terminal startup with model/effort selectors.
+- Add project-scoped `codex-translator` session support.
+- Keep session identity by `<baseRepoRoot> + targetLanguage`; do not split
+  sessions by task, worktree, source role, or translation profile.
+- Persist the translator session record at `.ai/vcm/translations/session.json`
+  so VCM can resume it after reconnecting to the project.
+- Reuse Codex embedded terminal startup with model/effort selectors in the
+  translator session modal.
 - Add hook endpoints and running/idle tracking.
 - Send translation job prompts into the long-lived Codex session.
 - Ensure hook completion advances only the active queue item.
@@ -1214,7 +1213,10 @@ durable under `translations/files/completed/`.
 - Show selected job status; show runtime report details only while a job is not
   completed.
 - Add shared queue status for file and conversation translation tasks.
-- Add Codex Translator terminal surface.
+- Do not show Codex Translator in the task role tab bar.
+- Add Translation sidebar controls for `Session status` and `Open Session`.
+- Show Codex Translator terminal controls, including model/effort/restart, only
+  in the opened translator session modal.
 - Replace older completed file translations after a new translation for the
   same file/language/profile completes successfully.
 - Add cancel, skip, manual resolve, and promote actions.
@@ -1275,7 +1277,9 @@ durable under `translations/files/completed/`.
 - Store completed file outputs under `.ai/vcm/translations/files/completed/`;
   store temporary file jobs under `.ai/vcm/translations/runtime/files/jobs/`.
 - Store conversation translation runtime metadata/result temporary files under
-  `.ai/vcm/translations/runtime/conversations/<taskSlug>/`.
+  `.ai/vcm/translations/runtime/conversations/`.
+- Store the durable translator session record at
+  `.ai/vcm/translations/session.json`.
 - Store shared glossary and style memory under `.ai/vcm/translations/memory/`.
 - Resolve the translation root from `<baseRepoRoot>`, never from a task
   worktree.

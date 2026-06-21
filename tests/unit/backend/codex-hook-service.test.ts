@@ -118,11 +118,27 @@ describe("createCodexHookService", () => {
       projectService: createProjectServiceStub(),
       taskService: createTaskServiceStub(),
       sessionService: {
-        async recordRoleHookEvent(_repoRoot, input) {
-          calls.push(`session:${input.eventName}:${input.role}:${input.sessionId}`);
-          return undefined;
+        async recordRoleHookEvent() {
+          throw new Error("Codex Translator should not use task-scoped hook recording.");
+        },
+        async recordProjectTranslatorHookEvent(_repoRoot, input) {
+          calls.push(`session:${input.eventName}:codex-translator:${input.sessionId}`);
+          return {
+            id: "runtime_codex_translator",
+            claudeSessionId: input.sessionId ?? "codex_translator_session",
+            transcriptPath: input.transcriptPath,
+            taskSlug: "__project__",
+            role: "codex-translator",
+            status: "running",
+            activityStatus: input.eventName === "Stop" ? "idle" : "running",
+            command: "codex",
+            permissionMode: "default",
+            cwd: input.cwd ?? "/repo/.ai/codex-translator",
+            terminalBackend: "node-pty",
+            updatedAt: "2026-06-14T00:00:00.000Z"
+          };
         }
-      } as Pick<SessionService, "recordRoleHookEvent">,
+      } as Pick<SessionService, "recordRoleHookEvent" | "recordProjectTranslatorHookEvent">,
       roundService: {
         async recordRoleTurnEvent(input) {
           calls.push(`round:${input.eventName}:${input.role}`);
@@ -149,7 +165,7 @@ describe("createCodexHookService", () => {
       ok: true,
       eventName: "Stop",
       role: "codex-translator",
-      sessionUpdated: false
+      sessionUpdated: true
     });
     expect(calls).toEqual([
       "session:Stop:codex-translator:codex_translator_session",

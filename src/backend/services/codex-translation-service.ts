@@ -24,6 +24,7 @@ import { VcmError } from "../errors.js";
 import { submitTerminalInput } from "../runtime/terminal-submit.js";
 import type { TerminalRuntime } from "../runtime/terminal-runtime.js";
 import type { SessionService } from "./session-service.js";
+import type { RoleSessionRecord } from "../../shared/types/session.js";
 
 export interface CodexTranslationService {
   cleanupStartupRuntime(repoRoot: string): Promise<void>;
@@ -37,18 +38,18 @@ export interface CodexTranslationService {
   validateConversationResult(repoRoot: string, input: ValidateConversationResultInput): Promise<CodexConversationTranslationResultFile>;
   promoteFileJob(repoRoot: string, jobId: string, targetPath: string): Promise<CodexFileTranslationJob>;
   handleCodexHook(repoRoot: string, eventName: ClaudeHookEventName, taskSlug?: string): Promise<void>;
+  ensureTranslatorSession(repoRoot: string): Promise<RoleSessionRecord>;
 }
 
 export interface CodexTranslationServiceDeps {
   fs: FileSystemAdapter;
   runtime?: TerminalRuntime;
-  sessionService?: Pick<SessionService, "getRoleSession" | "resumeRoleSession" | "startRoleSession">;
+  sessionService?: Pick<SessionService, "ensureProjectTranslatorSession">;
   now?: () => string;
   id?: () => string;
 }
 
 export interface ValidateConversationResultInput {
-  taskSlug: string;
   resultPath: string;
   sourceHash: string;
   targetLanguage: string;
@@ -267,7 +268,7 @@ export function createCodexTranslationService(deps: CodexTranslationServiceDeps)
     return queued;
   }
 
-  async function dispatchNext(repoRoot: string, taskSlug: string): Promise<void> {
+  async function dispatchNext(repoRoot: string): Promise<void> {
     if (!deps.runtime || !deps.sessionService) {
       return;
     }
@@ -297,7 +298,7 @@ export function createCodexTranslationService(deps: CodexTranslationServiceDeps)
         queue.updatedAt = next.updatedAt;
         await saveQueue(repoRoot, queue);
       }
-      const session = await ensureTranslatorSession(repoRoot, taskSlug, next.targetLanguage);
+      const session = await ensureTranslatorSession(repoRoot, next.targetLanguage);
       await submitTerminalInput(deps.runtime, session.id, batch?.prompt ?? await buildQueuePrompt(repoRoot, next));
       const dispatchedAt = now();
       for (const item of batch?.items ?? [next]) {
@@ -350,7 +351,7 @@ export function createCodexTranslationService(deps: CodexTranslationServiceDeps)
     return { items: candidates, prompt };
   }
 
-  async function ensureTranslatorSession(repoRoot: string, taskSlug: string, targetLanguage: string) {
+  async function ensureTranslatorSession(repoRoot: string, targetLanguage: string) {
     void targetLanguage;
     if (!deps.sessionService) {
       throw new VcmError({
@@ -359,17 +360,7 @@ export function createCodexTranslationService(deps: CodexTranslationServiceDeps)
         statusCode: 500
       });
     }
-    const existing = await deps.sessionService.getRoleSession(repoRoot, taskSlug, CODEX_TRANSLATOR_ROLE);
-    if (existing?.status === "running") {
-      return existing;
-    }
-    if (existing?.claudeSessionId) {
-      return deps.sessionService.resumeRoleSession(repoRoot, taskSlug, CODEX_TRANSLATOR_ROLE, {
-        model: existing.model,
-        effort: existing.effort
-      });
-    }
-    return deps.sessionService.startRoleSession(repoRoot, taskSlug, CODEX_TRANSLATOR_ROLE, {
+    return deps.sessionService.ensureProjectTranslatorSession(repoRoot, {
       model: "gpt-5.5",
       effort: "medium"
     });
@@ -1071,9 +1062,7 @@ export function createCodexTranslationService(deps: CodexTranslationServiceDeps)
         isActiveFileTranslationJobStatus(job.status)
       );
       if (activeExisting) {
-        if (input.taskSlug) {
-          void dispatchNext(repoRoot, input.taskSlug);
-        }
+        void dispatchNext(repoRoot);
         return activeExisting;
       }
 
@@ -1174,9 +1163,7 @@ export function createCodexTranslationService(deps: CodexTranslationServiceDeps)
         lastUpdatedAt: timestamp
       });
       await deps.fs.writeText(resolveRepoPath(repoRoot, job.reportPath), `# Translation Report\n\nStatus: queued\nJob: ${jobId}\n`);
-      if (input.taskSlug) {
-        void dispatchNext(repoRoot, input.taskSlug);
-      }
+      void dispatchNext(repoRoot);
       return job;
     },
 
@@ -1235,9 +1222,7 @@ export function createCodexTranslationService(deps: CodexTranslationServiceDeps)
       index.runs = [run, ...index.runs];
       index.updatedAt = timestamp;
       await saveBootstrapIndex(repoRoot, index);
-      if (input.taskSlug) {
-        void dispatchNext(repoRoot, input.taskSlug);
-      }
+      void dispatchNext(repoRoot);
       return run;
     },
 
@@ -1294,9 +1279,7 @@ export function createCodexTranslationService(deps: CodexTranslationServiceDeps)
           "Delete or merge stale, duplicate, temporary, and task-local content."
         ]
       });
-      if (input.taskSlug) {
-        void dispatchNext(repoRoot, input.taskSlug);
-      }
+      void dispatchNext(repoRoot);
       return queueItem;
     },
 
@@ -1332,14 +1315,12 @@ export function createCodexTranslationService(deps: CodexTranslationServiceDeps)
         });
       }
       const timestamp = now();
-      const jobId = `conversation-${safeId(input.role)}-${Date.now()}-${createId().slice(0, 8)}`;
-      const jobRoot = `${CONVERSATION_RUNTIME_DIR}/${safeId(input.taskSlug)}/${safeId(input.role)}/jobs/${jobId}`;
+      const jobId = `conversation-${Date.now()}-${createId().slice(0, 8)}`;
+      const jobRoot = `${CONVERSATION_RUNTIME_DIR}/jobs/${jobId}`;
       const sourceHash = `sha256:${sha256(sourceText)}`;
       const targetLanguage = input.targetLanguage.trim() || "zh-CN";
       const job: CodexConversationTranslationJob = {
         id: jobId,
-        taskSlug: input.taskSlug,
-        role: input.role,
         direction: input.direction,
         sourceHash,
         sourceLanguage: input.sourceLanguage.trim() || "auto",
@@ -1363,15 +1344,10 @@ export function createCodexTranslationService(deps: CodexTranslationServiceDeps)
         version: 1,
         baseRepoRoot: repoRoot,
         pathBase: "baseRepoRoot",
-        job,
-        taskSlug: input.taskSlug,
-        role: input.role,
         direction: input.direction,
-        sourceHash,
         sourceLanguage: job.sourceLanguage,
         targetLanguage,
         translationProfile: input.translationProfile?.trim() || DEFAULT_PROFILE,
-        contextText: input.contextText,
         sourceContentBoundary: "VCM_TEXT",
         sourceText,
         absolutePaths: {
@@ -1384,8 +1360,8 @@ export function createCodexTranslationService(deps: CodexTranslationServiceDeps)
           format: "plain-text"
         }
       });
-      if (input.taskSlug && !input.deferDispatch) {
-        void dispatchNext(repoRoot, input.taskSlug);
+      if (!input.deferDispatch) {
+        void dispatchNext(repoRoot);
       }
       return job;
     },
@@ -1472,6 +1448,7 @@ export function createCodexTranslationService(deps: CodexTranslationServiceDeps)
     },
 
     async handleCodexHook(repoRoot, eventName, taskSlug) {
+      void taskSlug;
       if (eventName === "UserPromptSubmit") {
         const queue = await loadQueue(repoRoot);
         const active = queue.activeItemId
@@ -1489,10 +1466,12 @@ export function createCodexTranslationService(deps: CodexTranslationServiceDeps)
 
       if (eventName === "Stop") {
         await validateActiveQueueItem(repoRoot);
-        if (taskSlug) {
-          await dispatchNext(repoRoot, taskSlug);
-        }
+        await dispatchNext(repoRoot);
       }
+    },
+
+    ensureTranslatorSession(repoRoot) {
+      return ensureTranslatorSession(repoRoot, "zh-CN");
     }
   };
 }

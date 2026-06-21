@@ -69,13 +69,14 @@ describe("codex-translation-service", () => {
   it("cleans translation runtime state without removing durable translations or memory", async () => {
     tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-codex-translation-startup-clean-"));
     await mkdir(path.join(tmpRepo, ".ai/vcm/translations/runtime/files/jobs/job-1/chunks"), { recursive: true });
-    await mkdir(path.join(tmpRepo, ".ai/vcm/translations/runtime/conversations/demo-task/coder/jobs/job-2"), { recursive: true });
+    await mkdir(path.join(tmpRepo, ".ai/vcm/translations/runtime/conversations/jobs/job-2"), { recursive: true });
     await mkdir(path.join(tmpRepo, ".ai/vcm/translations/runtime/bootstrap/runs/run-1"), { recursive: true });
     await mkdir(path.join(tmpRepo, ".ai/vcm/translations/runtime/memory-updates/run-2"), { recursive: true });
     await mkdir(path.join(tmpRepo, ".ai/vcm/translations/files/completed"), { recursive: true });
     await mkdir(path.join(tmpRepo, ".ai/vcm/translations/memory"), { recursive: true });
     await writeFile(path.join(tmpRepo, ".ai/vcm/translations/runtime/queue.json"), "{}\n", "utf8");
     await writeFile(path.join(tmpRepo, ".ai/vcm/translations/runtime/files/jobs/job-1/request.json"), "{}\n", "utf8");
+    await writeFile(path.join(tmpRepo, ".ai/vcm/translations/session.json"), "{}\n", "utf8");
     await writeFile(path.join(tmpRepo, ".ai/vcm/translations/files/completed/readme-zh-cn-default.md"), "# 译文\n", "utf8");
     await writeFile(path.join(tmpRepo, ".ai/vcm/translations/files/index.json"), `${JSON.stringify({
       version: 1,
@@ -104,6 +105,7 @@ describe("codex-translation-service", () => {
     const bootstrapIndex = await fs.readJson<{ runs: Array<{ id: string }> }>(path.join(tmpRepo, ".ai/vcm/translations/bootstrap/index.json"));
 
     await expect(fs.pathExists(path.join(tmpRepo, ".ai/vcm/translations/runtime"))).resolves.toBe(false);
+    await expect(fs.pathExists(path.join(tmpRepo, ".ai/vcm/translations/session.json"))).resolves.toBe(true);
     await expect(fs.pathExists(path.join(tmpRepo, ".ai/vcm/translations/files/completed/readme-zh-cn-default.md"))).resolves.toBe(true);
     await expect(fs.pathExists(path.join(tmpRepo, ".ai/vcm/translations/files/index.json"))).resolves.toBe(true);
     await expect(fs.pathExists(path.join(tmpRepo, ".ai/vcm/translations/memory/glossary.md"))).resolves.toBe(true);
@@ -250,11 +252,10 @@ describe("codex-translation-service", () => {
     tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-codex-conversation-"));
     const fs = createNodeFileSystemAdapter();
     const service = createCodexTranslationService({ fs });
-    const resultPath = ".ai/vcm/translations/runtime/conversations/demo-task/codex-translator/results/result.txt";
+    const resultPath = ".ai/vcm/translations/runtime/conversations/jobs/result/result.txt";
     await fs.writeText(path.join(tmpRepo, resultPath), "你好");
 
     const result = await service.validateConversationResult(tmpRepo, {
-      taskSlug: "demo-task",
       resultPath,
       sourceHash: "sha256:abc",
       targetLanguage: "zh-CN"
@@ -271,23 +272,35 @@ describe("codex-translation-service", () => {
     const service = createCodexTranslationService({ fs });
 
     const job = await service.createConversationJob(tmpRepo, {
-      taskSlug: "demo-task",
-      role: "coder",
       direction: "user-input-to-english",
       sourceText: "请检查失败的测试。",
       sourceLanguage: "auto",
       targetLanguage: "en"
     });
-    const request = await fs.readJson<{ baseRepoRoot: string; outputContract: { resultPath: string; absoluteResultPath: string }; sourceText: string }>(
+    const request = await fs.readJson<{
+      baseRepoRoot: string;
+      outputContract: { resultPath: string; absoluteResultPath: string };
+      sourceText: string;
+      taskSlug?: string;
+      role?: string;
+      job?: unknown;
+      contextText?: string;
+      sourceHash?: string;
+    }>(
       path.join(tmpRepo, job.requestPath)
     );
     const state = await service.getState(tmpRepo);
 
-    expect(job.resultPath).toContain(".ai/vcm/translations/runtime/conversations/demo-task/coder/jobs/");
+    expect(job.resultPath).toContain(".ai/vcm/translations/runtime/conversations/jobs/");
     expect(request.baseRepoRoot).toBe(tmpRepo);
     expect(request.outputContract.resultPath).toBe(job.resultPath);
     expect(request.outputContract.absoluteResultPath).toBe(path.join(tmpRepo, job.resultPath));
     expect(request.sourceText).toBe("请检查失败的测试。");
+    expect(request.taskSlug).toBeUndefined();
+    expect(request.role).toBeUndefined();
+    expect(request.job).toBeUndefined();
+    expect(request.contextText).toBeUndefined();
+    expect(request.sourceHash).toBeUndefined();
     expect(job.resultPath).toMatch(/result\.txt$/);
     expect(job.reportPath).toBeUndefined();
     expect(state.queue.items[0]).toMatchObject({
@@ -310,8 +323,6 @@ describe("codex-translation-service", () => {
     });
 
     const job = await service.createConversationJob(tmpRepo, {
-      taskSlug: "demo-task",
-      role: "coder",
       direction: "user-input-to-english",
       sourceText: "请检查失败的测试。",
       sourceLanguage: "auto",
@@ -344,8 +355,6 @@ describe("codex-translation-service", () => {
     });
 
     const first = await service.createConversationJob(tmpRepo, {
-      taskSlug: "demo-task",
-      role: "coder",
       direction: "cc-output-to-user",
       sourceText: "First output.",
       sourceLanguage: "en",
@@ -353,8 +362,6 @@ describe("codex-translation-service", () => {
       deferDispatch: true
     });
     const second = await service.createConversationJob(tmpRepo, {
-      taskSlug: "demo-task",
-      role: "coder",
       direction: "cc-output-to-user",
       sourceText: "Second output.",
       sourceLanguage: "en",
@@ -385,13 +392,11 @@ describe("codex-translation-service", () => {
     await service.handleCodexHook(tmpRepo, "Stop", "demo-task");
 
     await expect(service.validateConversationResult(tmpRepo, {
-      taskSlug: "demo-task",
       resultPath: first.resultPath,
       sourceHash: first.sourceHash,
       targetLanguage: "zh-CN"
     })).resolves.toMatchObject({ translatedText: "第一段译文" });
     await expect(service.validateConversationResult(tmpRepo, {
-      taskSlug: "demo-task",
       resultPath: second.resultPath,
       sourceHash: second.sourceHash,
       targetLanguage: "zh-CN"
@@ -637,7 +642,7 @@ function createRuntimeStub(writes: string[]): TerminalRuntime {
       return sessionId === "translator-session"
         ? {
             id: "translator-session",
-            taskSlug: "demo-task",
+            taskSlug: "__project__",
             role: "codex-translator",
             status: "running",
             startedAt: "2026-06-20T00:00:00.000Z",
@@ -712,12 +717,12 @@ function createBootstrapRunRecord(id: string, status: string) {
   };
 }
 
-function createTranslatorSessionService(starts: string[]): Pick<SessionService, "getRoleSession" | "resumeRoleSession" | "startRoleSession"> {
+function createTranslatorSessionService(starts: string[]): Pick<SessionService, "ensureProjectTranslatorSession"> {
   let session: RoleSessionRecord | undefined;
   const createSession = (): RoleSessionRecord => ({
     id: "translator-session",
     claudeSessionId: "codex-translator-session",
-    taskSlug: "demo-task",
+    taskSlug: "__project__",
     role: "codex-translator",
     status: "running",
     activityStatus: "running",
@@ -730,19 +735,10 @@ function createTranslatorSessionService(starts: string[]): Pick<SessionService, 
     updatedAt: "2026-06-20T00:00:00.000Z"
   });
   return {
-    async getRoleSession() {
-      return session;
-    },
-    async resumeRoleSession(_repoRoot, _taskSlug, _role, input = {}) {
-      starts.push(`resume:codex-translator:${input.model ?? "default"}:${input.effort ?? "default"}`);
-      session = {
-        ...createSession(),
-        model: input.model ?? "gpt-5.5",
-        effort: input.effort ?? "medium"
-      };
-      return session;
-    },
-    async startRoleSession(_repoRoot, _taskSlug, _role, input = {}) {
+    async ensureProjectTranslatorSession(_repoRoot, input = {}) {
+      if (session) {
+        return session;
+      }
       starts.push(`start:codex-translator:${input.model ?? "default"}:${input.effort ?? "default"}`);
       session = {
         ...createSession(),

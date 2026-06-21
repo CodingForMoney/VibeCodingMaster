@@ -22,6 +22,7 @@ import { CODEX_REVIEW_GATES, type CodexReviewGate, type CodexReviewIndex } from 
 import type { VcmOrchestrationState, VcmRoleMessage } from "../../shared/types/message.js";
 import type { ProjectSummary } from "../../shared/types/project.js";
 import type { VcmSessionRoundState } from "../../shared/types/round.js";
+import type { RoleSessionRecord } from "../../shared/types/session.js";
 import type { TaskRecord } from "../../shared/types/task.js";
 import { EventLog } from "../components/event-log.js";
 import { HarnessPanel } from "../components/harness-panel.js";
@@ -54,6 +55,7 @@ export interface ProjectDashboardProps {
   translationAutoSendEnabled: boolean;
   translationTargetLanguage: TranslationTargetLanguage;
   translationOutputMode: TranslationOutputMode;
+  translatorSession: RoleSessionRecord | null;
   harnessStatus: HarnessStatusReport | null;
   harnessBootstrapStatus: HarnessBootstrapStatusReport | null;
   harnessApplyResult?: HarnessApplyResult | null;
@@ -78,6 +80,7 @@ export interface ProjectDashboardProps {
   onTranslationTargetLanguageChange(targetLanguage: TranslationTargetLanguage): void;
   onTranslationOutputModeChange(outputMode: TranslationOutputMode): void;
   onOpenFileTranslation(): void;
+  onOpenTranslatorSession(): void;
   onCreateTranslationBootstrap(): void;
   onUpdateTranslationMemory(): void;
   onCreateTask(input: { taskSlug: string; createWorktree?: boolean; title?: string }): Promise<void>;
@@ -112,6 +115,7 @@ export function ProjectDashboard({
   translationAutoSendEnabled,
   translationTargetLanguage,
   translationOutputMode,
+  translatorSession,
   harnessStatus,
   harnessBootstrapStatus,
   harnessApplyResult,
@@ -136,6 +140,7 @@ export function ProjectDashboard({
   onTranslationTargetLanguageChange,
   onTranslationOutputModeChange,
   onOpenFileTranslation,
+  onOpenTranslatorSession,
   onCreateTranslationBootstrap,
   onUpdateTranslationMemory,
   onCreateTask,
@@ -327,7 +332,8 @@ export function ProjectDashboard({
           autoSendEnabled={translationAutoSendEnabled}
           targetLanguage={translationTargetLanguage}
           outputMode={translationOutputMode}
-          fileTranslationAvailable={Boolean(project && activeTaskSlug)}
+          fileTranslationAvailable={Boolean(project)}
+          translatorSession={translatorSession}
           onAutoSendChange={onTranslationAutoSendChange}
           onCreateBootstrap={onCreateTranslationBootstrap}
           onEnabledChange={onTranslationEnabledChange}
@@ -335,6 +341,7 @@ export function ProjectDashboard({
           onTargetLanguageChange={onTranslationTargetLanguageChange}
           onOutputModeChange={onTranslationOutputModeChange}
           onOpenFileTranslation={onOpenFileTranslation}
+          onOpenTranslatorSession={onOpenTranslatorSession}
         />
       </SidebarSection>
 
@@ -495,13 +502,15 @@ function TranslationControlsPanel({
   fileTranslationAvailable,
   outputMode,
   targetLanguage,
+  translatorSession,
   onAutoSendChange,
   onCreateBootstrap,
   onEnabledChange,
   onUpdateMemory,
   onOutputModeChange,
   onTargetLanguageChange,
-  onOpenFileTranslation
+  onOpenFileTranslation,
+  onOpenTranslatorSession
 }: {
   autoSendEnabled: boolean;
   busy?: boolean;
@@ -509,6 +518,7 @@ function TranslationControlsPanel({
   fileTranslationAvailable: boolean;
   outputMode: TranslationOutputMode;
   targetLanguage: TranslationTargetLanguage;
+  translatorSession: RoleSessionRecord | null;
   onAutoSendChange(enabled: boolean): void;
   onCreateBootstrap(): void;
   onEnabledChange(enabled: boolean): void;
@@ -516,6 +526,7 @@ function TranslationControlsPanel({
   onOutputModeChange(outputMode: TranslationOutputMode): void;
   onTargetLanguageChange(targetLanguage: TranslationTargetLanguage): void;
   onOpenFileTranslation(): void;
+  onOpenTranslatorSession(): void;
 }) {
   return (
     <div className="sidebar-settings">
@@ -554,7 +565,7 @@ function TranslationControlsPanel({
         </select>
       </label>
       <label className="settings-select-row">
-        <span>Output</span>
+        <span>Reply scope</span>
         <select
           value={outputMode}
           disabled={busy}
@@ -570,7 +581,7 @@ function TranslationControlsPanel({
       <button
         className="settings-toggle"
         disabled={busy || !fileTranslationAvailable}
-        title={fileTranslationAvailable ? "Open file translation" : "Create or select a task first"}
+        title={fileTranslationAvailable ? "Open file translation" : "Connect a repository first"}
         type="button"
         onClick={onOpenFileTranslation}
       >
@@ -580,7 +591,7 @@ function TranslationControlsPanel({
       <button
         className="settings-toggle"
         disabled={busy || !fileTranslationAvailable}
-        title={fileTranslationAvailable ? "Run translation bootstrap" : "Create or select a task first"}
+        title={fileTranslationAvailable ? "Run translation bootstrap" : "Connect a repository first"}
         type="button"
         onClick={onCreateBootstrap}
       >
@@ -590,15 +601,39 @@ function TranslationControlsPanel({
       <button
         className="settings-toggle"
         disabled={busy || !fileTranslationAvailable}
-        title={fileTranslationAvailable ? "Compact and update translation memory" : "Create or select a task first"}
+        title={fileTranslationAvailable ? "Compact and update translation memory" : "Connect a repository first"}
         type="button"
         onClick={onUpdateMemory}
       >
         <span>Update memory</span>
         <span>run</span>
       </button>
+      <div className="settings-status-row">
+        <span>Session status</span>
+        <strong>{getTranslatorSessionStatus(translatorSession)}</strong>
+      </div>
+      <button
+        className="settings-toggle"
+        disabled={busy || !fileTranslationAvailable}
+        title={fileTranslationAvailable ? "Open Codex Translator session" : "Connect a repository first"}
+        type="button"
+        onClick={onOpenTranslatorSession}
+      >
+        <span>Open Session</span>
+        <span>open</span>
+      </button>
     </div>
   );
+}
+
+function getTranslatorSessionStatus(session: RoleSessionRecord | null): string {
+  if (!session) {
+    return "not started";
+  }
+  if (session.status === "running") {
+    return session.activityStatus ?? "idle";
+  }
+  return session.status;
 }
 
 function CodexReviewGateSettings({
@@ -813,17 +848,14 @@ function SessionStatusDock({
   task: TaskRecord;
 }) {
   const [nowMs, setNowMs] = useState(() => Date.now());
-  const showCurrentRound = Boolean(
-    roundState?.startedAt &&
-    roundState.status === "running"
-  );
+  const showRound = Boolean(roundState?.startedAt);
   const sessionElapsedMs = getElapsedMs(task.createdAt, nowMs);
   const totalCcActiveMs = getLiveCcActiveMs(roundState, roundState?.totalCcActiveMs ?? 0, nowMs);
-  const currentRoundCcActiveMs = showCurrentRound && roundState
+  const currentRoundCcActiveMs = showRound && roundState
     ? getLiveCcActiveMs(roundState, roundState.currentRoundCcActiveMs, nowMs)
     : 0;
-  const currentRoundElapsedMs = showCurrentRound && roundState?.startedAt
-    ? getElapsedMs(roundState.startedAt, nowMs)
+  const currentRoundElapsedMs = showRound && roundState
+    ? getRoundElapsedMs(roundState, nowMs)
     : 0;
   const sessionTitle = task.title?.trim() || task.taskSlug;
 
@@ -858,10 +890,10 @@ function SessionStatusDock({
         </div>
       </dl>
 
-      {showCurrentRound && roundState ? (
+      {showRound && roundState ? (
         <div className="current-round-status">
           <div className="current-round-title">
-            <span>Current Round</span>
+            <span>{roundState.status === "running" ? "Current Round" : "Last Round"}</span>
             <span className={`status-badge status-${roundState.status}`}>{roundState.status}</span>
           </div>
           <dl className="task-status-stats">
@@ -901,6 +933,13 @@ function getLiveCcActiveMs(
     return baseMs;
   }
   return baseMs + Math.max(0, nowMs - updatedAtMs);
+}
+
+function getRoundElapsedMs(roundState: VcmSessionRoundState, nowMs: number): number {
+  const endMs = roundState.status === "running"
+    ? nowMs
+    : Date.parse(roundState.stoppedAt ?? roundState.lastTurnEndedAt ?? "");
+  return getElapsedMs(roundState.startedAt ?? "", Number.isFinite(endMs) ? endMs : nowMs);
 }
 
 function getElapsedMs(startedAt: string, nowMs: number): number {

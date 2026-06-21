@@ -343,6 +343,8 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
 
   function startTranscriptTail(roleSession: RoleSessionRecord): void {
     const state = getState(roleSession.id);
+    state.taskSlug = roleSession.taskSlug;
+    state.role = roleSession.role;
     if (state.unsubscribeTranscript) {
       return;
     }
@@ -373,7 +375,7 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
 
     let displayed = false;
     if (event.kind === "text") {
-      const shouldTranslate = config.outputMode === "all" || event.stopReason === "end_turn";
+      const shouldTranslate = shouldTranslateTextTranscriptEvent(state, event, config);
       displayed = shouldTranslate
         ? processClaudeOutputText(sessionId, event.text, config, event.id, {
           flushImmediately: event.stopReason === "end_turn"
@@ -394,6 +396,23 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
     if (displayed) {
       state.seenTranscriptIds.add(event.id);
     }
+  }
+
+  function shouldTranslateTextTranscriptEvent(
+    state: SessionState,
+    event: Extract<ClaudeTranscriptEvent, { kind: "text" }>,
+    config: TranslationRuntimeConfig
+  ): boolean {
+    if (config.outputMode === "all") {
+      return true;
+    }
+    if (event.stopReason !== "end_turn") {
+      return false;
+    }
+    if (config.outputMode === "pm-final-only") {
+      return state.role === "project-manager";
+    }
+    return true;
   }
 
   function processClaudeOutputText(
@@ -1199,8 +1218,6 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
     }
 
     return deps.codexTranslationService.createConversationJob(input.repoRoot, {
-      taskSlug: input.taskSlug,
-      role: input.role,
       direction: input.direction,
       sourceText: input.text,
       sourceLanguage: input.sourceLanguage,
@@ -1235,7 +1252,6 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
       }
       try {
         return await deps.codexTranslationService!.validateConversationResult(repoRoot, {
-          taskSlug: job.taskSlug,
           resultPath: job.resultPath,
           sourceHash: job.sourceHash,
           targetLanguage: job.targetLanguage

@@ -296,8 +296,6 @@ export interface CreateCodexMemoryUpdateRequest {
 
 export interface CodexConversationTranslationJob {
   id: string;
-  taskSlug: string;
-  role: RoleName;
   direction: TranslationDirection;
   sourceHash: string;
   sourceLanguage: string;
@@ -311,8 +309,6 @@ export interface CodexConversationTranslationJob {
 }
 
 export interface CreateCodexConversationTranslationRequest {
-  taskSlug: string;
-  role: RoleName;
   direction: TranslationDirection;
   sourceText: string;
   sourceLanguage: string;

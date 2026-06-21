@@ -694,6 +694,25 @@ h2 {
   color: #202326;
 }
 
+.settings-status-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+  min-height: 30px;
+  border: 1px solid #d4cec3;
+  border-radius: 6px;
+  background: #fffdf8;
+  padding: 6px 10px;
+  color: #5f6a6c;
+  font-size: 13px;
+}
+
+.settings-status-row strong {
+  color: #202326;
+  font-size: 12px;
+}
+
 .task-status-dock {
   display: grid;
   gap: 10px;
@@ -1034,8 +1053,8 @@ h2 {
 }
 
 .translation-panel {
-  display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  display: flex;
+  flex-direction: column;
   gap: 8px;
   height: 100%;
   min-height: 0;
@@ -1368,6 +1387,7 @@ h2 {
 
 .translation-panel-header {
   display: grid;
+  flex: 0 0 auto;
   gap: 3px;
 }
 
@@ -1426,6 +1446,7 @@ h2 {
 
 .translation-entry-list {
   display: grid;
+  flex: 1 1 auto;
   align-content: start;
   gap: 8px;
   min-height: 0;
@@ -1640,6 +1661,7 @@ h2 {
 
 .translation-composer {
   display: grid;
+  flex: 0 0 auto;
   gap: 6px;
   border-top: 1px solid #292d31;
   padding-top: 8px;
@@ -1703,6 +1725,7 @@ h2 {
 }
 
 .translation-panel .error-banner {
+  flex: 0 0 auto;
   border-color: #da7b72;
   background: #2d1518;
   color: #ffdcd7;
@@ -1716,6 +1739,52 @@ h2 {
   place-items: center;
   background: rgba(24, 28, 31, 0.38);
   padding: 18px;
+}
+
+.translator-session-backdrop {
+  background: rgba(1, 4, 9, 0.72);
+}
+
+.translator-session-modal {
+  display: grid;
+  grid-template-rows: auto auto minmax(0, 1fr);
+  gap: 10px;
+  width: 95vw;
+  height: 92vh;
+  min-width: 0;
+  min-height: 0;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  background: #0d1117;
+  color: #d6deeb;
+  padding: 10px;
+}
+
+.translator-session-header {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.translator-session-header h2,
+.translator-session-header p {
+  margin-bottom: 0;
+}
+
+.translator-session-header p {
+  color: #8b949e;
+  font-family: Menlo, Monaco, Consolas, monospace;
+  font-size: 12px;
+}
+
+.translator-session-terminal {
+  min-width: 0;
+  min-height: 0;
+  border-radius: 6px;
+  overflow: hidden;
+  background: #111316;
 }
 
 .gateway-qr-modal {

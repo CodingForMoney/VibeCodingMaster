@@ -260,6 +260,38 @@ export const apiClient = {
   getCodexTranslationState() {
     return request<CodexTranslationState>("/api/translation/codex/state");
   },
+  getCodexTranslatorSession() {
+    return request<RoleSessionRecord | null>("/api/translation/codex/session");
+  },
+  ensureCodexTranslatorSession(input: StartRoleSessionRequest = {}) {
+    return request<RoleSessionRecord>("/api/translation/codex/session/ensure", {
+      method: "POST",
+      body: JSON.stringify(input)
+    });
+  },
+  startCodexTranslatorSession(input: StartRoleSessionRequest = {}) {
+    return request<RoleSessionRecord>("/api/translation/codex/session/start", {
+      method: "POST",
+      body: JSON.stringify(input)
+    });
+  },
+  resumeCodexTranslatorSession(input: StartRoleSessionRequest = {}) {
+    return request<RoleSessionRecord>("/api/translation/codex/session/resume", {
+      method: "POST",
+      body: JSON.stringify(input)
+    });
+  },
+  restartCodexTranslatorSession(input: StartRoleSessionRequest = {}) {
+    return request<RoleSessionRecord>("/api/translation/codex/session/restart", {
+      method: "POST",
+      body: JSON.stringify(input)
+    });
+  },
+  stopCodexTranslatorSession() {
+    return request<RoleSessionRecord>("/api/translation/codex/session/stop", {
+      method: "POST"
+    });
+  },
   browseCodexTranslationSourceFiles(input: { path?: string; query?: string; limit?: number } = {}) {
     const params = new URLSearchParams();
     if (input.path) {

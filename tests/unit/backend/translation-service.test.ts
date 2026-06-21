@@ -525,13 +525,13 @@ describe("translation-service", () => {
     expect(codexCalls).toEqual([
       expect.objectContaining({
         repoRoot: "/repo",
-        taskSlug: "demo-task",
-        role: "coder",
         direction: "user-input-to-english",
         sourceText: "请检查失败的测试。",
         targetLanguage: "en"
       })
     ]);
+    expect(codexCalls[0]).not.toHaveProperty("taskSlug");
+    expect(codexCalls[0]).not.toHaveProperty("role");
   });
 
   it("sends translated input by pasting first and pressing enter separately", async () => {
@@ -609,6 +609,78 @@ describe("translation-service", () => {
         sourceKind: "prose",
         sourceText: "I will inspect the test logs first.",
         translatedText: "I will inspect the test logs first.",
+        status: "preserved"
+      })
+    }));
+  });
+
+  it("translates only project-manager end-turn text in PM final reply mode", async () => {
+    const fs = createMemoryFs();
+    const appSettings = createAppSettingsService({
+      fs,
+      settingsPath: "/settings.json",
+    });
+    await appSettings.updatePreferences({ translationOutputMode: "pm-final-only" });
+    const coderSession = createRoleSessionRecord({
+      id: "session-coder",
+      role: "coder",
+      command: "claude --agent coder"
+    });
+    const pmSession = createRoleSessionRecord({
+      id: "session-pm",
+      role: "project-manager",
+      command: "claude --agent project-manager"
+    });
+    const runtime = createRuntimeStub([coderSession, pmSession]);
+    const transcripts = createSessionTranscriptStub();
+    const codexCalls: Array<{ role: string; sourceText: string }> = [];
+    const service = createTranslationService({
+      appSettings,
+      codexTranslationService: createCodexTranslationServiceStub(codexCalls, "PM 译文。"),
+      runtime,
+      sessionRegistry: createRegistryStub([coderSession, pmSession]),
+      transcripts,
+      sessionService: {} as SessionService
+    });
+
+    const coderMessages: TranslationWsMessage[] = [];
+    const pmMessages: TranslationWsMessage[] = [];
+    service.subscribeToSession(coderSession.id, (message) => coderMessages.push(message));
+    service.subscribeToSession(pmSession.id, (message) => pmMessages.push(message));
+
+    transcripts.emit(coderSession.id, {
+      kind: "text",
+      id: "coder-final",
+      timestamp: "2026-05-30T00:00:00.000Z",
+      stopReason: "end_turn",
+      text: "Coder final reply."
+    });
+    transcripts.emit(pmSession.id, {
+      kind: "text",
+      id: "pm-final",
+      timestamp: "2026-05-30T00:00:01.000Z",
+      stopReason: "end_turn",
+      text: "PM final reply."
+    });
+
+    await waitFor(() => pmMessages.some((message) =>
+      message.type === "translation-entry"
+      && message.entry.id === "pm-final"
+      && message.entry.status === "translated"
+    ));
+
+    expect(codexCalls).toHaveLength(1);
+    expect(codexCalls[0]).toMatchObject({
+      sourceText: "PM final reply."
+    });
+    expect(codexCalls[0]).not.toHaveProperty("taskSlug");
+    expect(codexCalls[0]).not.toHaveProperty("role");
+    expect(coderMessages).toContainEqual(expect.objectContaining({
+      type: "translation-entry",
+      entry: expect.objectContaining({
+        id: "coder-final",
+        sourceText: "Coder final reply.",
+        translatedText: "Coder final reply.",
         status: "preserved"
       })
     }));
@@ -1115,14 +1187,12 @@ function createCodexTranslationServiceStub(calls: unknown[], translatedText: str
       calls.push({ repoRoot, ...input, sourceHash: job.sourceHash });
       return {
         id: job.id,
-        taskSlug: input.taskSlug,
-        role: input.role,
         direction: input.direction,
         sourceHash: job.sourceHash,
         sourceLanguage: input.sourceLanguage,
         targetLanguage: input.targetLanguage,
-        requestPath: `.ai/vcm/translations/runtime/conversations/demo-task/coder/jobs/${job.id}/request.json`,
-        resultPath: `.ai/vcm/translations/runtime/conversations/demo-task/coder/jobs/${job.id}/result.txt`,
+        requestPath: `.ai/vcm/translations/runtime/conversations/jobs/${job.id}/request.json`,
+        resultPath: `.ai/vcm/translations/runtime/conversations/jobs/${job.id}/result.txt`,
         queueItemId: job.queueItemId,
         createdAt: timestamp,
         updatedAt: timestamp
@@ -1151,8 +1221,8 @@ function createCodexTranslationServiceStub(calls: unknown[], translatedText: str
             type: "conversation",
             status: "completed",
             targetLanguage: job.targetLanguage,
-            requestPath: `.ai/vcm/translations/runtime/conversations/demo-task/coder/jobs/${job.id}/request.json`,
-            expectedResultPath: `.ai/vcm/translations/runtime/conversations/demo-task/coder/jobs/${job.id}/result.txt`,
+            requestPath: `.ai/vcm/translations/runtime/conversations/jobs/${job.id}/request.json`,
+            expectedResultPath: `.ai/vcm/translations/runtime/conversations/jobs/${job.id}/result.txt`,
             createdAt: timestamp,
             updatedAt: timestamp
           }))

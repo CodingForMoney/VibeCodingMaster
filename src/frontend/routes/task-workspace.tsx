@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { CODEX_REVIEWER_ROLE_DEFINITION, CODEX_TRANSLATOR_ROLE_DEFINITION, VCM_ROLE_DEFINITIONS, isCodexRoleName } from "../../shared/constants.js";
+import { CODEX_REVIEWER_ROLE_DEFINITION, VCM_ROLE_DEFINITIONS, isCodexRoleName } from "../../shared/constants.js";
 import type { TaskStatusReport } from "../../shared/types/api.js";
 import type { VcmOrchestrationMode, VcmOrchestrationState, VcmRoleMessage } from "../../shared/types/message.js";
 import type { RoleDefinition, RoleName, VcmRoleName } from "../../shared/types/role.js";
@@ -92,18 +92,14 @@ export function TaskWorkspace({
   const [events, setEvents] = useState<string[]>([]);
   const [orchestration, setOrchestration] = useState<VcmOrchestrationState | null>(null);
   const messageSnapshotRef = useRef<{ taskSlug: string; messages: VcmRoleMessage[] } | null>(null);
+  const taskStatusSyncKeyRef = useRef("");
   const hasCodexReviewerSession = Boolean(
     statusReport?.sessions.some((session) => session.role === "codex-reviewer")
   );
-  const hasCodexTranslatorSession = Boolean(
-    statusReport?.sessions.some((session) => session.role === "codex-translator")
-  );
   const codexReviewerVisible = codexReviewerEnabled || hasCodexReviewerSession;
-  const codexTranslatorVisible = translationEnabled || hasCodexTranslatorSession;
   const visibleRoleDefinitions: readonly RoleDefinition[] = [
     ...VCM_ROLE_DEFINITIONS,
-    ...(codexReviewerVisible ? [CODEX_REVIEWER_ROLE_DEFINITION] : []),
-    ...(codexTranslatorVisible ? [CODEX_TRANSLATOR_ROLE_DEFINITION] : [])
+    ...(codexReviewerVisible ? [CODEX_REVIEWER_ROLE_DEFINITION] : [])
   ];
 
   const applyMessageState = useCallback((nextMessages: VcmRoleMessage[], nextOrchestration: VcmOrchestrationState) => {
@@ -154,10 +150,32 @@ export function TaskWorkspace({
     if (statusReport && !codexReviewerVisible && activeRole === "codex-reviewer") {
       onActiveRoleChange("project-manager");
     }
-    if (statusReport && !codexTranslatorVisible && activeRole === "codex-translator") {
+    if (statusReport && activeRole === "codex-translator") {
       onActiveRoleChange("project-manager");
     }
-  }, [activeRole, codexReviewerVisible, codexTranslatorVisible, onActiveRoleChange, statusReport]);
+  }, [activeRole, codexReviewerVisible, onActiveRoleChange, statusReport]);
+
+  useEffect(() => {
+    const fetchedTask = statusReport?.task;
+    if (!fetchedTask || fetchedTask.taskSlug !== task.taskSlug) {
+      return;
+    }
+
+    const fetchedKey = taskSyncKey(fetchedTask);
+    if (fetchedKey === taskSyncKey(task)) {
+      taskStatusSyncKeyRef.current = "";
+      return;
+    }
+    if (taskStatusSyncKeyRef.current === fetchedKey) {
+      return;
+    }
+
+    taskStatusSyncKeyRef.current = fetchedKey;
+    void onTaskChanged().catch((caught: Error) => {
+      taskStatusSyncKeyRef.current = "";
+      setError(caught.message);
+    });
+  }, [onTaskChanged, statusReport?.task, task]);
 
   useEffect(() => {
     setPermissionModes((current) => {
@@ -496,4 +514,13 @@ export function TaskWorkspace({
       </div>
     </div>
   );
+}
+
+function taskSyncKey(task: TaskRecord): string {
+  return [
+    task.status,
+    task.updatedAt,
+    task.cleanupStatus ?? "",
+    task.cleanedAt ?? ""
+  ].join(":");
 }
