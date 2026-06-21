@@ -64,7 +64,8 @@ export function HarnessPanel({
             -> No file list, no apply button. "Up to date" indicator +
                "Refresh" button (calls onRefresh).
 
-        Bootstrap stage below and the applyResult/warnings blocks are out of scope.
+        Bootstrap keeps a compact status/action row; verbose check details and
+        fixed-install output are intentionally kept out of the sidebar.
       */}
       <div className="harness-stage">
         <div className="harness-panel-header">
@@ -133,63 +134,37 @@ export function HarnessPanel({
           </div>
         </div>
 
-        {bootstrapStatus ? (
-          <>
-            <ol className="harness-file-list">
-              {bootstrapStatus.checks.map((check) => (
-                <li key={check.key} title={check.detail ?? check.path ?? ""}>
-                  <span>{check.path ? `${check.label}: ${check.path}` : check.label}</span>
-                  <StatusBadge status={check.status} />
-                </li>
-              ))}
-            </ol>
-
-            {bootstrapSession ? (
-              <div className="harness-bootstrap-session">
-                <div>
-                  <span>{bootstrapSession.command}</span>
-                  <StatusBadge status={bootstrapSession.status} />
-                </div>
-                <button
-                  type="button"
-                  onClick={() => setShowBootstrapTerminal(true)}
-                >
-                  Open Terminal
-                </button>
-              </div>
-            ) : null}
-          </>
-        ) : (
-          <p className="muted">Refresh harness status to load bootstrap checks.</p>
-        )}
+        {bootstrapSession ? (
+          <div className="harness-bootstrap-session">
+            <div>
+              <span>{bootstrapSession.command}</span>
+              <StatusBadge status={bootstrapSession.status} />
+            </div>
+            <button
+              type="button"
+              onClick={() => setShowBootstrapTerminal(true)}
+            >
+              Open Terminal
+            </button>
+          </div>
+        ) : null}
       </div>
 
-      {applyResult ? (
+      {applyResult?.changedFiles.length && canCommitAndRebaseTask && !taskSyncResult ? (
         <div className="harness-result">
-          <p>{applyResult.message}</p>
-          {applyResult.changedFiles.length > 0 ? (
-            <>
-              <ul>
-                {applyResult.changedFiles.map((change) => (
-                  <li key={`${change.path}:${change.action}`}>
-                    <strong>{change.action}</strong> {change.path}
-                  </li>
-                ))}
-              </ul>
-              {canCommitAndRebaseTask && !taskSyncResult ? (
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={() => void onCommitAndRebaseTask()}
-                >
-                  Commit &amp; rebase task
-                </button>
-              ) : null}
-            </>
-          ) : null}
-          {taskSyncResult ? (
-            <p className="muted">{taskSyncResult.message}</p>
-          ) : null}
+          <button
+            type="button"
+            disabled={busy}
+            onClick={() => void onCommitAndRebaseTask()}
+          >
+            Commit &amp; rebase task
+          </button>
+        </div>
+      ) : null}
+
+      {taskSyncResult ? (
+        <div className="harness-result">
+          <p className="muted">{taskSyncResult.message}</p>
         </div>
       ) : null}
 

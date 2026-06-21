@@ -129,7 +129,7 @@ describe("HarnessPanel fixed-install three-state UI", () => {
     expect(stateCHtml).toContain('disabled="">Refresh</button>');
   });
 
-  it("shows Commit & rebase task after harness apply when a worktree task is active", () => {
+  it("shows Commit & rebase task without verbose harness apply output", () => {
     const html = renderToStaticMarkup(
       createElement(HarnessPanel, {
         ...baseProps,
@@ -137,13 +137,49 @@ describe("HarnessPanel fixed-install three-state UI", () => {
         applyResult: {
           version: 1,
           changedFiles: [change("CLAUDE.md", "update")],
-          message: "VCM Harness updated."
+          message: "Applied VCM fixed harness install Project: /workspace DONE CLAUDE.md"
         },
         canCommitAndRebaseTask: true
       } as never)
     );
 
-    expect(html).toContain("VCM Harness updated.");
+    expect(html).not.toContain("Applied VCM fixed harness install");
+    expect(html).not.toContain("CLAUDE.md");
     expect(html).toContain("Commit &amp; rebase task</button>");
+  });
+
+  it("does not show bootstrap check details in the sidebar", () => {
+    const html = renderToStaticMarkup(
+      createElement(HarnessPanel, {
+        ...baseProps,
+        status: makeStatus({ initialized: true, needsApply: false }),
+        bootstrapStatus: {
+          version: 1,
+          status: "incomplete",
+          canStart: true,
+          checks: [
+            {
+              key: "project-context",
+              label: "Project context",
+              path: "CLAUDE.md",
+              status: "ok"
+            },
+            {
+              key: "module-index",
+              label: "Module index",
+              path: ".ai/generated/module-index.json",
+              status: "ok"
+            }
+          ],
+          warnings: []
+        }
+      } as never)
+    );
+
+    expect(html).toContain("Bootstrap");
+    expect(html).toContain("incomplete");
+    expect(html).not.toContain("Project context");
+    expect(html).not.toContain("Module index");
+    expect(html).not.toContain(".ai/generated/module-index.json");
   });
 });
