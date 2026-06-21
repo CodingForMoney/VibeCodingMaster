@@ -12,7 +12,7 @@ import type {
   VcmRouteFileDispatchResult
 } from "../../shared/types/message.js";
 import type { RoleName, VcmRoleName } from "../../shared/types/role.js";
-import { VCM_ROLE_NAMES, isVcmRoleName } from "../../shared/constants.js";
+import { CORE_VCM_ROLE_NAMES } from "../../shared/constants.js";
 import { VcmError } from "../errors.js";
 import { resolveRepoPath } from "../adapters/filesystem.js";
 import type { FileSystemAdapter } from "../adapters/filesystem.js";
@@ -405,8 +405,8 @@ async function listRouteFiles(fs: FileSystemAdapter, input: RouteContext): Promi
 }
 
 function parseRouteFileName(fileName: string): { fromRole: VcmRoleName; toRole: VcmRoleName } | undefined {
-  for (const fromRole of VCM_ROLE_NAMES) {
-    for (const toRole of VCM_ROLE_NAMES) {
+  for (const fromRole of CORE_VCM_ROLE_NAMES) {
+    for (const toRole of CORE_VCM_ROLE_NAMES) {
       if (fromRole === toRole) {
         continue;
       }
@@ -507,7 +507,7 @@ function selectDispatchCandidates(routeFiles: VcmRouteFile[], stoppedRole?: Role
 }
 
 function validateMessagePolicy(fromRole: VcmMessageActor, toRole: VcmRoleName, type: VcmMessageType): void {
-  if (!VCM_ROLE_NAMES.includes(toRole)) {
+  if (!CORE_VCM_ROLE_NAMES.some((role) => role === toRole)) {
     throw new VcmError({
       code: "MESSAGE_TARGET_UNKNOWN",
       message: `Unknown target role: ${toRole}`,
@@ -515,7 +515,7 @@ function validateMessagePolicy(fromRole: VcmMessageActor, toRole: VcmRoleName, t
     });
   }
 
-  if (!isVcmRoleName(String(fromRole))) {
+  if (!CORE_VCM_ROLE_NAMES.some((role) => role === fromRole)) {
     throw new VcmError({
       code: "MESSAGE_SENDER_UNKNOWN",
       message: `Unknown sender role: ${fromRole}`,
@@ -583,7 +583,7 @@ async function clearRouteFileIfStillMatchesMessage(
   message: VcmRoleMessage
 ): Promise<void> {
   const fromRole = message.fromRole;
-  if (!message.routePath || !isVcmRoleName(fromRole)) {
+  if (!message.routePath || !isCoreRouteRole(fromRole) || !isCoreRouteRole(message.toRole)) {
     return;
   }
 
@@ -601,6 +601,10 @@ async function clearRouteFileIfStillMatchesMessage(
   ) {
     await fs.writeText(absolutePath, "");
   }
+}
+
+function isCoreRouteRole(role: VcmMessageActor): role is VcmRoleName {
+  return CORE_VCM_ROLE_NAMES.some((candidate) => candidate === role);
 }
 
 function arraysEqual(left: string[], right: string[]): boolean {

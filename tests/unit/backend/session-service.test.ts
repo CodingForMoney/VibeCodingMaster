@@ -151,10 +151,12 @@ describe("createSessionService", () => {
       "bypassPermissions"
     ]);
     expect(runtimeInputs[0]?.env).toMatchObject({
-      VCM_TASK_REPO_ROOT: "/repo",
-      VCM_TASK_SLUG: "__project_gate_reviewer__",
+      VCM_TASK_REPO_ROOT: TASK_WORKTREE,
+      VCM_TASK_SLUG: "demo-task",
       VCM_ROLE: "gate-reviewer"
     });
+    expect(started.activeTaskSlug).toBe("demo-task");
+    expect(started.activeTaskRepoRoot).toBe(TASK_WORKTREE);
     await expect(fs.pathExists("/repo/.ai/vcm/gate-reviewer/session.json")).resolves.toBe(true);
     await expect(fs.pathExists(`${TASK_WORKTREE}/.ai/vcm/sessions/demo-task.json`)).resolves.toBe(false);
   });

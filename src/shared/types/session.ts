@@ -132,6 +132,8 @@ export interface RoleSessionRecord {
   lastTurnEndedAt?: string;
   lastHookEventAt?: string;
   lastCompactAt?: string;
+  activeTaskSlug?: string;
+  activeTaskRepoRoot?: string;
   exitCode?: number | null;
 }
 

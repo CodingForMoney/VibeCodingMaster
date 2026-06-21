@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { VCM_ROLE_DEFINITIONS } from "../../shared/constants.js";
+import { CORE_VCM_ROLE_DEFINITIONS, CORE_VCM_ROLE_NAMES, GATE_REVIEWER_ROLE_DEFINITION } from "../../shared/constants.js";
 import type {
   GatewayDiagnostics
 } from "../../shared/types/diagnostics.js";
@@ -66,12 +66,12 @@ export interface GatewayServiceDeps {
   channel: WeixinIlinkChannel;
   projectService: ProjectService;
   taskService: TaskService;
-  sessionService: Pick<SessionService, "getRoleSession" | "listRoleSessions" | "startRoleSession" | "stopRoleSession">;
+  sessionService: Pick<SessionService, "getRoleSession" | "listRoleSessions" | "resumeRoleSession" | "startRoleSession" | "stopRoleSession">;
   messageService: Pick<MessageService, "updateOrchestrationState">;
   translationService: Pick<TranslationService, "translateUserInput" | "translateGatewayOutput" | "stopTask">;
   roundService: Pick<RoundService, "stopTask">;
   runtime: Pick<TerminalRuntime, "write">;
-  appSettings: Pick<AppSettingsService, "getPreferences" | "updatePreferences">;
+  appSettings: Pick<AppSettingsService, "getPreferences" | "updatePreferences" | "getGateReviewSettings">;
   now?: () => string;
 }
 
@@ -542,17 +542,35 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
       mode: template.autoOrchestration ? "auto" : "manual"
     });
 
+    const gateReviewSettings = await deps.appSettings.getGateReviewSettings(project.repoRoot, task.taskSlug);
+    const roleDefinitions = [
+      ...CORE_VCM_ROLE_DEFINITIONS,
+      ...(gateReviewSettings.enabled ? [GATE_REVIEWER_ROLE_DEFINITION] : [])
+    ];
     const startedRoles: string[] = [];
-    for (const definition of VCM_ROLE_DEFINITIONS) {
+    for (const definition of roleDefinitions) {
       const roleTemplate = template.roles[definition.name];
       try {
-        await deps.sessionService.startRoleSession(project.repoRoot, task.taskSlug, definition.name, {
+        const sessionInput = {
           cols: 100,
           rows: 28,
           permissionMode: roleTemplate.permissionMode,
           model: roleTemplate.model,
           effort: roleTemplate.effort
-        });
+        };
+        const existing = await deps.sessionService.getRoleSession(project.repoRoot, task.taskSlug, definition.name);
+        if (existing?.status === "running") {
+          if (definition.name === "gate-reviewer") {
+            await deps.sessionService.resumeRoleSession(project.repoRoot, task.taskSlug, definition.name, sessionInput);
+          }
+          startedRoles.push(definition.name);
+          continue;
+        }
+        if (existing?.claudeSessionId) {
+          await deps.sessionService.resumeRoleSession(project.repoRoot, task.taskSlug, definition.name, sessionInput);
+        } else {
+          await deps.sessionService.startRoleSession(project.repoRoot, task.taskSlug, definition.name, sessionInput);
+        }
         startedRoles.push(definition.name);
       } catch (error) {
         const settings = await deps.settings.loadSettings();
@@ -676,7 +694,7 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
   async function stopRunningRoleSessions(repoRoot: string, taskSlug: string): Promise<void> {
     const sessions = await deps.sessionService.listRoleSessions(repoRoot, taskSlug);
     for (const session of sessions) {
-      if (session.status === "running") {
+      if (session.status === "running" && CORE_VCM_ROLE_NAMES.some((role) => role === session.role)) {
         await deps.sessionService.stopRoleSession(repoRoot, taskSlug, session.role);
       }
     }

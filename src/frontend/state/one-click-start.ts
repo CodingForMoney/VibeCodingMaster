@@ -1,4 +1,4 @@
-import { VCM_ROLE_DEFINITIONS } from "../../shared/constants.js";
+import { CORE_VCM_ROLE_DEFINITIONS } from "../../shared/constants.js";
 import type { LaunchTemplate } from "../../shared/types/app-settings.js";
 import type { RoleName } from "../../shared/types/role.js";
 import type { ClaudePermissionMode, SessionEffort, SessionModel } from "../../shared/types/session.js";
@@ -10,18 +10,11 @@ export interface OneClickRoleLaunch {
   effort: SessionEffort;
 }
 
-const DEFAULT_GATE_REVIEWER_LAUNCH: OneClickRoleLaunch = {
-  role: "gate-reviewer",
-  permissionMode: "default",
-  model: "default",
-  effort: "default"
-};
-
 export function buildOneClickRoleLaunches(
   launchTemplate: LaunchTemplate,
   input: { gateReviewerEnabled: boolean }
 ): OneClickRoleLaunch[] {
-  const launches: OneClickRoleLaunch[] = VCM_ROLE_DEFINITIONS.map((definition) => ({
+  const launches: OneClickRoleLaunch[] = CORE_VCM_ROLE_DEFINITIONS.map((definition) => ({
     role: definition.name,
     permissionMode: launchTemplate.roles[definition.name].permissionMode,
     model: launchTemplate.roles[definition.name].model,
@@ -29,7 +22,13 @@ export function buildOneClickRoleLaunches(
   }));
 
   if (input.gateReviewerEnabled) {
-    launches.push(DEFAULT_GATE_REVIEWER_LAUNCH);
+    const gateReviewerTemplate = launchTemplate.roles["gate-reviewer"];
+    launches.push({
+      role: "gate-reviewer",
+      permissionMode: gateReviewerTemplate.permissionMode,
+      model: gateReviewerTemplate.model,
+      effort: gateReviewerTemplate.effort
+    });
   }
 
   return launches;

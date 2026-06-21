@@ -1,8 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { GATE_REVIEWER_ROLE_DEFINITION, VCM_ROLE_DEFINITIONS, isVcmRoleName } from "../../shared/constants.js";
+import { CORE_VCM_ROLE_DEFINITIONS, GATE_REVIEWER_ROLE_DEFINITION, VCM_ROLE_DEFINITIONS } from "../../shared/constants.js";
 import type { TaskStatusReport } from "../../shared/types/api.js";
 import type { VcmOrchestrationMode, VcmOrchestrationState, VcmRoleMessage } from "../../shared/types/message.js";
-import type { RoleDefinition, RoleName, VcmRoleName } from "../../shared/types/role.js";
+import type { CoreVcmRoleName, RoleDefinition, RoleName, VcmRoleName } from "../../shared/types/role.js";
 import type { VcmSessionRoundState } from "../../shared/types/round.js";
 import type { ClaudeModel, ClaudePermissionMode, SessionEffort, SessionModel } from "../../shared/types/session.js";
 import type { TranslationTargetLanguage } from "../../shared/types/app-settings.js";
@@ -98,7 +98,7 @@ export function TaskWorkspace({
   );
   const gateReviewerVisible = gateReviewerEnabled || hasGateReviewerSession;
   const visibleRoleDefinitions: readonly RoleDefinition[] = [
-    ...VCM_ROLE_DEFINITIONS,
+    ...CORE_VCM_ROLE_DEFINITIONS,
     ...(gateReviewerVisible ? [GATE_REVIEWER_ROLE_DEFINITION] : [])
   ];
 
@@ -223,8 +223,8 @@ export function TaskWorkspace({
 
   useEffect(() => {
     const sessions = statusReport?.sessions ?? [];
-    const vcmSessions = sessions.filter((session) => isVcmRoleName(session.role));
-    const sessionRoles = new Set(vcmSessions.map((session) => session.role));
+    const coreSessions = sessions.filter((session) => isCoreVcmRoleName(session.role));
+    const coreSessionRoles = new Set(coreSessions.map((session) => session.role));
     const roles = {} as TaskWorkspaceLaunchState["roles"];
     for (const definition of VCM_ROLE_DEFINITIONS) {
       roles[definition.name] = {
@@ -239,9 +239,9 @@ export function TaskWorkspace({
       roles,
       autoOrchestration: (orchestration?.mode ?? "auto") === "auto",
       statusLoaded: Boolean(statusReport),
-      sessionCount: vcmSessions.length,
-      hasAnySession: vcmSessions.length > 0,
-      allRolesHaveSession: VCM_ROLE_DEFINITIONS.every((definition) => sessionRoles.has(definition.name))
+      sessionCount: coreSessions.length,
+      hasAnySession: coreSessions.length > 0,
+      allRolesHaveSession: CORE_VCM_ROLE_DEFINITIONS.every((definition) => coreSessionRoles.has(definition.name))
     });
   }, [
     models,
@@ -503,6 +503,10 @@ export function TaskWorkspace({
       </div>
     </div>
   );
+}
+
+function isCoreVcmRoleName(role: RoleName): role is CoreVcmRoleName {
+  return CORE_VCM_ROLE_DEFINITIONS.some((definition) => definition.name === role);
 }
 
 function taskSyncKey(task: TaskRecord): string {

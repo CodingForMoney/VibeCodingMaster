@@ -84,10 +84,11 @@ project-manager
 
 ### 4.1 Gate Review Gates
 
-For complex tasks, VCM supports optional Gate Review Gates through an
-independent `gate-reviewer` Claude Code role. The reviewer uses a
-project-scoped long-lived session, but every gate prompt names the current task
-and task worktree so task evidence stays explicit.
+For complex tasks, VCM supports optional Gate Review Gates through a
+`gate-reviewer` Claude Code role. Gate Reviewer is a VCM flow role with the same
+hook, Round, terminal, and translation behavior as the core roles. Its session
+is project-scoped and reusable across tasks, but each gate turn is bound to the
+current task and task worktree so task evidence stays explicit.
 
 ```text
 architect architecture plan
@@ -108,9 +109,9 @@ default to off.
 
 When any gate is on, or when a Gate Reviewer session already exists, the task
 workspace shows `Gate Reviewer` as a fifth terminal role. VCM sends a short gate
-prompt into that session and manually marks the role/Round running until the
-assigned report is valid. The role remains outside PM routing and normal
-auto-orchestration.
+prompt into that project session and binds the session to the current task for
+hooks, Round state, translation, and report polling. The role remains outside PM
+route-file dispatch.
 Architecture-plan findings return to architect, validation-adequacy findings
 return to reviewer, and final-diff findings go to architect first for
 assessment. Gate Reviewer role rules live in `.claude/agents/gate-reviewer.md`.
@@ -409,7 +410,7 @@ The split should stay close to 50/50 width. Both panes expand vertically to fill
 
 ## 8. Flow Pause Detection
 
-VCM detects flow pauses from role hook events, not from terminal silence, message history, or pending route files. Claude Code roles report through `.claude/settings.json`; VCM directly records Gate Reviewer turns while a gate prompt is active.
+VCM detects flow pauses from role hook events, not from terminal silence, message history, or pending route files. Claude Code VCM flow roles report through `.claude/settings.json`; Gate Reviewer follows the same hook path while VCM separately validates the assigned gate report.
 
 Backend role state:
 
@@ -417,7 +418,7 @@ Backend role state:
 - `Stop`: role becomes `idle` and records `lastTurnEndedAt`.
 - `PostCompact`: refreshes role session metadata and records `lastCompactAt` without changing `running`/`idle`.
 - `StopFailure`: first checks completion evidence. If the role already wrote an outgoing route file, VCM marks the role idle and dispatches normally. If not, VCM sends a recovery prompt to the same role without marking it idle.
-- The role tab and flow pause state react to Claude Code hook events plus VCM-recorded Gate Reviewer gate turns.
+- The role tab and flow pause state react to Claude Code hook events for all VCM flow roles, including Gate Reviewer.
 
 Task-level Round state:
 

@@ -4,7 +4,7 @@ import type {
   ClaudeHookResult,
   ClaudePermissionRequestHookResult
 } from "../../shared/types/claude-hook.js";
-import { isVcmRoleName } from "../../shared/constants.js";
+import { isGateReviewerRoleName, isVcmRoleName } from "../../shared/constants.js";
 import { VcmError } from "../errors.js";
 import type { GatewayService } from "../gateway/gateway-service.js";
 import type { TerminalRuntime } from "../runtime/terminal-runtime.js";
@@ -60,15 +60,34 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
       });
     }
     const config = await deps.projectService.loadConfig(project.repoRoot);
-    const task = await deps.taskService.loadTask(project.repoRoot, input.taskSlug);
+    const taskSlug = await resolveHookTaskSlug(project.repoRoot, input);
+    const task = await deps.taskService.loadTask(project.repoRoot, taskSlug);
     const taskRepoRoot = getTaskRuntimeRepoRoot(task);
 
     return {
       project,
       config,
       task,
+      taskSlug,
       taskRepoRoot
     };
+  }
+
+  async function resolveHookTaskSlug(repoRoot: string, input: ClaudeHookRequest): Promise<string> {
+    if (!isGateReviewerRoleName(input.role)) {
+      return input.taskSlug;
+    }
+
+    const session = await deps.sessionService.getProjectGateReviewerSession(repoRoot);
+    if (session?.activeTaskSlug) {
+      return session.activeTaskSlug;
+    }
+    throw new VcmError({
+      code: "GATE_REVIEWER_TASK_UNBOUND",
+      message: "Gate Reviewer hook arrived without an active task binding.",
+      statusCode: 409,
+      hint: "Start or resume Gate Reviewer from the current task before submitting work."
+    });
   }
 
   async function handleUserPromptSubmitHook(input: ClaudeHookRequest): Promise<ClaudeHookResult> {
@@ -80,11 +99,11 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
     const context = await getHookContext(input);
     deps.jobGuard?.notePromptSubmitted({
       repoRoot: context.project.repoRoot,
-      taskSlug: input.taskSlug,
+      taskSlug: context.taskSlug,
       role: input.role
     });
     const session = await deps.sessionService.recordClaudeHookEvent(context.project.repoRoot, {
-      taskSlug: input.taskSlug,
+      taskSlug: context.taskSlug,
       role: input.role,
       eventName,
       claudeSessionId: stringOrUndefined(input.event.session_id),
@@ -95,7 +114,7 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
       repoRoot: context.project.repoRoot,
       stateRepoRoot: context.taskRepoRoot,
       stateRoot: context.config.stateRoot,
-      taskSlug: input.taskSlug,
+      taskSlug: context.taskSlug,
       role: input.role,
       eventName
     });
@@ -103,7 +122,7 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
       await deps.translationService.recordConversationBoundary({
         repoRoot: context.project.repoRoot,
         taskRepoRoot: context.taskRepoRoot,
-        taskSlug: input.taskSlug,
+        taskSlug: context.taskSlug,
         role: input.role,
         sessionId: session.id,
         boundaryKind: "start",
@@ -116,7 +135,7 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
       stateRepoRoot: context.taskRepoRoot,
       stateRoot: context.config.stateRoot,
       handoffDir: context.task.handoffDir,
-      taskSlug: input.taskSlug,
+      taskSlug: context.taskSlug,
       role: input.role,
       prompt: stringOrUndefined(input.event.prompt)
     });
@@ -124,7 +143,7 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
     return {
       ok: true,
       eventName,
-      taskSlug: input.taskSlug,
+      taskSlug: context.taskSlug,
       role: input.role,
       sessionUpdated: Boolean(session),
       dispatchedCount: 0,
@@ -139,12 +158,12 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
     }
 
     const context = await getHookContext(input);
-    clearStopFailureRecovery(context.project.repoRoot, input.taskSlug, input.role);
+    clearStopFailureRecovery(context.project.repoRoot, context.taskSlug, input.role);
 
     if (options.allowBlock && deps.jobGuard) {
       const verdict = await deps.jobGuard.evaluateStop({
         repoRoot: context.project.repoRoot,
-        taskSlug: input.taskSlug,
+        taskSlug: context.taskSlug,
         role: input.role,
         taskRepoRoot: context.taskRepoRoot
       });
@@ -154,7 +173,7 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
         return {
           ok: true,
           eventName,
-          taskSlug: input.taskSlug,
+          taskSlug: context.taskSlug,
           role: input.role,
           sessionUpdated: false,
           dispatchedCount: 0,
@@ -164,7 +183,7 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
     }
 
     return recordTurnEnd(input, context, eventName, {
-      dispatchRouteFiles: true,
+      dispatchRouteFiles: !isGateReviewerRoleName(input.role),
       notifyGateway: true,
       settleGuard: true
     });
@@ -182,9 +201,9 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
     const hasCompletionEvidence = pending.some((routeFile) => routeFile.fromRole === input.role);
 
     if (hasCompletionEvidence) {
-      clearStopFailureRecovery(context.project.repoRoot, input.taskSlug, input.role);
+      clearStopFailureRecovery(context.project.repoRoot, context.taskSlug, input.role);
       return recordTurnEnd(input, context, eventName, {
-        dispatchRouteFiles: true,
+        dispatchRouteFiles: !isGateReviewerRoleName(input.role),
         notifyGateway: false,
         settleGuard: true
       });
@@ -195,7 +214,7 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
       return {
         ok: true,
         eventName,
-        taskSlug: input.taskSlug,
+        taskSlug: context.taskSlug,
         role: input.role,
         sessionUpdated: true,
         dispatchedCount: 0
@@ -217,7 +236,7 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
 
     const context = await getHookContext(input);
     const session = await deps.sessionService.recordClaudeHookEvent(context.project.repoRoot, {
-      taskSlug: input.taskSlug,
+      taskSlug: context.taskSlug,
       role: input.role,
       eventName,
       claudeSessionId: stringOrUndefined(input.event.session_id),
@@ -228,7 +247,7 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
     return {
       ok: true,
       eventName,
-      taskSlug: input.taskSlug,
+      taskSlug: context.taskSlug,
       role: input.role,
       sessionUpdated: Boolean(session),
       dispatchedCount: 0
@@ -249,7 +268,7 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
     const settleRouteDispatchInput = createRouteDispatchInput(input, context);
 
     const session = await deps.sessionService.recordClaudeHookEvent(context.project.repoRoot, {
-      taskSlug: input.taskSlug,
+      taskSlug: context.taskSlug,
       role: input.role,
       eventName,
       claudeSessionId: stringOrUndefined(input.event.session_id),
@@ -260,7 +279,7 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
       repoRoot: context.project.repoRoot,
       stateRepoRoot: context.taskRepoRoot,
       stateRoot: context.config.stateRoot,
-      taskSlug: input.taskSlug,
+      taskSlug: context.taskSlug,
       role: input.role,
       eventName,
       ...(options.settleGuard
@@ -282,7 +301,7 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
       await deps.translationService.recordConversationBoundary({
         repoRoot: context.project.repoRoot,
         taskRepoRoot: context.taskRepoRoot,
-        taskSlug: input.taskSlug,
+        taskSlug: context.taskSlug,
         role: input.role,
         sessionId: session.id,
         boundaryKind: "end",
@@ -292,7 +311,7 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
     if (options.notifyGateway && session && input.role === "project-manager") {
       void deps.gatewayService?.handlePmStop({
         repoRoot: context.project.repoRoot,
-        taskSlug: input.taskSlug,
+        taskSlug: context.taskSlug,
         session
       }).catch(() => undefined);
     }
@@ -304,7 +323,7 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
     return {
       ok: true,
       eventName,
-      taskSlug: input.taskSlug,
+      taskSlug: context.taskSlug,
       role: input.role,
       sessionUpdated: Boolean(session),
       dispatchedCount: dispatched.filter((result) => result.delivered).length
@@ -322,7 +341,7 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
       stateRepoRoot: context.taskRepoRoot,
       stateRoot: context.config.stateRoot,
       handoffDir: context.task.handoffDir,
-      taskSlug: input.taskSlug,
+      taskSlug: context.taskSlug,
       ...(stoppedRole ? { stoppedRole } : {})
     };
   }
@@ -335,20 +354,20 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
       return false;
     }
 
-    const key = stopFailureRecoveryKey(context.project.repoRoot, input.taskSlug, input.role);
+    const key = stopFailureRecoveryKey(context.project.repoRoot, context.taskSlug, input.role);
     const attempt = (stopFailureRecoveryAttempts.get(key) ?? 0) + 1;
     if (attempt > MAX_STOP_FAILURE_RECOVERY_ATTEMPTS) {
       return false;
     }
 
-    const session = await deps.sessionService.getRoleSession(context.project.repoRoot, input.taskSlug, input.role);
+    const session = await deps.sessionService.getRoleSession(context.project.repoRoot, context.taskSlug, input.role);
     if (!session || session.status !== "running") {
       return false;
     }
 
     stopFailureRecoveryAttempts.set(key, attempt);
     await submitTerminalInput(deps.runtime, session.id, renderStopFailureRecoveryPrompt(attempt));
-    await deps.sessionService.markRoleActivityRunning(context.project.repoRoot, input.taskSlug, input.role);
+    await deps.sessionService.markRoleActivityRunning(context.project.repoRoot, context.taskSlug, input.role);
     return true;
   }
 

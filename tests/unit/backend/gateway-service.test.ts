@@ -6,6 +6,7 @@ import type { GatewayStatus, UpdateGatewaySettingsRequest } from "../../../src/s
 import type { ProjectSummary } from "../../../src/shared/types/project.js";
 import type { RoleSessionRecord } from "../../../src/shared/types/session.js";
 import type { TaskRecord } from "../../../src/shared/types/task.js";
+import { createDefaultLaunchTemplate } from "../../../src/shared/types/app-settings.js";
 import { createGatewayService } from "../../../src/backend/gateway/gateway-service.js";
 import type {
   WeixinIlinkChannel,
@@ -292,6 +293,9 @@ function createService(input: {
       async startRoleSession() {
         return {};
       },
+      async resumeRoleSession() {
+        return {};
+      },
       async stopRoleSession() {
         return {};
       }
@@ -332,12 +336,12 @@ function createService(input: {
     appSettings: {
       async getPreferences() {
         return {
-          launchTemplate: {
-            autoOrchestration: true,
-            translationEnabled: true,
-            roles: {}
-          }
+          launchTemplate: createDefaultLaunchTemplate(),
+          translationEnabled: true
         };
+      },
+      async getGateReviewSettings() {
+        return { enabled: false, requiredGates: [] };
       },
       async updatePreferences(update: unknown) {
         input.preferenceUpdates?.push(update);

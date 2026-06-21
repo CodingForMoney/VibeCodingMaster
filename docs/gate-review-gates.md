@@ -3,8 +3,9 @@
 This document defines VCM Gate Review Gates.
 
 Gate Review is an optional quality layer for complex tasks. It uses a fifth
-role, `gate-reviewer`, powered by Claude Code. The role is independent from the
-normal PM -> architect -> coder -> reviewer workflow.
+VCM flow role, `gate-reviewer`, powered by Claude Code. The role uses the same
+hook, Round, terminal, and translation path as the normal VCM roles, but it
+does not participate in PM route-file dispatch.
 
 ## Gates
 
@@ -32,7 +33,8 @@ VCM owns:
 - starting/resuming the project-scoped Gate Reviewer Claude Code session
 - sending the gate prompt
 - waiting for the report
-- marking the Gate Reviewer turn in Round state
+- binding the project-scoped Gate Reviewer session to the current task for hook,
+  Round, and translation state
 - sending the callback to PM
 
 PM owns:
@@ -59,6 +61,11 @@ The session is reusable across tasks in the same project. The gate prompt must
 therefore name the current task and task worktree path explicitly. Prior
 session memory can help orientation, but only current worktree evidence can
 decide the gate.
+
+When a task uses Gate Reviewer, VCM records the active task binding on the
+project session. Hook events from the long-lived session are resolved through
+that binding so Round state and translation output are written to the current
+task.
 
 Gate reports remain task-scoped:
 
@@ -122,9 +129,10 @@ PM reaches gate
   -> VCM checks global gate switch and task state
   -> VCM starts or resumes project Gate Reviewer session
   -> VCM sends short prompt with task/worktree/report paths
-  -> VCM marks Gate Reviewer running in current Round
+  -> VCM binds Gate Reviewer to the current task
   -> Gate Reviewer writes report
-  -> VCM validates report and marks Gate Reviewer idle
+  -> standard Claude hooks update Gate Reviewer activity/Round state
+  -> VCM validates report
   -> VCM callbacks PM
   -> PM continues or routes follow-up
 ```

@@ -287,12 +287,12 @@ export function ProjectDashboard({
           <button
             className="settings-toggle"
             disabled={busy || !canSaveLaunchTemplate}
-            title="Save the current four role launch settings"
+            title="Save the current core role launch settings and optional Gate Reviewer settings"
             type="button"
             onClick={onSaveLaunchTemplate}
           >
             <span>Save launch template</span>
-            <span>{canSaveLaunchTemplate ? "ready" : "needs 4 sessions"}</span>
+            <span>{canSaveLaunchTemplate ? "ready" : "needs core sessions"}</span>
           </button>
           {canOneClickStart ? (
             <button

@@ -11,7 +11,7 @@ VCM is designed for long-running coding work where one Claude Code conversation 
 
 Each role runs as a real Claude Code process inside an embedded terminal. The GUI lets the user start, stop, resume, restart, switch, observe, and manually intervene in those sessions without juggling separate terminal windows.
 
-When Gate Review Gates are enabled for a task, or when a Gate Reviewer session already exists, the workspace can also show a fifth `Gate Reviewer` terminal role. It runs Claude Code as a project-scoped long-lived review session, receives short gate prompts that include the current task and worktree path, writes reports under the task worktree, and stays outside normal PM role routing.
+When Gate Review Gates are enabled for a task, or when a Gate Reviewer session already exists, the workspace can also show a fifth `Gate Reviewer` terminal role. It is an optional VCM flow role powered by Claude Code. Its session is project-scoped and reusable across tasks, but each gate turn is bound to the current task/worktree, writes reports under the task worktree, and stays outside normal PM route-file dispatch.
 
 ## Current Capabilities
 
@@ -21,7 +21,7 @@ When Gate Review Gates are enabled for a task, or when a Gate Reviewer session a
 - Connected repository status for the base repo, including branch, upstream status, commit hash, dirty state, and fast-forward-only pull.
 - Embedded Claude Code terminals powered by `node-pty` and `xterm.js`.
 - One Claude Code session per role, with role tabs in the task header.
-- Optional Gate Reviewer terminal role when any Gate Review Gate is enabled.
+- Optional Gate Reviewer VCM flow role when any Gate Review Gate is enabled.
 - Role session recovery through persisted Claude session ids and `claude --resume`.
 - Permission mode selection before start, resume, or restart:
   - `default`
@@ -350,14 +350,14 @@ Typical mobile flow:
 - `/pull-current`: runs the same fast-forward-only connected repository pull as the desktop `Pull` button.
 - `/tasks`: lists tasks for the selected project.
 - `/use-task <index-or-task-slug>`: selects the Gateway's current task context.
-- `/create-task <task-slug> [title]`: creates a worktree-backed task and starts the four role sessions using the saved launch template.
+- `/create-task <task-slug> [title]`: creates a worktree-backed task and starts the four core role sessions using the saved launch template. If any Gate Review Gate is enabled, Gateway also resumes or starts Gate Reviewer from the saved template.
 - `/close-task`: starts a destructive close confirmation for the current task.
 - `/close-task confirm <task-slug>`: closes the task through VCM cleanup after exact slug confirmation.
 - `/translate on` and `/translate off`: changes Gateway translation for mobile messages.
 
 `/pull-current` only pulls the connected base repository. It does not pull task worktrees, stash local changes, merge divergent branches, or run arbitrary shell commands.
 
-`/create-task` uses the saved launch template from the desktop settings. The template controls permission mode, model, effort, and auto orchestration for the four core role sessions. Gateway translation uses the global Gateway translation setting, not the launch template.
+`/create-task` uses the saved launch template from the desktop settings. The template controls permission mode, model, effort, and auto orchestration for the four core role sessions plus the optional Gate Reviewer. Gateway translation uses the global Gateway translation setting, not the launch template.
 
 `/close-task` is destructive. It stops VCM-managed role sessions and removes task-owned worktree/branch state according to the same cleanup behavior as the desktop `Close Task` action.
 
@@ -574,7 +574,7 @@ When it is on, VCM is in auto mode:
 - When the target role later reaches `Stop`, VCM scans again and may deliver the next pending route file.
 - If auto orchestration gets stuck after a manual copy/paste recovery, `Mark All Done` clears pending route files. It does not mutate message history.
 
-VCM Harness injects Claude Code `UserPromptSubmit` and `Stop` hooks into `.claude/settings.json`. Role tabs become `running` when Claude Code accepts a prompt and `idle` after `Stop`; VCM also marks a role `running` immediately after it writes a message to that embedded terminal. Gate Reviewer is a Claude Code role, but VCM triggers and settles gate turns directly around the gate prompt and report callback. The terminal process status is still tracked separately. Claude role rules require a role to end its turn after writing or updating a message route file, rather than polling, looping, or waiting for another role inside the same Claude Code turn.
+VCM Harness injects Claude Code `UserPromptSubmit` and `Stop` hooks into `.claude/settings.json`. Role tabs become `running` when Claude Code accepts a prompt and `idle` after `Stop`; VCM also marks a role `running` immediately after it writes a message to that embedded terminal. Gate Reviewer uses the same Claude hook/Round/translation path as other VCM flow roles, while VCM still owns gate report polling and the PM callback. The terminal process status is tracked separately. Claude role rules require a role to end its turn after writing or updating a message route file, rather than polling, looping, or waiting for another role inside the same Claude Code turn.
 
 The implementation keeps only the active manual/auto orchestration mode. It does not expose pause/resume, stage/approve/reject, or a separate agent-facing message CLI.
 

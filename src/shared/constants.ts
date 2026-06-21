@@ -1,9 +1,9 @@
-import type { CodexRoleName, CodexTranslatorRoleName, DispatchableRole, GateReviewerRoleName, RoleDefinition, RoleName, VcmRoleName } from "./types/role.js";
+import type { CodexRoleName, CodexTranslatorRoleName, CoreVcmRoleName, DispatchableRole, GateReviewerRoleName, RoleDefinition, RoleName, VcmRoleName } from "./types/role.js";
 
 export const DEFAULT_BACKEND_PORT = 4173;
 export const DEFAULT_FRONTEND_PORT = 5173;
 
-export const VCM_ROLE_DEFINITIONS: readonly RoleDefinition<VcmRoleName>[] = [
+export const CORE_VCM_ROLE_DEFINITIONS: readonly RoleDefinition<CoreVcmRoleName>[] = [
   {
     name: "project-manager",
     label: "Project Manager",
@@ -37,6 +37,11 @@ export const GATE_REVIEWER_ROLE_DEFINITION: RoleDefinition<GateReviewerRoleName>
   dispatchable: false
 };
 
+export const VCM_ROLE_DEFINITIONS: readonly RoleDefinition<VcmRoleName>[] = [
+  ...CORE_VCM_ROLE_DEFINITIONS,
+  GATE_REVIEWER_ROLE_DEFINITION
+] as const;
+
 export const CODEX_TRANSLATOR_ROLE_DEFINITION: RoleDefinition<CodexTranslatorRoleName> = {
   name: "codex-translator",
   label: "Codex Translator",
@@ -50,10 +55,10 @@ export const CODEX_ROLE_DEFINITIONS: readonly RoleDefinition<CodexRoleName>[] = 
 
 export const ROLE_DEFINITIONS: readonly RoleDefinition[] = [
   ...VCM_ROLE_DEFINITIONS,
-  GATE_REVIEWER_ROLE_DEFINITION,
   ...CODEX_ROLE_DEFINITIONS
 ] as const;
 
+export const CORE_VCM_ROLE_NAMES = CORE_VCM_ROLE_DEFINITIONS.map((role) => role.name) as readonly CoreVcmRoleName[];
 export const VCM_ROLE_NAMES = VCM_ROLE_DEFINITIONS.map((role) => role.name) as readonly VcmRoleName[];
 export const CODEX_ROLE_NAMES = CODEX_ROLE_DEFINITIONS.map((role) => role.name) as readonly CodexRoleName[];
 export const ROLE_NAMES = ROLE_DEFINITIONS.map((role) => role.name) as readonly RoleName[];

@@ -40,7 +40,13 @@ describe("buildOneClickRoleLaunches", () => {
   });
 
   it("adds Gate Reviewer when Gate review gates are enabled", () => {
-    const launches = buildOneClickRoleLaunches(createDefaultLaunchTemplate(), {
+    const template = createDefaultLaunchTemplate();
+    template.roles["gate-reviewer"] = {
+      permissionMode: "bypassPermissions",
+      model: "opus[1m]",
+      effort: "max"
+    };
+    const launches = buildOneClickRoleLaunches(template, {
       gateReviewerEnabled: true
     });
 
@@ -53,9 +59,9 @@ describe("buildOneClickRoleLaunches", () => {
     ]);
     expect(launches.at(-1)).toEqual({
       role: "gate-reviewer",
-      permissionMode: "default",
-      model: "default",
-      effort: "default"
+      permissionMode: "bypassPermissions",
+      model: "opus[1m]",
+      effort: "max"
     });
   });
 });

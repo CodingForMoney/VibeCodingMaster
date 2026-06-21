@@ -29,7 +29,7 @@ import type { RoleName } from "../shared/types/role.js";
 import type { VcmSessionRoundState } from "../shared/types/round.js";
 import type { RoleSessionRecord, SessionEffort, SessionModel } from "../shared/types/session.js";
 import type { TaskRecord } from "../shared/types/task.js";
-import { isVcmRoleName } from "../shared/constants.js";
+import { CORE_VCM_ROLE_NAMES } from "../shared/constants.js";
 import { AppShell } from "./components/app-shell.js";
 import { CodexTranslatorSessionModal } from "./components/codex-translator-session-modal.js";
 import { FileTranslationModalHost } from "./components/translation-panel.js";
@@ -719,7 +719,7 @@ export function App() {
           onSaveLaunchTemplate={() => {
             void withBusy(async () => {
               if (!activeTaskLaunchState?.allRolesHaveSession) {
-                throw new Error("Start all four role sessions before saving a launch template.");
+                throw new Error("Start all core role sessions before saving a launch template.");
               }
 
               const preferences = await apiClient.updateAppPreferences({
@@ -739,7 +739,7 @@ export function App() {
               }
 
               const status = await apiClient.getTaskStatus(activeTask.taskSlug);
-              if (status.sessions.some((session) => isVcmRoleName(session.role))) {
+              if (status.sessions.some((session) => CORE_VCM_ROLE_NAMES.some((role) => role === session.role))) {
                 throw new Error("One-click start is only available before any role session has started.");
               }
 
@@ -762,6 +762,9 @@ export function App() {
                 };
                 const existingSession = status.sessions.find((session) => session.role === roleLaunch.role);
                 if (existingSession?.status === "running") {
+                  if (roleLaunch.role === "gate-reviewer") {
+                    await apiClient.resumeRoleSession(activeTask.taskSlug, roleLaunch.role, sessionInput);
+                  }
                   continue;
                 }
                 if (existingSession?.claudeSessionId) {

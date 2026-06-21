@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import path from "node:path";
-import { VCM_ROLE_NAMES, isCodexRoleName, isDispatchableRole } from "../../shared/constants.js";
+import { CORE_VCM_ROLE_NAMES, isCodexRoleName, isDispatchableRole } from "../../shared/constants.js";
 import type { ClaudeHookEventName } from "../../shared/types/claude-hook.js";
 import type { RoleName } from "../../shared/types/role.js";
 import type {
@@ -231,14 +231,15 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
   async function launchProjectGateReviewerSession(
     repoRoot: string,
     input: StartRoleSessionRequest,
-    launchMode: LaunchMode
+    launchMode: LaunchMode,
+    activeTaskSlug?: string
   ): Promise<RoleSessionRecord> {
     const live = toRoleSessionRecordView(
       getRegisteredProjectGateReviewerSession(deps.registry, deps.runtime),
       deps.runtime
     );
     if (live && live.status === "running") {
-      return live;
+      return bindProjectGateReviewerSession(repoRoot, live, activeTaskSlug);
     }
 
     const config = await deps.projectService.loadConfig(repoRoot);
@@ -262,6 +263,10 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     const transcriptPath = launchMode === "resume" && persisted?.transcriptPath
       ? persisted.transcriptPath
       : claudeTranscriptPath(repoRoot, claudeSessionId);
+    const activeTask = activeTaskSlug
+      ? await deps.taskService.loadTask(repoRoot, activeTaskSlug)
+      : undefined;
+    const activeTaskRepoRoot = activeTask ? getTaskRuntimeRepoRoot(activeTask) : undefined;
     const startCommand = {
       ...deps.claude.buildRoleStartCommand(
         GATE_REVIEWER_ROLE,
@@ -282,8 +287,8 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       cwd: startCommand.cwd,
       env: {
         VCM_API_URL: deps.apiUrl,
-        VCM_TASK_REPO_ROOT: repoRoot,
-        VCM_TASK_SLUG: PROJECT_GATE_REVIEWER_SCOPE,
+        VCM_TASK_REPO_ROOT: activeTaskRepoRoot ?? repoRoot,
+        VCM_TASK_SLUG: activeTaskSlug ?? PROJECT_GATE_REVIEWER_SCOPE,
         VCM_ROLE: GATE_REVIEWER_ROLE,
         VCM_SESSION_ID: claudeSessionId
       },
@@ -309,12 +314,37 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       startedAt: runtimeSession.startedAt,
       updatedAt: timestamp,
       lastOutputAt: runtimeSession.lastOutputAt,
+      activeTaskSlug,
+      activeTaskRepoRoot,
       exitCode: runtimeSession.exitCode
     };
 
     deps.registry.upsert(record);
     await persistProjectGateReviewerSession(deps.fs, repoRoot, record);
     return record;
+  }
+
+  async function bindProjectGateReviewerSession(
+    repoRoot: string,
+    record: RoleSessionRecord,
+    activeTaskSlug?: string
+  ): Promise<RoleSessionRecord> {
+    if (!activeTaskSlug) {
+      return record;
+    }
+
+    const task = await deps.taskService.loadTask(repoRoot, activeTaskSlug);
+    const activeTaskRepoRoot = getTaskRuntimeRepoRoot(task);
+    const updated: RoleSessionRecord = {
+      ...record,
+      taskSlug: PROJECT_GATE_REVIEWER_SCOPE,
+      activeTaskSlug,
+      activeTaskRepoRoot,
+      updatedAt: now()
+    };
+    deps.registry.upsert(updated);
+    await persistProjectGateReviewerSession(deps.fs, repoRoot, updated);
+    return updated;
   }
 
   async function launchProjectTranslatorSession(
@@ -555,7 +585,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     },
     startRoleSession(repoRoot, taskSlug, role, input = {}) {
       if (role === GATE_REVIEWER_ROLE) {
-        return this.startProjectGateReviewerSession(repoRoot, input)
+        return launchProjectGateReviewerSession(repoRoot, input, "fresh", taskSlug)
           .then((session) => scopeProjectRoleSession(session, taskSlug)!);
       }
       if (role === CODEX_TRANSLATOR_ROLE) {
@@ -566,7 +596,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     },
     resumeRoleSession(repoRoot, taskSlug, role, input = {}) {
       if (role === GATE_REVIEWER_ROLE) {
-        return this.resumeProjectGateReviewerSession(repoRoot, input)
+        return launchProjectGateReviewerSession(repoRoot, input, "resume", taskSlug)
           .then((session) => scopeProjectRoleSession(session, taskSlug)!);
       }
       if (role === CODEX_TRANSLATOR_ROLE) {
@@ -610,7 +640,14 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     },
     async restartRoleSession(repoRoot, taskSlug, role, input = {}) {
       if (role === GATE_REVIEWER_ROLE) {
-        return scopeProjectRoleSession(await this.restartProjectGateReviewerSession(repoRoot, input), taskSlug)!;
+        const existing = await this.getProjectGateReviewerSession(repoRoot);
+        if (existing && deps.runtime.getSession(existing.id)) {
+          await deps.runtime.stop(existing.id);
+        }
+        if (existing) {
+          deps.registry.remove(existing.id);
+        }
+        return scopeProjectRoleSession(await launchProjectGateReviewerSession(repoRoot, input, "fresh", taskSlug), taskSlug)!;
       }
       if (role === CODEX_TRANSLATOR_ROLE) {
         void taskSlug;
@@ -630,7 +667,11 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     },
     async getRoleSession(repoRoot, taskSlug, role) {
       if (role === GATE_REVIEWER_ROLE) {
-        return scopeProjectRoleSession(await this.getProjectGateReviewerSession(repoRoot), taskSlug);
+        const session = await this.getProjectGateReviewerSession(repoRoot);
+        if (!session) {
+          return undefined;
+        }
+        return scopeProjectRoleSession(await bindProjectGateReviewerSession(repoRoot, session, taskSlug), taskSlug);
       }
       if (role === CODEX_TRANSLATOR_ROLE) {
         void taskSlug;
@@ -653,7 +694,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       const task = await deps.taskService.loadTask(repoRoot, taskSlug);
       const taskRepoRoot = getTaskRuntimeRepoRoot(task);
       const persistedTaskSession = await loadPersistedTaskSessionRecord(deps.fs, taskRepoRoot, config.stateRoot, taskSlug);
-      for (const role of VCM_ROLE_NAMES) {
+      for (const role of CORE_VCM_ROLE_NAMES) {
         const record = deps.registry.getByRole(taskSlug, role)
           ?? normalizePersistedRoleRecord(persistedTaskSession?.roles[role]?.record);
         const session = toRoleSessionRecordView(
