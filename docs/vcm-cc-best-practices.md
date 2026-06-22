@@ -171,8 +171,8 @@ Current runtime files and directories:
 .ai/vcm/handoffs/known-issues.md
 .ai/vcm/gate-reviews/
 .ai/vcm/jobs/<job-id>/
+.ai/vcm/harness-engineer/session.json
 .ai/vcm/bootstrap/session.json
-.ai/vcm/bootstrap/bootstrap.log
 ```
 
 App-local VCM task records live outside the connected repository:
@@ -402,22 +402,17 @@ during bootstrap.
 Important claims should be marked as verified, inferred, unknown, or needing
 human confirmation.
 
-VCM should launch bootstrap as a visible temporary Claude Code terminal, not as
-an invisible background task:
+VCM should run bootstrap through the project-scoped `harness-engineer` session,
+not through a separate temporary terminal or invisible background task:
 
 - run the deterministic fixed installer first
-- start Claude Code in the connected repository root without a role agent
-- set `VCM_TASK_REPO_ROOT`, `VCM_HARNESS_BOOTSTRAP=1`, `VCM_SESSION_ID`, and
-  `VCM_API_URL`
+- start or resume the `harness-engineer` role in the connected repository root
 - send a prompt that explicitly requires using `vcm-harness-bootstrap`
-- log terminal output under `.ai/vcm/bootstrap/bootstrap.log`
-- persist session metadata under `.ai/vcm/bootstrap/session.json`
-- mark bootstrap complete only when project context, generated context,
-  project architecture docs, module architecture docs, and testing docs are
-  present and non-empty
+- persist the bootstrap run marker under `.ai/vcm/bootstrap/session.json`
+- mark the bootstrap run complete when the `harness-engineer` Stop hook arrives
 
 The UI should expose both stages: fixed install status and bootstrap completion
-status. A failed or disconnected bootstrap terminal should be restartable
+status. A failed or disconnected Harness Engineer session should be restartable
 without treating project-owned durable docs as VCM-owned harness files.
 
 ## 12. Final Acceptance

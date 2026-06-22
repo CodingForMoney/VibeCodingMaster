@@ -62,7 +62,8 @@ export function HarnessPanel({
   const [bootstrapModel, setBootstrapModel] = useState<SessionModel>("default");
   const [bootstrapEffort, setBootstrapEffort] = useState<SessionEffort>("default");
   const bootstrapSession = bootstrapStatus?.session;
-  const bootstrapRunning = bootstrapSession?.status === "running";
+  const bootstrapRunning = bootstrapStatus?.status === "running";
+  const bootstrapSessionRunning = bootstrapSession?.status === "running";
 
   useEffect(() => {
     if (bootstrapSession?.permissionMode) {
@@ -238,12 +239,12 @@ export function HarnessPanel({
       ) : null}
 
       {showBootstrapTerminal ? (
-        <div className="harness-bootstrap-modal" role="dialog" aria-modal="true" aria-label="Harness bootstrap terminal">
+        <div className="harness-bootstrap-modal" role="dialog" aria-modal="true" aria-label="Harness Engineer bootstrap session">
           <div className="harness-bootstrap-modal-surface">
             <header className="harness-bootstrap-modal-header">
               <div>
-                <strong>Harness Bootstrap Terminal</strong>
-                <p className="muted">{bootstrapSession?.command ?? "Start Claude Code, then run bootstrap when ready."}</p>
+                <strong>Harness Engineer Bootstrap</strong>
+                <p className="muted">{bootstrapSession?.command ?? "Start Harness Engineer, then run bootstrap when ready."}</p>
               </div>
               <div className="harness-bootstrap-modal-actions">
                 {bootstrapSession ? <StatusBadge status={bootstrapSession.status} /> : null}
@@ -258,7 +259,7 @@ export function HarnessPanel({
                 <span>Permission</span>
                 <select
                   value={bootstrapPermissionMode}
-                  disabled={busy || bootstrapRunning}
+                  disabled={busy || bootstrapRunning || bootstrapSessionRunning}
                   onChange={(event) => setBootstrapPermissionMode(event.target.value as ClaudePermissionMode)}
                 >
                   <option value="default">默认</option>
@@ -269,7 +270,7 @@ export function HarnessPanel({
                 <span>Model</span>
                 <select
                   value={bootstrapModel}
-                  disabled={busy || bootstrapRunning}
+                  disabled={busy || bootstrapRunning || bootstrapSessionRunning}
                   onChange={(event) => setBootstrapModel(event.target.value as SessionModel)}
                 >
                   {CLAUDE_MODEL_OPTIONS.map((option) => (
@@ -281,7 +282,7 @@ export function HarnessPanel({
                 <span>Effort</span>
                 <select
                   value={bootstrapEffort}
-                  disabled={busy || bootstrapRunning}
+                  disabled={busy || bootstrapRunning || bootstrapSessionRunning}
                   onChange={(event) => setBootstrapEffort(event.target.value as SessionEffort)}
                 >
                   {CLAUDE_EFFORT_OPTIONS.map((option) => (
@@ -299,7 +300,7 @@ export function HarnessPanel({
                 </button>
                 <button
                   type="button"
-                  disabled={busy || !bootstrapStatus?.canStart}
+                  disabled={busy || bootstrapRunning || !bootstrapStatus?.canStart}
                   onClick={() => void onRestartBootstrap(bootstrapLaunchOptions)}
                 >
                   Restart
@@ -313,7 +314,7 @@ export function HarnessPanel({
                 </button>
                 <button
                   type="button"
-                  disabled={busy || !bootstrapRunning}
+                  disabled={busy || bootstrapRunning || !bootstrapSessionRunning}
                   onClick={() => void onRunBootstrap()}
                 >
                   Run bootstrap
@@ -322,12 +323,12 @@ export function HarnessPanel({
             </div>
 
             <div className="harness-bootstrap-terminal">
-              {bootstrapSession?.status === "running" ? (
+              {bootstrapSessionRunning ? (
                 <XtermView sessionId={bootstrapSession.id} active={showBootstrapTerminal} />
               ) : (
                 <div className="terminal-empty">
                   <strong>Harness Bootstrap</strong>
-                  <span>Start Claude Code first. When it is ready, click Run bootstrap to send the prompt.</span>
+                  <span>Start Harness Engineer first. When it is ready, click Run bootstrap to send the prompt.</span>
                 </div>
               )}
             </div>

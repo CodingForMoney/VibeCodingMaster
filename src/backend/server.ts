@@ -216,14 +216,6 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
   const registry = createSessionRegistry();
   const artifactService = createArtifactService(fs);
   const projectService = createProjectService({ fs, git, appSettings });
-  const harnessService = createHarnessService({
-    fs,
-    git,
-    runtime,
-    projectService,
-    apiUrl: options.apiUrl,
-    runFixedInstaller: createScriptFixedHarnessInstaller(path.join(getAppRoot(), "scripts/install-vcm-harness.mjs"))
-  });
   const taskService = createTaskService({ fs, git, artifactService, projectService });
   const sessionService = createSessionService({
     fs,
@@ -234,6 +226,13 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     projectService,
     taskService,
     apiUrl: options.apiUrl
+  });
+  const harnessService = createHarnessService({
+    fs,
+    git,
+    runtime,
+    harnessEngineerSessions: sessionService,
+    runFixedInstaller: createScriptFixedHarnessInstaller(path.join(getAppRoot(), "scripts/install-vcm-harness.mjs"))
   });
   const commandDispatcher = createCommandDispatcher({
     runtime,
@@ -313,6 +312,7 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     translationService,
     appSettings,
     runtime,
+    harnessService,
     gatewayService,
     jobGuard: createJobGuardService(),
     translationWorkerService

@@ -825,9 +825,9 @@ Project-scoped local files:
 
 ```text
 .ai/vcm/gate-reviewer/session.json
+.ai/vcm/harness-engineer/session.json
 .ai/vcm/translations/
 .ai/vcm/bootstrap/session.json
-.ai/vcm/bootstrap/bootstrap.log
 ```
 
 External Claude transcripts:

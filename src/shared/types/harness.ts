@@ -164,3 +164,9 @@ export interface RunHarnessBootstrapResult {
   session: HarnessBootstrapSession;
   prompt: string;
 }
+
+export interface RecordHarnessBootstrapHookInput {
+  eventName: "Stop" | "StopFailure" | "UserPromptSubmit" | "PostCompact";
+  sessionId?: string;
+  claudeSessionId?: string;
+}

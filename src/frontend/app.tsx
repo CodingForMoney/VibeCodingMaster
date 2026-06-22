@@ -453,9 +453,15 @@ export function App() {
       return;
     }
 
-    void refreshHarnessEngineerSession({ syncLaunchOptions: true }).catch((caught: Error) => setError(caught.message));
+    void Promise.all([
+      refreshHarnessEngineerSession({ syncLaunchOptions: true }),
+      loadHarnessBootstrapStatus()
+    ]).catch((caught: Error) => setError(caught.message));
     const interval = window.setInterval(() => {
-      void refreshHarnessEngineerSession().catch((caught: Error) => setError(caught.message));
+      void Promise.all([
+        refreshHarnessEngineerSession(),
+        loadHarnessBootstrapStatus()
+      ]).catch((caught: Error) => setError(caught.message));
     }, 3000);
     return () => window.clearInterval(interval);
   }, [project?.repoRoot]);
@@ -616,6 +622,7 @@ export function App() {
               ...input
             });
             setHarnessBootstrapStatus(result.status);
+            await refreshHarnessEngineerSession({ syncLaunchOptions: true });
           })}
           onRestartHarnessBootstrap={(input) => withBusy(async () => {
             const result = await apiClient.restartHarnessBootstrap({
@@ -624,14 +631,17 @@ export function App() {
               ...input
             });
             setHarnessBootstrapStatus(result.status);
+            await refreshHarnessEngineerSession({ syncLaunchOptions: true });
           })}
           onStopHarnessBootstrap={() => withBusy(async () => {
             const status = await apiClient.stopHarnessBootstrap();
             setHarnessBootstrapStatus(status);
+            await refreshHarnessEngineerSession();
           })}
           onRunHarnessBootstrap={() => withBusy(async () => {
             const result = await apiClient.runHarnessBootstrap();
             setHarnessBootstrapStatus(result.status);
+            await refreshHarnessEngineerSession();
           })}
           onOpenHarnessStudio={() => setHarnessStudioOpen(true)}
           onRefreshGateway={() => withBusy(async () => {

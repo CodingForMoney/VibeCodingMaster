@@ -720,6 +720,79 @@ describe("createClaudeHookService", () => {
       "worker:Stop:__project__"
     ]);
   });
+
+  it("routes Harness Engineer Stop hooks to bootstrap completion without VCM flow side effects", async () => {
+    const calls: string[] = [];
+    const service = createClaudeHookService({
+      projectService: createProjectServiceStub(),
+      taskService: createTaskServiceStub(),
+      sessionService: {
+        async recordProjectHarnessEngineerHookEvent(_repoRoot, input) {
+          calls.push(`session:${input.eventName}:${input.sessionId}`);
+          return {
+            id: "runtime_harness_engineer",
+            claudeSessionId: input.sessionId ?? "harness_engineer_session",
+            taskSlug: "__project_harness_engineer__",
+            role: "harness-engineer",
+            status: "running",
+            activityStatus: input.eventName === "Stop" ? "idle" : "running",
+            command: "claude --agent harness-engineer",
+            permissionMode: "default",
+            cwd: input.cwd ?? "/repo",
+            terminalBackend: "node-pty",
+            updatedAt: "2026-06-01T00:00:00.000Z"
+          };
+        }
+      } as SessionService,
+      messageService: {
+        async confirmPromptSubmitted() {
+          calls.push("message");
+          return undefined;
+        }
+      } as unknown as MessageService,
+      roundService: {
+        async recordClaudeHookEvent() {
+          calls.push("round");
+          return {} as never;
+        }
+      } as RoundService,
+      translationService: {
+        async recordConversationBoundary() {
+          calls.push("boundary");
+          return undefined;
+        }
+      } as Pick<TranslationService, "recordConversationBoundary">,
+      harnessService: {
+        async recordHarnessBootstrapHook(_repoRoot, input) {
+          calls.push(`bootstrap:${input.eventName}:${input.sessionId}:${input.claudeSessionId}`);
+          return {} as never;
+        }
+      },
+      appSettings: createAppSettingsStub()
+    });
+
+    const result = await service.handleStopHook({
+      taskSlug: "__project_harness_engineer__",
+      role: "harness-engineer",
+      event: {
+        hook_event_name: "Stop",
+        session_id: "harness_engineer_session",
+        cwd: "/repo"
+      }
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      eventName: "Stop",
+      role: "harness-engineer",
+      sessionUpdated: true,
+      dispatchedCount: 0
+    });
+    expect(calls).toEqual([
+      "session:Stop:harness_engineer_session",
+      "bootstrap:Stop:runtime_harness_engineer:harness_engineer_session"
+    ]);
+  });
 });
 
 function createAppSettingsStub(permissionRequestMode: "off" | "allowAll" = "off") {

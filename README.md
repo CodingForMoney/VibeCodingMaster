@@ -486,7 +486,7 @@ For `.gitignore`, VCM uses a gitignore-native managed block:
 
 VCM also JSON-merges `.claude/settings.json` to install Claude Code `PreToolUse`, `UserPromptSubmit`, `Stop`, and `PermissionRequest` hooks plus a managed `env.BASH_DEFAULT_TIMEOUT_MS` so foreground watch windows fit inside the Bash tool timeout. The hooks post directly to the local VCM backend, so roles do not need a VCM CLI command to confirm delivery or report turn completion. The `Stop` hook forwards the backend response to Claude Code, which lets VCM block turn-end while a validation job is still running.
 
-Bootstrap is AI-assisted. VCM starts a visible temporary Claude Code session in the connected repository and asks it to use the `vcm-harness-bootstrap` skill. Bootstrap fills project-specific content and generated context:
+Bootstrap is AI-assisted. VCM starts or resumes the project-scoped Harness Engineer Claude Code session in the connected repository and asks it to use the `vcm-harness-bootstrap` skill. Bootstrap fills project-specific content and generated context:
 
 ```text
 CLAUDE.md project context outside the VCM managed block

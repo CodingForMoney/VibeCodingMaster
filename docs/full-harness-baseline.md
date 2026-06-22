@@ -130,9 +130,9 @@ Project-scoped runtime state lives in the base repository:
 
 ```text
 <baseRepoRoot>/.ai/vcm/gate-reviewer/session.json
+<baseRepoRoot>/.ai/vcm/harness-engineer/session.json
 <baseRepoRoot>/.ai/vcm/translations/
 <baseRepoRoot>/.ai/vcm/bootstrap/session.json
-<baseRepoRoot>/.ai/vcm/bootstrap/bootstrap.log
 ```
 
 App-local state lives under `vcmDataDir`:

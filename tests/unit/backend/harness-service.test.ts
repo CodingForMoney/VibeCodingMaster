@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { FileSystemAdapter } from "../../../src/backend/adapters/filesystem.js";
 import type { CreateTerminalSessionInput, TerminalRuntime, TerminalSession } from "../../../src/backend/runtime/terminal-runtime.js";
 import { createHarnessService } from "../../../src/backend/services/harness-service.js";
+import type { RoleSessionRecord, StartRoleSessionRequest } from "../../../src/shared/types/session.js";
 
 describe("createHarnessService", () => {
   it("plans and applies recommended harness files when they are missing", async () => {
@@ -405,23 +406,16 @@ describe("createHarnessService", () => {
     });
   });
 
-  it("starts bootstrap Claude Code before sending the bootstrap prompt", async () => {
+  it("uses the project harness-engineer session for bootstrap", async () => {
     const fs = createMemoryFs();
     const runtimeInputs: CreateTerminalSessionInput[] = [];
     const writes: string[] = [];
+    const runtime = createFakeRuntime(runtimeInputs, writes);
+    const ensureRequests: StartRoleSessionRequest[] = [];
     const service = createHarnessService({
       fs,
-      runtime: createFakeRuntime(runtimeInputs, writes),
-      projectService: {
-        async loadConfig() {
-          return {
-            version: 1,
-            repoRoot: "/repo",
-            stateRoot: ".ai/vcm",
-            claudeCommand: "claude"
-          };
-        }
-      } as never
+      runtime,
+      harnessEngineerSessions: createFakeHarnessEngineerSessions(runtime, ensureRequests)
     });
     await service.applyHarness("/repo");
     await fs.writeText("/repo/.ai/vcm-harness-manifest.json", "{}\n");
@@ -438,24 +432,120 @@ describe("createHarnessService", () => {
     expect(started.session.permissionMode).toBe("bypassPermissions");
     expect(started.session.model).toBe("claude-opus-4-8[1m]");
     expect(started.session.effort).toBe("high");
-    expect(runtimeInputs[0]?.args).toEqual([
-      "--session-id",
-      started.session.claudeSessionId,
-      "--model",
-      "claude-opus-4-8[1m]",
-      "--effort",
-      "high",
-      "--permission-mode",
-      "bypassPermissions"
-    ]);
+    expect(ensureRequests[0]).toMatchObject({
+      permissionMode: "bypassPermissions",
+      model: "claude-opus-4-8[1m]",
+      effort: "high"
+    });
+    expect(runtimeInputs[0]).toMatchObject({
+      taskSlug: "__project_harness_engineer__",
+      role: "harness-engineer",
+      cwd: "/repo"
+    });
     expect(writes).toEqual([]);
 
     const run = await service.runHarnessBootstrap("/repo");
     expect(run.prompt).toContain("Use the vcm-harness-bootstrap skill");
     expect(writes[0]).toContain("Use the vcm-harness-bootstrap skill");
     expect(writes[1]).toBe("\r");
+
+    const runningStatus = await service.getBootstrapStatus("/repo");
+    expect(runningStatus.status).toBe("running");
+
+    await service.recordHarnessBootstrapHook("/repo", {
+      eventName: "Stop",
+      sessionId: started.session.id,
+      claudeSessionId: started.session.claudeSessionId
+    });
+    const completedStatus = await service.getBootstrapStatus("/repo");
+    expect(completedStatus.status).toBe("complete");
+  });
+
+  it("ignores stale legacy bootstrap terminal session records", async () => {
+    const fs = createMemoryFs();
+    const service = createHarnessService({ fs });
+    await service.applyHarness("/repo");
+    await fs.writeText("/repo/.ai/vcm-harness-manifest.json", "{}\n");
+    await fs.writeText("/repo/.ai/tools/generate-module-index", "#!/usr/bin/env python3\n");
+    await fs.writeText("/repo/.ai/tools/generate-public-surface", "#!/usr/bin/env python3\n");
+    await fs.writeJson("/repo/.ai/vcm/bootstrap/session.json", {
+      id: "legacy-bootstrap",
+      claudeSessionId: "legacy-claude-session",
+      status: "running",
+      command: "claude --session-id legacy-claude-session",
+      cwd: "/repo",
+      logPath: ".ai/vcm/bootstrap/bootstrap.log",
+      updatedAt: "2026-06-22T00:00:00.000Z"
+    });
+
+    const status = await service.getBootstrapStatus("/repo");
+
+    expect(status.status).not.toBe("running");
+    expect(status.session).toBeUndefined();
   });
 });
+
+function createFakeHarnessEngineerSessions(
+  runtime: TerminalRuntime,
+  ensureRequests: StartRoleSessionRequest[]
+) {
+  let record: RoleSessionRecord | undefined;
+  async function createRecord(input: StartRoleSessionRequest = {}): Promise<RoleSessionRecord> {
+    ensureRequests.push(input);
+    const runtimeSession = await runtime.createSession({
+      taskSlug: "__project_harness_engineer__",
+      role: "harness-engineer",
+      command: "claude",
+      args: ["--agent", "harness-engineer"],
+      cwd: "/repo",
+      cols: input.cols,
+      rows: input.rows
+    });
+    record = {
+      id: runtimeSession.id,
+      claudeSessionId: "claude-harness-engineer",
+      taskSlug: "__project_harness_engineer__",
+      role: "harness-engineer",
+      status: runtimeSession.status,
+      activityStatus: "idle",
+      command: "claude --agent harness-engineer",
+      permissionMode: input.permissionMode ?? "default",
+      model: input.model,
+      effort: input.effort,
+      cwd: "/repo",
+      terminalBackend: "node-pty",
+      startedAt: runtimeSession.startedAt,
+      updatedAt: "2026-06-22T00:00:00.000Z",
+      lastOutputAt: runtimeSession.lastOutputAt,
+      exitCode: runtimeSession.exitCode
+    };
+    return record;
+  }
+
+  return {
+    ensureProjectHarnessEngineerSession: async (_repoRoot: string, input: StartRoleSessionRequest = {}) => {
+      if (record?.status === "running") {
+        return record;
+      }
+      return createRecord(input);
+    },
+    restartProjectHarnessEngineerSession: async (_repoRoot: string, input: StartRoleSessionRequest = {}) => createRecord(input),
+    stopProjectHarnessEngineerSession: async () => {
+      if (!record) {
+        throw new Error("missing harness engineer session");
+      }
+      await runtime.stop(record.id);
+      record = {
+        ...record,
+        status: "exited",
+        updatedAt: "2026-06-22T00:00:01.000Z",
+        exitCode: 0
+      };
+      return record;
+    },
+    getProjectHarnessEngineerSession: async () => record
+  };
+}
 
 function createFakeRuntime(inputs: CreateTerminalSessionInput[], writes: string[]): TerminalRuntime {
   const sessions = new Map<string, TerminalSession>();
