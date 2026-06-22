@@ -1,4 +1,4 @@
-import type { RoleSessionRecord, SessionEffort, SessionModel } from "../../shared/types/session.js";
+import type { ClaudePermissionMode, RoleSessionRecord, SessionEffort, SessionModel } from "../../shared/types/session.js";
 import { SessionToolbar } from "./session-toolbar.js";
 import { XtermView } from "../terminal/xterm-view.js";
 
@@ -7,10 +7,12 @@ export interface TranslatorSessionModalProps {
   effort: SessionEffort;
   model: SessionModel;
   open: boolean;
+  permissionMode: ClaudePermissionMode;
   session?: RoleSessionRecord | null;
   onClose(): void;
   onEffortChange(effort: SessionEffort): void;
   onModelChange(model: SessionModel): void;
+  onPermissionModeChange(permissionMode: ClaudePermissionMode): void;
   onResume(): void;
   onRestart(): void;
   onStart(): void;
@@ -22,10 +24,12 @@ export function TranslatorSessionModal({
   effort,
   model,
   open,
+  permissionMode,
   session,
   onClose,
   onEffortChange,
   onModelChange,
+  onPermissionModeChange,
   onResume,
   onRestart,
   onStart,
@@ -49,11 +53,11 @@ export function TranslatorSessionModal({
         <SessionToolbar
           role="translator"
           session={session ?? undefined}
-          permissionMode="default"
+          permissionMode={permissionMode}
           model={model}
           effort={effort}
           busy={busy}
-          onPermissionModeChange={() => undefined}
+          onPermissionModeChange={onPermissionModeChange}
           onModelChange={onModelChange}
           onEffortChange={onEffortChange}
           onStart={onStart}

@@ -342,7 +342,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     const persisted = await loadPersistedTranslatorSession(deps.fs, repoRoot);
     const permissionMode = normalizeClaudePermissionMode(input.permissionMode ?? persisted?.permissionMode);
     const model = normalizeClaudeModel(input.model ?? persisted?.model);
-    const effort = normalizeClaudeEffort(input.effort ?? persisted?.effort);
+    const effort = normalizeClaudeEffort(input.effort ?? persisted?.effort ?? "medium");
     const claudeSessionId = launchMode === "resume"
       ? persisted?.claudeSessionId
       : randomUUID();
@@ -536,6 +536,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       }
       if (existing?.claudeSessionId) {
         return this.resumeProjectTranslatorSession(repoRoot, {
+          permissionMode: input.permissionMode ?? existing.permissionMode,
           model: input.model ?? existing.model,
           effort: input.effort ?? existing.effort,
           cols: input.cols,

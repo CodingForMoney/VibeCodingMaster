@@ -27,7 +27,7 @@ import type { VcmOrchestrationState, VcmRoleMessage } from "../shared/types/mess
 import type { ProjectSummary } from "../shared/types/project.js";
 import type { RoleName } from "../shared/types/role.js";
 import type { VcmSessionRoundState } from "../shared/types/round.js";
-import type { RoleSessionRecord, SessionEffort, SessionModel } from "../shared/types/session.js";
+import type { ClaudePermissionMode, RoleSessionRecord, SessionEffort, SessionModel } from "../shared/types/session.js";
 import type { TaskRecord } from "../shared/types/task.js";
 import { CORE_VCM_ROLE_NAMES } from "../shared/constants.js";
 import { AppShell } from "./components/app-shell.js";
@@ -71,6 +71,7 @@ export function App() {
   const [fileTranslationOpen, setFileTranslationOpen] = useState(false);
   const [translatorSessionOpen, setTranslatorSessionOpen] = useState(false);
   const [translatorSession, setTranslatorSession] = useState<RoleSessionRecord | null>(null);
+  const [translatorPermissionMode, setTranslatorPermissionMode] = useState<ClaudePermissionMode>("default");
   const [translatorModel, setTranslatorModel] = useState<SessionModel>("default");
   const [translatorEffort, setTranslatorEffort] = useState<SessionEffort>("medium");
   const [launchTemplate, setLaunchTemplate] = useState<LaunchTemplate>(() => createDefaultLaunchTemplate());
@@ -273,14 +274,24 @@ export function App() {
     return state;
   }
 
-  async function refreshTranslatorSession() {
-    const session = await apiClient.getTranslatorSession();
-    setTranslatorSession(session);
-    if (session?.model) {
+  function syncTranslatorLaunchOptions(session: RoleSessionRecord | null) {
+    if (!session) {
+      return;
+    }
+    setTranslatorPermissionMode(session.permissionMode);
+    if (session.model) {
       setTranslatorModel(session.model);
     }
-    if (session?.effort) {
+    if (session.effort) {
       setTranslatorEffort(session.effort);
+    }
+  }
+
+  async function refreshTranslatorSession(options: { syncLaunchOptions?: boolean } = {}) {
+    const session = await apiClient.getTranslatorSession();
+    setTranslatorSession(session);
+    if (options.syncLaunchOptions) {
+      syncTranslatorLaunchOptions(session);
     }
     return session;
   }
@@ -388,6 +399,9 @@ export function App() {
   useEffect(() => {
     translatorEnsureKeyRef.current = "";
     setTranslatorSession(null);
+    setTranslatorPermissionMode("default");
+    setTranslatorModel("default");
+    setTranslatorEffort("medium");
   }, [project?.repoRoot]);
 
   useEffect(() => {
@@ -395,7 +409,7 @@ export function App() {
       return;
     }
 
-    void refreshTranslatorSession().catch((caught: Error) => setError(caught.message));
+    void refreshTranslatorSession({ syncLaunchOptions: true }).catch((caught: Error) => setError(caught.message));
     const interval = window.setInterval(() => {
       void refreshTranslatorSession().catch((caught: Error) => setError(caught.message));
     }, 3000);
@@ -412,18 +426,10 @@ export function App() {
       return;
     }
     translatorEnsureKeyRef.current = ensureKey;
-    void apiClient.ensureTranslatorSession({
-      model: translatorModel,
-      effort: translatorEffort
-    })
+    void apiClient.ensureTranslatorSession()
       .then((session) => {
         setTranslatorSession(session);
-        if (session.model) {
-          setTranslatorModel(session.model);
-        }
-        if (session.effort) {
-          setTranslatorEffort(session.effort);
-        }
+        syncTranslatorLaunchOptions(session);
       })
       .catch((caught: Error) => {
         translatorEnsureKeyRef.current = "";
@@ -878,9 +884,11 @@ export function App() {
         open={translatorSessionOpen}
         busy={busy}
         session={translatorSession}
+        permissionMode={translatorPermissionMode}
         model={translatorModel}
         effort={translatorEffort}
         onClose={() => setTranslatorSessionOpen(false)}
+        onPermissionModeChange={setTranslatorPermissionMode}
         onModelChange={setTranslatorModel}
         onEffortChange={setTranslatorEffort}
         onStart={() => {
@@ -888,10 +896,12 @@ export function App() {
             const session = await apiClient.startTranslatorSession({
               cols: 100,
               rows: 28,
+              permissionMode: translatorPermissionMode,
               model: translatorModel,
               effort: translatorEffort
             });
             setTranslatorSession(session);
+            syncTranslatorLaunchOptions(session);
           });
         }}
         onResume={() => {
@@ -899,10 +909,12 @@ export function App() {
             const session = await apiClient.resumeTranslatorSession({
               cols: 100,
               rows: 28,
+              permissionMode: translatorPermissionMode,
               model: translatorModel,
               effort: translatorEffort
             });
             setTranslatorSession(session);
+            syncTranslatorLaunchOptions(session);
           });
         }}
         onRestart={() => {
@@ -910,10 +922,12 @@ export function App() {
             const session = await apiClient.restartTranslatorSession({
               cols: 100,
               rows: 28,
+              permissionMode: translatorPermissionMode,
               model: translatorModel,
               effort: translatorEffort
             });
             setTranslatorSession(session);
+            syncTranslatorLaunchOptions(session);
           });
         }}
         onStop={() => {

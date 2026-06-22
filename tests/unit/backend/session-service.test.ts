@@ -270,6 +270,37 @@ describe("createSessionService", () => {
     expect(runtimeInputs[0]?.args).not.toContain("--sandbox");
   });
 
+  it("resumes Translator with selected permission, model, and effort from ensure", async () => {
+    const fs = createMemoryFs();
+    const firstService = createTestSessionService(fs, []);
+    const started = await firstService.startProjectTranslatorSession("/repo");
+
+    const runtimeInputs: CreateTerminalSessionInput[] = [];
+    const secondService = createTestSessionService(fs, runtimeInputs);
+    const resumed = await secondService.ensureProjectTranslatorSession("/repo", {
+      permissionMode: "bypassPermissions",
+      model: "claude-opus-4-8[1m]",
+      effort: "high"
+    });
+
+    expect(resumed.claudeSessionId).toBe(started.claudeSessionId);
+    expect(resumed.permissionMode).toBe("bypassPermissions");
+    expect(resumed.model).toBe("claude-opus-4-8[1m]");
+    expect(resumed.effort).toBe("high");
+    expect(runtimeInputs[0]?.args).toEqual([
+      "--agent",
+      "translator",
+      "--resume",
+      started.claudeSessionId,
+      "--model",
+      "claude-opus-4-8[1m]",
+      "--effort",
+      "high",
+      "--permission-mode",
+      "bypassPermissions"
+    ]);
+  });
+
   it("passes Gate Reviewer effort through Claude Code settings", async () => {
     const fs = createMemoryFs();
     const runtimeInputs: CreateTerminalSessionInput[] = [];
