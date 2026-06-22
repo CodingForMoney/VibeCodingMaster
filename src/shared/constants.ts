@@ -1,4 +1,4 @@
-import type { CodexRoleName, CodexTranslatorRoleName, CoreVcmRoleName, DispatchableRole, GateReviewerRoleName, RoleDefinition, RoleName, VcmRoleName } from "./types/role.js";
+import type { CoreVcmRoleName, DispatchableRole, GateReviewerRoleName, RoleDefinition, RoleName, ToolRoleName, TranslatorToolRoleName, VcmRoleName } from "./types/role.js";
 
 export const DEFAULT_BACKEND_PORT = 4173;
 export const DEFAULT_FRONTEND_PORT = 5173;
@@ -42,25 +42,25 @@ export const VCM_ROLE_DEFINITIONS: readonly RoleDefinition<VcmRoleName>[] = [
   GATE_REVIEWER_ROLE_DEFINITION
 ] as const;
 
-export const CODEX_TRANSLATOR_ROLE_DEFINITION: RoleDefinition<CodexTranslatorRoleName> = {
-  name: "codex-translator",
-  label: "Codex Translator",
-  commandAgent: "codex-translator",
+export const TRANSLATOR_TOOL_ROLE_DEFINITION: RoleDefinition<TranslatorToolRoleName> = {
+  name: "translator",
+  label: "Translator",
+  commandAgent: "translator",
   dispatchable: false
 };
 
-export const CODEX_ROLE_DEFINITIONS: readonly RoleDefinition<CodexRoleName>[] = [
-  CODEX_TRANSLATOR_ROLE_DEFINITION
+export const TOOL_ROLE_DEFINITIONS: readonly RoleDefinition<ToolRoleName>[] = [
+  TRANSLATOR_TOOL_ROLE_DEFINITION
 ] as const;
 
 export const ROLE_DEFINITIONS: readonly RoleDefinition[] = [
   ...VCM_ROLE_DEFINITIONS,
-  ...CODEX_ROLE_DEFINITIONS
+  ...TOOL_ROLE_DEFINITIONS
 ] as const;
 
 export const CORE_VCM_ROLE_NAMES = CORE_VCM_ROLE_DEFINITIONS.map((role) => role.name) as readonly CoreVcmRoleName[];
 export const VCM_ROLE_NAMES = VCM_ROLE_DEFINITIONS.map((role) => role.name) as readonly VcmRoleName[];
-export const CODEX_ROLE_NAMES = CODEX_ROLE_DEFINITIONS.map((role) => role.name) as readonly CodexRoleName[];
+export const TOOL_ROLE_NAMES = TOOL_ROLE_DEFINITIONS.map((role) => role.name) as readonly ToolRoleName[];
 export const ROLE_NAMES = ROLE_DEFINITIONS.map((role) => role.name) as readonly RoleName[];
 export const DISPATCHABLE_ROLES = ROLE_DEFINITIONS
   .filter((role) => role.dispatchable)
@@ -78,8 +78,12 @@ export function isGateReviewerRoleName(value: string): value is GateReviewerRole
   return value === GATE_REVIEWER_ROLE_DEFINITION.name;
 }
 
-export function isCodexRoleName(value: string): value is CodexRoleName {
-  return CODEX_ROLE_NAMES.includes(value as CodexRoleName);
+export function isToolRoleName(value: string): value is ToolRoleName {
+  return TOOL_ROLE_NAMES.includes(value as ToolRoleName);
+}
+
+export function isTranslatorToolRoleName(value: string): value is TranslatorToolRoleName {
+  return value === TRANSLATOR_TOOL_ROLE_DEFINITION.name;
 }
 
 export function isDispatchableRole(value: string): value is DispatchableRole {

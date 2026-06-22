@@ -7,7 +7,7 @@ import type {
   ClaudeTranscriptService,
   ClaudeTranscriptSubscribeOptions
 } from "../../../src/backend/services/claude-transcript-service.js";
-import type { CodexTranslationService } from "../../../src/backend/services/codex-translation-service.js";
+import type { TranslationWorkerService } from "../../../src/backend/services/translation-worker-service.js";
 import type { SessionService } from "../../../src/backend/services/session-service.js";
 import { formatTerminalPaste, normalizeTerminalSubmitText } from "../../../src/backend/runtime/terminal-submit.js";
 import { createTranslationService as createTranslationServiceBase } from "../../../src/backend/services/translation-service.js";
@@ -132,11 +132,12 @@ describe("translation-service", () => {
       fs,
       settingsPath: "/settings.json",
     });
+    await appSettings.updatePreferences({ translationOutputMode: "final-only" });
     const runtime = createRuntimeStub();
     const transcripts = createTranscriptStub();
     const service = createTranslationService({
       appSettings,
-      codexTranslationService: createCodexTranslationServiceStub([], "我找到了失败的测试。"),
+      translationWorkerService: createTranslationWorkerServiceStub([], "我找到了失败的测试。"),
       runtime,
       sessionRegistry: createRegistryStub(),
       transcripts,
@@ -193,10 +194,10 @@ describe("translation-service", () => {
       await appSettings.updatePreferences({ translationOutputMode: "all" });
       const runtime = createRuntimeStub();
       const transcripts = createTranscriptStub();
-      const codexCalls: Array<{ sourceText: string; deferDispatch?: boolean }> = [];
+      const translatorCalls: Array<{ sourceText: string; deferDispatch?: boolean }> = [];
       const service = createTranslationService({
         appSettings,
-        codexTranslationService: createCodexTranslationServiceStub(codexCalls, "已翻译。"),
+        translationWorkerService: createTranslationWorkerServiceStub(translatorCalls, "已翻译。"),
         runtime,
         sessionRegistry: createRegistryStub(),
         transcripts,
@@ -224,19 +225,19 @@ describe("translation-service", () => {
       });
       await vi.advanceTimersByTimeAsync(0);
 
-      expect(codexCalls).toHaveLength(0);
+      expect(translatorCalls).toHaveLength(0);
       expect(messages.filter((message) =>
         message.type === "translation-entry" && message.entry.status === "queued"
       )).toHaveLength(2);
 
       await vi.advanceTimersByTimeAsync(9999);
-      expect(codexCalls).toHaveLength(0);
+      expect(translatorCalls).toHaveLength(0);
       await vi.advanceTimersByTimeAsync(1);
       await waitFor(() => messages.filter((message) =>
         message.type === "translation-entry" && message.entry.status === "translated"
       ).length >= 2);
 
-      expect(codexCalls.map((call) => ({
+      expect(translatorCalls.map((call) => ({
         sourceText: call.sourceText,
         deferDispatch: call.deferDispatch
       }))).toEqual([
@@ -257,10 +258,10 @@ describe("translation-service", () => {
     await appSettings.updatePreferences({ translationOutputMode: "all" });
     const runtime = createRuntimeStub();
     const transcripts = createTranscriptStub();
-    const codexCalls: Array<{ sourceText: string; deferDispatch?: boolean }> = [];
+    const translatorCalls: Array<{ sourceText: string; deferDispatch?: boolean }> = [];
     const service = createTranslationServiceBase({
       appSettings,
-      codexTranslationService: createCodexTranslationServiceStub(codexCalls, "已翻译。"),
+      translationWorkerService: createTranslationWorkerServiceStub(translatorCalls, "已翻译。"),
       runtime,
       sessionRegistry: createRegistryStub(),
       transcripts,
@@ -278,7 +279,7 @@ describe("translation-service", () => {
       text: "I will inspect the logs."
     });
     await delay(20);
-    expect(codexCalls).toHaveLength(0);
+    expect(translatorCalls).toHaveLength(0);
 
     transcripts.emit({
       kind: "text",
@@ -292,7 +293,7 @@ describe("translation-service", () => {
       message.type === "translation-entry" && message.entry.status === "translated"
     ).length >= 2);
 
-    expect(codexCalls.map((call) => ({
+    expect(translatorCalls.map((call) => ({
       sourceText: call.sourceText,
       deferDispatch: call.deferDispatch
     }))).toEqual([
@@ -307,11 +308,12 @@ describe("translation-service", () => {
       fs,
       settingsPath: "/settings.json",
     });
+    await appSettings.updatePreferences({ translationOutputMode: "final-only" });
     const runtime = createRuntimeStub();
     const transcripts = createTranscriptStub();
     const service = createTranslationService({
       appSettings,
-      codexTranslationService: createFailOnceCodexTranslationServiceStub("重试成功。"),
+      translationWorkerService: createFailOnceTranslationWorkerServiceStub("重试成功。"),
       runtime,
       sessionRegistry: createRegistryStub(),
       transcripts,
@@ -386,11 +388,12 @@ describe("translation-service", () => {
       fs,
       settingsPath: "/settings.json",
     });
+    await appSettings.updatePreferences({ translationOutputMode: "final-only" });
     const runtime = createRuntimeStub();
     const transcripts = createTranscriptStub();
     const service = createTranslationService({
       appSettings,
-      codexTranslationService: createAlwaysFailCodexTranslationServiceStub(),
+      translationWorkerService: createAlwaysFailTranslationWorkerServiceStub(),
       runtime,
       sessionRegistry: createRegistryStub(),
       transcripts,
@@ -450,7 +453,7 @@ describe("translation-service", () => {
     const roleSession = createRoleSessionRecord();
     const service = createTranslationService({
       appSettings,
-      codexTranslationService: createCodexTranslationServiceStub([], "Please inspect the failing test."),
+      translationWorkerService: createTranslationWorkerServiceStub([], "Please inspect the failing test."),
       runtime: createRuntimeStub(),
       sessionRegistry: createRegistryStub(roleSession),
       transcripts: createTranscriptStub(),
@@ -492,17 +495,17 @@ describe("translation-service", () => {
     });
   });
 
-  it("uses Codex conversation jobs for user input translation when available", async () => {
+  it("uses Translator conversation jobs for user input translation when available", async () => {
     const fs = createMemoryFs();
     const appSettings = createAppSettingsService({
       fs,
       settingsPath: "/settings.json",
     });
     const roleSession = createRoleSessionRecord();
-    const codexCalls: unknown[] = [];
+    const translatorCalls: unknown[] = [];
     const service = createTranslationService({
       appSettings,
-      codexTranslationService: createCodexTranslationServiceStub(codexCalls, "Please inspect the failing test."),
+      translationWorkerService: createTranslationWorkerServiceStub(translatorCalls, "Please inspect the failing test."),
       runtime: createRuntimeStub(),
       sessionRegistry: createRegistryStub(roleSession),
       transcripts: createTranscriptStub(),
@@ -522,7 +525,7 @@ describe("translation-service", () => {
     });
 
     expect(result.englishPreview).toBe("Please inspect the failing test.");
-    expect(codexCalls).toEqual([
+    expect(translatorCalls).toEqual([
       expect.objectContaining({
         repoRoot: "/repo",
         direction: "user-input-to-english",
@@ -530,8 +533,8 @@ describe("translation-service", () => {
         targetLanguage: "en"
       })
     ]);
-    expect(codexCalls[0]).not.toHaveProperty("taskSlug");
-    expect(codexCalls[0]).not.toHaveProperty("role");
+    expect(translatorCalls[0]).not.toHaveProperty("taskSlug");
+    expect(translatorCalls[0]).not.toHaveProperty("role");
   });
 
   it("sends translated input by pasting first and pressing enter separately", async () => {
@@ -573,12 +576,13 @@ describe("translation-service", () => {
       fs,
       settingsPath: "/settings.json",
     });
+    await appSettings.updatePreferences({ translationOutputMode: "final-only" });
     const runtime = createRuntimeStub();
     const transcripts = createTranscriptStub();
-    const codexCalls: unknown[] = [];
+    const translatorCalls: unknown[] = [];
     const service = createTranslationService({
       appSettings,
-      codexTranslationService: createCodexTranslationServiceStub(codexCalls, "最终译文。"),
+      translationWorkerService: createTranslationWorkerServiceStub(translatorCalls, "最终译文。"),
       runtime,
       sessionRegistry: createRegistryStub(),
       transcripts,
@@ -601,7 +605,7 @@ describe("translation-service", () => {
       && message.entry.status === "preserved"
     ));
 
-    expect(codexCalls).toHaveLength(0);
+    expect(translatorCalls).toHaveLength(0);
     expect(messages).toContainEqual(expect.objectContaining({
       type: "translation-entry",
       entry: expect.objectContaining({
@@ -614,13 +618,12 @@ describe("translation-service", () => {
     }));
   });
 
-  it("translates only project-manager end-turn text in PM final reply mode", async () => {
+  it("translates only project-manager end-turn text by default", async () => {
     const fs = createMemoryFs();
     const appSettings = createAppSettingsService({
       fs,
       settingsPath: "/settings.json",
     });
-    await appSettings.updatePreferences({ translationOutputMode: "pm-final-only" });
     const coderSession = createRoleSessionRecord({
       id: "session-coder",
       role: "coder",
@@ -633,10 +636,10 @@ describe("translation-service", () => {
     });
     const runtime = createRuntimeStub([coderSession, pmSession]);
     const transcripts = createSessionTranscriptStub();
-    const codexCalls: Array<{ role: string; sourceText: string }> = [];
+    const translatorCalls: Array<{ role: string; sourceText: string }> = [];
     const service = createTranslationService({
       appSettings,
-      codexTranslationService: createCodexTranslationServiceStub(codexCalls, "PM 译文。"),
+      translationWorkerService: createTranslationWorkerServiceStub(translatorCalls, "PM 译文。"),
       runtime,
       sessionRegistry: createRegistryStub([coderSession, pmSession]),
       transcripts,
@@ -669,12 +672,12 @@ describe("translation-service", () => {
       && message.entry.status === "translated"
     ));
 
-    expect(codexCalls).toHaveLength(1);
-    expect(codexCalls[0]).toMatchObject({
+    expect(translatorCalls).toHaveLength(1);
+    expect(translatorCalls[0]).toMatchObject({
       sourceText: "PM final reply."
     });
-    expect(codexCalls[0]).not.toHaveProperty("taskSlug");
-    expect(codexCalls[0]).not.toHaveProperty("role");
+    expect(translatorCalls[0]).not.toHaveProperty("taskSlug");
+    expect(translatorCalls[0]).not.toHaveProperty("role");
     expect(coderMessages).toContainEqual(expect.objectContaining({
       type: "translation-entry",
       entry: expect.objectContaining({
@@ -695,10 +698,10 @@ describe("translation-service", () => {
     await appSettings.updatePreferences({ translationOutputMode: "all" });
     const runtime = createRuntimeStub();
     const transcripts = createTranscriptStub();
-    const codexCalls: Array<{ sourceText: string }> = [];
+    const translatorCalls: Array<{ sourceText: string }> = [];
     const service = createTranslationService({
       appSettings,
-      codexTranslationService: createCodexTranslationServiceStub(codexCalls, "最终译文。"),
+      translationWorkerService: createTranslationWorkerServiceStub(translatorCalls, "最终译文。"),
       runtime,
       sessionRegistry: createRegistryStub(),
       transcripts,
@@ -721,8 +724,8 @@ describe("translation-service", () => {
       && message.entry.status === "translated"
     ));
 
-    expect(codexCalls).toHaveLength(1);
-    expect(codexCalls[0]?.sourceText).toBe("I will inspect the test logs first.");
+    expect(translatorCalls).toHaveLength(1);
+    expect(translatorCalls[0]?.sourceText).toBe("I will inspect the test logs first.");
   });
 
   it("translates long assistant prose even when it mentions permissions or code-like terms", async () => {
@@ -731,12 +734,13 @@ describe("translation-service", () => {
       fs,
       settingsPath: "/settings.json",
     });
+    await appSettings.updatePreferences({ translationOutputMode: "final-only" });
     const runtime = createRuntimeStub();
     const transcripts = createTranscriptStub();
-    const codexCalls: Array<{ sourceText: string }> = [];
+    const translatorCalls: Array<{ sourceText: string }> = [];
     const service = createTranslationService({
       appSettings,
-      codexTranslationService: createCodexTranslationServiceStub(codexCalls, "项目理解已翻译。"),
+      translationWorkerService: createTranslationWorkerServiceStub(translatorCalls, "项目理解已翻译。"),
       runtime,
       sessionRegistry: createRegistryStub(),
       transcripts,
@@ -769,8 +773,8 @@ describe("translation-service", () => {
       message.type === "translation-entry" && message.entry.status === "translated"
     ));
 
-    expect(codexCalls).toHaveLength(1);
-    expect(codexCalls[0]?.sourceText).toBe(text);
+    expect(translatorCalls).toHaveLength(1);
+    expect(translatorCalls[0]?.sourceText).toBe(text);
     expect(messages.some((message) =>
       message.type === "translation-entry"
       && message.entry.id === "assistant-final-message"
@@ -785,6 +789,7 @@ describe("translation-service", () => {
       fs,
       settingsPath: "/settings.json",
     });
+    await appSettings.updatePreferences({ translationOutputMode: "final-only" });
     const runtime = createRuntimeStub();
     const transcripts = createTranscriptStub();
     const service = createTranslationService({
@@ -897,12 +902,13 @@ describe("translation-service", () => {
       fs,
       settingsPath: "/settings.json",
     });
+    await appSettings.updatePreferences({ translationOutputMode: "final-only" });
     const runtime = createRuntimeStub();
     const transcripts = createTranscriptStub();
-    const translator = createDeferredCodexTranslationServiceStub("慢速译文。");
+    const translator = createDeferredTranslationWorkerServiceStub("慢速译文。");
     const service = createTranslationService({
       appSettings,
-      codexTranslationService: translator,
+      translationWorkerService: translator,
       runtime,
       sessionRegistry: createRegistryStub(),
       transcripts,
@@ -959,6 +965,7 @@ describe("translation-service", () => {
       fs,
       settingsPath: "/settings.json",
     });
+    await appSettings.updatePreferences({ translationOutputMode: "final-only" });
     const coderSession = createRoleSessionRecord({
       id: "session-coder",
       role: "coder",
@@ -970,10 +977,10 @@ describe("translation-service", () => {
       claudeSessionId: "claude-reviewer"
     });
     const transcripts = createSessionTranscriptStub();
-    const translator = createSelectiveDeferredCodexTranslationServiceStub("Coder output is slow.");
+    const translator = createSelectiveDeferredTranslationWorkerServiceStub("Coder output is slow.");
     const service = createTranslationService({
       appSettings,
-      codexTranslationService: translator,
+      translationWorkerService: translator,
       runtime: createRuntimeStub([coderSession, reviewerSession]),
       sessionRegistry: createRegistryStub([coderSession, reviewerSession]),
       transcripts,
@@ -1034,10 +1041,10 @@ describe("translation-service", () => {
     await appSettings.updatePreferences({ translationOutputMode: "all" });
     const runtime = createRuntimeStub();
     const transcripts = createTranscriptStub();
-    const codexCalls: Array<{ sourceText: string }> = [];
+    const translatorCalls: Array<{ sourceText: string }> = [];
     const service = createTranslationService({
       appSettings,
-      codexTranslationService: createCodexTranslationServiceStub(codexCalls, "结构化译文。"),
+      translationWorkerService: createTranslationWorkerServiceStub(translatorCalls, "结构化译文。"),
       runtime,
       sessionRegistry: createRegistryStub(),
       transcripts,
@@ -1082,7 +1089,7 @@ describe("translation-service", () => {
       message.type === "translation-entry" && message.entry.status === "translated"
     ).length >= 3);
 
-    expect(codexCalls.map((call) => call.sourceText)).toEqual([
+    expect(translatorCalls.map((call) => call.sourceText)).toEqual([
       expect.stringContaining("AskUserQuestion"),
       expect.stringContaining("TodoWrite plan"),
       expect.stringContaining("Agent dispatch")
@@ -1123,11 +1130,12 @@ describe("translation-service", () => {
       fs,
       settingsPath: "/settings.json",
     });
+    await appSettings.updatePreferences({ translationOutputMode: "final-only" });
     const runtime = createRuntimeStub();
     const transcripts = createTranscriptStub();
     const service = createTranslationService({
       appSettings,
-      codexTranslationService: createCodexTranslationServiceStub([], "已翻译。"),
+      translationWorkerService: createTranslationWorkerServiceStub([], "已翻译。"),
       runtime,
       sessionRegistry: createRegistryStub(),
       transcripts,
@@ -1166,7 +1174,7 @@ function createTranslationService(deps: TranslationServiceDeps) {
   });
 }
 
-function createCodexTranslationServiceStub(calls: unknown[], translatedText: string): Pick<CodexTranslationService, "createConversationJob" | "validateConversationResult" | "getState"> {
+function createTranslationWorkerServiceStub(calls: unknown[], translatedText: string): Pick<TranslationWorkerService, "createConversationJob" | "validateConversationResult" | "getState"> {
   const timestamp = "2026-05-30T00:00:00.000Z";
   const jobs: Array<{
     id: string;
@@ -1243,33 +1251,33 @@ function createCodexTranslationServiceStub(calls: unknown[], translatedText: str
   };
 }
 
-function createFailOnceCodexTranslationServiceStub(translatedText = "translated"): Pick<CodexTranslationService, "createConversationJob" | "validateConversationResult" | "getState"> {
-  const service = createCodexTranslationServiceStub([], translatedText);
+function createFailOnceTranslationWorkerServiceStub(translatedText = "translated"): Pick<TranslationWorkerService, "createConversationJob" | "validateConversationResult" | "getState"> {
+  const service = createTranslationWorkerServiceStub([], translatedText);
   let calls = 0;
   return {
     ...service,
     async validateConversationResult(repoRoot, input) {
       calls += 1;
       if (calls === 1) {
-        throw new Error("Codex translation temporarily failed.");
+        throw new Error("translation temporarily failed.");
       }
       return service.validateConversationResult(repoRoot, input);
     }
   };
 }
 
-function createAlwaysFailCodexTranslationServiceStub(): Pick<CodexTranslationService, "createConversationJob" | "validateConversationResult" | "getState"> {
-  const service = createCodexTranslationServiceStub([], "unused");
+function createAlwaysFailTranslationWorkerServiceStub(): Pick<TranslationWorkerService, "createConversationJob" | "validateConversationResult" | "getState"> {
+  const service = createTranslationWorkerServiceStub([], "unused");
   return {
     ...service,
     async validateConversationResult() {
-      throw new Error("Codex translation failed.");
+      throw new Error("translation failed.");
     }
   };
 }
 
-function createDeferredCodexTranslationServiceStub(text = "translated"): Pick<CodexTranslationService, "createConversationJob" | "validateConversationResult" | "getState"> & { resolve(): void } {
-  const service = createCodexTranslationServiceStub([], text);
+function createDeferredTranslationWorkerServiceStub(text = "translated"): Pick<TranslationWorkerService, "createConversationJob" | "validateConversationResult" | "getState"> & { resolve(): void } {
+  const service = createTranslationWorkerServiceStub([], text);
   let resolveTranslation: (() => void) | undefined;
   let resolved = false;
   return {
@@ -1289,9 +1297,9 @@ function createDeferredCodexTranslationServiceStub(text = "translated"): Pick<Co
   };
 }
 
-function createSelectiveDeferredCodexTranslationServiceStub(blockedText: string): Pick<CodexTranslationService, "createConversationJob" | "validateConversationResult" | "getState"> & { resolve(): void } {
+function createSelectiveDeferredTranslationWorkerServiceStub(blockedText: string): Pick<TranslationWorkerService, "createConversationJob" | "validateConversationResult" | "getState"> & { resolve(): void } {
   const calls: Array<{ sourceText: string; sourceHash?: string }> = [];
-  const service = createCodexTranslationServiceStub(calls, "translated");
+  const service = createTranslationWorkerServiceStub(calls, "translated");
   let resolveTranslation: (() => void) | undefined;
   let resolved = false;
   return {

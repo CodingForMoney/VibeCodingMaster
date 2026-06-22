@@ -648,6 +648,78 @@ describe("createClaudeHookService", () => {
       }
     })).resolves.toBeUndefined();
   });
+
+  it("routes Translator hooks to the project translation worker without VCM flow side effects", async () => {
+    const calls: string[] = [];
+    const service = createClaudeHookService({
+      projectService: createProjectServiceStub(),
+      taskService: createTaskServiceStub(),
+      sessionService: {
+        async recordProjectTranslatorHookEvent(_repoRoot, input) {
+          calls.push(`session:${input.eventName}:${input.sessionId}`);
+          return {
+            id: "runtime_translator",
+            claudeSessionId: input.sessionId ?? "translator_session",
+            taskSlug: "__project__",
+            role: "translator",
+            status: "running",
+            activityStatus: input.eventName === "Stop" ? "idle" : "running",
+            command: "claude --agent translator",
+            permissionMode: "default",
+            cwd: input.cwd ?? "/repo",
+            terminalBackend: "node-pty",
+            updatedAt: "2026-06-01T00:00:00.000Z"
+          };
+        }
+      } as SessionService,
+      messageService: {
+        async confirmPromptSubmitted() {
+          calls.push("message");
+          return undefined;
+        }
+      } as unknown as MessageService,
+      roundService: {
+        async recordClaudeHookEvent() {
+          calls.push("round");
+          return {} as never;
+        }
+      } as RoundService,
+      translationService: {
+        async recordConversationBoundary() {
+          calls.push("boundary");
+          return undefined;
+        }
+      } as Pick<TranslationService, "recordConversationBoundary">,
+      translationWorkerService: {
+        async handleTranslatorHook(_repoRoot, eventName, taskSlug) {
+          calls.push(`worker:${eventName}:${taskSlug}`);
+        }
+      },
+      appSettings: createAppSettingsStub()
+    });
+
+    const result = await service.handleStopHook({
+      taskSlug: "__project__",
+      role: "translator",
+      event: {
+        hook_event_name: "Stop",
+        session_id: "translator_session",
+        cwd: "/repo"
+      }
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      eventName: "Stop",
+      role: "translator",
+      sessionUpdated: true,
+      dispatchedCount: 0
+    });
+    expect(calls).toEqual([
+      "session:Stop:translator_session",
+      "worker:Stop:__project__"
+    ]);
+  });
 });
 
 function createAppSettingsStub(permissionRequestMode: "off" | "allowAll" = "off") {

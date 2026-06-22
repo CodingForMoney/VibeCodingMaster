@@ -8,12 +8,9 @@ import { fileURLToPath } from "node:url";
 import { renderArchitectHarnessRules } from "../templates/harness/architect-agent.js";
 import { renderCoderHarnessRules } from "../templates/harness/coder-agent.js";
 import {
-  renderCodexCliConfigHarnessRules,
-  renderCodexHooksHarnessRules,
-  renderCodexTranslatorAgentsHarnessRules,
-  renderCodexTranslatorConfigHarnessRules,
   renderGateReviewerAgentRules,
   renderRequestGateReviewTool,
+  renderTranslatorAgentRules,
   renderVcmGateReviewSkillRules
 } from "../templates/harness/gate-review.js";
 import { renderRootClaudeHarnessRules } from "../templates/harness/claude-root.js";
@@ -32,6 +29,12 @@ const APP_ROOT = path.resolve(CLI_DIR, "../../..");
 const MANIFEST_PATH = ".ai/vcm-harness-manifest.json";
 const HTML_BLOCK_PATTERN = /<!-- VCM:BEGIN(?:\s+version=\d+)? -->[\s\S]*?<!-- VCM:END -->/m;
 const HASH_BLOCK_PATTERN = /# VCM:BEGIN(?:\s+version=\d+)?\n[\s\S]*?# VCM:END/m;
+const LEGACY_CODEX_HARNESS_PATHS = [
+  ".ai/codex",
+  ".ai/codex-translator",
+  ".claude/skills/vcm-codex-review-gate",
+  ".ai/tools/request-codex-review"
+];
 const VCM_HOOK_COMMAND = `sh -c 'if [ -z "\${VCM_TASK_SLUG:-}" ] || [ -z "\${VCM_ROLE:-}" ] || [ -z "\${VCM_API_URL:-}" ]; then exit 0; fi; node -e '"'"'let s="";process.stdin.setEncoding("utf8");process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{let event={};try{event=s.trim()?JSON.parse(s):{};}catch{event={raw:s};}process.stdout.write(JSON.stringify({taskSlug:process.env.VCM_TASK_SLUG,role:process.env.VCM_ROLE,event}));});'"'"' | curl -fsS --max-time 2 -X POST "\${VCM_API_URL}/api/hooks/claude-code" -H "content-type: application/json" --data-binary @- >/dev/null || true'`;
 const VCM_STOP_HOOK_COMMAND = `sh -c 'if [ -z "\${VCM_TASK_SLUG:-}" ] || [ -z "\${VCM_ROLE:-}" ] || [ -z "\${VCM_API_URL:-}" ]; then exit 0; fi; node -e '"'"'let s="";process.stdin.setEncoding("utf8");process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{let event={};try{event=s.trim()?JSON.parse(s):{};}catch{event={raw:s};}process.stdout.write(JSON.stringify({taskSlug:process.env.VCM_TASK_SLUG,role:process.env.VCM_ROLE,event}));});'"'"' | curl -fsS --max-time 5 -X POST "\${VCM_API_URL}/api/hooks/claude-code/stop" -H "content-type: application/json" --data-binary @- || true'`;
 const VCM_PERMISSION_REQUEST_HOOK_COMMAND = `sh -c 'if [ -z "\${VCM_TASK_SLUG:-}" ] || [ -z "\${VCM_ROLE:-}" ] || [ -z "\${VCM_API_URL:-}" ]; then exit 0; fi; node -e '"'"'let s="";process.stdin.setEncoding("utf8");process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{let event={};try{event=s.trim()?JSON.parse(s):{};}catch{event={raw:s};}process.stdout.write(JSON.stringify({taskSlug:process.env.VCM_TASK_SLUG,role:process.env.VCM_ROLE,event}));});'"'"' | curl -fsS --max-time 5 -X POST "\${VCM_API_URL}/api/hooks/claude-code/permission-request" -H "content-type: application/json" --data-binary @- || true'`;
@@ -61,6 +64,9 @@ const AGENT_FRONTMATTER = {
   },
   "gate-reviewer": {
     description: "VCM independent gate review role for architecture plans, validation adequacy, and final diffs."
+  },
+  translator: {
+    description: "VCM project translation tool role for conversation translation, file translation, bootstrap, and memory updates."
   }
 };
 
@@ -129,11 +135,12 @@ const MANAGED_FILES = [
     content: renderGateReviewerAgentRules()
   },
   {
-    path: ".ai/codex-translator/AGENTS.md",
-    title: "VCM Codex Translator",
+    path: ".claude/agents/translator.md",
+    title: "Translator Agent",
+    agentName: "translator",
     commentStyle: "html",
-    category: "codex-translator-agent",
-    content: renderCodexTranslatorAgentsHarnessRules()
+    category: "agent-translator",
+    content: renderTranslatorAgentRules()
   }
 ];
 
@@ -221,24 +228,6 @@ const WHOLE_FILES = [
     )
   },
   {
-    path: ".ai/codex-translator/config.toml",
-    category: "codex-translator-config",
-    mode: 0o644,
-    content: renderCodexTranslatorConfigHarnessRules()
-  },
-  {
-    path: ".ai/codex-translator/.codex/config.toml",
-    category: "codex-translator-hooks",
-    mode: 0o644,
-    content: renderCodexCliConfigHarnessRules()
-  },
-  {
-    path: ".ai/codex-translator/.codex/hooks.json",
-    category: "codex-translator-hooks",
-    mode: 0o644,
-    content: renderCodexHooksHarnessRules("codex-translator")
-  },
-  {
     path: ".ai/tools/request-gate-review",
     category: "runtime-tool",
     mode: 0o755,
@@ -315,6 +304,7 @@ async function main() {
     await installWholeFile({ projectRoot, file, dryRun, operations });
   }
   await removeLegacyFlatSkillFiles({ projectRoot, dryRun, operations });
+  await removeLegacyCodexHarnessPaths({ projectRoot, dryRun, operations });
 
   printReport({ projectRoot, dryRun, operations });
 }
@@ -471,8 +461,6 @@ function fixedDirectories() {
     ".claude/skills/vcm-long-running-validation/",
     ".claude/skills/vcm-route-message/",
     ".claude/skills/vcm-gate-review/",
-    ".ai/codex-translator/",
-    ".ai/codex-translator/.codex/",
     ".ai/vcm/translations/",
     ".ai/vcm/gate-reviews/",
     ".ai/tools/",
@@ -710,6 +698,22 @@ async function removeLegacyFlatSkillFiles({ projectRoot, dryRun, operations }) {
 
     await fs.rm(targetPath, { force: true });
     operations.push(done(legacy.path, "deleted legacy flat skill file"));
+  }
+}
+
+async function removeLegacyCodexHarnessPaths({ projectRoot, dryRun, operations }) {
+  for (const relativePath of LEGACY_CODEX_HARNESS_PATHS) {
+    const targetPath = resolveInside(projectRoot, relativePath);
+    if (!await pathExists(targetPath)) {
+      continue;
+    }
+    if (dryRun) {
+      operations.push(plan(relativePath, "delete legacy Codex harness path"));
+      continue;
+    }
+
+    await fs.rm(targetPath, { recursive: true, force: true });
+    operations.push(done(relativePath, "deleted legacy Codex harness path"));
   }
 }
 

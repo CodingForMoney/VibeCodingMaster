@@ -1,4 +1,4 @@
-import { isCodexRoleName, isVcmRoleName } from "../../shared/constants.js";
+import { isVcmRoleName } from "../../shared/constants.js";
 import type { TranslationTargetLanguage } from "../../shared/types/app-settings.js";
 import type { RoleName } from "../../shared/types/role.js";
 import type { ClaudePermissionMode, RoleSessionRecord, SessionEffort, SessionModel } from "../../shared/types/session.js";
@@ -47,7 +47,6 @@ export function SessionConsole({
   onRestart,
   onTerminalEvent
 }: SessionConsoleProps) {
-  const isCodexRole = isCodexRoleName(role);
   const showTranslation = isVcmRoleName(role) && translationEnabled && session?.status === "running";
 
   return (
@@ -75,11 +74,7 @@ export function SessionConsole({
             <div className="terminal-empty">
               <strong>{role}</strong>
               <span>
-                {isCodexRole
-                  ? session?.claudeSessionId
-                    ? `Resume this role to reconnect the ${role === "codex-translator" ? "Codex Translator" : "Gate Reviewer"} terminal.`
-                    : `Start this role to open an embedded ${role === "codex-translator" ? "Codex Translator" : "Gate Reviewer"} terminal.`
-                  : session?.claudeSessionId
+                {session?.claudeSessionId
                   ? "Resume this role to reconnect its Claude Code conversation."
                   : "Start this role to open an embedded Claude Code terminal."}
               </span>

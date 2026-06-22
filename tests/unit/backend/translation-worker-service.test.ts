@@ -4,7 +4,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { createNodeFileSystemAdapter, type FileSystemAdapter } from "../../../src/backend/adapters/filesystem.js";
 import type { TerminalRuntime } from "../../../src/backend/runtime/terminal-runtime.js";
-import { createCodexTranslationService } from "../../../src/backend/services/codex-translation-service.js";
+import { createTranslationWorkerService } from "../../../src/backend/services/translation-worker-service.js";
 import type { SessionService } from "../../../src/backend/services/session-service.js";
 import type { RoleSessionRecord } from "../../../src/shared/types/session.js";
 
@@ -17,12 +17,12 @@ afterEach(async () => {
   }
 });
 
-describe("codex-translation-service", () => {
+describe("translator-translation-service", () => {
   it("creates project translation layout, file jobs, and queue items", async () => {
-    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-codex-translation-"));
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-translator-translation-"));
     await writeFile(path.join(tmpRepo, "README.md"), "# Demo\n\nHello project.\n", "utf8");
     const fs = createNodeFileSystemAdapter();
-    const service = createCodexTranslationService({ fs });
+    const service = createTranslationWorkerService({ fs });
 
     const job = await service.createFileJob(tmpRepo, {
       sourcePath: "README.md",
@@ -67,7 +67,7 @@ describe("codex-translation-service", () => {
   });
 
   it("cleans translation runtime state without removing durable translations or memory", async () => {
-    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-codex-translation-startup-clean-"));
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-translator-translation-startup-clean-"));
     await mkdir(path.join(tmpRepo, ".ai/vcm/translations/runtime/files/jobs/job-1/chunks"), { recursive: true });
     await mkdir(path.join(tmpRepo, ".ai/vcm/translations/runtime/conversations/jobs/job-2"), { recursive: true });
     await mkdir(path.join(tmpRepo, ".ai/vcm/translations/runtime/bootstrap/runs/run-1"), { recursive: true });
@@ -98,7 +98,7 @@ describe("codex-translation-service", () => {
     })}\n`, "utf8");
     await writeFile(path.join(tmpRepo, ".ai/vcm/translations/memory/glossary.md"), "# Glossary\n", "utf8");
     const fs = createNodeFileSystemAdapter();
-    const service = createCodexTranslationService({ fs });
+    const service = createTranslationWorkerService({ fs });
 
     await service.cleanupStartupRuntime(tmpRepo);
     const fileIndex = await fs.readJson<{ jobs: Array<{ id: string }> }>(path.join(tmpRepo, ".ai/vcm/translations/files/index.json"));
@@ -114,11 +114,11 @@ describe("codex-translation-service", () => {
   });
 
   it("splits large file translation sources into VCM-managed chunk files", async () => {
-    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-codex-translation-chunks-"));
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-translator-translation-chunks-"));
     const source = Array.from({ length: 120 }, (_, index) => `## Section ${index + 1}\n\n${"Long sentence. ".repeat(12)}\n`).join("\n");
     await writeFile(path.join(tmpRepo, "WHITEPAPER.md"), source, "utf8");
     const fs = createNodeFileSystemAdapter();
-    const service = createCodexTranslationService({ fs });
+    const service = createTranslationWorkerService({ fs });
 
     const job = await service.createFileJob(tmpRepo, {
       sourcePath: "WHITEPAPER.md",
@@ -141,10 +141,10 @@ describe("codex-translation-service", () => {
   });
 
   it("creates bootstrap runs and memory files", async () => {
-    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-codex-bootstrap-"));
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-translator-bootstrap-"));
     await writeFile(path.join(tmpRepo, "README.md"), "# Demo\n", "utf8");
     const fs = createNodeFileSystemAdapter();
-    const service = createCodexTranslationService({ fs });
+    const service = createTranslationWorkerService({ fs });
 
     const run = await service.createBootstrapRun(tmpRepo, {
       targetLanguage: "zh-CN"
@@ -166,11 +166,11 @@ describe("codex-translation-service", () => {
     });
   });
 
-  it("queues compact memory updates through the Codex Translator session", async () => {
-    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-codex-memory-update-"));
+  it("queues compact memory updates through the Translator session", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-translator-memory-update-"));
     const fs = createNodeFileSystemAdapter();
     const writes: string[] = [];
-    const service = createCodexTranslationService({
+    const service = createTranslationWorkerService({
       fs,
       runtime: createRuntimeStub(writes),
       sessionService: createTranslatorSessionService([])
@@ -194,7 +194,7 @@ describe("codex-translation-service", () => {
     }>(path.join(tmpRepo, queueItem.requestPath));
     let state = await service.getState(tmpRepo);
     const activeItem = state.queue.items.find((item) => item.id === queueItem.id);
-    const prompt = writes.find((entry) => entry.includes("[VCM CODEX TRANSLATION TASK]"));
+    const prompt = writes.find((entry) => entry.includes("[VCM TRANSLATION TASK]"));
 
     expect(queueItem.type).toBe("memory-update");
     expect(state.queue.activeItemId).toBe(queueItem.id);
@@ -214,7 +214,7 @@ describe("codex-translation-service", () => {
     expect(prompt).toContain("Do not use apply_patch");
     expect(await fs.pathExists(path.join(tmpRepo, queueItem.requestPath))).toBe(true);
 
-    await service.handleCodexHook(tmpRepo, "Stop", "demo-task");
+    await service.handleTranslatorHook(tmpRepo, "Stop", "demo-task");
     await waitForDispatcher();
 
     state = await service.getState(tmpRepo);
@@ -224,9 +224,9 @@ describe("codex-translation-service", () => {
   });
 
   it("fails memory updates that leave non-core memory artifacts", async () => {
-    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-codex-memory-extra-"));
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-translator-memory-extra-"));
     const fs = createNodeFileSystemAdapter();
-    const service = createCodexTranslationService({
+    const service = createTranslationWorkerService({
       fs,
       runtime: createRuntimeStub([]),
       sessionService: createTranslatorSessionService([])
@@ -239,7 +239,7 @@ describe("codex-translation-service", () => {
     await waitForDispatcher();
     await fs.writeText(path.join(tmpRepo, ".ai/vcm/translations/memory/report.md"), "# Extra report\n");
 
-    await service.handleCodexHook(tmpRepo, "Stop", "demo-task");
+    await service.handleTranslatorHook(tmpRepo, "Stop", "demo-task");
 
     const state = await service.getState(tmpRepo);
     const failedItem = state.queue.items.find((item) => item.id === queueItem.id);
@@ -249,9 +249,9 @@ describe("codex-translation-service", () => {
   });
 
   it("validates conversation result files", async () => {
-    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-codex-conversation-"));
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-translator-conversation-"));
     const fs = createNodeFileSystemAdapter();
-    const service = createCodexTranslationService({ fs });
+    const service = createTranslationWorkerService({ fs });
     const resultPath = ".ai/vcm/translations/runtime/conversations/jobs/result/result.txt";
     await fs.writeText(path.join(tmpRepo, resultPath), "你好");
 
@@ -267,9 +267,9 @@ describe("codex-translation-service", () => {
   });
 
   it("creates conversation jobs with a temporary result file contract", async () => {
-    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-codex-conversation-job-"));
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-translator-conversation-job-"));
     const fs = createNodeFileSystemAdapter();
-    const service = createCodexTranslationService({ fs });
+    const service = createTranslationWorkerService({ fs });
 
     const job = await service.createConversationJob(tmpRepo, {
       direction: "user-input-to-english",
@@ -313,10 +313,10 @@ describe("codex-translation-service", () => {
   });
 
   it("dispatches conversation translation with inline source text and file output", async () => {
-    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-codex-conversation-inline-"));
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-translator-conversation-inline-"));
     const fs = createNodeFileSystemAdapter();
     const writes: string[] = [];
-    const service = createCodexTranslationService({
+    const service = createTranslationWorkerService({
       fs,
       runtime: createRuntimeStub(writes),
       sessionService: createTranslatorSessionService([])
@@ -345,10 +345,10 @@ describe("codex-translation-service", () => {
   });
 
   it("batches queued conversation translations into one prompt and result file", async () => {
-    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-codex-conversation-batch-"));
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-translator-conversation-batch-"));
     const fs = createNodeFileSystemAdapter();
     const writes: string[] = [];
-    const service = createCodexTranslationService({
+    const service = createTranslationWorkerService({
       fs,
       runtime: createRuntimeStub(writes),
       sessionService: createTranslatorSessionService([])
@@ -389,7 +389,7 @@ describe("codex-translation-service", () => {
       "<VCM_RESULT2>",
       "第二段译文"
     ].join("\n"));
-    await service.handleCodexHook(tmpRepo, "Stop", "demo-task");
+    await service.handleTranslatorHook(tmpRepo, "Stop", "demo-task");
 
     const internalState = await service.getState(tmpRepo);
     const publicState = await service.getState(tmpRepo, { visibility: "public" });
@@ -411,7 +411,7 @@ describe("codex-translation-service", () => {
   });
 
   it("browses translatable source files and filters generated state", async () => {
-    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-codex-browser-"));
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-translator-browser-"));
     await mkdir(path.join(tmpRepo, "docs"), { recursive: true });
     await mkdir(path.join(tmpRepo, "node_modules/pkg"), { recursive: true });
     await mkdir(path.join(tmpRepo, ".ai/vcm/translations"), { recursive: true });
@@ -420,7 +420,7 @@ describe("codex-translation-service", () => {
     await writeFile(path.join(tmpRepo, "docs/logo.png"), "not text", "utf8");
     await writeFile(path.join(tmpRepo, "node_modules/pkg/README.md"), "# Dependency\n", "utf8");
     await writeFile(path.join(tmpRepo, ".ai/vcm/translations/output.md"), "# Output\n", "utf8");
-    const service = createCodexTranslationService({ fs: createNodeFileSystemAdapter() });
+    const service = createTranslationWorkerService({ fs: createNodeFileSystemAdapter() });
 
     const root = await service.browseSourceFiles(tmpRepo);
     expect(root.entries.map((entry) => entry.path)).toEqual(["docs", "README.md"]);
@@ -434,10 +434,10 @@ describe("codex-translation-service", () => {
   });
 
   it("refuses to promote over the source file", async () => {
-    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-codex-promote-"));
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-translator-promote-"));
     await writeFile(path.join(tmpRepo, "README.md"), "# Demo\n", "utf8");
     const fs = createNodeFileSystemAdapter();
-    const service = createCodexTranslationService({
+    const service = createTranslationWorkerService({
       fs,
       runtime: createRuntimeStub([]),
       sessionService: createTranslatorSessionService([])
@@ -449,7 +449,7 @@ describe("codex-translation-service", () => {
     });
     await waitForDispatcher();
     await writeCompletedFileTranslation(fs, tmpRepo, job, "# Demo translated\n");
-    await service.handleCodexHook(tmpRepo, "Stop", "demo-task");
+    await service.handleTranslatorHook(tmpRepo, "Stop", "demo-task");
 
     await expect(service.promoteFileJob(tmpRepo, job.id, "README.md"))
       .rejects.toMatchObject({
@@ -458,11 +458,11 @@ describe("codex-translation-service", () => {
   });
 
   it("retranslates files through the normal translate flow and replaces completed output", async () => {
-    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-codex-retranslate-"));
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-translator-retranslate-"));
     await writeFile(path.join(tmpRepo, "README.md"), "# Demo\n\nHello project.\n", "utf8");
     const fs = createNodeFileSystemAdapter();
     const writes: string[] = [];
-    const service = createCodexTranslationService({
+    const service = createTranslationWorkerService({
       fs,
       runtime: createRuntimeStub(writes),
       sessionService: createTranslatorSessionService([])
@@ -475,7 +475,7 @@ describe("codex-translation-service", () => {
     });
     await waitForDispatcher();
     await writeCompletedFileTranslation(fs, tmpRepo, first, "# 旧译文\n");
-    await service.handleCodexHook(tmpRepo, "Stop", "demo-task");
+    await service.handleTranslatorHook(tmpRepo, "Stop", "demo-task");
 
     let state = await service.getState(tmpRepo);
     const firstCompleted = state.fileIndex.jobs.find((job) => job.id === first.id);
@@ -516,7 +516,7 @@ describe("codex-translation-service", () => {
     expect(durableIndexDuringRetranslate.jobs.map((job) => job.id)).toEqual([first.id]);
 
     await writeCompletedFileTranslation(fs, tmpRepo, second, "# 新译文\n");
-    await service.handleCodexHook(tmpRepo, "Stop", "demo-task");
+    await service.handleTranslatorHook(tmpRepo, "Stop", "demo-task");
     state = await service.getState(tmpRepo);
 
     const completedJobs = state.fileIndex.jobs.filter((job) =>
@@ -537,10 +537,10 @@ describe("codex-translation-service", () => {
   });
 
   it("fails file translations that only write empty output and diagnostics", async () => {
-    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-codex-empty-output-"));
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-translator-empty-output-"));
     await writeFile(path.join(tmpRepo, "README.md"), "# Demo\n\nHello project.\n", "utf8");
     const fs = createNodeFileSystemAdapter();
-    const service = createCodexTranslationService({
+    const service = createTranslationWorkerService({
       fs,
       runtime: createRuntimeStub([]),
       sessionService: createTranslatorSessionService([])
@@ -555,7 +555,7 @@ describe("codex-translation-service", () => {
     await fs.writeText(path.join(tmpRepo, job.resultPath), "");
     await fs.writeText(path.join(tmpRepo, job.reportPath), "# Translation Diagnostics\n\nStatus: blocked\nReason: not enough context.\n");
 
-    await service.handleCodexHook(tmpRepo, "Stop", "demo-task");
+    await service.handleTranslatorHook(tmpRepo, "Stop", "demo-task");
 
     const state = await service.getState(tmpRepo);
     const failedJob = state.fileIndex.jobs.find((candidate) => candidate.id === job.id);
@@ -568,13 +568,13 @@ describe("codex-translation-service", () => {
   });
 
   it("keeps the queue single-threaded and dispatches the next item after Stop", async () => {
-    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-codex-queue-"));
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-translator-queue-"));
     await writeFile(path.join(tmpRepo, "README.md"), "# Demo\n", "utf8");
     await writeFile(path.join(tmpRepo, "GUIDE.md"), "# Guide\n", "utf8");
     const fs = createNodeFileSystemAdapter();
     const writes: string[] = [];
     const starts: string[] = [];
-    const service = createCodexTranslationService({
+    const service = createTranslationWorkerService({
       fs,
       runtime: createRuntimeStub(writes),
       sessionService: createTranslatorSessionService(starts)
@@ -596,14 +596,14 @@ describe("codex-translation-service", () => {
       return queuedState.queue.activeItemId === first.queueItemId &&
         queuedState.fileIndex.jobs.find((job) => job.id === first.id)?.status === "running" &&
         queuedState.fileIndex.jobs.find((job) => job.id === second.id)?.status === "queued" &&
-        writes.filter((entry) => entry.includes("[VCM CODEX TRANSLATION TASK]")).length === 1;
+        writes.filter((entry) => entry.includes("[VCM TRANSLATION TASK]")).length === 1;
     });
 
     let state = await service.getState(tmpRepo);
     expect(state.queue.activeItemId).toBe(first.queueItemId);
     expect(state.fileIndex.jobs.find((job) => job.id === first.id)?.status).toBe("running");
     expect(state.fileIndex.jobs.find((job) => job.id === second.id)?.status).toBe("queued");
-    expect(writes.filter((entry) => entry.includes("[VCM CODEX TRANSLATION TASK]"))).toHaveLength(1);
+    expect(writes.filter((entry) => entry.includes("[VCM TRANSLATION TASK]"))).toHaveLength(1);
     expect(writes[0]).toContain(`Base Repository Root: ${tmpRepo}`);
     expect(writes[0]).toContain(`Request Path:\n${path.join(tmpRepo, first.requestPath)}`);
     expect(writes[0]).toContain(`Result Path: ${path.join(tmpRepo, first.resultPath)}`);
@@ -614,13 +614,13 @@ describe("codex-translation-service", () => {
     expect(writes[0]).not.toContain("Do not print");
 
     await writeCompletedFileTranslation(fs, tmpRepo, first, "# Demo translated\n");
-    await service.handleCodexHook(tmpRepo, "Stop", "demo-task");
+    await service.handleTranslatorHook(tmpRepo, "Stop", "demo-task");
     await waitForCondition(async () => {
       const nextState = await service.getState(tmpRepo!);
       return nextState.queue.activeItemId === second.queueItemId &&
         nextState.fileIndex.jobs.find((job) => job.id === first.id)?.status === "completed" &&
         nextState.fileIndex.jobs.find((job) => job.id === second.id)?.status === "running" &&
-        writes.filter((entry) => entry.includes("[VCM CODEX TRANSLATION TASK]")).length === 2;
+        writes.filter((entry) => entry.includes("[VCM TRANSLATION TASK]")).length === 2;
     });
 
     state = await service.getState(tmpRepo);
@@ -634,8 +634,8 @@ describe("codex-translation-service", () => {
     expect(await fs.pathExists(path.join(tmpRepo, first.reportPath))).toBe(false);
     expect(state.queue.items.some((item) => item.id === first.queueItemId)).toBe(false);
     expect(state.fileIndex.jobs.find((job) => job.id === second.id)?.status).toBe("running");
-    expect(starts).toEqual(["start:codex-translator:gpt-5.5:medium"]);
-    expect(writes.filter((entry) => entry.includes("[VCM CODEX TRANSLATION TASK]"))).toHaveLength(2);
+    expect(starts).toEqual(["start:translator:default:medium"]);
+    expect(writes.filter((entry) => entry.includes("[VCM TRANSLATION TASK]"))).toHaveLength(2);
   });
 });
 
@@ -649,7 +649,7 @@ function createRuntimeStub(writes: string[]): TerminalRuntime {
         ? {
             id: "translator-session",
             taskSlug: "__project__",
-            role: "codex-translator",
+            role: "translator",
             status: "running",
             startedAt: "2026-06-20T00:00:00.000Z",
             exitCode: null
@@ -727,16 +727,16 @@ function createTranslatorSessionService(starts: string[]): Pick<SessionService, 
   let session: RoleSessionRecord | undefined;
   const createSession = (): RoleSessionRecord => ({
     id: "translator-session",
-    claudeSessionId: "codex-translator-session",
+    claudeSessionId: "translator-session",
     taskSlug: "__project__",
-    role: "codex-translator",
+    role: "translator",
     status: "running",
     activityStatus: "running",
-    command: "codex",
+    command: "translator",
     permissionMode: "default",
     model: "gpt-5.5",
     effort: "medium",
-    cwd: "/repo/.ai/codex-translator",
+    cwd: "/repo",
     terminalBackend: "node-pty",
     updatedAt: "2026-06-20T00:00:00.000Z"
   });
@@ -745,7 +745,7 @@ function createTranslatorSessionService(starts: string[]): Pick<SessionService, 
       if (session) {
         return session;
       }
-      starts.push(`start:codex-translator:${input.model ?? "default"}:${input.effort ?? "default"}`);
+      starts.push(`start:translator:${input.model ?? "default"}:${input.effort ?? "default"}`);
       session = {
         ...createSession(),
         model: input.model ?? "gpt-5.5",
@@ -767,5 +767,5 @@ async function waitForCondition(predicate: () => boolean | Promise<boolean>): Pr
     }
     await new Promise((resolve) => setTimeout(resolve, 25));
   }
-  throw new Error("Timed out waiting for Codex translation dispatcher.");
+  throw new Error("Timed out waiting for translation dispatcher.");
 }

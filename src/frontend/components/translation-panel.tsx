@@ -7,9 +7,9 @@ import {
 } from "../../shared/types/app-settings.js";
 import type { RoleName } from "../../shared/types/role.js";
 import type {
-  CodexTranslationSourceFileBrowserResult,
-  CodexTranslationSourceFileEntry,
-  CodexTranslationState,
+  TranslationSourceFileBrowserResult,
+  TranslationSourceFileEntry,
+  TranslationState,
   TranslationEntry,
   TranslationFailureItem,
   TranslationSessionEvent,
@@ -294,7 +294,7 @@ export function TranslationPanel({
           </div>
         </div>
         <div className="translation-status-row">
-          <p>Codex · target {getTranslationTargetLanguageLabel(targetLanguage)} · {panelStatus}</p>
+          <p>Claude Code · target {getTranslationTargetLanguageLabel(targetLanguage)} · {panelStatus}</p>
           <p>{lastPollAt ? `poll ${lastPollAt}` : "poll -"}</p>
         </div>
       </header>
@@ -355,12 +355,12 @@ export function FileTranslationModalHost({
 }) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [codexState, setCodexState] = useState<CodexTranslationState | null>(null);
+  const [translationState, setTranslationState] = useState<TranslationState | null>(null);
   const [selectedFileJobId, setSelectedFileJobId] = useState<string>("");
   const [selectedFileOutput, setSelectedFileOutput] = useState("");
   const [selectedFileReport, setSelectedFileReport] = useState("");
   const [fileBrowserOpen, setFileBrowserOpen] = useState(false);
-  const [fileBrowserState, setFileBrowserState] = useState<CodexTranslationSourceFileBrowserResult | null>(null);
+  const [fileBrowserState, setFileBrowserState] = useState<TranslationSourceFileBrowserResult | null>(null);
   const [fileBrowserPath, setFileBrowserPath] = useState("");
   const [fileBrowserQuery, setFileBrowserQuery] = useState("");
   const [fileBrowserSelectedPath, setFileBrowserSelectedPath] = useState("");
@@ -376,7 +376,7 @@ export function FileTranslationModalHost({
       if (cancelled) {
         return;
       }
-      await refreshCodexTranslationState(true);
+      await refreshTranslationState(true);
       if (!cancelled) {
         timer = window.setTimeout(tick, 2000);
       }
@@ -390,10 +390,10 @@ export function FileTranslationModalHost({
     };
   }, [open, selectedFileJobId]);
 
-  async function refreshCodexTranslationState(refreshSelected = false) {
+  async function refreshTranslationState(refreshSelected = false) {
     try {
-      const next = await apiClient.getCodexTranslationState();
-      setCodexState(next);
+      const next = await apiClient.getTranslationState();
+      setTranslationState(next);
       const selectedStillVisible = selectedFileJobId
         ? next.fileIndex.jobs.some((job) => job.id === selectedFileJobId)
         : false;
@@ -404,7 +404,7 @@ export function FileTranslationModalHost({
         setSelectedFileOutput("");
         setSelectedFileReport("");
       } else if (refreshSelected && selectedFileJobId) {
-        const result = await apiClient.readCodexFileTranslation(selectedFileJobId);
+        const result = await apiClient.readFileTranslation(selectedFileJobId);
         setSelectedFileOutput(result.output);
         setSelectedFileReport(result.report);
       }
@@ -418,7 +418,7 @@ export function FileTranslationModalHost({
     setSelectedFileOutput("");
     setSelectedFileReport("");
     try {
-      const result = await apiClient.readCodexFileTranslation(jobId);
+      const result = await apiClient.readFileTranslation(jobId);
       setSelectedFileOutput(result.output);
       setSelectedFileReport(result.report);
     } catch (caught) {
@@ -435,7 +435,7 @@ export function FileTranslationModalHost({
     setFileBrowserBusy(true);
     setError("");
     try {
-      const result = await apiClient.browseCodexTranslationSourceFiles({
+      const result = await apiClient.browseTranslationSourceFiles({
         path,
         query,
         limit: 250
@@ -458,12 +458,12 @@ export function FileTranslationModalHost({
     setBusy(true);
     setError("");
     try {
-      const job = await apiClient.createCodexFileTranslation({
+      const job = await apiClient.createFileTranslation({
         sourcePath: normalizedSourcePath,
         targetLanguage
       });
       setFileBrowserOpen(false);
-      await refreshCodexTranslationState();
+      await refreshTranslationState();
       await selectFileJob(job.id);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Failed to create file translation.");
@@ -482,7 +482,7 @@ export function FileTranslationModalHost({
         <FileTranslationPanel
           busy={busy}
           error={error}
-          state={codexState}
+          state={translationState}
           selectedJobId={selectedFileJobId}
           output={selectedFileOutput}
           report={selectedFileReport}
@@ -490,7 +490,7 @@ export function FileTranslationModalHost({
             setFileBrowserOpen(false);
             onClose();
           }}
-          onRefresh={() => void refreshCodexTranslationState()}
+          onRefresh={() => void refreshTranslationState()}
           onSelectJob={(jobId) => void selectFileJob(jobId)}
           onTranslate={() => void openFileBrowser()}
         />
@@ -526,7 +526,7 @@ function TranslationSourceFileBrowserModal({
   onTranslate
 }: {
   busy: boolean;
-  state: CodexTranslationSourceFileBrowserResult | null;
+  state: TranslationSourceFileBrowserResult | null;
   currentPath: string;
   query: string;
   selectedPath: string;
@@ -638,7 +638,7 @@ function FileBrowserEntryButton({
   onBrowse,
   onSelectPath
 }: {
-  entry: CodexTranslationSourceFileEntry;
+  entry: TranslationSourceFileEntry;
   selected: boolean;
   onBrowse(path: string, query?: string): void;
   onSelectPath(path: string): void;
@@ -672,7 +672,7 @@ function FileTranslationPanel({
 }: {
   busy: boolean;
   error?: string;
-  state: CodexTranslationState | null;
+  state: TranslationState | null;
   selectedJobId: string;
   output: string;
   report: string;
@@ -689,7 +689,7 @@ function FileTranslationPanel({
       <header className="file-translation-header">
         <div>
           <h2>File Translation</h2>
-          <p>Codex · 中英互译</p>
+          <p>Claude Code · 中英互译</p>
         </div>
         <div className="file-translation-toolbar">
           <button type="button" disabled={busy} onClick={onTranslate}>Translate</button>

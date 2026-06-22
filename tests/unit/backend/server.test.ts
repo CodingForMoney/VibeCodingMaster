@@ -59,10 +59,9 @@ function createServerDepsStub(calls: string[]): ServerDeps {
     harnessService: {} as never,
     commandDispatcher: {} as never,
     claudeHookService: {} as never,
-    codexHookService: {} as never,
     messageService: {} as never,
     gateReviewService: {} as never,
-    codexTranslationService: {
+    translationWorkerService: {
       async cleanupStartupRuntime(repoRoot: string) {
         calls.push(`cleanup:${repoRoot}`);
       }

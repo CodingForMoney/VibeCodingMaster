@@ -6,10 +6,10 @@ export type CoreVcmRoleName =
 
 export type GateReviewerRoleName = "gate-reviewer";
 export type VcmRoleName = CoreVcmRoleName | GateReviewerRoleName;
-export type CodexTranslatorRoleName = "codex-translator";
-export type CodexRoleName = CodexTranslatorRoleName;
+export type TranslatorToolRoleName = "translator";
+export type ToolRoleName = TranslatorToolRoleName;
 
-export type RoleName = VcmRoleName | CodexRoleName;
+export type RoleName = VcmRoleName | ToolRoleName;
 
 export type DispatchableRole =
   | "architect"

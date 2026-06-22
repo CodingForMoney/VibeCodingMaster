@@ -69,7 +69,7 @@ export function TaskWorkspace({
     coder: "default",
     reviewer: "default",
     "gate-reviewer": "default",
-    "codex-translator": "default"
+    translator: "default"
   });
   const [models, setModels] = useState<Record<RoleName, SessionModel>>({
     "project-manager": "default",
@@ -77,7 +77,7 @@ export function TaskWorkspace({
     coder: "default",
     reviewer: "default",
     "gate-reviewer": "default",
-    "codex-translator": "gpt-5.5"
+    translator: "default"
   });
   const [efforts, setEfforts] = useState<Record<RoleName, SessionEffort>>({
     "project-manager": "default",
@@ -85,7 +85,7 @@ export function TaskWorkspace({
     coder: "default",
     reviewer: "default",
     "gate-reviewer": "default",
-    "codex-translator": "medium"
+    translator: "medium"
   });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -150,7 +150,7 @@ export function TaskWorkspace({
     if (statusReport && !gateReviewerVisible && activeRole === "gate-reviewer") {
       onActiveRoleChange("project-manager");
     }
-    if (statusReport && activeRole === "codex-translator") {
+    if (statusReport && activeRole === "translator") {
       onActiveRoleChange("project-manager");
     }
   }, [activeRole, gateReviewerVisible, onActiveRoleChange, statusReport]);

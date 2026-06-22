@@ -21,8 +21,7 @@
       "version": "lts"
     },
     "ghcr.io/devcontainers/features/docker-outside-of-docker:1": {},
-    "ghcr.io/stu-bell/devcontainer-features/claude-code:0": {},
-    "ghcr.io/jsburckhardt/devcontainer-features/codex:1": {}
+    "ghcr.io/stu-bell/devcontainer-features/claude-code:0": {}
   },
   "customizations": {
     "vscode": {

@@ -9,17 +9,14 @@ export type HarnessFileKind =
   | "skill-vcm-route-message"
   | "skill-vcm-gate-review"
   | "agent-gate-reviewer"
-  | "codex-translator-agents"
-  | "codex-translator-config"
-  | "codex-translator-cli-config"
-  | "codex-translator-hooks"
+  | "agent-translator"
   | "tool-request-gate-review"
   | "agent-project-manager"
   | "agent-architect"
   | "agent-coder"
   | "agent-reviewer";
 
-export type HarnessFileAction = "create" | "insert" | "update" | "ok";
+export type HarnessFileAction = "create" | "insert" | "update" | "delete" | "ok";
 export type HarnessBootstrapCheckStatus = "ok" | "missing" | "incomplete" | "unknown";
 export type HarnessBootstrapStatus = "not_ready" | "not_started" | "incomplete" | "running" | "complete";
 

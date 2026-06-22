@@ -1,13 +1,13 @@
 ---
-name: vcm-codex-review-gate
-description: Use when project-manager reaches a Codex Review Gate or receives a VCM Codex Review callback.
+name: vcm-gate-review
+description: Use when project-manager reaches a Gate Review trigger or receives a VCM Gate Review callback.
 ---
 
-# VCM Codex Review Gate Skill
+# VCM Gate Review Skill
 
 ## Purpose
 
-Use this skill when project-manager reaches a VCM Codex Review Gate or receives a VCM Codex Review callback.
+Use this skill when project-manager reaches a VCM Gate Review or receives a VCM Gate Review callback.
 
 ## Trigger Points
 
@@ -20,7 +20,7 @@ Use this skill when project-manager reaches a VCM Codex Review Gate or receives 
 Run:
 
 ```sh
-.ai/tools/request-codex-review --gate <architecture-plan|validation-adequacy|final-diff>
+.ai/tools/request-gate-review --gate <architecture-plan|validation-adequacy|final-diff>
 ```
 
 Interpret the first output line:
@@ -29,15 +29,13 @@ Interpret the first output line:
 - `started` or `running`: stop this turn and wait for the VCM callback.
 - `failed_to_start`: report the failure to the user.
 
-Do not run `codex exec` yourself. VCM owns the Codex adapter and gate state.
-
 ## Callback
 
-When VCM sends `[VCM CODEX REVIEW CALLBACK]`, read the named report path.
+When VCM sends `[VCM GATE REVIEW CALLBACK]`, read the named report path.
 
 - `approve`: continue to the next normal VCM gate.
 - `request_changes`: summarize the findings and route follow-up through the responsible VCM role.
 - `failed`: stop and ask the user to retry, skip, or override in VCM.
 - `skipped` or `overridden`: record the exception reason in PM context and continue only as appropriate.
 
-Do not ask Codex Reviewer to choose owners, fixes, Replan, or user-intervention needs. PM routes those decisions through normal VCM responsibilities.
+Do not ask Gate Reviewer to choose owners, fixes, Replan, or user-intervention needs. PM routes those decisions through normal VCM responsibilities.

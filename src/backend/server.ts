@@ -8,12 +8,11 @@ import { createClaudeAdapter } from "./adapters/claude-adapter.js";
 import { createCommandRunner } from "./adapters/command-runner.js";
 import { createCommandDispatcher, type CommandDispatcher } from "./services/command-dispatcher.js";
 import { createClaudeHookService, type ClaudeHookService } from "./services/claude-hook-service.js";
-import { createCodexHookService, type CodexHookService } from "./services/codex-hook-service.js";
 import { createGitAdapter } from "./adapters/git-adapter.js";
 import { createAppSettingsService, type AppSettingsService } from "./services/app-settings-service.js";
 import { createClaudeTranscriptService } from "./services/claude-transcript-service.js";
 import { createGateReviewService, type GateReviewService } from "./services/gate-review-service.js";
-import { createCodexTranslationService, type CodexTranslationService } from "./services/codex-translation-service.js";
+import { createTranslationWorkerService, type TranslationWorkerService } from "./services/translation-worker-service.js";
 import {
   createHarnessService,
   createScriptFixedHarnessInstaller,
@@ -27,7 +26,6 @@ import { createWeixinIlinkChannel } from "./gateway/channels/weixin-ilink-channe
 import { createGatewayAuditLog } from "./gateway/gateway-audit-log.js";
 import { createGatewayService, type GatewayService } from "./gateway/gateway-service.js";
 import { createGatewaySettingsService } from "./gateway/gateway-settings-service.js";
-import { resolveCodexSandboxMode } from "./codex-sandbox-mode.js";
 import { createJobGuardService } from "./services/job-guard-service.js";
 import { createProjectService, type ProjectService } from "./services/project-service.js";
 import { createSessionRegistry } from "./runtime/session-registry.js";
@@ -41,9 +39,8 @@ import { createDiagnosticsService, type DiagnosticsService } from "./services/di
 import { registerAppSettingsRoutes } from "./api/app-settings-routes.js";
 import { registerArtifactRoutes } from "./api/artifact-routes.js";
 import { registerClaudeHookRoutes } from "./api/claude-hook-routes.js";
-import { registerCodexHookRoutes } from "./api/codex-hook-routes.js";
 import { registerGateReviewRoutes } from "./api/gate-review-routes.js";
-import { registerCodexTranslationRoutes } from "./api/codex-translation-routes.js";
+import { registerTranslationWorkerRoutes } from "./api/translation-worker-routes.js";
 import { registerHarnessRoutes } from "./api/harness-routes.js";
 import { registerMessageRoutes } from "./api/message-routes.js";
 import { registerProjectRoutes } from "./api/project-routes.js";
@@ -71,10 +68,9 @@ export interface ServerDeps {
   harnessService: HarnessService;
   commandDispatcher: CommandDispatcher;
   claudeHookService: ClaudeHookService;
-  codexHookService: CodexHookService;
   messageService: MessageService;
   gateReviewService: GateReviewService;
-  codexTranslationService: CodexTranslationService;
+  translationWorkerService: TranslationWorkerService;
   roundService: RoundService;
   statusService: StatusService;
   translationService: TranslationService;
@@ -103,19 +99,18 @@ export async function createServer(deps: ServerDeps, options: CreateServerOption
   registerDiagnosticsRoutes(app, { diagnosticsService: deps.diagnosticsService });
   registerAppSettingsRoutes(app, { appSettings: deps.appSettings });
   registerClaudeHookRoutes(app, { claudeHookService: deps.claudeHookService });
-  registerCodexHookRoutes(app, { codexHookService: deps.codexHookService });
   registerGateReviewRoutes(app, {
     projectService: deps.projectService,
     gateReviewService: deps.gateReviewService
   });
-  registerCodexTranslationRoutes(app, {
+  registerTranslationWorkerRoutes(app, {
     projectService: deps.projectService,
-    codexTranslationService: deps.codexTranslationService,
+    translationWorkerService: deps.translationWorkerService,
     sessionService: deps.sessionService
   });
   registerProjectRoutes(app, {
     projectService: deps.projectService,
-    codexTranslationService: deps.codexTranslationService
+    translationWorkerService: deps.translationWorkerService
   });
   registerHarnessRoutes(app, {
     projectService: deps.projectService,
@@ -181,10 +176,10 @@ export async function createServer(deps: ServerDeps, options: CreateServerOption
   return app;
 }
 
-async function cleanupRecentTranslationRuntime(deps: Pick<ServerDeps, "projectService" | "codexTranslationService">): Promise<void> {
+async function cleanupRecentTranslationRuntime(deps: Pick<ServerDeps, "projectService" | "translationWorkerService">): Promise<void> {
   const repoRoots = await deps.projectService.getRecentRepositoryPaths();
   await Promise.all(repoRoots.map((repoRoot) =>
-    deps.codexTranslationService.cleanupStartupRuntime(repoRoot)
+    deps.translationWorkerService.cleanupStartupRuntime(repoRoot)
   ));
 }
 
@@ -236,8 +231,7 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     artifactService,
     projectService,
     taskService,
-    apiUrl: options.apiUrl,
-    sandboxMode: resolveCodexSandboxMode(process.env)
+    apiUrl: options.apiUrl
   });
   const commandDispatcher = createCommandDispatcher({
     runtime,
@@ -273,7 +267,7 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     sessionService,
     roundService
   });
-  const codexTranslationService = createCodexTranslationService({
+  const translationWorkerService = createTranslationWorkerService({
     fs,
     runtime,
     sessionService
@@ -284,7 +278,7 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     sessionRegistry: registry,
     transcripts,
     sessionService,
-    codexTranslationService,
+    translationWorkerService,
     fs,
     projectService,
     appSettings
@@ -318,12 +312,8 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     appSettings,
     runtime,
     gatewayService,
-    jobGuard: createJobGuardService()
-  });
-  const codexHookService = createCodexHookService({
-    projectService,
-    sessionService,
-    codexTranslationService
+    jobGuard: createJobGuardService(),
+    translationWorkerService
   });
   const diagnosticsService = createDiagnosticsService({
     appRoot: getAppRoot(),
@@ -341,10 +331,9 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     harnessService,
     commandDispatcher,
     claudeHookService,
-    codexHookService,
     messageService,
     gateReviewService,
-    codexTranslationService,
+    translationWorkerService,
     roundService,
     statusService,
     translationService,

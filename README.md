@@ -31,7 +31,7 @@ When Gate Review Gates are enabled for a task, or when a Gate Reviewer session a
 - Two-stage VCM harness setup: deterministic fixed install plus AI-assisted bootstrap.
 - VCM-managed root rules, role agents, repo-local VCM skills, Claude Code hooks, generated-context tools, and PR template.
 - Rust generated context for module indexing and crate-external public surface indexing.
-- Translation panel powered by the long-lived Codex Translator session.
+- Translation panel powered by the long-lived Translator session.
 - Mobile Gateway through Tencent iLink Bot API / Weixin DM, for talking to PM and managing tasks from Weixin.
 - Durable task state, role session state, handoff artifacts, and message history.
 
@@ -139,10 +139,9 @@ Important container notes:
 
 - Install Claude Code inside the container, or make `claude` available in the container `PATH`.
 - Make sure Claude Code authentication works inside the container.
-- Make sure the container has network access to Claude services and any configured Codex model endpoints if translation is enabled.
+- Make sure the container has network access to Claude services if translation is enabled.
 - VCM accepts normal Git repositories by checking `.git` directly. It also supports `.git` files that point to worktree gitdirs.
 - VCM uses per-command `git -c safe.directory=...` for Git metadata reads and does not require global `git config --global --add safe.directory`.
-- Set `VCM_SANDBOX=devcontainer` so VCM-managed Codex Translator sessions rely on the container boundary and do not start Codex's nested Linux sandbox.
 - Treat the container as the sandbox boundary, especially when using relaxed Claude Code permission modes.
 
 ## Basic Usage
@@ -210,7 +209,7 @@ VCM will not offer a separate `Create task worktree` button after a task exists,
 
 Because worktrees live under `.claude/worktrees/`, the connected repository must ignore both `.ai/vcm/` and `.claude/worktrees/`. Apply the VCM Harness before creating tasks so `.gitignore` contains the managed ignore block. The base repository must also be clean because the task branch/worktree is created from the connected repo's current `HEAD`.
 
-When a task is complete, VCM provides a red `Close Task` action. Closing a task shows a destructive confirmation, stops VCM-managed running role sessions for that task, then deletes the task worktree, deletes the task branch by default, removes the app-local task record, and removes task runtime metadata. VCM does not preflight running sessions or uncommitted changes before closing. Project-scoped Gate Reviewer and Codex Translator sessions are not task-owned and are not stopped by Close Task.
+When a task is complete, VCM provides a red `Close Task` action. Closing a task shows a destructive confirmation, stops VCM-managed running role sessions for that task, then deletes the task worktree, deletes the task branch by default, removes the app-local task record, and removes task runtime metadata. VCM does not preflight running sessions or uncommitted changes before closing. Project-scoped Gate Reviewer and Translator sessions are not task-owned and are not stopped by Close Task.
 
 ## Sidebar UI
 
@@ -219,7 +218,7 @@ The left sidebar is intentionally compact and collapsible:
 - `Repository Path`: path input on one row; `Recent` and `Connect` on the next row.
 - `Connected Repository`: connected base repo path, branch, upstream/ahead-behind status, commit hash, working tree state, and a `Pull` button.
 - `Settings`: `Theme`, `Flow pause alert`, `Try alert`, `Messages`, and `Events`.
-- `Translation`: global conversation translation, auto-send, target language, output scope, file translation, bootstrap, memory update, session status, and Codex Translator session access.
+- `Translation`: global conversation translation, auto-send, target language, output scope, file translation, bootstrap, memory update, session status, and Translator session access.
 - `Gate Review Gates`: global gate switches for architecture plan, validation adequacy, and final diff.
 - `Gateway`: Weixin iLink binding, Gateway on/off, Gateway translation, and QR login.
 - `VCM Harness`: fixed-install status, bootstrap completion checks, and the bootstrap terminal when one is running.
@@ -387,7 +386,7 @@ Translation settings are local and stored in:
 
 The same file stores recent repository paths and global translation preferences such as enablement, auto-send, and target language.
 
-VCM resolves `vcmDataDir` from `VCM_DATA_DIR`. If `VCM_DATA_DIR` is unset or empty, VCM uses `~/.vcm`. In Dev Containers, set `VCM_DATA_DIR=/workspace/.ai/vcm` and `VCM_SANDBOX=devcontainer` through `containerEnv` so VCM app state survives container rebuilds and VCM-managed Codex Translator sessions do not run a nested Codex sandbox.
+VCM resolves `vcmDataDir` from `VCM_DATA_DIR`. If `VCM_DATA_DIR` is unset or empty, VCM uses `~/.vcm`. In Dev Containers, set `VCM_DATA_DIR=/workspace/.ai/vcm` through `containerEnv` so VCM app state survives container rebuilds.
 
 The sidebar `Settings` section also stores the UI theme preference in this file. The default is `system`, which follows the OS/browser color-scheme preference; users can cycle between `System`, `Light`, and `Dark`.
 
@@ -397,11 +396,11 @@ When Gateway is on, `Flow pause alert` is forced off because mobile notification
 
 Translation behavior:
 
-- Conversation translation is routed through the Codex Translator session and result files.
+- Conversation translation is routed through the Translator session and result files.
 - Global translation controls live in the sidebar Translation section: enablement, auto-send, target language, output scope, bootstrap, memory update, file translation, session status, and `Open Session`.
 - File and conversation translation share `<baseRepoRoot>/.ai/vcm/translations/`; conversation result files are temporary runtime artifacts.
 - Claude Code output translation reads semantic Claude transcript JSONL files under `~/.claude/projects`, not raw PTY output.
-- Claude Code prose output waits 10 seconds before dispatch so adjacent output can be translated in one Codex batch.
+- Claude Code prose output waits 10 seconds before dispatch so adjacent output can be translated in one Claude Code Translator batch.
 - VCM tails those transcript files in the backend. Closing the translation panel does not stop capture; the tailer stops only when the role session is stopped/restarted or the task is closed.
 - Translation events are cached under the task runtime repo at `.ai/vcm/translation/<task>/<role>/<session-id>.jsonl` and delivered to the frontend through HTTP polling.
 - The polling cursor is the next expected seq: `after=18` acknowledges seq `1..17` and returns seq `18+`; there is no snapshot mismatch error.
@@ -437,10 +436,7 @@ CLAUDE.md
 .claude/skills/vcm-harness-bootstrap/SKILL.md
 .claude/skills/vcm-gate-review/SKILL.md
 .claude/agents/gate-reviewer.md
-.ai/codex-translator/AGENTS.md
-.ai/codex-translator/config.toml
-.ai/codex-translator/.codex/config.toml
-.ai/codex-translator/.codex/hooks.json
+.claude/agents/translator.md
 .ai/tools/request-gate-review
 .ai/tools/generate-module-index
 .ai/tools/generate-public-surface
@@ -683,5 +679,5 @@ See also:
 - `docs/vcm-cc-best-practices.md`
 - `docs/full-harness-baseline.md`
 - `docs/gate-review-gates.md`
-- `docs/codex-translation-plan.md`
+- `docs/claude-code-translation-plan.md`
 - `docs/cc-best-practices.md` is archived and no longer maintained.

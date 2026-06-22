@@ -2085,7 +2085,8 @@ h2 {
 .status-blocked,
 .status-crashed,
 .status-missing,
-.status-empty {
+.status-empty,
+.status-delete {
   border-color: #c46e5f;
   background: #fae9e6;
   color: #6f2b21;
@@ -2526,6 +2527,7 @@ h2 {
 :root[data-theme="dark"] .status-crashed,
 :root[data-theme="dark"] .status-missing,
 :root[data-theme="dark"] .status-empty,
+:root[data-theme="dark"] .status-delete,
 :root[data-theme="dark"] .status-rejected,
 :root[data-theme="dark"] .status-failed,
 :root[data-theme="dark"] .status-delivery_failed,

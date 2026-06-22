@@ -606,7 +606,7 @@ function TranslationControlsPanel({
       <button
         className="settings-toggle"
         disabled={busy || !fileTranslationAvailable}
-        title={fileTranslationAvailable ? "Open Codex Translator session" : "Connect a repository first"}
+        title={fileTranslationAvailable ? "Open Translator session" : "Connect a repository first"}
         type="button"
         onClick={onOpenTranslatorSession}
       >

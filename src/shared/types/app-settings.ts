@@ -55,7 +55,7 @@ export interface UpdateAppPreferencesRequest {
 export const THEME_MODES: readonly ThemeMode[] = ["system", "light", "dark"] as const;
 export const PERMISSION_REQUEST_MODES: readonly PermissionRequestMode[] = ["off", "allowAll"] as const;
 export const DEFAULT_TRANSLATION_TARGET_LANGUAGE: TranslationTargetLanguage = "zh-CN";
-export const DEFAULT_TRANSLATION_OUTPUT_MODE: TranslationOutputMode = "final-only";
+export const DEFAULT_TRANSLATION_OUTPUT_MODE: TranslationOutputMode = "pm-final-only";
 export const TRANSLATION_TARGET_LANGUAGE_OPTIONS: readonly TranslationTargetLanguageOption[] = [
   { value: "zh-CN", label: "Chinese" },
   { value: "ja", label: "Japanese" },

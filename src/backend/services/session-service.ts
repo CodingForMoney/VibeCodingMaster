@@ -1,12 +1,11 @@
 import { randomUUID } from "node:crypto";
 import path from "node:path";
-import { CORE_VCM_ROLE_NAMES, isCodexRoleName, isDispatchableRole } from "../../shared/constants.js";
+import { CORE_VCM_ROLE_NAMES, isDispatchableRole } from "../../shared/constants.js";
 import type { ClaudeHookEventName } from "../../shared/types/claude-hook.js";
 import type { RoleName } from "../../shared/types/role.js";
 import type {
   ClaudeModel,
   ClaudePermissionMode,
-  CodexModel,
   RoleSessionRecord,
   SessionEffort,
   SessionModel,
@@ -66,11 +65,9 @@ export interface SessionServiceDeps {
 type LaunchMode = "fresh" | "resume";
 
 const GATE_REVIEWER_ROLE: RoleName = "gate-reviewer";
-const CODEX_TRANSLATOR_ROLE: RoleName = "codex-translator";
-const CODEX_TRANSLATOR_DIR = ".ai/codex-translator";
-const CODEX_TRANSLATION_DIR = ".ai/vcm/translations";
-const CODEX_TRANSLATOR_SESSION_PATH = ".ai/vcm/translations/session.json";
-const CODEX_TRANSLATOR_CONFIG_PATH = ".ai/codex-translator/config.toml";
+const TRANSLATOR_ROLE: RoleName = "translator";
+const TRANSLATION_DIR = ".ai/vcm/translations";
+const TRANSLATOR_SESSION_PATH = ".ai/vcm/translations/session.json";
 const GATE_REVIEWER_SESSION_PATH = ".ai/vcm/gate-reviewer/session.json";
 const PROJECT_TRANSLATOR_SCOPE = "__project__";
 const PROJECT_GATE_REVIEWER_SCOPE = "__project_gate_reviewer__";
@@ -131,16 +128,9 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     const taskRepoRoot = getTaskRuntimeRepoRoot(task);
     const paths = deps.artifactService.getHandoffPaths(taskRepoRoot, task.handoffDir);
     const persisted = await loadPersistedRoleRecordForRole(deps.fs, repoRoot, taskRepoRoot, config.stateRoot, taskSlug, role);
-    const isCodexRole = isCodexRoleName(role);
-    const isTranslator = role === CODEX_TRANSLATOR_ROLE;
-    const sessionRepoRoot = isTranslator ? repoRoot : taskRepoRoot;
     const permissionMode = normalizeClaudePermissionMode(input.permissionMode ?? persisted?.permissionMode);
-    const model: SessionModel = isCodexRole
-      ? normalizeCodexModel(input.model ?? persisted?.model)
-      : normalizeClaudeModel(input.model ?? persisted?.model);
-    const effort = isCodexRole
-      ? normalizeCodexEffort(input.effort ?? persisted?.effort)
-      : normalizeClaudeEffort(input.effort ?? persisted?.effort);
+    const model: SessionModel = normalizeClaudeModel(input.model ?? persisted?.model);
+    const effort = normalizeClaudeEffort(input.effort ?? persisted?.effort);
     const claudeSessionId = launchMode === "resume"
       ? persisted?.claudeSessionId
       : randomUUID();
@@ -155,32 +145,20 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     }
     const transcriptPath = launchMode === "resume" && persisted?.transcriptPath
       ? persisted.transcriptPath
-      : isCodexRole ? undefined : claudeTranscriptPath(taskRepoRoot, claudeSessionId);
+      : claudeTranscriptPath(taskRepoRoot, claudeSessionId);
 
-    const startCommand = isCodexRole
-      ? await buildCodexStartCommand(
-          deps.fs,
-          repoRoot,
-          taskRepoRoot,
-          role,
-          launchMode,
-          model as CodexModel,
-          effort,
-          deps.sandboxMode,
-          launchMode === "resume" && hasCapturedCodexSession(persisted) ? claudeSessionId : undefined
-        )
-      : {
-          ...deps.claude.buildRoleStartCommand(
-            role,
-            config.claudeCommand,
-            permissionMode,
-            claudeSessionId,
-            launchMode === "resume",
-            model as ClaudeModel,
-            effort
-          ),
-          cwd: taskRepoRoot
-        };
+    const startCommand = {
+      ...deps.claude.buildRoleStartCommand(
+        role,
+        config.claudeCommand,
+        permissionMode,
+        claudeSessionId,
+        launchMode === "resume",
+        model as ClaudeModel,
+        effort
+      ),
+      cwd: taskRepoRoot
+    };
     const runtimeSession = await deps.runtime.createSession({
       taskSlug,
       role,
@@ -189,7 +167,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       cwd: startCommand.cwd,
       env: {
         VCM_API_URL: deps.apiUrl,
-        VCM_TASK_REPO_ROOT: sessionRepoRoot,
+        VCM_TASK_REPO_ROOT: taskRepoRoot,
         VCM_TASK_SLUG: taskSlug,
         VCM_ROLE: role,
         VCM_SESSION_ID: claudeSessionId
@@ -360,36 +338,43 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       return live;
     }
 
-    const persisted = await loadPersistedCodexTranslatorSession(deps.fs, repoRoot);
-    const model = normalizeCodexModel(input.model ?? persisted?.model);
-    const effort = normalizeCodexEffort(input.effort ?? persisted?.effort);
+    const config = await deps.projectService.loadConfig(repoRoot);
+    const persisted = await loadPersistedTranslatorSession(deps.fs, repoRoot);
+    const permissionMode = normalizeClaudePermissionMode(input.permissionMode ?? persisted?.permissionMode);
+    const model = normalizeClaudeModel(input.model ?? persisted?.model);
+    const effort = normalizeClaudeEffort(input.effort ?? persisted?.effort);
     const claudeSessionId = launchMode === "resume"
       ? persisted?.claudeSessionId
       : randomUUID();
 
     if (!claudeSessionId) {
       throw new VcmError({
-        code: "CODEX_TRANSLATOR_SESSION_MISSING",
-        message: "Codex Translator does not have a session id to resume.",
+        code: "TRANSLATOR_SESSION_MISSING",
+        message: "Translator does not have a session id to resume.",
         statusCode: 409,
         hint: "Start the translator once before using Resume."
       });
     }
 
-    const startCommand = await buildCodexStartCommand(
-      deps.fs,
-      repoRoot,
-      repoRoot,
-      CODEX_TRANSLATOR_ROLE,
-      launchMode,
-      model,
-      effort,
-      deps.sandboxMode,
-      launchMode === "resume" && hasCapturedCodexSession(persisted) ? claudeSessionId : undefined
-    );
+    await deps.fs.ensureDir(resolveRepoPath(repoRoot, TRANSLATION_DIR));
+    const transcriptPath = launchMode === "resume" && persisted?.transcriptPath
+      ? persisted.transcriptPath
+      : claudeTranscriptPath(repoRoot, claudeSessionId);
+    const startCommand = {
+      ...deps.claude.buildRoleStartCommand(
+        TRANSLATOR_ROLE,
+        config.claudeCommand,
+        permissionMode,
+        claudeSessionId,
+        launchMode === "resume",
+        model,
+        effort
+      ),
+      cwd: repoRoot
+    };
     const runtimeSession = await deps.runtime.createSession({
       taskSlug: PROJECT_TRANSLATOR_SCOPE,
-      role: CODEX_TRANSLATOR_ROLE,
+      role: TRANSLATOR_ROLE,
       command: startCommand.command,
       args: startCommand.args,
       cwd: startCommand.cwd,
@@ -397,7 +382,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
         VCM_API_URL: deps.apiUrl,
         VCM_TASK_REPO_ROOT: repoRoot,
         VCM_TASK_SLUG: PROJECT_TRANSLATOR_SCOPE,
-        VCM_ROLE: CODEX_TRANSLATOR_ROLE,
+        VCM_ROLE: TRANSLATOR_ROLE,
         VCM_SESSION_ID: claudeSessionId
       },
       cols: input.cols,
@@ -407,12 +392,13 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     const record: RoleSessionRecord = {
       id: runtimeSession.id,
       claudeSessionId,
+      transcriptPath,
       taskSlug: PROJECT_TRANSLATOR_SCOPE,
-      role: CODEX_TRANSLATOR_ROLE,
+      role: TRANSLATOR_ROLE,
       status: runtimeSession.status,
       activityStatus: "idle",
       command: startCommand.display,
-      permissionMode: "default",
+      permissionMode,
       model,
       effort,
       cwd: startCommand.cwd,
@@ -425,7 +411,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     };
 
     deps.registry.upsert(record);
-    await persistCodexTranslatorSession(deps.fs, repoRoot, record);
+    await persistTranslatorSession(deps.fs, repoRoot, record);
     return record;
   }
 
@@ -506,7 +492,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       if (!existing) {
         throw new VcmError({
           code: "SESSION_MISSING",
-          message: "Codex Translator session has not been started.",
+          message: "Translator session has not been started.",
           statusCode: 404
         });
       }
@@ -522,7 +508,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
         updatedAt: now()
       };
       deps.registry.upsert(updated);
-      await persistCodexTranslatorSession(deps.fs, repoRoot, updated);
+      await persistTranslatorSession(deps.fs, repoRoot, updated);
       return updated;
     },
     async restartProjectTranslatorSession(repoRoot, input = {}) {
@@ -540,7 +526,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     },
     async getProjectTranslatorSession(repoRoot) {
       const record = getRegisteredProjectTranslatorSession(deps.registry, deps.runtime)
-        ?? await loadPersistedCodexTranslatorSession(deps.fs, repoRoot);
+        ?? await loadPersistedTranslatorSession(deps.fs, repoRoot);
       return toRoleSessionRecordView(record, deps.runtime);
     },
     async ensureProjectTranslatorSession(repoRoot, input = {}) {
@@ -580,7 +566,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
         updatedAt: timestamp
       };
       deps.registry.upsert(updated);
-      await persistCodexTranslatorSession(deps.fs, repoRoot, updated);
+      await persistTranslatorSession(deps.fs, repoRoot, updated);
       return updated;
     },
     startRoleSession(repoRoot, taskSlug, role, input = {}) {
@@ -588,7 +574,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
         return launchProjectGateReviewerSession(repoRoot, input, "fresh", taskSlug)
           .then((session) => scopeProjectRoleSession(session, taskSlug)!);
       }
-      if (role === CODEX_TRANSLATOR_ROLE) {
+      if (role === TRANSLATOR_ROLE) {
         void taskSlug;
         return this.startProjectTranslatorSession(repoRoot, input);
       }
@@ -599,7 +585,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
         return launchProjectGateReviewerSession(repoRoot, input, "resume", taskSlug)
           .then((session) => scopeProjectRoleSession(session, taskSlug)!);
       }
-      if (role === CODEX_TRANSLATOR_ROLE) {
+      if (role === TRANSLATOR_ROLE) {
         void taskSlug;
         return this.resumeProjectTranslatorSession(repoRoot, input);
       }
@@ -609,7 +595,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       if (role === GATE_REVIEWER_ROLE) {
         return scopeProjectRoleSession(await this.stopProjectGateReviewerSession(repoRoot), taskSlug)!;
       }
-      if (role === CODEX_TRANSLATOR_ROLE) {
+      if (role === TRANSLATOR_ROLE) {
         void taskSlug;
         return this.stopProjectTranslatorSession(repoRoot);
       }
@@ -649,7 +635,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
         }
         return scopeProjectRoleSession(await launchProjectGateReviewerSession(repoRoot, input, "fresh", taskSlug), taskSlug)!;
       }
-      if (role === CODEX_TRANSLATOR_ROLE) {
+      if (role === TRANSLATOR_ROLE) {
         void taskSlug;
         return this.restartProjectTranslatorSession(repoRoot, input);
       }
@@ -673,7 +659,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
         }
         return scopeProjectRoleSession(await bindProjectGateReviewerSession(repoRoot, session, taskSlug), taskSlug);
       }
-      if (role === CODEX_TRANSLATOR_ROLE) {
+      if (role === TRANSLATOR_ROLE) {
         void taskSlug;
         return this.getProjectTranslatorSession(repoRoot);
       }
@@ -737,7 +723,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
         await persistProjectGateReviewerSession(deps.fs, repoRoot, updated);
         return scopeProjectRoleSession(updated, input.taskSlug);
       }
-      if (input.role === CODEX_TRANSLATOR_ROLE) {
+      if (input.role === TRANSLATOR_ROLE) {
         void input.taskSlug;
         return this.recordProjectTranslatorHookEvent(repoRoot, {
           eventName: input.eventName,
@@ -875,108 +861,6 @@ function toRoleSessionRecordView(
   };
 }
 
-async function buildCodexStartCommand(
-  fs: FileSystemAdapter,
-  baseRepoRoot: string,
-  _taskRepoRoot: string,
-  role: RoleName,
-  launchMode: LaunchMode,
-  selectedModel: CodexModel,
-  selectedEffort: SessionEffort,
-  sandboxMode: string | undefined,
-  resumeSessionId?: string
-): Promise<{ command: string; args: string[]; display: string; cwd: string }> {
-  const isTranslator = role === CODEX_TRANSLATOR_ROLE;
-  if (!isTranslator) {
-    throw new VcmError({
-      code: "CODEX_ROLE_UNSUPPORTED",
-      message: `${role} is not a Codex role.`,
-      statusCode: 400
-    });
-  }
-  const codexDir = resolveRepoPath(baseRepoRoot, CODEX_TRANSLATOR_DIR);
-  const outputDir = resolveRepoPath(baseRepoRoot, CODEX_TRANSLATION_DIR);
-  if (!(await fs.pathExists(codexDir))) {
-    throw new VcmError({
-      code: "CODEX_TRANSLATOR_CONFIG_MISSING",
-      message: `${CODEX_TRANSLATOR_DIR} does not exist.`,
-      statusCode: 409,
-      hint: "Apply the VCM harness before starting Codex Translator."
-    });
-  }
-
-  await fs.ensureDir(outputDir);
-  const config = await loadCodexSessionConfig(fs, baseRepoRoot, CODEX_TRANSLATOR_CONFIG_PATH);
-  const args = launchMode === "resume"
-    ? resumeSessionId ? ["resume", resumeSessionId] : ["resume", "--last"]
-    : [];
-  args.push("--cd", codexDir);
-  if (isDevContainerSandbox(sandboxMode)) {
-    args.push("--dangerously-bypass-approvals-and-sandbox");
-  } else {
-    args.push("--add-dir", baseRepoRoot);
-    args.push(
-      "--sandbox",
-      "workspace-write",
-      "--ask-for-approval",
-      "never"
-    );
-  }
-  args.push(
-    "--dangerously-bypass-hook-trust",
-    "--search"
-  );
-  if (selectedModel !== "default") {
-    args.push("--model", selectedModel);
-  }
-  if (selectedEffort !== "default") {
-    args.push("--config", `model_reasoning_effort="${selectedEffort}"`);
-  }
-
-  return {
-    command: config.command,
-    args,
-    cwd: baseRepoRoot,
-    display: [config.command, ...args].map(formatDisplayArg).join(" ")
-  };
-}
-
-function hasCapturedCodexSession(record: RoleSessionRecord | undefined): boolean {
-  return Boolean(record?.lastHookEventAt || record?.transcriptPath);
-}
-
-function isDevContainerSandbox(value: string | undefined): boolean {
-  const normalized = value?.toLowerCase().replace(/[\s_-]+/g, "");
-  return normalized === "devcontainer" ||
-    normalized === "container" ||
-    normalized === "docker" ||
-    normalized === "podman" ||
-    normalized === "codespaces" ||
-    normalized === "bypass" ||
-    normalized === "nosandbox" ||
-    normalized === "disabled" ||
-    normalized === "off" ||
-    normalized === "none";
-}
-
-async function loadCodexSessionConfig(
-  fs: FileSystemAdapter,
-  repoRoot: string,
-  configRelativePath: string
-): Promise<{ command: string }> {
-  const configPath = resolveRepoPath(repoRoot, configRelativePath);
-  if (!(await fs.pathExists(configPath))) {
-    return {
-      command: "codex"
-    };
-  }
-
-  const content = await fs.readText(configPath);
-  return {
-    command: parseTomlString(content, "command") ?? "codex"
-  };
-}
-
 function matchesRoleHookSession(record: RoleSessionRecord, input: RecordRoleHookEventInput): boolean {
   if (input.sessionId && record.claudeSessionId === input.sessionId) {
     return true;
@@ -1026,7 +910,7 @@ function getRegisteredRoleSession(
   taskSlug: string,
   role: RoleName
 ): RoleSessionRecord | undefined {
-  if (role !== CODEX_TRANSLATOR_ROLE && role !== GATE_REVIEWER_ROLE) {
+  if (role !== TRANSLATOR_ROLE && role !== GATE_REVIEWER_ROLE) {
     return registry.getByRole(taskSlug, role);
   }
 
@@ -1051,7 +935,7 @@ function getRegisteredProjectTranslatorSession(
   registry: SessionRegistry,
   runtime: TerminalRuntime
 ): RoleSessionRecord | undefined {
-  const candidates = registry.list().filter((session) => session.role === CODEX_TRANSLATOR_ROLE);
+  const candidates = registry.list().filter((session) => session.role === TRANSLATOR_ROLE);
   const live = candidates.find((session) => runtime.getSession(session.id)?.status === "running");
   return live ?? candidates.sort(compareSessionUpdatedAtDesc)[0];
 }
@@ -1061,7 +945,7 @@ function compareSessionUpdatedAtDesc(left: RoleSessionRecord, right: RoleSession
 }
 
 function scopeProjectRoleSession(record: RoleSessionRecord | undefined, taskSlug: string): RoleSessionRecord | undefined {
-  if (!record || (record.role !== CODEX_TRANSLATOR_ROLE && record.role !== GATE_REVIEWER_ROLE)) {
+  if (!record || (record.role !== TRANSLATOR_ROLE && record.role !== GATE_REVIEWER_ROLE)) {
     return record;
   }
   return {
@@ -1082,9 +966,9 @@ async function loadPersistedRoleRecordForRole(
     void taskSlug;
     return loadPersistedProjectGateReviewerSession(fs, baseRepoRoot);
   }
-  if (role === CODEX_TRANSLATOR_ROLE) {
+  if (role === TRANSLATOR_ROLE) {
     void taskSlug;
-    return loadPersistedCodexTranslatorSession(fs, baseRepoRoot);
+    return loadPersistedTranslatorSession(fs, baseRepoRoot);
   }
 
   return loadPersistedRoleRecord(fs, taskRepoRoot, stateRoot, taskSlug, role);
@@ -1110,11 +994,11 @@ async function loadPersistedProjectGateReviewerSession(
   };
 }
 
-async function loadPersistedCodexTranslatorSession(
+async function loadPersistedTranslatorSession(
   fs: FileSystemAdapter,
   repoRoot: string
 ): Promise<RoleSessionRecord | undefined> {
-  const sessionPath = resolveRepoPath(repoRoot, CODEX_TRANSLATOR_SESSION_PATH);
+  const sessionPath = resolveRepoPath(repoRoot, TRANSLATOR_SESSION_PATH);
   if (!(await fs.pathExists(sessionPath))) {
     return undefined;
   }
@@ -1174,12 +1058,8 @@ function normalizePersistedRoleRecord(record: RoleSessionRecord | undefined): Ro
             : undefined
         ),
         permissionMode: normalizeClaudePermissionMode(record.permissionMode),
-        model: isCodexRoleName(record.role)
-          ? normalizeCodexModel(record.model)
-          : normalizeClaudeModel(record.model),
-        effort: isCodexRoleName(record.role)
-          ? normalizeCodexEffort(record.effort)
-          : normalizeClaudeEffort(record.effort)
+        model: normalizeClaudeModel(record.model),
+        effort: normalizeClaudeEffort(record.effort)
       }
     : undefined;
 }
@@ -1227,8 +1107,8 @@ async function persistRoleSessionRecord(
     await persistProjectGateReviewerSession(fs, baseRepoRoot, session);
     return;
   }
-  if (session.role === CODEX_TRANSLATOR_ROLE) {
-    await persistCodexTranslatorSession(fs, baseRepoRoot, session);
+  if (session.role === TRANSLATOR_ROLE) {
+    await persistTranslatorSession(fs, baseRepoRoot, session);
     return;
   }
 
@@ -1254,13 +1134,13 @@ async function persistProjectGateReviewerSession(
   );
 }
 
-async function persistCodexTranslatorSession(
+async function persistTranslatorSession(
   fs: FileSystemAdapter,
   repoRoot: string,
   session: RoleSessionRecord
 ): Promise<void> {
   await fs.writeJsonAtomic<ProjectRoleSessionFile>(
-    resolveRepoPath(repoRoot, CODEX_TRANSLATOR_SESSION_PATH),
+    resolveRepoPath(repoRoot, TRANSLATOR_SESSION_PATH),
     {
       version: 1,
       role: session.role,
@@ -1316,13 +1196,6 @@ function normalizeClaudeModel(value: unknown): ClaudeModel {
   return "default";
 }
 
-function normalizeCodexModel(value: unknown): CodexModel {
-  if (value === "default" || value === "gpt-5.5") {
-    return value;
-  }
-  return "gpt-5.5";
-}
-
 function normalizeClaudeEffort(value: unknown): SessionEffort {
   if (
     value === "low"
@@ -1335,32 +1208,4 @@ function normalizeClaudeEffort(value: unknown): SessionEffort {
     return value;
   }
   return "default";
-}
-
-function normalizeCodexEffort(value: unknown): SessionEffort {
-  if (
-    value === "low"
-    || value === "medium"
-    || value === "high"
-    || value === "xhigh"
-  ) {
-    return value;
-  }
-  return "default";
-}
-
-function parseTomlString(content: string, key: string): string | undefined {
-  const pattern = new RegExp(`^\\s*${escapeRegExp(key)}\\s*=\\s*"([^"]*)"\\s*$`, "m");
-  return pattern.exec(content)?.[1];
-}
-
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-function formatDisplayArg(value: string): string {
-  if (/^[A-Za-z0-9_./:=@+-]+$/.test(value)) {
-    return value;
-  }
-  return `'${value.replaceAll("'", "'\\''")}'`;
 }

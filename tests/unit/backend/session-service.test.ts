@@ -3,7 +3,6 @@ import type { ProjectConfig } from "../../../src/shared/types/project.js";
 import type { RoleName } from "../../../src/shared/types/role.js";
 import {
   CLAUDE_EFFORT_OPTIONS,
-  CODEX_EFFORT_OPTIONS,
   type ClaudeModel,
   type SessionEffort
 } from "../../../src/shared/types/session.js";
@@ -15,8 +14,7 @@ import type { FileSystemAdapter } from "../../../src/backend/adapters/filesystem
 const TASK_WORKTREE = "/repo/.claude/worktrees/demo-task";
 
 describe("createSessionService", () => {
-  it("keeps Max effort for Claude but not Codex options", () => {
-    expect(CODEX_EFFORT_OPTIONS.map((option) => option.value)).not.toContain("max");
+  it("keeps Max effort in Claude Code options", () => {
     expect(CLAUDE_EFFORT_OPTIONS.map((option) => option.value)).toContain("max");
   });
 
@@ -192,17 +190,15 @@ describe("createSessionService", () => {
     ]);
   });
 
-  it("persists Codex Translator sessions under project translation runtime state", async () => {
+  it("persists Translator sessions under project translation runtime state", async () => {
     const fs = createMemoryFs();
-    await fs.writeText("/repo/.ai/codex-translator", "");
-    await fs.writeText("/repo/.ai/codex-translator/config.toml", `approval_policy = "never"`);
     const firstRuntimeInputs: CreateTerminalSessionInput[] = [];
     const firstService = createTestSessionService(fs, firstRuntimeInputs, [], {
       worktreePath: TASK_WORKTREE
     });
 
     const started = await firstService.startProjectTranslatorSession("/repo", {
-      model: "gpt-5.5",
+      model: "default",
       effort: "xhigh"
     });
 
@@ -211,7 +207,7 @@ describe("createSessionService", () => {
     expect(firstRuntimeInputs[0]?.env).toMatchObject({
       VCM_TASK_REPO_ROOT: "/repo",
       VCM_TASK_SLUG: "__project__",
-      VCM_ROLE: "codex-translator"
+      VCM_ROLE: "translator"
     });
     expect(firstRuntimeInputs[0]?.logPath).toBeUndefined();
     await expect(fs.pathExists("/repo/.ai/vcm/translations/session.json")).resolves.toBe(true);
@@ -220,72 +216,58 @@ describe("createSessionService", () => {
 
     const hooked = await firstService.recordProjectTranslatorHookEvent("/repo", {
       eventName: "UserPromptSubmit",
-      sessionId: "codex-translator-real-session",
-      transcriptPath: "/Users/sheldon/.codex/sessions/codex-translator-real-session.jsonl",
-      cwd: "/repo/.ai/codex-translator"
+      sessionId: "translator-real-session",
+      transcriptPath: "/repo/.claude/projects/-repo/translator-real-session.jsonl",
+      cwd: "/repo"
     });
-    expect(hooked?.claudeSessionId).toBe("codex-translator-real-session");
+    expect(hooked?.claudeSessionId).toBe("translator-real-session");
 
     const secondRuntimeInputs: CreateTerminalSessionInput[] = [];
     const secondService = createTestSessionService(fs, secondRuntimeInputs);
     const recovered = await secondService.getProjectTranslatorSession("/repo");
     expect(recovered).toMatchObject({
-      role: "codex-translator",
+      role: "translator",
       taskSlug: "__project__",
       status: "resumable",
-      claudeSessionId: "codex-translator-real-session"
+      claudeSessionId: "translator-real-session"
     });
     const resumed = await secondService.resumeProjectTranslatorSession("/repo");
-    expect(resumed.claudeSessionId).toBe("codex-translator-real-session");
+    expect(resumed.claudeSessionId).toBe("translator-real-session");
     expect(secondRuntimeInputs[0]?.args).toEqual([
-      "resume",
-      "codex-translator-real-session",
-      "--cd",
-      "/repo/.ai/codex-translator",
-      "--add-dir",
-      "/repo",
-      "--sandbox",
-      "workspace-write",
-      "--ask-for-approval",
-      "never",
-      "--dangerously-bypass-hook-trust",
-      "--search",
+      "--agent",
+      "translator",
+      "--resume",
+      "translator-real-session",
       "--model",
-      "gpt-5.5",
-      "--config",
-      'model_reasoning_effort="xhigh"'
+      "default",
+      "--effort",
+      "xhigh"
     ]);
   });
 
-  it("starts Codex Translator without nested Codex sandbox inside devContainer", async () => {
+  it("starts Translator as a project-scoped Claude Code session", async () => {
     const fs = createMemoryFs();
-    await fs.writeText("/repo/.ai/codex-translator", "");
-    await fs.writeText("/repo/.ai/codex-translator/config.toml", `approval_policy = "never"`);
     const runtimeInputs: CreateTerminalSessionInput[] = [];
-    const service = createTestSessionService(fs, runtimeInputs, [], {
-      sandboxMode: "devcontainer"
-    });
+    const service = createTestSessionService(fs, runtimeInputs);
 
     const started = await service.startProjectTranslatorSession("/repo", {
-      model: "gpt-5.5",
-      effort: "xhigh"
+      model: "default",
+      effort: "medium"
     });
 
-    expect(started.command).toContain("--dangerously-bypass-approvals-and-sandbox");
+    expect(started.command).toContain("--agent translator");
+    expect(runtimeInputs[0]?.cwd).toBe("/repo");
     expect(runtimeInputs[0]?.args).toEqual([
-      "--cd",
-      "/repo/.ai/codex-translator",
-      "--dangerously-bypass-approvals-and-sandbox",
-      "--dangerously-bypass-hook-trust",
-      "--search",
+      "--agent",
+      "translator",
+      "--session-id",
+      started.claudeSessionId,
       "--model",
-      "gpt-5.5",
-      "--config",
-      'model_reasoning_effort="xhigh"'
+      "default",
+      "--effort",
+      "medium"
     ]);
     expect(runtimeInputs[0]?.args).not.toContain("--sandbox");
-    expect(runtimeInputs[0]?.args).not.toContain("--add-dir");
-    expect(runtimeInputs[0]?.args).not.toContain("--ask-for-approval");
   });
 
   it("passes Gate Reviewer effort through Claude Code settings", async () => {

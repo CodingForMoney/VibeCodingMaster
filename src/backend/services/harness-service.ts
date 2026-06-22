@@ -22,12 +22,9 @@ import type { FileSystemAdapter } from "../adapters/filesystem.js";
 import { renderArchitectHarnessRules } from "../templates/harness/architect-agent.js";
 import { renderCoderHarnessRules } from "../templates/harness/coder-agent.js";
 import {
-  renderCodexCliConfigHarnessRules,
-  renderCodexHooksHarnessRules,
-  renderCodexTranslatorAgentsHarnessRules,
-  renderCodexTranslatorConfigHarnessRules,
   renderGateReviewerAgentRules,
   renderRequestGateReviewTool,
+  renderTranslatorAgentRules,
   renderVcmGateReviewSkillRules
 } from "../templates/harness/gate-review.js";
 import { renderRootClaudeHarnessRules } from "../templates/harness/claude-root.js";
@@ -98,6 +95,12 @@ export const VCM_HARNESS_VERSION = 1;
 const MANAGED_BLOCK_PATTERN = /<!-- VCM:BEGIN(?:\s+version=(\d+))? -->[\s\S]*?<!-- VCM:END -->/m;
 const HASH_MANAGED_BLOCK_PATTERN = /# VCM:BEGIN(?:\s+version=(\d+))?\n[\s\S]*?# VCM:END/m;
 const CLAUDE_SETTINGS_PATH = ".claude/settings.json";
+const LEGACY_CODEX_HARNESS_PATHS = [
+  ".ai/codex",
+  ".ai/codex-translator",
+  ".claude/skills/vcm-codex-review-gate",
+  ".ai/tools/request-codex-review"
+] as const;
 const VCM_HOOK_COMMAND = `sh -c 'if [ -z "\${VCM_TASK_SLUG:-}" ] || [ -z "\${VCM_ROLE:-}" ] || [ -z "\${VCM_API_URL:-}" ]; then exit 0; fi; node -e '"'"'let s="";process.stdin.setEncoding("utf8");process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{let event={};try{event=s.trim()?JSON.parse(s):{};}catch{event={raw:s};}process.stdout.write(JSON.stringify({taskSlug:process.env.VCM_TASK_SLUG,role:process.env.VCM_ROLE,event}));});'"'"' | curl -fsS --max-time 2 -X POST "\${VCM_API_URL}/api/hooks/claude-code" -H "content-type: application/json" --data-binary @- >/dev/null || true'`;
 const VCM_STOP_HOOK_COMMAND = `sh -c 'if [ -z "\${VCM_TASK_SLUG:-}" ] || [ -z "\${VCM_ROLE:-}" ] || [ -z "\${VCM_API_URL:-}" ]; then exit 0; fi; node -e '"'"'let s="";process.stdin.setEncoding("utf8");process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{let event={};try{event=s.trim()?JSON.parse(s):{};}catch{event={raw:s};}process.stdout.write(JSON.stringify({taskSlug:process.env.VCM_TASK_SLUG,role:process.env.VCM_ROLE,event}));});'"'"' | curl -fsS --max-time 5 -X POST "\${VCM_API_URL}/api/hooks/claude-code/stop" -H "content-type: application/json" --data-binary @- || true'`;
 const VCM_PERMISSION_REQUEST_HOOK_COMMAND = `sh -c 'if [ -z "\${VCM_TASK_SLUG:-}" ] || [ -z "\${VCM_ROLE:-}" ] || [ -z "\${VCM_API_URL:-}" ]; then exit 0; fi; node -e '"'"'let s="";process.stdin.setEncoding("utf8");process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{let event={};try{event=s.trim()?JSON.parse(s):{};}catch{event={raw:s};}process.stdout.write(JSON.stringify({taskSlug:process.env.VCM_TASK_SLUG,role:process.env.VCM_ROLE,event}));});'"'"' | curl -fsS --max-time 5 -X POST "\${VCM_API_URL}/api/hooks/claude-code/permission-request" -H "content-type: application/json" --data-binary @- || true'`;
@@ -199,31 +202,14 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
     renderRules: renderGateReviewerAgentRules
   },
   {
-    kind: "codex-translator-agents",
-    path: ".ai/codex-translator/AGENTS.md",
-    title: "VCM Codex Translator",
-    renderRules: renderCodexTranslatorAgentsHarnessRules
-  },
-  {
-    kind: "codex-translator-config",
-    path: ".ai/codex-translator/config.toml",
-    title: "VCM Codex Translator Config",
-    ownership: "raw-file",
-    renderRules: renderCodexTranslatorConfigHarnessRules
-  },
-  {
-    kind: "codex-translator-cli-config",
-    path: ".ai/codex-translator/.codex/config.toml",
-    title: "VCM Codex Translator CLI Config",
-    ownership: "raw-file",
-    renderRules: renderCodexCliConfigHarnessRules
-  },
-  {
-    kind: "codex-translator-hooks",
-    path: ".ai/codex-translator/.codex/hooks.json",
-    title: "VCM Codex Translator Hooks",
-    ownership: "raw-file",
-    renderRules: () => renderCodexHooksHarnessRules("codex-translator")
+    kind: "agent-translator",
+    path: ".claude/agents/translator.md",
+    title: "Translator Agent",
+    frontmatter: renderAgentFrontmatter(
+      "translator",
+      "VCM project translation tool role for conversation translation, file translation, bootstrap, and memory updates."
+    ),
+    renderRules: renderTranslatorAgentRules
   },
   {
     kind: "tool-request-gate-review",
@@ -281,7 +267,8 @@ export function createHarnessService(deps: HarnessServiceDeps): HarnessService {
   return {
     async getHarnessStatus(repoRoot) {
       const analyses = await analyzeHarnessFiles(deps.fs, repoRoot);
-      return renderHarnessStatus(analyses);
+      const legacyChanges = await analyzeLegacyCodexHarnessPaths(deps.fs, repoRoot);
+      return renderHarnessStatus(analyses, legacyChanges);
     },
     async applyHarness(repoRoot) {
       if (deps.runFixedInstaller) {
@@ -300,6 +287,9 @@ export function createHarnessService(deps: HarnessServiceDeps): HarnessService {
           changedFiles.push(analysis.plannedChange);
         }
       }
+
+      const legacyChanges = await removeLegacyCodexHarnessPaths(deps.fs, repoRoot);
+      changedFiles.push(...legacyChanges);
 
       return {
         version: VCM_HARNESS_VERSION,
@@ -627,11 +617,48 @@ async function analyzeHarnessFile(
   };
 }
 
-function renderHarnessStatus(analyses: HarnessFileAnalysis[]): HarnessStatusReport {
+async function analyzeLegacyCodexHarnessPaths(fs: FileSystemAdapter, repoRoot: string): Promise<HarnessPlannedChange[]> {
+  const changes: HarnessPlannedChange[] = [];
+  for (const relativePath of LEGACY_CODEX_HARNESS_PATHS) {
+    if (!await fs.pathExists(resolveHarnessPath(repoRoot, relativePath))) {
+      continue;
+    }
+    changes.push({
+      path: relativePath,
+      action: "delete",
+      reason: "Legacy Codex harness path is obsolete; VCM now uses Claude Code Gate Reviewer and Translator roles."
+    });
+  }
+  return changes;
+}
+
+async function removeLegacyCodexHarnessPaths(fs: FileSystemAdapter, repoRoot: string): Promise<HarnessPlannedChange[]> {
+  const changes = await analyzeLegacyCodexHarnessPaths(fs, repoRoot);
+  if (changes.length === 0) {
+    return [];
+  }
+  if (!fs.removePath) {
+    return [];
+  }
+
+  for (const change of changes) {
+    await fs.removePath(resolveHarnessPath(repoRoot, change.path), {
+      recursive: true,
+      force: true
+    });
+  }
+  return changes;
+}
+
+function renderHarnessStatus(
+  analyses: HarnessFileAnalysis[],
+  legacyChanges: HarnessPlannedChange[] = []
+): HarnessStatusReport {
   const files = analyses.map((analysis) => analysis.status);
   const plannedChanges = analyses
     .map((analysis) => analysis.plannedChange)
-    .filter((change): change is HarnessPlannedChange => Boolean(change));
+    .filter((change): change is HarnessPlannedChange => Boolean(change))
+    .concat(legacyChanges);
 
   // Derive `initialized`: the VCM harness is considered installed when at least one
   // VCM-exclusive marker is present (per analysis):

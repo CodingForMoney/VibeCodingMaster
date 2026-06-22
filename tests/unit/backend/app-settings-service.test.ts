@@ -230,7 +230,7 @@ function createDefaultPreferences(overrides: Partial<AppPreferences> = {}): AppP
     translationEnabled: false,
     translationAutoSendEnabled: false,
     translationTargetLanguage: "zh-CN",
-    translationOutputMode: "final-only",
+    translationOutputMode: "pm-final-only",
     launchTemplate: createDefaultLaunchTemplate(),
     ...overrides
   };

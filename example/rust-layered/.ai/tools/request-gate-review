@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Request a VCM-managed Codex Review Gate."""
+"""Request a VCM-managed Gate Review Gate."""
 import argparse
 import hashlib
 import json
@@ -13,17 +13,12 @@ import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 
-try:
-    import tomllib
-except ModuleNotFoundError:
-    tomllib = None
-
 
 GATES = ("architecture-plan", "validation-adequacy", "final-diff")
 REPORTS = {
-    "architecture-plan": ".ai/vcm/codex-reviews/architecture-plan-review.md",
-    "validation-adequacy": ".ai/vcm/codex-reviews/validation-adequacy-review.md",
-    "final-diff": ".ai/vcm/codex-reviews/final-diff-review.md",
+    "architecture-plan": ".ai/vcm/gate-reviews/architecture-plan-review.md",
+    "validation-adequacy": ".ai/vcm/gate-reviews/validation-adequacy-review.md",
+    "final-diff": ".ai/vcm/gate-reviews/final-diff-review.md",
 }
 SOURCE_ARTIFACTS = {
     "architecture-plan": [".ai/vcm/handoffs/architecture-plan.md"],
@@ -65,7 +60,7 @@ def call_vcm_api(gate: str) -> int | None:
         base_url.rstrip("/")
         + "/api/tasks/"
         + urllib.parse.quote(task_slug, safe="")
-        + "/codex-review/"
+        + "/gate-review/"
         + urllib.parse.quote(gate, safe="")
         + "/request"
     )
@@ -115,20 +110,6 @@ def write_json(path: Path, data: dict) -> None:
     tmp.replace(path)
 
 
-def load_config(root: Path) -> dict:
-    path = root / ".ai/codex/config.toml"
-    if not path.is_file() or tomllib is None:
-        return {}
-    return tomllib.loads(path.read_text())
-
-
-def codex_review_config(root: Path) -> dict:
-    config = load_config(root)
-    vcm = config.get("vcm", {})
-    review = vcm.get("codex_review", {}) if isinstance(vcm, dict) else {}
-    return review if isinstance(review, dict) else {}
-
-
 def command_output(root: Path, command: list[str]) -> bytes:
     result = subprocess.run(
         command,
@@ -144,9 +125,9 @@ def input_hash(root: Path, gate: str) -> str:
     digest = hashlib.sha256()
     common = [
         "CLAUDE.md",
-        ".ai/codex/AGENTS.md",
-        ".ai/codex/config.toml",
-        f".ai/codex/prompts/{gate}-gate.md",
+        ".claude/agents/gate-reviewer.md",
+        ".claude/skills/vcm-gate-review/SKILL.md",
+        ".ai/tools/request-gate-review",
     ]
     for relative in common + SOURCE_ARTIFACTS[gate]:
         path = root / relative
@@ -155,7 +136,7 @@ def input_hash(root: Path, gate: str) -> str:
             digest.update(path.read_bytes())
         else:
             digest.update(b"<missing>")
-    if gate == "final-diff":
+    if gate in ("architecture-plan", "final-diff"):
         digest.update(command_output(root, ["git", "status", "--porcelain=v1"]))
         digest.update(command_output(root, ["git", "diff", "--binary"]))
         digest.update(command_output(root, ["git", "diff", "--cached", "--binary"]))
@@ -169,11 +150,11 @@ def request_id(gate: str) -> str:
 
 def local_request(gate: str) -> int:
     root = root_dir()
-    review_config = codex_review_config(root)
-    enabled = bool(review_config.get("enabled", False))
-    required = set(review_config.get("required_gates", []))
-    index_path = root / ".ai/vcm/codex-reviews/index.json"
+    index_path = root / ".ai/vcm/gate-reviews/index.json"
     index = read_json(index_path)
+    enabled = bool(index.get("enabled", False))
+    gate_record = index.get("gates", {}).get(gate, {}) if isinstance(index.get("gates"), dict) else {}
+    required = bool(gate_record.get("required", False)) if isinstance(gate_record, dict) else False
     index.update({"version": 1, "enabled": enabled})
     index.setdefault("gates", {})
 
@@ -183,7 +164,7 @@ def local_request(gate: str) -> int:
         print_result("disabled", gate=gate)
         return 0
 
-    if gate not in required:
+    if not required:
         gate_record = index["gates"].setdefault(gate, {})
         gate_record.update({"required": False, "status": "not_required", "updatedAt": now_iso()})
         write_json(index_path, index)
@@ -201,7 +182,8 @@ def local_request(gate: str) -> int:
         return 0
 
     rid = request_id(gate)
-    request_path = root / ".ai/vcm/codex-reviews/requests" / f"{rid}.json"
+    request_path = root / ".ai/vcm/gate-reviews/requests" / f"{rid}.json"
+    prompt_path = f".ai/vcm/gate-reviews/requests/{rid}.prompt.md"
     report_path = REPORTS[gate]
     requested_at = now_iso()
     write_json(request_path, {
@@ -212,7 +194,7 @@ def local_request(gate: str) -> int:
         "requestedAt": requested_at,
         "inputHash": current_hash,
         "reportPath": report_path,
-        "promptPath": f".ai/codex/prompts/{gate}-gate.md",
+        "promptPath": prompt_path,
     })
 
     index["activeGate"] = gate
@@ -222,7 +204,7 @@ def local_request(gate: str) -> int:
         "status": "running",
         "decision": None,
         "reportPath": report_path,
-        "promptPath": f".ai/codex/prompts/{gate}-gate.md",
+        "promptPath": prompt_path,
         "inputHash": current_hash,
         "requestId": rid,
         "requestPath": request_path.relative_to(root).as_posix(),

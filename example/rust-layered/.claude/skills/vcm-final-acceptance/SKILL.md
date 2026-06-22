@@ -22,7 +22,7 @@ Read the relevant task evidence before deciding:
 - `.ai/vcm/handoffs/review-report.md` when reviewer validation was required
 - `.ai/vcm/handoffs/docs-sync-report.md` when durable docs could be affected
 - `.ai/vcm/handoffs/known-issues.md` when unresolved findings were recorded
-- `.ai/vcm/codex-reviews/index.json` and referenced Codex reports when Codex gates were required, skipped, or overridden
+- `.ai/vcm/gate-reviews/index.json` and referenced Gate Review reports when Gate Reviews were required, skipped, or overridden
 - current `git status` and changed file list
 - relevant long-term docs only when needed to confirm that a docs-sync artifact exists and names the correct durable docs
 
@@ -34,7 +34,7 @@ Acceptable evidence must show:
 
 - architect plan or docs-sync decision when architecture, public contracts, durable docs, or known issues changed
 - reviewer decision and validation evidence when code, behavior, tests, or generated context changed
-- required Codex gate decisions, skip reasons, or override reasons when Codex gates were enabled
+- required Gate Review decisions, skip reasons, or override reasons when Gate Reviews were enabled
 - known-issues disposition when unresolved findings were recorded
 - explicit user approval for accepted high-risk decisions or intentionally skipped required gates
 
@@ -62,7 +62,7 @@ Check:
 - required handoff artifacts exist and are current
 - architecture plan completion, Replan, or architect follow-up decision is recorded
 - reviewer report records validation commands, results, skipped checks with reasons, and an acceptable decision
-- required Codex gates are approved, skipped with a recorded reason, or overridden with a recorded reason
+- required Gate Reviews are approved, skipped with a recorded reason, or overridden with a recorded reason
 - docs-sync report records docs updated, docs intentionally left unchanged, or required follow-up
 - known issues are either resolved, promoted to durable docs by architect, or explicitly accepted
 - temporary task state is ready to clean after durable facts are promoted
@@ -78,7 +78,7 @@ Choose exactly one:
 - needs-docs-sync
 - blocked-by-user-decision
 
-Do not accept when required role evidence is missing, required Codex gate evidence is missing, reviewer findings are unresolved, docs sync is missing for durable changes, known-issues disposition is missing, or unexplained high-risk files remain.
+Do not accept when required role evidence is missing, required Gate Review evidence is missing, reviewer findings are unresolved, docs sync is missing for durable changes, known-issues disposition is missing, or unexplained high-risk files remain.
 
 ## Output
 
@@ -115,7 +115,7 @@ accepted | accepted-with-known-risks | needs-coder-follow-up | needs-architect-r
 
 ## Review And Docs Sync
 
-## Codex Review Gates
+## Gate Review Gates
 
 ## Cleanup Readiness
 

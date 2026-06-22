@@ -1,6 +1,6 @@
 import type { RoleName } from "./role.js";
 
-export type TranslationProviderType = "codex";
+export type TranslationProviderType = "claude-code";
 
 export type TranslationDirection =
   | "user-input-to-english"
@@ -147,7 +147,7 @@ export type TranslationWsMessage =
   | { type: "translation-error"; id?: string; message: string }
   | { type: "translation-failures"; failures: TranslationFailureItem[] };
 
-export type CodexTranslationQueueItemType =
+export type TranslationQueueItemType =
   | "bootstrap"
   | "file"
   | "conversation"
@@ -156,7 +156,7 @@ export type CodexTranslationQueueItemType =
   | "resume"
   | "force-retranslate";
 
-export type CodexTranslationQueueItemStatus =
+export type TranslationQueueItemStatus =
   | "queued"
   | "dispatching"
   | "running"
@@ -168,10 +168,10 @@ export type CodexTranslationQueueItemStatus =
   | "skipped"
   | "cancelled";
 
-export interface CodexTranslationQueueItem {
+export interface TranslationQueueItem {
   id: string;
-  type: CodexTranslationQueueItemType;
-  status: CodexTranslationQueueItemStatus;
+  type: TranslationQueueItemType;
+  status: TranslationQueueItemStatus;
   targetLanguage: string;
   jobId?: string;
   requestPath: string;
@@ -186,14 +186,14 @@ export interface CodexTranslationQueueItem {
   updatedAt: string;
 }
 
-export interface CodexTranslationQueueState {
+export interface TranslationQueueState {
   version: 1;
   activeItemId?: string;
   updatedAt: string;
-  items: CodexTranslationQueueItem[];
+  items: TranslationQueueItem[];
 }
 
-export type CodexFileTranslationJobStatus =
+export type FileTranslationJobStatus =
   | "queued"
   | "running"
   | "validating"
@@ -204,7 +204,7 @@ export type CodexFileTranslationJobStatus =
   | "skipped"
   | "cancelled";
 
-export interface CodexFileTranslationJob {
+export interface FileTranslationJob {
   id: string;
   sourcePath: string;
   sourceHash: string;
@@ -214,7 +214,7 @@ export interface CodexFileTranslationJob {
   translationProfile: string;
   chunkSourceTokenTarget: number;
   dedupeKey: string;
-  status: CodexFileTranslationJobStatus;
+  status: FileTranslationJobStatus;
   requestPath: string;
   progressPath: string;
   resultPath: string;
@@ -225,15 +225,15 @@ export interface CodexFileTranslationJob {
   completedAt?: string;
 }
 
-export interface CodexFileTranslationIndex {
+export interface FileTranslationIndex {
   version: 1;
   updatedAt: string;
-  jobs: CodexFileTranslationJob[];
+  jobs: FileTranslationJob[];
 }
 
-export interface CodexBootstrapRun {
+export interface TranslationBootstrapRun {
   id: string;
-  status: CodexTranslationQueueItemStatus;
+  status: TranslationQueueItemStatus;
   targetLanguage: string;
   candidatePaths: string[];
   requestPath: string;
@@ -245,13 +245,13 @@ export interface CodexBootstrapRun {
   completedAt?: string;
 }
 
-export interface CodexBootstrapIndex {
+export interface TranslationBootstrapIndex {
   version: 1;
   updatedAt: string;
-  runs: CodexBootstrapRun[];
+  runs: TranslationBootstrapRun[];
 }
 
-export interface CreateCodexFileTranslationRequest {
+export interface CreateFileTranslationRequest {
   taskSlug?: string;
   sourcePath: string;
   targetLanguage: string;
@@ -260,13 +260,13 @@ export interface CreateCodexFileTranslationRequest {
   force?: boolean;
 }
 
-export interface BrowseCodexTranslationSourceFilesRequest {
+export interface BrowseTranslationSourceFilesRequest {
   path?: string;
   query?: string;
   limit?: number;
 }
 
-export interface CodexTranslationSourceFileEntry {
+export interface TranslationSourceFileEntry {
   name: string;
   path: string;
   type: "directory" | "file";
@@ -275,26 +275,26 @@ export interface CodexTranslationSourceFileEntry {
   reason?: string;
 }
 
-export interface CodexTranslationSourceFileBrowserResult {
+export interface TranslationSourceFileBrowserResult {
   currentPath: string;
   parentPath?: string;
   query?: string;
-  entries: CodexTranslationSourceFileEntry[];
+  entries: TranslationSourceFileEntry[];
   truncated: boolean;
 }
 
-export interface CreateCodexBootstrapRequest {
+export interface CreateTranslationBootstrapRequest {
   taskSlug?: string;
   targetLanguage: string;
   candidatePaths?: string[];
 }
 
-export interface CreateCodexMemoryUpdateRequest {
+export interface CreateTranslationMemoryUpdateRequest {
   taskSlug?: string;
   targetLanguage: string;
 }
 
-export interface CodexConversationTranslationJob {
+export interface ConversationTranslationJob {
   id: string;
   direction: TranslationDirection;
   sourceHash: string;
@@ -308,7 +308,7 @@ export interface CodexConversationTranslationJob {
   updatedAt: string;
 }
 
-export interface CreateCodexConversationTranslationRequest {
+export interface CreateConversationTranslationRequest {
   direction: TranslationDirection;
   sourceText: string;
   sourceLanguage: string;
@@ -318,14 +318,14 @@ export interface CreateCodexConversationTranslationRequest {
   deferDispatch?: boolean;
 }
 
-export interface CodexTranslationState {
-  queue: CodexTranslationQueueState;
-  fileIndex: CodexFileTranslationIndex;
-  bootstrapIndex: CodexBootstrapIndex;
+export interface TranslationState {
+  queue: TranslationQueueState;
+  fileIndex: FileTranslationIndex;
+  bootstrapIndex: TranslationBootstrapIndex;
   memoryInitialized: boolean;
 }
 
-export interface CodexConversationTranslationResultFile {
+export interface ConversationTranslationResultFile {
   version: 1;
   id: string;
   status: "completed" | "failed" | "needs_review";

@@ -1,10 +1,7 @@
 import type { RoleName } from "../../shared/types/role.js";
-import { isCodexRoleName } from "../../shared/constants.js";
 import {
   CLAUDE_EFFORT_OPTIONS,
   CLAUDE_MODEL_OPTIONS,
-  CODEX_EFFORT_OPTIONS,
-  CODEX_MODEL_OPTIONS,
   type ClaudePermissionMode,
   type RoleSessionRecord,
   type SessionEffort,
@@ -45,26 +42,21 @@ export function SessionToolbar({
   const isRunning = session?.status === "running";
   const canResume = Boolean(session?.claudeSessionId && !isRunning);
   const canStart = !isRunning && !session?.claudeSessionId;
-  const isCodexRole = isCodexRoleName(role);
-  const modelOptions = isCodexRole ? CODEX_MODEL_OPTIONS : CLAUDE_MODEL_OPTIONS;
-  const effortOptions = isCodexRole ? CODEX_EFFORT_OPTIONS : CLAUDE_EFFORT_OPTIONS;
 
   return (
     <div className="session-controls">
-      {isCodexRole ? null : (
-        <label className="session-option-field permission-mode-field">
-          <span>
-            Permission
-          </span>
-          <select
-            value={permissionMode}
-            onChange={(event) => onPermissionModeChange(event.target.value as ClaudePermissionMode)}
-          >
-            <option value="default">默认</option>
-            <option value="bypassPermissions">bypassPermissions</option>
-          </select>
-        </label>
-      )}
+      <label className="session-option-field permission-mode-field">
+        <span>
+          Permission
+        </span>
+        <select
+          value={permissionMode}
+          onChange={(event) => onPermissionModeChange(event.target.value as ClaudePermissionMode)}
+        >
+          <option value="default">默认</option>
+          <option value="bypassPermissions">bypassPermissions</option>
+        </select>
+      </label>
 
       <label className="session-option-field model-field">
         <span>
@@ -74,7 +66,7 @@ export function SessionToolbar({
           value={model}
           onChange={(event) => onModelChange(event.target.value as SessionModel)}
         >
-          {modelOptions.map((option) => (
+          {CLAUDE_MODEL_OPTIONS.map((option) => (
             <option key={option.value} value={option.value}>
               {option.label}
             </option>
@@ -90,7 +82,7 @@ export function SessionToolbar({
           value={effort}
           onChange={(event) => onEffortChange(event.target.value as SessionEffort)}
         >
-          {effortOptions.map((option) => (
+          {CLAUDE_EFFORT_OPTIONS.map((option) => (
             <option key={option.value} value={option.value}>
               {option.label}
             </option>

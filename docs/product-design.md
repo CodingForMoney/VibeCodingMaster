@@ -635,7 +635,7 @@ The settings file stores:
 - global translation target language
 - recent repository paths
 
-Translation work is routed through the long-lived Codex Translator session. VCM no longer exposes API-key, provider, or prompt-slot settings for the old API-backed translation path.
+Translation work is routed through the long-lived Translator session. VCM no longer exposes API-key, provider, or prompt-slot settings for the old API-backed translation path.
 
 Sidebar controls:
 
@@ -689,7 +689,7 @@ Display behavior:
 - when translation fails, panel status shows `error` and the entry keeps the visible source plus an error.
 - `tool-output` is dim, one-line, truncated by CSS, and not translated.
 
-Long translations do not block capture. Translatable prose entries are pushed to the panel before Codex translation starts. Claude Code prose output waits up to 10 seconds so adjacent entries can be batched into one Codex prompt and one temporary result file. When an `end_turn` assistant text arrives, VCM adds it to the current batch and flushes the batch immediately. The default output mode is `final summary`, which translates only `end_turn` assistant text to save Codex quota. In `all output` mode, intermediate assistant text and structured question/todo/agent events are also translated. `tool_use` and `tool_result` entries are never added to the translation queue; they are displayed immediately.
+Long translations do not block capture. Translatable prose entries are pushed to the panel before translation starts. Claude Code prose output waits up to 10 seconds so adjacent entries can be batched into one Claude Code Translator prompt and one temporary result file. When an `end_turn` assistant text arrives, VCM adds it to the current batch and flushes the batch immediately. The default output mode is `PM final reply`, which translates only Project Manager `end_turn` assistant text to reduce translation work. In `all output` mode, intermediate assistant text and structured question/todo/agent events are also translated. `tool_use` and `tool_result` entries are never added to the translation queue; they are displayed immediately.
 
 There is no keyword classifier that drops assistant text. A previous design skipped permission-looking or log-looking text; that is removed.
 

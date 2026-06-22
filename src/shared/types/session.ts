@@ -46,23 +46,9 @@ export const CLAUDE_MODEL_OPTIONS = [
 
 export type ClaudeModel = typeof CLAUDE_MODEL_OPTIONS[number]["value"];
 
-export const CODEX_MODEL_OPTIONS = [
-  {
-    value: "gpt-5.5",
-    label: "GPT-5.5",
-    description: "Strong Codex reviewer default"
-  },
-  {
-    value: "default",
-    label: "Default",
-    description: "Codex account default"
-  }
-] as const;
+export type SessionModel = ClaudeModel;
 
-export type CodexModel = typeof CODEX_MODEL_OPTIONS[number]["value"];
-export type SessionModel = ClaudeModel | CodexModel;
-
-export const CODEX_EFFORT_OPTIONS = [
+const BASE_EFFORT_OPTIONS = [
   {
     value: "default",
     label: "Default",
@@ -91,7 +77,7 @@ export const CODEX_EFFORT_OPTIONS = [
 ] as const;
 
 export const CLAUDE_EFFORT_OPTIONS = [
-  ...CODEX_EFFORT_OPTIONS,
+  ...BASE_EFFORT_OPTIONS,
   {
     value: "max",
     label: "Max",

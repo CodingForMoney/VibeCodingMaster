@@ -218,7 +218,7 @@ describe("apiClient", () => {
     expect(fetchMock.mock.calls[1]?.[1]?.body).toBeUndefined();
   });
 
-  it("browses Codex translation source files with encoded query params", async () => {
+  it("browses translation source files with encoded query params", async () => {
     const fetchMock = mockFetch({
       currentPath: "docs/specs",
       query: "white paper",
@@ -226,16 +226,16 @@ describe("apiClient", () => {
       truncated: false
     });
 
-    await apiClient.browseCodexTranslationSourceFiles({
+    await apiClient.browseTranslationSourceFiles({
       path: "docs/specs",
       query: "white paper",
       limit: 25
     });
 
-    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/translation/codex/source-files?path=docs%2Fspecs&query=white+paper&limit=25");
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/translation/source-files?path=docs%2Fspecs&query=white+paper&limit=25");
   });
 
-  it("queues Codex translation memory updates", async () => {
+  it("queues translation memory updates", async () => {
     const fetchMock = mockFetch({
       id: "queue-memory-update",
       type: "memory-update",
@@ -245,12 +245,12 @@ describe("apiClient", () => {
       requestPath: ".ai/vcm/translations/runtime/memory-updates/memory-update-1/request.json"
     });
 
-    await apiClient.createCodexMemoryUpdate({
+    await apiClient.createTranslationMemoryUpdate({
       taskSlug: "demo-task",
       targetLanguage: "zh-CN"
     });
 
-    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/translation/codex/memory-update");
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/translation/memory-update");
     expect(fetchMock.mock.calls[0]?.[1]?.method).toBe("POST");
     expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
       taskSlug: "demo-task",

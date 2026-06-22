@@ -59,7 +59,6 @@ describe("gate-review-service", () => {
     expect(record.callbackStatus).toBe("sent");
     expect(record.reportPath).toBe(".ai/vcm/gate-reviews/architecture-plan-review.md");
 
-    expect(runnerCalls.some((call) => call.command === "codex")).toBe(false);
     expect(runnerCalls.some((call) => call.command === "git" && call.args.join(" ") === "status --porcelain=v1")).toBe(true);
     expect(runnerCalls.some((call) => call.command === "git" && call.args.join(" ") === "diff --binary")).toBe(true);
     expect(sessionStarts).toEqual(["gate-reviewer"]);
@@ -100,7 +99,6 @@ describe("gate-review-service", () => {
     const result = await service.requestReviewGate(tmpRepo, "demo-task", "architecture-plan");
 
     expect(result.status).toBe("disabled");
-    expect(runnerCalls.some((call) => call.command === "codex")).toBe(false);
   });
 
   it("updates gate settings from disabled state without enabling stale gates", async () => {

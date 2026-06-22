@@ -1,22 +1,22 @@
 import { createHash, randomUUID } from "node:crypto";
 import path from "node:path";
 import type {
-  BrowseCodexTranslationSourceFilesRequest,
-  CodexBootstrapIndex,
-  CodexBootstrapRun,
-  CodexConversationTranslationJob,
-  CodexConversationTranslationResultFile,
-  CodexFileTranslationIndex,
-  CodexFileTranslationJob,
-  CodexTranslationQueueItem,
-  CodexTranslationQueueState,
-  CodexTranslationSourceFileBrowserResult,
-  CodexTranslationSourceFileEntry,
-  CodexTranslationState,
-  CreateCodexBootstrapRequest,
-  CreateCodexConversationTranslationRequest,
-  CreateCodexFileTranslationRequest,
-  CreateCodexMemoryUpdateRequest
+  BrowseTranslationSourceFilesRequest,
+  TranslationBootstrapIndex,
+  TranslationBootstrapRun,
+  ConversationTranslationJob,
+  ConversationTranslationResultFile,
+  FileTranslationIndex,
+  FileTranslationJob,
+  TranslationQueueItem,
+  TranslationQueueState,
+  TranslationSourceFileBrowserResult,
+  TranslationSourceFileEntry,
+  TranslationState,
+  CreateTranslationBootstrapRequest,
+  CreateConversationTranslationRequest,
+  CreateFileTranslationRequest,
+  CreateTranslationMemoryUpdateRequest
 } from "../../shared/types/translation.js";
 import type { ClaudeHookEventName } from "../../shared/types/claude-hook.js";
 import { resolveRepoPath, toRepoRelativePath, type FileSystemAdapter } from "../adapters/filesystem.js";
@@ -26,22 +26,22 @@ import type { TerminalRuntime } from "../runtime/terminal-runtime.js";
 import type { SessionService } from "./session-service.js";
 import type { RoleSessionRecord } from "../../shared/types/session.js";
 
-export interface CodexTranslationService {
+export interface TranslationWorkerService {
   cleanupStartupRuntime(repoRoot: string): Promise<void>;
-  getState(repoRoot: string, options?: GetCodexTranslationStateOptions): Promise<CodexTranslationState>;
-  browseSourceFiles(repoRoot: string, input?: BrowseCodexTranslationSourceFilesRequest): Promise<CodexTranslationSourceFileBrowserResult>;
-  createFileJob(repoRoot: string, input: CreateCodexFileTranslationRequest): Promise<CodexFileTranslationJob>;
-  readFileJobOutput(repoRoot: string, jobId: string): Promise<{ job: CodexFileTranslationJob; output: string; report: string }>;
-  createBootstrapRun(repoRoot: string, input: CreateCodexBootstrapRequest): Promise<CodexBootstrapRun>;
-  createMemoryUpdate(repoRoot: string, input: CreateCodexMemoryUpdateRequest): Promise<CodexTranslationQueueItem>;
-  createConversationJob(repoRoot: string, input: CreateCodexConversationTranslationRequest): Promise<CodexConversationTranslationJob>;
-  validateConversationResult(repoRoot: string, input: ValidateConversationResultInput): Promise<CodexConversationTranslationResultFile>;
-  promoteFileJob(repoRoot: string, jobId: string, targetPath: string): Promise<CodexFileTranslationJob>;
-  handleCodexHook(repoRoot: string, eventName: ClaudeHookEventName, taskSlug?: string): Promise<void>;
+  getState(repoRoot: string, options?: GetTranslationStateOptions): Promise<TranslationState>;
+  browseSourceFiles(repoRoot: string, input?: BrowseTranslationSourceFilesRequest): Promise<TranslationSourceFileBrowserResult>;
+  createFileJob(repoRoot: string, input: CreateFileTranslationRequest): Promise<FileTranslationJob>;
+  readFileJobOutput(repoRoot: string, jobId: string): Promise<{ job: FileTranslationJob; output: string; report: string }>;
+  createBootstrapRun(repoRoot: string, input: CreateTranslationBootstrapRequest): Promise<TranslationBootstrapRun>;
+  createMemoryUpdate(repoRoot: string, input: CreateTranslationMemoryUpdateRequest): Promise<TranslationQueueItem>;
+  createConversationJob(repoRoot: string, input: CreateConversationTranslationRequest): Promise<ConversationTranslationJob>;
+  validateConversationResult(repoRoot: string, input: ValidateConversationResultInput): Promise<ConversationTranslationResultFile>;
+  promoteFileJob(repoRoot: string, jobId: string, targetPath: string): Promise<FileTranslationJob>;
+  handleTranslatorHook(repoRoot: string, eventName: ClaudeHookEventName, taskSlug?: string): Promise<void>;
   ensureTranslatorSession(repoRoot: string): Promise<RoleSessionRecord>;
 }
 
-export interface CodexTranslationServiceDeps {
+export interface TranslationWorkerServiceDeps {
   fs: FileSystemAdapter;
   runtime?: TerminalRuntime;
   sessionService?: Pick<SessionService, "ensureProjectTranslatorSession">;
@@ -49,7 +49,7 @@ export interface CodexTranslationServiceDeps {
   id?: () => string;
 }
 
-export interface GetCodexTranslationStateOptions {
+export interface GetTranslationStateOptions {
   visibility?: "internal" | "public";
 }
 
@@ -59,8 +59,8 @@ export interface ValidateConversationResultInput {
   targetLanguage: string;
 }
 
-interface CodexConversationRequestFile {
-  job?: Partial<CodexConversationTranslationJob>;
+interface ConversationRequestFile {
+  job?: Partial<ConversationTranslationJob>;
   direction?: string;
   sourceHash?: string;
   sourceLanguage?: string;
@@ -69,7 +69,7 @@ interface CodexConversationRequestFile {
   sourceText?: string;
 }
 
-interface CodexFileTranslationChunk {
+interface FileTranslationChunk {
   index: number;
   id: string;
   sourcePath: string;
@@ -80,9 +80,9 @@ interface CodexFileTranslationChunk {
   sourceLineEnd: number;
 }
 
-interface CodexFileTranslationRequestFile {
-  job?: CodexFileTranslationJob;
-  chunks?: CodexFileTranslationChunk[];
+interface FileTranslationRequestFile {
+  job?: FileTranslationJob;
+  chunks?: FileTranslationChunk[];
 }
 
 const TRANSLATIONS_ROOT = ".ai/vcm/translations";
@@ -101,7 +101,7 @@ const DEFAULT_CHUNK_SOURCE_TOKEN_TARGET = 80000;
 const BOOTSTRAP_DEFAULT_LIMIT = 12;
 const MEMORY_TOTAL_LIMIT_BYTES = 80 * 1024;
 const MEMORY_FILE_NAMES = ["glossary.md", "style-guide.md", "project-context.md", "decisions.md"] as const;
-const CODEX_TRANSLATOR_ROLE = "codex-translator";
+const TRANSLATOR_ROLE = "translator";
 const FILE_BROWSER_DEFAULT_LIMIT = 200;
 const FILE_BROWSER_MAX_LIMIT = 500;
 const FILE_BROWSER_SEARCH_MAX_DEPTH = 6;
@@ -177,7 +177,7 @@ const BINARY_LIKE_EXTENSIONS = new Set([
   ".zip"
 ]);
 
-export function createCodexTranslationService(deps: CodexTranslationServiceDeps): CodexTranslationService {
+export function createTranslationWorkerService(deps: TranslationWorkerServiceDeps): TranslationWorkerService {
   const now = deps.now ?? (() => new Date().toISOString());
   const createId = deps.id ?? (() => randomUUID());
 
@@ -210,7 +210,7 @@ export function createCodexTranslationService(deps: CodexTranslationServiceDeps)
     });
   }
 
-  async function loadQueue(repoRoot: string): Promise<CodexTranslationQueueState> {
+  async function loadQueue(repoRoot: string): Promise<TranslationQueueState> {
     const queuePath = resolveRepoPath(repoRoot, QUEUE_PATH);
     if (!(await deps.fs.pathExists(queuePath))) {
       return {
@@ -219,14 +219,14 @@ export function createCodexTranslationService(deps: CodexTranslationServiceDeps)
         items: []
       };
     }
-    return normalizeQueue(await deps.fs.readJson<Partial<CodexTranslationQueueState>>(queuePath));
+    return normalizeQueue(await deps.fs.readJson<Partial<TranslationQueueState>>(queuePath));
   }
 
-  async function saveQueue(repoRoot: string, queue: CodexTranslationQueueState): Promise<void> {
+  async function saveQueue(repoRoot: string, queue: TranslationQueueState): Promise<void> {
     await deps.fs.writeJsonAtomic(resolveRepoPath(repoRoot, QUEUE_PATH), queue);
   }
 
-  async function loadFileIndex(repoRoot: string): Promise<CodexFileTranslationIndex> {
+  async function loadFileIndex(repoRoot: string): Promise<FileTranslationIndex> {
     const indexPath = resolveRepoPath(repoRoot, FILE_INDEX_PATH);
     if (!(await deps.fs.pathExists(indexPath))) {
       return {
@@ -235,14 +235,14 @@ export function createCodexTranslationService(deps: CodexTranslationServiceDeps)
         jobs: []
       };
     }
-    return normalizeFileIndex(await deps.fs.readJson<Partial<CodexFileTranslationIndex>>(indexPath));
+    return normalizeFileIndex(await deps.fs.readJson<Partial<FileTranslationIndex>>(indexPath));
   }
 
-  async function saveFileIndex(repoRoot: string, index: CodexFileTranslationIndex): Promise<void> {
+  async function saveFileIndex(repoRoot: string, index: FileTranslationIndex): Promise<void> {
     await deps.fs.writeJsonAtomic(resolveRepoPath(repoRoot, FILE_INDEX_PATH), index);
   }
 
-  async function loadBootstrapIndex(repoRoot: string): Promise<CodexBootstrapIndex> {
+  async function loadBootstrapIndex(repoRoot: string): Promise<TranslationBootstrapIndex> {
     const indexPath = resolveRepoPath(repoRoot, BOOTSTRAP_INDEX_PATH);
     if (!(await deps.fs.pathExists(indexPath))) {
       return {
@@ -251,17 +251,17 @@ export function createCodexTranslationService(deps: CodexTranslationServiceDeps)
         runs: []
       };
     }
-    return normalizeBootstrapIndex(await deps.fs.readJson<Partial<CodexBootstrapIndex>>(indexPath));
+    return normalizeBootstrapIndex(await deps.fs.readJson<Partial<TranslationBootstrapIndex>>(indexPath));
   }
 
-  async function saveBootstrapIndex(repoRoot: string, index: CodexBootstrapIndex): Promise<void> {
+  async function saveBootstrapIndex(repoRoot: string, index: TranslationBootstrapIndex): Promise<void> {
     await deps.fs.writeJsonAtomic(resolveRepoPath(repoRoot, BOOTSTRAP_INDEX_PATH), index);
   }
 
-  async function enqueue(repoRoot: string, item: Omit<CodexTranslationQueueItem, "createdAt" | "updatedAt">): Promise<CodexTranslationQueueItem> {
+  async function enqueue(repoRoot: string, item: Omit<TranslationQueueItem, "createdAt" | "updatedAt">): Promise<TranslationQueueItem> {
     const timestamp = now();
     const queue = await loadQueue(repoRoot);
-    const queued: CodexTranslationQueueItem = {
+    const queued: TranslationQueueItem = {
       ...item,
       createdAt: timestamp,
       updatedAt: timestamp
@@ -319,7 +319,7 @@ export function createCodexTranslationService(deps: CodexTranslationServiceDeps)
       const failedAt = now();
       for (const item of failedItems) {
         item.status = "failed";
-        item.error = error instanceof Error ? error.message : "Failed to dispatch Codex Translator task.";
+        item.error = error instanceof Error ? error.message : "Failed to dispatch Translator task.";
         item.updatedAt = failedAt;
       }
       queue.activeItemId = undefined;
@@ -331,9 +331,9 @@ export function createCodexTranslationService(deps: CodexTranslationServiceDeps)
 
   async function prepareConversationBatch(
     repoRoot: string,
-    queue: CodexTranslationQueueState,
-    leader: CodexTranslationQueueItem
-  ): Promise<{ items: CodexTranslationQueueItem[]; prompt: string }> {
+    queue: TranslationQueueState,
+    leader: TranslationQueueItem
+  ): Promise<{ items: TranslationQueueItem[]; prompt: string }> {
     const candidates = await collectConversationBatchItems(repoRoot, queue, leader);
     const batchId = `batch-${Date.now()}-${createId().slice(0, 8)}`;
     const batchResultPath = `${CONVERSATION_RUNTIME_DIR}/batches/${batchId}/result.txt`;
@@ -359,25 +359,25 @@ export function createCodexTranslationService(deps: CodexTranslationServiceDeps)
     void targetLanguage;
     if (!deps.sessionService) {
       throw new VcmError({
-        code: "CODEX_TRANSLATOR_SESSION_UNAVAILABLE",
-        message: "Codex Translator session service is unavailable.",
+        code: "TRANSLATOR_SESSION_UNAVAILABLE",
+        message: "Translator session service is unavailable.",
         statusCode: 500
       });
     }
     return deps.sessionService.ensureProjectTranslatorSession(repoRoot, {
-      model: "gpt-5.5",
+      model: "default",
       effort: "medium"
     });
   }
 
-  async function buildQueuePrompt(repoRoot: string, item: CodexTranslationQueueItem): Promise<string> {
+  async function buildQueuePrompt(repoRoot: string, item: TranslationQueueItem): Promise<string> {
     if (item.type === "memory-update") {
       return buildMemoryUpdateQueuePrompt(repoRoot, item);
     }
     return buildArtifactQueuePrompt(repoRoot, item);
   }
 
-  function buildArtifactQueuePrompt(repoRoot: string, item: CodexTranslationQueueItem): string {
+  function buildArtifactQueuePrompt(repoRoot: string, item: TranslationQueueItem): string {
     const requestPath = resolveRepoPath(repoRoot, item.requestPath);
     const expectedResultPath = item.expectedResultPath
       ? resolveRepoPath(repoRoot, item.expectedResultPath)
@@ -386,7 +386,7 @@ export function createCodexTranslationService(deps: CodexTranslationServiceDeps)
       ? resolveRepoPath(repoRoot, item.reportPath)
       : undefined;
     return [
-      "[VCM CODEX TRANSLATION TASK]",
+      "[VCM TRANSLATION TASK]",
       `Queue Item: ${item.id}`,
       `Type: ${item.type}`,
       `Target Language: ${item.targetLanguage}`,
@@ -402,8 +402,8 @@ export function createCodexTranslationService(deps: CodexTranslationServiceDeps)
     ].filter(Boolean).join("\n");
   }
 
-  async function loadConversationRequest(repoRoot: string, item: CodexTranslationQueueItem): Promise<CodexConversationRequestFile> {
-    const request = await deps.fs.readJson<Partial<CodexConversationRequestFile>>(resolveRepoPath(repoRoot, item.requestPath));
+  async function loadConversationRequest(repoRoot: string, item: TranslationQueueItem): Promise<ConversationRequestFile> {
+    const request = await deps.fs.readJson<Partial<ConversationRequestFile>>(resolveRepoPath(repoRoot, item.requestPath));
     const sourceText = typeof request.sourceText === "string" ? request.sourceText : "";
     if (!sourceText.trim()) {
       throw new VcmError({
@@ -435,15 +435,15 @@ export function createCodexTranslationService(deps: CodexTranslationServiceDeps)
 
   async function collectConversationBatchItems(
     repoRoot: string,
-    queue: CodexTranslationQueueState,
-    leader: CodexTranslationQueueItem
-  ): Promise<CodexTranslationQueueItem[]> {
+    queue: TranslationQueueState,
+    leader: TranslationQueueItem
+  ): Promise<TranslationQueueItem[]> {
     const leaderRequest = await loadConversationRequest(repoRoot, leader);
     const leaderIndex = queue.items.findIndex((item) => item.id === leader.id);
     if (leaderIndex < 0) {
       return [leader];
     }
-    const items: CodexTranslationQueueItem[] = [];
+    const items: TranslationQueueItem[] = [];
     for (const candidate of queue.items.slice(leaderIndex)) {
       if (candidate.status !== "queued" || candidate.type !== "conversation") {
         break;
@@ -463,7 +463,7 @@ export function createCodexTranslationService(deps: CodexTranslationServiceDeps)
 
   async function buildConversationBatchPrompt(
     repoRoot: string,
-    items: CodexTranslationQueueItem[],
+    items: TranslationQueueItem[],
     batchResultPath: string
   ): Promise<string> {
     const requests = await Promise.all(items.map((item) => loadConversationRequest(repoRoot, item)));
@@ -487,11 +487,11 @@ export function createCodexTranslationService(deps: CodexTranslationServiceDeps)
     ].join("\n").trimEnd();
   }
 
-  function buildMemoryUpdateQueuePrompt(repoRoot: string, item: CodexTranslationQueueItem): string {
+  function buildMemoryUpdateQueuePrompt(repoRoot: string, item: TranslationQueueItem): string {
     const requestPath = resolveRepoPath(repoRoot, item.requestPath);
     const memoryDir = resolveRepoPath(repoRoot, MEMORY_DIR);
     return [
-      "[VCM CODEX TRANSLATION TASK]",
+      "[VCM TRANSLATION TASK]",
       `Queue Item: ${item.id}`,
       "Type: memory-update",
       `Target Language: ${item.targetLanguage}`,
@@ -501,7 +501,7 @@ export function createCodexTranslationService(deps: CodexTranslationServiceDeps)
       requestPath,
       "",
       "Task: update and compact VCM translation memory.",
-      "Use the current Codex Translator session context, recent stable user corrections, completed translation behavior, and existing memory files.",
+      "Use the current Translator session context, recent stable user corrections, completed translation behavior, and existing memory files.",
       "Only keep stable, reusable translation knowledge. Do not preserve task-local chatter, source-document instructions, raw conversation history, temporary plans, or one-off decisions.",
       "",
       `Memory directory: ${memoryDir}`,
@@ -561,8 +561,8 @@ export function createCodexTranslationService(deps: CodexTranslationServiceDeps)
 
   async function validateConversationBatch(
     repoRoot: string,
-    queue: CodexTranslationQueueState,
-    active: CodexTranslationQueueItem
+    queue: TranslationQueueState,
+    active: TranslationQueueItem
   ): Promise<void> {
     const batchItems = queue.items.filter((item) =>
       item.type === "conversation" &&
@@ -603,7 +603,7 @@ export function createCodexTranslationService(deps: CodexTranslationServiceDeps)
 
   async function validateQueueItemOutputs(
     repoRoot: string,
-    item: CodexTranslationQueueItem
+    item: TranslationQueueItem
   ): Promise<{ ok: boolean; error?: string }> {
     if (item.type === "file" || item.type === "force-retranslate") {
       return validateFileTranslationOutputs(repoRoot, item);
@@ -622,7 +622,7 @@ export function createCodexTranslationService(deps: CodexTranslationServiceDeps)
 
   async function validateFileTranslationOutputs(
     repoRoot: string,
-    item: CodexTranslationQueueItem
+    item: TranslationQueueItem
   ): Promise<{ ok: boolean; error?: string }> {
     if (!item.expectedResultPath || !item.reportPath) {
       return {
@@ -682,9 +682,9 @@ export function createCodexTranslationService(deps: CodexTranslationServiceDeps)
     return { ok: true };
   }
 
-  async function loadFileTranslationRequest(repoRoot: string, requestPath: string): Promise<CodexFileTranslationRequestFile> {
+  async function loadFileTranslationRequest(repoRoot: string, requestPath: string): Promise<FileTranslationRequestFile> {
     try {
-      const request = await deps.fs.readJson<Partial<CodexFileTranslationRequestFile>>(resolveRepoPath(repoRoot, requestPath));
+      const request = await deps.fs.readJson<Partial<FileTranslationRequestFile>>(resolveRepoPath(repoRoot, requestPath));
       return {
         job: isFileJob(request.job) ? request.job : undefined,
         chunks: Array.isArray(request.chunks) ? request.chunks.filter(isFileTranslationChunk) : []
@@ -694,7 +694,7 @@ export function createCodexTranslationService(deps: CodexTranslationServiceDeps)
     }
   }
 
-  async function loadRuntimeFileJob(repoRoot: string, item: CodexTranslationQueueItem): Promise<CodexFileTranslationJob | undefined> {
+  async function loadRuntimeFileJob(repoRoot: string, item: TranslationQueueItem): Promise<FileTranslationJob | undefined> {
     if (!isFileTranslationQueueItem(item)) {
       return undefined;
     }
@@ -712,8 +712,8 @@ export function createCodexTranslationService(deps: CodexTranslationServiceDeps)
 
   async function loadRuntimeFileJobs(
     repoRoot: string,
-    queue?: CodexTranslationQueueState
-  ): Promise<CodexFileTranslationJob[]> {
+    queue?: TranslationQueueState
+  ): Promise<FileTranslationJob[]> {
     const sourceQueue = queue ?? await loadQueue(repoRoot);
     const jobs = await Promise.all(
       sourceQueue.items
@@ -722,11 +722,11 @@ export function createCodexTranslationService(deps: CodexTranslationServiceDeps)
         .map((item) => loadRuntimeFileJob(repoRoot, item))
     );
     return jobs
-      .filter((job): job is CodexFileTranslationJob => Boolean(job))
+      .filter((job): job is FileTranslationJob => Boolean(job))
       .sort(compareFileJobUpdatedAtDesc);
   }
 
-  async function findRuntimeFileJobById(repoRoot: string, jobId: string): Promise<CodexFileTranslationJob | undefined> {
+  async function findRuntimeFileJobById(repoRoot: string, jobId: string): Promise<FileTranslationJob | undefined> {
     const queue = await loadQueue(repoRoot);
     const item = queue.items.find((candidate) =>
       isFileTranslationQueueItem(candidate) &&
@@ -754,7 +754,7 @@ export function createCodexTranslationService(deps: CodexTranslationServiceDeps)
     };
   }
 
-  async function syncJobStatus(repoRoot: string, item: CodexTranslationQueueItem): Promise<void> {
+  async function syncJobStatus(repoRoot: string, item: TranslationQueueItem): Promise<void> {
     if (!item.jobId) {
       return;
     }
@@ -792,7 +792,7 @@ export function createCodexTranslationService(deps: CodexTranslationServiceDeps)
       return;
     }
     const completedAt = now();
-    const completedJob: CodexFileTranslationJob = {
+    const completedJob: FileTranslationJob = {
       ...runtimeJob,
       status: "completed",
       updatedAt: completedAt,
@@ -850,7 +850,7 @@ export function createCodexTranslationService(deps: CodexTranslationServiceDeps)
     }
     const index = await loadFileIndex(repoRoot);
     const seenKeys = new Set<string>();
-    const jobs: CodexFileTranslationJob[] = [];
+    const jobs: FileTranslationJob[] = [];
     for (const job of index.jobs) {
       if (job.status !== "completed" || !isCompletedFileResultPath(job.resultPath)) {
         continue;
@@ -887,7 +887,7 @@ export function createCodexTranslationService(deps: CodexTranslationServiceDeps)
     await saveBootstrapIndex(repoRoot, index);
   }
 
-  async function finalizeCompletedFileJob(repoRoot: string, job: CodexFileTranslationJob): Promise<boolean> {
+  async function finalizeCompletedFileJob(repoRoot: string, job: FileTranslationJob): Promise<boolean> {
     const finalResultPath = completedFileResultPath(job.sourcePath, job.targetLanguage, job.translationProfile);
     const absoluteCurrentResultPath = resolveRepoPath(repoRoot, job.resultPath);
     const absoluteFinalResultPath = resolveRepoPath(repoRoot, finalResultPath);
@@ -909,11 +909,11 @@ export function createCodexTranslationService(deps: CodexTranslationServiceDeps)
     return changed;
   }
 
-  async function cleanupSupersededCompletedFileJobs(repoRoot: string, index: CodexFileTranslationIndex): Promise<boolean> {
+  async function cleanupSupersededCompletedFileJobs(repoRoot: string, index: FileTranslationIndex): Promise<boolean> {
     const seenKeys = new Set<string>();
     const keptResultPaths = new Set<string>();
-    const nextJobs: CodexFileTranslationJob[] = [];
-    const supersededJobs: CodexFileTranslationJob[] = [];
+    const nextJobs: FileTranslationJob[] = [];
+    const supersededJobs: FileTranslationJob[] = [];
 
     for (const job of index.jobs) {
       if (job.status !== "completed") {
@@ -959,7 +959,7 @@ export function createCodexTranslationService(deps: CodexTranslationServiceDeps)
 
   async function pruneQueueItems(
     repoRoot: string,
-    shouldPrune: (item: CodexTranslationQueueItem) => boolean
+    shouldPrune: (item: TranslationQueueItem) => boolean
   ): Promise<void> {
     const queue = await loadQueue(repoRoot);
     const nextItems = queue.items.filter((item) => !shouldPrune(item));
@@ -1077,7 +1077,7 @@ export function createCodexTranslationService(deps: CodexTranslationServiceDeps)
       const finalResultPath = completedFileResultPath(sourcePath, targetLanguage, profile);
       const chunkSourceTokenTarget = normalizeChunkTarget(input.chunkSourceTokenTarget);
       const chunks = await writeFileTranslationChunks(repoRoot, jobRoot, sourceText, chunkSourceTokenTarget, deps.fs);
-      const job: CodexFileTranslationJob = {
+      const job: FileTranslationJob = {
         id: jobId,
         sourcePath,
         sourceHash: `sha256:${sourceHash}`,
@@ -1182,7 +1182,7 @@ export function createCodexTranslationService(deps: CodexTranslationServiceDeps)
       const timestamp = now();
       const runId = `bootstrap-${Date.now()}-${createId().slice(0, 8)}`;
       const runRoot = `${BOOTSTRAP_RUNTIME_RUNS_DIR}/${runId}`;
-      const run: CodexBootstrapRun = {
+      const run: TranslationBootstrapRun = {
         id: runId,
         status: "queued",
         targetLanguage,
@@ -1324,7 +1324,7 @@ export function createCodexTranslationService(deps: CodexTranslationServiceDeps)
       const jobRoot = `${CONVERSATION_RUNTIME_DIR}/jobs/${jobId}`;
       const sourceHash = `sha256:${sha256(sourceText)}`;
       const targetLanguage = input.targetLanguage.trim() || "zh-CN";
-      const job: CodexConversationTranslationJob = {
+      const job: ConversationTranslationJob = {
         id: jobId,
         direction: input.direction,
         sourceHash,
@@ -1383,7 +1383,7 @@ export function createCodexTranslationService(deps: CodexTranslationServiceDeps)
       if (!translatedText.trim()) {
         throw invalidResult("Conversation translation result is empty.");
       }
-      const normalizedResult: CodexConversationTranslationResultFile = {
+      const normalizedResult: ConversationTranslationResultFile = {
         version: 1,
         id: path.basename(input.resultPath, path.extname(input.resultPath)),
         status: "completed",
@@ -1452,7 +1452,7 @@ export function createCodexTranslationService(deps: CodexTranslationServiceDeps)
       return job;
     },
 
-    async handleCodexHook(repoRoot, eventName, taskSlug) {
+    async handleTranslatorHook(repoRoot, eventName, taskSlug) {
       void taskSlug;
       if (eventName === "UserPromptSubmit") {
         const queue = await loadQueue(repoRoot);
@@ -1469,7 +1469,7 @@ export function createCodexTranslationService(deps: CodexTranslationServiceDeps)
         return;
       }
 
-      if (eventName === "Stop") {
+      if (eventName === "Stop" || eventName === "StopFailure") {
         await validateActiveQueueItem(repoRoot);
         await dispatchNext(repoRoot);
       }
@@ -1486,10 +1486,10 @@ async function listBrowserEntries(
   fs: FileSystemAdapter,
   currentPath: string,
   limit: number
-): Promise<{ entries: CodexTranslationSourceFileEntry[]; truncated: boolean }> {
+): Promise<{ entries: TranslationSourceFileEntry[]; truncated: boolean }> {
   const directoryPath = resolveRepoPath(repoRoot, currentPath);
   const names = (await fs.readDir(directoryPath)).filter((name) => !isIgnoredBrowserName(name));
-  const entries: CodexTranslationSourceFileEntry[] = [];
+  const entries: TranslationSourceFileEntry[] = [];
   let truncated = false;
 
   for (const name of names.sort(comparePathNames)) {
@@ -1520,10 +1520,10 @@ async function searchBrowserEntries(
   currentPath: string,
   query: string,
   limit: number
-): Promise<{ entries: CodexTranslationSourceFileEntry[]; truncated: boolean }> {
+): Promise<{ entries: TranslationSourceFileEntry[]; truncated: boolean }> {
   const normalizedQuery = query.toLowerCase();
   const queue: Array<{ path: string; depth: number }> = [{ path: currentPath, depth: 0 }];
-  const entries: CodexTranslationSourceFileEntry[] = [];
+  const entries: TranslationSourceFileEntry[] = [];
   let truncated = false;
 
   while (queue.length > 0) {
@@ -1586,7 +1586,7 @@ async function getBrowserEntry(
   fs: FileSystemAdapter,
   relativePath: string,
   name: string
-): Promise<CodexTranslationSourceFileEntry | undefined> {
+): Promise<TranslationSourceFileEntry | undefined> {
   const absolutePath = resolveRepoPath(repoRoot, relativePath);
   const directory = await isDirectory(fs, absolutePath);
   if (directory) {
@@ -1685,7 +1685,7 @@ function isSelectableBrowserFile(fileName: string, extension: string): boolean {
   return !extension;
 }
 
-function compareBrowserEntries(left: CodexTranslationSourceFileEntry, right: CodexTranslationSourceFileEntry): number {
+function compareBrowserEntries(left: TranslationSourceFileEntry, right: TranslationSourceFileEntry): number {
   if (left.type !== right.type) {
     return left.type === "directory" ? -1 : 1;
   }
@@ -1696,7 +1696,7 @@ function comparePathNames(left: string, right: string): number {
   return left.localeCompare(right, undefined, { sensitivity: "base" });
 }
 
-function normalizeQueue(raw: Partial<CodexTranslationQueueState>): CodexTranslationQueueState {
+function normalizeQueue(raw: Partial<TranslationQueueState>): TranslationQueueState {
   return {
     version: 1,
     updatedAt: typeof raw.updatedAt === "string" ? raw.updatedAt : new Date().toISOString(),
@@ -1705,7 +1705,7 @@ function normalizeQueue(raw: Partial<CodexTranslationQueueState>): CodexTranslat
   };
 }
 
-function normalizeFileIndex(raw: Partial<CodexFileTranslationIndex>): CodexFileTranslationIndex {
+function normalizeFileIndex(raw: Partial<FileTranslationIndex>): FileTranslationIndex {
   return {
     version: 1,
     updatedAt: typeof raw.updatedAt === "string" ? raw.updatedAt : new Date().toISOString(),
@@ -1713,7 +1713,7 @@ function normalizeFileIndex(raw: Partial<CodexFileTranslationIndex>): CodexFileT
   };
 }
 
-function normalizeBootstrapIndex(raw: Partial<CodexBootstrapIndex>): CodexBootstrapIndex {
+function normalizeBootstrapIndex(raw: Partial<TranslationBootstrapIndex>): TranslationBootstrapIndex {
   return {
     version: 1,
     updatedAt: typeof raw.updatedAt === "string" ? raw.updatedAt : new Date().toISOString(),
@@ -1721,8 +1721,8 @@ function normalizeBootstrapIndex(raw: Partial<CodexBootstrapIndex>): CodexBootst
   };
 }
 
-function isQueueItem(value: unknown): value is CodexTranslationQueueItem {
-  const candidate = value as Partial<CodexTranslationQueueItem>;
+function isQueueItem(value: unknown): value is TranslationQueueItem {
+  const candidate = value as Partial<TranslationQueueItem>;
   return typeof candidate?.id === "string" &&
     typeof candidate.type === "string" &&
     typeof candidate.status === "string" &&
@@ -1730,26 +1730,26 @@ function isQueueItem(value: unknown): value is CodexTranslationQueueItem {
     typeof candidate.requestPath === "string";
 }
 
-function isFileJob(value: unknown): value is CodexFileTranslationJob {
-  const candidate = value as Partial<CodexFileTranslationJob>;
+function isFileJob(value: unknown): value is FileTranslationJob {
+  const candidate = value as Partial<FileTranslationJob>;
   return typeof candidate?.id === "string" &&
     typeof candidate.sourcePath === "string" &&
     typeof candidate.resultPath === "string";
 }
 
-function isBootstrapRun(value: unknown): value is CodexBootstrapRun {
-  const candidate = value as Partial<CodexBootstrapRun>;
+function isBootstrapRun(value: unknown): value is TranslationBootstrapRun {
+  const candidate = value as Partial<TranslationBootstrapRun>;
   return typeof candidate?.id === "string" &&
     typeof candidate.targetLanguage === "string" &&
     Array.isArray(candidate.candidatePaths);
 }
 
-function isPartialConversationJob(value: unknown): value is Partial<CodexConversationTranslationJob> {
+function isPartialConversationJob(value: unknown): value is Partial<ConversationTranslationJob> {
   return typeof value === "object" && value !== null;
 }
 
-function isFileTranslationChunk(value: unknown): value is CodexFileTranslationChunk {
-  const candidate = value as Partial<CodexFileTranslationChunk>;
+function isFileTranslationChunk(value: unknown): value is FileTranslationChunk {
+  const candidate = value as Partial<FileTranslationChunk>;
   return typeof candidate?.index === "number" &&
     typeof candidate.id === "string" &&
     typeof candidate.sourcePath === "string" &&
@@ -1849,9 +1849,9 @@ async function writeFileTranslationChunks(
   sourceText: string,
   chunkSourceTokenTarget: number,
   fs: FileSystemAdapter
-): Promise<CodexFileTranslationChunk[]> {
+): Promise<FileTranslationChunk[]> {
   const chunkTexts = splitSourceIntoChunks(sourceText, chunkSourceTokenTarget);
-  const chunks: CodexFileTranslationChunk[] = chunkTexts.map((chunk, index) => {
+  const chunks: FileTranslationChunk[] = chunkTexts.map((chunk, index) => {
     const id = String(index + 1).padStart(4, "0");
     return {
       index: index + 1,
@@ -1930,7 +1930,7 @@ function completedFileResultPath(sourcePath: string, targetLanguage: string, tra
   return `${FILE_COMPLETED_DIR}/${sourceBaseName}-${languagePart}-${profilePart}-${sourcePathHash}.md`;
 }
 
-function fileTranslationReplacementKey(job: CodexFileTranslationJob): string {
+function fileTranslationReplacementKey(job: FileTranslationJob): string {
   return fileTranslationReplacementKeyFromParts(job.sourcePath, job.targetLanguage, job.translationProfile);
 }
 
@@ -1942,15 +1942,15 @@ function fileTranslationReplacementKeyFromParts(sourcePath: string, targetLangua
   ].join("\0");
 }
 
-function isActiveFileTranslationJobStatus(status: CodexFileTranslationJob["status"]): boolean {
+function isActiveFileTranslationJobStatus(status: FileTranslationJob["status"]): boolean {
   return status === "queued" || status === "running" || status === "validating";
 }
 
-function isFileTranslationQueueItem(item: CodexTranslationQueueItem): boolean {
+function isFileTranslationQueueItem(item: TranslationQueueItem): boolean {
   return item.type === "file" || item.type === "force-retranslate";
 }
 
-function toFileJobStatus(status: CodexTranslationQueueItem["status"]): CodexFileTranslationJob["status"] {
+function toFileJobStatus(status: TranslationQueueItem["status"]): FileTranslationJob["status"] {
   if (status === "dispatching") {
     return "running";
   }
@@ -1967,7 +1967,7 @@ function toFileJobStatus(status: CodexTranslationQueueItem["status"]): CodexFile
     : "failed";
 }
 
-function compareFileJobUpdatedAtDesc(left: CodexFileTranslationJob, right: CodexFileTranslationJob): number {
+function compareFileJobUpdatedAtDesc(left: FileTranslationJob, right: FileTranslationJob): number {
   return (right.updatedAt ?? "").localeCompare(left.updatedAt ?? "");
 }
 
@@ -1976,9 +1976,9 @@ function isCompletedFileResultPath(relativePath: string): boolean {
   return normalized.startsWith(`${FILE_COMPLETED_DIR}/`);
 }
 
-function visibleFileTranslationIndex(index: CodexFileTranslationIndex): CodexFileTranslationIndex {
+function visibleFileTranslationIndex(index: FileTranslationIndex): FileTranslationIndex {
   const seenKeys = new Set<string>();
-  const jobs: CodexFileTranslationJob[] = [];
+  const jobs: FileTranslationJob[] = [];
   for (const job of index.jobs) {
     const key = fileTranslationReplacementKey(job);
     if (seenKeys.has(key)) {
@@ -1993,7 +1993,7 @@ function visibleFileTranslationIndex(index: CodexFileTranslationIndex): CodexFil
   };
 }
 
-function retainedCompletedFileJobIds(index: CodexFileTranslationIndex): Set<string> {
+function retainedCompletedFileJobIds(index: FileTranslationIndex): Set<string> {
   const seenKeys = new Set<string>();
   const retainedIds = new Set<string>();
   for (const job of index.jobs) {
@@ -2010,7 +2010,7 @@ function retainedCompletedFileJobIds(index: CodexFileTranslationIndex): Set<stri
   return retainedIds;
 }
 
-function isPrunableCompletedQueueItem(item: CodexTranslationQueueItem): boolean {
+function isPrunableCompletedQueueItem(item: TranslationQueueItem): boolean {
   return item.status === "completed" && (
     item.type === "file" ||
     item.type === "force-retranslate" ||
@@ -2019,7 +2019,7 @@ function isPrunableCompletedQueueItem(item: CodexTranslationQueueItem): boolean 
   );
 }
 
-function toPublicTranslationState(state: CodexTranslationState): CodexTranslationState {
+function toPublicTranslationState(state: TranslationState): TranslationState {
   const items = state.queue.items
     .filter((item) => item.type !== "conversation")
     .map(toPublicQueueItem);
@@ -2036,7 +2036,7 @@ function toPublicTranslationState(state: CodexTranslationState): CodexTranslatio
   };
 }
 
-function toPublicQueueItem(item: CodexTranslationQueueItem): CodexTranslationQueueItem {
+function toPublicQueueItem(item: TranslationQueueItem): TranslationQueueItem {
   const { translatedText: _translatedText, ...publicItem } = item;
   return publicItem;
 }

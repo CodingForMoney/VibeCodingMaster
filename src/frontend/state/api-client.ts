@@ -38,14 +38,14 @@ import type { VcmSessionRoundState } from "../../shared/types/round.js";
 import type { RoleSessionRecord, StartRoleSessionRequest } from "../../shared/types/session.js";
 import type { CleanupTaskRequest, CleanupTaskResult, CreateTaskRequest, TaskRecord } from "../../shared/types/task.js";
 import type {
-  CodexBootstrapRun,
-  CodexFileTranslationJob,
-  CodexTranslationQueueItem,
-  CodexTranslationSourceFileBrowserResult,
-  CodexTranslationState,
-  CreateCodexBootstrapRequest,
-  CreateCodexFileTranslationRequest,
-  CreateCodexMemoryUpdateRequest,
+  TranslationBootstrapRun,
+  FileTranslationJob,
+  TranslationQueueItem,
+  TranslationSourceFileBrowserResult,
+  TranslationState,
+  CreateTranslationBootstrapRequest,
+  CreateFileTranslationRequest,
+  CreateTranslationMemoryUpdateRequest,
   SendTranslatedInputRequest,
   TranslateUserInputRequest,
   TranslateUserInputResult,
@@ -268,42 +268,42 @@ export const apiClient = {
       method: "POST"
     });
   },
-  getCodexTranslationState() {
-    return request<CodexTranslationState>("/api/translation/codex/state");
+  getTranslationState() {
+    return request<TranslationState>("/api/translation/state");
   },
-  getCodexTranslatorSession() {
-    return request<RoleSessionRecord | null>("/api/translation/codex/session");
+  getTranslatorSession() {
+    return request<RoleSessionRecord | null>("/api/translation/session");
   },
-  ensureCodexTranslatorSession(input: StartRoleSessionRequest = {}) {
-    return request<RoleSessionRecord>("/api/translation/codex/session/ensure", {
+  ensureTranslatorSession(input: StartRoleSessionRequest = {}) {
+    return request<RoleSessionRecord>("/api/translation/session/ensure", {
       method: "POST",
       body: JSON.stringify(input)
     });
   },
-  startCodexTranslatorSession(input: StartRoleSessionRequest = {}) {
-    return request<RoleSessionRecord>("/api/translation/codex/session/start", {
+  startTranslatorSession(input: StartRoleSessionRequest = {}) {
+    return request<RoleSessionRecord>("/api/translation/session/start", {
       method: "POST",
       body: JSON.stringify(input)
     });
   },
-  resumeCodexTranslatorSession(input: StartRoleSessionRequest = {}) {
-    return request<RoleSessionRecord>("/api/translation/codex/session/resume", {
+  resumeTranslatorSession(input: StartRoleSessionRequest = {}) {
+    return request<RoleSessionRecord>("/api/translation/session/resume", {
       method: "POST",
       body: JSON.stringify(input)
     });
   },
-  restartCodexTranslatorSession(input: StartRoleSessionRequest = {}) {
-    return request<RoleSessionRecord>("/api/translation/codex/session/restart", {
+  restartTranslatorSession(input: StartRoleSessionRequest = {}) {
+    return request<RoleSessionRecord>("/api/translation/session/restart", {
       method: "POST",
       body: JSON.stringify(input)
     });
   },
-  stopCodexTranslatorSession() {
-    return request<RoleSessionRecord>("/api/translation/codex/session/stop", {
+  stopTranslatorSession() {
+    return request<RoleSessionRecord>("/api/translation/session/stop", {
       method: "POST"
     });
   },
-  browseCodexTranslationSourceFiles(input: { path?: string; query?: string; limit?: number } = {}) {
+  browseTranslationSourceFiles(input: { path?: string; query?: string; limit?: number } = {}) {
     const params = new URLSearchParams();
     if (input.path) {
       params.set("path", input.path);
@@ -315,31 +315,31 @@ export const apiClient = {
       params.set("limit", String(input.limit));
     }
     const suffix = params.toString() ? `?${params.toString()}` : "";
-    return request<CodexTranslationSourceFileBrowserResult>(`/api/translation/codex/source-files${suffix}`);
+    return request<TranslationSourceFileBrowserResult>(`/api/translation/source-files${suffix}`);
   },
-  createCodexFileTranslation(input: CreateCodexFileTranslationRequest) {
-    return request<CodexFileTranslationJob>("/api/translation/codex/files", {
+  createFileTranslation(input: CreateFileTranslationRequest) {
+    return request<FileTranslationJob>("/api/translation/files", {
       method: "POST",
       body: JSON.stringify(input)
     });
   },
-  readCodexFileTranslation(jobId: string) {
-    return request<{ job: CodexFileTranslationJob; output: string; report: string }>(`/api/translation/codex/files/${encodeURIComponent(jobId)}`);
+  readFileTranslation(jobId: string) {
+    return request<{ job: FileTranslationJob; output: string; report: string }>(`/api/translation/files/${encodeURIComponent(jobId)}`);
   },
-  createCodexBootstrap(input: CreateCodexBootstrapRequest) {
-    return request<CodexBootstrapRun>("/api/translation/codex/bootstrap", {
+  createTranslationBootstrap(input: CreateTranslationBootstrapRequest) {
+    return request<TranslationBootstrapRun>("/api/translation/bootstrap", {
       method: "POST",
       body: JSON.stringify(input)
     });
   },
-  createCodexMemoryUpdate(input: CreateCodexMemoryUpdateRequest) {
-    return request<CodexTranslationQueueItem>("/api/translation/codex/memory-update", {
+  createTranslationMemoryUpdate(input: CreateTranslationMemoryUpdateRequest) {
+    return request<TranslationQueueItem>("/api/translation/memory-update", {
       method: "POST",
       body: JSON.stringify(input)
     });
   },
-  promoteCodexTranslation(jobId: string, targetPath: string) {
-    return request<CodexFileTranslationJob>(`/api/translation/codex/files/${encodeURIComponent(jobId)}/promote`, {
+  promoteTranslation(jobId: string, targetPath: string) {
+    return request<FileTranslationJob>(`/api/translation/files/${encodeURIComponent(jobId)}/promote`, {
       method: "POST",
       body: JSON.stringify({ targetPath })
     });

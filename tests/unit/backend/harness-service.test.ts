@@ -11,17 +11,17 @@ describe("createHarnessService", () => {
     expect(status.needsApply).toBe(true);
     // B1: a fresh repo with every harness file missing is not yet initialized.
     expect(status.initialized).toBe(false);
-    expect(status.plannedChanges).toHaveLength(19);
-    expect(status.plannedChanges.map((change) => change.action)).toEqual(Array(19).fill("create"));
+    expect(status.plannedChanges).toHaveLength(16);
+    expect(status.plannedChanges.map((change) => change.action)).toEqual(Array(16).fill("create"));
 
     const result = await service.applyHarness("/repo");
-    expect(result.changedFiles).toHaveLength(19);
+    expect(result.changedFiles).toHaveLength(16);
 
     const nextStatus = await service.getHarnessStatus("/repo");
     expect(nextStatus.needsApply).toBe(false);
     // B2: once the harness is applied, VCM markers exist -> initialized.
     expect(nextStatus.initialized).toBe(true);
-    expect(nextStatus.files.map((file) => file.action)).toEqual(Array(19).fill("ok"));
+    expect(nextStatus.files.map((file) => file.action)).toEqual(Array(16).fill("ok"));
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("## VCM Start Here");
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("## VCM Task Flow");
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("## VCM Worktree Policy");
@@ -62,15 +62,12 @@ describe("createHarnessService", () => {
     expect(await fs.readText("/repo/.claude/agents/gate-reviewer.md")).toContain("name: gate-reviewer");
     expect(await fs.readText("/repo/.claude/agents/gate-reviewer.md")).toContain("You are VCM `gate-reviewer`");
     expect(await fs.readText("/repo/.claude/agents/gate-reviewer.md")).toContain("Use the task and worktree paths named there");
-    const translatorAgents = await fs.readText("/repo/.ai/codex-translator/AGENTS.md");
-    expect(translatorAgents).toContain("You are VCM `codex-translator`");
+    const translatorAgents = await fs.readText("/repo/.claude/agents/translator.md");
+    expect(translatorAgents).toContain("name: translator");
+    expect(translatorAgents).toContain("You are VCM `translator`");
     expect(translatorAgents).toContain("follow the VCM chunk manifest");
     expect(translatorAgents).toContain("Do not delegate translation to another CLI, package, API, service, browser, or");
     expect(translatorAgents).toContain("write diagnostics to the assigned report path");
-    expect(await fs.readText("/repo/.ai/codex-translator/config.toml")).toContain("vcm_codex_translator");
-    const translatorHooks = await fs.readText("/repo/.ai/codex-translator/.codex/hooks.json");
-    expect(translatorHooks).toContain("/api/hooks/codex-translator");
-    expect(translatorHooks).toContain("/api/hooks/codex-translator/stop");
     expect(await fs.readText("/repo/.ai/tools/request-gate-review")).toContain("Request a VCM-managed Gate Review Gate");
     expect(await fs.readText("/repo/.claude/settings.json")).toContain("UserPromptSubmit");
     expect(await fs.readText("/repo/.claude/settings.json")).toContain("Stop");
@@ -129,6 +126,35 @@ describe("createHarnessService", () => {
     expect(content).toContain(".ai/vcm/");
     expect(content).toContain(".claude/worktrees/");
     expect(content).not.toContain("<!-- VCM:BEGIN");
+  });
+
+  it("plans and removes obsolete Codex harness paths", async () => {
+    const fs = createMemoryFs();
+    await fs.writeText("/repo/.ai/codex/AGENTS.md", "# old codex reviewer\n");
+    await fs.writeText("/repo/.ai/codex-translator/AGENTS.md", "# old codex translator\n");
+    await fs.writeText("/repo/.claude/skills/vcm-codex-review-gate/SKILL.md", "# old skill\n");
+    await fs.writeText("/repo/.ai/tools/request-codex-review", "#!/usr/bin/env python3\n");
+    const service = createHarnessService({ fs });
+
+    const status = await service.getHarnessStatus("/repo");
+    expect(status.plannedChanges.filter((change) => change.action === "delete").map((change) => change.path)).toEqual([
+      ".ai/codex",
+      ".ai/codex-translator",
+      ".claude/skills/vcm-codex-review-gate",
+      ".ai/tools/request-codex-review"
+    ]);
+
+    const result = await service.applyHarness("/repo");
+    expect(result.changedFiles.filter((change) => change.action === "delete").map((change) => change.path)).toEqual([
+      ".ai/codex",
+      ".ai/codex-translator",
+      ".claude/skills/vcm-codex-review-gate",
+      ".ai/tools/request-codex-review"
+    ]);
+    await expect(fs.pathExists("/repo/.ai/codex/AGENTS.md")).resolves.toBe(false);
+    await expect(fs.pathExists("/repo/.ai/codex-translator/AGENTS.md")).resolves.toBe(false);
+    await expect(fs.pathExists("/repo/.claude/skills/vcm-codex-review-gate/SKILL.md")).resolves.toBe(false);
+    await expect(fs.pathExists("/repo/.ai/tools/request-codex-review")).resolves.toBe(false);
   });
 
   it("replaces old VCM hook commands with direct HTTP hooks", async () => {
@@ -332,7 +358,7 @@ function createMemoryFs(): FileSystemAdapter {
   const files = new Map<string, string>();
   return {
     async pathExists(targetPath) {
-      return files.has(targetPath);
+      return files.has(targetPath) || Array.from(files.keys()).some((filePath) => filePath.startsWith(`${targetPath}/`));
     },
     async ensureDir() {},
     async readDir() {
@@ -366,6 +392,16 @@ function createMemoryFs(): FileSystemAdapter {
       }
       files.set(targetPath, content);
       return true;
+    },
+    async removePath(targetPath, options = {}) {
+      files.delete(targetPath);
+      if (options.recursive) {
+        for (const filePath of Array.from(files.keys())) {
+          if (filePath.startsWith(`${targetPath}/`)) {
+            files.delete(filePath);
+          }
+        }
+      }
     }
   };
 }

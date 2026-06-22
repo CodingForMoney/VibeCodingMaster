@@ -36,7 +36,7 @@ CLAUDE.md
 .claude/agents/coder.md
 .claude/agents/reviewer.md
 .claude/agents/gate-reviewer.md
-.ai/codex-translator/AGENTS.md
+.claude/agents/translator.md
 ```
 
 Whole-file or raw-file harness files:
@@ -47,9 +47,7 @@ Whole-file or raw-file harness files:
 .claude/skills/vcm-long-running-validation/SKILL.md
 .claude/skills/vcm-harness-bootstrap/SKILL.md
 .claude/skills/vcm-gate-review/SKILL.md
-.ai/codex-translator/config.toml
-.ai/codex-translator/.codex/config.toml
-.ai/codex-translator/.codex/hooks.json
+.claude/agents/translator.md
 .ai/tools/generate-module-index
 .ai/tools/generate-public-surface
 .ai/tools/request-gate-review
@@ -76,8 +74,6 @@ Directory roots created by the installer:
 .claude/skills/vcm-long-running-validation/
 .claude/skills/vcm-route-message/
 .claude/skills/vcm-gate-review/
-.ai/codex-translator/
-.ai/codex-translator/.codex/
 .ai/vcm/translations/
 .ai/vcm/gate-reviews/
 .ai/tools/
@@ -158,7 +154,7 @@ session recovery.
 
 Close Task removes the task-owned worktree, branch, app-local task record, and
 task-local runtime state. It stops task-scoped VCM role sessions for that task.
-It must not stop project-scoped Gate Reviewer or Codex Translator sessions.
+It must not stop project-scoped Gate Reviewer or Translator sessions.
 
 Durable facts that should survive task cleanup must be promoted into code,
 tests, durable docs, PR text, commit history, or release notes before closing

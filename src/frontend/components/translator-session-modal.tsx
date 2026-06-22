@@ -2,7 +2,7 @@ import type { RoleSessionRecord, SessionEffort, SessionModel } from "../../share
 import { SessionToolbar } from "./session-toolbar.js";
 import { XtermView } from "../terminal/xterm-view.js";
 
-export interface CodexTranslatorSessionModalProps {
+export interface TranslatorSessionModalProps {
   busy?: boolean;
   effort: SessionEffort;
   model: SessionModel;
@@ -17,7 +17,7 @@ export interface CodexTranslatorSessionModalProps {
   onStop(): void;
 }
 
-export function CodexTranslatorSessionModal({
+export function TranslatorSessionModal({
   busy,
   effort,
   model,
@@ -30,24 +30,24 @@ export function CodexTranslatorSessionModal({
   onRestart,
   onStart,
   onStop
-}: CodexTranslatorSessionModalProps) {
+}: TranslatorSessionModalProps) {
   if (!open) {
     return null;
   }
 
   return (
     <div className="modal-backdrop translator-session-backdrop">
-      <section className="translator-session-modal" role="dialog" aria-modal="true" aria-label="Codex Translator Session">
+      <section className="translator-session-modal" role="dialog" aria-modal="true" aria-label="Translator Session">
         <header className="translator-session-header">
           <div>
-            <h2>Codex Translator Session</h2>
+            <h2>Translator Session</h2>
             <p>{formatTranslatorSessionStatus(session)}</p>
           </div>
           <button type="button" onClick={onClose}>Close</button>
         </header>
 
         <SessionToolbar
-          role="codex-translator"
+          role="translator"
           session={session ?? undefined}
           permissionMode="default"
           model={model}
@@ -67,7 +67,7 @@ export function CodexTranslatorSessionModal({
             <XtermView key={session.id} sessionId={session.id} active={open} />
           ) : (
             <div className="terminal-empty">
-              <strong>codex-translator</strong>
+              <strong>translator</strong>
               <span>{session?.claudeSessionId ? "Resume this project translator session." : "Start the project translator session."}</span>
             </div>
           )}

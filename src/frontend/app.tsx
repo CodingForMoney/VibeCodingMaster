@@ -31,7 +31,7 @@ import type { RoleSessionRecord, SessionEffort, SessionModel } from "../shared/t
 import type { TaskRecord } from "../shared/types/task.js";
 import { CORE_VCM_ROLE_NAMES } from "../shared/constants.js";
 import { AppShell } from "./components/app-shell.js";
-import { CodexTranslatorSessionModal } from "./components/codex-translator-session-modal.js";
+import { TranslatorSessionModal } from "./components/translator-session-modal.js";
 import { FileTranslationModalHost } from "./components/translation-panel.js";
 import { selectActiveTask } from "./state/app-store.js";
 import { apiClient } from "./state/api-client.js";
@@ -71,7 +71,7 @@ export function App() {
   const [fileTranslationOpen, setFileTranslationOpen] = useState(false);
   const [translatorSessionOpen, setTranslatorSessionOpen] = useState(false);
   const [translatorSession, setTranslatorSession] = useState<RoleSessionRecord | null>(null);
-  const [translatorModel, setTranslatorModel] = useState<SessionModel>("gpt-5.5");
+  const [translatorModel, setTranslatorModel] = useState<SessionModel>("default");
   const [translatorEffort, setTranslatorEffort] = useState<SessionEffort>("medium");
   const [launchTemplate, setLaunchTemplate] = useState<LaunchTemplate>(() => createDefaultLaunchTemplate());
   const [activeLaunchState, setActiveLaunchState] = useState<TaskWorkspaceLaunchState | null>(null);
@@ -274,7 +274,7 @@ export function App() {
   }
 
   async function refreshTranslatorSession() {
-    const session = await apiClient.getCodexTranslatorSession();
+    const session = await apiClient.getTranslatorSession();
     setTranslatorSession(session);
     if (session?.model) {
       setTranslatorModel(session.model);
@@ -412,7 +412,7 @@ export function App() {
       return;
     }
     translatorEnsureKeyRef.current = ensureKey;
-    void apiClient.ensureCodexTranslatorSession({
+    void apiClient.ensureTranslatorSession({
       model: translatorModel,
       effort: translatorEffort
     })
@@ -658,7 +658,7 @@ export function App() {
               if (!project) {
                 throw new Error("Connect a repository before running Translation Bootstrap.");
               }
-              await apiClient.createCodexBootstrap({
+              await apiClient.createTranslationBootstrap({
                 targetLanguage: translationTargetLanguage
               });
               await refreshTranslatorSession();
@@ -669,7 +669,7 @@ export function App() {
               if (!project) {
                 throw new Error("Connect a repository before updating translation memory.");
               }
-              await apiClient.createCodexMemoryUpdate({
+              await apiClient.createTranslationMemoryUpdate({
                 targetLanguage: translationTargetLanguage
               });
               await refreshTranslatorSession();
@@ -874,7 +874,7 @@ export function App() {
         targetLanguage={translationTargetLanguage}
         onClose={() => setFileTranslationOpen(false)}
       />
-      <CodexTranslatorSessionModal
+        <TranslatorSessionModal
         open={translatorSessionOpen}
         busy={busy}
         session={translatorSession}
@@ -885,7 +885,7 @@ export function App() {
         onEffortChange={setTranslatorEffort}
         onStart={() => {
           void withBusy(async () => {
-            const session = await apiClient.startCodexTranslatorSession({
+            const session = await apiClient.startTranslatorSession({
               cols: 100,
               rows: 28,
               model: translatorModel,
@@ -896,7 +896,7 @@ export function App() {
         }}
         onResume={() => {
           void withBusy(async () => {
-            const session = await apiClient.resumeCodexTranslatorSession({
+            const session = await apiClient.resumeTranslatorSession({
               cols: 100,
               rows: 28,
               model: translatorModel,
@@ -907,7 +907,7 @@ export function App() {
         }}
         onRestart={() => {
           void withBusy(async () => {
-            const session = await apiClient.restartCodexTranslatorSession({
+            const session = await apiClient.restartTranslatorSession({
               cols: 100,
               rows: 28,
               model: translatorModel,
@@ -918,7 +918,7 @@ export function App() {
         }}
         onStop={() => {
           void withBusy(async () => {
-            const session = await apiClient.stopCodexTranslatorSession();
+            const session = await apiClient.stopTranslatorSession();
             setTranslatorSession(session);
           });
         }}

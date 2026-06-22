@@ -5,7 +5,7 @@ import type {
   TranslationDiagnostics
 } from "../../shared/types/diagnostics.js";
 import type {
-  CodexConversationTranslationJob,
+  ConversationTranslationJob,
   PollTranslationSessionResult,
   SendTranslatedInputRequest,
   StartTranslationSessionResult,
@@ -34,7 +34,7 @@ import {
   type ClaudeTranscriptEvent,
   type ClaudeTranscriptService
 } from "./claude-transcript-service.js";
-import type { CodexTranslationService } from "./codex-translation-service.js";
+import type { TranslationWorkerService } from "./translation-worker-service.js";
 import type { ProjectService } from "./project-service.js";
 import type { SessionService } from "./session-service.js";
 import { createTranslationQueueRegistry } from "./translation-queue.js";
@@ -105,7 +105,7 @@ export interface TranslationServiceDeps {
   sessionRegistry: Pick<SessionRegistry, "get">;
   transcripts: ClaudeTranscriptService;
   sessionService: SessionService;
-  codexTranslationService?: Pick<CodexTranslationService, "createConversationJob" | "validateConversationResult" | "getState">;
+  translationWorkerService?: Pick<TranslationWorkerService, "createConversationJob" | "validateConversationResult" | "getState">;
   fs?: FileSystemAdapter;
   projectService?: Pick<ProjectService, "loadConfig">;
   appSettings: Pick<AppSettingsService, "getPreferences">;
@@ -166,8 +166,8 @@ const TRANSLATION_SOURCE_LANGUAGE = "auto";
 const TRANSLATION_INPUT_MODE: TranslationInputMode = "review-before-send";
 const TRANSLATION_CONTEXT_ENABLED = false;
 const TRANSLATION_TIMEOUT_MS = 120000;
-const TRANSLATION_PROVIDER = "codex";
-const TRANSLATION_MODEL = "codex-translator";
+const TRANSLATION_PROVIDER = "claude-code";
+const TRANSLATION_MODEL = "translator";
 const OUTPUT_TRANSLATION_BATCH_DELAY_MS = 10000;
 
 const TRANSCRIPT_REPLAY_GRACE_MS = 5000;
@@ -531,10 +531,10 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
 
       let hasFailure = false;
       try {
-        const jobs: Array<{ item: PendingOutputTranslation; job: CodexConversationTranslationJob }> = [];
+        const jobs: Array<{ item: PendingOutputTranslation; job: ConversationTranslationJob }> = [];
         for (let index = 0; index < items.length; index += 1) {
           const item = items[index]!;
-          const job = await createCodexConversationJob({
+          const job = await createConversationJob({
             repoRoot: item.repoRoot,
             taskSlug: item.entry.taskSlug,
             role: item.entry.role,
@@ -551,7 +551,7 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
 
         for (const { item, job } of jobs) {
           try {
-            const result = await waitForCodexConversationResult(item.repoRoot!, job, item.config.requestTimeoutMs);
+            const result = await waitForConversationResult(item.repoRoot!, job, item.config.requestTimeoutMs);
             const completed = {
               ...item.entry,
               status: "translated" as TranslationStatus,
@@ -1182,14 +1182,14 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
     contextText?: string;
     config: TranslationRuntimeConfig;
   }): Promise<{ text: string; warning?: string }> {
-    const job = await createCodexConversationJob(input);
-    const result = await waitForCodexConversationResult(input.repoRoot!, job, input.config.requestTimeoutMs);
+    const job = await createConversationJob(input);
+    const result = await waitForConversationResult(input.repoRoot!, job, input.config.requestTimeoutMs);
     return {
       text: result.translatedText
     };
   }
 
-  async function createCodexConversationJob(input: {
+  async function createConversationJob(input: {
     repoRoot?: string;
     taskSlug: string;
     role: RoleName;
@@ -1201,23 +1201,23 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
     contextText?: string;
     config: TranslationRuntimeConfig;
     deferDispatch?: boolean;
-  }): Promise<CodexConversationTranslationJob> {
-    if (!deps.codexTranslationService) {
+  }): Promise<ConversationTranslationJob> {
+    if (!deps.translationWorkerService) {
       throw new VcmError({
-        code: "CODEX_TRANSLATION_UNAVAILABLE",
-        message: "Codex translation service is unavailable.",
+        code: "TRANSLATION_WORKER_UNAVAILABLE",
+        message: "translation service is unavailable.",
         statusCode: 500
       });
     }
     if (!input.repoRoot) {
       throw new VcmError({
         code: "TRANSLATION_REPO_ROOT_MISSING",
-        message: "Codex translation requires a base repository root.",
+        message: "translation requires a base repository root.",
         statusCode: 500
       });
     }
 
-    return deps.codexTranslationService.createConversationJob(input.repoRoot, {
+    return deps.translationWorkerService.createConversationJob(input.repoRoot, {
       direction: input.direction,
       sourceText: input.text,
       sourceLanguage: input.sourceLanguage,
@@ -1227,22 +1227,22 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
     });
   }
 
-  async function waitForCodexConversationResult(
+  async function waitForConversationResult(
     repoRoot: string,
-    job: CodexConversationTranslationJob,
+    job: ConversationTranslationJob,
     timeoutMs: number
   ) {
     const deadline = Date.now() + timeoutMs;
     let lastError: unknown;
     while (Date.now() <= deadline) {
-      const state = await deps.codexTranslationService!.getState(repoRoot);
+      const state = await deps.translationWorkerService!.getState(repoRoot);
       const item = job.queueItemId
         ? state.queue.items.find((candidate) => candidate.id === job.queueItemId)
         : undefined;
       if (item && ["failed", "cancelled", "interrupted", "skipped"].includes(item.status)) {
         throw new VcmError({
           code: "TRANSLATION_FAILED",
-          message: item.error ?? "Codex translation failed.",
+          message: item.error ?? "translation failed.",
           statusCode: 502
         });
       }
@@ -1251,7 +1251,7 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
         continue;
       }
       try {
-        return await deps.codexTranslationService!.validateConversationResult(repoRoot, {
+        return await deps.translationWorkerService!.validateConversationResult(repoRoot, {
           resultPath: job.resultPath,
           sourceHash: job.sourceHash,
           targetLanguage: job.targetLanguage
@@ -1266,7 +1266,7 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
     }
     throw new VcmError({
       code: "TRANSLATION_TIMEOUT",
-      message: lastError instanceof Error ? `Codex translation timed out: ${lastError.message}` : "Codex translation timed out.",
+      message: lastError instanceof Error ? `translation timed out: ${lastError.message}` : "translation timed out.",
       statusCode: 504
     });
   }

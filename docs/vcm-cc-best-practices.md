@@ -7,7 +7,7 @@ It is based on the latest `example/rust-layered` harness baseline.
 
 Do not install this document into target repositories. Target repositories should
 receive a concise root `CLAUDE.md` VCM block, role agents, repo-local VCM
-skills, harness tools, Codex Translator harness files, and project-owned
+skills, harness tools, Translator harness files, and project-owned
 durable docs.
 
 `docs/cc-best-practices.md` is archived as the old generic baseline. Current VCM
@@ -48,10 +48,7 @@ CLAUDE.md
 .claude/skills/vcm-long-running-validation/SKILL.md
 .claude/skills/vcm-harness-bootstrap/SKILL.md
 .claude/skills/vcm-gate-review/SKILL.md
-.ai/codex-translator/AGENTS.md
-.ai/codex-translator/config.toml
-.ai/codex-translator/.codex/config.toml
-.ai/codex-translator/.codex/hooks.json
+.claude/agents/translator.md
 .ai/tools/generate-module-index
 .ai/tools/generate-public-surface
 .ai/tools/request-gate-review

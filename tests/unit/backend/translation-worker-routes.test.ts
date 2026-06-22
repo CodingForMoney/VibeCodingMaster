@@ -1,16 +1,16 @@
 import Fastify from "fastify";
 import { describe, expect, it } from "vitest";
-import { registerCodexTranslationRoutes } from "../../../src/backend/api/codex-translation-routes.js";
-import type { CodexTranslationService } from "../../../src/backend/services/codex-translation-service.js";
+import { registerTranslationWorkerRoutes } from "../../../src/backend/api/translation-worker-routes.js";
+import type { TranslationWorkerService } from "../../../src/backend/services/translation-worker-service.js";
 import type { ProjectService } from "../../../src/backend/services/project-service.js";
 
-describe("codex translation routes", () => {
+describe("translation worker routes", () => {
   it("browses source files for the current project", async () => {
     const calls: unknown[] = [];
     const app = Fastify({ logger: false });
-    registerCodexTranslationRoutes(app, {
+    registerTranslationWorkerRoutes(app, {
       projectService: createProjectServiceStub(),
-      codexTranslationService: {
+      translationWorkerService: {
         async browseSourceFiles(repoRoot, input) {
           calls.push({ repoRoot, input });
           return {
@@ -20,12 +20,12 @@ describe("codex translation routes", () => {
             truncated: false
           };
         }
-      } as CodexTranslationService
+      } as TranslationWorkerService
     });
 
     const response = await app.inject({
       method: "GET",
-      url: "/api/translation/codex/source-files?path=docs&query=white&limit=25"
+      url: "/api/translation/source-files?path=docs&query=white&limit=25"
     });
 
     expect(response.statusCode).toBe(200);

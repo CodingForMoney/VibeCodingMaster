@@ -34,7 +34,7 @@
 - Test-only or validation-only work may use: `project-manager -> reviewer -> project-manager final acceptance`.
 - If a docs/test/validation-only task reveals required code, architecture, public contract, dependency, durable-doc, or test-strategy changes, route back through the full code-change flow.
 - Keep role outputs under `.ai/vcm/handoffs/`.
-- Gate Review reports live under `.ai/vcm/gate-reviews/` and are VCM-managed task evidence.
+- Gate Review Gate reports live under `.ai/vcm/gate-reviews/` and are VCM-managed task evidence.
 - Runtime task records and handoffs under `.ai/vcm/` are temporary. Durable facts must move into code, tests, PR text, commit history, or long-term docs.
 - Record current-task unresolved findings in `.ai/vcm/handoffs/known-issues.md`.
 
