@@ -1,3 +1,5 @@
+import type { ClaudePermissionMode, SessionEffort, SessionModel } from "./session.js";
+
 export type HarnessFileKind =
   | "root-claude"
   | "gitignore"
@@ -10,6 +12,7 @@ export type HarnessFileKind =
   | "skill-vcm-gate-review"
   | "agent-gate-reviewer"
   | "agent-translator"
+  | "agent-harness-engineer"
   | "tool-request-gate-review"
   | "agent-project-manager"
   | "agent-architect"
@@ -37,6 +40,7 @@ export interface HarnessPlannedChange {
 
 export interface HarnessStatusReport {
   version: number;
+  harnessRevision: number;
   /**
    * Whether the VCM harness has already been installed in the target repo.
    *
@@ -56,6 +60,24 @@ export interface HarnessStatusReport {
   needsApply: boolean;
   plannedChanges: HarnessPlannedChange[];
   warnings: string[];
+}
+
+export interface HarnessFileContent {
+  path: string;
+  kind: HarnessFileKind;
+  title: string;
+  content: string;
+  editable: boolean;
+  readonlyReason?: string;
+}
+
+export interface UpdateHarnessFileContentRequest {
+  content: string;
+}
+
+export interface UpdateHarnessFileContentResult {
+  file: HarnessFileContent;
+  status: HarnessStatusReport;
 }
 
 export interface HarnessApplyResult {
@@ -102,6 +124,9 @@ export interface HarnessBootstrapSession {
   claudeSessionId: string;
   status: "running" | "exited" | "crashed" | "resumable";
   command: string;
+  permissionMode?: ClaudePermissionMode;
+  model?: SessionModel;
+  effort?: SessionEffort;
   cwd: string;
   logPath: string;
   startedAt?: string;
@@ -121,9 +146,20 @@ export interface HarnessBootstrapStatusReport {
 export interface StartHarnessBootstrapRequest {
   cols?: number;
   rows?: number;
+  permissionMode?: ClaudePermissionMode;
+  model?: SessionModel;
+  effort?: SessionEffort;
 }
 
 export interface StartHarnessBootstrapResult {
+  status: HarnessBootstrapStatusReport;
+  session: HarnessBootstrapSession;
+  prompt: string;
+}
+
+export type RestartHarnessBootstrapRequest = StartHarnessBootstrapRequest;
+
+export interface RunHarnessBootstrapResult {
   status: HarnessBootstrapStatusReport;
   session: HarnessBootstrapSession;
   prompt: string;

@@ -23,7 +23,7 @@ import { GATE_REVIEW_GATES, type GateReviewGate, type GateReviewIndex } from "..
 import type { VcmOrchestrationState, VcmRoleMessage } from "../../shared/types/message.js";
 import type { ProjectSummary } from "../../shared/types/project.js";
 import type { VcmSessionRoundState } from "../../shared/types/round.js";
-import type { RoleSessionRecord } from "../../shared/types/session.js";
+import type { ClaudePermissionMode, RoleSessionRecord, SessionEffort, SessionModel } from "../../shared/types/session.js";
 import type { TaskRecord } from "../../shared/types/task.js";
 import { EventLog } from "../components/event-log.js";
 import { HarnessPanel } from "../components/harness-panel.js";
@@ -57,6 +57,7 @@ export interface ProjectDashboardProps {
   translationTargetLanguage: TranslationTargetLanguage;
   translationOutputMode: TranslationOutputMode;
   translatorSession: RoleSessionRecord | null;
+  harnessEngineerSession: RoleSessionRecord | null;
   harnessStatus: HarnessStatusReport | null;
   harnessBootstrapStatus: HarnessBootstrapStatusReport | null;
   harnessApplyResult?: HarnessApplyResult | null;
@@ -71,7 +72,11 @@ export interface ProjectDashboardProps {
   onRefreshHarness(): Promise<void>;
   onApplyHarness(): Promise<void>;
   onCommitAndRebaseHarnessTask(): Promise<void>;
-  onStartHarnessBootstrap(): Promise<void>;
+  onStartHarnessBootstrap(input: { permissionMode: ClaudePermissionMode; model: SessionModel; effort: SessionEffort }): Promise<void>;
+  onRestartHarnessBootstrap(input: { permissionMode: ClaudePermissionMode; model: SessionModel; effort: SessionEffort }): Promise<void>;
+  onStopHarnessBootstrap(): Promise<void>;
+  onRunHarnessBootstrap(): Promise<void>;
+  onOpenHarnessStudio(): void;
   onRefreshGateway(): Promise<void>;
   onGatewayEnabledChange(enabled: boolean): void;
   onGatewayTranslationChange(enabled: boolean): void;
@@ -119,6 +124,7 @@ export function ProjectDashboard({
   translationTargetLanguage,
   translationOutputMode,
   translatorSession,
+  harnessEngineerSession,
   harnessStatus,
   harnessBootstrapStatus,
   harnessApplyResult,
@@ -134,6 +140,10 @@ export function ProjectDashboard({
   onApplyHarness,
   onCommitAndRebaseHarnessTask,
   onStartHarnessBootstrap,
+  onRestartHarnessBootstrap,
+  onStopHarnessBootstrap,
+  onRunHarnessBootstrap,
+  onOpenHarnessStudio,
   onRefreshGateway,
   onGatewayEnabledChange,
   onGatewayTranslationChange,
@@ -394,12 +404,17 @@ export function ProjectDashboard({
             bootstrapStatus={harnessBootstrapStatus}
             applyResult={harnessApplyResult}
             taskSyncResult={harnessTaskSyncResult}
+            harnessEngineerSession={harnessEngineerSession}
             canCommitAndRebaseTask={Boolean(harnessApplyResult?.changedFiles.length && activeTask)}
             busy={busy}
             onRefresh={onRefreshHarness}
             onApply={onApplyHarness}
             onCommitAndRebaseTask={onCommitAndRebaseHarnessTask}
+            onOpenStudio={onOpenHarnessStudio}
             onStartBootstrap={onStartHarnessBootstrap}
+            onRestartBootstrap={onRestartHarnessBootstrap}
+            onStopBootstrap={onStopHarnessBootstrap}
+            onRunBootstrap={onRunHarnessBootstrap}
           />
         </SidebarSection>
       ) : null}

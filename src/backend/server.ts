@@ -115,6 +115,7 @@ export async function createServer(deps: ServerDeps, options: CreateServerOption
   registerHarnessRoutes(app, {
     projectService: deps.projectService,
     harnessService: deps.harnessService,
+    sessionService: deps.sessionService,
     taskService: deps.taskService
   });
   registerTaskRoutes(app, {
@@ -150,6 +151,7 @@ export async function createServer(deps: ServerDeps, options: CreateServerOption
   registerTranslationRoutes(app, {
     projectService: deps.projectService,
     taskService: deps.taskService,
+    sessionService: deps.sessionService,
     translationService: deps.translationService
   });
   registerGatewayRoutes(app, { gatewayService: deps.gatewayService });

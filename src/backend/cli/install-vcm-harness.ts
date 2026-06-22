@@ -13,6 +13,7 @@ import {
   renderTranslatorAgentRules,
   renderVcmGateReviewSkillRules
 } from "../templates/harness/gate-review.js";
+import { renderHarnessEngineerHarnessRules } from "../templates/harness/harness-engineer-agent.js";
 import { renderRootClaudeHarnessRules } from "../templates/harness/claude-root.js";
 import { renderGitignoreHarnessRules } from "../templates/harness/gitignore.js";
 import { renderProjectManagerHarnessRules } from "../templates/harness/project-manager-agent.js";
@@ -67,6 +68,9 @@ const AGENT_FRONTMATTER = {
   },
   translator: {
     description: "VCM project translation tool role for conversation translation, file translation, bootstrap, and memory updates."
+  },
+  "harness-engineer": {
+    description: "VCM project-scoped harness maintenance role for harness diagnosis, diff proposals, and VCM issue drafts."
   }
 };
 
@@ -141,6 +145,14 @@ const MANAGED_FILES = [
     commentStyle: "html",
     category: "agent-translator",
     content: renderTranslatorAgentRules()
+  },
+  {
+    path: ".claude/agents/harness-engineer.md",
+    title: "Harness Engineer Agent",
+    agentName: "harness-engineer",
+    commentStyle: "html",
+    category: "agent-harness-engineer",
+    content: renderHarnessEngineerHarnessRules()
   }
 ];
 

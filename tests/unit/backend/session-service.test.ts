@@ -301,6 +301,81 @@ describe("createSessionService", () => {
     ]);
   });
 
+  it("starts Harness Engineer as a project-scoped Claude Code session", async () => {
+    const fs = createMemoryFs();
+    const runtimeInputs: CreateTerminalSessionInput[] = [];
+    const service = createTestSessionService(fs, runtimeInputs);
+
+    const started = await service.startProjectHarnessEngineerSession("/repo", {
+      permissionMode: "bypassPermissions",
+      model: "claude-opus-4-8[1m]",
+      effort: "medium"
+    });
+
+    expect(started.role).toBe("harness-engineer");
+    expect(started.taskSlug).toBe("__project_harness_engineer__");
+    expect(started.command).toContain("--agent harness-engineer");
+    expect(runtimeInputs[0]?.cwd).toBe("/repo");
+    expect(runtimeInputs[0]?.env).toMatchObject({
+      VCM_TASK_REPO_ROOT: "/repo",
+      VCM_TASK_SLUG: "__project_harness_engineer__",
+      VCM_ROLE: "harness-engineer"
+    });
+    expect(runtimeInputs[0]?.args).toEqual([
+      "--agent",
+      "harness-engineer",
+      "--session-id",
+      started.claudeSessionId,
+      "--model",
+      "claude-opus-4-8[1m]",
+      "--effort",
+      "medium",
+      "--permission-mode",
+      "bypassPermissions"
+    ]);
+    await expect(fs.pathExists("/repo/.ai/vcm/harness-engineer/session.json")).resolves.toBe(true);
+    await expect(fs.pathExists("/repo/.claude/worktrees/demo-task/.ai/vcm/sessions/demo-task.json"))
+      .resolves.toBe(false);
+  });
+
+  it("marks sessions outdated when harness revision advances and notifies them", async () => {
+    const fs = createMemoryFs();
+    const runtimeInputs: CreateTerminalSessionInput[] = [];
+    const writes: string[] = [];
+    const service = createTestSessionService(fs, runtimeInputs, writes);
+
+    const started = await service.startRoleSession("/repo", "demo-task", "architect");
+    expect(started.harnessRevision).toBe(0);
+    expect(started.harnessCurrentRevision).toBe(0);
+    expect(started.harnessOutdated).toBe(false);
+
+    await fs.writeJson("/repo/.ai/vcm/harness/revision.json", {
+      version: 1,
+      revision: 1,
+      updatedAt: "2026-05-29T00:00:00.000Z"
+    });
+
+    const [outdated] = await service.listRoleSessions("/repo", "demo-task");
+    expect(outdated).toMatchObject({
+      role: "architect",
+      harnessRevision: 0,
+      harnessCurrentRevision: 1,
+      harnessOutdated: true
+    });
+
+    const notified = await service.notifyRoleHarnessUpdated("/repo", "demo-task", "architect");
+    expect(notified).toMatchObject({
+      role: "architect",
+      harnessRevision: 1,
+      harnessCurrentRevision: 1,
+      harnessOutdated: false,
+      lastHarnessNotifyAt: "2026-05-29T00:00:00.000Z"
+    });
+    expect(writes[0]).toContain("VCM harness was updated.");
+    expect(writes[0]).toContain(".claude/agents/architect.md");
+    expect(writes[1]).toBe("\r");
+  });
+
   it("passes Gate Reviewer effort through Claude Code settings", async () => {
     const fs = createMemoryFs();
     const runtimeInputs: CreateTerminalSessionInput[] = [];

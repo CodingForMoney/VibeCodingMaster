@@ -24,6 +24,7 @@ export interface SessionConsoleProps {
   onResume(): void;
   onStop(): void;
   onRestart(): void;
+  onNotifyHarnessUpdated?(): void;
   onTerminalEvent(message: string): void;
 }
 
@@ -45,6 +46,7 @@ export function SessionConsole({
   onResume,
   onStop,
   onRestart,
+  onNotifyHarnessUpdated,
   onTerminalEvent
 }: SessionConsoleProps) {
   const showTranslation = isVcmRoleName(role) && translationEnabled && session?.status === "running";
@@ -67,6 +69,7 @@ export function SessionConsole({
             onResume={onResume}
             onStop={onStop}
             onRestart={onRestart}
+            onNotifyHarnessUpdated={onNotifyHarnessUpdated}
           />
           {session?.status === "running" ? (
             <XtermView key={session.id} sessionId={session.id} active={active} onEvent={onTerminalEvent} />

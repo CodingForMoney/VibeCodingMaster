@@ -17,6 +17,7 @@ export interface TranslatorSessionModalProps {
   onRestart(): void;
   onStart(): void;
   onStop(): void;
+  onNotifyHarnessUpdated(): void;
 }
 
 export function TranslatorSessionModal({
@@ -33,7 +34,8 @@ export function TranslatorSessionModal({
   onResume,
   onRestart,
   onStart,
-  onStop
+  onStop,
+  onNotifyHarnessUpdated
 }: TranslatorSessionModalProps) {
   if (!open) {
     return null;
@@ -64,6 +66,7 @@ export function TranslatorSessionModal({
           onResume={onResume}
           onRestart={onRestart}
           onStop={onStop}
+          onNotifyHarnessUpdated={onNotifyHarnessUpdated}
         />
 
         <div className="translator-session-terminal">

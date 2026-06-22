@@ -69,7 +69,8 @@ export function TaskWorkspace({
     coder: "default",
     reviewer: "default",
     "gate-reviewer": "default",
-    translator: "default"
+    translator: "default",
+    "harness-engineer": "default"
   });
   const [models, setModels] = useState<Record<RoleName, SessionModel>>({
     "project-manager": "default",
@@ -77,7 +78,8 @@ export function TaskWorkspace({
     coder: "default",
     reviewer: "default",
     "gate-reviewer": "default",
-    translator: "default"
+    translator: "default",
+    "harness-engineer": "default"
   });
   const [efforts, setEfforts] = useState<Record<RoleName, SessionEffort>>({
     "project-manager": "default",
@@ -85,7 +87,8 @@ export function TaskWorkspace({
     coder: "default",
     reviewer: "default",
     "gate-reviewer": "default",
-    translator: "medium"
+    translator: "medium",
+    "harness-engineer": "medium"
   });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -492,6 +495,10 @@ export function TaskWorkspace({
                         effort: efforts[role]
                       });
                       appendEvent(`restarted ${role} with ${permissionModes[role]} / ${models[role]} / ${efforts[role]}`);
+                    })}
+                    onNotifyHarnessUpdated={() => void runAction(async () => {
+                      await apiClient.notifyRoleHarnessUpdated(task.taskSlug, role);
+                      appendEvent(`notified ${role} to reload latest harness`);
                     })}
                     onTerminalEvent={(message) => appendEvent(`${definition.label}: ${message}`)}
                   />

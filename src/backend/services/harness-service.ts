@@ -7,16 +7,20 @@ import type {
   HarnessApplyResult,
   HarnessBootstrapCheck,
   HarnessBootstrapSession,
+  HarnessFileContent,
   HarnessBootstrapStatusReport,
   HarnessFileAction,
   HarnessFileKind,
   HarnessFileStatus,
   HarnessPlannedChange,
   HarnessStatusReport,
+  RestartHarnessBootstrapRequest,
+  RunHarnessBootstrapResult,
   StartHarnessBootstrapRequest,
-  StartHarnessBootstrapResult
+  StartHarnessBootstrapResult,
+  UpdateHarnessFileContentResult
 } from "../../shared/types/harness.js";
-import type { ClaudePermissionMode } from "../../shared/types/session.js";
+import type { ClaudeModel, ClaudePermissionMode, SessionEffort, SessionModel } from "../../shared/types/session.js";
 import type { GitAdapter } from "../adapters/git-adapter.js";
 import type { FileSystemAdapter } from "../adapters/filesystem.js";
 import { renderArchitectHarnessRules } from "../templates/harness/architect-agent.js";
@@ -27,6 +31,7 @@ import {
   renderTranslatorAgentRules,
   renderVcmGateReviewSkillRules
 } from "../templates/harness/gate-review.js";
+import { renderHarnessEngineerHarnessRules } from "../templates/harness/harness-engineer-agent.js";
 import { renderRootClaudeHarnessRules } from "../templates/harness/claude-root.js";
 import { renderGitignoreHarnessRules } from "../templates/harness/gitignore.js";
 import { renderProjectManagerHarnessRules } from "../templates/harness/project-manager-agent.js";
@@ -40,6 +45,7 @@ import type { ProjectService } from "./project-service.js";
 import type { TerminalRuntime } from "../runtime/terminal-runtime.js";
 import { submitTerminalInput } from "../runtime/terminal-submit.js";
 import { VcmError } from "../errors.js";
+import { bumpHarnessRevision, readHarnessRevisionState } from "./harness-revision.js";
 
 const execFileAsync = promisify(execFile);
 const BOOTSTRAP_TASK_SLUG = "__vcm-harness-bootstrap__";
@@ -49,10 +55,15 @@ const BOOTSTRAP_SESSION_PATH = ".ai/vcm/bootstrap/session.json";
 
 export interface HarnessService {
   getHarnessStatus(repoRoot: string): Promise<HarnessStatusReport>;
+  getHarnessFileContent(repoRoot: string, filePath: string): Promise<HarnessFileContent>;
+  updateHarnessFileContent(repoRoot: string, filePath: string, content: string): Promise<UpdateHarnessFileContentResult>;
   applyHarness(repoRoot: string): Promise<HarnessApplyResult>;
   commitAndRebaseTask(repoRoot: string, input: CommitAndRebaseHarnessTaskInput): Promise<CommitAndRebaseHarnessTaskResult>;
   getBootstrapStatus(repoRoot: string): Promise<HarnessBootstrapStatusReport>;
   startHarnessBootstrap(repoRoot: string, input?: StartHarnessBootstrapRequest): Promise<StartHarnessBootstrapResult>;
+  restartHarnessBootstrap(repoRoot: string, input?: RestartHarnessBootstrapRequest): Promise<StartHarnessBootstrapResult>;
+  stopHarnessBootstrap(repoRoot: string): Promise<HarnessBootstrapStatusReport>;
+  runHarnessBootstrap(repoRoot: string): Promise<RunHarnessBootstrapResult>;
 }
 
 export interface HarnessServiceDeps {
@@ -212,6 +223,16 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
     renderRules: renderTranslatorAgentRules
   },
   {
+    kind: "agent-harness-engineer",
+    path: ".claude/agents/harness-engineer.md",
+    title: "Harness Engineer Agent",
+    frontmatter: renderAgentFrontmatter(
+      "harness-engineer",
+      "VCM project-scoped harness maintenance role for harness diagnosis, diff proposals, and VCM issue drafts."
+    ),
+    renderRules: renderHarnessEngineerHarnessRules
+  },
+  {
     kind: "tool-request-gate-review",
     path: ".ai/tools/request-gate-review",
     title: "Request Gate Review Tool",
@@ -268,11 +289,48 @@ export function createHarnessService(deps: HarnessServiceDeps): HarnessService {
     async getHarnessStatus(repoRoot) {
       const analyses = await analyzeHarnessFiles(deps.fs, repoRoot);
       const legacyChanges = await analyzeLegacyCodexHarnessPaths(deps.fs, repoRoot);
-      return renderHarnessStatus(analyses, legacyChanges);
+      return renderHarnessStatus(await readHarnessRevisionValue(deps.fs, repoRoot), analyses, legacyChanges);
+    },
+    async getHarnessFileContent(repoRoot, filePath) {
+      return readHarnessFileContent(deps.fs, repoRoot, filePath);
+    },
+    async updateHarnessFileContent(repoRoot, filePath, content) {
+      const definition = getHarnessFileDefinition(filePath);
+      if (!isProjectEditableHarnessFile(definition)) {
+        throw new VcmError({
+          code: "HARNESS_FILE_READONLY",
+          message: "This harness file is managed by VCM and cannot be edited directly.",
+          statusCode: 409,
+          hint: getReadonlyHarnessReason(definition)
+        });
+      }
+
+      const absolutePath = resolveHarnessPath(repoRoot, definition.path);
+      const currentContent = await deps.fs.pathExists(absolutePath)
+        ? await deps.fs.readText(absolutePath)
+        : "";
+      assertManagedBlockUnchanged(definition, currentContent, content);
+      const nextContent = ensureTrailingNewline(content);
+      await deps.fs.writeText(absolutePath, nextContent);
+      if (nextContent !== currentContent) {
+        await bumpHarnessRevision(deps.fs, repoRoot, now());
+      }
+
+      const file = await readHarnessFileContent(deps.fs, repoRoot, definition.path);
+      const analyses = await analyzeHarnessFiles(deps.fs, repoRoot);
+      const legacyChanges = await analyzeLegacyCodexHarnessPaths(deps.fs, repoRoot);
+      return {
+        file,
+        status: renderHarnessStatus(await readHarnessRevisionValue(deps.fs, repoRoot), analyses, legacyChanges)
+      };
     },
     async applyHarness(repoRoot) {
       if (deps.runFixedInstaller) {
-        return deps.runFixedInstaller(repoRoot);
+        const result = await deps.runFixedInstaller(repoRoot);
+        if (result.changedFiles.length > 0) {
+          await bumpHarnessRevision(deps.fs, repoRoot, now());
+        }
+        return result;
       }
 
       const analyses = await analyzeHarnessFiles(deps.fs, repoRoot);
@@ -290,6 +348,9 @@ export function createHarnessService(deps: HarnessServiceDeps): HarnessService {
 
       const legacyChanges = await removeLegacyCodexHarnessPaths(deps.fs, repoRoot);
       changedFiles.push(...legacyChanges);
+      if (changedFiles.length > 0) {
+        await bumpHarnessRevision(deps.fs, repoRoot, now());
+      }
 
       return {
         version: VCM_HARNESS_VERSION,
@@ -376,69 +437,73 @@ export function createHarnessService(deps: HarnessServiceDeps): HarnessService {
       return getHarnessBootstrapStatus(deps, repoRoot, now);
     },
     async startHarnessBootstrap(repoRoot, input = {}) {
-      if (!deps.runtime || !deps.projectService) {
+      const session = await launchHarnessBootstrapSession(deps, repoRoot, now, input, { forceFresh: false });
+      const nextStatus = await getHarnessBootstrapStatus(deps, repoRoot, now);
+
+      return {
+        status: {
+          ...nextStatus,
+          session
+        },
+        session,
+        prompt: buildHarnessBootstrapPrompt(repoRoot)
+      };
+    },
+    async restartHarnessBootstrap(repoRoot, input = {}) {
+      const existing = await getCurrentHarnessBootstrapSession(deps, repoRoot, now);
+      if (existing && deps.runtime?.getSession(existing.id)) {
+        await deps.runtime.stop(existing.id);
+      }
+      const session = await launchHarnessBootstrapSession(deps, repoRoot, now, input, { forceFresh: true });
+      const nextStatus = await getHarnessBootstrapStatus(deps, repoRoot, now);
+      return {
+        status: {
+          ...nextStatus,
+          session
+        },
+        session,
+        prompt: buildHarnessBootstrapPrompt(repoRoot)
+      };
+    },
+    async stopHarnessBootstrap(repoRoot) {
+      const existing = await getCurrentHarnessBootstrapSession(deps, repoRoot, now);
+      if (!existing) {
+        throw new VcmError({
+          code: "HARNESS_BOOTSTRAP_SESSION_MISSING",
+          message: "Harness bootstrap terminal has not been started.",
+          statusCode: 404
+        });
+      }
+      if (deps.runtime?.getSession(existing.id)) {
+        await deps.runtime.stop(existing.id);
+      }
+      await persistHarnessBootstrapSession(deps.fs, repoRoot, {
+        ...existing,
+        status: "exited",
+        updatedAt: now()
+      });
+      return getHarnessBootstrapStatus(deps, repoRoot, now);
+    },
+    async runHarnessBootstrap(repoRoot) {
+      if (!deps.runtime) {
         throw new VcmError({
           code: "HARNESS_BOOTSTRAP_UNAVAILABLE",
           message: "Harness bootstrap sessions are not available in this VCM runtime.",
           statusCode: 501
         });
       }
-
-      const currentStatus = await getHarnessBootstrapStatus(deps, repoRoot, now);
-      if (currentStatus.session?.status === "running") {
-        return {
-          status: currentStatus,
-          session: currentStatus.session,
-          prompt: buildHarnessBootstrapPrompt(repoRoot)
-        };
-      }
-      if (!currentStatus.canStart) {
+      const status = await getHarnessBootstrapStatus(deps, repoRoot, now);
+      const session = status.session;
+      if (!session || session.status !== "running" || !deps.runtime.getSession(session.id)) {
         throw new VcmError({
-          code: "HARNESS_BOOTSTRAP_NOT_READY",
-          message: "Install the fixed VCM harness before running harness bootstrap.",
+          code: "HARNESS_BOOTSTRAP_SESSION_NOT_RUNNING",
+          message: "Start the Harness Bootstrap terminal before running bootstrap.",
           statusCode: 409
         });
       }
-
-      const config = await deps.projectService.loadConfig(repoRoot);
-      const claudeSessionId = randomUUID();
-      const command = buildClaudeStartCommand(config.claudeCommand, "default", claudeSessionId);
-      const logPath = path.join(repoRoot, BOOTSTRAP_LOG_PATH);
-      const runtimeSession = await deps.runtime.createSession({
-        taskSlug: BOOTSTRAP_TASK_SLUG,
-        role: BOOTSTRAP_RUNTIME_ROLE,
-        command: command.command,
-        args: command.args,
-        cwd: repoRoot,
-        env: {
-          VCM_API_URL: deps.apiUrl,
-          VCM_TASK_REPO_ROOT: repoRoot,
-          VCM_HARNESS_BOOTSTRAP: "1",
-          VCM_SESSION_ID: claudeSessionId
-        },
-        cols: input.cols,
-        rows: input.rows,
-        logPath
-      });
-      const timestamp = now();
-      const session: HarnessBootstrapSession = {
-        id: runtimeSession.id,
-        claudeSessionId,
-        status: runtimeSession.status === "crashed" ? "crashed" : runtimeSession.status === "exited" ? "exited" : "running",
-        command: command.display,
-        cwd: repoRoot,
-        logPath: BOOTSTRAP_LOG_PATH,
-        startedAt: runtimeSession.startedAt,
-        updatedAt: timestamp,
-        lastOutputAt: runtimeSession.lastOutputAt,
-        exitCode: runtimeSession.exitCode
-      };
-      await persistHarnessBootstrapSession(deps.fs, repoRoot, session);
-
       const prompt = buildHarnessBootstrapPrompt(repoRoot);
-      await submitTerminalInput(deps.runtime, runtimeSession.id, prompt);
+      await submitTerminalInput(deps.runtime, session.id, prompt);
       const nextStatus = await getHarnessBootstrapStatus(deps, repoRoot, now);
-
       return {
         status: {
           ...nextStatus,
@@ -468,6 +533,75 @@ function dedupeHarnessChanges(changedFiles: HarnessPlannedChange[]): HarnessPlan
   return changes;
 }
 
+async function launchHarnessBootstrapSession(
+  deps: HarnessServiceDeps,
+  repoRoot: string,
+  now: () => string,
+  input: StartHarnessBootstrapRequest,
+  options: { forceFresh: boolean }
+): Promise<HarnessBootstrapSession> {
+  if (!deps.runtime || !deps.projectService) {
+    throw new VcmError({
+      code: "HARNESS_BOOTSTRAP_UNAVAILABLE",
+      message: "Harness bootstrap sessions are not available in this VCM runtime.",
+      statusCode: 501
+    });
+  }
+
+  const currentStatus = await getHarnessBootstrapStatus(deps, repoRoot, now);
+  if (!options.forceFresh && currentStatus.session?.status === "running") {
+    return currentStatus.session;
+  }
+  if (!currentStatus.canStart && !(options.forceFresh && currentStatus.session?.status === "running")) {
+    throw new VcmError({
+      code: "HARNESS_BOOTSTRAP_NOT_READY",
+      message: "Install the fixed VCM harness before starting harness bootstrap.",
+      statusCode: 409
+    });
+  }
+
+  const config = await deps.projectService.loadConfig(repoRoot);
+  const claudeSessionId = randomUUID();
+  const permissionMode = normalizeClaudePermissionMode(input.permissionMode);
+  const model = normalizeClaudeModel(input.model);
+  const effort = normalizeClaudeEffort(input.effort);
+  const command = buildClaudeStartCommand(config.claudeCommand, permissionMode, claudeSessionId, model, effort);
+  const logPath = path.join(repoRoot, BOOTSTRAP_LOG_PATH);
+  const runtimeSession = await deps.runtime.createSession({
+    taskSlug: BOOTSTRAP_TASK_SLUG,
+    role: BOOTSTRAP_RUNTIME_ROLE,
+    command: command.command,
+    args: command.args,
+    cwd: repoRoot,
+    env: {
+      VCM_API_URL: deps.apiUrl,
+      VCM_TASK_REPO_ROOT: repoRoot,
+      VCM_HARNESS_BOOTSTRAP: "1",
+      VCM_SESSION_ID: claudeSessionId
+    },
+    cols: input.cols,
+    rows: input.rows,
+    logPath
+  });
+  const session: HarnessBootstrapSession = {
+    id: runtimeSession.id,
+    claudeSessionId,
+    status: runtimeSession.status === "crashed" ? "crashed" : runtimeSession.status === "exited" ? "exited" : "running",
+    command: command.display,
+    permissionMode,
+    model,
+    effort,
+    cwd: repoRoot,
+    logPath: BOOTSTRAP_LOG_PATH,
+    startedAt: runtimeSession.startedAt,
+    updatedAt: now(),
+    lastOutputAt: runtimeSession.lastOutputAt,
+    exitCode: runtimeSession.exitCode
+  };
+  await persistHarnessBootstrapSession(deps.fs, repoRoot, session);
+  return session;
+}
+
 function normalizeHarnessGitPath(value: string): string {
   if (!value || value.includes("\0") || path.posix.isAbsolute(value)) {
     throw new VcmError({
@@ -492,6 +626,121 @@ function normalizeHarnessGitPath(value: string): string {
 
 function shortCommit(commit: string): string {
   return commit.slice(0, 7);
+}
+
+async function readHarnessFileContent(
+  fs: FileSystemAdapter,
+  repoRoot: string,
+  filePath: string
+): Promise<HarnessFileContent> {
+  const definition = getHarnessFileDefinition(filePath);
+  const absolutePath = resolveHarnessPath(repoRoot, definition.path);
+  const exists = await fs.pathExists(absolutePath);
+  const content = exists ? await fs.readText(absolutePath) : "";
+  const editable = isProjectEditableHarnessFile(definition);
+  return {
+    path: definition.path,
+    kind: definition.kind,
+    title: definition.title,
+    content,
+    editable,
+    readonlyReason: editable ? undefined : getReadonlyHarnessReason(definition)
+  };
+}
+
+function getHarnessFileDefinition(filePath: string): HarnessFileDefinition {
+  const normalizedPath = normalizeHarnessFilePath(filePath);
+  const definition = HARNESS_FILES.find((file) => file.path === normalizedPath) ?? getSpecialHarnessFileDefinition(normalizedPath);
+  if (!definition) {
+    throw new VcmError({
+      code: "HARNESS_FILE_UNKNOWN",
+      message: "This path is not a known VCM harness file.",
+      statusCode: 404,
+      hint: normalizedPath
+    });
+  }
+  return definition;
+}
+
+function getSpecialHarnessFileDefinition(filePath: string): HarnessFileDefinition | undefined {
+  if (filePath !== CLAUDE_SETTINGS_PATH) {
+    return undefined;
+  }
+  return {
+    kind: "claude-settings",
+    path: CLAUDE_SETTINGS_PATH,
+    title: "Claude Code Settings",
+    ownership: "raw-file",
+    renderRules: () => ""
+  };
+}
+
+function normalizeHarnessFilePath(filePath: string): string {
+  if (!filePath || filePath.includes("\0") || path.posix.isAbsolute(filePath)) {
+    throw new VcmError({
+      code: "HARNESS_FILE_PATH_INVALID",
+      message: "Harness file path is invalid.",
+      statusCode: 400,
+      hint: filePath
+    });
+  }
+
+  const normalized = path.posix.normalize(filePath).replace(/^\.\//, "");
+  if (normalized === "." || normalized.startsWith("../")) {
+    throw new VcmError({
+      code: "HARNESS_FILE_PATH_INVALID",
+      message: "Harness file path must stay inside the repository.",
+      statusCode: 400,
+      hint: filePath
+    });
+  }
+  return normalized;
+}
+
+function isProjectEditableHarnessFile(definition: HarnessFileDefinition): boolean {
+  return definition.ownership !== "whole-file" && definition.ownership !== "raw-file";
+}
+
+function getReadonlyHarnessReason(definition: HarnessFileDefinition): string {
+  if (definition.path === CLAUDE_SETTINGS_PATH) {
+    return "Claude Code hooks are generated by VCM fixed harness install.";
+  }
+  if (definition.ownership === "whole-file" || definition.ownership === "raw-file") {
+    return "This file is VCM-owned whole-file template content. Use fixed harness update instead.";
+  }
+  return "This harness file is not editable from Harness Studio.";
+}
+
+function assertManagedBlockUnchanged(
+  definition: HarnessFileDefinition,
+  currentContent: string,
+  nextContent: string
+): void {
+  const currentBlock = extractManagedBlock(definition, currentContent);
+  const nextBlock = extractManagedBlock(definition, nextContent);
+  if (currentBlock && nextBlock !== currentBlock) {
+    throw new VcmError({
+      code: "HARNESS_MANAGED_BLOCK_PROTECTED",
+      message: "VCM fixed managed blocks cannot be edited from Harness Studio.",
+      statusCode: 409,
+      hint: "Edit project-specific content outside the VCM:BEGIN / VCM:END block, or use fixed harness update."
+    });
+  }
+  if (!currentBlock && nextBlock) {
+    throw new VcmError({
+      code: "HARNESS_MANAGED_BLOCK_PROTECTED",
+      message: "VCM fixed managed blocks must be installed by VCM.",
+      statusCode: 409,
+      hint: "Use fixed harness update instead of adding a VCM managed block manually."
+    });
+  }
+}
+
+function extractManagedBlock(definition: HarnessFileDefinition, content: string): string | undefined {
+  if (definition.ownership === "whole-file" || definition.ownership === "raw-file") {
+    return undefined;
+  }
+  return content.match(getManagedBlockPattern(definition))?.[0];
 }
 
 async function analyzeHarnessFiles(fs: FileSystemAdapter, repoRoot: string): Promise<HarnessFileAnalysis[]> {
@@ -651,6 +900,7 @@ async function removeLegacyCodexHarnessPaths(fs: FileSystemAdapter, repoRoot: st
 }
 
 function renderHarnessStatus(
+  harnessRevision: number,
   analyses: HarnessFileAnalysis[],
   legacyChanges: HarnessPlannedChange[] = []
 ): HarnessStatusReport {
@@ -678,6 +928,7 @@ function renderHarnessStatus(
 
   return {
     version: VCM_HARNESS_VERSION,
+    harnessRevision,
     initialized,
     files,
     needsApply: plannedChanges.length > 0,
@@ -686,6 +937,10 @@ function renderHarnessStatus(
       ? ["Review and commit VCM Harness changes before starting long-running work."]
       : []
   };
+}
+
+async function readHarnessRevisionValue(fs: FileSystemAdapter, repoRoot: string): Promise<number> {
+  return (await readHarnessRevisionState(fs, repoRoot)).revision;
 }
 
 function renderManagedBlock(definition: HarnessFileDefinition, rules: string): string {
@@ -1141,6 +1396,9 @@ async function getCurrentHarnessBootstrapSession(
       claudeSessionId: persisted?.claudeSessionId ?? runtimeSession.id,
       status: runtimeSession.status === "crashed" ? "crashed" : runtimeSession.status === "exited" ? "exited" : "running",
       command: persisted?.command ?? "claude",
+      permissionMode: persisted?.permissionMode,
+      model: persisted?.model,
+      effort: persisted?.effort,
       cwd: persisted?.cwd ?? repoRoot,
       logPath: persisted?.logPath ?? BOOTSTRAP_LOG_PATH,
       startedAt: runtimeSession.startedAt,
@@ -1190,6 +1448,9 @@ async function loadPersistedHarnessBootstrapSession(
     claudeSessionId: payload.claudeSessionId,
     status,
     command: payload.command,
+    permissionMode: normalizeClaudePermissionMode(payload.permissionMode),
+    model: normalizeClaudeModel(payload.model),
+    effort: normalizeClaudeEffort(payload.effort),
     cwd: payload.cwd,
     logPath: payload.logPath,
     startedAt: typeof payload.startedAt === "string" ? payload.startedAt : undefined,
@@ -1259,17 +1520,65 @@ function bootstrapWarnings(
 function buildClaudeStartCommand(
   command = "claude",
   permissionMode: ClaudePermissionMode = "default",
-  claudeSessionId: string
+  claudeSessionId: string,
+  model: SessionModel = "default",
+  effort: SessionEffort = "default"
 ): { command: string; args: string[]; display: string } {
-  const args = ["--session-id", claudeSessionId];
+  const args = ["--session-id", claudeSessionId, "--model", model];
+  if (effort === "ultracode") {
+    args.push("--settings", JSON.stringify({ ultracode: true }));
+  } else if (effort !== "default") {
+    args.push("--effort", effort);
+  }
   if (permissionMode === "bypassPermissions") {
     args.push("--permission-mode", "bypassPermissions");
   }
   return {
     command,
     args,
-    display: `${command} ${args.join(" ")}`
+    display: [command, ...args].map(formatDisplayArg).join(" ")
   };
+}
+
+function formatDisplayArg(value: string): string {
+  if (/^[A-Za-z0-9_./:=@+-]+$/.test(value)) {
+    return value;
+  }
+  return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
+function normalizeClaudePermissionMode(value: unknown): ClaudePermissionMode {
+  return value === "bypassPermissions" || value === "dangerously-skip-permissions"
+    ? "bypassPermissions"
+    : "default";
+}
+
+function normalizeClaudeModel(value: unknown): ClaudeModel {
+  if (
+    value === "best"
+    || value === "fable"
+    || value === "opus"
+    || value === "opus[1m]"
+    || value === "claude-opus-4-8"
+    || value === "claude-opus-4-8[1m]"
+  ) {
+    return value;
+  }
+  return "default";
+}
+
+function normalizeClaudeEffort(value: unknown): SessionEffort {
+  if (
+    value === "low"
+    || value === "medium"
+    || value === "high"
+    || value === "xhigh"
+    || value === "max"
+    || value === "ultracode"
+  ) {
+    return value;
+  }
+  return "default";
 }
 
 function buildHarnessBootstrapPrompt(repoRoot: string): string {

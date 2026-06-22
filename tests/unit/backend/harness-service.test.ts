@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import type { FileSystemAdapter } from "../../../src/backend/adapters/filesystem.js";
+import type { CreateTerminalSessionInput, TerminalRuntime, TerminalSession } from "../../../src/backend/runtime/terminal-runtime.js";
 import { createHarnessService } from "../../../src/backend/services/harness-service.js";
 
 describe("createHarnessService", () => {
@@ -11,17 +12,17 @@ describe("createHarnessService", () => {
     expect(status.needsApply).toBe(true);
     // B1: a fresh repo with every harness file missing is not yet initialized.
     expect(status.initialized).toBe(false);
-    expect(status.plannedChanges).toHaveLength(16);
-    expect(status.plannedChanges.map((change) => change.action)).toEqual(Array(16).fill("create"));
+    expect(status.plannedChanges).toHaveLength(17);
+    expect(status.plannedChanges.map((change) => change.action)).toEqual(Array(17).fill("create"));
 
     const result = await service.applyHarness("/repo");
-    expect(result.changedFiles).toHaveLength(16);
+    expect(result.changedFiles).toHaveLength(17);
 
     const nextStatus = await service.getHarnessStatus("/repo");
     expect(nextStatus.needsApply).toBe(false);
     // B2: once the harness is applied, VCM markers exist -> initialized.
     expect(nextStatus.initialized).toBe(true);
-    expect(nextStatus.files.map((file) => file.action)).toEqual(Array(16).fill("ok"));
+    expect(nextStatus.files.map((file) => file.action)).toEqual(Array(17).fill("ok"));
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("## VCM Start Here");
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("## VCM Task Flow");
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("## VCM Worktree Policy");
@@ -68,6 +69,11 @@ describe("createHarnessService", () => {
     expect(translatorAgents).toContain("follow the VCM chunk manifest");
     expect(translatorAgents).toContain("Do not delegate translation to another CLI, package, API, service, browser, or");
     expect(translatorAgents).toContain("write diagnostics to the assigned report path");
+    const harnessEngineerAgent = await fs.readText("/repo/.claude/agents/harness-engineer.md");
+    expect(harnessEngineerAgent).toContain("name: harness-engineer");
+    expect(harnessEngineerAgent).toContain("You are VCM `harness-engineer`");
+    expect(harnessEngineerAgent).toContain("Propose harness changes as reviewable diffs");
+    expect(harnessEngineerAgent).toContain("CodingForMoney/VibeCodingMaster");
     expect(await fs.readText("/repo/.ai/tools/request-gate-review")).toContain("Request a VCM-managed Gate Review Gate");
     expect(await fs.readText("/repo/.claude/settings.json")).toContain("UserPromptSubmit");
     expect(await fs.readText("/repo/.claude/settings.json")).toContain("Stop");
@@ -245,6 +251,52 @@ describe("createHarnessService", () => {
     expect(content).toContain("## VCM Start Here");
   });
 
+  it("lets Harness Studio edit project-owned content outside managed blocks", async () => {
+    const fs = createMemoryFs();
+    const service = createHarnessService({ fs });
+    await service.applyHarness("/repo");
+    expect((await service.getHarnessStatus("/repo")).harnessRevision).toBe(1);
+
+    const file = await service.getHarnessFileContent("/repo", "CLAUDE.md");
+    expect(file.editable).toBe(true);
+
+    const result = await service.updateHarnessFileContent(
+      "/repo",
+      "CLAUDE.md",
+      `# Project Harness Notes\n\nKeep generated code small.\n\n${file.content}`
+    );
+
+    expect(result.file.content).toContain("Keep generated code small.");
+    expect(result.status.harnessRevision).toBe(2);
+    expect(result.status.needsApply).toBe(false);
+    await expect(fs.readText("/repo/CLAUDE.md")).resolves.toContain("Keep generated code small.");
+  });
+
+  it("protects VCM-owned harness content from Harness Studio edits", async () => {
+    const fs = createMemoryFs();
+    const service = createHarnessService({ fs });
+    await service.applyHarness("/repo");
+
+    const claudeFile = await service.getHarnessFileContent("/repo", "CLAUDE.md");
+    await expect(service.updateHarnessFileContent(
+      "/repo",
+      "CLAUDE.md",
+      claudeFile.content.replace("## VCM Start Here", "## Changed")
+    )).rejects.toMatchObject({
+      code: "HARNESS_MANAGED_BLOCK_PROTECTED"
+    });
+
+    const skillFile = await service.getHarnessFileContent("/repo", ".claude/skills/vcm-route-message/SKILL.md");
+    expect(skillFile.editable).toBe(false);
+    await expect(service.updateHarnessFileContent(
+      "/repo",
+      ".claude/skills/vcm-route-message/SKILL.md",
+      `${skillFile.content}\nExtra line.\n`
+    )).rejects.toMatchObject({
+      code: "HARNESS_FILE_READONLY"
+    });
+  });
+
   it("commits provided harness files and rebases the task worktree onto the new base commit", async () => {
     const fs = createMemoryFs();
     const calls: string[] = [];
@@ -352,7 +404,110 @@ describe("createHarnessService", () => {
       code: "HARNESS_TASK_DIRTY"
     });
   });
+
+  it("starts bootstrap Claude Code before sending the bootstrap prompt", async () => {
+    const fs = createMemoryFs();
+    const runtimeInputs: CreateTerminalSessionInput[] = [];
+    const writes: string[] = [];
+    const service = createHarnessService({
+      fs,
+      runtime: createFakeRuntime(runtimeInputs, writes),
+      projectService: {
+        async loadConfig() {
+          return {
+            version: 1,
+            repoRoot: "/repo",
+            stateRoot: ".ai/vcm",
+            claudeCommand: "claude"
+          };
+        }
+      } as never
+    });
+    await service.applyHarness("/repo");
+    await fs.writeText("/repo/.ai/vcm-harness-manifest.json", "{}\n");
+    await fs.writeText("/repo/.ai/tools/generate-module-index", "#!/usr/bin/env python3\n");
+    await fs.writeText("/repo/.ai/tools/generate-public-surface", "#!/usr/bin/env python3\n");
+
+    const started = await service.startHarnessBootstrap("/repo", {
+      permissionMode: "bypassPermissions",
+      model: "claude-opus-4-8[1m]",
+      effort: "high"
+    });
+
+    expect(started.session.status).toBe("running");
+    expect(started.session.permissionMode).toBe("bypassPermissions");
+    expect(started.session.model).toBe("claude-opus-4-8[1m]");
+    expect(started.session.effort).toBe("high");
+    expect(runtimeInputs[0]?.args).toEqual([
+      "--session-id",
+      started.session.claudeSessionId,
+      "--model",
+      "claude-opus-4-8[1m]",
+      "--effort",
+      "high",
+      "--permission-mode",
+      "bypassPermissions"
+    ]);
+    expect(writes).toEqual([]);
+
+    const run = await service.runHarnessBootstrap("/repo");
+    expect(run.prompt).toContain("Use the vcm-harness-bootstrap skill");
+    expect(writes[0]).toContain("Use the vcm-harness-bootstrap skill");
+    expect(writes[1]).toBe("\r");
+  });
 });
+
+function createFakeRuntime(inputs: CreateTerminalSessionInput[], writes: string[]): TerminalRuntime {
+  const sessions = new Map<string, TerminalSession>();
+  return {
+    async createSession(input) {
+      inputs.push(input);
+      const session: TerminalSession = {
+        id: `bootstrap_${inputs.length}`,
+        taskSlug: input.taskSlug,
+        role: input.role,
+        status: "running",
+        startedAt: "2026-06-22T00:00:00.000Z",
+        exitCode: null
+      };
+      sessions.set(session.id, session);
+      return session;
+    },
+    getSession(sessionId) {
+      return sessions.get(sessionId);
+    },
+    getSessionByRole(taskSlug, role) {
+      return [...sessions.values()].find((session) => session.taskSlug === taskSlug && session.role === role);
+    },
+    listSessions(taskSlug) {
+      return [...sessions.values()].filter((session) => !taskSlug || session.taskSlug === taskSlug);
+    },
+    write(_sessionId, data) {
+      writes.push(data);
+    },
+    resize() {},
+    async stop(sessionId) {
+      const session = sessions.get(sessionId);
+      if (session) {
+        sessions.set(sessionId, {
+          ...session,
+          status: "exited",
+          exitCode: 0
+        });
+      }
+    },
+    async restart(sessionId) {
+      const session = sessions.get(sessionId);
+      if (!session) {
+        throw new Error("missing session");
+      }
+      return session;
+    },
+    subscribe() {
+      return () => {};
+    }
+  };
+}
 
 function createMemoryFs(): FileSystemAdapter {
   const files = new Map<string, string>();

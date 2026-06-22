@@ -7,6 +7,7 @@ import {
   type SessionEffort,
   type SessionModel
 } from "../../shared/types/session.js";
+import { StatusBadge } from "./status-badge.js";
 
 export interface SessionToolbarProps {
   role: RoleName;
@@ -22,6 +23,7 @@ export interface SessionToolbarProps {
   onResume(): void;
   onStop(): void;
   onRestart(): void;
+  onNotifyHarnessUpdated?(): void;
 }
 
 export function SessionToolbar({
@@ -37,11 +39,13 @@ export function SessionToolbar({
   onStart,
   onResume,
   onStop,
-  onRestart
+  onRestart,
+  onNotifyHarnessUpdated
 }: SessionToolbarProps) {
   const isRunning = session?.status === "running";
   const canResume = Boolean(session?.claudeSessionId && !isRunning);
   const canStart = !isRunning && !session?.claudeSessionId;
+  const showHarnessOutdated = Boolean(session?.harnessOutdated);
 
   return (
     <div className="session-controls">
@@ -104,6 +108,24 @@ export function SessionToolbar({
           Stop
         </button>
       </div>
+      {showHarnessOutdated ? (
+        <div className="session-harness-notice">
+          <StatusBadge status="outdated" />
+          <span>
+            Harness updated
+            {session?.harnessRevision !== undefined && session.harnessCurrentRevision !== undefined
+              ? ` (${session.harnessRevision} -> ${session.harnessCurrentRevision})`
+              : ""}
+          </span>
+          <button
+            type="button"
+            disabled={busy || !isRunning || !onNotifyHarnessUpdated}
+            onClick={onNotifyHarnessUpdated}
+          >
+            Notify role
+          </button>
+        </div>
+      ) : null}
     </div>
   );
 }

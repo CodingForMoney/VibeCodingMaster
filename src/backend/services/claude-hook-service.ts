@@ -4,7 +4,7 @@ import type {
   ClaudeHookResult,
   ClaudePermissionRequestHookResult
 } from "../../shared/types/claude-hook.js";
-import { isGateReviewerRoleName, isTranslatorToolRoleName, isVcmRoleName } from "../../shared/constants.js";
+import { isGateReviewerRoleName, isHarnessEngineerToolRoleName, isTranslatorToolRoleName, isVcmRoleName } from "../../shared/constants.js";
 import { VcmError } from "../errors.js";
 import type { GatewayService } from "../gateway/gateway-service.js";
 import type { TerminalRuntime } from "../runtime/terminal-runtime.js";
@@ -87,6 +87,18 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
     return { project };
   }
 
+  async function getProjectToolHookContext(toolLabel: string) {
+    const project = await deps.projectService.getCurrentProject();
+    if (!project) {
+      throw new VcmError({
+        code: "PROJECT_NOT_CONNECTED",
+        message: `Connect a repository before accepting ${toolLabel} hooks.`,
+        statusCode: 409
+      });
+    }
+    return { project };
+  }
+
   async function processTranslatorHook(input: ClaudeHookRequest): Promise<ClaudeHookResult> {
     const eventName = parseHookEvent(input.event.hook_event_name);
     const context = await getTranslatorHookContext();
@@ -97,6 +109,25 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
       cwd: stringOrUndefined(input.event.cwd)
     });
     await deps.translationWorkerService?.handleTranslatorHook(context.project.repoRoot, eventName, input.taskSlug);
+    return {
+      ok: true,
+      eventName,
+      taskSlug: input.taskSlug,
+      role: input.role,
+      sessionUpdated: Boolean(session),
+      dispatchedCount: 0
+    };
+  }
+
+  async function processHarnessEngineerHook(input: ClaudeHookRequest): Promise<ClaudeHookResult> {
+    const eventName = parseHookEvent(input.event.hook_event_name);
+    const context = await getProjectToolHookContext("Harness Engineer");
+    const session = await deps.sessionService.recordProjectHarnessEngineerHookEvent(context.project.repoRoot, {
+      eventName,
+      sessionId: stringOrUndefined(input.event.session_id),
+      transcriptPath: stringOrUndefined(input.event.transcript_path),
+      cwd: stringOrUndefined(input.event.cwd)
+    });
     return {
       ok: true,
       eventName,
@@ -426,7 +457,7 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
 
   async function handlePermissionRequestHook(input: ClaudeHookRequest): Promise<ClaudePermissionRequestHookResult | undefined> {
     if (!isVcmRoleName(input.role)) {
-      if (isTranslatorToolRoleName(input.role)) {
+      if (isTranslatorToolRoleName(input.role) || isHarnessEngineerToolRoleName(input.role)) {
         const preferences = await deps.appSettings.getPreferences();
         if (preferences.permissionRequestMode !== "allowAll") {
           return undefined;
@@ -476,6 +507,9 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
       if (isTranslatorToolRoleName(input.role)) {
         return processTranslatorHook(input);
       }
+      if (isHarnessEngineerToolRoleName(input.role)) {
+        return processHarnessEngineerHook(input);
+      }
       const eventName = parseHookEvent(input.event.hook_event_name);
       if (eventName === "UserPromptSubmit") {
         return handleUserPromptSubmitHook(input);
@@ -493,6 +527,9 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
     handleStopHook(input) {
       if (isTranslatorToolRoleName(input.role)) {
         return processTranslatorHook(input);
+      }
+      if (isHarnessEngineerToolRoleName(input.role)) {
+        return processHarnessEngineerHook(input);
       }
       return processStopHook(input, { allowBlock: true });
     },

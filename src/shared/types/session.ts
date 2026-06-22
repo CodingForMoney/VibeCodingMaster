@@ -118,6 +118,10 @@ export interface RoleSessionRecord {
   lastTurnEndedAt?: string;
   lastHookEventAt?: string;
   lastCompactAt?: string;
+  harnessRevision?: number;
+  harnessCurrentRevision?: number;
+  harnessOutdated?: boolean;
+  lastHarnessNotifyAt?: string;
   activeTaskSlug?: string;
   activeTaskRepoRoot?: string;
   exitCode?: number | null;

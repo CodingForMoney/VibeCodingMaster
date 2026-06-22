@@ -6,12 +6,14 @@ import type {
 } from "../../shared/types/translation.js";
 import { VcmError } from "../errors.js";
 import type { ProjectService } from "../services/project-service.js";
+import type { SessionService } from "../services/session-service.js";
 import { getTaskRuntimeRepoRoot, type TaskService } from "../services/task-service.js";
 import type { TranslationService } from "../services/translation-service.js";
 
 export interface TranslationRouteDeps {
   projectService: ProjectService;
   taskService: TaskService;
+  sessionService: Pick<SessionService, "notifyProjectTranslatorHarnessUpdated">;
   translationService: TranslationService;
 }
 
@@ -86,6 +88,11 @@ export function registerTranslationRoutes(app: FastifyInstance, deps: Translatio
     await requireCurrentProject(deps.projectService);
     await deps.translationService.stopSession(request.params.sessionId);
     return { ok: true };
+  });
+
+  app.post("/api/projects/translation/session/notify-harness", async () => {
+    const project = await requireCurrentProject(deps.projectService);
+    return deps.sessionService.notifyProjectTranslatorHarnessUpdated(project.repoRoot);
   });
 
   app.post<{ Params: { sessionId: string; translationId: string } }>(

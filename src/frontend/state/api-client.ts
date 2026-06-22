@@ -13,9 +13,14 @@ import type {
   CommitAndRebaseHarnessTaskResult,
   HarnessApplyResult,
   HarnessBootstrapStatusReport,
+  HarnessFileContent,
+  RestartHarnessBootstrapRequest,
+  RunHarnessBootstrapResult,
   HarnessStatusReport,
   StartHarnessBootstrapRequest,
-  StartHarnessBootstrapResult
+  StartHarnessBootstrapResult,
+  UpdateHarnessFileContentRequest,
+  UpdateHarnessFileContentResult
 } from "../../shared/types/harness.js";
 import type {
   GateReviewExceptionRequest,
@@ -108,6 +113,17 @@ export const apiClient = {
       method: "POST"
     });
   },
+  getHarnessFileContent(filePath: string) {
+    const params = new URLSearchParams({ path: filePath });
+    return request<HarnessFileContent>(`/api/projects/harness/file?${params.toString()}`);
+  },
+  updateHarnessFileContent(filePath: string, input: UpdateHarnessFileContentRequest) {
+    const params = new URLSearchParams({ path: filePath });
+    return request<UpdateHarnessFileContentResult>(`/api/projects/harness/file?${params.toString()}`, {
+      method: "PUT",
+      body: JSON.stringify(input)
+    });
+  },
   commitAndRebaseHarnessTask(taskSlug: string, input: CommitAndRebaseHarnessTaskRequest) {
     return request<CommitAndRebaseHarnessTaskResult>(
       `/api/projects/harness/tasks/${encodeURIComponent(taskSlug)}/commit-and-rebase`,
@@ -124,6 +140,59 @@ export const apiClient = {
     return request<StartHarnessBootstrapResult>("/api/projects/harness/bootstrap/start", {
       method: "POST",
       body: JSON.stringify(input)
+    });
+  },
+  restartHarnessBootstrap(input: RestartHarnessBootstrapRequest = {}) {
+    return request<StartHarnessBootstrapResult>("/api/projects/harness/bootstrap/restart", {
+      method: "POST",
+      body: JSON.stringify(input)
+    });
+  },
+  stopHarnessBootstrap() {
+    return request<HarnessBootstrapStatusReport>("/api/projects/harness/bootstrap/stop", {
+      method: "POST"
+    });
+  },
+  runHarnessBootstrap() {
+    return request<RunHarnessBootstrapResult>("/api/projects/harness/bootstrap/run", {
+      method: "POST"
+    });
+  },
+  getHarnessEngineerSession() {
+    return request<RoleSessionRecord | null>("/api/projects/harness/engineer/session");
+  },
+  ensureHarnessEngineerSession(input: StartRoleSessionRequest = {}) {
+    return request<RoleSessionRecord>("/api/projects/harness/engineer/session/ensure", {
+      method: "POST",
+      body: JSON.stringify(input)
+    });
+  },
+  startHarnessEngineerSession(input: StartRoleSessionRequest = {}) {
+    return request<RoleSessionRecord>("/api/projects/harness/engineer/session/start", {
+      method: "POST",
+      body: JSON.stringify(input)
+    });
+  },
+  resumeHarnessEngineerSession(input: StartRoleSessionRequest = {}) {
+    return request<RoleSessionRecord>("/api/projects/harness/engineer/session/resume", {
+      method: "POST",
+      body: JSON.stringify(input)
+    });
+  },
+  restartHarnessEngineerSession(input: StartRoleSessionRequest = {}) {
+    return request<RoleSessionRecord>("/api/projects/harness/engineer/session/restart", {
+      method: "POST",
+      body: JSON.stringify(input)
+    });
+  },
+  stopHarnessEngineerSession() {
+    return request<RoleSessionRecord>("/api/projects/harness/engineer/session/stop", {
+      method: "POST"
+    });
+  },
+  notifyHarnessEngineerHarnessUpdated() {
+    return request<RoleSessionRecord>("/api/projects/harness/engineer/session/notify-harness", {
+      method: "POST"
     });
   },
   getTaskStatus(taskSlug: string) {
@@ -153,6 +222,11 @@ export const apiClient = {
     return request<RoleSessionRecord>(`/api/tasks/${encodeURIComponent(taskSlug)}/sessions/${role}/resume`, {
       method: "POST",
       body: JSON.stringify(input)
+    });
+  },
+  notifyRoleHarnessUpdated(taskSlug: string, role: RoleName) {
+    return request<RoleSessionRecord>(`/api/tasks/${encodeURIComponent(taskSlug)}/sessions/${role}/notify-harness`, {
+      method: "POST"
     });
   },
   dispatchRoleCommand(taskSlug: string, role: DispatchableRole) {
@@ -250,6 +324,11 @@ export const apiClient = {
   },
   stopTranslationSession(sessionId: string) {
     return request<{ ok: true }>(`/api/translation/sessions/${encodeURIComponent(sessionId)}/stop`, {
+      method: "POST"
+    });
+  },
+  notifyTranslatorHarnessUpdated() {
+    return request<RoleSessionRecord>("/api/projects/translation/session/notify-harness", {
       method: "POST"
     });
   },

@@ -1,4 +1,4 @@
-import type { CoreVcmRoleName, DispatchableRole, GateReviewerRoleName, RoleDefinition, RoleName, ToolRoleName, TranslatorToolRoleName, VcmRoleName } from "./types/role.js";
+import type { CoreVcmRoleName, DispatchableRole, GateReviewerRoleName, HarnessEngineerToolRoleName, RoleDefinition, RoleName, ToolRoleName, TranslatorToolRoleName, VcmRoleName } from "./types/role.js";
 
 export const DEFAULT_BACKEND_PORT = 4173;
 export const DEFAULT_FRONTEND_PORT = 5173;
@@ -49,8 +49,16 @@ export const TRANSLATOR_TOOL_ROLE_DEFINITION: RoleDefinition<TranslatorToolRoleN
   dispatchable: false
 };
 
+export const HARNESS_ENGINEER_TOOL_ROLE_DEFINITION: RoleDefinition<HarnessEngineerToolRoleName> = {
+  name: "harness-engineer",
+  label: "Harness Engineer",
+  commandAgent: "harness-engineer",
+  dispatchable: false
+};
+
 export const TOOL_ROLE_DEFINITIONS: readonly RoleDefinition<ToolRoleName>[] = [
-  TRANSLATOR_TOOL_ROLE_DEFINITION
+  TRANSLATOR_TOOL_ROLE_DEFINITION,
+  HARNESS_ENGINEER_TOOL_ROLE_DEFINITION
 ] as const;
 
 export const ROLE_DEFINITIONS: readonly RoleDefinition[] = [
@@ -84,6 +92,10 @@ export function isToolRoleName(value: string): value is ToolRoleName {
 
 export function isTranslatorToolRoleName(value: string): value is TranslatorToolRoleName {
   return value === TRANSLATOR_TOOL_ROLE_DEFINITION.name;
+}
+
+export function isHarnessEngineerToolRoleName(value: string): value is HarnessEngineerToolRoleName {
+  return value === HARNESS_ENGINEER_TOOL_ROLE_DEFINITION.name;
 }
 
 export function isDispatchableRole(value: string): value is DispatchableRole {

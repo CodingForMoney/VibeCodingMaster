@@ -31,6 +31,7 @@ import type { ClaudePermissionMode, RoleSessionRecord, SessionEffort, SessionMod
 import type { TaskRecord } from "../shared/types/task.js";
 import { CORE_VCM_ROLE_NAMES } from "../shared/constants.js";
 import { AppShell } from "./components/app-shell.js";
+import { HarnessStudioModal } from "./components/harness-studio-modal.js";
 import { TranslatorSessionModal } from "./components/translator-session-modal.js";
 import { FileTranslationModalHost } from "./components/translation-panel.js";
 import { selectActiveTask } from "./state/app-store.js";
@@ -70,10 +71,15 @@ export function App() {
   const [translationOutputMode, setTranslationOutputMode] = useState<TranslationOutputMode>(DEFAULT_TRANSLATION_OUTPUT_MODE);
   const [fileTranslationOpen, setFileTranslationOpen] = useState(false);
   const [translatorSessionOpen, setTranslatorSessionOpen] = useState(false);
+  const [harnessStudioOpen, setHarnessStudioOpen] = useState(false);
   const [translatorSession, setTranslatorSession] = useState<RoleSessionRecord | null>(null);
   const [translatorPermissionMode, setTranslatorPermissionMode] = useState<ClaudePermissionMode>("default");
   const [translatorModel, setTranslatorModel] = useState<SessionModel>("default");
   const [translatorEffort, setTranslatorEffort] = useState<SessionEffort>("medium");
+  const [harnessEngineerSession, setHarnessEngineerSession] = useState<RoleSessionRecord | null>(null);
+  const [harnessEngineerPermissionMode, setHarnessEngineerPermissionMode] = useState<ClaudePermissionMode>("default");
+  const [harnessEngineerModel, setHarnessEngineerModel] = useState<SessionModel>("default");
+  const [harnessEngineerEffort, setHarnessEngineerEffort] = useState<SessionEffort>("medium");
   const [launchTemplate, setLaunchTemplate] = useState<LaunchTemplate>(() => createDefaultLaunchTemplate());
   const [activeLaunchState, setActiveLaunchState] = useState<TaskWorkspaceLaunchState | null>(null);
   const [workspaceRefreshNonce, setWorkspaceRefreshNonce] = useState(0);
@@ -296,6 +302,28 @@ export function App() {
     return session;
   }
 
+  function syncHarnessEngineerLaunchOptions(session: RoleSessionRecord | null) {
+    if (!session) {
+      return;
+    }
+    setHarnessEngineerPermissionMode(session.permissionMode);
+    if (session.model) {
+      setHarnessEngineerModel(session.model);
+    }
+    if (session.effort) {
+      setHarnessEngineerEffort(session.effort);
+    }
+  }
+
+  async function refreshHarnessEngineerSession(options: { syncLaunchOptions?: boolean } = {}) {
+    const session = await apiClient.getHarnessEngineerSession();
+    setHarnessEngineerSession(session);
+    if (options.syncLaunchOptions) {
+      syncHarnessEngineerLaunchOptions(session);
+    }
+    return session;
+  }
+
   useEffect(() => {
     Promise.all([
       apiClient.getCurrentProject(),
@@ -402,6 +430,10 @@ export function App() {
     setTranslatorPermissionMode("default");
     setTranslatorModel("default");
     setTranslatorEffort("medium");
+    setHarnessEngineerSession(null);
+    setHarnessEngineerPermissionMode("default");
+    setHarnessEngineerModel("default");
+    setHarnessEngineerEffort("medium");
   }, [project?.repoRoot]);
 
   useEffect(() => {
@@ -412,6 +444,18 @@ export function App() {
     void refreshTranslatorSession({ syncLaunchOptions: true }).catch((caught: Error) => setError(caught.message));
     const interval = window.setInterval(() => {
       void refreshTranslatorSession().catch((caught: Error) => setError(caught.message));
+    }, 3000);
+    return () => window.clearInterval(interval);
+  }, [project?.repoRoot]);
+
+  useEffect(() => {
+    if (!project) {
+      return;
+    }
+
+    void refreshHarnessEngineerSession({ syncLaunchOptions: true }).catch((caught: Error) => setError(caught.message));
+    const interval = window.setInterval(() => {
+      void refreshHarnessEngineerSession().catch((caught: Error) => setError(caught.message));
     }, 3000);
     return () => window.clearInterval(interval);
   }, [project?.repoRoot]);
@@ -504,6 +548,7 @@ export function App() {
           translationTargetLanguage={translationTargetLanguage}
           translationOutputMode={translationOutputMode}
           translatorSession={translatorSession}
+          harnessEngineerSession={harnessEngineerSession}
           harnessStatus={harnessStatus}
           harnessBootstrapStatus={harnessBootstrapStatus}
           harnessApplyResult={harnessApplyResult}
@@ -564,10 +609,31 @@ export function App() {
             setProject(nextProject);
             await loadTasks();
           })}
-          onStartHarnessBootstrap={() => withBusy(async () => {
-            const result = await apiClient.startHarnessBootstrap();
+          onStartHarnessBootstrap={(input) => withBusy(async () => {
+            const result = await apiClient.startHarnessBootstrap({
+              cols: 120,
+              rows: 32,
+              ...input
+            });
             setHarnessBootstrapStatus(result.status);
           })}
+          onRestartHarnessBootstrap={(input) => withBusy(async () => {
+            const result = await apiClient.restartHarnessBootstrap({
+              cols: 120,
+              rows: 32,
+              ...input
+            });
+            setHarnessBootstrapStatus(result.status);
+          })}
+          onStopHarnessBootstrap={() => withBusy(async () => {
+            const status = await apiClient.stopHarnessBootstrap();
+            setHarnessBootstrapStatus(status);
+          })}
+          onRunHarnessBootstrap={() => withBusy(async () => {
+            const result = await apiClient.runHarnessBootstrap();
+            setHarnessBootstrapStatus(result.status);
+          })}
+          onOpenHarnessStudio={() => setHarnessStudioOpen(true)}
           onRefreshGateway={() => withBusy(async () => {
             await loadGatewayStatus();
           })}
@@ -880,7 +946,82 @@ export function App() {
         targetLanguage={translationTargetLanguage}
         onClose={() => setFileTranslationOpen(false)}
       />
-        <TranslatorSessionModal
+      <HarnessStudioModal
+        open={harnessStudioOpen}
+        busy={busy}
+        status={harnessStatus}
+        bootstrapStatus={harnessBootstrapStatus}
+        engineerSession={harnessEngineerSession}
+        permissionMode={harnessEngineerPermissionMode}
+        model={harnessEngineerModel}
+        effort={harnessEngineerEffort}
+        onClose={() => setHarnessStudioOpen(false)}
+        onRefresh={() => {
+          void withBusy(async () => {
+            await Promise.all([
+              loadHarnessStatus(),
+              loadHarnessBootstrapStatus(),
+              refreshHarnessEngineerSession()
+            ]);
+          });
+        }}
+        onPermissionModeChange={setHarnessEngineerPermissionMode}
+        onModelChange={setHarnessEngineerModel}
+        onEffortChange={setHarnessEngineerEffort}
+        onEngineerStart={() => {
+          void withBusy(async () => {
+            const session = await apiClient.startHarnessEngineerSession({
+              cols: 120,
+              rows: 32,
+              permissionMode: harnessEngineerPermissionMode,
+              model: harnessEngineerModel,
+              effort: harnessEngineerEffort
+            });
+            setHarnessEngineerSession(session);
+            syncHarnessEngineerLaunchOptions(session);
+          });
+        }}
+        onEngineerResume={() => {
+          void withBusy(async () => {
+            const session = await apiClient.resumeHarnessEngineerSession({
+              cols: 120,
+              rows: 32,
+              permissionMode: harnessEngineerPermissionMode,
+              model: harnessEngineerModel,
+              effort: harnessEngineerEffort
+            });
+            setHarnessEngineerSession(session);
+            syncHarnessEngineerLaunchOptions(session);
+          });
+        }}
+        onEngineerRestart={() => {
+          void withBusy(async () => {
+            const session = await apiClient.restartHarnessEngineerSession({
+              cols: 120,
+              rows: 32,
+              permissionMode: harnessEngineerPermissionMode,
+              model: harnessEngineerModel,
+              effort: harnessEngineerEffort
+            });
+            setHarnessEngineerSession(session);
+            syncHarnessEngineerLaunchOptions(session);
+          });
+        }}
+        onEngineerStop={() => {
+          void withBusy(async () => {
+            const session = await apiClient.stopHarnessEngineerSession();
+            setHarnessEngineerSession(session);
+          });
+        }}
+        onEngineerNotifyHarnessUpdated={() => {
+          void withBusy(async () => {
+            const session = await apiClient.notifyHarnessEngineerHarnessUpdated();
+            setHarnessEngineerSession(session);
+            syncHarnessEngineerLaunchOptions(session);
+          });
+        }}
+      />
+      <TranslatorSessionModal
         open={translatorSessionOpen}
         busy={busy}
         session={translatorSession}
@@ -934,6 +1075,13 @@ export function App() {
           void withBusy(async () => {
             const session = await apiClient.stopTranslatorSession();
             setTranslatorSession(session);
+          });
+        }}
+        onNotifyHarnessUpdated={() => {
+          void withBusy(async () => {
+            const session = await apiClient.notifyTranslatorHarnessUpdated();
+            setTranslatorSession(session);
+            syncTranslatorLaunchOptions(session);
           });
         }}
       />
