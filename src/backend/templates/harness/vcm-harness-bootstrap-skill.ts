@@ -49,7 +49,7 @@ This skill is an operating procedure. It does not replace the deterministic VCM 
 
 - Document the project-level module overview, module responsibilities, module relationships, dependency direction, and project-wide constraints.
 - Link to module-level \`ARCHITECTURE.md\` files when present.
-- Explain generated-context ownership, especially that \`.ai/generated/public-surface.json\` is the machine index for crate-external public APIs.
+- Explain generated-context ownership, especially that \`.ai/generated/public-surface.json\` is the machine index for public APIs, routes, and externally consumed surfaces.
 
 ### Module-Level \`ARCHITECTURE.md\`
 

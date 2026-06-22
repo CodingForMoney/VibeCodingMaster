@@ -101,10 +101,10 @@ Directory roots created by the installer:
 .ai/tools/vcm-bash-guard
 ```
 
-`generate-module-index` and `generate-public-surface` currently target Rust
-projects. Non-Rust repositories can still install the fixed harness, but
-generated context should be treated as unsupported until project-specific
-generators exist.
+`generate-module-index` and `generate-public-surface` support Rust/Cargo
+projects and npm workspace TypeScript/JavaScript projects. Other repository
+shapes can still install the fixed harness, but generated context should be
+treated as unsupported until project-specific generators exist.
 
 ## Runtime State
 

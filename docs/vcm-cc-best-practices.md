@@ -363,13 +363,12 @@ The current example has two generated artifacts:
 `module-index.json` helps agents find layers, modules, manifests, module docs,
 source files, test files, and workspace dependencies.
 
-`public-surface.json` indexes crate-external Rust public APIs. It is a machine
-index, not an architecture document.
+`public-surface.json` indexes project public APIs, routes, and externally
+consumed surfaces. It is a machine index, not an architecture document.
 
-Current generated-context support is Rust-only. The fixed installer provides
-Rust generator tools as the default baseline, but it does not generate trusted
-context by itself. Non-Rust projects must use project-specific generators before
-`.ai/generated/*` is considered reliable.
+Current generated-context support covers Rust/Cargo projects and npm workspace
+TypeScript/JavaScript projects. Other repository shapes must use
+project-specific generators before `.ai/generated/*` is considered reliable.
 
 There is no `test-map.json`. Rust unit tests live with source where appropriate;
 integration tests use Cargo's normal test layout. Test files are discoverable

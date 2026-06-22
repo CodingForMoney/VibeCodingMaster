@@ -22,7 +22,7 @@ export function renderRootClaudeHarnessRules(): string {
 - \`docs/TESTING.md\`: validation strategy, commands, validation levels, integration/E2E case definitions, final-validation cleanup, and known testing gaps; reviewer-owned.
 - \`docs/known-issues.md\`: durable known issues and accepted limitations; architect-owned.
 - \`.ai/generated/module-index.json\`: generated module index; use it to find layers, modules, manifests, module docs, source files, test files, and workspace dependencies.
-- \`.ai/generated/public-surface.json\`: generated crate-external public API index; use it to inspect module-to-module public interfaces and source evidence.
+- \`.ai/generated/public-surface.json\`: generated public surface index; use it to inspect module-to-module public APIs, routes, and source evidence.
 
 ## VCM Task Flow
 

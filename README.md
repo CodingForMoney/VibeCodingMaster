@@ -30,7 +30,7 @@ When Gate Review Gates are enabled for a task, or when a Gate Reviewer session a
 - Manual and automatic orchestration modes.
 - Two-stage VCM harness setup: deterministic fixed install plus AI-assisted bootstrap.
 - VCM-managed root rules, role agents, repo-local VCM skills, Claude Code hooks, generated-context tools, and PR template.
-- Rust generated context for module indexing and crate-external public surface indexing.
+- Generated context for Rust and npm workspace module indexing plus public surface indexing.
 - Translation panel powered by the long-lived Translator session.
 - Mobile Gateway through Tencent iLink Bot API / Weixin DM, for talking to PM and managing tasks from Weixin.
 - Durable task state, role session state, handoff artifacts, and message history.
@@ -497,7 +497,7 @@ docs/TESTING.md
 .ai/generated/public-surface.json
 ```
 
-The generated-context tools currently target Rust projects. Non-Rust repositories can still install the fixed harness, but generated context should be treated as unsupported until project-specific generators exist.
+The generated-context tools support Rust/Cargo projects and npm workspace TypeScript/JavaScript projects. Other repository shapes can still install the fixed harness, but generated context should be treated as unsupported until project-specific generators exist.
 
 After applying harness changes or completing bootstrap, VCM reports the exact files changed or checks completed and reminds the user to review and commit them before starting long-running work.
 

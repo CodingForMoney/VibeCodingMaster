@@ -1,7 +1,6 @@
 import path from "node:path";
 import { describe, expect, it } from "vitest";
 import type { FileSystemAdapter } from "../../../src/backend/adapters/filesystem.js";
-import { VcmError } from "../../../src/backend/errors.js";
 import type { TerminalRuntime } from "../../../src/backend/runtime/terminal-runtime.js";
 import { createMessageService } from "../../../src/backend/services/message-service.js";
 import type { SessionService } from "../../../src/backend/services/session-service.js";
@@ -234,13 +233,55 @@ describe("createMessageService", () => {
     await expect(harness.readRoute("project-manager-coder.md")).resolves.toBe("Still pending.");
   });
 
-  it("rejects direct non-PM role-to-role route files", async () => {
+  it("delivers route files regardless of message type", async () => {
+    const harness = createHarness(["coder"]);
+    await harness.service.updateOrchestrationState({
+      ...harness.base,
+      mode: "auto"
+    });
+    await harness.writeRoute("project-manager-coder.md", [
+      "---",
+      "type: blocked",
+      "---",
+      "This is a PM message that should still be delivered."
+    ].join("\n"));
+
+    const results = await harness.service.scanAndDispatchPendingRouteFiles(harness.base);
+
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatchObject({
+      delivered: true,
+      message: {
+        id: "msg_1",
+        fromRole: "project-manager",
+        toRole: "coder",
+        type: "blocked",
+        body: "This is a PM message that should still be delivered."
+      }
+    });
+  });
+
+  it("delivers peer route files without enforcing a PM-only policy", async () => {
     const harness = createHarness(["coder", "reviewer"]);
+    await harness.service.updateOrchestrationState({
+      ...harness.base,
+      mode: "auto"
+    });
     await harness.writeRoute("coder-reviewer.md", "Can you review this directly?");
 
-    await expect(harness.service.scanAndDispatchPendingRouteFiles(harness.base)).rejects.toMatchObject({
-      code: "MESSAGE_POLICY_DENIED"
-    } satisfies Partial<VcmError>);
+    const results = await harness.service.scanAndDispatchPendingRouteFiles(harness.base);
+
+    expect(results).toHaveLength(1);
+    expect(results[0]).toMatchObject({
+      delivered: true,
+      message: {
+        id: "msg_1",
+        fromRole: "coder",
+        toRole: "reviewer",
+        type: "question",
+        body: "Can you review this directly?"
+      }
+    });
   });
 });
 

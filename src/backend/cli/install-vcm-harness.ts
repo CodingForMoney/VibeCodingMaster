@@ -360,7 +360,7 @@ Installs only fixed VCM harness content.
 This deterministic installer handles VCM-owned managed blocks, VCM-owned whole
 files, VCM Claude settings hooks, generic long-running helper tools, and the
 harness manifest. It also creates blank durable project doc templates when
-missing and installs Rust generated-context generator tools. It does not copy
+missing and installs generated-context tools for Rust and npm workspace projects. It does not copy
 example project docs, generated context artifacts, module-level architecture
 docs, or task runtime handoff artifacts.`);
 }
