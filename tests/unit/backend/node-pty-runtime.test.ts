@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  appendTerminalReplay,
   buildPtyEnvironment,
   createTerminalLogWriter,
   tailTerminalReplay
@@ -55,6 +56,17 @@ describe("node-pty-runtime", () => {
       "recent line 1",
       "recent line 2"
     ].join("\n"), 28);
+
+    expect(replay).toBe([
+      "recent line 1",
+      "recent line 2"
+    ].join("\n"));
+  });
+
+  it("keeps in-memory terminal replay bounded to the recent tail", () => {
+    let replay = "";
+    replay = appendTerminalReplay(replay, "old line 1\nold line 2\n", 28);
+    replay = appendTerminalReplay(replay, "recent line 1\nrecent line 2", 28);
 
     expect(replay).toBe([
       "recent line 1",

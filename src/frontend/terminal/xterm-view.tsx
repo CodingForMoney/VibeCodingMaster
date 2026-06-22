@@ -77,6 +77,11 @@ export function XtermView({ sessionId, active = true, onEvent }: XtermViewProps)
     terminalRef.current = terminal;
     fitAddonRef.current = fitAddon;
 
+    const initialRect = containerRef.current.getBoundingClientRect();
+    if (initialRect.width >= MIN_VISIBLE_TERMINAL_WIDTH && initialRect.height >= MIN_VISIBLE_TERMINAL_HEIGHT) {
+      fitAddon.fit();
+    }
+
     const client = new TerminalClient(sessionId, {
       onOutput(data) {
         terminal.write(data);
@@ -90,6 +95,9 @@ export function XtermView({ sessionId, active = true, onEvent }: XtermViewProps)
       }
     });
     clientRef.current = client;
+    if (terminal.cols >= MIN_TERMINAL_COLS && terminal.rows >= MIN_TERMINAL_ROWS) {
+      client.resize(terminal.cols, terminal.rows);
+    }
     const dataDisposable = terminal.onData((data) => {
       client.sendInput(data);
     });
