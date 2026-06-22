@@ -48,6 +48,49 @@ describe("apiClient", () => {
     expect(paths).toEqual(["/workspace", "/repo"]);
   });
 
+  it("loads runtime diagnostics", async () => {
+    const fetchMock = mockFetch({
+      version: "0.3.6",
+      pid: 123,
+      cwd: "/workspace",
+      execPath: "/usr/bin/node",
+      nodeVersion: "v20.20.2",
+      platform: "linux",
+      arch: "x64",
+      uptimeSeconds: 12,
+      fdCount: 42,
+      openFilesLimit: { soft: "1024", hard: "1048576" },
+      runtimeSessions: { total: 0, running: 0 },
+      gateway: { polling: false },
+      translation: { sessions: 0, transcriptWatchers: 0, listeners: 0 }
+    });
+
+    const diagnostics = await apiClient.getRuntimeDiagnostics();
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/diagnostics/runtime");
+    expect(diagnostics.pid).toBe(123);
+  });
+
+  it("adds backend runtime info to API errors", async () => {
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
+      error: {
+        message: "boom",
+        runtime: {
+          version: "0.3.6",
+          pid: 123,
+          cwd: "/workspace"
+        }
+      }
+    }), {
+      headers: { "content-type": "application/json" },
+      status: 500
+    })));
+
+    await expect(apiClient.getCurrentProject()).rejects.toThrow(
+      "boom [backend 0.3.6 pid=123 cwd=/workspace]"
+    );
+  });
+
   it("pulls the connected repository with a bodyless POST", async () => {
     const fetchMock = mockFetch({
       branch: "main",
@@ -63,6 +106,32 @@ describe("apiClient", () => {
     expect(init?.method).toBe("POST");
     expect(init?.body).toBeUndefined();
     expect(new Headers(init?.headers).has("content-type")).toBe(false);
+  });
+
+  it("commits harness changes and rebases a task branch", async () => {
+    const fetchMock = mockFetch({
+      taskSlug: "demo-task",
+      branch: "feature/demo-task",
+      worktreePath: "/repo/.claude/worktrees/demo-task",
+      baseBranch: "main",
+      baseCommitBefore: "abc",
+      baseCommitAfter: "def",
+      committed: true,
+      rebased: true,
+      changedFiles: [],
+      message: "done"
+    });
+
+    await apiClient.commitAndRebaseHarnessTask("demo-task", {
+      changedFiles: [{ path: "CLAUDE.md", action: "update", reason: "updated" }]
+    });
+
+    const init = fetchMock.mock.calls[0]?.[1];
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/projects/harness/tasks/demo-task/commit-and-rebase");
+    expect(init?.method).toBe("POST");
+    expect(JSON.parse(String(init?.body))).toEqual({
+      changedFiles: [{ path: "CLAUDE.md", action: "update", reason: "updated" }]
+    });
   });
 
   it("marks all messages done with a bodyless POST", async () => {
@@ -119,59 +188,6 @@ describe("apiClient", () => {
     expect(preferences.flowPauseAlerts).toBe(false);
   });
 
-  it("sends translation API keys in the settings request body", async () => {
-    const fetchMock = mockFetch({
-      version: 1,
-      enabled: true,
-      providerType: "openai-compatible",
-      baseUrl: "https://api.example.com/v1",
-      apiKey: "sk-local-test",
-      model: "cheap-translator",
-      sourceLanguage: "auto",
-      targetLanguage: "zh-CN",
-      workingLanguage: "en",
-      inputMode: "review-before-send",
-      translateOutput: true,
-      translateUserInput: true,
-      contextEnabled: false,
-      preserveTechnicalTokens: true,
-      skipCjkText: true,
-      redactSecrets: true,
-      requestTimeoutMs: 120000,
-      temperature: 0.1
-    });
-
-    await apiClient.updateTranslationSettings({
-      enabled: true,
-      model: "cheap-translator",
-      apiKey: "sk-local-test"
-    });
-
-    const init = fetchMock.mock.calls[0]?.[1];
-    expect(init?.method).toBe("PUT");
-    expect(JSON.parse(String(init?.body))).toMatchObject({
-      enabled: true,
-      model: "cheap-translator",
-      apiKey: "sk-local-test"
-    });
-    expect(new Headers(init?.headers).get("content-type")).toBe("application/json");
-  });
-
-  it("loads translation prompt previews", async () => {
-    const fetchMock = mockFetch([{
-      key: "zh-to-en",
-      label: "zh-to-en",
-      defaultPrompt: "DEFAULT",
-      userPrompt: "USER",
-      customized: true
-    }]);
-
-    const prompts = await apiClient.getTranslationPrompts();
-
-    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/translation/prompts");
-    expect(prompts[0]?.userPrompt).toBe("USER");
-  });
-
   it("starts and polls translation sessions through HTTP APIs", async () => {
     const fetchMock = mockFetch({
       sessionId: "session-1",
@@ -200,6 +216,46 @@ describe("apiClient", () => {
     expect(fetchMock.mock.calls[1]?.[0]).toBe("/api/translation/sessions/session-1/failures/retry");
     expect(fetchMock.mock.calls[1]?.[1]?.method).toBe("POST");
     expect(fetchMock.mock.calls[1]?.[1]?.body).toBeUndefined();
+  });
+
+  it("browses translation source files with encoded query params", async () => {
+    const fetchMock = mockFetch({
+      currentPath: "docs/specs",
+      query: "white paper",
+      entries: [],
+      truncated: false
+    });
+
+    await apiClient.browseTranslationSourceFiles({
+      path: "docs/specs",
+      query: "white paper",
+      limit: 25
+    });
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/translation/source-files?path=docs%2Fspecs&query=white+paper&limit=25");
+  });
+
+  it("queues translation memory updates", async () => {
+    const fetchMock = mockFetch({
+      id: "queue-memory-update",
+      type: "memory-update",
+      status: "queued",
+      targetLanguage: "zh-CN",
+      jobId: "memory-update-1",
+      requestPath: ".ai/vcm/translations/runtime/memory-updates/memory-update-1/request.json"
+    });
+
+    await apiClient.createTranslationMemoryUpdate({
+      taskSlug: "demo-task",
+      targetLanguage: "zh-CN"
+    });
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/translation/memory-update");
+    expect(fetchMock.mock.calls[0]?.[1]?.method).toBe("POST");
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
+      taskSlug: "demo-task",
+      targetLanguage: "zh-CN"
+    });
   });
 
   it("calls gateway status and settings APIs", async () => {

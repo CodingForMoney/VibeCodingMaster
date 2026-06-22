@@ -30,18 +30,18 @@ describe("createTaskService", () => {
       handoffDir: ".ai/vcm/handoffs",
       worktreePath: path.join(repoRoot, ".claude/worktrees/demo-task")
     });
-    await expect(fileExists(path.join(task.worktreePath!, ".git"))).resolves.toBe(true);
-    await expect(fileExists(path.join(task.worktreePath!, ".ai/vcm/handoffs/architecture-plan.md"))).resolves.toBe(true);
-    await expect(fileExists(path.join(task.worktreePath!, ".ai/vcm/handoffs/final-acceptance.md"))).resolves.toBe(true);
-    await expect(fileExists(path.join(task.worktreePath!, ".ai/vcm/sessions"))).resolves.toBe(true);
-    await expect(fileExists(path.join(task.worktreePath!, ".ai/vcm/messages"))).resolves.toBe(true);
-    await expect(fileExists(path.join(task.worktreePath!, ".ai/vcm/orchestration"))).resolves.toBe(true);
-    await expect(fileExists(path.join(task.worktreePath!, ".ai/vcm/translation"))).resolves.toBe(true);
+    await expect(fileExists(path.join(task.worktreePath, ".git"))).resolves.toBe(true);
+    await expect(fileExists(path.join(task.worktreePath, ".ai/vcm/handoffs/architecture-plan.md"))).resolves.toBe(true);
+    await expect(fileExists(path.join(task.worktreePath, ".ai/vcm/handoffs/final-acceptance.md"))).resolves.toBe(true);
+    await expect(fileExists(path.join(task.worktreePath, ".ai/vcm/sessions"))).resolves.toBe(true);
+    await expect(fileExists(path.join(task.worktreePath, ".ai/vcm/messages"))).resolves.toBe(true);
+    await expect(fileExists(path.join(task.worktreePath, ".ai/vcm/orchestration"))).resolves.toBe(true);
+    await expect(fileExists(path.join(task.worktreePath, ".ai/vcm/translation"))).resolves.toBe(true);
     await expect(fileExists(path.join(repoRoot, ".ai/vcm/tasks/demo-task.json"))).resolves.toBe(false);
     await expect(fileExists(path.join(getAppProjectDataRoot(repoRoot), "tasks/demo-task.json"))).resolves.toBe(true);
-    await expect(readText(path.join(task.worktreePath!, ".ai/vcm/handoffs/role-commands/coder.md")))
+    await expect(readText(path.join(task.worktreePath, ".ai/vcm/handoffs/role-commands/coder.md")))
       .resolves.toContain(`Task repo root: ${task.worktreePath}`);
-    await expect(readText(path.join(task.worktreePath!, ".ai/vcm/handoffs/role-commands/coder.md")))
+    await expect(readText(path.join(task.worktreePath, ".ai/vcm/handoffs/role-commands/coder.md")))
       .resolves.toContain("Branch: feature/demo-task");
     await expect(readGit(repoRoot, ["status", "--porcelain"])).resolves.toBe("");
   });
@@ -56,10 +56,10 @@ describe("createTaskService", () => {
     expect(result.removedWorktreePath).toBe(task.worktreePath);
     expect(result.deletedBranch).toBe("feature/cleanup-task");
     expect(result.removedStatePaths).toContain(path.join(getAppProjectDataRoot(repoRoot), "tasks/cleanup-task.json"));
-    expect(result.removedStatePaths).toContain(path.join(task.worktreePath!, ".ai/vcm/sessions/cleanup-task.json"));
-    expect(result.removedStatePaths).toContain(path.join(task.worktreePath!, ".ai/vcm/handoffs"));
+    expect(result.removedStatePaths).toContain(path.join(task.worktreePath, ".ai/vcm/sessions/cleanup-task.json"));
+    expect(result.removedStatePaths).toContain(path.join(task.worktreePath, ".ai/vcm/handoffs"));
     expect(result.removedStatePaths).not.toContain(path.join(repoRoot, ".ai/vcm/sessions/cleanup-task.json"));
-    await expect(fileExists(task.worktreePath!)).resolves.toBe(false);
+    await expect(fileExists(task.worktreePath)).resolves.toBe(false);
     await expect(fileExists(path.join(repoRoot, ".ai/vcm/tasks/cleanup-task.json"))).resolves.toBe(false);
     await expect(fileExists(path.join(getAppProjectDataRoot(repoRoot), "tasks/cleanup-task.json"))).resolves.toBe(false);
     await expect(gitExitCode(repoRoot, ["show-ref", "--verify", "--quiet", "refs/heads/feature/cleanup-task"]))
@@ -70,36 +70,12 @@ describe("createTaskService", () => {
     const repoRoot = await createTempGitRepo(tempDirs);
     const service = createService(repoRoot);
     const task = await service.createTask(repoRoot, { taskSlug: "dirty-close-task" });
-    await fs.writeFile(path.join(task.worktreePath!, "pending.txt"), "uncommitted\n");
+    await fs.writeFile(path.join(task.worktreePath, "pending.txt"), "uncommitted\n");
 
     const result = await service.cleanupTask(repoRoot, "dirty-close-task");
 
     expect(result.deletedBranch).toBe("feature/dirty-close-task");
-    await expect(fileExists(task.worktreePath!)).resolves.toBe(false);
-  });
-
-  it("creates a task in the current repository when worktree creation is disabled", async () => {
-    const repoRoot = await createTempGitRepo(tempDirs);
-    const currentBranch = (await readGit(repoRoot, ["branch", "--show-current"])).trim();
-    const service = createService(repoRoot);
-
-    const task = await service.createTask(repoRoot, {
-      taskSlug: "inline-task",
-      createWorktree: false
-    });
-
-    expect(task).toMatchObject({
-      taskSlug: "inline-task",
-      repoRoot,
-      branch: currentBranch,
-      handoffDir: ".ai/vcm/handoffs"
-    });
-    expect(task.worktreePath).toBeUndefined();
-    await expect(fileExists(path.join(repoRoot, ".ai/vcm/handoffs/architecture-plan.md"))).resolves.toBe(true);
-    await expect(fileExists(path.join(repoRoot, ".ai/vcm/handoffs/final-acceptance.md"))).resolves.toBe(true);
-    await expect(fileExists(path.join(repoRoot, ".claude/worktrees/inline-task"))).resolves.toBe(false);
-    await expect(gitExitCode(repoRoot, ["show-ref", "--verify", "--quiet", "refs/heads/feature/inline-task"]))
-      .resolves.toBe(1);
+    await expect(fileExists(task.worktreePath)).resolves.toBe(false);
   });
 
   it("refuses task creation when .ai/vcm is not ignored", async () => {
@@ -130,35 +106,6 @@ describe("createTaskService", () => {
     });
   });
 
-  it("allows current-repository task creation when the base repository has uncommitted changes", async () => {
-    const repoRoot = await createTempGitRepo(tempDirs);
-    const service = createService(repoRoot);
-    await fs.writeFile(path.join(repoRoot, "pending.txt"), "not committed\n");
-
-    const task = await service.createTask(repoRoot, {
-      taskSlug: "dirty-inline-task",
-      createWorktree: false
-    });
-
-    expect(task.worktreePath).toBeUndefined();
-    await expect(fileExists(path.join(repoRoot, ".ai/vcm/handoffs/architecture-plan.md"))).resolves.toBe(true);
-  });
-
-  it("refuses a second active inline task because handoffs are scoped to the runtime repo", async () => {
-    const repoRoot = await createTempGitRepo(tempDirs);
-    const service = createService(repoRoot);
-    await service.createTask(repoRoot, {
-      taskSlug: "first-inline-task",
-      createWorktree: false
-    });
-
-    await expect(service.createTask(repoRoot, {
-      taskSlug: "second-inline-task",
-      createWorktree: false
-    })).rejects.toMatchObject({
-      code: "INLINE_TASK_EXISTS"
-    });
-  });
 });
 
 function createService(repoRoot: string) {

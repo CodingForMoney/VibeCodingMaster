@@ -1,0 +1,443 @@
+{
+  "schemaVersion": 1,
+  "manager": "vcm",
+  "harnessVersion": "0.3.0-fixed",
+  "installMode": "fixed",
+  "installedAt": "2026-06-13T14:23:22.455Z",
+  "updatedAt": "2026-06-22T06:36:00.945Z",
+  "runtimeRoots": [
+    ".ai/vcm/",
+    ".claude/worktrees/"
+  ],
+  "entries": [
+    {
+      "path": ".ai/vcm-harness-manifest.json",
+      "entryType": "file",
+      "category": "harness-manifest",
+      "ownership": "whole-file",
+      "source": "vcm-template",
+      "lifecycle": "long-term"
+    },
+    {
+      "path": "CLAUDE.md",
+      "entryType": "file",
+      "category": "root-rules",
+      "ownership": "managed-block",
+      "source": "vcm-template",
+      "lifecycle": "long-term",
+      "marker": {
+        "type": "html",
+        "begin": "<!-- VCM:BEGIN version=1 -->",
+        "end": "<!-- VCM:END -->"
+      },
+      "uninstall": {
+        "action": "remove-managed-block",
+        "requiresConfirmation": false
+      }
+    },
+    {
+      "path": ".gitignore",
+      "entryType": "file",
+      "category": "ignore-rules",
+      "ownership": "managed-block",
+      "source": "vcm-template",
+      "lifecycle": "long-term",
+      "marker": {
+        "type": "hash-comment",
+        "begin": "# VCM:BEGIN version=1",
+        "end": "# VCM:END"
+      },
+      "uninstall": {
+        "action": "remove-managed-block",
+        "requiresConfirmation": false
+      }
+    },
+    {
+      "path": ".claude/agents/project-manager.md",
+      "entryType": "file",
+      "category": "core-agent",
+      "ownership": "managed-block",
+      "source": "vcm-template",
+      "lifecycle": "long-term",
+      "marker": {
+        "type": "html",
+        "begin": "<!-- VCM:BEGIN version=1 -->",
+        "end": "<!-- VCM:END -->"
+      },
+      "uninstall": {
+        "action": "remove-managed-block",
+        "requiresConfirmation": false
+      }
+    },
+    {
+      "path": ".claude/agents/architect.md",
+      "entryType": "file",
+      "category": "core-agent",
+      "ownership": "managed-block",
+      "source": "vcm-template",
+      "lifecycle": "long-term",
+      "marker": {
+        "type": "html",
+        "begin": "<!-- VCM:BEGIN version=1 -->",
+        "end": "<!-- VCM:END -->"
+      },
+      "uninstall": {
+        "action": "remove-managed-block",
+        "requiresConfirmation": false
+      }
+    },
+    {
+      "path": ".claude/agents/coder.md",
+      "entryType": "file",
+      "category": "core-agent",
+      "ownership": "managed-block",
+      "source": "vcm-template",
+      "lifecycle": "long-term",
+      "marker": {
+        "type": "html",
+        "begin": "<!-- VCM:BEGIN version=1 -->",
+        "end": "<!-- VCM:END -->"
+      },
+      "uninstall": {
+        "action": "remove-managed-block",
+        "requiresConfirmation": false
+      }
+    },
+    {
+      "path": ".claude/agents/reviewer.md",
+      "entryType": "file",
+      "category": "core-agent",
+      "ownership": "managed-block",
+      "source": "vcm-template",
+      "lifecycle": "long-term",
+      "marker": {
+        "type": "html",
+        "begin": "<!-- VCM:BEGIN version=1 -->",
+        "end": "<!-- VCM:END -->"
+      },
+      "uninstall": {
+        "action": "remove-managed-block",
+        "requiresConfirmation": false
+      }
+    },
+    {
+      "path": ".github/pull_request_template.md",
+      "entryType": "file",
+      "category": "pull-request-template",
+      "ownership": "managed-block",
+      "source": "vcm-template",
+      "lifecycle": "long-term",
+      "marker": {
+        "type": "html",
+        "begin": "<!-- VCM:BEGIN version=1 -->",
+        "end": "<!-- VCM:END -->"
+      },
+      "uninstall": {
+        "action": "remove-managed-block",
+        "requiresConfirmation": false
+      }
+    },
+    {
+      "path": ".claude/agents/gate-reviewer.md",
+      "entryType": "file",
+      "category": "gate-reviewer-agent",
+      "ownership": "managed-block",
+      "source": "vcm-template",
+      "lifecycle": "long-term",
+      "marker": {
+        "type": "html",
+        "begin": "<!-- VCM:BEGIN version=1 -->",
+        "end": "<!-- VCM:END -->"
+      },
+      "uninstall": {
+        "action": "remove-managed-block",
+        "requiresConfirmation": false
+      }
+    },
+    {
+      "path": ".claude/agents/translator.md",
+      "entryType": "file",
+      "category": "agent-translator",
+      "ownership": "managed-block",
+      "source": "vcm-template",
+      "lifecycle": "long-term",
+      "marker": {
+        "type": "html",
+        "begin": "<!-- VCM:BEGIN version=1 -->",
+        "end": "<!-- VCM:END -->"
+      },
+      "uninstall": {
+        "action": "remove-managed-block",
+        "requiresConfirmation": false
+      }
+    },
+    {
+      "path": ".claude/settings.json",
+      "entryType": "file",
+      "category": "claude-settings",
+      "ownership": "json-merge",
+      "source": "vcm-template",
+      "lifecycle": "long-term",
+      "jsonOwnership": {
+        "topLevelKeys": [
+          "hooks",
+          "env"
+        ],
+        "hookMatchers": [
+          "VCM"
+        ],
+        "envKeys": [
+          "BASH_DEFAULT_TIMEOUT_MS"
+        ]
+      },
+      "uninstall": {
+        "action": "remove-owned-json-keys",
+        "requiresConfirmation": false
+      }
+    },
+    {
+      "path": ".claude/agents/",
+      "entryType": "directory",
+      "category": "agent-directory",
+      "ownership": "vcm-created",
+      "source": "vcm-template",
+      "lifecycle": "long-term"
+    },
+    {
+      "path": ".claude/skills/",
+      "entryType": "directory",
+      "category": "skill-directory",
+      "ownership": "vcm-created",
+      "source": "vcm-template",
+      "lifecycle": "long-term"
+    },
+    {
+      "path": ".claude/skills/vcm-final-acceptance/",
+      "entryType": "directory",
+      "category": "skill-directory",
+      "ownership": "vcm-created",
+      "source": "vcm-template",
+      "lifecycle": "long-term"
+    },
+    {
+      "path": ".claude/skills/vcm-harness-bootstrap/",
+      "entryType": "directory",
+      "category": "skill-directory",
+      "ownership": "vcm-created",
+      "source": "vcm-template",
+      "lifecycle": "long-term"
+    },
+    {
+      "path": ".claude/skills/vcm-long-running-validation/",
+      "entryType": "directory",
+      "category": "skill-directory",
+      "ownership": "vcm-created",
+      "source": "vcm-template",
+      "lifecycle": "long-term"
+    },
+    {
+      "path": ".claude/skills/vcm-route-message/",
+      "entryType": "directory",
+      "category": "skill-directory",
+      "ownership": "vcm-created",
+      "source": "vcm-template",
+      "lifecycle": "long-term"
+    },
+    {
+      "path": ".claude/skills/vcm-gate-review/",
+      "entryType": "directory",
+      "category": "skill-directory",
+      "ownership": "vcm-created",
+      "source": "vcm-template",
+      "lifecycle": "long-term"
+    },
+    {
+      "path": ".ai/vcm/translations/",
+      "entryType": "directory",
+      "category": "harness-tool-directory",
+      "ownership": "vcm-created",
+      "source": "vcm-template",
+      "lifecycle": "long-term"
+    },
+    {
+      "path": ".ai/vcm/gate-reviews/",
+      "entryType": "directory",
+      "category": "harness-tool-directory",
+      "ownership": "vcm-created",
+      "source": "vcm-template",
+      "lifecycle": "long-term"
+    },
+    {
+      "path": ".ai/tools/",
+      "entryType": "directory",
+      "category": "harness-tool-directory",
+      "ownership": "vcm-created",
+      "source": "vcm-template",
+      "lifecycle": "long-term"
+    },
+    {
+      "path": ".ai/generated/",
+      "entryType": "directory",
+      "category": "generated-context-directory",
+      "ownership": "vcm-created",
+      "source": "vcm-template",
+      "lifecycle": "long-term"
+    },
+    {
+      "path": ".ai/tools/generate-module-index",
+      "entryType": "file",
+      "category": "generated-context-tool",
+      "ownership": "whole-file",
+      "source": "vcm-template",
+      "lifecycle": "long-term",
+      "uninstall": {
+        "action": "delete-file-if-unchanged",
+        "requiresConfirmation": false
+      }
+    },
+    {
+      "path": ".ai/tools/generate-public-surface",
+      "entryType": "file",
+      "category": "generated-context-tool",
+      "ownership": "whole-file",
+      "source": "vcm-template",
+      "lifecycle": "long-term",
+      "uninstall": {
+        "action": "delete-file-if-unchanged",
+        "requiresConfirmation": false
+      }
+    },
+    {
+      "path": ".claude/skills/vcm-final-acceptance/SKILL.md",
+      "entryType": "file",
+      "category": "skill",
+      "ownership": "whole-file",
+      "source": "vcm-template",
+      "lifecycle": "long-term",
+      "uninstall": {
+        "action": "delete-file-if-unchanged",
+        "requiresConfirmation": false
+      }
+    },
+    {
+      "path": ".claude/skills/vcm-harness-bootstrap/SKILL.md",
+      "entryType": "file",
+      "category": "skill",
+      "ownership": "whole-file",
+      "source": "vcm-template",
+      "lifecycle": "long-term",
+      "uninstall": {
+        "action": "delete-file-if-unchanged",
+        "requiresConfirmation": false
+      }
+    },
+    {
+      "path": ".claude/skills/vcm-long-running-validation/SKILL.md",
+      "entryType": "file",
+      "category": "skill",
+      "ownership": "whole-file",
+      "source": "vcm-template",
+      "lifecycle": "long-term",
+      "uninstall": {
+        "action": "delete-file-if-unchanged",
+        "requiresConfirmation": false
+      }
+    },
+    {
+      "path": ".claude/skills/vcm-route-message/SKILL.md",
+      "entryType": "file",
+      "category": "skill",
+      "ownership": "whole-file",
+      "source": "vcm-template",
+      "lifecycle": "long-term",
+      "uninstall": {
+        "action": "delete-file-if-unchanged",
+        "requiresConfirmation": false
+      }
+    },
+    {
+      "path": ".claude/skills/vcm-gate-review/SKILL.md",
+      "entryType": "file",
+      "category": "skill",
+      "ownership": "whole-file",
+      "source": "vcm-template",
+      "lifecycle": "long-term",
+      "uninstall": {
+        "action": "delete-file-if-unchanged",
+        "requiresConfirmation": false
+      }
+    },
+    {
+      "path": ".ai/tools/request-gate-review",
+      "entryType": "file",
+      "category": "runtime-tool",
+      "ownership": "whole-file",
+      "source": "vcm-template",
+      "lifecycle": "conditional-long-term",
+      "uninstall": {
+        "action": "delete-file-if-unchanged",
+        "requiresConfirmation": false
+      }
+    },
+    {
+      "path": ".ai/tools/run-long-check",
+      "entryType": "file",
+      "category": "runtime-tool",
+      "ownership": "whole-file",
+      "source": "vcm-template",
+      "lifecycle": "conditional-long-term",
+      "uninstall": {
+        "action": "delete-file-if-unchanged",
+        "requiresConfirmation": false
+      }
+    },
+    {
+      "path": ".ai/tools/watch-job",
+      "entryType": "file",
+      "category": "runtime-tool",
+      "ownership": "whole-file",
+      "source": "vcm-template",
+      "lifecycle": "conditional-long-term",
+      "uninstall": {
+        "action": "delete-file-if-unchanged",
+        "requiresConfirmation": false
+      }
+    },
+    {
+      "path": ".ai/tools/vcm-bash-guard",
+      "entryType": "file",
+      "category": "runtime-tool",
+      "ownership": "whole-file",
+      "source": "vcm-template",
+      "lifecycle": "conditional-long-term",
+      "uninstall": {
+        "action": "delete-file-if-unchanged",
+        "requiresConfirmation": false
+      }
+    },
+    {
+      "path": ".ai/generated/module-index.json",
+      "entryType": "file",
+      "category": "generated-context",
+      "ownership": "derived-artifact",
+      "source": ".ai/tools/generate-module-index",
+      "lifecycle": "derived",
+      "uninstall": {
+        "action": "delete-derived-artifact",
+        "requiresConfirmation": false
+      }
+    },
+    {
+      "path": ".ai/generated/public-surface.json",
+      "entryType": "file",
+      "category": "generated-context",
+      "ownership": "derived-artifact",
+      "source": ".ai/tools/generate-public-surface",
+      "lifecycle": "derived",
+      "uninstall": {
+        "action": "delete-derived-artifact",
+        "requiresConfirmation": false
+      }
+    }
+  ]
+}

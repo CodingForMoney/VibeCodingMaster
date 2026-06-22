@@ -1,45 +1,52 @@
 import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import {
+  TRANSLATION_TARGET_LANGUAGE_OPTIONS,
+  type TranslationTargetLanguage
+} from "../../shared/types/app-settings.js";
 import type { RoleName } from "../../shared/types/role.js";
 import type {
+  TranslationSourceFileBrowserResult,
+  TranslationSourceFileEntry,
+  TranslationState,
   TranslationEntry,
   TranslationFailureItem,
-  TranslationPromptPreview,
   TranslationSessionEvent,
-  TranslationSessionStatus,
-  TranslationSettings,
+  TranslationSessionStatus
 } from "../../shared/types/translation.js";
 import { TRANSLATION_ENTRY_RETENTION_LIMIT } from "../../shared/types/translation.js";
 import { apiClient } from "../state/api-client.js";
-import { TranslationSettingsModal } from "./translation-settings-modal.js";
 
 type TranslationPanelStatus = TranslationSessionStatus;
+const TRANSLATED_COMPOSER_SEPARATOR = "\n\n--- Translation ---\n";
 
 export interface TranslationPanelProps {
   active?: boolean;
+  autoSendEnabled: boolean;
+  targetLanguage: TranslationTargetLanguage;
   taskSlug: string;
   role: RoleName;
   sessionId: string;
 }
 
-export function TranslationPanel({ active = true, taskSlug, role, sessionId }: TranslationPanelProps) {
-  const [settings, setSettings] = useState<TranslationSettings | null>(null);
+export function TranslationPanel({
+  active = true,
+  autoSendEnabled,
+  targetLanguage,
+  taskSlug,
+  role,
+  sessionId
+}: TranslationPanelProps) {
   const [entries, setEntries] = useState<TranslationEntry[]>([]);
   const [failures, setFailures] = useState<TranslationFailureItem[]>([]);
   const [composer, setComposer] = useState("");
   const [composerIsEnglishDraft, setComposerIsEnglishDraft] = useState(false);
-  const [autoSendEnabled, setAutoSendEnabled] = useState(false);
-  const [contextUsed, setContextUsed] = useState(false);
   const [status, setStatus] = useState<TranslationPanelStatus>("ready");
   const [lastPollAt, setLastPollAt] = useState("");
   const [panelNowMs, setPanelNowMs] = useState(Date.now());
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
-  const [showSettings, setShowSettings] = useState(false);
-  const [promptPreviews, setPromptPreviews] = useState<TranslationPromptPreview[]>([]);
-  const [testResult, setTestResult] = useState<Awaited<ReturnType<typeof apiClient.testTranslationProvider>> | undefined>();
-  const [pollRevision, setPollRevision] = useState(0);
   const [scrollRevision, setScrollRevision] = useState(0);
   const activeRef = useRef(active);
   const cursorRef = useRef(1);
@@ -48,18 +55,6 @@ export function TranslationPanel({ active = true, taskSlug, role, sessionId }: T
   useEffect(() => {
     activeRef.current = active;
   }, [active]);
-
-  useEffect(() => {
-    void Promise.all([
-      apiClient.getTranslationSettings(),
-      apiClient.getTranslationPrompts()
-    ])
-      .then(([next, previews]) => {
-        setSettings(next);
-        setPromptPreviews(previews);
-      })
-      .catch((caught: Error) => setError(caught.message));
-  }, []);
 
   useEffect(() => {
     setEntries([]);
@@ -122,8 +117,9 @@ export function TranslationPanel({ active = true, taskSlug, role, sessionId }: T
       if (timer !== undefined) {
         window.clearTimeout(timer);
       }
+      void apiClient.stopTranslationSession(sessionId).catch(() => undefined);
     };
-  }, [sessionId, taskSlug, role, pollRevision]);
+  }, [sessionId, taskSlug, role]);
 
   useEffect(() => {
     if (!active) {
@@ -152,25 +148,22 @@ export function TranslationPanel({ active = true, taskSlug, role, sessionId }: T
   }, [activeTranslationStartedAt]);
 
   async function translateInput(send = false) {
-    if (!settings) {
-      return;
-    }
+    const sourceText = composer;
     setBusy(true);
     setError("");
     setComposerIsEnglishDraft(false);
     try {
       const result = await apiClient.translateUserInput(taskSlug, role, {
-        text: composer,
+        text: sourceText,
         mode: send ? "auto-send" : "review-before-send",
-        useContext: settings.contextEnabled,
+        useContext: false,
         send
       });
-      setContextUsed(result.contextUsed);
       if (result.sent) {
         setComposer("");
         setComposerIsEnglishDraft(false);
       } else {
-        setComposer(result.englishPreview);
+        setComposer(formatTranslatedComposerDraft(sourceText, result.englishPreview));
         setComposerIsEnglishDraft(true);
       }
     } catch (caught) {
@@ -214,16 +207,16 @@ export function TranslationPanel({ active = true, taskSlug, role, sessionId }: T
   }
 
   async function sendEnglish() {
-    if (!composer.trim()) {
+    const englishText = composerIsEnglishDraft ? extractTranslatedComposerDraft(composer) : composer;
+    if (!englishText.trim()) {
       return;
     }
     setBusy(true);
     setError("");
     try {
-      await apiClient.sendTranslatedInput(taskSlug, role, { englishText: composer });
+      await apiClient.sendTranslatedInput(taskSlug, role, { englishText });
       setComposer("");
       setComposerIsEnglishDraft(false);
-      setContextUsed(false);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "Failed to send English input.");
     } finally {
@@ -242,35 +235,6 @@ export function TranslationPanel({ active = true, taskSlug, role, sessionId }: T
       } else {
         void translateInput(autoSendEnabled);
       }
-    }
-  }
-
-  async function saveSettings(next: Partial<TranslationSettings>, apiKey?: string) {
-    setBusy(true);
-    setError("");
-    try {
-      const saved = await apiClient.updateTranslationSettings({ ...next, ...(apiKey !== undefined ? { apiKey } : {}) });
-      const previews = await apiClient.getTranslationPrompts();
-      setSettings(saved);
-      setPromptPreviews(previews);
-      setShowSettings(false);
-      setPollRevision((current) => current + 1);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Failed to save translation settings.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function testProvider() {
-    setBusy(true);
-    setError("");
-    try {
-      setTestResult(await apiClient.testTranslationProvider());
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Provider test failed.");
-    } finally {
-      setBusy(false);
     }
   }
 
@@ -307,10 +271,6 @@ export function TranslationPanel({ active = true, taskSlug, role, sessionId }: T
     }
   }
 
-  if (!settings) {
-    return <aside className="translation-panel"><p className="muted">Loading translation settings...</p></aside>;
-  }
-
   const panelStatus = getPanelStatus(entries, status, panelNowMs);
   const failureCount = failures.length;
 
@@ -320,14 +280,6 @@ export function TranslationPanel({ active = true, taskSlug, role, sessionId }: T
         <div className="translation-panel-titlebar">
           <h2>Translation</h2>
           <div className="translation-panel-actions">
-            <button
-              aria-pressed={autoSendEnabled}
-              className={`auto-send-toggle${autoSendEnabled ? " is-active" : ""}`}
-              type="button"
-              onClick={() => setAutoSendEnabled((current) => !current)}
-            >
-              {autoSendEnabled ? "✅ Auto-send" : "× Auto-send"}
-            </button>
             {failureCount > 0 ? (
               <>
                 <button type="button" disabled={busy} onClick={() => void ignoreFailures()}>
@@ -338,12 +290,11 @@ export function TranslationPanel({ active = true, taskSlug, role, sessionId }: T
                 </button>
               </>
             ) : null}
-            <button type="button" onClick={() => setShowSettings(true)}>Settings</button>
             <button type="button" onClick={() => void clearPanel()}>Clear</button>
           </div>
         </div>
         <div className="translation-status-row">
-          <p>{settings.model} · {panelStatus}{contextUsed ? " · context used" : ""}</p>
+          <p>Claude Code · target {getTranslationTargetLanguageLabel(targetLanguage)} · {panelStatus}</p>
           <p>{lastPollAt ? `poll ${lastPollAt}` : "poll -"}</p>
         </div>
       </header>
@@ -366,7 +317,7 @@ export function TranslationPanel({ active = true, taskSlug, role, sessionId }: T
             value={composer}
             onChange={(event) => {
               setComposer(event.target.value);
-              if (!event.target.value.trim()) {
+              if (!event.target.value.trim() || (composerIsEnglishDraft && !hasTranslatedComposerDraft(event.target.value))) {
                 setComposerIsEnglishDraft(false);
               }
             }}
@@ -374,25 +325,414 @@ export function TranslationPanel({ active = true, taskSlug, role, sessionId }: T
             placeholder="输入中文，先翻译成英文工程指令..."
           />
           <div className="translation-composer-actions">
-            <button type="button" disabled={busy || !composerIsEnglishDraft || !composer.trim()} onClick={() => void sendEnglish()}>
+            <button
+              type="button"
+              disabled={busy || !composerIsEnglishDraft || !extractTranslatedComposerDraft(composer).trim()}
+              onClick={() => void sendEnglish()}
+            >
               Send English
             </button>
           </div>
         </div>
       </div>
 
-      {showSettings ? (
-        <TranslationSettingsModal
-          settings={settings}
+    </aside>
+  );
+}
+
+function getTranslationTargetLanguageLabel(targetLanguage: TranslationTargetLanguage): string {
+  return TRANSLATION_TARGET_LANGUAGE_OPTIONS.find((option) => option.value === targetLanguage)?.label ?? targetLanguage;
+}
+
+export function FileTranslationModalHost({
+  open,
+  targetLanguage,
+  onClose
+}: {
+  open: boolean;
+  targetLanguage: TranslationTargetLanguage;
+  onClose(): void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
+  const [translationState, setTranslationState] = useState<TranslationState | null>(null);
+  const [selectedFileJobId, setSelectedFileJobId] = useState<string>("");
+  const [selectedFileOutput, setSelectedFileOutput] = useState("");
+  const [selectedFileReport, setSelectedFileReport] = useState("");
+  const [fileBrowserOpen, setFileBrowserOpen] = useState(false);
+  const [fileBrowserState, setFileBrowserState] = useState<TranslationSourceFileBrowserResult | null>(null);
+  const [fileBrowserPath, setFileBrowserPath] = useState("");
+  const [fileBrowserQuery, setFileBrowserQuery] = useState("");
+  const [fileBrowserSelectedPath, setFileBrowserSelectedPath] = useState("");
+  const [fileBrowserBusy, setFileBrowserBusy] = useState(false);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    let cancelled = false;
+    let timer: number | undefined;
+    const tick = async () => {
+      if (cancelled) {
+        return;
+      }
+      await refreshTranslationState(true);
+      if (!cancelled) {
+        timer = window.setTimeout(tick, 2000);
+      }
+    };
+    void tick();
+    return () => {
+      cancelled = true;
+      if (timer !== undefined) {
+        window.clearTimeout(timer);
+      }
+    };
+  }, [open, selectedFileJobId]);
+
+  async function refreshTranslationState(refreshSelected = false) {
+    try {
+      const next = await apiClient.getTranslationState();
+      setTranslationState(next);
+      const selectedStillVisible = selectedFileJobId
+        ? next.fileIndex.jobs.some((job) => job.id === selectedFileJobId)
+        : false;
+      if ((!selectedFileJobId || !selectedStillVisible) && next.fileIndex.jobs[0]) {
+        void selectFileJob(next.fileIndex.jobs[0].id);
+      } else if (!next.fileIndex.jobs[0]) {
+        setSelectedFileJobId("");
+        setSelectedFileOutput("");
+        setSelectedFileReport("");
+      } else if (refreshSelected && selectedFileJobId) {
+        const result = await apiClient.readFileTranslation(selectedFileJobId);
+        setSelectedFileOutput(result.output);
+        setSelectedFileReport(result.report);
+      }
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Failed to load file translations.");
+    }
+  }
+
+  async function selectFileJob(jobId: string) {
+    setSelectedFileJobId(jobId);
+    setSelectedFileOutput("");
+    setSelectedFileReport("");
+    try {
+      const result = await apiClient.readFileTranslation(jobId);
+      setSelectedFileOutput(result.output);
+      setSelectedFileReport(result.report);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Failed to read translated file.");
+    }
+  }
+
+  async function openFileBrowser() {
+    setFileBrowserOpen(true);
+    await loadFileBrowser(fileBrowserPath, fileBrowserQuery);
+  }
+
+  async function loadFileBrowser(path = "", query = "") {
+    setFileBrowserBusy(true);
+    setError("");
+    try {
+      const result = await apiClient.browseTranslationSourceFiles({
+        path,
+        query,
+        limit: 250
+      });
+      setFileBrowserState(result);
+      setFileBrowserPath(result.currentPath);
+      setFileBrowserQuery(query);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Failed to browse source files.");
+    } finally {
+      setFileBrowserBusy(false);
+    }
+  }
+
+  async function createFileTranslation(sourcePath = fileBrowserSelectedPath) {
+    const normalizedSourcePath = sourcePath.trim();
+    if (!normalizedSourcePath) {
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      const job = await apiClient.createFileTranslation({
+        sourcePath: normalizedSourcePath,
+        targetLanguage
+      });
+      setFileBrowserOpen(false);
+      await refreshTranslationState();
+      await selectFileJob(job.id);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Failed to create file translation.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  if (!open) {
+    return null;
+  }
+
+  return (
+    <>
+      <div className="modal-backdrop file-translation-backdrop">
+        <FileTranslationPanel
           busy={busy}
-          promptPreviews={promptPreviews}
-          testResult={testResult}
-          onSave={saveSettings}
-          onTest={testProvider}
-          onClose={() => setShowSettings(false)}
+          error={error}
+          state={translationState}
+          selectedJobId={selectedFileJobId}
+          output={selectedFileOutput}
+          report={selectedFileReport}
+          onClose={() => {
+            setFileBrowserOpen(false);
+            onClose();
+          }}
+          onRefresh={() => void refreshTranslationState()}
+          onSelectJob={(jobId) => void selectFileJob(jobId)}
+          onTranslate={() => void openFileBrowser()}
+        />
+      </div>
+      {fileBrowserOpen ? (
+        <TranslationSourceFileBrowserModal
+          busy={busy || fileBrowserBusy}
+          state={fileBrowserState}
+          currentPath={fileBrowserPath}
+          query={fileBrowserQuery}
+          selectedPath={fileBrowserSelectedPath}
+          onBrowse={(nextPath, nextQuery) => void loadFileBrowser(nextPath, nextQuery)}
+          onClose={() => setFileBrowserOpen(false)}
+          onQueryChange={setFileBrowserQuery}
+          onSelectPath={setFileBrowserSelectedPath}
+          onTranslate={() => void createFileTranslation()}
         />
       ) : null}
-    </aside>
+    </>
+  );
+}
+
+function TranslationSourceFileBrowserModal({
+  busy,
+  state,
+  currentPath,
+  query,
+  selectedPath,
+  onBrowse,
+  onClose,
+  onQueryChange,
+  onSelectPath,
+  onTranslate
+}: {
+  busy: boolean;
+  state: TranslationSourceFileBrowserResult | null;
+  currentPath: string;
+  query: string;
+  selectedPath: string;
+  onBrowse(path: string, query?: string): void;
+  onClose(): void;
+  onQueryChange(query: string): void;
+  onSelectPath(path: string): void;
+  onTranslate(): void;
+}) {
+  const entries = state?.entries ?? [];
+  const directoryEntries = entries.filter((entry) => entry.type === "directory");
+  const fileEntries = entries.filter((entry) => entry.type === "file");
+
+  return (
+    <div className="modal-backdrop translation-file-browser-backdrop">
+      <section className="translation-file-browser-modal" role="dialog" aria-modal="true" aria-label="Select Source File">
+        <header>
+          <div>
+            <h2>Select Source File</h2>
+            <p>{currentPath || "."}</p>
+          </div>
+          <button type="button" onClick={onClose}>Close</button>
+        </header>
+
+        <div className="translation-file-browser-controls">
+          <div className="translation-file-browser-nav">
+            <button type="button" disabled={busy || !currentPath} onClick={() => onBrowse(state?.parentPath ?? "", "")}>
+              Up
+            </button>
+            <button type="button" disabled={busy || !currentPath} onClick={() => onBrowse("", "")}>
+              Root
+            </button>
+          </div>
+          <form
+            className="translation-file-browser-search"
+            onSubmit={(event) => {
+              event.preventDefault();
+              onBrowse(currentPath, query);
+            }}
+          >
+            <input
+              value={query}
+              onChange={(event) => onQueryChange(event.target.value)}
+              placeholder="Search files"
+            />
+            <button type="submit" disabled={busy}>Search</button>
+            <button type="button" disabled={busy || !query} onClick={() => onBrowse(currentPath, "")}>
+              Clear
+            </button>
+          </form>
+        </div>
+
+        <div className="translation-file-browser-layout">
+          <div className="translation-file-browser-list">
+            {busy && !state ? <p className="muted">Loading files...</p> : null}
+            {!busy && entries.length === 0 ? <p className="muted">No source files found.</p> : null}
+            {directoryEntries.length > 0 ? (
+              <div className="translation-file-browser-group">
+                <h3>Folders</h3>
+                {directoryEntries.map((entry) => (
+                  <FileBrowserEntryButton
+                    entry={entry}
+                    key={entry.path}
+                    selected={selectedPath === entry.path}
+                    onBrowse={onBrowse}
+                    onSelectPath={onSelectPath}
+                  />
+                ))}
+              </div>
+            ) : null}
+            {fileEntries.length > 0 ? (
+              <div className="translation-file-browser-group">
+                <h3>Files</h3>
+                {fileEntries.map((entry) => (
+                  <FileBrowserEntryButton
+                    entry={entry}
+                    key={entry.path}
+                    selected={selectedPath === entry.path}
+                    onBrowse={onBrowse}
+                    onSelectPath={onSelectPath}
+                  />
+                ))}
+              </div>
+            ) : null}
+            {state?.truncated ? <p className="translation-entry-note">Result limit reached.</p> : null}
+          </div>
+
+          <aside className="translation-file-browser-selection">
+            <label>
+              <span>Source path</span>
+              <input
+                value={selectedPath}
+                onChange={(event) => onSelectPath(event.target.value)}
+              />
+            </label>
+            <button type="button" disabled={busy || !selectedPath.trim()} onClick={onTranslate}>
+              Translate File
+            </button>
+          </aside>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function FileBrowserEntryButton({
+  entry,
+  selected,
+  onBrowse,
+  onSelectPath
+}: {
+  entry: TranslationSourceFileEntry;
+  selected: boolean;
+  onBrowse(path: string, query?: string): void;
+  onSelectPath(path: string): void;
+}) {
+  const isDirectory = entry.type === "directory";
+  return (
+    <button
+      className={selected ? "translation-file-browser-entry is-selected" : "translation-file-browser-entry"}
+      type="button"
+      onClick={() => isDirectory ? onBrowse(entry.path, "") : onSelectPath(entry.path)}
+      onDoubleClick={() => isDirectory ? onBrowse(entry.path, "") : undefined}
+    >
+      <span>{isDirectory ? "DIR" : "FILE"}</span>
+      <strong>{entry.name}</strong>
+      <small>{entry.path}</small>
+    </button>
+  );
+}
+
+function FileTranslationPanel({
+  busy,
+  error,
+  state,
+  selectedJobId,
+  output,
+  report,
+  onClose,
+  onRefresh,
+  onSelectJob,
+  onTranslate
+}: {
+  busy: boolean;
+  error?: string;
+  state: TranslationState | null;
+  selectedJobId: string;
+  output: string;
+  report: string;
+  onClose(): void;
+  onRefresh(): void;
+  onSelectJob(jobId: string): void;
+  onTranslate(): void;
+}) {
+  const jobs = state?.fileIndex.jobs ?? [];
+  const selectedJob = jobs.find((job) => job.id === selectedJobId);
+
+  return (
+    <section className="file-translation-modal" role="dialog" aria-modal="true" aria-label="File Translation">
+      <header className="file-translation-header">
+        <div>
+          <h2>File Translation</h2>
+          <p>Claude Code · 中英互译</p>
+        </div>
+        <div className="file-translation-toolbar">
+          <button type="button" disabled={busy} onClick={onTranslate}>Translate</button>
+          <button type="button" disabled={busy} onClick={onRefresh}>Refresh</button>
+          <button type="button" onClick={onClose}>Close</button>
+        </div>
+      </header>
+      {error ? <div className="error-banner">{error}</div> : null}
+      {!state?.memoryInitialized ? (
+        <p className="translation-entry-note">Translation memory is not initialized. Run Bootstrap from the sidebar before important file translations.</p>
+      ) : null}
+      <div className="file-translation-layout">
+        <div className="file-translation-list">
+          {jobs.length === 0 ? <p className="muted">No translated files yet.</p> : null}
+          {jobs.map((job) => (
+            <button
+              className={job.id === selectedJobId ? "file-translation-item is-active" : "file-translation-item"}
+              key={job.id}
+              type="button"
+              onClick={() => onSelectJob(job.id)}
+            >
+              <strong>{job.sourcePath}</strong>
+              <span>{job.status} · {job.targetLanguage}</span>
+            </button>
+          ))}
+        </div>
+        <div className="file-translation-preview">
+          {selectedJob ? (
+            <>
+              <header>
+                <strong>{selectedJob.sourcePath}</strong>
+                <span>{selectedJob.status}</span>
+              </header>
+              <div className="translation-markdown">
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>{output || report || "Translation output is not available yet."}</ReactMarkdown>
+              </div>
+            </>
+          ) : (
+            <p className="muted">Select a translated file to preview it.</p>
+          )}
+        </div>
+      </div>
+    </section>
   );
 }
 
@@ -505,10 +845,29 @@ function getTranslationEntryDisplayText(entry: TranslationEntry): string {
   }
 
   if (entry.status === "translated") {
+    if (entry.direction === "user-input-to-english") {
+      return formatTranslatedComposerDraft(entry.sourceText, entry.translatedText);
+    }
     return entry.translatedText;
   }
 
   return entry.translatedText || entry.sourceText;
+}
+
+export function formatTranslatedComposerDraft(sourceText: string, translatedText: string): string {
+  return `${sourceText.trimEnd()}${TRANSLATED_COMPOSER_SEPARATOR}${translatedText.trimStart()}`;
+}
+
+export function hasTranslatedComposerDraft(composerText: string): boolean {
+  return composerText.includes(TRANSLATED_COMPOSER_SEPARATOR);
+}
+
+export function extractTranslatedComposerDraft(composerText: string): string {
+  const separatorIndex = composerText.indexOf(TRANSLATED_COMPOSER_SEPARATOR);
+  if (separatorIndex === -1) {
+    return composerText;
+  }
+  return composerText.slice(separatorIndex + TRANSLATED_COMPOSER_SEPARATOR.length);
 }
 
 function upsertEntry(entries: TranslationEntry[], entry: TranslationEntry): TranslationEntry[] {

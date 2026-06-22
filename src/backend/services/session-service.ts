@@ -1,12 +1,14 @@
 import { randomUUID } from "node:crypto";
 import path from "node:path";
-import { ROLE_NAMES, isDispatchableRole } from "../../shared/constants.js";
+import { CORE_VCM_ROLE_NAMES, isDispatchableRole } from "../../shared/constants.js";
 import type { ClaudeHookEventName } from "../../shared/types/claude-hook.js";
 import type { RoleName } from "../../shared/types/role.js";
 import type {
   ClaudeModel,
   ClaudePermissionMode,
   RoleSessionRecord,
+  SessionEffort,
+  SessionModel,
   StartRoleSessionRequest,
   TaskSessionRecord
 } from "../../shared/types/session.js";
@@ -22,14 +24,29 @@ import type { ProjectService } from "./project-service.js";
 import { getTaskRuntimeRepoRoot, type TaskService } from "./task-service.js";
 
 export interface SessionService {
+  startProjectGateReviewerSession(repoRoot: string, input?: StartRoleSessionRequest): Promise<RoleSessionRecord>;
+  resumeProjectGateReviewerSession(repoRoot: string, input?: StartRoleSessionRequest): Promise<RoleSessionRecord>;
+  stopProjectGateReviewerSession(repoRoot: string): Promise<RoleSessionRecord>;
+  restartProjectGateReviewerSession(repoRoot: string, input?: StartRoleSessionRequest): Promise<RoleSessionRecord>;
+  getProjectGateReviewerSession(repoRoot: string): Promise<RoleSessionRecord | undefined>;
+  ensureProjectGateReviewerSession(repoRoot: string, input?: StartRoleSessionRequest): Promise<RoleSessionRecord>;
+  startProjectTranslatorSession(repoRoot: string, input?: StartRoleSessionRequest): Promise<RoleSessionRecord>;
+  resumeProjectTranslatorSession(repoRoot: string, input?: StartRoleSessionRequest): Promise<RoleSessionRecord>;
+  stopProjectTranslatorSession(repoRoot: string): Promise<RoleSessionRecord>;
+  restartProjectTranslatorSession(repoRoot: string, input?: StartRoleSessionRequest): Promise<RoleSessionRecord>;
+  getProjectTranslatorSession(repoRoot: string): Promise<RoleSessionRecord | undefined>;
+  ensureProjectTranslatorSession(repoRoot: string, input?: StartRoleSessionRequest): Promise<RoleSessionRecord>;
+  recordProjectTranslatorHookEvent(repoRoot: string, input: RecordProjectTranslatorHookEventInput): Promise<RoleSessionRecord | undefined>;
   startRoleSession(repoRoot: string, taskSlug: string, role: RoleName, input?: StartRoleSessionRequest): Promise<RoleSessionRecord>;
   resumeRoleSession(repoRoot: string, taskSlug: string, role: RoleName, input?: StartRoleSessionRequest): Promise<RoleSessionRecord>;
   stopRoleSession(repoRoot: string, taskSlug: string, role: RoleName): Promise<RoleSessionRecord>;
   restartRoleSession(repoRoot: string, taskSlug: string, role: RoleName, input?: StartRoleSessionRequest): Promise<RoleSessionRecord>;
   getRoleSession(repoRoot: string, taskSlug: string, role: RoleName): Promise<RoleSessionRecord | undefined>;
   listRoleSessions(repoRoot: string, taskSlug: string): Promise<RoleSessionRecord[]>;
+  recordRoleHookEvent(repoRoot: string, input: RecordRoleHookEventInput): Promise<RoleSessionRecord | undefined>;
   recordClaudeHookEvent(repoRoot: string, input: RecordClaudeHookEventInput): Promise<RoleSessionRecord | undefined>;
   markRoleActivityRunning(repoRoot: string, taskSlug: string, role: RoleName): Promise<RoleSessionRecord | undefined>;
+  markRoleActivityIdle(repoRoot: string, taskSlug: string, role: RoleName): Promise<RoleSessionRecord | undefined>;
 }
 
 export interface SessionServiceDeps {
@@ -41,16 +58,49 @@ export interface SessionServiceDeps {
   projectService: Pick<ProjectService, "loadConfig">;
   taskService: Pick<TaskService, "loadTask">;
   apiUrl?: string;
+  sandboxMode?: string;
   now?: () => string;
 }
 
 type LaunchMode = "fresh" | "resume";
+
+const GATE_REVIEWER_ROLE: RoleName = "gate-reviewer";
+const TRANSLATOR_ROLE: RoleName = "translator";
+const TRANSLATION_DIR = ".ai/vcm/translations";
+const TRANSLATOR_SESSION_PATH = ".ai/vcm/translations/session.json";
+const GATE_REVIEWER_SESSION_PATH = ".ai/vcm/gate-reviewer/session.json";
+const PROJECT_TRANSLATOR_SCOPE = "__project__";
+const PROJECT_GATE_REVIEWER_SCOPE = "__project_gate_reviewer__";
+
+interface ProjectRoleSessionFile {
+  version: 1;
+  role: RoleName;
+  updatedAt: string;
+  record: RoleSessionRecord;
+}
 
 export interface RecordClaudeHookEventInput {
   taskSlug: string;
   role: RoleName;
   eventName: ClaudeHookEventName;
   claudeSessionId?: string;
+  transcriptPath?: string;
+  cwd?: string;
+}
+
+export interface RecordRoleHookEventInput {
+  taskSlug: string;
+  role: RoleName;
+  eventName: ClaudeHookEventName;
+  sessionId?: string;
+  transcriptPath?: string;
+  cwd?: string;
+  allowSessionMismatch?: boolean;
+}
+
+export interface RecordProjectTranslatorHookEventInput {
+  eventName: ClaudeHookEventName;
+  sessionId?: string;
   transcriptPath?: string;
   cwd?: string;
 }
@@ -65,7 +115,10 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     input: StartRoleSessionRequest,
     launchMode: LaunchMode
   ): Promise<RoleSessionRecord> {
-    const live = deps.registry.getByRole(taskSlug, role);
+    const live = toRoleSessionRecordView(
+      getRegisteredRoleSession(deps.registry, deps.runtime, taskSlug, role),
+      deps.runtime
+    );
     if (live && live.status === "running") {
       return live;
     }
@@ -74,9 +127,10 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     const task = await deps.taskService.loadTask(repoRoot, taskSlug);
     const taskRepoRoot = getTaskRuntimeRepoRoot(task);
     const paths = deps.artifactService.getHandoffPaths(taskRepoRoot, task.handoffDir);
-    const persisted = await loadPersistedRoleRecord(deps.fs, taskRepoRoot, config.stateRoot, taskSlug, role);
+    const persisted = await loadPersistedRoleRecordForRole(deps.fs, repoRoot, taskRepoRoot, config.stateRoot, taskSlug, role);
     const permissionMode = normalizeClaudePermissionMode(input.permissionMode ?? persisted?.permissionMode);
-    const model = normalizeClaudeModel(input.model ?? persisted?.model);
+    const model: SessionModel = normalizeClaudeModel(input.model ?? persisted?.model);
+    const effort = normalizeClaudeEffort(input.effort ?? persisted?.effort);
     const claudeSessionId = launchMode === "resume"
       ? persisted?.claudeSessionId
       : randomUUID();
@@ -84,7 +138,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     if (!claudeSessionId) {
       throw new VcmError({
         code: "CLAUDE_SESSION_MISSING",
-        message: `${role} does not have a Claude session id to resume.`,
+        message: `${role} does not have a session id to resume.`,
         statusCode: 409,
         hint: "Start the role once before using Resume."
       });
@@ -93,20 +147,24 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       ? persisted.transcriptPath
       : claudeTranscriptPath(taskRepoRoot, claudeSessionId);
 
-    const startCommand = deps.claude.buildRoleStartCommand(
-      role,
-      config.claudeCommand,
-      permissionMode,
-      claudeSessionId,
-      launchMode === "resume",
-      model
-    );
+    const startCommand = {
+      ...deps.claude.buildRoleStartCommand(
+        role,
+        config.claudeCommand,
+        permissionMode,
+        claudeSessionId,
+        launchMode === "resume",
+        model as ClaudeModel,
+        effort
+      ),
+      cwd: taskRepoRoot
+    };
     const runtimeSession = await deps.runtime.createSession({
       taskSlug,
       role,
       command: startCommand.command,
       args: startCommand.args,
-      cwd: taskRepoRoot,
+      cwd: startCommand.cwd,
       env: {
         VCM_API_URL: deps.apiUrl,
         VCM_TASK_REPO_ROOT: taskRepoRoot,
@@ -115,8 +173,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
         VCM_SESSION_ID: claudeSessionId
       },
       cols: input.cols,
-      rows: input.rows,
-      logPath: resolveRepoPath(taskRepoRoot, paths.roleLogPaths[role])
+      rows: input.rows
     });
     const timestamp = now();
     const record: RoleSessionRecord = {
@@ -130,10 +187,10 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       command: startCommand.display,
       permissionMode,
       model,
-      cwd: taskRepoRoot,
+      effort,
+      cwd: startCommand.cwd,
       terminalBackend: "node-pty",
       pid: runtimeSession.pid,
-      logPath: paths.roleLogPaths[role],
       roleCommandPath: isDispatchableRole(role)
         ? paths.roleCommandPaths[role]
         : undefined,
@@ -145,18 +202,403 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     };
 
     deps.registry.upsert(record);
-    await persistTaskSession(deps.fs, taskRepoRoot, config.stateRoot, record);
+    await persistRoleSessionRecord(deps.fs, repoRoot, taskRepoRoot, config.stateRoot, record);
+    return record;
+  }
+
+  async function launchProjectGateReviewerSession(
+    repoRoot: string,
+    input: StartRoleSessionRequest,
+    launchMode: LaunchMode,
+    activeTaskSlug?: string
+  ): Promise<RoleSessionRecord> {
+    const live = toRoleSessionRecordView(
+      getRegisteredProjectGateReviewerSession(deps.registry, deps.runtime),
+      deps.runtime
+    );
+    if (live && live.status === "running") {
+      return bindProjectGateReviewerSession(repoRoot, live, activeTaskSlug);
+    }
+
+    const config = await deps.projectService.loadConfig(repoRoot);
+    const persisted = await loadPersistedProjectGateReviewerSession(deps.fs, repoRoot);
+    const permissionMode = normalizeClaudePermissionMode(input.permissionMode ?? persisted?.permissionMode);
+    const model = normalizeClaudeModel(input.model ?? persisted?.model);
+    const effort = normalizeClaudeEffort(input.effort ?? persisted?.effort);
+    const claudeSessionId = launchMode === "resume"
+      ? persisted?.claudeSessionId
+      : randomUUID();
+
+    if (!claudeSessionId) {
+      throw new VcmError({
+        code: "GATE_REVIEWER_SESSION_MISSING",
+        message: "Gate Reviewer does not have a session id to resume.",
+        statusCode: 409,
+        hint: "Start Gate Reviewer once before using Resume."
+      });
+    }
+
+    const transcriptPath = launchMode === "resume" && persisted?.transcriptPath
+      ? persisted.transcriptPath
+      : claudeTranscriptPath(repoRoot, claudeSessionId);
+    const activeTask = activeTaskSlug
+      ? await deps.taskService.loadTask(repoRoot, activeTaskSlug)
+      : undefined;
+    const activeTaskRepoRoot = activeTask ? getTaskRuntimeRepoRoot(activeTask) : undefined;
+    const startCommand = {
+      ...deps.claude.buildRoleStartCommand(
+        GATE_REVIEWER_ROLE,
+        config.claudeCommand,
+        permissionMode,
+        claudeSessionId,
+        launchMode === "resume",
+        model,
+        effort
+      ),
+      cwd: repoRoot
+    };
+    const runtimeSession = await deps.runtime.createSession({
+      taskSlug: PROJECT_GATE_REVIEWER_SCOPE,
+      role: GATE_REVIEWER_ROLE,
+      command: startCommand.command,
+      args: startCommand.args,
+      cwd: startCommand.cwd,
+      env: {
+        VCM_API_URL: deps.apiUrl,
+        VCM_TASK_REPO_ROOT: activeTaskRepoRoot ?? repoRoot,
+        VCM_TASK_SLUG: activeTaskSlug ?? PROJECT_GATE_REVIEWER_SCOPE,
+        VCM_ROLE: GATE_REVIEWER_ROLE,
+        VCM_SESSION_ID: claudeSessionId
+      },
+      cols: input.cols,
+      rows: input.rows
+    });
+    const timestamp = now();
+    const record: RoleSessionRecord = {
+      id: runtimeSession.id,
+      claudeSessionId,
+      transcriptPath,
+      taskSlug: PROJECT_GATE_REVIEWER_SCOPE,
+      role: GATE_REVIEWER_ROLE,
+      status: runtimeSession.status,
+      activityStatus: "idle",
+      command: startCommand.display,
+      permissionMode,
+      model,
+      effort,
+      cwd: startCommand.cwd,
+      terminalBackend: "node-pty",
+      pid: runtimeSession.pid,
+      startedAt: runtimeSession.startedAt,
+      updatedAt: timestamp,
+      lastOutputAt: runtimeSession.lastOutputAt,
+      activeTaskSlug,
+      activeTaskRepoRoot,
+      exitCode: runtimeSession.exitCode
+    };
+
+    deps.registry.upsert(record);
+    await persistProjectGateReviewerSession(deps.fs, repoRoot, record);
+    return record;
+  }
+
+  async function bindProjectGateReviewerSession(
+    repoRoot: string,
+    record: RoleSessionRecord,
+    activeTaskSlug?: string
+  ): Promise<RoleSessionRecord> {
+    if (!activeTaskSlug) {
+      return record;
+    }
+
+    const task = await deps.taskService.loadTask(repoRoot, activeTaskSlug);
+    const activeTaskRepoRoot = getTaskRuntimeRepoRoot(task);
+    const updated: RoleSessionRecord = {
+      ...record,
+      taskSlug: PROJECT_GATE_REVIEWER_SCOPE,
+      activeTaskSlug,
+      activeTaskRepoRoot,
+      updatedAt: now()
+    };
+    deps.registry.upsert(updated);
+    await persistProjectGateReviewerSession(deps.fs, repoRoot, updated);
+    return updated;
+  }
+
+  async function launchProjectTranslatorSession(
+    repoRoot: string,
+    input: StartRoleSessionRequest,
+    launchMode: LaunchMode
+  ): Promise<RoleSessionRecord> {
+    const live = toRoleSessionRecordView(
+      getRegisteredProjectTranslatorSession(deps.registry, deps.runtime),
+      deps.runtime
+    );
+    if (live && live.status === "running") {
+      return live;
+    }
+
+    const config = await deps.projectService.loadConfig(repoRoot);
+    const persisted = await loadPersistedTranslatorSession(deps.fs, repoRoot);
+    const permissionMode = normalizeClaudePermissionMode(input.permissionMode ?? persisted?.permissionMode);
+    const model = normalizeClaudeModel(input.model ?? persisted?.model);
+    const effort = normalizeClaudeEffort(input.effort ?? persisted?.effort);
+    const claudeSessionId = launchMode === "resume"
+      ? persisted?.claudeSessionId
+      : randomUUID();
+
+    if (!claudeSessionId) {
+      throw new VcmError({
+        code: "TRANSLATOR_SESSION_MISSING",
+        message: "Translator does not have a session id to resume.",
+        statusCode: 409,
+        hint: "Start the translator once before using Resume."
+      });
+    }
+
+    await deps.fs.ensureDir(resolveRepoPath(repoRoot, TRANSLATION_DIR));
+    const transcriptPath = launchMode === "resume" && persisted?.transcriptPath
+      ? persisted.transcriptPath
+      : claudeTranscriptPath(repoRoot, claudeSessionId);
+    const startCommand = {
+      ...deps.claude.buildRoleStartCommand(
+        TRANSLATOR_ROLE,
+        config.claudeCommand,
+        permissionMode,
+        claudeSessionId,
+        launchMode === "resume",
+        model,
+        effort
+      ),
+      cwd: repoRoot
+    };
+    const runtimeSession = await deps.runtime.createSession({
+      taskSlug: PROJECT_TRANSLATOR_SCOPE,
+      role: TRANSLATOR_ROLE,
+      command: startCommand.command,
+      args: startCommand.args,
+      cwd: startCommand.cwd,
+      env: {
+        VCM_API_URL: deps.apiUrl,
+        VCM_TASK_REPO_ROOT: repoRoot,
+        VCM_TASK_SLUG: PROJECT_TRANSLATOR_SCOPE,
+        VCM_ROLE: TRANSLATOR_ROLE,
+        VCM_SESSION_ID: claudeSessionId
+      },
+      cols: input.cols,
+      rows: input.rows
+    });
+    const timestamp = now();
+    const record: RoleSessionRecord = {
+      id: runtimeSession.id,
+      claudeSessionId,
+      transcriptPath,
+      taskSlug: PROJECT_TRANSLATOR_SCOPE,
+      role: TRANSLATOR_ROLE,
+      status: runtimeSession.status,
+      activityStatus: "idle",
+      command: startCommand.display,
+      permissionMode,
+      model,
+      effort,
+      cwd: startCommand.cwd,
+      terminalBackend: "node-pty",
+      pid: runtimeSession.pid,
+      startedAt: runtimeSession.startedAt,
+      updatedAt: timestamp,
+      lastOutputAt: runtimeSession.lastOutputAt,
+      exitCode: runtimeSession.exitCode
+    };
+
+    deps.registry.upsert(record);
+    await persistTranslatorSession(deps.fs, repoRoot, record);
     return record;
   }
 
   return {
+    startProjectGateReviewerSession(repoRoot, input = {}) {
+      return launchProjectGateReviewerSession(repoRoot, input, "fresh");
+    },
+    resumeProjectGateReviewerSession(repoRoot, input = {}) {
+      return launchProjectGateReviewerSession(repoRoot, input, "resume");
+    },
+    async stopProjectGateReviewerSession(repoRoot) {
+      const existing = await this.getProjectGateReviewerSession(repoRoot);
+      if (!existing) {
+        throw new VcmError({
+          code: "SESSION_MISSING",
+          message: "Gate Reviewer session has not been started.",
+          statusCode: 404
+        });
+      }
+
+      if (deps.runtime.getSession(existing.id)) {
+        await deps.runtime.stop(existing.id);
+      }
+
+      const updated: RoleSessionRecord = {
+        ...existing,
+        taskSlug: PROJECT_GATE_REVIEWER_SCOPE,
+        status: "exited",
+        activityStatus: "idle",
+        updatedAt: now()
+      };
+      deps.registry.upsert(updated);
+      await persistProjectGateReviewerSession(deps.fs, repoRoot, updated);
+      return updated;
+    },
+    async restartProjectGateReviewerSession(repoRoot, input = {}) {
+      const existing = await this.getProjectGateReviewerSession(repoRoot);
+      if (!existing) {
+        return launchProjectGateReviewerSession(repoRoot, input, "fresh");
+      }
+
+      if (deps.runtime.getSession(existing.id)) {
+        await deps.runtime.stop(existing.id);
+      }
+      deps.registry.remove(existing.id);
+
+      return launchProjectGateReviewerSession(repoRoot, input, "fresh");
+    },
+    async getProjectGateReviewerSession(repoRoot) {
+      const record = getRegisteredProjectGateReviewerSession(deps.registry, deps.runtime)
+        ?? await loadPersistedProjectGateReviewerSession(deps.fs, repoRoot);
+      return toRoleSessionRecordView(record, deps.runtime);
+    },
+    async ensureProjectGateReviewerSession(repoRoot, input = {}) {
+      const existing = await this.getProjectGateReviewerSession(repoRoot);
+      if (existing?.status === "running") {
+        return existing;
+      }
+      if (existing?.claudeSessionId) {
+        return this.resumeProjectGateReviewerSession(repoRoot, {
+          permissionMode: input.permissionMode ?? existing.permissionMode,
+          model: input.model ?? existing.model,
+          effort: input.effort ?? existing.effort,
+          cols: input.cols,
+          rows: input.rows
+        });
+      }
+      return this.startProjectGateReviewerSession(repoRoot, input);
+    },
+    startProjectTranslatorSession(repoRoot, input = {}) {
+      return launchProjectTranslatorSession(repoRoot, input, "fresh");
+    },
+    resumeProjectTranslatorSession(repoRoot, input = {}) {
+      return launchProjectTranslatorSession(repoRoot, input, "resume");
+    },
+    async stopProjectTranslatorSession(repoRoot) {
+      const existing = await this.getProjectTranslatorSession(repoRoot);
+      if (!existing) {
+        throw new VcmError({
+          code: "SESSION_MISSING",
+          message: "Translator session has not been started.",
+          statusCode: 404
+        });
+      }
+
+      if (deps.runtime.getSession(existing.id)) {
+        await deps.runtime.stop(existing.id);
+      }
+
+      const updated: RoleSessionRecord = {
+        ...existing,
+        status: "exited",
+        activityStatus: "idle",
+        updatedAt: now()
+      };
+      deps.registry.upsert(updated);
+      await persistTranslatorSession(deps.fs, repoRoot, updated);
+      return updated;
+    },
+    async restartProjectTranslatorSession(repoRoot, input = {}) {
+      const existing = await this.getProjectTranslatorSession(repoRoot);
+      if (!existing) {
+        return launchProjectTranslatorSession(repoRoot, input, "fresh");
+      }
+
+      if (deps.runtime.getSession(existing.id)) {
+        await deps.runtime.stop(existing.id);
+      }
+      deps.registry.remove(existing.id);
+
+      return launchProjectTranslatorSession(repoRoot, input, "fresh");
+    },
+    async getProjectTranslatorSession(repoRoot) {
+      const record = getRegisteredProjectTranslatorSession(deps.registry, deps.runtime)
+        ?? await loadPersistedTranslatorSession(deps.fs, repoRoot);
+      return toRoleSessionRecordView(record, deps.runtime);
+    },
+    async ensureProjectTranslatorSession(repoRoot, input = {}) {
+      const existing = await this.getProjectTranslatorSession(repoRoot);
+      if (existing?.status === "running") {
+        return existing;
+      }
+      if (existing?.claudeSessionId) {
+        return this.resumeProjectTranslatorSession(repoRoot, {
+          model: input.model ?? existing.model,
+          effort: input.effort ?? existing.effort,
+          cols: input.cols,
+          rows: input.rows
+        });
+      }
+      return this.startProjectTranslatorSession(repoRoot, input);
+    },
+    async recordProjectTranslatorHookEvent(repoRoot, input) {
+      const current = await this.getProjectTranslatorSession(repoRoot);
+      if (!current) {
+        return undefined;
+      }
+
+      const timestamp = now();
+      const isTurnEnd = isTurnEndHook(input.eventName);
+      const isCompact = isCompactHook(input.eventName);
+      const updated: RoleSessionRecord = {
+        ...current,
+        claudeSessionId: input.sessionId ?? current.claudeSessionId,
+        transcriptPath: input.transcriptPath ?? current.transcriptPath,
+        cwd: input.cwd ?? current.cwd,
+        activityStatus: isTurnEnd ? "idle" : isCompact ? current.activityStatus : "running",
+        lastHookEventAt: timestamp,
+        lastTurnEndedAt: isTurnEnd ? timestamp : current.lastTurnEndedAt,
+        lastTurnStartedAt: isTurnEnd || isCompact ? current.lastTurnStartedAt : timestamp,
+        lastCompactAt: isCompact ? timestamp : current.lastCompactAt,
+        updatedAt: timestamp
+      };
+      deps.registry.upsert(updated);
+      await persistTranslatorSession(deps.fs, repoRoot, updated);
+      return updated;
+    },
     startRoleSession(repoRoot, taskSlug, role, input = {}) {
+      if (role === GATE_REVIEWER_ROLE) {
+        return launchProjectGateReviewerSession(repoRoot, input, "fresh", taskSlug)
+          .then((session) => scopeProjectRoleSession(session, taskSlug)!);
+      }
+      if (role === TRANSLATOR_ROLE) {
+        void taskSlug;
+        return this.startProjectTranslatorSession(repoRoot, input);
+      }
       return launchRoleSession(repoRoot, taskSlug, role, input, "fresh");
     },
     resumeRoleSession(repoRoot, taskSlug, role, input = {}) {
+      if (role === GATE_REVIEWER_ROLE) {
+        return launchProjectGateReviewerSession(repoRoot, input, "resume", taskSlug)
+          .then((session) => scopeProjectRoleSession(session, taskSlug)!);
+      }
+      if (role === TRANSLATOR_ROLE) {
+        void taskSlug;
+        return this.resumeProjectTranslatorSession(repoRoot, input);
+      }
       return launchRoleSession(repoRoot, taskSlug, role, input, "resume");
     },
     async stopRoleSession(repoRoot, taskSlug, role) {
+      if (role === GATE_REVIEWER_ROLE) {
+        return scopeProjectRoleSession(await this.stopProjectGateReviewerSession(repoRoot), taskSlug)!;
+      }
+      if (role === TRANSLATOR_ROLE) {
+        void taskSlug;
+        return this.stopProjectTranslatorSession(repoRoot);
+      }
       const existing = await this.getRoleSession(repoRoot, taskSlug, role);
       if (!existing) {
         throw new VcmError({
@@ -179,10 +621,24 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       deps.registry.upsert(updated);
       const config = await deps.projectService.loadConfig(repoRoot);
       const task = await deps.taskService.loadTask(repoRoot, taskSlug);
-      await persistTaskSession(deps.fs, getTaskRuntimeRepoRoot(task), config.stateRoot, updated);
+      await persistRoleSessionRecord(deps.fs, repoRoot, getTaskRuntimeRepoRoot(task), config.stateRoot, updated);
       return updated;
     },
     async restartRoleSession(repoRoot, taskSlug, role, input = {}) {
+      if (role === GATE_REVIEWER_ROLE) {
+        const existing = await this.getProjectGateReviewerSession(repoRoot);
+        if (existing && deps.runtime.getSession(existing.id)) {
+          await deps.runtime.stop(existing.id);
+        }
+        if (existing) {
+          deps.registry.remove(existing.id);
+        }
+        return scopeProjectRoleSession(await launchProjectGateReviewerSession(repoRoot, input, "fresh", taskSlug), taskSlug)!;
+      }
+      if (role === TRANSLATOR_ROLE) {
+        void taskSlug;
+        return this.restartProjectTranslatorSession(repoRoot, input);
+      }
       const existing = await this.getRoleSession(repoRoot, taskSlug, role);
       if (!existing) {
         return launchRoleSession(repoRoot, taskSlug, role, input, "fresh");
@@ -196,66 +652,122 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       return launchRoleSession(repoRoot, taskSlug, role, input, "fresh");
     },
     async getRoleSession(repoRoot, taskSlug, role) {
+      if (role === GATE_REVIEWER_ROLE) {
+        const session = await this.getProjectGateReviewerSession(repoRoot);
+        if (!session) {
+          return undefined;
+        }
+        return scopeProjectRoleSession(await bindProjectGateReviewerSession(repoRoot, session, taskSlug), taskSlug);
+      }
+      if (role === TRANSLATOR_ROLE) {
+        void taskSlug;
+        return this.getProjectTranslatorSession(repoRoot);
+      }
       const config = await deps.projectService.loadConfig(repoRoot);
       const task = await deps.taskService.loadTask(repoRoot, taskSlug);
       const taskRepoRoot = getTaskRuntimeRepoRoot(task);
-      const record = deps.registry.getByRole(taskSlug, role)
-        ?? await loadPersistedRoleRecord(deps.fs, taskRepoRoot, config.stateRoot, taskSlug, role);
+      const record = getRegisteredRoleSession(deps.registry, deps.runtime, taskSlug, role)
+        ?? await loadPersistedRoleRecordForRole(deps.fs, repoRoot, taskRepoRoot, config.stateRoot, taskSlug, role);
       if (!record) {
         return undefined;
       }
 
-      const runtimeSession = deps.runtime.getSession(record.id);
-      if (!runtimeSession) {
-        return {
-          ...record,
-          status: getRecoverableStatus(record),
-          pid: undefined,
-          exitCode: record.exitCode ?? null
-        };
-      }
-
-      return {
-        ...record,
-        status: runtimeSession.status,
-        activityStatus: record.activityStatus ?? "idle",
-        pid: runtimeSession.pid,
-        lastOutputAt: runtimeSession.lastOutputAt,
-        exitCode: runtimeSession.exitCode
-      };
+      return toRoleSessionRecordView(record, deps.runtime);
     },
     async listRoleSessions(repoRoot, taskSlug) {
       const sessions: RoleSessionRecord[] = [];
-      for (const role of ROLE_NAMES) {
-        const session = await this.getRoleSession(repoRoot, taskSlug, role);
+      const config = await deps.projectService.loadConfig(repoRoot);
+      const task = await deps.taskService.loadTask(repoRoot, taskSlug);
+      const taskRepoRoot = getTaskRuntimeRepoRoot(task);
+      const persistedTaskSession = await loadPersistedTaskSessionRecord(deps.fs, taskRepoRoot, config.stateRoot, taskSlug);
+      for (const role of CORE_VCM_ROLE_NAMES) {
+        const record = deps.registry.getByRole(taskSlug, role)
+          ?? normalizePersistedRoleRecord(persistedTaskSession?.roles[role]?.record);
+        const session = toRoleSessionRecordView(
+          record,
+          deps.runtime
+        );
         if (session) {
           sessions.push(session);
         }
       }
+      const gateReviewerSession = scopeProjectRoleSession(await this.getProjectGateReviewerSession(repoRoot), taskSlug);
+      if (gateReviewerSession) {
+        sessions.push(gateReviewerSession);
+      }
       return sessions;
     },
-    async recordClaudeHookEvent(repoRoot, input) {
+    async recordRoleHookEvent(repoRoot, input) {
+      if (input.role === GATE_REVIEWER_ROLE) {
+        const current = await this.getProjectGateReviewerSession(repoRoot);
+        if (!current || (!input.allowSessionMismatch && !matchesRoleHookSession(current, input))) {
+          return undefined;
+        }
+        const timestamp = now();
+        const isTurnEnd = isTurnEndHook(input.eventName);
+        const isCompact = isCompactHook(input.eventName);
+        const updated: RoleSessionRecord = {
+          ...current,
+          taskSlug: PROJECT_GATE_REVIEWER_SCOPE,
+          claudeSessionId: input.sessionId ?? current.claudeSessionId,
+          transcriptPath: input.transcriptPath ?? current.transcriptPath,
+          cwd: input.cwd ?? current.cwd,
+          activityStatus: isTurnEnd ? "idle" : isCompact ? current.activityStatus : "running",
+          lastHookEventAt: timestamp,
+          lastTurnEndedAt: isTurnEnd ? timestamp : current.lastTurnEndedAt,
+          lastTurnStartedAt: isTurnEnd || isCompact ? current.lastTurnStartedAt : timestamp,
+          lastCompactAt: isCompact ? timestamp : current.lastCompactAt,
+          updatedAt: timestamp
+        };
+        deps.registry.upsert(updated);
+        await persistProjectGateReviewerSession(deps.fs, repoRoot, updated);
+        return scopeProjectRoleSession(updated, input.taskSlug);
+      }
+      if (input.role === TRANSLATOR_ROLE) {
+        void input.taskSlug;
+        return this.recordProjectTranslatorHookEvent(repoRoot, {
+          eventName: input.eventName,
+          sessionId: input.sessionId,
+          transcriptPath: input.transcriptPath,
+          cwd: input.cwd
+        });
+      }
       const current = await this.getRoleSession(repoRoot, input.taskSlug, input.role);
-      if (!current || !matchesClaudeHookSession(current, input)) {
+      if (!current || (!input.allowSessionMismatch && !matchesRoleHookSession(current, input))) {
         return undefined;
       }
 
       const timestamp = now();
-      const isStop = input.eventName === "Stop";
+      const isTurnEnd = isTurnEndHook(input.eventName);
+      const isCompact = isCompactHook(input.eventName);
       const updated: RoleSessionRecord = {
         ...current,
-        activityStatus: isStop ? "idle" : "running",
+        claudeSessionId: input.sessionId ?? current.claudeSessionId,
+        transcriptPath: input.transcriptPath ?? current.transcriptPath,
+        cwd: input.cwd ?? current.cwd,
+        activityStatus: isTurnEnd ? "idle" : isCompact ? current.activityStatus : "running",
         lastHookEventAt: timestamp,
-        lastTurnEndedAt: isStop ? timestamp : current.lastTurnEndedAt,
-        lastTurnStartedAt: isStop ? current.lastTurnStartedAt : timestamp,
+        lastTurnEndedAt: isTurnEnd ? timestamp : current.lastTurnEndedAt,
+        lastTurnStartedAt: isTurnEnd || isCompact ? current.lastTurnStartedAt : timestamp,
+        lastCompactAt: isCompact ? timestamp : current.lastCompactAt,
         updatedAt: timestamp
       };
       deps.registry.upsert(updated);
 
       const config = await deps.projectService.loadConfig(repoRoot);
       const task = await deps.taskService.loadTask(repoRoot, input.taskSlug);
-      await persistTaskSession(deps.fs, getTaskRuntimeRepoRoot(task), config.stateRoot, updated);
+      await persistRoleSessionRecord(deps.fs, repoRoot, getTaskRuntimeRepoRoot(task), config.stateRoot, updated);
       return updated;
+    },
+    recordClaudeHookEvent(repoRoot, input) {
+      return this.recordRoleHookEvent(repoRoot, {
+        taskSlug: input.taskSlug,
+        role: input.role,
+        eventName: input.eventName,
+        sessionId: input.claudeSessionId,
+        transcriptPath: input.transcriptPath,
+        cwd: input.cwd
+      });
     },
     async markRoleActivityRunning(repoRoot, taskSlug, role) {
       const current = await this.getRoleSession(repoRoot, taskSlug, role);
@@ -271,27 +783,103 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
         lastHookEventAt: timestamp,
         updatedAt: timestamp
       };
+      if (role === GATE_REVIEWER_ROLE) {
+        const persisted = {
+          ...updated,
+          taskSlug: PROJECT_GATE_REVIEWER_SCOPE
+        };
+        deps.registry.upsert(persisted);
+        await persistProjectGateReviewerSession(deps.fs, repoRoot, persisted);
+        return updated;
+      }
+
       deps.registry.upsert(updated);
 
       const config = await deps.projectService.loadConfig(repoRoot);
       const task = await deps.taskService.loadTask(repoRoot, taskSlug);
-      await persistTaskSession(deps.fs, getTaskRuntimeRepoRoot(task), config.stateRoot, updated);
+      await persistRoleSessionRecord(deps.fs, repoRoot, getTaskRuntimeRepoRoot(task), config.stateRoot, updated);
+      return updated;
+    },
+    async markRoleActivityIdle(repoRoot, taskSlug, role) {
+      const current = await this.getRoleSession(repoRoot, taskSlug, role);
+      if (!current) {
+        return undefined;
+      }
+
+      const timestamp = now();
+      const updated: RoleSessionRecord = {
+        ...current,
+        activityStatus: "idle",
+        lastTurnEndedAt: timestamp,
+        updatedAt: timestamp
+      };
+      if (role === GATE_REVIEWER_ROLE) {
+        const persisted = {
+          ...updated,
+          taskSlug: PROJECT_GATE_REVIEWER_SCOPE
+        };
+        deps.registry.upsert(persisted);
+        await persistProjectGateReviewerSession(deps.fs, repoRoot, persisted);
+        return updated;
+      }
+
+      deps.registry.upsert(updated);
+
+      const config = await deps.projectService.loadConfig(repoRoot);
+      const task = await deps.taskService.loadTask(repoRoot, taskSlug);
+      await persistRoleSessionRecord(deps.fs, repoRoot, getTaskRuntimeRepoRoot(task), config.stateRoot, updated);
       return updated;
     }
   };
 }
 
-function matchesClaudeHookSession(record: RoleSessionRecord, input: RecordClaudeHookEventInput): boolean {
-  if (input.claudeSessionId && record.claudeSessionId === input.claudeSessionId) {
+function toRoleSessionRecordView(
+  record: RoleSessionRecord | undefined,
+  runtime: TerminalRuntime
+): RoleSessionRecord | undefined {
+  if (!record) {
+    return undefined;
+  }
+
+  const runtimeSession = runtime.getSession(record.id);
+  if (!runtimeSession) {
+    return {
+      ...record,
+      status: getRecoverableStatus(record),
+      pid: undefined,
+      exitCode: record.exitCode ?? null
+    };
+  }
+
+  return {
+    ...record,
+    status: runtimeSession.status,
+    activityStatus: record.activityStatus ?? "idle",
+    pid: runtimeSession.pid,
+    lastOutputAt: runtimeSession.lastOutputAt,
+    exitCode: runtimeSession.exitCode
+  };
+}
+
+function matchesRoleHookSession(record: RoleSessionRecord, input: RecordRoleHookEventInput): boolean {
+  if (input.sessionId && record.claudeSessionId === input.sessionId) {
     return true;
   }
   if (input.transcriptPath && record.transcriptPath === input.transcriptPath) {
     return true;
   }
-  if (!input.claudeSessionId && !input.transcriptPath) {
+  if (!input.sessionId && !input.transcriptPath) {
     return true;
   }
   return false;
+}
+
+function isTurnEndHook(eventName: ClaudeHookEventName): boolean {
+  return eventName === "Stop" || eventName === "StopFailure";
+}
+
+function isCompactHook(eventName: ClaudeHookEventName): boolean {
+  return eventName === "PostCompact";
 }
 
 function getRecoverableStatus(record: RoleSessionRecord): RoleSessionRecord["status"] {
@@ -316,6 +904,116 @@ function getHandoffArtifactPath(paths: ReturnType<ArtifactService["getHandoffPat
   return undefined;
 }
 
+function getRegisteredRoleSession(
+  registry: SessionRegistry,
+  runtime: TerminalRuntime,
+  taskSlug: string,
+  role: RoleName
+): RoleSessionRecord | undefined {
+  if (role !== TRANSLATOR_ROLE && role !== GATE_REVIEWER_ROLE) {
+    return registry.getByRole(taskSlug, role);
+  }
+
+  const candidates = registry.list().filter((session) => session.role === role);
+  const live = candidates.find((session) => runtime.getSession(session.id)?.status === "running");
+  const scoped = live
+    ?? candidates.find((session) => session.taskSlug === taskSlug)
+    ?? candidates.sort(compareSessionUpdatedAtDesc)[0];
+  return scopeProjectRoleSession(scoped, taskSlug);
+}
+
+function getRegisteredProjectGateReviewerSession(
+  registry: SessionRegistry,
+  runtime: TerminalRuntime
+): RoleSessionRecord | undefined {
+  const candidates = registry.list().filter((session) => session.role === GATE_REVIEWER_ROLE);
+  const live = candidates.find((session) => runtime.getSession(session.id)?.status === "running");
+  return live ?? candidates.sort(compareSessionUpdatedAtDesc)[0];
+}
+
+function getRegisteredProjectTranslatorSession(
+  registry: SessionRegistry,
+  runtime: TerminalRuntime
+): RoleSessionRecord | undefined {
+  const candidates = registry.list().filter((session) => session.role === TRANSLATOR_ROLE);
+  const live = candidates.find((session) => runtime.getSession(session.id)?.status === "running");
+  return live ?? candidates.sort(compareSessionUpdatedAtDesc)[0];
+}
+
+function compareSessionUpdatedAtDesc(left: RoleSessionRecord, right: RoleSessionRecord): number {
+  return (right.updatedAt ?? "").localeCompare(left.updatedAt ?? "");
+}
+
+function scopeProjectRoleSession(record: RoleSessionRecord | undefined, taskSlug: string): RoleSessionRecord | undefined {
+  if (!record || (record.role !== TRANSLATOR_ROLE && record.role !== GATE_REVIEWER_ROLE)) {
+    return record;
+  }
+  return {
+    ...record,
+    taskSlug
+  };
+}
+
+async function loadPersistedRoleRecordForRole(
+  fs: FileSystemAdapter,
+  baseRepoRoot: string,
+  taskRepoRoot: string,
+  stateRoot: string,
+  taskSlug: string,
+  role: RoleName
+): Promise<RoleSessionRecord | undefined> {
+  if (role === GATE_REVIEWER_ROLE) {
+    void taskSlug;
+    return loadPersistedProjectGateReviewerSession(fs, baseRepoRoot);
+  }
+  if (role === TRANSLATOR_ROLE) {
+    void taskSlug;
+    return loadPersistedTranslatorSession(fs, baseRepoRoot);
+  }
+
+  return loadPersistedRoleRecord(fs, taskRepoRoot, stateRoot, taskSlug, role);
+}
+
+async function loadPersistedProjectGateReviewerSession(
+  fs: FileSystemAdapter,
+  repoRoot: string
+): Promise<RoleSessionRecord | undefined> {
+  const sessionPath = resolveRepoPath(repoRoot, GATE_REVIEWER_SESSION_PATH);
+  if (!(await fs.pathExists(sessionPath))) {
+    return undefined;
+  }
+
+  const payload = await fs.readJson<ProjectRoleSessionFile | RoleSessionRecord>(sessionPath);
+  const record = normalizePersistedRoleRecord(isProjectRoleSessionFile(payload) ? payload.record : payload);
+  if (!record) {
+    return undefined;
+  }
+  return {
+    ...record,
+    taskSlug: PROJECT_GATE_REVIEWER_SCOPE
+  };
+}
+
+async function loadPersistedTranslatorSession(
+  fs: FileSystemAdapter,
+  repoRoot: string
+): Promise<RoleSessionRecord | undefined> {
+  const sessionPath = resolveRepoPath(repoRoot, TRANSLATOR_SESSION_PATH);
+  if (!(await fs.pathExists(sessionPath))) {
+    return undefined;
+  }
+
+  const payload = await fs.readJson<ProjectRoleSessionFile | RoleSessionRecord>(sessionPath);
+  const record = normalizePersistedRoleRecord(isProjectRoleSessionFile(payload) ? payload.record : payload);
+  if (!record) {
+    return undefined;
+  }
+  return {
+    ...record,
+    taskSlug: PROJECT_TRANSLATOR_SCOPE
+  };
+}
+
 async function loadPersistedRoleRecord(
   fs: FileSystemAdapter,
   repoRoot: string,
@@ -323,13 +1021,25 @@ async function loadPersistedRoleRecord(
   taskSlug: string,
   role: RoleName
 ): Promise<RoleSessionRecord | undefined> {
+  const current = await loadPersistedTaskSessionRecord(fs, repoRoot, stateRoot, taskSlug);
+  return normalizePersistedRoleRecord(current?.roles[role]?.record);
+}
+
+async function loadPersistedTaskSessionRecord(
+  fs: FileSystemAdapter,
+  repoRoot: string,
+  stateRoot: string,
+  taskSlug: string
+): Promise<TaskSessionRecord | undefined> {
   const sessionPath = getTaskSessionPath(repoRoot, stateRoot, taskSlug);
   if (!(await fs.pathExists(sessionPath))) {
     return undefined;
   }
 
-  const current = await fs.readJson<TaskSessionRecord>(sessionPath);
-  const record = current.roles[role]?.record;
+  return fs.readJson<TaskSessionRecord>(sessionPath);
+}
+
+function normalizePersistedRoleRecord(record: RoleSessionRecord | undefined): RoleSessionRecord | undefined {
   const legacy = record as (RoleSessionRecord & {
     lastPromptSubmittedAt?: unknown;
     lastStopAt?: unknown;
@@ -348,7 +1058,8 @@ async function loadPersistedRoleRecord(
             : undefined
         ),
         permissionMode: normalizeClaudePermissionMode(record.permissionMode),
-        model: normalizeClaudeModel(record.model)
+        model: normalizeClaudeModel(record.model),
+        effort: normalizeClaudeEffort(record.effort)
       }
     : undefined;
 }
@@ -385,6 +1096,67 @@ async function persistTaskSession(
   });
 }
 
+async function persistRoleSessionRecord(
+  fs: FileSystemAdapter,
+  baseRepoRoot: string,
+  taskRepoRoot: string,
+  stateRoot: string,
+  session: RoleSessionRecord
+): Promise<void> {
+  if (session.role === GATE_REVIEWER_ROLE) {
+    await persistProjectGateReviewerSession(fs, baseRepoRoot, session);
+    return;
+  }
+  if (session.role === TRANSLATOR_ROLE) {
+    await persistTranslatorSession(fs, baseRepoRoot, session);
+    return;
+  }
+
+  await persistTaskSession(fs, taskRepoRoot, stateRoot, session);
+}
+
+async function persistProjectGateReviewerSession(
+  fs: FileSystemAdapter,
+  repoRoot: string,
+  session: RoleSessionRecord
+): Promise<void> {
+  await fs.writeJsonAtomic<ProjectRoleSessionFile>(
+    resolveRepoPath(repoRoot, GATE_REVIEWER_SESSION_PATH),
+    {
+      version: 1,
+      role: session.role,
+      updatedAt: session.updatedAt,
+      record: {
+        ...session,
+        taskSlug: PROJECT_GATE_REVIEWER_SCOPE
+      }
+    }
+  );
+}
+
+async function persistTranslatorSession(
+  fs: FileSystemAdapter,
+  repoRoot: string,
+  session: RoleSessionRecord
+): Promise<void> {
+  await fs.writeJsonAtomic<ProjectRoleSessionFile>(
+    resolveRepoPath(repoRoot, TRANSLATOR_SESSION_PATH),
+    {
+      version: 1,
+      role: session.role,
+      updatedAt: session.updatedAt,
+      record: {
+        ...session,
+        taskSlug: PROJECT_TRANSLATOR_SCOPE
+      }
+    }
+  );
+}
+
+function isProjectRoleSessionFile(value: ProjectRoleSessionFile | RoleSessionRecord): value is ProjectRoleSessionFile {
+  return "record" in value && typeof value.record === "object" && value.record !== null;
+}
+
 function createEmptyTaskSessionRecord(taskSlug: string, updatedAt: string): TaskSessionRecord {
   return {
     version: 1,
@@ -418,6 +1190,20 @@ function normalizeClaudeModel(value: unknown): ClaudeModel {
     || value === "opus[1m]"
     || value === "claude-opus-4-8"
     || value === "claude-opus-4-8[1m]"
+  ) {
+    return value;
+  }
+  return "default";
+}
+
+function normalizeClaudeEffort(value: unknown): SessionEffort {
+  if (
+    value === "low"
+    || value === "medium"
+    || value === "high"
+    || value === "xhigh"
+    || value === "max"
+    || value === "ultracode"
   ) {
     return value;
   }

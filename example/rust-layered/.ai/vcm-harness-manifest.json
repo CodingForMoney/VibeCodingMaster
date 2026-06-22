@@ -4,7 +4,7 @@
   "harnessVersion": "0.3.0-fixed",
   "installMode": "fixed",
   "installedAt": "2026-06-07T00:00:00Z",
-  "updatedAt": "2026-06-11T03:04:25.112Z",
+  "updatedAt": "2026-06-22T06:36:13.778Z",
   "runtimeRoots": [
     ".ai/vcm/",
     ".claude/worktrees/"
@@ -138,6 +138,40 @@
       }
     },
     {
+      "path": ".claude/agents/gate-reviewer.md",
+      "entryType": "file",
+      "category": "gate-reviewer-agent",
+      "ownership": "managed-block",
+      "source": "vcm-template",
+      "lifecycle": "long-term",
+      "marker": {
+        "type": "html",
+        "begin": "<!-- VCM:BEGIN version=1 -->",
+        "end": "<!-- VCM:END -->"
+      },
+      "uninstall": {
+        "action": "remove-managed-block",
+        "requiresConfirmation": false
+      }
+    },
+    {
+      "path": ".claude/agents/translator.md",
+      "entryType": "file",
+      "category": "agent-translator",
+      "ownership": "managed-block",
+      "source": "vcm-template",
+      "lifecycle": "long-term",
+      "marker": {
+        "type": "html",
+        "begin": "<!-- VCM:BEGIN version=1 -->",
+        "end": "<!-- VCM:END -->"
+      },
+      "uninstall": {
+        "action": "remove-managed-block",
+        "requiresConfirmation": false
+      }
+    },
+    {
       "path": ".claude/settings.json",
       "entryType": "file",
       "category": "claude-settings",
@@ -205,6 +239,30 @@
       "path": ".claude/skills/vcm-route-message/",
       "entryType": "directory",
       "category": "skill-directory",
+      "ownership": "vcm-created",
+      "source": "vcm-template",
+      "lifecycle": "long-term"
+    },
+    {
+      "path": ".claude/skills/vcm-gate-review/",
+      "entryType": "directory",
+      "category": "skill-directory",
+      "ownership": "vcm-created",
+      "source": "vcm-template",
+      "lifecycle": "long-term"
+    },
+    {
+      "path": ".ai/vcm/translations/",
+      "entryType": "directory",
+      "category": "harness-tool-directory",
+      "ownership": "vcm-created",
+      "source": "vcm-template",
+      "lifecycle": "long-term"
+    },
+    {
+      "path": ".ai/vcm/gate-reviews/",
+      "entryType": "directory",
+      "category": "harness-tool-directory",
       "ownership": "vcm-created",
       "source": "vcm-template",
       "lifecycle": "long-term"
@@ -292,6 +350,30 @@
       "ownership": "whole-file",
       "source": "vcm-template",
       "lifecycle": "long-term",
+      "uninstall": {
+        "action": "delete-file-if-unchanged",
+        "requiresConfirmation": false
+      }
+    },
+    {
+      "path": ".claude/skills/vcm-gate-review/SKILL.md",
+      "entryType": "file",
+      "category": "skill",
+      "ownership": "whole-file",
+      "source": "vcm-template",
+      "lifecycle": "long-term",
+      "uninstall": {
+        "action": "delete-file-if-unchanged",
+        "requiresConfirmation": false
+      }
+    },
+    {
+      "path": ".ai/tools/request-gate-review",
+      "entryType": "file",
+      "category": "runtime-tool",
+      "ownership": "whole-file",
+      "source": "vcm-template",
+      "lifecycle": "conditional-long-term",
       "uninstall": {
         "action": "delete-file-if-unchanged",
         "requiresConfirmation": false

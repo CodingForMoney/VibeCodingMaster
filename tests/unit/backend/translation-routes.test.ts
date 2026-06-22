@@ -1,161 +1,80 @@
-import Fastify from "fastify";
+import Fastify, { type FastifyInstance } from "fastify";
 import { describe, expect, it } from "vitest";
 import { registerTranslationRoutes } from "../../../src/backend/api/translation-routes.js";
 import type { ProjectService } from "../../../src/backend/services/project-service.js";
 import type { TaskService } from "../../../src/backend/services/task-service.js";
 import type { TranslationService } from "../../../src/backend/services/translation-service.js";
-import type { TranslationSecretSettings, TranslationSettings } from "../../../src/shared/types/translation.js";
-
-const settings: TranslationSettings = {
-  version: 1,
-  enabled: false,
-  providerType: "openai-compatible",
-  baseUrl: "https://api.openai.com/v1",
-  model: "gpt-4o-mini",
-  sourceLanguage: "auto",
-  targetLanguage: "zh-CN",
-  workingLanguage: "en",
-  inputMode: "review-before-send",
-  translateOutput: true,
-  translateUserInput: true,
-  contextEnabled: false,
-  preserveTechnicalTokens: true,
-  skipCjkText: true,
-  redactSecrets: true,
-  requestTimeoutMs: 120000,
-  temperature: 0.1
-};
 
 describe("translation routes", () => {
-  it("saves global translation settings and API keys without requiring a connected project", async () => {
-    let savedSettings: Partial<TranslationSettings> | undefined;
-    let savedSecrets: TranslationSecretSettings | undefined;
+  it("does not expose legacy API translation settings routes", async () => {
     const app = Fastify({ logger: false });
 
     registerTranslationRoutes(app, {
       projectService: createProjectServiceThatShouldNotBeCalled(),
       taskService: {} as TaskService,
-      translationService: {
-        async getSettings() {
-          return settings;
-        },
-        async updateSettings(input, secrets) {
-          savedSettings = input;
-          savedSecrets = secrets;
-          return { ...settings, ...input };
-        },
-        async getPromptPreviews() {
-          return [];
-        },
-        async testProvider() {
-          return { ok: true, model: settings.model, elapsedMs: 1 };
-        },
-        async recordConversationBoundary() {
-          return undefined;
-        },
-        async translateUserInput() {
-          throw new Error("not implemented");
-        },
-        async sendTranslatedInput() {},
-        subscribeToSession() {
-          throw new Error("not implemented");
-        },
-        clearSession() {},
-        async retryTranslation() {
-          throw new Error("not implemented");
-        },
-        async retryFailedTranslations() {
-          return { failures: [] };
-        },
-        async ignoreTranslationFailures() {
-          return { failures: [] };
-        }
-      } satisfies TranslationService
+      translationService: createTranslationServiceStub()
     });
 
-    const response = await app.inject({
-      method: "PUT",
-      url: "/api/translation/settings",
-      payload: {
-        enabled: true,
-        apiKey: "sk-local-test",
-        model: "cheap-translator"
-      }
-    });
-
-    expect(response.statusCode).toBe(200);
-    expect(savedSettings).toMatchObject({
-      enabled: true,
-      model: "cheap-translator"
-    });
-    expect(savedSecrets).toEqual({ apiKey: "sk-local-test" });
-    await app.close();
-  });
-
-  it("returns prompt previews without requiring a connected project", async () => {
-    const app = Fastify({ logger: false });
-
-    registerTranslationRoutes(app, {
-      projectService: createProjectServiceThatShouldNotBeCalled(),
-      taskService: {} as TaskService,
-      translationService: {
-        async getSettings() {
-          return settings;
-        },
-        async updateSettings() {
-          return settings;
-        },
-        async getPromptPreviews() {
-          return [{
-            key: "zh-to-en",
-            label: "zh-to-en",
-            defaultPrompt: "DEFAULT",
-            userPrompt: "USER",
-            customized: true
-          }];
-        },
-        async testProvider() {
-          return { ok: true, model: settings.model, elapsedMs: 1 };
-        },
-        async recordConversationBoundary() {
-          return undefined;
-        },
-        async translateUserInput() {
-          throw new Error("not implemented");
-        },
-        async sendTranslatedInput() {},
-        subscribeToSession() {
-          throw new Error("not implemented");
-        },
-        clearSession() {},
-        async retryTranslation() {
-          throw new Error("not implemented");
-        },
-        async retryFailedTranslations() {
-          return { failures: [] };
-        },
-        async ignoreTranslationFailures() {
-          return { failures: [] };
-        }
-      } satisfies TranslationService
-    });
-
-    const response = await app.inject({
-      method: "GET",
-      url: "/api/translation/prompts"
-    });
-
-    expect(response.statusCode).toBe(200);
-    expect(response.json()).toEqual([{
-      key: "zh-to-en",
-      label: "zh-to-en",
-      defaultPrompt: "DEFAULT",
-      userPrompt: "USER",
-      customized: true
-    }]);
+    await expectRouteStatus(app, "GET", "/api/translation/settings", 404);
+    await expectRouteStatus(app, "PUT", "/api/translation/settings", 404);
+    await expectRouteStatus(app, "GET", "/api/translation/prompts", 404);
+    await expectRouteStatus(app, "POST", "/api/translation/test", 404);
     await app.close();
   });
 });
+
+async function expectRouteStatus(
+  app: FastifyInstance,
+  method: "GET" | "POST" | "PUT",
+  url: string,
+  statusCode: number
+) {
+  const response = await app.inject({ method, url, payload: method === "PUT" ? {} : undefined });
+  expect(response.statusCode).toBe(statusCode);
+}
+
+function createTranslationServiceStub(): TranslationService {
+  return {
+    async startSession() {
+      throw new Error("not implemented");
+    },
+    async pollSessionEvents() {
+      throw new Error("not implemented");
+    },
+    async recordConversationBoundary() {
+      return undefined;
+    },
+    async translateUserInput() {
+      throw new Error("not implemented");
+    },
+    async sendTranslatedInput() {},
+    subscribeToSession() {
+      throw new Error("not implemented");
+    },
+    async clearSession() {},
+    async stopSession() {},
+    async stopTask() {},
+    async retryTranslation() {
+      throw new Error("not implemented");
+    },
+    async retryFailedTranslations() {
+      return { failures: [] };
+    },
+    async ignoreTranslationFailures() {
+      return { failures: [] };
+    },
+    async translateGatewayOutput() {
+      throw new Error("not implemented");
+    },
+    getDiagnostics() {
+      return {
+        sessions: 0,
+        transcriptWatchers: 0,
+        listeners: 0
+      };
+    }
+  };
+}
 
 function createProjectServiceThatShouldNotBeCalled(): ProjectService {
   return {

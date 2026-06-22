@@ -1,5 +1,5 @@
 import path from "node:path";
-import { DISPATCHABLE_ROLES, ROLE_NAMES } from "../../shared/constants.js";
+import { DISPATCHABLE_ROLES } from "../../shared/constants.js";
 import type {
   ArtifactKind,
   ArtifactSummary,
@@ -32,7 +32,6 @@ export interface ArtifactService {
   resolveRoleCommandPath(input: ReadRoleCommandInput): Promise<string>;
   readRoleCommand(input: ReadRoleCommandInput): Promise<string>;
   saveRoleCommand(input: SaveRoleCommandInput): Promise<void>;
-  appendRoleLog(input: AppendRoleLogInput): Promise<void>;
 }
 
 export interface EnsureHandoffStructureInput {
@@ -66,13 +65,6 @@ export interface SaveRoleCommandInput extends ReadRoleCommandInput {
   content: string;
 }
 
-export interface AppendRoleLogInput {
-  repoRoot: string;
-  handoffDir: string;
-  role: RoleName;
-  content: string;
-}
-
 const ARTIFACT_PATH_KEYS: Array<[ArtifactKind, keyof HandoffPaths]> = [
   ["architecture-plan", "architecturePlanPath"],
   ["known-issues", "knownIssuesPath"],
@@ -94,24 +86,16 @@ export function createArtifactService(fs: FileSystemAdapter): ArtifactService {
   return {
     getHandoffPaths(_repoRoot, handoffDir) {
       const roleCommandsDir = path.posix.join(handoffDir, "role-commands");
-      const logsDir = path.posix.join(handoffDir, "logs");
       const messagesDir = path.posix.join(handoffDir, "messages");
 
       return {
         handoffDir,
         roleCommandsDir,
-        logsDir,
         messagesDir,
         roleCommandPaths: {
           architect: path.posix.join(roleCommandsDir, "architect.md"),
           coder: path.posix.join(roleCommandsDir, "coder.md"),
           reviewer: path.posix.join(roleCommandsDir, "reviewer.md")
-        },
-        roleLogPaths: {
-          "project-manager": path.posix.join(logsDir, "project-manager.log"),
-          architect: path.posix.join(logsDir, "architect.log"),
-          coder: path.posix.join(logsDir, "coder.log"),
-          reviewer: path.posix.join(logsDir, "reviewer.log")
         },
         messageRoutePaths: getDefaultMessageRoutePaths(messagesDir),
         architecturePlanPath: path.posix.join(handoffDir, "architecture-plan.md"),
@@ -128,7 +112,6 @@ export function createArtifactService(fs: FileSystemAdapter): ArtifactService {
       const paths = this.getHandoffPaths(input.repoRoot, input.handoffDir);
       await fs.ensureDir(resolveRepoPath(input.repoRoot, paths.handoffDir));
       await fs.ensureDir(resolveRepoPath(input.repoRoot, paths.roleCommandsDir));
-      await fs.ensureDir(resolveRepoPath(input.repoRoot, paths.logsDir));
       await fs.ensureDir(resolveRepoPath(input.repoRoot, paths.messagesDir));
       return paths;
     },
@@ -248,18 +231,6 @@ export function createArtifactService(fs: FileSystemAdapter): ArtifactService {
     async saveRoleCommand(input) {
       const paths = this.getHandoffPaths(input.repoRoot, input.handoffDir);
       await fs.writeText(resolveRepoPath(input.repoRoot, paths.roleCommandPaths[input.role]), input.content);
-    },
-    async appendRoleLog(input) {
-      if (!ROLE_NAMES.includes(input.role)) {
-        throw new VcmError({
-          code: "UNKNOWN_ROLE",
-          message: `Unknown role: ${input.role}`,
-          statusCode: 400
-        });
-      }
-
-      const paths = this.getHandoffPaths(input.repoRoot, input.handoffDir);
-      await fs.appendText(resolveRepoPath(input.repoRoot, paths.roleLogPaths[input.role]), input.content);
     }
   };
 }

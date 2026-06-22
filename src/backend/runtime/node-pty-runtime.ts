@@ -14,15 +14,23 @@ interface RuntimeEntry {
   session: TerminalSession;
   process: pty.IPty;
   listeners: Set<TerminalEventListener>;
+  logWriter: TerminalLogWriter;
+  disposed: boolean;
 }
 
 export interface NodePtyRuntimeDeps {
   fs: FileSystemAdapter;
   now?: () => string;
   id?: () => string;
+  onLogWriteError?: (error: unknown, logPath: string) => void;
 }
 
 export const TERMINAL_REPLAY_TAIL_LIMIT_BYTES = 2 * 1024 * 1024;
+
+export interface TerminalLogWriter {
+  append(data: string): void;
+  close(): Promise<void>;
+}
 
 export function createNodePtyTerminalRuntime(deps: NodePtyRuntimeDeps): TerminalRuntime {
   const entries = new Map<string, RuntimeEntry>();
@@ -41,7 +49,9 @@ export function createNodePtyTerminalRuntime(deps: NodePtyRuntimeDeps): Terminal
   };
 
   const create = async (input: CreateTerminalSessionInput, sessionId = id()): Promise<TerminalSession> => {
-    await deps.fs.ensureDir(input.logPath.replace(/[/\\][^/\\]+$/, ""));
+    if (input.logPath) {
+      await deps.fs.ensureDir(input.logPath.replace(/[/\\][^/\\]+$/, ""));
+    }
 
     const child = pty.spawn(input.command, input.args, {
       cwd: input.cwd,
@@ -61,17 +71,29 @@ export function createNodePtyTerminalRuntime(deps: NodePtyRuntimeDeps): Terminal
       exitCode: null
     };
 
+    const logWriter = input.logPath
+      ? createTerminalLogWriter(
+          deps.fs,
+          input.logPath,
+          deps.onLogWriteError ?? defaultLogWriteErrorHandler
+        )
+      : createNoopTerminalLogWriter();
     const entry: RuntimeEntry = {
       input,
       session,
       process: child,
-      listeners: new Set()
+      listeners: new Set(),
+      logWriter,
+      disposed: false
     };
     entries.set(session.id, entry);
 
     child.onData((data) => {
+      if (entry.disposed) {
+        return;
+      }
       entry.session.lastOutputAt = now();
-      void deps.fs.appendText(input.logPath, data);
+      entry.logWriter.append(data);
       emit(entry, {
         sessionId: session.id,
         taskSlug: input.taskSlug,
@@ -82,8 +104,9 @@ export function createNodePtyTerminalRuntime(deps: NodePtyRuntimeDeps): Terminal
     });
 
     child.onExit(({ exitCode }) => {
-      entry.session.status = exitCode === 0 ? "exited" : "crashed";
-      entry.session.exitCode = exitCode;
+      if (!disposeEntry(entries, entry, exitCode === 0 ? "exited" : "crashed", exitCode)) {
+        return;
+      }
       emit(entry, {
         sessionId: session.id,
         taskSlug: input.taskSlug,
@@ -91,6 +114,7 @@ export function createNodePtyTerminalRuntime(deps: NodePtyRuntimeDeps): Terminal
         type: "exit",
         exitCode
       });
+      entry.listeners.clear();
     });
 
     return { ...session };
@@ -134,19 +158,32 @@ export function createNodePtyTerminalRuntime(deps: NodePtyRuntimeDeps): Terminal
     },
     async stop(sessionId) {
       const entry = getEntry(entries, sessionId);
-      entry.session.status = "exited";
       entry.process.kill();
+      if (disposeEntry(entries, entry, "exited", entry.session.exitCode ?? null)) {
+        emit(entry, {
+          sessionId,
+          taskSlug: entry.session.taskSlug,
+          role: entry.session.role,
+          type: "exit",
+          exitCode: entry.session.exitCode ?? null
+        });
+        entry.listeners.clear();
+      }
+      await entry.logWriter.close();
     },
     async restart(sessionId) {
       const entry = getEntry(entries, sessionId);
       entry.process.kill();
+      disposeEntry(entries, entry, "exited", entry.session.exitCode ?? null);
+      entry.listeners.clear();
+      await entry.logWriter.close();
       return create(entry.input, sessionId);
     },
     subscribe(sessionId, listener, options = {}) {
       const entry = getEntry(entries, sessionId);
       entry.listeners.add(listener);
 
-      if (options.replay !== false) {
+      if (options.replay !== false && entry.input.logPath) {
         void readTerminalReplayText(deps.fs, entry.input.logPath)
           .then((data) => {
             if (!data || !entry.listeners.has(listener)) {
@@ -175,11 +212,69 @@ export function createNodePtyTerminalRuntime(deps: NodePtyRuntimeDeps): Terminal
   };
 }
 
+function disposeEntry(
+  entries: Map<string, RuntimeEntry>,
+  entry: RuntimeEntry,
+  status: TerminalSession["status"],
+  exitCode: number | null
+): boolean {
+  if (entry.disposed) {
+    return false;
+  }
+  entry.disposed = true;
+  entry.session.status = status;
+  entry.session.exitCode = exitCode;
+  void entry.logWriter.close();
+  entries.delete(entry.session.id);
+  return true;
+}
+
+function createNoopTerminalLogWriter(): TerminalLogWriter {
+  return {
+    append() {},
+    async close() {}
+  };
+}
+
+export function createTerminalLogWriter(
+  fs: Pick<FileSystemAdapter, "appendText">,
+  logPath: string,
+  onError: (error: unknown, logPath: string) => void
+): TerminalLogWriter {
+  let closed = false;
+  let pending = Promise.resolve();
+
+  return {
+    append(data) {
+      if (closed || !data) {
+        return;
+      }
+      pending = pending
+        .then(() => fs.appendText(logPath, data))
+        .catch((error: unknown) => {
+          try {
+            onError(error, logPath);
+          } catch {
+            // Logging must never break terminal output delivery or future log writes.
+          }
+        });
+    },
+    async close() {
+      closed = true;
+      await pending.catch(() => undefined);
+    }
+  };
+}
+
 async function readTerminalReplayText(fs: FileSystemAdapter, logPath: string): Promise<string> {
   const data = fs.readTextTail
     ? await fs.readTextTail(logPath, TERMINAL_REPLAY_TAIL_LIMIT_BYTES)
     : tailTerminalReplay(await fs.readText(logPath));
   return tailTerminalReplay(data);
+}
+
+function defaultLogWriteErrorHandler(error: unknown, logPath: string): void {
+  console.warn(`[VCM] Failed to append terminal log: ${logPath}`, error);
 }
 
 export function tailTerminalReplay(

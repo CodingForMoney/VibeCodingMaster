@@ -142,7 +142,7 @@ export function createWeixinIlinkChannel(options: WeixinIlinkChannelOptions = {}
   }): Promise<Record<string, unknown>> {
     const controller = input.timeoutMs !== undefined ? new AbortController() : undefined;
     const timeout = controller ? setTimeout(() => controller.abort(), input.timeoutMs) : undefined;
-    const signal = combineSignals(controller?.signal, input.signal);
+    const combinedSignal = combineSignals(controller?.signal, input.signal);
     const url = new URL(input.endpoint, ensureTrailingSlash(input.requestBaseUrl));
 
     try {
@@ -150,7 +150,7 @@ export function createWeixinIlinkChannel(options: WeixinIlinkChannelOptions = {}
         method: input.method,
         headers: input.jsonHeaders === false ? buildIlinkAppHeaders() : buildJsonHeaders(input.token),
         body: input.body === undefined ? undefined : JSON.stringify(input.body),
-        signal
+        signal: combinedSignal.signal
       });
       const rawText = await response.text();
       if (!response.ok) {
@@ -161,6 +161,7 @@ export function createWeixinIlinkChannel(options: WeixinIlinkChannelOptions = {}
       if (timeout) {
         clearTimeout(timeout);
       }
+      combinedSignal.cleanup();
     }
   }
 
@@ -403,12 +404,27 @@ function randomWechatUin(): string {
   return Buffer.from(String(value), "utf8").toString("base64");
 }
 
-function combineSignals(first: AbortSignal | undefined, second: AbortSignal | undefined): AbortSignal | undefined {
+function combineSignals(first: AbortSignal | undefined, second: AbortSignal | undefined): {
+  signal?: AbortSignal;
+  cleanup(): void;
+} {
   if (!first) {
-    return second;
+    return {
+      signal: second,
+      cleanup() {}
+    };
   }
   if (!second) {
-    return first;
+    return {
+      signal: first,
+      cleanup() {}
+    };
+  }
+  if (first === second) {
+    return {
+      signal: first,
+      cleanup() {}
+    };
   }
   const controller = new AbortController();
   const abort = () => controller.abort();
@@ -417,7 +433,13 @@ function combineSignals(first: AbortSignal | undefined, second: AbortSignal | un
   if (first.aborted || second.aborted) {
     controller.abort();
   }
-  return controller.signal;
+  return {
+    signal: controller.signal,
+    cleanup() {
+      first.removeEventListener("abort", abort);
+      second.removeEventListener("abort", abort);
+    }
+  };
 }
 
 function stringOrUndefined(value: unknown): string | undefined {

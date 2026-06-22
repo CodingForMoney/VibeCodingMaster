@@ -10,7 +10,7 @@ export interface CreateTerminalSessionInput {
   env?: NodeJS.ProcessEnv;
   cols?: number;
   rows?: number;
-  logPath: string;
+  logPath?: string;
 }
 
 export interface TerminalSession {

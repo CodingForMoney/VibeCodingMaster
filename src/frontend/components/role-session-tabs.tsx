@@ -1,19 +1,20 @@
 import { ROLE_DEFINITIONS } from "../../shared/constants.js";
-import type { RoleName } from "../../shared/types/role.js";
+import type { RoleDefinition, RoleName } from "../../shared/types/role.js";
 import type { RoleSessionRecord } from "../../shared/types/session.js";
 import { getSessionForRole } from "../state/session-store.js";
 import { StatusBadge } from "./status-badge.js";
 
 export interface RoleSessionTabsProps {
   activeRole: RoleName;
+  roles?: readonly RoleDefinition[];
   sessions: RoleSessionRecord[];
   onSelect(role: RoleName): void;
 }
 
-export function RoleSessionTabs({ activeRole, sessions, onSelect }: RoleSessionTabsProps) {
+export function RoleSessionTabs({ activeRole, roles = ROLE_DEFINITIONS, sessions, onSelect }: RoleSessionTabsProps) {
   return (
     <div className="role-tabs" role="tablist" aria-label="Role sessions">
-      {ROLE_DEFINITIONS.map((definition) => {
+      {roles.map((definition) => {
         const session = getSessionForRole(sessions, definition.name);
         const tabStatus = session?.status === "running"
           ? session.activityStatus ?? "idle"

@@ -1,13 +1,16 @@
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import type { ClaudeHookEventName } from "../../shared/types/claude-hook.js";
+import type { ClaudeTurnHookEventName } from "../../shared/types/claude-hook.js";
 import type { RoleName } from "../../shared/types/role.js";
 import type { VcmSessionRoundState } from "../../shared/types/round.js";
+import type { RoleSessionRecord } from "../../shared/types/session.js";
 import type { TaskStatus } from "../../shared/types/task.js";
 import type { FileSystemAdapter } from "../adapters/filesystem.js";
+import type { SessionService } from "./session-service.js";
 
 export interface RoundService {
   getSessionRoundState(input: SessionRoundInput): Promise<VcmSessionRoundState>;
+  recordRoleTurnEvent(input: RecordRoundHookEventInput): Promise<VcmSessionRoundState>;
   recordClaudeHookEvent(input: RecordRoundHookEventInput): Promise<VcmSessionRoundState>;
   stopSession(sessionId: string): void;
   stopTask(taskSlug: string): void;
@@ -22,7 +25,7 @@ export interface SessionRoundInput {
 
 export interface RecordRoundHookEventInput extends SessionRoundInput {
   role: RoleName;
-  eventName: ClaudeHookEventName;
+  eventName: ClaudeTurnHookEventName;
   settleGuard?: RoundSettleGuard;
 }
 
@@ -40,6 +43,7 @@ export type RoundSettleGuard = (input: RoundSettleGuardInput) => Promise<RoundSe
 
 export interface RoundServiceDeps {
   fs: FileSystemAdapter;
+  sessionService?: Pick<SessionService, "listRoleSessions">;
   now?: () => string;
   id?: () => string;
   settleMs?: number;
@@ -125,6 +129,61 @@ export function createRoundService(deps: RoundServiceDeps): RoundService {
     });
   }
 
+  async function findActiveRoleSession(input: SessionRoundInput, timestamp: string): Promise<{ role: RoleName; startedAt: string } | undefined> {
+    if (!input.repoRoot || !deps.sessionService) {
+      return undefined;
+    }
+
+    let sessions: RoleSessionRecord[];
+    try {
+      sessions = await deps.sessionService.listRoleSessions(input.repoRoot, input.taskSlug);
+    } catch {
+      return undefined;
+    }
+
+    const active = sessions
+      .filter((session) => session.status === "running" && session.activityStatus === "running")
+      .sort((left, right) => timestampMs(roleActivityTimestamp(right, timestamp)) - timestampMs(roleActivityTimestamp(left, timestamp)))[0];
+    if (!active) {
+      return undefined;
+    }
+
+    return {
+      role: active.role,
+      startedAt: roleActivityTimestamp(active, timestamp)
+    };
+  }
+
+  async function syncRoundFromActiveRoleSession(
+    input: SessionRoundInput,
+    state: PersistedRoundFile,
+    timestamp: string
+  ): Promise<PersistedRoundFile | undefined> {
+    const current = state.currentRound;
+    if (current?.status === "running" && current.activeTurnStartedAt) {
+      return undefined;
+    }
+
+    const active = await findActiveRoleSession(input, timestamp);
+    if (!active) {
+      return undefined;
+    }
+
+    const shouldStartNewRound = !current || current.status === "stopped";
+    const next = applyPromptSubmitted({
+      state,
+      taskSlug: input.taskSlug,
+      role: active.role,
+      timestamp: active.startedAt,
+      updatedAt: timestamp,
+      roundId: shouldStartNewRound ? id() : current.id
+    });
+    await save(input, next);
+    clearSettleTimer(input);
+    await updateSessionStatus(input, "running");
+    return next;
+  }
+
   async function settleIfNeeded(input: SessionRoundInput, state: PersistedRoundFile, timestamp: string): Promise<PersistedRoundFile> {
     const current = state.currentRound;
     if (
@@ -137,6 +196,11 @@ export function createRoundService(deps: RoundServiceDeps): RoundService {
 
     if (timestamp < current.settleDeadlineAt) {
       return state;
+    }
+
+    const activeSessionState = await syncRoundFromActiveRoleSession(input, state, timestamp);
+    if (activeSessionState) {
+      return activeSessionState;
     }
 
     const stopped: PersistedRound = {
@@ -174,6 +238,10 @@ export function createRoundService(deps: RoundServiceDeps): RoundService {
         return;
       }
       const timestamp = maxIsoTimestamp(now(), settleDeadlineAt);
+      const activeSessionState = await syncRoundFromActiveRoleSession(input, state, timestamp);
+      if (activeSessionState) {
+        return;
+      }
       if (settleGuard) {
         const decision = await runSettleGuard(settleGuard, {
           ...input,
@@ -244,6 +312,32 @@ export function createRoundService(deps: RoundServiceDeps): RoundService {
     settleTimers.set(getRoundStatePath(input), timer);
   }
 
+  async function recordRoleTurnEvent(input: RecordRoundHookEventInput): Promise<VcmSessionRoundState> {
+    return withTaskLock(input, async () => {
+      const timestamp = now();
+      const settled = await settleIfNeeded(input, await load(input), timestamp);
+      const current = settled.currentRound;
+      const shouldStartNewRound = input.eventName === "UserPromptSubmit" && (!current || current.status === "stopped");
+      const next = applyRoundHookEvent({
+        state: settled,
+        taskSlug: input.taskSlug,
+        role: input.role,
+        eventName: input.eventName,
+        timestamp,
+        roundId: shouldStartNewRound ? id() : current?.id ?? "",
+        settleMs
+      });
+      await save(input, next);
+      if (input.eventName === "UserPromptSubmit") {
+        clearSettleTimer(input);
+        await updateSessionStatus(input, "running");
+      } else if (next.currentRound) {
+        scheduleSettleTimer(input, next.currentRound, timestamp, input.settleGuard);
+      }
+      return toSessionRoundState(next, timestamp);
+    });
+  }
+
   async function withTaskLock<T>(input: SessionRoundInput, run: () => Promise<T>): Promise<T> {
     const key = getRoundStatePath(input);
     const previous = taskLocks.get(key) ?? Promise.resolve();
@@ -262,33 +356,15 @@ export function createRoundService(deps: RoundServiceDeps): RoundService {
     async getSessionRoundState(input) {
       return withTaskLock(input, async () => {
         const timestamp = now();
-        return toSessionRoundState(await load(input), timestamp);
+        const loaded = await load(input);
+        const synced = await syncRoundFromActiveRoleSession(input, loaded, timestamp);
+        const settled = synced ?? await settleIfNeeded(input, loaded, timestamp);
+        return toSessionRoundState(settled, timestamp);
       });
     },
-    async recordClaudeHookEvent(input) {
-      return withTaskLock(input, async () => {
-        const timestamp = now();
-        const settled = await settleIfNeeded(input, await load(input), timestamp);
-        const current = settled.currentRound;
-        const shouldStartNewRound = input.eventName === "UserPromptSubmit" && (!current || current.status === "stopped");
-        const next = applyRoundHookEvent({
-          state: settled,
-          taskSlug: input.taskSlug,
-          role: input.role,
-          eventName: input.eventName,
-          timestamp,
-          roundId: shouldStartNewRound ? id() : current?.id ?? "",
-          settleMs
-        });
-        await save(input, next);
-        if (input.eventName === "UserPromptSubmit") {
-          clearSettleTimer(input);
-          await updateSessionStatus(input, "running");
-        } else if (next.currentRound) {
-          scheduleSettleTimer(input, next.currentRound, timestamp, input.settleGuard);
-        }
-        return toSessionRoundState(next, timestamp);
-      });
+    recordRoleTurnEvent,
+    recordClaudeHookEvent(input) {
+      return recordRoleTurnEvent(input);
     },
     stopSession() {},
     stopTask(taskSlug) {
@@ -301,7 +377,7 @@ export function applyRoundHookEvent(input: {
   state: PersistedRoundFile;
   taskSlug: string;
   role: RoleName;
-  eventName: ClaudeHookEventName;
+  eventName: ClaudeTurnHookEventName;
   timestamp: string;
   roundId: string;
   settleMs: number;
@@ -317,9 +393,22 @@ function applyPromptSubmitted(input: {
   taskSlug: string;
   role: RoleName;
   timestamp: string;
+  updatedAt?: string;
   roundId: string;
 }): PersistedRoundFile {
+  const updatedAt = input.updatedAt ?? input.timestamp;
   const current = input.state.currentRound;
+  if (current?.status === "running" && current.activeTurnStartedAt && current.activeRole === input.role) {
+    return {
+      ...input.state,
+      taskSlug: input.taskSlug,
+      currentRound: {
+        ...current,
+        roles: appendUniqueRole(current.roles, input.role)
+      },
+      updatedAt
+    };
+  }
   const shouldStartNewRound = !current || current.status === "stopped";
   const totalRoundCount = shouldStartNewRound
     ? input.state.totalRoundCount + 1
@@ -358,7 +447,7 @@ function applyPromptSubmitted(input: {
     totalTurnCount: input.state.totalTurnCount + 1,
     totalCompletedTurnCount: input.state.totalCompletedTurnCount,
     totalCcActiveMs: input.state.totalCcActiveMs,
-    updatedAt: input.timestamp
+    updatedAt
   };
 }
 
@@ -371,7 +460,7 @@ function applyStop(input: {
   settleMs: number;
 }): PersistedRoundFile {
   const current = input.state.currentRound;
-  if (!current || current.status === "stopped" || !current.activeTurnStartedAt) {
+  if (!current || current.status === "stopped" || !current.activeTurnStartedAt || current.activeRole !== input.role) {
     return {
       ...input.state,
       taskSlug: input.taskSlug,
@@ -540,6 +629,15 @@ function addMilliseconds(value: string, milliseconds: number): string {
 
 function maxIsoTimestamp(left: string, right: string): string {
   return Date.parse(left) >= Date.parse(right) ? left : right;
+}
+
+function roleActivityTimestamp(session: RoleSessionRecord, fallback: string): string {
+  return session.lastTurnStartedAt ?? session.lastHookEventAt ?? session.updatedAt ?? fallback;
+}
+
+function timestampMs(value: string): number {
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) ? parsed : 0;
 }
 
 async function runSettleGuard(

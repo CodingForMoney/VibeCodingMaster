@@ -1,6 +1,7 @@
-import type { VcmOrchestrationMode } from "../../shared/types/message.js";
+import { isVcmRoleName } from "../../shared/constants.js";
+import type { TranslationTargetLanguage } from "../../shared/types/app-settings.js";
 import type { RoleName } from "../../shared/types/role.js";
-import type { ClaudeModel, ClaudePermissionMode, RoleSessionRecord } from "../../shared/types/session.js";
+import type { ClaudePermissionMode, RoleSessionRecord, SessionEffort, SessionModel } from "../../shared/types/session.js";
 import { XtermView } from "../terminal/xterm-view.js";
 import { SessionToolbar } from "./session-toolbar.js";
 import { TranslationPanel } from "./translation-panel.js";
@@ -9,14 +10,16 @@ export interface SessionConsoleProps {
   role: RoleName;
   session?: RoleSessionRecord;
   permissionMode: ClaudePermissionMode;
-  model: ClaudeModel;
+  model: SessionModel;
+  effort: SessionEffort;
   active?: boolean;
   busy?: boolean;
-  orchestrationMode: VcmOrchestrationMode;
   translationEnabled: boolean;
+  translationAutoSendEnabled: boolean;
+  translationTargetLanguage: TranslationTargetLanguage;
   onPermissionModeChange(mode: ClaudePermissionMode): void;
-  onModelChange(model: ClaudeModel): void;
-  onOrchestrationModeChange(mode: VcmOrchestrationMode): void;
+  onModelChange(model: SessionModel): void;
+  onEffortChange(effort: SessionEffort): void;
   onStart(): void;
   onResume(): void;
   onStop(): void;
@@ -29,98 +32,69 @@ export function SessionConsole({
   session,
   permissionMode,
   model,
+  effort,
   active = true,
   busy,
-  orchestrationMode,
   translationEnabled,
+  translationAutoSendEnabled,
+  translationTargetLanguage,
   onPermissionModeChange,
   onModelChange,
-  onOrchestrationModeChange,
+  onEffortChange,
   onStart,
   onResume,
   onStop,
   onRestart,
   onTerminalEvent
 }: SessionConsoleProps) {
-  const autoOrchestrationEnabled = orchestrationMode === "auto";
+  const showTranslation = isVcmRoleName(role) && translationEnabled && session?.status === "running";
 
   return (
     <section className="session-console">
-      <div className="session-console-top">
-        <SessionToolbar
-          role={role}
-          session={session}
-          permissionMode={permissionMode}
-          model={model}
-          busy={busy}
-          onPermissionModeChange={onPermissionModeChange}
-          onModelChange={onModelChange}
-          onStart={onStart}
-          onResume={onResume}
-          onStop={onStop}
-          onRestart={onRestart}
-        />
-        <div className="session-console-actions">
-          <button
-            aria-label={`Auto orchestration is ${autoOrchestrationEnabled ? "on" : "off"}`}
-            aria-pressed={autoOrchestrationEnabled}
-            className={`translation-toggle${autoOrchestrationEnabled ? " is-active" : ""}`}
-            disabled={busy}
-            type="button"
-            onClick={() => onOrchestrationModeChange(autoOrchestrationEnabled ? "manual" : "auto")}
-          >
-            {autoOrchestrationEnabled ? "✅ Auto orchestration" : "× Auto orchestration"}
-          </button>
+      <div className={showTranslation ? "session-console-body has-translation" : "session-console-body"}>
+        <div className="terminal-pane">
+          <SessionToolbar
+            role={role}
+            session={session}
+            permissionMode={permissionMode}
+            model={model}
+            effort={effort}
+            busy={busy}
+            onPermissionModeChange={onPermissionModeChange}
+            onModelChange={onModelChange}
+            onEffortChange={onEffortChange}
+            onStart={onStart}
+            onResume={onResume}
+            onStop={onStop}
+            onRestart={onRestart}
+          />
+          {session?.status === "running" ? (
+            <XtermView key={session.id} sessionId={session.id} active={active} onEvent={onTerminalEvent} />
+          ) : (
+            <div className="terminal-empty">
+              <strong>{role}</strong>
+              <span>
+                {session?.claudeSessionId
+                  ? "Resume this role to reconnect its Claude Code conversation."
+                  : "Start this role to open an embedded Claude Code terminal."}
+              </span>
+            </div>
+          )}
         </div>
+        {showTranslation ? (
+          <div className="translation-pane">
+            <TranslationPanel
+              key={session.id}
+              active={active}
+              autoSendEnabled={translationAutoSendEnabled}
+              targetLanguage={translationTargetLanguage}
+              taskSlug={session.taskSlug}
+              role={role}
+              sessionId={session.id}
+            />
+          </div>
+        ) : null}
       </div>
-      {session?.status === "running" ? (
-        <SessionConsoleBody
-          active={active}
-          onTerminalEvent={onTerminalEvent}
-          role={role}
-          session={session}
-          taskSlug={session.taskSlug}
-          translationEnabled={translationEnabled}
-        />
-      ) : (
-        <div className="terminal-empty">
-          <strong>{role}</strong>
-          <span>
-            {session?.claudeSessionId
-              ? "Resume this role to reconnect its Claude Code conversation."
-              : "Start this role to open an embedded Claude Code terminal."}
-          </span>
-        </div>
-      )}
     </section>
-  );
-}
-
-function SessionConsoleBody({
-  active,
-  onTerminalEvent,
-  role,
-  session,
-  taskSlug,
-  translationEnabled
-}: {
-  active: boolean;
-  onTerminalEvent(message: string): void;
-  role: RoleName;
-  session: RoleSessionRecord;
-  taskSlug: string;
-  translationEnabled: boolean;
-}) {
-  return (
-    <div className={translationEnabled ? "session-console-body has-translation" : "session-console-body"}>
-      <div className="terminal-pane">
-        <XtermView key={session.id} sessionId={session.id} active={active} onEvent={onTerminalEvent} />
-      </div>
-      {translationEnabled ? (
-        <div className="translation-pane">
-          <TranslationPanel key={session.id} active={active} taskSlug={taskSlug} role={role} sessionId={session.id} />
-        </div>
-      ) : null}
-    </div>
   );
 }

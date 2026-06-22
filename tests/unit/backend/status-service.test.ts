@@ -36,6 +36,49 @@ describe("createStatusService", () => {
     expect(report.artifacts.checks).toHaveLength(5);
     expect(report.warnings).toContain(".ai/vcm/handoffs/docs-sync-report.md: incomplete");
   });
+
+  it("keeps recoverable sessions when artifact status hits the open-files limit", async () => {
+    const service = createStatusService({
+      taskService: {
+        async loadTask(): Promise<TaskRecord> {
+          return createTask();
+        }
+      } as never,
+      sessionService: {
+        async listRoleSessions() {
+          return [{
+            id: "runtime-coder",
+            claudeSessionId: "claude-coder-session",
+            taskSlug: "demo-task",
+            role: "coder",
+            status: "resumable",
+            command: "claude --agent coder",
+            permissionMode: "default",
+            cwd: "/repo",
+            terminalBackend: "node-pty",
+            updatedAt: "2026-05-30T00:00:00.000Z",
+            exitCode: null
+          }];
+        }
+      } as never,
+      artifactService: {
+        async listArtifacts(): Promise<ArtifactSummary> {
+          throw Object.assign(new Error("EMFILE: too many open files"), {
+            code: "EMFILE"
+          });
+        }
+      } as never
+    });
+
+    const report = await service.getTaskStatus("/repo", "demo-task");
+
+    expect(report.sessions).toMatchObject([{
+      role: "coder",
+      claudeSessionId: "claude-coder-session",
+      status: "resumable"
+    }]);
+    expect(report.warnings[0]).toContain("Artifacts are temporarily unavailable");
+  });
 });
 
 function createTask(): TaskRecord {
@@ -45,6 +88,7 @@ function createTask(): TaskRecord {
     createdAt: "2026-05-30T00:00:00.000Z",
     updatedAt: "2026-05-30T00:00:00.000Z",
     repoRoot: "/repo",
+    worktreePath: "/repo/.claude/worktrees/demo-task",
     branch: "feature/vcm",
     handoffDir: ".ai/vcm/handoffs",
     status: "running"
@@ -56,18 +100,11 @@ function createArtifactSummary(statuses: Record<ArtifactSummary["checks"][number
     paths: {
       handoffDir: ".ai/vcm/handoffs",
       roleCommandsDir: ".ai/vcm/handoffs/role-commands",
-      logsDir: ".ai/vcm/handoffs/logs",
       messagesDir: ".ai/vcm/handoffs/messages",
       roleCommandPaths: {
         architect: ".ai/vcm/handoffs/role-commands/architect.md",
         coder: ".ai/vcm/handoffs/role-commands/coder.md",
         reviewer: ".ai/vcm/handoffs/role-commands/reviewer.md"
-      },
-      roleLogPaths: {
-        "project-manager": ".ai/vcm/handoffs/logs/project-manager.log",
-        architect: ".ai/vcm/handoffs/logs/architect.log",
-        coder: ".ai/vcm/handoffs/logs/coder.log",
-        reviewer: ".ai/vcm/handoffs/logs/reviewer.log"
       },
       messageRoutePaths: {
         "project-manager-architect": ".ai/vcm/handoffs/messages/project-manager-architect.md",

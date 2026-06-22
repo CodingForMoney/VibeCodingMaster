@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createDefaultLaunchTemplate,
   type AppPreferences
@@ -12,6 +12,21 @@ import {
 } from "../../../src/backend/services/app-settings-service.js";
 
 describe("app-settings-service", () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it("uses VCM_DATA_DIR for the default app settings root", () => {
+    vi.stubEnv("VCM_DATA_DIR", "/workspace/.ai/vcm");
+    const service = createAppSettingsService({
+      fs: createMemoryFs()
+    });
+
+    expect(service.getSettingsPath()).toBe("/workspace/.ai/vcm/settings.json");
+    expect(service.getProjectIndexPath()).toBe("/workspace/.ai/vcm/projects/index.json");
+    expect(service.getProjectConfigPath("/workspace/project")).toMatch(/^\/workspace\/\.ai\/vcm\/projects\/.+\/config\.json$/);
+  });
+
   it("creates an empty settings.json when no settings exist", async () => {
     const fs = createMemoryFs();
     const service = createAppSettingsService({
@@ -25,7 +40,6 @@ describe("app-settings-service", () => {
     expect(settings).toEqual({
       version: 1,
       preferences: createDefaultPreferences(),
-      translation: undefined,
       recentRepositoryPaths: []
     });
     expect(stored).toEqual(settings);
@@ -42,18 +56,30 @@ describe("app-settings-service", () => {
     await expect(service.updatePreferences({
       themeMode: "dark",
       flowPauseAlerts: false,
-      permissionRequestMode: "allowAll"
+      permissionRequestMode: "allowAll",
+      translationEnabled: true,
+      translationAutoSendEnabled: true,
+      translationTargetLanguage: "ja",
+      translationOutputMode: "all"
     })).resolves.toEqual(createDefaultPreferences({
       themeMode: "dark",
       flowPauseAlerts: false,
-      permissionRequestMode: "allowAll"
+      permissionRequestMode: "allowAll",
+      translationEnabled: true,
+      translationAutoSendEnabled: true,
+      translationTargetLanguage: "ja",
+      translationOutputMode: "all"
     }));
 
     const stored = await fs.readJson<AppSettingsFile>("/settings.json");
     expect(stored.preferences).toEqual(createDefaultPreferences({
       themeMode: "dark",
       flowPauseAlerts: false,
-      permissionRequestMode: "allowAll"
+      permissionRequestMode: "allowAll",
+      translationEnabled: true,
+      translationAutoSendEnabled: true,
+      translationTargetLanguage: "ja",
+      translationOutputMode: "all"
     }));
   });
 
@@ -65,10 +91,10 @@ describe("app-settings-service", () => {
     });
     const launchTemplate = createDefaultLaunchTemplate();
     launchTemplate.autoOrchestration = false;
-    launchTemplate.translationEnabled = false;
     launchTemplate.roles.coder = {
       permissionMode: "bypassPermissions",
-      model: "opus[1m]"
+      model: "opus[1m]",
+      effort: "high"
     };
 
     await expect(service.updatePreferences({ launchTemplate })).resolves.toEqual(createDefaultPreferences({
@@ -126,7 +152,7 @@ describe("app-settings-service", () => {
     ]);
   });
 
-  it("stores project config under ~/.vcm projects state", async () => {
+  it("stores project config under app-local projects state", async () => {
     const fs = createMemoryFs();
     const service = createAppSettingsService({
       fs,
@@ -161,6 +187,39 @@ describe("app-settings-service", () => {
       configPath: `/home/.vcm/projects/${projectId}/config.json`
     });
   });
+
+  it("stores Gate Review Gate switches in settings.json", async () => {
+    const fs = createMemoryFs();
+    const service = createAppSettingsService({
+      fs,
+      settingsPath: "/home/.vcm/settings.json"
+    });
+    const repoRoot = "/workspace/project";
+
+    await expect(service.getGateReviewSettings(repoRoot, "demo-task")).resolves.toEqual({
+      enabled: false,
+      requiredGates: []
+    });
+
+    await expect(service.updateGateReviewSettings(repoRoot, "demo-task", [
+      "final-diff",
+      "architecture-plan",
+      "final-diff"
+    ])).resolves.toEqual({
+      enabled: true,
+      requiredGates: ["architecture-plan", "final-diff"]
+    });
+
+    const stored = await fs.readJson<AppSettingsFile>("/home/.vcm/settings.json");
+    expect(stored.gateReview).toMatchObject({
+      requiredGates: ["architecture-plan", "final-diff"]
+    });
+    expect(stored.gateReview).not.toHaveProperty("projects");
+    await expect(service.getGateReviewSettings("/workspace/another-project", "another-task")).resolves.toEqual({
+      enabled: true,
+      requiredGates: ["architecture-plan", "final-diff"]
+    });
+  });
 });
 
 function createDefaultPreferences(overrides: Partial<AppPreferences> = {}): AppPreferences {
@@ -168,6 +227,10 @@ function createDefaultPreferences(overrides: Partial<AppPreferences> = {}): AppP
     themeMode: "system",
     flowPauseAlerts: true,
     permissionRequestMode: "off",
+    translationEnabled: false,
+    translationAutoSendEnabled: false,
+    translationTargetLanguage: "zh-CN",
+    translationOutputMode: "pm-final-only",
     launchTemplate: createDefaultLaunchTemplate(),
     ...overrides
   };

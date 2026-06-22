@@ -1,9 +1,9 @@
-import type { RoleName } from "./role.js";
+import type { VcmRoleName } from "./role.js";
 
 export interface ProjectConfig {
   version: 1;
   repoRoot: string;
-  defaultRoles: RoleName[];
+  defaultRoles: VcmRoleName[];
   handoffRoot: string;
   stateRoot: string;
   terminalBackend: "node-pty";

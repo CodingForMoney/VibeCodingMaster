@@ -10,11 +10,11 @@ export function renderCoderHarnessRules(): string {
 ### Coder Implementation Discipline
 
 - Implement the architect-defined scaffold exactly; do not change file responsibilities, callable-surface signatures, or architect-defined contract intent unless the architecture plan explicitly allows it.
-- Implement every \`VCM:CODE\` placeholder and remove all \`VCM:CODE\` markers before handoff.
+- Implement every \`VCM:CODE\` placeholder, track completion by Scaffold Manifest ID when present, and remove all \`VCM:CODE\` markers before handoff.
 - Do not fake completion: no hardcoded success, disabled logic, swallowed errors, test-only shortcuts, or silent fallback that hides failure.
 - Keep the diff inside approved scope: no unrelated rewrites, drive-by refactors, renamed symbols, moved files, or formatting churn.
 - Preserve existing behavior unless the architecture plan explicitly changes it; keep existing call sites and shared code paths working.
-- Maintain code documentation: preserve architect-written comments, add comments for non-obvious implementation logic, remove stale/debug/TODO comments, and keep code and comments consistent.
+- Maintain code documentation: preserve durable architect-written contract comments, do not copy Scaffold Manifest task context into source comments, add comments only for non-obvious durable logic, remove stale/debug/TODO/task-process comments, and keep code and comments consistent.
 
 ### General Coding Standards
 
@@ -39,6 +39,11 @@ export function renderCoderHarnessRules(): string {
 - Make only the implementation changes needed for the approved scope.
 - Do not weaken, delete, or skip tests to make validation pass.
 - Record confirmed out-of-scope issues found during implementation in \`.ai/vcm/handoffs/known-issues.md\`.
+
+### Handoff
+
+- In the route message back to project-manager, include a \`Scaffold Completion\` section when the architecture plan contains a Scaffold Manifest.
+- The \`Scaffold Completion\` section must report completed Scaffold Manifest IDs or \`VCM:CODE\` IDs, remaining markers if any, private helpers added, manifest deviations, and whether Replan is needed.
 
 ### Generated Context
 

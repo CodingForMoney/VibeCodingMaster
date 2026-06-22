@@ -2,13 +2,17 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import qrcode from "qrcode-generator";
 import {
   createDefaultLaunchTemplate,
+  DEFAULT_TRANSLATION_OUTPUT_MODE,
+  DEFAULT_TRANSLATION_TARGET_LANGUAGE,
   type AppPreferences,
   type LaunchTemplate,
   type PermissionRequestMode,
+  type TranslationOutputMode,
+  type TranslationTargetLanguage,
   type ThemeMode
 } from "../shared/types/app-settings.js";
-import { ROLE_DEFINITIONS } from "../shared/constants.js";
 import type {
+  CommitAndRebaseHarnessTaskResult,
   HarnessApplyResult,
   HarnessBootstrapStatusReport,
   HarnessStatusReport
@@ -18,27 +22,33 @@ import type {
   GatewayStatus,
   StartGatewayQrLoginResult
 } from "../shared/types/gateway.js";
+import type { GateReviewGate, GateReviewIndex } from "../shared/types/gate-review.js";
 import type { VcmOrchestrationState, VcmRoleMessage } from "../shared/types/message.js";
 import type { ProjectSummary } from "../shared/types/project.js";
 import type { RoleName } from "../shared/types/role.js";
 import type { VcmSessionRoundState } from "../shared/types/round.js";
+import type { RoleSessionRecord, SessionEffort, SessionModel } from "../shared/types/session.js";
 import type { TaskRecord } from "../shared/types/task.js";
+import { CORE_VCM_ROLE_NAMES } from "../shared/constants.js";
 import { AppShell } from "./components/app-shell.js";
+import { TranslatorSessionModal } from "./components/translator-session-modal.js";
+import { FileTranslationModalHost } from "./components/translation-panel.js";
 import { selectActiveTask } from "./state/app-store.js";
 import { apiClient } from "./state/api-client.js";
+import { buildOneClickRoleLaunches } from "./state/one-click-start.js";
 import { ProjectDashboard } from "./routes/project-dashboard.js";
 import { TaskWorkspace, type TaskWorkspaceLaunchState } from "./routes/task-workspace.js";
 
 const FLOW_PAUSE_STRONG_ALERT_THRESHOLD_MS = 2 * 60 * 1000;
 const FLOW_PAUSE_CHIME_INTERVAL_MS = 1400;
 const FLOW_PAUSE_WEAK_CHIME_COUNT = 3;
-
 export function App() {
   const [project, setProject] = useState<ProjectSummary | null>(null);
   const [recentRepositoryPaths, setRecentRepositoryPaths] = useState<string[]>([]);
   const [harnessStatus, setHarnessStatus] = useState<HarnessStatusReport | null>(null);
   const [harnessBootstrapStatus, setHarnessBootstrapStatus] = useState<HarnessBootstrapStatusReport | null>(null);
   const [harnessApplyResult, setHarnessApplyResult] = useState<HarnessApplyResult | null>(null);
+  const [harnessTaskSyncResult, setHarnessTaskSyncResult] = useState<CommitAndRebaseHarnessTaskResult | null>(null);
   const [gatewayStatus, setGatewayStatus] = useState<GatewayStatus | null>(null);
   const [gatewayQrLogin, setGatewayQrLogin] = useState<StartGatewayQrLoginResult | null>(null);
   const [gatewayQrCheck, setGatewayQrCheck] = useState<CheckGatewayQrLoginResult | null>(null);
@@ -49,13 +59,22 @@ export function App() {
   const [activeOrchestration, setActiveOrchestration] = useState<{ taskSlug: string; orchestration: VcmOrchestrationState } | null>(null);
   const [activeEvents, setActiveEvents] = useState<{ taskSlug: string; events: string[] } | null>(null);
   const [activeSessionRoundState, setActiveSessionRoundState] = useState<{ taskSlug: string; roundState: VcmSessionRoundState } | null>(null);
+  const [activeGateReview, setActiveGateReview] = useState<{ taskSlug: string; state: GateReviewIndex } | null>(null);
   const [activeRole, setActiveRole] = useState<RoleName>("project-manager");
   const [themeMode, setThemeMode] = useState<ThemeMode>("system");
   const [flowPauseAlerts, setFlowPauseAlerts] = useState(true);
   const [permissionRequestMode, setPermissionRequestMode] = useState<PermissionRequestMode>("off");
+  const [translationEnabled, setTranslationEnabled] = useState(false);
+  const [translationAutoSendEnabled, setTranslationAutoSendEnabled] = useState(false);
+  const [translationTargetLanguage, setTranslationTargetLanguage] = useState<TranslationTargetLanguage>(DEFAULT_TRANSLATION_TARGET_LANGUAGE);
+  const [translationOutputMode, setTranslationOutputMode] = useState<TranslationOutputMode>(DEFAULT_TRANSLATION_OUTPUT_MODE);
+  const [fileTranslationOpen, setFileTranslationOpen] = useState(false);
+  const [translatorSessionOpen, setTranslatorSessionOpen] = useState(false);
+  const [translatorSession, setTranslatorSession] = useState<RoleSessionRecord | null>(null);
+  const [translatorModel, setTranslatorModel] = useState<SessionModel>("default");
+  const [translatorEffort, setTranslatorEffort] = useState<SessionEffort>("medium");
   const [launchTemplate, setLaunchTemplate] = useState<LaunchTemplate>(() => createDefaultLaunchTemplate());
   const [activeLaunchState, setActiveLaunchState] = useState<TaskWorkspaceLaunchState | null>(null);
-  const [translationEnabledByTask, setTranslationEnabledByTask] = useState<Record<string, boolean>>({});
   const [workspaceRefreshNonce, setWorkspaceRefreshNonce] = useState(0);
   const [flowPauseNotice, setFlowPauseNotice] = useState<{ id: string; text: string } | null>(null);
   const [systemPrefersDark, setSystemPrefersDark] = useState(false);
@@ -64,13 +83,11 @@ export function App() {
   const notifiedFlowPauseKeyRef = useRef<Record<string, string>>({});
   const flowPauseAlarmRef = useRef<number | null>(null);
   const gatewayContextSyncKeyRef = useRef("");
+  const translatorEnsureKeyRef = useRef("");
   const activeTask = useMemo(
     () => selectActiveTask(tasks, activeTaskSlug),
     [tasks, activeTaskSlug]
   );
-  const activeTranslationEnabled = activeTask
-    ? translationEnabledByTask[activeTask.taskSlug] ?? false
-    : false;
   const activeTaskLaunchState = activeLaunchState?.taskSlug === activeTask?.taskSlug
     ? activeLaunchState
     : null;
@@ -81,6 +98,10 @@ export function App() {
     setThemeMode(preferences.themeMode);
     setFlowPauseAlerts(preferences.flowPauseAlerts);
     setPermissionRequestMode(preferences.permissionRequestMode);
+    setTranslationEnabled(preferences.translationEnabled);
+    setTranslationAutoSendEnabled(preferences.translationAutoSendEnabled);
+    setTranslationTargetLanguage(preferences.translationTargetLanguage);
+    setTranslationOutputMode(preferences.translationOutputMode);
     setLaunchTemplate(preferences.launchTemplate);
   }, []);
 
@@ -170,6 +191,7 @@ export function App() {
     if (previousPauseKey === pauseKey) {
       return;
     }
+    notifiedFlowPauseKeyRef.current[roundState.taskSlug] = pauseKey;
 
     if (!flowPauseAlerts) {
       return;
@@ -181,7 +203,6 @@ export function App() {
     } else {
       playWeakFlowPauseAlert();
     }
-    notifiedFlowPauseKeyRef.current[roundState.taskSlug] = pauseKey;
   }, [activeTask?.taskSlug, flowPauseAlerts, playWeakFlowPauseAlert, showStrongFlowPauseNotice]);
 
   const handleLaunchStateChanged = useCallback((launchState: TaskWorkspaceLaunchState) => {
@@ -193,7 +214,6 @@ export function App() {
         current.hasAnySession === launchState.hasAnySession &&
         current.allRolesHaveSession === launchState.allRolesHaveSession &&
         current.autoOrchestration === launchState.autoOrchestration &&
-        current.translationEnabled === launchState.translationEnabled &&
         JSON.stringify(current.roles) === JSON.stringify(launchState.roles)
       ) {
         return current;
@@ -245,6 +265,24 @@ export function App() {
     ]);
     setActiveMessages({ taskSlug, messages });
     setActiveOrchestration({ taskSlug, orchestration });
+  }
+
+  async function refreshGateReviewState(taskSlug: string) {
+    const state = await apiClient.getGateReviewState(taskSlug);
+    setActiveGateReview({ taskSlug, state });
+    return state;
+  }
+
+  async function refreshTranslatorSession() {
+    const session = await apiClient.getTranslatorSession();
+    setTranslatorSession(session);
+    if (session?.model) {
+      setTranslatorModel(session.model);
+    }
+    if (session?.effort) {
+      setTranslatorEffort(session.effort);
+    }
+    return session;
   }
 
   useEffect(() => {
@@ -338,6 +376,74 @@ export function App() {
     project?.repoRoot
   ]);
 
+  useEffect(() => {
+    if (!activeTask?.taskSlug) {
+      setActiveGateReview(null);
+      return;
+    }
+
+    void refreshGateReviewState(activeTask.taskSlug).catch((caught: Error) => setError(caught.message));
+  }, [activeTask?.taskSlug]);
+
+  useEffect(() => {
+    translatorEnsureKeyRef.current = "";
+    setTranslatorSession(null);
+  }, [project?.repoRoot]);
+
+  useEffect(() => {
+    if (!project) {
+      return;
+    }
+
+    void refreshTranslatorSession().catch((caught: Error) => setError(caught.message));
+    const interval = window.setInterval(() => {
+      void refreshTranslatorSession().catch((caught: Error) => setError(caught.message));
+    }, 3000);
+    return () => window.clearInterval(interval);
+  }, [project?.repoRoot]);
+
+  useEffect(() => {
+    if (!project || !translationEnabled) {
+      return;
+    }
+
+    const ensureKey = project.repoRoot;
+    if (translatorEnsureKeyRef.current === ensureKey && translatorSession?.status === "running") {
+      return;
+    }
+    translatorEnsureKeyRef.current = ensureKey;
+    void apiClient.ensureTranslatorSession({
+      model: translatorModel,
+      effort: translatorEffort
+    })
+      .then((session) => {
+        setTranslatorSession(session);
+        if (session.model) {
+          setTranslatorModel(session.model);
+        }
+        if (session.effort) {
+          setTranslatorEffort(session.effort);
+        }
+      })
+      .catch((caught: Error) => {
+        translatorEnsureKeyRef.current = "";
+        setError(caught.message);
+      });
+  }, [project?.repoRoot, translationEnabled]);
+
+  useEffect(() => {
+    if (!activeTask?.taskSlug) {
+      return;
+    }
+
+    const taskSlug = activeTask.taskSlug;
+    const interval = window.setInterval(() => {
+      void refreshGateReviewState(taskSlug).catch((caught: Error) => setError(caught.message));
+    }, 3000);
+
+    return () => window.clearInterval(interval);
+  }, [activeTask?.taskSlug]);
+
   async function withBusy(action: () => Promise<void>) {
     setBusy(true);
     setError("");
@@ -366,6 +472,13 @@ export function App() {
     activeSessionRoundState && activeSessionRoundState.taskSlug === activeTask?.taskSlug
       ? activeSessionRoundState.roundState
       : null;
+  const sidebarGateReview =
+    activeGateReview && activeGateReview.taskSlug === activeTask?.taskSlug
+      ? activeGateReview.state
+      : null;
+  const gateReviewerEnabled = Boolean(
+    sidebarGateReview && Object.values(sidebarGateReview.gates).some((gate) => gate.required)
+  );
 
   return (
     <AppShell
@@ -379,9 +492,16 @@ export function App() {
           orchestration={sidebarOrchestration}
           events={sidebarEvents}
           roundState={sidebarRoundState}
+          gateReview={sidebarGateReview}
+          translationEnabled={translationEnabled}
+          translationAutoSendEnabled={translationAutoSendEnabled}
+          translationTargetLanguage={translationTargetLanguage}
+          translationOutputMode={translationOutputMode}
+          translatorSession={translatorSession}
           harnessStatus={harnessStatus}
           harnessBootstrapStatus={harnessBootstrapStatus}
           harnessApplyResult={harnessApplyResult}
+          harnessTaskSyncResult={harnessTaskSyncResult}
           gatewayStatus={gatewayStatus}
           gatewayQrLogin={gatewayQrLogin}
           gatewayQrCheck={gatewayQrCheck}
@@ -390,6 +510,7 @@ export function App() {
             const nextProject = await apiClient.connectProject({ repoPath });
             setProject(nextProject);
             setHarnessApplyResult(null);
+            setHarnessTaskSyncResult(null);
             await Promise.all([
               loadTasks(),
               loadHarnessStatus(),
@@ -407,18 +528,35 @@ export function App() {
           })}
           onRefreshHarness={() => withBusy(async () => {
             setHarnessApplyResult(null);
+            setHarnessTaskSyncResult(null);
             await Promise.all([
               loadHarnessStatus(),
               loadHarnessBootstrapStatus()
             ]);
           })}
           onApplyHarness={() => withBusy(async () => {
+            setHarnessTaskSyncResult(null);
             const result = await apiClient.applyHarness();
             setHarnessApplyResult(result);
             await Promise.all([
               loadHarnessStatus(),
               loadHarnessBootstrapStatus()
             ]);
+          })}
+          onCommitAndRebaseHarnessTask={() => withBusy(async () => {
+            if (!activeTask) {
+              throw new Error("Select a task before using Commit & rebase task.");
+            }
+            if (!harnessApplyResult?.changedFiles.length) {
+              throw new Error("Apply a harness update before using Commit & rebase task.");
+            }
+            const result = await apiClient.commitAndRebaseHarnessTask(activeTask.taskSlug, {
+              changedFiles: harnessApplyResult.changedFiles
+            });
+            setHarnessTaskSyncResult(result);
+            const nextProject = await apiClient.getCurrentProject();
+            setProject(nextProject);
+            await loadTasks();
           })}
           onStartHarnessBootstrap={() => withBusy(async () => {
             const result = await apiClient.startHarnessBootstrap();
@@ -474,10 +612,74 @@ export function App() {
               setGatewayQrModalOpen(false);
             });
           }}
+          onGateReviewGateEnabledChange={(gate: GateReviewGate, enabled) => {
+            void withBusy(async () => {
+              if (!activeTask) {
+                throw new Error("Create or select a task before changing Gate Review Gates.");
+              }
+              const state = await apiClient.updateGateReviewSettings(activeTask.taskSlug, {
+                gates: { [gate]: enabled }
+              });
+              setActiveGateReview({ taskSlug: activeTask.taskSlug, state });
+            });
+          }}
+          onTranslationEnabledChange={(enabled) => {
+            setTranslationEnabled(enabled);
+            void withBusy(async () => {
+              const preferences = await apiClient.updateAppPreferences({ translationEnabled: enabled });
+              applyPreferences(preferences);
+            });
+          }}
+          onTranslationAutoSendChange={(enabled) => {
+            setTranslationAutoSendEnabled(enabled);
+            void withBusy(async () => {
+              const preferences = await apiClient.updateAppPreferences({ translationAutoSendEnabled: enabled });
+              applyPreferences(preferences);
+            });
+          }}
+          onTranslationTargetLanguageChange={(targetLanguage) => {
+            setTranslationTargetLanguage(targetLanguage);
+            void withBusy(async () => {
+              const preferences = await apiClient.updateAppPreferences({ translationTargetLanguage: targetLanguage });
+              applyPreferences(preferences);
+            });
+          }}
+          onTranslationOutputModeChange={(outputMode) => {
+            setTranslationOutputMode(outputMode);
+            void withBusy(async () => {
+              const preferences = await apiClient.updateAppPreferences({ translationOutputMode: outputMode });
+              applyPreferences(preferences);
+            });
+          }}
+          onOpenFileTranslation={() => setFileTranslationOpen(true)}
+          onOpenTranslatorSession={() => setTranslatorSessionOpen(true)}
+          onCreateTranslationBootstrap={() => {
+            void withBusy(async () => {
+              if (!project) {
+                throw new Error("Connect a repository before running Translation Bootstrap.");
+              }
+              await apiClient.createTranslationBootstrap({
+                targetLanguage: translationTargetLanguage
+              });
+              await refreshTranslatorSession();
+            });
+          }}
+          onUpdateTranslationMemory={() => {
+            void withBusy(async () => {
+              if (!project) {
+                throw new Error("Connect a repository before updating translation memory.");
+              }
+              await apiClient.createTranslationMemoryUpdate({
+                targetLanguage: translationTargetLanguage
+              });
+              await refreshTranslatorSession();
+            });
+          }}
           onCreateTask={(input) => withBusy(async () => {
             const task = await apiClient.createTask(input);
             await loadTasks();
             setActiveTaskSlug(task.taskSlug);
+            await refreshGateReviewState(task.taskSlug);
           })}
           onSelectTask={setActiveTaskSlug}
           themeMode={themeMode}
@@ -517,15 +719,14 @@ export function App() {
           onSaveLaunchTemplate={() => {
             void withBusy(async () => {
               if (!activeTaskLaunchState?.allRolesHaveSession) {
-                throw new Error("Start all four role sessions before saving a launch template.");
+                throw new Error("Start all core role sessions before saving a launch template.");
               }
 
               const preferences = await apiClient.updateAppPreferences({
                 launchTemplate: {
                   version: 1,
                   roles: activeTaskLaunchState.roles,
-                  autoOrchestration: activeTaskLaunchState.autoOrchestration,
-                  translationEnabled: activeTaskLaunchState.translationEnabled
+                  autoOrchestration: activeTaskLaunchState.autoOrchestration
                 }
               });
               applyPreferences(preferences);
@@ -538,14 +739,10 @@ export function App() {
               }
 
               const status = await apiClient.getTaskStatus(activeTask.taskSlug);
-              if (status.sessions.length > 0) {
+              if (status.sessions.some((session) => CORE_VCM_ROLE_NAMES.some((role) => role === session.role))) {
                 throw new Error("One-click start is only available before any role session has started.");
               }
 
-              setTranslationEnabledByTask((current) => ({
-                ...current,
-                [activeTask.taskSlug]: launchTemplate.translationEnabled
-              }));
               const nextOrchestration = await apiClient.updateOrchestrationState(activeTask.taskSlug, {
                 mode: launchTemplate.autoOrchestration ? "auto" : "manual"
               });
@@ -554,14 +751,27 @@ export function App() {
                 orchestration: nextOrchestration
               });
 
-              for (const definition of ROLE_DEFINITIONS) {
-                const roleTemplate = launchTemplate.roles[definition.name];
-                await apiClient.startRoleSession(activeTask.taskSlug, definition.name, {
+              const roleLaunches = buildOneClickRoleLaunches(launchTemplate, { gateReviewerEnabled });
+              for (const roleLaunch of roleLaunches) {
+                const sessionInput = {
                   cols: 100,
                   rows: 28,
-                  permissionMode: roleTemplate.permissionMode,
-                  model: roleTemplate.model
-                });
+                  permissionMode: roleLaunch.permissionMode,
+                  model: roleLaunch.model,
+                  effort: roleLaunch.effort
+                };
+                const existingSession = status.sessions.find((session) => session.role === roleLaunch.role);
+                if (existingSession?.status === "running") {
+                  if (roleLaunch.role === "gate-reviewer") {
+                    await apiClient.resumeRoleSession(activeTask.taskSlug, roleLaunch.role, sessionInput);
+                  }
+                  continue;
+                }
+                if (existingSession?.claudeSessionId) {
+                  await apiClient.resumeRoleSession(activeTask.taskSlug, roleLaunch.role, sessionInput);
+                } else {
+                  await apiClient.startRoleSession(activeTask.taskSlug, roleLaunch.role, sessionInput);
+                }
               }
 
               setActiveRole("project-manager");
@@ -634,18 +844,15 @@ export function App() {
         <TaskWorkspace
           task={activeTask}
           activeRole={activeRole}
-          translationEnabled={activeTranslationEnabled}
+          gateReviewerEnabled={gateReviewerEnabled}
+          translationEnabled={translationEnabled}
+          translationAutoSendEnabled={translationAutoSendEnabled}
+          translationTargetLanguage={translationTargetLanguage}
           refreshNonce={workspaceRefreshNonce}
           onTaskChanged={async () => {
             await loadTasks();
           }}
           onActiveRoleChange={setActiveRole}
-          onTranslationEnabledChange={(enabled) => {
-            setTranslationEnabledByTask((current) => ({
-              ...current,
-              [activeTask.taskSlug]: enabled
-            }));
-          }}
           onMessagesChanged={handleMessagesChanged}
           onOrchestrationChanged={handleOrchestrationChanged}
           onRoundStateChanged={handleRoundStateChanged}
@@ -657,11 +864,65 @@ export function App() {
           <h1>{project ? "Create a task to open the workspace" : "Connect a repository to begin"}</h1>
           <p>
             {project
-              ? "Tasks create local role commands, logs, and handoff artifacts for the selected repository."
-              : "VibeCodingMaster will create a local task workspace, role sessions, logs, and handoff artifacts."}
+              ? "Tasks create local role commands and handoff artifacts for the selected repository."
+              : "VibeCodingMaster will create a local task workspace, role sessions, and handoff artifacts."}
           </p>
         </section>
       )}
+      <FileTranslationModalHost
+        open={fileTranslationOpen}
+        targetLanguage={translationTargetLanguage}
+        onClose={() => setFileTranslationOpen(false)}
+      />
+        <TranslatorSessionModal
+        open={translatorSessionOpen}
+        busy={busy}
+        session={translatorSession}
+        model={translatorModel}
+        effort={translatorEffort}
+        onClose={() => setTranslatorSessionOpen(false)}
+        onModelChange={setTranslatorModel}
+        onEffortChange={setTranslatorEffort}
+        onStart={() => {
+          void withBusy(async () => {
+            const session = await apiClient.startTranslatorSession({
+              cols: 100,
+              rows: 28,
+              model: translatorModel,
+              effort: translatorEffort
+            });
+            setTranslatorSession(session);
+          });
+        }}
+        onResume={() => {
+          void withBusy(async () => {
+            const session = await apiClient.resumeTranslatorSession({
+              cols: 100,
+              rows: 28,
+              model: translatorModel,
+              effort: translatorEffort
+            });
+            setTranslatorSession(session);
+          });
+        }}
+        onRestart={() => {
+          void withBusy(async () => {
+            const session = await apiClient.restartTranslatorSession({
+              cols: 100,
+              rows: 28,
+              model: translatorModel,
+              effort: translatorEffort
+            });
+            setTranslatorSession(session);
+          });
+        }}
+        onStop={() => {
+          void withBusy(async () => {
+            const session = await apiClient.stopTranslatorSession();
+            setTranslatorSession(session);
+          });
+        }}
+      />
     </AppShell>
   );
 }

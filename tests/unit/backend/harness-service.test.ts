@@ -9,15 +9,19 @@ describe("createHarnessService", () => {
 
     const status = await service.getHarnessStatus("/repo");
     expect(status.needsApply).toBe(true);
-    expect(status.plannedChanges).toHaveLength(12);
-    expect(status.plannedChanges.map((change) => change.action)).toEqual(Array(12).fill("create"));
+    // B1: a fresh repo with every harness file missing is not yet initialized.
+    expect(status.initialized).toBe(false);
+    expect(status.plannedChanges).toHaveLength(16);
+    expect(status.plannedChanges.map((change) => change.action)).toEqual(Array(16).fill("create"));
 
     const result = await service.applyHarness("/repo");
-    expect(result.changedFiles).toHaveLength(12);
+    expect(result.changedFiles).toHaveLength(16);
 
     const nextStatus = await service.getHarnessStatus("/repo");
     expect(nextStatus.needsApply).toBe(false);
-    expect(nextStatus.files.map((file) => file.action)).toEqual(Array(12).fill("ok"));
+    // B2: once the harness is applied, VCM markers exist -> initialized.
+    expect(nextStatus.initialized).toBe(true);
+    expect(nextStatus.files.map((file) => file.action)).toEqual(Array(16).fill("ok"));
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("## VCM Start Here");
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("## VCM Task Flow");
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("## VCM Worktree Policy");
@@ -40,6 +44,8 @@ describe("createHarnessService", () => {
     expect(await fs.readText("/repo/.claude/skills/vcm-long-running-validation/SKILL.md")).toContain("name: vcm-long-running-validation");
     expect(await fs.readText("/repo/.claude/skills/vcm-long-running-validation/SKILL.md")).toContain("## Protocol");
     expect(await fs.readText("/repo/.claude/skills/vcm-long-running-validation/SKILL.md")).toContain(".ai/tools/watch-job");
+    expect(await fs.readText("/repo/.claude/skills/vcm-gate-review/SKILL.md")).toContain("name: vcm-gate-review");
+    expect(await fs.readText("/repo/.claude/skills/vcm-gate-review/SKILL.md")).toContain(".ai/tools/request-gate-review");
     expect(await fs.readText("/repo/.claude/agents/project-manager.md")).toContain("name: project-manager");
     expect(await fs.readText("/repo/.claude/agents/project-manager.md")).toContain("<!-- VCM:BEGIN version=1 -->");
     expect(await fs.readText("/repo/.claude/agents/project-manager.md")).toContain("Use the routes defined in `CLAUDE.md`");
@@ -50,10 +56,23 @@ describe("createHarnessService", () => {
     expect(await fs.readText("/repo/.claude/agents/project-manager.md")).toContain(".github/pull_request_template.md");
     expect(await fs.readText("/repo/.claude/agents/project-manager.md")).toContain("VCM_TASK_REPO_ROOT");
     expect(await fs.readText("/repo/.claude/agents/project-manager.md")).toContain("Include the confirmed task repo root and branch in each role message");
+    expect(await fs.readText("/repo/.claude/agents/project-manager.md")).toContain("### Gate Review Gates");
     expect(await fs.readText("/repo/.claude/agents/architect.md")).toContain("verifiable behavior, phase boundaries, behavior/contract proof points");
     expect(await fs.readText("/repo/.claude/agents/architect.md")).toContain("Read `.ai/vcm/handoffs/known-issues.md` and promote confirmed unresolved issues to `docs/known-issues.md`.");
+    expect(await fs.readText("/repo/.claude/agents/gate-reviewer.md")).toContain("name: gate-reviewer");
+    expect(await fs.readText("/repo/.claude/agents/gate-reviewer.md")).toContain("You are VCM `gate-reviewer`");
+    expect(await fs.readText("/repo/.claude/agents/gate-reviewer.md")).toContain("Use the task and worktree paths named there");
+    const translatorAgents = await fs.readText("/repo/.claude/agents/translator.md");
+    expect(translatorAgents).toContain("name: translator");
+    expect(translatorAgents).toContain("You are VCM `translator`");
+    expect(translatorAgents).toContain("follow the VCM chunk manifest");
+    expect(translatorAgents).toContain("Do not delegate translation to another CLI, package, API, service, browser, or");
+    expect(translatorAgents).toContain("write diagnostics to the assigned report path");
+    expect(await fs.readText("/repo/.ai/tools/request-gate-review")).toContain("Request a VCM-managed Gate Review Gate");
     expect(await fs.readText("/repo/.claude/settings.json")).toContain("UserPromptSubmit");
     expect(await fs.readText("/repo/.claude/settings.json")).toContain("Stop");
+    expect(await fs.readText("/repo/.claude/settings.json")).toContain("StopFailure");
+    expect(await fs.readText("/repo/.claude/settings.json")).toContain("PostCompact");
     expect(await fs.readText("/repo/.claude/settings.json")).toContain("PermissionRequest");
     expect(await fs.readText("/repo/.claude/settings.json")).toContain("PreToolUse");
     expect(await fs.readText("/repo/.claude/settings.json")).toContain("vcm-bash-guard");
@@ -74,6 +93,8 @@ describe("createHarnessService", () => {
       hasManagedBlock: false,
       action: "insert"
     });
+    // B3: a pre-existing non-VCM CLAUDE.md (insert, no managed block) is not initialized.
+    expect(status.initialized).toBe(false);
 
     await service.applyHarness("/repo");
 
@@ -105,6 +126,35 @@ describe("createHarnessService", () => {
     expect(content).toContain(".ai/vcm/");
     expect(content).toContain(".claude/worktrees/");
     expect(content).not.toContain("<!-- VCM:BEGIN");
+  });
+
+  it("plans and removes obsolete Codex harness paths", async () => {
+    const fs = createMemoryFs();
+    await fs.writeText("/repo/.ai/codex/AGENTS.md", "# old codex reviewer\n");
+    await fs.writeText("/repo/.ai/codex-translator/AGENTS.md", "# old codex translator\n");
+    await fs.writeText("/repo/.claude/skills/vcm-codex-review-gate/SKILL.md", "# old skill\n");
+    await fs.writeText("/repo/.ai/tools/request-codex-review", "#!/usr/bin/env python3\n");
+    const service = createHarnessService({ fs });
+
+    const status = await service.getHarnessStatus("/repo");
+    expect(status.plannedChanges.filter((change) => change.action === "delete").map((change) => change.path)).toEqual([
+      ".ai/codex",
+      ".ai/codex-translator",
+      ".claude/skills/vcm-codex-review-gate",
+      ".ai/tools/request-codex-review"
+    ]);
+
+    const result = await service.applyHarness("/repo");
+    expect(result.changedFiles.filter((change) => change.action === "delete").map((change) => change.path)).toEqual([
+      ".ai/codex",
+      ".ai/codex-translator",
+      ".claude/skills/vcm-codex-review-gate",
+      ".ai/tools/request-codex-review"
+    ]);
+    await expect(fs.pathExists("/repo/.ai/codex/AGENTS.md")).resolves.toBe(false);
+    await expect(fs.pathExists("/repo/.ai/codex-translator/AGENTS.md")).resolves.toBe(false);
+    await expect(fs.pathExists("/repo/.claude/skills/vcm-codex-review-gate/SKILL.md")).resolves.toBe(false);
+    await expect(fs.pathExists("/repo/.ai/tools/request-codex-review")).resolves.toBe(false);
   });
 
   it("replaces old VCM hook commands with direct HTTP hooks", async () => {
@@ -141,11 +191,17 @@ describe("createHarnessService", () => {
     }, null, 2));
     const service = createHarnessService({ fs });
 
+    // B4: a pre-existing .claude/settings.json without VCM markers is not initialized.
+    const status = await service.getHarnessStatus("/repo");
+    expect(status.initialized).toBe(false);
+
     await service.applyHarness("/repo");
 
     const settings = JSON.parse(await fs.readText("/repo/.claude/settings.json"));
     expect(JSON.stringify(settings.hooks.UserPromptSubmit)).toContain("/api/hooks/claude-code");
     expect(JSON.stringify(settings.hooks.Stop)).toContain("/api/hooks/claude-code");
+    expect(JSON.stringify(settings.hooks.StopFailure)).toContain("/api/hooks/claude-code");
+    expect(JSON.stringify(settings.hooks.PostCompact)).toContain("/api/hooks/claude-code");
     expect(JSON.stringify(settings.hooks.PermissionRequest)).toContain("/api/hooks/claude-code/permission-request");
     expect(JSON.stringify(settings.hooks.UserPromptSubmit)).not.toContain("vcmctl");
     expect(JSON.stringify(settings.hooks.Stop)).not.toContain("vcmctl");
@@ -175,6 +231,9 @@ describe("createHarnessService", () => {
       managedVersion: 0,
       action: "update"
     });
+    // B5: a drifted managed block is still a VCM marker -> initialized with pending updates.
+    expect(status.initialized).toBe(true);
+    expect(status.needsApply).toBe(true);
 
     await service.applyHarness("/repo");
 
@@ -185,13 +244,121 @@ describe("createHarnessService", () => {
     expect(content).toContain("<!-- VCM:BEGIN version=1 -->");
     expect(content).toContain("## VCM Start Here");
   });
+
+  it("commits provided harness files and rebases the task worktree onto the new base commit", async () => {
+    const fs = createMemoryFs();
+    const calls: string[] = [];
+    const service = createHarnessService({
+      fs,
+      git: {
+        async getCurrentBranch(repoRoot) {
+          calls.push(`branch:${repoRoot}`);
+          return repoRoot.endsWith("/demo") ? "feature/demo" : "main";
+        },
+        async getHeadCommit(repoRoot) {
+          calls.push(`head:${repoRoot}`);
+          return calls.filter((call) => call === "head:/repo").length > 1 ? "base2222222" : "base1111111";
+        },
+        async getStatusPorcelain(repoRoot) {
+          calls.push(`status:${repoRoot}`);
+          return "";
+        },
+        async getStagedStatus(repoRoot) {
+          calls.push(`staged:${repoRoot}`);
+          return calls.filter((call) => call === "staged:/repo").length > 1 ? "M\tCLAUDE.md\n" : "";
+        },
+        async addPaths(repoRoot, paths) {
+          calls.push(`add:${repoRoot}:${paths.join(",")}`);
+        },
+        async commit(repoRoot, message) {
+          calls.push(`commit:${repoRoot}:${message}`);
+          return "base2222222";
+        },
+        async rebase(repoRoot, upstream) {
+          calls.push(`rebase:${repoRoot}:${upstream}`);
+          return { stdout: "", stderr: "" };
+        }
+      }
+    });
+
+    const result = await service.commitAndRebaseTask("/repo", {
+      taskSlug: "demo",
+      branch: "feature/demo",
+      worktreePath: "/repo/.claude/worktrees/demo",
+      changedFiles: [
+        { path: "CLAUDE.md", action: "update", reason: "updated" },
+        { path: "./CLAUDE.md", action: "update", reason: "duplicate" },
+        { path: ".claude/settings.json", action: "update", reason: "updated" }
+      ]
+    });
+
+    expect(result).toMatchObject({
+      taskSlug: "demo",
+      branch: "feature/demo",
+      baseBranch: "main",
+      baseCommitBefore: "base1111111",
+      baseCommitAfter: "base2222222",
+      harnessCommit: "base2222222",
+      committed: true,
+      rebased: true
+    });
+    expect(result.changedFiles.map((change) => change.path)).toEqual(["CLAUDE.md", ".claude/settings.json"]);
+    expect(calls).toEqual([
+      "branch:/repo/.claude/worktrees/demo",
+      "status:/repo/.claude/worktrees/demo",
+      "staged:/repo",
+      "branch:/repo",
+      "head:/repo",
+      "add:/repo:CLAUDE.md,.claude/settings.json",
+      "staged:/repo",
+      "commit:/repo:chore: update VCM harness",
+      "head:/repo",
+      "rebase:/repo/.claude/worktrees/demo:base2222222"
+    ]);
+  });
+
+  it("refuses to commit and rebase when the task worktree is dirty", async () => {
+    const service = createHarnessService({
+      fs: createMemoryFs(),
+      git: {
+        async getCurrentBranch() {
+          return "feature/demo";
+        },
+        async getHeadCommit() {
+          return "base1111111";
+        },
+        async getStatusPorcelain() {
+          return "M src/app.ts\n";
+        },
+        async getStagedStatus() {
+          return "";
+        },
+        async addPaths() {},
+        async commit() {
+          return "base2222222";
+        },
+        async rebase() {
+          return { stdout: "", stderr: "" };
+        }
+      }
+    });
+
+    await expect(service.commitAndRebaseTask("/repo", {
+      taskSlug: "demo",
+      branch: "feature/demo",
+      worktreePath: "/repo/.claude/worktrees/demo",
+      changedFiles: [{ path: "CLAUDE.md", action: "update", reason: "updated" }]
+    })).rejects.toMatchObject({
+      code: "HARNESS_TASK_DIRTY"
+    });
+  });
 });
 
 function createMemoryFs(): FileSystemAdapter {
   const files = new Map<string, string>();
   return {
     async pathExists(targetPath) {
-      return files.has(targetPath);
+      return files.has(targetPath) || Array.from(files.keys()).some((filePath) => filePath.startsWith(`${targetPath}/`));
     },
     async ensureDir() {},
     async readDir() {
@@ -225,6 +392,16 @@ function createMemoryFs(): FileSystemAdapter {
       }
       files.set(targetPath, content);
       return true;
+    },
+    async removePath(targetPath, options = {}) {
+      files.delete(targetPath);
+      if (options.recursive) {
+        for (const filePath of Array.from(files.keys())) {
+          if (filePath.startsWith(`${targetPath}/`)) {
+            files.delete(filePath);
+          }
+        }
+      }
     }
   };
 }

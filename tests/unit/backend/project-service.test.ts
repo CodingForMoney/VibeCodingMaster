@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import { createProjectService } from "../../../src/backend/services/project-service.js";
-import type { ClaudeAdapter } from "../../../src/backend/adapters/claude-adapter.js";
 import type { FileSystemAdapter } from "../../../src/backend/adapters/filesystem.js";
 import type { GitAdapter } from "../../../src/backend/adapters/git-adapter.js";
 import { getProjectId, type AppSettingsService } from "../../../src/backend/services/app-settings-service.js";
@@ -12,7 +11,6 @@ describe("createProjectService", () => {
     const service = createProjectService({
       fs,
       git: createGitAdapterStub(checkedRepos),
-      claude: createClaudeAdapterStub(),
       appSettings: createAppSettingsStub()
     });
 
@@ -26,7 +24,6 @@ describe("createProjectService", () => {
     const service = createProjectService({
       fs: createMemoryFs(new Set()),
       git: createGitAdapterStub([]),
-      claude: createClaudeAdapterStub(),
       appSettings: createAppSettingsStub()
     });
 
@@ -40,7 +37,6 @@ describe("createProjectService", () => {
     const service = createProjectService({
       fs: createMemoryFs(new Set(["/workspace"])),
       git: createGitAdapterStub([], { failMetadata: true }),
-      claude: createClaudeAdapterStub(),
       appSettings: createAppSettingsStub()
     });
 
@@ -60,7 +56,6 @@ describe("createProjectService", () => {
     const service = createProjectService({
       fs: createMemoryFs(new Set(["/workspace"])),
       git: createGitAdapterStub([]),
-      claude: createClaudeAdapterStub(),
       appSettings
     });
 
@@ -75,7 +70,6 @@ describe("createProjectService", () => {
     const service = createProjectService({
       fs,
       git: createGitAdapterStub([]),
-      claude: createClaudeAdapterStub(),
       appSettings: createAppSettingsStub(fs)
     });
 
@@ -98,7 +92,6 @@ describe("createProjectService", () => {
     const service = createProjectService({
       fs: createMemoryFs(new Set(["/workspace"])),
       git,
-      claude: createClaudeAdapterStub(),
       appSettings: createAppSettingsStub()
     });
 
@@ -214,20 +207,6 @@ function createGitAdapterStub(
         stdout: "",
         stderr: ""
       };
-    }
-  };
-}
-
-function createClaudeAdapterStub(): ClaudeAdapter {
-  return {
-    async isAvailable() {
-      return true;
-    },
-    async getVersion() {
-      return "2.1.0";
-    },
-    buildRoleStartCommand() {
-      return { command: "claude", args: [], display: "claude" };
     }
   };
 }

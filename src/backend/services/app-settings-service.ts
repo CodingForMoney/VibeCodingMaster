@@ -1,30 +1,37 @@
 import path from "node:path";
-import { homedir } from "node:os";
 import { createHash } from "node:crypto";
-import { ROLE_NAMES } from "../../shared/constants.js";
+import { VCM_ROLE_NAMES } from "../../shared/constants.js";
+import { GATE_REVIEW_GATES, type GateReviewGate } from "../../shared/types/gate-review.js";
 import {
   createDefaultLaunchTemplate,
+  DEFAULT_TRANSLATION_OUTPUT_MODE,
+  DEFAULT_TRANSLATION_TARGET_LANGUAGE,
+  TRANSLATION_OUTPUT_MODE_OPTIONS,
+  TRANSLATION_TARGET_LANGUAGE_OPTIONS,
   type AppPreferences,
   type LaunchTemplate,
   type PermissionRequestMode,
   type RoleLaunchTemplateEntry,
+  type TranslationOutputMode,
+  type TranslationTargetLanguage,
   type ThemeMode
 } from "../../shared/types/app-settings.js";
 import type { ProjectConfig } from "../../shared/types/project.js";
-import type { RoleName } from "../../shared/types/role.js";
-import { CLAUDE_MODEL_OPTIONS, type ClaudeModel, type ClaudePermissionMode } from "../../shared/types/session.js";
-import type { TranslationSecretSettings, TranslationSettings } from "../../shared/types/translation.js";
+import type { VcmRoleName } from "../../shared/types/role.js";
+import {
+  CLAUDE_MODEL_OPTIONS,
+  SESSION_EFFORT_OPTIONS,
+  type ClaudeModel,
+  type ClaudePermissionMode,
+  type SessionEffort
+} from "../../shared/types/session.js";
 import type { FileSystemAdapter } from "../adapters/filesystem.js";
-
-export interface StoredTranslationConfig {
-  settings: Partial<TranslationSettings>;
-  secrets: TranslationSecretSettings;
-}
+import { resolveVcmDataDir } from "../vcm-data-dir.js";
 
 export interface AppSettingsFile {
   version: 1;
   preferences: AppPreferences;
-  translation?: StoredTranslationConfig;
+  gateReview?: AppGateReviewSettingsState;
   recentRepositoryPaths: string[];
 }
 
@@ -40,17 +47,28 @@ export interface AppProjectIndexFile {
   projects: AppProjectIndexEntry[];
 }
 
+export interface AppGateReviewSettingsState {
+  version: 1;
+  requiredGates: GateReviewGate[];
+  updatedAt: string;
+}
+
+export interface AppGateReviewSettings {
+  enabled: boolean;
+  requiredGates: GateReviewGate[];
+}
+
 export interface AppSettingsService {
   loadSettings(): Promise<AppSettingsFile>;
   getPreferences(): Promise<AppPreferences>;
   updatePreferences(input: Partial<AppPreferences>): Promise<AppPreferences>;
-  updateTranslationConfig(config: StoredTranslationConfig): Promise<StoredTranslationConfig>;
-  getTranslationConfig(): Promise<StoredTranslationConfig | undefined>;
   getRecentRepositoryPaths(): Promise<string[]>;
   recordRecentRepositoryPath(repoRoot: string): Promise<string[]>;
   loadProjectIndex(): Promise<AppProjectIndexFile>;
   loadProjectConfig(repoRoot: string): Promise<Partial<ProjectConfig> | undefined>;
   saveProjectConfig(config: ProjectConfig): Promise<ProjectConfig>;
+  getGateReviewSettings(repoRoot: string, taskSlug: string): Promise<AppGateReviewSettings>;
+  updateGateReviewSettings(repoRoot: string, taskSlug: string, requiredGates: GateReviewGate[]): Promise<AppGateReviewSettings>;
   getSettingsPath(): string;
   getProjectIndexPath(): string;
   getProjectConfigPath(repoRoot: string): string;
@@ -64,7 +82,7 @@ export interface AppSettingsServiceDeps {
 const MAX_RECENT_REPOSITORIES = 5;
 
 export function createAppSettingsService(deps: AppSettingsServiceDeps): AppSettingsService {
-  const settingsPath = deps.settingsPath ?? path.join(homedir(), ".vcm", "settings.json");
+  const settingsPath = deps.settingsPath ?? path.join(resolveVcmDataDir(), "settings.json");
   const settingsRoot = path.dirname(settingsPath);
   const projectIndexPath = path.join(settingsRoot, "projects", "index.json");
   let cachedSettings: AppSettingsFile | null = null;
@@ -137,18 +155,6 @@ export function createAppSettingsService(deps: AppSettingsServiceDeps): AppSetti
       });
       return preferences;
     },
-    async updateTranslationConfig(config) {
-      const current = await loadSettings();
-      const translation = normalizeTranslationConfig(config) ?? { settings: {}, secrets: {} };
-      await saveSettings({
-        ...current,
-        translation
-      });
-      return translation;
-    },
-    async getTranslationConfig() {
-      return (await loadSettings()).translation;
-    },
     async getRecentRepositoryPaths() {
       return (await loadSettings()).recentRepositoryPaths;
     },
@@ -198,6 +204,32 @@ export function createAppSettingsService(deps: AppSettingsServiceDeps): AppSetti
       });
       return config;
     },
+    async getGateReviewSettings() {
+      const settings = await loadSettings();
+      const requiredGates = normalizeGateReviewGates(settings.gateReview?.requiredGates);
+      return {
+        enabled: requiredGates.length > 0,
+        requiredGates
+      };
+    },
+    async updateGateReviewSettings(_repoRoot, _taskSlug, requiredGates) {
+      const current = await loadSettings();
+      const normalizedRequiredGates = normalizeGateReviewGates(requiredGates);
+      const timestamp = new Date().toISOString();
+      const nextGateReview: AppGateReviewSettingsState = {
+        version: 1,
+        requiredGates: normalizedRequiredGates,
+        updatedAt: timestamp
+      };
+      await saveSettings({
+        ...current,
+        gateReview: normalizeGateReviewSettingsState(nextGateReview)
+      });
+      return {
+        enabled: normalizedRequiredGates.length > 0,
+        requiredGates: normalizedRequiredGates
+      };
+    },
     getSettingsPath() {
       return settingsPath;
     },
@@ -246,13 +278,43 @@ function normalizeProjectIndexFile(input: Partial<AppProjectIndexFile>): AppProj
   };
 }
 
-function normalizeSettingsFile(input: Partial<AppSettingsFile>): AppSettingsFile {
+function normalizeGateReviewSettingsState(input: unknown): AppGateReviewSettingsState | undefined {
+  if (!isObject(input)) {
+    return undefined;
+  }
+
   return {
     version: 1,
+    requiredGates: normalizeGateReviewGates(input.requiredGates),
+    updatedAt: typeof input.updatedAt === "string" ? input.updatedAt : new Date(0).toISOString()
+  };
+}
+
+function normalizeGateReviewGates(input: unknown): GateReviewGate[] {
+  if (!Array.isArray(input)) {
+    return [];
+  }
+  const gates: GateReviewGate[] = [];
+  for (const value of input) {
+    if (!GATE_REVIEW_GATES.includes(value as GateReviewGate) || gates.includes(value as GateReviewGate)) {
+      continue;
+    }
+    gates.push(value as GateReviewGate);
+  }
+  return GATE_REVIEW_GATES.filter((gate) => gates.includes(gate));
+}
+
+function normalizeSettingsFile(input: Partial<AppSettingsFile>): AppSettingsFile {
+  const settings: AppSettingsFile = {
+    version: 1,
     preferences: normalizePreferences(input.preferences),
-    translation: normalizeTranslationConfig(input.translation),
     recentRepositoryPaths: normalizeRecentRepositoryPaths(input.recentRepositoryPaths)
   };
+  const gateReview = normalizeGateReviewSettingsState(input.gateReview);
+  if (gateReview) {
+    settings.gateReview = gateReview;
+  }
+  return settings;
 }
 
 function normalizePreferences(input: unknown): AppPreferences {
@@ -264,6 +326,10 @@ function normalizePreferences(input: unknown): AppPreferences {
     themeMode: normalizeThemeMode(candidate.themeMode),
     flowPauseAlerts: rawFlowPauseAlerts !== false,
     permissionRequestMode: normalizePermissionRequestMode(candidate.permissionRequestMode),
+    translationEnabled: candidate.translationEnabled === true,
+    translationAutoSendEnabled: candidate.translationAutoSendEnabled === true,
+    translationTargetLanguage: normalizeTranslationTargetLanguage(candidate.translationTargetLanguage),
+    translationOutputMode: normalizeTranslationOutputMode(candidate.translationOutputMode),
     launchTemplate: normalizeLaunchTemplate(candidate.launchTemplate)
   };
 }
@@ -282,6 +348,16 @@ function normalizePermissionRequestMode(input: unknown): PermissionRequestMode {
   return "off";
 }
 
+function normalizeTranslationTargetLanguage(input: unknown): TranslationTargetLanguage {
+  const option = TRANSLATION_TARGET_LANGUAGE_OPTIONS.find((current) => current.value === input);
+  return option?.value ?? DEFAULT_TRANSLATION_TARGET_LANGUAGE;
+}
+
+function normalizeTranslationOutputMode(input: unknown): TranslationOutputMode {
+  const option = TRANSLATION_OUTPUT_MODE_OPTIONS.find((current) => current.value === input);
+  return option?.value ?? DEFAULT_TRANSLATION_OUTPUT_MODE;
+}
+
 function normalizeLaunchTemplate(input: unknown): LaunchTemplate {
   const defaults = createDefaultLaunchTemplate();
   if (!isObject(input)) {
@@ -289,16 +365,15 @@ function normalizeLaunchTemplate(input: unknown): LaunchTemplate {
   }
 
   const rawRoles = isObject(input.roles) ? input.roles : {};
-  const roles = {} as Record<RoleName, RoleLaunchTemplateEntry>;
-  for (const role of ROLE_NAMES) {
+  const roles = {} as Record<VcmRoleName, RoleLaunchTemplateEntry>;
+  for (const role of VCM_ROLE_NAMES) {
     roles[role] = normalizeRoleLaunchTemplateEntry(rawRoles[role], defaults.roles[role]);
   }
 
   return {
     version: 1,
     roles,
-    autoOrchestration: input.autoOrchestration !== false,
-    translationEnabled: input.translationEnabled !== false
+    autoOrchestration: input.autoOrchestration !== false
   };
 }
 
@@ -309,7 +384,8 @@ function normalizeRoleLaunchTemplateEntry(
   const candidate = isObject(input) ? input : {};
   return {
     permissionMode: normalizeClaudePermissionMode(candidate.permissionMode, fallback.permissionMode),
-    model: normalizeClaudeModel(candidate.model, fallback.model)
+    model: normalizeClaudeModel(candidate.model, fallback.model),
+    effort: normalizeSessionEffort(candidate.effort, fallback.effort)
   };
 }
 
@@ -331,23 +407,12 @@ function normalizeClaudeModel(input: unknown, fallback: ClaudeModel): ClaudeMode
   return model?.value ?? fallback;
 }
 
-function normalizeTranslationConfig(input: unknown): StoredTranslationConfig | undefined {
-  if (!input || typeof input !== "object") {
-    return undefined;
+function normalizeSessionEffort(input: unknown, fallback: SessionEffort): SessionEffort {
+  if (typeof input !== "string") {
+    return fallback;
   }
-
-  const candidate = input as Partial<StoredTranslationConfig>;
-  const rawSettings = isObject(candidate.settings) ? candidate.settings as Partial<TranslationSettings> : {};
-  const rawSecrets = isObject(candidate.secrets) ? candidate.secrets as TranslationSecretSettings : {};
-  const { apiKey: settingsApiKey, ...settings } = rawSettings;
-  const apiKey = rawSecrets.apiKey ?? settingsApiKey;
-  return {
-    settings,
-    secrets: {
-      ...rawSecrets,
-      ...(apiKey !== undefined ? { apiKey } : {})
-    }
-  };
+  const effort = SESSION_EFFORT_OPTIONS.find((option) => option.value === input);
+  return effort?.value ?? fallback;
 }
 
 function normalizeRecentRepositoryPaths(input: unknown): string[] {

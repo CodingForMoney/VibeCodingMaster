@@ -7,12 +7,16 @@ export type HarnessFileKind =
   | "skill-vcm-harness-bootstrap"
   | "skill-vcm-long-running-validation"
   | "skill-vcm-route-message"
+  | "skill-vcm-gate-review"
+  | "agent-gate-reviewer"
+  | "agent-translator"
+  | "tool-request-gate-review"
   | "agent-project-manager"
   | "agent-architect"
   | "agent-coder"
   | "agent-reviewer";
 
-export type HarnessFileAction = "create" | "insert" | "update" | "ok";
+export type HarnessFileAction = "create" | "insert" | "update" | "delete" | "ok";
 export type HarnessBootstrapCheckStatus = "ok" | "missing" | "incomplete" | "unknown";
 export type HarnessBootstrapStatus = "not_ready" | "not_started" | "incomplete" | "running" | "complete";
 
@@ -33,6 +37,21 @@ export interface HarnessPlannedChange {
 
 export interface HarnessStatusReport {
   version: number;
+  /**
+   * Whether the VCM harness has already been installed in the target repo.
+   *
+   * Single source of truth for the UI "project initialized" judgement. Derived
+   * by the backend (see renderHarnessStatus in harness-service.ts): true when at
+   * least one VCM-exclusive marker is present (a managed block exists, or a
+   * VCM-owned whole-file/raw-file harness file exists). Independent of needsApply:
+   * an initialized project may still have pending updates.
+   *
+   * UI contract (HarnessPanel "Fixed install" stage):
+   * - initialized === false              -> hide file list, show only "Initialize".
+   * - initialized && needsApply          -> show update file list + "Update" button.
+   * - initialized && !needsApply         -> show "Up to date", no file list, no apply button.
+   */
+  initialized: boolean;
   files: HarnessFileStatus[];
   needsApply: boolean;
   plannedChanges: HarnessPlannedChange[];
@@ -41,6 +60,24 @@ export interface HarnessStatusReport {
 
 export interface HarnessApplyResult {
   version: number;
+  changedFiles: HarnessPlannedChange[];
+  message: string;
+}
+
+export interface CommitAndRebaseHarnessTaskRequest {
+  changedFiles: HarnessPlannedChange[];
+}
+
+export interface CommitAndRebaseHarnessTaskResult {
+  taskSlug: string;
+  branch: string;
+  worktreePath: string;
+  baseBranch: string;
+  baseCommitBefore: string;
+  baseCommitAfter: string;
+  harnessCommit?: string;
+  committed: boolean;
+  rebased: boolean;
   changedFiles: HarnessPlannedChange[];
   message: string;
 }

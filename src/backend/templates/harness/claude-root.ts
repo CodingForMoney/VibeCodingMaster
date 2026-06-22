@@ -5,6 +5,7 @@ export function renderRootClaudeHarnessRules(): string {
 - Read module-local \`CLAUDE.md\` before editing a subdirectory if one exists.
 - Use \`vcm-route-message\` whenever a VCM role hands off work, asks another role a question, reports a result, reports a blocker, or raises a finding. Follow its write-then-stop rule.
 - Use \`vcm-long-running-validation\` for long-running validation. Follow the background job limits below.
+- Project-manager uses \`vcm-gate-review\` at enabled Gate Review trigger points and on VCM Gate Review callbacks.
 
 ## VCM Background Jobs
 
@@ -26,11 +27,12 @@ export function renderRootClaudeHarnessRules(): string {
 ## VCM Task Flow
 
 - Code changes use the full route: \`project-manager -> architect -> coder -> reviewer -> architect docs sync -> project-manager final acceptance\`.
-- Before code changes, architect must write an architecture plan and code scaffolding that cover file responsibilities, cross-file callable surfaces, user-visible behavior, docs impact, risks, and Replan triggers.
+- Before code changes, architect must write an architecture plan with a Scaffold Manifest and minimum necessary code scaffolding that cover file responsibilities, cross-file callable surfaces, user-visible behavior, docs impact, risks, and Replan triggers.
 - Docs-only changes may use: \`project-manager -> architect -> project-manager final acceptance\`.
 - Test-only or validation-only work may use: \`project-manager -> reviewer -> project-manager final acceptance\`.
 - If a docs/test/validation-only task reveals required code, architecture, public contract, dependency, durable-doc, or test-strategy changes, route back through the full code-change flow.
 - Keep role outputs under \`.ai/vcm/handoffs/\`.
+- Gate Review Gate reports live under \`.ai/vcm/gate-reviews/\` and are VCM-managed task evidence.
 - Runtime task records and handoffs under \`.ai/vcm/\` are temporary. Durable facts must move into code, tests, PR text, commit history, or long-term docs.
 - Record current-task unresolved findings in \`.ai/vcm/handoffs/known-issues.md\`.
 

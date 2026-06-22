@@ -1,6 +1,10 @@
 import type { FastifyInstance } from "fastify";
+import { CORE_VCM_ROLE_NAMES, DISPATCHABLE_ROLES } from "../../shared/constants.js";
+import type { ArtifactSummary } from "../../shared/types/artifact.js";
+import type { DispatchableRole } from "../../shared/types/role.js";
+import type { TaskStatusReport } from "../../shared/types/api.js";
 import type { CleanupTaskRequest, CreateTaskRequest } from "../../shared/types/task.js";
-import { VcmError } from "../errors.js";
+import { isOpenFileLimitError, VcmError } from "../errors.js";
 import type { ProjectService } from "../services/project-service.js";
 import type { SessionService } from "../services/session-service.js";
 import type { StatusService } from "../services/status-service.js";
@@ -34,8 +38,17 @@ export function registerTaskRoutes(app: FastifyInstance, deps: TaskRouteDeps): v
   });
 
   app.get<{ Params: { taskSlug: string } }>("/api/tasks/:taskSlug/status", async (request) => {
-    const project = await requireCurrentProject(deps.projectService);
-    return deps.statusService.getTaskStatus(project.repoRoot, request.params.taskSlug);
+    let repoRoot = "unknown";
+    try {
+      const project = await requireCurrentProject(deps.projectService);
+      repoRoot = project.repoRoot;
+      return await deps.statusService.getTaskStatus(project.repoRoot, request.params.taskSlug);
+    } catch (error) {
+      if (isOpenFileLimitError(error)) {
+        return degradedTaskStatus(repoRoot, request.params.taskSlug, error);
+      }
+      throw error;
+    }
   });
 
   app.post<{ Params: { taskSlug: string }; Body: CleanupTaskRequest }>(
@@ -58,7 +71,7 @@ async function stopRunningRoleSessions(
 ): Promise<void> {
   const sessions = await deps.sessionService.listRoleSessions(repoRoot, taskSlug);
   for (const session of sessions) {
-    if (session.status === "running") {
+    if (session.status === "running" && CORE_VCM_ROLE_NAMES.some((role) => role === session.role)) {
       await deps.sessionService.stopRoleSession(repoRoot, taskSlug, session.role);
     }
   }
@@ -74,4 +87,53 @@ async function requireCurrentProject(projectService: ProjectService) {
     });
   }
   return project;
+}
+
+function degradedTaskStatus(repoRoot: string, taskSlug: string, error: unknown): TaskStatusReport {
+  const timestamp = new Date().toISOString();
+  const handoffDir = ".ai/vcm/handoffs";
+  return {
+    task: {
+      version: 1,
+      taskSlug,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+      repoRoot,
+      worktreePath: `${repoRoot}/.claude/worktrees/${taskSlug}`,
+      branch: "unknown",
+      handoffDir,
+      status: "stopped"
+    },
+    sessions: [],
+    artifacts: degradedArtifactSummary(handoffDir),
+    warnings: [
+      `Task status is temporarily unavailable because the backend hit the open-files limit: ${errorMessage(error)}`
+    ]
+  };
+}
+
+function degradedArtifactSummary(handoffDir: string): ArtifactSummary {
+  const roleCommandsDir = `${handoffDir}/role-commands`;
+  const messagesDir = `${handoffDir}/messages`;
+  return {
+    paths: {
+      handoffDir,
+      roleCommandsDir,
+      messagesDir,
+      roleCommandPaths: Object.fromEntries(
+        DISPATCHABLE_ROLES.map((role) => [role, `${roleCommandsDir}/${role}.md`])
+      ) as Record<DispatchableRole, string>,
+      messageRoutePaths: {},
+      architecturePlanPath: `${handoffDir}/architecture-plan.md`,
+      knownIssuesPath: `${handoffDir}/known-issues.md`,
+      reviewReportPath: `${handoffDir}/review-report.md`,
+      docsSyncReportPath: `${handoffDir}/docs-sync-report.md`,
+      finalAcceptancePath: `${handoffDir}/final-acceptance.md`
+    },
+    checks: []
+  };
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }

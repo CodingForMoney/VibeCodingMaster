@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { isDispatchableRole, isRoleName } from "../../shared/constants.js";
+import { isDispatchableRole } from "../../shared/constants.js";
 import type { DispatchableRole } from "../../shared/types/role.js";
 import { VcmError } from "../errors.js";
 import type { ArtifactService } from "../services/artifact-service.js";
@@ -76,29 +76,6 @@ export function registerArtifactRoutes(app: FastifyInstance, deps: ArtifactRoute
     }
   );
 
-  app.get<{ Params: { taskSlug: string; role: string } }>(
-    "/api/tasks/:taskSlug/logs/:role",
-    async (request) => {
-      const project = await requireCurrentProject(deps.projectService);
-      if (!isRoleName(request.params.role)) {
-        throw new VcmError({
-          code: "UNKNOWN_ROLE",
-          message: `Unknown role: ${request.params.role}`,
-          statusCode: 400
-        });
-      }
-      const task = await deps.taskService.loadTask(project.repoRoot, request.params.taskSlug);
-      const taskRepoRoot = getTaskRuntimeRepoRoot(task);
-      const paths = deps.artifactService.getHandoffPaths(taskRepoRoot, task.handoffDir);
-      return {
-        role: request.params.role,
-        content: await deps.artifactService.readArtifact({
-          repoRoot: taskRepoRoot,
-          artifactPath: paths.roleLogPaths[request.params.role]
-        })
-      };
-    }
-  );
 }
 
 function parseDispatchableRole(role: string): DispatchableRole {

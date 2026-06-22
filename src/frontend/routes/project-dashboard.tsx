@@ -1,6 +1,15 @@
 import { FormEvent, type ReactNode, useEffect, useState } from "react";
-import type { LaunchTemplate, PermissionRequestMode, ThemeMode } from "../../shared/types/app-settings.js";
+import {
+  TRANSLATION_OUTPUT_MODE_OPTIONS,
+  TRANSLATION_TARGET_LANGUAGE_OPTIONS,
+  type LaunchTemplate,
+  type PermissionRequestMode,
+  type ThemeMode,
+  type TranslationOutputMode,
+  type TranslationTargetLanguage
+} from "../../shared/types/app-settings.js";
 import type {
+  CommitAndRebaseHarnessTaskResult,
   HarnessApplyResult,
   HarnessBootstrapStatusReport,
   HarnessStatusReport
@@ -10,9 +19,11 @@ import type {
   GatewayStatus,
   StartGatewayQrLoginResult
 } from "../../shared/types/gateway.js";
+import { GATE_REVIEW_GATES, type GateReviewGate, type GateReviewIndex } from "../../shared/types/gate-review.js";
 import type { VcmOrchestrationState, VcmRoleMessage } from "../../shared/types/message.js";
 import type { ProjectSummary } from "../../shared/types/project.js";
 import type { VcmSessionRoundState } from "../../shared/types/round.js";
+import type { RoleSessionRecord } from "../../shared/types/session.js";
 import type { TaskRecord } from "../../shared/types/task.js";
 import { EventLog } from "../components/event-log.js";
 import { HarnessPanel } from "../components/harness-panel.js";
@@ -24,6 +35,8 @@ type SidebarSectionId =
   | "repository-path"
   | "connected-repository"
   | "settings"
+  | "translation"
+  | "gate-review-gates"
   | "gateway"
   | "vcm-harness"
   | "new-task"
@@ -38,9 +51,16 @@ export interface ProjectDashboardProps {
   orchestration: VcmOrchestrationState | null;
   events: string[];
   roundState: VcmSessionRoundState | null;
+  gateReview: GateReviewIndex | null;
+  translationEnabled: boolean;
+  translationAutoSendEnabled: boolean;
+  translationTargetLanguage: TranslationTargetLanguage;
+  translationOutputMode: TranslationOutputMode;
+  translatorSession: RoleSessionRecord | null;
   harnessStatus: HarnessStatusReport | null;
   harnessBootstrapStatus: HarnessBootstrapStatusReport | null;
   harnessApplyResult?: HarnessApplyResult | null;
+  harnessTaskSyncResult?: CommitAndRebaseHarnessTaskResult | null;
   gatewayStatus: GatewayStatus | null;
   gatewayQrLogin: StartGatewayQrLoginResult | null;
   gatewayQrCheck: CheckGatewayQrLoginResult | null;
@@ -50,13 +70,23 @@ export interface ProjectDashboardProps {
   onPullConnectedRepository(): Promise<void>;
   onRefreshHarness(): Promise<void>;
   onApplyHarness(): Promise<void>;
+  onCommitAndRebaseHarnessTask(): Promise<void>;
   onStartHarnessBootstrap(): Promise<void>;
   onRefreshGateway(): Promise<void>;
   onGatewayEnabledChange(enabled: boolean): void;
   onGatewayTranslationChange(enabled: boolean): void;
   onStartGatewayQrLogin(): void;
   onResetGatewayBinding(): void;
-  onCreateTask(input: { taskSlug: string; createWorktree?: boolean; title?: string }): Promise<void>;
+  onGateReviewGateEnabledChange(gate: GateReviewGate, enabled: boolean): void;
+  onTranslationEnabledChange(enabled: boolean): void;
+  onTranslationAutoSendChange(enabled: boolean): void;
+  onTranslationTargetLanguageChange(targetLanguage: TranslationTargetLanguage): void;
+  onTranslationOutputModeChange(outputMode: TranslationOutputMode): void;
+  onOpenFileTranslation(): void;
+  onOpenTranslatorSession(): void;
+  onCreateTranslationBootstrap(): void;
+  onUpdateTranslationMemory(): void;
+  onCreateTask(input: { taskSlug: string; title?: string }): Promise<void>;
   onSelectTask(taskSlug: string): void;
   themeMode: ThemeMode;
   onThemeModeChange(themeMode: ThemeMode): void;
@@ -83,9 +113,16 @@ export function ProjectDashboard({
   orchestration,
   events,
   roundState,
+  gateReview,
+  translationEnabled,
+  translationAutoSendEnabled,
+  translationTargetLanguage,
+  translationOutputMode,
+  translatorSession,
   harnessStatus,
   harnessBootstrapStatus,
   harnessApplyResult,
+  harnessTaskSyncResult,
   gatewayStatus,
   gatewayQrLogin,
   gatewayQrCheck,
@@ -95,12 +132,22 @@ export function ProjectDashboard({
   onPullConnectedRepository,
   onRefreshHarness,
   onApplyHarness,
+  onCommitAndRebaseHarnessTask,
   onStartHarnessBootstrap,
   onRefreshGateway,
   onGatewayEnabledChange,
   onGatewayTranslationChange,
   onStartGatewayQrLogin,
   onResetGatewayBinding,
+  onGateReviewGateEnabledChange,
+  onTranslationEnabledChange,
+  onTranslationAutoSendChange,
+  onTranslationTargetLanguageChange,
+  onTranslationOutputModeChange,
+  onOpenFileTranslation,
+  onOpenTranslatorSession,
+  onCreateTranslationBootstrap,
+  onUpdateTranslationMemory,
   onCreateTask,
   onSelectTask,
   themeMode,
@@ -119,7 +166,6 @@ export function ProjectDashboard({
   onDeleteMessageHistory
 }: ProjectDashboardProps) {
   const [taskSlug, setTaskSlug] = useState("");
-  const [createWorktree, setCreateWorktree] = useState(true);
   const [showMessages, setShowMessages] = useState(false);
   const [showEvents, setShowEvents] = useState(false);
   const [openSidebarSection, setOpenSidebarSection] = useState<SidebarSectionId | null>(
@@ -147,9 +193,8 @@ export function ProjectDashboard({
 
   async function handleCreateTask(event: FormEvent) {
     event.preventDefault();
-    await onCreateTask({ taskSlug: normalizedTaskSlug, createWorktree });
+    await onCreateTask({ taskSlug: normalizedTaskSlug });
     setTaskSlug("");
-    setCreateWorktree(true);
   }
 
   return (
@@ -183,7 +228,6 @@ export function ProjectDashboard({
           }}
         >
           <ConnectedRepositoryPanel
-            activeTask={activeTask}
             busy={busy}
             project={project}
             onPull={onPullConnectedRepository}
@@ -243,12 +287,12 @@ export function ProjectDashboard({
           <button
             className="settings-toggle"
             disabled={busy || !canSaveLaunchTemplate}
-            title="Save the current four role launch settings"
+            title="Save the current core role launch settings and optional Gate Reviewer settings"
             type="button"
             onClick={onSaveLaunchTemplate}
           >
             <span>Save launch template</span>
-            <span>{canSaveLaunchTemplate ? "ready" : "needs 4 sessions"}</span>
+            <span>{canSaveLaunchTemplate ? "ready" : "needs core sessions"}</span>
           </button>
           {canOneClickStart ? (
             <button
@@ -278,6 +322,44 @@ export function ProjectDashboard({
           ) : null}
         </div>
       </SidebarSection>
+
+      <SidebarSection
+        title="Translation"
+        open={openSidebarSection === "translation"}
+        onOpenChange={(open) => handleSidebarSectionChange("translation", open)}
+      >
+        <TranslationControlsPanel
+          busy={busy}
+          enabled={translationEnabled}
+          autoSendEnabled={translationAutoSendEnabled}
+          targetLanguage={translationTargetLanguage}
+          outputMode={translationOutputMode}
+          fileTranslationAvailable={Boolean(project)}
+          translatorSession={translatorSession}
+          onAutoSendChange={onTranslationAutoSendChange}
+          onCreateBootstrap={onCreateTranslationBootstrap}
+          onEnabledChange={onTranslationEnabledChange}
+          onUpdateMemory={onUpdateTranslationMemory}
+          onTargetLanguageChange={onTranslationTargetLanguageChange}
+          onOutputModeChange={onTranslationOutputModeChange}
+          onOpenFileTranslation={onOpenFileTranslation}
+          onOpenTranslatorSession={onOpenTranslatorSession}
+        />
+      </SidebarSection>
+
+      {project && activeTaskSlug ? (
+        <SidebarSection
+          title="Gate Review Gates"
+          open={openSidebarSection === "gate-review-gates"}
+          onOpenChange={(open) => handleSidebarSectionChange("gate-review-gates", open)}
+        >
+          <GateReviewGateSettings
+            busy={busy}
+            state={gateReview}
+            onGateEnabledChange={onGateReviewGateEnabledChange}
+          />
+        </SidebarSection>
+      ) : null}
 
       <SidebarSection
         title="Gateway"
@@ -311,9 +393,12 @@ export function ProjectDashboard({
             status={harnessStatus}
             bootstrapStatus={harnessBootstrapStatus}
             applyResult={harnessApplyResult}
+            taskSyncResult={harnessTaskSyncResult}
+            canCommitAndRebaseTask={Boolean(harnessApplyResult?.changedFiles.length && activeTask)}
             busy={busy}
             onRefresh={onRefreshHarness}
             onApply={onApplyHarness}
+            onCommitAndRebaseTask={onCommitAndRebaseHarnessTask}
             onStartBootstrap={onStartHarnessBootstrap}
           />
         </SidebarSection>
@@ -332,24 +417,10 @@ export function ProjectDashboard({
                 onChange={(event) => setTaskSlug(event.target.value)}
                 placeholder="task name"
               />
-              <label className="task-create-option">
-                <input
-                  type="checkbox"
-                  checked={createWorktree}
-                  onChange={(event) => setCreateWorktree(event.target.checked)}
-                />
-                <span>Create worktree and branch</span>
-              </label>
-              {createWorktree ? (
-                <div className="task-create-preview">
-                  <small>branch: {normalizedTaskSlug ? `feature/${normalizedTaskSlug}` : "feature/<task>"}</small>
-                  <small>worktree: {normalizedTaskSlug ? `.claude/worktrees/${normalizedTaskSlug}` : ".claude/worktrees/<task>"}</small>
-                </div>
-              ) : (
-                <div className="task-create-preview">
-                  <small>uses current repository path and current branch</small>
-                </div>
-              )}
+              <div className="task-create-preview">
+                <small>branch: {normalizedTaskSlug ? `feature/${normalizedTaskSlug}` : "feature/<task>"}</small>
+                <small>worktree: {normalizedTaskSlug ? `.claude/worktrees/${normalizedTaskSlug}` : ".claude/worktrees/<task>"}</small>
+              </div>
               <button type="submit" disabled={busy || !normalizedTaskSlug}>
                 Create
               </button>
@@ -403,17 +474,202 @@ export function ProjectDashboard({
 
 function getLaunchTemplateBadge(template: LaunchTemplate): string {
   const parts = [
-    template.autoOrchestration ? "auto" : "manual",
-    template.translationEnabled ? "tx" : "no tx"
+    template.autoOrchestration ? "auto" : "manual"
   ];
   return parts.join(" + ");
 }
 
 function getLaunchTemplateSummary(template: LaunchTemplate): string {
   const roles = Object.entries(template.roles)
-    .map(([role, config]) => `${role}: ${config.permissionMode} / ${config.model}`)
+    .map(([role, config]) => `${role}: ${config.permissionMode} / ${config.model} / ${config.effort}`)
     .join("; ");
   return `Launch template: ${getLaunchTemplateBadge(template)}; ${roles}`;
+}
+
+function TranslationControlsPanel({
+  autoSendEnabled,
+  busy,
+  enabled,
+  fileTranslationAvailable,
+  outputMode,
+  targetLanguage,
+  translatorSession,
+  onAutoSendChange,
+  onCreateBootstrap,
+  onEnabledChange,
+  onUpdateMemory,
+  onOutputModeChange,
+  onTargetLanguageChange,
+  onOpenFileTranslation,
+  onOpenTranslatorSession
+}: {
+  autoSendEnabled: boolean;
+  busy?: boolean;
+  enabled: boolean;
+  fileTranslationAvailable: boolean;
+  outputMode: TranslationOutputMode;
+  targetLanguage: TranslationTargetLanguage;
+  translatorSession: RoleSessionRecord | null;
+  onAutoSendChange(enabled: boolean): void;
+  onCreateBootstrap(): void;
+  onEnabledChange(enabled: boolean): void;
+  onUpdateMemory(): void;
+  onOutputModeChange(outputMode: TranslationOutputMode): void;
+  onTargetLanguageChange(targetLanguage: TranslationTargetLanguage): void;
+  onOpenFileTranslation(): void;
+  onOpenTranslatorSession(): void;
+}) {
+  return (
+    <div className="sidebar-settings">
+      <button
+        aria-pressed={enabled}
+        className={enabled ? "settings-toggle is-active" : "settings-toggle"}
+        disabled={busy}
+        type="button"
+        onClick={() => onEnabledChange(!enabled)}
+      >
+        <span>Conversation translation</span>
+        <span>{enabled ? "on" : "off"}</span>
+      </button>
+      <button
+        aria-pressed={autoSendEnabled}
+        className={autoSendEnabled ? "settings-toggle is-active" : "settings-toggle"}
+        disabled={busy}
+        type="button"
+        onClick={() => onAutoSendChange(!autoSendEnabled)}
+      >
+        <span>Auto-send</span>
+        <span>{autoSendEnabled ? "on" : "off"}</span>
+      </button>
+      <label className="settings-select-row">
+        <span>Language</span>
+        <select
+          value={targetLanguage}
+          disabled={busy}
+          onChange={(event) => onTargetLanguageChange(event.target.value as TranslationTargetLanguage)}
+        >
+          {TRANSLATION_TARGET_LANGUAGE_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+      </label>
+      <label className="settings-select-row">
+        <span>Reply scope</span>
+        <select
+          value={outputMode}
+          disabled={busy}
+          onChange={(event) => onOutputModeChange(event.target.value as TranslationOutputMode)}
+        >
+          {TRANSLATION_OUTPUT_MODE_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
+        </select>
+      </label>
+      <button
+        className="settings-toggle"
+        disabled={busy || !fileTranslationAvailable}
+        title={fileTranslationAvailable ? "Open file translation" : "Connect a repository first"}
+        type="button"
+        onClick={onOpenFileTranslation}
+      >
+        <span>File translation</span>
+        <span>open</span>
+      </button>
+      <button
+        className="settings-toggle"
+        disabled={busy || !fileTranslationAvailable}
+        title={fileTranslationAvailable ? "Run translation bootstrap" : "Connect a repository first"}
+        type="button"
+        onClick={onCreateBootstrap}
+      >
+        <span>Bootstrap</span>
+        <span>run</span>
+      </button>
+      <button
+        className="settings-toggle"
+        disabled={busy || !fileTranslationAvailable}
+        title={fileTranslationAvailable ? "Compact and update translation memory" : "Connect a repository first"}
+        type="button"
+        onClick={onUpdateMemory}
+      >
+        <span>Update memory</span>
+        <span>run</span>
+      </button>
+      <div className="settings-status-row">
+        <span>Session status</span>
+        <strong>{getTranslatorSessionStatus(translatorSession)}</strong>
+      </div>
+      <button
+        className="settings-toggle"
+        disabled={busy || !fileTranslationAvailable}
+        title={fileTranslationAvailable ? "Open Translator session" : "Connect a repository first"}
+        type="button"
+        onClick={onOpenTranslatorSession}
+      >
+        <span>Open Session</span>
+        <span>open</span>
+      </button>
+    </div>
+  );
+}
+
+function getTranslatorSessionStatus(session: RoleSessionRecord | null): string {
+  if (!session) {
+    return "not started";
+  }
+  if (session.status === "running") {
+    return session.activityStatus ?? "idle";
+  }
+  return session.status;
+}
+
+function GateReviewGateSettings({
+  busy,
+  onGateEnabledChange,
+  state
+}: {
+  busy?: boolean;
+  onGateEnabledChange(gate: GateReviewGate, enabled: boolean): void;
+  state: GateReviewIndex | null;
+}) {
+  return (
+    <div className="sidebar-settings">
+      {GATE_REVIEW_GATES.map((gate) => {
+        const record = state?.gates[gate];
+        const enabled = Boolean(record?.required);
+        return (
+          <button
+            aria-pressed={enabled}
+            className={enabled ? "settings-toggle is-active" : "settings-toggle"}
+            disabled={busy || !state}
+            key={gate}
+            title={record?.status ? `status: ${record.status}` : undefined}
+            type="button"
+            onClick={() => onGateEnabledChange(gate, !enabled)}
+          >
+            <span>{getGateReviewGateLabel(gate)}</span>
+            <span>{enabled ? "on" : "off"}</span>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function getGateReviewGateLabel(gate: GateReviewGate): string {
+  switch (gate) {
+    case "architecture-plan":
+      return "Architecture plan";
+    case "validation-adequacy":
+      return "Validation adequacy";
+    case "final-diff":
+      return "Final diff";
+  }
+  return gate;
 }
 
 function GatewayPanel({
@@ -484,21 +740,16 @@ function GatewayPanel({
 }
 
 function ConnectedRepositoryPanel({
-  activeTask,
   busy,
   onPull,
   project
 }: {
-  activeTask: TaskRecord | null;
   busy?: boolean;
   onPull(): Promise<void>;
   project: ProjectSummary;
 }) {
-  const inlineTaskBlocksPull = Boolean(activeTask && !activeTask.worktreePath && activeTask.cleanupStatus !== "cleaned");
-  const pullDisabledReason = inlineTaskBlocksPull
-    ? `Inline task "${activeTask?.taskSlug}" uses the base repository.`
-    : project.pullDisabledReason;
-  const canPull = Boolean(project.canPull && !inlineTaskBlocksPull);
+  const pullDisabledReason = project.pullDisabledReason;
+  const canPull = Boolean(project.canPull);
 
   return (
     <div className="project-summary">
@@ -583,17 +834,14 @@ function SessionStatusDock({
   task: TaskRecord;
 }) {
   const [nowMs, setNowMs] = useState(() => Date.now());
-  const showCurrentRound = Boolean(
-    roundState?.startedAt &&
-    roundState.status === "running"
-  );
+  const showRound = Boolean(roundState?.startedAt);
   const sessionElapsedMs = getElapsedMs(task.createdAt, nowMs);
   const totalCcActiveMs = getLiveCcActiveMs(roundState, roundState?.totalCcActiveMs ?? 0, nowMs);
-  const currentRoundCcActiveMs = showCurrentRound && roundState
+  const currentRoundCcActiveMs = showRound && roundState
     ? getLiveCcActiveMs(roundState, roundState.currentRoundCcActiveMs, nowMs)
     : 0;
-  const currentRoundElapsedMs = showCurrentRound && roundState?.startedAt
-    ? getElapsedMs(roundState.startedAt, nowMs)
+  const currentRoundElapsedMs = showRound && roundState
+    ? getRoundElapsedMs(roundState, nowMs)
     : 0;
   const sessionTitle = task.title?.trim() || task.taskSlug;
 
@@ -623,15 +871,15 @@ function SessionStatusDock({
           <dd>{roundState?.totalRoundCount ?? 0}</dd>
         </div>
         <div>
-          <dt>CC runtime</dt>
+          <dt>Role runtime</dt>
           <dd>{formatDuration(totalCcActiveMs)}</dd>
         </div>
       </dl>
 
-      {showCurrentRound && roundState ? (
+      {showRound && roundState ? (
         <div className="current-round-status">
           <div className="current-round-title">
-            <span>Current Round</span>
+            <span>{roundState.status === "running" ? "Current Round" : "Last Round"}</span>
             <span className={`status-badge status-${roundState.status}`}>{roundState.status}</span>
           </div>
           <dl className="task-status-stats">
@@ -644,7 +892,7 @@ function SessionStatusDock({
               <dd>{formatDuration(currentRoundElapsedMs)}</dd>
             </div>
             <div>
-              <dt>CC runtime</dt>
+              <dt>Role runtime</dt>
               <dd>{formatDuration(currentRoundCcActiveMs)}</dd>
             </div>
             <div>
@@ -671,6 +919,13 @@ function getLiveCcActiveMs(
     return baseMs;
   }
   return baseMs + Math.max(0, nowMs - updatedAtMs);
+}
+
+function getRoundElapsedMs(roundState: VcmSessionRoundState, nowMs: number): number {
+  const endMs = roundState.status === "running"
+    ? nowMs
+    : Date.parse(roundState.stoppedAt ?? roundState.lastTurnEndedAt ?? "");
+  return getElapsedMs(roundState.startedAt ?? "", Number.isFinite(endMs) ? endMs : nowMs);
 }
 
 function getElapsedMs(startedAt: string, nowMs: number): number {

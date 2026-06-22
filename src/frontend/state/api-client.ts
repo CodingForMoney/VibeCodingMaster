@@ -7,13 +7,24 @@ import type {
   StartGatewayQrLoginResult,
   UpdateGatewaySettingsRequest
 } from "../../shared/types/gateway.js";
+import type { RuntimeDiagnostics } from "../../shared/types/diagnostics.js";
 import type {
+  CommitAndRebaseHarnessTaskRequest,
+  CommitAndRebaseHarnessTaskResult,
   HarnessApplyResult,
   HarnessBootstrapStatusReport,
   HarnessStatusReport,
   StartHarnessBootstrapRequest,
   StartHarnessBootstrapResult
 } from "../../shared/types/harness.js";
+import type {
+  GateReviewExceptionRequest,
+  GateReviewGate,
+  GateReviewIndex,
+  GateReviewReport,
+  GateReviewRequestResult,
+  GateReviewSettingsUpdateRequest
+} from "../../shared/types/gate-review.js";
 import type {
   VcmOrchestrationMode,
   VcmOrchestrationState,
@@ -27,17 +38,21 @@ import type { VcmSessionRoundState } from "../../shared/types/round.js";
 import type { RoleSessionRecord, StartRoleSessionRequest } from "../../shared/types/session.js";
 import type { CleanupTaskRequest, CleanupTaskResult, CreateTaskRequest, TaskRecord } from "../../shared/types/task.js";
 import type {
+  TranslationBootstrapRun,
+  FileTranslationJob,
+  TranslationQueueItem,
+  TranslationSourceFileBrowserResult,
+  TranslationState,
+  CreateTranslationBootstrapRequest,
+  CreateFileTranslationRequest,
+  CreateTranslationMemoryUpdateRequest,
   SendTranslatedInputRequest,
   TranslateUserInputRequest,
   TranslateUserInputResult,
   TranslationEntry,
   TranslationFailuresResult,
   PollTranslationSessionResult,
-  StartTranslationSessionResult,
-  TranslationPromptPreview,
-  TranslationProviderTestResult,
-  TranslationSecretSettings,
-  TranslationSettings
+  StartTranslationSessionResult
 } from "../../shared/types/translation.js";
 
 export const apiClient = {
@@ -49,6 +64,9 @@ export const apiClient = {
       method: "PUT",
       body: JSON.stringify(input)
     });
+  },
+  getRuntimeDiagnostics() {
+    return request<RuntimeDiagnostics>("/api/diagnostics/runtime");
   },
   getCurrentProject() {
     return request<ProjectSummary | null>("/api/projects/current");
@@ -89,6 +107,15 @@ export const apiClient = {
     return request<HarnessApplyResult>("/api/projects/harness/apply", {
       method: "POST"
     });
+  },
+  commitAndRebaseHarnessTask(taskSlug: string, input: CommitAndRebaseHarnessTaskRequest) {
+    return request<CommitAndRebaseHarnessTaskResult>(
+      `/api/projects/harness/tasks/${encodeURIComponent(taskSlug)}/commit-and-rebase`,
+      {
+        method: "POST",
+        body: JSON.stringify(input)
+      }
+    );
   },
   getHarnessBootstrapStatus() {
     return request<HarnessBootstrapStatusReport>("/api/projects/harness/bootstrap");
@@ -158,22 +185,39 @@ export const apiClient = {
   getSessionRoundState(taskSlug: string) {
     return request<VcmSessionRoundState>(`/api/tasks/${encodeURIComponent(taskSlug)}/round`);
   },
-  getTranslationSettings() {
-    return request<TranslationSettings>("/api/translation/settings");
+  getGateReviewState(taskSlug: string) {
+    return request<GateReviewIndex>(`/api/tasks/${encodeURIComponent(taskSlug)}/gate-review`);
   },
-  updateTranslationSettings(input: Partial<TranslationSettings> & TranslationSecretSettings) {
-    return request<TranslationSettings>("/api/translation/settings", {
+  updateGateReviewSettings(taskSlug: string, input: GateReviewSettingsUpdateRequest) {
+    return request<GateReviewIndex>(`/api/tasks/${encodeURIComponent(taskSlug)}/gate-review/settings`, {
       method: "PUT",
       body: JSON.stringify(input)
     });
   },
-  getTranslationPrompts() {
-    return request<TranslationPromptPreview[]>("/api/translation/prompts");
-  },
-  testTranslationProvider() {
-    return request<TranslationProviderTestResult>("/api/translation/test", {
+  requestGateReviewGate(taskSlug: string, gate: GateReviewGate) {
+    return request<GateReviewRequestResult>(`/api/tasks/${encodeURIComponent(taskSlug)}/gate-review/${gate}/request`, {
       method: "POST"
     });
+  },
+  retryGateReviewGate(taskSlug: string, gate: GateReviewGate) {
+    return request<GateReviewRequestResult>(`/api/tasks/${encodeURIComponent(taskSlug)}/gate-review/${gate}/retry`, {
+      method: "POST"
+    });
+  },
+  skipGateReviewGate(taskSlug: string, gate: GateReviewGate, input: GateReviewExceptionRequest) {
+    return request<GateReviewIndex>(`/api/tasks/${encodeURIComponent(taskSlug)}/gate-review/${gate}/skip`, {
+      method: "POST",
+      body: JSON.stringify(input)
+    });
+  },
+  overrideGateReviewGate(taskSlug: string, gate: GateReviewGate, input: GateReviewExceptionRequest) {
+    return request<GateReviewIndex>(`/api/tasks/${encodeURIComponent(taskSlug)}/gate-review/${gate}/override`, {
+      method: "POST",
+      body: JSON.stringify(input)
+    });
+  },
+  getGateReviewReport(taskSlug: string, gate: GateReviewGate) {
+    return request<GateReviewReport>(`/api/tasks/${encodeURIComponent(taskSlug)}/gate-review/${gate}/report`);
   },
   startTranslationSession(taskSlug: string, role: RoleName) {
     return request<StartTranslationSessionResult>(`/api/tasks/${encodeURIComponent(taskSlug)}/sessions/${role}/translation/start`, {
@@ -204,6 +248,11 @@ export const apiClient = {
       method: "POST"
     });
   },
+  stopTranslationSession(sessionId: string) {
+    return request<{ ok: true }>(`/api/translation/sessions/${encodeURIComponent(sessionId)}/stop`, {
+      method: "POST"
+    });
+  },
   retryTranslation(sessionId: string, translationId: string) {
     return request<TranslationEntry>(`/api/translation/sessions/${encodeURIComponent(sessionId)}/retry/${encodeURIComponent(translationId)}`, {
       method: "POST"
@@ -217,6 +266,82 @@ export const apiClient = {
   retryTranslationFailures(sessionId: string) {
     return request<TranslationFailuresResult>(`/api/translation/sessions/${encodeURIComponent(sessionId)}/failures/retry`, {
       method: "POST"
+    });
+  },
+  getTranslationState() {
+    return request<TranslationState>("/api/translation/state");
+  },
+  getTranslatorSession() {
+    return request<RoleSessionRecord | null>("/api/translation/session");
+  },
+  ensureTranslatorSession(input: StartRoleSessionRequest = {}) {
+    return request<RoleSessionRecord>("/api/translation/session/ensure", {
+      method: "POST",
+      body: JSON.stringify(input)
+    });
+  },
+  startTranslatorSession(input: StartRoleSessionRequest = {}) {
+    return request<RoleSessionRecord>("/api/translation/session/start", {
+      method: "POST",
+      body: JSON.stringify(input)
+    });
+  },
+  resumeTranslatorSession(input: StartRoleSessionRequest = {}) {
+    return request<RoleSessionRecord>("/api/translation/session/resume", {
+      method: "POST",
+      body: JSON.stringify(input)
+    });
+  },
+  restartTranslatorSession(input: StartRoleSessionRequest = {}) {
+    return request<RoleSessionRecord>("/api/translation/session/restart", {
+      method: "POST",
+      body: JSON.stringify(input)
+    });
+  },
+  stopTranslatorSession() {
+    return request<RoleSessionRecord>("/api/translation/session/stop", {
+      method: "POST"
+    });
+  },
+  browseTranslationSourceFiles(input: { path?: string; query?: string; limit?: number } = {}) {
+    const params = new URLSearchParams();
+    if (input.path) {
+      params.set("path", input.path);
+    }
+    if (input.query) {
+      params.set("query", input.query);
+    }
+    if (input.limit !== undefined) {
+      params.set("limit", String(input.limit));
+    }
+    const suffix = params.toString() ? `?${params.toString()}` : "";
+    return request<TranslationSourceFileBrowserResult>(`/api/translation/source-files${suffix}`);
+  },
+  createFileTranslation(input: CreateFileTranslationRequest) {
+    return request<FileTranslationJob>("/api/translation/files", {
+      method: "POST",
+      body: JSON.stringify(input)
+    });
+  },
+  readFileTranslation(jobId: string) {
+    return request<{ job: FileTranslationJob; output: string; report: string }>(`/api/translation/files/${encodeURIComponent(jobId)}`);
+  },
+  createTranslationBootstrap(input: CreateTranslationBootstrapRequest) {
+    return request<TranslationBootstrapRun>("/api/translation/bootstrap", {
+      method: "POST",
+      body: JSON.stringify(input)
+    });
+  },
+  createTranslationMemoryUpdate(input: CreateTranslationMemoryUpdateRequest) {
+    return request<TranslationQueueItem>("/api/translation/memory-update", {
+      method: "POST",
+      body: JSON.stringify(input)
+    });
+  },
+  promoteTranslation(jobId: string, targetPath: string) {
+    return request<FileTranslationJob>(`/api/translation/files/${encodeURIComponent(jobId)}/promote`, {
+      method: "POST",
+      body: JSON.stringify({ targetPath })
     });
   },
   getGatewayStatus() {
@@ -258,11 +383,25 @@ async function request<T>(url: string, init: RequestInit = {}): Promise<T> {
   });
 
   if (!response.ok) {
-    const payload = await response.json().catch(() => null) as { error?: { message?: string; hint?: string } } | null;
+    const payload = await response.json().catch(() => null) as {
+      error?: {
+        message?: string;
+        hint?: string;
+        runtime?: {
+          version?: string;
+          pid?: number;
+          cwd?: string;
+        };
+      };
+    } | null;
     const message = payload?.error?.hint
       ? `${payload.error.message} ${payload.error.hint}`
       : payload?.error?.message ?? `Request failed: ${response.status}`;
-    throw new Error(message);
+    const runtime = payload?.error?.runtime;
+    const runtimeSuffix = runtime
+      ? ` [backend ${runtime.version ?? "unknown"} pid=${runtime.pid ?? "unknown"} cwd=${runtime.cwd ?? "unknown"}]`
+      : "";
+    throw new Error(`${message}${runtimeSuffix}`);
   }
 
   return response.json() as Promise<T>;

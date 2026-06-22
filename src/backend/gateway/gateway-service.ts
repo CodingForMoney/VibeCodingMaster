@@ -1,5 +1,8 @@
 import { readFile } from "node:fs/promises";
-import { ROLE_DEFINITIONS } from "../../shared/constants.js";
+import { CORE_VCM_ROLE_DEFINITIONS, CORE_VCM_ROLE_NAMES, GATE_REVIEWER_ROLE_DEFINITION } from "../../shared/constants.js";
+import type {
+  GatewayDiagnostics
+} from "../../shared/types/diagnostics.js";
 import type {
   CheckGatewayQrLoginRequest,
   CheckGatewayQrLoginResult,
@@ -40,13 +43,14 @@ import type {
 
 export interface GatewayService {
   start(): Promise<void>;
-  stop(): void;
+  stop(): Promise<void>;
   getStatus(): Promise<GatewayStatus>;
   updateSettings(input: UpdateGatewaySettingsRequest): Promise<GatewayStatus>;
   resetBinding(): Promise<GatewayStatus>;
   startQrLogin(): Promise<StartGatewayQrLoginResult>;
   checkQrLogin(input?: CheckGatewayQrLoginRequest): Promise<CheckGatewayQrLoginResult>;
   handlePmStop(input: GatewayPmStopInput): Promise<void>;
+  getDiagnostics(): GatewayDiagnostics;
 }
 
 export interface GatewayPmStopInput {
@@ -62,12 +66,12 @@ export interface GatewayServiceDeps {
   channel: WeixinIlinkChannel;
   projectService: ProjectService;
   taskService: TaskService;
-  sessionService: Pick<SessionService, "getRoleSession" | "listRoleSessions" | "startRoleSession" | "stopRoleSession">;
+  sessionService: Pick<SessionService, "getRoleSession" | "listRoleSessions" | "resumeRoleSession" | "startRoleSession" | "stopRoleSession">;
   messageService: Pick<MessageService, "updateOrchestrationState">;
   translationService: Pick<TranslationService, "translateUserInput" | "translateGatewayOutput" | "stopTask">;
   roundService: Pick<RoundService, "stopTask">;
   runtime: Pick<TerminalRuntime, "write">;
-  appSettings: Pick<AppSettingsService, "getPreferences" | "updatePreferences">;
+  appSettings: Pick<AppSettingsService, "getPreferences" | "updatePreferences" | "getGateReviewSettings">;
   now?: () => string;
 }
 
@@ -128,6 +132,7 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
   const now = deps.now ?? (() => new Date().toISOString());
   let pollAbort: AbortController | null = null;
   let pollLoopPromise: Promise<void> | null = null;
+  let pollStartingPromise: Promise<void> | null = null;
   let qrLogin: QrLoginState | null = null;
   let lastFailedTranslation: LastFailedGatewayTranslation | null = null;
 
@@ -136,23 +141,48 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
   }
 
   async function ensurePolling(): Promise<void> {
-    const settings = await deps.settings.loadSettings();
-    if (!settings.binding.token || isRunning()) {
+    if (isRunning()) {
       return;
     }
-    pollAbort = new AbortController();
-    pollLoopPromise = pollLoop(pollAbort.signal).finally(() => {
-      pollAbort = null;
-      pollLoopPromise = null;
+    if (pollStartingPromise) {
+      await pollStartingPromise;
+      return;
+    }
+
+    pollStartingPromise = (async () => {
+      const settings = await deps.settings.loadSettings();
+      if (!settings.binding.token || isRunning()) {
+        return;
+      }
+      const controller = new AbortController();
+      pollAbort = controller;
+      const loop = pollLoop(controller.signal).finally(() => {
+        if (pollAbort === controller) {
+          pollAbort = null;
+        }
+        if (pollLoopPromise === loop) {
+          pollLoopPromise = null;
+        }
+      });
+      pollLoopPromise = loop;
+    })().finally(() => {
+      pollStartingPromise = null;
     });
+
+    await pollStartingPromise;
   }
 
   async function stopPolling(): Promise<void> {
+    await pollStartingPromise?.catch(() => undefined);
     if (!pollAbort) {
       return;
     }
-    pollAbort.abort();
+    const controller = pollAbort;
+    controller.abort();
     await pollLoopPromise?.catch(() => undefined);
+    if (pollAbort === controller) {
+      pollAbort = null;
+    }
   }
 
   function toAccount(settings: GatewaySettingsFile): WeixinIlinkAccount | undefined {
@@ -452,17 +482,6 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
 
   async function pullCurrent(): Promise<string> {
     const project = await ensureProject();
-    const settings = await syncDesktopContext(await deps.settings.loadSettings());
-    if (settings.currentTaskSlug) {
-      const task = await deps.taskService.loadTask(project.repoRoot, settings.currentTaskSlug);
-      if (!task.worktreePath && task.cleanupStatus !== "cleaned") {
-        throw new VcmError({
-          code: "GATEWAY_PULL_BLOCKED_BY_INLINE_TASK",
-          message: `Inline task "${task.taskSlug}" uses the base repository.`,
-          statusCode: 409
-        });
-      }
-    }
     const pulled = await deps.projectService.pullCurrentProject();
     return [
       "Connected repository updated.",
@@ -478,7 +497,7 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
     if (tasks.length === 0) {
       return "No tasks. Use /create-task <task-slug> [title] to create one.";
     }
-    return tasks.map((task, index) => `${index + 1}. ${task.taskSlug} [${task.status}] ${task.worktreePath ? "worktree" : "inline"}`).join("\n");
+    return tasks.map((task, index) => `${index + 1}. ${task.taskSlug} [${task.status}] ${task.branch}`).join("\n");
   }
 
   async function useTask(selector: string): Promise<string> {
@@ -508,8 +527,7 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
     const project = await ensureProject();
     const task = await deps.taskService.createTask(project.repoRoot, {
       taskSlug,
-      title,
-      createWorktree: true
+      title
     });
     const config = await deps.projectService.loadConfig(project.repoRoot);
     const taskRepoRoot = getTaskRuntimeRepoRoot(task);
@@ -524,16 +542,35 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
       mode: template.autoOrchestration ? "auto" : "manual"
     });
 
+    const gateReviewSettings = await deps.appSettings.getGateReviewSettings(project.repoRoot, task.taskSlug);
+    const roleDefinitions = [
+      ...CORE_VCM_ROLE_DEFINITIONS,
+      ...(gateReviewSettings.enabled ? [GATE_REVIEWER_ROLE_DEFINITION] : [])
+    ];
     const startedRoles: string[] = [];
-    for (const definition of ROLE_DEFINITIONS) {
+    for (const definition of roleDefinitions) {
       const roleTemplate = template.roles[definition.name];
       try {
-        await deps.sessionService.startRoleSession(project.repoRoot, task.taskSlug, definition.name, {
+        const sessionInput = {
           cols: 100,
           rows: 28,
           permissionMode: roleTemplate.permissionMode,
-          model: roleTemplate.model
-        });
+          model: roleTemplate.model,
+          effort: roleTemplate.effort
+        };
+        const existing = await deps.sessionService.getRoleSession(project.repoRoot, task.taskSlug, definition.name);
+        if (existing?.status === "running") {
+          if (definition.name === "gate-reviewer") {
+            await deps.sessionService.resumeRoleSession(project.repoRoot, task.taskSlug, definition.name, sessionInput);
+          }
+          startedRoles.push(definition.name);
+          continue;
+        }
+        if (existing?.claudeSessionId) {
+          await deps.sessionService.resumeRoleSession(project.repoRoot, task.taskSlug, definition.name, sessionInput);
+        } else {
+          await deps.sessionService.startRoleSession(project.repoRoot, task.taskSlug, definition.name, sessionInput);
+        }
         startedRoles.push(definition.name);
       } catch (error) {
         const settings = await deps.settings.loadSettings();
@@ -541,7 +578,7 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
           ...settings,
           currentProjectId: project.repoRoot,
           currentTaskSlug: task.taskSlug,
-          translationEnabled: template.translationEnabled,
+          translationEnabled: preferences.translationEnabled,
           updatedAt: now()
         });
         throw new VcmError({
@@ -558,16 +595,16 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
       ...settings,
       currentProjectId: project.repoRoot,
       currentTaskSlug: task.taskSlug,
-      translationEnabled: template.translationEnabled,
+      translationEnabled: preferences.translationEnabled,
       updatedAt: now()
     });
 
     return [
       `Task created and initialized: ${task.taskSlug}`,
       `branch: ${task.branch}`,
-      `worktree: ${task.worktreePath ?? task.repoRoot}`,
+      `worktree: ${task.worktreePath}`,
       `orchestration: ${template.autoOrchestration ? "auto" : "manual"}`,
-      `translation: ${template.translationEnabled ? "on" : "off"}`,
+      `translation: ${preferences.translationEnabled ? "on" : "off"}`,
       `sessions: ${startedRoles.join(", ")}`
     ].join("\n");
   }
@@ -631,7 +668,6 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
     deps.roundService.stopTask(taskSlug);
     const result = await deps.taskService.cleanupTask(project.repoRoot, taskSlug, {
       force: true,
-      deleteBranch: Boolean(task.worktreePath),
       forceDeleteBranch: true
     });
     clearFailedTranslation(project.repoRoot, taskSlug);
@@ -658,7 +694,7 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
   async function stopRunningRoleSessions(repoRoot: string, taskSlug: string): Promise<void> {
     const sessions = await deps.sessionService.listRoleSessions(repoRoot, taskSlug);
     for (const session of sessions) {
-      if (session.status === "running") {
+      if (session.status === "running" && CORE_VCM_ROLE_NAMES.some((role) => role === session.role)) {
         await deps.sessionService.stopRoleSession(repoRoot, taskSlug, session.role);
       }
     }
@@ -791,7 +827,7 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
       await ensurePolling();
     },
     stop() {
-      void stopPolling();
+      return stopPolling();
     },
     async getStatus() {
       const settings = await syncDesktopContext(await deps.settings.loadSettings());
@@ -954,6 +990,11 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
         preview: output.text,
         error: output.translationError
       });
+    },
+    getDiagnostics() {
+      return {
+        polling: isRunning()
+      };
     }
   };
 

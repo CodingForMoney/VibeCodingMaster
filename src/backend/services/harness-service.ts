@@ -3,6 +3,7 @@ import { execFile } from "node:child_process";
 import path from "node:path";
 import { promisify } from "node:util";
 import type {
+  CommitAndRebaseHarnessTaskResult,
   HarnessApplyResult,
   HarnessBootstrapCheck,
   HarnessBootstrapSession,
@@ -16,9 +17,16 @@ import type {
   StartHarnessBootstrapResult
 } from "../../shared/types/harness.js";
 import type { ClaudePermissionMode } from "../../shared/types/session.js";
+import type { GitAdapter } from "../adapters/git-adapter.js";
 import type { FileSystemAdapter } from "../adapters/filesystem.js";
 import { renderArchitectHarnessRules } from "../templates/harness/architect-agent.js";
 import { renderCoderHarnessRules } from "../templates/harness/coder-agent.js";
+import {
+  renderGateReviewerAgentRules,
+  renderRequestGateReviewTool,
+  renderTranslatorAgentRules,
+  renderVcmGateReviewSkillRules
+} from "../templates/harness/gate-review.js";
 import { renderRootClaudeHarnessRules } from "../templates/harness/claude-root.js";
 import { renderGitignoreHarnessRules } from "../templates/harness/gitignore.js";
 import { renderProjectManagerHarnessRules } from "../templates/harness/project-manager-agent.js";
@@ -42,17 +50,26 @@ const BOOTSTRAP_SESSION_PATH = ".ai/vcm/bootstrap/session.json";
 export interface HarnessService {
   getHarnessStatus(repoRoot: string): Promise<HarnessStatusReport>;
   applyHarness(repoRoot: string): Promise<HarnessApplyResult>;
+  commitAndRebaseTask(repoRoot: string, input: CommitAndRebaseHarnessTaskInput): Promise<CommitAndRebaseHarnessTaskResult>;
   getBootstrapStatus(repoRoot: string): Promise<HarnessBootstrapStatusReport>;
   startHarnessBootstrap(repoRoot: string, input?: StartHarnessBootstrapRequest): Promise<StartHarnessBootstrapResult>;
 }
 
 export interface HarnessServiceDeps {
   fs: FileSystemAdapter;
+  git?: Pick<GitAdapter, "addPaths" | "commit" | "getCurrentBranch" | "getHeadCommit" | "getStagedStatus" | "getStatusPorcelain" | "rebase">;
   runtime?: TerminalRuntime;
   projectService?: Pick<ProjectService, "loadConfig">;
   apiUrl?: string;
   now?: () => string;
   runFixedInstaller?: (repoRoot: string) => Promise<HarnessApplyResult>;
+}
+
+export interface CommitAndRebaseHarnessTaskInput {
+  taskSlug: string;
+  branch: string;
+  worktreePath: string;
+  changedFiles: HarnessPlannedChange[];
 }
 
 interface HarnessFileDefinition {
@@ -61,7 +78,7 @@ interface HarnessFileDefinition {
   title: string;
   frontmatter?: string;
   commentStyle?: "html" | "hash";
-  ownership?: "managed-block" | "whole-file";
+  ownership?: "managed-block" | "whole-file" | "raw-file";
   blankLineBeforeEnd?: boolean;
   renderRules(): string;
 }
@@ -78,6 +95,12 @@ export const VCM_HARNESS_VERSION = 1;
 const MANAGED_BLOCK_PATTERN = /<!-- VCM:BEGIN(?:\s+version=(\d+))? -->[\s\S]*?<!-- VCM:END -->/m;
 const HASH_MANAGED_BLOCK_PATTERN = /# VCM:BEGIN(?:\s+version=(\d+))?\n[\s\S]*?# VCM:END/m;
 const CLAUDE_SETTINGS_PATH = ".claude/settings.json";
+const LEGACY_CODEX_HARNESS_PATHS = [
+  ".ai/codex",
+  ".ai/codex-translator",
+  ".claude/skills/vcm-codex-review-gate",
+  ".ai/tools/request-codex-review"
+] as const;
 const VCM_HOOK_COMMAND = `sh -c 'if [ -z "\${VCM_TASK_SLUG:-}" ] || [ -z "\${VCM_ROLE:-}" ] || [ -z "\${VCM_API_URL:-}" ]; then exit 0; fi; node -e '"'"'let s="";process.stdin.setEncoding("utf8");process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{let event={};try{event=s.trim()?JSON.parse(s):{};}catch{event={raw:s};}process.stdout.write(JSON.stringify({taskSlug:process.env.VCM_TASK_SLUG,role:process.env.VCM_ROLE,event}));});'"'"' | curl -fsS --max-time 2 -X POST "\${VCM_API_URL}/api/hooks/claude-code" -H "content-type: application/json" --data-binary @- >/dev/null || true'`;
 const VCM_STOP_HOOK_COMMAND = `sh -c 'if [ -z "\${VCM_TASK_SLUG:-}" ] || [ -z "\${VCM_ROLE:-}" ] || [ -z "\${VCM_API_URL:-}" ]; then exit 0; fi; node -e '"'"'let s="";process.stdin.setEncoding("utf8");process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{let event={};try{event=s.trim()?JSON.parse(s):{};}catch{event={raw:s};}process.stdout.write(JSON.stringify({taskSlug:process.env.VCM_TASK_SLUG,role:process.env.VCM_ROLE,event}));});'"'"' | curl -fsS --max-time 5 -X POST "\${VCM_API_URL}/api/hooks/claude-code/stop" -H "content-type: application/json" --data-binary @- || true'`;
 const VCM_PERMISSION_REQUEST_HOOK_COMMAND = `sh -c 'if [ -z "\${VCM_TASK_SLUG:-}" ] || [ -z "\${VCM_ROLE:-}" ] || [ -z "\${VCM_API_URL:-}" ]; then exit 0; fi; node -e '"'"'let s="";process.stdin.setEncoding("utf8");process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{let event={};try{event=s.trim()?JSON.parse(s):{};}catch{event={raw:s};}process.stdout.write(JSON.stringify({taskSlug:process.env.VCM_TASK_SLUG,role:process.env.VCM_ROLE,event}));});'"'"' | curl -fsS --max-time 5 -X POST "\${VCM_API_URL}/api/hooks/claude-code/permission-request" -H "content-type: application/json" --data-binary @- || true'`;
@@ -87,6 +110,8 @@ const VCM_HOOK_DEFINITIONS: ReadonlyArray<{ eventName: string; matcher?: string;
   { eventName: "PreToolUse", matcher: "Bash", command: VCM_BASH_GUARD_HOOK_COMMAND, timeout: 10 },
   { eventName: "UserPromptSubmit", command: VCM_HOOK_COMMAND, timeout: 5 },
   { eventName: "Stop", command: VCM_STOP_HOOK_COMMAND, timeout: 10 },
+  { eventName: "StopFailure", command: VCM_HOOK_COMMAND, timeout: 5 },
+  { eventName: "PostCompact", command: VCM_HOOK_COMMAND, timeout: 5 },
   { eventName: "PermissionRequest", command: VCM_PERMISSION_REQUEST_HOOK_COMMAND, timeout: 5 }
 ];
 
@@ -156,6 +181,44 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
     renderRules: renderVcmLongRunningValidationSkillRules
   },
   {
+    kind: "skill-vcm-gate-review",
+    path: ".claude/skills/vcm-gate-review/SKILL.md",
+    title: "VCM Gate Review Skill",
+    frontmatter: renderSkillFrontmatter(
+      "vcm-gate-review",
+      "Use when project-manager reaches a Gate Review trigger or receives a VCM Gate Review callback."
+    ),
+    ownership: "whole-file",
+    renderRules: renderVcmGateReviewSkillRules
+  },
+  {
+    kind: "agent-gate-reviewer",
+    path: ".claude/agents/gate-reviewer.md",
+    title: "Gate Reviewer Agent",
+    frontmatter: renderAgentFrontmatter(
+      "gate-reviewer",
+      "VCM independent gate review role for architecture plans, validation adequacy, and final diffs."
+    ),
+    renderRules: renderGateReviewerAgentRules
+  },
+  {
+    kind: "agent-translator",
+    path: ".claude/agents/translator.md",
+    title: "Translator Agent",
+    frontmatter: renderAgentFrontmatter(
+      "translator",
+      "VCM project translation tool role for conversation translation, file translation, bootstrap, and memory updates."
+    ),
+    renderRules: renderTranslatorAgentRules
+  },
+  {
+    kind: "tool-request-gate-review",
+    path: ".ai/tools/request-gate-review",
+    title: "Request Gate Review Tool",
+    ownership: "raw-file",
+    renderRules: renderRequestGateReviewTool
+  },
+  {
     kind: "agent-project-manager",
     path: ".claude/agents/project-manager.md",
     title: "Project Manager Agent",
@@ -204,7 +267,8 @@ export function createHarnessService(deps: HarnessServiceDeps): HarnessService {
   return {
     async getHarnessStatus(repoRoot) {
       const analyses = await analyzeHarnessFiles(deps.fs, repoRoot);
-      return renderHarnessStatus(analyses);
+      const legacyChanges = await analyzeLegacyCodexHarnessPaths(deps.fs, repoRoot);
+      return renderHarnessStatus(analyses, legacyChanges);
     },
     async applyHarness(repoRoot) {
       if (deps.runFixedInstaller) {
@@ -224,12 +288,88 @@ export function createHarnessService(deps: HarnessServiceDeps): HarnessService {
         }
       }
 
+      const legacyChanges = await removeLegacyCodexHarnessPaths(deps.fs, repoRoot);
+      changedFiles.push(...legacyChanges);
+
       return {
         version: VCM_HARNESS_VERSION,
         changedFiles,
         message: changedFiles.length === 0
           ? "VCM Harness is already up to date."
           : "VCM Harness updated. Review these files and commit the harness changes before starting long-running work."
+      };
+    },
+    async commitAndRebaseTask(repoRoot, input) {
+      if (!deps.git) {
+        throw new VcmError({
+          code: "HARNESS_GIT_UNAVAILABLE",
+          message: "Git-backed harness sync is not available in this VCM runtime.",
+          statusCode: 501
+        });
+      }
+      const changedFiles = dedupeHarnessChanges(input.changedFiles);
+      const changedPaths = changedFiles.map((change) => change.path);
+      const taskBranch = await deps.git.getCurrentBranch(input.worktreePath);
+      if (taskBranch !== input.branch) {
+        throw new VcmError({
+          code: "HARNESS_TASK_BRANCH_MISMATCH",
+          message: "The selected task worktree is not on its recorded task branch.",
+          statusCode: 409,
+          hint: `Expected ${input.branch}, found ${taskBranch}.`
+        });
+      }
+
+      const taskStatus = await deps.git.getStatusPorcelain(input.worktreePath);
+      if (taskStatus.trim()) {
+        throw new VcmError({
+          code: "HARNESS_TASK_DIRTY",
+          message: "The selected task worktree has uncommitted changes.",
+          statusCode: 409,
+          hint: "Commit or clean the task worktree before rebasing it onto the harness commit."
+        });
+      }
+
+      const preExistingStaged = await deps.git.getStagedStatus(repoRoot);
+      if (preExistingStaged.trim()) {
+        throw new VcmError({
+          code: "HARNESS_BASE_STAGED_CHANGES",
+          message: "The connected repository already has staged changes.",
+          statusCode: 409,
+          hint: "Commit, unstage, or clean existing staged changes before using Commit & rebase task."
+        });
+      }
+
+      const baseBranch = await deps.git.getCurrentBranch(repoRoot);
+      const baseCommitBefore = await deps.git.getHeadCommit(repoRoot);
+      let harnessCommit: string | undefined;
+      let committed = false;
+
+      if (changedPaths.length > 0) {
+        await deps.git.addPaths(repoRoot, changedPaths);
+        const stagedHarnessChanges = await deps.git.getStagedStatus(repoRoot);
+        if (stagedHarnessChanges.trim()) {
+          harnessCommit = await deps.git.commit(repoRoot, "chore: update VCM harness");
+          committed = true;
+        }
+      }
+
+      const baseCommitAfter = await deps.git.getHeadCommit(repoRoot);
+      await deps.git.rebase(input.worktreePath, baseCommitAfter);
+
+      return {
+        taskSlug: input.taskSlug,
+        branch: input.branch,
+        worktreePath: input.worktreePath,
+        baseBranch,
+        baseCommitBefore,
+        baseCommitAfter,
+        harnessCommit,
+        committed,
+        rebased: true,
+        changedFiles,
+        message: committed
+          ? `Committed VCM harness update ${shortCommit(baseCommitAfter)} on ${baseBranch} and rebased ${input.branch}.`
+          : `No new harness commit was needed; rebased ${input.branch} onto ${shortCommit(baseCommitAfter)}.`
       };
     },
     async getBootstrapStatus(repoRoot) {
@@ -311,6 +451,49 @@ export function createHarnessService(deps: HarnessServiceDeps): HarnessService {
   };
 }
 
+function dedupeHarnessChanges(changedFiles: HarnessPlannedChange[]): HarnessPlannedChange[] {
+  const seen = new Set<string>();
+  const changes: HarnessPlannedChange[] = [];
+  for (const change of changedFiles) {
+    const normalizedPath = normalizeHarnessGitPath(change.path);
+    if (seen.has(normalizedPath)) {
+      continue;
+    }
+    seen.add(normalizedPath);
+    changes.push({
+      ...change,
+      path: normalizedPath
+    });
+  }
+  return changes;
+}
+
+function normalizeHarnessGitPath(value: string): string {
+  if (!value || value.includes("\0") || path.posix.isAbsolute(value)) {
+    throw new VcmError({
+      code: "HARNESS_CHANGED_PATH_INVALID",
+      message: "Harness changed file path is invalid.",
+      statusCode: 400,
+      hint: value
+    });
+  }
+
+  const normalized = path.posix.normalize(value).replace(/^\.\//, "");
+  if (normalized === "." || normalized.startsWith("../")) {
+    throw new VcmError({
+      code: "HARNESS_CHANGED_PATH_INVALID",
+      message: "Harness changed file path must stay inside the repository.",
+      statusCode: 400,
+      hint: value
+    });
+  }
+  return normalized;
+}
+
+function shortCommit(commit: string): string {
+  return commit.slice(0, 7);
+}
+
 async function analyzeHarnessFiles(fs: FileSystemAdapter, repoRoot: string): Promise<HarnessFileAnalysis[]> {
   const analyses: HarnessFileAnalysis[] = [];
 
@@ -328,13 +511,13 @@ async function analyzeHarnessFile(
   definition: HarnessFileDefinition
 ): Promise<HarnessFileAnalysis> {
   const absolutePath = resolveHarnessPath(repoRoot, definition.path);
-  const expectedContent = definition.ownership === "whole-file"
+  const expectedContent = definition.ownership === "whole-file" || definition.ownership === "raw-file"
     ? renderWholeHarnessFile(definition)
     : undefined;
-  const expectedBlock = definition.ownership === "whole-file"
+  const expectedBlock = definition.ownership === "whole-file" || definition.ownership === "raw-file"
     ? undefined
     : renderManagedBlock(definition, definition.renderRules());
-  const managedBlockPattern = definition.ownership === "whole-file"
+  const managedBlockPattern = definition.ownership === "whole-file" || definition.ownership === "raw-file"
     ? undefined
     : getManagedBlockPattern(definition);
   const exists = await fs.pathExists(absolutePath);
@@ -434,14 +617,68 @@ async function analyzeHarnessFile(
   };
 }
 
-function renderHarnessStatus(analyses: HarnessFileAnalysis[]): HarnessStatusReport {
+async function analyzeLegacyCodexHarnessPaths(fs: FileSystemAdapter, repoRoot: string): Promise<HarnessPlannedChange[]> {
+  const changes: HarnessPlannedChange[] = [];
+  for (const relativePath of LEGACY_CODEX_HARNESS_PATHS) {
+    if (!await fs.pathExists(resolveHarnessPath(repoRoot, relativePath))) {
+      continue;
+    }
+    changes.push({
+      path: relativePath,
+      action: "delete",
+      reason: "Legacy Codex harness path is obsolete; VCM now uses Claude Code Gate Reviewer and Translator roles."
+    });
+  }
+  return changes;
+}
+
+async function removeLegacyCodexHarnessPaths(fs: FileSystemAdapter, repoRoot: string): Promise<HarnessPlannedChange[]> {
+  const changes = await analyzeLegacyCodexHarnessPaths(fs, repoRoot);
+  if (changes.length === 0) {
+    return [];
+  }
+  if (!fs.removePath) {
+    return [];
+  }
+
+  for (const change of changes) {
+    await fs.removePath(resolveHarnessPath(repoRoot, change.path), {
+      recursive: true,
+      force: true
+    });
+  }
+  return changes;
+}
+
+function renderHarnessStatus(
+  analyses: HarnessFileAnalysis[],
+  legacyChanges: HarnessPlannedChange[] = []
+): HarnessStatusReport {
   const files = analyses.map((analysis) => analysis.status);
   const plannedChanges = analyses
     .map((analysis) => analysis.plannedChange)
-    .filter((change): change is HarnessPlannedChange => Boolean(change));
+    .filter((change): change is HarnessPlannedChange => Boolean(change))
+    .concat(legacyChanges);
+
+  // Derive `initialized`: the VCM harness is considered installed when at least one
+  // VCM-exclusive marker is present (per analysis):
+  //   - status.hasManagedBlock === true (a managed block already lives in the file), OR
+  //   - definition.ownership is "whole-file" | "raw-file" AND status.exists === true
+  //     (a VCM-owned file lives at a VCM-exclusive path).
+  // A pre-existing claude-settings (default "managed-block" ownership, no managed block)
+  // or a non-VCM CLAUDE.md/.gitignore (action "insert", hasManagedBlock === false) is
+  // intentionally NOT counted as initialized.
+  const initialized = analyses.some(
+    (analysis) =>
+      analysis.status.hasManagedBlock ||
+      ((analysis.definition.ownership === "whole-file" ||
+        analysis.definition.ownership === "raw-file") &&
+        analysis.status.exists)
+  );
 
   return {
     version: VCM_HARNESS_VERSION,
+    initialized,
     files,
     needsApply: plannedChanges.length > 0,
     plannedChanges,
@@ -474,6 +711,9 @@ function renderNewHarnessFile(definition: HarnessFileDefinition, block: string):
 }
 
 function renderWholeHarnessFile(definition: HarnessFileDefinition): string {
+  if (definition.ownership === "raw-file") {
+    return ensureTrailingNewline(definition.renderRules().trimEnd());
+  }
   return ensureTrailingNewline(renderNewHarnessFile(definition, definition.renderRules().trimEnd()));
 }
 

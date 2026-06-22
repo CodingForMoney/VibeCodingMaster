@@ -35,9 +35,18 @@ export function renderProjectManagerHarnessRules(): string {
 ### Dispatch
 
 - Use the \`vcm-route-message\` skill for every role dispatch, question, result, blocker, or finding.
-- Route messages contain PM-owned routing context only: target role, user request summary, known user constraints, source of truth, required next gate, skipped gates when applicable, required handoff inputs, expected artifact, stop conditions, and confirmed worktree information.
+- Formal route messages contain PM-owned routing context only: target role, user request summary, known user constraints, source of truth, required next gate, skipped gates when applicable, required handoff inputs, expected artifact, stop conditions, and confirmed worktree information.
 - Do not write technical design into route messages; ask architect to determine architecture, file scope, public contracts, behavior/contract proof points, docs impact, and Replan triggers.
 - For coder or reviewer messages, reference existing handoff artifacts instead of making new technical judgments.
+
+### Simple User Relay
+
+When forwarding a user's answer, clarification, or small preference update to an active role, use a lightweight relay message.
+
+PM may lightly rewrite the user's words to:
+- clarify pronouns or references from the current context
+- translate the user's intent into clear role-facing language
+- state whether this is confirmation, rejection, preference, or a small constraint
 
 ### Phased Tasks
 
@@ -54,6 +63,16 @@ export function renderProjectManagerHarnessRules(): string {
 - If a required artifact is missing, stale, blocked, or asks for a decision, route the issue to the responsible role or user.
 - Request architect post-review docs sync after reviewer completes.
 
+### Gate Review Gates
+
+- Use the \`vcm-gate-review\` skill to request a Gate Review or handle a VCM Gate Review callback.
+- If Gate Review is enabled, accept only \`approve\` or \`request_changes\`.
+- Before coder dispatch, request \`architecture-plan\`; on \`request_changes\`, route the report to architect.
+- Before docs sync or final acceptance, request \`validation-adequacy\`; on \`request_changes\`, route the report to reviewer.
+- Before PR preparation, request \`final-diff\`; on \`request_changes\`, route the report to architect for Debug Mode or Replan assessment.
+- Do not ask Gate Reviewer to choose owners, fixes, Replan, or user-intervention needs.
+- Record gate decision, report path, and any skip or override reason.
+
 ### Partial Role Results
 
 - Treat partial, blocked, or continuation-needed role results as incomplete gates.
@@ -65,8 +84,8 @@ export function renderProjectManagerHarnessRules(): string {
 ### Final Acceptance
 
 - Use the \`vcm-final-acceptance\` skill before declaring the task complete.
-- Start final acceptance only after reviewer and docs-sync gates pass or an explicit exception is approved.
-- Confirm required evidence exists: validation result, review decision, docs-sync decision, unresolved risks, known-issues disposition, and cleanup status.
+- Start final acceptance only after reviewer, required Gate Reviews, and docs-sync gates pass or an explicit exception is approved.
+- Confirm required evidence exists: validation result, review decision, required Gate Review decisions, docs-sync decision, unresolved risks, known-issues disposition, and cleanup status.
 - If final acceptance finds missing evidence, unresolved risk, or required user approval, route it to the responsible role or user before closing the task.
 
 ### PR Preparation
@@ -74,7 +93,7 @@ export function renderProjectManagerHarnessRules(): string {
 - Prepare or update a GitHub PR only after final acceptance passes.
 - Confirm \`git status\` has no uncommitted changes before creating or updating the PR.
 - Use \`.github/pull_request_template.md\` when present.
-- Fill the PR body from final acceptance, review report, docs-sync report, known-issues disposition, and commits.
+- Fill the PR body from final acceptance, review report, Gate Review reports when present, docs-sync report, known-issues disposition, and commits.
 - Do not perform technical review or validation during PR preparation; route missing evidence to the responsible role.
 - Create a draft PR by default unless the user requests a ready PR.
 

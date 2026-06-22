@@ -1,4 +1,4 @@
-import type { DispatchableRole, RoleName } from "./role.js";
+import type { DispatchableRole } from "./role.js";
 
 export type ArtifactKind =
   | "architecture-plan"
@@ -10,10 +10,8 @@ export type ArtifactKind =
 export interface HandoffPaths {
   handoffDir: string;
   roleCommandsDir: string;
-  logsDir: string;
   messagesDir: string;
   roleCommandPaths: Record<DispatchableRole, string>;
-  roleLogPaths: Record<RoleName, string>;
   messageRoutePaths: Record<string, string>;
   architecturePlanPath: string;
   knownIssuesPath: string;

@@ -1,0 +1,38 @@
+{
+  "name": "VCM Rust Layered Sandbox",
+  "image": "mcr.microsoft.com/devcontainers/rust:1-bookworm",
+  "remoteUser": "vscode",
+  "updateRemoteUserUID": true,
+  "workspaceFolder": "/workspaces/${localWorkspaceFolderBasename}",
+  "runArgs": [
+    "--cap-drop=ALL",
+    "--security-opt=no-new-privileges:true",
+    "--security-opt=seccomp=unconfined",
+    "--pids-limit=1024",
+    "--memory=4g",
+    "--cpus=4"
+  ],
+  "containerEnv": {
+    "VCM_SANDBOX": "devcontainer",
+    "CARGO_TERM_COLOR": "always"
+  },
+  "features": {
+    "ghcr.io/devcontainers/features/node:1": {
+      "version": "lts"
+    },
+    "ghcr.io/devcontainers/features/docker-outside-of-docker:1": {},
+    "ghcr.io/stu-bell/devcontainer-features/claude-code:0": {}
+  },
+  "customizations": {
+    "vscode": {
+      "settings": {
+        "rust-analyzer.check.command": "clippy",
+        "terminal.integrated.defaultProfile.linux": "bash"
+      },
+      "extensions": [
+        "rust-lang.rust-analyzer",
+        "tamasfe.even-better-toml"
+      ]
+    }
+  }
+}

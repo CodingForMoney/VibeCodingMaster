@@ -1,13 +1,23 @@
 import { describe, expect, it } from "vitest";
 import type { ProjectConfig } from "../../../src/shared/types/project.js";
 import type { RoleName } from "../../../src/shared/types/role.js";
-import type { ClaudeModel } from "../../../src/shared/types/session.js";
+import {
+  CLAUDE_EFFORT_OPTIONS,
+  type ClaudeModel,
+  type SessionEffort
+} from "../../../src/shared/types/session.js";
 import type { CreateTerminalSessionInput, TerminalRuntime, TerminalSession } from "../../../src/backend/runtime/terminal-runtime.js";
 import { createSessionRegistry } from "../../../src/backend/runtime/session-registry.js";
 import { createSessionService } from "../../../src/backend/services/session-service.js";
 import type { FileSystemAdapter } from "../../../src/backend/adapters/filesystem.js";
 
+const TASK_WORKTREE = "/repo/.claude/worktrees/demo-task";
+
 describe("createSessionService", () => {
+  it("keeps Max effort in Claude Code options", () => {
+    expect(CLAUDE_EFFORT_OPTIONS.map((option) => option.value)).toContain("max");
+  });
+
   it("persists Claude session ids and resumes them after registry loss", async () => {
     const fs = createMemoryFs();
     const firstRuntimeInputs: CreateTerminalSessionInput[] = [];
@@ -17,7 +27,7 @@ describe("createSessionService", () => {
       permissionMode: "default"
     });
     expect(started.claudeSessionId).toMatch(/^[0-9a-f-]{36}$/);
-    expect(started.transcriptPath).toMatch(/\.claude\/projects\/-repo\/[0-9a-f-]{36}\.jsonl$/);
+    expect(started.transcriptPath).toMatch(/\.claude\/projects\/-repo-\.claude-worktrees-demo-task\/[0-9a-f-]{36}\.jsonl$/);
     expect(started.command).toContain("--session-id");
     expect(firstRuntimeInputs[0]?.args).toContain("--session-id");
 
@@ -57,7 +67,7 @@ describe("createSessionService", () => {
     expect(writes).toHaveLength(0);
     expect(runtimeInputs[0]?.env).toMatchObject({
       VCM_API_URL: "http://127.0.0.1:4173",
-      VCM_TASK_REPO_ROOT: "/repo",
+      VCM_TASK_REPO_ROOT: TASK_WORKTREE,
       VCM_TASK_SLUG: "demo-task",
       VCM_ROLE: "project-manager",
       VCM_SESSION_ID: expect.any(String)
@@ -84,6 +94,215 @@ describe("createSessionService", () => {
     ]);
   });
 
+  it("starts role sessions with the selected Claude effort", async () => {
+    const fs = createMemoryFs();
+    const runtimeInputs: CreateTerminalSessionInput[] = [];
+    const service = createTestSessionService(fs, runtimeInputs);
+
+    const started = await service.startRoleSession("/repo", "demo-task", "architect", {
+      effort: "high"
+    });
+
+    expect(started.effort).toBe("high");
+    expect(runtimeInputs[0]?.args).toEqual([
+      "--agent",
+      "architect",
+      "--session-id",
+      started.claudeSessionId,
+      "--model",
+      "default",
+      "--effort",
+      "high"
+    ]);
+  });
+
+  it("starts Gate Reviewer as a project-scoped Claude Code session", async () => {
+    const fs = createMemoryFs();
+    const runtimeInputs: CreateTerminalSessionInput[] = [];
+    const service = createTestSessionService(fs, runtimeInputs, [], {
+      worktreePath: TASK_WORKTREE
+    });
+
+    const started = await service.startRoleSession("/repo", "demo-task", "gate-reviewer", {
+      permissionMode: "bypassPermissions",
+      model: "claude-opus-4-8[1m]",
+      effort: "high"
+    });
+
+    expect(started.role).toBe("gate-reviewer");
+    expect(started.taskSlug).toBe("demo-task");
+    expect(started.model).toBe("claude-opus-4-8[1m]");
+    expect(started.effort).toBe("high");
+    expect(started.transcriptPath).toMatch(/\.claude\/projects\/-repo\/[0-9a-f-]{36}\.jsonl$/);
+    expect(runtimeInputs[0]?.command).toBe("claude");
+    expect(runtimeInputs[0]?.cwd).toBe("/repo");
+    expect(runtimeInputs[0]?.args).toEqual([
+      "--agent",
+      "gate-reviewer",
+      "--session-id",
+      started.claudeSessionId,
+      "--model",
+      "claude-opus-4-8[1m]",
+      "--effort",
+      "high",
+      "--permission-mode",
+      "bypassPermissions"
+    ]);
+    expect(runtimeInputs[0]?.env).toMatchObject({
+      VCM_TASK_REPO_ROOT: TASK_WORKTREE,
+      VCM_TASK_SLUG: "demo-task",
+      VCM_ROLE: "gate-reviewer"
+    });
+    expect(started.activeTaskSlug).toBe("demo-task");
+    expect(started.activeTaskRepoRoot).toBe(TASK_WORKTREE);
+    await expect(fs.pathExists("/repo/.ai/vcm/gate-reviewer/session.json")).resolves.toBe(true);
+    await expect(fs.pathExists(`${TASK_WORKTREE}/.ai/vcm/sessions/demo-task.json`)).resolves.toBe(false);
+  });
+
+  it("resumes Gate Reviewer across tasks with the same project session", async () => {
+    const fs = createMemoryFs();
+    const firstRuntimeInputs: CreateTerminalSessionInput[] = [];
+    const firstService = createTestSessionService(fs, firstRuntimeInputs);
+
+    const started = await firstService.startRoleSession("/repo", "demo-task", "gate-reviewer");
+
+    const secondRuntimeInputs: CreateTerminalSessionInput[] = [];
+    const secondService = createTestSessionService(fs, secondRuntimeInputs);
+    const recovered = await secondService.getRoleSession("/repo", "another-task", "gate-reviewer");
+    expect(recovered).toMatchObject({
+      role: "gate-reviewer",
+      taskSlug: "another-task",
+      status: "resumable",
+      claudeSessionId: started.claudeSessionId
+    });
+
+    const resumed = await secondService.resumeRoleSession("/repo", "another-task", "gate-reviewer");
+    expect(resumed.claudeSessionId).toBe(started.claudeSessionId);
+    expect(resumed.taskSlug).toBe("another-task");
+    expect(secondRuntimeInputs[0]?.cwd).toBe("/repo");
+    expect(secondRuntimeInputs[0]?.args).toEqual([
+      "--agent",
+      "gate-reviewer",
+      "--resume",
+      started.claudeSessionId,
+      "--model",
+      "default"
+    ]);
+  });
+
+  it("persists Translator sessions under project translation runtime state", async () => {
+    const fs = createMemoryFs();
+    const firstRuntimeInputs: CreateTerminalSessionInput[] = [];
+    const firstService = createTestSessionService(fs, firstRuntimeInputs, [], {
+      worktreePath: TASK_WORKTREE
+    });
+
+    const started = await firstService.startProjectTranslatorSession("/repo", {
+      model: "default",
+      effort: "xhigh"
+    });
+
+    expect(started.taskSlug).toBe("__project__");
+    expect(firstRuntimeInputs[0]?.cwd).toBe("/repo");
+    expect(firstRuntimeInputs[0]?.env).toMatchObject({
+      VCM_TASK_REPO_ROOT: "/repo",
+      VCM_TASK_SLUG: "__project__",
+      VCM_ROLE: "translator"
+    });
+    expect(firstRuntimeInputs[0]?.logPath).toBeUndefined();
+    await expect(fs.pathExists("/repo/.ai/vcm/translations/session.json")).resolves.toBe(true);
+    await expect(fs.pathExists("/repo/.claude/worktrees/demo-task/.ai/vcm/sessions/demo-task.json"))
+      .resolves.toBe(false);
+
+    const hooked = await firstService.recordProjectTranslatorHookEvent("/repo", {
+      eventName: "UserPromptSubmit",
+      sessionId: "translator-real-session",
+      transcriptPath: "/repo/.claude/projects/-repo/translator-real-session.jsonl",
+      cwd: "/repo"
+    });
+    expect(hooked?.claudeSessionId).toBe("translator-real-session");
+
+    const secondRuntimeInputs: CreateTerminalSessionInput[] = [];
+    const secondService = createTestSessionService(fs, secondRuntimeInputs);
+    const recovered = await secondService.getProjectTranslatorSession("/repo");
+    expect(recovered).toMatchObject({
+      role: "translator",
+      taskSlug: "__project__",
+      status: "resumable",
+      claudeSessionId: "translator-real-session"
+    });
+    const resumed = await secondService.resumeProjectTranslatorSession("/repo");
+    expect(resumed.claudeSessionId).toBe("translator-real-session");
+    expect(secondRuntimeInputs[0]?.args).toEqual([
+      "--agent",
+      "translator",
+      "--resume",
+      "translator-real-session",
+      "--model",
+      "default",
+      "--effort",
+      "xhigh"
+    ]);
+  });
+
+  it("starts Translator as a project-scoped Claude Code session", async () => {
+    const fs = createMemoryFs();
+    const runtimeInputs: CreateTerminalSessionInput[] = [];
+    const service = createTestSessionService(fs, runtimeInputs);
+
+    const started = await service.startProjectTranslatorSession("/repo", {
+      model: "default",
+      effort: "medium"
+    });
+
+    expect(started.command).toContain("--agent translator");
+    expect(runtimeInputs[0]?.cwd).toBe("/repo");
+    expect(runtimeInputs[0]?.args).toEqual([
+      "--agent",
+      "translator",
+      "--session-id",
+      started.claudeSessionId,
+      "--model",
+      "default",
+      "--effort",
+      "medium"
+    ]);
+    expect(runtimeInputs[0]?.args).not.toContain("--sandbox");
+  });
+
+  it("passes Gate Reviewer effort through Claude Code settings", async () => {
+    const fs = createMemoryFs();
+    const runtimeInputs: CreateTerminalSessionInput[] = [];
+    const service = createTestSessionService(fs, runtimeInputs);
+
+    const started = await service.startRoleSession("/repo", "demo-task", "gate-reviewer", {
+      model: "claude-sonnet-4-6[1m]",
+      effort: "max"
+    });
+
+    expect(started.effort).toBe("max");
+    expect(runtimeInputs[0]?.args).toContain("--agent");
+    expect(runtimeInputs[0]?.args).toContain("gate-reviewer");
+    expect(runtimeInputs[0]?.args).toContain("--effort");
+    expect(runtimeInputs[0]?.args).toContain("max");
+  });
+
+  it("starts Claude Code sessions with ultracode settings", async () => {
+    const fs = createMemoryFs();
+    const runtimeInputs: CreateTerminalSessionInput[] = [];
+    const service = createTestSessionService(fs, runtimeInputs);
+
+    const started = await service.startRoleSession("/repo", "demo-task", "architect", {
+      model: "fable",
+      effort: "ultracode"
+    });
+
+    expect(started.effort).toBe("ultracode");
+    expect(runtimeInputs[0]?.args).toContain("--settings");
+    expect(runtimeInputs[0]?.args).toContain("{\"ultracode\":true}");
+    expect(runtimeInputs[0]?.args).not.toContain("--effort");
+  });
+
   it("starts role sessions inside the task worktree when one exists", async () => {
     const fs = createMemoryFs();
     const runtimeInputs: CreateTerminalSessionInput[] = [];
@@ -99,7 +318,7 @@ describe("createSessionService", () => {
     expect(runtimeInputs[0]?.env).toMatchObject({
       VCM_TASK_REPO_ROOT: "/repo/.claude/worktrees/demo-task"
     });
-    expect(runtimeInputs[0]?.logPath).toBe("/repo/.claude/worktrees/demo-task/.ai/vcm/handoffs/logs/architect.log");
+    expect(runtimeInputs[0]?.logPath).toBeUndefined();
     await expect(fs.pathExists("/repo/.claude/worktrees/demo-task/.ai/vcm/sessions/demo-task.json"))
       .resolves.toBe(true);
     await expect(fs.pathExists("/repo/.ai/vcm/sessions/demo-task.json"))
@@ -143,7 +362,7 @@ describe("createSessionService", () => {
 
   it("normalizes legacy dangerously skip permission records to bypassPermissions", async () => {
     const fs = createMemoryFs();
-    await fs.writeJson("/repo/.ai/vcm/sessions/demo-task.json", {
+    await fs.writeJson(`${TASK_WORKTREE}/.ai/vcm/sessions/demo-task.json`, {
       version: 1,
       taskSlug: "demo-task",
       updatedAt: "2026-05-29T00:00:00.000Z",
@@ -163,9 +382,8 @@ describe("createSessionService", () => {
             activityStatus: "idle",
             command: "claude --agent coder --dangerously-skip-permissions",
             permissionMode: "dangerously-skip-permissions",
-            cwd: "/repo",
+            cwd: TASK_WORKTREE,
             terminalBackend: "node-pty",
-            logPath: ".ai/vcm/handoffs/logs/coder.log",
             updatedAt: "2026-05-29T00:00:00.000Z"
           }
         },
@@ -209,6 +427,14 @@ describe("createSessionService", () => {
       lastTurnStartedAt: "2026-05-29T00:00:00.000Z"
     });
 
+    const manuallyIdle = await service.markRoleActivityIdle("/repo", "demo-task", "coder");
+    expect(manuallyIdle).toMatchObject({
+      status: "running",
+      activityStatus: "idle",
+      lastTurnEndedAt: "2026-05-29T00:00:00.000Z"
+    });
+
+    await service.markRoleActivityRunning("/repo", "demo-task", "coder");
     const idle = await service.recordClaudeHookEvent("/repo", {
       taskSlug: "demo-task",
       role: "coder",
@@ -220,6 +446,73 @@ describe("createSessionService", () => {
       activityStatus: "idle",
       lastTurnEndedAt: "2026-05-29T00:00:00.000Z"
     });
+
+    await service.markRoleActivityRunning("/repo", "demo-task", "coder");
+    const failed = await service.recordClaudeHookEvent("/repo", {
+      taskSlug: "demo-task",
+      role: "coder",
+      eventName: "StopFailure",
+      claudeSessionId: started.claudeSessionId
+    });
+    expect(failed).toMatchObject({
+      status: "running",
+      activityStatus: "idle",
+      lastTurnEndedAt: "2026-05-29T00:00:00.000Z"
+    });
+
+    await service.markRoleActivityRunning("/repo", "demo-task", "coder");
+    const compacted = await service.recordClaudeHookEvent("/repo", {
+      taskSlug: "demo-task",
+      role: "coder",
+      eventName: "PostCompact",
+      claudeSessionId: started.claudeSessionId,
+      transcriptPath: "/Users/sheldon/.claude/projects/demo/compact.jsonl"
+    });
+    expect(compacted).toMatchObject({
+      status: "running",
+      activityStatus: "running",
+      transcriptPath: "/Users/sheldon/.claude/projects/demo/compact.jsonl",
+      lastCompactAt: "2026-05-29T00:00:00.000Z"
+    });
+  });
+
+  it("records Gate Reviewer hook activity on the project-scoped session", async () => {
+    const fs = createMemoryFs();
+    const service = createTestSessionService(fs, []);
+    const started = await service.startRoleSession("/repo", "demo-task", "gate-reviewer");
+
+    expect(started.claudeSessionId).not.toBe("claude_session_123");
+
+    const running = await service.recordRoleHookEvent("/repo", {
+      taskSlug: "demo-task",
+      role: "gate-reviewer",
+      eventName: "UserPromptSubmit",
+      sessionId: "claude_session_123",
+      transcriptPath: "/Users/sheldon/.claude/projects/-repo/claude_session_123.jsonl",
+      cwd: "/repo",
+      allowSessionMismatch: true
+    });
+    expect(running).toMatchObject({
+      role: "gate-reviewer",
+      taskSlug: "demo-task",
+      claudeSessionId: "claude_session_123",
+      transcriptPath: "/Users/sheldon/.claude/projects/-repo/claude_session_123.jsonl",
+      cwd: "/repo",
+      activityStatus: "running",
+      lastTurnStartedAt: "2026-05-29T00:00:00.000Z"
+    });
+
+    const idle = await service.recordRoleHookEvent("/repo", {
+      taskSlug: "demo-task",
+      role: "gate-reviewer",
+      eventName: "Stop",
+      sessionId: "claude_session_123",
+      allowSessionMismatch: true
+    });
+    expect(idle).toMatchObject({
+      activityStatus: "idle",
+      lastTurnEndedAt: "2026-05-29T00:00:00.000Z"
+    });
   });
 });
 
@@ -227,8 +520,9 @@ function createTestSessionService(
   fs: FileSystemAdapter,
   runtimeInputs: CreateTerminalSessionInput[],
   writes: string[] = [],
-  options: { worktreePath?: string } = {}
+  options: { sandboxMode?: string; worktreePath?: string } = {}
 ) {
+  const worktreePath = options.worktreePath ?? TASK_WORKTREE;
   return createSessionService({
     fs,
     runtime: createFakeRuntime(runtimeInputs, writes),
@@ -246,13 +540,19 @@ function createTestSessionService(
         permissionMode = "default",
         claudeSessionId?: string,
         resume = false,
-        model: ClaudeModel = "default"
+        model: ClaudeModel = "default",
+        effort: SessionEffort = "default"
       ) {
         const args = ["--agent", role];
         if (claudeSessionId) {
           args.push(resume ? "--resume" : "--session-id", claudeSessionId);
         }
         args.push("--model", model);
+        if (effort === "ultracode") {
+          args.push("--settings", JSON.stringify({ ultracode: true }));
+        } else if (effort !== "default") {
+          args.push("--effort", effort);
+        }
         if (permissionMode === "bypassPermissions") {
           args.push("--permission-mode", "bypassPermissions");
         }
@@ -264,17 +564,11 @@ function createTestSessionService(
         return {
           handoffDir: ".ai/vcm/handoffs",
           roleCommandsDir: ".ai/vcm/handoffs/role-commands",
-          logsDir: ".ai/vcm/handoffs/logs",
+          messagesDir: ".ai/vcm/handoffs/messages",
           roleCommandPaths: {
             architect: ".ai/vcm/handoffs/role-commands/architect.md",
             coder: ".ai/vcm/handoffs/role-commands/coder.md",
             reviewer: ".ai/vcm/handoffs/role-commands/reviewer.md"
-          },
-          roleLogPaths: {
-            "project-manager": ".ai/vcm/handoffs/logs/project-manager.log",
-            architect: ".ai/vcm/handoffs/logs/architect.log",
-            coder: ".ai/vcm/handoffs/logs/coder.log",
-            reviewer: ".ai/vcm/handoffs/logs/reviewer.log"
           },
           architecturePlanPath: ".ai/vcm/handoffs/architecture-plan.md",
           knownIssuesPath: ".ai/vcm/handoffs/known-issues.md",
@@ -305,7 +599,7 @@ function createTestSessionService(
           createdAt: "2026-05-29T00:00:00.000Z",
           updatedAt: "2026-05-29T00:00:00.000Z",
           repoRoot: "/repo",
-          worktreePath: options.worktreePath,
+          worktreePath,
           branch: "feature",
           handoffDir: ".ai/vcm/handoffs",
           status: "created"
@@ -318,7 +612,7 @@ function createTestSessionService(
           createdAt: "2026-05-29T00:00:00.000Z",
           updatedAt: "2026-05-29T00:00:00.000Z",
           repoRoot: "/repo",
-          worktreePath: options.worktreePath,
+          worktreePath,
           branch: "feature",
           handoffDir: ".ai/vcm/handoffs",
           status: "running"
@@ -326,6 +620,7 @@ function createTestSessionService(
       }
     } as never,
     apiUrl: "http://127.0.0.1:4173",
+    sandboxMode: options.sandboxMode,
     now: () => "2026-05-29T00:00:00.000Z"
   });
 }
@@ -414,6 +709,9 @@ function createMemoryFs(): FileSystemAdapter {
       }
       files.set(targetPath, content);
       return true;
+    },
+    async removePath(targetPath) {
+      files.delete(targetPath);
     }
   };
 }

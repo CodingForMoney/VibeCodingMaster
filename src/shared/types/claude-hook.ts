@@ -1,6 +1,7 @@
 import type { RoleName } from "./role.js";
 
-export type ClaudeHookEventName = "UserPromptSubmit" | "Stop";
+export type ClaudeTurnHookEventName = "UserPromptSubmit" | "Stop" | "StopFailure";
+export type ClaudeHookEventName = ClaudeTurnHookEventName | "PostCompact";
 
 export interface ClaudeHookPayload {
   hook_event_name?: string;

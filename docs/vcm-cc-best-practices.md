@@ -1,13 +1,14 @@
 # VCM Claude Code Best Practices
 
-Last updated: 2026-06-08
+Last updated: 2026-06-21
 
 This is the current VCM-specific Claude Code / AI coding best-practices guide.
 It is based on the latest `example/rust-layered` harness baseline.
 
 Do not install this document into target repositories. Target repositories should
-receive a concise root `CLAUDE.md` VCM block, four role agents, repo-local VCM
-skills, harness tools, and project-owned durable docs.
+receive a concise root `CLAUDE.md` VCM block, role agents, repo-local VCM
+skills, harness tools, Translator harness files, and project-owned
+durable docs.
 
 `docs/cc-best-practices.md` is archived as the old generic baseline. Current VCM
 implementation should use this document and `docs/full-harness-baseline.md`.
@@ -17,7 +18,7 @@ implementation should use this document and `docs/full-harness-baseline.md`.
 VCM separates three concerns:
 
 - Harness-managed files: VCM owns, upgrades, repairs, audits, and can uninstall
-  these through `.ai/vcm-harness-manifest.json`.
+  these through deterministic installer definitions and managed markers.
 - Project-owned durable docs: VCM bootstrap may create or initialize these, but
   they become project truth and are not VCM-owned harness.
 - Runtime state: VCM writes these during task execution and cleans them up after
@@ -41,13 +42,16 @@ CLAUDE.md
 .claude/agents/architect.md
 .claude/agents/coder.md
 .claude/agents/reviewer.md
+.claude/agents/gate-reviewer.md
 .claude/skills/vcm-route-message/SKILL.md
 .claude/skills/vcm-final-acceptance/SKILL.md
 .claude/skills/vcm-long-running-validation/SKILL.md
 .claude/skills/vcm-harness-bootstrap/SKILL.md
-.ai/vcm-harness-manifest.json
+.claude/skills/vcm-gate-review/SKILL.md
+.claude/agents/translator.md
 .ai/tools/generate-module-index
 .ai/tools/generate-public-surface
+.ai/tools/request-gate-review
 .ai/tools/run-long-check
 .ai/tools/watch-job
 .ai/tools/vcm-bash-guard
@@ -61,9 +65,8 @@ Derived bootstrap artifacts:
 .ai/generated/public-surface.json
 ```
 
-The generated artifacts are tracked in the manifest as derived artifacts so VCM
-can clean or refresh them, but they are produced by generator tools during
-bootstrap or later maintenance work. They are not hand-authored fixed templates.
+The generated artifacts are produced by generator tools during bootstrap or
+later maintenance work. They are not hand-authored fixed templates.
 
 Runtime roots:
 
@@ -80,6 +83,7 @@ Not part of the current baseline:
 .ai/task-specs/
 .ai/vcm/tasks/
 .ai/vcm/handoffs/role-commands/
+.ai/vcm-harness-manifest.json
 docs/plans/active/
 docs/plans/completed/
 docs/MODULE_MAP.md
@@ -100,35 +104,31 @@ docs/AI_WORKFLOW.md
 
 Do not reintroduce these unless there is a current VCM requirement.
 
-## 3. Harness Manifest
+## 3. Harness Ownership
 
-`.ai/vcm-harness-manifest.json` is a VCM harness ownership and lifecycle record.
-It is not a project-document index.
+VCM harness ownership is defined by the installer code and by managed markers.
+The current implementation does not use `.ai/vcm-harness-manifest.json`.
 
-It should record:
+VCM-owned managed blocks use markers such as:
 
-- VCM-managed files and directories
-- managed-block marker type and boundaries
-- JSON merge ownership, especially `.claude/settings.json` hooks
-- VCM agent and skill files
-- harness tools under `.ai/tools/`
-- generated context artifacts under `.ai/generated/`
-- PR template managed blocks
-- lifecycle labels
-- runtime roots
-- uninstall actions
+```md
+<!-- VCM:BEGIN version=1 -->
+...
+<!-- VCM:END -->
+```
 
-It should not record:
+For `.gitignore`, VCM uses:
 
-- project-owned durable docs such as `docs/ARCHITECTURE.md`,
-  `docs/TESTING.md`, `docs/known-issues.md`, `docs/plans/`, or module-level
-  `ARCHITECTURE.md`
-- `.ai/vcm/**` runtime files
-- `.claude/worktrees/**` task worktrees
-- placeholder `.gitkeep` files
+```gitignore
+# VCM:BEGIN version=1
+...
+# VCM:END
+```
 
-VCM uninstall should remove only VCM-owned managed blocks or unchanged VCM-owned
-whole files. User-authored project docs must not be deleted by harness uninstall.
+Whole-file and raw-file harness files are owned by VCM only when their paths are
+listed by the fixed installer. VCM uninstall should remove only VCM-owned
+managed blocks or unchanged VCM-owned whole files. User-authored project docs
+must not be deleted by harness uninstall.
 
 ## 4. Project-Owned Durable Docs
 
@@ -164,12 +164,12 @@ Current runtime files and directories:
 ```text
 .ai/vcm/handoffs/
 .ai/vcm/handoffs/messages/
-.ai/vcm/handoffs/logs/
 .ai/vcm/handoffs/architecture-plan.md
 .ai/vcm/handoffs/review-report.md
 .ai/vcm/handoffs/docs-sync-report.md
 .ai/vcm/handoffs/final-acceptance.md
 .ai/vcm/handoffs/known-issues.md
+.ai/vcm/gate-reviews/
 .ai/vcm/jobs/<job-id>/
 .ai/vcm/bootstrap/session.json
 .ai/vcm/bootstrap/bootstrap.log
@@ -178,7 +178,7 @@ Current runtime files and directories:
 App-local VCM task records live outside the connected repository:
 
 ```text
-~/.vcm/projects/<project-id>/tasks/<task-slug>.json
+<vcmDataDir>/projects/<project-id>/tasks/<task-slug>.json
 ```
 
 Runtime state is deleted during task cleanup after useful facts are promoted to
@@ -194,12 +194,14 @@ VCM uses four core roles:
 - `architect`: technical planner and docs-sync owner. It defines module/file
   responsibilities, cross-file callable surfaces, public contracts, phase
   boundaries, risks, and durable docs updates. Before coder work starts,
-  architect writes the plan and materializes it in code scaffolding with
-  contract comments and `VCM:CODE` placeholders.
+  architect writes the plan with a Scaffold Manifest whose rows have stable
+  IDs, and materializes only the minimum necessary code scaffolding with
+  durable contract comments and `VCM:CODE <ID>` placeholders.
 - `coder`: implementation owner. It changes production code and baseline unit
   tests within the approved plan. It follows the architect-defined scaffold,
-  implements and removes `VCM:CODE` placeholders, follows general coding
-  standards, and does not change architecture or durable docs.
+  implements and removes `VCM:CODE` placeholders, reports Scaffold Completion
+  by ID in handoff, follows general coding standards, and does not change
+  architecture or durable docs.
 - `reviewer`: independent validation owner. It reads code as needed, writes or
   updates tests, owns `docs/TESTING.md`, and decides validation sufficiency.
   `docs/TESTING.md` must be current validation strategy, not a task log, and
@@ -240,26 +242,37 @@ workload or context size is not a valid reason to change the architect plan.
 ## 7.1 Architecture Plan And Code Scaffolding
 
 For code changes, the architect plan is not only a markdown handoff. It is a
-plan document plus code scaffolding.
+plan document plus a Scaffold Manifest and the minimum necessary code
+scaffolding.
 
 The plan document defines affected modules, changed or created files, file
 responsibilities, why each file is in scope, user-visible behavior changes,
 non-private cross-file callable surfaces, docs impact, risks, and Replan
 triggers.
 
+The Scaffold Manifest carries task-specific file context for the current handoff:
+stable row ID, why a file is in scope, what coder should implement, allowed
+implementation freedom, expected `VCM:CODE` placeholders, durable code comment
+needs, proof points, and Replan triggers. Task context, phase notes, handoff
+instructions, temporary rationale, and coder guidance belong in the Scaffold
+Manifest, not in source-code comments.
+
 Code scaffolding materializes that plan in the repository before coder work
 starts:
 
 - new modules or files are created when needed
-- file-level responsibilities, logic boundaries, collaborators, and non-goals
-  are documented in code
+- durable behavior, contracts, invariants, error boundaries, or non-obvious
+  logic are documented in code only when they should remain useful after the
+  task is complete
 - new or changed non-private callable surfaces are defined directly in code with
   signature shape and contract comments
-- incomplete implementation bodies are marked with `VCM:CODE`
+- incomplete implementation bodies are marked with `VCM:CODE <Scaffold Manifest ID>`
 
 Coder implements the marked placeholders and may add private helpers, but cannot
 change file responsibilities, callable-surface signatures, or contract intent
-without architect replan.
+without architect replan. Coder handoff reports Scaffold Completion by manifest
+ID, including completed markers, remaining markers if any, private helpers
+added, manifest deviations, and whether Replan is needed.
 
 Architect may also enter Debug Mode when PM routes bugs, failing tests,
 build/runtime failures, or unclear defects. Debug Mode allows architect to read
@@ -405,7 +418,7 @@ an invisible background task:
 
 The UI should expose both stages: fixed install status and bootstrap completion
 status. A failed or disconnected bootstrap terminal should be restartable
-without treating project-owned durable docs as VCM-owned manifest entries.
+without treating project-owned durable docs as VCM-owned harness files.
 
 ## 12. Final Acceptance
 
@@ -432,7 +445,6 @@ Temporary files should be deleted after the task:
 - route messages
 - handoff artifacts
 - job logs and status files
-- raw terminal logs
 - app-local task records
 - routine completed plans
 
@@ -482,13 +494,13 @@ Gateway product rules:
 Gateway settings and secrets live in app-local state:
 
 ```text
-~/.vcm/gateway/settings.json
+<vcmDataDir>/gateway/settings.json
 ```
 
 Gateway audit logs live outside connected repositories:
 
 ```text
-~/.vcm/gateway/audit.jsonl
+<vcmDataDir>/gateway/audit.jsonl
 ```
 
 Rules:

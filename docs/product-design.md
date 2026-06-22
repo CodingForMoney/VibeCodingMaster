@@ -1,6 +1,6 @@
 # VibeCodingMaster Product Design
 
-Last updated: 2026-06-10
+Last updated: 2026-06-21
 
 This document describes the current product direction and implemented V1 behavior for VCM.
 
@@ -29,13 +29,13 @@ Session = n x Round = m x Turn
 
 - `Session`: one VCM task. It is the statistics container for the whole task, from task creation until Close Task.
 - `Round`: one VCM conversation cycle. It starts with an accepted user prompt or VCM-delivered prompt, continues through sequential role orchestration, and ends when the final role turn stops and no next turn starts inside the 10 second stop window. In the normal orchestrated workflow, the final visible result comes back from `project-manager`.
-- `Turn`: one role-level Claude Code conversation. It starts when a prompt is submitted to one role session and ends when that role's Claude Code process emits `Stop`.
+- `Turn`: one role-level Claude Code conversation. It starts when a prompt is submitted to one role session and ends when that role's Claude Code process emits `Stop` or `StopFailure`.
 
 Turns inside one Round are strictly sequential. VCM should finish one role Turn before starting the next role Turn in that Round.
 
 Session state is intentionally small: `created` means no Round has started yet, `running` means there is a current running Round, and `stopped` means there is no current running Round after at least one Round has stopped. Starting Claude Code role sessions does not make the VCM Session `running`.
 
-Round state is only `running` or `stopped`. After a `Stop` hook, the 10 second stop window still counts as `running`; the Round becomes `stopped` only when the timer expires without another `UserPromptSubmit`.
+Round state is only `running` or `stopped`. After a turn-end hook, the 10 second stop window still counts as `running`; the Round becomes `stopped` only when the timer expires without another `UserPromptSubmit`.
 
 This `Session` term is only for VCM statistics. It must not be confused with a Claude Code role session, terminal runtime session, or Claude transcript session id. VCM still runs one Claude Code role session per role inside one task-level VCM Session.
 
@@ -44,10 +44,10 @@ This `Session` term is only for VCM statistics. It must not be confused with a C
 VCM V1 must make multi-session Claude Code work visible and recoverable:
 
 - Connect a local Git repository.
-- Create a named task with its own branch and task-level worktree by default.
+- Create a named task with its own branch and task-level worktree.
 - Start, stop, restart, and resume one Claude Code session per role.
 - Keep role terminals embedded in one GUI.
-- Preserve task state, session state, handoff files, message history, and raw terminal logs.
+- Preserve task state, session state, handoff files, and message history.
 - Let roles communicate through a PM-mediated message bus.
 - Let users choose between manual message approval and auto orchestration.
 - Install or update VCM role rules into `CLAUDE.md` and `.claude/agents/*.md`.
@@ -75,16 +75,52 @@ Recommended flow:
 
 ```text
 project-manager
-  -> architect architecture plan and code scaffolding
+  -> architect architecture plan, Scaffold Manifest, and code scaffolding
   -> coder implementation and baseline unit checks
   -> reviewer independent validation
   -> architect docs sync / architecture drift check
   -> project-manager final acceptance, commit, and PR
 ```
 
-### 4.1 Task Worktree Model
+### 4.1 Gate Review Gates
 
-Task-level worktree management is the recommended default model for multi-task parallelism:
+For complex tasks, VCM supports optional Gate Review Gates through a
+`gate-reviewer` Claude Code role. Gate Reviewer is a VCM flow role with the same
+hook, Round, terminal, and translation behavior as the core roles. Its session
+is project-scoped and reusable across tasks, but each gate turn is bound to the
+current task and task worktree so task evidence stays explicit.
+
+```text
+architect architecture plan
+  -> Gate Reviewer checks plan quality before coder starts
+
+reviewer review-report
+  -> Gate Reviewer checks validation adequacy before final acceptance
+
+final task diff
+  -> Gate Reviewer checks code and PR readiness before PR preparation
+```
+
+Each gate returns `approve` or `request_changes`. PM triggers gates through the
+`vcm-gate-review` skill at the three workflow points; VCM owns the sidebar
+toggles, gate state, Gate Reviewer session, report polling, and PM callback.
+Reports are task-scoped under `.ai/vcm/gate-reviews/`. All three gate toggles
+default to off.
+
+When any gate is on, or when a Gate Reviewer session already exists, the task
+workspace shows `Gate Reviewer` as a fifth terminal role. VCM sends a short gate
+prompt into that project session and binds the session to the current task for
+hooks, Round state, translation, and report polling. The role remains outside PM
+route-file dispatch.
+Architecture-plan findings return to architect, validation-adequacy findings
+return to reviewer, and final-diff findings go to architect first for
+assessment. Gate Reviewer role rules live in `.claude/agents/gate-reviewer.md`.
+
+The detailed design lives in `docs/gate-review-gates.md`.
+
+### 4.2 Task Worktree Model
+
+Task-level worktree management is the required model for all tasks:
 
 ```text
 one task
@@ -96,9 +132,7 @@ one task
 
 VCM must not create worktrees per role. `project-manager`, `architect`, `coder`, and `reviewer` for the same task all run in the same task worktree and hand off sequentially.
 
-When the user creates a task, `Create worktree and branch` is selected by default. With that option selected, VCM creates the branch and worktree immediately. If the user clears the option, VCM creates the task in the currently connected repository path and records the current branch.
-
-There is no separate later button named `Create task worktree`, and a task cannot be switched between worktree and non-worktree mode after creation.
+When the user creates a task, VCM always creates the branch and worktree immediately. Tasks never run directly in the connected base repository, and there is no separate later button named `Create task worktree`.
 
 Branch naming:
 
@@ -130,17 +164,13 @@ New Task submit
   -> validate task name
   -> verify .ai/vcm/ is ignored
   -> verify .claude/worktrees/ is ignored
-	  -> if Create worktree and branch is selected:
-	       -> derive branch feature/<task-name>
-	       -> derive worktree path .claude/worktrees/<task-name>
-	       -> verify the base repo is clean
-	       -> git worktree add -b feature/<task-name> .claude/worktrees/<task-name> <base-ref>
-	  -> otherwise:
-	       -> use the connected repo path and current branch
-	       -> reject if another inline task is already active
+  -> derive branch feature/<task-name>
+  -> derive worktree path .claude/worktrees/<task-name>
+  -> verify the base repo is clean
+  -> git worktree add -b feature/<task-name> .claude/worktrees/<task-name> <base-ref>
   -> create task metadata
-  -> create handoff structure inside the task runtime repo
-  -> open the task workspace with role session cwd = task runtime repo
+  -> create handoff structure inside the task worktree
+  -> open the task workspace with role session cwd = task worktree
 ```
 
 Task close flow:
@@ -151,13 +181,11 @@ user clicks red Close Task
   -> stop VCM-managed running role sessions for the task
   -> explain that VCM deletes the task worktree and task branch
   -> explain that VCM does not check running sessions or uncommitted changes
-  -> remove git worktree when the task owns one
-  -> delete the task branch by default when the task owns one
+  -> remove git worktree
+  -> delete the task branch
   -> remove VCM task metadata from the base repo
-  -> remove task runtime metadata from the task runtime repo
+  -> remove task runtime metadata from the task worktree
 ```
-
-Tasks created without a worktree do not own a separate branch/worktree, so Close Task stops VCM-managed running role sessions and removes only VCM metadata for those tasks.
 
 ## 5. Roles
 
@@ -181,10 +209,11 @@ The project manager must not become the architect, coder, reviewer, or debugger 
 The architect owns:
 
 - architecture plan
+- Scaffold Manifest with stable row IDs for task-specific file context and coder guidance
 - module boundaries
 - file responsibilities
 - cross-file callable surfaces and contract comments
-- code scaffolding with `VCM:CODE` placeholders
+- code scaffolding with `VCM:CODE <ID>` placeholders
 - public contracts
 - verifiable behavior and behavior/contract proof points
 - Replan triggers
@@ -201,7 +230,7 @@ Outputs:
 The coder owns:
 
 - implementation within the approved plan
-- completion of architect-defined `VCM:CODE` placeholders
+- completion of architect-defined `VCM:CODE` placeholders and Scaffold Completion handoff by ID
 - baseline unit/contract/regression tests
 - general coding standards and code documentation consistency
 
@@ -246,11 +275,14 @@ Sections:
 - `Repository Path`
 - `Connected Repository`
 - `Settings`
+- `Translation`
+- `Gate Review Gates`
+- `Gateway`
 - `VCM Harness`
 - `New Task`
 - `Tasks`
 
-The connected active task also has a bottom status dock. It is not a collapsible sidebar section. It stays at the bottom of the sidebar and shows the active VCM Session title, task status, Session start time, total elapsed time, total Round count, and Claude Code active runtime. When the current Round is running, it also shows the Current Round start time, total elapsed time, Claude Code active runtime, and Turn count.
+The connected active task also has a bottom status dock. It is not a collapsible sidebar section. It stays at the bottom of the sidebar and shows the active VCM Session title, task status, Session start time, total elapsed time, total Round count, and role active runtime. It also shows the Current Round while a Round is running, or the Last Round after a flow pause, including start time, total elapsed time, role active runtime, Turn count, and Round status.
 
 `Repository Path` layout:
 
@@ -277,8 +309,7 @@ Opening this section refreshes the connected repository status through
 
 The `Pull` button runs `git pull --ff-only` only against the connected base
 repository. It is disabled when the base repository has uncommitted changes,
-when the branch has no upstream, or when the active task is an inline task using
-the base repository directly. VCM does not stash, merge, or mutate task
+or when the branch has no upstream. VCM does not stash, merge, or mutate task
 worktrees from this button.
 
 The old `Dirty: yes/no` label is not used. The UI uses `Working tree: clean` or
@@ -300,33 +331,49 @@ Safari may still require the user to manually set `Safari > Website Settings > A
 
 There is no separate `Pause orchestration` or `Resume orchestration` control in the GUI. The current product model is one on/off toggle in the role console toolbar.
 
+`Translation` contains:
+
+- `Conversation translation`
+- `Auto-send`
+- `Language`
+- `Reply scope`
+- `File translation`
+- `Bootstrap`
+- `Update memory`
+- `Session status`
+- `Open Session`
+
+`Gate Review Gates` contains three independent switches:
+
+- `Architecture plan`
+- `Validation adequacy`
+- `Final diff`
+
 `VCM Harness` shows whether VCM managed blocks are installed/up to date in the project rules files and `.gitignore`.
 
 `New Task` contains:
 
 - `task name`
-- a `Create worktree and branch` checkbox, selected by default
-- generated branch preview when selected: `feature/<task-name>`
-- generated worktree preview when selected: `.claude/worktrees/<task-name>`
-- current repository/current branch note when cleared
+- generated branch preview: `feature/<task-name>`
+- generated worktree preview: `.claude/worktrees/<task-name>`
 
 There is no optional title input in the current UI.
-
-The worktree/branch path is the recommended VCM task model, but the user may clear the checkbox for an inline task. VCM should not require a separate worktree creation action later.
 
 ### Task Workspace
 
 The task workspace header is one compact row:
 
 ```text
-<task>  [Project Manager] [Architect] [Coder] [Reviewer]  [Translate] [Close Task]
+<task>  [Project Manager] [Architect] [Coder] [Reviewer] [Gate Reviewer?]  [Auto orchestration] [Close Task]
 ```
 
 The header does not show `TASK WORKSPACE`, branch, or worktree path. Task branch/worktree details remain task metadata, but they are not first-row chrome.
 
 The task workspace does not show a manual `Refresh` button. Task status, role status, messages, orchestration state, and flow pause state refresh automatically. The only remaining `Refresh` control is inside the sidebar `VCM Harness` section, where it rechecks managed project files.
 
-Role tabs show the session status for each role.
+Role tabs show the session status for each visible role. `Gate Reviewer` appears
+only when a Gate Review switch is enabled or a Gate Reviewer session already
+exists.
 
 The main task workspace only renders the active role console. Messages and Events are opened from the sidebar.
 
@@ -363,27 +410,30 @@ The split should stay close to 50/50 width. Both panes expand vertically to fill
 
 ## 8. Flow Pause Detection
 
-VCM detects flow pauses from Claude Code hook events, not from terminal silence, message history, or pending route files.
+VCM detects flow pauses from role hook events, not from terminal silence, message history, or pending route files. Claude Code VCM flow roles report through `.claude/settings.json`; Gate Reviewer follows the same hook path while VCM separately validates the assigned gate report.
 
 Backend role state:
 
 - VCM terminal submit: role becomes `running`.
 - `Stop`: role becomes `idle` and records `lastTurnEndedAt`.
-- The role tab and flow pause state both react to Claude Code hook events.
+- `PostCompact`: refreshes role session metadata and records `lastCompactAt` without changing `running`/`idle`.
+- `StopFailure`: first checks completion evidence. If the role already wrote an outgoing route file, VCM marks the role idle and dispatches normally. If not, VCM sends a recovery prompt to the same role without marking it idle.
+- The role tab and flow pause state react to Claude Code hook events for all VCM flow roles, including Gate Reviewer.
 
 Task-level Round state:
 
 - The first `UserPromptSubmit` starts a Round for the current VCM Session.
 - Each accepted `UserPromptSubmit` is the start of one Turn.
 - `Stop` ends the current Turn and starts a 10 second stop timer; during that timer, the Round is still `running`.
+- `StopFailure` ends the Turn only after VCM decides the role completed or recovery is unavailable. When recovery is sent, the existing Turn stays running.
 - A new `UserPromptSubmit` inside the window continues the same Round and starts the next Turn.
 - If no new prompt is accepted before the deadline, the Round becomes `stopped`.
-- The stop transition is timer-driven from the `Stop` event. Round-state reads do not end a Round.
+- The stop transition is timer-driven from the turn-end event. Round-state reads do not end a Round.
 - Before stopping, VCM checks `.ai/vcm/handoffs/messages`; if a pending route message exists and can be delivered, VCM retries delivery and extends the stop window instead of alerting.
-- The same Round state stores total Round count, Turn count, completed Turn count, and Claude Code active runtime. Active runtime is measured only between `UserPromptSubmit` and `Stop`, not during the stop window.
-- The Current Round dock shows both wall-clock Round duration and Claude Code active runtime. `Total` is `now - Round.startedAt`; `CC runtime` is the accumulated active runtime across Turns in that Round; `Turn count` is the number of accepted prompts in the Round.
+- The same Round state stores total Round count, Turn count, completed Turn count, and role active runtime. Active runtime is measured only between `UserPromptSubmit` and the turn-end event, not during the stop window.
+- The Round dock shows both wall-clock Round duration and role active runtime. For a running Round, `Total` is `now - Round.startedAt`; for a stopped Round, it is `stoppedAt - Round.startedAt`. `Role runtime` is the accumulated active runtime across Turns in that Round; `Turn count` is the number of accepted prompts in the Round.
 
-The frontend polls this task-level Round state and deduplicates each stopped Round so the same stopped state does not alert on every poll. Flow duration is measured from the first `UserPromptSubmit` to `stoppedAt`, falling back to the last `Stop` when needed. Runs under 2 minutes trigger the weak 3-chime reminder at 1.4 second intervals. Runs at or above 2 minutes trigger the strong alert dialog and repeating sound until confirmation.
+The frontend polls this task-level Round state and deduplicates each stopped Round so the same stopped state does not alert on every poll. Flow duration is measured from the first `UserPromptSubmit` to `stoppedAt`, falling back to the last turn-end timestamp when needed. Runs under 2 minutes trigger the weak 3-chime reminder at 1.4 second intervals. Runs at or above 2 minutes trigger the strong alert dialog and repeating sound until confirmation.
 
 ## 9. Session Lifecycle
 
@@ -452,7 +502,7 @@ For `.gitignore`, VCM uses hash comments:
 
 VCM must preserve all user-authored content outside the managed block.
 
-After applying harness changes, the UI tells the user what changed and recommends reviewing and committing those files.
+After applying harness changes in the base repo, the UI shows the changed files. When a task is active, the result area also shows `Commit & rebase task`: VCM stages only the changed harness files, creates a `chore: update VCM harness` commit in the base repo, and rebases the active task branch onto that commit. If the task worktree is dirty or the base repo already has staged changes, VCM stops and asks the user to clean up first.
 
 Role sessions get VCM behavior from `CLAUDE.md` and `.claude/agents/*.md`, not from a pasted startup context.
 
@@ -466,11 +516,6 @@ Each task creates:
     architect.md
     coder.md
     reviewer.md
-  logs/
-    project-manager.log
-    architect.log
-    coder.log
-    reviewer.log
   architecture-plan.md
   known-issues.md
   review-report.md
@@ -521,11 +566,11 @@ Default route policy:
 - Peer routes such as `coder-reviewer.md` may exist for explicit task designs, but VCM still serializes delivery per target role.
 - `user` talks to `project-manager` through the normal active terminal or translation composer, not through a route file.
 
-Stop-triggered scan:
+Claude turn-end scan:
 
-- VCM injects Claude Code `UserPromptSubmit`, `Stop`, and `PermissionRequest` hooks into `.claude/settings.json`.
+- VCM injects Claude Code `UserPromptSubmit`, `Stop`, `StopFailure`, `PostCompact`, and `PermissionRequest` hooks into `.claude/settings.json`.
 - The hooks do not call `vcmctl`; they POST directly to the local VCM backend.
-- When any role stops, VCM marks that role idle, then scans pending route files.
+- When a Claude Code role stops, VCM marks that role idle, then scans pending route files.
 - VCM scans the stopped role's outgoing files and also any pending files targeting newly idle roles, so messages that were blocked by a busy target can be delivered after that target stops.
 - VCM reads only stable, non-empty files and ignores blank files.
 - VCM delivers at most one message to a target role per scan.
@@ -557,9 +602,13 @@ VCM Harness injects Claude Code hooks into `.claude/settings.json`:
 
 - `UserPromptSubmit`: posts directly to the VCM backend, marks the role running, and confirms any matching VCM message by recording `acceptedAt`
 - `Stop`: posts directly to the VCM backend, marks the role idle, and triggers pending route-file dispatch
+- `StopFailure`: posts directly to the VCM backend; VCM checks for outgoing route-file completion evidence before marking idle. If no evidence exists, VCM sends a same-role recovery prompt and keeps the Turn running.
+- `PostCompact`: posts directly to the VCM backend, refreshes `session_id`/`transcript_path`/`cwd`, and records `lastCompactAt`
 - `PermissionRequest`: posts directly to the VCM backend and prints the backend response to stdout so Claude Code can consume an allow decision when the local VCM setting is enabled
 
 VCM uses `UserPromptSubmit` as the Claude Code acceptance signal. A successful PTY write only proves VCM delivered text to the embedded terminal; `UserPromptSubmit` proves Claude Code accepted the prompt.
+
+Gate Reviewer does not dispatch route files. PM receives Gate Review completion through the Gate Review callback managed by VCM.
 
 The injected role rules require asynchronous file messaging: after writing or updating a route file, the role must end the current Claude Code turn and wait for VCM to deliver a later reply. Roles should use `.claude/skills/vcm-route-message/SKILL.md` to author route files. Roles must not poll files, start shell loops, keep the turn open waiting for another role to answer, paste directly into another role terminal, or use Claude Code Task/Subagent for VCM role delegation.
 
@@ -571,33 +620,32 @@ There is no `vcmctl` in the target design. Hook entrypoints are direct HTTP from
 
 Translation is a local assistant layer beside the role terminal.
 
-### Provider Settings
+### Translation Controls
 
 Settings are saved in:
 
 ```text
-~/.vcm/settings.json
+<vcmDataDir>/settings.json
 ```
 
 The settings file stores:
 
-- translation provider settings
-- translation API key
+- global translation enablement
+- global translation auto-send preference
+- global translation target language
 - recent repository paths
 
-The API key input is a normal text input. The file is local to the user's machine/runtime.
+Translation work is routed through the long-lived Translator session. VCM no longer exposes API-key, provider, or prompt-slot settings for the old API-backed translation path.
 
-Provider type:
+Sidebar controls:
 
-- OpenAI-compatible chat completions
-
-Prompt slots:
-
-- `zh-to-en`
-- `zh-to-en-with-context`
-- `en-to-zh`
-
-The settings modal shows all three prompt slots as direct editors. `Reset prompts` restores every prompt to its built-in default. The modal does not include separate enable/output/input-mode switches; opening the task header `Translate` panel is the translation on/off control, and the panel-level `Auto-send` toggle controls whether translated user input is submitted automatically.
+- Conversation translation on/off
+- Auto-send on/off
+- Target language
+- Output mode: final summary or all output
+- File translation
+- Bootstrap
+- Update memory
 
 ### Claude Output Translation
 
@@ -623,16 +671,17 @@ The frontend does not subscribe through WebSocket. It polls the backend with a c
 
 Transcript event handling:
 
-- assistant text -> `prose` -> translated
-- AskUserQuestion tool -> formatted `prose` -> translated
-- TodoWrite tool -> formatted `prose` -> translated
-- Agent/Task tool -> formatted `prose` -> translated
+- assistant text with `stopReason=end_turn` -> `prose` -> translated
+- assistant text with other stop reasons -> `prose` -> preserved by default, translated only in `all output` mode
+- AskUserQuestion tool -> formatted `prose` -> preserved by default, translated only in `all output` mode
+- TodoWrite tool -> formatted `prose` -> preserved by default, translated only in `all output` mode
+- Agent/Task tool -> formatted `prose` -> preserved by default, translated only in `all output` mode
 - normal tool_use -> `tool-output` -> preserved
 - tool_result -> `tool-output` -> preserved
 
 Display behavior:
 
-- `prose` starts by showing the English source.
+- `prose` starts by showing the English source as queued.
 - while translating, panel status shows `translating <elapsed>`.
 - when translation succeeds, the English source is replaced by Chinese translated text.
 - when new translation events arrive, the active panel scrolls to the bottom after render so the latest entry, retry result, or conversation boundary is visible.
@@ -640,7 +689,7 @@ Display behavior:
 - when translation fails, panel status shows `error` and the entry keeps the visible source plus an error.
 - `tool-output` is dim, one-line, truncated by CSS, and not translated.
 
-Long translations do not block capture. Prose entries are pushed to the panel before provider translation starts. `tool_use` and `tool_result` entries are never added to the translation queue; they are displayed immediately.
+Long translations do not block capture. Translatable prose entries are pushed to the panel before translation starts. Claude Code prose output waits up to 10 seconds so adjacent entries can be batched into one Claude Code Translator prompt and one temporary result file. When an `end_turn` assistant text arrives, VCM adds it to the current batch and flushes the batch immediately. The default output mode is `PM final reply`, which translates only Project Manager `end_turn` assistant text to reduce translation work. In `all output` mode, intermediate assistant text and structured question/todo/agent events are also translated. `tool_use` and `tool_result` entries are never added to the translation queue; they are displayed immediately.
 
 There is no keyword classifier that drops assistant text. A previous design skipped permission-looking or log-looking text; that is removed.
 
@@ -667,7 +716,7 @@ Keyboard behavior:
 - `Enter`: translate current Chinese text, or send the current English draft.
 - `Shift+Enter`: insert newline.
 
-After translation succeeds, the English draft replaces the original Chinese text in the same textarea.
+After translation succeeds, the English draft is appended after the original Chinese text in the same textarea.
 
 The translated user input is also shown in the translation panel as a conversation boundary. User-input entries have a thick divider and larger top spacing so the next Claude output reads as the answer to that prompt.
 
@@ -678,7 +727,11 @@ Translation panel `Auto-send` is separate from task `Auto orchestration`:
 - `Auto-send` on: translate and send if there is no translation warning.
 - `Auto-send` off: translate to English draft and wait for user send.
 
-Task `Auto orchestration` is a compact selected/unselected button in the role console toolbar. New tasks default to auto orchestration. `Translate` is a global task header toggle next to `Close Task`; it opens/closes the translation split for all role consoles, so switching roles keeps the same translation setting.
+Task `Auto orchestration` is a compact selected/unselected button in the task
+workspace header next to `Close Task`. New tasks default to auto orchestration.
+Conversation translation is controlled by the sidebar `Translation` group; when
+enabled, each running core VCM role console shows the translation split, so
+switching roles keeps the same global translation setting.
 
 ## 14. Mobile Gateway
 
@@ -719,7 +772,7 @@ implementation plan live in `docs/gateway-design.md`.
 App-level settings:
 
 ```text
-~/.vcm/settings.json
+<vcmDataDir>/settings.json
 ```
 
 Stored app-level settings include:
@@ -727,34 +780,34 @@ Stored app-level settings include:
 - UI theme mode: `system`, `light`, or `dark`
 - flow pause alert preference
 - Claude Code permission request handling preference
-- translation provider settings and API key
+- global translation preferences
 - recent repository paths
 
 Gateway state and audit logs:
 
 ```text
-~/.vcm/gateway/settings.json
-~/.vcm/gateway/audit.jsonl
+<vcmDataDir>/gateway/settings.json
+<vcmDataDir>/gateway/audit.jsonl
 ```
 
 Gateway credentials, iLink tokens, DM binding identity, cursors, context tokens,
-and audit logs must stay outside connected repositories.
+and audit logs live under `vcmDataDir`. VCM resolves `vcmDataDir` from
+`VCM_DATA_DIR`; if it is unset or empty, VCM uses `~/.vcm`.
 
 Repository-level VCM state:
 
 ```text
-.ai/vcm/tasks/<task>.json
 .claude/worktrees/<task>/
 ```
 
 Project config:
 
 ```text
-~/.vcm/projects/<project-id>/config.json
-~/.vcm/projects/index.json
+<vcmDataDir>/projects/<project-id>/config.json
+<vcmDataDir>/projects/index.json
 ```
 
-The base repository's `.ai/vcm/` directory stores the task index, while `.claude/worktrees/` stores nested task worktrees. Long-lived project config is stored under `~/.vcm` so it survives outside Git-ignored repo state.
+The base repository's `.ai/vcm/` directory stores task-local runtime state, while `.claude/worktrees/` stores nested task worktrees. Long-lived project config is stored under `vcmDataDir`. In Dev Containers, set `VCM_DATA_DIR=/workspace/.ai/vcm` through `containerEnv` so VCM app state survives container rebuilds.
 
 Task worktree local files:
 
@@ -763,11 +816,19 @@ Task worktree local files:
 .claude/worktrees/<task>/.ai/vcm/messages/<task>.jsonl
 .claude/worktrees/<task>/.ai/vcm/orchestration/<task>.json
 .claude/worktrees/<task>/.ai/vcm/translation/<task>/
+.claude/worktrees/<task>/.ai/vcm/gate-reviews/
 .claude/worktrees/<task>/.ai/vcm/handoffs/
 .claude/worktrees/<task>/.ai/vcm/handoffs/messages/<from-role>-<to-role>.md
 ```
 
-For tasks created without a worktree, the task runtime repo is the connected base repo, so the runtime state resolves under the base repo's `.ai/vcm/`. Because `.ai/vcm/handoffs/` has no task-name segment, VCM allows only one active inline task in a connected repo.
+Project-scoped local files:
+
+```text
+.ai/vcm/gate-reviewer/session.json
+.ai/vcm/translations/
+.ai/vcm/bootstrap/session.json
+.ai/vcm/bootstrap/bootstrap.log
+```
 
 External Claude transcripts:
 
@@ -799,9 +860,8 @@ This protects against publishing raw TypeScript bin files or missing frontend as
 VCM V1 is successful when:
 
 - A user can connect a repo without global Git safe-directory setup.
-- A user can create a default task, which creates `feature/<task>` and `.claude/worktrees/<task>`.
-- A user can clear `Create worktree and branch` and create a task in the connected repo/current branch.
-- A user can start all four role sessions in the task runtime repo.
+- A user can create a task, which creates `feature/<task>` and `.claude/worktrees/<task>`.
+- A user can start all four role sessions in the task worktree.
 - Switching roles never loses the embedded terminal.
 - Restart creates a fresh Claude session; Resume reconnects to the persisted one.
 - Permission modes are reflected in the Claude command.
@@ -812,7 +872,7 @@ VCM V1 is successful when:
 - Auto orchestration switches to the target role tab when VCM records `dispatchingAt`, before VCM submits the route-file message.
 - Auto orchestration treats `UserPromptSubmit` as the reliable acceptance confirmation; if confirmation does not arrive, backend PTY retries Enter and records a message `failureReason` after retry exhaustion.
 - Round completion detection waits for the final role in a chained conversation and can alert with prompt plus sound.
-- Translation settings save to `~/.vcm/settings.json`.
+- Translation settings save to `<vcmDataDir>/settings.json`.
 - Translation reads Claude transcript JSONL reliably after start, resume, and restart.
 - Gateway can bind one Weixin DM identity to the desktop VCM instance, send
   translated plain text to PM, and push translated PM replies back to Weixin.

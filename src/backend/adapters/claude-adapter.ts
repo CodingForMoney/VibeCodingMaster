@@ -1,5 +1,5 @@
 import type { RoleName } from "../../shared/types/role.js";
-import type { ClaudeModel, ClaudePermissionMode } from "../../shared/types/session.js";
+import type { ClaudeModel, ClaudePermissionMode, SessionEffort } from "../../shared/types/session.js";
 import { VcmError } from "../errors.js";
 import type { CommandRunner } from "./command-runner.js";
 
@@ -12,7 +12,8 @@ export interface ClaudeAdapter {
     permissionMode?: ClaudePermissionMode,
     claudeSessionId?: string,
     resume?: boolean,
-    model?: ClaudeModel
+    model?: ClaudeModel,
+    effort?: SessionEffort
   ): { command: string; args: string[]; display: string };
 }
 
@@ -35,12 +36,17 @@ export function createClaudeAdapter(runner: CommandRunner): ClaudeAdapter {
 
       return result.stdout.trim();
     },
-    buildRoleStartCommand(role, command = "claude", permissionMode = "default", claudeSessionId, resume = false, model = "default") {
+    buildRoleStartCommand(role, command = "claude", permissionMode = "default", claudeSessionId, resume = false, model = "default", effort = "default") {
       const args = ["--agent", role];
       if (claudeSessionId) {
         args.push(resume ? "--resume" : "--session-id", claudeSessionId);
       }
       args.push("--model", model);
+      if (effort === "ultracode") {
+        args.push("--settings", JSON.stringify({ ultracode: true }));
+      } else if (effort !== "default") {
+        args.push("--effort", effort);
+      }
       if (permissionMode === "bypassPermissions") {
         args.push("--permission-mode", "bypassPermissions");
       }

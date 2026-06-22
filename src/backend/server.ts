@@ -11,6 +11,8 @@ import { createClaudeHookService, type ClaudeHookService } from "./services/clau
 import { createGitAdapter } from "./adapters/git-adapter.js";
 import { createAppSettingsService, type AppSettingsService } from "./services/app-settings-service.js";
 import { createClaudeTranscriptService } from "./services/claude-transcript-service.js";
+import { createGateReviewService, type GateReviewService } from "./services/gate-review-service.js";
+import { createTranslationWorkerService, type TranslationWorkerService } from "./services/translation-worker-service.js";
 import {
   createHarnessService,
   createScriptFixedHarnessInstaller,
@@ -18,8 +20,8 @@ import {
 } from "./services/harness-service.js";
 import { createNodeFileSystemAdapter } from "./adapters/filesystem.js";
 import { createNodePtyTerminalRuntime } from "./runtime/node-pty-runtime.js";
-import { createOpenAiCompatibleTranslationProvider } from "./adapters/translation-provider.js";
 import { registerGatewayRoutes } from "./api/gateway-routes.js";
+import { registerDiagnosticsRoutes } from "./api/diagnostics-routes.js";
 import { createWeixinIlinkChannel } from "./gateway/channels/weixin-ilink-channel.js";
 import { createGatewayAuditLog } from "./gateway/gateway-audit-log.js";
 import { createGatewayService, type GatewayService } from "./gateway/gateway-service.js";
@@ -33,9 +35,12 @@ import { createRoundService, type RoundService } from "./services/round-service.
 import { createStatusService, type StatusService } from "./services/status-service.js";
 import { createTaskService, type TaskService } from "./services/task-service.js";
 import { createTranslationService, type TranslationService } from "./services/translation-service.js";
+import { createDiagnosticsService, type DiagnosticsService } from "./services/diagnostics-service.js";
 import { registerAppSettingsRoutes } from "./api/app-settings-routes.js";
 import { registerArtifactRoutes } from "./api/artifact-routes.js";
 import { registerClaudeHookRoutes } from "./api/claude-hook-routes.js";
+import { registerGateReviewRoutes } from "./api/gate-review-routes.js";
+import { registerTranslationWorkerRoutes } from "./api/translation-worker-routes.js";
 import { registerHarnessRoutes } from "./api/harness-routes.js";
 import { registerMessageRoutes } from "./api/message-routes.js";
 import { registerProjectRoutes } from "./api/project-routes.js";
@@ -64,11 +69,14 @@ export interface ServerDeps {
   commandDispatcher: CommandDispatcher;
   claudeHookService: ClaudeHookService;
   messageService: MessageService;
+  gateReviewService: GateReviewService;
+  translationWorkerService: TranslationWorkerService;
   roundService: RoundService;
   statusService: StatusService;
   translationService: TranslationService;
   gatewayService: GatewayService;
   runtime: TerminalRuntime;
+  diagnosticsService: DiagnosticsService;
 }
 
 export async function createServer(deps: ServerDeps, options: CreateServerOptions = {}): Promise<FastifyInstance> {
@@ -82,17 +90,32 @@ export async function createServer(deps: ServerDeps, options: CreateServerOption
       error: {
         code: vcmError.code,
         message: vcmError.message,
-        hint: vcmError.hint
+        hint: vcmError.hint,
+        runtime: deps.diagnosticsService.getErrorRuntimeInfo()
       }
     });
   });
 
+  registerDiagnosticsRoutes(app, { diagnosticsService: deps.diagnosticsService });
   registerAppSettingsRoutes(app, { appSettings: deps.appSettings });
   registerClaudeHookRoutes(app, { claudeHookService: deps.claudeHookService });
-  registerProjectRoutes(app, { projectService: deps.projectService });
+  registerGateReviewRoutes(app, {
+    projectService: deps.projectService,
+    gateReviewService: deps.gateReviewService
+  });
+  registerTranslationWorkerRoutes(app, {
+    projectService: deps.projectService,
+    translationWorkerService: deps.translationWorkerService,
+    sessionService: deps.sessionService
+  });
+  registerProjectRoutes(app, {
+    projectService: deps.projectService,
+    translationWorkerService: deps.translationWorkerService
+  });
   registerHarnessRoutes(app, {
     projectService: deps.projectService,
-    harnessService: deps.harnessService
+    harnessService: deps.harnessService,
+    taskService: deps.taskService
   });
   registerTaskRoutes(app, {
     projectService: deps.projectService,
@@ -133,10 +156,11 @@ export async function createServer(deps: ServerDeps, options: CreateServerOption
   registerTerminalWs(app, { runtime: deps.runtime });
 
   app.addHook("onReady", async () => {
+    await cleanupRecentTranslationRuntime(deps);
     await deps.gatewayService.start();
   });
   app.addHook("onClose", async () => {
-    deps.gatewayService.stop();
+    await deps.gatewayService.stop();
   });
 
   if (options.staticDir) {
@@ -150,6 +174,13 @@ export async function createServer(deps: ServerDeps, options: CreateServerOption
   }
 
   return app;
+}
+
+async function cleanupRecentTranslationRuntime(deps: Pick<ServerDeps, "projectService" | "translationWorkerService">): Promise<void> {
+  const repoRoots = await deps.projectService.getRecentRepositoryPaths();
+  await Promise.all(repoRoots.map((repoRoot) =>
+    deps.translationWorkerService.cleanupStartupRuntime(repoRoot)
+  ));
 }
 
 export async function startServer(options: CreateServerOptions = {}): Promise<{ url: string; close(): Promise<void> }> {
@@ -182,9 +213,10 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
   const runtime = createNodePtyTerminalRuntime({ fs });
   const registry = createSessionRegistry();
   const artifactService = createArtifactService(fs);
-  const projectService = createProjectService({ fs, git, claude, appSettings });
+  const projectService = createProjectService({ fs, git, appSettings });
   const harnessService = createHarnessService({
     fs,
+    git,
     runtime,
     projectService,
     apiUrl: options.apiUrl,
@@ -220,9 +252,25 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
   });
   const roundService = createRoundService({
     fs,
+    sessionService,
     onSessionStatusChange: async ({ repoRoot, taskSlug, status }) => {
       await taskService.updateTaskStatus(repoRoot, taskSlug, status);
     }
+  });
+  const gateReviewService = createGateReviewService({
+    fs,
+    runner,
+    runtime,
+    projectService,
+    taskService,
+    appSettings,
+    sessionService,
+    roundService
+  });
+  const translationWorkerService = createTranslationWorkerService({
+    fs,
+    runtime,
+    sessionService
   });
   const transcripts = createClaudeTranscriptService();
   const translationService = createTranslationService({
@@ -230,10 +278,10 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     sessionRegistry: registry,
     transcripts,
     sessionService,
+    translationWorkerService,
     fs,
     projectService,
-    appSettings,
-    provider: createOpenAiCompatibleTranslationProvider()
+    appSettings
   });
   const gatewaySettings = createGatewaySettingsService({ fs });
   const gatewayAudit = createGatewayAuditLog({
@@ -262,8 +310,16 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     roundService,
     translationService,
     appSettings,
+    runtime,
     gatewayService,
-    jobGuard: createJobGuardService()
+    jobGuard: createJobGuardService(),
+    translationWorkerService
+  });
+  const diagnosticsService = createDiagnosticsService({
+    appRoot: getAppRoot(),
+    runtime,
+    gatewayService,
+    translationService
   });
 
   return {
@@ -276,11 +332,14 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     commandDispatcher,
     claudeHookService,
     messageService,
+    gateReviewService,
+    translationWorkerService,
     roundService,
     statusService,
     translationService,
     gatewayService,
-    runtime
+    runtime,
+    diagnosticsService
   };
 }
 

@@ -1,10 +1,8 @@
 import type { FastifyInstance } from "fastify";
-import { isRoleName } from "../../shared/constants.js";
+import { isVcmRoleName } from "../../shared/constants.js";
 import type {
   SendTranslatedInputRequest,
-  TranslateUserInputRequest,
-  TranslationSecretSettings,
-  TranslationSettings
+  TranslateUserInputRequest
 } from "../../shared/types/translation.js";
 import { VcmError } from "../errors.js";
 import type { ProjectService } from "../services/project-service.js";
@@ -18,23 +16,6 @@ export interface TranslationRouteDeps {
 }
 
 export function registerTranslationRoutes(app: FastifyInstance, deps: TranslationRouteDeps): void {
-  app.get("/api/translation/settings", async () => {
-    return deps.translationService.getSettings();
-  });
-
-  app.put<{ Body: Partial<TranslationSettings> & TranslationSecretSettings }>("/api/translation/settings", async (request) => {
-    const { apiKey, ...settings } = request.body ?? {};
-    return deps.translationService.updateSettings(settings, apiKey !== undefined ? { apiKey } : undefined);
-  });
-
-  app.get("/api/translation/prompts", async () => {
-    return deps.translationService.getPromptPreviews();
-  });
-
-  app.post("/api/translation/test", async () => {
-    return deps.translationService.testProvider();
-  });
-
   app.post<{ Params: { taskSlug: string; role: string } }>(
     "/api/tasks/:taskSlug/sessions/:role/translation/start",
     async (request) => {
@@ -101,6 +82,12 @@ export function registerTranslationRoutes(app: FastifyInstance, deps: Translatio
     return { ok: true };
   });
 
+  app.post<{ Params: { sessionId: string } }>("/api/translation/sessions/:sessionId/stop", async (request) => {
+    await requireCurrentProject(deps.projectService);
+    await deps.translationService.stopSession(request.params.sessionId);
+    return { ok: true };
+  });
+
   app.post<{ Params: { sessionId: string; translationId: string } }>(
     "/api/translation/sessions/:sessionId/retry/:translationId",
     async (request) => {
@@ -127,7 +114,7 @@ export function registerTranslationRoutes(app: FastifyInstance, deps: Translatio
 }
 
 function parseRole(role: string) {
-  if (!isRoleName(role)) {
+  if (!isVcmRoleName(role)) {
     throw new VcmError({
       code: "UNKNOWN_ROLE",
       message: `Unknown role: ${role}`,

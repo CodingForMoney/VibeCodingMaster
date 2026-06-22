@@ -46,6 +46,54 @@ export const CLAUDE_MODEL_OPTIONS = [
 
 export type ClaudeModel = typeof CLAUDE_MODEL_OPTIONS[number]["value"];
 
+export type SessionModel = ClaudeModel;
+
+const BASE_EFFORT_OPTIONS = [
+  {
+    value: "default",
+    label: "Default",
+    description: "CLI or project default"
+  },
+  {
+    value: "low",
+    label: "Low",
+    description: "Fastest reasoning"
+  },
+  {
+    value: "medium",
+    label: "Medium",
+    description: "Balanced reasoning"
+  },
+  {
+    value: "high",
+    label: "High",
+    description: "Deeper reasoning"
+  },
+  {
+    value: "xhigh",
+    label: "XHigh",
+    description: "Extra high reasoning"
+  }
+] as const;
+
+export const CLAUDE_EFFORT_OPTIONS = [
+  ...BASE_EFFORT_OPTIONS,
+  {
+    value: "max",
+    label: "Max",
+    description: "Maximum reasoning"
+  },
+  {
+    value: "ultracode",
+    label: "Ultracode",
+    description: "Claude Code dynamic workflows with xhigh reasoning"
+  }
+] as const;
+
+export const SESSION_EFFORT_OPTIONS = CLAUDE_EFFORT_OPTIONS;
+
+export type SessionEffort = typeof SESSION_EFFORT_OPTIONS[number]["value"];
+
 export interface RoleSessionRecord {
   id: string;
   claudeSessionId: string;
@@ -56,11 +104,11 @@ export interface RoleSessionRecord {
   activityStatus?: RoleActivityStatus;
   command: string;
   permissionMode: ClaudePermissionMode;
-  model?: ClaudeModel;
+  model?: SessionModel;
+  effort?: SessionEffort;
   cwd: string;
   terminalBackend: "node-pty";
   pid?: number;
-  logPath: string;
   roleCommandPath?: string;
   handoffArtifactPath?: string;
   startedAt?: string;
@@ -69,6 +117,9 @@ export interface RoleSessionRecord {
   lastTurnStartedAt?: string;
   lastTurnEndedAt?: string;
   lastHookEventAt?: string;
+  lastCompactAt?: string;
+  activeTaskSlug?: string;
+  activeTaskRepoRoot?: string;
   exitCode?: number | null;
 }
 
@@ -76,7 +127,7 @@ export interface TaskSessionRecord {
   version: 1;
   taskSlug: string;
   updatedAt: string;
-  roles: Record<RoleName, RoleSessionPointer>;
+  roles: Partial<Record<RoleName, RoleSessionPointer>>;
 }
 
 export interface RoleSessionPointer {
@@ -91,5 +142,6 @@ export interface StartRoleSessionRequest {
   cols?: number;
   rows?: number;
   permissionMode?: ClaudePermissionMode;
-  model?: ClaudeModel;
+  model?: SessionModel;
+  effort?: SessionEffort;
 }
