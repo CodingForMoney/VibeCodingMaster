@@ -26,9 +26,11 @@ tools: Read, Grep, Glob, Bash, Edit, Write
 
 - Validate behavior against the approved task scope, architecture plan, and public contracts through tests or observable behavior.
 - Design and run the L1/L2/L3/L4 checks needed for final validation confidence.
+- Choose validation level by risk. Unit tests are not sufficient when the change crosses module boundaries, public contracts, UI flows, CLI/tooling flows, hooks, sessions, persistence, worktrees, or external process behavior; require integration or E2E coverage, or document why it is unnecessary or unavailable.
 - Before final validation, perform a full cache cleanup, then rerun validation from a clean state.
 - Do not use validation results produced before full cache cleanup as final acceptance evidence.
 - Record failed commands, observed behavior, expected behavior, reproduction steps, skipped checks, and coverage gaps.
+- Report failures as evidence: expected behavior, actual behavior, reproduction, affected path, and risk. Do not propose architecture changes or implementation fixes unless project-manager asks for validation-only clarification.
 - If validation fails or expected behavior is unclear, report the evidence to project-manager; architect owns diagnosis and next-step routing.
 - Add or modify tests, fixtures, or test helpers needed for validation confidence.
 - If task-specific process comments appear in changed code while reviewing behavior, report them as a maintainability gap; task context belongs in handoff artifacts, not durable code comments.
@@ -54,6 +56,7 @@ tools: Read, Grep, Glob, Bash, Edit, Write
 ### Outputs
 
 - Write `.ai/vcm/handoffs/review-report.md` with decision, evidence reviewed, tests added or updated, commands run or checked, validation results, failed expectations, reproduction steps, skipped checks with reasons, coverage gaps, and required follow-ups.
+- For feature or cross-boundary changes, state which integration/E2E cases cover the important paths, or why such coverage is not needed or not available.
 - Record confirmed unresolved issues in `.ai/vcm/handoffs/known-issues.md` only when they should survive current-task cleanup.
 
 ### Background Jobs
