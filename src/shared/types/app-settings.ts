@@ -74,7 +74,7 @@ export function createDefaultLaunchTemplate(): LaunchTemplate {
   const roles = {} as Record<VcmRoleName, RoleLaunchTemplateEntry>;
   for (const role of VCM_ROLE_NAMES) {
     roles[role] = {
-      permissionMode: "default",
+      permissionMode: "bypassPermissions",
       model: "default",
       effort: "default"
     };

@@ -81,11 +81,11 @@ export function App() {
   const [harnessStudioOpen, setHarnessStudioOpen] = useState(false);
   const [repositoryDiffOpen, setRepositoryDiffOpen] = useState(false);
   const [translatorSession, setTranslatorSession] = useState<RoleSessionRecord | null>(null);
-  const [translatorPermissionMode, setTranslatorPermissionMode] = useState<ClaudePermissionMode>("default");
+  const [translatorPermissionMode, setTranslatorPermissionMode] = useState<ClaudePermissionMode>("bypassPermissions");
   const [translatorModel, setTranslatorModel] = useState<SessionModel>("default");
   const [translatorEffort, setTranslatorEffort] = useState<SessionEffort>("medium");
   const [harnessEngineerSession, setHarnessEngineerSession] = useState<RoleSessionRecord | null>(null);
-  const [harnessEngineerPermissionMode, setHarnessEngineerPermissionMode] = useState<ClaudePermissionMode>("default");
+  const [harnessEngineerPermissionMode, setHarnessEngineerPermissionMode] = useState<ClaudePermissionMode>("bypassPermissions");
   const [harnessEngineerModel, setHarnessEngineerModel] = useState<SessionModel>("default");
   const [harnessEngineerEffort, setHarnessEngineerEffort] = useState<SessionEffort>("medium");
   const [launchTemplate, setLaunchTemplate] = useState<LaunchTemplate>(() => createDefaultLaunchTemplate());
@@ -462,12 +462,12 @@ export function App() {
     translatorAutoResumeKeyRef.current = "";
     harnessEngineerAutoResumeKeyRef.current = "";
     setTranslatorSession(null);
-    setTranslatorPermissionMode("default");
+    setTranslatorPermissionMode("bypassPermissions");
     setTranslatorModel("default");
     setTranslatorEffort("medium");
     setTranslationMemoryInitialized(false);
     setHarnessEngineerSession(null);
-    setHarnessEngineerPermissionMode("default");
+    setHarnessEngineerPermissionMode("bypassPermissions");
     setHarnessEngineerModel("default");
     setHarnessEngineerEffort("medium");
     setHarnessStatus(null);

@@ -1859,6 +1859,9 @@ function normalizeClaudePermissionMode(value: unknown): ClaudePermissionMode {
   if (value === "bypassPermissions" || value === "dangerously-skip-permissions") {
     return "bypassPermissions";
   }
+  if (value === "plan") {
+    return "plan";
+  }
   return "default";
 }
 

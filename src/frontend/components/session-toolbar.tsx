@@ -1,5 +1,6 @@
 import type { RoleName } from "../../shared/types/role.js";
 import {
+  CLAUDE_PERMISSION_MODE_OPTIONS,
   CLAUDE_EFFORT_OPTIONS,
   CLAUDE_MODEL_OPTIONS,
   type ClaudePermissionMode,
@@ -57,8 +58,11 @@ export function SessionToolbar({
           value={permissionMode}
           onChange={(event) => onPermissionModeChange(event.target.value as ClaudePermissionMode)}
         >
-          <option value="default">默认</option>
-          <option value="bypassPermissions">bypassPermissions</option>
+          {CLAUDE_PERMISSION_MODE_OPTIONS.map((option) => (
+            <option key={option.value} value={option.value}>
+              {option.label}
+            </option>
+          ))}
         </select>
       </label>
 

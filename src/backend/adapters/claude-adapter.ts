@@ -47,8 +47,8 @@ export function createClaudeAdapter(runner: CommandRunner): ClaudeAdapter {
       } else if (effort !== "default") {
         args.push("--effort", effort);
       }
-      if (permissionMode === "bypassPermissions") {
-        args.push("--permission-mode", "bypassPermissions");
+      if (permissionMode !== "default") {
+        args.push("--permission-mode", permissionMode);
       }
 
       return {

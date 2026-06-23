@@ -4,7 +4,30 @@ export type RoleActivityStatus = "idle" | "running";
 
 export type ClaudePermissionMode =
   | "default"
+  | "plan"
   | "bypassPermissions";
+
+export const CLAUDE_PERMISSION_MODE_OPTIONS = [
+  {
+    value: "bypassPermissions",
+    label: "bypassPermissions",
+    description: "Bypass prompts; recommended in DevContainer worktrees"
+  },
+  {
+    value: "plan",
+    label: "plan",
+    description: "Plan-only permission mode"
+  },
+  {
+    value: "default",
+    label: "default",
+    description: "Claude Code default permission behavior"
+  }
+] as const satisfies ReadonlyArray<{
+  value: ClaudePermissionMode;
+  label: string;
+  description: string;
+}>;
 
 export const CLAUDE_MODEL_OPTIONS = [
   {

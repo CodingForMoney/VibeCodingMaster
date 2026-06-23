@@ -754,8 +754,8 @@ function createTestSessionService(
         } else if (effort !== "default") {
           args.push("--effort", effort);
         }
-        if (permissionMode === "bypassPermissions") {
-          args.push("--permission-mode", "bypassPermissions");
+        if (permissionMode !== "default") {
+          args.push("--permission-mode", permissionMode);
         }
         return { command, args, display: `${command} ${args.join(" ")}` };
       }

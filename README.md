@@ -24,8 +24,9 @@ When Gate Review Gates are enabled for a task, or when a Gate Reviewer session a
 - Optional Gate Reviewer VCM flow role when any Gate Review Gate is enabled.
 - Role session recovery through persisted Claude session ids and `claude --resume`.
 - Permission mode selection before start, resume, or restart:
-  - `default`
   - `bypassPermissions`
+  - `plan`
+  - `default`
 - PM-mediated role messaging through VCM-dispatched route files.
 - Manual and automatic orchestration modes.
 - Two-stage VCM harness setup: deterministic fixed install plus AI-assisted bootstrap.

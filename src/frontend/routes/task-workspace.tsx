@@ -66,13 +66,13 @@ export function TaskWorkspace({
 }: TaskWorkspaceProps) {
   const [statusReport, setStatusReport] = useState<TaskStatusReport | null>(null);
   const [permissionModes, setPermissionModes] = useState<Record<RoleName, ClaudePermissionMode>>({
-    "project-manager": "default",
-    architect: "default",
-    coder: "default",
-    reviewer: "default",
-    "gate-reviewer": "default",
-    translator: "default",
-    "harness-engineer": "default"
+    "project-manager": "bypassPermissions",
+    architect: "bypassPermissions",
+    coder: "bypassPermissions",
+    reviewer: "bypassPermissions",
+    "gate-reviewer": "bypassPermissions",
+    translator: "bypassPermissions",
+    "harness-engineer": "bypassPermissions"
   });
   const [models, setModels] = useState<Record<RoleName, SessionModel>>({
     "project-manager": "default",

@@ -5,6 +5,7 @@ import type {
   HarnessStatusReport
 } from "../../shared/types/harness.js";
 import {
+  CLAUDE_PERMISSION_MODE_OPTIONS,
   CLAUDE_EFFORT_OPTIONS,
   CLAUDE_MODEL_OPTIONS,
   type ClaudePermissionMode,
@@ -52,7 +53,7 @@ export function HarnessPanel({
   onRunBootstrap
 }: HarnessPanelProps) {
   const [showBootstrapTerminal, setShowBootstrapTerminal] = useState(false);
-  const [bootstrapPermissionMode, setBootstrapPermissionMode] = useState<ClaudePermissionMode>("default");
+  const [bootstrapPermissionMode, setBootstrapPermissionMode] = useState<ClaudePermissionMode>("bypassPermissions");
   const [bootstrapModel, setBootstrapModel] = useState<SessionModel>("default");
   const [bootstrapEffort, setBootstrapEffort] = useState<SessionEffort>("default");
   const bootstrapSession = bootstrapStatus?.session;
@@ -245,8 +246,9 @@ export function HarnessPanel({
                   disabled={busy || bootstrapRunning || bootstrapSessionRunning}
                   onChange={(event) => setBootstrapPermissionMode(event.target.value as ClaudePermissionMode)}
                 >
-                  <option value="default">默认</option>
-                  <option value="bypassPermissions">bypassPermissions</option>
+                  {CLAUDE_PERMISSION_MODE_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
                 </select>
               </label>
               <label>

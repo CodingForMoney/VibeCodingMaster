@@ -393,7 +393,7 @@ function normalizeClaudePermissionMode(
   input: unknown,
   fallback: ClaudePermissionMode
 ): ClaudePermissionMode {
-  if (input === "bypassPermissions" || input === "default") {
+  if (input === "bypassPermissions" || input === "plan" || input === "default") {
     return input;
   }
   return fallback;

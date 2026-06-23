@@ -391,8 +391,9 @@ Controls:
 
 Permission modes:
 
-- `default`
 - `bypassPermissions`
+- `plan`
+- `default`
 
 The permission mode applies on the next start/resume/restart. If a session is already running, changing the select does not mutate that live process.
 
