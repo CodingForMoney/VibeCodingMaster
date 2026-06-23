@@ -29,7 +29,7 @@ Summary: <one or two sentences>
 
 Findings must include severity, title, evidence, expected, gap, and risk.
 
-Do not edit code, tests, durable docs, role files, route files, or handoff artifacts. Do not choose owners, fixes, Replan, or user-intervention needs.`;
+Do not run tests. Review only code, architecture, and documents; do not perform validation. Do not edit code, tests, durable docs, role files, route files, or handoff artifacts. Do not choose owners, fixes, Replan, or user-intervention needs.`;
 }
 
 export function renderTranslatorAgentRules(): string {
