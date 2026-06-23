@@ -92,6 +92,7 @@ export interface ProjectDashboardProps {
   onCloseTask(): void;
   onSelectTask(taskSlug: string): void;
   themeMode: ThemeMode;
+  onAutoOrchestrationChange(enabled: boolean): void;
   onThemeModeChange(themeMode: ThemeMode): void;
   flowPauseAlerts: boolean;
   onFlowPauseAlertsChange(enabled: boolean): void;
@@ -159,6 +160,7 @@ export function ProjectDashboard({
   onCloseTask,
   onSelectTask,
   themeMode,
+  onAutoOrchestrationChange,
   onThemeModeChange,
   flowPauseAlerts,
   onFlowPauseAlertsChange,
@@ -261,6 +263,14 @@ export function ProjectDashboard({
             <span>Theme</span>
             <span>{getThemeModeLabel(themeMode)}</span>
           </button>
+          <SwitchControl
+            checked={(orchestration?.mode ?? "auto") === "auto"}
+            className="sidebar-switch"
+            disabled={busy || !activeTaskSlug}
+            label="Auto orchestration"
+            title={activeTaskSlug ? "Automatically dispatch role messages during the active task" : "Create or select a task first"}
+            onChange={onAutoOrchestrationChange}
+          />
           <SwitchControl
             checked={!gatewayStatus?.enabled && flowPauseAlerts}
             className="sidebar-switch"

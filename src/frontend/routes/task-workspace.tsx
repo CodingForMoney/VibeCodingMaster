@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CORE_VCM_ROLE_DEFINITIONS, GATE_REVIEWER_ROLE_DEFINITION, VCM_ROLE_DEFINITIONS } from "../../shared/constants.js";
 import type { TaskStatusReport } from "../../shared/types/api.js";
-import type { VcmOrchestrationMode, VcmOrchestrationState, VcmRoleMessage } from "../../shared/types/message.js";
+import type { VcmOrchestrationState, VcmRoleMessage } from "../../shared/types/message.js";
 import type { CoreVcmRoleName, RoleDefinition, RoleName, VcmRoleName } from "../../shared/types/role.js";
 import type { VcmSessionRoundState } from "../../shared/types/round.js";
 import type { ClaudeModel, ClaudePermissionMode, SessionEffort, SessionModel } from "../../shared/types/session.js";
@@ -9,7 +9,6 @@ import type { LaunchTemplate, TranslationTargetLanguage } from "../../shared/typ
 import type { TaskRecord } from "../../shared/types/task.js";
 import { RoleSessionTabs } from "../components/role-session-tabs.js";
 import { SessionConsole } from "../components/session-console.js";
-import { SwitchControl } from "../components/switch-control.js";
 import { formatUiError } from "../state/error-format.js";
 import { getSessionForRole } from "../state/session-store.js";
 import { apiClient } from "../state/api-client.js";
@@ -323,23 +322,6 @@ export function TaskWorkspace({
     }));
   }
 
-  async function setOrchestrationMode(mode: VcmOrchestrationMode) {
-    setBusy(true);
-    setError("");
-    try {
-      const nextOrchestration = await apiClient.updateOrchestrationState(task.taskSlug, { mode });
-      setOrchestration(nextOrchestration);
-      onOrchestrationChanged?.(nextOrchestration);
-      appendEvent(`auto orchestration ${mode === "auto" ? "enabled" : "disabled"}`);
-    } catch (caught) {
-      setError(formatUiError("Update auto orchestration mode", caught));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  const autoOrchestrationEnabled = (orchestration?.mode ?? "auto") === "auto";
-
   return (
     <div className="task-workspace">
       <header className="workspace-header">
@@ -352,15 +334,6 @@ export function TaskWorkspace({
           sessions={statusReport?.sessions ?? []}
           onSelect={onActiveRoleChange}
         />
-        <div className="workspace-header-actions">
-          <SwitchControl
-            checked={autoOrchestrationEnabled}
-            className="orchestration-switch"
-            disabled={busy}
-            label="Auto orchestration"
-            onChange={(checked) => void setOrchestrationMode(checked ? "auto" : "manual")}
-          />
-        </div>
       </header>
 
       {error ? <div className="error-banner">{error}</div> : null}

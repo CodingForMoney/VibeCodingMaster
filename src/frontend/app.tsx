@@ -1049,6 +1049,17 @@ export function App() {
           }}
           onSelectTask={setActiveTaskSlug}
           themeMode={themeMode}
+          onAutoOrchestrationChange={(enabled) => {
+            void withBusy(async () => {
+              if (!activeTask) {
+                throw new Error("Create or select a task before changing auto orchestration.");
+              }
+              const orchestration = await apiClient.updateOrchestrationState(activeTask.taskSlug, {
+                mode: enabled ? "auto" : "manual"
+              });
+              setActiveOrchestration({ taskSlug: activeTask.taskSlug, orchestration });
+            }, "Update auto orchestration mode");
+          }}
           onThemeModeChange={(nextThemeMode) => {
             setThemeMode(nextThemeMode);
             void withBusy(async () => {

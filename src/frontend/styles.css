@@ -921,7 +921,7 @@ h2 {
 
 .workspace-header {
   display: grid;
-  grid-template-columns: minmax(120px, max-content) minmax(420px, 1fr) auto;
+  grid-template-columns: minmax(120px, max-content) minmax(0, 1fr);
   gap: 10px;
   align-items: center;
   margin-bottom: 6px;
@@ -936,14 +936,6 @@ h2 {
   margin-bottom: 0;
   font-size: 18px;
   line-height: 1.15;
-}
-
-.workspace-header-actions {
-  display: flex;
-  gap: 8px;
-  align-items: center;
-  justify-content: flex-end;
-  min-width: max-content;
 }
 
 .role-tabs {
@@ -1129,12 +1121,6 @@ h2 {
   min-height: 24px;
   padding: 1px 7px;
   font-size: 11px;
-}
-
-.orchestration-switch {
-  width: 250px;
-  min-height: 30px;
-  font-size: 12px;
 }
 
 .session-console-body {
