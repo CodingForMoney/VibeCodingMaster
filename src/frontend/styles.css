@@ -730,22 +730,9 @@ h2 {
   white-space: nowrap;
 }
 
-.switch-control-action {
-  display: inline-flex;
-  gap: 8px;
-  align-items: center;
-  justify-self: end;
-}
-
-.switch-control-state {
-  color: #697476;
-  font-size: 11px;
-  font-weight: 800;
-  text-transform: uppercase;
-}
-
 .switch-control-track {
   position: relative;
+  justify-self: end;
   width: 38px;
   height: 20px;
   border-radius: 999px;
@@ -768,10 +755,6 @@ h2 {
 .switch-control.is-on {
   border-color: #2f7e84;
   background: #e8f4f2;
-  color: #145e64;
-}
-
-.switch-control.is-on .switch-control-state {
   color: #145e64;
 }
 
@@ -3307,10 +3290,6 @@ h2 {
   background: #1a2530;
 }
 
-:root[data-theme="dark"] .switch-control-state {
-  color: #8b949e;
-}
-
 :root[data-theme="dark"] .switch-control-track {
   background: #3d4652;
 }
@@ -3324,10 +3303,6 @@ h2 {
   border-color: #56d4dd;
   background: #10262b;
   color: #d6fbff;
-}
-
-:root[data-theme="dark"] .switch-control.is-on .switch-control-state {
-  color: #9debf2;
 }
 
 :root[data-theme="dark"] .switch-control.is-on .switch-control-track {
