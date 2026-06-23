@@ -4,6 +4,7 @@ import type { HarnessBootstrapStatusReport, HarnessFileStatus, HarnessStatusRepo
 import type { HarnessFileContent } from "../../shared/types/harness.js";
 import type { ClaudePermissionMode, RoleSessionRecord, SessionEffort, SessionModel } from "../../shared/types/session.js";
 import { apiClient } from "../state/api-client.js";
+import { formatUiError } from "../state/error-format.js";
 import { XtermView } from "../terminal/xterm-view.js";
 import { SessionToolbar } from "./session-toolbar.js";
 import { StatusBadge } from "./status-badge.js";
@@ -99,7 +100,7 @@ export function HarnessStudioModal({
       })
       .catch((error: Error) => {
         if (!cancelled) {
-          setFileError(error.message);
+          setFileError(formatUiError(`Load harness file ${selectedPath}`, error));
         }
       })
       .finally(() => {
@@ -127,7 +128,7 @@ export function HarnessStudioModal({
       setEditingFile(false);
       onRefresh();
     } catch (error) {
-      setFileError(error instanceof Error ? error.message : String(error));
+      setFileError(formatUiError(`Save harness file ${selectedFile.path}`, error));
     } finally {
       setFileBusy(false);
     }
@@ -142,11 +143,16 @@ export function HarnessStudioModal({
   }
 
   async function copyHarnessFilePath(filePath: string) {
-    await writeClipboardText(filePath);
-    setCopiedPath(filePath);
-    window.setTimeout(() => {
-      setCopiedPath((current) => current === filePath ? null : current);
-    }, 1200);
+    setFileError(null);
+    try {
+      await writeClipboardText(filePath);
+      setCopiedPath(filePath);
+      window.setTimeout(() => {
+        setCopiedPath((current) => current === filePath ? null : current);
+      }, 1200);
+    } catch (error) {
+      setFileError(formatUiError(`Copy harness file path ${filePath}`, error));
+    }
   }
 
   if (!open) {

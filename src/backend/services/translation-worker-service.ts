@@ -320,7 +320,7 @@ export function createTranslationWorkerService(deps: TranslationWorkerServiceDep
       const failedAt = now();
       for (const item of failedItems) {
         item.status = "failed";
-        item.error = error instanceof Error ? error.message : "Failed to dispatch Translator task.";
+        item.error = describeWorkerError(error, "Dispatch Translator task failed.");
         item.updatedAt = failedAt;
       }
       queue.activeItemId = undefined;
@@ -553,7 +553,7 @@ export function createTranslationWorkerService(deps: TranslationWorkerServiceDep
       }
     } catch (error) {
       active.status = "failed";
-      active.error = error instanceof Error ? error.message : "Failed to finalize translation output.";
+      active.error = describeWorkerError(error, "Finalize translation output failed.");
       active.updatedAt = now();
       queue.updatedAt = active.updatedAt;
       await saveQueue(repoRoot, queue);
@@ -2135,4 +2135,21 @@ function invalidResult(message: string): VcmError {
     message,
     statusCode: 422
   });
+}
+
+function describeWorkerError(error: unknown, fallback: string): string {
+  if (error instanceof Error) {
+    return error.message || fallback;
+  }
+  if (typeof error === "string" && error.trim()) {
+    return `${fallback} Reason: ${error}`;
+  }
+  if (error === undefined) {
+    return fallback;
+  }
+  try {
+    return `${fallback} Non-Error value: ${JSON.stringify(error)}`;
+  } catch {
+    return `${fallback} Non-Error value: ${String(error)}`;
+  }
 }

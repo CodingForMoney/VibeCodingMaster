@@ -44,6 +44,7 @@ import type { DispatchableRole, RoleName } from "../../shared/types/role.js";
 import type { VcmSessionRoundState } from "../../shared/types/round.js";
 import type { RoleSessionRecord, StartRoleSessionRequest } from "../../shared/types/session.js";
 import type { CleanupTaskRequest, CleanupTaskResult, CreateTaskRequest, TaskRecord } from "../../shared/types/task.js";
+import { errorReason } from "./error-format.js";
 import type {
   TranslationBootstrapRun,
   FileTranslationJob,
@@ -474,13 +475,51 @@ async function request<T>(url: string, init: RequestInit = {}): Promise<T> {
     headers.set("content-type", "application/json");
   }
 
-  const response = await fetch(url, {
-    ...init,
-    headers
-  });
+  const method = (init.method ?? "GET").toUpperCase();
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      ...init,
+      headers
+    });
+  } catch (error) {
+    throw new Error(`${method} ${url} could not reach the VCM backend. Reason: ${errorReason(error)}`);
+  }
 
   if (!response.ok) {
-    const payload = await response.json().catch(() => null) as {
+    const rawBody = await response.text().catch(() => "");
+    const payload = parseErrorPayload(rawBody);
+    const statusText = response.statusText ? `${response.status} ${response.statusText}` : String(response.status);
+    const backendReason = payload?.error?.hint
+      ? `${payload.error.message ?? "Backend error."} ${payload.error.hint}`
+      : payload?.error?.message;
+    const bodyReason = backendReason ?? formatNonJsonErrorBody(rawBody);
+    const runtime = payload?.error?.runtime;
+    const runtimeSuffix = runtime
+      ? ` [backend ${runtime.version ?? "unknown"} pid=${runtime.pid ?? "unknown"} cwd=${runtime.cwd ?? "unknown"}]`
+      : "";
+    throw new Error(`${method} ${url} returned HTTP ${statusText}. ${bodyReason}${runtimeSuffix}`);
+  }
+
+  return response.json() as Promise<T>;
+}
+
+function parseErrorPayload(rawBody: string): {
+  error?: {
+    message?: string;
+    hint?: string;
+    runtime?: {
+      version?: string;
+      pid?: number;
+      cwd?: string;
+    };
+  };
+} | null {
+  if (!rawBody.trim()) {
+    return null;
+  }
+  try {
+    return JSON.parse(rawBody) as {
       error?: {
         message?: string;
         hint?: string;
@@ -490,16 +529,16 @@ async function request<T>(url: string, init: RequestInit = {}): Promise<T> {
           cwd?: string;
         };
       };
-    } | null;
-    const message = payload?.error?.hint
-      ? `${payload.error.message} ${payload.error.hint}`
-      : payload?.error?.message ?? `Request failed: ${response.status}`;
-    const runtime = payload?.error?.runtime;
-    const runtimeSuffix = runtime
-      ? ` [backend ${runtime.version ?? "unknown"} pid=${runtime.pid ?? "unknown"} cwd=${runtime.cwd ?? "unknown"}]`
-      : "";
-    throw new Error(`${message}${runtimeSuffix}`);
+    };
+  } catch {
+    return null;
   }
+}
 
-  return response.json() as Promise<T>;
+function formatNonJsonErrorBody(rawBody: string): string {
+  const trimmed = rawBody.trim();
+  if (!trimmed) {
+    return "The response body was empty.";
+  }
+  return `Non-JSON response body: ${trimmed.slice(0, 500)}`;
 }

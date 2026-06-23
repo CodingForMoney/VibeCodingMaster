@@ -7,6 +7,7 @@ import type {
   RepositoryDiffReport
 } from "../../shared/types/harness.js";
 import { apiClient } from "../state/api-client.js";
+import { formatUiError } from "../state/error-format.js";
 
 export interface RepositoryDiffModalProps {
   open: boolean;
@@ -42,7 +43,7 @@ export function RepositoryDiffModal({ open, taskSlug, onClose }: RepositoryDiffM
           : nextReport.files[0]?.path ?? null
       );
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : String(caught));
+      setError(formatUiError(commitSha ? `Load commit diff ${commitSha}` : "Load latest commit diff", caught));
     } finally {
       setBusy(false);
     }

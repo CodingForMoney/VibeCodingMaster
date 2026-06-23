@@ -2,6 +2,7 @@ import type {
   ClientTerminalMessage,
   ServerTerminalMessage
 } from "../../shared/types/terminal.js";
+import { errorReason } from "../state/error-format.js";
 
 export interface TerminalClientHandlers {
   onOutput(data: string): void;
@@ -14,10 +15,17 @@ export class TerminalClient {
 
   constructor(sessionId: string, handlers: TerminalClientHandlers) {
     const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-    this.socket = new WebSocket(`${protocol}//${window.location.host}/ws/terminal/${encodeURIComponent(sessionId)}`);
+    const terminalUrl = `${protocol}//${window.location.host}/ws/terminal/${encodeURIComponent(sessionId)}`;
+    this.socket = new WebSocket(terminalUrl);
 
     this.socket.addEventListener("message", (event) => {
-      const message = JSON.parse(event.data as string) as ServerTerminalMessage;
+      let message: ServerTerminalMessage;
+      try {
+        message = JSON.parse(event.data as string) as ServerTerminalMessage;
+      } catch (error) {
+        handlers.onError?.(`Terminal message parse failed for session ${sessionId}. Reason: ${errorReason(error)}`);
+        return;
+      }
       if (message.type === "output") {
         handlers.onOutput(message.data);
       } else if (message.type === "error") {
@@ -28,7 +36,7 @@ export class TerminalClient {
     });
 
     this.socket.addEventListener("error", () => {
-      handlers.onError?.("Terminal connection failed.");
+      handlers.onError?.(`Terminal WebSocket connection failed for session ${sessionId}. URL: ${terminalUrl}. Check that the VCM backend is running and the session still exists.`);
     });
   }
 

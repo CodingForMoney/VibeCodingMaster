@@ -352,7 +352,7 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
     const replaySince = getTranscriptReplaySince(roleSession);
     state.unsubscribeTranscript = deps.transcripts.subscribeToRoleSession(roleSession, (event) => {
       void handleTranscriptEvent(roleSession.id, event).catch((error) => {
-        publishError(roleSession.id, error instanceof Error ? error.message : "Translation failed.");
+        publishError(roleSession.id, normalizeTranslationError(error, "Process Claude transcript event for translation failed."));
       });
     }, {
       onError(error) {
@@ -496,13 +496,13 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
     }
     if (delayMs <= 0) {
       void flushClaudeOutputTranslations(sessionId).catch((error) => {
-        publishError(sessionId, error instanceof Error ? error.message : "Translation failed.");
+        publishError(sessionId, normalizeTranslationError(error, "Flush batched Claude output translations failed."));
       });
       return;
     }
     state.outputBatch.timer = setTimeout(() => {
       void flushClaudeOutputTranslations(sessionId).catch((error) => {
-        publishError(sessionId, error instanceof Error ? error.message : "Translation failed.");
+        publishError(sessionId, normalizeTranslationError(error, "Flush delayed Claude output translations failed."));
       });
     }, delayMs);
   }
@@ -575,7 +575,7 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
       }
       publishStatus(sessionId, hasFailure ? "failed" : "ready");
     }).catch((error) => {
-      publishError(sessionId, error instanceof Error ? error.message : "Translation failed.");
+      publishError(sessionId, normalizeTranslationError(error, "Run queued Claude output translation failed."));
     });
   }
 
@@ -583,7 +583,7 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
     const failed = {
       ...entry,
       status: "failed" as TranslationStatus,
-      error: error instanceof Error ? error.message : "Translation failed.",
+      error: normalizeTranslationError(error, "Claude output translation failed."),
       completedAt: now()
     };
     replaceEntry(sessionId, failed);
@@ -675,7 +675,7 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
       taskSlug: entry.taskSlug,
       role: entry.role,
       sourceText: entry.sourceText,
-      error: entry.error ?? "Translation failed.",
+      error: entry.error ?? "Translation failure reason was not recorded.",
       failedAt: entry.completedAt ?? now(),
       retryCount: existing?.retryCount ?? 0,
       lastRetryAt: existing?.lastRetryAt
@@ -746,7 +746,7 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
       taskSlug: original.taskSlug,
       role: original.role,
       sourceText: original.sourceText,
-      error: original.error ?? "Translation failed.",
+      error: original.error ?? "Translation failure reason was not recorded.",
       failedAt: original.completedAt ?? now(),
       retryCount: 0
     };
@@ -989,7 +989,7 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
         const failed: TranslationEntry = {
           ...entry,
           status: "failed",
-          error: normalizeTranslationError(error),
+          error: normalizeTranslationError(error, "Composer input translation failed."),
           completedAt: now()
         };
         if (roleSession) {
@@ -997,7 +997,7 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
         }
         throw new VcmError({
           code: "TRANSLATION_FAILED",
-          message: failed.error ?? "Translation failed.",
+          message: failed.error ?? "Composer input translation failed.",
           statusCode: 502
         });
       }
@@ -1464,6 +1464,22 @@ function getTranslationCachePath(
   return path.join(repoRoot, stateRoot, "translation", taskSlug, role, `${sessionId}.jsonl`);
 }
 
-function normalizeTranslationError(error: unknown): string {
-  return error instanceof Error ? error.message : "Translation failed.";
+function normalizeTranslationError(
+  error: unknown,
+  fallback = "Translation failed before VCM could identify the failing stage."
+): string {
+  if (error instanceof Error) {
+    return error.message || fallback;
+  }
+  if (typeof error === "string" && error.trim()) {
+    return `${fallback} Reason: ${error}`;
+  }
+  if (error === undefined) {
+    return fallback;
+  }
+  try {
+    return `${fallback} Non-Error value: ${JSON.stringify(error)}`;
+  } catch {
+    return `${fallback} Non-Error value: ${String(error)}`;
+  }
 }

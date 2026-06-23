@@ -17,6 +17,7 @@ import type {
 } from "../../shared/types/translation.js";
 import { TRANSLATION_ENTRY_RETENTION_LIMIT } from "../../shared/types/translation.js";
 import { apiClient } from "../state/api-client.js";
+import { formatUiError } from "../state/error-format.js";
 
 type TranslationPanelStatus = TranslationSessionStatus;
 const TRANSLATED_COMPOSER_SEPARATOR = "\n\n--- Translation ---\n";
@@ -90,7 +91,7 @@ export function TranslationPanel({
         }
       } catch (caught) {
         if (!cancelled) {
-          setError(caught instanceof Error ? caught.message : "Translation poll failed.");
+          setError(formatUiError("Poll conversation translation events", caught));
         }
       } finally {
         schedule();
@@ -108,7 +109,7 @@ export function TranslationPanel({
       })
       .catch((caught) => {
         if (!cancelled) {
-          setError(caught instanceof Error ? caught.message : "Translation start failed.");
+          setError(formatUiError("Start conversation translation session", caught));
         }
       });
 
@@ -167,7 +168,7 @@ export function TranslationPanel({
         setComposerIsEnglishDraft(true);
       }
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Translation failed.");
+      setError(formatUiError("Translate composer input", caught));
     } finally {
       setBusy(false);
     }
@@ -182,7 +183,7 @@ export function TranslationPanel({
       if (event.type === "status") {
         setStatus(event.status);
       } else if (event.type === "error") {
-        setError(event.message);
+        setError(formatUiError("Process translation session event", event.message));
       } else if (event.type === "failures") {
         setFailures(event.failures);
       }
@@ -218,7 +219,7 @@ export function TranslationPanel({
       setComposer("");
       setComposerIsEnglishDraft(false);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Failed to send English input.");
+      setError(formatUiError("Send translated English input to role", caught));
     } finally {
       setBusy(false);
     }
@@ -242,7 +243,7 @@ export function TranslationPanel({
     setEntries([]);
     setFailures([]);
     cursorRef.current = 1;
-    await apiClient.clearTranslationSession(sessionId).catch((caught: Error) => setError(caught.message));
+    await apiClient.clearTranslationSession(sessionId).catch((caught: Error) => setError(formatUiError("Clear conversation translation panel", caught)));
   }
 
   async function ignoreFailures() {
@@ -252,7 +253,7 @@ export function TranslationPanel({
       const result = await apiClient.ignoreTranslationFailures(sessionId);
       setFailures(result.failures);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Failed to ignore translation failures.");
+      setError(formatUiError("Ignore failed conversation translations", caught));
     } finally {
       setBusy(false);
     }
@@ -265,7 +266,7 @@ export function TranslationPanel({
       const result = await apiClient.retryTranslationFailures(sessionId);
       setFailures(result.failures);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Failed to retry translation failures.");
+      setError(formatUiError("Retry failed conversation translations", caught));
     } finally {
       setBusy(false);
     }
@@ -411,7 +412,7 @@ export function FileTranslationModalHost({
         setSelectedFileReport(result.report);
       }
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Failed to load file translations.");
+      setError(formatUiError("Load file translation list", caught));
     }
   }
 
@@ -424,7 +425,7 @@ export function FileTranslationModalHost({
       setSelectedFileOutput(result.output);
       setSelectedFileReport(result.report);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Failed to read translated file.");
+      setError(formatUiError(`Read translated file ${jobId}`, caught));
     }
   }
 
@@ -446,7 +447,7 @@ export function FileTranslationModalHost({
       setFileBrowserPath(result.currentPath);
       setFileBrowserQuery(query);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Failed to browse source files.");
+      setError(formatUiError("Browse translation source files", caught));
     } finally {
       setFileBrowserBusy(false);
     }
@@ -472,7 +473,7 @@ export function FileTranslationModalHost({
       await refreshTranslationState();
       await selectFileJob(job.id);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Failed to create file translation.");
+      setError(formatUiError(`Create file translation for ${normalizedSourcePath}`, caught));
     } finally {
       setBusy(false);
     }

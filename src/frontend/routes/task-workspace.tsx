@@ -10,6 +10,7 @@ import type { TaskRecord } from "../../shared/types/task.js";
 import { RoleSessionTabs } from "../components/role-session-tabs.js";
 import { SessionConsole } from "../components/session-console.js";
 import { SwitchControl } from "../components/switch-control.js";
+import { formatUiError } from "../state/error-format.js";
 import { getSessionForRole } from "../state/session-store.js";
 import { apiClient } from "../state/api-client.js";
 import { selectAutoDispatchRole } from "../state/message-navigation.js";
@@ -153,7 +154,7 @@ export function TaskWorkspace({
   }, [applyFetchedState, task.taskSlug]);
 
   useEffect(() => {
-    void refresh().catch((caught: Error) => setError(caught.message));
+    void refresh().catch((caught: Error) => setError(formatUiError("Load task workspace state", caught)));
   }, [refresh, refreshNonce]);
 
   useEffect(() => {
@@ -194,7 +195,7 @@ export function TaskWorkspace({
     taskStatusSyncKeyRef.current = fetchedKey;
     void onTaskChanged().catch((caught: Error) => {
       taskStatusSyncKeyRef.current = "";
-      setError(caught.message);
+      setError(formatUiError("Refresh task list after task status changed", caught));
     });
   }, [onTaskChanged, statusReport?.task, task]);
 
@@ -241,7 +242,7 @@ export function TaskWorkspace({
         .then(([nextStatusReport, nextMessages, nextOrchestration, nextRoundState]) => {
           applyFetchedState(nextStatusReport, nextMessages, nextOrchestration, nextRoundState);
         })
-        .catch((caught: Error) => setError(caught.message));
+        .catch((caught: Error) => setError(formatUiError("Poll task workspace state", caught)));
     }, 3000);
 
     return () => window.clearInterval(interval);
@@ -267,7 +268,7 @@ export function TaskWorkspace({
         })
         .catch((caught: Error) => {
           if (!cancelled) {
-            setError(caught.message);
+            setError(formatUiError("Poll role message routing state", caught));
           }
         })
         .finally(() => {
@@ -281,7 +282,7 @@ export function TaskWorkspace({
     };
   }, [applyMessageState, task.taskSlug]);
 
-  async function runAction(action: () => Promise<void>) {
+  async function runAction(action: () => Promise<void>, actionLabel = "Run role session action") {
     setBusy(true);
     setError("");
     try {
@@ -289,7 +290,7 @@ export function TaskWorkspace({
       await refresh();
       await onTaskChanged();
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Action failed.");
+      setError(formatUiError(actionLabel, caught));
     } finally {
       setBusy(false);
     }
@@ -326,7 +327,7 @@ export function TaskWorkspace({
       appendEvent(`closed ${task.taskSlug}`);
       await onTaskChanged();
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Close task failed.");
+      setError(formatUiError("Close task", caught));
     } finally {
       setBusy(false);
     }
@@ -370,7 +371,7 @@ export function TaskWorkspace({
       onOrchestrationChanged?.(nextOrchestration);
       appendEvent(`auto orchestration ${mode === "auto" ? "enabled" : "disabled"}`);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Failed to update orchestration mode.");
+      setError(formatUiError("Update auto orchestration mode", caught));
     } finally {
       setBusy(false);
     }
@@ -443,7 +444,7 @@ export function TaskWorkspace({
                         effort: efforts[role]
                       });
                       appendEvent(`started ${role} with ${permissionModes[role]} / ${models[role]} / ${efforts[role]}`);
-                    })}
+                    }, `Start ${role} session`)}
                     onResume={() => void runAction(async () => {
                       await apiClient.resumeRoleSession(task.taskSlug, role, {
                         cols: 100,
@@ -453,11 +454,11 @@ export function TaskWorkspace({
                         effort: efforts[role]
                       });
                       appendEvent(`resumed ${role} with ${permissionModes[role]} / ${models[role]} / ${efforts[role]}`);
-                    })}
+                    }, `Resume ${role} session`)}
                     onStop={() => void runAction(async () => {
                       await apiClient.stopRoleSession(task.taskSlug, role);
                       appendEvent(`stopped ${role}`);
-                    })}
+                    }, `Stop ${role} session`)}
                     onRestart={() => void runAction(async () => {
                       await apiClient.restartRoleSession(task.taskSlug, role, {
                         cols: 100,
@@ -467,11 +468,11 @@ export function TaskWorkspace({
                         effort: efforts[role]
                       });
                       appendEvent(`restarted ${role} with ${permissionModes[role]} / ${models[role]} / ${efforts[role]}`);
-                    })}
+                    }, `Restart ${role} session`)}
                     onNotifyHarnessUpdated={() => void runAction(async () => {
                       await apiClient.notifyRoleHarnessUpdated(task.taskSlug, role);
                       appendEvent(`notified ${role} to reload latest harness`);
-                    })}
+                    }, `Notify ${role} to reload harness`)}
                     onTerminalEvent={(message) => appendEvent(`${definition.label}: ${message}`)}
                   />
                 </div>

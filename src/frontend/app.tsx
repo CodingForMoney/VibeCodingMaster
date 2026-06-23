@@ -38,6 +38,7 @@ import { TranslatorSessionModal } from "./components/translator-session-modal.js
 import { FileTranslationModalHost } from "./components/translation-panel.js";
 import { selectActiveTask } from "./state/app-store.js";
 import { apiClient } from "./state/api-client.js";
+import { formatUiError } from "./state/error-format.js";
 import { buildOneClickRoleLaunches } from "./state/one-click-start.js";
 import { ProjectDashboard } from "./routes/project-dashboard.js";
 import { TaskWorkspace, type TaskWorkspaceLaunchState } from "./routes/task-workspace.js";
@@ -393,7 +394,7 @@ export function App() {
           await loadTasks();
         }
       })
-      .catch((caught: Error) => setError(caught.message));
+      .catch((caught: Error) => setError(formatUiError("Load initial app data", caught)));
   }, [applyPreferences]);
 
   useEffect(() => {
@@ -424,7 +425,7 @@ export function App() {
     disableFlowPauseAlerts();
     void apiClient.updateAppPreferences({ flowPauseAlerts: false })
       .then((preferences) => applyPreferences(preferences))
-      .catch((caught: Error) => setError(caught.message));
+      .catch((caught: Error) => setError(formatUiError("Disable flow pause alerts while Gateway is enabled", caught)));
   }, [applyPreferences, disableFlowPauseAlerts, flowPauseAlerts, gatewayStatus?.enabled]);
 
   useEffect(() => {
@@ -454,7 +455,7 @@ export function App() {
         if (gatewayContextSyncKeyRef.current === syncKey) {
           gatewayContextSyncKeyRef.current = "";
         }
-        setError(caught.message);
+        setError(formatUiError("Sync Gateway active project/task", caught));
       });
   }, [
     activeTask?.taskSlug,
@@ -470,7 +471,7 @@ export function App() {
       return;
     }
 
-    void refreshGateReviewState(activeTask.taskSlug).catch((caught: Error) => setError(caught.message));
+    void refreshGateReviewState(activeTask.taskSlug).catch((caught: Error) => setError(formatUiError("Refresh Gate Review state", caught)));
   }, [activeTask?.taskSlug]);
 
   useEffect(() => {
@@ -499,9 +500,9 @@ export function App() {
       return;
     }
 
-    void refreshHarnessFeedbackState(activeTask?.taskSlug).catch((caught: Error) => setError(caught.message));
+    void refreshHarnessFeedbackState(activeTask?.taskSlug).catch((caught: Error) => setError(formatUiError("Refresh Harness feedback state", caught)));
     const interval = window.setInterval(() => {
-      void refreshHarnessFeedbackState(activeTask?.taskSlug).catch((caught: Error) => setError(caught.message));
+      void refreshHarnessFeedbackState(activeTask?.taskSlug).catch((caught: Error) => setError(formatUiError("Poll Harness feedback state", caught)));
     }, 4000);
     return () => window.clearInterval(interval);
   }, [activeTask?.taskSlug, project?.repoRoot]);
@@ -512,11 +513,11 @@ export function App() {
       return;
     }
 
-    void refreshTranslatorSession({ syncLaunchOptions: true }).catch((caught: Error) => setError(caught.message));
-    void refreshTranslationMemoryInitialized().catch((caught: Error) => setError(caught.message));
+    void refreshTranslatorSession({ syncLaunchOptions: true }).catch((caught: Error) => setError(formatUiError("Load Translator session", caught)));
+    void refreshTranslationMemoryInitialized().catch((caught: Error) => setError(formatUiError("Load translation memory status", caught)));
     const interval = window.setInterval(() => {
-      void refreshTranslatorSession().catch((caught: Error) => setError(caught.message));
-      void refreshTranslationMemoryInitialized().catch((caught: Error) => setError(caught.message));
+      void refreshTranslatorSession().catch((caught: Error) => setError(formatUiError("Poll Translator session", caught)));
+      void refreshTranslationMemoryInitialized().catch((caught: Error) => setError(formatUiError("Poll translation memory status", caught)));
     }, 3000);
     return () => window.clearInterval(interval);
   }, [project?.repoRoot]);
@@ -526,9 +527,9 @@ export function App() {
       return;
     }
 
-    void refreshHarnessEngineerSession({ syncLaunchOptions: true }).catch((caught: Error) => setError(caught.message));
+    void refreshHarnessEngineerSession({ syncLaunchOptions: true }).catch((caught: Error) => setError(formatUiError("Load Harness Engineer session", caught)));
     const interval = window.setInterval(() => {
-      void refreshHarnessEngineerSession().catch((caught: Error) => setError(caught.message));
+      void refreshHarnessEngineerSession().catch((caught: Error) => setError(formatUiError("Poll Harness Engineer session", caught)));
     }, 3000);
     return () => window.clearInterval(interval);
   }, [project?.repoRoot]);
@@ -557,7 +558,7 @@ export function App() {
         setHarnessEngineerSession(session);
         syncHarnessEngineerLaunchOptions(session);
       })
-      .catch((caught: Error) => setError(caught.message));
+      .catch((caught: Error) => setError(formatUiError("Resume Harness Engineer session", caught)));
   }, [
     activeTask?.taskSlug,
     harnessEngineerSession?.claudeSessionId,
@@ -590,7 +591,7 @@ export function App() {
         setHarnessEngineerSession(session);
         syncHarnessEngineerLaunchOptions(session);
       })
-      .catch((caught: Error) => setError(caught.message));
+      .catch((caught: Error) => setError(formatUiError("Move Harness Engineer session to active task worktree", caught)));
   }, [
     activeTask?.taskSlug,
     activeTask?.worktreePath,
@@ -631,7 +632,7 @@ export function App() {
       })
       .catch((caught: Error) => {
         translatorAutoResumeKeyRef.current = "";
-        setError(caught.message);
+        setError(formatUiError("Resume Translator session", caught));
       });
   }, [
     activeTask?.taskSlug,
@@ -669,7 +670,7 @@ export function App() {
         setTranslatorSession(session);
         syncTranslatorLaunchOptions(session);
       })
-      .catch((caught: Error) => setError(caught.message));
+      .catch((caught: Error) => setError(formatUiError("Move Translator session to active task worktree", caught)));
   }, [
     activeTask?.taskSlug,
     activeTask?.worktreePath,
@@ -696,12 +697,12 @@ export function App() {
     void Promise.all([
       loadHarnessStatus(taskSlug),
       loadHarnessBootstrapStatus(taskSlug)
-    ]).catch((caught: Error) => setError(caught.message));
+    ]).catch((caught: Error) => setError(formatUiError("Load VCM Harness status", caught)));
     const interval = window.setInterval(() => {
       void Promise.all([
         loadHarnessStatus(taskSlug),
         loadHarnessBootstrapStatus(taskSlug)
-      ]).catch((caught: Error) => setError(caught.message));
+      ]).catch((caught: Error) => setError(formatUiError("Poll VCM Harness status", caught)));
     }, 3000);
     return () => window.clearInterval(interval);
   }, [project?.repoRoot, activeTask?.taskSlug]);
@@ -724,7 +725,7 @@ export function App() {
       })
       .catch((caught: Error) => {
         translatorEnsureKeyRef.current = "";
-        setError(caught.message);
+        setError(formatUiError("Ensure Translator session for active task", caught));
       });
   }, [project?.repoRoot, activeTask?.taskSlug, translationEnabled, translationBaseReady, translatorSessionRunning]);
 
@@ -735,19 +736,19 @@ export function App() {
 
     const taskSlug = activeTask.taskSlug;
     const interval = window.setInterval(() => {
-      void refreshGateReviewState(taskSlug).catch((caught: Error) => setError(caught.message));
+      void refreshGateReviewState(taskSlug).catch((caught: Error) => setError(formatUiError("Poll Gate Review state", caught)));
     }, 3000);
 
     return () => window.clearInterval(interval);
   }, [activeTask?.taskSlug]);
 
-  async function withBusy(action: () => Promise<void>) {
+  async function withBusy(action: () => Promise<void>, actionLabel = "Run UI action") {
     setBusy(true);
     setError("");
     try {
       await action();
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Action failed.");
+      setError(formatUiError(actionLabel, caught));
     } finally {
       setBusy(false);
     }
@@ -810,15 +811,15 @@ export function App() {
               loadTasks(),
               loadRecentRepositoryPaths()
             ]);
-          })}
+          }, "Connect repository")}
           onRefreshConnectedRepository={() => withBusy(async () => {
             const nextProject = await apiClient.getCurrentProject();
             setProject(nextProject);
-          })}
+          }, "Refresh connected repository")}
           onPullConnectedRepository={() => withBusy(async () => {
             const nextProject = await apiClient.pullCurrentProject();
             setProject(nextProject);
-          })}
+          }, "Pull connected repository")}
           onRefreshHarness={() => withBusy(async () => {
             if (!activeTask) {
               throw new Error("Create or select a task before refreshing VCM Harness.");
@@ -828,7 +829,7 @@ export function App() {
               loadHarnessStatus(activeTask.taskSlug),
               loadHarnessBootstrapStatus(activeTask.taskSlug)
             ]);
-          })}
+          }, "Refresh VCM Harness")}
           onApplyHarness={() => withBusy(async () => {
             if (!activeTask) {
               throw new Error("Create or select a task before applying VCM Harness.");
@@ -839,7 +840,7 @@ export function App() {
               loadHarnessStatus(activeTask.taskSlug),
               loadHarnessBootstrapStatus(activeTask.taskSlug)
             ]);
-          })}
+          }, "Apply VCM Harness")}
           onStartHarnessBootstrap={(input) => withBusy(async () => {
             if (!activeTask) {
               throw new Error("Create or select a task before starting Harness Bootstrap.");
@@ -853,7 +854,7 @@ export function App() {
             setHarnessBootstrapStatus(result.status);
             setHarnessBootstrapStatusTaskSlug(activeTask.taskSlug);
             await refreshHarnessEngineerSession({ syncLaunchOptions: true });
-          })}
+          }, "Start Harness Bootstrap")}
           onRestartHarnessBootstrap={(input) => withBusy(async () => {
             if (!activeTask) {
               throw new Error("Create or select a task before restarting Harness Bootstrap.");
@@ -867,13 +868,13 @@ export function App() {
             setHarnessBootstrapStatus(result.status);
             setHarnessBootstrapStatusTaskSlug(activeTask.taskSlug);
             await refreshHarnessEngineerSession({ syncLaunchOptions: true });
-          })}
+          }, "Restart Harness Bootstrap")}
           onStopHarnessBootstrap={() => withBusy(async () => {
             const status = await apiClient.stopHarnessBootstrap();
             setHarnessBootstrapStatus(status);
             setHarnessBootstrapStatusTaskSlug(activeTask?.taskSlug ?? null);
             await refreshHarnessEngineerSession();
-          })}
+          }, "Stop Harness Bootstrap")}
           onRunHarnessBootstrap={() => withBusy(async () => {
             if (!activeTask) {
               throw new Error("Create or select a task before running Harness Bootstrap.");
@@ -882,12 +883,12 @@ export function App() {
             setHarnessBootstrapStatus(result.status);
             setHarnessBootstrapStatusTaskSlug(activeTask.taskSlug);
             await refreshHarnessEngineerSession();
-          })}
+          }, "Run Harness Bootstrap")}
           onOpenHarnessStudio={() => setHarnessStudioOpen(true)}
           onOpenRepositoryDiff={() => setRepositoryDiffOpen(true)}
           onRefreshGateway={() => withBusy(async () => {
             await loadGatewayStatus();
-          })}
+          }, "Refresh Gateway status")}
           onGatewayEnabledChange={(enabled) => {
             void withBusy(async () => {
               const [nextStatus, preferences] = await Promise.all([
@@ -909,13 +910,13 @@ export function App() {
                 disableFlowPauseAlerts();
               }
               setGatewayStatus(nextStatus);
-            });
+            }, "Update Gateway enabled setting");
           }}
           onGatewayTranslationChange={(enabled) => {
             void withBusy(async () => {
               const nextStatus = await apiClient.updateGatewaySettings({ translationEnabled: enabled });
               setGatewayStatus(nextStatus);
-            });
+            }, "Update Gateway translation setting");
           }}
           onStartGatewayQrLogin={() => {
             void withBusy(async () => {
@@ -924,7 +925,7 @@ export function App() {
               setGatewayQrCheck(null);
               setGatewayQrModalOpen(true);
               await loadGatewayStatus();
-            });
+            }, "Start Gateway QR login");
           }}
           onResetGatewayBinding={() => {
             void withBusy(async () => {
@@ -933,7 +934,7 @@ export function App() {
               setGatewayQrLogin(null);
               setGatewayQrCheck(null);
               setGatewayQrModalOpen(false);
-            });
+            }, "Reset Gateway binding");
           }}
           onGateReviewGateEnabledChange={(gate: GateReviewGate, enabled) => {
             void withBusy(async () => {
@@ -944,35 +945,35 @@ export function App() {
                 gates: { [gate]: enabled }
               });
               setActiveGateReview({ taskSlug: activeTask.taskSlug, state });
-            });
+            }, `Update ${gate} Gate Review setting`);
           }}
           onTranslationEnabledChange={(enabled) => {
             setTranslationEnabled(enabled);
             void withBusy(async () => {
               const preferences = await apiClient.updateAppPreferences({ translationEnabled: enabled });
               applyPreferences(preferences);
-            });
+            }, "Update conversation translation setting");
           }}
           onTranslationAutoSendChange={(enabled) => {
             setTranslationAutoSendEnabled(enabled);
             void withBusy(async () => {
               const preferences = await apiClient.updateAppPreferences({ translationAutoSendEnabled: enabled });
               applyPreferences(preferences);
-            });
+            }, "Update translation auto-send setting");
           }}
           onTranslationTargetLanguageChange={(targetLanguage) => {
             setTranslationTargetLanguage(targetLanguage);
             void withBusy(async () => {
               const preferences = await apiClient.updateAppPreferences({ translationTargetLanguage: targetLanguage });
               applyPreferences(preferences);
-            });
+            }, "Update translation target language");
           }}
           onTranslationOutputModeChange={(outputMode) => {
             setTranslationOutputMode(outputMode);
             void withBusy(async () => {
               const preferences = await apiClient.updateAppPreferences({ translationOutputMode: outputMode });
               applyPreferences(preferences);
-            });
+            }, "Update translation output mode");
           }}
           onOpenFileTranslation={() => setFileTranslationOpen(true)}
           onOpenTranslatorSession={() => setTranslatorSessionOpen(true)}
@@ -987,7 +988,7 @@ export function App() {
               });
               await refreshTranslationMemoryInitialized();
               await refreshTranslatorSession();
-            });
+            }, "Create Translation Bootstrap task");
           }}
           onUpdateTranslationMemory={() => {
             void withBusy(async () => {
@@ -1000,14 +1001,14 @@ export function App() {
               });
               await refreshTranslationMemoryInitialized();
               await refreshTranslatorSession();
-            });
+            }, "Create translation memory update task");
           }}
           onCreateTask={(input) => withBusy(async () => {
             const task = await apiClient.createTask(input);
             await loadTasks();
             setActiveTaskSlug(task.taskSlug);
             await refreshGateReviewState(task.taskSlug);
-          })}
+          }, "Create task")}
           onSelectTask={setActiveTaskSlug}
           themeMode={themeMode}
           onThemeModeChange={(nextThemeMode) => {
@@ -1015,7 +1016,7 @@ export function App() {
             void withBusy(async () => {
               const preferences = await apiClient.updateAppPreferences({ themeMode: nextThemeMode });
               applyPreferences(preferences);
-            });
+            }, "Update theme setting");
           }}
           flowPauseAlerts={flowPauseAlerts}
           onFlowPauseAlertsChange={(enabled) => {
@@ -1030,7 +1031,7 @@ export function App() {
             void withBusy(async () => {
               const preferences = await apiClient.updateAppPreferences({ flowPauseAlerts: enabled });
               applyPreferences(preferences);
-            });
+            }, "Update flow pause alert setting");
           }}
           permissionRequestMode={permissionRequestMode}
           onPermissionRequestModeChange={(nextMode) => {
@@ -1038,7 +1039,7 @@ export function App() {
             void withBusy(async () => {
               const preferences = await apiClient.updateAppPreferences({ permissionRequestMode: nextMode });
               applyPreferences(preferences);
-            });
+            }, "Update permission request setting");
           }}
           launchTemplate={launchTemplate}
           canSaveLaunchTemplate={canSaveLaunchTemplate}
@@ -1057,7 +1058,7 @@ export function App() {
                 }
               });
               applyPreferences(preferences);
-            });
+            }, "Save launch template");
           }}
           onOneClickStart={() => {
             void withBusy(async () => {
@@ -1105,7 +1106,7 @@ export function App() {
               await refreshMessageState(activeTask.taskSlug);
               await loadTasks();
               setWorkspaceRefreshNonce((current) => current + 1);
-            });
+            }, "One-click start role sessions");
           }}
           onTryFlowPauseAlert={() => {
             showStrongFlowPauseNotice("This is a test flow pause alert.", undefined, { resetAudio: true });
@@ -1115,14 +1116,14 @@ export function App() {
               const result = await apiClient.markAllMessagesDone(taskSlug);
               setActiveMessages({ taskSlug, messages: result.messages });
               await refreshMessageState(taskSlug);
-            });
+            }, "Mark all role messages done");
           }}
           onDeleteMessageHistory={(taskSlug) => {
             void withBusy(async () => {
               const result = await apiClient.deleteMessageHistory(taskSlug);
               setActiveMessages({ taskSlug, messages: result.messages });
               await refreshMessageState(taskSlug);
-            });
+            }, "Delete role message history");
           }}
         />
       )}
@@ -1224,7 +1225,7 @@ export function App() {
               loadHarnessBootstrapStatus(activeTask.taskSlug),
               refreshHarnessEngineerSession()
             ]);
-          });
+          }, "Refresh Harness Studio");
         }}
         onPermissionModeChange={setHarnessEngineerPermissionMode}
         onModelChange={setHarnessEngineerModel}
@@ -1244,7 +1245,7 @@ export function App() {
             });
             setHarnessEngineerSession(session);
             syncHarnessEngineerLaunchOptions(session);
-          });
+          }, "Start Harness Engineer");
         }}
         onEngineerResume={() => {
           void withBusy(async () => {
@@ -1261,7 +1262,7 @@ export function App() {
             });
             setHarnessEngineerSession(session);
             syncHarnessEngineerLaunchOptions(session);
-          });
+          }, "Resume Harness Engineer");
         }}
         onEngineerRestart={() => {
           void withBusy(async () => {
@@ -1278,20 +1279,20 @@ export function App() {
             });
             setHarnessEngineerSession(session);
             syncHarnessEngineerLaunchOptions(session);
-          });
+          }, "Restart Harness Engineer");
         }}
         onEngineerStop={() => {
           void withBusy(async () => {
             const session = await apiClient.stopHarnessEngineerSession();
             setHarnessEngineerSession(session);
-          });
+          }, "Stop Harness Engineer");
         }}
         onEngineerNotifyHarnessUpdated={() => {
           void withBusy(async () => {
             const session = await apiClient.notifyHarnessEngineerHarnessUpdated();
             setHarnessEngineerSession(session);
             syncHarnessEngineerLaunchOptions(session);
-          });
+          }, "Notify Harness Engineer to reload harness");
         }}
         onOpenRepositoryDiff={() => setRepositoryDiffOpen(true)}
       />
@@ -1326,7 +1327,7 @@ export function App() {
             });
             setTranslatorSession(session);
             syncTranslatorLaunchOptions(session);
-          });
+          }, "Start Translator session");
         }}
         onResume={() => {
           void withBusy(async () => {
@@ -1343,7 +1344,7 @@ export function App() {
             });
             setTranslatorSession(session);
             syncTranslatorLaunchOptions(session);
-          });
+          }, "Resume Translator session");
         }}
         onRestart={() => {
           void withBusy(async () => {
@@ -1360,27 +1361,27 @@ export function App() {
             });
             setTranslatorSession(session);
             syncTranslatorLaunchOptions(session);
-          });
+          }, "Restart Translator session");
         }}
         onStop={() => {
           void withBusy(async () => {
             const session = await apiClient.stopTranslatorSession();
             setTranslatorSession(session);
-          });
+          }, "Stop Translator session");
         }}
         onNotifyHarnessUpdated={() => {
           void withBusy(async () => {
             const session = await apiClient.notifyTranslatorHarnessUpdated();
             setTranslatorSession(session);
             syncTranslatorLaunchOptions(session);
-          });
+          }, "Notify Translator to reload harness");
         }}
       />
       <HarnessFeedbackReview
         busy={busy}
         state={harnessFeedbackState}
         onRefresh={() => {
-          void refreshHarnessFeedbackState(activeTask?.taskSlug).catch((caught: Error) => setError(caught.message));
+          void refreshHarnessFeedbackState(activeTask?.taskSlug).catch((caught: Error) => setError(formatUiError("Refresh Harness feedback state", caught)));
         }}
         onApprove={(comment) => {
           void withBusy(async () => {
@@ -1394,7 +1395,7 @@ export function App() {
             });
             setHarnessFeedbackState(state);
             await refreshHarnessEngineerSession();
-          });
+          }, "Approve Harness feedback");
         }}
         onComment={(comment) => {
           void withBusy(async () => {
@@ -1408,7 +1409,7 @@ export function App() {
             });
             setHarnessFeedbackState(state);
             await refreshHarnessEngineerSession();
-          });
+          }, "Send Harness feedback comment");
         }}
         onReject={(comment) => {
           void withBusy(async () => {
@@ -1418,7 +1419,7 @@ export function App() {
               comment
             });
             setHarnessFeedbackState(state);
-          });
+          }, "Reject Harness feedback");
         }}
       />
     </AppShell>
@@ -1458,7 +1459,7 @@ function GatewayQrLoginModal({
       }
     } catch (error) {
       if (!cancelled) {
-        setQrError(error instanceof Error ? error.message : "Failed to render QR code.");
+        setQrError(formatUiError("Render Gateway QR login code", error));
       }
     }
     return () => {
