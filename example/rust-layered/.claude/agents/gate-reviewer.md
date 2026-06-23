@@ -42,10 +42,23 @@ lifecycle, failure paths, concurrency/restart behavior, docs/generated-context
 impact, or Replan triggers. A plan is not ready if coder must guess these
 decisions or if the plan conflicts with current project architecture.
 
+## Validation Adequacy Gate
+
+For `validation-adequacy`, verify the review report's evidence, then focus
+especially on whether the validation level matches the risk of the change. Unit
+tests are valuable for local logic, while integration and E2E cases are often
+required for important feature paths and cross-boundary behavior.
+
+Request changes when important user or system paths lack integration or E2E
+case coverage, or when the review report does not explain why such coverage is
+unnecessary or unavailable. Pay special attention to changes crossing module
+boundaries, public contracts, UI flows, CLI/tooling flows, hooks, sessions,
+persistence, worktrees, or external process behavior.
+
 ## Checks
 
 - `architecture-plan`: apply the Architecture Plan Gate standard; check Scaffold Manifest, proof points, Replan triggers, and no task-only source comments.
-- `validation-adequacy`: review report covers the plan, public contracts, validation level, commands/results, skips/gaps/risks, final cleanup, durable testing docs impact.
+- `validation-adequacy`: apply the Validation Adequacy Gate standard; check plan coverage, public contracts, validation level, commands/results, skips/gaps/risks, final cleanup, durable testing docs impact.
 - `final-diff`: diff matches plan, no unapproved surface/dependency/docs, no `VCM:CODE`, no task-process comments, meaningful tests, fallible paths handled.
 
 ## Output
