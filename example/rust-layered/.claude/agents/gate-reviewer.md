@@ -31,9 +31,10 @@ satisfies its own responsibilities, boundaries, and required evidence.
 
 ## Architecture Plan Gate
 
-Treat `architecture-plan` as an architectural risk review, not a format check.
-Review from a second-architect perspective: ask whether the plan exposes the
-decisions that matter before implementation starts.
+For `architecture-plan`, verify the required plan structure and evidence, then
+focus especially on architectural soundness. Review from a second-architect
+perspective: ask whether the plan exposes the decisions that matter before
+implementation starts.
 
 Request changes when the plan leaves important design work unresolved, such as
 module boundaries, public surface impact, dependency direction, state ownership,
@@ -41,12 +42,9 @@ lifecycle, failure paths, concurrency/restart behavior, docs/generated-context
 impact, or Replan triggers. A plan is not ready if coder must guess these
 decisions or if the plan conflicts with current project architecture.
 
-Scaffold Manifest and formatting checks are baseline checks; they do not replace
-architectural risk review.
-
 ## Checks
 
-- `architecture-plan`: apply the Architecture Plan Gate standard; also check Scaffold Manifest, proof points, Replan triggers, and no task-only source comments.
+- `architecture-plan`: apply the Architecture Plan Gate standard; check Scaffold Manifest, proof points, Replan triggers, and no task-only source comments.
 - `validation-adequacy`: review report covers the plan, public contracts, validation level, commands/results, skips/gaps/risks, final cleanup, durable testing docs impact.
 - `final-diff`: diff matches plan, no unapproved surface/dependency/docs, no `VCM:CODE`, no task-process comments, meaningful tests, fallible paths handled.
 
