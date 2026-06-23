@@ -73,7 +73,7 @@ export function App() {
   const [activeGateReview, setActiveGateReview] = useState<{ taskSlug: string; state: GateReviewIndex } | null>(null);
   const [activeRole, setActiveRole] = useState<RoleName>("project-manager");
   const [themeMode, setThemeMode] = useState<ThemeMode>("system");
-  const [flowPauseAlerts, setFlowPauseAlerts] = useState(true);
+  const [pauseAlertSound, setPauseAlertSound] = useState(true);
   const [permissionRequestMode, setPermissionRequestMode] = useState<PermissionRequestMode>("off");
   const [translationEnabled, setTranslationEnabled] = useState(false);
   const [translationAutoSendEnabled, setTranslationAutoSendEnabled] = useState(false);
@@ -122,7 +122,7 @@ export function App() {
 
   const applyPreferences = useCallback((preferences: AppPreferences) => {
     setThemeMode(preferences.themeMode);
-    setFlowPauseAlerts(preferences.flowPauseAlerts);
+    setPauseAlertSound(preferences.flowPauseAlerts);
     setPermissionRequestMode(preferences.permissionRequestMode);
     setTranslationEnabled(preferences.translationEnabled);
     setTranslationAutoSendEnabled(preferences.translationAutoSendEnabled);
@@ -152,7 +152,6 @@ export function App() {
 
   const playWeakFlowPauseAlert = useCallback(() => {
     stopFlowPauseAlarm();
-    setFlowPauseNotice(null);
     let playCount = 1;
     void playFlowPauseSound();
     flowPauseAlarmRef.current = window.setInterval(() => {
@@ -165,24 +164,24 @@ export function App() {
     }, FLOW_PAUSE_CHIME_INTERVAL_MS);
   }, [stopFlowPauseAlarm]);
 
-  const showStrongFlowPauseNotice = useCallback((
+  const showFlowPauseNotice = useCallback((
     text: string,
     id = `manual-${Date.now()}`,
-    options: { resetAudio?: boolean } = {}
+    options: { resetAudio?: boolean; sound?: "none" | "weak" | "strong" } = {}
   ) => {
     setFlowPauseNotice({ id, text });
-    startStrongFlowPauseAlarm(options);
-  }, [startStrongFlowPauseAlarm]);
+    if (options.sound === "strong") {
+      startStrongFlowPauseAlarm(options);
+    } else if (options.sound === "weak") {
+      playWeakFlowPauseAlert();
+    } else {
+      stopFlowPauseAlarm();
+    }
+  }, [playWeakFlowPauseAlert, startStrongFlowPauseAlarm, stopFlowPauseAlarm]);
 
   const confirmFlowPauseNotice = useCallback(() => {
     stopFlowPauseAlarm();
     setFlowPauseNotice(null);
-  }, [stopFlowPauseAlarm]);
-
-  const disableFlowPauseAlerts = useCallback(() => {
-    stopFlowPauseAlarm();
-    setFlowPauseNotice(null);
-    setFlowPauseAlerts(false);
   }, [stopFlowPauseAlarm]);
 
   const handleMessagesChanged = useCallback((messages: VcmRoleMessage[]) => {
@@ -222,17 +221,14 @@ export function App() {
     }
     notifiedFlowPauseKeyRef.current[roundState.taskSlug] = pauseKey;
 
-    if (!flowPauseAlerts) {
-      return;
-    }
-
     const roleLabel = roundState.activeRole ?? "role";
-    if (getFlowPauseDurationMs(roundState) >= FLOW_PAUSE_STRONG_ALERT_THRESHOLD_MS) {
-      showStrongFlowPauseNotice(`No new turn started after ${roleLabel} stopped.`, pauseKey);
-    } else {
-      playWeakFlowPauseAlert();
-    }
-  }, [activeTask?.taskSlug, flowPauseAlerts, playWeakFlowPauseAlert, showStrongFlowPauseNotice]);
+    const sound = !pauseAlertSound
+      ? "none"
+      : getFlowPauseDurationMs(roundState) >= FLOW_PAUSE_STRONG_ALERT_THRESHOLD_MS
+        ? "strong"
+        : "weak";
+    showFlowPauseNotice(`No new turn started after ${roleLabel} stopped.`, pauseKey, { sound });
+  }, [activeTask?.taskSlug, pauseAlertSound, showFlowPauseNotice]);
 
   const handleLaunchStateChanged = useCallback((launchState: TaskWorkspaceLaunchState) => {
     setActiveLaunchState((current) => {
@@ -416,17 +412,6 @@ export function App() {
     document.documentElement.dataset.theme = resolvedTheme;
     document.documentElement.dataset.themeMode = themeMode;
   }, [systemPrefersDark, themeMode]);
-
-  useEffect(() => {
-    if (!gatewayStatus?.enabled || !flowPauseAlerts) {
-      return;
-    }
-
-    disableFlowPauseAlerts();
-    void apiClient.updateAppPreferences({ flowPauseAlerts: false })
-      .then((preferences) => applyPreferences(preferences))
-      .catch((caught: Error) => setError(formatUiError("Disable flow pause alerts while Gateway is enabled", caught)));
-  }, [applyPreferences, disableFlowPauseAlerts, flowPauseAlerts, gatewayStatus?.enabled]);
 
   useEffect(() => {
     if (!gatewayStatus?.enabled || !project || !activeTask) {
@@ -926,24 +911,13 @@ export function App() {
           }, "Refresh Gateway status")}
           onGatewayEnabledChange={(enabled) => {
             void withBusy(async () => {
-              const [nextStatus, preferences] = await Promise.all([
-                apiClient.updateGatewaySettings({
-                  enabled,
-                  ...(enabled && project ? {
-                    currentProjectId: project.repoRoot,
-                    currentTaskSlug: activeTask?.taskSlug ?? null
-                  } : {})
-                }),
-                enabled
-                  ? apiClient.updateAppPreferences({ flowPauseAlerts: false })
-                  : Promise.resolve(null)
-              ]);
-              if (preferences) {
-                applyPreferences(preferences);
-              }
-              if (enabled) {
-                disableFlowPauseAlerts();
-              }
+              const nextStatus = await apiClient.updateGatewaySettings({
+                enabled,
+                ...(enabled && project ? {
+                  currentProjectId: project.repoRoot,
+                  currentTaskSlug: activeTask?.taskSlug ?? null
+                } : {})
+              });
               setGatewayStatus(nextStatus);
             }, "Update Gateway enabled setting");
           }}
@@ -1067,20 +1041,16 @@ export function App() {
               applyPreferences(preferences);
             }, "Update theme setting");
           }}
-          flowPauseAlerts={flowPauseAlerts}
-          onFlowPauseAlertsChange={(enabled) => {
-            if (gatewayStatus?.enabled) {
-              disableFlowPauseAlerts();
-              return;
-            }
-            setFlowPauseAlerts(enabled);
+          pauseAlertSound={pauseAlertSound}
+          onPauseAlertSoundChange={(enabled) => {
+            setPauseAlertSound(enabled);
             if (enabled) {
               void primeFlowPauseAudio();
             }
             void withBusy(async () => {
               const preferences = await apiClient.updateAppPreferences({ flowPauseAlerts: enabled });
               applyPreferences(preferences);
-            }, "Update flow pause alert setting");
+            }, "Update pause alert sound setting");
           }}
           permissionRequestMode={permissionRequestMode}
           onPermissionRequestModeChange={(nextMode) => {
@@ -1158,7 +1128,10 @@ export function App() {
             }, "One-click start role sessions");
           }}
           onTryFlowPauseAlert={() => {
-            showStrongFlowPauseNotice("This is a test flow pause alert.", undefined, { resetAudio: true });
+            showFlowPauseNotice("This is a test pause alert.", undefined, {
+              resetAudio: true,
+              sound: pauseAlertSound ? "strong" : "none"
+            });
           }}
           onMarkAllMessagesDone={(taskSlug) => {
             void withBusy(async () => {

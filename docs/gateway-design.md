@@ -35,9 +35,9 @@ Product rules:
 - VCM stores the latest PM reply for each task in local Gateway state. When
   `/start` enables Gateway and the current task has a cached PM reply, Gateway
   returns that reply immediately so the phone user sees the current task state.
-- When Gateway is enabled, browser Flow pause alert should be forced off because
-  Weixin becomes the notification path and browser modal alerts can block the
-  workflow.
+- Gateway does not change the desktop `Pause alert sound` preference. The
+  desktop pause dialog remains a fixed local UI signal, and Weixin is the mobile
+  notification path.
 - Gateway may push PM replies to Weixin whenever it is enabled, even when the PM
   turn was started from the desktop UI rather than from Weixin.
 - When translation is enabled, Chinese input is translated to English before it

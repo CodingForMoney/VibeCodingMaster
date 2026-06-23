@@ -94,8 +94,8 @@ export interface ProjectDashboardProps {
   themeMode: ThemeMode;
   onAutoOrchestrationChange(enabled: boolean): void;
   onThemeModeChange(themeMode: ThemeMode): void;
-  flowPauseAlerts: boolean;
-  onFlowPauseAlertsChange(enabled: boolean): void;
+  pauseAlertSound: boolean;
+  onPauseAlertSoundChange(enabled: boolean): void;
   permissionRequestMode: PermissionRequestMode;
   onPermissionRequestModeChange(mode: PermissionRequestMode): void;
   launchTemplate: LaunchTemplate;
@@ -162,8 +162,8 @@ export function ProjectDashboard({
   themeMode,
   onAutoOrchestrationChange,
   onThemeModeChange,
-  flowPauseAlerts,
-  onFlowPauseAlertsChange,
+  pauseAlertSound,
+  onPauseAlertSoundChange,
   permissionRequestMode,
   onPermissionRequestModeChange,
   launchTemplate,
@@ -272,13 +272,12 @@ export function ProjectDashboard({
             onChange={onAutoOrchestrationChange}
           />
           <SwitchControl
-            checked={!gatewayStatus?.enabled && flowPauseAlerts}
+            checked={pauseAlertSound}
             className="sidebar-switch"
-            disabled={busy || gatewayStatus?.enabled}
-            label="Flow pause alert"
-            stateLabel={gatewayStatus?.enabled ? "off" : flowPauseAlerts ? "on" : "off"}
-            title={gatewayStatus?.enabled ? "Disabled while Gateway is on" : undefined}
-            onChange={(checked) => onFlowPauseAlertsChange(checked)}
+            disabled={busy}
+            label="Pause alert sound"
+            title="Play a sound when VCM shows the fixed flow pause dialog"
+            onChange={(checked) => onPauseAlertSoundChange(checked)}
           />
           <button
             className="settings-toggle"

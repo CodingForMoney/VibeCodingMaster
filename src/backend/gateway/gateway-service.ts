@@ -734,7 +734,6 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
     }
     const enabled = await syncDesktopContext(await deps.settings.updateSettings({ enabled: true }));
     await ensurePolling();
-    await deps.appSettings.updatePreferences({ flowPauseAlerts: false });
     const lines = [
       "Gateway started.",
       "Full mobile commands and PM messages are now enabled.",

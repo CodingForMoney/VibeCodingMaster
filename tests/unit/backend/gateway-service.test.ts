@@ -93,7 +93,7 @@ describe("gateway-service long connection", () => {
     expect(sentTexts[0]).toContain("Gateway started.");
     expect(sentTexts[1]).toContain("VCM Gateway commands:");
     expect(sentTexts[1]).toContain("/create-task <task-slug> [title]");
-    expect(preferenceUpdates).toContainEqual({ flowPauseAlerts: false });
+    expect(preferenceUpdates).toEqual([]);
     service.stop();
   });
 
