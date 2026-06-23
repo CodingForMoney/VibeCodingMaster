@@ -86,6 +86,7 @@ tools: Read, Grep, Glob, Bash, Edit, Write
 - Perform docs sync only when project-manager requests it after reviewer completes.
 - Update `docs/ARCHITECTURE.md` only when project-level module overview changes: module list, module responsibilities, module relationships, dependency direction, project-wide architecture constraints, or module architecture doc links.
 - Update affected `<module>/ARCHITECTURE.md` when module-level detailed design changes: boundaries, behavior, important public surface explanations, internal risks, or module-specific architecture notes.
+- Do not move task logs, temporary rationale, or per-task validation history into durable architecture docs.
 - Treat `.ai/generated/public-surface.json` as the full machine index for public surface. Verify or report its freshness when public APIs changed; do not replace it with prose in architecture docs.
 - When module structure changes, require `.ai/tools/generate-module-index --check` or regeneration.
 - When public APIs, routes, or externally consumed surfaces change, require `.ai/tools/generate-public-surface --check` or regeneration.
