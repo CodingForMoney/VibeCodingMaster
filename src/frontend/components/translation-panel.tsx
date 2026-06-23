@@ -42,6 +42,7 @@ export function TranslationPanel({
   const [entries, setEntries] = useState<TranslationEntry[]>([]);
   const [failures, setFailures] = useState<TranslationFailureItem[]>([]);
   const [composer, setComposer] = useState("");
+  const [manualSource, setManualSource] = useState("");
   const [composerIsEnglishDraft, setComposerIsEnglishDraft] = useState(false);
   const [status, setStatus] = useState<TranslationPanelStatus>("ready");
   const [lastPollAt, setLastPollAt] = useState("");
@@ -169,6 +170,25 @@ export function TranslationPanel({
       }
     } catch (caught) {
       setError(formatUiError("Translate composer input", caught));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function translateManualOutput() {
+    const sourceText = manualSource.trim();
+    if (!sourceText) {
+      return;
+    }
+    setBusy(true);
+    setError("");
+    try {
+      const entry = await apiClient.translateManualOutput(taskSlug, role, { text: sourceText });
+      setEntries((current) => trimTranslationEntries(upsertEntry(current, entry)).entries);
+      setManualSource("");
+      setScrollRevision((current) => current + 1);
+    } catch (caught) {
+      setError(formatUiError("Translate pasted English output", caught));
     } finally {
       setBusy(false);
     }
@@ -313,6 +333,22 @@ export function TranslationPanel({
       </div>
 
       <div className="translation-composer">
+        <div className="translation-composer-row translation-manual-row">
+          <textarea
+            value={manualSource}
+            onChange={(event) => setManualSource(event.target.value)}
+            placeholder="Paste English to translate on demand..."
+          />
+          <div className="translation-composer-actions">
+            <button
+              type="button"
+              disabled={busy || !manualSource.trim()}
+              onClick={() => void translateManualOutput()}
+            >
+              Translate
+            </button>
+          </div>
+        </div>
         <div className="translation-composer-row">
           <textarea
             value={composer}

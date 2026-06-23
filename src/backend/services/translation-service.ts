@@ -9,6 +9,7 @@ import type {
   PollTranslationSessionResult,
   SendTranslatedInputRequest,
   StartTranslationSessionResult,
+  TranslateManualOutputRequest,
   TranslateUserInputRequest,
   TranslateUserInputResult,
   TranslationConversationBoundaryKind,
@@ -44,6 +45,7 @@ export interface TranslationService {
   pollSessionEvents(sessionId: string, after: number, limit?: number): Promise<PollTranslationSessionResult>;
   recordConversationBoundary(input: RecordTranslationConversationBoundaryInput): Promise<TranslationEntry | undefined>;
   translateUserInput(input: TranslateUserInputServiceInput): Promise<TranslateUserInputResult>;
+  translateManualOutput(input: TranslateManualOutputServiceInput): Promise<TranslationEntry>;
   sendTranslatedInput(input: SendTranslatedInputServiceInput): Promise<void>;
   subscribeToSession(sessionId: string, listener: TranslationEventListener): Unsubscribe;
   clearSession(sessionId: string): Promise<void>;
@@ -74,6 +76,13 @@ export interface RecordTranslationConversationBoundaryInput {
 }
 
 export interface TranslateUserInputServiceInput extends TranslateUserInputRequest {
+  repoRoot: string;
+  taskRepoRoot?: string;
+  taskSlug: string;
+  role: RoleName;
+}
+
+export interface TranslateManualOutputServiceInput extends TranslateManualOutputRequest {
   repoRoot: string;
   taskRepoRoot?: string;
   taskSlug: string;
@@ -1001,6 +1010,47 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
           statusCode: 502
         });
       }
+    },
+    async translateManualOutput(input) {
+      const config = await loadConfig();
+      if (!input.text.trim()) {
+        throw new VcmError({
+          code: "TRANSLATION_INPUT_EMPTY",
+          message: "Manual translation input cannot be empty.",
+          statusCode: 400
+        });
+      }
+
+      const roleSession = await deps.sessionService.getRoleSession(input.repoRoot, input.taskSlug, input.role);
+      if (!roleSession || roleSession.status !== "running") {
+        throw new VcmError({
+          code: "SESSION_NOT_RUNNING",
+          message: `${input.role} session is not running.`,
+          statusCode: 409
+        });
+      }
+
+      await prepareCache({
+        repoRoot: input.taskRepoRoot ?? input.repoRoot,
+        baseRepoRoot: input.repoRoot,
+        taskSlug: input.taskSlug,
+        role: input.role,
+        sessionId: roleSession.id
+      });
+      startTranscriptTail(roleSession);
+      const entry = startClaudeOutputTranslation(roleSession.id, input.text, config, {
+        replaceExisting: false,
+        flushImmediately: true
+      });
+      if (!entry) {
+        throw new VcmError({
+          code: "TRANSLATION_NOT_STARTED",
+          message: "Manual translation could not be queued.",
+          statusCode: 409,
+          hint: "Check that the role session is still running and try again."
+        });
+      }
+      return entry;
     },
     async sendTranslatedInput(input) {
       await writeToCurrentRole(input.repoRoot, input.taskSlug, input.role, input.englishText);

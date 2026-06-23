@@ -94,6 +94,10 @@ export interface SendTranslatedInputRequest {
   englishText: string;
 }
 
+export interface TranslateManualOutputRequest {
+  text: string;
+}
+
 export type TranslationSessionStatus =
   | "ready"
   | "paused"

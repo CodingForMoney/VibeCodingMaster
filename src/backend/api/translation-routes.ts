@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import { isVcmRoleName } from "../../shared/constants.js";
 import type {
   SendTranslatedInputRequest,
+  TranslateManualOutputRequest,
   TranslateUserInputRequest
 } from "../../shared/types/translation.js";
 import { VcmError } from "../errors.js";
@@ -57,6 +58,22 @@ export function registerTranslationRoutes(app: FastifyInstance, deps: Translatio
         taskSlug: request.params.taskSlug,
         role,
         ...(request.body ?? { text: "" })
+      });
+    }
+  );
+
+  app.post<{ Params: { taskSlug: string; role: string }; Body: TranslateManualOutputRequest }>(
+    "/api/tasks/:taskSlug/sessions/:role/translation/manual-output",
+    async (request) => {
+      const project = await requireCurrentProject(deps.projectService);
+      const role = parseRole(request.params.role);
+      const task = await deps.taskService.loadTask(project.repoRoot, request.params.taskSlug);
+      return deps.translationService.translateManualOutput({
+        repoRoot: project.repoRoot,
+        taskRepoRoot: getTaskRuntimeRepoRoot(task),
+        taskSlug: request.params.taskSlug,
+        role,
+        text: request.body?.text ?? ""
       });
     }
   );

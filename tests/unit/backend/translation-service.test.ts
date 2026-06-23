@@ -537,6 +537,61 @@ describe("translation-service", () => {
     expect(translatorCalls[0]).not.toHaveProperty("role");
   });
 
+  it("queues pasted English output for manual translation", async () => {
+    const fs = createMemoryFs();
+    const appSettings = createAppSettingsService({
+      fs,
+      settingsPath: "/settings.json",
+    });
+    const roleSession = createRoleSessionRecord();
+    const translatorCalls: unknown[] = [];
+    const service = createTranslationService({
+      appSettings,
+      translationWorkerService: createTranslationWorkerServiceStub(translatorCalls, "构建失败。"),
+      runtime: createRuntimeStub([roleSession]),
+      sessionRegistry: createRegistryStub(roleSession),
+      transcripts: createTranscriptStub(),
+      sessionService: {
+        async getRoleSession() {
+          return roleSession;
+        }
+      } as SessionService
+    });
+
+    const messages: TranslationWsMessage[] = [];
+    service.subscribeToSession("session-1", (message) => messages.push(message));
+    const entry = await service.translateManualOutput({
+      repoRoot: "/repo",
+      taskSlug: "demo-task",
+      role: "coder",
+      text: "The build failed."
+    });
+
+    expect(entry).toMatchObject({
+      direction: "cc-output-to-user",
+      sourceLanguage: "en",
+      targetLanguage: "zh-CN",
+      sourceText: "The build failed.",
+      status: "queued"
+    });
+    await waitFor(() => messages.some((message) =>
+      message.type === "translation-entry" &&
+      message.entry.id === entry.id &&
+      message.entry.status === "translated" &&
+      message.entry.translatedText === "构建失败。"
+    ));
+    expect(translatorCalls).toEqual([
+      expect.objectContaining({
+        repoRoot: "/repo",
+        taskSlug: "demo-task",
+        direction: "cc-output-to-user",
+        sourceText: "The build failed.",
+        sourceLanguage: "en",
+        targetLanguage: "zh-CN"
+      })
+    ]);
+  });
+
   it("sends translated input by pasting first and pressing enter separately", async () => {
     const fs = createMemoryFs();
     const appSettings = createAppSettingsService({

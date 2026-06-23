@@ -55,6 +55,7 @@ import type {
   CreateFileTranslationRequest,
   CreateTranslationMemoryUpdateRequest,
   SendTranslatedInputRequest,
+  TranslateManualOutputRequest,
   TranslateUserInputRequest,
   TranslateUserInputResult,
   TranslationEntry,
@@ -326,6 +327,12 @@ export const apiClient = {
   },
   translateUserInput(taskSlug: string, role: RoleName, input: TranslateUserInputRequest) {
     return request<TranslateUserInputResult>(`/api/tasks/${encodeURIComponent(taskSlug)}/sessions/${role}/translation/input`, {
+      method: "POST",
+      body: JSON.stringify(input)
+    });
+  },
+  translateManualOutput(taskSlug: string, role: RoleName, input: TranslateManualOutputRequest) {
+    return request<TranslationEntry>(`/api/tasks/${encodeURIComponent(taskSlug)}/sessions/${role}/translation/manual-output`, {
       method: "POST",
       body: JSON.stringify(input)
     });
