@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import type { ReactNode } from "react";
 import type { HarnessBootstrapStatusReport, HarnessFileStatus, HarnessStatusReport } from "../../shared/types/harness.js";
 import type { HarnessFileContent } from "../../shared/types/harness.js";
 import type { ClaudePermissionMode, RoleSessionRecord, SessionEffort, SessionModel } from "../../shared/types/session.js";
@@ -62,6 +63,8 @@ export function HarnessStudioModal({
 
   const files = status?.files ?? [];
   const agents = files.filter((file) => file.kind.startsWith("agent-"));
+  const vcmRoleAgents = agents.filter((file) => isVcmRoleAgent(file));
+  const auxiliaryAgents = agents.filter((file) => !isVcmRoleAgent(file));
   const skills = files.filter((file) => file.kind.startsWith("skill-"));
   const tools = files.filter((file) => file.kind.startsWith("tool-"));
   const rootContext = files.filter((file) => file.kind === "root-claude" || file.kind === "gitignore" || file.kind === "pull-request-template");
@@ -224,30 +227,30 @@ export function HarnessStudioModal({
                 </section>
               ) : (
                 <>
-                  <section className="harness-studio-section harness-studio-overview">
-                    <h3>Overview</h3>
-                    <div className="harness-studio-metrics">
-                      <HarnessMetric label="Fixed install" value={status ? status.initialized ? status.needsApply ? "updates" : "current" : "new" : "unknown"} />
-                      <HarnessMetric label="Revision" value={String(status?.harnessRevision ?? 0)} />
-                      <HarnessMetric label="Managed files" value={String(files.length)} />
-                      <HarnessMetric label="Pending updates" value={String(status?.plannedChanges.length ?? 0)} />
-                      <HarnessMetric label="Bootstrap" value={bootstrapStatus?.status.replaceAll("_", " ") ?? "unknown"} />
-                      <HarnessMetric label="Engineer" value={formatSessionStatus(engineerSession)} />
-                    </div>
-                    {status?.warnings.length ? (
-                      <ul className="warnings">
-                        {status.warnings.map((warning) => <li key={warning}>{warning}</li>)}
-                      </ul>
-                    ) : null}
-                  </section>
+                  <HarnessFileSection title="VCM Roles" files={vcmRoleAgents} selectedPath={selectedPath} copiedPath={copiedPath} onCopy={(path) => void copyHarnessFilePath(path)} onSelect={setSelectedPath} />
+                  <HarnessFileSection title="Auxiliary Roles" files={auxiliaryAgents} selectedPath={selectedPath} copiedPath={copiedPath} onCopy={(path) => void copyHarnessFilePath(path)} onSelect={setSelectedPath} />
+                  <HarnessCollapsibleSection title="Overview">
+                    <section className="harness-studio-overview">
+                      <div className="harness-studio-metrics">
+                        <HarnessMetric label="Fixed install" value={status ? status.initialized ? status.needsApply ? "updates" : "current" : "new" : "unknown"} />
+                        <HarnessMetric label="Revision" value={String(status?.harnessRevision ?? 0)} />
+                        <HarnessMetric label="Managed files" value={String(files.length)} />
+                        <HarnessMetric label="Pending updates" value={String(status?.plannedChanges.length ?? 0)} />
+                        <HarnessMetric label="Bootstrap" value={bootstrapStatus?.status.replaceAll("_", " ") ?? "unknown"} />
+                        <HarnessMetric label="Engineer" value={formatSessionStatus(engineerSession)} />
+                      </div>
+                      {status?.warnings.length ? (
+                        <ul className="warnings">
+                          {status.warnings.map((warning) => <li key={warning}>{warning}</li>)}
+                        </ul>
+                      ) : null}
+                    </section>
+                  </HarnessCollapsibleSection>
+                  <HarnessFileSection title="Skills" files={skills} selectedPath={selectedPath} copiedPath={copiedPath} onCopy={(path) => void copyHarnessFilePath(path)} onSelect={setSelectedPath} collapsible />
+                  <HarnessFileSection title="Root Context" files={rootContext} selectedPath={selectedPath} copiedPath={copiedPath} onCopy={(path) => void copyHarnessFilePath(path)} onSelect={setSelectedPath} collapsible />
+                  <HarnessFileSection title="Tools" files={tools} selectedPath={selectedPath} copiedPath={copiedPath} onCopy={(path) => void copyHarnessFilePath(path)} onSelect={setSelectedPath} collapsible />
 
-                  <HarnessFileSection title="Agents" files={agents} selectedPath={selectedPath} copiedPath={copiedPath} onCopy={(path) => void copyHarnessFilePath(path)} onSelect={setSelectedPath} />
-                  <HarnessFileSection title="Skills" files={skills} selectedPath={selectedPath} copiedPath={copiedPath} onCopy={(path) => void copyHarnessFilePath(path)} onSelect={setSelectedPath} />
-                  <HarnessFileSection title="Root Context" files={rootContext} selectedPath={selectedPath} copiedPath={copiedPath} onCopy={(path) => void copyHarnessFilePath(path)} onSelect={setSelectedPath} />
-                  <HarnessFileSection title="Tools" files={tools} selectedPath={selectedPath} copiedPath={copiedPath} onCopy={(path) => void copyHarnessFilePath(path)} onSelect={setSelectedPath} />
-
-                  <section className="harness-studio-section">
-                    <h3>Project Docs</h3>
+                  <HarnessCollapsibleSection title="Project Docs">
                     <ul className="harness-studio-doc-list">
                       {bootstrapStatus?.checks.map((check) => (
                         <li key={check.key}>
@@ -256,7 +259,7 @@ export function HarnessStudioModal({
                         </li>
                       )) ?? <li><span>No bootstrap status loaded.</span></li>}
                     </ul>
-                  </section>
+                  </HarnessCollapsibleSection>
                 </>
               )}
             </aside>
@@ -319,7 +322,8 @@ function HarnessFileSection({
   selectedPath,
   copiedPath,
   onCopy,
-  onSelect
+  onSelect,
+  collapsible = false
 }: {
   title: string;
   files: HarnessFileStatus[];
@@ -327,30 +331,65 @@ function HarnessFileSection({
   copiedPath: string | null;
   onCopy(path: string): void;
   onSelect(path: string): void;
+  collapsible?: boolean;
 }) {
+  const content = (
+    <ol className="harness-studio-file-list">
+      {files.length ? files.map((file) => (
+        <li key={file.path} className={file.path === selectedPath ? "selected" : undefined}>
+          <button className="harness-studio-file-path-button" type="button" title={file.path} onClick={() => onSelect(file.path)}>
+            {file.path}
+          </button>
+          <button
+            className="harness-studio-file-copy-button"
+            type="button"
+            title={`Copy ${file.path}`}
+            onClick={() => onCopy(file.path)}
+          >
+            {copiedPath === file.path ? "Copied" : "Copy"}
+          </button>
+          <StatusBadge status={file.action} />
+        </li>
+      )) : <li><span>No files.</span></li>}
+    </ol>
+  );
+
+  if (collapsible) {
+    return (
+      <HarnessCollapsibleSection title={title}>
+        {content}
+      </HarnessCollapsibleSection>
+    );
+  }
+
   return (
     <section className="harness-studio-section">
       <h3>{title}</h3>
-      <ol className="harness-studio-file-list">
-        {files.length ? files.map((file) => (
-          <li key={file.path} className={file.path === selectedPath ? "selected" : undefined}>
-            <button className="harness-studio-file-path-button" type="button" title={file.path} onClick={() => onSelect(file.path)}>
-              {file.path}
-            </button>
-            <button
-              className="harness-studio-file-copy-button"
-              type="button"
-              title={`Copy ${file.path}`}
-              onClick={() => onCopy(file.path)}
-            >
-              {copiedPath === file.path ? "Copied" : "Copy"}
-            </button>
-            <StatusBadge status={file.action} />
-          </li>
-        )) : <li><span>No files.</span></li>}
-      </ol>
+      {content}
     </section>
   );
+}
+
+function HarnessCollapsibleSection({ title, children }: { title: string; children: ReactNode }) {
+  return (
+    <details className="harness-studio-section harness-studio-collapsible-section">
+      <summary>
+        <h3>{title}</h3>
+        <span>Show</span>
+      </summary>
+      <div className="harness-studio-collapsible-content">
+        {children}
+      </div>
+    </details>
+  );
+}
+
+function isVcmRoleAgent(file: HarnessFileStatus): boolean {
+  return file.kind === "agent-project-manager"
+    || file.kind === "agent-architect"
+    || file.kind === "agent-coder"
+    || file.kind === "agent-reviewer"
+    || file.kind === "agent-gate-reviewer";
 }
 
 function formatSessionStatus(session: RoleSessionRecord | null): string {

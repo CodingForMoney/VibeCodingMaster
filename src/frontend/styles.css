@@ -463,6 +463,10 @@ h2 {
   justify-content: flex-end;
 }
 
+.harness-review-diff-button {
+  width: 100%;
+}
+
 .harness-file-list-title {
   margin: 0;
   font-size: 12px;
@@ -1922,6 +1926,42 @@ h2 {
 .harness-studio-section h3 {
   margin-bottom: 8px;
   font-size: 14px;
+}
+
+.harness-studio-collapsible-section {
+  padding: 0;
+  overflow: hidden;
+}
+
+.harness-studio-collapsible-section summary {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.harness-studio-collapsible-section summary::-webkit-details-marker {
+  display: none;
+}
+
+.harness-studio-collapsible-section summary h3 {
+  margin: 0;
+}
+
+.harness-studio-collapsible-section summary span {
+  color: #8b949e;
+  font-size: 11px;
+}
+
+.harness-studio-collapsible-section[open] summary span {
+  color: #d6deeb;
+}
+
+.harness-studio-collapsible-content {
+  padding: 0 10px 10px;
 }
 
 .harness-studio-engineer {

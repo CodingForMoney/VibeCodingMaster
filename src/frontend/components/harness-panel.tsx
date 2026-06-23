@@ -168,14 +168,19 @@ export function HarnessPanel({
             <strong>Harness Studio</strong>
           </div>
           <div className="harness-actions">
-            <button type="button" disabled={busy} onClick={onOpenRepositoryDiff}>
-              Review Diff
-            </button>
             <button type="button" disabled={busy} onClick={onOpenStudio}>
               Open Studio
             </button>
           </div>
         </div>
+        <button
+          className="harness-review-diff-button"
+          type="button"
+          disabled={busy}
+          onClick={onOpenRepositoryDiff}
+        >
+          Review Diff
+        </button>
       </div>
 
       {showBootstrapStage ? (
