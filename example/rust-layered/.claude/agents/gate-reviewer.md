@@ -31,7 +31,7 @@ satisfies its own responsibilities, boundaries, and required evidence.
 
 ## Checks
 
-- `architecture-plan`: scope, affected files/contracts, Scaffold Manifest, dependencies, docs/generated context, proof points, Replan triggers, no task-only source comments.
+- `architecture-plan`: primarily review architectural risk, not plan format. Request changes when key boundaries, public surface impact, dependency direction, state ownership, failure paths, or design decisions are missing, unsafe, contradictory, or left for coder to guess. Also check Scaffold Manifest, docs/generated context, proof points, Replan triggers, and no task-only source comments.
 - `validation-adequacy`: review report covers the plan, public contracts, validation level, commands/results, skips/gaps/risks, final cleanup, durable testing docs impact.
 - `final-diff`: diff matches plan, no unapproved surface/dependency/docs, no `VCM:CODE`, no task-process comments, meaningful tests, fallible paths handled.
 
