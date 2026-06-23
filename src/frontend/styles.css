@@ -2061,13 +2061,20 @@ h2 {
 .harness-studio-file-list li,
 .harness-studio-doc-list li {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
   gap: 8px;
   align-items: center;
   min-width: 0;
   border: 1px solid #30363d;
   border-radius: 6px;
   padding: 8px;
+}
+
+.harness-studio-file-list li {
+  grid-template-columns: minmax(0, 1fr) auto auto;
+}
+
+.harness-studio-doc-list li {
+  grid-template-columns: minmax(0, 1fr) auto;
 }
 
 .harness-studio-file-list li.selected {
@@ -2085,6 +2092,19 @@ h2 {
   text-align: left;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.harness-studio-file-list .harness-studio-file-copy-button {
+  border: 1px solid #30363d;
+  border-radius: 5px;
+  background: #161b22;
+  color: #d6deeb;
+  padding: 4px 8px;
+  text-align: center;
+}
+
+.harness-studio-file-list .harness-studio-file-copy-button:hover {
+  border-color: #58a6ff;
 }
 
 .harness-studio-file-list span:first-child,

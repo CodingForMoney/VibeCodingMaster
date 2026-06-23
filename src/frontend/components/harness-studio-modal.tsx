@@ -58,6 +58,7 @@ export function HarnessStudioModal({
   const [editingFile, setEditingFile] = useState(false);
   const [fileBusy, setFileBusy] = useState(false);
   const [fileError, setFileError] = useState<string | null>(null);
+  const [copiedPath, setCopiedPath] = useState<string | null>(null);
 
   const files = status?.files ?? [];
   const agents = files.filter((file) => file.kind.startsWith("agent-"));
@@ -135,6 +136,14 @@ export function HarnessStudioModal({
     setDraftContent("");
     setEditingFile(false);
     setFileError(null);
+  }
+
+  async function copyHarnessFilePath(filePath: string) {
+    await writeClipboardText(filePath);
+    setCopiedPath(filePath);
+    window.setTimeout(() => {
+      setCopiedPath((current) => current === filePath ? null : current);
+    }, 1200);
   }
 
   if (!open) {
@@ -232,10 +241,10 @@ export function HarnessStudioModal({
                     ) : null}
                   </section>
 
-                  <HarnessFileSection title="Agents" files={agents} selectedPath={selectedPath} onSelect={setSelectedPath} />
-                  <HarnessFileSection title="Skills" files={skills} selectedPath={selectedPath} onSelect={setSelectedPath} />
-                  <HarnessFileSection title="Root Context" files={rootContext} selectedPath={selectedPath} onSelect={setSelectedPath} />
-                  <HarnessFileSection title="Tools" files={tools} selectedPath={selectedPath} onSelect={setSelectedPath} />
+                  <HarnessFileSection title="Agents" files={agents} selectedPath={selectedPath} copiedPath={copiedPath} onCopy={(path) => void copyHarnessFilePath(path)} onSelect={setSelectedPath} />
+                  <HarnessFileSection title="Skills" files={skills} selectedPath={selectedPath} copiedPath={copiedPath} onCopy={(path) => void copyHarnessFilePath(path)} onSelect={setSelectedPath} />
+                  <HarnessFileSection title="Root Context" files={rootContext} selectedPath={selectedPath} copiedPath={copiedPath} onCopy={(path) => void copyHarnessFilePath(path)} onSelect={setSelectedPath} />
+                  <HarnessFileSection title="Tools" files={tools} selectedPath={selectedPath} copiedPath={copiedPath} onCopy={(path) => void copyHarnessFilePath(path)} onSelect={setSelectedPath} />
 
                   <section className="harness-studio-section">
                     <h3>Project Docs</h3>
@@ -308,11 +317,15 @@ function HarnessFileSection({
   title,
   files,
   selectedPath,
+  copiedPath,
+  onCopy,
   onSelect
 }: {
   title: string;
   files: HarnessFileStatus[];
   selectedPath: string | null;
+  copiedPath: string | null;
+  onCopy(path: string): void;
   onSelect(path: string): void;
 }) {
   return (
@@ -321,8 +334,16 @@ function HarnessFileSection({
       <ol className="harness-studio-file-list">
         {files.length ? files.map((file) => (
           <li key={file.path} className={file.path === selectedPath ? "selected" : undefined}>
-            <button type="button" title={file.path} onClick={() => onSelect(file.path)}>
+            <button className="harness-studio-file-path-button" type="button" title={file.path} onClick={() => onSelect(file.path)}>
               {file.path}
+            </button>
+            <button
+              className="harness-studio-file-copy-button"
+              type="button"
+              title={`Copy ${file.path}`}
+              onClick={() => onCopy(file.path)}
+            >
+              {copiedPath === file.path ? "Copied" : "Copy"}
             </button>
             <StatusBadge status={file.action} />
           </li>
@@ -339,4 +360,21 @@ function formatSessionStatus(session: RoleSessionRecord | null): string {
   return session.status === "running"
     ? `${session.status} / ${session.activityStatus ?? "idle"}`
     : session.status;
+}
+
+async function writeClipboardText(text: string): Promise<void> {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "true");
+  textarea.style.position = "fixed";
+  textarea.style.left = "-9999px";
+  document.body.appendChild(textarea);
+  textarea.select();
+  document.execCommand("copy");
+  textarea.remove();
 }

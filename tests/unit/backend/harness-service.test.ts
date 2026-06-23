@@ -79,6 +79,8 @@ describe("createHarnessService", () => {
     expect(harnessEngineerAgent).toContain("You are VCM `harness-engineer`");
     expect(harnessEngineerAgent).toContain("Propose harness changes as reviewable diffs");
     expect(harnessEngineerAgent).toContain("CodingForMoney/VibeCodingMaster");
+    expect(harnessEngineerAgent).toContain("unless the harness owner gives explicit");
+    expect(harnessEngineerAgent).not.toContain("Do not act as PM, Architect, Coder");
     expect(await fs.readText("/repo/.ai/tools/request-gate-review")).toContain("Request a VCM-managed Gate Review Gate");
     expect(await fs.readText("/repo/.claude/settings.json")).toContain("UserPromptSubmit");
     expect(await fs.readText("/repo/.claude/settings.json")).toContain("Stop");
