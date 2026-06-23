@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useState } from "react";
 import type {
   HarnessApplyResult,
   HarnessBootstrapStatusReport,
@@ -20,8 +20,6 @@ type BootstrapLaunchOptions = {
   model: SessionModel;
   effort: SessionEffort;
 };
-type BootstrapLaunchOptionField = keyof BootstrapLaunchOptions;
-type BootstrapLaunchOptionOverrides = Partial<Record<BootstrapLaunchOptionField, true>>;
 
 export interface HarnessPanelProps {
   status: HarnessStatusReport | null;
@@ -58,27 +56,10 @@ export function HarnessPanel({
   const [bootstrapPermissionMode, setBootstrapPermissionMode] = useState<ClaudePermissionMode>("bypassPermissions");
   const [bootstrapModel, setBootstrapModel] = useState<SessionModel>("default");
   const [bootstrapEffort, setBootstrapEffort] = useState<SessionEffort>("default");
-  const bootstrapLaunchOverridesRef = useRef<BootstrapLaunchOptionOverrides>({});
   const bootstrapSession = bootstrapStatus?.session;
   const bootstrapRunning = bootstrapStatus?.status === "running";
   const bootstrapSessionRunning = bootstrapSession?.status === "running";
   const showBootstrapStage = bootstrapStatus?.status !== "complete";
-
-  useEffect(() => {
-    bootstrapLaunchOverridesRef.current = {};
-  }, [bootstrapSession?.id]);
-
-  useEffect(() => {
-    if (bootstrapSession?.permissionMode && !bootstrapLaunchOverridesRef.current.permissionMode) {
-      setBootstrapPermissionMode(bootstrapSession.permissionMode);
-    }
-    if (bootstrapSession?.model && !bootstrapLaunchOverridesRef.current.model) {
-      setBootstrapModel(bootstrapSession.model);
-    }
-    if (bootstrapSession?.effort && !bootstrapLaunchOverridesRef.current.effort) {
-      setBootstrapEffort(bootstrapSession.effort);
-    }
-  }, [bootstrapSession]);
 
   const bootstrapLaunchOptions = {
     permissionMode: bootstrapPermissionMode,
@@ -256,10 +237,7 @@ export function HarnessPanel({
                 <select
                   value={bootstrapPermissionMode}
                   disabled={busy || bootstrapRunning || bootstrapSessionRunning}
-                  onChange={(event) => {
-                    bootstrapLaunchOverridesRef.current.permissionMode = true;
-                    setBootstrapPermissionMode(event.target.value as ClaudePermissionMode);
-                  }}
+                  onChange={(event) => setBootstrapPermissionMode(event.target.value as ClaudePermissionMode)}
                 >
                   {CLAUDE_PERMISSION_MODE_OPTIONS.map((option) => (
                     <option key={option.value} value={option.value}>{option.label}</option>
@@ -271,10 +249,7 @@ export function HarnessPanel({
                 <select
                   value={bootstrapModel}
                   disabled={busy || bootstrapRunning || bootstrapSessionRunning}
-                  onChange={(event) => {
-                    bootstrapLaunchOverridesRef.current.model = true;
-                    setBootstrapModel(event.target.value as SessionModel);
-                  }}
+                  onChange={(event) => setBootstrapModel(event.target.value as SessionModel)}
                 >
                   {CLAUDE_MODEL_OPTIONS.map((option) => (
                     <option key={option.value} value={option.value}>{option.label}</option>
@@ -286,10 +261,7 @@ export function HarnessPanel({
                 <select
                   value={bootstrapEffort}
                   disabled={busy || bootstrapRunning || bootstrapSessionRunning}
-                  onChange={(event) => {
-                    bootstrapLaunchOverridesRef.current.effort = true;
-                    setBootstrapEffort(event.target.value as SessionEffort);
-                  }}
+                  onChange={(event) => setBootstrapEffort(event.target.value as SessionEffort)}
                 >
                   {CLAUDE_EFFORT_OPTIONS.map((option) => (
                     <option key={option.value} value={option.value}>{option.label}</option>

@@ -1,11 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CORE_VCM_ROLE_DEFINITIONS, GATE_REVIEWER_ROLE_DEFINITION, VCM_ROLE_DEFINITIONS } from "../../shared/constants.js";
 import type { TaskStatusReport } from "../../shared/types/api.js";
 import type { VcmOrchestrationMode, VcmOrchestrationState, VcmRoleMessage } from "../../shared/types/message.js";
 import type { CoreVcmRoleName, RoleDefinition, RoleName, VcmRoleName } from "../../shared/types/role.js";
 import type { VcmSessionRoundState } from "../../shared/types/round.js";
-import type { ClaudeModel, ClaudePermissionMode, RoleSessionRecord, SessionEffort, SessionModel } from "../../shared/types/session.js";
-import type { TranslationTargetLanguage } from "../../shared/types/app-settings.js";
+import type { ClaudeModel, ClaudePermissionMode, SessionEffort, SessionModel } from "../../shared/types/session.js";
+import type { LaunchTemplate, TranslationTargetLanguage } from "../../shared/types/app-settings.js";
 import type { TaskRecord } from "../../shared/types/task.js";
 import { RoleSessionTabs } from "../components/role-session-tabs.js";
 import { SessionConsole } from "../components/session-console.js";
@@ -15,8 +15,36 @@ import { apiClient } from "../state/api-client.js";
 import { selectAutoDispatchRole } from "../state/message-navigation.js";
 
 const TASK_MESSAGE_STATE_POLL_INTERVAL_MS = 2000;
-type LaunchOptionField = "permissionMode" | "model" | "effort";
-type LaunchOptionOverrides = Partial<Record<RoleName, Partial<Record<LaunchOptionField, true>>>>;
+
+const DEFAULT_PERMISSION_MODES: Record<RoleName, ClaudePermissionMode> = {
+  "project-manager": "bypassPermissions",
+  architect: "bypassPermissions",
+  coder: "bypassPermissions",
+  reviewer: "bypassPermissions",
+  "gate-reviewer": "bypassPermissions",
+  translator: "bypassPermissions",
+  "harness-engineer": "bypassPermissions"
+};
+
+const DEFAULT_MODELS: Record<RoleName, SessionModel> = {
+  "project-manager": "default",
+  architect: "default",
+  coder: "default",
+  reviewer: "default",
+  "gate-reviewer": "default",
+  translator: "default",
+  "harness-engineer": "default"
+};
+
+const DEFAULT_EFFORTS: Record<RoleName, SessionEffort> = {
+  "project-manager": "default",
+  architect: "default",
+  coder: "default",
+  reviewer: "default",
+  "gate-reviewer": "default",
+  translator: "medium",
+  "harness-engineer": "medium"
+};
 
 export interface TaskWorkspaceProps {
   task: TaskRecord;
@@ -25,6 +53,7 @@ export interface TaskWorkspaceProps {
   translationEnabled: boolean;
   translationAutoSendEnabled: boolean;
   translationTargetLanguage: TranslationTargetLanguage;
+  launchTemplate: LaunchTemplate;
   refreshNonce?: number;
   onTaskChanged(): Promise<void>;
   onActiveRoleChange(role: RoleName): void;
@@ -57,6 +86,7 @@ export function TaskWorkspace({
   translationEnabled,
   translationAutoSendEnabled,
   translationTargetLanguage,
+  launchTemplate,
   refreshNonce = 0,
   onTaskChanged,
   onActiveRoleChange,
@@ -68,40 +98,16 @@ export function TaskWorkspace({
   onLaunchStateChanged
 }: TaskWorkspaceProps) {
   const [statusReport, setStatusReport] = useState<TaskStatusReport | null>(null);
-  const [permissionModes, setPermissionModes] = useState<Record<RoleName, ClaudePermissionMode>>({
-    "project-manager": "bypassPermissions",
-    architect: "bypassPermissions",
-    coder: "bypassPermissions",
-    reviewer: "bypassPermissions",
-    "gate-reviewer": "bypassPermissions",
-    translator: "bypassPermissions",
-    "harness-engineer": "bypassPermissions"
-  });
-  const [models, setModels] = useState<Record<RoleName, SessionModel>>({
-    "project-manager": "default",
-    architect: "default",
-    coder: "default",
-    reviewer: "default",
-    "gate-reviewer": "default",
-    translator: "default",
-    "harness-engineer": "default"
-  });
-  const [efforts, setEfforts] = useState<Record<RoleName, SessionEffort>>({
-    "project-manager": "default",
-    architect: "default",
-    coder: "default",
-    reviewer: "default",
-    "gate-reviewer": "default",
-    translator: "medium",
-    "harness-engineer": "medium"
-  });
+  const [permissionModes, setPermissionModes] = useState<Record<RoleName, ClaudePermissionMode>>(() => permissionModesFromLaunchTemplate(launchTemplate));
+  const [models, setModels] = useState<Record<RoleName, SessionModel>>(() => modelsFromLaunchTemplate(launchTemplate));
+  const [efforts, setEfforts] = useState<Record<RoleName, SessionEffort>>(() => effortsFromLaunchTemplate(launchTemplate));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const [events, setEvents] = useState<string[]>([]);
   const [orchestration, setOrchestration] = useState<VcmOrchestrationState | null>(null);
   const messageSnapshotRef = useRef<{ taskSlug: string; messages: VcmRoleMessage[] } | null>(null);
   const taskStatusSyncKeyRef = useRef("");
-  const launchOptionOverridesRef = useRef<LaunchOptionOverrides>({});
+  const launchTemplateKey = useMemo(() => JSON.stringify(launchTemplate), [launchTemplate]);
   const hasGateReviewerSession = Boolean(
     statusReport?.sessions.some((session) => session.role === "gate-reviewer")
   );
@@ -153,8 +159,13 @@ export function TaskWorkspace({
   useEffect(() => {
     setEvents([]);
     onEventsChanged?.([]);
-    launchOptionOverridesRef.current = {};
   }, [onEventsChanged, task.taskSlug]);
+
+  useEffect(() => {
+    setPermissionModes(permissionModesFromLaunchTemplate(launchTemplate));
+    setModels(modelsFromLaunchTemplate(launchTemplate));
+    setEfforts(effortsFromLaunchTemplate(launchTemplate));
+  }, [launchTemplateKey, task.taskSlug]);
 
   useEffect(() => {
     if (statusReport && !gateReviewerVisible && activeRole === "gate-reviewer") {
@@ -186,59 +197,6 @@ export function TaskWorkspace({
       setError(caught.message);
     });
   }, [onTaskChanged, statusReport?.task, task]);
-
-  useEffect(() => {
-    setPermissionModes((current) => {
-      let changed = false;
-      const next = { ...current };
-      for (const session of statusReport?.sessions ?? []) {
-        if (hasLaunchOptionOverride(launchOptionOverridesRef.current, session.role, "permissionMode")) {
-          continue;
-        }
-        if (next[session.role] !== session.permissionMode) {
-          next[session.role] = session.permissionMode;
-          changed = true;
-        }
-      }
-      return changed ? next : current;
-    });
-  }, [statusReport?.sessions]);
-
-  useEffect(() => {
-    setModels((current) => {
-      let changed = false;
-      const next = { ...current };
-      for (const session of statusReport?.sessions ?? []) {
-        if (hasLaunchOptionOverride(launchOptionOverridesRef.current, session.role, "model")) {
-          continue;
-        }
-        const sessionModel = session.model ?? "default";
-        if (next[session.role] !== sessionModel) {
-          next[session.role] = sessionModel;
-          changed = true;
-        }
-      }
-      return changed ? next : current;
-    });
-  }, [statusReport?.sessions]);
-
-  useEffect(() => {
-    setEfforts((current) => {
-      let changed = false;
-      const next = { ...current };
-      for (const session of statusReport?.sessions ?? []) {
-        if (hasLaunchOptionOverride(launchOptionOverridesRef.current, session.role, "effort")) {
-          continue;
-        }
-        const sessionEffort = session.effort ?? "default";
-        if (next[session.role] !== sessionEffort) {
-          next[session.role] = sessionEffort;
-          changed = true;
-        }
-      }
-      return changed ? next : current;
-    });
-  }, [statusReport?.sessions]);
 
   useEffect(() => {
     const sessions = statusReport?.sessions ?? [];
@@ -383,7 +341,6 @@ export function TaskWorkspace({
   }
 
   function setRolePermissionMode(role: RoleName, permissionMode: ClaudePermissionMode) {
-    markLaunchOptionOverride(launchOptionOverridesRef.current, role, "permissionMode");
     setPermissionModes((current) => ({
       ...current,
       [role]: permissionMode
@@ -391,7 +348,6 @@ export function TaskWorkspace({
   }
 
   function setRoleModel(role: RoleName, model: SessionModel) {
-    markLaunchOptionOverride(launchOptionOverridesRef.current, role, "model");
     setModels((current) => ({
       ...current,
       [role]: model
@@ -399,26 +355,9 @@ export function TaskWorkspace({
   }
 
   function setRoleEffort(role: RoleName, effort: SessionEffort) {
-    markLaunchOptionOverride(launchOptionOverridesRef.current, role, "effort");
     setEfforts((current) => ({
       ...current,
       [role]: effort
-    }));
-  }
-
-  function syncRoleLaunchOptions(session: RoleSessionRecord) {
-    delete launchOptionOverridesRef.current[session.role];
-    setPermissionModes((current) => ({
-      ...current,
-      [session.role]: session.permissionMode
-    }));
-    setModels((current) => ({
-      ...current,
-      [session.role]: session.model ?? "default"
-    }));
-    setEfforts((current) => ({
-      ...current,
-      [session.role]: session.effort ?? "default"
     }));
   }
 
@@ -496,25 +435,23 @@ export function TaskWorkspace({
                     onModelChange={(model) => setRoleModel(role, model)}
                     onEffortChange={(effort) => setRoleEffort(role, effort)}
                     onStart={() => void runAction(async () => {
-                      const session = await apiClient.startRoleSession(task.taskSlug, role, {
+                      await apiClient.startRoleSession(task.taskSlug, role, {
                         cols: 100,
                         rows: 28,
                         permissionMode: permissionModes[role],
                         model: models[role],
                         effort: efforts[role]
                       });
-                      syncRoleLaunchOptions(session);
                       appendEvent(`started ${role} with ${permissionModes[role]} / ${models[role]} / ${efforts[role]}`);
                     })}
                     onResume={() => void runAction(async () => {
-                      const session = await apiClient.resumeRoleSession(task.taskSlug, role, {
+                      await apiClient.resumeRoleSession(task.taskSlug, role, {
                         cols: 100,
                         rows: 28,
                         permissionMode: permissionModes[role],
                         model: models[role],
                         effort: efforts[role]
                       });
-                      syncRoleLaunchOptions(session);
                       appendEvent(`resumed ${role} with ${permissionModes[role]} / ${models[role]} / ${efforts[role]}`);
                     })}
                     onStop={() => void runAction(async () => {
@@ -522,14 +459,13 @@ export function TaskWorkspace({
                       appendEvent(`stopped ${role}`);
                     })}
                     onRestart={() => void runAction(async () => {
-                      const session = await apiClient.restartRoleSession(task.taskSlug, role, {
+                      await apiClient.restartRoleSession(task.taskSlug, role, {
                         cols: 100,
                         rows: 28,
                         permissionMode: permissionModes[role],
                         model: models[role],
                         effort: efforts[role]
                       });
-                      syncRoleLaunchOptions(session);
                       appendEvent(`restarted ${role} with ${permissionModes[role]} / ${models[role]} / ${efforts[role]}`);
                     })}
                     onNotifyHarnessUpdated={() => void runAction(async () => {
@@ -561,13 +497,26 @@ function taskSyncKey(task: TaskRecord): string {
   ].join(":");
 }
 
-function hasLaunchOptionOverride(overrides: LaunchOptionOverrides, role: RoleName, field: LaunchOptionField): boolean {
-  return Boolean(overrides[role]?.[field]);
+function permissionModesFromLaunchTemplate(template: LaunchTemplate): Record<RoleName, ClaudePermissionMode> {
+  const modes = { ...DEFAULT_PERMISSION_MODES };
+  for (const definition of VCM_ROLE_DEFINITIONS) {
+    modes[definition.name] = template.roles[definition.name]?.permissionMode ?? modes[definition.name];
+  }
+  return modes;
 }
 
-function markLaunchOptionOverride(overrides: LaunchOptionOverrides, role: RoleName, field: LaunchOptionField): void {
-  overrides[role] = {
-    ...overrides[role],
-    [field]: true
-  };
+function modelsFromLaunchTemplate(template: LaunchTemplate): Record<RoleName, SessionModel> {
+  const models = { ...DEFAULT_MODELS };
+  for (const definition of VCM_ROLE_DEFINITIONS) {
+    models[definition.name] = template.roles[definition.name]?.model ?? models[definition.name];
+  }
+  return models;
+}
+
+function effortsFromLaunchTemplate(template: LaunchTemplate): Record<RoleName, SessionEffort> {
+  const efforts = { ...DEFAULT_EFFORTS };
+  for (const definition of VCM_ROLE_DEFINITIONS) {
+    efforts[definition.name] = template.roles[definition.name]?.effort ?? efforts[definition.name];
+  }
+  return efforts;
 }

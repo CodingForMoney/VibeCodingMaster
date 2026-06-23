@@ -1172,6 +1172,7 @@ export function App() {
           translationEnabled={effectiveTranslationEnabled}
           translationAutoSendEnabled={translationAutoSendEnabled}
           translationTargetLanguage={translationTargetLanguage}
+          launchTemplate={launchTemplate}
           refreshNonce={workspaceRefreshNonce}
           onTaskChanged={async () => {
             await loadTasks();
