@@ -178,6 +178,11 @@ export function ProjectDashboard({
   );
   const messageCounts = getMessageCounts(messages);
   const normalizedTaskSlug = taskSlug.trim();
+  const translationBaseUnavailableReason = getTranslationBaseUnavailableReason(
+    project,
+    activeTaskSlug,
+    harnessStatus
+  );
   const activeTask = tasks.find((task) => task.taskSlug === activeTaskSlug) ?? null;
 
   useEffect(() => {
@@ -339,7 +344,7 @@ export function ProjectDashboard({
           autoSendEnabled={translationAutoSendEnabled}
           targetLanguage={translationTargetLanguage}
           outputMode={translationOutputMode}
-          fileTranslationAvailable={Boolean(project)}
+          baseUnavailableReason={translationBaseUnavailableReason}
           translatorSession={translatorSession}
           onAutoSendChange={onTranslationAutoSendChange}
           onCreateBootstrap={onCreateTranslationBootstrap}
@@ -496,9 +501,9 @@ function getLaunchTemplateSummary(template: LaunchTemplate): string {
 
 function TranslationControlsPanel({
   autoSendEnabled,
+  baseUnavailableReason,
   busy,
   enabled,
-  fileTranslationAvailable,
   outputMode,
   targetLanguage,
   translatorSession,
@@ -512,9 +517,9 @@ function TranslationControlsPanel({
   onOpenTranslatorSession
 }: {
   autoSendEnabled: boolean;
+  baseUnavailableReason: string | null;
   busy?: boolean;
   enabled: boolean;
-  fileTranslationAvailable: boolean;
   outputMode: TranslationOutputMode;
   targetLanguage: TranslationTargetLanguage;
   translatorSession: RoleSessionRecord | null;
@@ -527,22 +532,32 @@ function TranslationControlsPanel({
   onOpenFileTranslation(): void;
   onOpenTranslatorSession(): void;
 }) {
+  const baseDisabled = Boolean(busy || baseUnavailableReason);
+  const sessionRunning = translatorSession?.status === "running";
+  const conversationEnabled = Boolean(enabled && !baseUnavailableReason && sessionRunning);
+  const sessionUnavailableReason = baseUnavailableReason ?? (sessionRunning ? null : "Start Translator session first.");
+  const sessionActionsDisabled = Boolean(busy || sessionUnavailableReason);
+  const baseReadyTitle = "Open Translator session";
+  const baseUnavailableTitle = baseUnavailableReason ?? baseReadyTitle;
+  const sessionActionTitle = sessionUnavailableReason ?? "Translation tools are ready";
+
   return (
     <div className="sidebar-settings">
       <button
-        aria-pressed={enabled}
-        className={enabled ? "settings-toggle is-active" : "settings-toggle"}
-        disabled={busy}
+        aria-pressed={conversationEnabled}
+        className={conversationEnabled ? "settings-toggle is-active" : "settings-toggle"}
+        disabled={baseDisabled || !sessionRunning}
+        title={sessionActionTitle}
         type="button"
-        onClick={() => onEnabledChange(!enabled)}
+        onClick={() => onEnabledChange(!conversationEnabled)}
       >
         <span>Conversation translation</span>
-        <span>{enabled ? "on" : "off"}</span>
+        <span>{conversationEnabled ? "on" : "off"}</span>
       </button>
       <button
         aria-pressed={autoSendEnabled}
         className={autoSendEnabled ? "settings-toggle is-active" : "settings-toggle"}
-        disabled={busy}
+        disabled={baseDisabled}
         type="button"
         onClick={() => onAutoSendChange(!autoSendEnabled)}
       >
@@ -553,7 +568,7 @@ function TranslationControlsPanel({
         <span>Language</span>
         <select
           value={targetLanguage}
-          disabled={busy}
+          disabled={baseDisabled}
           onChange={(event) => onTargetLanguageChange(event.target.value as TranslationTargetLanguage)}
         >
           {TRANSLATION_TARGET_LANGUAGE_OPTIONS.map((option) => (
@@ -567,7 +582,7 @@ function TranslationControlsPanel({
         <span>Reply scope</span>
         <select
           value={outputMode}
-          disabled={busy}
+          disabled={baseDisabled}
           onChange={(event) => onOutputModeChange(event.target.value as TranslationOutputMode)}
         >
           {TRANSLATION_OUTPUT_MODE_OPTIONS.map((option) => (
@@ -579,8 +594,8 @@ function TranslationControlsPanel({
       </label>
       <button
         className="settings-toggle"
-        disabled={busy || !fileTranslationAvailable}
-        title={fileTranslationAvailable ? "Open file translation" : "Connect a repository first"}
+        disabled={sessionActionsDisabled}
+        title={sessionActionTitle}
         type="button"
         onClick={onOpenFileTranslation}
       >
@@ -589,8 +604,8 @@ function TranslationControlsPanel({
       </button>
       <button
         className="settings-toggle"
-        disabled={busy || !fileTranslationAvailable}
-        title={fileTranslationAvailable ? "Run translation bootstrap" : "Connect a repository first"}
+        disabled={sessionActionsDisabled}
+        title={sessionActionTitle}
         type="button"
         onClick={onCreateBootstrap}
       >
@@ -599,22 +614,25 @@ function TranslationControlsPanel({
       </button>
       <button
         className="settings-toggle"
-        disabled={busy || !fileTranslationAvailable}
-        title={fileTranslationAvailable ? "Compact and update translation memory" : "Connect a repository first"}
+        disabled={sessionActionsDisabled}
+        title={sessionActionTitle}
         type="button"
         onClick={onUpdateMemory}
       >
         <span>Update memory</span>
         <span>run</span>
       </button>
+      {sessionUnavailableReason ? (
+        <p className="settings-help-text">{sessionUnavailableReason}</p>
+      ) : null}
       <div className="settings-status-row">
         <span>Session status</span>
         <strong>{getTranslatorSessionStatus(translatorSession)}</strong>
       </div>
       <button
         className="settings-toggle"
-        disabled={busy || !fileTranslationAvailable}
-        title={fileTranslationAvailable ? "Open Translator session" : "Connect a repository first"}
+        disabled={baseDisabled}
+        title={baseUnavailableTitle}
         type="button"
         onClick={onOpenTranslatorSession}
       >
@@ -633,6 +651,26 @@ function getTranslatorSessionStatus(session: RoleSessionRecord | null): string {
     return session.activityStatus ?? "idle";
   }
   return session.status;
+}
+
+function getTranslationBaseUnavailableReason(
+  project: ProjectSummary | null,
+  activeTaskSlug: string | null,
+  harnessStatus: HarnessStatusReport | null
+): string | null {
+  if (!project) {
+    return "Connect a repository first.";
+  }
+  if (!activeTaskSlug) {
+    return "Create or select a task first.";
+  }
+  if (!harnessStatus) {
+    return "Load VCM Harness status first.";
+  }
+  if (!harnessStatus.initialized) {
+    return "Initialize VCM Harness first.";
+  }
+  return null;
 }
 
 function GateReviewGateSettings({

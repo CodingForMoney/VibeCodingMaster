@@ -43,11 +43,18 @@ import { TaskWorkspace, type TaskWorkspaceLaunchState } from "./routes/task-work
 const FLOW_PAUSE_STRONG_ALERT_THRESHOLD_MS = 2 * 60 * 1000;
 const FLOW_PAUSE_CHIME_INTERVAL_MS = 1400;
 const FLOW_PAUSE_WEAK_CHIME_COUNT = 3;
+
+function isTranslationHarnessReady(harnessStatus: HarnessStatusReport | null): boolean {
+  return Boolean(harnessStatus?.initialized);
+}
+
 export function App() {
   const [project, setProject] = useState<ProjectSummary | null>(null);
   const [recentRepositoryPaths, setRecentRepositoryPaths] = useState<string[]>([]);
   const [harnessStatus, setHarnessStatus] = useState<HarnessStatusReport | null>(null);
   const [harnessBootstrapStatus, setHarnessBootstrapStatus] = useState<HarnessBootstrapStatusReport | null>(null);
+  const [harnessStatusTaskSlug, setHarnessStatusTaskSlug] = useState<string | null>(null);
+  const [harnessBootstrapStatusTaskSlug, setHarnessBootstrapStatusTaskSlug] = useState<string | null>(null);
   const [harnessApplyResult, setHarnessApplyResult] = useState<HarnessApplyResult | null>(null);
   const [gatewayStatus, setGatewayStatus] = useState<GatewayStatus | null>(null);
   const [gatewayQrLogin, setGatewayQrLogin] = useState<StartGatewayQrLoginResult | null>(null);
@@ -99,6 +106,11 @@ export function App() {
   const activeTaskLaunchState = activeLaunchState?.taskSlug === activeTask?.taskSlug
     ? activeLaunchState
     : null;
+  const currentHarnessStatus = harnessStatusTaskSlug === activeTask?.taskSlug ? harnessStatus : null;
+  const currentHarnessBootstrapStatus = harnessBootstrapStatusTaskSlug === activeTask?.taskSlug ? harnessBootstrapStatus : null;
+  const translationBaseReady = Boolean(project && activeTask && isTranslationHarnessReady(currentHarnessStatus));
+  const translatorSessionRunning = translatorSession?.status === "running";
+  const effectiveTranslationEnabled = Boolean(translationEnabled && translationBaseReady && translatorSessionRunning);
   const canSaveLaunchTemplate = Boolean(activeTaskLaunchState?.statusLoaded && activeTaskLaunchState.allRolesHaveSession);
   const canOneClickStart = Boolean(activeTask && activeTaskLaunchState?.statusLoaded && !activeTaskLaunchState.hasAnySession);
 
@@ -245,20 +257,24 @@ export function App() {
   async function loadHarnessStatus(taskSlug = activeTask?.taskSlug) {
     if (!taskSlug) {
       setHarnessStatus(null);
+      setHarnessStatusTaskSlug(null);
       return null;
     }
     const nextStatus = await apiClient.getHarnessStatus(taskSlug);
     setHarnessStatus(nextStatus);
+    setHarnessStatusTaskSlug(taskSlug);
     return nextStatus;
   }
 
   async function loadHarnessBootstrapStatus(taskSlug = activeTask?.taskSlug) {
     if (!taskSlug) {
       setHarnessBootstrapStatus(null);
+      setHarnessBootstrapStatusTaskSlug(null);
       return null;
     }
     const nextStatus = await apiClient.getHarnessBootstrapStatus(taskSlug);
     setHarnessBootstrapStatus(nextStatus);
+    setHarnessBootstrapStatusTaskSlug(taskSlug);
     return nextStatus;
   }
 
@@ -440,6 +456,10 @@ export function App() {
     setHarnessEngineerPermissionMode("default");
     setHarnessEngineerModel("default");
     setHarnessEngineerEffort("medium");
+    setHarnessStatus(null);
+    setHarnessBootstrapStatus(null);
+    setHarnessStatusTaskSlug(null);
+    setHarnessBootstrapStatusTaskSlug(null);
   }, [project?.repoRoot]);
 
   useEffect(() => {
@@ -505,6 +525,8 @@ export function App() {
     if (!project || !activeTask?.taskSlug) {
       setHarnessStatus(null);
       setHarnessBootstrapStatus(null);
+      setHarnessStatusTaskSlug(null);
+      setHarnessBootstrapStatusTaskSlug(null);
       return;
     }
 
@@ -523,7 +545,8 @@ export function App() {
   }, [project?.repoRoot, activeTask?.taskSlug]);
 
   useEffect(() => {
-    if (!project || !translationEnabled || !activeTask?.taskSlug) {
+    if (!project || !translationEnabled || !activeTask?.taskSlug || !translationBaseReady || !translatorSessionRunning) {
+      translatorEnsureKeyRef.current = "";
       return;
     }
 
@@ -541,7 +564,7 @@ export function App() {
         translatorEnsureKeyRef.current = "";
         setError(caught.message);
       });
-  }, [project?.repoRoot, activeTask?.taskSlug, translationEnabled]);
+  }, [project?.repoRoot, activeTask?.taskSlug, translationEnabled, translationBaseReady, translatorSessionRunning]);
 
   useEffect(() => {
     if (!activeTask?.taskSlug) {
@@ -591,7 +614,6 @@ export function App() {
   const gateReviewerEnabled = Boolean(
     sidebarGateReview && Object.values(sidebarGateReview.gates).some((gate) => gate.required)
   );
-
   return (
     <AppShell
       sidebar={(
@@ -605,13 +627,13 @@ export function App() {
           events={sidebarEvents}
           roundState={sidebarRoundState}
           gateReview={sidebarGateReview}
-          translationEnabled={translationEnabled}
+          translationEnabled={effectiveTranslationEnabled}
           translationAutoSendEnabled={translationAutoSendEnabled}
           translationTargetLanguage={translationTargetLanguage}
           translationOutputMode={translationOutputMode}
           translatorSession={translatorSession}
-          harnessStatus={harnessStatus}
-          harnessBootstrapStatus={harnessBootstrapStatus}
+          harnessStatus={currentHarnessStatus}
+          harnessBootstrapStatus={currentHarnessBootstrapStatus}
           harnessApplyResult={harnessApplyResult}
           gatewayStatus={gatewayStatus}
           gatewayQrLogin={gatewayQrLogin}
@@ -666,6 +688,7 @@ export function App() {
               ...input
             });
             setHarnessBootstrapStatus(result.status);
+            setHarnessBootstrapStatusTaskSlug(activeTask.taskSlug);
             await refreshHarnessEngineerSession({ syncLaunchOptions: true });
           })}
           onRestartHarnessBootstrap={(input) => withBusy(async () => {
@@ -679,11 +702,13 @@ export function App() {
               ...input
             });
             setHarnessBootstrapStatus(result.status);
+            setHarnessBootstrapStatusTaskSlug(activeTask.taskSlug);
             await refreshHarnessEngineerSession({ syncLaunchOptions: true });
           })}
           onStopHarnessBootstrap={() => withBusy(async () => {
             const status = await apiClient.stopHarnessBootstrap();
             setHarnessBootstrapStatus(status);
+            setHarnessBootstrapStatusTaskSlug(activeTask?.taskSlug ?? null);
             await refreshHarnessEngineerSession();
           })}
           onRunHarnessBootstrap={() => withBusy(async () => {
@@ -692,6 +717,7 @@ export function App() {
             }
             const result = await apiClient.runHarnessBootstrap({ taskSlug: activeTask.taskSlug });
             setHarnessBootstrapStatus(result.status);
+            setHarnessBootstrapStatusTaskSlug(activeTask.taskSlug);
             await refreshHarnessEngineerSession();
           })}
           onOpenHarnessStudio={() => setHarnessStudioOpen(true)}
@@ -981,7 +1007,7 @@ export function App() {
           task={activeTask}
           activeRole={activeRole}
           gateReviewerEnabled={gateReviewerEnabled}
-          translationEnabled={translationEnabled}
+          translationEnabled={effectiveTranslationEnabled}
           translationAutoSendEnabled={translationAutoSendEnabled}
           translationTargetLanguage={translationTargetLanguage}
           refreshNonce={workspaceRefreshNonce}
@@ -1014,8 +1040,8 @@ export function App() {
       <HarnessStudioModal
         open={harnessStudioOpen}
         busy={busy}
-        status={harnessStatus}
-        bootstrapStatus={harnessBootstrapStatus}
+        status={currentHarnessStatus}
+        bootstrapStatus={currentHarnessBootstrapStatus}
         engineerSession={harnessEngineerSession}
         permissionMode={harnessEngineerPermissionMode}
         model={harnessEngineerModel}

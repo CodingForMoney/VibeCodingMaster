@@ -197,7 +197,7 @@ export function HarnessStudioModal({
                           </button>
                         </>
                       )}
-                      <button type="button" onClick={closeFilePreview}>Files</button>
+                      <button type="button" onClick={closeFilePreview}>Return</button>
                     </div>
                   </header>
                   {selectedFile?.readonlyReason ? (

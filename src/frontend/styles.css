@@ -735,6 +735,13 @@ h2 {
   font-size: 12px;
 }
 
+.settings-help-text {
+  margin: 0;
+  color: #7b5e00;
+  font-size: 12px;
+  line-height: 1.35;
+}
+
 .task-status-dock {
   display: grid;
   gap: 10px;
@@ -1880,6 +1887,7 @@ h2 {
   display: grid;
   grid-template-columns: minmax(340px, 0.85fr) minmax(640px, 1.55fr);
   gap: 12px;
+  height: 100%;
   min-width: 0;
   min-height: 0;
   overflow: hidden;
@@ -1896,6 +1904,8 @@ h2 {
 }
 
 .harness-studio-left-preview {
+  grid-template-rows: minmax(0, 1fr);
+  height: 100%;
   align-content: stretch;
   overflow: hidden;
   padding-right: 0;
@@ -1937,6 +1947,7 @@ h2 {
   display: grid;
   grid-template-rows: auto auto auto minmax(0, 1fr);
   gap: 10px;
+  height: 100%;
   min-width: 0;
   min-height: 0;
   overflow: hidden;
@@ -1970,9 +1981,13 @@ h2 {
 }
 
 .harness-studio-file-textarea {
+  grid-row: 4;
+  align-self: stretch;
+  height: 100%;
   width: 100%;
   min-width: 0;
   min-height: 0;
+  overflow: auto;
   resize: none;
   border: 1px solid #30363d;
   border-radius: 6px;
@@ -2995,6 +3010,10 @@ h2 {
 
 :root[data-theme="dark"] .message-sequence {
   color: #f0f6fc;
+}
+
+:root[data-theme="dark"] .settings-help-text {
+  color: #d29922;
 }
 
 :root[data-theme="dark"] .task-nav-item.is-active,
