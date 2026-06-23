@@ -143,7 +143,6 @@ const VCM_HOOK_DEFINITIONS: ReadonlyArray<{ eventName: string; matcher?: string;
   { eventName: "Stop", command: VCM_STOP_HOOK_COMMAND, timeout: 10 },
   { eventName: "StopFailure", command: VCM_HOOK_COMMAND, timeout: 5 },
   { eventName: "PostCompact", command: VCM_HOOK_COMMAND, timeout: 5 },
-  { eventName: "CwdChanged", command: VCM_HOOK_COMMAND, timeout: 5 },
   { eventName: "PermissionRequest", command: VCM_PERMISSION_REQUEST_HOOK_COMMAND, timeout: 5 }
 ];
 
@@ -1787,7 +1786,7 @@ async function clearHarnessBootstrapRunState(fs: FileSystemAdapter, repoRoot: st
 }
 
 function isHarnessBootstrapHookEvent(value: unknown): value is RecordHarnessBootstrapHookInput["eventName"] {
-  return value === "Stop" || value === "StopFailure" || value === "UserPromptSubmit" || value === "PostCompact" || value === "CwdChanged";
+  return value === "Stop" || value === "StopFailure" || value === "UserPromptSubmit" || value === "PostCompact";
 }
 
 function matchesBootstrapRunState(

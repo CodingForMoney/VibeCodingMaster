@@ -621,9 +621,6 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       cwd: targetCwd,
       previousCwd: session.cwd,
       transcriptPath: claudeTranscriptPath(targetCwd, session.claudeSessionId),
-      cwdMigrationTarget: targetCwd,
-      cwdMigrationPending: true,
-      lastCwdMigrationAt: timestamp,
       updatedAt: timestamp
     };
     deps.registry.upsert(normalizeProjectScopedRecordForPersistence(updated));
@@ -950,19 +947,16 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       const timestamp = now();
       const isTurnEnd = isTurnEndHook(input.eventName);
       const isCompact = isCompactHook(input.eventName);
-      const isCwdChanged = isCwdChangedHook(input.eventName);
       const updated: RoleSessionRecord = {
         ...current,
         claudeSessionId: input.sessionId ?? current.claudeSessionId,
         transcriptPath: input.transcriptPath ?? current.transcriptPath,
         cwd: input.cwd ?? current.cwd,
-        activityStatus: isTurnEnd ? "idle" : (isCompact || isCwdChanged) ? current.activityStatus : "running",
+        activityStatus: isTurnEnd ? "idle" : isCompact ? current.activityStatus : "running",
         lastHookEventAt: timestamp,
         lastTurnEndedAt: isTurnEnd ? timestamp : current.lastTurnEndedAt,
-        lastTurnStartedAt: isTurnEnd || isCompact || isCwdChanged ? current.lastTurnStartedAt : timestamp,
+        lastTurnStartedAt: isTurnEnd || isCompact ? current.lastTurnStartedAt : timestamp,
         lastCompactAt: isCompact ? timestamp : current.lastCompactAt,
-        cwdMigrationPending: isCwdChanged ? false : current.cwdMigrationPending,
-        cwdMigrationTarget: isCwdChanged ? undefined : current.cwdMigrationTarget,
         updatedAt: timestamp
       };
       deps.registry.upsert(updated);
@@ -1085,19 +1079,16 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       const timestamp = now();
       const isTurnEnd = isTurnEndHook(input.eventName);
       const isCompact = isCompactHook(input.eventName);
-      const isCwdChanged = isCwdChangedHook(input.eventName);
       const updated: RoleSessionRecord = {
         ...current,
         claudeSessionId: input.sessionId ?? current.claudeSessionId,
         transcriptPath: input.transcriptPath ?? current.transcriptPath,
         cwd: input.cwd ?? current.cwd,
-        activityStatus: isTurnEnd ? "idle" : (isCompact || isCwdChanged) ? current.activityStatus : "running",
+        activityStatus: isTurnEnd ? "idle" : isCompact ? current.activityStatus : "running",
         lastHookEventAt: timestamp,
         lastTurnEndedAt: isTurnEnd ? timestamp : current.lastTurnEndedAt,
-        lastTurnStartedAt: isTurnEnd || isCompact || isCwdChanged ? current.lastTurnStartedAt : timestamp,
+        lastTurnStartedAt: isTurnEnd || isCompact ? current.lastTurnStartedAt : timestamp,
         lastCompactAt: isCompact ? timestamp : current.lastCompactAt,
-        cwdMigrationPending: isCwdChanged ? false : current.cwdMigrationPending,
-        cwdMigrationTarget: isCwdChanged ? undefined : current.cwdMigrationTarget,
         updatedAt: timestamp
       };
       deps.registry.upsert(updated);
@@ -1279,20 +1270,17 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
         const timestamp = now();
         const isTurnEnd = isTurnEndHook(input.eventName);
         const isCompact = isCompactHook(input.eventName);
-        const isCwdChanged = isCwdChangedHook(input.eventName);
         const updated: RoleSessionRecord = {
           ...current,
           taskSlug: PROJECT_GATE_REVIEWER_SCOPE,
           claudeSessionId: input.sessionId ?? current.claudeSessionId,
           transcriptPath: input.transcriptPath ?? current.transcriptPath,
           cwd: input.cwd ?? current.cwd,
-          activityStatus: isTurnEnd ? "idle" : (isCompact || isCwdChanged) ? current.activityStatus : "running",
+          activityStatus: isTurnEnd ? "idle" : isCompact ? current.activityStatus : "running",
           lastHookEventAt: timestamp,
           lastTurnEndedAt: isTurnEnd ? timestamp : current.lastTurnEndedAt,
-          lastTurnStartedAt: isTurnEnd || isCompact || isCwdChanged ? current.lastTurnStartedAt : timestamp,
+          lastTurnStartedAt: isTurnEnd || isCompact ? current.lastTurnStartedAt : timestamp,
           lastCompactAt: isCompact ? timestamp : current.lastCompactAt,
-          cwdMigrationPending: isCwdChanged ? false : current.cwdMigrationPending,
-          cwdMigrationTarget: isCwdChanged ? undefined : current.cwdMigrationTarget,
           updatedAt: timestamp
         };
         deps.registry.upsert(updated);
@@ -1325,19 +1313,16 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       const timestamp = now();
       const isTurnEnd = isTurnEndHook(input.eventName);
       const isCompact = isCompactHook(input.eventName);
-      const isCwdChanged = isCwdChangedHook(input.eventName);
       const updated: RoleSessionRecord = {
         ...current,
         claudeSessionId: input.sessionId ?? current.claudeSessionId,
         transcriptPath: input.transcriptPath ?? current.transcriptPath,
         cwd: input.cwd ?? current.cwd,
-        activityStatus: isTurnEnd ? "idle" : (isCompact || isCwdChanged) ? current.activityStatus : "running",
+        activityStatus: isTurnEnd ? "idle" : isCompact ? current.activityStatus : "running",
         lastHookEventAt: timestamp,
         lastTurnEndedAt: isTurnEnd ? timestamp : current.lastTurnEndedAt,
-        lastTurnStartedAt: isTurnEnd || isCompact || isCwdChanged ? current.lastTurnStartedAt : timestamp,
+        lastTurnStartedAt: isTurnEnd || isCompact ? current.lastTurnStartedAt : timestamp,
         lastCompactAt: isCompact ? timestamp : current.lastCompactAt,
-        cwdMigrationPending: isCwdChanged ? false : current.cwdMigrationPending,
-        cwdMigrationTarget: isCwdChanged ? undefined : current.cwdMigrationTarget,
         updatedAt: timestamp
       };
       deps.registry.upsert(updated);
@@ -1468,10 +1453,6 @@ function isTurnEndHook(eventName: ClaudeHookEventName): boolean {
 
 function isCompactHook(eventName: ClaudeHookEventName): boolean {
   return eventName === "PostCompact";
-}
-
-function isCwdChangedHook(eventName: ClaudeHookEventName): boolean {
-  return eventName === "CwdChanged";
 }
 
 function getRecoverableStatus(record: RoleSessionRecord): RoleSessionRecord["status"] {

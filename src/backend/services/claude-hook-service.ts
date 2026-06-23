@@ -326,32 +326,6 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
     };
   }
 
-  async function processCwdChangedHook(input: ClaudeHookRequest): Promise<ClaudeHookResult> {
-    const eventName = parseHookEvent(input.event.hook_event_name);
-    if (eventName !== "CwdChanged") {
-      throwUnsupportedEvent(eventName);
-    }
-
-    const context = await getHookContext(input);
-    const session = await deps.sessionService.recordClaudeHookEvent(context.project.repoRoot, {
-      taskSlug: context.taskSlug,
-      role: input.role,
-      eventName,
-      claudeSessionId: stringOrUndefined(input.event.session_id),
-      transcriptPath: stringOrUndefined(input.event.transcript_path),
-      cwd: stringOrUndefined(input.event.cwd) ?? stringOrUndefined(input.event.new_cwd)
-    });
-
-    return {
-      ok: true,
-      eventName,
-      taskSlug: context.taskSlug,
-      role: input.role,
-      sessionUpdated: Boolean(session),
-      dispatchedCount: 0
-    };
-  }
-
   async function recordTurnEnd(
     input: ClaudeHookRequest,
     context: Awaited<ReturnType<typeof getHookContext>>,
@@ -553,9 +527,6 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
       if (eventName === "PostCompact") {
         return processPostCompactHook(input);
       }
-      if (eventName === "CwdChanged") {
-        return processCwdChangedHook(input);
-      }
       // Legacy combined endpoint: the installed hook discards the response,
       // so a block decision could not be enforced. Never block here.
       return processStopHook(input, { allowBlock: false });
@@ -579,7 +550,6 @@ function parseHookEvent(value: unknown): ClaudeHookEventName {
     || value === "Stop"
     || value === "StopFailure"
     || value === "PostCompact"
-    || value === "CwdChanged"
   ) {
     return value;
   }
@@ -587,7 +557,7 @@ function parseHookEvent(value: unknown): ClaudeHookEventName {
     code: "HOOK_EVENT_UNSUPPORTED",
     message: `Unsupported Claude Code hook event: ${String(value)}`,
     statusCode: 400,
-    hint: "VCM accepts UserPromptSubmit, Stop, StopFailure, PostCompact, and CwdChanged hooks only."
+    hint: "VCM accepts UserPromptSubmit, Stop, StopFailure, and PostCompact hooks only."
   });
 }
 

@@ -213,7 +213,7 @@ export interface RunHarnessBootstrapResult {
 }
 
 export interface RecordHarnessBootstrapHookInput {
-  eventName: "Stop" | "StopFailure" | "UserPromptSubmit" | "PostCompact" | "CwdChanged";
+  eventName: "Stop" | "StopFailure" | "UserPromptSubmit" | "PostCompact";
   sessionId?: string;
   claudeSessionId?: string;
 }

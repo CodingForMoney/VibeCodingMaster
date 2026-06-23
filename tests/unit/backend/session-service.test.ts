@@ -329,13 +329,11 @@ describe("createSessionService", () => {
     expect(moved.claudeSessionId).toBe(started.claudeSessionId);
     expect(moved.cwd).toBe("/repo/.claude/worktrees/other-task");
     expect(moved.previousCwd).toBe(TASK_WORKTREE);
-    expect(moved.cwdMigrationPending).toBe(true);
     expect(writes[0]).toContain("/cd /repo/.claude/worktrees/other-task");
 
-    const persisted = await fs.readJson<{ record: { cwd: string; previousCwd?: string; cwdMigrationPending?: boolean } }>("/repo/.ai/vcm/translations/session.json");
+    const persisted = await fs.readJson<{ record: { cwd: string; previousCwd?: string } }>("/repo/.ai/vcm/translations/session.json");
     expect(persisted.record.cwd).toBe("/repo/.claude/worktrees/other-task");
     expect(persisted.record.previousCwd).toBe(TASK_WORKTREE);
-    expect(persisted.record.cwdMigrationPending).toBe(true);
   });
 
   it("resumes a Translator from the previous cwd before moving it to a new task worktree", async () => {
@@ -674,21 +672,6 @@ describe("createSessionService", () => {
       activityStatus: "running",
       transcriptPath: "/Users/sheldon/.claude/projects/demo/compact.jsonl",
       lastCompactAt: "2026-05-29T00:00:00.000Z"
-    });
-
-    const cwdChanged = await service.recordClaudeHookEvent("/repo", {
-      taskSlug: "demo-task",
-      role: "coder",
-      eventName: "CwdChanged",
-      claudeSessionId: started.claudeSessionId,
-      transcriptPath: "/Users/sheldon/.claude/projects/other/cwd.jsonl",
-      cwd: "/repo/.claude/worktrees/other"
-    });
-    expect(cwdChanged).toMatchObject({
-      status: "running",
-      activityStatus: "running",
-      cwd: "/repo/.claude/worktrees/other",
-      transcriptPath: "/Users/sheldon/.claude/projects/other/cwd.jsonl"
     });
   });
 
