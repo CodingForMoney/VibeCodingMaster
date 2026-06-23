@@ -108,7 +108,7 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
       eventName,
       sessionId: stringOrUndefined(input.event.session_id),
       transcriptPath: stringOrUndefined(input.event.transcript_path),
-      cwd: stringOrUndefined(input.event.cwd)
+      cwd: stringOrUndefined(input.event.cwd) ?? stringOrUndefined(input.event.new_cwd)
     });
     await deps.translationWorkerService?.handleTranslatorHook(context.project.repoRoot, eventName, input.taskSlug);
     return {
@@ -128,7 +128,7 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
       eventName,
       sessionId: stringOrUndefined(input.event.session_id),
       transcriptPath: stringOrUndefined(input.event.transcript_path),
-      cwd: stringOrUndefined(input.event.cwd)
+      cwd: stringOrUndefined(input.event.cwd) ?? stringOrUndefined(input.event.new_cwd)
     });
     await deps.harnessService?.recordHarnessBootstrapHook(context.project.repoRoot, {
       eventName,
@@ -180,7 +180,7 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
       eventName,
       claudeSessionId: stringOrUndefined(input.event.session_id),
       transcriptPath: stringOrUndefined(input.event.transcript_path),
-      cwd: stringOrUndefined(input.event.cwd)
+      cwd: stringOrUndefined(input.event.cwd) ?? stringOrUndefined(input.event.new_cwd)
     });
     await deps.roundService.recordClaudeHookEvent({
       repoRoot: context.project.repoRoot,
@@ -313,7 +313,33 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
       eventName,
       claudeSessionId: stringOrUndefined(input.event.session_id),
       transcriptPath: stringOrUndefined(input.event.transcript_path),
-      cwd: stringOrUndefined(input.event.cwd)
+      cwd: stringOrUndefined(input.event.cwd) ?? stringOrUndefined(input.event.new_cwd)
+    });
+
+    return {
+      ok: true,
+      eventName,
+      taskSlug: context.taskSlug,
+      role: input.role,
+      sessionUpdated: Boolean(session),
+      dispatchedCount: 0
+    };
+  }
+
+  async function processCwdChangedHook(input: ClaudeHookRequest): Promise<ClaudeHookResult> {
+    const eventName = parseHookEvent(input.event.hook_event_name);
+    if (eventName !== "CwdChanged") {
+      throwUnsupportedEvent(eventName);
+    }
+
+    const context = await getHookContext(input);
+    const session = await deps.sessionService.recordClaudeHookEvent(context.project.repoRoot, {
+      taskSlug: context.taskSlug,
+      role: input.role,
+      eventName,
+      claudeSessionId: stringOrUndefined(input.event.session_id),
+      transcriptPath: stringOrUndefined(input.event.transcript_path),
+      cwd: stringOrUndefined(input.event.cwd) ?? stringOrUndefined(input.event.new_cwd)
     });
 
     return {
@@ -345,7 +371,7 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
       eventName,
       claudeSessionId: stringOrUndefined(input.event.session_id),
       transcriptPath: stringOrUndefined(input.event.transcript_path),
-      cwd: stringOrUndefined(input.event.cwd)
+      cwd: stringOrUndefined(input.event.cwd) ?? stringOrUndefined(input.event.new_cwd)
     });
     await deps.roundService.recordClaudeHookEvent({
       repoRoot: context.project.repoRoot,
@@ -527,6 +553,9 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
       if (eventName === "PostCompact") {
         return processPostCompactHook(input);
       }
+      if (eventName === "CwdChanged") {
+        return processCwdChangedHook(input);
+      }
       // Legacy combined endpoint: the installed hook discards the response,
       // so a block decision could not be enforced. Never block here.
       return processStopHook(input, { allowBlock: false });
@@ -545,14 +574,20 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
 }
 
 function parseHookEvent(value: unknown): ClaudeHookEventName {
-  if (value === "UserPromptSubmit" || value === "Stop" || value === "StopFailure" || value === "PostCompact") {
+  if (
+    value === "UserPromptSubmit"
+    || value === "Stop"
+    || value === "StopFailure"
+    || value === "PostCompact"
+    || value === "CwdChanged"
+  ) {
     return value;
   }
   throw new VcmError({
     code: "HOOK_EVENT_UNSUPPORTED",
     message: `Unsupported Claude Code hook event: ${String(value)}`,
     statusCode: 400,
-    hint: "VCM accepts UserPromptSubmit, Stop, StopFailure, and PostCompact hooks only."
+    hint: "VCM accepts UserPromptSubmit, Stop, StopFailure, PostCompact, and CwdChanged hooks only."
   });
 }
 

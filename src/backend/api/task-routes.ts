@@ -15,7 +15,7 @@ import type { RoundService } from "../services/round-service.js";
 export interface TaskRouteDeps {
   projectService: ProjectService;
   taskService: TaskService;
-  sessionService: Pick<SessionService, "listRoleSessions" | "stopRoleSession" | "stopProjectTranslatorSession" | "stopProjectHarnessEngineerSession">;
+  sessionService: Pick<SessionService, "listRoleSessions" | "stopRoleSession" | "moveProjectTranslatorSessionToSafeCwd" | "moveProjectHarnessEngineerSessionToSafeCwd">;
   statusService: StatusService;
   translationService: Pick<TranslationService, "stopTask">;
   roundService: Pick<RoundService, "stopTask">;
@@ -57,7 +57,7 @@ export function registerTaskRoutes(app: FastifyInstance, deps: TaskRouteDeps): v
       const project = await requireCurrentProject(deps.projectService);
       const task = await deps.taskService.loadTask(project.repoRoot, request.params.taskSlug);
       await stopRunningRoleSessions(deps, project.repoRoot, request.params.taskSlug);
-      await stopProjectToolSessions(deps, project.repoRoot);
+      await moveProjectToolSessionsToSafeCwd(deps, project.repoRoot);
       await deps.translationService.stopTask(getTaskRuntimeRepoRoot(task), request.params.taskSlug, { clearCache: true });
       deps.roundService.stopTask(request.params.taskSlug);
       return deps.taskService.cleanupTask(project.repoRoot, request.params.taskSlug, request.body ?? {});
@@ -78,13 +78,13 @@ async function stopRunningRoleSessions(
   }
 }
 
-async function stopProjectToolSessions(
+async function moveProjectToolSessionsToSafeCwd(
   deps: Pick<TaskRouteDeps, "sessionService">,
   repoRoot: string
 ): Promise<void> {
   await Promise.all([
-    ignoreMissingSession(deps.sessionService.stopProjectTranslatorSession(repoRoot)),
-    ignoreMissingSession(deps.sessionService.stopProjectHarnessEngineerSession(repoRoot))
+    ignoreMissingSession(deps.sessionService.moveProjectTranslatorSessionToSafeCwd(repoRoot)),
+    ignoreMissingSession(deps.sessionService.moveProjectHarnessEngineerSessionToSafeCwd(repoRoot))
   ]);
 }
 

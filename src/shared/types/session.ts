@@ -107,6 +107,10 @@ export interface RoleSessionRecord {
   model?: SessionModel;
   effort?: SessionEffort;
   cwd: string;
+  previousCwd?: string;
+  cwdMigrationTarget?: string;
+  cwdMigrationPending?: boolean;
+  lastCwdMigrationAt?: string;
   terminalBackend: "node-pty";
   pid?: number;
   roleCommandPath?: string;

@@ -329,7 +329,7 @@ export function TaskWorkspace({
       "",
       "This is destructive:",
       "- stops VCM-managed running role sessions for this task",
-      "- stops project-scoped Translator and Harness Engineer sessions",
+      "- moves project-scoped Translator and Harness Engineer sessions to the base repository cwd",
       `- deletes the task worktree: ${task.worktreePath}`,
       `- deletes the Git branch: ${task.branch}`,
       "- deletes VCM task/session/message/orchestration state",

@@ -66,7 +66,7 @@ export interface GatewayServiceDeps {
   channel: WeixinIlinkChannel;
   projectService: ProjectService;
   taskService: TaskService;
-  sessionService: Pick<SessionService, "getRoleSession" | "listRoleSessions" | "resumeRoleSession" | "startRoleSession" | "stopRoleSession" | "stopProjectTranslatorSession" | "stopProjectHarnessEngineerSession">;
+  sessionService: Pick<SessionService, "getRoleSession" | "listRoleSessions" | "resumeRoleSession" | "startRoleSession" | "stopRoleSession" | "moveProjectTranslatorSessionToSafeCwd" | "moveProjectHarnessEngineerSessionToSafeCwd">;
   messageService: Pick<MessageService, "updateOrchestrationState">;
   translationService: Pick<TranslationService, "translateUserInput" | "translateGatewayOutput" | "stopTask">;
   roundService: Pick<RoundService, "stopTask">;
@@ -664,7 +664,7 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
 
     const task = await deps.taskService.loadTask(project.repoRoot, taskSlug);
     await stopRunningRoleSessions(project.repoRoot, taskSlug);
-    await stopProjectToolSessions(project.repoRoot);
+    await moveProjectToolSessionsToSafeCwd(project.repoRoot);
     await deps.translationService.stopTask(getTaskRuntimeRepoRoot(task), taskSlug, { clearCache: true });
     deps.roundService.stopTask(taskSlug);
     const result = await deps.taskService.cleanupTask(project.repoRoot, taskSlug, {
@@ -701,10 +701,10 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
     }
   }
 
-  async function stopProjectToolSessions(repoRoot: string): Promise<void> {
+  async function moveProjectToolSessionsToSafeCwd(repoRoot: string): Promise<void> {
     await Promise.all([
-      ignoreMissingSession(deps.sessionService.stopProjectTranslatorSession(repoRoot)),
-      ignoreMissingSession(deps.sessionService.stopProjectHarnessEngineerSession(repoRoot))
+      ignoreMissingSession(deps.sessionService.moveProjectTranslatorSessionToSafeCwd(repoRoot)),
+      ignoreMissingSession(deps.sessionService.moveProjectHarnessEngineerSessionToSafeCwd(repoRoot))
     ]);
   }
 

@@ -361,45 +361,6 @@ export function App() {
     return session;
   }
 
-  async function stopToolSessionsForTaskClose() {
-    const taskSlug = activeTask?.taskSlug;
-    const repoRoot = project?.repoRoot;
-    const stops: Promise<void>[] = [];
-
-    if (repoRoot && taskSlug && translatorSession?.claudeSessionId && translatorSession.status !== "exited") {
-      translatorAutoResumeKeyRef.current = `${repoRoot}:${taskSlug}:${translatorSession.claudeSessionId}`;
-      stops.push(
-        apiClient.stopTranslatorSession()
-          .then((session) => {
-            setTranslatorSession(session);
-            syncTranslatorLaunchOptions(session);
-          })
-          .catch(ignoreMissingSession)
-      );
-    }
-
-    if (repoRoot && taskSlug && harnessEngineerSession?.claudeSessionId && harnessEngineerSession.status !== "exited") {
-      harnessEngineerAutoResumeKeyRef.current = `${repoRoot}:${taskSlug}:${harnessEngineerSession.claudeSessionId}`;
-      stops.push(
-        apiClient.stopHarnessEngineerSession()
-          .then((session) => {
-            setHarnessEngineerSession(session);
-            syncHarnessEngineerLaunchOptions(session);
-          })
-          .catch(ignoreMissingSession)
-      );
-    }
-
-    await Promise.all(stops);
-  }
-
-  function ignoreMissingSession(caught: unknown) {
-    if (caught instanceof Error && caught.message.includes("session has not been started")) {
-      return;
-    }
-    throw caught;
-  }
-
   useEffect(() => {
     Promise.all([
       apiClient.getCurrentProject(),
@@ -570,6 +531,41 @@ export function App() {
   }, [
     activeTask?.taskSlug,
     harnessEngineerSession?.claudeSessionId,
+    harnessEngineerSession?.cwd,
+    harnessEngineerSession?.effort,
+    harnessEngineerSession?.model,
+    harnessEngineerSession?.permissionMode,
+    harnessEngineerSession?.status,
+    project?.repoRoot
+  ]);
+
+  useEffect(() => {
+    if (
+      !project
+      || !activeTask?.taskSlug
+      || !harnessEngineerSession?.claudeSessionId
+      || harnessEngineerSession.status !== "running"
+      || harnessEngineerSession.cwd === activeTask.worktreePath
+    ) {
+      return;
+    }
+
+    void apiClient.ensureHarnessEngineerSession({
+      taskSlug: activeTask.taskSlug,
+      permissionMode: harnessEngineerSession.permissionMode,
+      model: harnessEngineerSession.model,
+      effort: harnessEngineerSession.effort
+    })
+      .then((session) => {
+        setHarnessEngineerSession(session);
+        syncHarnessEngineerLaunchOptions(session);
+      })
+      .catch((caught: Error) => setError(caught.message));
+  }, [
+    activeTask?.taskSlug,
+    activeTask?.worktreePath,
+    harnessEngineerSession?.claudeSessionId,
+    harnessEngineerSession?.cwd,
     harnessEngineerSession?.effort,
     harnessEngineerSession?.model,
     harnessEngineerSession?.permissionMode,
@@ -612,6 +608,45 @@ export function App() {
     project?.repoRoot,
     translationBaseReady,
     translatorSession?.claudeSessionId,
+    translatorSession?.cwd,
+    translatorSession?.effort,
+    translatorSession?.model,
+    translatorSession?.permissionMode,
+    translatorSession?.status
+  ]);
+
+  useEffect(() => {
+    if (
+      !project
+      || !activeTask?.taskSlug
+      || !translationBaseReady
+      || !translatorSession?.claudeSessionId
+      || translatorSession.status !== "running"
+      || translatorSession.cwd === activeTask.worktreePath
+    ) {
+      return;
+    }
+
+    void apiClient.ensureTranslatorSession({
+      taskSlug: activeTask.taskSlug,
+      cols: 100,
+      rows: 28,
+      permissionMode: translatorSession.permissionMode,
+      model: translatorSession.model,
+      effort: translatorSession.effort
+    })
+      .then((session) => {
+        setTranslatorSession(session);
+        syncTranslatorLaunchOptions(session);
+      })
+      .catch((caught: Error) => setError(caught.message));
+  }, [
+    activeTask?.taskSlug,
+    activeTask?.worktreePath,
+    project?.repoRoot,
+    translationBaseReady,
+    translatorSession?.claudeSessionId,
+    translatorSession?.cwd,
     translatorSession?.effort,
     translatorSession?.model,
     translatorSession?.permissionMode,
@@ -1115,7 +1150,6 @@ export function App() {
             await loadTasks();
           }}
           onActiveRoleChange={setActiveRole}
-          onBeforeCloseTask={stopToolSessionsForTaskClose}
           onMessagesChanged={handleMessagesChanged}
           onOrchestrationChanged={handleOrchestrationChanged}
           onRoundStateChanged={handleRoundStateChanged}

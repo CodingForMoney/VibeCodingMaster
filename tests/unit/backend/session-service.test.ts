@@ -308,6 +308,93 @@ describe("createSessionService", () => {
     ]);
   });
 
+  it("moves a running Translator session to the active task worktree with /cd", async () => {
+    const fs = createMemoryFs();
+    const runtimeInputs: CreateTerminalSessionInput[] = [];
+    const writes: string[] = [];
+    const service = createTestSessionService(fs, runtimeInputs, writes, {
+      worktreePaths: {
+        "demo-task": TASK_WORKTREE,
+        "other-task": "/repo/.claude/worktrees/other-task"
+      }
+    });
+
+    const started = await service.startProjectTranslatorSession("/repo", {
+      taskSlug: "demo-task"
+    });
+    const moved = await service.ensureProjectTranslatorSession("/repo", {
+      taskSlug: "other-task"
+    });
+
+    expect(moved.claudeSessionId).toBe(started.claudeSessionId);
+    expect(moved.cwd).toBe("/repo/.claude/worktrees/other-task");
+    expect(moved.previousCwd).toBe(TASK_WORKTREE);
+    expect(moved.cwdMigrationPending).toBe(true);
+    expect(writes[0]).toContain("/cd /repo/.claude/worktrees/other-task");
+
+    const persisted = await fs.readJson<{ record: { cwd: string; previousCwd?: string; cwdMigrationPending?: boolean } }>("/repo/.ai/vcm/translations/session.json");
+    expect(persisted.record.cwd).toBe("/repo/.claude/worktrees/other-task");
+    expect(persisted.record.previousCwd).toBe(TASK_WORKTREE);
+    expect(persisted.record.cwdMigrationPending).toBe(true);
+  });
+
+  it("resumes a Translator from the previous cwd before moving it to a new task worktree", async () => {
+    const fs = createMemoryFs();
+    const firstService = createTestSessionService(fs, [], [], {
+      worktreePaths: {
+        "demo-task": TASK_WORKTREE,
+        "other-task": "/repo/.claude/worktrees/other-task"
+      }
+    });
+    const started = await firstService.startProjectTranslatorSession("/repo", {
+      taskSlug: "demo-task"
+    });
+
+    const runtimeInputs: CreateTerminalSessionInput[] = [];
+    const writes: string[] = [];
+    const secondService = createTestSessionService(fs, runtimeInputs, writes, {
+      worktreePaths: {
+        "demo-task": TASK_WORKTREE,
+        "other-task": "/repo/.claude/worktrees/other-task"
+      }
+    });
+    const resumed = await secondService.resumeProjectTranslatorSession("/repo", {
+      taskSlug: "other-task"
+    });
+
+    expect(resumed.claudeSessionId).toBe(started.claudeSessionId);
+    expect(runtimeInputs[0]?.cwd).toBe(TASK_WORKTREE);
+    expect(runtimeInputs[0]?.args).toEqual([
+      "--agent",
+      "translator",
+      "--resume",
+      started.claudeSessionId,
+      "--model",
+      "default",
+      "--effort",
+      "medium"
+    ]);
+    expect(writes[0]).toContain("/cd /repo/.claude/worktrees/other-task");
+    expect(resumed.cwd).toBe("/repo/.claude/worktrees/other-task");
+  });
+
+  it("moves a Translator session to the base repository cwd before task cleanup", async () => {
+    const fs = createMemoryFs();
+    const runtimeInputs: CreateTerminalSessionInput[] = [];
+    const writes: string[] = [];
+    const service = createTestSessionService(fs, runtimeInputs, writes);
+
+    const started = await service.startProjectTranslatorSession("/repo", {
+      taskSlug: "demo-task"
+    });
+    const moved = await service.moveProjectTranslatorSessionToSafeCwd("/repo");
+
+    expect(moved.claudeSessionId).toBe(started.claudeSessionId);
+    expect(moved.cwd).toBe("/repo");
+    expect(moved.previousCwd).toBe(TASK_WORKTREE);
+    expect(writes[0]).toContain("/cd /repo");
+  });
+
   it("starts Harness Engineer as a project-scoped Claude Code session", async () => {
     const fs = createMemoryFs();
     const runtimeInputs: CreateTerminalSessionInput[] = [];
@@ -588,6 +675,21 @@ describe("createSessionService", () => {
       transcriptPath: "/Users/sheldon/.claude/projects/demo/compact.jsonl",
       lastCompactAt: "2026-05-29T00:00:00.000Z"
     });
+
+    const cwdChanged = await service.recordClaudeHookEvent("/repo", {
+      taskSlug: "demo-task",
+      role: "coder",
+      eventName: "CwdChanged",
+      claudeSessionId: started.claudeSessionId,
+      transcriptPath: "/Users/sheldon/.claude/projects/other/cwd.jsonl",
+      cwd: "/repo/.claude/worktrees/other"
+    });
+    expect(cwdChanged).toMatchObject({
+      status: "running",
+      activityStatus: "running",
+      cwd: "/repo/.claude/worktrees/other",
+      transcriptPath: "/Users/sheldon/.claude/projects/other/cwd.jsonl"
+    });
   });
 
   it("records Gate Reviewer hook activity on the project-scoped session", async () => {
@@ -634,9 +736,11 @@ function createTestSessionService(
   fs: FileSystemAdapter,
   runtimeInputs: CreateTerminalSessionInput[],
   writes: string[] = [],
-  options: { sandboxMode?: string; worktreePath?: string } = {}
+  options: { sandboxMode?: string; worktreePath?: string; worktreePaths?: Record<string, string> } = {}
 ) {
   const worktreePath = options.worktreePath ?? TASK_WORKTREE;
+  const resolveWorktreePath = (taskSlug: string) => options.worktreePaths?.[taskSlug]
+    ?? (taskSlug === "demo-task" ? worktreePath : `/repo/.claude/worktrees/${taskSlug}`);
   return createSessionService({
     fs,
     runtime: createFakeRuntime(runtimeInputs, writes),
@@ -706,27 +810,29 @@ function createTestSessionService(
       }
     },
     taskService: {
-      async loadTask() {
+      async loadTask(_repoRoot: string, taskSlug = "demo-task") {
+        const resolvedWorktreePath = resolveWorktreePath(taskSlug);
         return {
           version: 1,
-          taskSlug: "demo-task",
+          taskSlug,
           createdAt: "2026-05-29T00:00:00.000Z",
           updatedAt: "2026-05-29T00:00:00.000Z",
           repoRoot: "/repo",
-          worktreePath,
+          worktreePath: resolvedWorktreePath,
           branch: "feature",
           handoffDir: ".ai/vcm/handoffs",
           status: "created"
         };
       },
-      async updateTaskStatus() {
+      async updateTaskStatus(_repoRoot: string, taskSlug = "demo-task") {
+        const resolvedWorktreePath = resolveWorktreePath(taskSlug);
         return {
           version: 1,
-          taskSlug: "demo-task",
+          taskSlug,
           createdAt: "2026-05-29T00:00:00.000Z",
           updatedAt: "2026-05-29T00:00:00.000Z",
           repoRoot: "/repo",
-          worktreePath,
+          worktreePath: resolvedWorktreePath,
           branch: "feature",
           handoffDir: ".ai/vcm/handoffs",
           status: "running"
