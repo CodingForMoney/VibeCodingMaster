@@ -4,7 +4,7 @@ import type { TaskStatusReport } from "../../shared/types/api.js";
 import type { VcmOrchestrationMode, VcmOrchestrationState, VcmRoleMessage } from "../../shared/types/message.js";
 import type { CoreVcmRoleName, RoleDefinition, RoleName, VcmRoleName } from "../../shared/types/role.js";
 import type { VcmSessionRoundState } from "../../shared/types/round.js";
-import type { ClaudeModel, ClaudePermissionMode, SessionEffort, SessionModel } from "../../shared/types/session.js";
+import type { ClaudeModel, ClaudePermissionMode, RoleSessionRecord, SessionEffort, SessionModel } from "../../shared/types/session.js";
 import type { TranslationTargetLanguage } from "../../shared/types/app-settings.js";
 import type { TaskRecord } from "../../shared/types/task.js";
 import { RoleSessionTabs } from "../components/role-session-tabs.js";
@@ -15,6 +15,8 @@ import { apiClient } from "../state/api-client.js";
 import { selectAutoDispatchRole } from "../state/message-navigation.js";
 
 const TASK_MESSAGE_STATE_POLL_INTERVAL_MS = 2000;
+type LaunchOptionField = "permissionMode" | "model" | "effort";
+type LaunchOptionOverrides = Partial<Record<RoleName, Partial<Record<LaunchOptionField, true>>>>;
 
 export interface TaskWorkspaceProps {
   task: TaskRecord;
@@ -99,6 +101,7 @@ export function TaskWorkspace({
   const [orchestration, setOrchestration] = useState<VcmOrchestrationState | null>(null);
   const messageSnapshotRef = useRef<{ taskSlug: string; messages: VcmRoleMessage[] } | null>(null);
   const taskStatusSyncKeyRef = useRef("");
+  const launchOptionOverridesRef = useRef<LaunchOptionOverrides>({});
   const hasGateReviewerSession = Boolean(
     statusReport?.sessions.some((session) => session.role === "gate-reviewer")
   );
@@ -150,6 +153,7 @@ export function TaskWorkspace({
   useEffect(() => {
     setEvents([]);
     onEventsChanged?.([]);
+    launchOptionOverridesRef.current = {};
   }, [onEventsChanged, task.taskSlug]);
 
   useEffect(() => {
@@ -188,6 +192,9 @@ export function TaskWorkspace({
       let changed = false;
       const next = { ...current };
       for (const session of statusReport?.sessions ?? []) {
+        if (hasLaunchOptionOverride(launchOptionOverridesRef.current, session.role, "permissionMode")) {
+          continue;
+        }
         if (next[session.role] !== session.permissionMode) {
           next[session.role] = session.permissionMode;
           changed = true;
@@ -202,6 +209,9 @@ export function TaskWorkspace({
       let changed = false;
       const next = { ...current };
       for (const session of statusReport?.sessions ?? []) {
+        if (hasLaunchOptionOverride(launchOptionOverridesRef.current, session.role, "model")) {
+          continue;
+        }
         const sessionModel = session.model ?? "default";
         if (next[session.role] !== sessionModel) {
           next[session.role] = sessionModel;
@@ -217,6 +227,9 @@ export function TaskWorkspace({
       let changed = false;
       const next = { ...current };
       for (const session of statusReport?.sessions ?? []) {
+        if (hasLaunchOptionOverride(launchOptionOverridesRef.current, session.role, "effort")) {
+          continue;
+        }
         const sessionEffort = session.effort ?? "default";
         if (next[session.role] !== sessionEffort) {
           next[session.role] = sessionEffort;
@@ -370,6 +383,7 @@ export function TaskWorkspace({
   }
 
   function setRolePermissionMode(role: RoleName, permissionMode: ClaudePermissionMode) {
+    markLaunchOptionOverride(launchOptionOverridesRef.current, role, "permissionMode");
     setPermissionModes((current) => ({
       ...current,
       [role]: permissionMode
@@ -377,6 +391,7 @@ export function TaskWorkspace({
   }
 
   function setRoleModel(role: RoleName, model: SessionModel) {
+    markLaunchOptionOverride(launchOptionOverridesRef.current, role, "model");
     setModels((current) => ({
       ...current,
       [role]: model
@@ -384,9 +399,26 @@ export function TaskWorkspace({
   }
 
   function setRoleEffort(role: RoleName, effort: SessionEffort) {
+    markLaunchOptionOverride(launchOptionOverridesRef.current, role, "effort");
     setEfforts((current) => ({
       ...current,
       [role]: effort
+    }));
+  }
+
+  function syncRoleLaunchOptions(session: RoleSessionRecord) {
+    delete launchOptionOverridesRef.current[session.role];
+    setPermissionModes((current) => ({
+      ...current,
+      [session.role]: session.permissionMode
+    }));
+    setModels((current) => ({
+      ...current,
+      [session.role]: session.model ?? "default"
+    }));
+    setEfforts((current) => ({
+      ...current,
+      [session.role]: session.effort ?? "default"
     }));
   }
 
@@ -464,23 +496,25 @@ export function TaskWorkspace({
                     onModelChange={(model) => setRoleModel(role, model)}
                     onEffortChange={(effort) => setRoleEffort(role, effort)}
                     onStart={() => void runAction(async () => {
-                      await apiClient.startRoleSession(task.taskSlug, role, {
+                      const session = await apiClient.startRoleSession(task.taskSlug, role, {
                         cols: 100,
                         rows: 28,
                         permissionMode: permissionModes[role],
                         model: models[role],
                         effort: efforts[role]
                       });
+                      syncRoleLaunchOptions(session);
                       appendEvent(`started ${role} with ${permissionModes[role]} / ${models[role]} / ${efforts[role]}`);
                     })}
                     onResume={() => void runAction(async () => {
-                      await apiClient.resumeRoleSession(task.taskSlug, role, {
+                      const session = await apiClient.resumeRoleSession(task.taskSlug, role, {
                         cols: 100,
                         rows: 28,
                         permissionMode: permissionModes[role],
                         model: models[role],
                         effort: efforts[role]
                       });
+                      syncRoleLaunchOptions(session);
                       appendEvent(`resumed ${role} with ${permissionModes[role]} / ${models[role]} / ${efforts[role]}`);
                     })}
                     onStop={() => void runAction(async () => {
@@ -488,13 +522,14 @@ export function TaskWorkspace({
                       appendEvent(`stopped ${role}`);
                     })}
                     onRestart={() => void runAction(async () => {
-                      await apiClient.restartRoleSession(task.taskSlug, role, {
+                      const session = await apiClient.restartRoleSession(task.taskSlug, role, {
                         cols: 100,
                         rows: 28,
                         permissionMode: permissionModes[role],
                         model: models[role],
                         effort: efforts[role]
                       });
+                      syncRoleLaunchOptions(session);
                       appendEvent(`restarted ${role} with ${permissionModes[role]} / ${models[role]} / ${efforts[role]}`);
                     })}
                     onNotifyHarnessUpdated={() => void runAction(async () => {
@@ -524,4 +559,15 @@ function taskSyncKey(task: TaskRecord): string {
     task.cleanupStatus ?? "",
     task.cleanedAt ?? ""
   ].join(":");
+}
+
+function hasLaunchOptionOverride(overrides: LaunchOptionOverrides, role: RoleName, field: LaunchOptionField): boolean {
+  return Boolean(overrides[role]?.[field]);
+}
+
+function markLaunchOptionOverride(overrides: LaunchOptionOverrides, role: RoleName, field: LaunchOptionField): void {
+  overrides[role] = {
+    ...overrides[role],
+    [field]: true
+  };
 }
