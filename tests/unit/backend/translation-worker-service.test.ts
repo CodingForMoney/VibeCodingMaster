@@ -67,6 +67,20 @@ describe("translator-translation-service", () => {
     await expect(fs.pathExists(path.join(tmpRepo, ".ai/vcm/translations/files/index.json"))).resolves.toBe(false);
   });
 
+  it("treats translation memory as initialized only after multiple core memory files have content", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-translator-memory-init-"));
+    const fs = createNodeFileSystemAdapter();
+    const service = createTranslationWorkerService({ fs });
+
+    await expect(service.getState(tmpRepo).then((state) => state.memoryInitialized)).resolves.toBe(false);
+
+    await writeFile(path.join(tmpRepo, ".ai/vcm/translations/memory/glossary.md"), "# Glossary\n\n- VCM => VCM\n", "utf8");
+    await expect(service.getState(tmpRepo).then((state) => state.memoryInitialized)).resolves.toBe(false);
+
+    await writeFile(path.join(tmpRepo, ".ai/vcm/translations/memory/project-context.md"), "# Project Context\n\nVCM manages AI coding roles.\n", "utf8");
+    await expect(service.getState(tmpRepo).then((state) => state.memoryInitialized)).resolves.toBe(true);
+  });
+
   it("cleans translation runtime state without removing durable translations or memory", async () => {
     tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-translator-translation-startup-clean-"));
     await mkdir(path.join(tmpRepo, ".ai/vcm/translations/runtime/files/jobs/job-1/chunks"), { recursive: true });

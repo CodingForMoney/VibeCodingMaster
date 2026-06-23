@@ -55,6 +55,7 @@ export interface ProjectDashboardProps {
   translationAutoSendEnabled: boolean;
   translationTargetLanguage: TranslationTargetLanguage;
   translationOutputMode: TranslationOutputMode;
+  translationMemoryInitialized: boolean;
   translatorSession: RoleSessionRecord | null;
   harnessStatus: HarnessStatusReport | null;
   harnessBootstrapStatus: HarnessBootstrapStatusReport | null;
@@ -120,6 +121,7 @@ export function ProjectDashboard({
   translationAutoSendEnabled,
   translationTargetLanguage,
   translationOutputMode,
+  translationMemoryInitialized,
   translatorSession,
   harnessStatus,
   harnessBootstrapStatus,
@@ -344,6 +346,7 @@ export function ProjectDashboard({
           autoSendEnabled={translationAutoSendEnabled}
           targetLanguage={translationTargetLanguage}
           outputMode={translationOutputMode}
+          memoryInitialized={translationMemoryInitialized}
           baseUnavailableReason={translationBaseUnavailableReason}
           translatorSession={translatorSession}
           onAutoSendChange={onTranslationAutoSendChange}
@@ -504,6 +507,7 @@ function TranslationControlsPanel({
   baseUnavailableReason,
   busy,
   enabled,
+  memoryInitialized,
   outputMode,
   targetLanguage,
   translatorSession,
@@ -520,6 +524,7 @@ function TranslationControlsPanel({
   baseUnavailableReason: string | null;
   busy?: boolean;
   enabled: boolean;
+  memoryInitialized: boolean;
   outputMode: TranslationOutputMode;
   targetLanguage: TranslationTargetLanguage;
   translatorSession: RoleSessionRecord | null;
@@ -602,16 +607,18 @@ function TranslationControlsPanel({
         <span>File translation</span>
         <span>open</span>
       </button>
-      <button
-        className="settings-toggle"
-        disabled={sessionActionsDisabled}
-        title={sessionActionTitle}
-        type="button"
-        onClick={onCreateBootstrap}
-      >
-        <span>Bootstrap</span>
-        <span>run</span>
-      </button>
+      {!memoryInitialized ? (
+        <button
+          className="settings-toggle"
+          disabled={sessionActionsDisabled}
+          title={sessionActionTitle}
+          type="button"
+          onClick={onCreateBootstrap}
+        >
+          <span>Bootstrap</span>
+          <span>run</span>
+        </button>
+      ) : null}
       <button
         className="settings-toggle"
         disabled={sessionActionsDisabled}

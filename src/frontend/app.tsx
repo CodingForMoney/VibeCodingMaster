@@ -75,6 +75,7 @@ export function App() {
   const [translationAutoSendEnabled, setTranslationAutoSendEnabled] = useState(false);
   const [translationTargetLanguage, setTranslationTargetLanguage] = useState<TranslationTargetLanguage>(DEFAULT_TRANSLATION_TARGET_LANGUAGE);
   const [translationOutputMode, setTranslationOutputMode] = useState<TranslationOutputMode>(DEFAULT_TRANSLATION_OUTPUT_MODE);
+  const [translationMemoryInitialized, setTranslationMemoryInitialized] = useState(false);
   const [fileTranslationOpen, setFileTranslationOpen] = useState(false);
   const [translatorSessionOpen, setTranslatorSessionOpen] = useState(false);
   const [harnessStudioOpen, setHarnessStudioOpen] = useState(false);
@@ -291,6 +292,16 @@ export function App() {
     return nextPaths;
   }
 
+  async function refreshTranslationMemoryInitialized() {
+    if (!project) {
+      setTranslationMemoryInitialized(false);
+      return false;
+    }
+    const state = await apiClient.getTranslationState();
+    setTranslationMemoryInitialized(state.memoryInitialized);
+    return state.memoryInitialized;
+  }
+
   async function refreshMessageState(taskSlug: string) {
     const [messages, orchestration] = await Promise.all([
       apiClient.listMessages(taskSlug),
@@ -493,6 +504,7 @@ export function App() {
     setTranslatorPermissionMode("default");
     setTranslatorModel("default");
     setTranslatorEffort("medium");
+    setTranslationMemoryInitialized(false);
     setHarnessEngineerSession(null);
     setHarnessEngineerPermissionMode("default");
     setHarnessEngineerModel("default");
@@ -505,12 +517,15 @@ export function App() {
 
   useEffect(() => {
     if (!project) {
+      setTranslationMemoryInitialized(false);
       return;
     }
 
     void refreshTranslatorSession({ syncLaunchOptions: true }).catch((caught: Error) => setError(caught.message));
+    void refreshTranslationMemoryInitialized().catch((caught: Error) => setError(caught.message));
     const interval = window.setInterval(() => {
       void refreshTranslatorSession().catch((caught: Error) => setError(caught.message));
+      void refreshTranslationMemoryInitialized().catch((caught: Error) => setError(caught.message));
     }, 3000);
     return () => window.clearInterval(interval);
   }, [project?.repoRoot]);
@@ -713,6 +728,7 @@ export function App() {
           translationAutoSendEnabled={translationAutoSendEnabled}
           translationTargetLanguage={translationTargetLanguage}
           translationOutputMode={translationOutputMode}
+          translationMemoryInitialized={translationMemoryInitialized}
           translatorSession={translatorSession}
           harnessStatus={currentHarnessStatus}
           harnessBootstrapStatus={currentHarnessBootstrapStatus}
@@ -904,6 +920,7 @@ export function App() {
                 taskSlug: activeTask.taskSlug,
                 targetLanguage: translationTargetLanguage
               });
+              await refreshTranslationMemoryInitialized();
               await refreshTranslatorSession();
             });
           }}
@@ -916,6 +933,7 @@ export function App() {
                 taskSlug: activeTask.taskSlug,
                 targetLanguage: translationTargetLanguage
               });
+              await refreshTranslationMemoryInitialized();
               await refreshTranslatorSession();
             });
           }}

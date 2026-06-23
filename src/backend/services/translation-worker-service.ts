@@ -100,6 +100,7 @@ const DEFAULT_PROFILE = "default";
 const DEFAULT_CHUNK_SOURCE_TOKEN_TARGET = 80000;
 const BOOTSTRAP_DEFAULT_LIMIT = 12;
 const MEMORY_TOTAL_LIMIT_BYTES = 80 * 1024;
+const MEMORY_INITIALIZED_MIN_FILES = 2;
 const MEMORY_FILE_NAMES = ["glossary.md", "style-guide.md", "project-context.md", "decisions.md"] as const;
 const TRANSLATOR_ROLE = "translator";
 const FILE_BROWSER_DEFAULT_LIMIT = 200;
@@ -1789,14 +1790,15 @@ function isFileTranslationChunk(value: unknown): value is FileTranslationChunk {
 }
 
 async function isMemoryInitialized(repoRoot: string, fs: FileSystemAdapter): Promise<boolean> {
+  let initializedFiles = 0;
   for (const file of MEMORY_FILE_NAMES) {
     const content = await fs.readText(resolveRepoPath(repoRoot, `${MEMORY_DIR}/${file}`));
     const meaningfulLines = content.split("\n").filter((line) => line.trim() && !line.trim().startsWith("#"));
     if (meaningfulLines.length > 0) {
-      return true;
+      initializedFiles += 1;
     }
   }
-  return false;
+  return initializedFiles >= MEMORY_INITIALIZED_MIN_FILES;
 }
 
 async function getMemoryUsage(repoRoot: string, fs: FileSystemAdapter): Promise<{
