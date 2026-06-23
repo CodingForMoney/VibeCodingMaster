@@ -207,6 +207,9 @@ export function App() {
       return;
     }
     setActiveSessionRoundState({ taskSlug: roundState.taskSlug, roundState });
+    if (roundState.status === "running" && roundState.activeRole === "gate-reviewer") {
+      setActiveRole("gate-reviewer");
+    }
     if (roundState.status !== "stopped" || !roundState.roundId) {
       return;
     }
