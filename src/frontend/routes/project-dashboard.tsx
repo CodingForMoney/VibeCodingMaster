@@ -303,7 +303,7 @@ export function ProjectDashboard({
             onClick={onSaveLaunchTemplate}
           >
             <span>Save launch template</span>
-            <span>{canSaveLaunchTemplate ? "ready" : "needs core sessions"}</span>
+            <span>{canSaveLaunchTemplate ? "ready" : "open task"}</span>
           </button>
           {canOneClickStart ? (
             <button

@@ -116,7 +116,7 @@ export function App() {
   const translationBaseReady = Boolean(project && activeTask && isTranslationHarnessReady(currentHarnessStatus));
   const translatorSessionRunning = translatorSession?.status === "running";
   const effectiveTranslationEnabled = Boolean(translationEnabled && translationBaseReady && translatorSessionRunning);
-  const canSaveLaunchTemplate = Boolean(activeTaskLaunchState?.statusLoaded && activeTaskLaunchState.allRolesHaveSession);
+  const canSaveLaunchTemplate = Boolean(activeTaskLaunchState?.statusLoaded);
   const canOneClickStart = Boolean(activeTask && activeTaskLaunchState?.statusLoaded && !activeTaskLaunchState.hasAnySession);
 
   const applyPreferences = useCallback((preferences: AppPreferences) => {
@@ -1042,8 +1042,8 @@ export function App() {
           canOneClickStart={canOneClickStart}
           onSaveLaunchTemplate={() => {
             void withBusy(async () => {
-              if (!activeTaskLaunchState?.allRolesHaveSession) {
-                throw new Error("Start all core role sessions before saving a launch template.");
+              if (!activeTaskLaunchState?.statusLoaded) {
+                throw new Error("Open a task workspace before saving a launch template.");
               }
 
               const preferences = await apiClient.updateAppPreferences({
