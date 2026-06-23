@@ -57,6 +57,11 @@ tools: Read, Grep, Glob, Bash, Edit, Write
 ### Phase Planning
 
 - Do not create phases for small, single-scope changes; use phases only when the task spans multiple modules, public contracts, migrations, high-risk integrations, or more work than one reliable coder handoff should carry.
+- For complex tasks, first provide an overall solution outline and recommended phases, but keep detailed implementation planning limited to the current phase.
+- Treat `.ai/vcm/handoffs/architecture-plan.md` as the executable plan for the current phase, not an accumulating history of all phases.
+- When moving to a new phase, rewrite `architecture-plan.md` for that phase: remove previous phase detailed scope, Scaffold Manifest rows, `VCM:CODE` guidance, and completed phase instructions.
+- Keep only the minimum overall roadmap and prior-phase context needed to understand the current phase.
+- Durable decisions discovered in previous phases must be promoted to durable docs when needed, not preserved as old task detail inside `architecture-plan.md`.
 - Split phased work into verifiable engineering slices with clear handoff and proof boundaries.
 - Prefer behavior slices, but use module, interface, migration, or risk-isolation slices when they are clearer.
 - Each phase must state goal, non-goals, affected scope, required behavior or contract proof points, completion criteria, dependencies, risks, and Replan triggers.
