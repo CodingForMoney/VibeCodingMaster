@@ -754,6 +754,41 @@ export function App() {
     }
   }
 
+  async function closeActiveTask() {
+    if (!activeTask) {
+      throw new Error("Create or select a task before closing it.");
+    }
+    const closeMessage = [
+      `Close task "${activeTask.taskSlug}"?`,
+      "",
+      "This is destructive:",
+      "- stops VCM-managed running role sessions for this task",
+      "- moves project-scoped Translator and Harness Engineer sessions to the base repository cwd",
+      `- deletes the task worktree: ${activeTask.worktreePath}`,
+      `- deletes the Git branch: ${activeTask.branch}`,
+      "- deletes VCM task/session/message/orchestration state",
+      "",
+      "VCM will not check running sessions or uncommitted changes before closing."
+    ].join("\n");
+    const confirmed = window.confirm(closeMessage);
+    if (!confirmed) {
+      return;
+    }
+
+    await apiClient.cleanupTask(activeTask.taskSlug, {
+      force: true,
+      forceDeleteBranch: true
+    });
+    setActiveTaskSlug(null);
+    setActiveMessages(null);
+    setActiveOrchestration(null);
+    setActiveEvents(null);
+    setActiveSessionRoundState(null);
+    setActiveGateReview(null);
+    setWorkspaceRefreshNonce((current) => current + 1);
+    await loadTasks();
+  }
+
   const sidebarMessages =
     activeMessages && activeMessages.taskSlug === activeTask?.taskSlug
       ? activeMessages.messages
@@ -1009,6 +1044,9 @@ export function App() {
             setActiveTaskSlug(task.taskSlug);
             await refreshGateReviewState(task.taskSlug);
           }, "Create task")}
+          onCloseTask={() => {
+            void withBusy(closeActiveTask, "Close task");
+          }}
           onSelectTask={setActiveTaskSlug}
           themeMode={themeMode}
           onThemeModeChange={(nextThemeMode) => {

@@ -66,6 +66,16 @@ describe("createTaskService", () => {
       .resolves.toBe(1);
   });
 
+  it("refuses to create a second active task for the same project", async () => {
+    const repoRoot = await createTempGitRepo(tempDirs);
+    const service = createService(repoRoot);
+    await service.createTask(repoRoot, { taskSlug: "first-task" });
+
+    await expect(service.createTask(repoRoot, { taskSlug: "second-task" })).rejects.toMatchObject({
+      code: "ACTIVE_TASK_EXISTS"
+    });
+  });
+
   it("closes a dirty task worktree without checking uncommitted changes", async () => {
     const repoRoot = await createTempGitRepo(tempDirs);
     const service = createService(repoRoot);

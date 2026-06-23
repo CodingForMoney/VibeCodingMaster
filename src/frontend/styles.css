@@ -633,6 +633,23 @@ h2 {
   gap: 8px;
 }
 
+.task-panel {
+  display: grid;
+  gap: 10px;
+}
+
+.task-panel-actions {
+  display: grid;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid #ece5d9;
+}
+
+.task-panel-actions .danger-button {
+  width: 100%;
+  text-align: center;
+}
+
 .task-create-preview {
   display: grid;
   gap: 2px;

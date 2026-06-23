@@ -38,8 +38,7 @@ type SidebarSectionId =
   | "gate-review-gates"
   | "gateway"
   | "vcm-harness"
-  | "new-task"
-  | "tasks";
+  | "task";
 
 export interface ProjectDashboardProps {
   project: ProjectSummary | null;
@@ -90,6 +89,7 @@ export interface ProjectDashboardProps {
   onCreateTranslationBootstrap(): void;
   onUpdateTranslationMemory(): void;
   onCreateTask(input: { taskSlug: string; title?: string }): Promise<void>;
+  onCloseTask(): void;
   onSelectTask(taskSlug: string): void;
   themeMode: ThemeMode;
   onThemeModeChange(themeMode: ThemeMode): void;
@@ -156,6 +156,7 @@ export function ProjectDashboard({
   onCreateTranslationBootstrap,
   onUpdateTranslationMemory,
   onCreateTask,
+  onCloseTask,
   onSelectTask,
   themeMode,
   onThemeModeChange,
@@ -185,7 +186,8 @@ export function ProjectDashboard({
     activeTaskSlug,
     harnessStatus
   );
-  const activeTask = tasks.find((task) => task.taskSlug === activeTaskSlug) ?? null;
+  const openTasks = tasks.filter((task) => task.cleanupStatus !== "cleaned");
+  const activeTask = openTasks.find((task) => task.taskSlug === activeTaskSlug) ?? null;
 
   useEffect(() => {
     setOpenSidebarSection((current) => {
@@ -193,11 +195,11 @@ export function ProjectDashboard({
         return null;
       }
       if (!activeTaskSlug && current === null) {
-        return "repository";
+        return project ? "task" : "repository";
       }
       return current;
     });
-  }, [activeTaskSlug]);
+  }, [activeTaskSlug, project]);
 
   function handleSidebarSectionChange(sectionId: SidebarSectionId, open: boolean) {
     setOpenSidebarSection(open ? sectionId : null);
@@ -415,36 +417,44 @@ export function ProjectDashboard({
 
       {project ? (
         <SidebarSection
-          title="New Task"
-          open={openSidebarSection === "new-task"}
-          onOpenChange={(open) => handleSidebarSectionChange("new-task", open)}
+          title="Task"
+          open={openSidebarSection === "task"}
+          onOpenChange={(open) => handleSidebarSectionChange("task", open)}
         >
-          <div className="task-create">
-            <form onSubmit={handleCreateTask}>
-              <input
-                value={taskSlug}
-                onChange={(event) => setTaskSlug(event.target.value)}
-                placeholder="task name"
-              />
-              <div className="task-create-preview">
-                <small>branch: {normalizedTaskSlug ? `feature/${normalizedTaskSlug}` : "feature/<task>"}</small>
-                <small>worktree: {normalizedTaskSlug ? `.claude/worktrees/${normalizedTaskSlug}` : ".claude/worktrees/<task>"}</small>
-              </div>
-              <button type="submit" disabled={busy || !normalizedTaskSlug}>
-                Create
-              </button>
-            </form>
-          </div>
-        </SidebarSection>
-      ) : null}
-
-      {tasks.length > 0 ? (
-        <SidebarSection
-          title="Tasks"
-          open={openSidebarSection === "tasks"}
-          onOpenChange={(open) => handleSidebarSectionChange("tasks", open)}
-        >
-          <TaskNav tasks={tasks} activeTaskSlug={activeTaskSlug} onSelect={onSelectTask} />
+          {openTasks.length > 0 ? (
+            <div className="task-panel">
+              <TaskNav tasks={openTasks} activeTaskSlug={activeTaskSlug} onSelect={onSelectTask} />
+              {activeTask ? (
+                <div className="task-panel-actions">
+                  <button
+                    className="danger-button"
+                    disabled={busy}
+                    type="button"
+                    onClick={onCloseTask}
+                  >
+                    Close Task
+                  </button>
+                </div>
+              ) : null}
+            </div>
+          ) : (
+            <div className="task-create">
+              <form onSubmit={handleCreateTask}>
+                <input
+                  value={taskSlug}
+                  onChange={(event) => setTaskSlug(event.target.value)}
+                  placeholder="task name"
+                />
+                <div className="task-create-preview">
+                  <small>branch: {normalizedTaskSlug ? `feature/${normalizedTaskSlug}` : "feature/<task>"}</small>
+                  <small>worktree: {normalizedTaskSlug ? `.claude/worktrees/${normalizedTaskSlug}` : ".claude/worktrees/<task>"}</small>
+                </div>
+                <button type="submit" disabled={busy || !normalizedTaskSlug}>
+                  Create
+                </button>
+              </form>
+            </div>
+          )}
         </SidebarSection>
       ) : null}
 

@@ -49,6 +49,16 @@ export function createTaskService(deps: TaskServiceDeps): TaskService {
           statusCode: 409
         });
       }
+      const existingTasks = await readStoredTasks(deps.fs, taskStoreRoot);
+      const activeTask = existingTasks.find((task) => task.cleanupStatus !== "cleaned");
+      if (activeTask) {
+        throw new VcmError({
+          code: "ACTIVE_TASK_EXISTS",
+          message: `A task is already active for this project: ${activeTask.taskSlug}`,
+          statusCode: 409,
+          hint: "Close the current task before creating a new one."
+        });
+      }
       if (await deps.git.branchExists(repoRoot, taskBranch)) {
         throw new VcmError({
           code: "TASK_BRANCH_EXISTS",
@@ -115,18 +125,7 @@ export function createTaskService(deps: TaskServiceDeps): TaskService {
       return task;
     },
     async listTasks(repoRoot) {
-      const tasksDir = path.join(deps.projectService.getProjectDataRoot(repoRoot), "tasks");
-      if (!(await deps.fs.pathExists(tasksDir))) {
-        return [];
-      }
-
-      const entries = await deps.fs.readDir(tasksDir);
-      const tasks: TaskRecord[] = [];
-      for (const entry of entries.filter((candidate) => candidate.endsWith(".json"))) {
-        tasks.push(await deps.fs.readJson<TaskRecord>(path.join(tasksDir, entry)));
-      }
-
-      return tasks.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+      return readStoredTasks(deps.fs, deps.projectService.getProjectDataRoot(repoRoot));
     },
     async loadTask(repoRoot, taskSlug) {
       assertValidTaskSlug(taskSlug);
@@ -196,6 +195,21 @@ export function createTaskService(deps: TaskServiceDeps): TaskService {
       };
     }
   };
+}
+
+async function readStoredTasks(fs: FileSystemAdapter, taskStoreRoot: string): Promise<TaskRecord[]> {
+  const tasksDir = path.join(taskStoreRoot, "tasks");
+  if (!(await fs.pathExists(tasksDir))) {
+    return [];
+  }
+
+  const entries = await fs.readDir(tasksDir);
+  const tasks: TaskRecord[] = [];
+  for (const entry of entries.filter((candidate) => candidate.endsWith(".json"))) {
+    tasks.push(await fs.readJson<TaskRecord>(path.join(tasksDir, entry)));
+  }
+
+  return tasks.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
 }
 
 export function getTaskRuntimeRepoRoot(task: TaskRecord): string {

@@ -58,7 +58,6 @@ export interface TaskWorkspaceProps {
   refreshNonce?: number;
   onTaskChanged(): Promise<void>;
   onActiveRoleChange(role: RoleName): void;
-  onBeforeCloseTask?(): Promise<void>;
   onMessagesChanged?(messages: VcmRoleMessage[]): void;
   onOrchestrationChanged?(orchestration: VcmOrchestrationState): void;
   onRoundStateChanged?(roundState: VcmSessionRoundState): void;
@@ -91,7 +90,6 @@ export function TaskWorkspace({
   refreshNonce = 0,
   onTaskChanged,
   onActiveRoleChange,
-  onBeforeCloseTask,
   onMessagesChanged,
   onOrchestrationChanged,
   onRoundStateChanged,
@@ -296,43 +294,6 @@ export function TaskWorkspace({
     }
   }
 
-  async function closeTask() {
-    const closeMessage = [
-      `Close task "${task.taskSlug}"?`,
-      "",
-      "This is destructive:",
-      "- stops VCM-managed running role sessions for this task",
-      "- moves project-scoped Translator and Harness Engineer sessions to the base repository cwd",
-      `- deletes the task worktree: ${task.worktreePath}`,
-      `- deletes the Git branch: ${task.branch}`,
-      "- deletes VCM task/session/message/orchestration state",
-      "",
-      "VCM will not check running sessions or uncommitted changes before closing."
-    ].join("\n");
-    const confirmed = window.confirm(
-      closeMessage
-    );
-    if (!confirmed) {
-      return;
-    }
-
-    setBusy(true);
-    setError("");
-    try {
-      await onBeforeCloseTask?.();
-      await apiClient.cleanupTask(task.taskSlug, {
-        force: true,
-        forceDeleteBranch: true
-      });
-      appendEvent(`closed ${task.taskSlug}`);
-      await onTaskChanged();
-    } catch (caught) {
-      setError(formatUiError("Close task", caught));
-    } finally {
-      setBusy(false);
-    }
-  }
-
   function appendEvent(message: string) {
     setEvents((current) => {
       const next = [...current, `${new Date().toLocaleTimeString()} ${message}`];
@@ -399,9 +360,6 @@ export function TaskWorkspace({
             label="Auto orchestration"
             onChange={(checked) => void setOrchestrationMode(checked ? "auto" : "manual")}
           />
-          <button className="danger-button" type="button" disabled={busy} onClick={() => void closeTask()}>
-            Close Task
-          </button>
         </div>
       </header>
 
