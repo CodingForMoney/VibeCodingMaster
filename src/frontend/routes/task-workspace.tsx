@@ -25,6 +25,7 @@ export interface TaskWorkspaceProps {
   refreshNonce?: number;
   onTaskChanged(): Promise<void>;
   onActiveRoleChange(role: RoleName): void;
+  onBeforeCloseTask?(): Promise<void>;
   onMessagesChanged?(messages: VcmRoleMessage[]): void;
   onOrchestrationChanged?(orchestration: VcmOrchestrationState): void;
   onRoundStateChanged?(roundState: VcmSessionRoundState): void;
@@ -56,6 +57,7 @@ export function TaskWorkspace({
   refreshNonce = 0,
   onTaskChanged,
   onActiveRoleChange,
+  onBeforeCloseTask,
   onMessagesChanged,
   onOrchestrationChanged,
   onRoundStateChanged,
@@ -327,6 +329,7 @@ export function TaskWorkspace({
       "",
       "This is destructive:",
       "- stops VCM-managed running role sessions for this task",
+      "- stops project-scoped Translator and Harness Engineer sessions",
       `- deletes the task worktree: ${task.worktreePath}`,
       `- deletes the Git branch: ${task.branch}`,
       "- deletes VCM task/session/message/orchestration state",
@@ -343,6 +346,7 @@ export function TaskWorkspace({
     setBusy(true);
     setError("");
     try {
+      await onBeforeCloseTask?.();
       await apiClient.cleanupTask(task.taskSlug, {
         force: true,
         forceDeleteBranch: true

@@ -66,6 +66,14 @@ describe("task routes", () => {
         async stopRoleSession(_repoRoot: string, _taskSlug: string, role: RoleName) {
           calls.push(`stop:${role}`);
           return createSession(role, "exited");
+        },
+        async stopProjectTranslatorSession() {
+          calls.push("stop:translator");
+          return createSession("translator", "exited");
+        },
+        async stopProjectHarnessEngineerSession() {
+          calls.push("stop:harness-engineer");
+          return createSession("harness-engineer", "exited");
         }
       },
       statusService: {
@@ -96,6 +104,8 @@ describe("task routes", () => {
       "list-sessions",
       "stop:architect",
       "stop:reviewer",
+      "stop:translator",
+      "stop:harness-engineer",
       "translation:/repo/.claude/worktrees/demo-task:demo-task:true",
       "round:demo-task",
       "cleanup"
@@ -134,6 +144,12 @@ describe("task routes", () => {
           return [];
         },
         async stopRoleSession() {
+          throw new Error("not used");
+        },
+        async stopProjectTranslatorSession() {
+          throw new Error("not used");
+        },
+        async stopProjectHarnessEngineerSession() {
           throw new Error("not used");
         }
       },

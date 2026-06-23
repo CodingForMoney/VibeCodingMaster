@@ -15,7 +15,7 @@ import type { RoundService } from "../services/round-service.js";
 export interface TaskRouteDeps {
   projectService: ProjectService;
   taskService: TaskService;
-  sessionService: Pick<SessionService, "listRoleSessions" | "stopRoleSession">;
+  sessionService: Pick<SessionService, "listRoleSessions" | "stopRoleSession" | "stopProjectTranslatorSession" | "stopProjectHarnessEngineerSession">;
   statusService: StatusService;
   translationService: Pick<TranslationService, "stopTask">;
   roundService: Pick<RoundService, "stopTask">;
@@ -57,6 +57,7 @@ export function registerTaskRoutes(app: FastifyInstance, deps: TaskRouteDeps): v
       const project = await requireCurrentProject(deps.projectService);
       const task = await deps.taskService.loadTask(project.repoRoot, request.params.taskSlug);
       await stopRunningRoleSessions(deps, project.repoRoot, request.params.taskSlug);
+      await stopProjectToolSessions(deps, project.repoRoot);
       await deps.translationService.stopTask(getTaskRuntimeRepoRoot(task), request.params.taskSlug, { clearCache: true });
       deps.roundService.stopTask(request.params.taskSlug);
       return deps.taskService.cleanupTask(project.repoRoot, request.params.taskSlug, request.body ?? {});
@@ -74,6 +75,27 @@ async function stopRunningRoleSessions(
     if (session.status === "running" && CORE_VCM_ROLE_NAMES.some((role) => role === session.role)) {
       await deps.sessionService.stopRoleSession(repoRoot, taskSlug, session.role);
     }
+  }
+}
+
+async function stopProjectToolSessions(
+  deps: Pick<TaskRouteDeps, "sessionService">,
+  repoRoot: string
+): Promise<void> {
+  await Promise.all([
+    ignoreMissingSession(deps.sessionService.stopProjectTranslatorSession(repoRoot)),
+    ignoreMissingSession(deps.sessionService.stopProjectHarnessEngineerSession(repoRoot))
+  ]);
+}
+
+async function ignoreMissingSession(operation: Promise<unknown>): Promise<void> {
+  try {
+    await operation;
+  } catch (error) {
+    if (error instanceof VcmError && error.code === "SESSION_MISSING") {
+      return;
+    }
+    throw error;
   }
 }
 

@@ -66,7 +66,7 @@ export interface GatewayServiceDeps {
   channel: WeixinIlinkChannel;
   projectService: ProjectService;
   taskService: TaskService;
-  sessionService: Pick<SessionService, "getRoleSession" | "listRoleSessions" | "resumeRoleSession" | "startRoleSession" | "stopRoleSession">;
+  sessionService: Pick<SessionService, "getRoleSession" | "listRoleSessions" | "resumeRoleSession" | "startRoleSession" | "stopRoleSession" | "stopProjectTranslatorSession" | "stopProjectHarnessEngineerSession">;
   messageService: Pick<MessageService, "updateOrchestrationState">;
   translationService: Pick<TranslationService, "translateUserInput" | "translateGatewayOutput" | "stopTask">;
   roundService: Pick<RoundService, "stopTask">;
@@ -664,6 +664,7 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
 
     const task = await deps.taskService.loadTask(project.repoRoot, taskSlug);
     await stopRunningRoleSessions(project.repoRoot, taskSlug);
+    await stopProjectToolSessions(project.repoRoot);
     await deps.translationService.stopTask(getTaskRuntimeRepoRoot(task), taskSlug, { clearCache: true });
     deps.roundService.stopTask(taskSlug);
     const result = await deps.taskService.cleanupTask(project.repoRoot, taskSlug, {
@@ -697,6 +698,24 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
       if (session.status === "running" && CORE_VCM_ROLE_NAMES.some((role) => role === session.role)) {
         await deps.sessionService.stopRoleSession(repoRoot, taskSlug, session.role);
       }
+    }
+  }
+
+  async function stopProjectToolSessions(repoRoot: string): Promise<void> {
+    await Promise.all([
+      ignoreMissingSession(deps.sessionService.stopProjectTranslatorSession(repoRoot)),
+      ignoreMissingSession(deps.sessionService.stopProjectHarnessEngineerSession(repoRoot))
+    ]);
+  }
+
+  async function ignoreMissingSession(operation: Promise<unknown>): Promise<void> {
+    try {
+      await operation;
+    } catch (error) {
+      if (error instanceof VcmError && error.code === "SESSION_MISSING") {
+        return;
+      }
+      throw error;
     }
   }
 

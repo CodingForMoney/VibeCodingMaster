@@ -98,6 +98,7 @@ export function App() {
   const flowPauseAlarmRef = useRef<number | null>(null);
   const gatewayContextSyncKeyRef = useRef("");
   const translatorEnsureKeyRef = useRef("");
+  const translatorAutoResumeKeyRef = useRef("");
   const harnessEngineerAutoResumeKeyRef = useRef("");
   const activeTask = useMemo(
     () => selectActiveTask(tasks, activeTaskSlug),
@@ -349,6 +350,45 @@ export function App() {
     return session;
   }
 
+  async function stopToolSessionsForTaskClose() {
+    const taskSlug = activeTask?.taskSlug;
+    const repoRoot = project?.repoRoot;
+    const stops: Promise<void>[] = [];
+
+    if (repoRoot && taskSlug && translatorSession?.claudeSessionId && translatorSession.status !== "exited") {
+      translatorAutoResumeKeyRef.current = `${repoRoot}:${taskSlug}:${translatorSession.claudeSessionId}`;
+      stops.push(
+        apiClient.stopTranslatorSession()
+          .then((session) => {
+            setTranslatorSession(session);
+            syncTranslatorLaunchOptions(session);
+          })
+          .catch(ignoreMissingSession)
+      );
+    }
+
+    if (repoRoot && taskSlug && harnessEngineerSession?.claudeSessionId && harnessEngineerSession.status !== "exited") {
+      harnessEngineerAutoResumeKeyRef.current = `${repoRoot}:${taskSlug}:${harnessEngineerSession.claudeSessionId}`;
+      stops.push(
+        apiClient.stopHarnessEngineerSession()
+          .then((session) => {
+            setHarnessEngineerSession(session);
+            syncHarnessEngineerLaunchOptions(session);
+          })
+          .catch(ignoreMissingSession)
+      );
+    }
+
+    await Promise.all(stops);
+  }
+
+  function ignoreMissingSession(caught: unknown) {
+    if (caught instanceof Error && caught.message.includes("session has not been started")) {
+      return;
+    }
+    throw caught;
+  }
+
   useEffect(() => {
     Promise.all([
       apiClient.getCurrentProject(),
@@ -447,6 +487,7 @@ export function App() {
 
   useEffect(() => {
     translatorEnsureKeyRef.current = "";
+    translatorAutoResumeKeyRef.current = "";
     harnessEngineerAutoResumeKeyRef.current = "";
     setTranslatorSession(null);
     setTranslatorPermissionMode("default");
@@ -519,6 +560,47 @@ export function App() {
     harnessEngineerSession?.permissionMode,
     harnessEngineerSession?.status,
     project?.repoRoot
+  ]);
+
+  useEffect(() => {
+    if (!project || !activeTask?.taskSlug || !translationBaseReady || !translatorSession?.claudeSessionId) {
+      return;
+    }
+    if (translatorSession.status === "running" || translatorSession.status === "done") {
+      return;
+    }
+
+    const resumeKey = `${project.repoRoot}:${activeTask.taskSlug}:${translatorSession.claudeSessionId}`;
+    if (translatorAutoResumeKeyRef.current === resumeKey) {
+      return;
+    }
+    translatorAutoResumeKeyRef.current = resumeKey;
+
+    void apiClient.resumeTranslatorSession({
+      taskSlug: activeTask.taskSlug,
+      cols: 100,
+      rows: 28,
+      permissionMode: translatorSession.permissionMode,
+      model: translatorSession.model,
+      effort: translatorSession.effort
+    })
+      .then((session) => {
+        setTranslatorSession(session);
+        syncTranslatorLaunchOptions(session);
+      })
+      .catch((caught: Error) => {
+        translatorAutoResumeKeyRef.current = "";
+        setError(caught.message);
+      });
+  }, [
+    activeTask?.taskSlug,
+    project?.repoRoot,
+    translationBaseReady,
+    translatorSession?.claudeSessionId,
+    translatorSession?.effort,
+    translatorSession?.model,
+    translatorSession?.permissionMode,
+    translatorSession?.status
   ]);
 
   useEffect(() => {
@@ -1015,6 +1097,7 @@ export function App() {
             await loadTasks();
           }}
           onActiveRoleChange={setActiveRole}
+          onBeforeCloseTask={stopToolSessionsForTaskClose}
           onMessagesChanged={handleMessagesChanged}
           onOrchestrationChanged={handleOrchestrationChanged}
           onRoundStateChanged={handleRoundStateChanged}
