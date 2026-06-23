@@ -255,10 +255,21 @@ h2 {
 
 .repo-connect,
 .project-summary,
+.repository-panel,
 .gateway-panel,
 .harness-panel,
 .task-create {
   margin: 0;
+}
+
+.repository-panel {
+  display: grid;
+  gap: 10px;
+}
+
+.repository-panel .project-summary {
+  padding-top: 10px;
+  border-top: 1px solid #ece5d9;
 }
 
 .inline-form {

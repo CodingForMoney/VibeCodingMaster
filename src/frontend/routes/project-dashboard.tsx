@@ -32,8 +32,7 @@ import { SwitchControl } from "../components/switch-control.js";
 import { TaskNav } from "../components/task-nav.js";
 
 type SidebarSectionId =
-  | "repository-path"
-  | "connected-repository"
+  | "repository"
   | "settings"
   | "translation"
   | "gate-review-gates"
@@ -177,7 +176,7 @@ export function ProjectDashboard({
   const [showMessages, setShowMessages] = useState(false);
   const [showEvents, setShowEvents] = useState(false);
   const [openSidebarSection, setOpenSidebarSection] = useState<SidebarSectionId | null>(
-    () => activeTaskSlug ? null : "repository-path"
+    () => activeTaskSlug ? null : "repository"
   );
   const messageCounts = getMessageCounts(messages);
   const normalizedTaskSlug = taskSlug.trim();
@@ -190,11 +189,11 @@ export function ProjectDashboard({
 
   useEffect(() => {
     setOpenSidebarSection((current) => {
-      if (activeTaskSlug && current === "repository-path") {
+      if (activeTaskSlug && current === "repository") {
         return null;
       }
       if (!activeTaskSlug && current === null) {
-        return "repository-path";
+        return "repository";
       }
       return current;
     });
@@ -217,36 +216,31 @@ export function ProjectDashboard({
       </header>
 
       <SidebarSection
-        title="Repository Path"
-        open={openSidebarSection === "repository-path"}
-        onOpenChange={(open) => handleSidebarSectionChange("repository-path", open)}
+        title="Repository"
+        open={openSidebarSection === "repository"}
+        onOpenChange={(open) => {
+          handleSidebarSectionChange("repository", open);
+          if (open && project) {
+            void onRefreshConnectedRepository();
+          }
+        }}
       >
-        <RepoConnectForm
-          defaultPath={project?.repoRoot ?? ""}
-          recentPaths={recentRepositoryPaths}
-          busy={busy}
-          onConnect={onConnect}
-        />
-      </SidebarSection>
-
-      {project ? (
-        <SidebarSection
-          title="Connected Repository"
-          open={openSidebarSection === "connected-repository"}
-          onOpenChange={(open) => {
-            handleSidebarSectionChange("connected-repository", open);
-            if (open) {
-              void onRefreshConnectedRepository();
-            }
-          }}
-        >
-          <ConnectedRepositoryPanel
+        <div className="repository-panel">
+          <RepoConnectForm
+            defaultPath={project?.repoRoot ?? ""}
+            recentPaths={recentRepositoryPaths}
             busy={busy}
-            project={project}
-            onPull={onPullConnectedRepository}
+            onConnect={onConnect}
           />
-        </SidebarSection>
-      ) : null}
+          {project ? (
+            <ConnectedRepositoryPanel
+              busy={busy}
+              project={project}
+              onPull={onPullConnectedRepository}
+            />
+          ) : null}
+        </div>
+      </SidebarSection>
 
       <SidebarSection
         title="Settings"
