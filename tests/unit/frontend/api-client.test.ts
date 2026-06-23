@@ -108,30 +108,50 @@ describe("apiClient", () => {
     expect(new Headers(init?.headers).has("content-type")).toBe(false);
   });
 
-  it("commits harness changes and rebases a task branch", async () => {
+  it("applies harness changes for the active task", async () => {
     const fetchMock = mockFetch({
-      taskSlug: "demo-task",
-      branch: "feature/demo-task",
-      worktreePath: "/repo/.claude/worktrees/demo-task",
-      baseBranch: "main",
-      baseCommitBefore: "abc",
-      baseCommitAfter: "def",
-      committed: true,
-      rebased: true,
+      version: 1,
       changedFiles: [],
+      harnessCommit: "abc1234",
       message: "done"
     });
 
-    await apiClient.commitAndRebaseHarnessTask("demo-task", {
-      changedFiles: [{ path: "CLAUDE.md", action: "update", reason: "updated" }]
-    });
+    await apiClient.applyHarness({ taskSlug: "demo-task" });
 
     const init = fetchMock.mock.calls[0]?.[1];
-    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/projects/harness/tasks/demo-task/commit-and-rebase");
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/projects/harness/apply");
     expect(init?.method).toBe("POST");
     expect(JSON.parse(String(init?.body))).toEqual({
-      changedFiles: [{ path: "CLAUDE.md", action: "update", reason: "updated" }]
+      taskSlug: "demo-task"
     });
+  });
+
+  it("loads repository diff with the selected scope", async () => {
+    const fetchMock = mockFetch({
+      version: 1,
+      repoRoot: "/repo",
+      scope: "all",
+      generatedAt: "2026-06-23T00:00:00.000Z",
+      summary: {
+        totalFiles: 0,
+        committedFiles: 0,
+        stagedFiles: 0,
+        unstagedFiles: 0,
+        untrackedFiles: 0,
+        additions: 0,
+        deletions: 0,
+        harnessFiles: 0,
+        productCodeFiles: 0,
+        truncatedFiles: 0,
+        binaryFiles: 0
+      },
+      files: [],
+      warnings: []
+    });
+
+    await apiClient.getRepositoryDiff("demo-task", "all");
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/projects/harness/repository-diff?taskSlug=demo-task&scope=all");
   });
 
   it("marks all messages done with a bodyless POST", async () => {

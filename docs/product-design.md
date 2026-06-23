@@ -498,11 +498,11 @@ For `.gitignore`, VCM uses hash comments:
 # VCM:END
 ```
 
-`.ai/vcm/` is the active VCM local control area, and `.claude/worktrees/` is the Claude-compatible task worktree area. The base repo keeps the task index; each task runtime repo keeps its own session, message, orchestration, and translation state.
+`.ai/vcm/` is the active VCM local control area, and `.claude/worktrees/` is the Claude-compatible task worktree area. The base repo keeps project-scoped runtime state outside Git; each task runtime repo keeps its own session, message, orchestration, and translation state.
 
 VCM must preserve all user-authored content outside the managed block.
 
-After applying harness changes in the base repo, the UI shows the changed files. When a task is active, the result area also shows `Commit & rebase task`: VCM stages only the changed harness files, creates a `chore: update VCM harness` commit in the base repo, and rebases the active task branch onto that commit. If the task worktree is dirty or the base repo already has staged changes, VCM stops and asks the user to clean up first.
+Harness changes are applied only in the active task worktree. VCM refuses to run harness operations when that worktree has Git-visible changes, writes the harness update, stages the changed harness files, and immediately creates a harness commit. Review Diff shows the latest active task commit diff, not an unstaged worktree diff. If the review is wrong, the user can revert the commit, modify and commit a follow-up, or ask Harness Engineer to revise the harness.
 
 Role sessions get VCM behavior from `CLAUDE.md` and `.claude/agents/*.md`, not from a pasted startup context.
 

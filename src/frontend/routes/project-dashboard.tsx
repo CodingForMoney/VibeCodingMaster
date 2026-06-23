@@ -9,7 +9,6 @@ import {
   type TranslationTargetLanguage
 } from "../../shared/types/app-settings.js";
 import type {
-  CommitAndRebaseHarnessTaskResult,
   HarnessApplyResult,
   HarnessBootstrapStatusReport,
   HarnessStatusReport
@@ -61,7 +60,6 @@ export interface ProjectDashboardProps {
   harnessStatus: HarnessStatusReport | null;
   harnessBootstrapStatus: HarnessBootstrapStatusReport | null;
   harnessApplyResult?: HarnessApplyResult | null;
-  harnessTaskSyncResult?: CommitAndRebaseHarnessTaskResult | null;
   gatewayStatus: GatewayStatus | null;
   gatewayQrLogin: StartGatewayQrLoginResult | null;
   gatewayQrCheck: CheckGatewayQrLoginResult | null;
@@ -71,12 +69,12 @@ export interface ProjectDashboardProps {
   onPullConnectedRepository(): Promise<void>;
   onRefreshHarness(): Promise<void>;
   onApplyHarness(): Promise<void>;
-  onCommitAndRebaseHarnessTask(): Promise<void>;
   onStartHarnessBootstrap(input: { permissionMode: ClaudePermissionMode; model: SessionModel; effort: SessionEffort }): Promise<void>;
   onRestartHarnessBootstrap(input: { permissionMode: ClaudePermissionMode; model: SessionModel; effort: SessionEffort }): Promise<void>;
   onStopHarnessBootstrap(): Promise<void>;
   onRunHarnessBootstrap(): Promise<void>;
   onOpenHarnessStudio(): void;
+  onOpenRepositoryDiff(): void;
   onRefreshGateway(): Promise<void>;
   onGatewayEnabledChange(enabled: boolean): void;
   onGatewayTranslationChange(enabled: boolean): void;
@@ -128,7 +126,6 @@ export function ProjectDashboard({
   harnessStatus,
   harnessBootstrapStatus,
   harnessApplyResult,
-  harnessTaskSyncResult,
   gatewayStatus,
   gatewayQrLogin,
   gatewayQrCheck,
@@ -138,12 +135,12 @@ export function ProjectDashboard({
   onPullConnectedRepository,
   onRefreshHarness,
   onApplyHarness,
-  onCommitAndRebaseHarnessTask,
   onStartHarnessBootstrap,
   onRestartHarnessBootstrap,
   onStopHarnessBootstrap,
   onRunHarnessBootstrap,
   onOpenHarnessStudio,
+  onOpenRepositoryDiff,
   onRefreshGateway,
   onGatewayEnabledChange,
   onGatewayTranslationChange,
@@ -403,14 +400,13 @@ export function ProjectDashboard({
             status={harnessStatus}
             bootstrapStatus={harnessBootstrapStatus}
             applyResult={harnessApplyResult}
-            taskSyncResult={harnessTaskSyncResult}
             harnessEngineerSession={harnessEngineerSession}
-            canCommitAndRebaseTask={Boolean(harnessApplyResult?.changedFiles.length && activeTask)}
+            hasActiveTask={Boolean(activeTask)}
             busy={busy}
             onRefresh={onRefreshHarness}
             onApply={onApplyHarness}
-            onCommitAndRebaseTask={onCommitAndRebaseHarnessTask}
             onOpenStudio={onOpenHarnessStudio}
+            onOpenRepositoryDiff={onOpenRepositoryDiff}
             onStartBootstrap={onStartHarnessBootstrap}
             onRestartBootstrap={onRestartHarnessBootstrap}
             onStopBootstrap={onStopHarnessBootstrap}

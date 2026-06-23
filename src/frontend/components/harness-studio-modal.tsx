@@ -13,6 +13,7 @@ export interface HarnessStudioModalProps {
   model: SessionModel;
   open: boolean;
   permissionMode: ClaudePermissionMode;
+  taskSlug: string | null;
   bootstrapStatus: HarnessBootstrapStatusReport | null;
   engineerSession: RoleSessionRecord | null;
   status: HarnessStatusReport | null;
@@ -25,6 +26,7 @@ export interface HarnessStudioModalProps {
   onEngineerStart(): void;
   onEngineerStop(): void;
   onEngineerNotifyHarnessUpdated(): void;
+  onOpenRepositoryDiff(): void;
   onRefresh(): void;
 }
 
@@ -34,6 +36,7 @@ export function HarnessStudioModal({
   model,
   open,
   permissionMode,
+  taskSlug,
   bootstrapStatus,
   engineerSession,
   status,
@@ -46,6 +49,7 @@ export function HarnessStudioModal({
   onEngineerStart,
   onEngineerStop,
   onEngineerNotifyHarnessUpdated,
+  onOpenRepositoryDiff,
   onRefresh
 }: HarnessStudioModalProps) {
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
@@ -76,14 +80,14 @@ export function HarnessStudioModal({
   }, [files, open, selectedPath]);
 
   useEffect(() => {
-    if (!open || !selectedPath) {
+    if (!open || !selectedPath || !taskSlug) {
       return;
     }
 
     let cancelled = false;
     setFileBusy(true);
     setFileError(null);
-    void apiClient.getHarnessFileContent(selectedPath)
+    void apiClient.getHarnessFileContent(taskSlug, selectedPath)
       .then((file) => {
         if (cancelled) {
           return;
@@ -105,17 +109,17 @@ export function HarnessStudioModal({
     return () => {
       cancelled = true;
     };
-  }, [open, selectedPath]);
+  }, [open, selectedPath, taskSlug]);
 
   async function saveSelectedFile() {
-    if (!selectedFile || !selectedFile.editable || !dirty) {
+    if (!selectedFile || !selectedFile.editable || !dirty || !taskSlug) {
       return;
     }
 
     setFileBusy(true);
     setFileError(null);
     try {
-      const result = await apiClient.updateHarnessFileContent(selectedFile.path, { content: draftContent });
+      const result = await apiClient.updateHarnessFileContent(taskSlug, selectedFile.path, { content: draftContent });
       setSelectedFile(result.file);
       setDraftContent(result.file.content);
       onRefresh();
@@ -137,8 +141,10 @@ export function HarnessStudioModal({
           <div>
             <h2>Harness Studio</h2>
             <p>VCM 0.4 harness visibility, role configuration, and Harness Engineer workspace.</p>
+            {!taskSlug ? <p className="muted">Create or select a task before editing harness files.</p> : null}
           </div>
           <div className="harness-studio-header-actions">
+            <button type="button" disabled={busy} onClick={onOpenRepositoryDiff}>Review Diff</button>
             <button type="button" disabled={busy} onClick={onRefresh}>Refresh</button>
             <button type="button" onClick={onClose}>Close</button>
           </div>
@@ -203,7 +209,7 @@ export function HarnessStudioModal({
                 {selectedFile ? <StatusBadge status={selectedFile.editable ? "ok" : "unknown"} /> : null}
                 <button
                   type="button"
-                  disabled={fileBusy || !selectedFile?.editable || !dirty}
+                  disabled={fileBusy || !taskSlug || !selectedFile?.editable || !dirty}
                   onClick={() => void saveSelectedFile()}
                 >
                   Save

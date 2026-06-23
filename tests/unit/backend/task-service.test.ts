@@ -78,22 +78,20 @@ describe("createTaskService", () => {
     await expect(fileExists(task.worktreePath)).resolves.toBe(false);
   });
 
-  it("refuses task creation when .ai/vcm is not ignored", async () => {
-    const repoRoot = await createTempGitRepo(tempDirs, { ignoreVcm: false });
-    const service = createService(repoRoot);
-
-    await expect(service.createTask(repoRoot, { taskSlug: "blocked-task" })).rejects.toMatchObject({
-      code: "VCM_STATE_NOT_IGNORED"
+  it("allows task creation when the base repo only has VCM runtime files", async () => {
+    const repoRoot = await createTempGitRepo(tempDirs, {
+      ignoreVcm: false,
+      ignoreClaudeWorktrees: false
     });
-  });
-
-  it("refuses task worktree creation when .claude/worktrees is not ignored", async () => {
-    const repoRoot = await createTempGitRepo(tempDirs, { ignoreClaudeWorktrees: false });
     const service = createService(repoRoot);
+    await fs.mkdir(path.join(repoRoot, ".ai/vcm/tasks"), { recursive: true });
+    await fs.writeFile(path.join(repoRoot, ".ai/vcm/tasks/stale.json"), "{}\n");
+    await fs.mkdir(path.join(repoRoot, ".claude/worktrees/stale"), { recursive: true });
+    await fs.writeFile(path.join(repoRoot, ".claude/worktrees/stale/marker.txt"), "runtime\n");
 
-    await expect(service.createTask(repoRoot, { taskSlug: "blocked-worktree-task" })).rejects.toMatchObject({
-      code: "VCM_WORKTREES_NOT_IGNORED"
-    });
+    const task = await service.createTask(repoRoot, { taskSlug: "runtime-only-task" });
+
+    expect(task.taskSlug).toBe("runtime-only-task");
   });
 
   it("refuses task creation when the base repository has uncommitted changes", async () => {

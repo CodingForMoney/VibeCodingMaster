@@ -9,11 +9,12 @@ import type {
 } from "../../shared/types/gateway.js";
 import type { RuntimeDiagnostics } from "../../shared/types/diagnostics.js";
 import type {
-  CommitAndRebaseHarnessTaskRequest,
-  CommitAndRebaseHarnessTaskResult,
+  HarnessApplyRequest,
   HarnessApplyResult,
   HarnessBootstrapStatusReport,
   HarnessFileContent,
+  RepositoryDiffReport,
+  RepositoryDiffScope,
   RestartHarnessBootstrapRequest,
   RunHarnessBootstrapResult,
   HarnessStatusReport,
@@ -105,36 +106,34 @@ export const apiClient = {
       body: JSON.stringify(input)
     });
   },
-  getHarnessStatus() {
-    return request<HarnessStatusReport>("/api/projects/harness");
+  getHarnessStatus(taskSlug: string) {
+    const params = new URLSearchParams({ taskSlug });
+    return request<HarnessStatusReport>(`/api/projects/harness?${params.toString()}`);
   },
-  applyHarness() {
+  applyHarness(input: HarnessApplyRequest) {
     return request<HarnessApplyResult>("/api/projects/harness/apply", {
-      method: "POST"
+      method: "POST",
+      body: JSON.stringify(input)
     });
   },
-  getHarnessFileContent(filePath: string) {
-    const params = new URLSearchParams({ path: filePath });
+  getHarnessFileContent(taskSlug: string, filePath: string) {
+    const params = new URLSearchParams({ path: filePath, taskSlug });
     return request<HarnessFileContent>(`/api/projects/harness/file?${params.toString()}`);
   },
-  updateHarnessFileContent(filePath: string, input: UpdateHarnessFileContentRequest) {
-    const params = new URLSearchParams({ path: filePath });
+  updateHarnessFileContent(taskSlug: string, filePath: string, input: UpdateHarnessFileContentRequest) {
+    const params = new URLSearchParams({ path: filePath, taskSlug });
     return request<UpdateHarnessFileContentResult>(`/api/projects/harness/file?${params.toString()}`, {
       method: "PUT",
       body: JSON.stringify(input)
     });
   },
-  commitAndRebaseHarnessTask(taskSlug: string, input: CommitAndRebaseHarnessTaskRequest) {
-    return request<CommitAndRebaseHarnessTaskResult>(
-      `/api/projects/harness/tasks/${encodeURIComponent(taskSlug)}/commit-and-rebase`,
-      {
-        method: "POST",
-        body: JSON.stringify(input)
-      }
-    );
+  getRepositoryDiff(taskSlug: string, scope: RepositoryDiffScope = "harness") {
+    const params = new URLSearchParams({ taskSlug, scope });
+    return request<RepositoryDiffReport>(`/api/projects/harness/repository-diff?${params.toString()}`);
   },
-  getHarnessBootstrapStatus() {
-    return request<HarnessBootstrapStatusReport>("/api/projects/harness/bootstrap");
+  getHarnessBootstrapStatus(taskSlug: string) {
+    const params = new URLSearchParams({ taskSlug });
+    return request<HarnessBootstrapStatusReport>(`/api/projects/harness/bootstrap?${params.toString()}`);
   },
   startHarnessBootstrap(input: StartHarnessBootstrapRequest = {}) {
     return request<StartHarnessBootstrapResult>("/api/projects/harness/bootstrap/start", {
@@ -153,9 +152,10 @@ export const apiClient = {
       method: "POST"
     });
   },
-  runHarnessBootstrap() {
+  runHarnessBootstrap(input: { taskSlug: string }) {
     return request<RunHarnessBootstrapResult>("/api/projects/harness/bootstrap/run", {
-      method: "POST"
+      method: "POST",
+      body: JSON.stringify(input)
     });
   },
   getHarnessEngineerSession() {

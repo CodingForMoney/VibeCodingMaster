@@ -2,7 +2,6 @@ import { execFile } from "node:child_process";
 import path from "node:path";
 import { promisify } from "node:util";
 import type {
-  CommitAndRebaseHarnessTaskResult,
   HarnessApplyResult,
   HarnessBootstrapCheck,
   HarnessBootstrapSession,
@@ -14,6 +13,11 @@ import type {
   HarnessPlannedChange,
   HarnessStatusReport,
   RecordHarnessBootstrapHookInput,
+  RepositoryDiffFile,
+  RepositoryDiffFileCategory,
+  RepositoryDiffFileStatus,
+  RepositoryDiffReport,
+  RepositoryDiffScope,
   RestartHarnessBootstrapRequest,
   RunHarnessBootstrapResult,
   StartHarnessBootstrapRequest,
@@ -56,18 +60,18 @@ export interface HarnessService {
   getHarnessFileContent(repoRoot: string, filePath: string): Promise<HarnessFileContent>;
   updateHarnessFileContent(repoRoot: string, filePath: string, content: string): Promise<UpdateHarnessFileContentResult>;
   applyHarness(repoRoot: string): Promise<HarnessApplyResult>;
-  commitAndRebaseTask(repoRoot: string, input: CommitAndRebaseHarnessTaskInput): Promise<CommitAndRebaseHarnessTaskResult>;
-  getBootstrapStatus(repoRoot: string): Promise<HarnessBootstrapStatusReport>;
-  startHarnessBootstrap(repoRoot: string, input?: StartHarnessBootstrapRequest): Promise<StartHarnessBootstrapResult>;
-  restartHarnessBootstrap(repoRoot: string, input?: RestartHarnessBootstrapRequest): Promise<StartHarnessBootstrapResult>;
+  getRepositoryDiff(repoRoot: string, scope?: RepositoryDiffScope): Promise<RepositoryDiffReport>;
+  getBootstrapStatus(repoRoot: string, targetRepoRoot?: string): Promise<HarnessBootstrapStatusReport>;
+  startHarnessBootstrap(repoRoot: string, targetRepoRoot?: string, input?: StartHarnessBootstrapRequest): Promise<StartHarnessBootstrapResult>;
+  restartHarnessBootstrap(repoRoot: string, targetRepoRoot?: string, input?: RestartHarnessBootstrapRequest): Promise<StartHarnessBootstrapResult>;
   stopHarnessBootstrap(repoRoot: string): Promise<HarnessBootstrapStatusReport>;
-  runHarnessBootstrap(repoRoot: string): Promise<RunHarnessBootstrapResult>;
+  runHarnessBootstrap(repoRoot: string, targetRepoRoot?: string): Promise<RunHarnessBootstrapResult>;
   recordHarnessBootstrapHook(repoRoot: string, input: RecordHarnessBootstrapHookInput): Promise<HarnessBootstrapStatusReport>;
 }
 
 export interface HarnessServiceDeps {
   fs: FileSystemAdapter;
-  git?: Pick<GitAdapter, "addPaths" | "commit" | "getCurrentBranch" | "getHeadCommit" | "getStagedStatus" | "getStatusPorcelain" | "rebase">;
+  git?: Pick<GitAdapter, "addPaths" | "commit" | "getCommitDiff" | "getCommitInfo" | "getStatusPorcelainV1">;
   runtime?: TerminalRuntime;
   harnessEngineerSessions?: Pick<
     SessionService,
@@ -83,19 +87,13 @@ export interface HarnessServiceDeps {
 interface HarnessBootstrapRunState {
   version: 1;
   status: "running" | "complete";
+  targetRepoRoot?: string;
   sessionId?: string;
   claudeSessionId?: string;
   startedAt?: string;
   completedAt?: string;
   updatedAt: string;
   lastHookEvent?: RecordHarnessBootstrapHookInput["eventName"];
-}
-
-export interface CommitAndRebaseHarnessTaskInput {
-  taskSlug: string;
-  branch: string;
-  worktreePath: string;
-  changedFiles: HarnessPlannedChange[];
 }
 
 interface HarnessFileDefinition {
@@ -310,6 +308,7 @@ export function createHarnessService(deps: HarnessServiceDeps): HarnessService {
       return readHarnessFileContent(deps.fs, repoRoot, filePath);
     },
     async updateHarnessFileContent(repoRoot, filePath, content) {
+      await assertHarnessWorktreeClean(deps.git, repoRoot);
       const definition = getHarnessFileDefinition(filePath);
       if (!isProjectEditableHarnessFile(definition)) {
         throw new VcmError({
@@ -327,8 +326,14 @@ export function createHarnessService(deps: HarnessServiceDeps): HarnessService {
       assertManagedBlockUnchanged(definition, currentContent, content);
       const nextContent = ensureTrailingNewline(content);
       await deps.fs.writeText(absolutePath, nextContent);
+      let harnessCommit: string | undefined;
       if (nextContent !== currentContent) {
         await bumpHarnessRevision(deps.fs, repoRoot, now());
+        harnessCommit = (await commitHarnessVisibleChanges(
+          deps.git,
+          repoRoot,
+          "chore(vcm-harness): update harness file"
+        )).harnessCommit;
       }
 
       const file = await readHarnessFileContent(deps.fs, repoRoot, definition.path);
@@ -336,16 +341,28 @@ export function createHarnessService(deps: HarnessServiceDeps): HarnessService {
       const legacyChanges = await analyzeLegacyCodexHarnessPaths(deps.fs, repoRoot);
       return {
         file,
-        status: renderHarnessStatus(await readHarnessRevisionValue(deps.fs, repoRoot), analyses, legacyChanges)
+        status: renderHarnessStatus(await readHarnessRevisionValue(deps.fs, repoRoot), analyses, legacyChanges),
+        harnessCommit
       };
     },
     async applyHarness(repoRoot) {
+      await assertHarnessWorktreeClean(deps.git, repoRoot);
       if (deps.runFixedInstaller) {
         const result = await deps.runFixedInstaller(repoRoot);
         if (result.changedFiles.length > 0) {
           await bumpHarnessRevision(deps.fs, repoRoot, now());
         }
-        return result;
+        const committed = await commitHarnessVisibleChanges(
+          deps.git,
+          repoRoot,
+          "chore(vcm-harness): update fixed harness"
+        );
+        return {
+          ...result,
+          changedFiles: committed.changedFiles.length > 0 ? committed.changedFiles : result.changedFiles,
+          harnessCommit: committed.harnessCommit,
+          message: formatHarnessApplyMessage(committed.harnessCommit, result.changedFiles.length > 0)
+        };
       }
 
       const analyses = await analyzeHarnessFiles(deps.fs, repoRoot);
@@ -366,94 +383,37 @@ export function createHarnessService(deps: HarnessServiceDeps): HarnessService {
       if (changedFiles.length > 0) {
         await bumpHarnessRevision(deps.fs, repoRoot, now());
       }
+      const committed = await commitHarnessVisibleChanges(
+        deps.git,
+        repoRoot,
+        "chore(vcm-harness): update fixed harness"
+      );
 
       return {
         version: VCM_HARNESS_VERSION,
-        changedFiles,
+        changedFiles: committed.changedFiles.length > 0 ? committed.changedFiles : changedFiles,
+        harnessCommit: committed.harnessCommit,
         message: changedFiles.length === 0
           ? "VCM Harness is already up to date."
-          : "VCM Harness updated. Review these files and commit the harness changes before starting long-running work."
+          : formatHarnessApplyMessage(committed.harnessCommit, true)
       };
     },
-    async commitAndRebaseTask(repoRoot, input) {
+    async getRepositoryDiff(repoRoot, scope = "harness") {
       if (!deps.git) {
         throw new VcmError({
           code: "HARNESS_GIT_UNAVAILABLE",
-          message: "Git-backed harness sync is not available in this VCM runtime.",
+          message: "Git-backed repository diff is not available in this VCM runtime.",
           statusCode: 501
         });
       }
-      const changedFiles = dedupeHarnessChanges(input.changedFiles);
-      const changedPaths = changedFiles.map((change) => change.path);
-      const taskBranch = await deps.git.getCurrentBranch(input.worktreePath);
-      if (taskBranch !== input.branch) {
-        throw new VcmError({
-          code: "HARNESS_TASK_BRANCH_MISMATCH",
-          message: "The selected task worktree is not on its recorded task branch.",
-          statusCode: 409,
-          hint: `Expected ${input.branch}, found ${taskBranch}.`
-        });
-      }
-
-      const taskStatus = await deps.git.getStatusPorcelain(input.worktreePath);
-      if (taskStatus.trim()) {
-        throw new VcmError({
-          code: "HARNESS_TASK_DIRTY",
-          message: "The selected task worktree has uncommitted changes.",
-          statusCode: 409,
-          hint: "Commit or clean the task worktree before rebasing it onto the harness commit."
-        });
-      }
-
-      const preExistingStaged = await deps.git.getStagedStatus(repoRoot);
-      if (preExistingStaged.trim()) {
-        throw new VcmError({
-          code: "HARNESS_BASE_STAGED_CHANGES",
-          message: "The connected repository already has staged changes.",
-          statusCode: 409,
-          hint: "Commit, unstage, or clean existing staged changes before using Commit & rebase task."
-        });
-      }
-
-      const baseBranch = await deps.git.getCurrentBranch(repoRoot);
-      const baseCommitBefore = await deps.git.getHeadCommit(repoRoot);
-      let harnessCommit: string | undefined;
-      let committed = false;
-
-      if (changedPaths.length > 0) {
-        await deps.git.addPaths(repoRoot, changedPaths);
-        const stagedHarnessChanges = await deps.git.getStagedStatus(repoRoot);
-        if (stagedHarnessChanges.trim()) {
-          harnessCommit = await deps.git.commit(repoRoot, "chore: update VCM harness");
-          committed = true;
-        }
-      }
-
-      const baseCommitAfter = await deps.git.getHeadCommit(repoRoot);
-      await deps.git.rebase(input.worktreePath, baseCommitAfter);
-
-      return {
-        taskSlug: input.taskSlug,
-        branch: input.branch,
-        worktreePath: input.worktreePath,
-        baseBranch,
-        baseCommitBefore,
-        baseCommitAfter,
-        harnessCommit,
-        committed,
-        rebased: true,
-        changedFiles,
-        message: committed
-          ? `Committed VCM harness update ${shortCommit(baseCommitAfter)} on ${baseBranch} and rebased ${input.branch}.`
-          : `No new harness commit was needed; rebased ${input.branch} onto ${shortCommit(baseCommitAfter)}.`
-      };
+      return getRepositoryDiffReport(deps.git, repoRoot, scope, now());
     },
-    async getBootstrapStatus(repoRoot) {
-      return getHarnessBootstrapStatus(deps, repoRoot, now);
+    async getBootstrapStatus(repoRoot, targetRepoRoot = repoRoot) {
+      return getHarnessBootstrapStatus(deps, repoRoot, targetRepoRoot, now);
     },
-    async startHarnessBootstrap(repoRoot, input = {}) {
-      const session = await ensureHarnessEngineerForBootstrap(deps, repoRoot, now, input);
-      const nextStatus = await getHarnessBootstrapStatus(deps, repoRoot, now);
+    async startHarnessBootstrap(repoRoot, targetRepoRoot = repoRoot, input = {}) {
+      const session = await ensureHarnessEngineerForBootstrap(deps, repoRoot, targetRepoRoot, now, input);
+      const nextStatus = await getHarnessBootstrapStatus(deps, repoRoot, targetRepoRoot, now);
 
       return {
         status: {
@@ -461,19 +421,19 @@ export function createHarnessService(deps: HarnessServiceDeps): HarnessService {
           session
         },
         session,
-        prompt: buildHarnessBootstrapPrompt(repoRoot)
+        prompt: buildHarnessBootstrapPrompt(repoRoot, targetRepoRoot)
       };
     },
-    async restartHarnessBootstrap(repoRoot, input = {}) {
-      const session = await restartHarnessEngineerForBootstrap(deps, repoRoot, now, input);
-      const nextStatus = await getHarnessBootstrapStatus(deps, repoRoot, now);
+    async restartHarnessBootstrap(repoRoot, targetRepoRoot = repoRoot, input = {}) {
+      const session = await restartHarnessEngineerForBootstrap(deps, repoRoot, targetRepoRoot, now, input);
+      const nextStatus = await getHarnessBootstrapStatus(deps, repoRoot, targetRepoRoot, now);
       return {
         status: {
           ...nextStatus,
           session
         },
         session,
-        prompt: buildHarnessBootstrapPrompt(repoRoot)
+        prompt: buildHarnessBootstrapPrompt(repoRoot, targetRepoRoot)
       };
     },
     async stopHarnessBootstrap(repoRoot) {
@@ -487,9 +447,9 @@ export function createHarnessService(deps: HarnessServiceDeps): HarnessService {
       }
       await deps.harnessEngineerSessions?.stopProjectHarnessEngineerSession(repoRoot);
       await clearHarnessBootstrapRunState(deps.fs, repoRoot);
-      return getHarnessBootstrapStatus(deps, repoRoot, now);
+      return getHarnessBootstrapStatus(deps, repoRoot, repoRoot, now);
     },
-    async runHarnessBootstrap(repoRoot) {
+    async runHarnessBootstrap(repoRoot, targetRepoRoot = repoRoot) {
       if (!deps.runtime || !deps.harnessEngineerSessions) {
         throw new VcmError({
           code: "HARNESS_BOOTSTRAP_UNAVAILABLE",
@@ -497,7 +457,8 @@ export function createHarnessService(deps: HarnessServiceDeps): HarnessService {
           statusCode: 501
         });
       }
-      const status = await getHarnessBootstrapStatus(deps, repoRoot, now);
+      await assertHarnessWorktreeClean(deps.git, targetRepoRoot);
+      const status = await getHarnessBootstrapStatus(deps, repoRoot, targetRepoRoot, now);
       const session = status.session;
       if (!session || session.status !== "running" || !deps.runtime.getSession(session.id)) {
         throw new VcmError({
@@ -506,34 +467,44 @@ export function createHarnessService(deps: HarnessServiceDeps): HarnessService {
           statusCode: 409
         });
       }
-      const prompt = buildHarnessBootstrapPrompt(repoRoot);
+      const prompt = buildHarnessBootstrapPrompt(repoRoot, targetRepoRoot);
       const timestamp = now();
       await persistHarnessBootstrapRunState(deps.fs, repoRoot, {
         version: 1,
         status: "running",
+        targetRepoRoot,
         sessionId: session.id,
         claudeSessionId: session.claudeSessionId,
         startedAt: timestamp,
         updatedAt: timestamp
       });
       await submitTerminalInput(deps.runtime, session.id, prompt);
-      const nextStatus = await getHarnessBootstrapStatus(deps, repoRoot, now);
+      const nextStatus = await getHarnessBootstrapStatus(deps, repoRoot, targetRepoRoot, now);
       return {
         status: {
           ...nextStatus,
           session
         },
         session,
-        prompt
+        prompt,
+        targetRepoRoot
       };
     },
     async recordHarnessBootstrapHook(repoRoot, input) {
       const state = await loadPersistedHarnessBootstrapRunState(deps.fs, repoRoot);
       if (state?.status !== "running" || !matchesBootstrapRunState(state, input)) {
-        return getHarnessBootstrapStatus(deps, repoRoot, now);
+        return getHarnessBootstrapStatus(deps, repoRoot, state?.targetRepoRoot ?? repoRoot, now);
       }
 
       const timestamp = now();
+      if (input.eventName === "Stop" && state.targetRepoRoot) {
+        await bumpHarnessRevision(deps.fs, state.targetRepoRoot, timestamp);
+        await commitHarnessVisibleChanges(
+          deps.git,
+          state.targetRepoRoot,
+          "chore(vcm-harness): bootstrap project context"
+        );
+      }
       await persistHarnessBootstrapRunState(deps.fs, repoRoot, {
         ...state,
         status: input.eventName === "Stop" ? "complete" : state.status,
@@ -541,31 +512,15 @@ export function createHarnessService(deps: HarnessServiceDeps): HarnessService {
         updatedAt: timestamp,
         lastHookEvent: input.eventName
       });
-      return getHarnessBootstrapStatus(deps, repoRoot, now);
+      return getHarnessBootstrapStatus(deps, repoRoot, state.targetRepoRoot ?? repoRoot, now);
     }
   };
-}
-
-function dedupeHarnessChanges(changedFiles: HarnessPlannedChange[]): HarnessPlannedChange[] {
-  const seen = new Set<string>();
-  const changes: HarnessPlannedChange[] = [];
-  for (const change of changedFiles) {
-    const normalizedPath = normalizeHarnessGitPath(change.path);
-    if (seen.has(normalizedPath)) {
-      continue;
-    }
-    seen.add(normalizedPath);
-    changes.push({
-      ...change,
-      path: normalizedPath
-    });
-  }
-  return changes;
 }
 
 async function ensureHarnessEngineerForBootstrap(
   deps: HarnessServiceDeps,
   repoRoot: string,
+  targetRepoRoot: string,
   now: () => string,
   input: StartHarnessBootstrapRequest
 ): Promise<HarnessBootstrapSession> {
@@ -577,7 +532,7 @@ async function ensureHarnessEngineerForBootstrap(
     });
   }
 
-  const currentStatus = await getHarnessBootstrapStatus(deps, repoRoot, now);
+  const currentStatus = await getHarnessBootstrapStatus(deps, repoRoot, targetRepoRoot, now);
   if (currentStatus.session?.status === "running") {
     return currentStatus.session;
   }
@@ -595,6 +550,7 @@ async function ensureHarnessEngineerForBootstrap(
 async function restartHarnessEngineerForBootstrap(
   deps: HarnessServiceDeps,
   repoRoot: string,
+  targetRepoRoot: string,
   now: () => string,
   input: RestartHarnessBootstrapRequest
 ): Promise<HarnessBootstrapSession> {
@@ -606,7 +562,7 @@ async function restartHarnessEngineerForBootstrap(
     });
   }
 
-  const currentStatus = await getHarnessBootstrapStatus(deps, repoRoot, now);
+  const currentStatus = await getHarnessBootstrapStatus(deps, repoRoot, targetRepoRoot, now);
   if (!currentStatus.canStart) {
     throw new VcmError({
       code: "HARNESS_BOOTSTRAP_NOT_READY",
@@ -675,6 +631,291 @@ function normalizeHarnessGitPath(value: string): string {
 
 function shortCommit(commit: string): string {
   return commit.slice(0, 7);
+}
+
+type RepositoryDiffGit = NonNullable<HarnessServiceDeps["git"]>;
+
+interface ParsedGitStatusEntry {
+  path: string;
+  oldPath?: string;
+  indexStatus: string;
+  workingTreeStatus: string;
+}
+
+const REPOSITORY_DIFF_MAX_FILES = 250;
+const REPOSITORY_DIFF_MAX_DIFF_CHARS = 180_000;
+
+async function getRepositoryDiffReport(
+  git: RepositoryDiffGit,
+  repoRoot: string,
+  scope: RepositoryDiffScope,
+  generatedAt: string
+): Promise<RepositoryDiffReport> {
+  const commitInfo = await git.getCommitInfo(repoRoot, "HEAD");
+  const rawDiff = await git.getCommitDiff(repoRoot, "HEAD");
+  const allFiles = parseCommitDiffFiles(rawDiff)
+    .filter((file) => scope === "all" || file.category !== "product_code");
+  const warnings: string[] = [];
+  const files = allFiles.slice(0, REPOSITORY_DIFF_MAX_FILES);
+  if (allFiles.length > files.length) {
+    warnings.push(`Diff file list is truncated to ${REPOSITORY_DIFF_MAX_FILES} files.`);
+  }
+
+  const productCodeCount = files.filter((file) => file.category === "product_code").length;
+  if (productCodeCount > 0) {
+    warnings.push(`${productCodeCount} product code file(s) are present in this commit. Verify they are expected before approving harness work.`);
+  }
+
+  return {
+    version: 1,
+    repoRoot,
+    scope,
+    generatedAt,
+    commit: {
+      sha: commitInfo.sha,
+      shortSha: commitInfo.sha.slice(0, 12),
+      subject: commitInfo.subject,
+      committedAt: commitInfo.committedAt
+    },
+    summary: {
+      totalFiles: files.length,
+      committedFiles: files.length,
+      stagedFiles: 0,
+      unstagedFiles: 0,
+      untrackedFiles: 0,
+      additions: files.reduce((total, file) => total + file.additions, 0),
+      deletions: files.reduce((total, file) => total + file.deletions, 0),
+      harnessFiles: files.filter((file) => file.category !== "product_code").length,
+      productCodeFiles: productCodeCount,
+      truncatedFiles: files.filter((file) => file.truncated).length,
+      binaryFiles: files.filter((file) => file.binary).length
+    },
+    files,
+    warnings
+  };
+}
+
+function parseCommitDiffFiles(rawDiff: string): RepositoryDiffFile[] {
+  const chunks = rawDiff.split(/(?=^diff --git )/m).filter((chunk) => chunk.startsWith("diff --git "));
+  return chunks.map(parseCommitDiffFile);
+}
+
+function parseCommitDiffFile(chunk: string): RepositoryDiffFile {
+  const firstLine = chunk.split("\n", 1)[0] ?? "";
+  const match = firstLine.match(/^diff --git a\/(.+) b\/(.+)$/);
+  const oldPath = normalizeHarnessGitPath(match?.[1] ?? "unknown");
+  const nextPath = normalizeHarnessGitPath(match?.[2] ?? oldPath);
+  const status = getCommitDiffFileStatus(chunk);
+  const pathForCategory = status === "deleted" ? oldPath : nextPath;
+  const category = classifyRepositoryDiffPath(pathForCategory);
+  const truncatedDiff = truncateRepositoryDiff(chunk);
+  const lineStats = countDiffLines(truncatedDiff.diff);
+
+  return {
+    path: pathForCategory,
+    oldPath: oldPath === pathForCategory ? undefined : oldPath,
+    status,
+    stage: "committed",
+    category,
+    diff: truncatedDiff.diff,
+    binary: /Binary files .* differ|GIT binary patch/.test(chunk),
+    truncated: truncatedDiff.truncated,
+    additions: lineStats.additions,
+    deletions: lineStats.deletions
+  };
+}
+
+function getCommitDiffFileStatus(diffChunk: string): RepositoryDiffFileStatus {
+  if (/^new file mode /m.test(diffChunk)) {
+    return "added";
+  }
+  if (/^deleted file mode /m.test(diffChunk)) {
+    return "deleted";
+  }
+  if (/^similarity index /m.test(diffChunk) && /^rename from /m.test(diffChunk) && /^rename to /m.test(diffChunk)) {
+    return "renamed";
+  }
+  if (/^copy from /m.test(diffChunk) && /^copy to /m.test(diffChunk)) {
+    return "copied";
+  }
+  return "modified";
+}
+
+export function parseGitStatusPorcelainV1(rawStatus: string): ParsedGitStatusEntry[] {
+  const records = rawStatus.split("\0").filter(Boolean);
+  const entries: ParsedGitStatusEntry[] = [];
+  for (let index = 0; index < records.length; index += 1) {
+    const record = records[index] ?? "";
+    if (record.length < 4) {
+      continue;
+    }
+    const indexStatus = record[0] ?? " ";
+    const workingTreeStatus = record[1] ?? " ";
+    const filePath = normalizeHarnessGitPath(record.slice(3));
+    let oldPath: string | undefined;
+    if (indexStatus === "R" || indexStatus === "C") {
+      const oldPathRecord = records[index + 1];
+      if (oldPathRecord) {
+        oldPath = normalizeHarnessGitPath(oldPathRecord);
+        index += 1;
+      }
+    }
+    entries.push({
+      path: filePath,
+      oldPath,
+      indexStatus,
+      workingTreeStatus
+    });
+  }
+  return entries;
+}
+
+export function classifyRepositoryDiffPath(repoRelativePath: string): RepositoryDiffFileCategory {
+  const filePath = normalizeHarnessGitPath(repoRelativePath);
+  if (
+    filePath === "CLAUDE.md" ||
+    filePath === ".gitignore" ||
+    filePath === ".ai/vcm-harness-manifest.json" ||
+    filePath === ".github/pull_request_template.md" ||
+    filePath === ".claude/settings.json" ||
+    filePath === ".claude/settings.local.json" ||
+    filePath.startsWith(".claude/agents/") ||
+    filePath.startsWith(".claude/skills/")
+  ) {
+    return "fixed_harness";
+  }
+  if (filePath.startsWith(".ai/tools/") || filePath.startsWith(".github/workflows/")) {
+    return "tools_hooks";
+  }
+  if (filePath.startsWith(".ai/generated/")) {
+    return "generated_context";
+  }
+  if (
+    filePath.startsWith("docs/") ||
+    filePath === "ARCHITECTURE.md" ||
+    filePath.endsWith("/ARCHITECTURE.md") ||
+    filePath === "TESTING.md" ||
+    filePath.endsWith("/TESTING.md")
+  ) {
+    return "project_docs";
+  }
+  return "product_code";
+}
+
+function truncateRepositoryDiff(diff: string): { diff: string; truncated: boolean } {
+  if (diff.length <= REPOSITORY_DIFF_MAX_DIFF_CHARS) {
+    return { diff, truncated: false };
+  }
+  return {
+    diff: `${diff.slice(0, REPOSITORY_DIFF_MAX_DIFF_CHARS)}\n# ... diff truncated ...\n`,
+    truncated: true
+  };
+}
+
+function countDiffLines(diff: string): { additions: number; deletions: number } {
+  let additions = 0;
+  let deletions = 0;
+  for (const line of diff.split("\n")) {
+    if (line.startsWith("+++") || line.startsWith("---")) {
+      continue;
+    }
+    if (line.startsWith("+")) {
+      additions += 1;
+    } else if (line.startsWith("-")) {
+      deletions += 1;
+    }
+  }
+  return { additions, deletions };
+}
+
+async function assertHarnessWorktreeClean(git: RepositoryDiffGit | undefined, repoRoot: string): Promise<void> {
+  if (!git) {
+    return;
+  }
+  const entries = await getVisibleGitStatusEntries(git, repoRoot);
+  if (entries.length === 0) {
+    return;
+  }
+  throw new VcmError({
+    code: "HARNESS_WORKTREE_DIRTY",
+    message: "The active task worktree has uncommitted Git-visible changes.",
+    statusCode: 409,
+    hint: `Commit or revert these files before running a harness operation: ${entries.map((entry) => entry.path).slice(0, 12).join(", ")}`
+  });
+}
+
+async function commitHarnessVisibleChanges(
+  git: RepositoryDiffGit | undefined,
+  repoRoot: string,
+  message: string
+): Promise<{ harnessCommit?: string; changedFiles: HarnessPlannedChange[] }> {
+  if (!git) {
+    return { changedFiles: [] };
+  }
+  const entries = await getVisibleGitStatusEntries(git, repoRoot);
+  if (entries.length === 0) {
+    return { changedFiles: [] };
+  }
+
+  const unexpected = entries.filter((entry) => classifyRepositoryDiffPath(entry.path) === "product_code");
+  if (unexpected.length > 0) {
+    throw new VcmError({
+      code: "HARNESS_UNEXPECTED_PRODUCT_CHANGES",
+      message: "Harness operation produced product-code changes.",
+      statusCode: 409,
+      hint: `Review, revert, or move these changes before continuing: ${unexpected.map((entry) => entry.path).slice(0, 12).join(", ")}`
+    });
+  }
+
+  const changedFiles = entries.map(statusEntryToHarnessChange);
+  const stagePaths = uniqueStrings(entries.flatMap((entry) => [entry.path, entry.oldPath].filter((value): value is string => Boolean(value))));
+  await git.addPaths(repoRoot, stagePaths);
+  const harnessCommit = await git.commit(repoRoot, message);
+  return { harnessCommit, changedFiles };
+}
+
+async function getVisibleGitStatusEntries(git: RepositoryDiffGit, repoRoot: string): Promise<ParsedGitStatusEntry[]> {
+  const rawStatus = await git.getStatusPorcelainV1(repoRoot);
+  return parseGitStatusPorcelainV1(rawStatus).filter((entry) => !isVcmRuntimePath(entry.path));
+}
+
+function isVcmRuntimePath(repoRelativePath: string): boolean {
+  const filePath = normalizeHarnessGitPath(repoRelativePath);
+  return filePath.startsWith(".ai/vcm/") ||
+    filePath.startsWith(".claude/worktrees/") ||
+    filePath.startsWith(".ai/tools/__pycache__/") ||
+    filePath.endsWith("/__pycache__");
+}
+
+function statusEntryToHarnessChange(entry: ParsedGitStatusEntry): HarnessPlannedChange {
+  return {
+    path: entry.path,
+    action: statusEntryToHarnessAction(entry),
+    reason: "Committed by VCM harness operation."
+  };
+}
+
+function statusEntryToHarnessAction(entry: ParsedGitStatusEntry): HarnessFileAction {
+  if (entry.indexStatus === "?" || entry.indexStatus === "A" || entry.workingTreeStatus === "A") {
+    return "create";
+  }
+  if (entry.indexStatus === "D" || entry.workingTreeStatus === "D") {
+    return "delete";
+  }
+  return "update";
+}
+
+function uniqueStrings(values: string[]): string[] {
+  return [...new Set(values)];
+}
+
+function formatHarnessApplyMessage(harnessCommit: string | undefined, changed: boolean): string {
+  if (!changed) {
+    return "VCM Harness is already up to date.";
+  }
+  return harnessCommit
+    ? `VCM Harness updated and committed as ${shortCommit(harnessCommit)}. Review the commit diff before approving.`
+    : "VCM Harness updated. Review the latest harness commit before approving.";
 }
 
 async function readHarnessFileContent(
@@ -1158,22 +1399,23 @@ function ensureTrailingNewline(content: string): string {
 async function getHarnessBootstrapStatus(
   deps: HarnessServiceDeps,
   repoRoot: string,
+  targetRepoRoot: string,
   now: () => string
 ): Promise<HarnessBootstrapStatusReport> {
-  const moduleIndex = await readOptionalJsonObject(deps.fs, repoRoot, ".ai/generated/module-index.json");
+  const moduleIndex = await readOptionalJsonObject(deps.fs, targetRepoRoot, ".ai/generated/module-index.json");
   const checks: HarnessBootstrapCheck[] = [
-    await checkFixedHarness(deps.fs, repoRoot),
-    await checkProjectContext(deps.fs, repoRoot),
+    await checkFixedHarness(deps.fs, targetRepoRoot),
+    await checkProjectContext(deps.fs, targetRepoRoot),
     checkGeneratedJson(moduleIndex, ".ai/generated/module-index.json", "module-index", "Module index"),
     checkGeneratedJson(
-      await readOptionalJsonObject(deps.fs, repoRoot, ".ai/generated/public-surface.json"),
+      await readOptionalJsonObject(deps.fs, targetRepoRoot, ".ai/generated/public-surface.json"),
       ".ai/generated/public-surface.json",
       "public-surface",
       "Public surface"
     ),
-    await checkFilledMarkdown(deps.fs, repoRoot, "docs/ARCHITECTURE.md", "Project architecture", "project-architecture"),
-    await checkModuleArchitectureDocs(deps.fs, repoRoot, moduleIndex),
-    await checkFilledMarkdown(deps.fs, repoRoot, "docs/TESTING.md", "Testing doc", "testing-doc")
+    await checkFilledMarkdown(deps.fs, targetRepoRoot, "docs/ARCHITECTURE.md", "Project architecture", "project-architecture"),
+    await checkModuleArchitectureDocs(deps.fs, targetRepoRoot, moduleIndex),
+    await checkFilledMarkdown(deps.fs, targetRepoRoot, "docs/TESTING.md", "Testing doc", "testing-doc")
   ];
   const runState = await loadPersistedHarnessBootstrapRunState(deps.fs, repoRoot);
   const session = await getCurrentHarnessEngineerBootstrapSession(deps, repoRoot);
@@ -1544,21 +1786,26 @@ function bootstrapWarnings(
   return warnings;
 }
 
-function buildHarnessBootstrapPrompt(repoRoot: string): string {
-  return `Use the vcm-harness-bootstrap skill to finish the VCM harness bootstrap for this repository.
+function buildHarnessBootstrapPrompt(baseRepoRoot: string, targetRepoRoot: string): string {
+  return `Use the vcm-harness-bootstrap skill to finish the VCM harness bootstrap for the active task worktree.
 
-Repository root:
-${repoRoot}
+Base repository root:
+${baseRepoRoot}
+
+Target task worktree:
+${targetRepoRoot}
 
 Required work:
-- Run .ai/tools/generate-module-index when available.
-- Run .ai/tools/generate-public-surface after module-index.json exists.
-- Add or update project-specific Project Context and Project Constraints in CLAUDE.md above the VCM managed block.
-- Fill docs/ARCHITECTURE.md with project-level module overview, responsibilities, relationships, dependency direction, project-wide constraints, and links to module-level architecture docs.
-- Create or update module-level ARCHITECTURE.md files for clear module boundaries listed by module-index.json.
-- Fill docs/TESTING.md with project-native validation levels, commands, validation selection rules, final-validation cleanup, test layout, integration/E2E case lists, generated-context freshness checks, and known testing gaps.
+- Work only inside the target task worktree.
+- Run .ai/tools/generate-module-index from the target task worktree when available.
+- Run .ai/tools/generate-public-surface from the target task worktree after module-index.json exists.
+- Add or update project-specific Project Context and Project Constraints in target CLAUDE.md above the VCM managed block.
+- Fill target docs/ARCHITECTURE.md with project-level module overview, responsibilities, relationships, dependency direction, project-wide constraints, and links to module-level architecture docs.
+- Create or update target module-level ARCHITECTURE.md files for clear module boundaries listed by module-index.json.
+- Fill target docs/TESTING.md with project-native validation levels, commands, validation selection rules, final-validation cleanup, test layout, integration/E2E case lists, generated-context freshness checks, and known testing gaps.
 
 Boundaries:
+- Do not write to the base repository root.
 - Do not edit product source, product tests, package manifests, lockfiles, deployment config, secrets, or VCM managed blocks.
 - Preserve user-authored content.
 - Do not create new validation wrapper tools.

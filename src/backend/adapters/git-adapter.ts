@@ -17,12 +17,13 @@ export interface GitAdapter {
   getAheadBehind(repoRoot: string, upstreamBranch: string): Promise<GitAheadBehind>;
   isDirty(repoRoot: string): Promise<boolean>;
   getStatusPorcelain(repoRoot: string): Promise<string>;
-  getStagedStatus(repoRoot: string): Promise<string>;
+  getStatusPorcelainV1(repoRoot: string): Promise<string>;
+  getCommitInfo(repoRoot: string, ref?: string): Promise<GitCommitInfo>;
+  getCommitDiff(repoRoot: string, ref?: string): Promise<string>;
   isIgnored(repoRoot: string, repoRelativePath: string): Promise<boolean>;
   branchExists(repoRoot: string, branch: string): Promise<boolean>;
   addPaths(repoRoot: string, paths: string[]): Promise<void>;
   commit(repoRoot: string, message: string): Promise<string>;
-  rebase(repoRoot: string, upstream: string): Promise<GitRebaseResult>;
   createWorktree(input: CreateGitWorktreeInput): Promise<void>;
   removeWorktree(repoRoot: string, worktreePath: string, options?: { force?: boolean }): Promise<void>;
   deleteBranch(repoRoot: string, branch: string, options?: { force?: boolean }): Promise<void>;
@@ -39,9 +40,10 @@ export interface GitPullResult {
   stderr: string;
 }
 
-export interface GitRebaseResult {
-  stdout: string;
-  stderr: string;
+export interface GitCommitInfo {
+  sha: string;
+  subject: string;
+  committedAt?: string;
 }
 
 export interface CreateGitWorktreeInput {
@@ -136,12 +138,56 @@ export function createGitAdapter(runner: CommandRunner): GitAdapter {
 
       return result.stdout;
     },
-    async getStagedStatus(repoRoot) {
-      const result = await runGit(runner, repoRoot, ["diff", "--cached", "--name-status"]);
+    async getStatusPorcelainV1(repoRoot) {
+      const result = await runGit(runner, repoRoot, [
+        "status",
+        "--porcelain=v1",
+        "-z",
+        "--untracked-files=all"
+      ]);
       if (result.exitCode !== 0) {
         throw new VcmError({
           code: "GIT_ERROR",
-          message: "Unable to read staged Git changes.",
+          message: "Unable to read Git status.",
+          statusCode: 400,
+          hint: result.stderr
+        });
+      }
+
+      return result.stdout;
+    },
+    async getCommitInfo(repoRoot, ref = "HEAD") {
+      const result = await runGit(runner, repoRoot, ["show", "-s", "--format=%H%x00%s%x00%cI", ref]);
+      if (result.exitCode !== 0) {
+        throw new VcmError({
+          code: "GIT_ERROR",
+          message: "Unable to read Git commit.",
+          statusCode: 400,
+          hint: result.stderr
+        });
+      }
+
+      const [sha = "", subject = "", committedAt = ""] = result.stdout.split("\0");
+      return {
+        sha: sha.trim(),
+        subject: subject.trim(),
+        committedAt: committedAt.trim() || undefined
+      };
+    },
+    async getCommitDiff(repoRoot, ref = "HEAD") {
+      const result = await runGit(runner, repoRoot, [
+        "show",
+        "--format=",
+        "--no-ext-diff",
+        "--binary",
+        "--src-prefix=a/",
+        "--dst-prefix=b/",
+        ref
+      ]);
+      if (result.exitCode !== 0) {
+        throw new VcmError({
+          code: "GIT_ERROR",
+          message: "Unable to read Git commit diff.",
           statusCode: 400,
           hint: result.stderr
         });
@@ -205,22 +251,6 @@ export function createGitAdapter(runner: CommandRunner): GitAdapter {
       }
 
       return this.getHeadCommit(repoRoot);
-    },
-    async rebase(repoRoot, upstream) {
-      const result = await runGit(runner, repoRoot, ["rebase", upstream]);
-      if (result.exitCode !== 0) {
-        throw new VcmError({
-          code: "GIT_REBASE_FAILED",
-          message: "Unable to rebase task branch onto the harness commit.",
-          statusCode: 409,
-          hint: result.stderr || result.stdout
-        });
-      }
-
-      return {
-        stdout: result.stdout,
-        stderr: result.stderr
-      };
     },
     async createWorktree(input) {
       const result = await runGit(runner, input.repoRoot, [

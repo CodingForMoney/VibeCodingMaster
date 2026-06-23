@@ -1,6 +1,5 @@
 import { useEffect, useState } from "react";
 import type {
-  CommitAndRebaseHarnessTaskResult,
   HarnessApplyResult,
   HarnessBootstrapStatusReport,
   HarnessStatusReport
@@ -26,14 +25,13 @@ export interface HarnessPanelProps {
   status: HarnessStatusReport | null;
   bootstrapStatus: HarnessBootstrapStatusReport | null;
   applyResult?: HarnessApplyResult | null;
-  taskSyncResult?: CommitAndRebaseHarnessTaskResult | null;
   harnessEngineerSession?: RoleSessionRecord | null;
-  canCommitAndRebaseTask?: boolean;
+  hasActiveTask?: boolean;
   busy?: boolean;
   onRefresh(): Promise<void>;
   onApply(): Promise<void>;
-  onCommitAndRebaseTask(): Promise<void>;
   onOpenStudio(): void;
+  onOpenRepositoryDiff(): void;
   onStartBootstrap(input: BootstrapLaunchOptions): Promise<void>;
   onRestartBootstrap(input: BootstrapLaunchOptions): Promise<void>;
   onStopBootstrap(): Promise<void>;
@@ -44,14 +42,13 @@ export function HarnessPanel({
   status,
   bootstrapStatus,
   applyResult,
-  taskSyncResult,
   harnessEngineerSession,
-  canCommitAndRebaseTask = false,
+  hasActiveTask = false,
   busy = false,
   onRefresh,
   onApply,
-  onCommitAndRebaseTask,
   onOpenStudio,
+  onOpenRepositoryDiff,
   onStartBootstrap,
   onRestartBootstrap,
   onStopBootstrap,
@@ -82,6 +79,17 @@ export function HarnessPanel({
     model: bootstrapModel,
     effort: bootstrapEffort
   };
+
+  if (!hasActiveTask) {
+    return (
+      <section className="harness-panel">
+        <div className="harness-result">
+          <strong>Task required</strong>
+          <p className="muted">Create or select a task before changing VCM Harness. Harness changes are committed in the active task worktree.</p>
+        </div>
+      </section>
+    );
+  }
 
   if (!status) {
     return null;
@@ -162,6 +170,9 @@ export function HarnessPanel({
             <p className="muted">Engineer: {formatHarnessEngineerStatus(harnessEngineerSession)}</p>
           </div>
           <div className="harness-actions">
+            <button type="button" disabled={busy} onClick={onOpenRepositoryDiff}>
+              Review Diff
+            </button>
             <button type="button" disabled={busy} onClick={onOpenStudio}>
               Open Studio
             </button>
@@ -204,21 +215,9 @@ export function HarnessPanel({
         ) : null}
       </div>
 
-      {applyResult?.changedFiles.length && canCommitAndRebaseTask && !taskSyncResult ? (
+      {applyResult?.changedFiles.length ? (
         <div className="harness-result">
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => void onCommitAndRebaseTask()}
-          >
-            Commit &amp; rebase task
-          </button>
-        </div>
-      ) : null}
-
-      {taskSyncResult ? (
-        <div className="harness-result">
-          <p className="muted">{taskSyncResult.message}</p>
+          <p className="muted">{applyResult.message}</p>
         </div>
       ) : null}
 

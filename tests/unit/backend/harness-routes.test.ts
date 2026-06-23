@@ -7,6 +7,7 @@ describe("harness routes", () => {
     const app = Fastify({ logger: false });
     registerHarnessRoutes(app, {
       projectService: createProjectServiceStub(),
+      taskService: createTaskServiceStub(),
       harnessService: {
         async getHarnessStatus() {
           throw openFilesError("/workspace/CLAUDE.md");
@@ -25,7 +26,7 @@ describe("harness routes", () => {
 
     const response = await app.inject({
       method: "GET",
-      url: "/api/projects/harness"
+      url: "/api/projects/harness?taskSlug=demo-task"
     });
 
     expect(response.statusCode).toBe(200);
@@ -39,6 +40,7 @@ describe("harness routes", () => {
     const app = Fastify({ logger: false });
     registerHarnessRoutes(app, {
       projectService: createProjectServiceStub(),
+      taskService: createTaskServiceStub(),
       harnessService: {
         async getHarnessStatus() {
           throw new Error("not used");
@@ -57,7 +59,7 @@ describe("harness routes", () => {
 
     const response = await app.inject({
       method: "GET",
-      url: "/api/projects/harness/bootstrap"
+      url: "/api/projects/harness/bootstrap?taskSlug=demo-task"
     });
 
     expect(response.statusCode).toBe(200);
@@ -68,27 +70,34 @@ describe("harness routes", () => {
     await app.close();
   });
 
-  it("commits and rebases the selected task worktree", async () => {
+  it("requires a task before reading harness status", async () => {
+    const app = Fastify({ logger: false });
+    registerHarnessRoutes(app, {
+      projectService: createProjectServiceStub(),
+      taskService: createTaskServiceStub(),
+      harnessService: {
+        async getHarnessStatus() {
+          throw new Error("not used");
+        }
+      }
+    } as never);
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/projects/harness"
+    });
+
+    expect(response.statusCode).toBe(409);
+    expect(response.json().code).toBe("HARNESS_TASK_REQUIRED");
+    await app.close();
+  });
+
+  it("returns repository diff using the requested scope", async () => {
     const app = Fastify({ logger: false });
     const calls: unknown[] = [];
     registerHarnessRoutes(app, {
       projectService: createProjectServiceStub(),
-      taskService: {
-        async loadTask(repoRoot: string, taskSlug: string) {
-          calls.push(["loadTask", repoRoot, taskSlug]);
-          return {
-            version: 1,
-            taskSlug,
-            createdAt: "",
-            updatedAt: "",
-            repoRoot,
-            worktreePath: "/workspace/.claude/worktrees/demo-task",
-            branch: "feature/demo-task",
-            handoffDir: ".ai/vcm/handoffs",
-            status: "created"
-          };
-        }
-      },
+      taskService: createTaskServiceStub(),
       harnessService: {
         async getHarnessStatus() {
           throw new Error("not used");
@@ -96,19 +105,28 @@ describe("harness routes", () => {
         async applyHarness() {
           throw new Error("not used");
         },
-        async commitAndRebaseTask(repoRoot, input) {
-          calls.push(["commitAndRebaseTask", repoRoot, input]);
+        async getRepositoryDiff(repoRoot, scope) {
+          calls.push(["getRepositoryDiff", repoRoot, scope]);
           return {
-            taskSlug: input.taskSlug,
-            branch: input.branch,
-            worktreePath: input.worktreePath,
-            baseBranch: "main",
-            baseCommitBefore: "abc",
-            baseCommitAfter: "def",
-            committed: true,
-            rebased: true,
-            changedFiles: input.changedFiles,
-            message: "done"
+            version: 1,
+            repoRoot,
+            scope,
+            generatedAt: "2026-06-23T00:00:00.000Z",
+            summary: {
+              totalFiles: 0,
+              committedFiles: 0,
+              stagedFiles: 0,
+              unstagedFiles: 0,
+              untrackedFiles: 0,
+              additions: 0,
+              deletions: 0,
+              harnessFiles: 0,
+              productCodeFiles: 0,
+              truncatedFiles: 0,
+              binaryFiles: 0
+            },
+            files: [],
+            warnings: []
           };
         },
         async getBootstrapStatus() {
@@ -121,29 +139,13 @@ describe("harness routes", () => {
     } as never);
 
     const response = await app.inject({
-      method: "POST",
-      url: "/api/projects/harness/tasks/demo-task/commit-and-rebase",
-      payload: {
-        changedFiles: [{ path: "CLAUDE.md", action: "update", reason: "updated" }]
-      }
+      method: "GET",
+      url: "/api/projects/harness/repository-diff?taskSlug=demo-task&scope=all"
     });
 
     expect(response.statusCode).toBe(200);
-    expect(response.json()).toMatchObject({
-      taskSlug: "demo-task",
-      branch: "feature/demo-task",
-      committed: true,
-      rebased: true
-    });
-    expect(calls).toEqual([
-      ["loadTask", "/workspace", "demo-task"],
-      ["commitAndRebaseTask", "/workspace", {
-        taskSlug: "demo-task",
-        branch: "feature/demo-task",
-        worktreePath: "/workspace/.claude/worktrees/demo-task",
-        changedFiles: [{ path: "CLAUDE.md", action: "update", reason: "updated" }]
-      }]
-    ]);
+    expect(response.json()).toMatchObject({ repoRoot: "/workspace/.claude/worktrees/demo-task", scope: "all" });
+    expect(calls).toEqual([["getRepositoryDiff", "/workspace/.claude/worktrees/demo-task", "all"]]);
     await app.close();
   });
 });
@@ -153,6 +155,24 @@ function createProjectServiceStub() {
     async getCurrentProject() {
       return {
         repoRoot: "/workspace"
+      };
+    }
+  };
+}
+
+function createTaskServiceStub() {
+  return {
+    async loadTask(repoRoot: string, taskSlug: string) {
+      return {
+        version: 1,
+        taskSlug,
+        createdAt: "",
+        updatedAt: "",
+        repoRoot,
+        worktreePath: `/workspace/.claude/worktrees/${taskSlug}`,
+        branch: `feature/${taskSlug}`,
+        handoffDir: ".ai/vcm/handoffs",
+        status: "created"
       };
     }
   };

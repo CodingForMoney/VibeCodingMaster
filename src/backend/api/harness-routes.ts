@@ -1,6 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import type {
-  CommitAndRebaseHarnessTaskRequest,
+  HarnessApplyRequest,
   HarnessBootstrapStatusReport,
   HarnessStatusReport,
   RestartHarnessBootstrapRequest,
@@ -31,10 +31,10 @@ export interface HarnessRouteDeps {
 }
 
 export function registerHarnessRoutes(app: FastifyInstance, deps: HarnessRouteDeps): void {
-  app.get("/api/projects/harness", async () => {
-    const project = await requireCurrentProject(deps.projectService);
+  app.get<{ Querystring: { taskSlug?: string } }>("/api/projects/harness", async (request) => {
+    const { task } = await requireHarnessTaskContext(deps, request.query.taskSlug);
     try {
-      return await deps.harnessService.getHarnessStatus(project.repoRoot);
+      return await deps.harnessService.getHarnessStatus(task.worktreePath);
     } catch (error) {
       if (isOpenFileLimitError(error)) {
         return degradedHarnessStatus(error);
@@ -43,21 +43,21 @@ export function registerHarnessRoutes(app: FastifyInstance, deps: HarnessRouteDe
     }
   });
 
-  app.post("/api/projects/harness/apply", async () => {
-    const project = await requireCurrentProject(deps.projectService);
-    return deps.harnessService.applyHarness(project.repoRoot);
+  app.post<{ Body: HarnessApplyRequest }>("/api/projects/harness/apply", async (request) => {
+    const { task } = await requireHarnessTaskContext(deps, request.body?.taskSlug);
+    return deps.harnessService.applyHarness(task.worktreePath);
   });
 
-  app.get<{ Querystring: { path?: string } }>("/api/projects/harness/file", async (request) => {
-    const project = await requireCurrentProject(deps.projectService);
-    return deps.harnessService.getHarnessFileContent(project.repoRoot, request.query.path ?? "");
+  app.get<{ Querystring: { path?: string; taskSlug?: string } }>("/api/projects/harness/file", async (request) => {
+    const { task } = await requireHarnessTaskContext(deps, request.query.taskSlug);
+    return deps.harnessService.getHarnessFileContent(task.worktreePath, request.query.path ?? "");
   });
 
   app.put<{
-    Querystring: { path?: string };
+    Querystring: { path?: string; taskSlug?: string };
     Body: UpdateHarnessFileContentRequest;
   }>("/api/projects/harness/file", async (request) => {
-    const project = await requireCurrentProject(deps.projectService);
+    const { task } = await requireHarnessTaskContext(deps, request.query.taskSlug ?? request.body?.taskSlug);
     if (typeof request.body?.content !== "string") {
       throw new VcmError({
         code: "HARNESS_FILE_CONTENT_INVALID",
@@ -65,27 +65,19 @@ export function registerHarnessRoutes(app: FastifyInstance, deps: HarnessRouteDe
         statusCode: 400
       });
     }
-    return deps.harnessService.updateHarnessFileContent(project.repoRoot, request.query.path ?? "", request.body.content);
+    return deps.harnessService.updateHarnessFileContent(task.worktreePath, request.query.path ?? "", request.body.content);
   });
 
-  app.post<{
-    Params: { taskSlug: string };
-    Body: CommitAndRebaseHarnessTaskRequest;
-  }>("/api/projects/harness/tasks/:taskSlug/commit-and-rebase", async (request) => {
-    const project = await requireCurrentProject(deps.projectService);
-    const task = await deps.taskService.loadTask(project.repoRoot, request.params.taskSlug);
-    return deps.harnessService.commitAndRebaseTask(project.repoRoot, {
-      taskSlug: task.taskSlug,
-      branch: task.branch,
-      worktreePath: task.worktreePath,
-      changedFiles: request.body?.changedFiles ?? []
-    });
+  app.get<{ Querystring: { scope?: string; taskSlug?: string } }>("/api/projects/harness/repository-diff", async (request) => {
+    const { task } = await requireHarnessTaskContext(deps, request.query.taskSlug);
+    const scope = request.query.scope === "all" ? "all" : "harness";
+    return deps.harnessService.getRepositoryDiff(task.worktreePath, scope);
   });
 
-  app.get("/api/projects/harness/bootstrap", async () => {
-    const project = await requireCurrentProject(deps.projectService);
+  app.get<{ Querystring: { taskSlug?: string } }>("/api/projects/harness/bootstrap", async (request) => {
+    const { project, task } = await requireHarnessTaskContext(deps, request.query.taskSlug);
     try {
-      return await deps.harnessService.getBootstrapStatus(project.repoRoot);
+      return await deps.harnessService.getBootstrapStatus(project.repoRoot, task.worktreePath);
     } catch (error) {
       if (isOpenFileLimitError(error)) {
         return degradedBootstrapStatus(error);
@@ -95,13 +87,13 @@ export function registerHarnessRoutes(app: FastifyInstance, deps: HarnessRouteDe
   });
 
   app.post<{ Body: StartHarnessBootstrapRequest }>("/api/projects/harness/bootstrap/start", async (request) => {
-    const project = await requireCurrentProject(deps.projectService);
-    return deps.harnessService.startHarnessBootstrap(project.repoRoot, request.body ?? {});
+    const { project, task } = await requireHarnessTaskContext(deps, request.body?.taskSlug);
+    return deps.harnessService.startHarnessBootstrap(project.repoRoot, task.worktreePath, request.body ?? {});
   });
 
   app.post<{ Body: RestartHarnessBootstrapRequest }>("/api/projects/harness/bootstrap/restart", async (request) => {
-    const project = await requireCurrentProject(deps.projectService);
-    return deps.harnessService.restartHarnessBootstrap(project.repoRoot, request.body ?? {});
+    const { project, task } = await requireHarnessTaskContext(deps, request.body?.taskSlug);
+    return deps.harnessService.restartHarnessBootstrap(project.repoRoot, task.worktreePath, request.body ?? {});
   });
 
   app.post("/api/projects/harness/bootstrap/stop", async () => {
@@ -109,9 +101,9 @@ export function registerHarnessRoutes(app: FastifyInstance, deps: HarnessRouteDe
     return deps.harnessService.stopHarnessBootstrap(project.repoRoot);
   });
 
-  app.post("/api/projects/harness/bootstrap/run", async () => {
-    const project = await requireCurrentProject(deps.projectService);
-    return deps.harnessService.runHarnessBootstrap(project.repoRoot);
+  app.post<{ Body: { taskSlug?: string } }>("/api/projects/harness/bootstrap/run", async (request) => {
+    const { project, task } = await requireHarnessTaskContext(deps, request.body?.taskSlug);
+    return deps.harnessService.runHarnessBootstrap(project.repoRoot, task.worktreePath);
   });
 
   app.get("/api/projects/harness/engineer/session", async () => {
@@ -194,4 +186,19 @@ async function requireCurrentProject(projectService: ProjectService) {
     });
   }
   return project;
+}
+
+async function requireHarnessTaskContext(deps: HarnessRouteDeps, taskSlug: string | undefined) {
+  const project = await requireCurrentProject(deps.projectService);
+  const normalizedTaskSlug = taskSlug?.trim();
+  if (!normalizedTaskSlug) {
+    throw new VcmError({
+      code: "HARNESS_TASK_REQUIRED",
+      message: "Select or create an active task before changing VCM Harness.",
+      statusCode: 409,
+      hint: "VCM writes harness changes only to the active task worktree."
+    });
+  }
+  const task = await deps.taskService.loadTask(project.repoRoot, normalizedTaskSlug);
+  return { project, task };
 }

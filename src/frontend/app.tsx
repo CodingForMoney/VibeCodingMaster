@@ -12,7 +12,6 @@ import {
   type ThemeMode
 } from "../shared/types/app-settings.js";
 import type {
-  CommitAndRebaseHarnessTaskResult,
   HarnessApplyResult,
   HarnessBootstrapStatusReport,
   HarnessStatusReport
@@ -32,6 +31,7 @@ import type { TaskRecord } from "../shared/types/task.js";
 import { CORE_VCM_ROLE_NAMES } from "../shared/constants.js";
 import { AppShell } from "./components/app-shell.js";
 import { HarnessStudioModal } from "./components/harness-studio-modal.js";
+import { RepositoryDiffModal } from "./components/repository-diff-modal.js";
 import { TranslatorSessionModal } from "./components/translator-session-modal.js";
 import { FileTranslationModalHost } from "./components/translation-panel.js";
 import { selectActiveTask } from "./state/app-store.js";
@@ -49,7 +49,6 @@ export function App() {
   const [harnessStatus, setHarnessStatus] = useState<HarnessStatusReport | null>(null);
   const [harnessBootstrapStatus, setHarnessBootstrapStatus] = useState<HarnessBootstrapStatusReport | null>(null);
   const [harnessApplyResult, setHarnessApplyResult] = useState<HarnessApplyResult | null>(null);
-  const [harnessTaskSyncResult, setHarnessTaskSyncResult] = useState<CommitAndRebaseHarnessTaskResult | null>(null);
   const [gatewayStatus, setGatewayStatus] = useState<GatewayStatus | null>(null);
   const [gatewayQrLogin, setGatewayQrLogin] = useState<StartGatewayQrLoginResult | null>(null);
   const [gatewayQrCheck, setGatewayQrCheck] = useState<CheckGatewayQrLoginResult | null>(null);
@@ -72,6 +71,7 @@ export function App() {
   const [fileTranslationOpen, setFileTranslationOpen] = useState(false);
   const [translatorSessionOpen, setTranslatorSessionOpen] = useState(false);
   const [harnessStudioOpen, setHarnessStudioOpen] = useState(false);
+  const [repositoryDiffOpen, setRepositoryDiffOpen] = useState(false);
   const [translatorSession, setTranslatorSession] = useState<RoleSessionRecord | null>(null);
   const [translatorPermissionMode, setTranslatorPermissionMode] = useState<ClaudePermissionMode>("default");
   const [translatorModel, setTranslatorModel] = useState<SessionModel>("default");
@@ -241,14 +241,22 @@ export function App() {
     return nextTasks;
   }
 
-  async function loadHarnessStatus() {
-    const nextStatus = await apiClient.getHarnessStatus();
+  async function loadHarnessStatus(taskSlug = activeTask?.taskSlug) {
+    if (!taskSlug) {
+      setHarnessStatus(null);
+      return null;
+    }
+    const nextStatus = await apiClient.getHarnessStatus(taskSlug);
     setHarnessStatus(nextStatus);
     return nextStatus;
   }
 
-  async function loadHarnessBootstrapStatus() {
-    const nextStatus = await apiClient.getHarnessBootstrapStatus();
+  async function loadHarnessBootstrapStatus(taskSlug = activeTask?.taskSlug) {
+    if (!taskSlug) {
+      setHarnessBootstrapStatus(null);
+      return null;
+    }
+    const nextStatus = await apiClient.getHarnessBootstrapStatus(taskSlug);
     setHarnessBootstrapStatus(nextStatus);
     return nextStatus;
   }
@@ -337,11 +345,7 @@ export function App() {
         setGatewayStatus(nextGatewayStatus);
         applyPreferences(preferences);
         if (currentProject) {
-          await Promise.all([
-            loadTasks(),
-            loadHarnessStatus(),
-            loadHarnessBootstrapStatus()
-          ]);
+          await loadTasks();
         }
       })
       .catch((caught: Error) => setError(caught.message));
@@ -453,18 +457,33 @@ export function App() {
       return;
     }
 
-    void Promise.all([
-      refreshHarnessEngineerSession({ syncLaunchOptions: true }),
-      loadHarnessBootstrapStatus()
-    ]).catch((caught: Error) => setError(caught.message));
+    void refreshHarnessEngineerSession({ syncLaunchOptions: true }).catch((caught: Error) => setError(caught.message));
     const interval = window.setInterval(() => {
-      void Promise.all([
-        refreshHarnessEngineerSession(),
-        loadHarnessBootstrapStatus()
-      ]).catch((caught: Error) => setError(caught.message));
+      void refreshHarnessEngineerSession().catch((caught: Error) => setError(caught.message));
     }, 3000);
     return () => window.clearInterval(interval);
   }, [project?.repoRoot]);
+
+  useEffect(() => {
+    if (!project || !activeTask?.taskSlug) {
+      setHarnessStatus(null);
+      setHarnessBootstrapStatus(null);
+      return;
+    }
+
+    const taskSlug = activeTask.taskSlug;
+    void Promise.all([
+      loadHarnessStatus(taskSlug),
+      loadHarnessBootstrapStatus(taskSlug)
+    ]).catch((caught: Error) => setError(caught.message));
+    const interval = window.setInterval(() => {
+      void Promise.all([
+        loadHarnessStatus(taskSlug),
+        loadHarnessBootstrapStatus(taskSlug)
+      ]).catch((caught: Error) => setError(caught.message));
+    }, 3000);
+    return () => window.clearInterval(interval);
+  }, [project?.repoRoot, activeTask?.taskSlug]);
 
   useEffect(() => {
     if (!project || !translationEnabled) {
@@ -558,7 +577,6 @@ export function App() {
           harnessStatus={harnessStatus}
           harnessBootstrapStatus={harnessBootstrapStatus}
           harnessApplyResult={harnessApplyResult}
-          harnessTaskSyncResult={harnessTaskSyncResult}
           gatewayStatus={gatewayStatus}
           gatewayQrLogin={gatewayQrLogin}
           gatewayQrCheck={gatewayQrCheck}
@@ -567,11 +585,8 @@ export function App() {
             const nextProject = await apiClient.connectProject({ repoPath });
             setProject(nextProject);
             setHarnessApplyResult(null);
-            setHarnessTaskSyncResult(null);
             await Promise.all([
               loadTasks(),
-              loadHarnessStatus(),
-              loadHarnessBootstrapStatus(),
               loadRecentRepositoryPaths()
             ]);
           })}
@@ -584,39 +599,32 @@ export function App() {
             setProject(nextProject);
           })}
           onRefreshHarness={() => withBusy(async () => {
+            if (!activeTask) {
+              throw new Error("Create or select a task before refreshing VCM Harness.");
+            }
             setHarnessApplyResult(null);
-            setHarnessTaskSyncResult(null);
             await Promise.all([
-              loadHarnessStatus(),
-              loadHarnessBootstrapStatus()
+              loadHarnessStatus(activeTask.taskSlug),
+              loadHarnessBootstrapStatus(activeTask.taskSlug)
             ]);
           })}
           onApplyHarness={() => withBusy(async () => {
-            setHarnessTaskSyncResult(null);
-            const result = await apiClient.applyHarness();
+            if (!activeTask) {
+              throw new Error("Create or select a task before applying VCM Harness.");
+            }
+            const result = await apiClient.applyHarness({ taskSlug: activeTask.taskSlug });
             setHarnessApplyResult(result);
             await Promise.all([
-              loadHarnessStatus(),
-              loadHarnessBootstrapStatus()
+              loadHarnessStatus(activeTask.taskSlug),
+              loadHarnessBootstrapStatus(activeTask.taskSlug)
             ]);
           })}
-          onCommitAndRebaseHarnessTask={() => withBusy(async () => {
-            if (!activeTask) {
-              throw new Error("Select a task before using Commit & rebase task.");
-            }
-            if (!harnessApplyResult?.changedFiles.length) {
-              throw new Error("Apply a harness update before using Commit & rebase task.");
-            }
-            const result = await apiClient.commitAndRebaseHarnessTask(activeTask.taskSlug, {
-              changedFiles: harnessApplyResult.changedFiles
-            });
-            setHarnessTaskSyncResult(result);
-            const nextProject = await apiClient.getCurrentProject();
-            setProject(nextProject);
-            await loadTasks();
-          })}
           onStartHarnessBootstrap={(input) => withBusy(async () => {
+            if (!activeTask) {
+              throw new Error("Create or select a task before starting Harness Bootstrap.");
+            }
             const result = await apiClient.startHarnessBootstrap({
+              taskSlug: activeTask.taskSlug,
               cols: 120,
               rows: 32,
               ...input
@@ -625,7 +633,11 @@ export function App() {
             await refreshHarnessEngineerSession({ syncLaunchOptions: true });
           })}
           onRestartHarnessBootstrap={(input) => withBusy(async () => {
+            if (!activeTask) {
+              throw new Error("Create or select a task before restarting Harness Bootstrap.");
+            }
             const result = await apiClient.restartHarnessBootstrap({
+              taskSlug: activeTask.taskSlug,
               cols: 120,
               rows: 32,
               ...input
@@ -639,11 +651,15 @@ export function App() {
             await refreshHarnessEngineerSession();
           })}
           onRunHarnessBootstrap={() => withBusy(async () => {
-            const result = await apiClient.runHarnessBootstrap();
+            if (!activeTask) {
+              throw new Error("Create or select a task before running Harness Bootstrap.");
+            }
+            const result = await apiClient.runHarnessBootstrap({ taskSlug: activeTask.taskSlug });
             setHarnessBootstrapStatus(result.status);
             await refreshHarnessEngineerSession();
           })}
           onOpenHarnessStudio={() => setHarnessStudioOpen(true)}
+          onOpenRepositoryDiff={() => setRepositoryDiffOpen(true)}
           onRefreshGateway={() => withBusy(async () => {
             await loadGatewayStatus();
           })}
@@ -965,12 +981,16 @@ export function App() {
         permissionMode={harnessEngineerPermissionMode}
         model={harnessEngineerModel}
         effort={harnessEngineerEffort}
+        taskSlug={activeTask?.taskSlug ?? null}
         onClose={() => setHarnessStudioOpen(false)}
         onRefresh={() => {
           void withBusy(async () => {
+            if (!activeTask) {
+              throw new Error("Create or select a task before refreshing Harness Studio.");
+            }
             await Promise.all([
-              loadHarnessStatus(),
-              loadHarnessBootstrapStatus(),
+              loadHarnessStatus(activeTask.taskSlug),
+              loadHarnessBootstrapStatus(activeTask.taskSlug),
               refreshHarnessEngineerSession()
             ]);
           });
@@ -1030,6 +1050,12 @@ export function App() {
             syncHarnessEngineerLaunchOptions(session);
           });
         }}
+        onOpenRepositoryDiff={() => setRepositoryDiffOpen(true)}
+      />
+      <RepositoryDiffModal
+        open={repositoryDiffOpen}
+        taskSlug={activeTask?.taskSlug ?? null}
+        onClose={() => setRepositoryDiffOpen(false)}
       />
       <TranslatorSessionModal
         open={translatorSessionOpen}

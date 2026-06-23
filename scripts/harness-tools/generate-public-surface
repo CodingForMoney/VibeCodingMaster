@@ -31,7 +31,7 @@ TS_REEXPORT = re.compile(
     r"\bexport\s+(?:type\s+)?(?P<form>\*|\{[^}]*\})\s+from\s+(?P<quote>[\"'`])(?P<specifier>[^\"'`]+)(?P=quote)"
 )
 TS_ROUTE_CALL = re.compile(
-    r"\.\s*(?P<method>get|post|put|patch|delete|options|head)\s*\(\s*(?P<quote>[\"'`])(?P<path>[^\"'`]+)(?P=quote)",
+    r"\.\s*(?P<method>get|post|put|patch|delete|options|head)\s*(?:<(?:(?!>\s*\()[\s\S])*>\s*)?\(\s*(?P<quote>[\"'`])(?P<path>[^\"'`]+)(?P=quote)",
     re.IGNORECASE,
 )
 TS_ROUTE_OBJECT = re.compile(r"\.route\s*\(\s*\{(?P<body>.*?)\}\s*\)", re.IGNORECASE | re.DOTALL)

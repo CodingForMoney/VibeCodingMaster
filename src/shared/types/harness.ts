@@ -38,6 +38,10 @@ export interface HarnessPlannedChange {
   reason: string;
 }
 
+export interface HarnessTaskRequest {
+  taskSlug: string;
+}
+
 export interface HarnessStatusReport {
   version: number;
   harnessRevision: number;
@@ -62,6 +66,61 @@ export interface HarnessStatusReport {
   warnings: string[];
 }
 
+export type RepositoryDiffScope = "all" | "harness";
+export type RepositoryDiffFileStatus = "added" | "copied" | "deleted" | "modified" | "renamed" | "untracked" | "unknown";
+export type RepositoryDiffFileStage = "committed" | "staged" | "unstaged" | "staged_and_unstaged" | "untracked";
+export type RepositoryDiffFileCategory =
+  | "fixed_harness"
+  | "tools_hooks"
+  | "generated_context"
+  | "project_docs"
+  | "product_code";
+
+export interface RepositoryDiffFile {
+  path: string;
+  oldPath?: string;
+  status: RepositoryDiffFileStatus;
+  stage: RepositoryDiffFileStage;
+  category: RepositoryDiffFileCategory;
+  diff: string;
+  binary: boolean;
+  truncated: boolean;
+  additions: number;
+  deletions: number;
+}
+
+export interface RepositoryDiffSummary {
+  totalFiles: number;
+  committedFiles: number;
+  stagedFiles: number;
+  unstagedFiles: number;
+  untrackedFiles: number;
+  additions: number;
+  deletions: number;
+  harnessFiles: number;
+  productCodeFiles: number;
+  truncatedFiles: number;
+  binaryFiles: number;
+}
+
+export interface RepositoryDiffCommit {
+  sha: string;
+  shortSha: string;
+  subject: string;
+  committedAt?: string;
+}
+
+export interface RepositoryDiffReport {
+  version: 1;
+  repoRoot: string;
+  scope: RepositoryDiffScope;
+  generatedAt: string;
+  commit?: RepositoryDiffCommit;
+  summary: RepositoryDiffSummary;
+  files: RepositoryDiffFile[];
+  warnings: string[];
+}
+
 export interface HarnessFileContent {
   path: string;
   kind: HarnessFileKind;
@@ -72,37 +131,24 @@ export interface HarnessFileContent {
 }
 
 export interface UpdateHarnessFileContentRequest {
+  taskSlug?: string;
   content: string;
 }
 
 export interface UpdateHarnessFileContentResult {
   file: HarnessFileContent;
   status: HarnessStatusReport;
+  harnessCommit?: string;
 }
 
 export interface HarnessApplyResult {
   version: number;
   changedFiles: HarnessPlannedChange[];
-  message: string;
-}
-
-export interface CommitAndRebaseHarnessTaskRequest {
-  changedFiles: HarnessPlannedChange[];
-}
-
-export interface CommitAndRebaseHarnessTaskResult {
-  taskSlug: string;
-  branch: string;
-  worktreePath: string;
-  baseBranch: string;
-  baseCommitBefore: string;
-  baseCommitAfter: string;
   harnessCommit?: string;
-  committed: boolean;
-  rebased: boolean;
-  changedFiles: HarnessPlannedChange[];
   message: string;
 }
+
+export type HarnessApplyRequest = HarnessTaskRequest;
 
 export interface HarnessBootstrapCheck {
   key:
@@ -144,6 +190,7 @@ export interface HarnessBootstrapStatusReport {
 }
 
 export interface StartHarnessBootstrapRequest {
+  taskSlug?: string;
   cols?: number;
   rows?: number;
   permissionMode?: ClaudePermissionMode;
@@ -163,6 +210,7 @@ export interface RunHarnessBootstrapResult {
   status: HarnessBootstrapStatusReport;
   session: HarnessBootstrapSession;
   prompt: string;
+  targetRepoRoot?: string;
 }
 
 export interface RecordHarnessBootstrapHookInput {

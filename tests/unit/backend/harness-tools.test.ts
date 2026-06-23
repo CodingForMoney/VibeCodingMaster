@@ -95,6 +95,9 @@ async function createTypescriptWorkspace(repoRoot: string) {
     export async function createApp() {
       const app = Fastify();
       app.get("/health", async () => ({ ok: true }));
+      app.get<{ Querystring: Record<string, string | undefined> }>("/tickets", async () => ({ tickets: [] }));
+      app.patch<{ Params: { id: string } }>("/tickets/:id", async () => ({ id: "T-1" }));
+      app.post<{ Params: { id: string } }>("/tickets/:id/comments", async () => ({ id: "comment-1" }));
       app.post("/tickets", async () => ({ id: "T-1" }));
       return app;
     }
@@ -165,7 +168,14 @@ describe("harness generated-context tools", () => {
     );
     const apiItems = publicSurface.modules.find((module: { name: string }) => module.name === "@demo/api").items;
     expect(apiItems.map((item: { path: string }) => item.path)).toEqual(
-      expect.arrayContaining(["createApp", "GET /health", "POST /tickets"])
+      expect.arrayContaining([
+        "createApp",
+        "GET /health",
+        "GET /tickets",
+        "PATCH /tickets/:id",
+        "POST /tickets/:id/comments",
+        "POST /tickets"
+      ])
     );
   });
 });

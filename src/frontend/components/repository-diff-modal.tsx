@@ -1,0 +1,200 @@
+import { useEffect, useMemo, useState } from "react";
+import type {
+  RepositoryDiffFile,
+  RepositoryDiffFileCategory,
+  RepositoryDiffFileStage,
+  RepositoryDiffFileStatus,
+  RepositoryDiffReport,
+  RepositoryDiffScope
+} from "../../shared/types/harness.js";
+import { apiClient } from "../state/api-client.js";
+
+export interface RepositoryDiffModalProps {
+  open: boolean;
+  taskSlug: string | null;
+  onClose(): void;
+}
+
+export function RepositoryDiffModal({ open, taskSlug, onClose }: RepositoryDiffModalProps) {
+  const [scope, setScope] = useState<RepositoryDiffScope>("harness");
+  const [report, setReport] = useState<RepositoryDiffReport | null>(null);
+  const [selectedPath, setSelectedPath] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const selectedFile = useMemo(
+    () => report?.files.find((file) => file.path === selectedPath) ?? report?.files[0] ?? null,
+    [report, selectedPath]
+  );
+
+  async function loadDiff(nextScope = scope) {
+    setBusy(true);
+    setError(null);
+    try {
+      if (!taskSlug) {
+        throw new Error("Create or select a task before reviewing harness commits.");
+      }
+      const nextReport = await apiClient.getRepositoryDiff(taskSlug, nextScope);
+      setReport(nextReport);
+      setSelectedPath((current) =>
+        current && nextReport.files.some((file) => file.path === current)
+          ? current
+          : nextReport.files[0]?.path ?? null
+      );
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : String(caught));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    void loadDiff(scope);
+  }, [open, scope, taskSlug]);
+
+  if (!open) {
+    return null;
+  }
+
+  return (
+    <div className="modal-backdrop repository-diff-backdrop">
+      <section className="repository-diff-modal" role="dialog" aria-modal="true" aria-label="Latest Commit Diff">
+        <header className="repository-diff-header">
+          <div>
+            <h2>Latest Commit Diff</h2>
+            <p>
+              {report
+                ? `${report.commit?.shortSha ?? "HEAD"} · ${report.summary.totalFiles} files · +${report.summary.additions} / -${report.summary.deletions}`
+                : "Review the active task worktree HEAD commit."}
+            </p>
+          </div>
+          <div className="repository-diff-header-actions">
+            <div className="segmented-control" aria-label="Diff scope">
+              <button
+                type="button"
+                className={scope === "harness" ? "selected" : ""}
+                disabled={busy}
+                onClick={() => setScope("harness")}
+              >
+                Harness
+              </button>
+              <button
+                type="button"
+                className={scope === "all" ? "selected" : ""}
+                disabled={busy}
+                onClick={() => setScope("all")}
+              >
+                All
+              </button>
+            </div>
+            <button type="button" disabled={busy} onClick={() => void loadDiff()}>
+              Refresh
+            </button>
+            <button type="button" onClick={onClose}>
+              Close
+            </button>
+          </div>
+        </header>
+
+        {error ? <p className="error-banner">{error}</p> : null}
+
+        {report?.warnings.length ? (
+          <ul className="warnings repository-diff-warnings">
+            {report.warnings.map((warning) => <li key={warning}>{warning}</li>)}
+          </ul>
+        ) : null}
+
+        <div className="repository-diff-body">
+          <aside className="repository-diff-sidebar">
+            <RepositoryDiffSummary report={report} busy={busy} />
+            <ol className="repository-diff-file-list">
+              {report?.files.map((file) => (
+                <li key={file.path} className={selectedFile?.path === file.path ? "selected" : ""}>
+                  <button type="button" onClick={() => setSelectedPath(file.path)}>
+                    <span>{file.path}</span>
+                    <small>
+                      {formatStatus(file.status)} · {formatStage(file.stage)} · {formatCategory(file.category)}
+                    </small>
+                  </button>
+                </li>
+              ))}
+              {report && report.files.length === 0 ? (
+                <li className="repository-diff-empty">No files in this commit scope.</li>
+              ) : null}
+            </ol>
+          </aside>
+
+          <main className="repository-diff-main">
+            {selectedFile ? (
+              <>
+                <div className="repository-diff-file-header">
+                  <div>
+                    <h3>{selectedFile.path}</h3>
+                    <p>
+                      {formatCategory(selectedFile.category)} · {formatStatus(selectedFile.status)} · {formatStage(selectedFile.stage)}
+                    </p>
+                  </div>
+                  <span className="repository-diff-stats">+{selectedFile.additions} / -{selectedFile.deletions}</span>
+                </div>
+                {selectedFile.binary ? <p className="muted">Binary or non-regular file. Text diff is not available.</p> : null}
+                {selectedFile.truncated ? <p className="muted">Diff was truncated for display.</p> : null}
+                <pre className="repository-diff-code">{selectedFile.diff}</pre>
+              </>
+            ) : (
+              <div className="repository-diff-placeholder">
+                {busy ? "Loading commit diff..." : "No diff selected."}
+              </div>
+            )}
+          </main>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function RepositoryDiffSummary({ report, busy }: { report: RepositoryDiffReport | null; busy: boolean }) {
+  const summary = report?.summary;
+  return (
+    <div className="repository-diff-summary">
+      <strong>{busy ? "Loading" : report ? formatScope(report.scope) : "Not loaded"}</strong>
+      {summary ? (
+        <>
+          <span>{summary.harnessFiles} harness files</span>
+          <span>{summary.productCodeFiles} product code files</span>
+          <span>{summary.committedFiles} committed files</span>
+          <span>{report?.commit?.subject ?? "HEAD"}</span>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+function formatScope(scope: RepositoryDiffScope): string {
+  return scope === "all" ? "All repository changes" : "Harness changes";
+}
+
+function formatCategory(category: RepositoryDiffFileCategory): string {
+  switch (category) {
+    case "fixed_harness":
+      return "fixed harness";
+    case "tools_hooks":
+      return "tools/hooks";
+    case "generated_context":
+      return "generated context";
+    case "project_docs":
+      return "project docs";
+    case "product_code":
+      return "product code";
+  }
+}
+
+function formatStage(stage: RepositoryDiffFileStage): string {
+  return stage.replaceAll("_", " ");
+}
+
+function formatStatus(status: RepositoryDiffFileStatus): string {
+  return status.replaceAll("_", " ");
+}
