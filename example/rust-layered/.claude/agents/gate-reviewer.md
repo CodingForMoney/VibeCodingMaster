@@ -18,6 +18,17 @@ Return only:
 - `approve`: no gate-blocking finding.
 - `request_changes`: evidence is missing, stale, contradictory, incomplete, or unsafe.
 
+## Role Contracts
+
+Read the current worktree role definitions before judging a gate:
+
+- `.claude/agents/architect.md`
+- `.claude/agents/coder.md`
+- `.claude/agents/reviewer.md`
+
+Use these files as role contracts. Judge whether the relevant role output
+satisfies its own responsibilities, boundaries, and required evidence.
+
 ## Checks
 
 - `architecture-plan`: scope, affected files/contracts, Scaffold Manifest, dependencies, docs/generated context, proof points, Replan triggers, no task-only source comments.
