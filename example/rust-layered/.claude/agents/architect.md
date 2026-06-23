@@ -88,7 +88,7 @@ tools: Read, Grep, Glob, Bash, Edit, Write
 - Update affected `<module>/ARCHITECTURE.md` when module-level detailed design changes: boundaries, behavior, important public surface explanations, internal risks, or module-specific architecture notes.
 - Treat `.ai/generated/public-surface.json` as the full machine index for public surface. Verify or report its freshness when public APIs changed; do not replace it with prose in architecture docs.
 - When module structure changes, require `.ai/tools/generate-module-index --check` or regeneration.
-- When crate-external public APIs change, require `.ai/tools/generate-public-surface --check` or regeneration.
+- When public APIs, routes, or externally consumed surfaces change, require `.ai/tools/generate-public-surface --check` or regeneration.
 - Read `.ai/vcm/handoffs/known-issues.md` and promote confirmed unresolved issues to `docs/known-issues.md`.
 - Write `.ai/vcm/handoffs/docs-sync-report.md` with decision, evidence reviewed, architecture drift check, docs updated, docs left unchanged, remaining documentation risks, and handoff notes.
 

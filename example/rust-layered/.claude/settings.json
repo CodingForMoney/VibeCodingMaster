@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "sh -c 'if [ -z \"${VCM_TASK_SLUG:-}\" ] || [ -z \"${VCM_ROLE:-}\" ]; then exit 0; fi; exec python3 \"${CLAUDE_PROJECT_DIR:-.}/.ai/tools/vcm-bash-guard\"'",
+            "command": "sh -c 'if [ -z \"${VCM_TASK_SLUG:-}\" ] || [ -z \"${VCM_ROLE:-}\" ]; then exit 0; fi; guard=\"\"; repo=\"$(git rev-parse --show-toplevel 2>/dev/null || true)\"; if [ -n \"$repo\" ] && [ -f \"$repo/.ai/tools/vcm-bash-guard\" ]; then guard=\"$repo/.ai/tools/vcm-bash-guard\"; else cwd=\"$(pwd -P 2>/dev/null || pwd)\"; dir=\"$cwd\"; while [ -n \"$dir\" ] && [ \"$dir\" != \"/\" ]; do if [ -f \"$dir/.ai/tools/vcm-bash-guard\" ]; then guard=\"$dir/.ai/tools/vcm-bash-guard\"; break; fi; dir=\"$(dirname \"$dir\")\"; done; if [ -z \"$guard\" ] && [ -n \"${CLAUDE_PROJECT_DIR:-}\" ] && [ -f \"${CLAUDE_PROJECT_DIR}/.ai/tools/vcm-bash-guard\" ]; then guard=\"${CLAUDE_PROJECT_DIR}/.ai/tools/vcm-bash-guard\"; fi; fi; [ -n \"$guard\" ] || exit 0; python3 \"$guard\" || exit 0'",
             "timeout": 10
           }
         ]

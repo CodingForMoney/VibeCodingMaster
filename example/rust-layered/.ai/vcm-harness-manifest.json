@@ -4,7 +4,7 @@
   "harnessVersion": "0.3.0-fixed",
   "installMode": "fixed",
   "installedAt": "2026-06-07T00:00:00Z",
-  "updatedAt": "2026-06-22T06:36:13.778Z",
+  "updatedAt": "2026-06-23T14:27:34.488Z",
   "runtimeRoots": [
     ".ai/vcm/",
     ".claude/worktrees/"
@@ -172,6 +172,23 @@
       }
     },
     {
+      "path": ".claude/agents/harness-engineer.md",
+      "entryType": "file",
+      "category": "agent-harness-engineer",
+      "ownership": "managed-block",
+      "source": "vcm-template",
+      "lifecycle": "long-term",
+      "marker": {
+        "type": "html",
+        "begin": "<!-- VCM:BEGIN version=1 -->",
+        "end": "<!-- VCM:END -->"
+      },
+      "uninstall": {
+        "action": "remove-managed-block",
+        "requiresConfirmation": false
+      }
+    },
+    {
       "path": ".claude/settings.json",
       "entryType": "file",
       "category": "claude-settings",
@@ -245,6 +262,14 @@
     },
     {
       "path": ".claude/skills/vcm-gate-review/",
+      "entryType": "directory",
+      "category": "skill-directory",
+      "ownership": "vcm-created",
+      "source": "vcm-template",
+      "lifecycle": "long-term"
+    },
+    {
+      "path": ".claude/skills/vcm-report-harness-issue/",
       "entryType": "directory",
       "category": "skill-directory",
       "ownership": "vcm-created",
@@ -357,6 +382,18 @@
     },
     {
       "path": ".claude/skills/vcm-gate-review/SKILL.md",
+      "entryType": "file",
+      "category": "skill",
+      "ownership": "whole-file",
+      "source": "vcm-template",
+      "lifecycle": "long-term",
+      "uninstall": {
+        "action": "delete-file-if-unchanged",
+        "requiresConfirmation": false
+      }
+    },
+    {
+      "path": ".claude/skills/vcm-report-harness-issue/SKILL.md",
       "entryType": "file",
       "category": "skill",
       "ownership": "whole-file",

@@ -56,7 +56,7 @@ tools: Read, Grep, Glob, Bash, Edit, Write
 ### Generated Context
 
 - Regenerate `.ai/generated/module-index.json` with `.ai/tools/generate-module-index` after module, manifest, source-file, or test-file changes.
-- Regenerate `.ai/generated/public-surface.json` with `.ai/tools/generate-public-surface` after crate-external public API or public visibility changes.
+- Regenerate `.ai/generated/public-surface.json` with `.ai/tools/generate-public-surface` after public API, route, externally consumed surface, or public visibility changes.
 - Do not hand-edit generated context files.
 
 ### Baseline Tests

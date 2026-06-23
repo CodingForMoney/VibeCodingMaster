@@ -17,7 +17,14 @@ This is a Rust workspace example for VCM harness experiments. It has three archi
 - Read module-local `CLAUDE.md` before editing a subdirectory if one exists.
 - Use `vcm-route-message` whenever a VCM role hands off work, asks another role a question, reports a result, reports a blocker, or raises a finding. Follow its write-then-stop rule.
 - Use `vcm-long-running-validation` for long-running validation. Follow the background job limits below.
+- Use `vcm-report-harness-issue` when you notice a reusable VCM harness problem. Record feedback; do not contact Harness Engineer directly.
 - Project-manager uses `vcm-gate-review` at enabled Gate Review trigger points and on VCM Gate Review callbacks.
+
+## VCM Harness Scope
+
+VCM harness includes root `CLAUDE.md`, `.claude/agents/**`, `.claude/skills/**`, `.ai/tools/**`, `.claude/settings.json`, VCM managed blocks, generated-context tooling, bootstrap rules, routing rules, validation rules, Gate Review rules, Translator rules, and Harness Engineer rules.
+
+If a reusable harness problem is suspected, it is enough to record a concise feedback report with evidence. Harness Engineer decides whether it is real, whether it should be fixed, and which files are in scope.
 
 ## VCM Background Jobs
 
@@ -34,7 +41,7 @@ This is a Rust workspace example for VCM harness experiments. It has three archi
 - `docs/TESTING.md`: validation strategy, commands, validation levels, integration/E2E case definitions, final-validation cleanup, and known testing gaps; reviewer-owned.
 - `docs/known-issues.md`: durable known issues and accepted limitations; architect-owned.
 - `.ai/generated/module-index.json`: generated module index; use it to find layers, modules, manifests, module docs, source files, test files, and workspace dependencies.
-- `.ai/generated/public-surface.json`: generated crate-external public API index; use it to inspect module-to-module public interfaces and source evidence.
+- `.ai/generated/public-surface.json`: generated public surface index; use it to inspect module-to-module public APIs, routes, and source evidence.
 
 ## VCM Task Flow
 
