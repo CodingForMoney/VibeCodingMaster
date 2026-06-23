@@ -103,7 +103,6 @@ export interface ProjectDashboardProps {
   canOneClickStart: boolean;
   onSaveLaunchTemplate(): void;
   onOneClickStart(): void;
-  onTryFlowPauseAlert(): void;
   onMarkAllMessagesDone(taskSlug: string): void;
   onDeleteMessageHistory(taskSlug: string): void;
 }
@@ -171,7 +170,6 @@ export function ProjectDashboard({
   canOneClickStart,
   onSaveLaunchTemplate,
   onOneClickStart,
-  onTryFlowPauseAlert,
   onMarkAllMessagesDone,
   onDeleteMessageHistory
 }: ProjectDashboardProps) {
@@ -279,16 +277,6 @@ export function ProjectDashboard({
             title="Play a sound when VCM shows the fixed flow pause dialog"
             onChange={(checked) => onPauseAlertSoundChange(checked)}
           />
-          <button
-            className="settings-toggle"
-            disabled={busy || gatewayStatus?.enabled}
-            title={gatewayStatus?.enabled ? "Disabled while Gateway is on" : undefined}
-            type="button"
-            onClick={onTryFlowPauseAlert}
-          >
-            <span>Try alert</span>
-            <span>test</span>
-          </button>
           <label className="settings-select-row">
             <span>Permission requests</span>
             <select

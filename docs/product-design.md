@@ -319,14 +319,12 @@ The old `Dirty: yes/no` label is not used. The UI uses `Working tree: clean` or
 
 - `Theme` button, cycling through `System`, `Light`, and `Dark`.
 - `Pause alert sound` button, on by default, controlling only the audible pause reminder.
-- `Try alert` button, firing the fixed pause alert dialog and, when sound is enabled, the alert sound for local verification.
 - `Messages` button, opening a modal list of role messages.
 - `Events` button, opening a modal list of runtime UI events for the current task.
 
 The default theme mode is `System`, which follows the OS/browser color-scheme preference. The entire application chrome, sidebar, forms, modals, status badges, and workspace panels must support both light and dark rendering. Embedded terminals keep their terminal-native dark styling.
 
 When a role flow stops advancing, VCM always shows the fixed in-app pause alert dialog. When `Pause alert sound` is on, VCM also plays a short, soft, two-note local chime. If the flow lasted less than 2 minutes, the chime plays 3 times, 1.4 seconds apart, and stops. If the flow lasted 2 minutes or longer, the chime repeats until the user confirms the dialog. The alert sound must reuse one browser audio context after user activation instead of creating a fresh context for each repeat, because Safari can block repeated timer-driven playback when every repeat looks like a new autoplay attempt.
-`Try alert` must work even when no flow has just stopped advancing so the user can verify browser dialog and sound behavior.
 Safari may still require the user to manually set `Safari > Website Settings > Auto-Play > Allow All Auto-Play`; Chrome is the recommended browser for reliable repeated alert sound.
 
 There is no separate `Pause orchestration` or `Resume orchestration` control in the GUI. The current product model is one on/off toggle in the role console toolbar.

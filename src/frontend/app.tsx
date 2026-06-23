@@ -139,11 +139,8 @@ export function App() {
     flowPauseAlarmRef.current = null;
   }, []);
 
-  const startStrongFlowPauseAlarm = useCallback((options: { resetAudio?: boolean } = {}) => {
+  const startStrongFlowPauseAlarm = useCallback(() => {
     stopFlowPauseAlarm();
-    if (options.resetAudio) {
-      resetFlowPauseAudioContext();
-    }
     void playFlowPauseSound();
     flowPauseAlarmRef.current = window.setInterval(() => {
       void playFlowPauseSound();
@@ -167,11 +164,11 @@ export function App() {
   const showFlowPauseNotice = useCallback((
     text: string,
     id = `manual-${Date.now()}`,
-    options: { resetAudio?: boolean; sound?: "none" | "weak" | "strong" } = {}
+    options: { sound?: "none" | "weak" | "strong" } = {}
   ) => {
     setFlowPauseNotice({ id, text });
     if (options.sound === "strong") {
-      startStrongFlowPauseAlarm(options);
+      startStrongFlowPauseAlarm();
     } else if (options.sound === "weak") {
       playWeakFlowPauseAlert();
     } else {
@@ -1127,12 +1124,6 @@ export function App() {
               setWorkspaceRefreshNonce((current) => current + 1);
             }, "One-click start role sessions");
           }}
-          onTryFlowPauseAlert={() => {
-            showFlowPauseNotice("This is a test pause alert.", undefined, {
-              resetAudio: true,
-              sound: pauseAlertSound ? "strong" : "none"
-            });
-          }}
           onMarkAllMessagesDone={(taskSlug) => {
             void withBusy(async () => {
               const result = await apiClient.markAllMessagesDone(taskSlug);
@@ -1634,10 +1625,6 @@ function getFlowPauseAudioContext(): AudioContext | null {
   } catch {
     return null;
   }
-}
-
-function resetFlowPauseAudioContext(): void {
-  discardFlowPauseAudioContext(flowPauseAudioContext);
 }
 
 function discardFlowPauseAudioContext(context: AudioContext | null): void {
