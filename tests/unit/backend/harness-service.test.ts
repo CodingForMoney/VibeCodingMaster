@@ -216,6 +216,10 @@ describe("createHarnessService", () => {
     expect(JSON.stringify(settings.hooks.StopFailure)).toContain("/api/hooks/claude-code");
     expect(JSON.stringify(settings.hooks.PostCompact)).toContain("/api/hooks/claude-code");
     expect(JSON.stringify(settings.hooks.PermissionRequest)).toContain("/api/hooks/claude-code/permission-request");
+    expect(JSON.stringify(settings.hooks.PreToolUse)).toContain("git rev-parse --show-toplevel");
+    expect(JSON.stringify(settings.hooks.PreToolUse)).toContain("[ -n \\\"$guard\\\" ] || exit 0");
+    expect(JSON.stringify(settings.hooks.PreToolUse)).toContain("python3 \\\"$guard\\\" || exit 0");
+    expect(JSON.stringify(settings.hooks.PreToolUse)).not.toContain("${CLAUDE_PROJECT_DIR:-.}/.ai/tools/vcm-bash-guard");
     expect(JSON.stringify(settings.hooks.UserPromptSubmit)).not.toContain("vcmctl");
     expect(JSON.stringify(settings.hooks.Stop)).not.toContain("vcmctl");
     expect(JSON.stringify(settings.hooks.PreToolUse)).toContain("echo keep-user-hook");

@@ -1,5 +1,5 @@
-import { execFile } from "node:child_process";
-import { mkdtemp, rm } from "node:fs/promises";
+import { execFile, execFileSync } from "node:child_process";
+import { mkdir, mkdtemp, readFile, rm, unlink } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -35,5 +35,45 @@ describe("harness templates stay in sync with the script installer", () => {
       "script installer output must exactly match the backend harness templates"
     ).toEqual([]);
     expect(status.needsApply).toBe(false);
+  }, 30_000);
+
+  it("installs a Bash guard hook that survives stale CLAUDE_PROJECT_DIR and fails open when missing", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-harness-bash-hook-"));
+    await execFileAsync(process.execPath, [installerPath, tmpRepo]);
+    const childDir = path.join(tmpRepo, "nested", "cwd");
+    await mkdir(childDir, { recursive: true });
+
+    const settings = JSON.parse(await readFile(path.join(tmpRepo, ".claude/settings.json"), "utf8")) as {
+      hooks: { PreToolUse: Array<{ hooks: Array<{ command: string }> }> };
+    };
+    const command = settings.hooks.PreToolUse[0]?.hooks[0]?.command;
+    expect(command).toContain("git rev-parse --show-toplevel");
+    expect(command).toContain("[ -n \"$guard\" ] || exit 0");
+
+    const env = {
+      ...process.env,
+      VCM_TASK_SLUG: "demo-task",
+      VCM_ROLE: "coder",
+      CLAUDE_PROJECT_DIR: path.join(tmpRepo, ".claude", "worktrees", "removed")
+    };
+    const deniedOutput = execFileSync("sh", ["-c", command], {
+      cwd: childDir,
+      env,
+      input: JSON.stringify({ tool_name: "Bash", tool_input: { command: "sleep 100 &" } }),
+      encoding: "utf8"
+    });
+    const denied = JSON.parse(deniedOutput) as {
+      hookSpecificOutput: { permissionDecision: string };
+    };
+    expect(denied.hookSpecificOutput.permissionDecision).toBe("deny");
+
+    await unlink(path.join(tmpRepo, ".ai/tools/vcm-bash-guard"));
+    const missingGuardOutput = execFileSync("sh", ["-c", command], {
+      cwd: childDir,
+      env,
+      input: JSON.stringify({ tool_name: "Bash", tool_input: { command: "sleep 100 &" } }),
+      encoding: "utf8"
+    });
+    expect(missingGuardOutput).toBe("");
   }, 30_000);
 });
