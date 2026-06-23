@@ -122,6 +122,20 @@ describe("createGitAdapter", () => {
     const adapter = createGitAdapter({
       async run(command, args = [], options = {}) {
         calls.push({ command, args, options });
+        if (args.includes("merge-base")) {
+          return {
+            stdout: "base1234567890\n",
+            stderr: "",
+            exitCode: 0
+          };
+        }
+        if (args.includes("log")) {
+          return {
+            stdout: "def1234567890\u0000feat: second\u00002026-06-23T01:00:00+00:00\u001eabc1234567890\u0000feat: first\u00002026-06-23T00:00:00+00:00\u001e",
+            stderr: "",
+            exitCode: 0
+          };
+        }
         if (args.includes("--format=%H%x00%s%x00%cI")) {
           return {
             stdout: "abc1234567890\u0000chore(vcm-harness): update\u00002026-06-23T00:00:00+00:00\n",
@@ -143,6 +157,19 @@ describe("createGitAdapter", () => {
       committedAt: "2026-06-23T00:00:00+00:00"
     });
     await expect(adapter.getCommitDiff("/workspace", "HEAD")).resolves.toContain("diff --git");
+    await expect(adapter.getCommitList("/workspace", "base123..HEAD")).resolves.toEqual([
+      {
+        sha: "def1234567890",
+        subject: "feat: second",
+        committedAt: "2026-06-23T01:00:00+00:00"
+      },
+      {
+        sha: "abc1234567890",
+        subject: "feat: first",
+        committedAt: "2026-06-23T00:00:00+00:00"
+      }
+    ]);
+    await expect(adapter.getMergeBase("/workspace", "main", "HEAD")).resolves.toBe("base1234567890");
 
     expect(calls[0]).toMatchObject({ command: "git", options: { cwd: "/workspace" } });
     expect(calls[0]?.args).toContain("safe.directory=/workspace");
@@ -155,6 +182,8 @@ describe("createGitAdapter", () => {
       "--dst-prefix=b/",
       "HEAD"
     ]);
+    expect(calls[2]?.args.slice(-3)).toEqual(["log", "--format=%H%x00%s%x00%cI%x1e", "base123..HEAD"]);
+    expect(calls[3]?.args.slice(-3)).toEqual(["merge-base", "main", "HEAD"]);
   });
 });
 

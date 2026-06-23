@@ -68,10 +68,12 @@ export function registerHarnessRoutes(app: FastifyInstance, deps: HarnessRouteDe
     return deps.harnessService.updateHarnessFileContent(task.worktreePath, request.query.path ?? "", request.body.content);
   });
 
-  app.get<{ Querystring: { scope?: string; taskSlug?: string } }>("/api/projects/harness/repository-diff", async (request) => {
-    const { task } = await requireHarnessTaskContext(deps, request.query.taskSlug);
-    const scope = request.query.scope === "all" ? "all" : "harness";
-    return deps.harnessService.getRepositoryDiff(task.worktreePath, scope);
+  app.get<{ Querystring: { commit?: string; taskSlug?: string } }>("/api/projects/harness/repository-diff", async (request) => {
+    const { project, task } = await requireHarnessTaskContext(deps, request.query.taskSlug);
+    return deps.harnessService.getRepositoryDiff(task.worktreePath, {
+      baseRepoRoot: project.repoRoot,
+      commitSha: request.query.commit
+    });
   });
 
   app.get<{ Querystring: { taskSlug?: string } }>("/api/projects/harness/bootstrap", async (request) => {

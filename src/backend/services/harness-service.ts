@@ -13,11 +13,12 @@ import type {
   HarnessPlannedChange,
   HarnessStatusReport,
   RecordHarnessBootstrapHookInput,
+  RepositoryDiffCommit,
   RepositoryDiffFile,
   RepositoryDiffFileCategory,
   RepositoryDiffFileStatus,
   RepositoryDiffReport,
-  RepositoryDiffScope,
+  RepositoryDiffSummary,
   RestartHarnessBootstrapRequest,
   RunHarnessBootstrapResult,
   StartHarnessBootstrapRequest,
@@ -60,7 +61,7 @@ export interface HarnessService {
   getHarnessFileContent(repoRoot: string, filePath: string): Promise<HarnessFileContent>;
   updateHarnessFileContent(repoRoot: string, filePath: string, content: string): Promise<UpdateHarnessFileContentResult>;
   applyHarness(repoRoot: string): Promise<HarnessApplyResult>;
-  getRepositoryDiff(repoRoot: string, scope?: RepositoryDiffScope): Promise<RepositoryDiffReport>;
+  getRepositoryDiff(repoRoot: string, input?: RepositoryDiffRequest): Promise<RepositoryDiffReport>;
   getBootstrapStatus(repoRoot: string, targetRepoRoot?: string): Promise<HarnessBootstrapStatusReport>;
   startHarnessBootstrap(repoRoot: string, targetRepoRoot?: string, input?: StartHarnessBootstrapRequest): Promise<StartHarnessBootstrapResult>;
   restartHarnessBootstrap(repoRoot: string, targetRepoRoot?: string, input?: RestartHarnessBootstrapRequest): Promise<StartHarnessBootstrapResult>;
@@ -71,7 +72,8 @@ export interface HarnessService {
 
 export interface HarnessServiceDeps {
   fs: FileSystemAdapter;
-  git?: Pick<GitAdapter, "addPaths" | "commit" | "getCommitDiff" | "getCommitInfo" | "getStatusPorcelainV1">;
+  git?: Pick<GitAdapter, "addPaths" | "commit" | "getStatusPorcelainV1"> &
+    Partial<Pick<GitAdapter, "getCommitDiff" | "getCommitInfo" | "getCommitList" | "getHeadCommit" | "getMergeBase">>;
   runtime?: TerminalRuntime;
   harnessEngineerSessions?: Pick<
     SessionService,
@@ -94,6 +96,11 @@ interface HarnessBootstrapRunState {
   completedAt?: string;
   updatedAt: string;
   lastHookEvent?: RecordHarnessBootstrapHookInput["eventName"];
+}
+
+export interface RepositoryDiffRequest {
+  baseRepoRoot?: string;
+  commitSha?: string;
 }
 
 interface HarnessFileDefinition {
@@ -398,15 +405,8 @@ export function createHarnessService(deps: HarnessServiceDeps): HarnessService {
           : formatHarnessApplyMessage(committed.harnessCommit, true)
       };
     },
-    async getRepositoryDiff(repoRoot, scope = "harness") {
-      if (!deps.git) {
-        throw new VcmError({
-          code: "HARNESS_GIT_UNAVAILABLE",
-          message: "Git-backed repository diff is not available in this VCM runtime.",
-          statusCode: 501
-        });
-      }
-      return getRepositoryDiffReport(deps.git, repoRoot, scope, now());
+    async getRepositoryDiff(repoRoot, input = {}) {
+      return getRepositoryDiffReport(requireRepositoryDiffGit(deps.git), repoRoot, input, now());
     },
     async getBootstrapStatus(repoRoot, targetRepoRoot = repoRoot) {
       return getHarnessBootstrapStatus(deps, repoRoot, targetRepoRoot, now);
@@ -628,7 +628,10 @@ function shortCommit(commit: string): string {
   return commit.slice(0, 7);
 }
 
-type RepositoryDiffGit = NonNullable<HarnessServiceDeps["git"]>;
+type HarnessGit = NonNullable<HarnessServiceDeps["git"]>;
+type RepositoryDiffGit = HarnessGit & Required<
+  Pick<GitAdapter, "getCommitDiff" | "getCommitInfo" | "getCommitList" | "getHeadCommit" | "getMergeBase">
+>;
 
 interface ParsedGitStatusEntry {
   path: string;
@@ -640,17 +643,52 @@ interface ParsedGitStatusEntry {
 const REPOSITORY_DIFF_MAX_FILES = 250;
 const REPOSITORY_DIFF_MAX_DIFF_CHARS = 180_000;
 
+function requireRepositoryDiffGit(git: HarnessGit | undefined): RepositoryDiffGit {
+  if (
+    !git?.getCommitDiff ||
+    !git.getCommitInfo ||
+    !git.getCommitList ||
+    !git.getHeadCommit ||
+    !git.getMergeBase
+  ) {
+    throw new VcmError({
+      code: "HARNESS_GIT_UNAVAILABLE",
+      message: "Git-backed repository diff is not available in this VCM runtime.",
+      statusCode: 501
+    });
+  }
+  return git as RepositoryDiffGit;
+}
+
 async function getRepositoryDiffReport(
   git: RepositoryDiffGit,
   repoRoot: string,
-  scope: RepositoryDiffScope,
+  input: RepositoryDiffRequest,
   generatedAt: string
 ): Promise<RepositoryDiffReport> {
-  const commitInfo = await git.getCommitInfo(repoRoot, "HEAD");
-  const rawDiff = await git.getCommitDiff(repoRoot, "HEAD");
-  const allFiles = parseCommitDiffFiles(rawDiff)
-    .filter((file) => scope === "all" || file.category !== "product_code");
+  const baseRef = input.baseRepoRoot
+    ? await git.getHeadCommit(input.baseRepoRoot)
+    : "HEAD^";
+  const mergeBase = await git.getMergeBase(repoRoot, baseRef, "HEAD");
+  const commits = (await git.getCommitList(repoRoot, `${mergeBase}..HEAD`)).map(toRepositoryDiffCommit);
   const warnings: string[] = [];
+  const selectedCommit = selectRepositoryDiffCommit(commits, input.commitSha);
+
+  if (!selectedCommit) {
+    return {
+      version: 1,
+      repoRoot,
+      generatedAt,
+      commits,
+      summary: createEmptyRepositoryDiffSummary(),
+      files: [],
+      warnings
+    };
+  }
+
+  const commitInfo = await git.getCommitInfo(repoRoot, selectedCommit.sha);
+  const rawDiff = await git.getCommitDiff(repoRoot, selectedCommit.sha);
+  const allFiles = parseCommitDiffFiles(rawDiff);
   const files = allFiles.slice(0, REPOSITORY_DIFF_MAX_FILES);
   if (allFiles.length > files.length) {
     warnings.push(`Diff file list is truncated to ${REPOSITORY_DIFF_MAX_FILES} files.`);
@@ -664,8 +702,8 @@ async function getRepositoryDiffReport(
   return {
     version: 1,
     repoRoot,
-    scope,
     generatedAt,
+    commits,
     commit: {
       sha: commitInfo.sha,
       shortSha: commitInfo.sha.slice(0, 12),
@@ -687,6 +725,42 @@ async function getRepositoryDiffReport(
     },
     files,
     warnings
+  };
+}
+
+function toRepositoryDiffCommit(commit: { sha: string; subject: string; committedAt?: string }): RepositoryDiffCommit {
+  return {
+    sha: commit.sha,
+    shortSha: commit.sha.slice(0, 12),
+    subject: commit.subject,
+    committedAt: commit.committedAt
+  };
+}
+
+function selectRepositoryDiffCommit(
+  commits: RepositoryDiffCommit[],
+  requestedSha: string | undefined
+): RepositoryDiffCommit | undefined {
+  const normalizedSha = requestedSha?.trim();
+  if (normalizedSha) {
+    return commits.find((commit) => commit.sha === normalizedSha || commit.shortSha === normalizedSha);
+  }
+  return commits[0];
+}
+
+function createEmptyRepositoryDiffSummary(): RepositoryDiffSummary {
+  return {
+    totalFiles: 0,
+    committedFiles: 0,
+    stagedFiles: 0,
+    unstagedFiles: 0,
+    untrackedFiles: 0,
+    additions: 0,
+    deletions: 0,
+    harnessFiles: 0,
+    productCodeFiles: 0,
+    truncatedFiles: 0,
+    binaryFiles: 0
   };
 }
 
@@ -823,7 +897,7 @@ function countDiffLines(diff: string): { additions: number; deletions: number } 
   return { additions, deletions };
 }
 
-async function assertHarnessWorktreeClean(git: RepositoryDiffGit | undefined, repoRoot: string): Promise<void> {
+async function assertHarnessWorktreeClean(git: HarnessGit | undefined, repoRoot: string): Promise<void> {
   if (!git) {
     return;
   }
@@ -840,7 +914,7 @@ async function assertHarnessWorktreeClean(git: RepositoryDiffGit | undefined, re
 }
 
 async function commitHarnessVisibleChanges(
-  git: RepositoryDiffGit | undefined,
+  git: HarnessGit | undefined,
   repoRoot: string,
   message: string
 ): Promise<{ harnessCommit?: string; changedFiles: HarnessPlannedChange[] }> {
@@ -869,7 +943,7 @@ async function commitHarnessVisibleChanges(
   return { harnessCommit, changedFiles };
 }
 
-async function getVisibleGitStatusEntries(git: RepositoryDiffGit, repoRoot: string): Promise<ParsedGitStatusEntry[]> {
+async function getVisibleGitStatusEntries(git: HarnessGit, repoRoot: string): Promise<ParsedGitStatusEntry[]> {
   const rawStatus = await git.getStatusPorcelainV1(repoRoot);
   return parseGitStatusPorcelainV1(rawStatus).filter((entry) => !isVcmRuntimePath(entry.path));
 }

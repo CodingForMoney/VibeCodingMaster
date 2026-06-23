@@ -14,7 +14,6 @@ import type {
   HarnessBootstrapStatusReport,
   HarnessFileContent,
   RepositoryDiffReport,
-  RepositoryDiffScope,
   RestartHarnessBootstrapRequest,
   RunHarnessBootstrapResult,
   HarnessStatusReport,
@@ -127,8 +126,11 @@ export const apiClient = {
       body: JSON.stringify(input)
     });
   },
-  getRepositoryDiff(taskSlug: string, scope: RepositoryDiffScope = "harness") {
-    const params = new URLSearchParams({ taskSlug, scope });
+  getRepositoryDiff(taskSlug: string, commitSha?: string | null) {
+    const params = new URLSearchParams({ taskSlug });
+    if (commitSha) {
+      params.set("commit", commitSha);
+    }
     return request<RepositoryDiffReport>(`/api/projects/harness/repository-diff?${params.toString()}`);
   },
   getHarnessBootstrapStatus(taskSlug: string) {

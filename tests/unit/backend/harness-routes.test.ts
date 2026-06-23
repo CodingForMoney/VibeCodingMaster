@@ -92,7 +92,7 @@ describe("harness routes", () => {
     await app.close();
   });
 
-  it("returns repository diff using the requested scope", async () => {
+  it("returns repository diff using the selected commit", async () => {
     const app = Fastify({ logger: false });
     const calls: unknown[] = [];
     registerHarnessRoutes(app, {
@@ -105,13 +105,24 @@ describe("harness routes", () => {
         async applyHarness() {
           throw new Error("not used");
         },
-        async getRepositoryDiff(repoRoot, scope) {
-          calls.push(["getRepositoryDiff", repoRoot, scope]);
+        async getRepositoryDiff(repoRoot, input) {
+          calls.push(["getRepositoryDiff", repoRoot, input]);
           return {
             version: 1,
             repoRoot,
-            scope,
             generatedAt: "2026-06-23T00:00:00.000Z",
+            commits: [{
+              sha: "abc1234567890",
+              shortSha: "abc123456789",
+              subject: "chore(vcm-harness): bootstrap",
+              committedAt: "2026-06-23T00:00:00.000Z"
+            }],
+            commit: {
+              sha: "abc1234567890",
+              shortSha: "abc123456789",
+              subject: "chore(vcm-harness): bootstrap",
+              committedAt: "2026-06-23T00:00:00.000Z"
+            },
             summary: {
               totalFiles: 0,
               committedFiles: 0,
@@ -140,12 +151,19 @@ describe("harness routes", () => {
 
     const response = await app.inject({
       method: "GET",
-      url: "/api/projects/harness/repository-diff?taskSlug=demo-task&scope=all"
+      url: "/api/projects/harness/repository-diff?taskSlug=demo-task&commit=abc1234567890"
     });
 
     expect(response.statusCode).toBe(200);
-    expect(response.json()).toMatchObject({ repoRoot: "/workspace/.claude/worktrees/demo-task", scope: "all" });
-    expect(calls).toEqual([["getRepositoryDiff", "/workspace/.claude/worktrees/demo-task", "all"]]);
+    expect(response.json()).toMatchObject({ repoRoot: "/workspace/.claude/worktrees/demo-task" });
+    expect(calls).toEqual([[
+      "getRepositoryDiff",
+      "/workspace/.claude/worktrees/demo-task",
+      {
+        baseRepoRoot: "/workspace",
+        commitSha: "abc1234567890"
+      }
+    ]]);
     await app.close();
   });
 });

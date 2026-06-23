@@ -126,12 +126,12 @@ describe("apiClient", () => {
     });
   });
 
-  it("loads repository diff with the selected scope", async () => {
+  it("loads repository diff with the selected commit", async () => {
     const fetchMock = mockFetch({
       version: 1,
       repoRoot: "/repo",
-      scope: "all",
       generatedAt: "2026-06-23T00:00:00.000Z",
+      commits: [],
       summary: {
         totalFiles: 0,
         committedFiles: 0,
@@ -149,9 +149,9 @@ describe("apiClient", () => {
       warnings: []
     });
 
-    await apiClient.getRepositoryDiff("demo-task", "all");
+    await apiClient.getRepositoryDiff("demo-task", "abc1234567890");
 
-    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/projects/harness/repository-diff?taskSlug=demo-task&scope=all");
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/projects/harness/repository-diff?taskSlug=demo-task&commit=abc1234567890");
   });
 
   it("marks all messages done with a bodyless POST", async () => {

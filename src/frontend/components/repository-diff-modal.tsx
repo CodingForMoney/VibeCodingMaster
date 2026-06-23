@@ -4,8 +4,7 @@ import type {
   RepositoryDiffFileCategory,
   RepositoryDiffFileStage,
   RepositoryDiffFileStatus,
-  RepositoryDiffReport,
-  RepositoryDiffScope
+  RepositoryDiffReport
 } from "../../shared/types/harness.js";
 import { apiClient } from "../state/api-client.js";
 
@@ -16,8 +15,8 @@ export interface RepositoryDiffModalProps {
 }
 
 export function RepositoryDiffModal({ open, taskSlug, onClose }: RepositoryDiffModalProps) {
-  const [scope, setScope] = useState<RepositoryDiffScope>("harness");
   const [report, setReport] = useState<RepositoryDiffReport | null>(null);
+  const [selectedCommitSha, setSelectedCommitSha] = useState<string | null>(null);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -27,15 +26,16 @@ export function RepositoryDiffModal({ open, taskSlug, onClose }: RepositoryDiffM
     [report, selectedPath]
   );
 
-  async function loadDiff(nextScope = scope) {
+  async function loadDiff(commitSha = selectedCommitSha) {
     setBusy(true);
     setError(null);
     try {
       if (!taskSlug) {
         throw new Error("Create or select a task before reviewing harness commits.");
       }
-      const nextReport = await apiClient.getRepositoryDiff(taskSlug, nextScope);
+      const nextReport = await apiClient.getRepositoryDiff(taskSlug, commitSha);
       setReport(nextReport);
+      setSelectedCommitSha(nextReport.commit?.sha ?? null);
       setSelectedPath((current) =>
         current && nextReport.files.some((file) => file.path === current)
           ? current
@@ -52,8 +52,9 @@ export function RepositoryDiffModal({ open, taskSlug, onClose }: RepositoryDiffM
     if (!open) {
       return;
     }
-    void loadDiff(scope);
-  }, [open, scope, taskSlug]);
+    setSelectedCommitSha(null);
+    void loadDiff(null);
+  }, [open, taskSlug]);
 
   if (!open) {
     return null;
@@ -61,35 +62,35 @@ export function RepositoryDiffModal({ open, taskSlug, onClose }: RepositoryDiffM
 
   return (
     <div className="modal-backdrop repository-diff-backdrop">
-      <section className="repository-diff-modal" role="dialog" aria-modal="true" aria-label="Latest Commit Diff">
+      <section className="repository-diff-modal" role="dialog" aria-modal="true" aria-label="Commit Diff">
         <header className="repository-diff-header">
           <div>
-            <h2>Latest Commit Diff</h2>
+            <h2>Commit Diff</h2>
             <p>
               {report
                 ? `${report.commit?.shortSha ?? "HEAD"} · ${report.summary.totalFiles} files · +${report.summary.additions} / -${report.summary.deletions}`
-                : "Review the active task worktree HEAD commit."}
+                : "Review a new commit on the active task worktree branch."}
             </p>
           </div>
           <div className="repository-diff-header-actions">
-            <div className="segmented-control" aria-label="Diff scope">
-              <button
-                type="button"
-                className={scope === "harness" ? "selected" : ""}
-                disabled={busy}
-                onClick={() => setScope("harness")}
+            <label className="repository-diff-commit-picker">
+              <span>Commit</span>
+              <select
+                value={selectedCommitSha ?? ""}
+                disabled={busy || !report?.commits.length}
+                onChange={(event) => {
+                  const nextCommitSha = event.target.value || null;
+                  setSelectedCommitSha(nextCommitSha);
+                  void loadDiff(nextCommitSha);
+                }}
               >
-                Harness
-              </button>
-              <button
-                type="button"
-                className={scope === "all" ? "selected" : ""}
-                disabled={busy}
-                onClick={() => setScope("all")}
-              >
-                All
-              </button>
-            </div>
+                {report?.commits.map((commit) => (
+                  <option key={commit.sha} value={commit.sha}>
+                    {commit.shortSha} · {commit.subject}
+                  </option>
+                ))}
+              </select>
+            </label>
             <button type="button" disabled={busy} onClick={() => void loadDiff()}>
               Refresh
             </button>
@@ -122,7 +123,9 @@ export function RepositoryDiffModal({ open, taskSlug, onClose }: RepositoryDiffM
                 </li>
               ))}
               {report && report.files.length === 0 ? (
-                <li className="repository-diff-empty">No files in this commit scope.</li>
+                <li className="repository-diff-empty">
+                  {report.commits.length === 0 ? "No new commits on this task branch." : "No files in this commit."}
+                </li>
               ) : null}
             </ol>
           </aside>
@@ -161,21 +164,18 @@ function RepositoryDiffSummary({ report, busy }: { report: RepositoryDiffReport 
   const summary = report?.summary;
   return (
     <div className="repository-diff-summary">
-      <strong>{busy ? "Loading" : report ? formatScope(report.scope) : "Not loaded"}</strong>
+      <strong>{busy ? "Loading" : report ? "Commit changes" : "Not loaded"}</strong>
       {summary ? (
         <>
           <span>{summary.harnessFiles} harness files</span>
           <span>{summary.productCodeFiles} product code files</span>
           <span>{summary.committedFiles} committed files</span>
+          <span>{report?.commits.length ?? 0} branch commits</span>
           <span>{report?.commit?.subject ?? "HEAD"}</span>
         </>
       ) : null}
     </div>
   );
-}
-
-function formatScope(scope: RepositoryDiffScope): string {
-  return scope === "all" ? "All repository changes" : "Harness changes";
 }
 
 function formatCategory(category: RepositoryDiffFileCategory): string {

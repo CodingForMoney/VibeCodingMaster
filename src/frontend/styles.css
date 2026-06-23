@@ -1899,10 +1899,18 @@ h2 {
   align-items: center;
 }
 
-.harness-studio-grid {
+.harness-studio-layout {
   display: grid;
-  grid-template-columns: minmax(320px, 0.9fr) minmax(520px, 1.4fr);
-  grid-auto-rows: minmax(0, auto);
+  grid-template-columns: minmax(340px, 0.85fr) minmax(640px, 1.55fr);
+  gap: 12px;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+
+.harness-studio-left {
+  display: grid;
+  align-content: start;
   gap: 10px;
   min-width: 0;
   min-height: 0;
@@ -1925,18 +1933,42 @@ h2 {
 
 .harness-studio-engineer {
   display: grid;
-  grid-row: span 3;
-  grid-template-rows: auto auto auto minmax(340px, 1fr);
+  grid-template-rows: auto auto minmax(0, 1fr);
   gap: 8px;
-  min-height: 620px;
+  min-height: 0;
 }
 
-.harness-studio-file-editor {
+.harness-studio-engineer-header {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+  justify-content: space-between;
+  min-width: 0;
+}
+
+.harness-studio-engineer-header p {
+  margin-bottom: 0;
+}
+
+.harness-file-editor-backdrop {
+  z-index: 30;
+  background: rgba(1, 4, 9, 0.78);
+}
+
+.harness-file-editor-modal {
   display: grid;
-  grid-row: span 3;
-  grid-template-rows: auto auto auto minmax(360px, 1fr);
-  gap: 8px;
-  min-height: 620px;
+  grid-template-rows: auto auto auto minmax(0, 1fr);
+  gap: 10px;
+  width: 95vw;
+  height: 92vh;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  background: #0d1117;
+  color: #d6deeb;
+  padding: 12px;
 }
 
 .harness-studio-file-editor-header {
@@ -2104,23 +2136,22 @@ h2 {
   justify-content: flex-end;
 }
 
-.segmented-control {
+.repository-diff-commit-picker {
   display: inline-flex;
-  overflow: hidden;
-  border: 1px solid #30363d;
-  border-radius: 6px;
-  background: #0b1017;
+  gap: 8px;
+  align-items: center;
+  min-width: 280px;
 }
 
-.segmented-control button {
-  border: 0;
-  border-radius: 0;
-  background: transparent;
+.repository-diff-commit-picker span {
+  color: #8b949e;
+  font-size: 12px;
+  font-weight: 700;
 }
 
-.segmented-control button.selected {
-  background: #10262b;
-  color: #d6fbff;
+.repository-diff-commit-picker select {
+  min-width: 260px;
+  max-width: 520px;
 }
 
 .repository-diff-warnings {

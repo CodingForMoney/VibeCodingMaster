@@ -66,7 +66,6 @@ export interface HarnessStatusReport {
   warnings: string[];
 }
 
-export type RepositoryDiffScope = "all" | "harness";
 export type RepositoryDiffFileStatus = "added" | "copied" | "deleted" | "modified" | "renamed" | "untracked" | "unknown";
 export type RepositoryDiffFileStage = "committed" | "staged" | "unstaged" | "staged_and_unstaged" | "untracked";
 export type RepositoryDiffFileCategory =
@@ -113,8 +112,8 @@ export interface RepositoryDiffCommit {
 export interface RepositoryDiffReport {
   version: 1;
   repoRoot: string;
-  scope: RepositoryDiffScope;
   generatedAt: string;
+  commits: RepositoryDiffCommit[];
   commit?: RepositoryDiffCommit;
   summary: RepositoryDiffSummary;
   files: RepositoryDiffFile[];

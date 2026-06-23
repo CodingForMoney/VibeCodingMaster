@@ -479,7 +479,7 @@ describe("repository diff helpers", () => {
 });
 
 describe("repository diff reports", () => {
-  it("filters product code out of harness scope and warns in all scope", async () => {
+  it("returns full commit diff with branch commit choices", async () => {
     const fs = createMemoryFs();
     const git = createDiffGitStub();
     const service = createHarnessService({
@@ -488,15 +488,13 @@ describe("repository diff reports", () => {
       now: () => "2026-06-23T00:00:00.000Z"
     } as never);
 
-    const harnessReport = await service.getRepositoryDiff("/repo", "harness");
-    expect(harnessReport.files.map((file) => file.path)).toEqual(["CLAUDE.md"]);
-    expect(harnessReport.commit?.shortSha).toBe("abc123456789");
-    expect(harnessReport.summary.productCodeFiles).toBe(0);
+    const report = await service.getRepositoryDiff("/repo", { baseRepoRoot: "/base" });
 
-    const allReport = await service.getRepositoryDiff("/repo", "all");
-    expect(allReport.files.map((file) => file.path)).toEqual(["CLAUDE.md", "src/server.ts"]);
-    expect(allReport.summary.productCodeFiles).toBe(1);
-    expect(allReport.warnings[0]).toContain("product code");
+    expect(report.commits.map((commit) => commit.sha)).toEqual(["abc1234567890"]);
+    expect(report.commit?.shortSha).toBe("abc123456789");
+    expect(report.files.map((file) => file.path)).toEqual(["CLAUDE.md", "src/server.ts"]);
+    expect(report.summary.productCodeFiles).toBe(1);
+    expect(report.warnings[0]).toContain("product code");
   });
 });
 
@@ -616,9 +614,22 @@ function createFakeRuntime(inputs: CreateTerminalSessionInput[], writes: string[
 
 function createDiffGitStub() {
   return {
-    async getCommitInfo() {
-      return {
+    async getHeadCommit(repoRoot: string) {
+      return repoRoot === "/base" ? "base1234567890" : "abc1234567890";
+    },
+    async getMergeBase() {
+      return "base1234567890";
+    },
+    async getCommitList() {
+      return [{
         sha: "abc1234567890",
+        subject: "chore(vcm-harness): update fixed harness",
+        committedAt: "2026-06-23T00:00:00.000Z"
+      }];
+    },
+    async getCommitInfo(_repoRoot: string, ref: string) {
+      return {
+        sha: ref,
         subject: "chore(vcm-harness): update fixed harness",
         committedAt: "2026-06-23T00:00:00.000Z"
       };

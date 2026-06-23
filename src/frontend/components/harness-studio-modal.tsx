@@ -71,11 +71,6 @@ export function HarnessStudioModal({
       setSelectedFile(null);
       setDraftContent("");
       setFileError(null);
-      return;
-    }
-
-    if (!selectedPath && files.length > 0) {
-      setSelectedPath(files[0].path);
     }
   }, [files, open, selectedPath]);
 
@@ -130,80 +125,116 @@ export function HarnessStudioModal({
     }
   }
 
+  function closeFileEditor() {
+    setSelectedPath(null);
+    setSelectedFile(null);
+    setDraftContent("");
+    setFileError(null);
+  }
+
   if (!open) {
     return null;
   }
 
   return (
-    <div className="modal-backdrop harness-studio-backdrop">
-      <section className="harness-studio-modal" role="dialog" aria-modal="true" aria-label="Harness Studio">
-        <header className="harness-studio-header">
-          <div>
-            <h2>Harness Studio</h2>
-            <p>VCM 0.4 harness visibility, role configuration, and Harness Engineer workspace.</p>
-            {!taskSlug ? <p className="muted">Create or select a task before editing harness files.</p> : null}
-          </div>
-          <div className="harness-studio-header-actions">
-            <button type="button" disabled={busy} onClick={onOpenRepositoryDiff}>Review Diff</button>
-            <button type="button" disabled={busy} onClick={onRefresh}>Refresh</button>
-            <button type="button" onClick={onClose}>Close</button>
-          </div>
-        </header>
-
-        <div className="harness-studio-grid">
-          <section className="harness-studio-section harness-studio-overview">
-            <h3>Overview</h3>
-            <div className="harness-studio-metrics">
-              <HarnessMetric label="Fixed install" value={status ? status.initialized ? status.needsApply ? "updates" : "current" : "new" : "unknown"} />
-              <HarnessMetric label="Revision" value={String(status?.harnessRevision ?? 0)} />
-              <HarnessMetric label="Managed files" value={String(files.length)} />
-              <HarnessMetric label="Pending updates" value={String(status?.plannedChanges.length ?? 0)} />
-              <HarnessMetric label="Bootstrap" value={bootstrapStatus?.status.replaceAll("_", " ") ?? "unknown"} />
-              <HarnessMetric label="Engineer" value={formatSessionStatus(engineerSession)} />
+    <>
+      <div className="modal-backdrop harness-studio-backdrop">
+        <section className="harness-studio-modal" role="dialog" aria-modal="true" aria-label="Harness Studio">
+          <header className="harness-studio-header">
+            <div>
+              <h2>Harness Studio</h2>
+              {!taskSlug ? <p className="muted">Create or select a task before editing harness files.</p> : null}
             </div>
-            {status?.warnings.length ? (
-              <ul className="warnings">
-                {status.warnings.map((warning) => <li key={warning}>{warning}</li>)}
-              </ul>
-            ) : null}
-          </section>
+            <div className="harness-studio-header-actions">
+              <button type="button" disabled={busy} onClick={onOpenRepositoryDiff}>Review Diff</button>
+              <button type="button" disabled={busy} onClick={onRefresh}>Refresh</button>
+              <button type="button" onClick={onClose}>Close</button>
+            </div>
+          </header>
 
-          <section className="harness-studio-section harness-studio-engineer">
-            <h3>Harness Engineer</h3>
-            <p className="muted">Project-scoped tool role. It proposes harness diffs and VCM issue drafts; it is not part of task round state.</p>
-            <SessionToolbar
-              role="harness-engineer"
-              session={engineerSession ?? undefined}
-              permissionMode={permissionMode}
-              model={model}
-              effort={effort}
-              busy={busy}
-              onPermissionModeChange={onPermissionModeChange}
-              onModelChange={onModelChange}
-              onEffortChange={onEffortChange}
-              onStart={onEngineerStart}
-              onResume={onEngineerResume}
-              onRestart={onEngineerRestart}
-              onStop={onEngineerStop}
-              onNotifyHarnessUpdated={onEngineerNotifyHarnessUpdated}
-            />
-            <div className="harness-engineer-terminal">
-              {engineerSession?.status === "running" ? (
-                <XtermView key={engineerSession.id} sessionId={engineerSession.id} active={open} />
-              ) : (
-                <div className="terminal-empty">
-                  <strong>harness-engineer</strong>
-                  <span>{engineerSession?.claudeSessionId ? "Resume this project Harness Engineer session." : "Start the project Harness Engineer session."}</span>
+          <div className="harness-studio-layout">
+            <aside className="harness-studio-left">
+              <section className="harness-studio-section harness-studio-overview">
+                <h3>Overview</h3>
+                <div className="harness-studio-metrics">
+                  <HarnessMetric label="Fixed install" value={status ? status.initialized ? status.needsApply ? "updates" : "current" : "new" : "unknown"} />
+                  <HarnessMetric label="Revision" value={String(status?.harnessRevision ?? 0)} />
+                  <HarnessMetric label="Managed files" value={String(files.length)} />
+                  <HarnessMetric label="Pending updates" value={String(status?.plannedChanges.length ?? 0)} />
+                  <HarnessMetric label="Bootstrap" value={bootstrapStatus?.status.replaceAll("_", " ") ?? "unknown"} />
+                  <HarnessMetric label="Engineer" value={formatSessionStatus(engineerSession)} />
                 </div>
-              )}
-            </div>
-          </section>
+                {status?.warnings.length ? (
+                  <ul className="warnings">
+                    {status.warnings.map((warning) => <li key={warning}>{warning}</li>)}
+                  </ul>
+                ) : null}
+              </section>
 
-          <section className="harness-studio-section harness-studio-file-editor">
-            <div className="harness-studio-file-editor-header">
+              <HarnessFileSection title="Agents" files={agents} selectedPath={selectedPath} onSelect={setSelectedPath} />
+              <HarnessFileSection title="Skills" files={skills} selectedPath={selectedPath} onSelect={setSelectedPath} />
+              <HarnessFileSection title="Root Context" files={rootContext} selectedPath={selectedPath} onSelect={setSelectedPath} />
+              <HarnessFileSection title="Tools" files={tools} selectedPath={selectedPath} onSelect={setSelectedPath} />
+
+              <section className="harness-studio-section">
+                <h3>Project Docs</h3>
+                <ul className="harness-studio-doc-list">
+                  {bootstrapStatus?.checks.map((check) => (
+                    <li key={check.key}>
+                      <span>{check.path ?? check.label}</span>
+                      <StatusBadge status={check.status} />
+                    </li>
+                  )) ?? <li><span>No bootstrap status loaded.</span></li>}
+                </ul>
+              </section>
+            </aside>
+
+            <section className="harness-studio-section harness-studio-engineer">
+              <div className="harness-studio-engineer-header">
+                <div>
+                  <h3>Harness Engineer</h3>
+                  <p className="muted">{formatSessionStatus(engineerSession)}</p>
+                </div>
+                <StatusBadge status={engineerSession?.status ?? "unknown"} />
+              </div>
+              <SessionToolbar
+                role="harness-engineer"
+                session={engineerSession ?? undefined}
+                permissionMode={permissionMode}
+                model={model}
+                effort={effort}
+                busy={busy}
+                onPermissionModeChange={onPermissionModeChange}
+                onModelChange={onModelChange}
+                onEffortChange={onEffortChange}
+                onStart={onEngineerStart}
+                onResume={onEngineerResume}
+                onRestart={onEngineerRestart}
+                onStop={onEngineerStop}
+                onNotifyHarnessUpdated={onEngineerNotifyHarnessUpdated}
+              />
+              <div className="harness-engineer-terminal">
+                {engineerSession?.status === "running" ? (
+                  <XtermView key={engineerSession.id} sessionId={engineerSession.id} active={open} />
+                ) : (
+                  <div className="terminal-empty">
+                    <strong>harness-engineer</strong>
+                    <span>{engineerSession?.claudeSessionId ? "Resume this project Harness Engineer session." : "Start this project Harness Engineer session."}</span>
+                  </div>
+                )}
+              </div>
+            </section>
+          </div>
+        </section>
+      </div>
+
+      {selectedPath ? (
+        <div className="modal-backdrop harness-file-editor-backdrop">
+          <section className="harness-file-editor-modal" role="dialog" aria-modal="true" aria-label="Harness File Editor">
+            <header className="harness-studio-file-editor-header">
               <div>
                 <h3>{selectedFile?.title ?? "Harness File"}</h3>
-                <p className="muted">{selectedFile?.path ?? "Select a file to inspect."}</p>
+                <p className="muted">{selectedFile?.path ?? selectedPath}</p>
               </div>
               <div className="harness-studio-file-editor-actions">
                 {selectedFile ? <StatusBadge status={selectedFile.editable ? "ok" : "unknown"} /> : null}
@@ -214,8 +245,9 @@ export function HarnessStudioModal({
                 >
                   Save
                 </button>
+                <button type="button" onClick={closeFileEditor}>Close</button>
               </div>
-            </div>
+            </header>
             {selectedFile?.readonlyReason ? (
               <p className="muted">{selectedFile.readonlyReason}</p>
             ) : null}
@@ -228,36 +260,9 @@ export function HarnessStudioModal({
               onChange={(event) => setDraftContent(event.target.value)}
             />
           </section>
-
-          <HarnessFileSection title="Agents" files={agents} selectedPath={selectedPath} onSelect={setSelectedPath} />
-          <HarnessFileSection title="Skills" files={skills} selectedPath={selectedPath} onSelect={setSelectedPath} />
-          <HarnessFileSection title="Root Context" files={rootContext} selectedPath={selectedPath} onSelect={setSelectedPath} />
-          <HarnessFileSection title="Tools" files={tools} selectedPath={selectedPath} onSelect={setSelectedPath} />
-
-          <section className="harness-studio-section">
-            <h3>Project Docs</h3>
-            <ul className="harness-studio-doc-list">
-              {bootstrapStatus?.checks.map((check) => (
-                <li key={check.key}>
-                  <span>{check.path ?? check.label}</span>
-                  <StatusBadge status={check.status} />
-                </li>
-              )) ?? <li><span>No bootstrap status loaded.</span></li>}
-            </ul>
-          </section>
-
-          <section className="harness-studio-section">
-            <h3>Proposed Changes</h3>
-            <p className="muted">Harness Engineer changes must be reviewed as diffs before apply. The first 0.4 implementation exposes the workspace; pending change-set apply will build on this surface.</p>
-          </section>
-
-          <section className="harness-studio-section">
-            <h3>VCM Feedback</h3>
-            <p className="muted">VCM product or fixed-template problems should become issue drafts for CodingForMoney/VibeCodingMaster, submitted only after user confirmation.</p>
-          </section>
         </div>
-      </section>
-    </div>
+      ) : null}
+    </>
   );
 }
 

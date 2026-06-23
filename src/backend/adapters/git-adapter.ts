@@ -20,6 +20,8 @@ export interface GitAdapter {
   getStatusPorcelainV1(repoRoot: string): Promise<string>;
   getCommitInfo(repoRoot: string, ref?: string): Promise<GitCommitInfo>;
   getCommitDiff(repoRoot: string, ref?: string): Promise<string>;
+  getCommitList(repoRoot: string, range: string): Promise<GitCommitInfo[]>;
+  getMergeBase(repoRoot: string, leftRef: string, rightRef: string): Promise<string>;
   isIgnored(repoRoot: string, repoRelativePath: string): Promise<boolean>;
   branchExists(repoRoot: string, branch: string): Promise<boolean>;
   addPaths(repoRoot: string, paths: string[]): Promise<void>;
@@ -194,6 +196,44 @@ export function createGitAdapter(runner: CommandRunner): GitAdapter {
       }
 
       return result.stdout;
+    },
+    async getCommitList(repoRoot, range) {
+      const result = await runGit(runner, repoRoot, ["log", "--format=%H%x00%s%x00%cI%x1e", range]);
+      if (result.exitCode !== 0) {
+        throw new VcmError({
+          code: "GIT_ERROR",
+          message: "Unable to read Git commit list.",
+          statusCode: 400,
+          hint: result.stderr
+        });
+      }
+
+      return result.stdout
+        .split("\x1e")
+        .map((record) => record.trim())
+        .filter(Boolean)
+        .map((record) => {
+          const [sha = "", subject = "", committedAt = ""] = record.split("\0");
+          return {
+            sha: sha.trim(),
+            subject: subject.trim(),
+            committedAt: committedAt.trim() || undefined
+          };
+        })
+        .filter((commit) => commit.sha.length > 0);
+    },
+    async getMergeBase(repoRoot, leftRef, rightRef) {
+      const result = await runGit(runner, repoRoot, ["merge-base", leftRef, rightRef]);
+      if (result.exitCode !== 0) {
+        throw new VcmError({
+          code: "GIT_ERROR",
+          message: "Unable to find Git merge base.",
+          statusCode: 400,
+          hint: result.stderr
+        });
+      }
+
+      return result.stdout.trim();
     },
     async isIgnored(repoRoot, repoRelativePath) {
       const result = await runGit(runner, repoRoot, ["check-ignore", "-q", "--", repoRelativePath]);
