@@ -141,7 +141,9 @@ export function RepositoryDiffModal({ open, taskSlug, onClose }: RepositoryDiffM
                 </div>
                 {selectedFile.binary ? <p className="muted">Binary or non-regular file. Text diff is not available.</p> : null}
                 {selectedFile.truncated ? <p className="muted">Diff was truncated for display.</p> : null}
-                <pre className="repository-diff-code">{selectedFile.diff}</pre>
+                <pre className="repository-diff-code" aria-label={`${selectedFile.path} diff`}>
+                  {renderDiffLines(selectedFile.diff)}
+                </pre>
               </>
             ) : (
               <div className="repository-diff-placeholder">
@@ -197,4 +199,40 @@ function formatStage(stage: RepositoryDiffFileStage): string {
 
 function formatStatus(status: RepositoryDiffFileStatus): string {
   return status.replaceAll("_", " ");
+}
+
+function renderDiffLines(diff: string) {
+  return diff
+    .split("\n")
+    .filter((line) => !isHiddenDiffMetaLine(line))
+    .map((line, index) => (
+      <span key={`${index}:${line}`} className={`repository-diff-line ${getDiffLineClassName(line)}`}>
+        {line || " "}
+      </span>
+    ));
+}
+
+function getDiffLineClassName(line: string): string {
+  if (line.startsWith("+") && !line.startsWith("+++")) {
+    return "repository-diff-line-added";
+  }
+  if (line.startsWith("-") && !line.startsWith("---")) {
+    return "repository-diff-line-deleted";
+  }
+  if (line.startsWith("@@")) {
+    return "repository-diff-line-hunk";
+  }
+  return "repository-diff-line-context";
+}
+
+function isHiddenDiffMetaLine(line: string): boolean {
+  return line.startsWith("diff --git") ||
+    line.startsWith("index ") ||
+    line.startsWith("new file mode ") ||
+    line.startsWith("deleted file mode ") ||
+    line.startsWith("similarity index ") ||
+    line.startsWith("rename from ") ||
+    line.startsWith("rename to ") ||
+    line.startsWith("--- ") ||
+    line.startsWith("+++ ");
 }

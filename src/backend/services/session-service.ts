@@ -370,6 +370,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     input: StartRoleSessionRequest,
     launchMode: LaunchMode
   ): Promise<RoleSessionRecord> {
+    const taskContext = await resolveProjectToolTaskContext(repoRoot, input, "Translator");
     const live = toRoleSessionRecordView(
       getRegisteredProjectTranslatorSession(deps.registry, deps.runtime),
       deps.runtime
@@ -397,9 +398,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     }
 
     await deps.fs.ensureDir(resolveRepoPath(repoRoot, TRANSLATION_DIR));
-    const transcriptPath = launchMode === "resume" && persisted?.transcriptPath
-      ? persisted.transcriptPath
-      : claudeTranscriptPath(repoRoot, claudeSessionId);
+    const transcriptPath = claudeTranscriptPath(taskContext.taskRepoRoot, claudeSessionId);
     const startCommand = {
       ...deps.claude.buildRoleStartCommand(
         TRANSLATOR_ROLE,
@@ -410,7 +409,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
         model,
         effort
       ),
-      cwd: repoRoot
+      cwd: taskContext.taskRepoRoot
     };
     const runtimeSession = await deps.runtime.createSession({
       taskSlug: PROJECT_TRANSLATOR_SCOPE,
@@ -420,8 +419,8 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       cwd: startCommand.cwd,
       env: {
         VCM_API_URL: deps.apiUrl,
-        VCM_TASK_REPO_ROOT: repoRoot,
-        VCM_TASK_SLUG: PROJECT_TRANSLATOR_SCOPE,
+        VCM_TASK_REPO_ROOT: taskContext.taskRepoRoot,
+        VCM_TASK_SLUG: taskContext.taskSlug,
         VCM_ROLE: TRANSLATOR_ROLE,
         VCM_SESSION_ID: claudeSessionId
       },
@@ -462,6 +461,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     input: StartRoleSessionRequest,
     launchMode: LaunchMode
   ): Promise<RoleSessionRecord> {
+    const taskContext = await resolveProjectToolTaskContext(repoRoot, input, "Harness Engineer");
     const live = toRoleSessionRecordView(
       getRegisteredProjectHarnessEngineerSession(deps.registry, deps.runtime),
       deps.runtime
@@ -489,9 +489,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     }
 
     await deps.fs.ensureDir(resolveRepoPath(repoRoot, HARNESS_ENGINEER_DIR));
-    const transcriptPath = launchMode === "resume" && persisted?.transcriptPath
-      ? persisted.transcriptPath
-      : claudeTranscriptPath(repoRoot, claudeSessionId);
+    const transcriptPath = claudeTranscriptPath(taskContext.taskRepoRoot, claudeSessionId);
     const startCommand = {
       ...deps.claude.buildRoleStartCommand(
         HARNESS_ENGINEER_ROLE,
@@ -502,7 +500,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
         model,
         effort
       ),
-      cwd: repoRoot
+      cwd: taskContext.taskRepoRoot
     };
     const runtimeSession = await deps.runtime.createSession({
       taskSlug: PROJECT_HARNESS_ENGINEER_SCOPE,
@@ -512,8 +510,8 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       cwd: startCommand.cwd,
       env: {
         VCM_API_URL: deps.apiUrl,
-        VCM_TASK_REPO_ROOT: repoRoot,
-        VCM_TASK_SLUG: PROJECT_HARNESS_ENGINEER_SCOPE,
+        VCM_TASK_REPO_ROOT: taskContext.taskRepoRoot,
+        VCM_TASK_SLUG: taskContext.taskSlug,
         VCM_ROLE: HARNESS_ENGINEER_ROLE,
         VCM_SESSION_ID: claudeSessionId
       },
@@ -547,6 +545,27 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     deps.registry.upsert(record);
     await persistHarnessEngineerSession(deps.fs, repoRoot, record);
     return withHarnessRevisionView(repoRoot, record);
+  }
+
+  async function resolveProjectToolTaskContext(
+    repoRoot: string,
+    input: StartRoleSessionRequest,
+    roleLabel: string
+  ): Promise<{ taskSlug: string; taskRepoRoot: string }> {
+    const taskSlug = input.taskSlug?.trim();
+    if (!taskSlug) {
+      throw new VcmError({
+        code: "PROJECT_TOOL_TASK_REQUIRED",
+        message: `${roleLabel} requires an active task worktree.`,
+        statusCode: 409,
+        hint: "Create or select a task, then start or resume this project tool session."
+      });
+    }
+    const task = await deps.taskService.loadTask(repoRoot, taskSlug);
+    return {
+      taskSlug: task.taskSlug,
+      taskRepoRoot: getTaskRuntimeRepoRoot(task)
+    };
   }
 
   async function notifyHarnessUpdatedForSession(
@@ -734,6 +753,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       }
       if (existing?.claudeSessionId) {
         return this.resumeProjectTranslatorSession(repoRoot, {
+          taskSlug: input.taskSlug,
           permissionMode: input.permissionMode ?? existing.permissionMode,
           model: input.model ?? existing.model,
           effort: input.effort ?? existing.effort,
@@ -835,6 +855,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       }
       if (existing?.claudeSessionId) {
         return this.resumeProjectHarnessEngineerSession(repoRoot, {
+          taskSlug: input.taskSlug,
           permissionMode: input.permissionMode ?? existing.permissionMode,
           model: input.model ?? existing.model,
           effort: input.effort ?? existing.effort,
@@ -886,12 +907,10 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
           .then((session) => scopeProjectRoleSession(session, taskSlug)!);
       }
       if (role === TRANSLATOR_ROLE) {
-        void taskSlug;
-        return this.startProjectTranslatorSession(repoRoot, input);
+        return this.startProjectTranslatorSession(repoRoot, { ...input, taskSlug });
       }
       if (role === HARNESS_ENGINEER_ROLE) {
-        void taskSlug;
-        return this.startProjectHarnessEngineerSession(repoRoot, input);
+        return this.startProjectHarnessEngineerSession(repoRoot, { ...input, taskSlug });
       }
       return launchRoleSession(repoRoot, taskSlug, role, input, "fresh");
     },
@@ -901,12 +920,10 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
           .then((session) => scopeProjectRoleSession(session, taskSlug)!);
       }
       if (role === TRANSLATOR_ROLE) {
-        void taskSlug;
-        return this.resumeProjectTranslatorSession(repoRoot, input);
+        return this.resumeProjectTranslatorSession(repoRoot, { ...input, taskSlug });
       }
       if (role === HARNESS_ENGINEER_ROLE) {
-        void taskSlug;
-        return this.resumeProjectHarnessEngineerSession(repoRoot, input);
+        return this.resumeProjectHarnessEngineerSession(repoRoot, { ...input, taskSlug });
       }
       return launchRoleSession(repoRoot, taskSlug, role, input, "resume");
     },
@@ -959,12 +976,10 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
         return scopeProjectRoleSession(await launchProjectGateReviewerSession(repoRoot, input, "fresh", taskSlug), taskSlug)!;
       }
       if (role === TRANSLATOR_ROLE) {
-        void taskSlug;
-        return this.restartProjectTranslatorSession(repoRoot, input);
+        return this.restartProjectTranslatorSession(repoRoot, { ...input, taskSlug });
       }
       if (role === HARNESS_ENGINEER_ROLE) {
-        void taskSlug;
-        return this.restartProjectHarnessEngineerSession(repoRoot, input);
+        return this.restartProjectHarnessEngineerSession(repoRoot, { ...input, taskSlug });
       }
       const existing = await this.getRoleSession(repoRoot, taskSlug, role);
       if (!existing) {

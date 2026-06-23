@@ -486,16 +486,16 @@ export function App() {
   }, [project?.repoRoot, activeTask?.taskSlug]);
 
   useEffect(() => {
-    if (!project || !translationEnabled) {
+    if (!project || !translationEnabled || !activeTask?.taskSlug) {
       return;
     }
 
-    const ensureKey = project.repoRoot;
+    const ensureKey = `${project.repoRoot}:${activeTask.taskSlug}`;
     if (translatorEnsureKeyRef.current === ensureKey && translatorSession?.status === "running") {
       return;
     }
     translatorEnsureKeyRef.current = ensureKey;
-    void apiClient.ensureTranslatorSession()
+    void apiClient.ensureTranslatorSession({ taskSlug: activeTask.taskSlug })
       .then((session) => {
         setTranslatorSession(session);
         syncTranslatorLaunchOptions(session);
@@ -504,7 +504,7 @@ export function App() {
         translatorEnsureKeyRef.current = "";
         setError(caught.message);
       });
-  }, [project?.repoRoot, translationEnabled]);
+  }, [project?.repoRoot, activeTask?.taskSlug, translationEnabled]);
 
   useEffect(() => {
     if (!activeTask?.taskSlug) {
@@ -753,10 +753,11 @@ export function App() {
           onOpenTranslatorSession={() => setTranslatorSessionOpen(true)}
           onCreateTranslationBootstrap={() => {
             void withBusy(async () => {
-              if (!project) {
-                throw new Error("Connect a repository before running Translation Bootstrap.");
+              if (!activeTask) {
+                throw new Error("Create or select a task before running Translation Bootstrap.");
               }
               await apiClient.createTranslationBootstrap({
+                taskSlug: activeTask.taskSlug,
                 targetLanguage: translationTargetLanguage
               });
               await refreshTranslatorSession();
@@ -764,10 +765,11 @@ export function App() {
           }}
           onUpdateTranslationMemory={() => {
             void withBusy(async () => {
-              if (!project) {
-                throw new Error("Connect a repository before updating translation memory.");
+              if (!activeTask) {
+                throw new Error("Create or select a task before updating translation memory.");
               }
               await apiClient.createTranslationMemoryUpdate({
+                taskSlug: activeTask.taskSlug,
                 targetLanguage: translationTargetLanguage
               });
               await refreshTranslatorSession();
@@ -969,6 +971,7 @@ export function App() {
       )}
       <FileTranslationModalHost
         open={fileTranslationOpen}
+        taskSlug={activeTask?.taskSlug ?? null}
         targetLanguage={translationTargetLanguage}
         onClose={() => setFileTranslationOpen(false)}
       />
@@ -1000,7 +1003,11 @@ export function App() {
         onEffortChange={setHarnessEngineerEffort}
         onEngineerStart={() => {
           void withBusy(async () => {
+            if (!activeTask) {
+              throw new Error("Create or select a task before starting Harness Engineer.");
+            }
             const session = await apiClient.startHarnessEngineerSession({
+              taskSlug: activeTask.taskSlug,
               cols: 120,
               rows: 32,
               permissionMode: harnessEngineerPermissionMode,
@@ -1013,7 +1020,11 @@ export function App() {
         }}
         onEngineerResume={() => {
           void withBusy(async () => {
+            if (!activeTask) {
+              throw new Error("Create or select a task before resuming Harness Engineer.");
+            }
             const session = await apiClient.resumeHarnessEngineerSession({
+              taskSlug: activeTask.taskSlug,
               cols: 120,
               rows: 32,
               permissionMode: harnessEngineerPermissionMode,
@@ -1026,7 +1037,11 @@ export function App() {
         }}
         onEngineerRestart={() => {
           void withBusy(async () => {
+            if (!activeTask) {
+              throw new Error("Create or select a task before restarting Harness Engineer.");
+            }
             const session = await apiClient.restartHarnessEngineerSession({
+              taskSlug: activeTask.taskSlug,
               cols: 120,
               rows: 32,
               permissionMode: harnessEngineerPermissionMode,
@@ -1070,7 +1085,11 @@ export function App() {
         onEffortChange={setTranslatorEffort}
         onStart={() => {
           void withBusy(async () => {
+            if (!activeTask) {
+              throw new Error("Create or select a task before starting Translator.");
+            }
             const session = await apiClient.startTranslatorSession({
+              taskSlug: activeTask.taskSlug,
               cols: 100,
               rows: 28,
               permissionMode: translatorPermissionMode,
@@ -1083,7 +1102,11 @@ export function App() {
         }}
         onResume={() => {
           void withBusy(async () => {
+            if (!activeTask) {
+              throw new Error("Create or select a task before resuming Translator.");
+            }
             const session = await apiClient.resumeTranslatorSession({
+              taskSlug: activeTask.taskSlug,
               cols: 100,
               rows: 28,
               permissionMode: translatorPermissionMode,
@@ -1096,7 +1119,11 @@ export function App() {
         }}
         onRestart={() => {
           void withBusy(async () => {
+            if (!activeTask) {
+              throw new Error("Create or select a task before restarting Translator.");
+            }
             const session = await apiClient.restartTranslatorSession({
+              taskSlug: activeTask.taskSlug,
               cols: 100,
               rows: 28,
               permissionMode: translatorPermissionMode,

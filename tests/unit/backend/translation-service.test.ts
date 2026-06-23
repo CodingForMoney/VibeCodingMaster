@@ -528,12 +528,12 @@ describe("translation-service", () => {
     expect(translatorCalls).toEqual([
       expect.objectContaining({
         repoRoot: "/repo",
+        taskSlug: "demo-task",
         direction: "user-input-to-english",
         sourceText: "请检查失败的测试。",
         targetLanguage: "en"
       })
     ]);
-    expect(translatorCalls[0]).not.toHaveProperty("taskSlug");
     expect(translatorCalls[0]).not.toHaveProperty("role");
   });
 
@@ -674,9 +674,9 @@ describe("translation-service", () => {
 
     expect(translatorCalls).toHaveLength(1);
     expect(translatorCalls[0]).toMatchObject({
+      taskSlug: "demo-task",
       sourceText: "PM final reply."
     });
-    expect(translatorCalls[0]).not.toHaveProperty("taskSlug");
     expect(translatorCalls[0]).not.toHaveProperty("role");
     expect(coderMessages).toContainEqual(expect.objectContaining({
       type: "translation-entry",

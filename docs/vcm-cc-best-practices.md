@@ -405,10 +405,11 @@ VCM should run bootstrap through the project-scoped `harness-engineer` session,
 not through a separate temporary terminal or invisible background task:
 
 - run the deterministic fixed installer first
-- start or resume the `harness-engineer` role in the connected repository root
-- send a prompt that explicitly requires using `vcm-harness-bootstrap`
+- start or resume the project-scoped `harness-engineer` role with execution cwd set to the active task worktree
+- send a prompt that explicitly requires using `vcm-harness-bootstrap` and creating the bootstrap commit
 - persist the bootstrap run marker under `.ai/vcm/bootstrap/session.json`
 - mark the bootstrap run complete when the `harness-engineer` Stop hook arrives
+- do not create the bootstrap commit in VCM; Harness Engineer owns that commit
 
 The UI should expose both stages: fixed install status and bootstrap completion
 status. A failed or disconnected Harness Engineer session should be restartable

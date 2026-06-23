@@ -173,6 +173,7 @@ export interface TranslationQueueItem {
   type: TranslationQueueItemType;
   status: TranslationQueueItemStatus;
   targetLanguage: string;
+  taskSlug: string;
   jobId?: string;
   requestPath: string;
   expectedResultPath?: string;
@@ -309,6 +310,7 @@ export interface ConversationTranslationJob {
 }
 
 export interface CreateConversationTranslationRequest {
+  taskSlug: string;
   direction: TranslationDirection;
   sourceText: string;
   sourceLanguage: string;

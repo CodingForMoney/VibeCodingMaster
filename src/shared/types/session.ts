@@ -143,6 +143,7 @@ export interface RoleSessionPointer {
 }
 
 export interface StartRoleSessionRequest {
+  taskSlug?: string;
   cols?: number;
   rows?: number;
   permissionMode?: ClaudePermissionMode;

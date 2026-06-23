@@ -1218,6 +1218,7 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
     }
 
     return deps.translationWorkerService.createConversationJob(input.repoRoot, {
+      taskSlug: input.taskSlug,
       direction: input.direction,
       sourceText: input.text,
       sourceLanguage: input.sourceLanguage,

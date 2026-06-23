@@ -198,15 +198,16 @@ describe("createSessionService", () => {
     });
 
     const started = await firstService.startProjectTranslatorSession("/repo", {
+      taskSlug: "demo-task",
       model: "default",
       effort: "xhigh"
     });
 
     expect(started.taskSlug).toBe("__project__");
-    expect(firstRuntimeInputs[0]?.cwd).toBe("/repo");
+    expect(firstRuntimeInputs[0]?.cwd).toBe(TASK_WORKTREE);
     expect(firstRuntimeInputs[0]?.env).toMatchObject({
-      VCM_TASK_REPO_ROOT: "/repo",
-      VCM_TASK_SLUG: "__project__",
+      VCM_TASK_REPO_ROOT: TASK_WORKTREE,
+      VCM_TASK_SLUG: "demo-task",
       VCM_ROLE: "translator"
     });
     expect(firstRuntimeInputs[0]?.logPath).toBeUndefined();
@@ -217,8 +218,8 @@ describe("createSessionService", () => {
     const hooked = await firstService.recordProjectTranslatorHookEvent("/repo", {
       eventName: "UserPromptSubmit",
       sessionId: "translator-real-session",
-      transcriptPath: "/repo/.claude/projects/-repo/translator-real-session.jsonl",
-      cwd: "/repo"
+      transcriptPath: `${TASK_WORKTREE}/.claude/projects/translator-real-session.jsonl`,
+      cwd: TASK_WORKTREE
     });
     expect(hooked?.claudeSessionId).toBe("translator-real-session");
 
@@ -231,7 +232,9 @@ describe("createSessionService", () => {
       status: "resumable",
       claudeSessionId: "translator-real-session"
     });
-    const resumed = await secondService.resumeProjectTranslatorSession("/repo");
+    const resumed = await secondService.resumeProjectTranslatorSession("/repo", {
+      taskSlug: "demo-task"
+    });
     expect(resumed.claudeSessionId).toBe("translator-real-session");
     expect(secondRuntimeInputs[0]?.args).toEqual([
       "--agent",
@@ -251,12 +254,13 @@ describe("createSessionService", () => {
     const service = createTestSessionService(fs, runtimeInputs);
 
     const started = await service.startProjectTranslatorSession("/repo", {
+      taskSlug: "demo-task",
       model: "default",
       effort: "medium"
     });
 
     expect(started.command).toContain("--agent translator");
-    expect(runtimeInputs[0]?.cwd).toBe("/repo");
+    expect(runtimeInputs[0]?.cwd).toBe(TASK_WORKTREE);
     expect(runtimeInputs[0]?.args).toEqual([
       "--agent",
       "translator",
@@ -273,11 +277,14 @@ describe("createSessionService", () => {
   it("resumes Translator with selected permission, model, and effort from ensure", async () => {
     const fs = createMemoryFs();
     const firstService = createTestSessionService(fs, []);
-    const started = await firstService.startProjectTranslatorSession("/repo");
+    const started = await firstService.startProjectTranslatorSession("/repo", {
+      taskSlug: "demo-task"
+    });
 
     const runtimeInputs: CreateTerminalSessionInput[] = [];
     const secondService = createTestSessionService(fs, runtimeInputs);
     const resumed = await secondService.ensureProjectTranslatorSession("/repo", {
+      taskSlug: "demo-task",
       permissionMode: "bypassPermissions",
       model: "claude-opus-4-8[1m]",
       effort: "high"
@@ -307,6 +314,7 @@ describe("createSessionService", () => {
     const service = createTestSessionService(fs, runtimeInputs);
 
     const started = await service.startProjectHarnessEngineerSession("/repo", {
+      taskSlug: "demo-task",
       permissionMode: "bypassPermissions",
       model: "claude-opus-4-8[1m]",
       effort: "medium"
@@ -315,10 +323,10 @@ describe("createSessionService", () => {
     expect(started.role).toBe("harness-engineer");
     expect(started.taskSlug).toBe("__project_harness_engineer__");
     expect(started.command).toContain("--agent harness-engineer");
-    expect(runtimeInputs[0]?.cwd).toBe("/repo");
+    expect(runtimeInputs[0]?.cwd).toBe(TASK_WORKTREE);
     expect(runtimeInputs[0]?.env).toMatchObject({
-      VCM_TASK_REPO_ROOT: "/repo",
-      VCM_TASK_SLUG: "__project_harness_engineer__",
+      VCM_TASK_REPO_ROOT: TASK_WORKTREE,
+      VCM_TASK_SLUG: "demo-task",
       VCM_ROLE: "harness-engineer"
     });
     expect(runtimeInputs[0]?.args).toEqual([

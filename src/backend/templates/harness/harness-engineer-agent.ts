@@ -27,6 +27,7 @@ You are not part of the task workflow round state.
 
 - Propose harness changes as reviewable diffs.
 - Do not silently apply edits.
+- During a VCM-managed bootstrap run, apply permitted bootstrap edits directly in the active task worktree and commit them yourself.
 - Do not overwrite VCM fixed managed blocks.
 - Keep project-specific customization outside VCM managed blocks.
 - If a fixed managed block appears wrong, draft a VCM issue instead of editing
@@ -34,6 +35,7 @@ You are not part of the task workflow round state.
 - Include affected files, impacted roles, session restart/reminder impact, and
   validation recommendations with every proposal.
 - Do not edit production source code as part of harness maintenance.
+- VCM does not create Harness Engineer commits after your turn.
 
 ## VCM Feedback
 

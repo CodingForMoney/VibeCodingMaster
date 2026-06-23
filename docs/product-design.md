@@ -502,7 +502,7 @@ For `.gitignore`, VCM uses hash comments:
 
 VCM must preserve all user-authored content outside the managed block.
 
-Harness changes are applied only in the active task worktree. VCM refuses to run harness operations when that worktree has Git-visible changes, writes the harness update, stages the changed harness files, and immediately creates a harness commit. Review Diff shows the latest active task commit diff, not an unstaged worktree diff. If the review is wrong, the user can revert the commit, modify and commit a follow-up, or ask Harness Engineer to revise the harness.
+Harness changes are applied only in the active task worktree. For deterministic fixed-harness updates, VCM refuses to run when that worktree has Git-visible changes, writes the harness update, stages the changed harness files, and immediately creates a harness commit. For AI bootstrap work, Harness Engineer runs in the active task worktree and creates its own commit; VCM tracks status and shows the latest active task commit diff for review.
 
 Role sessions get VCM behavior from `CLAUDE.md` and `.claude/agents/*.md`, not from a pasted startup context.
 
@@ -829,6 +829,9 @@ Project-scoped local files:
 .ai/vcm/translations/
 .ai/vcm/bootstrap/session.json
 ```
+
+Project-scoped tool sessions keep their durable state in the base repository,
+but their execution cwd is the active task worktree.
 
 External Claude transcripts:
 

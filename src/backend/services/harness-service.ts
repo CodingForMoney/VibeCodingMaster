@@ -499,11 +499,6 @@ export function createHarnessService(deps: HarnessServiceDeps): HarnessService {
       const timestamp = now();
       if (input.eventName === "Stop" && state.targetRepoRoot) {
         await bumpHarnessRevision(deps.fs, state.targetRepoRoot, timestamp);
-        await commitHarnessVisibleChanges(
-          deps.git,
-          state.targetRepoRoot,
-          "chore(vcm-harness): bootstrap project context"
-        );
       }
       await persistHarnessBootstrapRunState(deps.fs, repoRoot, {
         ...state,
@@ -1803,15 +1798,18 @@ Required work:
 - Fill target docs/ARCHITECTURE.md with project-level module overview, responsibilities, relationships, dependency direction, project-wide constraints, and links to module-level architecture docs.
 - Create or update target module-level ARCHITECTURE.md files for clear module boundaries listed by module-index.json.
 - Fill target docs/TESTING.md with project-native validation levels, commands, validation selection rules, final-validation cleanup, test layout, integration/E2E case lists, generated-context freshness checks, and known testing gaps.
+- Review git status and git diff in the target task worktree.
+- Stage only allowed bootstrap harness changes and create a commit in the target task worktree.
 
 Boundaries:
 - Do not write to the base repository root.
 - Do not edit product source, product tests, package manifests, lockfiles, deployment config, secrets, or VCM managed blocks.
 - Preserve user-authored content.
 - Do not create new validation wrapper tools.
+- VCM will not create the bootstrap commit for you.
 
 Final response:
-Summarize files reviewed, files updated, generated artifacts, verified claims, inferred claims, unknowns, confirmation-needed items, and suggested validation commands.`;
+Summarize files reviewed, files updated, generated artifacts, commit hash, final git status, verified claims, inferred claims, unknowns, confirmation-needed items, and suggested validation commands.`;
 }
 
 export function createScriptFixedHarnessInstaller(

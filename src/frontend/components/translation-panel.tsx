@@ -346,10 +346,12 @@ function getTranslationTargetLanguageLabel(targetLanguage: TranslationTargetLang
 
 export function FileTranslationModalHost({
   open,
+  taskSlug,
   targetLanguage,
   onClose
 }: {
   open: boolean;
+  taskSlug: string | null;
   targetLanguage: TranslationTargetLanguage;
   onClose(): void;
 }) {
@@ -458,7 +460,11 @@ export function FileTranslationModalHost({
     setBusy(true);
     setError("");
     try {
+      if (!taskSlug) {
+        throw new Error("Create or select a task before translating files.");
+      }
       const job = await apiClient.createFileTranslation({
+        taskSlug,
         sourcePath: normalizedSourcePath,
         targetLanguage
       });
