@@ -55,11 +55,28 @@ unnecessary or unavailable. Pay special attention to changes crossing module
 boundaries, public contracts, UI flows, CLI/tooling flows, hooks, sessions,
 persistence, worktrees, or external process behavior.
 
+## Final Diff Gate
+
+For `final-diff`, focus primarily on code quality and boundary-condition
+robustness in the final repository diff. The code should fit the project's
+existing structure, naming, helpers, error handling, state patterns, and
+documentation/generated-context expectations.
+
+Request changes when the code violates project style, duplicates existing
+patterns unnecessarily, adds avoidable abstraction, leaves debug or task-only
+artifacts, handles errors inconsistently, changes files outside the approved
+scope, or weakens tests.
+
+Request changes when important boundary conditions are not handled: empty or
+missing inputs, invalid data, permissions, external command failure, partial
+writes, retries, concurrency, repeated UI actions, stale state, restart
+recovery, cleanup, compatibility, or public API validation.
+
 ## Checks
 
 - `architecture-plan`: apply the Architecture Plan Gate standard; check Scaffold Manifest, proof points, Replan triggers, and no task-only source comments.
 - `validation-adequacy`: apply the Validation Adequacy Gate standard; check plan coverage, public contracts, validation level, commands/results, skips/gaps/risks, final cleanup, durable testing docs impact.
-- `final-diff`: diff matches plan, no unapproved surface/dependency/docs, no `VCM:CODE`, no task-process comments, meaningful tests, fallible paths handled.
+- `final-diff`: apply the Final Diff Gate standard; check diff matches plan, no unapproved surface/dependency/docs, no `VCM:CODE`, no task-process comments, meaningful tests, fallible paths handled.
 
 ## Output
 
