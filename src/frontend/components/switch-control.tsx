@@ -36,9 +36,11 @@ export function SwitchControl({
       onClick={() => onChange(!checked)}
     >
       <span className="switch-control-label">{label}</span>
-      <span className="switch-control-state">{status}</span>
-      <span className="switch-control-track" aria-hidden="true">
-        <span className="switch-control-thumb" />
+      <span className="switch-control-action">
+        <span className="switch-control-state">{status}</span>
+        <span className="switch-control-track" aria-hidden="true">
+          <span className="switch-control-thumb" />
+        </span>
       </span>
     </button>
   );

@@ -700,8 +700,8 @@ h2 {
 
 .switch-control {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
-  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
   align-items: center;
   min-height: 34px;
   border: 1px solid #b9c0c4;
@@ -728,6 +728,13 @@ h2 {
   font-weight: 700;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.switch-control-action {
+  display: inline-flex;
+  gap: 8px;
+  align-items: center;
+  justify-self: end;
 }
 
 .switch-control-state {
