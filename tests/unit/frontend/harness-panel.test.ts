@@ -183,6 +183,25 @@ describe("HarnessPanel fixed-install three-state UI", () => {
     expect(html).not.toContain(".ai/generated/module-index.json");
   });
 
+  it("hides bootstrap controls after bootstrap is complete", () => {
+    const html = renderToStaticMarkup(
+      createElement(HarnessPanel, {
+        ...baseProps,
+        status: makeStatus({ initialized: true, needsApply: false }),
+        bootstrapStatus: {
+          version: 1,
+          status: "complete",
+          canStart: false,
+          checks: [],
+          warnings: []
+        }
+      } as never)
+    );
+
+    expect(html).not.toContain("Bootstrap");
+    expect(html).not.toContain("Open Bootstrap");
+  });
+
   it("shows a repository diff review entry point", () => {
     const html = render(makeStatus({ initialized: true, needsApply: false }));
 

@@ -515,29 +515,6 @@ h2 {
   padding-left: 18px;
 }
 
-.harness-bootstrap-session {
-  display: grid;
-  gap: 8px;
-  border: 1px solid #e0d6c7;
-  border-radius: 6px;
-  padding: 8px;
-  background: #f8f7f2;
-  font-size: 12px;
-}
-
-.harness-bootstrap-session > div:first-child {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 8px;
-  align-items: center;
-}
-
-.harness-bootstrap-session span:first-child {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
 .harness-bootstrap-modal {
   position: fixed;
   inset: 0;
@@ -1918,6 +1895,12 @@ h2 {
   padding-right: 2px;
 }
 
+.harness-studio-left-preview {
+  align-content: stretch;
+  overflow: hidden;
+  padding-right: 0;
+}
+
 .harness-studio-section {
   min-width: 0;
   border: 1px solid #30363d;
@@ -1950,25 +1933,13 @@ h2 {
   margin-bottom: 0;
 }
 
-.harness-file-editor-backdrop {
-  z-index: 30;
-  background: rgba(1, 4, 9, 0.78);
-}
-
-.harness-file-editor-modal {
+.harness-studio-file-preview {
   display: grid;
   grid-template-rows: auto auto auto minmax(0, 1fr);
   gap: 10px;
-  width: 95vw;
-  height: 92vh;
   min-width: 0;
   min-height: 0;
   overflow: hidden;
-  border: 1px solid #30363d;
-  border-radius: 8px;
-  background: #0d1117;
-  color: #d6deeb;
-  padding: 12px;
 }
 
 .harness-studio-file-editor-header {
@@ -1983,8 +1954,17 @@ h2 {
   margin-bottom: 0;
 }
 
+.harness-studio-file-editor-header h3,
+.harness-studio-file-editor-header p {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .harness-studio-file-editor-actions {
   display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 8px;
   align-items: center;
 }
@@ -2004,8 +1984,20 @@ h2 {
   line-height: 1.55;
 }
 
-.harness-studio-file-textarea:disabled {
+.harness-studio-file-textarea:read-only {
+  background: #080c12;
   color: #8b949e;
+  cursor: default;
+}
+
+.harness-studio-file-textarea.is-editing {
+  background: #090d13;
+  color: #d6deeb;
+  cursor: text;
+}
+
+.harness-studio-file-textarea:disabled {
+  opacity: 0.72;
 }
 
 .harness-engineer-terminal {
@@ -2951,7 +2943,6 @@ h2 {
 :root[data-theme="dark"] .harness-file-list li,
 :root[data-theme="dark"] .harness-changes,
 :root[data-theme="dark"] .harness-result,
-:root[data-theme="dark"] .harness-bootstrap-session,
 :root[data-theme="dark"] .gateway-qr img,
 :root[data-theme="dark"] .task-create-preview,
 :root[data-theme="dark"] .task-status-stats div,

@@ -55,6 +55,7 @@ export function HarnessStudioModal({
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [selectedFile, setSelectedFile] = useState<HarnessFileContent | null>(null);
   const [draftContent, setDraftContent] = useState("");
+  const [editingFile, setEditingFile] = useState(false);
   const [fileBusy, setFileBusy] = useState(false);
   const [fileError, setFileError] = useState<string | null>(null);
 
@@ -70,6 +71,7 @@ export function HarnessStudioModal({
       setSelectedPath(null);
       setSelectedFile(null);
       setDraftContent("");
+      setEditingFile(false);
       setFileError(null);
     }
   }, [files, open, selectedPath]);
@@ -82,6 +84,7 @@ export function HarnessStudioModal({
     let cancelled = false;
     setFileBusy(true);
     setFileError(null);
+    setEditingFile(false);
     void apiClient.getHarnessFileContent(taskSlug, selectedPath)
       .then((file) => {
         if (cancelled) {
@@ -117,6 +120,7 @@ export function HarnessStudioModal({
       const result = await apiClient.updateHarnessFileContent(taskSlug, selectedFile.path, { content: draftContent });
       setSelectedFile(result.file);
       setDraftContent(result.file.content);
+      setEditingFile(false);
       onRefresh();
     } catch (error) {
       setFileError(error instanceof Error ? error.message : String(error));
@@ -125,10 +129,11 @@ export function HarnessStudioModal({
     }
   }
 
-  function closeFileEditor() {
+  function closeFilePreview() {
     setSelectedPath(null);
     setSelectedFile(null);
     setDraftContent("");
+    setEditingFile(false);
     setFileError(null);
   }
 
@@ -153,40 +158,98 @@ export function HarnessStudioModal({
           </header>
 
           <div className="harness-studio-layout">
-            <aside className="harness-studio-left">
-              <section className="harness-studio-section harness-studio-overview">
-                <h3>Overview</h3>
-                <div className="harness-studio-metrics">
-                  <HarnessMetric label="Fixed install" value={status ? status.initialized ? status.needsApply ? "updates" : "current" : "new" : "unknown"} />
-                  <HarnessMetric label="Revision" value={String(status?.harnessRevision ?? 0)} />
-                  <HarnessMetric label="Managed files" value={String(files.length)} />
-                  <HarnessMetric label="Pending updates" value={String(status?.plannedChanges.length ?? 0)} />
-                  <HarnessMetric label="Bootstrap" value={bootstrapStatus?.status.replaceAll("_", " ") ?? "unknown"} />
-                  <HarnessMetric label="Engineer" value={formatSessionStatus(engineerSession)} />
-                </div>
-                {status?.warnings.length ? (
-                  <ul className="warnings">
-                    {status.warnings.map((warning) => <li key={warning}>{warning}</li>)}
-                  </ul>
-                ) : null}
-              </section>
+            <aside className={selectedPath ? "harness-studio-left harness-studio-left-preview" : "harness-studio-left"}>
+              {selectedPath ? (
+                <section className="harness-studio-section harness-studio-file-preview">
+                  <header className="harness-studio-file-editor-header">
+                    <div>
+                      <h3>{selectedFile?.title ?? "Harness File"}</h3>
+                      <p className="muted">{selectedFile?.path ?? selectedPath}</p>
+                    </div>
+                    <div className="harness-studio-file-editor-actions">
+                      {selectedFile ? <StatusBadge status={selectedFile.editable ? "ok" : "unknown"} /> : null}
+                      {!editingFile ? (
+                        <button
+                          type="button"
+                          disabled={fileBusy || !taskSlug || !selectedFile?.editable}
+                          onClick={() => setEditingFile(true)}
+                        >
+                          Edit
+                        </button>
+                      ) : (
+                        <>
+                          <button
+                            type="button"
+                            disabled={fileBusy || !taskSlug || !selectedFile?.editable || !dirty}
+                            onClick={() => void saveSelectedFile()}
+                          >
+                            Save
+                          </button>
+                          <button
+                            type="button"
+                            disabled={fileBusy}
+                            onClick={() => {
+                              setDraftContent(selectedFile?.content ?? "");
+                              setEditingFile(false);
+                            }}
+                          >
+                            Cancel
+                          </button>
+                        </>
+                      )}
+                      <button type="button" onClick={closeFilePreview}>Files</button>
+                    </div>
+                  </header>
+                  {selectedFile?.readonlyReason ? (
+                    <p className="muted">{selectedFile.readonlyReason}</p>
+                  ) : null}
+                  {fileError ? <p className="error-banner">{fileError}</p> : null}
+                  <textarea
+                    className={editingFile ? "harness-studio-file-textarea is-editing" : "harness-studio-file-textarea"}
+                    value={draftContent}
+                    spellCheck={false}
+                    readOnly={!editingFile}
+                    disabled={fileBusy}
+                    onChange={(event) => setDraftContent(event.target.value)}
+                  />
+                </section>
+              ) : (
+                <>
+                  <section className="harness-studio-section harness-studio-overview">
+                    <h3>Overview</h3>
+                    <div className="harness-studio-metrics">
+                      <HarnessMetric label="Fixed install" value={status ? status.initialized ? status.needsApply ? "updates" : "current" : "new" : "unknown"} />
+                      <HarnessMetric label="Revision" value={String(status?.harnessRevision ?? 0)} />
+                      <HarnessMetric label="Managed files" value={String(files.length)} />
+                      <HarnessMetric label="Pending updates" value={String(status?.plannedChanges.length ?? 0)} />
+                      <HarnessMetric label="Bootstrap" value={bootstrapStatus?.status.replaceAll("_", " ") ?? "unknown"} />
+                      <HarnessMetric label="Engineer" value={formatSessionStatus(engineerSession)} />
+                    </div>
+                    {status?.warnings.length ? (
+                      <ul className="warnings">
+                        {status.warnings.map((warning) => <li key={warning}>{warning}</li>)}
+                      </ul>
+                    ) : null}
+                  </section>
 
-              <HarnessFileSection title="Agents" files={agents} selectedPath={selectedPath} onSelect={setSelectedPath} />
-              <HarnessFileSection title="Skills" files={skills} selectedPath={selectedPath} onSelect={setSelectedPath} />
-              <HarnessFileSection title="Root Context" files={rootContext} selectedPath={selectedPath} onSelect={setSelectedPath} />
-              <HarnessFileSection title="Tools" files={tools} selectedPath={selectedPath} onSelect={setSelectedPath} />
+                  <HarnessFileSection title="Agents" files={agents} selectedPath={selectedPath} onSelect={setSelectedPath} />
+                  <HarnessFileSection title="Skills" files={skills} selectedPath={selectedPath} onSelect={setSelectedPath} />
+                  <HarnessFileSection title="Root Context" files={rootContext} selectedPath={selectedPath} onSelect={setSelectedPath} />
+                  <HarnessFileSection title="Tools" files={tools} selectedPath={selectedPath} onSelect={setSelectedPath} />
 
-              <section className="harness-studio-section">
-                <h3>Project Docs</h3>
-                <ul className="harness-studio-doc-list">
-                  {bootstrapStatus?.checks.map((check) => (
-                    <li key={check.key}>
-                      <span>{check.path ?? check.label}</span>
-                      <StatusBadge status={check.status} />
-                    </li>
-                  )) ?? <li><span>No bootstrap status loaded.</span></li>}
-                </ul>
-              </section>
+                  <section className="harness-studio-section">
+                    <h3>Project Docs</h3>
+                    <ul className="harness-studio-doc-list">
+                      {bootstrapStatus?.checks.map((check) => (
+                        <li key={check.key}>
+                          <span>{check.path ?? check.label}</span>
+                          <StatusBadge status={check.status} />
+                        </li>
+                      )) ?? <li><span>No bootstrap status loaded.</span></li>}
+                    </ul>
+                  </section>
+                </>
+              )}
             </aside>
 
             <section className="harness-studio-section harness-studio-engineer">
@@ -228,40 +291,6 @@ export function HarnessStudioModal({
         </section>
       </div>
 
-      {selectedPath ? (
-        <div className="modal-backdrop harness-file-editor-backdrop">
-          <section className="harness-file-editor-modal" role="dialog" aria-modal="true" aria-label="Harness File Editor">
-            <header className="harness-studio-file-editor-header">
-              <div>
-                <h3>{selectedFile?.title ?? "Harness File"}</h3>
-                <p className="muted">{selectedFile?.path ?? selectedPath}</p>
-              </div>
-              <div className="harness-studio-file-editor-actions">
-                {selectedFile ? <StatusBadge status={selectedFile.editable ? "ok" : "unknown"} /> : null}
-                <button
-                  type="button"
-                  disabled={fileBusy || !taskSlug || !selectedFile?.editable || !dirty}
-                  onClick={() => void saveSelectedFile()}
-                >
-                  Save
-                </button>
-                <button type="button" onClick={closeFileEditor}>Close</button>
-              </div>
-            </header>
-            {selectedFile?.readonlyReason ? (
-              <p className="muted">{selectedFile.readonlyReason}</p>
-            ) : null}
-            {fileError ? <p className="error-banner">{fileError}</p> : null}
-            <textarea
-              className="harness-studio-file-textarea"
-              value={draftContent}
-              spellCheck={false}
-              disabled={fileBusy || !selectedFile?.editable}
-              onChange={(event) => setDraftContent(event.target.value)}
-            />
-          </section>
-        </div>
-      ) : null}
     </>
   );
 }

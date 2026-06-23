@@ -8,7 +8,6 @@ import {
   CLAUDE_EFFORT_OPTIONS,
   CLAUDE_MODEL_OPTIONS,
   type ClaudePermissionMode,
-  type RoleSessionRecord,
   type SessionEffort,
   type SessionModel
 } from "../../shared/types/session.js";
@@ -25,7 +24,6 @@ export interface HarnessPanelProps {
   status: HarnessStatusReport | null;
   bootstrapStatus: HarnessBootstrapStatusReport | null;
   applyResult?: HarnessApplyResult | null;
-  harnessEngineerSession?: RoleSessionRecord | null;
   hasActiveTask?: boolean;
   busy?: boolean;
   onRefresh(): Promise<void>;
@@ -42,7 +40,6 @@ export function HarnessPanel({
   status,
   bootstrapStatus,
   applyResult,
-  harnessEngineerSession,
   hasActiveTask = false,
   busy = false,
   onRefresh,
@@ -61,6 +58,7 @@ export function HarnessPanel({
   const bootstrapSession = bootstrapStatus?.session;
   const bootstrapRunning = bootstrapStatus?.status === "running";
   const bootstrapSessionRunning = bootstrapSession?.status === "running";
+  const showBootstrapStage = bootstrapStatus?.status !== "complete";
 
   useEffect(() => {
     if (bootstrapSession?.permissionMode) {
@@ -167,7 +165,6 @@ export function HarnessPanel({
         <div className="harness-panel-header">
           <div>
             <strong>Harness Studio</strong>
-            <p className="muted">Engineer: {formatHarnessEngineerStatus(harnessEngineerSession)}</p>
           </div>
           <div className="harness-actions">
             <button type="button" disabled={busy} onClick={onOpenRepositoryDiff}>
@@ -180,40 +177,27 @@ export function HarnessPanel({
         </div>
       </div>
 
-      <div className="harness-stage">
-        <div className="harness-panel-header">
-          <div>
-            <strong>Bootstrap</strong>
-            <p className="muted">{bootstrapStatus ? formatBootstrapStatus(bootstrapStatus.status) : "not loaded"}</p>
-          </div>
-          <div className="harness-actions">
-            <button
-              type="button"
-              disabled={busy || !bootstrapStatus?.canStart}
-              onClick={() => {
-                setShowBootstrapTerminal(true);
-              }}
-            >
-              Open Bootstrap
-            </button>
+      {showBootstrapStage ? (
+        <div className="harness-stage">
+          <div className="harness-panel-header">
+            <div>
+              <strong>Bootstrap</strong>
+              <p className="muted">{bootstrapStatus ? formatBootstrapStatus(bootstrapStatus.status) : "not loaded"}</p>
+            </div>
+            <div className="harness-actions">
+              <button
+                type="button"
+                disabled={busy || !bootstrapStatus?.canStart}
+                onClick={() => {
+                  setShowBootstrapTerminal(true);
+                }}
+              >
+                Open Bootstrap
+              </button>
+            </div>
           </div>
         </div>
-
-        {bootstrapSession ? (
-          <div className="harness-bootstrap-session">
-            <div>
-              <span>{bootstrapSession.command}</span>
-              <StatusBadge status={bootstrapSession.status} />
-            </div>
-            <button
-              type="button"
-              onClick={() => setShowBootstrapTerminal(true)}
-            >
-              Open Terminal
-            </button>
-          </div>
-        ) : null}
-      </div>
+      ) : null}
 
       {applyResult?.changedFiles.length ? (
         <div className="harness-result">
@@ -237,7 +221,7 @@ export function HarnessPanel({
         </ul>
       ) : null}
 
-      {showBootstrapTerminal ? (
+      {showBootstrapStage && showBootstrapTerminal ? (
         <div className="harness-bootstrap-modal" role="dialog" aria-modal="true" aria-label="Harness Engineer bootstrap session">
           <div className="harness-bootstrap-modal-surface">
             <header className="harness-bootstrap-modal-header">
@@ -340,13 +324,4 @@ export function HarnessPanel({
 
 function formatBootstrapStatus(status: HarnessBootstrapStatusReport["status"]): string {
   return status.replaceAll("_", " ");
-}
-
-function formatHarnessEngineerStatus(session?: RoleSessionRecord | null): string {
-  if (!session) {
-    return "not started";
-  }
-  return session.status === "running"
-    ? `${session.status} / ${session.activityStatus ?? "idle"}`
-    : session.status;
 }

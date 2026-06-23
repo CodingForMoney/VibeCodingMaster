@@ -91,6 +91,7 @@ export function App() {
   const flowPauseAlarmRef = useRef<number | null>(null);
   const gatewayContextSyncKeyRef = useRef("");
   const translatorEnsureKeyRef = useRef("");
+  const harnessEngineerAutoResumeKeyRef = useRef("");
   const activeTask = useMemo(
     () => selectActiveTask(tasks, activeTaskSlug),
     [tasks, activeTaskSlug]
@@ -430,6 +431,7 @@ export function App() {
 
   useEffect(() => {
     translatorEnsureKeyRef.current = "";
+    harnessEngineerAutoResumeKeyRef.current = "";
     setTranslatorSession(null);
     setTranslatorPermissionMode("default");
     setTranslatorModel("default");
@@ -463,6 +465,41 @@ export function App() {
     }, 3000);
     return () => window.clearInterval(interval);
   }, [project?.repoRoot]);
+
+  useEffect(() => {
+    if (!project || !activeTask?.taskSlug || !harnessEngineerSession?.claudeSessionId) {
+      return;
+    }
+    if (harnessEngineerSession.status === "running" || harnessEngineerSession.status === "done") {
+      return;
+    }
+
+    const resumeKey = `${project.repoRoot}:${activeTask.taskSlug}:${harnessEngineerSession.claudeSessionId}`;
+    if (harnessEngineerAutoResumeKeyRef.current === resumeKey) {
+      return;
+    }
+    harnessEngineerAutoResumeKeyRef.current = resumeKey;
+
+    void apiClient.resumeHarnessEngineerSession({
+      taskSlug: activeTask.taskSlug,
+      permissionMode: harnessEngineerSession.permissionMode,
+      model: harnessEngineerSession.model,
+      effort: harnessEngineerSession.effort
+    })
+      .then((session) => {
+        setHarnessEngineerSession(session);
+        syncHarnessEngineerLaunchOptions(session);
+      })
+      .catch((caught: Error) => setError(caught.message));
+  }, [
+    activeTask?.taskSlug,
+    harnessEngineerSession?.claudeSessionId,
+    harnessEngineerSession?.effort,
+    harnessEngineerSession?.model,
+    harnessEngineerSession?.permissionMode,
+    harnessEngineerSession?.status,
+    project?.repoRoot
+  ]);
 
   useEffect(() => {
     if (!project || !activeTask?.taskSlug) {
@@ -573,7 +610,6 @@ export function App() {
           translationTargetLanguage={translationTargetLanguage}
           translationOutputMode={translationOutputMode}
           translatorSession={translatorSession}
-          harnessEngineerSession={harnessEngineerSession}
           harnessStatus={harnessStatus}
           harnessBootstrapStatus={harnessBootstrapStatus}
           harnessApplyResult={harnessApplyResult}

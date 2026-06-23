@@ -56,7 +56,6 @@ export interface ProjectDashboardProps {
   translationTargetLanguage: TranslationTargetLanguage;
   translationOutputMode: TranslationOutputMode;
   translatorSession: RoleSessionRecord | null;
-  harnessEngineerSession: RoleSessionRecord | null;
   harnessStatus: HarnessStatusReport | null;
   harnessBootstrapStatus: HarnessBootstrapStatusReport | null;
   harnessApplyResult?: HarnessApplyResult | null;
@@ -122,7 +121,6 @@ export function ProjectDashboard({
   translationTargetLanguage,
   translationOutputMode,
   translatorSession,
-  harnessEngineerSession,
   harnessStatus,
   harnessBootstrapStatus,
   harnessApplyResult,
@@ -400,7 +398,6 @@ export function ProjectDashboard({
             status={harnessStatus}
             bootstrapStatus={harnessBootstrapStatus}
             applyResult={harnessApplyResult}
-            harnessEngineerSession={harnessEngineerSession}
             hasActiveTask={Boolean(activeTask)}
             busy={busy}
             onRefresh={onRefreshHarness}
