@@ -18,18 +18,11 @@ Return only:
 - `approve`: no gate-blocking finding.
 - `request_changes`: evidence is missing, stale, contradictory, incomplete, or unsafe.
 
-## Role Contracts
-
-Read the current worktree role definitions before judging a gate:
-
-- `.claude/agents/architect.md`
-- `.claude/agents/coder.md`
-- `.claude/agents/reviewer.md`
-
-Use these files as role contracts. Judge whether the relevant role output
-satisfies its own responsibilities, boundaries, and required evidence.
-
 ## Architecture Plan Gate
+
+Read `.claude/agents/architect.md` as the primary role contract. Read
+`.claude/agents/coder.md` and `.claude/agents/reviewer.md` when judging whether
+the plan gives implementation and validation enough boundaries and evidence.
 
 For `architecture-plan`, verify the required plan structure and evidence, then
 focus especially on architectural soundness. Review from a second-architect
@@ -42,7 +35,14 @@ lifecycle, failure paths, concurrency/restart behavior, docs/generated-context
 impact, or Replan triggers. A plan is not ready if coder must guess these
 decisions or if the plan conflicts with current project architecture.
 
+Also check Scaffold Manifest, proof points, Replan triggers, and no task-only
+source comments.
+
 ## Validation Adequacy Gate
+
+Read `.claude/agents/reviewer.md` as the primary role contract. Read
+`.claude/agents/architect.md` to compare validation against the plan, and read
+`.claude/agents/coder.md` when implementation test responsibility matters.
 
 For `validation-adequacy`, verify the review report's evidence, then focus
 especially on whether the validation level matches the risk of the change. Unit
@@ -55,7 +55,14 @@ unnecessary or unavailable. Pay special attention to changes crossing module
 boundaries, public contracts, UI flows, CLI/tooling flows, hooks, sessions,
 persistence, worktrees, or external process behavior.
 
+Also check plan coverage, public contracts, validation level, commands/results,
+skips/gaps/risks, final cleanup, and durable testing docs impact.
+
 ## Final Diff Gate
+
+Read `.claude/agents/coder.md` as the primary implementation contract. Read
+`.claude/agents/architect.md` and `.claude/agents/reviewer.md` to compare the
+final diff against the approved plan and validation evidence.
 
 For `final-diff`, focus primarily on code quality and boundary-condition
 robustness in the final repository diff. The code should fit the project's
@@ -72,11 +79,9 @@ missing inputs, invalid data, permissions, external command failure, partial
 writes, retries, concurrency, repeated UI actions, stale state, restart
 recovery, cleanup, compatibility, or public API validation.
 
-## Checks
-
-- `architecture-plan`: apply the Architecture Plan Gate standard; check Scaffold Manifest, proof points, Replan triggers, and no task-only source comments.
-- `validation-adequacy`: apply the Validation Adequacy Gate standard; check plan coverage, public contracts, validation level, commands/results, skips/gaps/risks, final cleanup, durable testing docs impact.
-- `final-diff`: apply the Final Diff Gate standard; check diff matches plan, no unapproved surface/dependency/docs, no `VCM:CODE`, no task-process comments, meaningful tests, fallible paths handled.
+Also check diff matches plan, no unapproved surface/dependency/docs, no
+`VCM:CODE`, no task-process comments, meaningful tests, and fallible paths
+handled.
 
 ## Output
 
