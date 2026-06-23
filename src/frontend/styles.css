@@ -698,6 +698,89 @@ h2 {
   background: #e8f1ef;
 }
 
+.switch-control {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 8px;
+  align-items: center;
+  min-height: 34px;
+  border: 1px solid #b9c0c4;
+  border-radius: 7px;
+  background: #fffefa;
+  color: #3f474a;
+  padding: 5px 8px;
+  text-align: left;
+}
+
+.switch-control:hover:not(:disabled) {
+  border-color: #2f7e84;
+  background: #f2faf8;
+}
+
+.switch-control:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.switch-control-label {
+  min-width: 0;
+  overflow: hidden;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.switch-control-state {
+  color: #697476;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.switch-control-track {
+  position: relative;
+  width: 38px;
+  height: 20px;
+  border-radius: 999px;
+  background: #b9c0c4;
+  transition: background 0.16s ease;
+}
+
+.switch-control-thumb {
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 14px;
+  height: 14px;
+  border-radius: 999px;
+  background: #fffefa;
+  box-shadow: 0 1px 3px rgba(18, 22, 24, 0.22);
+  transition: transform 0.16s ease;
+}
+
+.switch-control.is-on {
+  border-color: #2f7e84;
+  background: #e8f4f2;
+  color: #145e64;
+}
+
+.switch-control.is-on .switch-control-state {
+  color: #145e64;
+}
+
+.switch-control.is-on .switch-control-track {
+  background: #2f7e84;
+}
+
+.switch-control.is-on .switch-control-thumb {
+  transform: translateX(18px);
+}
+
+.sidebar-settings .switch-control,
+.gateway-actions .switch-control {
+  width: 100%;
+}
+
 .sidebar-settings .theme-mode-toggle span:last-child {
   font-weight: 750;
 }
@@ -1030,31 +1113,10 @@ h2 {
   font-size: 11px;
 }
 
-.orchestration-toggle {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: 8px;
+.orchestration-switch {
+  width: 250px;
   min-height: 30px;
-  border: 1px solid #b5bec4;
-  border-radius: 6px;
-  background: #fffefa;
-  color: #4f5558;
   font-size: 12px;
-  font-weight: 650;
-  padding: 3px 10px;
-  white-space: nowrap;
-}
-
-.orchestration-toggle strong {
-  font-size: 11px;
-  text-transform: uppercase;
-}
-
-.orchestration-toggle.is-active {
-  border-color: #2f7e84;
-  background: #e8f4f2;
-  color: #145e64;
 }
 
 .session-console-body {
@@ -2557,13 +2619,9 @@ h2 {
 }
 
 .message-mode-toggle {
-  color: #4f5558;
-  font-size: 13px;
-  font-weight: 650;
-}
-
-.message-mode-toggle input {
   width: auto;
+  min-width: 220px;
+  font-size: 13px;
 }
 
 .message-list {
@@ -3079,17 +3137,48 @@ h2 {
 :root[data-theme="dark"] .task-nav-item.is-active,
 :root[data-theme="dark"] .role-tab.is-active,
 :root[data-theme="dark"] .sidebar-settings .settings-toggle.is-active,
-:root[data-theme="dark"] .gateway-actions .settings-toggle.is-active,
-:root[data-theme="dark"] .orchestration-toggle.is-active {
+:root[data-theme="dark"] .gateway-actions .settings-toggle.is-active {
   border-color: #56d4dd;
   background: #10262b;
   color: #d6fbff;
 }
 
-:root[data-theme="dark"] .orchestration-toggle {
+:root[data-theme="dark"] .switch-control {
   border-color: #3d4652;
   background: #161b22;
-  color: #b7c0ca;
+  color: #d6deeb;
+}
+
+:root[data-theme="dark"] .switch-control:hover:not(:disabled) {
+  border-color: #56d4dd;
+  background: #1a2530;
+}
+
+:root[data-theme="dark"] .switch-control-state {
+  color: #8b949e;
+}
+
+:root[data-theme="dark"] .switch-control-track {
+  background: #3d4652;
+}
+
+:root[data-theme="dark"] .switch-control-thumb {
+  background: #e6edf3;
+  box-shadow: 0 1px 4px rgba(1, 4, 9, 0.48);
+}
+
+:root[data-theme="dark"] .switch-control.is-on {
+  border-color: #56d4dd;
+  background: #10262b;
+  color: #d6fbff;
+}
+
+:root[data-theme="dark"] .switch-control.is-on .switch-control-state {
+  color: #9debf2;
+}
+
+:root[data-theme="dark"] .switch-control.is-on .switch-control-track {
+  background: #56d4dd;
 }
 
 :root[data-theme="dark"] .session-option-field select,

@@ -28,6 +28,7 @@ import { EventLog } from "../components/event-log.js";
 import { HarnessPanel } from "../components/harness-panel.js";
 import { MessageTimeline, getMessageCounts } from "../components/message-timeline.js";
 import { RepoConnectForm } from "../components/repo-connect-form.js";
+import { SwitchControl } from "../components/switch-control.js";
 import { TaskNav } from "../components/task-nav.js";
 
 type SidebarSectionId =
@@ -264,17 +265,15 @@ export function ProjectDashboard({
             <span>Theme</span>
             <span>{getThemeModeLabel(themeMode)}</span>
           </button>
-          <button
-            aria-pressed={!gatewayStatus?.enabled && flowPauseAlerts}
-            className={!gatewayStatus?.enabled && flowPauseAlerts ? "settings-toggle is-active" : "settings-toggle"}
+          <SwitchControl
+            checked={!gatewayStatus?.enabled && flowPauseAlerts}
+            className="sidebar-switch"
             disabled={busy || gatewayStatus?.enabled}
+            label="Flow pause alert"
+            stateLabel={gatewayStatus?.enabled ? "off" : flowPauseAlerts ? "on" : "off"}
             title={gatewayStatus?.enabled ? "Disabled while Gateway is on" : undefined}
-            type="button"
-            onClick={() => onFlowPauseAlertsChange(!flowPauseAlerts)}
-          >
-            <span>Flow pause alert</span>
-            <span>{gatewayStatus?.enabled ? "off" : flowPauseAlerts ? "on" : "off"}</span>
-          </button>
+            onChange={(checked) => onFlowPauseAlertsChange(checked)}
+          />
           <button
             className="settings-toggle"
             disabled={busy || gatewayStatus?.enabled}
@@ -548,27 +547,21 @@ function TranslationControlsPanel({
 
   return (
     <div className="sidebar-settings">
-      <button
-        aria-pressed={conversationEnabled}
-        className={conversationEnabled ? "settings-toggle is-active" : "settings-toggle"}
+      <SwitchControl
+        checked={conversationEnabled}
+        className="sidebar-switch"
         disabled={baseDisabled || !sessionRunning}
+        label="Conversation translation"
         title={sessionActionTitle}
-        type="button"
-        onClick={() => onEnabledChange(!conversationEnabled)}
-      >
-        <span>Conversation translation</span>
-        <span>{conversationEnabled ? "on" : "off"}</span>
-      </button>
-      <button
-        aria-pressed={autoSendEnabled}
-        className={autoSendEnabled ? "settings-toggle is-active" : "settings-toggle"}
+        onChange={onEnabledChange}
+      />
+      <SwitchControl
+        checked={autoSendEnabled}
+        className="sidebar-switch"
         disabled={baseDisabled}
-        type="button"
-        onClick={() => onAutoSendChange(!autoSendEnabled)}
-      >
-        <span>Auto-send</span>
-        <span>{autoSendEnabled ? "on" : "off"}</span>
-      </button>
+        label="Auto-send"
+        onChange={onAutoSendChange}
+      />
       <label className="settings-select-row">
         <span>Language</span>
         <select
@@ -695,18 +688,15 @@ function GateReviewGateSettings({
         const record = state?.gates[gate];
         const enabled = Boolean(record?.required);
         return (
-          <button
-            aria-pressed={enabled}
-            className={enabled ? "settings-toggle is-active" : "settings-toggle"}
+          <SwitchControl
+            checked={enabled}
+            className="sidebar-switch"
             disabled={busy || !state}
             key={gate}
+            label={getGateReviewGateLabel(gate)}
             title={record?.status ? `status: ${record.status}` : undefined}
-            type="button"
-            onClick={() => onGateEnabledChange(gate, !enabled)}
-          >
-            <span>{getGateReviewGateLabel(gate)}</span>
-            <span>{enabled ? "on" : "off"}</span>
-          </button>
+            onChange={(checked) => onGateEnabledChange(gate, checked)}
+          />
         );
       })}
     </div>
@@ -750,27 +740,21 @@ function GatewayPanel({
   return (
     <div className="gateway-panel">
       <div className="gateway-actions">
-        <button
-          aria-pressed={Boolean(status?.enabled)}
-          className={status?.enabled ? "settings-toggle is-active" : "settings-toggle"}
+        <SwitchControl
+          checked={Boolean(status?.enabled)}
+          className="sidebar-switch"
           disabled={busy || !status || (!status.enabled && !canEnable)}
+          label="Gateway"
           title={canEnable ? "Enable or disable PM messages and task-changing Gateway commands" : "Scan and confirm iLink login first"}
-          type="button"
-          onClick={() => status ? onEnabledChange(!status.enabled) : undefined}
-        >
-          <span>Gateway</span>
-          <span>{status?.enabled ? "on" : "off"}</span>
-        </button>
-        <button
-          aria-pressed={Boolean(status?.translationEnabled)}
-          className={status?.translationEnabled ? "settings-toggle is-active" : "settings-toggle"}
+          onChange={(checked) => onEnabledChange(checked)}
+        />
+        <SwitchControl
+          checked={Boolean(status?.translationEnabled)}
+          className="sidebar-switch"
           disabled={busy || !status}
-          type="button"
-          onClick={() => status ? onTranslationChange(!status.translationEnabled) : undefined}
-        >
-          <span>Translation</span>
-          <span>{status?.translationEnabled ? "on" : "off"}</span>
-        </button>
+          label="Translation"
+          onChange={(checked) => onTranslationChange(checked)}
+        />
         {isBound ? (
           <button className="danger-button" type="button" disabled={busy} onClick={onResetBinding}>
             Reset Binding

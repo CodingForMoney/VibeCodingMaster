@@ -9,6 +9,7 @@ import type { TranslationTargetLanguage } from "../../shared/types/app-settings.
 import type { TaskRecord } from "../../shared/types/task.js";
 import { RoleSessionTabs } from "../components/role-session-tabs.js";
 import { SessionConsole } from "../components/session-console.js";
+import { SwitchControl } from "../components/switch-control.js";
 import { getSessionForRole } from "../state/session-store.js";
 import { apiClient } from "../state/api-client.js";
 import { selectAutoDispatchRole } from "../state/message-navigation.js";
@@ -419,17 +420,13 @@ export function TaskWorkspace({
           onSelect={onActiveRoleChange}
         />
         <div className="workspace-header-actions">
-          <button
-            aria-label={`Auto orchestration is ${autoOrchestrationEnabled ? "on" : "off"}`}
-            aria-pressed={autoOrchestrationEnabled}
-            className={`orchestration-toggle${autoOrchestrationEnabled ? " is-active" : ""}`}
+          <SwitchControl
+            checked={autoOrchestrationEnabled}
+            className="orchestration-switch"
             disabled={busy}
-            type="button"
-            onClick={() => void setOrchestrationMode(autoOrchestrationEnabled ? "manual" : "auto")}
-          >
-            <span>Auto orchestration</span>
-            <strong>{autoOrchestrationEnabled ? "on" : "off"}</strong>
-          </button>
+            label="Auto orchestration"
+            onChange={(checked) => void setOrchestrationMode(checked ? "auto" : "manual")}
+          />
           <button className="danger-button" type="button" disabled={busy} onClick={() => void closeTask()}>
             Close Task
           </button>
