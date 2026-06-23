@@ -12,6 +12,7 @@ import { createGitAdapter } from "./adapters/git-adapter.js";
 import { createAppSettingsService, type AppSettingsService } from "./services/app-settings-service.js";
 import { createClaudeTranscriptService } from "./services/claude-transcript-service.js";
 import { createGateReviewService, type GateReviewService } from "./services/gate-review-service.js";
+import { createHarnessFeedbackService, type HarnessFeedbackService } from "./services/harness-feedback-service.js";
 import { createTranslationWorkerService, type TranslationWorkerService } from "./services/translation-worker-service.js";
 import {
   createHarnessService,
@@ -66,6 +67,7 @@ export interface ServerDeps {
   sessionService: SessionService;
   artifactService: ArtifactService;
   harnessService: HarnessService;
+  harnessFeedbackService: HarnessFeedbackService;
   commandDispatcher: CommandDispatcher;
   claudeHookService: ClaudeHookService;
   messageService: MessageService;
@@ -115,6 +117,7 @@ export async function createServer(deps: ServerDeps, options: CreateServerOption
   registerHarnessRoutes(app, {
     projectService: deps.projectService,
     harnessService: deps.harnessService,
+    harnessFeedbackService: deps.harnessFeedbackService,
     sessionService: deps.sessionService,
     taskService: deps.taskService
   });
@@ -234,6 +237,11 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     harnessEngineerSessions: sessionService,
     runFixedInstaller: createScriptFixedHarnessInstaller(path.join(getAppRoot(), "scripts/install-vcm-harness.mjs"))
   });
+  const harnessFeedbackService = createHarnessFeedbackService({
+    fs,
+    runtime,
+    sessionService
+  });
   const commandDispatcher = createCommandDispatcher({
     runtime,
     sessionService,
@@ -313,6 +321,7 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     appSettings,
     runtime,
     harnessService,
+    harnessFeedbackService,
     gatewayService,
     jobGuard: createJobGuardService(),
     translationWorkerService
@@ -331,6 +340,7 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     sessionService,
     artifactService,
     harnessService,
+    harnessFeedbackService,
     commandDispatcher,
     claudeHookService,
     messageService,

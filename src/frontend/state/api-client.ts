@@ -12,6 +12,8 @@ import type {
   HarnessApplyRequest,
   HarnessApplyResult,
   HarnessBootstrapStatusReport,
+  HarnessFeedbackDecisionRequest,
+  HarnessFeedbackStateReport,
   HarnessFileContent,
   RepositoryDiffReport,
   RestartHarnessBootstrapRequest,
@@ -195,6 +197,20 @@ export const apiClient = {
   notifyHarnessEngineerHarnessUpdated() {
     return request<RoleSessionRecord>("/api/projects/harness/engineer/session/notify-harness", {
       method: "POST"
+    });
+  },
+  getHarnessFeedbackState(taskSlug?: string | null) {
+    const params = new URLSearchParams();
+    if (taskSlug) {
+      params.set("taskSlug", taskSlug);
+    }
+    const query = params.toString();
+    return request<HarnessFeedbackStateReport>(`/api/projects/harness/feedback${query ? `?${query}` : ""}`);
+  },
+  decideHarnessFeedback(input: HarnessFeedbackDecisionRequest) {
+    return request<HarnessFeedbackStateReport>("/api/projects/harness/feedback/decision", {
+      method: "POST",
+      body: JSON.stringify(input)
     });
   },
   getTaskStatus(taskSlug: string) {

@@ -205,6 +205,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       cwd: startCommand.cwd,
       env: {
         VCM_API_URL: deps.apiUrl,
+        VCM_BASE_REPO_ROOT: repoRoot,
         VCM_TASK_REPO_ROOT: taskRepoRoot,
         VCM_TASK_SLUG: taskSlug,
         VCM_ROLE: role,
@@ -305,6 +306,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       cwd: startCommand.cwd,
       env: {
         VCM_API_URL: deps.apiUrl,
+        VCM_BASE_REPO_ROOT: repoRoot,
         VCM_TASK_REPO_ROOT: activeTaskRepoRoot ?? repoRoot,
         VCM_TASK_SLUG: activeTaskSlug ?? PROJECT_GATE_REVIEWER_SCOPE,
         VCM_ROLE: GATE_REVIEWER_ROLE,
@@ -429,6 +431,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       cwd: startCommand.cwd,
       env: {
         VCM_API_URL: deps.apiUrl,
+        VCM_BASE_REPO_ROOT: repoRoot,
         VCM_TASK_REPO_ROOT: taskContext.taskRepoRoot,
         VCM_TASK_SLUG: taskContext.taskSlug,
         VCM_ROLE: TRANSLATOR_ROLE,
@@ -531,6 +534,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       cwd: startCommand.cwd,
       env: {
         VCM_API_URL: deps.apiUrl,
+        VCM_BASE_REPO_ROOT: repoRoot,
         VCM_TASK_REPO_ROOT: taskContext.taskRepoRoot,
         VCM_TASK_SLUG: taskContext.taskSlug,
         VCM_ROLE: HARNESS_ENGINEER_ROLE,
@@ -670,6 +674,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       cwd: startCommand.cwd,
       env: {
         VCM_API_URL: deps.apiUrl,
+        VCM_BASE_REPO_ROOT: repoRoot,
         VCM_TASK_REPO_ROOT: targetCwd,
         VCM_TASK_SLUG: normalizeProjectScopedRecordForPersistence(session).taskSlug,
         VCM_ROLE: session.role,

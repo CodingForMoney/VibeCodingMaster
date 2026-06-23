@@ -14,6 +14,7 @@ import {
 import type {
   HarnessApplyResult,
   HarnessBootstrapStatusReport,
+  HarnessFeedbackStateReport,
   HarnessStatusReport
 } from "../shared/types/harness.js";
 import type {
@@ -30,6 +31,7 @@ import type { ClaudePermissionMode, RoleSessionRecord, SessionEffort, SessionMod
 import type { TaskRecord } from "../shared/types/task.js";
 import { CORE_VCM_ROLE_NAMES } from "../shared/constants.js";
 import { AppShell } from "./components/app-shell.js";
+import { HarnessFeedbackReview } from "./components/harness-feedback-review.js";
 import { HarnessStudioModal } from "./components/harness-studio-modal.js";
 import { RepositoryDiffModal } from "./components/repository-diff-modal.js";
 import { TranslatorSessionModal } from "./components/translator-session-modal.js";
@@ -56,6 +58,7 @@ export function App() {
   const [harnessStatusTaskSlug, setHarnessStatusTaskSlug] = useState<string | null>(null);
   const [harnessBootstrapStatusTaskSlug, setHarnessBootstrapStatusTaskSlug] = useState<string | null>(null);
   const [harnessApplyResult, setHarnessApplyResult] = useState<HarnessApplyResult | null>(null);
+  const [harnessFeedbackState, setHarnessFeedbackState] = useState<HarnessFeedbackStateReport | null>(null);
   const [gatewayStatus, setGatewayStatus] = useState<GatewayStatus | null>(null);
   const [gatewayQrLogin, setGatewayQrLogin] = useState<StartGatewayQrLoginResult | null>(null);
   const [gatewayQrCheck, setGatewayQrCheck] = useState<CheckGatewayQrLoginResult | null>(null);
@@ -361,6 +364,16 @@ export function App() {
     return session;
   }
 
+  async function refreshHarnessFeedbackState(taskSlug = activeTask?.taskSlug) {
+    if (!project) {
+      setHarnessFeedbackState(null);
+      return null;
+    }
+    const state = await apiClient.getHarnessFeedbackState(taskSlug);
+    setHarnessFeedbackState(state);
+    return state;
+  }
+
   useEffect(() => {
     Promise.all([
       apiClient.getCurrentProject(),
@@ -474,7 +487,21 @@ export function App() {
     setHarnessBootstrapStatus(null);
     setHarnessStatusTaskSlug(null);
     setHarnessBootstrapStatusTaskSlug(null);
+    setHarnessFeedbackState(null);
   }, [project?.repoRoot]);
+
+  useEffect(() => {
+    if (!project) {
+      setHarnessFeedbackState(null);
+      return;
+    }
+
+    void refreshHarnessFeedbackState(activeTask?.taskSlug).catch((caught: Error) => setError(caught.message));
+    const interval = window.setInterval(() => {
+      void refreshHarnessFeedbackState(activeTask?.taskSlug).catch((caught: Error) => setError(caught.message));
+    }, 4000);
+    return () => window.clearInterval(interval);
+  }, [activeTask?.taskSlug, project?.repoRoot]);
 
   useEffect(() => {
     if (!project) {
@@ -1342,6 +1369,51 @@ export function App() {
             const session = await apiClient.notifyTranslatorHarnessUpdated();
             setTranslatorSession(session);
             syncTranslatorLaunchOptions(session);
+          });
+        }}
+      />
+      <HarnessFeedbackReview
+        busy={busy}
+        state={harnessFeedbackState}
+        onRefresh={() => {
+          void refreshHarnessFeedbackState(activeTask?.taskSlug).catch((caught: Error) => setError(caught.message));
+        }}
+        onApprove={(comment) => {
+          void withBusy(async () => {
+            if (!activeTask) {
+              throw new Error("Create or select a task before approving Harness feedback.");
+            }
+            const state = await apiClient.decideHarnessFeedback({
+              action: "approve",
+              taskSlug: activeTask.taskSlug,
+              comment
+            });
+            setHarnessFeedbackState(state);
+            await refreshHarnessEngineerSession();
+          });
+        }}
+        onComment={(comment) => {
+          void withBusy(async () => {
+            if (!activeTask) {
+              throw new Error("Create or select a task before sending Harness feedback comments.");
+            }
+            const state = await apiClient.decideHarnessFeedback({
+              action: "comment",
+              taskSlug: activeTask.taskSlug,
+              comment
+            });
+            setHarnessFeedbackState(state);
+            await refreshHarnessEngineerSession();
+          });
+        }}
+        onReject={(comment) => {
+          void withBusy(async () => {
+            const state = await apiClient.decideHarnessFeedback({
+              action: "reject",
+              taskSlug: activeTask?.taskSlug,
+              comment
+            });
+            setHarnessFeedbackState(state);
           });
         }}
       />

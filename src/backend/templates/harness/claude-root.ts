@@ -5,7 +5,14 @@ export function renderRootClaudeHarnessRules(): string {
 - Read module-local \`CLAUDE.md\` before editing a subdirectory if one exists.
 - Use \`vcm-route-message\` whenever a VCM role hands off work, asks another role a question, reports a result, reports a blocker, or raises a finding. Follow its write-then-stop rule.
 - Use \`vcm-long-running-validation\` for long-running validation. Follow the background job limits below.
+- Use \`vcm-report-harness-issue\` when you notice a reusable VCM harness problem. Record feedback; do not contact Harness Engineer directly.
 - Project-manager uses \`vcm-gate-review\` at enabled Gate Review trigger points and on VCM Gate Review callbacks.
+
+## VCM Harness Scope
+
+VCM harness includes root \`CLAUDE.md\`, \`.claude/agents/**\`, \`.claude/skills/**\`, \`.ai/tools/**\`, \`.claude/settings.json\`, VCM managed blocks, generated-context tooling, bootstrap rules, routing rules, validation rules, Gate Review rules, Translator rules, and Harness Engineer rules.
+
+If a reusable harness problem is suspected, it is enough to record a concise feedback report with evidence. Harness Engineer decides whether it is real, whether it should be fixed, and which files are in scope.
 
 ## VCM Background Jobs
 

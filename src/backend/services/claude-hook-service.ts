@@ -11,6 +11,7 @@ import type { TerminalRuntime } from "../runtime/terminal-runtime.js";
 import { submitTerminalInput } from "../runtime/terminal-submit.js";
 import type { AppSettingsService } from "./app-settings-service.js";
 import type { HarnessService } from "./harness-service.js";
+import type { HarnessFeedbackService } from "./harness-feedback-service.js";
 import type { JobGuardService } from "./job-guard-service.js";
 import type { MessageService } from "./message-service.js";
 import type { ProjectService } from "./project-service.js";
@@ -39,6 +40,7 @@ export interface ClaudeHookServiceDeps {
   appSettings: Pick<AppSettingsService, "getPreferences">;
   runtime?: Pick<TerminalRuntime, "write">;
   harnessService?: Pick<HarnessService, "recordHarnessBootstrapHook">;
+  harnessFeedbackService?: Pick<HarnessFeedbackService, "recordHarnessEngineerHook">;
   gatewayService?: Pick<GatewayService, "handlePmStop">;
   jobGuard?: Pick<JobGuardService, "evaluateStop" | "notePromptSubmitted">;
 }
@@ -135,6 +137,7 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
       sessionId: session?.id,
       claudeSessionId: stringOrUndefined(input.event.session_id)
     });
+    await deps.harnessFeedbackService?.recordHarnessEngineerHook(context.project.repoRoot, eventName);
     return {
       ok: true,
       eventName,

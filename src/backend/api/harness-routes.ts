@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import type {
   HarnessApplyRequest,
   HarnessBootstrapStatusReport,
+  HarnessFeedbackDecisionRequest,
   HarnessStatusReport,
   RestartHarnessBootstrapRequest,
   StartHarnessBootstrapRequest,
@@ -9,6 +10,7 @@ import type {
 } from "../../shared/types/harness.js";
 import { isOpenFileLimitError, VcmError } from "../errors.js";
 import type { HarnessService } from "../services/harness-service.js";
+import type { HarnessFeedbackService } from "../services/harness-feedback-service.js";
 import type { ProjectService } from "../services/project-service.js";
 import type { SessionService } from "../services/session-service.js";
 import type { TaskService } from "../services/task-service.js";
@@ -17,6 +19,7 @@ import type { StartRoleSessionRequest } from "../../shared/types/session.js";
 export interface HarnessRouteDeps {
   projectService: ProjectService;
   harnessService: HarnessService;
+  harnessFeedbackService: HarnessFeedbackService;
   sessionService: Pick<
     SessionService,
     | "getProjectHarnessEngineerSession"
@@ -90,11 +93,13 @@ export function registerHarnessRoutes(app: FastifyInstance, deps: HarnessRouteDe
 
   app.post<{ Body: StartHarnessBootstrapRequest }>("/api/projects/harness/bootstrap/start", async (request) => {
     const { project, task } = await requireHarnessTaskContext(deps, request.body?.taskSlug);
+    await deps.harnessFeedbackService.assertHarnessEngineerAvailable(project.repoRoot);
     return deps.harnessService.startHarnessBootstrap(project.repoRoot, task.worktreePath, request.body ?? {});
   });
 
   app.post<{ Body: RestartHarnessBootstrapRequest }>("/api/projects/harness/bootstrap/restart", async (request) => {
     const { project, task } = await requireHarnessTaskContext(deps, request.body?.taskSlug);
+    await deps.harnessFeedbackService.assertHarnessEngineerAvailable(project.repoRoot);
     return deps.harnessService.restartHarnessBootstrap(project.repoRoot, task.worktreePath, request.body ?? {});
   });
 
@@ -105,6 +110,7 @@ export function registerHarnessRoutes(app: FastifyInstance, deps: HarnessRouteDe
 
   app.post<{ Body: { taskSlug?: string } }>("/api/projects/harness/bootstrap/run", async (request) => {
     const { project, task } = await requireHarnessTaskContext(deps, request.body?.taskSlug);
+    await deps.harnessFeedbackService.assertHarnessEngineerAvailable(project.repoRoot);
     return deps.harnessService.runHarnessBootstrap(project.repoRoot, task.worktreePath);
   });
 
@@ -141,6 +147,30 @@ export function registerHarnessRoutes(app: FastifyInstance, deps: HarnessRouteDe
   app.post("/api/projects/harness/engineer/session/notify-harness", async () => {
     const project = await requireCurrentProject(deps.projectService);
     return deps.sessionService.notifyProjectHarnessEngineerHarnessUpdated(project.repoRoot);
+  });
+
+  app.get<{ Querystring: { taskSlug?: string } }>("/api/projects/harness/feedback", async (request) => {
+    const project = await requireCurrentProject(deps.projectService);
+    const taskSlug = await normalizeOptionalTaskSlug(deps, project.repoRoot, request.query.taskSlug);
+    return deps.harnessFeedbackService.getState(project.repoRoot, taskSlug);
+  });
+
+  app.post<{ Body: HarnessFeedbackDecisionRequest }>("/api/projects/harness/feedback/decision", async (request) => {
+    const project = await requireCurrentProject(deps.projectService);
+    const action = request.body?.action;
+    if (action !== "approve" && action !== "reject" && action !== "comment") {
+      throw new VcmError({
+        code: "HARNESS_FEEDBACK_DECISION_INVALID",
+        message: "Harness feedback decision action is invalid.",
+        statusCode: 400
+      });
+    }
+    const taskSlug = await normalizeOptionalTaskSlug(deps, project.repoRoot, request.body?.taskSlug);
+    return deps.harnessFeedbackService.decide(project.repoRoot, {
+      action,
+      taskSlug,
+      comment: typeof request.body?.comment === "string" ? request.body.comment : undefined
+    });
   });
 }
 
@@ -203,4 +233,17 @@ async function requireHarnessTaskContext(deps: HarnessRouteDeps, taskSlug: strin
   }
   const task = await deps.taskService.loadTask(project.repoRoot, normalizedTaskSlug);
   return { project, task };
+}
+
+async function normalizeOptionalTaskSlug(
+  deps: HarnessRouteDeps,
+  repoRoot: string,
+  taskSlug: string | undefined
+): Promise<string | undefined> {
+  const normalizedTaskSlug = taskSlug?.trim();
+  if (!normalizedTaskSlug) {
+    return undefined;
+  }
+  await deps.taskService.loadTask(repoRoot, normalizedTaskSlug);
+  return normalizedTaskSlug;
 }

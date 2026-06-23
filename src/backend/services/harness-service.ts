@@ -45,6 +45,7 @@ import { renderReviewerHarnessRules } from "../templates/harness/reviewer-agent.
 import { renderVcmFinalAcceptanceSkillRules } from "../templates/harness/vcm-final-acceptance-skill.js";
 import { renderVcmHarnessBootstrapSkillRules } from "../templates/harness/vcm-harness-bootstrap-skill.js";
 import { renderVcmLongRunningValidationSkillRules } from "../templates/harness/vcm-long-running-validation-skill.js";
+import { renderVcmReportHarnessIssueSkillRules } from "../templates/harness/vcm-report-harness-issue-skill.js";
 import { renderVcmRouteMessageSkillRules } from "../templates/harness/vcm-route-message-skill.js";
 import type { TerminalRuntime } from "../runtime/terminal-runtime.js";
 import { submitTerminalInput } from "../runtime/terminal-submit.js";
@@ -221,6 +222,17 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
     ),
     ownership: "whole-file",
     renderRules: renderVcmGateReviewSkillRules
+  },
+  {
+    kind: "skill-vcm-report-harness-issue",
+    path: ".claude/skills/vcm-report-harness-issue/SKILL.md",
+    title: "VCM Report Harness Issue Skill",
+    frontmatter: renderSkillFrontmatter(
+      "vcm-report-harness-issue",
+      "Use when a VCM role notices a reusable harness problem and needs to record feedback for Harness Engineer review."
+    ),
+    ownership: "whole-file",
+    renderRules: renderVcmReportHarnessIssueSkillRules
   },
   {
     kind: "agent-gate-reviewer",

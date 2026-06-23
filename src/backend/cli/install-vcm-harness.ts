@@ -22,6 +22,7 @@ import { renderReviewerHarnessRules } from "../templates/harness/reviewer-agent.
 import { renderVcmFinalAcceptanceSkillRules } from "../templates/harness/vcm-final-acceptance-skill.js";
 import { renderVcmHarnessBootstrapSkillRules } from "../templates/harness/vcm-harness-bootstrap-skill.js";
 import { renderVcmLongRunningValidationSkillRules } from "../templates/harness/vcm-long-running-validation-skill.js";
+import { renderVcmReportHarnessIssueSkillRules } from "../templates/harness/vcm-report-harness-issue-skill.js";
 import { renderVcmRouteMessageSkillRules } from "../templates/harness/vcm-route-message-skill.js";
 
 const HARNESS_VERSION = "0.3.0-fixed";
@@ -237,6 +238,17 @@ const WHOLE_FILES = [
       "vcm-gate-review",
       "Use when project-manager reaches a Gate Review trigger or receives a VCM Gate Review callback.",
       renderVcmGateReviewSkillRules()
+    )
+  },
+  {
+    path: ".claude/skills/vcm-report-harness-issue/SKILL.md",
+    category: "skill",
+    mode: 0o644,
+    content: renderSkillFile(
+      "VCM Report Harness Issue Skill",
+      "vcm-report-harness-issue",
+      "Use when a VCM role notices a reusable harness problem and needs to record feedback for Harness Engineer review.",
+      renderVcmReportHarnessIssueSkillRules()
     )
   },
   {
@@ -473,6 +485,7 @@ function fixedDirectories() {
     ".claude/skills/vcm-long-running-validation/",
     ".claude/skills/vcm-route-message/",
     ".claude/skills/vcm-gate-review/",
+    ".claude/skills/vcm-report-harness-issue/",
     ".ai/vcm/translations/",
     ".ai/vcm/gate-reviews/",
     ".ai/tools/",

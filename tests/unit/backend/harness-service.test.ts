@@ -12,23 +12,25 @@ describe("createHarnessService", () => {
   it("plans and applies recommended harness files when they are missing", async () => {
     const fs = createMemoryFs();
     const service = createHarnessService({ fs });
+    const expectedHarnessFileCount = 18;
 
     const status = await service.getHarnessStatus("/repo");
     expect(status.needsApply).toBe(true);
     // B1: a fresh repo with every harness file missing is not yet initialized.
     expect(status.initialized).toBe(false);
-    expect(status.plannedChanges).toHaveLength(17);
-    expect(status.plannedChanges.map((change) => change.action)).toEqual(Array(17).fill("create"));
+    expect(status.plannedChanges).toHaveLength(expectedHarnessFileCount);
+    expect(status.plannedChanges.map((change) => change.action)).toEqual(Array(expectedHarnessFileCount).fill("create"));
 
     const result = await service.applyHarness("/repo");
-    expect(result.changedFiles).toHaveLength(17);
+    expect(result.changedFiles).toHaveLength(expectedHarnessFileCount);
 
     const nextStatus = await service.getHarnessStatus("/repo");
     expect(nextStatus.needsApply).toBe(false);
     // B2: once the harness is applied, VCM markers exist -> initialized.
     expect(nextStatus.initialized).toBe(true);
-    expect(nextStatus.files.map((file) => file.action)).toEqual(Array(17).fill("ok"));
+    expect(nextStatus.files.map((file) => file.action)).toEqual(Array(expectedHarnessFileCount).fill("ok"));
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("## VCM Start Here");
+    expect(await fs.readText("/repo/CLAUDE.md")).toContain("## VCM Harness Scope");
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("## VCM Task Flow");
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("## VCM Worktree Policy");
     expect(await fs.readText("/repo/.gitignore")).toContain("# VCM:BEGIN version=1");
@@ -52,6 +54,8 @@ describe("createHarnessService", () => {
     expect(await fs.readText("/repo/.claude/skills/vcm-long-running-validation/SKILL.md")).toContain(".ai/tools/watch-job");
     expect(await fs.readText("/repo/.claude/skills/vcm-gate-review/SKILL.md")).toContain("name: vcm-gate-review");
     expect(await fs.readText("/repo/.claude/skills/vcm-gate-review/SKILL.md")).toContain(".ai/tools/request-gate-review");
+    expect(await fs.readText("/repo/.claude/skills/vcm-report-harness-issue/SKILL.md")).toContain("name: vcm-report-harness-issue");
+    expect(await fs.readText("/repo/.claude/skills/vcm-report-harness-issue/SKILL.md")).toContain(".ai/vcm/harness-feedback/pending/");
     expect(await fs.readText("/repo/.claude/agents/project-manager.md")).toContain("name: project-manager");
     expect(await fs.readText("/repo/.claude/agents/project-manager.md")).toContain("<!-- VCM:BEGIN version=1 -->");
     expect(await fs.readText("/repo/.claude/agents/project-manager.md")).toContain("Use the routes defined in `CLAUDE.md`");

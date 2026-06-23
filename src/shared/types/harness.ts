@@ -10,6 +10,7 @@ export type HarnessFileKind =
   | "skill-vcm-long-running-validation"
   | "skill-vcm-route-message"
   | "skill-vcm-gate-review"
+  | "skill-vcm-report-harness-issue"
   | "agent-gate-reviewer"
   | "agent-translator"
   | "agent-harness-engineer"
@@ -216,4 +217,46 @@ export interface RecordHarnessBootstrapHookInput {
   eventName: "Stop" | "StopFailure" | "UserPromptSubmit" | "PostCompact";
   sessionId?: string;
   claudeSessionId?: string;
+}
+
+export type HarnessFeedbackStatus =
+  | "idle"
+  | "queued"
+  | "analyzing"
+  | "awaiting_user_approval"
+  | "applying";
+
+export interface HarnessFeedbackQueueItem {
+  id: string;
+  title: string;
+  path: string;
+  reporterRole?: string;
+  taskSlug?: string;
+  summary?: string;
+}
+
+export interface HarnessFeedbackActiveItem extends HarnessFeedbackQueueItem {
+  status: Exclude<HarnessFeedbackStatus, "idle" | "queued">;
+  startedAt?: string;
+  updatedAt?: string;
+  feedbackContent: string;
+  analysisPath?: string;
+  analysisContent?: string;
+  applyReportPath?: string;
+  applyReportContent?: string;
+}
+
+export interface HarnessFeedbackStateReport {
+  version: 1;
+  status: HarnessFeedbackStatus;
+  queuedCount: number;
+  pending: HarnessFeedbackQueueItem[];
+  active?: HarnessFeedbackActiveItem;
+  warnings: string[];
+}
+
+export interface HarnessFeedbackDecisionRequest {
+  taskSlug?: string;
+  action: "approve" | "reject" | "comment";
+  comment?: string;
 }
