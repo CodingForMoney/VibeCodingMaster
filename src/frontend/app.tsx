@@ -26,7 +26,7 @@ import type { GateReviewGate, GateReviewIndex } from "../shared/types/gate-revie
 import type { VcmOrchestrationState, VcmRoleMessage } from "../shared/types/message.js";
 import type { ProjectSummary } from "../shared/types/project.js";
 import type { RoleName } from "../shared/types/role.js";
-import type { VcmSessionRoundState } from "../shared/types/round.js";
+import type { VcmRoundStatus, VcmSessionRoundState } from "../shared/types/round.js";
 import type { ClaudePermissionMode, RoleSessionRecord, SessionEffort, SessionModel } from "../shared/types/session.js";
 import type { TaskRecord } from "../shared/types/task.js";
 import { CORE_VCM_ROLE_NAMES } from "../shared/constants.js";
@@ -100,6 +100,8 @@ export function App() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const notifiedFlowPauseKeyRef = useRef<Record<string, string>>({});
+  const observedFlowPauseStateRef = useRef<Record<string, { status: VcmRoundStatus }>>({});
+  const activeTaskViewStartedAtRef = useRef<Record<string, number>>({});
   const flowPauseAlarmRef = useRef<number | null>(null);
   const gatewayContextSyncKeyRef = useRef("");
   const translatorEnsureKeyRef = useRef("");
@@ -181,6 +183,12 @@ export function App() {
     setFlowPauseNotice(null);
   }, [stopFlowPauseAlarm]);
 
+  useEffect(() => {
+    if (activeTask?.taskSlug) {
+      activeTaskViewStartedAtRef.current[activeTask.taskSlug] = Date.now();
+    }
+  }, [activeTask?.taskSlug]);
+
   const handleMessagesChanged = useCallback((messages: VcmRoleMessage[]) => {
     if (activeTask?.taskSlug) {
       setActiveMessages({ taskSlug: activeTask.taskSlug, messages });
@@ -208,15 +216,21 @@ export function App() {
       setActiveRole("gate-reviewer");
     }
     if (roundState.status !== "stopped" || !roundState.roundId) {
+      observedFlowPauseStateRef.current[roundState.taskSlug] = { status: roundState.status };
       return;
     }
 
     const pauseKey = getFlowPauseNotificationKey(roundState);
     const previousPauseKey = notifiedFlowPauseKeyRef.current[roundState.taskSlug];
+    const previousObservation = observedFlowPauseStateRef.current[roundState.taskSlug];
+    observedFlowPauseStateRef.current[roundState.taskSlug] = { status: roundState.status };
     if (previousPauseKey === pauseKey) {
       return;
     }
     notifiedFlowPauseKeyRef.current[roundState.taskSlug] = pauseKey;
+    if (!shouldShowFlowPauseNotice(roundState, previousObservation, activeTaskViewStartedAtRef.current[roundState.taskSlug])) {
+      return;
+    }
 
     const roleLabel = roundState.activeRole ?? "role";
     const sound = !pauseAlertSound
@@ -1557,6 +1571,23 @@ function getFlowPauseDurationMs(roundState: VcmSessionRoundState): number {
     return 0;
   }
   return Math.max(0, endedAt - startedAt);
+}
+
+function shouldShowFlowPauseNotice(
+  roundState: VcmSessionRoundState,
+  previousObservation: { status: VcmRoundStatus } | undefined,
+  taskViewStartedAtMs: number | undefined
+): boolean {
+  if (previousObservation?.status === "running") {
+    return true;
+  }
+
+  const stoppedAtMs = Date.parse(roundState.stoppedAt ?? roundState.lastTurnEndedAt ?? "");
+  return Boolean(
+    taskViewStartedAtMs &&
+    Number.isFinite(stoppedAtMs) &&
+    stoppedAtMs > taskViewStartedAtMs
+  );
 }
 
 function getFlowPauseNotificationKey(roundState: VcmSessionRoundState): string {
