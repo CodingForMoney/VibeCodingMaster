@@ -191,9 +191,6 @@ export function ProjectDashboard({
 
   useEffect(() => {
     setOpenSidebarSection((current) => {
-      if (activeTaskSlug && current === "repository") {
-        return null;
-      }
       if (!activeTaskSlug && current === null) {
         return project ? "task" : "repository";
       }
