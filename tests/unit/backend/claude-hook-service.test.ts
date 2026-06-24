@@ -377,8 +377,16 @@ describe("createClaudeHookService", () => {
       "get-session:coder",
       "mark-running:coder"
     ]);
-    expect(writes.join("\n")).toContain("[VCM Recovery]");
-    expect(writes.join("\n")).toContain("Continue the same assigned work");
+    expect(writes.join("")).toContain([
+      "[VCM Recovery]",
+      "Previous turn ended unexpectedly. Continue from current repo + VCM handoff state.",
+      "",
+      "Check whether your assigned work is already complete.",
+      "If complete, write the expected VCM completion artifact now.",
+      "Do not repeat completed edits, validation, or route messages."
+    ].join("\n"));
+    expect(writes.join("\n")).not.toContain("Recovery attempt");
+    expect(writes.join("\n")).not.toContain("Continue the same assigned work");
     expect(writes.at(-1)).toBe("\r");
   });
 

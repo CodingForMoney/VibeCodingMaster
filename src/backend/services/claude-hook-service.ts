@@ -429,7 +429,7 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
     }
 
     stopFailureRecoveryAttempts.set(key, attempt);
-    await submitTerminalInput(deps.runtime, session.id, renderStopFailureRecoveryPrompt(attempt));
+    await submitTerminalInput(deps.runtime, session.id, renderStopFailureRecoveryPrompt());
     await deps.sessionService.markRoleActivityRunning(context.project.repoRoot, context.taskSlug, input.role);
     return true;
   }
@@ -442,14 +442,14 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
     return `${repoRoot}:${taskSlug}:${role}`;
   }
 
-  function renderStopFailureRecoveryPrompt(attempt: number): string {
+  function renderStopFailureRecoveryPrompt(): string {
     return [
       "[VCM Recovery]",
-      "Your previous turn ended unexpectedly after context compaction or an API error.",
-      "Continue the same assigned work from the current repository and VCM handoff state.",
-      "Do not repeat completed edits, duplicate validation, or duplicate route messages.",
-      "If the assigned work is already complete, write/send the expected VCM handoff now.",
-      `Recovery attempt: ${attempt}/${MAX_STOP_FAILURE_RECOVERY_ATTEMPTS}.`
+      "Previous turn ended unexpectedly. Continue from current repo + VCM handoff state.",
+      "",
+      "Check whether your assigned work is already complete.",
+      "If complete, write the expected VCM completion artifact now.",
+      "Do not repeat completed edits, validation, or route messages."
     ].join("\n");
   }
 
