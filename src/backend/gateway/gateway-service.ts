@@ -846,7 +846,7 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
         })).englishPreview
       : text;
 
-    await submitTerminalInput(deps.runtime, session.id, `[VCM Gateway]\n${englishText}`);
+    await submitTerminalInput(deps.runtime, session.id, englishText);
     return "Sent to PM.";
   }
 

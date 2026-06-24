@@ -99,6 +99,36 @@ describe("gateway-service long connection", () => {
     service.stop();
   });
 
+  it("forwards gateway chat text to PM without a VCM Gateway marker", async () => {
+    const settings = createSettings({
+      enabled: true,
+      translationEnabled: false,
+      binding: {
+        token: "token-1",
+        boundUserId: "user-1",
+        loginUserId: "user-1"
+      } as Partial<GatewaySettingsFile["binding"]> as GatewaySettingsFile["binding"]
+    });
+    const sentTexts: string[] = [];
+    const runtimeWrites: string[] = [];
+    const channel = createChannel([
+      { messageId: "m1", fromUserId: "user-1", text: "please continue" }
+    ], sentTexts);
+    const service = createService({
+      settings,
+      channel,
+      pmSession: createPmSession(),
+      runtimeWrites
+    });
+
+    await service.start();
+    await waitFor(() => runtimeWrites.length === 1);
+
+    expect(runtimeWrites[0]).toContain("please continue");
+    expect(runtimeWrites[0]).not.toContain("[VCM Gateway]");
+    service.stop();
+  });
+
   it("returns the latest cached PM reply when /start enables Gateway", async () => {
     const transcriptDir = await mkdtemp(join(tmpdir(), "vcm-gateway-transcript-"));
     const transcriptPath = join(transcriptDir, "pm.jsonl");
@@ -331,6 +361,8 @@ function createService(input: {
   settings: GatewaySettingsService;
   channel: GatewayChannelAdapter & { getUpdatesCalls: number };
   preferenceUpdates?: unknown[];
+  pmSession?: RoleSessionRecord | null;
+  runtimeWrites?: string[];
   translateGatewayOutput?: (input: {
     repoRoot: string;
     taskSlug: string;
@@ -389,7 +421,7 @@ function createService(input: {
     } as never,
     sessionService: {
       async getRoleSession() {
-        return null;
+        return input.pmSession ?? null;
       },
       async listRoleSessions() {
         return [];
@@ -433,7 +465,8 @@ function createService(input: {
       }
     },
     runtime: {
-      write() {
+      write(_sessionId: string, data: string) {
+        input.runtimeWrites?.push(data);
         return undefined;
       }
     },
@@ -657,7 +690,7 @@ function createTask(): TaskRecord {
   };
 }
 
-function createPmSession(transcriptPath: string): RoleSessionRecord {
+function createPmSession(transcriptPath?: string): RoleSessionRecord {
   return {
     id: "pm-session",
     claudeSessionId: "claude-pm-session",
