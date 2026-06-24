@@ -116,7 +116,7 @@ describe("createSessionService", () => {
     ]);
   });
 
-  it("starts Gate Reviewer as a project-scoped Claude Code session", async () => {
+  it("starts Gate Reviewer as a task-scoped Claude Code session", async () => {
     const fs = createMemoryFs();
     const runtimeInputs: CreateTerminalSessionInput[] = [];
     const service = createTestSessionService(fs, runtimeInputs, [], {
@@ -133,9 +133,9 @@ describe("createSessionService", () => {
     expect(started.taskSlug).toBe("demo-task");
     expect(started.model).toBe("claude-opus-4-8[1m]");
     expect(started.effort).toBe("high");
-    expect(started.transcriptPath).toMatch(/\.claude\/projects\/-repo\/[0-9a-f-]{36}\.jsonl$/);
+    expect(started.transcriptPath).toMatch(/\.claude\/projects\/-repo-\.claude-worktrees-demo-task\/[0-9a-f-]{36}\.jsonl$/);
     expect(runtimeInputs[0]?.command).toBe("claude");
-    expect(runtimeInputs[0]?.cwd).toBe("/repo");
+    expect(runtimeInputs[0]?.cwd).toBe(TASK_WORKTREE);
     expect(runtimeInputs[0]?.args).toEqual([
       "--agent",
       "gate-reviewer",
@@ -153,13 +153,11 @@ describe("createSessionService", () => {
       VCM_TASK_SLUG: "demo-task",
       VCM_ROLE: "gate-reviewer"
     });
-    expect(started.activeTaskSlug).toBe("demo-task");
-    expect(started.activeTaskRepoRoot).toBe(TASK_WORKTREE);
-    await expect(fs.pathExists("/repo/.ai/vcm/gate-reviewer/session.json")).resolves.toBe(true);
-    await expect(fs.pathExists(`${TASK_WORKTREE}/.ai/vcm/sessions/demo-task.json`)).resolves.toBe(false);
+    await expect(fs.pathExists("/repo/.ai/vcm/gate-reviewer/session.json")).resolves.toBe(false);
+    await expect(fs.pathExists(`${TASK_WORKTREE}/.ai/vcm/sessions/demo-task.json`)).resolves.toBe(true);
   });
 
-  it("resumes Gate Reviewer across tasks with the same project session", async () => {
+  it("keeps Gate Reviewer sessions isolated per task", async () => {
     const fs = createMemoryFs();
     const firstRuntimeInputs: CreateTerminalSessionInput[] = [];
     const firstService = createTestSessionService(fs, firstRuntimeInputs);
@@ -169,22 +167,17 @@ describe("createSessionService", () => {
     const secondRuntimeInputs: CreateTerminalSessionInput[] = [];
     const secondService = createTestSessionService(fs, secondRuntimeInputs);
     const recovered = await secondService.getRoleSession("/repo", "another-task", "gate-reviewer");
-    expect(recovered).toMatchObject({
-      role: "gate-reviewer",
-      taskSlug: "another-task",
-      status: "resumable",
-      claudeSessionId: started.claudeSessionId
-    });
+    expect(recovered).toBeUndefined();
 
-    const resumed = await secondService.resumeRoleSession("/repo", "another-task", "gate-reviewer");
-    expect(resumed.claudeSessionId).toBe(started.claudeSessionId);
-    expect(resumed.taskSlug).toBe("another-task");
-    expect(secondRuntimeInputs[0]?.cwd).toBe("/repo");
+    const nextTask = await secondService.startRoleSession("/repo", "another-task", "gate-reviewer");
+    expect(nextTask.claudeSessionId).not.toBe(started.claudeSessionId);
+    expect(nextTask.taskSlug).toBe("another-task");
+    expect(secondRuntimeInputs[0]?.cwd).toBe("/repo/.claude/worktrees/another-task");
     expect(secondRuntimeInputs[0]?.args).toEqual([
       "--agent",
       "gate-reviewer",
-      "--resume",
-      started.claudeSessionId,
+      "--session-id",
+      nextTask.claudeSessionId,
       "--model",
       "default"
     ]);
@@ -675,7 +668,7 @@ describe("createSessionService", () => {
     });
   });
 
-  it("records Gate Reviewer hook activity on the project-scoped session", async () => {
+  it("records Gate Reviewer hook activity on the task-scoped session", async () => {
     const fs = createMemoryFs();
     const service = createTestSessionService(fs, []);
     const started = await service.startRoleSession("/repo", "demo-task", "gate-reviewer");
@@ -687,16 +680,16 @@ describe("createSessionService", () => {
       role: "gate-reviewer",
       eventName: "UserPromptSubmit",
       sessionId: "claude_session_123",
-      transcriptPath: "/Users/sheldon/.claude/projects/-repo/claude_session_123.jsonl",
-      cwd: "/repo",
+      transcriptPath: "/Users/sheldon/.claude/projects/-repo-.claude-worktrees-demo-task/claude_session_123.jsonl",
+      cwd: TASK_WORKTREE,
       allowSessionMismatch: true
     });
     expect(running).toMatchObject({
       role: "gate-reviewer",
       taskSlug: "demo-task",
       claudeSessionId: "claude_session_123",
-      transcriptPath: "/Users/sheldon/.claude/projects/-repo/claude_session_123.jsonl",
-      cwd: "/repo",
+      transcriptPath: "/Users/sheldon/.claude/projects/-repo-.claude-worktrees-demo-task/claude_session_123.jsonl",
+      cwd: TASK_WORKTREE,
       activityStatus: "running",
       lastTurnStartedAt: "2026-05-29T00:00:00.000Z"
     });

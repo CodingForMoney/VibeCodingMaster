@@ -30,11 +30,9 @@ VCM owns:
 
 - global Gate Review switches in `~/.vcm/settings.json`
 - current task gate state under `<taskRepoRoot>/.ai/vcm/gate-reviews/`
-- starting/resuming the project-scoped Gate Reviewer Claude Code session
+- starting/resuming the task-scoped Gate Reviewer Claude Code session
 - sending the gate prompt
 - waiting for the report
-- binding the project-scoped Gate Reviewer session to the current task for hook,
-  Round, and translation state
 - sending the callback to PM
 
 PM owns:
@@ -51,21 +49,15 @@ Gate Reviewer owns:
 
 ## Session Scope
 
-Gate Reviewer is project-scoped:
+Gate Reviewer is task-scoped, like the normal VCM roles:
 
 ```text
-<baseRepoRoot>/.ai/vcm/gate-reviewer/session.json
+<taskRepoRoot>/<stateRoot>/sessions/<taskSlug>.json
 ```
 
-The session is reusable across tasks in the same project. The gate prompt must
-therefore name the current task and task worktree path explicitly. Prior
-session memory can help orientation, but only current worktree evidence can
+Each task gets its own Gate Reviewer session. The gate prompt names the current
+task and task worktree path explicitly, and only current worktree evidence can
 decide the gate.
-
-When a task uses Gate Reviewer, VCM records the active task binding on the
-project session. Hook events from the long-lived session are resolved through
-that binding so Round state and translation output are written to the current
-task.
 
 Gate reports remain task-scoped:
 
@@ -127,9 +119,8 @@ Task runtime files:
 PM reaches gate
   -> PM uses vcm-gate-review
   -> VCM checks global gate switch and task state
-  -> VCM starts or resumes project Gate Reviewer session
+  -> VCM starts or resumes the task Gate Reviewer session
   -> VCM sends short prompt with task/worktree/report paths
-  -> VCM binds Gate Reviewer to the current task
   -> Gate Reviewer writes report
   -> standard Claude hooks update Gate Reviewer activity/Round state
   -> VCM validates report
@@ -137,5 +128,5 @@ PM reaches gate
   -> PM continues or routes follow-up
 ```
 
-Close Task stops task-scoped VCM role sessions only. It must not stop the
-project-scoped Gate Reviewer session.
+Close Task stops the task-scoped Gate Reviewer session with the other VCM role
+sessions.

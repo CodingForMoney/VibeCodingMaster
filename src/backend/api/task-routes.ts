@@ -1,5 +1,5 @@
 import type { FastifyInstance } from "fastify";
-import { CORE_VCM_ROLE_NAMES, DISPATCHABLE_ROLES } from "../../shared/constants.js";
+import { DISPATCHABLE_ROLES, VCM_ROLE_NAMES } from "../../shared/constants.js";
 import type { ArtifactSummary } from "../../shared/types/artifact.js";
 import type { DispatchableRole } from "../../shared/types/role.js";
 import type { TaskStatusReport } from "../../shared/types/api.js";
@@ -72,7 +72,7 @@ async function stopRunningRoleSessions(
 ): Promise<void> {
   const sessions = await deps.sessionService.listRoleSessions(repoRoot, taskSlug);
   for (const session of sessions) {
-    if (session.status === "running" && CORE_VCM_ROLE_NAMES.some((role) => role === session.role)) {
+    if (session.status === "running" && VCM_ROLE_NAMES.some((role) => role === session.role)) {
       await deps.sessionService.stopRoleSession(repoRoot, taskSlug, session.role);
     }
   }

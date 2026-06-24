@@ -146,8 +146,6 @@ export interface RoleSessionRecord {
   harnessCurrentRevision?: number;
   harnessOutdated?: boolean;
   lastHarnessNotifyAt?: string;
-  activeTaskSlug?: string;
-  activeTaskRepoRoot?: string;
   exitCode?: number | null;
 }
 

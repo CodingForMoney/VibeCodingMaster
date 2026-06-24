@@ -29,7 +29,7 @@ import type { RoleName } from "../shared/types/role.js";
 import type { VcmRoundStatus, VcmSessionRoundState } from "../shared/types/round.js";
 import type { ClaudePermissionMode, RoleSessionRecord, SessionEffort, SessionModel } from "../shared/types/session.js";
 import type { TaskRecord } from "../shared/types/task.js";
-import { CORE_VCM_ROLE_NAMES } from "../shared/constants.js";
+import { VCM_ROLE_NAMES } from "../shared/constants.js";
 import { AppShell } from "./components/app-shell.js";
 import { HarnessFeedbackReview } from "./components/harness-feedback-review.js";
 import { HarnessStudioModal } from "./components/harness-studio-modal.js";
@@ -1097,7 +1097,7 @@ export function App() {
               }
 
               const status = await apiClient.getTaskStatus(activeTask.taskSlug);
-              if (status.sessions.some((session) => CORE_VCM_ROLE_NAMES.some((role) => role === session.role))) {
+              if (status.sessions.some((session) => VCM_ROLE_NAMES.some((role) => role === session.role))) {
                 throw new Error("One-click start is only available before any role session has started.");
               }
 
@@ -1120,9 +1120,6 @@ export function App() {
                 };
                 const existingSession = status.sessions.find((session) => session.role === roleLaunch.role);
                 if (existingSession?.status === "running") {
-                  if (roleLaunch.role === "gate-reviewer") {
-                    await apiClient.resumeRoleSession(activeTask.taskSlug, roleLaunch.role, sessionInput);
-                  }
                   continue;
                 }
                 if (existingSession?.claudeSessionId) {

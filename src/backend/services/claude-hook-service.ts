@@ -149,20 +149,8 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
   }
 
   async function resolveHookTaskSlug(repoRoot: string, input: ClaudeHookRequest): Promise<string> {
-    if (!isGateReviewerRoleName(input.role)) {
-      return input.taskSlug;
-    }
-
-    const session = await deps.sessionService.getProjectGateReviewerSession(repoRoot);
-    if (session?.activeTaskSlug) {
-      return session.activeTaskSlug;
-    }
-    throw new VcmError({
-      code: "GATE_REVIEWER_TASK_UNBOUND",
-      message: "Gate Reviewer hook arrived without an active task binding.",
-      statusCode: 409,
-      hint: "Start or resume Gate Reviewer from the current task before submitting work."
-    });
+    void repoRoot;
+    return input.taskSlug;
   }
 
   async function handleUserPromptSubmitHook(input: ClaudeHookRequest): Promise<ClaudeHookResult> {

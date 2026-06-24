@@ -129,7 +129,6 @@ Task runtime state lives in the task worktree:
 Project-scoped runtime state lives in the base repository:
 
 ```text
-<baseRepoRoot>/.ai/vcm/gate-reviewer/session.json
 <baseRepoRoot>/.ai/vcm/harness-engineer/session.json
 <baseRepoRoot>/.ai/vcm/translations/
 <baseRepoRoot>/.ai/vcm/bootstrap/session.json
@@ -154,7 +153,7 @@ session recovery.
 
 Close Task removes the task-owned worktree, branch, app-local task record, and
 task-local runtime state. It stops task-scoped VCM role sessions for that task.
-It must not stop project-scoped Gate Reviewer or Translator sessions.
+It must not stop project-scoped Translator or Harness Engineer sessions.
 
 Durable facts that should survive task cleanup must be promoted into code,
 tests, durable docs, PR text, commit history, or release notes before closing

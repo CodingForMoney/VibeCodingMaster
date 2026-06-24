@@ -87,8 +87,8 @@ project-manager
 For complex tasks, VCM supports optional Gate Review Gates through a
 `gate-reviewer` Claude Code role. Gate Reviewer is a VCM flow role with the same
 hook, Round, terminal, and translation behavior as the core roles. Its session
-is project-scoped and reusable across tasks, but each gate turn is bound to the
-current task and task worktree so task evidence stays explicit.
+is task-scoped: each task gets its own Gate Reviewer session in the active task
+worktree.
 
 ```text
 architect architecture plan
@@ -109,9 +109,9 @@ default to off.
 
 When any gate is on, or when a Gate Reviewer session already exists, the task
 workspace shows `Gate Reviewer` as a fifth terminal role. VCM sends a short gate
-prompt into that project session and binds the session to the current task for
-hooks, Round state, translation, and report polling. The role remains outside PM
-route-file dispatch.
+prompt into that task session and uses the normal role hook path for Round
+state, translation, and report polling. The role remains outside PM route-file
+dispatch.
 Architecture-plan findings return to architect, validation-adequacy findings
 return to reviewer, and final-diff findings go to architect first for
 assessment. Gate Reviewer role rules live in `.claude/agents/gate-reviewer.md`.
@@ -823,7 +823,6 @@ Task worktree local files:
 Project-scoped local files:
 
 ```text
-.ai/vcm/gate-reviewer/session.json
 .ai/vcm/harness-engineer/session.json
 .ai/vcm/translations/
 .ai/vcm/bootstrap/session.json

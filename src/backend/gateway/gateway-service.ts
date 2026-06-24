@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { CORE_VCM_ROLE_DEFINITIONS, CORE_VCM_ROLE_NAMES, GATE_REVIEWER_ROLE_DEFINITION } from "../../shared/constants.js";
+import { CORE_VCM_ROLE_DEFINITIONS, GATE_REVIEWER_ROLE_DEFINITION, VCM_ROLE_NAMES } from "../../shared/constants.js";
 import type {
   GatewayDiagnostics
 } from "../../shared/types/diagnostics.js";
@@ -560,9 +560,6 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
         };
         const existing = await deps.sessionService.getRoleSession(project.repoRoot, task.taskSlug, definition.name);
         if (existing?.status === "running") {
-          if (definition.name === "gate-reviewer") {
-            await deps.sessionService.resumeRoleSession(project.repoRoot, task.taskSlug, definition.name, sessionInput);
-          }
           startedRoles.push(definition.name);
           continue;
         }
@@ -695,7 +692,7 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
   async function stopRunningRoleSessions(repoRoot: string, taskSlug: string): Promise<void> {
     const sessions = await deps.sessionService.listRoleSessions(repoRoot, taskSlug);
     for (const session of sessions) {
-      if (session.status === "running" && CORE_VCM_ROLE_NAMES.some((role) => role === session.role)) {
+      if (session.status === "running" && VCM_ROLE_NAMES.some((role) => role === session.role)) {
         await deps.sessionService.stopRoleSession(repoRoot, taskSlug, session.role);
       }
     }
