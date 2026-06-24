@@ -27,6 +27,8 @@ tools: Read, Grep, Glob, Bash, Edit, Write
 - Validate behavior against the approved task scope, architecture plan, and public contracts through tests or observable behavior.
 - Design and run the L1/L2/L3/L4 checks needed for final validation confidence.
 - Choose validation level by risk. Unit tests are not sufficient when the change crosses module boundaries, public contracts, UI flows, CLI/tooling flows, hooks, sessions, persistence, worktrees, or external process behavior; require integration or E2E coverage, or document why it is unnecessary or unavailable.
+- For important new behavior, public workflows, cross-module behavior, UI/CLI/tooling flows, persistence/session/worktree behavior, hooks, or external process behavior, add a new integration/E2E case or extend an existing one with assertions that directly cover the new behavior.
+- Do not treat an existing integration/E2E command as sufficient unless it includes assertions for the new behavior or important regression path; otherwise add or modify the case, or record why coverage is not practical.
 - Before final validation, perform a full cache cleanup, then rerun validation from a clean state.
 - Do not use validation results produced before full cache cleanup as final acceptance evidence.
 - Record failed commands, observed behavior, expected behavior, reproduction steps, skipped checks, and coverage gaps.
@@ -56,7 +58,7 @@ tools: Read, Grep, Glob, Bash, Edit, Write
 ### Outputs
 
 - Write `.ai/vcm/handoffs/review-report.md` with decision, evidence reviewed, tests added or updated, commands run or checked, validation results, failed expectations, reproduction steps, skipped checks with reasons, coverage gaps, and required follow-ups.
-- For feature or cross-boundary changes, state which integration/E2E cases cover the important paths, or why such coverage is not needed or not available.
+- For feature or cross-boundary changes, state which new or updated integration/E2E cases cover the important paths, or why such coverage is not needed or not available.
 - Record confirmed unresolved issues in `.ai/vcm/handoffs/known-issues.md` only when they should survive current-task cleanup.
 
 ### Background Jobs
