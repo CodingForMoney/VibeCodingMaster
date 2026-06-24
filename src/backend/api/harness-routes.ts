@@ -168,7 +168,7 @@ export function registerHarnessRoutes(app: FastifyInstance, deps: HarnessRouteDe
   app.post<{ Body: HarnessFeedbackDecisionRequest }>("/api/projects/harness/feedback/decision", async (request) => {
     const project = await requireCurrentProject(deps.projectService);
     const action = request.body?.action;
-    if (action !== "approve" && action !== "reject" && action !== "comment") {
+    if (action !== "approve" && action !== "reject" && action !== "comment" && action !== "cancel") {
       throw new VcmError({
         code: "HARNESS_FEEDBACK_DECISION_INVALID",
         message: "Harness feedback decision action is invalid.",

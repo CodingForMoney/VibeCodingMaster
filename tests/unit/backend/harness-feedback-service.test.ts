@@ -175,6 +175,72 @@ describe("harness-feedback-service", () => {
       trigger: "manual"
     })).rejects.toThrow("already been triggered");
   });
+
+  it("cancels an interrupted active task harness retrospective while it is still analyzing", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-harness-retrospective-cancel-"));
+    const taskRepoRoot = path.join(tmpRepo, ".claude/worktrees/demo-task");
+    await mkdir(path.join(taskRepoRoot, ".ai/vcm/handoffs"), { recursive: true });
+    await writeFile(
+      path.join(taskRepoRoot, ".ai/vcm/handoffs/final-acceptance.md"),
+      [
+        "# Final Acceptance",
+        "",
+        "## Decision",
+        "accepted",
+        "",
+        "## Evidence Reviewed",
+        "All handoffs.",
+        "",
+        "## Scope Traceability",
+        "All changes traced.",
+        "",
+        "## Validation Summary",
+        "Checks passed.",
+        "",
+        "## Review And Docs Sync",
+        "Reviewer and docs sync complete.",
+        "",
+        "## Known Issues Disposition",
+        "No task issues to promote.",
+        "",
+        "## Cleanup Readiness",
+        "Ready.",
+        "",
+        "## Final User Summary",
+        "Done."
+      ].join("\n"),
+      "utf8"
+    );
+
+    const service = createHarnessFeedbackService({
+      fs: createNodeFileSystemAdapter(),
+      runtime: createRuntime([]),
+      sessionService: createSessionService(),
+      now: createClock()
+    });
+    await service.startTaskRetrospective(tmpRepo, {
+      taskSlug: "demo-task",
+      taskRepoRoot,
+      handoffDir: ".ai/vcm/handoffs",
+      trigger: "auto"
+    });
+
+    const canceled = await service.decide(tmpRepo, {
+      action: "cancel",
+      taskSlug: "demo-task",
+      comment: "User interrupted Harness Engineer."
+    });
+
+    expect(canceled.status).toBe("idle");
+    await expect(readFile(
+      path.join(tmpRepo, ".ai/vcm/harness-feedback/completed/2026-01-01T00-00-00.000Z-task-retrospective-demo-task/decision.json"),
+      "utf8"
+    )).resolves.toContain("\"outcome\": \"canceled\"");
+    await expect(readFile(
+      path.join(tmpRepo, ".ai/vcm/harness-feedback/task-retrospectives/demo-task.json"),
+      "utf8"
+    )).resolves.toContain("\"status\": \"canceled\"");
+  });
 });
 
 function createRuntime(writes: string[]): TerminalRuntime {

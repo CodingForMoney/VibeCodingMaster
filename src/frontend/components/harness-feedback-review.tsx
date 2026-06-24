@@ -5,6 +5,7 @@ export interface HarnessFeedbackReviewProps {
   busy?: boolean;
   state: HarnessFeedbackStateReport | null;
   onApprove(comment: string): void;
+  onCancel(comment: string): void;
   onComment(comment: string): void;
   onReject(comment: string): void;
   onRefresh(): void;
@@ -14,6 +15,7 @@ export function HarnessFeedbackReview({
   busy,
   state,
   onApprove,
+  onCancel,
   onComment,
   onReject,
   onRefresh
@@ -83,6 +85,19 @@ export function HarnessFeedbackReview({
                   </button>
                   <button type="button" disabled={busy} onClick={() => onApprove(comment)}>
                     Approve
+                  </button>
+                </div>
+              </footer>
+            ) : active ? (
+              <footer className="harness-feedback-review-actions">
+                <textarea
+                  value={comment}
+                  placeholder="Optional cancellation note..."
+                  onChange={(event) => setComment(event.target.value)}
+                />
+                <div>
+                  <button type="button" disabled={busy} onClick={() => onCancel(comment)}>
+                    Cancel
                   </button>
                 </div>
               </footer>

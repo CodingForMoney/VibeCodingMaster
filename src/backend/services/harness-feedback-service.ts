@@ -164,6 +164,11 @@ export function createHarnessFeedbackService(deps: HarnessFeedbackServiceDeps): 
 
   async function decide(repoRoot: string, input: HarnessFeedbackDecisionRequest): Promise<HarnessFeedbackStateReport> {
     const state = await loadStoredState(repoRoot);
+    if (state && input.action === "cancel") {
+      await completeActive(repoRoot, state, "canceled", input.comment);
+      await clearStoredState(repoRoot);
+      return getState(repoRoot, input.taskSlug);
+    }
     if (!state || state.status !== "awaiting_user_approval") {
       throw new VcmError({
         code: "HARNESS_FEEDBACK_NOT_AWAITING_APPROVAL",
@@ -516,7 +521,7 @@ export function createHarnessFeedbackService(deps: HarnessFeedbackServiceDeps): 
   async function completeActive(
     repoRoot: string,
     state: StoredHarnessFeedbackState,
-    outcome: "applied" | "rejected",
+    outcome: "applied" | "rejected" | "canceled",
     comment = ""
   ): Promise<void> {
     const completedDir = `${COMPLETED_DIR}/${state.active.id}`;
@@ -541,7 +546,7 @@ export function createHarnessFeedbackService(deps: HarnessFeedbackServiceDeps): 
       comment,
       completedAt: now()
     });
-    await persistTaskRetrospectiveMarker(repoRoot, state.active, outcome === "rejected" ? "rejected" : "completed");
+    await persistTaskRetrospectiveMarker(repoRoot, state.active, outcome === "applied" ? "completed" : outcome);
     await deps.fs.removePath?.(resolveRepoPath(repoRoot, state.active.feedbackPath), { force: true });
     await deps.fs.removePath?.(resolveRepoPath(repoRoot, path.posix.dirname(state.active.analysisPath)), { recursive: true, force: true });
   }
@@ -593,7 +598,7 @@ export function createHarnessFeedbackService(deps: HarnessFeedbackServiceDeps): 
   async function persistTaskRetrospectiveMarker(
     repoRoot: string,
     active: StoredHarnessFeedbackActive,
-    status: "analyzing" | "awaiting_user_approval" | "applying" | "completed" | "rejected",
+    status: "analyzing" | "awaiting_user_approval" | "applying" | "completed" | "rejected" | "canceled",
     timestamp = now()
   ): Promise<void> {
     if (active.source !== "task-retrospective" || !active.taskSlug) {

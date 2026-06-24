@@ -282,7 +282,7 @@ export interface HarnessFeedbackStateReport {
 
 export interface HarnessFeedbackDecisionRequest {
   taskSlug?: string;
-  action: "approve" | "reject" | "comment";
+  action: "approve" | "reject" | "comment" | "cancel";
   comment?: string;
 }
 

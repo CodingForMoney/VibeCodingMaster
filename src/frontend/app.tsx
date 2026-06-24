@@ -1538,6 +1538,16 @@ export function App() {
         onRefresh={() => {
           void refreshHarnessFeedbackState(activeTask?.taskSlug).catch((caught: Error) => setError(formatUiError("Refresh Harness feedback state", caught)));
         }}
+        onCancel={(comment) => {
+          void withBusy(async () => {
+            const state = await apiClient.decideHarnessFeedback({
+              action: "cancel",
+              taskSlug: activeTask?.taskSlug,
+              comment
+            });
+            setHarnessFeedbackState(state);
+          }, "Cancel Harness feedback");
+        }}
         onApprove={(comment) => {
           void withBusy(async () => {
             if (!activeTask) {
