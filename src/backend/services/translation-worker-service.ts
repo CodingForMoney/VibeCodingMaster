@@ -98,6 +98,14 @@ const CONVERSATION_RUNTIME_DIR = `${TRANSLATIONS_RUNTIME_DIR}/conversations`;
 const MEMORY_UPDATE_RUNTIME_DIR = `${TRANSLATIONS_RUNTIME_DIR}/memory-updates`;
 const DEFAULT_PROFILE = "default";
 const DEFAULT_CHUNK_SOURCE_TOKEN_TARGET = 80000;
+// In-flight conversation queue items normally finalize when the Translator
+// session's Stop/StopFailure hook reaches the backend. If that hook is lost
+// (session crash, backend restart/reconnect) a conversation item with no result
+// on disk would block the queue head forever. Treat such an item as stuck once it
+// has been in-flight past this bound and release it so later items can dispatch.
+// Kept comfortably above a normal short composer translation, so a genuinely
+// running conversation turn is never released mid-flight.
+const STALE_CONVERSATION_ITEM_MS = 90000;
 const BOOTSTRAP_DEFAULT_LIMIT = 12;
 const MEMORY_TOTAL_LIMIT_BYTES = 80 * 1024;
 const MEMORY_INITIALIZED_MIN_FILES = 2;
@@ -277,12 +285,15 @@ export function createTranslationWorkerService(deps: TranslationWorkerServiceDep
     if (!deps.runtime || !deps.sessionService) {
       return;
     }
-    const queue = await loadQueue(repoRoot);
+    let queue = await loadQueue(repoRoot);
     const active = queue.activeItemId
       ? queue.items.find((item) => item.id === queue.activeItemId)
       : undefined;
     if (active && ["dispatching", "running", "validating"].includes(active.status)) {
-      return;
+      if (!(await reconcileStuckActiveItem(repoRoot, active))) {
+        return;
+      }
+      queue = await loadQueue(repoRoot);
     }
     const next = queue.items.find((item) => item.status === "queued");
     if (!next) {
@@ -518,6 +529,44 @@ export function createTranslationWorkerService(deps: TranslationWorkerServiceDep
       "Mark target-language-specific rules clearly. Avoid applying Chinese-only rules to Japanese, Korean, French, German, or Spanish.",
       "When finished, ensure the four memory files together are within budget, then stop."
     ].join("\n");
+  }
+
+  // Recover an active queue item whose finalizing Stop/StopFailure hook never
+  // arrived. Returns true when the item was finalized (and `activeItemId`
+  // cleared) so the caller can dispatch the next queued item; returns false when
+  // the item is still legitimately in flight and the queue head must be held.
+  async function reconcileStuckActiveItem(
+    repoRoot: string,
+    active: TranslationQueueItem
+  ): Promise<boolean> {
+    if (await activeItemResultAvailable(repoRoot, active)) {
+      await validateActiveQueueItem(repoRoot);
+      return true;
+    }
+    if (active.type === "conversation" && isStaleActiveItem(active)) {
+      await validateActiveQueueItem(repoRoot);
+      return true;
+    }
+    return false;
+  }
+
+  async function activeItemResultAvailable(
+    repoRoot: string,
+    item: TranslationQueueItem
+  ): Promise<boolean> {
+    const resultPath = item.type === "conversation" ? item.batchResultPath : item.expectedResultPath;
+    if (!resultPath) {
+      return false;
+    }
+    return deps.fs.pathExists(resolveRepoPath(repoRoot, resultPath));
+  }
+
+  function isStaleActiveItem(item: TranslationQueueItem): boolean {
+    const updatedAtMs = Date.parse(item.updatedAt ?? "");
+    if (!Number.isFinite(updatedAtMs)) {
+      return true;
+    }
+    return Date.now() - updatedAtMs >= STALE_CONVERSATION_ITEM_MS;
   }
 
   async function validateActiveQueueItem(repoRoot: string): Promise<void> {
