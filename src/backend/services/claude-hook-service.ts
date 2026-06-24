@@ -24,7 +24,23 @@ import type { TranslationWorkerService } from "./translation-worker-service.js";
 
 const MAX_ROLE_RETRY_ATTEMPTS = 20;
 const ROLE_RETRY_BASE_DELAY_MS = 60_000;
+const NON_RETRYABLE_STOP_FAILURE_ERRORS = new Set([
+  "authentication_failed",
+  "oauth_org_not_allowed",
+  "billing_error",
+  "invalid_request",
+  "model_not_found",
+  "max_output_tokens"
+]);
+const DIAGNOSTIC_SNIPPET_MAX_LENGTH = 2000;
 type StopFailureRetryTimer = ReturnType<typeof setTimeout>;
+
+interface StopFailureDiagnostic {
+  error: string;
+  errorDetails?: string;
+  lastAssistantMessage?: string;
+  retryable: boolean;
+}
 
 export interface ClaudeHookService {
   handleHook(input: ClaudeHookRequest): Promise<ClaudeHookResult>;
@@ -281,7 +297,17 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
       });
     }
 
-    const retryScheduled = await scheduleStopFailureRetry(input, context);
+    const failure = parseStopFailureDiagnostic(input.event);
+    if (!failure.retryable) {
+      await markStopFailureRecoveryFailed(input, context, failure, 0);
+      return recordTurnEnd(input, context, eventName, {
+        dispatchRouteFiles: false,
+        notifyGateway: false,
+        settleGuard: false
+      });
+    }
+
+    const retryScheduled = await scheduleStopFailureRetry(input, context, failure);
     if (retryScheduled) {
       return {
         ok: true,
@@ -420,7 +446,8 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
 
   async function scheduleStopFailureRetry(
     input: ClaudeHookRequest,
-    context: Awaited<ReturnType<typeof getHookContext>>
+    context: Awaited<ReturnType<typeof getHookContext>>,
+    failure: StopFailureDiagnostic
   ): Promise<boolean> {
     const preferences = await deps.appSettings.getPreferences();
     if (!preferences.roleRetryEnabled || !deps.runtime) {
@@ -438,17 +465,7 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
 
     if (attempt > MAX_ROLE_RETRY_ATTEMPTS) {
       clearStopFailureRetryTimer(context.project.repoRoot, context.taskSlug, input.role);
-      await deps.roundService.setRoleRecovery({
-        ...stateInput,
-        recovery: {
-          role: input.role,
-          status: "failed",
-          attempt: MAX_ROLE_RETRY_ATTEMPTS,
-          maxAttempts: MAX_ROLE_RETRY_ATTEMPTS,
-          lastFailureAt: timestamp,
-          failedAt: timestamp
-        }
-      });
+      await markStopFailureRecoveryFailed(input, context, failure, MAX_ROLE_RETRY_ATTEMPTS, timestamp);
       return false;
     }
 
@@ -461,6 +478,10 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
         attempt,
         maxAttempts: MAX_ROLE_RETRY_ATTEMPTS,
         lastFailureAt: timestamp,
+        error: failure.error,
+        errorDetails: failure.errorDetails,
+        lastAssistantMessage: failure.lastAssistantMessage,
+        retryable: failure.retryable,
         nextRetryAt
       }
     });
@@ -527,6 +548,31 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
     });
     await submitTerminalInput(deps.runtime, session.id, renderStopFailureRecoveryPrompt());
     await deps.sessionService.markRoleActivityRunning(context.project.repoRoot, context.taskSlug, input.role);
+  }
+
+  async function markStopFailureRecoveryFailed(
+    input: ClaudeHookRequest,
+    context: Awaited<ReturnType<typeof getHookContext>>,
+    failure: StopFailureDiagnostic,
+    attempt: number,
+    timestamp = now()
+  ): Promise<void> {
+    clearStopFailureRetryTimer(context.project.repoRoot, context.taskSlug, input.role);
+    await deps.roundService.setRoleRecovery({
+      ...createRoundStateInput(context),
+      recovery: {
+        role: input.role,
+        status: "failed",
+        attempt,
+        maxAttempts: MAX_ROLE_RETRY_ATTEMPTS,
+        lastFailureAt: timestamp,
+        error: failure.error,
+        errorDetails: failure.errorDetails,
+        lastAssistantMessage: failure.lastAssistantMessage,
+        retryable: failure.retryable,
+        failedAt: timestamp
+      }
+    });
   }
 
   function clearStopFailureRecovery(repoRoot: string, taskSlug: string, role: string): void {
@@ -684,6 +730,38 @@ function throwUnsupportedEvent(eventName: ClaudeHookEventName): never {
     statusCode: 400,
     hint: "Use the matching VCM hook endpoint for this event."
   });
+}
+
+function parseStopFailureDiagnostic(event: ClaudeHookRequest["event"]): StopFailureDiagnostic {
+  const error = (normalizeDiagnosticString(event.error, 200) ?? "unknown").toLowerCase();
+  const errorDetails = normalizeDiagnosticString(event.error_details, DIAGNOSTIC_SNIPPET_MAX_LENGTH);
+  const lastAssistantMessage = normalizeDiagnosticString(event.last_assistant_message, DIAGNOSTIC_SNIPPET_MAX_LENGTH);
+  return {
+    error,
+    errorDetails,
+    lastAssistantMessage,
+    retryable: !NON_RETRYABLE_STOP_FAILURE_ERRORS.has(error)
+  };
+}
+
+function normalizeDiagnosticString(value: unknown, maxLength: number): string | undefined {
+  let text: string | undefined;
+  if (typeof value === "string") {
+    text = value;
+  } else if (value !== undefined && value !== null) {
+    try {
+      text = JSON.stringify(value);
+    } catch {
+      text = String(value);
+    }
+  }
+  const trimmed = text?.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+  return trimmed.length > maxLength
+    ? `${trimmed.slice(0, maxLength)}...`
+    : trimmed;
 }
 
 function stringOrUndefined(value: unknown): string | undefined {

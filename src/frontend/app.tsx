@@ -247,7 +247,7 @@ export function App() {
         : "weak";
     const recovery = roundState.roleRecovery;
     const message = recovery?.status === "failed"
-      ? `CC retry failed after ${recovery.maxAttempts} attempts for ${roleLabel}.`
+      ? formatRoleRecoveryFailureMessage(recovery, roleLabel)
       : `No new turn started after ${roleLabel} stopped.`;
     showFlowPauseNotice(message, pauseKey, { sound });
   }, [activeTask?.taskSlug, pauseAlertSound, showFlowPauseNotice]);
@@ -1634,10 +1634,32 @@ function getRoleRecoveryNoticeKey(taskSlug: string, recovery: VcmRoleRecoverySta
 
 function formatRoleRecoveryNotice(recovery: VcmRoleRecoveryState): string {
   const role = formatRoleRecoveryRole(recovery.role);
+  const reason = formatRoleRecoveryReason(recovery);
   if (recovery.status === "retrying") {
-    return `CC 出错，正在重试 ${role} · 第 ${recovery.attempt}/${recovery.maxAttempts} 次`;
+    return `CC 出错，正在重试 ${role}${reason} · 第 ${recovery.attempt}/${recovery.maxAttempts} 次`;
   }
-  return `CC 出错，重试中 ${role} · 第 ${recovery.attempt}/${recovery.maxAttempts} 次 · ${formatRetryDelay(recovery.nextRetryAt)}`;
+  return `CC 出错，重试中 ${role}${reason} · 第 ${recovery.attempt}/${recovery.maxAttempts} 次 · ${formatRetryDelay(recovery.nextRetryAt)}`;
+}
+
+function formatRoleRecoveryFailureMessage(recovery: VcmRoleRecoveryState, roleLabel: string): string {
+  const reason = formatRoleRecoveryReason(recovery);
+  if (recovery.retryable === false) {
+    return `CC stopped for ${roleLabel}: ${formatRoleRecoveryError(recovery)} cannot be fixed by retrying.`;
+  }
+  return `CC retry failed after ${recovery.maxAttempts} attempts for ${roleLabel}${reason}.`;
+}
+
+function formatRoleRecoveryReason(recovery: VcmRoleRecoveryState): string {
+  if (!recovery.error || recovery.error === "unknown") {
+    return "";
+  }
+  return ` · ${recovery.error}`;
+}
+
+function formatRoleRecoveryError(recovery: VcmRoleRecoveryState): string {
+  return recovery.error && recovery.error !== "unknown"
+    ? recovery.error
+    : "this error";
 }
 
 function formatRoleRecoveryRole(role: string): string {

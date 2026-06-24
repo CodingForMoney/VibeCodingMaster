@@ -621,6 +621,10 @@ function normalizeRoleRecovery(input: unknown): VcmRoleRecoveryState | undefined
     attempt: normalizeNumber(record.attempt),
     maxAttempts: normalizeNumber(record.maxAttempts),
     lastFailureAt: record.lastFailureAt,
+    error: typeof record.error === "string" ? record.error : undefined,
+    errorDetails: typeof record.errorDetails === "string" ? record.errorDetails : undefined,
+    lastAssistantMessage: typeof record.lastAssistantMessage === "string" ? record.lastAssistantMessage : undefined,
+    retryable: typeof record.retryable === "boolean" ? record.retryable : undefined,
     nextRetryAt: typeof record.nextRetryAt === "string" ? record.nextRetryAt : undefined,
     lastRetryAt: typeof record.lastRetryAt === "string" ? record.lastRetryAt : undefined,
     failedAt: typeof record.failedAt === "string" ? record.failedAt : undefined

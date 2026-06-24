@@ -392,7 +392,10 @@ describe("createClaudeHookService", () => {
       role: "coder",
       event: {
         hook_event_name: "StopFailure",
-        session_id: "claude_coder"
+        session_id: "claude_coder",
+        error: "overloaded",
+        error_details: { retry_after: 60 },
+        last_assistant_message: "Still working."
       }
     });
 
@@ -410,6 +413,15 @@ describe("createClaudeHookService", () => {
     ]);
     expect(timers).toHaveLength(1);
     expect(timers[0]?.delayMs).toBe(60_000);
+    expect(recovery).toMatchObject({
+      role: "coder",
+      status: "waiting",
+      attempt: 1,
+      error: "overloaded",
+      errorDetails: "{\"retry_after\":60}",
+      lastAssistantMessage: "Still working.",
+      retryable: true
+    });
     expect(writes).toEqual([]);
 
     calls.length = 0;
@@ -433,6 +445,100 @@ describe("createClaudeHookService", () => {
     expect(writes.join("\n")).not.toContain("Recovery attempt");
     expect(writes.join("\n")).not.toContain("Continue the same assigned work");
     expect(writes.at(-1)).toBe("\r");
+  });
+
+  it("does not retry non-retryable StopFailure errors", async () => {
+    const calls: string[] = [];
+    const writes: string[] = [];
+    let recovery: unknown;
+    const service = createClaudeHookService({
+      projectService: createProjectServiceStub(),
+      taskService: createTaskServiceStub(),
+      sessionService: {
+        async recordClaudeHookEvent(_repoRoot, input) {
+          calls.push(`session:${input.eventName}:${input.role}`);
+          return {
+            id: "runtime_coder",
+            claudeSessionId: "claude_coder",
+            taskSlug: input.taskSlug,
+            role: input.role,
+            status: "running",
+            activityStatus: "idle",
+            command: "claude --agent coder",
+            permissionMode: "default",
+            cwd: "/repo",
+            terminalBackend: "node-pty",
+            updatedAt: "2026-06-01T00:00:00.000Z"
+          };
+        }
+      } as never,
+      messageService: {
+        async listPendingRouteFiles() {
+          calls.push("list");
+          return [];
+        }
+      } as never,
+      roundService: {
+        async setRoleRecovery(input) {
+          recovery = input.recovery;
+          calls.push(`set-recovery:${input.recovery.status}:${input.recovery.attempt}:${input.recovery.error}:${input.recovery.retryable}`);
+          return {} as never;
+        },
+        async recordClaudeHookEvent(input) {
+          calls.push(`round:${input.eventName}:${input.role}`);
+          return {} as never;
+        }
+      } as never,
+      translationService: {
+        async recordConversationBoundary(input) {
+          calls.push(`boundary:${input.boundaryKind}:${input.role}`);
+        }
+      } as Pick<TranslationService, "recordConversationBoundary">,
+      appSettings: createAppSettingsStub(),
+      runtime: {
+        write(_sessionId, data) {
+          writes.push(data);
+        }
+      },
+      now: () => "2026-06-01T00:00:00.000Z"
+    });
+
+    const result = await service.handleHook({
+      taskSlug: "demo-task",
+      role: "coder",
+      event: {
+        hook_event_name: "StopFailure",
+        session_id: "claude_coder",
+        error: "billing_error",
+        error_details: "Payment required",
+        last_assistant_message: "Cannot continue."
+      }
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      eventName: "StopFailure",
+      sessionUpdated: true,
+      dispatchedCount: 0
+    });
+    expect(calls).toEqual([
+      "list",
+      "set-recovery:failed:0:billing_error:false",
+      "session:StopFailure:coder",
+      "round:StopFailure:coder",
+      "boundary:end:coder"
+    ]);
+    expect(recovery).toMatchObject({
+      role: "coder",
+      status: "failed",
+      attempt: 0,
+      error: "billing_error",
+      errorDetails: "Payment required",
+      lastAssistantMessage: "Cannot continue.",
+      retryable: false,
+      failedAt: "2026-06-01T00:00:00.000Z"
+    });
+    expect(writes).toEqual([]);
   });
 
   it("ends StopFailure without retry when role retry is disabled", async () => {

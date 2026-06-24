@@ -15,6 +15,10 @@ export interface VcmRoleRecoveryState {
   attempt: number;
   maxAttempts: number;
   lastFailureAt: string;
+  error?: string;
+  errorDetails?: string;
+  lastAssistantMessage?: string;
+  retryable?: boolean;
   nextRetryAt?: string;
   lastRetryAt?: string;
   failedAt?: string;
