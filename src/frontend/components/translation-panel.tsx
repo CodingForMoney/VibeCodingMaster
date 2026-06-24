@@ -48,7 +48,6 @@ export function TranslationPanel({
   const [manualSource, setManualSource] = useState("");
   const [composerIsEnglishDraft, setComposerIsEnglishDraft] = useState(false);
   const [status, setStatus] = useState<TranslationPanelStatus>("ready");
-  const [lastPollAt, setLastPollAt] = useState("");
   const [panelNowMs, setPanelNowMs] = useState(Date.now());
   const [busy, setBusy] = useState(false);
   const [, setError] = useUiErrorState("");
@@ -69,9 +68,6 @@ export function TranslationPanel({
       setStatus(result.status);
       clearPollError("Poll conversation translation events");
       setError((current) => clearUiErrorForActions(current, ["Poll conversation translation events"]));
-      if (activeRef.current) {
-        setLastPollAt(formatPollTimestamp(new Date().toISOString()));
-      }
     } catch (caught) {
       const message = recordPollError("Poll conversation translation events", caught as Error);
       if (message) {
@@ -94,7 +90,6 @@ export function TranslationPanel({
     setFailures([]);
     setError("");
     setStatus("ready");
-    setLastPollAt("");
     cursorRef.current = 1;
     let cancelled = false;
 
@@ -312,7 +307,6 @@ export function TranslationPanel({
         </div>
         <div className="translation-status-row">
           <p>Claude Code · target {getTranslationTargetLanguageLabel(targetLanguage)} · {panelStatus}</p>
-          <p>{lastPollAt ? `poll ${lastPollAt}` : "poll -"}</p>
         </div>
       </header>
 
@@ -909,14 +903,6 @@ function formatElapsed(elapsedMs: number): string {
   const minutes = Math.floor(seconds / 60);
   const remainder = Math.floor(seconds % 60).toString().padStart(2, "0");
   return `${minutes}:${remainder}`;
-}
-
-function formatPollTimestamp(timestamp: string): string {
-  const date = new Date(timestamp);
-  if (Number.isNaN(date.getTime())) {
-    return timestamp;
-  }
-  return date.toLocaleTimeString();
 }
 
 function formatBoundaryTimestamp(timestamp: string): string {

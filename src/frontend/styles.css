@@ -1673,15 +1673,6 @@ h2 {
   justify-content: flex-end;
 }
 
-.translation-status-row {
-  flex-wrap: nowrap;
-}
-
-.translation-status-row p:last-child {
-  flex: 0 0 auto;
-  text-align: right;
-}
-
 .translation-entry-list {
   display: grid;
   flex: 1 1 auto;
