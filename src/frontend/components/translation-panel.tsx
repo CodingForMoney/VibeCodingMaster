@@ -270,14 +270,15 @@ export function TranslationPanel({
     }
   }
 
-  async function retryFailures() {
+  async function retryLatestFailure(failure: TranslationFailureItem) {
     setBusy(true);
     setError("");
     try {
-      const result = await apiClient.retryTranslationFailures(sessionId);
-      setFailures(result.failures);
+      const entry = await apiClient.retryTranslation(sessionId, failure.translationId);
+      setEntries((current) => trimTranslationEntries(upsertEntry(current, entry)).entries);
+      setScrollRevision((current) => current + 1);
     } catch (caught) {
-      setError(formatUiError("Retry failed conversation translations", caught));
+      setError(formatUiError("Retry latest failed conversation translation", caught));
     } finally {
       setBusy(false);
     }
@@ -285,6 +286,7 @@ export function TranslationPanel({
 
   const panelStatus = getPanelStatus(entries, status, panelNowMs);
   const failureCount = failures.length;
+  const latestFailure = getLatestTranslationFailure(failures);
 
   return (
     <aside className="translation-panel">
@@ -297,9 +299,11 @@ export function TranslationPanel({
                 <button type="button" disabled={busy} onClick={() => void ignoreFailures()}>
                   Ignore {failureCount}
                 </button>
-                <button type="button" disabled={busy} onClick={() => void retryFailures()}>
-                  Retry {failureCount}
-                </button>
+                {latestFailure ? (
+                  <button type="button" disabled={busy} onClick={() => void retryLatestFailure(latestFailure)}>
+                    Retry latest
+                  </button>
+                ) : null}
               </>
             ) : null}
             <button type="button" onClick={() => void clearPanel()}>Clear</button>
@@ -367,6 +371,22 @@ export function TranslationPanel({
 
 function getTranslationTargetLanguageLabel(targetLanguage: TranslationTargetLanguage): string {
   return TRANSLATION_TARGET_LANGUAGE_OPTIONS.find((option) => option.value === targetLanguage)?.label ?? targetLanguage;
+}
+
+function getLatestTranslationFailure(failures: TranslationFailureItem[]): TranslationFailureItem | undefined {
+  let latest: TranslationFailureItem | undefined;
+  let latestFailedAtMs = Number.NEGATIVE_INFINITY;
+
+  for (const failure of failures) {
+    const failedAtMs = Date.parse(failure.failedAt);
+    const comparableFailedAtMs = Number.isFinite(failedAtMs) ? failedAtMs : Number.NEGATIVE_INFINITY;
+    if (!latest || comparableFailedAtMs >= latestFailedAtMs) {
+      latest = failure;
+      latestFailedAtMs = comparableFailedAtMs;
+    }
+  }
+
+  return latest;
 }
 
 export function FileTranslationModalHost({
