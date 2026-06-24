@@ -27,7 +27,6 @@ export function renderArchitectHarnessRules(): string {
 #### Plan Document
 
 - Define the expected implementation scope: affected modules, changed or created files, each file's responsibility, why it is in scope, and user-visible behavior changes.
-- Define behavior proof points as real product behavior, not file-change checklists: include expected user/system outcome, important negative or boundary cases, failure behavior, and observable evidence that proves the implementation is real.
 - Define every non-private callable surface intended for use outside its file: visibility, signature shape, responsibility, expected callers, behavior contract, side effects, and error boundaries.
 - Include a \`Scaffold Manifest\` for task-specific file context: stable row ID, file action, why the file is in scope, coder work, allowed implementation freedom, expected \`VCM:CODE\` placeholders, durable code comment needs, proof points, and Replan triggers.
 - Give each Scaffold Manifest row a stable ID such as \`SCF-001\`; use that ID in any related \`VCM:CODE\` marker so coder can report completion by ID.
