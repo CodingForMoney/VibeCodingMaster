@@ -94,6 +94,18 @@ tools: Read, Grep, Glob, Bash, Edit, Write
 - Keep module-level docs focused on current responsibility boundaries, owned behavior, non-owned behavior, collaboration points, important public contracts, invariants, risks, and update triggers.
 - Do not duplicate the generated public API index; explain design intent and contract meaning instead.
 
+#### Known Issues Quality
+
+- `docs/known-issues.md` is a current open-issue snapshot, not a task log, changelog, review archive, validation diary, or decision transcript.
+- Promote only unresolved durable issues or accepted limitations that can affect future architecture, implementation, validation, operation, or release decisions.
+- Remove fully resolved issues from `docs/known-issues.md`; git history preserves resolved details.
+- When a parent issue remains open but some sub-items are resolved, rewrite the entry around the remaining current gap instead of preserving resolved-history narrative.
+- Keep one KI entry focused on one owning problem. Split unrelated residuals instead of grouping them under a phase, review, or implementation session.
+- Do not include round names, role-session notes, commit hashes, reviewer verdict history, temporary investigation logs, or full validation history unless they are essential to identify the current unresolved issue.
+- Each KI entry should state: status, category, affected modules/surfaces, current gap, impact, mitigation or workaround, resolution condition, and related issue IDs when useful.
+- Distinguish product/protocol issues from dev-environment, test-infra, harness, or VCM-tooling issues. Do not mix them in one KI entry.
+- Do not promote a task-local deferral unless it remains relevant after the task ends.
+
 - Update `docs/ARCHITECTURE.md` only when project-level module overview changes: module list, module responsibilities, module relationships, dependency direction, project-wide architecture constraints, or module architecture doc links.
 - Update affected `<module>/ARCHITECTURE.md` when module-level detailed design changes: boundaries, behavior, important public surface explanations, internal risks, or module-specific architecture notes.
 - During docs sync, inspect every module touched by the final diff.
@@ -102,8 +114,9 @@ tools: Read, Grep, Glob, Bash, Edit, Write
 - Treat `.ai/generated/public-surface.json` as the full machine index for public surface. Verify or report its freshness when public APIs changed; do not replace it with prose in architecture docs.
 - When module structure changes, require `.ai/tools/generate-module-index --check` or regeneration.
 - When crate-external public APIs change, require `.ai/tools/generate-public-surface --check` or regeneration.
-- Read `.ai/vcm/handoffs/known-issues.md` and promote confirmed unresolved issues to `docs/known-issues.md`.
-- Write `.ai/vcm/handoffs/docs-sync-report.md` with decision, evidence reviewed, architecture drift check, docs updated, docs left unchanged, remaining documentation risks, and handoff notes.
+- Read `.ai/vcm/handoffs/known-issues.md`; promote only confirmed unresolved durable issues that satisfy Known Issues Quality.
+- During docs sync, remove or rewrite resolved/stale KI entries touched by the task so `docs/known-issues.md` remains an open-issue snapshot.
+- Write `.ai/vcm/handoffs/docs-sync-report.md` with decision, evidence reviewed, architecture drift check, docs updated, docs left unchanged, promoted/updated/removed/not-promoted known issues, remaining documentation risks, and handoff notes.
 
 ### Background Jobs
 
