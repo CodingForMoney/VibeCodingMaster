@@ -67,6 +67,7 @@ import type {
   TranslationEntry,
   TranslationFailuresResult,
   PollTranslationSessionResult,
+  PollTranslationTaskFeedResult,
   StartTranslationSessionResult
 } from "../../shared/types/translation.js";
 
@@ -357,6 +358,13 @@ export const apiClient = {
       params.set("limit", String(limit));
     }
     return request<PollTranslationSessionResult>(`/api/translation/sessions/${encodeURIComponent(sessionId)}/events?${params.toString()}`);
+  },
+  pollTranslationTaskFeed(taskSlug: string, after: number, limit?: number) {
+    const params = new URLSearchParams({ after: String(after) });
+    if (limit !== undefined) {
+      params.set("limit", String(limit));
+    }
+    return request<PollTranslationTaskFeedResult>(`/api/tasks/${encodeURIComponent(taskSlug)}/translation/feed?${params.toString()}`);
   },
   translateUserInput(taskSlug: string, role: RoleName, input: TranslateUserInputRequest) {
     return request<TranslateUserInputResult>(`/api/tasks/${encodeURIComponent(taskSlug)}/sessions/${role}/translation/input`, {

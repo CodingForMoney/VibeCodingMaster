@@ -144,6 +144,26 @@ export interface PollTranslationSessionResult {
   events: TranslationSessionEvent[];
 }
 
+export interface TranslationTaskFeedEvent {
+  seq: number;
+  sessionId: string;
+  role: RoleName;
+  event: TranslationSessionEvent;
+}
+
+export interface TranslationTaskFeedSession {
+  sessionId: string;
+  role: RoleName;
+  status: TranslationSessionStatus;
+}
+
+export interface PollTranslationTaskFeedResult {
+  taskSlug: string;
+  nextCursor: number;
+  sessions: TranslationTaskFeedSession[];
+  events: TranslationTaskFeedEvent[];
+}
+
 export type TranslationWsMessage =
   | { type: "translation-entry"; entry: TranslationEntry }
   | { type: "translation-status"; status: TranslationSessionStatus }

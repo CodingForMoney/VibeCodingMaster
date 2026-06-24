@@ -5,6 +5,8 @@ import type { ClaudePermissionMode, RoleSessionRecord, SessionEffort, SessionMod
 import { XtermView } from "../terminal/xterm-view.js";
 import { SessionToolbar } from "./session-toolbar.js";
 import { TranslationPanel } from "./translation-panel.js";
+import type { TranslationPanelSessionState } from "../state/translation-feed-store.js";
+import type { TranslationEntry, TranslationFailureItem } from "../../shared/types/translation.js";
 
 export interface SessionConsoleProps {
   role: RoleName;
@@ -17,6 +19,10 @@ export interface SessionConsoleProps {
   translationEnabled: boolean;
   translationAutoSendEnabled: boolean;
   translationTargetLanguage: TranslationTargetLanguage;
+  translationPanelState?: TranslationPanelSessionState;
+  onClearTranslationSession?(sessionId: string, role: RoleName): void;
+  onTranslationEntry?(sessionId: string, role: RoleName, entry: TranslationEntry): void;
+  onTranslationFailures?(sessionId: string, role: RoleName, failures: TranslationFailureItem[]): void;
   onPermissionModeChange(mode: ClaudePermissionMode): void;
   onModelChange(model: SessionModel): void;
   onEffortChange(effort: SessionEffort): void;
@@ -39,6 +45,10 @@ export function SessionConsole({
   translationEnabled,
   translationAutoSendEnabled,
   translationTargetLanguage,
+  translationPanelState,
+  onClearTranslationSession,
+  onTranslationEntry,
+  onTranslationFailures,
   onPermissionModeChange,
   onModelChange,
   onEffortChange,
@@ -97,6 +107,15 @@ export function SessionConsole({
               taskSlug={session.taskSlug}
               role={role}
               sessionId={session.id}
+              panelState={translationPanelState ?? {
+                role,
+                status: "ready",
+                entries: [],
+                failures: []
+              }}
+              onClearSession={onClearTranslationSession ?? (() => undefined)}
+              onEntry={onTranslationEntry ?? (() => undefined)}
+              onFailures={onTranslationFailures ?? (() => undefined)}
             />
           </div>
         ) : null}

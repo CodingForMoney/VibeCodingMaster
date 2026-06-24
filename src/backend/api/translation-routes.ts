@@ -47,6 +47,21 @@ export function registerTranslationRoutes(app: FastifyInstance, deps: Translatio
     }
   );
 
+  app.get<{ Params: { taskSlug: string }; Querystring: { after?: string; limit?: string } }>(
+    "/api/tasks/:taskSlug/translation/feed",
+    async (request) => {
+      const project = await requireCurrentProject(deps.projectService);
+      const task = await deps.taskService.loadTask(project.repoRoot, request.params.taskSlug);
+      return deps.translationService.pollTaskFeed({
+        repoRoot: project.repoRoot,
+        taskRepoRoot: getTaskRuntimeRepoRoot(task),
+        taskSlug: request.params.taskSlug,
+        after: Number(request.query.after ?? "1"),
+        limit: request.query.limit === undefined ? undefined : Number(request.query.limit)
+      });
+    }
+  );
+
   app.post<{ Params: { taskSlug: string; role: string }; Body: TranslateUserInputRequest }>(
     "/api/tasks/:taskSlug/sessions/:role/translation/input",
     async (request) => {

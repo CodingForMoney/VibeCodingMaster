@@ -16,6 +16,14 @@ import { getSessionForRole } from "../state/session-store.js";
 import { apiClient } from "../state/api-client.js";
 import { selectAutoDispatchRole } from "../state/message-navigation.js";
 import { useScheduledPoll } from "../state/use-scheduled-poll.js";
+import {
+  applyTranslationPanelEntry,
+  applyTranslationTaskFeed,
+  clearTranslationPanelSession,
+  createTranslationPanelFeedStore,
+  selectTranslationPanelSessionState,
+  setTranslationPanelFailures
+} from "../state/translation-feed-store.js";
 
 const DEFAULT_PERMISSION_MODES: Record<RoleName, ClaudePermissionMode> = {
   "project-manager": "bypassPermissions",
@@ -105,8 +113,10 @@ export function TaskWorkspace({
   const [, setError] = useUiErrorState("");
   const [events, setEvents] = useState<string[]>([]);
   const [orchestration, setOrchestration] = useState<VcmOrchestrationState | null>(null);
+  const [translationFeedStore, setTranslationFeedStore] = useState(() => createTranslationPanelFeedStore(task.taskSlug));
   const messageSnapshotRef = useRef<{ taskSlug: string; messages: VcmRoleMessage[] } | null>(null);
   const taskStatusSyncKeyRef = useRef("");
+  const translationFeedCursorRef = useRef(1);
   const launchTemplateKey = useMemo(() => JSON.stringify(launchTemplate), [launchTemplate]);
   const hasGateReviewerSession = Boolean(
     statusReport?.sessions.some((session) => session.role === "gate-reviewer")
@@ -167,10 +177,34 @@ export function TaskWorkspace({
     }
   );
 
+  useScheduledPoll(
+    translationEnabled ? `task-translation-feed:${task.taskSlug}` : null,
+    async () => {
+      try {
+        const result = await apiClient.pollTranslationTaskFeed(task.taskSlug, translationFeedCursorRef.current);
+        translationFeedCursorRef.current = result.nextCursor;
+        setTranslationFeedStore((current) => applyTranslationTaskFeed(current, result));
+        clearPollError("Poll task translation feed");
+        setError((current) => clearUiErrorForActions(current, ["Poll task translation feed"]));
+      } catch (caught) {
+        reportPollError("Poll task translation feed", caught as Error);
+      }
+    },
+    {
+      intervalMs: 1000,
+      runImmediately: true
+    }
+  );
+
   useEffect(() => {
     setEvents([]);
     onEventsChanged?.([]);
   }, [onEventsChanged, task.taskSlug]);
+
+  useEffect(() => {
+    translationFeedCursorRef.current = 1;
+    setTranslationFeedStore(createTranslationPanelFeedStore(task.taskSlug));
+  }, [task.taskSlug]);
 
   useEffect(() => {
     setPermissionModes(permissionModesFromLaunchTemplate(launchTemplate));
@@ -308,6 +342,9 @@ export function TaskWorkspace({
               const isActive = role === activeRole;
               const sessions = statusReport?.sessions ?? [];
               const session = getSessionForRole(sessions, role);
+              const translationPanelState = session
+                ? selectTranslationPanelSessionState(translationFeedStore, session.id, role)
+                : undefined;
 
               return (
                 <div
@@ -326,6 +363,16 @@ export function TaskWorkspace({
                     translationEnabled={translationEnabled}
                     translationAutoSendEnabled={translationAutoSendEnabled}
                     translationTargetLanguage={translationTargetLanguage}
+                    translationPanelState={translationPanelState}
+                    onClearTranslationSession={(sessionId, targetRole) => {
+                      setTranslationFeedStore((current) => clearTranslationPanelSession(current, sessionId, targetRole));
+                    }}
+                    onTranslationEntry={(sessionId, targetRole, entry) => {
+                      setTranslationFeedStore((current) => applyTranslationPanelEntry(current, sessionId, targetRole, entry));
+                    }}
+                    onTranslationFailures={(sessionId, targetRole, failures) => {
+                      setTranslationFeedStore((current) => setTranslationPanelFailures(current, sessionId, targetRole, failures));
+                    }}
                     onPermissionModeChange={(permissionMode) => setRolePermissionMode(role, permissionMode)}
                     onModelChange={(model) => setRoleModel(role, model)}
                     onEffortChange={(effort) => setRoleEffort(role, effort)}

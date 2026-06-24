@@ -1,4 +1,5 @@
 import path from "node:path";
+import { isVcmRoleName } from "../../shared/constants.js";
 import type { RoleName } from "../../shared/types/role.js";
 import type { RoleSessionRecord } from "../../shared/types/session.js";
 import type {
@@ -7,6 +8,7 @@ import type {
 import type {
   ConversationTranslationJob,
   PollTranslationSessionResult,
+  PollTranslationTaskFeedResult,
   SendTranslatedInputRequest,
   StartTranslationSessionResult,
   TranslateManualOutputRequest,
@@ -19,6 +21,7 @@ import type {
   TranslationInputMode,
   TranslationSessionEvent,
   TranslationSessionStatus,
+  TranslationTaskFeedEvent,
   TranslationSourceKind,
   TranslationStatus,
   TranslationWsMessage
@@ -48,6 +51,7 @@ export interface TranslationService {
     limit?: number,
     context?: PollTranslationSessionContext
   ): Promise<PollTranslationSessionResult>;
+  pollTaskFeed(input: PollTranslationTaskFeedServiceInput): Promise<PollTranslationTaskFeedResult>;
   recordConversationBoundary(input: RecordTranslationConversationBoundaryInput): Promise<TranslationEntry | undefined>;
   translateUserInput(input: TranslateUserInputServiceInput): Promise<TranslateUserInputResult>;
   translateManualOutput(input: TranslateManualOutputServiceInput): Promise<TranslationEntry>;
@@ -72,6 +76,14 @@ export interface StartTranslationSessionServiceInput {
 
 export interface PollTranslationSessionContext {
   repoRoot: string;
+}
+
+export interface PollTranslationTaskFeedServiceInput {
+  repoRoot: string;
+  taskRepoRoot: string;
+  taskSlug: string;
+  after: number;
+  limit?: number;
 }
 
 export interface RecordTranslationConversationBoundaryInput {
@@ -175,6 +187,12 @@ interface PendingOutputTranslationBatch {
   items: PendingOutputTranslation[];
 }
 
+interface TaskFeedState {
+  events: TranslationTaskFeedEvent[];
+  nextSeq: number;
+  seenSessionEvents: Set<string>;
+}
+
 type TranslationSessionEventInput =
   | { type: "entry"; entry: TranslationEntry }
   | { type: "status"; status: TranslationSessionStatus }
@@ -190,6 +208,7 @@ const TRANSLATION_MODEL = "translator";
 const OUTPUT_TRANSLATION_BATCH_DELAY_MS = 10000;
 
 const TRANSCRIPT_REPLAY_GRACE_MS = 5000;
+const TRANSLATION_TASK_FEED_RETENTION_LIMIT = 2000;
 
 export function createTranslationService(deps: TranslationServiceDeps): TranslationService {
   const now = deps.now ?? (() => new Date().toISOString());
@@ -197,6 +216,7 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
   const outputBatchDelayMs = Math.max(0, deps.outputBatchDelayMs ?? OUTPUT_TRANSLATION_BATCH_DELAY_MS);
   const queues = createTranslationQueueRegistry();
   const sessionStates = new Map<string, SessionState>();
+  const taskFeeds = new Map<string, TaskFeedState>();
 
   async function loadConfig(): Promise<TranslationRuntimeConfig> {
     const preferences = await deps.appSettings.getPreferences();
@@ -270,8 +290,54 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
       createdAt: now()
     } as TranslationSessionEvent;
     state.events.push(event);
+    appendTaskFeedEvent(sessionId, state, event);
     void persistEvents(state);
     return event;
+  }
+
+  function appendTaskFeedEvent(sessionId: string, state: SessionState, event: TranslationSessionEvent): void {
+    if (!state.repoRoot || !state.taskSlug || !state.role) {
+      return;
+    }
+
+    const feed = getTaskFeed(state.repoRoot, state.taskSlug);
+    const sessionEventKey = getTaskFeedSessionEventKey(sessionId, event);
+    if (feed.seenSessionEvents.has(sessionEventKey)) {
+      return;
+    }
+
+    feed.seenSessionEvents.add(sessionEventKey);
+    feed.events.push({
+      seq: feed.nextSeq++,
+      sessionId,
+      role: state.role,
+      event
+    });
+
+    if (feed.events.length > TRANSLATION_TASK_FEED_RETENTION_LIMIT) {
+      feed.events = feed.events.slice(-TRANSLATION_TASK_FEED_RETENTION_LIMIT);
+    }
+  }
+
+  function syncTaskFeedFromSessionState(sessionId: string, state: SessionState): void {
+    for (const event of state.events) {
+      appendTaskFeedEvent(sessionId, state, event);
+    }
+  }
+
+  function getTaskFeed(repoRoot: string, taskSlug: string): TaskFeedState {
+    const key = getTaskFeedKey(repoRoot, taskSlug);
+    const current = taskFeeds.get(key);
+    if (current) {
+      return current;
+    }
+    const created: TaskFeedState = {
+      events: [],
+      nextSeq: 1,
+      seenSessionEvents: new Set()
+    };
+    taskFeeds.set(key, created);
+    return created;
   }
 
   async function prepareCache(input: {
@@ -300,6 +366,7 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
       state.cacheLoaded = true;
       pruneTranslationEntries(input.sessionId);
     }
+    syncTaskFeedFromSessionState(input.sessionId, state);
 
     await deps.fs.ensureDir(path.dirname(cachePath));
     return state;
@@ -930,6 +997,45 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
         events
       };
     },
+    async pollTaskFeed(input) {
+      const cursor = Number.isFinite(input.after) ? Math.max(1, Math.floor(input.after)) : 1;
+      const maxEvents = Math.min(Math.max(1, Math.floor(input.limit ?? 500)), 1000);
+      const roleSessions = await deps.sessionService.listRoleSessions(input.repoRoot, input.taskSlug);
+      const feedSessions: PollTranslationTaskFeedResult["sessions"] = [];
+
+      for (const roleSession of roleSessions) {
+        if (!isVcmRoleName(roleSession.role)) {
+          continue;
+        }
+        const state = await prepareCache({
+          repoRoot: input.taskRepoRoot,
+          baseRepoRoot: input.repoRoot,
+          taskSlug: input.taskSlug,
+          role: roleSession.role,
+          sessionId: roleSession.id
+        });
+        if (roleSession.status === "running") {
+          startTranscriptTail(roleSession);
+        }
+        feedSessions.push({
+          sessionId: roleSession.id,
+          role: roleSession.role,
+          status: state.status
+        });
+      }
+
+      const feed = getTaskFeed(input.taskRepoRoot, input.taskSlug);
+      const events = feed.events
+        .filter((event) => event.seq >= cursor)
+        .slice(0, maxEvents);
+      const nextCursor = events.length > 0 ? (events.at(-1)?.seq ?? cursor) + 1 : cursor;
+      return {
+        taskSlug: input.taskSlug,
+        nextCursor,
+        sessions: feedSessions,
+        events
+      };
+    },
     async recordConversationBoundary(input) {
       const config = await loadConfig();
       const state = await prepareCache({
@@ -1406,6 +1512,14 @@ function getTranscriptSessionKey(roleSession: RoleSessionRecord): string | undef
     roleSession.claudeSessionId,
     roleSession.transcriptPath
   ].join("\n");
+}
+
+function getTaskFeedKey(repoRoot: string, taskSlug: string): string {
+  return `${repoRoot}\n${taskSlug}`;
+}
+
+function getTaskFeedSessionEventKey(sessionId: string, event: TranslationSessionEvent): string {
+  return `${sessionId}:${event.seq}`;
 }
 
 function formatStructuredTranscriptEvent(event: Extract<ClaudeTranscriptEvent, { kind: "question" | "todo" | "agent" }>): string {

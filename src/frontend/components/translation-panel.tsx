@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useEffect, useRef, useState, type KeyboardEvent } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
@@ -12,15 +12,13 @@ import type {
   TranslationState,
   TranslationEntry,
   TranslationFailureItem,
-  TranslationSessionEvent,
   TranslationSessionStatus
 } from "../../shared/types/translation.js";
-import { TRANSLATION_ENTRY_RETENTION_LIMIT } from "../../shared/types/translation.js";
 import { apiClient } from "../state/api-client.js";
-import { clearUiErrorForActions, formatUiError } from "../state/error-format.js";
-import { clearPollError, recordPollError } from "../state/poll-error-gate.js";
+import { formatUiError } from "../state/error-format.js";
 import { useUiErrorState } from "../state/ui-error-state.js";
 import { useScheduledPoll } from "../state/use-scheduled-poll.js";
+import type { TranslationPanelSessionState } from "../state/translation-feed-store.js";
 
 type TranslationPanelStatus = TranslationSessionStatus;
 const TRANSLATED_COMPOSER_SEPARATOR = "\n\n--- Translation ---\n";
@@ -32,6 +30,10 @@ export interface TranslationPanelProps {
   taskSlug: string;
   role: RoleName;
   sessionId: string;
+  panelState: TranslationPanelSessionState;
+  onClearSession(sessionId: string, role: RoleName): void;
+  onEntry(sessionId: string, role: RoleName, entry: TranslationEntry): void;
+  onFailures(sessionId: string, role: RoleName, failures: TranslationFailureItem[]): void;
 }
 
 export function TranslationPanel({
@@ -40,59 +42,22 @@ export function TranslationPanel({
   targetLanguage,
   taskSlug,
   role,
-  sessionId
+  sessionId,
+  panelState,
+  onClearSession,
+  onEntry,
+  onFailures
 }: TranslationPanelProps) {
-  const [entries, setEntries] = useState<TranslationEntry[]>([]);
-  const [failures, setFailures] = useState<TranslationFailureItem[]>([]);
   const [composer, setComposer] = useState("");
   const [manualSource, setManualSource] = useState("");
   const [composerIsEnglishDraft, setComposerIsEnglishDraft] = useState(false);
-  const [status, setStatus] = useState<TranslationPanelStatus>("ready");
   const [panelNowMs, setPanelNowMs] = useState(Date.now());
   const [busy, setBusy] = useState(false);
   const [, setError] = useUiErrorState("");
-  const [scrollRevision, setScrollRevision] = useState(0);
-  const activeRef = useRef(active);
-  const cursorRef = useRef(1);
   const entryListRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    activeRef.current = active;
-  }, [active]);
-
-  const pollTranslationEvents = useCallback(async () => {
-    try {
-      const result = await apiClient.pollTranslationSession(sessionId, cursorRef.current);
-      applyTranslationEvents(result.events);
-      cursorRef.current = result.nextCursor;
-      setStatus(result.status);
-      clearPollError("Poll conversation translation events");
-      setError((current) => clearUiErrorForActions(current, ["Poll conversation translation events"]));
-    } catch (caught) {
-      const message = recordPollError("Poll conversation translation events", caught as Error);
-      if (message) {
-        setError(message);
-      }
-    }
-  }, [sessionId]);
-
-  useScheduledPoll(
-    sessionId ? `translation-events:${sessionId}` : null,
-    pollTranslationEvents,
-    {
-      intervalMs: active ? 1000 : 5000,
-      runImmediately: false
-    }
-  );
-
-  useEffect(() => {
-    setEntries([]);
-    setFailures([]);
-    setError("");
-    setStatus("ready");
-    cursorRef.current = 1;
-    void pollTranslationEvents();
-  }, [pollTranslationEvents, sessionId, taskSlug, role]);
+  const entries = panelState.entries;
+  const failures = panelState.failures;
+  const status = panelState.status;
 
   useEffect(() => {
     if (!active) {
@@ -107,7 +72,7 @@ export function TranslationPanel({
       entryList.scrollTop = entryList.scrollHeight;
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [active, scrollRevision]);
+  }, [active, entries]);
 
   const activeTranslationStartedAt = getActiveTranslationStartedAt(entries);
   useEffect(() => {
@@ -155,46 +120,12 @@ export function TranslationPanel({
     setError("");
     try {
       const entry = await apiClient.translateManualOutput(taskSlug, role, { text: sourceText });
-      setEntries((current) => trimTranslationEntries(upsertEntry(current, entry)).entries);
+      onEntry(sessionId, role, entry);
       setManualSource("");
-      setScrollRevision((current) => current + 1);
     } catch (caught) {
       setError(formatUiError("Translate pasted English output", caught));
     } finally {
       setBusy(false);
-    }
-  }
-
-  function applyTranslationEvents(events: TranslationSessionEvent[]) {
-    if (events.length === 0) {
-      return;
-    }
-
-    for (const event of events) {
-      if (event.type === "status") {
-        setStatus(event.status);
-      } else if (event.type === "error") {
-        setError(formatUiError("Process translation session event", event.message));
-      } else if (event.type === "failures") {
-        setFailures(event.failures);
-      }
-    }
-
-    const entryEvents = events.filter((event): event is Extract<TranslationSessionEvent, { type: "entry" }> =>
-      event.type === "entry"
-    );
-    if (entryEvents.length > 0) {
-      setEntries((current) => {
-        const nextEntries = entryEvents.reduce((next, event) => upsertEntry(next, event.entry), current);
-        const trimmed = trimTranslationEntries(nextEntries);
-        if (trimmed.removedIds.size > 0) {
-          setFailures((currentFailures) =>
-            currentFailures.filter((failure) => !trimmed.removedIds.has(failure.translationId))
-          );
-        }
-        return trimmed.entries;
-      });
-      setScrollRevision((current) => current + 1);
     }
   }
 
@@ -231,9 +162,7 @@ export function TranslationPanel({
   }
 
   async function clearPanel() {
-    setEntries([]);
-    setFailures([]);
-    cursorRef.current = 1;
+    onClearSession(sessionId, role);
     await apiClient.clearTranslationSession(sessionId).catch((caught: Error) => setError(formatUiError("Clear conversation translation panel", caught)));
   }
 
@@ -242,7 +171,7 @@ export function TranslationPanel({
     setError("");
     try {
       const result = await apiClient.ignoreTranslationFailures(sessionId);
-      setFailures(result.failures);
+      onFailures(sessionId, role, result.failures);
     } catch (caught) {
       setError(formatUiError("Ignore failed conversation translations", caught));
     } finally {
@@ -255,8 +184,7 @@ export function TranslationPanel({
     setError("");
     try {
       const entry = await apiClient.retryTranslation(sessionId, failure.translationId);
-      setEntries((current) => trimTranslationEntries(upsertEntry(current, entry)).entries);
-      setScrollRevision((current) => current + 1);
+      onEntry(sessionId, role, entry);
     } catch (caught) {
       setError(formatUiError("Retry latest failed conversation translation", caught));
     } finally {
@@ -816,36 +744,6 @@ function isActiveTranslation(entry: TranslationEntry): boolean {
   return entry.status === "queued" || entry.status === "translating";
 }
 
-function trimTranslationEntries(entries: TranslationEntry[]): {
-  entries: TranslationEntry[];
-  removedIds: Set<string>;
-} {
-  const overflow = entries.length - TRANSLATION_ENTRY_RETENTION_LIMIT;
-  if (overflow <= 0) {
-    return { entries, removedIds: new Set() };
-  }
-
-  const removedIds = new Set<string>();
-  for (const entry of entries) {
-    if (removedIds.size >= overflow) {
-      break;
-    }
-    if (isActiveTranslation(entry)) {
-      continue;
-    }
-    removedIds.add(entry.id);
-  }
-
-  if (removedIds.size === 0) {
-    return { entries, removedIds };
-  }
-
-  return {
-    entries: entries.filter((entry) => !removedIds.has(entry.id)),
-    removedIds
-  };
-}
-
 function getEntryStartedMs(entry: TranslationEntry): number {
   const timestamp = Date.parse(entry.translationStartedAt ?? entry.createdAt);
   return Number.isFinite(timestamp) ? timestamp : Date.now();
@@ -880,14 +778,6 @@ export function extractTranslatedComposerDraft(composerText: string): string {
     return composerText;
   }
   return composerText.slice(separatorIndex + TRANSLATED_COMPOSER_SEPARATOR.length);
-}
-
-function upsertEntry(entries: TranslationEntry[], entry: TranslationEntry): TranslationEntry[] {
-  const index = entries.findIndex((current) => current.id === entry.id);
-  if (index === -1) {
-    return [...entries, entry];
-  }
-  return entries.map((current) => current.id === entry.id ? entry : current);
 }
 
 function formatElapsed(elapsedMs: number): string {

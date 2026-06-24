@@ -271,10 +271,12 @@ describe("apiClient", () => {
 
     await apiClient.startTranslationSession("demo-task", "coder");
     await apiClient.pollTranslationSession("session-1", 18, 100);
+    await apiClient.pollTranslationTaskFeed("demo-task", 25, 200);
 
     expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/tasks/demo-task/sessions/coder/translation/start");
     expect(fetchMock.mock.calls[0]?.[1]?.method).toBe("POST");
     expect(fetchMock.mock.calls[1]?.[0]).toBe("/api/translation/sessions/session-1/events?after=18&limit=100");
+    expect(fetchMock.mock.calls[2]?.[0]).toBe("/api/tasks/demo-task/translation/feed?after=25&limit=200");
   });
 
   it("calls translation failure queue APIs with bodyless POST requests", async () => {

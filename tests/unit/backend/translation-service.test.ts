@@ -229,6 +229,79 @@ describe("translation-service", () => {
     ]);
   });
 
+  it("polls a task-level translation feed across role sessions", async () => {
+    const roleSession = createRoleSessionRecord({
+      cwd: "/repo/.claude/worktrees/demo-task",
+      role: "coder"
+    });
+    const transcripts = createTranscriptStub();
+    const service = createTranslationService({
+      appSettings: createAppSettingsService({
+        fs: createMemoryFs(),
+        settingsPath: "/settings.json",
+      }),
+      runtime: createRuntimeStub([roleSession]),
+      sessionRegistry: createRegistryStub(roleSession),
+      transcripts,
+      sessionService: {
+        async listRoleSessions() {
+          return [roleSession];
+        }
+      } as SessionService,
+      fs: createMemoryFs(),
+      projectService: createProjectServiceStub()
+    });
+
+    const firstPoll = await service.pollTaskFeed({
+      repoRoot: "/repo",
+      taskRepoRoot: "/repo/.claude/worktrees/demo-task",
+      taskSlug: "demo-task",
+      after: 1
+    });
+    expect(firstPoll.sessions).toEqual([
+      {
+        sessionId: roleSession.id,
+        role: "coder",
+        status: "ready"
+      }
+    ]);
+    expect(firstPoll.events).toEqual([]);
+
+    transcripts.emit({
+      kind: "tool_use",
+      id: "tool-use-task-feed",
+      timestamp: "2026-05-30T00:10:05.000Z",
+      toolUse: {
+        name: "Bash",
+        input: { command: "npm test" }
+      }
+    });
+    await delay(20);
+
+    const secondPoll = await service.pollTaskFeed({
+      repoRoot: "/repo",
+      taskRepoRoot: "/repo/.claude/worktrees/demo-task",
+      taskSlug: "demo-task",
+      after: firstPoll.nextCursor
+    });
+    expect(secondPoll.nextCursor).toBe(2);
+    expect(secondPoll.events).toHaveLength(1);
+    expect(secondPoll.events[0]).toMatchObject({
+      seq: 1,
+      sessionId: roleSession.id,
+      role: "coder",
+      event: {
+        type: "entry",
+        entry: {
+          id: "tool-use-task-feed",
+          status: "preserved",
+          sourceKind: "tool-output",
+          translatedText: expect.stringContaining("npm test")
+        }
+      }
+    });
+  });
+
   it("does not reprocess cached transcript entries when a feed is restarted", async () => {
     const fs = createMemoryFs();
     const roleSession = createRoleSessionRecord({
