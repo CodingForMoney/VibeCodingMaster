@@ -133,6 +133,7 @@ export function App() {
   const currentHarnessBootstrapStatus = harnessBootstrapStatusTaskSlug === activeTask?.taskSlug ? harnessBootstrapStatus : null;
   const translationBaseReady = Boolean(project && activeTask && isTranslationHarnessReady(currentHarnessStatus));
   const translatorSessionRunning = translatorSession?.status === "running";
+  const gatewayRunning = Boolean(gatewayStatus?.running);
   const effectiveTranslationEnabled = Boolean(translationEnabled && translationBaseReady && translatorSessionRunning);
   const canSaveLaunchTemplate = Boolean(activeTaskLaunchState?.statusLoaded);
   const canOneClickStart = Boolean(activeTask && activeTaskLaunchState?.statusLoaded && !activeTaskLaunchState.hasAnySession);
@@ -287,6 +288,11 @@ export function App() {
     if (!shouldShowFlowPauseNotice(roundState, previousObservation, activeTaskViewStartedAtRef.current[roundState.taskSlug])) {
       return;
     }
+    if (gatewayRunning) {
+      stopFlowPauseAlarm();
+      setFlowPauseNotice(null);
+      return;
+    }
 
     const roleLabel = roundState.activeRole ?? "role";
     const sound = !pauseAlertSound
@@ -299,7 +305,7 @@ export function App() {
       ? formatRoleRecoveryFailureMessage(recovery, roleLabel)
       : `No new turn started after ${roleLabel} stopped.`;
     showFlowPauseNotice(message, pauseKey, { sound });
-  }, [activeTask?.taskSlug, maybeTriggerAutoTaskHarnessReview, pauseAlertSound, showFlowPauseNotice]);
+  }, [activeTask?.taskSlug, gatewayRunning, maybeTriggerAutoTaskHarnessReview, pauseAlertSound, showFlowPauseNotice, stopFlowPauseAlarm]);
 
   const handleLaunchStateChanged = useCallback((launchState: TaskWorkspaceLaunchState) => {
     setActiveLaunchState((current) => {
@@ -556,6 +562,14 @@ export function App() {
   useEffect(() => {
     return () => stopFlowPauseAlarm();
   }, [stopFlowPauseAlarm]);
+
+  useEffect(() => {
+    if (!gatewayRunning) {
+      return;
+    }
+    stopFlowPauseAlarm();
+    setFlowPauseNotice(null);
+  }, [gatewayRunning, stopFlowPauseAlarm]);
 
   useEffect(() => {
     const resolvedTheme = themeMode === "system"
