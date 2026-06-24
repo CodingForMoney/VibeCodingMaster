@@ -91,15 +91,24 @@ tools: Read, Grep, Glob, Bash, Edit, Write
 
 - Perform docs sync only when project-manager requests it after reviewer completes.
 
-#### Architecture Docs Quality
+#### Architecture Docs Sync
 
 - Architecture docs describe the current durable system architecture, not task history, implementation chronology, changelog, investigation notes, validation logs, or handoff content.
 - Do not add phase/task/RP labels unless they are durable product, protocol, or spec identifiers that future maintainers must understand.
 - Keep project-level docs focused on module map, dependency direction, cross-module relationships, major runtime flows, and project-wide constraints.
 - Keep module-level docs focused on current responsibility boundaries, owned behavior, non-owned behavior, collaboration points, important public contracts, invariants, risks, and update triggers.
 - Do not duplicate the generated public API index; explain design intent and contract meaning instead.
+- Update `docs/ARCHITECTURE.md` only when project-level module overview changes: module list, module responsibilities, module relationships, dependency direction, project-wide architecture constraints, or module architecture doc links.
+- Update affected `<module>/ARCHITECTURE.md` when module-level detailed design changes: boundaries, behavior, important public surface explanations, internal risks, or module-specific architecture notes.
+- During docs sync, inspect every module touched by the final diff.
+- For each touched module, update its `<module>/ARCHITECTURE.md` when responsibility, boundary, behavior, public contract, dependency, state ownership, lifecycle, failure mode, or important invariant changed.
+- If a touched module's architecture doc does not need changes, record why in `.ai/vcm/handoffs/docs-sync-report.md`.
+- Do not move task logs, temporary rationale, or per-task validation history into durable architecture docs.
+- Treat `.ai/generated/public-surface.json` as the full machine index for public surface. Verify or report its freshness when public APIs changed; do not replace it with prose in architecture docs.
+- When module structure changes, require `.ai/tools/generate-module-index --check` or regeneration.
+- When public APIs, routes, or externally consumed surfaces change, require `.ai/tools/generate-public-surface --check` or regeneration.
 
-#### Known Issues Quality
+#### Known Issues Sync
 
 - `docs/known-issues.md` is a current open-issue snapshot, not a task log, changelog, review archive, validation diary, or decision transcript.
 - Promote only unresolved durable issues or accepted limitations that can affect future architecture, implementation, validation, operation, or release decisions.
@@ -110,18 +119,11 @@ tools: Read, Grep, Glob, Bash, Edit, Write
 - Each KI entry should state: status, category, affected modules/surfaces, current gap, impact, mitigation or workaround, resolution condition, and related issue IDs when useful.
 - Distinguish product/protocol issues from dev-environment, test-infra, harness, or VCM-tooling issues. Do not mix them in one KI entry.
 - Do not promote a task-local deferral unless it remains relevant after the task ends.
-
-- Update `docs/ARCHITECTURE.md` only when project-level module overview changes: module list, module responsibilities, module relationships, dependency direction, project-wide architecture constraints, or module architecture doc links.
-- Update affected `<module>/ARCHITECTURE.md` when module-level detailed design changes: boundaries, behavior, important public surface explanations, internal risks, or module-specific architecture notes.
-- During docs sync, inspect every module touched by the final diff.
-- For each touched module, update its `<module>/ARCHITECTURE.md` when responsibility, boundary, behavior, public contract, dependency, state ownership, lifecycle, failure mode, or important invariant changed.
-- If a touched module's architecture doc does not need changes, record why in `.ai/vcm/handoffs/docs-sync-report.md`.
-- Do not move task logs, temporary rationale, or per-task validation history into durable architecture docs.
-- Treat `.ai/generated/public-surface.json` as the full machine index for public surface. Verify or report its freshness when public APIs changed; do not replace it with prose in architecture docs.
-- When module structure changes, require `.ai/tools/generate-module-index --check` or regeneration.
-- When public APIs, routes, or externally consumed surfaces change, require `.ai/tools/generate-public-surface --check` or regeneration.
-- Read `.ai/vcm/handoffs/known-issues.md`; promote only confirmed unresolved durable issues that satisfy Known Issues Quality.
+- Read `.ai/vcm/handoffs/known-issues.md`; promote only confirmed unresolved durable issues that satisfy Known Issues Sync.
 - During docs sync, remove or rewrite resolved/stale KI entries touched by the task so `docs/known-issues.md` remains an open-issue snapshot.
+
+#### Docs Sync Report
+
 - Write `.ai/vcm/handoffs/docs-sync-report.md` with decision, evidence reviewed, architecture drift check, docs updated, docs left unchanged, promoted/updated/removed/not-promoted known issues, remaining documentation risks, and handoff notes.
 
 ### Background Jobs
