@@ -221,7 +221,7 @@ The left sidebar is intentionally compact and collapsible:
 - `Settings`: `Theme`, `Flow pause alert`, `Try alert`, `Messages`, and `Events`.
 - `Translation`: global conversation translation, auto-send, target language, output scope, file translation, bootstrap, memory update, session status, and Translator session access.
 - `Gate Review Gates`: global gate switches for architecture plan, validation adequacy, and final diff.
-- `Gateway`: Weixin iLink or Lark binding, Gateway on/off, Gateway translation, QR login, and Lark pairing.
+- `Gateway`: Weixin iLink or Lark binding, Gateway on/off, Gateway translation, QR login/setup, and Lark pairing.
 - `VCM Harness`: fixed-install status, bootstrap completion checks, and the bootstrap terminal when one is running.
 - `New Task`: one `task name` input.
 - `Tasks`: task list and task status.
@@ -275,14 +275,15 @@ The `Gateway` toggle is disabled until a QR login has produced a usable iLink to
 
 ### Bind Lark
 
-1. Create a Lark app with bot capability, message receive events, and WebSocket event delivery.
-2. Open the sidebar `Gateway` section and select `Lark`.
-3. Save the Lark App ID and App Secret.
-4. Click `Create Pairing Code`.
-5. Send `/bind CODE` to the Lark bot before the code expires.
-6. After binding succeeds, turn `Gateway` on in the sidebar.
+1. Open the sidebar `Gateway` section and select `Lark`.
+2. Click `Start QR Setup`.
+3. Scan the QR code with Lark and approve bot creation.
+4. Click `Confirm` in the setup dialog.
+5. Click `Create Pairing Code`.
+6. Send `/bind CODE` to the Lark bot before the code expires.
+7. After binding succeeds, turn `Gateway` on in the sidebar.
 
-Lark credentials stay in local VCM state. The App Secret is not shown again in the UI. `Reset Binding` clears the bound Lark user/chat state while keeping the saved Lark app credentials.
+Lark QR setup creates/configures the bot app and stores the resulting App ID/App Secret in local VCM state. Manual App ID/App Secret input remains available as a fallback. The App Secret is not shown again in the UI. `Reset Binding` clears the bound Lark user/chat state while keeping the saved Lark app credentials.
 
 When Gateway is turned on, VCM automatically turns off the browser `Flow pause alert` and disables `Try alert`. Gateway becomes the notification path, so the browser should not show blocking flow-pause dialogs while the user is managing the task from the phone.
 
@@ -377,7 +378,7 @@ Typical mobile flow:
 - If the QR dialog does not appear, refresh the page and click `Start QR Login` again.
 - If the QR status stays `wait`, confirm the login on the phone and click `Confirm` again.
 - If the QR code expires, start a new QR login.
-- If `Gateway` cannot be enabled, bind Weixin or pair Lark first.
+- If `Gateway` cannot be enabled, bind Weixin or complete Lark QR setup and pairing first.
 - If `/start` or read-only commands do not receive replies, check that the selected channel is connected and the message comes from the bound identity.
 - If PM messages or task-changing commands are rejected, check that Gateway is on.
 - If plain text cannot be sent to PM, select a project and task first, and make sure the task's PM session is running and idle.

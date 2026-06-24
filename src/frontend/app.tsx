@@ -19,7 +19,9 @@ import type {
 } from "../shared/types/harness.js";
 import type {
   CheckGatewayQrLoginResult,
+  CheckGatewayLarkRegistrationResult,
   GatewayStatus,
+  StartGatewayLarkRegistrationResult,
   StartGatewayQrLoginResult
 } from "../shared/types/gateway.js";
 import type { GateReviewGate, GateReviewIndex } from "../shared/types/gate-review.js";
@@ -69,6 +71,9 @@ export function App() {
   const [gatewayQrLogin, setGatewayQrLogin] = useState<StartGatewayQrLoginResult | null>(null);
   const [gatewayQrCheck, setGatewayQrCheck] = useState<CheckGatewayQrLoginResult | null>(null);
   const [gatewayQrModalOpen, setGatewayQrModalOpen] = useState(false);
+  const [gatewayLarkRegistration, setGatewayLarkRegistration] = useState<StartGatewayLarkRegistrationResult | null>(null);
+  const [gatewayLarkRegistrationCheck, setGatewayLarkRegistrationCheck] = useState<CheckGatewayLarkRegistrationResult | null>(null);
+  const [gatewayLarkRegistrationModalOpen, setGatewayLarkRegistrationModalOpen] = useState(false);
   const [tasks, setTasks] = useState<TaskRecord[]>([]);
   const [activeTaskSlug, setActiveTaskSlug] = useState<string | null>(null);
   const [activeMessages, setActiveMessages] = useState<{ taskSlug: string; messages: VcmRoleMessage[] } | null>(null);
@@ -961,6 +966,8 @@ export function App() {
           gatewayStatus={gatewayStatus}
           gatewayQrLogin={gatewayQrLogin}
           gatewayQrCheck={gatewayQrCheck}
+          gatewayLarkRegistration={gatewayLarkRegistration}
+          gatewayLarkRegistrationCheck={gatewayLarkRegistrationCheck}
           busy={busy}
           onConnect={(repoPath) => withBusy(async () => {
             const nextProject = await apiClient.connectProject({ repoPath });
@@ -1100,6 +1107,15 @@ export function App() {
               await loadGatewayStatus();
             }, "Start Gateway QR login");
           }}
+          onStartGatewayLarkRegistration={() => {
+            void withBusy(async () => {
+              const result = await apiClient.startGatewayLarkRegistration();
+              setGatewayLarkRegistration(result);
+              setGatewayLarkRegistrationCheck(null);
+              setGatewayLarkRegistrationModalOpen(true);
+              await loadGatewayStatus();
+            }, "Start Lark Gateway QR setup");
+          }}
           onResetGatewayBinding={() => {
             void withBusy(async () => {
               const nextStatus = await apiClient.resetGatewayBinding();
@@ -1107,6 +1123,9 @@ export function App() {
               setGatewayQrLogin(null);
               setGatewayQrCheck(null);
               setGatewayQrModalOpen(false);
+              setGatewayLarkRegistration(null);
+              setGatewayLarkRegistrationCheck(null);
+              setGatewayLarkRegistrationModalOpen(false);
             }, "Reset Gateway binding");
           }}
           onGateReviewGateEnabledChange={(gate: GateReviewGate, enabled) => {
@@ -1358,6 +1377,27 @@ export function App() {
             });
           }}
           onClose={() => setGatewayQrModalOpen(false)}
+        />
+      ) : null}
+      {gatewayLarkRegistrationModalOpen && gatewayLarkRegistration ? (
+        <GatewayLarkRegistrationModal
+          busy={busy}
+          registration={gatewayLarkRegistration}
+          registrationCheck={gatewayLarkRegistrationCheck}
+          onCheck={() => {
+            void withBusy(async () => {
+              const result = await apiClient.checkGatewayLarkRegistration();
+              setGatewayLarkRegistrationCheck(result);
+              if (result.gatewayStatus) {
+                setGatewayStatus(result.gatewayStatus);
+              }
+              if (result.status === "confirmed") {
+                setGatewayLarkRegistrationModalOpen(false);
+                await loadGatewayStatus();
+              }
+            }, "Check Lark Gateway QR setup");
+          }}
+          onClose={() => setGatewayLarkRegistrationModalOpen(false)}
         />
       ) : null}
       {project && activeTask ? (
@@ -1722,6 +1762,110 @@ function GatewayQrLoginModal({
               </div>
             ) : null}
           </dl>
+        </div>
+
+        <footer>
+          <button type="button" disabled={busy} onClick={onCheck}>Confirm</button>
+        </footer>
+      </section>
+    </div>
+  );
+}
+
+function GatewayLarkRegistrationModal({
+  busy,
+  onCheck,
+  onClose,
+  registration,
+  registrationCheck
+}: {
+  busy: boolean;
+  onCheck(): void;
+  onClose(): void;
+  registration: StartGatewayLarkRegistrationResult;
+  registrationCheck: CheckGatewayLarkRegistrationResult | null;
+}) {
+  const [qrImageSrc, setQrImageSrc] = useState("");
+  const [qrError, setQrError] = useUiErrorState("");
+
+  useEffect(() => {
+    let cancelled = false;
+    setQrError("");
+    setQrImageSrc("");
+    try {
+      const qr = qrcode(0, "M");
+      qr.addData(registration.qrUrl);
+      qr.make();
+      if (!cancelled) {
+        setQrImageSrc(qr.createDataURL(8, 2));
+      }
+    } catch (error) {
+      if (!cancelled) {
+        setQrError(formatUiError("Render Lark Gateway setup QR code", error));
+      }
+    }
+    return () => {
+      cancelled = true;
+    };
+  }, [registration.qrUrl]);
+
+  return (
+    <div className="modal-backdrop">
+      <section
+        aria-labelledby="gateway-lark-registration-title"
+        aria-modal="true"
+        className="gateway-qr-modal"
+        role="dialog"
+      >
+        <header>
+          <div>
+            <h2 id="gateway-lark-registration-title">Lark Gateway Setup</h2>
+            <p className="muted">Scan with Lark, approve bot creation, then click Confirm.</p>
+          </div>
+          <button type="button" onClick={onClose}>Close</button>
+        </header>
+
+        <div className="gateway-qr-modal-body">
+          <div className="gateway-qr-code-frame">
+            {qrImageSrc ? (
+              <img alt="Lark Gateway setup QR code" src={qrImageSrc} />
+            ) : (
+              <div className="gateway-qr-placeholder">
+                {qrError ? "QR code could not be rendered." : "Rendering QR code..."}
+              </div>
+            )}
+          </div>
+          <dl className="gateway-qr-meta">
+            <div>
+              <dt>Status</dt>
+              <dd>{registrationCheck?.status ?? registration.status}</dd>
+            </div>
+            <div>
+              <dt>Expires</dt>
+              <dd>{formatFullTime(registration.expiresAt)}</dd>
+            </div>
+            {registration.userCode ? (
+              <div>
+                <dt>User Code</dt>
+                <dd>{registration.userCode}</dd>
+              </div>
+            ) : null}
+            {registrationCheck?.larkBotName ? (
+              <div>
+                <dt>Bot</dt>
+                <dd>{registrationCheck.larkBotName}</dd>
+              </div>
+            ) : null}
+            {registrationCheck?.message ? (
+              <div>
+                <dt>Message</dt>
+                <dd>{registrationCheck.message}</dd>
+              </div>
+            ) : null}
+          </dl>
+          <a href={registration.qrUrl} target="_blank" rel="noreferrer">
+            Open setup link
+          </a>
         </div>
 
         <footer>

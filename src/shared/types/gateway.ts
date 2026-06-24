@@ -1,4 +1,5 @@
 export type GatewayChannel = "weixin-ilink" | "lark";
+export type GatewayLarkDomain = "lark" | "feishu";
 
 export type GatewayQrLoginStatus =
   | "idle"
@@ -21,6 +22,10 @@ export interface GatewayBindingStatus {
   appId: string | null;
   appIdConfigured: boolean;
   appSecretConfigured: boolean;
+  larkDomain?: GatewayLarkDomain | null;
+  larkOpenId?: string | null;
+  larkBotName?: string | null;
+  larkBotOpenId?: string | null;
   homeChatId: string | null;
   pairingCodeExpiresAt: string | null;
 }
@@ -93,6 +98,28 @@ export interface CheckGatewayQrLoginResult {
   boundUserId?: string | null;
   loginUserId?: string | null;
   message?: string;
+}
+
+export type GatewayLarkRegistrationStatus = "wait" | "confirmed" | "expired" | "failed";
+
+export interface StartGatewayLarkRegistrationResult {
+  status: "wait";
+  qrUrl: string;
+  userCode: string | null;
+  expiresAt: string;
+  intervalSeconds: number;
+}
+
+export interface CheckGatewayLarkRegistrationResult {
+  status: GatewayLarkRegistrationStatus;
+  message?: string;
+  appIdConfigured?: boolean;
+  appSecretConfigured?: boolean;
+  larkDomain?: GatewayLarkDomain;
+  larkOpenId?: string | null;
+  larkBotName?: string | null;
+  larkBotOpenId?: string | null;
+  gatewayStatus?: GatewayStatus;
 }
 
 export interface CreateGatewayPairingCodeResult {

@@ -380,6 +380,8 @@ describe("apiClient", () => {
 
     await apiClient.startGatewayQrLogin();
     await apiClient.checkGatewayQrLogin();
+    await apiClient.startGatewayLarkRegistration();
+    await apiClient.checkGatewayLarkRegistration();
     await apiClient.resetGatewayBinding();
 
     expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/gateway/qr/start");
@@ -388,9 +390,15 @@ describe("apiClient", () => {
     expect(fetchMock.mock.calls[1]?.[0]).toBe("/api/gateway/qr/check");
     expect(fetchMock.mock.calls[1]?.[1]?.method).toBe("POST");
     expect(fetchMock.mock.calls[1]?.[1]?.body).toBe(JSON.stringify({}));
-    expect(fetchMock.mock.calls[2]?.[0]).toBe("/api/gateway/binding/reset");
+    expect(fetchMock.mock.calls[2]?.[0]).toBe("/api/gateway/lark-registration/start");
     expect(fetchMock.mock.calls[2]?.[1]?.method).toBe("POST");
     expect(fetchMock.mock.calls[2]?.[1]?.body).toBeUndefined();
+    expect(fetchMock.mock.calls[3]?.[0]).toBe("/api/gateway/lark-registration/check");
+    expect(fetchMock.mock.calls[3]?.[1]?.method).toBe("POST");
+    expect(fetchMock.mock.calls[3]?.[1]?.body).toBeUndefined();
+    expect(fetchMock.mock.calls[4]?.[0]).toBe("/api/gateway/binding/reset");
+    expect(fetchMock.mock.calls[4]?.[1]?.method).toBe("POST");
+    expect(fetchMock.mock.calls[4]?.[1]?.body).toBeUndefined();
   });
 
   it("calls gateway pairing API", async () => {

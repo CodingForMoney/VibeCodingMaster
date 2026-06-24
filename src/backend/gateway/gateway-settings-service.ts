@@ -1,6 +1,7 @@
 import path from "node:path";
 import type {
   GatewayChannel,
+  GatewayLarkDomain,
   GatewayMessageStatus,
   GatewayPendingConfirmations,
   GatewayPollStatus,
@@ -37,6 +38,10 @@ export interface GatewayBindingSettings {
   token: string | null;
   appId: string | null;
   appSecret: string | null;
+  larkDomain: GatewayLarkDomain | null;
+  larkOpenId: string | null;
+  larkBotName: string | null;
+  larkBotOpenId: string | null;
   homeChatId: string | null;
   pairingCode: string | null;
   pairingCodeExpiresAt: string | null;
@@ -154,6 +159,10 @@ export function createGatewaySettingsService(deps: GatewaySettingsServiceDeps): 
           baseUrl: current.binding.baseUrl || normalizeOptions.defaultBaseUrl,
           appId: current.binding.appId,
           appSecret: current.binding.appSecret,
+          larkDomain: current.binding.larkDomain,
+          larkOpenId: current.binding.larkOpenId,
+          larkBotName: current.binding.larkBotName,
+          larkBotOpenId: current.binding.larkBotOpenId,
           homeChatId: current.binding.homeChatId
         },
         dedupe: {
@@ -186,6 +195,10 @@ export function createGatewaySettingsService(deps: GatewaySettingsServiceDeps): 
           appId: settings.binding.appId,
           appIdConfigured: Boolean(settings.binding.appId),
           appSecretConfigured: Boolean(settings.binding.appSecret),
+          larkDomain: settings.binding.larkDomain,
+          larkOpenId: settings.binding.larkOpenId,
+          larkBotName: settings.binding.larkBotName,
+          larkBotOpenId: settings.binding.larkBotOpenId,
           homeChatId: settings.binding.homeChatId,
           pairingCodeExpiresAt: settings.binding.pairingCodeExpiresAt
         },
@@ -238,6 +251,10 @@ export function normalizeSettings(
       token: normalizeNullableString(bindingInput.token),
       appId: normalizeNullableString(bindingInput.appId),
       appSecret: normalizeNullableString(bindingInput.appSecret),
+      larkDomain: normalizeLarkDomain(bindingInput.larkDomain),
+      larkOpenId: normalizeNullableString(bindingInput.larkOpenId),
+      larkBotName: normalizeNullableString(bindingInput.larkBotName),
+      larkBotOpenId: normalizeNullableString(bindingInput.larkBotOpenId),
       homeChatId: normalizeNullableString(bindingInput.homeChatId),
       pairingCode: normalizeNullableString(bindingInput.pairingCode),
       pairingCodeExpiresAt: normalizeNullableString(bindingInput.pairingCodeExpiresAt),
@@ -274,6 +291,10 @@ function createDefaultBinding(defaultBaseUrl = DEFAULT_BASE_URL): GatewayBinding
     token: null,
     appId: null,
     appSecret: null,
+    larkDomain: null,
+    larkOpenId: null,
+    larkBotName: null,
+    larkBotOpenId: null,
     homeChatId: null,
     pairingCode: null,
     pairingCodeExpiresAt: null,
@@ -285,6 +306,10 @@ function createDefaultBinding(defaultBaseUrl = DEFAULT_BASE_URL): GatewayBinding
 
 function normalizeGatewayChannel(input: unknown, fallback: GatewayChannel): GatewayChannel {
   return input === "weixin-ilink" || input === "lark" ? input : fallback;
+}
+
+function normalizeLarkDomain(input: unknown): GatewayLarkDomain | null {
+  return input === "lark" || input === "feishu" ? input : null;
 }
 
 function normalizeCloseTaskConfirmation(input: unknown): GatewayPendingConfirmations["closeTask"] {

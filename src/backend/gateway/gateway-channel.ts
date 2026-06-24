@@ -1,4 +1,4 @@
-import type { GatewayChannel, GatewayQrLoginStatus } from "../../shared/types/gateway.js";
+import type { GatewayChannel, GatewayLarkDomain, GatewayQrLoginStatus } from "../../shared/types/gateway.js";
 
 export interface GatewayChannelAccount {
   accountId: string | null;
@@ -6,6 +6,7 @@ export interface GatewayChannelAccount {
   token?: string | null;
   appId?: string | null;
   appSecret?: string | null;
+  larkDomain?: GatewayLarkDomain | null;
   homeChatId?: string | null;
 }
 

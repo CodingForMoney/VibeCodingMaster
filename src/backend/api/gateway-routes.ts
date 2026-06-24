@@ -30,6 +30,14 @@ export function registerGatewayRoutes(app: FastifyInstance, deps: GatewayRouteDe
     return deps.gatewayService.checkQrLogin(request.body);
   });
 
+  app.post("/api/gateway/lark-registration/start", async () => {
+    return deps.gatewayService.startLarkRegistration();
+  });
+
+  app.post("/api/gateway/lark-registration/check", async () => {
+    return deps.gatewayService.checkLarkRegistration();
+  });
+
   app.post("/api/gateway/binding/reset", async () => {
     return deps.gatewayService.resetBinding();
   });

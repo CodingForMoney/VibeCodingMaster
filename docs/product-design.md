@@ -767,9 +767,10 @@ Gateway product rules:
   identity.
 
 The Weixin channel uses Tencent iLink QR login, `getupdates` long polling, and
-`sendmessage` text replies. The Lark channel uses Lark bot App ID/App Secret,
-WebSocket event delivery, and a short-lived `/bind CODE` pairing flow. Gateway
-details and implementation plan live in `docs/gateway-design.md`.
+`sendmessage` text replies. The Lark channel uses QR setup to create/configure a
+bot app, stores the resulting App ID/App Secret locally, then uses WebSocket
+event delivery and a short-lived `/bind CODE` pairing flow. Gateway details and
+implementation plan live in `docs/gateway-design.md`.
 
 ## 15. Local State
 

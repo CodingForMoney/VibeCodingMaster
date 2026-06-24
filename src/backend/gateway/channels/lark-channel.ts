@@ -39,8 +39,9 @@ export function createLarkChannel(options: LarkChannelOptions = {}): GatewayChan
   async function ensureConnection(input: {
     appId: string;
     appSecret: string;
+    domain: "lark" | "feishu";
   }): Promise<LarkConnectionState> {
-    const key = `${input.appId}:${input.appSecret}`;
+    const key = `${input.domain}:${input.appId}:${input.appSecret}`;
     if (connection?.key === key) {
       return connection;
     }
@@ -61,7 +62,7 @@ export function createLarkChannel(options: LarkChannelOptions = {}): GatewayChan
     const client = new Lark.Client({
       appId: input.appId,
       appSecret: input.appSecret,
-      domain: options.domain ?? "lark"
+      domain: input.domain
     });
     const dispatcher = new Lark.EventDispatcher({}).register({
       "im.message.receive_v1": async (data: unknown) => {
@@ -77,7 +78,7 @@ export function createLarkChannel(options: LarkChannelOptions = {}): GatewayChan
       const wsClient = new Lark.WSClient({
         appId: input.appId,
         appSecret: input.appSecret,
-        domain: options.domain ?? "lark",
+        domain: input.domain,
         source: "vcm-gateway",
         autoReconnect: true,
         loggerLevel: options.loggerLevel as never,
@@ -113,10 +114,11 @@ export function createLarkChannel(options: LarkChannelOptions = {}): GatewayChan
     async getUpdates(input): Promise<GatewayGetUpdatesResult> {
       const appId = input.account.appId?.trim();
       const appSecret = input.account.appSecret?.trim();
+      const domain = input.account.larkDomain ?? options.domain ?? "lark";
       if (!appId || !appSecret) {
         throw new Error("Lark App ID and App Secret are required.");
       }
-      const state = await ensureConnection({ appId, appSecret });
+      const state = await ensureConnection({ appId, appSecret, domain });
       await state.ready;
       if (state.error) {
         throw state.error;
@@ -135,10 +137,11 @@ export function createLarkChannel(options: LarkChannelOptions = {}): GatewayChan
     async sendText(input) {
       const appId = input.account.appId?.trim();
       const appSecret = input.account.appSecret?.trim();
+      const domain = input.account.larkDomain ?? options.domain ?? "lark";
       if (!appId || !appSecret) {
         throw new Error("Lark App ID and App Secret are required.");
       }
-      const state = await ensureConnection({ appId, appSecret });
+      const state = await ensureConnection({ appId, appSecret, domain });
       await state.ready;
       if (!state.client) {
         throw new Error("Lark client is not initialized.");

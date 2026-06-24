@@ -7,8 +7,10 @@ import type {
 import type {
   CheckGatewayQrLoginRequest,
   CheckGatewayQrLoginResult,
+  CheckGatewayLarkRegistrationResult,
   CreateGatewayPairingCodeResult,
   GatewayStatus,
+  StartGatewayLarkRegistrationResult,
   StartGatewayQrLoginResult,
   UpdateGatewaySettingsRequest
 } from "../../shared/types/gateway.js";
@@ -43,6 +45,10 @@ import type {
   GatewaySettingsFile,
   GatewaySettingsService
 } from "./gateway-settings-service.js";
+import {
+  createLarkRegistrationClient,
+  type LarkRegistrationClient
+} from "./channels/lark-registration.js";
 
 export interface GatewayService {
   start(): Promise<void>;
@@ -53,6 +59,8 @@ export interface GatewayService {
   createPairingCode(): Promise<CreateGatewayPairingCodeResult>;
   startQrLogin(): Promise<StartGatewayQrLoginResult>;
   checkQrLogin(input?: CheckGatewayQrLoginRequest): Promise<CheckGatewayQrLoginResult>;
+  startLarkRegistration(): Promise<StartGatewayLarkRegistrationResult>;
+  checkLarkRegistration(): Promise<CheckGatewayLarkRegistrationResult>;
   handlePmStop(input: GatewayPmStopInput): Promise<void>;
   getDiagnostics(): GatewayDiagnostics;
 }
@@ -76,6 +84,7 @@ export interface GatewayServiceDeps {
   roundService: Pick<RoundService, "stopTask">;
   runtime: Pick<TerminalRuntime, "write">;
   appSettings: Pick<AppSettingsService, "getPreferences" | "updatePreferences" | "getGateReviewSettings">;
+  larkRegistration?: LarkRegistrationClient;
   now?: () => string;
 }
 
@@ -84,6 +93,15 @@ interface QrLoginState {
   qrcode: string;
   qrcodeUrl: string;
   baseUrl: string;
+  expiresAt: string;
+}
+
+interface LarkRegistrationState {
+  domain: "lark" | "feishu";
+  deviceCode: string;
+  qrUrl: string;
+  userCode: string | null;
+  intervalSeconds: number;
   expiresAt: string;
 }
 
@@ -135,10 +153,12 @@ const COMMANDS_ALLOWED_WHEN_DISABLED = new Set<GatewayCommand["kind"]>([
 
 export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
   const now = deps.now ?? (() => new Date().toISOString());
+  const larkRegistration = deps.larkRegistration ?? createLarkRegistrationClient();
   let pollAbort: AbortController | null = null;
   let pollLoopPromise: Promise<void> | null = null;
   let pollStartingPromise: Promise<void> | null = null;
   let qrLogin: QrLoginState | null = null;
+  let larkRegistrationState: LarkRegistrationState | null = null;
   let lastFailedTranslation: LastFailedGatewayTranslation | null = null;
 
   function isRunning(): boolean {
@@ -208,6 +228,7 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
       token: settings.binding.token,
       appId: settings.binding.appId,
       appSecret: settings.binding.appSecret,
+      larkDomain: settings.binding.larkDomain,
       homeChatId: settings.binding.homeChatId
     };
   }
@@ -786,7 +807,7 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
     const settings = await deps.settings.loadSettings();
     if (!toAccount(settings)) {
       return settings.channel === "lark"
-        ? "Gateway is not configured. Save Lark App ID and App Secret in desktop VCM first."
+        ? "Gateway is not configured. Complete Lark QR Setup in desktop VCM first, or use manual Lark credentials."
         : "Gateway is not bound. Start QR login from desktop VCM first.";
     }
     if (settings.enabled) {
@@ -926,7 +947,13 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
       return deps.settings.expose(settings, isRunning());
     },
     async updateSettings(input) {
-      let settings = await deps.settings.updateSettings(input);
+      const updateInput = input.channel && input.baseUrl === undefined
+        ? {
+            ...input,
+            baseUrl: deps.channels.get(input.channel).defaultBaseUrl
+          }
+        : input;
+      let settings = await deps.settings.updateSettings(updateInput);
       if (settings.enabled) {
         settings = await syncDesktopContext(settings);
       }
@@ -940,6 +967,8 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
     async resetBinding() {
       await stopPolling();
       lastFailedTranslation = null;
+      qrLogin = null;
+      larkRegistrationState = null;
       const settings = await deps.settings.resetBinding();
       return deps.settings.expose(settings, isRunning());
     },
@@ -955,7 +984,7 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
       if (!settings.binding.appId || !settings.binding.appSecret) {
         throw new VcmError({
           code: "GATEWAY_LARK_CONFIG_MISSING",
-          message: "Save Lark App ID and App Secret before creating a pairing code.",
+          message: "Complete Lark QR Setup or save Lark App ID and App Secret before creating a pairing code.",
           statusCode: 409
         });
       }
@@ -1058,6 +1087,95 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
         accountId: result.accountId,
         boundUserId,
         loginUserId: result.loginUserId
+      };
+    },
+    async startLarkRegistration() {
+      await stopPolling();
+      const settings = await deps.settings.updateSettings({
+        channel: "lark",
+        baseUrl: deps.channels.get("lark").defaultBaseUrl
+      });
+      const domain = "lark";
+      await larkRegistration.init(domain);
+      const begin = await larkRegistration.begin(domain);
+      larkRegistrationState = {
+        domain: begin.domain,
+        deviceCode: begin.deviceCode,
+        qrUrl: begin.qrUrl,
+        userCode: begin.userCode,
+        intervalSeconds: begin.intervalSeconds,
+        expiresAt: new Date(Date.now() + begin.expiresInSeconds * 1000).toISOString()
+      };
+      return {
+        status: "wait",
+        qrUrl: begin.qrUrl,
+        userCode: begin.userCode,
+        intervalSeconds: begin.intervalSeconds,
+        expiresAt: larkRegistrationState.expiresAt
+      };
+    },
+    async checkLarkRegistration() {
+      if (!larkRegistrationState || Date.parse(larkRegistrationState.expiresAt) < Date.now()) {
+        larkRegistrationState = null;
+        return {
+          status: "expired",
+          message: "Lark QR setup expired. Start a new setup."
+        };
+      }
+      const result = await larkRegistration.poll({
+        domain: larkRegistrationState.domain,
+        deviceCode: larkRegistrationState.deviceCode
+      });
+      if (result.status !== "confirmed") {
+        if (result.status === "expired" || result.status === "failed") {
+          larkRegistrationState = null;
+        }
+        return {
+          status: result.status,
+          message: result.message
+        };
+      }
+      if (!result.appId || !result.appSecret || !result.domain) {
+        larkRegistrationState = null;
+        return {
+          status: "failed",
+          message: "Lark QR setup completed without app credentials."
+        };
+      }
+      const current = await deps.settings.loadSettings();
+      const settings = await deps.settings.saveSettings({
+        ...current,
+        channel: "lark",
+        binding: {
+          ...current.binding,
+          appId: result.appId,
+          appSecret: result.appSecret,
+          larkDomain: result.domain,
+          larkOpenId: result.openId ?? null,
+          larkBotName: result.botName ?? null,
+          larkBotOpenId: result.botOpenId ?? null,
+          pairingCode: null,
+          pairingCodeExpiresAt: null,
+          getUpdatesBuf: ""
+        },
+        lastPollStatus: {
+          state: "idle",
+          checkedAt: now()
+        },
+        updatedAt: now()
+      });
+      larkRegistrationState = null;
+      await ensurePolling();
+      const status = deps.settings.expose(settings, isRunning());
+      return {
+        status: "confirmed",
+        appIdConfigured: Boolean(result.appId),
+        appSecretConfigured: Boolean(result.appSecret),
+        larkDomain: result.domain,
+        larkOpenId: result.openId ?? null,
+        larkBotName: result.botName ?? null,
+        larkBotOpenId: result.botOpenId ?? null,
+        gatewayStatus: status
       };
     },
     async handlePmStop(input) {

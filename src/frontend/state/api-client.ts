@@ -3,8 +3,10 @@ import type { AppPreferences, UpdateAppPreferencesRequest } from "../../shared/t
 import type {
   CheckGatewayQrLoginRequest,
   CheckGatewayQrLoginResult,
+  CheckGatewayLarkRegistrationResult,
   CreateGatewayPairingCodeResult,
   GatewayStatus,
+  StartGatewayLarkRegistrationResult,
   StartGatewayQrLoginResult,
   UpdateGatewaySettingsRequest
 } from "../../shared/types/gateway.js";
@@ -498,6 +500,16 @@ export const apiClient = {
     return request<CheckGatewayQrLoginResult>("/api/gateway/qr/check", {
       method: "POST",
       body: JSON.stringify(input)
+    });
+  },
+  startGatewayLarkRegistration() {
+    return request<StartGatewayLarkRegistrationResult>("/api/gateway/lark-registration/start", {
+      method: "POST"
+    });
+  },
+  checkGatewayLarkRegistration() {
+    return request<CheckGatewayLarkRegistrationResult>("/api/gateway/lark-registration/check", {
+      method: "POST"
     });
   },
   createGatewayPairingCode() {

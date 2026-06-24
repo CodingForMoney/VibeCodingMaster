@@ -9,6 +9,7 @@ import type { TaskRecord } from "../../../src/shared/types/task.js";
 import { createDefaultLaunchTemplate } from "../../../src/shared/types/app-settings.js";
 import { createGatewayChannelRegistry, type GatewayChannelAdapter, type GatewayInboundMessage } from "../../../src/backend/gateway/gateway-channel.js";
 import { createGatewayService } from "../../../src/backend/gateway/gateway-service.js";
+import type { LarkRegistrationClient } from "../../../src/backend/gateway/channels/lark-registration.js";
 import type {
   WeixinIlinkChannel,
   WeixinIlinkUpdate
@@ -252,6 +253,57 @@ describe("gateway-service long connection", () => {
     expect(settings.current().binding.chatIds.ou_1).toBe("oc_1");
     service.stop();
   });
+
+  it("saves Lark app credentials from QR setup before pairing", async () => {
+    const settings = createSettings({ channel: "lark" });
+    const sentTexts: string[] = [];
+    const channel = createLarkTestChannel([], sentTexts);
+    const registration: LarkRegistrationClient = {
+      async init(domain) {
+        expect(domain).toBe("lark");
+      },
+      async begin(domain) {
+        return {
+          domain,
+          deviceCode: "device-1",
+          qrUrl: "https://accounts.larksuite.com/qr",
+          userCode: "ABCD",
+          intervalSeconds: 3,
+          expiresInSeconds: 600
+        };
+      },
+      async poll(input) {
+        expect(input).toEqual({
+          domain: "lark",
+          deviceCode: "device-1"
+        });
+        return {
+          status: "confirmed",
+          appId: "cli_test",
+          appSecret: "secret_test",
+          domain: "lark",
+          openId: "ou_setup",
+          botName: "VCM Bot",
+          botOpenId: "ou_bot"
+        };
+      }
+    };
+    const service = createService({ settings, channel, larkRegistration: registration });
+
+    const setup = await service.startLarkRegistration();
+    const checked = await service.checkLarkRegistration();
+
+    expect(setup.qrUrl).toBe("https://accounts.larksuite.com/qr");
+    expect(checked.status).toBe("confirmed");
+    expect(checked.gatewayStatus?.binding.appIdConfigured).toBe(true);
+    expect(settings.current().binding.appId).toBe("cli_test");
+    expect(settings.current().binding.appSecret).toBe("secret_test");
+    expect(settings.current().binding.larkDomain).toBe("lark");
+    expect(settings.current().binding.larkOpenId).toBe("ou_setup");
+    expect(settings.current().binding.larkBotName).toBe("VCM Bot");
+    await waitFor(() => channel.getUpdatesCalls > 0);
+    service.stop();
+  });
 });
 
 function createService(input: {
@@ -264,6 +316,7 @@ function createService(input: {
     role: "project-manager";
     text: string;
   }) => Promise<string>;
+  larkRegistration?: LarkRegistrationClient;
 }) {
   const project = createProject();
   const task = createTask();
@@ -378,6 +431,7 @@ function createService(input: {
         return {};
       }
     } as never,
+    larkRegistration: input.larkRegistration,
     now: () => NOW
   });
 }
