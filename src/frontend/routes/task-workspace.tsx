@@ -77,6 +77,7 @@ export interface TaskWorkspaceLaunchState {
   statusLoaded: boolean;
   sessionCount: number;
   hasAnySession: boolean;
+  hasGateReviewerSession: boolean;
   allRolesHaveSession: boolean;
 }
 
@@ -211,6 +212,7 @@ export function TaskWorkspace({
     const sessions = statusReport?.sessions ?? [];
     const coreSessions = sessions.filter((session) => isCoreVcmRoleName(session.role));
     const coreSessionRoles = new Set(coreSessions.map((session) => session.role));
+    const hasGateReviewerSession = sessions.some((session) => session.role === "gate-reviewer");
     const roles = {} as TaskWorkspaceLaunchState["roles"];
     for (const definition of VCM_ROLE_DEFINITIONS) {
       roles[definition.name] = {
@@ -227,6 +229,7 @@ export function TaskWorkspace({
       statusLoaded: Boolean(statusReport),
       sessionCount: coreSessions.length,
       hasAnySession: coreSessions.length > 0,
+      hasGateReviewerSession,
       allRolesHaveSession: CORE_VCM_ROLE_DEFINITIONS.every((definition) => coreSessionRoles.has(definition.name))
     });
   }, [

@@ -300,6 +300,7 @@ export function App() {
         current.statusLoaded === launchState.statusLoaded &&
         current.sessionCount === launchState.sessionCount &&
         current.hasAnySession === launchState.hasAnySession &&
+        current.hasGateReviewerSession === launchState.hasGateReviewerSession &&
         current.allRolesHaveSession === launchState.allRolesHaveSession &&
         current.autoOrchestration === launchState.autoOrchestration &&
         JSON.stringify(current.roles) === JSON.stringify(launchState.roles)
@@ -817,12 +818,26 @@ export function App() {
     }
 
     const taskSlug = activeTask.taskSlug;
+    const gateReviewState = activeGateReview?.taskSlug === taskSlug ? activeGateReview.state : null;
+    const gateReviewActive = Boolean(gateReviewState?.activeGate);
+    const roundState = activeSessionRoundState?.taskSlug === taskSlug ? activeSessionRoundState.roundState : null;
+    const launchState = activeLaunchState?.taskSlug === taskSlug ? activeLaunchState : null;
+    const shouldPoll = gateReviewActive || roundState?.activeRole === "gate-reviewer" || launchState?.hasGateReviewerSession;
+    if (!shouldPoll) {
+      return;
+    }
+
     const interval = window.setInterval(() => {
       void refreshGateReviewState(taskSlug).catch((caught: Error) => reportPollError("Poll Gate Review state", caught));
     }, 3000);
 
     return () => window.clearInterval(interval);
-  }, [activeTask?.taskSlug]);
+  }, [
+    activeGateReview,
+    activeLaunchState,
+    activeSessionRoundState,
+    activeTask?.taskSlug
+  ]);
 
   async function withBusy(action: () => Promise<void>, actionLabel = "Run UI action") {
     setBusy(true);
@@ -1129,7 +1144,6 @@ export function App() {
             const task = await apiClient.createTask(input);
             await loadTasks();
             setActiveTaskSlug(task.taskSlug);
-            await refreshGateReviewState(task.taskSlug);
           }, "Create task")}
           onCloseTask={() => {
             void withBusy(closeActiveTask, "Close task");
