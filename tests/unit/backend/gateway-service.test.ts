@@ -302,6 +302,29 @@ describe("gateway-service long connection", () => {
     await waitFor(() => channel.getUpdatesCalls > 0);
     service.stop();
   });
+
+  it("saves manually entered Lark app credentials and starts polling", async () => {
+    const settings = createSettings({ channel: "lark" });
+    const sentTexts: string[] = [];
+    const channel = createLarkTestChannel([], sentTexts);
+    const service = createService({ settings, channel });
+
+    const result = await service.bindLarkApp({
+      appId: "cli_manual",
+      appSecret: "secret_manual",
+      larkDomain: "lark"
+    });
+
+    expect(result.status).toBe("confirmed");
+    expect(result.gatewayStatus?.binding.appIdConfigured).toBe(true);
+    expect(result.gatewayStatus?.binding.appSecretConfigured).toBe(true);
+    expect(settings.current().channel).toBe("lark");
+    expect(settings.current().binding.appId).toBe("cli_manual");
+    expect(settings.current().binding.appSecret).toBe("secret_manual");
+    expect(settings.current().binding.larkDomain).toBe("lark");
+    expect(channel.getUpdatesCalls).toBe(1);
+    service.stop();
+  });
 });
 
 function createService(input: {

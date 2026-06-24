@@ -117,3 +117,9 @@ export interface CheckGatewayLarkRegistrationResult {
   larkBotOpenId?: string | null;
   gatewayStatus?: GatewayStatus;
 }
+
+export interface BindGatewayLarkAppRequest {
+  appId: string;
+  appSecret: string;
+  larkDomain?: GatewayLarkDomain;
+}

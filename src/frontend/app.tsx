@@ -1383,6 +1383,23 @@ export function App() {
               }
             }, "Check Lark Gateway QR setup");
           }}
+          onManualBind={(appId, appSecret) => {
+            void withBusy(async () => {
+              const result = await apiClient.bindGatewayLarkApp({
+                appId,
+                appSecret,
+                larkDomain: "lark"
+              });
+              setGatewayLarkRegistrationCheck(result);
+              if (result.gatewayStatus) {
+                setGatewayStatus(result.gatewayStatus);
+              }
+              if (result.status === "confirmed") {
+                setGatewayLarkRegistrationModalOpen(false);
+                await loadGatewayStatus();
+              }
+            }, "Bind Lark Gateway app");
+          }}
           onClose={() => setGatewayLarkRegistrationModalOpen(false)}
         />
       ) : null}
@@ -1762,17 +1779,22 @@ function GatewayLarkRegistrationModal({
   busy,
   onCheck,
   onClose,
+  onManualBind,
   registration,
   registrationCheck
 }: {
   busy: boolean;
   onCheck(): void;
   onClose(): void;
+  onManualBind(appId: string, appSecret: string): void;
   registration: StartGatewayLarkRegistrationResult;
   registrationCheck: CheckGatewayLarkRegistrationResult | null;
 }) {
   const [qrImageSrc, setQrImageSrc] = useState("");
   const [qrError, setQrError] = useUiErrorState("");
+  const [manualAppId, setManualAppId] = useState("");
+  const [manualAppSecret, setManualAppSecret] = useState("");
+  const [manualError, setManualError] = useUiErrorState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -1849,9 +1871,47 @@ function GatewayLarkRegistrationModal({
               </div>
             ) : null}
           </dl>
-          <a href={registration.qrUrl} target="_blank" rel="noreferrer">
-            Open setup link
-          </a>
+          <form
+            className="gateway-manual-bind"
+            onSubmit={(event) => {
+              event.preventDefault();
+              const appId = manualAppId.trim();
+              const appSecret = manualAppSecret.trim();
+              if (!appId || !appSecret) {
+                setManualError("Enter both App ID and App Secret.");
+                return;
+              }
+              setManualError("");
+              setManualAppSecret("");
+              onManualBind(appId, appSecret);
+            }}
+          >
+            <div>
+              <label htmlFor="gateway-lark-app-id">App ID</label>
+              <input
+                id="gateway-lark-app-id"
+                autoComplete="off"
+                disabled={busy}
+                value={manualAppId}
+                onChange={(event) => setManualAppId(event.currentTarget.value)}
+                placeholder="cli_xxx"
+              />
+            </div>
+            <div>
+              <label htmlFor="gateway-lark-app-secret">App Secret</label>
+              <input
+                id="gateway-lark-app-secret"
+                autoComplete="off"
+                disabled={busy}
+                type="password"
+                value={manualAppSecret}
+                onChange={(event) => setManualAppSecret(event.currentTarget.value)}
+                placeholder="Enter App Secret"
+              />
+            </div>
+            {manualError ? <p className="form-error">{manualError}</p> : null}
+            <button type="submit" disabled={busy}>Bind manually</button>
+          </form>
         </div>
 
         <footer>

@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import type {
+  BindGatewayLarkAppRequest,
   CheckGatewayQrLoginRequest,
   UpdateGatewaySettingsRequest
 } from "../../shared/types/gateway.js";
@@ -32,6 +33,10 @@ export function registerGatewayRoutes(app: FastifyInstance, deps: GatewayRouteDe
 
   app.post("/api/gateway/lark-registration/check", async () => {
     return deps.gatewayService.checkLarkRegistration();
+  });
+
+  app.post<{ Body: BindGatewayLarkAppRequest }>("/api/gateway/lark-registration/bind", async (request) => {
+    return deps.gatewayService.bindLarkApp(request.body);
   });
 
   app.post("/api/gateway/binding/reset", async () => {

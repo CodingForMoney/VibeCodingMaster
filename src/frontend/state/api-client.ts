@@ -1,6 +1,7 @@
 import type { DispatchRoleCommandResult, ProjectRuntimeState, TaskStatusReport, TaskWorkspaceState } from "../../shared/types/api.js";
 import type { AppPreferences, UpdateAppPreferencesRequest } from "../../shared/types/app-settings.js";
 import type {
+  BindGatewayLarkAppRequest,
   CheckGatewayQrLoginRequest,
   CheckGatewayQrLoginResult,
   CheckGatewayLarkRegistrationResult,
@@ -509,6 +510,12 @@ export const apiClient = {
   checkGatewayLarkRegistration() {
     return request<CheckGatewayLarkRegistrationResult>("/api/gateway/lark-registration/check", {
       method: "POST"
+    });
+  },
+  bindGatewayLarkApp(input: BindGatewayLarkAppRequest) {
+    return request<CheckGatewayLarkRegistrationResult>("/api/gateway/lark-registration/bind", {
+      method: "POST",
+      body: JSON.stringify(input)
     });
   },
   resetGatewayBinding() {

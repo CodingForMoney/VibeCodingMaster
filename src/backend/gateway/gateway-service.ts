@@ -4,6 +4,7 @@ import type {
   GatewayDiagnostics
 } from "../../shared/types/diagnostics.js";
 import type {
+  BindGatewayLarkAppRequest,
   CheckGatewayQrLoginRequest,
   CheckGatewayQrLoginResult,
   CheckGatewayLarkRegistrationResult,
@@ -58,6 +59,7 @@ export interface GatewayService {
   checkQrLogin(input?: CheckGatewayQrLoginRequest): Promise<CheckGatewayQrLoginResult>;
   startLarkRegistration(): Promise<StartGatewayLarkRegistrationResult>;
   checkLarkRegistration(): Promise<CheckGatewayLarkRegistrationResult>;
+  bindLarkApp(input: BindGatewayLarkAppRequest): Promise<CheckGatewayLarkRegistrationResult>;
   handlePmStop(input: GatewayPmStopInput): Promise<void>;
   getDiagnostics(): GatewayDiagnostics;
 }
@@ -1116,6 +1118,71 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
         larkOpenId: result.openId ?? null,
         larkBotName: result.botName ?? null,
         larkBotOpenId: result.botOpenId ?? null,
+        gatewayStatus: status
+      };
+    },
+    async bindLarkApp(input) {
+      const appId = input.appId.trim();
+      const appSecret = input.appSecret.trim();
+      const domain = input.larkDomain ?? "lark";
+      if (!appId || !appSecret) {
+        return {
+          status: "failed",
+          message: "Lark App ID and App Secret are required."
+        };
+      }
+
+      await stopPolling();
+      const channel = deps.channels.get("lark");
+      try {
+        await channel.getUpdates({
+          account: {
+            accountId: null,
+            baseUrl: channel.defaultBaseUrl,
+            appId,
+            appSecret,
+            larkDomain: domain
+          },
+          timeoutMs: 1
+        });
+      } catch (error) {
+        return {
+          status: "failed",
+          message: `Lark App ID/App Secret validation failed. ${errorMessage(error)}`
+        };
+      }
+
+      const current = await deps.settings.loadSettings();
+      const settings = await deps.settings.saveSettings({
+        ...current,
+        channel: "lark",
+        binding: {
+          ...current.binding,
+          appId,
+          appSecret,
+          larkDomain: domain,
+          larkOpenId: null,
+          larkBotName: null,
+          larkBotOpenId: null,
+          getUpdatesBuf: ""
+        },
+        lastPollStatus: {
+          state: "idle",
+          checkedAt: now()
+        },
+        updatedAt: now()
+      });
+      larkRegistrationState = null;
+      await ensurePolling();
+      const status = deps.settings.expose(settings, isRunning());
+      return {
+        status: "confirmed",
+        appIdConfigured: true,
+        appSecretConfigured: true,
+        larkDomain: domain,
+        larkOpenId: null,
+        larkBotName: null,
+        larkBotOpenId: null,
         gatewayStatus: status
       };
     },

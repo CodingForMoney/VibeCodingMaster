@@ -2848,6 +2848,44 @@ h2 {
   font-size: 13px;
 }
 
+.gateway-manual-bind {
+  display: grid;
+  gap: 10px;
+  width: 100%;
+  border-top: 1px solid #ece5d9;
+  padding-top: 12px;
+}
+
+.gateway-manual-bind div {
+  display: grid;
+  gap: 4px;
+}
+
+.gateway-manual-bind label {
+  color: #6c6255;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.gateway-manual-bind input {
+  width: 100%;
+  border: 1px solid #d6d0c6;
+  border-radius: 6px;
+  background: #fff;
+  color: #191713;
+  padding: 8px 10px;
+  font: inherit;
+}
+
+.gateway-manual-bind button {
+  justify-self: end;
+}
+
+.form-error {
+  color: #b42318;
+  font-size: 13px;
+}
+
 .message-modal h2,
 .message-modal p,
 .event-modal h2,
@@ -3301,7 +3339,8 @@ h2 {
 }
 
 :root[data-theme="dark"] .gateway-qr-code-frame,
-:root[data-theme="dark"] .gateway-qr-meta div {
+:root[data-theme="dark"] .gateway-qr-meta div,
+:root[data-theme="dark"] .gateway-manual-bind input {
   border-color: #30363d;
   background: #0d1117;
 }
@@ -3311,7 +3350,8 @@ h2 {
 }
 
 :root[data-theme="dark"] .gateway-qr-meta dt,
-:root[data-theme="dark"] .gateway-qr-placeholder {
+:root[data-theme="dark"] .gateway-qr-placeholder,
+:root[data-theme="dark"] .gateway-manual-bind label {
   color: #8b949e;
 }
 

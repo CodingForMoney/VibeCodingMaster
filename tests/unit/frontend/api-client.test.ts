@@ -381,6 +381,7 @@ describe("apiClient", () => {
     await apiClient.checkGatewayQrLogin();
     await apiClient.startGatewayLarkRegistration();
     await apiClient.checkGatewayLarkRegistration();
+    await apiClient.bindGatewayLarkApp({ appId: "cli_test", appSecret: "secret_test", larkDomain: "lark" });
     await apiClient.resetGatewayBinding();
 
     expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/gateway/qr/start");
@@ -395,9 +396,16 @@ describe("apiClient", () => {
     expect(fetchMock.mock.calls[3]?.[0]).toBe("/api/gateway/lark-registration/check");
     expect(fetchMock.mock.calls[3]?.[1]?.method).toBe("POST");
     expect(fetchMock.mock.calls[3]?.[1]?.body).toBeUndefined();
-    expect(fetchMock.mock.calls[4]?.[0]).toBe("/api/gateway/binding/reset");
+    expect(fetchMock.mock.calls[4]?.[0]).toBe("/api/gateway/lark-registration/bind");
     expect(fetchMock.mock.calls[4]?.[1]?.method).toBe("POST");
-    expect(fetchMock.mock.calls[4]?.[1]?.body).toBeUndefined();
+    expect(JSON.parse(String(fetchMock.mock.calls[4]?.[1]?.body))).toEqual({
+      appId: "cli_test",
+      appSecret: "secret_test",
+      larkDomain: "lark"
+    });
+    expect(fetchMock.mock.calls[5]?.[0]).toBe("/api/gateway/binding/reset");
+    expect(fetchMock.mock.calls[5]?.[1]?.method).toBe("POST");
+    expect(fetchMock.mock.calls[5]?.[1]?.body).toBeUndefined();
   });
 });
 
