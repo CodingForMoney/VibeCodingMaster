@@ -1503,6 +1503,7 @@ export function App() {
           translationEnabled={effectiveTranslationEnabled}
           translationAutoSendEnabled={translationAutoSendEnabled}
           translationTargetLanguage={translationTargetLanguage}
+          translationOutputMode={translationOutputMode}
           launchTemplate={launchTemplate}
           refreshNonce={workspaceRefreshNonce}
           onTaskChanged={async () => {
