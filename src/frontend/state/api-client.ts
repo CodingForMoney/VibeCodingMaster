@@ -22,6 +22,7 @@ import type {
   HarnessStatusReport,
   StartHarnessBootstrapRequest,
   StartHarnessBootstrapResult,
+  StartTaskHarnessRetrospectiveRequest,
   UpdateHarnessFileContentRequest,
   UpdateHarnessFileContentResult
 } from "../../shared/types/harness.js";
@@ -218,6 +219,12 @@ export const apiClient = {
   },
   decideHarnessFeedback(input: HarnessFeedbackDecisionRequest) {
     return request<HarnessFeedbackStateReport>("/api/projects/harness/feedback/decision", {
+      method: "POST",
+      body: JSON.stringify(input)
+    });
+  },
+  startTaskHarnessRetrospective(input: StartTaskHarnessRetrospectiveRequest) {
+    return request<HarnessFeedbackStateReport>("/api/projects/harness/task-retrospective", {
       method: "POST",
       body: JSON.stringify(input)
     });

@@ -7,6 +7,7 @@ import type {
   HarnessStatusReport,
   RestartHarnessBootstrapRequest,
   StartHarnessBootstrapRequest,
+  StartTaskHarnessRetrospectiveRequest,
   UpdateHarnessFileContentRequest
 } from "../../shared/types/harness.js";
 import { isOpenFileLimitError, VcmError } from "../errors.js";
@@ -179,6 +180,17 @@ export function registerHarnessRoutes(app: FastifyInstance, deps: HarnessRouteDe
       action,
       taskSlug,
       comment: typeof request.body?.comment === "string" ? request.body.comment : undefined
+    });
+  });
+
+  app.post<{ Body: StartTaskHarnessRetrospectiveRequest }>("/api/projects/harness/task-retrospective", async (request) => {
+    const { project, task } = await requireHarnessTaskContext(deps, request.body?.taskSlug);
+    const trigger = request.body?.trigger === "auto" ? "auto" : "manual";
+    return deps.harnessFeedbackService.startTaskRetrospective(project.repoRoot, {
+      taskSlug: task.taskSlug,
+      taskRepoRoot: task.worktreePath,
+      handoffDir: task.handoffDir,
+      trigger
     });
   });
 }

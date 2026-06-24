@@ -27,12 +27,13 @@ export function HarnessFeedbackReview({
   const active = state.active;
   const needsReview = state.status === "awaiting_user_approval";
   const title = active?.title ?? state.pending[0]?.title ?? "Harness feedback";
+  const label = active?.source === "task-retrospective" ? "Task Harness Review" : "Harness Feedback";
 
   return (
     <>
       <section className={needsReview ? "harness-feedback-float needs-review" : "harness-feedback-float"}>
         <div>
-          <strong>{needsReview ? "Harness review needed" : "Harness feedback"}</strong>
+          <strong>{needsReview ? `${label} needed` : label}</strong>
           <span>{formatHarnessFeedbackStatus(state)}</span>
         </div>
         <p title={title}>{title}</p>
@@ -49,7 +50,7 @@ export function HarnessFeedbackReview({
           <section className="harness-feedback-modal" role="dialog" aria-modal="true" aria-label="Harness feedback review">
             <header>
               <div>
-                <h2>Harness Feedback</h2>
+                <h2>{label}</h2>
                 <p className="muted">{state.status.replaceAll("_", " ")} · queued {state.queuedCount}</p>
               </div>
               <button type="button" onClick={() => setOpen(false)}>Close</button>
@@ -57,7 +58,7 @@ export function HarnessFeedbackReview({
 
             <div className="harness-feedback-modal-body">
               <section>
-                <h3>Feedback</h3>
+                <h3>{active.source === "task-retrospective" ? "Task Retrospective Request" : "Feedback"}</h3>
                 <pre>{active.feedbackContent || "No feedback content found."}</pre>
               </section>
               <section>

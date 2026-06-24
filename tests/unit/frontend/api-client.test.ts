@@ -215,13 +215,15 @@ describe("apiClient", () => {
     const fetchMock = mockFetch({
       themeMode: "dark",
       flowPauseAlerts: false,
-      roleRetryEnabled: false
+      roleRetryEnabled: false,
+      autoTaskHarnessReviewEnabled: true
     });
 
     const preferences = await apiClient.updateAppPreferences({
       themeMode: "dark",
       flowPauseAlerts: false,
-      roleRetryEnabled: false
+      roleRetryEnabled: false,
+      autoTaskHarnessReviewEnabled: true
     });
 
     const init = fetchMock.mock.calls[0]?.[1];
@@ -230,11 +232,13 @@ describe("apiClient", () => {
     expect(JSON.parse(String(init?.body))).toEqual({
       themeMode: "dark",
       flowPauseAlerts: false,
-      roleRetryEnabled: false
+      roleRetryEnabled: false,
+      autoTaskHarnessReviewEnabled: true
     });
     expect(preferences.themeMode).toBe("dark");
     expect(preferences.flowPauseAlerts).toBe(false);
     expect(preferences.roleRetryEnabled).toBe(false);
+    expect(preferences.autoTaskHarnessReviewEnabled).toBe(true);
   });
 
   it("starts and polls translation sessions through HTTP APIs", async () => {

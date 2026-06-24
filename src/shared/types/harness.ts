@@ -245,6 +245,8 @@ export type HarnessFeedbackStatus =
   | "analyzing"
   | "awaiting_user_approval"
   | "applying";
+export type HarnessFeedbackSource = "role-feedback" | "task-retrospective";
+export type TaskHarnessRetrospectiveTrigger = "manual" | "auto";
 
 export interface HarnessFeedbackQueueItem {
   id: string;
@@ -253,12 +255,15 @@ export interface HarnessFeedbackQueueItem {
   reporterRole?: string;
   taskSlug?: string;
   summary?: string;
+  source?: HarnessFeedbackSource;
 }
 
 export interface HarnessFeedbackActiveItem extends HarnessFeedbackQueueItem {
   status: Exclude<HarnessFeedbackStatus, "idle" | "queued">;
   startedAt?: string;
   updatedAt?: string;
+  trigger?: TaskHarnessRetrospectiveTrigger;
+  finalAcceptanceHash?: string;
   feedbackContent: string;
   analysisPath?: string;
   analysisContent?: string;
@@ -279,4 +284,9 @@ export interface HarnessFeedbackDecisionRequest {
   taskSlug?: string;
   action: "approve" | "reject" | "comment";
   comment?: string;
+}
+
+export interface StartTaskHarnessRetrospectiveRequest {
+  taskSlug?: string;
+  trigger?: TaskHarnessRetrospectiveTrigger;
 }

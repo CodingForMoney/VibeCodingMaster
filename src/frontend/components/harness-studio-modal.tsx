@@ -29,6 +29,7 @@ export interface HarnessStudioModalProps {
   onEngineerStop(): void;
   onEngineerNotifyHarnessUpdated(): void;
   onOpenRepositoryDiff(): void;
+  onReviewTaskHarness(): void;
   onRefresh(): void;
 }
 
@@ -52,6 +53,7 @@ export function HarnessStudioModal({
   onEngineerStop,
   onEngineerNotifyHarnessUpdated,
   onOpenRepositoryDiff,
+  onReviewTaskHarness,
   onRefresh
 }: HarnessStudioModalProps) {
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
@@ -169,6 +171,7 @@ export function HarnessStudioModal({
               {!taskSlug ? <p className="muted">Create or select a task before editing harness files.</p> : null}
             </div>
             <div className="harness-studio-header-actions">
+              <button type="button" disabled={busy || !taskSlug} onClick={onReviewTaskHarness}>Review Task Harness</button>
               <button type="button" disabled={busy} onClick={onOpenRepositoryDiff}>Review Diff</button>
               <button type="button" disabled={busy} onClick={onRefresh}>Refresh</button>
               <button type="button" onClick={onClose}>Close</button>

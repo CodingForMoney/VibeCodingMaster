@@ -34,6 +34,7 @@ export interface AppPreferences {
   flowPauseAlerts: boolean;
   roleRetryEnabled: boolean;
   permissionRequestMode: PermissionRequestMode;
+  autoTaskHarnessReviewEnabled: boolean;
   translationEnabled: boolean;
   translationAutoSendEnabled: boolean;
   translationTargetLanguage: TranslationTargetLanguage;
@@ -47,6 +48,7 @@ export interface UpdateAppPreferencesRequest {
   roleRetryEnabled?: boolean;
   roundCompletionAlerts?: boolean;
   permissionRequestMode?: PermissionRequestMode;
+  autoTaskHarnessReviewEnabled?: boolean;
   translationEnabled?: boolean;
   translationAutoSendEnabled?: boolean;
   translationTargetLanguage?: TranslationTargetLanguage;

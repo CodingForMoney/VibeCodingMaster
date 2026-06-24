@@ -13,6 +13,7 @@ import {
   type SessionModel
 } from "../../shared/types/session.js";
 import { XtermView } from "../terminal/xterm-view.js";
+import { SwitchControl } from "./switch-control.js";
 import { StatusBadge } from "./status-badge.js";
 
 type BootstrapLaunchOptions = {
@@ -26,11 +27,13 @@ export interface HarnessPanelProps {
   bootstrapStatus: HarnessBootstrapStatusReport | null;
   applyResult?: HarnessApplyResult | null;
   hasActiveTask?: boolean;
+  autoTaskHarnessReviewEnabled: boolean;
   busy?: boolean;
   onRefresh(): Promise<void>;
   onApply(): Promise<void>;
   onOpenStudio(): void;
   onOpenRepositoryDiff(): void;
+  onAutoTaskHarnessReviewChange(enabled: boolean): void;
   onStartBootstrap(input: BootstrapLaunchOptions): Promise<void>;
   onRestartBootstrap(input: BootstrapLaunchOptions): Promise<void>;
   onStopBootstrap(): Promise<void>;
@@ -42,11 +45,13 @@ export function HarnessPanel({
   bootstrapStatus,
   applyResult,
   hasActiveTask = false,
+  autoTaskHarnessReviewEnabled,
   busy = false,
   onRefresh,
   onApply,
   onOpenStudio,
   onOpenRepositoryDiff,
+  onAutoTaskHarnessReviewChange,
   onStartBootstrap,
   onRestartBootstrap,
   onStopBootstrap,
@@ -169,6 +174,14 @@ export function HarnessPanel({
         >
           Review Diff
         </button>
+        <SwitchControl
+          checked={autoTaskHarnessReviewEnabled}
+          className="sidebar-switch"
+          disabled={busy}
+          label="Auto task harness review"
+          title="Automatically ask Harness Engineer to review task harness after final acceptance completes"
+          onChange={onAutoTaskHarnessReviewChange}
+        />
       </div>
 
       {showBootstrapStage ? (

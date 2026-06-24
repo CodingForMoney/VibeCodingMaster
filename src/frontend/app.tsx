@@ -76,6 +76,7 @@ export function App() {
   const [pauseAlertSound, setPauseAlertSound] = useState(true);
   const [roleRetryEnabled, setRoleRetryEnabled] = useState(true);
   const [permissionRequestMode, setPermissionRequestMode] = useState<PermissionRequestMode>("off");
+  const [autoTaskHarnessReviewEnabled, setAutoTaskHarnessReviewEnabled] = useState(false);
   const [translationEnabled, setTranslationEnabled] = useState(false);
   const [translationAutoSendEnabled, setTranslationAutoSendEnabled] = useState(false);
   const [translationTargetLanguage, setTranslationTargetLanguage] = useState<TranslationTargetLanguage>(DEFAULT_TRANSLATION_TARGET_LANGUAGE);
@@ -109,6 +110,7 @@ export function App() {
   const translatorEnsureKeyRef = useRef("");
   const translatorAutoResumeKeyRef = useRef("");
   const harnessEngineerAutoResumeKeyRef = useRef("");
+  const autoTaskHarnessReviewAttemptRef = useRef<Record<string, string>>({});
   const activeTask = useMemo(
     () => selectActiveTask(tasks, activeTaskSlug),
     [tasks, activeTaskSlug]
@@ -129,6 +131,7 @@ export function App() {
     setPauseAlertSound(preferences.flowPauseAlerts);
     setRoleRetryEnabled(preferences.roleRetryEnabled);
     setPermissionRequestMode(preferences.permissionRequestMode);
+    setAutoTaskHarnessReviewEnabled(preferences.autoTaskHarnessReviewEnabled);
     setTranslationEnabled(preferences.translationEnabled);
     setTranslationAutoSendEnabled(preferences.translationAutoSendEnabled);
     setTranslationTargetLanguage(preferences.translationTargetLanguage);
@@ -210,6 +213,40 @@ export function App() {
     }
   }, [activeTask?.taskSlug]);
 
+  const maybeTriggerAutoTaskHarnessReview = useCallback((roundState: VcmSessionRoundState, previousObservation: { status: VcmRoundStatus } | undefined) => {
+    if (
+      !autoTaskHarnessReviewEnabled ||
+      !project ||
+      !activeTask ||
+      roundState.taskSlug !== activeTask.taskSlug ||
+      roundState.status !== "stopped" ||
+      !roundState.roundId ||
+      previousObservation?.status !== "running" ||
+      roundState.roleRecovery?.status === "failed"
+    ) {
+      return;
+    }
+
+    const reviewKey = getFlowPauseNotificationKey(roundState);
+    if (autoTaskHarnessReviewAttemptRef.current[roundState.taskSlug] === reviewKey) {
+      return;
+    }
+    autoTaskHarnessReviewAttemptRef.current[roundState.taskSlug] = reviewKey;
+
+    void apiClient.startTaskHarnessRetrospective({
+      taskSlug: roundState.taskSlug,
+      trigger: "auto"
+    }).then(async (state) => {
+      setHarnessFeedbackState(state);
+      await refreshHarnessEngineerSession({ syncLaunchOptions: true });
+    }).catch((caught: Error) => {
+      if (isExpectedAutoTaskHarnessReviewSkip(caught)) {
+        return;
+      }
+      setError(formatUiError("Auto task harness review", caught));
+    });
+  }, [activeTask, autoTaskHarnessReviewEnabled, project, refreshHarnessEngineerSession]);
+
   const handleRoundStateChanged = useCallback((roundState: VcmSessionRoundState) => {
     if (!activeTask?.taskSlug || roundState.taskSlug !== activeTask.taskSlug) {
       return;
@@ -230,6 +267,7 @@ export function App() {
     const pauseKey = getFlowPauseNotificationKey(roundState);
     const previousPauseKey = notifiedFlowPauseKeyRef.current[roundState.taskSlug];
     const previousObservation = observedFlowPauseStateRef.current[roundState.taskSlug];
+    maybeTriggerAutoTaskHarnessReview(roundState, previousObservation);
     observedFlowPauseStateRef.current[roundState.taskSlug] = { status: roundState.status };
     if (previousPauseKey === pauseKey) {
       return;
@@ -250,7 +288,7 @@ export function App() {
       ? formatRoleRecoveryFailureMessage(recovery, roleLabel)
       : `No new turn started after ${roleLabel} stopped.`;
     showFlowPauseNotice(message, pauseKey, { sound });
-  }, [activeTask?.taskSlug, pauseAlertSound, showFlowPauseNotice]);
+  }, [activeTask?.taskSlug, maybeTriggerAutoTaskHarnessReview, pauseAlertSound, showFlowPauseNotice]);
 
   const handleLaunchStateChanged = useCallback((launchState: TaskWorkspaceLaunchState) => {
     setActiveLaunchState((current) => {
@@ -849,6 +887,7 @@ export function App() {
           harnessStatus={currentHarnessStatus}
           harnessBootstrapStatus={currentHarnessBootstrapStatus}
           harnessApplyResult={harnessApplyResult}
+          autoTaskHarnessReviewEnabled={autoTaskHarnessReviewEnabled}
           gatewayStatus={gatewayStatus}
           gatewayQrLogin={gatewayQrLogin}
           gatewayQrCheck={gatewayQrCheck}
@@ -936,6 +975,13 @@ export function App() {
           }, "Run Harness Bootstrap")}
           onOpenHarnessStudio={() => setHarnessStudioOpen(true)}
           onOpenRepositoryDiff={() => setRepositoryDiffOpen(true)}
+          onAutoTaskHarnessReviewChange={(enabled) => {
+            setAutoTaskHarnessReviewEnabled(enabled);
+            void withBusy(async () => {
+              const preferences = await apiClient.updateAppPreferences({ autoTaskHarnessReviewEnabled: enabled });
+              applyPreferences(preferences);
+            }, "Update auto task harness review setting");
+          }}
           onRefreshGateway={() => withBusy(async () => {
             await loadGatewayStatus();
           }, "Refresh Gateway status")}
@@ -1354,6 +1400,19 @@ export function App() {
           }, "Notify Harness Engineer to reload harness");
         }}
         onOpenRepositoryDiff={() => setRepositoryDiffOpen(true)}
+        onReviewTaskHarness={() => {
+          void withBusy(async () => {
+            if (!activeTask) {
+              throw new Error("Create or select a task before reviewing task harness.");
+            }
+            const state = await apiClient.startTaskHarnessRetrospective({
+              taskSlug: activeTask.taskSlug,
+              trigger: "manual"
+            });
+            setHarnessFeedbackState(state);
+            await refreshHarnessEngineerSession({ syncLaunchOptions: true });
+          }, "Review task harness");
+        }}
       />
       <RepositoryDiffModal
         open={repositoryDiffOpen}
@@ -1660,6 +1719,16 @@ function formatRoleRecoveryError(recovery: VcmRoleRecoveryState): string {
   return recovery.error && recovery.error !== "unknown"
     ? recovery.error
     : "this error";
+}
+
+function isExpectedAutoTaskHarnessReviewSkip(error: Error): boolean {
+  return [
+    "Task final acceptance is not complete yet.",
+    "Task Harness Retrospective has already been triggered",
+    "Harness feedback is already active.",
+    "Harness Engineer is reserved for an active Harness feedback item.",
+    "Harness Engineer is busy or unavailable."
+  ].some((message) => error.message.includes(message));
 }
 
 function formatRoleRecoveryRole(role: string): string {

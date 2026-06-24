@@ -83,6 +83,98 @@ describe("harness-feedback-service", () => {
       "utf8"
     )).resolves.toContain("Committed abc1234");
   });
+
+  it("starts a task harness retrospective only after final acceptance is complete", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-harness-retrospective-"));
+    const taskRepoRoot = path.join(tmpRepo, ".claude/worktrees/demo-task");
+    await mkdir(path.join(taskRepoRoot, ".ai/vcm/handoffs"), { recursive: true });
+    await writeFile(
+      path.join(taskRepoRoot, ".ai/vcm/handoffs/final-acceptance.md"),
+      [
+        "# Final Acceptance",
+        "",
+        "## Decision",
+        "accepted",
+        "",
+        "## Evidence Reviewed",
+        "All handoffs.",
+        "",
+        "## Scope Traceability",
+        "All changes traced.",
+        "",
+        "## Validation Summary",
+        "Checks passed.",
+        "",
+        "## Review And Docs Sync",
+        "Reviewer and docs sync complete.",
+        "",
+        "## Known Issues Disposition",
+        "No task issues to promote.",
+        "",
+        "## Cleanup Readiness",
+        "Ready.",
+        "",
+        "## Final User Summary",
+        "Done."
+      ].join("\n"),
+      "utf8"
+    );
+
+    const writes: string[] = [];
+    const service = createHarnessFeedbackService({
+      fs: createNodeFileSystemAdapter(),
+      runtime: createRuntime(writes),
+      sessionService: createSessionService(),
+      now: createClock()
+    });
+
+    const state = await service.startTaskRetrospective(tmpRepo, {
+      taskSlug: "demo-task",
+      taskRepoRoot,
+      handoffDir: ".ai/vcm/handoffs",
+      trigger: "manual"
+    });
+
+    expect(state.status).toBe("analyzing");
+    expect(state.active).toMatchObject({
+      title: "Task Harness Retrospective: demo-task",
+      source: "task-retrospective",
+      taskSlug: "demo-task",
+      trigger: "manual"
+    });
+    expect(writes.join("\n")).toContain("[VCM Task Harness Retrospective]");
+    expect(writes.join("\n")).toContain("Review the completed task from the current active task worktree.");
+    expect(writes.join("\n")).toContain("Write the analysis to Result Path:");
+    expect(writes.join("\n")).not.toContain(".ai/vcm/handoffs/final-acceptance.md");
+
+    const marker = JSON.parse(await readFile(
+      path.join(tmpRepo, ".ai/vcm/harness-feedback/task-retrospectives/demo-task.json"),
+      "utf8"
+    ));
+    expect(marker).toMatchObject({
+      taskSlug: "demo-task",
+      trigger: "manual",
+      status: "analyzing"
+    });
+
+    await writeFile(
+      path.join(tmpRepo, ".ai/vcm/harness-feedback/active/2026-01-01T00-00-00.000Z-task-retrospective-demo-task/analysis.md"),
+      "No reusable harness problem found.\n",
+      "utf8"
+    );
+    await service.recordHarnessEngineerHook(tmpRepo, "Stop");
+    await service.decide(tmpRepo, {
+      action: "reject",
+      taskSlug: "demo-task"
+    });
+
+    await expect(service.startTaskRetrospective(tmpRepo, {
+      taskSlug: "demo-task",
+      taskRepoRoot,
+      handoffDir: ".ai/vcm/handoffs",
+      trigger: "manual"
+    })).rejects.toThrow("already been triggered");
+  });
 });
 
 function createRuntime(writes: string[]): TerminalRuntime {

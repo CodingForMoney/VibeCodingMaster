@@ -59,6 +59,7 @@ export interface ProjectDashboardProps {
   harnessStatus: HarnessStatusReport | null;
   harnessBootstrapStatus: HarnessBootstrapStatusReport | null;
   harnessApplyResult?: HarnessApplyResult | null;
+  autoTaskHarnessReviewEnabled: boolean;
   gatewayStatus: GatewayStatus | null;
   gatewayQrLogin: StartGatewayQrLoginResult | null;
   gatewayQrCheck: CheckGatewayQrLoginResult | null;
@@ -74,6 +75,7 @@ export interface ProjectDashboardProps {
   onRunHarnessBootstrap(): Promise<void>;
   onOpenHarnessStudio(): void;
   onOpenRepositoryDiff(): void;
+  onAutoTaskHarnessReviewChange(enabled: boolean): void;
   onRefreshGateway(): Promise<void>;
   onGatewayEnabledChange(enabled: boolean): void;
   onGatewayTranslationChange(enabled: boolean): void;
@@ -128,6 +130,7 @@ export function ProjectDashboard({
   harnessStatus,
   harnessBootstrapStatus,
   harnessApplyResult,
+  autoTaskHarnessReviewEnabled,
   gatewayStatus,
   gatewayQrLogin,
   gatewayQrCheck,
@@ -143,6 +146,7 @@ export function ProjectDashboard({
   onRunHarnessBootstrap,
   onOpenHarnessStudio,
   onOpenRepositoryDiff,
+  onAutoTaskHarnessReviewChange,
   onRefreshGateway,
   onGatewayEnabledChange,
   onGatewayTranslationChange,
@@ -408,11 +412,13 @@ export function ProjectDashboard({
             bootstrapStatus={harnessBootstrapStatus}
             applyResult={harnessApplyResult}
             hasActiveTask={Boolean(activeTask)}
+            autoTaskHarnessReviewEnabled={autoTaskHarnessReviewEnabled}
             busy={busy}
             onRefresh={onRefreshHarness}
             onApply={onApplyHarness}
             onOpenStudio={onOpenHarnessStudio}
             onOpenRepositoryDiff={onOpenRepositoryDiff}
+            onAutoTaskHarnessReviewChange={onAutoTaskHarnessReviewChange}
             onStartBootstrap={onStartHarnessBootstrap}
             onRestartBootstrap={onRestartHarnessBootstrap}
             onStopBootstrap={onStopHarnessBootstrap}

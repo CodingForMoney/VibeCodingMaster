@@ -1032,6 +1032,7 @@ function createAppSettingsStub(permissionRequestMode: "off" | "allowAll" = "off"
         themeMode: "system",
         flowPauseAlerts: true,
         roleRetryEnabled,
+        autoTaskHarnessReviewEnabled: false,
         permissionRequestMode
       };
     }
