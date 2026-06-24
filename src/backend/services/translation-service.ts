@@ -832,6 +832,8 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
       state.entries = [];
       state.nextSeq = 1;
     }
+    await state.persistChain?.catch(() => undefined);
+    sessionStates.delete(sessionId);
   }
 
   return {
@@ -860,8 +862,16 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
       };
     },
     async pollSessionEvents(sessionId, after, limit = 200) {
-      const state = getState(sessionId);
       const cursor = Number.isFinite(after) ? Math.max(1, Math.floor(after)) : 1;
+      const state = sessionStates.get(sessionId);
+      if (!state) {
+        return {
+          sessionId,
+          status: "ready",
+          nextCursor: cursor,
+          events: []
+        };
+      }
       const maxEvents = Math.min(Math.max(1, Math.floor(limit)), 500);
       await compactEventsBefore(state, cursor);
       const events = state.events
@@ -1095,7 +1105,10 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
       };
     },
     async clearSession(sessionId) {
-      const state = getState(sessionId);
+      const state = sessionStates.get(sessionId);
+      if (!state) {
+        return;
+      }
       state.entries = [];
       state.failures.clear();
       state.events = [];

@@ -145,7 +145,7 @@ export interface TailOptions {
   pollIntervalMs?: number;
 }
 
-const DEFAULT_TAIL_POLL_INTERVAL_MS = 200;
+const DEFAULT_TAIL_POLL_INTERVAL_MS = 1000;
 
 /**
  * Adapted from CodingForMoney/cc-pm's transcript tailer.

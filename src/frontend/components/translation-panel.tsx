@@ -18,6 +18,7 @@ import type {
 import { TRANSLATION_ENTRY_RETENTION_LIMIT } from "../../shared/types/translation.js";
 import { apiClient } from "../state/api-client.js";
 import { clearUiErrorForActions, formatUiError } from "../state/error-format.js";
+import { clearPollError, recordPollError } from "../state/poll-error-gate.js";
 
 type TranslationPanelStatus = TranslationSessionStatus;
 const TRANSLATED_COMPOSER_SEPARATOR = "\n\n--- Translation ---\n";
@@ -72,7 +73,7 @@ export function TranslationPanel({
       if (cancelled) {
         return;
       }
-      timer = window.setTimeout(tick, activeRef.current ? 200 : 1000);
+      timer = window.setTimeout(tick, activeRef.current ? 1000 : 5000);
     };
 
     const tick = async () => {
@@ -87,13 +88,17 @@ export function TranslationPanel({
         applyTranslationEvents(result.events);
         cursorRef.current = result.nextCursor;
         setStatus(result.status);
+        clearPollError("Poll conversation translation events");
         setError((current) => clearUiErrorForActions(current, ["Poll conversation translation events"]));
         if (activeRef.current) {
           setLastPollAt(formatPollTimestamp(new Date().toISOString()));
         }
       } catch (caught) {
         if (!cancelled) {
-          setError(formatUiError("Poll conversation translation events", caught));
+          const message = recordPollError("Poll conversation translation events", caught);
+          if (message) {
+            setError(message);
+          }
         }
       } finally {
         schedule();

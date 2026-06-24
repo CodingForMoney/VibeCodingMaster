@@ -39,6 +39,7 @@ import { FileTranslationModalHost } from "./components/translation-panel.js";
 import { selectActiveTask } from "./state/app-store.js";
 import { apiClient } from "./state/api-client.js";
 import { clearUiErrorForActions, formatUiError } from "./state/error-format.js";
+import { clearPollError, recordPollError } from "./state/poll-error-gate.js";
 import { buildOneClickRoleLaunches } from "./state/one-click-start.js";
 import { ProjectDashboard } from "./routes/project-dashboard.js";
 import { TaskWorkspace, type TaskWorkspaceLaunchState } from "./routes/task-workspace.js";
@@ -377,8 +378,16 @@ export function App() {
   async function refreshGateReviewState(taskSlug: string) {
     const state = await apiClient.getGateReviewState(taskSlug);
     setActiveGateReview({ taskSlug, state });
+    clearPollError("Poll Gate Review state");
     setError((current) => clearUiErrorForActions(current, ["Refresh Gate Review state", "Poll Gate Review state"]));
     return state;
+  }
+
+  function reportPollError(action: string, caught: Error) {
+    const message = recordPollError(action, caught);
+    if (message) {
+      setError(message);
+    }
   }
 
   function syncTranslatorLaunchOptions(session: RoleSessionRecord | null) {
@@ -548,7 +557,12 @@ export function App() {
 
     void refreshHarnessFeedbackState(activeTask?.taskSlug).catch((caught: Error) => setError(formatUiError("Refresh Harness feedback state", caught)));
     const interval = window.setInterval(() => {
-      void refreshHarnessFeedbackState(activeTask?.taskSlug).catch((caught: Error) => setError(formatUiError("Poll Harness feedback state", caught)));
+      void refreshHarnessFeedbackState(activeTask?.taskSlug)
+        .then(() => {
+          clearPollError("Poll Harness feedback state");
+          setError((current) => clearUiErrorForActions(current, ["Poll Harness feedback state"]));
+        })
+        .catch((caught: Error) => reportPollError("Poll Harness feedback state", caught));
     }, 4000);
     return () => window.clearInterval(interval);
   }, [activeTask?.taskSlug, project?.repoRoot]);
@@ -562,8 +576,18 @@ export function App() {
     void refreshTranslatorSession({ syncLaunchOptions: true }).catch((caught: Error) => setError(formatUiError("Load Translator session", caught)));
     void refreshTranslationMemoryInitialized().catch((caught: Error) => setError(formatUiError("Load translation memory status", caught)));
     const interval = window.setInterval(() => {
-      void refreshTranslatorSession().catch((caught: Error) => setError(formatUiError("Poll Translator session", caught)));
-      void refreshTranslationMemoryInitialized().catch((caught: Error) => setError(formatUiError("Poll translation memory status", caught)));
+      void refreshTranslatorSession()
+        .then(() => {
+          clearPollError("Poll Translator session");
+          setError((current) => clearUiErrorForActions(current, ["Poll Translator session"]));
+        })
+        .catch((caught: Error) => reportPollError("Poll Translator session", caught));
+      void refreshTranslationMemoryInitialized()
+        .then(() => {
+          clearPollError("Poll translation memory status");
+          setError((current) => clearUiErrorForActions(current, ["Poll translation memory status"]));
+        })
+        .catch((caught: Error) => reportPollError("Poll translation memory status", caught));
     }, 3000);
     return () => window.clearInterval(interval);
   }, [project?.repoRoot]);
@@ -575,7 +599,12 @@ export function App() {
 
     void refreshHarnessEngineerSession({ syncLaunchOptions: true }).catch((caught: Error) => setError(formatUiError("Load Harness Engineer session", caught)));
     const interval = window.setInterval(() => {
-      void refreshHarnessEngineerSession().catch((caught: Error) => setError(formatUiError("Poll Harness Engineer session", caught)));
+      void refreshHarnessEngineerSession()
+        .then(() => {
+          clearPollError("Poll Harness Engineer session");
+          setError((current) => clearUiErrorForActions(current, ["Poll Harness Engineer session"]));
+        })
+        .catch((caught: Error) => reportPollError("Poll Harness Engineer session", caught));
     }, 3000);
     return () => window.clearInterval(interval);
   }, [project?.repoRoot]);
@@ -748,7 +777,12 @@ export function App() {
       void Promise.all([
         loadHarnessStatus(taskSlug),
         loadHarnessBootstrapStatus(taskSlug)
-      ]).catch((caught: Error) => setError(formatUiError("Poll VCM Harness status", caught)));
+      ])
+        .then(() => {
+          clearPollError("Poll VCM Harness status");
+          setError((current) => clearUiErrorForActions(current, ["Poll VCM Harness status"]));
+        })
+        .catch((caught: Error) => reportPollError("Poll VCM Harness status", caught));
     }, 3000);
     return () => window.clearInterval(interval);
   }, [project?.repoRoot, activeTask?.taskSlug]);
@@ -782,7 +816,7 @@ export function App() {
 
     const taskSlug = activeTask.taskSlug;
     const interval = window.setInterval(() => {
-      void refreshGateReviewState(taskSlug).catch((caught: Error) => setError(formatUiError("Poll Gate Review state", caught)));
+      void refreshGateReviewState(taskSlug).catch((caught: Error) => reportPollError("Poll Gate Review state", caught));
     }, 3000);
 
     return () => window.clearInterval(interval);

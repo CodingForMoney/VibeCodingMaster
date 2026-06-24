@@ -24,6 +24,37 @@ describe("translation-service", () => {
     expect(formatTerminalPaste("run tests")).toBe("\x1b[200~run tests\x1b[201~");
   });
 
+  it("does not create translation session state when polling a stale session id", async () => {
+    const service = createTranslationService({
+      appSettings: createAppSettingsService({
+        fs: createMemoryFs(),
+        settingsPath: "/settings.json",
+      }),
+      runtime: createRuntimeStub(),
+      sessionRegistry: createRegistryStub(),
+      transcripts: createTranscriptStub(),
+      sessionService: {} as SessionService
+    });
+
+    expect(service.getDiagnostics()).toMatchObject({
+      sessions: 0,
+      transcriptWatchers: 0,
+      listeners: 0
+    });
+
+    await expect(service.pollSessionEvents("stale-session", 50)).resolves.toEqual({
+      sessionId: "stale-session",
+      status: "ready",
+      nextCursor: 50,
+      events: []
+    });
+    expect(service.getDiagnostics()).toMatchObject({
+      sessions: 0,
+      transcriptWatchers: 0,
+      listeners: 0
+    });
+  });
+
   it("records conversation boundary entries with per-session turns", async () => {
     const fs = createMemoryFs();
     const roleSession = createRoleSessionRecord();

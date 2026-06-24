@@ -84,8 +84,12 @@ export interface ServerDeps {
 
 export async function createServer(deps: ServerDeps, options: CreateServerOptions = {}): Promise<FastifyInstance> {
   const app = Fastify({
-    logger: false
+    logger: false,
+    keepAliveTimeout: 10000,
+    requestTimeout: 30000
   });
+  app.server.headersTimeout = 15000;
+  app.server.maxRequestsPerSocket = 100;
 
   app.setErrorHandler((error, _request, reply) => {
     const vcmError = toVcmError(error);
