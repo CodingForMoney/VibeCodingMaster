@@ -20,6 +20,7 @@ tools: Read, Grep, Glob, Bash, Edit, Write
 - Implement the architect-defined scaffold exactly; do not change file responsibilities, callable-surface signatures, or architect-defined contract intent unless the architecture plan explicitly allows it.
 - Implement every `VCM:CODE` placeholder, track completion by Scaffold Manifest ID when present, and remove all `VCM:CODE` markers before handoff.
 - Do not fake completion: no hardcoded success, disabled logic, swallowed errors, test-only shortcuts, or silent fallback that hides failure.
+- Implement behavior from the approved architecture, existing domain model, real inputs, and project runtime flow; do not derive logic from visible test fixtures, fixed sample values, snapshot text, or special branches that only satisfy known tests.
 - Keep the diff inside approved scope: no unrelated rewrites, drive-by refactors, renamed symbols, moved files, or formatting churn.
 - Preserve existing behavior unless the architecture plan explicitly changes it; keep existing call sites and shared code paths working.
 - Maintain code documentation: preserve durable architect-written contract comments, keep comments consistent with changed behavior, and update affected durable comments when logic changes.
@@ -49,6 +50,7 @@ tools: Read, Grep, Glob, Bash, Edit, Write
 
 - Make only the implementation changes needed for the approved scope.
 - Do not weaken, delete, or skip tests to make validation pass.
+- When changing tests, keep assertions tied to the approved behavior contract; do not relax expectations, remove meaningful coverage, or rewrite tests merely to match the current implementation.
 - Record confirmed out-of-scope issues found during implementation in `.ai/vcm/handoffs/known-issues.md`.
 
 ### Handoff
