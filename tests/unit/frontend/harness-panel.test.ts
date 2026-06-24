@@ -17,10 +17,11 @@ const { HarnessPanel } = await import("../../../src/frontend/components/harness-
 const baseProps = {
   bootstrapStatus: null,
   applyResult: null,
-  taskSyncResult: null,
+  hasActiveTask: true,
   onRefresh: async () => {},
   onApply: async () => {},
-  onCommitAndRebaseTask: async () => {},
+  onOpenRepositoryDiff: () => {},
+  onOpenStudio: () => {},
   onStartBootstrap: async () => {}
 };
 
@@ -129,7 +130,7 @@ describe("HarnessPanel fixed-install three-state UI", () => {
     expect(stateCHtml).toContain('disabled="">Refresh</button>');
   });
 
-  it("shows Commit & rebase task without verbose harness apply output", () => {
+  it("shows the harness commit message after apply", () => {
     const html = renderToStaticMarkup(
       createElement(HarnessPanel, {
         ...baseProps,
@@ -137,15 +138,14 @@ describe("HarnessPanel fixed-install three-state UI", () => {
         applyResult: {
           version: 1,
           changedFiles: [change("CLAUDE.md", "update")],
-          message: "Applied VCM fixed harness install Project: /workspace DONE CLAUDE.md"
-        },
-        canCommitAndRebaseTask: true
+          harnessCommit: "abc1234",
+          message: "VCM Harness updated and committed as abc1234. Review the commit diff before approving."
+        }
       } as never)
     );
 
-    expect(html).not.toContain("Applied VCM fixed harness install");
-    expect(html).not.toContain("CLAUDE.md");
-    expect(html).toContain("Commit &amp; rebase task</button>");
+    expect(html).toContain("VCM Harness updated and committed as abc1234");
+    expect(html).not.toContain("Commit &amp; rebase task</button>");
   });
 
   it("does not show bootstrap check details in the sidebar", () => {
@@ -181,5 +181,31 @@ describe("HarnessPanel fixed-install three-state UI", () => {
     expect(html).not.toContain("Project context");
     expect(html).not.toContain("Module index");
     expect(html).not.toContain(".ai/generated/module-index.json");
+  });
+
+  it("hides bootstrap controls after bootstrap is complete", () => {
+    const html = renderToStaticMarkup(
+      createElement(HarnessPanel, {
+        ...baseProps,
+        status: makeStatus({ initialized: true, needsApply: false }),
+        bootstrapStatus: {
+          version: 1,
+          status: "complete",
+          canStart: false,
+          checks: [],
+          warnings: []
+        }
+      } as never)
+    );
+
+    expect(html).not.toContain("Bootstrap");
+    expect(html).not.toContain("Open Bootstrap");
+  });
+
+  it("shows a repository diff review entry point", () => {
+    const html = render(makeStatus({ initialized: true, needsApply: false }));
+
+    expect(html).toContain(">Review Diff</button>");
+    expect(html).toContain(">Open Studio</button>");
   });
 });

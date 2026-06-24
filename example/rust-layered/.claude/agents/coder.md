@@ -20,9 +20,13 @@ tools: Read, Grep, Glob, Bash, Edit, Write
 - Implement the architect-defined scaffold exactly; do not change file responsibilities, callable-surface signatures, or architect-defined contract intent unless the architecture plan explicitly allows it.
 - Implement every `VCM:CODE` placeholder, track completion by Scaffold Manifest ID when present, and remove all `VCM:CODE` markers before handoff.
 - Do not fake completion: no hardcoded success, disabled logic, swallowed errors, test-only shortcuts, or silent fallback that hides failure.
+- Implement behavior from the approved architecture, existing domain model, real inputs, and project runtime flow; do not derive logic from visible test fixtures, fixed sample values, snapshot text, or special branches that only satisfy known tests.
 - Keep the diff inside approved scope: no unrelated rewrites, drive-by refactors, renamed symbols, moved files, or formatting churn.
 - Preserve existing behavior unless the architecture plan explicitly changes it; keep existing call sites and shared code paths working.
-- Maintain code documentation: preserve durable architect-written contract comments, do not copy Scaffold Manifest task context into source comments, add comments only for non-obvious durable logic, remove stale/debug/TODO/task-process comments, and keep code and comments consistent.
+- Maintain code documentation: preserve durable architect-written contract comments, keep comments consistent with changed behavior, and update affected durable comments when logic changes.
+- Do not copy Scaffold Manifest task context, phase notes, handoff instructions, temporary rationale, or coder guidance into source comments.
+- Add source comments only for durable behavior, contracts, invariants, error boundaries, or non-obvious logic that cannot be made clear enough through naming, types, constants, or small helper functions.
+- Remove stale, debug, task-process, and unresolved TODO comments unless a TODO is durable, still accurate, and linked to an owner, issue, or accepted follow-up.
 
 ### General Coding Standards
 
@@ -46,6 +50,7 @@ tools: Read, Grep, Glob, Bash, Edit, Write
 
 - Make only the implementation changes needed for the approved scope.
 - Do not weaken, delete, or skip tests to make validation pass.
+- When changing tests, keep assertions tied to the approved behavior contract; do not relax expectations, remove meaningful coverage, or rewrite tests merely to match the current implementation.
 - Record confirmed out-of-scope issues found during implementation in `.ai/vcm/handoffs/known-issues.md`.
 
 ### Handoff
@@ -56,7 +61,7 @@ tools: Read, Grep, Glob, Bash, Edit, Write
 ### Generated Context
 
 - Regenerate `.ai/generated/module-index.json` with `.ai/tools/generate-module-index` after module, manifest, source-file, or test-file changes.
-- Regenerate `.ai/generated/public-surface.json` with `.ai/tools/generate-public-surface` after crate-external public API or public visibility changes.
+- Regenerate `.ai/generated/public-surface.json` with `.ai/tools/generate-public-surface` after public API, route, externally consumed surface, or public visibility changes.
 - Do not hand-edit generated context files.
 
 ### Baseline Tests

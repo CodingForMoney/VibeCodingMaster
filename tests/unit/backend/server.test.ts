@@ -57,6 +57,7 @@ function createServerDepsStub(calls: string[]): ServerDeps {
     sessionService: {} as never,
     artifactService: {} as never,
     harnessService: {} as never,
+    harnessFeedbackService: {} as never,
     commandDispatcher: {} as never,
     claudeHookService: {} as never,
     messageService: {} as never,
@@ -77,6 +78,7 @@ function createServerDepsStub(calls: string[]): ServerDeps {
         calls.push("gateway:stop");
       }
     } as never,
+    runtimeCoordinator: {} as never,
     runtime: {} as never,
     diagnosticsService: {
       getErrorRuntimeInfo() {

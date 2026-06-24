@@ -67,6 +67,15 @@ export function registerSessionRoutes(app: FastifyInstance, deps: SessionRouteDe
   );
 
   app.post<{ Params: { taskSlug: string; role: string } }>(
+    "/api/tasks/:taskSlug/sessions/:role/notify-harness",
+    async (request) => {
+      const project = await requireCurrentProject(deps.projectService);
+      const role = parseRole(request.params.role);
+      return deps.sessionService.notifyRoleHarnessUpdated(project.repoRoot, request.params.taskSlug, role);
+    }
+  );
+
+  app.post<{ Params: { taskSlug: string; role: string } }>(
     "/api/tasks/:taskSlug/sessions/:role/dispatch",
     async (request) => {
       const project = await requireCurrentProject(deps.projectService);

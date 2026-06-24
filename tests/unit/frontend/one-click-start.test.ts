@@ -14,13 +14,13 @@ describe("buildOneClickRoleLaunches", () => {
     expect(buildOneClickRoleLaunches(template, { gateReviewerEnabled: false })).toEqual([
       {
         role: "project-manager",
-        permissionMode: "default",
+        permissionMode: "bypassPermissions",
         model: "default",
         effort: "default"
       },
       {
         role: "architect",
-        permissionMode: "default",
+        permissionMode: "bypassPermissions",
         model: "default",
         effort: "default"
       },
@@ -32,7 +32,7 @@ describe("buildOneClickRoleLaunches", () => {
       },
       {
         role: "reviewer",
-        permissionMode: "default",
+        permissionMode: "bypassPermissions",
         model: "default",
         effort: "default"
       }

@@ -25,6 +25,7 @@ describe("translator-translation-service", () => {
     const service = createTranslationWorkerService({ fs });
 
     const job = await service.createFileJob(tmpRepo, {
+      taskSlug: "demo-task",
       sourcePath: "README.md",
       targetLanguage: "zh-CN"
     });
@@ -64,6 +65,20 @@ describe("translator-translation-service", () => {
     });
     expect(state.fileIndex.jobs[0]?.id).toBe(job.id);
     await expect(fs.pathExists(path.join(tmpRepo, ".ai/vcm/translations/files/index.json"))).resolves.toBe(false);
+  });
+
+  it("treats translation memory as initialized only after multiple core memory files have content", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-translator-memory-init-"));
+    const fs = createNodeFileSystemAdapter();
+    const service = createTranslationWorkerService({ fs });
+
+    await expect(service.getState(tmpRepo).then((state) => state.memoryInitialized)).resolves.toBe(false);
+
+    await writeFile(path.join(tmpRepo, ".ai/vcm/translations/memory/glossary.md"), "# Glossary\n\n- VCM => VCM\n", "utf8");
+    await expect(service.getState(tmpRepo).then((state) => state.memoryInitialized)).resolves.toBe(false);
+
+    await writeFile(path.join(tmpRepo, ".ai/vcm/translations/memory/project-context.md"), "# Project Context\n\nVCM manages AI coding roles.\n", "utf8");
+    await expect(service.getState(tmpRepo).then((state) => state.memoryInitialized)).resolves.toBe(true);
   });
 
   it("cleans translation runtime state without removing durable translations or memory", async () => {
@@ -121,6 +136,7 @@ describe("translator-translation-service", () => {
     const service = createTranslationWorkerService({ fs });
 
     const job = await service.createFileJob(tmpRepo, {
+      taskSlug: "demo-task",
       sourcePath: "WHITEPAPER.md",
       targetLanguage: "zh-CN",
       chunkSourceTokenTarget: 1000
@@ -147,6 +163,7 @@ describe("translator-translation-service", () => {
     const service = createTranslationWorkerService({ fs });
 
     const run = await service.createBootstrapRun(tmpRepo, {
+      taskSlug: "demo-task",
       targetLanguage: "zh-CN"
     });
     const request = await fs.readJson<{ baseRepoRoot: string; absolutePaths: { memoryDir: string; reportPath: string; candidatePaths: string[] } }>(
@@ -272,6 +289,7 @@ describe("translator-translation-service", () => {
     const service = createTranslationWorkerService({ fs });
 
     const job = await service.createConversationJob(tmpRepo, {
+      taskSlug: "demo-task",
       direction: "user-input-to-english",
       sourceText: "请检查失败的测试。",
       sourceLanguage: "auto",
@@ -323,6 +341,7 @@ describe("translator-translation-service", () => {
     });
 
     const job = await service.createConversationJob(tmpRepo, {
+      taskSlug: "demo-task",
       direction: "user-input-to-english",
       sourceText: "请检查失败的测试。",
       sourceLanguage: "auto",
@@ -355,6 +374,7 @@ describe("translator-translation-service", () => {
     });
 
     const first = await service.createConversationJob(tmpRepo, {
+      taskSlug: "demo-task",
       direction: "cc-output-to-user",
       sourceText: "First output.",
       sourceLanguage: "en",
@@ -362,6 +382,7 @@ describe("translator-translation-service", () => {
       deferDispatch: true
     });
     const second = await service.createConversationJob(tmpRepo, {
+      taskSlug: "demo-task",
       direction: "cc-output-to-user",
       sourceText: "Second output.",
       sourceLanguage: "en",
@@ -634,7 +655,7 @@ describe("translator-translation-service", () => {
     expect(await fs.pathExists(path.join(tmpRepo, first.reportPath))).toBe(false);
     expect(state.queue.items.some((item) => item.id === first.queueItemId)).toBe(false);
     expect(state.fileIndex.jobs.find((job) => job.id === second.id)?.status).toBe("running");
-    expect(starts).toEqual(["start:translator:default:medium"]);
+    expect(starts).toEqual(["start:translator:demo-task:default:medium"]);
     expect(writes.filter((entry) => entry.includes("[VCM TRANSLATION TASK]"))).toHaveLength(2);
   });
 });
@@ -745,7 +766,7 @@ function createTranslatorSessionService(starts: string[]): Pick<SessionService, 
       if (session) {
         return session;
       }
-      starts.push(`start:translator:${input.model ?? "default"}:${input.effort ?? "default"}`);
+      starts.push(`start:translator:${input.taskSlug ?? "missing"}:${input.model ?? "default"}:${input.effort ?? "default"}`);
       session = {
         ...createSession(),
         model: input.model ?? "gpt-5.5",

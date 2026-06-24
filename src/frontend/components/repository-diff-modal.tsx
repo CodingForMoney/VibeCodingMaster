@@ -1,0 +1,389 @@
+import { useEffect, useMemo, useState } from "react";
+import type {
+  RepositoryDiffFile,
+  RepositoryDiffFileCategory,
+  RepositoryDiffFileStage,
+  RepositoryDiffFileStatus,
+  RepositoryFileDiffReport,
+  RepositoryDiffReport
+} from "../../shared/types/harness.js";
+import { apiClient } from "../state/api-client.js";
+import { formatUiError } from "../state/error-format.js";
+import { useUiErrorState } from "../state/ui-error-state.js";
+
+export interface RepositoryDiffModalProps {
+  open: boolean;
+  taskSlug: string | null;
+  onClose(): void;
+}
+
+export function RepositoryDiffModal({ open, taskSlug, onClose }: RepositoryDiffModalProps) {
+  const [report, setReport] = useState<RepositoryDiffReport | null>(null);
+  const [selectedCommitSha, setSelectedCommitSha] = useState<string | null>(null);
+  const [selectedPath, setSelectedPath] = useState<string | null>(null);
+  const [taskFileDiff, setTaskFileDiff] = useState<RepositoryFileDiffReport | null>(null);
+  const [taskFileDiffBusyPath, setTaskFileDiffBusyPath] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [mergeBusy, setMergeBusy] = useState(false);
+  const [, setError] = useUiErrorState(null);
+  const [mergeMessage, setMergeMessage] = useState<string | null>(null);
+
+  const selectedFile = useMemo(
+    () => report?.files.find((file) => file.path === selectedPath) ?? report?.files[0] ?? null,
+    [report, selectedPath]
+  );
+
+  async function loadDiff(commitSha = selectedCommitSha) {
+    setBusy(true);
+    setError(null);
+    try {
+      if (!taskSlug) {
+        throw new Error("Create or select a task before reviewing harness commits.");
+      }
+      const nextReport = await apiClient.getRepositoryDiff(taskSlug, commitSha);
+      setReport(nextReport);
+      setTaskFileDiff(null);
+      setSelectedCommitSha(nextReport.commit?.sha ?? null);
+      setSelectedPath((current) =>
+        current && nextReport.files.some((file) => file.path === current)
+          ? current
+          : nextReport.files[0]?.path ?? null
+      );
+    } catch (caught) {
+      setError(formatUiError(commitSha ? `Load commit diff ${commitSha}` : "Load latest commit diff", caught));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+    setSelectedCommitSha(null);
+    setMergeMessage(null);
+    void loadDiff(null);
+  }, [open, taskSlug]);
+
+  async function loadTaskFileDiff(filePath: string) {
+    setTaskFileDiffBusyPath(filePath);
+    setError(null);
+    try {
+      if (!taskSlug) {
+        throw new Error("Create or select a task before reviewing file diffs.");
+      }
+      const nextDiff = await apiClient.getRepositoryFileDiff(taskSlug, filePath);
+      setTaskFileDiff(nextDiff);
+      setSelectedPath(filePath);
+    } catch (caught) {
+      setError(formatUiError(`Load task file diff for ${filePath}`, caught));
+    } finally {
+      setTaskFileDiffBusyPath(null);
+    }
+  }
+
+  async function mergeToCurrentBranch() {
+    setError(null);
+    setMergeMessage(null);
+    if (!taskSlug) {
+      setError("Create or select a task before merging the task branch.");
+      return;
+    }
+    if (!report) {
+      setError("Load the commit diff before merging the task branch.");
+      return;
+    }
+    const commitLines = report.commits.length
+      ? report.commits.map((commit) => `- ${commit.shortSha} ${commit.subject}`)
+      : ["- No new commits found."];
+    const confirmed = window.confirm([
+      `Merge ${report.sourceBranch} into ${report.targetBranch}?`,
+      "",
+      "VCM will run a fast-forward merge only.",
+      "The merge will fail if the task worktree or connected repository has uncommitted changes.",
+      "If the connected repository branch has diverged, rebase or merge manually first.",
+      "",
+      "Commits:",
+      ...commitLines
+    ].join("\n"));
+    if (!confirmed) {
+      return;
+    }
+
+    setMergeBusy(true);
+    try {
+      const result = await apiClient.mergeRepositoryDiffToCurrentBranch(taskSlug);
+      setMergeMessage(
+        result.changed
+          ? `Merged ${result.sourceBranch} into ${result.targetBranch} at ${result.afterSha.slice(0, 12)}.`
+          : `${result.targetBranch} already includes ${result.sourceBranch}.`
+      );
+      setSelectedCommitSha(null);
+      await loadDiff(null);
+    } catch (caught) {
+      setError(formatUiError("Merge task branch to connected repository branch", caught));
+    } finally {
+      setMergeBusy(false);
+    }
+  }
+
+  if (!open) {
+    return null;
+  }
+
+  return (
+    <div className="modal-backdrop repository-diff-backdrop">
+      <section className="repository-diff-modal" role="dialog" aria-modal="true" aria-label="Commit Diff">
+        <header className="repository-diff-header">
+          <div>
+            <h2>Commit Diff</h2>
+            <p>
+              {report
+                ? `${report.commit?.shortSha ?? "HEAD"} · ${report.summary.totalFiles} files · +${report.summary.additions} / -${report.summary.deletions}`
+                : "Review a new commit on the active task worktree branch."}
+            </p>
+          </div>
+          <div className="repository-diff-header-actions">
+            <label className="repository-diff-commit-picker">
+              <span>Commit</span>
+              <select
+                value={selectedCommitSha ?? ""}
+                disabled={busy || !report?.commits.length}
+                onChange={(event) => {
+                  const nextCommitSha = event.target.value || null;
+                  setSelectedCommitSha(nextCommitSha);
+                  void loadDiff(nextCommitSha);
+                }}
+              >
+                {report?.commits.map((commit) => (
+                  <option key={commit.sha} value={commit.sha}>
+                    {commit.shortSha} · {commit.subject}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button type="button" disabled={busy} onClick={() => void loadDiff()}>
+              Refresh
+            </button>
+            <button
+              type="button"
+              disabled={busy || mergeBusy || !taskSlug || !report?.commits.length}
+              onClick={() => void mergeToCurrentBranch()}
+            >
+              {mergeBusy ? "Merging..." : "Merge to Main"}
+            </button>
+            <button type="button" onClick={onClose}>
+              Close
+            </button>
+          </div>
+        </header>
+
+        {mergeMessage ? <p className="success-banner">{mergeMessage}</p> : null}
+
+        {report?.warnings.length ? (
+          <ul className="warnings repository-diff-warnings">
+            {report.warnings.map((warning) => <li key={warning}>{warning}</li>)}
+          </ul>
+        ) : null}
+
+        <div className="repository-diff-body">
+          <aside className="repository-diff-sidebar">
+            <RepositoryDiffSummary report={report} busy={busy} />
+            <ol className="repository-diff-file-list">
+              {report?.files.map((file) => (
+                <li
+                  key={file.path}
+                  className={[
+                    selectedFile?.path === file.path && !taskFileDiff ? "selected" : "",
+                    taskFileDiff?.path === file.path ? "task-diff-selected" : ""
+                  ].filter(Boolean).join(" ")}
+                >
+                  <div className="repository-diff-file-row">
+                    <button
+                      className="repository-diff-file-select"
+                      type="button"
+                      onClick={() => {
+                        setTaskFileDiff(null);
+                        setSelectedPath(file.path);
+                      }}
+                    >
+                      <span>{file.path}</span>
+                      <small>
+                        {formatStatus(file.status)} · {formatStage(file.stage)} · {formatCategory(file.category)}
+                      </small>
+                    </button>
+                    <button
+                      className="repository-diff-task-file-button"
+                      type="button"
+                      disabled={taskFileDiffBusyPath === file.path}
+                      title="View this file diff across the whole task worktree"
+                      onClick={() => void loadTaskFileDiff(file.path)}
+                    >
+                      {taskFileDiffBusyPath === file.path ? "..." : "Task diff"}
+                    </button>
+                  </div>
+                </li>
+              ))}
+              {report && report.files.length === 0 ? (
+                <li className="repository-diff-empty">
+                  {report.commits.length === 0 ? "No new commits on this task branch." : "No files in this commit."}
+                </li>
+              ) : null}
+            </ol>
+          </aside>
+
+          <main className="repository-diff-main">
+            {taskFileDiff ? (
+              <RepositoryTaskFileDiffView diff={taskFileDiff} onClose={() => setTaskFileDiff(null)} />
+            ) : selectedFile ? (
+              <>
+                <div className="repository-diff-file-header">
+                  <div>
+                    <h3>{selectedFile.path}</h3>
+                    <p>
+                      {formatCategory(selectedFile.category)} · {formatStatus(selectedFile.status)} · {formatStage(selectedFile.stage)}
+                    </p>
+                  </div>
+                  <span className="repository-diff-stats">+{selectedFile.additions} / -{selectedFile.deletions}</span>
+                </div>
+                {selectedFile.binary ? <p className="muted">Binary or non-regular file. Text diff is not available.</p> : null}
+                {selectedFile.truncated ? <p className="muted">Diff was truncated for display.</p> : null}
+                <pre className="repository-diff-code" aria-label={`${selectedFile.path} diff`}>
+                  {renderDiffLines(selectedFile.diff)}
+                </pre>
+              </>
+            ) : (
+              <div className="repository-diff-placeholder">
+                {busy ? "Loading commit diff..." : "No diff selected."}
+              </div>
+            )}
+          </main>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function RepositoryDiffSummary({ report, busy }: { report: RepositoryDiffReport | null; busy: boolean }) {
+  const summary = report?.summary;
+  return (
+    <div className="repository-diff-summary">
+      <strong>{busy ? "Loading" : report ? "Commit changes" : "Not loaded"}</strong>
+      {summary ? (
+        <>
+          <span>{summary.harnessFiles} harness files</span>
+          <span>{summary.productCodeFiles} product code files</span>
+          <span>{summary.committedFiles} committed files</span>
+          <span>{report?.commits.length ?? 0} branch commits</span>
+          <span>{report?.commit?.subject ?? "HEAD"}</span>
+        </>
+      ) : null}
+    </div>
+  );
+}
+
+function RepositoryTaskFileDiffView({
+  diff,
+  onClose
+}: {
+  diff: RepositoryFileDiffReport;
+  onClose(): void;
+}) {
+  const file = diff.file;
+  return (
+    <>
+      <div className="repository-diff-file-header">
+        <div>
+          <h3>{diff.path}</h3>
+          <p>
+            Task diff · {diff.targetBranch} {diff.baseSha.slice(0, 12)} → {diff.sourceBranch} worktree {diff.headSha.slice(0, 12)}
+          </p>
+        </div>
+        <div className="repository-diff-task-file-actions">
+          {file ? <span className="repository-diff-stats">+{file.additions} / -{file.deletions}</span> : null}
+          <button type="button" onClick={onClose}>Commit diff</button>
+        </div>
+      </div>
+      {diff.warnings.length > 0 ? (
+        <ul className="warnings repository-diff-warnings">
+          {diff.warnings.map((warning) => <li key={warning}>{warning}</li>)}
+        </ul>
+      ) : null}
+      {file ? (
+        <>
+          <p className="muted">
+            {formatCategory(file.category)} · {formatStatus(file.status)} · whole task comparison
+          </p>
+          {file.binary ? <p className="muted">Binary or non-regular file. Text diff is not available.</p> : null}
+          {file.truncated ? <p className="muted">Diff was truncated for display.</p> : null}
+          <pre className="repository-diff-code" aria-label={`${diff.path} task diff`}>
+            {renderDiffLines(file.diff)}
+          </pre>
+        </>
+      ) : (
+        <div className="repository-diff-placeholder">
+          No task-level diff for this file.
+        </div>
+      )}
+    </>
+  );
+}
+
+function formatCategory(category: RepositoryDiffFileCategory): string {
+  switch (category) {
+    case "fixed_harness":
+      return "fixed harness";
+    case "tools_hooks":
+      return "tools/hooks";
+    case "generated_context":
+      return "generated context";
+    case "project_docs":
+      return "project docs";
+    case "product_code":
+      return "product code";
+  }
+}
+
+function formatStage(stage: RepositoryDiffFileStage): string {
+  return stage.replaceAll("_", " ");
+}
+
+function formatStatus(status: RepositoryDiffFileStatus): string {
+  return status.replaceAll("_", " ");
+}
+
+function renderDiffLines(diff: string) {
+  return diff
+    .split("\n")
+    .filter((line) => !isHiddenDiffMetaLine(line))
+    .map((line, index) => (
+      <span key={`${index}:${line}`} className={`repository-diff-line ${getDiffLineClassName(line)}`}>
+        {line || " "}
+      </span>
+    ));
+}
+
+function getDiffLineClassName(line: string): string {
+  if (line.startsWith("+") && !line.startsWith("+++")) {
+    return "repository-diff-line-added";
+  }
+  if (line.startsWith("-") && !line.startsWith("---")) {
+    return "repository-diff-line-deleted";
+  }
+  if (line.startsWith("@@")) {
+    return "repository-diff-line-hunk";
+  }
+  return "repository-diff-line-context";
+}
+
+function isHiddenDiffMetaLine(line: string): boolean {
+  return line.startsWith("diff --git") ||
+    line.startsWith("index ") ||
+    line.startsWith("new file mode ") ||
+    line.startsWith("deleted file mode ") ||
+    line.startsWith("similarity index ") ||
+    line.startsWith("rename from ") ||
+    line.startsWith("rename to ") ||
+    line.startsWith("--- ") ||
+    line.startsWith("+++ ");
+}

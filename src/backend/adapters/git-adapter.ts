@@ -17,12 +17,17 @@ export interface GitAdapter {
   getAheadBehind(repoRoot: string, upstreamBranch: string): Promise<GitAheadBehind>;
   isDirty(repoRoot: string): Promise<boolean>;
   getStatusPorcelain(repoRoot: string): Promise<string>;
-  getStagedStatus(repoRoot: string): Promise<string>;
+  getStatusPorcelainV1(repoRoot: string): Promise<string>;
+  getCommitInfo(repoRoot: string, ref?: string): Promise<GitCommitInfo>;
+  getCommitDiff(repoRoot: string, ref?: string): Promise<string>;
+  getDiff(repoRoot: string, baseRef: string, headRef?: string | null, paths?: string[]): Promise<string>;
+  getCommitList(repoRoot: string, range: string): Promise<GitCommitInfo[]>;
+  getMergeBase(repoRoot: string, leftRef: string, rightRef: string): Promise<string>;
   isIgnored(repoRoot: string, repoRelativePath: string): Promise<boolean>;
   branchExists(repoRoot: string, branch: string): Promise<boolean>;
+  mergeBranchFastForward(repoRoot: string, branch: string): Promise<GitMergeResult>;
   addPaths(repoRoot: string, paths: string[]): Promise<void>;
   commit(repoRoot: string, message: string): Promise<string>;
-  rebase(repoRoot: string, upstream: string): Promise<GitRebaseResult>;
   createWorktree(input: CreateGitWorktreeInput): Promise<void>;
   removeWorktree(repoRoot: string, worktreePath: string, options?: { force?: boolean }): Promise<void>;
   deleteBranch(repoRoot: string, branch: string, options?: { force?: boolean }): Promise<void>;
@@ -39,9 +44,15 @@ export interface GitPullResult {
   stderr: string;
 }
 
-export interface GitRebaseResult {
+export interface GitMergeResult {
   stdout: string;
   stderr: string;
+}
+
+export interface GitCommitInfo {
+  sha: string;
+  subject: string;
+  committedAt?: string;
 }
 
 export interface CreateGitWorktreeInput {
@@ -136,18 +147,123 @@ export function createGitAdapter(runner: CommandRunner): GitAdapter {
 
       return result.stdout;
     },
-    async getStagedStatus(repoRoot) {
-      const result = await runGit(runner, repoRoot, ["diff", "--cached", "--name-status"]);
+    async getStatusPorcelainV1(repoRoot) {
+      const result = await runGit(runner, repoRoot, [
+        "status",
+        "--porcelain=v1",
+        "-z",
+        "--untracked-files=all"
+      ]);
       if (result.exitCode !== 0) {
         throw new VcmError({
           code: "GIT_ERROR",
-          message: "Unable to read staged Git changes.",
+          message: "Unable to read Git status.",
           statusCode: 400,
           hint: result.stderr
         });
       }
 
       return result.stdout;
+    },
+    async getCommitInfo(repoRoot, ref = "HEAD") {
+      const result = await runGit(runner, repoRoot, ["show", "-s", "--format=%H%x00%s%x00%cI", ref]);
+      if (result.exitCode !== 0) {
+        throw new VcmError({
+          code: "GIT_ERROR",
+          message: "Unable to read Git commit.",
+          statusCode: 400,
+          hint: result.stderr
+        });
+      }
+
+      const [sha = "", subject = "", committedAt = ""] = result.stdout.split("\0");
+      return {
+        sha: sha.trim(),
+        subject: subject.trim(),
+        committedAt: committedAt.trim() || undefined
+      };
+    },
+    async getCommitDiff(repoRoot, ref = "HEAD") {
+      const result = await runGit(runner, repoRoot, [
+        "show",
+        "--format=",
+        "--no-ext-diff",
+        "--binary",
+        "--src-prefix=a/",
+        "--dst-prefix=b/",
+        ref
+      ]);
+      if (result.exitCode !== 0) {
+        throw new VcmError({
+          code: "GIT_ERROR",
+          message: "Unable to read Git commit diff.",
+          statusCode: 400,
+          hint: result.stderr
+        });
+      }
+
+      return result.stdout;
+    },
+    async getDiff(repoRoot, baseRef, headRef = null, paths = []) {
+      const result = await runGit(runner, repoRoot, [
+        "diff",
+        "--no-ext-diff",
+        "--binary",
+        "--src-prefix=a/",
+        "--dst-prefix=b/",
+        baseRef,
+        ...(headRef ? [headRef] : []),
+        "--",
+        ...paths
+      ]);
+      if (result.exitCode !== 0) {
+        throw new VcmError({
+          code: "GIT_ERROR",
+          message: "Unable to read Git diff.",
+          statusCode: 400,
+          hint: result.stderr
+        });
+      }
+
+      return result.stdout;
+    },
+    async getCommitList(repoRoot, range) {
+      const result = await runGit(runner, repoRoot, ["log", "--format=%H%x00%s%x00%cI%x1e", range]);
+      if (result.exitCode !== 0) {
+        throw new VcmError({
+          code: "GIT_ERROR",
+          message: "Unable to read Git commit list.",
+          statusCode: 400,
+          hint: result.stderr
+        });
+      }
+
+      return result.stdout
+        .split("\x1e")
+        .map((record) => record.trim())
+        .filter(Boolean)
+        .map((record) => {
+          const [sha = "", subject = "", committedAt = ""] = record.split("\0");
+          return {
+            sha: sha.trim(),
+            subject: subject.trim(),
+            committedAt: committedAt.trim() || undefined
+          };
+        })
+        .filter((commit) => commit.sha.length > 0);
+    },
+    async getMergeBase(repoRoot, leftRef, rightRef) {
+      const result = await runGit(runner, repoRoot, ["merge-base", leftRef, rightRef]);
+      if (result.exitCode !== 0) {
+        throw new VcmError({
+          code: "GIT_ERROR",
+          message: "Unable to find Git merge base.",
+          statusCode: 400,
+          hint: result.stderr
+        });
+      }
+
+      return result.stdout.trim();
     },
     async isIgnored(repoRoot, repoRelativePath) {
       const result = await runGit(runner, repoRoot, ["check-ignore", "-q", "--", repoRelativePath]);
@@ -179,6 +295,22 @@ export function createGitAdapter(runner: CommandRunner): GitAdapter {
         hint: result.stderr
       });
     },
+    async mergeBranchFastForward(repoRoot, branch) {
+      const result = await runGit(runner, repoRoot, ["merge", "--ff-only", branch]);
+      if (result.exitCode !== 0) {
+        throw new VcmError({
+          code: "GIT_MERGE_FAILED",
+          message: `Unable to fast-forward merge branch: ${branch}`,
+          statusCode: 409,
+          hint: result.stderr || result.stdout || "Rebase the task branch onto the connected repository branch, then try again."
+        });
+      }
+
+      return {
+        stdout: result.stdout,
+        stderr: result.stderr
+      };
+    },
     async addPaths(repoRoot, paths) {
       if (paths.length === 0) {
         return;
@@ -205,22 +337,6 @@ export function createGitAdapter(runner: CommandRunner): GitAdapter {
       }
 
       return this.getHeadCommit(repoRoot);
-    },
-    async rebase(repoRoot, upstream) {
-      const result = await runGit(runner, repoRoot, ["rebase", upstream]);
-      if (result.exitCode !== 0) {
-        throw new VcmError({
-          code: "GIT_REBASE_FAILED",
-          message: "Unable to rebase task branch onto the harness commit.",
-          statusCode: 409,
-          hint: result.stderr || result.stdout
-        });
-      }
-
-      return {
-        stdout: result.stdout,
-        stderr: result.stderr
-      };
     },
     async createWorktree(input) {
       const result = await runGit(runner, input.repoRoot, [

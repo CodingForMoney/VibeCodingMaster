@@ -295,9 +295,11 @@ describe("createClaudeHookService", () => {
     ]);
   });
 
-  it("recovers StopFailure without marking idle when no completion evidence exists", async () => {
+  it("schedules StopFailure retry without marking idle when no completion evidence exists", async () => {
     const calls: string[] = [];
     const writes: string[] = [];
+    const timers: Array<{ callback: () => void; delayMs: number }> = [];
+    let recovery: unknown;
     const service = createClaudeHookService({
       projectService: createProjectServiceStub(),
       taskService: createTaskServiceStub(),
@@ -338,8 +340,30 @@ describe("createClaudeHookService", () => {
         }
       } as never,
       roundService: {
-        async recordClaudeHookEvent(input) {
-          calls.push(`round:${input.eventName}:${input.role}`);
+        async getSessionRoundState() {
+          calls.push("round-state");
+          return {
+            taskSlug: "demo-task",
+            status: "running",
+            turnCount: 1,
+            completedTurnCount: 0,
+            totalRoundCount: 1,
+            totalTurnCount: 1,
+            totalCompletedTurnCount: 0,
+            totalCcActiveMs: 0,
+            currentRoundCcActiveMs: 0,
+            roleRecovery: recovery,
+            roles: ["coder"],
+            updatedAt: "2026-06-01T00:00:00.000Z"
+          } as never;
+        },
+        async setRoleRecovery(input) {
+          recovery = input.recovery;
+          calls.push(`set-recovery:${input.recovery.status}:${input.recovery.attempt}:${input.recovery.nextRetryAt}`);
+          return {} as never;
+        },
+        async recordClaudeHookEvent() {
+          calls.push("round");
           return {} as never;
         }
       } as RoundService,
@@ -353,6 +377,214 @@ describe("createClaudeHookService", () => {
       runtime: {
         write(_sessionId, data) {
           writes.push(data);
+        }
+      },
+      now: () => "2026-06-01T00:00:00.000Z",
+      retrySetTimeout(callback, delayMs) {
+        timers.push({ callback, delayMs });
+        return timers.length;
+      },
+      retryClearTimeout() {}
+    });
+
+    const result = await service.handleHook({
+      taskSlug: "demo-task",
+      role: "coder",
+      event: {
+        hook_event_name: "StopFailure",
+        session_id: "claude_coder",
+        error: "overloaded",
+        error_details: { retry_after: 60 },
+        last_assistant_message: "Still working."
+      }
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      eventName: "StopFailure",
+      sessionUpdated: true,
+      dispatchedCount: 0
+    });
+    expect(calls).toEqual([
+      "list:demo-task:.ai/vcm/handoffs:/repo/.claude/worktrees/demo-task",
+      "round-state",
+      "set-recovery:waiting:1:2026-06-01T00:01:00.000Z",
+      "mark-running:coder"
+    ]);
+    expect(timers).toHaveLength(1);
+    expect(timers[0]?.delayMs).toBe(60_000);
+    expect(recovery).toMatchObject({
+      role: "coder",
+      status: "waiting",
+      attempt: 1,
+      error: "overloaded",
+      errorDetails: "{\"retry_after\":60}",
+      lastAssistantMessage: "Still working.",
+      retryable: true
+    });
+    expect(writes).toEqual([]);
+
+    calls.length = 0;
+    timers[0]?.callback();
+    await new Promise((resolve) => setTimeout(resolve, 100));
+
+    expect(calls).toEqual([
+      "round-state",
+      "get-session:coder",
+      "set-recovery:retrying:1:undefined",
+      "mark-running:coder"
+    ]);
+    expect(writes.join("")).toContain([
+      "[VCM Recovery]",
+      "Previous turn ended unexpectedly. Continue from current repo + VCM handoff state.",
+      "",
+      "Check whether your assigned work is already complete.",
+      "If complete, write the expected VCM completion artifact now.",
+      "Do not repeat completed edits, validation, or route messages."
+    ].join("\n"));
+    expect(writes.join("\n")).not.toContain("Recovery attempt");
+    expect(writes.join("\n")).not.toContain("Continue the same assigned work");
+    expect(writes.at(-1)).toBe("\r");
+  });
+
+  it("does not retry non-retryable StopFailure errors", async () => {
+    const calls: string[] = [];
+    const writes: string[] = [];
+    let recovery: unknown;
+    const service = createClaudeHookService({
+      projectService: createProjectServiceStub(),
+      taskService: createTaskServiceStub(),
+      sessionService: {
+        async recordClaudeHookEvent(_repoRoot, input) {
+          calls.push(`session:${input.eventName}:${input.role}`);
+          return {
+            id: "runtime_coder",
+            claudeSessionId: "claude_coder",
+            taskSlug: input.taskSlug,
+            role: input.role,
+            status: "running",
+            activityStatus: "idle",
+            command: "claude --agent coder",
+            permissionMode: "default",
+            cwd: "/repo",
+            terminalBackend: "node-pty",
+            updatedAt: "2026-06-01T00:00:00.000Z"
+          };
+        }
+      } as never,
+      messageService: {
+        async listPendingRouteFiles() {
+          calls.push("list");
+          return [];
+        }
+      } as never,
+      roundService: {
+        async setRoleRecovery(input) {
+          recovery = input.recovery;
+          calls.push(`set-recovery:${input.recovery.status}:${input.recovery.attempt}:${input.recovery.error}:${input.recovery.retryable}`);
+          return {} as never;
+        },
+        async recordClaudeHookEvent(input) {
+          calls.push(`round:${input.eventName}:${input.role}`);
+          return {} as never;
+        }
+      } as never,
+      translationService: {
+        async recordConversationBoundary(input) {
+          calls.push(`boundary:${input.boundaryKind}:${input.role}`);
+        }
+      } as Pick<TranslationService, "recordConversationBoundary">,
+      appSettings: createAppSettingsStub(),
+      runtime: {
+        write(_sessionId, data) {
+          writes.push(data);
+        }
+      },
+      now: () => "2026-06-01T00:00:00.000Z"
+    });
+
+    const result = await service.handleHook({
+      taskSlug: "demo-task",
+      role: "coder",
+      event: {
+        hook_event_name: "StopFailure",
+        session_id: "claude_coder",
+        error: "billing_error",
+        error_details: "Payment required",
+        last_assistant_message: "Cannot continue."
+      }
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      eventName: "StopFailure",
+      sessionUpdated: true,
+      dispatchedCount: 0
+    });
+    expect(calls).toEqual([
+      "list",
+      "set-recovery:failed:0:billing_error:false",
+      "session:StopFailure:coder",
+      "round:StopFailure:coder",
+      "boundary:end:coder"
+    ]);
+    expect(recovery).toMatchObject({
+      role: "coder",
+      status: "failed",
+      attempt: 0,
+      error: "billing_error",
+      errorDetails: "Payment required",
+      lastAssistantMessage: "Cannot continue.",
+      retryable: false,
+      failedAt: "2026-06-01T00:00:00.000Z"
+    });
+    expect(writes).toEqual([]);
+  });
+
+  it("ends StopFailure without retry when role retry is disabled", async () => {
+    const calls: string[] = [];
+    const service = createClaudeHookService({
+      projectService: createProjectServiceStub(),
+      taskService: createTaskServiceStub(),
+      sessionService: {
+        async recordClaudeHookEvent(_repoRoot, input) {
+          calls.push(`session:${input.eventName}:${input.role}`);
+          return {
+            id: "runtime_coder",
+            claudeSessionId: "claude_coder",
+            taskSlug: input.taskSlug,
+            role: input.role,
+            status: "running",
+            activityStatus: "idle",
+            command: "claude --agent coder",
+            permissionMode: "default",
+            cwd: "/repo",
+            terminalBackend: "node-pty",
+            updatedAt: "2026-06-01T00:00:00.000Z"
+          };
+        }
+      } as never,
+      messageService: {
+        async listPendingRouteFiles() {
+          calls.push("list");
+          return [];
+        }
+      } as never,
+      roundService: {
+        async recordClaudeHookEvent(input) {
+          calls.push(`round:${input.eventName}:${input.role}`);
+          return {} as never;
+        }
+      } as never,
+      translationService: {
+        async recordConversationBoundary(input) {
+          calls.push(`boundary:${input.boundaryKind}:${input.role}`);
+        }
+      } as Pick<TranslationService, "recordConversationBoundary">,
+      appSettings: createAppSettingsStub("off", false),
+      runtime: {
+        write() {
+          calls.push("write");
         }
       }
     });
@@ -373,13 +605,11 @@ describe("createClaudeHookService", () => {
       dispatchedCount: 0
     });
     expect(calls).toEqual([
-      "list:demo-task:.ai/vcm/handoffs:/repo/.claude/worktrees/demo-task",
-      "get-session:coder",
-      "mark-running:coder"
+      "list",
+      "session:StopFailure:coder",
+      "round:StopFailure:coder",
+      "boundary:end:coder"
     ]);
-    expect(writes.join("\n")).toContain("[VCM Recovery]");
-    expect(writes.join("\n")).toContain("Continue the same assigned work");
-    expect(writes.at(-1)).toBe("\r");
   });
 
   it("records PostCompact metadata without changing turn state", async () => {
@@ -720,14 +950,89 @@ describe("createClaudeHookService", () => {
       "worker:Stop:__project__"
     ]);
   });
+
+  it("routes Harness Engineer Stop hooks to bootstrap completion without VCM flow side effects", async () => {
+    const calls: string[] = [];
+    const service = createClaudeHookService({
+      projectService: createProjectServiceStub(),
+      taskService: createTaskServiceStub(),
+      sessionService: {
+        async recordProjectHarnessEngineerHookEvent(_repoRoot, input) {
+          calls.push(`session:${input.eventName}:${input.sessionId}`);
+          return {
+            id: "runtime_harness_engineer",
+            claudeSessionId: input.sessionId ?? "harness_engineer_session",
+            taskSlug: "__project_harness_engineer__",
+            role: "harness-engineer",
+            status: "running",
+            activityStatus: input.eventName === "Stop" ? "idle" : "running",
+            command: "claude --agent harness-engineer",
+            permissionMode: "default",
+            cwd: input.cwd ?? "/repo",
+            terminalBackend: "node-pty",
+            updatedAt: "2026-06-01T00:00:00.000Z"
+          };
+        }
+      } as SessionService,
+      messageService: {
+        async confirmPromptSubmitted() {
+          calls.push("message");
+          return undefined;
+        }
+      } as unknown as MessageService,
+      roundService: {
+        async recordClaudeHookEvent() {
+          calls.push("round");
+          return {} as never;
+        }
+      } as RoundService,
+      translationService: {
+        async recordConversationBoundary() {
+          calls.push("boundary");
+          return undefined;
+        }
+      } as Pick<TranslationService, "recordConversationBoundary">,
+      harnessService: {
+        async recordHarnessBootstrapHook(_repoRoot, input) {
+          calls.push(`bootstrap:${input.eventName}:${input.sessionId}:${input.claudeSessionId}`);
+          return {} as never;
+        }
+      },
+      appSettings: createAppSettingsStub()
+    });
+
+    const result = await service.handleStopHook({
+      taskSlug: "__project_harness_engineer__",
+      role: "harness-engineer",
+      event: {
+        hook_event_name: "Stop",
+        session_id: "harness_engineer_session",
+        cwd: "/repo"
+      }
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      eventName: "Stop",
+      role: "harness-engineer",
+      sessionUpdated: true,
+      dispatchedCount: 0
+    });
+    expect(calls).toEqual([
+      "session:Stop:harness_engineer_session",
+      "bootstrap:Stop:runtime_harness_engineer:harness_engineer_session"
+    ]);
+  });
 });
 
-function createAppSettingsStub(permissionRequestMode: "off" | "allowAll" = "off") {
+function createAppSettingsStub(permissionRequestMode: "off" | "allowAll" = "off", roleRetryEnabled = true) {
   return {
     async getPreferences() {
       return {
         themeMode: "system",
         flowPauseAlerts: true,
+        roleRetryEnabled,
+        autoTaskHarnessReviewEnabled: false,
         permissionRequestMode
       };
     }

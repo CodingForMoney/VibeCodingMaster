@@ -12,6 +12,12 @@ except ModuleNotFoundError:
     tomllib = None
 
 
+NODE_SOURCE_EXTENSIONS = (".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs")
+NODE_EXCLUDED_DIRS = {"node_modules", "dist", "build", "coverage", ".next", ".turbo", ".vite"}
+NODE_DEPENDENCY_TABLES = ("dependencies", "devDependencies", "peerDependencies", "optionalDependencies")
+NODE_TEST_MARKERS = (".test.", ".spec.")
+
+
 def relative_path(path: Path, root: Path) -> str:
     try:
         rel = path.absolute().relative_to(root.absolute())
@@ -20,7 +26,7 @@ def relative_path(path: Path, root: Path) -> str:
     return "." if str(rel) == "." else rel.as_posix()
 
 
-def find_cargo_root(project_root: Path) -> Path:
+def maybe_find_cargo_root(project_root: Path) -> Path | None:
     if (project_root / "Cargo.toml").is_file():
         return project_root
 
@@ -28,7 +34,18 @@ def find_cargo_root(project_root: Path) -> Path:
         if child.is_dir() and (child / "Cargo.toml").is_file():
             return child
 
-    raise SystemExit(f"Could not find Cargo.toml in {project_root} or its direct child directories.")
+    return None
+
+
+def find_cargo_root(project_root: Path) -> Path:
+    cargo_root = maybe_find_cargo_root(project_root)
+    if cargo_root is None:
+        raise SystemExit(f"Could not find Cargo.toml in {project_root} or its direct child directories.")
+    return cargo_root
+
+
+def load_json(path: Path) -> dict:
+    return json.loads(path.read_text())
 
 
 def load_toml(path: Path) -> dict:
@@ -149,6 +166,196 @@ def rust_files_under(module_dir: Path, project_root: Path, child: str) -> list[s
     )
 
 
+def maybe_find_node_root(project_root: Path) -> Path | None:
+    if (project_root / "package.json").is_file():
+        return project_root
+
+    for child in sorted(project_root.iterdir(), key=lambda path: path.name):
+        if child.is_dir() and (child / "package.json").is_file():
+            return child
+
+    return None
+
+
+def workspace_patterns(package_data: dict) -> list[str]:
+    workspaces = package_data.get("workspaces")
+    if isinstance(workspaces, list):
+        return [pattern for pattern in workspaces if isinstance(pattern, str)]
+    if isinstance(workspaces, dict):
+        packages = workspaces.get("packages", [])
+        if isinstance(packages, list):
+            return [pattern for pattern in packages if isinstance(pattern, str)]
+    return []
+
+
+def node_workspace_manifests(node_root: Path) -> list[Path]:
+    root_manifest = node_root / "package.json"
+    root_data = load_json(root_manifest)
+    patterns = workspace_patterns(root_data)
+
+    if not patterns:
+        return [root_manifest]
+
+    manifests: list[Path] = []
+    seen: set[Path] = set()
+
+    for pattern in patterns:
+        if pattern.startswith("!") or pattern.startswith("/") or ".." in Path(pattern).parts:
+            continue
+        for candidate in sorted(node_root.glob(pattern), key=lambda path: path.as_posix()):
+            manifest = candidate / "package.json"
+            if not candidate.is_dir() or not manifest.is_file() or manifest in seen:
+                continue
+            if any(part in NODE_EXCLUDED_DIRS for part in relative_path(candidate, node_root).split("/")):
+                continue
+            manifests.append(manifest)
+            seen.add(manifest)
+
+    if root_data.get("name") and (root_data.get("main") or root_data.get("exports") or (node_root / "src").is_dir()):
+        manifests.insert(0, root_manifest)
+
+    return manifests
+
+
+def node_dependency_names(manifest: Path) -> set[str]:
+    data = load_json(manifest)
+    names: set[str] = set()
+    for table_name in NODE_DEPENDENCY_TABLES:
+        table = data.get(table_name, {})
+        if isinstance(table, dict):
+            names.update(name for name in table.keys() if isinstance(name, str))
+    return names
+
+
+def node_source_files_under(module_dir: Path, project_root: Path) -> tuple[list[str], list[str]]:
+    source_root = module_dir / "src"
+    if not source_root.is_dir():
+        return ([], [])
+
+    source_files: list[str] = []
+    test_files: list[str] = []
+
+    for path in sorted(source_root.rglob("*"), key=lambda item: item.as_posix()):
+        if not path.is_file():
+            continue
+        if path.suffix not in NODE_SOURCE_EXTENSIONS or path.name.endswith(".d.ts"):
+            continue
+        if any(part in NODE_EXCLUDED_DIRS for part in path.relative_to(module_dir).parts):
+            continue
+
+        rel = relative_path(path, project_root)
+        if any(marker in path.name for marker in NODE_TEST_MARKERS):
+            test_files.append(rel)
+        else:
+            source_files.append(rel)
+
+    tests_root = module_dir / "tests"
+    if tests_root.is_dir():
+        for path in sorted(tests_root.rglob("*"), key=lambda item: item.as_posix()):
+            if (
+                path.is_file()
+                and path.suffix in NODE_SOURCE_EXTENSIONS
+                and not path.name.endswith(".d.ts")
+                and not any(part in NODE_EXCLUDED_DIRS for part in path.relative_to(module_dir).parts)
+            ):
+                test_files.append(relative_path(path, project_root))
+
+    return (source_files, sorted(set(test_files)))
+
+
+def infer_node_layer(module_path: str, node_root: Path, project_root: Path) -> tuple[str, str]:
+    node_root_rel = relative_path(node_root, project_root)
+    if module_path == node_root_rel:
+        return ("root", node_root_rel)
+
+    relative_to_node_root = relative_path(project_root / module_path, node_root)
+    first = relative_to_node_root.split("/", 1)[0]
+    return (first, relative_path(node_root / first, project_root))
+
+
+def node_package_records(node_root: Path) -> list[dict]:
+    manifests = node_workspace_manifests(node_root)
+    records: list[dict] = []
+    names_by_manifest: dict[Path, str] = {}
+
+    for manifest in manifests:
+        data = load_json(manifest)
+        name = data.get("name")
+        if isinstance(name, str) and name:
+            names_by_manifest[manifest] = name
+
+    workspace_names = set(names_by_manifest.values())
+
+    for manifest, name in names_by_manifest.items():
+        dependency_names = node_dependency_names(manifest) & workspace_names
+        records.append(
+            {
+                "name": name,
+                "manifest": manifest,
+                "workspaceDependencies": sorted(dependency_names),
+            }
+        )
+
+    return records
+
+
+def build_node_index(project_root: Path, node_root: Path) -> dict:
+    records = node_package_records(node_root)
+    has_workspaces = bool(workspace_patterns(load_json(node_root / "package.json")))
+    layers: list[dict] = []
+    layer_by_name: dict[str, dict] = {}
+
+    for record in records:
+        manifest_path = record["manifest"]
+        module_dir = manifest_path.parent
+        module_path = relative_path(module_dir, project_root)
+        manifest_rel = relative_path(manifest_path, project_root)
+        layer_name, layer_path = infer_node_layer(module_path, node_root, project_root)
+        source_files, test_files = node_source_files_under(module_dir, project_root)
+
+        if layer_name not in layer_by_name:
+            layer = {
+                "name": layer_name,
+                "path": layer_path,
+                "modules": [],
+            }
+            layer_by_name[layer_name] = layer
+            layers.append(layer)
+
+        layer_by_name[layer_name]["modules"].append(
+            {
+                "name": record["name"],
+                "path": module_path,
+                "manifest": manifest_rel,
+                "architectureDoc": f"{module_path}/ARCHITECTURE.md"
+                if module_path != "."
+                else "ARCHITECTURE.md",
+                "workspaceDependencies": record["workspaceDependencies"],
+                "language": "typescript",
+                "files": {
+                    "source": source_files,
+                    "tests": test_files,
+                },
+            }
+        )
+
+    return {
+        "schemaVersion": 1,
+        "kind": "module-index",
+        "generatedBy": ".ai/tools/generate-module-index",
+        "workspace": {
+            "type": "npm-workspaces" if has_workspaces else "npm-package",
+            "root": relative_path(node_root, project_root),
+            "manifest": relative_path(node_root / "package.json", project_root),
+        },
+        "layerInference": {
+            "method": "path-first-segment-from-workspace-root",
+            "rootPackageLayer": "root",
+        },
+        "layers": layers,
+    }
+
+
 def package_records_from_metadata(project_root: Path, cargo_root: Path, metadata: dict) -> list[dict]:
     workspace_root = Path(metadata["workspace_root"])
     workspace_member_ids = set(metadata["workspace_members"])
@@ -201,8 +408,7 @@ def package_records_from_manifests(cargo_root: Path) -> list[dict]:
     return records
 
 
-def build_index(project_root: Path) -> dict:
-    cargo_root = find_cargo_root(project_root)
+def build_cargo_index(project_root: Path, cargo_root: Path) -> dict:
     metadata = load_cargo_metadata(cargo_root)
     records = (
         package_records_from_metadata(project_root, cargo_root, metadata)
@@ -262,8 +468,22 @@ def build_index(project_root: Path) -> dict:
     }
 
 
+def build_index(project_root: Path) -> dict:
+    cargo_root = maybe_find_cargo_root(project_root)
+    if cargo_root is not None:
+        return build_cargo_index(project_root, cargo_root)
+
+    node_root = maybe_find_node_root(project_root)
+    if node_root is not None:
+        return build_node_index(project_root, node_root)
+
+    raise SystemExit(
+        f"Could not find Cargo.toml or package.json in {project_root} or its direct child directories."
+    )
+
+
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Generate .ai/generated/module-index.json from cargo metadata.")
+    parser = argparse.ArgumentParser(description="Generate .ai/generated/module-index.json from Cargo or npm workspace metadata.")
     parser.add_argument("--check", action="store_true", help="Fail if the generated module index differs from the current file.")
     parser.add_argument("--print", action="store_true", help="Print generated JSON instead of writing it.")
     parser.add_argument("--output", default=".ai/generated/module-index.json", help="Output path relative to the project root.")

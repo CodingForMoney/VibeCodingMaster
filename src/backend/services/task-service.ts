@@ -49,20 +49,14 @@ export function createTaskService(deps: TaskServiceDeps): TaskService {
           statusCode: 409
         });
       }
-      if (!(await deps.git.isIgnored(repoRoot, `${config.stateRoot}/.probe`))) {
+      const existingTasks = await readStoredTasks(deps.fs, taskStoreRoot);
+      const activeTask = existingTasks.find((task) => task.cleanupStatus !== "cleaned");
+      if (activeTask) {
         throw new VcmError({
-          code: "VCM_STATE_NOT_IGNORED",
-          message: `${config.stateRoot}/ is not ignored by Git.`,
+          code: "ACTIVE_TASK_EXISTS",
+          message: `A task is already active for this project: ${activeTask.taskSlug}`,
           statusCode: 409,
-          hint: "Apply VCM Harness first so .gitignore contains the VCM managed block."
-        });
-      }
-      if (!(await deps.git.isIgnored(repoRoot, ".claude/worktrees/.probe"))) {
-        throw new VcmError({
-          code: "VCM_WORKTREES_NOT_IGNORED",
-          message: ".claude/worktrees/ is not ignored by Git.",
-          statusCode: 409,
-          hint: "Apply VCM Harness first so .gitignore ignores Claude-compatible task worktrees."
+          hint: "Close the current task before creating a new one."
         });
       }
       if (await deps.git.branchExists(repoRoot, taskBranch)) {
@@ -81,13 +75,13 @@ export function createTaskService(deps: TaskServiceDeps): TaskService {
           hint: "Choose a different task name or clean up the existing worktree."
         });
       }
-      const baseStatus = await deps.git.getStatusPorcelain(repoRoot);
-      if (baseStatus.trim()) {
+      const baseVisibleChanges = await getBaseRepoVisibleChanges(deps.git, repoRoot);
+      if (baseVisibleChanges.length > 0) {
         throw new VcmError({
           code: "BASE_REPO_DIRTY",
-          message: "The connected repository has uncommitted changes.",
+          message: "The connected repository has uncommitted Git-visible changes.",
           statusCode: 409,
-          hint: "Commit, stash, or discard base repository changes before creating a task worktree."
+          hint: `Commit, stash, or discard these changes before creating a task worktree: ${baseVisibleChanges.slice(0, 12).join(", ")}`
         });
       }
 
@@ -131,18 +125,7 @@ export function createTaskService(deps: TaskServiceDeps): TaskService {
       return task;
     },
     async listTasks(repoRoot) {
-      const tasksDir = path.join(deps.projectService.getProjectDataRoot(repoRoot), "tasks");
-      if (!(await deps.fs.pathExists(tasksDir))) {
-        return [];
-      }
-
-      const entries = await deps.fs.readDir(tasksDir);
-      const tasks: TaskRecord[] = [];
-      for (const entry of entries.filter((candidate) => candidate.endsWith(".json"))) {
-        tasks.push(await deps.fs.readJson<TaskRecord>(path.join(tasksDir, entry)));
-      }
-
-      return tasks.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+      return readStoredTasks(deps.fs, deps.projectService.getProjectDataRoot(repoRoot));
     },
     async loadTask(repoRoot, taskSlug) {
       assertValidTaskSlug(taskSlug);
@@ -214,8 +197,56 @@ export function createTaskService(deps: TaskServiceDeps): TaskService {
   };
 }
 
+async function readStoredTasks(fs: FileSystemAdapter, taskStoreRoot: string): Promise<TaskRecord[]> {
+  const tasksDir = path.join(taskStoreRoot, "tasks");
+  if (!(await fs.pathExists(tasksDir))) {
+    return [];
+  }
+
+  const entries = await fs.readDir(tasksDir);
+  const tasks: TaskRecord[] = [];
+  for (const entry of entries.filter((candidate) => candidate.endsWith(".json"))) {
+    tasks.push(await fs.readJson<TaskRecord>(path.join(tasksDir, entry)));
+  }
+
+  return tasks.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+}
+
 export function getTaskRuntimeRepoRoot(task: TaskRecord): string {
   return task.worktreePath;
+}
+
+async function getBaseRepoVisibleChanges(git: GitAdapter, repoRoot: string): Promise<string[]> {
+  const rawStatus = await git.getStatusPorcelainV1(repoRoot);
+  return parseGitStatusPaths(rawStatus).filter((filePath) => !isVcmRuntimePath(filePath));
+}
+
+function parseGitStatusPaths(rawStatus: string): string[] {
+  const records = rawStatus.split("\0").filter(Boolean);
+  const paths: string[] = [];
+  for (let index = 0; index < records.length; index += 1) {
+    const record = records[index] ?? "";
+    if (record.length < 4) {
+      continue;
+    }
+    const indexStatus = record[0] ?? " ";
+    const filePath = normalizeGitStatusPath(record.slice(3));
+    paths.push(filePath);
+    if (indexStatus === "R" || indexStatus === "C") {
+      index += 1;
+    }
+  }
+  return paths;
+}
+
+function normalizeGitStatusPath(value: string): string {
+  return path.posix.normalize(value).replace(/^\.\//, "");
+}
+
+function isVcmRuntimePath(repoRelativePath: string): boolean {
+  return repoRelativePath.startsWith(".ai/vcm/") ||
+    repoRelativePath.startsWith(".claude/worktrees/") ||
+    repoRelativePath.startsWith(".ai/tools/__pycache__/");
 }
 
 function getTaskPath(taskStoreRoot: string, taskSlug: string): string {

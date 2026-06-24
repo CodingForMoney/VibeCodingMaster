@@ -6,7 +6,7 @@ import type { TranslationStatus } from "../../shared/types/translation.js";
 import type { GateReviewGateStatus } from "../../shared/types/gate-review.js";
 
 export interface StatusBadgeProps {
-  status: RoleStatus | RoleActivityStatus | TaskStatus | HarnessFileAction | TranslationStatus | GateReviewGateStatus | "ok" | "missing" | "empty" | "incomplete";
+  status: RoleStatus | RoleActivityStatus | TaskStatus | HarnessFileAction | TranslationStatus | GateReviewGateStatus | "ok" | "missing" | "empty" | "incomplete" | "unknown" | "outdated";
 }
 
 export function StatusBadge({ status }: StatusBadgeProps) {

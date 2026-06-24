@@ -100,6 +100,7 @@ const DEFAULT_PROFILE = "default";
 const DEFAULT_CHUNK_SOURCE_TOKEN_TARGET = 80000;
 const BOOTSTRAP_DEFAULT_LIMIT = 12;
 const MEMORY_TOTAL_LIMIT_BYTES = 80 * 1024;
+const MEMORY_INITIALIZED_MIN_FILES = 2;
 const MEMORY_FILE_NAMES = ["glossary.md", "style-guide.md", "project-context.md", "decisions.md"] as const;
 const TRANSLATOR_ROLE = "translator";
 const FILE_BROWSER_DEFAULT_LIMIT = 200;
@@ -302,7 +303,7 @@ export function createTranslationWorkerService(deps: TranslationWorkerServiceDep
         queue.updatedAt = next.updatedAt;
         await saveQueue(repoRoot, queue);
       }
-      const session = await ensureTranslatorSession(repoRoot, next.targetLanguage);
+      const session = await ensureTranslatorSession(repoRoot, next.targetLanguage, next.taskSlug);
       await submitTerminalInput(deps.runtime, session.id, batch?.prompt ?? await buildQueuePrompt(repoRoot, next));
       const dispatchedAt = now();
       for (const item of batch?.items ?? [next]) {
@@ -319,7 +320,7 @@ export function createTranslationWorkerService(deps: TranslationWorkerServiceDep
       const failedAt = now();
       for (const item of failedItems) {
         item.status = "failed";
-        item.error = error instanceof Error ? error.message : "Failed to dispatch Translator task.";
+        item.error = describeWorkerError(error, "Dispatch Translator task failed.");
         item.updatedAt = failedAt;
       }
       queue.activeItemId = undefined;
@@ -355,7 +356,7 @@ export function createTranslationWorkerService(deps: TranslationWorkerServiceDep
     return { items: candidates, prompt };
   }
 
-  async function ensureTranslatorSession(repoRoot: string, targetLanguage: string) {
+  async function ensureTranslatorSession(repoRoot: string, targetLanguage: string, taskSlug: string) {
     void targetLanguage;
     if (!deps.sessionService) {
       throw new VcmError({
@@ -365,6 +366,7 @@ export function createTranslationWorkerService(deps: TranslationWorkerServiceDep
       });
     }
     return deps.sessionService.ensureProjectTranslatorSession(repoRoot, {
+      taskSlug,
       model: "default",
       effort: "medium"
     });
@@ -551,7 +553,7 @@ export function createTranslationWorkerService(deps: TranslationWorkerServiceDep
       }
     } catch (error) {
       active.status = "failed";
-      active.error = error instanceof Error ? error.message : "Failed to finalize translation output.";
+      active.error = describeWorkerError(error, "Finalize translation output failed.");
       active.updatedAt = now();
       queue.updatedAt = active.updatedAt;
       await saveQueue(repoRoot, queue);
@@ -1044,6 +1046,7 @@ export function createTranslationWorkerService(deps: TranslationWorkerServiceDep
 
     async createFileJob(repoRoot, input) {
       await ensureLayout(repoRoot);
+      const taskSlug = requireTranslationTaskSlug(input.taskSlug);
       const sourcePath = normalizeRepoRelative(input.sourcePath);
       const absoluteSourcePath = resolveRepoPath(repoRoot, sourcePath);
       assertInsideRepo(repoRoot, absoluteSourcePath);
@@ -1101,6 +1104,7 @@ export function createTranslationWorkerService(deps: TranslationWorkerServiceDep
         type: input.force ? "force-retranslate" : "file",
         status: "queued",
         targetLanguage,
+        taskSlug,
         jobId,
         requestPath: job.requestPath,
         expectedResultPath: job.resultPath,
@@ -1174,6 +1178,7 @@ export function createTranslationWorkerService(deps: TranslationWorkerServiceDep
 
     async createBootstrapRun(repoRoot, input) {
       await ensureLayout(repoRoot);
+      const taskSlug = requireTranslationTaskSlug(input.taskSlug);
       const targetLanguage = input.targetLanguage.trim() || "zh-CN";
       const candidatePaths = (input.candidatePaths?.length
         ? input.candidatePaths
@@ -1198,6 +1203,7 @@ export function createTranslationWorkerService(deps: TranslationWorkerServiceDep
         type: "bootstrap",
         status: "queued",
         targetLanguage,
+        taskSlug,
         jobId: runId,
         requestPath: run.requestPath,
         expectedResultPath: run.reportPath,
@@ -1233,6 +1239,7 @@ export function createTranslationWorkerService(deps: TranslationWorkerServiceDep
 
     async createMemoryUpdate(repoRoot, input) {
       await ensureLayout(repoRoot);
+      const taskSlug = requireTranslationTaskSlug(input.taskSlug);
       const targetLanguage = input.targetLanguage.trim() || "zh-CN";
       const timestamp = now();
       const runId = `memory-update-${Date.now()}-${createId().slice(0, 8)}`;
@@ -1244,6 +1251,7 @@ export function createTranslationWorkerService(deps: TranslationWorkerServiceDep
         type: "memory-update",
         status: "queued",
         targetLanguage,
+        taskSlug,
         jobId: runId,
         requestPath
       });
@@ -1311,6 +1319,7 @@ export function createTranslationWorkerService(deps: TranslationWorkerServiceDep
 
     async createConversationJob(repoRoot, input) {
       await ensureLayout(repoRoot);
+      const taskSlug = requireTranslationTaskSlug(input.taskSlug);
       const sourceText = input.sourceText.trimEnd();
       if (!sourceText.trim()) {
         throw new VcmError({
@@ -1340,6 +1349,7 @@ export function createTranslationWorkerService(deps: TranslationWorkerServiceDep
         type: "conversation",
         status: "queued",
         targetLanguage,
+        taskSlug,
         jobId,
         requestPath: job.requestPath,
         expectedResultPath: job.resultPath
@@ -1476,9 +1486,27 @@ export function createTranslationWorkerService(deps: TranslationWorkerServiceDep
     },
 
     ensureTranslatorSession(repoRoot) {
-      return ensureTranslatorSession(repoRoot, "zh-CN");
+      void repoRoot;
+      throw new VcmError({
+        code: "TRANSLATION_TASK_REQUIRED",
+        message: "Translator requires an active task worktree.",
+        statusCode: 409
+      });
     }
   };
+}
+
+function requireTranslationTaskSlug(value: string | undefined): string {
+  const taskSlug = value?.trim();
+  if (!taskSlug) {
+    throw new VcmError({
+      code: "TRANSLATION_TASK_REQUIRED",
+      message: "Translation requires an active task worktree.",
+      statusCode: 409,
+      hint: "Create or select a task before starting translation."
+    });
+  }
+  return taskSlug;
 }
 
 async function listBrowserEntries(
@@ -1727,6 +1755,7 @@ function isQueueItem(value: unknown): value is TranslationQueueItem {
     typeof candidate.type === "string" &&
     typeof candidate.status === "string" &&
     typeof candidate.targetLanguage === "string" &&
+    typeof candidate.taskSlug === "string" &&
     typeof candidate.requestPath === "string";
 }
 
@@ -1761,14 +1790,15 @@ function isFileTranslationChunk(value: unknown): value is FileTranslationChunk {
 }
 
 async function isMemoryInitialized(repoRoot: string, fs: FileSystemAdapter): Promise<boolean> {
+  let initializedFiles = 0;
   for (const file of MEMORY_FILE_NAMES) {
     const content = await fs.readText(resolveRepoPath(repoRoot, `${MEMORY_DIR}/${file}`));
     const meaningfulLines = content.split("\n").filter((line) => line.trim() && !line.trim().startsWith("#"));
     if (meaningfulLines.length > 0) {
-      return true;
+      initializedFiles += 1;
     }
   }
-  return false;
+  return initializedFiles >= MEMORY_INITIALIZED_MIN_FILES;
 }
 
 async function getMemoryUsage(repoRoot: string, fs: FileSystemAdapter): Promise<{
@@ -2105,4 +2135,21 @@ function invalidResult(message: string): VcmError {
     message,
     statusCode: 422
   });
+}
+
+function describeWorkerError(error: unknown, fallback: string): string {
+  if (error instanceof Error) {
+    return error.message || fallback;
+  }
+  if (typeof error === "string" && error.trim()) {
+    return `${fallback} Reason: ${error}`;
+  }
+  if (error === undefined) {
+    return fallback;
+  }
+  try {
+    return `${fallback} Non-Error value: ${JSON.stringify(error)}`;
+  } catch {
+    return `${fallback} Non-Error value: ${String(error)}`;
+  }
 }

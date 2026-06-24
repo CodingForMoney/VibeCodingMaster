@@ -171,8 +171,8 @@ Current runtime files and directories:
 .ai/vcm/handoffs/known-issues.md
 .ai/vcm/gate-reviews/
 .ai/vcm/jobs/<job-id>/
+.ai/vcm/harness-engineer/session.json
 .ai/vcm/bootstrap/session.json
-.ai/vcm/bootstrap/bootstrap.log
 ```
 
 App-local VCM task records live outside the connected repository:
@@ -363,13 +363,12 @@ The current example has two generated artifacts:
 `module-index.json` helps agents find layers, modules, manifests, module docs,
 source files, test files, and workspace dependencies.
 
-`public-surface.json` indexes crate-external Rust public APIs. It is a machine
-index, not an architecture document.
+`public-surface.json` indexes project public APIs, routes, and externally
+consumed surfaces. It is a machine index, not an architecture document.
 
-Current generated-context support is Rust-only. The fixed installer provides
-Rust generator tools as the default baseline, but it does not generate trusted
-context by itself. Non-Rust projects must use project-specific generators before
-`.ai/generated/*` is considered reliable.
+Current generated-context support covers Rust/Cargo projects and npm workspace
+TypeScript/JavaScript projects. Other repository shapes must use
+project-specific generators before `.ai/generated/*` is considered reliable.
 
 There is no `test-map.json`. Rust unit tests live with source where appropriate;
 integration tests use Cargo's normal test layout. Test files are discoverable
@@ -402,22 +401,18 @@ during bootstrap.
 Important claims should be marked as verified, inferred, unknown, or needing
 human confirmation.
 
-VCM should launch bootstrap as a visible temporary Claude Code terminal, not as
-an invisible background task:
+VCM should run bootstrap through the project-scoped `harness-engineer` session,
+not through a separate temporary terminal or invisible background task:
 
 - run the deterministic fixed installer first
-- start Claude Code in the connected repository root without a role agent
-- set `VCM_TASK_REPO_ROOT`, `VCM_HARNESS_BOOTSTRAP=1`, `VCM_SESSION_ID`, and
-  `VCM_API_URL`
-- send a prompt that explicitly requires using `vcm-harness-bootstrap`
-- log terminal output under `.ai/vcm/bootstrap/bootstrap.log`
-- persist session metadata under `.ai/vcm/bootstrap/session.json`
-- mark bootstrap complete only when project context, generated context,
-  project architecture docs, module architecture docs, and testing docs are
-  present and non-empty
+- start or resume the project-scoped `harness-engineer` role with execution cwd set to the active task worktree
+- send a prompt that explicitly requires using `vcm-harness-bootstrap` and creating the bootstrap commit
+- persist the bootstrap run marker under `.ai/vcm/bootstrap/session.json`
+- mark the bootstrap run complete when the `harness-engineer` Stop hook arrives
+- do not create the bootstrap commit in VCM; Harness Engineer owns that commit
 
 The UI should expose both stages: fixed install status and bootstrap completion
-status. A failed or disconnected bootstrap terminal should be restartable
+status. A failed or disconnected Harness Engineer session should be restartable
 without treating project-owned durable docs as VCM-owned harness files.
 
 ## 12. Final Acceptance

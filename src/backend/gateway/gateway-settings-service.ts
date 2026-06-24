@@ -1,6 +1,7 @@
 import path from "node:path";
 import type {
   GatewayChannel,
+  GatewayLarkDomain,
   GatewayMessageStatus,
   GatewayPendingConfirmations,
   GatewayPollStatus,
@@ -35,8 +36,16 @@ export interface GatewayBindingSettings {
   boundUserId: string | null;
   loginUserId: string | null;
   token: string | null;
+  appId: string | null;
+  appSecret: string | null;
+  larkDomain: GatewayLarkDomain | null;
+  larkOpenId: string | null;
+  larkBotName: string | null;
+  larkBotOpenId: string | null;
+  homeChatId: string | null;
   getUpdatesBuf: string;
   contextTokens: Record<string, string>;
+  chatIds: Record<string, string>;
 }
 
 export interface GatewayPushCursor {
@@ -70,10 +79,18 @@ export interface GatewaySettingsServiceDeps {
   fs: FileSystemAdapter;
   settingsPath?: string;
   auditPath?: string;
+  defaultChannel?: GatewayChannel;
+  defaultBaseUrl?: string;
   now?: () => string;
 }
 
+interface NormalizeGatewaySettingsOptions {
+  defaultChannel: GatewayChannel;
+  defaultBaseUrl: string;
+}
+
 const DEFAULT_BASE_URL = "https://ilinkai.weixin.qq.com";
+const DEFAULT_GATEWAY_CHANNEL: GatewayChannel = "weixin-ilink";
 const MAX_DEDUPE_IDS = 1000;
 
 export function createGatewaySettingsService(deps: GatewaySettingsServiceDeps): GatewaySettingsService {
@@ -81,6 +98,10 @@ export function createGatewaySettingsService(deps: GatewaySettingsServiceDeps): 
   const settingsPath = deps.settingsPath ?? path.join(dataDir, "gateway", "settings.json");
   const auditPath = deps.auditPath ?? path.join(dataDir, "gateway", "audit.jsonl");
   const now = deps.now ?? (() => new Date().toISOString());
+  const normalizeOptions: NormalizeGatewaySettingsOptions = {
+    defaultChannel: deps.defaultChannel ?? DEFAULT_GATEWAY_CHANNEL,
+    defaultBaseUrl: deps.defaultBaseUrl ?? DEFAULT_BASE_URL
+  };
   let cachedSettings: GatewaySettingsFile | null = null;
 
   async function loadSettings(): Promise<GatewaySettingsFile> {
@@ -88,16 +109,16 @@ export function createGatewaySettingsService(deps: GatewaySettingsServiceDeps): 
       return cachedSettings;
     }
     if (!(await deps.fs.pathExists(settingsPath))) {
-      cachedSettings = normalizeSettings({}, now());
+      cachedSettings = normalizeSettings({}, now(), normalizeOptions);
       await saveSettings(cachedSettings);
       return cachedSettings;
     }
-    cachedSettings = normalizeSettings(await deps.fs.readJson<Partial<GatewaySettingsFile>>(settingsPath), now());
+    cachedSettings = normalizeSettings(await deps.fs.readJson<Partial<GatewaySettingsFile>>(settingsPath), now(), normalizeOptions);
     return cachedSettings;
   }
 
   async function saveSettings(settings: GatewaySettingsFile): Promise<GatewaySettingsFile> {
-    cachedSettings = normalizeSettings(settings, now());
+    cachedSettings = normalizeSettings(settings, now(), normalizeOptions);
     await deps.fs.writeJsonAtomic(settingsPath, cachedSettings);
     return cachedSettings;
   }
@@ -109,9 +130,16 @@ export function createGatewaySettingsService(deps: GatewaySettingsServiceDeps): 
       return saveSettings({
         ...current,
         enabled: input.enabled ?? current.enabled,
+        channel: input.channel ?? current.channel,
         translationEnabled: input.translationEnabled ?? current.translationEnabled,
         currentProjectId: input.currentProjectId !== undefined ? normalizeNullableString(input.currentProjectId) : current.currentProjectId,
         currentTaskSlug: input.currentTaskSlug !== undefined ? normalizeNullableString(input.currentTaskSlug) : current.currentTaskSlug,
+        binding: {
+          ...current.binding,
+          baseUrl: input.baseUrl !== undefined
+            ? normalizeBaseUrl(input.baseUrl, normalizeOptions.defaultBaseUrl)
+            : current.binding.baseUrl
+        },
         updatedAt: now()
       });
     },
@@ -121,7 +149,17 @@ export function createGatewaySettingsService(deps: GatewaySettingsServiceDeps): 
       return saveSettings({
         ...current,
         enabled: false,
-        binding: createDefaultBinding(),
+        binding: {
+          ...createDefaultBinding(normalizeOptions.defaultBaseUrl),
+          baseUrl: current.binding.baseUrl || normalizeOptions.defaultBaseUrl,
+          appId: current.binding.appId,
+          appSecret: current.binding.appSecret,
+          larkDomain: current.binding.larkDomain,
+          larkOpenId: current.binding.larkOpenId,
+          larkBotName: current.binding.larkBotName,
+          larkBotOpenId: current.binding.larkBotOpenId,
+          homeChatId: current.binding.homeChatId
+        },
         dedupe: {
           recentInboundMessageIds: []
         },
@@ -148,7 +186,15 @@ export function createGatewaySettingsService(deps: GatewaySettingsServiceDeps): 
           baseUrl: settings.binding.baseUrl,
           boundUserId: settings.binding.boundUserId,
           loginUserId: settings.binding.loginUserId,
-          tokenConfigured: Boolean(settings.binding.token)
+          tokenConfigured: Boolean(settings.binding.token),
+          appId: settings.binding.appId,
+          appIdConfigured: Boolean(settings.binding.appId),
+          appSecretConfigured: Boolean(settings.binding.appSecret),
+          larkDomain: settings.binding.larkDomain,
+          larkOpenId: settings.binding.larkOpenId,
+          larkBotName: settings.binding.larkBotName,
+          larkBotOpenId: settings.binding.larkBotOpenId,
+          homeChatId: settings.binding.homeChatId
         },
         pendingConfirmations: settings.pendingConfirmations,
         lastPollStatus: settings.lastPollStatus,
@@ -165,7 +211,14 @@ export function createGatewaySettingsService(deps: GatewaySettingsServiceDeps): 
   };
 }
 
-export function normalizeSettings(input: Partial<GatewaySettingsFile>, timestamp: string): GatewaySettingsFile {
+export function normalizeSettings(
+  input: Partial<GatewaySettingsFile>,
+  timestamp: string,
+  options: NormalizeGatewaySettingsOptions = {
+    defaultChannel: DEFAULT_GATEWAY_CHANNEL,
+    defaultBaseUrl: DEFAULT_BASE_URL
+  }
+): GatewaySettingsFile {
   const bindingInput = isObject(input.binding) ? input.binding as Partial<GatewayBindingSettings> : {};
   const dedupeInput = isObject(input.dedupe) ? input.dedupe as Partial<GatewaySettingsFile["dedupe"]> : {};
   const pendingInput = isObject(input.pendingConfirmations)
@@ -179,20 +232,30 @@ export function normalizeSettings(input: Partial<GatewaySettingsFile>, timestamp
   return {
     version: 1,
     enabled: input.enabled === true,
-    channel: "weixin-ilink",
+    channel: normalizeGatewayChannel(input.channel, options.defaultChannel),
     translationEnabled: input.translationEnabled !== false,
     currentProjectId: normalizeNullableString(input.currentProjectId),
     currentTaskSlug: normalizeNullableString(input.currentTaskSlug),
     binding: {
-      ...createDefaultBinding(),
+      ...createDefaultBinding(options.defaultBaseUrl),
       accountId: normalizeNullableString(bindingInput.accountId),
-      baseUrl: normalizeBaseUrl(bindingInput.baseUrl),
+      baseUrl: normalizeBaseUrl(bindingInput.baseUrl, options.defaultBaseUrl),
       boundUserId: normalizeNullableString(bindingInput.boundUserId),
       loginUserId: normalizeNullableString(bindingInput.loginUserId),
       token: normalizeNullableString(bindingInput.token),
+      appId: normalizeNullableString(bindingInput.appId),
+      appSecret: normalizeNullableString(bindingInput.appSecret),
+      larkDomain: normalizeLarkDomain(bindingInput.larkDomain),
+      larkOpenId: normalizeNullableString(bindingInput.larkOpenId),
+      larkBotName: normalizeNullableString(bindingInput.larkBotName),
+      larkBotOpenId: normalizeNullableString(bindingInput.larkBotOpenId),
+      homeChatId: normalizeNullableString(bindingInput.homeChatId),
       getUpdatesBuf: typeof bindingInput.getUpdatesBuf === "string" ? bindingInput.getUpdatesBuf : "",
       contextTokens: isObject(bindingInput.contextTokens)
         ? normalizeStringRecord(bindingInput.contextTokens)
+        : {},
+      chatIds: isObject(bindingInput.chatIds)
+        ? normalizeStringRecord(bindingInput.chatIds)
         : {}
     },
     dedupe: {
@@ -211,16 +274,32 @@ export function normalizeSettings(input: Partial<GatewaySettingsFile>, timestamp
   };
 }
 
-function createDefaultBinding(): GatewayBindingSettings {
+function createDefaultBinding(defaultBaseUrl = DEFAULT_BASE_URL): GatewayBindingSettings {
   return {
     accountId: null,
-    baseUrl: DEFAULT_BASE_URL,
+    baseUrl: defaultBaseUrl,
     boundUserId: null,
     loginUserId: null,
     token: null,
+    appId: null,
+    appSecret: null,
+    larkDomain: null,
+    larkOpenId: null,
+    larkBotName: null,
+    larkBotOpenId: null,
+    homeChatId: null,
     getUpdatesBuf: "",
-    contextTokens: {}
+    contextTokens: {},
+    chatIds: {}
   };
+}
+
+function normalizeGatewayChannel(input: unknown, fallback: GatewayChannel): GatewayChannel {
+  return input === "weixin-ilink" || input === "lark" ? input : fallback;
+}
+
+function normalizeLarkDomain(input: unknown): GatewayLarkDomain | null {
+  return input === "lark" || input === "feishu" ? input : null;
 }
 
 function normalizeCloseTaskConfirmation(input: unknown): GatewayPendingConfirmations["closeTask"] {
@@ -308,12 +387,15 @@ function normalizeMessageStatus(input: unknown): GatewayMessageStatus | null {
   };
 }
 
-function normalizeBaseUrl(input: unknown): string {
+function normalizeBaseUrl(input: unknown, fallback = DEFAULT_BASE_URL): string {
   const raw = typeof input === "string" ? input.trim() : "";
   if (!raw) {
-    return DEFAULT_BASE_URL;
+    return fallback;
   }
-  if (raw.startsWith("http://") || raw.startsWith("https://")) {
+  if (/^https:\/\/lark:\/\//i.test(raw)) {
+    return raw.replace(/^https:\/\//i, "").replace(/\/+$/, "");
+  }
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(raw)) {
     return raw.replace(/\/+$/, "");
   }
   return `https://${raw.replace(/\/+$/, "")}`;

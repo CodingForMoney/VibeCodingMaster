@@ -1,46 +1,87 @@
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import type {
-  CommitAndRebaseHarnessTaskResult,
   HarnessApplyResult,
   HarnessBootstrapStatusReport,
   HarnessStatusReport
 } from "../../shared/types/harness.js";
+import {
+  CLAUDE_PERMISSION_MODE_OPTIONS,
+  CLAUDE_EFFORT_OPTIONS,
+  CLAUDE_MODEL_OPTIONS,
+  type ClaudePermissionMode,
+  type SessionEffort,
+  type SessionModel
+} from "../../shared/types/session.js";
 import { XtermView } from "../terminal/xterm-view.js";
+import { SwitchControl } from "./switch-control.js";
 import { StatusBadge } from "./status-badge.js";
+
+type BootstrapLaunchOptions = {
+  permissionMode: ClaudePermissionMode;
+  model: SessionModel;
+  effort: SessionEffort;
+};
 
 export interface HarnessPanelProps {
   status: HarnessStatusReport | null;
   bootstrapStatus: HarnessBootstrapStatusReport | null;
   applyResult?: HarnessApplyResult | null;
-  taskSyncResult?: CommitAndRebaseHarnessTaskResult | null;
-  canCommitAndRebaseTask?: boolean;
+  hasActiveTask?: boolean;
+  autoTaskHarnessReviewEnabled: boolean;
   busy?: boolean;
   onRefresh(): Promise<void>;
   onApply(): Promise<void>;
-  onCommitAndRebaseTask(): Promise<void>;
-  onStartBootstrap(): Promise<void>;
+  onOpenStudio(): void;
+  onOpenRepositoryDiff(): void;
+  onAutoTaskHarnessReviewChange(enabled: boolean): void;
+  onStartBootstrap(input: BootstrapLaunchOptions): Promise<void>;
+  onRestartBootstrap(input: BootstrapLaunchOptions): Promise<void>;
+  onStopBootstrap(): Promise<void>;
+  onRunBootstrap(): Promise<void>;
 }
 
 export function HarnessPanel({
   status,
   bootstrapStatus,
   applyResult,
-  taskSyncResult,
-  canCommitAndRebaseTask = false,
+  hasActiveTask = false,
+  autoTaskHarnessReviewEnabled,
   busy = false,
   onRefresh,
   onApply,
-  onCommitAndRebaseTask,
-  onStartBootstrap
+  onOpenStudio,
+  onOpenRepositoryDiff,
+  onAutoTaskHarnessReviewChange,
+  onStartBootstrap,
+  onRestartBootstrap,
+  onStopBootstrap,
+  onRunBootstrap
 }: HarnessPanelProps) {
   const [showBootstrapTerminal, setShowBootstrapTerminal] = useState(false);
+  const [bootstrapPermissionMode, setBootstrapPermissionMode] = useState<ClaudePermissionMode>("bypassPermissions");
+  const [bootstrapModel, setBootstrapModel] = useState<SessionModel>("default");
+  const [bootstrapEffort, setBootstrapEffort] = useState<SessionEffort>("default");
   const bootstrapSession = bootstrapStatus?.session;
+  const bootstrapRunning = bootstrapStatus?.status === "running";
+  const bootstrapSessionRunning = bootstrapSession?.status === "running";
+  const showBootstrapStage = bootstrapStatus?.status !== "complete";
 
-  useEffect(() => {
-    if (!bootstrapSession) {
-      setShowBootstrapTerminal(false);
-    }
-  }, [bootstrapSession]);
+  const bootstrapLaunchOptions = {
+    permissionMode: bootstrapPermissionMode,
+    model: bootstrapModel,
+    effort: bootstrapEffort
+  };
+
+  if (!hasActiveTask) {
+    return (
+      <section className="harness-panel">
+        <div className="harness-result">
+          <strong>Task required</strong>
+          <p className="muted">Create or select a task before changing VCM Harness. Harness changes are committed in the active task worktree.</p>
+        </div>
+      </section>
+    );
+  }
 
   if (!status) {
     return null;
@@ -117,54 +158,57 @@ export function HarnessPanel({
       <div className="harness-stage">
         <div className="harness-panel-header">
           <div>
-            <strong>Bootstrap</strong>
-            <p className="muted">{bootstrapStatus ? formatBootstrapStatus(bootstrapStatus.status) : "not loaded"}</p>
+            <strong>Harness Studio</strong>
           </div>
           <div className="harness-actions">
-            <button
-              type="button"
-              disabled={busy || !bootstrapStatus?.canStart}
-              onClick={() => {
-                setShowBootstrapTerminal(true);
-                void onStartBootstrap();
-              }}
-            >
-              Run Bootstrap
+            <button type="button" disabled={busy} onClick={onOpenStudio}>
+              Open Studio
             </button>
           </div>
         </div>
-
-        {bootstrapSession ? (
-          <div className="harness-bootstrap-session">
-            <div>
-              <span>{bootstrapSession.command}</span>
-              <StatusBadge status={bootstrapSession.status} />
-            </div>
-            <button
-              type="button"
-              onClick={() => setShowBootstrapTerminal(true)}
-            >
-              Open Terminal
-            </button>
-          </div>
-        ) : null}
+        <button
+          className="harness-review-diff-button"
+          type="button"
+          disabled={busy}
+          onClick={onOpenRepositoryDiff}
+        >
+          Review Diff
+        </button>
+        <SwitchControl
+          checked={autoTaskHarnessReviewEnabled}
+          className="sidebar-switch"
+          disabled={busy}
+          label="Auto task harness review"
+          title="Automatically ask Harness Engineer to review task harness after final acceptance completes"
+          onChange={onAutoTaskHarnessReviewChange}
+        />
       </div>
 
-      {applyResult?.changedFiles.length && canCommitAndRebaseTask && !taskSyncResult ? (
-        <div className="harness-result">
-          <button
-            type="button"
-            disabled={busy}
-            onClick={() => void onCommitAndRebaseTask()}
-          >
-            Commit &amp; rebase task
-          </button>
+      {showBootstrapStage ? (
+        <div className="harness-stage">
+          <div className="harness-panel-header">
+            <div>
+              <strong>Bootstrap</strong>
+              <p className="muted">{bootstrapStatus ? formatBootstrapStatus(bootstrapStatus.status) : "not loaded"}</p>
+            </div>
+            <div className="harness-actions">
+              <button
+                type="button"
+                disabled={busy || !bootstrapStatus?.canStart}
+                onClick={() => {
+                  setShowBootstrapTerminal(true);
+                }}
+              >
+                Open Bootstrap
+              </button>
+            </div>
+          </div>
         </div>
       ) : null}
 
-      {taskSyncResult ? (
+      {applyResult?.changedFiles.length ? (
         <div className="harness-result">
-          <p className="muted">{taskSyncResult.message}</p>
+          <p className="muted">{applyResult.message}</p>
         </div>
       ) : null}
 
@@ -184,23 +228,100 @@ export function HarnessPanel({
         </ul>
       ) : null}
 
-      {showBootstrapTerminal && bootstrapSession ? (
-        <div className="harness-bootstrap-modal" role="dialog" aria-modal="true" aria-label="Harness bootstrap terminal">
+      {showBootstrapStage && showBootstrapTerminal ? (
+        <div className="harness-bootstrap-modal" role="dialog" aria-modal="true" aria-label="Harness Engineer bootstrap session">
           <div className="harness-bootstrap-modal-surface">
             <header className="harness-bootstrap-modal-header">
               <div>
-                <strong>Harness Bootstrap Terminal</strong>
-                <p className="muted">{bootstrapSession.command}</p>
+                <strong>Harness Engineer Bootstrap</strong>
+                <p className="muted">{bootstrapSession?.command ?? "Start Harness Engineer, then run bootstrap when ready."}</p>
               </div>
               <div className="harness-bootstrap-modal-actions">
-                <StatusBadge status={bootstrapSession.status} />
+                {bootstrapSession ? <StatusBadge status={bootstrapSession.status} /> : null}
                 <button type="button" onClick={() => setShowBootstrapTerminal(false)}>
                   Close
                 </button>
               </div>
             </header>
+
+            <div className="harness-bootstrap-controls">
+              <label>
+                <span>Permission</span>
+                <select
+                  value={bootstrapPermissionMode}
+                  disabled={busy || bootstrapRunning || bootstrapSessionRunning}
+                  onChange={(event) => setBootstrapPermissionMode(event.target.value as ClaudePermissionMode)}
+                >
+                  {CLAUDE_PERMISSION_MODE_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span>Model</span>
+                <select
+                  value={bootstrapModel}
+                  disabled={busy || bootstrapRunning || bootstrapSessionRunning}
+                  onChange={(event) => setBootstrapModel(event.target.value as SessionModel)}
+                >
+                  {CLAUDE_MODEL_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
+              </label>
+              <label>
+                <span>Effort</span>
+                <select
+                  value={bootstrapEffort}
+                  disabled={busy || bootstrapRunning || bootstrapSessionRunning}
+                  onChange={(event) => setBootstrapEffort(event.target.value as SessionEffort)}
+                >
+                  {CLAUDE_EFFORT_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </select>
+              </label>
+              <div className="harness-bootstrap-control-actions">
+                <button
+                  type="button"
+                  disabled={busy || bootstrapRunning || !bootstrapStatus?.canStart}
+                  onClick={() => void onStartBootstrap(bootstrapLaunchOptions)}
+                >
+                  Start
+                </button>
+                <button
+                  type="button"
+                  disabled={busy || bootstrapRunning || !bootstrapStatus?.canStart}
+                  onClick={() => void onRestartBootstrap(bootstrapLaunchOptions)}
+                >
+                  Restart
+                </button>
+                <button
+                  type="button"
+                  disabled={busy || !bootstrapSession}
+                  onClick={() => void onStopBootstrap()}
+                >
+                  Stop
+                </button>
+                <button
+                  type="button"
+                  disabled={busy || bootstrapRunning || !bootstrapSessionRunning}
+                  onClick={() => void onRunBootstrap()}
+                >
+                  Run bootstrap
+                </button>
+              </div>
+            </div>
+
             <div className="harness-bootstrap-terminal">
-              <XtermView sessionId={bootstrapSession.id} active={showBootstrapTerminal} />
+              {bootstrapSessionRunning ? (
+                <XtermView sessionId={bootstrapSession.id} active={showBootstrapTerminal} />
+              ) : (
+                <div className="terminal-empty">
+                  <strong>Harness Bootstrap</strong>
+                  <span>Start Harness Engineer first. When it is ready, click Run bootstrap to send the prompt.</span>
+                </div>
+              )}
             </div>
           </div>
         </div>

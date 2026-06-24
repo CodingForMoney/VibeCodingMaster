@@ -108,30 +108,95 @@ describe("apiClient", () => {
     expect(new Headers(init?.headers).has("content-type")).toBe(false);
   });
 
-  it("commits harness changes and rebases a task branch", async () => {
+  it("applies harness changes for the active task", async () => {
     const fetchMock = mockFetch({
-      taskSlug: "demo-task",
-      branch: "feature/demo-task",
-      worktreePath: "/repo/.claude/worktrees/demo-task",
-      baseBranch: "main",
-      baseCommitBefore: "abc",
-      baseCommitAfter: "def",
-      committed: true,
-      rebased: true,
+      version: 1,
       changedFiles: [],
+      harnessCommit: "abc1234",
       message: "done"
     });
 
-    await apiClient.commitAndRebaseHarnessTask("demo-task", {
-      changedFiles: [{ path: "CLAUDE.md", action: "update", reason: "updated" }]
-    });
+    await apiClient.applyHarness({ taskSlug: "demo-task" });
 
     const init = fetchMock.mock.calls[0]?.[1];
-    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/projects/harness/tasks/demo-task/commit-and-rebase");
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/projects/harness/apply");
     expect(init?.method).toBe("POST");
     expect(JSON.parse(String(init?.body))).toEqual({
-      changedFiles: [{ path: "CLAUDE.md", action: "update", reason: "updated" }]
+      taskSlug: "demo-task"
     });
+  });
+
+  it("loads repository diff with the selected commit", async () => {
+    const fetchMock = mockFetch({
+      version: 1,
+      repoRoot: "/repo",
+      sourceBranch: "feature/demo-task",
+      targetBranch: "release/v0.4",
+      generatedAt: "2026-06-23T00:00:00.000Z",
+      commits: [],
+      summary: {
+        totalFiles: 0,
+        committedFiles: 0,
+        stagedFiles: 0,
+        unstagedFiles: 0,
+        untrackedFiles: 0,
+        additions: 0,
+        deletions: 0,
+        harnessFiles: 0,
+        productCodeFiles: 0,
+        truncatedFiles: 0,
+        binaryFiles: 0
+      },
+      files: [],
+      warnings: []
+    });
+
+    await apiClient.getRepositoryDiff("demo-task", "abc1234567890");
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/projects/harness/repository-diff?taskSlug=demo-task&commit=abc1234567890");
+  });
+
+  it("loads repository file diff for the task worktree", async () => {
+    const fetchMock = mockFetch({
+      version: 1,
+      repoRoot: "/repo/.claude/worktrees/demo-task",
+      baseRepoRoot: "/repo",
+      sourceBranch: "feature/demo-task",
+      targetBranch: "main",
+      baseSha: "base123",
+      headSha: "head123",
+      path: "CLAUDE.md",
+      generatedAt: "2026-06-23T00:00:00.000Z",
+      file: null,
+      warnings: []
+    });
+
+    await apiClient.getRepositoryFileDiff("demo-task", "CLAUDE.md");
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/projects/harness/repository-diff/file?taskSlug=demo-task&path=CLAUDE.md");
+  });
+
+  it("merges repository diff to the connected repository current branch", async () => {
+    const fetchMock = mockFetch({
+      version: 1,
+      baseRepoRoot: "/repo",
+      taskRepoRoot: "/repo/.claude/worktrees/demo-task",
+      sourceBranch: "feature/demo-task",
+      targetBranch: "release/v0.4",
+      beforeSha: "base123",
+      afterSha: "abc123",
+      changed: true,
+      stdout: "Fast-forward",
+      stderr: "",
+      mergedAt: "2026-06-23T00:00:00.000Z"
+    });
+
+    await apiClient.mergeRepositoryDiffToCurrentBranch("demo-task");
+
+    const init = fetchMock.mock.calls[0]?.[1];
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/projects/harness/repository-diff/merge-to-current-branch");
+    expect(init?.method).toBe("POST");
+    expect(JSON.parse(String(init?.body))).toEqual({ taskSlug: "demo-task" });
   });
 
   it("marks all messages done with a bodyless POST", async () => {
@@ -169,12 +234,16 @@ describe("apiClient", () => {
   it("updates app preferences", async () => {
     const fetchMock = mockFetch({
       themeMode: "dark",
-      flowPauseAlerts: false
+      flowPauseAlerts: false,
+      roleRetryEnabled: false,
+      autoTaskHarnessReviewEnabled: true
     });
 
     const preferences = await apiClient.updateAppPreferences({
       themeMode: "dark",
-      flowPauseAlerts: false
+      flowPauseAlerts: false,
+      roleRetryEnabled: false,
+      autoTaskHarnessReviewEnabled: true
     });
 
     const init = fetchMock.mock.calls[0]?.[1];
@@ -182,10 +251,14 @@ describe("apiClient", () => {
     expect(init?.method).toBe("PUT");
     expect(JSON.parse(String(init?.body))).toEqual({
       themeMode: "dark",
-      flowPauseAlerts: false
+      flowPauseAlerts: false,
+      roleRetryEnabled: false,
+      autoTaskHarnessReviewEnabled: true
     });
     expect(preferences.themeMode).toBe("dark");
     expect(preferences.flowPauseAlerts).toBe(false);
+    expect(preferences.roleRetryEnabled).toBe(false);
+    expect(preferences.autoTaskHarnessReviewEnabled).toBe(true);
   });
 
   it("starts and polls translation sessions through HTTP APIs", async () => {
@@ -198,10 +271,12 @@ describe("apiClient", () => {
 
     await apiClient.startTranslationSession("demo-task", "coder");
     await apiClient.pollTranslationSession("session-1", 18, 100);
+    await apiClient.pollTranslationTaskFeed("demo-task", 25, 200);
 
     expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/tasks/demo-task/sessions/coder/translation/start");
     expect(fetchMock.mock.calls[0]?.[1]?.method).toBe("POST");
     expect(fetchMock.mock.calls[1]?.[0]).toBe("/api/translation/sessions/session-1/events?after=18&limit=100");
+    expect(fetchMock.mock.calls[2]?.[0]).toBe("/api/tasks/demo-task/translation/feed?after=25&limit=200");
   });
 
   it("calls translation failure queue APIs with bodyless POST requests", async () => {
@@ -272,7 +347,11 @@ describe("apiClient", () => {
         baseUrl: "https://ilinkai.weixin.qq.com",
         boundUserId: "user",
         loginUserId: "user",
-        tokenConfigured: true
+        tokenConfigured: true,
+        appId: null,
+        appIdConfigured: false,
+        appSecretConfigured: false,
+        homeChatId: null
       },
       pendingConfirmations: {},
       lastPollStatus: { state: "running" },
@@ -302,6 +381,9 @@ describe("apiClient", () => {
 
     await apiClient.startGatewayQrLogin();
     await apiClient.checkGatewayQrLogin();
+    await apiClient.startGatewayLarkRegistration();
+    await apiClient.checkGatewayLarkRegistration();
+    await apiClient.bindGatewayLarkApp({ appId: "cli_test", appSecret: "secret_test", larkDomain: "lark" });
     await apiClient.resetGatewayBinding();
 
     expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/gateway/qr/start");
@@ -310,9 +392,22 @@ describe("apiClient", () => {
     expect(fetchMock.mock.calls[1]?.[0]).toBe("/api/gateway/qr/check");
     expect(fetchMock.mock.calls[1]?.[1]?.method).toBe("POST");
     expect(fetchMock.mock.calls[1]?.[1]?.body).toBe(JSON.stringify({}));
-    expect(fetchMock.mock.calls[2]?.[0]).toBe("/api/gateway/binding/reset");
+    expect(fetchMock.mock.calls[2]?.[0]).toBe("/api/gateway/lark-registration/start");
     expect(fetchMock.mock.calls[2]?.[1]?.method).toBe("POST");
     expect(fetchMock.mock.calls[2]?.[1]?.body).toBeUndefined();
+    expect(fetchMock.mock.calls[3]?.[0]).toBe("/api/gateway/lark-registration/check");
+    expect(fetchMock.mock.calls[3]?.[1]?.method).toBe("POST");
+    expect(fetchMock.mock.calls[3]?.[1]?.body).toBeUndefined();
+    expect(fetchMock.mock.calls[4]?.[0]).toBe("/api/gateway/lark-registration/bind");
+    expect(fetchMock.mock.calls[4]?.[1]?.method).toBe("POST");
+    expect(JSON.parse(String(fetchMock.mock.calls[4]?.[1]?.body))).toEqual({
+      appId: "cli_test",
+      appSecret: "secret_test",
+      larkDomain: "lark"
+    });
+    expect(fetchMock.mock.calls[5]?.[0]).toBe("/api/gateway/binding/reset");
+    expect(fetchMock.mock.calls[5]?.[1]?.method).toBe("POST");
+    expect(fetchMock.mock.calls[5]?.[1]?.body).toBeUndefined();
   });
 });
 

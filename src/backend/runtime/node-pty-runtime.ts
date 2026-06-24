@@ -15,6 +15,7 @@ interface RuntimeEntry {
   process: pty.IPty;
   listeners: Set<TerminalEventListener>;
   logWriter: TerminalLogWriter;
+  replayBuffer: string;
   disposed: boolean;
 }
 
@@ -84,6 +85,7 @@ export function createNodePtyTerminalRuntime(deps: NodePtyRuntimeDeps): Terminal
       process: child,
       listeners: new Set(),
       logWriter,
+      replayBuffer: "",
       disposed: false
     };
     entries.set(session.id, entry);
@@ -93,6 +95,7 @@ export function createNodePtyTerminalRuntime(deps: NodePtyRuntimeDeps): Terminal
         return;
       }
       entry.session.lastOutputAt = now();
+      entry.replayBuffer = appendTerminalReplay(entry.replayBuffer, data);
       entry.logWriter.append(data);
       emit(entry, {
         sessionId: session.id,
@@ -183,7 +186,17 @@ export function createNodePtyTerminalRuntime(deps: NodePtyRuntimeDeps): Terminal
       const entry = getEntry(entries, sessionId);
       entry.listeners.add(listener);
 
-      if (options.replay !== false && entry.input.logPath) {
+      if (options.replay !== false && entry.replayBuffer) {
+        listener({
+          id: `evt_${Date.now()}_${Math.random().toString(16).slice(2)}`,
+          sessionId,
+          taskSlug: entry.session.taskSlug,
+          role: entry.session.role,
+          type: "output",
+          timestamp: now(),
+          data: entry.replayBuffer
+        });
+      } else if (options.replay !== false && entry.input.logPath) {
         void readTerminalReplayText(deps.fs, entry.input.logPath)
           .then((data) => {
             if (!data || !entry.listeners.has(listener)) {
@@ -294,6 +307,17 @@ export function tailTerminalReplay(
 
   const firstLineBreak = tail.indexOf("\n");
   return firstLineBreak >= 0 ? tail.slice(firstLineBreak + 1) : tail;
+}
+
+export function appendTerminalReplay(
+  current: string,
+  data: string,
+  limitBytes = TERMINAL_REPLAY_TAIL_LIMIT_BYTES
+): string {
+  if (!data) {
+    return current;
+  }
+  return tailTerminalReplay(`${current}${data}`, limitBytes);
 }
 
 export function buildPtyEnvironment(

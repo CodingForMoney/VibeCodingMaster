@@ -6,7 +6,7 @@ import type { RoleSessionRecord } from "../../../src/shared/types/session.js";
 import type { TaskRecord } from "../../../src/shared/types/task.js";
 
 describe("task routes", () => {
-  it("stops running role sessions before closing a task", async () => {
+  it("stops task role sessions and moves project tool sessions before closing a task", async () => {
     const app = Fastify({ logger: false });
     const calls: string[] = [];
     const task = createTask({
@@ -66,11 +66,31 @@ describe("task routes", () => {
         async stopRoleSession(_repoRoot: string, _taskSlug: string, role: RoleName) {
           calls.push(`stop:${role}`);
           return createSession(role, "exited");
+        },
+        async moveProjectTranslatorSessionToSafeCwd() {
+          calls.push("move-safe:translator");
+          return createSession("translator", "running");
+        },
+        async moveProjectHarnessEngineerSessionToSafeCwd() {
+          calls.push("move-safe:harness-engineer");
+          return createSession("harness-engineer", "running");
         }
       },
       statusService: {
         async getTaskStatus() {
           return {};
+        }
+      } as never,
+      messageService: {
+        async listMessages() {
+          return [];
+        },
+        async getOrchestrationState() {
+          return {
+            taskSlug: "demo-task",
+            mode: "auto",
+            updatedAt: "2026-05-31T00:00:00.000Z"
+          };
         }
       } as never,
       translationService: {
@@ -79,6 +99,9 @@ describe("task routes", () => {
         }
       },
       roundService: {
+        async getSessionRoundState() {
+          throw new Error("not used");
+        },
         stopTask(taskSlug: string) {
           calls.push(`round:${taskSlug}`);
         }
@@ -96,6 +119,8 @@ describe("task routes", () => {
       "list-sessions",
       "stop:architect",
       "stop:reviewer",
+      "move-safe:translator",
+      "move-safe:harness-engineer",
       "translation:/repo/.claude/worktrees/demo-task:demo-task:true",
       "round:demo-task",
       "cleanup"
@@ -135,6 +160,12 @@ describe("task routes", () => {
         },
         async stopRoleSession() {
           throw new Error("not used");
+        },
+        async moveProjectTranslatorSessionToSafeCwd() {
+          throw new Error("not used");
+        },
+        async moveProjectHarnessEngineerSessionToSafeCwd() {
+          throw new Error("not used");
         }
       },
       statusService: {
@@ -144,12 +175,27 @@ describe("task routes", () => {
           });
         }
       } as never,
+      messageService: {
+        async listMessages() {
+          return [];
+        },
+        async getOrchestrationState() {
+          return {
+            taskSlug: "demo-task",
+            mode: "auto",
+            updatedAt: "2026-05-31T00:00:00.000Z"
+          };
+        }
+      } as never,
       translationService: {
         async stopTask() {
           throw new Error("not used");
         }
       },
       roundService: {
+        async getSessionRoundState() {
+          throw new Error("not used");
+        },
         stopTask() {}
       }
     });
@@ -164,6 +210,125 @@ describe("task routes", () => {
     expect(payload.task.taskSlug).toBe("demo-task");
     expect(payload.sessions).toEqual([]);
     expect(payload.warnings[0]).toContain("open-files limit");
+    await app.close();
+  });
+
+  it("returns aggregated task workspace state", async () => {
+    const app = Fastify({ logger: false });
+    const task = createTask();
+
+    registerTaskRoutes(app, {
+      projectService: {
+        async getCurrentProject() {
+          return {
+            repoRoot: "/repo"
+          };
+        },
+        async loadConfig() {
+          return {
+            stateRoot: ".ai/vcm"
+          };
+        }
+      } as never,
+      taskService: {
+        async listTasks() {
+          return [];
+        },
+        async createTask() {
+          return task;
+        },
+        async loadTask() {
+          return task;
+        },
+        async cleanupTask() {
+          throw new Error("not used");
+        }
+      } as never,
+      sessionService: {
+        async listRoleSessions() {
+          return [];
+        },
+        async stopRoleSession() {
+          throw new Error("not used");
+        },
+        async moveProjectTranslatorSessionToSafeCwd() {
+          throw new Error("not used");
+        },
+        async moveProjectHarnessEngineerSessionToSafeCwd() {
+          throw new Error("not used");
+        }
+      },
+      statusService: {
+        async getTaskStatus() {
+          return {
+            task,
+            sessions: [createSession("architect", "running")],
+            artifacts: { checks: [], paths: {} },
+            warnings: []
+          };
+        }
+      } as never,
+      messageService: {
+        async listMessages() {
+          return [{
+            id: "msg-1",
+            taskSlug: "demo-task",
+            fromRole: "project-manager",
+            toRole: "architect",
+            type: "task",
+            body: "hello",
+            artifactRefs: [],
+            createdAt: "2026-05-31T00:00:00.000Z"
+          }];
+        },
+        async getOrchestrationState() {
+          return {
+            taskSlug: "demo-task",
+            mode: "auto",
+            updatedAt: "2026-05-31T00:00:00.000Z"
+          };
+        }
+      } as never,
+      translationService: {
+        async stopTask() {
+          throw new Error("not used");
+        }
+      },
+      roundService: {
+        async getSessionRoundState() {
+          return {
+            taskSlug: "demo-task",
+            status: "running",
+            turnCount: 1,
+            completedTurnCount: 0,
+            totalRoundCount: 1,
+            totalTurnCount: 1,
+            totalCompletedTurnCount: 0,
+            totalCcActiveMs: 1000,
+            currentRoundCcActiveMs: 1000,
+            roles: ["architect"],
+            updatedAt: "2026-05-31T00:00:00.000Z"
+          };
+        },
+        stopTask() {}
+      } as never
+    });
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/tasks/demo-task/workspace-state"
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      taskStatus: {
+        task: { taskSlug: "demo-task" },
+        sessions: [{ role: "architect", status: "running" }]
+      },
+      messages: [{ id: "msg-1" }],
+      orchestration: { mode: "auto" },
+      roundState: { status: "running" }
+    });
     await app.close();
   });
 });

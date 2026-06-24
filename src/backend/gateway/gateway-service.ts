@@ -1,12 +1,15 @@
 import { readFile } from "node:fs/promises";
-import { CORE_VCM_ROLE_DEFINITIONS, CORE_VCM_ROLE_NAMES, GATE_REVIEWER_ROLE_DEFINITION } from "../../shared/constants.js";
+import { CORE_VCM_ROLE_DEFINITIONS, GATE_REVIEWER_ROLE_DEFINITION, VCM_ROLE_NAMES } from "../../shared/constants.js";
 import type {
   GatewayDiagnostics
 } from "../../shared/types/diagnostics.js";
 import type {
+  BindGatewayLarkAppRequest,
   CheckGatewayQrLoginRequest,
   CheckGatewayQrLoginResult,
+  CheckGatewayLarkRegistrationResult,
   GatewayStatus,
+  StartGatewayLarkRegistrationResult,
   StartGatewayQrLoginResult,
   UpdateGatewaySettingsRequest
 } from "../../shared/types/gateway.js";
@@ -28,18 +31,23 @@ import {
   parseAssistantContent,
   resolveExistingClaudeTranscriptPath
 } from "../services/claude-transcript-service.js";
+import type {
+  GatewayChannelAccount,
+  GatewayChannelAdapter,
+  GatewayChannelRegistry,
+  GatewayInboundMessage
+} from "./gateway-channel.js";
 import { parseGatewayCommand, type GatewayCommand } from "./gateway-command-parser.js";
 import type { GatewayAuditLog } from "./gateway-audit-log.js";
-import type {
-  WeixinIlinkAccount,
-  WeixinIlinkChannel,
-  WeixinIlinkUpdate
-} from "./channels/weixin-ilink-channel.js";
 import type {
   GatewayLatestPmReply,
   GatewaySettingsFile,
   GatewaySettingsService
 } from "./gateway-settings-service.js";
+import {
+  createLarkRegistrationClient,
+  type LarkRegistrationClient
+} from "./channels/lark-registration.js";
 
 export interface GatewayService {
   start(): Promise<void>;
@@ -49,6 +57,9 @@ export interface GatewayService {
   resetBinding(): Promise<GatewayStatus>;
   startQrLogin(): Promise<StartGatewayQrLoginResult>;
   checkQrLogin(input?: CheckGatewayQrLoginRequest): Promise<CheckGatewayQrLoginResult>;
+  startLarkRegistration(): Promise<StartGatewayLarkRegistrationResult>;
+  checkLarkRegistration(): Promise<CheckGatewayLarkRegistrationResult>;
+  bindLarkApp(input: BindGatewayLarkAppRequest): Promise<CheckGatewayLarkRegistrationResult>;
   handlePmStop(input: GatewayPmStopInput): Promise<void>;
   getDiagnostics(): GatewayDiagnostics;
 }
@@ -63,22 +74,33 @@ export interface GatewayServiceDeps {
   fs: FileSystemAdapter;
   settings: GatewaySettingsService;
   audit: GatewayAuditLog;
-  channel: WeixinIlinkChannel;
+  channels: GatewayChannelRegistry;
   projectService: ProjectService;
   taskService: TaskService;
-  sessionService: Pick<SessionService, "getRoleSession" | "listRoleSessions" | "resumeRoleSession" | "startRoleSession" | "stopRoleSession">;
+  sessionService: Pick<SessionService, "getRoleSession" | "listRoleSessions" | "resumeRoleSession" | "startRoleSession" | "stopRoleSession" | "moveProjectTranslatorSessionToSafeCwd" | "moveProjectHarnessEngineerSessionToSafeCwd">;
   messageService: Pick<MessageService, "updateOrchestrationState">;
   translationService: Pick<TranslationService, "translateUserInput" | "translateGatewayOutput" | "stopTask">;
   roundService: Pick<RoundService, "stopTask">;
   runtime: Pick<TerminalRuntime, "write">;
   appSettings: Pick<AppSettingsService, "getPreferences" | "updatePreferences" | "getGateReviewSettings">;
+  larkRegistration?: LarkRegistrationClient;
   now?: () => string;
 }
 
 interface QrLoginState {
+  channel: GatewaySettingsFile["channel"];
   qrcode: string;
   qrcodeUrl: string;
   baseUrl: string;
+  expiresAt: string;
+}
+
+interface LarkRegistrationState {
+  domain: "lark" | "feishu";
+  deviceCode: string;
+  qrUrl: string;
+  userCode: string | null;
+  intervalSeconds: number;
   expiresAt: string;
 }
 
@@ -86,6 +108,7 @@ interface TranscriptTextEvent {
   id: string;
   timestamp: string;
   text: string;
+  stopReason?: string;
 }
 
 interface LatestPmReplyCandidate {
@@ -111,13 +134,13 @@ interface GatewayOutputRenderResult {
   translationError?: string;
 }
 
-const DEFAULT_BASE_URL = "https://ilinkai.weixin.qq.com";
 const QR_LOGIN_TTL_MS = 8 * 60 * 1000;
 const CLOSE_CONFIRM_TTL_MS = 10 * 60 * 1000;
 const POLL_ERROR_BACKOFF_MS = 2_000;
 const POLL_LONG_BACKOFF_MS = 30_000;
 const MAX_FAILURES_BEFORE_LONG_BACKOFF = 3;
 const DEFAULT_POLL_TIMEOUT_MS = 35_000;
+const LARK_REGISTRATION_CONFIRM_TIMEOUT_MS = 15_000;
 const MAX_LATEST_PM_REPLY_CHARS = 8_000;
 const GATEWAY_TRANSLATION_FAILURE_TEXT = "PM 回复已收到，但翻译失败。\n发送 /retry 重新翻译。";
 const COMMANDS_ALLOWED_WHEN_DISABLED = new Set<GatewayCommand["kind"]>([
@@ -130,10 +153,12 @@ const COMMANDS_ALLOWED_WHEN_DISABLED = new Set<GatewayCommand["kind"]>([
 
 export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
   const now = deps.now ?? (() => new Date().toISOString());
+  const larkRegistration = deps.larkRegistration ?? createLarkRegistrationClient();
   let pollAbort: AbortController | null = null;
   let pollLoopPromise: Promise<void> | null = null;
   let pollStartingPromise: Promise<void> | null = null;
   let qrLogin: QrLoginState | null = null;
+  let larkRegistrationState: LarkRegistrationState | null = null;
   let lastFailedTranslation: LastFailedGatewayTranslation | null = null;
 
   function isRunning(): boolean {
@@ -151,7 +176,7 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
 
     pollStartingPromise = (async () => {
       const settings = await deps.settings.loadSettings();
-      if (!settings.binding.token || isRunning()) {
+      if (!toAccount(settings) || isRunning()) {
         return;
       }
       const controller = new AbortController();
@@ -185,14 +210,26 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
     }
   }
 
-  function toAccount(settings: GatewaySettingsFile): WeixinIlinkAccount | undefined {
-    if (!settings.binding.token) {
+  function resolveChannel(settings: GatewaySettingsFile): GatewayChannelAdapter {
+    return deps.channels.get(settings.channel);
+  }
+
+  function toAccount(settings: GatewaySettingsFile): GatewayChannelAccount | undefined {
+    const channel = resolveChannel(settings);
+    if (settings.channel === "weixin-ilink" && !settings.binding.token) {
+      return undefined;
+    }
+    if (settings.channel === "lark" && (!settings.binding.appId || !settings.binding.appSecret)) {
       return undefined;
     }
     return {
       accountId: settings.binding.accountId,
-      baseUrl: settings.binding.baseUrl || DEFAULT_BASE_URL,
-      token: settings.binding.token
+      baseUrl: settings.binding.baseUrl || channel.defaultBaseUrl,
+      token: settings.binding.token,
+      appId: settings.binding.appId,
+      appSecret: settings.binding.appSecret,
+      larkDomain: settings.binding.larkDomain,
+      homeChatId: settings.binding.homeChatId
     };
   }
 
@@ -208,9 +245,10 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
         await savePollStatus("idle");
         return;
       }
+      const channel = resolveChannel(settings);
 
       try {
-        const result = await deps.channel.getUpdates({
+        const result = await channel.getUpdates({
           account,
           cursor: settings.binding.getUpdatesBuf,
           timeoutMs,
@@ -244,7 +282,7 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
         }
         consecutiveFailures += 1;
         const message = errorMessage(error);
-        const expired = message.toLowerCase().includes("expired");
+        const expired = channel.isSessionExpiredError?.(error) ?? message.toLowerCase().includes("expired");
         const settingsAfterError = await deps.settings.loadSettings();
         await deps.settings.saveSettings({
           ...settingsAfterError,
@@ -292,7 +330,7 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
     });
   }
 
-  async function handleInbound(update: WeixinIlinkUpdate): Promise<void> {
+  async function handleInbound(update: GatewayInboundMessage): Promise<void> {
     let settings = await deps.settings.loadSettings();
     if (settings.dedupe.recentInboundMessageIds.includes(update.messageId)) {
       await deps.audit.record({
@@ -305,26 +343,12 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
       return;
     }
 
-    settings = await deps.settings.saveSettings({
-      ...settings,
-      binding: {
-        ...settings.binding,
-        boundUserId: settings.binding.boundUserId ?? update.fromUserId,
-        contextTokens: update.contextToken
-          ? {
-              ...settings.binding.contextTokens,
-              [update.fromUserId]: update.contextToken
-            }
-          : settings.binding.contextTokens
-      },
-      dedupe: {
-        recentInboundMessageIds: [...settings.dedupe.recentInboundMessageIds, update.messageId].slice(-1000)
-      },
-      updatedAt: now()
+    settings = await saveInboundMetadata(settings, update, {
+      bind: settings.channel === "lark" ? "always" : "if-missing"
     });
 
-    if (settings.binding.boundUserId !== update.fromUserId) {
-      await reply(settings, update.fromUserId, "This VCM gateway is already bound to another Weixin DM.");
+    if (settings.channel !== "lark" && settings.binding.boundUserId !== update.fromUserId) {
+      await reply(settings, update.fromUserId, "This VCM gateway is already bound to another user.");
       await recordMessageStatus("inbound", "ignored", update.text, "unbound user");
       return;
     }
@@ -356,6 +380,44 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
         error: message
       });
     }
+  }
+
+  async function saveInboundMetadata(
+    settings: GatewaySettingsFile,
+    update: GatewayInboundMessage,
+    options: { bind?: "always" | "if-missing" | "never" } = {}
+  ): Promise<GatewaySettingsFile> {
+    const bindMode = options.bind ?? "never";
+    return deps.settings.saveSettings({
+      ...settings,
+      binding: {
+        ...settings.binding,
+        boundUserId: bindMode === "always"
+          ? update.fromUserId
+          : bindMode === "if-missing"
+            ? settings.binding.boundUserId ?? update.fromUserId
+            : settings.binding.boundUserId,
+        loginUserId: bindMode === "always"
+          ? update.fromUserId
+          : settings.binding.loginUserId,
+        contextTokens: update.contextToken
+          ? {
+              ...settings.binding.contextTokens,
+              [update.fromUserId]: update.contextToken
+            }
+          : settings.binding.contextTokens,
+        chatIds: update.chatId
+          ? {
+              ...settings.binding.chatIds,
+              [update.fromUserId]: update.chatId
+            }
+          : settings.binding.chatIds
+      },
+      dedupe: {
+        recentInboundMessageIds: [...settings.dedupe.recentInboundMessageIds, update.messageId].slice(-1000)
+      },
+      updatedAt: now()
+    });
   }
 
   async function executeCommand(command: GatewayCommand, settings: GatewaySettingsFile): Promise<string> {
@@ -560,9 +622,6 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
         };
         const existing = await deps.sessionService.getRoleSession(project.repoRoot, task.taskSlug, definition.name);
         if (existing?.status === "running") {
-          if (definition.name === "gate-reviewer") {
-            await deps.sessionService.resumeRoleSession(project.repoRoot, task.taskSlug, definition.name, sessionInput);
-          }
           startedRoles.push(definition.name);
           continue;
         }
@@ -664,6 +723,7 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
 
     const task = await deps.taskService.loadTask(project.repoRoot, taskSlug);
     await stopRunningRoleSessions(project.repoRoot, taskSlug);
+    await moveProjectToolSessionsToSafeCwd(project.repoRoot);
     await deps.translationService.stopTask(getTaskRuntimeRepoRoot(task), taskSlug, { clearCache: true });
     deps.roundService.stopTask(taskSlug);
     const result = await deps.taskService.cleanupTask(project.repoRoot, taskSlug, {
@@ -694,9 +754,27 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
   async function stopRunningRoleSessions(repoRoot: string, taskSlug: string): Promise<void> {
     const sessions = await deps.sessionService.listRoleSessions(repoRoot, taskSlug);
     for (const session of sessions) {
-      if (session.status === "running" && CORE_VCM_ROLE_NAMES.some((role) => role === session.role)) {
+      if (session.status === "running" && VCM_ROLE_NAMES.some((role) => role === session.role)) {
         await deps.sessionService.stopRoleSession(repoRoot, taskSlug, session.role);
       }
+    }
+  }
+
+  async function moveProjectToolSessionsToSafeCwd(repoRoot: string): Promise<void> {
+    await Promise.all([
+      ignoreMissingSession(deps.sessionService.moveProjectTranslatorSessionToSafeCwd(repoRoot)),
+      ignoreMissingSession(deps.sessionService.moveProjectHarnessEngineerSessionToSafeCwd(repoRoot))
+    ]);
+  }
+
+  async function ignoreMissingSession(operation: Promise<unknown>): Promise<void> {
+    try {
+      await operation;
+    } catch (error) {
+      if (error instanceof VcmError && error.code === "SESSION_MISSING") {
+        return;
+      }
+      throw error;
     }
   }
 
@@ -705,17 +783,34 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
     return `Gateway translation ${settings.translationEnabled ? "on" : "off"}.`;
   }
 
+  async function enableGatewayTranslationRuntime(): Promise<void> {
+    const preferences = await deps.appSettings.getPreferences();
+    if (preferences.translationEnabled && preferences.translationAutoSendEnabled) {
+      return;
+    }
+    await deps.appSettings.updatePreferences({
+      translationEnabled: true,
+      translationAutoSendEnabled: true
+    });
+  }
+
   async function startGateway(): Promise<string> {
     const settings = await deps.settings.loadSettings();
-    if (!settings.binding.token) {
-      return "Gateway is not bound. Start QR login from desktop VCM first.";
+    if (!toAccount(settings)) {
+      return settings.channel === "lark"
+        ? "Gateway is not configured. Complete Lark QR Setup in desktop VCM first."
+        : "Gateway is not bound. Start QR login from desktop VCM first.";
     }
     if (settings.enabled) {
+      await enableGatewayTranslationRuntime();
       return "Gateway is already on.";
     }
-    const enabled = await syncDesktopContext(await deps.settings.updateSettings({ enabled: true }));
+    await enableGatewayTranslationRuntime();
+    const enabled = await syncDesktopContext(await deps.settings.updateSettings({
+      enabled: true,
+      translationEnabled: true
+    }));
     await ensurePolling();
-    await deps.appSettings.updatePreferences({ flowPauseAlerts: false });
     const lines = [
       "Gateway started.",
       "Full mobile commands and PM messages are now enabled.",
@@ -768,7 +863,7 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
         })).englishPreview
       : text;
 
-    await submitTerminalInput(deps.runtime, session.id, `[VCM Gateway]\n${englishText}`);
+    await submitTerminalInput(deps.runtime, session.id, englishText);
     return "Sent to PM.";
   }
 
@@ -778,9 +873,11 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
       return;
     }
     const contextToken = settings.binding.contextTokens[userId];
-    await deps.channel.sendText({
+    const chatId = settings.binding.chatIds[userId] ?? settings.binding.homeChatId ?? undefined;
+    await resolveChannel(settings).sendText({
       account,
       toUserId: userId,
+      chatId,
       contextToken,
       text
     });
@@ -812,9 +909,12 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
   async function statusText(settings: GatewaySettingsFile): Promise<string> {
     const synced = await syncDesktopContext(settings);
     const project = await deps.projectService.getCurrentProject();
+    const bindingLine = synced.channel === "lark"
+      ? `Active Lark chat: ${synced.binding.boundUserId ? "yes" : "none"}`
+      : `Binding: ${synced.binding.boundUserId ? "bound" : "not bound"}`;
     return [
       `Gateway: ${synced.enabled ? "on" : "off"}${isRunning() ? " / polling" : ""}`,
-      `Binding: ${synced.binding.boundUserId ? "bound" : "not bound"}`,
+      bindingLine,
       `Translation: ${synced.translationEnabled ? "on" : "off"}`,
       `Project: ${project?.repoRoot ?? synced.currentProjectId ?? "none"}`,
       `Task: ${synced.currentTaskSlug ?? "none"}`,
@@ -831,15 +931,30 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
     },
     async getStatus() {
       const settings = await syncDesktopContext(await deps.settings.loadSettings());
+      if (settings.enabled) {
+        await enableGatewayTranslationRuntime();
+      }
       await ensurePolling();
       return deps.settings.expose(settings, isRunning());
     },
     async updateSettings(input) {
-      let settings = await deps.settings.updateSettings(input);
+      const gatewayStartInput = input.enabled === true
+        ? { ...input, translationEnabled: true }
+        : input;
+      const updateInput = gatewayStartInput.channel && gatewayStartInput.baseUrl === undefined
+        ? {
+            ...gatewayStartInput,
+            baseUrl: deps.channels.get(gatewayStartInput.channel).defaultBaseUrl
+          }
+        : gatewayStartInput;
+      if (input.enabled === true) {
+        await enableGatewayTranslationRuntime();
+      }
+      let settings = await deps.settings.updateSettings(updateInput);
       if (settings.enabled) {
         settings = await syncDesktopContext(settings);
       }
-      if (settings.binding.token) {
+      if (toAccount(settings)) {
         await ensurePolling();
       } else {
         await stopPolling();
@@ -849,18 +964,29 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
     async resetBinding() {
       await stopPolling();
       lastFailedTranslation = null;
+      qrLogin = null;
+      larkRegistrationState = null;
       const settings = await deps.settings.resetBinding();
       return deps.settings.expose(settings, isRunning());
     },
     async startQrLogin() {
       const settings = await deps.settings.loadSettings();
-      const login = await deps.channel.startQrLogin({
+      const channel = resolveChannel(settings);
+      if (!channel.startQrLogin) {
+        throw new VcmError({
+          code: "GATEWAY_QR_UNSUPPORTED",
+          message: `${channel.label} Gateway does not support QR login.`,
+          statusCode: 409
+        });
+      }
+      const login = await channel.startQrLogin({
         localTokenList: settings.binding.token ? [settings.binding.token] : []
       });
       qrLogin = {
+        channel: settings.channel,
         qrcode: login.qrcode,
         qrcodeUrl: login.qrcodeUrl,
-        baseUrl: settings.binding.baseUrl || DEFAULT_BASE_URL,
+        baseUrl: settings.binding.baseUrl || channel.defaultBaseUrl,
         expiresAt: new Date(Date.now() + QR_LOGIN_TTL_MS).toISOString()
       };
       return {
@@ -877,7 +1003,15 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
           message: "QR login expired. Start a new QR login."
         };
       }
-      const result = await deps.channel.checkQrLogin({
+      const channel = deps.channels.get(qrLogin.channel);
+      if (!channel.checkQrLogin) {
+        throw new VcmError({
+          code: "GATEWAY_QR_UNSUPPORTED",
+          message: `${channel.label} Gateway does not support QR login.`,
+          statusCode: 409
+        });
+      }
+      const result = await channel.checkQrLogin({
         baseUrl: qrLogin.baseUrl,
         qrcode: qrLogin.qrcode,
         verifyCode: input.verifyCode
@@ -885,21 +1019,22 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
       if (result.status === "scaned_but_redirect" && result.redirectHost) {
         qrLogin = {
           ...qrLogin,
-          baseUrl: normalizeBaseUrl(result.redirectHost)
+          baseUrl: normalizeBaseUrl(result.redirectHost, channel.defaultBaseUrl)
         };
       }
       if (result.status === "confirmed" || result.status === "binded_redirect") {
         const settings = await deps.settings.loadSettings();
         const token = result.token ?? settings.binding.token;
+        const boundUserId = result.boundUserId ?? result.loginUserId;
         if (token) {
           await deps.settings.saveSettings({
             ...settings,
             binding: {
               ...settings.binding,
               accountId: result.accountId ?? settings.binding.accountId,
-              baseUrl: normalizeBaseUrl(result.baseUrl ?? settings.binding.baseUrl),
+              baseUrl: normalizeBaseUrl(result.baseUrl ?? settings.binding.baseUrl, channel.defaultBaseUrl),
               loginUserId: result.loginUserId ?? settings.binding.loginUserId,
-              boundUserId: result.loginUserId ?? settings.binding.boundUserId,
+              boundUserId: boundUserId ?? settings.binding.boundUserId,
               token
             },
             updatedAt: now()
@@ -908,12 +1043,173 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
           await ensurePolling();
         }
       }
+      const boundUserId = result.boundUserId ?? result.loginUserId;
       return {
         status: result.status,
         qrcodeUrl: qrLogin?.qrcodeUrl,
         accountId: result.accountId,
-        boundUserId: result.loginUserId,
+        boundUserId,
         loginUserId: result.loginUserId
+      };
+    },
+    async startLarkRegistration() {
+      await stopPolling();
+      const settings = await deps.settings.updateSettings({
+        channel: "lark",
+        baseUrl: deps.channels.get("lark").defaultBaseUrl
+      });
+      const domain = "lark";
+      await larkRegistration.init(domain);
+      const begin = await larkRegistration.begin(domain);
+      larkRegistrationState = {
+        domain: begin.domain,
+        deviceCode: begin.deviceCode,
+        qrUrl: begin.qrUrl,
+        userCode: begin.userCode,
+        intervalSeconds: begin.intervalSeconds,
+        expiresAt: new Date(Date.now() + begin.expiresInSeconds * 1000).toISOString()
+      };
+      return {
+        status: "wait",
+        qrUrl: begin.qrUrl,
+        userCode: begin.userCode,
+        intervalSeconds: begin.intervalSeconds,
+        expiresAt: larkRegistrationState.expiresAt
+      };
+    },
+    async checkLarkRegistration() {
+      if (!larkRegistrationState || Date.parse(larkRegistrationState.expiresAt) < Date.now()) {
+        larkRegistrationState = null;
+        return {
+          status: "expired",
+          message: "Lark QR setup expired. Start a new setup."
+        };
+      }
+      const confirmDeadline = Date.now() + LARK_REGISTRATION_CONFIRM_TIMEOUT_MS;
+      let result = await larkRegistration.poll({
+        domain: larkRegistrationState.domain,
+        deviceCode: larkRegistrationState.deviceCode
+      });
+      while (result.status === "wait" && Date.now() < confirmDeadline) {
+        await sleep(Math.min(larkRegistrationState.intervalSeconds * 1000, 3_000), new AbortController().signal);
+        result = await larkRegistration.poll({
+          domain: larkRegistrationState.domain,
+          deviceCode: larkRegistrationState.deviceCode
+        });
+      }
+      if (result.status !== "confirmed") {
+        if (result.status === "expired" || result.status === "failed") {
+          larkRegistrationState = null;
+        }
+        return {
+          status: result.status,
+          message: result.message ?? (result.status === "wait" ? "Lark has not returned app credentials yet. Confirm again in a moment." : undefined)
+        };
+      }
+      if (!result.appId || !result.appSecret || !result.domain) {
+        larkRegistrationState = null;
+        return {
+          status: "failed",
+          message: "Lark QR setup completed without app credentials."
+        };
+      }
+      const current = await deps.settings.loadSettings();
+      const settings = await deps.settings.saveSettings({
+        ...current,
+        channel: "lark",
+        binding: {
+          ...current.binding,
+          appId: result.appId,
+          appSecret: result.appSecret,
+          larkDomain: result.domain,
+          larkOpenId: result.openId ?? null,
+          larkBotName: result.botName ?? null,
+          larkBotOpenId: result.botOpenId ?? null,
+          getUpdatesBuf: ""
+        },
+        lastPollStatus: {
+          state: "idle",
+          checkedAt: now()
+        },
+        updatedAt: now()
+      });
+      larkRegistrationState = null;
+      await ensurePolling();
+      const status = deps.settings.expose(settings, isRunning());
+      return {
+        status: "confirmed",
+        appIdConfigured: Boolean(result.appId),
+        appSecretConfigured: Boolean(result.appSecret),
+        larkDomain: result.domain,
+        larkOpenId: result.openId ?? null,
+        larkBotName: result.botName ?? null,
+        larkBotOpenId: result.botOpenId ?? null,
+        gatewayStatus: status
+      };
+    },
+    async bindLarkApp(input) {
+      const appId = input.appId.trim();
+      const appSecret = input.appSecret.trim();
+      const domain = input.larkDomain ?? "lark";
+      if (!appId || !appSecret) {
+        return {
+          status: "failed",
+          message: "Lark App ID and App Secret are required."
+        };
+      }
+
+      await stopPolling();
+      const channel = deps.channels.get("lark");
+      try {
+        await channel.getUpdates({
+          account: {
+            accountId: null,
+            baseUrl: channel.defaultBaseUrl,
+            appId,
+            appSecret,
+            larkDomain: domain
+          },
+          timeoutMs: 1
+        });
+      } catch (error) {
+        return {
+          status: "failed",
+          message: `Lark App ID/App Secret validation failed. ${errorMessage(error)}`
+        };
+      }
+
+      const current = await deps.settings.loadSettings();
+      const settings = await deps.settings.saveSettings({
+        ...current,
+        channel: "lark",
+        binding: {
+          ...current.binding,
+          appId,
+          appSecret,
+          larkDomain: domain,
+          larkOpenId: null,
+          larkBotName: null,
+          larkBotOpenId: null,
+          getUpdatesBuf: ""
+        },
+        lastPollStatus: {
+          state: "idle",
+          checkedAt: now()
+        },
+        updatedAt: now()
+      });
+      larkRegistrationState = null;
+      await ensurePolling();
+      const status = deps.settings.expose(settings, isRunning());
+      return {
+        status: "confirmed",
+        appIdConfigured: true,
+        appSecretConfigured: true,
+        larkDomain: domain,
+        larkOpenId: null,
+        larkBotName: null,
+        larkBotOpenId: null,
+        gatewayStatus: status
       };
     },
     async handlePmStop(input) {
@@ -940,7 +1236,8 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
 
       const cursorKey = `${input.taskSlug}:project-manager:${input.session.claudeSessionId}`;
       const cursor = settings.pushCursors[cursorKey];
-      const nextEvents = selectEventsAfterCursor(events, cursor?.lastTranscriptEventId);
+      const nextEvents = selectEventsAfterCursor(events, cursor?.lastTranscriptEventId)
+        .filter(isFinalTurnTextEvent);
       if (nextEvents.length === 0) {
         return;
       }
@@ -956,9 +1253,10 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
         sourceText: text
       });
 
-      await deps.channel.sendText({
+      await resolveChannel(settings).sendText({
         account,
         toUserId: boundUserId,
+        chatId: settings.binding.chatIds[boundUserId] ?? settings.binding.homeChatId ?? undefined,
         contextToken: settings.binding.contextTokens[boundUserId],
         text: output.text
       });
@@ -1134,12 +1432,17 @@ async function readTranscriptTextEvents(transcriptPath: string): Promise<Transcr
         events.push({
           id: event.id,
           timestamp: event.timestamp,
-          text: event.text
+          text: event.text,
+          stopReason: event.stopReason
         });
       }
     }
   }
   return events;
+}
+
+function isFinalTurnTextEvent(event: TranscriptTextEvent): boolean {
+  return event.stopReason === "end_turn";
 }
 
 function selectEventsAfterCursor(events: TranscriptTextEvent[], cursorId: string | null | undefined): TranscriptTextEvent[] {
@@ -1163,9 +1466,10 @@ function selectLatestTurnReply(events: TranscriptTextEvent[], session: RoleSessi
 
   const startMs = timestampMs(session.lastTurnStartedAt);
   const endMs = timestampMs(session.lastTurnEndedAt);
+  const finalEvents = events.filter(isFinalTurnTextEvent);
   const selected = startMs === undefined
-    ? events.slice(-1)
-    : events.filter((event) => {
+    ? finalEvents.slice(-1)
+    : finalEvents.filter((event) => {
         const eventMs = timestampMs(event.timestamp);
         return eventMs !== undefined
           && eventMs >= startMs - 1_000
@@ -1281,12 +1585,15 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
   });
 }
 
-function normalizeBaseUrl(input: string): string {
+function normalizeBaseUrl(input: string, fallback: string): string {
   const trimmed = input.trim();
   if (!trimmed) {
-    return DEFAULT_BASE_URL;
+    return fallback;
   }
-  if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+  if (/^https:\/\/lark:\/\//i.test(trimmed)) {
+    return trimmed.replace(/^https:\/\//i, "").replace(/\/+$/, "");
+  }
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed)) {
     return trimmed.replace(/\/+$/, "");
   }
   return `https://${trimmed.replace(/\/+$/, "")}`;

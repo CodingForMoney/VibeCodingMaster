@@ -1,21 +1,34 @@
-import type { DispatchRoleCommandResult, TaskStatusReport } from "../../shared/types/api.js";
+import type { DispatchRoleCommandResult, ProjectRuntimeState, TaskStatusReport, TaskWorkspaceState } from "../../shared/types/api.js";
 import type { AppPreferences, UpdateAppPreferencesRequest } from "../../shared/types/app-settings.js";
 import type {
+  BindGatewayLarkAppRequest,
   CheckGatewayQrLoginRequest,
   CheckGatewayQrLoginResult,
+  CheckGatewayLarkRegistrationResult,
   GatewayStatus,
+  StartGatewayLarkRegistrationResult,
   StartGatewayQrLoginResult,
   UpdateGatewaySettingsRequest
 } from "../../shared/types/gateway.js";
 import type { RuntimeDiagnostics } from "../../shared/types/diagnostics.js";
 import type {
-  CommitAndRebaseHarnessTaskRequest,
-  CommitAndRebaseHarnessTaskResult,
+  HarnessApplyRequest,
   HarnessApplyResult,
   HarnessBootstrapStatusReport,
+  HarnessFeedbackDecisionRequest,
+  HarnessFeedbackStateReport,
+  HarnessFileContent,
+  MergeRepositoryDiffToCurrentBranchResult,
+  RepositoryDiffReport,
+  RepositoryFileDiffReport,
+  RestartHarnessBootstrapRequest,
+  RunHarnessBootstrapResult,
   HarnessStatusReport,
   StartHarnessBootstrapRequest,
-  StartHarnessBootstrapResult
+  StartHarnessBootstrapResult,
+  StartTaskHarnessRetrospectiveRequest,
+  UpdateHarnessFileContentRequest,
+  UpdateHarnessFileContentResult
 } from "../../shared/types/harness.js";
 import type {
   GateReviewExceptionRequest,
@@ -37,6 +50,7 @@ import type { DispatchableRole, RoleName } from "../../shared/types/role.js";
 import type { VcmSessionRoundState } from "../../shared/types/round.js";
 import type { RoleSessionRecord, StartRoleSessionRequest } from "../../shared/types/session.js";
 import type { CleanupTaskRequest, CleanupTaskResult, CreateTaskRequest, TaskRecord } from "../../shared/types/task.js";
+import { errorReason } from "./error-format.js";
 import type {
   TranslationBootstrapRun,
   FileTranslationJob,
@@ -47,11 +61,13 @@ import type {
   CreateFileTranslationRequest,
   CreateTranslationMemoryUpdateRequest,
   SendTranslatedInputRequest,
+  TranslateManualOutputRequest,
   TranslateUserInputRequest,
   TranslateUserInputResult,
   TranslationEntry,
   TranslationFailuresResult,
   PollTranslationSessionResult,
+  PollTranslationTaskFeedResult,
   StartTranslationSessionResult
 } from "../../shared/types/translation.js";
 
@@ -100,25 +116,47 @@ export const apiClient = {
       body: JSON.stringify(input)
     });
   },
-  getHarnessStatus() {
-    return request<HarnessStatusReport>("/api/projects/harness");
+  getHarnessStatus(taskSlug: string) {
+    const params = new URLSearchParams({ taskSlug });
+    return request<HarnessStatusReport>(`/api/projects/harness?${params.toString()}`);
   },
-  applyHarness() {
+  applyHarness(input: HarnessApplyRequest) {
     return request<HarnessApplyResult>("/api/projects/harness/apply", {
-      method: "POST"
+      method: "POST",
+      body: JSON.stringify(input)
     });
   },
-  commitAndRebaseHarnessTask(taskSlug: string, input: CommitAndRebaseHarnessTaskRequest) {
-    return request<CommitAndRebaseHarnessTaskResult>(
-      `/api/projects/harness/tasks/${encodeURIComponent(taskSlug)}/commit-and-rebase`,
-      {
-        method: "POST",
-        body: JSON.stringify(input)
-      }
-    );
+  getHarnessFileContent(taskSlug: string, filePath: string) {
+    const params = new URLSearchParams({ path: filePath, taskSlug });
+    return request<HarnessFileContent>(`/api/projects/harness/file?${params.toString()}`);
   },
-  getHarnessBootstrapStatus() {
-    return request<HarnessBootstrapStatusReport>("/api/projects/harness/bootstrap");
+  updateHarnessFileContent(taskSlug: string, filePath: string, input: UpdateHarnessFileContentRequest) {
+    const params = new URLSearchParams({ path: filePath, taskSlug });
+    return request<UpdateHarnessFileContentResult>(`/api/projects/harness/file?${params.toString()}`, {
+      method: "PUT",
+      body: JSON.stringify(input)
+    });
+  },
+  getRepositoryDiff(taskSlug: string, commitSha?: string | null) {
+    const params = new URLSearchParams({ taskSlug });
+    if (commitSha) {
+      params.set("commit", commitSha);
+    }
+    return request<RepositoryDiffReport>(`/api/projects/harness/repository-diff?${params.toString()}`);
+  },
+  getRepositoryFileDiff(taskSlug: string, filePath: string) {
+    const params = new URLSearchParams({ taskSlug, path: filePath });
+    return request<RepositoryFileDiffReport>(`/api/projects/harness/repository-diff/file?${params.toString()}`);
+  },
+  mergeRepositoryDiffToCurrentBranch(taskSlug: string) {
+    return request<MergeRepositoryDiffToCurrentBranchResult>("/api/projects/harness/repository-diff/merge-to-current-branch", {
+      method: "POST",
+      body: JSON.stringify({ taskSlug })
+    });
+  },
+  getHarnessBootstrapStatus(taskSlug: string) {
+    const params = new URLSearchParams({ taskSlug });
+    return request<HarnessBootstrapStatusReport>(`/api/projects/harness/bootstrap?${params.toString()}`);
   },
   startHarnessBootstrap(input: StartHarnessBootstrapRequest = {}) {
     return request<StartHarnessBootstrapResult>("/api/projects/harness/bootstrap/start", {
@@ -126,8 +164,93 @@ export const apiClient = {
       body: JSON.stringify(input)
     });
   },
+  restartHarnessBootstrap(input: RestartHarnessBootstrapRequest = {}) {
+    return request<StartHarnessBootstrapResult>("/api/projects/harness/bootstrap/restart", {
+      method: "POST",
+      body: JSON.stringify(input)
+    });
+  },
+  stopHarnessBootstrap() {
+    return request<HarnessBootstrapStatusReport>("/api/projects/harness/bootstrap/stop", {
+      method: "POST"
+    });
+  },
+  runHarnessBootstrap(input: { taskSlug: string }) {
+    return request<RunHarnessBootstrapResult>("/api/projects/harness/bootstrap/run", {
+      method: "POST",
+      body: JSON.stringify(input)
+    });
+  },
+  getHarnessEngineerSession() {
+    return request<RoleSessionRecord | null>("/api/projects/harness/engineer/session");
+  },
+  ensureHarnessEngineerSession(input: StartRoleSessionRequest = {}) {
+    return request<RoleSessionRecord>("/api/projects/harness/engineer/session/ensure", {
+      method: "POST",
+      body: JSON.stringify(input)
+    });
+  },
+  startHarnessEngineerSession(input: StartRoleSessionRequest = {}) {
+    return request<RoleSessionRecord>("/api/projects/harness/engineer/session/start", {
+      method: "POST",
+      body: JSON.stringify(input)
+    });
+  },
+  resumeHarnessEngineerSession(input: StartRoleSessionRequest = {}) {
+    return request<RoleSessionRecord>("/api/projects/harness/engineer/session/resume", {
+      method: "POST",
+      body: JSON.stringify(input)
+    });
+  },
+  restartHarnessEngineerSession(input: StartRoleSessionRequest = {}) {
+    return request<RoleSessionRecord>("/api/projects/harness/engineer/session/restart", {
+      method: "POST",
+      body: JSON.stringify(input)
+    });
+  },
+  stopHarnessEngineerSession() {
+    return request<RoleSessionRecord>("/api/projects/harness/engineer/session/stop", {
+      method: "POST"
+    });
+  },
+  notifyHarnessEngineerHarnessUpdated() {
+    return request<RoleSessionRecord>("/api/projects/harness/engineer/session/notify-harness", {
+      method: "POST"
+    });
+  },
+  getHarnessFeedbackState(taskSlug?: string | null) {
+    const params = new URLSearchParams();
+    if (taskSlug) {
+      params.set("taskSlug", taskSlug);
+    }
+    const query = params.toString();
+    return request<HarnessFeedbackStateReport>(`/api/projects/harness/feedback${query ? `?${query}` : ""}`);
+  },
+  decideHarnessFeedback(input: HarnessFeedbackDecisionRequest) {
+    return request<HarnessFeedbackStateReport>("/api/projects/harness/feedback/decision", {
+      method: "POST",
+      body: JSON.stringify(input)
+    });
+  },
+  startTaskHarnessRetrospective(input: StartTaskHarnessRetrospectiveRequest) {
+    return request<HarnessFeedbackStateReport>("/api/projects/harness/task-retrospective", {
+      method: "POST",
+      body: JSON.stringify(input)
+    });
+  },
   getTaskStatus(taskSlug: string) {
     return request<TaskStatusReport>(`/api/tasks/${encodeURIComponent(taskSlug)}/status`);
+  },
+  getTaskWorkspaceState(taskSlug: string) {
+    return request<TaskWorkspaceState>(`/api/tasks/${encodeURIComponent(taskSlug)}/workspace-state`);
+  },
+  getProjectRuntimeState(taskSlug?: string | null) {
+    const params = new URLSearchParams();
+    if (taskSlug) {
+      params.set("taskSlug", taskSlug);
+    }
+    const query = params.toString();
+    return request<ProjectRuntimeState>(`/api/projects/runtime-state${query ? `?${query}` : ""}`);
   },
   listSessions(taskSlug: string) {
     return request<RoleSessionRecord[]>(`/api/tasks/${encodeURIComponent(taskSlug)}/sessions`);
@@ -153,6 +276,11 @@ export const apiClient = {
     return request<RoleSessionRecord>(`/api/tasks/${encodeURIComponent(taskSlug)}/sessions/${role}/resume`, {
       method: "POST",
       body: JSON.stringify(input)
+    });
+  },
+  notifyRoleHarnessUpdated(taskSlug: string, role: RoleName) {
+    return request<RoleSessionRecord>(`/api/tasks/${encodeURIComponent(taskSlug)}/sessions/${role}/notify-harness`, {
+      method: "POST"
     });
   },
   dispatchRoleCommand(taskSlug: string, role: DispatchableRole) {
@@ -231,8 +359,21 @@ export const apiClient = {
     }
     return request<PollTranslationSessionResult>(`/api/translation/sessions/${encodeURIComponent(sessionId)}/events?${params.toString()}`);
   },
+  pollTranslationTaskFeed(taskSlug: string, after: number, limit?: number) {
+    const params = new URLSearchParams({ after: String(after) });
+    if (limit !== undefined) {
+      params.set("limit", String(limit));
+    }
+    return request<PollTranslationTaskFeedResult>(`/api/tasks/${encodeURIComponent(taskSlug)}/translation/feed?${params.toString()}`);
+  },
   translateUserInput(taskSlug: string, role: RoleName, input: TranslateUserInputRequest) {
     return request<TranslateUserInputResult>(`/api/tasks/${encodeURIComponent(taskSlug)}/sessions/${role}/translation/input`, {
+      method: "POST",
+      body: JSON.stringify(input)
+    });
+  },
+  translateManualOutput(taskSlug: string, role: RoleName, input: TranslateManualOutputRequest) {
+    return request<TranslationEntry>(`/api/tasks/${encodeURIComponent(taskSlug)}/sessions/${role}/translation/manual-output`, {
       method: "POST",
       body: JSON.stringify(input)
     });
@@ -250,6 +391,11 @@ export const apiClient = {
   },
   stopTranslationSession(sessionId: string) {
     return request<{ ok: true }>(`/api/translation/sessions/${encodeURIComponent(sessionId)}/stop`, {
+      method: "POST"
+    });
+  },
+  notifyTranslatorHarnessUpdated() {
+    return request<RoleSessionRecord>("/api/projects/translation/session/notify-harness", {
       method: "POST"
     });
   },
@@ -364,6 +510,22 @@ export const apiClient = {
       body: JSON.stringify(input)
     });
   },
+  startGatewayLarkRegistration() {
+    return request<StartGatewayLarkRegistrationResult>("/api/gateway/lark-registration/start", {
+      method: "POST"
+    });
+  },
+  checkGatewayLarkRegistration() {
+    return request<CheckGatewayLarkRegistrationResult>("/api/gateway/lark-registration/check", {
+      method: "POST"
+    });
+  },
+  bindGatewayLarkApp(input: BindGatewayLarkAppRequest) {
+    return request<CheckGatewayLarkRegistrationResult>("/api/gateway/lark-registration/bind", {
+      method: "POST",
+      body: JSON.stringify(input)
+    });
+  },
   resetGatewayBinding() {
     return request<GatewayStatus>("/api/gateway/binding/reset", {
       method: "POST"
@@ -377,13 +539,51 @@ async function request<T>(url: string, init: RequestInit = {}): Promise<T> {
     headers.set("content-type", "application/json");
   }
 
-  const response = await fetch(url, {
-    ...init,
-    headers
-  });
+  const method = (init.method ?? "GET").toUpperCase();
+  let response: Response;
+  try {
+    response = await fetch(url, {
+      ...init,
+      headers
+    });
+  } catch (error) {
+    throw new Error(`${method} ${url} could not reach the VCM backend. Reason: ${errorReason(error)}`);
+  }
 
   if (!response.ok) {
-    const payload = await response.json().catch(() => null) as {
+    const rawBody = await response.text().catch(() => "");
+    const payload = parseErrorPayload(rawBody);
+    const statusText = response.statusText ? `${response.status} ${response.statusText}` : String(response.status);
+    const backendReason = payload?.error?.hint
+      ? `${payload.error.message ?? "Backend error."} ${payload.error.hint}`
+      : payload?.error?.message;
+    const bodyReason = backendReason ?? formatNonJsonErrorBody(rawBody);
+    const runtime = payload?.error?.runtime;
+    const runtimeSuffix = runtime
+      ? ` [backend ${runtime.version ?? "unknown"} pid=${runtime.pid ?? "unknown"} cwd=${runtime.cwd ?? "unknown"}]`
+      : "";
+    throw new Error(`${method} ${url} returned HTTP ${statusText}. ${bodyReason}${runtimeSuffix}`);
+  }
+
+  return response.json() as Promise<T>;
+}
+
+function parseErrorPayload(rawBody: string): {
+  error?: {
+    message?: string;
+    hint?: string;
+    runtime?: {
+      version?: string;
+      pid?: number;
+      cwd?: string;
+    };
+  };
+} | null {
+  if (!rawBody.trim()) {
+    return null;
+  }
+  try {
+    return JSON.parse(rawBody) as {
       error?: {
         message?: string;
         hint?: string;
@@ -393,16 +593,16 @@ async function request<T>(url: string, init: RequestInit = {}): Promise<T> {
           cwd?: string;
         };
       };
-    } | null;
-    const message = payload?.error?.hint
-      ? `${payload.error.message} ${payload.error.hint}`
-      : payload?.error?.message ?? `Request failed: ${response.status}`;
-    const runtime = payload?.error?.runtime;
-    const runtimeSuffix = runtime
-      ? ` [backend ${runtime.version ?? "unknown"} pid=${runtime.pid ?? "unknown"} cwd=${runtime.cwd ?? "unknown"}]`
-      : "";
-    throw new Error(`${message}${runtimeSuffix}`);
+    };
+  } catch {
+    return null;
   }
+}
 
-  return response.json() as Promise<T>;
+function formatNonJsonErrorBody(rawBody: string): string {
+  const trimmed = rawBody.trim();
+  if (!trimmed) {
+    return "The response body was empty.";
+  }
+  return `Non-JSON response body: ${trimmed.slice(0, 500)}`;
 }

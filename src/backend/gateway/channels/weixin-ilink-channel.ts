@@ -1,73 +1,20 @@
 import { randomBytes, randomUUID } from "node:crypto";
 import type { GatewayQrLoginStatus } from "../../../shared/types/gateway.js";
+import type {
+  GatewayChannelAccount,
+  GatewayChannelAdapter,
+  GatewayChannelQrLogin,
+  GatewayChannelQrStatus,
+  GatewayGetUpdatesResult,
+  GatewayInboundMessage
+} from "../gateway-channel.js";
 
-export interface WeixinIlinkAccount {
-  accountId: string | null;
-  baseUrl: string;
-  token: string;
-}
-
-export interface WeixinIlinkQrLogin {
-  qrcode: string;
-  qrcodeUrl: string;
-}
-
-export interface WeixinIlinkQrStatus {
-  status: GatewayQrLoginStatus;
-  redirectHost?: string;
-  accountId?: string;
-  token?: string;
-  baseUrl?: string;
-  loginUserId?: string;
-  raw?: unknown;
-}
-
-export interface WeixinIlinkUpdate {
-  messageId: string;
-  fromUserId: string;
-  text: string;
-  contextToken?: string;
-  createdAt?: string;
-  raw?: unknown;
-}
-
-export interface WeixinIlinkGetUpdatesResult {
-  cursor: string;
-  timeoutMs?: number;
-  updates: WeixinIlinkUpdate[];
-}
-
-export interface WeixinIlinkChannel {
-  startQrLogin(input: StartQrLoginInput): Promise<WeixinIlinkQrLogin>;
-  checkQrLogin(input: CheckQrLoginInput): Promise<WeixinIlinkQrStatus>;
-  getUpdates(input: GetUpdatesInput): Promise<WeixinIlinkGetUpdatesResult>;
-  sendText(input: SendTextInput): Promise<string>;
-}
-
-export interface StartQrLoginInput {
-  botType?: string;
-  localTokenList?: string[];
-}
-
-export interface CheckQrLoginInput {
-  baseUrl: string;
-  qrcode: string;
-  verifyCode?: string;
-}
-
-export interface GetUpdatesInput {
-  account: WeixinIlinkAccount;
-  cursor?: string;
-  timeoutMs?: number;
-  signal?: AbortSignal;
-}
-
-export interface SendTextInput {
-  account: WeixinIlinkAccount;
-  toUserId: string;
-  contextToken?: string;
-  text: string;
-}
+export type WeixinIlinkAccount = GatewayChannelAccount;
+export type WeixinIlinkQrLogin = GatewayChannelQrLogin;
+export type WeixinIlinkQrStatus = GatewayChannelQrStatus;
+export type WeixinIlinkUpdate = GatewayInboundMessage;
+export type WeixinIlinkGetUpdatesResult = GatewayGetUpdatesResult;
+export type WeixinIlinkChannel = GatewayChannelAdapter;
 
 export interface WeixinIlinkChannelOptions {
   fetchImpl?: typeof fetch;
@@ -203,10 +150,14 @@ export function createWeixinIlinkChannel(options: WeixinIlinkChannelOptions = {}
   }
 
   return {
+    id: "weixin-ilink",
+    label: "Weixin iLink",
+    defaultBaseUrl: DEFAULT_BASE_URL,
+    supportsQrLogin: true,
     async startQrLogin(input) {
       const payload = await post({
         requestBaseUrl: baseUrl,
-        endpoint: `ilink/bot/get_bot_qrcode?bot_type=${encodeURIComponent(input.botType ?? DEFAULT_BOT_TYPE)}`,
+        endpoint: `ilink/bot/get_bot_qrcode?bot_type=${encodeURIComponent(DEFAULT_BOT_TYPE)}`,
         body: {
           local_token_list: input.localTokenList ?? []
         },
@@ -245,7 +196,7 @@ export function createWeixinIlinkChannel(options: WeixinIlinkChannelOptions = {}
       const payload = await post({
         requestBaseUrl: input.account.baseUrl,
         endpoint: "ilink/bot/getupdates",
-        token: input.account.token,
+        token: input.account.token ?? undefined,
         timeoutMs: input.timeoutMs ?? DEFAULT_LONG_POLL_TIMEOUT_MS,
         label: "getupdates",
         signal: input.signal,
@@ -271,7 +222,7 @@ export function createWeixinIlinkChannel(options: WeixinIlinkChannelOptions = {}
       const payload = await post({
         requestBaseUrl: input.account.baseUrl,
         endpoint: "ilink/bot/sendmessage",
-        token: input.account.token,
+        token: input.account.token ?? undefined,
         label: "sendmessage",
         body: {
           msg: {
@@ -295,6 +246,9 @@ export function createWeixinIlinkChannel(options: WeixinIlinkChannelOptions = {}
       });
       assertIlinkOk(payload, "sendmessage");
       return clientId;
+    },
+    isSessionExpiredError(error) {
+      return error instanceof Error && error.message.toLowerCase().includes("expired");
     }
   };
 }

@@ -81,7 +81,7 @@ describe("createGitAdapter", () => {
     expect(calls[0]?.args.slice(-2)).toEqual(["branch", "--show-current"]);
   });
 
-  it("stages, commits, and rebases with safe.directory", async () => {
+  it("stages and commits with safe.directory", async () => {
     const calls: RunnerCall[] = [];
     const adapter = createGitAdapter({
       async run(command, args = [], options = {}) {
@@ -95,14 +95,106 @@ describe("createGitAdapter", () => {
 
     await adapter.addPaths("/workspace", ["CLAUDE.md", ".claude/settings.json"]);
     await expect(adapter.commit("/workspace", "chore: update VCM harness")).resolves.toBe("abc123456789");
-    await adapter.rebase("/workspace/.claude/worktrees/demo", "abc123456789");
 
     expect(calls[0]).toMatchObject({ command: "git", options: { cwd: "/workspace" } });
     expect(calls[0]?.args.slice(-4)).toEqual(["add", "--", "CLAUDE.md", ".claude/settings.json"]);
     expect(calls[1]?.args.slice(-3)).toEqual(["commit", "-m", "chore: update VCM harness"]);
     expect(calls[2]?.args.slice(-2)).toEqual(["rev-parse", "HEAD"]);
-    expect(calls[3]).toMatchObject({ command: "git", options: { cwd: "/workspace/.claude/worktrees/demo" } });
-    expect(calls[3]?.args.slice(-2)).toEqual(["rebase", "abc123456789"]);
+  });
+
+  it("reads porcelain status with safe.directory", async () => {
+    const calls: RunnerCall[] = [];
+    const adapter = createGitAdapter(createRunner(calls, {
+      stdout: "",
+      stderr: "",
+      exitCode: 0
+    }));
+
+    await adapter.getStatusPorcelainV1("/workspace");
+
+    expect(calls[0]).toMatchObject({ command: "git", options: { cwd: "/workspace" } });
+    expect(calls[0]?.args).toContain("safe.directory=/workspace");
+    expect(calls[0]?.args.slice(-4)).toEqual(["status", "--porcelain=v1", "-z", "--untracked-files=all"]);
+  });
+
+  it("reads commit metadata and commit diffs with safe.directory", async () => {
+    const calls: RunnerCall[] = [];
+    const adapter = createGitAdapter({
+      async run(command, args = [], options = {}) {
+        calls.push({ command, args, options });
+        if (args.includes("merge-base")) {
+          return {
+            stdout: "base1234567890\n",
+            stderr: "",
+            exitCode: 0
+          };
+        }
+        if (args.includes("log")) {
+          return {
+            stdout: "def1234567890\u0000feat: second\u00002026-06-23T01:00:00+00:00\u001eabc1234567890\u0000feat: first\u00002026-06-23T00:00:00+00:00\u001e",
+            stderr: "",
+            exitCode: 0
+          };
+        }
+        if (args.includes("--format=%H%x00%s%x00%cI")) {
+          return {
+            stdout: "abc1234567890\u0000chore(vcm-harness): update\u00002026-06-23T00:00:00+00:00\n",
+            stderr: "",
+            exitCode: 0
+          };
+        }
+        return {
+          stdout: "diff --git a/CLAUDE.md b/CLAUDE.md\n",
+          stderr: "",
+          exitCode: 0
+        };
+      }
+    });
+
+    await expect(adapter.getCommitInfo("/workspace", "HEAD")).resolves.toEqual({
+      sha: "abc1234567890",
+      subject: "chore(vcm-harness): update",
+      committedAt: "2026-06-23T00:00:00+00:00"
+    });
+    await expect(adapter.getCommitDiff("/workspace", "HEAD")).resolves.toContain("diff --git");
+    await expect(adapter.getDiff("/workspace", "base123", null, ["CLAUDE.md"])).resolves.toContain("diff --git");
+    await expect(adapter.getCommitList("/workspace", "base123..HEAD")).resolves.toEqual([
+      {
+        sha: "def1234567890",
+        subject: "feat: second",
+        committedAt: "2026-06-23T01:00:00+00:00"
+      },
+      {
+        sha: "abc1234567890",
+        subject: "feat: first",
+        committedAt: "2026-06-23T00:00:00+00:00"
+      }
+    ]);
+    await expect(adapter.getMergeBase("/workspace", "main", "HEAD")).resolves.toBe("base1234567890");
+
+    expect(calls[0]).toMatchObject({ command: "git", options: { cwd: "/workspace" } });
+    expect(calls[0]?.args).toContain("safe.directory=/workspace");
+    expect(calls[0]?.args.slice(-4)).toEqual(["show", "-s", "--format=%H%x00%s%x00%cI", "HEAD"]);
+    expect(calls[1]?.args).toContain("safe.directory=/workspace");
+    expect(calls[1]?.args.slice(-5)).toEqual([
+      "--no-ext-diff",
+      "--binary",
+      "--src-prefix=a/",
+      "--dst-prefix=b/",
+      "HEAD"
+    ]);
+    expect(calls[2]?.args.slice(-8)).toEqual([
+      "diff",
+      "--no-ext-diff",
+      "--binary",
+      "--src-prefix=a/",
+      "--dst-prefix=b/",
+      "base123",
+      "--",
+      "CLAUDE.md"
+    ]);
+    expect(calls[3]?.args.slice(-3)).toEqual(["log", "--format=%H%x00%s%x00%cI%x1e", "base123..HEAD"]);
+    expect(calls[4]?.args.slice(-3)).toEqual(["merge-base", "main", "HEAD"]);
   });
 });
 

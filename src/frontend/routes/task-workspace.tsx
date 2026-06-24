@@ -1,19 +1,59 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CORE_VCM_ROLE_DEFINITIONS, GATE_REVIEWER_ROLE_DEFINITION, VCM_ROLE_DEFINITIONS } from "../../shared/constants.js";
 import type { TaskStatusReport } from "../../shared/types/api.js";
-import type { VcmOrchestrationMode, VcmOrchestrationState, VcmRoleMessage } from "../../shared/types/message.js";
+import type { VcmOrchestrationState, VcmRoleMessage } from "../../shared/types/message.js";
 import type { CoreVcmRoleName, RoleDefinition, RoleName, VcmRoleName } from "../../shared/types/role.js";
 import type { VcmSessionRoundState } from "../../shared/types/round.js";
 import type { ClaudeModel, ClaudePermissionMode, SessionEffort, SessionModel } from "../../shared/types/session.js";
-import type { TranslationTargetLanguage } from "../../shared/types/app-settings.js";
+import type { LaunchTemplate, TranslationTargetLanguage } from "../../shared/types/app-settings.js";
 import type { TaskRecord } from "../../shared/types/task.js";
 import { RoleSessionTabs } from "../components/role-session-tabs.js";
 import { SessionConsole } from "../components/session-console.js";
+import { clearUiErrorForActions, formatUiError } from "../state/error-format.js";
+import { clearPollError, recordPollError } from "../state/poll-error-gate.js";
+import { useUiErrorState } from "../state/ui-error-state.js";
 import { getSessionForRole } from "../state/session-store.js";
 import { apiClient } from "../state/api-client.js";
 import { selectAutoDispatchRole } from "../state/message-navigation.js";
+import { useScheduledPoll } from "../state/use-scheduled-poll.js";
+import {
+  applyTranslationPanelEntry,
+  applyTranslationTaskFeed,
+  clearTranslationPanelSession,
+  createTranslationPanelFeedStore,
+  selectTranslationPanelSessionState,
+  setTranslationPanelFailures
+} from "../state/translation-feed-store.js";
 
-const TASK_MESSAGE_STATE_POLL_INTERVAL_MS = 2000;
+const DEFAULT_PERMISSION_MODES: Record<RoleName, ClaudePermissionMode> = {
+  "project-manager": "bypassPermissions",
+  architect: "bypassPermissions",
+  coder: "bypassPermissions",
+  reviewer: "bypassPermissions",
+  "gate-reviewer": "bypassPermissions",
+  translator: "bypassPermissions",
+  "harness-engineer": "bypassPermissions"
+};
+
+const DEFAULT_MODELS: Record<RoleName, SessionModel> = {
+  "project-manager": "default",
+  architect: "default",
+  coder: "default",
+  reviewer: "default",
+  "gate-reviewer": "default",
+  translator: "default",
+  "harness-engineer": "default"
+};
+
+const DEFAULT_EFFORTS: Record<RoleName, SessionEffort> = {
+  "project-manager": "default",
+  architect: "default",
+  coder: "default",
+  reviewer: "default",
+  "gate-reviewer": "default",
+  translator: "medium",
+  "harness-engineer": "medium"
+};
 
 export interface TaskWorkspaceProps {
   task: TaskRecord;
@@ -22,6 +62,7 @@ export interface TaskWorkspaceProps {
   translationEnabled: boolean;
   translationAutoSendEnabled: boolean;
   translationTargetLanguage: TranslationTargetLanguage;
+  launchTemplate: LaunchTemplate;
   refreshNonce?: number;
   onTaskChanged(): Promise<void>;
   onActiveRoleChange(role: RoleName): void;
@@ -43,6 +84,7 @@ export interface TaskWorkspaceLaunchState {
   statusLoaded: boolean;
   sessionCount: number;
   hasAnySession: boolean;
+  hasGateReviewerSession: boolean;
   allRolesHaveSession: boolean;
 }
 
@@ -53,6 +95,7 @@ export function TaskWorkspace({
   translationEnabled,
   translationAutoSendEnabled,
   translationTargetLanguage,
+  launchTemplate,
   refreshNonce = 0,
   onTaskChanged,
   onActiveRoleChange,
@@ -63,36 +106,18 @@ export function TaskWorkspace({
   onLaunchStateChanged
 }: TaskWorkspaceProps) {
   const [statusReport, setStatusReport] = useState<TaskStatusReport | null>(null);
-  const [permissionModes, setPermissionModes] = useState<Record<RoleName, ClaudePermissionMode>>({
-    "project-manager": "default",
-    architect: "default",
-    coder: "default",
-    reviewer: "default",
-    "gate-reviewer": "default",
-    translator: "default"
-  });
-  const [models, setModels] = useState<Record<RoleName, SessionModel>>({
-    "project-manager": "default",
-    architect: "default",
-    coder: "default",
-    reviewer: "default",
-    "gate-reviewer": "default",
-    translator: "default"
-  });
-  const [efforts, setEfforts] = useState<Record<RoleName, SessionEffort>>({
-    "project-manager": "default",
-    architect: "default",
-    coder: "default",
-    reviewer: "default",
-    "gate-reviewer": "default",
-    translator: "medium"
-  });
+  const [permissionModes, setPermissionModes] = useState<Record<RoleName, ClaudePermissionMode>>(() => permissionModesFromLaunchTemplate(launchTemplate));
+  const [models, setModels] = useState<Record<RoleName, SessionModel>>(() => modelsFromLaunchTemplate(launchTemplate));
+  const [efforts, setEfforts] = useState<Record<RoleName, SessionEffort>>(() => effortsFromLaunchTemplate(launchTemplate));
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
+  const [, setError] = useUiErrorState("");
   const [events, setEvents] = useState<string[]>([]);
   const [orchestration, setOrchestration] = useState<VcmOrchestrationState | null>(null);
+  const [translationFeedStore, setTranslationFeedStore] = useState(() => createTranslationPanelFeedStore(task.taskSlug));
   const messageSnapshotRef = useRef<{ taskSlug: string; messages: VcmRoleMessage[] } | null>(null);
   const taskStatusSyncKeyRef = useRef("");
+  const translationFeedCursorRef = useRef(1);
+  const launchTemplateKey = useMemo(() => JSON.stringify(launchTemplate), [launchTemplate]);
   const hasGateReviewerSession = Boolean(
     statusReport?.sessions.some((session) => session.role === "gate-reviewer")
   );
@@ -128,23 +153,64 @@ export function TaskWorkspace({
   }, [applyMessageState, onRoundStateChanged]);
 
   const refresh = useCallback(async () => {
-    const [nextStatusReport, nextMessages, nextOrchestration, nextRoundState] = await Promise.all([
-      apiClient.getTaskStatus(task.taskSlug),
-      apiClient.listMessages(task.taskSlug),
-      apiClient.getOrchestrationState(task.taskSlug),
-      apiClient.getSessionRoundState(task.taskSlug)
-    ]);
-    applyFetchedState(nextStatusReport, nextMessages, nextOrchestration, nextRoundState);
+    const nextState = await apiClient.getTaskWorkspaceState(task.taskSlug);
+    applyFetchedState(nextState.taskStatus, nextState.messages, nextState.orchestration, nextState.roundState);
+    clearPollError("Poll task workspace state");
+    setError((current) => clearUiErrorForActions(current, ["Load task workspace state", "Poll task workspace state"]));
   }, [applyFetchedState, task.taskSlug]);
 
-  useEffect(() => {
-    void refresh().catch((caught: Error) => setError(caught.message));
-  }, [refresh, refreshNonce]);
+  const reportPollError = useCallback((action: string, caught: Error) => {
+    const message = recordPollError(action, caught);
+    if (message) {
+      setError(message);
+    }
+  }, []);
+
+  useScheduledPoll(
+    `task-workspace:${task.taskSlug}:${refreshNonce}`,
+    () => refresh().catch((caught: Error) => {
+      reportPollError("Poll task workspace state", caught);
+    }),
+    {
+      intervalMs: 3000,
+      runImmediately: true
+    }
+  );
+
+  useScheduledPoll(
+    translationEnabled ? `task-translation-feed:${task.taskSlug}` : null,
+    async () => {
+      try {
+        const result = await apiClient.pollTranslationTaskFeed(task.taskSlug, translationFeedCursorRef.current);
+        translationFeedCursorRef.current = result.nextCursor;
+        setTranslationFeedStore((current) => applyTranslationTaskFeed(current, result));
+        clearPollError("Poll task translation feed");
+        setError((current) => clearUiErrorForActions(current, ["Poll task translation feed"]));
+      } catch (caught) {
+        reportPollError("Poll task translation feed", caught as Error);
+      }
+    },
+    {
+      intervalMs: 1000,
+      runImmediately: true
+    }
+  );
 
   useEffect(() => {
     setEvents([]);
     onEventsChanged?.([]);
   }, [onEventsChanged, task.taskSlug]);
+
+  useEffect(() => {
+    translationFeedCursorRef.current = 1;
+    setTranslationFeedStore(createTranslationPanelFeedStore(task.taskSlug));
+  }, [task.taskSlug]);
+
+  useEffect(() => {
+    setPermissionModes(permissionModesFromLaunchTemplate(launchTemplate));
+    setModels(modelsFromLaunchTemplate(launchTemplate));
+    setEfforts(effortsFromLaunchTemplate(launchTemplate));
+  }, [launchTemplateKey, task.taskSlug]);
 
   useEffect(() => {
     if (statusReport && !gateReviewerVisible && activeRole === "gate-reviewer") {
@@ -173,58 +239,15 @@ export function TaskWorkspace({
     taskStatusSyncKeyRef.current = fetchedKey;
     void onTaskChanged().catch((caught: Error) => {
       taskStatusSyncKeyRef.current = "";
-      setError(caught.message);
+      setError(formatUiError("Refresh task list after task status changed", caught));
     });
   }, [onTaskChanged, statusReport?.task, task]);
-
-  useEffect(() => {
-    setPermissionModes((current) => {
-      let changed = false;
-      const next = { ...current };
-      for (const session of statusReport?.sessions ?? []) {
-        if (next[session.role] !== session.permissionMode) {
-          next[session.role] = session.permissionMode;
-          changed = true;
-        }
-      }
-      return changed ? next : current;
-    });
-  }, [statusReport?.sessions]);
-
-  useEffect(() => {
-    setModels((current) => {
-      let changed = false;
-      const next = { ...current };
-      for (const session of statusReport?.sessions ?? []) {
-        const sessionModel = session.model ?? "default";
-        if (next[session.role] !== sessionModel) {
-          next[session.role] = sessionModel;
-          changed = true;
-        }
-      }
-      return changed ? next : current;
-    });
-  }, [statusReport?.sessions]);
-
-  useEffect(() => {
-    setEfforts((current) => {
-      let changed = false;
-      const next = { ...current };
-      for (const session of statusReport?.sessions ?? []) {
-        const sessionEffort = session.effort ?? "default";
-        if (next[session.role] !== sessionEffort) {
-          next[session.role] = sessionEffort;
-          changed = true;
-        }
-      }
-      return changed ? next : current;
-    });
-  }, [statusReport?.sessions]);
 
   useEffect(() => {
     const sessions = statusReport?.sessions ?? [];
     const coreSessions = sessions.filter((session) => isCoreVcmRoleName(session.role));
     const coreSessionRoles = new Set(coreSessions.map((session) => session.role));
+    const hasGateReviewerSession = sessions.some((session) => session.role === "gate-reviewer");
     const roles = {} as TaskWorkspaceLaunchState["roles"];
     for (const definition of VCM_ROLE_DEFINITIONS) {
       roles[definition.name] = {
@@ -241,6 +264,7 @@ export function TaskWorkspace({
       statusLoaded: Boolean(statusReport),
       sessionCount: coreSessions.length,
       hasAnySession: coreSessions.length > 0,
+      hasGateReviewerSession,
       allRolesHaveSession: CORE_VCM_ROLE_DEFINITIONS.every((definition) => coreSessionRoles.has(definition.name))
     });
   }, [
@@ -253,58 +277,7 @@ export function TaskWorkspace({
     task.taskSlug
   ]);
 
-  useEffect(() => {
-    const interval = window.setInterval(() => {
-      void Promise.all([
-        apiClient.getTaskStatus(task.taskSlug),
-        apiClient.listMessages(task.taskSlug),
-        apiClient.getOrchestrationState(task.taskSlug),
-        apiClient.getSessionRoundState(task.taskSlug)
-      ])
-        .then(([nextStatusReport, nextMessages, nextOrchestration, nextRoundState]) => {
-          applyFetchedState(nextStatusReport, nextMessages, nextOrchestration, nextRoundState);
-        })
-        .catch((caught: Error) => setError(caught.message));
-    }, 3000);
-
-    return () => window.clearInterval(interval);
-  }, [applyFetchedState, task.taskSlug]);
-
-  useEffect(() => {
-    let cancelled = false;
-    let inFlight = false;
-
-    const interval = window.setInterval(() => {
-      if (inFlight) {
-        return;
-      }
-      inFlight = true;
-      void Promise.all([
-        apiClient.listMessages(task.taskSlug),
-        apiClient.getOrchestrationState(task.taskSlug)
-      ])
-        .then(([nextMessages, nextOrchestration]) => {
-          if (!cancelled) {
-            applyMessageState(nextMessages, nextOrchestration);
-          }
-        })
-        .catch((caught: Error) => {
-          if (!cancelled) {
-            setError(caught.message);
-          }
-        })
-        .finally(() => {
-          inFlight = false;
-        });
-    }, TASK_MESSAGE_STATE_POLL_INTERVAL_MS);
-
-    return () => {
-      cancelled = true;
-      window.clearInterval(interval);
-    };
-  }, [applyMessageState, task.taskSlug]);
-
-  async function runAction(action: () => Promise<void>) {
+  async function runAction(action: () => Promise<void>, actionLabel = "Run role session action") {
     setBusy(true);
     setError("");
     try {
@@ -312,42 +285,7 @@ export function TaskWorkspace({
       await refresh();
       await onTaskChanged();
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Action failed.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function closeTask() {
-    const closeMessage = [
-      `Close task "${task.taskSlug}"?`,
-      "",
-      "This is destructive:",
-      "- stops VCM-managed running role sessions for this task",
-      `- deletes the task worktree: ${task.worktreePath}`,
-      `- deletes the Git branch: ${task.branch}`,
-      "- deletes VCM task/session/message/orchestration state",
-      "",
-      "VCM will not check running sessions or uncommitted changes before closing."
-    ].join("\n");
-    const confirmed = window.confirm(
-      closeMessage
-    );
-    if (!confirmed) {
-      return;
-    }
-
-    setBusy(true);
-    setError("");
-    try {
-      await apiClient.cleanupTask(task.taskSlug, {
-        force: true,
-        forceDeleteBranch: true
-      });
-      appendEvent(`closed ${task.taskSlug}`);
-      await onTaskChanged();
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Close task failed.");
+      setError(formatUiError(actionLabel, caught));
     } finally {
       setBusy(false);
     }
@@ -382,23 +320,6 @@ export function TaskWorkspace({
     }));
   }
 
-  async function setOrchestrationMode(mode: VcmOrchestrationMode) {
-    setBusy(true);
-    setError("");
-    try {
-      const nextOrchestration = await apiClient.updateOrchestrationState(task.taskSlug, { mode });
-      setOrchestration(nextOrchestration);
-      onOrchestrationChanged?.(nextOrchestration);
-      appendEvent(`auto orchestration ${mode === "auto" ? "enabled" : "disabled"}`);
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Failed to update orchestration mode.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  const autoOrchestrationEnabled = (orchestration?.mode ?? "auto") === "auto";
-
   return (
     <div className="task-workspace">
       <header className="workspace-header">
@@ -411,25 +332,7 @@ export function TaskWorkspace({
           sessions={statusReport?.sessions ?? []}
           onSelect={onActiveRoleChange}
         />
-        <div className="workspace-header-actions">
-          <button
-            aria-label={`Auto orchestration is ${autoOrchestrationEnabled ? "on" : "off"}`}
-            aria-pressed={autoOrchestrationEnabled}
-            className={`orchestration-toggle${autoOrchestrationEnabled ? " is-active" : ""}`}
-            disabled={busy}
-            type="button"
-            onClick={() => void setOrchestrationMode(autoOrchestrationEnabled ? "manual" : "auto")}
-          >
-            <span>Auto orchestration</span>
-            <strong>{autoOrchestrationEnabled ? "on" : "off"}</strong>
-          </button>
-          <button className="danger-button" type="button" disabled={busy} onClick={() => void closeTask()}>
-            Close Task
-          </button>
-        </div>
       </header>
-
-      {error ? <div className="error-banner">{error}</div> : null}
 
       <div className="workspace-grid">
         <div className="workspace-main">
@@ -437,7 +340,11 @@ export function TaskWorkspace({
             {visibleRoleDefinitions.map((definition) => {
               const role = definition.name;
               const isActive = role === activeRole;
-              const session = getSessionForRole(statusReport?.sessions ?? [], role);
+              const sessions = statusReport?.sessions ?? [];
+              const session = getSessionForRole(sessions, role);
+              const translationPanelState = session
+                ? selectTranslationPanelSessionState(translationFeedStore, session.id, role)
+                : undefined;
 
               return (
                 <div
@@ -456,6 +363,16 @@ export function TaskWorkspace({
                     translationEnabled={translationEnabled}
                     translationAutoSendEnabled={translationAutoSendEnabled}
                     translationTargetLanguage={translationTargetLanguage}
+                    translationPanelState={translationPanelState}
+                    onClearTranslationSession={(sessionId, targetRole) => {
+                      setTranslationFeedStore((current) => clearTranslationPanelSession(current, sessionId, targetRole));
+                    }}
+                    onTranslationEntry={(sessionId, targetRole, entry) => {
+                      setTranslationFeedStore((current) => applyTranslationPanelEntry(current, sessionId, targetRole, entry));
+                    }}
+                    onTranslationFailures={(sessionId, targetRole, failures) => {
+                      setTranslationFeedStore((current) => setTranslationPanelFailures(current, sessionId, targetRole, failures));
+                    }}
                     onPermissionModeChange={(permissionMode) => setRolePermissionMode(role, permissionMode)}
                     onModelChange={(model) => setRoleModel(role, model)}
                     onEffortChange={(effort) => setRoleEffort(role, effort)}
@@ -468,7 +385,7 @@ export function TaskWorkspace({
                         effort: efforts[role]
                       });
                       appendEvent(`started ${role} with ${permissionModes[role]} / ${models[role]} / ${efforts[role]}`);
-                    })}
+                    }, `Start ${role} session`)}
                     onResume={() => void runAction(async () => {
                       await apiClient.resumeRoleSession(task.taskSlug, role, {
                         cols: 100,
@@ -478,11 +395,11 @@ export function TaskWorkspace({
                         effort: efforts[role]
                       });
                       appendEvent(`resumed ${role} with ${permissionModes[role]} / ${models[role]} / ${efforts[role]}`);
-                    })}
+                    }, `Resume ${role} session`)}
                     onStop={() => void runAction(async () => {
                       await apiClient.stopRoleSession(task.taskSlug, role);
                       appendEvent(`stopped ${role}`);
-                    })}
+                    }, `Stop ${role} session`)}
                     onRestart={() => void runAction(async () => {
                       await apiClient.restartRoleSession(task.taskSlug, role, {
                         cols: 100,
@@ -492,7 +409,11 @@ export function TaskWorkspace({
                         effort: efforts[role]
                       });
                       appendEvent(`restarted ${role} with ${permissionModes[role]} / ${models[role]} / ${efforts[role]}`);
-                    })}
+                    }, `Restart ${role} session`)}
+                    onNotifyHarnessUpdated={() => void runAction(async () => {
+                      await apiClient.notifyRoleHarnessUpdated(task.taskSlug, role);
+                      appendEvent(`notified ${role} to reload latest harness`);
+                    }, `Notify ${role} to reload harness`)}
                     onTerminalEvent={(message) => appendEvent(`${definition.label}: ${message}`)}
                   />
                 </div>
@@ -516,4 +437,28 @@ function taskSyncKey(task: TaskRecord): string {
     task.cleanupStatus ?? "",
     task.cleanedAt ?? ""
   ].join(":");
+}
+
+function permissionModesFromLaunchTemplate(template: LaunchTemplate): Record<RoleName, ClaudePermissionMode> {
+  const modes = { ...DEFAULT_PERMISSION_MODES };
+  for (const definition of VCM_ROLE_DEFINITIONS) {
+    modes[definition.name] = template.roles[definition.name]?.permissionMode ?? modes[definition.name];
+  }
+  return modes;
+}
+
+function modelsFromLaunchTemplate(template: LaunchTemplate): Record<RoleName, SessionModel> {
+  const models = { ...DEFAULT_MODELS };
+  for (const definition of VCM_ROLE_DEFINITIONS) {
+    models[definition.name] = template.roles[definition.name]?.model ?? models[definition.name];
+  }
+  return models;
+}
+
+function effortsFromLaunchTemplate(template: LaunchTemplate): Record<RoleName, SessionEffort> {
+  const efforts = { ...DEFAULT_EFFORTS };
+  for (const definition of VCM_ROLE_DEFINITIONS) {
+    efforts[definition.name] = template.roles[definition.name]?.effort ?? efforts[definition.name];
+  }
+  return efforts;
 }

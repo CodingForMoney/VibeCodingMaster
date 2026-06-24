@@ -325,7 +325,9 @@ function normalizePreferences(input: unknown): AppPreferences {
   return {
     themeMode: normalizeThemeMode(candidate.themeMode),
     flowPauseAlerts: rawFlowPauseAlerts !== false,
+    roleRetryEnabled: candidate.roleRetryEnabled !== false,
     permissionRequestMode: normalizePermissionRequestMode(candidate.permissionRequestMode),
+    autoTaskHarnessReviewEnabled: candidate.autoTaskHarnessReviewEnabled === true,
     translationEnabled: candidate.translationEnabled === true,
     translationAutoSendEnabled: candidate.translationAutoSendEnabled === true,
     translationTargetLanguage: normalizeTranslationTargetLanguage(candidate.translationTargetLanguage),
@@ -393,7 +395,7 @@ function normalizeClaudePermissionMode(
   input: unknown,
   fallback: ClaudePermissionMode
 ): ClaudePermissionMode {
-  if (input === "bypassPermissions" || input === "default") {
+  if (input === "bypassPermissions" || input === "plan" || input === "default") {
     return input;
   }
   return fallback;

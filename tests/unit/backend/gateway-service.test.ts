@@ -7,7 +7,9 @@ import type { ProjectSummary } from "../../../src/shared/types/project.js";
 import type { RoleSessionRecord } from "../../../src/shared/types/session.js";
 import type { TaskRecord } from "../../../src/shared/types/task.js";
 import { createDefaultLaunchTemplate } from "../../../src/shared/types/app-settings.js";
+import { createGatewayChannelRegistry, type GatewayChannelAdapter, type GatewayInboundMessage } from "../../../src/backend/gateway/gateway-channel.js";
 import { createGatewayService } from "../../../src/backend/gateway/gateway-service.js";
+import type { LarkRegistrationClient } from "../../../src/backend/gateway/channels/lark-registration.js";
 import type {
   WeixinIlinkChannel,
   WeixinIlinkUpdate
@@ -93,7 +95,99 @@ describe("gateway-service long connection", () => {
     expect(sentTexts[0]).toContain("Gateway started.");
     expect(sentTexts[1]).toContain("VCM Gateway commands:");
     expect(sentTexts[1]).toContain("/create-task <task-slug> [title]");
-    expect(preferenceUpdates).toContainEqual({ flowPauseAlerts: false });
+    expect(preferenceUpdates).toEqual([{
+      translationEnabled: true,
+      translationAutoSendEnabled: true
+    }]);
+    service.stop();
+  });
+
+  it("desktop Gateway enable turns on translation runtime without changing output mode", async () => {
+    const settings = createSettings({
+      translationEnabled: false,
+      binding: {
+        token: "token-1",
+        boundUserId: "user-1",
+        loginUserId: "user-1"
+      } as Partial<GatewaySettingsFile["binding"]> as GatewaySettingsFile["binding"]
+    });
+    const sentTexts: string[] = [];
+    const preferenceUpdates: unknown[] = [];
+    const channel = createChannel([], sentTexts);
+    const service = createService({ settings, channel, preferenceUpdates });
+
+    const status = await service.updateSettings({ enabled: true });
+
+    expect(status.enabled).toBe(true);
+    expect(status.translationEnabled).toBe(true);
+    expect(preferenceUpdates).toEqual([{
+      translationEnabled: true,
+      translationAutoSendEnabled: true
+    }]);
+    service.stop();
+  });
+
+  it("restores translation runtime when a persisted Gateway is already enabled", async () => {
+    const settings = createSettings({
+      enabled: true,
+      translationEnabled: true,
+      binding: {
+        token: "token-1",
+        boundUserId: "user-1",
+        loginUserId: "user-1"
+      } as Partial<GatewaySettingsFile["binding"]> as GatewaySettingsFile["binding"]
+    });
+    const sentTexts: string[] = [];
+    const preferenceUpdates: unknown[] = [];
+    const channel = createChannel([], sentTexts);
+    const service = createService({
+      settings,
+      channel,
+      preferenceUpdates,
+      appPreferences: {
+        translationEnabled: false,
+        translationAutoSendEnabled: false
+      }
+    });
+
+    const status = await service.getStatus();
+
+    expect(status.enabled).toBe(true);
+    expect(status.running).toBe(true);
+    expect(preferenceUpdates).toEqual([{
+      translationEnabled: true,
+      translationAutoSendEnabled: true
+    }]);
+    service.stop();
+  });
+
+  it("forwards gateway chat text to PM without a VCM Gateway marker", async () => {
+    const settings = createSettings({
+      enabled: true,
+      translationEnabled: false,
+      binding: {
+        token: "token-1",
+        boundUserId: "user-1",
+        loginUserId: "user-1"
+      } as Partial<GatewaySettingsFile["binding"]> as GatewaySettingsFile["binding"]
+    });
+    const sentTexts: string[] = [];
+    const runtimeWrites: string[] = [];
+    const channel = createChannel([
+      { messageId: "m1", fromUserId: "user-1", text: "please continue" }
+    ], sentTexts);
+    const service = createService({
+      settings,
+      channel,
+      pmSession: createPmSession(),
+      runtimeWrites
+    });
+
+    await service.start();
+    await waitFor(() => runtimeWrites.length === 1);
+
+    expect(runtimeWrites[0]).toContain("please continue");
+    expect(runtimeWrites[0]).not.toContain("[VCM Gateway]");
     service.stop();
   });
 
@@ -196,6 +290,62 @@ describe("gateway-service long connection", () => {
     }
   });
 
+  it("pushes only PM final replies when Gateway handles a PM stop", async () => {
+    const transcriptDir = await mkdtemp(join(tmpdir(), "vcm-gateway-transcript-"));
+    const transcriptPath = join(transcriptDir, "pm.jsonl");
+    await writeFile(transcriptPath, [
+      assistantTranscriptLine(
+        "tool-progress",
+        "2026-06-11T00:00:00.500Z",
+        "Intermediate PM text while tools are still running.",
+        "tool_use"
+      ),
+      assistantTranscriptLine(
+        "current-reply",
+        "2026-06-11T00:00:01.000Z",
+        "Final PM reply for the active task.",
+        "end_turn"
+      )
+    ].join("\n"));
+    const settings = createSettings({
+      enabled: true,
+      translationEnabled: true,
+      binding: {
+        token: "token-1",
+        boundUserId: "user-1",
+        loginUserId: "user-1"
+      } as Partial<GatewaySettingsFile["binding"]> as GatewaySettingsFile["binding"]
+    });
+    const sentTexts: string[] = [];
+    const channel = createChannel([], sentTexts);
+    const translatedInputs: string[] = [];
+    const service = createService({
+      settings,
+      channel,
+      async translateGatewayOutput(input) {
+        translatedInputs.push(input.text);
+        return `ZH: ${input.text}`;
+      }
+    });
+
+    try {
+      await service.handlePmStop({
+        repoRoot: "/repo",
+        taskSlug: "demo-task",
+        session: createPmSession(transcriptPath)
+      });
+
+      expect(translatedInputs).toEqual(["Final PM reply for the active task."]);
+      expect(sentTexts[0]).toContain("ZH: Final PM reply for the active task.");
+      expect(sentTexts[0]).not.toContain("Intermediate PM text");
+      const latest = Object.values(settings.current().latestPmReplies)[0];
+      expect(latest?.text).toBe("Final PM reply for the active task.");
+    } finally {
+      service.stop();
+      await rm(transcriptDir, { recursive: true, force: true });
+    }
+  });
+
   it("clears expired tokens so status checks do not restart polling", async () => {
     const settings = createSettings({
       enabled: true,
@@ -222,21 +372,134 @@ describe("gateway-service long connection", () => {
     expect(channel.getUpdatesCalls).toBe(1);
     service.stop();
   });
+
+  it("uses the most recent active Lark chat without pairing", async () => {
+    const settings = createSettings({
+      channel: "lark",
+      binding: {
+        appId: "cli_test",
+        appSecret: "secret_test"
+      } as Partial<GatewaySettingsFile["binding"]> as GatewaySettingsFile["binding"]
+    });
+    const sentTexts: string[] = [];
+    const channel = createLarkTestChannel([
+      { messageId: "m1", fromUserId: "ou_1", chatId: "oc_1", chatType: "dm", text: "/status" },
+      { messageId: "m2", fromUserId: "ou_2", chatId: "oc_2", chatType: "group", text: "/status" }
+    ], sentTexts);
+    const service = createService({ settings, channel });
+
+    await service.start();
+    await waitFor(() => sentTexts.length === 2);
+
+    expect(sentTexts[0]).toContain("Gateway: off / polling");
+    expect(sentTexts[0]).toContain("Active Lark chat: yes");
+    expect(sentTexts[1]).toContain("Gateway: off / polling");
+    expect(settings.current().binding.boundUserId).toBe("ou_2");
+    expect(settings.current().binding.chatIds.ou_1).toBe("oc_1");
+    expect(settings.current().binding.chatIds.ou_2).toBe("oc_2");
+    service.stop();
+  });
+
+  it("saves Lark app credentials from QR setup before pairing", async () => {
+    const settings = createSettings({ channel: "lark" });
+    const sentTexts: string[] = [];
+    const channel = createLarkTestChannel([], sentTexts);
+    const registration: LarkRegistrationClient = {
+      async init(domain) {
+        expect(domain).toBe("lark");
+      },
+      async begin(domain) {
+        return {
+          domain,
+          deviceCode: "device-1",
+          qrUrl: "https://accounts.larksuite.com/qr",
+          userCode: "ABCD",
+          intervalSeconds: 3,
+          expiresInSeconds: 600
+        };
+      },
+      async poll(input) {
+        expect(input).toEqual({
+          domain: "lark",
+          deviceCode: "device-1"
+        });
+        return {
+          status: "confirmed",
+          appId: "cli_test",
+          appSecret: "secret_test",
+          domain: "lark",
+          openId: "ou_setup",
+          botName: "VCM Bot",
+          botOpenId: "ou_bot"
+        };
+      }
+    };
+    const service = createService({ settings, channel, larkRegistration: registration });
+
+    const setup = await service.startLarkRegistration();
+    const checked = await service.checkLarkRegistration();
+
+    expect(setup.qrUrl).toBe("https://accounts.larksuite.com/qr");
+    expect(checked.status).toBe("confirmed");
+    expect(checked.gatewayStatus?.binding.appIdConfigured).toBe(true);
+    expect(settings.current().binding.appId).toBe("cli_test");
+    expect(settings.current().binding.appSecret).toBe("secret_test");
+    expect(settings.current().binding.larkDomain).toBe("lark");
+    expect(settings.current().binding.larkOpenId).toBe("ou_setup");
+    expect(settings.current().binding.larkBotName).toBe("VCM Bot");
+    await waitFor(() => channel.getUpdatesCalls > 0);
+    service.stop();
+  });
+
+  it("saves manually entered Lark app credentials and starts polling", async () => {
+    const settings = createSettings({ channel: "lark" });
+    const sentTexts: string[] = [];
+    const channel = createLarkTestChannel([], sentTexts);
+    const service = createService({ settings, channel });
+
+    const result = await service.bindLarkApp({
+      appId: "cli_manual",
+      appSecret: "secret_manual",
+      larkDomain: "lark"
+    });
+
+    expect(result.status).toBe("confirmed");
+    expect(result.gatewayStatus?.binding.appIdConfigured).toBe(true);
+    expect(result.gatewayStatus?.binding.appSecretConfigured).toBe(true);
+    expect(settings.current().channel).toBe("lark");
+    expect(settings.current().binding.appId).toBe("cli_manual");
+    expect(settings.current().binding.appSecret).toBe("secret_manual");
+    expect(settings.current().binding.larkDomain).toBe("lark");
+    expect(channel.getUpdatesCalls).toBe(1);
+    service.stop();
+  });
 });
 
 function createService(input: {
   settings: GatewaySettingsService;
-  channel: WeixinIlinkChannel & { getUpdatesCalls: number };
+  channel: GatewayChannelAdapter & { getUpdatesCalls: number };
   preferenceUpdates?: unknown[];
+  appPreferences?: {
+    translationEnabled?: boolean;
+    translationAutoSendEnabled?: boolean;
+  };
+  pmSession?: RoleSessionRecord | null;
+  runtimeWrites?: string[];
   translateGatewayOutput?: (input: {
     repoRoot: string;
     taskSlug: string;
     role: "project-manager";
     text: string;
   }) => Promise<string>;
+  larkRegistration?: LarkRegistrationClient;
 }) {
   const project = createProject();
   const task = createTask();
+  let appPreferences = {
+    launchTemplate: createDefaultLaunchTemplate(),
+    translationEnabled: input.appPreferences?.translationEnabled ?? true,
+    translationAutoSendEnabled: input.appPreferences?.translationAutoSendEnabled ?? false
+  };
   return createGatewayService({
     fs: {} as never,
     settings: input.settings,
@@ -245,7 +508,7 @@ function createService(input: {
         return undefined;
       }
     },
-    channel: input.channel,
+    channels: createGatewayChannelRegistry([input.channel]),
     projectService: {
       async getCurrentProject() {
         return project;
@@ -285,7 +548,7 @@ function createService(input: {
     } as never,
     sessionService: {
       async getRoleSession() {
-        return null;
+        return input.pmSession ?? null;
       },
       async listRoleSessions() {
         return [];
@@ -329,25 +592,28 @@ function createService(input: {
       }
     },
     runtime: {
-      write() {
+      write(_sessionId: string, data: string) {
+        input.runtimeWrites?.push(data);
         return undefined;
       }
     },
     appSettings: {
       async getPreferences() {
-        return {
-          launchTemplate: createDefaultLaunchTemplate(),
-          translationEnabled: true
-        };
+        return appPreferences as never;
       },
       async getGateReviewSettings() {
         return { enabled: false, requiredGates: [] };
       },
-      async updatePreferences(update: unknown) {
+      async updatePreferences(update: Record<string, unknown>) {
         input.preferenceUpdates?.push(update);
-        return {};
+        appPreferences = {
+          ...appPreferences,
+          ...update
+        };
+        return appPreferences as never;
       }
     } as never,
+    larkRegistration: input.larkRegistration,
     now: () => NOW
   });
 }
@@ -355,6 +621,9 @@ function createService(input: {
 function createChannel(updates: WeixinIlinkUpdate[], sentTexts: string[]): WeixinIlinkChannel & { getUpdatesCalls: number } {
   let used = false;
   return {
+    id: "weixin-ilink",
+    label: "Weixin iLink",
+    defaultBaseUrl: "https://ilinkai.weixin.qq.com",
     get getUpdatesCalls() {
       return used ? 1 : 0;
     },
@@ -388,9 +657,39 @@ function createChannel(updates: WeixinIlinkUpdate[], sentTexts: string[]): Weixi
   };
 }
 
+function createLarkTestChannel(updates: GatewayInboundMessage[], sentTexts: string[]): GatewayChannelAdapter & { getUpdatesCalls: number } {
+  let used = false;
+  return {
+    id: "lark",
+    label: "Lark",
+    defaultBaseUrl: "lark://open-platform",
+    get getUpdatesCalls() {
+      return used ? 1 : 0;
+    },
+    async getUpdates(input) {
+      if (!used) {
+        used = true;
+        return { cursor: "cursor-1", updates };
+      }
+      return new Promise((resolve) => {
+        input.signal?.addEventListener("abort", () => {
+          resolve({ cursor: "cursor-2", updates: [] });
+        });
+      });
+    },
+    async sendText(input) {
+      sentTexts.push(input.text);
+      return input.chatId ?? "ok";
+    }
+  };
+}
+
 function createFailingChannel(error: Error): WeixinIlinkChannel & { getUpdatesCalls: number } {
   let calls = 0;
   return {
+    id: "weixin-ilink",
+    label: "Weixin iLink",
+    defaultBaseUrl: "https://ilinkai.weixin.qq.com",
     get getUpdatesCalls() {
       return calls;
     },
@@ -426,9 +725,14 @@ function createSettings(initial: Partial<GatewaySettingsFile> = {}): GatewaySett
       current = normalizeSettings({
         ...current,
         enabled: input.enabled ?? current.enabled,
+        channel: input.channel ?? current.channel,
         translationEnabled: input.translationEnabled ?? current.translationEnabled,
         currentProjectId: input.currentProjectId !== undefined ? input.currentProjectId : current.currentProjectId,
         currentTaskSlug: input.currentTaskSlug !== undefined ? input.currentTaskSlug : current.currentTaskSlug,
+        binding: {
+          ...current.binding,
+          baseUrl: input.baseUrl !== undefined ? input.baseUrl ?? current.binding.baseUrl : current.binding.baseUrl
+        },
         updatedAt: NOW
       }, NOW);
       return current;
@@ -455,7 +759,11 @@ function createSettings(initial: Partial<GatewaySettingsFile> = {}): GatewaySett
           baseUrl: settings.binding.baseUrl,
           boundUserId: settings.binding.boundUserId,
           loginUserId: settings.binding.loginUserId,
-          tokenConfigured: Boolean(settings.binding.token)
+          tokenConfigured: Boolean(settings.binding.token),
+          appId: settings.binding.appId,
+          appIdConfigured: Boolean(settings.binding.appId),
+          appSecretConfigured: Boolean(settings.binding.appSecret),
+          homeChatId: settings.binding.homeChatId
         },
         pendingConfirmations: settings.pendingConfirmations,
         lastPollStatus: settings.lastPollStatus,
@@ -510,7 +818,7 @@ function createTask(): TaskRecord {
   };
 }
 
-function createPmSession(transcriptPath: string): RoleSessionRecord {
+function createPmSession(transcriptPath?: string): RoleSessionRecord {
   return {
     id: "pm-session",
     claudeSessionId: "claude-pm-session",
@@ -530,13 +838,18 @@ function createPmSession(transcriptPath: string): RoleSessionRecord {
   };
 }
 
-function assistantTranscriptLine(uuid: string, timestamp: string, text: string): string {
+function assistantTranscriptLine(
+  uuid: string,
+  timestamp: string,
+  text: string,
+  stopReason = "end_turn"
+): string {
   return JSON.stringify({
     type: "assistant",
     uuid,
     timestamp,
     message: {
-      stop_reason: "end_turn",
+      stop_reason: stopReason,
       content: [
         {
           type: "text",

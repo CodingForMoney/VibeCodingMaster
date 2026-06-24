@@ -24,6 +24,14 @@ describe("createClaudeAdapter", () => {
     });
   });
 
+  it("builds plan as a permission mode", () => {
+    expect(adapter.buildRoleStartCommand("architect", "claude", "plan")).toEqual({
+      command: "claude",
+      args: ["--agent", "architect", "--model", "default", "--permission-mode", "plan"],
+      display: "claude --agent architect --model default --permission-mode plan"
+    });
+  });
+
   it("builds role commands with a selected model", () => {
     expect(adapter.buildRoleStartCommand(
       "coder",

@@ -1,4 +1,5 @@
-export type GatewayChannel = "weixin-ilink";
+export type GatewayChannel = "weixin-ilink" | "lark";
+export type GatewayLarkDomain = "lark" | "feishu";
 
 export type GatewayQrLoginStatus =
   | "idle"
@@ -18,6 +19,14 @@ export interface GatewayBindingStatus {
   boundUserId: string | null;
   loginUserId: string | null;
   tokenConfigured: boolean;
+  appId: string | null;
+  appIdConfigured: boolean;
+  appSecretConfigured: boolean;
+  larkDomain?: GatewayLarkDomain | null;
+  larkOpenId?: string | null;
+  larkBotName?: string | null;
+  larkBotOpenId?: string | null;
+  homeChatId: string | null;
 }
 
 export interface GatewayPollStatus {
@@ -60,9 +69,11 @@ export interface GatewayStatus {
 
 export interface UpdateGatewaySettingsRequest {
   enabled?: boolean;
+  channel?: GatewayChannel;
   translationEnabled?: boolean;
   currentProjectId?: string | null;
   currentTaskSlug?: string | null;
+  baseUrl?: string | null;
 }
 
 export interface StartGatewayQrLoginResult {
@@ -83,4 +94,32 @@ export interface CheckGatewayQrLoginResult {
   boundUserId?: string | null;
   loginUserId?: string | null;
   message?: string;
+}
+
+export type GatewayLarkRegistrationStatus = "wait" | "confirmed" | "expired" | "failed";
+
+export interface StartGatewayLarkRegistrationResult {
+  status: "wait";
+  qrUrl: string;
+  userCode: string | null;
+  expiresAt: string;
+  intervalSeconds: number;
+}
+
+export interface CheckGatewayLarkRegistrationResult {
+  status: GatewayLarkRegistrationStatus;
+  message?: string;
+  appIdConfigured?: boolean;
+  appSecretConfigured?: boolean;
+  larkDomain?: GatewayLarkDomain;
+  larkOpenId?: string | null;
+  larkBotName?: string | null;
+  larkBotOpenId?: string | null;
+  gatewayStatus?: GatewayStatus;
+}
+
+export interface BindGatewayLarkAppRequest {
+  appId: string;
+  appSecret: string;
+  larkDomain?: GatewayLarkDomain;
 }

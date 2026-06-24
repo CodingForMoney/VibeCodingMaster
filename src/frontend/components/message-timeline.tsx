@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { VcmOrchestrationState, VcmRoleMessage } from "../../shared/types/message.js";
+import { SwitchControl } from "./switch-control.js";
 
 export interface MessageTimelineProps {
   messages: VcmRoleMessage[];
@@ -74,15 +75,13 @@ export function MessageTimeline({
           </div>
           {showControls && onModeChange ? (
             <div className="message-controls">
-              <label className="message-mode-toggle">
-                <input
-                  type="checkbox"
-                  checked={mode === "auto"}
-                  disabled={busy}
-                  onChange={(event) => onModeChange(event.target.checked ? "auto" : "manual")}
-                />
-                <span>Auto orchestration</span>
-              </label>
+              <SwitchControl
+                checked={mode === "auto"}
+                className="message-mode-toggle"
+                disabled={busy}
+                label="Auto orchestration"
+                onChange={(checked) => onModeChange(checked ? "auto" : "manual")}
+              />
             </div>
           ) : null}
           {showControls && onMarkAllDone ? (

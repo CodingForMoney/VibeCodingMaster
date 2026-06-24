@@ -32,7 +32,9 @@ export interface LaunchTemplate {
 export interface AppPreferences {
   themeMode: ThemeMode;
   flowPauseAlerts: boolean;
+  roleRetryEnabled: boolean;
   permissionRequestMode: PermissionRequestMode;
+  autoTaskHarnessReviewEnabled: boolean;
   translationEnabled: boolean;
   translationAutoSendEnabled: boolean;
   translationTargetLanguage: TranslationTargetLanguage;
@@ -43,8 +45,10 @@ export interface AppPreferences {
 export interface UpdateAppPreferencesRequest {
   themeMode?: ThemeMode;
   flowPauseAlerts?: boolean;
+  roleRetryEnabled?: boolean;
   roundCompletionAlerts?: boolean;
   permissionRequestMode?: PermissionRequestMode;
+  autoTaskHarnessReviewEnabled?: boolean;
   translationEnabled?: boolean;
   translationAutoSendEnabled?: boolean;
   translationTargetLanguage?: TranslationTargetLanguage;
@@ -74,7 +78,7 @@ export function createDefaultLaunchTemplate(): LaunchTemplate {
   const roles = {} as Record<VcmRoleName, RoleLaunchTemplateEntry>;
   for (const role of VCM_ROLE_NAMES) {
     roles[role] = {
-      permissionMode: "default",
+      permissionMode: "bypassPermissions",
       model: "default",
       effort: "default"
     };

@@ -1,10 +1,9 @@
-import { readFileSync } from "node:fs";
 import fs from "node:fs/promises";
-import path from "node:path";
 import type { RuntimeDiagnostics, OpenFilesLimit } from "../../shared/types/diagnostics.js";
 import type { GatewayService } from "../gateway/gateway-service.js";
 import type { TerminalRuntime } from "../runtime/terminal-runtime.js";
 import type { TranslationService } from "./translation-service.js";
+import { readVcmPackageVersion } from "../app-version.js";
 
 export interface DiagnosticsService {
   getRuntimeDiagnostics(): Promise<RuntimeDiagnostics>;
@@ -25,7 +24,7 @@ export interface DiagnosticsServiceDeps {
 }
 
 export function createDiagnosticsService(deps: DiagnosticsServiceDeps): DiagnosticsService {
-  const version = readPackageVersion(deps.appRoot);
+  const version = readVcmPackageVersion(deps.appRoot);
 
   return {
     async getRuntimeDiagnostics() {
@@ -57,16 +56,6 @@ export function createDiagnosticsService(deps: DiagnosticsServiceDeps): Diagnost
       };
     }
   };
-}
-
-function readPackageVersion(appRoot: string): string {
-  const packageJsonPath = path.join(appRoot, "package.json");
-  try {
-    const raw = JSON.parse(readFileSync(packageJsonPath, "utf8")) as { version?: unknown };
-    return typeof raw.version === "string" && raw.version.trim() ? raw.version : "unknown";
-  } catch {
-    return process.env.npm_package_version || "unknown";
-  }
 }
 
 async function readFdCount(): Promise<number | null> {

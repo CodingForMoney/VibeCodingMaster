@@ -13,6 +13,7 @@ import {
   renderTranslatorAgentRules,
   renderVcmGateReviewSkillRules
 } from "../templates/harness/gate-review.js";
+import { renderHarnessEngineerHarnessRules } from "../templates/harness/harness-engineer-agent.js";
 import { renderRootClaudeHarnessRules } from "../templates/harness/claude-root.js";
 import { renderGitignoreHarnessRules } from "../templates/harness/gitignore.js";
 import { renderProjectManagerHarnessRules } from "../templates/harness/project-manager-agent.js";
@@ -21,11 +22,13 @@ import { renderReviewerHarnessRules } from "../templates/harness/reviewer-agent.
 import { renderVcmFinalAcceptanceSkillRules } from "../templates/harness/vcm-final-acceptance-skill.js";
 import { renderVcmHarnessBootstrapSkillRules } from "../templates/harness/vcm-harness-bootstrap-skill.js";
 import { renderVcmLongRunningValidationSkillRules } from "../templates/harness/vcm-long-running-validation-skill.js";
+import { renderVcmReportHarnessIssueSkillRules } from "../templates/harness/vcm-report-harness-issue-skill.js";
 import { renderVcmRouteMessageSkillRules } from "../templates/harness/vcm-route-message-skill.js";
+import { readVcmPackageVersion } from "../app-version.js";
 
-const HARNESS_VERSION = "0.3.0-fixed";
 const CLI_DIR = path.dirname(fileURLToPath(import.meta.url));
 const APP_ROOT = path.resolve(CLI_DIR, "../../..");
+const VCM_PACKAGE_VERSION = readVcmPackageVersion(APP_ROOT);
 const MANIFEST_PATH = ".ai/vcm-harness-manifest.json";
 const HTML_BLOCK_PATTERN = /<!-- VCM:BEGIN(?:\s+version=\d+)? -->[\s\S]*?<!-- VCM:END -->/m;
 const HASH_BLOCK_PATTERN = /# VCM:BEGIN(?:\s+version=\d+)?\n[\s\S]*?# VCM:END/m;
@@ -38,7 +41,7 @@ const LEGACY_CODEX_HARNESS_PATHS = [
 const VCM_HOOK_COMMAND = `sh -c 'if [ -z "\${VCM_TASK_SLUG:-}" ] || [ -z "\${VCM_ROLE:-}" ] || [ -z "\${VCM_API_URL:-}" ]; then exit 0; fi; node -e '"'"'let s="";process.stdin.setEncoding("utf8");process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{let event={};try{event=s.trim()?JSON.parse(s):{};}catch{event={raw:s};}process.stdout.write(JSON.stringify({taskSlug:process.env.VCM_TASK_SLUG,role:process.env.VCM_ROLE,event}));});'"'"' | curl -fsS --max-time 2 -X POST "\${VCM_API_URL}/api/hooks/claude-code" -H "content-type: application/json" --data-binary @- >/dev/null || true'`;
 const VCM_STOP_HOOK_COMMAND = `sh -c 'if [ -z "\${VCM_TASK_SLUG:-}" ] || [ -z "\${VCM_ROLE:-}" ] || [ -z "\${VCM_API_URL:-}" ]; then exit 0; fi; node -e '"'"'let s="";process.stdin.setEncoding("utf8");process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{let event={};try{event=s.trim()?JSON.parse(s):{};}catch{event={raw:s};}process.stdout.write(JSON.stringify({taskSlug:process.env.VCM_TASK_SLUG,role:process.env.VCM_ROLE,event}));});'"'"' | curl -fsS --max-time 5 -X POST "\${VCM_API_URL}/api/hooks/claude-code/stop" -H "content-type: application/json" --data-binary @- || true'`;
 const VCM_PERMISSION_REQUEST_HOOK_COMMAND = `sh -c 'if [ -z "\${VCM_TASK_SLUG:-}" ] || [ -z "\${VCM_ROLE:-}" ] || [ -z "\${VCM_API_URL:-}" ]; then exit 0; fi; node -e '"'"'let s="";process.stdin.setEncoding("utf8");process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{let event={};try{event=s.trim()?JSON.parse(s):{};}catch{event={raw:s};}process.stdout.write(JSON.stringify({taskSlug:process.env.VCM_TASK_SLUG,role:process.env.VCM_ROLE,event}));});'"'"' | curl -fsS --max-time 5 -X POST "\${VCM_API_URL}/api/hooks/claude-code/permission-request" -H "content-type: application/json" --data-binary @- || true'`;
-const VCM_BASH_GUARD_HOOK_COMMAND = `sh -c 'if [ -z "\${VCM_TASK_SLUG:-}" ] || [ -z "\${VCM_ROLE:-}" ]; then exit 0; fi; exec python3 "\${CLAUDE_PROJECT_DIR:-.}/.ai/tools/vcm-bash-guard"'`;
+const VCM_BASH_GUARD_HOOK_COMMAND = `sh -c 'if [ -z "\${VCM_TASK_SLUG:-}" ] || [ -z "\${VCM_ROLE:-}" ]; then exit 0; fi; guard=""; repo="$(git rev-parse --show-toplevel 2>/dev/null || true)"; if [ -n "$repo" ] && [ -f "$repo/.ai/tools/vcm-bash-guard" ]; then guard="$repo/.ai/tools/vcm-bash-guard"; else cwd="$(pwd -P 2>/dev/null || pwd)"; dir="$cwd"; while [ -n "$dir" ] && [ "$dir" != "/" ]; do if [ -f "$dir/.ai/tools/vcm-bash-guard" ]; then guard="$dir/.ai/tools/vcm-bash-guard"; break; fi; dir="$(dirname "$dir")"; done; if [ -z "$guard" ] && [ -n "\${CLAUDE_PROJECT_DIR:-}" ] && [ -f "\${CLAUDE_PROJECT_DIR}/.ai/tools/vcm-bash-guard" ]; then guard="\${CLAUDE_PROJECT_DIR}/.ai/tools/vcm-bash-guard"; fi; fi; [ -n "$guard" ] || exit 0; python3 "$guard" || exit 0'`;
 const VCM_BASH_DEFAULT_TIMEOUT_MS = "600000";
 const VCM_HOOK_DEFINITIONS = [
   { eventName: "PreToolUse", matcher: "Bash", command: VCM_BASH_GUARD_HOOK_COMMAND, timeout: 10 },
@@ -67,6 +70,9 @@ const AGENT_FRONTMATTER = {
   },
   translator: {
     description: "VCM project translation tool role for conversation translation, file translation, bootstrap, and memory updates."
+  },
+  "harness-engineer": {
+    description: "VCM project-scoped harness maintenance role for harness diagnosis, diff proposals, and VCM issue drafts."
   }
 };
 
@@ -141,6 +147,14 @@ const MANAGED_FILES = [
     commentStyle: "html",
     category: "agent-translator",
     content: renderTranslatorAgentRules()
+  },
+  {
+    path: ".claude/agents/harness-engineer.md",
+    title: "Harness Engineer Agent",
+    agentName: "harness-engineer",
+    commentStyle: "html",
+    category: "agent-harness-engineer",
+    content: renderHarnessEngineerHarnessRules()
   }
 ];
 
@@ -228,6 +242,17 @@ const WHOLE_FILES = [
     )
   },
   {
+    path: ".claude/skills/vcm-report-harness-issue/SKILL.md",
+    category: "skill",
+    mode: 0o644,
+    content: renderSkillFile(
+      "VCM Report Harness Issue Skill",
+      "vcm-report-harness-issue",
+      "Use when a VCM role notices a reusable harness problem and needs to record feedback for Harness Engineer review.",
+      renderVcmReportHarnessIssueSkillRules()
+    )
+  },
+  {
     path: ".ai/tools/request-gate-review",
     category: "runtime-tool",
     mode: 0o755,
@@ -289,7 +314,6 @@ async function main() {
   await assertDirectory(projectRoot, "Project root");
 
   const manifest = await buildManifest(projectRoot);
-  await installManifest({ projectRoot, manifest, dryRun, operations });
   for (const definition of MANAGED_FILES) {
     await installManagedFile({ projectRoot, definition, dryRun, operations });
   }
@@ -305,6 +329,13 @@ async function main() {
   }
   await removeLegacyFlatSkillFiles({ projectRoot, dryRun, operations });
   await removeLegacyCodexHarnessPaths({ projectRoot, dryRun, operations });
+  await installManifest({
+    projectRoot,
+    manifest,
+    dryRun,
+    operations,
+    forceWrite: hasRealHarnessChange(operations)
+  });
 
   printReport({ projectRoot, dryRun, operations });
 }
@@ -348,7 +379,7 @@ Installs only fixed VCM harness content.
 This deterministic installer handles VCM-owned managed blocks, VCM-owned whole
 files, VCM Claude settings hooks, generic long-running helper tools, and the
 harness manifest. It also creates blank durable project doc templates when
-missing and installs Rust generated-context generator tools. It does not copy
+missing and installs generated-context tools for Rust and npm workspace projects. It does not copy
 example project docs, generated context artifacts, module-level architecture
 docs, or task runtime handoff artifacts.`);
 }
@@ -359,7 +390,7 @@ async function buildManifest(projectRoot) {
   return {
     schemaVersion: 1,
     manager: "vcm",
-    harnessVersion: HARNESS_VERSION,
+    harnessVersion: VCM_PACKAGE_VERSION,
     installMode: "fixed",
     installedAt: typeof current?.installedAt === "string" ? current.installedAt : now,
     updatedAt: now,
@@ -461,6 +492,7 @@ function fixedDirectories() {
     ".claude/skills/vcm-long-running-validation/",
     ".claude/skills/vcm-route-message/",
     ".claude/skills/vcm-gate-review/",
+    ".claude/skills/vcm-report-harness-issue/",
     ".ai/vcm/translations/",
     ".ai/vcm/gate-reviews/",
     ".ai/tools/",
@@ -481,12 +513,16 @@ function directoryCategory(directory) {
   return "harness-tool-directory";
 }
 
-async function installManifest({ projectRoot, manifest, dryRun, operations }) {
+async function installManifest({ projectRoot, manifest, dryRun, operations, forceWrite = false }) {
   const targetPath = path.join(projectRoot, MANIFEST_PATH);
   const currentManifest = await readOptionalJson(targetPath);
 
   if (currentManifest && manifestBodyEqual(currentManifest, manifest)) {
     operations.push(skip(MANIFEST_PATH, "unchanged"));
+    return;
+  }
+  if (!forceWrite && currentManifest && manifestBodyEqual(currentManifest, manifest, { ignoreHarnessVersion: true })) {
+    operations.push(skip(MANIFEST_PATH, "version-only change ignored"));
     return;
   }
 
@@ -801,14 +837,25 @@ async function pathExists(absolutePath) {
   );
 }
 
-function manifestBodyEqual(left, right) {
+function manifestBodyEqual(left, right, options = {}) {
   const normalizedLeft = { ...left };
   const normalizedRight = { ...right };
   delete normalizedLeft.installedAt;
   delete normalizedLeft.updatedAt;
   delete normalizedRight.installedAt;
   delete normalizedRight.updatedAt;
+  if (options.ignoreHarnessVersion) {
+    delete normalizedLeft.harnessVersion;
+    delete normalizedRight.harnessVersion;
+  }
   return JSON.stringify(normalizedLeft) === JSON.stringify(normalizedRight);
+}
+
+function hasRealHarnessChange(operations) {
+  return operations.some((operation) =>
+    operation.path !== MANIFEST_PATH &&
+    (operation.status === "done" || operation.status === "plan")
+  );
 }
 
 function resolveInside(root, relativePath) {

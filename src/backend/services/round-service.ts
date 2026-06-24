@@ -2,7 +2,7 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import type { ClaudeTurnHookEventName } from "../../shared/types/claude-hook.js";
 import type { RoleName } from "../../shared/types/role.js";
-import type { VcmSessionRoundState } from "../../shared/types/round.js";
+import type { VcmRoleRecoveryState, VcmSessionRoundState } from "../../shared/types/round.js";
 import type { RoleSessionRecord } from "../../shared/types/session.js";
 import type { TaskStatus } from "../../shared/types/task.js";
 import type { FileSystemAdapter } from "../adapters/filesystem.js";
@@ -12,6 +12,8 @@ export interface RoundService {
   getSessionRoundState(input: SessionRoundInput): Promise<VcmSessionRoundState>;
   recordRoleTurnEvent(input: RecordRoundHookEventInput): Promise<VcmSessionRoundState>;
   recordClaudeHookEvent(input: RecordRoundHookEventInput): Promise<VcmSessionRoundState>;
+  setRoleRecovery(input: SetRoleRecoveryInput): Promise<VcmSessionRoundState>;
+  clearRoleRecovery(input: ClearRoleRecoveryInput): Promise<VcmSessionRoundState>;
   stopSession(sessionId: string): void;
   stopTask(taskSlug: string): void;
 }
@@ -27,6 +29,14 @@ export interface RecordRoundHookEventInput extends SessionRoundInput {
   role: RoleName;
   eventName: ClaudeTurnHookEventName;
   settleGuard?: RoundSettleGuard;
+}
+
+export interface SetRoleRecoveryInput extends SessionRoundInput {
+  recovery: VcmRoleRecoveryState;
+}
+
+export interface ClearRoleRecoveryInput extends SessionRoundInput {
+  role?: RoleName;
 }
 
 export interface RoundSettleGuardInput extends SessionRoundInput {
@@ -65,6 +75,7 @@ interface PersistedRoundFile {
   totalTurnCount: number;
   totalCompletedTurnCount: number;
   totalCcActiveMs: number;
+  roleRecovery?: VcmRoleRecoveryState;
   updatedAt: string;
 }
 
@@ -366,6 +377,36 @@ export function createRoundService(deps: RoundServiceDeps): RoundService {
     recordClaudeHookEvent(input) {
       return recordRoleTurnEvent(input);
     },
+    async setRoleRecovery(input) {
+      return withTaskLock(input, async () => {
+        const timestamp = now();
+        const state = await load(input);
+        const next = {
+          ...state,
+          roleRecovery: normalizeRoleRecovery(input.recovery),
+          updatedAt: timestamp
+        };
+        await save(input, next);
+        await updateSessionStatus(input, "running");
+        return toSessionRoundState(next, timestamp);
+      });
+    },
+    async clearRoleRecovery(input) {
+      return withTaskLock(input, async () => {
+        const timestamp = now();
+        const state = await load(input);
+        if (!state.roleRecovery || (input.role && state.roleRecovery.role !== input.role)) {
+          return toSessionRoundState(state, timestamp);
+        }
+        const next = {
+          ...state,
+          roleRecovery: undefined,
+          updatedAt: timestamp
+        };
+        await save(input, next);
+        return toSessionRoundState(next, timestamp);
+      });
+    },
     stopSession() {},
     stopTask(taskSlug) {
       clearSettleTimersForTask(taskSlug);
@@ -506,6 +547,7 @@ function toSessionRoundState(state: PersistedRoundFile, updatedAt: string): VcmS
       totalCompletedTurnCount: state.totalCompletedTurnCount,
       totalCcActiveMs: state.totalCcActiveMs,
       currentRoundCcActiveMs: 0,
+      roleRecovery: state.roleRecovery,
       roles: [],
       updatedAt
     };
@@ -535,6 +577,7 @@ function toSessionRoundState(state: PersistedRoundFile, updatedAt: string): VcmS
     totalCompletedTurnCount: state.totalCompletedTurnCount,
     totalCcActiveMs: state.totalCcActiveMs + activeDurationMs,
     currentRoundCcActiveMs,
+    roleRecovery: state.roleRecovery,
     roles: current.roles,
     updatedAt
   };
@@ -555,7 +598,36 @@ function normalizeRoundFile(input: Partial<PersistedRoundFile>, taskSlug: string
     totalTurnCount: normalizeNumber(input.totalTurnCount ?? legacy.totalPromptSubmitCount),
     totalCompletedTurnCount: normalizeNumber(input.totalCompletedTurnCount ?? legacy.totalStopCount),
     totalCcActiveMs: normalizeNumber(input.totalCcActiveMs),
+    roleRecovery: normalizeRoleRecovery(input.roleRecovery),
     updatedAt: typeof input.updatedAt === "string" ? input.updatedAt : updatedAt
+  };
+}
+
+function normalizeRoleRecovery(input: unknown): VcmRoleRecoveryState | undefined {
+  if (!input || typeof input !== "object") {
+    return undefined;
+  }
+  const record = input as Partial<VcmRoleRecoveryState>;
+  if (
+    typeof record.role !== "string" ||
+    (record.status !== "waiting" && record.status !== "retrying" && record.status !== "failed") ||
+    typeof record.lastFailureAt !== "string"
+  ) {
+    return undefined;
+  }
+  return {
+    role: record.role as RoleName,
+    status: record.status,
+    attempt: normalizeNumber(record.attempt),
+    maxAttempts: normalizeNumber(record.maxAttempts),
+    lastFailureAt: record.lastFailureAt,
+    error: typeof record.error === "string" ? record.error : undefined,
+    errorDetails: typeof record.errorDetails === "string" ? record.errorDetails : undefined,
+    lastAssistantMessage: typeof record.lastAssistantMessage === "string" ? record.lastAssistantMessage : undefined,
+    retryable: typeof record.retryable === "boolean" ? record.retryable : undefined,
+    nextRetryAt: typeof record.nextRetryAt === "string" ? record.nextRetryAt : undefined,
+    lastRetryAt: typeof record.lastRetryAt === "string" ? record.lastRetryAt : undefined,
+    failedAt: typeof record.failedAt === "string" ? record.failedAt : undefined
   };
 }
 

@@ -23,6 +23,20 @@ BLOCK_ITEM_KEYWORDS = {
     "union",
     "macro_rules",
 }
+TS_SOURCE_EXTENSIONS = (".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs")
+TS_EXPORT_DECLARATION = re.compile(
+    r"\bexport\s+(?:default\s+)?(?:declare\s+)?(?:(?:async\s+)?function\s+(?P<function>[A-Za-z_$][A-Za-z0-9_$]*)|class\s+(?P<class>[A-Za-z_$][A-Za-z0-9_$]*)|interface\s+(?P<interface>[A-Za-z_$][A-Za-z0-9_$]*)|type\s+(?P<type>[A-Za-z_$][A-Za-z0-9_$]*)|enum\s+(?P<enum>[A-Za-z_$][A-Za-z0-9_$]*)|(?:const|let|var)\s+(?P<variable>[A-Za-z_$][A-Za-z0-9_$]*))"
+)
+TS_REEXPORT = re.compile(
+    r"\bexport\s+(?:type\s+)?(?P<form>\*|\{[^}]*\})\s+from\s+(?P<quote>[\"'`])(?P<specifier>[^\"'`]+)(?P=quote)"
+)
+TS_ROUTE_CALL = re.compile(
+    r"\.\s*(?P<method>get|post|put|patch|delete|options|head)\s*(?:<(?:(?!>\s*\()[\s\S])*>\s*)?\(\s*(?P<quote>[\"'`])(?P<path>[^\"'`]+)(?P=quote)",
+    re.IGNORECASE,
+)
+TS_ROUTE_OBJECT = re.compile(r"\.route\s*\(\s*\{(?P<body>.*?)\}\s*\)", re.IGNORECASE | re.DOTALL)
+TS_ROUTE_METHOD = re.compile(r"\bmethod\s*:\s*(?P<quote>[\"'`])(?P<method>[A-Za-z]+)(?P=quote)", re.IGNORECASE)
+TS_ROUTE_URL = re.compile(r"\b(?:url|path)\s*:\s*(?P<quote>[\"'`])(?P<path>[^\"'`]+)(?P=quote)", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -54,6 +68,24 @@ def load_module_index(root: Path) -> dict:
     if not path.is_file():
         raise SystemExit("Missing .ai/generated/module-index.json; run .ai/tools/generate-module-index first.")
     return json.loads(path.read_text())
+
+
+def load_optional_json(path: Path) -> dict:
+    if not path.is_file():
+        return {}
+    return json.loads(path.read_text())
+
+
+def relative_path(path: Path, root: Path) -> str:
+    try:
+        rel = path.absolute().relative_to(root.absolute())
+    except ValueError:
+        rel = path.resolve().relative_to(root.resolve())
+    return "." if str(rel) == "." else rel.as_posix()
+
+
+def line_number_from_offset(source: str, offset: int) -> int:
+    return source.count("\n", 0, offset) + 1
 
 
 def raw_string_end(source: str, index: int) -> int | None:
@@ -633,13 +665,366 @@ def extract_public_items(root: Path, module: dict) -> list[dict]:
     return unique_items
 
 
+def remove_ts_comments_preserve_literals(source: str) -> str:
+    output: list[str] = []
+    cursor = 0
+    quote: str | None = None
+    escaped = False
+
+    while cursor < len(source):
+        char = source[cursor]
+
+        if quote is not None:
+            output.append(char)
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == quote:
+                quote = None
+            cursor += 1
+            continue
+
+        if source.startswith("//", cursor):
+            end = source.find("\n", cursor + 2)
+            if end == -1:
+                output.append(" " * (len(source) - cursor))
+                break
+            output.append(" " * (end - cursor))
+            output.append("\n")
+            cursor = end + 1
+            continue
+
+        if source.startswith("/*", cursor):
+            end = source.find("*/", cursor + 2)
+            end = len(source) if end == -1 else end + 2
+            chunk = source[cursor:end]
+            output.append("".join("\n" if item == "\n" else " " for item in chunk))
+            cursor = end
+            continue
+
+        if char in {"'", '"', "`"}:
+            quote = char
+            escaped = False
+            output.append(char)
+            cursor += 1
+            continue
+
+        output.append(char)
+        cursor += 1
+
+    return "".join(output)
+
+
+def ts_signature_from_source(source: str, start: int) -> str:
+    cursor = start
+    depth_angle = 0
+    depth_paren = 0
+    depth_bracket = 0
+
+    while cursor < len(source):
+        char = source[cursor]
+        if char in {"'", '"', "`"}:
+            cursor = quoted_literal_end(source, cursor) if char != "`" else quoted_literal_end(source.replace("`", '"'), cursor)
+            continue
+
+        if char == "<":
+            depth_angle += 1
+        elif char == ">" and depth_angle:
+            depth_angle -= 1
+        elif char == "(":
+            depth_paren += 1
+        elif char == ")" and depth_paren:
+            depth_paren -= 1
+        elif char == "[":
+            depth_bracket += 1
+        elif char == "]" and depth_bracket:
+            depth_bracket -= 1
+
+        at_top_level = depth_angle == 0 and depth_paren == 0 and depth_bracket == 0
+        if at_top_level and char in "{;":
+            return " ".join(source[start:cursor].split())
+        cursor += 1
+
+    return " ".join(source[start:].split())
+
+
+def ts_item_kind(match: re.Match) -> tuple[str, str] | None:
+    for kind in ("function", "class", "interface", "type", "enum", "variable"):
+        name = match.group(kind)
+        if name:
+            return ("const" if kind == "variable" else kind, name)
+    return None
+
+
+def extract_ts_exported_declarations(source: str, source_file: str) -> list[dict]:
+    sanitized = remove_ts_comments_preserve_literals(source)
+    items: list[dict] = []
+
+    for match in TS_EXPORT_DECLARATION.finditer(sanitized):
+        kind_and_name = ts_item_kind(match)
+        if kind_and_name is None:
+            continue
+        kind, name = kind_and_name
+        items.append(
+            {
+                "path": name,
+                "kind": kind,
+                "name": name,
+                "source": {
+                    "path": source_file,
+                    "line": line_number_from_offset(sanitized, match.start()),
+                },
+                "signature": ts_signature_from_source(source, match.start()),
+            }
+        )
+
+    return items
+
+
+def exported_names_from_group(group: str) -> list[tuple[str, str]]:
+    names: list[tuple[str, str]] = []
+    body = group.strip()[1:-1]
+    for raw_part in body.split(","):
+        part = raw_part.strip()
+        if not part:
+            continue
+        if part.startswith("type "):
+            part = part.removeprefix("type ").strip()
+        pieces = [piece.strip() for piece in re.split(r"\s+as\s+", part, maxsplit=1)]
+        source_name = pieces[0]
+        public_name = pieces[1] if len(pieces) == 2 else source_name
+        if source_name and source_name != "default":
+            names.append((source_name, public_name))
+    return names
+
+
+def resolve_ts_specifier(current_file: Path, specifier: str, indexed_sources: dict[Path, str]) -> str | None:
+    if not specifier.startswith("."):
+        return None
+
+    base = (current_file.parent / specifier).resolve()
+    candidates: list[Path] = []
+
+    if base.suffix:
+        candidates.append(base)
+        for extension in TS_SOURCE_EXTENSIONS:
+            candidates.append(base.with_suffix(extension))
+    else:
+        for extension in TS_SOURCE_EXTENSIONS:
+            candidates.append(base.with_suffix(extension))
+        for extension in TS_SOURCE_EXTENSIONS:
+            candidates.append(base / f"index{extension}")
+
+    for candidate in candidates:
+        source_file = indexed_sources.get(candidate.resolve())
+        if source_file is not None:
+            return source_file
+
+    return None
+
+
+def package_export_targets(value) -> list[str]:
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, list):
+        targets: list[str] = []
+        for item in value:
+            targets.extend(package_export_targets(item))
+        return targets
+    if isinstance(value, dict):
+        targets: list[str] = []
+        for key, item in value.items():
+            if key in {"types", "import", "require", "default", "module"} or key.startswith("."):
+                targets.extend(package_export_targets(item))
+        return targets
+    return []
+
+
+def ts_entrypoint_files(root: Path, module: dict) -> list[str]:
+    indexed_sources = set(module.get("files", {}).get("source", []))
+    module_path = module.get("path", ".")
+    module_root = root if module_path == "." else root / module_path
+    manifest = load_optional_json(root / module.get("manifest", ""))
+    targets: list[str] = []
+
+    for key in ("exports", "main", "module", "types"):
+        targets.extend(package_export_targets(manifest.get(key)))
+
+    candidates: list[str] = []
+    for target in targets:
+        if not isinstance(target, str):
+            continue
+        target_path = (module_root / target).resolve()
+        for candidate in [target_path, *[target_path.with_suffix(ext) for ext in TS_SOURCE_EXTENSIONS]]:
+            rel = relative_path(candidate, root)
+            if rel in indexed_sources:
+                candidates.append(rel)
+
+    if not candidates:
+        for name in ("index", "main", "app"):
+            for extension in TS_SOURCE_EXTENSIONS:
+                rel = relative_path(module_root / "src" / f"{name}{extension}", root)
+                if rel in indexed_sources:
+                    candidates.append(rel)
+
+    if not candidates and module_path.startswith("apps/"):
+        candidates.extend(module.get("files", {}).get("source", []))
+
+    return sorted(dict.fromkeys(candidates))
+
+
+def collect_ts_public_items(
+    root: Path,
+    source_file: str,
+    module: dict,
+    direct_definitions: dict[str, dict[str, dict]],
+    indexed_sources: dict[Path, str],
+    visited: set[str],
+) -> list[dict]:
+    if source_file in visited:
+        return []
+    visited.add(source_file)
+
+    path = root / source_file
+    source = path.read_text()
+    sanitized = remove_ts_comments_preserve_literals(source)
+    items = list(direct_definitions.get(source_file, {}).values())
+
+    for match in TS_REEXPORT.finditer(sanitized):
+        target_file = resolve_ts_specifier(path, match.group("specifier"), indexed_sources)
+        if target_file is None:
+            continue
+
+        form = match.group("form")
+        if form == "*":
+            items.extend(collect_ts_public_items(root, target_file, module, direct_definitions, indexed_sources, visited))
+            continue
+
+        target_definitions = direct_definitions.get(target_file, {})
+        for source_name, public_name in exported_names_from_group(form):
+            definition = target_definitions.get(source_name)
+            if definition is None:
+                items.append(
+                    {
+                        "path": public_name,
+                        "kind": "re-export",
+                        "name": public_name,
+                        "source": {
+                            "path": source_file,
+                            "line": line_number_from_offset(sanitized, match.start()),
+                        },
+                    }
+                )
+                continue
+            items.append({**definition, "path": public_name, "name": public_name})
+
+    return items
+
+
+def extract_ts_routes(source: str, source_file: str) -> list[dict]:
+    sanitized = remove_ts_comments_preserve_literals(source)
+    items: list[dict] = []
+
+    for match in TS_ROUTE_CALL.finditer(sanitized):
+        method = match.group("method").upper()
+        route_path = match.group("path")
+        name = f"{method} {route_path}"
+        items.append(
+            {
+                "path": name,
+                "kind": "route",
+                "name": name,
+                "source": {
+                    "path": source_file,
+                    "line": line_number_from_offset(sanitized, match.start()),
+                },
+            }
+        )
+
+    for match in TS_ROUTE_OBJECT.finditer(sanitized):
+        body = match.group("body")
+        method_match = TS_ROUTE_METHOD.search(body)
+        path_match = TS_ROUTE_URL.search(body)
+        if method_match is None or path_match is None:
+            continue
+        name = f"{method_match.group('method').upper()} {path_match.group('path')}"
+        items.append(
+            {
+                "path": name,
+                "kind": "route",
+                "name": name,
+                "source": {
+                    "path": source_file,
+                    "line": line_number_from_offset(sanitized, match.start()),
+                },
+            }
+        )
+
+    return items
+
+
+def extract_typescript_public_items(root: Path, module: dict) -> list[dict]:
+    indexed_sources = {
+        (root / source_file).resolve(): source_file
+        for source_file in module.get("files", {}).get("source", [])
+    }
+    direct_definitions: dict[str, dict[str, dict]] = {}
+
+    for source_file in module.get("files", {}).get("source", []):
+        path = root / source_file
+        if not path.is_file():
+            raise SystemExit(f"Missing source file from module index: {source_file}")
+        direct_definitions[source_file] = {
+            item["name"]: item
+            for item in extract_ts_exported_declarations(path.read_text(), source_file)
+        }
+
+    entrypoints = ts_entrypoint_files(root, module)
+    if not entrypoints:
+        entrypoints = list(module.get("files", {}).get("source", []))
+
+    items: list[dict] = []
+    for entrypoint in entrypoints:
+        items.extend(collect_ts_public_items(root, entrypoint, module, direct_definitions, indexed_sources, set()))
+
+    if module.get("path", "").startswith("apps/"):
+        for source_file in module.get("files", {}).get("source", []):
+            items.extend(extract_ts_routes((root / source_file).read_text(), source_file))
+
+    seen: set[tuple[str, str, str, int]] = set()
+    unique_items: list[dict] = []
+    for item in items:
+        key = (item["path"], item["kind"], item["source"]["path"], item["source"]["line"])
+        if key in seen:
+            continue
+        seen.add(key)
+        unique_items.append(item)
+
+    return unique_items
+
+
+def module_index_is_typescript(module_index: dict) -> bool:
+    workspace = module_index.get("workspace", {})
+    workspace_type = workspace.get("type")
+    if workspace_type in {"npm-workspaces", "npm-package"}:
+        return True
+    manifest = workspace.get("manifest")
+    return isinstance(manifest, str) and manifest.endswith("package.json")
+
+
 def build_surface(root: Path) -> dict:
     module_index = load_module_index(root)
+    is_typescript = module_index_is_typescript(module_index)
     modules = []
 
     for layer in module_index.get("layers", []):
         for module in layer.get("modules", []):
-            public_items = extract_public_items(root, module)
+            public_items = (
+                extract_typescript_public_items(root, module)
+                if is_typescript or module.get("language") == "typescript"
+                else extract_public_items(root, module)
+            )
             modules.append(
                 {
                     "name": module["name"],
@@ -651,13 +1036,13 @@ def build_surface(root: Path) -> dict:
         "schemaVersion": 1,
         "kind": "public-surface",
         "generatedBy": ".ai/tools/generate-public-surface",
-        "visibility": "crate-external",
+        "visibility": "project-public" if is_typescript else "crate-external",
         "modules": modules,
     }
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Generate .ai/generated/public-surface.json from Rust source files.")
+    parser = argparse.ArgumentParser(description="Generate .ai/generated/public-surface.json from Rust or TypeScript source files.")
     parser.add_argument("--check", action="store_true", help="Fail if the generated public surface differs from the current file.")
     parser.add_argument("--print", action="store_true", help="Print generated JSON instead of writing it.")
     parser.add_argument("--output", default=".ai/generated/public-surface.json", help="Output path relative to the project root.")

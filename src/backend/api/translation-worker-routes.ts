@@ -8,6 +8,7 @@ import { VcmError } from "../errors.js";
 import type { TranslationWorkerService } from "../services/translation-worker-service.js";
 import type { ProjectService } from "../services/project-service.js";
 import type { SessionService } from "../services/session-service.js";
+import type { TranslationService } from "../services/translation-service.js";
 import type { StartRoleSessionRequest } from "../../shared/types/session.js";
 
 export interface TranslationWorkerRouteDeps {
@@ -22,6 +23,7 @@ export interface TranslationWorkerRouteDeps {
     | "restartProjectTranslatorSession"
     | "stopProjectTranslatorSession"
   >;
+  translationService: Pick<TranslationService, "stopSession">;
 }
 
 export function registerTranslationWorkerRoutes(app: FastifyInstance, deps: TranslationWorkerRouteDeps): void {
@@ -54,12 +56,18 @@ export function registerTranslationWorkerRoutes(app: FastifyInstance, deps: Tran
 
   app.post<{ Body: StartRoleSessionRequest }>("/api/translation/session/restart", async (request) => {
     const project = await requireCurrentProject(deps.projectService);
+    const existing = await deps.sessionService.getProjectTranslatorSession(project.repoRoot);
+    if (existing) {
+      await deps.translationService.stopSession(existing.id, { clearCache: true });
+    }
     return deps.sessionService.restartProjectTranslatorSession(project.repoRoot, request.body);
   });
 
   app.post("/api/translation/session/stop", async () => {
     const project = await requireCurrentProject(deps.projectService);
-    return deps.sessionService.stopProjectTranslatorSession(project.repoRoot);
+    const session = await deps.sessionService.stopProjectTranslatorSession(project.repoRoot);
+    await deps.translationService.stopSession(session.id);
+    return session;
   });
 
   app.get<{ Querystring: { path?: string; query?: string; limit?: string } }>(

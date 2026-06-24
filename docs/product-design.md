@@ -87,8 +87,8 @@ project-manager
 For complex tasks, VCM supports optional Gate Review Gates through a
 `gate-reviewer` Claude Code role. Gate Reviewer is a VCM flow role with the same
 hook, Round, terminal, and translation behavior as the core roles. Its session
-is project-scoped and reusable across tasks, but each gate turn is bound to the
-current task and task worktree so task evidence stays explicit.
+is task-scoped: each task gets its own Gate Reviewer session in the active task
+worktree.
 
 ```text
 architect architecture plan
@@ -109,9 +109,9 @@ default to off.
 
 When any gate is on, or when a Gate Reviewer session already exists, the task
 workspace shows `Gate Reviewer` as a fifth terminal role. VCM sends a short gate
-prompt into that project session and binds the session to the current task for
-hooks, Round state, translation, and report polling. The role remains outside PM
-route-file dispatch.
+prompt into that task session and uses the normal role hook path for Round
+state, translation, and report polling. The role remains outside PM route-file
+dispatch.
 Architecture-plan findings return to architect, validation-adequacy findings
 return to reviewer, and final-diff findings go to architect first for
 assessment. Gate Reviewer role rules live in `.claude/agents/gate-reviewer.md`.
@@ -318,15 +318,13 @@ The old `Dirty: yes/no` label is not used. The UI uses `Working tree: clean` or
 `Settings` contains:
 
 - `Theme` button, cycling through `System`, `Light`, and `Dark`.
-- `Flow pause alert` button, on by default, controlling weak and strong pause reminders.
-- `Try alert` button, firing the strong pause alert dialog and sound for local verification.
+- `Pause alert sound` button, on by default, controlling only the audible pause reminder.
 - `Messages` button, opening a modal list of role messages.
 - `Events` button, opening a modal list of runtime UI events for the current task.
 
 The default theme mode is `System`, which follows the OS/browser color-scheme preference. The entire application chrome, sidebar, forms, modals, status badges, and workspace panels must support both light and dark rendering. Embedded terminals keep their terminal-native dark styling.
 
-When `Flow pause alert` is on, VCM plays a short, soft, two-note local chime after a role flow stops advancing. If the flow lasted less than 2 minutes, the chime plays 3 times, 1.4 seconds apart, and stops. If the flow lasted 2 minutes or longer, VCM shows an in-app alert dialog and repeats the chime until the user confirms the dialog. The alert sound must reuse one browser audio context after user activation instead of creating a fresh context for each repeat, because Safari can block repeated timer-driven playback when every repeat looks like a new autoplay attempt.
-`Try alert` must work even when no flow has just stopped advancing so the user can verify browser sound and notification behavior.
+When a role flow stops advancing, VCM always shows the fixed in-app pause alert dialog. When `Pause alert sound` is on, VCM also plays a short, soft, two-note local chime. If the flow lasted less than 2 minutes, the chime plays 3 times, 1.4 seconds apart, and stops. If the flow lasted 2 minutes or longer, the chime repeats until the user confirms the dialog. The alert sound must reuse one browser audio context after user activation instead of creating a fresh context for each repeat, because Safari can block repeated timer-driven playback when every repeat looks like a new autoplay attempt.
 Safari may still require the user to manually set `Safari > Website Settings > Auto-Play > Allow All Auto-Play`; Chrome is the recommended browser for reliable repeated alert sound.
 
 There is no separate `Pause orchestration` or `Resume orchestration` control in the GUI. The current product model is one on/off toggle in the role console toolbar.
@@ -391,8 +389,9 @@ Controls:
 
 Permission modes:
 
-- `default`
 - `bypassPermissions`
+- `plan`
+- `default`
 
 The permission mode applies on the next start/resume/restart. If a session is already running, changing the select does not mutate that live process.
 
@@ -498,11 +497,11 @@ For `.gitignore`, VCM uses hash comments:
 # VCM:END
 ```
 
-`.ai/vcm/` is the active VCM local control area, and `.claude/worktrees/` is the Claude-compatible task worktree area. The base repo keeps the task index; each task runtime repo keeps its own session, message, orchestration, and translation state.
+`.ai/vcm/` is the active VCM local control area, and `.claude/worktrees/` is the Claude-compatible task worktree area. The base repo keeps project-scoped runtime state outside Git; each task runtime repo keeps its own session, message, orchestration, and translation state.
 
 VCM must preserve all user-authored content outside the managed block.
 
-After applying harness changes in the base repo, the UI shows the changed files. When a task is active, the result area also shows `Commit & rebase task`: VCM stages only the changed harness files, creates a `chore: update VCM harness` commit in the base repo, and rebases the active task branch onto that commit. If the task worktree is dirty or the base repo already has staged changes, VCM stops and asks the user to clean up first.
+Harness changes are applied only in the active task worktree. For deterministic fixed-harness updates, VCM refuses to run when that worktree has Git-visible changes, writes the harness update, stages the changed harness files, and immediately creates a harness commit. For AI bootstrap work, Harness Engineer runs in the active task worktree and creates its own commit; VCM tracks status and shows the latest active task commit diff for review.
 
 Role sessions get VCM behavior from `CLAUDE.md` and `.claude/agents/*.md`, not from a pasted startup context.
 
@@ -735,37 +734,45 @@ switching roles keeps the same global translation setting.
 
 ## 14. Mobile Gateway
 
-VCM Gateway is a mobile Weixin DM bridge to the local desktop VCM instance.
+VCM Gateway is a mobile chat bridge to the local desktop VCM instance. Supported
+channels are Weixin iLink and Lark.
 
 Gateway product rules:
 
-- DM only; group chat is not supported.
-- One mobile Weixin DM identity binds to one desktop VCM instance.
-- Binding is not tied to one project or one task.
-- The bound phone can select among the projects and tasks available to the
-  desktop VCM instance.
-- After QR binding succeeds, VCM keeps a Gateway long-polling connection even
-  when Gateway is off; only `/help`, `/start`, `/status`, `/projects`, and
-  `/tasks` are accepted in that state. `/start` turns Gateway on from Weixin.
+- Weixin is DM only; Lark can receive group messages only when the bot is
+  mentioned.
+- Weixin binds one mobile chat identity to one desktop VCM instance.
+- Lark accepts any DM or group @mention that can reach the bot, and the most
+  recent active Lark chat becomes the PM reply target.
+- The active mobile chat is not tied to one project or one task.
+- The active mobile chat can select among the projects and tasks available to
+  the desktop VCM instance.
+- After setup succeeds, VCM keeps a Gateway channel connection even when
+  Gateway is off; only `/help`, `/start`, `/status`, `/projects`, and `/tasks`
+  are accepted in that state. `/start` turns Gateway on from the active mobile
+  chat.
 - VCM caches the latest PM reply per task locally. When `/start` turns Gateway
   on and the current task has a cached PM reply, the response includes that
   latest PM reply so the mobile user can resume with context.
 - Plain mobile text is sent only to the current task's `project-manager`.
 - Gateway never sends directly to `architect`, `coder`, or `reviewer`.
-- Gateway can push PM assistant replies to Weixin whenever gateway is enabled,
-  even if that PM turn was started from desktop VCM.
-- When gateway translation is enabled, mobile Chinese input is translated to
-  English before PM receives it, and PM English replies are translated to
-  Chinese before Weixin receives them.
+- Gateway can push PM assistant replies to the active mobile chat whenever
+  gateway is enabled, even if that PM turn was started from desktop VCM.
+- When gateway translation is enabled, mobile input is translated to English
+  before PM receives it, and PM English replies are translated before the mobile
+  chat receives them.
 - If PM reply translation fails or times out, Gateway sends a translation
-  failure notice instead of the English source. The bound phone can send
+  failure notice instead of the English source. The active mobile chat can send
   `/retry` to retry the latest failed output translation kept in memory.
 - The PM prompt does not include the original Chinese text.
-- There is no multi-user allowlist. The security model is one bound DM identity.
+- There is no multi-user allowlist. Weixin is a bound identity model; Lark is a
+  trusted-chat bot model.
 
-The first channel is Tencent iLink Bot API / Weixin DM. VCM uses QR login,
-`getupdates` long polling, and `sendmessage` text replies. Gateway details and
-implementation plan live in `docs/gateway-design.md`.
+The Weixin channel uses Tencent iLink QR login, `getupdates` long polling, and
+`sendmessage` text replies. The Lark channel uses QR setup to create/configure a
+bot app, stores the resulting App ID/App Secret locally, then uses WebSocket
+event delivery. Gateway details and implementation plan live in
+`docs/gateway-design.md`.
 
 ## 15. Local State
 
@@ -778,7 +785,7 @@ App-level settings:
 Stored app-level settings include:
 
 - UI theme mode: `system`, `light`, or `dark`
-- flow pause alert preference
+- pause alert sound preference
 - Claude Code permission request handling preference
 - global translation preferences
 - recent repository paths
@@ -790,8 +797,8 @@ Gateway state and audit logs:
 <vcmDataDir>/gateway/audit.jsonl
 ```
 
-Gateway credentials, iLink tokens, DM binding identity, cursors, context tokens,
-and audit logs live under `vcmDataDir`. VCM resolves `vcmDataDir` from
+Gateway credentials, iLink tokens, active chat metadata, cursors, context
+tokens, and audit logs live under `vcmDataDir`. VCM resolves `vcmDataDir` from
 `VCM_DATA_DIR`; if it is unset or empty, VCM uses `~/.vcm`.
 
 Repository-level VCM state:
@@ -824,11 +831,13 @@ Task worktree local files:
 Project-scoped local files:
 
 ```text
-.ai/vcm/gate-reviewer/session.json
+.ai/vcm/harness-engineer/session.json
 .ai/vcm/translations/
 .ai/vcm/bootstrap/session.json
-.ai/vcm/bootstrap/bootstrap.log
 ```
+
+Project-scoped tool sessions keep their durable state in the base repository,
+but their execution cwd is the active task worktree.
 
 External Claude transcripts:
 
@@ -874,8 +883,9 @@ VCM V1 is successful when:
 - Round completion detection waits for the final role in a chained conversation and can alert with prompt plus sound.
 - Translation settings save to `<vcmDataDir>/settings.json`.
 - Translation reads Claude transcript JSONL reliably after start, resume, and restart.
-- Gateway can bind one Weixin DM identity to the desktop VCM instance, send
-  translated plain text to PM, and push translated PM replies back to Weixin.
+- Gateway can bind one Weixin DM identity or use the most recent active Lark
+  chat, send translated plain text to PM, and push translated PM replies back to
+  the active mobile chat.
 - Terminal and translation panel have equal, stable reading space.
 - Harness install/update preserves user content outside VCM managed blocks.
 - Completed tasks can cleanly remove their worktree and VCM task metadata without affecting other tasks.

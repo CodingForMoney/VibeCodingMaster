@@ -41,6 +41,9 @@ function createTranslationServiceStub(): TranslationService {
     async pollSessionEvents() {
       throw new Error("not implemented");
     },
+    async pollTaskFeed() {
+      throw new Error("not implemented");
+    },
     async recordConversationBoundary() {
       return undefined;
     },

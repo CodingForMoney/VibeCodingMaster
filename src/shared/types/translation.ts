@@ -94,6 +94,10 @@ export interface SendTranslatedInputRequest {
   englishText: string;
 }
 
+export interface TranslateManualOutputRequest {
+  text: string;
+}
+
 export type TranslationSessionStatus =
   | "ready"
   | "paused"
@@ -140,6 +144,26 @@ export interface PollTranslationSessionResult {
   events: TranslationSessionEvent[];
 }
 
+export interface TranslationTaskFeedEvent {
+  seq: number;
+  sessionId: string;
+  role: RoleName;
+  event: TranslationSessionEvent;
+}
+
+export interface TranslationTaskFeedSession {
+  sessionId: string;
+  role: RoleName;
+  status: TranslationSessionStatus;
+}
+
+export interface PollTranslationTaskFeedResult {
+  taskSlug: string;
+  nextCursor: number;
+  sessions: TranslationTaskFeedSession[];
+  events: TranslationTaskFeedEvent[];
+}
+
 export type TranslationWsMessage =
   | { type: "translation-entry"; entry: TranslationEntry }
   | { type: "translation-status"; status: TranslationSessionStatus }
@@ -173,6 +197,7 @@ export interface TranslationQueueItem {
   type: TranslationQueueItemType;
   status: TranslationQueueItemStatus;
   targetLanguage: string;
+  taskSlug: string;
   jobId?: string;
   requestPath: string;
   expectedResultPath?: string;
@@ -309,6 +334,7 @@ export interface ConversationTranslationJob {
 }
 
 export interface CreateConversationTranslationRequest {
+  taskSlug: string;
   direction: TranslationDirection;
   sourceText: string;
   sourceLanguage: string;

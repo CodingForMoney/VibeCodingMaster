@@ -5,6 +5,8 @@ import type { ClaudePermissionMode, RoleSessionRecord, SessionEffort, SessionMod
 import { XtermView } from "../terminal/xterm-view.js";
 import { SessionToolbar } from "./session-toolbar.js";
 import { TranslationPanel } from "./translation-panel.js";
+import type { TranslationPanelSessionState } from "../state/translation-feed-store.js";
+import type { TranslationEntry, TranslationFailureItem } from "../../shared/types/translation.js";
 
 export interface SessionConsoleProps {
   role: RoleName;
@@ -17,6 +19,10 @@ export interface SessionConsoleProps {
   translationEnabled: boolean;
   translationAutoSendEnabled: boolean;
   translationTargetLanguage: TranslationTargetLanguage;
+  translationPanelState?: TranslationPanelSessionState;
+  onClearTranslationSession?(sessionId: string, role: RoleName): void;
+  onTranslationEntry?(sessionId: string, role: RoleName, entry: TranslationEntry): void;
+  onTranslationFailures?(sessionId: string, role: RoleName, failures: TranslationFailureItem[]): void;
   onPermissionModeChange(mode: ClaudePermissionMode): void;
   onModelChange(model: SessionModel): void;
   onEffortChange(effort: SessionEffort): void;
@@ -24,6 +30,7 @@ export interface SessionConsoleProps {
   onResume(): void;
   onStop(): void;
   onRestart(): void;
+  onNotifyHarnessUpdated?(): void;
   onTerminalEvent(message: string): void;
 }
 
@@ -38,6 +45,10 @@ export function SessionConsole({
   translationEnabled,
   translationAutoSendEnabled,
   translationTargetLanguage,
+  translationPanelState,
+  onClearTranslationSession,
+  onTranslationEntry,
+  onTranslationFailures,
   onPermissionModeChange,
   onModelChange,
   onEffortChange,
@@ -45,9 +56,13 @@ export function SessionConsole({
   onResume,
   onStop,
   onRestart,
+  onNotifyHarnessUpdated,
   onTerminalEvent
 }: SessionConsoleProps) {
-  const showTranslation = isVcmRoleName(role) && translationEnabled && session?.status === "running";
+  const showTranslation = active
+    && isVcmRoleName(role)
+    && translationEnabled
+    && session?.status === "running";
 
   return (
     <section className="session-console">
@@ -67,6 +82,7 @@ export function SessionConsole({
             onResume={onResume}
             onStop={onStop}
             onRestart={onRestart}
+            onNotifyHarnessUpdated={onNotifyHarnessUpdated}
           />
           {session?.status === "running" ? (
             <XtermView key={session.id} sessionId={session.id} active={active} onEvent={onTerminalEvent} />
@@ -84,13 +100,22 @@ export function SessionConsole({
         {showTranslation ? (
           <div className="translation-pane">
             <TranslationPanel
-              key={session.id}
+              key={`${role}:${session.id}`}
               active={active}
               autoSendEnabled={translationAutoSendEnabled}
               targetLanguage={translationTargetLanguage}
               taskSlug={session.taskSlug}
               role={role}
               sessionId={session.id}
+              panelState={translationPanelState ?? {
+                role,
+                status: "ready",
+                entries: [],
+                failures: []
+              }}
+              onClearSession={onClearTranslationSession ?? (() => undefined)}
+              onEntry={onTranslationEntry ?? (() => undefined)}
+              onFailures={onTranslationFailures ?? (() => undefined)}
             />
           </div>
         ) : null}

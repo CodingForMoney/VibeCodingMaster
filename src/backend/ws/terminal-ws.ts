@@ -30,6 +30,8 @@ export function registerTerminalWs(app: FastifyInstance, deps: TerminalWsDeps): 
 
 function bindTerminalSocket(ws: WebSocket, sessionId: string, runtime: TerminalRuntime): void {
   let unsubscribe = () => {};
+  let alive = true;
+  let closed = false;
 
   try {
     unsubscribe = runtime.subscribe(sessionId, (event) => {
@@ -48,6 +50,27 @@ function bindTerminalSocket(ws: WebSocket, sessionId: string, runtime: TerminalR
     return;
   }
 
+  const heartbeat = setInterval(() => {
+    if (closed) {
+      return;
+    }
+    if (ws.readyState !== ws.OPEN) {
+      cleanup();
+      return;
+    }
+    if (!alive) {
+      cleanup();
+      ws.terminate();
+      return;
+    }
+    alive = false;
+    ws.ping();
+  }, TERMINAL_WS_HEARTBEAT_MS);
+
+  ws.on("pong", () => {
+    alive = true;
+  });
+
   ws.on("message", (raw) => {
     try {
       const message = JSON.parse(raw.toString()) as ClientTerminalMessage;
@@ -64,9 +87,17 @@ function bindTerminalSocket(ws: WebSocket, sessionId: string, runtime: TerminalR
     }
   });
 
-  ws.on("close", () => {
+  ws.on("close", cleanup);
+  ws.on("error", cleanup);
+
+  function cleanup() {
+    if (closed) {
+      return;
+    }
+    closed = true;
+    clearInterval(heartbeat);
     unsubscribe();
-  });
+  }
 }
 
 export function isSafeTerminalResize(cols: number, rows: number): boolean {
@@ -84,6 +115,7 @@ const MIN_TERMINAL_COLS = 20;
 const MIN_TERMINAL_ROWS = 5;
 const MAX_TERMINAL_COLS = 1000;
 const MAX_TERMINAL_ROWS = 200;
+const TERMINAL_WS_HEARTBEAT_MS = 30000;
 
 function send(ws: WebSocket, message: ServerTerminalMessage): void {
   if (ws.readyState === ws.OPEN) {

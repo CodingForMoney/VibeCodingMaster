@@ -25,7 +25,9 @@ This skill is an operating procedure. It does not replace the deterministic VCM 
 3. Fill project context: add or update non-managed project facts in `CLAUDE.md` above the VCM managed block.
 4. Fill durable docs: update `docs/ARCHITECTURE.md`, module-level `ARCHITECTURE.md` files, and `docs/TESTING.md` with detailed project-specific content.
 5. Preserve user-authored content and VCM managed blocks.
-6. Report evidence, unknowns, confirmation-needed areas, generation failures, and recommended deterministic VCM actions.
+6. Review `git status` and `git diff`.
+7. Stage only allowed bootstrap harness changes and create a commit in the active task worktree.
+8. Report evidence, commit hash, final git status, unknowns, confirmation-needed areas, generation failures, and recommended deterministic VCM actions.
 
 ## Typical Outputs
 
@@ -55,7 +57,7 @@ This skill is an operating procedure. It does not replace the deterministic VCM 
 
 - Document the project-level module overview, module responsibilities, module relationships, dependency direction, and project-wide constraints.
 - Link to module-level `ARCHITECTURE.md` files when present.
-- Explain generated-context ownership, especially that `.ai/generated/public-surface.json` is the machine index for crate-external public APIs.
+- Explain generated-context ownership, especially that `.ai/generated/public-surface.json` is the machine index for public APIs, routes, and externally consumed surfaces.
 
 ### Module-Level `ARCHITECTURE.md`
 
@@ -70,12 +72,20 @@ This skill is an operating procedure. It does not replace the deterministic VCM 
 - Keep historical investigation details, superseded failures, temporary diagnostics, and per-task validation logs out of `docs/TESTING.md`.
 - Keep reviewer ownership of validation strategy and testing documentation clear.
 
+### Commit
+
+- Create the bootstrap commit yourself after the allowed files are updated.
+- Do not include product source, product tests, package manifests, lockfiles, deployment config, secrets, or VCM managed-block changes in the commit.
+- VCM will not commit bootstrap changes after your turn.
+
 ## Final Summary
 
 Include:
 
 - files reviewed
 - files drafted or updated
+- commit hash
+- final git status
 - verified claims
 - inferred claims
 - unknowns

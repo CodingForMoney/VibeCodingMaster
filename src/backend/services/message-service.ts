@@ -3,7 +3,6 @@ import { randomUUID } from "node:crypto";
 import type {
   DeleteMessageHistoryResult,
   MarkAllMessagesDoneResult,
-  VcmMessageActor,
   VcmMessageType,
   VcmOrchestrationMode,
   VcmOrchestrationState,
@@ -13,7 +12,6 @@ import type {
 } from "../../shared/types/message.js";
 import type { RoleName, VcmRoleName } from "../../shared/types/role.js";
 import { CORE_VCM_ROLE_NAMES } from "../../shared/constants.js";
-import { VcmError } from "../errors.js";
 import { resolveRepoPath } from "../adapters/filesystem.js";
 import type { FileSystemAdapter } from "../adapters/filesystem.js";
 import type { TerminalRuntime } from "../runtime/terminal-runtime.js";
@@ -84,8 +82,6 @@ export interface MessageServiceDeps {
 }
 
 const PM_ROLE: VcmRoleName = "project-manager";
-const PM_TO_ROLE_TYPES = new Set<VcmMessageType>(["task", "question", "review-request", "revise", "cancel"]);
-const ROLE_TO_PM_TYPES = new Set<VcmMessageType>(["result", "question", "blocked", "finding"]);
 const DEFAULT_PRE_DISPATCH_SWITCH_DELAY_MS = 500;
 const DEFAULT_AUTO_DISPATCH_ENTER_DELAY_MS = 500;
 const DEFAULT_DISPATCH_CONFIRMATION_RETRY_DELAYS_MS = [1500, 3000];
@@ -155,8 +151,6 @@ export function createMessageService(deps: MessageServiceDeps): MessageService {
     state: VcmOrchestrationState,
     timestamp: string
   ): Promise<VcmRouteFileDispatchResult> {
-    validateMessagePolicy(routeFile.fromRole, routeFile.toRole, routeFile.type);
-
     const session = await deps.sessionService.getRoleSession(input.repoRoot, input.taskSlug, routeFile.toRole);
     if (!session || session.status !== "running") {
       return {
@@ -506,39 +500,6 @@ function selectDispatchCandidates(routeFiles: VcmRouteFile[], stoppedRole?: Role
   });
 }
 
-function validateMessagePolicy(fromRole: VcmMessageActor, toRole: VcmRoleName, type: VcmMessageType): void {
-  if (!CORE_VCM_ROLE_NAMES.some((role) => role === toRole)) {
-    throw new VcmError({
-      code: "MESSAGE_TARGET_UNKNOWN",
-      message: `Unknown target role: ${toRole}`,
-      statusCode: 400
-    });
-  }
-
-  if (!CORE_VCM_ROLE_NAMES.some((role) => role === fromRole)) {
-    throw new VcmError({
-      code: "MESSAGE_SENDER_UNKNOWN",
-      message: `Unknown sender role: ${fromRole}`,
-      statusCode: 400
-    });
-  }
-
-  if (fromRole === PM_ROLE && toRole !== PM_ROLE && PM_TO_ROLE_TYPES.has(type)) {
-    return;
-  }
-
-  if (fromRole !== PM_ROLE && toRole === PM_ROLE && ROLE_TO_PM_TYPES.has(type)) {
-    return;
-  }
-
-  throw new VcmError({
-    code: "MESSAGE_POLICY_DENIED",
-    message: `${fromRole} cannot send ${type} messages to ${toRole}.`,
-    statusCode: 403,
-    hint: "Use project-manager as the orchestration hub unless this task explicitly allows a peer route."
-  });
-}
-
 async function withTaskLock<T>(
   locks: Map<string, Promise<unknown>>,
   key: string,
@@ -603,7 +564,7 @@ async function clearRouteFileIfStillMatchesMessage(
   }
 }
 
-function isCoreRouteRole(role: VcmMessageActor): role is VcmRoleName {
+function isCoreRouteRole(role: string): role is VcmRoleName {
   return CORE_VCM_ROLE_NAMES.some((candidate) => candidate === role);
 }
 

@@ -1,22 +1,33 @@
-import { randomUUID } from "node:crypto";
 import { execFile } from "node:child_process";
 import path from "node:path";
 import { promisify } from "node:util";
 import type {
-  CommitAndRebaseHarnessTaskResult,
   HarnessApplyResult,
   HarnessBootstrapCheck,
   HarnessBootstrapSession,
+  HarnessFileContent,
   HarnessBootstrapStatusReport,
   HarnessFileAction,
   HarnessFileKind,
   HarnessFileStatus,
   HarnessPlannedChange,
   HarnessStatusReport,
+  RecordHarnessBootstrapHookInput,
+  RepositoryDiffCommit,
+  RepositoryDiffFile,
+  RepositoryDiffFileCategory,
+  RepositoryDiffFileStatus,
+  RepositoryFileDiffReport,
+  RepositoryDiffReport,
+  RepositoryDiffSummary,
+  MergeRepositoryDiffToCurrentBranchResult,
+  RestartHarnessBootstrapRequest,
+  RunHarnessBootstrapResult,
   StartHarnessBootstrapRequest,
-  StartHarnessBootstrapResult
+  StartHarnessBootstrapResult,
+  UpdateHarnessFileContentResult
 } from "../../shared/types/harness.js";
-import type { ClaudePermissionMode } from "../../shared/types/session.js";
+import type { RoleSessionRecord } from "../../shared/types/session.js";
 import type { GitAdapter } from "../adapters/git-adapter.js";
 import type { FileSystemAdapter } from "../adapters/filesystem.js";
 import { renderArchitectHarnessRules } from "../templates/harness/architect-agent.js";
@@ -27,6 +38,7 @@ import {
   renderTranslatorAgentRules,
   renderVcmGateReviewSkillRules
 } from "../templates/harness/gate-review.js";
+import { renderHarnessEngineerHarnessRules } from "../templates/harness/harness-engineer-agent.js";
 import { renderRootClaudeHarnessRules } from "../templates/harness/claude-root.js";
 import { renderGitignoreHarnessRules } from "../templates/harness/gitignore.js";
 import { renderProjectManagerHarnessRules } from "../templates/harness/project-manager-agent.js";
@@ -35,41 +47,77 @@ import { renderReviewerHarnessRules } from "../templates/harness/reviewer-agent.
 import { renderVcmFinalAcceptanceSkillRules } from "../templates/harness/vcm-final-acceptance-skill.js";
 import { renderVcmHarnessBootstrapSkillRules } from "../templates/harness/vcm-harness-bootstrap-skill.js";
 import { renderVcmLongRunningValidationSkillRules } from "../templates/harness/vcm-long-running-validation-skill.js";
+import { renderVcmReportHarnessIssueSkillRules } from "../templates/harness/vcm-report-harness-issue-skill.js";
 import { renderVcmRouteMessageSkillRules } from "../templates/harness/vcm-route-message-skill.js";
-import type { ProjectService } from "./project-service.js";
 import type { TerminalRuntime } from "../runtime/terminal-runtime.js";
 import { submitTerminalInput } from "../runtime/terminal-submit.js";
 import { VcmError } from "../errors.js";
+import { bumpHarnessRevision, readHarnessRevisionState } from "./harness-revision.js";
+import type { SessionService } from "./session-service.js";
 
 const execFileAsync = promisify(execFile);
-const BOOTSTRAP_TASK_SLUG = "__vcm-harness-bootstrap__";
-const BOOTSTRAP_RUNTIME_ROLE = "project-manager";
-const BOOTSTRAP_LOG_PATH = ".ai/vcm/bootstrap/bootstrap.log";
 const BOOTSTRAP_SESSION_PATH = ".ai/vcm/bootstrap/session.json";
+const HARNESS_ENGINEER_SESSION_PATH = ".ai/vcm/harness-engineer/session.json";
+const MANIFEST_PATH = ".ai/vcm-harness-manifest.json";
 
 export interface HarnessService {
   getHarnessStatus(repoRoot: string): Promise<HarnessStatusReport>;
+  getHarnessFileContent(repoRoot: string, filePath: string): Promise<HarnessFileContent>;
+  updateHarnessFileContent(repoRoot: string, filePath: string, content: string): Promise<UpdateHarnessFileContentResult>;
   applyHarness(repoRoot: string): Promise<HarnessApplyResult>;
-  commitAndRebaseTask(repoRoot: string, input: CommitAndRebaseHarnessTaskInput): Promise<CommitAndRebaseHarnessTaskResult>;
-  getBootstrapStatus(repoRoot: string): Promise<HarnessBootstrapStatusReport>;
-  startHarnessBootstrap(repoRoot: string, input?: StartHarnessBootstrapRequest): Promise<StartHarnessBootstrapResult>;
+  getRepositoryDiff(repoRoot: string, input?: RepositoryDiffRequest): Promise<RepositoryDiffReport>;
+  getRepositoryFileDiff(repoRoot: string, input: RepositoryFileDiffRequest): Promise<RepositoryFileDiffReport>;
+  mergeRepositoryDiffToCurrentBranch(baseRepoRoot: string, input: MergeRepositoryDiffToCurrentBranchInput): Promise<MergeRepositoryDiffToCurrentBranchResult>;
+  getBootstrapStatus(repoRoot: string, targetRepoRoot?: string): Promise<HarnessBootstrapStatusReport>;
+  startHarnessBootstrap(repoRoot: string, targetRepoRoot?: string, input?: StartHarnessBootstrapRequest): Promise<StartHarnessBootstrapResult>;
+  restartHarnessBootstrap(repoRoot: string, targetRepoRoot?: string, input?: RestartHarnessBootstrapRequest): Promise<StartHarnessBootstrapResult>;
+  stopHarnessBootstrap(repoRoot: string): Promise<HarnessBootstrapStatusReport>;
+  runHarnessBootstrap(repoRoot: string, targetRepoRoot?: string): Promise<RunHarnessBootstrapResult>;
+  recordHarnessBootstrapHook(repoRoot: string, input: RecordHarnessBootstrapHookInput): Promise<HarnessBootstrapStatusReport>;
 }
 
 export interface HarnessServiceDeps {
   fs: FileSystemAdapter;
-  git?: Pick<GitAdapter, "addPaths" | "commit" | "getCurrentBranch" | "getHeadCommit" | "getStagedStatus" | "getStatusPorcelain" | "rebase">;
+  git?: Pick<GitAdapter, "addPaths" | "commit" | "getStatusPorcelainV1"> &
+    Partial<Pick<GitAdapter, "branchExists" | "getCommitDiff" | "getCommitInfo" | "getCommitList" | "getCurrentBranch" | "getDiff" | "getHeadCommit" | "getMergeBase" | "mergeBranchFastForward">>;
   runtime?: TerminalRuntime;
-  projectService?: Pick<ProjectService, "loadConfig">;
-  apiUrl?: string;
+  harnessEngineerSessions?: Pick<
+    SessionService,
+    | "ensureProjectHarnessEngineerSession"
+    | "restartProjectHarnessEngineerSession"
+    | "stopProjectHarnessEngineerSession"
+    | "getProjectHarnessEngineerSession"
+  >;
   now?: () => string;
   runFixedInstaller?: (repoRoot: string) => Promise<HarnessApplyResult>;
+  vcmVersion?: string;
 }
 
-export interface CommitAndRebaseHarnessTaskInput {
-  taskSlug: string;
-  branch: string;
-  worktreePath: string;
-  changedFiles: HarnessPlannedChange[];
+interface HarnessBootstrapRunState {
+  version: 1;
+  status: "running" | "complete";
+  targetRepoRoot?: string;
+  sessionId?: string;
+  claudeSessionId?: string;
+  startedAt?: string;
+  completedAt?: string;
+  updatedAt: string;
+  lastHookEvent?: RecordHarnessBootstrapHookInput["eventName"];
+}
+
+export interface RepositoryDiffRequest {
+  baseRepoRoot?: string;
+  commitSha?: string;
+}
+
+export interface RepositoryFileDiffRequest {
+  baseRepoRoot: string;
+  path: string;
+}
+
+export interface MergeRepositoryDiffToCurrentBranchInput {
+  taskRepoRoot: string;
+  taskBranch: string;
 }
 
 interface HarnessFileDefinition {
@@ -104,7 +152,7 @@ const LEGACY_CODEX_HARNESS_PATHS = [
 const VCM_HOOK_COMMAND = `sh -c 'if [ -z "\${VCM_TASK_SLUG:-}" ] || [ -z "\${VCM_ROLE:-}" ] || [ -z "\${VCM_API_URL:-}" ]; then exit 0; fi; node -e '"'"'let s="";process.stdin.setEncoding("utf8");process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{let event={};try{event=s.trim()?JSON.parse(s):{};}catch{event={raw:s};}process.stdout.write(JSON.stringify({taskSlug:process.env.VCM_TASK_SLUG,role:process.env.VCM_ROLE,event}));});'"'"' | curl -fsS --max-time 2 -X POST "\${VCM_API_URL}/api/hooks/claude-code" -H "content-type: application/json" --data-binary @- >/dev/null || true'`;
 const VCM_STOP_HOOK_COMMAND = `sh -c 'if [ -z "\${VCM_TASK_SLUG:-}" ] || [ -z "\${VCM_ROLE:-}" ] || [ -z "\${VCM_API_URL:-}" ]; then exit 0; fi; node -e '"'"'let s="";process.stdin.setEncoding("utf8");process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{let event={};try{event=s.trim()?JSON.parse(s):{};}catch{event={raw:s};}process.stdout.write(JSON.stringify({taskSlug:process.env.VCM_TASK_SLUG,role:process.env.VCM_ROLE,event}));});'"'"' | curl -fsS --max-time 5 -X POST "\${VCM_API_URL}/api/hooks/claude-code/stop" -H "content-type: application/json" --data-binary @- || true'`;
 const VCM_PERMISSION_REQUEST_HOOK_COMMAND = `sh -c 'if [ -z "\${VCM_TASK_SLUG:-}" ] || [ -z "\${VCM_ROLE:-}" ] || [ -z "\${VCM_API_URL:-}" ]; then exit 0; fi; node -e '"'"'let s="";process.stdin.setEncoding("utf8");process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{let event={};try{event=s.trim()?JSON.parse(s):{};}catch{event={raw:s};}process.stdout.write(JSON.stringify({taskSlug:process.env.VCM_TASK_SLUG,role:process.env.VCM_ROLE,event}));});'"'"' | curl -fsS --max-time 5 -X POST "\${VCM_API_URL}/api/hooks/claude-code/permission-request" -H "content-type: application/json" --data-binary @- || true'`;
-const VCM_BASH_GUARD_HOOK_COMMAND = `sh -c 'if [ -z "\${VCM_TASK_SLUG:-}" ] || [ -z "\${VCM_ROLE:-}" ]; then exit 0; fi; exec python3 "\${CLAUDE_PROJECT_DIR:-.}/.ai/tools/vcm-bash-guard"'`;
+const VCM_BASH_GUARD_HOOK_COMMAND = `sh -c 'if [ -z "\${VCM_TASK_SLUG:-}" ] || [ -z "\${VCM_ROLE:-}" ]; then exit 0; fi; guard=""; repo="$(git rev-parse --show-toplevel 2>/dev/null || true)"; if [ -n "$repo" ] && [ -f "$repo/.ai/tools/vcm-bash-guard" ]; then guard="$repo/.ai/tools/vcm-bash-guard"; else cwd="$(pwd -P 2>/dev/null || pwd)"; dir="$cwd"; while [ -n "$dir" ] && [ "$dir" != "/" ]; do if [ -f "$dir/.ai/tools/vcm-bash-guard" ]; then guard="$dir/.ai/tools/vcm-bash-guard"; break; fi; dir="$(dirname "$dir")"; done; if [ -z "$guard" ] && [ -n "\${CLAUDE_PROJECT_DIR:-}" ] && [ -f "\${CLAUDE_PROJECT_DIR}/.ai/tools/vcm-bash-guard" ]; then guard="\${CLAUDE_PROJECT_DIR}/.ai/tools/vcm-bash-guard"; fi; fi; [ -n "$guard" ] || exit 0; python3 "$guard" || exit 0'`;
 const VCM_BASH_DEFAULT_TIMEOUT_MS = "600000";
 const VCM_HOOK_DEFINITIONS: ReadonlyArray<{ eventName: string; matcher?: string; command: string; timeout: number }> = [
   { eventName: "PreToolUse", matcher: "Bash", command: VCM_BASH_GUARD_HOOK_COMMAND, timeout: 10 },
@@ -192,6 +240,17 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
     renderRules: renderVcmGateReviewSkillRules
   },
   {
+    kind: "skill-vcm-report-harness-issue",
+    path: ".claude/skills/vcm-report-harness-issue/SKILL.md",
+    title: "VCM Report Harness Issue Skill",
+    frontmatter: renderSkillFrontmatter(
+      "vcm-report-harness-issue",
+      "Use when a VCM role notices a reusable harness problem and needs to record feedback for Harness Engineer review."
+    ),
+    ownership: "whole-file",
+    renderRules: renderVcmReportHarnessIssueSkillRules
+  },
+  {
     kind: "agent-gate-reviewer",
     path: ".claude/agents/gate-reviewer.md",
     title: "Gate Reviewer Agent",
@@ -210,6 +269,16 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
       "VCM project translation tool role for conversation translation, file translation, bootstrap, and memory updates."
     ),
     renderRules: renderTranslatorAgentRules
+  },
+  {
+    kind: "agent-harness-engineer",
+    path: ".claude/agents/harness-engineer.md",
+    title: "Harness Engineer Agent",
+    frontmatter: renderAgentFrontmatter(
+      "harness-engineer",
+      "VCM project-scoped harness maintenance role for harness diagnosis, diff proposals, and VCM issue drafts."
+    ),
+    renderRules: renderHarnessEngineerHarnessRules
   },
   {
     kind: "tool-request-gate-review",
@@ -263,16 +332,79 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
 
 export function createHarnessService(deps: HarnessServiceDeps): HarnessService {
   const now = deps.now ?? (() => new Date().toISOString());
+  const vcmVersion = deps.vcmVersion ?? "unknown";
 
   return {
     async getHarnessStatus(repoRoot) {
       const analyses = await analyzeHarnessFiles(deps.fs, repoRoot);
       const legacyChanges = await analyzeLegacyCodexHarnessPaths(deps.fs, repoRoot);
-      return renderHarnessStatus(analyses, legacyChanges);
+      const manifestChange = deps.runFixedInstaller
+        ? await analyzeHarnessManifest(deps.fs, repoRoot, vcmVersion)
+        : undefined;
+      return renderHarnessStatus(await readHarnessRevisionValue(deps.fs, repoRoot), analyses, legacyChanges, manifestChange);
+    },
+    async getHarnessFileContent(repoRoot, filePath) {
+      return readHarnessFileContent(deps.fs, repoRoot, filePath);
+    },
+    async updateHarnessFileContent(repoRoot, filePath, content) {
+      await assertHarnessWorktreeClean(deps.git, repoRoot);
+      const definition = getHarnessFileDefinition(filePath);
+      if (!isProjectEditableHarnessFile(definition)) {
+        throw new VcmError({
+          code: "HARNESS_FILE_READONLY",
+          message: "This harness file is managed by VCM and cannot be edited directly.",
+          statusCode: 409,
+          hint: getReadonlyHarnessReason(definition)
+        });
+      }
+
+      const absolutePath = resolveHarnessPath(repoRoot, definition.path);
+      const currentContent = await deps.fs.pathExists(absolutePath)
+        ? await deps.fs.readText(absolutePath)
+        : "";
+      assertManagedBlockUnchanged(definition, currentContent, content);
+      const nextContent = ensureTrailingNewline(content);
+      await deps.fs.writeText(absolutePath, nextContent);
+      let harnessCommit: string | undefined;
+      if (nextContent !== currentContent) {
+        await bumpHarnessRevision(deps.fs, repoRoot, now());
+        harnessCommit = (await commitHarnessVisibleChanges(
+          deps.git,
+          repoRoot,
+          "chore(vcm-harness): update harness file"
+        )).harnessCommit;
+      }
+
+      const file = await readHarnessFileContent(deps.fs, repoRoot, definition.path);
+      const analyses = await analyzeHarnessFiles(deps.fs, repoRoot);
+      const legacyChanges = await analyzeLegacyCodexHarnessPaths(deps.fs, repoRoot);
+      const manifestChange = deps.runFixedInstaller
+        ? await analyzeHarnessManifest(deps.fs, repoRoot, vcmVersion)
+        : undefined;
+      return {
+        file,
+        status: renderHarnessStatus(await readHarnessRevisionValue(deps.fs, repoRoot), analyses, legacyChanges, manifestChange),
+        harnessCommit
+      };
     },
     async applyHarness(repoRoot) {
+      await assertHarnessWorktreeClean(deps.git, repoRoot);
       if (deps.runFixedInstaller) {
-        return deps.runFixedInstaller(repoRoot);
+        const result = await deps.runFixedInstaller(repoRoot);
+        if (result.changedFiles.length > 0) {
+          await bumpHarnessRevision(deps.fs, repoRoot, now());
+        }
+        const committed = await commitHarnessVisibleChanges(
+          deps.git,
+          repoRoot,
+          "chore(vcm-harness): update fixed harness"
+        );
+        return {
+          ...result,
+          changedFiles: committed.changedFiles.length > 0 ? committed.changedFiles : result.changedFiles,
+          harnessCommit: committed.harnessCommit,
+          message: formatHarnessApplyMessage(committed.harnessCommit, result.changedFiles.length > 0)
+        };
       }
 
       const analyses = await analyzeHarnessFiles(deps.fs, repoRoot);
@@ -290,154 +422,39 @@ export function createHarnessService(deps: HarnessServiceDeps): HarnessService {
 
       const legacyChanges = await removeLegacyCodexHarnessPaths(deps.fs, repoRoot);
       changedFiles.push(...legacyChanges);
+      if (changedFiles.length > 0) {
+        await bumpHarnessRevision(deps.fs, repoRoot, now());
+      }
+      const committed = await commitHarnessVisibleChanges(
+        deps.git,
+        repoRoot,
+        "chore(vcm-harness): update fixed harness"
+      );
 
       return {
         version: VCM_HARNESS_VERSION,
-        changedFiles,
+        changedFiles: committed.changedFiles.length > 0 ? committed.changedFiles : changedFiles,
+        harnessCommit: committed.harnessCommit,
         message: changedFiles.length === 0
           ? "VCM Harness is already up to date."
-          : "VCM Harness updated. Review these files and commit the harness changes before starting long-running work."
+          : formatHarnessApplyMessage(committed.harnessCommit, true)
       };
     },
-    async commitAndRebaseTask(repoRoot, input) {
-      if (!deps.git) {
-        throw new VcmError({
-          code: "HARNESS_GIT_UNAVAILABLE",
-          message: "Git-backed harness sync is not available in this VCM runtime.",
-          statusCode: 501
-        });
-      }
-      const changedFiles = dedupeHarnessChanges(input.changedFiles);
-      const changedPaths = changedFiles.map((change) => change.path);
-      const taskBranch = await deps.git.getCurrentBranch(input.worktreePath);
-      if (taskBranch !== input.branch) {
-        throw new VcmError({
-          code: "HARNESS_TASK_BRANCH_MISMATCH",
-          message: "The selected task worktree is not on its recorded task branch.",
-          statusCode: 409,
-          hint: `Expected ${input.branch}, found ${taskBranch}.`
-        });
-      }
-
-      const taskStatus = await deps.git.getStatusPorcelain(input.worktreePath);
-      if (taskStatus.trim()) {
-        throw new VcmError({
-          code: "HARNESS_TASK_DIRTY",
-          message: "The selected task worktree has uncommitted changes.",
-          statusCode: 409,
-          hint: "Commit or clean the task worktree before rebasing it onto the harness commit."
-        });
-      }
-
-      const preExistingStaged = await deps.git.getStagedStatus(repoRoot);
-      if (preExistingStaged.trim()) {
-        throw new VcmError({
-          code: "HARNESS_BASE_STAGED_CHANGES",
-          message: "The connected repository already has staged changes.",
-          statusCode: 409,
-          hint: "Commit, unstage, or clean existing staged changes before using Commit & rebase task."
-        });
-      }
-
-      const baseBranch = await deps.git.getCurrentBranch(repoRoot);
-      const baseCommitBefore = await deps.git.getHeadCommit(repoRoot);
-      let harnessCommit: string | undefined;
-      let committed = false;
-
-      if (changedPaths.length > 0) {
-        await deps.git.addPaths(repoRoot, changedPaths);
-        const stagedHarnessChanges = await deps.git.getStagedStatus(repoRoot);
-        if (stagedHarnessChanges.trim()) {
-          harnessCommit = await deps.git.commit(repoRoot, "chore: update VCM harness");
-          committed = true;
-        }
-      }
-
-      const baseCommitAfter = await deps.git.getHeadCommit(repoRoot);
-      await deps.git.rebase(input.worktreePath, baseCommitAfter);
-
-      return {
-        taskSlug: input.taskSlug,
-        branch: input.branch,
-        worktreePath: input.worktreePath,
-        baseBranch,
-        baseCommitBefore,
-        baseCommitAfter,
-        harnessCommit,
-        committed,
-        rebased: true,
-        changedFiles,
-        message: committed
-          ? `Committed VCM harness update ${shortCommit(baseCommitAfter)} on ${baseBranch} and rebased ${input.branch}.`
-          : `No new harness commit was needed; rebased ${input.branch} onto ${shortCommit(baseCommitAfter)}.`
-      };
+    async getRepositoryDiff(repoRoot, input = {}) {
+      return getRepositoryDiffReport(requireRepositoryDiffGit(deps.git), repoRoot, input, now());
     },
-    async getBootstrapStatus(repoRoot) {
-      return getHarnessBootstrapStatus(deps, repoRoot, now);
+    async getRepositoryFileDiff(repoRoot, input) {
+      return getRepositoryFileDiffReport(requireRepositoryDiffGit(deps.git), repoRoot, input, now());
     },
-    async startHarnessBootstrap(repoRoot, input = {}) {
-      if (!deps.runtime || !deps.projectService) {
-        throw new VcmError({
-          code: "HARNESS_BOOTSTRAP_UNAVAILABLE",
-          message: "Harness bootstrap sessions are not available in this VCM runtime.",
-          statusCode: 501
-        });
-      }
-
-      const currentStatus = await getHarnessBootstrapStatus(deps, repoRoot, now);
-      if (currentStatus.session?.status === "running") {
-        return {
-          status: currentStatus,
-          session: currentStatus.session,
-          prompt: buildHarnessBootstrapPrompt(repoRoot)
-        };
-      }
-      if (!currentStatus.canStart) {
-        throw new VcmError({
-          code: "HARNESS_BOOTSTRAP_NOT_READY",
-          message: "Install the fixed VCM harness before running harness bootstrap.",
-          statusCode: 409
-        });
-      }
-
-      const config = await deps.projectService.loadConfig(repoRoot);
-      const claudeSessionId = randomUUID();
-      const command = buildClaudeStartCommand(config.claudeCommand, "default", claudeSessionId);
-      const logPath = path.join(repoRoot, BOOTSTRAP_LOG_PATH);
-      const runtimeSession = await deps.runtime.createSession({
-        taskSlug: BOOTSTRAP_TASK_SLUG,
-        role: BOOTSTRAP_RUNTIME_ROLE,
-        command: command.command,
-        args: command.args,
-        cwd: repoRoot,
-        env: {
-          VCM_API_URL: deps.apiUrl,
-          VCM_TASK_REPO_ROOT: repoRoot,
-          VCM_HARNESS_BOOTSTRAP: "1",
-          VCM_SESSION_ID: claudeSessionId
-        },
-        cols: input.cols,
-        rows: input.rows,
-        logPath
-      });
-      const timestamp = now();
-      const session: HarnessBootstrapSession = {
-        id: runtimeSession.id,
-        claudeSessionId,
-        status: runtimeSession.status === "crashed" ? "crashed" : runtimeSession.status === "exited" ? "exited" : "running",
-        command: command.display,
-        cwd: repoRoot,
-        logPath: BOOTSTRAP_LOG_PATH,
-        startedAt: runtimeSession.startedAt,
-        updatedAt: timestamp,
-        lastOutputAt: runtimeSession.lastOutputAt,
-        exitCode: runtimeSession.exitCode
-      };
-      await persistHarnessBootstrapSession(deps.fs, repoRoot, session);
-
-      const prompt = buildHarnessBootstrapPrompt(repoRoot);
-      await submitTerminalInput(deps.runtime, runtimeSession.id, prompt);
-      const nextStatus = await getHarnessBootstrapStatus(deps, repoRoot, now);
+    async mergeRepositoryDiffToCurrentBranch(baseRepoRoot, input) {
+      return mergeRepositoryDiffToCurrentBranch(requireRepositoryMergeGit(deps.git), baseRepoRoot, input, now());
+    },
+    async getBootstrapStatus(repoRoot, targetRepoRoot = repoRoot) {
+      return getHarnessBootstrapStatus(deps, repoRoot, targetRepoRoot, now, vcmVersion);
+    },
+    async startHarnessBootstrap(repoRoot, targetRepoRoot = repoRoot, input = {}) {
+      const session = await ensureHarnessEngineerForBootstrap(deps, repoRoot, targetRepoRoot, now, vcmVersion, input);
+      const nextStatus = await getHarnessBootstrapStatus(deps, repoRoot, targetRepoRoot, now, vcmVersion);
 
       return {
         status: {
@@ -445,27 +462,187 @@ export function createHarnessService(deps: HarnessServiceDeps): HarnessService {
           session
         },
         session,
-        prompt
+        prompt: buildHarnessBootstrapPrompt(repoRoot, targetRepoRoot)
       };
+    },
+    async restartHarnessBootstrap(repoRoot, targetRepoRoot = repoRoot, input = {}) {
+      const session = await restartHarnessEngineerForBootstrap(deps, repoRoot, targetRepoRoot, now, vcmVersion, input);
+      const nextStatus = await getHarnessBootstrapStatus(deps, repoRoot, targetRepoRoot, now, vcmVersion);
+      return {
+        status: {
+          ...nextStatus,
+          session
+        },
+        session,
+        prompt: buildHarnessBootstrapPrompt(repoRoot, targetRepoRoot)
+      };
+    },
+    async stopHarnessBootstrap(repoRoot) {
+      const existing = await getCurrentHarnessEngineerBootstrapSession(deps, repoRoot);
+      if (!existing) {
+        throw new VcmError({
+          code: "HARNESS_BOOTSTRAP_SESSION_MISSING",
+          message: "Harness Engineer session has not been started.",
+          statusCode: 404
+        });
+      }
+      await deps.harnessEngineerSessions?.stopProjectHarnessEngineerSession(repoRoot);
+      await clearHarnessBootstrapRunState(deps.fs, repoRoot);
+      return getHarnessBootstrapStatus(deps, repoRoot, repoRoot, now, vcmVersion);
+    },
+    async runHarnessBootstrap(repoRoot, targetRepoRoot = repoRoot) {
+      if (!deps.runtime || !deps.harnessEngineerSessions) {
+        throw new VcmError({
+          code: "HARNESS_BOOTSTRAP_UNAVAILABLE",
+          message: "Harness bootstrap sessions are not available in this VCM runtime.",
+          statusCode: 501
+        });
+      }
+      await assertHarnessWorktreeClean(deps.git, targetRepoRoot);
+      const status = await getHarnessBootstrapStatus(deps, repoRoot, targetRepoRoot, now, vcmVersion);
+      const session = status.session;
+      if (!session || session.status !== "running" || !deps.runtime.getSession(session.id)) {
+        throw new VcmError({
+          code: "HARNESS_BOOTSTRAP_SESSION_NOT_RUNNING",
+          message: "Start the Harness Engineer session before running bootstrap.",
+          statusCode: 409
+        });
+      }
+      const prompt = buildHarnessBootstrapPrompt(repoRoot, targetRepoRoot);
+      const timestamp = now();
+      await persistHarnessBootstrapRunState(deps.fs, repoRoot, {
+        version: 1,
+        status: "running",
+        targetRepoRoot,
+        sessionId: session.id,
+        claudeSessionId: session.claudeSessionId,
+        startedAt: timestamp,
+        updatedAt: timestamp
+      });
+      await submitTerminalInput(deps.runtime, session.id, prompt);
+      const nextStatus = await getHarnessBootstrapStatus(deps, repoRoot, targetRepoRoot, now, vcmVersion);
+      return {
+        status: {
+          ...nextStatus,
+          session
+        },
+        session,
+        prompt,
+        targetRepoRoot
+      };
+    },
+    async recordHarnessBootstrapHook(repoRoot, input) {
+      const state = await loadPersistedHarnessBootstrapRunState(deps.fs, repoRoot);
+      if (state?.status !== "running" || !matchesBootstrapRunState(state, input)) {
+        return getHarnessBootstrapStatus(deps, repoRoot, state?.targetRepoRoot ?? repoRoot, now, vcmVersion);
+      }
+
+      const timestamp = now();
+      if (input.eventName === "Stop" && state.targetRepoRoot) {
+        await bumpHarnessRevision(deps.fs, state.targetRepoRoot, timestamp);
+      }
+      await persistHarnessBootstrapRunState(deps.fs, repoRoot, {
+        ...state,
+        status: input.eventName === "Stop" ? "complete" : state.status,
+        completedAt: input.eventName === "Stop" ? timestamp : state.completedAt,
+        updatedAt: timestamp,
+        lastHookEvent: input.eventName
+      });
+      return getHarnessBootstrapStatus(deps, repoRoot, state.targetRepoRoot ?? repoRoot, now, vcmVersion);
     }
   };
 }
 
-function dedupeHarnessChanges(changedFiles: HarnessPlannedChange[]): HarnessPlannedChange[] {
-  const seen = new Set<string>();
-  const changes: HarnessPlannedChange[] = [];
-  for (const change of changedFiles) {
-    const normalizedPath = normalizeHarnessGitPath(change.path);
-    if (seen.has(normalizedPath)) {
-      continue;
-    }
-    seen.add(normalizedPath);
-    changes.push({
-      ...change,
-      path: normalizedPath
+async function ensureHarnessEngineerForBootstrap(
+  deps: HarnessServiceDeps,
+  repoRoot: string,
+  targetRepoRoot: string,
+  now: () => string,
+  vcmVersion: string,
+  input: StartHarnessBootstrapRequest
+): Promise<HarnessBootstrapSession> {
+  if (!deps.harnessEngineerSessions) {
+    throw new VcmError({
+      code: "HARNESS_BOOTSTRAP_UNAVAILABLE",
+      message: "Harness bootstrap sessions are not available in this VCM runtime.",
+      statusCode: 501
     });
   }
-  return changes;
+
+  const currentStatus = await getHarnessBootstrapStatus(deps, repoRoot, targetRepoRoot, now, vcmVersion);
+  if (currentStatus.session?.status === "running") {
+    return currentStatus.session;
+  }
+  if (!currentStatus.canStart) {
+    throw new VcmError({
+      code: "HARNESS_BOOTSTRAP_NOT_READY",
+      message: "Install the fixed VCM harness before starting harness bootstrap.",
+      statusCode: 409
+    });
+  }
+
+  return toHarnessBootstrapSession(await deps.harnessEngineerSessions.ensureProjectHarnessEngineerSession(repoRoot, input));
+}
+
+async function restartHarnessEngineerForBootstrap(
+  deps: HarnessServiceDeps,
+  repoRoot: string,
+  targetRepoRoot: string,
+  now: () => string,
+  vcmVersion: string,
+  input: RestartHarnessBootstrapRequest
+): Promise<HarnessBootstrapSession> {
+  if (!deps.harnessEngineerSessions) {
+    throw new VcmError({
+      code: "HARNESS_BOOTSTRAP_UNAVAILABLE",
+      message: "Harness bootstrap sessions are not available in this VCM runtime.",
+      statusCode: 501
+    });
+  }
+
+  const currentStatus = await getHarnessBootstrapStatus(deps, repoRoot, targetRepoRoot, now, vcmVersion);
+  if (!currentStatus.canStart) {
+    throw new VcmError({
+      code: "HARNESS_BOOTSTRAP_NOT_READY",
+      message: "Install the fixed VCM harness before starting harness bootstrap.",
+      statusCode: 409
+    });
+  }
+
+  return toHarnessBootstrapSession(await deps.harnessEngineerSessions.restartProjectHarnessEngineerSession(repoRoot, input));
+}
+
+async function getCurrentHarnessEngineerBootstrapSession(
+  deps: HarnessServiceDeps,
+  repoRoot: string
+): Promise<HarnessBootstrapSession | undefined> {
+  const session = await deps.harnessEngineerSessions?.getProjectHarnessEngineerSession(repoRoot);
+  return session ? toHarnessBootstrapSession(session) : undefined;
+}
+
+function toHarnessBootstrapSession(session: RoleSessionRecord): HarnessBootstrapSession {
+  return {
+    id: session.id,
+    claudeSessionId: session.claudeSessionId,
+    status: toBootstrapSessionStatus(session.status),
+    command: session.command,
+    permissionMode: session.permissionMode,
+    model: session.model,
+    effort: session.effort,
+    cwd: session.cwd,
+    logPath: HARNESS_ENGINEER_SESSION_PATH,
+    startedAt: session.startedAt,
+    updatedAt: session.updatedAt,
+    lastOutputAt: session.lastOutputAt,
+    exitCode: session.exitCode
+  };
+}
+
+function toBootstrapSessionStatus(status: RoleSessionRecord["status"]): HarnessBootstrapSession["status"] {
+  if (status === "running" || status === "crashed" || status === "exited" || status === "resumable") {
+    return status;
+  }
+  return status === "missing" ? "resumable" : "exited";
 }
 
 function normalizeHarnessGitPath(value: string): string {
@@ -492,6 +669,620 @@ function normalizeHarnessGitPath(value: string): string {
 
 function shortCommit(commit: string): string {
   return commit.slice(0, 7);
+}
+
+type HarnessGit = NonNullable<HarnessServiceDeps["git"]>;
+type RepositoryDiffGit = HarnessGit & Required<
+  Pick<GitAdapter, "getCommitDiff" | "getCommitInfo" | "getCommitList" | "getCurrentBranch" | "getDiff" | "getHeadCommit" | "getMergeBase">
+>;
+type RepositoryMergeGit = HarnessGit & Required<
+  Pick<GitAdapter, "branchExists" | "getCurrentBranch" | "getHeadCommit" | "mergeBranchFastForward">
+>;
+
+interface ParsedGitStatusEntry {
+  path: string;
+  oldPath?: string;
+  indexStatus: string;
+  workingTreeStatus: string;
+}
+
+const REPOSITORY_DIFF_MAX_FILES = 250;
+const REPOSITORY_DIFF_MAX_DIFF_CHARS = 180_000;
+
+function requireRepositoryDiffGit(git: HarnessGit | undefined): RepositoryDiffGit {
+  if (
+    !git?.getCommitDiff ||
+    !git.getCommitInfo ||
+    !git.getCommitList ||
+    !git.getCurrentBranch ||
+    !git.getDiff ||
+    !git.getHeadCommit ||
+    !git.getMergeBase
+  ) {
+    throw new VcmError({
+      code: "HARNESS_GIT_UNAVAILABLE",
+      message: "Git-backed repository diff is not available in this VCM runtime.",
+      statusCode: 501
+    });
+  }
+  return git as RepositoryDiffGit;
+}
+
+function requireRepositoryMergeGit(git: HarnessGit | undefined): RepositoryMergeGit {
+  if (
+    !git?.branchExists ||
+    !git.getCurrentBranch ||
+    !git.getHeadCommit ||
+    !git.mergeBranchFastForward
+  ) {
+    throw new VcmError({
+      code: "HARNESS_GIT_UNAVAILABLE",
+      message: "Git-backed repository merge is not available in this VCM runtime.",
+      statusCode: 501
+    });
+  }
+  return git as RepositoryMergeGit;
+}
+
+async function getRepositoryDiffReport(
+  git: RepositoryDiffGit,
+  repoRoot: string,
+  input: RepositoryDiffRequest,
+  generatedAt: string
+): Promise<RepositoryDiffReport> {
+  const sourceBranch = await git.getCurrentBranch(repoRoot);
+  const targetBranch = input.baseRepoRoot ? await git.getCurrentBranch(input.baseRepoRoot) : sourceBranch;
+  const baseRef = input.baseRepoRoot
+    ? await git.getHeadCommit(input.baseRepoRoot)
+    : "HEAD^";
+  const mergeBase = await git.getMergeBase(repoRoot, baseRef, "HEAD");
+  const commits = (await git.getCommitList(repoRoot, `${mergeBase}..HEAD`)).map(toRepositoryDiffCommit);
+  const warnings: string[] = [];
+  const selectedCommit = selectRepositoryDiffCommit(commits, input.commitSha);
+
+  if (!selectedCommit) {
+    return {
+      version: 1,
+      repoRoot,
+      sourceBranch,
+      targetBranch,
+      generatedAt,
+      commits,
+      summary: createEmptyRepositoryDiffSummary(),
+      files: [],
+      warnings
+    };
+  }
+
+  const commitInfo = await git.getCommitInfo(repoRoot, selectedCommit.sha);
+  const rawDiff = await git.getCommitDiff(repoRoot, selectedCommit.sha);
+  const allFiles = parseCommitDiffFiles(rawDiff);
+  const files = allFiles.slice(0, REPOSITORY_DIFF_MAX_FILES);
+  if (allFiles.length > files.length) {
+    warnings.push(`Diff file list is truncated to ${REPOSITORY_DIFF_MAX_FILES} files.`);
+  }
+
+  const productCodeCount = files.filter((file) => file.category === "product_code").length;
+
+  return {
+    version: 1,
+    repoRoot,
+    sourceBranch,
+    targetBranch,
+    generatedAt,
+    commits,
+    commit: {
+      sha: commitInfo.sha,
+      shortSha: commitInfo.sha.slice(0, 12),
+      subject: commitInfo.subject,
+      committedAt: commitInfo.committedAt
+    },
+    summary: {
+      totalFiles: files.length,
+      committedFiles: files.length,
+      stagedFiles: 0,
+      unstagedFiles: 0,
+      untrackedFiles: 0,
+      additions: files.reduce((total, file) => total + file.additions, 0),
+      deletions: files.reduce((total, file) => total + file.deletions, 0),
+      harnessFiles: files.filter((file) => file.category !== "product_code").length,
+      productCodeFiles: productCodeCount,
+      truncatedFiles: files.filter((file) => file.truncated).length,
+      binaryFiles: files.filter((file) => file.binary).length
+    },
+    files,
+    warnings
+  };
+}
+
+async function getRepositoryFileDiffReport(
+  git: RepositoryDiffGit,
+  repoRoot: string,
+  input: RepositoryFileDiffRequest,
+  generatedAt: string
+): Promise<RepositoryFileDiffReport> {
+  const filePath = normalizeHarnessGitPath(input.path);
+  const baseRepoRoot = input.baseRepoRoot;
+  const sourceBranch = await git.getCurrentBranch(repoRoot);
+  const targetBranch = await git.getCurrentBranch(baseRepoRoot);
+  const baseSha = await git.getHeadCommit(baseRepoRoot);
+  const headSha = await git.getHeadCommit(repoRoot);
+  const rawDiff = await git.getDiff(repoRoot, baseSha, null, [filePath]);
+  const files = parseCommitDiffFiles(rawDiff);
+  const file = files.find((entry) => entry.path === filePath || entry.oldPath === filePath) ?? files[0] ?? null;
+  const warnings: string[] = [];
+  if (files.length > 1) {
+    warnings.push(`Multiple diff entries matched ${filePath}; showing the first entry.`);
+  }
+
+  return {
+    version: 1,
+    repoRoot,
+    baseRepoRoot,
+    sourceBranch,
+    targetBranch,
+    baseSha,
+    headSha,
+    path: filePath,
+    generatedAt,
+    file,
+    warnings
+  };
+}
+
+async function mergeRepositoryDiffToCurrentBranch(
+  git: RepositoryMergeGit,
+  baseRepoRoot: string,
+  input: MergeRepositoryDiffToCurrentBranchInput,
+  mergedAt: string
+): Promise<MergeRepositoryDiffToCurrentBranchResult> {
+  const taskBranch = input.taskBranch.trim();
+  if (!taskBranch) {
+    throw new VcmError({
+      code: "HARNESS_MERGE_SOURCE_BRANCH_MISSING",
+      message: "Task branch is missing.",
+      statusCode: 400
+    });
+  }
+  if (!(await git.branchExists(baseRepoRoot, taskBranch))) {
+    throw new VcmError({
+      code: "HARNESS_MERGE_SOURCE_BRANCH_MISSING",
+      message: `Task branch does not exist locally: ${taskBranch}`,
+      statusCode: 409,
+      hint: "Create or restore the task branch before merging it into the connected repository branch."
+    });
+  }
+
+  const targetBranch = await git.getCurrentBranch(baseRepoRoot);
+  if (targetBranch === "detached") {
+    throw new VcmError({
+      code: "HARNESS_MERGE_BASE_DETACHED",
+      message: "The connected repository is in detached HEAD state.",
+      statusCode: 409,
+      hint: "Checkout the intended target branch in the connected repository before merging the task branch."
+    });
+  }
+  if (taskBranch === targetBranch) {
+    throw new VcmError({
+      code: "HARNESS_MERGE_BRANCH_INVALID",
+      message: "Task branch is already the connected repository branch.",
+      statusCode: 409,
+      hint: `Source and target are both ${targetBranch}.`
+    });
+  }
+
+  await assertVisibleWorktreeClean(git, input.taskRepoRoot, "The active task worktree", "HARNESS_MERGE_TASK_DIRTY");
+  await assertVisibleWorktreeClean(git, baseRepoRoot, "The connected repository", "HARNESS_MERGE_BASE_DIRTY");
+
+  const beforeSha = await git.getHeadCommit(baseRepoRoot);
+  const mergeResult = await git.mergeBranchFastForward(baseRepoRoot, taskBranch);
+  const afterSha = await git.getHeadCommit(baseRepoRoot);
+
+  return {
+    version: 1,
+    baseRepoRoot,
+    taskRepoRoot: input.taskRepoRoot,
+    sourceBranch: taskBranch,
+    targetBranch,
+    beforeSha,
+    afterSha,
+    changed: beforeSha !== afterSha,
+    stdout: mergeResult.stdout,
+    stderr: mergeResult.stderr,
+    mergedAt
+  };
+}
+
+async function assertVisibleWorktreeClean(
+  git: HarnessGit,
+  repoRoot: string,
+  label: string,
+  code: string
+): Promise<void> {
+  const entries = await getVisibleGitStatusEntries(git, repoRoot);
+  if (entries.length === 0) {
+    return;
+  }
+  throw new VcmError({
+    code,
+    message: `${label} has uncommitted Git-visible changes.`,
+    statusCode: 409,
+    hint: `Commit or revert these files before merging to main: ${entries.map((entry) => entry.path).slice(0, 12).join(", ")}`
+  });
+}
+
+function toRepositoryDiffCommit(commit: { sha: string; subject: string; committedAt?: string }): RepositoryDiffCommit {
+  return {
+    sha: commit.sha,
+    shortSha: commit.sha.slice(0, 12),
+    subject: commit.subject,
+    committedAt: commit.committedAt
+  };
+}
+
+function selectRepositoryDiffCommit(
+  commits: RepositoryDiffCommit[],
+  requestedSha: string | undefined
+): RepositoryDiffCommit | undefined {
+  const normalizedSha = requestedSha?.trim();
+  if (normalizedSha) {
+    return commits.find((commit) => commit.sha === normalizedSha || commit.shortSha === normalizedSha);
+  }
+  return commits[0];
+}
+
+function createEmptyRepositoryDiffSummary(): RepositoryDiffSummary {
+  return {
+    totalFiles: 0,
+    committedFiles: 0,
+    stagedFiles: 0,
+    unstagedFiles: 0,
+    untrackedFiles: 0,
+    additions: 0,
+    deletions: 0,
+    harnessFiles: 0,
+    productCodeFiles: 0,
+    truncatedFiles: 0,
+    binaryFiles: 0
+  };
+}
+
+function parseCommitDiffFiles(rawDiff: string): RepositoryDiffFile[] {
+  const chunks = rawDiff.split(/(?=^diff --git )/m).filter((chunk) => chunk.startsWith("diff --git "));
+  return chunks.map(parseCommitDiffFile);
+}
+
+function parseCommitDiffFile(chunk: string): RepositoryDiffFile {
+  const firstLine = chunk.split("\n", 1)[0] ?? "";
+  const match = firstLine.match(/^diff --git a\/(.+) b\/(.+)$/);
+  const oldPath = normalizeHarnessGitPath(match?.[1] ?? "unknown");
+  const nextPath = normalizeHarnessGitPath(match?.[2] ?? oldPath);
+  const status = getCommitDiffFileStatus(chunk);
+  const pathForCategory = status === "deleted" ? oldPath : nextPath;
+  const category = classifyRepositoryDiffPath(pathForCategory);
+  const truncatedDiff = truncateRepositoryDiff(chunk);
+  const lineStats = countDiffLines(truncatedDiff.diff);
+
+  return {
+    path: pathForCategory,
+    oldPath: oldPath === pathForCategory ? undefined : oldPath,
+    status,
+    stage: "committed",
+    category,
+    diff: truncatedDiff.diff,
+    binary: /Binary files .* differ|GIT binary patch/.test(chunk),
+    truncated: truncatedDiff.truncated,
+    additions: lineStats.additions,
+    deletions: lineStats.deletions
+  };
+}
+
+function getCommitDiffFileStatus(diffChunk: string): RepositoryDiffFileStatus {
+  if (/^new file mode /m.test(diffChunk)) {
+    return "added";
+  }
+  if (/^deleted file mode /m.test(diffChunk)) {
+    return "deleted";
+  }
+  if (/^similarity index /m.test(diffChunk) && /^rename from /m.test(diffChunk) && /^rename to /m.test(diffChunk)) {
+    return "renamed";
+  }
+  if (/^copy from /m.test(diffChunk) && /^copy to /m.test(diffChunk)) {
+    return "copied";
+  }
+  return "modified";
+}
+
+export function parseGitStatusPorcelainV1(rawStatus: string): ParsedGitStatusEntry[] {
+  const records = rawStatus.split("\0").filter(Boolean);
+  const entries: ParsedGitStatusEntry[] = [];
+  for (let index = 0; index < records.length; index += 1) {
+    const record = records[index] ?? "";
+    if (record.length < 4) {
+      continue;
+    }
+    const indexStatus = record[0] ?? " ";
+    const workingTreeStatus = record[1] ?? " ";
+    const filePath = normalizeHarnessGitPath(record.slice(3));
+    let oldPath: string | undefined;
+    if (indexStatus === "R" || indexStatus === "C") {
+      const oldPathRecord = records[index + 1];
+      if (oldPathRecord) {
+        oldPath = normalizeHarnessGitPath(oldPathRecord);
+        index += 1;
+      }
+    }
+    entries.push({
+      path: filePath,
+      oldPath,
+      indexStatus,
+      workingTreeStatus
+    });
+  }
+  return entries;
+}
+
+export function classifyRepositoryDiffPath(repoRelativePath: string): RepositoryDiffFileCategory {
+  const filePath = normalizeHarnessGitPath(repoRelativePath);
+  if (
+    filePath === "CLAUDE.md" ||
+    filePath === ".gitignore" ||
+    filePath === ".ai/vcm-harness-manifest.json" ||
+    filePath === ".github/pull_request_template.md" ||
+    filePath === ".claude/settings.json" ||
+    filePath === ".claude/settings.local.json" ||
+    filePath.startsWith(".claude/agents/") ||
+    filePath.startsWith(".claude/skills/")
+  ) {
+    return "fixed_harness";
+  }
+  if (filePath.startsWith(".ai/tools/") || filePath.startsWith(".github/workflows/")) {
+    return "tools_hooks";
+  }
+  if (filePath.startsWith(".ai/generated/")) {
+    return "generated_context";
+  }
+  if (
+    filePath.startsWith("docs/") ||
+    filePath === "ARCHITECTURE.md" ||
+    filePath.endsWith("/ARCHITECTURE.md") ||
+    filePath === "TESTING.md" ||
+    filePath.endsWith("/TESTING.md")
+  ) {
+    return "project_docs";
+  }
+  return "product_code";
+}
+
+function truncateRepositoryDiff(diff: string): { diff: string; truncated: boolean } {
+  if (diff.length <= REPOSITORY_DIFF_MAX_DIFF_CHARS) {
+    return { diff, truncated: false };
+  }
+  return {
+    diff: `${diff.slice(0, REPOSITORY_DIFF_MAX_DIFF_CHARS)}\n# ... diff truncated ...\n`,
+    truncated: true
+  };
+}
+
+function countDiffLines(diff: string): { additions: number; deletions: number } {
+  let additions = 0;
+  let deletions = 0;
+  for (const line of diff.split("\n")) {
+    if (line.startsWith("+++") || line.startsWith("---")) {
+      continue;
+    }
+    if (line.startsWith("+")) {
+      additions += 1;
+    } else if (line.startsWith("-")) {
+      deletions += 1;
+    }
+  }
+  return { additions, deletions };
+}
+
+async function assertHarnessWorktreeClean(git: HarnessGit | undefined, repoRoot: string): Promise<void> {
+  if (!git) {
+    return;
+  }
+  const entries = await getVisibleGitStatusEntries(git, repoRoot);
+  if (entries.length === 0) {
+    return;
+  }
+  throw new VcmError({
+    code: "HARNESS_WORKTREE_DIRTY",
+    message: "The active task worktree has uncommitted Git-visible changes.",
+    statusCode: 409,
+    hint: `Commit or revert these files before running a harness operation: ${entries.map((entry) => entry.path).slice(0, 12).join(", ")}`
+  });
+}
+
+async function commitHarnessVisibleChanges(
+  git: HarnessGit | undefined,
+  repoRoot: string,
+  message: string
+): Promise<{ harnessCommit?: string; changedFiles: HarnessPlannedChange[] }> {
+  if (!git) {
+    return { changedFiles: [] };
+  }
+  const entries = await getVisibleGitStatusEntries(git, repoRoot);
+  if (entries.length === 0) {
+    return { changedFiles: [] };
+  }
+
+  const unexpected = entries.filter((entry) => classifyRepositoryDiffPath(entry.path) === "product_code");
+  if (unexpected.length > 0) {
+    throw new VcmError({
+      code: "HARNESS_UNEXPECTED_PRODUCT_CHANGES",
+      message: "Harness operation produced product-code changes.",
+      statusCode: 409,
+      hint: `Review, revert, or move these changes before continuing: ${unexpected.map((entry) => entry.path).slice(0, 12).join(", ")}`
+    });
+  }
+
+  const changedFiles = entries.map(statusEntryToHarnessChange);
+  const stagePaths = uniqueStrings(entries.flatMap((entry) => [entry.path, entry.oldPath].filter((value): value is string => Boolean(value))));
+  await git.addPaths(repoRoot, stagePaths);
+  const harnessCommit = await git.commit(repoRoot, message);
+  return { harnessCommit, changedFiles };
+}
+
+async function getVisibleGitStatusEntries(git: HarnessGit, repoRoot: string): Promise<ParsedGitStatusEntry[]> {
+  const rawStatus = await git.getStatusPorcelainV1(repoRoot);
+  return parseGitStatusPorcelainV1(rawStatus).filter((entry) => !isVcmRuntimePath(entry.path));
+}
+
+function isVcmRuntimePath(repoRelativePath: string): boolean {
+  const filePath = normalizeHarnessGitPath(repoRelativePath);
+  return filePath.startsWith(".ai/vcm/") ||
+    filePath.startsWith(".claude/worktrees/") ||
+    filePath.startsWith(".ai/tools/__pycache__/") ||
+    filePath.endsWith("/__pycache__");
+}
+
+function statusEntryToHarnessChange(entry: ParsedGitStatusEntry): HarnessPlannedChange {
+  return {
+    path: entry.path,
+    action: statusEntryToHarnessAction(entry),
+    reason: "Committed by VCM harness operation."
+  };
+}
+
+function statusEntryToHarnessAction(entry: ParsedGitStatusEntry): HarnessFileAction {
+  if (entry.indexStatus === "?" || entry.indexStatus === "A" || entry.workingTreeStatus === "A") {
+    return "create";
+  }
+  if (entry.indexStatus === "D" || entry.workingTreeStatus === "D") {
+    return "delete";
+  }
+  return "update";
+}
+
+function uniqueStrings(values: string[]): string[] {
+  return [...new Set(values)];
+}
+
+function formatHarnessApplyMessage(harnessCommit: string | undefined, changed: boolean): string {
+  if (!changed) {
+    return "VCM Harness is already up to date.";
+  }
+  return harnessCommit
+    ? `VCM Harness updated and committed as ${shortCommit(harnessCommit)}. Review the commit diff before approving.`
+    : "VCM Harness updated. Review the latest harness commit before approving.";
+}
+
+async function readHarnessFileContent(
+  fs: FileSystemAdapter,
+  repoRoot: string,
+  filePath: string
+): Promise<HarnessFileContent> {
+  const definition = getHarnessFileDefinition(filePath);
+  const absolutePath = resolveHarnessPath(repoRoot, definition.path);
+  const exists = await fs.pathExists(absolutePath);
+  const content = exists ? await fs.readText(absolutePath) : "";
+  const editable = isProjectEditableHarnessFile(definition);
+  return {
+    path: definition.path,
+    kind: definition.kind,
+    title: definition.title,
+    content,
+    editable,
+    readonlyReason: editable ? undefined : getReadonlyHarnessReason(definition)
+  };
+}
+
+function getHarnessFileDefinition(filePath: string): HarnessFileDefinition {
+  const normalizedPath = normalizeHarnessFilePath(filePath);
+  const definition = HARNESS_FILES.find((file) => file.path === normalizedPath) ?? getSpecialHarnessFileDefinition(normalizedPath);
+  if (!definition) {
+    throw new VcmError({
+      code: "HARNESS_FILE_UNKNOWN",
+      message: "This path is not a known VCM harness file.",
+      statusCode: 404,
+      hint: normalizedPath
+    });
+  }
+  return definition;
+}
+
+function getSpecialHarnessFileDefinition(filePath: string): HarnessFileDefinition | undefined {
+  if (filePath !== CLAUDE_SETTINGS_PATH) {
+    return undefined;
+  }
+  return {
+    kind: "claude-settings",
+    path: CLAUDE_SETTINGS_PATH,
+    title: "Claude Code Settings",
+    ownership: "raw-file",
+    renderRules: () => ""
+  };
+}
+
+function normalizeHarnessFilePath(filePath: string): string {
+  if (!filePath || filePath.includes("\0") || path.posix.isAbsolute(filePath)) {
+    throw new VcmError({
+      code: "HARNESS_FILE_PATH_INVALID",
+      message: "Harness file path is invalid.",
+      statusCode: 400,
+      hint: filePath
+    });
+  }
+
+  const normalized = path.posix.normalize(filePath).replace(/^\.\//, "");
+  if (normalized === "." || normalized.startsWith("../")) {
+    throw new VcmError({
+      code: "HARNESS_FILE_PATH_INVALID",
+      message: "Harness file path must stay inside the repository.",
+      statusCode: 400,
+      hint: filePath
+    });
+  }
+  return normalized;
+}
+
+function isProjectEditableHarnessFile(definition: HarnessFileDefinition): boolean {
+  return definition.ownership !== "whole-file" && definition.ownership !== "raw-file";
+}
+
+function getReadonlyHarnessReason(definition: HarnessFileDefinition): string {
+  if (definition.path === CLAUDE_SETTINGS_PATH) {
+    return "Claude Code hooks are generated by VCM fixed harness install.";
+  }
+  if (definition.ownership === "whole-file" || definition.ownership === "raw-file") {
+    return "This file is VCM-owned whole-file template content. Use fixed harness update instead.";
+  }
+  return "This harness file is not editable from Harness Studio.";
+}
+
+function assertManagedBlockUnchanged(
+  definition: HarnessFileDefinition,
+  currentContent: string,
+  nextContent: string
+): void {
+  const currentBlock = extractManagedBlock(definition, currentContent);
+  const nextBlock = extractManagedBlock(definition, nextContent);
+  if (currentBlock && nextBlock !== currentBlock) {
+    throw new VcmError({
+      code: "HARNESS_MANAGED_BLOCK_PROTECTED",
+      message: "VCM fixed managed blocks cannot be edited from Harness Studio.",
+      statusCode: 409,
+      hint: "Edit project-specific content outside the VCM:BEGIN / VCM:END block, or use fixed harness update."
+    });
+  }
+  if (!currentBlock && nextBlock) {
+    throw new VcmError({
+      code: "HARNESS_MANAGED_BLOCK_PROTECTED",
+      message: "VCM fixed managed blocks must be installed by VCM.",
+      statusCode: 409,
+      hint: "Use fixed harness update instead of adding a VCM managed block manually."
+    });
+  }
+}
+
+function extractManagedBlock(definition: HarnessFileDefinition, content: string): string | undefined {
+  if (definition.ownership === "whole-file" || definition.ownership === "raw-file") {
+    return undefined;
+  }
+  return content.match(getManagedBlockPattern(definition))?.[0];
 }
 
 async function analyzeHarnessFiles(fs: FileSystemAdapter, repoRoot: string): Promise<HarnessFileAnalysis[]> {
@@ -651,14 +1442,17 @@ async function removeLegacyCodexHarnessPaths(fs: FileSystemAdapter, repoRoot: st
 }
 
 function renderHarnessStatus(
+  harnessRevision: number,
   analyses: HarnessFileAnalysis[],
-  legacyChanges: HarnessPlannedChange[] = []
+  legacyChanges: HarnessPlannedChange[] = [],
+  manifestChange?: HarnessPlannedChange
 ): HarnessStatusReport {
   const files = analyses.map((analysis) => analysis.status);
   const plannedChanges = analyses
     .map((analysis) => analysis.plannedChange)
     .filter((change): change is HarnessPlannedChange => Boolean(change))
-    .concat(legacyChanges);
+    .concat(legacyChanges)
+    .concat(manifestChange ? [manifestChange] : []);
 
   // Derive `initialized`: the VCM harness is considered installed when at least one
   // VCM-exclusive marker is present (per analysis):
@@ -678,6 +1472,7 @@ function renderHarnessStatus(
 
   return {
     version: VCM_HARNESS_VERSION,
+    harnessRevision,
     initialized,
     files,
     needsApply: plannedChanges.length > 0,
@@ -686,6 +1481,10 @@ function renderHarnessStatus(
       ? ["Review and commit VCM Harness changes before starting long-running work."]
       : []
   };
+}
+
+async function readHarnessRevisionValue(fs: FileSystemAdapter, repoRoot: string): Promise<number> {
+  return (await readHarnessRevisionState(fs, repoRoot)).revision;
 }
 
 function renderManagedBlock(definition: HarnessFileDefinition, rules: string): string {
@@ -851,36 +1650,74 @@ function ensureTrailingNewline(content: string): string {
   return content.endsWith("\n") ? content : `${content}\n`;
 }
 
+async function analyzeHarnessManifest(
+  fs: FileSystemAdapter,
+  repoRoot: string,
+  vcmVersion: string
+): Promise<HarnessPlannedChange | undefined> {
+  if (!vcmVersion || vcmVersion === "unknown") {
+    return undefined;
+  }
+
+  const manifestPath = resolveHarnessPath(repoRoot, MANIFEST_PATH);
+  if (!await fs.pathExists(manifestPath)) {
+    return {
+      path: MANIFEST_PATH,
+      action: "create",
+      reason: `VCM fixed harness manifest is missing; current VCM version is ${vcmVersion}.`
+    };
+  }
+
+  const manifest = await readOptionalJsonObject(fs, repoRoot, MANIFEST_PATH);
+  const installedVersion = typeof manifest?.harnessVersion === "string" ? manifest.harnessVersion : undefined;
+  if (!manifest || manifest.manager !== "vcm" || manifest.schemaVersion !== 1) {
+    return {
+      path: MANIFEST_PATH,
+      action: "update",
+      reason: "VCM fixed harness manifest metadata is invalid."
+    };
+  }
+  if (installedVersion !== vcmVersion) {
+    return undefined;
+  }
+
+  return undefined;
+}
+
 async function getHarnessBootstrapStatus(
   deps: HarnessServiceDeps,
   repoRoot: string,
-  now: () => string
+  targetRepoRoot: string,
+  now: () => string,
+  vcmVersion: string
 ): Promise<HarnessBootstrapStatusReport> {
-  const moduleIndex = await readOptionalJsonObject(deps.fs, repoRoot, ".ai/generated/module-index.json");
+  const moduleIndex = await readOptionalJsonObject(deps.fs, targetRepoRoot, ".ai/generated/module-index.json");
   const checks: HarnessBootstrapCheck[] = [
-    await checkFixedHarness(deps.fs, repoRoot),
-    await checkProjectContext(deps.fs, repoRoot),
+    await checkFixedHarness(deps.fs, targetRepoRoot, vcmVersion),
+    await checkProjectContext(deps.fs, targetRepoRoot),
     checkGeneratedJson(moduleIndex, ".ai/generated/module-index.json", "module-index", "Module index"),
     checkGeneratedJson(
-      await readOptionalJsonObject(deps.fs, repoRoot, ".ai/generated/public-surface.json"),
+      await readOptionalJsonObject(deps.fs, targetRepoRoot, ".ai/generated/public-surface.json"),
       ".ai/generated/public-surface.json",
       "public-surface",
       "Public surface"
     ),
-    await checkFilledMarkdown(deps.fs, repoRoot, "docs/ARCHITECTURE.md", "Project architecture", "project-architecture"),
-    await checkModuleArchitectureDocs(deps.fs, repoRoot, moduleIndex),
-    await checkFilledMarkdown(deps.fs, repoRoot, "docs/TESTING.md", "Testing doc", "testing-doc")
+    await checkFilledMarkdown(deps.fs, targetRepoRoot, "docs/ARCHITECTURE.md", "Project architecture", "project-architecture"),
+    await checkModuleArchitectureDocs(deps.fs, targetRepoRoot, moduleIndex),
+    await checkFilledMarkdown(deps.fs, targetRepoRoot, "docs/TESTING.md", "Testing doc", "testing-doc")
   ];
-  const session = await getCurrentHarnessBootstrapSession(deps, repoRoot, now);
+  const runState = await loadPersistedHarnessBootstrapRunState(deps.fs, repoRoot);
+  const session = await getCurrentHarnessEngineerBootstrapSession(deps, repoRoot);
   const fixedHarnessReady = checks[0]?.status === "ok";
   const projectChecks = checks.slice(1);
   const projectComplete = projectChecks.every((check) => check.status === "ok");
   const projectStarted = projectChecks.some((check) => check.status === "ok" || check.status === "incomplete");
+  const runActive = runState?.status === "running" && session?.status === "running";
   const status = !fixedHarnessReady
     ? "not_ready"
-    : session?.status === "running"
+    : runActive
       ? "running"
-      : projectComplete
+      : runState?.status === "complete" || projectComplete
         ? "complete"
         : projectStarted
           ? "incomplete"
@@ -888,17 +1725,17 @@ async function getHarnessBootstrapStatus(
 
   return {
     status,
-    canStart: fixedHarnessReady && session?.status !== "running",
+    canStart: fixedHarnessReady && !runActive,
     checks,
     session,
-    warnings: bootstrapWarnings(status, checks, session)
+    warnings: bootstrapWarnings(status, checks, session, runState)
   };
 }
 
-async function checkFixedHarness(fs: FileSystemAdapter, repoRoot: string): Promise<HarnessBootstrapCheck> {
+async function checkFixedHarness(fs: FileSystemAdapter, repoRoot: string, vcmVersion: string): Promise<HarnessBootstrapCheck> {
   const requiredPaths = [
     "CLAUDE.md",
-    ".ai/vcm-harness-manifest.json",
+    MANIFEST_PATH,
     ".claude/skills/vcm-harness-bootstrap/SKILL.md",
     ".ai/tools/generate-module-index",
     ".ai/tools/generate-public-surface"
@@ -928,6 +1765,17 @@ async function checkFixedHarness(fs: FileSystemAdapter, repoRoot: string): Promi
       status: "incomplete",
       path: "CLAUDE.md",
       detail: "CLAUDE.md is missing the VCM managed block."
+    };
+  }
+
+  const manifestChange = await analyzeHarnessManifest(fs, repoRoot, vcmVersion);
+  if (manifestChange) {
+    return {
+      key: "fixed-harness",
+      label: "Fixed harness",
+      status: "incomplete",
+      path: MANIFEST_PATH,
+      detail: manifestChange.reason
     };
   }
 
@@ -1125,86 +1973,64 @@ function isFilledMarkdown(content: string): boolean {
   return meaningfulLines.join("\n").length >= 120;
 }
 
-async function getCurrentHarnessBootstrapSession(
-  deps: HarnessServiceDeps,
-  repoRoot: string,
-  now: () => string
-): Promise<HarnessBootstrapSession | undefined> {
-  const persisted = await loadPersistedHarnessBootstrapSession(deps.fs, repoRoot);
-  const runtimeSession = deps.runtime
-    ?.listSessions(BOOTSTRAP_TASK_SLUG)
-    .find((session) => session.id === persisted?.id || session.status === "running");
-
-  if (runtimeSession) {
-    const session: HarnessBootstrapSession = {
-      id: runtimeSession.id,
-      claudeSessionId: persisted?.claudeSessionId ?? runtimeSession.id,
-      status: runtimeSession.status === "crashed" ? "crashed" : runtimeSession.status === "exited" ? "exited" : "running",
-      command: persisted?.command ?? "claude",
-      cwd: persisted?.cwd ?? repoRoot,
-      logPath: persisted?.logPath ?? BOOTSTRAP_LOG_PATH,
-      startedAt: runtimeSession.startedAt,
-      updatedAt: now(),
-      lastOutputAt: runtimeSession.lastOutputAt,
-      exitCode: runtimeSession.exitCode
-    };
-    await persistHarnessBootstrapSession(deps.fs, repoRoot, session);
-    return session;
-  }
-
-  if (persisted?.status === "running") {
-    return {
-      ...persisted,
-      status: "resumable",
-      updatedAt: now()
-    };
-  }
-  return undefined;
-}
-
-async function loadPersistedHarnessBootstrapSession(
+async function loadPersistedHarnessBootstrapRunState(
   fs: FileSystemAdapter,
   repoRoot: string
-): Promise<HarnessBootstrapSession | undefined> {
+): Promise<HarnessBootstrapRunState | undefined> {
   const payload = await readOptionalJsonObject(fs, repoRoot, BOOTSTRAP_SESSION_PATH);
   if (!payload) {
     return undefined;
   }
   if (
-    typeof payload.id !== "string" ||
-    typeof payload.claudeSessionId !== "string" ||
-    typeof payload.command !== "string" ||
-    typeof payload.cwd !== "string" ||
-    typeof payload.logPath !== "string" ||
+    payload.version !== 1 ||
     typeof payload.updatedAt !== "string"
   ) {
     return undefined;
   }
   const status = payload.status;
-  if (status !== "running" && status !== "exited" && status !== "crashed" && status !== "resumable") {
+  if (status !== "running" && status !== "complete") {
     return undefined;
   }
 
   return {
-    id: payload.id,
-    claudeSessionId: payload.claudeSessionId,
+    version: 1,
     status,
-    command: payload.command,
-    cwd: payload.cwd,
-    logPath: payload.logPath,
+    sessionId: typeof payload.sessionId === "string" ? payload.sessionId : undefined,
+    claudeSessionId: typeof payload.claudeSessionId === "string" ? payload.claudeSessionId : undefined,
     startedAt: typeof payload.startedAt === "string" ? payload.startedAt : undefined,
+    completedAt: typeof payload.completedAt === "string" ? payload.completedAt : undefined,
     updatedAt: payload.updatedAt,
-    lastOutputAt: typeof payload.lastOutputAt === "string" ? payload.lastOutputAt : undefined,
-    exitCode: typeof payload.exitCode === "number" || payload.exitCode === null ? payload.exitCode : undefined
+    lastHookEvent: isHarnessBootstrapHookEvent(payload.lastHookEvent) ? payload.lastHookEvent : undefined
   };
 }
 
-async function persistHarnessBootstrapSession(
+async function persistHarnessBootstrapRunState(
   fs: FileSystemAdapter,
   repoRoot: string,
-  session: HarnessBootstrapSession
+  state: HarnessBootstrapRunState
 ): Promise<void> {
-  await fs.writeJsonAtomic(resolveHarnessPath(repoRoot, BOOTSTRAP_SESSION_PATH), session);
+  await fs.writeJsonAtomic(resolveHarnessPath(repoRoot, BOOTSTRAP_SESSION_PATH), state);
+}
+
+async function clearHarnessBootstrapRunState(fs: FileSystemAdapter, repoRoot: string): Promise<void> {
+  await fs.removePath?.(resolveHarnessPath(repoRoot, BOOTSTRAP_SESSION_PATH), { force: true });
+}
+
+function isHarnessBootstrapHookEvent(value: unknown): value is RecordHarnessBootstrapHookInput["eventName"] {
+  return value === "Stop" || value === "StopFailure" || value === "UserPromptSubmit" || value === "PostCompact";
+}
+
+function matchesBootstrapRunState(
+  state: HarnessBootstrapRunState,
+  input: RecordHarnessBootstrapHookInput
+): boolean {
+  if (state.sessionId && input.sessionId && state.sessionId !== input.sessionId) {
+    return false;
+  }
+  if (state.claudeSessionId && input.claudeSessionId && state.claudeSessionId !== input.claudeSessionId) {
+    return false;
+  }
+  return true;
 }
 
 async function readOptionalText(
@@ -1240,14 +2066,18 @@ async function readOptionalJsonObject(
 function bootstrapWarnings(
   status: HarnessBootstrapStatusReport["status"],
   checks: HarnessBootstrapCheck[],
-  session: HarnessBootstrapSession | undefined
+  session: HarnessBootstrapSession | undefined,
+  runState: HarnessBootstrapRunState | undefined
 ): string[] {
   const warnings: string[] = [];
   if (status === "not_ready") {
     warnings.push("Install or update the fixed VCM harness before running harness bootstrap.");
   }
   if (session?.status === "resumable") {
-    warnings.push("The previous bootstrap terminal is no longer active; start bootstrap again or finish the remaining files manually.");
+    warnings.push("The Harness Engineer session is resumable; resume it before running harness bootstrap.");
+  }
+  if (runState?.status === "running" && session?.status !== "running") {
+    warnings.push("The previous bootstrap run did not finish with an active Harness Engineer session; resume the session or run bootstrap again.");
   }
   const unknownChecks = checks.filter((check) => check.status === "unknown");
   if (unknownChecks.length > 0) {
@@ -1256,43 +2086,35 @@ function bootstrapWarnings(
   return warnings;
 }
 
-function buildClaudeStartCommand(
-  command = "claude",
-  permissionMode: ClaudePermissionMode = "default",
-  claudeSessionId: string
-): { command: string; args: string[]; display: string } {
-  const args = ["--session-id", claudeSessionId];
-  if (permissionMode === "bypassPermissions") {
-    args.push("--permission-mode", "bypassPermissions");
-  }
-  return {
-    command,
-    args,
-    display: `${command} ${args.join(" ")}`
-  };
-}
+function buildHarnessBootstrapPrompt(baseRepoRoot: string, targetRepoRoot: string): string {
+  return `Use the vcm-harness-bootstrap skill to finish the VCM harness bootstrap for the active task worktree.
 
-function buildHarnessBootstrapPrompt(repoRoot: string): string {
-  return `Use the vcm-harness-bootstrap skill to finish the VCM harness bootstrap for this repository.
+Base repository root:
+${baseRepoRoot}
 
-Repository root:
-${repoRoot}
+Target task worktree:
+${targetRepoRoot}
 
 Required work:
-- Run .ai/tools/generate-module-index when available.
-- Run .ai/tools/generate-public-surface after module-index.json exists.
-- Add or update project-specific Project Context and Project Constraints in CLAUDE.md above the VCM managed block.
-- Fill docs/ARCHITECTURE.md with project-level module overview, responsibilities, relationships, dependency direction, project-wide constraints, and links to module-level architecture docs.
-- Create or update module-level ARCHITECTURE.md files for clear module boundaries listed by module-index.json.
-- Fill docs/TESTING.md with project-native validation levels, commands, validation selection rules, final-validation cleanup, test layout, integration/E2E case lists, generated-context freshness checks, and known testing gaps.
+- Work only inside the target task worktree.
+- Run .ai/tools/generate-module-index from the target task worktree when available.
+- Run .ai/tools/generate-public-surface from the target task worktree after module-index.json exists.
+- Add or update project-specific Project Context and Project Constraints in target CLAUDE.md above the VCM managed block.
+- Fill target docs/ARCHITECTURE.md with project-level module overview, responsibilities, relationships, dependency direction, project-wide constraints, and links to module-level architecture docs.
+- Create or update target module-level ARCHITECTURE.md files for clear module boundaries listed by module-index.json.
+- Fill target docs/TESTING.md with project-native validation levels, commands, validation selection rules, final-validation cleanup, test layout, integration/E2E case lists, generated-context freshness checks, and known testing gaps.
+- Review git status and git diff in the target task worktree.
+- Stage only allowed bootstrap harness changes and create a commit in the target task worktree.
 
 Boundaries:
+- Do not write to the base repository root.
 - Do not edit product source, product tests, package manifests, lockfiles, deployment config, secrets, or VCM managed blocks.
 - Preserve user-authored content.
 - Do not create new validation wrapper tools.
+- VCM will not create the bootstrap commit for you.
 
 Final response:
-Summarize files reviewed, files updated, generated artifacts, verified claims, inferred claims, unknowns, confirmation-needed items, and suggested validation commands.`;
+Summarize files reviewed, files updated, generated artifacts, commit hash, final git status, verified claims, inferred claims, unknowns, confirmation-needed items, and suggested validation commands.`;
 }
 
 export function createScriptFixedHarnessInstaller(

@@ -7,6 +7,7 @@ describe("harness routes", () => {
     const app = Fastify({ logger: false });
     registerHarnessRoutes(app, {
       projectService: createProjectServiceStub(),
+      taskService: createTaskServiceStub(),
       harnessService: {
         async getHarnessStatus() {
           throw openFilesError("/workspace/CLAUDE.md");
@@ -25,7 +26,7 @@ describe("harness routes", () => {
 
     const response = await app.inject({
       method: "GET",
-      url: "/api/projects/harness"
+      url: "/api/projects/harness?taskSlug=demo-task"
     });
 
     expect(response.statusCode).toBe(200);
@@ -39,6 +40,7 @@ describe("harness routes", () => {
     const app = Fastify({ logger: false });
     registerHarnessRoutes(app, {
       projectService: createProjectServiceStub(),
+      taskService: createTaskServiceStub(),
       harnessService: {
         async getHarnessStatus() {
           throw new Error("not used");
@@ -57,7 +59,7 @@ describe("harness routes", () => {
 
     const response = await app.inject({
       method: "GET",
-      url: "/api/projects/harness/bootstrap"
+      url: "/api/projects/harness/bootstrap?taskSlug=demo-task"
     });
 
     expect(response.statusCode).toBe(200);
@@ -68,27 +70,34 @@ describe("harness routes", () => {
     await app.close();
   });
 
-  it("commits and rebases the selected task worktree", async () => {
+  it("requires a task before reading harness status", async () => {
+    const app = Fastify({ logger: false });
+    registerHarnessRoutes(app, {
+      projectService: createProjectServiceStub(),
+      taskService: createTaskServiceStub(),
+      harnessService: {
+        async getHarnessStatus() {
+          throw new Error("not used");
+        }
+      }
+    } as never);
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/projects/harness"
+    });
+
+    expect(response.statusCode).toBe(409);
+    expect(response.json().code).toBe("HARNESS_TASK_REQUIRED");
+    await app.close();
+  });
+
+  it("returns repository diff using the selected commit", async () => {
     const app = Fastify({ logger: false });
     const calls: unknown[] = [];
     registerHarnessRoutes(app, {
       projectService: createProjectServiceStub(),
-      taskService: {
-        async loadTask(repoRoot: string, taskSlug: string) {
-          calls.push(["loadTask", repoRoot, taskSlug]);
-          return {
-            version: 1,
-            taskSlug,
-            createdAt: "",
-            updatedAt: "",
-            repoRoot,
-            worktreePath: "/workspace/.claude/worktrees/demo-task",
-            branch: "feature/demo-task",
-            handoffDir: ".ai/vcm/handoffs",
-            status: "created"
-          };
-        }
-      },
+      taskService: createTaskServiceStub(),
       harnessService: {
         async getHarnessStatus() {
           throw new Error("not used");
@@ -96,19 +105,156 @@ describe("harness routes", () => {
         async applyHarness() {
           throw new Error("not used");
         },
-        async commitAndRebaseTask(repoRoot, input) {
-          calls.push(["commitAndRebaseTask", repoRoot, input]);
+        async getRepositoryDiff(repoRoot, input) {
+          calls.push(["getRepositoryDiff", repoRoot, input]);
           return {
-            taskSlug: input.taskSlug,
-            branch: input.branch,
-            worktreePath: input.worktreePath,
-            baseBranch: "main",
-            baseCommitBefore: "abc",
-            baseCommitAfter: "def",
-            committed: true,
-            rebased: true,
-            changedFiles: input.changedFiles,
-            message: "done"
+            version: 1,
+            repoRoot,
+            sourceBranch: "feature/demo-task",
+            targetBranch: "release/v0.4",
+            generatedAt: "2026-06-23T00:00:00.000Z",
+            commits: [{
+              sha: "abc1234567890",
+              shortSha: "abc123456789",
+              subject: "chore(vcm-harness): bootstrap",
+              committedAt: "2026-06-23T00:00:00.000Z"
+            }],
+            commit: {
+              sha: "abc1234567890",
+              shortSha: "abc123456789",
+              subject: "chore(vcm-harness): bootstrap",
+              committedAt: "2026-06-23T00:00:00.000Z"
+            },
+            summary: {
+              totalFiles: 0,
+              committedFiles: 0,
+              stagedFiles: 0,
+              unstagedFiles: 0,
+              untrackedFiles: 0,
+              additions: 0,
+              deletions: 0,
+              harnessFiles: 0,
+              productCodeFiles: 0,
+              truncatedFiles: 0,
+              binaryFiles: 0
+            },
+            files: [],
+            warnings: []
+          };
+        },
+        async getBootstrapStatus() {
+          throw new Error("not used");
+        },
+        async startHarnessBootstrap() {
+          throw new Error("not used");
+        }
+      }
+    } as never);
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/projects/harness/repository-diff?taskSlug=demo-task&commit=abc1234567890"
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({ repoRoot: "/workspace/.claude/worktrees/demo-task" });
+    expect(calls).toEqual([[
+      "getRepositoryDiff",
+      "/workspace/.claude/worktrees/demo-task",
+      {
+        baseRepoRoot: "/workspace",
+        commitSha: "abc1234567890"
+      }
+    ]]);
+    await app.close();
+  });
+
+  it("returns repository file diff against the connected repository", async () => {
+    const app = Fastify({ logger: false });
+    const calls: unknown[] = [];
+    registerHarnessRoutes(app, {
+      projectService: createProjectServiceStub(),
+      taskService: createTaskServiceStub(),
+      harnessService: {
+        async getHarnessStatus() {
+          throw new Error("not used");
+        },
+        async applyHarness() {
+          throw new Error("not used");
+        },
+        async getRepositoryFileDiff(repoRoot, input) {
+          calls.push(["getRepositoryFileDiff", repoRoot, input]);
+          return {
+            version: 1,
+            repoRoot,
+            baseRepoRoot: input.baseRepoRoot,
+            sourceBranch: "feature/demo-task",
+            targetBranch: "release/v0.4",
+            baseSha: "base123",
+            headSha: "head123",
+            path: input.path,
+            generatedAt: "2026-06-23T00:00:00.000Z",
+            file: null,
+            warnings: []
+          };
+        },
+        async getBootstrapStatus() {
+          throw new Error("not used");
+        },
+        async startHarnessBootstrap() {
+          throw new Error("not used");
+        }
+      }
+    } as never);
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/projects/harness/repository-diff/file?taskSlug=demo-task&path=CLAUDE.md"
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({ path: "CLAUDE.md" });
+    expect(calls).toEqual([[
+      "getRepositoryFileDiff",
+      "/workspace/.claude/worktrees/demo-task",
+      {
+        baseRepoRoot: "/workspace",
+        path: "CLAUDE.md"
+      }
+    ]]);
+    await app.close();
+  });
+
+  it("merges the active task branch to the connected repository current branch", async () => {
+    const app = Fastify({ logger: false });
+    const calls: unknown[] = [];
+    registerHarnessRoutes(app, {
+      projectService: createProjectServiceStub(),
+      taskService: createTaskServiceStub(),
+      harnessService: {
+        async getHarnessStatus() {
+          throw new Error("not used");
+        },
+        async applyHarness() {
+          throw new Error("not used");
+        },
+        async getRepositoryDiff() {
+          throw new Error("not used");
+        },
+        async mergeRepositoryDiffToCurrentBranch(repoRoot, input) {
+          calls.push(["mergeRepositoryDiffToCurrentBranch", repoRoot, input]);
+          return {
+            version: 1,
+            baseRepoRoot: repoRoot,
+            taskRepoRoot: input.taskRepoRoot,
+            sourceBranch: input.taskBranch,
+            targetBranch: "release/v0.4",
+            beforeSha: "base123",
+            afterSha: "abc123",
+            changed: true,
+            stdout: "Fast-forward",
+            stderr: "",
+            mergedAt: "2026-06-23T00:00:00.000Z"
           };
         },
         async getBootstrapStatus() {
@@ -122,28 +268,24 @@ describe("harness routes", () => {
 
     const response = await app.inject({
       method: "POST",
-      url: "/api/projects/harness/tasks/demo-task/commit-and-rebase",
-      payload: {
-        changedFiles: [{ path: "CLAUDE.md", action: "update", reason: "updated" }]
-      }
+      url: "/api/projects/harness/repository-diff/merge-to-current-branch",
+      payload: { taskSlug: "demo-task" }
     });
 
     expect(response.statusCode).toBe(200);
     expect(response.json()).toMatchObject({
-      taskSlug: "demo-task",
-      branch: "feature/demo-task",
-      committed: true,
-      rebased: true
+      sourceBranch: "feature/demo-task",
+      targetBranch: "release/v0.4",
+      changed: true
     });
-    expect(calls).toEqual([
-      ["loadTask", "/workspace", "demo-task"],
-      ["commitAndRebaseTask", "/workspace", {
-        taskSlug: "demo-task",
-        branch: "feature/demo-task",
-        worktreePath: "/workspace/.claude/worktrees/demo-task",
-        changedFiles: [{ path: "CLAUDE.md", action: "update", reason: "updated" }]
-      }]
-    ]);
+    expect(calls).toEqual([[
+      "mergeRepositoryDiffToCurrentBranch",
+      "/workspace",
+      {
+        taskRepoRoot: "/workspace/.claude/worktrees/demo-task",
+        taskBranch: "feature/demo-task"
+      }
+    ]]);
     await app.close();
   });
 });
@@ -153,6 +295,24 @@ function createProjectServiceStub() {
     async getCurrentProject() {
       return {
         repoRoot: "/workspace"
+      };
+    }
+  };
+}
+
+function createTaskServiceStub() {
+  return {
+    async loadTask(repoRoot: string, taskSlug: string) {
+      return {
+        version: 1,
+        taskSlug,
+        createdAt: "",
+        updatedAt: "",
+        repoRoot,
+        worktreePath: `/workspace/.claude/worktrees/${taskSlug}`,
+        branch: `feature/${taskSlug}`,
+        handoffDir: ".ai/vcm/handoffs",
+        status: "created"
       };
     }
   };

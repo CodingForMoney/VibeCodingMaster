@@ -12,6 +12,7 @@ import { createGitAdapter } from "./adapters/git-adapter.js";
 import { createAppSettingsService, type AppSettingsService } from "./services/app-settings-service.js";
 import { createClaudeTranscriptService } from "./services/claude-transcript-service.js";
 import { createGateReviewService, type GateReviewService } from "./services/gate-review-service.js";
+import { createHarnessFeedbackService, type HarnessFeedbackService } from "./services/harness-feedback-service.js";
 import { createTranslationWorkerService, type TranslationWorkerService } from "./services/translation-worker-service.js";
 import {
   createHarnessService,
@@ -22,8 +23,10 @@ import { createNodeFileSystemAdapter } from "./adapters/filesystem.js";
 import { createNodePtyTerminalRuntime } from "./runtime/node-pty-runtime.js";
 import { registerGatewayRoutes } from "./api/gateway-routes.js";
 import { registerDiagnosticsRoutes } from "./api/diagnostics-routes.js";
+import { createLarkChannel } from "./gateway/channels/lark-channel.js";
 import { createWeixinIlinkChannel } from "./gateway/channels/weixin-ilink-channel.js";
 import { createGatewayAuditLog } from "./gateway/gateway-audit-log.js";
+import { createGatewayChannelRegistry } from "./gateway/gateway-channel.js";
 import { createGatewayService, type GatewayService } from "./gateway/gateway-service.js";
 import { createGatewaySettingsService } from "./gateway/gateway-settings-service.js";
 import { createJobGuardService } from "./services/job-guard-service.js";
@@ -32,6 +35,7 @@ import { createSessionRegistry } from "./runtime/session-registry.js";
 import { createSessionService, type SessionService } from "./services/session-service.js";
 import { createMessageService, type MessageService } from "./services/message-service.js";
 import { createRoundService, type RoundService } from "./services/round-service.js";
+import { createRuntimeCoordinatorService, type RuntimeCoordinatorService } from "./services/runtime-coordinator-service.js";
 import { createStatusService, type StatusService } from "./services/status-service.js";
 import { createTaskService, type TaskService } from "./services/task-service.js";
 import { createTranslationService, type TranslationService } from "./services/translation-service.js";
@@ -45,12 +49,14 @@ import { registerHarnessRoutes } from "./api/harness-routes.js";
 import { registerMessageRoutes } from "./api/message-routes.js";
 import { registerProjectRoutes } from "./api/project-routes.js";
 import { registerRoundRoutes } from "./api/round-routes.js";
+import { registerRuntimeStateRoutes } from "./api/runtime-state-routes.js";
 import { registerSessionRoutes } from "./api/session-routes.js";
 import { registerTaskRoutes } from "./api/task-routes.js";
 import { registerTranslationRoutes } from "./api/translation-routes.js";
 import { registerTerminalWs } from "./ws/terminal-ws.js";
 import { toVcmError } from "./errors.js";
 import type { TerminalRuntime } from "./runtime/terminal-runtime.js";
+import { readVcmPackageVersion } from "./app-version.js";
 
 export interface CreateServerOptions {
   host?: string;
@@ -66,6 +72,7 @@ export interface ServerDeps {
   sessionService: SessionService;
   artifactService: ArtifactService;
   harnessService: HarnessService;
+  harnessFeedbackService: HarnessFeedbackService;
   commandDispatcher: CommandDispatcher;
   claudeHookService: ClaudeHookService;
   messageService: MessageService;
@@ -75,14 +82,19 @@ export interface ServerDeps {
   statusService: StatusService;
   translationService: TranslationService;
   gatewayService: GatewayService;
+  runtimeCoordinator: RuntimeCoordinatorService;
   runtime: TerminalRuntime;
   diagnosticsService: DiagnosticsService;
 }
 
 export async function createServer(deps: ServerDeps, options: CreateServerOptions = {}): Promise<FastifyInstance> {
   const app = Fastify({
-    logger: false
+    logger: false,
+    keepAliveTimeout: 10000,
+    requestTimeout: 30000
   });
+  app.server.headersTimeout = 15000;
+  app.server.maxRequestsPerSocket = 100;
 
   app.setErrorHandler((error, _request, reply) => {
     const vcmError = toVcmError(error);
@@ -106,7 +118,8 @@ export async function createServer(deps: ServerDeps, options: CreateServerOption
   registerTranslationWorkerRoutes(app, {
     projectService: deps.projectService,
     translationWorkerService: deps.translationWorkerService,
-    sessionService: deps.sessionService
+    sessionService: deps.sessionService,
+    translationService: deps.translationService
   });
   registerProjectRoutes(app, {
     projectService: deps.projectService,
@@ -115,13 +128,25 @@ export async function createServer(deps: ServerDeps, options: CreateServerOption
   registerHarnessRoutes(app, {
     projectService: deps.projectService,
     harnessService: deps.harnessService,
+    harnessFeedbackService: deps.harnessFeedbackService,
+    sessionService: deps.sessionService,
     taskService: deps.taskService
+  });
+  registerRuntimeStateRoutes(app, {
+    projectService: deps.projectService,
+    taskService: deps.taskService,
+    sessionService: deps.sessionService,
+    translationWorkerService: deps.translationWorkerService,
+    harnessService: deps.harnessService,
+    harnessFeedbackService: deps.harnessFeedbackService,
+    runtimeCoordinator: deps.runtimeCoordinator
   });
   registerTaskRoutes(app, {
     projectService: deps.projectService,
     taskService: deps.taskService,
     sessionService: deps.sessionService,
     statusService: deps.statusService,
+    messageService: deps.messageService,
     translationService: deps.translationService,
     roundService: deps.roundService
   });
@@ -150,6 +175,7 @@ export async function createServer(deps: ServerDeps, options: CreateServerOption
   registerTranslationRoutes(app, {
     projectService: deps.projectService,
     taskService: deps.taskService,
+    sessionService: deps.sessionService,
     translationService: deps.translationService
   });
   registerGatewayRoutes(app, { gatewayService: deps.gatewayService });
@@ -206,6 +232,8 @@ export interface CreateDefaultServerDepsOptions {
 
 export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions = {}): ServerDeps {
   const fs = createNodeFileSystemAdapter();
+  const appRoot = getAppRoot();
+  const vcmVersion = readVcmPackageVersion(appRoot);
   const runner = createCommandRunner();
   const git = createGitAdapter(runner);
   const claude = createClaudeAdapter(runner);
@@ -214,14 +242,6 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
   const registry = createSessionRegistry();
   const artifactService = createArtifactService(fs);
   const projectService = createProjectService({ fs, git, appSettings });
-  const harnessService = createHarnessService({
-    fs,
-    git,
-    runtime,
-    projectService,
-    apiUrl: options.apiUrl,
-    runFixedInstaller: createScriptFixedHarnessInstaller(path.join(getAppRoot(), "scripts/install-vcm-harness.mjs"))
-  });
   const taskService = createTaskService({ fs, git, artifactService, projectService });
   const sessionService = createSessionService({
     fs,
@@ -232,6 +252,19 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     projectService,
     taskService,
     apiUrl: options.apiUrl
+  });
+  const harnessService = createHarnessService({
+    fs,
+    git,
+    runtime,
+    harnessEngineerSessions: sessionService,
+    runFixedInstaller: createScriptFixedHarnessInstaller(path.join(appRoot, "scripts/install-vcm-harness.mjs")),
+    vcmVersion
+  });
+  const harnessFeedbackService = createHarnessFeedbackService({
+    fs,
+    runtime,
+    sessionService
   });
   const commandDispatcher = createCommandDispatcher({
     runtime,
@@ -283,7 +316,15 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     projectService,
     appSettings
   });
-  const gatewaySettings = createGatewaySettingsService({ fs });
+  const gatewayChannels = createGatewayChannelRegistry([
+    createWeixinIlinkChannel(),
+    createLarkChannel()
+  ]);
+  const gatewaySettings = createGatewaySettingsService({
+    fs,
+    defaultChannel: gatewayChannels.defaultChannel.id,
+    defaultBaseUrl: gatewayChannels.defaultChannel.defaultBaseUrl
+  });
   const gatewayAudit = createGatewayAuditLog({
     fs,
     auditPath: gatewaySettings.getAuditPath()
@@ -292,7 +333,7 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     fs,
     settings: gatewaySettings,
     audit: gatewayAudit,
-    channel: createWeixinIlinkChannel(),
+    channels: gatewayChannels,
     projectService,
     taskService,
     sessionService,
@@ -301,6 +342,19 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     roundService,
     runtime,
     appSettings
+  });
+  const runtimeCoordinator = createRuntimeCoordinatorService({
+    appSettings,
+    taskService,
+    sessionService,
+    translationService,
+    harnessService,
+    harnessFeedbackService,
+    roundService,
+    gatewayService,
+    async getStateRoot(repoRoot) {
+      return (await projectService.loadConfig(repoRoot)).stateRoot;
+    }
   });
   const claudeHookService = createClaudeHookService({
     projectService,
@@ -311,12 +365,14 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     translationService,
     appSettings,
     runtime,
+    harnessService,
+    harnessFeedbackService,
     gatewayService,
     jobGuard: createJobGuardService(),
     translationWorkerService
   });
   const diagnosticsService = createDiagnosticsService({
-    appRoot: getAppRoot(),
+    appRoot,
     runtime,
     gatewayService,
     translationService
@@ -329,6 +385,7 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     sessionService,
     artifactService,
     harnessService,
+    harnessFeedbackService,
     commandDispatcher,
     claudeHookService,
     messageService,
@@ -338,6 +395,7 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     statusService,
     translationService,
     gatewayService,
+    runtimeCoordinator,
     runtime,
     diagnosticsService
   };

@@ -2,16 +2,19 @@ import type { FastifyInstance } from "fastify";
 import { isVcmRoleName } from "../../shared/constants.js";
 import type {
   SendTranslatedInputRequest,
+  TranslateManualOutputRequest,
   TranslateUserInputRequest
 } from "../../shared/types/translation.js";
 import { VcmError } from "../errors.js";
 import type { ProjectService } from "../services/project-service.js";
+import type { SessionService } from "../services/session-service.js";
 import { getTaskRuntimeRepoRoot, type TaskService } from "../services/task-service.js";
 import type { TranslationService } from "../services/translation-service.js";
 
 export interface TranslationRouteDeps {
   projectService: ProjectService;
   taskService: TaskService;
+  sessionService: Pick<SessionService, "notifyProjectTranslatorHarnessUpdated">;
   translationService: TranslationService;
 }
 
@@ -34,12 +37,28 @@ export function registerTranslationRoutes(app: FastifyInstance, deps: Translatio
   app.get<{ Params: { sessionId: string }; Querystring: { after?: string; limit?: string } }>(
     "/api/translation/sessions/:sessionId/events",
     async (request) => {
-      await requireCurrentProject(deps.projectService);
+      const project = await requireCurrentProject(deps.projectService);
       return deps.translationService.pollSessionEvents(
         request.params.sessionId,
         Number(request.query.after ?? "1"),
-        request.query.limit === undefined ? undefined : Number(request.query.limit)
+        request.query.limit === undefined ? undefined : Number(request.query.limit),
+        { repoRoot: project.repoRoot }
       );
+    }
+  );
+
+  app.get<{ Params: { taskSlug: string }; Querystring: { after?: string; limit?: string } }>(
+    "/api/tasks/:taskSlug/translation/feed",
+    async (request) => {
+      const project = await requireCurrentProject(deps.projectService);
+      const task = await deps.taskService.loadTask(project.repoRoot, request.params.taskSlug);
+      return deps.translationService.pollTaskFeed({
+        repoRoot: project.repoRoot,
+        taskRepoRoot: getTaskRuntimeRepoRoot(task),
+        taskSlug: request.params.taskSlug,
+        after: Number(request.query.after ?? "1"),
+        limit: request.query.limit === undefined ? undefined : Number(request.query.limit)
+      });
     }
   );
 
@@ -55,6 +74,22 @@ export function registerTranslationRoutes(app: FastifyInstance, deps: Translatio
         taskSlug: request.params.taskSlug,
         role,
         ...(request.body ?? { text: "" })
+      });
+    }
+  );
+
+  app.post<{ Params: { taskSlug: string; role: string }; Body: TranslateManualOutputRequest }>(
+    "/api/tasks/:taskSlug/sessions/:role/translation/manual-output",
+    async (request) => {
+      const project = await requireCurrentProject(deps.projectService);
+      const role = parseRole(request.params.role);
+      const task = await deps.taskService.loadTask(project.repoRoot, request.params.taskSlug);
+      return deps.translationService.translateManualOutput({
+        repoRoot: project.repoRoot,
+        taskRepoRoot: getTaskRuntimeRepoRoot(task),
+        taskSlug: request.params.taskSlug,
+        role,
+        text: request.body?.text ?? ""
       });
     }
   );
@@ -86,6 +121,11 @@ export function registerTranslationRoutes(app: FastifyInstance, deps: Translatio
     await requireCurrentProject(deps.projectService);
     await deps.translationService.stopSession(request.params.sessionId);
     return { ok: true };
+  });
+
+  app.post("/api/projects/translation/session/notify-harness", async () => {
+    const project = await requireCurrentProject(deps.projectService);
+    return deps.sessionService.notifyProjectTranslatorHarnessUpdated(project.repoRoot);
   });
 
   app.post<{ Params: { sessionId: string; translationId: string } }>(

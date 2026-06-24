@@ -9,38 +9,39 @@ import {
   type TranslationTargetLanguage
 } from "../../shared/types/app-settings.js";
 import type {
-  CommitAndRebaseHarnessTaskResult,
   HarnessApplyResult,
   HarnessBootstrapStatusReport,
   HarnessStatusReport
 } from "../../shared/types/harness.js";
 import type {
   CheckGatewayQrLoginResult,
+  CheckGatewayLarkRegistrationResult,
   GatewayStatus,
-  StartGatewayQrLoginResult
+  StartGatewayLarkRegistrationResult,
+  StartGatewayQrLoginResult,
+  UpdateGatewaySettingsRequest
 } from "../../shared/types/gateway.js";
 import { GATE_REVIEW_GATES, type GateReviewGate, type GateReviewIndex } from "../../shared/types/gate-review.js";
 import type { VcmOrchestrationState, VcmRoleMessage } from "../../shared/types/message.js";
 import type { ProjectSummary } from "../../shared/types/project.js";
 import type { VcmSessionRoundState } from "../../shared/types/round.js";
-import type { RoleSessionRecord } from "../../shared/types/session.js";
+import type { ClaudePermissionMode, RoleSessionRecord, SessionEffort, SessionModel } from "../../shared/types/session.js";
 import type { TaskRecord } from "../../shared/types/task.js";
 import { EventLog } from "../components/event-log.js";
 import { HarnessPanel } from "../components/harness-panel.js";
 import { MessageTimeline, getMessageCounts } from "../components/message-timeline.js";
 import { RepoConnectForm } from "../components/repo-connect-form.js";
+import { SwitchControl } from "../components/switch-control.js";
 import { TaskNav } from "../components/task-nav.js";
 
 type SidebarSectionId =
-  | "repository-path"
-  | "connected-repository"
+  | "repository"
   | "settings"
   | "translation"
   | "gate-review-gates"
   | "gateway"
   | "vcm-harness"
-  | "new-task"
-  | "tasks";
+  | "task";
 
 export interface ProjectDashboardProps {
   project: ProjectSummary | null;
@@ -56,26 +57,36 @@ export interface ProjectDashboardProps {
   translationAutoSendEnabled: boolean;
   translationTargetLanguage: TranslationTargetLanguage;
   translationOutputMode: TranslationOutputMode;
+  translationMemoryInitialized: boolean;
   translatorSession: RoleSessionRecord | null;
   harnessStatus: HarnessStatusReport | null;
   harnessBootstrapStatus: HarnessBootstrapStatusReport | null;
   harnessApplyResult?: HarnessApplyResult | null;
-  harnessTaskSyncResult?: CommitAndRebaseHarnessTaskResult | null;
+  autoTaskHarnessReviewEnabled: boolean;
   gatewayStatus: GatewayStatus | null;
   gatewayQrLogin: StartGatewayQrLoginResult | null;
   gatewayQrCheck: CheckGatewayQrLoginResult | null;
+  gatewayLarkRegistration: StartGatewayLarkRegistrationResult | null;
+  gatewayLarkRegistrationCheck: CheckGatewayLarkRegistrationResult | null;
   busy?: boolean;
   onConnect(repoPath: string): Promise<void>;
   onRefreshConnectedRepository(): Promise<void>;
   onPullConnectedRepository(): Promise<void>;
   onRefreshHarness(): Promise<void>;
   onApplyHarness(): Promise<void>;
-  onCommitAndRebaseHarnessTask(): Promise<void>;
-  onStartHarnessBootstrap(): Promise<void>;
+  onStartHarnessBootstrap(input: { permissionMode: ClaudePermissionMode; model: SessionModel; effort: SessionEffort }): Promise<void>;
+  onRestartHarnessBootstrap(input: { permissionMode: ClaudePermissionMode; model: SessionModel; effort: SessionEffort }): Promise<void>;
+  onStopHarnessBootstrap(): Promise<void>;
+  onRunHarnessBootstrap(): Promise<void>;
+  onOpenHarnessStudio(): void;
+  onOpenRepositoryDiff(): void;
+  onAutoTaskHarnessReviewChange(enabled: boolean): void;
   onRefreshGateway(): Promise<void>;
   onGatewayEnabledChange(enabled: boolean): void;
+  onGatewaySettingsChange(input: UpdateGatewaySettingsRequest): Promise<void>;
   onGatewayTranslationChange(enabled: boolean): void;
   onStartGatewayQrLogin(): void;
+  onStartGatewayLarkRegistration(): void;
   onResetGatewayBinding(): void;
   onGateReviewGateEnabledChange(gate: GateReviewGate, enabled: boolean): void;
   onTranslationEnabledChange(enabled: boolean): void;
@@ -87,11 +98,15 @@ export interface ProjectDashboardProps {
   onCreateTranslationBootstrap(): void;
   onUpdateTranslationMemory(): void;
   onCreateTask(input: { taskSlug: string; title?: string }): Promise<void>;
+  onCloseTask(): void;
   onSelectTask(taskSlug: string): void;
   themeMode: ThemeMode;
+  onAutoOrchestrationChange(enabled: boolean): void;
   onThemeModeChange(themeMode: ThemeMode): void;
-  flowPauseAlerts: boolean;
-  onFlowPauseAlertsChange(enabled: boolean): void;
+  pauseAlertSound: boolean;
+  onPauseAlertSoundChange(enabled: boolean): void;
+  roleRetryEnabled: boolean;
+  onRoleRetryEnabledChange(enabled: boolean): void;
   permissionRequestMode: PermissionRequestMode;
   onPermissionRequestModeChange(mode: PermissionRequestMode): void;
   launchTemplate: LaunchTemplate;
@@ -99,7 +114,6 @@ export interface ProjectDashboardProps {
   canOneClickStart: boolean;
   onSaveLaunchTemplate(): void;
   onOneClickStart(): void;
-  onTryFlowPauseAlert(): void;
   onMarkAllMessagesDone(taskSlug: string): void;
   onDeleteMessageHistory(taskSlug: string): void;
 }
@@ -118,26 +132,36 @@ export function ProjectDashboard({
   translationAutoSendEnabled,
   translationTargetLanguage,
   translationOutputMode,
+  translationMemoryInitialized,
   translatorSession,
   harnessStatus,
   harnessBootstrapStatus,
   harnessApplyResult,
-  harnessTaskSyncResult,
+  autoTaskHarnessReviewEnabled,
   gatewayStatus,
   gatewayQrLogin,
   gatewayQrCheck,
+  gatewayLarkRegistration,
+  gatewayLarkRegistrationCheck,
   busy,
   onConnect,
   onRefreshConnectedRepository,
   onPullConnectedRepository,
   onRefreshHarness,
   onApplyHarness,
-  onCommitAndRebaseHarnessTask,
   onStartHarnessBootstrap,
+  onRestartHarnessBootstrap,
+  onStopHarnessBootstrap,
+  onRunHarnessBootstrap,
+  onOpenHarnessStudio,
+  onOpenRepositoryDiff,
+  onAutoTaskHarnessReviewChange,
   onRefreshGateway,
   onGatewayEnabledChange,
+  onGatewaySettingsChange,
   onGatewayTranslationChange,
   onStartGatewayQrLogin,
+  onStartGatewayLarkRegistration,
   onResetGatewayBinding,
   onGateReviewGateEnabledChange,
   onTranslationEnabledChange,
@@ -149,11 +173,15 @@ export function ProjectDashboard({
   onCreateTranslationBootstrap,
   onUpdateTranslationMemory,
   onCreateTask,
+  onCloseTask,
   onSelectTask,
   themeMode,
+  onAutoOrchestrationChange,
   onThemeModeChange,
-  flowPauseAlerts,
-  onFlowPauseAlertsChange,
+  pauseAlertSound,
+  onPauseAlertSoundChange,
+  roleRetryEnabled,
+  onRoleRetryEnabledChange,
   permissionRequestMode,
   onPermissionRequestModeChange,
   launchTemplate,
@@ -161,7 +189,6 @@ export function ProjectDashboard({
   canOneClickStart,
   onSaveLaunchTemplate,
   onOneClickStart,
-  onTryFlowPauseAlert,
   onMarkAllMessagesDone,
   onDeleteMessageHistory
 }: ProjectDashboardProps) {
@@ -169,23 +196,26 @@ export function ProjectDashboard({
   const [showMessages, setShowMessages] = useState(false);
   const [showEvents, setShowEvents] = useState(false);
   const [openSidebarSection, setOpenSidebarSection] = useState<SidebarSectionId | null>(
-    () => activeTaskSlug ? null : "repository-path"
+    () => activeTaskSlug ? null : "repository"
   );
   const messageCounts = getMessageCounts(messages);
   const normalizedTaskSlug = taskSlug.trim();
-  const activeTask = tasks.find((task) => task.taskSlug === activeTaskSlug) ?? null;
+  const translationBaseUnavailableReason = getTranslationBaseUnavailableReason(
+    project,
+    activeTaskSlug,
+    harnessStatus
+  );
+  const openTasks = tasks.filter((task) => task.cleanupStatus !== "cleaned");
+  const activeTask = openTasks.find((task) => task.taskSlug === activeTaskSlug) ?? null;
 
   useEffect(() => {
     setOpenSidebarSection((current) => {
-      if (activeTaskSlug && current === "repository-path") {
-        return null;
-      }
       if (!activeTaskSlug && current === null) {
-        return "repository-path";
+        return project ? "task" : "repository";
       }
       return current;
     });
-  }, [activeTaskSlug]);
+  }, [activeTaskSlug, project]);
 
   function handleSidebarSectionChange(sectionId: SidebarSectionId, open: boolean) {
     setOpenSidebarSection(open ? sectionId : null);
@@ -204,36 +234,31 @@ export function ProjectDashboard({
       </header>
 
       <SidebarSection
-        title="Repository Path"
-        open={openSidebarSection === "repository-path"}
-        onOpenChange={(open) => handleSidebarSectionChange("repository-path", open)}
+        title="Repository"
+        open={openSidebarSection === "repository"}
+        onOpenChange={(open) => {
+          handleSidebarSectionChange("repository", open);
+          if (open && project) {
+            void onRefreshConnectedRepository();
+          }
+        }}
       >
-        <RepoConnectForm
-          defaultPath={project?.repoRoot ?? ""}
-          recentPaths={recentRepositoryPaths}
-          busy={busy}
-          onConnect={onConnect}
-        />
-      </SidebarSection>
-
-      {project ? (
-        <SidebarSection
-          title="Connected Repository"
-          open={openSidebarSection === "connected-repository"}
-          onOpenChange={(open) => {
-            handleSidebarSectionChange("connected-repository", open);
-            if (open) {
-              void onRefreshConnectedRepository();
-            }
-          }}
-        >
-          <ConnectedRepositoryPanel
+        <div className="repository-panel">
+          <RepoConnectForm
+            defaultPath={project?.repoRoot ?? ""}
+            recentPaths={recentRepositoryPaths}
             busy={busy}
-            project={project}
-            onPull={onPullConnectedRepository}
+            onConnect={onConnect}
           />
-        </SidebarSection>
-      ) : null}
+          {project ? (
+            <ConnectedRepositoryPanel
+              busy={busy}
+              project={project}
+              onPull={onPullConnectedRepository}
+            />
+          ) : null}
+        </div>
+      </SidebarSection>
 
       <SidebarSection
         title="Settings"
@@ -252,27 +277,30 @@ export function ProjectDashboard({
             <span>Theme</span>
             <span>{getThemeModeLabel(themeMode)}</span>
           </button>
-          <button
-            aria-pressed={!gatewayStatus?.enabled && flowPauseAlerts}
-            className={!gatewayStatus?.enabled && flowPauseAlerts ? "settings-toggle is-active" : "settings-toggle"}
-            disabled={busy || gatewayStatus?.enabled}
-            title={gatewayStatus?.enabled ? "Disabled while Gateway is on" : undefined}
-            type="button"
-            onClick={() => onFlowPauseAlertsChange(!flowPauseAlerts)}
-          >
-            <span>Flow pause alert</span>
-            <span>{gatewayStatus?.enabled ? "off" : flowPauseAlerts ? "on" : "off"}</span>
-          </button>
-          <button
-            className="settings-toggle"
-            disabled={busy || gatewayStatus?.enabled}
-            title={gatewayStatus?.enabled ? "Disabled while Gateway is on" : undefined}
-            type="button"
-            onClick={onTryFlowPauseAlert}
-          >
-            <span>Try alert</span>
-            <span>test</span>
-          </button>
+          <SwitchControl
+            checked={(orchestration?.mode ?? "auto") === "auto"}
+            className="sidebar-switch"
+            disabled={busy || !activeTaskSlug}
+            label="Auto orchestration"
+            title={activeTaskSlug ? "Automatically dispatch role messages during the active task" : "Create or select a task first"}
+            onChange={onAutoOrchestrationChange}
+          />
+          <SwitchControl
+            checked={pauseAlertSound}
+            className="sidebar-switch"
+            disabled={busy}
+            label="Pause alert sound"
+            title="Play a sound when VCM shows the fixed flow pause dialog"
+            onChange={(checked) => onPauseAlertSoundChange(checked)}
+          />
+          <SwitchControl
+            checked={roleRetryEnabled}
+            className="sidebar-switch"
+            disabled={busy}
+            label="CC auto retry"
+            title="Retry temporary Claude Code turn failures before showing the flow pause alert"
+            onChange={(checked) => onRoleRetryEnabledChange(checked)}
+          />
           <label className="settings-select-row">
             <span>Permission requests</span>
             <select
@@ -292,7 +320,7 @@ export function ProjectDashboard({
             onClick={onSaveLaunchTemplate}
           >
             <span>Save launch template</span>
-            <span>{canSaveLaunchTemplate ? "ready" : "needs core sessions"}</span>
+            <span>{canSaveLaunchTemplate ? "ready" : "open task"}</span>
           </button>
           {canOneClickStart ? (
             <button
@@ -334,7 +362,8 @@ export function ProjectDashboard({
           autoSendEnabled={translationAutoSendEnabled}
           targetLanguage={translationTargetLanguage}
           outputMode={translationOutputMode}
-          fileTranslationAvailable={Boolean(project)}
+          memoryInitialized={translationMemoryInitialized}
+          baseUnavailableReason={translationBaseUnavailableReason}
           translatorSession={translatorSession}
           onAutoSendChange={onTranslationAutoSendChange}
           onCreateBootstrap={onCreateTranslationBootstrap}
@@ -375,9 +404,13 @@ export function ProjectDashboard({
           busy={busy}
           qrCheck={gatewayQrCheck}
           qrLogin={gatewayQrLogin}
+          larkRegistration={gatewayLarkRegistration}
+          larkRegistrationCheck={gatewayLarkRegistrationCheck}
           status={gatewayStatus}
           onEnabledChange={onGatewayEnabledChange}
+          onSettingsChange={onGatewaySettingsChange}
           onResetBinding={onResetGatewayBinding}
+          onStartLarkRegistration={onStartGatewayLarkRegistration}
           onStartQrLogin={onStartGatewayQrLogin}
           onTranslationChange={onGatewayTranslationChange}
         />
@@ -393,49 +426,62 @@ export function ProjectDashboard({
             status={harnessStatus}
             bootstrapStatus={harnessBootstrapStatus}
             applyResult={harnessApplyResult}
-            taskSyncResult={harnessTaskSyncResult}
-            canCommitAndRebaseTask={Boolean(harnessApplyResult?.changedFiles.length && activeTask)}
+            hasActiveTask={Boolean(activeTask)}
+            autoTaskHarnessReviewEnabled={autoTaskHarnessReviewEnabled}
             busy={busy}
             onRefresh={onRefreshHarness}
             onApply={onApplyHarness}
-            onCommitAndRebaseTask={onCommitAndRebaseHarnessTask}
+            onOpenStudio={onOpenHarnessStudio}
+            onOpenRepositoryDiff={onOpenRepositoryDiff}
+            onAutoTaskHarnessReviewChange={onAutoTaskHarnessReviewChange}
             onStartBootstrap={onStartHarnessBootstrap}
+            onRestartBootstrap={onRestartHarnessBootstrap}
+            onStopBootstrap={onStopHarnessBootstrap}
+            onRunBootstrap={onRunHarnessBootstrap}
           />
         </SidebarSection>
       ) : null}
 
       {project ? (
         <SidebarSection
-          title="New Task"
-          open={openSidebarSection === "new-task"}
-          onOpenChange={(open) => handleSidebarSectionChange("new-task", open)}
+          title="Task"
+          open={openSidebarSection === "task"}
+          onOpenChange={(open) => handleSidebarSectionChange("task", open)}
         >
-          <div className="task-create">
-            <form onSubmit={handleCreateTask}>
-              <input
-                value={taskSlug}
-                onChange={(event) => setTaskSlug(event.target.value)}
-                placeholder="task name"
-              />
-              <div className="task-create-preview">
-                <small>branch: {normalizedTaskSlug ? `feature/${normalizedTaskSlug}` : "feature/<task>"}</small>
-                <small>worktree: {normalizedTaskSlug ? `.claude/worktrees/${normalizedTaskSlug}` : ".claude/worktrees/<task>"}</small>
-              </div>
-              <button type="submit" disabled={busy || !normalizedTaskSlug}>
-                Create
-              </button>
-            </form>
-          </div>
-        </SidebarSection>
-      ) : null}
-
-      {tasks.length > 0 ? (
-        <SidebarSection
-          title="Tasks"
-          open={openSidebarSection === "tasks"}
-          onOpenChange={(open) => handleSidebarSectionChange("tasks", open)}
-        >
-          <TaskNav tasks={tasks} activeTaskSlug={activeTaskSlug} onSelect={onSelectTask} />
+          {openTasks.length > 0 ? (
+            <div className="task-panel">
+              <TaskNav tasks={openTasks} activeTaskSlug={activeTaskSlug} onSelect={onSelectTask} />
+              {activeTask ? (
+                <div className="task-panel-actions">
+                  <button
+                    className="danger-button"
+                    disabled={busy}
+                    type="button"
+                    onClick={onCloseTask}
+                  >
+                    Close Task
+                  </button>
+                </div>
+              ) : null}
+            </div>
+          ) : (
+            <div className="task-create">
+              <form onSubmit={handleCreateTask}>
+                <input
+                  value={taskSlug}
+                  onChange={(event) => setTaskSlug(event.target.value)}
+                  placeholder="task name"
+                />
+                <div className="task-create-preview">
+                  <small>branch: {normalizedTaskSlug ? `feature/${normalizedTaskSlug}` : "feature/<task>"}</small>
+                  <small>worktree: {normalizedTaskSlug ? `.claude/worktrees/${normalizedTaskSlug}` : ".claude/worktrees/<task>"}</small>
+                </div>
+                <button type="submit" disabled={busy || !normalizedTaskSlug}>
+                  Create
+                </button>
+              </form>
+            </div>
+          )}
         </SidebarSection>
       ) : null}
 
@@ -488,9 +534,10 @@ function getLaunchTemplateSummary(template: LaunchTemplate): string {
 
 function TranslationControlsPanel({
   autoSendEnabled,
+  baseUnavailableReason,
   busy,
   enabled,
-  fileTranslationAvailable,
+  memoryInitialized,
   outputMode,
   targetLanguage,
   translatorSession,
@@ -504,9 +551,10 @@ function TranslationControlsPanel({
   onOpenTranslatorSession
 }: {
   autoSendEnabled: boolean;
+  baseUnavailableReason: string | null;
   busy?: boolean;
   enabled: boolean;
-  fileTranslationAvailable: boolean;
+  memoryInitialized: boolean;
   outputMode: TranslationOutputMode;
   targetLanguage: TranslationTargetLanguage;
   translatorSession: RoleSessionRecord | null;
@@ -519,33 +567,37 @@ function TranslationControlsPanel({
   onOpenFileTranslation(): void;
   onOpenTranslatorSession(): void;
 }) {
+  const baseDisabled = Boolean(busy || baseUnavailableReason);
+  const sessionRunning = translatorSession?.status === "running";
+  const conversationEnabled = Boolean(enabled && !baseUnavailableReason && sessionRunning);
+  const sessionUnavailableReason = baseUnavailableReason ?? (sessionRunning ? null : "Start Translator session first.");
+  const sessionActionsDisabled = Boolean(busy || sessionUnavailableReason);
+  const baseReadyTitle = "Open Translator session";
+  const baseUnavailableTitle = baseUnavailableReason ?? baseReadyTitle;
+  const sessionActionTitle = sessionUnavailableReason ?? "Translation tools are ready";
+
   return (
     <div className="sidebar-settings">
-      <button
-        aria-pressed={enabled}
-        className={enabled ? "settings-toggle is-active" : "settings-toggle"}
-        disabled={busy}
-        type="button"
-        onClick={() => onEnabledChange(!enabled)}
-      >
-        <span>Conversation translation</span>
-        <span>{enabled ? "on" : "off"}</span>
-      </button>
-      <button
-        aria-pressed={autoSendEnabled}
-        className={autoSendEnabled ? "settings-toggle is-active" : "settings-toggle"}
-        disabled={busy}
-        type="button"
-        onClick={() => onAutoSendChange(!autoSendEnabled)}
-      >
-        <span>Auto-send</span>
-        <span>{autoSendEnabled ? "on" : "off"}</span>
-      </button>
+      <SwitchControl
+        checked={conversationEnabled}
+        className="sidebar-switch"
+        disabled={baseDisabled || !sessionRunning}
+        label="Conversation translation"
+        title={sessionActionTitle}
+        onChange={onEnabledChange}
+      />
+      <SwitchControl
+        checked={autoSendEnabled}
+        className="sidebar-switch"
+        disabled={baseDisabled}
+        label="Auto-send"
+        onChange={onAutoSendChange}
+      />
       <label className="settings-select-row">
         <span>Language</span>
         <select
           value={targetLanguage}
-          disabled={busy}
+          disabled={baseDisabled}
           onChange={(event) => onTargetLanguageChange(event.target.value as TranslationTargetLanguage)}
         >
           {TRANSLATION_TARGET_LANGUAGE_OPTIONS.map((option) => (
@@ -559,7 +611,7 @@ function TranslationControlsPanel({
         <span>Reply scope</span>
         <select
           value={outputMode}
-          disabled={busy}
+          disabled={baseDisabled}
           onChange={(event) => onOutputModeChange(event.target.value as TranslationOutputMode)}
         >
           {TRANSLATION_OUTPUT_MODE_OPTIONS.map((option) => (
@@ -571,42 +623,47 @@ function TranslationControlsPanel({
       </label>
       <button
         className="settings-toggle"
-        disabled={busy || !fileTranslationAvailable}
-        title={fileTranslationAvailable ? "Open file translation" : "Connect a repository first"}
+        disabled={sessionActionsDisabled}
+        title={sessionActionTitle}
         type="button"
         onClick={onOpenFileTranslation}
       >
         <span>File translation</span>
         <span>open</span>
       </button>
+      {!memoryInitialized ? (
+        <button
+          className="settings-toggle"
+          disabled={sessionActionsDisabled}
+          title={sessionActionTitle}
+          type="button"
+          onClick={onCreateBootstrap}
+        >
+          <span>Bootstrap</span>
+          <span>run</span>
+        </button>
+      ) : null}
       <button
         className="settings-toggle"
-        disabled={busy || !fileTranslationAvailable}
-        title={fileTranslationAvailable ? "Run translation bootstrap" : "Connect a repository first"}
-        type="button"
-        onClick={onCreateBootstrap}
-      >
-        <span>Bootstrap</span>
-        <span>run</span>
-      </button>
-      <button
-        className="settings-toggle"
-        disabled={busy || !fileTranslationAvailable}
-        title={fileTranslationAvailable ? "Compact and update translation memory" : "Connect a repository first"}
+        disabled={sessionActionsDisabled}
+        title={sessionActionTitle}
         type="button"
         onClick={onUpdateMemory}
       >
         <span>Update memory</span>
         <span>run</span>
       </button>
+      {sessionUnavailableReason ? (
+        <p className="settings-help-text">{sessionUnavailableReason}</p>
+      ) : null}
       <div className="settings-status-row">
         <span>Session status</span>
         <strong>{getTranslatorSessionStatus(translatorSession)}</strong>
       </div>
       <button
         className="settings-toggle"
-        disabled={busy || !fileTranslationAvailable}
-        title={fileTranslationAvailable ? "Open Translator session" : "Connect a repository first"}
+        disabled={baseDisabled}
+        title={baseUnavailableTitle}
         type="button"
         onClick={onOpenTranslatorSession}
       >
@@ -627,6 +684,26 @@ function getTranslatorSessionStatus(session: RoleSessionRecord | null): string {
   return session.status;
 }
 
+function getTranslationBaseUnavailableReason(
+  project: ProjectSummary | null,
+  activeTaskSlug: string | null,
+  harnessStatus: HarnessStatusReport | null
+): string | null {
+  if (!project) {
+    return "Connect a repository first.";
+  }
+  if (!activeTaskSlug) {
+    return "Create or select a task first.";
+  }
+  if (!harnessStatus) {
+    return "Load VCM Harness status first.";
+  }
+  if (!harnessStatus.initialized) {
+    return "Initialize VCM Harness first.";
+  }
+  return null;
+}
+
 function GateReviewGateSettings({
   busy,
   onGateEnabledChange,
@@ -642,18 +719,15 @@ function GateReviewGateSettings({
         const record = state?.gates[gate];
         const enabled = Boolean(record?.required);
         return (
-          <button
-            aria-pressed={enabled}
-            className={enabled ? "settings-toggle is-active" : "settings-toggle"}
+          <SwitchControl
+            checked={enabled}
+            className="sidebar-switch"
             disabled={busy || !state}
             key={gate}
+            label={getGateReviewGateLabel(gate)}
             title={record?.status ? `status: ${record.status}` : undefined}
-            type="button"
-            onClick={() => onGateEnabledChange(gate, !enabled)}
-          >
-            <span>{getGateReviewGateLabel(gate)}</span>
-            <span>{enabled ? "on" : "off"}</span>
-          </button>
+            onChange={(checked) => onGateEnabledChange(gate, checked)}
+          />
         );
       })}
     </div>
@@ -674,8 +748,12 @@ function getGateReviewGateLabel(gate: GateReviewGate): string {
 
 function GatewayPanel({
   busy,
+  larkRegistration,
+  larkRegistrationCheck,
   onEnabledChange,
   onResetBinding,
+  onSettingsChange,
+  onStartLarkRegistration,
   onStartQrLogin,
   onTranslationChange,
   qrCheck,
@@ -683,42 +761,62 @@ function GatewayPanel({
   status
 }: {
   busy?: boolean;
+  larkRegistration: StartGatewayLarkRegistrationResult | null;
+  larkRegistrationCheck: CheckGatewayLarkRegistrationResult | null;
   onEnabledChange(enabled: boolean): void;
   onResetBinding(): void;
+  onSettingsChange(input: UpdateGatewaySettingsRequest): Promise<void>;
+  onStartLarkRegistration(): void;
   onStartQrLogin(): void;
   onTranslationChange(enabled: boolean): void;
   qrCheck: CheckGatewayQrLoginResult | null;
   qrLogin: StartGatewayQrLoginResult | null;
   status: GatewayStatus | null;
 }) {
-  const canEnable = Boolean(status?.binding.tokenConfigured);
-  const isBound = Boolean(status?.binding.tokenConfigured);
+  const isLark = status?.channel === "lark";
+  const canEnable = status?.channel === "lark"
+    ? Boolean(status.binding.appIdConfigured && status.binding.appSecretConfigured)
+    : Boolean(status?.binding.tokenConfigured);
+  const isBound = status?.channel === "lark"
+    ? Boolean(status.binding.appIdConfigured && status.binding.appSecretConfigured)
+    : Boolean(status?.binding.tokenConfigured);
 
   return (
     <div className="gateway-panel">
-      <div className="gateway-actions">
-        <button
-          aria-pressed={Boolean(status?.enabled)}
-          className={status?.enabled ? "settings-toggle is-active" : "settings-toggle"}
-          disabled={busy || !status || (!status.enabled && !canEnable)}
-          title={canEnable ? "Enable or disable PM messages and task-changing Gateway commands" : "Scan and confirm iLink login first"}
-          type="button"
-          onClick={() => status ? onEnabledChange(!status.enabled) : undefined}
-        >
-          <span>Gateway</span>
-          <span>{status?.enabled ? "on" : "off"}</span>
-        </button>
-        <button
-          aria-pressed={Boolean(status?.translationEnabled)}
-          className={status?.translationEnabled ? "settings-toggle is-active" : "settings-toggle"}
+      <label className="compact-field">
+        <span>Channel</span>
+        <select
           disabled={busy || !status}
-          type="button"
-          onClick={() => status ? onTranslationChange(!status.translationEnabled) : undefined}
+          value={status?.channel ?? "weixin-ilink"}
+          onChange={(event) => {
+            void onSettingsChange({ channel: event.currentTarget.value === "lark" ? "lark" : "weixin-ilink" });
+          }}
         >
-          <span>Translation</span>
-          <span>{status?.translationEnabled ? "on" : "off"}</span>
-        </button>
-        {isBound ? (
+          <option value="weixin-ilink">Weixin iLink</option>
+          <option value="lark">Lark</option>
+        </select>
+      </label>
+      <div className="gateway-actions">
+        <SwitchControl
+          checked={Boolean(status?.enabled)}
+          className="sidebar-switch"
+          disabled={busy || !status || (!status.enabled && !canEnable)}
+          label="Gateway"
+          title={canEnable ? "Enable or disable PM messages and task-changing Gateway commands" : "Configure the selected Gateway channel first"}
+          onChange={(checked) => onEnabledChange(checked)}
+        />
+        <SwitchControl
+          checked={Boolean(status?.translationEnabled)}
+          className="sidebar-switch"
+          disabled={busy || !status}
+          label="Translation"
+          onChange={(checked) => onTranslationChange(checked)}
+        />
+        {isLark ? (
+          <button type="button" disabled={busy} onClick={onStartLarkRegistration}>
+            Start QR Setup
+          </button>
+        ) : isBound ? (
           <button className="danger-button" type="button" disabled={busy} onClick={onResetBinding}>
             Reset Binding
           </button>
@@ -727,10 +825,24 @@ function GatewayPanel({
         )}
       </div>
 
-      {qrLogin ? (
+      {isLark ? (
+        <div className="gateway-lark-settings">
+          <p className="muted">
+            {status?.binding.appIdConfigured && status.binding.appSecretConfigured
+              ? `Lark app configured${status.binding.larkBotName ? ` · ${status.binding.larkBotName}` : ""}.`
+              : "Use QR setup to create and configure the Lark bot automatically."}
+          </p>
+          {larkRegistration ? (
+            <p className="muted">
+              QR setup: {larkRegistrationCheck?.status ?? larkRegistration.status}
+              {larkRegistrationCheck?.message ? ` · ${larkRegistrationCheck.message}` : ""}
+            </p>
+          ) : null}
+        </div>
+      ) : qrLogin ? (
         <p className="muted">QR login started. Use the login dialog to confirm binding.</p>
       ) : null}
-      {qrCheck ? (
+      {!isLark && qrCheck ? (
         <p className="muted">
           QR status: {qrCheck.status}{qrCheck.message ? ` · ${qrCheck.message}` : ""}
         </p>

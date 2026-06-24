@@ -56,7 +56,9 @@ describe("app-settings-service", () => {
     await expect(service.updatePreferences({
       themeMode: "dark",
       flowPauseAlerts: false,
+      roleRetryEnabled: false,
       permissionRequestMode: "allowAll",
+      autoTaskHarnessReviewEnabled: true,
       translationEnabled: true,
       translationAutoSendEnabled: true,
       translationTargetLanguage: "ja",
@@ -64,7 +66,9 @@ describe("app-settings-service", () => {
     })).resolves.toEqual(createDefaultPreferences({
       themeMode: "dark",
       flowPauseAlerts: false,
+      roleRetryEnabled: false,
       permissionRequestMode: "allowAll",
+      autoTaskHarnessReviewEnabled: true,
       translationEnabled: true,
       translationAutoSendEnabled: true,
       translationTargetLanguage: "ja",
@@ -75,7 +79,9 @@ describe("app-settings-service", () => {
     expect(stored.preferences).toEqual(createDefaultPreferences({
       themeMode: "dark",
       flowPauseAlerts: false,
+      roleRetryEnabled: false,
       permissionRequestMode: "allowAll",
+      autoTaskHarnessReviewEnabled: true,
       translationEnabled: true,
       translationAutoSendEnabled: true,
       translationTargetLanguage: "ja",
@@ -226,7 +232,9 @@ function createDefaultPreferences(overrides: Partial<AppPreferences> = {}): AppP
   return {
     themeMode: "system",
     flowPauseAlerts: true,
+    roleRetryEnabled: true,
     permissionRequestMode: "off",
+    autoTaskHarnessReviewEnabled: false,
     translationEnabled: false,
     translationAutoSendEnabled: false,
     translationTargetLanguage: "zh-CN",

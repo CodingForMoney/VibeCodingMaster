@@ -12,11 +12,13 @@ import type {
   TranslationState,
   TranslationEntry,
   TranslationFailureItem,
-  TranslationSessionEvent,
   TranslationSessionStatus
 } from "../../shared/types/translation.js";
-import { TRANSLATION_ENTRY_RETENTION_LIMIT } from "../../shared/types/translation.js";
 import { apiClient } from "../state/api-client.js";
+import { formatUiError } from "../state/error-format.js";
+import { useUiErrorState } from "../state/ui-error-state.js";
+import { useScheduledPoll } from "../state/use-scheduled-poll.js";
+import type { TranslationPanelSessionState } from "../state/translation-feed-store.js";
 
 type TranslationPanelStatus = TranslationSessionStatus;
 const TRANSLATED_COMPOSER_SEPARATOR = "\n\n--- Translation ---\n";
@@ -28,6 +30,10 @@ export interface TranslationPanelProps {
   taskSlug: string;
   role: RoleName;
   sessionId: string;
+  panelState: TranslationPanelSessionState;
+  onClearSession(sessionId: string, role: RoleName): void;
+  onEntry(sessionId: string, role: RoleName, entry: TranslationEntry): void;
+  onFailures(sessionId: string, role: RoleName, failures: TranslationFailureItem[]): void;
 }
 
 export function TranslationPanel({
@@ -36,90 +42,22 @@ export function TranslationPanel({
   targetLanguage,
   taskSlug,
   role,
-  sessionId
+  sessionId,
+  panelState,
+  onClearSession,
+  onEntry,
+  onFailures
 }: TranslationPanelProps) {
-  const [entries, setEntries] = useState<TranslationEntry[]>([]);
-  const [failures, setFailures] = useState<TranslationFailureItem[]>([]);
   const [composer, setComposer] = useState("");
+  const [manualSource, setManualSource] = useState("");
   const [composerIsEnglishDraft, setComposerIsEnglishDraft] = useState(false);
-  const [status, setStatus] = useState<TranslationPanelStatus>("ready");
-  const [lastPollAt, setLastPollAt] = useState("");
   const [panelNowMs, setPanelNowMs] = useState(Date.now());
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
-  const [scrollRevision, setScrollRevision] = useState(0);
-  const activeRef = useRef(active);
-  const cursorRef = useRef(1);
+  const [, setError] = useUiErrorState("");
   const entryListRef = useRef<HTMLDivElement | null>(null);
-
-  useEffect(() => {
-    activeRef.current = active;
-  }, [active]);
-
-  useEffect(() => {
-    setEntries([]);
-    setFailures([]);
-    setError("");
-    setStatus("ready");
-    setLastPollAt("");
-    cursorRef.current = 1;
-    let cancelled = false;
-    let timer: number | undefined;
-
-    const schedule = () => {
-      if (cancelled) {
-        return;
-      }
-      timer = window.setTimeout(tick, activeRef.current ? 200 : 1000);
-    };
-
-    const tick = async () => {
-      if (cancelled) {
-        return;
-      }
-      try {
-        const result = await apiClient.pollTranslationSession(sessionId, cursorRef.current);
-        if (cancelled) {
-          return;
-        }
-        applyTranslationEvents(result.events);
-        cursorRef.current = result.nextCursor;
-        setStatus(result.status);
-        if (activeRef.current) {
-          setLastPollAt(formatPollTimestamp(new Date().toISOString()));
-        }
-      } catch (caught) {
-        if (!cancelled) {
-          setError(caught instanceof Error ? caught.message : "Translation poll failed.");
-        }
-      } finally {
-        schedule();
-      }
-    };
-
-    void apiClient.startTranslationSession(taskSlug, role)
-      .then((result) => {
-        if (cancelled) {
-          return;
-        }
-        setStatus(result.status);
-        cursorRef.current = result.nextCursor;
-        void tick();
-      })
-      .catch((caught) => {
-        if (!cancelled) {
-          setError(caught instanceof Error ? caught.message : "Translation start failed.");
-        }
-      });
-
-    return () => {
-      cancelled = true;
-      if (timer !== undefined) {
-        window.clearTimeout(timer);
-      }
-      void apiClient.stopTranslationSession(sessionId).catch(() => undefined);
-    };
-  }, [sessionId, taskSlug, role]);
+  const entries = panelState.entries;
+  const failures = panelState.failures;
+  const status = panelState.status;
 
   useEffect(() => {
     if (!active) {
@@ -134,7 +72,7 @@ export function TranslationPanel({
       entryList.scrollTop = entryList.scrollHeight;
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [active, scrollRevision]);
+  }, [active, entries]);
 
   const activeTranslationStartedAt = getActiveTranslationStartedAt(entries);
   useEffect(() => {
@@ -167,42 +105,27 @@ export function TranslationPanel({
         setComposerIsEnglishDraft(true);
       }
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Translation failed.");
+      setError(formatUiError("Translate composer input", caught));
     } finally {
       setBusy(false);
     }
   }
 
-  function applyTranslationEvents(events: TranslationSessionEvent[]) {
-    if (events.length === 0) {
+  async function translateManualOutput() {
+    const sourceText = manualSource.trim();
+    if (!sourceText) {
       return;
     }
-
-    for (const event of events) {
-      if (event.type === "status") {
-        setStatus(event.status);
-      } else if (event.type === "error") {
-        setError(event.message);
-      } else if (event.type === "failures") {
-        setFailures(event.failures);
-      }
-    }
-
-    const entryEvents = events.filter((event): event is Extract<TranslationSessionEvent, { type: "entry" }> =>
-      event.type === "entry"
-    );
-    if (entryEvents.length > 0) {
-      setEntries((current) => {
-        const nextEntries = entryEvents.reduce((next, event) => upsertEntry(next, event.entry), current);
-        const trimmed = trimTranslationEntries(nextEntries);
-        if (trimmed.removedIds.size > 0) {
-          setFailures((currentFailures) =>
-            currentFailures.filter((failure) => !trimmed.removedIds.has(failure.translationId))
-          );
-        }
-        return trimmed.entries;
-      });
-      setScrollRevision((current) => current + 1);
+    setBusy(true);
+    setError("");
+    try {
+      const entry = await apiClient.translateManualOutput(taskSlug, role, { text: sourceText });
+      onEntry(sessionId, role, entry);
+      setManualSource("");
+    } catch (caught) {
+      setError(formatUiError("Translate pasted English output", caught));
+    } finally {
+      setBusy(false);
     }
   }
 
@@ -218,7 +141,7 @@ export function TranslationPanel({
       setComposer("");
       setComposerIsEnglishDraft(false);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Failed to send English input.");
+      setError(formatUiError("Send translated English input to role", caught));
     } finally {
       setBusy(false);
     }
@@ -239,10 +162,8 @@ export function TranslationPanel({
   }
 
   async function clearPanel() {
-    setEntries([]);
-    setFailures([]);
-    cursorRef.current = 1;
-    await apiClient.clearTranslationSession(sessionId).catch((caught: Error) => setError(caught.message));
+    onClearSession(sessionId, role);
+    await apiClient.clearTranslationSession(sessionId).catch((caught: Error) => setError(formatUiError("Clear conversation translation panel", caught)));
   }
 
   async function ignoreFailures() {
@@ -250,22 +171,22 @@ export function TranslationPanel({
     setError("");
     try {
       const result = await apiClient.ignoreTranslationFailures(sessionId);
-      setFailures(result.failures);
+      onFailures(sessionId, role, result.failures);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Failed to ignore translation failures.");
+      setError(formatUiError("Ignore failed conversation translations", caught));
     } finally {
       setBusy(false);
     }
   }
 
-  async function retryFailures() {
+  async function retryLatestFailure(failure: TranslationFailureItem) {
     setBusy(true);
     setError("");
     try {
-      const result = await apiClient.retryTranslationFailures(sessionId);
-      setFailures(result.failures);
+      const entry = await apiClient.retryTranslation(sessionId, failure.translationId);
+      onEntry(sessionId, role, entry);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Failed to retry translation failures.");
+      setError(formatUiError("Retry latest failed conversation translation", caught));
     } finally {
       setBusy(false);
     }
@@ -273,6 +194,7 @@ export function TranslationPanel({
 
   const panelStatus = getPanelStatus(entries, status, panelNowMs);
   const failureCount = failures.length;
+  const latestFailure = getLatestTranslationFailure(failures);
 
   return (
     <aside className="translation-panel">
@@ -285,9 +207,11 @@ export function TranslationPanel({
                 <button type="button" disabled={busy} onClick={() => void ignoreFailures()}>
                   Ignore {failureCount}
                 </button>
-                <button type="button" disabled={busy} onClick={() => void retryFailures()}>
-                  Retry {failureCount}
-                </button>
+                {latestFailure ? (
+                  <button type="button" disabled={busy} onClick={() => void retryLatestFailure(latestFailure)}>
+                    Retry latest
+                  </button>
+                ) : null}
               </>
             ) : null}
             <button type="button" onClick={() => void clearPanel()}>Clear</button>
@@ -295,11 +219,8 @@ export function TranslationPanel({
         </div>
         <div className="translation-status-row">
           <p>Claude Code · target {getTranslationTargetLanguageLabel(targetLanguage)} · {panelStatus}</p>
-          <p>{lastPollAt ? `poll ${lastPollAt}` : "poll -"}</p>
         </div>
       </header>
-
-      {error ? <div className="error-banner">{error}</div> : null}
 
       <div className="translation-entry-list" ref={entryListRef}>
         {entries.length === 0 ? <p className="muted">Translated Claude Code output will appear here.</p> : null}
@@ -312,6 +233,22 @@ export function TranslationPanel({
       </div>
 
       <div className="translation-composer">
+        <div className="translation-composer-row translation-manual-row">
+          <textarea
+            value={manualSource}
+            onChange={(event) => setManualSource(event.target.value)}
+            placeholder="Paste English to translate on demand..."
+          />
+          <div className="translation-composer-actions">
+            <button
+              type="button"
+              disabled={busy || !manualSource.trim()}
+              onClick={() => void translateManualOutput()}
+            >
+              Translate
+            </button>
+          </div>
+        </div>
         <div className="translation-composer-row">
           <textarea
             value={composer}
@@ -344,17 +281,35 @@ function getTranslationTargetLanguageLabel(targetLanguage: TranslationTargetLang
   return TRANSLATION_TARGET_LANGUAGE_OPTIONS.find((option) => option.value === targetLanguage)?.label ?? targetLanguage;
 }
 
+function getLatestTranslationFailure(failures: TranslationFailureItem[]): TranslationFailureItem | undefined {
+  let latest: TranslationFailureItem | undefined;
+  let latestFailedAtMs = Number.NEGATIVE_INFINITY;
+
+  for (const failure of failures) {
+    const failedAtMs = Date.parse(failure.failedAt);
+    const comparableFailedAtMs = Number.isFinite(failedAtMs) ? failedAtMs : Number.NEGATIVE_INFINITY;
+    if (!latest || comparableFailedAtMs >= latestFailedAtMs) {
+      latest = failure;
+      latestFailedAtMs = comparableFailedAtMs;
+    }
+  }
+
+  return latest;
+}
+
 export function FileTranslationModalHost({
   open,
+  taskSlug,
   targetLanguage,
   onClose
 }: {
   open: boolean;
+  taskSlug: string | null;
   targetLanguage: TranslationTargetLanguage;
   onClose(): void;
 }) {
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
+  const [, setError] = useUiErrorState("");
   const [translationState, setTranslationState] = useState<TranslationState | null>(null);
   const [selectedFileJobId, setSelectedFileJobId] = useState<string>("");
   const [selectedFileOutput, setSelectedFileOutput] = useState("");
@@ -366,29 +321,14 @@ export function FileTranslationModalHost({
   const [fileBrowserSelectedPath, setFileBrowserSelectedPath] = useState("");
   const [fileBrowserBusy, setFileBrowserBusy] = useState(false);
 
-  useEffect(() => {
-    if (!open) {
-      return;
+  useScheduledPoll(
+    open ? `file-translation:${selectedFileJobId || "none"}` : null,
+    () => refreshTranslationState(true),
+    {
+      intervalMs: 2000,
+      runImmediately: true
     }
-    let cancelled = false;
-    let timer: number | undefined;
-    const tick = async () => {
-      if (cancelled) {
-        return;
-      }
-      await refreshTranslationState(true);
-      if (!cancelled) {
-        timer = window.setTimeout(tick, 2000);
-      }
-    };
-    void tick();
-    return () => {
-      cancelled = true;
-      if (timer !== undefined) {
-        window.clearTimeout(timer);
-      }
-    };
-  }, [open, selectedFileJobId]);
+  );
 
   async function refreshTranslationState(refreshSelected = false) {
     try {
@@ -409,7 +349,7 @@ export function FileTranslationModalHost({
         setSelectedFileReport(result.report);
       }
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Failed to load file translations.");
+      setError(formatUiError("Load file translation list", caught));
     }
   }
 
@@ -422,7 +362,7 @@ export function FileTranslationModalHost({
       setSelectedFileOutput(result.output);
       setSelectedFileReport(result.report);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Failed to read translated file.");
+      setError(formatUiError(`Read translated file ${jobId}`, caught));
     }
   }
 
@@ -444,7 +384,7 @@ export function FileTranslationModalHost({
       setFileBrowserPath(result.currentPath);
       setFileBrowserQuery(query);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Failed to browse source files.");
+      setError(formatUiError("Browse translation source files", caught));
     } finally {
       setFileBrowserBusy(false);
     }
@@ -458,7 +398,11 @@ export function FileTranslationModalHost({
     setBusy(true);
     setError("");
     try {
+      if (!taskSlug) {
+        throw new Error("Create or select a task before translating files.");
+      }
       const job = await apiClient.createFileTranslation({
+        taskSlug,
         sourcePath: normalizedSourcePath,
         targetLanguage
       });
@@ -466,7 +410,7 @@ export function FileTranslationModalHost({
       await refreshTranslationState();
       await selectFileJob(job.id);
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "Failed to create file translation.");
+      setError(formatUiError(`Create file translation for ${normalizedSourcePath}`, caught));
     } finally {
       setBusy(false);
     }
@@ -481,7 +425,6 @@ export function FileTranslationModalHost({
       <div className="modal-backdrop file-translation-backdrop">
         <FileTranslationPanel
           busy={busy}
-          error={error}
           state={translationState}
           selectedJobId={selectedFileJobId}
           output={selectedFileOutput}
@@ -660,7 +603,6 @@ function FileBrowserEntryButton({
 
 function FileTranslationPanel({
   busy,
-  error,
   state,
   selectedJobId,
   output,
@@ -671,7 +613,6 @@ function FileTranslationPanel({
   onTranslate
 }: {
   busy: boolean;
-  error?: string;
   state: TranslationState | null;
   selectedJobId: string;
   output: string;
@@ -697,7 +638,6 @@ function FileTranslationPanel({
           <button type="button" onClick={onClose}>Close</button>
         </div>
       </header>
-      {error ? <div className="error-banner">{error}</div> : null}
       {!state?.memoryInitialized ? (
         <p className="translation-entry-note">Translation memory is not initialized. Run Bootstrap from the sidebar before important file translations.</p>
       ) : null}
@@ -804,36 +744,6 @@ function isActiveTranslation(entry: TranslationEntry): boolean {
   return entry.status === "queued" || entry.status === "translating";
 }
 
-function trimTranslationEntries(entries: TranslationEntry[]): {
-  entries: TranslationEntry[];
-  removedIds: Set<string>;
-} {
-  const overflow = entries.length - TRANSLATION_ENTRY_RETENTION_LIMIT;
-  if (overflow <= 0) {
-    return { entries, removedIds: new Set() };
-  }
-
-  const removedIds = new Set<string>();
-  for (const entry of entries) {
-    if (removedIds.size >= overflow) {
-      break;
-    }
-    if (isActiveTranslation(entry)) {
-      continue;
-    }
-    removedIds.add(entry.id);
-  }
-
-  if (removedIds.size === 0) {
-    return { entries, removedIds };
-  }
-
-  return {
-    entries: entries.filter((entry) => !removedIds.has(entry.id)),
-    removedIds
-  };
-}
-
 function getEntryStartedMs(entry: TranslationEntry): number {
   const timestamp = Date.parse(entry.translationStartedAt ?? entry.createdAt);
   return Number.isFinite(timestamp) ? timestamp : Date.now();
@@ -870,14 +780,6 @@ export function extractTranslatedComposerDraft(composerText: string): string {
   return composerText.slice(separatorIndex + TRANSLATED_COMPOSER_SEPARATOR.length);
 }
 
-function upsertEntry(entries: TranslationEntry[], entry: TranslationEntry): TranslationEntry[] {
-  const index = entries.findIndex((current) => current.id === entry.id);
-  if (index === -1) {
-    return [...entries, entry];
-  }
-  return entries.map((current) => current.id === entry.id ? entry : current);
-}
-
 function formatElapsed(elapsedMs: number): string {
   if (elapsedMs < 1000) {
     return `${Math.max(0.1, elapsedMs / 1000).toFixed(1)}s`;
@@ -891,14 +793,6 @@ function formatElapsed(elapsedMs: number): string {
   const minutes = Math.floor(seconds / 60);
   const remainder = Math.floor(seconds % 60).toString().padStart(2, "0");
   return `${minutes}:${remainder}`;
-}
-
-function formatPollTimestamp(timestamp: string): string {
-  const date = new Date(timestamp);
-  if (Number.isNaN(date.getTime())) {
-    return timestamp;
-  }
-  return date.toLocaleTimeString();
 }
 
 function formatBoundaryTimestamp(timestamp: string): string {
