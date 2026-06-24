@@ -1843,6 +1843,9 @@ function GatewayLarkRegistrationModal({
               </div>
             )}
           </div>
+          <div className="gateway-qr-actions">
+            <button type="button" disabled={busy} onClick={onCheck}>Confirm</button>
+          </div>
           <dl className="gateway-qr-meta">
             <div>
               <dt>Status</dt>
@@ -1913,10 +1916,6 @@ function GatewayLarkRegistrationModal({
             <button type="submit" disabled={busy}>Bind manually</button>
           </form>
         </div>
-
-        <footer>
-          <button type="button" disabled={busy} onClick={onCheck}>Confirm</button>
-        </footer>
       </section>
     </div>
   );
