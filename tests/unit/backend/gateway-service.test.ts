@@ -549,10 +549,7 @@ function createSettings(initial: Partial<GatewaySettingsFile> = {}): GatewaySett
         currentTaskSlug: input.currentTaskSlug !== undefined ? input.currentTaskSlug : current.currentTaskSlug,
         binding: {
           ...current.binding,
-          baseUrl: input.baseUrl !== undefined ? input.baseUrl ?? current.binding.baseUrl : current.binding.baseUrl,
-          appId: input.larkAppId !== undefined ? input.larkAppId : current.binding.appId,
-          appSecret: input.larkAppSecret !== undefined ? input.larkAppSecret : current.binding.appSecret,
-          homeChatId: input.larkHomeChatId !== undefined ? input.larkHomeChatId : current.binding.homeChatId
+          baseUrl: input.baseUrl !== undefined ? input.baseUrl ?? current.binding.baseUrl : current.binding.baseUrl
         },
         updatedAt: NOW
       }, NOW);

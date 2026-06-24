@@ -779,9 +779,6 @@ function GatewayPanel({
   qrLogin: StartGatewayQrLoginResult | null;
   status: GatewayStatus | null;
 }) {
-  const [larkAppId, setLarkAppId] = useState("");
-  const [larkAppSecret, setLarkAppSecret] = useState("");
-  const [larkHomeChatId, setLarkHomeChatId] = useState("");
   const [pairingCode, setPairingCode] = useState<CreateGatewayPairingCodeResult | null>(null);
   const isLark = status?.channel === "lark";
   const canEnable = status?.channel === "lark"
@@ -792,11 +789,8 @@ function GatewayPanel({
     : Boolean(status?.binding.tokenConfigured);
 
   useEffect(() => {
-    setLarkAppId(status?.binding.appId ?? "");
-    setLarkAppSecret("");
-    setLarkHomeChatId(status?.binding.homeChatId ?? "");
     setPairingCode(null);
-  }, [status?.channel, status?.binding.appId, status?.binding.homeChatId]);
+  }, [status?.channel, status?.binding.appIdConfigured, status?.binding.appSecretConfigured]);
 
   return (
     <div className="gateway-panel">
@@ -843,7 +837,7 @@ function GatewayPanel({
             <button
               type="button"
               disabled={busy || !canEnable}
-              title={canEnable ? "Create a short code, then send /bind CODE to the Lark bot" : "Complete Lark QR Setup or save manual credentials first"}
+              title={canEnable ? "Create a short code, then send /bind CODE to the Lark bot" : "Complete Lark QR Setup first"}
               onClick={() => {
                 void onCreatePairingCode().then((result) => {
                   setPairingCode(result);
@@ -869,52 +863,6 @@ function GatewayPanel({
               {larkRegistrationCheck?.message ? ` · ${larkRegistrationCheck.message}` : ""}
             </p>
           ) : null}
-          <p className="muted">Manual setup fallback</p>
-          <label className="compact-field">
-            <span>App ID</span>
-            <input
-              disabled={busy}
-              value={larkAppId}
-              onChange={(event) => setLarkAppId(event.currentTarget.value)}
-              placeholder="cli_a..."
-            />
-          </label>
-          <label className="compact-field">
-            <span>App Secret</span>
-            <input
-              disabled={busy}
-              type="password"
-              value={larkAppSecret}
-              onChange={(event) => setLarkAppSecret(event.currentTarget.value)}
-              placeholder={status?.binding.appSecretConfigured ? "configured" : "required"}
-            />
-          </label>
-          <label className="compact-field">
-            <span>Home Chat ID</span>
-            <input
-              disabled={busy}
-              value={larkHomeChatId}
-              onChange={(event) => setLarkHomeChatId(event.currentTarget.value)}
-              placeholder="optional chat_id"
-            />
-          </label>
-          <button
-            type="button"
-            disabled={busy || !status}
-            onClick={() => {
-              const input: UpdateGatewaySettingsRequest = {
-                channel: "lark",
-                larkAppId,
-                larkHomeChatId
-              };
-              if (larkAppSecret.trim() || !status?.binding.appSecretConfigured) {
-                input.larkAppSecret = larkAppSecret;
-              }
-              void onSettingsChange(input).then(() => setLarkAppSecret(""));
-            }}
-          >
-            Save Lark Settings
-          </button>
           {pairingCode ? (
             <p className="muted">
               Send <code>/bind {pairingCode.code}</code> to the Lark bot before {formatTime(pairingCode.expiresAt)}.

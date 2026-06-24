@@ -75,9 +75,6 @@ export interface UpdateGatewaySettingsRequest {
   currentProjectId?: string | null;
   currentTaskSlug?: string | null;
   baseUrl?: string | null;
-  larkAppId?: string | null;
-  larkAppSecret?: string | null;
-  larkHomeChatId?: string | null;
 }
 
 export interface StartGatewayQrLoginResult {

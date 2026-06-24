@@ -140,10 +140,7 @@ export function createGatewaySettingsService(deps: GatewaySettingsServiceDeps): 
           ...current.binding,
           baseUrl: input.baseUrl !== undefined
             ? normalizeBaseUrl(input.baseUrl, normalizeOptions.defaultBaseUrl)
-            : current.binding.baseUrl,
-          appId: input.larkAppId !== undefined ? normalizeNullableString(input.larkAppId) : current.binding.appId,
-          appSecret: input.larkAppSecret !== undefined ? normalizeNullableString(input.larkAppSecret) : current.binding.appSecret,
-          homeChatId: input.larkHomeChatId !== undefined ? normalizeNullableString(input.larkHomeChatId) : current.binding.homeChatId
+            : current.binding.baseUrl
         },
         updatedAt: now()
       });

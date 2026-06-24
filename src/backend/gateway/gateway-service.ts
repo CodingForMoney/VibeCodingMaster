@@ -807,7 +807,7 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
     const settings = await deps.settings.loadSettings();
     if (!toAccount(settings)) {
       return settings.channel === "lark"
-        ? "Gateway is not configured. Complete Lark QR Setup in desktop VCM first, or use manual Lark credentials."
+        ? "Gateway is not configured. Complete Lark QR Setup in desktop VCM first."
         : "Gateway is not bound. Start QR login from desktop VCM first.";
     }
     if (settings.enabled) {
@@ -984,7 +984,7 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
       if (!settings.binding.appId || !settings.binding.appSecret) {
         throw new VcmError({
           code: "GATEWAY_LARK_CONFIG_MISSING",
-          message: "Complete Lark QR Setup or save Lark App ID and App Secret before creating a pairing code.",
+          message: "Complete Lark QR Setup before creating a pairing code.",
           statusCode: 409
         });
       }

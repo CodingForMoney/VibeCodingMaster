@@ -283,7 +283,7 @@ The `Gateway` toggle is disabled until a QR login has produced a usable iLink to
 6. Send `/bind CODE` to the Lark bot before the code expires.
 7. After binding succeeds, turn `Gateway` on in the sidebar.
 
-Lark QR setup creates/configures the bot app and stores the resulting App ID/App Secret in local VCM state. Manual App ID/App Secret input remains available as a fallback. The App Secret is not shown again in the UI. `Reset Binding` clears the bound Lark user/chat state while keeping the saved Lark app credentials.
+Lark QR setup creates/configures the bot app and stores the resulting App ID/App Secret in local VCM state. The App Secret is not shown in the UI. `Reset Binding` clears the bound Lark user/chat state while keeping the saved Lark app credentials.
 
 When Gateway is turned on, VCM automatically turns off the browser `Flow pause alert` and disables `Try alert`. Gateway becomes the notification path, so the browser should not show blocking flow-pause dialogs while the user is managing the task from the phone.
 
