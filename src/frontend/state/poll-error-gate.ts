@@ -1,4 +1,5 @@
 import { formatUiError, errorReason } from "./error-format.js";
+import { clearReportedUiErrorsForActions } from "./ui-error-events.js";
 
 interface PollErrorState {
   consecutiveFailures: number;
@@ -41,6 +42,7 @@ export function recordPollError(action: string, error: unknown): string | null {
 
 export function clearPollError(action: string): void {
   pollErrors.delete(action);
+  clearReportedUiErrorsForActions([action]);
 }
 
 function isBackendReachabilityError(error: unknown): boolean {
