@@ -148,7 +148,7 @@ export function RepositoryDiffModal({ open, taskSlug, onClose }: RepositoryDiffM
               disabled={busy || mergeBusy || !taskSlug || !report?.commits.length}
               onClick={() => void mergeToCurrentBranch()}
             >
-              {mergeBusy ? "Merging..." : "Merge to current branch"}
+              {mergeBusy ? "Merging..." : "Merge to Main"}
             </button>
             <button type="button" onClick={onClose}>
               Close
