@@ -565,6 +565,26 @@ describe("repository diff reports", () => {
     expect(report.warnings).toEqual([]);
   });
 
+  it("returns a single file task diff against the connected repository", async () => {
+    const fs = createMemoryFs();
+    const git = createDiffGitStub();
+    const service = createHarnessService({
+      fs,
+      git,
+      now: () => "2026-06-23T00:00:00.000Z"
+    } as never);
+
+    const report = await service.getRepositoryFileDiff("/repo", {
+      baseRepoRoot: "/base",
+      path: "CLAUDE.md"
+    });
+
+    expect(report.baseSha).toBe("base1234567890");
+    expect(report.headSha).toBe("abc1234567890");
+    expect(report.file?.path).toBe("CLAUDE.md");
+    expect(report.file?.diff).toContain("+task new");
+  });
+
   it("fast-forwards the connected repository current branch with the task branch", async () => {
     const fs = createMemoryFs();
     const calls: string[] = [];
@@ -766,6 +786,17 @@ function createDiffGitStub() {
         "@@ -1 +1 @@",
         "-old",
         "+new",
+        ""
+      ].join("\n");
+    },
+    async getDiff() {
+      return [
+        "diff --git a/CLAUDE.md b/CLAUDE.md",
+        "--- a/CLAUDE.md",
+        "+++ b/CLAUDE.md",
+        "@@ -1 +1 @@",
+        "-base old",
+        "+task new",
         ""
       ].join("\n");
     }

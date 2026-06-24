@@ -157,6 +157,7 @@ describe("createGitAdapter", () => {
       committedAt: "2026-06-23T00:00:00+00:00"
     });
     await expect(adapter.getCommitDiff("/workspace", "HEAD")).resolves.toContain("diff --git");
+    await expect(adapter.getDiff("/workspace", "base123", null, ["CLAUDE.md"])).resolves.toContain("diff --git");
     await expect(adapter.getCommitList("/workspace", "base123..HEAD")).resolves.toEqual([
       {
         sha: "def1234567890",
@@ -182,8 +183,18 @@ describe("createGitAdapter", () => {
       "--dst-prefix=b/",
       "HEAD"
     ]);
-    expect(calls[2]?.args.slice(-3)).toEqual(["log", "--format=%H%x00%s%x00%cI%x1e", "base123..HEAD"]);
-    expect(calls[3]?.args.slice(-3)).toEqual(["merge-base", "main", "HEAD"]);
+    expect(calls[2]?.args.slice(-8)).toEqual([
+      "diff",
+      "--no-ext-diff",
+      "--binary",
+      "--src-prefix=a/",
+      "--dst-prefix=b/",
+      "base123",
+      "--",
+      "CLAUDE.md"
+    ]);
+    expect(calls[3]?.args.slice(-3)).toEqual(["log", "--format=%H%x00%s%x00%cI%x1e", "base123..HEAD"]);
+    expect(calls[4]?.args.slice(-3)).toEqual(["merge-base", "main", "HEAD"]);
   });
 });
 

@@ -2611,6 +2611,14 @@ h2 {
   min-width: 0;
 }
 
+.repository-diff-file-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 6px;
+  align-items: stretch;
+  min-width: 0;
+}
+
 .repository-diff-file-list button {
   display: grid;
   gap: 4px;
@@ -2624,9 +2632,17 @@ h2 {
   text-align: left;
 }
 
-.repository-diff-file-list li.selected button {
+.repository-diff-file-list li.selected .repository-diff-file-select,
+.repository-diff-file-list li.task-diff-selected .repository-diff-task-file-button {
   border-color: #58a6ff;
   background: #0f1b2d;
+}
+
+.repository-diff-task-file-button {
+  align-content: center;
+  min-width: 78px;
+  font-size: 12px;
+  text-align: center;
 }
 
 .repository-diff-file-list span,
@@ -2672,6 +2688,14 @@ h2 {
   color: #7ee787;
   font-family: Menlo, Monaco, Consolas, monospace;
   font-size: 12px;
+}
+
+.repository-diff-task-file-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: flex-end;
 }
 
 .repository-diff-code {

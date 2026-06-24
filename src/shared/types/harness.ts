@@ -123,6 +123,20 @@ export interface RepositoryDiffReport {
   warnings: string[];
 }
 
+export interface RepositoryFileDiffReport {
+  version: 1;
+  repoRoot: string;
+  baseRepoRoot: string;
+  sourceBranch: string;
+  targetBranch: string;
+  baseSha: string;
+  headSha: string;
+  path: string;
+  generatedAt: string;
+  file: RepositoryDiffFile | null;
+  warnings: string[];
+}
+
 export interface MergeRepositoryDiffToCurrentBranchRequest {
   taskSlug?: string;
 }

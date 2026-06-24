@@ -17,6 +17,7 @@ import type {
   RepositoryDiffFile,
   RepositoryDiffFileCategory,
   RepositoryDiffFileStatus,
+  RepositoryFileDiffReport,
   RepositoryDiffReport,
   RepositoryDiffSummary,
   MergeRepositoryDiffToCurrentBranchResult,
@@ -65,6 +66,7 @@ export interface HarnessService {
   updateHarnessFileContent(repoRoot: string, filePath: string, content: string): Promise<UpdateHarnessFileContentResult>;
   applyHarness(repoRoot: string): Promise<HarnessApplyResult>;
   getRepositoryDiff(repoRoot: string, input?: RepositoryDiffRequest): Promise<RepositoryDiffReport>;
+  getRepositoryFileDiff(repoRoot: string, input: RepositoryFileDiffRequest): Promise<RepositoryFileDiffReport>;
   mergeRepositoryDiffToCurrentBranch(baseRepoRoot: string, input: MergeRepositoryDiffToCurrentBranchInput): Promise<MergeRepositoryDiffToCurrentBranchResult>;
   getBootstrapStatus(repoRoot: string, targetRepoRoot?: string): Promise<HarnessBootstrapStatusReport>;
   startHarnessBootstrap(repoRoot: string, targetRepoRoot?: string, input?: StartHarnessBootstrapRequest): Promise<StartHarnessBootstrapResult>;
@@ -77,7 +79,7 @@ export interface HarnessService {
 export interface HarnessServiceDeps {
   fs: FileSystemAdapter;
   git?: Pick<GitAdapter, "addPaths" | "commit" | "getStatusPorcelainV1"> &
-    Partial<Pick<GitAdapter, "branchExists" | "getCommitDiff" | "getCommitInfo" | "getCommitList" | "getCurrentBranch" | "getHeadCommit" | "getMergeBase" | "mergeBranchFastForward">>;
+    Partial<Pick<GitAdapter, "branchExists" | "getCommitDiff" | "getCommitInfo" | "getCommitList" | "getCurrentBranch" | "getDiff" | "getHeadCommit" | "getMergeBase" | "mergeBranchFastForward">>;
   runtime?: TerminalRuntime;
   harnessEngineerSessions?: Pick<
     SessionService,
@@ -106,6 +108,11 @@ interface HarnessBootstrapRunState {
 export interface RepositoryDiffRequest {
   baseRepoRoot?: string;
   commitSha?: string;
+}
+
+export interface RepositoryFileDiffRequest {
+  baseRepoRoot: string;
+  path: string;
 }
 
 export interface MergeRepositoryDiffToCurrentBranchInput {
@@ -436,6 +443,9 @@ export function createHarnessService(deps: HarnessServiceDeps): HarnessService {
     async getRepositoryDiff(repoRoot, input = {}) {
       return getRepositoryDiffReport(requireRepositoryDiffGit(deps.git), repoRoot, input, now());
     },
+    async getRepositoryFileDiff(repoRoot, input) {
+      return getRepositoryFileDiffReport(requireRepositoryDiffGit(deps.git), repoRoot, input, now());
+    },
     async mergeRepositoryDiffToCurrentBranch(baseRepoRoot, input) {
       return mergeRepositoryDiffToCurrentBranch(requireRepositoryMergeGit(deps.git), baseRepoRoot, input, now());
     },
@@ -663,7 +673,7 @@ function shortCommit(commit: string): string {
 
 type HarnessGit = NonNullable<HarnessServiceDeps["git"]>;
 type RepositoryDiffGit = HarnessGit & Required<
-  Pick<GitAdapter, "getCommitDiff" | "getCommitInfo" | "getCommitList" | "getCurrentBranch" | "getHeadCommit" | "getMergeBase">
+  Pick<GitAdapter, "getCommitDiff" | "getCommitInfo" | "getCommitList" | "getCurrentBranch" | "getDiff" | "getHeadCommit" | "getMergeBase">
 >;
 type RepositoryMergeGit = HarnessGit & Required<
   Pick<GitAdapter, "branchExists" | "getCurrentBranch" | "getHeadCommit" | "mergeBranchFastForward">
@@ -685,6 +695,7 @@ function requireRepositoryDiffGit(git: HarnessGit | undefined): RepositoryDiffGi
     !git.getCommitInfo ||
     !git.getCommitList ||
     !git.getCurrentBranch ||
+    !git.getDiff ||
     !git.getHeadCommit ||
     !git.getMergeBase
   ) {
@@ -780,6 +791,41 @@ async function getRepositoryDiffReport(
       binaryFiles: files.filter((file) => file.binary).length
     },
     files,
+    warnings
+  };
+}
+
+async function getRepositoryFileDiffReport(
+  git: RepositoryDiffGit,
+  repoRoot: string,
+  input: RepositoryFileDiffRequest,
+  generatedAt: string
+): Promise<RepositoryFileDiffReport> {
+  const filePath = normalizeHarnessGitPath(input.path);
+  const baseRepoRoot = input.baseRepoRoot;
+  const sourceBranch = await git.getCurrentBranch(repoRoot);
+  const targetBranch = await git.getCurrentBranch(baseRepoRoot);
+  const baseSha = await git.getHeadCommit(baseRepoRoot);
+  const headSha = await git.getHeadCommit(repoRoot);
+  const rawDiff = await git.getDiff(repoRoot, baseSha, null, [filePath]);
+  const files = parseCommitDiffFiles(rawDiff);
+  const file = files.find((entry) => entry.path === filePath || entry.oldPath === filePath) ?? files[0] ?? null;
+  const warnings: string[] = [];
+  if (files.length > 1) {
+    warnings.push(`Multiple diff entries matched ${filePath}; showing the first entry.`);
+  }
+
+  return {
+    version: 1,
+    repoRoot,
+    baseRepoRoot,
+    sourceBranch,
+    targetBranch,
+    baseSha,
+    headSha,
+    path: filePath,
+    generatedAt,
+    file,
     warnings
   };
 }

@@ -81,6 +81,14 @@ export function registerHarnessRoutes(app: FastifyInstance, deps: HarnessRouteDe
     });
   });
 
+  app.get<{ Querystring: { path?: string; taskSlug?: string } }>("/api/projects/harness/repository-diff/file", async (request) => {
+    const { project, task } = await requireHarnessTaskContext(deps, request.query.taskSlug);
+    return deps.harnessService.getRepositoryFileDiff(task.worktreePath, {
+      baseRepoRoot: project.repoRoot,
+      path: request.query.path ?? ""
+    });
+  });
+
   app.post<{ Body: MergeRepositoryDiffToCurrentBranchRequest }>("/api/projects/harness/repository-diff/merge-to-current-branch", async (request) => {
     const { project, task } = await requireHarnessTaskContext(deps, request.body?.taskSlug);
     return deps.harnessService.mergeRepositoryDiffToCurrentBranch(project.repoRoot, {

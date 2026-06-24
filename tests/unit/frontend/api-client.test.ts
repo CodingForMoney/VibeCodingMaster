@@ -156,6 +156,26 @@ describe("apiClient", () => {
     expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/projects/harness/repository-diff?taskSlug=demo-task&commit=abc1234567890");
   });
 
+  it("loads repository file diff for the task worktree", async () => {
+    const fetchMock = mockFetch({
+      version: 1,
+      repoRoot: "/repo/.claude/worktrees/demo-task",
+      baseRepoRoot: "/repo",
+      sourceBranch: "feature/demo-task",
+      targetBranch: "main",
+      baseSha: "base123",
+      headSha: "head123",
+      path: "CLAUDE.md",
+      generatedAt: "2026-06-23T00:00:00.000Z",
+      file: null,
+      warnings: []
+    });
+
+    await apiClient.getRepositoryFileDiff("demo-task", "CLAUDE.md");
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/projects/harness/repository-diff/file?taskSlug=demo-task&path=CLAUDE.md");
+  });
+
   it("merges repository diff to the connected repository current branch", async () => {
     const fetchMock = mockFetch({
       version: 1,

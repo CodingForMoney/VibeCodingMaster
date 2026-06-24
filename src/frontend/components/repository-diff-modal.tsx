@@ -4,6 +4,7 @@ import type {
   RepositoryDiffFileCategory,
   RepositoryDiffFileStage,
   RepositoryDiffFileStatus,
+  RepositoryFileDiffReport,
   RepositoryDiffReport
 } from "../../shared/types/harness.js";
 import { apiClient } from "../state/api-client.js";
@@ -20,6 +21,8 @@ export function RepositoryDiffModal({ open, taskSlug, onClose }: RepositoryDiffM
   const [report, setReport] = useState<RepositoryDiffReport | null>(null);
   const [selectedCommitSha, setSelectedCommitSha] = useState<string | null>(null);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
+  const [taskFileDiff, setTaskFileDiff] = useState<RepositoryFileDiffReport | null>(null);
+  const [taskFileDiffBusyPath, setTaskFileDiffBusyPath] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [mergeBusy, setMergeBusy] = useState(false);
   const [, setError] = useUiErrorState(null);
@@ -39,6 +42,7 @@ export function RepositoryDiffModal({ open, taskSlug, onClose }: RepositoryDiffM
       }
       const nextReport = await apiClient.getRepositoryDiff(taskSlug, commitSha);
       setReport(nextReport);
+      setTaskFileDiff(null);
       setSelectedCommitSha(nextReport.commit?.sha ?? null);
       setSelectedPath((current) =>
         current && nextReport.files.some((file) => file.path === current)
@@ -60,6 +64,23 @@ export function RepositoryDiffModal({ open, taskSlug, onClose }: RepositoryDiffM
     setMergeMessage(null);
     void loadDiff(null);
   }, [open, taskSlug]);
+
+  async function loadTaskFileDiff(filePath: string) {
+    setTaskFileDiffBusyPath(filePath);
+    setError(null);
+    try {
+      if (!taskSlug) {
+        throw new Error("Create or select a task before reviewing file diffs.");
+      }
+      const nextDiff = await apiClient.getRepositoryFileDiff(taskSlug, filePath);
+      setTaskFileDiff(nextDiff);
+      setSelectedPath(filePath);
+    } catch (caught) {
+      setError(formatUiError(`Load task file diff for ${filePath}`, caught));
+    } finally {
+      setTaskFileDiffBusyPath(null);
+    }
+  }
 
   async function mergeToCurrentBranch() {
     setError(null);
@@ -170,13 +191,37 @@ export function RepositoryDiffModal({ open, taskSlug, onClose }: RepositoryDiffM
             <RepositoryDiffSummary report={report} busy={busy} />
             <ol className="repository-diff-file-list">
               {report?.files.map((file) => (
-                <li key={file.path} className={selectedFile?.path === file.path ? "selected" : ""}>
-                  <button type="button" onClick={() => setSelectedPath(file.path)}>
-                    <span>{file.path}</span>
-                    <small>
-                      {formatStatus(file.status)} · {formatStage(file.stage)} · {formatCategory(file.category)}
-                    </small>
-                  </button>
+                <li
+                  key={file.path}
+                  className={[
+                    selectedFile?.path === file.path && !taskFileDiff ? "selected" : "",
+                    taskFileDiff?.path === file.path ? "task-diff-selected" : ""
+                  ].filter(Boolean).join(" ")}
+                >
+                  <div className="repository-diff-file-row">
+                    <button
+                      className="repository-diff-file-select"
+                      type="button"
+                      onClick={() => {
+                        setTaskFileDiff(null);
+                        setSelectedPath(file.path);
+                      }}
+                    >
+                      <span>{file.path}</span>
+                      <small>
+                        {formatStatus(file.status)} · {formatStage(file.stage)} · {formatCategory(file.category)}
+                      </small>
+                    </button>
+                    <button
+                      className="repository-diff-task-file-button"
+                      type="button"
+                      disabled={taskFileDiffBusyPath === file.path}
+                      title="View this file diff across the whole task worktree"
+                      onClick={() => void loadTaskFileDiff(file.path)}
+                    >
+                      {taskFileDiffBusyPath === file.path ? "..." : "Task diff"}
+                    </button>
+                  </div>
                 </li>
               ))}
               {report && report.files.length === 0 ? (
@@ -188,7 +233,9 @@ export function RepositoryDiffModal({ open, taskSlug, onClose }: RepositoryDiffM
           </aside>
 
           <main className="repository-diff-main">
-            {selectedFile ? (
+            {taskFileDiff ? (
+              <RepositoryTaskFileDiffView diff={taskFileDiff} onClose={() => setTaskFileDiff(null)} />
+            ) : selectedFile ? (
               <>
                 <div className="repository-diff-file-header">
                   <div>
@@ -232,6 +279,53 @@ function RepositoryDiffSummary({ report, busy }: { report: RepositoryDiffReport 
         </>
       ) : null}
     </div>
+  );
+}
+
+function RepositoryTaskFileDiffView({
+  diff,
+  onClose
+}: {
+  diff: RepositoryFileDiffReport;
+  onClose(): void;
+}) {
+  const file = diff.file;
+  return (
+    <>
+      <div className="repository-diff-file-header">
+        <div>
+          <h3>{diff.path}</h3>
+          <p>
+            Task diff · {diff.targetBranch} {diff.baseSha.slice(0, 12)} → {diff.sourceBranch} worktree {diff.headSha.slice(0, 12)}
+          </p>
+        </div>
+        <div className="repository-diff-task-file-actions">
+          {file ? <span className="repository-diff-stats">+{file.additions} / -{file.deletions}</span> : null}
+          <button type="button" onClick={onClose}>Commit diff</button>
+        </div>
+      </div>
+      {diff.warnings.length > 0 ? (
+        <ul className="warnings repository-diff-warnings">
+          {diff.warnings.map((warning) => <li key={warning}>{warning}</li>)}
+        </ul>
+      ) : null}
+      {file ? (
+        <>
+          <p className="muted">
+            {formatCategory(file.category)} · {formatStatus(file.status)} · whole task comparison
+          </p>
+          {file.binary ? <p className="muted">Binary or non-regular file. Text diff is not available.</p> : null}
+          {file.truncated ? <p className="muted">Diff was truncated for display.</p> : null}
+          <pre className="repository-diff-code" aria-label={`${diff.path} task diff`}>
+            {renderDiffLines(file.diff)}
+          </pre>
+        </>
+      ) : (
+        <div className="repository-diff-placeholder">
+          No task-level diff for this file.
+        </div>
+      )}
+    </>
   );
 }
 

@@ -20,6 +20,7 @@ export interface GitAdapter {
   getStatusPorcelainV1(repoRoot: string): Promise<string>;
   getCommitInfo(repoRoot: string, ref?: string): Promise<GitCommitInfo>;
   getCommitDiff(repoRoot: string, ref?: string): Promise<string>;
+  getDiff(repoRoot: string, baseRef: string, headRef?: string | null, paths?: string[]): Promise<string>;
   getCommitList(repoRoot: string, range: string): Promise<GitCommitInfo[]>;
   getMergeBase(repoRoot: string, leftRef: string, rightRef: string): Promise<string>;
   isIgnored(repoRoot: string, repoRelativePath: string): Promise<boolean>;
@@ -196,6 +197,29 @@ export function createGitAdapter(runner: CommandRunner): GitAdapter {
         throw new VcmError({
           code: "GIT_ERROR",
           message: "Unable to read Git commit diff.",
+          statusCode: 400,
+          hint: result.stderr
+        });
+      }
+
+      return result.stdout;
+    },
+    async getDiff(repoRoot, baseRef, headRef = null, paths = []) {
+      const result = await runGit(runner, repoRoot, [
+        "diff",
+        "--no-ext-diff",
+        "--binary",
+        "--src-prefix=a/",
+        "--dst-prefix=b/",
+        baseRef,
+        ...(headRef ? [headRef] : []),
+        "--",
+        ...paths
+      ]);
+      if (result.exitCode !== 0) {
+        throw new VcmError({
+          code: "GIT_ERROR",
+          message: "Unable to read Git diff.",
           statusCode: 400,
           hint: result.stderr
         });

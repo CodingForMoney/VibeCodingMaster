@@ -18,6 +18,7 @@ import type {
   HarnessFileContent,
   MergeRepositoryDiffToCurrentBranchResult,
   RepositoryDiffReport,
+  RepositoryFileDiffReport,
   RestartHarnessBootstrapRequest,
   RunHarnessBootstrapResult,
   HarnessStatusReport,
@@ -139,6 +140,10 @@ export const apiClient = {
       params.set("commit", commitSha);
     }
     return request<RepositoryDiffReport>(`/api/projects/harness/repository-diff?${params.toString()}`);
+  },
+  getRepositoryFileDiff(taskSlug: string, filePath: string) {
+    const params = new URLSearchParams({ taskSlug, path: filePath });
+    return request<RepositoryFileDiffReport>(`/api/projects/harness/repository-diff/file?${params.toString()}`);
   },
   mergeRepositoryDiffToCurrentBranch(taskSlug: string) {
     return request<MergeRepositoryDiffToCurrentBranchResult>("/api/projects/harness/repository-diff/merge-to-current-branch", {

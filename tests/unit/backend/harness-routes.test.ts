@@ -169,6 +169,62 @@ describe("harness routes", () => {
     await app.close();
   });
 
+  it("returns repository file diff against the connected repository", async () => {
+    const app = Fastify({ logger: false });
+    const calls: unknown[] = [];
+    registerHarnessRoutes(app, {
+      projectService: createProjectServiceStub(),
+      taskService: createTaskServiceStub(),
+      harnessService: {
+        async getHarnessStatus() {
+          throw new Error("not used");
+        },
+        async applyHarness() {
+          throw new Error("not used");
+        },
+        async getRepositoryFileDiff(repoRoot, input) {
+          calls.push(["getRepositoryFileDiff", repoRoot, input]);
+          return {
+            version: 1,
+            repoRoot,
+            baseRepoRoot: input.baseRepoRoot,
+            sourceBranch: "feature/demo-task",
+            targetBranch: "release/v0.4",
+            baseSha: "base123",
+            headSha: "head123",
+            path: input.path,
+            generatedAt: "2026-06-23T00:00:00.000Z",
+            file: null,
+            warnings: []
+          };
+        },
+        async getBootstrapStatus() {
+          throw new Error("not used");
+        },
+        async startHarnessBootstrap() {
+          throw new Error("not used");
+        }
+      }
+    } as never);
+
+    const response = await app.inject({
+      method: "GET",
+      url: "/api/projects/harness/repository-diff/file?taskSlug=demo-task&path=CLAUDE.md"
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({ path: "CLAUDE.md" });
+    expect(calls).toEqual([[
+      "getRepositoryFileDiff",
+      "/workspace/.claude/worktrees/demo-task",
+      {
+        baseRepoRoot: "/workspace",
+        path: "CLAUDE.md"
+      }
+    ]]);
+    await app.close();
+  });
+
   it("merges the active task branch to the connected repository current branch", async () => {
     const app = Fastify({ logger: false });
     const calls: unknown[] = [];
