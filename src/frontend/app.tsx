@@ -558,16 +558,51 @@ export function App() {
       return;
     }
 
-    void refreshHarnessFeedbackState(activeTask?.taskSlug).catch((caught: Error) => setError(formatUiError("Refresh Harness feedback state", caught)));
+    let cancelled = false;
+    let inFlight = false;
+    const taskSlug = activeTask?.taskSlug ?? null;
+    const loadFeedbackState = async () => {
+      const state = await apiClient.getHarnessFeedbackState(taskSlug);
+      if (!cancelled) {
+        setHarnessFeedbackState(state);
+      }
+    };
+
+    inFlight = true;
+    void loadFeedbackState()
+      .catch((caught: Error) => {
+        if (!cancelled) {
+          setError(formatUiError("Refresh Harness feedback state", caught));
+        }
+      })
+      .finally(() => {
+        inFlight = false;
+      });
     const interval = window.setInterval(() => {
-      void refreshHarnessFeedbackState(activeTask?.taskSlug)
+      if (inFlight) {
+        return;
+      }
+      inFlight = true;
+      void loadFeedbackState()
         .then(() => {
-          clearPollError("Poll Harness feedback state");
-          setError((current) => clearUiErrorForActions(current, ["Poll Harness feedback state"]));
+          if (!cancelled) {
+            clearPollError("Poll Harness feedback state");
+            setError((current) => clearUiErrorForActions(current, ["Poll Harness feedback state"]));
+          }
         })
-        .catch((caught: Error) => reportPollError("Poll Harness feedback state", caught));
+        .catch((caught: Error) => {
+          if (!cancelled) {
+            reportPollError("Poll Harness feedback state", caught);
+          }
+        })
+        .finally(() => {
+          inFlight = false;
+        });
     }, 4000);
-    return () => window.clearInterval(interval);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
   }, [activeTask?.taskSlug, project?.repoRoot]);
 
   useEffect(() => {
@@ -576,23 +611,62 @@ export function App() {
       return;
     }
 
-    void refreshTranslatorSession({ syncLaunchOptions: true }).catch((caught: Error) => setError(formatUiError("Load Translator session", caught)));
-    void refreshTranslationMemoryInitialized().catch((caught: Error) => setError(formatUiError("Load translation memory status", caught)));
+    let cancelled = false;
+    let inFlight = false;
+    const loadTranslatorState = async (syncLaunchOptions = false) => {
+      const [session, state] = await Promise.all([
+        apiClient.getTranslatorSession(),
+        apiClient.getTranslationState()
+      ]);
+      if (cancelled) {
+        return;
+      }
+      setTranslatorSession(session);
+      setTranslationMemoryInitialized(state.memoryInitialized);
+      if (syncLaunchOptions) {
+        syncTranslatorLaunchOptions(session);
+      }
+    };
+
+    inFlight = true;
+    void loadTranslatorState(true)
+      .catch((caught: Error) => {
+        if (!cancelled) {
+          setError(formatUiError("Load Translator session", caught));
+        }
+      })
+      .finally(() => {
+        inFlight = false;
+      });
     const interval = window.setInterval(() => {
-      void refreshTranslatorSession()
+      if (inFlight) {
+        return;
+      }
+      inFlight = true;
+      void loadTranslatorState()
         .then(() => {
-          clearPollError("Poll Translator session");
-          setError((current) => clearUiErrorForActions(current, ["Poll Translator session"]));
+          if (!cancelled) {
+            clearPollError("Poll Translator session");
+            clearPollError("Poll translation memory status");
+            setError((current) => clearUiErrorForActions(current, [
+              "Poll Translator session",
+              "Poll translation memory status"
+            ]));
+          }
         })
-        .catch((caught: Error) => reportPollError("Poll Translator session", caught));
-      void refreshTranslationMemoryInitialized()
-        .then(() => {
-          clearPollError("Poll translation memory status");
-          setError((current) => clearUiErrorForActions(current, ["Poll translation memory status"]));
+        .catch((caught: Error) => {
+          if (!cancelled) {
+            reportPollError("Poll Translator session", caught);
+          }
         })
-        .catch((caught: Error) => reportPollError("Poll translation memory status", caught));
+        .finally(() => {
+          inFlight = false;
+        });
     }, 3000);
-    return () => window.clearInterval(interval);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
   }, [project?.repoRoot]);
 
   useEffect(() => {
@@ -600,16 +674,54 @@ export function App() {
       return;
     }
 
-    void refreshHarnessEngineerSession({ syncLaunchOptions: true }).catch((caught: Error) => setError(formatUiError("Load Harness Engineer session", caught)));
+    let cancelled = false;
+    let inFlight = false;
+    const loadHarnessEngineerSession = async (syncLaunchOptions = false) => {
+      const session = await apiClient.getHarnessEngineerSession();
+      if (cancelled) {
+        return;
+      }
+      setHarnessEngineerSession(session);
+      if (syncLaunchOptions) {
+        syncHarnessEngineerLaunchOptions(session);
+      }
+    };
+
+    inFlight = true;
+    void loadHarnessEngineerSession(true)
+      .catch((caught: Error) => {
+        if (!cancelled) {
+          setError(formatUiError("Load Harness Engineer session", caught));
+        }
+      })
+      .finally(() => {
+        inFlight = false;
+      });
     const interval = window.setInterval(() => {
-      void refreshHarnessEngineerSession()
+      if (inFlight) {
+        return;
+      }
+      inFlight = true;
+      void loadHarnessEngineerSession()
         .then(() => {
-          clearPollError("Poll Harness Engineer session");
-          setError((current) => clearUiErrorForActions(current, ["Poll Harness Engineer session"]));
+          if (!cancelled) {
+            clearPollError("Poll Harness Engineer session");
+            setError((current) => clearUiErrorForActions(current, ["Poll Harness Engineer session"]));
+          }
         })
-        .catch((caught: Error) => reportPollError("Poll Harness Engineer session", caught));
+        .catch((caught: Error) => {
+          if (!cancelled) {
+            reportPollError("Poll Harness Engineer session", caught);
+          }
+        })
+        .finally(() => {
+          inFlight = false;
+        });
     }, 3000);
-    return () => window.clearInterval(interval);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
   }, [project?.repoRoot]);
 
   useEffect(() => {
@@ -772,22 +884,57 @@ export function App() {
     }
 
     const taskSlug = activeTask.taskSlug;
-    void Promise.all([
-      loadHarnessStatus(taskSlug),
-      loadHarnessBootstrapStatus(taskSlug)
-    ]).catch((caught: Error) => setError(formatUiError("Load VCM Harness status", caught)));
+    let cancelled = false;
+    let inFlight = false;
+    const loadCurrentHarnessStatus = async () => {
+      const [nextHarnessStatus, nextBootstrapStatus] = await Promise.all([
+        apiClient.getHarnessStatus(taskSlug),
+        apiClient.getHarnessBootstrapStatus(taskSlug)
+      ]);
+      if (cancelled) {
+        return;
+      }
+      setHarnessStatus(nextHarnessStatus);
+      setHarnessStatusTaskSlug(taskSlug);
+      setHarnessBootstrapStatus(nextBootstrapStatus);
+      setHarnessBootstrapStatusTaskSlug(taskSlug);
+    };
+
+    inFlight = true;
+    void loadCurrentHarnessStatus()
+      .catch((caught: Error) => {
+        if (!cancelled) {
+          setError(formatUiError("Load VCM Harness status", caught));
+        }
+      })
+      .finally(() => {
+        inFlight = false;
+      });
     const interval = window.setInterval(() => {
-      void Promise.all([
-        loadHarnessStatus(taskSlug),
-        loadHarnessBootstrapStatus(taskSlug)
-      ])
+      if (inFlight) {
+        return;
+      }
+      inFlight = true;
+      void loadCurrentHarnessStatus()
         .then(() => {
-          clearPollError("Poll VCM Harness status");
-          setError((current) => clearUiErrorForActions(current, ["Poll VCM Harness status"]));
+          if (!cancelled) {
+            clearPollError("Poll VCM Harness status");
+            setError((current) => clearUiErrorForActions(current, ["Poll VCM Harness status"]));
+          }
         })
-        .catch((caught: Error) => reportPollError("Poll VCM Harness status", caught));
+        .catch((caught: Error) => {
+          if (!cancelled) {
+            reportPollError("Poll VCM Harness status", caught);
+          }
+        })
+        .finally(() => {
+          inFlight = false;
+        });
     }, 3000);
-    return () => window.clearInterval(interval);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
   }, [project?.repoRoot, activeTask?.taskSlug]);
 
   useEffect(() => {
@@ -827,11 +974,35 @@ export function App() {
       return;
     }
 
+    let cancelled = false;
+    let inFlight = false;
     const interval = window.setInterval(() => {
-      void refreshGateReviewState(taskSlug).catch((caught: Error) => reportPollError("Poll Gate Review state", caught));
+      if (inFlight) {
+        return;
+      }
+      inFlight = true;
+      void apiClient.getGateReviewState(taskSlug)
+        .then((state) => {
+          if (!cancelled) {
+            setActiveGateReview({ taskSlug, state });
+            clearPollError("Poll Gate Review state");
+            setError((current) => clearUiErrorForActions(current, ["Refresh Gate Review state", "Poll Gate Review state"]));
+          }
+        })
+        .catch((caught: Error) => {
+          if (!cancelled) {
+            reportPollError("Poll Gate Review state", caught);
+          }
+        })
+        .finally(() => {
+          inFlight = false;
+        });
     }, 3000);
 
-    return () => window.clearInterval(interval);
+    return () => {
+      cancelled = true;
+      window.clearInterval(interval);
+    };
   }, [
     activeGateReview,
     activeLaunchState,
