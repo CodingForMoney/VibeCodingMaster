@@ -24,10 +24,11 @@ import { renderVcmHarnessBootstrapSkillRules } from "../templates/harness/vcm-ha
 import { renderVcmLongRunningValidationSkillRules } from "../templates/harness/vcm-long-running-validation-skill.js";
 import { renderVcmReportHarnessIssueSkillRules } from "../templates/harness/vcm-report-harness-issue-skill.js";
 import { renderVcmRouteMessageSkillRules } from "../templates/harness/vcm-route-message-skill.js";
+import { readVcmPackageVersion } from "../app-version.js";
 
-const HARNESS_VERSION = "0.3.0-fixed";
 const CLI_DIR = path.dirname(fileURLToPath(import.meta.url));
 const APP_ROOT = path.resolve(CLI_DIR, "../../..");
+const VCM_PACKAGE_VERSION = readVcmPackageVersion(APP_ROOT);
 const MANIFEST_PATH = ".ai/vcm-harness-manifest.json";
 const HTML_BLOCK_PATTERN = /<!-- VCM:BEGIN(?:\s+version=\d+)? -->[\s\S]*?<!-- VCM:END -->/m;
 const HASH_BLOCK_PATTERN = /# VCM:BEGIN(?:\s+version=\d+)?\n[\s\S]*?# VCM:END/m;
@@ -383,7 +384,7 @@ async function buildManifest(projectRoot) {
   return {
     schemaVersion: 1,
     manager: "vcm",
-    harnessVersion: HARNESS_VERSION,
+    harnessVersion: VCM_PACKAGE_VERSION,
     installMode: "fixed",
     installedAt: typeof current?.installedAt === "string" ? current.installedAt : now,
     updatedAt: now,

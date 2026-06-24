@@ -52,6 +52,7 @@ import { registerTranslationRoutes } from "./api/translation-routes.js";
 import { registerTerminalWs } from "./ws/terminal-ws.js";
 import { toVcmError } from "./errors.js";
 import type { TerminalRuntime } from "./runtime/terminal-runtime.js";
+import { readVcmPackageVersion } from "./app-version.js";
 
 export interface CreateServerOptions {
   host?: string;
@@ -211,6 +212,8 @@ export interface CreateDefaultServerDepsOptions {
 
 export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions = {}): ServerDeps {
   const fs = createNodeFileSystemAdapter();
+  const appRoot = getAppRoot();
+  const vcmVersion = readVcmPackageVersion(appRoot);
   const runner = createCommandRunner();
   const git = createGitAdapter(runner);
   const claude = createClaudeAdapter(runner);
@@ -235,7 +238,8 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     git,
     runtime,
     harnessEngineerSessions: sessionService,
-    runFixedInstaller: createScriptFixedHarnessInstaller(path.join(getAppRoot(), "scripts/install-vcm-harness.mjs"))
+    runFixedInstaller: createScriptFixedHarnessInstaller(path.join(appRoot, "scripts/install-vcm-harness.mjs")),
+    vcmVersion
   });
   const harnessFeedbackService = createHarnessFeedbackService({
     fs,
@@ -327,7 +331,7 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     translationWorkerService
   });
   const diagnosticsService = createDiagnosticsService({
-    appRoot: getAppRoot(),
+    appRoot,
     runtime,
     gatewayService,
     translationService

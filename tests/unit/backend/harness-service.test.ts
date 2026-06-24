@@ -266,6 +266,66 @@ describe("createHarnessService", () => {
     expect(content).toContain("## VCM Start Here");
   });
 
+  it("marks the fixed harness stale when manifest version differs from the VCM version", async () => {
+    const fs = createMemoryFs();
+    await createHarnessService({ fs }).applyHarness("/repo");
+    await fs.writeJson("/repo/.ai/vcm-harness-manifest.json", {
+      schemaVersion: 1,
+      manager: "vcm",
+      harnessVersion: "0.3.0-fixed"
+    });
+    const service = createHarnessService({
+      fs,
+      vcmVersion: "0.4.21",
+      runFixedInstaller: async () => ({
+        version: 1,
+        changedFiles: [],
+        message: "ok"
+      })
+    });
+
+    const status = await service.getHarnessStatus("/repo");
+
+    expect(status.needsApply).toBe(true);
+    expect(status.plannedChanges).toContainEqual({
+      path: ".ai/vcm-harness-manifest.json",
+      action: "update",
+      reason: "VCM fixed harness manifest version is 0.3.0-fixed; current VCM version is 0.4.21."
+    });
+  });
+
+  it("does not consider bootstrap ready when the fixed harness manifest is stale", async () => {
+    const fs = createMemoryFs();
+    await createHarnessService({ fs }).applyHarness("/repo");
+    await fs.writeJson("/repo/.ai/vcm-harness-manifest.json", {
+      schemaVersion: 1,
+      manager: "vcm",
+      harnessVersion: "0.3.0-fixed"
+    });
+    await fs.writeText("/repo/.ai/tools/generate-module-index", "#!/usr/bin/env python3\n");
+    await fs.writeText("/repo/.ai/tools/generate-public-surface", "#!/usr/bin/env python3\n");
+    const service = createHarnessService({
+      fs,
+      vcmVersion: "0.4.21",
+      runFixedInstaller: async () => ({
+        version: 1,
+        changedFiles: [],
+        message: "ok"
+      })
+    });
+
+    const status = await service.getBootstrapStatus("/repo");
+
+    expect(status.status).toBe("not_ready");
+    expect(status.canStart).toBe(false);
+    expect(status.checks[0]).toMatchObject({
+      key: "fixed-harness",
+      status: "incomplete",
+      path: ".ai/vcm-harness-manifest.json"
+    });
+    expect(status.checks[0]?.detail).toContain("current VCM version is 0.4.21");
+  });
+
   it("lets Harness Studio edit project-owned content outside managed blocks", async () => {
     const fs = createMemoryFs();
     const service = createHarnessService({ fs });

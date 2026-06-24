@@ -57,6 +57,7 @@ import type { SessionService } from "./session-service.js";
 const execFileAsync = promisify(execFile);
 const BOOTSTRAP_SESSION_PATH = ".ai/vcm/bootstrap/session.json";
 const HARNESS_ENGINEER_SESSION_PATH = ".ai/vcm/harness-engineer/session.json";
+const MANIFEST_PATH = ".ai/vcm-harness-manifest.json";
 
 export interface HarnessService {
   getHarnessStatus(repoRoot: string): Promise<HarnessStatusReport>;
@@ -87,6 +88,7 @@ export interface HarnessServiceDeps {
   >;
   now?: () => string;
   runFixedInstaller?: (repoRoot: string) => Promise<HarnessApplyResult>;
+  vcmVersion?: string;
 }
 
 interface HarnessBootstrapRunState {
@@ -323,12 +325,16 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
 
 export function createHarnessService(deps: HarnessServiceDeps): HarnessService {
   const now = deps.now ?? (() => new Date().toISOString());
+  const vcmVersion = deps.vcmVersion ?? "unknown";
 
   return {
     async getHarnessStatus(repoRoot) {
       const analyses = await analyzeHarnessFiles(deps.fs, repoRoot);
       const legacyChanges = await analyzeLegacyCodexHarnessPaths(deps.fs, repoRoot);
-      return renderHarnessStatus(await readHarnessRevisionValue(deps.fs, repoRoot), analyses, legacyChanges);
+      const manifestChange = deps.runFixedInstaller
+        ? await analyzeHarnessManifest(deps.fs, repoRoot, vcmVersion)
+        : undefined;
+      return renderHarnessStatus(await readHarnessRevisionValue(deps.fs, repoRoot), analyses, legacyChanges, manifestChange);
     },
     async getHarnessFileContent(repoRoot, filePath) {
       return readHarnessFileContent(deps.fs, repoRoot, filePath);
@@ -365,9 +371,12 @@ export function createHarnessService(deps: HarnessServiceDeps): HarnessService {
       const file = await readHarnessFileContent(deps.fs, repoRoot, definition.path);
       const analyses = await analyzeHarnessFiles(deps.fs, repoRoot);
       const legacyChanges = await analyzeLegacyCodexHarnessPaths(deps.fs, repoRoot);
+      const manifestChange = deps.runFixedInstaller
+        ? await analyzeHarnessManifest(deps.fs, repoRoot, vcmVersion)
+        : undefined;
       return {
         file,
-        status: renderHarnessStatus(await readHarnessRevisionValue(deps.fs, repoRoot), analyses, legacyChanges),
+        status: renderHarnessStatus(await readHarnessRevisionValue(deps.fs, repoRoot), analyses, legacyChanges, manifestChange),
         harnessCommit
       };
     },
@@ -431,11 +440,11 @@ export function createHarnessService(deps: HarnessServiceDeps): HarnessService {
       return mergeRepositoryDiffToCurrentBranch(requireRepositoryMergeGit(deps.git), baseRepoRoot, input, now());
     },
     async getBootstrapStatus(repoRoot, targetRepoRoot = repoRoot) {
-      return getHarnessBootstrapStatus(deps, repoRoot, targetRepoRoot, now);
+      return getHarnessBootstrapStatus(deps, repoRoot, targetRepoRoot, now, vcmVersion);
     },
     async startHarnessBootstrap(repoRoot, targetRepoRoot = repoRoot, input = {}) {
-      const session = await ensureHarnessEngineerForBootstrap(deps, repoRoot, targetRepoRoot, now, input);
-      const nextStatus = await getHarnessBootstrapStatus(deps, repoRoot, targetRepoRoot, now);
+      const session = await ensureHarnessEngineerForBootstrap(deps, repoRoot, targetRepoRoot, now, vcmVersion, input);
+      const nextStatus = await getHarnessBootstrapStatus(deps, repoRoot, targetRepoRoot, now, vcmVersion);
 
       return {
         status: {
@@ -447,8 +456,8 @@ export function createHarnessService(deps: HarnessServiceDeps): HarnessService {
       };
     },
     async restartHarnessBootstrap(repoRoot, targetRepoRoot = repoRoot, input = {}) {
-      const session = await restartHarnessEngineerForBootstrap(deps, repoRoot, targetRepoRoot, now, input);
-      const nextStatus = await getHarnessBootstrapStatus(deps, repoRoot, targetRepoRoot, now);
+      const session = await restartHarnessEngineerForBootstrap(deps, repoRoot, targetRepoRoot, now, vcmVersion, input);
+      const nextStatus = await getHarnessBootstrapStatus(deps, repoRoot, targetRepoRoot, now, vcmVersion);
       return {
         status: {
           ...nextStatus,
@@ -469,7 +478,7 @@ export function createHarnessService(deps: HarnessServiceDeps): HarnessService {
       }
       await deps.harnessEngineerSessions?.stopProjectHarnessEngineerSession(repoRoot);
       await clearHarnessBootstrapRunState(deps.fs, repoRoot);
-      return getHarnessBootstrapStatus(deps, repoRoot, repoRoot, now);
+      return getHarnessBootstrapStatus(deps, repoRoot, repoRoot, now, vcmVersion);
     },
     async runHarnessBootstrap(repoRoot, targetRepoRoot = repoRoot) {
       if (!deps.runtime || !deps.harnessEngineerSessions) {
@@ -480,7 +489,7 @@ export function createHarnessService(deps: HarnessServiceDeps): HarnessService {
         });
       }
       await assertHarnessWorktreeClean(deps.git, targetRepoRoot);
-      const status = await getHarnessBootstrapStatus(deps, repoRoot, targetRepoRoot, now);
+      const status = await getHarnessBootstrapStatus(deps, repoRoot, targetRepoRoot, now, vcmVersion);
       const session = status.session;
       if (!session || session.status !== "running" || !deps.runtime.getSession(session.id)) {
         throw new VcmError({
@@ -501,7 +510,7 @@ export function createHarnessService(deps: HarnessServiceDeps): HarnessService {
         updatedAt: timestamp
       });
       await submitTerminalInput(deps.runtime, session.id, prompt);
-      const nextStatus = await getHarnessBootstrapStatus(deps, repoRoot, targetRepoRoot, now);
+      const nextStatus = await getHarnessBootstrapStatus(deps, repoRoot, targetRepoRoot, now, vcmVersion);
       return {
         status: {
           ...nextStatus,
@@ -515,7 +524,7 @@ export function createHarnessService(deps: HarnessServiceDeps): HarnessService {
     async recordHarnessBootstrapHook(repoRoot, input) {
       const state = await loadPersistedHarnessBootstrapRunState(deps.fs, repoRoot);
       if (state?.status !== "running" || !matchesBootstrapRunState(state, input)) {
-        return getHarnessBootstrapStatus(deps, repoRoot, state?.targetRepoRoot ?? repoRoot, now);
+        return getHarnessBootstrapStatus(deps, repoRoot, state?.targetRepoRoot ?? repoRoot, now, vcmVersion);
       }
 
       const timestamp = now();
@@ -529,7 +538,7 @@ export function createHarnessService(deps: HarnessServiceDeps): HarnessService {
         updatedAt: timestamp,
         lastHookEvent: input.eventName
       });
-      return getHarnessBootstrapStatus(deps, repoRoot, state.targetRepoRoot ?? repoRoot, now);
+      return getHarnessBootstrapStatus(deps, repoRoot, state.targetRepoRoot ?? repoRoot, now, vcmVersion);
     }
   };
 }
@@ -539,6 +548,7 @@ async function ensureHarnessEngineerForBootstrap(
   repoRoot: string,
   targetRepoRoot: string,
   now: () => string,
+  vcmVersion: string,
   input: StartHarnessBootstrapRequest
 ): Promise<HarnessBootstrapSession> {
   if (!deps.harnessEngineerSessions) {
@@ -549,7 +559,7 @@ async function ensureHarnessEngineerForBootstrap(
     });
   }
 
-  const currentStatus = await getHarnessBootstrapStatus(deps, repoRoot, targetRepoRoot, now);
+  const currentStatus = await getHarnessBootstrapStatus(deps, repoRoot, targetRepoRoot, now, vcmVersion);
   if (currentStatus.session?.status === "running") {
     return currentStatus.session;
   }
@@ -569,6 +579,7 @@ async function restartHarnessEngineerForBootstrap(
   repoRoot: string,
   targetRepoRoot: string,
   now: () => string,
+  vcmVersion: string,
   input: RestartHarnessBootstrapRequest
 ): Promise<HarnessBootstrapSession> {
   if (!deps.harnessEngineerSessions) {
@@ -579,7 +590,7 @@ async function restartHarnessEngineerForBootstrap(
     });
   }
 
-  const currentStatus = await getHarnessBootstrapStatus(deps, repoRoot, targetRepoRoot, now);
+  const currentStatus = await getHarnessBootstrapStatus(deps, repoRoot, targetRepoRoot, now, vcmVersion);
   if (!currentStatus.canStart) {
     throw new VcmError({
       code: "HARNESS_BOOTSTRAP_NOT_READY",
@@ -1390,13 +1401,15 @@ async function removeLegacyCodexHarnessPaths(fs: FileSystemAdapter, repoRoot: st
 function renderHarnessStatus(
   harnessRevision: number,
   analyses: HarnessFileAnalysis[],
-  legacyChanges: HarnessPlannedChange[] = []
+  legacyChanges: HarnessPlannedChange[] = [],
+  manifestChange?: HarnessPlannedChange
 ): HarnessStatusReport {
   const files = analyses.map((analysis) => analysis.status);
   const plannedChanges = analyses
     .map((analysis) => analysis.plannedChange)
     .filter((change): change is HarnessPlannedChange => Boolean(change))
-    .concat(legacyChanges);
+    .concat(legacyChanges)
+    .concat(manifestChange ? [manifestChange] : []);
 
   // Derive `initialized`: the VCM harness is considered installed when at least one
   // VCM-exclusive marker is present (per analysis):
@@ -1594,15 +1607,54 @@ function ensureTrailingNewline(content: string): string {
   return content.endsWith("\n") ? content : `${content}\n`;
 }
 
+async function analyzeHarnessManifest(
+  fs: FileSystemAdapter,
+  repoRoot: string,
+  vcmVersion: string
+): Promise<HarnessPlannedChange | undefined> {
+  if (!vcmVersion || vcmVersion === "unknown") {
+    return undefined;
+  }
+
+  const manifestPath = resolveHarnessPath(repoRoot, MANIFEST_PATH);
+  if (!await fs.pathExists(manifestPath)) {
+    return {
+      path: MANIFEST_PATH,
+      action: "create",
+      reason: `VCM fixed harness manifest is missing; current VCM version is ${vcmVersion}.`
+    };
+  }
+
+  const manifest = await readOptionalJsonObject(fs, repoRoot, MANIFEST_PATH);
+  const installedVersion = typeof manifest?.harnessVersion === "string" ? manifest.harnessVersion : undefined;
+  if (!manifest || manifest.manager !== "vcm" || manifest.schemaVersion !== 1) {
+    return {
+      path: MANIFEST_PATH,
+      action: "update",
+      reason: "VCM fixed harness manifest metadata is invalid."
+    };
+  }
+  if (installedVersion !== vcmVersion) {
+    return {
+      path: MANIFEST_PATH,
+      action: "update",
+      reason: `VCM fixed harness manifest version is ${installedVersion ?? "missing"}; current VCM version is ${vcmVersion}.`
+    };
+  }
+
+  return undefined;
+}
+
 async function getHarnessBootstrapStatus(
   deps: HarnessServiceDeps,
   repoRoot: string,
   targetRepoRoot: string,
-  now: () => string
+  now: () => string,
+  vcmVersion: string
 ): Promise<HarnessBootstrapStatusReport> {
   const moduleIndex = await readOptionalJsonObject(deps.fs, targetRepoRoot, ".ai/generated/module-index.json");
   const checks: HarnessBootstrapCheck[] = [
-    await checkFixedHarness(deps.fs, targetRepoRoot),
+    await checkFixedHarness(deps.fs, targetRepoRoot, vcmVersion),
     await checkProjectContext(deps.fs, targetRepoRoot),
     checkGeneratedJson(moduleIndex, ".ai/generated/module-index.json", "module-index", "Module index"),
     checkGeneratedJson(
@@ -1641,10 +1693,10 @@ async function getHarnessBootstrapStatus(
   };
 }
 
-async function checkFixedHarness(fs: FileSystemAdapter, repoRoot: string): Promise<HarnessBootstrapCheck> {
+async function checkFixedHarness(fs: FileSystemAdapter, repoRoot: string, vcmVersion: string): Promise<HarnessBootstrapCheck> {
   const requiredPaths = [
     "CLAUDE.md",
-    ".ai/vcm-harness-manifest.json",
+    MANIFEST_PATH,
     ".claude/skills/vcm-harness-bootstrap/SKILL.md",
     ".ai/tools/generate-module-index",
     ".ai/tools/generate-public-surface"
@@ -1674,6 +1726,17 @@ async function checkFixedHarness(fs: FileSystemAdapter, repoRoot: string): Promi
       status: "incomplete",
       path: "CLAUDE.md",
       detail: "CLAUDE.md is missing the VCM managed block."
+    };
+  }
+
+  const manifestChange = await analyzeHarnessManifest(fs, repoRoot, vcmVersion);
+  if (manifestChange) {
+    return {
+      key: "fixed-harness",
+      label: "Fixed harness",
+      status: "incomplete",
+      path: MANIFEST_PATH,
+      detail: manifestChange.reason
     };
   }
 

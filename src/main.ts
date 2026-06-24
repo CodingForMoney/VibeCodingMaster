@@ -7,6 +7,7 @@ import {
   DEFAULT_BACKEND_PORT,
   DEFAULT_FRONTEND_PORT
 } from "./shared/constants.js";
+import { readVcmPackageVersion } from "./backend/app-version.js";
 import { getDefaultStaticDir, startServer } from "./backend/server.js";
 
 export interface MainOptions {
@@ -88,16 +89,7 @@ export async function main(argv = process.argv.slice(2)): Promise<void> {
 }
 
 function readPackageVersion(): string {
-  const packageJsonPath = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "package.json");
-  try {
-    const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, "utf8")) as { version?: unknown };
-    if (typeof packageJson.version === "string" && packageJson.version.trim()) {
-      return packageJson.version;
-    }
-  } catch {
-    // Fall through to an explicit unknown version instead of starting the server.
-  }
-  return "unknown";
+  return readVcmPackageVersion(path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."));
 }
 
 function renderHelp(): string {
