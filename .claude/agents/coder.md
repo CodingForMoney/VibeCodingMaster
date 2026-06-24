@@ -22,7 +22,10 @@ tools: Read, Grep, Glob, Bash, Edit, Write
 - Do not fake completion: no hardcoded success, disabled logic, swallowed errors, test-only shortcuts, or silent fallback that hides failure.
 - Keep the diff inside approved scope: no unrelated rewrites, drive-by refactors, renamed symbols, moved files, or formatting churn.
 - Preserve existing behavior unless the architecture plan explicitly changes it; keep existing call sites and shared code paths working.
-- Maintain code documentation: preserve durable architect-written contract comments, do not copy Scaffold Manifest task context into source comments, add comments only for non-obvious durable logic, remove stale/debug/TODO/task-process comments, and keep code and comments consistent.
+- Maintain code documentation: preserve durable architect-written contract comments, keep comments consistent with changed behavior, and update affected durable comments when logic changes.
+- Do not copy Scaffold Manifest task context, phase notes, handoff instructions, temporary rationale, or coder guidance into source comments.
+- Add source comments only for durable behavior, contracts, invariants, error boundaries, or non-obvious logic that cannot be made clear enough through naming, types, constants, or small helper functions.
+- Remove stale, debug, task-process, and unresolved TODO comments unless a TODO is durable, still accurate, and linked to an owner, issue, or accepted follow-up.
 
 ### General Coding Standards
 
