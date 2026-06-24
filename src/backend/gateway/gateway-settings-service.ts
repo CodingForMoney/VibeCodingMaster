@@ -70,10 +70,18 @@ export interface GatewaySettingsServiceDeps {
   fs: FileSystemAdapter;
   settingsPath?: string;
   auditPath?: string;
+  defaultChannel?: GatewayChannel;
+  defaultBaseUrl?: string;
   now?: () => string;
 }
 
+interface NormalizeGatewaySettingsOptions {
+  defaultChannel: GatewayChannel;
+  defaultBaseUrl: string;
+}
+
 const DEFAULT_BASE_URL = "https://ilinkai.weixin.qq.com";
+const DEFAULT_GATEWAY_CHANNEL: GatewayChannel = "weixin-ilink";
 const MAX_DEDUPE_IDS = 1000;
 
 export function createGatewaySettingsService(deps: GatewaySettingsServiceDeps): GatewaySettingsService {
@@ -81,6 +89,10 @@ export function createGatewaySettingsService(deps: GatewaySettingsServiceDeps): 
   const settingsPath = deps.settingsPath ?? path.join(dataDir, "gateway", "settings.json");
   const auditPath = deps.auditPath ?? path.join(dataDir, "gateway", "audit.jsonl");
   const now = deps.now ?? (() => new Date().toISOString());
+  const normalizeOptions: NormalizeGatewaySettingsOptions = {
+    defaultChannel: deps.defaultChannel ?? DEFAULT_GATEWAY_CHANNEL,
+    defaultBaseUrl: deps.defaultBaseUrl ?? DEFAULT_BASE_URL
+  };
   let cachedSettings: GatewaySettingsFile | null = null;
 
   async function loadSettings(): Promise<GatewaySettingsFile> {
@@ -88,16 +100,16 @@ export function createGatewaySettingsService(deps: GatewaySettingsServiceDeps): 
       return cachedSettings;
     }
     if (!(await deps.fs.pathExists(settingsPath))) {
-      cachedSettings = normalizeSettings({}, now());
+      cachedSettings = normalizeSettings({}, now(), normalizeOptions);
       await saveSettings(cachedSettings);
       return cachedSettings;
     }
-    cachedSettings = normalizeSettings(await deps.fs.readJson<Partial<GatewaySettingsFile>>(settingsPath), now());
+    cachedSettings = normalizeSettings(await deps.fs.readJson<Partial<GatewaySettingsFile>>(settingsPath), now(), normalizeOptions);
     return cachedSettings;
   }
 
   async function saveSettings(settings: GatewaySettingsFile): Promise<GatewaySettingsFile> {
-    cachedSettings = normalizeSettings(settings, now());
+    cachedSettings = normalizeSettings(settings, now(), normalizeOptions);
     await deps.fs.writeJsonAtomic(settingsPath, cachedSettings);
     return cachedSettings;
   }
@@ -121,7 +133,7 @@ export function createGatewaySettingsService(deps: GatewaySettingsServiceDeps): 
       return saveSettings({
         ...current,
         enabled: false,
-        binding: createDefaultBinding(),
+        binding: createDefaultBinding(normalizeOptions.defaultBaseUrl),
         dedupe: {
           recentInboundMessageIds: []
         },
@@ -165,7 +177,14 @@ export function createGatewaySettingsService(deps: GatewaySettingsServiceDeps): 
   };
 }
 
-export function normalizeSettings(input: Partial<GatewaySettingsFile>, timestamp: string): GatewaySettingsFile {
+export function normalizeSettings(
+  input: Partial<GatewaySettingsFile>,
+  timestamp: string,
+  options: NormalizeGatewaySettingsOptions = {
+    defaultChannel: DEFAULT_GATEWAY_CHANNEL,
+    defaultBaseUrl: DEFAULT_BASE_URL
+  }
+): GatewaySettingsFile {
   const bindingInput = isObject(input.binding) ? input.binding as Partial<GatewayBindingSettings> : {};
   const dedupeInput = isObject(input.dedupe) ? input.dedupe as Partial<GatewaySettingsFile["dedupe"]> : {};
   const pendingInput = isObject(input.pendingConfirmations)
@@ -179,14 +198,14 @@ export function normalizeSettings(input: Partial<GatewaySettingsFile>, timestamp
   return {
     version: 1,
     enabled: input.enabled === true,
-    channel: "weixin-ilink",
+    channel: normalizeGatewayChannel(input.channel, options.defaultChannel),
     translationEnabled: input.translationEnabled !== false,
     currentProjectId: normalizeNullableString(input.currentProjectId),
     currentTaskSlug: normalizeNullableString(input.currentTaskSlug),
     binding: {
-      ...createDefaultBinding(),
+      ...createDefaultBinding(options.defaultBaseUrl),
       accountId: normalizeNullableString(bindingInput.accountId),
-      baseUrl: normalizeBaseUrl(bindingInput.baseUrl),
+      baseUrl: normalizeBaseUrl(bindingInput.baseUrl, options.defaultBaseUrl),
       boundUserId: normalizeNullableString(bindingInput.boundUserId),
       loginUserId: normalizeNullableString(bindingInput.loginUserId),
       token: normalizeNullableString(bindingInput.token),
@@ -211,16 +230,20 @@ export function normalizeSettings(input: Partial<GatewaySettingsFile>, timestamp
   };
 }
 
-function createDefaultBinding(): GatewayBindingSettings {
+function createDefaultBinding(defaultBaseUrl = DEFAULT_BASE_URL): GatewayBindingSettings {
   return {
     accountId: null,
-    baseUrl: DEFAULT_BASE_URL,
+    baseUrl: defaultBaseUrl,
     boundUserId: null,
     loginUserId: null,
     token: null,
     getUpdatesBuf: "",
     contextTokens: {}
   };
+}
+
+function normalizeGatewayChannel(input: unknown, fallback: GatewayChannel): GatewayChannel {
+  return input === "weixin-ilink" ? input : fallback;
 }
 
 function normalizeCloseTaskConfirmation(input: unknown): GatewayPendingConfirmations["closeTask"] {
@@ -308,10 +331,10 @@ function normalizeMessageStatus(input: unknown): GatewayMessageStatus | null {
   };
 }
 
-function normalizeBaseUrl(input: unknown): string {
+function normalizeBaseUrl(input: unknown, fallback = DEFAULT_BASE_URL): string {
   const raw = typeof input === "string" ? input.trim() : "";
   if (!raw) {
-    return DEFAULT_BASE_URL;
+    return fallback;
   }
   if (raw.startsWith("http://") || raw.startsWith("https://")) {
     return raw.replace(/\/+$/, "");

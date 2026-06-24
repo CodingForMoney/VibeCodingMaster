@@ -25,6 +25,7 @@ import { registerGatewayRoutes } from "./api/gateway-routes.js";
 import { registerDiagnosticsRoutes } from "./api/diagnostics-routes.js";
 import { createWeixinIlinkChannel } from "./gateway/channels/weixin-ilink-channel.js";
 import { createGatewayAuditLog } from "./gateway/gateway-audit-log.js";
+import { createGatewayChannelRegistry } from "./gateway/gateway-channel.js";
 import { createGatewayService, type GatewayService } from "./gateway/gateway-service.js";
 import { createGatewaySettingsService } from "./gateway/gateway-settings-service.js";
 import { createJobGuardService } from "./services/job-guard-service.js";
@@ -311,7 +312,14 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     projectService,
     appSettings
   });
-  const gatewaySettings = createGatewaySettingsService({ fs });
+  const gatewayChannels = createGatewayChannelRegistry([
+    createWeixinIlinkChannel()
+  ]);
+  const gatewaySettings = createGatewaySettingsService({
+    fs,
+    defaultChannel: gatewayChannels.defaultChannel.id,
+    defaultBaseUrl: gatewayChannels.defaultChannel.defaultBaseUrl
+  });
   const gatewayAudit = createGatewayAuditLog({
     fs,
     auditPath: gatewaySettings.getAuditPath()
@@ -320,7 +328,7 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     fs,
     settings: gatewaySettings,
     audit: gatewayAudit,
-    channel: createWeixinIlinkChannel(),
+    channels: gatewayChannels,
     projectService,
     taskService,
     sessionService,

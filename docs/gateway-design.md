@@ -551,6 +551,7 @@ Implemented files:
 src/shared/types/gateway.ts
 
 src/backend/gateway/
+  gateway-channel.ts
   gateway-service.ts
   gateway-settings-service.ts
   gateway-command-parser.ts
@@ -564,13 +565,16 @@ src/backend/api/gateway-routes.ts
 Responsibilities:
 
 - `gateway-settings-service`: load/save app-local gateway settings and secrets.
-- `weixin-ilink-channel`: QR login, long polling, send text, token expiration.
+- `gateway-channel`: define the generic channel adapter contract and registry.
+- `weixin-ilink-channel`: implement the generic adapter with Weixin iLink QR
+  login, long polling, send text, and token expiration detection.
 - `gateway-command-parser`: parse `/help`, `/status`, `/projects`,
   `/use-project`, `/pull-current`, `/tasks`, `/use-task`, `/create-task`,
   `/close-task`, and `/translate`.
 - `gateway-audit-log`: append redacted JSONL audit entries.
 - `gateway-service`: lifecycle, poll loop, command dispatch, PM terminal
-  submission, PM Stop reply push, and error backoff.
+  submission, PM Stop reply push, and error backoff. It must depend on the
+  channel registry and generic adapter types, not Weixin/iLink-specific types.
 - `gateway-routes`: desktop UI settings, QR login start/status, enable/disable,
   rebind, and gateway status.
 

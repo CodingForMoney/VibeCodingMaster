@@ -7,6 +7,7 @@ import type { ProjectSummary } from "../../../src/shared/types/project.js";
 import type { RoleSessionRecord } from "../../../src/shared/types/session.js";
 import type { TaskRecord } from "../../../src/shared/types/task.js";
 import { createDefaultLaunchTemplate } from "../../../src/shared/types/app-settings.js";
+import { createGatewayChannelRegistry } from "../../../src/backend/gateway/gateway-channel.js";
 import { createGatewayService } from "../../../src/backend/gateway/gateway-service.js";
 import type {
   WeixinIlinkChannel,
@@ -245,7 +246,7 @@ function createService(input: {
         return undefined;
       }
     },
-    channel: input.channel,
+    channels: createGatewayChannelRegistry([input.channel]),
     projectService: {
       async getCurrentProject() {
         return project;
@@ -355,6 +356,9 @@ function createService(input: {
 function createChannel(updates: WeixinIlinkUpdate[], sentTexts: string[]): WeixinIlinkChannel & { getUpdatesCalls: number } {
   let used = false;
   return {
+    id: "weixin-ilink",
+    label: "Weixin iLink",
+    defaultBaseUrl: "https://ilinkai.weixin.qq.com",
     get getUpdatesCalls() {
       return used ? 1 : 0;
     },
@@ -391,6 +395,9 @@ function createChannel(updates: WeixinIlinkUpdate[], sentTexts: string[]): Weixi
 function createFailingChannel(error: Error): WeixinIlinkChannel & { getUpdatesCalls: number } {
   let calls = 0;
   return {
+    id: "weixin-ilink",
+    label: "Weixin iLink",
+    defaultBaseUrl: "https://ilinkai.weixin.qq.com",
     get getUpdatesCalls() {
       return calls;
     },

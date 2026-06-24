@@ -28,13 +28,14 @@ import {
   parseAssistantContent,
   resolveExistingClaudeTranscriptPath
 } from "../services/claude-transcript-service.js";
+import type {
+  GatewayChannelAccount,
+  GatewayChannelAdapter,
+  GatewayChannelRegistry,
+  GatewayInboundMessage
+} from "./gateway-channel.js";
 import { parseGatewayCommand, type GatewayCommand } from "./gateway-command-parser.js";
 import type { GatewayAuditLog } from "./gateway-audit-log.js";
-import type {
-  WeixinIlinkAccount,
-  WeixinIlinkChannel,
-  WeixinIlinkUpdate
-} from "./channels/weixin-ilink-channel.js";
 import type {
   GatewayLatestPmReply,
   GatewaySettingsFile,
@@ -63,7 +64,7 @@ export interface GatewayServiceDeps {
   fs: FileSystemAdapter;
   settings: GatewaySettingsService;
   audit: GatewayAuditLog;
-  channel: WeixinIlinkChannel;
+  channels: GatewayChannelRegistry;
   projectService: ProjectService;
   taskService: TaskService;
   sessionService: Pick<SessionService, "getRoleSession" | "listRoleSessions" | "resumeRoleSession" | "startRoleSession" | "stopRoleSession" | "moveProjectTranslatorSessionToSafeCwd" | "moveProjectHarnessEngineerSessionToSafeCwd">;
@@ -76,6 +77,7 @@ export interface GatewayServiceDeps {
 }
 
 interface QrLoginState {
+  channel: GatewaySettingsFile["channel"];
   qrcode: string;
   qrcodeUrl: string;
   baseUrl: string;
@@ -111,7 +113,6 @@ interface GatewayOutputRenderResult {
   translationError?: string;
 }
 
-const DEFAULT_BASE_URL = "https://ilinkai.weixin.qq.com";
 const QR_LOGIN_TTL_MS = 8 * 60 * 1000;
 const CLOSE_CONFIRM_TTL_MS = 10 * 60 * 1000;
 const POLL_ERROR_BACKOFF_MS = 2_000;
@@ -185,13 +186,18 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
     }
   }
 
-  function toAccount(settings: GatewaySettingsFile): WeixinIlinkAccount | undefined {
+  function resolveChannel(settings: GatewaySettingsFile): GatewayChannelAdapter {
+    return deps.channels.get(settings.channel);
+  }
+
+  function toAccount(settings: GatewaySettingsFile): GatewayChannelAccount | undefined {
     if (!settings.binding.token) {
       return undefined;
     }
+    const channel = resolveChannel(settings);
     return {
       accountId: settings.binding.accountId,
-      baseUrl: settings.binding.baseUrl || DEFAULT_BASE_URL,
+      baseUrl: settings.binding.baseUrl || channel.defaultBaseUrl,
       token: settings.binding.token
     };
   }
@@ -208,9 +214,10 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
         await savePollStatus("idle");
         return;
       }
+      const channel = resolveChannel(settings);
 
       try {
-        const result = await deps.channel.getUpdates({
+        const result = await channel.getUpdates({
           account,
           cursor: settings.binding.getUpdatesBuf,
           timeoutMs,
@@ -244,7 +251,7 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
         }
         consecutiveFailures += 1;
         const message = errorMessage(error);
-        const expired = message.toLowerCase().includes("expired");
+        const expired = channel.isSessionExpiredError?.(error) ?? message.toLowerCase().includes("expired");
         const settingsAfterError = await deps.settings.loadSettings();
         await deps.settings.saveSettings({
           ...settingsAfterError,
@@ -292,7 +299,7 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
     });
   }
 
-  async function handleInbound(update: WeixinIlinkUpdate): Promise<void> {
+  async function handleInbound(update: GatewayInboundMessage): Promise<void> {
     let settings = await deps.settings.loadSettings();
     if (settings.dedupe.recentInboundMessageIds.includes(update.messageId)) {
       await deps.audit.record({
@@ -793,7 +800,7 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
       return;
     }
     const contextToken = settings.binding.contextTokens[userId];
-    await deps.channel.sendText({
+    await resolveChannel(settings).sendText({
       account,
       toUserId: userId,
       contextToken,
@@ -869,13 +876,15 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
     },
     async startQrLogin() {
       const settings = await deps.settings.loadSettings();
-      const login = await deps.channel.startQrLogin({
+      const channel = resolveChannel(settings);
+      const login = await channel.startQrLogin({
         localTokenList: settings.binding.token ? [settings.binding.token] : []
       });
       qrLogin = {
+        channel: settings.channel,
         qrcode: login.qrcode,
         qrcodeUrl: login.qrcodeUrl,
-        baseUrl: settings.binding.baseUrl || DEFAULT_BASE_URL,
+        baseUrl: settings.binding.baseUrl || channel.defaultBaseUrl,
         expiresAt: new Date(Date.now() + QR_LOGIN_TTL_MS).toISOString()
       };
       return {
@@ -892,7 +901,8 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
           message: "QR login expired. Start a new QR login."
         };
       }
-      const result = await deps.channel.checkQrLogin({
+      const channel = deps.channels.get(qrLogin.channel);
+      const result = await channel.checkQrLogin({
         baseUrl: qrLogin.baseUrl,
         qrcode: qrLogin.qrcode,
         verifyCode: input.verifyCode
@@ -900,21 +910,22 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
       if (result.status === "scaned_but_redirect" && result.redirectHost) {
         qrLogin = {
           ...qrLogin,
-          baseUrl: normalizeBaseUrl(result.redirectHost)
+          baseUrl: normalizeBaseUrl(result.redirectHost, channel.defaultBaseUrl)
         };
       }
       if (result.status === "confirmed" || result.status === "binded_redirect") {
         const settings = await deps.settings.loadSettings();
         const token = result.token ?? settings.binding.token;
+        const boundUserId = result.boundUserId ?? result.loginUserId;
         if (token) {
           await deps.settings.saveSettings({
             ...settings,
             binding: {
               ...settings.binding,
               accountId: result.accountId ?? settings.binding.accountId,
-              baseUrl: normalizeBaseUrl(result.baseUrl ?? settings.binding.baseUrl),
+              baseUrl: normalizeBaseUrl(result.baseUrl ?? settings.binding.baseUrl, channel.defaultBaseUrl),
               loginUserId: result.loginUserId ?? settings.binding.loginUserId,
-              boundUserId: result.loginUserId ?? settings.binding.boundUserId,
+              boundUserId: boundUserId ?? settings.binding.boundUserId,
               token
             },
             updatedAt: now()
@@ -923,11 +934,12 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
           await ensurePolling();
         }
       }
+      const boundUserId = result.boundUserId ?? result.loginUserId;
       return {
         status: result.status,
         qrcodeUrl: qrLogin?.qrcodeUrl,
         accountId: result.accountId,
-        boundUserId: result.loginUserId,
+        boundUserId,
         loginUserId: result.loginUserId
       };
     },
@@ -971,7 +983,7 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
         sourceText: text
       });
 
-      await deps.channel.sendText({
+      await resolveChannel(settings).sendText({
         account,
         toUserId: boundUserId,
         contextToken: settings.binding.contextTokens[boundUserId],
@@ -1296,10 +1308,10 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
   });
 }
 
-function normalizeBaseUrl(input: string): string {
+function normalizeBaseUrl(input: string, fallback: string): string {
   const trimmed = input.trim();
   if (!trimmed) {
-    return DEFAULT_BASE_URL;
+    return fallback;
   }
   if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
     return trimmed.replace(/\/+$/, "");
