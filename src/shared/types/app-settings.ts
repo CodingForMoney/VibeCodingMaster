@@ -32,6 +32,7 @@ export interface LaunchTemplate {
 export interface AppPreferences {
   themeMode: ThemeMode;
   flowPauseAlerts: boolean;
+  roleRetryEnabled: boolean;
   permissionRequestMode: PermissionRequestMode;
   translationEnabled: boolean;
   translationAutoSendEnabled: boolean;
@@ -43,6 +44,7 @@ export interface AppPreferences {
 export interface UpdateAppPreferencesRequest {
   themeMode?: ThemeMode;
   flowPauseAlerts?: boolean;
+  roleRetryEnabled?: boolean;
   roundCompletionAlerts?: boolean;
   permissionRequestMode?: PermissionRequestMode;
   translationEnabled?: boolean;

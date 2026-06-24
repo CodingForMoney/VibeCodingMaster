@@ -809,6 +809,63 @@ describe("round-service", () => {
       currentRoundCcActiveMs: 15000
     });
   });
+
+  it("persists and clears role recovery state", async () => {
+    const fs = createMemoryFs();
+    const service = createRoundService({
+      fs,
+      now: () => "2026-05-31T00:00:00.000Z",
+      id: () => "round_1"
+    });
+
+    const waiting = await service.setRoleRecovery({
+      stateRepoRoot: "/repo",
+      stateRoot: ".ai/vcm",
+      taskSlug: "demo-task",
+      recovery: {
+        role: "coder",
+        status: "waiting",
+        attempt: 3,
+        maxAttempts: 20,
+        lastFailureAt: "2026-05-31T00:00:00.000Z",
+        nextRetryAt: "2026-05-31T00:03:00.000Z"
+      }
+    });
+
+    expect(waiting.roleRecovery).toMatchObject({
+      role: "coder",
+      status: "waiting",
+      attempt: 3,
+      nextRetryAt: "2026-05-31T00:03:00.000Z"
+    });
+    await expect(service.getSessionRoundState({
+      stateRepoRoot: "/repo",
+      stateRoot: ".ai/vcm",
+      taskSlug: "demo-task"
+    })).resolves.toMatchObject({
+      roleRecovery: {
+        role: "coder",
+        status: "waiting",
+        attempt: 3
+      }
+    });
+
+    const stillWaiting = await service.clearRoleRecovery({
+      stateRepoRoot: "/repo",
+      stateRoot: ".ai/vcm",
+      taskSlug: "demo-task",
+      role: "reviewer"
+    });
+    expect(stillWaiting.roleRecovery?.role).toBe("coder");
+
+    const cleared = await service.clearRoleRecovery({
+      stateRepoRoot: "/repo",
+      stateRoot: ".ai/vcm",
+      taskSlug: "demo-task",
+      role: "coder"
+    });
+    expect(cleared.roleRecovery).toBeUndefined();
+  });
 });
 
 function createMemoryFs(): FileSystemAdapter {

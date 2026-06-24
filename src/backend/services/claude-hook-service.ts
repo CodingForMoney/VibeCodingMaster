@@ -16,12 +16,15 @@ import type { JobGuardService } from "./job-guard-service.js";
 import type { MessageService } from "./message-service.js";
 import type { ProjectService } from "./project-service.js";
 import type { RoundService } from "./round-service.js";
+import type { RoleName } from "../../shared/types/role.js";
 import type { SessionService } from "./session-service.js";
 import { getTaskRuntimeRepoRoot, type TaskService } from "./task-service.js";
 import type { TranslationService } from "./translation-service.js";
 import type { TranslationWorkerService } from "./translation-worker-service.js";
 
-const MAX_STOP_FAILURE_RECOVERY_ATTEMPTS = 2;
+const MAX_ROLE_RETRY_ATTEMPTS = 20;
+const ROLE_RETRY_BASE_DELAY_MS = 60_000;
+type StopFailureRetryTimer = ReturnType<typeof setTimeout>;
 
 export interface ClaudeHookService {
   handleHook(input: ClaudeHookRequest): Promise<ClaudeHookResult>;
@@ -39,6 +42,9 @@ export interface ClaudeHookServiceDeps {
   translationWorkerService?: Pick<TranslationWorkerService, "handleTranslatorHook">;
   appSettings: Pick<AppSettingsService, "getPreferences">;
   runtime?: Pick<TerminalRuntime, "write">;
+  now?: () => string;
+  retrySetTimeout?: (callback: () => void, delayMs: number) => StopFailureRetryTimer;
+  retryClearTimeout?: (timer: StopFailureRetryTimer) => void;
   harnessService?: Pick<HarnessService, "recordHarnessBootstrapHook">;
   harnessFeedbackService?: Pick<HarnessFeedbackService, "recordHarnessEngineerHook">;
   gatewayService?: Pick<GatewayService, "handlePmStop">;
@@ -46,7 +52,10 @@ export interface ClaudeHookServiceDeps {
 }
 
 export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHookService {
-  const stopFailureRecoveryAttempts = new Map<string, number>();
+  const stopFailureRetryTimers = new Map<string, StopFailureRetryTimer>();
+  const now = deps.now ?? (() => new Date().toISOString());
+  const retrySetTimeout = deps.retrySetTimeout ?? ((callback: () => void, delayMs: number) => globalThis.setTimeout(callback, delayMs));
+  const retryClearTimeout = deps.retryClearTimeout ?? ((timer: StopFailureRetryTimer) => globalThis.clearTimeout(timer));
 
   async function getHookContext(input: ClaudeHookRequest) {
     if (!isVcmRoleName(input.role)) {
@@ -221,7 +230,7 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
     }
 
     const context = await getHookContext(input);
-    clearStopFailureRecovery(context.project.repoRoot, context.taskSlug, input.role);
+    await clearStopFailureRecoveryState(context, input.role);
 
     if (options.allowBlock && deps.jobGuard) {
       const verdict = await deps.jobGuard.evaluateStop({
@@ -264,7 +273,7 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
     const hasCompletionEvidence = pending.some((routeFile) => routeFile.fromRole === input.role);
 
     if (hasCompletionEvidence) {
-      clearStopFailureRecovery(context.project.repoRoot, context.taskSlug, input.role);
+      await clearStopFailureRecoveryState(context, input.role);
       return recordTurnEnd(input, context, eventName, {
         dispatchRouteFiles: !isGateReviewerRoleName(input.role),
         notifyGateway: false,
@@ -272,8 +281,8 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
       });
     }
 
-    const recovered = await dispatchStopFailureRecovery(input, context);
-    if (recovered) {
+    const retryScheduled = await scheduleStopFailureRetry(input, context);
+    if (retryScheduled) {
       return {
         ok: true,
         eventName,
@@ -409,37 +418,153 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
     };
   }
 
-  async function dispatchStopFailureRecovery(
+  async function scheduleStopFailureRetry(
     input: ClaudeHookRequest,
     context: Awaited<ReturnType<typeof getHookContext>>
   ): Promise<boolean> {
-    if (!deps.runtime) {
+    const preferences = await deps.appSettings.getPreferences();
+    if (!preferences.roleRetryEnabled || !deps.runtime) {
       return false;
     }
 
-    const key = stopFailureRecoveryKey(context.project.repoRoot, context.taskSlug, input.role);
-    const attempt = (stopFailureRecoveryAttempts.get(key) ?? 0) + 1;
-    if (attempt > MAX_STOP_FAILURE_RECOVERY_ATTEMPTS) {
+    const stateInput = createRoundStateInput(context);
+    const currentRoundState = await deps.roundService.getSessionRoundState(stateInput);
+    const previousAttempt = currentRoundState.roleRecovery?.role === input.role &&
+      currentRoundState.roleRecovery.status !== "failed"
+      ? currentRoundState.roleRecovery.attempt
+      : 0;
+    const attempt = previousAttempt + 1;
+    const timestamp = now();
+
+    if (attempt > MAX_ROLE_RETRY_ATTEMPTS) {
+      clearStopFailureRetryTimer(context.project.repoRoot, context.taskSlug, input.role);
+      await deps.roundService.setRoleRecovery({
+        ...stateInput,
+        recovery: {
+          role: input.role,
+          status: "failed",
+          attempt: MAX_ROLE_RETRY_ATTEMPTS,
+          maxAttempts: MAX_ROLE_RETRY_ATTEMPTS,
+          lastFailureAt: timestamp,
+          failedAt: timestamp
+        }
+      });
       return false;
     }
 
-    const session = await deps.sessionService.getRoleSession(context.project.repoRoot, context.taskSlug, input.role);
-    if (!session || session.status !== "running") {
-      return false;
-    }
-
-    stopFailureRecoveryAttempts.set(key, attempt);
-    await submitTerminalInput(deps.runtime, session.id, renderStopFailureRecoveryPrompt());
+    const nextRetryAt = new Date(Date.parse(timestamp) + attempt * ROLE_RETRY_BASE_DELAY_MS).toISOString();
+    await deps.roundService.setRoleRecovery({
+      ...stateInput,
+      recovery: {
+        role: input.role,
+        status: "waiting",
+        attempt,
+        maxAttempts: MAX_ROLE_RETRY_ATTEMPTS,
+        lastFailureAt: timestamp,
+        nextRetryAt
+      }
+    });
     await deps.sessionService.markRoleActivityRunning(context.project.repoRoot, context.taskSlug, input.role);
+    scheduleStopFailureRetryTimer(input, context, attempt, nextRetryAt);
     return true;
   }
 
+  function scheduleStopFailureRetryTimer(
+    input: ClaudeHookRequest,
+    context: Awaited<ReturnType<typeof getHookContext>>,
+    attempt: number,
+    nextRetryAt: string
+  ): void {
+    const key = stopFailureRecoveryKey(context.project.repoRoot, context.taskSlug, input.role);
+    clearStopFailureRetryTimer(context.project.repoRoot, context.taskSlug, input.role);
+    const delayMs = Math.max(0, Date.parse(nextRetryAt) - Date.parse(now()));
+    const timer = retrySetTimeout(() => {
+      stopFailureRetryTimers.delete(key);
+      void runScheduledStopFailureRetry(input, context, attempt).catch(() => undefined);
+    }, delayMs);
+    stopFailureRetryTimers.set(key, timer);
+  }
+
+  async function runScheduledStopFailureRetry(
+    input: ClaudeHookRequest,
+    context: Awaited<ReturnType<typeof getHookContext>>,
+    attempt: number
+  ): Promise<void> {
+    const stateInput = createRoundStateInput(context);
+    const currentRoundState = await deps.roundService.getSessionRoundState(stateInput);
+    const recovery = currentRoundState.roleRecovery;
+    if (!recovery || recovery.role !== input.role || recovery.attempt !== attempt || recovery.status !== "waiting") {
+      return;
+    }
+
+    const timestamp = now();
+    const session = await deps.sessionService.getRoleSession(context.project.repoRoot, context.taskSlug, input.role);
+    if (!session || session.status !== "running" || !deps.runtime) {
+      await deps.roundService.setRoleRecovery({
+        ...stateInput,
+        recovery: {
+          ...recovery,
+          status: "failed",
+          failedAt: timestamp
+        }
+      });
+      await recordTurnEnd(input, context, "StopFailure", {
+        dispatchRouteFiles: false,
+        notifyGateway: false,
+        settleGuard: false
+      });
+      return;
+    }
+
+    await deps.roundService.setRoleRecovery({
+      ...stateInput,
+      recovery: {
+        ...recovery,
+        status: "retrying",
+        nextRetryAt: undefined,
+        lastRetryAt: timestamp
+      }
+    });
+    await submitTerminalInput(deps.runtime, session.id, renderStopFailureRecoveryPrompt());
+    await deps.sessionService.markRoleActivityRunning(context.project.repoRoot, context.taskSlug, input.role);
+  }
+
   function clearStopFailureRecovery(repoRoot: string, taskSlug: string, role: string): void {
-    stopFailureRecoveryAttempts.delete(stopFailureRecoveryKey(repoRoot, taskSlug, role));
+    clearStopFailureRetryTimer(repoRoot, taskSlug, role);
+  }
+
+  async function clearStopFailureRecoveryState(
+    context: Awaited<ReturnType<typeof getHookContext>>,
+    role: RoleName
+  ): Promise<void> {
+    clearStopFailureRecovery(context.project.repoRoot, context.taskSlug, role);
+    await deps.roundService.clearRoleRecovery?.({
+      ...createRoundStateInput(context),
+      role
+    });
+  }
+
+  function clearStopFailureRetryTimer(repoRoot: string, taskSlug: string, role: string): void {
+    const key = stopFailureRecoveryKey(repoRoot, taskSlug, role);
+    const timer = stopFailureRetryTimers.get(key);
+    if (timer === undefined) {
+      return;
+    }
+    retryClearTimeout(timer);
+    stopFailureRetryTimers.delete(key);
   }
 
   function stopFailureRecoveryKey(repoRoot: string, taskSlug: string, role: string): string {
     return `${repoRoot}:${taskSlug}:${role}`;
+  }
+
+  function createRoundStateInput(context: Awaited<ReturnType<typeof getHookContext>>) {
+    return {
+      repoRoot: context.project.repoRoot,
+      stateRepoRoot: context.taskRepoRoot,
+      stateRoot: context.config.stateRoot,
+      taskSlug: context.taskSlug
+    };
   }
 
   function renderStopFailureRecoveryPrompt(): string {

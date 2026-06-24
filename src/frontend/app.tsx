@@ -26,7 +26,7 @@ import type { GateReviewGate, GateReviewIndex } from "../shared/types/gate-revie
 import type { VcmOrchestrationState, VcmRoleMessage } from "../shared/types/message.js";
 import type { ProjectSummary } from "../shared/types/project.js";
 import type { RoleName } from "../shared/types/role.js";
-import type { VcmRoundStatus, VcmSessionRoundState } from "../shared/types/round.js";
+import type { VcmRoleRecoveryState, VcmRoundStatus, VcmSessionRoundState } from "../shared/types/round.js";
 import type { ClaudePermissionMode, RoleSessionRecord, SessionEffort, SessionModel } from "../shared/types/session.js";
 import type { TaskRecord } from "../shared/types/task.js";
 import { VCM_ROLE_NAMES } from "../shared/constants.js";
@@ -74,6 +74,7 @@ export function App() {
   const [activeRole, setActiveRole] = useState<RoleName>("project-manager");
   const [themeMode, setThemeMode] = useState<ThemeMode>("system");
   const [pauseAlertSound, setPauseAlertSound] = useState(true);
+  const [roleRetryEnabled, setRoleRetryEnabled] = useState(true);
   const [permissionRequestMode, setPermissionRequestMode] = useState<PermissionRequestMode>("off");
   const [translationEnabled, setTranslationEnabled] = useState(false);
   const [translationAutoSendEnabled, setTranslationAutoSendEnabled] = useState(false);
@@ -96,6 +97,7 @@ export function App() {
   const [activeLaunchState, setActiveLaunchState] = useState<TaskWorkspaceLaunchState | null>(null);
   const [workspaceRefreshNonce, setWorkspaceRefreshNonce] = useState(0);
   const [flowPauseNotice, setFlowPauseNotice] = useState<{ id: string; text: string } | null>(null);
+  const [dismissedRoleRecoveryKey, setDismissedRoleRecoveryKey] = useState<string | null>(null);
   const [systemPrefersDark, setSystemPrefersDark] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -125,6 +127,7 @@ export function App() {
   const applyPreferences = useCallback((preferences: AppPreferences) => {
     setThemeMode(preferences.themeMode);
     setPauseAlertSound(preferences.flowPauseAlerts);
+    setRoleRetryEnabled(preferences.roleRetryEnabled);
     setPermissionRequestMode(preferences.permissionRequestMode);
     setTranslationEnabled(preferences.translationEnabled);
     setTranslationAutoSendEnabled(preferences.translationAutoSendEnabled);
@@ -215,6 +218,10 @@ export function App() {
     if (roundState.status === "running" && roundState.activeRole === "gate-reviewer") {
       setActiveRole("gate-reviewer");
     }
+    if (roundState.roleRecovery?.status === "waiting" || roundState.roleRecovery?.status === "retrying") {
+      observedFlowPauseStateRef.current[roundState.taskSlug] = { status: roundState.status };
+      return;
+    }
     if (roundState.status !== "stopped" || !roundState.roundId) {
       observedFlowPauseStateRef.current[roundState.taskSlug] = { status: roundState.status };
       return;
@@ -238,7 +245,11 @@ export function App() {
       : getFlowPauseDurationMs(roundState) >= FLOW_PAUSE_STRONG_ALERT_THRESHOLD_MS
         ? "strong"
         : "weak";
-    showFlowPauseNotice(`No new turn started after ${roleLabel} stopped.`, pauseKey, { sound });
+    const recovery = roundState.roleRecovery;
+    const message = recovery?.status === "failed"
+      ? `CC retry failed after ${recovery.maxAttempts} attempts for ${roleLabel}.`
+      : `No new turn started after ${roleLabel} stopped.`;
+    showFlowPauseNotice(message, pauseKey, { sound });
   }, [activeTask?.taskSlug, pauseAlertSound, showFlowPauseNotice]);
 
   const handleLaunchStateChanged = useCallback((launchState: TaskWorkspaceLaunchState) => {
@@ -801,6 +812,14 @@ export function App() {
     activeSessionRoundState && activeSessionRoundState.taskSlug === activeTask?.taskSlug
       ? activeSessionRoundState.roundState
       : null;
+  const roleRecoveryNoticeKey = activeTask?.taskSlug && sidebarRoundState?.roleRecovery
+    ? getRoleRecoveryNoticeKey(activeTask.taskSlug, sidebarRoundState.roleRecovery)
+    : null;
+  const roleRecoveryNoticeText = sidebarRoundState?.roleRecovery &&
+    sidebarRoundState.roleRecovery.status !== "failed" &&
+    roleRecoveryNoticeKey !== dismissedRoleRecoveryKey
+      ? formatRoleRecoveryNotice(sidebarRoundState.roleRecovery)
+      : null;
   const sidebarGateReview =
     activeGateReview && activeGateReview.taskSlug === activeTask?.taskSlug
       ? activeGateReview.state
@@ -1063,6 +1082,14 @@ export function App() {
               applyPreferences(preferences);
             }, "Update pause alert sound setting");
           }}
+          roleRetryEnabled={roleRetryEnabled}
+          onRoleRetryEnabledChange={(enabled) => {
+            setRoleRetryEnabled(enabled);
+            void withBusy(async () => {
+              const preferences = await apiClient.updateAppPreferences({ roleRetryEnabled: enabled });
+              applyPreferences(preferences);
+            }, "Update CC retry setting");
+          }}
           permissionRequestMode={permissionRequestMode}
           onPermissionRequestModeChange={(nextMode) => {
             setPermissionRequestMode(nextMode);
@@ -1172,6 +1199,14 @@ export function App() {
               Confirm
             </button>
           </section>
+        </div>
+      ) : null}
+      {roleRecoveryNoticeText && roleRecoveryNoticeKey ? (
+        <div className="role-recovery-toast" role="status">
+          <span>{roleRecoveryNoticeText}</span>
+          <button type="button" onClick={() => setDismissedRoleRecoveryKey(roleRecoveryNoticeKey)}>
+            Close
+          </button>
         </div>
       ) : null}
       {gatewayQrModalOpen && gatewayQrLogin ? (
@@ -1591,6 +1626,38 @@ function getFlowPauseNotificationKey(roundState: VcmSessionRoundState): string {
   const roundKey = roundState.roundId ?? roundState.startedAt ?? roundState.taskSlug;
   const stoppedKey = roundState.stoppedAt ?? roundState.lastTurnEndedAt ?? "stopped";
   return `${roundKey}:${stoppedKey}`;
+}
+
+function getRoleRecoveryNoticeKey(taskSlug: string, recovery: VcmRoleRecoveryState): string {
+  return `${taskSlug}:${recovery.role}:${recovery.lastFailureAt}`;
+}
+
+function formatRoleRecoveryNotice(recovery: VcmRoleRecoveryState): string {
+  const role = formatRoleRecoveryRole(recovery.role);
+  if (recovery.status === "retrying") {
+    return `CC 出错，正在重试 ${role} · 第 ${recovery.attempt}/${recovery.maxAttempts} 次`;
+  }
+  return `CC 出错，重试中 ${role} · 第 ${recovery.attempt}/${recovery.maxAttempts} 次 · ${formatRetryDelay(recovery.nextRetryAt)}`;
+}
+
+function formatRoleRecoveryRole(role: string): string {
+  return role
+    .split("-")
+    .filter(Boolean)
+    .map((part) => `${part.slice(0, 1).toUpperCase()}${part.slice(1)}`)
+    .join(" ");
+}
+
+function formatRetryDelay(nextRetryAt: string | undefined): string {
+  if (!nextRetryAt) {
+    return "即将重试";
+  }
+  const delayMs = Date.parse(nextRetryAt) - Date.now();
+  if (!Number.isFinite(delayMs) || delayMs <= 0) {
+    return "即将重试";
+  }
+  const minutes = Math.ceil(delayMs / 60_000);
+  return `${minutes} 分钟后`;
 }
 
 async function primeFlowPauseAudio(): Promise<boolean> {

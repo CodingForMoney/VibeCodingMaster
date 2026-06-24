@@ -4,6 +4,22 @@ export type VcmRoundStatus =
   | "running"
   | "stopped";
 
+export type VcmRoleRecoveryStatus =
+  | "waiting"
+  | "retrying"
+  | "failed";
+
+export interface VcmRoleRecoveryState {
+  role: RoleName;
+  status: VcmRoleRecoveryStatus;
+  attempt: number;
+  maxAttempts: number;
+  lastFailureAt: string;
+  nextRetryAt?: string;
+  lastRetryAt?: string;
+  failedAt?: string;
+}
+
 export interface VcmSessionRoundState {
   taskSlug: string;
   status: VcmRoundStatus;
@@ -23,6 +39,7 @@ export interface VcmSessionRoundState {
   totalCompletedTurnCount: number;
   totalCcActiveMs: number;
   currentRoundCcActiveMs: number;
+  roleRecovery?: VcmRoleRecoveryState;
   roles: RoleName[];
   updatedAt: string;
 }

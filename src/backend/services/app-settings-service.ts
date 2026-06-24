@@ -325,6 +325,7 @@ function normalizePreferences(input: unknown): AppPreferences {
   return {
     themeMode: normalizeThemeMode(candidate.themeMode),
     flowPauseAlerts: rawFlowPauseAlerts !== false,
+    roleRetryEnabled: candidate.roleRetryEnabled !== false,
     permissionRequestMode: normalizePermissionRequestMode(candidate.permissionRequestMode),
     translationEnabled: candidate.translationEnabled === true,
     translationAutoSendEnabled: candidate.translationAutoSendEnabled === true,

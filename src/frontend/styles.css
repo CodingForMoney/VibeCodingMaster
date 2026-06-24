@@ -446,6 +446,35 @@ h2 {
   background: #245c60;
 }
 
+.role-recovery-toast {
+  position: fixed;
+  left: 50%;
+  bottom: 18px;
+  z-index: 90;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: calc(100vw - 32px);
+  border: 1px solid #b7791f;
+  border-radius: 8px;
+  background: #fff8e6;
+  color: #5f3b00;
+  box-shadow: 0 14px 42px rgba(31, 36, 43, 0.18);
+  padding: 10px 12px;
+  transform: translateX(-50%);
+}
+
+.role-recovery-toast span {
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.role-recovery-toast button {
+  border-color: #b7791f;
+  color: #5f3b00;
+}
+
 .warnings {
   margin: 12px 0 0;
   padding-left: 26px;
@@ -3235,6 +3264,18 @@ h2 {
 
 :root[data-theme="dark"] .flow-pause-alert button:hover {
   background: #84f3fa;
+}
+
+:root[data-theme="dark"] .role-recovery-toast {
+  border-color: #d29922;
+  background: #2d230d;
+  color: #ffdf8b;
+  box-shadow: 0 14px 42px rgba(1, 4, 9, 0.52);
+}
+
+:root[data-theme="dark"] .role-recovery-toast button {
+  border-color: #d29922;
+  color: #ffdf8b;
 }
 
 :root[data-theme="dark"] .harness-file-list li,

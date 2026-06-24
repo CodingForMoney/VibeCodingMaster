@@ -96,6 +96,8 @@ export interface ProjectDashboardProps {
   onThemeModeChange(themeMode: ThemeMode): void;
   pauseAlertSound: boolean;
   onPauseAlertSoundChange(enabled: boolean): void;
+  roleRetryEnabled: boolean;
+  onRoleRetryEnabledChange(enabled: boolean): void;
   permissionRequestMode: PermissionRequestMode;
   onPermissionRequestModeChange(mode: PermissionRequestMode): void;
   launchTemplate: LaunchTemplate;
@@ -163,6 +165,8 @@ export function ProjectDashboard({
   onThemeModeChange,
   pauseAlertSound,
   onPauseAlertSoundChange,
+  roleRetryEnabled,
+  onRoleRetryEnabledChange,
   permissionRequestMode,
   onPermissionRequestModeChange,
   launchTemplate,
@@ -273,6 +277,14 @@ export function ProjectDashboard({
             label="Pause alert sound"
             title="Play a sound when VCM shows the fixed flow pause dialog"
             onChange={(checked) => onPauseAlertSoundChange(checked)}
+          />
+          <SwitchControl
+            checked={roleRetryEnabled}
+            className="sidebar-switch"
+            disabled={busy}
+            label="CC auto retry"
+            title="Retry temporary Claude Code turn failures before showing the flow pause alert"
+            onChange={(checked) => onRoleRetryEnabledChange(checked)}
           />
           <label className="settings-select-row">
             <span>Permission requests</span>
