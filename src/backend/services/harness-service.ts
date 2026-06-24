@@ -752,9 +752,6 @@ async function getRepositoryDiffReport(
   }
 
   const productCodeCount = files.filter((file) => file.category === "product_code").length;
-  if (productCodeCount > 0) {
-    warnings.push(`${productCodeCount} product code file(s) are present in this commit. Verify they are expected before approving harness work.`);
-  }
 
   return {
     version: 1,

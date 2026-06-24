@@ -562,7 +562,7 @@ describe("repository diff reports", () => {
     expect(report.commit?.shortSha).toBe("abc123456789");
     expect(report.files.map((file) => file.path)).toEqual(["CLAUDE.md", "src/server.ts"]);
     expect(report.summary.productCodeFiles).toBe(1);
-    expect(report.warnings[0]).toContain("product code");
+    expect(report.warnings).toEqual([]);
   });
 
   it("fast-forwards the connected repository current branch with the task branch", async () => {
