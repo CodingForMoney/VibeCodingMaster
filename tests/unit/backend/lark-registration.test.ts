@@ -1,45 +1,27 @@
 import { describe, expect, it } from "vitest";
-import { createLarkRegistrationClient } from "../../../src/backend/gateway/channels/lark-registration.js";
+import {
+  createLarkRegistrationClient,
+  type LarkRegistrationClientDeps,
+  type LarkRegistrationPollResult
+} from "../../../src/backend/gateway/channels/lark-registration.js";
 
 describe("lark-registration", () => {
-  it("uses VCM QR parameters and parses data-wrapped registration responses", async () => {
-    const requests: Array<{ url: string; body: string }> = [];
-    const fetchMock = async (url: string | URL | Request, init?: RequestInit): Promise<Response> => {
-      const urlText = String(url);
-      requests.push({
-        url: urlText,
-        body: init?.body instanceof URLSearchParams ? init.body.toString() : String(init?.body ?? "")
+  it("uses the Lark SDK registration flow and parses returned app credentials", async () => {
+    let resolveRegistration: (value: Awaited<ReturnType<NonNullable<LarkRegistrationClientDeps["registerApp"]>>>) => void = () => undefined;
+    const registrationDone = new Promise<Awaited<ReturnType<NonNullable<LarkRegistrationClientDeps["registerApp"]>>>>((resolve) => {
+      resolveRegistration = resolve;
+    });
+    let capturedOptions: Parameters<NonNullable<LarkRegistrationClientDeps["registerApp"]>>[0] | null = null;
+    const registerApp: NonNullable<LarkRegistrationClientDeps["registerApp"]> = async (options) => {
+      capturedOptions = options;
+      options.onQRCodeReady({
+        url: "https://open.larksuite.com/page/launcher?user_code=ABCD&from=sdk&tp=sdk&source=node-sdk%2Fvcm",
+        expireIn: 600
       });
-      if (urlText.includes("/oauth/v1/app/registration") && requests.length === 1) {
-        return jsonResponse({
-          data: {
-            supported_auth_methods: ["client_secret"]
-          }
-        });
-      }
-      if (urlText.includes("/oauth/v1/app/registration") && requests.length === 2) {
-        return jsonResponse({
-          data: {
-            device_code: "device-1",
-            verification_uri_complete: "https://accounts.larksuite.com/qr?existing=1",
-            user_code: "ABCD",
-            interval: 3,
-            expire_in: 600
-          }
-        });
-      }
-      if (urlText.includes("/oauth/v1/app/registration") && requests.length === 3) {
-        return jsonResponse({
-          data: {
-            client_id: "cli_test",
-            client_secret: "secret_test",
-            user_info: {
-              tenant_brand: "lark",
-              open_id: "ou_user"
-            }
-          }
-        });
-      }
+      return registrationDone;
+    };
+    const fetchMock = async (url: string | URL | Request): Promise<Response> => {
+      const urlText = String(url);
       if (urlText.includes("/open-apis/auth/v3/tenant_access_token/internal")) {
         return jsonResponse({
           tenant_access_token: "tenant-token"
@@ -56,21 +38,40 @@ describe("lark-registration", () => {
       }
       throw new Error(`Unexpected request: ${urlText}`);
     };
-    const client = createLarkRegistrationClient({ fetch: fetchMock as typeof fetch });
+    const client = createLarkRegistrationClient({
+      fetch: fetchMock as typeof fetch,
+      registerApp
+    });
 
     await client.init("lark");
     const begin = await client.begin("lark");
-    const result = await client.poll({ domain: "lark", deviceCode: begin.deviceCode });
+    const waiting = await client.poll({ domain: "lark", deviceCode: begin.deviceCode });
 
+    expect(capturedOptions).toMatchObject({
+      domain: "accounts.larksuite.com",
+      larkDomain: "accounts.larksuite.com",
+      source: "vcm"
+    });
     expect(begin).toEqual({
       domain: "lark",
-      deviceCode: "device-1",
-      qrUrl: "https://accounts.larksuite.com/qr?existing=1&from=vcm&tp=vcm",
+      deviceCode: expect.stringMatching(/^lark-registration-/),
+      qrUrl: "https://open.larksuite.com/page/launcher?user_code=ABCD&from=sdk&tp=sdk&source=node-sdk%2Fvcm",
       userCode: "ABCD",
-      intervalSeconds: 3,
+      intervalSeconds: 5,
       expiresInSeconds: 600
     });
-    expect(requests[2]?.body).toBe("action=poll&device_code=device-1&tp=ob_app");
+    expect(waiting).toEqual({ status: "wait", message: undefined });
+
+    resolveRegistration({
+      client_id: "cli_test",
+      client_secret: "secret_test",
+      user_info: {
+        tenant_brand: "lark",
+        open_id: "ou_user"
+      }
+    });
+
+    const result = await waitForConfirmedResult(() => client.poll({ domain: "lark", deviceCode: begin.deviceCode }));
     expect(result).toEqual({
       status: "confirmed",
       appId: "cli_test",
@@ -82,6 +83,19 @@ describe("lark-registration", () => {
     });
   });
 });
+
+async function waitForConfirmedResult(
+  poll: () => Promise<LarkRegistrationPollResult>
+): Promise<LarkRegistrationPollResult> {
+  for (let index = 0; index < 20; index += 1) {
+    const result = await poll();
+    if (result.status !== "wait") {
+      return result;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 0));
+  }
+  throw new Error("Timed out waiting for Lark registration result.");
+}
 
 function jsonResponse(input: unknown, status = 200): Response {
   return new Response(JSON.stringify(input), {

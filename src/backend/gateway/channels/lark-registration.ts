@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import type { GatewayLarkDomain } from "../../../shared/types/gateway.js";
 
 export interface LarkRegistrationBeginResult {
@@ -29,126 +30,201 @@ export interface LarkRegistrationClient {
   }): Promise<LarkRegistrationPollResult>;
 }
 
-export interface LarkRegistrationClientDeps {
-  fetch?: typeof fetch;
+interface SdkQrCodeInfo {
+  url: string;
+  expireIn?: number;
 }
 
-const ACCOUNTS_BASE_URLS: Record<GatewayLarkDomain, string> = {
-  feishu: "https://accounts.feishu.cn",
-  lark: "https://accounts.larksuite.com"
+interface SdkStatusChangeInfo {
+  status?: string;
+  interval?: number;
+}
+
+interface SdkRegisterAppResult {
+  client_id?: string;
+  client_secret?: string;
+  user_info?: {
+    open_id?: string;
+    tenant_brand?: "feishu" | "lark";
+  };
+}
+
+interface SdkRegisterAppOptions {
+  domain?: string;
+  larkDomain?: string;
+  source?: string;
+  signal?: AbortSignal;
+  onQRCodeReady(info: SdkQrCodeInfo): void;
+  onStatusChange?(info: SdkStatusChangeInfo): void;
+}
+
+type SdkRegisterApp = (options: SdkRegisterAppOptions) => Promise<SdkRegisterAppResult>;
+
+export interface LarkRegistrationClientDeps {
+  fetch?: typeof fetch;
+  registerApp?: SdkRegisterApp;
+}
+
+interface ActiveRegistration {
+  id: string;
+  domain: GatewayLarkDomain;
+  controller: AbortController;
+  expiresAtMs: number;
+  qrUrl: string;
+  intervalSeconds: number;
+  result: LarkRegistrationPollResult | null;
+  message: string | undefined;
+  promise: Promise<void>;
+}
+
+const ACCOUNTS_HOSTS: Record<GatewayLarkDomain, string> = {
+  feishu: "accounts.feishu.cn",
+  lark: "accounts.larksuite.com"
 };
 const OPEN_BASE_URLS: Record<GatewayLarkDomain, string> = {
   feishu: "https://open.feishu.cn",
   lark: "https://open.larksuite.com"
 };
-const REGISTRATION_PATH = "/oauth/v1/app/registration";
 const REQUEST_TIMEOUT_MS = 10_000;
+const DEFAULT_REGISTRATION_EXPIRES_IN_SECONDS = 600;
+const DEFAULT_REGISTRATION_INTERVAL_SECONDS = 5;
 
 export function createLarkRegistrationClient(deps: LarkRegistrationClientDeps = {}): LarkRegistrationClient {
   const fetchImpl = deps.fetch ?? fetch;
+  let registerAppPromise: Promise<SdkRegisterApp> | null = deps.registerApp ? Promise.resolve(deps.registerApp) : null;
+  let active: ActiveRegistration | null = null;
 
-  async function postRegistration(domain: GatewayLarkDomain, body: Record<string, string>): Promise<Record<string, unknown>> {
-    const url = `${ACCOUNTS_BASE_URLS[domain]}${REGISTRATION_PATH}`;
-    const payload = await fetchJson(fetchImpl, url, {
-      method: "POST",
-      headers: {
-        "content-type": "application/x-www-form-urlencoded"
-      },
-      body: new URLSearchParams(body)
+  async function getRegisterApp(): Promise<SdkRegisterApp> {
+    registerAppPromise ??= import("@larksuiteoapi/node-sdk").then((sdk) => {
+      if (typeof sdk.registerApp !== "function") {
+        throw new Error("Lark SDK does not expose registerApp.");
+      }
+      return sdk.registerApp as SdkRegisterApp;
     });
-    return payload;
+    return registerAppPromise;
   }
 
   return {
-    async init(domain) {
-      const payload = await postRegistration(domain, { action: "init" });
-      const data = responseData(payload);
-      const methods = Array.isArray(data.supported_auth_methods)
-        ? data.supported_auth_methods.filter((value): value is string => typeof value === "string")
-        : [];
-      if (!methods.includes("client_secret")) {
-        throw new Error(`Lark QR setup does not support client_secret auth. Supported methods: ${methods.join(", ") || "none"}.`);
-      }
+    async init() {
+      await getRegisterApp();
     },
     async begin(domain) {
-      const payload = await postRegistration(domain, {
-        action: "begin",
-        archetype: "PersonalAgent",
-        auth_method: "client_secret",
-        request_user_info: "open_id"
+      active?.controller.abort();
+
+      const registerApp = await getRegisterApp();
+      const controller = new AbortController();
+      const id = `lark-registration-${Date.now()}-${randomUUID()}`;
+      const session: ActiveRegistration = {
+        id,
+        domain,
+        controller,
+        expiresAtMs: Date.now() + DEFAULT_REGISTRATION_EXPIRES_IN_SECONDS * 1000,
+        qrUrl: "",
+        intervalSeconds: DEFAULT_REGISTRATION_INTERVAL_SECONDS,
+        result: null,
+        message: undefined,
+        promise: Promise.resolve()
+      };
+      active = session;
+
+      let qrReadySettled = false;
+      let resolveQrReady: (info: Required<SdkQrCodeInfo>) => void = () => undefined;
+      let rejectQrReady: (error: Error) => void = () => undefined;
+      const qrReady = new Promise<Required<SdkQrCodeInfo>>((resolve, reject) => {
+        resolveQrReady = resolve;
+        rejectQrReady = reject;
       });
-      const data = responseData(payload);
-      const deviceCode = stringOrNull(data.device_code);
-      if (!deviceCode) {
-        throw new Error("Lark QR setup did not return a device_code.");
-      }
-      const qrUrl = appendQrTrackingParams(stringOrNull(data.verification_uri_complete) ?? "");
-      if (!qrUrl) {
-        throw new Error("Lark QR setup did not return a QR URL.");
-      }
+
+      session.promise = (async () => {
+        try {
+          const result = await registerApp({
+            domain: ACCOUNTS_HOSTS[domain],
+            larkDomain: ACCOUNTS_HOSTS.lark,
+            source: "vcm",
+            signal: controller.signal,
+            onQRCodeReady(info) {
+              const qrUrl = info.url;
+              const expireIn = positiveNumberOr(info.expireIn, DEFAULT_REGISTRATION_EXPIRES_IN_SECONDS);
+              session.qrUrl = qrUrl;
+              session.expiresAtMs = Date.now() + expireIn * 1000;
+              if (!qrReadySettled) {
+                qrReadySettled = true;
+                resolveQrReady({ url: qrUrl, expireIn });
+              }
+            },
+            onStatusChange(info) {
+              session.message = formatSdkStatus(info);
+            }
+          });
+
+          const appId = stringOrNull(result.client_id);
+          const appSecret = stringOrNull(result.client_secret);
+          const resultDomain = result.user_info?.tenant_brand === "lark" ? "lark" : domain;
+          if (!appId || !appSecret) {
+            session.result = {
+              status: "failed",
+              message: "Lark QR setup completed without app credentials."
+            };
+            return;
+          }
+          const bot = await probeBot(fetchImpl, {
+            appId,
+            appSecret,
+            domain: resultDomain
+          });
+          session.result = {
+            status: "confirmed",
+            appId,
+            appSecret,
+            domain: resultDomain,
+            openId: stringOrNull(result.user_info?.open_id),
+            botName: bot.botName,
+            botOpenId: bot.botOpenId
+          };
+        } catch (error) {
+          const mapped = mapSdkError(error);
+          session.result = mapped;
+          if (!qrReadySettled) {
+            qrReadySettled = true;
+            rejectQrReady(new Error(mapped.message ?? "Lark QR setup failed."));
+          }
+        }
+      })();
+
+      const qrInfo = await qrReady;
       return {
         domain,
-        deviceCode,
-        qrUrl,
-        userCode: stringOrNull(data.user_code),
-        intervalSeconds: positiveNumberOr(data.interval, 5),
-        expiresInSeconds: positiveNumberOr(data.expire_in, 600)
+        deviceCode: id,
+        qrUrl: qrInfo.url,
+        userCode: extractUserCode(qrInfo.url),
+        intervalSeconds: session.intervalSeconds,
+        expiresInSeconds: qrInfo.expireIn
       };
     },
     async poll(input) {
-      const payload = await postRegistration(input.domain, {
-        action: "poll",
-        device_code: input.deviceCode,
-        tp: "ob_app"
-      });
-      const data = responseData(payload);
-      const userInfo = isObject(data.user_info) ? data.user_info : {};
-      const tenantBrand = stringOrNull(userInfo.tenant_brand);
-      const domain = tenantBrand === "lark" ? "lark" : input.domain;
-      const appId = stringOrNull(data.client_id);
-      const appSecret = stringOrNull(data.client_secret);
-      if (appId && appSecret) {
-        const bot = await probeBot(fetchImpl, {
-          appId,
-          appSecret,
-          domain
-        });
+      if (!active || active.id !== input.deviceCode) {
         return {
-          status: "confirmed",
-          appId,
-          appSecret,
-          domain,
-          openId: stringOrNull(userInfo.open_id),
-          botName: bot.botName,
-          botOpenId: bot.botOpenId
+          status: "expired",
+          message: "Lark QR setup session is no longer active. Start a new setup."
         };
       }
-
-      const error = stringOrNull(data.error) ?? stringOrNull(payload.error);
-      if (error === "expired_token") {
-        return { status: "expired", message: "Lark QR setup expired. Start a new setup." };
+      if (active.result) {
+        return active.result;
       }
-      if (error === "access_denied") {
-        return { status: "failed", message: "Lark QR setup was denied." };
+      if (Date.now() > active.expiresAtMs) {
+        active.controller.abort();
+        active.result = {
+          status: "expired",
+          message: "Lark QR setup expired. Start a new setup."
+        };
+        return active.result;
       }
-      const errorDescription = stringOrNull(data.error_description)
-        ?? stringOrNull(payload.error_description)
-        ?? stringOrNull(data.message)
-        ?? stringOrNull(payload.message)
-        ?? stringOrNull(data.msg)
-        ?? stringOrNull(payload.msg);
       return {
         status: "wait",
-        message: error && error !== "authorization_pending"
-          ? [error, errorDescription].filter(Boolean).join(": ")
-          : undefined
+        message: active.message
       };
     }
   };
-}
-
-function responseData(payload: Record<string, unknown>): Record<string, unknown> {
-  return isObject(payload.data) ? payload.data : payload;
 }
 
 async function probeBot(
@@ -231,29 +307,55 @@ async function fetchJson(
 }
 
 function formatPayloadError(payload: Record<string, unknown>): string {
-  const data = responseData(payload);
   const message = [
-    stringOrNull(data.error) ?? stringOrNull(payload.error),
-    stringOrNull(data.error_description) ?? stringOrNull(payload.error_description),
-    stringOrNull(data.message) ?? stringOrNull(payload.message),
-    stringOrNull(data.msg) ?? stringOrNull(payload.msg),
-    typeof data.code === "number" || typeof data.code === "string" ? `code ${data.code}` : null,
+    stringOrNull(payload.error),
+    stringOrNull(payload.error_description),
+    stringOrNull(payload.message),
+    stringOrNull(payload.msg),
     typeof payload.code === "number" || typeof payload.code === "string" ? `code ${payload.code}` : null
   ].filter(Boolean).join(": ");
   return message ? ` (${message})` : "";
 }
 
-function appendQrTrackingParams(value: string): string {
-  if (!value) {
-    return "";
+function mapSdkError(error: unknown): LarkRegistrationPollResult {
+  const code = isObject(error) ? stringOrNull(error.code) : null;
+  const description = isObject(error) ? stringOrNull(error.description) : null;
+  if (code === "expired_token") {
+    return { status: "expired", message: "Lark QR setup expired. Start a new setup." };
   }
+  if (code === "access_denied") {
+    return { status: "failed", message: "Lark QR setup was denied." };
+  }
+  if (code === "abort") {
+    return { status: "failed", message: "Lark QR setup was cancelled." };
+  }
+  if (error instanceof Error) {
+    return { status: "failed", message: error.message };
+  }
+  return {
+    status: "failed",
+    message: description ?? (code ? `Lark QR setup failed: ${code}` : "Lark QR setup failed.")
+  };
+}
+
+function formatSdkStatus(info: SdkStatusChangeInfo): string | undefined {
+  if (info.status === "domain_switched") {
+    return "Detected a Lark tenant; continuing setup on the Lark domain.";
+  }
+  if (info.status === "slow_down") {
+    return info.interval
+      ? `Lark requested slower setup polling; retrying every ${info.interval} seconds.`
+      : "Lark requested slower setup polling.";
+  }
+  return undefined;
+}
+
+function extractUserCode(qrUrl: string): string | null {
   try {
-    const url = new URL(value);
-    url.searchParams.set("from", "vcm");
-    url.searchParams.set("tp", "vcm");
-    return url.toString();
+    const value = new URL(qrUrl).searchParams.get("user_code");
+    return stringOrNull(value);
   } catch {
-    return `${value}${value.includes("?") ? "&" : "?"}from=vcm&tp=vcm`;
+    return null;
   }
 }
 
