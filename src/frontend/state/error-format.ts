@@ -18,3 +18,7 @@ export function errorReason(error: unknown, fallback = "Unknown error."): string
 export function formatUiError(action: string, error: unknown, fallback?: string): string {
   return `${action} failed. Reason: ${errorReason(error, fallback)}`;
 }
+
+export function clearUiErrorForActions(current: string, actions: string[]): string {
+  return actions.some((action) => current.startsWith(`${action} failed.`)) ? "" : current;
+}

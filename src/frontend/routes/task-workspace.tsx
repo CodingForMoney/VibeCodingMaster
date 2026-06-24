@@ -9,7 +9,7 @@ import type { LaunchTemplate, TranslationTargetLanguage } from "../../shared/typ
 import type { TaskRecord } from "../../shared/types/task.js";
 import { RoleSessionTabs } from "../components/role-session-tabs.js";
 import { SessionConsole } from "../components/session-console.js";
-import { formatUiError } from "../state/error-format.js";
+import { clearUiErrorForActions, formatUiError } from "../state/error-format.js";
 import { getSessionForRole } from "../state/session-store.js";
 import { apiClient } from "../state/api-client.js";
 import { selectAutoDispatchRole } from "../state/message-navigation.js";
@@ -148,6 +148,7 @@ export function TaskWorkspace({
       apiClient.getSessionRoundState(task.taskSlug)
     ]);
     applyFetchedState(nextStatusReport, nextMessages, nextOrchestration, nextRoundState);
+    setError((current) => clearUiErrorForActions(current, ["Load task workspace state", "Poll task workspace state"]));
   }, [applyFetchedState, task.taskSlug]);
 
   useEffect(() => {
@@ -238,6 +239,7 @@ export function TaskWorkspace({
       ])
         .then(([nextStatusReport, nextMessages, nextOrchestration, nextRoundState]) => {
           applyFetchedState(nextStatusReport, nextMessages, nextOrchestration, nextRoundState);
+          setError((current) => clearUiErrorForActions(current, ["Load task workspace state", "Poll task workspace state"]));
         })
         .catch((caught: Error) => setError(formatUiError("Poll task workspace state", caught)));
     }, 3000);
@@ -261,6 +263,7 @@ export function TaskWorkspace({
         .then(([nextMessages, nextOrchestration]) => {
           if (!cancelled) {
             applyMessageState(nextMessages, nextOrchestration);
+            setError((current) => clearUiErrorForActions(current, ["Poll role message routing state"]));
           }
         })
         .catch((caught: Error) => {

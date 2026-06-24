@@ -17,7 +17,7 @@ import type {
 } from "../../shared/types/translation.js";
 import { TRANSLATION_ENTRY_RETENTION_LIMIT } from "../../shared/types/translation.js";
 import { apiClient } from "../state/api-client.js";
-import { formatUiError } from "../state/error-format.js";
+import { clearUiErrorForActions, formatUiError } from "../state/error-format.js";
 
 type TranslationPanelStatus = TranslationSessionStatus;
 const TRANSLATED_COMPOSER_SEPARATOR = "\n\n--- Translation ---\n";
@@ -87,6 +87,7 @@ export function TranslationPanel({
         applyTranslationEvents(result.events);
         cursorRef.current = result.nextCursor;
         setStatus(result.status);
+        setError((current) => clearUiErrorForActions(current, ["Poll conversation translation events"]));
         if (activeRef.current) {
           setLastPollAt(formatPollTimestamp(new Date().toISOString()));
         }

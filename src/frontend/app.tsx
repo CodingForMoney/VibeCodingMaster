@@ -38,7 +38,7 @@ import { TranslatorSessionModal } from "./components/translator-session-modal.js
 import { FileTranslationModalHost } from "./components/translation-panel.js";
 import { selectActiveTask } from "./state/app-store.js";
 import { apiClient } from "./state/api-client.js";
-import { formatUiError } from "./state/error-format.js";
+import { clearUiErrorForActions, formatUiError } from "./state/error-format.js";
 import { buildOneClickRoleLaunches } from "./state/one-click-start.js";
 import { ProjectDashboard } from "./routes/project-dashboard.js";
 import { TaskWorkspace, type TaskWorkspaceLaunchState } from "./routes/task-workspace.js";
@@ -377,6 +377,7 @@ export function App() {
   async function refreshGateReviewState(taskSlug: string) {
     const state = await apiClient.getGateReviewState(taskSlug);
     setActiveGateReview({ taskSlug, state });
+    setError((current) => clearUiErrorForActions(current, ["Refresh Gate Review state", "Poll Gate Review state"]));
     return state;
   }
 
