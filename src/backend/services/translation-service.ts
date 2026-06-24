@@ -159,6 +159,7 @@ interface SessionState {
   cachePath?: string;
   cacheLoaded?: boolean;
   persistChain?: Promise<void>;
+  transcriptSessionKey?: string;
 }
 
 interface PendingOutputTranslation {
@@ -327,6 +328,7 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
     for (const event of state.events) {
       if (event.type === "entry") {
         state.entries = upsertEntry(state.entries, event.entry);
+        state.seenTranscriptIds.add(event.entry.id);
       } else if (event.type === "status") {
         state.status = event.status;
       } else if (event.type === "error") {
@@ -363,11 +365,21 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
     const state = getState(roleSession.id);
     state.taskSlug = roleSession.taskSlug;
     state.role = roleSession.role;
-    if (state.unsubscribeTranscript) {
+    const transcriptSessionKey = getTranscriptSessionKey(roleSession);
+    if (!transcriptSessionKey) {
       return;
+    }
+    if (state.unsubscribeTranscript) {
+      if (state.transcriptSessionKey === transcriptSessionKey) {
+        return;
+      }
+      state.unsubscribeTranscript();
+      state.unsubscribeTranscript = undefined;
+      state.transcriptSessionKey = undefined;
     }
 
     const replaySince = getTranscriptReplaySince(roleSession);
+    state.transcriptSessionKey = transcriptSessionKey;
     state.unsubscribeTranscript = deps.transcripts.subscribeToRoleSession(roleSession, (event) => {
       void handleTranscriptEvent(roleSession.id, event).catch((error) => {
         publishError(roleSession.id, normalizeTranslationError(error, "Process Claude transcript event for translation failed."));
@@ -830,6 +842,7 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
       state.unsubscribeTranscript();
       state.unsubscribeTranscript = undefined;
     }
+    state.transcriptSessionKey = undefined;
     if (state.outputBatch?.timer) {
       clearTimeout(state.outputBatch.timer);
     }
@@ -1373,12 +1386,26 @@ function delay(ms: number): Promise<void> {
 }
 
 function getTranscriptReplaySince(roleSession: RoleSessionRecord): string | undefined {
-  const rawTimestamp = roleSession.startedAt ?? roleSession.updatedAt;
+  const rawTimestamp = roleSession.lastTurnStartedAt
+    ?? roleSession.lastHookEventAt
+    ?? roleSession.updatedAt
+    ?? roleSession.startedAt;
   const timestampMs = Date.parse(rawTimestamp);
   if (!Number.isFinite(timestampMs)) {
     return undefined;
   }
   return new Date(Math.max(0, timestampMs - TRANSCRIPT_REPLAY_GRACE_MS)).toISOString();
+}
+
+function getTranscriptSessionKey(roleSession: RoleSessionRecord): string | undefined {
+  if (!roleSession.claudeSessionId && !roleSession.transcriptPath) {
+    return undefined;
+  }
+  return [
+    roleSession.cwd,
+    roleSession.claudeSessionId,
+    roleSession.transcriptPath
+  ].join("\n");
 }
 
 function formatStructuredTranscriptEvent(event: Extract<ClaudeTranscriptEvent, { kind: "question" | "todo" | "agent" }>): string {

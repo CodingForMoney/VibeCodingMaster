@@ -57,7 +57,10 @@ describe("translation-service", () => {
 
   it("starts the backend transcript feed when polling a running role session", async () => {
     const roleSession = createRoleSessionRecord({
-      cwd: "/repo/.claude/worktrees/demo-task"
+      cwd: "/repo/.claude/worktrees/demo-task",
+      startedAt: "2026-05-30T00:00:00.000Z",
+      updatedAt: "2026-05-30T00:30:00.000Z",
+      lastTurnStartedAt: "2026-05-30T00:10:00.000Z"
     });
     const subscribeCalls: Array<{
       session: RoleSessionRecord;
@@ -88,10 +91,205 @@ describe("translation-service", () => {
     });
     expect(subscribeCalls).toHaveLength(1);
     expect(subscribeCalls[0]?.session.id).toBe(roleSession.id);
+    expect(subscribeCalls[0]?.options?.replaySince).toBe("2026-05-30T00:09:55.000Z");
     expect(service.getDiagnostics()).toMatchObject({
       sessions: 1,
       transcriptWatchers: 1
     });
+  });
+
+  it("waits for the current Claude session identity before tailing transcript output", async () => {
+    let roleSession = createRoleSessionRecord({
+      claudeSessionId: "",
+      transcriptPath: undefined,
+      cwd: "/repo/.claude/worktrees/demo-task"
+    });
+    const subscribeCalls: Array<{
+      session: RoleSessionRecord;
+      options?: ClaudeTranscriptSubscribeOptions;
+    }> = [];
+    const transcripts = createTranscriptStub(subscribeCalls);
+    const service = createTranslationService({
+      appSettings: createAppSettingsService({
+        fs: createMemoryFs(),
+        settingsPath: "/settings.json",
+      }),
+      runtime: createRuntimeStub([roleSession]),
+      sessionRegistry: {
+        get(sessionId: string) {
+          return roleSession.id === sessionId ? roleSession : undefined;
+        }
+      },
+      transcripts,
+      sessionService: {} as SessionService,
+      fs: createMemoryFs(),
+      projectService: createProjectServiceStub()
+    });
+
+    await service.pollSessionEvents(roleSession.id, 1, undefined, {
+      repoRoot: "/repo"
+    });
+    expect(subscribeCalls).toHaveLength(0);
+    expect(service.getDiagnostics()).toMatchObject({
+      sessions: 1,
+      transcriptWatchers: 0
+    });
+
+    roleSession = {
+      ...roleSession,
+      claudeSessionId: "claude-session-current",
+      transcriptPath: "/Users/test/.claude/projects/current/claude-session-current.jsonl",
+      lastTurnStartedAt: "2026-05-30T00:10:00.000Z"
+    };
+
+    await service.pollSessionEvents(roleSession.id, 1, undefined, {
+      repoRoot: "/repo"
+    });
+    expect(subscribeCalls).toHaveLength(1);
+    expect(subscribeCalls[0]?.session.claudeSessionId).toBe("claude-session-current");
+    expect(service.getDiagnostics()).toMatchObject({
+      sessions: 1,
+      transcriptWatchers: 1
+    });
+
+    transcripts.emit({
+      kind: "tool_use",
+      id: "tool-use-1",
+      timestamp: "2026-05-30T00:10:05.000Z",
+      toolUse: {
+        name: "Bash",
+        input: { command: "npm test" }
+      }
+    });
+
+    await delay(20);
+    const result = await service.pollSessionEvents(roleSession.id, 1, undefined, {
+      repoRoot: "/repo"
+    });
+    const entryEvent = result.events.find((event): event is Extract<TranslationSessionEvent, { type: "entry" }> => event.type === "entry");
+    expect(entryEvent?.entry.status).toBe("preserved");
+    expect(entryEvent?.entry.sourceKind).toBe("tool-output");
+    expect(entryEvent?.entry.translatedText).toContain("Bash");
+    expect(entryEvent?.entry.translatedText).toContain("npm test");
+  });
+
+  it("switches to the current transcript when the role session identity changes", async () => {
+    let unsubscribed = 0;
+    let roleSession = createRoleSessionRecord({
+      claudeSessionId: "claude-session-old",
+      transcriptPath: "/Users/test/.claude/projects/old/claude-session-old.jsonl",
+      cwd: "/repo/.claude/worktrees/demo-task"
+    });
+    const subscribeCalls: Array<{
+      session: RoleSessionRecord;
+      options?: ClaudeTranscriptSubscribeOptions;
+    }> = [];
+    const service = createTranslationService({
+      appSettings: createAppSettingsService({
+        fs: createMemoryFs(),
+        settingsPath: "/settings.json",
+      }),
+      runtime: createRuntimeStub([roleSession]),
+      sessionRegistry: {
+        get(sessionId: string) {
+          return roleSession.id === sessionId ? roleSession : undefined;
+        }
+      },
+      transcripts: {
+        subscribeToRoleSession(session, listener, options) {
+          void listener;
+          subscribeCalls.push({ session, options });
+          return () => {
+            unsubscribed += 1;
+          };
+        }
+      },
+      sessionService: {} as SessionService,
+      fs: createMemoryFs(),
+      projectService: createProjectServiceStub()
+    });
+
+    await service.pollSessionEvents(roleSession.id, 1, undefined, {
+      repoRoot: "/repo"
+    });
+    roleSession = {
+      ...roleSession,
+      claudeSessionId: "claude-session-current",
+      transcriptPath: "/Users/test/.claude/projects/current/claude-session-current.jsonl",
+      lastTurnStartedAt: "2026-05-30T00:15:00.000Z"
+    };
+    await service.pollSessionEvents(roleSession.id, 1, undefined, {
+      repoRoot: "/repo"
+    });
+
+    expect(unsubscribed).toBe(1);
+    expect(subscribeCalls.map((call) => call.session.claudeSessionId)).toEqual([
+      "claude-session-old",
+      "claude-session-current"
+    ]);
+  });
+
+  it("does not reprocess cached transcript entries when a feed is restarted", async () => {
+    const fs = createMemoryFs();
+    const roleSession = createRoleSessionRecord({
+      cwd: "/repo/.claude/worktrees/demo-task"
+    });
+    const transcripts = createTranscriptStub();
+    await fs.writeText(
+      "/repo/.claude/worktrees/demo-task/.ai/vcm/translation/demo-task/coder/session-1.jsonl",
+      `${JSON.stringify({
+        type: "entry",
+        seq: 1,
+        createdAt: "2026-05-30T00:00:00.000Z",
+        entry: {
+          id: "old-event",
+          taskSlug: "demo-task",
+          role: "coder",
+          direction: "cc-output-to-user",
+          sourceKind: "prose",
+          sourceLanguage: "en",
+          targetLanguage: "zh-CN",
+          sourceText: "Already translated.",
+          translatedText: "已经翻译。",
+          status: "translated",
+          contextUsed: false,
+          createdAt: "2026-05-30T00:00:00.000Z",
+          completedAt: "2026-05-30T00:00:01.000Z",
+          provider: "claude-code",
+          model: "claude-code-translator"
+        }
+      })}\n`
+    );
+    const service = createTranslationService({
+      appSettings: createAppSettingsService({
+        fs,
+        settingsPath: "/settings.json",
+      }),
+      runtime: createRuntimeStub([roleSession]),
+      sessionRegistry: createRegistryStub(roleSession),
+      transcripts,
+      sessionService: {} as SessionService,
+      fs,
+      projectService: createProjectServiceStub()
+    });
+
+    const firstPoll = await service.pollSessionEvents(roleSession.id, 1, undefined, {
+      repoRoot: "/repo"
+    });
+    transcripts.emit({
+      kind: "text",
+      id: "old-event",
+      timestamp: "2026-05-30T00:00:02.000Z",
+      text: "Already translated.",
+      stopReason: "end_turn"
+    });
+    await delay(20);
+    const secondPoll = await service.pollSessionEvents(roleSession.id, firstPoll.nextCursor, undefined, {
+      repoRoot: "/repo"
+    });
+
+    expect(firstPoll.events).toHaveLength(1);
+    expect(secondPoll.events).toEqual([]);
   });
 
   it("records conversation boundary entries with per-session turns", async () => {
