@@ -15,7 +15,7 @@ import type {
   HarnessFeedbackDecisionRequest,
   HarnessFeedbackStateReport,
   HarnessFileContent,
-  MergeRepositoryDiffToMainResult,
+  MergeRepositoryDiffToCurrentBranchResult,
   RepositoryDiffReport,
   RestartHarnessBootstrapRequest,
   RunHarnessBootstrapResult,
@@ -138,8 +138,8 @@ export const apiClient = {
     }
     return request<RepositoryDiffReport>(`/api/projects/harness/repository-diff?${params.toString()}`);
   },
-  mergeRepositoryDiffToMain(taskSlug: string) {
-    return request<MergeRepositoryDiffToMainResult>("/api/projects/harness/repository-diff/merge-to-main", {
+  mergeRepositoryDiffToCurrentBranch(taskSlug: string) {
+    return request<MergeRepositoryDiffToCurrentBranchResult>("/api/projects/harness/repository-diff/merge-to-current-branch", {
       method: "POST",
       body: JSON.stringify({ taskSlug })
     });

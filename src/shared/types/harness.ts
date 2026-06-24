@@ -113,6 +113,8 @@ export interface RepositoryDiffCommit {
 export interface RepositoryDiffReport {
   version: 1;
   repoRoot: string;
+  sourceBranch: string;
+  targetBranch: string;
   generatedAt: string;
   commits: RepositoryDiffCommit[];
   commit?: RepositoryDiffCommit;
@@ -121,11 +123,11 @@ export interface RepositoryDiffReport {
   warnings: string[];
 }
 
-export interface MergeRepositoryDiffToMainRequest {
+export interface MergeRepositoryDiffToCurrentBranchRequest {
   taskSlug?: string;
 }
 
-export interface MergeRepositoryDiffToMainResult {
+export interface MergeRepositoryDiffToCurrentBranchResult {
   version: 1;
   baseRepoRoot: string;
   taskRepoRoot: string;

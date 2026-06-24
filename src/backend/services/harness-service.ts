@@ -19,7 +19,7 @@ import type {
   RepositoryDiffFileStatus,
   RepositoryDiffReport,
   RepositoryDiffSummary,
-  MergeRepositoryDiffToMainResult,
+  MergeRepositoryDiffToCurrentBranchResult,
   RestartHarnessBootstrapRequest,
   RunHarnessBootstrapResult,
   StartHarnessBootstrapRequest,
@@ -64,7 +64,7 @@ export interface HarnessService {
   updateHarnessFileContent(repoRoot: string, filePath: string, content: string): Promise<UpdateHarnessFileContentResult>;
   applyHarness(repoRoot: string): Promise<HarnessApplyResult>;
   getRepositoryDiff(repoRoot: string, input?: RepositoryDiffRequest): Promise<RepositoryDiffReport>;
-  mergeRepositoryDiffToMain(baseRepoRoot: string, input: MergeRepositoryDiffToMainInput): Promise<MergeRepositoryDiffToMainResult>;
+  mergeRepositoryDiffToCurrentBranch(baseRepoRoot: string, input: MergeRepositoryDiffToCurrentBranchInput): Promise<MergeRepositoryDiffToCurrentBranchResult>;
   getBootstrapStatus(repoRoot: string, targetRepoRoot?: string): Promise<HarnessBootstrapStatusReport>;
   startHarnessBootstrap(repoRoot: string, targetRepoRoot?: string, input?: StartHarnessBootstrapRequest): Promise<StartHarnessBootstrapResult>;
   restartHarnessBootstrap(repoRoot: string, targetRepoRoot?: string, input?: RestartHarnessBootstrapRequest): Promise<StartHarnessBootstrapResult>;
@@ -76,7 +76,7 @@ export interface HarnessService {
 export interface HarnessServiceDeps {
   fs: FileSystemAdapter;
   git?: Pick<GitAdapter, "addPaths" | "commit" | "getStatusPorcelainV1"> &
-    Partial<Pick<GitAdapter, "branchExists" | "checkoutBranch" | "getCommitDiff" | "getCommitInfo" | "getCommitList" | "getCurrentBranch" | "getHeadCommit" | "getMergeBase" | "mergeBranchFastForward">>;
+    Partial<Pick<GitAdapter, "branchExists" | "getCommitDiff" | "getCommitInfo" | "getCommitList" | "getCurrentBranch" | "getHeadCommit" | "getMergeBase" | "mergeBranchFastForward">>;
   runtime?: TerminalRuntime;
   harnessEngineerSessions?: Pick<
     SessionService,
@@ -106,7 +106,7 @@ export interface RepositoryDiffRequest {
   commitSha?: string;
 }
 
-export interface MergeRepositoryDiffToMainInput {
+export interface MergeRepositoryDiffToCurrentBranchInput {
   taskRepoRoot: string;
   taskBranch: string;
 }
@@ -427,8 +427,8 @@ export function createHarnessService(deps: HarnessServiceDeps): HarnessService {
     async getRepositoryDiff(repoRoot, input = {}) {
       return getRepositoryDiffReport(requireRepositoryDiffGit(deps.git), repoRoot, input, now());
     },
-    async mergeRepositoryDiffToMain(baseRepoRoot, input) {
-      return mergeRepositoryDiffToMain(requireRepositoryMergeGit(deps.git), baseRepoRoot, input, now());
+    async mergeRepositoryDiffToCurrentBranch(baseRepoRoot, input) {
+      return mergeRepositoryDiffToCurrentBranch(requireRepositoryMergeGit(deps.git), baseRepoRoot, input, now());
     },
     async getBootstrapStatus(repoRoot, targetRepoRoot = repoRoot) {
       return getHarnessBootstrapStatus(deps, repoRoot, targetRepoRoot, now);
@@ -652,10 +652,10 @@ function shortCommit(commit: string): string {
 
 type HarnessGit = NonNullable<HarnessServiceDeps["git"]>;
 type RepositoryDiffGit = HarnessGit & Required<
-  Pick<GitAdapter, "getCommitDiff" | "getCommitInfo" | "getCommitList" | "getHeadCommit" | "getMergeBase">
+  Pick<GitAdapter, "getCommitDiff" | "getCommitInfo" | "getCommitList" | "getCurrentBranch" | "getHeadCommit" | "getMergeBase">
 >;
 type RepositoryMergeGit = HarnessGit & Required<
-  Pick<GitAdapter, "branchExists" | "checkoutBranch" | "getCurrentBranch" | "getHeadCommit" | "mergeBranchFastForward">
+  Pick<GitAdapter, "branchExists" | "getCurrentBranch" | "getHeadCommit" | "mergeBranchFastForward">
 >;
 
 interface ParsedGitStatusEntry {
@@ -673,6 +673,7 @@ function requireRepositoryDiffGit(git: HarnessGit | undefined): RepositoryDiffGi
     !git?.getCommitDiff ||
     !git.getCommitInfo ||
     !git.getCommitList ||
+    !git.getCurrentBranch ||
     !git.getHeadCommit ||
     !git.getMergeBase
   ) {
@@ -688,7 +689,6 @@ function requireRepositoryDiffGit(git: HarnessGit | undefined): RepositoryDiffGi
 function requireRepositoryMergeGit(git: HarnessGit | undefined): RepositoryMergeGit {
   if (
     !git?.branchExists ||
-    !git.checkoutBranch ||
     !git.getCurrentBranch ||
     !git.getHeadCommit ||
     !git.mergeBranchFastForward
@@ -708,6 +708,8 @@ async function getRepositoryDiffReport(
   input: RepositoryDiffRequest,
   generatedAt: string
 ): Promise<RepositoryDiffReport> {
+  const sourceBranch = await git.getCurrentBranch(repoRoot);
+  const targetBranch = input.baseRepoRoot ? await git.getCurrentBranch(input.baseRepoRoot) : sourceBranch;
   const baseRef = input.baseRepoRoot
     ? await git.getHeadCommit(input.baseRepoRoot)
     : "HEAD^";
@@ -720,6 +722,8 @@ async function getRepositoryDiffReport(
     return {
       version: 1,
       repoRoot,
+      sourceBranch,
+      targetBranch,
       generatedAt,
       commits,
       summary: createEmptyRepositoryDiffSummary(),
@@ -744,6 +748,8 @@ async function getRepositoryDiffReport(
   return {
     version: 1,
     repoRoot,
+    sourceBranch,
+    targetBranch,
     generatedAt,
     commits,
     commit: {
@@ -770,12 +776,12 @@ async function getRepositoryDiffReport(
   };
 }
 
-async function mergeRepositoryDiffToMain(
+async function mergeRepositoryDiffToCurrentBranch(
   git: RepositoryMergeGit,
   baseRepoRoot: string,
-  input: MergeRepositoryDiffToMainInput,
+  input: MergeRepositoryDiffToCurrentBranchInput,
   mergedAt: string
-): Promise<MergeRepositoryDiffToMainResult> {
+): Promise<MergeRepositoryDiffToCurrentBranchResult> {
   const taskBranch = input.taskBranch.trim();
   if (!taskBranch) {
     throw new VcmError({
@@ -789,15 +795,23 @@ async function mergeRepositoryDiffToMain(
       code: "HARNESS_MERGE_SOURCE_BRANCH_MISSING",
       message: `Task branch does not exist locally: ${taskBranch}`,
       statusCode: 409,
-      hint: "Create or restore the task branch before merging it into local main."
+      hint: "Create or restore the task branch before merging it into the connected repository branch."
     });
   }
 
-  const targetBranch = await resolveLocalMainBranch(git, baseRepoRoot);
+  const targetBranch = await git.getCurrentBranch(baseRepoRoot);
+  if (targetBranch === "detached") {
+    throw new VcmError({
+      code: "HARNESS_MERGE_BASE_DETACHED",
+      message: "The connected repository is in detached HEAD state.",
+      statusCode: 409,
+      hint: "Checkout the intended target branch in the connected repository before merging the task branch."
+    });
+  }
   if (taskBranch === targetBranch) {
     throw new VcmError({
       code: "HARNESS_MERGE_BRANCH_INVALID",
-      message: "Task branch is already the local main branch.",
+      message: "Task branch is already the connected repository branch.",
       statusCode: 409,
       hint: `Source and target are both ${targetBranch}.`
     });
@@ -805,19 +819,6 @@ async function mergeRepositoryDiffToMain(
 
   await assertVisibleWorktreeClean(git, input.taskRepoRoot, "The active task worktree", "HARNESS_MERGE_TASK_DIRTY");
   await assertVisibleWorktreeClean(git, baseRepoRoot, "The connected repository", "HARNESS_MERGE_BASE_DIRTY");
-
-  const originalBranch = await git.getCurrentBranch(baseRepoRoot);
-  if (originalBranch === "detached") {
-    throw new VcmError({
-      code: "HARNESS_MERGE_BASE_DETACHED",
-      message: "The connected repository is in detached HEAD state.",
-      statusCode: 409,
-      hint: `Checkout ${targetBranch} before merging the task branch.`
-    });
-  }
-  if (originalBranch !== targetBranch) {
-    await git.checkoutBranch(baseRepoRoot, targetBranch);
-  }
 
   const beforeSha = await git.getHeadCommit(baseRepoRoot);
   const mergeResult = await git.mergeBranchFastForward(baseRepoRoot, taskBranch);
@@ -836,22 +837,6 @@ async function mergeRepositoryDiffToMain(
     stderr: mergeResult.stderr,
     mergedAt
   };
-}
-
-async function resolveLocalMainBranch(git: RepositoryMergeGit, repoRoot: string): Promise<string> {
-  if (await git.branchExists(repoRoot, "main")) {
-    return "main";
-  }
-  if (await git.branchExists(repoRoot, "master")) {
-    return "master";
-  }
-
-  throw new VcmError({
-    code: "HARNESS_MERGE_MAIN_MISSING",
-    message: "No local main or master branch exists.",
-    statusCode: 409,
-    hint: "Create a local main branch, or merge the task branch manually."
-  });
 }
 
 async function assertVisibleWorktreeClean(

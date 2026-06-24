@@ -3,7 +3,7 @@ import type {
   HarnessApplyRequest,
   HarnessBootstrapStatusReport,
   HarnessFeedbackDecisionRequest,
-  MergeRepositoryDiffToMainRequest,
+  MergeRepositoryDiffToCurrentBranchRequest,
   HarnessStatusReport,
   RestartHarnessBootstrapRequest,
   StartHarnessBootstrapRequest,
@@ -80,9 +80,9 @@ export function registerHarnessRoutes(app: FastifyInstance, deps: HarnessRouteDe
     });
   });
 
-  app.post<{ Body: MergeRepositoryDiffToMainRequest }>("/api/projects/harness/repository-diff/merge-to-main", async (request) => {
+  app.post<{ Body: MergeRepositoryDiffToCurrentBranchRequest }>("/api/projects/harness/repository-diff/merge-to-current-branch", async (request) => {
     const { project, task } = await requireHarnessTaskContext(deps, request.body?.taskSlug);
-    return deps.harnessService.mergeRepositoryDiffToMain(project.repoRoot, {
+    return deps.harnessService.mergeRepositoryDiffToCurrentBranch(project.repoRoot, {
       taskRepoRoot: task.worktreePath,
       taskBranch: task.branch
     });

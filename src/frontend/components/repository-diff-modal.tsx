@@ -60,19 +60,29 @@ export function RepositoryDiffModal({ open, taskSlug, onClose }: RepositoryDiffM
     void loadDiff(null);
   }, [open, taskSlug]);
 
-  async function mergeToMain() {
+  async function mergeToCurrentBranch() {
     setError(null);
     setMergeMessage(null);
     if (!taskSlug) {
-      setError("Create or select a task before merging to main.");
+      setError("Create or select a task before merging the task branch.");
       return;
     }
+    if (!report) {
+      setError("Load the commit diff before merging the task branch.");
+      return;
+    }
+    const commitLines = report.commits.length
+      ? report.commits.map((commit) => `- ${commit.shortSha} ${commit.subject}`)
+      : ["- No new commits found."];
     const confirmed = window.confirm([
-      "Merge this task branch into local main?",
+      `Merge ${report.sourceBranch} into ${report.targetBranch}?`,
       "",
       "VCM will run a fast-forward merge only.",
       "The merge will fail if the task worktree or connected repository has uncommitted changes.",
-      "If local main has diverged, rebase or merge manually first."
+      "If the connected repository branch has diverged, rebase or merge manually first.",
+      "",
+      "Commits:",
+      ...commitLines
     ].join("\n"));
     if (!confirmed) {
       return;
@@ -80,7 +90,7 @@ export function RepositoryDiffModal({ open, taskSlug, onClose }: RepositoryDiffM
 
     setMergeBusy(true);
     try {
-      const result = await apiClient.mergeRepositoryDiffToMain(taskSlug);
+      const result = await apiClient.mergeRepositoryDiffToCurrentBranch(taskSlug);
       setMergeMessage(
         result.changed
           ? `Merged ${result.sourceBranch} into ${result.targetBranch} at ${result.afterSha.slice(0, 12)}.`
@@ -89,7 +99,7 @@ export function RepositoryDiffModal({ open, taskSlug, onClose }: RepositoryDiffM
       setSelectedCommitSha(null);
       await loadDiff(null);
     } catch (caught) {
-      setError(formatUiError("Merge task branch to local main", caught));
+      setError(formatUiError("Merge task branch to connected repository branch", caught));
     } finally {
       setMergeBusy(false);
     }
@@ -136,9 +146,9 @@ export function RepositoryDiffModal({ open, taskSlug, onClose }: RepositoryDiffM
             <button
               type="button"
               disabled={busy || mergeBusy || !taskSlug || !report?.commits.length}
-              onClick={() => void mergeToMain()}
+              onClick={() => void mergeToCurrentBranch()}
             >
-              {mergeBusy ? "Merging..." : "Merge to main"}
+              {mergeBusy ? "Merging..." : "Merge to current branch"}
             </button>
             <button type="button" onClick={onClose}>
               Close

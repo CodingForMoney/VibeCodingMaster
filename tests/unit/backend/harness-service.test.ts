@@ -501,13 +501,15 @@ describe("repository diff reports", () => {
     const report = await service.getRepositoryDiff("/repo", { baseRepoRoot: "/base" });
 
     expect(report.commits.map((commit) => commit.sha)).toEqual(["abc1234567890"]);
+    expect(report.sourceBranch).toBe("feature/demo-task");
+    expect(report.targetBranch).toBe("release/v0.4");
     expect(report.commit?.shortSha).toBe("abc123456789");
     expect(report.files.map((file) => file.path)).toEqual(["CLAUDE.md", "src/server.ts"]);
     expect(report.summary.productCodeFiles).toBe(1);
     expect(report.warnings[0]).toContain("product code");
   });
 
-  it("fast-forwards the local main branch with the task branch", async () => {
+  it("fast-forwards the connected repository current branch with the task branch", async () => {
     const fs = createMemoryFs();
     const calls: string[] = [];
     let head = "base1234567890";
@@ -518,13 +520,10 @@ describe("repository diff reports", () => {
           return "";
         },
         async branchExists(_repoRoot: string, branch: string) {
-          return branch === "main" || branch === "feature/demo-task";
+          return branch === "feature/demo-task";
         },
         async getCurrentBranch() {
-          return "main";
-        },
-        async checkoutBranch(_repoRoot: string, branch: string) {
-          calls.push(`checkout:${branch}`);
+          return "release/v0.4";
         },
         async mergeBranchFastForward(_repoRoot: string, branch: string) {
           calls.push(`merge:${branch}`);
@@ -542,14 +541,14 @@ describe("repository diff reports", () => {
       now: () => "2026-06-23T00:00:00.000Z"
     } as never);
 
-    const result = await service.mergeRepositoryDiffToMain("/base", {
+    const result = await service.mergeRepositoryDiffToCurrentBranch("/base", {
       taskRepoRoot: "/repo",
       taskBranch: "feature/demo-task"
     });
 
     expect(result).toMatchObject({
       sourceBranch: "feature/demo-task",
-      targetBranch: "main",
+      targetBranch: "release/v0.4",
       beforeSha: "base1234567890",
       afterSha: "abc1234567890",
       changed: true
@@ -674,6 +673,9 @@ function createFakeRuntime(inputs: CreateTerminalSessionInput[], writes: string[
 
 function createDiffGitStub() {
   return {
+    async getCurrentBranch(repoRoot: string) {
+      return repoRoot === "/base" ? "release/v0.4" : "feature/demo-task";
+    },
     async getHeadCommit(repoRoot: string) {
       return repoRoot === "/base" ? "base1234567890" : "abc1234567890";
     },

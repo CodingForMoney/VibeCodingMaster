@@ -110,6 +110,8 @@ describe("harness routes", () => {
           return {
             version: 1,
             repoRoot,
+            sourceBranch: "feature/demo-task",
+            targetBranch: "release/v0.4",
             generatedAt: "2026-06-23T00:00:00.000Z",
             commits: [{
               sha: "abc1234567890",
@@ -167,7 +169,7 @@ describe("harness routes", () => {
     await app.close();
   });
 
-  it("merges the active task branch to local main", async () => {
+  it("merges the active task branch to the connected repository current branch", async () => {
     const app = Fastify({ logger: false });
     const calls: unknown[] = [];
     registerHarnessRoutes(app, {
@@ -183,14 +185,14 @@ describe("harness routes", () => {
         async getRepositoryDiff() {
           throw new Error("not used");
         },
-        async mergeRepositoryDiffToMain(repoRoot, input) {
-          calls.push(["mergeRepositoryDiffToMain", repoRoot, input]);
+        async mergeRepositoryDiffToCurrentBranch(repoRoot, input) {
+          calls.push(["mergeRepositoryDiffToCurrentBranch", repoRoot, input]);
           return {
             version: 1,
             baseRepoRoot: repoRoot,
             taskRepoRoot: input.taskRepoRoot,
             sourceBranch: input.taskBranch,
-            targetBranch: "main",
+            targetBranch: "release/v0.4",
             beforeSha: "base123",
             afterSha: "abc123",
             changed: true,
@@ -210,18 +212,18 @@ describe("harness routes", () => {
 
     const response = await app.inject({
       method: "POST",
-      url: "/api/projects/harness/repository-diff/merge-to-main",
+      url: "/api/projects/harness/repository-diff/merge-to-current-branch",
       payload: { taskSlug: "demo-task" }
     });
 
     expect(response.statusCode).toBe(200);
     expect(response.json()).toMatchObject({
       sourceBranch: "feature/demo-task",
-      targetBranch: "main",
+      targetBranch: "release/v0.4",
       changed: true
     });
     expect(calls).toEqual([[
-      "mergeRepositoryDiffToMain",
+      "mergeRepositoryDiffToCurrentBranch",
       "/workspace",
       {
         taskRepoRoot: "/workspace/.claude/worktrees/demo-task",
