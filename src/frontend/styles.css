@@ -351,6 +351,31 @@ h2 {
   background: #e8f1ef;
 }
 
+.gateway-panel .compact-field,
+.gateway-lark-settings {
+  display: grid;
+  gap: 6px;
+}
+
+.gateway-panel .compact-field {
+  font-size: 12px;
+  color: #6c6255;
+}
+
+.gateway-panel .compact-field input,
+.gateway-panel .compact-field select {
+  width: 100%;
+  min-width: 0;
+}
+
+.gateway-lark-settings {
+  margin-top: 10px;
+}
+
+.gateway-lark-settings button {
+  width: 100%;
+}
+
 .gateway-qr {
   display: grid;
   gap: 6px;

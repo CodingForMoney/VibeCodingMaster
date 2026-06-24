@@ -153,6 +153,7 @@ export function createWeixinIlinkChannel(options: WeixinIlinkChannelOptions = {}
     id: "weixin-ilink",
     label: "Weixin iLink",
     defaultBaseUrl: DEFAULT_BASE_URL,
+    supportsQrLogin: true,
     async startQrLogin(input) {
       const payload = await post({
         requestBaseUrl: baseUrl,
@@ -195,7 +196,7 @@ export function createWeixinIlinkChannel(options: WeixinIlinkChannelOptions = {}
       const payload = await post({
         requestBaseUrl: input.account.baseUrl,
         endpoint: "ilink/bot/getupdates",
-        token: input.account.token,
+        token: input.account.token ?? undefined,
         timeoutMs: input.timeoutMs ?? DEFAULT_LONG_POLL_TIMEOUT_MS,
         label: "getupdates",
         signal: input.signal,
@@ -221,7 +222,7 @@ export function createWeixinIlinkChannel(options: WeixinIlinkChannelOptions = {}
       const payload = await post({
         requestBaseUrl: input.account.baseUrl,
         endpoint: "ilink/bot/sendmessage",
-        token: input.account.token,
+        token: input.account.token ?? undefined,
         label: "sendmessage",
         body: {
           msg: {

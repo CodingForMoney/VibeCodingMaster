@@ -3,6 +3,7 @@ import type { AppPreferences, UpdateAppPreferencesRequest } from "../../shared/t
 import type {
   CheckGatewayQrLoginRequest,
   CheckGatewayQrLoginResult,
+  CreateGatewayPairingCodeResult,
   GatewayStatus,
   StartGatewayQrLoginResult,
   UpdateGatewaySettingsRequest
@@ -492,6 +493,11 @@ export const apiClient = {
     return request<CheckGatewayQrLoginResult>("/api/gateway/qr/check", {
       method: "POST",
       body: JSON.stringify(input)
+    });
+  },
+  createGatewayPairingCode() {
+    return request<CreateGatewayPairingCodeResult>("/api/gateway/pairing-code", {
+      method: "POST"
     });
   },
   resetGatewayBinding() {

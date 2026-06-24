@@ -35,8 +35,14 @@ export interface GatewayBindingSettings {
   boundUserId: string | null;
   loginUserId: string | null;
   token: string | null;
+  appId: string | null;
+  appSecret: string | null;
+  homeChatId: string | null;
+  pairingCode: string | null;
+  pairingCodeExpiresAt: string | null;
   getUpdatesBuf: string;
   contextTokens: Record<string, string>;
+  chatIds: Record<string, string>;
 }
 
 export interface GatewayPushCursor {
@@ -121,9 +127,19 @@ export function createGatewaySettingsService(deps: GatewaySettingsServiceDeps): 
       return saveSettings({
         ...current,
         enabled: input.enabled ?? current.enabled,
+        channel: input.channel ?? current.channel,
         translationEnabled: input.translationEnabled ?? current.translationEnabled,
         currentProjectId: input.currentProjectId !== undefined ? normalizeNullableString(input.currentProjectId) : current.currentProjectId,
         currentTaskSlug: input.currentTaskSlug !== undefined ? normalizeNullableString(input.currentTaskSlug) : current.currentTaskSlug,
+        binding: {
+          ...current.binding,
+          baseUrl: input.baseUrl !== undefined
+            ? normalizeBaseUrl(input.baseUrl, normalizeOptions.defaultBaseUrl)
+            : current.binding.baseUrl,
+          appId: input.larkAppId !== undefined ? normalizeNullableString(input.larkAppId) : current.binding.appId,
+          appSecret: input.larkAppSecret !== undefined ? normalizeNullableString(input.larkAppSecret) : current.binding.appSecret,
+          homeChatId: input.larkHomeChatId !== undefined ? normalizeNullableString(input.larkHomeChatId) : current.binding.homeChatId
+        },
         updatedAt: now()
       });
     },
@@ -133,7 +149,13 @@ export function createGatewaySettingsService(deps: GatewaySettingsServiceDeps): 
       return saveSettings({
         ...current,
         enabled: false,
-        binding: createDefaultBinding(normalizeOptions.defaultBaseUrl),
+        binding: {
+          ...createDefaultBinding(normalizeOptions.defaultBaseUrl),
+          baseUrl: current.binding.baseUrl || normalizeOptions.defaultBaseUrl,
+          appId: current.binding.appId,
+          appSecret: current.binding.appSecret,
+          homeChatId: current.binding.homeChatId
+        },
         dedupe: {
           recentInboundMessageIds: []
         },
@@ -160,7 +182,12 @@ export function createGatewaySettingsService(deps: GatewaySettingsServiceDeps): 
           baseUrl: settings.binding.baseUrl,
           boundUserId: settings.binding.boundUserId,
           loginUserId: settings.binding.loginUserId,
-          tokenConfigured: Boolean(settings.binding.token)
+          tokenConfigured: Boolean(settings.binding.token),
+          appId: settings.binding.appId,
+          appIdConfigured: Boolean(settings.binding.appId),
+          appSecretConfigured: Boolean(settings.binding.appSecret),
+          homeChatId: settings.binding.homeChatId,
+          pairingCodeExpiresAt: settings.binding.pairingCodeExpiresAt
         },
         pendingConfirmations: settings.pendingConfirmations,
         lastPollStatus: settings.lastPollStatus,
@@ -209,9 +236,17 @@ export function normalizeSettings(
       boundUserId: normalizeNullableString(bindingInput.boundUserId),
       loginUserId: normalizeNullableString(bindingInput.loginUserId),
       token: normalizeNullableString(bindingInput.token),
+      appId: normalizeNullableString(bindingInput.appId),
+      appSecret: normalizeNullableString(bindingInput.appSecret),
+      homeChatId: normalizeNullableString(bindingInput.homeChatId),
+      pairingCode: normalizeNullableString(bindingInput.pairingCode),
+      pairingCodeExpiresAt: normalizeNullableString(bindingInput.pairingCodeExpiresAt),
       getUpdatesBuf: typeof bindingInput.getUpdatesBuf === "string" ? bindingInput.getUpdatesBuf : "",
       contextTokens: isObject(bindingInput.contextTokens)
         ? normalizeStringRecord(bindingInput.contextTokens)
+        : {},
+      chatIds: isObject(bindingInput.chatIds)
+        ? normalizeStringRecord(bindingInput.chatIds)
         : {}
     },
     dedupe: {
@@ -237,13 +272,19 @@ function createDefaultBinding(defaultBaseUrl = DEFAULT_BASE_URL): GatewayBinding
     boundUserId: null,
     loginUserId: null,
     token: null,
+    appId: null,
+    appSecret: null,
+    homeChatId: null,
+    pairingCode: null,
+    pairingCodeExpiresAt: null,
     getUpdatesBuf: "",
-    contextTokens: {}
+    contextTokens: {},
+    chatIds: {}
   };
 }
 
 function normalizeGatewayChannel(input: unknown, fallback: GatewayChannel): GatewayChannel {
-  return input === "weixin-ilink" ? input : fallback;
+  return input === "weixin-ilink" || input === "lark" ? input : fallback;
 }
 
 function normalizeCloseTaskConfirmation(input: unknown): GatewayPendingConfirmations["closeTask"] {

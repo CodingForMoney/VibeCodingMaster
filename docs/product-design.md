@@ -734,37 +734,42 @@ switching roles keeps the same global translation setting.
 
 ## 14. Mobile Gateway
 
-VCM Gateway is a mobile Weixin DM bridge to the local desktop VCM instance.
+VCM Gateway is a mobile chat bridge to the local desktop VCM instance. Supported
+channels are Weixin iLink and Lark.
 
 Gateway product rules:
 
-- DM only; group chat is not supported.
-- One mobile Weixin DM identity binds to one desktop VCM instance.
+- Weixin is DM only; Lark can receive group messages only when the bot is
+  mentioned.
+- One mobile chat identity binds to one desktop VCM instance.
 - Binding is not tied to one project or one task.
 - The bound phone can select among the projects and tasks available to the
   desktop VCM instance.
-- After QR binding succeeds, VCM keeps a Gateway long-polling connection even
-  when Gateway is off; only `/help`, `/start`, `/status`, `/projects`, and
-  `/tasks` are accepted in that state. `/start` turns Gateway on from Weixin.
+- After binding succeeds, VCM keeps a Gateway channel connection even when
+  Gateway is off; only `/help`, `/start`, `/status`, `/projects`, and `/tasks`
+  are accepted in that state. `/start` turns Gateway on from the bound mobile
+  chat identity.
 - VCM caches the latest PM reply per task locally. When `/start` turns Gateway
   on and the current task has a cached PM reply, the response includes that
   latest PM reply so the mobile user can resume with context.
 - Plain mobile text is sent only to the current task's `project-manager`.
 - Gateway never sends directly to `architect`, `coder`, or `reviewer`.
-- Gateway can push PM assistant replies to Weixin whenever gateway is enabled,
-  even if that PM turn was started from desktop VCM.
-- When gateway translation is enabled, mobile Chinese input is translated to
-  English before PM receives it, and PM English replies are translated to
-  Chinese before Weixin receives them.
+- Gateway can push PM assistant replies to the bound mobile chat whenever
+  gateway is enabled, even if that PM turn was started from desktop VCM.
+- When gateway translation is enabled, mobile input is translated to English
+  before PM receives it, and PM English replies are translated before the mobile
+  chat receives them.
 - If PM reply translation fails or times out, Gateway sends a translation
   failure notice instead of the English source. The bound phone can send
   `/retry` to retry the latest failed output translation kept in memory.
 - The PM prompt does not include the original Chinese text.
-- There is no multi-user allowlist. The security model is one bound DM identity.
+- There is no multi-user allowlist. The security model is one bound mobile
+  identity.
 
-The first channel is Tencent iLink Bot API / Weixin DM. VCM uses QR login,
-`getupdates` long polling, and `sendmessage` text replies. Gateway details and
-implementation plan live in `docs/gateway-design.md`.
+The Weixin channel uses Tencent iLink QR login, `getupdates` long polling, and
+`sendmessage` text replies. The Lark channel uses Lark bot App ID/App Secret,
+WebSocket event delivery, and a short-lived `/bind CODE` pairing flow. Gateway
+details and implementation plan live in `docs/gateway-design.md`.
 
 ## 15. Local State
 

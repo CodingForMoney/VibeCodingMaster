@@ -15,8 +15,10 @@ import type {
 } from "../../shared/types/harness.js";
 import type {
   CheckGatewayQrLoginResult,
+  CreateGatewayPairingCodeResult,
   GatewayStatus,
-  StartGatewayQrLoginResult
+  StartGatewayQrLoginResult,
+  UpdateGatewaySettingsRequest
 } from "../../shared/types/gateway.js";
 import { GATE_REVIEW_GATES, type GateReviewGate, type GateReviewIndex } from "../../shared/types/gate-review.js";
 import type { VcmOrchestrationState, VcmRoleMessage } from "../../shared/types/message.js";
@@ -78,7 +80,9 @@ export interface ProjectDashboardProps {
   onAutoTaskHarnessReviewChange(enabled: boolean): void;
   onRefreshGateway(): Promise<void>;
   onGatewayEnabledChange(enabled: boolean): void;
+  onGatewaySettingsChange(input: UpdateGatewaySettingsRequest): Promise<void>;
   onGatewayTranslationChange(enabled: boolean): void;
+  onCreateGatewayPairingCode(): Promise<CreateGatewayPairingCodeResult>;
   onStartGatewayQrLogin(): void;
   onResetGatewayBinding(): void;
   onGateReviewGateEnabledChange(gate: GateReviewGate, enabled: boolean): void;
@@ -149,7 +153,9 @@ export function ProjectDashboard({
   onAutoTaskHarnessReviewChange,
   onRefreshGateway,
   onGatewayEnabledChange,
+  onGatewaySettingsChange,
   onGatewayTranslationChange,
+  onCreateGatewayPairingCode,
   onStartGatewayQrLogin,
   onResetGatewayBinding,
   onGateReviewGateEnabledChange,
@@ -395,6 +401,8 @@ export function ProjectDashboard({
           qrLogin={gatewayQrLogin}
           status={gatewayStatus}
           onEnabledChange={onGatewayEnabledChange}
+          onSettingsChange={onGatewaySettingsChange}
+          onCreatePairingCode={onCreateGatewayPairingCode}
           onResetBinding={onResetGatewayBinding}
           onStartQrLogin={onStartGatewayQrLogin}
           onTranslationChange={onGatewayTranslationChange}
@@ -733,8 +741,10 @@ function getGateReviewGateLabel(gate: GateReviewGate): string {
 
 function GatewayPanel({
   busy,
+  onCreatePairingCode,
   onEnabledChange,
   onResetBinding,
+  onSettingsChange,
   onStartQrLogin,
   onTranslationChange,
   qrCheck,
@@ -742,26 +752,57 @@ function GatewayPanel({
   status
 }: {
   busy?: boolean;
+  onCreatePairingCode(): Promise<CreateGatewayPairingCodeResult>;
   onEnabledChange(enabled: boolean): void;
   onResetBinding(): void;
+  onSettingsChange(input: UpdateGatewaySettingsRequest): Promise<void>;
   onStartQrLogin(): void;
   onTranslationChange(enabled: boolean): void;
   qrCheck: CheckGatewayQrLoginResult | null;
   qrLogin: StartGatewayQrLoginResult | null;
   status: GatewayStatus | null;
 }) {
-  const canEnable = Boolean(status?.binding.tokenConfigured);
-  const isBound = Boolean(status?.binding.tokenConfigured);
+  const [larkAppId, setLarkAppId] = useState("");
+  const [larkAppSecret, setLarkAppSecret] = useState("");
+  const [larkHomeChatId, setLarkHomeChatId] = useState("");
+  const [pairingCode, setPairingCode] = useState<CreateGatewayPairingCodeResult | null>(null);
+  const isLark = status?.channel === "lark";
+  const canEnable = status?.channel === "lark"
+    ? Boolean(status.binding.appIdConfigured && status.binding.appSecretConfigured)
+    : Boolean(status?.binding.tokenConfigured);
+  const isBound = status?.channel === "lark"
+    ? Boolean(status.binding.boundUserId)
+    : Boolean(status?.binding.tokenConfigured);
+
+  useEffect(() => {
+    setLarkAppId(status?.binding.appId ?? "");
+    setLarkAppSecret("");
+    setLarkHomeChatId(status?.binding.homeChatId ?? "");
+    setPairingCode(null);
+  }, [status?.channel, status?.binding.appId, status?.binding.homeChatId]);
 
   return (
     <div className="gateway-panel">
+      <label className="compact-field">
+        <span>Channel</span>
+        <select
+          disabled={busy || !status}
+          value={status?.channel ?? "weixin-ilink"}
+          onChange={(event) => {
+            void onSettingsChange({ channel: event.currentTarget.value === "lark" ? "lark" : "weixin-ilink" });
+          }}
+        >
+          <option value="weixin-ilink">Weixin iLink</option>
+          <option value="lark">Lark</option>
+        </select>
+      </label>
       <div className="gateway-actions">
         <SwitchControl
           checked={Boolean(status?.enabled)}
           className="sidebar-switch"
           disabled={busy || !status || (!status.enabled && !canEnable)}
           label="Gateway"
-          title={canEnable ? "Enable or disable PM messages and task-changing Gateway commands" : "Scan and confirm iLink login first"}
+          title={canEnable ? "Enable or disable PM messages and task-changing Gateway commands" : "Configure and bind the selected Gateway channel first"}
           onChange={(checked) => onEnabledChange(checked)}
         />
         <SwitchControl
@@ -775,15 +816,82 @@ function GatewayPanel({
           <button className="danger-button" type="button" disabled={busy} onClick={onResetBinding}>
             Reset Binding
           </button>
-        ) : (
+        ) : !isLark ? (
           <button type="button" disabled={busy} onClick={onStartQrLogin}>Start QR Login</button>
+        ) : (
+          <button
+            type="button"
+            disabled={busy || !canEnable}
+            onClick={() => {
+              void onCreatePairingCode().then((result) => {
+                setPairingCode(result);
+              }).catch(() => undefined);
+            }}
+          >
+            Create Pairing Code
+          </button>
         )}
       </div>
 
-      {qrLogin ? (
+      {isLark ? (
+        <div className="gateway-lark-settings">
+          <label className="compact-field">
+            <span>App ID</span>
+            <input
+              disabled={busy}
+              value={larkAppId}
+              onChange={(event) => setLarkAppId(event.currentTarget.value)}
+              placeholder="cli_a..."
+            />
+          </label>
+          <label className="compact-field">
+            <span>App Secret</span>
+            <input
+              disabled={busy}
+              type="password"
+              value={larkAppSecret}
+              onChange={(event) => setLarkAppSecret(event.currentTarget.value)}
+              placeholder={status?.binding.appSecretConfigured ? "configured" : "required"}
+            />
+          </label>
+          <label className="compact-field">
+            <span>Home Chat ID</span>
+            <input
+              disabled={busy}
+              value={larkHomeChatId}
+              onChange={(event) => setLarkHomeChatId(event.currentTarget.value)}
+              placeholder="optional chat_id"
+            />
+          </label>
+          <button
+            type="button"
+            disabled={busy || !status}
+            onClick={() => {
+              const input: UpdateGatewaySettingsRequest = {
+                channel: "lark",
+                larkAppId,
+                larkHomeChatId
+              };
+              if (larkAppSecret.trim() || !status?.binding.appSecretConfigured) {
+                input.larkAppSecret = larkAppSecret;
+              }
+              void onSettingsChange(input).then(() => setLarkAppSecret(""));
+            }}
+          >
+            Save Lark Settings
+          </button>
+          {pairingCode ? (
+            <p className="muted">
+              Send <code>/bind {pairingCode.code}</code> to the Lark bot before {formatTime(pairingCode.expiresAt)}.
+            </p>
+          ) : status?.binding.pairingCodeExpiresAt ? (
+            <p className="muted">Pairing code active until {formatTime(status.binding.pairingCodeExpiresAt)}.</p>
+          ) : null}
+        </div>
+      ) : qrLogin ? (
         <p className="muted">QR login started. Use the login dialog to confirm binding.</p>
       ) : null}
-      {qrCheck ? (
+      {!isLark && qrCheck ? (
         <p className="muted">
           QR status: {qrCheck.status}{qrCheck.message ? ` · ${qrCheck.message}` : ""}
         </p>

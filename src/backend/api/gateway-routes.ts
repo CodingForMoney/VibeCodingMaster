@@ -22,6 +22,10 @@ export function registerGatewayRoutes(app: FastifyInstance, deps: GatewayRouteDe
     return deps.gatewayService.startQrLogin();
   });
 
+  app.post("/api/gateway/pairing-code", async () => {
+    return deps.gatewayService.createPairingCode();
+  });
+
   app.post<{ Body: CheckGatewayQrLoginRequest }>("/api/gateway/qr/check", async (request) => {
     return deps.gatewayService.checkQrLogin(request.body);
   });

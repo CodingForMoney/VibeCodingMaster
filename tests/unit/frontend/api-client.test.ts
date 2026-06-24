@@ -325,7 +325,12 @@ describe("apiClient", () => {
         baseUrl: "https://ilinkai.weixin.qq.com",
         boundUserId: "user",
         loginUserId: "user",
-        tokenConfigured: true
+        tokenConfigured: true,
+        appId: null,
+        appIdConfigured: false,
+        appSecretConfigured: false,
+        homeChatId: null,
+        pairingCodeExpiresAt: null
       },
       pendingConfirmations: {},
       lastPollStatus: { state: "running" },
@@ -366,6 +371,44 @@ describe("apiClient", () => {
     expect(fetchMock.mock.calls[2]?.[0]).toBe("/api/gateway/binding/reset");
     expect(fetchMock.mock.calls[2]?.[1]?.method).toBe("POST");
     expect(fetchMock.mock.calls[2]?.[1]?.body).toBeUndefined();
+  });
+
+  it("calls gateway pairing API", async () => {
+    const fetchMock = mockFetch({
+      code: "ABCDEFGH",
+      expiresAt: "2026-06-10T00:10:00.000Z",
+      status: {
+        version: 1,
+        enabled: false,
+        running: true,
+        channel: "lark",
+        translationEnabled: true,
+        currentProjectId: null,
+        currentTaskSlug: null,
+        binding: {
+          accountId: null,
+          baseUrl: "lark://open-platform",
+          boundUserId: null,
+          loginUserId: null,
+          tokenConfigured: false,
+          appId: "cli_test",
+          appIdConfigured: true,
+          appSecretConfigured: true,
+          homeChatId: null,
+          pairingCodeExpiresAt: "2026-06-10T00:10:00.000Z"
+        },
+        pendingConfirmations: {},
+        lastPollStatus: { state: "running" },
+        lastMessageStatus: null,
+        updatedAt: "2026-06-10T00:00:00.000Z"
+      }
+    });
+
+    await apiClient.createGatewayPairingCode();
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/gateway/pairing-code");
+    expect(fetchMock.mock.calls[0]?.[1]?.method).toBe("POST");
+    expect(fetchMock.mock.calls[0]?.[1]?.body).toBeUndefined();
   });
 });
 

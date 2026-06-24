@@ -1,3 +1,4 @@
+import { randomInt } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { CORE_VCM_ROLE_DEFINITIONS, GATE_REVIEWER_ROLE_DEFINITION, VCM_ROLE_NAMES } from "../../shared/constants.js";
 import type {
@@ -6,6 +7,7 @@ import type {
 import type {
   CheckGatewayQrLoginRequest,
   CheckGatewayQrLoginResult,
+  CreateGatewayPairingCodeResult,
   GatewayStatus,
   StartGatewayQrLoginResult,
   UpdateGatewaySettingsRequest
@@ -48,6 +50,7 @@ export interface GatewayService {
   getStatus(): Promise<GatewayStatus>;
   updateSettings(input: UpdateGatewaySettingsRequest): Promise<GatewayStatus>;
   resetBinding(): Promise<GatewayStatus>;
+  createPairingCode(): Promise<CreateGatewayPairingCodeResult>;
   startQrLogin(): Promise<StartGatewayQrLoginResult>;
   checkQrLogin(input?: CheckGatewayQrLoginRequest): Promise<CheckGatewayQrLoginResult>;
   handlePmStop(input: GatewayPmStopInput): Promise<void>;
@@ -114,6 +117,7 @@ interface GatewayOutputRenderResult {
 }
 
 const QR_LOGIN_TTL_MS = 8 * 60 * 1000;
+const PAIRING_CODE_TTL_MS = 10 * 60 * 1000;
 const CLOSE_CONFIRM_TTL_MS = 10 * 60 * 1000;
 const POLL_ERROR_BACKOFF_MS = 2_000;
 const POLL_LONG_BACKOFF_MS = 30_000;
@@ -152,7 +156,7 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
 
     pollStartingPromise = (async () => {
       const settings = await deps.settings.loadSettings();
-      if (!settings.binding.token || isRunning()) {
+      if (!toAccount(settings) || isRunning()) {
         return;
       }
       const controller = new AbortController();
@@ -191,14 +195,20 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
   }
 
   function toAccount(settings: GatewaySettingsFile): GatewayChannelAccount | undefined {
-    if (!settings.binding.token) {
+    const channel = resolveChannel(settings);
+    if (settings.channel === "weixin-ilink" && !settings.binding.token) {
       return undefined;
     }
-    const channel = resolveChannel(settings);
+    if (settings.channel === "lark" && (!settings.binding.appId || !settings.binding.appSecret)) {
+      return undefined;
+    }
     return {
       accountId: settings.binding.accountId,
       baseUrl: settings.binding.baseUrl || channel.defaultBaseUrl,
-      token: settings.binding.token
+      token: settings.binding.token,
+      appId: settings.binding.appId,
+      appSecret: settings.binding.appSecret,
+      homeChatId: settings.binding.homeChatId
     };
   }
 
@@ -312,26 +322,40 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
       return;
     }
 
-    settings = await deps.settings.saveSettings({
-      ...settings,
-      binding: {
-        ...settings.binding,
-        boundUserId: settings.binding.boundUserId ?? update.fromUserId,
-        contextTokens: update.contextToken
-          ? {
-              ...settings.binding.contextTokens,
-              [update.fromUserId]: update.contextToken
-            }
-          : settings.binding.contextTokens
-      },
-      dedupe: {
-        recentInboundMessageIds: [...settings.dedupe.recentInboundMessageIds, update.messageId].slice(-1000)
-      },
-      updatedAt: now()
-    });
+    if (settings.channel === "lark" && !settings.binding.boundUserId) {
+      settings = await saveInboundMetadata(settings, update);
+      const pairing = parseLarkPairingCommand(update.text);
+      if (!pairing || !isValidPairingCode(settings, pairing)) {
+        await reply(settings, update.fromUserId, "Lark Gateway is not paired. Generate a pairing code in desktop VCM, then send /bind CODE here.");
+        await recordMessageStatus("inbound", "ignored", update.text, "lark gateway not paired");
+        return;
+      }
+      await deps.settings.saveSettings({
+        ...settings,
+        binding: {
+          ...settings.binding,
+          boundUserId: update.fromUserId,
+          loginUserId: update.fromUserId,
+          pairingCode: null,
+          pairingCodeExpiresAt: null,
+          chatIds: update.chatId
+            ? {
+                ...settings.binding.chatIds,
+                [update.fromUserId]: update.chatId
+              }
+            : settings.binding.chatIds
+        },
+        updatedAt: now()
+      });
+      await reply(await deps.settings.loadSettings(), update.fromUserId, "Lark Gateway bound. Send /help for available commands.");
+      await recordMessageStatus("inbound", "ok", update.text, undefined, "bind");
+      return;
+    }
+
+    settings = await saveInboundMetadata(settings, update, { bindIfMissing: true });
 
     if (settings.binding.boundUserId !== update.fromUserId) {
-      await reply(settings, update.fromUserId, "This VCM gateway is already bound to another Weixin DM.");
+      await reply(settings, update.fromUserId, "This VCM gateway is already bound to another user.");
       await recordMessageStatus("inbound", "ignored", update.text, "unbound user");
       return;
     }
@@ -363,6 +387,36 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
         error: message
       });
     }
+  }
+
+  async function saveInboundMetadata(
+    settings: GatewaySettingsFile,
+    update: GatewayInboundMessage,
+    options: { bindIfMissing?: boolean } = {}
+  ): Promise<GatewaySettingsFile> {
+    return deps.settings.saveSettings({
+      ...settings,
+      binding: {
+        ...settings.binding,
+        boundUserId: options.bindIfMissing ? settings.binding.boundUserId ?? update.fromUserId : settings.binding.boundUserId,
+        contextTokens: update.contextToken
+          ? {
+              ...settings.binding.contextTokens,
+              [update.fromUserId]: update.contextToken
+            }
+          : settings.binding.contextTokens,
+        chatIds: update.chatId
+          ? {
+              ...settings.binding.chatIds,
+              [update.fromUserId]: update.chatId
+            }
+          : settings.binding.chatIds
+      },
+      dedupe: {
+        recentInboundMessageIds: [...settings.dedupe.recentInboundMessageIds, update.messageId].slice(-1000)
+      },
+      updatedAt: now()
+    });
   }
 
   async function executeCommand(command: GatewayCommand, settings: GatewaySettingsFile): Promise<string> {
@@ -730,8 +784,10 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
 
   async function startGateway(): Promise<string> {
     const settings = await deps.settings.loadSettings();
-    if (!settings.binding.token) {
-      return "Gateway is not bound. Start QR login from desktop VCM first.";
+    if (!toAccount(settings)) {
+      return settings.channel === "lark"
+        ? "Gateway is not configured. Save Lark App ID and App Secret in desktop VCM first."
+        : "Gateway is not bound. Start QR login from desktop VCM first.";
     }
     if (settings.enabled) {
       return "Gateway is already on.";
@@ -800,9 +856,11 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
       return;
     }
     const contextToken = settings.binding.contextTokens[userId];
+    const chatId = settings.binding.chatIds[userId] ?? settings.binding.homeChatId ?? undefined;
     await resolveChannel(settings).sendText({
       account,
       toUserId: userId,
+      chatId,
       contextToken,
       text
     });
@@ -844,6 +902,17 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
     ].join("\n");
   }
 
+  function parseLarkPairingCommand(text: string): string | null {
+    const match = text.trim().match(/^\/bind\s+([A-Z0-9]{6,12})$/i);
+    return match?.[1]?.toUpperCase() ?? null;
+  }
+
+  function isValidPairingCode(settings: GatewaySettingsFile, code: string): boolean {
+    const expected = settings.binding.pairingCode?.toUpperCase();
+    const expiresAt = settings.binding.pairingCodeExpiresAt;
+    return Boolean(expected && expected === code.toUpperCase() && expiresAt && Date.parse(expiresAt) > Date.now());
+  }
+
   return {
     async start() {
       await ensurePolling();
@@ -861,7 +930,7 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
       if (settings.enabled) {
         settings = await syncDesktopContext(settings);
       }
-      if (settings.binding.token) {
+      if (toAccount(settings)) {
         await ensurePolling();
       } else {
         await stopPolling();
@@ -874,9 +943,50 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
       const settings = await deps.settings.resetBinding();
       return deps.settings.expose(settings, isRunning());
     },
+    async createPairingCode() {
+      const settings = await deps.settings.loadSettings();
+      if (settings.channel !== "lark") {
+        throw new VcmError({
+          code: "GATEWAY_PAIRING_UNSUPPORTED",
+          message: "Pairing codes are only available for Lark Gateway.",
+          statusCode: 409
+        });
+      }
+      if (!settings.binding.appId || !settings.binding.appSecret) {
+        throw new VcmError({
+          code: "GATEWAY_LARK_CONFIG_MISSING",
+          message: "Save Lark App ID and App Secret before creating a pairing code.",
+          statusCode: 409
+        });
+      }
+      const code = randomPairingCode();
+      const expiresAt = new Date(Date.now() + PAIRING_CODE_TTL_MS).toISOString();
+      const nextSettings = await deps.settings.saveSettings({
+        ...settings,
+        binding: {
+          ...settings.binding,
+          pairingCode: code,
+          pairingCodeExpiresAt: expiresAt
+        },
+        updatedAt: now()
+      });
+      await ensurePolling();
+      return {
+        code,
+        expiresAt,
+        status: deps.settings.expose(nextSettings, isRunning())
+      };
+    },
     async startQrLogin() {
       const settings = await deps.settings.loadSettings();
       const channel = resolveChannel(settings);
+      if (!channel.startQrLogin) {
+        throw new VcmError({
+          code: "GATEWAY_QR_UNSUPPORTED",
+          message: `${channel.label} Gateway does not support QR login.`,
+          statusCode: 409
+        });
+      }
       const login = await channel.startQrLogin({
         localTokenList: settings.binding.token ? [settings.binding.token] : []
       });
@@ -902,6 +1012,13 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
         };
       }
       const channel = deps.channels.get(qrLogin.channel);
+      if (!channel.checkQrLogin) {
+        throw new VcmError({
+          code: "GATEWAY_QR_UNSUPPORTED",
+          message: `${channel.label} Gateway does not support QR login.`,
+          statusCode: 409
+        });
+      }
       const result = await channel.checkQrLogin({
         baseUrl: qrLogin.baseUrl,
         qrcode: qrLogin.qrcode,
@@ -986,6 +1103,7 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
       await resolveChannel(settings).sendText({
         account,
         toUserId: boundUserId,
+        chatId: settings.binding.chatIds[boundUserId] ?? settings.binding.homeChatId ?? undefined,
         contextToken: settings.binding.contextTokens[boundUserId],
         text: output.text
       });
@@ -1292,6 +1410,15 @@ function formatAheadBehind(project: ProjectSummary): string {
     return `ahead ${ahead}, behind ${behind}`;
   }
   return ahead > 0 ? `ahead ${ahead}` : `behind ${behind}`;
+}
+
+function randomPairingCode(): string {
+  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  let out = "";
+  for (let index = 0; index < 8; index += 1) {
+    out += alphabet[randomInt(alphabet.length)];
+  }
+  return out;
 }
 
 function sleep(ms: number, signal: AbortSignal): Promise<void> {

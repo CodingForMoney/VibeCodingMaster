@@ -33,7 +33,7 @@ When Gate Review Gates are enabled for a task, or when a Gate Reviewer session a
 - VCM-managed root rules, role agents, repo-local VCM skills, Claude Code hooks, generated-context tools, and PR template.
 - Generated context for Rust and npm workspace module indexing plus public surface indexing.
 - Translation panel powered by the long-lived Translator session.
-- Mobile Gateway through Tencent iLink Bot API / Weixin DM, for talking to PM and managing tasks from Weixin.
+- Mobile Gateway through Tencent iLink / Weixin DM or Lark, for talking to PM and managing tasks from a phone.
 - Durable task state, role session state, handoff artifacts, and message history.
 
 ## Requirements
@@ -221,7 +221,7 @@ The left sidebar is intentionally compact and collapsible:
 - `Settings`: `Theme`, `Flow pause alert`, `Try alert`, `Messages`, and `Events`.
 - `Translation`: global conversation translation, auto-send, target language, output scope, file translation, bootstrap, memory update, session status, and Translator session access.
 - `Gate Review Gates`: global gate switches for architecture plan, validation adequacy, and final diff.
-- `Gateway`: Weixin iLink binding, Gateway on/off, Gateway translation, and QR login.
+- `Gateway`: Weixin iLink or Lark binding, Gateway on/off, Gateway translation, QR login, and Lark pairing.
 - `VCM Harness`: fixed-install status, bootstrap completion checks, and the bootstrap terminal when one is running.
 - `New Task`: one `task name` input.
 - `Tasks`: task list and task status.
@@ -238,11 +238,11 @@ When VCM is connected to an active task, the bottom of the sidebar shows a task 
 
 ## Mobile Gateway
 
-VCM Gateway lets one Weixin DM identity bind to one desktop VCM instance. It is a mobile control surface for the current desktop VCM, not a remote terminal and not a group-chat bot.
+VCM Gateway lets one mobile chat identity bind to one desktop VCM instance. It supports Weixin iLink and Lark. It is a mobile control surface for the current desktop VCM, not a remote terminal and not a multi-user collaboration surface.
 
 Gateway rules:
 
-- DM only; group chat is not supported.
+- Weixin is DM only; Lark can receive group messages only when the bot is mentioned.
 - One phone identity binds to one desktop VCM instance.
 - The phone can manage projects and tasks available to that desktop VCM instance.
 - When the desktop UI has an active task selected, Gateway uses that task automatically.
@@ -273,7 +273,18 @@ Gateway state is stored locally under:
 
 The `Gateway` toggle is disabled until a QR login has produced a usable iLink token. After binding, VCM keeps receiving `/help`, `/start`, `/status`, `/projects`, and `/tasks` even when the toggle is off. Turning `Gateway` on, either from desktop or by sending `/start`, enables PM messages, task-changing commands, and PM reply push. `Reset Binding` clears the stored token and bound Weixin identity so the desktop VCM can bind again.
 
-When Gateway is turned on, VCM automatically turns off the browser `Flow pause alert` and disables `Try alert`. Gateway becomes the notification path, so the browser should not show blocking flow-pause dialogs while the user is managing the task from Weixin.
+### Bind Lark
+
+1. Create a Lark app with bot capability, message receive events, and WebSocket event delivery.
+2. Open the sidebar `Gateway` section and select `Lark`.
+3. Save the Lark App ID and App Secret.
+4. Click `Create Pairing Code`.
+5. Send `/bind CODE` to the Lark bot before the code expires.
+6. After binding succeeds, turn `Gateway` on in the sidebar.
+
+Lark credentials stay in local VCM state. The App Secret is not shown again in the UI. `Reset Binding` clears the bound Lark user/chat state while keeping the saved Lark app credentials.
+
+When Gateway is turned on, VCM automatically turns off the browser `Flow pause alert` and disables `Try alert`. Gateway becomes the notification path, so the browser should not show blocking flow-pause dialogs while the user is managing the task from the phone.
 
 ### Translation
 
@@ -281,17 +292,17 @@ The Gateway section has its own `Translation` toggle.
 
 When Gateway translation is on:
 
-- Chinese Weixin input is translated to English before being submitted to PM.
+- Mobile input is translated to English before being submitted to PM.
 - The prompt sent to PM includes only the translated English text with a `[VCM Gateway]` marker.
 - The original Chinese text is not included in the PM prompt.
-- PM replies are translated back to Chinese before VCM sends them to Weixin.
+- PM replies are translated before VCM sends them to the bound mobile chat.
 - If PM reply translation fails or times out, VCM sends a translation failure notice instead of the English source. The user can send `/retry` to retry the latest failed Gateway output translation.
 
-When Gateway translation is off, plain Weixin text is sent to PM as-is.
+When Gateway translation is off, plain mobile text is sent to PM as-is.
 
 ### Commands
 
-After Gateway is bound, send commands in the bound Weixin DM.
+After Gateway is bound, send commands in the bound mobile conversation.
 
 When `Gateway` is off, only these commands are accepted:
 
@@ -343,7 +354,7 @@ Typical mobile flow:
 
 - `/status`: shows Gateway, binding, translation, current project, current task, and last poll status.
 - `/status` also adopts the current desktop project/task when one is selected.
-- `/start`: turns Gateway on from the bound Weixin DM so full mobile task operations and PM messages are allowed. If the current task has a cached latest PM reply, `/start` includes it in the response.
+- `/start`: turns Gateway on from the bound mobile conversation so full mobile task operations and PM messages are allowed. If the current task has a cached latest PM reply, `/start` includes it in the response.
 - `/retry`: retries the latest failed Gateway output translation in the current VCM process.
 - `/projects`: lists the current/recent repositories known by the desktop VCM.
 - `/use-project <index-or-path>`: selects the Gateway's current project context.
@@ -366,12 +377,12 @@ Typical mobile flow:
 - If the QR dialog does not appear, refresh the page and click `Start QR Login` again.
 - If the QR status stays `wait`, confirm the login on the phone and click `Confirm` again.
 - If the QR code expires, start a new QR login.
-- If `Gateway` cannot be enabled, bind Weixin first.
-- If `/start` or read-only commands do not receive replies, check that the iLink token has not expired and the Weixin DM is the bound identity.
+- If `Gateway` cannot be enabled, bind Weixin or pair Lark first.
+- If `/start` or read-only commands do not receive replies, check that the selected channel is connected and the message comes from the bound identity.
 - If PM messages or task-changing commands are rejected, check that Gateway is on.
 - If plain text cannot be sent to PM, select a project and task first, and make sure the task's PM session is running and idle.
 - If PM replies are not pushed, check that Gateway is on and the PM session is producing normal Claude transcript output.
-- If PM reply translation fails, send `/retry` from the bound Weixin DM. Retry state is memory-only and is cleared when VCM restarts.
+- If PM reply translation fails, send `/retry` from the bound mobile conversation. Retry state is memory-only and is cleared when VCM restarts.
 
 ## Translation
 
@@ -393,7 +404,7 @@ The sidebar `Settings` section also stores the UI theme preference in this file.
 
 The same sidebar also has a `Flow pause alert` toggle. It is on by default and controls the local alert that fires when VCM detects that the current role flow has stopped advancing. Short flows use a weak reminder: the soft two-note chime plays 3 times, 1.4 seconds apart. Flows lasting 2 minutes or longer use a strong reminder: VCM shows an alert dialog and repeats the chime until the user confirms it. The alert sound reuses one browser audio context so repeated reminders remain reliable in stricter browsers such as Safari. Safari users may still need to manually set `Safari > Website Settings > Auto-Play > Allow All Auto-Play`; Chrome is recommended for the most reliable alert sound behavior. The `Try alert` button always triggers the strong reminder for testing.
 
-When Gateway is on, `Flow pause alert` is forced off because mobile notifications are delivered through Weixin and browser alerts can block normal workflow progress.
+When Gateway is on, `Flow pause alert` is forced off because mobile notifications are delivered through Gateway and browser alerts can block normal workflow progress.
 
 Translation behavior:
 

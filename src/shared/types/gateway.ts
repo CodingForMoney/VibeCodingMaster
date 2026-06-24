@@ -1,4 +1,4 @@
-export type GatewayChannel = "weixin-ilink";
+export type GatewayChannel = "weixin-ilink" | "lark";
 
 export type GatewayQrLoginStatus =
   | "idle"
@@ -18,6 +18,11 @@ export interface GatewayBindingStatus {
   boundUserId: string | null;
   loginUserId: string | null;
   tokenConfigured: boolean;
+  appId: string | null;
+  appIdConfigured: boolean;
+  appSecretConfigured: boolean;
+  homeChatId: string | null;
+  pairingCodeExpiresAt: string | null;
 }
 
 export interface GatewayPollStatus {
@@ -60,9 +65,14 @@ export interface GatewayStatus {
 
 export interface UpdateGatewaySettingsRequest {
   enabled?: boolean;
+  channel?: GatewayChannel;
   translationEnabled?: boolean;
   currentProjectId?: string | null;
   currentTaskSlug?: string | null;
+  baseUrl?: string | null;
+  larkAppId?: string | null;
+  larkAppSecret?: string | null;
+  larkHomeChatId?: string | null;
 }
 
 export interface StartGatewayQrLoginResult {
@@ -83,4 +93,10 @@ export interface CheckGatewayQrLoginResult {
   boundUserId?: string | null;
   loginUserId?: string | null;
   message?: string;
+}
+
+export interface CreateGatewayPairingCodeResult {
+  code: string;
+  expiresAt: string;
+  status: GatewayStatus;
 }

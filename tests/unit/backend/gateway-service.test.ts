@@ -7,7 +7,7 @@ import type { ProjectSummary } from "../../../src/shared/types/project.js";
 import type { RoleSessionRecord } from "../../../src/shared/types/session.js";
 import type { TaskRecord } from "../../../src/shared/types/task.js";
 import { createDefaultLaunchTemplate } from "../../../src/shared/types/app-settings.js";
-import { createGatewayChannelRegistry } from "../../../src/backend/gateway/gateway-channel.js";
+import { createGatewayChannelRegistry, type GatewayChannelAdapter, type GatewayInboundMessage } from "../../../src/backend/gateway/gateway-channel.js";
 import { createGatewayService } from "../../../src/backend/gateway/gateway-service.js";
 import type {
   WeixinIlinkChannel,
@@ -223,11 +223,40 @@ describe("gateway-service long connection", () => {
     expect(channel.getUpdatesCalls).toBe(1);
     service.stop();
   });
+
+  it("requires Lark pairing before accepting commands", async () => {
+    const settings = createSettings({
+      channel: "lark",
+      binding: {
+        appId: "cli_test",
+        appSecret: "secret_test",
+        pairingCode: "ABCDEFGH",
+        pairingCodeExpiresAt: "2999-06-11T00:10:00.000Z"
+      } as Partial<GatewaySettingsFile["binding"]> as GatewaySettingsFile["binding"]
+    });
+    const sentTexts: string[] = [];
+    const channel = createLarkTestChannel([
+      { messageId: "m1", fromUserId: "ou_1", chatId: "oc_1", chatType: "dm", text: "/status" },
+      { messageId: "m2", fromUserId: "ou_1", chatId: "oc_1", chatType: "dm", text: "/bind ABCDEFGH" },
+      { messageId: "m3", fromUserId: "ou_1", chatId: "oc_1", chatType: "dm", text: "/status" }
+    ], sentTexts);
+    const service = createService({ settings, channel });
+
+    await service.start();
+    await waitFor(() => sentTexts.length === 3);
+
+    expect(sentTexts[0]).toContain("Lark Gateway is not paired.");
+    expect(sentTexts[1]).toContain("Lark Gateway bound.");
+    expect(sentTexts[2]).toContain("Gateway: off / polling");
+    expect(settings.current().binding.boundUserId).toBe("ou_1");
+    expect(settings.current().binding.chatIds.ou_1).toBe("oc_1");
+    service.stop();
+  });
 });
 
 function createService(input: {
   settings: GatewaySettingsService;
-  channel: WeixinIlinkChannel & { getUpdatesCalls: number };
+  channel: GatewayChannelAdapter & { getUpdatesCalls: number };
   preferenceUpdates?: unknown[];
   translateGatewayOutput?: (input: {
     repoRoot: string;
@@ -392,6 +421,33 @@ function createChannel(updates: WeixinIlinkUpdate[], sentTexts: string[]): Weixi
   };
 }
 
+function createLarkTestChannel(updates: GatewayInboundMessage[], sentTexts: string[]): GatewayChannelAdapter & { getUpdatesCalls: number } {
+  let used = false;
+  return {
+    id: "lark",
+    label: "Lark",
+    defaultBaseUrl: "lark://open-platform",
+    get getUpdatesCalls() {
+      return used ? 1 : 0;
+    },
+    async getUpdates(input) {
+      if (!used) {
+        used = true;
+        return { cursor: "cursor-1", updates };
+      }
+      return new Promise((resolve) => {
+        input.signal?.addEventListener("abort", () => {
+          resolve({ cursor: "cursor-2", updates: [] });
+        });
+      });
+    },
+    async sendText(input) {
+      sentTexts.push(input.text);
+      return input.chatId ?? "ok";
+    }
+  };
+}
+
 function createFailingChannel(error: Error): WeixinIlinkChannel & { getUpdatesCalls: number } {
   let calls = 0;
   return {
@@ -433,9 +489,17 @@ function createSettings(initial: Partial<GatewaySettingsFile> = {}): GatewaySett
       current = normalizeSettings({
         ...current,
         enabled: input.enabled ?? current.enabled,
+        channel: input.channel ?? current.channel,
         translationEnabled: input.translationEnabled ?? current.translationEnabled,
         currentProjectId: input.currentProjectId !== undefined ? input.currentProjectId : current.currentProjectId,
         currentTaskSlug: input.currentTaskSlug !== undefined ? input.currentTaskSlug : current.currentTaskSlug,
+        binding: {
+          ...current.binding,
+          baseUrl: input.baseUrl !== undefined ? input.baseUrl ?? current.binding.baseUrl : current.binding.baseUrl,
+          appId: input.larkAppId !== undefined ? input.larkAppId : current.binding.appId,
+          appSecret: input.larkAppSecret !== undefined ? input.larkAppSecret : current.binding.appSecret,
+          homeChatId: input.larkHomeChatId !== undefined ? input.larkHomeChatId : current.binding.homeChatId
+        },
         updatedAt: NOW
       }, NOW);
       return current;
@@ -462,7 +526,12 @@ function createSettings(initial: Partial<GatewaySettingsFile> = {}): GatewaySett
           baseUrl: settings.binding.baseUrl,
           boundUserId: settings.binding.boundUserId,
           loginUserId: settings.binding.loginUserId,
-          tokenConfigured: Boolean(settings.binding.token)
+          tokenConfigured: Boolean(settings.binding.token),
+          appId: settings.binding.appId,
+          appIdConfigured: Boolean(settings.binding.appId),
+          appSecretConfigured: Boolean(settings.binding.appSecret),
+          homeChatId: settings.binding.homeChatId,
+          pairingCodeExpiresAt: settings.binding.pairingCodeExpiresAt
         },
         pendingConfirmations: settings.pendingConfirmations,
         lastPollStatus: settings.lastPollStatus,

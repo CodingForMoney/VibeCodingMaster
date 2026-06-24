@@ -3,7 +3,10 @@ import type { GatewayChannel, GatewayQrLoginStatus } from "../../shared/types/ga
 export interface GatewayChannelAccount {
   accountId: string | null;
   baseUrl: string;
-  token: string;
+  token?: string | null;
+  appId?: string | null;
+  appSecret?: string | null;
+  homeChatId?: string | null;
 }
 
 export interface GatewayChannelQrLogin {
@@ -26,6 +29,8 @@ export interface GatewayInboundMessage {
   messageId: string;
   fromUserId: string;
   text: string;
+  chatId?: string;
+  chatType?: "dm" | "group";
   contextToken?: string;
   createdAt?: string;
   raw?: unknown;
@@ -41,8 +46,9 @@ export interface GatewayChannelAdapter {
   id: GatewayChannel;
   label: string;
   defaultBaseUrl: string;
-  startQrLogin(input: GatewayStartQrLoginInput): Promise<GatewayChannelQrLogin>;
-  checkQrLogin(input: GatewayCheckQrLoginInput): Promise<GatewayChannelQrStatus>;
+  supportsQrLogin?: boolean;
+  startQrLogin?(input: GatewayStartQrLoginInput): Promise<GatewayChannelQrLogin>;
+  checkQrLogin?(input: GatewayCheckQrLoginInput): Promise<GatewayChannelQrStatus>;
   getUpdates(input: GatewayGetUpdatesInput): Promise<GatewayGetUpdatesResult>;
   sendText(input: GatewaySendTextInput): Promise<string>;
   isSessionExpiredError?(error: unknown): boolean;
@@ -68,6 +74,8 @@ export interface GatewayGetUpdatesInput {
 export interface GatewaySendTextInput {
   account: GatewayChannelAccount;
   toUserId: string;
+  chatId?: string;
+  chatType?: "dm" | "group";
   contextToken?: string;
   text: string;
 }

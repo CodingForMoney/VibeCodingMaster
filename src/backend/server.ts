@@ -23,6 +23,7 @@ import { createNodeFileSystemAdapter } from "./adapters/filesystem.js";
 import { createNodePtyTerminalRuntime } from "./runtime/node-pty-runtime.js";
 import { registerGatewayRoutes } from "./api/gateway-routes.js";
 import { registerDiagnosticsRoutes } from "./api/diagnostics-routes.js";
+import { createLarkChannel } from "./gateway/channels/lark-channel.js";
 import { createWeixinIlinkChannel } from "./gateway/channels/weixin-ilink-channel.js";
 import { createGatewayAuditLog } from "./gateway/gateway-audit-log.js";
 import { createGatewayChannelRegistry } from "./gateway/gateway-channel.js";
@@ -313,7 +314,8 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     appSettings
   });
   const gatewayChannels = createGatewayChannelRegistry([
-    createWeixinIlinkChannel()
+    createWeixinIlinkChannel(),
+    createLarkChannel()
   ]);
   const gatewaySettings = createGatewaySettingsService({
     fs,
