@@ -371,8 +371,7 @@ h2 {
   font-size: 11px;
 }
 
-.warnings,
-.error-banner {
+.warnings {
   border: 1px solid #c87b54;
   background: #fff4ed;
   color: #6f3218;
@@ -444,6 +443,85 @@ h2 {
 
 .flow-pause-alert button:hover {
   background: #245c60;
+}
+
+.ui-error-center {
+  position: fixed;
+  top: 14px;
+  right: 14px;
+  z-index: 95;
+  display: grid;
+  gap: 8px;
+  width: min(520px, calc(100vw - 28px));
+  max-height: min(58vh, 540px);
+  border: 1px solid #c87b54;
+  border-radius: 8px;
+  background: #fff4ed;
+  color: #6f3218;
+  box-shadow: 0 18px 50px rgba(31, 36, 43, 0.2);
+  padding: 10px;
+}
+
+.ui-error-center-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.ui-error-center-header h2 {
+  margin: 0;
+  font-size: 14px;
+  line-height: 1.2;
+}
+
+.ui-error-center-header p {
+  margin: 2px 0 0;
+  color: #8b4a28;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.ui-error-center button {
+  border-color: #c87b54;
+  color: #6f3218;
+  min-height: 28px;
+  padding: 4px 8px;
+  font-size: 12px;
+}
+
+.ui-error-list {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  overflow: auto;
+  list-style: none;
+}
+
+.ui-error-list li {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: start;
+  border-top: 1px solid rgba(200, 123, 84, 0.32);
+  padding-top: 8px;
+}
+
+.ui-error-list p {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+}
+
+.ui-error-list span {
+  display: block;
+  margin-top: 4px;
+  color: #8b4a28;
+  font-size: 11px;
+  font-weight: 700;
 }
 
 .role-recovery-toast {
@@ -1884,13 +1962,6 @@ h2 {
   color: #8b949e;
 }
 
-.translation-panel .error-banner {
-  flex: 0 0 auto;
-  border-color: #da7b72;
-  background: #2d1518;
-  color: #ffdcd7;
-}
-
 .modal-backdrop {
   position: fixed;
   inset: 0;
@@ -3227,11 +3298,31 @@ h2 {
   color: #8b949e;
 }
 
-:root[data-theme="dark"] .warnings,
-:root[data-theme="dark"] .error-banner {
+:root[data-theme="dark"] .warnings {
   border-color: #da7b72;
   background: #2d1518;
   color: #ffdcd7;
+}
+
+:root[data-theme="dark"] .ui-error-center {
+  border-color: #da7b72;
+  background: #2d1518;
+  color: #ffdcd7;
+  box-shadow: 0 18px 50px rgba(1, 4, 9, 0.56);
+}
+
+:root[data-theme="dark"] .ui-error-center-header p,
+:root[data-theme="dark"] .ui-error-list span {
+  color: #ffb4ab;
+}
+
+:root[data-theme="dark"] .ui-error-center button {
+  border-color: #da7b72;
+  color: #ffdcd7;
+}
+
+:root[data-theme="dark"] .ui-error-list li {
+  border-top-color: rgba(218, 123, 114, 0.34);
 }
 
 :root[data-theme="dark"] .success-banner {

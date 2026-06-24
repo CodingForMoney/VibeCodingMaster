@@ -19,6 +19,7 @@ import { TRANSLATION_ENTRY_RETENTION_LIMIT } from "../../shared/types/translatio
 import { apiClient } from "../state/api-client.js";
 import { clearUiErrorForActions, formatUiError } from "../state/error-format.js";
 import { clearPollError, recordPollError } from "../state/poll-error-gate.js";
+import { useUiErrorState } from "../state/ui-error-state.js";
 
 type TranslationPanelStatus = TranslationSessionStatus;
 const TRANSLATED_COMPOSER_SEPARATOR = "\n\n--- Translation ---\n";
@@ -49,7 +50,7 @@ export function TranslationPanel({
   const [lastPollAt, setLastPollAt] = useState("");
   const [panelNowMs, setPanelNowMs] = useState(Date.now());
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
+  const [, setError] = useUiErrorState("");
   const [scrollRevision, setScrollRevision] = useState(0);
   const activeRef = useRef(active);
   const cursorRef = useRef(1);
@@ -326,8 +327,6 @@ export function TranslationPanel({
         </div>
       </header>
 
-      {error ? <div className="error-banner">{error}</div> : null}
-
       <div className="translation-entry-list" ref={entryListRef}>
         {entries.length === 0 ? <p className="muted">Translated Claude Code output will appear here.</p> : null}
         {entries.map((entry) => (
@@ -399,7 +398,7 @@ export function FileTranslationModalHost({
   onClose(): void;
 }) {
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
+  const [, setError] = useUiErrorState("");
   const [translationState, setTranslationState] = useState<TranslationState | null>(null);
   const [selectedFileJobId, setSelectedFileJobId] = useState<string>("");
   const [selectedFileOutput, setSelectedFileOutput] = useState("");
@@ -530,7 +529,6 @@ export function FileTranslationModalHost({
       <div className="modal-backdrop file-translation-backdrop">
         <FileTranslationPanel
           busy={busy}
-          error={error}
           state={translationState}
           selectedJobId={selectedFileJobId}
           output={selectedFileOutput}
@@ -709,7 +707,6 @@ function FileBrowserEntryButton({
 
 function FileTranslationPanel({
   busy,
-  error,
   state,
   selectedJobId,
   output,
@@ -720,7 +717,6 @@ function FileTranslationPanel({
   onTranslate
 }: {
   busy: boolean;
-  error?: string;
   state: TranslationState | null;
   selectedJobId: string;
   output: string;
@@ -746,7 +742,6 @@ function FileTranslationPanel({
           <button type="button" onClick={onClose}>Close</button>
         </div>
       </header>
-      {error ? <div className="error-banner">{error}</div> : null}
       {!state?.memoryInitialized ? (
         <p className="translation-entry-note">Translation memory is not initialized. Run Bootstrap from the sidebar before important file translations.</p>
       ) : null}

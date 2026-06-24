@@ -5,6 +5,7 @@ import type { HarnessFileContent } from "../../shared/types/harness.js";
 import type { ClaudePermissionMode, RoleSessionRecord, SessionEffort, SessionModel } from "../../shared/types/session.js";
 import { apiClient } from "../state/api-client.js";
 import { formatUiError } from "../state/error-format.js";
+import { useUiErrorState } from "../state/ui-error-state.js";
 import { XtermView } from "../terminal/xterm-view.js";
 import { SessionToolbar } from "./session-toolbar.js";
 import { StatusBadge } from "./status-badge.js";
@@ -61,7 +62,7 @@ export function HarnessStudioModal({
   const [draftContent, setDraftContent] = useState("");
   const [editingFile, setEditingFile] = useState(false);
   const [fileBusy, setFileBusy] = useState(false);
-  const [fileError, setFileError] = useState<string | null>(null);
+  const [, setFileError] = useUiErrorState(null);
   const [copiedPath, setCopiedPath] = useState<string | null>(null);
 
   const files = status?.files ?? [];
@@ -224,7 +225,6 @@ export function HarnessStudioModal({
                   {selectedFile?.readonlyReason ? (
                     <p className="muted">{selectedFile.readonlyReason}</p>
                   ) : null}
-                  {fileError ? <p className="error-banner">{fileError}</p> : null}
                   <textarea
                     className={editingFile ? "harness-studio-file-textarea is-editing" : "harness-studio-file-textarea"}
                     value={draftContent}

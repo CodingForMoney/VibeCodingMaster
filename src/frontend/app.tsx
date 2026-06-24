@@ -36,10 +36,12 @@ import { HarnessStudioModal } from "./components/harness-studio-modal.js";
 import { RepositoryDiffModal } from "./components/repository-diff-modal.js";
 import { TranslatorSessionModal } from "./components/translator-session-modal.js";
 import { FileTranslationModalHost } from "./components/translation-panel.js";
+import { UiErrorCenter } from "./components/ui-error-center.js";
 import { selectActiveTask } from "./state/app-store.js";
 import { apiClient } from "./state/api-client.js";
 import { clearUiErrorForActions, formatUiError } from "./state/error-format.js";
 import { clearPollError, recordPollError } from "./state/poll-error-gate.js";
+import { useUiErrorState } from "./state/ui-error-state.js";
 import { buildOneClickRoleLaunches } from "./state/one-click-start.js";
 import { ProjectDashboard } from "./routes/project-dashboard.js";
 import { TaskWorkspace, type TaskWorkspaceLaunchState } from "./routes/task-workspace.js";
@@ -102,7 +104,7 @@ export function App() {
   const [dismissedRoleRecoveryKey, setDismissedRoleRecoveryKey] = useState<string | null>(null);
   const [systemPrefersDark, setSystemPrefersDark] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
+  const [, setError] = useUiErrorState("");
   const notifiedFlowPauseKeyRef = useRef<Record<string, string>>({});
   const observedFlowPauseStateRef = useRef<Record<string, { status: VcmRoundStatus }>>({});
   const activeTaskViewStartedAtRef = useRef<Record<string, number>>({});
@@ -1260,7 +1262,7 @@ export function App() {
         />
       )}
     >
-      {error ? <div className="error-banner">{error}</div> : null}
+      <UiErrorCenter />
       {flowPauseNotice ? (
         <div className="flow-pause-alert-backdrop">
           <section
@@ -1593,7 +1595,7 @@ function GatewayQrLoginModal({
   qrLogin: StartGatewayQrLoginResult;
 }) {
   const [qrImageSrc, setQrImageSrc] = useState("");
-  const [qrError, setQrError] = useState("");
+  const [qrError, setQrError] = useUiErrorState("");
 
   useEffect(() => {
     let cancelled = false;
@@ -1642,7 +1644,7 @@ function GatewayQrLoginModal({
               <img alt="Weixin Gateway QR login" src={qrImageSrc} />
             ) : (
               <div className="gateway-qr-placeholder">
-                {qrError || "Rendering QR code..."}
+                {qrError ? "QR code could not be rendered." : "Rendering QR code..."}
               </div>
             )}
           </div>

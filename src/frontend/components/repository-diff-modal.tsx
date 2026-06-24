@@ -8,6 +8,7 @@ import type {
 } from "../../shared/types/harness.js";
 import { apiClient } from "../state/api-client.js";
 import { formatUiError } from "../state/error-format.js";
+import { useUiErrorState } from "../state/ui-error-state.js";
 
 export interface RepositoryDiffModalProps {
   open: boolean;
@@ -21,7 +22,7 @@ export function RepositoryDiffModal({ open, taskSlug, onClose }: RepositoryDiffM
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [mergeBusy, setMergeBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [, setError] = useUiErrorState(null);
   const [mergeMessage, setMergeMessage] = useState<string | null>(null);
 
   const selectedFile = useMemo(
@@ -156,7 +157,6 @@ export function RepositoryDiffModal({ open, taskSlug, onClose }: RepositoryDiffM
           </div>
         </header>
 
-        {error ? <p className="error-banner">{error}</p> : null}
         {mergeMessage ? <p className="success-banner">{mergeMessage}</p> : null}
 
         {report?.warnings.length ? (

@@ -11,6 +11,7 @@ import { RoleSessionTabs } from "../components/role-session-tabs.js";
 import { SessionConsole } from "../components/session-console.js";
 import { clearUiErrorForActions, formatUiError } from "../state/error-format.js";
 import { clearPollError, recordPollError } from "../state/poll-error-gate.js";
+import { useUiErrorState } from "../state/ui-error-state.js";
 import { getSessionForRole } from "../state/session-store.js";
 import { apiClient } from "../state/api-client.js";
 import { selectAutoDispatchRole } from "../state/message-navigation.js";
@@ -101,7 +102,7 @@ export function TaskWorkspace({
   const [models, setModels] = useState<Record<RoleName, SessionModel>>(() => modelsFromLaunchTemplate(launchTemplate));
   const [efforts, setEfforts] = useState<Record<RoleName, SessionEffort>>(() => effortsFromLaunchTemplate(launchTemplate));
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
+  const [, setError] = useUiErrorState("");
   const [events, setEvents] = useState<string[]>([]);
   const [orchestration, setOrchestration] = useState<VcmOrchestrationState | null>(null);
   const messageSnapshotRef = useRef<{ taskSlug: string; messages: VcmRoleMessage[] } | null>(null);
@@ -349,8 +350,6 @@ export function TaskWorkspace({
           onSelect={onActiveRoleChange}
         />
       </header>
-
-      {error ? <div className="error-banner">{error}</div> : null}
 
       <div className="workspace-grid">
         <div className="workspace-main">
