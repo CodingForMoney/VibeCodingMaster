@@ -293,6 +293,80 @@ describe("createSessionService", () => {
     ]);
   });
 
+  it("clears Translator session ids on restart until the next prompt hook", async () => {
+    const fs = createMemoryFs();
+    const service = createTestSessionService(fs, [], [], {
+      worktreePath: TASK_WORKTREE
+    });
+
+    await service.startProjectTranslatorSession("/repo", {
+      taskSlug: "demo-task"
+    });
+    await service.recordProjectTranslatorHookEvent("/repo", {
+      eventName: "UserPromptSubmit",
+      sessionId: "translator-old-session",
+      transcriptPath: `${TASK_WORKTREE}/.claude/projects/translator-old-session.jsonl`,
+      cwd: TASK_WORKTREE
+    });
+    await expect(fs.pathExists("/repo/.ai/vcm/translations/session.json")).resolves.toBe(true);
+
+    const restarted = await service.restartProjectTranslatorSession("/repo", {
+      taskSlug: "demo-task"
+    });
+
+    expect(restarted.claudeSessionId).toBe("");
+    expect(restarted.transcriptPath).toBeUndefined();
+    await expect(fs.pathExists("/repo/.ai/vcm/translations/session.json")).resolves.toBe(false);
+    await expect(createTestSessionService(fs, []).getProjectTranslatorSession("/repo")).resolves.toBeUndefined();
+
+    const hooked = await service.recordProjectTranslatorHookEvent("/repo", {
+      eventName: "UserPromptSubmit",
+      sessionId: "translator-new-session",
+      transcriptPath: `${TASK_WORKTREE}/.claude/projects/translator-new-session.jsonl`,
+      cwd: TASK_WORKTREE
+    });
+
+    expect(hooked?.claudeSessionId).toBe("translator-new-session");
+    await expect(fs.pathExists("/repo/.ai/vcm/translations/session.json")).resolves.toBe(true);
+  });
+
+  it("clears Harness Engineer session ids on restart until the next prompt hook", async () => {
+    const fs = createMemoryFs();
+    const service = createTestSessionService(fs, [], [], {
+      worktreePath: TASK_WORKTREE
+    });
+
+    await service.startProjectHarnessEngineerSession("/repo", {
+      taskSlug: "demo-task"
+    });
+    await service.recordProjectHarnessEngineerHookEvent("/repo", {
+      eventName: "UserPromptSubmit",
+      sessionId: "harness-old-session",
+      transcriptPath: `${TASK_WORKTREE}/.claude/projects/harness-old-session.jsonl`,
+      cwd: TASK_WORKTREE
+    });
+    await expect(fs.pathExists("/repo/.ai/vcm/harness-engineer/session.json")).resolves.toBe(true);
+
+    const restarted = await service.restartProjectHarnessEngineerSession("/repo", {
+      taskSlug: "demo-task"
+    });
+
+    expect(restarted.claudeSessionId).toBe("");
+    expect(restarted.transcriptPath).toBeUndefined();
+    await expect(fs.pathExists("/repo/.ai/vcm/harness-engineer/session.json")).resolves.toBe(false);
+    await expect(createTestSessionService(fs, []).getProjectHarnessEngineerSession("/repo")).resolves.toBeUndefined();
+
+    const hooked = await service.recordProjectHarnessEngineerHookEvent("/repo", {
+      eventName: "UserPromptSubmit",
+      sessionId: "harness-new-session",
+      transcriptPath: `${TASK_WORKTREE}/.claude/projects/harness-new-session.jsonl`,
+      cwd: TASK_WORKTREE
+    });
+
+    expect(hooked?.claudeSessionId).toBe("harness-new-session");
+    await expect(fs.pathExists("/repo/.ai/vcm/harness-engineer/session.json")).resolves.toBe(true);
+  });
+
   it("starts Translator as a project-scoped Claude Code session", async () => {
     const fs = createMemoryFs();
     const runtimeInputs: CreateTerminalSessionInput[] = [];
@@ -645,6 +719,29 @@ describe("createSessionService", () => {
       "default"
     ]);
     expect(secondRuntimeInputs[0]?.args).not.toContain("--resume");
+
+    const cleared = await fs.readJson<{
+      roles: { coder?: { id: string | null; claudeSessionId?: string; status: string; record?: unknown } };
+    }>(`${TASK_WORKTREE}/.ai/vcm/sessions/demo-task.json`);
+    expect(cleared.roles.coder).toEqual({
+      id: null,
+      status: "not_started"
+    });
+    await expect(createTestSessionService(fs, []).getRoleSession("/repo", "demo-task", "coder"))
+      .resolves.toBeUndefined();
+
+    const hooked = await secondService.recordRoleHookEvent("/repo", {
+      taskSlug: "demo-task",
+      role: "coder",
+      eventName: "UserPromptSubmit",
+      sessionId: "coder-new-session",
+      transcriptPath: `${TASK_WORKTREE}/.claude/projects/coder-new-session.jsonl`,
+      cwd: TASK_WORKTREE
+    });
+    expect(hooked?.claudeSessionId).toBe("coder-new-session");
+
+    const recovered = await createTestSessionService(fs, []).getRoleSession("/repo", "demo-task", "coder");
+    expect(recovered?.claudeSessionId).toBe("coder-new-session");
   });
 
   it("normalizes legacy dangerously skip permission records to bypassPermissions", async () => {

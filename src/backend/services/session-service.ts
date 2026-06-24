@@ -706,6 +706,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
         await deps.runtime.stop(existing.id);
       }
       deps.registry.remove(existing.id);
+      await clearPersistedTranslatorSession(deps.fs, repoRoot);
 
       return launchProjectTranslatorSession(repoRoot, input, "fresh");
     },
@@ -839,6 +840,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
         await deps.runtime.stop(existing.id);
       }
       deps.registry.remove(existing.id);
+      await clearPersistedHarnessEngineerSession(deps.fs, repoRoot);
 
       return launchProjectHarnessEngineerSession(repoRoot, input, "fresh");
     },
@@ -980,6 +982,16 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
         await deps.runtime.stop(existing.id);
       }
       deps.registry.remove(existing.id);
+      const config = await deps.projectService.loadConfig(repoRoot);
+      const task = await deps.taskService.loadTask(repoRoot, taskSlug);
+      await clearPersistedRoleSessionRecord(
+        deps.fs,
+        getTaskRuntimeRepoRoot(task),
+        config.stateRoot,
+        taskSlug,
+        role,
+        now()
+      );
 
       return launchRoleSession(repoRoot, taskSlug, role, input, "fresh");
     },
@@ -1475,6 +1487,32 @@ async function persistTaskSession(
   });
 }
 
+async function clearPersistedRoleSessionRecord(
+  fs: FileSystemAdapter,
+  repoRoot: string,
+  stateRoot: string,
+  taskSlug: string,
+  role: RoleName,
+  updatedAt: string
+): Promise<void> {
+  const sessionPath = getTaskSessionPath(repoRoot, stateRoot, taskSlug);
+  const current = await fs.pathExists(sessionPath)
+    ? await fs.readJson<TaskSessionRecord>(sessionPath)
+    : createEmptyTaskSessionRecord(taskSlug, updatedAt);
+
+  await fs.writeJsonAtomic(sessionPath, {
+    ...current,
+    updatedAt,
+    roles: {
+      ...current.roles,
+      [role]: {
+        id: null,
+        status: "not_started"
+      }
+    }
+  });
+}
+
 async function persistRoleSessionRecord(
   fs: FileSystemAdapter,
   baseRepoRoot: string,
@@ -1516,6 +1554,13 @@ async function persistTranslatorSession(
   );
 }
 
+async function clearPersistedTranslatorSession(
+  fs: FileSystemAdapter,
+  repoRoot: string
+): Promise<void> {
+  await removePersistedProjectSessionFile(fs, repoRoot, TRANSLATOR_SESSION_PATH);
+}
+
 async function persistHarnessEngineerSession(
   fs: FileSystemAdapter,
   repoRoot: string,
@@ -1536,6 +1581,33 @@ async function persistHarnessEngineerSession(
       }
     }
   );
+}
+
+async function clearPersistedHarnessEngineerSession(
+  fs: FileSystemAdapter,
+  repoRoot: string
+): Promise<void> {
+  await removePersistedProjectSessionFile(fs, repoRoot, HARNESS_ENGINEER_SESSION_PATH);
+}
+
+async function removePersistedProjectSessionFile(
+  fs: FileSystemAdapter,
+  repoRoot: string,
+  relativePath: string
+): Promise<void> {
+  const sessionPath = resolveRepoPath(repoRoot, relativePath);
+  if (!(await fs.pathExists(sessionPath))) {
+    return;
+  }
+  if (!fs.removePath) {
+    throw new VcmError({
+      code: "SESSION_CLEAR_UNAVAILABLE",
+      message: "VCM cannot clear the persisted Claude session file in this runtime.",
+      statusCode: 500,
+      hint: `Remove ${relativePath} manually before restarting the role.`
+    });
+  }
+  await fs.removePath(sessionPath, { force: true });
 }
 
 function isProjectRoleSessionFile(value: ProjectRoleSessionFile | RoleSessionRecord): value is ProjectRoleSessionFile {
