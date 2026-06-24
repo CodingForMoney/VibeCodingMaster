@@ -62,8 +62,9 @@ export function createLarkRegistrationClient(deps: LarkRegistrationClientDeps = 
   return {
     async init(domain) {
       const payload = await postRegistration(domain, { action: "init" });
-      const methods = Array.isArray(payload.supported_auth_methods)
-        ? payload.supported_auth_methods.filter((value): value is string => typeof value === "string")
+      const data = responseData(payload);
+      const methods = Array.isArray(data.supported_auth_methods)
+        ? data.supported_auth_methods.filter((value): value is string => typeof value === "string")
         : [];
       if (!methods.includes("client_secret")) {
         throw new Error(`Lark QR setup does not support client_secret auth. Supported methods: ${methods.join(", ") || "none"}.`);
@@ -76,11 +77,12 @@ export function createLarkRegistrationClient(deps: LarkRegistrationClientDeps = 
         auth_method: "client_secret",
         request_user_info: "open_id"
       });
-      const deviceCode = stringOrNull(payload.device_code);
+      const data = responseData(payload);
+      const deviceCode = stringOrNull(data.device_code);
       if (!deviceCode) {
         throw new Error("Lark QR setup did not return a device_code.");
       }
-      const qrUrl = appendQrTrackingParams(stringOrNull(payload.verification_uri_complete) ?? "");
+      const qrUrl = appendQrTrackingParams(stringOrNull(data.verification_uri_complete) ?? "");
       if (!qrUrl) {
         throw new Error("Lark QR setup did not return a QR URL.");
       }
@@ -88,9 +90,9 @@ export function createLarkRegistrationClient(deps: LarkRegistrationClientDeps = 
         domain,
         deviceCode,
         qrUrl,
-        userCode: stringOrNull(payload.user_code),
-        intervalSeconds: positiveNumberOr(payload.interval, 5),
-        expiresInSeconds: positiveNumberOr(payload.expire_in, 600)
+        userCode: stringOrNull(data.user_code),
+        intervalSeconds: positiveNumberOr(data.interval, 5),
+        expiresInSeconds: positiveNumberOr(data.expire_in, 600)
       };
     },
     async poll(input) {
@@ -99,11 +101,12 @@ export function createLarkRegistrationClient(deps: LarkRegistrationClientDeps = 
         device_code: input.deviceCode,
         tp: "ob_app"
       });
-      const userInfo = isObject(payload.user_info) ? payload.user_info : {};
+      const data = responseData(payload);
+      const userInfo = isObject(data.user_info) ? data.user_info : {};
       const tenantBrand = stringOrNull(userInfo.tenant_brand);
       const domain = tenantBrand === "lark" ? "lark" : input.domain;
-      const appId = stringOrNull(payload.client_id);
-      const appSecret = stringOrNull(payload.client_secret);
+      const appId = stringOrNull(data.client_id);
+      const appSecret = stringOrNull(data.client_secret);
       if (appId && appSecret) {
         const bot = await probeBot(fetchImpl, {
           appId,
@@ -121,19 +124,31 @@ export function createLarkRegistrationClient(deps: LarkRegistrationClientDeps = 
         };
       }
 
-      const error = stringOrNull(payload.error);
+      const error = stringOrNull(data.error) ?? stringOrNull(payload.error);
       if (error === "expired_token") {
         return { status: "expired", message: "Lark QR setup expired. Start a new setup." };
       }
       if (error === "access_denied") {
         return { status: "failed", message: "Lark QR setup was denied." };
       }
+      const errorDescription = stringOrNull(data.error_description)
+        ?? stringOrNull(payload.error_description)
+        ?? stringOrNull(data.message)
+        ?? stringOrNull(payload.message)
+        ?? stringOrNull(data.msg)
+        ?? stringOrNull(payload.msg);
       return {
         status: "wait",
-        message: error && error !== "authorization_pending" ? error : undefined
+        message: error && error !== "authorization_pending"
+          ? [error, errorDescription].filter(Boolean).join(": ")
+          : undefined
       };
     }
   };
+}
+
+function responseData(payload: Record<string, unknown>): Record<string, unknown> {
+  return isObject(payload.data) ? payload.data : payload;
 }
 
 async function probeBot(
@@ -202,7 +217,7 @@ async function fetchJson(
       throw new Error("Lark setup response was not a JSON object.");
     }
     if (!response.ok && !payload.error) {
-      throw new Error(`${response.status} ${response.statusText}`);
+      throw new Error(`Lark QR setup request failed: ${response.status} ${response.statusText}${formatPayloadError(payload)}`);
     }
     return payload;
   } catch (error) {
@@ -215,17 +230,30 @@ async function fetchJson(
   }
 }
 
+function formatPayloadError(payload: Record<string, unknown>): string {
+  const data = responseData(payload);
+  const message = [
+    stringOrNull(data.error) ?? stringOrNull(payload.error),
+    stringOrNull(data.error_description) ?? stringOrNull(payload.error_description),
+    stringOrNull(data.message) ?? stringOrNull(payload.message),
+    stringOrNull(data.msg) ?? stringOrNull(payload.msg),
+    typeof data.code === "number" || typeof data.code === "string" ? `code ${data.code}` : null,
+    typeof payload.code === "number" || typeof payload.code === "string" ? `code ${payload.code}` : null
+  ].filter(Boolean).join(": ");
+  return message ? ` (${message})` : "";
+}
+
 function appendQrTrackingParams(value: string): string {
   if (!value) {
     return "";
   }
   try {
     const url = new URL(value);
-    url.searchParams.set("from", "vcm");
-    url.searchParams.set("tp", "vcm");
+    url.searchParams.set("from", "hermes");
+    url.searchParams.set("tp", "hermes");
     return url.toString();
   } catch {
-    return `${value}${value.includes("?") ? "&" : "?"}from=vcm&tp=vcm`;
+    return `${value}${value.includes("?") ? "&" : "?"}from=hermes&tp=hermes`;
   }
 }
 

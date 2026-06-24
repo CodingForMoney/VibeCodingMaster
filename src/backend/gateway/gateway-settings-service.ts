@@ -399,7 +399,10 @@ function normalizeBaseUrl(input: unknown, fallback = DEFAULT_BASE_URL): string {
   if (!raw) {
     return fallback;
   }
-  if (raw.startsWith("http://") || raw.startsWith("https://")) {
+  if (/^https:\/\/lark:\/\//i.test(raw)) {
+    return raw.replace(/^https:\/\//i, "").replace(/\/+$/, "");
+  }
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(raw)) {
     return raw.replace(/\/+$/, "");
   }
   return `https://${raw.replace(/\/+$/, "")}`;

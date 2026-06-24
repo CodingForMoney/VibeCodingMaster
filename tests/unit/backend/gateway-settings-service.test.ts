@@ -40,4 +40,27 @@ describe("gateway-settings-service", () => {
     expect(settings.binding.baseUrl).toBe("https://gateway.example");
     expect(written?.binding.baseUrl).toBe("https://gateway.example");
   });
+
+  it("preserves non-http gateway base URL schemes", async () => {
+    const service = createGatewaySettingsService({
+      fs: {
+        async pathExists() {
+          return false;
+        },
+        async writeJsonAtomic() {
+          return undefined;
+        }
+      } as never,
+      defaultChannel: "lark",
+      defaultBaseUrl: "lark://open-platform"
+    });
+
+    const settings = await service.loadSettings();
+    const updated = await service.updateSettings({ baseUrl: "lark://open-platform" });
+    const repaired = await service.updateSettings({ baseUrl: "https://lark://open-platform" });
+
+    expect(settings.binding.baseUrl).toBe("lark://open-platform");
+    expect(updated.binding.baseUrl).toBe("lark://open-platform");
+    expect(repaired.binding.baseUrl).toBe("lark://open-platform");
+  });
 });

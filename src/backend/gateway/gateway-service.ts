@@ -141,6 +141,7 @@ const POLL_ERROR_BACKOFF_MS = 2_000;
 const POLL_LONG_BACKOFF_MS = 30_000;
 const MAX_FAILURES_BEFORE_LONG_BACKOFF = 3;
 const DEFAULT_POLL_TIMEOUT_MS = 35_000;
+const LARK_REGISTRATION_CONFIRM_TIMEOUT_MS = 15_000;
 const MAX_LATEST_PM_REPLY_CHARS = 8_000;
 const GATEWAY_TRANSLATION_FAILURE_TEXT = "PM 回复已收到，但翻译失败。\n发送 /retry 重新翻译。";
 const COMMANDS_ALLOWED_WHEN_DISABLED = new Set<GatewayCommand["kind"]>([
@@ -1122,17 +1123,25 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
           message: "Lark QR setup expired. Start a new setup."
         };
       }
-      const result = await larkRegistration.poll({
+      const confirmDeadline = Date.now() + LARK_REGISTRATION_CONFIRM_TIMEOUT_MS;
+      let result = await larkRegistration.poll({
         domain: larkRegistrationState.domain,
         deviceCode: larkRegistrationState.deviceCode
       });
+      while (result.status === "wait" && Date.now() < confirmDeadline) {
+        await sleep(Math.min(larkRegistrationState.intervalSeconds * 1000, 3_000), new AbortController().signal);
+        result = await larkRegistration.poll({
+          domain: larkRegistrationState.domain,
+          deviceCode: larkRegistrationState.deviceCode
+        });
+      }
       if (result.status !== "confirmed") {
         if (result.status === "expired" || result.status === "failed") {
           larkRegistrationState = null;
         }
         return {
           status: result.status,
-          message: result.message
+          message: result.message ?? (result.status === "wait" ? "Lark has not returned app credentials yet. Confirm again in a moment." : undefined)
         };
       }
       if (!result.appId || !result.appSecret || !result.domain) {
@@ -1558,7 +1567,10 @@ function normalizeBaseUrl(input: string, fallback: string): string {
   if (!trimmed) {
     return fallback;
   }
-  if (trimmed.startsWith("http://") || trimmed.startsWith("https://")) {
+  if (/^https:\/\/lark:\/\//i.test(trimmed)) {
+    return trimmed.replace(/^https:\/\//i, "").replace(/\/+$/, "");
+  }
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed)) {
     return trimmed.replace(/\/+$/, "");
   }
   return `https://${trimmed.replace(/\/+$/, "")}`;
