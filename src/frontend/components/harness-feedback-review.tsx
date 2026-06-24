@@ -8,7 +8,6 @@ export interface HarnessFeedbackReviewProps {
   onCancel(comment: string): void;
   onComment(comment: string): void;
   onReject(comment: string): void;
-  onRefresh(): void;
 }
 
 export function HarnessFeedbackReview({
@@ -17,19 +16,28 @@ export function HarnessFeedbackReview({
   onApprove,
   onCancel,
   onComment,
-  onReject,
-  onRefresh
+  onReject
 }: HarnessFeedbackReviewProps) {
   const [open, setOpen] = useState(false);
   const [comment, setComment] = useState("");
+  const [dismissedNoticeKey, setDismissedNoticeKey] = useState<string | null>(null);
   if (!state || state.status === "idle") {
     return null;
   }
 
   const active = state.active;
+  const noticeKey = getHarnessFeedbackNoticeKey(state);
+  if (dismissedNoticeKey === noticeKey) {
+    return null;
+  }
+
   const needsReview = state.status === "awaiting_user_approval";
   const title = active?.title ?? state.pending[0]?.title ?? "Harness feedback";
   const label = active?.source === "task-retrospective" ? "Task Harness Review" : "Harness Feedback";
+  const closeFloat = () => {
+    setOpen(false);
+    setDismissedNoticeKey(noticeKey);
+  };
 
   return (
     <>
@@ -40,7 +48,7 @@ export function HarnessFeedbackReview({
         </div>
         <p title={title}>{title}</p>
         <div className="harness-feedback-float-actions">
-          <button type="button" disabled={busy} onClick={onRefresh}>Refresh</button>
+          <button type="button" disabled={busy} onClick={closeFloat}>Close</button>
           <button type="button" disabled={busy || !active} onClick={() => setOpen(true)}>
             {needsReview ? "Review" : "Open"}
           </button>
@@ -107,6 +115,25 @@ export function HarnessFeedbackReview({
       ) : null}
     </>
   );
+}
+
+function getHarnessFeedbackNoticeKey(state: HarnessFeedbackStateReport): string {
+  if (state.active) {
+    return [
+      "active",
+      state.status,
+      state.active.id,
+      state.active.path,
+      state.active.updatedAt ?? "",
+      state.active.analysisPath ?? "",
+      state.active.applyReportPath ?? ""
+    ].join(":");
+  }
+  const pending = state.pending[0];
+  if (pending) {
+    return ["pending", state.status, pending.id, pending.path, state.queuedCount].join(":");
+  }
+  return [state.status, state.queuedCount].join(":");
 }
 
 function formatHarnessFeedbackStatus(state: HarnessFeedbackStateReport): string {

@@ -1568,9 +1568,6 @@ export function App() {
       <HarnessFeedbackReview
         busy={busy}
         state={harnessFeedbackState}
-        onRefresh={() => {
-          void refreshHarnessFeedbackState(activeTask?.taskSlug).catch((caught: Error) => setError(formatUiError("Refresh Harness feedback state", caught)));
-        }}
         onCancel={(comment) => {
           void withBusy(async () => {
             const state = await apiClient.decideHarnessFeedback({
