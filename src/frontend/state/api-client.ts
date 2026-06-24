@@ -1,4 +1,4 @@
-import type { DispatchRoleCommandResult, TaskStatusReport } from "../../shared/types/api.js";
+import type { DispatchRoleCommandResult, ProjectRuntimeState, TaskStatusReport, TaskWorkspaceState } from "../../shared/types/api.js";
 import type { AppPreferences, UpdateAppPreferencesRequest } from "../../shared/types/app-settings.js";
 import type {
   CheckGatewayQrLoginRequest,
@@ -231,6 +231,17 @@ export const apiClient = {
   },
   getTaskStatus(taskSlug: string) {
     return request<TaskStatusReport>(`/api/tasks/${encodeURIComponent(taskSlug)}/status`);
+  },
+  getTaskWorkspaceState(taskSlug: string) {
+    return request<TaskWorkspaceState>(`/api/tasks/${encodeURIComponent(taskSlug)}/workspace-state`);
+  },
+  getProjectRuntimeState(taskSlug?: string | null) {
+    const params = new URLSearchParams();
+    if (taskSlug) {
+      params.set("taskSlug", taskSlug);
+    }
+    const query = params.toString();
+    return request<ProjectRuntimeState>(`/api/projects/runtime-state${query ? `?${query}` : ""}`);
   },
   listSessions(taskSlug: string) {
     return request<RoleSessionRecord[]>(`/api/tasks/${encodeURIComponent(taskSlug)}/sessions`);

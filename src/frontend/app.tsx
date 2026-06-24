@@ -25,6 +25,7 @@ import type {
 import type { GateReviewGate, GateReviewIndex } from "../shared/types/gate-review.js";
 import type { VcmOrchestrationState, VcmRoleMessage } from "../shared/types/message.js";
 import type { ProjectSummary } from "../shared/types/project.js";
+import type { ProjectRuntimeState } from "../shared/types/api.js";
 import type { RoleName } from "../shared/types/role.js";
 import type { VcmRoleRecoveryState, VcmRoundStatus, VcmSessionRoundState } from "../shared/types/round.js";
 import type { ClaudePermissionMode, RoleSessionRecord, SessionEffort, SessionModel } from "../shared/types/session.js";
@@ -42,6 +43,7 @@ import { apiClient } from "./state/api-client.js";
 import { clearUiErrorForActions, formatUiError } from "./state/error-format.js";
 import { clearPollError, recordPollError } from "./state/poll-error-gate.js";
 import { useUiErrorState } from "./state/ui-error-state.js";
+import { useScheduledPoll } from "./state/use-scheduled-poll.js";
 import { buildOneClickRoleLaunches } from "./state/one-click-start.js";
 import { ProjectDashboard } from "./routes/project-dashboard.js";
 import { TaskWorkspace, type TaskWorkspaceLaunchState } from "./routes/task-workspace.js";
@@ -110,6 +112,7 @@ export function App() {
   const activeTaskViewStartedAtRef = useRef<Record<string, number>>({});
   const flowPauseAlarmRef = useRef<number | null>(null);
   const gatewayContextSyncKeyRef = useRef("");
+  const projectRuntimeLaunchSyncKeyRef = useRef("");
   const translatorEnsureKeyRef = useRef("");
   const translatorAutoResumeKeyRef = useRef("");
   const harnessEngineerAutoResumeKeyRef = useRef("");
@@ -447,6 +450,77 @@ export function App() {
     return state;
   }
 
+  function applyProjectRuntimeState(
+    state: ProjectRuntimeState,
+    taskSlug: string | null,
+    options: { syncLaunchOptions?: boolean } = {}
+  ) {
+    setTranslatorSession(state.translatorSession);
+    setTranslationMemoryInitialized(Boolean(state.translationState?.memoryInitialized));
+    setHarnessEngineerSession(state.harnessEngineerSession);
+    setHarnessFeedbackState(state.harnessFeedbackState);
+
+    if (taskSlug && state.harnessStatus) {
+      setHarnessStatus(state.harnessStatus);
+      setHarnessStatusTaskSlug(taskSlug);
+    } else {
+      setHarnessStatus(null);
+      setHarnessStatusTaskSlug(null);
+    }
+
+    if (taskSlug && state.harnessBootstrapStatus) {
+      setHarnessBootstrapStatus(state.harnessBootstrapStatus);
+      setHarnessBootstrapStatusTaskSlug(taskSlug);
+    } else {
+      setHarnessBootstrapStatus(null);
+      setHarnessBootstrapStatusTaskSlug(null);
+    }
+
+    if (options.syncLaunchOptions) {
+      syncTranslatorLaunchOptions(state.translatorSession);
+      syncHarnessEngineerLaunchOptions(state.harnessEngineerSession);
+    }
+  }
+
+  async function refreshProjectRuntimeState(options: { syncLaunchOptions?: boolean } = {}) {
+    if (!project) {
+      setTranslatorSession(null);
+      setTranslationMemoryInitialized(false);
+      setHarnessEngineerSession(null);
+      setHarnessStatus(null);
+      setHarnessBootstrapStatus(null);
+      setHarnessStatusTaskSlug(null);
+      setHarnessBootstrapStatusTaskSlug(null);
+      setHarnessFeedbackState(null);
+      return null;
+    }
+
+    const taskSlug = activeTask?.taskSlug ?? null;
+    const state = await apiClient.getProjectRuntimeState(taskSlug);
+    applyProjectRuntimeState(state, taskSlug, options);
+    return state;
+  }
+
+  function clearProjectRuntimePollErrors() {
+    const actions = [
+      "Poll project runtime state",
+      "Load project runtime state",
+      "Refresh Harness feedback state",
+      "Poll Harness feedback state",
+      "Load Translator session",
+      "Poll Translator session",
+      "Poll translation memory status",
+      "Load Harness Engineer session",
+      "Poll Harness Engineer session",
+      "Load VCM Harness status",
+      "Poll VCM Harness status"
+    ];
+    for (const action of actions) {
+      clearPollError(action);
+    }
+    setError((current) => clearUiErrorForActions(current, actions));
+  }
+
   useEffect(() => {
     Promise.all([
       apiClient.getCurrentProject(),
@@ -533,6 +607,7 @@ export function App() {
   }, [activeTask?.taskSlug]);
 
   useEffect(() => {
+    projectRuntimeLaunchSyncKeyRef.current = "";
     translatorEnsureKeyRef.current = "";
     translatorAutoResumeKeyRef.current = "";
     harnessEngineerAutoResumeKeyRef.current = "";
@@ -552,177 +627,26 @@ export function App() {
     setHarnessFeedbackState(null);
   }, [project?.repoRoot]);
 
-  useEffect(() => {
-    if (!project) {
-      setHarnessFeedbackState(null);
-      return;
-    }
-
-    let cancelled = false;
-    let inFlight = false;
-    const taskSlug = activeTask?.taskSlug ?? null;
-    const loadFeedbackState = async () => {
-      const state = await apiClient.getHarnessFeedbackState(taskSlug);
-      if (!cancelled) {
-        setHarnessFeedbackState(state);
-      }
-    };
-
-    inFlight = true;
-    void loadFeedbackState()
-      .catch((caught: Error) => {
-        if (!cancelled) {
-          setError(formatUiError("Refresh Harness feedback state", caught));
+  useScheduledPoll(
+    project ? `project-runtime:${project.repoRoot}:${activeTask?.taskSlug ?? "no-task"}` : null,
+    async () => {
+      try {
+        const syncKey = project?.repoRoot ?? "";
+        const syncLaunchOptions = Boolean(project && projectRuntimeLaunchSyncKeyRef.current !== syncKey);
+        await refreshProjectRuntimeState({ syncLaunchOptions });
+        if (syncLaunchOptions) {
+          projectRuntimeLaunchSyncKeyRef.current = syncKey;
         }
-      })
-      .finally(() => {
-        inFlight = false;
-      });
-    const interval = window.setInterval(() => {
-      if (inFlight) {
-        return;
+        clearProjectRuntimePollErrors();
+      } catch (caught) {
+        reportPollError("Poll project runtime state", caught as Error);
       }
-      inFlight = true;
-      void loadFeedbackState()
-        .then(() => {
-          if (!cancelled) {
-            clearPollError("Poll Harness feedback state");
-            setError((current) => clearUiErrorForActions(current, ["Poll Harness feedback state"]));
-          }
-        })
-        .catch((caught: Error) => {
-          if (!cancelled) {
-            reportPollError("Poll Harness feedback state", caught);
-          }
-        })
-        .finally(() => {
-          inFlight = false;
-        });
-    }, 4000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(interval);
-    };
-  }, [activeTask?.taskSlug, project?.repoRoot]);
-
-  useEffect(() => {
-    if (!project) {
-      setTranslationMemoryInitialized(false);
-      return;
+    },
+    {
+      intervalMs: 3000,
+      runImmediately: true
     }
-
-    let cancelled = false;
-    let inFlight = false;
-    const loadTranslatorState = async (syncLaunchOptions = false) => {
-      const [session, state] = await Promise.all([
-        apiClient.getTranslatorSession(),
-        apiClient.getTranslationState()
-      ]);
-      if (cancelled) {
-        return;
-      }
-      setTranslatorSession(session);
-      setTranslationMemoryInitialized(state.memoryInitialized);
-      if (syncLaunchOptions) {
-        syncTranslatorLaunchOptions(session);
-      }
-    };
-
-    inFlight = true;
-    void loadTranslatorState(true)
-      .catch((caught: Error) => {
-        if (!cancelled) {
-          setError(formatUiError("Load Translator session", caught));
-        }
-      })
-      .finally(() => {
-        inFlight = false;
-      });
-    const interval = window.setInterval(() => {
-      if (inFlight) {
-        return;
-      }
-      inFlight = true;
-      void loadTranslatorState()
-        .then(() => {
-          if (!cancelled) {
-            clearPollError("Poll Translator session");
-            clearPollError("Poll translation memory status");
-            setError((current) => clearUiErrorForActions(current, [
-              "Poll Translator session",
-              "Poll translation memory status"
-            ]));
-          }
-        })
-        .catch((caught: Error) => {
-          if (!cancelled) {
-            reportPollError("Poll Translator session", caught);
-          }
-        })
-        .finally(() => {
-          inFlight = false;
-        });
-    }, 3000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(interval);
-    };
-  }, [project?.repoRoot]);
-
-  useEffect(() => {
-    if (!project) {
-      return;
-    }
-
-    let cancelled = false;
-    let inFlight = false;
-    const loadHarnessEngineerSession = async (syncLaunchOptions = false) => {
-      const session = await apiClient.getHarnessEngineerSession();
-      if (cancelled) {
-        return;
-      }
-      setHarnessEngineerSession(session);
-      if (syncLaunchOptions) {
-        syncHarnessEngineerLaunchOptions(session);
-      }
-    };
-
-    inFlight = true;
-    void loadHarnessEngineerSession(true)
-      .catch((caught: Error) => {
-        if (!cancelled) {
-          setError(formatUiError("Load Harness Engineer session", caught));
-        }
-      })
-      .finally(() => {
-        inFlight = false;
-      });
-    const interval = window.setInterval(() => {
-      if (inFlight) {
-        return;
-      }
-      inFlight = true;
-      void loadHarnessEngineerSession()
-        .then(() => {
-          if (!cancelled) {
-            clearPollError("Poll Harness Engineer session");
-            setError((current) => clearUiErrorForActions(current, ["Poll Harness Engineer session"]));
-          }
-        })
-        .catch((caught: Error) => {
-          if (!cancelled) {
-            reportPollError("Poll Harness Engineer session", caught);
-          }
-        })
-        .finally(() => {
-          inFlight = false;
-        });
-    }, 3000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(interval);
-    };
-  }, [project?.repoRoot]);
+  );
 
   useEffect(() => {
     if (!project || !activeTask?.taskSlug || !harnessEngineerSession?.claudeSessionId) {
@@ -875,69 +799,6 @@ export function App() {
   ]);
 
   useEffect(() => {
-    if (!project || !activeTask?.taskSlug) {
-      setHarnessStatus(null);
-      setHarnessBootstrapStatus(null);
-      setHarnessStatusTaskSlug(null);
-      setHarnessBootstrapStatusTaskSlug(null);
-      return;
-    }
-
-    const taskSlug = activeTask.taskSlug;
-    let cancelled = false;
-    let inFlight = false;
-    const loadCurrentHarnessStatus = async () => {
-      const [nextHarnessStatus, nextBootstrapStatus] = await Promise.all([
-        apiClient.getHarnessStatus(taskSlug),
-        apiClient.getHarnessBootstrapStatus(taskSlug)
-      ]);
-      if (cancelled) {
-        return;
-      }
-      setHarnessStatus(nextHarnessStatus);
-      setHarnessStatusTaskSlug(taskSlug);
-      setHarnessBootstrapStatus(nextBootstrapStatus);
-      setHarnessBootstrapStatusTaskSlug(taskSlug);
-    };
-
-    inFlight = true;
-    void loadCurrentHarnessStatus()
-      .catch((caught: Error) => {
-        if (!cancelled) {
-          setError(formatUiError("Load VCM Harness status", caught));
-        }
-      })
-      .finally(() => {
-        inFlight = false;
-      });
-    const interval = window.setInterval(() => {
-      if (inFlight) {
-        return;
-      }
-      inFlight = true;
-      void loadCurrentHarnessStatus()
-        .then(() => {
-          if (!cancelled) {
-            clearPollError("Poll VCM Harness status");
-            setError((current) => clearUiErrorForActions(current, ["Poll VCM Harness status"]));
-          }
-        })
-        .catch((caught: Error) => {
-          if (!cancelled) {
-            reportPollError("Poll VCM Harness status", caught);
-          }
-        })
-        .finally(() => {
-          inFlight = false;
-        });
-    }, 3000);
-    return () => {
-      cancelled = true;
-      window.clearInterval(interval);
-    };
-  }, [project?.repoRoot, activeTask?.taskSlug]);
-
-  useEffect(() => {
     if (!project || !translationEnabled || !activeTask?.taskSlug || !translationBaseReady || !translatorSessionRunning) {
       translatorEnsureKeyRef.current = "";
       return;
@@ -959,56 +820,42 @@ export function App() {
       });
   }, [project?.repoRoot, activeTask?.taskSlug, translationEnabled, translationBaseReady, translatorSessionRunning]);
 
-  useEffect(() => {
-    if (!activeTask?.taskSlug) {
-      return;
-    }
+  const gateReviewPollTaskSlug = activeTask?.taskSlug ?? null;
+  const gateReviewPollState = gateReviewPollTaskSlug && activeGateReview?.taskSlug === gateReviewPollTaskSlug
+    ? activeGateReview.state
+    : null;
+  const gateReviewPollRoundState = gateReviewPollTaskSlug && activeSessionRoundState?.taskSlug === gateReviewPollTaskSlug
+    ? activeSessionRoundState.roundState
+    : null;
+  const gateReviewPollLaunchState = gateReviewPollTaskSlug && activeLaunchState?.taskSlug === gateReviewPollTaskSlug
+    ? activeLaunchState
+    : null;
+  const gateReviewShouldPoll = Boolean(
+    gateReviewPollTaskSlug
+      && (
+        gateReviewPollState?.activeGate
+        || gateReviewPollRoundState?.activeRole === "gate-reviewer"
+        || gateReviewPollLaunchState?.hasGateReviewerSession
+      )
+  );
 
-    const taskSlug = activeTask.taskSlug;
-    const gateReviewState = activeGateReview?.taskSlug === taskSlug ? activeGateReview.state : null;
-    const gateReviewActive = Boolean(gateReviewState?.activeGate);
-    const roundState = activeSessionRoundState?.taskSlug === taskSlug ? activeSessionRoundState.roundState : null;
-    const launchState = activeLaunchState?.taskSlug === taskSlug ? activeLaunchState : null;
-    const shouldPoll = gateReviewActive || roundState?.activeRole === "gate-reviewer" || launchState?.hasGateReviewerSession;
-    if (!shouldPoll) {
-      return;
-    }
-
-    let cancelled = false;
-    let inFlight = false;
-    const interval = window.setInterval(() => {
-      if (inFlight) {
+  useScheduledPoll(
+    gateReviewShouldPoll && gateReviewPollTaskSlug ? `gate-review:${gateReviewPollTaskSlug}` : null,
+    async () => {
+      if (!gateReviewPollTaskSlug) {
         return;
       }
-      inFlight = true;
-      void apiClient.getGateReviewState(taskSlug)
-        .then((state) => {
-          if (!cancelled) {
-            setActiveGateReview({ taskSlug, state });
-            clearPollError("Poll Gate Review state");
-            setError((current) => clearUiErrorForActions(current, ["Refresh Gate Review state", "Poll Gate Review state"]));
-          }
-        })
-        .catch((caught: Error) => {
-          if (!cancelled) {
-            reportPollError("Poll Gate Review state", caught);
-          }
-        })
-        .finally(() => {
-          inFlight = false;
-        });
-    }, 3000);
-
-    return () => {
-      cancelled = true;
-      window.clearInterval(interval);
-    };
-  }, [
-    activeGateReview,
-    activeLaunchState,
-    activeSessionRoundState,
-    activeTask?.taskSlug
-  ]);
+      try {
+        await refreshGateReviewState(gateReviewPollTaskSlug);
+      } catch (caught) {
+        reportPollError("Poll Gate Review state", caught as Error);
+      }
+    },
+    {
+      intervalMs: 3000,
+      runImmediately: false
+    }
+  );
 
   async function withBusy(action: () => Promise<void>, actionLabel = "Run UI action") {
     setBusy(true);

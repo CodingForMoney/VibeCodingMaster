@@ -15,6 +15,7 @@ import { useUiErrorState } from "../state/ui-error-state.js";
 import { getSessionForRole } from "../state/session-store.js";
 import { apiClient } from "../state/api-client.js";
 import { selectAutoDispatchRole } from "../state/message-navigation.js";
+import { useScheduledPoll } from "../state/use-scheduled-poll.js";
 
 const DEFAULT_PERMISSION_MODES: Record<RoleName, ClaudePermissionMode> = {
   "project-manager": "bypassPermissions",
@@ -144,13 +145,8 @@ export function TaskWorkspace({
   }, [applyMessageState, onRoundStateChanged]);
 
   const refresh = useCallback(async () => {
-    const [nextStatusReport, nextMessages, nextOrchestration, nextRoundState] = await Promise.all([
-      apiClient.getTaskStatus(task.taskSlug),
-      apiClient.listMessages(task.taskSlug),
-      apiClient.getOrchestrationState(task.taskSlug),
-      apiClient.getSessionRoundState(task.taskSlug)
-    ]);
-    applyFetchedState(nextStatusReport, nextMessages, nextOrchestration, nextRoundState);
+    const nextState = await apiClient.getTaskWorkspaceState(task.taskSlug);
+    applyFetchedState(nextState.taskStatus, nextState.messages, nextState.orchestration, nextState.roundState);
     clearPollError("Poll task workspace state");
     setError((current) => clearUiErrorForActions(current, ["Load task workspace state", "Poll task workspace state"]));
   }, [applyFetchedState, task.taskSlug]);
@@ -162,9 +158,16 @@ export function TaskWorkspace({
     }
   }, []);
 
-  useEffect(() => {
-    void refresh().catch((caught: Error) => setError(formatUiError("Load task workspace state", caught)));
-  }, [refresh, refreshNonce]);
+  useScheduledPoll(
+    `task-workspace:${task.taskSlug}:${refreshNonce}`,
+    () => refresh().catch((caught: Error) => {
+      reportPollError("Poll task workspace state", caught);
+    }),
+    {
+      intervalMs: 3000,
+      runImmediately: true
+    }
+  );
 
   useEffect(() => {
     setEvents([]);
@@ -241,44 +244,6 @@ export function TaskWorkspace({
     statusReport,
     task.taskSlug
   ]);
-
-  useEffect(() => {
-    let cancelled = false;
-    let inFlight = false;
-
-    const interval = window.setInterval(() => {
-      if (inFlight) {
-        return;
-      }
-      inFlight = true;
-      void Promise.all([
-        apiClient.getTaskStatus(task.taskSlug),
-        apiClient.listMessages(task.taskSlug),
-        apiClient.getOrchestrationState(task.taskSlug),
-        apiClient.getSessionRoundState(task.taskSlug)
-      ])
-        .then(([nextStatusReport, nextMessages, nextOrchestration, nextRoundState]) => {
-          if (!cancelled) {
-            applyFetchedState(nextStatusReport, nextMessages, nextOrchestration, nextRoundState);
-            clearPollError("Poll task workspace state");
-            setError((current) => clearUiErrorForActions(current, ["Load task workspace state", "Poll task workspace state"]));
-          }
-        })
-        .catch((caught: Error) => {
-          if (!cancelled) {
-            reportPollError("Poll task workspace state", caught);
-          }
-        })
-        .finally(() => {
-          inFlight = false;
-        });
-    }, 3000);
-
-    return () => {
-      cancelled = true;
-      window.clearInterval(interval);
-    };
-  }, [applyFetchedState, reportPollError, task.taskSlug]);
 
   async function runAction(action: () => Promise<void>, actionLabel = "Run role session action") {
     setBusy(true);

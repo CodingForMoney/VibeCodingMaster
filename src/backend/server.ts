@@ -46,6 +46,7 @@ import { registerHarnessRoutes } from "./api/harness-routes.js";
 import { registerMessageRoutes } from "./api/message-routes.js";
 import { registerProjectRoutes } from "./api/project-routes.js";
 import { registerRoundRoutes } from "./api/round-routes.js";
+import { registerRuntimeStateRoutes } from "./api/runtime-state-routes.js";
 import { registerSessionRoutes } from "./api/session-routes.js";
 import { registerTaskRoutes } from "./api/task-routes.js";
 import { registerTranslationRoutes } from "./api/translation-routes.js";
@@ -127,11 +128,20 @@ export async function createServer(deps: ServerDeps, options: CreateServerOption
     sessionService: deps.sessionService,
     taskService: deps.taskService
   });
+  registerRuntimeStateRoutes(app, {
+    projectService: deps.projectService,
+    taskService: deps.taskService,
+    sessionService: deps.sessionService,
+    translationWorkerService: deps.translationWorkerService,
+    harnessService: deps.harnessService,
+    harnessFeedbackService: deps.harnessFeedbackService
+  });
   registerTaskRoutes(app, {
     projectService: deps.projectService,
     taskService: deps.taskService,
     sessionService: deps.sessionService,
     statusService: deps.statusService,
+    messageService: deps.messageService,
     translationService: deps.translationService,
     roundService: deps.roundService
   });

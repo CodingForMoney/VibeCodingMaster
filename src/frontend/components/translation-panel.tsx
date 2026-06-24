@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type KeyboardEvent } from "react";
+import { useCallback, useEffect, useRef, useState, type KeyboardEvent } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
@@ -20,6 +20,7 @@ import { apiClient } from "../state/api-client.js";
 import { clearUiErrorForActions, formatUiError } from "../state/error-format.js";
 import { clearPollError, recordPollError } from "../state/poll-error-gate.js";
 import { useUiErrorState } from "../state/ui-error-state.js";
+import { useScheduledPoll } from "../state/use-scheduled-poll.js";
 
 type TranslationPanelStatus = TranslationSessionStatus;
 const TRANSLATED_COMPOSER_SEPARATOR = "\n\n--- Translation ---\n";
@@ -60,6 +61,34 @@ export function TranslationPanel({
     activeRef.current = active;
   }, [active]);
 
+  const pollTranslationEvents = useCallback(async () => {
+    try {
+      const result = await apiClient.pollTranslationSession(sessionId, cursorRef.current);
+      applyTranslationEvents(result.events);
+      cursorRef.current = result.nextCursor;
+      setStatus(result.status);
+      clearPollError("Poll conversation translation events");
+      setError((current) => clearUiErrorForActions(current, ["Poll conversation translation events"]));
+      if (activeRef.current) {
+        setLastPollAt(formatPollTimestamp(new Date().toISOString()));
+      }
+    } catch (caught) {
+      const message = recordPollError("Poll conversation translation events", caught as Error);
+      if (message) {
+        setError(message);
+      }
+    }
+  }, [sessionId]);
+
+  useScheduledPoll(
+    sessionId ? `translation-events:${sessionId}` : null,
+    pollTranslationEvents,
+    {
+      intervalMs: active ? 1000 : 5000,
+      runImmediately: false
+    }
+  );
+
   useEffect(() => {
     setEntries([]);
     setFailures([]);
@@ -68,43 +97,6 @@ export function TranslationPanel({
     setLastPollAt("");
     cursorRef.current = 1;
     let cancelled = false;
-    let timer: number | undefined;
-
-    const schedule = () => {
-      if (cancelled) {
-        return;
-      }
-      timer = window.setTimeout(tick, activeRef.current ? 1000 : 5000);
-    };
-
-    const tick = async () => {
-      if (cancelled) {
-        return;
-      }
-      try {
-        const result = await apiClient.pollTranslationSession(sessionId, cursorRef.current);
-        if (cancelled) {
-          return;
-        }
-        applyTranslationEvents(result.events);
-        cursorRef.current = result.nextCursor;
-        setStatus(result.status);
-        clearPollError("Poll conversation translation events");
-        setError((current) => clearUiErrorForActions(current, ["Poll conversation translation events"]));
-        if (activeRef.current) {
-          setLastPollAt(formatPollTimestamp(new Date().toISOString()));
-        }
-      } catch (caught) {
-        if (!cancelled) {
-          const message = recordPollError("Poll conversation translation events", caught);
-          if (message) {
-            setError(message);
-          }
-        }
-      } finally {
-        schedule();
-      }
-    };
 
     void apiClient.startTranslationSession(taskSlug, role)
       .then((result) => {
@@ -113,7 +105,7 @@ export function TranslationPanel({
         }
         setStatus(result.status);
         cursorRef.current = result.nextCursor;
-        void tick();
+        void pollTranslationEvents();
       })
       .catch((caught) => {
         if (!cancelled) {
@@ -123,12 +115,9 @@ export function TranslationPanel({
 
     return () => {
       cancelled = true;
-      if (timer !== undefined) {
-        window.clearTimeout(timer);
-      }
       void apiClient.stopTranslationSession(sessionId).catch(() => undefined);
     };
-  }, [sessionId, taskSlug, role]);
+  }, [pollTranslationEvents, sessionId, taskSlug, role]);
 
   useEffect(() => {
     if (!active) {
@@ -410,29 +399,14 @@ export function FileTranslationModalHost({
   const [fileBrowserSelectedPath, setFileBrowserSelectedPath] = useState("");
   const [fileBrowserBusy, setFileBrowserBusy] = useState(false);
 
-  useEffect(() => {
-    if (!open) {
-      return;
+  useScheduledPoll(
+    open ? `file-translation:${selectedFileJobId || "none"}` : null,
+    () => refreshTranslationState(true),
+    {
+      intervalMs: 2000,
+      runImmediately: true
     }
-    let cancelled = false;
-    let timer: number | undefined;
-    const tick = async () => {
-      if (cancelled) {
-        return;
-      }
-      await refreshTranslationState(true);
-      if (!cancelled) {
-        timer = window.setTimeout(tick, 2000);
-      }
-    };
-    void tick();
-    return () => {
-      cancelled = true;
-      if (timer !== undefined) {
-        window.clearTimeout(timer);
-      }
-    };
-  }, [open, selectedFileJobId]);
+  );
 
   async function refreshTranslationState(refreshSelected = false) {
     try {

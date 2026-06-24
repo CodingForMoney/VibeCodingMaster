@@ -2,9 +2,11 @@ import type { FastifyInstance } from "fastify";
 import { DISPATCHABLE_ROLES, VCM_ROLE_NAMES } from "../../shared/constants.js";
 import type { ArtifactSummary } from "../../shared/types/artifact.js";
 import type { DispatchableRole } from "../../shared/types/role.js";
-import type { TaskStatusReport } from "../../shared/types/api.js";
+import type { TaskStatusReport, TaskWorkspaceState } from "../../shared/types/api.js";
+import type { VcmSessionRoundState } from "../../shared/types/round.js";
 import type { CleanupTaskRequest, CreateTaskRequest } from "../../shared/types/task.js";
 import { isOpenFileLimitError, VcmError } from "../errors.js";
+import type { MessageService } from "../services/message-service.js";
 import type { ProjectService } from "../services/project-service.js";
 import type { SessionService } from "../services/session-service.js";
 import type { StatusService } from "../services/status-service.js";
@@ -17,8 +19,9 @@ export interface TaskRouteDeps {
   taskService: TaskService;
   sessionService: Pick<SessionService, "listRoleSessions" | "stopRoleSession" | "moveProjectTranslatorSessionToSafeCwd" | "moveProjectHarnessEngineerSessionToSafeCwd">;
   statusService: StatusService;
+  messageService: MessageService;
   translationService: Pick<TranslationService, "stopTask">;
-  roundService: Pick<RoundService, "stopTask">;
+  roundService: Pick<RoundService, "stopTask" | "getSessionRoundState">;
 }
 
 export function registerTaskRoutes(app: FastifyInstance, deps: TaskRouteDeps): void {
@@ -46,6 +49,75 @@ export function registerTaskRoutes(app: FastifyInstance, deps: TaskRouteDeps): v
     } catch (error) {
       if (isOpenFileLimitError(error)) {
         return degradedTaskStatus(repoRoot, request.params.taskSlug, error);
+      }
+      throw error;
+    }
+  });
+
+  app.get<{ Params: { taskSlug: string } }>("/api/tasks/:taskSlug/workspace-state", async (request) => {
+    const taskSlug = request.params.taskSlug;
+    let repoRoot = "unknown";
+    try {
+      const project = await requireCurrentProject(deps.projectService);
+      repoRoot = project.repoRoot;
+      const config = await deps.projectService.loadConfig(project.repoRoot);
+      const task = await deps.taskService.loadTask(project.repoRoot, taskSlug);
+      const taskRepoRoot = getTaskRuntimeRepoRoot(task);
+      const context = {
+        repoRoot: project.repoRoot,
+        taskRepoRoot,
+        stateRepoRoot: taskRepoRoot,
+        stateRoot: config.stateRoot,
+        handoffDir: task.handoffDir,
+        taskSlug
+      };
+
+      const [taskStatus, messages, orchestration, roundState] = await Promise.all([
+        withOpenFileLimitFallback(
+          () => deps.statusService.getTaskStatus(project.repoRoot, taskSlug),
+          (error) => degradedTaskStatus(project.repoRoot, taskSlug, error)
+        ),
+        withOpenFileLimitFallback(
+          () => deps.messageService.listMessages(context),
+          () => []
+        ),
+        withOpenFileLimitFallback(
+          () => deps.messageService.getOrchestrationState(context),
+          () => ({
+            taskSlug,
+            mode: "auto" as const,
+            updatedAt: new Date().toISOString()
+          })
+        ),
+        withOpenFileLimitFallback(
+          () => deps.roundService.getSessionRoundState({
+            repoRoot: project.repoRoot,
+            stateRepoRoot: taskRepoRoot,
+            stateRoot: config.stateRoot,
+            taskSlug
+          }),
+          () => degradedRoundState(taskSlug)
+        )
+      ]);
+
+      return {
+        taskStatus,
+        messages,
+        orchestration,
+        roundState
+      } satisfies TaskWorkspaceState;
+    } catch (error) {
+      if (isOpenFileLimitError(error)) {
+        return {
+          taskStatus: degradedTaskStatus(repoRoot, taskSlug, error),
+          messages: [],
+          orchestration: {
+            taskSlug,
+            mode: "auto" as const,
+            updatedAt: new Date().toISOString()
+          },
+          roundState: degradedRoundState(taskSlug)
+        } satisfies TaskWorkspaceState;
       }
       throw error;
     }
@@ -132,6 +204,36 @@ function degradedTaskStatus(repoRoot: string, taskSlug: string, error: unknown):
       `Task status is temporarily unavailable because the backend hit the open-files limit: ${errorMessage(error)}`
     ]
   };
+}
+
+function degradedRoundState(taskSlug: string): VcmSessionRoundState {
+  return {
+    taskSlug,
+    status: "stopped",
+    turnCount: 0,
+    completedTurnCount: 0,
+    totalRoundCount: 0,
+    totalTurnCount: 0,
+    totalCompletedTurnCount: 0,
+    totalCcActiveMs: 0,
+    currentRoundCcActiveMs: 0,
+    roles: [],
+    updatedAt: new Date().toISOString()
+  };
+}
+
+async function withOpenFileLimitFallback<T>(
+  run: () => Promise<T>,
+  fallback: (error: unknown) => T
+): Promise<T> {
+  try {
+    return await run();
+  } catch (error) {
+    if (isOpenFileLimitError(error)) {
+      return fallback(error);
+    }
+    throw error;
+  }
 }
 
 function degradedArtifactSummary(handoffDir: string): ArtifactSummary {
