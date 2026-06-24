@@ -95,7 +95,69 @@ describe("gateway-service long connection", () => {
     expect(sentTexts[0]).toContain("Gateway started.");
     expect(sentTexts[1]).toContain("VCM Gateway commands:");
     expect(sentTexts[1]).toContain("/create-task <task-slug> [title]");
-    expect(preferenceUpdates).toEqual([]);
+    expect(preferenceUpdates).toEqual([{
+      translationEnabled: true,
+      translationAutoSendEnabled: true
+    }]);
+    service.stop();
+  });
+
+  it("desktop Gateway enable turns on translation runtime without changing output mode", async () => {
+    const settings = createSettings({
+      translationEnabled: false,
+      binding: {
+        token: "token-1",
+        boundUserId: "user-1",
+        loginUserId: "user-1"
+      } as Partial<GatewaySettingsFile["binding"]> as GatewaySettingsFile["binding"]
+    });
+    const sentTexts: string[] = [];
+    const preferenceUpdates: unknown[] = [];
+    const channel = createChannel([], sentTexts);
+    const service = createService({ settings, channel, preferenceUpdates });
+
+    const status = await service.updateSettings({ enabled: true });
+
+    expect(status.enabled).toBe(true);
+    expect(status.translationEnabled).toBe(true);
+    expect(preferenceUpdates).toEqual([{
+      translationEnabled: true,
+      translationAutoSendEnabled: true
+    }]);
+    service.stop();
+  });
+
+  it("restores translation runtime when a persisted Gateway is already enabled", async () => {
+    const settings = createSettings({
+      enabled: true,
+      translationEnabled: true,
+      binding: {
+        token: "token-1",
+        boundUserId: "user-1",
+        loginUserId: "user-1"
+      } as Partial<GatewaySettingsFile["binding"]> as GatewaySettingsFile["binding"]
+    });
+    const sentTexts: string[] = [];
+    const preferenceUpdates: unknown[] = [];
+    const channel = createChannel([], sentTexts);
+    const service = createService({
+      settings,
+      channel,
+      preferenceUpdates,
+      appPreferences: {
+        translationEnabled: false,
+        translationAutoSendEnabled: false
+      }
+    });
+
+    const status = await service.getStatus();
+
+    expect(status.enabled).toBe(true);
+    expect(status.running).toBe(true);
+    expect(preferenceUpdates).toEqual([{
+      translationEnabled: true,
+      translationAutoSendEnabled: true
+    }]);
     service.stop();
   });
 
@@ -222,6 +284,62 @@ describe("gateway-service long connection", () => {
 
       expect(sentTexts[1]).toContain("重新翻译成功：");
       expect(sentTexts[1]).toContain("重新翻译后的中文状态。");
+    } finally {
+      service.stop();
+      await rm(transcriptDir, { recursive: true, force: true });
+    }
+  });
+
+  it("pushes only PM final replies when Gateway handles a PM stop", async () => {
+    const transcriptDir = await mkdtemp(join(tmpdir(), "vcm-gateway-transcript-"));
+    const transcriptPath = join(transcriptDir, "pm.jsonl");
+    await writeFile(transcriptPath, [
+      assistantTranscriptLine(
+        "tool-progress",
+        "2026-06-11T00:00:00.500Z",
+        "Intermediate PM text while tools are still running.",
+        "tool_use"
+      ),
+      assistantTranscriptLine(
+        "current-reply",
+        "2026-06-11T00:00:01.000Z",
+        "Final PM reply for the active task.",
+        "end_turn"
+      )
+    ].join("\n"));
+    const settings = createSettings({
+      enabled: true,
+      translationEnabled: true,
+      binding: {
+        token: "token-1",
+        boundUserId: "user-1",
+        loginUserId: "user-1"
+      } as Partial<GatewaySettingsFile["binding"]> as GatewaySettingsFile["binding"]
+    });
+    const sentTexts: string[] = [];
+    const channel = createChannel([], sentTexts);
+    const translatedInputs: string[] = [];
+    const service = createService({
+      settings,
+      channel,
+      async translateGatewayOutput(input) {
+        translatedInputs.push(input.text);
+        return `ZH: ${input.text}`;
+      }
+    });
+
+    try {
+      await service.handlePmStop({
+        repoRoot: "/repo",
+        taskSlug: "demo-task",
+        session: createPmSession(transcriptPath)
+      });
+
+      expect(translatedInputs).toEqual(["Final PM reply for the active task."]);
+      expect(sentTexts[0]).toContain("ZH: Final PM reply for the active task.");
+      expect(sentTexts[0]).not.toContain("Intermediate PM text");
+      const latest = Object.values(settings.current().latestPmReplies)[0];
+      expect(latest?.text).toBe("Final PM reply for the active task.");
     } finally {
       service.stop();
       await rm(transcriptDir, { recursive: true, force: true });
@@ -361,6 +479,10 @@ function createService(input: {
   settings: GatewaySettingsService;
   channel: GatewayChannelAdapter & { getUpdatesCalls: number };
   preferenceUpdates?: unknown[];
+  appPreferences?: {
+    translationEnabled?: boolean;
+    translationAutoSendEnabled?: boolean;
+  };
   pmSession?: RoleSessionRecord | null;
   runtimeWrites?: string[];
   translateGatewayOutput?: (input: {
@@ -373,6 +495,11 @@ function createService(input: {
 }) {
   const project = createProject();
   const task = createTask();
+  let appPreferences = {
+    launchTemplate: createDefaultLaunchTemplate(),
+    translationEnabled: input.appPreferences?.translationEnabled ?? true,
+    translationAutoSendEnabled: input.appPreferences?.translationAutoSendEnabled ?? false
+  };
   return createGatewayService({
     fs: {} as never,
     settings: input.settings,
@@ -472,17 +599,18 @@ function createService(input: {
     },
     appSettings: {
       async getPreferences() {
-        return {
-          launchTemplate: createDefaultLaunchTemplate(),
-          translationEnabled: true
-        };
+        return appPreferences as never;
       },
       async getGateReviewSettings() {
         return { enabled: false, requiredGates: [] };
       },
-      async updatePreferences(update: unknown) {
+      async updatePreferences(update: Record<string, unknown>) {
         input.preferenceUpdates?.push(update);
-        return {};
+        appPreferences = {
+          ...appPreferences,
+          ...update
+        };
+        return appPreferences as never;
       }
     } as never,
     larkRegistration: input.larkRegistration,
@@ -710,13 +838,18 @@ function createPmSession(transcriptPath?: string): RoleSessionRecord {
   };
 }
 
-function assistantTranscriptLine(uuid: string, timestamp: string, text: string): string {
+function assistantTranscriptLine(
+  uuid: string,
+  timestamp: string,
+  text: string,
+  stopReason = "end_turn"
+): string {
   return JSON.stringify({
     type: "assistant",
     uuid,
     timestamp,
     message: {
-      stop_reason: "end_turn",
+      stop_reason: stopReason,
       content: [
         {
           type: "text",

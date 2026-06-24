@@ -458,7 +458,8 @@ describe("createSessionService", () => {
     expect(moved.claudeSessionId).toBe("translator-move-session");
     expect(moved.cwd).toBe("/repo/.claude/worktrees/other-task");
     expect(moved.previousCwd).toBe(TASK_WORKTREE);
-    expect(writes[0]).toContain("/cd /repo/.claude/worktrees/other-task");
+    expect(writes[0]).toContain('/cd "/repo/.claude/worktrees/other-task"');
+    expect(writes[1]).toBe("\r");
 
     const persisted = await fs.readJson<{ record: { cwd: string; previousCwd?: string } }>("/repo/.ai/vcm/translations/session.json");
     expect(persisted.record.cwd).toBe("/repo/.claude/worktrees/other-task");
@@ -507,7 +508,8 @@ describe("createSessionService", () => {
       "--effort",
       "medium"
     ]);
-    expect(writes[0]).toContain("/cd /repo/.claude/worktrees/other-task");
+    expect(writes[0]).toContain('/cd "/repo/.claude/worktrees/other-task"');
+    expect(writes[1]).toBe("\r");
     expect(resumed.cwd).toBe("/repo/.claude/worktrees/other-task");
   });
 
@@ -531,7 +533,8 @@ describe("createSessionService", () => {
     expect(moved.claudeSessionId).toBe("translator-safe-session");
     expect(moved.cwd).toBe("/repo");
     expect(moved.previousCwd).toBe(TASK_WORKTREE);
-    expect(writes[0]).toContain("/cd /repo");
+    expect(writes[0]).toContain('/cd "/repo"');
+    expect(writes[1]).toBe("\r");
   });
 
   it("starts Harness Engineer as a project-scoped Claude Code session", async () => {

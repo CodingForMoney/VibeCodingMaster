@@ -5,6 +5,7 @@ import { isOpenFileLimitError, VcmError } from "../errors.js";
 import type { HarnessFeedbackService } from "../services/harness-feedback-service.js";
 import type { HarnessService } from "../services/harness-service.js";
 import type { ProjectService } from "../services/project-service.js";
+import type { RuntimeCoordinatorService } from "../services/runtime-coordinator-service.js";
 import type { SessionService } from "../services/session-service.js";
 import type { TaskService } from "../services/task-service.js";
 import type { TranslationWorkerService } from "../services/translation-worker-service.js";
@@ -16,12 +17,14 @@ export interface RuntimeStateRouteDeps {
   translationWorkerService: Pick<TranslationWorkerService, "getState">;
   harnessService: Pick<HarnessService, "getHarnessStatus" | "getBootstrapStatus">;
   harnessFeedbackService: Pick<HarnessFeedbackService, "getState">;
+  runtimeCoordinator: Pick<RuntimeCoordinatorService, "reconcileProject">;
 }
 
 export function registerRuntimeStateRoutes(app: FastifyInstance, deps: RuntimeStateRouteDeps): void {
   app.get<{ Querystring: { taskSlug?: string } }>("/api/projects/runtime-state", async (request) => {
     const project = await requireCurrentProject(deps.projectService);
     const taskSlug = request.query.taskSlug?.trim();
+    const coordinated = await deps.runtimeCoordinator.reconcileProject(project.repoRoot, { taskSlug });
     const [translatorSession, translationState, harnessEngineerSession, harnessFeedbackState] = await Promise.all([
       deps.sessionService.getProjectTranslatorSession(project.repoRoot).then((session) => session ?? null),
       deps.translationWorkerService.getState(project.repoRoot, { visibility: "public" }),
@@ -36,7 +39,8 @@ export function registerRuntimeStateRoutes(app: FastifyInstance, deps: RuntimeSt
         harnessEngineerSession,
         harnessStatus: null,
         harnessBootstrapStatus: null,
-        harnessFeedbackState
+        harnessFeedbackState,
+        gatewayStatus: coordinated.gatewayStatus
       } satisfies ProjectRuntimeState;
     }
 
@@ -59,7 +63,8 @@ export function registerRuntimeStateRoutes(app: FastifyInstance, deps: RuntimeSt
         harnessEngineerSession,
         harnessStatus,
         harnessBootstrapStatus,
-        harnessFeedbackState
+        harnessFeedbackState,
+        gatewayStatus: coordinated.gatewayStatus
       } satisfies ProjectRuntimeState;
     } catch (error) {
       if (isOpenFileLimitError(error)) {
@@ -69,7 +74,8 @@ export function registerRuntimeStateRoutes(app: FastifyInstance, deps: RuntimeSt
           harnessEngineerSession,
           harnessStatus: degradedHarnessStatus(error),
           harnessBootstrapStatus: degradedBootstrapStatus(error),
-          harnessFeedbackState
+          harnessFeedbackState,
+          gatewayStatus: coordinated.gatewayStatus
         } satisfies ProjectRuntimeState;
       }
       throw error;

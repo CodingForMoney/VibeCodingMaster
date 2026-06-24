@@ -37,11 +37,12 @@ export function registerTranslationRoutes(app: FastifyInstance, deps: Translatio
   app.get<{ Params: { sessionId: string }; Querystring: { after?: string; limit?: string } }>(
     "/api/translation/sessions/:sessionId/events",
     async (request) => {
-      await requireCurrentProject(deps.projectService);
+      const project = await requireCurrentProject(deps.projectService);
       return deps.translationService.pollSessionEvents(
         request.params.sessionId,
         Number(request.query.after ?? "1"),
-        request.query.limit === undefined ? undefined : Number(request.query.limit)
+        request.query.limit === undefined ? undefined : Number(request.query.limit),
+        { repoRoot: project.repoRoot }
       );
     }
   );

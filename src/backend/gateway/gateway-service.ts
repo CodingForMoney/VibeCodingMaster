@@ -108,6 +108,7 @@ interface TranscriptTextEvent {
   id: string;
   timestamp: string;
   text: string;
+  stopReason?: string;
 }
 
 interface LatestPmReplyCandidate {
@@ -782,6 +783,17 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
     return `Gateway translation ${settings.translationEnabled ? "on" : "off"}.`;
   }
 
+  async function enableGatewayTranslationRuntime(): Promise<void> {
+    const preferences = await deps.appSettings.getPreferences();
+    if (preferences.translationEnabled && preferences.translationAutoSendEnabled) {
+      return;
+    }
+    await deps.appSettings.updatePreferences({
+      translationEnabled: true,
+      translationAutoSendEnabled: true
+    });
+  }
+
   async function startGateway(): Promise<string> {
     const settings = await deps.settings.loadSettings();
     if (!toAccount(settings)) {
@@ -790,9 +802,14 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
         : "Gateway is not bound. Start QR login from desktop VCM first.";
     }
     if (settings.enabled) {
+      await enableGatewayTranslationRuntime();
       return "Gateway is already on.";
     }
-    const enabled = await syncDesktopContext(await deps.settings.updateSettings({ enabled: true }));
+    await enableGatewayTranslationRuntime();
+    const enabled = await syncDesktopContext(await deps.settings.updateSettings({
+      enabled: true,
+      translationEnabled: true
+    }));
     await ensurePolling();
     const lines = [
       "Gateway started.",
@@ -914,16 +931,25 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
     },
     async getStatus() {
       const settings = await syncDesktopContext(await deps.settings.loadSettings());
+      if (settings.enabled) {
+        await enableGatewayTranslationRuntime();
+      }
       await ensurePolling();
       return deps.settings.expose(settings, isRunning());
     },
     async updateSettings(input) {
-      const updateInput = input.channel && input.baseUrl === undefined
-        ? {
-            ...input,
-            baseUrl: deps.channels.get(input.channel).defaultBaseUrl
-          }
+      const gatewayStartInput = input.enabled === true
+        ? { ...input, translationEnabled: true }
         : input;
+      const updateInput = gatewayStartInput.channel && gatewayStartInput.baseUrl === undefined
+        ? {
+            ...gatewayStartInput,
+            baseUrl: deps.channels.get(gatewayStartInput.channel).defaultBaseUrl
+          }
+        : gatewayStartInput;
+      if (input.enabled === true) {
+        await enableGatewayTranslationRuntime();
+      }
       let settings = await deps.settings.updateSettings(updateInput);
       if (settings.enabled) {
         settings = await syncDesktopContext(settings);
@@ -1210,7 +1236,8 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
 
       const cursorKey = `${input.taskSlug}:project-manager:${input.session.claudeSessionId}`;
       const cursor = settings.pushCursors[cursorKey];
-      const nextEvents = selectEventsAfterCursor(events, cursor?.lastTranscriptEventId);
+      const nextEvents = selectEventsAfterCursor(events, cursor?.lastTranscriptEventId)
+        .filter(isFinalTurnTextEvent);
       if (nextEvents.length === 0) {
         return;
       }
@@ -1405,12 +1432,17 @@ async function readTranscriptTextEvents(transcriptPath: string): Promise<Transcr
         events.push({
           id: event.id,
           timestamp: event.timestamp,
-          text: event.text
+          text: event.text,
+          stopReason: event.stopReason
         });
       }
     }
   }
   return events;
+}
+
+function isFinalTurnTextEvent(event: TranscriptTextEvent): boolean {
+  return event.stopReason === "end_turn";
 }
 
 function selectEventsAfterCursor(events: TranscriptTextEvent[], cursorId: string | null | undefined): TranscriptTextEvent[] {
@@ -1434,9 +1466,10 @@ function selectLatestTurnReply(events: TranscriptTextEvent[], session: RoleSessi
 
   const startMs = timestampMs(session.lastTurnStartedAt);
   const endMs = timestampMs(session.lastTurnEndedAt);
+  const finalEvents = events.filter(isFinalTurnTextEvent);
   const selected = startMs === undefined
-    ? events.slice(-1)
-    : events.filter((event) => {
+    ? finalEvents.slice(-1)
+    : finalEvents.filter((event) => {
         const eventMs = timestampMs(event.timestamp);
         return eventMs !== undefined
           && eventMs >= startMs - 1_000

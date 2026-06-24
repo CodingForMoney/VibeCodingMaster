@@ -76,6 +76,16 @@ describe("runtime state routes", () => {
             queue: []
           };
         }
+      } as never,
+      runtimeCoordinator: {
+        async reconcileProject() {
+          return {
+            activeTask: null,
+            gatewayStatus: {
+              running: true
+            }
+          };
+        }
       } as never
     });
 
@@ -91,7 +101,8 @@ describe("runtime state routes", () => {
       harnessEngineerSession: { id: "harness-runtime" },
       harnessStatus: { initialized: true },
       harnessBootstrapStatus: { status: "complete" },
-      harnessFeedbackState: { status: "idle" }
+      harnessFeedbackState: { status: "idle" },
+      gatewayStatus: { running: true }
     });
     await app.close();
   });

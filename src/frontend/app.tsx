@@ -116,12 +116,7 @@ export function App() {
   const observedFlowPauseStateRef = useRef<Record<string, { status: VcmRoundStatus }>>({});
   const activeTaskViewStartedAtRef = useRef<Record<string, number>>({});
   const flowPauseAlarmRef = useRef<number | null>(null);
-  const gatewayContextSyncKeyRef = useRef("");
   const projectRuntimeLaunchSyncKeyRef = useRef("");
-  const translatorEnsureKeyRef = useRef("");
-  const translatorAutoResumeKeyRef = useRef("");
-  const harnessEngineerAutoResumeKeyRef = useRef("");
-  const autoTaskHarnessReviewAttemptRef = useRef<Record<string, string>>({});
   const activeTask = useMemo(
     () => selectActiveTask(tasks, activeTaskSlug),
     [tasks, activeTaskSlug]
@@ -225,40 +220,6 @@ export function App() {
     }
   }, [activeTask?.taskSlug]);
 
-  const maybeTriggerAutoTaskHarnessReview = useCallback((roundState: VcmSessionRoundState, previousObservation: { status: VcmRoundStatus } | undefined) => {
-    if (
-      !autoTaskHarnessReviewEnabled ||
-      !project ||
-      !activeTask ||
-      roundState.taskSlug !== activeTask.taskSlug ||
-      roundState.status !== "stopped" ||
-      !roundState.roundId ||
-      previousObservation?.status !== "running" ||
-      roundState.roleRecovery?.status === "failed"
-    ) {
-      return;
-    }
-
-    const reviewKey = getFlowPauseNotificationKey(roundState);
-    if (autoTaskHarnessReviewAttemptRef.current[roundState.taskSlug] === reviewKey) {
-      return;
-    }
-    autoTaskHarnessReviewAttemptRef.current[roundState.taskSlug] = reviewKey;
-
-    void apiClient.startTaskHarnessRetrospective({
-      taskSlug: roundState.taskSlug,
-      trigger: "auto"
-    }).then(async (state) => {
-      setHarnessFeedbackState(state);
-      await refreshHarnessEngineerSession({ syncLaunchOptions: true });
-    }).catch((caught: Error) => {
-      if (isExpectedAutoTaskHarnessReviewSkip(caught)) {
-        return;
-      }
-      setError(formatUiError("Auto task harness review", caught));
-    });
-  }, [activeTask, autoTaskHarnessReviewEnabled, project, refreshHarnessEngineerSession]);
-
   const handleRoundStateChanged = useCallback((roundState: VcmSessionRoundState) => {
     if (!activeTask?.taskSlug || roundState.taskSlug !== activeTask.taskSlug) {
       return;
@@ -279,7 +240,6 @@ export function App() {
     const pauseKey = getFlowPauseNotificationKey(roundState);
     const previousPauseKey = notifiedFlowPauseKeyRef.current[roundState.taskSlug];
     const previousObservation = observedFlowPauseStateRef.current[roundState.taskSlug];
-    maybeTriggerAutoTaskHarnessReview(roundState, previousObservation);
     observedFlowPauseStateRef.current[roundState.taskSlug] = { status: roundState.status };
     if (previousPauseKey === pauseKey) {
       return;
@@ -305,7 +265,7 @@ export function App() {
       ? formatRoleRecoveryFailureMessage(recovery, roleLabel)
       : `No new turn started after ${roleLabel} stopped.`;
     showFlowPauseNotice(message, pauseKey, { sound });
-  }, [activeTask?.taskSlug, gatewayRunning, maybeTriggerAutoTaskHarnessReview, pauseAlertSound, showFlowPauseNotice, stopFlowPauseAlarm]);
+  }, [activeTask?.taskSlug, gatewayRunning, pauseAlertSound, showFlowPauseNotice, stopFlowPauseAlarm]);
 
   const handleLaunchStateChanged = useCallback((launchState: TaskWorkspaceLaunchState) => {
     setActiveLaunchState((current) => {
@@ -470,6 +430,7 @@ export function App() {
     setTranslationMemoryInitialized(Boolean(state.translationState?.memoryInitialized));
     setHarnessEngineerSession(state.harnessEngineerSession);
     setHarnessFeedbackState(state.harnessFeedbackState);
+    setGatewayStatus(state.gatewayStatus);
 
     if (taskSlug && state.harnessStatus) {
       setHarnessStatus(state.harnessStatus);
@@ -580,43 +541,6 @@ export function App() {
   }, [systemPrefersDark, themeMode]);
 
   useEffect(() => {
-    if (!gatewayStatus?.enabled || !project || !activeTask) {
-      return;
-    }
-
-    const syncKey = `${project.repoRoot}:${activeTask.taskSlug}`;
-    if (
-      gatewayStatus.currentProjectId === project.repoRoot &&
-      gatewayStatus.currentTaskSlug === activeTask.taskSlug
-    ) {
-      gatewayContextSyncKeyRef.current = syncKey;
-      return;
-    }
-    if (gatewayContextSyncKeyRef.current === syncKey) {
-      return;
-    }
-
-    gatewayContextSyncKeyRef.current = syncKey;
-    void apiClient.updateGatewaySettings({
-      currentProjectId: project.repoRoot,
-      currentTaskSlug: activeTask.taskSlug
-    })
-      .then((nextStatus) => setGatewayStatus(nextStatus))
-      .catch((caught: Error) => {
-        if (gatewayContextSyncKeyRef.current === syncKey) {
-          gatewayContextSyncKeyRef.current = "";
-        }
-        setError(formatUiError("Sync Gateway active project/task", caught));
-      });
-  }, [
-    activeTask?.taskSlug,
-    gatewayStatus?.currentProjectId,
-    gatewayStatus?.currentTaskSlug,
-    gatewayStatus?.enabled,
-    project?.repoRoot
-  ]);
-
-  useEffect(() => {
     if (!activeTask?.taskSlug) {
       setActiveGateReview(null);
       return;
@@ -627,9 +551,6 @@ export function App() {
 
   useEffect(() => {
     projectRuntimeLaunchSyncKeyRef.current = "";
-    translatorEnsureKeyRef.current = "";
-    translatorAutoResumeKeyRef.current = "";
-    harnessEngineerAutoResumeKeyRef.current = "";
     setTranslatorSession(null);
     setTranslatorPermissionMode("bypassPermissions");
     setTranslatorModel("default");
@@ -666,178 +587,6 @@ export function App() {
       runImmediately: true
     }
   );
-
-  useEffect(() => {
-    if (!project || !activeTask?.taskSlug || !harnessEngineerSession?.claudeSessionId) {
-      return;
-    }
-    if (harnessEngineerSession.status === "running" || harnessEngineerSession.status === "done") {
-      return;
-    }
-
-    const resumeKey = `${project.repoRoot}:${activeTask.taskSlug}:${harnessEngineerSession.claudeSessionId}`;
-    if (harnessEngineerAutoResumeKeyRef.current === resumeKey) {
-      return;
-    }
-    harnessEngineerAutoResumeKeyRef.current = resumeKey;
-
-    void apiClient.resumeHarnessEngineerSession({
-      taskSlug: activeTask.taskSlug,
-      permissionMode: harnessEngineerSession.permissionMode,
-      model: harnessEngineerSession.model,
-      effort: harnessEngineerSession.effort
-    })
-      .then((session) => {
-        setHarnessEngineerSession(session);
-        syncHarnessEngineerLaunchOptions(session);
-      })
-      .catch((caught: Error) => setError(formatUiError("Resume Harness Engineer session", caught)));
-  }, [
-    activeTask?.taskSlug,
-    harnessEngineerSession?.claudeSessionId,
-    harnessEngineerSession?.cwd,
-    harnessEngineerSession?.effort,
-    harnessEngineerSession?.model,
-    harnessEngineerSession?.permissionMode,
-    harnessEngineerSession?.status,
-    project?.repoRoot
-  ]);
-
-  useEffect(() => {
-    if (
-      !project
-      || !activeTask?.taskSlug
-      || !harnessEngineerSession?.claudeSessionId
-      || harnessEngineerSession.status !== "running"
-      || harnessEngineerSession.cwd === activeTask.worktreePath
-    ) {
-      return;
-    }
-
-    void apiClient.ensureHarnessEngineerSession({
-      taskSlug: activeTask.taskSlug,
-      permissionMode: harnessEngineerSession.permissionMode,
-      model: harnessEngineerSession.model,
-      effort: harnessEngineerSession.effort
-    })
-      .then((session) => {
-        setHarnessEngineerSession(session);
-        syncHarnessEngineerLaunchOptions(session);
-      })
-      .catch((caught: Error) => setError(formatUiError("Move Harness Engineer session to active task worktree", caught)));
-  }, [
-    activeTask?.taskSlug,
-    activeTask?.worktreePath,
-    harnessEngineerSession?.claudeSessionId,
-    harnessEngineerSession?.cwd,
-    harnessEngineerSession?.effort,
-    harnessEngineerSession?.model,
-    harnessEngineerSession?.permissionMode,
-    harnessEngineerSession?.status,
-    project?.repoRoot
-  ]);
-
-  useEffect(() => {
-    if (!project || !activeTask?.taskSlug || !translationBaseReady || !translatorSession?.claudeSessionId) {
-      return;
-    }
-    if (translatorSession.status === "running" || translatorSession.status === "done") {
-      return;
-    }
-
-    const resumeKey = `${project.repoRoot}:${activeTask.taskSlug}:${translatorSession.claudeSessionId}`;
-    if (translatorAutoResumeKeyRef.current === resumeKey) {
-      return;
-    }
-    translatorAutoResumeKeyRef.current = resumeKey;
-
-    void apiClient.resumeTranslatorSession({
-      taskSlug: activeTask.taskSlug,
-      cols: 100,
-      rows: 28,
-      permissionMode: translatorSession.permissionMode,
-      model: translatorSession.model,
-      effort: translatorSession.effort
-    })
-      .then((session) => {
-        setTranslatorSession(session);
-        syncTranslatorLaunchOptions(session);
-      })
-      .catch((caught: Error) => {
-        translatorAutoResumeKeyRef.current = "";
-        setError(formatUiError("Resume Translator session", caught));
-      });
-  }, [
-    activeTask?.taskSlug,
-    project?.repoRoot,
-    translationBaseReady,
-    translatorSession?.claudeSessionId,
-    translatorSession?.cwd,
-    translatorSession?.effort,
-    translatorSession?.model,
-    translatorSession?.permissionMode,
-    translatorSession?.status
-  ]);
-
-  useEffect(() => {
-    if (
-      !project
-      || !activeTask?.taskSlug
-      || !translationBaseReady
-      || !translatorSession?.claudeSessionId
-      || translatorSession.status !== "running"
-      || translatorSession.cwd === activeTask.worktreePath
-    ) {
-      return;
-    }
-
-    void apiClient.ensureTranslatorSession({
-      taskSlug: activeTask.taskSlug,
-      cols: 100,
-      rows: 28,
-      permissionMode: translatorSession.permissionMode,
-      model: translatorSession.model,
-      effort: translatorSession.effort
-    })
-      .then((session) => {
-        setTranslatorSession(session);
-        syncTranslatorLaunchOptions(session);
-      })
-      .catch((caught: Error) => setError(formatUiError("Move Translator session to active task worktree", caught)));
-  }, [
-    activeTask?.taskSlug,
-    activeTask?.worktreePath,
-    project?.repoRoot,
-    translationBaseReady,
-    translatorSession?.claudeSessionId,
-    translatorSession?.cwd,
-    translatorSession?.effort,
-    translatorSession?.model,
-    translatorSession?.permissionMode,
-    translatorSession?.status
-  ]);
-
-  useEffect(() => {
-    if (!project || !translationEnabled || !activeTask?.taskSlug || !translationBaseReady || !translatorSessionRunning) {
-      translatorEnsureKeyRef.current = "";
-      return;
-    }
-
-    const ensureKey = `${project.repoRoot}:${activeTask.taskSlug}`;
-    if (translatorEnsureKeyRef.current === ensureKey && translatorSession?.status === "running") {
-      return;
-    }
-    translatorEnsureKeyRef.current = ensureKey;
-    void apiClient.ensureTranslatorSession({ taskSlug: activeTask.taskSlug })
-      .then((session) => {
-        setTranslatorSession(session);
-        syncTranslatorLaunchOptions(session);
-      })
-      .catch((caught: Error) => {
-        translatorEnsureKeyRef.current = "";
-        setError(formatUiError("Ensure Translator session for active task", caught));
-      });
-  }, [project?.repoRoot, activeTask?.taskSlug, translationEnabled, translationBaseReady, translatorSessionRunning]);
 
   const gateReviewPollTaskSlug = activeTask?.taskSlug ?? null;
   const gateReviewPollState = gateReviewPollTaskSlug && activeGateReview?.taskSlug === gateReviewPollTaskSlug
@@ -1086,6 +835,9 @@ export function App() {
                 } : {})
               });
               setGatewayStatus(nextStatus);
+              if (enabled) {
+                applyPreferences(await apiClient.getAppPreferences());
+              }
             }, "Update Gateway enabled setting");
           }}
           onGatewaySettingsChange={(input) => withBusy(async () => {
@@ -1425,7 +1177,6 @@ export function App() {
           translationEnabled={effectiveTranslationEnabled}
           translationAutoSendEnabled={translationAutoSendEnabled}
           translationTargetLanguage={translationTargetLanguage}
-          translationOutputMode={translationOutputMode}
           launchTemplate={launchTemplate}
           refreshNonce={workspaceRefreshNonce}
           onTaskChanged={async () => {
@@ -2017,16 +1768,6 @@ function formatRoleRecoveryError(recovery: VcmRoleRecoveryState): string {
   return recovery.error && recovery.error !== "unknown"
     ? recovery.error
     : "this error";
-}
-
-function isExpectedAutoTaskHarnessReviewSkip(error: Error): boolean {
-  return [
-    "Task final acceptance is not complete yet.",
-    "Task Harness Retrospective has already been triggered",
-    "Harness feedback is already active.",
-    "Harness Engineer is reserved for an active Harness feedback item.",
-    "Harness Engineer is busy or unavailable."
-  ].some((message) => error.message.includes(message));
 }
 
 function formatRoleRecoveryRole(role: string): string {

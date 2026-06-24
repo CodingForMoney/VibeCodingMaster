@@ -91,27 +91,7 @@ export function TranslationPanel({
     setError("");
     setStatus("ready");
     cursorRef.current = 1;
-    let cancelled = false;
-
-    void apiClient.startTranslationSession(taskSlug, role)
-      .then((result) => {
-        if (cancelled) {
-          return;
-        }
-        setStatus(result.status);
-        cursorRef.current = result.nextCursor;
-        void pollTranslationEvents();
-      })
-      .catch((caught) => {
-        if (!cancelled) {
-          setError(formatUiError("Start conversation translation session", caught));
-        }
-      });
-
-    return () => {
-      cancelled = true;
-      void apiClient.stopTranslationSession(sessionId).catch(() => undefined);
-    };
+    void pollTranslationEvents();
   }, [pollTranslationEvents, sessionId, taskSlug, role]);
 
   useEffect(() => {

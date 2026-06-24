@@ -79,6 +79,7 @@ const HARNESS_ENGINEER_DIR = ".ai/vcm/harness-engineer";
 const HARNESS_ENGINEER_SESSION_PATH = ".ai/vcm/harness-engineer/session.json";
 const PROJECT_TRANSLATOR_SCOPE = "__project__";
 const PROJECT_HARNESS_ENGINEER_SCOPE = "__project_harness_engineer__";
+const PROJECT_TOOL_CD_ENTER_DELAY_MS = 500;
 
 interface ProjectRoleSessionFile {
   version: 1;
@@ -495,7 +496,9 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
 
     assertSafeCwdTarget(targetCwd);
     const timestamp = now();
-    await submitTerminalInput(deps.runtime, session.id, `/cd ${targetCwd}`);
+    await submitTerminalInput(deps.runtime, session.id, formatClaudeCdCommand(targetCwd), {
+      enterDelayMs: PROJECT_TOOL_CD_ENTER_DELAY_MS
+    });
     const updated: RoleSessionRecord = {
       ...session,
       cwd: targetCwd,
@@ -1672,4 +1675,8 @@ function normalizeClaudeEffort(value: unknown): SessionEffort {
     return value;
   }
   return "default";
+}
+
+function formatClaudeCdCommand(targetCwd: string): string {
+  return `/cd ${JSON.stringify(targetCwd)}`;
 }

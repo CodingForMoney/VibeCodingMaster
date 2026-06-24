@@ -42,7 +42,12 @@ import { createTranslationQueueRegistry } from "./translation-queue.js";
 
 export interface TranslationService {
   startSession(input: StartTranslationSessionServiceInput): Promise<StartTranslationSessionResult>;
-  pollSessionEvents(sessionId: string, after: number, limit?: number): Promise<PollTranslationSessionResult>;
+  pollSessionEvents(
+    sessionId: string,
+    after: number,
+    limit?: number,
+    context?: PollTranslationSessionContext
+  ): Promise<PollTranslationSessionResult>;
   recordConversationBoundary(input: RecordTranslationConversationBoundaryInput): Promise<TranslationEntry | undefined>;
   translateUserInput(input: TranslateUserInputServiceInput): Promise<TranslateUserInputResult>;
   translateManualOutput(input: TranslateManualOutputServiceInput): Promise<TranslationEntry>;
@@ -63,6 +68,10 @@ export interface StartTranslationSessionServiceInput {
   taskRepoRoot?: string;
   taskSlug: string;
   role: RoleName;
+}
+
+export interface PollTranslationSessionContext {
+  repoRoot: string;
 }
 
 export interface RecordTranslationConversationBoundaryInput {
@@ -836,6 +845,29 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
     sessionStates.delete(sessionId);
   }
 
+  async function ensureSessionForPoll(
+    sessionId: string,
+    context?: PollTranslationSessionContext
+  ): Promise<SessionState | undefined> {
+    const roleSession = deps.sessionRegistry.get(sessionId);
+    const existing = sessionStates.get(sessionId);
+    if (!roleSession || roleSession.status !== "running") {
+      return existing;
+    }
+
+    const state = context
+      ? await prepareCache({
+          repoRoot: roleSession.cwd,
+          baseRepoRoot: context.repoRoot,
+          taskSlug: roleSession.taskSlug,
+          role: roleSession.role,
+          sessionId: roleSession.id
+        })
+      : getState(sessionId);
+    startTranscriptTail(roleSession);
+    return state;
+  }
+
   return {
     async startSession(input) {
       const roleSession = await deps.sessionService.getRoleSession(input.repoRoot, input.taskSlug, input.role);
@@ -861,9 +893,9 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
         nextCursor: 1
       };
     },
-    async pollSessionEvents(sessionId, after, limit = 200) {
+    async pollSessionEvents(sessionId, after, limit = 200, context) {
       const cursor = Number.isFinite(after) ? Math.max(1, Math.floor(after)) : 1;
-      const state = sessionStates.get(sessionId);
+      const state = await ensureSessionForPoll(sessionId, context);
       if (!state) {
         return {
           sessionId,

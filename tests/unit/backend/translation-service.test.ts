@@ -55,6 +55,45 @@ describe("translation-service", () => {
     });
   });
 
+  it("starts the backend transcript feed when polling a running role session", async () => {
+    const roleSession = createRoleSessionRecord({
+      cwd: "/repo/.claude/worktrees/demo-task"
+    });
+    const subscribeCalls: Array<{
+      session: RoleSessionRecord;
+      options?: ClaudeTranscriptSubscribeOptions;
+    }> = [];
+    const service = createTranslationService({
+      appSettings: createAppSettingsService({
+        fs: createMemoryFs(),
+        settingsPath: "/settings.json",
+      }),
+      runtime: createRuntimeStub([roleSession]),
+      sessionRegistry: createRegistryStub(roleSession),
+      transcripts: createTranscriptStub(subscribeCalls),
+      sessionService: {} as SessionService,
+      fs: createMemoryFs(),
+      projectService: createProjectServiceStub()
+    });
+
+    const result = await service.pollSessionEvents(roleSession.id, 1, undefined, {
+      repoRoot: "/repo"
+    });
+
+    expect(result).toMatchObject({
+      sessionId: roleSession.id,
+      status: "ready",
+      nextCursor: 1,
+      events: []
+    });
+    expect(subscribeCalls).toHaveLength(1);
+    expect(subscribeCalls[0]?.session.id).toBe(roleSession.id);
+    expect(service.getDiagnostics()).toMatchObject({
+      sessions: 1,
+      transcriptWatchers: 1
+    });
+  });
+
   it("records conversation boundary entries with per-session turns", async () => {
     const fs = createMemoryFs();
     const roleSession = createRoleSessionRecord();

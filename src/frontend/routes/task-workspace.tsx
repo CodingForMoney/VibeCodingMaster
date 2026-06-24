@@ -5,7 +5,7 @@ import type { VcmOrchestrationState, VcmRoleMessage } from "../../shared/types/m
 import type { CoreVcmRoleName, RoleDefinition, RoleName, VcmRoleName } from "../../shared/types/role.js";
 import type { VcmSessionRoundState } from "../../shared/types/round.js";
 import type { ClaudeModel, ClaudePermissionMode, SessionEffort, SessionModel } from "../../shared/types/session.js";
-import type { LaunchTemplate, TranslationOutputMode, TranslationTargetLanguage } from "../../shared/types/app-settings.js";
+import type { LaunchTemplate, TranslationTargetLanguage } from "../../shared/types/app-settings.js";
 import type { TaskRecord } from "../../shared/types/task.js";
 import { RoleSessionTabs } from "../components/role-session-tabs.js";
 import { SessionConsole } from "../components/session-console.js";
@@ -54,7 +54,6 @@ export interface TaskWorkspaceProps {
   translationEnabled: boolean;
   translationAutoSendEnabled: boolean;
   translationTargetLanguage: TranslationTargetLanguage;
-  translationOutputMode: TranslationOutputMode;
   launchTemplate: LaunchTemplate;
   refreshNonce?: number;
   onTaskChanged(): Promise<void>;
@@ -88,7 +87,6 @@ export function TaskWorkspace({
   translationEnabled,
   translationAutoSendEnabled,
   translationTargetLanguage,
-  translationOutputMode,
   launchTemplate,
   refreshNonce = 0,
   onTaskChanged,
@@ -310,10 +308,6 @@ export function TaskWorkspace({
               const isActive = role === activeRole;
               const sessions = statusReport?.sessions ?? [];
               const session = getSessionForRole(sessions, role);
-              const translationRole: RoleName = translationOutputMode === "pm-final-only"
-                ? "project-manager"
-                : role;
-              const translationSession = getSessionForRole(sessions, translationRole);
 
               return (
                 <div
@@ -332,8 +326,6 @@ export function TaskWorkspace({
                     translationEnabled={translationEnabled}
                     translationAutoSendEnabled={translationAutoSendEnabled}
                     translationTargetLanguage={translationTargetLanguage}
-                    translationRole={translationRole}
-                    translationSession={translationSession}
                     onPermissionModeChange={(permissionMode) => setRolePermissionMode(role, permissionMode)}
                     onModelChange={(model) => setRoleModel(role, model)}
                     onEffortChange={(effort) => setRoleEffort(role, effort)}

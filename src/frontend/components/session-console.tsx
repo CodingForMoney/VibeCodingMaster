@@ -17,8 +17,6 @@ export interface SessionConsoleProps {
   translationEnabled: boolean;
   translationAutoSendEnabled: boolean;
   translationTargetLanguage: TranslationTargetLanguage;
-  translationRole?: RoleName;
-  translationSession?: RoleSessionRecord;
   onPermissionModeChange(mode: ClaudePermissionMode): void;
   onModelChange(model: SessionModel): void;
   onEffortChange(effort: SessionEffort): void;
@@ -41,8 +39,6 @@ export function SessionConsole({
   translationEnabled,
   translationAutoSendEnabled,
   translationTargetLanguage,
-  translationRole = role,
-  translationSession = session,
   onPermissionModeChange,
   onModelChange,
   onEffortChange,
@@ -54,9 +50,9 @@ export function SessionConsole({
   onTerminalEvent
 }: SessionConsoleProps) {
   const showTranslation = active
-    && isVcmRoleName(translationRole)
+    && isVcmRoleName(role)
     && translationEnabled
-    && translationSession?.status === "running";
+    && session?.status === "running";
 
   return (
     <section className="session-console">
@@ -94,13 +90,13 @@ export function SessionConsole({
         {showTranslation ? (
           <div className="translation-pane">
             <TranslationPanel
-              key={`${translationRole}:${translationSession.id}`}
+              key={`${role}:${session.id}`}
               active={active}
               autoSendEnabled={translationAutoSendEnabled}
               targetLanguage={translationTargetLanguage}
-              taskSlug={translationSession.taskSlug}
-              role={translationRole}
-              sessionId={translationSession.id}
+              taskSlug={session.taskSlug}
+              role={role}
+              sessionId={session.id}
             />
           </div>
         ) : null}

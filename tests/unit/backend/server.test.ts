@@ -78,6 +78,7 @@ function createServerDepsStub(calls: string[]): ServerDeps {
         calls.push("gateway:stop");
       }
     } as never,
+    runtimeCoordinator: {} as never,
     runtime: {} as never,
     diagnosticsService: {
       getErrorRuntimeInfo() {

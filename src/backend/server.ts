@@ -35,6 +35,7 @@ import { createSessionRegistry } from "./runtime/session-registry.js";
 import { createSessionService, type SessionService } from "./services/session-service.js";
 import { createMessageService, type MessageService } from "./services/message-service.js";
 import { createRoundService, type RoundService } from "./services/round-service.js";
+import { createRuntimeCoordinatorService, type RuntimeCoordinatorService } from "./services/runtime-coordinator-service.js";
 import { createStatusService, type StatusService } from "./services/status-service.js";
 import { createTaskService, type TaskService } from "./services/task-service.js";
 import { createTranslationService, type TranslationService } from "./services/translation-service.js";
@@ -81,6 +82,7 @@ export interface ServerDeps {
   statusService: StatusService;
   translationService: TranslationService;
   gatewayService: GatewayService;
+  runtimeCoordinator: RuntimeCoordinatorService;
   runtime: TerminalRuntime;
   diagnosticsService: DiagnosticsService;
 }
@@ -136,7 +138,8 @@ export async function createServer(deps: ServerDeps, options: CreateServerOption
     sessionService: deps.sessionService,
     translationWorkerService: deps.translationWorkerService,
     harnessService: deps.harnessService,
-    harnessFeedbackService: deps.harnessFeedbackService
+    harnessFeedbackService: deps.harnessFeedbackService,
+    runtimeCoordinator: deps.runtimeCoordinator
   });
   registerTaskRoutes(app, {
     projectService: deps.projectService,
@@ -340,6 +343,19 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     runtime,
     appSettings
   });
+  const runtimeCoordinator = createRuntimeCoordinatorService({
+    appSettings,
+    taskService,
+    sessionService,
+    translationService,
+    harnessService,
+    harnessFeedbackService,
+    roundService,
+    gatewayService,
+    async getStateRoot(repoRoot) {
+      return (await projectService.loadConfig(repoRoot)).stateRoot;
+    }
+  });
   const claudeHookService = createClaudeHookService({
     projectService,
     taskService,
@@ -379,6 +395,7 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     statusService,
     translationService,
     gatewayService,
+    runtimeCoordinator,
     runtime,
     diagnosticsService
   };

@@ -1,5 +1,6 @@
 import type { ArtifactSummary } from "./artifact.js";
 import type { HarnessBootstrapStatusReport, HarnessFeedbackStateReport, HarnessStatusReport } from "./harness.js";
+import type { GatewayStatus } from "./gateway.js";
 import type { VcmOrchestrationState, VcmRoleMessage } from "./message.js";
 import type { ProjectSummary } from "./project.js";
 import type { DispatchableRole } from "./role.js";
@@ -37,6 +38,7 @@ export interface ProjectRuntimeState {
   harnessStatus: HarnessStatusReport | null;
   harnessBootstrapStatus: HarnessBootstrapStatusReport | null;
   harnessFeedbackState: HarnessFeedbackStateReport | null;
+  gatewayStatus: GatewayStatus | null;
 }
 
 export interface DispatchRoleCommandResult {
