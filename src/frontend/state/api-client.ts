@@ -15,6 +15,7 @@ import type {
   HarnessFeedbackDecisionRequest,
   HarnessFeedbackStateReport,
   HarnessFileContent,
+  MergeRepositoryDiffToMainResult,
   RepositoryDiffReport,
   RestartHarnessBootstrapRequest,
   RunHarnessBootstrapResult,
@@ -136,6 +137,12 @@ export const apiClient = {
       params.set("commit", commitSha);
     }
     return request<RepositoryDiffReport>(`/api/projects/harness/repository-diff?${params.toString()}`);
+  },
+  mergeRepositoryDiffToMain(taskSlug: string) {
+    return request<MergeRepositoryDiffToMainResult>("/api/projects/harness/repository-diff/merge-to-main", {
+      method: "POST",
+      body: JSON.stringify({ taskSlug })
+    });
   },
   getHarnessBootstrapStatus(taskSlug: string) {
     const params = new URLSearchParams({ taskSlug });

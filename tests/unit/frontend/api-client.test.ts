@@ -154,6 +154,29 @@ describe("apiClient", () => {
     expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/projects/harness/repository-diff?taskSlug=demo-task&commit=abc1234567890");
   });
 
+  it("merges repository diff to local main", async () => {
+    const fetchMock = mockFetch({
+      version: 1,
+      baseRepoRoot: "/repo",
+      taskRepoRoot: "/repo/.claude/worktrees/demo-task",
+      sourceBranch: "feature/demo-task",
+      targetBranch: "main",
+      beforeSha: "base123",
+      afterSha: "abc123",
+      changed: true,
+      stdout: "Fast-forward",
+      stderr: "",
+      mergedAt: "2026-06-23T00:00:00.000Z"
+    });
+
+    await apiClient.mergeRepositoryDiffToMain("demo-task");
+
+    const init = fetchMock.mock.calls[0]?.[1];
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/projects/harness/repository-diff/merge-to-main");
+    expect(init?.method).toBe("POST");
+    expect(JSON.parse(String(init?.body))).toEqual({ taskSlug: "demo-task" });
+  });
+
   it("marks all messages done with a bodyless POST", async () => {
     const fetchMock = mockFetch({
       taskSlug: "demo-task",

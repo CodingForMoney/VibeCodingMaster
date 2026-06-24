@@ -20,7 +20,9 @@ export function RepositoryDiffModal({ open, taskSlug, onClose }: RepositoryDiffM
   const [selectedCommitSha, setSelectedCommitSha] = useState<string | null>(null);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [mergeBusy, setMergeBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [mergeMessage, setMergeMessage] = useState<string | null>(null);
 
   const selectedFile = useMemo(
     () => report?.files.find((file) => file.path === selectedPath) ?? report?.files[0] ?? null,
@@ -54,8 +56,44 @@ export function RepositoryDiffModal({ open, taskSlug, onClose }: RepositoryDiffM
       return;
     }
     setSelectedCommitSha(null);
+    setMergeMessage(null);
     void loadDiff(null);
   }, [open, taskSlug]);
+
+  async function mergeToMain() {
+    setError(null);
+    setMergeMessage(null);
+    if (!taskSlug) {
+      setError("Create or select a task before merging to main.");
+      return;
+    }
+    const confirmed = window.confirm([
+      "Merge this task branch into local main?",
+      "",
+      "VCM will run a fast-forward merge only.",
+      "The merge will fail if the task worktree or connected repository has uncommitted changes.",
+      "If local main has diverged, rebase or merge manually first."
+    ].join("\n"));
+    if (!confirmed) {
+      return;
+    }
+
+    setMergeBusy(true);
+    try {
+      const result = await apiClient.mergeRepositoryDiffToMain(taskSlug);
+      setMergeMessage(
+        result.changed
+          ? `Merged ${result.sourceBranch} into ${result.targetBranch} at ${result.afterSha.slice(0, 12)}.`
+          : `${result.targetBranch} already includes ${result.sourceBranch}.`
+      );
+      setSelectedCommitSha(null);
+      await loadDiff(null);
+    } catch (caught) {
+      setError(formatUiError("Merge task branch to local main", caught));
+    } finally {
+      setMergeBusy(false);
+    }
+  }
 
   if (!open) {
     return null;
@@ -95,6 +133,13 @@ export function RepositoryDiffModal({ open, taskSlug, onClose }: RepositoryDiffM
             <button type="button" disabled={busy} onClick={() => void loadDiff()}>
               Refresh
             </button>
+            <button
+              type="button"
+              disabled={busy || mergeBusy || !taskSlug || !report?.commits.length}
+              onClick={() => void mergeToMain()}
+            >
+              {mergeBusy ? "Merging..." : "Merge to main"}
+            </button>
             <button type="button" onClick={onClose}>
               Close
             </button>
@@ -102,6 +147,7 @@ export function RepositoryDiffModal({ open, taskSlug, onClose }: RepositoryDiffM
         </header>
 
         {error ? <p className="error-banner">{error}</p> : null}
+        {mergeMessage ? <p className="success-banner">{mergeMessage}</p> : null}
 
         {report?.warnings.length ? (
           <ul className="warnings repository-diff-warnings">

@@ -121,6 +121,24 @@ export interface RepositoryDiffReport {
   warnings: string[];
 }
 
+export interface MergeRepositoryDiffToMainRequest {
+  taskSlug?: string;
+}
+
+export interface MergeRepositoryDiffToMainResult {
+  version: 1;
+  baseRepoRoot: string;
+  taskRepoRoot: string;
+  sourceBranch: string;
+  targetBranch: string;
+  beforeSha: string;
+  afterSha: string;
+  changed: boolean;
+  stdout: string;
+  stderr: string;
+  mergedAt: string;
+}
+
 export interface HarnessFileContent {
   path: string;
   kind: HarnessFileKind;

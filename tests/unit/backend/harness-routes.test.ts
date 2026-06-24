@@ -166,6 +166,70 @@ describe("harness routes", () => {
     ]]);
     await app.close();
   });
+
+  it("merges the active task branch to local main", async () => {
+    const app = Fastify({ logger: false });
+    const calls: unknown[] = [];
+    registerHarnessRoutes(app, {
+      projectService: createProjectServiceStub(),
+      taskService: createTaskServiceStub(),
+      harnessService: {
+        async getHarnessStatus() {
+          throw new Error("not used");
+        },
+        async applyHarness() {
+          throw new Error("not used");
+        },
+        async getRepositoryDiff() {
+          throw new Error("not used");
+        },
+        async mergeRepositoryDiffToMain(repoRoot, input) {
+          calls.push(["mergeRepositoryDiffToMain", repoRoot, input]);
+          return {
+            version: 1,
+            baseRepoRoot: repoRoot,
+            taskRepoRoot: input.taskRepoRoot,
+            sourceBranch: input.taskBranch,
+            targetBranch: "main",
+            beforeSha: "base123",
+            afterSha: "abc123",
+            changed: true,
+            stdout: "Fast-forward",
+            stderr: "",
+            mergedAt: "2026-06-23T00:00:00.000Z"
+          };
+        },
+        async getBootstrapStatus() {
+          throw new Error("not used");
+        },
+        async startHarnessBootstrap() {
+          throw new Error("not used");
+        }
+      }
+    } as never);
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/projects/harness/repository-diff/merge-to-main",
+      payload: { taskSlug: "demo-task" }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      sourceBranch: "feature/demo-task",
+      targetBranch: "main",
+      changed: true
+    });
+    expect(calls).toEqual([[
+      "mergeRepositoryDiffToMain",
+      "/workspace",
+      {
+        taskRepoRoot: "/workspace/.claude/worktrees/demo-task",
+        taskBranch: "feature/demo-task"
+      }
+    ]]);
+    await app.close();
+  });
 });
 
 function createProjectServiceStub() {

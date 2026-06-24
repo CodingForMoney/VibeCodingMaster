@@ -506,6 +506,56 @@ describe("repository diff reports", () => {
     expect(report.summary.productCodeFiles).toBe(1);
     expect(report.warnings[0]).toContain("product code");
   });
+
+  it("fast-forwards the local main branch with the task branch", async () => {
+    const fs = createMemoryFs();
+    const calls: string[] = [];
+    let head = "base1234567890";
+    const service = createHarnessService({
+      fs,
+      git: {
+        async getStatusPorcelainV1() {
+          return "";
+        },
+        async branchExists(_repoRoot: string, branch: string) {
+          return branch === "main" || branch === "feature/demo-task";
+        },
+        async getCurrentBranch() {
+          return "main";
+        },
+        async checkoutBranch(_repoRoot: string, branch: string) {
+          calls.push(`checkout:${branch}`);
+        },
+        async mergeBranchFastForward(_repoRoot: string, branch: string) {
+          calls.push(`merge:${branch}`);
+          head = "abc1234567890";
+          return { stdout: "Fast-forward", stderr: "" };
+        },
+        async getHeadCommit() {
+          return head;
+        },
+        async addPaths() {},
+        async commit() {
+          throw new Error("not used");
+        }
+      },
+      now: () => "2026-06-23T00:00:00.000Z"
+    } as never);
+
+    const result = await service.mergeRepositoryDiffToMain("/base", {
+      taskRepoRoot: "/repo",
+      taskBranch: "feature/demo-task"
+    });
+
+    expect(result).toMatchObject({
+      sourceBranch: "feature/demo-task",
+      targetBranch: "main",
+      beforeSha: "base1234567890",
+      afterSha: "abc1234567890",
+      changed: true
+    });
+    expect(calls).toEqual(["merge:feature/demo-task"]);
+  });
 });
 
 function createFakeHarnessEngineerSessions(

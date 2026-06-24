@@ -24,6 +24,8 @@ export interface GitAdapter {
   getMergeBase(repoRoot: string, leftRef: string, rightRef: string): Promise<string>;
   isIgnored(repoRoot: string, repoRelativePath: string): Promise<boolean>;
   branchExists(repoRoot: string, branch: string): Promise<boolean>;
+  checkoutBranch(repoRoot: string, branch: string): Promise<void>;
+  mergeBranchFastForward(repoRoot: string, branch: string): Promise<GitMergeResult>;
   addPaths(repoRoot: string, paths: string[]): Promise<void>;
   commit(repoRoot: string, message: string): Promise<string>;
   createWorktree(input: CreateGitWorktreeInput): Promise<void>;
@@ -38,6 +40,11 @@ export interface GitAheadBehind {
 }
 
 export interface GitPullResult {
+  stdout: string;
+  stderr: string;
+}
+
+export interface GitMergeResult {
   stdout: string;
   stderr: string;
 }
@@ -264,6 +271,33 @@ export function createGitAdapter(runner: CommandRunner): GitAdapter {
         statusCode: 400,
         hint: result.stderr
       });
+    },
+    async checkoutBranch(repoRoot, branch) {
+      const result = await runGit(runner, repoRoot, ["checkout", branch]);
+      if (result.exitCode !== 0) {
+        throw new VcmError({
+          code: "GIT_CHECKOUT_FAILED",
+          message: `Unable to checkout Git branch: ${branch}`,
+          statusCode: 409,
+          hint: result.stderr || result.stdout
+        });
+      }
+    },
+    async mergeBranchFastForward(repoRoot, branch) {
+      const result = await runGit(runner, repoRoot, ["merge", "--ff-only", branch]);
+      if (result.exitCode !== 0) {
+        throw new VcmError({
+          code: "GIT_MERGE_FAILED",
+          message: `Unable to fast-forward merge branch: ${branch}`,
+          statusCode: 409,
+          hint: result.stderr || result.stdout || "Rebase the task branch onto local main, then try again."
+        });
+      }
+
+      return {
+        stdout: result.stdout,
+        stderr: result.stderr
+      };
     },
     async addPaths(repoRoot, paths) {
       if (paths.length === 0) {
