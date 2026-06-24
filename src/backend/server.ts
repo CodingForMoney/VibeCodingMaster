@@ -113,7 +113,8 @@ export async function createServer(deps: ServerDeps, options: CreateServerOption
   registerTranslationWorkerRoutes(app, {
     projectService: deps.projectService,
     translationWorkerService: deps.translationWorkerService,
-    sessionService: deps.sessionService
+    sessionService: deps.sessionService,
+    translationService: deps.translationService
   });
   registerProjectRoutes(app, {
     projectService: deps.projectService,
