@@ -447,6 +447,11 @@ export function parseAssistantContent(line: string): ClaudeTranscriptEvent[] {
     return [];
   }
 
+  const messageRecord = obj.message as Record<string, unknown> | undefined;
+  if (messageRecord?.model === "<synthetic>") {
+    return [];
+  }
+
   const message = obj.message as { content?: unknown } | undefined;
   const content = message?.content;
   if (!Array.isArray(content)) {

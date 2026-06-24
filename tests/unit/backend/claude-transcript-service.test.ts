@@ -67,6 +67,23 @@ describe("claude-transcript-service", () => {
     ]);
   });
 
+  it("ignores synthetic assistant transcript messages", () => {
+    const events = parseAssistantContent(JSON.stringify({
+      type: "assistant",
+      uuid: "synthetic-message",
+      timestamp: "2026-05-30T00:00:00.000Z",
+      message: {
+        model: "<synthetic>",
+        stop_reason: "stop_sequence",
+        content: [
+          { type: "text", text: "No response requested." }
+        ]
+      }
+    }));
+
+    expect(events).toEqual([]);
+  });
+
   it("resolves Claude Code transcript paths from the project cwd and session id", () => {
     expect(projectHash("/workspace")).toBe("-workspace");
     expect(projectHash("/Users/sheldon/Documents/New project 3/VibeCodingMaster"))
