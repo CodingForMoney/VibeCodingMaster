@@ -1,4 +1,3 @@
-import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { VCM_ROLE_NAMES, isDispatchableRole } from "../../shared/constants.js";
 import type { ClaudeHookEventName } from "../../shared/types/claude-hook.js";
@@ -160,11 +159,11 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     const permissionMode = normalizeClaudePermissionMode(input.permissionMode ?? persisted?.permissionMode);
     const model: SessionModel = normalizeClaudeModel(input.model ?? persisted?.model);
     const effort = normalizeClaudeEffort(input.effort ?? persisted?.effort);
-    const claudeSessionId = launchMode === "resume"
+    const resumeClaudeSessionId = launchMode === "resume"
       ? persisted?.claudeSessionId
-      : randomUUID();
+      : undefined;
 
-    if (!claudeSessionId) {
+    if (launchMode === "resume" && !resumeClaudeSessionId) {
       throw new VcmError({
         code: "CLAUDE_SESSION_MISSING",
         message: `${role} does not have a session id to resume.`,
@@ -172,16 +171,19 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
         hint: "Start the role once before using Resume."
       });
     }
+    const claudeSessionId = resumeClaudeSessionId ?? "";
     const transcriptPath = launchMode === "resume" && persisted?.transcriptPath
       ? persisted.transcriptPath
-      : claudeTranscriptPath(taskRepoRoot, claudeSessionId);
+      : resumeClaudeSessionId
+        ? claudeTranscriptPath(taskRepoRoot, resumeClaudeSessionId)
+        : undefined;
 
     const startCommand = {
       ...deps.claude.buildRoleStartCommand(
         role,
         config.claudeCommand,
         permissionMode,
-        claudeSessionId,
+        resumeClaudeSessionId,
         launchMode === "resume",
         model as ClaudeModel,
         effort
@@ -200,7 +202,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
         VCM_TASK_REPO_ROOT: taskRepoRoot,
         VCM_TASK_SLUG: taskSlug,
         VCM_ROLE: role,
-        VCM_SESSION_ID: claudeSessionId
+        VCM_SESSION_ID: claudeSessionId || undefined
       },
       cols: input.cols,
       rows: input.rows
@@ -260,11 +262,11 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     const permissionMode = normalizeClaudePermissionMode(input.permissionMode ?? persisted?.permissionMode);
     const model = normalizeClaudeModel(input.model ?? persisted?.model);
     const effort = normalizeClaudeEffort(input.effort ?? persisted?.effort ?? "medium");
-    const claudeSessionId = launchMode === "resume"
+    const resumeClaudeSessionId = launchMode === "resume"
       ? persisted?.claudeSessionId
-      : randomUUID();
+      : undefined;
 
-    if (!claudeSessionId) {
+    if (launchMode === "resume" && !resumeClaudeSessionId) {
       throw new VcmError({
         code: "TRANSLATOR_SESSION_MISSING",
         message: "Translator does not have a session id to resume.",
@@ -277,15 +279,18 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     const launchCwd = launchMode === "resume"
       ? persisted?.cwd ?? taskContext.taskRepoRoot
       : taskContext.taskRepoRoot;
+    const claudeSessionId = resumeClaudeSessionId ?? "";
     const transcriptPath = launchMode === "resume" && persisted?.transcriptPath
       ? persisted.transcriptPath
-      : claudeTranscriptPath(launchCwd, claudeSessionId);
+      : resumeClaudeSessionId
+        ? claudeTranscriptPath(launchCwd, resumeClaudeSessionId)
+        : undefined;
     const startCommand = {
       ...deps.claude.buildRoleStartCommand(
         TRANSLATOR_ROLE,
         config.claudeCommand,
         permissionMode,
-        claudeSessionId,
+        resumeClaudeSessionId,
         launchMode === "resume",
         model,
         effort
@@ -304,7 +309,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
         VCM_TASK_REPO_ROOT: taskContext.taskRepoRoot,
         VCM_TASK_SLUG: taskContext.taskSlug,
         VCM_ROLE: TRANSLATOR_ROLE,
-        VCM_SESSION_ID: claudeSessionId
+        VCM_SESSION_ID: claudeSessionId || undefined
       },
       cols: input.cols,
       rows: input.rows
@@ -363,11 +368,11 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     const permissionMode = normalizeClaudePermissionMode(input.permissionMode ?? persisted?.permissionMode);
     const model = normalizeClaudeModel(input.model ?? persisted?.model);
     const effort = normalizeClaudeEffort(input.effort ?? persisted?.effort ?? "medium");
-    const claudeSessionId = launchMode === "resume"
+    const resumeClaudeSessionId = launchMode === "resume"
       ? persisted?.claudeSessionId
-      : randomUUID();
+      : undefined;
 
-    if (!claudeSessionId) {
+    if (launchMode === "resume" && !resumeClaudeSessionId) {
       throw new VcmError({
         code: "HARNESS_ENGINEER_SESSION_MISSING",
         message: "Harness Engineer does not have a session id to resume.",
@@ -380,15 +385,18 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     const launchCwd = launchMode === "resume"
       ? persisted?.cwd ?? taskContext.taskRepoRoot
       : taskContext.taskRepoRoot;
+    const claudeSessionId = resumeClaudeSessionId ?? "";
     const transcriptPath = launchMode === "resume" && persisted?.transcriptPath
       ? persisted.transcriptPath
-      : claudeTranscriptPath(launchCwd, claudeSessionId);
+      : resumeClaudeSessionId
+        ? claudeTranscriptPath(launchCwd, resumeClaudeSessionId)
+        : undefined;
     const startCommand = {
       ...deps.claude.buildRoleStartCommand(
         HARNESS_ENGINEER_ROLE,
         config.claudeCommand,
         permissionMode,
-        claudeSessionId,
+        resumeClaudeSessionId,
         launchMode === "resume",
         model,
         effort
@@ -407,7 +415,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
         VCM_TASK_REPO_ROOT: taskContext.taskRepoRoot,
         VCM_TASK_SLUG: taskContext.taskSlug,
         VCM_ROLE: HARNESS_ENGINEER_ROLE,
-        VCM_SESSION_ID: claudeSessionId
+        VCM_SESSION_ID: claudeSessionId || undefined
       },
       cols: input.cols,
       rows: input.rows
@@ -492,7 +500,9 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       ...session,
       cwd: targetCwd,
       previousCwd: session.cwd,
-      transcriptPath: claudeTranscriptPath(targetCwd, session.claudeSessionId),
+      transcriptPath: session.claudeSessionId
+        ? claudeTranscriptPath(targetCwd, session.claudeSessionId)
+        : session.transcriptPath,
       updatedAt: timestamp
     };
     deps.registry.upsert(normalizeProjectScopedRecordForPersistence(updated));
@@ -741,10 +751,11 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       const timestamp = now();
       const isTurnEnd = isTurnEndHook(input.eventName);
       const isCompact = isCompactHook(input.eventName);
+      const sessionIdentity = nextHookSessionIdentity(current, input);
       const updated: RoleSessionRecord = {
         ...current,
-        claudeSessionId: input.sessionId ?? current.claudeSessionId,
-        transcriptPath: input.transcriptPath ?? current.transcriptPath,
+        claudeSessionId: sessionIdentity.claudeSessionId,
+        transcriptPath: sessionIdentity.transcriptPath,
         cwd: input.cwd ?? current.cwd,
         activityStatus: isTurnEnd ? "idle" : isCompact ? current.activityStatus : "running",
         lastHookEventAt: timestamp,
@@ -873,10 +884,11 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       const timestamp = now();
       const isTurnEnd = isTurnEndHook(input.eventName);
       const isCompact = isCompactHook(input.eventName);
+      const sessionIdentity = nextHookSessionIdentity(current, input);
       const updated: RoleSessionRecord = {
         ...current,
-        claudeSessionId: input.sessionId ?? current.claudeSessionId,
-        transcriptPath: input.transcriptPath ?? current.transcriptPath,
+        claudeSessionId: sessionIdentity.claudeSessionId,
+        transcriptPath: sessionIdentity.transcriptPath,
         cwd: input.cwd ?? current.cwd,
         activityStatus: isTurnEnd ? "idle" : isCompact ? current.activityStatus : "running",
         lastHookEventAt: timestamp,
@@ -1049,10 +1061,11 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       const timestamp = now();
       const isTurnEnd = isTurnEndHook(input.eventName);
       const isCompact = isCompactHook(input.eventName);
+      const sessionIdentity = nextHookSessionIdentity(current, input);
       const updated: RoleSessionRecord = {
         ...current,
-        claudeSessionId: input.sessionId ?? current.claudeSessionId,
-        transcriptPath: input.transcriptPath ?? current.transcriptPath,
+        claudeSessionId: sessionIdentity.claudeSessionId,
+        transcriptPath: sessionIdentity.transcriptPath,
         cwd: input.cwd ?? current.cwd,
         activityStatus: isTurnEnd ? "idle" : isCompact ? current.activityStatus : "running",
         lastHookEventAt: timestamp,
@@ -1153,6 +1166,9 @@ function toRoleSessionRecordView(
 }
 
 function matchesRoleHookSession(record: RoleSessionRecord, input: RecordRoleHookEventInput): boolean {
+  if (!record.claudeSessionId && !record.transcriptPath) {
+    return input.eventName === "UserPromptSubmit";
+  }
   if (input.sessionId && record.claudeSessionId === input.sessionId) {
     return true;
   }
@@ -1163,6 +1179,30 @@ function matchesRoleHookSession(record: RoleSessionRecord, input: RecordRoleHook
     return true;
   }
   return false;
+}
+
+function nextHookSessionIdentity(
+  current: RoleSessionRecord,
+  input: {
+    eventName: ClaudeHookEventName;
+    sessionId?: string;
+    transcriptPath?: string;
+  }
+): Pick<RoleSessionRecord, "claudeSessionId" | "transcriptPath"> {
+  const canRecordFirstClaudeSessionId = Boolean(
+    !current.claudeSessionId &&
+    input.eventName === "UserPromptSubmit" &&
+    input.sessionId
+  );
+  const hasConfirmedClaudeSessionId = Boolean(current.claudeSessionId || canRecordFirstClaudeSessionId);
+  return {
+    claudeSessionId: canRecordFirstClaudeSessionId
+      ? input.sessionId ?? current.claudeSessionId
+      : current.claudeSessionId,
+    transcriptPath: hasConfirmedClaudeSessionId
+      ? input.transcriptPath ?? current.transcriptPath
+      : current.transcriptPath
+  };
 }
 
 function isTurnEndHook(eventName: ClaudeHookEventName): boolean {
@@ -1406,6 +1446,9 @@ async function persistTaskSession(
   stateRoot: string,
   session: RoleSessionRecord
 ): Promise<void> {
+  if (!hasConfirmedClaudeSessionId(session)) {
+    return;
+  }
   const sessionPath = getTaskSessionPath(repoRoot, stateRoot, session.taskSlug);
   const empty = createEmptyTaskSessionRecord(session.taskSlug, session.updatedAt);
   const current = await fs.pathExists(sessionPath)
@@ -1456,6 +1499,9 @@ async function persistTranslatorSession(
   repoRoot: string,
   session: RoleSessionRecord
 ): Promise<void> {
+  if (!hasConfirmedClaudeSessionId(session)) {
+    return;
+  }
   await fs.writeJsonAtomic<ProjectRoleSessionFile>(
     resolveRepoPath(repoRoot, TRANSLATOR_SESSION_PATH),
     {
@@ -1475,6 +1521,9 @@ async function persistHarnessEngineerSession(
   repoRoot: string,
   session: RoleSessionRecord
 ): Promise<void> {
+  if (!hasConfirmedClaudeSessionId(session)) {
+    return;
+  }
   await fs.writeJsonAtomic<ProjectRoleSessionFile>(
     resolveRepoPath(repoRoot, HARNESS_ENGINEER_SESSION_PATH),
     {
@@ -1491,6 +1540,10 @@ async function persistHarnessEngineerSession(
 
 function isProjectRoleSessionFile(value: ProjectRoleSessionFile | RoleSessionRecord): value is ProjectRoleSessionFile {
   return "record" in value && typeof value.record === "object" && value.record !== null;
+}
+
+function hasConfirmedClaudeSessionId(session: RoleSessionRecord): boolean {
+  return session.claudeSessionId.trim().length > 0;
 }
 
 function createEmptyTaskSessionRecord(taskSlug: string, updatedAt: string): TaskSessionRecord {

@@ -18,7 +18,7 @@ describe("createSessionService", () => {
     expect(CLAUDE_EFFORT_OPTIONS.map((option) => option.value)).toContain("max");
   });
 
-  it("persists Claude session ids and resumes them after registry loss", async () => {
+  it("persists Claude session ids after the first UserPromptSubmit hook and resumes them after registry loss", async () => {
     const fs = createMemoryFs();
     const firstRuntimeInputs: CreateTerminalSessionInput[] = [];
     const firstService = createTestSessionService(fs, firstRuntimeInputs);
@@ -26,10 +26,21 @@ describe("createSessionService", () => {
     const started = await firstService.startRoleSession("/repo", "demo-task", "architect", {
       permissionMode: "default"
     });
-    expect(started.claudeSessionId).toMatch(/^[0-9a-f-]{36}$/);
-    expect(started.transcriptPath).toMatch(/\.claude\/projects\/-repo-\.claude-worktrees-demo-task\/[0-9a-f-]{36}\.jsonl$/);
-    expect(started.command).toContain("--session-id");
-    expect(firstRuntimeInputs[0]?.args).toContain("--session-id");
+    expect(started.claudeSessionId).toBe("");
+    expect(started.transcriptPath).toBeUndefined();
+    expect(started.command).not.toContain("--session-id");
+    expect(firstRuntimeInputs[0]?.args).not.toContain("--session-id");
+    await expect(fs.pathExists(`${TASK_WORKTREE}/.ai/vcm/sessions/demo-task.json`)).resolves.toBe(false);
+
+    const hooked = await firstService.recordRoleHookEvent("/repo", {
+      taskSlug: "demo-task",
+      role: "architect",
+      eventName: "UserPromptSubmit",
+      sessionId: "architect-real-session",
+      transcriptPath: `${TASK_WORKTREE}/.claude/projects/architect-real-session.jsonl`,
+      cwd: TASK_WORKTREE
+    });
+    expect(hooked?.claudeSessionId).toBe("architect-real-session");
 
     const secondRuntimeInputs: CreateTerminalSessionInput[] = [];
     const secondService = createTestSessionService(fs, secondRuntimeInputs);
@@ -38,22 +49,52 @@ describe("createSessionService", () => {
       {
         role: "architect",
         status: "resumable",
-        claudeSessionId: started.claudeSessionId,
-        transcriptPath: started.transcriptPath
+        claudeSessionId: "architect-real-session",
+        transcriptPath: `${TASK_WORKTREE}/.claude/projects/architect-real-session.jsonl`
       }
     ]);
 
     const resumed = await secondService.resumeRoleSession("/repo", "demo-task", "architect");
-    expect(resumed.claudeSessionId).toBe(started.claudeSessionId);
-    expect(resumed.transcriptPath).toBe(started.transcriptPath);
+    expect(resumed.claudeSessionId).toBe("architect-real-session");
+    expect(resumed.transcriptPath).toBe(`${TASK_WORKTREE}/.claude/projects/architect-real-session.jsonl`);
     expect(secondRuntimeInputs[0]?.args).toEqual([
       "--agent",
       "architect",
       "--resume",
-      started.claudeSessionId,
+      "architect-real-session",
       "--model",
       "default"
     ]);
+  });
+
+  it("does not persist a fresh Claude session id from non-prompt hooks", async () => {
+    const fs = createMemoryFs();
+    const service = createTestSessionService(fs, []);
+
+    await service.startRoleSession("/repo", "demo-task", "coder");
+    const stopped = await service.recordRoleHookEvent("/repo", {
+      taskSlug: "demo-task",
+      role: "coder",
+      eventName: "Stop",
+      sessionId: "coder-stop-session",
+      transcriptPath: `${TASK_WORKTREE}/.claude/projects/coder-stop-session.jsonl`,
+      cwd: TASK_WORKTREE
+    });
+
+    expect(stopped).toBeUndefined();
+    await expect(fs.pathExists(`${TASK_WORKTREE}/.ai/vcm/sessions/demo-task.json`)).resolves.toBe(false);
+
+    const prompted = await service.recordRoleHookEvent("/repo", {
+      taskSlug: "demo-task",
+      role: "coder",
+      eventName: "UserPromptSubmit",
+      sessionId: "coder-prompt-session",
+      transcriptPath: `${TASK_WORKTREE}/.claude/projects/coder-prompt-session.jsonl`,
+      cwd: TASK_WORKTREE
+    });
+
+    expect(prompted?.claudeSessionId).toBe("coder-prompt-session");
+    await expect(fs.pathExists(`${TASK_WORKTREE}/.ai/vcm/sessions/demo-task.json`)).resolves.toBe(true);
   });
 
   it("starts project-manager sessions with VCM environment instead of pasted context", async () => {
@@ -69,9 +110,9 @@ describe("createSessionService", () => {
       VCM_API_URL: "http://127.0.0.1:4173",
       VCM_TASK_REPO_ROOT: TASK_WORKTREE,
       VCM_TASK_SLUG: "demo-task",
-      VCM_ROLE: "project-manager",
-      VCM_SESSION_ID: expect.any(String)
+      VCM_ROLE: "project-manager"
     });
+    expect(runtimeInputs[0]?.env?.VCM_SESSION_ID).toBeUndefined();
   });
 
   it("starts role sessions with the selected Claude model", async () => {
@@ -87,8 +128,6 @@ describe("createSessionService", () => {
     expect(runtimeInputs[0]?.args).toEqual([
       "--agent",
       "coder",
-      "--session-id",
-      started.claudeSessionId,
       "--model",
       "claude-opus-4-8[1m]"
     ]);
@@ -107,8 +146,6 @@ describe("createSessionService", () => {
     expect(runtimeInputs[0]?.args).toEqual([
       "--agent",
       "architect",
-      "--session-id",
-      started.claudeSessionId,
       "--model",
       "default",
       "--effort",
@@ -133,14 +170,13 @@ describe("createSessionService", () => {
     expect(started.taskSlug).toBe("demo-task");
     expect(started.model).toBe("claude-opus-4-8[1m]");
     expect(started.effort).toBe("high");
-    expect(started.transcriptPath).toMatch(/\.claude\/projects\/-repo-\.claude-worktrees-demo-task\/[0-9a-f-]{36}\.jsonl$/);
+    expect(started.claudeSessionId).toBe("");
+    expect(started.transcriptPath).toBeUndefined();
     expect(runtimeInputs[0]?.command).toBe("claude");
     expect(runtimeInputs[0]?.cwd).toBe(TASK_WORKTREE);
     expect(runtimeInputs[0]?.args).toEqual([
       "--agent",
       "gate-reviewer",
-      "--session-id",
-      started.claudeSessionId,
       "--model",
       "claude-opus-4-8[1m]",
       "--effort",
@@ -154,6 +190,16 @@ describe("createSessionService", () => {
       VCM_ROLE: "gate-reviewer"
     });
     await expect(fs.pathExists("/repo/.ai/vcm/gate-reviewer/session.json")).resolves.toBe(false);
+    await expect(fs.pathExists(`${TASK_WORKTREE}/.ai/vcm/sessions/demo-task.json`)).resolves.toBe(false);
+
+    await service.recordRoleHookEvent("/repo", {
+      taskSlug: "demo-task",
+      role: "gate-reviewer",
+      eventName: "UserPromptSubmit",
+      sessionId: "gate-reviewer-real-session",
+      transcriptPath: `${TASK_WORKTREE}/.claude/projects/gate-reviewer-real-session.jsonl`,
+      cwd: TASK_WORKTREE
+    });
     await expect(fs.pathExists(`${TASK_WORKTREE}/.ai/vcm/sessions/demo-task.json`)).resolves.toBe(true);
   });
 
@@ -162,7 +208,15 @@ describe("createSessionService", () => {
     const firstRuntimeInputs: CreateTerminalSessionInput[] = [];
     const firstService = createTestSessionService(fs, firstRuntimeInputs);
 
-    const started = await firstService.startRoleSession("/repo", "demo-task", "gate-reviewer");
+    await firstService.startRoleSession("/repo", "demo-task", "gate-reviewer");
+    await firstService.recordRoleHookEvent("/repo", {
+      taskSlug: "demo-task",
+      role: "gate-reviewer",
+      eventName: "UserPromptSubmit",
+      sessionId: "gate-demo-session",
+      transcriptPath: `${TASK_WORKTREE}/.claude/projects/gate-demo-session.jsonl`,
+      cwd: TASK_WORKTREE
+    });
 
     const secondRuntimeInputs: CreateTerminalSessionInput[] = [];
     const secondService = createTestSessionService(fs, secondRuntimeInputs);
@@ -170,14 +224,12 @@ describe("createSessionService", () => {
     expect(recovered).toBeUndefined();
 
     const nextTask = await secondService.startRoleSession("/repo", "another-task", "gate-reviewer");
-    expect(nextTask.claudeSessionId).not.toBe(started.claudeSessionId);
+    expect(nextTask.claudeSessionId).toBe("");
     expect(nextTask.taskSlug).toBe("another-task");
     expect(secondRuntimeInputs[0]?.cwd).toBe("/repo/.claude/worktrees/another-task");
     expect(secondRuntimeInputs[0]?.args).toEqual([
       "--agent",
       "gate-reviewer",
-      "--session-id",
-      nextTask.claudeSessionId,
       "--model",
       "default"
     ]);
@@ -204,7 +256,7 @@ describe("createSessionService", () => {
       VCM_ROLE: "translator"
     });
     expect(firstRuntimeInputs[0]?.logPath).toBeUndefined();
-    await expect(fs.pathExists("/repo/.ai/vcm/translations/session.json")).resolves.toBe(true);
+    await expect(fs.pathExists("/repo/.ai/vcm/translations/session.json")).resolves.toBe(false);
     await expect(fs.pathExists("/repo/.claude/worktrees/demo-task/.ai/vcm/sessions/demo-task.json"))
       .resolves.toBe(false);
 
@@ -257,8 +309,6 @@ describe("createSessionService", () => {
     expect(runtimeInputs[0]?.args).toEqual([
       "--agent",
       "translator",
-      "--session-id",
-      started.claudeSessionId,
       "--model",
       "default",
       "--effort",
@@ -270,8 +320,14 @@ describe("createSessionService", () => {
   it("resumes Translator with selected permission, model, and effort from ensure", async () => {
     const fs = createMemoryFs();
     const firstService = createTestSessionService(fs, []);
-    const started = await firstService.startProjectTranslatorSession("/repo", {
+    await firstService.startProjectTranslatorSession("/repo", {
       taskSlug: "demo-task"
+    });
+    await firstService.recordProjectTranslatorHookEvent("/repo", {
+      eventName: "UserPromptSubmit",
+      sessionId: "translator-ensure-session",
+      transcriptPath: `${TASK_WORKTREE}/.claude/projects/translator-ensure-session.jsonl`,
+      cwd: TASK_WORKTREE
     });
 
     const runtimeInputs: CreateTerminalSessionInput[] = [];
@@ -283,7 +339,7 @@ describe("createSessionService", () => {
       effort: "high"
     });
 
-    expect(resumed.claudeSessionId).toBe(started.claudeSessionId);
+    expect(resumed.claudeSessionId).toBe("translator-ensure-session");
     expect(resumed.permissionMode).toBe("bypassPermissions");
     expect(resumed.model).toBe("claude-opus-4-8[1m]");
     expect(resumed.effort).toBe("high");
@@ -291,7 +347,7 @@ describe("createSessionService", () => {
       "--agent",
       "translator",
       "--resume",
-      started.claudeSessionId,
+      "translator-ensure-session",
       "--model",
       "claude-opus-4-8[1m]",
       "--effort",
@@ -312,14 +368,20 @@ describe("createSessionService", () => {
       }
     });
 
-    const started = await service.startProjectTranslatorSession("/repo", {
+    await service.startProjectTranslatorSession("/repo", {
       taskSlug: "demo-task"
+    });
+    await service.recordProjectTranslatorHookEvent("/repo", {
+      eventName: "UserPromptSubmit",
+      sessionId: "translator-move-session",
+      transcriptPath: `${TASK_WORKTREE}/.claude/projects/translator-move-session.jsonl`,
+      cwd: TASK_WORKTREE
     });
     const moved = await service.ensureProjectTranslatorSession("/repo", {
       taskSlug: "other-task"
     });
 
-    expect(moved.claudeSessionId).toBe(started.claudeSessionId);
+    expect(moved.claudeSessionId).toBe("translator-move-session");
     expect(moved.cwd).toBe("/repo/.claude/worktrees/other-task");
     expect(moved.previousCwd).toBe(TASK_WORKTREE);
     expect(writes[0]).toContain("/cd /repo/.claude/worktrees/other-task");
@@ -337,8 +399,14 @@ describe("createSessionService", () => {
         "other-task": "/repo/.claude/worktrees/other-task"
       }
     });
-    const started = await firstService.startProjectTranslatorSession("/repo", {
+    await firstService.startProjectTranslatorSession("/repo", {
       taskSlug: "demo-task"
+    });
+    await firstService.recordProjectTranslatorHookEvent("/repo", {
+      eventName: "UserPromptSubmit",
+      sessionId: "translator-resume-session",
+      transcriptPath: `${TASK_WORKTREE}/.claude/projects/translator-resume-session.jsonl`,
+      cwd: TASK_WORKTREE
     });
 
     const runtimeInputs: CreateTerminalSessionInput[] = [];
@@ -353,13 +421,13 @@ describe("createSessionService", () => {
       taskSlug: "other-task"
     });
 
-    expect(resumed.claudeSessionId).toBe(started.claudeSessionId);
+    expect(resumed.claudeSessionId).toBe("translator-resume-session");
     expect(runtimeInputs[0]?.cwd).toBe(TASK_WORKTREE);
     expect(runtimeInputs[0]?.args).toEqual([
       "--agent",
       "translator",
       "--resume",
-      started.claudeSessionId,
+      "translator-resume-session",
       "--model",
       "default",
       "--effort",
@@ -375,12 +443,18 @@ describe("createSessionService", () => {
     const writes: string[] = [];
     const service = createTestSessionService(fs, runtimeInputs, writes);
 
-    const started = await service.startProjectTranslatorSession("/repo", {
+    await service.startProjectTranslatorSession("/repo", {
       taskSlug: "demo-task"
+    });
+    await service.recordProjectTranslatorHookEvent("/repo", {
+      eventName: "UserPromptSubmit",
+      sessionId: "translator-safe-session",
+      transcriptPath: `${TASK_WORKTREE}/.claude/projects/translator-safe-session.jsonl`,
+      cwd: TASK_WORKTREE
     });
     const moved = await service.moveProjectTranslatorSessionToSafeCwd("/repo");
 
-    expect(moved.claudeSessionId).toBe(started.claudeSessionId);
+    expect(moved.claudeSessionId).toBe("translator-safe-session");
     expect(moved.cwd).toBe("/repo");
     expect(moved.previousCwd).toBe(TASK_WORKTREE);
     expect(writes[0]).toContain("/cd /repo");
@@ -410,8 +484,6 @@ describe("createSessionService", () => {
     expect(runtimeInputs[0]?.args).toEqual([
       "--agent",
       "harness-engineer",
-      "--session-id",
-      started.claudeSessionId,
       "--model",
       "claude-opus-4-8[1m]",
       "--effort",
@@ -419,9 +491,17 @@ describe("createSessionService", () => {
       "--permission-mode",
       "bypassPermissions"
     ]);
-    await expect(fs.pathExists("/repo/.ai/vcm/harness-engineer/session.json")).resolves.toBe(true);
+    await expect(fs.pathExists("/repo/.ai/vcm/harness-engineer/session.json")).resolves.toBe(false);
     await expect(fs.pathExists("/repo/.claude/worktrees/demo-task/.ai/vcm/sessions/demo-task.json"))
       .resolves.toBe(false);
+
+    await service.recordProjectHarnessEngineerHookEvent("/repo", {
+      eventName: "UserPromptSubmit",
+      sessionId: "harness-engineer-real-session",
+      transcriptPath: `${TASK_WORKTREE}/.claude/projects/harness-engineer-real-session.jsonl`,
+      cwd: TASK_WORKTREE
+    });
+    await expect(fs.pathExists("/repo/.ai/vcm/harness-engineer/session.json")).resolves.toBe(true);
   });
 
   it("marks sessions outdated when harness revision advances and notifies them", async () => {
@@ -505,16 +585,25 @@ describe("createSessionService", () => {
     const started = await service.startRoleSession("/repo", "demo-task", "architect");
 
     expect(started.cwd).toBe("/repo/.claude/worktrees/demo-task");
-    expect(started.transcriptPath).toContain("-repo-.claude-worktrees-demo-task");
+    expect(started.transcriptPath).toBeUndefined();
     expect(runtimeInputs[0]?.cwd).toBe("/repo/.claude/worktrees/demo-task");
     expect(runtimeInputs[0]?.env).toMatchObject({
       VCM_TASK_REPO_ROOT: "/repo/.claude/worktrees/demo-task"
     });
     expect(runtimeInputs[0]?.logPath).toBeUndefined();
     await expect(fs.pathExists("/repo/.claude/worktrees/demo-task/.ai/vcm/sessions/demo-task.json"))
-      .resolves.toBe(true);
+      .resolves.toBe(false);
     await expect(fs.pathExists("/repo/.ai/vcm/sessions/demo-task.json"))
       .resolves.toBe(false);
+
+    await service.recordRoleHookEvent("/repo", {
+      taskSlug: "demo-task",
+      role: "architect",
+      eventName: "UserPromptSubmit",
+      sessionId: "architect-worktree-session",
+      transcriptPath: "/repo/.claude/worktrees/demo-task/.claude/projects/architect-worktree-session.jsonl",
+      cwd: "/repo/.claude/worktrees/demo-task"
+    });
 
     const recoveredService = createTestSessionService(fs, [], [], {
       worktreePath: "/repo/.claude/worktrees/demo-task"
@@ -522,7 +611,7 @@ describe("createSessionService", () => {
     await expect(recoveredService.listRoleSessions("/repo", "demo-task")).resolves.toMatchObject([{
       role: "architect",
       status: "resumable",
-      claudeSessionId: started.claudeSessionId
+      claudeSessionId: "architect-worktree-session"
     }]);
   });
 
@@ -532,20 +621,26 @@ describe("createSessionService", () => {
     const firstRuntimeInputs: CreateTerminalSessionInput[] = [];
     const firstService = createTestSessionService(fs, firstRuntimeInputs);
 
-    const started = await firstService.startRoleSession("/repo", "demo-task", "coder");
-    expect(firstRuntimeInputs[0]?.args).toContain("--session-id");
+    await firstService.startRoleSession("/repo", "demo-task", "coder");
+    expect(firstRuntimeInputs[0]?.args).not.toContain("--session-id");
+    await firstService.recordRoleHookEvent("/repo", {
+      taskSlug: "demo-task",
+      role: "coder",
+      eventName: "UserPromptSubmit",
+      sessionId: "coder-old-session",
+      transcriptPath: `${TASK_WORKTREE}/.claude/projects/coder-old-session.jsonl`,
+      cwd: TASK_WORKTREE
+    });
 
     const secondRuntimeInputs: CreateTerminalSessionInput[] = [];
     const secondService = createTestSessionService(fs, secondRuntimeInputs);
     const restarted = await secondService.restartRoleSession("/repo", "demo-task", "coder");
 
-    expect(restarted.claudeSessionId).not.toBe(started.claudeSessionId);
-    expect(restarted.transcriptPath).not.toBe(started.transcriptPath);
+    expect(restarted.claudeSessionId).toBe("");
+    expect(restarted.transcriptPath).toBeUndefined();
     expect(secondRuntimeInputs[0]?.args).toEqual([
       "--agent",
       "coder",
-      "--session-id",
-      restarted.claudeSessionId,
       "--model",
       "default"
     ]);
@@ -611,6 +706,18 @@ describe("createSessionService", () => {
       status: "running",
       activityStatus: "idle"
     });
+    const prompted = await service.recordClaudeHookEvent("/repo", {
+      taskSlug: "demo-task",
+      role: "coder",
+      eventName: "UserPromptSubmit",
+      claudeSessionId: "coder-real-session",
+      transcriptPath: `${TASK_WORKTREE}/.claude/projects/coder-real-session.jsonl`,
+      cwd: TASK_WORKTREE
+    });
+    expect(prompted).toMatchObject({
+      claudeSessionId: "coder-real-session",
+      activityStatus: "running"
+    });
 
     const running = await service.markRoleActivityRunning("/repo", "demo-task", "coder");
     expect(running).toMatchObject({
@@ -631,7 +738,7 @@ describe("createSessionService", () => {
       taskSlug: "demo-task",
       role: "coder",
       eventName: "Stop",
-      claudeSessionId: started.claudeSessionId
+      claudeSessionId: "coder-real-session"
     });
     expect(idle).toMatchObject({
       status: "running",
@@ -644,7 +751,7 @@ describe("createSessionService", () => {
       taskSlug: "demo-task",
       role: "coder",
       eventName: "StopFailure",
-      claudeSessionId: started.claudeSessionId
+      claudeSessionId: "coder-real-session"
     });
     expect(failed).toMatchObject({
       status: "running",
@@ -657,7 +764,7 @@ describe("createSessionService", () => {
       taskSlug: "demo-task",
       role: "coder",
       eventName: "PostCompact",
-      claudeSessionId: started.claudeSessionId,
+      claudeSessionId: "coder-real-session",
       transcriptPath: "/Users/sheldon/.claude/projects/demo/compact.jsonl"
     });
     expect(compacted).toMatchObject({
@@ -674,6 +781,7 @@ describe("createSessionService", () => {
     const started = await service.startRoleSession("/repo", "demo-task", "gate-reviewer");
 
     expect(started.claudeSessionId).not.toBe("claude_session_123");
+    expect(started.claudeSessionId).toBe("");
 
     const running = await service.recordRoleHookEvent("/repo", {
       taskSlug: "demo-task",
