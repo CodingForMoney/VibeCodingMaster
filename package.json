@@ -1,6 +1,6 @@
 {
   "name": "vibe-coding-master",
-  "version": "0.4.40",
+  "version": "0.4.41",
   "description": "Local GUI session cockpit for Claude Code role sessions.",
   "type": "module",
   "files": [
