@@ -1,5 +1,27 @@
 # CLAUDE.md
 
+## Project Context
+
+- VibeCodingMaster (VCM, npm package `vibe-coding-master`) is a local GUI cockpit that runs and orchestrates multiple Claude Code role sessions around one engineering task.
+- Single npm package, not a monorepo. TypeScript end to end, ESM (`"type": "module"`), Node `^20 || >=22`.
+- Three source layers under `src/`:
+  - `src/backend`: Fastify HTTP/WebSocket server, role/session runtime (`node-pty`), services, adapters, gateway channels, and harness templates. Entry point `src/main.ts` -> `src/backend/server.ts`.
+  - `src/frontend`: React 19 + Vite single-page GUI, embedded terminals via `@xterm/xterm`, app/session state stores.
+  - `src/shared`: cross-layer TypeScript types, constants, and zod-backed validation helpers; imported by both backend and frontend.
+- Runtime model: one Fastify backend (default port 4173) plus a Vite dev server (default port 5173, proxies `/api` and `/ws` to backend). Each Claude Code role runs as a real `pty` process the backend supervises.
+- VCM roles: `project-manager`, `architect`, `coder`, `reviewer`, optional `gate-reviewer`, plus tool roles (translator, harness-engineer). Role definitions live in `src/shared/constants.ts`.
+- The harness this repo installs into other projects is authored in `src/backend/templates/harness/**`. Editing harness behavior for downstream users means editing those templates, not the generated files in a target repo.
+- Durable local app state lives outside the repo under `vcmDataDir` (`VCM_DATA_DIR` or `~/.vcm`); per-task runtime state lives under `<taskRepoRoot>/.ai/vcm/`.
+
+## Project Constraints
+
+- Do not break the `src/shared` boundary: `shared` must not import from `backend` or `frontend`; `frontend` and `backend` may depend on `shared` but not on each other.
+- Backend tsconfig (`tsconfig.node.json`) and frontend tsconfig (`tsconfig.json`) are separate; `npm run typecheck` runs both. Keep new files inside the correct `include` globs.
+- Frontend talks to the backend only through `src/frontend/state/api-client.ts` and the WebSocket terminal client; do not scatter raw `fetch`/socket calls in components.
+- Background/long-running work is constrained by the VCM background-job rules in the managed block below; never detach processes.
+- The published npm package ships only built output (`dist`, `dist-frontend`, `docs`, `scripts`, `README.md`). Do not assume `src/` is shipped; keep runtime-needed assets in shipped paths.
+- Treat `package.json`, lockfiles, and build/deploy config as out of scope for harness bootstrap edits.
+
 <!-- VCM:BEGIN version=1 -->
 ## VCM Start Here
 
