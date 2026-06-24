@@ -65,7 +65,7 @@ describe("lark-registration", () => {
     expect(begin).toEqual({
       domain: "lark",
       deviceCode: "device-1",
-      qrUrl: "https://accounts.larksuite.com/qr?existing=1&from=hermes&tp=hermes",
+      qrUrl: "https://accounts.larksuite.com/qr?existing=1&from=vcm&tp=vcm",
       userCode: "ABCD",
       intervalSeconds: 3,
       expiresInSeconds: 600

@@ -249,11 +249,11 @@ function appendQrTrackingParams(value: string): string {
   }
   try {
     const url = new URL(value);
-    url.searchParams.set("from", "hermes");
-    url.searchParams.set("tp", "hermes");
+    url.searchParams.set("from", "vcm");
+    url.searchParams.set("tp", "vcm");
     return url.toString();
   } catch {
-    return `${value}${value.includes("?") ? "&" : "?"}from=hermes&tp=hermes`;
+    return `${value}${value.includes("?") ? "&" : "?"}from=vcm&tp=vcm`;
   }
 }
 
