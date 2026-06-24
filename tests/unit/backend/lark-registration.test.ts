@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 import { createLarkRegistrationClient } from "../../../src/backend/gateway/channels/lark-registration.js";
 
 describe("lark-registration", () => {
-  it("uses Hermes QR parameters and parses data-wrapped registration responses", async () => {
+  it("uses VCM QR parameters and parses data-wrapped registration responses", async () => {
     const requests: Array<{ url: string; body: string }> = [];
     const fetchMock = async (url: string | URL | Request, init?: RequestInit): Promise<Response> => {
       const urlText = String(url);

@@ -59,10 +59,11 @@ export function createLarkChannel(options: LarkChannelOptions = {}): GatewayChan
       ready: Promise.resolve(),
       error: null
     };
+    const sdkDomain = input.domain === "lark" ? Lark.Domain.Lark : Lark.Domain.Feishu;
     const client = new Lark.Client({
       appId: input.appId,
       appSecret: input.appSecret,
-      domain: input.domain
+      domain: sdkDomain
     });
     const dispatcher = new Lark.EventDispatcher({}).register({
       "im.message.receive_v1": async (data: unknown) => {
@@ -78,7 +79,7 @@ export function createLarkChannel(options: LarkChannelOptions = {}): GatewayChan
       const wsClient = new Lark.WSClient({
         appId: input.appId,
         appSecret: input.appSecret,
-        domain: input.domain,
+        domain: sdkDomain,
         source: "vcm-gateway",
         autoReconnect: true,
         loggerLevel: options.loggerLevel as never,
