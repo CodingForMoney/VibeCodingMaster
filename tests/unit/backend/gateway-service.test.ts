@@ -225,32 +225,30 @@ describe("gateway-service long connection", () => {
     service.stop();
   });
 
-  it("requires Lark pairing before accepting commands", async () => {
+  it("uses the most recent active Lark chat without pairing", async () => {
     const settings = createSettings({
       channel: "lark",
       binding: {
         appId: "cli_test",
-        appSecret: "secret_test",
-        pairingCode: "ABCDEFGH",
-        pairingCodeExpiresAt: "2999-06-11T00:10:00.000Z"
+        appSecret: "secret_test"
       } as Partial<GatewaySettingsFile["binding"]> as GatewaySettingsFile["binding"]
     });
     const sentTexts: string[] = [];
     const channel = createLarkTestChannel([
       { messageId: "m1", fromUserId: "ou_1", chatId: "oc_1", chatType: "dm", text: "/status" },
-      { messageId: "m2", fromUserId: "ou_1", chatId: "oc_1", chatType: "dm", text: "/bind ABCDEFGH" },
-      { messageId: "m3", fromUserId: "ou_1", chatId: "oc_1", chatType: "dm", text: "/status" }
+      { messageId: "m2", fromUserId: "ou_2", chatId: "oc_2", chatType: "group", text: "/status" }
     ], sentTexts);
     const service = createService({ settings, channel });
 
     await service.start();
-    await waitFor(() => sentTexts.length === 3);
+    await waitFor(() => sentTexts.length === 2);
 
-    expect(sentTexts[0]).toContain("Lark Gateway is not paired.");
-    expect(sentTexts[1]).toContain("Lark Gateway bound.");
-    expect(sentTexts[2]).toContain("Gateway: off / polling");
-    expect(settings.current().binding.boundUserId).toBe("ou_1");
+    expect(sentTexts[0]).toContain("Gateway: off / polling");
+    expect(sentTexts[0]).toContain("Active Lark chat: yes");
+    expect(sentTexts[1]).toContain("Gateway: off / polling");
+    expect(settings.current().binding.boundUserId).toBe("ou_2");
     expect(settings.current().binding.chatIds.ou_1).toBe("oc_1");
+    expect(settings.current().binding.chatIds.ou_2).toBe("oc_2");
     service.stop();
   });
 
@@ -581,8 +579,7 @@ function createSettings(initial: Partial<GatewaySettingsFile> = {}): GatewaySett
           appId: settings.binding.appId,
           appIdConfigured: Boolean(settings.binding.appId),
           appSecretConfigured: Boolean(settings.binding.appSecret),
-          homeChatId: settings.binding.homeChatId,
-          pairingCodeExpiresAt: settings.binding.pairingCodeExpiresAt
+          homeChatId: settings.binding.homeChatId
         },
         pendingConfirmations: settings.pendingConfirmations,
         lastPollStatus: settings.lastPollStatus,

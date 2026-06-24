@@ -1,4 +1,3 @@
-import { randomInt } from "node:crypto";
 import { readFile } from "node:fs/promises";
 import { CORE_VCM_ROLE_DEFINITIONS, GATE_REVIEWER_ROLE_DEFINITION, VCM_ROLE_NAMES } from "../../shared/constants.js";
 import type {
@@ -8,7 +7,6 @@ import type {
   CheckGatewayQrLoginRequest,
   CheckGatewayQrLoginResult,
   CheckGatewayLarkRegistrationResult,
-  CreateGatewayPairingCodeResult,
   GatewayStatus,
   StartGatewayLarkRegistrationResult,
   StartGatewayQrLoginResult,
@@ -56,7 +54,6 @@ export interface GatewayService {
   getStatus(): Promise<GatewayStatus>;
   updateSettings(input: UpdateGatewaySettingsRequest): Promise<GatewayStatus>;
   resetBinding(): Promise<GatewayStatus>;
-  createPairingCode(): Promise<CreateGatewayPairingCodeResult>;
   startQrLogin(): Promise<StartGatewayQrLoginResult>;
   checkQrLogin(input?: CheckGatewayQrLoginRequest): Promise<CheckGatewayQrLoginResult>;
   startLarkRegistration(): Promise<StartGatewayLarkRegistrationResult>;
@@ -135,7 +132,6 @@ interface GatewayOutputRenderResult {
 }
 
 const QR_LOGIN_TTL_MS = 8 * 60 * 1000;
-const PAIRING_CODE_TTL_MS = 10 * 60 * 1000;
 const CLOSE_CONFIRM_TTL_MS = 10 * 60 * 1000;
 const POLL_ERROR_BACKOFF_MS = 2_000;
 const POLL_LONG_BACKOFF_MS = 30_000;
@@ -344,39 +340,11 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
       return;
     }
 
-    if (settings.channel === "lark" && !settings.binding.boundUserId) {
-      settings = await saveInboundMetadata(settings, update);
-      const pairing = parseLarkPairingCommand(update.text);
-      if (!pairing || !isValidPairingCode(settings, pairing)) {
-        await reply(settings, update.fromUserId, "Lark Gateway is not paired. Generate a pairing code in desktop VCM, then send /bind CODE here.");
-        await recordMessageStatus("inbound", "ignored", update.text, "lark gateway not paired");
-        return;
-      }
-      await deps.settings.saveSettings({
-        ...settings,
-        binding: {
-          ...settings.binding,
-          boundUserId: update.fromUserId,
-          loginUserId: update.fromUserId,
-          pairingCode: null,
-          pairingCodeExpiresAt: null,
-          chatIds: update.chatId
-            ? {
-                ...settings.binding.chatIds,
-                [update.fromUserId]: update.chatId
-              }
-            : settings.binding.chatIds
-        },
-        updatedAt: now()
-      });
-      await reply(await deps.settings.loadSettings(), update.fromUserId, "Lark Gateway bound. Send /help for available commands.");
-      await recordMessageStatus("inbound", "ok", update.text, undefined, "bind");
-      return;
-    }
+    settings = await saveInboundMetadata(settings, update, {
+      bind: settings.channel === "lark" ? "always" : "if-missing"
+    });
 
-    settings = await saveInboundMetadata(settings, update, { bindIfMissing: true });
-
-    if (settings.binding.boundUserId !== update.fromUserId) {
+    if (settings.channel !== "lark" && settings.binding.boundUserId !== update.fromUserId) {
       await reply(settings, update.fromUserId, "This VCM gateway is already bound to another user.");
       await recordMessageStatus("inbound", "ignored", update.text, "unbound user");
       return;
@@ -414,13 +382,21 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
   async function saveInboundMetadata(
     settings: GatewaySettingsFile,
     update: GatewayInboundMessage,
-    options: { bindIfMissing?: boolean } = {}
+    options: { bind?: "always" | "if-missing" | "never" } = {}
   ): Promise<GatewaySettingsFile> {
+    const bindMode = options.bind ?? "never";
     return deps.settings.saveSettings({
       ...settings,
       binding: {
         ...settings.binding,
-        boundUserId: options.bindIfMissing ? settings.binding.boundUserId ?? update.fromUserId : settings.binding.boundUserId,
+        boundUserId: bindMode === "always"
+          ? update.fromUserId
+          : bindMode === "if-missing"
+            ? settings.binding.boundUserId ?? update.fromUserId
+            : settings.binding.boundUserId,
+        loginUserId: bindMode === "always"
+          ? update.fromUserId
+          : settings.binding.loginUserId,
         contextTokens: update.contextToken
           ? {
               ...settings.binding.contextTokens,
@@ -914,25 +890,17 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
   async function statusText(settings: GatewaySettingsFile): Promise<string> {
     const synced = await syncDesktopContext(settings);
     const project = await deps.projectService.getCurrentProject();
+    const bindingLine = synced.channel === "lark"
+      ? `Active Lark chat: ${synced.binding.boundUserId ? "yes" : "none"}`
+      : `Binding: ${synced.binding.boundUserId ? "bound" : "not bound"}`;
     return [
       `Gateway: ${synced.enabled ? "on" : "off"}${isRunning() ? " / polling" : ""}`,
-      `Binding: ${synced.binding.boundUserId ? "bound" : "not bound"}`,
+      bindingLine,
       `Translation: ${synced.translationEnabled ? "on" : "off"}`,
       `Project: ${project?.repoRoot ?? synced.currentProjectId ?? "none"}`,
       `Task: ${synced.currentTaskSlug ?? "none"}`,
       `Last poll: ${synced.lastPollStatus.state}${synced.lastPollStatus.error ? ` (${synced.lastPollStatus.error})` : ""}`
     ].join("\n");
-  }
-
-  function parseLarkPairingCommand(text: string): string | null {
-    const match = text.trim().match(/^\/bind\s+([A-Z0-9]{6,12})$/i);
-    return match?.[1]?.toUpperCase() ?? null;
-  }
-
-  function isValidPairingCode(settings: GatewaySettingsFile, code: string): boolean {
-    const expected = settings.binding.pairingCode?.toUpperCase();
-    const expiresAt = settings.binding.pairingCodeExpiresAt;
-    return Boolean(expected && expected === code.toUpperCase() && expiresAt && Date.parse(expiresAt) > Date.now());
   }
 
   return {
@@ -972,40 +940,6 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
       larkRegistrationState = null;
       const settings = await deps.settings.resetBinding();
       return deps.settings.expose(settings, isRunning());
-    },
-    async createPairingCode() {
-      const settings = await deps.settings.loadSettings();
-      if (settings.channel !== "lark") {
-        throw new VcmError({
-          code: "GATEWAY_PAIRING_UNSUPPORTED",
-          message: "Pairing codes are only available for Lark Gateway.",
-          statusCode: 409
-        });
-      }
-      if (!settings.binding.appId || !settings.binding.appSecret) {
-        throw new VcmError({
-          code: "GATEWAY_LARK_CONFIG_MISSING",
-          message: "Complete Lark QR Setup before creating a pairing code.",
-          statusCode: 409
-        });
-      }
-      const code = randomPairingCode();
-      const expiresAt = new Date(Date.now() + PAIRING_CODE_TTL_MS).toISOString();
-      const nextSettings = await deps.settings.saveSettings({
-        ...settings,
-        binding: {
-          ...settings.binding,
-          pairingCode: code,
-          pairingCodeExpiresAt: expiresAt
-        },
-        updatedAt: now()
-      });
-      await ensurePolling();
-      return {
-        code,
-        expiresAt,
-        status: deps.settings.expose(nextSettings, isRunning())
-      };
     },
     async startQrLogin() {
       const settings = await deps.settings.loadSettings();
@@ -1163,8 +1097,6 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
           larkOpenId: result.openId ?? null,
           larkBotName: result.botName ?? null,
           larkBotOpenId: result.botOpenId ?? null,
-          pairingCode: null,
-          pairingCodeExpiresAt: null,
           getUpdatesBuf: ""
         },
         lastPollStatus: {
@@ -1537,15 +1469,6 @@ function formatAheadBehind(project: ProjectSummary): string {
     return `ahead ${ahead}, behind ${behind}`;
   }
   return ahead > 0 ? `ahead ${ahead}` : `behind ${behind}`;
-}
-
-function randomPairingCode(): string {
-  const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
-  let out = "";
-  for (let index = 0; index < 8; index += 1) {
-    out += alphabet[randomInt(alphabet.length)];
-  }
-  return out;
 }
 
 function sleep(ms: number, signal: AbortSignal): Promise<void> {

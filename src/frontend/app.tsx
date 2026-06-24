@@ -1084,20 +1084,6 @@ export function App() {
               setGatewayStatus(nextStatus);
             }, "Update Gateway translation setting");
           }}
-          onCreateGatewayPairingCode={async () => {
-            setBusy(true);
-            setError("");
-            try {
-              const result = await apiClient.createGatewayPairingCode();
-              setGatewayStatus(result.status);
-              return result;
-            } catch (caught) {
-              setError(formatUiError("Create Gateway pairing code", caught));
-              throw caught;
-            } finally {
-              setBusy(false);
-            }
-          }}
           onStartGatewayQrLogin={() => {
             void withBusy(async () => {
               const result = await apiClient.startGatewayQrLogin();

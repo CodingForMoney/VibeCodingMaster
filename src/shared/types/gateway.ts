@@ -27,7 +27,6 @@ export interface GatewayBindingStatus {
   larkBotName?: string | null;
   larkBotOpenId?: string | null;
   homeChatId: string | null;
-  pairingCodeExpiresAt: string | null;
 }
 
 export interface GatewayPollStatus {
@@ -117,10 +116,4 @@ export interface CheckGatewayLarkRegistrationResult {
   larkBotName?: string | null;
   larkBotOpenId?: string | null;
   gatewayStatus?: GatewayStatus;
-}
-
-export interface CreateGatewayPairingCodeResult {
-  code: string;
-  expiresAt: string;
-  status: GatewayStatus;
 }

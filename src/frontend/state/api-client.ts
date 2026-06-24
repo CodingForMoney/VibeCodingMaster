@@ -4,7 +4,6 @@ import type {
   CheckGatewayQrLoginRequest,
   CheckGatewayQrLoginResult,
   CheckGatewayLarkRegistrationResult,
-  CreateGatewayPairingCodeResult,
   GatewayStatus,
   StartGatewayLarkRegistrationResult,
   StartGatewayQrLoginResult,
@@ -509,11 +508,6 @@ export const apiClient = {
   },
   checkGatewayLarkRegistration() {
     return request<CheckGatewayLarkRegistrationResult>("/api/gateway/lark-registration/check", {
-      method: "POST"
-    });
-  },
-  createGatewayPairingCode() {
-    return request<CreateGatewayPairingCodeResult>("/api/gateway/pairing-code", {
       method: "POST"
     });
   },

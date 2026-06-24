@@ -221,7 +221,7 @@ The left sidebar is intentionally compact and collapsible:
 - `Settings`: `Theme`, `Flow pause alert`, `Try alert`, `Messages`, and `Events`.
 - `Translation`: global conversation translation, auto-send, target language, output scope, file translation, bootstrap, memory update, session status, and Translator session access.
 - `Gate Review Gates`: global gate switches for architecture plan, validation adequacy, and final diff.
-- `Gateway`: Weixin iLink or Lark binding, Gateway on/off, Gateway translation, QR login/setup, and Lark pairing.
+- `Gateway`: Weixin iLink or Lark setup, Gateway on/off, Gateway translation, and QR login/setup.
 - `VCM Harness`: fixed-install status, bootstrap completion checks, and the bootstrap terminal when one is running.
 - `New Task`: one `task name` input.
 - `Tasks`: task list and task status.
@@ -238,15 +238,16 @@ When VCM is connected to an active task, the bottom of the sidebar shows a task 
 
 ## Mobile Gateway
 
-VCM Gateway lets one mobile chat identity bind to one desktop VCM instance. It supports Weixin iLink and Lark. It is a mobile control surface for the current desktop VCM, not a remote terminal and not a multi-user collaboration surface.
+VCM Gateway lets mobile chat clients talk to one desktop VCM instance. It supports Weixin iLink and Lark. It is a mobile control surface for the current desktop VCM, not a remote terminal.
 
 Gateway rules:
 
 - Weixin is DM only; Lark can receive group messages only when the bot is mentioned.
-- One phone identity binds to one desktop VCM instance.
-- The phone can manage projects and tasks available to that desktop VCM instance.
+- Weixin binds one phone identity to one desktop VCM instance.
+- Lark accepts any DM or @mention from a chat that can reach the bot; the most recent active Lark chat becomes the PM reply target.
+- The active mobile chat can manage projects and tasks available to that desktop VCM instance.
 - When the desktop UI has an active task selected, Gateway uses that task automatically.
-- After binding, VCM keeps a lightweight Gateway connection for `/start` and read-only commands even when the `Gateway` toggle is off.
+- After setup, VCM keeps a lightweight Gateway connection for `/start` and read-only commands even when the `Gateway` toggle is off.
 - VCM caches the latest PM reply for each task locally, so `/start` can immediately return the current task's latest PM status when available.
 - Plain text messages go only to the current task's `project-manager`.
 - Gateway never sends directly to `architect`, `coder`, or `reviewer`.
@@ -279,11 +280,10 @@ The `Gateway` toggle is disabled until a QR login has produced a usable iLink to
 2. Click `Start QR Setup`.
 3. Scan the QR code with Lark and approve bot creation.
 4. Click `Confirm` in the setup dialog.
-5. Click `Create Pairing Code`.
-6. Send `/bind CODE` to the Lark bot before the code expires.
-7. After binding succeeds, turn `Gateway` on in the sidebar.
+5. Turn `Gateway` on in the sidebar.
+6. Send a DM to the bot, or @mention it from a group.
 
-Lark QR setup creates/configures the bot app and stores the resulting App ID/App Secret in local VCM state. The App Secret is not shown in the UI. `Reset Binding` clears the bound Lark user/chat state while keeping the saved Lark app credentials.
+Lark QR setup creates/configures the bot app and stores the resulting App ID/App Secret in local VCM state. The App Secret is not shown in the UI. Any Lark chat that can message the bot can control Gateway; VCM always treats the most recent active Lark chat as the PM reply target.
 
 When Gateway is turned on, VCM automatically turns off the browser `Flow pause alert` and disables `Try alert`. Gateway becomes the notification path, so the browser should not show blocking flow-pause dialogs while the user is managing the task from the phone.
 
@@ -296,14 +296,14 @@ When Gateway translation is on:
 - Mobile input is translated to English before being submitted to PM.
 - The prompt sent to PM includes only the translated English text with a `[VCM Gateway]` marker.
 - The original Chinese text is not included in the PM prompt.
-- PM replies are translated before VCM sends them to the bound mobile chat.
+- PM replies are translated before VCM sends them to the active mobile chat.
 - If PM reply translation fails or times out, VCM sends a translation failure notice instead of the English source. The user can send `/retry` to retry the latest failed Gateway output translation.
 
 When Gateway translation is off, plain mobile text is sent to PM as-is.
 
 ### Commands
 
-After Gateway is bound, send commands in the bound mobile conversation.
+After Gateway is configured, send commands in the active mobile conversation.
 
 When `Gateway` is off, only these commands are accepted:
 
@@ -353,9 +353,9 @@ Typical mobile flow:
 
 ### Command Behavior
 
-- `/status`: shows Gateway, binding, translation, current project, current task, and last poll status.
+- `/status`: shows Gateway, active chat, translation, current project, current task, and last poll status.
 - `/status` also adopts the current desktop project/task when one is selected.
-- `/start`: turns Gateway on from the bound mobile conversation so full mobile task operations and PM messages are allowed. If the current task has a cached latest PM reply, `/start` includes it in the response.
+- `/start`: turns Gateway on from the active mobile conversation so full mobile task operations and PM messages are allowed. If the current task has a cached latest PM reply, `/start` includes it in the response.
 - `/retry`: retries the latest failed Gateway output translation in the current VCM process.
 - `/projects`: lists the current/recent repositories known by the desktop VCM.
 - `/use-project <index-or-path>`: selects the Gateway's current project context.
@@ -378,12 +378,12 @@ Typical mobile flow:
 - If the QR dialog does not appear, refresh the page and click `Start QR Login` again.
 - If the QR status stays `wait`, confirm the login on the phone and click `Confirm` again.
 - If the QR code expires, start a new QR login.
-- If `Gateway` cannot be enabled, bind Weixin or complete Lark QR setup and pairing first.
-- If `/start` or read-only commands do not receive replies, check that the selected channel is connected and the message comes from the bound identity.
+- If `Gateway` cannot be enabled, bind Weixin or complete Lark QR setup first.
+- If `/start` or read-only commands do not receive replies, check that the selected channel is connected and that Lark messages are sent as DM or group @mentions.
 - If PM messages or task-changing commands are rejected, check that Gateway is on.
 - If plain text cannot be sent to PM, select a project and task first, and make sure the task's PM session is running and idle.
 - If PM replies are not pushed, check that Gateway is on and the PM session is producing normal Claude transcript output.
-- If PM reply translation fails, send `/retry` from the bound mobile conversation. Retry state is memory-only and is cleared when VCM restarts.
+- If PM reply translation fails, send `/retry` from the active mobile conversation. Retry state is memory-only and is cleared when VCM restarts.
 
 ## Translation
 

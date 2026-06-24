@@ -43,8 +43,6 @@ export interface GatewayBindingSettings {
   larkBotName: string | null;
   larkBotOpenId: string | null;
   homeChatId: string | null;
-  pairingCode: string | null;
-  pairingCodeExpiresAt: string | null;
   getUpdatesBuf: string;
   contextTokens: Record<string, string>;
   chatIds: Record<string, string>;
@@ -196,8 +194,7 @@ export function createGatewaySettingsService(deps: GatewaySettingsServiceDeps): 
           larkOpenId: settings.binding.larkOpenId,
           larkBotName: settings.binding.larkBotName,
           larkBotOpenId: settings.binding.larkBotOpenId,
-          homeChatId: settings.binding.homeChatId,
-          pairingCodeExpiresAt: settings.binding.pairingCodeExpiresAt
+          homeChatId: settings.binding.homeChatId
         },
         pendingConfirmations: settings.pendingConfirmations,
         lastPollStatus: settings.lastPollStatus,
@@ -253,8 +250,6 @@ export function normalizeSettings(
       larkBotName: normalizeNullableString(bindingInput.larkBotName),
       larkBotOpenId: normalizeNullableString(bindingInput.larkBotOpenId),
       homeChatId: normalizeNullableString(bindingInput.homeChatId),
-      pairingCode: normalizeNullableString(bindingInput.pairingCode),
-      pairingCodeExpiresAt: normalizeNullableString(bindingInput.pairingCodeExpiresAt),
       getUpdatesBuf: typeof bindingInput.getUpdatesBuf === "string" ? bindingInput.getUpdatesBuf : "",
       contextTokens: isObject(bindingInput.contextTokens)
         ? normalizeStringRecord(bindingInput.contextTokens)
@@ -293,8 +288,6 @@ function createDefaultBinding(defaultBaseUrl = DEFAULT_BASE_URL): GatewayBinding
     larkBotName: null,
     larkBotOpenId: null,
     homeChatId: null,
-    pairingCode: null,
-    pairingCodeExpiresAt: null,
     getUpdatesBuf: "",
     contextTokens: {},
     chatIds: {}

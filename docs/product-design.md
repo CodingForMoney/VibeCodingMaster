@@ -741,36 +741,38 @@ Gateway product rules:
 
 - Weixin is DM only; Lark can receive group messages only when the bot is
   mentioned.
-- One mobile chat identity binds to one desktop VCM instance.
-- Binding is not tied to one project or one task.
-- The bound phone can select among the projects and tasks available to the
-  desktop VCM instance.
-- After binding succeeds, VCM keeps a Gateway channel connection even when
+- Weixin binds one mobile chat identity to one desktop VCM instance.
+- Lark accepts any DM or group @mention that can reach the bot, and the most
+  recent active Lark chat becomes the PM reply target.
+- The active mobile chat is not tied to one project or one task.
+- The active mobile chat can select among the projects and tasks available to
+  the desktop VCM instance.
+- After setup succeeds, VCM keeps a Gateway channel connection even when
   Gateway is off; only `/help`, `/start`, `/status`, `/projects`, and `/tasks`
-  are accepted in that state. `/start` turns Gateway on from the bound mobile
-  chat identity.
+  are accepted in that state. `/start` turns Gateway on from the active mobile
+  chat.
 - VCM caches the latest PM reply per task locally. When `/start` turns Gateway
   on and the current task has a cached PM reply, the response includes that
   latest PM reply so the mobile user can resume with context.
 - Plain mobile text is sent only to the current task's `project-manager`.
 - Gateway never sends directly to `architect`, `coder`, or `reviewer`.
-- Gateway can push PM assistant replies to the bound mobile chat whenever
+- Gateway can push PM assistant replies to the active mobile chat whenever
   gateway is enabled, even if that PM turn was started from desktop VCM.
 - When gateway translation is enabled, mobile input is translated to English
   before PM receives it, and PM English replies are translated before the mobile
   chat receives them.
 - If PM reply translation fails or times out, Gateway sends a translation
-  failure notice instead of the English source. The bound phone can send
+  failure notice instead of the English source. The active mobile chat can send
   `/retry` to retry the latest failed output translation kept in memory.
 - The PM prompt does not include the original Chinese text.
-- There is no multi-user allowlist. The security model is one bound mobile
-  identity.
+- There is no multi-user allowlist. Weixin is a bound identity model; Lark is a
+  trusted-chat bot model.
 
 The Weixin channel uses Tencent iLink QR login, `getupdates` long polling, and
 `sendmessage` text replies. The Lark channel uses QR setup to create/configure a
 bot app, stores the resulting App ID/App Secret locally, then uses WebSocket
-event delivery and a short-lived `/bind CODE` pairing flow. Gateway details and
-implementation plan live in `docs/gateway-design.md`.
+event delivery. Gateway details and implementation plan live in
+`docs/gateway-design.md`.
 
 ## 15. Local State
 
@@ -795,8 +797,8 @@ Gateway state and audit logs:
 <vcmDataDir>/gateway/audit.jsonl
 ```
 
-Gateway credentials, iLink tokens, DM binding identity, cursors, context tokens,
-and audit logs live under `vcmDataDir`. VCM resolves `vcmDataDir` from
+Gateway credentials, iLink tokens, active chat metadata, cursors, context
+tokens, and audit logs live under `vcmDataDir`. VCM resolves `vcmDataDir` from
 `VCM_DATA_DIR`; if it is unset or empty, VCM uses `~/.vcm`.
 
 Repository-level VCM state:
@@ -881,8 +883,9 @@ VCM V1 is successful when:
 - Round completion detection waits for the final role in a chained conversation and can alert with prompt plus sound.
 - Translation settings save to `<vcmDataDir>/settings.json`.
 - Translation reads Claude transcript JSONL reliably after start, resume, and restart.
-- Gateway can bind one Weixin DM identity to the desktop VCM instance, send
-  translated plain text to PM, and push translated PM replies back to Weixin.
+- Gateway can bind one Weixin DM identity or use the most recent active Lark
+  chat, send translated plain text to PM, and push translated PM replies back to
+  the active mobile chat.
 - Terminal and translation panel have equal, stable reading space.
 - Harness install/update preserves user content outside VCM managed blocks.
 - Completed tasks can cleanly remove their worktree and VCM task metadata without affecting other tasks.

@@ -16,7 +16,6 @@ import type {
 import type {
   CheckGatewayQrLoginResult,
   CheckGatewayLarkRegistrationResult,
-  CreateGatewayPairingCodeResult,
   GatewayStatus,
   StartGatewayLarkRegistrationResult,
   StartGatewayQrLoginResult,
@@ -86,7 +85,6 @@ export interface ProjectDashboardProps {
   onGatewayEnabledChange(enabled: boolean): void;
   onGatewaySettingsChange(input: UpdateGatewaySettingsRequest): Promise<void>;
   onGatewayTranslationChange(enabled: boolean): void;
-  onCreateGatewayPairingCode(): Promise<CreateGatewayPairingCodeResult>;
   onStartGatewayQrLogin(): void;
   onStartGatewayLarkRegistration(): void;
   onResetGatewayBinding(): void;
@@ -162,7 +160,6 @@ export function ProjectDashboard({
   onGatewayEnabledChange,
   onGatewaySettingsChange,
   onGatewayTranslationChange,
-  onCreateGatewayPairingCode,
   onStartGatewayQrLogin,
   onStartGatewayLarkRegistration,
   onResetGatewayBinding,
@@ -412,7 +409,6 @@ export function ProjectDashboard({
           status={gatewayStatus}
           onEnabledChange={onGatewayEnabledChange}
           onSettingsChange={onGatewaySettingsChange}
-          onCreatePairingCode={onCreateGatewayPairingCode}
           onResetBinding={onResetGatewayBinding}
           onStartLarkRegistration={onStartGatewayLarkRegistration}
           onStartQrLogin={onStartGatewayQrLogin}
@@ -754,7 +750,6 @@ function GatewayPanel({
   busy,
   larkRegistration,
   larkRegistrationCheck,
-  onCreatePairingCode,
   onEnabledChange,
   onResetBinding,
   onSettingsChange,
@@ -768,7 +763,6 @@ function GatewayPanel({
   busy?: boolean;
   larkRegistration: StartGatewayLarkRegistrationResult | null;
   larkRegistrationCheck: CheckGatewayLarkRegistrationResult | null;
-  onCreatePairingCode(): Promise<CreateGatewayPairingCodeResult>;
   onEnabledChange(enabled: boolean): void;
   onResetBinding(): void;
   onSettingsChange(input: UpdateGatewaySettingsRequest): Promise<void>;
@@ -779,18 +773,13 @@ function GatewayPanel({
   qrLogin: StartGatewayQrLoginResult | null;
   status: GatewayStatus | null;
 }) {
-  const [pairingCode, setPairingCode] = useState<CreateGatewayPairingCodeResult | null>(null);
   const isLark = status?.channel === "lark";
   const canEnable = status?.channel === "lark"
     ? Boolean(status.binding.appIdConfigured && status.binding.appSecretConfigured)
     : Boolean(status?.binding.tokenConfigured);
   const isBound = status?.channel === "lark"
-    ? Boolean(status.binding.boundUserId)
+    ? Boolean(status.binding.appIdConfigured && status.binding.appSecretConfigured)
     : Boolean(status?.binding.tokenConfigured);
-
-  useEffect(() => {
-    setPairingCode(null);
-  }, [status?.channel, status?.binding.appIdConfigured, status?.binding.appSecretConfigured]);
 
   return (
     <div className="gateway-panel">
@@ -813,7 +802,7 @@ function GatewayPanel({
           className="sidebar-switch"
           disabled={busy || !status || (!status.enabled && !canEnable)}
           label="Gateway"
-          title={canEnable ? "Enable or disable PM messages and task-changing Gateway commands" : "Configure and bind the selected Gateway channel first"}
+          title={canEnable ? "Enable or disable PM messages and task-changing Gateway commands" : "Configure the selected Gateway channel first"}
           onChange={(checked) => onEnabledChange(checked)}
         />
         <SwitchControl
@@ -823,30 +812,16 @@ function GatewayPanel({
           label="Translation"
           onChange={(checked) => onTranslationChange(checked)}
         />
-        {isBound ? (
+        {isLark ? (
+          <button type="button" disabled={busy} onClick={onStartLarkRegistration}>
+            Start QR Setup
+          </button>
+        ) : isBound ? (
           <button className="danger-button" type="button" disabled={busy} onClick={onResetBinding}>
             Reset Binding
           </button>
-        ) : !isLark ? (
-          <button type="button" disabled={busy} onClick={onStartQrLogin}>Start QR Login</button>
         ) : (
-          <>
-            <button type="button" disabled={busy} onClick={onStartLarkRegistration}>
-              Start QR Setup
-            </button>
-            <button
-              type="button"
-              disabled={busy || !canEnable}
-              title={canEnable ? "Create a short code, then send /bind CODE to the Lark bot" : "Complete Lark QR Setup first"}
-              onClick={() => {
-                void onCreatePairingCode().then((result) => {
-                  setPairingCode(result);
-                }).catch(() => undefined);
-              }}
-            >
-              Create Pairing Code
-            </button>
-          </>
+          <button type="button" disabled={busy} onClick={onStartQrLogin}>Start QR Login</button>
         )}
       </div>
 
@@ -862,13 +837,6 @@ function GatewayPanel({
               QR setup: {larkRegistrationCheck?.status ?? larkRegistration.status}
               {larkRegistrationCheck?.message ? ` · ${larkRegistrationCheck.message}` : ""}
             </p>
-          ) : null}
-          {pairingCode ? (
-            <p className="muted">
-              Send <code>/bind {pairingCode.code}</code> to the Lark bot before {formatTime(pairingCode.expiresAt)}.
-            </p>
-          ) : status?.binding.pairingCodeExpiresAt ? (
-            <p className="muted">Pairing code active until {formatTime(status.binding.pairingCodeExpiresAt)}.</p>
           ) : null}
         </div>
       ) : qrLogin ? (
