@@ -314,7 +314,6 @@ async function main() {
   await assertDirectory(projectRoot, "Project root");
 
   const manifest = await buildManifest(projectRoot);
-  await installManifest({ projectRoot, manifest, dryRun, operations });
   for (const definition of MANAGED_FILES) {
     await installManagedFile({ projectRoot, definition, dryRun, operations });
   }
@@ -330,6 +329,13 @@ async function main() {
   }
   await removeLegacyFlatSkillFiles({ projectRoot, dryRun, operations });
   await removeLegacyCodexHarnessPaths({ projectRoot, dryRun, operations });
+  await installManifest({
+    projectRoot,
+    manifest,
+    dryRun,
+    operations,
+    forceWrite: hasRealHarnessChange(operations)
+  });
 
   printReport({ projectRoot, dryRun, operations });
 }
@@ -507,12 +513,16 @@ function directoryCategory(directory) {
   return "harness-tool-directory";
 }
 
-async function installManifest({ projectRoot, manifest, dryRun, operations }) {
+async function installManifest({ projectRoot, manifest, dryRun, operations, forceWrite = false }) {
   const targetPath = path.join(projectRoot, MANIFEST_PATH);
   const currentManifest = await readOptionalJson(targetPath);
 
   if (currentManifest && manifestBodyEqual(currentManifest, manifest)) {
     operations.push(skip(MANIFEST_PATH, "unchanged"));
+    return;
+  }
+  if (!forceWrite && currentManifest && manifestBodyEqual(currentManifest, manifest, { ignoreHarnessVersion: true })) {
+    operations.push(skip(MANIFEST_PATH, "version-only change ignored"));
     return;
   }
 
@@ -827,14 +837,25 @@ async function pathExists(absolutePath) {
   );
 }
 
-function manifestBodyEqual(left, right) {
+function manifestBodyEqual(left, right, options = {}) {
   const normalizedLeft = { ...left };
   const normalizedRight = { ...right };
   delete normalizedLeft.installedAt;
   delete normalizedLeft.updatedAt;
   delete normalizedRight.installedAt;
   delete normalizedRight.updatedAt;
+  if (options.ignoreHarnessVersion) {
+    delete normalizedLeft.harnessVersion;
+    delete normalizedRight.harnessVersion;
+  }
   return JSON.stringify(normalizedLeft) === JSON.stringify(normalizedRight);
+}
+
+function hasRealHarnessChange(operations) {
+  return operations.some((operation) =>
+    operation.path !== MANIFEST_PATH &&
+    (operation.status === "done" || operation.status === "plan")
+  );
 }
 
 function resolveInside(root, relativePath) {

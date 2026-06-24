@@ -1635,11 +1635,7 @@ async function analyzeHarnessManifest(
     };
   }
   if (installedVersion !== vcmVersion) {
-    return {
-      path: MANIFEST_PATH,
-      action: "update",
-      reason: `VCM fixed harness manifest version is ${installedVersion ?? "missing"}; current VCM version is ${vcmVersion}.`
-    };
+    return undefined;
   }
 
   return undefined;

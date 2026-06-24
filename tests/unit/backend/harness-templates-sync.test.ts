@@ -1,5 +1,5 @@
 import { execFile, execFileSync } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, unlink } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, unlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -35,6 +35,24 @@ describe("harness templates stay in sync with the script installer", () => {
       "script installer output must exactly match the backend harness templates"
     ).toEqual([]);
     expect(status.needsApply).toBe(false);
+  }, 30_000);
+
+  it("does not rewrite the harness manifest for a version-only change", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-harness-manifest-"));
+    await execFileAsync(process.execPath, [installerPath, tmpRepo]);
+    const manifestPath = path.join(tmpRepo, ".ai/vcm-harness-manifest.json");
+    const manifest = JSON.parse(await readFile(manifestPath, "utf8")) as Record<string, unknown>;
+    const staleManifest = {
+      ...manifest,
+      harnessVersion: "0.3.0-fixed"
+    };
+    await writeFile(manifestPath, `${JSON.stringify(staleManifest, null, 2)}\n`, "utf8");
+
+    const { stdout } = await execFileAsync(process.execPath, [installerPath, tmpRepo]);
+    const nextManifest = JSON.parse(await readFile(manifestPath, "utf8")) as Record<string, unknown>;
+
+    expect(nextManifest.harnessVersion).toBe("0.3.0-fixed");
+    expect(stdout).toContain("SKIP .ai/vcm-harness-manifest.json - version-only change ignored");
   }, 30_000);
 
   it("installs a Bash guard hook that survives stale CLAUDE_PROJECT_DIR and fails open when missing", async () => {

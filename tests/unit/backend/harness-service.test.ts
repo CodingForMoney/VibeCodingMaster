@@ -266,7 +266,7 @@ describe("createHarnessService", () => {
     expect(content).toContain("## VCM Start Here");
   });
 
-  it("marks the fixed harness stale when manifest version differs from the VCM version", async () => {
+  it("ignores fixed harness manifest version-only drift", async () => {
     const fs = createMemoryFs();
     await createHarnessService({ fs }).applyHarness("/repo");
     await fs.writeJson("/repo/.ai/vcm-harness-manifest.json", {
@@ -286,15 +286,13 @@ describe("createHarnessService", () => {
 
     const status = await service.getHarnessStatus("/repo");
 
-    expect(status.needsApply).toBe(true);
-    expect(status.plannedChanges).toContainEqual({
-      path: ".ai/vcm-harness-manifest.json",
-      action: "update",
-      reason: "VCM fixed harness manifest version is 0.3.0-fixed; current VCM version is 0.4.21."
-    });
+    expect(status.needsApply).toBe(false);
+    expect(status.plannedChanges).not.toContainEqual(expect.objectContaining({
+      path: ".ai/vcm-harness-manifest.json"
+    }));
   });
 
-  it("does not consider bootstrap ready when the fixed harness manifest is stale", async () => {
+  it("keeps bootstrap available when only the fixed harness manifest version is stale", async () => {
     const fs = createMemoryFs();
     await createHarnessService({ fs }).applyHarness("/repo");
     await fs.writeJson("/repo/.ai/vcm-harness-manifest.json", {
@@ -316,14 +314,12 @@ describe("createHarnessService", () => {
 
     const status = await service.getBootstrapStatus("/repo");
 
-    expect(status.status).toBe("not_ready");
-    expect(status.canStart).toBe(false);
+    expect(status.status).not.toBe("not_ready");
+    expect(status.canStart).toBe(true);
     expect(status.checks[0]).toMatchObject({
       key: "fixed-harness",
-      status: "incomplete",
-      path: ".ai/vcm-harness-manifest.json"
+      status: "ok"
     });
-    expect(status.checks[0]?.detail).toContain("current VCM version is 0.4.21");
   });
 
   it("lets Harness Studio edit project-owned content outside managed blocks", async () => {
