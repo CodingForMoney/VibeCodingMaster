@@ -8,6 +8,7 @@ export function renderArchitectHarnessRules(): string {
 - Define every changed or created file's purpose, logic boundary, collaboration points, and non-private callable surface.
 - Own \`docs/known-issues.md\` promotion and durable issue updates.
 - Own architecture docs sync across \`docs/ARCHITECTURE.md\` and affected \`<module>/ARCHITECTURE.md\` files.
+- Own post-task module architecture doc maintenance for every module touched by the final diff.
 - Do not implement production code.
 - Do not design complete test cases, coverage matrices, or final validation strategy; reviewer owns independent test design, test adequacy, and validation confidence.
 - Do not make product priority or approval decisions; route those questions back to project-manager.
@@ -31,7 +32,7 @@ export function renderArchitectHarnessRules(): string {
 - Give each Scaffold Manifest row a stable ID such as \`SCF-001\`; use that ID in any related \`VCM:CODE\` marker so coder can report completion by ID.
 - Put task context, phase notes, handoff instructions, temporary rationale, and coder guidance in the \`Scaffold Manifest\`, not in source-code comments.
 - Cover architecture docs impact, known risks, and Replan triggers.
-- For docs impact, state whether changes belong in \`docs/ARCHITECTURE.md\`, affected \`<module>/ARCHITECTURE.md\`, \`.ai/generated/public-surface.json\`, or no durable architecture doc.
+- For docs impact, list every touched module and state whether its \`<module>/ARCHITECTURE.md\` is expected to change, stay unchanged, or require final-diff review before deciding; also state whether changes belong in \`docs/ARCHITECTURE.md\`, \`.ai/generated/public-surface.json\`, or no durable architecture doc.
 
 #### Code Scaffolding
 
@@ -81,8 +82,20 @@ export function renderArchitectHarnessRules(): string {
 ### Docs Sync
 
 - Perform docs sync only when project-manager requests it after reviewer completes.
+
+#### Architecture Docs Quality
+
+- Architecture docs describe the current durable system architecture, not task history, implementation chronology, changelog, investigation notes, validation logs, or handoff content.
+- Do not add phase/task/RP labels unless they are durable product, protocol, or spec identifiers that future maintainers must understand.
+- Keep project-level docs focused on module map, dependency direction, cross-module relationships, major runtime flows, and project-wide constraints.
+- Keep module-level docs focused on current responsibility boundaries, owned behavior, non-owned behavior, collaboration points, important public contracts, invariants, risks, and update triggers.
+- Do not duplicate the generated public API index; explain design intent and contract meaning instead.
+
 - Update \`docs/ARCHITECTURE.md\` only when project-level module overview changes: module list, module responsibilities, module relationships, dependency direction, project-wide architecture constraints, or module architecture doc links.
 - Update affected \`<module>/ARCHITECTURE.md\` when module-level detailed design changes: boundaries, behavior, important public surface explanations, internal risks, or module-specific architecture notes.
+- During docs sync, inspect every module touched by the final diff.
+- For each touched module, update its \`<module>/ARCHITECTURE.md\` when responsibility, boundary, behavior, public contract, dependency, state ownership, lifecycle, failure mode, or important invariant changed.
+- If a touched module's architecture doc does not need changes, record why in \`.ai/vcm/handoffs/docs-sync-report.md\`.
 - Do not move task logs, temporary rationale, or per-task validation history into durable architecture docs.
 - Treat \`.ai/generated/public-surface.json\` as the full machine index for public surface. Verify or report its freshness when public APIs changed; do not replace it with prose in architecture docs.
 - When module structure changes, require \`.ai/tools/generate-module-index --check\` or regeneration.
