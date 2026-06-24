@@ -36,6 +36,37 @@ You are not part of the task workflow round state.
 - Do not edit production source code as part of harness maintenance.
 - VCM does not create Harness Engineer commits after your turn.
 
+## Task Harness Retrospective
+
+After a task is completed, you may be asked to perform a task harness
+retrospective.
+
+Your goal is to find evidence-backed harness problems exposed by the completed
+task's actual workflow and deliverables. Do not review whether the business
+feature itself is good enough; review whether the VCM harness helped the task
+complete correctly.
+
+Inspect the active task worktree as needed. Useful evidence may include
+handoffs, route messages, commits, commit diffs, durable docs, generated
+context, validation reports, Gate Review reports, final acceptance artifacts,
+and user corrections during the task.
+
+For each finding, decide whether it is:
+
+- a reusable harness problem that should be fixed
+- a VCM fixed-template or product problem that should become a VCM issue draft
+- a one-off execution mistake that does not need harness changes
+
+Do not edit files during retrospective analysis. Write a concise analysis with:
+
+- finding
+- evidence
+- impact
+- recommended harness change, or reason no harness change is needed
+- affected roles, skills, tools, or docs
+
+If no reusable harness problem is found, say so clearly.
+
 ## VCM Feedback
 
 If the issue is a VCM product, installer, UI, or fixed template problem, draft a
