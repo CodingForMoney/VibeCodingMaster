@@ -165,3 +165,16 @@ security risk, not delivery priority.
 - **Mitigation / workaround**: None needed.
 - **Resolution condition**: Either re-surface `flowPause.message` (e.g. in the modal or a detail view) or remove the inert plumbing (`userFacingReply`, `pendingUserReply`, `awaitingUser.message`, `flowPause.message`, and the claude-hook-service capture call). Removal touches the `src/shared` public contract → full `architect plan -> coder -> reviewer` flow.
 - **Related**: KI-013.
+
+### KI-015 — Project-level `/cd` correctness depends on unverified Claude Code behaviors (not unit-testable)
+
+- **Status**: Open (accepted empirical dependency; needs a real-run confirmation in a live environment).
+- **Category**: Product / correctness (external coupling to Claude Code's own `/cd` and `--resume` behavior).
+- **Affected modules / surfaces**: `src/backend/services/session-service.ts` (`formatClaudeCdCommand`, `migrateRunningProjectToolSessionCwd`, project-level launch/resume cwd tracking), translator + harness-engineer project-level sessions.
+- **Current gap**: The project-level `/cd` migration relies on two Claude Code behaviors that VCM's unit tests cannot verify (they only assert the bytes VCM emits and the cwd it tracks, not Claude's reaction):
+  1. **`/cd` argument parsing**: VCM now emits a **bare, unquoted** path (`/cd <path>`), assuming Claude Code's `/cd` consumes the literal rest-of-line (so spaces are fine and surrounding quotes would be taken literally). Previously VCM emitted `/cd "<path>"` (JSON-quoted); if the literal-rest-of-line assumption is correct, that quoted form was **silently failing** — the quotes became part of the path, the `cd` errored, and project-level sessions **may never have actually switched into the task worktree** (they kept operating in their launch cwd). The de-quote fix is low-risk: if the premise is wrong, the switch simply fails as before — no new breakage.
+  2. **`claude --resume` cwd restoration**: VCM now skips `/cd` when the session's tracked (persisted/restored) cwd already equals the target, assuming `claude --resume` restores the session's prior working directory (user-confirmed). If this premise is wrong, a needed `/cd` is skipped and the resumed session stays at the `repoRoot` spawn cwd → the #16 wrong-directory symptom returns for the resume-same-task path. Higher risk than (1).
+- **Impact**: If either premise is false, project-level sessions can operate in the wrong directory. The behavior is correct under the (reasonable, user-confirmed for #2) premises, but only an end-to-end run confirms the `/cd` takes effect.
+- **Mitigation / workaround**: Real-run smoke (below) in a live environment; the spawn anchor at the always-present `repoRoot` (#16) bounds the worst case (sessions land at repoRoot, not a crash).
+- **Resolution condition**: A real-run smoke confirming a project-level session actually operates in the active task worktree across fresh launch, resume-same-task (no `/cd`, still in worktree), and switch-task (`/cd` fires, moves to new worktree). Optionally confirm `/cd`/`new_cwd` via the hook to convert these empirical assumptions into runtime-verified state (issue #16 optional confirmation step).
+- **Related**: KI-004 (Claude transcript directory-encoding external coupling).

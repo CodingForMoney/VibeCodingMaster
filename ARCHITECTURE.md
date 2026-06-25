@@ -62,7 +62,13 @@ External boundaries of the module:
   relocates it on `/cd`, so the constant `repoRoot` anchor keeps `claude --resume`
   valid across task close/create boundaries (the worktree may be deleted) and
   keeps `transcriptPath` stable; the active task root is exposed through
-  `VCM_TASK_REPO_ROOT` independent of pty cwd. Project-level tool sessions report
+  `VCM_TASK_REPO_ROOT` independent of pty cwd. The `/cd` is emitted as a bare,
+  unquoted path (Claude Code's `/cd` consumes the literal rest-of-line; quoting
+  breaks it) and is on-demand — it fires only when the session's tracked cwd
+  differs from the target. Because `claude --resume` restores the session's prior
+  working directory, a resume that lands back in the same task worktree issues no
+  `/cd`; `/cd` fires on a fresh launch (repoRoot -> worktree) or a real switch
+  (e.g. into a different/new task). Project-level tool sessions report
   their project sentinel (not the active task) as `VCM_TASK_SLUG`, so their hook
   payloads match their own session record; the hook layer additionally ignores
   round/status mutations from any session whose authoritative record is not bound
