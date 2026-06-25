@@ -608,10 +608,17 @@ function computeFlowPause(
   current: PersistedRound | undefined,
   roleRecovery: VcmRoleRecoveryState | undefined
 ): VcmFlowPauseState | undefined {
-  // VCM:CODE SCF-301
-  void current;
-  void roleRecovery;
-  return undefined;
+  const recovering = roleRecovery?.status === "waiting" || roleRecovery?.status === "retrying";
+  const paused = Boolean(current) && current!.status === "stopped" && Boolean(current!.id) && !recovering;
+  if (!paused) {
+    return undefined;
+  }
+  return {
+    paused: true,
+    reason: roleRecovery?.status === "failed" ? "role-recovery-failed" : "stopped-no-next-turn",
+    role: current!.activeRole,
+    since: current!.stoppedAt ?? current!.lastTurnEndedAt
+  };
 }
 
 function normalizeRoundFile(input: Partial<PersistedRoundFile>, taskSlug: string, updatedAt: string): PersistedRoundFile {

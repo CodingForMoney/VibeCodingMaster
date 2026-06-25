@@ -41,6 +41,7 @@ import { FileTranslationModalHost } from "./components/translation-panel.js";
 import { UiErrorCenter } from "./components/ui-error-center.js";
 import { selectActiveTask } from "./state/app-store.js";
 import { selectAutoFollowRole } from "./state/active-role-follow.js";
+import { selectFlowPauseAlertMessage } from "./state/flow-pause-alert.js";
 import { apiClient } from "./state/api-client.js";
 import { clearUiErrorForActions, formatUiError } from "./state/error-format.js";
 import { clearPollError, recordPollError } from "./state/poll-error-gate.js";
@@ -243,23 +244,12 @@ export function App() {
       autoFollowedRoleRef.current[roundState.taskSlug] = followRole;
       setActiveRole(followRole);
     }
-    // VCM:CODE SCF-302 (modify): consume the authoritative pause DECISION from the
-    // backend instead of deriving it here. Replace these two early-returns with:
-    //   if (!roundState.flowPause?.paused) {
-    //     observedFlowPauseStateRef.current[roundState.taskSlug] = { status: roundState.status };
-    //     return;
-    //   }
-    // and below, drive the message from roundState.flowPause.reason
-    // ("role-recovery-failed" vs "stopped-no-next-turn") instead of re-checking
-    // recovery?.status === "failed". KEEP all alert mechanics unchanged
-    // (getFlowPauseNotificationKey dedupe, shouldShowFlowPauseNotice viewing gate,
-    // getFlowPauseDurationMs sound severity, gatewayRunning suppression, and the
-    // formatRoleRecoveryFailureMessage wording).
-    if (roundState.roleRecovery?.status === "waiting" || roundState.roleRecovery?.status === "retrying") {
-      observedFlowPauseStateRef.current[roundState.taskSlug] = { status: roundState.status };
-      return;
-    }
-    if (roundState.status !== "stopped" || !roundState.roundId) {
+    // Consume the authoritative flow-pause decision + message from the backend
+    // (round-service) instead of re-deriving "is it paused / why" here. Everything
+    // below is purely the client-side alert mechanics (dedupe, viewing gate, sound,
+    // gateway suppression), which are unchanged.
+    const flowPauseMessage = selectFlowPauseAlertMessage(roundState, formatRoleRecoveryFailureMessage);
+    if (flowPauseMessage === null) {
       observedFlowPauseStateRef.current[roundState.taskSlug] = { status: roundState.status };
       return;
     }
@@ -281,17 +271,12 @@ export function App() {
       return;
     }
 
-    const roleLabel = roundState.activeRole ?? "role";
     const sound = !pauseAlertSound
       ? "none"
       : getFlowPauseDurationMs(roundState) >= FLOW_PAUSE_STRONG_ALERT_THRESHOLD_MS
         ? "strong"
         : "weak";
-    const recovery = roundState.roleRecovery;
-    const message = recovery?.status === "failed"
-      ? formatRoleRecoveryFailureMessage(recovery, roleLabel)
-      : `No new turn started after ${roleLabel} stopped.`;
-    showFlowPauseNotice(message, pauseKey, { sound });
+    showFlowPauseNotice(flowPauseMessage, pauseKey, { sound });
   }, [activeTask?.taskSlug, gatewayRunning, pauseAlertSound, showFlowPauseNotice, stopFlowPauseAlarm]);
 
   const handleLaunchStateChanged = useCallback((launchState: TaskWorkspaceLaunchState) => {
