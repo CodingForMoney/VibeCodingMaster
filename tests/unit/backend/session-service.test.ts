@@ -570,6 +570,35 @@ describe("createSessionService", () => {
     expect(writes.some((write) => write.includes("/cd"))).toBe(false);
   });
 
+  it("emits /cd as a bare unquoted path so a worktree path with spaces is sent intact (#16 de-quote)", async () => {
+    const fs = createMemoryFs();
+    const runtimeInputs: CreateTerminalSessionInput[] = [];
+    const writes: string[] = [];
+    const SPACEY_WORKTREE = "/repo/.claude/worktrees/space task";
+    const service = createTestSessionService(fs, runtimeInputs, writes, {
+      worktreePaths: { "demo-task": TASK_WORKTREE, "spacey-task": SPACEY_WORKTREE }
+    });
+
+    await service.startProjectTranslatorSession("/repo", { taskSlug: "demo-task" });
+    await service.recordProjectTranslatorHookEvent("/repo", {
+      eventName: "UserPromptSubmit",
+      sessionId: "translator-spaces-session",
+      transcriptPath: `${TASK_WORKTREE}/.claude/projects/translator-spaces-session.jsonl`,
+      cwd: TASK_WORKTREE
+    });
+    const moved = await service.ensureProjectTranslatorSession("/repo", { taskSlug: "spacey-task" });
+
+    expect(moved.cwd).toBe(SPACEY_WORKTREE);
+    // De-quote (#16): Claude Code's `/cd` takes the literal remainder of the line, so
+    // VCM emits the path bare. A worktree path with spaces must therefore arrive whole
+    // and UNQUOTED (the prior `/cd "<path>"` form put quotes into the path and failed,
+    // and quoting would also not protect spaces here). Whether Claude actually changes
+    // into the directory is empirical (depends on Claude Code's `/cd` parser).
+    const cdToSpacey = writes.find((write) => write.includes("space task"));
+    expect(cdToSpacey).toContain(`/cd ${SPACEY_WORKTREE}`);
+    expect(cdToSpacey).not.toContain('"');
+  });
+
   it("moves a Translator session to the base repository cwd before task cleanup", async () => {
     const fs = createMemoryFs();
     const runtimeInputs: CreateTerminalSessionInput[] = [];
