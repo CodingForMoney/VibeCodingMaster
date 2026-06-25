@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { FileSystemAdapter } from "../../../src/backend/adapters/filesystem.js";
 import { createRoundService } from "../../../src/backend/services/round-service.js";
+import { selectFlowPauseAlertMessage } from "../../../src/frontend/state/flow-pause-alert.js";
 import type { RoleName } from "../../../src/shared/types/role.js";
 import type { RoleSessionRecord } from "../../../src/shared/types/session.js";
 
@@ -1138,6 +1139,88 @@ describe("round-service", () => {
     const state = await service.getSessionRoundState(input);
     expect(state.flowPause).toMatchObject({ reason: "stopped-no-next-turn", role: "coder" });
     expect(state.flowPause?.message).toBeUndefined();
+  });
+
+  it("regression(#17): sticky awaiting-user re-arms the transient flow-pause modal/alarm across a gate-reviewer round cycle", async () => {
+    // Reproduces the validation-adequacy gate's Finding 1. The web frontend was
+    // restored byte-identical to pre-#17 (awaiting-user now drives the transient
+    // modal+alarm via selectFlowPauseAlertMessage), but the BACKEND awaiting-user
+    // anchor is sticky. Pre-#17 stopped-no-next-turn was NON-sticky: it cleared when
+    // the round resumed, so the alert message went null and the alert effect
+    // early-returned. With sticky awaiting-user, a single pending PM decision survives
+    // a gate-reviewer round running->stop cycle while the frontend dedup key
+    // (roundId:stoppedAt) advances, so the modal + alarm re-fire for the SAME
+    // unanswered decision.
+    const fs = createMemoryFs();
+    const timers = createManualTimers();
+    let currentTime = "2026-05-31T00:00:00.000Z";
+    let roundCounter = 0;
+    const service = createRoundService({
+      fs,
+      now: () => currentTime,
+      id: () => `round_${++roundCounter}`,
+      setTimeout: timers.setTimeout,
+      clearTimeout: timers.clearTimeout
+    });
+    const input = { stateRepoRoot: "/repo", stateRoot: ".ai/vcm", taskSlug: "demo-task" } as const;
+    // awaiting-user is never role-recovery-failed, so this formatter is never invoked.
+    const formatRecoveryFailure = () => "unused-recovery-message";
+
+    // 1) PM stops awaiting a user decision -> first stop (round_1).
+    await service.recordClaudeHookEvent({ ...input, role: "project-manager", eventName: "UserPromptSubmit" });
+    currentTime = "2026-05-31T00:00:02.000Z";
+    await service.recordClaudeHookEvent({ ...input, role: "project-manager", eventName: "Stop" });
+    currentTime = "2026-05-31T00:00:12.000Z";
+    timers.entries.at(-1)?.callback();
+    await flushAsyncWork();
+    const stoppedA = await service.getSessionRoundState(input);
+
+    // 2) A gate-reviewer turn auto-continues the round under another role -> running (round_2).
+    currentTime = "2026-05-31T00:01:00.000Z";
+    await service.recordClaudeHookEvent({ ...input, role: "gate-reviewer", eventName: "UserPromptSubmit" });
+    const running = await service.getSessionRoundState(input);
+
+    // 3) The gate-reviewer turn stops and settles -> stopped again (round_2, new stoppedAt).
+    currentTime = "2026-05-31T00:01:02.000Z";
+    await service.recordClaudeHookEvent({ ...input, role: "gate-reviewer", eventName: "Stop" });
+    currentTime = "2026-05-31T00:01:12.000Z";
+    timers.entries.at(-1)?.callback();
+    await flushAsyncWork();
+    const stoppedB = await service.getSessionRoundState(input);
+
+    // Backend: the SAME pending user decision is sticky through the whole cycle.
+    expect(stoppedA.flowPause).toMatchObject({ reason: "awaiting-user", paused: true, role: "project-manager" });
+    expect(running.status).toBe("running");
+    expect(running.flowPause).toMatchObject({ reason: "awaiting-user", paused: true, role: "project-manager" });
+    expect(stoppedB.flowPause).toMatchObject({ reason: "awaiting-user", paused: true, role: "project-manager" });
+    // The sticky anchor (`since`) does not advance -> this is ONE decision, not two.
+    expect(stoppedB.flowPause?.since).toBe(stoppedA.flowPause?.since);
+
+    // Frontend (real selector): the restored modal alert stays NON-null at the re-stop,
+    // so the alert effect does NOT early-return — the decisive difference from the
+    // pre-#17 non-sticky pause, which would have gone null once the round resumed.
+    const messageA = selectFlowPauseAlertMessage(stoppedA, formatRecoveryFailure);
+    const messageB = selectFlowPauseAlertMessage(stoppedB, formatRecoveryFailure);
+    expect(messageA).toBe("No new turn started after project-manager stopped.");
+    expect(messageB).not.toBeNull();
+    // The re-fired modal also MISLABELS the role: the message uses the live activeRole
+    // (now gate-reviewer), not the pending decision's project-manager — extra evidence
+    // it is a fresh alert for the same sticky decision, not a deduped no-op.
+    expect(stoppedB.activeRole).toBe("gate-reviewer");
+    expect(messageB).toBe("No new turn started after gate-reviewer stopped.");
+
+    // ...and the exact fields the frontend dedup key is built from
+    // (getFlowPauseNotificationKey = `${roundId}:${stoppedAt}`, app.tsx:1720-1724)
+    // BOTH advance across the cycle, so dedup will NOT suppress the second alert.
+    expect(stoppedB.roundId).not.toBe(stoppedA.roundId);
+    expect(stoppedB.stoppedAt).not.toBe(stoppedA.stoppedAt);
+
+    // Composition (reasoned in the review report; app.tsx alert effect :251-279):
+    // non-null message at the re-stop (no early-return) + a changed dedup key + the
+    // documented shouldShowFlowPauseNotice rule (returns true after a `running`
+    // observation, :1708) => showFlowPauseNotice fires a SECOND time => the centered
+    // modal pops and the alarm sounds AGAIN for one unanswered PM decision. This
+    // contradicts the "fire once like pre-#17" intent of the fix.
   });
 });
 
