@@ -25,3 +25,21 @@ export function selectFlowPauseAlertMessage(
   }
   return `No new turn started after ${roleLabel} stopped.`;
 }
+
+/**
+ * Stable identity for one flow-pause alert, used by the GUI to fire the modal +
+ * alarm exactly once per distinct pause. A sticky `awaiting-user` pause is ONE
+ * pending decision whose `since` anchor stays fixed while the round may cycle
+ * running->stopped under other roles, so it keys on `(reason, since)`. Transient
+ * (non-sticky) pauses key on the volatile `roundId:stoppedAt`, so each genuine new
+ * stop is a distinct alert.
+ */
+export function getFlowPauseNotificationKey(roundState: VcmSessionRoundState): string {
+  const flowPause = roundState.flowPause;
+  if (flowPause?.reason === "awaiting-user") {
+    return `awaiting-user:${flowPause.since ?? roundState.taskSlug}`;
+  }
+  const roundKey = roundState.roundId ?? roundState.startedAt ?? roundState.taskSlug;
+  const stoppedKey = roundState.stoppedAt ?? roundState.lastTurnEndedAt ?? "stopped";
+  return `${roundKey}:${stoppedKey}`;
+}
