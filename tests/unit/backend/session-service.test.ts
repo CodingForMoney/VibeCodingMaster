@@ -537,6 +537,58 @@ describe("createSessionService", () => {
     expect(writes[1]).toBe("\r");
   });
 
+  it("rebuilds a fresh Translator session when resume by id fails", async () => {
+    const fs = createMemoryFs();
+    const firstService = createTestSessionService(fs, []);
+    await firstService.startProjectTranslatorSession("/repo", { taskSlug: "demo-task" });
+    await firstService.recordProjectTranslatorHookEvent("/repo", {
+      eventName: "UserPromptSubmit",
+      sessionId: "translator-stale-session",
+      transcriptPath: `${TASK_WORKTREE}/.claude/projects/translator-stale-session.jsonl`,
+      cwd: TASK_WORKTREE
+    });
+    await expect(fs.pathExists("/repo/.ai/vcm/translations/session.json")).resolves.toBe(true);
+
+    // The first launch attempt (a resume of the stale id) exits immediately,
+    // simulating `claude --resume <stale-id>` failing to reopen the session.
+    const runtimeInputs: CreateTerminalSessionInput[] = [];
+    const secondService = createTestSessionService(fs, runtimeInputs, [], { exitedCalls: [1] });
+    const rebuilt = await secondService.resumeProjectTranslatorSession("/repo", { taskSlug: "demo-task" });
+
+    expect(runtimeInputs).toHaveLength(2);
+    expect(runtimeInputs[0]?.args).toContain("--resume");
+    expect(runtimeInputs[0]?.args).toContain("translator-stale-session");
+    expect(runtimeInputs[1]?.args).not.toContain("--resume");
+    expect(runtimeInputs[1]?.args).not.toContain("translator-stale-session");
+    expect(rebuilt.claudeSessionId).toBe("");
+    await expect(fs.pathExists("/repo/.ai/vcm/translations/session.json")).resolves.toBe(false);
+  });
+
+  it("rebuilds a fresh Harness Engineer session when resume by id fails", async () => {
+    const fs = createMemoryFs();
+    const firstService = createTestSessionService(fs, []);
+    await firstService.startProjectHarnessEngineerSession("/repo", { taskSlug: "demo-task" });
+    await firstService.recordProjectHarnessEngineerHookEvent("/repo", {
+      eventName: "UserPromptSubmit",
+      sessionId: "harness-stale-session",
+      transcriptPath: `${TASK_WORKTREE}/.claude/projects/harness-stale-session.jsonl`,
+      cwd: TASK_WORKTREE
+    });
+    await expect(fs.pathExists("/repo/.ai/vcm/harness-engineer/session.json")).resolves.toBe(true);
+
+    const runtimeInputs: CreateTerminalSessionInput[] = [];
+    const secondService = createTestSessionService(fs, runtimeInputs, [], { exitedCalls: [1] });
+    const rebuilt = await secondService.resumeProjectHarnessEngineerSession("/repo", { taskSlug: "demo-task" });
+
+    expect(runtimeInputs).toHaveLength(2);
+    expect(runtimeInputs[0]?.args).toContain("--resume");
+    expect(runtimeInputs[0]?.args).toContain("harness-stale-session");
+    expect(runtimeInputs[1]?.args).not.toContain("--resume");
+    expect(runtimeInputs[1]?.args).not.toContain("harness-stale-session");
+    expect(rebuilt.claudeSessionId).toBe("");
+    await expect(fs.pathExists("/repo/.ai/vcm/harness-engineer/session.json")).resolves.toBe(false);
+  });
+
   it("starts Harness Engineer as a project-scoped Claude Code session", async () => {
     const fs = createMemoryFs();
     const runtimeInputs: CreateTerminalSessionInput[] = [];
@@ -920,14 +972,14 @@ function createTestSessionService(
   fs: FileSystemAdapter,
   runtimeInputs: CreateTerminalSessionInput[],
   writes: string[] = [],
-  options: { sandboxMode?: string; worktreePath?: string; worktreePaths?: Record<string, string> } = {}
+  options: { sandboxMode?: string; worktreePath?: string; worktreePaths?: Record<string, string>; exitedCalls?: number[] } = {}
 ) {
   const worktreePath = options.worktreePath ?? TASK_WORKTREE;
   const resolveWorktreePath = (taskSlug: string) => options.worktreePaths?.[taskSlug]
     ?? (taskSlug === "demo-task" ? worktreePath : `/repo/.claude/worktrees/${taskSlug}`);
   return createSessionService({
     fs,
-    runtime: createFakeRuntime(runtimeInputs, writes),
+    runtime: createFakeRuntime(runtimeInputs, writes, { exitedCalls: options.exitedCalls }),
     registry: createSessionRegistry(),
     claude: {
       async isAvailable() {
@@ -1029,21 +1081,33 @@ function createTestSessionService(
   });
 }
 
-function createFakeRuntime(inputs: CreateTerminalSessionInput[], writes: string[]): TerminalRuntime {
+function createFakeRuntime(
+  inputs: CreateTerminalSessionInput[],
+  writes: string[],
+  options: { exitedCalls?: number[] } = {}
+): TerminalRuntime {
   const sessions = new Map<string, TerminalSession>();
+  const exitedCalls = new Set(options.exitedCalls ?? []);
   return {
     async createSession(input) {
       inputs.push(input);
+      const callIndex = inputs.length;
+      const exited = exitedCalls.has(callIndex);
       const session: TerminalSession = {
-        id: `runtime_${inputs.length}`,
+        id: `runtime_${callIndex}`,
         taskSlug: input.taskSlug,
         role: input.role,
-        status: "running",
-        pid: 123,
+        status: exited ? "exited" : "running",
+        pid: exited ? undefined : 123,
         startedAt: "2026-05-29T00:00:00.000Z",
-        exitCode: null
+        // A live TUI emits output immediately, which the readiness wait keys off;
+        // a failed launch exits and leaves no live runtime entry.
+        lastOutputAt: exited ? undefined : "2026-05-29T00:00:00.000Z",
+        exitCode: exited ? 1 : null
       };
-      sessions.set(session.id, session);
+      if (!exited) {
+        sessions.set(session.id, session);
+      }
       return session;
     },
     getSession(sessionId) {
