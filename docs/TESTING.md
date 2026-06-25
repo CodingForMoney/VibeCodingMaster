@@ -121,3 +121,9 @@ recommended first cases when integration/E2E coverage is added.
   which are environment-sensitive and not currently stubbed for CI.
 - There is no lint command in `package.json`; L0 is currently typecheck-only.
 - Coverage thresholds are not enforced by configuration.
+- `tests/unit/backend/harness-templates-sync.test.ts` shells out to
+  `scripts/install-vcm-harness.mjs`, which needs the compiled CLI (`dist/main.js`).
+  On a clean checkout with no `dist/`, those 3 cases fail with
+  "compiled CLI not found. Run npm run build first." Run `npm run build` before
+  `npm test` (or treat these specific failures as build-state, not regressions)
+  when validating from a clean tree.
