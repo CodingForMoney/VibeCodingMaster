@@ -2,7 +2,7 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import type { ClaudeTurnHookEventName } from "../../shared/types/claude-hook.js";
 import type { RoleName } from "../../shared/types/role.js";
-import type { VcmRoleRecoveryState, VcmSessionRoundState } from "../../shared/types/round.js";
+import type { VcmFlowPauseState, VcmRoleRecoveryState, VcmSessionRoundState } from "../../shared/types/round.js";
 import type { RoleSessionRecord } from "../../shared/types/session.js";
 import type { TaskStatus } from "../../shared/types/task.js";
 import type { FileSystemAdapter } from "../adapters/filesystem.js";
@@ -548,6 +548,7 @@ function toSessionRoundState(state: PersistedRoundFile, updatedAt: string): VcmS
       totalCcActiveMs: state.totalCcActiveMs,
       currentRoundCcActiveMs: 0,
       roleRecovery: state.roleRecovery,
+      flowPause: computeFlowPause(undefined, state.roleRecovery),
       roles: [],
       updatedAt
     };
@@ -578,9 +579,39 @@ function toSessionRoundState(state: PersistedRoundFile, updatedAt: string): VcmS
     totalCcActiveMs: state.totalCcActiveMs + activeDurationMs,
     currentRoundCcActiveMs,
     roleRecovery: state.roleRecovery,
+    flowPause: computeFlowPause(current, state.roleRecovery),
     roles: current.roles,
     updatedAt
   };
+}
+
+/**
+ * Authoritative flow-pause predicate (single source of truth). Returns a paused
+ * VcmFlowPauseState exactly when a real round has ended and the auto flow has not
+ * advanced and we are not mid active-recovery — mirroring the decision the GUI
+ * previously derived. Reason is `role-recovery-failed` when recovery has failed,
+ * otherwise `stopped-no-next-turn`. Returns a non-paused state (or undefined) when
+ * the flow is not paused. The frontend consumes this instead of re-deriving it.
+ *
+ * Intended logic (to implement):
+ *   const recovering = roleRecovery?.status === "waiting" || roleRecovery?.status === "retrying";
+ *   const paused = !!current && current.status === "stopped" && !!current.id && !recovering;
+ *   if (!paused) return undefined; // or { paused: false }
+ *   return {
+ *     paused: true,
+ *     reason: roleRecovery?.status === "failed" ? "role-recovery-failed" : "stopped-no-next-turn",
+ *     role: current.activeRole,
+ *     since: current.stoppedAt ?? current.lastTurnEndedAt
+ *   };
+ */
+function computeFlowPause(
+  current: PersistedRound | undefined,
+  roleRecovery: VcmRoleRecoveryState | undefined
+): VcmFlowPauseState | undefined {
+  // VCM:CODE SCF-301
+  void current;
+  void roleRecovery;
+  return undefined;
 }
 
 function normalizeRoundFile(input: Partial<PersistedRoundFile>, taskSlug: string, updatedAt: string): PersistedRoundFile {

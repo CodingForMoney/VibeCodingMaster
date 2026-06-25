@@ -24,6 +24,31 @@ export interface VcmRoleRecoveryState {
   failedAt?: string;
 }
 
+/**
+ * Why the automated flow is paused/stalled.
+ * - `stopped-no-next-turn`: a round ended and the auto flow did not start a new turn.
+ * - `role-recovery-failed`: a role's CC recovery exhausted retries / is non-retryable.
+ */
+export type VcmFlowPauseReason =
+  | "stopped-no-next-turn"
+  | "role-recovery-failed";
+
+/**
+ * Authoritative flow-pause signal, owned by the backend (round-service). The
+ * frontend consumes `paused` + `reason` to decide WHETHER and WHY to alert, and
+ * keeps only the alert mechanics (dedupe, sound, viewing gating, wording). It must
+ * NOT re-derive the pause decision from `status`/`roundId`/`roleRecovery`.
+ * Present with `paused: true` when paused; omitted (or `paused: false`) otherwise.
+ */
+export interface VcmFlowPauseState {
+  paused: boolean;
+  reason?: VcmFlowPauseReason;
+  /** Role the flow paused on (authoritative; e.g. the active role at pause). */
+  role?: RoleName;
+  /** When the pause condition began (e.g. stoppedAt / lastTurnEndedAt). */
+  since?: string;
+}
+
 export interface VcmSessionRoundState {
   taskSlug: string;
   status: VcmRoundStatus;
@@ -44,6 +69,11 @@ export interface VcmSessionRoundState {
   totalCcActiveMs: number;
   currentRoundCcActiveMs: number;
   roleRecovery?: VcmRoleRecoveryState;
+  /**
+   * Authoritative flow-pause signal (backend-owned). Frontend consumes this
+   * instead of deriving the pause decision from status/roundId/roleRecovery.
+   */
+  flowPause?: VcmFlowPauseState;
   roles: RoleName[];
   updatedAt: string;
 }

@@ -243,6 +243,18 @@ export function App() {
       autoFollowedRoleRef.current[roundState.taskSlug] = followRole;
       setActiveRole(followRole);
     }
+    // VCM:CODE SCF-302 (modify): consume the authoritative pause DECISION from the
+    // backend instead of deriving it here. Replace these two early-returns with:
+    //   if (!roundState.flowPause?.paused) {
+    //     observedFlowPauseStateRef.current[roundState.taskSlug] = { status: roundState.status };
+    //     return;
+    //   }
+    // and below, drive the message from roundState.flowPause.reason
+    // ("role-recovery-failed" vs "stopped-no-next-turn") instead of re-checking
+    // recovery?.status === "failed". KEEP all alert mechanics unchanged
+    // (getFlowPauseNotificationKey dedupe, shouldShowFlowPauseNotice viewing gate,
+    // getFlowPauseDurationMs sound severity, gatewayRunning suppression, and the
+    // formatRoleRecoveryFailureMessage wording).
     if (roundState.roleRecovery?.status === "waiting" || roundState.roleRecovery?.status === "retrying") {
       observedFlowPauseStateRef.current[roundState.taskSlug] = { status: roundState.status };
       return;
