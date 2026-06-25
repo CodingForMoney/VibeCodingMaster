@@ -204,7 +204,6 @@
               "tests/unit/backend/vcm-data-dir.test.ts",
               "tests/unit/frontend/active-role-follow.test.ts",
               "tests/unit/frontend/api-client.test.ts",
-              "tests/unit/frontend/await-user-banner.test.ts",
               "tests/unit/frontend/flow-pause-alert.test.ts",
               "tests/unit/frontend/harness-panel.test.ts",
               "tests/unit/frontend/message-timeline.test.ts",

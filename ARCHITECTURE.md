@@ -77,16 +77,27 @@ External boundaries of the module:
   for pause alerts — the GUI keeps only alert mechanics (dedupe, sound, viewing
   gate, wording). One reason is `awaiting-user`: when a user-facing role
   (project-manager) settles to stopped with no onward route, `round-service`
-  persists a sticky await-user anchor on the round state. The role's user-facing
-  reply is captured best-effort at the Stop hook (via the shared
-  `claude-transcript-reply` helper, also used by the gateway push path), stashed,
-  promoted to the anchor's `message` at settle, and surfaced through
-  `flowPause.message` to a persistent web banner (distinct from the transient
-  pause modal, which does not fire for `awaiting-user`). The anchor is sticky: it
+  persists a sticky await-user anchor on the round state, surfaced through
+  `flowPause` (reason `awaiting-user`, with `role` and `since`). The GUI renders
+  it as the standard transient flow-pause modal + alarm. The anchor is sticky — it
   survives round auto-continuation and other roles' activity (including
   gate-reviewer) and clears only when the awaiting role receives the user's next
-  prompt. While a role is actively recovering, await-user is intentionally not
-  surfaced and reappears once recovery resolves.
+  prompt — so the GUI fires the alert exactly once per pending decision by keying
+  `getFlowPauseNotificationKey` (`src/frontend/state/flow-pause-alert.ts`) on the
+  stable `(reason, since)` (non-sticky pauses still key on `roundId:stoppedAt`),
+  and labels it via the authoritative `flowPause.role` (not the live `activeRole`,
+  which may have advanced under another role). While a role is actively recovering,
+  await-user is intentionally not surfaced and reappears once recovery resolves.
+- **Await-user design tension (retained intentionally)**: issue #17 originally
+  surfaced await-user as a persistent web banner carrying the PM's captured
+  user-facing reply (`flowPause.message`); that banner was removed at the user's
+  request in favor of the prior transient modal + alarm. The backend still computes
+  the full sticky pipeline — including the best-effort PM-reply capture
+  (`claude-transcript-reply`, also used independently by the gateway push path),
+  the `pendingUserReply` stash, and `flowPause.message` — but with the banner gone
+  the captured `message` is no longer read on the web. The sticky reason/`role`/
+  `since` and the task-binding guard remain load-bearing; the message-capture
+  pipeline is currently inert on the web surface (tracked in known issues).
 - **One-click start**: `task-launch-service` is the single backend owner of
   one-click task start — it composes the role roster (CORE roles plus gate-reviewer
   when enabled), applies the launch-template orchestration mode, and starts/resumes

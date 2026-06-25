@@ -144,17 +144,6 @@ security risk, not delivery priority.
 - **Resolution condition**: Gate verbose `hint`/`runtime` detail behind a dev flag, or sanitize before returning, if non-loopback exposure is ever supported.
 - **Related**: KI-001, KI-007.
 
-### KI-012 — `flowPause.role` / `flowPause.since` are emitted but unused by the GUI
-
-- **Status**: Open (accepted minor redundancy; not a defect).
-- **Category**: Product / maintainability (cleanup).
-- **Affected modules / surfaces**: `src/shared/types/round.ts` (`VcmFlowPauseState`), `src/backend/services/round-service.ts` (`computeFlowPause`), `src/frontend/app.tsx` (flow-pause alert mechanics).
-- **Current gap**: The authoritative `roundState.flowPause` carries `role` and `since`, but the GUI alert mechanics still read equivalent round-level fields — `roundState.activeRole` for the pause-notice label and `getFlowPauseDurationMs(roundState)` for sound severity. Both sources derive from the same `currentRound`, so the values are equivalent and the redundancy is harmless.
-- **Impact**: None functionally; mild contract over-provisioning (fields provided that no consumer reads), which can confuse future maintainers ("why does `flowPause` carry `role`/`since`?").
-- **Mitigation / workaround**: None needed.
-- **Resolution condition**: Either point the GUI label/severity at `flowPause.role`/`flowPause.since` (consume what the signal already provides), or drop the two fields from `VcmFlowPauseState`. Small, optional.
-- **Related**: none.
-
 ### KI-013 — `RoleSessionRecord.cwd` / `previousCwd` persistence is redundant for project-level tool sessions
 
 - **Status**: Open (accepted limitation / deferred cleanup; not a defect).
@@ -165,3 +154,14 @@ security risk, not delivery priority.
 - **Mitigation / workaround**: None needed.
 - **Resolution condition**: If pursued, drop `cwd`/`previousCwd` from `RoleSessionRecord` and migrate the remaining consumers to derive cwd (repoRoot anchor plus active task root). This is a `src/shared` public-contract change and must go through the full `architect plan -> coder -> reviewer` flow (out of Debug Mode scope).
 - **Related**: KI-004.
+
+### KI-014 — Inert await-user message-capture pipeline on the web surface
+
+- **Status**: Open (accepted limitation / deferred cleanup; not a defect).
+- **Category**: Product / maintainability (cleanup).
+- **Affected modules / surfaces**: `src/shared/types/round.ts` (`VcmFlowPauseState.message`/`messageTruncated`), `src/backend/services/round-service.ts` (`awaitingUser.message`/`messageTruncated`, `pendingUserReply` stash, `RecordRoundHookEventInput.userFacingReply`), `src/backend/services/claude-hook-service.ts` (best-effort `readLatestRoleTurnReply` capture on a user-facing Stop).
+- **Current gap**: issue #17 shipped a persistent web banner that displayed the PM's captured user-facing reply via `flowPause.message`. The banner was removed at the user's request; await-user now reuses the transient flow-pause modal + alarm, whose wording does NOT include `flowPause.message`. The backend still captures, stashes, promotes, and emits that reply text, but no web consumer reads it. (The `claude-transcript-reply` helper itself is NOT dead — the gateway push path still uses it independently.) The sticky `reason`/`role`/`since` and the task-binding guard remain load-bearing; only the message-capture/`message` plumbing is inert on the web.
+- **Impact**: None functional. A best-effort transcript read runs on each user-facing Stop and a `src/shared` field (`flowPause.message`) plus round-state fields are produced that no consumer reads — can mislead future maintainers.
+- **Mitigation / workaround**: None needed.
+- **Resolution condition**: Either re-surface `flowPause.message` (e.g. in the modal or a detail view) or remove the inert plumbing (`userFacingReply`, `pendingUserReply`, `awaitingUser.message`, `flowPause.message`, and the claude-hook-service capture call). Removal touches the `src/shared` public contract → full `architect plan -> coder -> reviewer` flow.
+- **Related**: KI-013.
