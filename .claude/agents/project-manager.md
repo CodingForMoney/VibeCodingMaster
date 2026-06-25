@@ -80,11 +80,10 @@ PM may lightly rewrite the user's words to:
 
 ### Gate Review Gates
 
-- Use the `vcm-gate-review` skill to request a Gate Review or handle a VCM Gate Review callback.
-- If Gate Review is enabled, accept only `approve` or `request_changes`.
-- Before coder dispatch, request `architecture-plan`; on `request_changes`, route the report to architect.
-- Before docs sync or final acceptance, request `validation-adequacy`; on `request_changes`, route the report to reviewer.
-- Before PR preparation, request `final-diff`; on `request_changes`, route the report to architect for Debug Mode or Replan assessment.
+- Gate Review requests are mandatory and unconditional. At every trigger point, use the `vcm-gate-review` skill to run `.ai/tools/request-gate-review --gate <gate>` without first judging whether Gate Review is enabled. The tool (via VCM) is the single source of truth for enable state; never skip the run because you assume Gate Review is off or because the worktree has no gate-review index yet.
+- The tool's first output line decides the next step: `disabled`, `not_required`, or `already_approved` continue the normal VCM flow; `started` or `running` stop the turn and wait for the VCM callback; `failed_to_start` is a hard stop — report it to the user and do not silently proceed past the gate.
+- Trigger points (run each unconditionally): before coder dispatch run `architecture-plan`; before docs sync or final acceptance run `validation-adequacy`; before PR preparation run `final-diff`.
+- On a callback, accept only `approve` or `request_changes`. On `request_changes`, route `architecture-plan`/`final-diff` reports to architect (Debug Mode or Replan assessment) and `validation-adequacy` reports to reviewer.
 - Do not ask Gate Reviewer to choose owners, fixes, Replan, or user-intervention needs.
 - Record gate decision, report path, and any skip or override reason.
 
