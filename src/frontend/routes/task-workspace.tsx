@@ -128,6 +128,12 @@ export function TaskWorkspace({
   ];
 
   const applyMessageState = useCallback((nextMessages: VcmRoleMessage[], nextOrchestration: VcmOrchestrationState) => {
+    // VCM:CODE SCF-202 (modify): remove the client-side message-diff auto-switch
+    // (selectAutoDispatchRole / previousMessages snapshot / "before VCM dispatch"
+    // event). The auto role-follow now consumes the authoritative
+    // roundState.activeRole in app.tsx (handleRoundStateChanged). Keep this callback
+    // only for orchestration/message propagation. Then delete
+    // src/frontend/state/message-navigation.ts and its test.
     const previousMessages = messageSnapshotRef.current?.taskSlug === task.taskSlug
       ? messageSnapshotRef.current.messages
       : null;

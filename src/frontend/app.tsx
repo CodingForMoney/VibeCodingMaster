@@ -223,6 +223,12 @@ export function App() {
       return;
     }
     setActiveSessionRoundState({ taskSlug: roundState.taskSlug, roundState });
+    // VCM:CODE SCF-202 (modify): generalize this authoritative active-role follow
+    // beyond gate-reviewer. In auto orchestration mode, when roundState.activeRole
+    // changes, switch the visible role tab to it (dedupe on change so manual focus
+    // is not stolen every poll). This replaces the client-side message-diff
+    // derivation removed from task-workspace (selectAutoDispatchRole). No backend or
+    // shared-type change: activeRole is the authoritative signal (set at turn start).
     if (roundState.status === "running" && roundState.activeRole === "gate-reviewer") {
       setActiveRole("gate-reviewer");
     }

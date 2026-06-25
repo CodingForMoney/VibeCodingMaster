@@ -1,3 +1,7 @@
+// VCM:CODE SCF-202 (remove): this client-side auto-dispatch-role derivation is
+// replaced by consuming the authoritative roundState.activeRole in app.tsx.
+// Delete this file and its test (tests/unit/frontend/message-navigation.test.ts)
+// once task-workspace no longer calls selectAutoDispatchRole.
 import type { VcmOrchestrationState, VcmRoleMessage } from "../../shared/types/message.js";
 import type { RoleName } from "../../shared/types/role.js";
 
