@@ -65,7 +65,7 @@ gate and reports results.
 4. `npm run verify:package`
 5. `npm pack --dry-run`, then verify tarball contents:
    - tarball name/version matches the bumped version (e.g. `vibe-coding-master-<version>.tgz`);
-   - only whitelisted paths are present (`dist`, `dist-frontend`, `docs`, `scripts`, `README.md`, `package.json`);
+   - only whitelisted paths are present (`dist`, `dist-frontend`, `scripts`, `README.md`, `package.json`, plus npm's auto-included `LICENSE`); note `docs/` is intentionally NOT shipped as of 0.5.1;
    - no leak of `src/`, `tests/`, `.ai/`, `.claude/worktrees/`, or local runtime state.
 
 Notes:
