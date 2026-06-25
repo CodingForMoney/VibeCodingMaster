@@ -11,8 +11,8 @@ All commands run from the repository root (the task worktree during a VCM task).
 | Level | Scope | Command(s) |
 | --- | --- | --- |
 | L0 fast checks | Format/lint/typecheck/boundary. Project ships typecheck across both tsconfigs. | `npm run typecheck` |
-| L1 coder unit checks | Changed behavior + direct regressions via Vitest unit tests. | `npm test` (optionally a scoped `npx vitest run <path>`) |
-| L2 module / integration checks | Module/API/runtime wiring. Vitest config reserves `tests/integration/api/**` and `tests/integration/runtime/**`. | `npm test` (runs unit + any integration tests that exist) |
+| L1 coder unit checks | Changed behavior + direct regressions via Vitest unit tests. | `npm run build` then `npm test` on a clean tree (build first — see note); optionally a scoped `npx vitest run <path>` |
+| L2 module / integration checks | Module/API/runtime wiring. Vitest config reserves `tests/integration/api/**` and `tests/integration/runtime/**`. | `npm run build` then `npm test` on a clean tree (build first — see note); runs unit + any integration tests that exist |
 | L3 smoke E2E checks | Core GUI journeys via Playwright. | `npm run e2e` |
 | L4 full regression / release | Build + package verification before publish. | `npm run build` then `npm run verify:package` |
 
@@ -24,6 +24,12 @@ Notes:
 - `npm test` is `vitest run`. Its `include` globs already cover unit and the
   reserved integration directories, so a single `npm test` is both L1 and L2 once
   integration tests exist.
+- **Build before `npm test` on a clean tree.**
+  `tests/unit/backend/harness-templates-sync.test.ts` shells out to the compiled
+  CLI (`dist/main.js`), so run `npm run build` first; otherwise those 3 cases fail
+  with "compiled CLI not found" — a build-state failure, not a regression. This is
+  why the Release Gate below runs `build` before `test` (see also "Known Testing
+  Gaps").
 - `npm run e2e` is `playwright test` against `tests/e2e`, and its `webServer`
   starts `npm run dev` automatically (reusing an existing server if one is up).
 
@@ -60,8 +66,8 @@ architect-owned (see root `CLAUDE.md` "Release Process"); the reviewer runs the
 gate and reports results.
 
 1. `npm run typecheck`
-2. `npm test`
-3. `npm run build`
+2. `npm run build` (must run before `npm test`: `harness-templates-sync` needs the compiled `dist/main.js`)
+3. `npm test`
 4. `npm run verify:package`
 5. `npm pack --dry-run`, then verify tarball contents:
    - tarball name/version matches the bumped version (e.g. `vibe-coding-master-<version>.tgz`);
