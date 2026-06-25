@@ -48,6 +48,23 @@ describe("apiClient", () => {
     expect(paths).toEqual(["/workspace", "/repo"]);
   });
 
+  it("one-click starts a task via a bodyless POST", async () => {
+    const fetchMock = mockFetch({
+      taskSlug: "demo-task",
+      orchestration: { taskSlug: "demo-task", mode: "auto", updatedAt: "2026-06-25T00:00:00.000Z" },
+      startedRoles: ["project-manager"],
+      sessions: []
+    });
+
+    const result = await apiClient.oneClickStart("demo-task");
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/tasks/demo-task/one-click-start");
+    const init = fetchMock.mock.calls[0]?.[1];
+    expect(init?.method).toBe("POST");
+    expect(init?.body).toBeUndefined();
+    expect(result.startedRoles).toEqual(["project-manager"]);
+  });
+
   it("loads runtime diagnostics", async () => {
     const fetchMock = mockFetch({
       version: "0.3.6",

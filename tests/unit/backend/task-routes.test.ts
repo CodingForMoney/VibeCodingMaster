@@ -14,6 +14,7 @@ describe("task routes", () => {
     });
 
     registerTaskRoutes(app, {
+      taskLaunchService: notUsedTaskLaunchService(),
       projectService: {
         async getCurrentProject() {
           return {
@@ -133,6 +134,7 @@ describe("task routes", () => {
     const app = Fastify({ logger: false });
 
     registerTaskRoutes(app, {
+      taskLaunchService: notUsedTaskLaunchService(),
       projectService: {
         async getCurrentProject() {
           return {
@@ -213,11 +215,67 @@ describe("task routes", () => {
     await app.close();
   });
 
+  it("one-click starts a task via the launch service with requireFreshStart", async () => {
+    const app = Fastify({ logger: false });
+    const calls: Array<{ repoRoot: string; taskSlug: string; requireFreshStart: boolean }> = [];
+    const result = {
+      taskSlug: "demo-task",
+      orchestration: { taskSlug: "demo-task", mode: "auto" as const, updatedAt: "2026-05-31T00:00:00.000Z" },
+      startedRoles: ["project-manager", "architect", "coder", "reviewer"] as RoleName[],
+      sessions: [createSession("project-manager", "running")]
+    };
+
+    registerTaskRoutes(app, {
+      taskLaunchService: {
+        async startTaskRoleSessions(repoRoot: string, input: { taskSlug: string; requireFreshStart: boolean }) {
+          calls.push({ repoRoot, ...input });
+          return result;
+        }
+      },
+      projectService: {
+        async getCurrentProject() {
+          return { repoRoot: "/repo" };
+        }
+      } as never,
+      taskService: {} as never,
+      sessionService: {} as never,
+      statusService: {} as never,
+      messageService: {} as never,
+      translationService: {
+        async stopTask() {
+          throw new Error("not used");
+        }
+      },
+      roundService: {
+        async getSessionRoundState() {
+          throw new Error("not used");
+        },
+        stopTask() {}
+      } as never
+    });
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/tasks/demo-task/one-click-start",
+      payload: {}
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(response.json()).toMatchObject({
+      taskSlug: "demo-task",
+      orchestration: { mode: "auto" },
+      startedRoles: ["project-manager", "architect", "coder", "reviewer"]
+    });
+    expect(calls).toEqual([{ repoRoot: "/repo", taskSlug: "demo-task", requireFreshStart: true }]);
+    await app.close();
+  });
+
   it("returns aggregated task workspace state", async () => {
     const app = Fastify({ logger: false });
     const task = createTask();
 
     registerTaskRoutes(app, {
+      taskLaunchService: notUsedTaskLaunchService(),
       projectService: {
         async getCurrentProject() {
           return {
@@ -332,6 +390,14 @@ describe("task routes", () => {
     await app.close();
   });
 });
+
+function notUsedTaskLaunchService() {
+  return {
+    async startTaskRoleSessions() {
+      throw new Error("not used");
+    }
+  };
+}
 
 function createTask(input: Partial<TaskRecord> = {}): TaskRecord {
   return {

@@ -49,7 +49,7 @@ import type { ProjectSummary, ConnectProjectRequest } from "../../shared/types/p
 import type { DispatchableRole, RoleName } from "../../shared/types/role.js";
 import type { VcmSessionRoundState } from "../../shared/types/round.js";
 import type { RoleSessionRecord, StartRoleSessionRequest } from "../../shared/types/session.js";
-import type { CleanupTaskRequest, CleanupTaskResult, CreateTaskRequest, TaskRecord } from "../../shared/types/task.js";
+import type { CleanupTaskRequest, CleanupTaskResult, CreateTaskRequest, OneClickStartTaskResult, TaskRecord } from "../../shared/types/task.js";
 import { errorReason } from "./error-format.js";
 import type {
   TranslationBootstrapRun,
@@ -240,6 +240,11 @@ export const apiClient = {
   },
   getTaskStatus(taskSlug: string) {
     return request<TaskStatusReport>(`/api/tasks/${encodeURIComponent(taskSlug)}/status`);
+  },
+  oneClickStart(taskSlug: string) {
+    return request<OneClickStartTaskResult>(`/api/tasks/${encodeURIComponent(taskSlug)}/one-click-start`, {
+      method: "POST"
+    });
   },
   getTaskWorkspaceState(taskSlug: string) {
     return request<TaskWorkspaceState>(`/api/tasks/${encodeURIComponent(taskSlug)}/workspace-state`);

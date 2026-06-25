@@ -61,6 +61,7 @@ function createServerDepsStub(calls: string[]): ServerDeps {
     commandDispatcher: {} as never,
     claudeHookService: {} as never,
     messageService: {} as never,
+    taskLaunchService: {} as never,
     gateReviewService: {} as never,
     translationWorkerService: {
       async cleanupStartupRuntime(repoRoot: string) {

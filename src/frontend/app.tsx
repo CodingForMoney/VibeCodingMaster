@@ -32,7 +32,6 @@ import type { RoleName } from "../shared/types/role.js";
 import type { VcmRoleRecoveryState, VcmRoundStatus, VcmSessionRoundState } from "../shared/types/round.js";
 import type { ClaudePermissionMode, RoleSessionRecord, SessionEffort, SessionModel } from "../shared/types/session.js";
 import type { TaskRecord } from "../shared/types/task.js";
-import { VCM_ROLE_NAMES } from "../shared/constants.js";
 import { AppShell } from "./components/app-shell.js";
 import { HarnessFeedbackReview } from "./components/harness-feedback-review.js";
 import { HarnessStudioModal } from "./components/harness-studio-modal.js";
@@ -46,7 +45,6 @@ import { clearUiErrorForActions, formatUiError } from "./state/error-format.js";
 import { clearPollError, recordPollError } from "./state/poll-error-gate.js";
 import { useUiErrorState } from "./state/ui-error-state.js";
 import { useScheduledPoll } from "./state/use-scheduled-poll.js";
-import { buildOneClickRoleLaunches } from "./state/one-click-start.js";
 import { ProjectDashboard } from "./routes/project-dashboard.js";
 import { TaskWorkspace, type TaskWorkspaceLaunchState } from "./routes/task-workspace.js";
 
@@ -1027,45 +1025,13 @@ export function App() {
                 throw new Error("Create or select a task before one-click start.");
               }
 
-              // VCM:CODE SCF-107 (modify): replace this entire client-side orchestration
-              // (precondition check, orchestration-mode set, buildOneClickRoleLaunches
-              // roster, and the per-role start/resume loop) with a single
-              // `const result = await apiClient.oneClickStart(activeTask.taskSlug);`
-              // then apply result.orchestration, set active role to project-manager, and
-              // refresh. Remove the buildOneClickRoleLaunches import and delete
-              // state/one-click-start.ts (+ its test).
-              const status = await apiClient.getTaskStatus(activeTask.taskSlug);
-              if (status.sessions.some((session) => VCM_ROLE_NAMES.some((role) => role === session.role))) {
-                throw new Error("One-click start is only available before any role session has started.");
-              }
-
-              const nextOrchestration = await apiClient.updateOrchestrationState(activeTask.taskSlug, {
-                mode: launchTemplate.autoOrchestration ? "auto" : "manual"
-              });
+              // The backend owns roster composition, orchestration mode, the
+              // fresh-start precondition, and per-role skip/resume/start.
+              const result = await apiClient.oneClickStart(activeTask.taskSlug);
               setActiveOrchestration({
                 taskSlug: activeTask.taskSlug,
-                orchestration: nextOrchestration
+                orchestration: result.orchestration
               });
-
-              const roleLaunches = buildOneClickRoleLaunches(launchTemplate, { gateReviewerEnabled });
-              for (const roleLaunch of roleLaunches) {
-                const sessionInput = {
-                  cols: 100,
-                  rows: 28,
-                  permissionMode: roleLaunch.permissionMode,
-                  model: roleLaunch.model,
-                  effort: roleLaunch.effort
-                };
-                const existingSession = status.sessions.find((session) => session.role === roleLaunch.role);
-                if (existingSession?.status === "running") {
-                  continue;
-                }
-                if (existingSession?.claudeSessionId) {
-                  await apiClient.resumeRoleSession(activeTask.taskSlug, roleLaunch.role, sessionInput);
-                } else {
-                  await apiClient.startRoleSession(activeTask.taskSlug, roleLaunch.role, sessionInput);
-                }
-              }
 
               setActiveRole("project-manager");
               await refreshMessageState(activeTask.taskSlug);

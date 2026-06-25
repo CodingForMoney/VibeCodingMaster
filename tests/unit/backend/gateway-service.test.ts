@@ -563,9 +563,14 @@ function createService(input: {
         return {};
       }
     } as never,
-    messageService: {
-      async updateOrchestrationState() {
-        return {};
+    taskLaunchService: {
+      async startTaskRoleSessions() {
+        return {
+          taskSlug: task.taskSlug,
+          orchestration: { taskSlug: task.taskSlug, mode: "auto", updatedAt: NOW },
+          startedRoles: [],
+          sessions: []
+        };
       }
     } as never,
     translationService: {
