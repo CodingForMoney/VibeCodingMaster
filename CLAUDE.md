@@ -13,6 +13,13 @@
 - The harness this repo installs into other projects is authored in `src/backend/templates/harness/**`. Editing harness behavior for downstream users means editing those templates, not the generated files in a target repo.
 - Durable local app state lives outside the repo under `vcmDataDir` (`VCM_DATA_DIR` or `~/.vcm`); per-task runtime state lives under `<taskRepoRoot>/.ai/vcm/`.
 
+## Release Process
+
+- Release/publish is a recurring, irreversible operation and is **architect-owned**: the architect leads and is responsible for the release.
+- Project release flow: architect (release plan, owns the release) -> coder (version bump in `package.json` + lockfile) -> reviewer (release gate, see `docs/TESTING.md` "Release Gate (L4)") -> `npm publish` -> project-manager final acceptance (record the published commit SHA and confirm with `npm view`).
+- When the user has already explicitly requested a release, that request **is** the go-ahead: do not insert another user confirmation step before publishing. Only pause for the user if something in the release gate fails or the scope is unclear.
+- `npm publish` runs in the foreground and may prompt for an interactive OTP/2FA, so it must **not** be run through the detached long-running-validation job tooling (`run-long-check`/`watch-job`), which cannot accept interactive input.
+
 ## Project Constraints
 
 - Do not break the `src/shared` boundary: `shared` must not import from `backend` or `frontend`; `frontend` and `backend` may depend on `shared` but not on each other.
@@ -20,7 +27,7 @@
 - Frontend talks to the backend only through `src/frontend/state/api-client.ts` and the WebSocket terminal client; do not scatter raw `fetch`/socket calls in components.
 - Background/long-running work is constrained by the VCM background-job rules in the managed block below; never detach processes.
 - The published npm package ships only built output (`dist`, `dist-frontend`, `docs`, `scripts`, `README.md`). Do not assume `src/` is shipped; keep runtime-needed assets in shipped paths.
-- Treat `package.json`, lockfiles, and build/deploy config as out of scope for harness bootstrap edits.
+- `package.json`, lockfiles, and build/deploy config are out of scope for **Harness Engineer bootstrap** edits. A deliberate release version bump (e.g. `package.json` version plus lockfile) made by the architect-led release flow inside an explicit release task is a sanctioned exception, not a bootstrap edit.
 
 <!-- VCM:BEGIN version=1 -->
 ## VCM Start Here

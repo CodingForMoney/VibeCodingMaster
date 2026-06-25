@@ -53,6 +53,32 @@ Use the `vcm-long-running-validation` skill (`.ai/tools/run-long-check` +
 `npm run e2e` and full builds). Never run validation as a detached/background
 process; the job guard denies it. Honor the 60-minute per-job ceiling.
 
+## Release Gate (L4)
+
+Run this gate for any version release before `npm publish`. The release is
+architect-owned (see root `CLAUDE.md` "Release Process"); the reviewer runs the
+gate and reports results.
+
+1. `npm run typecheck`
+2. `npm test`
+3. `npm run build`
+4. `npm run verify:package`
+5. `npm pack --dry-run`, then verify tarball contents:
+   - tarball name/version matches the bumped version (e.g. `vibe-coding-master-<version>.tgz`);
+   - only whitelisted paths are present (`dist`, `dist-frontend`, `docs`, `scripts`, `README.md`, `package.json`);
+   - no leak of `src/`, `tests/`, `.ai/`, `.claude/worktrees/`, or local runtime state.
+
+Notes:
+
+- `npm run verify:package` asserts that required files are **present** and that
+  `package.json` `files`/`bin` are correct, but it does not assert the **negative**
+  (that non-whitelisted paths are absent). Step 5's `npm pack --dry-run` content
+  review is what currently covers that negative-leak check — do not skip it.
+- Publish (`npm publish`) is foreground, irreversible, and may prompt for an
+  interactive OTP/2FA. Run it directly in the foreground, never through the
+  detached `run-long-check`/`watch-job` tooling. When the user has explicitly
+  requested the release, proceed without a redundant re-confirmation step.
+
 ## Test Layout
 
 ```
@@ -128,3 +154,6 @@ recommended first cases when integration/E2E coverage is added.
   "compiled CLI not found. Run npm run build first." Run `npm run build` before
   `npm test` (or treat these specific failures as build-state, not regressions)
   when validating from a clean tree.
+- `npm run verify:package` does not assert the negative (that non-whitelisted
+  paths such as `src/`/`tests/`/`.ai/` are absent from the published tarball); that
+  leak check is currently manual via the Release Gate's `npm pack --dry-run` step.
