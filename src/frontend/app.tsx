@@ -40,6 +40,7 @@ import { TranslatorSessionModal } from "./components/translator-session-modal.js
 import { FileTranslationModalHost } from "./components/translation-panel.js";
 import { UiErrorCenter } from "./components/ui-error-center.js";
 import { selectActiveTask } from "./state/app-store.js";
+import { selectAutoFollowRole } from "./state/active-role-follow.js";
 import { apiClient } from "./state/api-client.js";
 import { clearUiErrorForActions, formatUiError } from "./state/error-format.js";
 import { clearPollError, recordPollError } from "./state/poll-error-gate.js";
@@ -112,6 +113,10 @@ export function App() {
   const [, setError] = useUiErrorState("");
   const notifiedFlowPauseKeyRef = useRef<Record<string, string>>({});
   const observedFlowPauseStateRef = useRef<Record<string, { status: VcmRoundStatus }>>({});
+  // Per-task mirror of the orchestration mode and the last role we auto-followed,
+  // read inside handleRoundStateChanged without widening its dependency array.
+  const orchestrationModeRef = useRef<Record<string, VcmOrchestrationState["mode"]>>({});
+  const autoFollowedRoleRef = useRef<Record<string, RoleName>>({});
   const activeTaskViewStartedAtRef = useRef<Record<string, number>>({});
   const flowPauseAlarmRef = useRef<number | null>(null);
   const projectRuntimeLaunchSyncKeyRef = useRef("");
@@ -207,6 +212,7 @@ export function App() {
   }, [activeTask?.taskSlug]);
 
   const handleOrchestrationChanged = useCallback((orchestration: VcmOrchestrationState) => {
+    orchestrationModeRef.current[orchestration.taskSlug] = orchestration.mode;
     if (activeTask?.taskSlug) {
       setActiveOrchestration({ taskSlug: activeTask.taskSlug, orchestration });
     }
@@ -223,14 +229,19 @@ export function App() {
       return;
     }
     setActiveSessionRoundState({ taskSlug: roundState.taskSlug, roundState });
-    // VCM:CODE SCF-202 (modify): generalize this authoritative active-role follow
-    // beyond gate-reviewer. In auto orchestration mode, when roundState.activeRole
-    // changes, switch the visible role tab to it (dedupe on change so manual focus
-    // is not stolen every poll). This replaces the client-side message-diff
-    // derivation removed from task-workspace (selectAutoDispatchRole). No backend or
-    // shared-type change: activeRole is the authoritative signal (set at turn start).
-    if (roundState.status === "running" && roundState.activeRole === "gate-reviewer") {
-      setActiveRole("gate-reviewer");
+    // Follow the authoritative active role (set by the round at turn start) in auto
+    // orchestration mode, deduped so a steady role does not re-switch every poll and
+    // a user's manual tab focus is not stolen. Replaces the former client-side
+    // message-diff role derivation and the gate-reviewer-only tab special case.
+    const followRole = selectAutoFollowRole({
+      mode: orchestrationModeRef.current[roundState.taskSlug],
+      status: roundState.status,
+      activeRole: roundState.activeRole,
+      lastFollowedRole: autoFollowedRoleRef.current[roundState.taskSlug]
+    });
+    if (followRole) {
+      autoFollowedRoleRef.current[roundState.taskSlug] = followRole;
+      setActiveRole(followRole);
     }
     if (roundState.roleRecovery?.status === "waiting" || roundState.roleRecovery?.status === "retrying") {
       observedFlowPauseStateRef.current[roundState.taskSlug] = { status: roundState.status };
