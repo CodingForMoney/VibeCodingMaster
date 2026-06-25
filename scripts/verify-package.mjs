@@ -41,7 +41,6 @@ const requiredFiles = [
 const requiredFileEntries = [
   "dist",
   "dist-frontend",
-  "docs",
   "scripts",
   "README.md"
 ];
