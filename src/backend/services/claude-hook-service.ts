@@ -397,6 +397,11 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
       cwd: stringOrUndefined(input.event.cwd) ?? stringOrUndefined(input.event.new_cwd)
     });
     if (boundToTask) {
+      // VCM:CODE SCF-106: when eventName === "Stop" && isUserFacingRole(input.role) && session,
+      // best-effort capture the role's last user-facing turn text via
+      // readLatestRoleTurnReply(session) (import from ./claude-transcript-reply.js) and pass it
+      // as `userFacingReply: { text, truncated }` into the roundService.recordClaudeHookEvent
+      // call below. Capture failure (undefined) must not block turn-end; just omit the field.
       await deps.roundService.recordClaudeHookEvent({
         repoRoot: context.project.repoRoot,
         stateRepoRoot: context.taskRepoRoot,

@@ -52,6 +52,13 @@ export interface VcmFlowPauseState {
   role?: RoleName;
   /** When the pause condition began (e.g. stoppedAt / lastTurnEndedAt). */
   since?: string;
+  /**
+   * The awaiting role's captured user-facing turn text. Present only for reason
+   * `awaiting-user`, and only when capture succeeded (best-effort; may be absent).
+   */
+  message?: string;
+  /** True when `message` was truncated to the capture length limit. */
+  messageTruncated?: boolean;
 }
 
 export interface VcmSessionRoundState {

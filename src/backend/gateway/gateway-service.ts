@@ -1391,6 +1391,11 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
   }
 }
 
+// VCM:CODE SCF-103: relocate this transcript-reply extraction (readTranscriptTextEvents,
+// selectLatestTurnReply, isFinalTurnTextEvent, limitLatestPmReply / MAX_LATEST_PM_REPLY_CHARS,
+// TranscriptTextEvent) into src/backend/services/claude-transcript-reply.ts and have
+// handlePmStop consume readLatestRoleTurnReply from there. Behavior must stay identical
+// (gateway push unchanged); this is a relocation, not a behavior change.
 async function readTranscriptTextEvents(transcriptPath: string): Promise<TranscriptTextEvent[]> {
   const raw = await readFile(transcriptPath, "utf8");
   const events: TranscriptTextEvent[] = [];

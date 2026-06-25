@@ -30,6 +30,12 @@ export interface RecordRoundHookEventInput extends SessionRoundInput {
   role: RoleName;
   eventName: ClaudeTurnHookEventName;
   settleGuard?: RoundSettleGuard;
+  /**
+   * The captured user-facing turn reply for this event, supplied by the hook
+   * layer on a user-facing role's Stop. Stashed until settle, where it becomes
+   * the await-user pause message. Best-effort: absent when capture failed.
+   */
+  userFacingReply?: { text: string; truncated: boolean };
 }
 
 export interface SetRoleRecoveryInput extends SessionRoundInput {
@@ -84,13 +90,31 @@ interface PersistedRoundFile {
    * `awaiting-user` flow-pause reason.
    */
   awaitingUser?: AwaitingUserState;
+  /**
+   * Transient stash of a user-facing role's captured reply from its latest Stop,
+   * carried from the Stop hook to the settle moment. Consumed into
+   * `awaitingUser.message` when the await-user anchor is created, and cleared on
+   * consume / new round / answer so it never attaches to a later anchor.
+   */
+  pendingUserReply?: PendingUserReply;
   updatedAt: string;
+}
+
+interface PendingUserReply {
+  role: RoleName;
+  text: string;
+  truncated: boolean;
+  capturedAt: string;
 }
 
 interface AwaitingUserState {
   role: RoleName;
   since: string;
   capturedAt?: string;
+  /** The awaiting role's captured user-facing text (best-effort; may be absent). */
+  message?: string;
+  /** True when `message` was truncated to the capture length limit. */
+  messageTruncated?: boolean;
 }
 
 interface PersistedRound {
@@ -238,7 +262,14 @@ export function createRoundService(deps: RoundServiceDeps): RoundService {
       ...state,
       currentRound: stopped,
       lastStoppedRound: stopped,
-      awaitingUser: resolveAwaitingUserOnStop(state.awaitingUser, current.activeRole, stopped.stoppedAt ?? timestamp),
+      awaitingUser: resolveAwaitingUserOnStop(
+        state.awaitingUser,
+        current.activeRole,
+        stopped.stoppedAt ?? timestamp,
+        state.pendingUserReply
+      ),
+      // VCM:CODE SCF-104: clear next.pendingUserReply here once it has been consumed
+      // into awaitingUser.message (it is a one-shot stash, not durable round state).
       updatedAt: timestamp
     };
     await save(input, next);
@@ -354,6 +385,12 @@ export function createRoundService(deps: RoundServiceDeps): RoundService {
         settleMs
       });
       const next = clearAwaitingUserIfAnswered(recorded, input.eventName, input.role);
+      // VCM:CODE SCF-104: when input.eventName === "Stop" && isUserFacingRole(input.role)
+      // && input.userFacingReply, stash it on next.pendingUserReply
+      // ({ role, text, truncated, capturedAt: timestamp }) so settle can promote it to
+      // awaitingUser.message. Also drop next.pendingUserReply when the await-user anchor
+      // was just cleared (UserPromptSubmit by the awaiting role) so stale text cannot
+      // reattach. Do not stash for non-user-facing roles or non-Stop events.
       await save(input, next);
       if (input.eventName === "UserPromptSubmit") {
         clearSettleTimer(input);
@@ -639,7 +676,9 @@ function computeFlowPause(
       paused: true,
       reason: "awaiting-user",
       role: awaitingUser.role,
-      since: awaitingUser.since
+      since: awaitingUser.since,
+      message: awaitingUser.message,
+      messageTruncated: awaitingUser.messageTruncated
     };
   }
 
@@ -663,7 +702,8 @@ function computeFlowPause(
 function resolveAwaitingUserOnStop(
   existing: AwaitingUserState | undefined,
   role: RoleName,
-  since: string
+  since: string,
+  pendingReply: PendingUserReply | undefined
 ): AwaitingUserState | undefined {
   if (existing) {
     return existing;
@@ -671,6 +711,10 @@ function resolveAwaitingUserOnStop(
   if (!isUserFacingRole(role)) {
     return undefined;
   }
+  // VCM:CODE SCF-104: when pendingReply belongs to this role, attach it as the
+  // anchor message: { role, since, capturedAt: pendingReply.capturedAt,
+  // message: pendingReply.text, messageTruncated: pendingReply.truncated }.
+  void pendingReply;
   return { role, since };
 }
 
@@ -701,7 +745,29 @@ function normalizeAwaitingUser(input: unknown): AwaitingUserState | undefined {
   return {
     role: record.role as RoleName,
     since: record.since,
-    capturedAt: typeof record.capturedAt === "string" ? record.capturedAt : undefined
+    capturedAt: typeof record.capturedAt === "string" ? record.capturedAt : undefined,
+    message: typeof record.message === "string" ? record.message : undefined,
+    messageTruncated: record.messageTruncated === true ? true : undefined
+  };
+}
+
+function normalizePendingUserReply(input: unknown): PendingUserReply | undefined {
+  if (!input || typeof input !== "object") {
+    return undefined;
+  }
+  const record = input as Partial<PendingUserReply>;
+  if (
+    typeof record.role !== "string"
+    || typeof record.text !== "string"
+    || typeof record.capturedAt !== "string"
+  ) {
+    return undefined;
+  }
+  return {
+    role: record.role as RoleName,
+    text: record.text,
+    truncated: record.truncated === true,
+    capturedAt: record.capturedAt
   };
 }
 
@@ -722,6 +788,7 @@ function normalizeRoundFile(input: Partial<PersistedRoundFile>, taskSlug: string
     totalCcActiveMs: normalizeNumber(input.totalCcActiveMs),
     roleRecovery: normalizeRoleRecovery(input.roleRecovery),
     awaitingUser: normalizeAwaitingUser(input.awaitingUser),
+    pendingUserReply: normalizePendingUserReply(input.pendingUserReply),
     updatedAt: typeof input.updatedAt === "string" ? input.updatedAt : updatedAt
   };
 }

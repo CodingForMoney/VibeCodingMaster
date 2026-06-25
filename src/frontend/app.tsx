@@ -1071,6 +1071,15 @@ export function App() {
       )}
     >
       <UiErrorCenter />
+      {/*
+        VCM:CODE SCF-108: render a persistent, actionable await-user banner whenever
+        roundState.flowPause?.reason === "awaiting-user". Show the awaiting role
+        (flowPause.role) and the captured text (flowPause.message) rendered as plain
+        React text (no dangerouslySetInnerHTML); indicate truncation when
+        flowPause.messageTruncated. The banner stays while the anchor is set and clears
+        automatically once the backend clears it. It is distinct from the transient
+        flowPauseNotice modal below (which no longer fires for awaiting-user).
+      */}
       {flowPauseNotice ? (
         <div className="flow-pause-alert-backdrop">
           <section
