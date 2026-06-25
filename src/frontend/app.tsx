@@ -132,7 +132,13 @@ export function App() {
   const currentHarnessBootstrapStatus = harnessBootstrapStatusTaskSlug === activeTask?.taskSlug ? harnessBootstrapStatus : null;
   const translationBaseReady = Boolean(project && activeTask && isTranslationHarnessReady(currentHarnessStatus));
   const translatorSessionRunning = translatorSession?.status === "running";
-  const gatewayRunning = Boolean(gatewayStatus?.running);
+  // Suppress the web flow-pause modal + sound only when the gateway will actually
+  // DELIVER the "needs attention" notification — i.e. it is enabled (handlePmStop
+  // pushes only when settings.enabled). The gateway keeps polling while disabled
+  // (to receive a `/start` command), so `gatewayStatus.running` is true even when
+  // disabled; keying suppression on `running` silences the web alert with no push
+  // anywhere. Key on `enabled` instead.
+  const gatewayHandlesAlerts = Boolean(gatewayStatus?.enabled);
   const effectiveTranslationEnabled = Boolean(translationEnabled && translationBaseReady && translatorSessionRunning);
   const canSaveLaunchTemplate = Boolean(activeTaskLaunchState?.statusLoaded);
   const canOneClickStart = Boolean(activeTask && activeTaskLaunchState?.statusLoaded && !activeTaskLaunchState.hasAnySession);
@@ -293,7 +299,7 @@ export function App() {
     if (!shouldShowFlowPauseNotice(roundState, previousObservation, activeTaskViewStartedAtRef.current[roundState.taskSlug])) {
       return;
     }
-    if (gatewayRunning) {
+    if (gatewayHandlesAlerts) {
       stopFlowPauseAlarm();
       setFlowPauseNotice(null);
       return;
@@ -305,7 +311,7 @@ export function App() {
         ? "strong"
         : "weak";
     showFlowPauseNotice(flowPauseMessage, pauseKey, { sound });
-  }, [activeTask?.taskSlug, gatewayRunning, pauseAlertSound, showFlowPauseNotice, stopFlowPauseAlarm]);
+  }, [activeTask?.taskSlug, gatewayHandlesAlerts, pauseAlertSound, showFlowPauseNotice, stopFlowPauseAlarm]);
 
   const handleLaunchStateChanged = useCallback((launchState: TaskWorkspaceLaunchState) => {
     setActiveLaunchState((current) => {
@@ -565,12 +571,12 @@ export function App() {
   }, [stopFlowPauseAlarm]);
 
   useEffect(() => {
-    if (!gatewayRunning) {
+    if (!gatewayHandlesAlerts) {
       return;
     }
     stopFlowPauseAlarm();
     setFlowPauseNotice(null);
-  }, [gatewayRunning, stopFlowPauseAlarm]);
+  }, [gatewayHandlesAlerts, stopFlowPauseAlarm]);
 
   useEffect(() => {
     const resolvedTheme = themeMode === "system"
