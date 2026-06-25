@@ -875,6 +875,125 @@ describe("translator-translation-service", () => {
     expect(state.queue.activeItemId).toBe(next.queueItemId);
     expect(nextItem?.status).toBe("running");
   });
+
+  it("hook-finalizes a matching result.json but fails the batch item whose index is missing", async () => {
+    // Proof point 5: on the Stop/StopFailure hook the Translator is definitively
+    // done, so an identity-matching result.json that is missing an expected index
+    // is a genuine per-item failure for that index while siblings still complete.
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-translator-conversation-hook-missing-"));
+    const fs = createNodeFileSystemAdapter();
+    const writes: string[] = [];
+    const service = createTranslationWorkerService({
+      fs,
+      runtime: createRuntimeStub(writes),
+      sessionService: createTranslatorSessionService([])
+    });
+
+    const first = await service.createConversationJob(tmpRepo, {
+      taskSlug: "demo-task",
+      direction: "cc-output-to-user",
+      sourceText: "First output.",
+      sourceLanguage: "en",
+      targetLanguage: "zh-CN",
+      deferDispatch: true
+    });
+    const second = await service.createConversationJob(tmpRepo, {
+      taskSlug: "demo-task",
+      direction: "cc-output-to-user",
+      sourceText: "Second output.",
+      sourceLanguage: "en",
+      targetLanguage: "zh-CN"
+    });
+    await waitForDispatcher();
+
+    const dispatched = await service.getState(tmpRepo);
+    const firstItem = dispatched.queue.items.find((item) => item.id === first.queueItemId);
+    const secondItem = dispatched.queue.items.find((item) => item.id === second.queueItemId);
+    expect(firstItem?.batchId).toBe(secondItem?.batchId);
+    expect(firstItem?.batchIndex).toBe(1);
+    expect(secondItem?.batchIndex).toBe(2);
+
+    // Identity matches, but only index 1 is present (index 2 absent).
+    await fs.writeText(path.join(tmpRepo, firstItem!.batchResultPath!), JSON.stringify({
+      version: 1,
+      batchId: firstItem!.batchId,
+      results: [{ index: 1, translatedText: "第一段译文" }]
+    }));
+    await service.handleTranslatorHook(tmpRepo, "Stop", "demo-task");
+
+    const state = await service.getState(tmpRepo);
+    const firstFinal = state.queue.items.find((item) => item.id === first.queueItemId);
+    const secondFinal = state.queue.items.find((item) => item.id === second.queueItemId);
+    expect(firstFinal?.status).toBe("completed");
+    expect(firstFinal?.translatedText).toBe("第一段译文");
+    expect(secondFinal?.status).toBe("failed");
+    expect(secondFinal?.error).toContain("batch index 2");
+    expect(state.queue.activeItemId).toBeUndefined();
+  });
+
+  it("defers (does not fail) a stuck batch when reconcile sees a matching result.json missing an index", async () => {
+    // Proof point 4: the reconcile/availability path cannot assume the Translator
+    // finished, so a matching result.json missing an expected index fails the
+    // all-or-nothing predicate and is treated as absent -> the head is held
+    // (deferred to stale-release), NOT prematurely failed like the hook path.
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-translator-conversation-reconcile-missing-"));
+    const fs = createNodeFileSystemAdapter();
+    const writes: string[] = [];
+    const service = createTranslationWorkerService({
+      fs,
+      runtime: createRuntimeStub(writes),
+      sessionService: createTranslatorSessionService([])
+    });
+
+    const first = await service.createConversationJob(tmpRepo, {
+      taskSlug: "demo-task",
+      direction: "cc-output-to-user",
+      sourceText: "First output.",
+      sourceLanguage: "en",
+      targetLanguage: "zh-CN",
+      deferDispatch: true
+    });
+    const second = await service.createConversationJob(tmpRepo, {
+      taskSlug: "demo-task",
+      direction: "cc-output-to-user",
+      sourceText: "Second output.",
+      sourceLanguage: "en",
+      targetLanguage: "zh-CN"
+    });
+    await waitForDispatcher();
+
+    const dispatched = await service.getState(tmpRepo);
+    const firstItem = dispatched.queue.items.find((item) => item.id === first.queueItemId);
+    const batchId = firstItem!.batchId;
+    // Identity matches, but only index 1 of the 2-item batch is present.
+    await fs.writeText(path.join(tmpRepo, firstItem!.batchResultPath!), JSON.stringify({
+      version: 1,
+      batchId,
+      results: [{ index: 1, translatedText: "第一段译文" }]
+    }));
+
+    // A later enqueue triggers dispatchNext -> reconcile against the in-flight,
+    // non-stale batch. The partial (missing index 2) result must be treated as
+    // absent so neither batch item is finalized and the head is held.
+    const third = await service.createConversationJob(tmpRepo, {
+      taskSlug: "demo-task",
+      direction: "cc-output-to-user",
+      sourceText: "Third output.",
+      sourceLanguage: "en",
+      targetLanguage: "zh-CN"
+    });
+    await waitForDispatcher();
+
+    const state = await service.getState(tmpRepo);
+    const firstFinal = state.queue.items.find((item) => item.id === first.queueItemId);
+    const secondFinal = state.queue.items.find((item) => item.id === second.queueItemId);
+    const thirdFinal = state.queue.items.find((item) => item.id === third.queueItemId);
+    expect(firstFinal?.status).toBe("running");
+    expect(firstFinal?.translatedText).toBeUndefined();
+    expect(secondFinal?.status).toBe("running");
+    expect(thirdFinal?.status).toBe("queued");
+    expect(state.queue.activeItemId).toBe(first.queueItemId);
+  });
 });
 
 function createRuntimeStub(writes: string[]): TerminalRuntime {
