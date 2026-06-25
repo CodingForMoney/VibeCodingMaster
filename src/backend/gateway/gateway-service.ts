@@ -604,6 +604,11 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
       mode: template.autoOrchestration ? "auto" : "manual"
     });
 
+    // VCM:CODE SCF-104 (modify): replace this inline roster + skip/resume/start loop
+    // with a single taskLaunchService.startTaskRoleSessions(project.repoRoot,
+    // { taskSlug: task.taskSlug, requireFreshStart: false }) call. Keep the
+    // settings-persist below and rewrap TASK_ONE_CLICK_PARTIAL_START into the
+    // existing GATEWAY_TASK_PARTIAL_START message to preserve phone-facing parity.
     const gateReviewSettings = await deps.appSettings.getGateReviewSettings(project.repoRoot, task.taskSlug);
     const roleDefinitions = [
       ...CORE_VCM_ROLE_DEFINITIONS,

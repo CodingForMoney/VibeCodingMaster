@@ -1027,6 +1027,13 @@ export function App() {
                 throw new Error("Create or select a task before one-click start.");
               }
 
+              // VCM:CODE SCF-107 (modify): replace this entire client-side orchestration
+              // (precondition check, orchestration-mode set, buildOneClickRoleLaunches
+              // roster, and the per-role start/resume loop) with a single
+              // `const result = await apiClient.oneClickStart(activeTask.taskSlug);`
+              // then apply result.orchestration, set active role to project-manager, and
+              // refresh. Remove the buildOneClickRoleLaunches import and delete
+              // state/one-click-start.ts (+ its test).
               const status = await apiClient.getTaskStatus(activeTask.taskSlug);
               if (status.sessions.some((session) => VCM_ROLE_NAMES.some((role) => role === session.role))) {
                 throw new Error("One-click start is only available before any role session has started.");

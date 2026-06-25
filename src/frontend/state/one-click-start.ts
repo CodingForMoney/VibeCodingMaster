@@ -1,3 +1,6 @@
+// VCM:CODE SCF-107 (remove): this client-side role-roster composition moves to the
+// backend `task-launch-service`. Delete this file and its test once `app.tsx`
+// onOneClickStart calls `apiClient.oneClickStart`.
 import { CORE_VCM_ROLE_DEFINITIONS } from "../../shared/constants.js";
 import type { LaunchTemplate } from "../../shared/types/app-settings.js";
 import type { RoleName } from "../../shared/types/role.js";
