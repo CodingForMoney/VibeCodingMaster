@@ -143,3 +143,14 @@ security risk, not delivery priority.
 - **Mitigation / workaround**: Keep the loopback bind (KI-001).
 - **Resolution condition**: Gate verbose `hint`/`runtime` detail behind a dev flag, or sanitize before returning, if non-loopback exposure is ever supported.
 - **Related**: KI-001, KI-007.
+
+### KI-012 — `flowPause.role` / `flowPause.since` are emitted but unused by the GUI
+
+- **Status**: Open (accepted minor redundancy; not a defect).
+- **Category**: Product / maintainability (cleanup).
+- **Affected modules / surfaces**: `src/shared/types/round.ts` (`VcmFlowPauseState`), `src/backend/services/round-service.ts` (`computeFlowPause`), `src/frontend/app.tsx` (flow-pause alert mechanics).
+- **Current gap**: The authoritative `roundState.flowPause` carries `role` and `since`, but the GUI alert mechanics still read equivalent round-level fields — `roundState.activeRole` for the pause-notice label and `getFlowPauseDurationMs(roundState)` for sound severity. Both sources derive from the same `currentRound`, so the values are equivalent and the redundancy is harmless.
+- **Impact**: None functionally; mild contract over-provisioning (fields provided that no consumer reads), which can confuse future maintainers ("why does `flowPause` carry `role`/`since`?").
+- **Mitigation / workaround**: None needed.
+- **Resolution condition**: Either point the GUI label/severity at `flowPause.role`/`flowPause.since` (consume what the signal already provides), or drop the two fields from `VcmFlowPauseState`. Small, optional.
+- **Related**: none.

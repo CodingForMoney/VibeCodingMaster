@@ -29,10 +29,11 @@ layers plus supporting tools.
   runtime-state, app-settings, claude-hook). Routes are thin and delegate to
   services.
 - `services/`: business logic. Key services include `task-service`,
-  `session-service`, `round-service`, `runtime-coordinator-service`,
-  `message-service`, `harness-service`, `gate-review-service`,
-  `translation-service`/`translation-worker-service`, `job-guard-service`, and
-  `command-dispatcher`.
+  `task-launch-service` (backend-owned one-click task start, shared by the GUI
+  endpoint and the gateway), `session-service`, `round-service`,
+  `runtime-coordinator-service`, `message-service`, `harness-service`,
+  `gate-review-service`, `translation-service`/`translation-worker-service`,
+  `job-guard-service`, and `command-dispatcher`.
 - `runtime/`: PTY-backed terminal runtime (`node-pty-runtime`,
   `terminal-runtime`, `session-registry`, `terminal-submit`) that supervises one
   Claude Code process per role.

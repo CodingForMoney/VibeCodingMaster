@@ -57,7 +57,22 @@ External boundaries of the module:
   resume/restart, persisting Claude session ids for `claude --resume` recovery.
 - **Round / orchestration**: `round-service` and `command-dispatcher` drive the
   role route (`project-manager -> architect -> coder -> reviewer -> docs sync ->
-  PM final acceptance`) under manual or automatic orchestration.
+  PM final acceptance`) under manual or automatic orchestration. Orchestration
+  decisions are backend-owned and the GUI consumes them rather than re-deriving:
+  the active role tab follows the authoritative `roundState.activeRole` (no
+  client-side message-diff), and `round-service.computeFlowPause` emits the
+  authoritative `roundState.flowPause` signal (paused + reason) that the GUI uses
+  for pause alerts — the GUI keeps only alert mechanics (dedupe, sound, viewing
+  gate, wording).
+- **One-click start**: `task-launch-service` is the single backend owner of
+  one-click task start — it composes the role roster (CORE roles plus gate-reviewer
+  when enabled), applies the launch-template orchestration mode, and starts/resumes
+  each role with atomic partial-start semantics. Both the
+  `POST /api/tasks/:taskSlug/one-click-start` endpoint and the mobile gateway call
+  it, so the GUI and gateway paths cannot drift; the GUI issues a single call. It
+  is a small cycle-free service (the obvious homes would cycle:
+  runtime-coordinator depends on the gateway, and session-service cannot depend on
+  message-service).
 - **Messaging**: `message-service` persists the message bus; PM-mediated route
   files dispatch work between roles.
 - **Harness**: `harness-service` plus `templates/harness/**` produce the
