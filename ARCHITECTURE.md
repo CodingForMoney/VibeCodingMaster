@@ -67,7 +67,15 @@ External boundaries of the module:
   current task/worktree.
 - **Translation**: `translation-service`, `translation-queue`, and
   `translation-worker-service` read Claude transcript JSONL and feed the GUI
-  translation panel without writing into handoffs.
+  translation panel without writing into handoffs. The serial queue persists in
+  `runtime/queue.json`. Conversation (composer in/out) translation writes to a
+  single shared, self-describing `runtime/conversations/result.json` that carries
+  the active `batchId` plus per-index results, so crash recovery re-associates the
+  output with the right queue item by validating that in-file `batchId`
+  all-or-nothing (exists, parses, identity matches, all expected indexes present);
+  on any mismatch it degrades safely to a stale-release rather than mis-assigning.
+  File translation keeps per-task runtime job directories and durable
+  `files/completed/*` outputs.
 - **Gateway**: `gateway-service` and channel adapters let the user talk to PM and
   manage tasks from a phone.
 - **Job safety**: `job-guard-service` and `.ai/tools` wrappers enforce no
