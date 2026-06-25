@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { FileSystemAdapter } from "../../../src/backend/adapters/filesystem.js";
 import { createRoundService } from "../../../src/backend/services/round-service.js";
-import { selectFlowPauseAlertMessage } from "../../../src/frontend/state/flow-pause-alert.js";
+import { getFlowPauseNotificationKey, selectFlowPauseAlertMessage } from "../../../src/frontend/state/flow-pause-alert.js";
 import type { RoleName } from "../../../src/shared/types/role.js";
 import type { RoleSessionRecord } from "../../../src/shared/types/session.js";
 
@@ -1211,6 +1211,17 @@ describe("round-service", () => {
     // roundId:stoppedAt, so the advancing identity does NOT re-arm the alert.
     expect(stoppedB.roundId).not.toBe(stoppedA.roundId);
     expect(stoppedB.stoppedAt).not.toBe(stoppedA.stoppedAt);
+
+    // SINGLE-FIRE GUARD (real dedup key on real backend snapshots): the frontend
+    // notification key is IDENTICAL at the first stop, the running auto-continue,
+    // and the re-stop, so the alert effect dedups (app.tsx:261) and fires exactly
+    // once for the one pending decision. This is the assertion that FAILS if the
+    // awaiting-user key branch is reverted (it would fall back to the advancing
+    // roundId:stoppedAt -> three distinct keys -> re-fire).
+    const keyA = getFlowPauseNotificationKey(stoppedA);
+    expect(getFlowPauseNotificationKey(running)).toBe(keyA);
+    expect(getFlowPauseNotificationKey(stoppedB)).toBe(keyA);
+    expect(keyA).toBe(`awaiting-user:${stoppedA.flowPause?.since}`);
   });
 });
 

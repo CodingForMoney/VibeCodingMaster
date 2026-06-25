@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { selectFlowPauseAlertMessage } from "../../../src/frontend/state/flow-pause-alert.js";
+import { getFlowPauseNotificationKey, selectFlowPauseAlertMessage } from "../../../src/frontend/state/flow-pause-alert.js";
 import type { VcmSessionRoundState } from "../../../src/shared/types/round.js";
 
 const BASE: VcmSessionRoundState = {
@@ -103,5 +103,88 @@ describe("selectFlowPauseAlertMessage", () => {
       flowPause: { paused: true, reason: "stopped-no-next-turn" }
     };
     expect(selectFlowPauseAlertMessage(state, vi.fn())).toBe("No new turn started after role stopped.");
+  });
+});
+
+// Single-fire guard for the GUI alert dedup key (gate Finding 2). The GUI fires the
+// flow-pause modal + alarm once per distinct key; these pin the keying contract that
+// makes a sticky awaiting-user decision alert exactly once while still re-alerting on
+// a genuinely new decision, and leaves non-sticky pauses on their per-stop identity.
+describe("getFlowPauseNotificationKey", () => {
+  const SINCE = "2026-05-31T00:00:02.000Z";
+
+  it("keys a sticky awaiting-user decision on its stable `since`, so a round cycle dedups to ONE alert", () => {
+    // Same pending decision (`since`), but the round identity has advanced under a
+    // helper role (new roundId + new stoppedAt) — exactly the running->stopped cycle.
+    const firstStop: VcmSessionRoundState = {
+      ...BASE,
+      roundId: "round_1",
+      stoppedAt: SINCE,
+      activeRole: "project-manager",
+      flowPause: { paused: true, reason: "awaiting-user", role: "project-manager", since: SINCE }
+    };
+    const reStopAfterCycle: VcmSessionRoundState = {
+      ...BASE,
+      roundId: "round_2",
+      stoppedAt: "2026-05-31T01:01:02.000Z",
+      activeRole: "gate-reviewer",
+      flowPause: { paused: true, reason: "awaiting-user", role: "project-manager", since: SINCE }
+    };
+
+    // Stable key across the cycle => the alert effect dedups => single fire.
+    // (Reverting the awaiting-user key branch makes these fall back to the advancing
+    // roundId:stoppedAt — `round_1:...` vs `round_2:...` — failing this assertion.)
+    expect(getFlowPauseNotificationKey(firstStop)).toBe(`awaiting-user:${SINCE}`);
+    expect(getFlowPauseNotificationKey(reStopAfterCycle)).toBe(getFlowPauseNotificationKey(firstStop));
+  });
+
+  it("re-keys when a genuinely new awaiting-user decision arrives (`since` changes)", () => {
+    // Identical round identity, different decision anchor — proves the dedup keys on
+    // `since`, not the round. (On revert both would share roundId:stoppedAt and key
+    // identically, failing this `not.toBe`.)
+    const base = {
+      ...BASE,
+      roundId: "round_1",
+      stoppedAt: SINCE,
+      activeRole: "project-manager"
+    } satisfies VcmSessionRoundState;
+    const firstDecision: VcmSessionRoundState = {
+      ...base,
+      flowPause: { paused: true, reason: "awaiting-user", role: "project-manager", since: SINCE }
+    };
+    const newDecision: VcmSessionRoundState = {
+      ...base,
+      flowPause: { paused: true, reason: "awaiting-user", role: "project-manager", since: "2026-05-31T05:00:00.000Z" }
+    };
+
+    expect(getFlowPauseNotificationKey(newDecision)).not.toBe(getFlowPauseNotificationKey(firstDecision));
+    expect(getFlowPauseNotificationKey(newDecision)).toBe("awaiting-user:2026-05-31T05:00:00.000Z");
+  });
+
+  it("keys non-sticky pauses on roundId:stoppedAt, so each genuine stop is a distinct alert", () => {
+    const stoppedNoNextTurn: VcmSessionRoundState = {
+      ...BASE,
+      roundId: "round_1",
+      stoppedAt: SINCE,
+      activeRole: "coder",
+      flowPause: { paused: true, reason: "stopped-no-next-turn", role: "coder" }
+    };
+    expect(getFlowPauseNotificationKey(stoppedNoNextTurn)).toBe(`round_1:${SINCE}`);
+
+    const recoveryFailed: VcmSessionRoundState = {
+      ...BASE,
+      roundId: "round_1",
+      stoppedAt: SINCE,
+      activeRole: "coder",
+      flowPause: { paused: true, reason: "role-recovery-failed", role: "coder" }
+    };
+    expect(getFlowPauseNotificationKey(recoveryFailed)).toBe(`round_1:${SINCE}`);
+
+    const laterStop: VcmSessionRoundState = {
+      ...stoppedNoNextTurn,
+      roundId: "round_2",
+      stoppedAt: "2026-05-31T00:05:00.000Z"
+    };
+    expect(getFlowPauseNotificationKey(laterStop)).not.toBe(getFlowPauseNotificationKey(stoppedNoNextTurn));
   });
 });
