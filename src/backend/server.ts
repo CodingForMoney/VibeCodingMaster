@@ -38,6 +38,7 @@ import { createRoundService, type RoundService } from "./services/round-service.
 import { createRuntimeCoordinatorService, type RuntimeCoordinatorService } from "./services/runtime-coordinator-service.js";
 import { createStatusService, type StatusService } from "./services/status-service.js";
 import { createTaskService, type TaskService } from "./services/task-service.js";
+import { createTaskLaunchService, type TaskLaunchService } from "./services/task-launch-service.js";
 import { createTranslationService, type TranslationService } from "./services/translation-service.js";
 import { createDiagnosticsService, type DiagnosticsService } from "./services/diagnostics-service.js";
 import { registerAppSettingsRoutes } from "./api/app-settings-routes.js";
@@ -76,6 +77,7 @@ export interface ServerDeps {
   commandDispatcher: CommandDispatcher;
   claudeHookService: ClaudeHookService;
   messageService: MessageService;
+  taskLaunchService: TaskLaunchService;
   gateReviewService: GateReviewService;
   translationWorkerService: TranslationWorkerService;
   roundService: RoundService;
@@ -147,6 +149,7 @@ export async function createServer(deps: ServerDeps, options: CreateServerOption
     sessionService: deps.sessionService,
     statusService: deps.statusService,
     messageService: deps.messageService,
+    taskLaunchService: deps.taskLaunchService,
     translationService: deps.translationService,
     roundService: deps.roundService
   });
@@ -283,6 +286,13 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     sessionService,
     taskService
   });
+  const taskLaunchService = createTaskLaunchService({
+    projectService,
+    taskService,
+    appSettings,
+    sessionService,
+    messageService
+  });
   const roundService = createRoundService({
     fs,
     sessionService,
@@ -337,7 +347,7 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     projectService,
     taskService,
     sessionService,
-    messageService,
+    taskLaunchService,
     translationService,
     roundService,
     runtime,
@@ -389,6 +399,7 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     commandDispatcher,
     claudeHookService,
     messageService,
+    taskLaunchService,
     gateReviewService,
     translationWorkerService,
     roundService,

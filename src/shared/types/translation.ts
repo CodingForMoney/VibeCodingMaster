@@ -206,9 +206,32 @@ export interface TranslationQueueItem {
   batchResultPath?: string;
   batchIndex?: number;
   translatedText?: string;
+  /**
+   * Inline conversation source for `type: "conversation"` items. Carrying the
+   * source on the queue item (persisted in queue.json) removes the need for a
+   * per-job conversation `request.json`: the queue is the single durable record
+   * that distinguishes conversation tasks, while the translated output lives in
+   * one shared, self-describing `result.json`. Undefined for non-conversation
+   * types.
+   */
+  conversation?: ConversationQueueItemSource;
   error?: string;
   createdAt: string;
   updatedAt: string;
+}
+
+/**
+ * Source text and metadata for a conversation queue item, inlined into
+ * queue.json (previously stored in a per-job request.json). `sourceHash`
+ * deduplicates/identifies the input; the batch identity used for crash-recovery
+ * re-association lives in `TranslationQueueItem.batchId`.
+ */
+export interface ConversationQueueItemSource {
+  direction: TranslationDirection;
+  sourceLanguage: string;
+  sourceHash: string;
+  sourceText: string;
+  contextText?: string;
 }
 
 export interface TranslationQueueState {

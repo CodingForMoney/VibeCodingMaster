@@ -3,12 +3,19 @@ export interface VcmErrorInput {
   message: string;
   statusCode?: number;
   hint?: string;
+  /**
+   * Optional structured payload for in-process consumers (e.g. a caller that
+   * rewraps the error) and tests. Not serialized in the HTTP error envelope, so
+   * it never changes the public error response shape.
+   */
+  details?: unknown;
 }
 
 export class VcmError extends Error {
   readonly code: string;
   readonly statusCode: number;
   readonly hint?: string;
+  readonly details?: unknown;
 
   constructor(input: VcmErrorInput) {
     super(input.message);
@@ -16,6 +23,7 @@ export class VcmError extends Error {
     this.code = input.code;
     this.statusCode = input.statusCode ?? 400;
     this.hint = input.hint;
+    this.details = input.details;
   }
 }
 

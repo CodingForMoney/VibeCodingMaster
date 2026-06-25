@@ -655,7 +655,7 @@ For every task, `taskRepoRoot` is `<baseRepoRoot>/.claude/worktrees/<task>`.
 The npm package publishes built output, not raw TypeScript entry files. `package.json` includes:
 
 - `bin.vcm`: `dist/main.js`
-- `files`: `dist`, `dist-frontend`, `docs`, `scripts`, `README.md`
+- `files`: `dist`, `dist-frontend`, `scripts`, `README.md`
 - `prepack`: `npm run build && npm run verify:package`
 
 Use this before publishing:

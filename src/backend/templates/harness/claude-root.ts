@@ -6,7 +6,7 @@ export function renderRootClaudeHarnessRules(): string {
 - Use \`vcm-route-message\` whenever a VCM role hands off work, asks another role a question, reports a result, reports a blocker, or raises a finding. Follow its write-then-stop rule.
 - Use \`vcm-long-running-validation\` for long-running validation. Follow the background job limits below.
 - Use \`vcm-report-harness-issue\` when you notice a reusable VCM harness problem. Record feedback; do not contact Harness Engineer directly.
-- Project-manager uses \`vcm-gate-review\` at enabled Gate Review trigger points and on VCM Gate Review callbacks.
+- Project-manager runs \`vcm-gate-review\` unconditionally at every Gate Review trigger point and on VCM Gate Review callbacks; the tool reports the authoritative enable state.
 
 ## VCM Harness Scope
 

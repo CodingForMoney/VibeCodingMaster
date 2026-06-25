@@ -32,7 +32,6 @@ import type { RoleName } from "../shared/types/role.js";
 import type { VcmRoleRecoveryState, VcmRoundStatus, VcmSessionRoundState } from "../shared/types/round.js";
 import type { ClaudePermissionMode, RoleSessionRecord, SessionEffort, SessionModel } from "../shared/types/session.js";
 import type { TaskRecord } from "../shared/types/task.js";
-import { VCM_ROLE_NAMES } from "../shared/constants.js";
 import { AppShell } from "./components/app-shell.js";
 import { HarnessFeedbackReview } from "./components/harness-feedback-review.js";
 import { HarnessStudioModal } from "./components/harness-studio-modal.js";
@@ -41,12 +40,13 @@ import { TranslatorSessionModal } from "./components/translator-session-modal.js
 import { FileTranslationModalHost } from "./components/translation-panel.js";
 import { UiErrorCenter } from "./components/ui-error-center.js";
 import { selectActiveTask } from "./state/app-store.js";
+import { selectAutoFollowRole } from "./state/active-role-follow.js";
+import { selectFlowPauseAlertMessage } from "./state/flow-pause-alert.js";
 import { apiClient } from "./state/api-client.js";
 import { clearUiErrorForActions, formatUiError } from "./state/error-format.js";
 import { clearPollError, recordPollError } from "./state/poll-error-gate.js";
 import { useUiErrorState } from "./state/ui-error-state.js";
 import { useScheduledPoll } from "./state/use-scheduled-poll.js";
-import { buildOneClickRoleLaunches } from "./state/one-click-start.js";
 import { ProjectDashboard } from "./routes/project-dashboard.js";
 import { TaskWorkspace, type TaskWorkspaceLaunchState } from "./routes/task-workspace.js";
 
@@ -114,6 +114,10 @@ export function App() {
   const [, setError] = useUiErrorState("");
   const notifiedFlowPauseKeyRef = useRef<Record<string, string>>({});
   const observedFlowPauseStateRef = useRef<Record<string, { status: VcmRoundStatus }>>({});
+  // Per-task mirror of the orchestration mode and the last role we auto-followed,
+  // read inside handleRoundStateChanged without widening its dependency array.
+  const orchestrationModeRef = useRef<Record<string, VcmOrchestrationState["mode"]>>({});
+  const autoFollowedRoleRef = useRef<Record<string, RoleName>>({});
   const activeTaskViewStartedAtRef = useRef<Record<string, number>>({});
   const flowPauseAlarmRef = useRef<number | null>(null);
   const projectRuntimeLaunchSyncKeyRef = useRef("");
@@ -209,6 +213,7 @@ export function App() {
   }, [activeTask?.taskSlug]);
 
   const handleOrchestrationChanged = useCallback((orchestration: VcmOrchestrationState) => {
+    orchestrationModeRef.current[orchestration.taskSlug] = orchestration.mode;
     if (activeTask?.taskSlug) {
       setActiveOrchestration({ taskSlug: activeTask.taskSlug, orchestration });
     }
@@ -225,14 +230,26 @@ export function App() {
       return;
     }
     setActiveSessionRoundState({ taskSlug: roundState.taskSlug, roundState });
-    if (roundState.status === "running" && roundState.activeRole === "gate-reviewer") {
-      setActiveRole("gate-reviewer");
+    // Follow the authoritative active role (set by the round at turn start) in auto
+    // orchestration mode, deduped so a steady role does not re-switch every poll and
+    // a user's manual tab focus is not stolen. Replaces the former client-side
+    // message-diff role derivation and the gate-reviewer-only tab special case.
+    const followRole = selectAutoFollowRole({
+      mode: orchestrationModeRef.current[roundState.taskSlug],
+      status: roundState.status,
+      activeRole: roundState.activeRole,
+      lastFollowedRole: autoFollowedRoleRef.current[roundState.taskSlug]
+    });
+    if (followRole) {
+      autoFollowedRoleRef.current[roundState.taskSlug] = followRole;
+      setActiveRole(followRole);
     }
-    if (roundState.roleRecovery?.status === "waiting" || roundState.roleRecovery?.status === "retrying") {
-      observedFlowPauseStateRef.current[roundState.taskSlug] = { status: roundState.status };
-      return;
-    }
-    if (roundState.status !== "stopped" || !roundState.roundId) {
+    // Consume the authoritative flow-pause decision + message from the backend
+    // (round-service) instead of re-deriving "is it paused / why" here. Everything
+    // below is purely the client-side alert mechanics (dedupe, viewing gate, sound,
+    // gateway suppression), which are unchanged.
+    const flowPauseMessage = selectFlowPauseAlertMessage(roundState, formatRoleRecoveryFailureMessage);
+    if (flowPauseMessage === null) {
       observedFlowPauseStateRef.current[roundState.taskSlug] = { status: roundState.status };
       return;
     }
@@ -254,17 +271,12 @@ export function App() {
       return;
     }
 
-    const roleLabel = roundState.activeRole ?? "role";
     const sound = !pauseAlertSound
       ? "none"
       : getFlowPauseDurationMs(roundState) >= FLOW_PAUSE_STRONG_ALERT_THRESHOLD_MS
         ? "strong"
         : "weak";
-    const recovery = roundState.roleRecovery;
-    const message = recovery?.status === "failed"
-      ? formatRoleRecoveryFailureMessage(recovery, roleLabel)
-      : `No new turn started after ${roleLabel} stopped.`;
-    showFlowPauseNotice(message, pauseKey, { sound });
+    showFlowPauseNotice(flowPauseMessage, pauseKey, { sound });
   }, [activeTask?.taskSlug, gatewayRunning, pauseAlertSound, showFlowPauseNotice, stopFlowPauseAlarm]);
 
   const handleLaunchStateChanged = useCallback((launchState: TaskWorkspaceLaunchState) => {
@@ -1027,38 +1039,13 @@ export function App() {
                 throw new Error("Create or select a task before one-click start.");
               }
 
-              const status = await apiClient.getTaskStatus(activeTask.taskSlug);
-              if (status.sessions.some((session) => VCM_ROLE_NAMES.some((role) => role === session.role))) {
-                throw new Error("One-click start is only available before any role session has started.");
-              }
-
-              const nextOrchestration = await apiClient.updateOrchestrationState(activeTask.taskSlug, {
-                mode: launchTemplate.autoOrchestration ? "auto" : "manual"
-              });
+              // The backend owns roster composition, orchestration mode, the
+              // fresh-start precondition, and per-role skip/resume/start.
+              const result = await apiClient.oneClickStart(activeTask.taskSlug);
               setActiveOrchestration({
                 taskSlug: activeTask.taskSlug,
-                orchestration: nextOrchestration
+                orchestration: result.orchestration
               });
-
-              const roleLaunches = buildOneClickRoleLaunches(launchTemplate, { gateReviewerEnabled });
-              for (const roleLaunch of roleLaunches) {
-                const sessionInput = {
-                  cols: 100,
-                  rows: 28,
-                  permissionMode: roleLaunch.permissionMode,
-                  model: roleLaunch.model,
-                  effort: roleLaunch.effort
-                };
-                const existingSession = status.sessions.find((session) => session.role === roleLaunch.role);
-                if (existingSession?.status === "running") {
-                  continue;
-                }
-                if (existingSession?.claudeSessionId) {
-                  await apiClient.resumeRoleSession(activeTask.taskSlug, roleLaunch.role, sessionInput);
-                } else {
-                  await apiClient.startRoleSession(activeTask.taskSlug, roleLaunch.role, sessionInput);
-                }
-              }
 
               setActiveRole("project-manager");
               await refreshMessageState(activeTask.taskSlug);

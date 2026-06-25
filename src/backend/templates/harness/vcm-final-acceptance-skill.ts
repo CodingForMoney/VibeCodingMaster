@@ -57,6 +57,7 @@ Check:
 - architecture plan completion, Replan, or architect follow-up decision is recorded
 - reviewer report records validation commands, results, skipped checks with reasons, and an acceptable decision
 - required Gate Reviews are approved, skipped with a recorded reason, or overridden with a recorded reason
+- Gate Review enable state is confirmed authoritatively: do not infer that no Gate Reviews were required from an absent or empty \`.ai/vcm/gate-reviews/index.json\`. When Gate Review is enabled, a missing index or a required gate without a recorded decision means the gate was skipped — run the matching \`.ai/tools/request-gate-review --gate <gate>\` (the tool is the source of truth) and do not accept until each required gate returns \`approve\`/\`already_approved\`, \`disabled\`/\`not_required\`, or a recorded skip/override
 - docs-sync report records docs updated, docs intentionally left unchanged, or required follow-up
 - known issues are either resolved, promoted to durable docs by architect, or explicitly accepted
 - temporary task state is ready to clean after durable facts are promoted

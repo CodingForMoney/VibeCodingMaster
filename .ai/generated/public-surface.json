@@ -1,0 +1,43 @@
+{
+  "schemaVersion": 1,
+  "kind": "public-surface",
+  "generatedBy": ".ai/tools/generate-public-surface",
+  "visibility": "project-public",
+  "modules": [
+    {
+      "name": "vibe-coding-master",
+      "items": [
+        {
+          "path": "MainOptions",
+          "kind": "interface",
+          "name": "MainOptions",
+          "source": {
+            "path": "src/main.ts",
+            "line": 13
+          },
+          "signature": "export interface MainOptions"
+        },
+        {
+          "path": "parseMainArgs",
+          "kind": "function",
+          "name": "parseMainArgs",
+          "source": {
+            "path": "src/main.ts",
+            "line": 22
+          },
+          "signature": "export function parseMainArgs(argv: string[]): MainOptions"
+        },
+        {
+          "path": "main",
+          "kind": "function",
+          "name": "main",
+          "source": {
+            "path": "src/main.ts",
+            "line": 42
+          },
+          "signature": "export async function main(argv = process.argv.slice(2)): Promise<void>"
+        }
+      ]
+    }
+  ]
+}

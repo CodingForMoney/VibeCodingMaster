@@ -1,5 +1,5 @@
 import { readFile } from "node:fs/promises";
-import { CORE_VCM_ROLE_DEFINITIONS, GATE_REVIEWER_ROLE_DEFINITION, VCM_ROLE_NAMES } from "../../shared/constants.js";
+import { VCM_ROLE_NAMES } from "../../shared/constants.js";
 import type {
   GatewayDiagnostics
 } from "../../shared/types/diagnostics.js";
@@ -20,11 +20,11 @@ import { VcmError } from "../errors.js";
 import type { FileSystemAdapter } from "../adapters/filesystem.js";
 import type { TerminalRuntime } from "../runtime/terminal-runtime.js";
 import { submitTerminalInput } from "../runtime/terminal-submit.js";
-import type { MessageService } from "../services/message-service.js";
 import type { ProjectService } from "../services/project-service.js";
 import type { RoundService } from "../services/round-service.js";
 import type { SessionService } from "../services/session-service.js";
 import { getTaskRuntimeRepoRoot, type TaskService } from "../services/task-service.js";
+import type { TaskLaunchService } from "../services/task-launch-service.js";
 import type { TranslationService } from "../services/translation-service.js";
 import type { AppSettingsService } from "../services/app-settings-service.js";
 import {
@@ -78,11 +78,11 @@ export interface GatewayServiceDeps {
   projectService: ProjectService;
   taskService: TaskService;
   sessionService: Pick<SessionService, "getRoleSession" | "listRoleSessions" | "resumeRoleSession" | "startRoleSession" | "stopRoleSession" | "moveProjectTranslatorSessionToSafeCwd" | "moveProjectHarnessEngineerSessionToSafeCwd">;
-  messageService: Pick<MessageService, "updateOrchestrationState">;
+  taskLaunchService: Pick<TaskLaunchService, "startTaskRoleSessions">;
   translationService: Pick<TranslationService, "translateUserInput" | "translateGatewayOutput" | "stopTask">;
   roundService: Pick<RoundService, "stopTask">;
   runtime: Pick<TerminalRuntime, "write">;
-  appSettings: Pick<AppSettingsService, "getPreferences" | "updatePreferences" | "getGateReviewSettings">;
+  appSettings: Pick<AppSettingsService, "getPreferences" | "updatePreferences">;
   larkRegistration?: LarkRegistrationClient;
   now?: () => string;
 }
@@ -591,80 +591,51 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
       taskSlug,
       title
     });
-    const config = await deps.projectService.loadConfig(project.repoRoot);
-    const taskRepoRoot = getTaskRuntimeRepoRoot(task);
     const preferences = await deps.appSettings.getPreferences();
-    const template = preferences.launchTemplate;
 
-    await deps.messageService.updateOrchestrationState({
-      repoRoot: project.repoRoot,
-      stateRepoRoot: taskRepoRoot,
-      stateRoot: config.stateRoot,
-      taskSlug: task.taskSlug,
-      mode: template.autoOrchestration ? "auto" : "manual"
-    });
+    // Persist the gateway's current project/task selection. Done after a partial
+    // start (so the phone stays pointed at the new task) and on success.
+    const persistTaskSelection = async () => {
+      const settings = await deps.settings.loadSettings();
+      await deps.settings.saveSettings({
+        ...settings,
+        currentProjectId: project.repoRoot,
+        currentTaskSlug: task.taskSlug,
+        translationEnabled: preferences.translationEnabled,
+        updatedAt: now()
+      });
+    };
 
-    const gateReviewSettings = await deps.appSettings.getGateReviewSettings(project.repoRoot, task.taskSlug);
-    const roleDefinitions = [
-      ...CORE_VCM_ROLE_DEFINITIONS,
-      ...(gateReviewSettings.enabled ? [GATE_REVIEWER_ROLE_DEFINITION] : [])
-    ];
-    const startedRoles: string[] = [];
-    for (const definition of roleDefinitions) {
-      const roleTemplate = template.roles[definition.name];
-      try {
-        const sessionInput = {
-          cols: 100,
-          rows: 28,
-          permissionMode: roleTemplate.permissionMode,
-          model: roleTemplate.model,
-          effort: roleTemplate.effort
-        };
-        const existing = await deps.sessionService.getRoleSession(project.repoRoot, task.taskSlug, definition.name);
-        if (existing?.status === "running") {
-          startedRoles.push(definition.name);
-          continue;
-        }
-        if (existing?.claudeSessionId) {
-          await deps.sessionService.resumeRoleSession(project.repoRoot, task.taskSlug, definition.name, sessionInput);
-        } else {
-          await deps.sessionService.startRoleSession(project.repoRoot, task.taskSlug, definition.name, sessionInput);
-        }
-        startedRoles.push(definition.name);
-      } catch (error) {
-        const settings = await deps.settings.loadSettings();
-        await deps.settings.saveSettings({
-          ...settings,
-          currentProjectId: project.repoRoot,
-          currentTaskSlug: task.taskSlug,
-          translationEnabled: preferences.translationEnabled,
-          updatedAt: now()
-        });
+    // Reuse the shared backend launch orchestration (roster + mode + skip/resume/
+    // start). A freshly created task has no sessions, so requireFreshStart is false.
+    let launch;
+    try {
+      launch = await deps.taskLaunchService.startTaskRoleSessions(project.repoRoot, {
+        taskSlug: task.taskSlug,
+        requireFreshStart: false
+      });
+    } catch (error) {
+      if (error instanceof VcmError && error.code === "TASK_ONE_CLICK_PARTIAL_START") {
+        await persistTaskSelection();
         throw new VcmError({
           code: "GATEWAY_TASK_PARTIAL_START",
-          message: `Task was created, but ${definition.name} failed to start.`,
+          message: `Task was created, but ${error.message}`,
           statusCode: 409,
-          hint: errorMessage(error)
+          hint: error.hint
         });
       }
+      throw error;
     }
 
-    const settings = await deps.settings.loadSettings();
-    await deps.settings.saveSettings({
-      ...settings,
-      currentProjectId: project.repoRoot,
-      currentTaskSlug: task.taskSlug,
-      translationEnabled: preferences.translationEnabled,
-      updatedAt: now()
-    });
+    await persistTaskSelection();
 
     return [
       `Task created and initialized: ${task.taskSlug}`,
       `branch: ${task.branch}`,
       `worktree: ${task.worktreePath}`,
-      `orchestration: ${template.autoOrchestration ? "auto" : "manual"}`,
+      `orchestration: ${launch.orchestration.mode}`,
       `translation: ${preferences.translationEnabled ? "on" : "off"}`,
-      `sessions: ${startedRoles.join(", ")}`
+      `sessions: ${launch.startedRoles.join(", ")}`
     ].join("\n");
   }
 

@@ -9,6 +9,7 @@ import type { TaskRecord } from "../../../src/shared/types/task.js";
 import { createDefaultLaunchTemplate } from "../../../src/shared/types/app-settings.js";
 import { createGatewayChannelRegistry, type GatewayChannelAdapter, type GatewayInboundMessage } from "../../../src/backend/gateway/gateway-channel.js";
 import { createGatewayService } from "../../../src/backend/gateway/gateway-service.js";
+import { VcmError } from "../../../src/backend/errors.js";
 import type { LarkRegistrationClient } from "../../../src/backend/gateway/channels/lark-registration.js";
 import type {
   WeixinIlinkChannel,
@@ -473,6 +474,85 @@ describe("gateway-service long connection", () => {
     expect(channel.getUpdatesCalls).toBe(1);
     service.stop();
   });
+
+  it("create-task command reuses the shared launch service and reports its orchestration + sessions", async () => {
+    // Phase 1 proof point 4 (success side): the gateway no longer composes the
+    // roster/mode/loop itself; it surfaces exactly what startTaskRoleSessions
+    // returns.
+    const settings = createSettings({
+      enabled: true,
+      binding: {
+        token: "token-1",
+        boundUserId: "user-1",
+        loginUserId: "user-1"
+      } as Partial<GatewaySettingsFile["binding"]> as GatewaySettingsFile["binding"]
+    });
+    const sentTexts: string[] = [];
+    const channel = createChannel([
+      { messageId: "m1", fromUserId: "user-1", text: "/create-task demo-task" }
+    ], sentTexts);
+    const service = createService({
+      settings,
+      channel,
+      startTaskRoleSessions: async () => ({
+        taskSlug: "demo-task",
+        orchestration: { taskSlug: "demo-task", mode: "auto", updatedAt: NOW },
+        startedRoles: ["project-manager", "architect", "coder", "reviewer"],
+        sessions: []
+      })
+    });
+
+    await service.start();
+    await waitFor(() => sentTexts.length === 1);
+
+    expect(sentTexts[0]).toContain("Task created and initialized: demo-task");
+    expect(sentTexts[0]).toContain("orchestration: auto");
+    expect(sentTexts[0]).toContain("sessions: project-manager, architect, coder, reviewer");
+    expect(settings.current().currentTaskSlug).toBe("demo-task");
+    service.stop();
+  });
+
+  it("create-task rewraps a partial start into the byte-identical phone-facing message (parity)", async () => {
+    // Phase 1 proof point 4 (priority): a per-role failure from the shared service
+    // (TASK_ONE_CLICK_PARTIAL_START) must rewrap to the SAME phone-facing string the
+    // inline gateway loop produced before the refactor: "Task was created, but
+    // <role> failed to start." plus the per-role cause hint. handleInbound renders
+    // a VcmError as "Error: <message> <hint>", so this asserts full byte-identical
+    // parity including the preserved cause hint.
+    const settings = createSettings({
+      enabled: true,
+      binding: {
+        token: "token-1",
+        boundUserId: "user-1",
+        loginUserId: "user-1"
+      } as Partial<GatewaySettingsFile["binding"]> as GatewaySettingsFile["binding"]
+    });
+    const sentTexts: string[] = [];
+    const channel = createChannel([
+      { messageId: "m1", fromUserId: "user-1", text: "/create-task demo-task" }
+    ], sentTexts);
+    const service = createService({
+      settings,
+      channel,
+      startTaskRoleSessions: async () => {
+        throw new VcmError({
+          code: "TASK_ONE_CLICK_PARTIAL_START",
+          message: "architect failed to start.",
+          statusCode: 409,
+          hint: "spawn failed",
+          details: { startedRoles: ["project-manager"], failedRole: "architect" }
+        });
+      }
+    });
+
+    await service.start();
+    await waitFor(() => sentTexts.length === 1);
+
+    expect(sentTexts[0]).toBe("Error: Task was created, but architect failed to start. spawn failed");
+    // The phone stays pointed at the freshly created task even on a partial start.
+    expect(settings.current().currentTaskSlug).toBe("demo-task");
+    service.stop();
+  });
 });
 
 function createService(input: {
@@ -491,6 +571,7 @@ function createService(input: {
     role: "project-manager";
     text: string;
   }) => Promise<string>;
+  startTaskRoleSessions?: () => Promise<unknown>;
   larkRegistration?: LarkRegistrationClient;
 }) {
   const project = createProject();
@@ -563,10 +644,13 @@ function createService(input: {
         return {};
       }
     } as never,
-    messageService: {
-      async updateOrchestrationState() {
-        return {};
-      }
+    taskLaunchService: {
+      startTaskRoleSessions: input.startTaskRoleSessions ?? (async () => ({
+        taskSlug: task.taskSlug,
+        orchestration: { taskSlug: task.taskSlug, mode: "auto", updatedAt: NOW },
+        startedRoles: [],
+        sessions: []
+      }))
     } as never,
     translationService: {
       async translateUserInput() {

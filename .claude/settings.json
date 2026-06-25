@@ -1,0 +1,74 @@
+{
+  "hooks": {
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh -c 'if [ -z \"${VCM_TASK_SLUG:-}\" ] || [ -z \"${VCM_ROLE:-}\" ]; then exit 0; fi; guard=\"\"; repo=\"$(git rev-parse --show-toplevel 2>/dev/null || true)\"; if [ -n \"$repo\" ] && [ -f \"$repo/.ai/tools/vcm-bash-guard\" ]; then guard=\"$repo/.ai/tools/vcm-bash-guard\"; else cwd=\"$(pwd -P 2>/dev/null || pwd)\"; dir=\"$cwd\"; while [ -n \"$dir\" ] && [ \"$dir\" != \"/\" ]; do if [ -f \"$dir/.ai/tools/vcm-bash-guard\" ]; then guard=\"$dir/.ai/tools/vcm-bash-guard\"; break; fi; dir=\"$(dirname \"$dir\")\"; done; if [ -z \"$guard\" ] && [ -n \"${CLAUDE_PROJECT_DIR:-}\" ] && [ -f \"${CLAUDE_PROJECT_DIR}/.ai/tools/vcm-bash-guard\" ]; then guard=\"${CLAUDE_PROJECT_DIR}/.ai/tools/vcm-bash-guard\"; fi; fi; [ -n \"$guard\" ] || exit 0; python3 \"$guard\" || exit 0'",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh -c 'if [ -z \"${VCM_TASK_SLUG:-}\" ] || [ -z \"${VCM_ROLE:-}\" ] || [ -z \"${VCM_API_URL:-}\" ]; then exit 0; fi; node -e '\"'\"'let s=\"\";process.stdin.setEncoding(\"utf8\");process.stdin.on(\"data\",d=>s+=d);process.stdin.on(\"end\",()=>{let event={};try{event=s.trim()?JSON.parse(s):{};}catch{event={raw:s};}process.stdout.write(JSON.stringify({taskSlug:process.env.VCM_TASK_SLUG,role:process.env.VCM_ROLE,event}));});'\"'\"' | curl -fsS --max-time 2 -X POST \"${VCM_API_URL}/api/hooks/claude-code\" -H \"content-type: application/json\" --data-binary @- >/dev/null || true'",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "Stop": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh -c 'if [ -z \"${VCM_TASK_SLUG:-}\" ] || [ -z \"${VCM_ROLE:-}\" ] || [ -z \"${VCM_API_URL:-}\" ]; then exit 0; fi; node -e '\"'\"'let s=\"\";process.stdin.setEncoding(\"utf8\");process.stdin.on(\"data\",d=>s+=d);process.stdin.on(\"end\",()=>{let event={};try{event=s.trim()?JSON.parse(s):{};}catch{event={raw:s};}process.stdout.write(JSON.stringify({taskSlug:process.env.VCM_TASK_SLUG,role:process.env.VCM_ROLE,event}));});'\"'\"' | curl -fsS --max-time 5 -X POST \"${VCM_API_URL}/api/hooks/claude-code/stop\" -H \"content-type: application/json\" --data-binary @- || true'",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "StopFailure": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh -c 'if [ -z \"${VCM_TASK_SLUG:-}\" ] || [ -z \"${VCM_ROLE:-}\" ] || [ -z \"${VCM_API_URL:-}\" ]; then exit 0; fi; node -e '\"'\"'let s=\"\";process.stdin.setEncoding(\"utf8\");process.stdin.on(\"data\",d=>s+=d);process.stdin.on(\"end\",()=>{let event={};try{event=s.trim()?JSON.parse(s):{};}catch{event={raw:s};}process.stdout.write(JSON.stringify({taskSlug:process.env.VCM_TASK_SLUG,role:process.env.VCM_ROLE,event}));});'\"'\"' | curl -fsS --max-time 2 -X POST \"${VCM_API_URL}/api/hooks/claude-code\" -H \"content-type: application/json\" --data-binary @- >/dev/null || true'",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PostCompact": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh -c 'if [ -z \"${VCM_TASK_SLUG:-}\" ] || [ -z \"${VCM_ROLE:-}\" ] || [ -z \"${VCM_API_URL:-}\" ]; then exit 0; fi; node -e '\"'\"'let s=\"\";process.stdin.setEncoding(\"utf8\");process.stdin.on(\"data\",d=>s+=d);process.stdin.on(\"end\",()=>{let event={};try{event=s.trim()?JSON.parse(s):{};}catch{event={raw:s};}process.stdout.write(JSON.stringify({taskSlug:process.env.VCM_TASK_SLUG,role:process.env.VCM_ROLE,event}));});'\"'\"' | curl -fsS --max-time 2 -X POST \"${VCM_API_URL}/api/hooks/claude-code\" -H \"content-type: application/json\" --data-binary @- >/dev/null || true'",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "PermissionRequest": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "sh -c 'if [ -z \"${VCM_TASK_SLUG:-}\" ] || [ -z \"${VCM_ROLE:-}\" ] || [ -z \"${VCM_API_URL:-}\" ]; then exit 0; fi; node -e '\"'\"'let s=\"\";process.stdin.setEncoding(\"utf8\");process.stdin.on(\"data\",d=>s+=d);process.stdin.on(\"end\",()=>{let event={};try{event=s.trim()?JSON.parse(s):{};}catch{event={raw:s};}process.stdout.write(JSON.stringify({taskSlug:process.env.VCM_TASK_SLUG,role:process.env.VCM_ROLE,event}));});'\"'\"' | curl -fsS --max-time 5 -X POST \"${VCM_API_URL}/api/hooks/claude-code/permission-request\" -H \"content-type: application/json\" --data-binary @- || true'",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  },
+  "env": {
+    "BASH_DEFAULT_TIMEOUT_MS": "600000"
+  }
+}

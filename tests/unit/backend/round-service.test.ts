@@ -866,7 +866,157 @@ describe("round-service", () => {
     });
     expect(cleared.roleRecovery).toBeUndefined();
   });
+
+  it("emits no flowPause while a round is running", async () => {
+    const fs = createMemoryFs();
+    const service = createRoundService({
+      fs,
+      now: () => "2026-05-31T00:00:00.000Z",
+      id: () => "round_1"
+    });
+
+    const running = await service.recordClaudeHookEvent({
+      stateRepoRoot: "/repo",
+      stateRoot: ".ai/vcm",
+      taskSlug: "demo-task",
+      role: "project-manager",
+      eventName: "UserPromptSubmit"
+    });
+
+    expect(running.status).toBe("running");
+    expect(running.flowPause).toBeUndefined();
+  });
+
+  it("emits no flowPause when there is no current round", async () => {
+    const fs = createMemoryFs();
+    const service = createRoundService({
+      fs,
+      now: () => "2026-05-31T00:00:00.000Z",
+      id: () => "round_1"
+    });
+
+    const state = await service.getSessionRoundState({
+      stateRepoRoot: "/repo",
+      stateRoot: ".ai/vcm",
+      taskSlug: "demo-task"
+    });
+
+    expect(state.status).toBe("stopped");
+    expect(state.roundId).toBeUndefined();
+    expect(state.flowPause).toBeUndefined();
+  });
+
+  it("flags flowPause stopped-no-next-turn after the settle window with no recovery", async () => {
+    const stopped = await driveRoundToStopped();
+
+    expect(stopped.state.status).toBe("stopped");
+    expect(stopped.state.flowPause).toEqual({
+      paused: true,
+      reason: "stopped-no-next-turn",
+      role: "project-manager",
+      since: stopped.state.stoppedAt
+    });
+  });
+
+  it("suppresses flowPause while a stopped round is mid role-recovery", async () => {
+    const stopped = await driveRoundToStopped();
+
+    const waiting = await stopped.service.setRoleRecovery({
+      stateRepoRoot: "/repo",
+      stateRoot: ".ai/vcm",
+      taskSlug: "demo-task",
+      recovery: {
+        role: "project-manager",
+        status: "waiting",
+        attempt: 1,
+        maxAttempts: 20,
+        lastFailureAt: "2026-05-31T00:00:12.000Z",
+        nextRetryAt: "2026-05-31T00:03:12.000Z"
+      }
+    });
+    expect(waiting.status).toBe("stopped");
+    expect(waiting.flowPause).toBeUndefined();
+
+    const retrying = await stopped.service.setRoleRecovery({
+      stateRepoRoot: "/repo",
+      stateRoot: ".ai/vcm",
+      taskSlug: "demo-task",
+      recovery: {
+        role: "project-manager",
+        status: "retrying",
+        attempt: 2,
+        maxAttempts: 20,
+        lastFailureAt: "2026-05-31T00:00:12.000Z",
+        nextRetryAt: "2026-05-31T00:03:12.000Z"
+      }
+    });
+    expect(retrying.flowPause).toBeUndefined();
+  });
+
+  it("flags flowPause role-recovery-failed when recovery failed on a stopped round", async () => {
+    const stopped = await driveRoundToStopped();
+
+    const failed = await stopped.service.setRoleRecovery({
+      stateRepoRoot: "/repo",
+      stateRoot: ".ai/vcm",
+      taskSlug: "demo-task",
+      recovery: {
+        role: "project-manager",
+        status: "failed",
+        attempt: 20,
+        maxAttempts: 20,
+        lastFailureAt: "2026-05-31T00:00:12.000Z"
+      }
+    });
+
+    expect(failed.status).toBe("stopped");
+    expect(failed.flowPause).toMatchObject({
+      paused: true,
+      reason: "role-recovery-failed",
+      role: "project-manager"
+    });
+  });
 });
+
+async function driveRoundToStopped() {
+  const fs = createMemoryFs();
+  const timers = createManualTimers();
+  let currentTime = "2026-05-31T00:00:00.000Z";
+  const service = createRoundService({
+    fs,
+    now: () => currentTime,
+    id: () => "round_1",
+    setTimeout: timers.setTimeout,
+    clearTimeout: timers.clearTimeout
+  });
+
+  await service.recordClaudeHookEvent({
+    stateRepoRoot: "/repo",
+    stateRoot: ".ai/vcm",
+    taskSlug: "demo-task",
+    role: "project-manager",
+    eventName: "UserPromptSubmit"
+  });
+  currentTime = "2026-05-31T00:00:02.000Z";
+  await service.recordClaudeHookEvent({
+    stateRepoRoot: "/repo",
+    stateRoot: ".ai/vcm",
+    taskSlug: "demo-task",
+    role: "project-manager",
+    eventName: "Stop"
+  });
+  currentTime = "2026-05-31T00:00:12.000Z";
+  timers.entries[0]?.callback();
+  await flushAsyncWork();
+
+  const state = await service.getSessionRoundState({
+    stateRepoRoot: "/repo",
+    stateRoot: ".ai/vcm",
+    taskSlug: "demo-task"
+  });
+
+  return { service, state };
+}
 
 function createMemoryFs(): FileSystemAdapter {
   const files = new Map<string, string>();

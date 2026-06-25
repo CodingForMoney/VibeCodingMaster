@@ -11,6 +11,7 @@ import type { ProjectService } from "../services/project-service.js";
 import type { SessionService } from "../services/session-service.js";
 import type { StatusService } from "../services/status-service.js";
 import { getTaskRuntimeRepoRoot, type TaskService } from "../services/task-service.js";
+import type { TaskLaunchService } from "../services/task-launch-service.js";
 import type { TranslationService } from "../services/translation-service.js";
 import type { RoundService } from "../services/round-service.js";
 
@@ -20,6 +21,7 @@ export interface TaskRouteDeps {
   sessionService: Pick<SessionService, "listRoleSessions" | "stopRoleSession" | "moveProjectTranslatorSessionToSafeCwd" | "moveProjectHarnessEngineerSessionToSafeCwd">;
   statusService: StatusService;
   messageService: MessageService;
+  taskLaunchService: Pick<TaskLaunchService, "startTaskRoleSessions">;
   translationService: Pick<TranslationService, "stopTask">;
   roundService: Pick<RoundService, "stopTask" | "getSessionRoundState">;
 }
@@ -121,6 +123,14 @@ export function registerTaskRoutes(app: FastifyInstance, deps: TaskRouteDeps): v
       }
       throw error;
     }
+  });
+
+  app.post<{ Params: { taskSlug: string } }>("/api/tasks/:taskSlug/one-click-start", async (request) => {
+    const project = await requireCurrentProject(deps.projectService);
+    return deps.taskLaunchService.startTaskRoleSessions(project.repoRoot, {
+      taskSlug: request.params.taskSlug,
+      requireFreshStart: true
+    });
   });
 
   app.post<{ Params: { taskSlug: string }; Body: CleanupTaskRequest }>(

@@ -125,7 +125,7 @@ outside the source boundary.`;
 export function renderVcmGateReviewSkillRules(): string {
   return `## Purpose
 
-Use this skill when project-manager reaches a VCM Gate Review or receives a VCM Gate Review callback.
+Use this skill at every project-manager Gate Review trigger point and whenever VCM sends a Gate Review callback. Running the request is mandatory and unconditional: always run the tool at each trigger point and let its output decide; do not pre-judge whether Gate Review is enabled. The tool reports the authoritative enable state.
 
 ## Trigger Points
 
@@ -135,7 +135,7 @@ Use this skill when project-manager reaches a VCM Gate Review or receives a VCM 
 
 ## Request
 
-Run:
+Run this unconditionally at each trigger point (do not first check whether Gate Review is enabled):
 
 \`\`\`sh
 .ai/tools/request-gate-review --gate <architecture-plan|validation-adequacy|final-diff>
@@ -313,6 +313,16 @@ def request_id(gate: str) -> str:
 def local_request(gate: str) -> int:
     root = root_dir()
     index_path = root / ".ai/vcm/gate-reviews/index.json"
+    if not index_path.is_file():
+        # Reached only when the VCM API is unreachable (call_vcm_api returned None)
+        # AND no local index exists, so the authoritative enable state is unknown.
+        # Fail safe instead of silently treating an indeterminate state as disabled.
+        print_result(
+            "failed_to_start",
+            gate=gate,
+            reason="cannot reach VCM API and no local gate-review index; enable state is indeterminate",
+        )
+        return 2
     index = read_json(index_path)
     enabled = bool(index.get("enabled", False))
     gate_record = index.get("gates", {}).get(gate, {}) if isinstance(index.get("gates"), dict) else {}

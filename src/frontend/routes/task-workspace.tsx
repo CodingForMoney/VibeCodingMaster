@@ -14,7 +14,6 @@ import { clearPollError, recordPollError } from "../state/poll-error-gate.js";
 import { useUiErrorState } from "../state/ui-error-state.js";
 import { getSessionForRole } from "../state/session-store.js";
 import { apiClient } from "../state/api-client.js";
-import { selectAutoDispatchRole } from "../state/message-navigation.js";
 import { useScheduledPoll } from "../state/use-scheduled-poll.js";
 import {
   applyTranslationPanelEntry,
@@ -114,7 +113,6 @@ export function TaskWorkspace({
   const [events, setEvents] = useState<string[]>([]);
   const [orchestration, setOrchestration] = useState<VcmOrchestrationState | null>(null);
   const [translationFeedStore, setTranslationFeedStore] = useState(() => createTranslationPanelFeedStore(task.taskSlug));
-  const messageSnapshotRef = useRef<{ taskSlug: string; messages: VcmRoleMessage[] } | null>(null);
   const taskStatusSyncKeyRef = useRef("");
   const translationFeedCursorRef = useRef(1);
   const launchTemplateKey = useMemo(() => JSON.stringify(launchTemplate), [launchTemplate]);
@@ -128,23 +126,13 @@ export function TaskWorkspace({
   ];
 
   const applyMessageState = useCallback((nextMessages: VcmRoleMessage[], nextOrchestration: VcmOrchestrationState) => {
-    const previousMessages = messageSnapshotRef.current?.taskSlug === task.taskSlug
-      ? messageSnapshotRef.current.messages
-      : null;
-    const targetRole = selectAutoDispatchRole(previousMessages, nextMessages, nextOrchestration);
-    messageSnapshotRef.current = {
-      taskSlug: task.taskSlug,
-      messages: nextMessages
-    };
-
+    // Propagate messages/orchestration only. The auto role-follow now consumes the
+    // authoritative roundState.activeRole in app.tsx (handleRoundStateChanged)
+    // instead of deriving the next role from a client-side message diff.
     setOrchestration(nextOrchestration);
     onMessagesChanged?.(nextMessages);
     onOrchestrationChanged?.(nextOrchestration);
-    if (targetRole) {
-      onActiveRoleChange(targetRole);
-      appendEvent(`auto switched to ${targetRole} before VCM dispatch`);
-    }
-  }, [onActiveRoleChange, onMessagesChanged, onOrchestrationChanged, task.taskSlug]);
+  }, [onMessagesChanged, onOrchestrationChanged]);
 
   const applyFetchedState = useCallback((nextStatusReport: TaskStatusReport, nextMessages: VcmRoleMessage[], nextOrchestration: VcmOrchestrationState, nextRoundState: VcmSessionRoundState) => {
     setStatusReport(nextStatusReport);
