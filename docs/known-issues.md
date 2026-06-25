@@ -48,6 +48,17 @@ security risk, not delivery priority.
 - **Resolution condition**: Distinguish spawn/launch errors from non-zero process exits in `command-runner` (e.g., a sentinel exit code or a typed `spawnFailed` flag) and have git-adapter treat spawn failure as an error rather than a `false` result. Requires a cross-file contract change → route through the full code-change flow.
 - **Related**: none.
 
+### KI-010 — Translation queue stuck-head recovery is enqueue-triggered, not continuous
+
+- **Status**: Open (accepted limitation; the primary issue #13 case is resolved).
+- **Category**: Product / robustness (operability).
+- **Affected modules / surfaces**: `src/backend/services/translation-worker-service.ts` (`dispatchNext` / `reconcileStuckActiveItem` / `STALE_CONVERSATION_ITEM_MS`), `src/backend/services/translation-service.ts` (`waitForConversationResult` poll loop).
+- **Current gap**: Recovery of a stuck active queue item (whose Translator `Stop`/`StopFailure` hook was lost) runs only when `dispatchNext` is invoked — i.e. when a new item is enqueued or a hook arrives. The request poll loop (`waitForConversationResult` -> `getState`) does not call `dispatchNext`. The primary case (batch result already written to disk, hook lost) self-heals immediately on the next enqueue. The secondary case (Translator session gone with no result written) is only released after the item passes the 90s `STALE_CONVERSATION_ITEM_MS` window *and* a subsequent enqueue occurs; if the stuck head is still younger than 90s when the next translation is requested, that request can still time out once.
+- **Impact**: Low. A narrow window can still produce a single `translation timed out` (HTTP 502) for the "session gone, no result, head <90s old, no further enqueue" case; it self-heals on the next translation attempt after the stale window. No permanent queue block remains, and a backend restart with a pre-existing stuck item recovers immediately (its `updatedAt` is already stale, or the result is on disk).
+- **Mitigation / workaround**: Retry the translation once; the retry's enqueue triggers reconciliation.
+- **Resolution condition**: Add a periodic / poll-driven reconcile (e.g. reconcile on `getState` or a timer) so stuck heads are released without depending on a new enqueue. Requires a code change → route through the full code-change flow if pursued.
+- **Related**: none.
+
 ### KI-004 — Claude transcript project-directory hashing does not match Claude Code's encoding
 
 - **Status**: Open.
@@ -121,5 +132,3 @@ security risk, not delivery priority.
 - **Mitigation / workaround**: Keep the loopback bind (KI-001).
 - **Resolution condition**: Gate verbose `hint`/`runtime` detail behind a dev flag, or sanitize before returning, if non-loopback exposure is ever supported.
 - **Related**: KI-001, KI-007.
-</content>
-</invoke>
