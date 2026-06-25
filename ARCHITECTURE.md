@@ -55,6 +55,22 @@ External boundaries of the module:
 - **Session runtime**: `runtime/` owns PTY lifecycle and a `session-registry`;
   `runtime-coordinator-service` and `session-service` coordinate start/stop/
   resume/restart, persisting Claude session ids for `claude --resume` recovery.
+  A PTY reports `running` the instant it is spawned, which precedes the moment
+  the Claude TUI can accept input, so `session-service` gates any programmatic
+  input — notably the `/cd` that relocates the project-scoped translator and
+  harness-engineer sessions onto the active task worktree — behind a private,
+  quiescence-based input-readiness wait: it proceeds only after the session has
+  emitted output and then stayed quiet briefly, best-effort capped (~6s) so a
+  perpetually chatty or perpetually silent session still proceeds. The same
+  liveness probe detects a `--resume` that exits before becoming usable: that
+  resume is treated as a failed launch, its stale `claudeSessionId` is cleared,
+  and a fresh session is rebuilt — which also stops auto-reconcile from looping
+  on a broken id. Failure-mode limits: auto-rebuild covers only the project-level
+  translator/harness-engineer resume paths (regular VCM roles still recover via
+  manual Restart); only an *exiting* bad resume is rebuilt (one that hangs at an
+  error screen without exiting is not); and rebuilding loses that role's prior
+  Claude conversation context, which is the only recovery path for an unusable
+  resume.
 - **Round / orchestration**: `round-service` and `command-dispatcher` drive the
   role route (`project-manager -> architect -> coder -> reviewer -> docs sync ->
   PM final acceptance`) under manual or automatic orchestration. Orchestration
