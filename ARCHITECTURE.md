@@ -62,7 +62,11 @@ External boundaries of the module:
   relocates it on `/cd`, so the constant `repoRoot` anchor keeps `claude --resume`
   valid across task close/create boundaries (the worktree may be deleted) and
   keeps `transcriptPath` stable; the active task root is exposed through
-  `VCM_TASK_REPO_ROOT` independent of pty cwd.
+  `VCM_TASK_REPO_ROOT` independent of pty cwd. Project-level tool sessions report
+  their project sentinel (not the active task) as `VCM_TASK_SLUG`, so their hook
+  payloads match their own session record; the hook layer additionally ignores
+  round/status mutations from any session whose authoritative record is not bound
+  to the posted task (defensive task-binding guard).
 - **Round / orchestration**: `round-service` and `command-dispatcher` drive the
   role route (`project-manager -> architect -> coder -> reviewer -> docs sync ->
   PM final acceptance`) under manual or automatic orchestration. Orchestration
@@ -71,7 +75,18 @@ External boundaries of the module:
   client-side message-diff), and `round-service.computeFlowPause` emits the
   authoritative `roundState.flowPause` signal (paused + reason) that the GUI uses
   for pause alerts — the GUI keeps only alert mechanics (dedupe, sound, viewing
-  gate, wording).
+  gate, wording). One reason is `awaiting-user`: when a user-facing role
+  (project-manager) settles to stopped with no onward route, `round-service`
+  persists a sticky await-user anchor on the round state. The role's user-facing
+  reply is captured best-effort at the Stop hook (via the shared
+  `claude-transcript-reply` helper, also used by the gateway push path), stashed,
+  promoted to the anchor's `message` at settle, and surfaced through
+  `flowPause.message` to a persistent web banner (distinct from the transient
+  pause modal, which does not fire for `awaiting-user`). The anchor is sticky: it
+  survives round auto-continuation and other roles' activity (including
+  gate-reviewer) and clears only when the awaiting role receives the user's next
+  prompt. While a role is actively recovering, await-user is intentionally not
+  surfaced and reappears once recovery resolves.
 - **One-click start**: `task-launch-service` is the single backend owner of
   one-click task start — it composes the role roster (CORE roles plus gate-reviewer
   when enabled), applies the launch-template orchestration mode, and starts/resumes
