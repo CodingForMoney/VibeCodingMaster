@@ -124,8 +124,8 @@ Design intent of the most externally meaningful surfaces:
   higher blast-radius than ordinary GUI changes.
 - Shared-type changes are cross-cutting and must be typechecked under both
   tsconfigs.
-- Package shipping only `dist*`/`docs`/`scripts` means runtime-required assets
-  must live in shipped paths.
+- Package shipping only `dist*`/`scripts`/`README.md` (not `src/` or `docs/`)
+  means runtime-required assets must live in shipped paths.
 
 ## Update Triggers
 

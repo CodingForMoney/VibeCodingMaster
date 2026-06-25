@@ -97,8 +97,9 @@ frontend  --depends on-->  shared  <--depends on--  backend
   change harness output there, not in generated target-repo files.
 - Long-running and background process rules from the VCM managed block in
   `CLAUDE.md` apply; never detach processes.
-- The npm package ships only built artifacts (`dist`, `dist-frontend`, `docs`,
-  `scripts`, `README.md`).
+- The npm package ships only built artifacts (`dist`, `dist-frontend`,
+  `scripts`, `README.md`). `docs/` is not shipped (it holds internal
+  process/design docs, not user-facing or runtime-needed content).
 
 ## Generated Context Ownership
 

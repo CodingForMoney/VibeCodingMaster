@@ -26,7 +26,7 @@
 - Backend tsconfig (`tsconfig.node.json`) and frontend tsconfig (`tsconfig.json`) are separate; `npm run typecheck` runs both. Keep new files inside the correct `include` globs.
 - Frontend talks to the backend only through `src/frontend/state/api-client.ts` and the WebSocket terminal client; do not scatter raw `fetch`/socket calls in components.
 - Background/long-running work is constrained by the VCM background-job rules in the managed block below; never detach processes.
-- The published npm package ships only built output (`dist`, `dist-frontend`, `docs`, `scripts`, `README.md`). Do not assume `src/` is shipped; keep runtime-needed assets in shipped paths.
+- The published npm package ships only built output (`dist`, `dist-frontend`, `scripts`, `README.md`). Do not assume `src/` or `docs/` is shipped; keep runtime-needed assets in shipped paths.
 - `package.json`, lockfiles, and build/deploy config are out of scope for **Harness Engineer bootstrap** edits. A deliberate release version bump (e.g. `package.json` version plus lockfile) made by the architect-led release flow inside an explicit release task is a sanctioned exception, not a bootstrap edit.
 
 <!-- VCM:BEGIN version=1 -->
