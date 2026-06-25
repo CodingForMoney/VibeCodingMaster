@@ -78,7 +78,7 @@ describe("selectFlowPauseAlertMessage", () => {
     expect(selectFlowPauseAlertMessage(state, vi.fn())).toBe("No new turn started after reviewer stopped.");
   });
 
-  it("returns null for awaiting-user so the persistent banner owns that surface", () => {
+  it("surfaces awaiting-user through the modal wording (await-user banner removed)", () => {
     const formatRecoveryFailure = vi.fn();
     const state: VcmSessionRoundState = {
       ...BASE,
@@ -90,7 +90,9 @@ describe("selectFlowPauseAlertMessage", () => {
         message: "Need your call on the rollout."
       }
     };
-    expect(selectFlowPauseAlertMessage(state, formatRecoveryFailure)).toBeNull();
+    expect(selectFlowPauseAlertMessage(state, formatRecoveryFailure)).toBe(
+      "No new turn started after project-manager stopped."
+    );
     expect(formatRecoveryFailure).not.toHaveBeenCalled();
   });
 

@@ -14,11 +14,6 @@ export function selectFlowPauseAlertMessage(
   if (!roundState.flowPause?.paused) {
     return null;
   }
-  // Await-user is surfaced by the persistent banner (SCF-108), not by this
-  // transient alert, so the two never double-alert.
-  if (roundState.flowPause.reason === "awaiting-user") {
-    return null;
-  }
   const roleLabel = roundState.activeRole ?? "role";
   const recovery = roundState.roleRecovery;
   if (roundState.flowPause.reason === "role-recovery-failed" && recovery) {
