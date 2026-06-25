@@ -537,6 +537,39 @@ describe("createSessionService", () => {
     expect(resumed.transcriptPath).not.toContain("worktrees/other-task");
   });
 
+  it("does not re-issue /cd when resume restores the session into the same task worktree", async () => {
+    const fs = createMemoryFs();
+    const firstService = createTestSessionService(fs, [], [], {
+      worktreePath: TASK_WORKTREE
+    });
+    await firstService.startProjectTranslatorSession("/repo", {
+      taskSlug: "demo-task"
+    });
+    await firstService.recordProjectTranslatorHookEvent("/repo", {
+      eventName: "UserPromptSubmit",
+      sessionId: "translator-resume-session",
+      transcriptPath: `${TASK_WORKTREE}/.claude/projects/translator-resume-session.jsonl`,
+      cwd: TASK_WORKTREE
+    });
+
+    const runtimeInputs: CreateTerminalSessionInput[] = [];
+    const writes: string[] = [];
+    const secondService = createTestSessionService(fs, runtimeInputs, writes, {
+      worktreePath: TASK_WORKTREE
+    });
+    const resumed = await secondService.resumeProjectTranslatorSession("/repo", {
+      taskSlug: "demo-task"
+    });
+
+    expect(resumed.claudeSessionId).toBe("translator-resume-session");
+    // Spawn still anchors at repoRoot (#16), but `claude --resume` restores the
+    // session's last cwd (the same task worktree), so the cwd already equals the
+    // target and NO `/cd` is issued — `/cd` is on-demand, only on an actual switch.
+    expect(runtimeInputs[0]?.cwd).toBe("/repo");
+    expect(resumed.cwd).toBe(TASK_WORKTREE);
+    expect(writes.some((write) => write.includes("/cd"))).toBe(false);
+  });
+
   it("moves a Translator session to the base repository cwd before task cleanup", async () => {
     const fs = createMemoryFs();
     const runtimeInputs: CreateTerminalSessionInput[] = [];

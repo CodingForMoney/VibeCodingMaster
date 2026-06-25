@@ -285,6 +285,11 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     // (migrateRunningProjectToolSessionCwd), and the task root is also exposed
     // independently of pty cwd via VCM_TASK_REPO_ROOT.
     const launchCwd = repoRoot;
+    // `claude --resume` restores the session's last working directory, so a resumed
+    // session is already at its persisted cwd (not the repoRoot spawn cwd). Track that
+    // restored cwd so the `/cd` migrate below fires only on an actual switch; a fresh
+    // session genuinely starts at repoRoot.
+    const sessionCwd = launchMode === "resume" ? persisted?.cwd ?? launchCwd : launchCwd;
     const claudeSessionId = resumeClaudeSessionId ?? "";
     const transcriptPath = resumeClaudeSessionId
       ? claudeTranscriptPath(repoRoot, resumeClaudeSessionId)
@@ -335,7 +340,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       permissionMode,
       model,
       effort,
-      cwd: startCommand.cwd,
+      cwd: sessionCwd,
       terminalBackend: "node-pty",
       pid: runtimeSession.pid,
       startedAt: runtimeSession.startedAt,
@@ -394,6 +399,10 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     // resume never depends on a possibly-deleted task worktree. The active task
     // worktree is entered afterwards via `/cd`.
     const launchCwd = repoRoot;
+    // `claude --resume` restores the session's last working directory, so a resumed
+    // session is already at its persisted cwd (not the repoRoot spawn cwd). Track that
+    // restored cwd so the `/cd` migrate below fires only on an actual switch.
+    const sessionCwd = launchMode === "resume" ? persisted?.cwd ?? launchCwd : launchCwd;
     const claudeSessionId = resumeClaudeSessionId ?? "";
     const transcriptPath = resumeClaudeSessionId
       ? claudeTranscriptPath(repoRoot, resumeClaudeSessionId)
@@ -444,7 +453,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       permissionMode,
       model,
       effort,
-      cwd: startCommand.cwd,
+      cwd: sessionCwd,
       terminalBackend: "node-pty",
       pid: runtimeSession.pid,
       startedAt: runtimeSession.startedAt,
@@ -541,8 +550,10 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     const permissionMode = normalizeClaudePermissionMode(session.permissionMode);
     const model = normalizeClaudeModel(session.model);
     const effort = normalizeClaudeEffort(session.effort);
-    // Always resume from the base repoRoot anchor (never the persisted task cwd,
-    // which may have been deleted). The active worktree is re-entered via `/cd`.
+    // Spawn (`claude --resume`) always anchors at the base repoRoot so resume works
+    // even if the persisted task cwd was deleted. `--resume` then restores the
+    // session's own last cwd (tracked on `session.cwd`), so the `/cd` migrate below
+    // fires only when that restored cwd differs from the target worktree.
     const launchCwd = repoRoot;
     const startCommand = {
       ...deps.claude.buildRoleStartCommand(
@@ -581,7 +592,6 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       permissionMode,
       model,
       effort,
-      cwd: launchCwd,
       pid: runtimeSession.pid,
       startedAt: runtimeSession.startedAt,
       updatedAt: timestamp,
