@@ -256,7 +256,7 @@ describe("createSessionService", () => {
     expect(firstRuntimeInputs[0]?.cwd).toBe("/repo");
     expect(firstRuntimeInputs[0]?.env).toMatchObject({
       VCM_TASK_REPO_ROOT: TASK_WORKTREE,
-      VCM_TASK_SLUG: "demo-task",
+      VCM_TASK_SLUG: "__project__",
       VCM_ROLE: "translator"
     });
     expect(firstRuntimeInputs[0]?.logPath).toBeUndefined();
@@ -582,7 +582,7 @@ describe("createSessionService", () => {
     expect(runtimeInputs[0]?.cwd).toBe("/repo");
     expect(runtimeInputs[0]?.env).toMatchObject({
       VCM_TASK_REPO_ROOT: TASK_WORKTREE,
-      VCM_TASK_SLUG: "demo-task",
+      VCM_TASK_SLUG: "__project_harness_engineer__",
       VCM_ROLE: "harness-engineer"
     });
     expect(runtimeInputs[0]?.args).toEqual([

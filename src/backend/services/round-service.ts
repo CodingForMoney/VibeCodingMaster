@@ -1,5 +1,6 @@
 import path from "node:path";
 import { randomUUID } from "node:crypto";
+import { isUserFacingRole } from "../../shared/constants.js";
 import type { ClaudeTurnHookEventName } from "../../shared/types/claude-hook.js";
 import type { RoleName } from "../../shared/types/role.js";
 import type { VcmFlowPauseState, VcmRoleRecoveryState, VcmSessionRoundState } from "../../shared/types/round.js";
@@ -233,16 +234,13 @@ export function createRoundService(deps: RoundServiceDeps): RoundService {
       stoppedAt: current.settleDeadlineAt,
       settleDeadlineAt: undefined
     };
-    const next = {
+    const next: PersistedRoundFile = {
       ...state,
       currentRound: stopped,
       lastStoppedRound: stopped,
+      awaitingUser: resolveAwaitingUserOnStop(state.awaitingUser, current.activeRole, stopped.stoppedAt ?? timestamp),
       updatedAt: timestamp
     };
-    // VCM:CODE SCF-003: when isUserFacingRole(current.activeRole), set
-    // next.awaitingUser = { role: current.activeRole, since: stopped.stoppedAt }.
-    // Sticky: preserve any existing next.awaitingUser; do not set for non-user-facing
-    // roles (they remain stopped-no-next-turn). Clearing happens only in SCF-004.
     await save(input, next);
     await updateSessionStatus(input, "stopped");
     return next;
@@ -346,7 +344,7 @@ export function createRoundService(deps: RoundServiceDeps): RoundService {
       const settled = await settleIfNeeded(input, await load(input), timestamp);
       const current = settled.currentRound;
       const shouldStartNewRound = input.eventName === "UserPromptSubmit" && (!current || current.status === "stopped");
-      const next = applyRoundHookEvent({
+      const recorded = applyRoundHookEvent({
         state: settled,
         taskSlug: input.taskSlug,
         role: input.role,
@@ -355,10 +353,7 @@ export function createRoundService(deps: RoundServiceDeps): RoundService {
         roundId: shouldStartNewRound ? id() : current?.id ?? "",
         settleMs
       });
-      // VCM:CODE SCF-004: clear next.awaitingUser only when
-      // input.eventName === "UserPromptSubmit" && next.awaitingUser?.role === input.role
-      // (the awaiting role received the user's next input). Never clear for other roles,
-      // other events, or via syncRoundFromActiveRoleSession auto-continuation.
+      const next = clearAwaitingUserIfAnswered(recorded, input.eventName, input.role);
       await save(input, next);
       if (input.eventName === "UserPromptSubmit") {
         clearSettleTimer(input);
@@ -623,20 +618,90 @@ function computeFlowPause(
   awaitingUser: AwaitingUserState | undefined
 ): VcmFlowPauseState | undefined {
   const recovering = roleRecovery?.status === "waiting" || roleRecovery?.status === "retrying";
-  // VCM:CODE SCF-005: before the stopped-no-next-turn branch, when awaitingUser is set
-  // and recovery has not failed, return a sticky paused state:
-  //   { paused: true, reason: "awaiting-user", role: awaitingUser.role, since: awaitingUser.since }
-  // independent of `current`/round status. role-recovery-failed still takes precedence.
-  void awaitingUser;
-  const paused = Boolean(current) && current!.status === "stopped" && Boolean(current!.id) && !recovering;
-  if (!paused) {
+  if (recovering) {
+    return undefined;
+  }
+  const roundStopped = Boolean(current) && current!.status === "stopped" && Boolean(current!.id);
+
+  if (roleRecovery?.status === "failed") {
+    return roundStopped
+      ? {
+          paused: true,
+          reason: "role-recovery-failed",
+          role: current!.activeRole,
+          since: current!.stoppedAt ?? current!.lastTurnEndedAt
+        }
+      : undefined;
+  }
+
+  if (awaitingUser) {
+    return {
+      paused: true,
+      reason: "awaiting-user",
+      role: awaitingUser.role,
+      since: awaitingUser.since
+    };
+  }
+
+  if (roundStopped) {
+    return {
+      paused: true,
+      reason: "stopped-no-next-turn",
+      role: current!.activeRole,
+      since: current!.stoppedAt ?? current!.lastTurnEndedAt
+    };
+  }
+
+  return undefined;
+}
+
+/**
+ * Sticky await-user resolution on settle->stopped: keep any existing anchor
+ * untouched, and only set a new one when the settling role addresses the human
+ * operator. Non-user-facing roles never raise an await-user anchor.
+ */
+function resolveAwaitingUserOnStop(
+  existing: AwaitingUserState | undefined,
+  role: RoleName,
+  since: string
+): AwaitingUserState | undefined {
+  if (existing) {
+    return existing;
+  }
+  if (!isUserFacingRole(role)) {
+    return undefined;
+  }
+  return { role, since };
+}
+
+/**
+ * Clear the await-user anchor only when the awaiting role itself receives its
+ * next UserPromptSubmit (the user answered / that role resumed). Other roles,
+ * other events, and round auto-continuation never clear it.
+ */
+function clearAwaitingUserIfAnswered(
+  state: PersistedRoundFile,
+  eventName: ClaudeTurnHookEventName,
+  role: RoleName
+): PersistedRoundFile {
+  if (eventName !== "UserPromptSubmit" || state.awaitingUser?.role !== role) {
+    return state;
+  }
+  return { ...state, awaitingUser: undefined };
+}
+
+function normalizeAwaitingUser(input: unknown): AwaitingUserState | undefined {
+  if (!input || typeof input !== "object") {
+    return undefined;
+  }
+  const record = input as Partial<AwaitingUserState>;
+  if (typeof record.role !== "string" || typeof record.since !== "string") {
     return undefined;
   }
   return {
-    paused: true,
-    reason: roleRecovery?.status === "failed" ? "role-recovery-failed" : "stopped-no-next-turn",
-    role: current!.activeRole,
-    since: current!.stoppedAt ?? current!.lastTurnEndedAt
+    role: record.role as RoleName,
+    since: record.since,
+    capturedAt: typeof record.capturedAt === "string" ? record.capturedAt : undefined
   };
 }
 
@@ -656,6 +721,7 @@ function normalizeRoundFile(input: Partial<PersistedRoundFile>, taskSlug: string
     totalCompletedTurnCount: normalizeNumber(input.totalCompletedTurnCount ?? legacy.totalStopCount),
     totalCcActiveMs: normalizeNumber(input.totalCcActiveMs),
     roleRecovery: normalizeRoleRecovery(input.roleRecovery),
+    awaitingUser: normalizeAwaitingUser(input.awaitingUser),
     updatedAt: typeof input.updatedAt === "string" ? input.updatedAt : updatedAt
   };
 }

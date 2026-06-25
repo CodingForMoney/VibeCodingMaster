@@ -178,6 +178,23 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
     return input.taskSlug;
   }
 
+  // Defensive task-binding guard: only mutate a task's round/status when the
+  // posting role's authoritative session record is bound to that task. A session
+  // whose record reports a different slug (e.g. a project-scoped sentinel session)
+  // must not resume or clobber an unrelated task's flow. Absence of a record is
+  // not proof of misattribution, so the normal flow proceeds.
+  async function isHookSessionBoundToTask(
+    context: Awaited<ReturnType<typeof getHookContext>>,
+    role: RoleName
+  ): Promise<boolean> {
+    const session = await deps.sessionService.getRoleSession(
+      context.project.repoRoot,
+      context.taskSlug,
+      role
+    );
+    return !session || session.taskSlug === context.taskSlug;
+  }
+
   async function handleUserPromptSubmitHook(input: ClaudeHookRequest): Promise<ClaudeHookResult> {
     const eventName = parseHookEvent(input.event.hook_event_name);
     if (eventName !== "UserPromptSubmit") {
@@ -185,17 +202,14 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
     }
 
     const context = await getHookContext(input);
-    // VCM:CODE SCF-006: defensive task-binding guard. Before mutating this task's
-    // round/status below, confirm the posting role's authoritative session record is
-    // bound to context.taskSlug (e.g. via sessionService.getRoleSession). If a
-    // project-scoped/sentinel session is reporting another task's slug, skip the
-    // round/status mutations (still safe to no-op return) so it cannot resume or
-    // clobber an unrelated task's pause.
-    deps.jobGuard?.notePromptSubmitted({
-      repoRoot: context.project.repoRoot,
-      taskSlug: context.taskSlug,
-      role: input.role
-    });
+    const boundToTask = await isHookSessionBoundToTask(context, input.role);
+    if (boundToTask) {
+      deps.jobGuard?.notePromptSubmitted({
+        repoRoot: context.project.repoRoot,
+        taskSlug: context.taskSlug,
+        role: input.role
+      });
+    }
     const session = await deps.sessionService.recordClaudeHookEvent(context.project.repoRoot, {
       taskSlug: context.taskSlug,
       role: input.role,
@@ -204,14 +218,16 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
       transcriptPath: stringOrUndefined(input.event.transcript_path),
       cwd: stringOrUndefined(input.event.cwd) ?? stringOrUndefined(input.event.new_cwd)
     });
-    await deps.roundService.recordClaudeHookEvent({
-      repoRoot: context.project.repoRoot,
-      stateRepoRoot: context.taskRepoRoot,
-      stateRoot: context.config.stateRoot,
-      taskSlug: context.taskSlug,
-      role: input.role,
-      eventName
-    });
+    if (boundToTask) {
+      await deps.roundService.recordClaudeHookEvent({
+        repoRoot: context.project.repoRoot,
+        stateRepoRoot: context.taskRepoRoot,
+        stateRoot: context.config.stateRoot,
+        taskSlug: context.taskSlug,
+        role: input.role,
+        eventName
+      });
+    }
     if (session) {
       await deps.translationService.recordConversationBoundary({
         repoRoot: context.project.repoRoot,
@@ -368,13 +384,10 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
       settleGuard: boolean;
     }
   ): Promise<ClaudeHookResult> {
-    // VCM:CODE SCF-006: apply the same defensive task-binding guard here before the
-    // roundService.recordClaudeHookEvent / updateSessionStatus mutations, so a session
-    // whose authoritative record is not bound to context.taskSlug cannot flip this
-    // task's round/status on turn end.
     const scopedRouteDispatchInput = createRouteDispatchInput(input, context, input.role);
     const settleRouteDispatchInput = createRouteDispatchInput(input, context);
 
+    const boundToTask = await isHookSessionBoundToTask(context, input.role);
     const session = await deps.sessionService.recordClaudeHookEvent(context.project.repoRoot, {
       taskSlug: context.taskSlug,
       role: input.role,
@@ -383,28 +396,30 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
       transcriptPath: stringOrUndefined(input.event.transcript_path),
       cwd: stringOrUndefined(input.event.cwd) ?? stringOrUndefined(input.event.new_cwd)
     });
-    await deps.roundService.recordClaudeHookEvent({
-      repoRoot: context.project.repoRoot,
-      stateRepoRoot: context.taskRepoRoot,
-      stateRoot: context.config.stateRoot,
-      taskSlug: context.taskSlug,
-      role: input.role,
-      eventName,
-      ...(options.settleGuard
-        ? {
-            settleGuard: async () => {
-              const pending = await deps.messageService.listPendingRouteFiles(settleRouteDispatchInput);
-              if (pending.length === 0) {
-                return { action: "stop" };
+    if (boundToTask) {
+      await deps.roundService.recordClaudeHookEvent({
+        repoRoot: context.project.repoRoot,
+        stateRepoRoot: context.taskRepoRoot,
+        stateRoot: context.config.stateRoot,
+        taskSlug: context.taskSlug,
+        role: input.role,
+        eventName,
+        ...(options.settleGuard
+          ? {
+              settleGuard: async () => {
+                const pending = await deps.messageService.listPendingRouteFiles(settleRouteDispatchInput);
+                if (pending.length === 0) {
+                  return { action: "stop" };
+                }
+                const retried = await deps.messageService.scanAndDispatchPendingRouteFiles(settleRouteDispatchInput);
+                return retried.some((result) => result.delivered)
+                  ? { action: "continue", reason: "pending route message dispatched" }
+                  : { action: "stop" };
               }
-              const retried = await deps.messageService.scanAndDispatchPendingRouteFiles(settleRouteDispatchInput);
-              return retried.some((result) => result.delivered)
-                ? { action: "continue", reason: "pending route message dispatched" }
-                : { action: "stop" };
             }
-          }
-        : {})
-    });
+          : {})
+      });
+    }
     if (session) {
       await deps.translationService.recordConversationBoundary({
         repoRoot: context.project.repoRoot,

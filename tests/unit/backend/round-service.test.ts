@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { FileSystemAdapter } from "../../../src/backend/adapters/filesystem.js";
 import { createRoundService } from "../../../src/backend/services/round-service.js";
+import type { RoleName } from "../../../src/shared/types/role.js";
 import type { RoleSessionRecord } from "../../../src/shared/types/session.js";
 
 describe("round-service", () => {
@@ -906,14 +907,14 @@ describe("round-service", () => {
     expect(state.flowPause).toBeUndefined();
   });
 
-  it("flags flowPause stopped-no-next-turn after the settle window with no recovery", async () => {
-    const stopped = await driveRoundToStopped();
+  it("flags flowPause stopped-no-next-turn after a non-user-facing role settles with no recovery", async () => {
+    const stopped = await driveRoundToStopped("coder");
 
     expect(stopped.state.status).toBe("stopped");
     expect(stopped.state.flowPause).toEqual({
       paused: true,
       reason: "stopped-no-next-turn",
-      role: "project-manager",
+      role: "coder",
       since: stopped.state.stoppedAt
     });
   });
@@ -976,9 +977,71 @@ describe("round-service", () => {
       role: "project-manager"
     });
   });
+
+  it("flags flowPause awaiting-user when a user-facing role settles with no onward route", async () => {
+    const stopped = await driveRoundToStopped("project-manager");
+
+    expect(stopped.state.status).toBe("stopped");
+    expect(stopped.state.flowPause).toEqual({
+      paused: true,
+      reason: "awaiting-user",
+      role: "project-manager",
+      since: stopped.state.stoppedAt
+    });
+  });
+
+  it("keeps awaiting-user sticky when a gate-reviewer turn resumes the round", async () => {
+    const stopped = await driveRoundToStopped("project-manager");
+
+    const resumed = await stopped.service.recordClaudeHookEvent({
+      stateRepoRoot: "/repo",
+      stateRoot: ".ai/vcm",
+      taskSlug: "demo-task",
+      role: "gate-reviewer",
+      eventName: "UserPromptSubmit"
+    });
+
+    expect(resumed.status).toBe("running");
+    expect(resumed.flowPause).toMatchObject({
+      paused: true,
+      reason: "awaiting-user",
+      role: "project-manager"
+    });
+  });
+
+  it("does not clear awaiting-user across round-state polling", async () => {
+    const stopped = await driveRoundToStopped("project-manager");
+
+    const polled = await stopped.service.getSessionRoundState({
+      stateRepoRoot: "/repo",
+      stateRoot: ".ai/vcm",
+      taskSlug: "demo-task"
+    });
+
+    expect(polled.flowPause).toMatchObject({
+      paused: true,
+      reason: "awaiting-user",
+      role: "project-manager"
+    });
+  });
+
+  it("clears awaiting-user when the awaiting role receives its next prompt", async () => {
+    const stopped = await driveRoundToStopped("project-manager");
+
+    const resumed = await stopped.service.recordClaudeHookEvent({
+      stateRepoRoot: "/repo",
+      stateRoot: ".ai/vcm",
+      taskSlug: "demo-task",
+      role: "project-manager",
+      eventName: "UserPromptSubmit"
+    });
+
+    expect(resumed.status).toBe("running");
+    expect(resumed.flowPause).toBeUndefined();
+  });
 });
 
-async function driveRoundToStopped() {
+async function driveRoundToStopped(role: RoleName = "project-manager") {
   const fs = createMemoryFs();
   const timers = createManualTimers();
   let currentTime = "2026-05-31T00:00:00.000Z";
@@ -994,7 +1057,7 @@ async function driveRoundToStopped() {
     stateRepoRoot: "/repo",
     stateRoot: ".ai/vcm",
     taskSlug: "demo-task",
-    role: "project-manager",
+    role,
     eventName: "UserPromptSubmit"
   });
   currentTime = "2026-05-31T00:00:02.000Z";
@@ -1002,7 +1065,7 @@ async function driveRoundToStopped() {
     stateRepoRoot: "/repo",
     stateRoot: ".ai/vcm",
     taskSlug: "demo-task",
-    role: "project-manager",
+    role,
     eventName: "Stop"
   });
   currentTime = "2026-05-31T00:00:12.000Z";
