@@ -277,15 +277,18 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     }
 
     await deps.fs.ensureDir(resolveRepoPath(repoRoot, TRANSLATION_DIR));
-    const launchCwd = launchMode === "resume"
-      ? persisted?.cwd ?? taskContext.taskRepoRoot
-      : taskContext.taskRepoRoot;
+    // Project-level tool sessions always launch (and resume) from the base
+    // repoRoot. Claude anchors a session transcript to its first-launch cwd and
+    // `/cd` never relocates that transcript, so a constant repoRoot anchor keeps
+    // `claude --resume` valid even after the prior task worktree is deleted. The
+    // active task worktree is entered afterwards via `/cd`
+    // (migrateRunningProjectToolSessionCwd), and the task root is also exposed
+    // independently of pty cwd via VCM_TASK_REPO_ROOT.
+    const launchCwd = repoRoot;
     const claudeSessionId = resumeClaudeSessionId ?? "";
-    const transcriptPath = launchMode === "resume" && persisted?.transcriptPath
-      ? persisted.transcriptPath
-      : resumeClaudeSessionId
-        ? claudeTranscriptPath(launchCwd, resumeClaudeSessionId)
-        : undefined;
+    const transcriptPath = resumeClaudeSessionId
+      ? claudeTranscriptPath(repoRoot, resumeClaudeSessionId)
+      : undefined;
     const startCommand = {
       ...deps.claude.buildRoleStartCommand(
         TRANSLATOR_ROLE,
@@ -383,15 +386,15 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     }
 
     await deps.fs.ensureDir(resolveRepoPath(repoRoot, HARNESS_ENGINEER_DIR));
-    const launchCwd = launchMode === "resume"
-      ? persisted?.cwd ?? taskContext.taskRepoRoot
-      : taskContext.taskRepoRoot;
+    // See launchProjectTranslatorSession: project-level tool sessions launch and
+    // resume from the base repoRoot so the transcript anchor stays stable and
+    // resume never depends on a possibly-deleted task worktree. The active task
+    // worktree is entered afterwards via `/cd`.
+    const launchCwd = repoRoot;
     const claudeSessionId = resumeClaudeSessionId ?? "";
-    const transcriptPath = launchMode === "resume" && persisted?.transcriptPath
-      ? persisted.transcriptPath
-      : resumeClaudeSessionId
-        ? claudeTranscriptPath(launchCwd, resumeClaudeSessionId)
-        : undefined;
+    const transcriptPath = resumeClaudeSessionId
+      ? claudeTranscriptPath(repoRoot, resumeClaudeSessionId)
+      : undefined;
     const startCommand = {
       ...deps.claude.buildRoleStartCommand(
         HARNESS_ENGINEER_ROLE,
@@ -499,13 +502,13 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     await submitTerminalInput(deps.runtime, session.id, formatClaudeCdCommand(targetCwd), {
       enterDelayMs: PROJECT_TOOL_CD_ENTER_DELAY_MS
     });
+    // `cwd` tracks the logical `/cd` target only. The transcript stays anchored at
+    // the first-launch cwd (repoRoot for project tools), so transcriptPath must
+    // not be recomputed from targetCwd here.
     const updated: RoleSessionRecord = {
       ...session,
       cwd: targetCwd,
       previousCwd: session.cwd,
-      transcriptPath: session.claudeSessionId
-        ? claudeTranscriptPath(targetCwd, session.claudeSessionId)
-        : session.transcriptPath,
       updatedAt: timestamp
     };
     deps.registry.upsert(normalizeProjectScopedRecordForPersistence(updated));
@@ -532,7 +535,9 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     const permissionMode = normalizeClaudePermissionMode(session.permissionMode);
     const model = normalizeClaudeModel(session.model);
     const effort = normalizeClaudeEffort(session.effort);
-    const launchCwd = session.cwd || targetCwd;
+    // Always resume from the base repoRoot anchor (never the persisted task cwd,
+    // which may have been deleted). The active worktree is re-entered via `/cd`.
+    const launchCwd = repoRoot;
     const startCommand = {
       ...deps.claude.buildRoleStartCommand(
         session.role,
@@ -576,7 +581,9 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       updatedAt: timestamp,
       lastOutputAt: runtimeSession.lastOutputAt,
       exitCode: runtimeSession.exitCode,
-      transcriptPath: session.transcriptPath ?? claudeTranscriptPath(launchCwd, session.claudeSessionId)
+      transcriptPath: session.claudeSessionId
+        ? claudeTranscriptPath(repoRoot, session.claudeSessionId)
+        : session.transcriptPath
     };
     deps.registry.upsert(normalizeProjectScopedRecordForPersistence(resumed));
     await persistProjectScopedToolSession(repoRoot, resumed);

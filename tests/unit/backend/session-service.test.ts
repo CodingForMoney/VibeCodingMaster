@@ -249,7 +249,10 @@ describe("createSessionService", () => {
     });
 
     expect(started.taskSlug).toBe("__project__");
-    expect(firstRuntimeInputs[0]?.cwd).toBe(TASK_WORKTREE);
+    // Project-level tool sessions launch from the base repoRoot anchor; the task
+    // worktree is entered afterwards via `/cd`, while VCM_TASK_REPO_ROOT still
+    // exposes the active task root independently of pty cwd.
+    expect(firstRuntimeInputs[0]?.cwd).toBe("/repo");
     expect(firstRuntimeInputs[0]?.env).toMatchObject({
       VCM_TASK_REPO_ROOT: TASK_WORKTREE,
       VCM_TASK_SLUG: "demo-task",
@@ -379,7 +382,7 @@ describe("createSessionService", () => {
     });
 
     expect(started.command).toContain("--agent translator");
-    expect(runtimeInputs[0]?.cwd).toBe(TASK_WORKTREE);
+    expect(runtimeInputs[0]?.cwd).toBe("/repo");
     expect(runtimeInputs[0]?.args).toEqual([
       "--agent",
       "translator",
@@ -458,15 +461,18 @@ describe("createSessionService", () => {
     expect(moved.claudeSessionId).toBe("translator-move-session");
     expect(moved.cwd).toBe("/repo/.claude/worktrees/other-task");
     expect(moved.previousCwd).toBe(TASK_WORKTREE);
-    expect(writes[0]).toContain('/cd "/repo/.claude/worktrees/other-task"');
-    expect(writes[1]).toBe("\r");
+    // writes[0..1] are the start-time `/cd` into the original worktree (the
+    // session launches at repoRoot first); the move emits the second `/cd`.
+    expect(writes[0]).toContain(`/cd "${TASK_WORKTREE}"`);
+    expect(writes[2]).toContain('/cd "/repo/.claude/worktrees/other-task"');
+    expect(writes[3]).toBe("\r");
 
     const persisted = await fs.readJson<{ record: { cwd: string; previousCwd?: string } }>("/repo/.ai/vcm/translations/session.json");
     expect(persisted.record.cwd).toBe("/repo/.claude/worktrees/other-task");
     expect(persisted.record.previousCwd).toBe(TASK_WORKTREE);
   });
 
-  it("resumes a Translator from the previous cwd before moving it to a new task worktree", async () => {
+  it("resumes a Translator from the base repoRoot anchor before moving it to a new task worktree", async () => {
     const fs = createMemoryFs();
     const firstService = createTestSessionService(fs, [], [], {
       worktreePaths: {
@@ -497,7 +503,9 @@ describe("createSessionService", () => {
     });
 
     expect(resumed.claudeSessionId).toBe("translator-resume-session");
-    expect(runtimeInputs[0]?.cwd).toBe(TASK_WORKTREE);
+    // Resume anchors at repoRoot (not the persisted task cwd, which may be gone),
+    // then `/cd` migrates the live session into the active task worktree.
+    expect(runtimeInputs[0]?.cwd).toBe("/repo");
     expect(runtimeInputs[0]?.args).toEqual([
       "--agent",
       "translator",
@@ -533,8 +541,11 @@ describe("createSessionService", () => {
     expect(moved.claudeSessionId).toBe("translator-safe-session");
     expect(moved.cwd).toBe("/repo");
     expect(moved.previousCwd).toBe(TASK_WORKTREE);
-    expect(writes[0]).toContain('/cd "/repo"');
-    expect(writes[1]).toBe("\r");
+    // writes[0..1] are the start-time `/cd` into the worktree; the safe-cwd move
+    // emits the second `/cd` back to the base repoRoot.
+    expect(writes[0]).toContain(`/cd "${TASK_WORKTREE}"`);
+    expect(writes[2]).toContain('/cd "/repo"');
+    expect(writes[3]).toBe("\r");
   });
 
   it("starts Harness Engineer as a project-scoped Claude Code session", async () => {
@@ -552,7 +563,7 @@ describe("createSessionService", () => {
     expect(started.role).toBe("harness-engineer");
     expect(started.taskSlug).toBe("__project_harness_engineer__");
     expect(started.command).toContain("--agent harness-engineer");
-    expect(runtimeInputs[0]?.cwd).toBe(TASK_WORKTREE);
+    expect(runtimeInputs[0]?.cwd).toBe("/repo");
     expect(runtimeInputs[0]?.env).toMatchObject({
       VCM_TASK_REPO_ROOT: TASK_WORKTREE,
       VCM_TASK_SLUG: "demo-task",
