@@ -464,8 +464,8 @@ describe("createSessionService", () => {
     expect(moved.previousCwd).toBe(TASK_WORKTREE);
     // writes[0..1] are the start-time `/cd` into the original worktree (the
     // session launches at repoRoot first); the move emits the second `/cd`.
-    expect(writes[0]).toContain(`/cd "${TASK_WORKTREE}"`);
-    expect(writes[2]).toContain('/cd "/repo/.claude/worktrees/other-task"');
+    expect(writes[0]).toContain(`/cd ${TASK_WORKTREE}`);
+    expect(writes[2]).toContain('/cd /repo/.claude/worktrees/other-task');
     expect(writes[3]).toBe("\r");
     // #16: `/cd` must NOT relocate the transcript anchor. The transcriptPath
     // stays at its first-launch (hook-recorded) value and is not recomputed
@@ -524,7 +524,7 @@ describe("createSessionService", () => {
       "--effort",
       "medium"
     ]);
-    expect(writes[0]).toContain('/cd "/repo/.claude/worktrees/other-task"');
+    expect(writes[0]).toContain('/cd /repo/.claude/worktrees/other-task');
     expect(writes[1]).toBe("\r");
     expect(resumed.cwd).toBe("/repo/.claude/worktrees/other-task");
     // #16 second root cause: the transcript is anchored at the first-launch cwd
@@ -559,8 +559,8 @@ describe("createSessionService", () => {
     expect(moved.previousCwd).toBe(TASK_WORKTREE);
     // writes[0..1] are the start-time `/cd` into the worktree; the safe-cwd move
     // emits the second `/cd` back to the base repoRoot.
-    expect(writes[0]).toContain(`/cd "${TASK_WORKTREE}"`);
-    expect(writes[2]).toContain('/cd "/repo"');
+    expect(writes[0]).toContain(`/cd ${TASK_WORKTREE}`);
+    expect(writes[2]).toContain('/cd /repo');
     expect(writes[3]).toBe("\r");
   });
 

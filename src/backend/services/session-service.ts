@@ -1691,5 +1691,9 @@ function normalizeClaudeEffort(value: unknown): SessionEffort {
 }
 
 function formatClaudeCdCommand(targetCwd: string): string {
-  return `/cd ${JSON.stringify(targetCwd)}`;
+  // Claude Code's `/cd` slash command takes the literal remainder of the line as
+  // the path, so the target must NOT be wrapped in quotes (quotes are taken as part
+  // of the path and the cd fails). Paths with spaces are still fine unquoted; a
+  // newline is the only unsafe character and is rejected by assertSafeCwdTarget.
+  return `/cd ${targetCwd}`;
 }
