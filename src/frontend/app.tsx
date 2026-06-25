@@ -1718,6 +1718,15 @@ function shouldShowFlowPauseNotice(
 }
 
 function getFlowPauseNotificationKey(roundState: VcmSessionRoundState): string {
+  const flowPause = roundState.flowPause;
+  // A sticky awaiting-user pause is ONE pending decision whose `since` anchor stays
+  // fixed while the round may cycle running->stopped under other roles. Key on that
+  // stable anchor so the modal + alarm fire exactly once for the decision, instead
+  // of re-arming on each cycle via the volatile roundId:stoppedAt used for transient
+  // (non-sticky) pauses.
+  if (flowPause?.reason === "awaiting-user") {
+    return `awaiting-user:${flowPause.since ?? roundState.taskSlug}`;
+  }
   const roundKey = roundState.roundId ?? roundState.startedAt ?? roundState.taskSlug;
   const stoppedKey = roundState.stoppedAt ?? roundState.lastTurnEndedAt ?? "stopped";
   return `${roundKey}:${stoppedKey}`;

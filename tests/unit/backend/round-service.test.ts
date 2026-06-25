@@ -1141,16 +1141,15 @@ describe("round-service", () => {
     expect(state.flowPause?.message).toBeUndefined();
   });
 
-  it("regression(#17): sticky awaiting-user re-arms the transient flow-pause modal/alarm across a gate-reviewer round cycle", async () => {
-    // Reproduces the validation-adequacy gate's Finding 1. The web frontend was
-    // restored byte-identical to pre-#17 (awaiting-user now drives the transient
-    // modal+alarm via selectFlowPauseAlertMessage), but the BACKEND awaiting-user
-    // anchor is sticky. Pre-#17 stopped-no-next-turn was NON-sticky: it cleared when
-    // the round resumed, so the alert message went null and the alert effect
-    // early-returned. With sticky awaiting-user, a single pending PM decision survives
-    // a gate-reviewer round running->stop cycle while the frontend dedup key
-    // (roundId:stoppedAt) advances, so the modal + alarm re-fire for the SAME
-    // unanswered decision.
+  it("single-fire(#17): a sticky awaiting-user decision alerts once with the correct role across a gate-reviewer round cycle", async () => {
+    // Guards the fix for the validation-adequacy gate's Finding 1. The web frontend
+    // was restored to the pre-#17 transient modal+alarm (awaiting-user drives it via
+    // selectFlowPauseAlertMessage), while the BACKEND awaiting-user anchor stays
+    // sticky. The fix keeps single-fire by (a) the frontend dedup key keying on the
+    // stable (reason, since) anchor for awaiting-user instead of the volatile
+    // roundId:stoppedAt, and (b) the alert wording naming the authoritative
+    // flowPause.role (the role being waited on), not the live activeRole. This test
+    // pins the backend stability + selector behavior the fix relies on.
     const fs = createMemoryFs();
     const timers = createManualTimers();
     let currentTime = "2026-05-31T00:00:00.000Z";
@@ -1188,39 +1187,30 @@ describe("round-service", () => {
     await flushAsyncWork();
     const stoppedB = await service.getSessionRoundState(input);
 
-    // Backend: the SAME pending user decision is sticky through the whole cycle.
+    // Backend: ONE pending user decision, sticky through the whole cycle.
     expect(stoppedA.flowPause).toMatchObject({ reason: "awaiting-user", paused: true, role: "project-manager" });
     expect(running.status).toBe("running");
     expect(running.flowPause).toMatchObject({ reason: "awaiting-user", paused: true, role: "project-manager" });
     expect(stoppedB.flowPause).toMatchObject({ reason: "awaiting-user", paused: true, role: "project-manager" });
-    // The sticky anchor (`since`) does not advance -> this is ONE decision, not two.
+    // The sticky anchor (`since`) does NOT advance across the cycle -> ONE decision.
+    // The frontend dedup key now keys awaiting-user on (reason, since) — this stable
+    // `since` is what makes the modal + alarm fire exactly once.
     expect(stoppedB.flowPause?.since).toBe(stoppedA.flowPause?.since);
 
-    // Frontend (real selector): the restored modal alert stays NON-null at the re-stop,
-    // so the alert effect does NOT early-return — the decisive difference from the
-    // pre-#17 non-sticky pause, which would have gone null once the round resumed.
+    // Frontend (real selector): the alert wording names the role being WAITED ON
+    // (project-manager, via flowPause.role) at BOTH stops — not the live activeRole
+    // that advanced to gate-reviewer. This fixes the re-fire mislabel.
     const messageA = selectFlowPauseAlertMessage(stoppedA, formatRecoveryFailure);
     const messageB = selectFlowPauseAlertMessage(stoppedB, formatRecoveryFailure);
     expect(messageA).toBe("No new turn started after project-manager stopped.");
-    expect(messageB).not.toBeNull();
-    // The re-fired modal also MISLABELS the role: the message uses the live activeRole
-    // (now gate-reviewer), not the pending decision's project-manager — extra evidence
-    // it is a fresh alert for the same sticky decision, not a deduped no-op.
     expect(stoppedB.activeRole).toBe("gate-reviewer");
-    expect(messageB).toBe("No new turn started after gate-reviewer stopped.");
+    expect(messageB).toBe("No new turn started after project-manager stopped.");
 
-    // ...and the exact fields the frontend dedup key is built from
-    // (getFlowPauseNotificationKey = `${roundId}:${stoppedAt}`, app.tsx:1720-1724)
-    // BOTH advance across the cycle, so dedup will NOT suppress the second alert.
+    // The backend round identity still advances across the cycle (a real round ran
+    // and stopped), but the frontend no longer keys the await-user alert on
+    // roundId:stoppedAt, so the advancing identity does NOT re-arm the alert.
     expect(stoppedB.roundId).not.toBe(stoppedA.roundId);
     expect(stoppedB.stoppedAt).not.toBe(stoppedA.stoppedAt);
-
-    // Composition (reasoned in the review report; app.tsx alert effect :251-279):
-    // non-null message at the re-stop (no early-return) + a changed dedup key + the
-    // documented shouldShowFlowPauseNotice rule (returns true after a `running`
-    // observation, :1708) => showFlowPauseNotice fires a SECOND time => the centered
-    // modal pops and the alarm sounds AGAIN for one unanswered PM decision. This
-    // contradicts the "fire once like pre-#17" intent of the fix.
   });
 });
 

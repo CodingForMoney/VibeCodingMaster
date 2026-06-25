@@ -14,7 +14,11 @@ export function selectFlowPauseAlertMessage(
   if (!roundState.flowPause?.paused) {
     return null;
   }
-  const roleLabel = roundState.activeRole ?? "role";
+  // Use the authoritative pause role (set by the backend at pause time), not the
+  // live activeRole: for a sticky awaiting-user decision the round may have
+  // advanced under another role (e.g. gate-reviewer), but the alert must still
+  // name the role the flow is actually waiting on.
+  const roleLabel = roundState.flowPause.role ?? roundState.activeRole ?? "role";
   const recovery = roundState.roleRecovery;
   if (roundState.flowPause.reason === "role-recovery-failed" && recovery) {
     return formatRecoveryFailure(recovery, roleLabel);
