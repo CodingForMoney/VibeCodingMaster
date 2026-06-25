@@ -85,6 +85,27 @@ interface FileTranslationRequestFile {
   chunks?: FileTranslationChunk[];
 }
 
+/**
+ * On-disk shape of the single shared conversation output file
+ * (`CONVERSATION_RESULT_PATH`). It is self-describing: `batchId` is the
+ * association key that crash-recovery matches against the active queue item's
+ * `batchId`, and each `results[].index` maps to a queue item's `batchIndex`.
+ *
+ * Backend-internal only — not exported to `src/shared` because no frontend or
+ * route consumes it. The reader treats a file that is absent, unparseable, or
+ * structurally invalid as "no result" (see `parseConversationResultFile`).
+ */
+interface ConversationBatchResultFile {
+  version: 1;
+  batchId: string;
+  results: ConversationBatchResultEntry[];
+}
+
+interface ConversationBatchResultEntry {
+  index: number;
+  translatedText: string;
+}
+
 const TRANSLATIONS_ROOT = ".ai/vcm/translations";
 const TRANSLATIONS_RUNTIME_DIR = `${TRANSLATIONS_ROOT}/runtime`;
 const MEMORY_DIR = `${TRANSLATIONS_ROOT}/memory`;
@@ -95,6 +116,11 @@ const FILE_RUNTIME_JOBS_DIR = `${TRANSLATIONS_RUNTIME_DIR}/files/jobs`;
 const BOOTSTRAP_INDEX_PATH = `${TRANSLATIONS_ROOT}/bootstrap/index.json`;
 const BOOTSTRAP_RUNTIME_RUNS_DIR = `${TRANSLATIONS_RUNTIME_DIR}/bootstrap/runs`;
 const CONVERSATION_RUNTIME_DIR = `${TRANSLATIONS_RUNTIME_DIR}/conversations`;
+// Single shared, self-describing conversation output file: one folder + one file
+// for all conversation translation. It carries the batch identity plus per-index
+// results so crash recovery can re-associate the file with the active queue item
+// without a unique per-task/per-batch path. See ConversationBatchResultFile.
+const CONVERSATION_RESULT_PATH = `${CONVERSATION_RUNTIME_DIR}/result.json`;
 const MEMORY_UPDATE_RUNTIME_DIR = `${TRANSLATIONS_RUNTIME_DIR}/memory-updates`;
 const DEFAULT_PROFILE = "default";
 const DEFAULT_CHUNK_SOURCE_TOKEN_TARGET = 80000;
@@ -348,6 +374,9 @@ export function createTranslationWorkerService(deps: TranslationWorkerServiceDep
   ): Promise<{ items: TranslationQueueItem[]; prompt: string }> {
     const candidates = await collectConversationBatchItems(repoRoot, queue, leader);
     const batchId = `batch-${Date.now()}-${createId().slice(0, 8)}`;
+    // VCM:CODE SCF-002 (modify): point every batched item's batchResultPath at the
+    // single shared CONVERSATION_RESULT_PATH (result.json) instead of a per-batch
+    // result.txt. Leave each item's expectedResultPath as its unique logical key.
     const batchResultPath = `${CONVERSATION_RUNTIME_DIR}/batches/${batchId}/result.txt`;
     await deps.fs.ensureDir(path.dirname(resolveRepoPath(repoRoot, batchResultPath)));
     const prompt = await buildConversationBatchPrompt(repoRoot, candidates, batchResultPath);
@@ -416,6 +445,9 @@ export function createTranslationWorkerService(deps: TranslationWorkerServiceDep
   }
 
   async function loadConversationRequest(repoRoot: string, item: TranslationQueueItem): Promise<ConversationRequestFile> {
+    // VCM:CODE SCF-002 (modify): read the conversation source from the inline
+    // `item.conversation` queue field instead of a per-job request.json. Keep the
+    // returned shape so downstream batching/prompt code is unaffected.
     const request = await deps.fs.readJson<Partial<ConversationRequestFile>>(resolveRepoPath(repoRoot, item.requestPath));
     const sourceText = typeof request.sourceText === "string" ? request.sourceText : "";
     if (!sourceText.trim()) {
@@ -479,6 +511,11 @@ export function createTranslationWorkerService(deps: TranslationWorkerServiceDep
     items: TranslationQueueItem[],
     batchResultPath: string
   ): Promise<string> {
+    // VCM:CODE SCF-002 (modify): instruct the Translator to write a single
+    // result.json of shape ConversationBatchResultFile — { version, batchId,
+    // results: [{ index, translatedText }] } — to the shared result path, echoing
+    // the exact batchId so recovery can verify identity. Replaces the
+    // <VCM_RESULTn> delimiter format below.
     const requests = await Promise.all(items.map((item) => loadConversationRequest(repoRoot, item)));
     const first = requests[0]!;
     const absoluteResultPath = resolveRepoPath(repoRoot, batchResultPath);
@@ -554,11 +591,35 @@ export function createTranslationWorkerService(deps: TranslationWorkerServiceDep
     repoRoot: string,
     item: TranslationQueueItem
   ): Promise<boolean> {
+    // VCM:CODE SCF-002 (modify): for `type === "conversation"`, delegate to
+    // conversationResultAvailable (the all-or-nothing result.json predicate)
+    // instead of a bare path-exists check, so a torn write or a leftover
+    // previous-batch file is treated as absent rather than mis-attributed.
     const resultPath = item.type === "conversation" ? item.batchResultPath : item.expectedResultPath;
     if (!resultPath) {
       return false;
     }
     return deps.fs.pathExists(resolveRepoPath(repoRoot, resultPath));
+  }
+
+  /**
+   * Reader-side all-or-nothing availability predicate for the shared
+   * conversation result.json. Returns true ONLY when the file exists, parses,
+   * its `batchId` equals the active item's `batchId`, AND every expected
+   * `batchIndex` of the active batch is present. Any failed clause ⇒ false
+   * (treated as "no result this cycle"), which guarantees a torn write or a
+   * stale previous-batch file is never mis-assigned to the active item. This is
+   * the safety core that preserves the issue #13 / KI-010 crash recovery under a
+   * single shared output file.
+   */
+  async function conversationResultAvailable(
+    repoRoot: string,
+    active: TranslationQueueItem
+  ): Promise<boolean> {
+    // VCM:CODE SCF-002
+    void repoRoot;
+    void active;
+    return false;
   }
 
   function isStaleActiveItem(item: TranslationQueueItem): boolean {
@@ -628,6 +689,13 @@ export function createTranslationWorkerService(deps: TranslationWorkerServiceDep
     queue.updatedAt = validatingAt;
     await saveQueue(repoRoot, queue);
 
+    // VCM:CODE SCF-002 (modify): read+parse the shared result.json via
+    // parseConversationResultFile, verify parsed.batchId === active.batchId
+    // before applying any result, and build the index→text map from
+    // parsed.results. On parse failure or batchId mismatch, treat as no results
+    // (do not complete items from foreign/torn content). Note the hook-vs-reconcile
+    // "missing index" distinction (plan §1): hook-driven finalize fails a missing
+    // index; the reconcile/availability path defers (see conversationResultAvailable).
     const batchResultPath = active.batchResultPath;
     const parsed = batchResultPath && await deps.fs.pathExists(resolveRepoPath(repoRoot, batchResultPath))
       ? parseConversationBatchResults(await deps.fs.readText(resolveRepoPath(repoRoot, batchResultPath)))
@@ -1393,6 +1461,14 @@ export function createTranslationWorkerService(deps: TranslationWorkerServiceDep
         createdAt: timestamp,
         updatedAt: timestamp
       };
+      // VCM:CODE SCF-002 (modify): stop writing a per-job request.json; carry the
+      // conversation source inline on the queue item via the `conversation` field
+      // ({ direction, sourceLanguage, sourceHash, sourceText, contextText }).
+      // Keep `expectedResultPath` as a UNIQUE per-job logical key (no file is
+      // written there — already true today) so the consumer lookup in
+      // validateConversationResult stays unambiguous; only `batchResultPath`
+      // points at the shared physical CONVERSATION_RESULT_PATH (set in
+      // prepareConversationBatch).
       const queueItem = await enqueue(repoRoot, {
         id: `queue-${jobId}`,
         type: "conversation",
@@ -1431,6 +1507,11 @@ export function createTranslationWorkerService(deps: TranslationWorkerServiceDep
     },
 
     async validateConversationResult(repoRoot, input) {
+      // VCM:CODE SCF-002 (modify): the fallback physical read must come from the
+      // shared result.json (item.batchResultPath) parsed via
+      // parseConversationResultFile, verifying parsed.batchId === item.batchId and
+      // selecting the entry whose index === item.batchIndex. The item lookup stays
+      // keyed on the unique `expectedResultPath` (unchanged interface contract).
       const queue = await loadQueue(repoRoot);
       const item = queue.items.find((candidate) =>
         candidate.type === "conversation" &&
@@ -2140,6 +2221,19 @@ async function readStandaloneConversationResult(
     });
   }
   return fs.readText(resultPath);
+}
+
+/**
+ * Parse the shared conversation result.json into its structured form. Returns
+ * undefined when the text is empty, not valid JSON, or does not match the
+ * ConversationBatchResultFile shape (e.g. a truncated / torn write). Callers
+ * MUST treat undefined as "no result available" — never partially apply a
+ * malformed file — so recovery degrades safely to stale-release.
+ */
+function parseConversationResultFile(text: string): ConversationBatchResultFile | undefined {
+  // VCM:CODE SCF-002
+  void text;
+  return undefined;
 }
 
 function parseConversationBatchResults(text: string): Map<number, string> {
