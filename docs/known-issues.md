@@ -154,3 +154,14 @@ security risk, not delivery priority.
 - **Mitigation / workaround**: None needed.
 - **Resolution condition**: Either point the GUI label/severity at `flowPause.role`/`flowPause.since` (consume what the signal already provides), or drop the two fields from `VcmFlowPauseState`. Small, optional.
 - **Related**: none.
+
+### KI-013 — `RoleSessionRecord.cwd` / `previousCwd` persistence is redundant for project-level tool sessions
+
+- **Status**: Open (accepted limitation / deferred cleanup; not a defect).
+- **Category**: Product / maintainability (cleanup).
+- **Affected modules / surfaces**: `src/shared/types/session.ts` (`RoleSessionRecord.cwd`, `RoleSessionRecord.previousCwd`), `src/backend/services/session-service.ts` (project-level tool session launch/resume/`/cd` migrate), and `cwd` consumers `src/backend/services/claude-transcript-service.ts` (`resolveExistingClaudeTranscriptPath`), `translation-service.ts`, `harness-service.ts`.
+- **Current gap**: Project-level tool sessions (translator, harness-engineer) now anchor launch/resume cwd and `transcriptPath` at the base `repoRoot` and enter the active task worktree via `/cd`. Both the launch anchor (`repoRoot`) and the `/cd` target (the active task worktree) are derivable, so persisting `cwd`/`previousCwd` for these sessions is no longer load-bearing — `cwd` now only tracks the logical `/cd` target for the redundant-`/cd` skip check. The fields were intentionally retained to keep the underlying fix inside Debug Mode scope, because removing a `src/shared` public type field is a public-surface change.
+- **Impact**: None functional. A shared public type carries fields that are derivable for project-level sessions, which can mislead future maintainers about which cwd value is authoritative.
+- **Mitigation / workaround**: None needed.
+- **Resolution condition**: If pursued, drop `cwd`/`previousCwd` from `RoleSessionRecord` and migrate the remaining consumers to derive cwd (repoRoot anchor plus active task root). This is a `src/shared` public-contract change and must go through the full `architect plan -> coder -> reviewer` flow (out of Debug Mode scope).
+- **Related**: KI-004.

@@ -55,6 +55,14 @@ External boundaries of the module:
 - **Session runtime**: `runtime/` owns PTY lifecycle and a `session-registry`;
   `runtime-coordinator-service` and `session-service` coordinate start/stop/
   resume/restart, persisting Claude session ids for `claude --resume` recovery.
+  Per-task role sessions launch (and resume) in their task worktree. Project-level
+  tool sessions (translator, harness-engineer) instead anchor launch/resume cwd
+  and `transcriptPath` at the base `repoRoot` and enter the active task worktree
+  via `/cd`: Claude anchors a transcript to its first-launch cwd and never
+  relocates it on `/cd`, so the constant `repoRoot` anchor keeps `claude --resume`
+  valid across task close/create boundaries (the worktree may be deleted) and
+  keeps `transcriptPath` stable; the active task root is exposed through
+  `VCM_TASK_REPO_ROOT` independent of pty cwd.
 - **Round / orchestration**: `round-service` and `command-dispatcher` drive the
   role route (`project-manager -> architect -> coder -> reviewer -> docs sync ->
   PM final acceptance`) under manual or automatic orchestration. Orchestration
