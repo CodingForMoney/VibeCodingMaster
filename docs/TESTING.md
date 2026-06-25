@@ -154,6 +154,12 @@ recommended first cases when integration/E2E coverage is added.
   "compiled CLI not found. Run npm run build first." Run `npm run build` before
   `npm test` (or treat these specific failures as build-state, not regressions)
   when validating from a clean tree.
+- `tests/unit/backend/translation-worker-service.test.ts` can intermittently fail
+  with an `ENOTEMPTY` error during a full parallel `npm test` run because its
+  per-case temp directories are cleaned up concurrently. It is an environmental
+  test-isolation flake, not a product regression: re-run the file on its own
+  (`npx vitest run tests/unit/backend/translation-worker-service.test.ts`) to
+  confirm 22/22 before treating any `ENOTEMPTY` as a real failure.
 - `npm run verify:package` does not assert the negative (that non-whitelisted
   paths such as `src/`/`tests/`/`.ai/` are absent from the published tarball); that
   leak check is currently manual via the Release Gate's `npm pack --dry-run` step.
