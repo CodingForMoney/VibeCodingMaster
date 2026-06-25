@@ -9,6 +9,7 @@ import {
 import type { CreateTerminalSessionInput, TerminalRuntime, TerminalSession } from "../../../src/backend/runtime/terminal-runtime.js";
 import { createSessionRegistry } from "../../../src/backend/runtime/session-registry.js";
 import { createSessionService } from "../../../src/backend/services/session-service.js";
+import { claudeTranscriptPath } from "../../../src/backend/services/claude-transcript-service.js";
 import type { FileSystemAdapter } from "../../../src/backend/adapters/filesystem.js";
 
 const TASK_WORKTREE = "/repo/.claude/worktrees/demo-task";
@@ -466,6 +467,13 @@ describe("createSessionService", () => {
     expect(writes[0]).toContain(`/cd "${TASK_WORKTREE}"`);
     expect(writes[2]).toContain('/cd "/repo/.claude/worktrees/other-task"');
     expect(writes[3]).toBe("\r");
+    // #16: `/cd` must NOT relocate the transcript anchor. The transcriptPath
+    // stays at its first-launch (hook-recorded) value and is not recomputed
+    // against the new `/cd` target worktree.
+    expect(moved.transcriptPath).toBe(
+      `${TASK_WORKTREE}/.claude/projects/translator-move-session.jsonl`
+    );
+    expect(moved.transcriptPath).not.toContain("other-task");
 
     const persisted = await fs.readJson<{ record: { cwd: string; previousCwd?: string } }>("/repo/.ai/vcm/translations/session.json");
     expect(persisted.record.cwd).toBe("/repo/.claude/worktrees/other-task");
@@ -519,6 +527,14 @@ describe("createSessionService", () => {
     expect(writes[0]).toContain('/cd "/repo/.claude/worktrees/other-task"');
     expect(writes[1]).toBe("\r");
     expect(resumed.cwd).toBe("/repo/.claude/worktrees/other-task");
+    // #16 second root cause: the transcript is anchored at the first-launch cwd
+    // (repoRoot) and must NOT follow the `/cd` target. Resume re-anchors the
+    // persisted (stale, task-worktree-derived) transcriptPath back to repoRoot,
+    // self-healing it, so the translation panel reads the real transcript.
+    expect(resumed.transcriptPath).toBe(
+      claudeTranscriptPath("/repo", "translator-resume-session")
+    );
+    expect(resumed.transcriptPath).not.toContain("worktrees/other-task");
   });
 
   it("moves a Translator session to the base repository cwd before task cleanup", async () => {
