@@ -41,7 +41,7 @@ import { FileTranslationModalHost } from "./components/translation-panel.js";
 import { UiErrorCenter } from "./components/ui-error-center.js";
 import { selectActiveTask } from "./state/app-store.js";
 import { selectAutoFollowRole } from "./state/active-role-follow.js";
-import { selectFlowPauseAlertMessage } from "./state/flow-pause-alert.js";
+import { getFlowPauseNotificationKey, selectFlowPauseAlertMessage } from "./state/flow-pause-alert.js";
 import { apiClient } from "./state/api-client.js";
 import { clearUiErrorForActions, formatUiError } from "./state/error-format.js";
 import { clearPollError, recordPollError } from "./state/poll-error-gate.js";
@@ -132,7 +132,13 @@ export function App() {
   const currentHarnessBootstrapStatus = harnessBootstrapStatusTaskSlug === activeTask?.taskSlug ? harnessBootstrapStatus : null;
   const translationBaseReady = Boolean(project && activeTask && isTranslationHarnessReady(currentHarnessStatus));
   const translatorSessionRunning = translatorSession?.status === "running";
-  const gatewayRunning = Boolean(gatewayStatus?.running);
+  // Suppress the web flow-pause modal + sound only when the gateway will actually
+  // DELIVER the "needs attention" notification — i.e. it is enabled (handlePmStop
+  // pushes only when settings.enabled). The gateway keeps polling while disabled
+  // (to receive a `/start` command), so `gatewayStatus.running` is true even when
+  // disabled; keying suppression on `running` silences the web alert with no push
+  // anywhere. Key on `enabled` instead.
+  const gatewayHandlesAlerts = Boolean(gatewayStatus?.enabled);
   const effectiveTranslationEnabled = Boolean(translationEnabled && translationBaseReady && translatorSessionRunning);
   const canSaveLaunchTemplate = Boolean(activeTaskLaunchState?.statusLoaded);
   const canOneClickStart = Boolean(activeTask && activeTaskLaunchState?.statusLoaded && !activeTaskLaunchState.hasAnySession);
@@ -149,6 +155,34 @@ export function App() {
     setTranslationOutputMode(preferences.translationOutputMode);
     setLaunchTemplate(preferences.launchTemplate);
   }, []);
+
+  useEffect(() => {
+    // Pause-alert audio is bound to the (startup-loaded) `flowPauseAlerts`
+    // preference: only arm priming when the sound is enabled. Browser autoplay
+    // policy means an AudioContext can be unlocked only from a user gesture, never
+    // at page load — so when enabled we prime on the first user gesture anywhere in
+    // the app, after which poll-driven flow-pause alerts are audible. When disabled
+    // we arm nothing (and tear down on toggle-off).
+    if (!pauseAlertSound) {
+      return;
+    }
+    let primed = false;
+    const prime = () => {
+      if (primed) {
+        return;
+      }
+      primed = true;
+      void primeFlowPauseAudio();
+      window.removeEventListener("pointerdown", prime);
+      window.removeEventListener("keydown", prime);
+    };
+    window.addEventListener("pointerdown", prime);
+    window.addEventListener("keydown", prime);
+    return () => {
+      window.removeEventListener("pointerdown", prime);
+      window.removeEventListener("keydown", prime);
+    };
+  }, [pauseAlertSound]);
 
   const stopFlowPauseAlarm = useCallback(() => {
     if (flowPauseAlarmRef.current === null) {
@@ -265,7 +299,7 @@ export function App() {
     if (!shouldShowFlowPauseNotice(roundState, previousObservation, activeTaskViewStartedAtRef.current[roundState.taskSlug])) {
       return;
     }
-    if (gatewayRunning) {
+    if (gatewayHandlesAlerts) {
       stopFlowPauseAlarm();
       setFlowPauseNotice(null);
       return;
@@ -277,7 +311,7 @@ export function App() {
         ? "strong"
         : "weak";
     showFlowPauseNotice(flowPauseMessage, pauseKey, { sound });
-  }, [activeTask?.taskSlug, gatewayRunning, pauseAlertSound, showFlowPauseNotice, stopFlowPauseAlarm]);
+  }, [activeTask?.taskSlug, gatewayHandlesAlerts, pauseAlertSound, showFlowPauseNotice, stopFlowPauseAlarm]);
 
   const handleLaunchStateChanged = useCallback((launchState: TaskWorkspaceLaunchState) => {
     setActiveLaunchState((current) => {
@@ -537,12 +571,12 @@ export function App() {
   }, [stopFlowPauseAlarm]);
 
   useEffect(() => {
-    if (!gatewayRunning) {
+    if (!gatewayHandlesAlerts) {
       return;
     }
     stopFlowPauseAlarm();
     setFlowPauseNotice(null);
-  }, [gatewayRunning, stopFlowPauseAlarm]);
+  }, [gatewayHandlesAlerts, stopFlowPauseAlarm]);
 
   useEffect(() => {
     const resolvedTheme = themeMode === "system"
@@ -1715,12 +1749,6 @@ function shouldShowFlowPauseNotice(
     Number.isFinite(stoppedAtMs) &&
     stoppedAtMs > taskViewStartedAtMs
   );
-}
-
-function getFlowPauseNotificationKey(roundState: VcmSessionRoundState): string {
-  const roundKey = roundState.roundId ?? roundState.startedAt ?? roundState.taskSlug;
-  const stoppedKey = roundState.stoppedAt ?? roundState.lastTurnEndedAt ?? "stopped";
-  return `${roundKey}:${stoppedKey}`;
 }
 
 function getRoleRecoveryNoticeKey(taskSlug: string, recovery: VcmRoleRecoveryState): string {

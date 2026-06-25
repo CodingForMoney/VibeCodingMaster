@@ -1,5 +1,6 @@
 import path from "node:path";
 import { randomUUID } from "node:crypto";
+import { isUserFacingRole } from "../../shared/constants.js";
 import type { ClaudeTurnHookEventName } from "../../shared/types/claude-hook.js";
 import type { RoleName } from "../../shared/types/role.js";
 import type { VcmFlowPauseState, VcmRoleRecoveryState, VcmSessionRoundState } from "../../shared/types/round.js";
@@ -29,6 +30,12 @@ export interface RecordRoundHookEventInput extends SessionRoundInput {
   role: RoleName;
   eventName: ClaudeTurnHookEventName;
   settleGuard?: RoundSettleGuard;
+  /**
+   * The captured user-facing turn reply for this event, supplied by the hook
+   * layer on a user-facing role's Stop. Stashed until settle, where it becomes
+   * the await-user pause message. Best-effort: absent when capture failed.
+   */
+  userFacingReply?: { text: string; truncated: boolean };
 }
 
 export interface SetRoleRecoveryInput extends SessionRoundInput {
@@ -76,7 +83,38 @@ interface PersistedRoundFile {
   totalCompletedTurnCount: number;
   totalCcActiveMs: number;
   roleRecovery?: VcmRoleRecoveryState;
+  /**
+   * Set when a user-facing role settles to stopped with no onward route; cleared
+   * only when that same role receives its next UserPromptSubmit. Sticky across
+   * round auto-continuation and other roles' activity. Surfaced via the
+   * `awaiting-user` flow-pause reason.
+   */
+  awaitingUser?: AwaitingUserState;
+  /**
+   * Transient stash of a user-facing role's captured reply from its latest Stop,
+   * carried from the Stop hook to the settle moment. Consumed into
+   * `awaitingUser.message` when the await-user anchor is created, and cleared on
+   * consume / new round / answer so it never attaches to a later anchor.
+   */
+  pendingUserReply?: PendingUserReply;
   updatedAt: string;
+}
+
+interface PendingUserReply {
+  role: RoleName;
+  text: string;
+  truncated: boolean;
+  capturedAt: string;
+}
+
+interface AwaitingUserState {
+  role: RoleName;
+  since: string;
+  capturedAt?: string;
+  /** The awaiting role's captured user-facing text (best-effort; may be absent). */
+  message?: string;
+  /** True when `message` was truncated to the capture length limit. */
+  messageTruncated?: boolean;
 }
 
 interface PersistedRound {
@@ -220,10 +258,17 @@ export function createRoundService(deps: RoundServiceDeps): RoundService {
       stoppedAt: current.settleDeadlineAt,
       settleDeadlineAt: undefined
     };
-    const next = {
+    const next: PersistedRoundFile = {
       ...state,
       currentRound: stopped,
       lastStoppedRound: stopped,
+      awaitingUser: resolveAwaitingUserOnStop(
+        state.awaitingUser,
+        current.activeRole,
+        stopped.stoppedAt ?? timestamp,
+        state.pendingUserReply
+      ),
+      pendingUserReply: undefined,
       updatedAt: timestamp
     };
     await save(input, next);
@@ -329,7 +374,7 @@ export function createRoundService(deps: RoundServiceDeps): RoundService {
       const settled = await settleIfNeeded(input, await load(input), timestamp);
       const current = settled.currentRound;
       const shouldStartNewRound = input.eventName === "UserPromptSubmit" && (!current || current.status === "stopped");
-      const next = applyRoundHookEvent({
+      const recorded = applyRoundHookEvent({
         state: settled,
         taskSlug: input.taskSlug,
         role: input.role,
@@ -338,6 +383,8 @@ export function createRoundService(deps: RoundServiceDeps): RoundService {
         roundId: shouldStartNewRound ? id() : current?.id ?? "",
         settleMs
       });
+      const answered = clearAwaitingUserIfAnswered(recorded, input.eventName, input.role);
+      const next = applyPendingUserReplyStash(answered, input, timestamp);
       await save(input, next);
       if (input.eventName === "UserPromptSubmit") {
         clearSettleTimer(input);
@@ -548,7 +595,7 @@ function toSessionRoundState(state: PersistedRoundFile, updatedAt: string): VcmS
       totalCcActiveMs: state.totalCcActiveMs,
       currentRoundCcActiveMs: 0,
       roleRecovery: state.roleRecovery,
-      flowPause: computeFlowPause(undefined, state.roleRecovery),
+      flowPause: computeFlowPause(undefined, state.roleRecovery, state.awaitingUser),
       roles: [],
       updatedAt
     };
@@ -579,45 +626,178 @@ function toSessionRoundState(state: PersistedRoundFile, updatedAt: string): VcmS
     totalCcActiveMs: state.totalCcActiveMs + activeDurationMs,
     currentRoundCcActiveMs,
     roleRecovery: state.roleRecovery,
-    flowPause: computeFlowPause(current, state.roleRecovery),
+    flowPause: computeFlowPause(current, state.roleRecovery, state.awaitingUser),
     roles: current.roles,
     updatedAt
   };
 }
 
 /**
- * Authoritative flow-pause predicate (single source of truth). Returns a paused
- * VcmFlowPauseState exactly when a real round has ended and the auto flow has not
- * advanced and we are not mid active-recovery — mirroring the decision the GUI
- * previously derived. Reason is `role-recovery-failed` when recovery has failed,
- * otherwise `stopped-no-next-turn`. Returns a non-paused state (or undefined) when
- * the flow is not paused. The frontend consumes this instead of re-deriving it.
+ * Authoritative flow-pause predicate (single source of truth). The frontend
+ * consumes this instead of re-deriving the pause decision.
  *
- * Intended logic (to implement):
- *   const recovering = roleRecovery?.status === "waiting" || roleRecovery?.status === "retrying";
- *   const paused = !!current && current.status === "stopped" && !!current.id && !recovering;
- *   if (!paused) return undefined; // or { paused: false }
- *   return {
- *     paused: true,
- *     reason: roleRecovery?.status === "failed" ? "role-recovery-failed" : "stopped-no-next-turn",
- *     role: current.activeRole,
- *     since: current.stoppedAt ?? current.lastTurnEndedAt
- *   };
+ * Reason precedence: `role-recovery-failed` > `awaiting-user` > `stopped-no-next-turn`.
+ * - `awaiting-user` is emitted whenever `awaitingUser` is set and recovery has not
+ *   failed. It is STICKY: it stays paused regardless of round status (the round may
+ *   auto-continue under another role while the user's decision is still pending).
+ * - `stopped-no-next-turn` is emitted only when a real round has ended and the auto
+ *   flow has not advanced and we are not mid active-recovery.
  */
 function computeFlowPause(
   current: PersistedRound | undefined,
-  roleRecovery: VcmRoleRecoveryState | undefined
+  roleRecovery: VcmRoleRecoveryState | undefined,
+  awaitingUser: AwaitingUserState | undefined
 ): VcmFlowPauseState | undefined {
   const recovering = roleRecovery?.status === "waiting" || roleRecovery?.status === "retrying";
-  const paused = Boolean(current) && current!.status === "stopped" && Boolean(current!.id) && !recovering;
-  if (!paused) {
+  if (recovering) {
+    return undefined;
+  }
+  const roundStopped = Boolean(current) && current!.status === "stopped" && Boolean(current!.id);
+
+  if (roleRecovery?.status === "failed") {
+    return roundStopped
+      ? {
+          paused: true,
+          reason: "role-recovery-failed",
+          role: current!.activeRole,
+          since: current!.stoppedAt ?? current!.lastTurnEndedAt
+        }
+      : undefined;
+  }
+
+  if (awaitingUser) {
+    return {
+      paused: true,
+      reason: "awaiting-user",
+      role: awaitingUser.role,
+      since: awaitingUser.since,
+      message: awaitingUser.message,
+      messageTruncated: awaitingUser.messageTruncated
+    };
+  }
+
+  if (roundStopped) {
+    return {
+      paused: true,
+      reason: "stopped-no-next-turn",
+      role: current!.activeRole,
+      since: current!.stoppedAt ?? current!.lastTurnEndedAt
+    };
+  }
+
+  return undefined;
+}
+
+/**
+ * Sticky await-user resolution on settle->stopped: keep any existing anchor
+ * untouched, and only set a new one when the settling role addresses the human
+ * operator. Non-user-facing roles never raise an await-user anchor.
+ */
+function resolveAwaitingUserOnStop(
+  existing: AwaitingUserState | undefined,
+  role: RoleName,
+  since: string,
+  pendingReply: PendingUserReply | undefined
+): AwaitingUserState | undefined {
+  if (existing) {
+    return existing;
+  }
+  if (!isUserFacingRole(role)) {
+    return undefined;
+  }
+  if (pendingReply && pendingReply.role === role) {
+    return {
+      role,
+      since,
+      capturedAt: pendingReply.capturedAt,
+      message: pendingReply.text,
+      messageTruncated: pendingReply.truncated
+    };
+  }
+  return { role, since };
+}
+
+/**
+ * Maintain the transient `pendingUserReply` stash. A user-facing role's Stop with
+ * a captured reply records it until settle promotes it to `awaitingUser.message`.
+ * The same role's next UserPromptSubmit obsoletes the stash (turn answered/resumed),
+ * so stale text can never attach to a later anchor.
+ */
+function applyPendingUserReplyStash(
+  state: PersistedRoundFile,
+  input: RecordRoundHookEventInput,
+  timestamp: string
+): PersistedRoundFile {
+  if (input.eventName === "Stop" && isUserFacingRole(input.role) && input.userFacingReply) {
+    return {
+      ...state,
+      pendingUserReply: {
+        role: input.role,
+        text: input.userFacingReply.text,
+        truncated: input.userFacingReply.truncated,
+        capturedAt: timestamp
+      }
+    };
+  }
+  if (
+    input.eventName === "UserPromptSubmit"
+    && state.pendingUserReply?.role === input.role
+  ) {
+    return { ...state, pendingUserReply: undefined };
+  }
+  return state;
+}
+
+/**
+ * Clear the await-user anchor only when the awaiting role itself receives its
+ * next UserPromptSubmit (the user answered / that role resumed). Other roles,
+ * other events, and round auto-continuation never clear it.
+ */
+function clearAwaitingUserIfAnswered(
+  state: PersistedRoundFile,
+  eventName: ClaudeTurnHookEventName,
+  role: RoleName
+): PersistedRoundFile {
+  if (eventName !== "UserPromptSubmit" || state.awaitingUser?.role !== role) {
+    return state;
+  }
+  return { ...state, awaitingUser: undefined };
+}
+
+function normalizeAwaitingUser(input: unknown): AwaitingUserState | undefined {
+  if (!input || typeof input !== "object") {
+    return undefined;
+  }
+  const record = input as Partial<AwaitingUserState>;
+  if (typeof record.role !== "string" || typeof record.since !== "string") {
     return undefined;
   }
   return {
-    paused: true,
-    reason: roleRecovery?.status === "failed" ? "role-recovery-failed" : "stopped-no-next-turn",
-    role: current!.activeRole,
-    since: current!.stoppedAt ?? current!.lastTurnEndedAt
+    role: record.role as RoleName,
+    since: record.since,
+    capturedAt: typeof record.capturedAt === "string" ? record.capturedAt : undefined,
+    message: typeof record.message === "string" ? record.message : undefined,
+    messageTruncated: record.messageTruncated === true ? true : undefined
+  };
+}
+
+function normalizePendingUserReply(input: unknown): PendingUserReply | undefined {
+  if (!input || typeof input !== "object") {
+    return undefined;
+  }
+  const record = input as Partial<PendingUserReply>;
+  if (
+    typeof record.role !== "string"
+    || typeof record.text !== "string"
+    || typeof record.capturedAt !== "string"
+  ) {
+    return undefined;
+  }
+  return {
+    role: record.role as RoleName,
+    text: record.text,
+    truncated: record.truncated === true,
+    capturedAt: record.capturedAt
   };
 }
 
@@ -637,6 +817,8 @@ function normalizeRoundFile(input: Partial<PersistedRoundFile>, taskSlug: string
     totalCompletedTurnCount: normalizeNumber(input.totalCompletedTurnCount ?? legacy.totalStopCount),
     totalCcActiveMs: normalizeNumber(input.totalCcActiveMs),
     roleRecovery: normalizeRoleRecovery(input.roleRecovery),
+    awaitingUser: normalizeAwaitingUser(input.awaitingUser),
+    pendingUserReply: normalizePendingUserReply(input.pendingUserReply),
     updatedAt: typeof input.updatedAt === "string" ? input.updatedAt : updatedAt
   };
 }

@@ -102,6 +102,18 @@ export function isDispatchableRole(value: string): value is DispatchableRole {
   return DISPATCHABLE_ROLES.includes(value as DispatchableRole);
 }
 
+/**
+ * Roles that address the human operator. When a role in this set ends its turn
+ * with no onward route message, the flow is treated as awaiting a user decision
+ * (see the `awaiting-user` flow-pause reason). Single source of truth for that
+ * predicate.
+ */
+export const USER_FACING_ROLES = ["project-manager"] as const satisfies readonly RoleName[];
+
+export function isUserFacingRole(value: string): value is RoleName {
+  return (USER_FACING_ROLES as readonly string[]).includes(value);
+}
+
 export function getRoleDefinition(role: RoleName): RoleDefinition {
   const definition = ROLE_DEFINITIONS.find((candidate) => candidate.name === role);
   if (!definition) {

@@ -277,15 +277,23 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     }
 
     await deps.fs.ensureDir(resolveRepoPath(repoRoot, TRANSLATION_DIR));
-    const launchCwd = launchMode === "resume"
-      ? persisted?.cwd ?? taskContext.taskRepoRoot
-      : taskContext.taskRepoRoot;
+    // Project-level tool sessions always launch (and resume) from the base
+    // repoRoot. Claude anchors a session transcript to its first-launch cwd and
+    // `/cd` never relocates that transcript, so a constant repoRoot anchor keeps
+    // `claude --resume` valid even after the prior task worktree is deleted. The
+    // active task worktree is entered afterwards via `/cd`
+    // (migrateRunningProjectToolSessionCwd), and the task root is also exposed
+    // independently of pty cwd via VCM_TASK_REPO_ROOT.
+    const launchCwd = repoRoot;
+    // `claude --resume` restores the session's last working directory, so a resumed
+    // session is already at its persisted cwd (not the repoRoot spawn cwd). Track that
+    // restored cwd so the `/cd` migrate below fires only on an actual switch; a fresh
+    // session genuinely starts at repoRoot.
+    const sessionCwd = launchMode === "resume" ? persisted?.cwd ?? launchCwd : launchCwd;
     const claudeSessionId = resumeClaudeSessionId ?? "";
-    const transcriptPath = launchMode === "resume" && persisted?.transcriptPath
-      ? persisted.transcriptPath
-      : resumeClaudeSessionId
-        ? claudeTranscriptPath(launchCwd, resumeClaudeSessionId)
-        : undefined;
+    const transcriptPath = resumeClaudeSessionId
+      ? claudeTranscriptPath(repoRoot, resumeClaudeSessionId)
+      : undefined;
     const startCommand = {
       ...deps.claude.buildRoleStartCommand(
         TRANSLATOR_ROLE,
@@ -308,7 +316,10 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
         VCM_API_URL: deps.apiUrl,
         VCM_BASE_REPO_ROOT: repoRoot,
         VCM_TASK_REPO_ROOT: taskContext.taskRepoRoot,
-        VCM_TASK_SLUG: taskContext.taskSlug,
+        // Project-scoped sessions report their project sentinel as VCM_TASK_SLUG so
+        // hook payloads match this session's record and cannot be attributed to the
+        // active task; VCM_TASK_REPO_ROOT remains the active worktree.
+        VCM_TASK_SLUG: PROJECT_TRANSLATOR_SCOPE,
         VCM_ROLE: TRANSLATOR_ROLE,
         VCM_SESSION_ID: claudeSessionId || undefined
       },
@@ -329,7 +340,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       permissionMode,
       model,
       effort,
-      cwd: startCommand.cwd,
+      cwd: sessionCwd,
       terminalBackend: "node-pty",
       pid: runtimeSession.pid,
       startedAt: runtimeSession.startedAt,
@@ -383,15 +394,19 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     }
 
     await deps.fs.ensureDir(resolveRepoPath(repoRoot, HARNESS_ENGINEER_DIR));
-    const launchCwd = launchMode === "resume"
-      ? persisted?.cwd ?? taskContext.taskRepoRoot
-      : taskContext.taskRepoRoot;
+    // See launchProjectTranslatorSession: project-level tool sessions launch and
+    // resume from the base repoRoot so the transcript anchor stays stable and
+    // resume never depends on a possibly-deleted task worktree. The active task
+    // worktree is entered afterwards via `/cd`.
+    const launchCwd = repoRoot;
+    // `claude --resume` restores the session's last working directory, so a resumed
+    // session is already at its persisted cwd (not the repoRoot spawn cwd). Track that
+    // restored cwd so the `/cd` migrate below fires only on an actual switch.
+    const sessionCwd = launchMode === "resume" ? persisted?.cwd ?? launchCwd : launchCwd;
     const claudeSessionId = resumeClaudeSessionId ?? "";
-    const transcriptPath = launchMode === "resume" && persisted?.transcriptPath
-      ? persisted.transcriptPath
-      : resumeClaudeSessionId
-        ? claudeTranscriptPath(launchCwd, resumeClaudeSessionId)
-        : undefined;
+    const transcriptPath = resumeClaudeSessionId
+      ? claudeTranscriptPath(repoRoot, resumeClaudeSessionId)
+      : undefined;
     const startCommand = {
       ...deps.claude.buildRoleStartCommand(
         HARNESS_ENGINEER_ROLE,
@@ -414,7 +429,10 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
         VCM_API_URL: deps.apiUrl,
         VCM_BASE_REPO_ROOT: repoRoot,
         VCM_TASK_REPO_ROOT: taskContext.taskRepoRoot,
-        VCM_TASK_SLUG: taskContext.taskSlug,
+        // Project-scoped sessions report their project sentinel as VCM_TASK_SLUG so
+        // hook payloads match this session's record and cannot be attributed to the
+        // active task; VCM_TASK_REPO_ROOT remains the active worktree.
+        VCM_TASK_SLUG: PROJECT_HARNESS_ENGINEER_SCOPE,
         VCM_ROLE: HARNESS_ENGINEER_ROLE,
         VCM_SESSION_ID: claudeSessionId || undefined
       },
@@ -435,7 +453,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       permissionMode,
       model,
       effort,
-      cwd: startCommand.cwd,
+      cwd: sessionCwd,
       terminalBackend: "node-pty",
       pid: runtimeSession.pid,
       startedAt: runtimeSession.startedAt,
@@ -499,13 +517,13 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     await submitTerminalInput(deps.runtime, session.id, formatClaudeCdCommand(targetCwd), {
       enterDelayMs: PROJECT_TOOL_CD_ENTER_DELAY_MS
     });
+    // `cwd` tracks the logical `/cd` target only. The transcript stays anchored at
+    // the first-launch cwd (repoRoot for project tools), so transcriptPath must
+    // not be recomputed from targetCwd here.
     const updated: RoleSessionRecord = {
       ...session,
       cwd: targetCwd,
       previousCwd: session.cwd,
-      transcriptPath: session.claudeSessionId
-        ? claudeTranscriptPath(targetCwd, session.claudeSessionId)
-        : session.transcriptPath,
       updatedAt: timestamp
     };
     deps.registry.upsert(normalizeProjectScopedRecordForPersistence(updated));
@@ -532,7 +550,11 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     const permissionMode = normalizeClaudePermissionMode(session.permissionMode);
     const model = normalizeClaudeModel(session.model);
     const effort = normalizeClaudeEffort(session.effort);
-    const launchCwd = session.cwd || targetCwd;
+    // Spawn (`claude --resume`) always anchors at the base repoRoot so resume works
+    // even if the persisted task cwd was deleted. `--resume` then restores the
+    // session's own last cwd (tracked on `session.cwd`), so the `/cd` migrate below
+    // fires only when that restored cwd differs from the target worktree.
+    const launchCwd = repoRoot;
     const startCommand = {
       ...deps.claude.buildRoleStartCommand(
         session.role,
@@ -570,13 +592,14 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       permissionMode,
       model,
       effort,
-      cwd: launchCwd,
       pid: runtimeSession.pid,
       startedAt: runtimeSession.startedAt,
       updatedAt: timestamp,
       lastOutputAt: runtimeSession.lastOutputAt,
       exitCode: runtimeSession.exitCode,
-      transcriptPath: session.transcriptPath ?? claudeTranscriptPath(launchCwd, session.claudeSessionId)
+      transcriptPath: session.claudeSessionId
+        ? claudeTranscriptPath(repoRoot, session.claudeSessionId)
+        : session.transcriptPath
     };
     deps.registry.upsert(normalizeProjectScopedRecordForPersistence(resumed));
     await persistProjectScopedToolSession(repoRoot, resumed);
@@ -1678,5 +1701,9 @@ function normalizeClaudeEffort(value: unknown): SessionEffort {
 }
 
 function formatClaudeCdCommand(targetCwd: string): string {
-  return `/cd ${JSON.stringify(targetCwd)}`;
+  // Claude Code's `/cd` slash command takes the literal remainder of the line as
+  // the path, so the target must NOT be wrapped in quotes (quotes are taken as part
+  // of the path and the cd fails). Paths with spaces are still fine unquoted; a
+  // newline is the only unsafe character and is rejected by assertSafeCwdTarget.
+  return `/cd ${targetCwd}`;
 }

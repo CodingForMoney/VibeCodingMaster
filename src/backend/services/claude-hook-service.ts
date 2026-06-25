@@ -4,8 +4,9 @@ import type {
   ClaudeHookResult,
   ClaudePermissionRequestHookResult
 } from "../../shared/types/claude-hook.js";
-import { isGateReviewerRoleName, isHarnessEngineerToolRoleName, isTranslatorToolRoleName, isVcmRoleName } from "../../shared/constants.js";
+import { isGateReviewerRoleName, isHarnessEngineerToolRoleName, isTranslatorToolRoleName, isUserFacingRole, isVcmRoleName } from "../../shared/constants.js";
 import { VcmError } from "../errors.js";
+import { readLatestRoleTurnReply } from "./claude-transcript-reply.js";
 import type { GatewayService } from "../gateway/gateway-service.js";
 import type { TerminalRuntime } from "../runtime/terminal-runtime.js";
 import { submitTerminalInput } from "../runtime/terminal-submit.js";
@@ -17,6 +18,7 @@ import type { MessageService } from "./message-service.js";
 import type { ProjectService } from "./project-service.js";
 import type { RoundService } from "./round-service.js";
 import type { RoleName } from "../../shared/types/role.js";
+import type { RoleSessionRecord } from "../../shared/types/session.js";
 import type { SessionService } from "./session-service.js";
 import { getTaskRuntimeRepoRoot, type TaskService } from "./task-service.js";
 import type { TranslationService } from "./translation-service.js";
@@ -178,6 +180,23 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
     return input.taskSlug;
   }
 
+  // Defensive task-binding guard: only mutate a task's round/status when the
+  // posting role's authoritative session record is bound to that task. A session
+  // whose record reports a different slug (e.g. a project-scoped sentinel session)
+  // must not resume or clobber an unrelated task's flow. Absence of a record is
+  // not proof of misattribution, so the normal flow proceeds.
+  async function isHookSessionBoundToTask(
+    context: Awaited<ReturnType<typeof getHookContext>>,
+    role: RoleName
+  ): Promise<boolean> {
+    const session = await deps.sessionService.getRoleSession(
+      context.project.repoRoot,
+      context.taskSlug,
+      role
+    );
+    return !session || session.taskSlug === context.taskSlug;
+  }
+
   async function handleUserPromptSubmitHook(input: ClaudeHookRequest): Promise<ClaudeHookResult> {
     const eventName = parseHookEvent(input.event.hook_event_name);
     if (eventName !== "UserPromptSubmit") {
@@ -185,11 +204,14 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
     }
 
     const context = await getHookContext(input);
-    deps.jobGuard?.notePromptSubmitted({
-      repoRoot: context.project.repoRoot,
-      taskSlug: context.taskSlug,
-      role: input.role
-    });
+    const boundToTask = await isHookSessionBoundToTask(context, input.role);
+    if (boundToTask) {
+      deps.jobGuard?.notePromptSubmitted({
+        repoRoot: context.project.repoRoot,
+        taskSlug: context.taskSlug,
+        role: input.role
+      });
+    }
     const session = await deps.sessionService.recordClaudeHookEvent(context.project.repoRoot, {
       taskSlug: context.taskSlug,
       role: input.role,
@@ -198,14 +220,16 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
       transcriptPath: stringOrUndefined(input.event.transcript_path),
       cwd: stringOrUndefined(input.event.cwd) ?? stringOrUndefined(input.event.new_cwd)
     });
-    await deps.roundService.recordClaudeHookEvent({
-      repoRoot: context.project.repoRoot,
-      stateRepoRoot: context.taskRepoRoot,
-      stateRoot: context.config.stateRoot,
-      taskSlug: context.taskSlug,
-      role: input.role,
-      eventName
-    });
+    if (boundToTask) {
+      await deps.roundService.recordClaudeHookEvent({
+        repoRoot: context.project.repoRoot,
+        stateRepoRoot: context.taskRepoRoot,
+        stateRoot: context.config.stateRoot,
+        taskSlug: context.taskSlug,
+        role: input.role,
+        eventName
+      });
+    }
     if (session) {
       await deps.translationService.recordConversationBoundary({
         repoRoot: context.project.repoRoot,
@@ -365,6 +389,7 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
     const scopedRouteDispatchInput = createRouteDispatchInput(input, context, input.role);
     const settleRouteDispatchInput = createRouteDispatchInput(input, context);
 
+    const boundToTask = await isHookSessionBoundToTask(context, input.role);
     const session = await deps.sessionService.recordClaudeHookEvent(context.project.repoRoot, {
       taskSlug: context.taskSlug,
       role: input.role,
@@ -373,28 +398,32 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
       transcriptPath: stringOrUndefined(input.event.transcript_path),
       cwd: stringOrUndefined(input.event.cwd) ?? stringOrUndefined(input.event.new_cwd)
     });
-    await deps.roundService.recordClaudeHookEvent({
-      repoRoot: context.project.repoRoot,
-      stateRepoRoot: context.taskRepoRoot,
-      stateRoot: context.config.stateRoot,
-      taskSlug: context.taskSlug,
-      role: input.role,
-      eventName,
-      ...(options.settleGuard
-        ? {
-            settleGuard: async () => {
-              const pending = await deps.messageService.listPendingRouteFiles(settleRouteDispatchInput);
-              if (pending.length === 0) {
-                return { action: "stop" };
+    if (boundToTask) {
+      const userFacingReply = await captureUserFacingReply(eventName, input.role, session);
+      await deps.roundService.recordClaudeHookEvent({
+        repoRoot: context.project.repoRoot,
+        stateRepoRoot: context.taskRepoRoot,
+        stateRoot: context.config.stateRoot,
+        taskSlug: context.taskSlug,
+        role: input.role,
+        eventName,
+        ...(userFacingReply ? { userFacingReply } : {}),
+        ...(options.settleGuard
+          ? {
+              settleGuard: async () => {
+                const pending = await deps.messageService.listPendingRouteFiles(settleRouteDispatchInput);
+                if (pending.length === 0) {
+                  return { action: "stop" };
+                }
+                const retried = await deps.messageService.scanAndDispatchPendingRouteFiles(settleRouteDispatchInput);
+                return retried.some((result) => result.delivered)
+                  ? { action: "continue", reason: "pending route message dispatched" }
+                  : { action: "stop" };
               }
-              const retried = await deps.messageService.scanAndDispatchPendingRouteFiles(settleRouteDispatchInput);
-              return retried.some((result) => result.delivered)
-                ? { action: "continue", reason: "pending route message dispatched" }
-                : { action: "stop" };
             }
-          }
-        : {})
-    });
+          : {})
+      });
+    }
     if (session) {
       await deps.translationService.recordConversationBoundary({
         repoRoot: context.project.repoRoot,
@@ -721,6 +750,25 @@ function parseHookEvent(value: unknown): ClaudeHookEventName {
     statusCode: 400,
     hint: "VCM accepts UserPromptSubmit, Stop, StopFailure, and PostCompact hooks only."
   });
+}
+
+// On a user-facing role's Stop, best-effort capture its last user-facing turn
+// text to seed the await-user pause message. Capture failure is non-fatal and
+// must never block turn-end, so a missing/failed read just omits the field.
+async function captureUserFacingReply(
+  eventName: "Stop" | "StopFailure",
+  role: RoleName,
+  session: RoleSessionRecord | undefined
+): Promise<{ text: string; truncated: boolean } | undefined> {
+  if (eventName !== "Stop" || !isUserFacingRole(role) || !session) {
+    return undefined;
+  }
+  try {
+    const reply = await readLatestRoleTurnReply(session);
+    return reply ? { text: reply.text, truncated: reply.truncated } : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 function throwUnsupportedEvent(eventName: ClaudeHookEventName): never {
