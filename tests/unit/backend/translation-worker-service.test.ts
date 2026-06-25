@@ -283,7 +283,7 @@ describe("translator-translation-service", () => {
     expect(result.targetLanguage).toBe("zh-CN");
   });
 
-  it("creates conversation jobs with a temporary result file contract", async () => {
+  it("creates conversation jobs carrying inline source on the queue item", async () => {
     tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-translator-conversation-job-"));
     const fs = createNodeFileSystemAdapter();
     const service = createTranslationWorkerService({ fs });
@@ -295,39 +295,28 @@ describe("translator-translation-service", () => {
       sourceLanguage: "auto",
       targetLanguage: "en"
     });
-    const request = await fs.readJson<{
-      baseRepoRoot: string;
-      outputContract: { resultPath: string; absoluteResultPath: string };
-      sourceText: string;
-      taskSlug?: string;
-      role?: string;
-      job?: unknown;
-      contextText?: string;
-      sourceHash?: string;
-    }>(
-      path.join(tmpRepo, job.requestPath)
-    );
     const state = await service.getState(tmpRepo);
+    const item = state.queue.items[0];
 
     expect(job.resultPath).toContain(".ai/vcm/translations/runtime/conversations/jobs/");
-    expect(request.baseRepoRoot).toBe(tmpRepo);
-    expect(request.outputContract.resultPath).toBe(job.resultPath);
-    expect(request.outputContract.absoluteResultPath).toBe(path.join(tmpRepo, job.resultPath));
-    expect(request.sourceText).toBe("请检查失败的测试。");
-    expect(request.taskSlug).toBeUndefined();
-    expect(request.role).toBeUndefined();
-    expect(request.job).toBeUndefined();
-    expect(request.contextText).toBeUndefined();
-    expect(request.sourceHash).toBeUndefined();
     expect(job.resultPath).toMatch(/result\.txt$/);
     expect(job.reportPath).toBeUndefined();
-    expect(state.queue.items[0]).toMatchObject({
+    // The per-job request.json is gone; the source is inlined on the queue item.
+    expect(await fs.pathExists(path.join(tmpRepo, job.requestPath))).toBe(false);
+    expect(item).toMatchObject({
       type: "conversation",
       status: "queued",
       jobId: job.id,
       expectedResultPath: job.resultPath
     });
-    expect(state.queue.items[0]?.reportPath).toBeUndefined();
+    expect(item?.reportPath).toBeUndefined();
+    expect(item?.conversation).toMatchObject({
+      direction: "user-input-to-english",
+      sourceLanguage: "auto",
+      sourceText: "请检查失败的测试。",
+      sourceHash: job.sourceHash
+    });
+    expect(item?.conversation?.contextText).toBeUndefined();
   });
 
   it("dispatches conversation translation with inline source text and file output", async () => {
@@ -354,7 +343,9 @@ describe("translator-translation-service", () => {
     expect(prompt).toContain("Translate each <VCM_TEXT> item from auto to en.");
     expect(prompt).toContain("Result Path:");
     expect(prompt).toContain("<VCM_TEXT1>\n请检查失败的测试。\n</VCM_TEXT1>");
-    expect(prompt).toContain("<VCM_RESULT1>");
+    expect(prompt).toContain("\"batchId\"");
+    expect(prompt).toContain("\"results\"");
+    expect(prompt).toContain("\"index\": 1");
     expect(prompt).not.toContain("sourceHash");
     expect(prompt).not.toContain("CONTEXT_TEXT");
     expect(prompt).not.toContain("Result JSON contract");
@@ -363,7 +354,7 @@ describe("translator-translation-service", () => {
     expect(prompt).not.toContain("diagnostics");
   });
 
-  it("batches queued conversation translations into one prompt and result file", async () => {
+  it("batches queued conversation translations into one prompt and shared result.json", async () => {
     tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-translator-conversation-batch-"));
     const fs = createNodeFileSystemAdapter();
     const writes: string[] = [];
@@ -403,13 +394,16 @@ describe("translator-translation-service", () => {
     expect(firstItem?.batchIndex).toBe(1);
     expect(secondItem?.batchIndex).toBe(2);
     expect(firstItem?.batchResultPath).toBe(secondItem?.batchResultPath);
+    expect(firstItem?.batchResultPath).toBe(".ai/vcm/translations/runtime/conversations/result.json");
 
-    await fs.writeText(path.join(tmpRepo, firstItem!.batchResultPath!), [
-      "<VCM_RESULT1>",
-      "第一段译文",
-      "<VCM_RESULT2>",
-      "第二段译文"
-    ].join("\n"));
+    await fs.writeText(path.join(tmpRepo, firstItem!.batchResultPath!), JSON.stringify({
+      version: 1,
+      batchId: firstItem!.batchId,
+      results: [
+        { index: 1, translatedText: "第一段译文" },
+        { index: 2, translatedText: "第二段译文" }
+      ]
+    }));
     await service.handleTranslatorHook(tmpRepo, "Stop", "demo-task");
 
     const internalState = await service.getState(tmpRepo);
@@ -686,7 +680,11 @@ describe("translator-translation-service", () => {
     // backend (e.g. backend restart/reconnect), so the item is stuck as running.
     const stuckState = await service.getState(tmpRepo);
     const firstItem = stuckState.queue.items.find((candidate) => candidate.id === first.queueItemId);
-    await fs.writeText(path.join(tmpRepo, firstItem!.batchResultPath!), "<VCM_RESULT1>\nFirst result.");
+    await fs.writeText(path.join(tmpRepo, firstItem!.batchResultPath!), JSON.stringify({
+      version: 1,
+      batchId: firstItem!.batchId,
+      results: [{ index: 1, translatedText: "First result." }]
+    }));
 
     // A later translation must not be blocked: dispatching it reconciles the stuck
     // head (completing it from the on-disk result) and dispatches the new item.
@@ -711,6 +709,115 @@ describe("translator-translation-service", () => {
     expect(secondFinal?.status).toBe("running");
     expect(state.queue.activeItemId).toBe(second.queueItemId);
     expect(writes.filter((entry) => entry.includes("Translate each <VCM_TEXT> item"))).toHaveLength(2);
+  });
+
+  it("does not mis-assign a previous batch's result.json to the active batch", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-translator-conversation-foreign-"));
+    const fs = createNodeFileSystemAdapter();
+    const writes: string[] = [];
+    const service = createTranslationWorkerService({
+      fs,
+      runtime: createRuntimeStub(writes),
+      sessionService: createTranslatorSessionService([])
+    });
+
+    const first = await service.createConversationJob(tmpRepo, {
+      taskSlug: "demo-task",
+      direction: "user-input-to-english",
+      sourceText: "第一段。",
+      sourceLanguage: "auto",
+      targetLanguage: "en"
+    });
+    await waitForCondition(async () => {
+      const state = await service.getState(tmpRepo!);
+      const item = state.queue.items.find((candidate) => candidate.id === first.queueItemId);
+      return state.queue.activeItemId === first.queueItemId && item?.status === "running";
+    });
+
+    const stuckState = await service.getState(tmpRepo);
+    const firstItem = stuckState.queue.items.find((candidate) => candidate.id === first.queueItemId);
+    // The shared result.json carries a DIFFERENT (previous) batch identity.
+    await fs.writeText(path.join(tmpRepo, firstItem!.batchResultPath!), JSON.stringify({
+      version: 1,
+      batchId: "batch-previous-0000",
+      results: [{ index: 1, translatedText: "foreign translation" }]
+    }));
+
+    const second = await service.createConversationJob(tmpRepo, {
+      taskSlug: "demo-task",
+      direction: "user-input-to-english",
+      sourceText: "第二段。",
+      sourceLanguage: "auto",
+      targetLanguage: "en"
+    });
+    await waitForDispatcher();
+
+    const state = await service.getState(tmpRepo);
+    const firstFinal = state.queue.items.find((candidate) => candidate.id === first.queueItemId);
+    const secondFinal = state.queue.items.find((candidate) => candidate.id === second.queueItemId);
+    // Identity mismatch => the foreign result is treated as absent: the active
+    // head is neither completed with foreign text nor prematurely failed, and the
+    // queue head is held (no dispatch) until the real result or stale-release.
+    expect(firstFinal?.status).toBe("running");
+    expect(firstFinal?.translatedText).toBeUndefined();
+    expect(secondFinal?.status).toBe("queued");
+    expect(state.queue.activeItemId).toBe(first.queueItemId);
+  });
+
+  it("treats a truncated or unparseable result.json as absent and recovers later", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-translator-conversation-torn-"));
+    const fs = createNodeFileSystemAdapter();
+    const writes: string[] = [];
+    const service = createTranslationWorkerService({
+      fs,
+      runtime: createRuntimeStub(writes),
+      sessionService: createTranslatorSessionService([])
+    });
+
+    const first = await service.createConversationJob(tmpRepo, {
+      taskSlug: "demo-task",
+      direction: "user-input-to-english",
+      sourceText: "第一段。",
+      sourceLanguage: "auto",
+      targetLanguage: "en"
+    });
+    await waitForCondition(async () => {
+      const state = await service.getState(tmpRepo!);
+      const item = state.queue.items.find((candidate) => candidate.id === first.queueItemId);
+      return state.queue.activeItemId === first.queueItemId && item?.status === "running";
+    });
+
+    const stuckState = await service.getState(tmpRepo);
+    const firstItem = stuckState.queue.items.find((candidate) => candidate.id === first.queueItemId);
+    // A torn write: a partial JSON document that cannot parse.
+    await fs.writeText(path.join(tmpRepo, firstItem!.batchResultPath!), "{\"version\":1,\"batchId\":\"");
+
+    const second = await service.createConversationJob(tmpRepo, {
+      taskSlug: "demo-task",
+      direction: "user-input-to-english",
+      sourceText: "第二段。",
+      sourceLanguage: "auto",
+      targetLanguage: "en"
+    });
+    await waitForDispatcher();
+
+    let state = await service.getState(tmpRepo);
+    expect(state.queue.items.find((candidate) => candidate.id === first.queueItemId)?.status).toBe("running");
+    expect(state.queue.items.find((candidate) => candidate.id === second.queueItemId)?.status).toBe("queued");
+    expect(state.queue.activeItemId).toBe(first.queueItemId);
+
+    // A later complete, identity-matching result.json lets recovery finalize.
+    await fs.writeText(path.join(tmpRepo, firstItem!.batchResultPath!), JSON.stringify({
+      version: 1,
+      batchId: firstItem!.batchId,
+      results: [{ index: 1, translatedText: "First result." }]
+    }));
+    await service.handleTranslatorHook(tmpRepo, "Stop", "demo-task");
+
+    state = await service.getState(tmpRepo);
+    const firstFinal = state.queue.items.find((candidate) => candidate.id === first.queueItemId);
+    expect(firstFinal?.status).toBe("completed");
+    expect(firstFinal?.translatedText).toBe("First result.");
   });
 
   it("releases a stale stuck conversation head that has no result and never finalized", async () => {
@@ -740,7 +847,7 @@ describe("translator-translation-service", () => {
           requestPath: ".ai/vcm/translations/runtime/conversations/jobs/conversation-stuck/request.json",
           expectedResultPath: ".ai/vcm/translations/runtime/conversations/jobs/conversation-stuck/result.txt",
           batchId: "batch-stuck",
-          batchResultPath: ".ai/vcm/translations/runtime/conversations/batches/batch-stuck/result.txt",
+          batchResultPath: ".ai/vcm/translations/runtime/conversations/result.json",
           batchIndex: 1,
           createdAt: stale,
           updatedAt: stale
