@@ -150,6 +150,31 @@ export function App() {
     setLaunchTemplate(preferences.launchTemplate);
   }, []);
 
+  useEffect(() => {
+    // Web Audio autoplay policy: an AudioContext created without prior user
+    // activation starts "suspended" and cannot be resumed from a background event
+    // (the flow-pause alert fires from a round-state poll, not a user gesture), so
+    // the alarm would be silent. Prime the context on the first user gesture
+    // anywhere in the app so later alerts are audible without the operator first
+    // toggling the pause-alert-sound setting.
+    let primed = false;
+    const prime = () => {
+      if (primed) {
+        return;
+      }
+      primed = true;
+      void primeFlowPauseAudio();
+      window.removeEventListener("pointerdown", prime);
+      window.removeEventListener("keydown", prime);
+    };
+    window.addEventListener("pointerdown", prime);
+    window.addEventListener("keydown", prime);
+    return () => {
+      window.removeEventListener("pointerdown", prime);
+      window.removeEventListener("keydown", prime);
+    };
+  }, []);
+
   const stopFlowPauseAlarm = useCallback(() => {
     if (flowPauseAlarmRef.current === null) {
       return;
