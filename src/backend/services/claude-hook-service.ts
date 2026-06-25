@@ -185,6 +185,12 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
     }
 
     const context = await getHookContext(input);
+    // VCM:CODE SCF-006: defensive task-binding guard. Before mutating this task's
+    // round/status below, confirm the posting role's authoritative session record is
+    // bound to context.taskSlug (e.g. via sessionService.getRoleSession). If a
+    // project-scoped/sentinel session is reporting another task's slug, skip the
+    // round/status mutations (still safe to no-op return) so it cannot resume or
+    // clobber an unrelated task's pause.
     deps.jobGuard?.notePromptSubmitted({
       repoRoot: context.project.repoRoot,
       taskSlug: context.taskSlug,
@@ -362,6 +368,10 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
       settleGuard: boolean;
     }
   ): Promise<ClaudeHookResult> {
+    // VCM:CODE SCF-006: apply the same defensive task-binding guard here before the
+    // roundService.recordClaudeHookEvent / updateSessionStatus mutations, so a session
+    // whose authoritative record is not bound to context.taskSlug cannot flip this
+    // task's round/status on turn end.
     const scopedRouteDispatchInput = createRouteDispatchInput(input, context, input.role);
     const settleRouteDispatchInput = createRouteDispatchInput(input, context);
 

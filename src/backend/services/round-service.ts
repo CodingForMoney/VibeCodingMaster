@@ -76,7 +76,20 @@ interface PersistedRoundFile {
   totalCompletedTurnCount: number;
   totalCcActiveMs: number;
   roleRecovery?: VcmRoleRecoveryState;
+  /**
+   * Set when a user-facing role settles to stopped with no onward route; cleared
+   * only when that same role receives its next UserPromptSubmit. Sticky across
+   * round auto-continuation and other roles' activity. Surfaced via the
+   * `awaiting-user` flow-pause reason.
+   */
+  awaitingUser?: AwaitingUserState;
   updatedAt: string;
+}
+
+interface AwaitingUserState {
+  role: RoleName;
+  since: string;
+  capturedAt?: string;
 }
 
 interface PersistedRound {
@@ -226,6 +239,10 @@ export function createRoundService(deps: RoundServiceDeps): RoundService {
       lastStoppedRound: stopped,
       updatedAt: timestamp
     };
+    // VCM:CODE SCF-003: when isUserFacingRole(current.activeRole), set
+    // next.awaitingUser = { role: current.activeRole, since: stopped.stoppedAt }.
+    // Sticky: preserve any existing next.awaitingUser; do not set for non-user-facing
+    // roles (they remain stopped-no-next-turn). Clearing happens only in SCF-004.
     await save(input, next);
     await updateSessionStatus(input, "stopped");
     return next;
@@ -338,6 +355,10 @@ export function createRoundService(deps: RoundServiceDeps): RoundService {
         roundId: shouldStartNewRound ? id() : current?.id ?? "",
         settleMs
       });
+      // VCM:CODE SCF-004: clear next.awaitingUser only when
+      // input.eventName === "UserPromptSubmit" && next.awaitingUser?.role === input.role
+      // (the awaiting role received the user's next input). Never clear for other roles,
+      // other events, or via syncRoundFromActiveRoleSession auto-continuation.
       await save(input, next);
       if (input.eventName === "UserPromptSubmit") {
         clearSettleTimer(input);
@@ -548,7 +569,7 @@ function toSessionRoundState(state: PersistedRoundFile, updatedAt: string): VcmS
       totalCcActiveMs: state.totalCcActiveMs,
       currentRoundCcActiveMs: 0,
       roleRecovery: state.roleRecovery,
-      flowPause: computeFlowPause(undefined, state.roleRecovery),
+      flowPause: computeFlowPause(undefined, state.roleRecovery, state.awaitingUser),
       roles: [],
       updatedAt
     };
@@ -579,36 +600,34 @@ function toSessionRoundState(state: PersistedRoundFile, updatedAt: string): VcmS
     totalCcActiveMs: state.totalCcActiveMs + activeDurationMs,
     currentRoundCcActiveMs,
     roleRecovery: state.roleRecovery,
-    flowPause: computeFlowPause(current, state.roleRecovery),
+    flowPause: computeFlowPause(current, state.roleRecovery, state.awaitingUser),
     roles: current.roles,
     updatedAt
   };
 }
 
 /**
- * Authoritative flow-pause predicate (single source of truth). Returns a paused
- * VcmFlowPauseState exactly when a real round has ended and the auto flow has not
- * advanced and we are not mid active-recovery — mirroring the decision the GUI
- * previously derived. Reason is `role-recovery-failed` when recovery has failed,
- * otherwise `stopped-no-next-turn`. Returns a non-paused state (or undefined) when
- * the flow is not paused. The frontend consumes this instead of re-deriving it.
+ * Authoritative flow-pause predicate (single source of truth). The frontend
+ * consumes this instead of re-deriving the pause decision.
  *
- * Intended logic (to implement):
- *   const recovering = roleRecovery?.status === "waiting" || roleRecovery?.status === "retrying";
- *   const paused = !!current && current.status === "stopped" && !!current.id && !recovering;
- *   if (!paused) return undefined; // or { paused: false }
- *   return {
- *     paused: true,
- *     reason: roleRecovery?.status === "failed" ? "role-recovery-failed" : "stopped-no-next-turn",
- *     role: current.activeRole,
- *     since: current.stoppedAt ?? current.lastTurnEndedAt
- *   };
+ * Reason precedence: `role-recovery-failed` > `awaiting-user` > `stopped-no-next-turn`.
+ * - `awaiting-user` is emitted whenever `awaitingUser` is set and recovery has not
+ *   failed. It is STICKY: it stays paused regardless of round status (the round may
+ *   auto-continue under another role while the user's decision is still pending).
+ * - `stopped-no-next-turn` is emitted only when a real round has ended and the auto
+ *   flow has not advanced and we are not mid active-recovery.
  */
 function computeFlowPause(
   current: PersistedRound | undefined,
-  roleRecovery: VcmRoleRecoveryState | undefined
+  roleRecovery: VcmRoleRecoveryState | undefined,
+  awaitingUser: AwaitingUserState | undefined
 ): VcmFlowPauseState | undefined {
   const recovering = roleRecovery?.status === "waiting" || roleRecovery?.status === "retrying";
+  // VCM:CODE SCF-005: before the stopped-no-next-turn branch, when awaitingUser is set
+  // and recovery has not failed, return a sticky paused state:
+  //   { paused: true, reason: "awaiting-user", role: awaitingUser.role, since: awaitingUser.since }
+  // independent of `current`/round status. role-recovery-failed still takes precedence.
+  void awaitingUser;
   const paused = Boolean(current) && current!.status === "stopped" && Boolean(current!.id) && !recovering;
   if (!paused) {
     return undefined;

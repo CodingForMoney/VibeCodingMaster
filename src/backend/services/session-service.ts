@@ -311,6 +311,10 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
         VCM_API_URL: deps.apiUrl,
         VCM_BASE_REPO_ROOT: repoRoot,
         VCM_TASK_REPO_ROOT: taskContext.taskRepoRoot,
+        // VCM:CODE SCF-007: report the project sentinel (PROJECT_TRANSLATOR_SCOPE) as
+        // VCM_TASK_SLUG so hook payloads match this session's record and cannot be
+        // attributed to the active task. Keep VCM_TASK_REPO_ROOT = active worktree.
+        // Update the session-service test that asserts VCM_TASK_SLUG for this session.
         VCM_TASK_SLUG: taskContext.taskSlug,
         VCM_ROLE: TRANSLATOR_ROLE,
         VCM_SESSION_ID: claudeSessionId || undefined
@@ -417,6 +421,10 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
         VCM_API_URL: deps.apiUrl,
         VCM_BASE_REPO_ROOT: repoRoot,
         VCM_TASK_REPO_ROOT: taskContext.taskRepoRoot,
+        // VCM:CODE SCF-007: report the project sentinel (PROJECT_HARNESS_ENGINEER_SCOPE)
+        // as VCM_TASK_SLUG so hook payloads match this session's record and cannot be
+        // attributed to the active task. Keep VCM_TASK_REPO_ROOT = active worktree.
+        // Update the session-service test that asserts VCM_TASK_SLUG for this session.
         VCM_TASK_SLUG: taskContext.taskSlug,
         VCM_ROLE: HARNESS_ENGINEER_ROLE,
         VCM_SESSION_ID: claudeSessionId || undefined
