@@ -1,4 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
 import { createClaudeHookService } from "../../../src/backend/services/claude-hook-service.js";
 import type { MessageService } from "../../../src/backend/services/message-service.js";
 import type { ProjectService } from "../../../src/backend/services/project-service.js";
@@ -1116,6 +1119,93 @@ describe("createClaudeHookService", () => {
       "bootstrap:Stop:runtime_harness_engineer:harness_engineer_session"
     ]);
   });
+
+  it("captures the user-facing reply on a project-manager Stop and threads it to round-service", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "vcm-hook-capture-"));
+    transcriptDirs.push(dir);
+    const transcriptPath = join(dir, "pm.jsonl");
+    await writeFile(transcriptPath, JSON.stringify({
+      type: "assistant",
+      uuid: "e1",
+      timestamp: "2026-06-11T00:00:01.000Z",
+      message: { stop_reason: "end_turn", content: [{ type: "text", text: "Decision needed from you." }] }
+    }), "utf8");
+
+    let roundInput: { userFacingReply?: { text: string; truncated: boolean } } | undefined;
+    const service = createClaudeHookService({
+      projectService: createProjectServiceStub(),
+      taskService: createTaskServiceStub(),
+      sessionService: {
+        getRoleSession: boundRoleSession,
+        async recordClaudeHookEvent(_repoRoot, input) {
+          return {
+            id: "runtime_pm",
+            claudeSessionId: "claude_pm",
+            transcriptPath,
+            taskSlug: input.taskSlug,
+            role: input.role,
+            status: "running",
+            activityStatus: "idle",
+            command: "claude --agent project-manager",
+            permissionMode: "default",
+            cwd: "/repo",
+            terminalBackend: "node-pty",
+            updatedAt: "2026-06-11T00:00:02.000Z",
+            lastTurnStartedAt: "2026-06-11T00:00:00.000Z",
+            lastTurnEndedAt: "2026-06-11T00:00:02.000Z"
+          };
+        }
+      } as SessionService,
+      messageService: {
+        async listPendingRouteFiles() {
+          return [];
+        },
+        async scanAndDispatchPendingRouteFiles() {
+          return [];
+        }
+      } as unknown as MessageService,
+      roundService: {
+        async recordClaudeHookEvent(input) {
+          roundInput = input;
+          return {} as never;
+        }
+      } as RoundService,
+      translationService: {
+        async recordConversationBoundary() {
+          return undefined;
+        }
+      } as Pick<TranslationService, "recordConversationBoundary">,
+      appSettings: createAppSettingsStub(),
+      jobGuard: {
+        async evaluateStop() {
+          return { behavior: "allow" } as never;
+        },
+        notePromptSubmitted() {}
+      } as never
+    });
+
+    const result = await service.handleStopHook({
+      taskSlug: "demo-task",
+      role: "project-manager",
+      event: {
+        hook_event_name: "Stop",
+        session_id: "claude_pm",
+        transcript_path: transcriptPath
+      }
+    });
+
+    expect(result.ok).toBe(true);
+    expect(roundInput?.userFacingReply).toEqual({
+      text: "Decision needed from you.",
+      truncated: false
+    });
+  });
+});
+
+const transcriptDirs: string[] = [];
+
+afterEach(async () => {
+  await Promise.all(transcriptDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
 });
 
 function createAppSettingsStub(permissionRequestMode: "off" | "allowAll" = "off", roleRetryEnabled = true) {

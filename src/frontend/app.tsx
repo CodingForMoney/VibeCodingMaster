@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from "react";
 import qrcode from "qrcode-generator";
 import {
   createDefaultLaunchTemplate,
@@ -1071,15 +1071,7 @@ export function App() {
       )}
     >
       <UiErrorCenter />
-      {/*
-        VCM:CODE SCF-108: render a persistent, actionable await-user banner whenever
-        roundState.flowPause?.reason === "awaiting-user". Show the awaiting role
-        (flowPause.role) and the captured text (flowPause.message) rendered as plain
-        React text (no dangerouslySetInnerHTML); indicate truncation when
-        flowPause.messageTruncated. The banner stays while the anchor is set and clears
-        automatically once the backend clears it. It is distinct from the transient
-        flowPauseNotice modal below (which no longer fires for awaiting-user).
-      */}
+      <AwaitUserBanner roundState={sidebarRoundState} />
       {flowPauseNotice ? (
         <div className="flow-pause-alert-backdrop">
           <section
@@ -1764,6 +1756,40 @@ function formatRoleRecoveryError(recovery: VcmRoleRecoveryState): string {
   return recovery.error && recovery.error !== "unknown"
     ? recovery.error
     : "this error";
+}
+
+/**
+ * Persistent await-user banner: rendered whenever the backend reports
+ * `flowPause.reason === "awaiting-user"`. Shows the awaiting role and its captured
+ * user-facing text as plain React text (never HTML), and clears automatically once
+ * the backend clears the anchor. The transient flow-pause modal does not fire for
+ * this reason (see selectFlowPauseAlertMessage), so the two never double-alert.
+ */
+export function AwaitUserBanner({ roundState }: { roundState: VcmSessionRoundState | null }): ReactElement | null {
+  const flowPause = roundState?.flowPause;
+  if (flowPause?.reason !== "awaiting-user") {
+    return null;
+  }
+  return (
+    <section className="await-user-banner" role="status" aria-live="polite">
+      <p className="await-user-banner-kicker">Awaiting your input</p>
+      <h2 className="await-user-banner-title">
+        {formatRoleRecoveryRole(flowPause.role ?? "project-manager")} is waiting for your decision
+      </h2>
+      {flowPause.message ? (
+        <>
+          <p className="await-user-banner-message">{flowPause.message}</p>
+          {flowPause.messageTruncated ? (
+            <p className="await-user-banner-truncated">Message truncated — open the session for the full reply.</p>
+          ) : null}
+        </>
+      ) : (
+        <p className="await-user-banner-message await-user-banner-empty">
+          Open the project-manager session to see the latest reply.
+        </p>
+      )}
+    </section>
+  );
 }
 
 function formatRoleRecoveryRole(role: string): string {

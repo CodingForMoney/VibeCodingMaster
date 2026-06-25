@@ -1,4 +1,3 @@
-import { readFile } from "node:fs/promises";
 import { VCM_ROLE_NAMES } from "../../shared/constants.js";
 import type {
   GatewayDiagnostics
@@ -27,10 +26,14 @@ import { getTaskRuntimeRepoRoot, type TaskService } from "../services/task-servi
 import type { TaskLaunchService } from "../services/task-launch-service.js";
 import type { TranslationService } from "../services/translation-service.js";
 import type { AppSettingsService } from "../services/app-settings-service.js";
+import { resolveExistingClaudeTranscriptPath } from "../services/claude-transcript-service.js";
 import {
-  parseAssistantContent,
-  resolveExistingClaudeTranscriptPath
-} from "../services/claude-transcript-service.js";
+  isFinalTurnTextEvent,
+  readTranscriptTextEvents,
+  selectLatestTurnReply,
+  type ClaudeTurnReply,
+  type TranscriptTextEvent
+} from "../services/claude-transcript-reply.js";
 import type {
   GatewayChannelAccount,
   GatewayChannelAdapter,
@@ -104,20 +107,6 @@ interface LarkRegistrationState {
   expiresAt: string;
 }
 
-interface TranscriptTextEvent {
-  id: string;
-  timestamp: string;
-  text: string;
-  stopReason?: string;
-}
-
-interface LatestPmReplyCandidate {
-  transcriptEventId: string | null;
-  transcriptTimestamp: string | null;
-  text: string;
-  truncated: boolean;
-}
-
 interface LastFailedGatewayTranslation {
   repoRoot: string;
   taskSlug: string;
@@ -141,7 +130,6 @@ const POLL_LONG_BACKOFF_MS = 30_000;
 const MAX_FAILURES_BEFORE_LONG_BACKOFF = 3;
 const DEFAULT_POLL_TIMEOUT_MS = 35_000;
 const LARK_REGISTRATION_CONFIRM_TIMEOUT_MS = 15_000;
-const MAX_LATEST_PM_REPLY_CHARS = 8_000;
 const GATEWAY_TRANSLATION_FAILURE_TEXT = "PM 回复已收到，但翻译失败。\n发送 /retry 重新翻译。";
 const COMMANDS_ALLOWED_WHEN_DISABLED = new Set<GatewayCommand["kind"]>([
   "help",
@@ -1367,7 +1355,7 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
     }
   }
 
-  async function saveLatestPmReply(input: GatewayPmStopInput, reply: LatestPmReplyCandidate): Promise<void> {
+  async function saveLatestPmReply(input: GatewayPmStopInput, reply: ClaudeTurnReply): Promise<void> {
     const settings = await deps.settings.loadSettings();
     const key = latestPmReplyKey(input.repoRoot, input.taskSlug);
     await deps.settings.saveSettings({
@@ -1391,36 +1379,6 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
   }
 }
 
-// VCM:CODE SCF-103: relocate this transcript-reply extraction (readTranscriptTextEvents,
-// selectLatestTurnReply, isFinalTurnTextEvent, limitLatestPmReply / MAX_LATEST_PM_REPLY_CHARS,
-// TranscriptTextEvent) into src/backend/services/claude-transcript-reply.ts and have
-// handlePmStop consume readLatestRoleTurnReply from there. Behavior must stay identical
-// (gateway push unchanged); this is a relocation, not a behavior change.
-async function readTranscriptTextEvents(transcriptPath: string): Promise<TranscriptTextEvent[]> {
-  const raw = await readFile(transcriptPath, "utf8");
-  const events: TranscriptTextEvent[] = [];
-  for (const line of raw.split("\n")) {
-    if (!line.trim()) {
-      continue;
-    }
-    for (const event of parseAssistantContent(line)) {
-      if (event.kind === "text") {
-        events.push({
-          id: event.id,
-          timestamp: event.timestamp,
-          text: event.text,
-          stopReason: event.stopReason
-        });
-      }
-    }
-  }
-  return events;
-}
-
-function isFinalTurnTextEvent(event: TranscriptTextEvent): boolean {
-  return event.stopReason === "end_turn";
-}
-
 function selectEventsAfterCursor(events: TranscriptTextEvent[], cursorId: string | null | undefined): TranscriptTextEvent[] {
   if (events.length === 0) {
     return [];
@@ -1435,61 +1393,8 @@ function selectEventsAfterCursor(events: TranscriptTextEvent[], cursorId: string
   return events.slice(index + 1);
 }
 
-function selectLatestTurnReply(events: TranscriptTextEvent[], session: RoleSessionRecord): LatestPmReplyCandidate | undefined {
-  if (events.length === 0) {
-    return undefined;
-  }
-
-  const startMs = timestampMs(session.lastTurnStartedAt);
-  const endMs = timestampMs(session.lastTurnEndedAt);
-  const finalEvents = events.filter(isFinalTurnTextEvent);
-  const selected = startMs === undefined
-    ? finalEvents.slice(-1)
-    : finalEvents.filter((event) => {
-        const eventMs = timestampMs(event.timestamp);
-        return eventMs !== undefined
-          && eventMs >= startMs - 1_000
-          && (endMs === undefined || eventMs <= endMs + 1_000);
-      });
-  if (selected.length === 0) {
-    return undefined;
-  }
-
-  const text = selected.map((event) => event.text).join("\n\n").trim();
-  if (!text) {
-    return undefined;
-  }
-
-  const limited = limitLatestPmReply(text);
-  const lastEvent = selected.at(-1);
-  return {
-    transcriptEventId: lastEvent?.id ?? null,
-    transcriptTimestamp: lastEvent?.timestamp ?? null,
-    text: limited.text,
-    truncated: limited.truncated
-  };
-}
-
 function latestPmReplyKey(repoRoot: string, taskSlug: string): string {
   return JSON.stringify([repoRoot, taskSlug]);
-}
-
-function limitLatestPmReply(text: string): { text: string; truncated: boolean } {
-  if (text.length <= MAX_LATEST_PM_REPLY_CHARS) {
-    return { text, truncated: false };
-  }
-  return {
-    text: text.slice(0, MAX_LATEST_PM_REPLY_CHARS).trimEnd(),
-    truncated: true
-  };
-}
-
-function timestampMs(value: string | undefined): number | undefined {
-  if (!value) {
-    return undefined;
-  }
-  const parsed = Date.parse(value);
-  return Number.isFinite(parsed) ? parsed : undefined;
 }
 
 function projectsText(projects: string[]): string {

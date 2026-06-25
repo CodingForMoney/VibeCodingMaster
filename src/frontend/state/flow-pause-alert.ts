@@ -14,9 +14,11 @@ export function selectFlowPauseAlertMessage(
   if (!roundState.flowPause?.paused) {
     return null;
   }
-  // VCM:CODE SCF-107: return null for reason "awaiting-user" — that pause is surfaced
-  // by the persistent await-user banner (SCF-108), not by this transient alert, so the
-  // two never double-alert.
+  // Await-user is surfaced by the persistent banner (SCF-108), not by this
+  // transient alert, so the two never double-alert.
+  if (roundState.flowPause.reason === "awaiting-user") {
+    return null;
+  }
   const roleLabel = roundState.activeRole ?? "role";
   const recovery = roundState.roleRecovery;
   if (roundState.flowPause.reason === "role-recovery-failed" && recovery) {

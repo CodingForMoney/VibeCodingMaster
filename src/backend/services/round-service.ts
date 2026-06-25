@@ -268,8 +268,7 @@ export function createRoundService(deps: RoundServiceDeps): RoundService {
         stopped.stoppedAt ?? timestamp,
         state.pendingUserReply
       ),
-      // VCM:CODE SCF-104: clear next.pendingUserReply here once it has been consumed
-      // into awaitingUser.message (it is a one-shot stash, not durable round state).
+      pendingUserReply: undefined,
       updatedAt: timestamp
     };
     await save(input, next);
@@ -384,13 +383,8 @@ export function createRoundService(deps: RoundServiceDeps): RoundService {
         roundId: shouldStartNewRound ? id() : current?.id ?? "",
         settleMs
       });
-      const next = clearAwaitingUserIfAnswered(recorded, input.eventName, input.role);
-      // VCM:CODE SCF-104: when input.eventName === "Stop" && isUserFacingRole(input.role)
-      // && input.userFacingReply, stash it on next.pendingUserReply
-      // ({ role, text, truncated, capturedAt: timestamp }) so settle can promote it to
-      // awaitingUser.message. Also drop next.pendingUserReply when the await-user anchor
-      // was just cleared (UserPromptSubmit by the awaiting role) so stale text cannot
-      // reattach. Do not stash for non-user-facing roles or non-Stop events.
+      const answered = clearAwaitingUserIfAnswered(recorded, input.eventName, input.role);
+      const next = applyPendingUserReplyStash(answered, input, timestamp);
       await save(input, next);
       if (input.eventName === "UserPromptSubmit") {
         clearSettleTimer(input);
@@ -711,11 +705,47 @@ function resolveAwaitingUserOnStop(
   if (!isUserFacingRole(role)) {
     return undefined;
   }
-  // VCM:CODE SCF-104: when pendingReply belongs to this role, attach it as the
-  // anchor message: { role, since, capturedAt: pendingReply.capturedAt,
-  // message: pendingReply.text, messageTruncated: pendingReply.truncated }.
-  void pendingReply;
+  if (pendingReply && pendingReply.role === role) {
+    return {
+      role,
+      since,
+      capturedAt: pendingReply.capturedAt,
+      message: pendingReply.text,
+      messageTruncated: pendingReply.truncated
+    };
+  }
   return { role, since };
+}
+
+/**
+ * Maintain the transient `pendingUserReply` stash. A user-facing role's Stop with
+ * a captured reply records it until settle promotes it to `awaitingUser.message`.
+ * The same role's next UserPromptSubmit obsoletes the stash (turn answered/resumed),
+ * so stale text can never attach to a later anchor.
+ */
+function applyPendingUserReplyStash(
+  state: PersistedRoundFile,
+  input: RecordRoundHookEventInput,
+  timestamp: string
+): PersistedRoundFile {
+  if (input.eventName === "Stop" && isUserFacingRole(input.role) && input.userFacingReply) {
+    return {
+      ...state,
+      pendingUserReply: {
+        role: input.role,
+        text: input.userFacingReply.text,
+        truncated: input.userFacingReply.truncated,
+        capturedAt: timestamp
+      }
+    };
+  }
+  if (
+    input.eventName === "UserPromptSubmit"
+    && state.pendingUserReply?.role === input.role
+  ) {
+    return { ...state, pendingUserReply: undefined };
+  }
+  return state;
 }
 
 /**

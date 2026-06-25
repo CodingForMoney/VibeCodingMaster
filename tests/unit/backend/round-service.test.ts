@@ -1039,9 +1039,112 @@ describe("round-service", () => {
     expect(resumed.status).toBe("running");
     expect(resumed.flowPause).toBeUndefined();
   });
+
+  it("promotes a captured user-facing Stop reply to the awaiting-user message at settle", async () => {
+    const stopped = await driveRoundToStopped("project-manager", {
+      text: "Please confirm the rollout window.",
+      truncated: false
+    });
+
+    expect(stopped.state.flowPause).toMatchObject({
+      reason: "awaiting-user",
+      role: "project-manager",
+      message: "Please confirm the rollout window.",
+      messageTruncated: undefined
+    });
+  });
+
+  it("carries the truncation flag onto the awaiting-user message", async () => {
+    const stopped = await driveRoundToStopped("project-manager", {
+      text: "truncated reply",
+      truncated: true
+    });
+
+    expect(stopped.state.flowPause).toMatchObject({
+      reason: "awaiting-user",
+      message: "truncated reply",
+      messageTruncated: true
+    });
+  });
+
+  it("emits awaiting-user without a message when no reply was captured", async () => {
+    const stopped = await driveRoundToStopped("project-manager");
+
+    expect(stopped.state.flowPause).toMatchObject({
+      reason: "awaiting-user",
+      role: "project-manager"
+    });
+    expect(stopped.state.flowPause?.message).toBeUndefined();
+  });
+
+  it("keeps the captured message sticky through a gate-reviewer resume", async () => {
+    const stopped = await driveRoundToStopped("project-manager", {
+      text: "Decision needed.",
+      truncated: false
+    });
+
+    const resumed = await stopped.service.recordClaudeHookEvent({
+      stateRepoRoot: "/repo",
+      stateRoot: ".ai/vcm",
+      taskSlug: "demo-task",
+      role: "gate-reviewer",
+      eventName: "UserPromptSubmit"
+    });
+
+    expect(resumed.flowPause).toMatchObject({
+      reason: "awaiting-user",
+      role: "project-manager",
+      message: "Decision needed."
+    });
+  });
+
+  it("does not attach a stale stash to a later non-user-facing anchor", async () => {
+    const fs = createMemoryFs();
+    const timers = createManualTimers();
+    let currentTime = "2026-05-31T00:00:00.000Z";
+    let roundCounter = 0;
+    const service = createRoundService({
+      fs,
+      now: () => currentTime,
+      id: () => `round_${++roundCounter}`,
+      setTimeout: timers.setTimeout,
+      clearTimeout: timers.clearTimeout
+    });
+    const input = { stateRepoRoot: "/repo", stateRoot: ".ai/vcm", taskSlug: "demo-task" } as const;
+
+    // PM stops with a reply, then answers (UserPromptSubmit) before any settle:
+    // the stash must be dropped so it cannot attach to a later coder anchor.
+    await service.recordClaudeHookEvent({ ...input, role: "project-manager", eventName: "UserPromptSubmit" });
+    currentTime = "2026-05-31T00:00:02.000Z";
+    await service.recordClaudeHookEvent({
+      ...input,
+      role: "project-manager",
+      eventName: "Stop",
+      userFacingReply: { text: "stale PM text", truncated: false }
+    });
+    currentTime = "2026-05-31T00:00:03.000Z";
+    await service.recordClaudeHookEvent({ ...input, role: "project-manager", eventName: "UserPromptSubmit" });
+
+    // A coder turn then stops and settles; its anchor is non-user-facing, so no
+    // awaiting-user pause and certainly no leaked PM message.
+    currentTime = "2026-05-31T00:00:04.000Z";
+    await service.recordClaudeHookEvent({ ...input, role: "coder", eventName: "UserPromptSubmit" });
+    currentTime = "2026-05-31T00:00:05.000Z";
+    await service.recordClaudeHookEvent({ ...input, role: "coder", eventName: "Stop" });
+    currentTime = "2026-05-31T00:00:20.000Z";
+    timers.entries.at(-1)?.callback();
+    await flushAsyncWork();
+
+    const state = await service.getSessionRoundState(input);
+    expect(state.flowPause).toMatchObject({ reason: "stopped-no-next-turn", role: "coder" });
+    expect(state.flowPause?.message).toBeUndefined();
+  });
 });
 
-async function driveRoundToStopped(role: RoleName = "project-manager") {
+async function driveRoundToStopped(
+  role: RoleName = "project-manager",
+  userFacingReply?: { text: string; truncated: boolean }
+) {
   const fs = createMemoryFs();
   const timers = createManualTimers();
   let currentTime = "2026-05-31T00:00:00.000Z";
@@ -1066,7 +1169,8 @@ async function driveRoundToStopped(role: RoleName = "project-manager") {
     stateRoot: ".ai/vcm",
     taskSlug: "demo-task",
     role,
-    eventName: "Stop"
+    eventName: "Stop",
+    ...(userFacingReply ? { userFacingReply } : {})
   });
   currentTime = "2026-05-31T00:00:12.000Z";
   timers.entries[0]?.callback();

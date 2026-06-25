@@ -78,6 +78,22 @@ describe("selectFlowPauseAlertMessage", () => {
     expect(selectFlowPauseAlertMessage(state, vi.fn())).toBe("No new turn started after reviewer stopped.");
   });
 
+  it("returns null for awaiting-user so the persistent banner owns that surface", () => {
+    const formatRecoveryFailure = vi.fn();
+    const state: VcmSessionRoundState = {
+      ...BASE,
+      activeRole: "project-manager",
+      flowPause: {
+        paused: true,
+        reason: "awaiting-user",
+        role: "project-manager",
+        message: "Need your call on the rollout."
+      }
+    };
+    expect(selectFlowPauseAlertMessage(state, formatRecoveryFailure)).toBeNull();
+    expect(formatRecoveryFailure).not.toHaveBeenCalled();
+  });
+
   it("uses a generic role label when the active role is unknown", () => {
     const state: VcmSessionRoundState = {
       ...BASE,
