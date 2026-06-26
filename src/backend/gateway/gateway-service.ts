@@ -180,10 +180,12 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
   }
 
   async function ensurePolling(): Promise<void> {
-    // VCM:CODE SCF-003 — gate every auto-connect on the runtime switch: when
-    // `connectionEnabled` is false, return here without starting the poll loop,
-    // so boot / getStatus / reconcile / QR / updateSettings cannot connect while
-    // the user has not armed the connection.
+    // Single chokepoint for the runtime connection switch: while disarmed, no
+    // auto-connect path (boot, getStatus/reconcile self-heal, QR success,
+    // updateSettings) may start the poll loop.
+    if (!connectionEnabled) {
+      return;
+    }
     if (isRunning()) {
       return;
     }
@@ -952,8 +954,9 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
     },
     async resetBinding() {
       await stopPolling();
-      // VCM:CODE SCF-003 — disarm the connection switch on reset so no connection
-      // survives a binding reset.
+      // Disarm the connection switch on reset so no connection survives a
+      // binding reset.
+      connectionEnabled = false;
       lastFailedTranslation = null;
       qrLogin = null;
       larkRegistrationState = null;
@@ -962,10 +965,13 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
     },
     async setConnectionEnabled(enabled) {
       connectionEnabled = enabled;
-      // VCM:CODE SCF-003 — apply the switch as a side effect: when armed call
-      // ensurePolling() to connect now (if an account is configured); when
-      // disarmed call stopPolling() to abort the loop and tear the channel down
-      // (the Lark WS closes via the abort path in waitForUpdates).
+      // Armed → connect now if an account is configured; disarmed → abort the
+      // poll loop (the Lark WS closes via the abort path in waitForUpdates).
+      if (enabled) {
+        await ensurePolling();
+      } else {
+        await stopPolling();
+      }
       const settings = await deps.settings.loadSettings();
       return deps.settings.expose(settings, isRunning(), connectionEnabled);
     },
@@ -1230,10 +1236,9 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
       const settings = await deps.settings.loadSettings();
       const account = toAccount(settings);
       const boundUserId = settings.binding.boundUserId;
-      // VCM:CODE SCF-003 — also require `connectionEnabled` here: when disarmed,
-      // skip the outbound send (the latest reply was already cached above), so a
-      // disarmed gateway never opens or touches the channel.
-      if (!settings.enabled || !account || !boundUserId) {
+      // A disarmed gateway never touches the channel: skip the outbound push.
+      // The latest reply was already cached above and replays on the next /start.
+      if (!connectionEnabled || !settings.enabled || !account || !boundUserId) {
         return;
       }
 

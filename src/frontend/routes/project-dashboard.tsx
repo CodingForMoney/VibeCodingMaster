@@ -803,19 +803,15 @@ function GatewayPanel({
         </select>
       </label>
       <div className="gateway-actions">
-        {/*
-          VCM:CODE SCF-006 — finalize this connection switch: it arms/disarms the
-          runtime channel connection (status.connectionEnabled), is distinct from
-          the "Gateway" (enabled) switch below, and defaults off each session.
-          Confirm disabled/title copy (e.g. require a configured account) before
-          removing this marker.
-        */}
         <SwitchControl
           checked={Boolean(status?.connectionEnabled)}
           className="sidebar-switch"
-          disabled={busy || !status}
+          disabled={busy || !status || (!status.connectionEnabled && !canEnable)}
           label="Connection"
-          title="Connect or disconnect the channel. Off by default each session; required before the phone can drive the gateway."
+          stateLabel={status?.connectionEnabled ? "connected" : "off"}
+          title={canEnable
+            ? "Connect or disconnect the channel for this session. Off by default; the phone can drive the gateway only while Connection is on. Separate from the Gateway command switch."
+            : "Configure the selected Gateway channel first"}
           onChange={(checked) => onConnectionChange(checked)}
         />
         <SwitchControl
