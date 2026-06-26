@@ -2,6 +2,7 @@ import type { FastifyInstance } from "fastify";
 import type {
   BindGatewayLarkAppRequest,
   CheckGatewayQrLoginRequest,
+  SetGatewayConnectionRequest,
   UpdateGatewaySettingsRequest
 } from "../../shared/types/gateway.js";
 import type { GatewayService } from "../gateway/gateway-service.js";
@@ -41,5 +42,11 @@ export function registerGatewayRoutes(app: FastifyInstance, deps: GatewayRouteDe
 
   app.post("/api/gateway/binding/reset", async () => {
     return deps.gatewayService.resetBinding();
+  });
+
+  // Arm/disarm the runtime channel-connection switch (process-local, not
+  // persisted). Returns the updated GatewayStatus.
+  app.put<{ Body: SetGatewayConnectionRequest }>("/api/gateway/connection", async (request) => {
+    return deps.gatewayService.setConnectionEnabled(request.body.enabled);
   });
 }

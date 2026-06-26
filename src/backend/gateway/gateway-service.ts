@@ -55,6 +55,16 @@ export interface GatewayService {
   getStatus(): Promise<GatewayStatus>;
   updateSettings(input: UpdateGatewaySettingsRequest): Promise<GatewayStatus>;
   resetBinding(): Promise<GatewayStatus>;
+  /**
+   * Arm or disarm the runtime channel-connection switch. The switch is
+   * process-local and not persisted, and defaults to disarmed on every backend
+   * start. Armed → connect and poll now when an account is configured; disarmed →
+   * stop polling and tear the channel down (the Lark WS closes via the poll
+   * abort). While disarmed every auto-connect path (boot, `getStatus`/reconcile
+   * self-heal, QR success, `updateSettings`) is a no-op, and outbound PM push is
+   * skipped. Returns the exposed status. Idempotent / no-throw.
+   */
+  setConnectionEnabled(enabled: boolean): Promise<GatewayStatus>;
   startQrLogin(): Promise<StartGatewayQrLoginResult>;
   checkQrLogin(input?: CheckGatewayQrLoginRequest): Promise<CheckGatewayQrLoginResult>;
   startLarkRegistration(): Promise<StartGatewayLarkRegistrationResult>;
@@ -160,12 +170,20 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
   let qrLogin: QrLoginState | null = null;
   let larkRegistrationState: LarkRegistrationState | null = null;
   let lastFailedTranslation: LastFailedGatewayTranslation | null = null;
+  // Runtime channel-connection arming switch. Not persisted: every process starts
+  // disarmed. `ensurePolling` is the single chokepoint that reads it, so no
+  // self-heal path can connect the channel while this is false.
+  let connectionEnabled = false;
 
   function isRunning(): boolean {
     return Boolean(pollAbort && !pollAbort.signal.aborted);
   }
 
   async function ensurePolling(): Promise<void> {
+    // VCM:CODE SCF-003 — gate every auto-connect on the runtime switch: when
+    // `connectionEnabled` is false, return here without starting the poll loop,
+    // so boot / getStatus / reconcile / QR / updateSettings cannot connect while
+    // the user has not armed the connection.
     if (isRunning()) {
       return;
     }
@@ -906,7 +924,7 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
         await enableGatewayTranslationRuntime();
       }
       await ensurePolling();
-      return deps.settings.expose(settings, isRunning());
+      return deps.settings.expose(settings, isRunning(), connectionEnabled);
     },
     async updateSettings(input) {
       const gatewayStartInput = input.enabled === true
@@ -930,15 +948,26 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
       } else {
         await stopPolling();
       }
-      return deps.settings.expose(settings, isRunning());
+      return deps.settings.expose(settings, isRunning(), connectionEnabled);
     },
     async resetBinding() {
       await stopPolling();
+      // VCM:CODE SCF-003 — disarm the connection switch on reset so no connection
+      // survives a binding reset.
       lastFailedTranslation = null;
       qrLogin = null;
       larkRegistrationState = null;
       const settings = await deps.settings.resetBinding();
-      return deps.settings.expose(settings, isRunning());
+      return deps.settings.expose(settings, isRunning(), connectionEnabled);
+    },
+    async setConnectionEnabled(enabled) {
+      connectionEnabled = enabled;
+      // VCM:CODE SCF-003 — apply the switch as a side effect: when armed call
+      // ensurePolling() to connect now (if an account is configured); when
+      // disarmed call stopPolling() to abort the loop and tear the channel down
+      // (the Lark WS closes via the abort path in waitForUpdates).
+      const settings = await deps.settings.loadSettings();
+      return deps.settings.expose(settings, isRunning(), connectionEnabled);
     },
     async startQrLogin() {
       const settings = await deps.settings.loadSettings();
@@ -1106,7 +1135,7 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
       });
       larkRegistrationState = null;
       await ensurePolling();
-      const status = deps.settings.expose(settings, isRunning());
+      const status = deps.settings.expose(settings, isRunning(), connectionEnabled);
       return {
         status: "confirmed",
         appIdConfigured: Boolean(result.appId),
@@ -1171,7 +1200,7 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
       });
       larkRegistrationState = null;
       await ensurePolling();
-      const status = deps.settings.expose(settings, isRunning());
+      const status = deps.settings.expose(settings, isRunning(), connectionEnabled);
       return {
         status: "confirmed",
         appIdConfigured: true,
@@ -1201,6 +1230,9 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
       const settings = await deps.settings.loadSettings();
       const account = toAccount(settings);
       const boundUserId = settings.binding.boundUserId;
+      // VCM:CODE SCF-003 — also require `connectionEnabled` here: when disarmed,
+      // skip the outbound send (the latest reply was already cached above), so a
+      // disarmed gateway never opens or touches the channel.
       if (!settings.enabled || !account || !boundUserId) {
         return;
       }

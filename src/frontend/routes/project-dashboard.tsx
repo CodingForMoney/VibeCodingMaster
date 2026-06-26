@@ -85,6 +85,8 @@ export interface ProjectDashboardProps {
   onGatewayEnabledChange(enabled: boolean): void;
   onGatewaySettingsChange(input: UpdateGatewaySettingsRequest): Promise<void>;
   onGatewayTranslationChange(enabled: boolean): void;
+  // Arm/disarm the runtime channel-connection switch (process-local, not persisted).
+  onGatewayConnectionChange(enabled: boolean): void;
   onStartGatewayQrLogin(): void;
   onStartGatewayLarkRegistration(): void;
   onResetGatewayBinding(): void;
@@ -160,6 +162,7 @@ export function ProjectDashboard({
   onGatewayEnabledChange,
   onGatewaySettingsChange,
   onGatewayTranslationChange,
+  onGatewayConnectionChange,
   onStartGatewayQrLogin,
   onStartGatewayLarkRegistration,
   onResetGatewayBinding,
@@ -413,6 +416,7 @@ export function ProjectDashboard({
           onStartLarkRegistration={onStartGatewayLarkRegistration}
           onStartQrLogin={onStartGatewayQrLogin}
           onTranslationChange={onGatewayTranslationChange}
+          onConnectionChange={onGatewayConnectionChange}
         />
       </SidebarSection>
 
@@ -756,6 +760,7 @@ function GatewayPanel({
   onStartLarkRegistration,
   onStartQrLogin,
   onTranslationChange,
+  onConnectionChange,
   qrCheck,
   qrLogin,
   status
@@ -769,6 +774,7 @@ function GatewayPanel({
   onStartLarkRegistration(): void;
   onStartQrLogin(): void;
   onTranslationChange(enabled: boolean): void;
+  onConnectionChange(enabled: boolean): void;
   qrCheck: CheckGatewayQrLoginResult | null;
   qrLogin: StartGatewayQrLoginResult | null;
   status: GatewayStatus | null;
@@ -797,6 +803,21 @@ function GatewayPanel({
         </select>
       </label>
       <div className="gateway-actions">
+        {/*
+          VCM:CODE SCF-006 — finalize this connection switch: it arms/disarms the
+          runtime channel connection (status.connectionEnabled), is distinct from
+          the "Gateway" (enabled) switch below, and defaults off each session.
+          Confirm disabled/title copy (e.g. require a configured account) before
+          removing this marker.
+        */}
+        <SwitchControl
+          checked={Boolean(status?.connectionEnabled)}
+          className="sidebar-switch"
+          disabled={busy || !status}
+          label="Connection"
+          title="Connect or disconnect the channel. Off by default each session; required before the phone can drive the gateway."
+          onChange={(checked) => onConnectionChange(checked)}
+        />
         <SwitchControl
           checked={Boolean(status?.enabled)}
           className="sidebar-switch"

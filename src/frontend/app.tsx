@@ -862,6 +862,12 @@ export function App() {
               setGatewayStatus(nextStatus);
             }, "Update Gateway translation setting");
           }}
+          onGatewayConnectionChange={(enabled) => {
+            void withBusy(async () => {
+              const nextStatus = await apiClient.setGatewayConnection(enabled);
+              setGatewayStatus(nextStatus);
+            }, "Update Gateway connection setting");
+          }}
           onStartGatewayQrLogin={() => {
             void withBusy(async () => {
               const result = await apiClient.startGatewayQrLogin();
