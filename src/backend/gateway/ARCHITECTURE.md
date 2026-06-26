@@ -201,9 +201,9 @@ authoritative listing.
 - **Sender authorization asymmetry**: Weixin locks to the first sender
   (`boundUserId`) and rejects others; Lark binds **every** sender and skips the
   single-user lock, so any Lark user who DMs/@-mentions the bot can drive the
-  gateway when it is on. This relies on Lark app-level access control as the
-  authorization boundary. (Behavioral asymmetry, flagged for product
-  confirmation; not a code change in this task.)
+  gateway when it is on. This is a **confirmed, intentional design decision**
+  (accepted limitation, not a defect): Lark app-level access control is the
+  authorization boundary.
 
 ## Correctness Review
 
@@ -232,10 +232,11 @@ Accepted trade-offs (correct under their design intent, documented for clarity):
 - **Cursor keyed by `claudeSessionId`**: a PM resume (new session id) can re-push
   the previous turn once.
 
-Open questions to confirm with product (not defects; flagged, not changed):
+Confirmed design decisions (reviewed, intentional):
 
-- Whether Lark's "any sender binds" authorization is intended (vs. matching
-  Weixin's single-user lock).
+- Lark's "any sender binds" authorization (vs. Weixin's single-user lock) is an
+  intentional, accepted design — Lark app-level access control is the
+  authorization boundary.
 
 ## Risks / Invariants
 
