@@ -11,8 +11,8 @@ All commands run from the repository root (the task worktree during a VCM task).
 | Level | Scope | Command(s) |
 | --- | --- | --- |
 | L0 fast checks | Format/lint/typecheck/boundary. Project ships typecheck across both tsconfigs. | `npm run typecheck` |
-| L1 coder unit checks | Changed behavior + direct regressions via Vitest unit tests. | `npm test` (optionally a scoped `npx vitest run <path>`) |
-| L2 module / integration checks | Module/API/runtime wiring. Vitest config reserves `tests/integration/api/**` and `tests/integration/runtime/**`. | `npm test` (runs unit + any integration tests that exist) |
+| L1 coder unit checks | Changed behavior + direct regressions via Vitest unit tests. | `npm run build` then `npm test` on a clean tree (build first — see note); optionally a scoped `npx vitest run <path>` |
+| L2 module / integration checks | Module/API/runtime wiring. Vitest config reserves `tests/integration/api/**` and `tests/integration/runtime/**`. | `npm run build` then `npm test` on a clean tree (build first — see note); runs unit + any integration tests that exist |
 | L3 smoke E2E checks | Core GUI journeys via Playwright. | `npm run e2e` |
 | L4 full regression / release | Build + package verification before publish. | `npm run build` then `npm run verify:package` |
 
@@ -24,6 +24,12 @@ Notes:
 - `npm test` is `vitest run`. Its `include` globs already cover unit and the
   reserved integration directories, so a single `npm test` is both L1 and L2 once
   integration tests exist.
+- **Build before `npm test` on a clean tree.**
+  `tests/unit/backend/harness-templates-sync.test.ts` shells out to the compiled
+  CLI (`dist/main.js`), so run `npm run build` first; otherwise those 3 cases fail
+  with "compiled CLI not found" — a build-state failure, not a regression. This is
+  why the Release Gate below runs `build` before `test` (see also "Known Testing
+  Gaps").
 - `npm run e2e` is `playwright test` against `tests/e2e`, and its `webServer`
   starts `npm run dev` automatically (reusing an existing server if one is up).
 
@@ -60,8 +66,8 @@ architect-owned (see root `CLAUDE.md` "Release Process"); the reviewer runs the
 gate and reports results.
 
 1. `npm run typecheck`
-2. `npm test`
-3. `npm run build`
+2. `npm run build` (must run before `npm test`: `harness-templates-sync` needs the compiled `dist/main.js`)
+3. `npm test`
 4. `npm run verify:package`
 5. `npm pack --dry-run`, then verify tarball contents:
    - tarball name/version matches the bumped version (e.g. `vibe-coding-master-<version>.tgz`);
@@ -118,7 +124,8 @@ recommended first cases when integration/E2E coverage is added.
 | E2E-002 | Start a role session and observe terminal output | Task workspace role tabs | Embedded terminal streams PTY output over `/ws` | Session starts, xterm receives output, status badge updates | L3, on runtime/terminal change | Not yet implemented; environment-dependent |
 | E2E-003 | Translation panel renders translated transcript | Translation panel | Translator session reads transcript JSONL and renders | Panel shows translated entries without mutating handoffs | L3, on translation change | Not yet implemented |
 | E2E-004 | Auto-orchestration journey (one-click → auto-follow → flow-pause) | GUI task workspace, auto mode | The relocated backend-owned orchestration drives the GUI end to end | One-click starts the roster via `POST /api/tasks/:slug/one-click-start`; the role tab follows `roundState.activeRole`; a stopped round with no next turn raises the `roundState.flowPause` notice | L3, on one-click/round/role-follow change | Not yet implemented; needs a Playwright harness + live `claude`/pty. Until then the three contracts are covered at integration level: task-routes inject + gateway inbound (P1), active-role-follow + app wiring (P2), round-service flowPause matrix + flow-pause-alert (P3) |
-| E2E-005 | Gateway runtime connection switch arms/disarms the channel | Project dashboard `GatewayPanel` Connection switch | The desktop toggle gates channel connection (default off each session) end to end | Connection switch is disabled until an account is configured; arming it sets `connectionEnabled`/`running` and the phone can drive the gateway; disarming stops polling; it stays visually distinct from the `Gateway` (command-scope) switch | L3, on gateway connection/dashboard change | Not yet implemented; needs a Playwright harness + a channel double. Until then PP1–PP6 (default-disarmed, arm/connect, disarm/stop, disarmed-outbound-gate-with-cache, self-heal-cannot-bypass, expose orthogonality) are covered at unit level in `gateway-service.test.ts` / `gateway-settings-service.test.ts`; the live UI arm/disarm is verified by static wiring review + manual desktop check |
+| E2E-005 | Await-user alert (a user-facing role stops awaiting a user decision → flow-pause modal + alarm sound) | GUI task workspace; backend `roundState.flowPause` (reason `awaiting-user`) via workspace-state | A user-facing role's await-user pause reuses the standard flow-pause modal + alarm/notification sound; the issue #17 persistent web banner was removed (per user decision) and the backend await-user state is inert on the web | When `flowPause.reason === "awaiting-user"`, `selectFlowPauseAlertMessage` returns the generic modal wording ("No new turn started after project-manager stopped.") so the centered modal renders and the pause alarm/chime fires via the shared flow-pause sound path; the inert backend `flowPause.message` is NOT surfaced; no separate await-user banner exists | L3, on await-user / flow-pause-alert change | Not yet implemented as a browser spec; needs a Playwright harness + live `claude`/pty. Until then covered below L3 by `flow-pause-alert.test.ts` (awaiting-user → restored modal wording), plus the shared modal+sound mechanics exercised through E2E-004's flow-pause-notice contract |
+| E2E-006 | Gateway runtime connection switch arms/disarms the channel | Project dashboard `GatewayPanel` Connection switch | The desktop toggle gates channel connection (default off each session) end to end | Connection switch is disabled until an account is configured; arming it sets `connectionEnabled`/`running` and the phone can drive the gateway; disarming stops polling; it stays visually distinct from the `Gateway` (command-scope) switch | L3, on gateway connection/dashboard change | Not yet implemented; needs a Playwright harness + a channel double. Until then PP1–PP6 (default-disarmed, arm/connect, disarm/stop, disarmed-outbound-gate-with-cache, self-heal-cannot-bypass, expose orthogonality) are covered at unit level in `gateway-service.test.ts` / `gateway-settings-service.test.ts`; the live UI arm/disarm is verified by static wiring review + manual desktop check |
 
 ## Generated-Context Freshness Checks
 

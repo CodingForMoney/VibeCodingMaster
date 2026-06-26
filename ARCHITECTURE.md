@@ -55,17 +55,33 @@ External boundaries of the module:
 - **Session runtime**: `runtime/` owns PTY lifecycle and a `session-registry`;
   `runtime-coordinator-service` and `session-service` coordinate start/stop/
   resume/restart, persisting Claude session ids for `claude --resume` recovery.
-  A PTY reports `running` the instant it is spawned, which precedes the moment
-  the Claude TUI can accept input, so `session-service` gates any programmatic
-  input — notably the `/cd` that relocates the project-scoped translator and
-  harness-engineer sessions onto the active task worktree — behind a private,
-  quiescence-based input-readiness wait: it proceeds only after the session has
-  emitted output and then stayed quiet briefly, best-effort capped (~6s) so a
-  perpetually chatty or perpetually silent session still proceeds. The same
+  Per-task role sessions launch (and resume) in their task worktree. Project-level
+  tool sessions (translator, harness-engineer) instead anchor launch/resume cwd
+  and `transcriptPath` at the base `repoRoot` and enter the active task worktree
+  via `/cd`: Claude anchors a transcript to its first-launch cwd and never
+  relocates it on `/cd`, so the constant `repoRoot` anchor keeps `claude --resume`
+  valid across task close/create boundaries (the worktree may be deleted) and
+  keeps `transcriptPath` stable; the active task root is exposed through
+  `VCM_TASK_REPO_ROOT` independent of pty cwd. The `/cd` is emitted as a bare,
+  unquoted path (Claude Code's `/cd` consumes the literal rest-of-line; quoting
+  breaks it) and is on-demand — it fires only when the session's tracked cwd
+  differs from the target. Because `claude --resume` restores the session's prior
+  working directory, a resume that lands back in the same task worktree issues no
+  `/cd`; `/cd` fires on a fresh launch (repoRoot -> worktree) or a real switch
+  (e.g. into a different/new task). Project-level tool sessions report
+  their project sentinel (not the active task) as `VCM_TASK_SLUG`, so their hook
+  payloads match their own session record; the hook layer additionally ignores
+  round/status mutations from any session whose authoritative record is not bound
+  to the posted task (defensive task-binding guard). A PTY reports `running` the
+  instant it is spawned, which precedes the moment the Claude TUI can accept
+  input, so `session-service` gates that on-demand `/cd` (and any programmatic
+  input) behind a private, quiescence-based input-readiness wait: it proceeds only
+  after the session has emitted output and then stayed quiet briefly, best-effort
+  capped (~6s) so a perpetually chatty or silent session still proceeds. The same
   liveness probe detects a `--resume` that exits before becoming usable: that
   resume is treated as a failed launch, its stale `claudeSessionId` is cleared,
-  and a fresh session is rebuilt — which also stops auto-reconcile from looping
-  on a broken id. Failure-mode limits: auto-rebuild covers only the project-level
+  and a fresh session is rebuilt — which also stops auto-reconcile from looping on
+  a broken id. Failure-mode limits: auto-rebuild covers only the project-level
   translator/harness-engineer resume paths (regular VCM roles still recover via
   manual Restart); only an *exiting* bad resume is rebuilt (one that hangs at an
   error screen without exiting is not); and rebuilding loses that role's prior
@@ -79,7 +95,29 @@ External boundaries of the module:
   client-side message-diff), and `round-service.computeFlowPause` emits the
   authoritative `roundState.flowPause` signal (paused + reason) that the GUI uses
   for pause alerts — the GUI keeps only alert mechanics (dedupe, sound, viewing
-  gate, wording).
+  gate, wording). One reason is `awaiting-user`: when a user-facing role
+  (project-manager) settles to stopped with no onward route, `round-service`
+  persists a sticky await-user anchor on the round state, surfaced through
+  `flowPause` (reason `awaiting-user`, with `role` and `since`). The GUI renders
+  it as the standard transient flow-pause modal + alarm. The anchor is sticky — it
+  survives round auto-continuation and other roles' activity (including
+  gate-reviewer) and clears only when the awaiting role receives the user's next
+  prompt — so the GUI fires the alert exactly once per pending decision by keying
+  `getFlowPauseNotificationKey` (`src/frontend/state/flow-pause-alert.ts`) on the
+  stable `(reason, since)` (non-sticky pauses still key on `roundId:stoppedAt`),
+  and labels it via the authoritative `flowPause.role` (not the live `activeRole`,
+  which may have advanced under another role). While a role is actively recovering,
+  await-user is intentionally not surfaced and reappears once recovery resolves.
+- **Await-user design tension (retained intentionally)**: issue #17 originally
+  surfaced await-user as a persistent web banner carrying the PM's captured
+  user-facing reply (`flowPause.message`); that banner was removed at the user's
+  request in favor of the prior transient modal + alarm. The backend still computes
+  the full sticky pipeline — including the best-effort PM-reply capture
+  (`claude-transcript-reply`, also used independently by the gateway push path),
+  the `pendingUserReply` stash, and `flowPause.message` — but with the banner gone
+  the captured `message` is no longer read on the web. The sticky reason/`role`/
+  `since` and the task-binding guard remain load-bearing; the message-capture
+  pipeline is currently inert on the web surface (tracked in known issues).
 - **One-click start**: `task-launch-service` is the single backend owner of
   one-click task start — it composes the role roster (CORE roles plus gate-reviewer
   when enabled), applies the launch-template orchestration mode, and starts/resumes

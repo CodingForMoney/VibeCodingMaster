@@ -144,13 +144,37 @@ security risk, not delivery priority.
 - **Resolution condition**: Gate verbose `hint`/`runtime` detail behind a dev flag, or sanitize before returning, if non-loopback exposure is ever supported.
 - **Related**: KI-001, KI-007.
 
-### KI-012 — `flowPause.role` / `flowPause.since` are emitted but unused by the GUI
+### KI-013 — `RoleSessionRecord.cwd` / `previousCwd` persistence is redundant for project-level tool sessions
 
-- **Status**: Open (accepted minor redundancy; not a defect).
+- **Status**: Open (accepted limitation / deferred cleanup; not a defect).
 - **Category**: Product / maintainability (cleanup).
-- **Affected modules / surfaces**: `src/shared/types/round.ts` (`VcmFlowPauseState`), `src/backend/services/round-service.ts` (`computeFlowPause`), `src/frontend/app.tsx` (flow-pause alert mechanics).
-- **Current gap**: The authoritative `roundState.flowPause` carries `role` and `since`, but the GUI alert mechanics still read equivalent round-level fields — `roundState.activeRole` for the pause-notice label and `getFlowPauseDurationMs(roundState)` for sound severity. Both sources derive from the same `currentRound`, so the values are equivalent and the redundancy is harmless.
-- **Impact**: None functionally; mild contract over-provisioning (fields provided that no consumer reads), which can confuse future maintainers ("why does `flowPause` carry `role`/`since`?").
+- **Affected modules / surfaces**: `src/shared/types/session.ts` (`RoleSessionRecord.cwd`, `RoleSessionRecord.previousCwd`), `src/backend/services/session-service.ts` (project-level tool session launch/resume/`/cd` migrate), and `cwd` consumers `src/backend/services/claude-transcript-service.ts` (`resolveExistingClaudeTranscriptPath`), `translation-service.ts`, `harness-service.ts`.
+- **Current gap**: Project-level tool sessions (translator, harness-engineer) now anchor launch/resume cwd and `transcriptPath` at the base `repoRoot` and enter the active task worktree via `/cd`. Both the launch anchor (`repoRoot`) and the `/cd` target (the active task worktree) are derivable, so persisting `cwd`/`previousCwd` for these sessions is no longer load-bearing — `cwd` now only tracks the logical `/cd` target for the redundant-`/cd` skip check. The fields were intentionally retained to keep the underlying fix inside Debug Mode scope, because removing a `src/shared` public type field is a public-surface change.
+- **Impact**: None functional. A shared public type carries fields that are derivable for project-level sessions, which can mislead future maintainers about which cwd value is authoritative.
 - **Mitigation / workaround**: None needed.
-- **Resolution condition**: Either point the GUI label/severity at `flowPause.role`/`flowPause.since` (consume what the signal already provides), or drop the two fields from `VcmFlowPauseState`. Small, optional.
-- **Related**: none.
+- **Resolution condition**: If pursued, drop `cwd`/`previousCwd` from `RoleSessionRecord` and migrate the remaining consumers to derive cwd (repoRoot anchor plus active task root). This is a `src/shared` public-contract change and must go through the full `architect plan -> coder -> reviewer` flow (out of Debug Mode scope).
+- **Related**: KI-004.
+
+### KI-014 — Inert await-user message-capture pipeline on the web surface
+
+- **Status**: Open (accepted limitation / deferred cleanup; not a defect).
+- **Category**: Product / maintainability (cleanup).
+- **Affected modules / surfaces**: `src/shared/types/round.ts` (`VcmFlowPauseState.message`/`messageTruncated`), `src/backend/services/round-service.ts` (`awaitingUser.message`/`messageTruncated`, `pendingUserReply` stash, `RecordRoundHookEventInput.userFacingReply`), `src/backend/services/claude-hook-service.ts` (best-effort `readLatestRoleTurnReply` capture on a user-facing Stop).
+- **Current gap**: issue #17 shipped a persistent web banner that displayed the PM's captured user-facing reply via `flowPause.message`. The banner was removed at the user's request; await-user now reuses the transient flow-pause modal + alarm, whose wording does NOT include `flowPause.message`. The backend still captures, stashes, promotes, and emits that reply text, but no web consumer reads it. (The `claude-transcript-reply` helper itself is NOT dead — the gateway push path still uses it independently.) The sticky `reason`/`role`/`since` and the task-binding guard remain load-bearing; only the message-capture/`message` plumbing is inert on the web.
+- **Impact**: None functional. A best-effort transcript read runs on each user-facing Stop and a `src/shared` field (`flowPause.message`) plus round-state fields are produced that no consumer reads — can mislead future maintainers.
+- **Mitigation / workaround**: None needed.
+- **Resolution condition**: Either re-surface `flowPause.message` (e.g. in the modal or a detail view) or remove the inert plumbing (`userFacingReply`, `pendingUserReply`, `awaitingUser.message`, `flowPause.message`, and the claude-hook-service capture call). Removal touches the `src/shared` public contract → full `architect plan -> coder -> reviewer` flow.
+- **Related**: KI-013.
+
+### KI-015 — Project-level `/cd` correctness depends on unverified Claude Code behaviors (not unit-testable)
+
+- **Status**: Open (accepted empirical dependency; needs a real-run confirmation in a live environment).
+- **Category**: Product / correctness (external coupling to Claude Code's own `/cd` and `--resume` behavior).
+- **Affected modules / surfaces**: `src/backend/services/session-service.ts` (`formatClaudeCdCommand`, `migrateRunningProjectToolSessionCwd`, project-level launch/resume cwd tracking), translator + harness-engineer project-level sessions.
+- **Current gap**: The project-level `/cd` migration relies on two Claude Code behaviors that VCM's unit tests cannot verify (they only assert the bytes VCM emits and the cwd it tracks, not Claude's reaction):
+  1. **`/cd` argument parsing**: VCM now emits a **bare, unquoted** path (`/cd <path>`), assuming Claude Code's `/cd` consumes the literal rest-of-line (so spaces are fine and surrounding quotes would be taken literally). Previously VCM emitted `/cd "<path>"` (JSON-quoted); if the literal-rest-of-line assumption is correct, that quoted form was **silently failing** — the quotes became part of the path, the `cd` errored, and project-level sessions **may never have actually switched into the task worktree** (they kept operating in their launch cwd). The de-quote fix is low-risk: if the premise is wrong, the switch simply fails as before — no new breakage.
+  2. **`claude --resume` cwd restoration**: VCM now skips `/cd` when the session's tracked (persisted/restored) cwd already equals the target, assuming `claude --resume` restores the session's prior working directory (user-confirmed). If this premise is wrong, a needed `/cd` is skipped and the resumed session stays at the `repoRoot` spawn cwd → the #16 wrong-directory symptom returns for the resume-same-task path. Higher risk than (1).
+- **Impact**: If either premise is false, project-level sessions can operate in the wrong directory. The behavior is correct under the (reasonable, user-confirmed for #2) premises, but only an end-to-end run confirms the `/cd` takes effect.
+- **Mitigation / workaround**: Real-run smoke (below) in a live environment; the spawn anchor at the always-present `repoRoot` (#16) bounds the worst case (sessions land at repoRoot, not a crash).
+- **Resolution condition**: A real-run smoke confirming a project-level session actually operates in the active task worktree across fresh launch, resume-same-task (no `/cd`, still in worktree), and switch-task (`/cd` fires, moves to new worktree). Optionally confirm `/cd`/`new_cwd` via the hook to convert these empirical assumptions into runtime-verified state (issue #16 optional confirmation step).
+- **Related**: KI-004 (Claude transcript directory-encoding external coupling).

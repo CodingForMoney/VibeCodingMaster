@@ -9,6 +9,7 @@ import {
 import type { CreateTerminalSessionInput, TerminalRuntime, TerminalSession } from "../../../src/backend/runtime/terminal-runtime.js";
 import { createSessionRegistry } from "../../../src/backend/runtime/session-registry.js";
 import { createSessionService } from "../../../src/backend/services/session-service.js";
+import { claudeTranscriptPath } from "../../../src/backend/services/claude-transcript-service.js";
 import type { FileSystemAdapter } from "../../../src/backend/adapters/filesystem.js";
 
 const TASK_WORKTREE = "/repo/.claude/worktrees/demo-task";
@@ -249,10 +250,13 @@ describe("createSessionService", () => {
     });
 
     expect(started.taskSlug).toBe("__project__");
-    expect(firstRuntimeInputs[0]?.cwd).toBe(TASK_WORKTREE);
+    // Project-level tool sessions launch from the base repoRoot anchor; the task
+    // worktree is entered afterwards via `/cd`, while VCM_TASK_REPO_ROOT still
+    // exposes the active task root independently of pty cwd.
+    expect(firstRuntimeInputs[0]?.cwd).toBe("/repo");
     expect(firstRuntimeInputs[0]?.env).toMatchObject({
       VCM_TASK_REPO_ROOT: TASK_WORKTREE,
-      VCM_TASK_SLUG: "demo-task",
+      VCM_TASK_SLUG: "__project__",
       VCM_ROLE: "translator"
     });
     expect(firstRuntimeInputs[0]?.logPath).toBeUndefined();
@@ -379,7 +383,7 @@ describe("createSessionService", () => {
     });
 
     expect(started.command).toContain("--agent translator");
-    expect(runtimeInputs[0]?.cwd).toBe(TASK_WORKTREE);
+    expect(runtimeInputs[0]?.cwd).toBe("/repo");
     expect(runtimeInputs[0]?.args).toEqual([
       "--agent",
       "translator",
@@ -458,15 +462,25 @@ describe("createSessionService", () => {
     expect(moved.claudeSessionId).toBe("translator-move-session");
     expect(moved.cwd).toBe("/repo/.claude/worktrees/other-task");
     expect(moved.previousCwd).toBe(TASK_WORKTREE);
-    expect(writes[0]).toContain('/cd "/repo/.claude/worktrees/other-task"');
-    expect(writes[1]).toBe("\r");
+    // writes[0..1] are the start-time `/cd` into the original worktree (the
+    // session launches at repoRoot first); the move emits the second `/cd`.
+    expect(writes[0]).toContain(`/cd ${TASK_WORKTREE}`);
+    expect(writes[2]).toContain('/cd /repo/.claude/worktrees/other-task');
+    expect(writes[3]).toBe("\r");
+    // #16: `/cd` must NOT relocate the transcript anchor. The transcriptPath
+    // stays at its first-launch (hook-recorded) value and is not recomputed
+    // against the new `/cd` target worktree.
+    expect(moved.transcriptPath).toBe(
+      `${TASK_WORKTREE}/.claude/projects/translator-move-session.jsonl`
+    );
+    expect(moved.transcriptPath).not.toContain("other-task");
 
     const persisted = await fs.readJson<{ record: { cwd: string; previousCwd?: string } }>("/repo/.ai/vcm/translations/session.json");
     expect(persisted.record.cwd).toBe("/repo/.claude/worktrees/other-task");
     expect(persisted.record.previousCwd).toBe(TASK_WORKTREE);
   });
 
-  it("resumes a Translator from the previous cwd before moving it to a new task worktree", async () => {
+  it("resumes a Translator from the base repoRoot anchor before moving it to a new task worktree", async () => {
     const fs = createMemoryFs();
     const firstService = createTestSessionService(fs, [], [], {
       worktreePaths: {
@@ -497,7 +511,9 @@ describe("createSessionService", () => {
     });
 
     expect(resumed.claudeSessionId).toBe("translator-resume-session");
-    expect(runtimeInputs[0]?.cwd).toBe(TASK_WORKTREE);
+    // Resume anchors at repoRoot (not the persisted task cwd, which may be gone),
+    // then `/cd` migrates the live session into the active task worktree.
+    expect(runtimeInputs[0]?.cwd).toBe("/repo");
     expect(runtimeInputs[0]?.args).toEqual([
       "--agent",
       "translator",
@@ -508,9 +524,79 @@ describe("createSessionService", () => {
       "--effort",
       "medium"
     ]);
-    expect(writes[0]).toContain('/cd "/repo/.claude/worktrees/other-task"');
+    expect(writes[0]).toContain('/cd /repo/.claude/worktrees/other-task');
     expect(writes[1]).toBe("\r");
     expect(resumed.cwd).toBe("/repo/.claude/worktrees/other-task");
+    // #16 second root cause: the transcript is anchored at the first-launch cwd
+    // (repoRoot) and must NOT follow the `/cd` target. Resume re-anchors the
+    // persisted (stale, task-worktree-derived) transcriptPath back to repoRoot,
+    // self-healing it, so the translation panel reads the real transcript.
+    expect(resumed.transcriptPath).toBe(
+      claudeTranscriptPath("/repo", "translator-resume-session")
+    );
+    expect(resumed.transcriptPath).not.toContain("worktrees/other-task");
+  });
+
+  it("does not re-issue /cd when resume restores the session into the same task worktree", async () => {
+    const fs = createMemoryFs();
+    const firstService = createTestSessionService(fs, [], [], {
+      worktreePath: TASK_WORKTREE
+    });
+    await firstService.startProjectTranslatorSession("/repo", {
+      taskSlug: "demo-task"
+    });
+    await firstService.recordProjectTranslatorHookEvent("/repo", {
+      eventName: "UserPromptSubmit",
+      sessionId: "translator-resume-session",
+      transcriptPath: `${TASK_WORKTREE}/.claude/projects/translator-resume-session.jsonl`,
+      cwd: TASK_WORKTREE
+    });
+
+    const runtimeInputs: CreateTerminalSessionInput[] = [];
+    const writes: string[] = [];
+    const secondService = createTestSessionService(fs, runtimeInputs, writes, {
+      worktreePath: TASK_WORKTREE
+    });
+    const resumed = await secondService.resumeProjectTranslatorSession("/repo", {
+      taskSlug: "demo-task"
+    });
+
+    expect(resumed.claudeSessionId).toBe("translator-resume-session");
+    // Spawn still anchors at repoRoot (#16), but `claude --resume` restores the
+    // session's last cwd (the same task worktree), so the cwd already equals the
+    // target and NO `/cd` is issued — `/cd` is on-demand, only on an actual switch.
+    expect(runtimeInputs[0]?.cwd).toBe("/repo");
+    expect(resumed.cwd).toBe(TASK_WORKTREE);
+    expect(writes.some((write) => write.includes("/cd"))).toBe(false);
+  });
+
+  it("emits /cd as a bare unquoted path so a worktree path with spaces is sent intact (#16 de-quote)", async () => {
+    const fs = createMemoryFs();
+    const runtimeInputs: CreateTerminalSessionInput[] = [];
+    const writes: string[] = [];
+    const SPACEY_WORKTREE = "/repo/.claude/worktrees/space task";
+    const service = createTestSessionService(fs, runtimeInputs, writes, {
+      worktreePaths: { "demo-task": TASK_WORKTREE, "spacey-task": SPACEY_WORKTREE }
+    });
+
+    await service.startProjectTranslatorSession("/repo", { taskSlug: "demo-task" });
+    await service.recordProjectTranslatorHookEvent("/repo", {
+      eventName: "UserPromptSubmit",
+      sessionId: "translator-spaces-session",
+      transcriptPath: `${TASK_WORKTREE}/.claude/projects/translator-spaces-session.jsonl`,
+      cwd: TASK_WORKTREE
+    });
+    const moved = await service.ensureProjectTranslatorSession("/repo", { taskSlug: "spacey-task" });
+
+    expect(moved.cwd).toBe(SPACEY_WORKTREE);
+    // De-quote (#16): Claude Code's `/cd` takes the literal remainder of the line, so
+    // VCM emits the path bare. A worktree path with spaces must therefore arrive whole
+    // and UNQUOTED (the prior `/cd "<path>"` form put quotes into the path and failed,
+    // and quoting would also not protect spaces here). Whether Claude actually changes
+    // into the directory is empirical (depends on Claude Code's `/cd` parser).
+    const cdToSpacey = writes.find((write) => write.includes("space task"));
+    expect(cdToSpacey).toContain(`/cd ${SPACEY_WORKTREE}`);
+    expect(cdToSpacey).not.toContain('"');
   });
 
   it("moves a Translator session to the base repository cwd before task cleanup", async () => {
@@ -533,8 +619,11 @@ describe("createSessionService", () => {
     expect(moved.claudeSessionId).toBe("translator-safe-session");
     expect(moved.cwd).toBe("/repo");
     expect(moved.previousCwd).toBe(TASK_WORKTREE);
-    expect(writes[0]).toContain('/cd "/repo"');
-    expect(writes[1]).toBe("\r");
+    // writes[0..1] are the start-time `/cd` into the worktree; the safe-cwd move
+    // emits the second `/cd` back to the base repoRoot.
+    expect(writes[0]).toContain(`/cd ${TASK_WORKTREE}`);
+    expect(writes[2]).toContain('/cd /repo');
+    expect(writes[3]).toBe("\r");
   });
 
   it("rebuilds a fresh Translator session when resume by id fails", async () => {
@@ -604,10 +693,10 @@ describe("createSessionService", () => {
     expect(started.role).toBe("harness-engineer");
     expect(started.taskSlug).toBe("__project_harness_engineer__");
     expect(started.command).toContain("--agent harness-engineer");
-    expect(runtimeInputs[0]?.cwd).toBe(TASK_WORKTREE);
+    expect(runtimeInputs[0]?.cwd).toBe("/repo");
     expect(runtimeInputs[0]?.env).toMatchObject({
       VCM_TASK_REPO_ROOT: TASK_WORKTREE,
-      VCM_TASK_SLUG: "demo-task",
+      VCM_TASK_SLUG: "__project_harness_engineer__",
       VCM_ROLE: "harness-engineer"
     });
     expect(runtimeInputs[0]?.args).toEqual([

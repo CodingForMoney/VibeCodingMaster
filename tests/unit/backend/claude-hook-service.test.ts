@@ -1,11 +1,26 @@
-import { describe, expect, it } from "vitest";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { afterEach, describe, expect, it } from "vitest";
 import { createClaudeHookService } from "../../../src/backend/services/claude-hook-service.js";
 import type { MessageService } from "../../../src/backend/services/message-service.js";
 import type { ProjectService } from "../../../src/backend/services/project-service.js";
 import type { RoundService, RoundSettleGuard } from "../../../src/backend/services/round-service.js";
 import type { SessionService } from "../../../src/backend/services/session-service.js";
 import type { TranslationService } from "../../../src/backend/services/translation-service.js";
+import type { RoleName } from "../../../src/shared/types/role.js";
+import type { RoleSessionRecord } from "../../../src/shared/types/session.js";
 import type { TaskRecord } from "../../../src/shared/types/task.js";
+
+// Authoritative session record bound to the hooked task, so the defensive
+// task-binding guard treats the posting role as in-scope for round/status mutation.
+async function boundRoleSession(
+  _repoRoot: string,
+  taskSlug: string,
+  role: RoleName
+): Promise<RoleSessionRecord> {
+  return { taskSlug, role } as unknown as RoleSessionRecord;
+}
 
 describe("createClaudeHookService", () => {
   it("marks UserPromptSubmit activity running and confirms delivered VCM messages", async () => {
@@ -14,6 +29,7 @@ describe("createClaudeHookService", () => {
       projectService: createProjectServiceStub(),
       taskService: createTaskServiceStub(),
       sessionService: {
+        getRoleSession: boundRoleSession,
         async recordClaudeHookEvent(_repoRoot, input) {
           calls.push(`session:${input.eventName}:${input.role}:${input.claudeSessionId}`);
           return {
@@ -95,6 +111,7 @@ describe("createClaudeHookService", () => {
       projectService: createProjectServiceStub(),
       taskService: createTaskServiceStub(),
       sessionService: {
+        getRoleSession: boundRoleSession,
         async recordClaudeHookEvent(_repoRoot, input) {
           calls.push(`session:${input.eventName}:${input.role}:${input.claudeSessionId}`);
           return {
@@ -204,12 +221,85 @@ describe("createClaudeHookService", () => {
     ]);
   });
 
+  it("does not mutate task round/status when the posting session is bound to another task", async () => {
+    const calls: string[] = [];
+    const service = createClaudeHookService({
+      projectService: createProjectServiceStub(),
+      taskService: createTaskServiceStub(),
+      sessionService: {
+        async getRoleSession(_repoRoot, _taskSlug, role) {
+          calls.push(`get-session:${role}`);
+          // Authoritative record reports a different task than the hook payload.
+          return { taskSlug: "__project__", role } as unknown as RoleSessionRecord;
+        },
+        async recordClaudeHookEvent(_repoRoot, input) {
+          calls.push(`session:${input.eventName}:${input.role}`);
+          return {
+            id: "runtime_pm",
+            claudeSessionId: "claude_pm",
+            taskSlug: "__project__",
+            role: input.role,
+            status: "running",
+            activityStatus: "running",
+            command: "claude --agent project-manager",
+            permissionMode: "default",
+            cwd: "/repo",
+            terminalBackend: "node-pty",
+            updatedAt: "2026-06-01T00:00:00.000Z"
+          };
+        }
+      } as SessionService,
+      messageService: {
+        async confirmPromptSubmitted() {
+          calls.push("confirm");
+          return undefined;
+        }
+      } as unknown as MessageService,
+      roundService: {
+        async recordClaudeHookEvent() {
+          calls.push("round:mutated");
+          return {} as never;
+        }
+      } as RoundService,
+      translationService: {
+        async recordConversationBoundary() {
+          return undefined;
+        }
+      } as Pick<TranslationService, "recordConversationBoundary">,
+      appSettings: createAppSettingsStub(),
+      jobGuard: {
+        async evaluateStop() {
+          return { behavior: "allow" } as never;
+        },
+        notePromptSubmitted() {
+          calls.push("jobguard:notePromptSubmitted");
+        }
+      } as never
+    });
+
+    const result = await service.handleHook({
+      taskSlug: "demo-task",
+      role: "project-manager",
+      event: {
+        hook_event_name: "UserPromptSubmit",
+        session_id: "claude_pm",
+        prompt: "hello"
+      }
+    });
+
+    expect(result.ok).toBe(true);
+    // The guard must skip round/status mutation and the job-guard status note.
+    expect(calls).not.toContain("round:mutated");
+    expect(calls).not.toContain("jobguard:notePromptSubmitted");
+  });
+
   it("treats StopFailure with outgoing route evidence as completed before marking idle", async () => {
     const calls: string[] = [];
     const service = createClaudeHookService({
       projectService: createProjectServiceStub(),
       taskService: createTaskServiceStub(),
       sessionService: {
+        getRoleSession: boundRoleSession,
         async recordClaudeHookEvent(_repoRoot, input) {
           calls.push(`session:${input.eventName}:${input.role}:${input.claudeSessionId}`);
           return {
@@ -455,6 +545,7 @@ describe("createClaudeHookService", () => {
       projectService: createProjectServiceStub(),
       taskService: createTaskServiceStub(),
       sessionService: {
+        getRoleSession: boundRoleSession,
         async recordClaudeHookEvent(_repoRoot, input) {
           calls.push(`session:${input.eventName}:${input.role}`);
           return {
@@ -547,6 +638,7 @@ describe("createClaudeHookService", () => {
       projectService: createProjectServiceStub(),
       taskService: createTaskServiceStub(),
       sessionService: {
+        getRoleSession: boundRoleSession,
         async recordClaudeHookEvent(_repoRoot, input) {
           calls.push(`session:${input.eventName}:${input.role}`);
           return {
@@ -618,6 +710,7 @@ describe("createClaudeHookService", () => {
       projectService: createProjectServiceStub(),
       taskService: createTaskServiceStub(),
       sessionService: {
+        getRoleSession: boundRoleSession,
         async recordClaudeHookEvent(_repoRoot, input) {
           calls.push(`session:${input.eventName}:${input.role}:${input.transcriptPath}`);
           return {
@@ -680,6 +773,7 @@ describe("createClaudeHookService", () => {
       projectService: createProjectServiceStub(),
       taskService: createTaskServiceStub(),
       sessionService: {
+        getRoleSession: boundRoleSession,
         async recordClaudeHookEvent() {
           calls.push("session");
           return undefined;
@@ -737,6 +831,7 @@ describe("createClaudeHookService", () => {
       projectService: createProjectServiceStub(),
       taskService: createTaskServiceStub(),
       sessionService: {
+        getRoleSession: boundRoleSession,
         async recordClaudeHookEvent() {
           calls.push("session");
           return undefined;
@@ -787,6 +882,7 @@ describe("createClaudeHookService", () => {
       projectService: createProjectServiceStub(),
       taskService: createTaskServiceStub(),
       sessionService: {
+        getRoleSession: boundRoleSession,
         async recordClaudeHookEvent() {
           return undefined;
         }
@@ -1023,6 +1119,93 @@ describe("createClaudeHookService", () => {
       "bootstrap:Stop:runtime_harness_engineer:harness_engineer_session"
     ]);
   });
+
+  it("captures the user-facing reply on a project-manager Stop and threads it to round-service", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "vcm-hook-capture-"));
+    transcriptDirs.push(dir);
+    const transcriptPath = join(dir, "pm.jsonl");
+    await writeFile(transcriptPath, JSON.stringify({
+      type: "assistant",
+      uuid: "e1",
+      timestamp: "2026-06-11T00:00:01.000Z",
+      message: { stop_reason: "end_turn", content: [{ type: "text", text: "Decision needed from you." }] }
+    }), "utf8");
+
+    let roundInput: { userFacingReply?: { text: string; truncated: boolean } } | undefined;
+    const service = createClaudeHookService({
+      projectService: createProjectServiceStub(),
+      taskService: createTaskServiceStub(),
+      sessionService: {
+        getRoleSession: boundRoleSession,
+        async recordClaudeHookEvent(_repoRoot, input) {
+          return {
+            id: "runtime_pm",
+            claudeSessionId: "claude_pm",
+            transcriptPath,
+            taskSlug: input.taskSlug,
+            role: input.role,
+            status: "running",
+            activityStatus: "idle",
+            command: "claude --agent project-manager",
+            permissionMode: "default",
+            cwd: "/repo",
+            terminalBackend: "node-pty",
+            updatedAt: "2026-06-11T00:00:02.000Z",
+            lastTurnStartedAt: "2026-06-11T00:00:00.000Z",
+            lastTurnEndedAt: "2026-06-11T00:00:02.000Z"
+          };
+        }
+      } as SessionService,
+      messageService: {
+        async listPendingRouteFiles() {
+          return [];
+        },
+        async scanAndDispatchPendingRouteFiles() {
+          return [];
+        }
+      } as unknown as MessageService,
+      roundService: {
+        async recordClaudeHookEvent(input) {
+          roundInput = input;
+          return {} as never;
+        }
+      } as RoundService,
+      translationService: {
+        async recordConversationBoundary() {
+          return undefined;
+        }
+      } as Pick<TranslationService, "recordConversationBoundary">,
+      appSettings: createAppSettingsStub(),
+      jobGuard: {
+        async evaluateStop() {
+          return { behavior: "allow" } as never;
+        },
+        notePromptSubmitted() {}
+      } as never
+    });
+
+    const result = await service.handleStopHook({
+      taskSlug: "demo-task",
+      role: "project-manager",
+      event: {
+        hook_event_name: "Stop",
+        session_id: "claude_pm",
+        transcript_path: transcriptPath
+      }
+    });
+
+    expect(result.ok).toBe(true);
+    expect(roundInput?.userFacingReply).toEqual({
+      text: "Decision needed from you.",
+      truncated: false
+    });
+  });
+});
+
+const transcriptDirs: string[] = [];
+
+afterEach(async () => {
+  await Promise.all(transcriptDirs.splice(0).map((dir) => rm(dir, { recursive: true, force: true })));
 });
 
 function createAppSettingsStub(permissionRequestMode: "off" | "allowAll" = "off", roleRetryEnabled = true) {
