@@ -69,16 +69,49 @@ default channel if unknown.
 
 ## Runtime Flows
 
+### Connection switch (runtime, default off)
+
+Channel connection is gated by a **runtime arming switch** (`connectionEnabled`,
+in-memory in the gateway-service closure). It is **not persisted** and resets to
+**disarmed on every backend start**, so the backend never auto-connects a
+configured channel at boot — the user must arm it (desktop toggle →
+`setConnectionEnabled(true)` / `PUT /api/gateway/connection`).
+
+- **Single chokepoint.** `ensurePolling()` returns immediately when
+  `!connectionEnabled`. Because every auto-connect path funnels through
+  `ensurePolling()` (boot `start()`, `getStatus()`/`reconcileProject()`
+  self-heal, QR/registration success, `updateSettings()`), gating it in one place
+  guarantees the default-off cannot be bypassed by self-heal.
+- **Holistic gate (inbound + outbound).** Arming gates both the inbound poll loop
+  and the outbound PM push: while disarmed, `handlePmStop` still captures
+  `latestPmReplies` (a local transcript read + settings write — no channel I/O)
+  but does **not** send, so a disarmed gateway never opens or touches the channel.
+  The cached reply is replayed on the next `/start` once armed.
+- **Toggle behavior.** `setConnectionEnabled(true)` arms then `ensurePolling()`
+  (connect now if an account is configured); `setConnectionEnabled(false)` disarms
+  then `stopPolling()` (abort the loop; the Lark WS closes via the abort path).
+  `resetBinding()` also disarms.
+- **Orthogonal to `enabled`.** The switch governs *connection*; the persisted
+  `enabled` continues to govern *command scope + push intent*. Both are required
+  for full operation; disarming does not change persisted `enabled`, and arming
+  restores it. `running` (live poll-loop state) can be true only while armed.
+- **Known boundary:** the `bindLarkApp` credential-validation probe (a one-shot
+  `getUpdates timeoutMs:1`) calls the channel directly, **not** through
+  `ensurePolling`, so it runs regardless of the switch. This is intentional — it
+  is a user-explicit bind action that does not start the poll loop — and is
+  outside the switch's gate face (which covers the poll loop and PM push).
+
 ### Lifecycle / polling
 
 - `start()`/`stop()` (called from the server `onReady`/`onClose` hooks) wrap
-  `ensurePolling()`/`stopPolling()`.
+  `ensurePolling()`/`stopPolling()`. With the switch disarmed (the default),
+  `start()` is a no-op.
 - `ensurePolling()` is idempotent and race-guarded (`pollStartingPromise`,
-  `pollAbort`, `pollLoopPromise`): it starts a single `pollLoop` only when an
-  account is configured (`toAccount` returns a credentialed account).
+  `pollAbort`, `pollLoopPromise`): once armed, it starts a single `pollLoop` only
+  when an account is configured (`toAccount` returns a credentialed account).
 - `getStatus()` and `runtime-coordinator-service.reconcileProject()` both call
-  `getStatus()`, which **auto-starts polling** as a side effect when an account
-  exists — so polling self-heals without an explicit start.
+  `getStatus()`, which **auto-starts polling only when armed** (the
+  `ensurePolling` gate); a disarmed gateway stays disconnected through self-heal.
 - `pollLoop` is `AbortSignal`-driven: on success it advances the cursor and
   records `lastPollStatus: running`; on error it backs off
   (`POLL_ERROR_BACKOFF_MS`, escalating to `POLL_LONG_BACKOFF_MS` after
@@ -142,11 +175,12 @@ Triggered by `claude-hook-service` on a PM `Stop` (turn-end) hook
 2. `saveLatestPmReply` — store the latest turn's final text (bounded to
    `MAX_LATEST_PM_REPLY_CHARS`) keyed by `(repoRoot, taskSlug)`, so `/start` can
    replay it even when the gateway was off.
-3. If enabled + account + bound user: select transcript text events **after the
-   per-`(task, claudeSessionId)` cursor** that are turn-final (`stop_reason ===
-   end_turn`), render them (translate unless disabled — failure yields a
-   user-facing failure notice + a buffered `/retry`), send to the bound chat, and
-   advance the cursor + audit.
+3. If **armed** (`connectionEnabled`) + enabled + account + bound user: select
+   transcript text events **after the per-`(task, claudeSessionId)` cursor** that
+   are turn-final (`stop_reason === end_turn`), render them (translate unless
+   disabled — failure yields a user-facing failure notice + a buffered `/retry`),
+   send to the bound chat, and advance the cursor + audit. While disarmed, only
+   step 2 runs (no send).
 
 ## State and Persistence
 
@@ -159,9 +193,10 @@ Durable (`GatewaySettingsFile`, normalized on every load/save, atomic writes):
 GUI-facing `GatewayStatus` with **only** `tokenConfigured`/`appSecretConfigured`
 booleans (never the secrets).
 
-In-memory only (lost on restart): the active `pollAbort`, `qrLogin`,
-`larkRegistrationState`, and `lastFailedTranslation` (`/retry` buffer), plus the
-Lark WS connection.
+In-memory only (lost on restart): the runtime `connectionEnabled` arming switch
+(default off each process start — deliberately never persisted), the active
+`pollAbort`, `qrLogin`, `larkRegistrationState`, and `lastFailedTranslation`
+(`/retry` buffer), plus the Lark WS connection.
 
 ## Dependencies and Direction
 
@@ -183,12 +218,14 @@ service behavior via DI.
 ## Public Surface
 
 Externally meaningful surface = the `/api/gateway/*` routes (the desktop GUI
-contract): `GET /status`, `PUT /settings`, `POST /qr/start`, `POST /qr/check`,
-`POST /lark-registration/start|check|bind`, `POST /binding/reset`. The chat
-platforms are an outbound integration surface. The gateway's TypeScript exports
-are backend-internal — they are intentionally **not** part of
-`.ai/generated/public-surface.json` (`project-public` visibility), which is the
-authoritative listing.
+contract): `GET /status`, `PUT /settings`, `PUT /connection`, `POST /qr/start`,
+`POST /qr/check`, `POST /lark-registration/start|check|bind`,
+`POST /binding/reset`. `PUT /connection` (body `{ enabled: boolean }`) arms/disarms
+the runtime connection switch and returns `GatewayStatus`. The chat platforms are
+an outbound integration surface. The gateway's TypeScript exports are
+backend-internal — they are intentionally **not** part of
+`.ai/generated/public-surface.json` (`project-public` visibility), which only
+tracks the `src/main.ts` entry; record new routes here instead.
 
 ## Security Model
 

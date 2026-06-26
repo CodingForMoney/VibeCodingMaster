@@ -40,7 +40,8 @@ layers plus supporting tools.
 - `adapters/`: side-effect boundaries — `claude-adapter`, `git-adapter`,
   `command-runner`, `filesystem`.
 - `gateway/`: mobile gateway service plus channel implementations
-  (Weixin iLink, Lark) and command parsing. Detailed sub-area design lives in
+  (Weixin iLink, Lark) and command parsing; channel connection is gated by a
+  runtime, default-off switch. Detailed sub-area design lives in
   [`src/backend/gateway/ARCHITECTURE.md`](../src/backend/gateway/ARCHITECTURE.md).
 - `templates/`: message/handoff/role-command templates and, under
   `templates/harness/`, the source of truth for the VCM harness that VCM installs

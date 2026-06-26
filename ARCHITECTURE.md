@@ -112,10 +112,13 @@ External boundaries of the module:
   let the user drive a task and talk to PM from a phone. A single race-guarded
   poll loop handles inbound commands (dedupe → authorize → parse → execute →
   reply → audit); PM turn-final replies are pushed back on the PM `Stop` hook via
-  `handlePmStop`. It is wired by the composition root and consumes other services
-  through injected interfaces (cycle-free: the reverse references are type-only +
-  DI). Detailed design, flows, state, security model, and a correctness review
-  live in [`src/backend/gateway/ARCHITECTURE.md`](src/backend/gateway/ARCHITECTURE.md).
+  `handlePmStop`. Channel connection is gated by a runtime, **default-off** arming
+  switch (`ensurePolling` is the single chokepoint, so self-heal cannot bypass it);
+  the user arms it per session before any inbound/outbound channel I/O. It is wired
+  by the composition root and consumes other services through injected interfaces
+  (cycle-free: the reverse references are type-only + DI). Detailed design, flows,
+  state, security model, and a correctness review live in
+  [`src/backend/gateway/ARCHITECTURE.md`](src/backend/gateway/ARCHITECTURE.md).
 - **Job safety**: `job-guard-service` and `.ai/tools` wrappers enforce no
   detached/background processes and the long-running validation contract.
 
