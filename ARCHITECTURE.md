@@ -107,8 +107,15 @@ External boundaries of the module:
   on any mismatch it degrades safely to a stale-release rather than mis-assigning.
   File translation keeps per-task runtime job directories and durable
   `files/completed/*` outputs.
-- **Gateway**: `gateway-service` and channel adapters let the user talk to PM and
-  manage tasks from a phone.
+- **Gateway**: `gateway-service` plus the `GatewayChannelAdapter` registry
+  (Weixin iLink over HTTP long-poll, Lark/Feishu over a WebSocket event stream)
+  let the user drive a task and talk to PM from a phone. A single race-guarded
+  poll loop handles inbound commands (dedupe → authorize → parse → execute →
+  reply → audit); PM turn-final replies are pushed back on the PM `Stop` hook via
+  `handlePmStop`. It is wired by the composition root and consumes other services
+  through injected interfaces (cycle-free: the reverse references are type-only +
+  DI). Detailed design, flows, state, security model, and a correctness review
+  live in [`src/backend/gateway/ARCHITECTURE.md`](src/backend/gateway/ARCHITECTURE.md).
 - **Job safety**: `job-guard-service` and `.ai/tools` wrappers enforce no
   detached/background processes and the long-running validation contract.
 
