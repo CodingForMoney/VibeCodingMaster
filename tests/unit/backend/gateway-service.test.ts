@@ -733,6 +733,7 @@ function createService(input: {
     taskSlug: string;
     role: "project-manager";
     text: string;
+    sourceEntryIds?: string[];
   }) => Promise<string>;
   startTaskRoleSessions?: () => Promise<unknown>;
   larkRegistration?: LarkRegistrationClient;
@@ -824,6 +825,7 @@ function createService(input: {
         taskSlug: string;
         role: "project-manager";
         text: string;
+        sourceEntryIds?: string[];
       }) {
         return input.translateGatewayOutput
           ? input.translateGatewayOutput(translateInput)

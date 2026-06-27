@@ -1246,7 +1246,8 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
         settings,
         repoRoot: input.repoRoot,
         taskSlug: input.taskSlug,
-        sourceText: text
+        sourceText: text,
+        sourceEntryIds: nextEvents.map((event) => event.id)
       });
 
       await resolveChannel(settings).sendText({
@@ -1307,7 +1308,8 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
       settings,
       repoRoot: reply.repoRoot,
       taskSlug: reply.taskSlug,
-      sourceText: reply.text
+      sourceText: reply.text,
+      sourceEntryIds: reply.transcriptEventId ? [reply.transcriptEventId] : undefined
     });
     return {
       ...rendered,
@@ -1320,6 +1322,7 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
     repoRoot: string;
     taskSlug: string;
     sourceText: string;
+    sourceEntryIds?: string[];
   }): Promise<GatewayOutputRenderResult> {
     if (!input.settings.translationEnabled) {
       clearFailedTranslation(input.repoRoot, input.taskSlug);
@@ -1334,7 +1337,8 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
         repoRoot: input.repoRoot,
         taskSlug: input.taskSlug,
         role: "project-manager",
-        text: input.sourceText
+        text: input.sourceText,
+        sourceEntryIds: input.sourceEntryIds
       });
       clearFailedTranslation(input.repoRoot, input.taskSlug);
       return {

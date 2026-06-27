@@ -128,6 +128,7 @@ export interface TranslateGatewayOutputInput {
   taskSlug: string;
   role: RoleName;
   text: string;
+  sourceEntryIds?: string[];
 }
 
 export interface TranslationServiceDeps {
@@ -187,6 +188,11 @@ interface PendingOutputTranslationBatch {
   items: PendingOutputTranslation[];
 }
 
+type GatewayOutputLookupResult =
+  | { kind: "translated"; text: string }
+  | { kind: "active" }
+  | { kind: "missing" };
+
 interface TaskFeedState {
   events: TranslationTaskFeedEvent[];
   nextSeq: number;
@@ -209,6 +215,8 @@ const OUTPUT_TRANSLATION_BATCH_DELAY_MS = 10000;
 
 const TRANSCRIPT_REPLAY_GRACE_MS = 5000;
 const TRANSLATION_TASK_FEED_RETENTION_LIMIT = 2000;
+const GATEWAY_TRANSLATION_REUSE_GRACE_MS = 1500;
+const GATEWAY_TRANSLATION_REUSE_POLL_MS = 50;
 
 export function createTranslationService(deps: TranslationServiceDeps): TranslationService {
   const now = deps.now ?? (() => new Date().toISOString());
@@ -1342,6 +1350,11 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
     },
     async translateGatewayOutput(input) {
       const config = await loadConfig();
+      const reusable = await findReusableGatewayOutputTranslation(input, config);
+      if (reusable) {
+        return reusable.trim();
+      }
+
       const translation = await translateText({
         repoRoot: input.repoRoot,
         taskSlug: input.taskSlug,
@@ -1371,6 +1384,180 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
       };
     }
   };
+
+  async function findReusableGatewayOutputTranslation(
+    input: TranslateGatewayOutputInput,
+    config: TranslationRuntimeConfig
+  ): Promise<string | undefined> {
+    const graceDeadline = Date.now() + (input.sourceEntryIds?.length ? GATEWAY_TRANSLATION_REUSE_GRACE_MS : 0);
+    while (true) {
+      const lookup = await lookupGatewayOutputTranslation(input);
+      if (lookup.kind === "translated") {
+        return lookup.text;
+      }
+      if (lookup.kind === "active") {
+        return waitForReusableGatewayOutputTranslation(input, config);
+      }
+      if (!input.sourceEntryIds?.length || Date.now() >= graceDeadline) {
+        return undefined;
+      }
+      await delay(GATEWAY_TRANSLATION_REUSE_POLL_MS);
+    }
+  }
+
+  async function waitForReusableGatewayOutputTranslation(
+    input: TranslateGatewayOutputInput,
+    config: TranslationRuntimeConfig
+  ): Promise<string | undefined> {
+    const deadline = Date.now() + config.requestTimeoutMs;
+    while (Date.now() <= deadline) {
+      const lookup = await lookupGatewayOutputTranslation(input);
+      if (lookup.kind === "translated") {
+        return lookup.text;
+      }
+      if (lookup.kind !== "active") {
+        return undefined;
+      }
+      await delay(GATEWAY_TRANSLATION_REUSE_POLL_MS);
+    }
+
+    throw new VcmError({
+      code: "TRANSLATION_TIMEOUT",
+      message: "Gateway output translation timed out while waiting for the existing PM reply translation.",
+      statusCode: 504
+    });
+  }
+
+  async function lookupGatewayOutputTranslation(input: TranslateGatewayOutputInput): Promise<GatewayOutputLookupResult> {
+    const states = await getGatewayOutputCandidateStates(input);
+    return selectGatewayOutputTranslation(states, input);
+  }
+
+  async function getGatewayOutputCandidateStates(input: TranslateGatewayOutputInput): Promise<SessionState[]> {
+    const states: SessionState[] = [];
+    const seen = new Set<SessionState>();
+    const add = (state: SessionState) => {
+      if (seen.has(state) || !isGatewayOutputCandidateState(state, input)) {
+        return;
+      }
+      seen.add(state);
+      states.push(state);
+    };
+
+    const roleSession = await getGatewayRoleSession(input);
+    if (roleSession) {
+      const state = await prepareCache({
+        repoRoot: roleSession.cwd,
+        baseRepoRoot: input.repoRoot,
+        taskSlug: input.taskSlug,
+        role: input.role,
+        sessionId: roleSession.id
+      });
+      if (roleSession.status === "running") {
+        startTranscriptTail(roleSession);
+      }
+      add(state);
+    }
+
+    for (const state of sessionStates.values()) {
+      add(state);
+    }
+
+    return states;
+  }
+
+  async function getGatewayRoleSession(input: TranslateGatewayOutputInput): Promise<RoleSessionRecord | undefined> {
+    try {
+      return await deps.sessionService.getRoleSession(input.repoRoot, input.taskSlug, input.role);
+    } catch {
+      return undefined;
+    }
+  }
+
+  function isGatewayOutputCandidateState(state: SessionState, input: TranslateGatewayOutputInput): boolean {
+    if (state.taskSlug !== input.taskSlug || state.role !== input.role) {
+      return false;
+    }
+    return state.baseRepoRoot === input.repoRoot
+      || state.repoRoot === input.repoRoot
+      || Boolean(state.repoRoot?.startsWith(`${input.repoRoot}${path.sep}`));
+  }
+
+  function selectGatewayOutputTranslation(
+    states: SessionState[],
+    input: TranslateGatewayOutputInput
+  ): GatewayOutputLookupResult {
+    const sourceEntryIds = normalizeGatewaySourceEntryIds(input.sourceEntryIds);
+    if (sourceEntryIds.length > 0) {
+      const entries = sourceEntryIds
+        .map((entryId) => findGatewayOutputEntryById(states, input, entryId));
+      const foundEntries = entries.filter((entry): entry is TranslationEntry => Boolean(entry));
+      if (foundEntries.length === sourceEntryIds.length) {
+        if (foundEntries.some(isActiveTranslationEntry)) {
+          return { kind: "active" };
+        }
+        if (foundEntries.every(isReusableGatewayOutputEntry)) {
+          return {
+            kind: "translated",
+            text: foundEntries.map((entry) => entry.translatedText).join("\n\n")
+          };
+        }
+      } else if (foundEntries.some(isActiveTranslationEntry)) {
+        return { kind: "active" };
+      }
+    }
+
+    const normalizedSourceText = normalizeGatewaySourceText(input.text);
+    const sourceMatches = states
+      .flatMap((state) => state.entries)
+      .filter((entry) =>
+        isGatewayOutputEntry(entry, input)
+        && normalizeGatewaySourceText(entry.sourceText) === normalizedSourceText
+      );
+    const translated = [...sourceMatches].reverse().find(isReusableGatewayOutputEntry);
+    if (translated) {
+      return { kind: "translated", text: translated.translatedText };
+    }
+    if (sourceMatches.some(isActiveTranslationEntry)) {
+      return { kind: "active" };
+    }
+    return { kind: "missing" };
+  }
+
+  function findGatewayOutputEntryById(
+    states: SessionState[],
+    input: TranslateGatewayOutputInput,
+    entryId: string
+  ): TranslationEntry | undefined {
+    for (const state of states) {
+      const entry = state.entries.find((candidate) =>
+        candidate.id === entryId && isGatewayOutputEntry(candidate, input)
+      );
+      if (entry) {
+        return entry;
+      }
+    }
+    return undefined;
+  }
+
+  function isGatewayOutputEntry(entry: TranslationEntry, input: TranslateGatewayOutputInput): boolean {
+    return entry.taskSlug === input.taskSlug
+      && entry.role === input.role
+      && entry.direction === "cc-output-to-user"
+      && entry.sourceKind === "prose";
+  }
+
+  function isReusableGatewayOutputEntry(entry: TranslationEntry): boolean {
+    return entry.status === "translated" && Boolean(entry.translatedText.trim());
+  }
+
+  function normalizeGatewaySourceEntryIds(sourceEntryIds: string[] | undefined): string[] {
+    return Array.from(new Set((sourceEntryIds ?? []).map((entryId) => entryId.trim()).filter(Boolean)));
+  }
+
+  function normalizeGatewaySourceText(text: string): string {
+    return text.trim();
+  }
 
   async function writeToCurrentRole(repoRoot: string, taskSlug: string, role: RoleName, text: string): Promise<void> {
     const record = await deps.sessionService.getRoleSession(repoRoot, taskSlug, role);

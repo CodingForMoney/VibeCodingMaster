@@ -1085,6 +1085,123 @@ describe("translation-service", () => {
     }));
   });
 
+  it("reuses an existing PM final reply translation for Gateway output", async () => {
+    const fs = createMemoryFs();
+    const appSettings = createAppSettingsService({
+      fs,
+      settingsPath: "/settings.json",
+    });
+    const pmSession = createRoleSessionRecord({
+      id: "session-pm",
+      role: "project-manager",
+      command: "claude --agent project-manager",
+      cwd: "/repo/.claude/worktrees/demo-task"
+    });
+    const runtime = createRuntimeStub([pmSession]);
+    const transcripts = createSessionTranscriptStub();
+    const translatorCalls: Array<{ sourceText: string }> = [];
+    const service = createTranslationService({
+      appSettings,
+      translationWorkerService: createTranslationWorkerServiceStub(translatorCalls, "PM 译文。"),
+      runtime,
+      sessionRegistry: createRegistryStub(pmSession),
+      transcripts,
+      sessionService: {
+        async getRoleSession() {
+          return pmSession;
+        }
+      } as SessionService
+    });
+
+    const messages: TranslationWsMessage[] = [];
+    service.subscribeToSession(pmSession.id, (message) => messages.push(message));
+    transcripts.emit(pmSession.id, {
+      kind: "text",
+      id: "pm-final",
+      timestamp: "2026-05-30T00:00:01.000Z",
+      stopReason: "end_turn",
+      text: "PM final reply."
+    });
+
+    await waitFor(() => messages.some((message) =>
+      message.type === "translation-entry"
+      && message.entry.id === "pm-final"
+      && message.entry.status === "translated"
+    ));
+    expect(translatorCalls).toHaveLength(1);
+
+    const output = await service.translateGatewayOutput({
+      repoRoot: "/repo",
+      taskSlug: "demo-task",
+      role: "project-manager",
+      text: "PM final reply.",
+      sourceEntryIds: ["pm-final"]
+    });
+
+    expect(output).toBe("PM 译文。");
+    expect(translatorCalls).toHaveLength(1);
+  });
+
+  it("waits for an in-flight PM final reply translation before Gateway output", async () => {
+    const fs = createMemoryFs();
+    const appSettings = createAppSettingsService({
+      fs,
+      settingsPath: "/settings.json",
+    });
+    const pmSession = createRoleSessionRecord({
+      id: "session-pm",
+      role: "project-manager",
+      command: "claude --agent project-manager",
+      cwd: "/repo/.claude/worktrees/demo-task"
+    });
+    const runtime = createRuntimeStub([pmSession]);
+    const transcripts = createSessionTranscriptStub();
+    const translatorCalls: Array<{ sourceText: string }> = [];
+    const translator = createDeferredTranslationWorkerServiceStub("PM 译文。", translatorCalls);
+    const service = createTranslationService({
+      appSettings,
+      translationWorkerService: translator,
+      runtime,
+      sessionRegistry: createRegistryStub(pmSession),
+      transcripts,
+      sessionService: {
+        async getRoleSession() {
+          return pmSession;
+        }
+      } as SessionService
+    });
+
+    const messages: TranslationWsMessage[] = [];
+    service.subscribeToSession(pmSession.id, (message) => messages.push(message));
+    transcripts.emit(pmSession.id, {
+      kind: "text",
+      id: "pm-final",
+      timestamp: "2026-05-30T00:00:01.000Z",
+      stopReason: "end_turn",
+      text: "PM final reply."
+    });
+
+    await waitFor(() => messages.some((message) =>
+      message.type === "translation-entry"
+      && message.entry.id === "pm-final"
+      && message.entry.status === "translating"
+    ));
+
+    const outputPromise = service.translateGatewayOutput({
+      repoRoot: "/repo",
+      taskSlug: "demo-task",
+      role: "project-manager",
+      text: "PM final reply.",
+      sourceEntryIds: ["pm-final"]
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(translatorCalls).toHaveLength(1);
+
+    translator.resolve();
+    await expect(outputPromise).resolves.toBe("PM 译文。");
+    expect(translatorCalls).toHaveLength(1);
+  });
+
   it("translates assistant tool_use text when output mode is all", async () => {
     const fs = createMemoryFs();
     const appSettings = createAppSettingsService({
@@ -1672,8 +1789,11 @@ function createAlwaysFailTranslationWorkerServiceStub(): Pick<TranslationWorkerS
   };
 }
 
-function createDeferredTranslationWorkerServiceStub(text = "translated"): Pick<TranslationWorkerService, "createConversationJob" | "validateConversationResult" | "getState"> & { resolve(): void } {
-  const service = createTranslationWorkerServiceStub([], text);
+function createDeferredTranslationWorkerServiceStub(
+  text = "translated",
+  calls: unknown[] = []
+): Pick<TranslationWorkerService, "createConversationJob" | "validateConversationResult" | "getState"> & { resolve(): void } {
+  const service = createTranslationWorkerServiceStub(calls, text);
   let resolveTranslation: (() => void) | undefined;
   let resolved = false;
   return {
