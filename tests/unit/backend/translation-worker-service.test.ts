@@ -341,11 +341,9 @@ describe("translator-translation-service", () => {
 
     const prompt = writes.find((entry) => entry.includes("Translate each <VCM_TEXT> item"));
     expect(prompt).toContain("Translate each <VCM_TEXT> item from auto to en.");
-    expect(prompt).toContain("Result Path:");
+    expect(prompt).toContain(`Result Path 1: ${path.join(tmpRepo, job.resultPath)}`);
     expect(prompt).toContain("<VCM_TEXT1>\n请检查失败的测试。\n</VCM_TEXT1>");
-    expect(prompt).toContain("\"batchId\"");
-    expect(prompt).toContain("\"results\"");
-    expect(prompt).toContain("\"index\": 1");
+    expect(prompt).toContain("Do not write JSON");
     expect(prompt).not.toContain("sourceHash");
     expect(prompt).not.toContain("CONTEXT_TEXT");
     expect(prompt).not.toContain("Result JSON contract");
@@ -354,7 +352,7 @@ describe("translator-translation-service", () => {
     expect(prompt).not.toContain("diagnostics");
   });
 
-  it("batches queued conversation translations into one prompt and shared result.json", async () => {
+  it("batches queued conversation translations into one prompt and per-item plain text result files", async () => {
     tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-translator-conversation-batch-"));
     const fs = createNodeFileSystemAdapter();
     const writes: string[] = [];
@@ -394,16 +392,12 @@ describe("translator-translation-service", () => {
     expect(firstItem?.batchIndex).toBe(1);
     expect(secondItem?.batchIndex).toBe(2);
     expect(firstItem?.batchResultPath).toBe(secondItem?.batchResultPath);
-    expect(firstItem?.batchResultPath).toBe(".ai/vcm/translations/runtime/conversations/result.json");
+    expect(firstItem?.batchResultPath).toContain(".ai/vcm/translations/runtime/conversations/batches/");
+    expect(prompt).toContain(`Result Path 1: ${path.join(tmpRepo, first.resultPath)}`);
+    expect(prompt).toContain(`Result Path 2: ${path.join(tmpRepo, second.resultPath)}`);
 
-    await fs.writeText(path.join(tmpRepo, firstItem!.batchResultPath!), JSON.stringify({
-      version: 1,
-      batchId: firstItem!.batchId,
-      results: [
-        { index: 1, translatedText: "第一段译文" },
-        { index: 2, translatedText: "第二段译文" }
-      ]
-    }));
+    await fs.writeText(path.join(tmpRepo, first.resultPath), "第一段译文");
+    await fs.writeText(path.join(tmpRepo, second.resultPath), "第二段译文");
     await service.handleTranslatorHook(tmpRepo, "Stop", "demo-task");
 
     const internalState = await service.getState(tmpRepo);
@@ -423,6 +417,40 @@ describe("translator-translation-service", () => {
       targetLanguage: "zh-CN"
     })).resolves.toMatchObject({ translatedText: "第二段译文" });
     expect(await fs.pathExists(path.join(tmpRepo, firstItem!.batchResultPath!))).toBe(false);
+  });
+
+  it("accepts conversation plain text results containing JSON-sensitive characters", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-translator-conversation-quotes-"));
+    const fs = createNodeFileSystemAdapter();
+    const writes: string[] = [];
+    const service = createTranslationWorkerService({
+      fs,
+      runtime: createRuntimeStub(writes),
+      sessionService: createTranslatorSessionService([])
+    });
+
+    const job = await service.createConversationJob(tmpRepo, {
+      taskSlug: "demo-task",
+      direction: "cc-output-to-user",
+      sourceText: "Explain the experiment.",
+      sourceLanguage: "en",
+      targetLanguage: "zh-CN"
+    });
+    await waitForDispatcher();
+
+    const state = await service.getState(tmpRepo);
+    const item = state.queue.items.find((candidate) => candidate.id === job.queueItemId);
+    await fs.writeText(path.join(tmpRepo, job.resultPath), "这是 the \"experiment\" 的结果，路径为 C:\\\\tmp。");
+    await service.handleTranslatorHook(tmpRepo, "Stop", "demo-task");
+
+    await expect(service.validateConversationResult(tmpRepo, {
+      resultPath: job.resultPath,
+      sourceHash: job.sourceHash,
+      targetLanguage: "zh-CN"
+    })).resolves.toMatchObject({
+      translatedText: "这是 the \"experiment\" 的结果，路径为 C:\\\\tmp。"
+    });
+    expect(item?.batchResultPath).toContain(".ai/vcm/translations/runtime/conversations/batches/");
   });
 
   it("browses translatable source files and filters generated state", async () => {
@@ -676,15 +704,11 @@ describe("translator-translation-service", () => {
       return state.queue.activeItemId === first.queueItemId && item?.status === "running";
     });
 
-    // The Translator wrote the batch result, but its Stop hook never reached the
+    // The Translator wrote the plain-text result, but its Stop hook never reached the
     // backend (e.g. backend restart/reconnect), so the item is stuck as running.
     const stuckState = await service.getState(tmpRepo);
     const firstItem = stuckState.queue.items.find((candidate) => candidate.id === first.queueItemId);
-    await fs.writeText(path.join(tmpRepo, firstItem!.batchResultPath!), JSON.stringify({
-      version: 1,
-      batchId: firstItem!.batchId,
-      results: [{ index: 1, translatedText: "First result." }]
-    }));
+    await fs.writeText(path.join(tmpRepo, first.resultPath), "First result.");
 
     // A later translation must not be blocked: dispatching it reconciles the stuck
     // head (completing it from the on-disk result) and dispatches the new item.
@@ -711,7 +735,7 @@ describe("translator-translation-service", () => {
     expect(writes.filter((entry) => entry.includes("Translate each <VCM_TEXT> item"))).toHaveLength(2);
   });
 
-  it("does not mis-assign a previous batch's result.json to the active batch", async () => {
+  it("ignores a legacy shared result.json when the active plain-text result is missing", async () => {
     tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-translator-conversation-foreign-"));
     const fs = createNodeFileSystemAdapter();
     const writes: string[] = [];
@@ -736,10 +760,12 @@ describe("translator-translation-service", () => {
 
     const stuckState = await service.getState(tmpRepo);
     const firstItem = stuckState.queue.items.find((candidate) => candidate.id === first.queueItemId);
-    // The shared result.json carries a DIFFERENT (previous) batch identity.
-    await fs.writeText(path.join(tmpRepo, firstItem!.batchResultPath!), JSON.stringify({
+    // A leftover legacy result.json must not complete the active item. The active
+    // item now waits for its own plain-text result path.
+    await fs.ensureDir(path.join(tmpRepo, ".ai/vcm/translations/runtime/conversations"));
+    await fs.writeText(path.join(tmpRepo, ".ai/vcm/translations/runtime/conversations/result.json"), JSON.stringify({
       version: 1,
-      batchId: "batch-previous-0000",
+      batchId: firstItem!.batchId,
       results: [{ index: 1, translatedText: "foreign translation" }]
     }));
 
@@ -755,16 +781,13 @@ describe("translator-translation-service", () => {
     const state = await service.getState(tmpRepo);
     const firstFinal = state.queue.items.find((candidate) => candidate.id === first.queueItemId);
     const secondFinal = state.queue.items.find((candidate) => candidate.id === second.queueItemId);
-    // Identity mismatch => the foreign result is treated as absent: the active
-    // head is neither completed with foreign text nor prematurely failed, and the
-    // queue head is held (no dispatch) until the real result or stale-release.
     expect(firstFinal?.status).toBe("running");
     expect(firstFinal?.translatedText).toBeUndefined();
     expect(secondFinal?.status).toBe("queued");
     expect(state.queue.activeItemId).toBe(first.queueItemId);
   });
 
-  it("treats a truncated or unparseable result.json as absent and recovers later", async () => {
+  it("waits for the assigned plain-text result and recovers later", async () => {
     tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-translator-conversation-torn-"));
     const fs = createNodeFileSystemAdapter();
     const writes: string[] = [];
@@ -789,8 +812,10 @@ describe("translator-translation-service", () => {
 
     const stuckState = await service.getState(tmpRepo);
     const firstItem = stuckState.queue.items.find((candidate) => candidate.id === first.queueItemId);
-    // A torn write: a partial JSON document that cannot parse.
-    await fs.writeText(path.join(tmpRepo, firstItem!.batchResultPath!), "{\"version\":1,\"batchId\":\"");
+    // A stale legacy JSON artifact is ignored because conversation outputs are
+    // now read only from each item's assigned plain-text result path.
+    await fs.ensureDir(path.join(tmpRepo, ".ai/vcm/translations/runtime/conversations"));
+    await fs.writeText(path.join(tmpRepo, ".ai/vcm/translations/runtime/conversations/result.json"), "{\"version\":1,\"batchId\":\"");
 
     const second = await service.createConversationJob(tmpRepo, {
       taskSlug: "demo-task",
@@ -806,12 +831,8 @@ describe("translator-translation-service", () => {
     expect(state.queue.items.find((candidate) => candidate.id === second.queueItemId)?.status).toBe("queued");
     expect(state.queue.activeItemId).toBe(first.queueItemId);
 
-    // A later complete, identity-matching result.json lets recovery finalize.
-    await fs.writeText(path.join(tmpRepo, firstItem!.batchResultPath!), JSON.stringify({
-      version: 1,
-      batchId: firstItem!.batchId,
-      results: [{ index: 1, translatedText: "First result." }]
-    }));
+    // A later complete plain-text result lets recovery finalize.
+    await fs.writeText(path.join(tmpRepo, first.resultPath), "First result.");
     await service.handleTranslatorHook(tmpRepo, "Stop", "demo-task");
 
     state = await service.getState(tmpRepo);
@@ -847,7 +868,7 @@ describe("translator-translation-service", () => {
           requestPath: ".ai/vcm/translations/runtime/conversations/jobs/conversation-stuck/request.json",
           expectedResultPath: ".ai/vcm/translations/runtime/conversations/jobs/conversation-stuck/result.txt",
           batchId: "batch-stuck",
-          batchResultPath: ".ai/vcm/translations/runtime/conversations/result.json",
+          batchResultPath: ".ai/vcm/translations/runtime/conversations/batches/batch-stuck",
           batchIndex: 1,
           createdAt: stale,
           updatedAt: stale
@@ -876,10 +897,10 @@ describe("translator-translation-service", () => {
     expect(nextItem?.status).toBe("running");
   });
 
-  it("hook-finalizes a matching result.json but fails the batch item whose index is missing", async () => {
-    // Proof point 5: on the Stop/StopFailure hook the Translator is definitively
-    // done, so an identity-matching result.json that is missing an expected index
-    // is a genuine per-item failure for that index while siblings still complete.
+  it("hook-finalizes present plain-text results but fails the batch item whose result file is missing", async () => {
+    // On the Stop/StopFailure hook the Translator is definitively done, so a
+    // missing result file is a genuine per-item failure for that index while
+    // siblings still complete.
     tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-translator-conversation-hook-missing-"));
     const fs = createNodeFileSystemAdapter();
     const writes: string[] = [];
@@ -913,12 +934,8 @@ describe("translator-translation-service", () => {
     expect(firstItem?.batchIndex).toBe(1);
     expect(secondItem?.batchIndex).toBe(2);
 
-    // Identity matches, but only index 1 is present (index 2 absent).
-    await fs.writeText(path.join(tmpRepo, firstItem!.batchResultPath!), JSON.stringify({
-      version: 1,
-      batchId: firstItem!.batchId,
-      results: [{ index: 1, translatedText: "第一段译文" }]
-    }));
+    // Only index 1 is present (index 2 absent).
+    await fs.writeText(path.join(tmpRepo, first.resultPath), "第一段译文");
     await service.handleTranslatorHook(tmpRepo, "Stop", "demo-task");
 
     const state = await service.getState(tmpRepo);
@@ -931,10 +948,10 @@ describe("translator-translation-service", () => {
     expect(state.queue.activeItemId).toBeUndefined();
   });
 
-  it("defers (does not fail) a stuck batch when reconcile sees a matching result.json missing an index", async () => {
+  it("defers (does not fail) a stuck batch when reconcile sees a missing result file", async () => {
     // Proof point 4: the reconcile/availability path cannot assume the Translator
-    // finished, so a matching result.json missing an expected index fails the
-    // all-or-nothing predicate and is treated as absent -> the head is held
+    // finished, so a missing expected result file fails the all-or-nothing
+    // predicate and is treated as absent -> the head is held
     // (deferred to stale-release), NOT prematurely failed like the hook path.
     tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-translator-conversation-reconcile-missing-"));
     const fs = createNodeFileSystemAdapter();
@@ -964,13 +981,8 @@ describe("translator-translation-service", () => {
 
     const dispatched = await service.getState(tmpRepo);
     const firstItem = dispatched.queue.items.find((item) => item.id === first.queueItemId);
-    const batchId = firstItem!.batchId;
-    // Identity matches, but only index 1 of the 2-item batch is present.
-    await fs.writeText(path.join(tmpRepo, firstItem!.batchResultPath!), JSON.stringify({
-      version: 1,
-      batchId,
-      results: [{ index: 1, translatedText: "第一段译文" }]
-    }));
+    // Only index 1 of the 2-item batch is present.
+    await fs.writeText(path.join(tmpRepo, first.resultPath), "第一段译文");
 
     // A later enqueue triggers dispatchNext -> reconcile against the in-flight,
     // non-stale batch. The partial (missing index 2) result must be treated as
