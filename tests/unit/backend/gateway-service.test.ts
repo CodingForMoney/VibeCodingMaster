@@ -34,6 +34,7 @@ describe("gateway-service long connection", () => {
       { messageId: "m4", fromUserId: "user-1", text: "/create-task mobile-demo" }
     ], sentTexts);
     const service = createService({ settings, channel });
+    await service.setConnectionEnabled(true);
 
     await service.startQrLogin();
     const qr = await service.checkQrLogin();
@@ -41,7 +42,9 @@ describe("gateway-service long connection", () => {
     expect(qr.status).toBe("confirmed");
     await waitFor(() => sentTexts.length === 4);
     expect(channel.getUpdatesCalls).toBeGreaterThan(0);
-    expect((await service.getStatus()).enabled).toBe(false);
+    const status = await service.getStatus();
+    expect(status.enabled).toBe(false);
+    expect(status.connectionEnabled).toBe(true);
     expect(sentTexts[0]).toContain("Gateway: off / polling");
     expect(sentTexts[1]).toContain("demo-task [running]");
     expect(sentTexts[2]).toContain("Gateway is connected but off.");
@@ -59,15 +62,18 @@ describe("gateway-service long connection", () => {
       } as Partial<GatewaySettingsFile["binding"]> as GatewaySettingsFile["binding"]
     });
     const sentTexts: string[] = [];
-    const channel = createChannel([
-      { messageId: "m1", fromUserId: "user-1", text: "/help" }
-    ], sentTexts);
+    const channel = createManualChannel(sentTexts);
     const service = createService({ settings, channel });
+    await service.setConnectionEnabled(true);
 
     const status = await service.updateSettings({ enabled: false });
 
     expect(status.enabled).toBe(false);
     expect(status.running).toBe(true);
+    expect(status.connectionEnabled).toBe(true);
+    // Deliver the command only after the Gateway command toggle is off, so /help
+    // reflects the connected-but-off state rather than racing the toggle.
+    channel.deliver([{ messageId: "m1", fromUserId: "user-1", text: "/help" }]);
     await waitFor(() => sentTexts.length === 1);
     expect(sentTexts[0]).toContain("VCM Gateway is connected but off.");
     service.stop();
@@ -88,6 +94,7 @@ describe("gateway-service long connection", () => {
       { messageId: "m2", fromUserId: "user-1", text: "/help" }
     ], sentTexts);
     const service = createService({ settings, channel, preferenceUpdates });
+    await service.setConnectionEnabled(true);
 
     await service.start();
 
@@ -121,6 +128,9 @@ describe("gateway-service long connection", () => {
 
     expect(status.enabled).toBe(true);
     expect(status.translationEnabled).toBe(true);
+    // Enabling the desktop Gateway must not implicitly arm the connection switch.
+    expect(status.connectionEnabled).toBe(false);
+    expect(status.running).toBe(false);
     expect(preferenceUpdates).toEqual([{
       translationEnabled: true,
       translationAutoSendEnabled: true
@@ -150,6 +160,7 @@ describe("gateway-service long connection", () => {
         translationAutoSendEnabled: false
       }
     });
+    await service.setConnectionEnabled(true);
 
     const status = await service.getStatus();
 
@@ -183,6 +194,7 @@ describe("gateway-service long connection", () => {
       pmSession: createPmSession(),
       runtimeWrites
     });
+    await service.setConnectionEnabled(true);
 
     await service.start();
     await waitFor(() => runtimeWrites.length === 1);
@@ -221,7 +233,9 @@ describe("gateway-service long connection", () => {
       const latest = Object.values(settings.current().latestPmReplies)[0];
       expect(latest?.text).toBe("Current PM reply for the active task.");
 
-      await service.start();
+      // Arm the connection only after the reply is cached; the phone-driven
+      // /start then arrives over the freshly connected poll loop.
+      await service.setConnectionEnabled(true);
       await waitFor(() => sentTexts.length === 1);
 
       expect(sentTexts[0]).toContain("Gateway started.");
@@ -251,9 +265,7 @@ describe("gateway-service long connection", () => {
       } as Partial<GatewaySettingsFile["binding"]> as GatewaySettingsFile["binding"]
     });
     const sentTexts: string[] = [];
-    const channel = createChannel([
-      { messageId: "m1", fromUserId: "user-1", text: "/retry" }
-    ], sentTexts);
+    const channel = createManualChannel(sentTexts);
     let translateCalls = 0;
     const service = createService({
       settings,
@@ -268,6 +280,9 @@ describe("gateway-service long connection", () => {
     });
 
     try {
+      // Arm first so the disarmed-outbound gate does not suppress the failure
+      // notice; the manual channel withholds /retry until the failure is recorded.
+      await service.setConnectionEnabled(true);
       await service.handlePmStop({
         repoRoot: "/repo",
         taskSlug: "demo-task",
@@ -280,7 +295,7 @@ describe("gateway-service long connection", () => {
       expect(settings.current().lastMessageStatus?.result).toBe("error");
       expect(settings.current().lastMessageStatus?.error).toBe("translation timeout");
 
-      await service.start();
+      channel.deliver([{ messageId: "m1", fromUserId: "user-1", text: "/retry" }]);
       await waitFor(() => sentTexts.length === 2);
 
       expect(sentTexts[1]).toContain("重新翻译成功：");
@@ -330,6 +345,7 @@ describe("gateway-service long connection", () => {
     });
 
     try {
+      await service.setConnectionEnabled(true);
       await service.handlePmStop({
         repoRoot: "/repo",
         taskSlug: "demo-task",
@@ -359,8 +375,8 @@ describe("gateway-service long connection", () => {
     });
     const channel = createFailingChannel(new Error("token expired"));
     const service = createService({ settings, channel });
+    await service.setConnectionEnabled(true);
 
-    await service.start();
     await waitFor(() => settings.current().lastPollStatus.state === "expired");
     expect(settings.current().enabled).toBe(false);
     expect(settings.current().binding.token).toBeNull();
@@ -388,8 +404,8 @@ describe("gateway-service long connection", () => {
       { messageId: "m2", fromUserId: "ou_2", chatId: "oc_2", chatType: "group", text: "/status" }
     ], sentTexts);
     const service = createService({ settings, channel });
+    await service.setConnectionEnabled(true);
 
-    await service.start();
     await waitFor(() => sentTexts.length === 2);
 
     expect(sentTexts[0]).toContain("Gateway: off / polling");
@@ -436,6 +452,7 @@ describe("gateway-service long connection", () => {
       }
     };
     const service = createService({ settings, channel, larkRegistration: registration });
+    await service.setConnectionEnabled(true);
 
     const setup = await service.startLarkRegistration();
     const checked = await service.checkLarkRegistration();
@@ -457,6 +474,7 @@ describe("gateway-service long connection", () => {
     const sentTexts: string[] = [];
     const channel = createLarkTestChannel([], sentTexts);
     const service = createService({ settings, channel });
+    await service.setConnectionEnabled(true);
 
     const result = await service.bindLarkApp({
       appId: "cli_manual",
@@ -467,6 +485,8 @@ describe("gateway-service long connection", () => {
     expect(result.status).toBe("confirmed");
     expect(result.gatewayStatus?.binding.appIdConfigured).toBe(true);
     expect(result.gatewayStatus?.binding.appSecretConfigured).toBe(true);
+    expect(result.gatewayStatus?.connectionEnabled).toBe(true);
+    expect(result.gatewayStatus?.running).toBe(true);
     expect(settings.current().channel).toBe("lark");
     expect(settings.current().binding.appId).toBe("cli_manual");
     expect(settings.current().binding.appSecret).toBe("secret_manual");
@@ -501,6 +521,7 @@ describe("gateway-service long connection", () => {
         sessions: []
       })
     });
+    await service.setConnectionEnabled(true);
 
     await service.start();
     await waitFor(() => sentTexts.length === 1);
@@ -544,6 +565,7 @@ describe("gateway-service long connection", () => {
         });
       }
     });
+    await service.setConnectionEnabled(true);
 
     await service.start();
     await waitFor(() => sentTexts.length === 1);
@@ -552,6 +574,147 @@ describe("gateway-service long connection", () => {
     // The phone stays pointed at the freshly created task even on a partial start.
     expect(settings.current().currentTaskSlug).toBe("demo-task");
     service.stop();
+  });
+
+  it("does not start polling after QR binding while the connection switch is disarmed", async () => {
+    // PP1: construction defaults to disarmed; QR binding + getStatus self-heal
+    // must not start the poll loop.
+    const settings = createSettings();
+    const sentTexts: string[] = [];
+    const channel = createChannel([
+      { messageId: "m1", fromUserId: "user-1", text: "/status" }
+    ], sentTexts);
+    const service = createService({ settings, channel });
+
+    await service.startQrLogin();
+    const qr = await service.checkQrLogin();
+    const status = await service.getStatus();
+
+    expect(qr.status).toBe("confirmed");
+    expect(status.connectionEnabled).toBe(false);
+    expect(status.running).toBe(false);
+    expect(channel.getUpdatesCalls).toBe(0);
+    expect(sentTexts).toEqual([]);
+    service.stop();
+  });
+
+  it("keeps self-heal paths from connecting while the switch is disarmed", async () => {
+    // PP5: boot start, getStatus/reconcile self-heal, and updateSettings must
+    // not connect a configured channel while disarmed.
+    const settings = createSettings({
+      enabled: true,
+      binding: {
+        token: "token-1",
+        boundUserId: "user-1",
+        loginUserId: "user-1"
+      } as Partial<GatewaySettingsFile["binding"]> as GatewaySettingsFile["binding"]
+    });
+    const sentTexts: string[] = [];
+    const channel = createChannel([
+      { messageId: "m1", fromUserId: "user-1", text: "/status" }
+    ], sentTexts);
+    const service = createService({ settings, channel });
+
+    await service.start();
+    await service.getStatus();
+    await service.updateSettings({ translationEnabled: true });
+    const status = await service.getStatus();
+
+    expect(status.running).toBe(false);
+    expect(status.connectionEnabled).toBe(false);
+    expect(channel.getUpdatesCalls).toBe(0);
+    expect(sentTexts).toEqual([]);
+    service.stop();
+  });
+
+  it("connects and polls only after the connection switch is armed", async () => {
+    // PP2: arming with an account configured starts the poll loop.
+    const settings = createSettings({
+      binding: {
+        token: "token-1",
+        boundUserId: "user-1",
+        loginUserId: "user-1"
+      } as Partial<GatewaySettingsFile["binding"]> as GatewaySettingsFile["binding"]
+    });
+    const sentTexts: string[] = [];
+    const channel = createChannel([
+      { messageId: "m1", fromUserId: "user-1", text: "/status" }
+    ], sentTexts);
+    const service = createService({ settings, channel });
+
+    const before = await service.getStatus();
+    const armed = await service.setConnectionEnabled(true);
+    await waitFor(() => sentTexts.length === 1);
+
+    expect(before.running).toBe(false);
+    expect(before.connectionEnabled).toBe(false);
+    expect(armed.connectionEnabled).toBe(true);
+    expect(armed.running).toBe(true);
+    expect(channel.getUpdatesCalls).toBeGreaterThan(0);
+    expect(sentTexts[0]).toContain("Gateway: off / polling");
+    service.stop();
+  });
+
+  it("stops polling when the connection switch is disarmed", async () => {
+    // PP3: disarming aborts the poll loop (the Lark WS closes via the same abort).
+    const settings = createSettings({
+      binding: {
+        token: "token-1",
+        boundUserId: "user-1",
+        loginUserId: "user-1"
+      } as Partial<GatewaySettingsFile["binding"]> as GatewaySettingsFile["binding"]
+    });
+    const sentTexts: string[] = [];
+    const channel = createChannel([], sentTexts);
+    const service = createService({ settings, channel });
+
+    await service.setConnectionEnabled(true);
+    const armed = await service.getStatus();
+    const disarmed = await service.setConnectionEnabled(false);
+
+    expect(armed.running).toBe(true);
+    expect(disarmed.connectionEnabled).toBe(false);
+    expect(disarmed.running).toBe(false);
+    expect((await service.getStatus()).running).toBe(false);
+    service.stop();
+  });
+
+  it("caches the latest PM reply but sends nothing while disarmed", async () => {
+    // PP4: a disarmed gateway still records latestPmReplies for later replay but
+    // never opens the channel to push.
+    const transcriptDir = await mkdtemp(join(tmpdir(), "vcm-gateway-transcript-"));
+    const transcriptPath = join(transcriptDir, "pm.jsonl");
+    await writeFile(transcriptPath, assistantTranscriptLine(
+      "current-reply",
+      "2026-06-11T00:00:01.000Z",
+      "Final PM reply while disarmed."
+    ));
+    const settings = createSettings({
+      enabled: true,
+      binding: {
+        token: "token-1",
+        boundUserId: "user-1",
+        loginUserId: "user-1"
+      } as Partial<GatewaySettingsFile["binding"]> as GatewaySettingsFile["binding"]
+    });
+    const sentTexts: string[] = [];
+    const channel = createChannel([], sentTexts);
+    const service = createService({ settings, channel });
+
+    try {
+      await service.handlePmStop({
+        repoRoot: "/repo",
+        taskSlug: "demo-task",
+        session: createPmSession(transcriptPath)
+      });
+
+      expect(sentTexts).toEqual([]);
+      const latest = Object.values(settings.current().latestPmReplies)[0];
+      expect(latest?.text).toBe("Final PM reply while disarmed.");
+    } finally {
+      service.stop();
+      await rm(transcriptDir, { recursive: true, force: true });
+    }
   });
 });
 
@@ -741,6 +904,65 @@ function createChannel(updates: WeixinIlinkUpdate[], sentTexts: string[]): Weixi
   };
 }
 
+// A channel whose inbound updates are delivered on demand via `deliver(...)`,
+// so a test can record an outbound push (e.g. a failed PM translation) before
+// the next inbound command (e.g. /retry) reaches the poll loop.
+function createManualChannel(sentTexts: string[]): WeixinIlinkChannel & {
+  getUpdatesCalls: number;
+  deliver(updates: WeixinIlinkUpdate[]): void;
+} {
+  let getUpdatesCalls = 0;
+  const queued: WeixinIlinkUpdate[][] = [];
+  let waiting: ((result: { cursor: string; updates: WeixinIlinkUpdate[] }) => void) | null = null;
+  return {
+    id: "weixin-ilink",
+    label: "Weixin iLink",
+    defaultBaseUrl: "https://ilinkai.weixin.qq.com",
+    get getUpdatesCalls() {
+      return getUpdatesCalls;
+    },
+    deliver(updates) {
+      if (waiting) {
+        const resolve = waiting;
+        waiting = null;
+        resolve({ cursor: "cursor-1", updates });
+      } else {
+        queued.push(updates);
+      }
+    },
+    async startQrLogin() {
+      return { qrcode: "qr-1", qrcodeUrl: "https://login.example/qr" };
+    },
+    async checkQrLogin() {
+      return {
+        status: "confirmed",
+        token: "token-1",
+        loginUserId: "user-1",
+        accountId: "account-1",
+        baseUrl: "https://ilinkai.weixin.qq.com"
+      };
+    },
+    async getUpdates(input) {
+      getUpdatesCalls += 1;
+      const next = queued.shift();
+      if (next) {
+        return { cursor: "cursor-1", updates: next };
+      }
+      return new Promise((resolve) => {
+        waiting = resolve;
+        input.signal?.addEventListener("abort", () => {
+          waiting = null;
+          resolve({ cursor: "cursor-2", updates: [] });
+        });
+      });
+    },
+    async sendText(input) {
+      sentTexts.push(input.text);
+      return "ok";
+    }
+  };
+}
+
 function createLarkTestChannel(updates: GatewayInboundMessage[], sentTexts: string[]): GatewayChannelAdapter & { getUpdatesCalls: number } {
   let used = false;
   return {
@@ -829,11 +1051,12 @@ function createSettings(initial: Partial<GatewaySettingsFile> = {}): GatewaySett
       current = normalizeSettings({}, NOW);
       return current;
     },
-    expose(settings, running = false): GatewayStatus {
+    expose(settings, running = false, connectionEnabled = false): GatewayStatus {
       return {
         version: 1,
         enabled: settings.enabled,
         running,
+        connectionEnabled,
         channel: settings.channel,
         translationEnabled: settings.translationEnabled,
         currentProjectId: settings.currentProjectId,

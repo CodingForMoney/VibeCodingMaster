@@ -6,6 +6,7 @@ import type {
   CheckGatewayQrLoginResult,
   CheckGatewayLarkRegistrationResult,
   GatewayStatus,
+  SetGatewayConnectionRequest,
   StartGatewayLarkRegistrationResult,
   StartGatewayQrLoginResult,
   UpdateGatewaySettingsRequest
@@ -534,6 +535,14 @@ export const apiClient = {
   resetGatewayBinding() {
     return request<GatewayStatus>("/api/gateway/binding/reset", {
       method: "POST"
+    });
+  },
+  // Arm/disarm the runtime channel-connection switch (process-local, not
+  // persisted). Returns the updated GatewayStatus.
+  setGatewayConnection(enabled: boolean) {
+    return request<GatewayStatus>("/api/gateway/connection", {
+      method: "PUT",
+      body: JSON.stringify({ enabled } satisfies SetGatewayConnectionRequest)
     });
   }
 };

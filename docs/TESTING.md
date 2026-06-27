@@ -125,6 +125,7 @@ recommended first cases when integration/E2E coverage is added.
 | E2E-003 | Translation panel renders translated transcript | Translation panel | Translator session reads transcript JSONL and renders | Panel shows translated entries without mutating handoffs | L3, on translation change | Not yet implemented |
 | E2E-004 | Auto-orchestration journey (one-click → auto-follow → flow-pause) | GUI task workspace, auto mode | The relocated backend-owned orchestration drives the GUI end to end | One-click starts the roster via `POST /api/tasks/:slug/one-click-start`; the role tab follows `roundState.activeRole`; a stopped round with no next turn raises the `roundState.flowPause` notice | L3, on one-click/round/role-follow change | Not yet implemented; needs a Playwright harness + live `claude`/pty. Until then the three contracts are covered at integration level: task-routes inject + gateway inbound (P1), active-role-follow + app wiring (P2), round-service flowPause matrix + flow-pause-alert (P3) |
 | E2E-005 | Await-user alert (a user-facing role stops awaiting a user decision → flow-pause modal + alarm sound) | GUI task workspace; backend `roundState.flowPause` (reason `awaiting-user`) via workspace-state | A user-facing role's await-user pause reuses the standard flow-pause modal + alarm/notification sound; the issue #17 persistent web banner was removed (per user decision) and the backend await-user state is inert on the web | When `flowPause.reason === "awaiting-user"`, `selectFlowPauseAlertMessage` returns the generic modal wording ("No new turn started after project-manager stopped.") so the centered modal renders and the pause alarm/chime fires via the shared flow-pause sound path; the inert backend `flowPause.message` is NOT surfaced; no separate await-user banner exists | L3, on await-user / flow-pause-alert change | Not yet implemented as a browser spec; needs a Playwright harness + live `claude`/pty. Until then covered below L3 by `flow-pause-alert.test.ts` (awaiting-user → restored modal wording), plus the shared modal+sound mechanics exercised through E2E-004's flow-pause-notice contract |
+| E2E-006 | Gateway runtime connection switch arms/disarms the channel | Project dashboard `GatewayPanel` Connection switch | The desktop toggle gates channel connection (default off each session) end to end | Connection switch is disabled until an account is configured; arming it sets `connectionEnabled`/`running` and the phone can drive the gateway; disarming stops polling; it stays visually distinct from the `Gateway` (command-scope) switch | L3, on gateway connection/dashboard change | Not yet implemented; needs a Playwright harness + a channel double. Until then PP1–PP6 (default-disarmed, arm/connect, disarm/stop, disarmed-outbound-gate-with-cache, self-heal-cannot-bypass, expose orthogonality) are covered at unit level in `gateway-service.test.ts` / `gateway-settings-service.test.ts`; the live UI arm/disarm is verified by static wiring review + manual desktop check |
 
 ## Generated-Context Freshness Checks
 
@@ -161,6 +162,12 @@ recommended first cases when integration/E2E coverage is added.
   "compiled CLI not found. Run npm run build first." Run `npm run build` before
   `npm test` (or treat these specific failures as build-state, not regressions)
   when validating from a clean tree.
+- `tests/unit/backend/translation-worker-service.test.ts` can intermittently fail
+  with an `ENOTEMPTY` error during a full parallel `npm test` run because its
+  per-case temp directories are cleaned up concurrently. It is an environmental
+  test-isolation flake, not a product regression: re-run the file on its own
+  (`npx vitest run tests/unit/backend/translation-worker-service.test.ts`) to
+  confirm 22/22 before treating any `ENOTEMPTY` as a real failure.
 - `npm run verify:package` does not assert the negative (that non-whitelisted
   paths such as `src/`/`tests/`/`.ai/` are absent from the published tarball); that
   leak check is currently manual via the Release Gate's `npm pack --dry-run` step.

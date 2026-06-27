@@ -80,6 +80,15 @@ const HARNESS_ENGINEER_SESSION_PATH = ".ai/vcm/harness-engineer/session.json";
 const PROJECT_TRANSLATOR_SCOPE = "__project__";
 const PROJECT_HARNESS_ENGINEER_SCOPE = "__project_harness_engineer__";
 const PROJECT_TOOL_CD_ENTER_DELAY_MS = 500;
+// Project tool sessions launch a Claude Code TUI inside a PTY. The PTY reports
+// "running" the instant it is spawned, which is earlier than the moment the TUI
+// can actually accept pasted input. These bounds drive a quiescence-based
+// readiness wait (first output seen, then no further output for a short window)
+// used before any programmatic input, and as the liveness probe that detects a
+// resume-by-id launch that died before becoming usable.
+const SESSION_READY_POLL_INTERVAL_MS = 100;
+const SESSION_READY_QUIESCENT_POLLS = 3;
+const SESSION_READY_MAX_POLLS = 60;
 
 interface ProjectRoleSessionFile {
   version: 1;
@@ -352,6 +361,22 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
 
     deps.registry.upsert(record);
     await persistTranslatorSession(deps.fs, repoRoot, record);
+
+    if (launchMode === "resume") {
+      if ((await waitForSessionInputReady(record.id)) === "exited") {
+        // Resume by claudeSessionId failed (Claude could not reopen the session
+        // and the process exited). Drop the stale id and rebuild a fresh session
+        // so a broken id cannot wedge auto-reconcile on the same resume forever.
+        deps.registry.remove(record.id);
+        await clearPersistedTranslatorSession(deps.fs, repoRoot);
+        return launchProjectTranslatorSession(repoRoot, input, "fresh");
+      }
+      return withHarnessRevisionView(
+        repoRoot,
+        await migrateRunningProjectToolSessionCwd(repoRoot, record, taskContext.taskRepoRoot, { alreadyReady: true })
+      );
+    }
+
     return withHarnessRevisionView(
       repoRoot,
       await migrateRunningProjectToolSessionCwd(repoRoot, record, taskContext.taskRepoRoot)
@@ -465,6 +490,21 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
 
     deps.registry.upsert(record);
     await persistHarnessEngineerSession(deps.fs, repoRoot, record);
+
+    if (launchMode === "resume") {
+      if ((await waitForSessionInputReady(record.id)) === "exited") {
+        // Resume by claudeSessionId failed; drop the stale id and rebuild a fresh
+        // session so a broken id cannot wedge auto-reconcile on the same resume.
+        deps.registry.remove(record.id);
+        await clearPersistedHarnessEngineerSession(deps.fs, repoRoot);
+        return launchProjectHarnessEngineerSession(repoRoot, input, "fresh");
+      }
+      return withHarnessRevisionView(
+        repoRoot,
+        await migrateRunningProjectToolSessionCwd(repoRoot, record, taskContext.taskRepoRoot, { alreadyReady: true })
+      );
+    }
+
     return withHarnessRevisionView(
       repoRoot,
       await migrateRunningProjectToolSessionCwd(repoRoot, record, taskContext.taskRepoRoot)
@@ -492,10 +532,46 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     };
   }
 
+  // Wait until a freshly spawned/resumed session's TUI is ready to receive
+  // programmatic input, or until it has clearly failed to start. Readiness is
+  // inferred from terminal output quiescence reported by the runtime: once the
+  // session has emitted output and then stayed quiet for SESSION_READY_QUIESCENT_POLLS
+  // consecutive polls, the TUI prompt is treated as input-ready. The wait is
+  // capped at SESSION_READY_MAX_POLLS so a perpetually chatty (or perpetually
+  // silent) session still proceeds best-effort. Returns "exited" if the runtime
+  // session is gone or no longer running, which a resume launch treats as a
+  // resume-by-id failure.
+  async function waitForSessionInputReady(sessionId: string): Promise<"ready" | "exited"> {
+    let sawOutput = false;
+    let lastOutputAt: string | undefined;
+    let quietPolls = 0;
+    for (let poll = 0; poll < SESSION_READY_MAX_POLLS; poll += 1) {
+      const live = deps.runtime.getSession(sessionId);
+      if (!live || isExitedStatus(live.status)) {
+        return "exited";
+      }
+      if (live.lastOutputAt) {
+        if (!sawOutput || live.lastOutputAt !== lastOutputAt) {
+          sawOutput = true;
+          lastOutputAt = live.lastOutputAt;
+          quietPolls = 0;
+        } else {
+          quietPolls += 1;
+          if (quietPolls >= SESSION_READY_QUIESCENT_POLLS) {
+            return "ready";
+          }
+        }
+      }
+      await delay(SESSION_READY_POLL_INTERVAL_MS);
+    }
+    return "ready";
+  }
+
   async function migrateRunningProjectToolSessionCwd(
     repoRoot: string,
     session: RoleSessionRecord,
-    targetCwd: string
+    targetCwd: string,
+    options: { alreadyReady?: boolean } = {}
   ): Promise<RoleSessionRecord> {
     if (
       session.role !== TRANSLATOR_ROLE
@@ -509,6 +585,10 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
 
     const runtimeSession = deps.runtime.getSession(session.id);
     if (!runtimeSession || runtimeSession.status !== "running") {
+      return session;
+    }
+
+    if (!options.alreadyReady && (await waitForSessionInputReady(session.id)) === "exited") {
       return session;
     }
 
@@ -1706,4 +1786,15 @@ function formatClaudeCdCommand(targetCwd: string): string {
   // of the path and the cd fails). Paths with spaces are still fine unquoted; a
   // newline is the only unsafe character and is rejected by assertSafeCwdTarget.
   return `/cd ${targetCwd}`;
+}
+
+function isExitedStatus(status: string | undefined): boolean {
+  return status === "exited" || status === "crashed" || status === "missing";
+}
+
+function delay(ms: number): Promise<void> {
+  if (ms <= 0) {
+    return Promise.resolve();
+  }
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }

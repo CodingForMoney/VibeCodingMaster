@@ -70,7 +70,10 @@ export interface GatewaySettingsService {
   updateSettings(input: UpdateGatewaySettingsRequest): Promise<GatewaySettingsFile>;
   saveSettings(settings: GatewaySettingsFile): Promise<GatewaySettingsFile>;
   resetBinding(): Promise<GatewaySettingsFile>;
-  expose(settings: GatewaySettingsFile, running?: boolean): GatewayStatus;
+  // `connectionEnabled` is runtime state owned by the gateway service (not part
+  // of the persisted settings); the caller supplies it so the exposed status can
+  // report the channel-connection arming switch.
+  expose(settings: GatewaySettingsFile, running?: boolean, connectionEnabled?: boolean): GatewayStatus;
   getSettingsPath(): string;
   getAuditPath(): string;
 }
@@ -172,11 +175,12 @@ export function createGatewaySettingsService(deps: GatewaySettingsServiceDeps): 
         updatedAt: now()
       });
     },
-    expose(settings, running = false) {
+    expose(settings, running = false, connectionEnabled = false) {
       return {
         version: 1,
         enabled: settings.enabled,
         running,
+        connectionEnabled,
         channel: settings.channel,
         translationEnabled: settings.translationEnabled,
         currentProjectId: settings.currentProjectId,

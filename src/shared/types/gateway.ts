@@ -56,6 +56,13 @@ export interface GatewayStatus {
   version: 1;
   enabled: boolean;
   running: boolean;
+  /**
+   * Runtime channel-connection arming switch. Not persisted; resets to false on
+   * every backend start. While false the backend connects no channel (no inbound
+   * poll loop and no outbound PM push); the user must arm it manually. `running`
+   * (the live poll-loop state) can only be true while this is true.
+   */
+  connectionEnabled: boolean;
   channel: GatewayChannel;
   translationEnabled: boolean;
   currentProjectId: string | null;
@@ -65,6 +72,14 @@ export interface GatewayStatus {
   lastPollStatus: GatewayPollStatus;
   lastMessageStatus: GatewayMessageStatus | null;
   updatedAt: string;
+}
+
+/**
+ * Body for `PUT /api/gateway/connection`: arm (`true`) or disarm (`false`) the
+ * runtime channel-connection switch. The state is process-local and not persisted.
+ */
+export interface SetGatewayConnectionRequest {
+  enabled: boolean;
 }
 
 export interface UpdateGatewaySettingsRequest {

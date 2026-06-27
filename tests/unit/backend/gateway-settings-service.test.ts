@@ -63,4 +63,23 @@ describe("gateway-settings-service", () => {
     expect(updated.binding.baseUrl).toBe("lark://open-platform");
     expect(repaired.binding.baseUrl).toBe("lark://open-platform");
   });
+
+  it("exposes the runtime connection switch state, defaulting to disarmed", async () => {
+    const service = createGatewaySettingsService({
+      fs: {
+        async pathExists() {
+          return false;
+        },
+        async writeJsonAtomic() {
+          return undefined;
+        }
+      } as never
+    });
+    const settings = await service.loadSettings();
+
+    expect(service.expose(settings).connectionEnabled).toBe(false);
+    expect(service.expose(settings, true).connectionEnabled).toBe(false);
+    expect(service.expose(settings, true, true).connectionEnabled).toBe(true);
+    expect(service.expose(settings, false, true).running).toBe(false);
+  });
 });

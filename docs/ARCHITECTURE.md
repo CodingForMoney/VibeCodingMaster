@@ -40,7 +40,9 @@ layers plus supporting tools.
 - `adapters/`: side-effect boundaries — `claude-adapter`, `git-adapter`,
   `command-runner`, `filesystem`.
 - `gateway/`: mobile gateway service plus channel implementations
-  (Weixin iLink, Lark) and command parsing.
+  (Weixin iLink, Lark) and command parsing; channel connection is gated by a
+  runtime, default-off switch. Detailed sub-area design lives in
+  [`src/backend/gateway/ARCHITECTURE.md`](../src/backend/gateway/ARCHITECTURE.md).
 - `templates/`: message/handoff/role-command templates and, under
   `templates/harness/`, the source of truth for the VCM harness that VCM installs
   into downstream repositories.
@@ -123,3 +125,9 @@ Regenerate both after changing module layout, public exports, or HTTP routes.
 - Root module: [`ARCHITECTURE.md`](../ARCHITECTURE.md) — detailed design,
   boundaries, behavior, public surface explanation, risks, and update triggers
   for the `vibe-coding-master` workspace module.
+
+Sub-area architecture docs (deeper design for a cohesive backend sub-area):
+
+- Mobile gateway: [`src/backend/gateway/ARCHITECTURE.md`](../src/backend/gateway/ARCHITECTURE.md)
+  — channel abstraction, poll/inbound/PM-push flows, settings/persistence,
+  dependency direction, security model, and a correctness review.

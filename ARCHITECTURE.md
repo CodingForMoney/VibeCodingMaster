@@ -72,7 +72,21 @@ External boundaries of the module:
   their project sentinel (not the active task) as `VCM_TASK_SLUG`, so their hook
   payloads match their own session record; the hook layer additionally ignores
   round/status mutations from any session whose authoritative record is not bound
-  to the posted task (defensive task-binding guard).
+  to the posted task (defensive task-binding guard). A PTY reports `running` the
+  instant it is spawned, which precedes the moment the Claude TUI can accept
+  input, so `session-service` gates that on-demand `/cd` (and any programmatic
+  input) behind a private, quiescence-based input-readiness wait: it proceeds only
+  after the session has emitted output and then stayed quiet briefly, best-effort
+  capped (~6s) so a perpetually chatty or silent session still proceeds. The same
+  liveness probe detects a `--resume` that exits before becoming usable: that
+  resume is treated as a failed launch, its stale `claudeSessionId` is cleared,
+  and a fresh session is rebuilt — which also stops auto-reconcile from looping on
+  a broken id. Failure-mode limits: auto-rebuild covers only the project-level
+  translator/harness-engineer resume paths (regular VCM roles still recover via
+  manual Restart); only an *exiting* bad resume is rebuilt (one that hangs at an
+  error screen without exiting is not); and rebuilding loses that role's prior
+  Claude conversation context, which is the only recovery path for an unusable
+  resume.
 - **Round / orchestration**: `round-service` and `command-dispatcher` drive the
   role route (`project-manager -> architect -> coder -> reviewer -> docs sync ->
   PM final acceptance`) under manual or automatic orchestration. Orchestration
@@ -131,8 +145,18 @@ External boundaries of the module:
   on any mismatch it degrades safely to a stale-release rather than mis-assigning.
   File translation keeps per-task runtime job directories and durable
   `files/completed/*` outputs.
-- **Gateway**: `gateway-service` and channel adapters let the user talk to PM and
-  manage tasks from a phone.
+- **Gateway**: `gateway-service` plus the `GatewayChannelAdapter` registry
+  (Weixin iLink over HTTP long-poll, Lark/Feishu over a WebSocket event stream)
+  let the user drive a task and talk to PM from a phone. A single race-guarded
+  poll loop handles inbound commands (dedupe → authorize → parse → execute →
+  reply → audit); PM turn-final replies are pushed back on the PM `Stop` hook via
+  `handlePmStop`. Channel connection is gated by a runtime, **default-off** arming
+  switch (`ensurePolling` is the single chokepoint, so self-heal cannot bypass it);
+  the user arms it per session before any inbound/outbound channel I/O. It is wired
+  by the composition root and consumes other services through injected interfaces
+  (cycle-free: the reverse references are type-only + DI). Detailed design, flows,
+  state, security model, and a correctness review live in
+  [`src/backend/gateway/ARCHITECTURE.md`](src/backend/gateway/ARCHITECTURE.md).
 - **Job safety**: `job-guard-service` and `.ai/tools` wrappers enforce no
   detached/background processes and the long-running validation contract.
 

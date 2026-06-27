@@ -85,6 +85,8 @@ export interface ProjectDashboardProps {
   onGatewayEnabledChange(enabled: boolean): void;
   onGatewaySettingsChange(input: UpdateGatewaySettingsRequest): Promise<void>;
   onGatewayTranslationChange(enabled: boolean): void;
+  // Arm/disarm the runtime channel-connection switch (process-local, not persisted).
+  onGatewayConnectionChange(enabled: boolean): void;
   onStartGatewayQrLogin(): void;
   onStartGatewayLarkRegistration(): void;
   onResetGatewayBinding(): void;
@@ -160,6 +162,7 @@ export function ProjectDashboard({
   onGatewayEnabledChange,
   onGatewaySettingsChange,
   onGatewayTranslationChange,
+  onGatewayConnectionChange,
   onStartGatewayQrLogin,
   onStartGatewayLarkRegistration,
   onResetGatewayBinding,
@@ -413,6 +416,7 @@ export function ProjectDashboard({
           onStartLarkRegistration={onStartGatewayLarkRegistration}
           onStartQrLogin={onStartGatewayQrLogin}
           onTranslationChange={onGatewayTranslationChange}
+          onConnectionChange={onGatewayConnectionChange}
         />
       </SidebarSection>
 
@@ -756,6 +760,7 @@ function GatewayPanel({
   onStartLarkRegistration,
   onStartQrLogin,
   onTranslationChange,
+  onConnectionChange,
   qrCheck,
   qrLogin,
   status
@@ -769,6 +774,7 @@ function GatewayPanel({
   onStartLarkRegistration(): void;
   onStartQrLogin(): void;
   onTranslationChange(enabled: boolean): void;
+  onConnectionChange(enabled: boolean): void;
   qrCheck: CheckGatewayQrLoginResult | null;
   qrLogin: StartGatewayQrLoginResult | null;
   status: GatewayStatus | null;
@@ -797,6 +803,17 @@ function GatewayPanel({
         </select>
       </label>
       <div className="gateway-actions">
+        <SwitchControl
+          checked={Boolean(status?.connectionEnabled)}
+          className="sidebar-switch"
+          disabled={busy || !status || (!status.connectionEnabled && !canEnable)}
+          label="Connection"
+          stateLabel={status?.connectionEnabled ? "connected" : "off"}
+          title={canEnable
+            ? "Connect or disconnect the channel for this session. Off by default; the phone can drive the gateway only while Connection is on. Separate from the Gateway command switch."
+            : "Configure the selected Gateway channel first"}
+          onChange={(checked) => onConnectionChange(checked)}
+        />
         <SwitchControl
           checked={Boolean(status?.enabled)}
           className="sidebar-switch"
