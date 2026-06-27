@@ -12,6 +12,7 @@ import type { SessionService } from "../../../src/backend/services/session-servi
 import { formatTerminalPaste, normalizeTerminalSubmitText } from "../../../src/backend/runtime/terminal-submit.js";
 import { createTranslationService as createTranslationServiceBase } from "../../../src/backend/services/translation-service.js";
 import type { TranslationServiceDeps } from "../../../src/backend/services/translation-service.js";
+import type { VcmSessionRoundState } from "../../../src/shared/types/round.js";
 import type { RoleSessionRecord } from "../../../src/shared/types/session.js";
 import type { TranslationSessionEvent, TranslationWsMessage } from "../../../src/shared/types/translation.js";
 import { TRANSLATION_ENTRY_RETENTION_LIMIT } from "../../../src/shared/types/translation.js";
@@ -1085,6 +1086,149 @@ describe("translation-service", () => {
     }));
   });
 
+  it("translates only the last normal round reply in round-final mode", async () => {
+    const fs = createMemoryFs();
+    const appSettings = createAppSettingsService({
+      fs,
+      settingsPath: "/settings.json",
+    });
+    await appSettings.updatePreferences({ translationOutputMode: "round-final" });
+    const coderSession = createRoleSessionRecord({
+      id: "session-coder",
+      role: "coder",
+      command: "claude --agent coder",
+      cwd: "/repo/.claude/worktrees/demo-task"
+    });
+    const pmSession = createRoleSessionRecord({
+      id: "session-pm",
+      role: "project-manager",
+      command: "claude --agent project-manager",
+      cwd: "/repo/.claude/worktrees/demo-task"
+    });
+    const runtime = createRuntimeStub([coderSession, pmSession]);
+    const transcripts = createSessionTranscriptStub();
+    const translatorCalls: Array<{ sourceText: string }> = [];
+    const service = createTranslationService({
+      appSettings,
+      translationWorkerService: createTranslationWorkerServiceStub(translatorCalls, "Round final 译文。"),
+      runtime,
+      sessionRegistry: createRegistryStub([coderSession, pmSession]),
+      transcripts,
+      sessionService: {
+        async listRoleSessions() {
+          return [coderSession, pmSession];
+        }
+      } as SessionService,
+      projectService: createProjectServiceStub(),
+      roundService: createRoundServiceStub({
+        status: "stopped",
+        roundId: "round-1",
+        activeRole: "project-manager",
+        stoppedAt: "2026-05-30T00:00:03.000Z"
+      })
+    });
+
+    const pmMessages: TranslationWsMessage[] = [];
+    service.subscribeToSession(pmSession.id, (message) => pmMessages.push(message));
+    service.subscribeToSession(coderSession.id, () => undefined);
+    transcripts.emit(coderSession.id, {
+      kind: "text",
+      id: "coder-final",
+      timestamp: "2026-05-30T00:00:01.000Z",
+      stopReason: "end_turn",
+      text: "Coder final reply."
+    });
+    transcripts.emit(pmSession.id, {
+      kind: "text",
+      id: "pm-final",
+      timestamp: "2026-05-30T00:00:02.000Z",
+      stopReason: "end_turn",
+      text: "PM final reply."
+    });
+
+    await service.pollTaskFeed({
+      repoRoot: "/repo",
+      taskRepoRoot: "/repo/.claude/worktrees/demo-task",
+      taskSlug: "demo-task",
+      after: 1
+    });
+    await waitFor(() => pmMessages.some((message) =>
+      message.type === "translation-entry"
+      && message.entry.id === "pm-final"
+      && message.entry.status === "translated"
+    ));
+
+    expect(translatorCalls).toHaveLength(1);
+    expect(translatorCalls[0]).toMatchObject({
+      sourceText: "PM final reply."
+    });
+  });
+
+  it("does not translate round-final candidates for manual interrupts", async () => {
+    const fs = createMemoryFs();
+    const appSettings = createAppSettingsService({
+      fs,
+      settingsPath: "/settings.json",
+    });
+    await appSettings.updatePreferences({ translationOutputMode: "round-final" });
+    const pmSession = createRoleSessionRecord({
+      id: "session-pm",
+      role: "project-manager",
+      command: "claude --agent project-manager",
+      cwd: "/repo/.claude/worktrees/demo-task"
+    });
+    const transcripts = createSessionTranscriptStub();
+    const translatorCalls: Array<{ sourceText: string }> = [];
+    const service = createTranslationService({
+      appSettings,
+      translationWorkerService: createTranslationWorkerServiceStub(translatorCalls, "PM 译文。"),
+      runtime: createRuntimeStub([pmSession]),
+      sessionRegistry: createRegistryStub(pmSession),
+      transcripts,
+      sessionService: {
+        async listRoleSessions() {
+          return [pmSession];
+        }
+      } as SessionService,
+      projectService: createProjectServiceStub(),
+      roundService: createRoundServiceStub({
+        status: "stopped",
+        roundId: "round-1",
+        activeRole: "project-manager",
+        stoppedAt: "2026-05-30T00:00:02.000Z",
+        stopReason: "manual-interrupt"
+      })
+    });
+
+    const messages: TranslationWsMessage[] = [];
+    service.subscribeToSession(pmSession.id, (message) => messages.push(message));
+    transcripts.emit(pmSession.id, {
+      kind: "text",
+      id: "pm-final",
+      timestamp: "2026-05-30T00:00:01.000Z",
+      stopReason: "end_turn",
+      text: "Interrupted PM reply."
+    });
+
+    await service.pollTaskFeed({
+      repoRoot: "/repo",
+      taskRepoRoot: "/repo/.claude/worktrees/demo-task",
+      taskSlug: "demo-task",
+      after: 1
+    });
+    await delay(20);
+
+    expect(translatorCalls).toHaveLength(0);
+    expect(messages).toContainEqual(expect.objectContaining({
+      type: "translation-entry",
+      entry: expect.objectContaining({
+        id: "pm-final",
+        status: "preserved",
+        translatedText: "Interrupted PM reply."
+      })
+    }));
+  });
+
   it("reuses an existing PM final reply translation for Gateway output", async () => {
     const fs = createMemoryFs();
     const appSettings = createAppSettingsService({
@@ -1893,6 +2037,31 @@ function createRegistryStub(
   return {
     get(sessionId) {
       return sessions.find((session) => session.id === sessionId);
+    }
+  };
+}
+
+function createRoundServiceStub(overrides: Partial<VcmSessionRoundState> = {}): TranslationServiceDeps["roundService"] {
+  return {
+    async getSessionRoundState(input) {
+      return {
+        taskSlug: input.taskSlug,
+        status: "stopped",
+        roundId: "round-1",
+        activeRole: "project-manager",
+        stoppedAt: "2026-05-30T00:00:02.000Z",
+        roundSequence: 1,
+        turnCount: 1,
+        completedTurnCount: 1,
+        totalRoundCount: 1,
+        totalTurnCount: 1,
+        totalCompletedTurnCount: 1,
+        totalCcActiveMs: 1000,
+        currentRoundCcActiveMs: 1000,
+        roles: ["project-manager"],
+        updatedAt: "2026-05-30T00:00:02.000Z",
+        ...overrides
+      };
     }
   };
 }

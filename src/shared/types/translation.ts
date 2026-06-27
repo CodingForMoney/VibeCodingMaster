@@ -46,6 +46,8 @@ export interface TranslationEntry {
   translatedText: string;
   status: TranslationStatus;
   contextUsed: boolean;
+  transcriptStopReason?: string;
+  transcriptTimestamp?: string;
   boundaryKind?: TranslationConversationBoundaryKind;
   conversationTurn?: number;
   occurredAt?: string;

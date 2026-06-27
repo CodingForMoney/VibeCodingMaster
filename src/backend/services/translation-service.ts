@@ -41,6 +41,7 @@ import {
 import type { TranslationWorkerService } from "./translation-worker-service.js";
 import type { ProjectService } from "./project-service.js";
 import type { SessionService } from "./session-service.js";
+import type { RoundService } from "./round-service.js";
 import { createTranslationQueueRegistry } from "./translation-queue.js";
 
 export interface TranslationService {
@@ -139,6 +140,7 @@ export interface TranslationServiceDeps {
   translationWorkerService?: Pick<TranslationWorkerService, "createConversationJob" | "validateConversationResult" | "getState">;
   fs?: FileSystemAdapter;
   projectService?: Pick<ProjectService, "loadConfig">;
+  roundService?: Pick<RoundService, "getSessionRoundState">;
   appSettings: Pick<AppSettingsService, "getPreferences">;
   now?: () => string;
   id?: () => string;
@@ -181,6 +183,11 @@ interface PendingOutputTranslation {
   sourceLanguage: string;
   targetLanguage: string;
   config: TranslationRuntimeConfig;
+}
+
+interface TranscriptEntryMetadata {
+  transcriptStopReason?: string;
+  transcriptTimestamp?: string;
 }
 
 interface PendingOutputTranslationBatch {
@@ -481,11 +488,13 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
     let displayed = false;
     if (event.kind === "text") {
       const shouldTranslate = shouldTranslateTextTranscriptEvent(state, event, config);
+      const metadata = getTextTranscriptEntryMetadata(event);
       displayed = shouldTranslate
         ? processClaudeOutputText(sessionId, event.text, config, event.id, {
-          flushImmediately: event.stopReason === "end_turn"
+          flushImmediately: event.stopReason === "end_turn",
+          metadata
         })
-        : pushPreservedProseEntry(sessionId, event.id, event.text, config);
+        : pushPreservedProseEntry(sessionId, event.id, event.text, config, metadata);
       if (displayed && shouldTranslate) {
         state.lastAssistantText = event.text;
       }
@@ -511,6 +520,9 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
     if (config.outputMode === "all") {
       return true;
     }
+    if (config.outputMode === "round-final") {
+      return false;
+    }
     if (event.stopReason !== "end_turn") {
       return false;
     }
@@ -525,13 +537,23 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
     rawText: string,
     config: TranslationRuntimeConfig,
     entryId?: string,
-    options: { flushImmediately?: boolean } = {}
+    options: { flushImmediately?: boolean; metadata?: TranscriptEntryMetadata } = {}
   ): boolean {
     return startClaudeOutputTranslation(sessionId, rawText, config, {
       entryId,
       replaceExisting: false,
-      flushImmediately: options.flushImmediately === true
+      flushImmediately: options.flushImmediately === true,
+      metadata: options.metadata
     }) !== undefined;
+  }
+
+  function getTextTranscriptEntryMetadata(
+    event: Extract<ClaudeTranscriptEvent, { kind: "text" }>
+  ): TranscriptEntryMetadata {
+    return {
+      ...(event.stopReason !== undefined ? { transcriptStopReason: event.stopReason } : {}),
+      transcriptTimestamp: event.timestamp
+    };
   }
 
   function startClaudeOutputTranslation(
@@ -542,6 +564,7 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
       entryId?: string;
       replaceExisting: boolean;
       flushImmediately?: boolean;
+      metadata?: TranscriptEntryMetadata;
     }
   ): TranslationEntry | undefined {
     const session = deps.runtime.getSession(sessionId);
@@ -565,7 +588,8 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
         config,
         status: "queued",
         contextUsed: false,
-        id: options.entryId
+        id: options.entryId,
+        ...options.metadata
       })
     };
 
@@ -721,9 +745,10 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
     sessionId: string,
     entryId: string,
     sourceText: string,
-    config: TranslationRuntimeConfig
+    config: TranslationRuntimeConfig,
+    metadata: TranscriptEntryMetadata = {}
   ): boolean {
-    return pushPreservedOutputEntry(sessionId, entryId, sourceText, "prose", config);
+    return pushPreservedOutputEntry(sessionId, entryId, sourceText, "prose", config, metadata);
   }
 
   function pushPreservedOutputEntry(
@@ -731,7 +756,8 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
     entryId: string,
     sourceText: string,
     sourceKind: TranslationSourceKind,
-    config: TranslationRuntimeConfig
+    config: TranslationRuntimeConfig,
+    metadata: TranscriptEntryMetadata = {}
   ): boolean {
     if (!sourceText.trim()) {
       return false;
@@ -754,7 +780,8 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
       contextUsed: false,
       id: entryId,
       translatedText: sourceText,
-      completedAt: now()
+      completedAt: now(),
+      ...metadata
     });
     pushEntry(sessionId, entry);
     return true;
@@ -858,7 +885,11 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
     markFailureRetrying(sessionId, existingFailure);
     const retrying = startClaudeOutputTranslation(sessionId, original.sourceText, config, {
       entryId: original.id,
-      replaceExisting: true
+      replaceExisting: true,
+      metadata: {
+        transcriptStopReason: original.transcriptStopReason,
+        transcriptTimestamp: original.transcriptTimestamp
+      }
     });
     if (!retrying) {
       throw new VcmError({
@@ -882,6 +913,8 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
     id?: string;
     translatedText?: string;
     completedAt?: string;
+    transcriptStopReason?: string;
+    transcriptTimestamp?: string;
     boundaryKind?: TranslationConversationBoundaryKind;
     conversationTurn?: number;
     occurredAt?: string;
@@ -898,6 +931,8 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
       translatedText: input.translatedText ?? "",
       status: input.status,
       contextUsed: input.contextUsed,
+      transcriptStopReason: input.transcriptStopReason,
+      transcriptTimestamp: input.transcriptTimestamp,
       boundaryKind: input.boundaryKind,
       conversationTurn: input.conversationTurn,
       occurredAt: input.occurredAt,
@@ -1006,6 +1041,7 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
       };
     },
     async pollTaskFeed(input) {
+      const config = await loadConfig();
       const cursor = Number.isFinite(input.after) ? Math.max(1, Math.floor(input.after)) : 1;
       const maxEvents = Math.min(Math.max(1, Math.floor(input.limit ?? 500)), 1000);
       const roleSessions = await deps.sessionService.listRoleSessions(input.repoRoot, input.taskSlug);
@@ -1030,6 +1066,10 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
           role: roleSession.role,
           status: state.status
         });
+      }
+
+      if (config.outputMode === "round-final") {
+        await translateRoundFinalReplyIfReady(input, config);
       }
 
       const feed = getTaskFeed(input.taskRepoRoot, input.taskSlug);
@@ -1384,6 +1424,118 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
       };
     }
   };
+
+  async function translateRoundFinalReplyIfReady(
+    input: PollTranslationTaskFeedServiceInput,
+    config: TranslationRuntimeConfig
+  ): Promise<void> {
+    if (!deps.roundService || !deps.projectService) {
+      return;
+    }
+
+    const projectConfig = await deps.projectService.loadConfig(input.repoRoot);
+    const round = await deps.roundService.getSessionRoundState({
+      repoRoot: input.repoRoot,
+      stateRepoRoot: input.taskRepoRoot,
+      stateRoot: projectConfig.stateRoot,
+      taskSlug: input.taskSlug
+    });
+    if (!isNormalStoppedRound(round)) {
+      return;
+    }
+
+    const candidate = findRoundFinalReplyCandidate(input, round);
+    if (!candidate || candidate.entry.status !== "preserved") {
+      return;
+    }
+
+    startClaudeOutputTranslation(candidate.sessionId, candidate.entry.sourceText, config, {
+      entryId: candidate.entry.id,
+      replaceExisting: true,
+      flushImmediately: true,
+      metadata: {
+        transcriptStopReason: candidate.entry.transcriptStopReason,
+        transcriptTimestamp: candidate.entry.transcriptTimestamp
+      }
+    });
+  }
+
+  function isNormalStoppedRound(round: {
+    status: string;
+    roundId?: string;
+    stopReason?: string;
+    roleRecovery?: { status: string };
+    flowPause?: { reason?: string };
+  }): boolean {
+    return round.status === "stopped"
+      && Boolean(round.roundId)
+      && !round.stopReason
+      && round.roleRecovery?.status !== "failed"
+      && round.flowPause?.reason !== "role-recovery-failed";
+  }
+
+  function findRoundFinalReplyCandidate(
+    input: PollTranslationTaskFeedServiceInput,
+    round: { activeRole?: RoleName; stoppedAt?: string }
+  ): { sessionId: string; entry: TranslationEntry } | undefined {
+    const candidates: Array<{ sessionId: string; entry: TranslationEntry }> = [];
+    for (const [sessionId, state] of sessionStates) {
+      if (!isRoundFinalCandidateState(state, input, round.activeRole)) {
+        continue;
+      }
+      for (const entry of state.entries) {
+        if (isRoundFinalCandidateEntry(entry, input, round.stoppedAt)) {
+          candidates.push({ sessionId, entry });
+        }
+      }
+    }
+
+    return candidates
+      .sort((left, right) => compareRoundFinalCandidates(left.entry, right.entry))
+      .at(-1);
+  }
+
+  function isRoundFinalCandidateState(
+    state: SessionState,
+    input: PollTranslationTaskFeedServiceInput,
+    activeRole?: RoleName
+  ): boolean {
+    if (state.repoRoot !== input.taskRepoRoot || state.taskSlug !== input.taskSlug || !state.role) {
+      return false;
+    }
+    return !activeRole || state.role === activeRole;
+  }
+
+  function isRoundFinalCandidateEntry(
+    entry: TranslationEntry,
+    input: PollTranslationTaskFeedServiceInput,
+    stoppedAt?: string
+  ): boolean {
+    if (
+      entry.taskSlug !== input.taskSlug ||
+      entry.direction !== "cc-output-to-user" ||
+      entry.sourceKind !== "prose" ||
+      entry.transcriptStopReason !== "end_turn"
+    ) {
+      return false;
+    }
+    if (entry.status !== "preserved" && entry.status !== "queued" && entry.status !== "translating" && entry.status !== "translated") {
+      return false;
+    }
+    if (!stoppedAt || !entry.transcriptTimestamp) {
+      return true;
+    }
+    return entry.transcriptTimestamp <= stoppedAt;
+  }
+
+  function compareRoundFinalCandidates(left: TranslationEntry, right: TranslationEntry): number {
+    const leftTime = left.transcriptTimestamp ?? left.createdAt;
+    const rightTime = right.transcriptTimestamp ?? right.createdAt;
+    if (leftTime === rightTime) {
+      return left.id.localeCompare(right.id);
+    }
+    return leftTime.localeCompare(rightTime);
+  }
 
   async function findReusableGatewayOutputTranslation(
     input: TranslateGatewayOutputInput,

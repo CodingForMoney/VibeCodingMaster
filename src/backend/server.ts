@@ -331,6 +331,7 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     translationWorkerService,
     fs,
     projectService,
+    roundService,
     appSettings
   });
   const gatewayChannels = createGatewayChannelRegistry([
