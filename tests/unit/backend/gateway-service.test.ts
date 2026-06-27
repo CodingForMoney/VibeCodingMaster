@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import type { GatewayStatus, UpdateGatewaySettingsRequest } from "../../../src/shared/types/gateway.js";
 import type { ProjectSummary } from "../../../src/shared/types/project.js";
+import type { VcmSessionRoundState } from "../../../src/shared/types/round.js";
 import type { RoleSessionRecord } from "../../../src/shared/types/session.js";
 import type { TaskRecord } from "../../../src/shared/types/task.js";
 import { createDefaultLaunchTemplate } from "../../../src/shared/types/app-settings.js";
@@ -204,6 +205,79 @@ describe("gateway-service long connection", () => {
     service.stop();
   });
 
+  it("acknowledges gateway chat translation before sending translated text to PM", async () => {
+    const settings = createSettings({
+      enabled: true,
+      translationEnabled: true,
+      binding: {
+        token: "token-1",
+        boundUserId: "user-1",
+        loginUserId: "user-1"
+      } as Partial<GatewaySettingsFile["binding"]> as GatewaySettingsFile["binding"]
+    });
+    const sentTexts: string[] = [];
+    const runtimeWrites: string[] = [];
+    const channel = createChannel([
+      { messageId: "m1", fromUserId: "user-1", text: "继续处理任务" }
+    ], sentTexts);
+    const service = createService({
+      settings,
+      channel,
+      pmSession: createPmSession(),
+      runtimeWrites,
+      async translateUserInput(input) {
+        expect(input.text).toBe("继续处理任务");
+        return { englishPreview: "Please continue the task." };
+      }
+    });
+    await service.setConnectionEnabled(true);
+
+    await service.start();
+    await waitFor(() => sentTexts.length === 2 && runtimeWrites.length >= 1);
+
+    expect(sentTexts[0]).toContain("正在翻译");
+    expect(sentTexts[1]).toContain("翻译完成，已发送给 PM");
+    expect(sentTexts[1]).toContain("Please continue the task.");
+    expect(runtimeWrites[0]).toContain("Please continue the task.");
+    service.stop();
+  });
+
+  it("reports gateway chat translation failures without sending to PM", async () => {
+    const settings = createSettings({
+      enabled: true,
+      translationEnabled: true,
+      binding: {
+        token: "token-1",
+        boundUserId: "user-1",
+        loginUserId: "user-1"
+      } as Partial<GatewaySettingsFile["binding"]> as GatewaySettingsFile["binding"]
+    });
+    const sentTexts: string[] = [];
+    const runtimeWrites: string[] = [];
+    const channel = createChannel([
+      { messageId: "m1", fromUserId: "user-1", text: "继续处理任务" }
+    ], sentTexts);
+    const service = createService({
+      settings,
+      channel,
+      pmSession: createPmSession(),
+      runtimeWrites,
+      async translateUserInput() {
+        throw new Error("translator unavailable");
+      }
+    });
+    await service.setConnectionEnabled(true);
+
+    await service.start();
+    await waitFor(() => sentTexts.length === 2);
+
+    expect(sentTexts[0]).toContain("正在翻译");
+    expect(sentTexts[1]).toContain("翻译失败，消息未发送给 PM");
+    expect(sentTexts[1]).toContain("translator unavailable");
+    expect(runtimeWrites).toEqual([]);
+    service.stop();
+  });
+
   it("returns the latest cached PM reply when /start enables Gateway", async () => {
     const transcriptDir = await mkdtemp(join(tmpdir(), "vcm-gateway-transcript-"));
     const transcriptPath = join(transcriptDir, "pm.jsonl");
@@ -289,17 +363,22 @@ describe("gateway-service long connection", () => {
         session: createPmSession(transcriptPath)
       });
 
-      expect(sentTexts[0]).toContain("PM 回复已收到，但翻译失败。");
-      expect(sentTexts[0]).toContain("/retry");
-      expect(sentTexts[0]).not.toContain("PM English status");
+      expect(sentTexts[0]).toContain("PM final reply 原文：");
+      expect(sentTexts[0]).toContain("PM English status that needs translation.");
+      expect(sentTexts[0]).toContain("第 2 轮已结束");
+      expect(sentTexts[0]).toContain("现在需要你给出下一步指令");
+      expect(sentTexts[1]).toContain("PM 回复已收到，但翻译失败。");
+      expect(sentTexts[1]).toContain("/retry");
+      expect(sentTexts[1]).toContain("translation timeout");
+      expect(sentTexts[1]).not.toContain("PM English status");
       expect(settings.current().lastMessageStatus?.result).toBe("error");
       expect(settings.current().lastMessageStatus?.error).toBe("translation timeout");
 
       channel.deliver([{ messageId: "m1", fromUserId: "user-1", text: "/retry" }]);
-      await waitFor(() => sentTexts.length === 2);
+      await waitFor(() => sentTexts.length === 3);
 
-      expect(sentTexts[1]).toContain("重新翻译成功：");
-      expect(sentTexts[1]).toContain("重新翻译后的中文状态。");
+      expect(sentTexts[2]).toContain("重新翻译成功：");
+      expect(sentTexts[2]).toContain("重新翻译后的中文状态。");
     } finally {
       service.stop();
       await rm(transcriptDir, { recursive: true, force: true });
@@ -353,8 +432,13 @@ describe("gateway-service long connection", () => {
       });
 
       expect(translatedInputs).toEqual(["Final PM reply for the active task."]);
-      expect(sentTexts[0]).toContain("ZH: Final PM reply for the active task.");
+      expect(sentTexts[0]).toContain("PM final reply 原文：");
+      expect(sentTexts[0]).toContain("Final PM reply for the active task.");
       expect(sentTexts[0]).not.toContain("Intermediate PM text");
+      expect(sentTexts[0]).toContain("第 2 轮已结束");
+      expect(sentTexts[1]).toContain("PM final reply 翻译：");
+      expect(sentTexts[1]).toContain("ZH: Final PM reply for the active task.");
+      expect(sentTexts[1]).not.toContain("Intermediate PM text");
       const latest = Object.values(settings.current().latestPmReplies)[0];
       expect(latest?.text).toBe("Final PM reply for the active task.");
     } finally {
@@ -735,6 +819,16 @@ function createService(input: {
     text: string;
     sourceEntryIds?: string[];
   }) => Promise<string>;
+  translateUserInput?: (input: {
+    repoRoot: string;
+    taskRepoRoot: string;
+    taskSlug: string;
+    role: "project-manager";
+    text: string;
+    useContext: boolean;
+    send: boolean;
+  }) => Promise<{ englishPreview: string }>;
+  roundState?: Partial<VcmSessionRoundState>;
   startTaskRoleSessions?: () => Promise<unknown>;
   larkRegistration?: LarkRegistrationClient;
 }) {
@@ -817,8 +911,18 @@ function createService(input: {
       }))
     } as never,
     translationService: {
-      async translateUserInput() {
-        return { englishPreview: "" };
+      async translateUserInput(translateInput: {
+        repoRoot: string;
+        taskRepoRoot: string;
+        taskSlug: string;
+        role: "project-manager";
+        text: string;
+        useContext: boolean;
+        send: boolean;
+      }) {
+        return input.translateUserInput
+          ? input.translateUserInput(translateInput)
+          : { englishPreview: "" };
       },
       async translateGatewayOutput(translateInput: {
         repoRoot: string;
@@ -836,10 +940,13 @@ function createService(input: {
       }
     } as never,
     roundService: {
+      async getSessionRoundState() {
+        return createRoundState(input.roundState);
+      },
       stopTask() {
         return undefined;
       }
-    },
+    } as never,
     runtime: {
       write(_sessionId: string, data: string) {
         input.runtimeWrites?.push(data);
@@ -1124,6 +1231,25 @@ function createTask(): TaskRecord {
     handoffDir: ".ai/vcm/handoffs",
     status: "running",
     cleanupStatus: "active"
+  };
+}
+
+function createRoundState(overrides: Partial<VcmSessionRoundState> = {}): VcmSessionRoundState {
+  return {
+    taskSlug: "demo-task",
+    status: "stopped",
+    roundId: "round-1",
+    roundSequence: 2,
+    turnCount: 1,
+    completedTurnCount: 1,
+    totalRoundCount: 2,
+    totalTurnCount: 4,
+    totalCompletedTurnCount: 4,
+    totalCcActiveMs: 1000,
+    currentRoundCcActiveMs: 1000,
+    roles: ["project-manager"],
+    updatedAt: NOW,
+    ...overrides
   };
 }
 

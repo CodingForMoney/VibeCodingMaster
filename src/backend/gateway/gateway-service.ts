@@ -2,6 +2,7 @@ import { VCM_ROLE_NAMES } from "../../shared/constants.js";
 import type {
   GatewayDiagnostics
 } from "../../shared/types/diagnostics.js";
+import type { VcmSessionRoundState } from "../../shared/types/round.js";
 import type {
   BindGatewayLarkAppRequest,
   CheckGatewayQrLoginRequest,
@@ -93,7 +94,7 @@ export interface GatewayServiceDeps {
   sessionService: Pick<SessionService, "getRoleSession" | "listRoleSessions" | "resumeRoleSession" | "startRoleSession" | "stopRoleSession" | "moveProjectTranslatorSessionToSafeCwd" | "moveProjectHarnessEngineerSessionToSafeCwd">;
   taskLaunchService: Pick<TaskLaunchService, "startTaskRoleSessions">;
   translationService: Pick<TranslationService, "translateUserInput" | "translateGatewayOutput" | "stopTask">;
-  roundService: Pick<RoundService, "stopTask">;
+  roundService: Pick<RoundService, "getSessionRoundState" | "stopTask">;
   runtime: Pick<TerminalRuntime, "write">;
   appSettings: Pick<AppSettingsService, "getPreferences" | "updatePreferences">;
   larkRegistration?: LarkRegistrationClient;
@@ -133,6 +134,13 @@ interface GatewayOutputRenderResult {
   translationError?: string;
 }
 
+interface PlainTextPmTarget {
+  project: ProjectSummary;
+  task: TaskRecord;
+  session: RoleSessionRecord;
+  settings: GatewaySettingsFile;
+}
+
 const QR_LOGIN_TTL_MS = 8 * 60 * 1000;
 const CLOSE_CONFIRM_TTL_MS = 10 * 60 * 1000;
 const POLL_ERROR_BACKOFF_MS = 2_000;
@@ -148,6 +156,8 @@ const COMMANDS_ALLOWED_WHEN_DISABLED = new Set<GatewayCommand["kind"]>([
   "projects",
   "tasks"
 ]);
+
+class HandledGatewayInboundError extends Error {}
 
 export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
   const now = deps.now ?? (() => new Date().toISOString());
@@ -362,6 +372,11 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
     }
 
     const command = parseGatewayCommand(update.text);
+    if (command.kind === "plain" && settings.enabled) {
+      await handlePlainInbound(update, command.text);
+      return;
+    }
+
     try {
       const output = await executeCommand(command, settings);
       await reply(await deps.settings.loadSettings(), update.fromUserId, output);
@@ -388,6 +403,89 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
         error: message
       });
     }
+  }
+
+  async function handlePlainInbound(update: GatewayInboundMessage, text: string): Promise<void> {
+    try {
+      const target = await resolvePlainTextPmTarget(text);
+      if (typeof target === "string") {
+        await reply(await deps.settings.loadSettings(), update.fromUserId, target);
+        await recordInbound(update, "ok", "plain");
+        return;
+      }
+
+      if (target.settings.translationEnabled) {
+        await reply(await deps.settings.loadSettings(), update.fromUserId, "已收到，正在翻译...");
+      } else {
+        await reply(await deps.settings.loadSettings(), update.fromUserId, "已收到，正在发送给 PM...");
+      }
+
+      const englishText = target.settings.translationEnabled
+        ? await translatePlainTextForPm(target, text, update)
+        : text;
+
+      await submitTerminalInput(deps.runtime, target.session.id, englishText);
+      await reply(
+        await deps.settings.loadSettings(),
+        update.fromUserId,
+        target.settings.translationEnabled
+          ? formatGatewayInputTranslationSuccess(englishText)
+          : "已发送给 PM。"
+      );
+      await recordInbound(update, "ok", "plain");
+    } catch (error) {
+      if (error instanceof HandledGatewayInboundError) {
+        return;
+      }
+      const message = errorMessage(error);
+      await reply(await deps.settings.loadSettings(), update.fromUserId, `Error: ${message}`);
+      await recordInbound(update, "error", "plain", message);
+    }
+  }
+
+  async function translatePlainTextForPm(
+    target: PlainTextPmTarget,
+    text: string,
+    update: GatewayInboundMessage
+  ): Promise<string> {
+    try {
+      return (await deps.translationService.translateUserInput({
+        repoRoot: target.project.repoRoot,
+        taskRepoRoot: getTaskRuntimeRepoRoot(target.task),
+        taskSlug: target.task.taskSlug,
+        role: "project-manager",
+        text,
+        useContext: false,
+        send: false
+      })).englishPreview;
+    } catch (error) {
+      const message = errorMessage(error);
+      await reply(
+        await deps.settings.loadSettings(),
+        update.fromUserId,
+        formatGatewayInputTranslationFailure(message)
+      );
+      await recordInbound(update, "error", "plain", message);
+      throw new HandledGatewayInboundError();
+    }
+  }
+
+  async function recordInbound(
+    update: GatewayInboundMessage,
+    result: "ok" | "ignored" | "error",
+    command: GatewayCommand["kind"],
+    error?: string
+  ): Promise<void> {
+    await recordMessageStatus("inbound", result, update.text, error, command);
+    await deps.audit.record({
+      type: "gateway.command",
+      result,
+      messageId: update.messageId,
+      userId: update.fromUserId,
+      command,
+      preview: update.text,
+      error
+    });
   }
 
   async function saveInboundMetadata(
@@ -805,9 +903,32 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
   }
 
   async function sendPlainTextToPm(text: string): Promise<string> {
+    const target = await resolvePlainTextPmTarget(text);
+    if (typeof target === "string") {
+      return target;
+    }
+
+    const englishText = target.settings.translationEnabled
+      ? (await deps.translationService.translateUserInput({
+          repoRoot: target.project.repoRoot,
+          taskRepoRoot: getTaskRuntimeRepoRoot(target.task),
+          taskSlug: target.task.taskSlug,
+          role: "project-manager",
+          text,
+          useContext: false,
+          send: false
+        })).englishPreview
+      : text;
+
+    await submitTerminalInput(deps.runtime, target.session.id, englishText);
+    return "Sent to PM.";
+  }
+
+  async function resolvePlainTextPmTarget(text: string): Promise<PlainTextPmTarget | string> {
     if (!text.trim()) {
       return "Empty message ignored.";
     }
+
     const project = await ensureProject();
     const settings = await syncDesktopContext(await deps.settings.loadSettings());
     if (!settings.currentTaskSlug) {
@@ -829,24 +950,15 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
     if (session.activityStatus === "running") {
       return "PM is still working on the current turn. Please wait and send again later.";
     }
-
-    const englishText = settings.translationEnabled
-      ? (await deps.translationService.translateUserInput({
-          repoRoot: project.repoRoot,
-          taskRepoRoot: getTaskRuntimeRepoRoot(task),
-          taskSlug: task.taskSlug,
-          role: "project-manager",
-          text,
-          useContext: false,
-          send: false
-        })).englishPreview
-      : text;
-
-    await submitTerminalInput(deps.runtime, session.id, englishText);
-    return "Sent to PM.";
+    return { project, task, session, settings };
   }
 
   async function reply(settings: GatewaySettingsFile, userId: string, text: string): Promise<void> {
+    await sendGatewayText(settings, userId, text);
+    await recordMessageStatus("outbound", "ok", text);
+  }
+
+  async function sendGatewayText(settings: GatewaySettingsFile, userId: string, text: string): Promise<void> {
     const account = toAccount(settings);
     if (!account) {
       return;
@@ -860,7 +972,6 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
       contextToken,
       text
     });
-    await recordMessageStatus("outbound", "ok", text);
   }
 
   async function recordMessageStatus(
@@ -1242,21 +1353,30 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
         return;
       }
 
-      const output = await renderGatewayPmOutput({
-        settings,
-        repoRoot: input.repoRoot,
-        taskSlug: input.taskSlug,
-        sourceText: text,
-        sourceEntryIds: nextEvents.map((event) => event.id)
-      });
+      const roundNotice = await getGatewayRoundNotice(input.repoRoot, input.taskSlug);
+      const originalMessage = formatGatewayPmOriginalReply(text, roundNotice);
+      await sendGatewayText(settings, boundUserId, originalMessage);
 
-      await resolveChannel(settings).sendText({
-        account,
-        toUserId: boundUserId,
-        chatId: settings.binding.chatIds[boundUserId] ?? settings.binding.homeChatId ?? undefined,
-        contextToken: settings.binding.contextTokens[boundUserId],
-        text: output.text
-      });
+      let output: GatewayOutputRenderResult | undefined;
+      if (settings.translationEnabled) {
+        output = await renderGatewayPmOutput({
+          settings,
+          repoRoot: input.repoRoot,
+          taskSlug: input.taskSlug,
+          sourceText: text,
+          sourceEntryIds: nextEvents.map((event) => event.id)
+        });
+
+        await sendGatewayText(
+          settings,
+          boundUserId,
+          output.translationFailed
+            ? formatGatewayPmTranslationFailure(output.translationError)
+            : formatGatewayPmTranslatedReply(output.text)
+        );
+      } else {
+        clearFailedTranslation(input.repoRoot, input.taskSlug);
+      }
       const lastEvent = nextEvents.at(-1);
       const current = await deps.settings.loadSettings();
       await deps.settings.saveSettings({
@@ -1271,19 +1391,19 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
         lastMessageStatus: {
           checkedAt: now(),
           direction: "outbound",
-          result: output.translationFailed ? "error" : "ok",
+          result: output?.translationFailed ? "error" : "ok",
           command: "pm-stop",
-          preview: output.text.slice(0, 160),
-          error: output.translationError
+          preview: (output?.text ?? originalMessage).slice(0, 160),
+          error: output?.translationError
         },
         updatedAt: now()
       });
       await deps.audit.record({
         type: "gateway.pm_push",
-        result: output.translationFailed ? "error" : "ok",
+        result: output?.translationFailed ? "error" : "ok",
         command: "pm-stop",
-        preview: output.text,
-        error: output.translationError
+        preview: output ? `${originalMessage}\n\n${output.text}` : originalMessage,
+        error: output?.translationError
       });
     },
     getDiagnostics() {
@@ -1298,6 +1418,74 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
       return undefined;
     }
     return settings.latestPmReplies[latestPmReplyKey(settings.currentProjectId, settings.currentTaskSlug)];
+  }
+
+  async function getGatewayRoundNotice(repoRoot: string, taskSlug: string): Promise<string | undefined> {
+    try {
+      const [projectConfig, task] = await Promise.all([
+        deps.projectService.loadConfig(repoRoot),
+        deps.taskService.loadTask(repoRoot, taskSlug)
+      ]);
+      const round = await deps.roundService.getSessionRoundState({
+        repoRoot,
+        stateRepoRoot: getTaskRuntimeRepoRoot(task),
+        stateRoot: projectConfig.stateRoot,
+        taskSlug
+      });
+      return formatGatewayRoundNotice(round);
+    } catch {
+      return undefined;
+    }
+  }
+
+  function formatGatewayRoundNotice(round: VcmSessionRoundState): string {
+    const roundLabel = round.roundSequence ? `第 ${round.roundSequence} 轮` : "当前 round";
+    if (round.status === "stopped") {
+      return `${roundLabel}已结束。现在需要你给出下一步指令。`;
+    }
+    const activeRole = round.activeRole ? `，当前角色：${round.activeRole}` : "";
+    return `${roundLabel}运行中${activeRole}。`;
+  }
+
+  function formatGatewayPmOriginalReply(text: string, roundNotice?: string): string {
+    return [
+      "PM final reply 原文：",
+      "",
+      text.trim(),
+      roundNotice ? "" : undefined,
+      roundNotice ? `Round: ${roundNotice}` : undefined
+    ].filter((line): line is string => line !== undefined).join("\n");
+  }
+
+  function formatGatewayPmTranslatedReply(text: string): string {
+    return [
+      "PM final reply 翻译：",
+      "",
+      text.trim()
+    ].join("\n");
+  }
+
+  function formatGatewayPmTranslationFailure(error?: string): string {
+    return [
+      GATEWAY_TRANSLATION_FAILURE_TEXT,
+      error ? `原因：${error}` : undefined
+    ].filter((line): line is string => line !== undefined).join("\n");
+  }
+
+  function formatGatewayInputTranslationSuccess(englishText: string): string {
+    return [
+      "翻译完成，已发送给 PM：",
+      "",
+      englishText.trim()
+    ].join("\n");
+  }
+
+  function formatGatewayInputTranslationFailure(error: string): string {
+    return [
+      "翻译失败，消息未发送给 PM。",
+      `原因：${error}`,
+      "请重新输入后再试。"
+    ].join("\n");
   }
 
   async function renderLatestPmReply(
