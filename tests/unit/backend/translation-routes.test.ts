@@ -50,6 +50,12 @@ function createTranslationServiceStub(): TranslationService {
     async translateUserInput() {
       throw new Error("not implemented");
     },
+    async translateManualOutput() {
+      throw new Error("not implemented");
+    },
+    async translateLatestReply() {
+      throw new Error("not implemented");
+    },
     async sendTranslatedInput() {},
     subscribeToSession() {
       throw new Error("not implemented");

@@ -384,6 +384,11 @@ export const apiClient = {
       body: JSON.stringify(input)
     });
   },
+  translateLatestReply(taskSlug: string, role: RoleName) {
+    return request<TranslationEntry>(`/api/tasks/${encodeURIComponent(taskSlug)}/sessions/${role}/translation/latest-reply`, {
+      method: "POST"
+    });
+  },
   sendTranslatedInput(taskSlug: string, role: RoleName, input: SendTranslatedInputRequest) {
     return request<{ ok: true }>(`/api/tasks/${encodeURIComponent(taskSlug)}/sessions/${role}/translation/send`, {
       method: "POST",

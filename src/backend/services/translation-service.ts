@@ -38,6 +38,7 @@ import {
   type ClaudeTranscriptEvent,
   type ClaudeTranscriptService
 } from "./claude-transcript-service.js";
+import { readLatestRoleTurnReply } from "./claude-transcript-reply.js";
 import type { TranslationWorkerService } from "./translation-worker-service.js";
 import type { ProjectService } from "./project-service.js";
 import type { SessionService } from "./session-service.js";
@@ -56,6 +57,7 @@ export interface TranslationService {
   recordConversationBoundary(input: RecordTranslationConversationBoundaryInput): Promise<TranslationEntry | undefined>;
   translateUserInput(input: TranslateUserInputServiceInput): Promise<TranslateUserInputResult>;
   translateManualOutput(input: TranslateManualOutputServiceInput): Promise<TranslationEntry>;
+  translateLatestReply(input: TranslateLatestReplyServiceInput): Promise<TranslationEntry>;
   sendTranslatedInput(input: SendTranslatedInputServiceInput): Promise<void>;
   subscribeToSession(sessionId: string, listener: TranslationEventListener): Unsubscribe;
   clearSession(sessionId: string): Promise<void>;
@@ -105,6 +107,13 @@ export interface TranslateUserInputServiceInput extends TranslateUserInputReques
 }
 
 export interface TranslateManualOutputServiceInput extends TranslateManualOutputRequest {
+  repoRoot: string;
+  taskRepoRoot?: string;
+  taskSlug: string;
+  role: RoleName;
+}
+
+export interface TranslateLatestReplyServiceInput {
   repoRoot: string;
   taskRepoRoot?: string;
   taskSlug: string;
@@ -1255,6 +1264,53 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
         throw new VcmError({
           code: "TRANSLATION_NOT_STARTED",
           message: "Manual translation could not be queued.",
+          statusCode: 409,
+          hint: "Check that the role session is still running and try again."
+        });
+      }
+      return entry;
+    },
+    async translateLatestReply(input) {
+      const config = await loadConfig();
+      const roleSession = await deps.sessionService.getRoleSession(input.repoRoot, input.taskSlug, input.role);
+      if (!roleSession || roleSession.status !== "running") {
+        throw new VcmError({
+          code: "SESSION_NOT_RUNNING",
+          message: `${input.role} session is not running.`,
+          statusCode: 409
+        });
+      }
+
+      const reply = await readLatestRoleTurnReply(roleSession);
+      if (!reply?.text.trim()) {
+        throw new VcmError({
+          code: "TRANSLATION_REPLY_NOT_FOUND",
+          message: `No completed final reply was found for ${input.role}.`,
+          statusCode: 404,
+          hint: "Wait until the role finishes a Claude Code turn, then try again."
+        });
+      }
+
+      await prepareCache({
+        repoRoot: input.taskRepoRoot ?? input.repoRoot,
+        baseRepoRoot: input.repoRoot,
+        taskSlug: input.taskSlug,
+        role: input.role,
+        sessionId: roleSession.id
+      });
+      startTranscriptTail(roleSession);
+      const entry = startClaudeOutputTranslation(roleSession.id, reply.text, config, {
+        replaceExisting: false,
+        flushImmediately: true,
+        metadata: {
+          transcriptStopReason: "end_turn",
+          ...(reply.transcriptTimestamp ? { transcriptTimestamp: reply.transcriptTimestamp } : {})
+        }
+      });
+      if (!entry) {
+        throw new VcmError({
+          code: "TRANSLATION_NOT_STARTED",
+          message: "Latest reply translation could not be queued.",
           statusCode: 409,
           hint: "Check that the role session is still running and try again."
         });

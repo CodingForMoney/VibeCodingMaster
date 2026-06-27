@@ -94,6 +94,21 @@ export function registerTranslationRoutes(app: FastifyInstance, deps: Translatio
     }
   );
 
+  app.post<{ Params: { taskSlug: string; role: string } }>(
+    "/api/tasks/:taskSlug/sessions/:role/translation/latest-reply",
+    async (request) => {
+      const project = await requireCurrentProject(deps.projectService);
+      const role = parseRole(request.params.role);
+      const task = await deps.taskService.loadTask(project.repoRoot, request.params.taskSlug);
+      return deps.translationService.translateLatestReply({
+        repoRoot: project.repoRoot,
+        taskRepoRoot: getTaskRuntimeRepoRoot(task),
+        taskSlug: request.params.taskSlug,
+        role
+      });
+    }
+  );
+
   app.post<{ Params: { taskSlug: string; role: string }; Body: SendTranslatedInputRequest }>(
     "/api/tasks/:taskSlug/sessions/:role/translation/send",
     async (request) => {

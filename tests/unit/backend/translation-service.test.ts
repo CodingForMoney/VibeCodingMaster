@@ -1,3 +1,6 @@
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import type { FileSystemAdapter } from "../../../src/backend/adapters/filesystem.js";
 import type { TerminalRuntime } from "../../../src/backend/runtime/terminal-runtime.js";
@@ -932,6 +935,76 @@ describe("translation-service", () => {
         targetLanguage: "zh-CN"
       })
     ]);
+  });
+
+  it("queues the current role latest final reply for manual translation", async () => {
+    const transcriptDir = await mkdtemp(join(tmpdir(), "vcm-translation-reply-"));
+    const transcriptPath = join(transcriptDir, "coder.jsonl");
+    await writeFile(transcriptPath, [
+      assistantTranscriptLine("old-reply", "2026-05-30T00:00:01.000Z", "Older reply.", "end_turn"),
+      assistantTranscriptLine("tool-progress", "2026-05-30T00:00:02.000Z", "Tool progress should not be selected.", "tool_use"),
+      assistantTranscriptLine("latest-reply", "2026-05-30T00:00:03.000Z", "Latest final reply.", "end_turn")
+    ].join("\n"));
+    const fs = createMemoryFs();
+    const appSettings = createAppSettingsService({
+      fs,
+      settingsPath: "/settings.json",
+    });
+    const roleSession = createRoleSessionRecord({
+      transcriptPath,
+      lastTurnStartedAt: "2026-05-30T00:00:02.500Z",
+      lastTurnEndedAt: "2026-05-30T00:00:03.500Z"
+    });
+    const translatorCalls: unknown[] = [];
+    const service = createTranslationService({
+      appSettings,
+      translationWorkerService: createTranslationWorkerServiceStub(translatorCalls, "最后回复。"),
+      runtime: createRuntimeStub([roleSession]),
+      sessionRegistry: createRegistryStub(roleSession),
+      transcripts: createTranscriptStub(),
+      sessionService: {
+        async getRoleSession() {
+          return roleSession;
+        }
+      } as SessionService
+    });
+
+    try {
+      const messages: TranslationWsMessage[] = [];
+      service.subscribeToSession("session-1", (message) => messages.push(message));
+      const entry = await service.translateLatestReply({
+        repoRoot: "/repo",
+        taskRepoRoot: "/repo/.claude/worktrees/demo-task",
+        taskSlug: "demo-task",
+        role: "coder"
+      });
+
+      expect(entry).toMatchObject({
+        direction: "cc-output-to-user",
+        sourceText: "Latest final reply.",
+        transcriptStopReason: "end_turn",
+        transcriptTimestamp: "2026-05-30T00:00:03.000Z",
+        status: "queued"
+      });
+      await waitFor(() => messages.some((message) =>
+        message.type === "translation-entry" &&
+        message.entry.id === entry.id &&
+        message.entry.status === "translated" &&
+        message.entry.translatedText === "最后回复。"
+      ));
+      expect(translatorCalls).toEqual([
+        expect.objectContaining({
+          repoRoot: "/repo",
+          taskSlug: "demo-task",
+          direction: "cc-output-to-user",
+          sourceText: "Latest final reply.",
+          sourceLanguage: "en",
+          targetLanguage: "zh-CN"
+        })
+      ]);
+    } finally {
+      await rm(transcriptDir, { recursive: true, force: true });
+    }
   });
 
   it("sends translated input by pasting first and pressing enter separately", async () => {
@@ -2120,6 +2193,28 @@ function createRoleSessionRecord(overrides: Partial<RoleSessionRecord> = {}): Ro
     exitCode: null,
     ...overrides
   };
+}
+
+function assistantTranscriptLine(
+  uuid: string,
+  timestamp: string,
+  text: string,
+  stopReason = "end_turn"
+): string {
+  return JSON.stringify({
+    type: "assistant",
+    uuid,
+    timestamp,
+    message: {
+      stop_reason: stopReason,
+      content: [
+        {
+          type: "text",
+          text
+        }
+      ]
+    }
+  });
 }
 
 function createClock(values: string[]): () => string {

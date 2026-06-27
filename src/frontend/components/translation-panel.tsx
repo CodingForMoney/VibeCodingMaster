@@ -129,6 +129,19 @@ export function TranslationPanel({
     }
   }
 
+  async function translateLatestReply() {
+    setBusy(true);
+    setError("");
+    try {
+      const entry = await apiClient.translateLatestReply(taskSlug, role);
+      onEntry(sessionId, role, entry);
+    } catch (caught) {
+      setError(formatUiError("Translate final reply", caught));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function sendEnglish() {
     const englishText = composerIsEnglishDraft ? extractTranslatedComposerDraft(composer) : composer;
     if (!englishText.trim()) {
@@ -214,6 +227,9 @@ export function TranslationPanel({
                 ) : null}
               </>
             ) : null}
+            <button type="button" disabled={busy} onClick={() => void translateLatestReply()}>
+              Translate final reply
+            </button>
             <button type="button" onClick={() => void clearPanel()}>Clear</button>
           </div>
         </div>
