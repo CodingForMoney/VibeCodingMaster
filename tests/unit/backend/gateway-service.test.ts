@@ -106,12 +106,13 @@ describe("gateway-service long connection", () => {
     expect(sentTexts[1]).toContain("/create-task <task-slug> [title]");
     expect(preferenceUpdates).toEqual([{
       translationEnabled: true,
-      translationAutoSendEnabled: true
+      translationAutoSendEnabled: true,
+      translationOutputMode: "round-final"
     }]);
     service.stop();
   });
 
-  it("desktop Gateway enable turns on translation runtime without changing output mode", async () => {
+  it("desktop Gateway enable turns on translation runtime with round-final output mode", async () => {
     const settings = createSettings({
       translationEnabled: false,
       binding: {
@@ -134,7 +135,8 @@ describe("gateway-service long connection", () => {
     expect(status.running).toBe(false);
     expect(preferenceUpdates).toEqual([{
       translationEnabled: true,
-      translationAutoSendEnabled: true
+      translationAutoSendEnabled: true,
+      translationOutputMode: "round-final"
     }]);
     service.stop();
   });
@@ -158,7 +160,8 @@ describe("gateway-service long connection", () => {
       preferenceUpdates,
       appPreferences: {
         translationEnabled: false,
-        translationAutoSendEnabled: false
+        translationAutoSendEnabled: false,
+        translationOutputMode: "pm-final-only"
       }
     });
     await service.setConnectionEnabled(true);
@@ -169,7 +172,8 @@ describe("gateway-service long connection", () => {
     expect(status.running).toBe(true);
     expect(preferenceUpdates).toEqual([{
       translationEnabled: true,
-      translationAutoSendEnabled: true
+      translationAutoSendEnabled: true,
+      translationOutputMode: "round-final"
     }]);
     service.stop();
   });
@@ -441,6 +445,57 @@ describe("gateway-service long connection", () => {
       expect(sentTexts[1]).not.toContain("Intermediate PM text");
       const latest = Object.values(settings.current().latestPmReplies)[0];
       expect(latest?.text).toBe("Final PM reply for the active task.");
+    } finally {
+      service.stop();
+      await rm(transcriptDir, { recursive: true, force: true });
+    }
+  });
+
+  it("does not push PM replies for interrupted rounds", async () => {
+    const transcriptDir = await mkdtemp(join(tmpdir(), "vcm-gateway-transcript-"));
+    const transcriptPath = join(transcriptDir, "pm.jsonl");
+    await writeFile(transcriptPath, assistantTranscriptLine(
+      "current-reply",
+      "2026-06-11T00:00:01.000Z",
+      "Interrupted PM reply should not be pushed."
+    ));
+    const settings = createSettings({
+      enabled: true,
+      translationEnabled: true,
+      binding: {
+        token: "token-1",
+        boundUserId: "user-1",
+        loginUserId: "user-1"
+      } as Partial<GatewaySettingsFile["binding"]> as GatewaySettingsFile["binding"]
+    });
+    const sentTexts: string[] = [];
+    const channel = createChannel([], sentTexts);
+    const translatedInputs: string[] = [];
+    const service = createService({
+      settings,
+      channel,
+      roundState: {
+        status: "stopped",
+        stopReason: "manual-interrupt"
+      },
+      async translateGatewayOutput(input) {
+        translatedInputs.push(input.text);
+        return `ZH: ${input.text}`;
+      }
+    });
+
+    try {
+      await service.setConnectionEnabled(true);
+      await service.handlePmStop({
+        repoRoot: "/repo",
+        taskSlug: "demo-task",
+        session: createPmSession(transcriptPath)
+      });
+
+      expect(sentTexts).toEqual([]);
+      expect(translatedInputs).toEqual([]);
+      expect(Object.values(settings.current().latestPmReplies)).toEqual([]);
+      expect(settings.current().pushCursors).toEqual({});
     } finally {
       service.stop();
       await rm(transcriptDir, { recursive: true, force: true });
@@ -809,6 +864,7 @@ function createService(input: {
   appPreferences?: {
     translationEnabled?: boolean;
     translationAutoSendEnabled?: boolean;
+    translationOutputMode?: "round-final" | "pm-final-only" | "final-only" | "all";
   };
   pmSession?: RoleSessionRecord | null;
   runtimeWrites?: string[];
@@ -837,7 +893,8 @@ function createService(input: {
   let appPreferences = {
     launchTemplate: createDefaultLaunchTemplate(),
     translationEnabled: input.appPreferences?.translationEnabled ?? true,
-    translationAutoSendEnabled: input.appPreferences?.translationAutoSendEnabled ?? false
+    translationAutoSendEnabled: input.appPreferences?.translationAutoSendEnabled ?? false,
+    translationOutputMode: input.appPreferences?.translationOutputMode ?? "pm-final-only"
   };
   return createGatewayService({
     fs: {} as never,

@@ -148,6 +148,8 @@ const POLL_LONG_BACKOFF_MS = 30_000;
 const MAX_FAILURES_BEFORE_LONG_BACKOFF = 3;
 const DEFAULT_POLL_TIMEOUT_MS = 35_000;
 const LARK_REGISTRATION_CONFIRM_TIMEOUT_MS = 15_000;
+const GATEWAY_ROUND_FINAL_WAIT_MS = 12_000;
+const GATEWAY_ROUND_FINAL_POLL_MS = 250;
 const GATEWAY_TRANSLATION_FAILURE_TEXT = "PM 回复已收到，但翻译失败。\n发送 /retry 重新翻译。";
 const COMMANDS_ALLOWED_WHEN_DISABLED = new Set<GatewayCommand["kind"]>([
   "help",
@@ -862,12 +864,17 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
 
   async function enableGatewayTranslationRuntime(): Promise<void> {
     const preferences = await deps.appSettings.getPreferences();
-    if (preferences.translationEnabled && preferences.translationAutoSendEnabled) {
+    if (
+      preferences.translationEnabled &&
+      preferences.translationAutoSendEnabled &&
+      preferences.translationOutputMode === "round-final"
+    ) {
       return;
     }
     await deps.appSettings.updatePreferences({
       translationEnabled: true,
-      translationAutoSendEnabled: true
+      translationAutoSendEnabled: true,
+      translationOutputMode: "round-final"
     });
   }
 
@@ -1327,21 +1334,12 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
         return;
       }
       const events = await readTranscriptTextEvents(transcriptPath);
-      const latestReply = selectLatestTurnReply(events, input.session);
-      if (latestReply) {
-        await saveLatestPmReply(input, latestReply);
-      }
-
-      const settings = await deps.settings.loadSettings();
-      const account = toAccount(settings);
-      const boundUserId = settings.binding.boundUserId;
-      // A disarmed gateway never touches the channel: skip the outbound push.
-      // The latest reply was already cached above and replays on the next /start.
-      if (!connectionEnabled || !settings.enabled || !account || !boundUserId) {
+      const round = await waitForGatewayRoundFinal(input.repoRoot, input.taskSlug);
+      if (!round) {
         return;
       }
-
       const cursorKey = `${input.taskSlug}:project-manager:${input.session.claudeSessionId}`;
+      const settings = await deps.settings.loadSettings();
       const cursor = settings.pushCursors[cursorKey];
       const nextEvents = selectEventsAfterCursor(events, cursor?.lastTranscriptEventId)
         .filter(isFinalTurnTextEvent);
@@ -1353,7 +1351,20 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
         return;
       }
 
-      const roundNotice = await getGatewayRoundNotice(input.repoRoot, input.taskSlug);
+      const latestReply = selectLatestTurnReply(nextEvents, input.session);
+      if (latestReply) {
+        await saveLatestPmReply(input, latestReply);
+      }
+
+      const account = toAccount(settings);
+      const boundUserId = settings.binding.boundUserId;
+      // A disarmed gateway never touches the channel: skip the outbound push.
+      // The round-final PM reply was already cached above and replays on the next /start.
+      if (!connectionEnabled || !settings.enabled || !account || !boundUserId) {
+        return;
+      }
+
+      const roundNotice = formatGatewayRoundNotice(round);
       const originalMessage = formatGatewayPmOriginalReply(text, roundNotice);
       await sendGatewayText(settings, boundUserId, originalMessage);
 
@@ -1420,7 +1431,22 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
     return settings.latestPmReplies[latestPmReplyKey(settings.currentProjectId, settings.currentTaskSlug)];
   }
 
-  async function getGatewayRoundNotice(repoRoot: string, taskSlug: string): Promise<string | undefined> {
+  async function waitForGatewayRoundFinal(repoRoot: string, taskSlug: string): Promise<VcmSessionRoundState | undefined> {
+    const startedAt = Date.now();
+    while (Date.now() - startedAt <= GATEWAY_ROUND_FINAL_WAIT_MS) {
+      const round = await getGatewayRoundState(repoRoot, taskSlug);
+      if (round && isGatewayRoundFinal(round)) {
+        return round;
+      }
+      if (round && isGatewayNonFinalTerminalRound(round)) {
+        return undefined;
+      }
+      await delay(GATEWAY_ROUND_FINAL_POLL_MS);
+    }
+    return undefined;
+  }
+
+  async function getGatewayRoundState(repoRoot: string, taskSlug: string): Promise<VcmSessionRoundState | undefined> {
     try {
       const [projectConfig, task] = await Promise.all([
         deps.projectService.loadConfig(repoRoot),
@@ -1432,10 +1458,26 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
         stateRoot: projectConfig.stateRoot,
         taskSlug
       });
-      return formatGatewayRoundNotice(round);
+      return round;
     } catch {
       return undefined;
     }
+  }
+
+  function isGatewayRoundFinal(round: VcmSessionRoundState): boolean {
+    return round.status === "stopped"
+      && Boolean(round.roundId)
+      && !round.stopReason
+      && round.roleRecovery?.status !== "failed"
+      && round.flowPause?.reason !== "role-recovery-failed";
+  }
+
+  function isGatewayNonFinalTerminalRound(round: VcmSessionRoundState): boolean {
+    return round.status === "stopped" && (
+      Boolean(round.stopReason) ||
+      round.roleRecovery?.status === "failed" ||
+      round.flowPause?.reason === "role-recovery-failed"
+    );
   }
 
   function formatGatewayRoundNotice(round: VcmSessionRoundState): string {
@@ -1693,6 +1735,10 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
       resolve();
     }, { once: true });
   });
+}
+
+function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 function normalizeBaseUrl(input: string, fallback: string): string {
