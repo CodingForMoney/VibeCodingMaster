@@ -52,6 +52,7 @@ export interface SessionService {
   notifyRoleHarnessUpdated(repoRoot: string, taskSlug: string, role: RoleName): Promise<RoleSessionRecord>;
   recordRoleHookEvent(repoRoot: string, input: RecordRoleHookEventInput): Promise<RoleSessionRecord | undefined>;
   recordClaudeHookEvent(repoRoot: string, input: RecordClaudeHookEventInput): Promise<RoleSessionRecord | undefined>;
+  markTerminalSessionActivityIdle(repoRoot: string, sessionId: string): Promise<RoleSessionRecord | undefined>;
   markRoleActivityRunning(repoRoot: string, taskSlug: string, role: RoleName): Promise<RoleSessionRecord | undefined>;
   markRoleActivityIdle(repoRoot: string, taskSlug: string, role: RoleName): Promise<RoleSessionRecord | undefined>;
 }
@@ -201,6 +202,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       cwd: taskRepoRoot
     };
     const runtimeSession = await deps.runtime.createSession({
+      repoRoot,
       taskSlug,
       role,
       command: startCommand.command,
@@ -316,6 +318,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       cwd: launchCwd
     };
     const runtimeSession = await deps.runtime.createSession({
+      repoRoot,
       taskSlug: PROJECT_TRANSLATOR_SCOPE,
       role: TRANSLATOR_ROLE,
       command: startCommand.command,
@@ -445,6 +448,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       cwd: launchCwd
     };
     const runtimeSession = await deps.runtime.createSession({
+      repoRoot,
       taskSlug: PROJECT_HARNESS_ENGINEER_SCOPE,
       role: HARNESS_ENGINEER_ROLE,
       command: startCommand.command,
@@ -648,6 +652,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       cwd: launchCwd
     };
     const runtimeSession = await deps.runtime.createSession({
+      repoRoot,
       taskSlug: normalizeProjectScopedRecordForPersistence(session).taskSlug,
       role: session.role,
       command: startCommand.command,
@@ -749,6 +754,76 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     const config = await deps.projectService.loadConfig(repoRoot);
     const task = await deps.taskService.loadTask(repoRoot, session.taskSlug);
     await persistRoleSessionRecord(deps.fs, repoRoot, getTaskRuntimeRepoRoot(task), config.stateRoot, session);
+  }
+
+  async function getProjectToolSessionView(
+    repoRoot: string,
+    role: typeof TRANSLATOR_ROLE | typeof HARNESS_ENGINEER_ROLE
+  ): Promise<RoleSessionRecord | undefined> {
+    const record = role === TRANSLATOR_ROLE
+      ? getRegisteredProjectTranslatorSession(deps.registry, deps.runtime)
+        ?? await loadPersistedTranslatorSession(deps.fs, repoRoot)
+      : getRegisteredProjectHarnessEngineerSession(deps.registry, deps.runtime)
+        ?? await loadPersistedHarnessEngineerSession(deps.fs, repoRoot);
+    const view = toRoleSessionRecordView(record, deps.runtime);
+    return view ? withHarnessRevisionView(repoRoot, view) : undefined;
+  }
+
+  async function markProjectToolActivityIdle(
+    repoRoot: string,
+    current: RoleSessionRecord,
+    persist: (fs: FileSystemAdapter, repoRoot: string, record: RoleSessionRecord) => Promise<void>
+  ): Promise<RoleSessionRecord> {
+    const timestamp = now();
+    const updated: RoleSessionRecord = {
+      ...current,
+      activityStatus: "idle",
+      lastTurnEndedAt: timestamp,
+      updatedAt: timestamp
+    };
+    deps.registry.upsert(updated);
+    await persist(deps.fs, repoRoot, updated);
+    return updated;
+  }
+
+  async function getTaskRoleSessionView(
+    repoRoot: string,
+    taskSlug: string,
+    role: RoleName
+  ): Promise<RoleSessionRecord | undefined> {
+    const config = await deps.projectService.loadConfig(repoRoot);
+    const task = await deps.taskService.loadTask(repoRoot, taskSlug);
+    const taskRepoRoot = getTaskRuntimeRepoRoot(task);
+    const record = getRegisteredRoleSession(deps.registry, deps.runtime, taskSlug, role)
+      ?? await loadPersistedRoleRecordForRole(deps.fs, repoRoot, taskRepoRoot, config.stateRoot, taskSlug, role);
+    const view = toRoleSessionRecordView(record, deps.runtime);
+    return view ? withHarnessRevisionView(repoRoot, view) : undefined;
+  }
+
+  async function markTaskRoleActivityIdle(
+    repoRoot: string,
+    taskSlug: string,
+    role: RoleName
+  ): Promise<RoleSessionRecord | undefined> {
+    const current = await getTaskRoleSessionView(repoRoot, taskSlug, role);
+    if (!current) {
+      return undefined;
+    }
+
+    const timestamp = now();
+    const updated: RoleSessionRecord = {
+      ...current,
+      activityStatus: "idle",
+      lastTurnEndedAt: timestamp,
+      updatedAt: timestamp
+    };
+
+    deps.registry.upsert(updated);
+
+    const config = await deps.projectService.loadConfig(repoRoot);
+    const task = await deps.taskService.loadTask(repoRoot, taskSlug);
+    await persistRoleSessionRecord(deps.fs, repoRoot, getTaskRuntimeRepoRoot(task), config.stateRoot, updated);
+    return updated;
   }
 
   return {
@@ -1209,6 +1284,30 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
         cwd: input.cwd
       });
     },
+    async markTerminalSessionActivityIdle(repoRoot, sessionId) {
+      const runtimeSession = deps.runtime.getSession(sessionId);
+      const registered = deps.registry.get(sessionId);
+      const role = registered?.role ?? runtimeSession?.role;
+      const taskSlug = registered?.taskSlug ?? runtimeSession?.taskSlug;
+      if (!role || !taskSlug) {
+        return undefined;
+      }
+
+      if (role === TRANSLATOR_ROLE) {
+        const current = await getProjectToolSessionView(repoRoot, TRANSLATOR_ROLE);
+        return current?.id === sessionId
+          ? markProjectToolActivityIdle(repoRoot, current, persistTranslatorSession)
+          : undefined;
+      }
+      if (role === HARNESS_ENGINEER_ROLE) {
+        const current = await getProjectToolSessionView(repoRoot, HARNESS_ENGINEER_ROLE);
+        return current?.id === sessionId
+          ? markProjectToolActivityIdle(repoRoot, current, persistHarnessEngineerSession)
+          : undefined;
+      }
+
+      return markTaskRoleActivityIdle(repoRoot, taskSlug, role);
+    },
     async markRoleActivityRunning(repoRoot, taskSlug, role) {
       const current = await this.getRoleSession(repoRoot, taskSlug, role);
       if (!current) {
@@ -1232,25 +1331,21 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       return updated;
     },
     async markRoleActivityIdle(repoRoot, taskSlug, role) {
-      const current = await this.getRoleSession(repoRoot, taskSlug, role);
-      if (!current) {
-        return undefined;
+      if (role === TRANSLATOR_ROLE) {
+        void taskSlug;
+        const current = await getProjectToolSessionView(repoRoot, TRANSLATOR_ROLE);
+        return current
+          ? markProjectToolActivityIdle(repoRoot, current, persistTranslatorSession)
+          : undefined;
       }
-
-      const timestamp = now();
-      const updated: RoleSessionRecord = {
-        ...current,
-        activityStatus: "idle",
-        lastTurnEndedAt: timestamp,
-        updatedAt: timestamp
-      };
-
-      deps.registry.upsert(updated);
-
-      const config = await deps.projectService.loadConfig(repoRoot);
-      const task = await deps.taskService.loadTask(repoRoot, taskSlug);
-      await persistRoleSessionRecord(deps.fs, repoRoot, getTaskRuntimeRepoRoot(task), config.stateRoot, updated);
-      return updated;
+      if (role === HARNESS_ENGINEER_ROLE) {
+        void taskSlug;
+        const current = await getProjectToolSessionView(repoRoot, HARNESS_ENGINEER_ROLE);
+        return current
+          ? markProjectToolActivityIdle(repoRoot, current, persistHarnessEngineerSession)
+          : undefined;
+      }
+      return markTaskRoleActivityIdle(repoRoot, taskSlug, role);
     }
   };
 }

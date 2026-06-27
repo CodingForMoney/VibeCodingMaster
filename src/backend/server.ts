@@ -39,6 +39,7 @@ import { createRuntimeCoordinatorService, type RuntimeCoordinatorService } from 
 import { createStatusService, type StatusService } from "./services/status-service.js";
 import { createTaskService, type TaskService } from "./services/task-service.js";
 import { createTaskLaunchService, type TaskLaunchService } from "./services/task-launch-service.js";
+import { createTerminalInterruptService, type TerminalInterruptService } from "./services/terminal-interrupt-service.js";
 import { createTranslationService, type TranslationService } from "./services/translation-service.js";
 import { createDiagnosticsService, type DiagnosticsService } from "./services/diagnostics-service.js";
 import { registerAppSettingsRoutes } from "./api/app-settings-routes.js";
@@ -85,6 +86,7 @@ export interface ServerDeps {
   translationService: TranslationService;
   gatewayService: GatewayService;
   runtimeCoordinator: RuntimeCoordinatorService;
+  terminalInterruptService: TerminalInterruptService;
   runtime: TerminalRuntime;
   diagnosticsService: DiagnosticsService;
 }
@@ -182,7 +184,10 @@ export async function createServer(deps: ServerDeps, options: CreateServerOption
     translationService: deps.translationService
   });
   registerGatewayRoutes(app, { gatewayService: deps.gatewayService });
-  registerTerminalWs(app, { runtime: deps.runtime });
+  registerTerminalWs(app, {
+    runtime: deps.runtime,
+    onManualInterrupt: (sessionId) => deps.terminalInterruptService.handleManualInterrupt(sessionId)
+  });
 
   app.addHook("onReady", async () => {
     await cleanupRecentTranslationRuntime(deps);
@@ -381,6 +386,13 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     jobGuard: createJobGuardService(),
     translationWorkerService
   });
+  const terminalInterruptService = createTerminalInterruptService({
+    runtime,
+    projectService,
+    taskService,
+    sessionService,
+    roundService
+  });
   const diagnosticsService = createDiagnosticsService({
     appRoot,
     runtime,
@@ -407,6 +419,7 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     translationService,
     gatewayService,
     runtimeCoordinator,
+    terminalInterruptService,
     runtime,
     diagnosticsService
   };

@@ -485,6 +485,13 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
 
     const stateInput = createRoundStateInput(context);
     const currentRoundState = await deps.roundService.getSessionRoundState(stateInput);
+    if (
+      currentRoundState.stopReason === "manual-interrupt"
+      && currentRoundState.status === "stopped"
+      && currentRoundState.activeRole === input.role
+    ) {
+      return false;
+    }
     const previousAttempt = currentRoundState.roleRecovery?.role === input.role &&
       currentRoundState.roleRecovery.status !== "failed"
       ? currentRoundState.roleRecovery.attempt

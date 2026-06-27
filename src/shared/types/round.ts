@@ -38,6 +38,9 @@ export type VcmFlowPauseReason =
   | "role-recovery-failed"
   | "awaiting-user";
 
+export type VcmRoundStopReason =
+  | "manual-interrupt";
+
 /**
  * Authoritative flow-pause signal, owned by the backend (round-service). The
  * frontend consumes `paused` + `reason` to decide WHETHER and WHY to alert, and
@@ -71,6 +74,7 @@ export interface VcmSessionRoundState {
   lastTurnEndedAt?: string;
   settleDeadlineAt?: string;
   stoppedAt?: string;
+  stopReason?: VcmRoundStopReason;
   activeTurnStartedAt?: string;
   roundSequence?: number;
   turnCount: number;

@@ -2,6 +2,7 @@ import type { RoleName, RoleStatus } from "../../shared/types/role.js";
 import type { TerminalEvent } from "../../shared/types/terminal.js";
 
 export interface CreateTerminalSessionInput {
+  repoRoot?: string;
   taskSlug: string;
   role: RoleName;
   command: string;
@@ -15,6 +16,7 @@ export interface CreateTerminalSessionInput {
 
 export interface TerminalSession {
   id: string;
+  repoRoot?: string;
   taskSlug: string;
   role: RoleName;
   status: RoleStatus;

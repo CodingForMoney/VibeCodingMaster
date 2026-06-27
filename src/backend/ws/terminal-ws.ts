@@ -9,6 +9,7 @@ import { toVcmError } from "../errors.js";
 
 export interface TerminalWsDeps {
   runtime: TerminalRuntime;
+  onManualInterrupt?: (sessionId: string) => Promise<void> | void;
 }
 
 export function registerTerminalWs(app: FastifyInstance, deps: TerminalWsDeps): void {
@@ -23,18 +24,18 @@ export function registerTerminalWs(app: FastifyInstance, deps: TerminalWsDeps): 
     }
 
     wss.handleUpgrade(request, socket, head, (ws) => {
-      bindTerminalSocket(ws, decodeURIComponent(match[1] ?? ""), deps.runtime);
+      bindTerminalSocket(ws, decodeURIComponent(match[1] ?? ""), deps);
     });
   });
 }
 
-function bindTerminalSocket(ws: WebSocket, sessionId: string, runtime: TerminalRuntime): void {
+function bindTerminalSocket(ws: WebSocket, sessionId: string, deps: TerminalWsDeps): void {
   let unsubscribe = () => {};
   let alive = true;
   let closed = false;
 
   try {
-    unsubscribe = runtime.subscribe(sessionId, (event) => {
+    unsubscribe = deps.runtime.subscribe(sessionId, (event) => {
       if (event.type === "output") {
         send(ws, { type: "output", data: event.data ?? "" });
       } else if (event.type === "exit") {
@@ -75,10 +76,13 @@ function bindTerminalSocket(ws: WebSocket, sessionId: string, runtime: TerminalR
     try {
       const message = JSON.parse(raw.toString()) as ClientTerminalMessage;
       if (message.type === "input") {
-        runtime.write(sessionId, message.data);
+        deps.runtime.write(sessionId, message.data);
+        if (isManualInterruptInput(message.data)) {
+          void Promise.resolve(deps.onManualInterrupt?.(sessionId)).catch(() => undefined);
+        }
       } else if (message.type === "resize") {
         if (isSafeTerminalResize(message.cols, message.rows)) {
-          runtime.resize(sessionId, message.cols, message.rows);
+          deps.runtime.resize(sessionId, message.cols, message.rows);
         }
       }
     } catch (error) {
@@ -109,6 +113,10 @@ export function isSafeTerminalResize(cols: number, rows: number): boolean {
     cols <= MAX_TERMINAL_COLS &&
     rows <= MAX_TERMINAL_ROWS
   );
+}
+
+export function isManualInterruptInput(data: string): boolean {
+  return data.includes("\u0003");
 }
 
 const MIN_TERMINAL_COLS = 20;

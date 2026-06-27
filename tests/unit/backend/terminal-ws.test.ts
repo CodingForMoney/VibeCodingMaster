@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { isSafeTerminalResize } from "../../../src/backend/ws/terminal-ws.js";
+import { isManualInterruptInput, isSafeTerminalResize } from "../../../src/backend/ws/terminal-ws.js";
 
 describe("isSafeTerminalResize", () => {
   it("rejects hidden-container and invalid terminal sizes", () => {
@@ -13,5 +13,11 @@ describe("isSafeTerminalResize", () => {
   it("allows normal terminal sizes", () => {
     expect(isSafeTerminalResize(20, 5)).toBe(true);
     expect(isSafeTerminalResize(120, 40)).toBe(true);
+  });
+
+  it("detects Ctrl+C input without treating normal text as an interrupt", () => {
+    expect(isManualInterruptInput("\u0003")).toBe(true);
+    expect(isManualInterruptInput("abc\u0003def")).toBe(true);
+    expect(isManualInterruptInput("hello")).toBe(false);
   });
 });
