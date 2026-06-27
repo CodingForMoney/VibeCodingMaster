@@ -68,7 +68,8 @@ PM may lightly rewrite the user's words to:
 - When architect provides a phased plan, dispatch only one phase at a time.
 - Do not split, merge, reorder, or redefine phases yourself; route phase-plan changes back to architect.
 - Each coder phase must complete its assigned implementation before PM dispatches the next phase.
-- Phase validation normally runs through L2; reserve full L3 validation for final task acceptance.
+- Phase validation may require evidence up to L2, but route by runner: coder gets L0/L1 and explicitly assigned targeted fast L2 only; reviewer gets full L2, integration, multi-node, cross-service, persistence, runtime, public-contract, L3, and L4 gates.
+- Reserve full L3 validation for final task acceptance unless reviewer says a narrow phase smoke is needed.
 - Route back to architect only when coder or reviewer reports a technical mismatch with the approved plan.
 
 ### Flow Gates

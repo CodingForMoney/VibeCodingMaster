@@ -45,11 +45,11 @@ If a reusable harness problem is suspected, it is enough to record a concise fee
 
 ## VCM Validation Levels
 
-- L0 fast checks: format, lint, typecheck, boundary, dependency, or other cheap project checks.
-- L1 coder unit checks: changed behavior and direct regressions through project-defined unit tests.
-- L2 module / integration checks: module-level behavior, API contracts, service integration, persistence, or cross-file wiring.
-- L3 smoke E2E checks: core user journeys or critical browser/API flows.
-- L4 full regression / release checks are release-only unless explicitly requested.
+- L0 fast checks (default runner: coder): format, lint, typecheck, boundary, dependency, or other cheap project checks.
+- L1 baseline implementation checks (default runner: coder): changed behavior and direct regressions through project-defined unit tests.
+- L2 module / integration checks: targeted fast L2 may run in coder when explicitly assigned; full L2, integration suites, multi-node, cross-service, persistence, runtime, or public-contract gates are reviewer-run.
+- L3 smoke E2E checks (default runner: reviewer): core user journeys or critical browser/API flows.
+- L4 full regression / release checks (default runner: reviewer; architect-owned release flow) are release-only unless explicitly requested.
 
 ## VCM Worktree Policy
 
