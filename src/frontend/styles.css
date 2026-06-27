@@ -1913,6 +1913,14 @@ h2 {
   color: #a3715f;
 }
 
+.translation-manual-panel {
+  display: grid;
+  flex: 0 0 auto;
+  gap: 6px;
+  border-bottom: 1px solid #292d31;
+  padding-bottom: 8px;
+}
+
 .translation-composer {
   display: grid;
   flex: 0 0 auto;
@@ -1928,6 +1936,7 @@ h2 {
   align-items: stretch;
 }
 
+.translation-manual-panel textarea,
 .translation-composer textarea {
   width: 100%;
   min-height: 38px;
@@ -1941,15 +1950,19 @@ h2 {
   resize: vertical;
 }
 
+.translation-manual-panel textarea::placeholder,
 .translation-composer textarea::placeholder {
   color: #7d8590;
 }
 
+.translation-manual-panel textarea::selection,
 .translation-composer textarea::selection {
   background: rgba(139, 148, 158, 0.35);
   color: #ffffff;
 }
 
+.translation-manual-panel textarea:focus,
+.translation-manual-panel textarea:focus-visible,
 .translation-composer textarea:focus,
 .translation-composer textarea:focus-visible {
   border-color: #4b5563;

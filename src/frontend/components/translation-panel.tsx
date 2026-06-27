@@ -238,17 +238,7 @@ export function TranslationPanel({
         </div>
       </header>
 
-      <div className="translation-entry-list" ref={entryListRef}>
-        {entries.length === 0 ? <p className="muted">Translated Claude Code output will appear here.</p> : null}
-        {entries.map((entry) => (
-          <TranslationEntryRow
-            entry={entry}
-            key={entry.id}
-          />
-        ))}
-      </div>
-
-      <div className="translation-composer">
+      <div className="translation-manual-panel">
         <div className="translation-composer-row translation-manual-row">
           <textarea
             value={manualSource}
@@ -265,6 +255,19 @@ export function TranslationPanel({
             </button>
           </div>
         </div>
+      </div>
+
+      <div className="translation-entry-list" ref={entryListRef}>
+        {entries.length === 0 ? <p className="muted">Translated Claude Code output will appear here.</p> : null}
+        {entries.map((entry) => (
+          <TranslationEntryRow
+            entry={entry}
+            key={entry.id}
+          />
+        ))}
+      </div>
+
+      <div className="translation-composer">
         <div className="translation-composer-row">
           <textarea
             value={composer}
