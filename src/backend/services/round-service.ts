@@ -737,10 +737,13 @@ function computeFlowPause(
     return undefined;
   }
   const roundStopped = Boolean(current) && current!.status === "stopped" && Boolean(current!.id);
-  const manuallyInterrupted = roundStopped && current!.stopReason === "manual-interrupt";
+  const nonAlertingStop = roundStopped && (
+    current!.stopReason === "manual-interrupt" ||
+    current!.stopReason === "runtime-recovery"
+  );
 
   if (roleRecovery?.status === "failed") {
-    return roundStopped && !manuallyInterrupted
+    return roundStopped && !nonAlertingStop
       ? {
           paused: true,
           reason: "role-recovery-failed",
@@ -761,7 +764,7 @@ function computeFlowPause(
     };
   }
 
-  if (roundStopped && !manuallyInterrupted) {
+  if (roundStopped && !nonAlertingStop) {
     return {
       paused: true,
       reason: "stopped-no-next-turn",
@@ -974,7 +977,9 @@ function normalizeRound(input: PersistedRound | undefined): PersistedRound | und
       : typeof legacy.pausedAt === "string"
         ? legacy.pausedAt
         : undefined,
-    stopReason: input.stopReason === "manual-interrupt" ? "manual-interrupt" : undefined,
+    stopReason: input.stopReason === "manual-interrupt" || input.stopReason === "runtime-recovery"
+      ? input.stopReason
+      : undefined,
     activeTurnStartedAt: typeof input.activeTurnStartedAt === "string"
       ? input.activeTurnStartedAt
       : typeof legacy.runningSince === "string"

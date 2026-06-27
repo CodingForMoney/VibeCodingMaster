@@ -39,7 +39,8 @@ export type VcmFlowPauseReason =
   | "awaiting-user";
 
 export type VcmRoundStopReason =
-  | "manual-interrupt";
+  | "manual-interrupt"
+  | "runtime-recovery";
 
 /**
  * Authoritative flow-pause signal, owned by the backend (round-service). The

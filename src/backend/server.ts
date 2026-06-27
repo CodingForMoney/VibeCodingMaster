@@ -36,6 +36,7 @@ import { createSessionService, type SessionService } from "./services/session-se
 import { createMessageService, type MessageService } from "./services/message-service.js";
 import { createRoundService, type RoundService } from "./services/round-service.js";
 import { createRuntimeCoordinatorService, type RuntimeCoordinatorService } from "./services/runtime-coordinator-service.js";
+import { createRuntimeRecoveryService, type RuntimeRecoveryService } from "./services/runtime-recovery-service.js";
 import { createStatusService, type StatusService } from "./services/status-service.js";
 import { createTaskService, type TaskService } from "./services/task-service.js";
 import { createTaskLaunchService, type TaskLaunchService } from "./services/task-launch-service.js";
@@ -86,6 +87,7 @@ export interface ServerDeps {
   translationService: TranslationService;
   gatewayService: GatewayService;
   runtimeCoordinator: RuntimeCoordinatorService;
+  runtimeRecoveryService: RuntimeRecoveryService;
   terminalInterruptService: TerminalInterruptService;
   runtime: TerminalRuntime;
   diagnosticsService: DiagnosticsService;
@@ -127,7 +129,7 @@ export async function createServer(deps: ServerDeps, options: CreateServerOption
   });
   registerProjectRoutes(app, {
     projectService: deps.projectService,
-    translationWorkerService: deps.translationWorkerService
+    runtimeRecoveryService: deps.runtimeRecoveryService
   });
   registerHarnessRoutes(app, {
     projectService: deps.projectService,
@@ -371,6 +373,13 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
       return (await projectService.loadConfig(repoRoot)).stateRoot;
     }
   });
+  const runtimeRecoveryService = createRuntimeRecoveryService({
+    fs,
+    runtime,
+    projectService,
+    taskService,
+    translationWorkerService
+  });
   const claudeHookService = createClaudeHookService({
     projectService,
     taskService,
@@ -419,6 +428,7 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     translationService,
     gatewayService,
     runtimeCoordinator,
+    runtimeRecoveryService,
     terminalInterruptService,
     runtime,
     diagnosticsService

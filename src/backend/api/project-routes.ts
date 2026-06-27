@@ -1,11 +1,11 @@
 import type { FastifyInstance } from "fastify";
 import type { ConnectProjectRequest } from "../../shared/types/project.js";
-import type { TranslationWorkerService } from "../services/translation-worker-service.js";
 import type { ProjectService } from "../services/project-service.js";
+import type { RuntimeRecoveryService } from "../services/runtime-recovery-service.js";
 
 export interface ProjectRouteDeps {
   projectService: ProjectService;
-  translationWorkerService?: Pick<TranslationWorkerService, "cleanupStartupRuntime">;
+  runtimeRecoveryService?: Pick<RuntimeRecoveryService, "recoverProject">;
 }
 
 export function registerProjectRoutes(app: FastifyInstance, deps: ProjectRouteDeps): void {
@@ -17,7 +17,7 @@ export function registerProjectRoutes(app: FastifyInstance, deps: ProjectRouteDe
 
   app.post<{ Body: ConnectProjectRequest }>("/api/projects/connect", async (request) => {
     const project = await deps.projectService.connectProject(request.body);
-    await deps.translationWorkerService?.cleanupStartupRuntime(project.repoRoot);
+    await deps.runtimeRecoveryService?.recoverProject(project.repoRoot);
     return project;
   });
 
