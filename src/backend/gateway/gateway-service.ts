@@ -14,6 +14,7 @@ import type {
   UpdateGatewaySettingsRequest
 } from "../../shared/types/gateway.js";
 import type { ProjectSummary } from "../../shared/types/project.js";
+import type { RoleName } from "../../shared/types/role.js";
 import type { RoleSessionRecord } from "../../shared/types/session.js";
 import type { TaskRecord } from "../../shared/types/task.js";
 import { VcmError } from "../errors.js";
@@ -75,6 +76,7 @@ export interface GatewayService {
   checkLarkRegistration(): Promise<CheckGatewayLarkRegistrationResult>;
   bindLarkApp(input: BindGatewayLarkAppRequest): Promise<CheckGatewayLarkRegistrationResult>;
   handlePmStop(input: GatewayPmStopInput): Promise<void>;
+  handleRoleStopFailure(input: GatewayRoleStopFailureInput): Promise<void>;
   getDiagnostics(): GatewayDiagnostics;
 }
 
@@ -82,6 +84,16 @@ export interface GatewayPmStopInput {
   repoRoot: string;
   taskSlug: string;
   session: RoleSessionRecord;
+}
+
+export interface GatewayRoleStopFailureInput {
+  repoRoot: string;
+  taskSlug: string;
+  role: RoleName;
+  error?: string;
+  errorDetails?: string;
+  attempt?: number;
+  maxAttempts?: number;
 }
 
 export interface GatewayServiceDeps {
@@ -1417,6 +1429,43 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
         error: output?.translationError
       });
     },
+    async handleRoleStopFailure(input) {
+      const round = await getGatewayRoundState(input.repoRoot, input.taskSlug);
+      if (round?.stopReason === "manual-interrupt") {
+        return;
+      }
+
+      const settings = await deps.settings.loadSettings();
+      const account = toAccount(settings);
+      const boundUserId = settings.binding.boundUserId;
+      if (!connectionEnabled || !settings.enabled || !account || !boundUserId) {
+        return;
+      }
+
+      const message = formatGatewayRoleStopFailure(input, round);
+      await sendGatewayText(settings, boundUserId, message);
+
+      const current = await deps.settings.loadSettings();
+      await deps.settings.saveSettings({
+        ...current,
+        lastMessageStatus: {
+          checkedAt: now(),
+          direction: "outbound",
+          result: "error",
+          command: "role-stop-failure",
+          preview: message.slice(0, 160),
+          error: input.error
+        },
+        updatedAt: now()
+      });
+      await deps.audit.record({
+        type: "gateway.role_stop_failure",
+        result: "error",
+        command: "role-stop-failure",
+        preview: message,
+        error: input.error
+      });
+    },
     getDiagnostics() {
       return {
         polling: isRunning()
@@ -1487,6 +1536,32 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
     }
     const activeRole = round.activeRole ? `，当前角色：${round.activeRole}` : "";
     return `${roundLabel}运行中${activeRole}。`;
+  }
+
+  function formatGatewayRoleStopFailure(
+    input: GatewayRoleStopFailureInput,
+    round?: VcmSessionRoundState
+  ): string {
+    const roundLabel = round?.roundSequence ? `第 ${round.roundSequence} 轮` : "当前 round";
+    const retryLine = input.maxAttempts !== undefined
+      ? `Retry: ${input.attempt ?? 0}/${input.maxAttempts}`
+      : undefined;
+    return [
+      "VCM 角色异常中断，流程已暂停。",
+      `Task: ${input.taskSlug}`,
+      `Role: ${input.role}`,
+      `Round: ${roundLabel}`,
+      input.error ? `Reason: ${input.error}` : undefined,
+      retryLine,
+      input.errorDetails ? `Details: ${truncateGatewayFailureDetails(input.errorDetails)}` : undefined,
+      "",
+      "请在 VCM 中检查状态，或修复问题后继续给出下一步指令。"
+    ].filter((line): line is string => line !== undefined).join("\n");
+  }
+
+  function truncateGatewayFailureDetails(value: string): string {
+    const trimmed = value.trim();
+    return trimmed.length > 600 ? `${trimmed.slice(0, 600)}...` : trimmed;
   }
 
   function formatGatewayPmOriginalReply(text: string, roundNotice?: string): string {

@@ -502,6 +502,104 @@ describe("gateway-service long connection", () => {
     }
   });
 
+  it("pushes abnormal role stop failures to the Gateway channel", async () => {
+    const settings = createSettings({
+      enabled: true,
+      binding: {
+        token: "token-1",
+        boundUserId: "user-1",
+        loginUserId: "user-1"
+      } as Partial<GatewaySettingsFile["binding"]> as GatewaySettingsFile["binding"]
+    });
+    const sentTexts: string[] = [];
+    const channel = createChannel([], sentTexts);
+    const service = createService({
+      settings,
+      channel,
+      roundState: {
+        status: "stopped",
+        roundId: "round-1",
+        roundSequence: 3,
+        activeRole: "coder",
+        roleRecovery: {
+          role: "coder",
+          status: "failed",
+          attempt: 20,
+          maxAttempts: 20,
+          lastFailureAt: NOW,
+          error: "overloaded",
+          failedAt: NOW
+        },
+        flowPause: {
+          paused: true,
+          reason: "role-recovery-failed",
+          role: "coder",
+          since: NOW
+        }
+      }
+    });
+
+    try {
+      await service.setConnectionEnabled(true);
+      await service.handleRoleStopFailure({
+        repoRoot: "/repo",
+        taskSlug: "demo-task",
+        role: "coder",
+        error: "overloaded",
+        errorDetails: "Claude Code failed after retrying.",
+        attempt: 20,
+        maxAttempts: 20
+      });
+
+      expect(sentTexts).toHaveLength(1);
+      expect(sentTexts[0]).toContain("VCM 角色异常中断");
+      expect(sentTexts[0]).toContain("Role: coder");
+      expect(sentTexts[0]).toContain("Round: 第 3 轮");
+      expect(sentTexts[0]).toContain("Reason: overloaded");
+      expect(sentTexts[0]).toContain("Retry: 20/20");
+      expect(settings.current().lastMessageStatus.command).toBe("role-stop-failure");
+      expect(settings.current().lastMessageStatus.result).toBe("error");
+    } finally {
+      service.stop();
+    }
+  });
+
+  it("does not push role stop failure messages for manual interrupts", async () => {
+    const settings = createSettings({
+      enabled: true,
+      binding: {
+        token: "token-1",
+        boundUserId: "user-1",
+        loginUserId: "user-1"
+      } as Partial<GatewaySettingsFile["binding"]> as GatewaySettingsFile["binding"]
+    });
+    const sentTexts: string[] = [];
+    const channel = createChannel([], sentTexts);
+    const service = createService({
+      settings,
+      channel,
+      roundState: {
+        status: "stopped",
+        stopReason: "manual-interrupt",
+        activeRole: "coder"
+      }
+    });
+
+    try {
+      await service.setConnectionEnabled(true);
+      await service.handleRoleStopFailure({
+        repoRoot: "/repo",
+        taskSlug: "demo-task",
+        role: "coder",
+        error: "manual-interrupt"
+      });
+
+      expect(sentTexts).toEqual([]);
+    } finally {
+      service.stop();
+    }
+  });
+
   it("clears expired tokens so status checks do not restart polling", async () => {
     const settings = createSettings({
       enabled: true,

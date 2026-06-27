@@ -36,6 +36,7 @@ const NON_RETRYABLE_STOP_FAILURE_ERRORS = new Set([
 ]);
 const DIAGNOSTIC_SNIPPET_MAX_LENGTH = 2000;
 type StopFailureRetryTimer = ReturnType<typeof setTimeout>;
+type StopFailureRetryResult = "scheduled" | "manual-interrupt" | "not-scheduled";
 
 interface StopFailureDiagnostic {
   error: string;
@@ -65,7 +66,7 @@ export interface ClaudeHookServiceDeps {
   retryClearTimeout?: (timer: StopFailureRetryTimer) => void;
   harnessService?: Pick<HarnessService, "recordHarnessBootstrapHook">;
   harnessFeedbackService?: Pick<HarnessFeedbackService, "recordHarnessEngineerHook">;
-  gatewayService?: Pick<GatewayService, "handlePmStop">;
+  gatewayService?: Pick<GatewayService, "handlePmStop" | "handleRoleStopFailure">;
   jobGuard?: Pick<JobGuardService, "evaluateStop" | "notePromptSubmitted">;
 }
 
@@ -323,16 +324,28 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
 
     const failure = parseStopFailureDiagnostic(input.event);
     if (!failure.retryable) {
+      if (await isManualInterruptedStopFailure(context, input.role)) {
+        return recordTurnEnd(input, context, eventName, {
+          dispatchRouteFiles: false,
+          notifyGateway: false,
+          settleGuard: false
+        });
+      }
       await markStopFailureRecoveryFailed(input, context, failure, 0);
       return recordTurnEnd(input, context, eventName, {
         dispatchRouteFiles: false,
         notifyGateway: false,
-        settleGuard: false
+        settleGuard: false,
+        gatewayStopFailure: {
+          ...failure,
+          attempt: 0,
+          maxAttempts: MAX_ROLE_RETRY_ATTEMPTS
+        }
       });
     }
 
-    const retryScheduled = await scheduleStopFailureRetry(input, context, failure);
-    if (retryScheduled) {
+    const retryResult = await scheduleStopFailureRetry(input, context, failure);
+    if (retryResult === "scheduled") {
       return {
         ok: true,
         eventName,
@@ -346,7 +359,8 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
     return recordTurnEnd(input, context, eventName, {
       dispatchRouteFiles: false,
       notifyGateway: false,
-      settleGuard: false
+      settleGuard: false,
+      ...(retryResult === "manual-interrupt" ? {} : { gatewayStopFailure: failure })
     });
   }
 
@@ -384,6 +398,10 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
       dispatchRouteFiles: boolean;
       notifyGateway: boolean;
       settleGuard: boolean;
+      gatewayStopFailure?: StopFailureDiagnostic & {
+        attempt?: number;
+        maxAttempts?: number;
+      };
     }
   ): Promise<ClaudeHookResult> {
     const scopedRouteDispatchInput = createRouteDispatchInput(input, context, input.role);
@@ -442,6 +460,17 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
         session
       }).catch(() => undefined);
     }
+    if (boundToTask && options.gatewayStopFailure) {
+      void deps.gatewayService?.handleRoleStopFailure({
+        repoRoot: context.project.repoRoot,
+        taskSlug: context.taskSlug,
+        role: input.role,
+        error: options.gatewayStopFailure.error,
+        errorDetails: options.gatewayStopFailure.errorDetails,
+        attempt: options.gatewayStopFailure.attempt,
+        maxAttempts: options.gatewayStopFailure.maxAttempts
+      }).catch(() => undefined);
+    }
 
     const dispatched = options.dispatchRouteFiles
       ? await deps.messageService.scanAndDispatchPendingRouteFiles(scopedRouteDispatchInput)
@@ -477,10 +506,10 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
     input: ClaudeHookRequest,
     context: Awaited<ReturnType<typeof getHookContext>>,
     failure: StopFailureDiagnostic
-  ): Promise<boolean> {
+  ): Promise<StopFailureRetryResult> {
     const preferences = await deps.appSettings.getPreferences();
     if (!preferences.roleRetryEnabled || !deps.runtime) {
-      return false;
+      return "not-scheduled";
     }
 
     const stateInput = createRoundStateInput(context);
@@ -490,7 +519,7 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
       && currentRoundState.status === "stopped"
       && currentRoundState.activeRole === input.role
     ) {
-      return false;
+      return "manual-interrupt";
     }
     const previousAttempt = currentRoundState.roleRecovery?.role === input.role &&
       currentRoundState.roleRecovery.status !== "failed"
@@ -502,7 +531,7 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
     if (attempt > MAX_ROLE_RETRY_ATTEMPTS) {
       clearStopFailureRetryTimer(context.project.repoRoot, context.taskSlug, input.role);
       await markStopFailureRecoveryFailed(input, context, failure, MAX_ROLE_RETRY_ATTEMPTS, timestamp);
-      return false;
+      return "not-scheduled";
     }
 
     const nextRetryAt = new Date(Date.parse(timestamp) + attempt * ROLE_RETRY_BASE_DELAY_MS).toISOString();
@@ -523,7 +552,21 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
     });
     await deps.sessionService.markRoleActivityRunning(context.project.repoRoot, context.taskSlug, input.role);
     scheduleStopFailureRetryTimer(input, context, attempt, nextRetryAt);
-    return true;
+    return "scheduled";
+  }
+
+  async function isManualInterruptedStopFailure(
+    context: Awaited<ReturnType<typeof getHookContext>>,
+    role: RoleName
+  ): Promise<boolean> {
+    try {
+      const state = await deps.roundService.getSessionRoundState(createRoundStateInput(context));
+      return state.status === "stopped" &&
+        state.stopReason === "manual-interrupt" &&
+        state.activeRole === role;
+    } catch {
+      return false;
+    }
   }
 
   function scheduleStopFailureRetryTimer(
@@ -568,7 +611,15 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
       await recordTurnEnd(input, context, "StopFailure", {
         dispatchRouteFiles: false,
         notifyGateway: false,
-        settleGuard: false
+        settleGuard: false,
+        gatewayStopFailure: {
+          error: recovery.error ?? "stop_failure",
+          errorDetails: recovery.errorDetails,
+          lastAssistantMessage: recovery.lastAssistantMessage,
+          retryable: recovery.retryable ?? true,
+          attempt: recovery.attempt,
+          maxAttempts: recovery.maxAttempts
+        }
       });
       return;
     }
