@@ -451,6 +451,80 @@ describe("gateway-service long connection", () => {
     }
   });
 
+  it("pushes only the latest PM final reply after the Gateway cursor", async () => {
+    const transcriptDir = await mkdtemp(join(tmpdir(), "vcm-gateway-transcript-"));
+    const transcriptPath = join(transcriptDir, "pm.jsonl");
+    await writeFile(transcriptPath, [
+      assistantTranscriptLine(
+        "cursor-anchor",
+        "2026-06-11T00:00:00.250Z",
+        "Already pushed PM reply.",
+        "end_turn"
+      ),
+      assistantTranscriptLine(
+        "older-after-cursor",
+        "2026-06-11T00:00:00.750Z",
+        "Older PM reply after cursor should not be pushed.",
+        "end_turn"
+      ),
+      assistantTranscriptLine(
+        "latest-after-cursor",
+        "2026-06-11T00:00:01.000Z",
+        "Latest PM reply for the round.",
+        "end_turn"
+      )
+    ].join("\n"));
+    const settings = createSettings({
+      enabled: true,
+      translationEnabled: true,
+      pushCursors: {
+        "demo-task:project-manager:claude-pm-session": {
+          lastTranscriptEventId: "cursor-anchor",
+          lastTranscriptTimestamp: "2026-06-11T00:00:00.250Z"
+        }
+      },
+      binding: {
+        token: "token-1",
+        boundUserId: "user-1",
+        loginUserId: "user-1"
+      } as Partial<GatewaySettingsFile["binding"]> as GatewaySettingsFile["binding"]
+    });
+    const sentTexts: string[] = [];
+    const channel = createChannel([], sentTexts);
+    const translatedInputs: string[] = [];
+    const service = createService({
+      settings,
+      channel,
+      async translateGatewayOutput(input) {
+        translatedInputs.push(input.text);
+        expect(input.sourceEntryIds).toEqual(["latest-after-cursor"]);
+        return `ZH: ${input.text}`;
+      }
+    });
+
+    try {
+      await service.setConnectionEnabled(true);
+      await service.handlePmStop({
+        repoRoot: "/repo",
+        taskSlug: "demo-task",
+        session: createPmSession(transcriptPath)
+      });
+
+      expect(translatedInputs).toEqual(["Latest PM reply for the round."]);
+      expect(sentTexts[0]).toContain("Latest PM reply for the round.");
+      expect(sentTexts[0]).not.toContain("Older PM reply after cursor");
+      expect(sentTexts[1]).toContain("ZH: Latest PM reply for the round.");
+      expect(sentTexts[1]).not.toContain("Older PM reply after cursor");
+      expect(settings.current().pushCursors["demo-task:project-manager:claude-pm-session"]).toEqual({
+        lastTranscriptEventId: "latest-after-cursor",
+        lastTranscriptTimestamp: "2026-06-11T00:00:01.000Z"
+      });
+    } finally {
+      service.stop();
+      await rm(transcriptDir, { recursive: true, force: true });
+    }
+  });
+
   it("does not push PM replies for interrupted rounds", async () => {
     const transcriptDir = await mkdtemp(join(tmpdir(), "vcm-gateway-transcript-"));
     const transcriptPath = join(transcriptDir, "pm.jsonl");

@@ -32,7 +32,6 @@ import { resolveExistingClaudeTranscriptPath } from "../services/claude-transcri
 import {
   isFinalTurnTextEvent,
   readTranscriptTextEvents,
-  selectLatestTurnReply,
   type ClaudeTurnReply,
   type TranscriptTextEvent
 } from "../services/claude-transcript-reply.js";
@@ -1358,15 +1357,13 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
       if (nextEvents.length === 0) {
         return;
       }
-      const text = nextEvents.map((event) => event.text).join("\n\n").trim();
+      const latestReply = toGatewayPmReply(nextEvents[nextEvents.length - 1] as TranscriptTextEvent);
+      const text = latestReply.text.trim();
       if (!text) {
         return;
       }
 
-      const latestReply = selectLatestTurnReply(nextEvents, input.session);
-      if (latestReply) {
-        await saveLatestPmReply(input, latestReply);
-      }
+      await saveLatestPmReply(input, latestReply);
 
       const account = toAccount(settings);
       const boundUserId = settings.binding.boundUserId;
@@ -1387,7 +1384,7 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
           repoRoot: input.repoRoot,
           taskSlug: input.taskSlug,
           sourceText: text,
-          sourceEntryIds: nextEvents.map((event) => event.id)
+          sourceEntryIds: latestReply.transcriptEventId ? [latestReply.transcriptEventId] : undefined
         });
 
         await sendGatewayText(
@@ -1400,15 +1397,14 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
       } else {
         clearFailedTranslation(input.repoRoot, input.taskSlug);
       }
-      const lastEvent = nextEvents.at(-1);
       const current = await deps.settings.loadSettings();
       await deps.settings.saveSettings({
         ...current,
         pushCursors: {
           ...current.pushCursors,
           [cursorKey]: {
-            lastTranscriptEventId: lastEvent?.id ?? null,
-            lastTranscriptTimestamp: lastEvent?.timestamp ?? null
+            lastTranscriptEventId: latestReply.transcriptEventId,
+            lastTranscriptTimestamp: latestReply.transcriptTimestamp
           }
         },
         lastMessageStatus: {
@@ -1699,6 +1695,15 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
     if (lastFailedTranslation?.repoRoot === repoRoot && lastFailedTranslation.taskSlug === taskSlug) {
       lastFailedTranslation = null;
     }
+  }
+
+  function toGatewayPmReply(event: TranscriptTextEvent): ClaudeTurnReply {
+    return {
+      text: event.text,
+      truncated: false,
+      transcriptEventId: event.id,
+      transcriptTimestamp: event.timestamp
+    };
   }
 
   async function saveLatestPmReply(input: GatewayPmStopInput, reply: ClaudeTurnReply): Promise<void> {
