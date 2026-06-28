@@ -139,6 +139,7 @@ export interface TranslateGatewayOutputInput {
   role: RoleName;
   text: string;
   sourceEntryIds?: string[];
+  allowCreate?: boolean;
 }
 
 export interface TranslationServiceDeps {
@@ -1449,6 +1450,21 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
       const reusable = await findReusableGatewayOutputTranslation(input, config);
       if (reusable) {
         return reusable.trim();
+      }
+
+      if (input.allowCreate) {
+        const translation = await translateText({
+          repoRoot: input.repoRoot,
+          taskSlug: input.taskSlug,
+          role: input.role,
+          direction: "cc-output-to-user",
+          text: input.text,
+          sourceKind: "prose",
+          sourceLanguage: "en",
+          targetLanguage: config.targetLanguage,
+          config
+        });
+        return translation.text.trim();
       }
 
       throw new VcmError({

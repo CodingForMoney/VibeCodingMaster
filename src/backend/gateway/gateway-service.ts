@@ -1676,7 +1676,8 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
         repoRoot: failed.repoRoot,
         taskSlug: failed.taskSlug,
         role: failed.role,
-        text: failed.sourceText
+        text: failed.sourceText,
+        allowCreate: true
       });
       lastFailedTranslation = null;
       return `重新翻译成功：\n\n${text}`;

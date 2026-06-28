@@ -1397,6 +1397,59 @@ describe("translation-service", () => {
     expect(translatorCalls).toHaveLength(0);
   });
 
+  it("creates a new translation for explicit Gateway retry when panel output is missing", async () => {
+    const fs = createMemoryFs();
+    const appSettings = createAppSettingsService({
+      fs,
+      settingsPath: "/settings.json",
+    });
+    const pmSession = createRoleSessionRecord({
+      id: "session-pm",
+      role: "project-manager",
+      command: "claude --agent project-manager",
+      cwd: "/repo/.claude/worktrees/demo-task"
+    });
+    const translatorCalls: Array<{
+      repoRoot: string;
+      taskSlug: string;
+      direction: string;
+      sourceText: string;
+      sourceLanguage: string;
+      targetLanguage: string;
+    }> = [];
+    const service = createTranslationService({
+      appSettings,
+      translationWorkerService: createTranslationWorkerServiceStub(translatorCalls, "PM 译文。"),
+      runtime: createRuntimeStub([pmSession]),
+      sessionRegistry: createRegistryStub(pmSession),
+      transcripts: createSessionTranscriptStub(),
+      sessionService: {
+        async getRoleSession() {
+          return pmSession;
+        }
+      } as SessionService
+    });
+
+    const output = await service.translateGatewayOutput({
+      repoRoot: "/repo",
+      taskSlug: "demo-task",
+      role: "project-manager",
+      text: "PM final reply.",
+      sourceEntryIds: ["pm-final"],
+      allowCreate: true
+    });
+
+    expect(output).toBe("PM 译文。");
+    expect(translatorCalls).toEqual([expect.objectContaining({
+      repoRoot: "/repo",
+      taskSlug: "demo-task",
+      direction: "cc-output-to-user",
+      sourceText: "PM final reply.",
+      sourceLanguage: "en",
+      targetLanguage: "zh-CN"
+    })]);
+  });
+
   it("waits for an in-flight PM final reply translation before Gateway output", async () => {
     const fs = createMemoryFs();
     const appSettings = createAppSettingsService({

@@ -345,11 +345,13 @@ describe("gateway-service long connection", () => {
     const sentTexts: string[] = [];
     const channel = createManualChannel(sentTexts);
     let translateCalls = 0;
+    const allowCreateValues: Array<boolean | undefined> = [];
     const service = createService({
       settings,
       channel,
-      async translateGatewayOutput() {
+      async translateGatewayOutput(input) {
         translateCalls += 1;
+        allowCreateValues.push(input.allowCreate);
         if (translateCalls === 1) {
           throw new Error("translation timeout");
         }
@@ -383,6 +385,7 @@ describe("gateway-service long connection", () => {
 
       expect(sentTexts[2]).toContain("重新翻译成功：");
       expect(sentTexts[2]).toContain("重新翻译后的中文状态。");
+      expect(allowCreateValues).toEqual([undefined, true]);
     } finally {
       service.stop();
       await rm(transcriptDir, { recursive: true, force: true });
@@ -1046,6 +1049,7 @@ function createService(input: {
     role: "project-manager";
     text: string;
     sourceEntryIds?: string[];
+    allowCreate?: boolean;
   }) => Promise<string>;
   translateUserInput?: (input: {
     repoRoot: string;
@@ -1159,6 +1163,7 @@ function createService(input: {
         role: "project-manager";
         text: string;
         sourceEntryIds?: string[];
+        allowCreate?: boolean;
       }) {
         return input.translateGatewayOutput
           ? input.translateGatewayOutput(translateInput)
