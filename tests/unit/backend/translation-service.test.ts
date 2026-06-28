@@ -1359,6 +1359,44 @@ describe("translation-service", () => {
     expect(translatorCalls).toHaveLength(1);
   });
 
+  it("does not create a new translation when Gateway output is missing from the panel", async () => {
+    const fs = createMemoryFs();
+    const appSettings = createAppSettingsService({
+      fs,
+      settingsPath: "/settings.json",
+    });
+    const pmSession = createRoleSessionRecord({
+      id: "session-pm",
+      role: "project-manager",
+      command: "claude --agent project-manager",
+      cwd: "/repo/.claude/worktrees/demo-task"
+    });
+    const translatorCalls: Array<{ sourceText: string }> = [];
+    const service = createTranslationService({
+      appSettings,
+      translationWorkerService: createTranslationWorkerServiceStub(translatorCalls, "PM 译文。"),
+      runtime: createRuntimeStub([pmSession]),
+      sessionRegistry: createRegistryStub(pmSession),
+      transcripts: createSessionTranscriptStub(),
+      sessionService: {
+        async getRoleSession() {
+          return pmSession;
+        }
+      } as SessionService
+    });
+
+    await expect(service.translateGatewayOutput({
+      repoRoot: "/repo",
+      taskSlug: "demo-task",
+      role: "project-manager",
+      text: "PM final reply.",
+      sourceEntryIds: ["pm-final"]
+    })).rejects.toMatchObject({
+      code: "GATEWAY_TRANSLATION_RESULT_MISSING"
+    });
+    expect(translatorCalls).toHaveLength(0);
+  });
+
   it("waits for an in-flight PM final reply translation before Gateway output", async () => {
     const fs = createMemoryFs();
     const appSettings = createAppSettingsService({

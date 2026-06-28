@@ -1451,18 +1451,12 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
         return reusable.trim();
       }
 
-      const translation = await translateText({
-        repoRoot: input.repoRoot,
-        taskSlug: input.taskSlug,
-        role: input.role,
-        direction: "cc-output-to-user",
-        text: input.text,
-        sourceKind: "prose",
-        sourceLanguage: "en",
-        targetLanguage: config.targetLanguage,
-        config
+      throw new VcmError({
+        code: "GATEWAY_TRANSLATION_RESULT_MISSING",
+        message: "Gateway output translation is not available in the current translation panel.",
+        statusCode: 409,
+        hint: "Wait for the translation panel to finish translating the PM final reply, then retry from Gateway."
       });
-      return translation.text.trim();
     },
     getDiagnostics() {
       let transcriptWatchers = 0;
