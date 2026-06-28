@@ -76,6 +76,21 @@ export function XtermView({ sessionId, active = true, onEvent }: XtermViewProps)
     terminal.open(containerRef.current);
     terminalRef.current = terminal;
     fitAddonRef.current = fitAddon;
+    terminal.attachCustomKeyEventHandler((event) => {
+      if (!isCtrlC(event) || !terminal.hasSelection()) {
+        return true;
+      }
+
+      const selection = terminal.getSelection();
+      if (!selection) {
+        return true;
+      }
+
+      event.preventDefault();
+      event.stopPropagation();
+      void writeClipboardText(selection);
+      return false;
+    });
 
     const initialRect = containerRef.current.getBoundingClientRect();
     if (initialRect.width >= MIN_VISIBLE_TERMINAL_WIDTH && initialRect.height >= MIN_VISIBLE_TERMINAL_HEIGHT) {
@@ -181,6 +196,31 @@ const MIN_VISIBLE_TERMINAL_WIDTH = 160;
 const MIN_VISIBLE_TERMINAL_HEIGHT = 80;
 const MIN_TERMINAL_COLS = 20;
 const MIN_TERMINAL_ROWS = 5;
+
+function isCtrlC(event: KeyboardEvent): boolean {
+  return event.type === "keydown" && event.ctrlKey && !event.metaKey && !event.altKey && event.key.toLowerCase() === "c";
+}
+
+async function writeClipboardText(text: string): Promise<void> {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return;
+    }
+  } catch {
+    // Fall back to execCommand below.
+  }
+
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "true");
+  textarea.style.position = "fixed";
+  textarea.style.opacity = "0";
+  document.body.appendChild(textarea);
+  textarea.select();
+  document.execCommand("copy");
+  textarea.remove();
+}
 
 const CLAUDE_TERMINAL_THEME = {
   background: "#0d1117",
