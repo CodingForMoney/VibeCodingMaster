@@ -77,12 +77,26 @@ export function XtermView({ sessionId, active = true, onEvent }: XtermViewProps)
     terminalRef.current = terminal;
     fitAddonRef.current = fitAddon;
     terminal.attachCustomKeyEventHandler((event) => {
-      if (!isCtrlC(event) || !terminal.hasSelection()) {
+      const copyShortcut = terminalCopyShortcut(event);
+      if (!copyShortcut) {
         return true;
       }
 
+      if (!terminal.hasSelection()) {
+        if (copyShortcut === "command") {
+          event.preventDefault();
+          event.stopPropagation();
+          return false;
+        }
+        return true;
+      }
       const selection = terminal.getSelection();
       if (!selection) {
+        if (copyShortcut === "command") {
+          event.preventDefault();
+          event.stopPropagation();
+          return false;
+        }
         return true;
       }
 
@@ -197,8 +211,14 @@ const MIN_VISIBLE_TERMINAL_HEIGHT = 80;
 const MIN_TERMINAL_COLS = 20;
 const MIN_TERMINAL_ROWS = 5;
 
-function isCtrlC(event: KeyboardEvent): boolean {
-  return event.type === "keydown" && event.ctrlKey && !event.metaKey && !event.altKey && event.key.toLowerCase() === "c";
+function terminalCopyShortcut(event: KeyboardEvent): "command" | "control" | undefined {
+  if (event.type !== "keydown" || event.altKey || event.key.toLowerCase() !== "c") {
+    return undefined;
+  }
+  if (event.metaKey) {
+    return "command";
+  }
+  return event.ctrlKey ? "control" : undefined;
 }
 
 async function writeClipboardText(text: string): Promise<void> {
