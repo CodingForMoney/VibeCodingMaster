@@ -122,15 +122,15 @@ describe("createSessionService", () => {
     const service = createTestSessionService(fs, runtimeInputs);
 
     const started = await service.startRoleSession("/repo", "demo-task", "coder", {
-      model: "opus[1m]"
+      model: "opus"
     });
 
-    expect(started.model).toBe("opus[1m]");
+    expect(started.model).toBe("opus");
     expect(runtimeInputs[0]?.args).toEqual([
       "--agent",
       "coder",
       "--model",
-      "opus[1m]"
+      "opus"
     ]);
   });
 
@@ -163,13 +163,13 @@ describe("createSessionService", () => {
 
     const started = await service.startRoleSession("/repo", "demo-task", "gate-reviewer", {
       permissionMode: "bypassPermissions",
-      model: "opus[1m]",
+      model: "opus",
       effort: "high"
     });
 
     expect(started.role).toBe("gate-reviewer");
     expect(started.taskSlug).toBe("demo-task");
-    expect(started.model).toBe("opus[1m]");
+    expect(started.model).toBe("opus");
     expect(started.effort).toBe("high");
     expect(started.claudeSessionId).toBe("");
     expect(started.transcriptPath).toBeUndefined();
@@ -179,7 +179,7 @@ describe("createSessionService", () => {
       "--agent",
       "gate-reviewer",
       "--model",
-      "opus[1m]",
+      "opus",
       "--effort",
       "high",
       "--permission-mode",
@@ -413,13 +413,13 @@ describe("createSessionService", () => {
     const resumed = await secondService.ensureProjectTranslatorSession("/repo", {
       taskSlug: "demo-task",
       permissionMode: "bypassPermissions",
-      model: "opus[1m]",
+      model: "opus",
       effort: "high"
     });
 
     expect(resumed.claudeSessionId).toBe("translator-ensure-session");
     expect(resumed.permissionMode).toBe("bypassPermissions");
-    expect(resumed.model).toBe("opus[1m]");
+    expect(resumed.model).toBe("opus");
     expect(resumed.effort).toBe("high");
     expect(runtimeInputs[0]?.args).toEqual([
       "--agent",
@@ -427,7 +427,7 @@ describe("createSessionService", () => {
       "--resume",
       "translator-ensure-session",
       "--model",
-      "opus[1m]",
+      "opus",
       "--effort",
       "high",
       "--permission-mode",
@@ -686,7 +686,7 @@ describe("createSessionService", () => {
     const started = await service.startProjectHarnessEngineerSession("/repo", {
       taskSlug: "demo-task",
       permissionMode: "bypassPermissions",
-      model: "opus[1m]",
+      model: "opus",
       effort: "medium"
     });
 
@@ -703,7 +703,7 @@ describe("createSessionService", () => {
       "--agent",
       "harness-engineer",
       "--model",
-      "opus[1m]",
+      "opus",
       "--effort",
       "medium",
       "--permission-mode",
@@ -766,7 +766,7 @@ describe("createSessionService", () => {
     const service = createTestSessionService(fs, runtimeInputs);
 
     const started = await service.startRoleSession("/repo", "demo-task", "gate-reviewer", {
-      model: "sonnet[1m]",
+      model: "sonnet",
       effort: "max"
     });
 

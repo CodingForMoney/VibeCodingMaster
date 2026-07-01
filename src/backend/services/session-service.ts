@@ -1850,9 +1850,7 @@ function normalizeClaudePermissionMode(value: unknown): ClaudePermissionMode {
 function normalizeClaudeModel(value: unknown): ClaudeModel {
   if (
     value === "opus"
-    || value === "opus[1m]"
     || value === "sonnet"
-    || value === "sonnet[1m]"
     || value === "fable"
   ) {
     return value;

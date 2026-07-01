@@ -36,16 +36,6 @@ export const CLAUDE_MODEL_OPTIONS = [
     description: "Account default"
   },
   {
-    value: "opus[1m]",
-    label: "Opus 1M",
-    description: "Force 1M context"
-  },
-  {
-    value: "sonnet[1m]",
-    label: "Sonnet 1M",
-    description: "Force 1M context"
-  },
-  {
     value: "fable",
     label: "Fable",
     description: "Claude Fable"

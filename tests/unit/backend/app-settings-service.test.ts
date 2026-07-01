@@ -99,7 +99,7 @@ describe("app-settings-service", () => {
     launchTemplate.autoOrchestration = false;
     launchTemplate.roles.coder = {
       permissionMode: "bypassPermissions",
-      model: "opus[1m]",
+      model: "opus",
       effort: "high"
     };
 
