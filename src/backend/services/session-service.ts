@@ -1849,12 +1849,11 @@ function normalizeClaudePermissionMode(value: unknown): ClaudePermissionMode {
 
 function normalizeClaudeModel(value: unknown): ClaudeModel {
   if (
-    value === "best"
-    || value === "fable"
-    || value === "opus"
+    value === "opus"
     || value === "opus[1m]"
-    || value === "claude-opus-4-8"
-    || value === "claude-opus-4-8[1m]"
+    || value === "sonnet"
+    || value === "sonnet[1m]"
+    || value === "fable"
   ) {
     return value;
   }

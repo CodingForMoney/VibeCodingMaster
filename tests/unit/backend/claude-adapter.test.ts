@@ -39,7 +39,7 @@ describe("createClaudeAdapter", () => {
       "default",
       "00000000-0000-4000-8000-000000000001",
       false,
-      "claude-opus-4-8[1m]"
+      "opus[1m]"
     )).toEqual({
       command: "claude",
       args: [
@@ -48,9 +48,9 @@ describe("createClaudeAdapter", () => {
         "--session-id",
         "00000000-0000-4000-8000-000000000001",
         "--model",
-        "claude-opus-4-8[1m]"
+        "opus[1m]"
       ],
-      display: "claude --agent coder --session-id 00000000-0000-4000-8000-000000000001 --model 'claude-opus-4-8[1m]'"
+      display: "claude --agent coder --session-id 00000000-0000-4000-8000-000000000001 --model 'opus[1m]'"
     });
   });
 

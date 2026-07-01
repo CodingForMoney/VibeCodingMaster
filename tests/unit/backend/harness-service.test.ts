@@ -443,17 +443,17 @@ describe("createHarnessService", () => {
 
     const started = await service.startHarnessBootstrap("/repo", "/repo", {
       permissionMode: "bypassPermissions",
-      model: "claude-opus-4-8[1m]",
+      model: "opus[1m]",
       effort: "high"
     });
 
     expect(started.session.status).toBe("running");
     expect(started.session.permissionMode).toBe("bypassPermissions");
-    expect(started.session.model).toBe("claude-opus-4-8[1m]");
+    expect(started.session.model).toBe("opus[1m]");
     expect(started.session.effort).toBe("high");
     expect(ensureRequests[0]).toMatchObject({
       permissionMode: "bypassPermissions",
-      model: "claude-opus-4-8[1m]",
+      model: "opus[1m]",
       effort: "high"
     });
     expect(runtimeInputs[0]).toMatchObject({
