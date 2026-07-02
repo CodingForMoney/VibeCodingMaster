@@ -76,35 +76,6 @@ export function XtermView({ sessionId, active = true, onEvent }: XtermViewProps)
     terminal.open(containerRef.current);
     terminalRef.current = terminal;
     fitAddonRef.current = fitAddon;
-    terminal.attachCustomKeyEventHandler((event) => {
-      const copyShortcut = terminalCopyShortcut(event);
-      if (!copyShortcut) {
-        return true;
-      }
-
-      if (!terminal.hasSelection()) {
-        if (copyShortcut === "command") {
-          event.preventDefault();
-          event.stopPropagation();
-          return false;
-        }
-        return true;
-      }
-      const selection = terminal.getSelection();
-      if (!selection) {
-        if (copyShortcut === "command") {
-          event.preventDefault();
-          event.stopPropagation();
-          return false;
-        }
-        return true;
-      }
-
-      event.preventDefault();
-      event.stopPropagation();
-      copyTerminalSelection(terminal, selection);
-      return false;
-    });
 
     const initialRect = containerRef.current.getBoundingClientRect();
     if (initialRect.width >= MIN_VISIBLE_TERMINAL_WIDTH && initialRect.height >= MIN_VISIBLE_TERMINAL_HEIGHT) {
@@ -210,50 +181,6 @@ const MIN_VISIBLE_TERMINAL_WIDTH = 160;
 const MIN_VISIBLE_TERMINAL_HEIGHT = 80;
 const MIN_TERMINAL_COLS = 20;
 const MIN_TERMINAL_ROWS = 5;
-
-function terminalCopyShortcut(event: KeyboardEvent): "command" | "control" | undefined {
-  if (event.type !== "keydown" || event.altKey || event.key.toLowerCase() !== "c") {
-    return undefined;
-  }
-  if (event.metaKey) {
-    return "command";
-  }
-  return event.ctrlKey ? "control" : undefined;
-}
-
-function copyTerminalSelection(terminal: Terminal, text: string): void {
-  if (!copyTextWithHiddenTextarea(text)) {
-    void writeClipboardText(text);
-  }
-  terminal.focus();
-}
-
-function copyTextWithHiddenTextarea(text: string): boolean {
-  const textarea = document.createElement("textarea");
-  textarea.value = text;
-  textarea.setAttribute("readonly", "true");
-  textarea.style.position = "fixed";
-  textarea.style.top = "0";
-  textarea.style.left = "-9999px";
-  textarea.style.opacity = "0";
-  document.body.appendChild(textarea);
-  textarea.focus();
-  textarea.select();
-  try {
-    return document.execCommand("copy");
-  } finally {
-    textarea.remove();
-  }
-}
-
-async function writeClipboardText(text: string): Promise<void> {
-  try {
-    await navigator.clipboard?.writeText(text);
-  } catch {
-    // The synchronous textarea path above already failed. Ignore here so copy
-    // shortcuts never leak Ctrl+C/Cmd+C into the terminal.
-  }
-}
 
 const CLAUDE_TERMINAL_THEME = {
   background: "#0d1117",
