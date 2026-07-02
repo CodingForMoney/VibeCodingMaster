@@ -16,6 +16,7 @@ NODE_SOURCE_EXTENSIONS = (".ts", ".tsx", ".js", ".jsx", ".mjs", ".cjs")
 NODE_EXCLUDED_DIRS = {"node_modules", "dist", "build", "coverage", ".next", ".turbo", ".vite"}
 NODE_DEPENDENCY_TABLES = ("dependencies", "devDependencies", "peerDependencies", "optionalDependencies")
 NODE_TEST_MARKERS = (".test.", ".spec.")
+RUST_EXCLUDED_DIRS = {"target", ".git"}
 
 
 def relative_path(path: Path, root: Path) -> str:
@@ -55,14 +56,17 @@ def load_toml(path: Path) -> dict:
 
 
 def load_cargo_metadata(cargo_root: Path) -> dict | None:
-    result = subprocess.run(
-        ["cargo", "metadata", "--format-version", "1", "--no-deps"],
-        cwd=cargo_root,
-        check=False,
-        text=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-    )
+    try:
+        result = subprocess.run(
+            ["cargo", "metadata", "--format-version", "1", "--no-deps"],
+            cwd=cargo_root,
+            check=False,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+        )
+    except FileNotFoundError:
+        return None
     if result.returncode != 0:
         return None
     return json.loads(result.stdout)
@@ -163,6 +167,7 @@ def rust_files_under(module_dir: Path, project_root: Path, child: str) -> list[s
         relative_path(path, project_root)
         for path in root.rglob("*.rs")
         if path.is_file()
+        and not any(part in RUST_EXCLUDED_DIRS for part in path.relative_to(module_dir).parts)
     )
 
 
