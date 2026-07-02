@@ -102,7 +102,7 @@ export function XtermView({ sessionId, active = true, onEvent }: XtermViewProps)
 
       event.preventDefault();
       event.stopPropagation();
-      void writeClipboardText(selection);
+      copyTerminalSelection(terminal, selection);
       return false;
     });
 
@@ -221,25 +221,38 @@ function terminalCopyShortcut(event: KeyboardEvent): "command" | "control" | und
   return event.ctrlKey ? "control" : undefined;
 }
 
-async function writeClipboardText(text: string): Promise<void> {
-  try {
-    if (navigator.clipboard?.writeText) {
-      await navigator.clipboard.writeText(text);
-      return;
-    }
-  } catch {
-    // Fall back to execCommand below.
+function copyTerminalSelection(terminal: Terminal, text: string): void {
+  if (!copyTextWithHiddenTextarea(text)) {
+    void writeClipboardText(text);
   }
+  terminal.focus();
+}
 
+function copyTextWithHiddenTextarea(text: string): boolean {
   const textarea = document.createElement("textarea");
   textarea.value = text;
   textarea.setAttribute("readonly", "true");
   textarea.style.position = "fixed";
+  textarea.style.top = "0";
+  textarea.style.left = "-9999px";
   textarea.style.opacity = "0";
   document.body.appendChild(textarea);
+  textarea.focus();
   textarea.select();
-  document.execCommand("copy");
-  textarea.remove();
+  try {
+    return document.execCommand("copy");
+  } finally {
+    textarea.remove();
+  }
+}
+
+async function writeClipboardText(text: string): Promise<void> {
+  try {
+    await navigator.clipboard?.writeText(text);
+  } catch {
+    // The synchronous textarea path above already failed. Ignore here so copy
+    // shortcuts never leak Ctrl+C/Cmd+C into the terminal.
+  }
 }
 
 const CLAUDE_TERMINAL_THEME = {
