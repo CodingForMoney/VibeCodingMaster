@@ -570,6 +570,33 @@ describe("createSessionService", () => {
     expect(writes.some((write) => write.includes("/cd"))).toBe(false);
   });
 
+  it("does not let Translator prompt hooks clobber the VCM-managed cwd", async () => {
+    const fs = createMemoryFs();
+    const runtimeInputs: CreateTerminalSessionInput[] = [];
+    const writes: string[] = [];
+    const service = createTestSessionService(fs, runtimeInputs, writes);
+
+    const started = await service.startProjectTranslatorSession("/repo", { taskSlug: "demo-task" });
+    expect(started.cwd).toBe(TASK_WORKTREE);
+    expect(writes[0]).toContain(`/cd ${TASK_WORKTREE}`);
+    expect(writes[1]).toBe("\r");
+
+    const hooked = await service.recordProjectTranslatorHookEvent("/repo", {
+      eventName: "UserPromptSubmit",
+      sessionId: "translator-cd-prompt-session",
+      transcriptPath: claudeTranscriptPath("/repo", "translator-cd-prompt-session"),
+      cwd: "/repo"
+    });
+    expect(hooked?.cwd).toBe(TASK_WORKTREE);
+
+    const persisted = await fs.readJson<{ record: { cwd: string } }>("/repo/.ai/vcm/translations/session.json");
+    expect(persisted.record.cwd).toBe(TASK_WORKTREE);
+
+    const ensured = await service.ensureProjectTranslatorSession("/repo", { taskSlug: "demo-task" });
+    expect(ensured.cwd).toBe(TASK_WORKTREE);
+    expect(writes.filter((write) => write.includes("/cd"))).toHaveLength(1);
+  });
+
   it("emits /cd as a bare unquoted path so a worktree path with spaces is sent intact (#16 de-quote)", async () => {
     const fs = createMemoryFs();
     const runtimeInputs: CreateTerminalSessionInput[] = [];
@@ -720,6 +747,33 @@ describe("createSessionService", () => {
       cwd: TASK_WORKTREE
     });
     await expect(fs.pathExists("/repo/.ai/vcm/harness-engineer/session.json")).resolves.toBe(true);
+  });
+
+  it("does not let Harness Engineer prompt hooks clobber the VCM-managed cwd", async () => {
+    const fs = createMemoryFs();
+    const runtimeInputs: CreateTerminalSessionInput[] = [];
+    const writes: string[] = [];
+    const service = createTestSessionService(fs, runtimeInputs, writes);
+
+    const started = await service.startProjectHarnessEngineerSession("/repo", { taskSlug: "demo-task" });
+    expect(started.cwd).toBe(TASK_WORKTREE);
+    expect(writes[0]).toContain(`/cd ${TASK_WORKTREE}`);
+    expect(writes[1]).toBe("\r");
+
+    const hooked = await service.recordProjectHarnessEngineerHookEvent("/repo", {
+      eventName: "UserPromptSubmit",
+      sessionId: "harness-cd-prompt-session",
+      transcriptPath: claudeTranscriptPath("/repo", "harness-cd-prompt-session"),
+      cwd: "/repo"
+    });
+    expect(hooked?.cwd).toBe(TASK_WORKTREE);
+
+    const persisted = await fs.readJson<{ record: { cwd: string } }>("/repo/.ai/vcm/harness-engineer/session.json");
+    expect(persisted.record.cwd).toBe(TASK_WORKTREE);
+
+    const ensured = await service.ensureProjectHarnessEngineerSession("/repo", { taskSlug: "demo-task" });
+    expect(ensured.cwd).toBe(TASK_WORKTREE);
+    expect(writes.filter((write) => write.includes("/cd"))).toHaveLength(1);
   });
 
   it("marks sessions outdated when harness revision advances and notifies them", async () => {
