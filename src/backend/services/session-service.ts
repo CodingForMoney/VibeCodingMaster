@@ -16,7 +16,7 @@ import { resolveRepoPath } from "../adapters/filesystem.js";
 import type { ClaudeAdapter } from "../adapters/claude-adapter.js";
 import type { FileSystemAdapter } from "../adapters/filesystem.js";
 import type { SessionRegistry } from "../runtime/session-registry.js";
-import type { TerminalRuntime } from "../runtime/terminal-runtime.js";
+import type { TerminalRuntime, TerminalSession } from "../runtime/terminal-runtime.js";
 import { submitTerminalInput } from "../runtime/terminal-submit.js";
 import type { ArtifactService } from "./artifact-service.js";
 import { claudeTranscriptPath } from "./claude-transcript-service.js";
@@ -67,6 +67,7 @@ export interface SessionServiceDeps {
   taskService: Pick<TaskService, "loadTask">;
   apiUrl?: string;
   sandboxMode?: string;
+  isProcessAlive?: (pid: number) => boolean;
   now?: () => string;
 }
 
@@ -128,6 +129,7 @@ export type RecordProjectToolHookEventInput = RecordProjectTranslatorHookEventIn
 
 export function createSessionService(deps: SessionServiceDeps): SessionService {
   const now = deps.now ?? (() => new Date().toISOString());
+  const isProcessAlive = deps.isProcessAlive ?? defaultIsProcessAlive;
 
   async function readCurrentHarnessRevision(repoRoot: string): Promise<number> {
     return (await readHarnessRevisionState(deps.fs, repoRoot)).revision;
@@ -374,9 +376,15 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
         await clearPersistedTranslatorSession(deps.fs, repoRoot);
         return launchProjectTranslatorSession(repoRoot, input, "fresh");
       }
+      const migrated = await migrateRunningProjectToolSessionCwd(repoRoot, record, taskContext.taskRepoRoot, { alreadyReady: true });
+      if (migrated.status !== "running") {
+        deps.registry.remove(record.id);
+        await clearPersistedTranslatorSession(deps.fs, repoRoot);
+        return launchProjectTranslatorSession(repoRoot, input, "fresh");
+      }
       return withHarnessRevisionView(
         repoRoot,
-        await migrateRunningProjectToolSessionCwd(repoRoot, record, taskContext.taskRepoRoot, { alreadyReady: true })
+        migrated
       );
     }
 
@@ -503,9 +511,15 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
         await clearPersistedHarnessEngineerSession(deps.fs, repoRoot);
         return launchProjectHarnessEngineerSession(repoRoot, input, "fresh");
       }
+      const migrated = await migrateRunningProjectToolSessionCwd(repoRoot, record, taskContext.taskRepoRoot, { alreadyReady: true });
+      if (migrated.status !== "running") {
+        deps.registry.remove(record.id);
+        await clearPersistedHarnessEngineerSession(deps.fs, repoRoot);
+        return launchProjectHarnessEngineerSession(repoRoot, input, "fresh");
+      }
       return withHarnessRevisionView(
         repoRoot,
-        await migrateRunningProjectToolSessionCwd(repoRoot, record, taskContext.taskRepoRoot, { alreadyReady: true })
+        migrated
       );
     }
 
@@ -551,7 +565,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     let quietPolls = 0;
     for (let poll = 0; poll < SESSION_READY_MAX_POLLS; poll += 1) {
       const live = deps.runtime.getSession(sessionId);
-      if (!live || isExitedStatus(live.status)) {
+      if (!isRuntimeSessionAlive(live)) {
         return "exited";
       }
       if (live.lastOutputAt) {
@@ -583,24 +597,30 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     ) {
       return session;
     }
+    const runtimeSession = deps.runtime.getSession(session.id);
+    if (!isRuntimeSessionAlive(runtimeSession)) {
+      return markProjectToolRuntimeUnavailable(repoRoot, session);
+    }
     if (samePath(session.cwd, targetCwd)) {
       return session;
     }
 
-    const runtimeSession = deps.runtime.getSession(session.id);
-    if (!runtimeSession || runtimeSession.status !== "running") {
-      return session;
-    }
-
     if (!options.alreadyReady && (await waitForSessionInputReady(session.id)) === "exited") {
-      return session;
+      return markProjectToolRuntimeUnavailable(repoRoot, session);
     }
 
     assertSafeCwdTarget(targetCwd);
     const timestamp = now();
-    await submitTerminalInput(deps.runtime, session.id, formatClaudeCdCommand(targetCwd), {
-      enterDelayMs: PROJECT_TOOL_CD_ENTER_DELAY_MS
-    });
+    try {
+      await submitTerminalInput(deps.runtime, session.id, formatClaudeCdCommand(targetCwd), {
+        enterDelayMs: PROJECT_TOOL_CD_ENTER_DELAY_MS
+      });
+    } catch (error) {
+      if (isSessionMissingError(error) || !isRuntimeSessionAlive(deps.runtime.getSession(session.id))) {
+        return markProjectToolRuntimeUnavailable(repoRoot, session);
+      }
+      throw error;
+    }
     // `cwd` tracks the logical `/cd` target only. The transcript stays anchored at
     // the first-launch cwd (repoRoot for project tools), so transcriptPath must
     // not be recomputed from targetCwd here.
@@ -611,6 +631,23 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       updatedAt: timestamp
     };
     deps.registry.upsert(normalizeProjectScopedRecordForPersistence(updated));
+    await persistProjectScopedToolSession(repoRoot, updated);
+    return updated;
+  }
+
+  async function markProjectToolRuntimeUnavailable(
+    repoRoot: string,
+    session: RoleSessionRecord
+  ): Promise<RoleSessionRecord> {
+    const updated: RoleSessionRecord = {
+      ...session,
+      status: getRecoverableStatus(session),
+      activityStatus: "idle",
+      pid: undefined,
+      exitCode: session.exitCode ?? null,
+      updatedAt: now()
+    };
+    deps.registry.remove(session.id);
     await persistProjectScopedToolSession(repoRoot, updated);
     return updated;
   }
@@ -667,6 +704,24 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
         VCM_SESSION_ID: session.claudeSessionId
       }
     });
+    if ((await waitForSessionInputReady(runtimeSession.id)) === "exited") {
+      deps.registry.remove(runtimeSession.id);
+      return markProjectToolRuntimeUnavailable(repoRoot, {
+        ...session,
+        id: runtimeSession.id,
+        status: "crashed",
+        activityStatus: "idle",
+        command: startCommand.display,
+        permissionMode,
+        model,
+        effort,
+        pid: runtimeSession.pid,
+        startedAt: runtimeSession.startedAt,
+        updatedAt: now(),
+        lastOutputAt: runtimeSession.lastOutputAt,
+        exitCode: runtimeSession.exitCode ?? 1
+      });
+    }
     const timestamp = now();
     const resumed: RoleSessionRecord = {
       ...session,
@@ -689,6 +744,13 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     deps.registry.upsert(normalizeProjectScopedRecordForPersistence(resumed));
     await persistProjectScopedToolSession(repoRoot, resumed);
     return migrateRunningProjectToolSessionCwd(repoRoot, resumed, targetCwd);
+  }
+
+  function isRuntimeSessionAlive(session: ReturnType<TerminalRuntime["getSession"]>): session is TerminalSession & { pid: number } {
+    if (!session || isExitedStatus(session.status) || session.pid === undefined) {
+      return false;
+    }
+    return isProcessAlive(session.pid);
   }
 
   async function persistProjectScopedToolSession(repoRoot: string, session: RoleSessionRecord): Promise<void> {
@@ -1436,6 +1498,36 @@ function getRecoverableStatus(record: RoleSessionRecord): RoleSessionRecord["sta
   return "resumable";
 }
 
+function isSessionMissingError(error: unknown): boolean {
+  if (error instanceof VcmError && error.code === "SESSION_MISSING") {
+    return true;
+  }
+  return typeof error === "object" &&
+    error !== null &&
+    "code" in error &&
+    (error as { code?: unknown }).code === "SESSION_MISSING";
+}
+
+function withoutRuntimeOnlySessionFields(session: RoleSessionRecord): RoleSessionRecord {
+  const { pid: _pid, ...persisted } = session;
+  return persisted;
+}
+
+function defaultIsProcessAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return getErrorCode(error) === "EPERM";
+  }
+}
+
+function getErrorCode(error: unknown): string | undefined {
+  return typeof error === "object" && error !== null && "code" in error
+    ? String((error as { code?: unknown }).code)
+    : undefined;
+}
+
 function samePath(left: string, right: string): boolean {
   return path.resolve(left) === path.resolve(right);
 }
@@ -1680,7 +1772,7 @@ async function persistTaskSession(
         claudeSessionId: session.claudeSessionId,
         transcriptPath: session.transcriptPath,
         status: session.status,
-        record
+        record: withoutRuntimeOnlySessionFields(record)
       }
     }
   });
@@ -1746,7 +1838,7 @@ async function persistTranslatorSession(
       role: session.role,
       updatedAt: session.updatedAt,
       record: {
-        ...session,
+        ...withoutRuntimeOnlySessionFields(session),
         taskSlug: PROJECT_TRANSLATOR_SCOPE
       }
     }
@@ -1775,7 +1867,7 @@ async function persistHarnessEngineerSession(
       role: session.role,
       updatedAt: session.updatedAt,
       record: {
-        ...session,
+        ...withoutRuntimeOnlySessionFields(session),
         taskSlug: PROJECT_HARNESS_ENGINEER_SCOPE
       }
     }

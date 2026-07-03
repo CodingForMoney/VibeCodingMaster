@@ -271,6 +271,8 @@ describe("createSessionService", () => {
       cwd: TASK_WORKTREE
     });
     expect(hooked?.claudeSessionId).toBe("translator-real-session");
+    const persisted = await fs.readJson<{ record: { pid?: number } }>("/repo/.ai/vcm/translations/session.json");
+    expect(persisted.record.pid).toBeUndefined();
 
     const secondRuntimeInputs: CreateTerminalSessionInput[] = [];
     const secondService = createTestSessionService(fs, secondRuntimeInputs);
@@ -677,6 +679,66 @@ describe("createSessionService", () => {
     expect(runtimeInputs[1]?.args).not.toContain("--resume");
     expect(runtimeInputs[1]?.args).not.toContain("translator-stale-session");
     expect(rebuilt.claudeSessionId).toBe("");
+    await expect(fs.pathExists("/repo/.ai/vcm/translations/session.json")).resolves.toBe(false);
+  });
+
+  it("rebuilds a fresh Translator session when the resumed process is not alive", async () => {
+    const fs = createMemoryFs();
+    const firstService = createTestSessionService(fs, []);
+    await firstService.startProjectTranslatorSession("/repo", { taskSlug: "demo-task" });
+    await firstService.recordProjectTranslatorHookEvent("/repo", {
+      eventName: "UserPromptSubmit",
+      sessionId: "translator-dead-pid-session",
+      transcriptPath: `${TASK_WORKTREE}/.claude/projects/translator-dead-pid-session.jsonl`,
+      cwd: TASK_WORKTREE
+    });
+
+    const runtimeInputs: CreateTerminalSessionInput[] = [];
+    const secondService = createTestSessionService(fs, runtimeInputs, [], { deadProcessCalls: [1] });
+    const rebuilt = await secondService.resumeProjectTranslatorSession("/repo", { taskSlug: "demo-task" });
+
+    expect(runtimeInputs).toHaveLength(2);
+    expect(runtimeInputs[0]?.args).toContain("--resume");
+    expect(runtimeInputs[0]?.args).toContain("translator-dead-pid-session");
+    expect(runtimeInputs[1]?.args).not.toContain("--resume");
+    expect(rebuilt.claudeSessionId).toBe("");
+    await expect(fs.pathExists("/repo/.ai/vcm/translations/session.json")).resolves.toBe(false);
+  });
+
+  it("rebuilds a fresh Translator session when /cd finds the resumed terminal missing", async () => {
+    const fs = createMemoryFs();
+    const firstService = createTestSessionService(fs, [], [], {
+      worktreePaths: {
+        "demo-task": TASK_WORKTREE,
+        "other-task": "/repo/.claude/worktrees/other-task"
+      }
+    });
+    await firstService.startProjectTranslatorSession("/repo", { taskSlug: "demo-task" });
+    await firstService.recordProjectTranslatorHookEvent("/repo", {
+      eventName: "UserPromptSubmit",
+      sessionId: "translator-cd-missing-session",
+      transcriptPath: `${TASK_WORKTREE}/.claude/projects/translator-cd-missing-session.jsonl`,
+      cwd: TASK_WORKTREE
+    });
+
+    const runtimeInputs: CreateTerminalSessionInput[] = [];
+    const writes: string[] = [];
+    const secondService = createTestSessionService(fs, runtimeInputs, writes, {
+      worktreePaths: {
+        "demo-task": TASK_WORKTREE,
+        "other-task": "/repo/.claude/worktrees/other-task"
+      },
+      dropBeforeWriteCalls: [1]
+    });
+    const rebuilt = await secondService.resumeProjectTranslatorSession("/repo", { taskSlug: "other-task" });
+
+    expect(runtimeInputs).toHaveLength(2);
+    expect(runtimeInputs[0]?.args).toContain("--resume");
+    expect(runtimeInputs[0]?.args).toContain("translator-cd-missing-session");
+    expect(runtimeInputs[1]?.args).not.toContain("--resume");
+    expect(rebuilt.claudeSessionId).toBe("");
+    expect(rebuilt.cwd).toBe("/repo/.claude/worktrees/other-task");
+    expect(writes.filter((write) => write.includes("/cd /repo/.claude/worktrees/other-task"))).toHaveLength(1);
     await expect(fs.pathExists("/repo/.ai/vcm/translations/session.json")).resolves.toBe(false);
   });
 
@@ -1115,14 +1177,25 @@ function createTestSessionService(
   fs: FileSystemAdapter,
   runtimeInputs: CreateTerminalSessionInput[],
   writes: string[] = [],
-  options: { sandboxMode?: string; worktreePath?: string; worktreePaths?: Record<string, string>; exitedCalls?: number[] } = {}
+  options: {
+    sandboxMode?: string;
+    worktreePath?: string;
+    worktreePaths?: Record<string, string>;
+    exitedCalls?: number[];
+    deadProcessCalls?: number[];
+    dropBeforeWriteCalls?: number[];
+  } = {}
 ) {
   const worktreePath = options.worktreePath ?? TASK_WORKTREE;
   const resolveWorktreePath = (taskSlug: string) => options.worktreePaths?.[taskSlug]
     ?? (taskSlug === "demo-task" ? worktreePath : `/repo/.claude/worktrees/${taskSlug}`);
+  const deadProcessPids = new Set((options.deadProcessCalls ?? []).map((callIndex) => 1000 + callIndex));
   return createSessionService({
     fs,
-    runtime: createFakeRuntime(runtimeInputs, writes, { exitedCalls: options.exitedCalls }),
+    runtime: createFakeRuntime(runtimeInputs, writes, {
+      exitedCalls: options.exitedCalls,
+      dropBeforeWriteCalls: options.dropBeforeWriteCalls
+    }),
     registry: createSessionRegistry(),
     claude: {
       async isAvailable() {
@@ -1220,6 +1293,7 @@ function createTestSessionService(
     } as never,
     apiUrl: "http://127.0.0.1:4173",
     sandboxMode: options.sandboxMode,
+    isProcessAlive: (pid) => !deadProcessPids.has(pid),
     now: () => "2026-05-29T00:00:00.000Z"
   });
 }
@@ -1227,10 +1301,12 @@ function createTestSessionService(
 function createFakeRuntime(
   inputs: CreateTerminalSessionInput[],
   writes: string[],
-  options: { exitedCalls?: number[] } = {}
+  options: { exitedCalls?: number[]; dropBeforeWriteCalls?: number[] } = {}
 ): TerminalRuntime {
   const sessions = new Map<string, TerminalSession>();
   const exitedCalls = new Set(options.exitedCalls ?? []);
+  const dropBeforeWriteCalls = new Set(options.dropBeforeWriteCalls ?? []);
+  let writeCount = 0;
   return {
     async createSession(input) {
       inputs.push(input);
@@ -1241,7 +1317,7 @@ function createFakeRuntime(
         taskSlug: input.taskSlug,
         role: input.role,
         status: exited ? "exited" : "running",
-        pid: exited ? undefined : 123,
+        pid: exited ? undefined : 1000 + callIndex,
         startedAt: "2026-05-29T00:00:00.000Z",
         // A live TUI emits output immediately, which the readiness wait keys off;
         // a failed launch exits and leaves no live runtime entry.
@@ -1262,7 +1338,14 @@ function createFakeRuntime(
     listSessions() {
       return [...sessions.values()];
     },
-    write(_sessionId, data) {
+    write(sessionId, data) {
+      writeCount += 1;
+      if (dropBeforeWriteCalls.has(writeCount)) {
+        sessions.delete(sessionId);
+        throw Object.assign(new Error(`Terminal session does not exist: ${sessionId}`), {
+          code: "SESSION_MISSING"
+        });
+      }
       writes.push(data);
     },
     resize() {},
