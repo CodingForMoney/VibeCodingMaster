@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -59,8 +60,7 @@ describe("gate-review-service", () => {
     expect(record.callbackStatus).toBe("sent");
     expect(record.reportPath).toBe(".ai/vcm/gate-reviews/architecture-plan-review.md");
 
-    expect(runnerCalls.some((call) => call.command === "git" && call.args.join(" ") === "status --porcelain=v1")).toBe(true);
-    expect(runnerCalls.some((call) => call.command === "git" && call.args.join(" ") === "diff --binary")).toBe(true);
+    expect(runnerCalls.some((call) => call.command === "git")).toBe(false);
     expect(sessionStarts).toEqual(["gate-reviewer"]);
     expect(activityCalls).toEqual([
       "running:gate-reviewer",
@@ -99,6 +99,104 @@ describe("gate-review-service", () => {
     const result = await service.requestReviewGate(tmpRepo, "demo-task", "architecture-plan");
 
     expect(result.status).toBe("disabled");
+  });
+
+  it("does not start architecture-plan review when the architecture plan is missing", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-gate-review-missing-plan-"));
+    await writeHarnessFiles(tmpRepo);
+    await rm(path.join(taskWorktree(tmpRepo), ".ai/vcm/handoffs/architecture-plan.md"), { force: true });
+    const sessionStarts: string[] = [];
+    const service = createGateReviewService({
+      fs: createNodeFileSystemAdapter(),
+      runner: createRunner(tmpRepo, []),
+      runtime: createRuntime(tmpRepo, []),
+      projectService: createProjectService(),
+      taskService: createTaskService(tmpRepo),
+      appSettings: createAppSettings(["architecture-plan"]),
+      sessionService: createSessionService(sessionStarts),
+      roundService: createRoundService()
+    });
+
+    const result = await service.requestReviewGate(tmpRepo, "demo-task", "architecture-plan");
+    const state = await service.getState(tmpRepo, "demo-task");
+
+    expect(result.status).toBe("not_required");
+    expect(result.message).toContain("architecture-plan.md is missing");
+    expect(state.gates["architecture-plan"].status).toBe("not_required");
+    expect(sessionStarts).toEqual([]);
+  });
+
+  it("does not start validation-adequacy review when the review report is empty", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-gate-review-empty-report-"));
+    await writeHarnessFiles(tmpRepo);
+    await writeFile(path.join(taskWorktree(tmpRepo), ".ai/vcm/handoffs/review-report.md"), "\n\n", "utf8");
+    const sessionStarts: string[] = [];
+    const service = createGateReviewService({
+      fs: createNodeFileSystemAdapter(),
+      runner: createRunner(tmpRepo, []),
+      runtime: createRuntime(tmpRepo, []),
+      projectService: createProjectService(),
+      taskService: createTaskService(tmpRepo),
+      appSettings: createAppSettings(["validation-adequacy"]),
+      sessionService: createSessionService(sessionStarts),
+      roundService: createRoundService()
+    });
+
+    const result = await service.requestReviewGate(tmpRepo, "demo-task", "validation-adequacy");
+    const state = await service.getState(tmpRepo, "demo-task");
+
+    expect(result.status).toBe("not_required");
+    expect(result.message).toContain("review-report.md is empty");
+    expect(state.gates["validation-adequacy"].status).toBe("not_required");
+    expect(sessionStarts).toEqual([]);
+  });
+
+  it("reuses validation-adequacy approval when only the architecture plan changed", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-gate-review-report-hash-"));
+    await writeHarnessFiles(tmpRepo);
+    const taskRoot = taskWorktree(tmpRepo);
+    const reviewReport = "# Review Report\nAll checks covered.\n";
+    await writeFile(path.join(taskRoot, ".ai/vcm/handoffs/review-report.md"), reviewReport, "utf8");
+    await mkdir(path.join(taskRoot, ".ai/vcm/gate-reviews"), { recursive: true });
+    await writeFile(
+      path.join(taskRoot, ".ai/vcm/gate-reviews/index.json"),
+      JSON.stringify({
+        version: 1,
+        enabled: true,
+        activeGate: null,
+        updatedAt: "2026-06-13T00:00:00.000Z",
+        gates: {
+          "validation-adequacy": {
+            gate: "validation-adequacy",
+            required: true,
+            status: "completed",
+            decision: "approve",
+            reportPath: ".ai/vcm/gate-reviews/validation-adequacy-review.md",
+            promptPath: ".ai/vcm/gate-reviews/requests/approved.prompt.md",
+            inputHash: gateCoreHash(".ai/vcm/handoffs/review-report.md", reviewReport),
+            updatedAt: "2026-06-13T00:00:00.000Z"
+          }
+        }
+      }),
+      "utf8"
+    );
+    await writeFile(path.join(taskRoot, ".ai/vcm/handoffs/architecture-plan.md"), "# Architecture Plan\nChanged.\n", "utf8");
+    const sessionStarts: string[] = [];
+    const service = createGateReviewService({
+      fs: createNodeFileSystemAdapter(),
+      runner: createRunner(tmpRepo, []),
+      runtime: createRuntime(tmpRepo, []),
+      projectService: createProjectService(),
+      taskService: createTaskService(tmpRepo),
+      appSettings: createAppSettings(["validation-adequacy"]),
+      sessionService: createSessionService(sessionStarts),
+      roundService: createRoundService()
+    });
+
+    const result = await service.requestReviewGate(tmpRepo, "demo-task", "validation-adequacy");
+
+    expect(result.status).toBe("already_approved");
+    expect(sessionStarts).toEqual([]);
   });
 
   it("updates gate settings from disabled state without enabling stale gates", async () => {
@@ -339,6 +437,13 @@ function createAppSettings(initialRequiredGates: GateReviewGate[] = []) {
       return requiredGates;
     }
   };
+}
+
+function gateCoreHash(relativePath: string, content: string): string {
+  const digest = createHash("sha256");
+  digest.update(relativePath);
+  digest.update(content);
+  return digest.digest("hex");
 }
 
 async function waitFor(predicate: () => Promise<boolean>, timeoutMs = 1000): Promise<void> {

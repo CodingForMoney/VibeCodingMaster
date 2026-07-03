@@ -93,6 +93,11 @@ const SOURCE_ARTIFACTS: Record<GateReviewGate, string[]> = {
   ]
 };
 
+const CORE_INPUT_ARTIFACTS: Partial<Record<GateReviewGate, string>> = {
+  "architecture-plan": ".ai/vcm/handoffs/architecture-plan.md",
+  "validation-adequacy": ".ai/vcm/handoffs/review-report.md"
+};
+
 const VALID_SEVERITIES = new Set<GateReviewSeverity>(["critical", "high", "medium", "low"]);
 
 export function createGateReviewService(deps: GateReviewServiceDeps): GateReviewService {
@@ -156,6 +161,31 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
 
     if (record.status === "running" && !options.force) {
       return { status: "running", gate, record, message: "Gate review is already running." };
+    }
+
+    const coreInput = await readCoreInputArtifact(deps.fs, context.taskRepoRoot, gate);
+    if (coreInput && coreInput.status !== "ready") {
+      index = applyGateState(index, gate, {
+        status: "not_required",
+        decision: undefined,
+        error: undefined,
+        exceptionReason: undefined,
+        requestId: undefined,
+        requestPath: undefined,
+        inputHash: undefined,
+        requestedAt: undefined,
+        startedAt: undefined,
+        completedAt: undefined,
+        callbackStatus: "not_sent",
+        callbackError: undefined
+      }, now(), true);
+      await saveIndex(deps.fs, context.taskRepoRoot, index);
+      return {
+        status: "not_required",
+        gate,
+        record: index.gates[gate],
+        message: `${coreInput.path} is ${coreInput.status}.`
+      };
     }
 
     const inputHash = await computeInputHash(deps, context.taskRepoRoot, gate);
@@ -549,7 +579,7 @@ function normalizeIndex(
       : "disabled";
     const existingStatus = normalizeGateStatus(existing?.status);
     const status = config.enabled && required
-      ? (existingStatus === "disabled" || existingStatus === "not_required" ? "pending" : existingStatus ?? fallbackStatus)
+      ? (existingStatus === "disabled" ? "pending" : existingStatus ?? fallbackStatus)
       : fallbackStatus;
 
     gates[gate] = {
@@ -624,6 +654,13 @@ async function computeInputHash(
   gate: GateReviewGate
 ): Promise<string> {
   const digest = createHash("sha256");
+  const coreArtifact = CORE_INPUT_ARTIFACTS[gate];
+  if (coreArtifact) {
+    digest.update(coreArtifact);
+    digest.update(await deps.fs.readText(resolveRepoPath(taskRepoRoot, coreArtifact)));
+    return digest.digest("hex");
+  }
+
   const common = [
     "CLAUDE.md",
     ".claude/agents/gate-reviewer.md",
@@ -648,6 +685,26 @@ async function computeInputHash(
   }
 
   return digest.digest("hex");
+}
+
+async function readCoreInputArtifact(
+  fs: FileSystemAdapter,
+  taskRepoRoot: string,
+  gate: GateReviewGate
+): Promise<{ path: string; status: "missing" | "empty" | "ready" } | null> {
+  const relativePath = CORE_INPUT_ARTIFACTS[gate];
+  if (!relativePath) {
+    return null;
+  }
+  const absolutePath = resolveRepoPath(taskRepoRoot, relativePath);
+  if (!await fs.pathExists(absolutePath)) {
+    return { path: relativePath, status: "missing" };
+  }
+  const content = await fs.readText(absolutePath);
+  if (content.trim().length === 0) {
+    return { path: relativePath, status: "empty" };
+  }
+  return { path: relativePath, status: "ready" };
 }
 
 async function commandStdout(runner: CommandRunner, cwd: string, args: string[]): Promise<string> {
