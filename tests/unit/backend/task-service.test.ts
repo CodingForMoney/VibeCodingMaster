@@ -66,6 +66,43 @@ describe("createTaskService", () => {
       .resolves.toBe(1);
   });
 
+  it("closes a task when the worktree is already unregistered but the directory remains", async () => {
+    const repoRoot = await createTempGitRepo(tempDirs);
+    const service = createService(repoRoot);
+    const task = await service.createTask(repoRoot, { taskSlug: "orphaned-worktree-task" });
+    await readGit(repoRoot, ["worktree", "remove", "--force", task.worktreePath]);
+    await fs.mkdir(task.worktreePath, { recursive: true });
+    await fs.writeFile(path.join(task.worktreePath, ".DS_Store"), "stale\n");
+
+    const result = await service.cleanupTask(repoRoot, "orphaned-worktree-task");
+
+    expect(result.removedWorktreePath).toBe(task.worktreePath);
+    expect(result.deletedBranch).toBe("feature/orphaned-worktree-task");
+    expect(result.removedStatePaths).toContain(path.join(getAppProjectDataRoot(repoRoot), "tasks/orphaned-worktree-task.json"));
+    await expect(fileExists(task.worktreePath)).resolves.toBe(false);
+    await expect(fileExists(path.join(getAppProjectDataRoot(repoRoot), "tasks/orphaned-worktree-task.json")))
+      .resolves.toBe(false);
+    await expect(gitExitCode(repoRoot, ["show-ref", "--verify", "--quiet", "refs/heads/feature/orphaned-worktree-task"]))
+      .resolves.toBe(1);
+  });
+
+  it("closes a task when the worktree and branch were already removed by an earlier cleanup attempt", async () => {
+    const repoRoot = await createTempGitRepo(tempDirs);
+    const service = createService(repoRoot);
+    const task = await service.createTask(repoRoot, { taskSlug: "retry-close-task" });
+    await readGit(repoRoot, ["worktree", "remove", "--force", task.worktreePath]);
+    await readGit(repoRoot, ["branch", "-D", "feature/retry-close-task"]);
+    await fs.mkdir(task.worktreePath, { recursive: true });
+    await fs.writeFile(path.join(task.worktreePath, "stale.txt"), "left behind\n");
+
+    const result = await service.cleanupTask(repoRoot, "retry-close-task");
+
+    expect(result.deletedBranch).toBe("feature/retry-close-task");
+    await expect(fileExists(task.worktreePath)).resolves.toBe(false);
+    await expect(fileExists(path.join(getAppProjectDataRoot(repoRoot), "tasks/retry-close-task.json")))
+      .resolves.toBe(false);
+  });
+
   it("refuses to create a second active task for the same project", async () => {
     const repoRoot = await createTempGitRepo(tempDirs);
     const service = createService(repoRoot);

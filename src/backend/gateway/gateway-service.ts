@@ -833,12 +833,16 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
       },
       updatedAt: now()
     });
-    return [
+    const lines = [
       `Closed task: ${result.taskSlug}`,
       result.removedWorktreePath ? `removed worktree: ${result.removedWorktreePath}` : "removed worktree: none",
       result.deletedBranch ? `deleted branch: ${result.deletedBranch}` : "deleted branch: none",
       `removed state paths: ${result.removedStatePaths.length}`
-    ].join("\n");
+    ];
+    if (result.warnings?.length) {
+      lines.push("warnings:", ...result.warnings.map((warning) => `- ${warning}`));
+    }
+    return lines.join("\n");
   }
 
   async function stopRunningRoleSessions(repoRoot: string, taskSlug: string): Promise<void> {

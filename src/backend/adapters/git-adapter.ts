@@ -25,6 +25,8 @@ export interface GitAdapter {
   getMergeBase(repoRoot: string, leftRef: string, rightRef: string): Promise<string>;
   isIgnored(repoRoot: string, repoRelativePath: string): Promise<boolean>;
   branchExists(repoRoot: string, branch: string): Promise<boolean>;
+  isWorktreeRegistered(repoRoot: string, worktreePath: string): Promise<boolean>;
+  pruneWorktrees(repoRoot: string): Promise<void>;
   mergeBranchFastForward(repoRoot: string, branch: string): Promise<GitMergeResult>;
   addPaths(repoRoot: string, paths: string[]): Promise<void>;
   commit(repoRoot: string, message: string): Promise<string>;
@@ -295,6 +297,36 @@ export function createGitAdapter(runner: CommandRunner): GitAdapter {
         hint: result.stderr
       });
     },
+    async isWorktreeRegistered(repoRoot, worktreePath) {
+      const result = await runGit(runner, repoRoot, ["worktree", "list", "--porcelain"]);
+      if (result.exitCode !== 0) {
+        throw new VcmError({
+          code: "GIT_ERROR",
+          message: "Unable to list Git worktrees.",
+          statusCode: 400,
+          hint: result.stderr
+        });
+      }
+
+      const expectedPath = await normalizeWorktreePath(worktreePath);
+      for (const candidate of parseWorktreePaths(result.stdout)) {
+        if (await normalizeWorktreePath(candidate) === expectedPath) {
+          return true;
+        }
+      }
+      return false;
+    },
+    async pruneWorktrees(repoRoot) {
+      const result = await runGit(runner, repoRoot, ["worktree", "prune"]);
+      if (result.exitCode !== 0) {
+        throw new VcmError({
+          code: "GIT_WORKTREE_PRUNE_FAILED",
+          message: "Unable to prune Git worktree metadata.",
+          statusCode: 400,
+          hint: result.stderr
+        });
+      }
+    },
     async mergeBranchFastForward(repoRoot, branch) {
       const result = await runGit(runner, repoRoot, ["merge", "--ff-only", branch]);
       if (result.exitCode !== 0) {
@@ -469,6 +501,22 @@ async function pathExists(targetPath: string): Promise<boolean> {
 
 async function runGit(runner: CommandRunner, repoRoot: string, args: string[]) {
   return runner.run("git", [...await buildSafeDirectoryArgs(repoRoot), ...args], { cwd: repoRoot });
+}
+
+function parseWorktreePaths(output: string): string[] {
+  return output
+    .split(/\r?\n/)
+    .filter((line) => line.startsWith("worktree "))
+    .map((line) => line.slice("worktree ".length).trim())
+    .filter(Boolean);
+}
+
+async function normalizeWorktreePath(worktreePath: string): Promise<string> {
+  try {
+    return path.resolve(await fs.realpath(worktreePath));
+  } catch {
+    return path.resolve(worktreePath);
+  }
 }
 
 async function buildSafeDirectoryArgs(repoRoot: string): Promise<string[]> {
