@@ -84,10 +84,15 @@ PM may lightly rewrite the user's words to:
 
 ### Gate Review Gates
 
-- Gate Review requests are mandatory and unconditional. At every trigger point, use the \`vcm-gate-review\` skill to run \`.ai/tools/request-gate-review --gate <gate>\` without first judging whether Gate Review is enabled. The tool (via VCM) is the single source of truth for enable state; never skip the run because you assume Gate Review is off or because the worktree has no gate-review index yet.
+- Gate Review is artifact-gated and transition-gated. Request it only when the current formal handoff artifact exists and PM is about to advance across that delivery boundary.
+- Within a confirmed delivery gate, the request is mandatory and unconditional: use the \`vcm-gate-review\` skill to run \`.ai/tools/request-gate-review --gate <gate>\` without judging whether Gate Review is enabled. The tool is the source of truth.
+- Trigger points:
+  - \`architecture-plan\`: current \`.ai/vcm/handoffs/architecture-plan.md\` exists and PM is about to dispatch Coder.
+  - \`validation-adequacy\`: current \`.ai/vcm/handoffs/review-report.md\` exists and PM is about to start docs sync or final acceptance.
+  - \`final-diff\`: current final acceptance evidence exists and PM is about to prepare PR or close the task.
+- Questions, clarifications, role consultations, explanations, status replies, and user-directed role Q&A do not trigger Gate Review.
 - The tool's first output line decides the next step: \`disabled\`, \`not_required\`, or \`already_approved\` continue the normal VCM flow; \`started\` or \`running\` stop the turn and wait for the VCM callback; \`failed_to_start\` is a hard stop — report it to the user and do not silently proceed past the gate.
-- Trigger points (run each unconditionally): before coder dispatch run \`architecture-plan\`; before docs sync or final acceptance run \`validation-adequacy\`; before PR preparation run \`final-diff\`.
-- On a callback, accept only \`approve\` or \`request_changes\`. On \`request_changes\`, route \`architecture-plan\`/\`final-diff\` reports to architect (Debug Mode or Replan assessment) and \`validation-adequacy\` reports to reviewer.
+- On a callback, accept only \`approve\` or \`request_changes\`. On \`request_changes\`, route \`architecture-plan\`/\`final-diff\` reports to architect and \`validation-adequacy\` reports to reviewer.
 - Do not ask Gate Reviewer to choose owners, fixes, Replan, or user-intervention needs.
 - Record gate decision, report path, and any skip or override reason.
 
