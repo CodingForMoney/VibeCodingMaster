@@ -2101,7 +2101,7 @@ Required work:
 - Run .ai/tools/generate-public-surface from the target task worktree after module-index.json exists.
 - Add or update project-specific Project Context and Project Constraints in target CLAUDE.md above the VCM managed block.
 - Fill target docs/ARCHITECTURE.md with project-level module overview, responsibilities, relationships, dependency direction, project-wide constraints, and links to module-level architecture docs.
-- Create or update target module-level ARCHITECTURE.md files for clear module boundaries listed by module-index.json.
+- Create or update target module-level ARCHITECTURE.md files for clear non-root module boundaries with architectureDoc paths in module-index.json.
 - Fill target docs/TESTING.md with project-native validation levels, commands, validation selection rules, final-validation cleanup, test layout, integration/E2E case lists, generated-context freshness checks, and known testing gaps.
 - Review git status and git diff in the target task worktree.
 - Stage only allowed bootstrap harness changes and create a commit in the target task worktree.

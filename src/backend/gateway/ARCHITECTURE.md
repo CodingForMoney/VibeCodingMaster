@@ -2,10 +2,8 @@
 
 Detailed design for the VCM **mobile gateway** — the backend sub-area that lets a
 user drive a VCM task from a phone chat app (Weixin iLink or Lark/Feishu) and
-that pushes project-manager (PM) replies back to that chat. It is part of the
-single workspace module `vibe-coding-master`; for the module-wide overview see
-[`../../../ARCHITECTURE.md`](../../../ARCHITECTURE.md) and
-[`../../../docs/ARCHITECTURE.md`](../../../docs/ARCHITECTURE.md).
+that pushes project-manager (PM) replies back to that chat. For the project-wide
+overview see [`../../../docs/ARCHITECTURE.md`](../../../docs/ARCHITECTURE.md).
 
 ## Boundary
 

@@ -5,10 +5,7 @@ package that provides a local GUI cockpit for running and orchestrating multiple
 Claude Code role sessions around one engineering task.
 
 This document is architect-owned. It gives the project-wide module overview,
-responsibilities, relationships, dependency direction, and constraints. The
-module-level detailed design lives in [`ARCHITECTURE.md`](../ARCHITECTURE.md) at
-the repository root (the single workspace module recorded in
-`.ai/generated/module-index.json`).
+responsibilities, relationships, dependency direction, and constraints.
 
 ## Module / Layer Overview
 
@@ -120,13 +117,54 @@ by the tools in `.ai/tools/`:
 
 Regenerate both after changing module layout, public exports, or HTTP routes.
 
-## Module-Level Architecture Docs
+## Public Surface
 
-- Root module: [`ARCHITECTURE.md`](../ARCHITECTURE.md) — detailed design,
-  boundaries, behavior, public surface explanation, risks, and update triggers
-  for the `vibe-coding-master` workspace module.
+The authoritative machine listing of exported APIs, HTTP routes, and externally
+consumed surfaces is `.ai/generated/public-surface.json`. Do not duplicate that
+listing here.
 
-Sub-area architecture docs (deeper design for a cohesive backend sub-area):
+Design intent of the most externally meaningful surfaces:
+
+- **CLI**: `vcm` with `--help`, `--version`, `--host=`, `--port=`, `--dev`,
+  and `--open`.
+- **HTTP `/api/*`**: route modules under `src/backend/api/`; this is the
+  contract consumed by the frontend and gateway.
+- **`/ws`**: terminal I/O streaming contract used by the embedded terminal.
+- **`src/shared/types/**`**: typed contracts shared across the HTTP boundary.
+- **`src/backend/templates/harness/**`**: downstream-facing harness contract
+  installed into target repositories.
+
+## Risks
+
+- Layer-boundary erosion: accidental `frontend <-> backend` imports or
+  `shared -> backend/frontend` imports.
+- `node-pty` is a native dependency; runtime/spawn changes can be platform
+  sensitive.
+- Harness template edits affect every downstream repo VCM installs into.
+- Shared-type changes are cross-cutting and must typecheck under both frontend
+  and backend tsconfigs.
+- The npm package ships built artifacts (`dist`, `dist-frontend`, `scripts`,
+  `README.md`); runtime-required assets must live in shipped paths.
+
+## Update Triggers
+
+Update this document when:
+
+- a top-level area is added under `src/backend`, `src/frontend`, or `src/shared`;
+- dependency rules or layer boundaries change;
+- externally meaningful surfaces change in a way that affects consumers;
+- a new external integration, gateway channel, or adapter is added.
+
+After these changes, regenerate `.ai/generated/module-index.json` and
+`.ai/generated/public-surface.json`.
+
+## Sub-Area Architecture Docs
+
+Root packages do not get a separate module-level `ARCHITECTURE.md` by default.
+Create sub-area architecture docs only for clear internal boundaries whose
+details would make this project-level overview too noisy.
+
+Existing sub-area docs:
 
 - Mobile gateway: [`src/backend/gateway/ARCHITECTURE.md`](../src/backend/gateway/ARCHITECTURE.md)
   — channel abstraction, poll/inbound/PM-push flows, settings/persistence,

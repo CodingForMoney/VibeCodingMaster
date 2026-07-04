@@ -322,22 +322,21 @@ def build_node_index(project_root: Path, node_root: Path) -> dict:
             layer_by_name[layer_name] = layer
             layers.append(layer)
 
-        layer_by_name[layer_name]["modules"].append(
-            {
-                "name": record["name"],
-                "path": module_path,
-                "manifest": manifest_rel,
-                "architectureDoc": f"{module_path}/ARCHITECTURE.md"
-                if module_path != "."
-                else "ARCHITECTURE.md",
-                "workspaceDependencies": record["workspaceDependencies"],
-                "language": "typescript",
-                "files": {
-                    "source": source_files,
-                    "tests": test_files,
-                },
-            }
-        )
+        module_entry = {
+            "name": record["name"],
+            "path": module_path,
+            "manifest": manifest_rel,
+            "workspaceDependencies": record["workspaceDependencies"],
+            "language": "typescript",
+            "files": {
+                "source": source_files,
+                "tests": test_files,
+            },
+        }
+        if module_path != ".":
+            module_entry["architectureDoc"] = f"{module_path}/ARCHITECTURE.md"
+
+        layer_by_name[layer_name]["modules"].append(module_entry)
 
     return {
         "schemaVersion": 1,
@@ -436,21 +435,20 @@ def build_cargo_index(project_root: Path, cargo_root: Path) -> dict:
             layer_by_name[layer_name] = layer
             layers.append(layer)
 
-        layer_by_name[layer_name]["modules"].append(
-            {
-                "name": record["name"],
-                "path": module_path,
-                "manifest": manifest_rel,
-                "architectureDoc": f"{module_path}/ARCHITECTURE.md"
-                if module_path != "."
-                else "ARCHITECTURE.md",
-                "workspaceDependencies": record["workspaceDependencies"],
-                "files": {
-                    "source": rust_files_under(module_dir, project_root, "src"),
-                    "tests": rust_files_under(module_dir, project_root, "tests"),
-                },
-            }
-        )
+        module_entry = {
+            "name": record["name"],
+            "path": module_path,
+            "manifest": manifest_rel,
+            "workspaceDependencies": record["workspaceDependencies"],
+            "files": {
+                "source": rust_files_under(module_dir, project_root, "src"),
+                "tests": rust_files_under(module_dir, project_root, "tests"),
+            },
+        }
+        if module_path != ".":
+            module_entry["architectureDoc"] = f"{module_path}/ARCHITECTURE.md"
+
+        layer_by_name[layer_name]["modules"].append(module_entry)
 
     return {
         "schemaVersion": 1,
