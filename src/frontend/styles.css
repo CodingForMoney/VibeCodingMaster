@@ -1345,6 +1345,11 @@ h2 {
   color: #b7f7c4;
 }
 
+.terminal-copy-button.is-ready {
+  border-color: #58a6ff;
+  color: #c9e4ff;
+}
+
 .terminal-copy-button.is-empty,
 .terminal-copy-button.is-failed {
   border-color: #d29922;
