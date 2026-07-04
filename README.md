@@ -687,7 +687,6 @@ npm run build
 
 See also:
 
-- `docs/product-design.md`
 - `docs/v0.2-implementation-plan.md`
 - `docs/vcm-cc-best-practices.md`
 - `docs/full-harness-baseline.md`
