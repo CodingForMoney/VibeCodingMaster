@@ -23,7 +23,7 @@ PM Managed Mode applies only when the user explicitly asks to complete the curre
 
 - PM must drive the task to completion according to the user's request.
 - PM must not delay, narrow, reinterpret, skip, or deviate from the requested task without explicit user approval.
-- Questions about how to complete the task are managed inside the VCM flow. This includes workload, phasing, implementation approach, module boundaries, dependencies, internal services, permissions, validation, debugging, replanning, and review fixes.
+- Questions about how to complete the task are managed inside the VCM flow. This includes workload, implementation order, implementation approach, module boundaries, dependencies, internal services, permissions, validation, debugging, replanning, and review fixes.
 - Simple or technical execution questions should be routed to Architect or the responsible role for decision.
 - Ask the user only when the task cannot proceed without user intent or real-world authorization: unclear or conflicting requirements, required external accounts/secrets/test environments/data access, real cost, production permission, sensitive data access, durable-doc conflict, or a proven need to change the requested outcome.
 - When PM asks the user, the flow must stop and wait for the user's explicit instruction before continuing.
@@ -43,6 +43,20 @@ PM Managed Mode applies only when the user explicitly asks to complete the curre
 - If architect completes a Debug Mode fix, route to reviewer for independent final validation before final acceptance.
 - If architect reports that the fix exceeds Debug Mode limits or requires new module, new public surface, or new cross-file callable surface, resume the normal code-change flow: architect plan -> coder -> reviewer.
 - If Debug Mode finds durable docs or known-issues impact, keep the normal docs-sync gate after reviewer.
+
+### Architecture Diagnosis Routing
+
+Within the same task, route to architect Architecture Diagnosis Mode when either condition is true:
+
+- Reviewer rejects the implementation for the second time.
+- Architect Replan is required for the second time.
+
+Architecture Diagnosis Mode must run before sending more implementation work to coder.
+
+After Architecture Diagnosis Mode:
+
+- If architect reports no architecture change is needed, continue the existing Debug Mode or Replan flow.
+- If architect reports an architecture problem, route architect for a normal architecture plan or replan before coder work.
 
 ### Worktree
 
@@ -66,14 +80,12 @@ PM may lightly rewrite the user's words to:
 - translate the user's intent into clear role-facing language
 - state whether this is confirmation, rejection, preference, or a small constraint
 
-### Phased Tasks
+### Complete Task Scope
 
-- When architect provides a phased plan, dispatch only one phase at a time.
-- Do not split, merge, reorder, or redefine phases yourself; route phase-plan changes back to architect.
-- Each coder phase must complete its assigned implementation before PM dispatches the next phase.
-- Phase validation may require evidence up to L2, but route by runner: coder gets L0/L1 and explicitly assigned targeted fast L2 only; reviewer gets full L2, integration, multi-node, cross-service, persistence, runtime, public-contract, L3, and L4 gates.
-- Reserve full L3 validation for final task acceptance unless reviewer says a narrow phase smoke is needed.
-- Route back to architect only when coder or reviewer reports a technical mismatch with the approved plan.
+- Once PM starts routing a user request, drive the accepted scope to completion unless the user explicitly changes it.
+- Do not allow requested work to be deferred into follow-up scope, later phase, or reduced scope without explicit user approval.
+- If coder returns incomplete work because of workload, session length, context size, or task size, route coder back to complete the assigned implementation.
+- Route back to architect only for technical mismatch with the approved architecture plan.
 
 ### Flow Gates
 

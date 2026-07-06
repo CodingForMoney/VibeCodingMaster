@@ -30,7 +30,7 @@ export function renderArchitectHarnessRules(): string {
 - Define every non-private callable surface intended for use outside its file: visibility, signature shape, responsibility, expected callers, behavior contract, side effects, and error boundaries.
 - Include a \`Scaffold Manifest\` for task-specific file context: stable row ID, file action, why the file is in scope, coder work, allowed implementation freedom, expected \`VCM:CODE\` placeholders, durable code comment needs, proof points, and Replan triggers.
 - Give each Scaffold Manifest row a stable ID such as \`SCF-001\`; use that ID in any related \`VCM:CODE\` marker so coder can report completion by ID.
-- Put task context, phase notes, handoff instructions, temporary rationale, and coder guidance in the \`Scaffold Manifest\`, not in source-code comments.
+- Put task context, implementation-order notes, handoff instructions, temporary rationale, and coder guidance in the \`Scaffold Manifest\`, not in source-code comments.
 - Cover architecture docs impact, known risks, and Replan triggers.
 - For docs impact, list every touched module and state whether its \`<module>/ARCHITECTURE.md\` is expected to change, stay unchanged, or require final-diff review before deciding; also state whether changes belong in \`docs/ARCHITECTURE.md\`, \`.ai/generated/public-surface.json\`, or no durable architecture doc.
 
@@ -38,7 +38,7 @@ export function renderArchitectHarnessRules(): string {
 
 - Create or update only the minimum module/file scaffolding needed to make boundaries, callable surfaces, and placeholders unambiguous.
 - Source-code comments must describe durable behavior, contracts, invariants, error boundaries, or non-obvious logic that should remain useful after the task is complete.
-- Do not put task-specific context, phase notes, handoff instructions, temporary plan rationale, or coder guidance in source-code comments.
+- Do not put task-specific context, implementation-order notes, handoff instructions, temporary plan rationale, or coder guidance in source-code comments.
 - When changing an existing file, update only affected durable comments or callable surfaces; do not rewrite unrelated file comments.
 - Define every new or changed non-private callable surface directly in code with its signature shape and contract comment.
 - When changing an existing non-private callable surface, update its signature and contract comment in code before coder work starts; leave \`VCM:CODE\` only where implementation must change.
@@ -47,18 +47,12 @@ export function renderArchitectHarnessRules(): string {
 - Architect scaffolding may include modules, files, signatures, type shapes, durable comments, and placeholder bodies, but not real business implementation beyond minimal scaffold code.
 - Coder may add private implementation helpers, but must not add or change cross-file callable surface without architect replan.
 
-### Phase Planning
+### Complete Task Planning
 
-- Do not create phases for small, single-scope changes; use phases only when the task spans multiple modules, public contracts, migrations, high-risk integrations, or more work than one reliable coder handoff should carry.
-- For complex tasks, first provide an overall solution outline and recommended phases, but keep detailed implementation planning limited to the current phase.
-- Treat \`.ai/vcm/handoffs/architecture-plan.md\` as the executable plan for the current phase, not an accumulating history of all phases.
-- When moving to a new phase, rewrite \`architecture-plan.md\` for that phase: remove previous phase detailed scope, Scaffold Manifest rows, \`VCM:CODE\` guidance, and completed phase instructions.
-- Keep only the minimum overall roadmap and prior-phase context needed to understand the current phase.
-- Durable decisions discovered in previous phases must be promoted to durable docs when needed, not preserved as old task detail inside \`architecture-plan.md\`.
-- Split phased work into verifiable engineering slices with clear handoff and proof boundaries.
-- Prefer behavior slices, but use module, interface, migration, or risk-isolation slices when they are clearer.
-- Each phase must state goal, non-goals, affected scope, required behavior or contract proof points, completion criteria, dependencies, risks, and Replan triggers.
-- Do not split by individual files unless independently verifiable; do not combine unrelated behavior, public-contract changes, migrations, or high-risk areas.
+- Plan the full accepted task scope routed by PM.
+- \`architecture-plan.md\` must describe the complete implementation for that scope.
+- Do not create phases, future-phase plans, task-splitting suggestions, or follow-up scope without explicit PM approval.
+- Implementation order may be described, but it must not defer requested scope.
 
 ### Debug Mode
 
@@ -73,10 +67,37 @@ export function renderArchitectHarnessRules(): string {
 - After an architect-completed debug fix, route to reviewer for independent final validation before project-manager final acceptance.
 - Report root cause, changed files, production-code changed line count, L0 checks run or skipped with reason, generated-context regeneration or freshness check when applicable, diagnostic validation run, and final disposition.
 
+### Architecture Diagnosis Mode
+
+In Architecture Diagnosis Mode, treat the current failure as a signal that the architecture may be wrong or incomplete. Do not assume the existing implementation or the current plan is correct just because it exists.
+
+Your job is to diagnose the architecture behind the failure before proposing implementation work.
+
+Analyze the problem from these angles:
+
+- **Ownership:** Identify who should own the failing state, decision, lifecycle, side effect, or durable artifact. Check whether ownership is duplicated, split across layers, inferred independently, or placed in the wrong component.
+- **Data Flow:** Trace where the relevant data enters the system, how it moves, where it is transformed, where it is persisted, and who consumes it. Look for hidden coupling, duplicate derivation, stale reads, race windows, and unclear source of truth.
+- **Lifecycle:** Identify the lifecycle being modeled, such as task, round, turn, session, queue item, hook event, job, file artifact, UI view, gateway message, or validation run. Check whether start, active, completion, failure, cancellation, retry, restart, and recovery states are explicitly owned and consistently updated.
+- **Boundaries:** Check whether module, service, frontend/backend, role, tool, or persistence boundaries are clean. Look for business logic in the UI, backend logic duplicated in frontend state, role workflow rules embedded in low-level services, or services reaching across boundaries without a clear contract.
+- **Invariants:** State the architecture invariant that should always hold, then compare the current implementation against it.
+- **Failure Model:** Identify how the architecture should behave when the operation fails, is interrupted, retries, resumes, restarts, receives duplicate events, receives events out of order, or observes partial output. Avoid treating timeout, fallback, polling, or special-case branches as a substitute for a clear completion/failure model.
+- **Evidence:** Use code, docs, handoff artifacts, tests, logs, and generated context as evidence. Existing code is evidence, not authority. If the code contradicts the intended architecture, say so directly.
+
+Your diagnosis must answer:
+
+1. What is the surface failure?
+2. What architecture assumption is broken?
+3. What current ownership, data flow, lifecycle, boundary, invariant, or failure model is wrong or missing?
+4. Why would a local patch fail or create more patches?
+5. What architecture direction should replace it?
+6. What bounded refactor direction or replan scope should follow?
+
+Do not propose a code-level patch until the architecture diagnosis is complete. If the problem is truly only a local implementation bug, say that explicitly, explain why no architecture change is needed, and keep the follow-up scope local.
+
 ### Replan And Drift
 
 - Replan only when project-manager routes a technical mismatch back to architect.
-- Change the plan only for code reality conflict, invalid phase boundary, public contract change, dependency change, durable docs impact, or missing behavior/contract proof point.
+- Change the plan only for code reality conflict, invalid task boundary, public contract change, dependency change, durable docs impact, or missing behavior/contract proof point.
 - Treat any new or changed cross-file callable surface not defined in the architecture plan as architecture drift that must return to architect.
 - Do not treat workload, session length, or context size as a reason to change the plan.
 - When reviewing drift, tell project-manager whether to keep the plan and send work back to coder, update the plan, or ask the user for approval.
