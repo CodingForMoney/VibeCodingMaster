@@ -841,8 +841,8 @@ describe("translator-translation-service", () => {
     expect(firstFinal?.translatedText).toBe("First result.");
   });
 
-  it("releases a stale stuck conversation head that has no result and never finalized", async () => {
-    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-translator-conversation-stale-"));
+  it("releases a stuck conversation head when no Translator session is running", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-translator-conversation-session-settled-"));
     const fs = createNodeFileSystemAdapter();
     const writes: string[] = [];
     const service = createTranslationWorkerService({
@@ -852,10 +852,10 @@ describe("translator-translation-service", () => {
     });
     await service.getState(tmpRepo);
 
-    const stale = "2000-01-01T00:00:00.000Z";
+    const timestamp = "2026-01-01T00:00:00.000Z";
     await fs.writeJsonAtomic(path.join(tmpRepo, ".ai/vcm/translations/runtime/queue.json"), {
       version: 1,
-      updatedAt: stale,
+      updatedAt: timestamp,
       activeItemId: "queue-stuck",
       items: [
         {
@@ -870,8 +870,8 @@ describe("translator-translation-service", () => {
           batchId: "batch-stuck",
           batchResultPath: ".ai/vcm/translations/runtime/conversations/batches/batch-stuck",
           batchIndex: 1,
-          createdAt: stale,
-          updatedAt: stale
+          createdAt: timestamp,
+          updatedAt: timestamp
         }
       ]
     });
@@ -885,8 +885,9 @@ describe("translator-translation-service", () => {
     });
     await waitForCondition(async () => {
       const state = await service.getState(tmpRepo!);
+      const stuckItem = state.queue.items.find((candidate) => candidate.id === "queue-stuck");
       const nextItem = state.queue.items.find((candidate) => candidate.id === next.queueItemId);
-      return state.queue.activeItemId === next.queueItemId && nextItem?.status === "running";
+      return state.queue.activeItemId === next.queueItemId && stuckItem?.status === "failed" && nextItem?.status === "running";
     });
 
     const state = await service.getState(tmpRepo);
@@ -951,8 +952,9 @@ describe("translator-translation-service", () => {
   it("defers (does not fail) a stuck batch when reconcile sees a missing result file", async () => {
     // Proof point 4: the reconcile/availability path cannot assume the Translator
     // finished, so a missing expected result file fails the all-or-nothing
-    // predicate and is treated as absent -> the head is held
-    // (deferred to stale-release), NOT prematurely failed like the hook path.
+    // predicate and is treated as absent while the Translator session is still
+    // running, so the head is held instead of being prematurely failed like the
+    // hook path.
     tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-translator-conversation-reconcile-missing-"));
     const fs = createNodeFileSystemAdapter();
     const writes: string[] = [];
@@ -1092,15 +1094,18 @@ function createBootstrapRunRecord(id: string, status: string) {
   };
 }
 
-function createTranslatorSessionService(starts: string[]): Pick<SessionService, "ensureProjectTranslatorSession"> {
+function createTranslatorSessionService(
+  starts: string[],
+  options: { initialStatus?: RoleSessionRecord["status"] } = {}
+): Pick<SessionService, "ensureProjectTranslatorSession" | "getProjectTranslatorSession"> {
   let session: RoleSessionRecord | undefined;
   const createSession = (): RoleSessionRecord => ({
     id: "translator-session",
     claudeSessionId: "translator-session",
     taskSlug: "__project__",
     role: "translator",
-    status: "running",
-    activityStatus: "running",
+    status: options.initialStatus ?? "running",
+    activityStatus: options.initialStatus === "idle" ? "idle" : "running",
     command: "translator",
     permissionMode: "default",
     model: "gpt-5.5",
@@ -1110,6 +1115,9 @@ function createTranslatorSessionService(starts: string[]): Pick<SessionService, 
     updatedAt: "2026-06-20T00:00:00.000Z"
   });
   return {
+    async getProjectTranslatorSession() {
+      return session;
+    },
     async ensureProjectTranslatorSession(_repoRoot, input = {}) {
       if (session) {
         return session;

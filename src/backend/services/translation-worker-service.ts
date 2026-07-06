@@ -44,7 +44,7 @@ export interface TranslationWorkerService {
 export interface TranslationWorkerServiceDeps {
   fs: FileSystemAdapter;
   runtime?: TerminalRuntime;
-  sessionService?: Pick<SessionService, "ensureProjectTranslatorSession">;
+  sessionService?: Pick<SessionService, "ensureProjectTranslatorSession" | "getProjectTranslatorSession">;
   now?: () => string;
   id?: () => string;
 }
@@ -98,14 +98,6 @@ const CONVERSATION_BATCHES_DIR = `${CONVERSATION_RUNTIME_DIR}/batches`;
 const MEMORY_UPDATE_RUNTIME_DIR = `${TRANSLATIONS_RUNTIME_DIR}/memory-updates`;
 const DEFAULT_PROFILE = "default";
 const DEFAULT_CHUNK_SOURCE_TOKEN_TARGET = 80000;
-// In-flight conversation queue items normally finalize when the Translator
-// session's Stop/StopFailure hook reaches the backend. If that hook is lost
-// (session crash, backend restart/reconnect) a conversation item with no result
-// on disk would block the queue head forever. Treat such an item as stuck once it
-// has been in-flight past this bound and release it so later items can dispatch.
-// Kept comfortably above a normal short composer translation, so a genuinely
-// running conversation turn is never released mid-flight.
-const STALE_CONVERSATION_ITEM_MS = 90000;
 const BOOTSTRAP_DEFAULT_LIMIT = 12;
 const MEMORY_TOTAL_LIMIT_BYTES = 80 * 1024;
 const MEMORY_INITIALIZED_MIN_FILES = 2;
@@ -558,11 +550,22 @@ export function createTranslationWorkerService(deps: TranslationWorkerServiceDep
       await validateActiveQueueItem(repoRoot);
       return true;
     }
-    if (active.type === "conversation" && isStaleActiveItem(active)) {
+    if (await translatorSessionSettled(repoRoot)) {
       await validateActiveQueueItem(repoRoot);
       return true;
     }
     return false;
+  }
+
+  async function reconcileActiveItemFromSessionState(repoRoot: string): Promise<void> {
+    const queue = await loadQueue(repoRoot);
+    const active = queue.activeItemId
+      ? queue.items.find((item) => item.id === queue.activeItemId)
+      : undefined;
+    if (!active || !["dispatching", "running"].includes(active.status)) {
+      return;
+    }
+    await reconcileStuckActiveItem(repoRoot, active);
   }
 
   async function activeItemResultAvailable(
@@ -621,12 +624,12 @@ export function createTranslationWorkerService(deps: TranslationWorkerServiceDep
     return deps.fs.readText(resultPath);
   }
 
-  function isStaleActiveItem(item: TranslationQueueItem): boolean {
-    const updatedAtMs = Date.parse(item.updatedAt ?? "");
-    if (!Number.isFinite(updatedAtMs)) {
-      return true;
+  async function translatorSessionSettled(repoRoot: string): Promise<boolean> {
+    if (!deps.sessionService?.getProjectTranslatorSession) {
+      return false;
     }
-    return Date.now() - updatedAtMs >= STALE_CONVERSATION_ITEM_MS;
+    const session = await deps.sessionService.getProjectTranslatorSession(repoRoot);
+    return !session || session.status !== "running";
   }
 
   async function validateActiveQueueItem(repoRoot: string): Promise<void> {
@@ -680,14 +683,6 @@ export function createTranslationWorkerService(deps: TranslationWorkerServiceDep
       item.batchId === active.batchId &&
       ["dispatching", "running", "validating"].includes(item.status)
     );
-    const validatingAt = now();
-    for (const item of batchItems) {
-      item.status = "validating";
-      item.updatedAt = validatingAt;
-    }
-    queue.updatedAt = validatingAt;
-    await saveQueue(repoRoot, queue);
-
     const completedAt = now();
     for (const item of batchItems) {
       const index = item.batchIndex ?? 0;
@@ -1099,6 +1094,7 @@ export function createTranslationWorkerService(deps: TranslationWorkerServiceDep
     async getState(repoRoot, options = {}) {
       await ensureLayout(repoRoot);
       await cleanupCompletedRuntime(repoRoot);
+      await reconcileActiveItemFromSessionState(repoRoot);
       const [queue, fileIndex, bootstrapIndex, memoryInitialized] = await Promise.all([
         loadQueue(repoRoot),
         loadFileIndex(repoRoot),

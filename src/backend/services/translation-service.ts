@@ -163,7 +163,6 @@ interface TranslationRuntimeConfig {
   inputMode: TranslationInputMode;
   outputMode: TranslationOutputMode;
   contextEnabled: boolean;
-  requestTimeoutMs: number;
 }
 
 interface SessionState {
@@ -225,7 +224,6 @@ type TranslationSessionEventInput =
 const TRANSLATION_SOURCE_LANGUAGE = "auto";
 const TRANSLATION_INPUT_MODE: TranslationInputMode = "review-before-send";
 const TRANSLATION_CONTEXT_ENABLED = false;
-const TRANSLATION_TIMEOUT_MS = 120000;
 const TRANSLATION_PROVIDER = "claude-code";
 const TRANSLATION_MODEL = "translator";
 const OUTPUT_TRANSLATION_BATCH_DELAY_MS = 10000;
@@ -250,8 +248,7 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
       targetLanguage: preferences.translationTargetLanguage,
       inputMode: TRANSLATION_INPUT_MODE,
       outputMode: preferences.translationOutputMode,
-      contextEnabled: TRANSLATION_CONTEXT_ENABLED,
-      requestTimeoutMs: TRANSLATION_TIMEOUT_MS
+      contextEnabled: TRANSLATION_CONTEXT_ENABLED
     };
   }
 
@@ -690,7 +687,7 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
 
         for (const { item, job } of jobs) {
           try {
-            const result = await waitForConversationResult(item.repoRoot!, job, item.config.requestTimeoutMs);
+            const result = await waitForConversationResult(item.repoRoot!, job);
             const completed = {
               ...item.entry,
               status: "translated" as TranslationStatus,
@@ -1447,7 +1444,7 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
     },
     async translateGatewayOutput(input) {
       const config = await loadConfig();
-      const reusable = await findReusableGatewayOutputTranslation(input, config);
+      const reusable = await findReusableGatewayOutputTranslation(input);
       if (reusable) {
         return reusable.trim();
       }
@@ -1603,10 +1600,7 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
     return leftTime.localeCompare(rightTime);
   }
 
-  async function findReusableGatewayOutputTranslation(
-    input: TranslateGatewayOutputInput,
-    config: TranslationRuntimeConfig
-  ): Promise<string | undefined> {
+  async function findReusableGatewayOutputTranslation(input: TranslateGatewayOutputInput): Promise<string | undefined> {
     const graceDeadline = Date.now() + (input.sourceEntryIds?.length ? GATEWAY_TRANSLATION_REUSE_GRACE_MS : 0);
     while (true) {
       const lookup = await lookupGatewayOutputTranslation(input);
@@ -1614,7 +1608,7 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
         return lookup.text;
       }
       if (lookup.kind === "active") {
-        return waitForReusableGatewayOutputTranslation(input, config);
+        return waitForReusableGatewayOutputTranslation(input);
       }
       if (!input.sourceEntryIds?.length || Date.now() >= graceDeadline) {
         return undefined;
@@ -1623,12 +1617,8 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
     }
   }
 
-  async function waitForReusableGatewayOutputTranslation(
-    input: TranslateGatewayOutputInput,
-    config: TranslationRuntimeConfig
-  ): Promise<string | undefined> {
-    const deadline = Date.now() + config.requestTimeoutMs;
-    while (Date.now() <= deadline) {
+  async function waitForReusableGatewayOutputTranslation(input: TranslateGatewayOutputInput): Promise<string | undefined> {
+    while (true) {
       const lookup = await lookupGatewayOutputTranslation(input);
       if (lookup.kind === "translated") {
         return lookup.text;
@@ -1638,12 +1628,6 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
       }
       await delay(GATEWAY_TRANSLATION_REUSE_POLL_MS);
     }
-
-    throw new VcmError({
-      code: "TRANSLATION_TIMEOUT",
-      message: "Gateway output translation timed out while waiting for the existing PM reply translation.",
-      statusCode: 504
-    });
   }
 
   async function lookupGatewayOutputTranslation(input: TranslateGatewayOutputInput): Promise<GatewayOutputLookupResult> {
@@ -1802,7 +1786,7 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
     config: TranslationRuntimeConfig;
   }): Promise<{ text: string; warning?: string }> {
     const job = await createConversationJob(input);
-    const result = await waitForConversationResult(input.repoRoot!, job, input.config.requestTimeoutMs);
+    const result = await waitForConversationResult(input.repoRoot!, job);
     return {
       text: result.translatedText
     };
@@ -1849,16 +1833,30 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
 
   async function waitForConversationResult(
     repoRoot: string,
-    job: ConversationTranslationJob,
-    timeoutMs: number
+    job: ConversationTranslationJob
   ) {
-    const deadline = Date.now() + timeoutMs;
-    let lastError: unknown;
-    while (Date.now() <= deadline) {
+    while (true) {
       const state = await deps.translationWorkerService!.getState(repoRoot);
       const item = job.queueItemId
         ? state.queue.items.find((candidate) => candidate.id === job.queueItemId)
         : undefined;
+      if (!item) {
+        try {
+          return await deps.translationWorkerService!.validateConversationResult(repoRoot, {
+            resultPath: job.resultPath,
+            sourceHash: job.sourceHash,
+            targetLanguage: job.targetLanguage
+          });
+        } catch (error) {
+          throw new VcmError({
+            code: "TRANSLATION_FAILED",
+            message: error instanceof Error
+              ? `translation queue item is unavailable: ${error.message}`
+              : "translation queue item is unavailable.",
+            statusCode: 502
+          });
+        }
+      }
       if (item && ["failed", "cancelled", "interrupted", "skipped"].includes(item.status)) {
         throw new VcmError({
           code: "TRANSLATION_FAILED",
@@ -1867,7 +1865,7 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
         });
       }
       if (item && item.status !== "completed") {
-        await delay(Math.min(500, Math.max(25, timeoutMs)));
+        await delay(500);
         continue;
       }
       try {
@@ -1877,18 +1875,12 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
           targetLanguage: job.targetLanguage
         });
       } catch (error) {
-        lastError = error;
         if (item?.status === "completed") {
           throw error;
         }
       }
-      await delay(Math.min(500, Math.max(25, timeoutMs)));
+      await delay(500);
     }
-    throw new VcmError({
-      code: "TRANSLATION_TIMEOUT",
-      message: lastError instanceof Error ? `translation timed out: ${lastError.message}` : "translation timed out.",
-      statusCode: 504
-    });
   }
 }
 
