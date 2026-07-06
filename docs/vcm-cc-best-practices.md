@@ -223,7 +223,7 @@ VCM roles:
   routing owner, gate tracker, final evidence acceptance owner, and PR
   preparation owner.
 - `architect`: architecture plan, Scaffold Manifest, code scaffolding, Debug
-  Mode, phase planning, module docs, and docs sync.
+  Mode, complete task planning, module docs, and docs sync.
 - `coder`: implementation inside the approved plan, scaffold completion,
   baseline tests, and cleanup of task-only code markers/comments.
 - `reviewer`: independent validation, test adequacy, missing test additions,
@@ -310,19 +310,18 @@ The plan must cover:
 - docs/generated-context impact
 - proof points and validation expectations
 - Replan triggers
-- current phase boundaries
+- task boundaries
 
 The Scaffold Manifest carries task-specific context for coder. Task context,
-temporary rationale, phase notes, and coder guidance belong in the manifest, not
-in permanent source comments.
+temporary rationale, implementation-order notes, and coder guidance belong in
+the manifest, not in permanent source comments.
 
 Code scaffolding may create files and define non-private callable surfaces, but
 incomplete implementation must use `VCM:CODE <Scaffold Manifest ID>` markers.
 Coder removes/completes those markers and reports Scaffold Completion by ID.
 
-For phased tasks, the active architecture plan should describe the current phase
-in full detail. Previous phase task detail should be removed or promoted to
-durable docs when needed.
+The active architecture plan should describe the full accepted task scope. It
+may include implementation order, but that order must not defer requested scope.
 
 ## 11. Route Messages
 

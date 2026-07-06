@@ -58,7 +58,7 @@ After Architecture Diagnosis Mode:
 ### Complete Task Scope
 
 - Once PM starts routing a user request, drive the accepted scope to completion unless the user explicitly changes it.
-- Do not allow requested work to be deferred into follow-up scope, later phase, or reduced scope without explicit user approval.
+- Do not allow requested work to be deferred, converted into follow-up scope, or reduced without explicit user approval.
 - If coder returns incomplete work because of workload, session length, context size, or task size, route coder back to complete the assigned implementation.
 - Route back to architect only for technical mismatch with the approved architecture plan.
 

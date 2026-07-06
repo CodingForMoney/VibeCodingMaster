@@ -32,6 +32,8 @@ export function renderReviewerHarnessRules(): string {
 - Add anti-hardcode coverage when risk warrants it: use non-fixture inputs, boundary values, negative cases, repeated actions, and assertions through public/runtime paths.
 - Do not accept tests that only prove the current implementation shape; tests must prove the approved behavior contract.
 - If task-specific process comments appear in changed code while reviewing behavior, report them as a maintainability gap; task context belongs in handoff artifacts, not durable code comments.
+- Treat architect-flagged public contracts, migrations, auth, data flow, routing, or dependency changes as inputs for reviewer-owned validation design.
+- Record skipped L3 checks in \`.ai/vcm/handoffs/review-report.md\` with the reason.
 - Update \`docs/TESTING.md\` when validation strategy, commands, level mapping, integration/E2E case definitions, selection rules, final-validation cleanup, test gaps, or test expectations change.
 
 ### Testing Documentation
@@ -42,14 +44,6 @@ export function renderReviewerHarnessRules(): string {
 - Each integration/E2E case should include ID, scenario, entry point, what it proves, key assertions, when to run, and current limitations when relevant.
 - Keep historical investigation details, superseded failures, temporary diagnostics, and per-task validation logs out of \`docs/TESTING.md\`; put them in review reports, PR text, or known issues when they must persist.
 - When updating \`docs/TESTING.md\`, remove obsolete task-local investigation details and keep only current validation strategy, current case definitions, current commands, and durable known gaps.
-
-### Phase Validation
-
-- For phase review, run the strongest practical validation up to L2 that is relevant to the phase scope.
-- Reserve full L3 E2E / browser / integration validation for the final phase or whole-task acceptance.
-- Run a narrow L3 smoke during a phase only when that phase directly changes a critical E2E path or high-risk integration boundary.
-- Treat architect-flagged public contracts, migrations, auth, data flow, routing, or dependency changes as inputs for reviewer-owned validation design.
-- Record skipped L3 checks in \`.ai/vcm/handoffs/review-report.md\` with the reason and the planned final validation point.
 
 ### Outputs
 

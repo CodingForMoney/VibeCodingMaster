@@ -168,7 +168,7 @@ Root template:
 Role-specific behavior lives in `.claude/agents/`.
 
 - Project manager: user communication, task clarification, role routing, handoff verification, final acceptance.
-- Architect: architecture plan, module boundaries, file responsibilities, public contracts, test contracts, phases, architecture drift checks.
+- Architect: architecture plan, module boundaries, file responsibilities, public contracts, test contracts, implementation order, architecture drift checks.
 - Coder: implementation and direct tests within an approved plan.
 - Reviewer: independent review, validation adequacy, test gaps, docs gaps, acceptance findings.
 
@@ -249,9 +249,9 @@ Small changes still need traceable scope and validation.
 
 ```text
 project manager
-  -> architect writes current-phase plan
+  -> architect writes complete accepted-scope plan
   -> optional independent gate review of plan
-  -> coder implements approved phase
+  -> coder implements approved scope
   -> reviewer checks validation adequacy and adds/requests missing tests
   -> architect checks architecture/docs drift when needed
   -> optional independent gate review of final diff
@@ -350,15 +350,15 @@ Gate rules:
 
 ## 8. Architecture Plans and Scaffold Manifests
 
-The architecture plan is the executable plan for the current phase, not an accumulating history of every previous phase.
+The architecture plan is the executable plan for the full accepted task scope.
 
 For complex work:
 
-- The architect may describe the whole strategy and recommended phases.
-- The active plan should contain the current phase in complete detail.
-- When moving to a new phase, rewrite the active plan for that phase.
-- Durable decisions from prior phases should be promoted to durable docs when needed.
-- Do not keep completed phase instructions as stale task detail.
+- The architect may describe implementation order.
+- The active plan should contain the complete accepted scope.
+- Implementation order must not defer requested scope.
+- Durable decisions discovered during implementation should be promoted to durable docs when needed.
+- Do not keep completed temporary instructions as stale task detail.
 
 Use a scaffold manifest when the coder needs task-specific context.
 
@@ -473,7 +473,7 @@ Branch and worktree rules:
 - Do not do AI implementation directly on the main branch.
 - One task branch should map to one task worktree.
 - A task should not switch to a different branch or worktree after creation; create a new task instead.
-- Large work should use phase commits on the same task branch unless phases are independently releasable.
+- Large work should use reviewable commits on the same task branch.
 - Do not leave a large unreviewed diff until the end.
 
 Harness and bootstrap changes:
@@ -644,7 +644,7 @@ No validation command
   -> project-native validation levels
 
 Too much at once
-  -> phases + incremental commits
+  -> complete accepted scope + reviewable commits
 
 One do-everything session
   -> explicit role sessions + file handoffs

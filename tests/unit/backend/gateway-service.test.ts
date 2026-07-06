@@ -810,7 +810,7 @@ describe("gateway-service long connection", () => {
   });
 
   it("create-task command reuses the shared launch service and reports its orchestration + sessions", async () => {
-    // Phase 1 proof point 4 (success side): the gateway no longer composes the
+    // Gateway refactor proof point 4 (success side): the gateway no longer composes the
     // roster/mode/loop itself; it surfaces exactly what startTaskRoleSessions
     // returns.
     const settings = createSettings({
@@ -848,7 +848,7 @@ describe("gateway-service long connection", () => {
   });
 
   it("create-task rewraps a partial start into the byte-identical phone-facing message (parity)", async () => {
-    // Phase 1 proof point 4 (priority): a per-role failure from the shared service
+    // Gateway refactor proof point 4 (priority): a per-role failure from the shared service
     // (TASK_ONE_CLICK_PARTIAL_START) must rewrap to the SAME phone-facing string the
     // inline gateway loop produced before the refactor: "Task was created, but
     // <role> failed to start." plus the per-role cause hint. handleInbound renders

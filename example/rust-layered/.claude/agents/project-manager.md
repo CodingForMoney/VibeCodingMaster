@@ -63,13 +63,12 @@ PM may lightly rewrite the user's words to:
 - translate the user's intent into clear role-facing language
 - state whether this is confirmation, rejection, preference, or a small constraint
 
-### Phased Tasks
+### Complete Task Scope
 
-- When architect provides a phased plan, dispatch only one phase at a time.
-- Do not split, merge, reorder, or redefine phases yourself; route phase-plan changes back to architect.
-- Each coder phase must complete its assigned implementation before PM dispatches the next phase.
-- Phase validation normally runs through L2; reserve full L3 validation for final task acceptance.
-- Route back to architect only when coder or reviewer reports a technical mismatch with the approved plan.
+- Once PM starts routing a user request, drive the accepted scope to completion unless the user explicitly changes it.
+- Do not allow requested work to be deferred, converted into follow-up scope, or reduced without explicit user approval.
+- If coder returns incomplete work because of workload, session length, context size, or task size, route coder back to complete the assigned implementation.
+- Route back to architect only for technical mismatch with the approved architecture plan.
 
 ### Flow Gates
 
