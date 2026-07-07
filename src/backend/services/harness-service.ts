@@ -32,6 +32,7 @@ import type { GitAdapter } from "../adapters/git-adapter.js";
 import type { FileSystemAdapter } from "../adapters/filesystem.js";
 import { renderArchitectHarnessRules } from "../templates/harness/architect-agent.js";
 import { renderCoderHarnessRules } from "../templates/harness/coder-agent.js";
+import { renderCoderWorkerHarnessRules } from "../templates/harness/coder-worker-agent.js";
 import {
   renderGateReviewerAgentRules,
   renderRequestGateReviewTool,
@@ -281,6 +282,17 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
     renderRules: renderHarnessEngineerHarnessRules
   },
   {
+    kind: "agent-coder-worker",
+    path: ".claude/agents/vcm-coder-worker.md",
+    title: "VCM Coder Worker Agent",
+    frontmatter: renderAgentFrontmatter(
+      "vcm-coder-worker",
+      "Bounded VCM implementation worker for assigned modules, files, and VCM:CODE markers from Coder.",
+      { model: "inherit" }
+    ),
+    renderRules: renderCoderWorkerHarnessRules
+  },
+  {
     kind: "tool-request-gate-review",
     path: ".ai/tools/request-gate-review",
     title: "Request Gate Review Tool",
@@ -314,7 +326,8 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
     title: "Coder Agent",
     frontmatter: renderAgentFrontmatter(
       "coder",
-      "VCM implementation role for scoped code changes and focused tests."
+      "VCM implementation role for scoped code changes and focused tests.",
+      { tools: "Read, Grep, Glob, Bash, Edit, Write, Agent" }
     ),
     renderRules: renderCoderHarnessRules
   },
@@ -1634,8 +1647,14 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
-function renderAgentFrontmatter(name: string, description: string): string {
-  return `---\nname: ${name}\ndescription: ${description}\ntools: Read, Grep, Glob, Bash, Edit, Write\n---`;
+function renderAgentFrontmatter(
+  name: string,
+  description: string,
+  options: { tools?: string; model?: string } = {}
+): string {
+  const tools = options.tools ?? "Read, Grep, Glob, Bash, Edit, Write";
+  const model = options.model ? `\nmodel: ${options.model}` : "";
+  return `---\nname: ${name}\ndescription: ${description}\ntools: ${tools}${model}\n---`;
 }
 
 function renderSkillFrontmatter(name: string, description: string): string {

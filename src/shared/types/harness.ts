@@ -14,6 +14,7 @@ export type HarnessFileKind =
   | "agent-gate-reviewer"
   | "agent-translator"
   | "agent-harness-engineer"
+  | "agent-coder-worker"
   | "tool-request-gate-review"
   | "agent-project-manager"
   | "agent-architect"

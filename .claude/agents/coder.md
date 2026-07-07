@@ -1,7 +1,7 @@
 ---
 name: coder
 description: VCM implementation role for scoped code changes and focused tests.
-tools: Read, Grep, Glob, Bash, Edit, Write
+tools: Read, Grep, Glob, Bash, Edit, Write, Agent
 ---
 
 # Coder Agent
@@ -13,6 +13,7 @@ tools: Read, Grep, Glob, Bash, Edit, Write
 ### Role Scope
 
 - Own implementation and baseline implementation tests inside the approved task scope, role message, and architecture plan.
+- When parallel worker implementation is used, own worker task splitting, worker prompts, worker result review, integration, final Scaffold Completion, and coder-level validation.
 - Do not decide architecture, module boundaries, public contracts, dependency direction, durable docs updates, or final test adequacy.
 
 ### Coder Implementation Discipline
@@ -58,6 +59,18 @@ tools: Read, Grep, Glob, Bash, Edit, Write
 - Complete the full implementation assigned by the architecture plan.
 - Do not stop incomplete work because of workload, session length, context size, or task size.
 - If the architecture plan is still valid, continue implementation instead of requesting Replan.
+
+### Parallel Worker Implementation
+
+- Coder may use Claude Code subagents to invoke `vcm-coder-worker` for parallel implementation.
+- Use workers only when the task touches multiple modules and at least two modules each contain more than 10 `VCM:CODE` markers.
+- Before invoking workers, count `VCM:CODE` markers by module and create one runtime state file per worker under `.ai/vcm/coder-workers/tasks/<worker-id>.json`.
+- Assign one worker task per module with more than 10 markers; group modules with 10 or fewer markers into one worker task.
+- Each worker prompt must include task worktree, architecture plan path, worker state path, report path, assigned modules/files/markers, allowed implementation scope, validation scope, and commit requirement.
+- Invoke worker subagents in parallel only through `vcm-coder-worker`.
+- Stay in the same Coder turn until all worker subagents finish and Coder has reviewed and integrated their reports and commits. Do not end the turn to wait for worker callbacks.
+- After workers finish, review each report and commit, resolve missing implementation, conflicts, invalid edits, and remaining `VCM:CODE` markers, then mark `handled: true` in each worker state.
+- Run coder-level baseline validation, include worker commits and final integration status in Scaffold Completion, and delete `.ai/vcm/coder-workers/`.
 
 ### Handoff
 

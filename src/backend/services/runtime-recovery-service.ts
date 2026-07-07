@@ -92,6 +92,7 @@ const TRANSLATOR_SESSION_PATH = ".ai/vcm/translations/session.json";
 const HARNESS_ENGINEER_SESSION_PATH = ".ai/vcm/harness-engineer/session.json";
 const BOOTSTRAP_SESSION_PATH = ".ai/vcm/bootstrap/session.json";
 const HARNESS_FEEDBACK_STATE_PATH = ".ai/vcm/harness-feedback/state.json";
+const CODER_WORKERS_RUNTIME_DIR = ".ai/vcm/coder-workers";
 const RECOVERABLE_FEEDBACK_STATES = new Set(["analyzing", "applying"]);
 
 export function createRuntimeRecoveryService(deps: RuntimeRecoveryServiceDeps): RuntimeRecoveryService {
@@ -122,6 +123,7 @@ export function createRuntimeRecoveryService(deps: RuntimeRecoveryServiceDeps): 
           const roundRecovered = await recoverRound(taskRepoRoot, config.stateRoot, task.taskSlug, recoveredAt, context);
           await recoverMessages(taskRepoRoot, config.stateRoot, task.taskSlug, recoveredAt, context);
           await recoverGateReview(taskRepoRoot, recoveredAt, context);
+          await cleanupCoderWorkers(taskRepoRoot, context);
           if ((roundRecovered || task.status === "running") && !hasLiveTaskSession(task.taskSlug)) {
             await deps.taskService.updateTaskStatus(repoRoot, task.taskSlug, "stopped");
           }
@@ -374,6 +376,21 @@ export function createRuntimeRecoveryService(deps: RuntimeRecoveryServiceDeps): 
       updatedAt: timestamp
     });
     context.changedPaths.add(relativePath);
+  }
+
+  async function cleanupCoderWorkers(
+    taskRepoRoot: string,
+    context: RuntimeRecoveryContext
+  ): Promise<void> {
+    const absolutePath = path.join(taskRepoRoot, CODER_WORKERS_RUNTIME_DIR);
+    if (!(await deps.fs.pathExists(absolutePath))) {
+      return;
+    }
+    if (!deps.fs.removePath) {
+      return;
+    }
+    await deps.fs.removePath(absolutePath, { recursive: true, force: true });
+    context.changedPaths.add(CODER_WORKERS_RUNTIME_DIR);
   }
 
   async function recoverHarnessBootstrap(

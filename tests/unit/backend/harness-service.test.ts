@@ -12,7 +12,7 @@ describe("createHarnessService", () => {
   it("plans and applies recommended harness files when they are missing", async () => {
     const fs = createMemoryFs();
     const service = createHarnessService({ fs });
-    const expectedHarnessFileCount = 18;
+    const expectedHarnessFileCount = 19;
 
     const status = await service.getHarnessStatus("/repo");
     expect(status.needsApply).toBe(true);
@@ -69,6 +69,17 @@ describe("createHarnessService", () => {
     expect(await fs.readText("/repo/.claude/agents/project-manager.md")).toContain("### Gate Review Gates");
     expect(await fs.readText("/repo/.claude/agents/architect.md")).toContain("verifiable behavior, task boundaries, behavior/contract proof points");
     expect(await fs.readText("/repo/.claude/agents/architect.md")).toContain("Read `.ai/vcm/handoffs/known-issues.md`; promote only confirmed unresolved durable issues");
+    const coderAgent = await fs.readText("/repo/.claude/agents/coder.md");
+    expect(coderAgent).toContain("tools: Read, Grep, Glob, Bash, Edit, Write, Agent");
+    expect(coderAgent).toContain("### Parallel Worker Implementation");
+    expect(coderAgent).toContain("vcm-coder-worker");
+    expect(frontmatterOf(await fs.readText("/repo/.claude/agents/project-manager.md"))).not.toContain("Agent");
+    expect(frontmatterOf(await fs.readText("/repo/.claude/agents/architect.md"))).not.toContain("Agent");
+    expect(frontmatterOf(await fs.readText("/repo/.claude/agents/reviewer.md"))).not.toContain("Agent");
+    const coderWorkerAgent = await fs.readText("/repo/.claude/agents/vcm-coder-worker.md");
+    expect(coderWorkerAgent).toContain("name: vcm-coder-worker");
+    expect(coderWorkerAgent).toContain("model: inherit");
+    expect(coderWorkerAgent).toContain("Do not set `handled: true`");
     expect(await fs.readText("/repo/.claude/agents/gate-reviewer.md")).toContain("name: gate-reviewer");
     expect(await fs.readText("/repo/.claude/agents/gate-reviewer.md")).toContain("You are VCM `gate-reviewer`");
     expect(await fs.readText("/repo/.claude/agents/gate-reviewer.md")).toContain("Use the task and worktree paths named there");
@@ -801,6 +812,11 @@ function createDiffGitStub() {
       ].join("\n");
     }
   };
+}
+
+function frontmatterOf(content: string): string {
+  const sections = content.split("---");
+  return sections.length >= 3 ? sections[1] : "";
 }
 
 function createMemoryFs(): FileSystemAdapter {

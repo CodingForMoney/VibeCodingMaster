@@ -7,6 +7,7 @@ import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { renderArchitectHarnessRules } from "../templates/harness/architect-agent.js";
 import { renderCoderHarnessRules } from "../templates/harness/coder-agent.js";
+import { renderCoderWorkerHarnessRules } from "../templates/harness/coder-worker-agent.js";
 import {
   renderGateReviewerAgentRules,
   renderRequestGateReviewTool,
@@ -60,7 +61,8 @@ const AGENT_FRONTMATTER = {
     description: "VCM architecture role for plans, module boundaries, public contracts, verifiable behavior, and docs sync."
   },
   coder: {
-    description: "VCM implementation role for scoped code changes and focused tests."
+    description: "VCM implementation role for scoped code changes and focused tests.",
+    tools: "Read, Grep, Glob, Bash, Edit, Write, Agent"
   },
   reviewer: {
     description: "VCM independent review role for acceptance, test adequacy, scope checks, and risk findings."
@@ -73,6 +75,10 @@ const AGENT_FRONTMATTER = {
   },
   "harness-engineer": {
     description: "VCM project-scoped harness maintenance role for harness diagnosis, diff proposals, and VCM issue drafts."
+  },
+  "vcm-coder-worker": {
+    description: "Bounded VCM implementation worker for assigned modules, files, and VCM:CODE markers from Coder.",
+    model: "inherit"
   }
 };
 
@@ -155,6 +161,14 @@ const MANAGED_FILES = [
     commentStyle: "html",
     category: "agent-harness-engineer",
     content: renderHarnessEngineerHarnessRules()
+  },
+  {
+    path: ".claude/agents/vcm-coder-worker.md",
+    title: "VCM Coder Worker Agent",
+    agentName: "vcm-coder-worker",
+    commentStyle: "html",
+    category: "agent-coder-worker",
+    content: renderCoderWorkerHarnessRules()
   }
 ];
 
@@ -594,7 +608,9 @@ function renderManagedBlock(definition) {
 function renderNewManagedFile(definition, block) {
   if (definition.agentName) {
     const frontmatter = AGENT_FRONTMATTER[definition.agentName];
-    return `---\nname: ${definition.agentName}\ndescription: ${frontmatter.description}\ntools: Read, Grep, Glob, Bash, Edit, Write\n---\n\n# ${definition.title}\n\n${block}\n`;
+    const tools = frontmatter.tools ?? "Read, Grep, Glob, Bash, Edit, Write";
+    const model = frontmatter.model ? `\nmodel: ${frontmatter.model}` : "";
+    return `---\nname: ${definition.agentName}\ndescription: ${frontmatter.description}\ntools: ${tools}${model}\n---\n\n# ${definition.title}\n\n${block}\n`;
   }
   return `# ${definition.title}\n\n${block}\n`;
 }

@@ -43,6 +43,21 @@ async function writeJob(
   }
 }
 
+async function writeCoderWorkerTask(
+  repo: string,
+  workerId: string,
+  state: Record<string, unknown>,
+  options: { stateMtime?: Date } = {}
+): Promise<void> {
+  const dir = path.join(repo, ".ai/vcm/coder-workers/tasks");
+  await mkdir(dir, { recursive: true });
+  const statePath = path.join(dir, `${workerId}.json`);
+  await writeFile(statePath, JSON.stringify({ workerId, ...state }, null, 2));
+  if (options.stateMtime) {
+    await utimes(statePath, options.stateMtime, options.stateMtime);
+  }
+}
+
 function createGuard() {
   return createJobGuardService({
     isProcessAlive: (pid) => pid === LIVE_PID
@@ -54,6 +69,15 @@ function stopInput(repo: string) {
     repoRoot: "/repo",
     taskSlug: "demo-task",
     role: "coder" as const,
+    taskRepoRoot: repo
+  };
+}
+
+function architectStopInput(repo: string) {
+  return {
+    repoRoot: "/repo",
+    taskSlug: "demo-task",
+    role: "architect" as const,
     taskRepoRoot: repo
   };
 }
@@ -149,6 +173,71 @@ describe("createJobGuardService", () => {
     }
     guard.notePromptSubmitted({ repoRoot: "/repo", taskSlug: "demo-task", role: "coder" });
     await expect(guard.evaluateStop(stopInput(repo))).resolves.toMatchObject({ behavior: "block" });
+  });
+
+  it("blocks coder stop while a worker task is unhandled", async () => {
+    const repo = await makeTaskRepo();
+    await writeCoderWorkerTask(repo, "worker-1", {
+      status: "running",
+      handled: false,
+      reportPath: ".ai/vcm/coder-workers/reports/worker-1.md"
+    });
+    const guard = createGuard();
+
+    const verdict = await guard.evaluateStop(stopInput(repo));
+    expect(verdict.behavior).toBe("block");
+    if (verdict.behavior === "block") {
+      expect(verdict.reason).toContain("worker-1");
+      expect(verdict.reason).toContain("unhandled");
+      expect(verdict.reason).toContain("handled: true");
+    }
+  });
+
+  it("blocks completed and failed worker tasks until coder handles them", async () => {
+    const repo = await makeTaskRepo();
+    await writeCoderWorkerTask(repo, "worker-completed", { status: "completed", handled: false });
+    await writeCoderWorkerTask(repo, "worker-failed", { status: "failed", handled: false, error: "conflict" });
+    const guard = createGuard();
+
+    const verdict = await guard.evaluateStop(stopInput(repo));
+    expect(verdict.behavior).toBe("block");
+    if (verdict.behavior === "block") {
+      expect(verdict.reason).toContain("worker-completed (completed)");
+      expect(verdict.reason).toContain("worker-failed (failed)");
+    }
+  });
+
+  it("allows coder stop when worker tasks are handled", async () => {
+    const repo = await makeTaskRepo();
+    await writeCoderWorkerTask(repo, "worker-1", { status: "completed", handled: true });
+    const guard = createGuard();
+
+    await expect(guard.evaluateStop(stopInput(repo))).resolves.toEqual({ behavior: "allow" });
+  });
+
+  it("ignores coder worker tasks for non-coder roles", async () => {
+    const repo = await makeTaskRepo();
+    await writeCoderWorkerTask(repo, "worker-1", { status: "running", handled: false });
+    const guard = createGuard();
+
+    await expect(guard.evaluateStop(architectStopInput(repo))).resolves.toEqual({ behavior: "allow" });
+  });
+
+  it("keeps blocking when worker state changes between stop attempts", async () => {
+    const repo = await makeTaskRepo();
+    let stateTime = new Date(Date.now() - 60_000);
+    await writeCoderWorkerTask(repo, "worker-1", { status: "running", handled: false }, { stateMtime: stateTime });
+    const guard = createGuard();
+
+    for (let attempt = 0; attempt < MAX_CONSECUTIVE_STOP_BLOCKS + 2; attempt += 1) {
+      await expect(guard.evaluateStop(stopInput(repo))).resolves.toMatchObject({ behavior: "block" });
+      stateTime = new Date(stateTime.getTime() + 10_000);
+      await utimes(
+        path.join(repo, ".ai/vcm/coder-workers/tasks/worker-1.json"),
+        stateTime,
+        stateTime
+      );
+    }
   });
 
   it("lists active jobs with lease information", async () => {

@@ -25,6 +25,7 @@ describe("createRuntimeRecoveryService", () => {
     await mkdir(path.join(taskRepoRoot, ".ai/vcm/rounds"), { recursive: true });
     await mkdir(path.join(taskRepoRoot, ".ai/vcm/messages"), { recursive: true });
     await mkdir(path.join(taskRepoRoot, ".ai/vcm/gate-reviews"), { recursive: true });
+    await mkdir(path.join(taskRepoRoot, ".ai/vcm/coder-workers/tasks"), { recursive: true });
 
     await writeJson(path.join(taskRepoRoot, ".ai/vcm/sessions/demo-task.json"), {
       version: 1,
@@ -80,6 +81,12 @@ describe("createRuntimeRecoveryService", () => {
       deliveredAt: "2026-06-26T23:59:02.000Z"
     })}\n`, "utf8");
     await writeJson(path.join(taskRepoRoot, ".ai/vcm/gate-reviews/index.json"), gateIndex("architecture-plan", "running"));
+    await writeJson(path.join(taskRepoRoot, ".ai/vcm/coder-workers/tasks/worker-1.json"), {
+      version: 1,
+      workerId: "worker-1",
+      status: "running",
+      handled: false
+    });
 
     const statusUpdates: string[] = [];
     const service = createService(repoRoot, taskRepoRoot, [], statusUpdates);
@@ -116,6 +123,7 @@ describe("createRuntimeRecoveryService", () => {
     expect(gate.activeGate).toBeNull();
     expect(gate.gates["architecture-plan"].status).toBe("pending");
     expect(gate.gates["architecture-plan"].error).toContain("VCM restarted");
+    await expectPathMissing(path.join(taskRepoRoot, ".ai/vcm/coder-workers/tasks/worker-1.json"));
     expect(statusUpdates).toEqual(["demo-task:stopped"]);
   });
 

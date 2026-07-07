@@ -189,6 +189,23 @@
       }
     },
     {
+      "path": ".claude/agents/vcm-coder-worker.md",
+      "entryType": "file",
+      "category": "agent-coder-worker",
+      "ownership": "managed-block",
+      "source": "vcm-template",
+      "lifecycle": "long-term",
+      "marker": {
+        "type": "html",
+        "begin": "<!-- VCM:BEGIN version=1 -->",
+        "end": "<!-- VCM:END -->"
+      },
+      "uninstall": {
+        "action": "remove-managed-block",
+        "requiresConfirmation": false
+      }
+    },
+    {
       "path": ".claude/settings.json",
       "entryType": "file",
       "category": "claude-settings",
