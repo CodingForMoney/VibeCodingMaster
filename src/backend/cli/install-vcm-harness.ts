@@ -17,6 +17,7 @@ import {
 import { renderHarnessEngineerHarnessRules } from "../templates/harness/harness-engineer-agent.js";
 import { renderRootClaudeHarnessRules } from "../templates/harness/claude-root.js";
 import { renderGitignoreHarnessRules } from "../templates/harness/gitignore.js";
+import { renderProjectGlossaryTemplate } from "../templates/harness/project-glossary.js";
 import { renderProjectManagerHarnessRules } from "../templates/harness/project-manager-agent.js";
 import { renderPullRequestTemplateHarnessRules } from "../templates/harness/pull-request-template.js";
 import { renderReviewerHarnessRules } from "../templates/harness/reviewer-agent.js";
@@ -173,6 +174,10 @@ const MANAGED_FILES = [
 ];
 
 const DURABLE_DOC_TEMPLATES = [
+  {
+    path: "docs/GLOSSARY.md",
+    content: renderProjectGlossaryTemplate()
+  },
   {
     path: "docs/ARCHITECTURE.md",
     content: "# Architecture\n"
@@ -433,6 +438,7 @@ async function buildManifest(projectRoot) {
         }
       },
       ...fixedDirectories().map((directory) => manifestEntry(directory, "directory", directoryCategory(directory), "vcm-created")),
+      manifestEntry("docs/GLOSSARY.md", "file", "project-glossary", "project-owned"),
       ...WHOLE_FILES.map((file) => ({
         path: file.path,
         entryType: "file",

@@ -36,12 +36,19 @@ If a reusable harness problem is suspected, it is enough to record a concise fee
 
 ## VCM Durable Project Docs
 
+- `docs/GLOSSARY.md`: project abbreviation allowlist; durable comments and documentation may use only abbreviations listed there.
 - `docs/ARCHITECTURE.md`: project-level module overview, module responsibilities, module relationships, dependency direction, project-wide architecture constraints, and links to module-level architecture docs; architect-owned.
 - `<module>/ARCHITECTURE.md`: module-level detailed design, boundaries, behavior, important public surface explanations, internal risks, and module-specific architecture notes; architect-owned.
 - `docs/TESTING.md`: validation strategy, commands, validation levels, integration/E2E case definitions, final-validation cleanup, and known testing gaps; reviewer-owned.
 - `docs/known-issues.md`: durable known issues and accepted limitations; architect-owned.
 - `.ai/generated/module-index.json`: generated module index; use it to find layers, modules, manifests, module docs, source files, test files, and workspace dependencies.
 - `.ai/generated/public-surface.json`: generated public surface index; use it to inspect module-to-module public APIs, routes, and source evidence.
+
+## VCM Glossary Policy
+
+- `docs/GLOSSARY.md` is the only source of truth for abbreviations allowed in durable comments and documentation.
+- When writing or editing durable comments or documentation, use only abbreviations listed in `docs/GLOSSARY.md`; otherwise write the full term.
+- To introduce a new abbreviation, update `docs/GLOSSARY.md` before using it.
 
 ## VCM Task Flow
 

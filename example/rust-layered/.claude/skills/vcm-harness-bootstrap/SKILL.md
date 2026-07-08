@@ -23,7 +23,7 @@ This skill is an operating procedure. It does not replace the deterministic VCM 
 1. Generate context when supported: run `.ai/tools/generate-module-index`, then run `.ai/tools/generate-public-surface` after `module-index.json` exists.
 2. Inspect the project:  read `README.md`, read `CLAUDE.md`, durable project docs, project manifests/config, source layout, tests, and existing validation commands.
 3. Fill project context: add or update non-managed project facts in `CLAUDE.md` above the VCM managed block.
-4. Fill durable docs: update `docs/ARCHITECTURE.md`, module-level `ARCHITECTURE.md` files, and `docs/TESTING.md` with detailed project-specific content.
+4. Fill durable docs: update `docs/GLOSSARY.md`, `docs/ARCHITECTURE.md`, module-level `ARCHITECTURE.md` files for clear non-root module boundaries, and `docs/TESTING.md` with detailed project-specific content.
 5. Preserve user-authored content and VCM managed blocks.
 6. Review `git status` and `git diff`.
 7. Stage only allowed bootstrap harness changes and create a commit in the active task worktree.
@@ -32,10 +32,11 @@ This skill is an operating procedure. It does not replace the deterministic VCM 
 ## Typical Outputs
 
 - `CLAUDE.md` project context and project constraints outside the VCM managed block
+- `docs/GLOSSARY.md`
 - `docs/ARCHITECTURE.md`
 - `docs/TESTING.md`
 - `docs/known-issues.md` only for confirmed durable issues
-- module-level `ARCHITECTURE.md` files
+- module-level `ARCHITECTURE.md` files for clear non-root module boundaries
 - `.ai/generated/module-index.json`
 - `.ai/generated/public-surface.json`
 
@@ -53,6 +54,13 @@ This skill is an operating procedure. It does not replace the deterministic VCM 
 - Run `.ai/tools/generate-public-surface` only after `.ai/generated/module-index.json` exists.
 - If generation fails or the project is unsupported, report the reason. Do not invent generated artifacts.
 
+### `docs/GLOSSARY.md`
+
+- Keep the project abbreviation allowlist current.
+- Include abbreviations that are allowed in durable comments and documentation.
+- Remove or avoid project-invented shorthand that is not useful as durable terminology.
+- If an abbreviation is not listed here, roles must write the full term instead.
+
 ### `docs/ARCHITECTURE.md`
 
 - Document the project-level module overview, module responsibilities, module relationships, dependency direction, and project-wide constraints.
@@ -61,7 +69,8 @@ This skill is an operating procedure. It does not replace the deterministic VCM 
 
 ### Module-Level `ARCHITECTURE.md`
 
-- Create or update one module-level `ARCHITECTURE.md` for each clear module boundary.
+- Create or update one module-level `ARCHITECTURE.md` for each clear non-root module boundary with an `architectureDoc` path in `.ai/generated/module-index.json`.
+- Do not create a root-level `ARCHITECTURE.md` only because the root package exists.
 - Document module boundaries, responsibilities, allowed dependencies, important behavior, important public surface explanations, risks, and update triggers.
 - Keep complete public API listings in `.ai/generated/public-surface.json`; module docs should explain meaning and design intent, not duplicate the full generated index.
 

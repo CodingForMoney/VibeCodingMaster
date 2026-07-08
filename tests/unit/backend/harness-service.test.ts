@@ -12,7 +12,7 @@ describe("createHarnessService", () => {
   it("plans and applies recommended harness files when they are missing", async () => {
     const fs = createMemoryFs();
     const service = createHarnessService({ fs });
-    const expectedHarnessFileCount = 19;
+    const expectedHarnessFileCount = 20;
 
     const status = await service.getHarnessStatus("/repo");
     expect(status.needsApply).toBe(true);
@@ -33,6 +33,10 @@ describe("createHarnessService", () => {
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("## VCM Harness Scope");
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("## VCM Task Flow");
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("## VCM Worktree Policy");
+    expect(await fs.readText("/repo/CLAUDE.md")).toContain("## VCM Glossary Policy");
+    expect(await fs.readText("/repo/CLAUDE.md")).toContain("docs/GLOSSARY.md");
+    expect(await fs.readText("/repo/docs/GLOSSARY.md")).toContain("# Glossary");
+    expect(await fs.readText("/repo/docs/GLOSSARY.md")).toContain("| Abbreviation | Full Term | Meaning / Allowed Use |");
     expect(await fs.readText("/repo/.gitignore")).toContain("# VCM:BEGIN version=1");
     expect(await fs.readText("/repo/.gitignore")).toContain(".ai/vcm/");
     expect(await fs.readText("/repo/.gitignore")).toContain(".claude/worktrees/");
@@ -154,6 +158,27 @@ describe("createHarnessService", () => {
     expect(content).toContain(".ai/vcm/");
     expect(content).toContain(".claude/worktrees/");
     expect(content).not.toContain("<!-- VCM:BEGIN");
+  });
+
+  it("creates the project glossary only when missing", async () => {
+    const fs = createMemoryFs();
+    await fs.writeText("/repo/docs/GLOSSARY.md", "# Glossary\n\n| Abbreviation | Full Term |\n| --- | --- |\n| ACME | Example Term |\n");
+    const service = createHarnessService({ fs });
+
+    await expect(service.getHarnessFileContent("/repo", "docs/GLOSSARY.md")).resolves.toMatchObject({
+      path: "docs/GLOSSARY.md",
+      kind: "project-glossary",
+      editable: true
+    });
+    expect((await service.getHarnessStatus("/repo")).files.find((file) => file.path === "docs/GLOSSARY.md")).toMatchObject({
+      exists: true,
+      hasManagedBlock: false,
+      action: "ok"
+    });
+
+    await service.applyHarness("/repo");
+
+    await expect(fs.readText("/repo/docs/GLOSSARY.md")).resolves.toContain("ACME");
   });
 
   it("plans and removes obsolete Codex harness paths", async () => {

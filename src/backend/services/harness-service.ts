@@ -42,6 +42,7 @@ import {
 import { renderHarnessEngineerHarnessRules } from "../templates/harness/harness-engineer-agent.js";
 import { renderRootClaudeHarnessRules } from "../templates/harness/claude-root.js";
 import { renderGitignoreHarnessRules } from "../templates/harness/gitignore.js";
+import { renderProjectGlossaryTemplate } from "../templates/harness/project-glossary.js";
 import { renderProjectManagerHarnessRules } from "../templates/harness/project-manager-agent.js";
 import { renderPullRequestTemplateHarnessRules } from "../templates/harness/pull-request-template.js";
 import { renderReviewerHarnessRules } from "../templates/harness/reviewer-agent.js";
@@ -127,7 +128,7 @@ interface HarnessFileDefinition {
   title: string;
   frontmatter?: string;
   commentStyle?: "html" | "hash";
-  ownership?: "managed-block" | "whole-file" | "raw-file";
+  ownership?: "managed-block" | "whole-file" | "raw-file" | "project-file";
   blankLineBeforeEnd?: boolean;
   renderRules(): string;
 }
@@ -171,6 +172,13 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
     title: "CLAUDE.md",
     blankLineBeforeEnd: true,
     renderRules: renderRootClaudeHarnessRules
+  },
+  {
+    kind: "project-glossary",
+    path: "docs/GLOSSARY.md",
+    title: "Glossary",
+    ownership: "project-file",
+    renderRules: renderProjectGlossaryTemplate
   },
   {
     kind: "gitignore",
@@ -1292,7 +1300,7 @@ function assertManagedBlockUnchanged(
 }
 
 function extractManagedBlock(definition: HarnessFileDefinition, content: string): string | undefined {
-  if (definition.ownership === "whole-file" || definition.ownership === "raw-file") {
+  if (definition.ownership === "whole-file" || definition.ownership === "raw-file" || definition.ownership === "project-file") {
     return undefined;
   }
   return content.match(getManagedBlockPattern(definition))?.[0];
@@ -1315,6 +1323,28 @@ async function analyzeHarnessFile(
   definition: HarnessFileDefinition
 ): Promise<HarnessFileAnalysis> {
   const absolutePath = resolveHarnessPath(repoRoot, definition.path);
+  if (definition.ownership === "project-file") {
+    const exists = await fs.pathExists(absolutePath);
+    return {
+      definition,
+      status: {
+        kind: definition.kind,
+        path: definition.path,
+        exists,
+        hasManagedBlock: false,
+        action: exists ? "ok" : "create"
+      },
+      plannedChange: exists
+        ? undefined
+        : {
+          path: definition.path,
+          action: "create",
+          reason: "Project-owned harness file is missing; VCM will create an editable default."
+        },
+      nextContent: exists ? undefined : ensureTrailingNewline(definition.renderRules().trimEnd())
+    };
+  }
+
   const expectedContent = definition.ownership === "whole-file" || definition.ownership === "raw-file"
     ? renderWholeHarnessFile(definition)
     : undefined;
@@ -1721,6 +1751,7 @@ async function getHarnessBootstrapStatus(
       "public-surface",
       "Public surface"
     ),
+    await checkFilledMarkdown(deps.fs, targetRepoRoot, "docs/GLOSSARY.md", "Glossary", "glossary-doc"),
     await checkFilledMarkdown(deps.fs, targetRepoRoot, "docs/ARCHITECTURE.md", "Project architecture", "project-architecture"),
     await checkModuleArchitectureDocs(deps.fs, targetRepoRoot, moduleIndex),
     await checkFilledMarkdown(deps.fs, targetRepoRoot, "docs/TESTING.md", "Testing doc", "testing-doc")
@@ -1756,6 +1787,7 @@ async function checkFixedHarness(fs: FileSystemAdapter, repoRoot: string, vcmVer
     "CLAUDE.md",
     MANIFEST_PATH,
     ".claude/skills/vcm-harness-bootstrap/SKILL.md",
+    "docs/GLOSSARY.md",
     ".ai/tools/generate-module-index",
     ".ai/tools/generate-public-surface"
   ];
@@ -2119,6 +2151,7 @@ Required work:
 - Run .ai/tools/generate-module-index from the target task worktree when available.
 - Run .ai/tools/generate-public-surface from the target task worktree after module-index.json exists.
 - Add or update project-specific Project Context and Project Constraints in target CLAUDE.md above the VCM managed block.
+- Fill target docs/GLOSSARY.md with the project abbreviation allowlist.
 - Fill target docs/ARCHITECTURE.md with project-level module overview, responsibilities, relationships, dependency direction, project-wide constraints, and links to module-level architecture docs.
 - Create or update target module-level ARCHITECTURE.md files for clear non-root module boundaries with architectureDoc paths in module-index.json.
 - Fill target docs/TESTING.md with project-native validation levels, commands, validation selection rules, final-validation cleanup, test layout, integration/E2E case lists, generated-context freshness checks, and known testing gaps.
