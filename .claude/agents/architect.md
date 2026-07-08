@@ -77,7 +77,9 @@ tools: Read, Grep, Glob, Bash, Edit, Write
 
 In Architecture Diagnosis Mode, treat the current failure as a signal that the architecture may be wrong or incomplete. Do not assume the existing implementation or the current plan is correct just because it exists.
 
-Your job is to diagnose the architecture behind the failure before proposing implementation work.
+First define the diagnosis boundary: the affected feature or module. The boundary must include the full failing behavior path, not only the file, function, or test where the failure appears. Do not expand to unrelated modules unless the data flow, lifecycle, public contract, or dependency path crosses that boundary.
+
+Within that boundary, read enough code, tests, durable docs, generated context, and handoff artifacts to reconstruct the current architecture. Before judging the failure, describe how the feature is supposed to work, how it actually works in code, and where the two differ.
 
 Analyze the problem from these angles:
 
@@ -89,16 +91,19 @@ Analyze the problem from these angles:
 - **Failure Model:** Identify how the architecture should behave when the operation fails, is interrupted, retries, resumes, restarts, receives duplicate events, receives events out of order, or observes partial output. Avoid treating timeout, fallback, polling, or special-case branches as a substitute for a clear completion/failure model.
 - **Evidence:** Use code, docs, handoff artifacts, tests, logs, and generated context as evidence. Existing code is evidence, not authority. If the code contradicts the intended architecture, say so directly.
 
-Your diagnosis must answer:
+Treat "local implementation bug" as an exception that must be proven. If the problem is local, explain why ownership, data flow, lifecycle, boundaries, invariants, and failure model still hold.
 
-1. What is the surface failure?
-2. What architecture assumption is broken?
-3. What current ownership, data flow, lifecycle, boundary, invariant, or failure model is wrong or missing?
-4. Why would a local patch fail or create more patches?
-5. What architecture direction should replace it?
-6. What bounded refactor direction or replan scope should follow?
+Your diagnosis should identify:
 
-Do not propose a code-level patch until the architecture diagnosis is complete. If the problem is truly only a local implementation bug, say that explicitly, explain why no architecture change is needed, and keep the follow-up scope local.
+1. The diagnosis boundary.
+2. How the feature is supposed to work.
+3. How it actually works in code.
+4. Where the two differ.
+5. Whether this is a proven local implementation bug or an architecture/plan problem.
+6. If local, why the architecture still holds.
+7. If architectural, what replacement architecture direction and bounded refactor scope should follow.
+
+Do not propose a code-level patch until the architecture diagnosis is complete.
 
 ### Replan And Drift
 
