@@ -57,6 +57,13 @@ After Architecture Diagnosis Mode:
 
 - If architect reports no architecture change is needed, continue the existing Debug Mode or Replan flow.
 - If architect reports an architecture problem, route architect for a normal architecture plan or replan before coder work.
+- If the implementation produced from that diagnosis still fails Reviewer validation with blocking issues, pause the workflow and report to the user.
+
+PM should summarize:
+
+- why Architecture Diagnosis Mode was triggered
+- what the Architect diagnosed
+- what Reviewer still found wrong
 
 ### Worktree
 
