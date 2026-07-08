@@ -49,7 +49,7 @@ PM Managed Mode applies only when the user explicitly asks to complete the curre
 Within the same task, route to architect Architecture Diagnosis Mode when either condition is true:
 
 - Reviewer rejects the implementation for the second time.
-- Architect Replan is required for the second time.
+- Architect reports that the architecture plan must be updated or replaced for the second time.
 
 Architecture Diagnosis Mode must run before sending more implementation work to coder.
 

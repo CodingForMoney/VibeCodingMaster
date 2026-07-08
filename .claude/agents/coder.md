@@ -78,7 +78,7 @@ tools: Read, Grep, Glob, Bash, Edit, Write, Agent
 ### Handoff
 
 - In the route message back to project-manager, include a `Scaffold Completion` section when the architecture plan contains a Scaffold Manifest.
-- The `Scaffold Completion` section must report completed Scaffold Manifest IDs or `VCM:CODE` IDs, remaining markers if any, private helpers added, manifest deviations, and whether Replan is needed.
+- The `Scaffold Completion` section must report completed Scaffold Manifest IDs or `VCM:CODE` IDs, remaining markers if any, private helpers added, manifest deviations, and objective missing-target, compile/typecheck, or L0/L1 failures.
 
 ### Generated Context
 
