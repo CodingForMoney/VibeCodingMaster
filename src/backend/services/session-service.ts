@@ -82,6 +82,7 @@ const HARNESS_ENGINEER_SESSION_PATH = ".ai/vcm/harness-engineer/session.json";
 const PROJECT_TRANSLATOR_SCOPE = "__project__";
 const PROJECT_HARNESS_ENGINEER_SCOPE = "__project_harness_engineer__";
 const PROJECT_TOOL_CD_ENTER_DELAY_MS = 500;
+const CLAUDE_CODE_DISABLE_AUTO_MEMORY = "1";
 // Project tool sessions launch a Claude Code TUI inside a PTY. The PTY reports
 // "running" the instant it is spawned, which is earlier than the moment the TUI
 // can actually accept pasted input. These bounds drive a quiescence-based
@@ -210,14 +211,14 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       command: startCommand.command,
       args: startCommand.args,
       cwd: startCommand.cwd,
-      env: {
+      env: withClaudeCodeRuntimeEnv({
         VCM_API_URL: deps.apiUrl,
         VCM_BASE_REPO_ROOT: repoRoot,
         VCM_TASK_REPO_ROOT: taskRepoRoot,
         VCM_TASK_SLUG: taskSlug,
         VCM_ROLE: role,
         VCM_SESSION_ID: claudeSessionId || undefined
-      },
+      }),
       cols: input.cols,
       rows: input.rows
     });
@@ -326,7 +327,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       command: startCommand.command,
       args: startCommand.args,
       cwd: startCommand.cwd,
-      env: {
+      env: withClaudeCodeRuntimeEnv({
         VCM_API_URL: deps.apiUrl,
         VCM_BASE_REPO_ROOT: repoRoot,
         VCM_TASK_REPO_ROOT: taskContext.taskRepoRoot,
@@ -336,7 +337,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
         VCM_TASK_SLUG: PROJECT_TRANSLATOR_SCOPE,
         VCM_ROLE: TRANSLATOR_ROLE,
         VCM_SESSION_ID: claudeSessionId || undefined
-      },
+      }),
       cols: input.cols,
       rows: input.rows
     });
@@ -462,7 +463,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       command: startCommand.command,
       args: startCommand.args,
       cwd: startCommand.cwd,
-      env: {
+      env: withClaudeCodeRuntimeEnv({
         VCM_API_URL: deps.apiUrl,
         VCM_BASE_REPO_ROOT: repoRoot,
         VCM_TASK_REPO_ROOT: taskContext.taskRepoRoot,
@@ -472,7 +473,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
         VCM_TASK_SLUG: PROJECT_HARNESS_ENGINEER_SCOPE,
         VCM_ROLE: HARNESS_ENGINEER_ROLE,
         VCM_SESSION_ID: claudeSessionId || undefined
-      },
+      }),
       cols: input.cols,
       rows: input.rows
     });
@@ -695,14 +696,14 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       command: startCommand.command,
       args: startCommand.args,
       cwd: startCommand.cwd,
-      env: {
+      env: withClaudeCodeRuntimeEnv({
         VCM_API_URL: deps.apiUrl,
         VCM_BASE_REPO_ROOT: repoRoot,
         VCM_TASK_REPO_ROOT: targetCwd,
         VCM_TASK_SLUG: normalizeProjectScopedRecordForPersistence(session).taskSlug,
         VCM_ROLE: session.role,
         VCM_SESSION_ID: session.claudeSessionId
-      }
+      })
     });
     if ((await waitForSessionInputReady(runtimeSession.id)) === "exited") {
       deps.registry.remove(runtimeSession.id);
@@ -1972,6 +1973,13 @@ function formatClaudeCdCommand(targetCwd: string): string {
 
 function isExitedStatus(status: string | undefined): boolean {
   return status === "exited" || status === "crashed" || status === "missing";
+}
+
+function withClaudeCodeRuntimeEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  return {
+    ...env,
+    CLAUDE_CODE_DISABLE_AUTO_MEMORY
+  };
 }
 
 function delay(ms: number): Promise<void> {

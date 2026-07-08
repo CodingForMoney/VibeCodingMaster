@@ -112,6 +112,7 @@ describe("createHarnessService", () => {
     expect(await fs.readText("/repo/.claude/settings.json")).toContain("/api/hooks/claude-code/stop");
     expect(await fs.readText("/repo/.claude/settings.json")).toContain("/api/hooks/claude-code/permission-request");
     expect(await fs.readText("/repo/.claude/settings.json")).toContain("BASH_DEFAULT_TIMEOUT_MS");
+    expect(await fs.readText("/repo/.claude/settings.json")).toContain('"autoMemoryEnabled": false');
   });
 
   it("inserts VCM rules into an existing file without overwriting user content", async () => {
@@ -263,6 +264,7 @@ describe("createHarnessService", () => {
     expect(JSON.stringify(settings.hooks.UserPromptSubmit)).not.toContain("vcmctl");
     expect(JSON.stringify(settings.hooks.Stop)).not.toContain("vcmctl");
     expect(JSON.stringify(settings.hooks.PreToolUse)).toContain("echo keep-user-hook");
+    expect(settings.autoMemoryEnabled).toBe(false);
   });
 
   it("updates only the managed block when VCM rules drift", async () => {

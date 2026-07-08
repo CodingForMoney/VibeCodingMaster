@@ -108,6 +108,7 @@ describe("createSessionService", () => {
 
     expect(writes).toHaveLength(0);
     expect(runtimeInputs[0]?.env).toMatchObject({
+      CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1",
       VCM_API_URL: "http://127.0.0.1:4173",
       VCM_TASK_REPO_ROOT: TASK_WORKTREE,
       VCM_TASK_SLUG: "demo-task",
@@ -255,6 +256,7 @@ describe("createSessionService", () => {
     // exposes the active task root independently of pty cwd.
     expect(firstRuntimeInputs[0]?.cwd).toBe("/repo");
     expect(firstRuntimeInputs[0]?.env).toMatchObject({
+      CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1",
       VCM_TASK_REPO_ROOT: TASK_WORKTREE,
       VCM_TASK_SLUG: "__project__",
       VCM_ROLE: "translator"
@@ -784,6 +786,7 @@ describe("createSessionService", () => {
     expect(started.command).toContain("--agent harness-engineer");
     expect(runtimeInputs[0]?.cwd).toBe("/repo");
     expect(runtimeInputs[0]?.env).toMatchObject({
+      CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1",
       VCM_TASK_REPO_ROOT: TASK_WORKTREE,
       VCM_TASK_SLUG: "__project_harness_engineer__",
       VCM_ROLE: "harness-engineer"

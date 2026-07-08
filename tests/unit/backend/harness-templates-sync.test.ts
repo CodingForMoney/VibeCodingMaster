@@ -62,8 +62,10 @@ describe("harness templates stay in sync with the script installer", () => {
     await mkdir(childDir, { recursive: true });
 
     const settings = JSON.parse(await readFile(path.join(tmpRepo, ".claude/settings.json"), "utf8")) as {
+      autoMemoryEnabled: boolean;
       hooks: { PreToolUse: Array<{ hooks: Array<{ command: string }> }> };
     };
+    expect(settings.autoMemoryEnabled).toBe(false);
     const command = settings.hooks.PreToolUse[0]?.hooks[0]?.command;
     expect(command).toContain("git rev-parse --show-toplevel");
     expect(command).toContain("[ -n \"$guard\" ] || exit 0");
