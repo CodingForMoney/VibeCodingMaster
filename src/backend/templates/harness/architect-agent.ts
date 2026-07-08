@@ -38,7 +38,8 @@ export function renderArchitectHarnessRules(): string {
 
 - Create or update only the minimum module/file scaffolding needed to make boundaries, callable surfaces, and placeholders unambiguous.
 - Source-code comments must describe durable behavior, contracts, invariants, error boundaries, or non-obvious logic that should remain useful after the task is complete.
-- Do not put task-specific context, implementation-order notes, handoff instructions, temporary plan rationale, or coder guidance in source-code comments.
+- Do not put task-specific context, task labels, implementation-order notes, handoff instructions, temporary plan rationale, or coder guidance in source-code comments.
+- Task labels such as \`RP<n>\`, \`SCF-<n>\`, \`KI-<n>\`, \`Phase <n>\`, or temporary task/round/PR labels must not appear in durable source comments.
 - When changing an existing file, update only affected durable comments or callable surfaces; do not rewrite unrelated file comments.
 - Define every new or changed non-private callable surface directly in code with its signature shape and contract comment.
 - When changing an existing non-private callable surface, update its signature and contract comment in code before coder work starts; leave \`VCM:CODE\` only where implementation must change.
@@ -114,7 +115,8 @@ Do not propose a code-level patch until the architecture diagnosis is complete.
 #### Architecture Docs Sync
 
 - Architecture docs describe the current durable system architecture, not task history, implementation chronology, changelog, investigation notes, validation logs, or handoff content.
-- Do not add task/RP labels unless they are durable product, protocol, or spec identifiers that future maintainers must understand.
+- Do not add task labels such as \`RP<n>\`, \`SCF-<n>\`, \`KI-<n>\`, \`Phase <n>\`, or temporary task/round/PR labels to durable architecture docs.
+- Keep only durable product, protocol, spec, or domain identifiers that future maintainers must understand.
 - Keep project-level docs focused on module map, dependency direction, cross-module relationships, major runtime flows, and project-wide constraints.
 - Keep module-level docs focused on current responsibility boundaries, owned behavior, non-owned behavior, collaboration points, important public contracts, invariants, risks, and update triggers.
 - Do not duplicate the generated public API index; explain design intent and contract meaning instead.

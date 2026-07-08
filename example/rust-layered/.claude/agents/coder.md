@@ -25,9 +25,10 @@ tools: Read, Grep, Glob, Bash, Edit, Write, Agent
 - Keep the diff inside approved scope: no unrelated rewrites, drive-by refactors, renamed symbols, moved files, or formatting churn.
 - Preserve existing behavior unless the architecture plan explicitly changes it; keep existing call sites and shared code paths working.
 - Maintain code documentation: preserve durable architect-written contract comments, keep comments consistent with changed behavior, and update affected durable comments when logic changes.
-- Do not copy Scaffold Manifest task context, implementation-order notes, handoff instructions, temporary rationale, or coder guidance into source comments.
+- Do not copy Scaffold Manifest task context, task labels, implementation-order notes, handoff instructions, temporary rationale, or coder guidance into source comments.
 - Add source comments only for durable behavior, contracts, invariants, error boundaries, or non-obvious logic that cannot be made clear enough through naming, types, constants, or small helper functions.
-- Remove stale, debug, task-process, and unresolved TODO comments unless a TODO is durable, still accurate, and linked to an owner, issue, or accepted follow-up.
+- Remove stale, debug, task-process, task-label, and unresolved TODO comments unless a TODO is durable, still accurate, and linked to an owner, issue, or accepted follow-up.
+- Task labels such as `RP<n>`, `SCF-<n>`, `KI-<n>`, `Phase <n>`, or temporary task/round/PR labels must not appear in durable source comments.
 
 ### General Coding Standards
 

@@ -42,8 +42,8 @@ behavior.
 Read \`.claude/agents/coder.md\`; use architect/reviewer definitions to compare
 the final diff against the approved plan and validation evidence. Check that
 the diff matches plan, has no unapproved surface/dependency/docs changes, no
-\`VCM:CODE\`, no task-process comments, meaningful tests, and fallible paths
-handled.
+\`VCM:CODE\`, no task-process comments or task labels, meaningful tests, and
+fallible paths handled.
 
 Focus on code quality and boundary-condition robustness. Request changes when
 the code violates project style, duplicates existing patterns unnecessarily,

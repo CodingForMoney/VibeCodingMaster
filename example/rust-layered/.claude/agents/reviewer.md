@@ -39,7 +39,7 @@ tools: Read, Grep, Glob, Bash, Edit, Write
 - Treat passing tests as insufficient when assertions are tied to implementation details, fixed fixture values, snapshot text, or mocked paths that bypass the behavior being validated.
 - Add anti-hardcode coverage when risk warrants it: use non-fixture inputs, boundary values, negative cases, repeated actions, and assertions through public/runtime paths.
 - Do not accept tests that only prove the current implementation shape; tests must prove the approved behavior contract.
-- If task-specific process comments appear in changed code while reviewing behavior, report them as a maintainability gap; task context belongs in handoff artifacts, not durable code comments.
+- If task-specific process comments or task labels appear in changed code while reviewing behavior, report them as blocking findings; task context belongs in handoff artifacts, commit history, or PR text, not durable code comments.
 - Treat architect-flagged public contracts, migrations, auth, data flow, routing, or dependency changes as inputs for reviewer-owned validation design.
 - Record skipped L3 checks in `.ai/vcm/handoffs/review-report.md` with the reason.
 - Update `docs/TESTING.md` when validation strategy, commands, level mapping, integration/E2E case definitions, selection rules, final-validation cleanup, test gaps, or test expectations change.
