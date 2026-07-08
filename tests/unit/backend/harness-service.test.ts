@@ -76,8 +76,11 @@ describe("createHarnessService", () => {
     const coderAgent = await fs.readText("/repo/.claude/agents/coder.md");
     expect(coderAgent).toContain("tools: Read, Grep, Glob, Bash, Edit, Write, Agent");
     expect(coderAgent).toContain("Implement assigned file/function-level scaffold items");
+    expect(coderAgent).toContain("Unit test coverage is required for every callable unit named by the architecture plan");
     expect(coderAgent).toContain("Compile, typecheck, or L0/L1 failure is the signal to report");
+    expect(coderAgent).toContain("### Failure Reporting And Continuation");
     expect(coderAgent).not.toContain("Stop before editing when the architecture plan");
+    expect(coderAgent).not.toContain("Request Replan");
     expect(coderAgent).toContain("### Parallel Worker Implementation");
     expect(coderAgent).toContain("vcm-coder-worker");
     expect(frontmatterOf(await fs.readText("/repo/.claude/agents/project-manager.md"))).not.toContain("Agent");

@@ -80,19 +80,23 @@ export function renderCoderHarnessRules(): string {
 
 ### Baseline Tests
 
-- Add or update baseline unit tests for changed behavior: direct unit coverage, key happy path, key boundary or failure path when applicable.
+- Unit test coverage is required for every callable unit named by the architecture plan or touched by a \`VCM:CODE\` marker.
+- A callable unit means a function, method, handler, command action, route handler, hook callback, reducer, parser, validator, state transition function, or service API function.
+- If the changed callable unit is private, test it through the nearest existing public/exported/module-level callable unit that owns that behavior. Do not expose private helpers only for tests.
+- For each changed callable unit, add at least one success-path unit test.
+- For each changed validation, parsing, branching, error-handling, boundary, permission, lifecycle, retry, or state-transition path inside that callable unit, add a unit test that exercises that path.
+- Pure private helpers added only to support an already-tested callable unit do not need separate direct tests.
 - Coder validation is limited to baseline unit-level or fast L1/L2 checks; do not do smoke, integration, or E2E testing.
 - Run available L0/L1 validation after implementation.
 - Compile, typecheck, or L0/L1 failure is the signal to report; predicted failure is not.
 - If baseline validation cannot be run, finish implementation and explain the concrete reason in the route message to project-manager.
 
-### Replan And Continuation
+### Failure Reporting And Continuation
 
-- Request Replan only after objective implementation evidence exists: an assigned scaffold target is absent, compile/typecheck fails, or L0/L1 fails.
-- Do not request Replan based on predicted design failure, public-contract disagreement, architecture disagreement, or validation prediction.
-- Do not request Replan because of workload, session length, or context size.
+- Report failure only from objective implementation evidence: an assigned scaffold target is absent, compile/typecheck fails, or L0/L1 fails.
+- Do not report failure based on predicted design failure, public-contract disagreement, architecture disagreement, or validation prediction.
+- Do not stop because of workload, session length, or context size.
 - If the current turn ends before all assigned scaffold items are done, include completed items, remaining items, validation state, and next continuation step in the route message, then ask project-manager for continuation.
-- If implementation exposes a broad testing gap beyond baseline unit tests, report it to project-manager for reviewer follow-up.
 
 ### Background Jobs
 
