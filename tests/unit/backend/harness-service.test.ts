@@ -75,6 +75,9 @@ describe("createHarnessService", () => {
     expect(await fs.readText("/repo/.claude/agents/architect.md")).toContain("Read `.ai/vcm/handoffs/known-issues.md`; promote only confirmed unresolved durable issues");
     const coderAgent = await fs.readText("/repo/.claude/agents/coder.md");
     expect(coderAgent).toContain("tools: Read, Grep, Glob, Bash, Edit, Write, Agent");
+    expect(coderAgent).toContain("Implement assigned file/function-level scaffold items");
+    expect(coderAgent).toContain("Compile, typecheck, or L0/L1 failure is the signal to report");
+    expect(coderAgent).not.toContain("Stop before editing when the architecture plan");
     expect(coderAgent).toContain("### Parallel Worker Implementation");
     expect(coderAgent).toContain("vcm-coder-worker");
     expect(frontmatterOf(await fs.readText("/repo/.claude/agents/project-manager.md"))).not.toContain("Agent");
@@ -84,6 +87,8 @@ describe("createHarnessService", () => {
     expect(coderWorkerAgent).toContain("name: vcm-coder-worker");
     expect(coderWorkerAgent).toContain("model: inherit");
     expect(coderWorkerAgent).toContain("Do not set `handled: true`");
+    expect(coderWorkerAgent).toContain("Implement assigned file/function-level scaffold items only");
+    expect(coderWorkerAgent).not.toContain("Stop before editing if the assigned module");
     expect(await fs.readText("/repo/.claude/agents/gate-reviewer.md")).toContain("name: gate-reviewer");
     expect(await fs.readText("/repo/.claude/agents/gate-reviewer.md")).toContain("You are VCM `gate-reviewer`");
     expect(await fs.readText("/repo/.claude/agents/gate-reviewer.md")).toContain("Use the task and worktree paths named there");
