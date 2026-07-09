@@ -81,6 +81,53 @@ TBD
 `;
 }
 
+export function renderCoderCompletionTemplate(taskSlug: string): string {
+  return `# Coder Completion: ${taskSlug}
+
+Decision: ready_for_review|incomplete|failed
+
+## Scaffold Completion
+
+TBD
+
+## Remaining Markers
+
+TBD
+
+## Changed Files
+
+TBD
+
+## Private Helpers Added
+
+TBD
+
+## Manifest Deviations
+
+TBD
+
+## Generated Context
+
+TBD
+
+## Baseline Tests Added Or Updated
+
+TBD
+
+## L0/L1 Validation
+
+TBD
+
+## Worker Results
+
+TBD
+
+## Objective Failures
+
+TBD
+`;
+}
+
 export function renderDocsSyncReportTemplate(taskSlug: string): string {
   return `# Docs Sync Report: ${taskSlug}
 

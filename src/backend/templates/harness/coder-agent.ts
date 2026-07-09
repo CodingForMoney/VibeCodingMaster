@@ -27,7 +27,8 @@ export function renderCoderHarnessRules(): string {
 ### Implementation
 
 - Make only the implementation changes needed for the approved scope.
-- Record confirmed out-of-scope issues found during implementation in \`.ai/vcm/handoffs/known-issues.md\`.
+- Do not write \`.ai/vcm/handoffs/known-issues.md\`.
+- If implementation exposes an out-of-scope issue, record only direct objective facts in \`.ai/vcm/handoffs/coder-completion.md\`; do not investigate, classify, or diagnose it.
 
 ### Complete Implementation
 
@@ -53,6 +54,34 @@ export function renderCoderHarnessRules(): string {
 - Write \`.ai/vcm/handoffs/coder-completion.md\` before routing back to project-manager. This file is the current implementation completion evidence, not a log; replace stale content instead of appending history.
 - \`coder-completion.md\` must include \`Decision: ready_for_review | incomplete | failed\`.
 - \`coder-completion.md\` must report completed Scaffold Manifest IDs or \`VCM:CODE\` IDs, remaining markers if any, changed files, private helpers added, manifest deviations, generated context status, baseline tests added or updated, L0/L1 commands and results, worker commits and integration status when workers were used, and objective missing-target, compile/typecheck, or L0/L1 failures.
+- Use this structure:
+
+\`\`\`md
+# Coder Completion: <task>
+
+Decision: ready_for_review|incomplete|failed
+
+## Scaffold Completion
+
+## Remaining Markers
+
+## Changed Files
+
+## Private Helpers Added
+
+## Manifest Deviations
+
+## Generated Context
+
+## Baseline Tests Added Or Updated
+
+## L0/L1 Validation
+
+## Worker Results
+
+## Objective Failures
+\`\`\`
+
 - In the route message back to project-manager, include the \`coder-completion.md\` path, the same \`Decision\`, and a \`Scaffold Completion\` section when the architecture plan contains a Scaffold Manifest.
 - The \`Scaffold Completion\` section must report completed Scaffold Manifest IDs or \`VCM:CODE\` IDs, remaining markers if any, private helpers added, manifest deviations, and objective missing-target, compile/typecheck, or L0/L1 failures.
 
@@ -66,10 +95,11 @@ export function renderCoderHarnessRules(): string {
 
 - Follow \`docs/CODING_STANDARDS.md\` Baseline Tests for every changed callable unit.
 - For scaffolded implementation, this includes every callable unit named by the architecture plan or touched by a \`VCM:CODE\` marker.
-- Coder validation is limited to baseline unit-level or fast L1/L2 checks; do not do smoke, integration, or E2E testing.
+- Coder validation is limited to baseline unit-level and fast L0/L1 checks; do not run L2/L3/L4, smoke, integration, or E2E validation.
 - Run available L0/L1 validation after implementation.
 - Compile, typecheck, or L0/L1 failure is the signal to report; predicted failure is not.
-- If baseline validation cannot be run, finish implementation and explain the concrete reason in the route message to project-manager.
+- If required compile/typecheck/L0/L1 validation cannot run or cannot complete, write \`Decision: failed\` unless project-manager has recorded an explicit exception; finish implementation and explain the concrete reason in \`coder-completion.md\` and the route message to project-manager.
+- Do not make tests pass by weakening assertions, skipping tests, hardcoding success, bypassing real behavior paths, or adding test-only production behavior.
 
 ### Failure Reporting And Continuation
 

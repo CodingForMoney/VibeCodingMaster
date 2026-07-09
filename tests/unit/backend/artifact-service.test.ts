@@ -58,6 +58,7 @@ describe("createArtifactService", () => {
     expect(created).toContain(".ai/vcm/handoffs/docs-sync-report.md");
     expect(created).toContain(".ai/vcm/handoffs/final-acceptance.md");
     expect(created).toContain(".ai/vcm/handoffs/known-issues.md");
+    expect(created).toContain(".ai/vcm/handoffs/coder-completion.md");
     expect(summary.paths.docsSyncReportPath).toBe(".ai/vcm/handoffs/docs-sync-report.md");
     expect(summary.paths.finalAcceptancePath).toBe(".ai/vcm/handoffs/final-acceptance.md");
     expect(summary.paths.knownIssuesPath).toBe(".ai/vcm/handoffs/known-issues.md");
@@ -67,6 +68,8 @@ describe("createArtifactService", () => {
       .resolves.toContain("Task repo root: /repo");
     await expect(fs.readText("/repo/.ai/vcm/handoffs/role-commands/coder.md"))
       .resolves.toContain("Rule: only edit files under Task repo root.");
+    await expect(fs.readText("/repo/.ai/vcm/handoffs/coder-completion.md"))
+      .resolves.toContain("## L0/L1 Validation");
     expect(summary.checks.find((check) => check.kind === "docs-sync-report")).toMatchObject({
       status: "incomplete",
       hasPlaceholder: true
