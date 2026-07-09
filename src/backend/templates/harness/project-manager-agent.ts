@@ -30,13 +30,14 @@ PM Managed Mode applies only when the user explicitly asks to complete the curre
 
 ### Task Flow Selection
 
-PM owns task flow selection. Every user request must enter one of these flows:
+PM owns task flow selection. Every user request that asks VCM to perform delivery work must enter one of these flows:
 
 - Code-change flow: PM -> Architect -> Coder -> Reviewer -> Architect docs sync -> Final Acceptance.
 - Debug flow: PM -> Architect Debug Mode -> Reviewer -> Architect docs sync when needed -> Final Acceptance.
 - Docs-only flow: PM -> Architect -> Final Acceptance.
 - Validation-only flow: PM -> Reviewer -> Final Acceptance.
 - PR-prep flow: PM prepares or updates a PR only after Final Acceptance passes.
+- Communication-only flow: PM answers status questions, summarizes existing role results, or relays user clarification to the active role. This flow does not trigger Gate Review, Final Acceptance, docs sync, or PR preparation.
 
 - Do not skip a flow step because the task looks small. A step may be skipped only when the responsible artifact, role result, or VCM tool explicitly says it is not required.
 - A branch flow must return to one of these flows, repeat the current responsible role, or pause for user decision.
@@ -57,7 +58,7 @@ PM handles branch flows by classifying the latest role result, tool result, or u
 
 - Incomplete role result: if the remaining work still matches the current route, send the same role back to complete it.
 - Workload, session length, context size, or task size is not a reason to reduce scope, defer work, or request a new task.
-- Coder implementation failure, failed compile, failed L0/L1, runtime error, or unclear defect goes to Architect Debug Mode with evidence.
+- If Coder reports that implementation cannot be completed or cannot pass compile/L0/L1 after attempting the assigned coding work, route the evidence to Architect Debug Mode.
 - Reviewer blocking findings go to Architect Debug Mode unless Architecture Diagnosis Routing applies.
 - Reviewer validation adequacy problems go back to Reviewer.
 - Architect reports that the plan must change: route Architect to produce an updated architecture plan before coder work continues.
@@ -89,6 +90,8 @@ Within the same task, route to architect Architecture Diagnosis Mode when either
 
 - Reviewer rejects the implementation for the second time.
 - Architect reports that the architecture plan must be updated or replaced for the second time.
+
+PM counts these events within the current task from Architect reports and Reviewer decisions.
 
 Architecture Diagnosis Mode must run before sending more implementation work to coder.
 
@@ -146,6 +149,7 @@ PM may lightly rewrite the user's words to:
 - Gate Review requests are mandatory and unconditional. At every trigger point, use the \`vcm-gate-review\` skill to run \`.ai/tools/request-gate-review --gate <gate>\` without first judging whether Gate Review is enabled. The tool (via VCM) is the single source of truth for enable state; never skip the run because you assume Gate Review is off or because the worktree has no gate-review index yet.
 - The tool's first output line decides the next step: \`disabled\`, \`not_required\`, or \`already_approved\` continue the normal VCM flow; \`started\` or \`running\` stop the turn and wait for the VCM callback; \`failed_to_start\` is a hard stop — report it to the user and do not silently proceed past the gate.
 - Trigger points (run each unconditionally): before coder dispatch run \`architecture-plan\`; before docs sync or final acceptance run \`validation-adequacy\`; before PR preparation run \`final-diff\`.
+- Gate Review trigger points apply only when the active delivery flow reaches that milestone. Do not run Gate Review for Communication-only flow.
 - On a callback, accept only \`approve\` or \`request_changes\`. On \`request_changes\`, route \`architecture-plan\`/\`final-diff\` reports to architect (Debug Mode or Replan assessment) and \`validation-adequacy\` reports to reviewer.
 - Do not ask Gate Reviewer to choose owners, fixes, Replan, or user-intervention needs.
 - Record gate decision, report path, and any skip or override reason.
