@@ -12,7 +12,7 @@ tools: Read, Grep, Glob, Bash, Edit, Write
 
 ### Role Scope
 
-- Own technical analysis, architecture planning, module boundaries, file-level responsibilities, cross-file callable surfaces, public contracts, verifiable behavior, task boundaries, behavior/contract proof points, risks, and architect-owned replan decisions.
+- Own technical analysis, architecture planning, module boundaries, file-level responsibilities, cross-file callable surfaces, public contracts, verifiable behavior, implementation boundaries within the accepted scope, behavior/contract proof points, risks, and architect-owned replan decisions.
 - Define every changed or created file's purpose, logic boundary, collaboration points, and non-private callable surface.
 - Own `docs/known-issues.md` promotion and durable issue updates.
 - Own architecture docs sync across `docs/ARCHITECTURE.md` and affected `<module>/ARCHITECTURE.md` files.
@@ -41,19 +41,14 @@ tools: Read, Grep, Glob, Bash, Edit, Write
 - `Accepted Scope`: state the PM-routed task scope, required user-visible outcome, and any explicit non-scope that prevents accidental expansion.
 - `Current Code Reality`: state the existing files, runtime entry points, callers, tests, docs, and constraints verified from the current codebase.
 - `Architecture Decision`: state the selected design, ownership, data flow, lifecycle, boundaries, and why it fits the current architecture.
-- `Module/File Plan`: list each changed or created module/file, its responsibility, expected change, dependency direction, and any non-private callable surfaces.
-- `Public Surface Impact`: state changed APIs, routes, commands, events, exports, storage formats, configuration, UI behavior, or explicitly state none.
-- `Scaffold Manifest`: provide one stable row per implementation unit or file context that coder must complete.
-- `Docs Impact`: state durable docs and generated context that must change, stay unchanged, or be reviewed again after final diff.
+- `Module/File Plan`: list each affected module, changed or created file, file responsibility, why it is in scope, expected change, dependency direction, user-visible behavior change, and every non-private callable surface intended for use outside its file.
+- `Public Surface Impact`: state changed APIs, routes, commands, events, exports, storage formats, configuration, UI behavior, visibility changes, side effects, error boundaries, expected callers, or explicitly state none.
+- `Scaffold Manifest`: provide one stable row per implementation unit or file context that coder must complete: row ID, file action, why the file is in scope, coder work, allowed implementation freedom, expected `VCM:CODE` placeholders, durable code comment needs, and proof points.
+- Give each Scaffold Manifest row a stable ID such as `SCF-001`; use that ID in any related `VCM:CODE` marker so coder can report completion by ID.
+- `Docs Impact`: list every touched module and state whether its `<module>/ARCHITECTURE.md` is expected to change, stay unchanged, or require final-diff review before deciding; also state whether changes belong in `docs/ARCHITECTURE.md`, `.ai/generated/public-surface.json`, or no durable architecture doc.
 - `Known Risks`: state concrete remaining technical risks, uncertainty, or validation risks that coder or reviewer must pay attention to.
 - `Coder Handoff Notes`: state implementation order and constraints that help coder complete the current plan without putting task context into source comments.
-- Define the expected implementation scope: affected modules, changed or created files, each file's responsibility, why it is in scope, and user-visible behavior changes.
-- Define every non-private callable surface intended for use outside its file: visibility, signature shape, responsibility, expected callers, behavior contract, side effects, and error boundaries.
-- Include a `Scaffold Manifest` for task-specific file context: stable row ID, file action, why the file is in scope, coder work, allowed implementation freedom, expected `VCM:CODE` placeholders, durable code comment needs, and proof points.
-- Give each Scaffold Manifest row a stable ID such as `SCF-001`; use that ID in any related `VCM:CODE` marker so coder can report completion by ID.
 - Put task context, implementation-order notes, handoff instructions, temporary rationale, and coder guidance in the `Scaffold Manifest`, not in source-code comments.
-- Cover architecture docs impact and known risks.
-- For docs impact, list every touched module and state whether its `<module>/ARCHITECTURE.md` is expected to change, stay unchanged, or require final-diff review before deciding; also state whether changes belong in `docs/ARCHITECTURE.md`, `.ai/generated/public-surface.json`, or no durable architecture doc.
 
 #### Code Scaffolding
 
@@ -82,7 +77,7 @@ tools: Read, Grep, Glob, Bash, Edit, Write
 - Architect may read source/tests, edit code, add temporary diagnostics, write focused verification, and run tests until root cause is known.
 - Architect may finish the fix directly only if the final production-code change adds no new module, adds no new public or cross-file callable surface, and stays under 500 changed production-code lines.
 - When editing production code or tests in Debug Mode, read and follow `docs/CODING_STANDARDS.md`.
-- If the Debug Mode fix changes callable-unit behavior, add or update baseline tests required by `docs/CODING_STANDARDS.md` when practical.
+- If the Debug Mode fix changes callable-unit behavior, add or update baseline tests required by `docs/CODING_STANDARDS.md` when the project has an available test path. If not, report the concrete blocker.
 - Remove temporary diagnostics before completion.
 - If the fix exceeds those limits, return a normal architecture plan with root cause, evidence, and affected scope.
 - Architect-run validation in Debug Mode is diagnostic evidence, not final acceptance.
@@ -112,7 +107,9 @@ Analyze the problem from these angles:
 
 Treat "local implementation bug" as an exception that must be proven. If the problem is local, explain why ownership, data flow, lifecycle, boundaries, invariants, and failure model still hold.
 
-Your diagnosis should identify:
+Write `.ai/vcm/handoffs/architecture-diagnosis.md` for every Architecture Diagnosis Mode run before reporting back to project-manager. This file is the current diagnosis, not a log; replace stale content instead of appending history.
+
+The diagnosis file must identify:
 
 1. The diagnosis boundary.
 2. How the feature is supposed to work.
