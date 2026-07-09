@@ -32,6 +32,10 @@ describe("createHarnessService", () => {
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("## VCM Start Here");
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("## VCM Harness Scope");
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("## VCM Task Flow");
+    expect(await fs.readText("/repo/CLAUDE.md")).toContain("All role routes are PM-hub routes");
+    expect(await fs.readText("/repo/CLAUDE.md")).toContain("Debug work uses: `project-manager -> architect Debug Mode -> reviewer -> project-manager final acceptance`.");
+    expect(await fs.readText("/repo/CLAUDE.md")).toContain("Architecture Diagnosis is a PM-triggered branch inside code/debug work");
+    expect(await fs.readText("/repo/CLAUDE.md")).toContain("Final acceptance closes every delivery flow before task completion or PR preparation.");
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("## VCM Worktree Policy");
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("## VCM Glossary Policy");
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("docs/GLOSSARY.md");

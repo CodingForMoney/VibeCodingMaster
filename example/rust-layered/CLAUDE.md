@@ -18,7 +18,7 @@ This is a Rust workspace example for VCM harness experiments. It has three archi
 - Use `vcm-route-message` only for PM-hub routes: project-manager dispatches to roles, and roles report questions, results, blockers, and findings back to project-manager. Follow its write-then-stop rule.
 - Use `vcm-long-running-validation` for long-running validation. Follow the background job limits below.
 - Use `vcm-report-harness-issue` when you notice a reusable VCM harness problem. Record feedback; do not contact Harness Engineer directly.
-- Project-manager uses `vcm-gate-review` at enabled Gate Review trigger points and on VCM Gate Review callbacks.
+- Project-manager runs `vcm-gate-review` unconditionally at every Gate Review trigger point and on VCM Gate Review callbacks; the tool reports the authoritative enable state.
 
 ## VCM Harness Scope
 
@@ -52,11 +52,16 @@ If a reusable harness problem is suspected, it is enough to record a concise fee
 
 ## VCM Task Flow
 
-- Code changes use the full route: `project-manager -> architect -> coder -> reviewer -> architect docs sync -> project-manager final acceptance`.
-- Before code changes, architect must write an architecture plan with a Scaffold Manifest and minimum necessary code scaffolding that cover file responsibilities, cross-file callable surfaces, user-visible behavior, docs impact, risks, and Replan triggers.
-- Docs-only changes may use: `project-manager -> architect -> project-manager final acceptance`.
-- Test-only or validation-only work may use: `project-manager -> reviewer -> project-manager final acceptance`.
-- If a docs/test/validation-only task reveals required code, architecture, public contract, dependency, durable-doc, or test-strategy changes, route back through the full code-change flow.
+- All role routes are PM-hub routes. Project-manager starts and advances every flow; non-PM roles report blockers, failures, conflicts, incomplete work, and findings back to project-manager.
+- Code changes use: `project-manager -> architect -> coder -> reviewer -> architect docs sync -> project-manager final acceptance`.
+- Debug work uses: `project-manager -> architect Debug Mode -> reviewer -> project-manager final acceptance`.
+- Docs-only changes use: `project-manager -> architect -> project-manager final acceptance`.
+- Test-only or validation-only work uses: `project-manager -> reviewer -> project-manager final acceptance`.
+- Architecture Diagnosis is a PM-triggered branch inside code/debug work: `project-manager -> architect Architecture Diagnosis Mode -> project-manager route decision`.
+- Gate Review is PM-triggered at configured gates and returns to the current flow after approval or routes `request_changes` through PM.
+- Final acceptance closes every delivery flow before task completion or PR preparation.
+- PR preparation starts only after final acceptance.
+- If docs/test/validation-only work reveals required code, architecture, public contract, dependency, durable-doc, or test-strategy changes, project-manager routes through the full code-change flow.
 - Keep role outputs under `.ai/vcm/handoffs/`.
 - Gate Review Gate reports live under `.ai/vcm/gate-reviews/` and are VCM-managed task evidence.
 - Runtime task records and handoffs under `.ai/vcm/` are temporary. Durable facts must move into code, tests, PR text, commit history, or long-term docs.
@@ -64,11 +69,11 @@ If a reusable harness problem is suspected, it is enough to record a concise fee
 
 ## VCM Validation Levels
 
-- L0 fast checks: format, lint, typecheck, boundary, dependency, or other cheap project checks.
-- L1 coder unit checks: changed behavior and direct regressions through project-defined unit tests.
-- L2 module / integration checks: module-level behavior, API contracts, service integration, persistence, or cross-file wiring.
-- L3 smoke E2E checks: core user journeys or critical browser/API flows.
-- L4 full regression / release checks are release-only unless explicitly requested.
+- L0 fast checks (default runner: coder): format, lint, typecheck, boundary, dependency, or other cheap project checks.
+- L1 baseline implementation checks (default runner: coder): changed behavior and direct regressions through project-defined unit tests.
+- L2 module / integration checks: targeted fast L2 may run in coder when explicitly assigned; full L2, integration suites, multi-node, cross-service, persistence, runtime, or public-contract gates are reviewer-run.
+- L3 smoke E2E checks (default runner: reviewer): core user journeys or critical browser/API flows.
+- L4 full regression / release checks (default runner: reviewer; architect-owned release flow) are release-only unless explicitly requested.
 
 ## VCM Worktree Policy
 
