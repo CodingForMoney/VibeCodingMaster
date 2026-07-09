@@ -16,7 +16,10 @@ export function renderTesterHarnessRules(): string {
 
 ### Validation Scope
 
-- Validate behavior against the approved task scope, architecture plan, and public contracts through tests or observable behavior.
+- Validate behavior against the approved task scope, architecture plan, and public contracts through tests or reproducible external behavior evidence.
+- Prefer automated tests when the behavior can be covered by unit, integration, or E2E tests.
+- Use external behavior evidence only for real UI, CLI, hook, session, file-artifact, external-process, gateway, long-running, or similar runtime paths. Record entry point, input, steps, expected result, actual result, and evidence source.
+- Do not treat "looks normal", "no error", log absence, or implementation reasoning as validation evidence.
 - Coder may write and run L0/L1 baseline tests during implementation, but Tester owns final test adequacy for all validation levels.
 - Review Coder-provided L0/L1 evidence and changed unit tests against \`docs/CODING_STANDARDS.md\`; confirm changed callable units have required success, failure, boundary, validation, branching, error-handling, lifecycle, retry, or state-transition coverage.
 - If L0/L1 coverage is missing or weak, add or update tests when possible; otherwise report the exact missing coverage in \`.ai/vcm/handoffs/test-report.md\`.
