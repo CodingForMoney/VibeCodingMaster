@@ -1,7 +1,7 @@
 export const GATE_REVIEW_GATES = [
   "architecture-plan",
   "validation-adequacy",
-  "final-diff"
+  "code-diff"
 ] as const;
 
 export type GateReviewGate = typeof GATE_REVIEW_GATES[number];
@@ -61,6 +61,11 @@ export interface GateReviewGateRecord {
   requestId?: string;
   requestPath?: string;
   inputHash?: string;
+  baseCommit?: string;
+  headCommit?: string;
+  commits?: string[];
+  changedFiles?: string[];
+  diffStat?: string;
   summary?: string;
   findings?: GateReviewFinding[];
   error?: string;

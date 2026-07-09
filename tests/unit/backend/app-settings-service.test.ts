@@ -208,22 +208,23 @@ describe("app-settings-service", () => {
     });
 
     await expect(service.updateGateReviewSettings(repoRoot, "demo-task", [
-      "final-diff",
+      "code-diff",
       "architecture-plan",
-      "final-diff"
+      "code-diff",
+      "final-diff" as never
     ])).resolves.toEqual({
       enabled: true,
-      requiredGates: ["architecture-plan", "final-diff"]
+      requiredGates: ["architecture-plan", "code-diff"]
     });
 
     const stored = await fs.readJson<AppSettingsFile>("/home/.vcm/settings.json");
     expect(stored.gateReview).toMatchObject({
-      requiredGates: ["architecture-plan", "final-diff"]
+      requiredGates: ["architecture-plan", "code-diff"]
     });
     expect(stored.gateReview).not.toHaveProperty("projects");
     await expect(service.getGateReviewSettings("/workspace/another-project", "another-task")).resolves.toEqual({
       enabled: true,
-      requiredGates: ["architecture-plan", "final-diff"]
+      requiredGates: ["architecture-plan", "code-diff"]
     });
   });
 });

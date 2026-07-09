@@ -352,7 +352,7 @@ Gate Review gates are globally configured in VCM app settings and default off:
 ```text
 architecture-plan
 validation-adequacy
-final-diff
+code-diff
 ```
 
 PM must run `vcm-gate-review` at each trigger point. The tool is the source of
@@ -365,8 +365,8 @@ Input policy:
   input. Missing or empty core input is `not_required`.
 - `validation-adequacy` uses `.ai/vcm/handoffs/test-report.md` as its core
   input. Missing or empty core input is `not_required`.
-- `final-diff` uses handoff artifacts plus `git status` and `git diff`; it does
-  not use the core-input shortcut.
+- `code-diff` reviews the new commits from one PM route flow. Missing new
+  commits are `not_required`.
 - Gates avoid duplicate review by comparing input hashes.
 
 Gate Reviewer writes reports under:
@@ -377,7 +377,7 @@ Gate Reviewer writes reports under:
 
 Gate Reviewer returns only `approve` or `request_changes`, does not run tests,
 does not edit files, and does not choose fix owners, Replan, or user-intervention
-needs. PM routes `architecture-plan` and `final-diff` findings to architect, and
+needs. PM routes `architecture-plan` and `code-diff` findings to architect, and
 `validation-adequacy` findings to tester.
 
 ## 13. Validation

@@ -37,11 +37,11 @@ special attention to module boundaries, public contracts, UI flows,
 CLI/tooling, hooks, sessions, persistence, worktrees, and external process
 behavior.
 
-## Final Diff Gate
+## Code Diff Gate
 
 Read \`.claude/agents/coder.md\`; use architect/tester definitions to compare
-the final diff against the approved plan and validation evidence. Check that
-the diff matches plan, has no unapproved surface/dependency/docs changes, no
+the requested commit range against the approved plan and validation evidence.
+Check that the commits match plan, have no unapproved surface/dependency/docs changes, no
 \`VCM:CODE\`, no task-process comments or task labels, test changes and
 validation evidence match the changed behavior, tests do not weaken assertions
 or bypass real paths, and fallible paths are handled.
@@ -152,14 +152,14 @@ Use this skill at every project-manager Gate Review trigger point and whenever V
 
 - \`architecture-plan\`: after architect writes \`.ai/vcm/handoffs/architecture-plan.md\`, before coder dispatch.
 - \`validation-adequacy\`: after tester writes \`.ai/vcm/handoffs/test-report.md\`, before docs sync or final acceptance.
-- \`final-diff\`: after final acceptance evidence is ready, before PR preparation.
+- \`code-diff\`: after PM accepts a Coder or Architect Debug route-flow result that produced new commits, before advancing to the next VCM flow gate.
 
 ## Request
 
 Run this unconditionally at each trigger point (do not first check whether Gate Review is enabled):
 
 \`\`\`sh
-.ai/tools/request-gate-review --gate <architecture-plan|validation-adequacy|final-diff>
+.ai/tools/request-gate-review --gate <architecture-plan|validation-adequacy|code-diff>
 \`\`\`
 
 Interpret the first output line:
@@ -197,11 +197,11 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
-GATES = ("architecture-plan", "validation-adequacy", "final-diff")
+GATES = ("architecture-plan", "validation-adequacy", "code-diff")
 REPORTS = {
     "architecture-plan": ".ai/vcm/gate-reviews/architecture-plan-review.md",
     "validation-adequacy": ".ai/vcm/gate-reviews/validation-adequacy-review.md",
-    "final-diff": ".ai/vcm/gate-reviews/final-diff-review.md",
+    "code-diff": ".ai/vcm/gate-reviews/code-diff-review.md",
 }
 SOURCE_ARTIFACTS = {
     "architecture-plan": [".ai/vcm/handoffs/architecture-plan.md"],
@@ -209,11 +209,12 @@ SOURCE_ARTIFACTS = {
         ".ai/vcm/handoffs/architecture-plan.md",
         ".ai/vcm/handoffs/test-report.md",
     ],
-    "final-diff": [
+    "code-diff": [
         ".ai/vcm/handoffs/architecture-plan.md",
+        ".ai/vcm/handoffs/coder-completion.md",
+        ".ai/vcm/handoffs/architecture-diagnosis.md",
         ".ai/vcm/handoffs/test-report.md",
         ".ai/vcm/handoffs/docs-sync-report.md",
-        ".ai/vcm/handoffs/final-acceptance.md",
     ],
 }
 CORE_INPUT_ARTIFACTS = {
@@ -308,7 +309,52 @@ def command_output(root: Path, command: list[str]) -> bytes:
     return result.stdout if result.returncode == 0 else b""
 
 
-def input_hash(root: Path, gate: str) -> str:
+def command_text(root: Path, command: list[str]) -> str:
+    return command_output(root, command).decode("utf-8", errors="replace").strip()
+
+
+def is_ancestor(root: Path, ancestor: str, descendant: str) -> bool:
+    result = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", ancestor, descendant],
+        cwd=root,
+        check=False,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+    return result.returncode == 0
+
+
+def code_diff_range(root: Path, gate_record: dict):
+    head = command_text(root, ["git", "rev-parse", "HEAD"])
+    if not head:
+        return (None, None)
+
+    base = None
+    if (
+        gate_record.get("status") == "completed"
+        and gate_record.get("decision") == "request_changes"
+        and gate_record.get("baseCommit")
+        and is_ancestor(root, gate_record["baseCommit"], head)
+    ):
+        base = gate_record["baseCommit"]
+    elif (
+        gate_record.get("status") == "completed"
+        and gate_record.get("decision") == "approve"
+        and gate_record.get("headCommit")
+        and is_ancestor(root, gate_record["headCommit"], head)
+    ):
+        base = gate_record["headCommit"]
+    else:
+        base = os.environ.get("VCM_BASE_COMMIT", "").strip()
+        if not base or not is_ancestor(root, base, head):
+            upstream = command_text(root, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"])
+            base = command_text(root, ["merge-base", "HEAD", upstream]) if upstream else ""
+
+    return (base or head, head)
+
+
+def input_hash(root: Path, gate: str, gate_record=None) -> str:
+    gate_record = gate_record or {}
     digest = hashlib.sha256()
     core_artifact = CORE_INPUT_ARTIFACTS.get(gate)
     if core_artifact:
@@ -330,10 +376,18 @@ def input_hash(root: Path, gate: str) -> str:
             digest.update(path.read_bytes())
         else:
             digest.update(b"<missing>")
-    if gate in ("architecture-plan", "final-diff"):
+    if gate == "architecture-plan":
         digest.update(command_output(root, ["git", "status", "--porcelain=v1"]))
         digest.update(command_output(root, ["git", "diff", "--binary"]))
         digest.update(command_output(root, ["git", "diff", "--cached", "--binary"]))
+    if gate == "code-diff":
+        base, head = code_diff_range(root, gate_record)
+        if base and head and base != head:
+            digest.update(base.encode())
+            digest.update(head.encode())
+            digest.update(command_output(root, ["git", "log", "--oneline", "--reverse", f"{base}..{head}"]))
+            digest.update(command_output(root, ["git", "diff", "--name-only", "--find-renames", f"{base}..{head}"]))
+            digest.update(hashlib.sha256(command_output(root, ["git", "diff", "--binary", "--find-renames", f"{base}..{head}"])).hexdigest().encode())
     return digest.hexdigest()
 
 
@@ -411,8 +465,52 @@ def local_request(gate: str) -> int:
         print_result("not_required", gate=gate, message=f"{core_status[0]} is {core_status[1]}.")
         return 0
 
-    current_hash = input_hash(root, gate)
     gate_record = index["gates"].get(gate, {})
+    code_diff = {}
+    if gate == "code-diff":
+        base, head = code_diff_range(root, gate_record if isinstance(gate_record, dict) else {})
+        if not base or not head or base == head:
+            gate_record = index["gates"].setdefault(gate, {})
+            gate_record.update({
+                "required": True,
+                "status": "not_required",
+                "decision": None,
+                "error": None,
+                "exceptionReason": None,
+                "requestId": None,
+                "requestPath": None,
+                "inputHash": None,
+                "baseCommit": None,
+                "headCommit": None,
+                "commits": None,
+                "changedFiles": None,
+                "diffStat": None,
+                "requestedAt": None,
+                "startedAt": None,
+                "completedAt": None,
+                "callbackStatus": "not_sent",
+                "callbackError": None,
+                "updatedAt": now_iso(),
+            })
+            if index.get("activeGate") == gate:
+                index["activeGate"] = None
+            write_json(index_path, index)
+            print_result("not_required", gate=gate, message="No new commits to review.")
+            return 0
+        commit_lines = command_text(root, ["git", "log", "--oneline", "--reverse", f"{base}..{head}"]).splitlines()
+        changed_files = command_text(root, ["git", "diff", "--name-only", "--find-renames", f"{base}..{head}"]).splitlines()
+        if not commit_lines:
+            print_result("not_required", gate=gate, message="No new commits to review.")
+            return 0
+        code_diff = {
+            "baseCommit": base,
+            "headCommit": head,
+            "commits": commit_lines,
+            "changedFiles": changed_files,
+            "diffStat": command_text(root, ["git", "diff", "--stat", "--find-renames", f"{base}..{head}"]),
+        }
+
+    current_hash = input_hash(root, gate, gate_record if isinstance(gate_record, dict) else {})
     if (
         gate_record.get("status") == "completed"
         and gate_record.get("decision") == "approve"
@@ -433,6 +531,7 @@ def local_request(gate: str) -> int:
         "status": "requested",
         "requestedAt": requested_at,
         "inputHash": current_hash,
+        "codeDiff": code_diff or None,
         "reportPath": report_path,
         "promptPath": prompt_path,
     })
@@ -446,6 +545,11 @@ def local_request(gate: str) -> int:
         "reportPath": report_path,
         "promptPath": prompt_path,
         "inputHash": current_hash,
+        "baseCommit": code_diff.get("baseCommit"),
+        "headCommit": code_diff.get("headCommit"),
+        "commits": code_diff.get("commits"),
+        "changedFiles": code_diff.get("changedFiles"),
+        "diffStat": code_diff.get("diffStat"),
         "requestId": rid,
         "requestPath": request_path.relative_to(root).as_posix(),
         "requestedAt": requested_at,

@@ -13,14 +13,14 @@ Use this skill at every project-manager Gate Review trigger point and whenever V
 
 - `architecture-plan`: after architect writes `.ai/vcm/handoffs/architecture-plan.md`, before coder dispatch.
 - `validation-adequacy`: after tester writes `.ai/vcm/handoffs/test-report.md`, before docs sync or final acceptance.
-- `final-diff`: after final acceptance evidence is ready, before PR preparation.
+- `code-diff`: after PM accepts a Coder or Architect Debug route-flow result that produced new commits, before advancing to the next VCM flow gate.
 
 ## Request
 
 Run this unconditionally at each trigger point (do not first check whether Gate Review is enabled):
 
 ```sh
-.ai/tools/request-gate-review --gate <architecture-plan|validation-adequacy|final-diff>
+.ai/tools/request-gate-review --gate <architecture-plan|validation-adequacy|code-diff>
 ```
 
 Interpret the first output line:

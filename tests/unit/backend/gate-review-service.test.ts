@@ -37,7 +37,7 @@ describe("gate-review-service", () => {
       runtime: createRuntime(tmpRepo, writes),
       projectService: createProjectService(),
       taskService: createTaskService(tmpRepo),
-      appSettings: createAppSettings(["architecture-plan", "validation-adequacy", "final-diff"]),
+      appSettings: createAppSettings(["architecture-plan", "validation-adequacy", "code-diff"]),
       sessionService: createSessionService(sessionStarts, activityCalls),
       roundService: createRoundService(roundCalls),
       reportPollIntervalMs: 5,
@@ -199,6 +199,55 @@ describe("gate-review-service", () => {
     expect(sessionStarts).toEqual([]);
   });
 
+  it("starts code-diff review for the current unreviewed commit range", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-gate-review-code-diff-"));
+    await writeHarnessFiles(tmpRepo);
+    const runnerCalls: Array<{ command: string; args: string[]; options?: CommandRunnerOptions }> = [];
+    const runner = createRunner(tmpRepo, runnerCalls, {
+      "rev-parse HEAD": ({ cwd }) => cwd === tmpRepo ? "base-sha" : "head-sha",
+      "merge-base --is-ancestor base-sha head-sha": "",
+      "log --oneline --reverse base-sha..head-sha": "abc1234 implement route\nbcd2345 add tests",
+      "diff --name-only --find-renames base-sha..head-sha": "src/feature.ts\ntests/feature.test.ts",
+      "diff --stat --find-renames base-sha..head-sha": " src/feature.ts | 10 +++++\n 1 file changed",
+      "diff --binary --find-renames base-sha..head-sha": "diff --git a/src/feature.ts b/src/feature.ts\n"
+    });
+    const writes: string[] = [];
+    const service = createGateReviewService({
+      fs: createNodeFileSystemAdapter(),
+      runner,
+      runtime: createRuntime(tmpRepo, writes),
+      projectService: createProjectService(),
+      taskService: createTaskService(tmpRepo),
+      appSettings: createAppSettings(["code-diff"]),
+      sessionService: createSessionService(),
+      roundService: createRoundService(),
+      reportPollIntervalMs: 5,
+      reportTimeoutMs: 500
+    });
+
+    const result = await service.requestReviewGate(tmpRepo, "demo-task", "code-diff");
+
+    expect(result.status).toBe("started");
+    await waitFor(async () => {
+      const state = await service.getState(tmpRepo!, "demo-task");
+      return state.gates["code-diff"].status === "completed";
+    });
+
+    const state = await service.getState(tmpRepo, "demo-task");
+    const record = state.gates["code-diff"];
+    expect(record.baseCommit).toBe("base-sha");
+    expect(record.headCommit).toBe("head-sha");
+    expect(record.commits).toEqual(["abc1234 implement route", "bcd2345 add tests"]);
+    expect(record.changedFiles).toEqual(["src/feature.ts", "tests/feature.test.ts"]);
+    const prompt = writes.find((write) => write.includes("[VCM GATE REVIEW]")) ?? "";
+    expect(prompt).toContain("Gate: code-diff");
+    expect(prompt).toContain("This code-diff gate reviews the new commits from one PM route flow");
+    expect(prompt).toContain("Base commit: base-sha");
+    expect(prompt).toContain("Head commit: head-sha");
+    expect(prompt).toContain("- abc1234 implement route");
+    expect(runnerCalls.some((call) => call.args.join(" ") === "diff --binary --find-renames base-sha..head-sha")).toBe(true);
+  });
+
   it("updates gate settings from disabled state without enabling stale gates", async () => {
     tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-gate-review-settings-"));
     await writeHarnessFiles(tmpRepo);
@@ -221,7 +270,7 @@ describe("gate-review-service", () => {
     expect(state.enabled).toBe(true);
     expect(state.gates["architecture-plan"].required).toBe(true);
     expect(state.gates["validation-adequacy"].required).toBe(false);
-    expect(state.gates["final-diff"].required).toBe(false);
+    expect(state.gates["code-diff"].required).toBe(false);
     expect(appSettings.getStoredRequiredGates()).toEqual(["architecture-plan"]);
 
     const disabledState = await service.updateSettings(tmpRepo, "demo-task", {
@@ -255,12 +304,21 @@ function taskWorktree(repoRoot: string): string {
 
 function createRunner(
   repoRoot: string,
-  calls: Array<{ command: string; args: string[]; options?: CommandRunnerOptions }>
+  calls: Array<{ command: string; args: string[]; options?: CommandRunnerOptions }>,
+  gitOutputs: Record<string, string | ((input: { cwd?: string }) => string)> = {}
 ): CommandRunner {
   return {
     async run(command: string, args: string[] = [], options?: CommandRunnerOptions): Promise<CommandResult> {
       calls.push({ command, args, options });
       if (command === "git") {
+        const key = args.join(" ");
+        const output = gitOutputs[key];
+        if (typeof output === "function") {
+          return { stdout: output({ cwd: options?.cwd }), stderr: "", exitCode: 0 };
+        }
+        if (typeof output === "string") {
+          return { stdout: output, stderr: "", exitCode: 0 };
+        }
         return { stdout: "", stderr: "", exitCode: 0 };
       }
       return { stdout: "", stderr: `unexpected command: ${command}`, exitCode: 1 };

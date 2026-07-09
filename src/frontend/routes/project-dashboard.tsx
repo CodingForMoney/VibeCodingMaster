@@ -744,8 +744,8 @@ function getGateReviewGateLabel(gate: GateReviewGate): string {
       return "Architecture plan";
     case "validation-adequacy":
       return "Validation adequacy";
-    case "final-diff":
-      return "Final diff";
+    case "code-diff":
+      return "Code diff";
   }
   return gate;
 }

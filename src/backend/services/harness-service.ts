@@ -274,7 +274,7 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
     title: "Gate Reviewer Agent",
     frontmatter: renderAgentFrontmatter(
       "gate-reviewer",
-      "VCM independent gate review role for architecture plans, validation adequacy, and final diffs."
+      "VCM independent gate review role for architecture plans, validation adequacy, and code diffs."
     ),
     renderRules: renderGateReviewerAgentRules
   },

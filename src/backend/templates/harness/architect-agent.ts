@@ -8,7 +8,7 @@ export function renderArchitectHarnessRules(): string {
 - Define every changed or created file's purpose, logic boundary, collaboration points, and non-private callable surface.
 - Own \`docs/known-issues.md\` promotion and durable issue updates.
 - Own architecture docs sync across \`docs/ARCHITECTURE.md\` and affected \`<module>/ARCHITECTURE.md\` files.
-- Own post-task module architecture doc maintenance for every module touched by the final diff.
+- Own post-task module architecture doc maintenance for every module touched by accepted code commits.
 - Outside Debug Mode, do not implement production code.
 - Do not design complete test cases, coverage matrices, or final validation strategy; tester owns independent test design, test adequacy, and validation confidence.
 - Do not make product priority or approval decisions; route those questions back to project-manager.
@@ -37,7 +37,7 @@ export function renderArchitectHarnessRules(): string {
 - \`Public Surface Impact\`: state changed APIs, routes, commands, events, exports, storage formats, configuration, UI behavior, visibility changes, side effects, error boundaries, expected callers, or explicitly state none.
 - \`Scaffold Manifest\`: provide one stable row per implementation unit or file context that coder must complete: row ID, file action, why the file is in scope, coder work, allowed implementation freedom, expected \`VCM:CODE\` placeholders, durable code comment needs, and proof points.
 - Give each Scaffold Manifest row a stable ID such as \`SCF-001\`; use that ID in any related \`VCM:CODE\` marker so coder can report completion by ID.
-- \`Docs Impact\`: list every touched module and state whether its \`<module>/ARCHITECTURE.md\` is expected to change, stay unchanged, or require final-diff review before deciding; also state whether changes belong in \`docs/ARCHITECTURE.md\`, \`.ai/generated/public-surface.json\`, or no durable architecture doc.
+- \`Docs Impact\`: list every touched module and state whether its \`<module>/ARCHITECTURE.md\` is expected to change, stay unchanged, or require code-diff review before deciding; also state whether changes belong in \`docs/ARCHITECTURE.md\`, \`.ai/generated/public-surface.json\`, or no durable architecture doc.
 - \`Known Risks\`: state concrete remaining technical risks, uncertainty, or validation risks that coder or tester must pay attention to.
 - \`Coder Handoff Notes\`: state implementation order and constraints that help coder complete the current plan without putting task context into source comments.
 - Put task context, implementation-order notes, handoff instructions, temporary rationale, and coder guidance in the \`Scaffold Manifest\`, not in source-code comments.
@@ -137,7 +137,7 @@ Do not propose a code-level patch until the architecture diagnosis is complete.
 - Do not duplicate the generated public API index; explain design intent and contract meaning instead.
 - Update \`docs/ARCHITECTURE.md\` only when project-level module overview changes: module list, module responsibilities, module relationships, dependency direction, project-wide architecture constraints, or module architecture doc links.
 - Update affected \`<module>/ARCHITECTURE.md\` when module-level detailed design changes: boundaries, behavior, important public surface explanations, internal risks, or module-specific architecture notes.
-- During docs sync, inspect every module touched by the final diff.
+- During docs sync, inspect every module touched by accepted code commits.
 - For each touched module, update its \`<module>/ARCHITECTURE.md\` when responsibility, boundary, behavior, public contract, dependency, state ownership, lifecycle, failure mode, or important invariant changed.
 - If a touched module's architecture doc does not need changes, record why in \`.ai/vcm/handoffs/docs-sync-report.md\`.
 - Do not move task logs, temporary rationale, or per-task validation history into durable architecture docs.

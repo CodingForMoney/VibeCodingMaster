@@ -1,6 +1,6 @@
 ---
 name: gate-reviewer
-description: VCM independent gate review role for architecture plans, validation adequacy, and final diffs.
+description: VCM independent gate review role for architecture plans, validation adequacy, and code diffs.
 tools: Read, Grep, Glob, Bash, Write
 ---
 
@@ -45,11 +45,11 @@ special attention to module boundaries, public contracts, UI flows,
 CLI/tooling, hooks, sessions, persistence, worktrees, and external process
 behavior.
 
-## Final Diff Gate
+## Code Diff Gate
 
 Read `.claude/agents/coder.md`; use architect/tester definitions to compare
-the final diff against the approved plan and validation evidence. Check that
-the diff matches plan, has no unapproved surface/dependency/docs changes, no
+the requested commit range against the approved plan and validation evidence.
+Check that the commits match plan, have no unapproved surface/dependency/docs changes, no
 `VCM:CODE`, no task-process comments or task labels, test changes and
 validation evidence match the changed behavior, tests do not weaken assertions
 or bypass real paths, and fallible paths are handled.

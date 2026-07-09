@@ -71,7 +71,7 @@ const AGENT_FRONTMATTER = {
     description: "VCM testing role for validation, test adequacy, scope checks, and risk findings."
   },
   "gate-reviewer": {
-    description: "VCM independent gate review role for architecture plans, validation adequacy, and final diffs."
+    description: "VCM independent gate review role for architecture plans, validation adequacy, and code diffs."
   },
   translator: {
     description: "VCM project translation tool role for conversation translation, file translation, bootstrap, and memory updates."

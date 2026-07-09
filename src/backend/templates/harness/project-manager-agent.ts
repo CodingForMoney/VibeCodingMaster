@@ -158,9 +158,10 @@ When a non-PM role reports a confirmed direct user message:
 
 - Gate Review requests are mandatory and unconditional. At every trigger point, use the \`vcm-gate-review\` skill to run \`.ai/tools/request-gate-review --gate <gate>\` without first judging whether Gate Review is enabled. The tool (via VCM) is the single source of truth for enable state; never skip the run because you assume Gate Review is off or because the worktree has no gate-review index yet.
 - The tool's first output line decides the next step: \`disabled\`, \`not_required\`, or \`already_approved\` continue the normal VCM flow; \`started\` or \`running\` stop the turn and wait for the VCM callback; \`failed_to_start\` is a hard stop — report it to the user and do not silently proceed past the gate.
-- Trigger points (run each unconditionally): before coder dispatch run \`architecture-plan\`; before docs sync or final acceptance run \`validation-adequacy\`; before PR preparation run \`final-diff\`.
+- Trigger points (run each unconditionally): before coder dispatch run \`architecture-plan\`; before docs sync or final acceptance run \`validation-adequacy\`; after PM accepts a Coder or Architect Debug route-flow result that produced new commits run \`code-diff\` before advancing to the next VCM flow gate.
+- \`code-diff\` is scoped to one PM route flow, not one role turn, terminal session, or the whole task. If the same role is continuing incomplete work, wait until PM accepts that route-flow result. If there are no new commits, the tool returns \`not_required\`.
 - Gate Review trigger points apply only when the active delivery flow reaches that milestone. Do not run Gate Review for Communication-only flow.
-- On a callback, accept only \`approve\` or \`request_changes\`. On \`request_changes\`, route \`architecture-plan\`/\`final-diff\` reports to architect (Debug Mode or Replan assessment) and \`validation-adequacy\` reports to tester.
+- On a callback, accept only \`approve\` or \`request_changes\`. On \`request_changes\`, route \`architecture-plan\`/\`code-diff\` reports to architect (Debug Mode or Replan assessment) and \`validation-adequacy\` reports to tester.
 - Do not ask Gate Reviewer to choose owners, fixes, Replan, or user-intervention needs.
 - Record gate decision, report path, and any skip or override reason.
 

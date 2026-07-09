@@ -254,7 +254,7 @@ project manager
   -> coder implements approved scope
   -> tester checks validation adequacy and adds/requests missing tests
   -> architect checks architecture/docs drift when needed
-  -> optional independent gate review of final diff
+  -> optional independent gate review of code diff
   -> project manager final acceptance
 ```
 
@@ -335,7 +335,7 @@ validation adequacy gate:
   input: test report and validation evidence
   purpose: judge whether tests and validation cover important paths, especially integration and E2E behavior
 
-final diff gate:
+code diff gate:
   input: git diff, final acceptance evidence, relevant handoff artifacts
   purpose: inspect code quality, coding conventions, boundary cases, scope drift, and unresolved risks
 ```
@@ -611,7 +611,7 @@ Acceptance checklist:
 - implementation did not change scope, module boundaries, public contracts, or test strategy without replan
 - independent review checked scope, architecture, public contract, tests, validation, and docs
 - important features have integration or E2E coverage where needed
-- final diff was inspected for coding standards and boundary cases
+- code diff was inspected for coding standards and boundary cases
 - durable docs are current
 - temporary task artifacts are cleaned up or intentionally kept
 
