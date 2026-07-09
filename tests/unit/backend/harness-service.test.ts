@@ -68,6 +68,9 @@ describe("createHarnessService", () => {
     const projectManagerAgent = await fs.readText("/repo/.claude/agents/project-manager.md");
     expect(projectManagerAgent).toContain("Use the routes defined in `CLAUDE.md`");
     expect(projectManagerAgent).toContain("Do not perform technical analysis");
+    expect(projectManagerAgent).toContain("### Task Routes");
+    expect(projectManagerAgent).toContain("Code changes use: project-manager -> architect -> coder -> reviewer -> architect docs sync -> project-manager final acceptance.");
+    expect(projectManagerAgent).toContain("Do not dispatch coder for code changes until `.ai/vcm/handoffs/architecture-plan.md` exists");
     expect(projectManagerAgent).toContain("Use the `vcm-route-message` skill for every role dispatch");
     expect(projectManagerAgent).toContain("### PR Preparation");
     expect(projectManagerAgent).toContain("### Background Jobs");

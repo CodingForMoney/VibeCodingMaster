@@ -33,6 +33,14 @@ tools: Read, Grep, Glob, Bash, Edit, Write
 - Ask the user when architect or reviewer reports a conflict with durable docs that requires user approval.
 - Send bug reports, failing validation, runtime errors, and unclear defects to architect Debug Mode rather than coder or reviewer diagnosis.
 
+### Task Routes
+
+- Code changes use: project-manager -> architect -> coder -> reviewer -> architect docs sync -> project-manager final acceptance.
+- Do not dispatch coder for code changes until `.ai/vcm/handoffs/architecture-plan.md` exists and the architecture-plan Gate Review result allows continuation.
+- Docs-only changes may route: project-manager -> architect -> project-manager final acceptance.
+- Test-only or validation-only changes may route: project-manager -> reviewer -> project-manager final acceptance.
+- If docs-only, test-only, or validation-only work exposes required code, architecture, public contract, dependency, durable-doc, or validation-strategy changes, route through the full code-change flow.
+
 ### Debug Routing
 
 - Route bugs, failing checks, build/runtime errors, unclear defects, and reviewer failure evidence to architect Debug Mode.
