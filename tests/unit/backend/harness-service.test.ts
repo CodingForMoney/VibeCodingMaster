@@ -30,8 +30,9 @@ describe("createHarnessService", () => {
     expect(nextStatus.initialized).toBe(true);
     expect(nextStatus.files.map((file) => file.action)).toEqual(Array(expectedHarnessFileCount).fill("ok"));
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("## VCM Start Here");
-    expect(await fs.readText("/repo/CLAUDE.md")).toContain("## VCM Harness Scope");
-    expect(await fs.readText("/repo/CLAUDE.md")).toContain("## VCM Task Flow");
+    expect(await fs.readText("/repo/CLAUDE.md")).toContain("## VCM Global Invariants");
+    expect(await fs.readText("/repo/CLAUDE.md")).toContain("## VCM Structured Handoffs");
+    expect(await fs.readText("/repo/CLAUDE.md")).toContain("Gate Review must review real task artifacts");
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("## VCM Worktree Policy");
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("## VCM Glossary Policy");
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("docs/GLOSSARY.md");
