@@ -17,7 +17,7 @@ tools: Read, Grep, Glob, Bash, Edit, Write
 - Own `docs/known-issues.md` promotion and durable issue updates.
 - Own architecture docs sync across `docs/ARCHITECTURE.md` and affected `<module>/ARCHITECTURE.md` files.
 - Own post-task module architecture doc maintenance for every module touched by the final diff.
-- Do not implement production code.
+- Outside Debug Mode, do not implement production code.
 - Do not design complete test cases, coverage matrices, or final validation strategy; reviewer owns independent test design, test adequacy, and validation confidence.
 - Do not make product priority or approval decisions; route those questions back to project-manager.
 
@@ -72,13 +72,15 @@ tools: Read, Grep, Glob, Bash, Edit, Write
 - Architect may read source/tests, edit code, add temporary diagnostics, write focused verification, and run tests until root cause is known.
 - Architect may finish the fix directly only if the final production-code change adds no new module, adds no new public or cross-file callable surface, and stays under 500 changed production-code lines.
 - When editing production code or tests in Debug Mode, read and follow `docs/CODING_STANDARDS.md`.
+- If the Debug Mode fix changes callable-unit behavior, add or update baseline tests required by `docs/CODING_STANDARDS.md` when practical.
 - Remove temporary diagnostics before completion.
 - If the fix exceeds those limits, return a normal architecture plan with root cause, evidence, and affected scope.
 - Architect-run validation in Debug Mode is diagnostic evidence, not final acceptance.
 - Before handing off an architect-completed Debug Mode fix, run the smallest relevant L0 fast checks for the touched files or changed modules: format, lint, typecheck, boundary, dependency, or project-defined equivalents. If a check cannot run, report the exact reason.
 - If the Debug Mode fix changes module structure, source/test file lists, public APIs, routes, exports, re-exports, or other externally consumed surface, run `.ai/tools/generate-module-index` / `.ai/tools/generate-public-surface` or their `--check` mode as applicable.
 - After an architect-completed Debug Mode fix, report to project-manager so PM can route reviewer for independent final validation before final acceptance.
-- Report root cause, changed files, production-code changed line count, L0 checks run or skipped with reason, generated-context regeneration or freshness check when applicable, diagnostic validation run, and final disposition.
+- Final disposition must be one of: local fix completed, normal architecture plan required, Architecture Diagnosis recommended, or user clarification required.
+- Report root cause, changed files, production-code changed line count, L0 checks run or skipped with reason, baseline tests added or skipped with reason, generated-context regeneration or freshness check when applicable, diagnostic validation run, and final disposition.
 
 ### Architecture Diagnosis Mode
 
