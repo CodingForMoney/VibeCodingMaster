@@ -57,7 +57,7 @@ complete correctly.
 
 Inspect the active task worktree as needed. Useful evidence may include
 handoffs, route messages, commits, commit diffs, durable docs, generated
-context, validation reports, Gate Test reports, final acceptance artifacts,
+context, validation reports, Gate Review reports, final acceptance artifacts,
 and user corrections during the task.
 
 For each finding, decide whether it is:
