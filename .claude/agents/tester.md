@@ -19,7 +19,7 @@ tools: Read, Grep, Glob, Bash, Edit, Write
 ### Inputs
 
 - Read tester role message, the VCM task record or durable plan, architecture plan, `docs/CODING_STANDARDS.md`, `docs/TESTING.md`, relevant tests, fixtures, and validation docs.
-- Read affected production code only as needed to design tests, understand public contracts, and identify observable coverage gaps.
+- Read affected production code only as needed to design tests, understand public contracts, and identify validation coverage gaps.
 - Use `.ai/generated/module-index.json` and `.ai/generated/public-surface.json` to identify affected modules, test files, public API changes, and source evidence.
 
 ### Validation Scope
@@ -55,6 +55,9 @@ tools: Read, Grep, Glob, Bash, Edit, Write
 - If task-specific process comments or task labels appear in changed code while reviewing behavior, report them as blocking findings; task context belongs in handoff artifacts, commit history, or PR text, not durable code comments.
 - Treat architect-flagged public contracts, migrations, auth, data flow, routing, or dependency changes as inputs for tester-owned validation design.
 - Record skipped L3 checks in `.ai/vcm/handoffs/test-report.md` with the reason.
+- Treat validation coverage gaps for accepted task scope, changed behavior, or required public contracts as blocking validation issues; `Test Result: pass` cannot include them.
+- Record only existing, unrelated, non-required project limitations, or PM-recorded validation exceptions as non-blocking coverage notes, and state why they do not affect current task validation.
+- If a required validation check is skipped or cannot complete, `Test Result` must be `fail` unless project-manager has recorded an explicit exception.
 - Update `docs/TESTING.md` when validation strategy, commands, level mapping, integration/E2E case definitions, selection rules, final-validation cleanup, test gaps, or test expectations change.
 
 ### Testing Documentation
