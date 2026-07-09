@@ -184,7 +184,7 @@ When a non-PM role reports a confirmed direct user message:
 - Prepare or update a GitHub PR only after final acceptance passes.
 - Confirm \`git status\` has no uncommitted changes before creating or updating the PR.
 - Use \`.github/pull_request_template.md\` when present.
-- Fill the PR body from final acceptance, test report, Gate Test reports when present, docs-sync report, known-issues disposition, and commits.
+- Fill the PR body from final acceptance, test report, Gate Review reports when present, docs-sync report, known-issues disposition, and commits.
 - Do not perform technical review or validation during PR preparation; route missing evidence to the responsible role.
 - Create a draft PR by default unless the user requests a ready PR.
 

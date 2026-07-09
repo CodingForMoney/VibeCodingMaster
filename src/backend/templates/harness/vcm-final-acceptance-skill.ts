@@ -16,7 +16,7 @@ Read the relevant task evidence before deciding:
 - \`.ai/vcm/handoffs/test-report.md\` when tester validation was required
 - \`.ai/vcm/handoffs/docs-sync-report.md\` when durable docs could be affected
 - \`.ai/vcm/handoffs/known-issues.md\` when unresolved findings were recorded
-- \`.ai/vcm/gate-reviews/index.json\` and referenced Gate Test reports when Gate Reviews were required, skipped, or overridden
+- \`.ai/vcm/gate-reviews/index.json\` and referenced Gate Review reports when Gate Reviews were required, skipped, or overridden
 - current \`git status\` and changed file list
 - relevant long-term docs only when needed to confirm that a docs-sync artifact exists and names the correct durable docs
 

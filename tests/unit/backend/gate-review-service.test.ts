@@ -152,7 +152,7 @@ describe("gate-review-service", () => {
   });
 
   it("reuses validation-adequacy approval when only the architecture plan changed", async () => {
-    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-gate-test-report-hash-"));
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-gate-review-report-hash-"));
     await writeHarnessFiles(tmpRepo);
     const taskRoot = taskWorktree(tmpRepo);
     const testReport = "# Test Report\nAll checks covered.\n";
