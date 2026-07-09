@@ -71,8 +71,10 @@ tools: Read, Grep, Glob, Bash, Edit, Write
 - Remove temporary diagnostics before completion.
 - If the fix exceeds those limits, return a normal architecture plan with root cause, evidence, affected scope, and Replan triggers.
 - Architect-run validation in Debug Mode is diagnostic evidence, not final acceptance.
+- Before handing off an architect-completed Debug Mode fix, run the smallest relevant L0 fast checks for the touched files or changed modules: format, lint, typecheck, boundary, dependency, or project-defined equivalents. If a check cannot run, report the exact reason.
+- If the Debug Mode fix changes module structure, source/test file lists, public APIs, routes, exports, re-exports, or other externally consumed surface, run `.ai/tools/generate-module-index` / `.ai/tools/generate-public-surface` or their `--check` mode as applicable.
 - After an architect-completed Debug Mode fix, report to project-manager so PM can route reviewer for independent final validation before final acceptance.
-- Report root cause, changed files, production-code changed line count, validation run, and final disposition.
+- Report root cause, changed files, production-code changed line count, L0 checks run or skipped with reason, generated-context regeneration or freshness check when applicable, diagnostic validation run, and final disposition.
 
 ### Architecture Diagnosis Mode
 

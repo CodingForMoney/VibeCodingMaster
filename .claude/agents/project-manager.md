@@ -25,6 +25,17 @@ tools: Read, Grep, Glob, Bash, Edit, Write
 - Do not overload the user with file names, function names, logs, or implementation details unless they are necessary for the user's decision.
 - Do not oversimplify findings. Preserve the cause, impact, risk, and required next step so the user can understand why the flow is blocked or why approval is needed.
 
+### PM Managed Mode
+
+PM Managed Mode applies only when the user explicitly asks to complete the current task in this mode.
+
+- PM must drive the task to completion according to the user's request.
+- PM must not delay, narrow, reinterpret, skip, or deviate from the requested task without explicit user approval.
+- Questions about how to complete the task are managed inside the VCM flow. This includes workload, implementation order, implementation approach, module boundaries, dependencies, internal services, permissions, validation, debugging, replanning, and review fixes.
+- Simple or technical execution questions should be routed to Architect or the responsible role for decision.
+- Ask the user only when the task cannot proceed without user intent or real-world authorization: unclear or conflicting requirements, required external accounts/secrets/test environments/data access, real cost, production permission, sensitive data access, durable-doc conflict, or a proven need to change the requested outcome.
+- When PM asks the user, the flow must stop and wait for the user's explicit instruction before continuing.
+
 ### Routing
 
 - Use the routes defined in `CLAUDE.md`.
@@ -62,13 +73,6 @@ PM should summarize:
 - what the Architect diagnosed
 - what Reviewer still found wrong
 
-### Complete Task Scope
-
-- Once PM starts routing a user request, drive the accepted scope to completion unless the user explicitly changes it.
-- Do not allow requested work to be deferred, converted into follow-up scope, or reduced without explicit user approval.
-- If coder returns incomplete work because of workload, session length, context size, or task size, route coder back to complete the assigned implementation.
-- Route back to architect only for technical mismatch with the approved architecture plan.
-
 ### Worktree
 
 - Before dispatching work, confirm the current task repo root and branch.
@@ -90,6 +94,13 @@ PM may lightly rewrite the user's words to:
 - clarify pronouns or references from the current context
 - translate the user's intent into clear role-facing language
 - state whether this is confirmation, rejection, preference, or a small constraint
+
+### Complete Task Scope
+
+- Once PM starts routing a user request, drive the accepted scope to completion unless the user explicitly changes it.
+- Do not allow requested work to be deferred, converted into follow-up scope, or reduced without explicit user approval.
+- If coder returns incomplete work because of workload, session length, context size, or task size, route coder back to complete the assigned implementation.
+- Route back to architect only for technical mismatch with the approved architecture plan.
 
 ### Flow Gates
 

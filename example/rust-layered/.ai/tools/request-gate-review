@@ -33,6 +33,10 @@ SOURCE_ARTIFACTS = {
         ".ai/vcm/handoffs/final-acceptance.md",
     ],
 }
+CORE_INPUT_ARTIFACTS = {
+    "architecture-plan": ".ai/vcm/handoffs/architecture-plan.md",
+    "validation-adequacy": ".ai/vcm/handoffs/review-report.md",
+}
 
 
 def root_dir() -> Path:
@@ -123,6 +127,13 @@ def command_output(root: Path, command: list[str]) -> bytes:
 
 def input_hash(root: Path, gate: str) -> str:
     digest = hashlib.sha256()
+    core_artifact = CORE_INPUT_ARTIFACTS.get(gate)
+    if core_artifact:
+        path = root / core_artifact
+        digest.update(core_artifact.encode())
+        digest.update(path.read_bytes())
+        return digest.hexdigest()
+
     common = [
         "CLAUDE.md",
         ".claude/agents/gate-reviewer.md",
@@ -143,6 +154,18 @@ def input_hash(root: Path, gate: str) -> str:
     return digest.hexdigest()
 
 
+def core_input_status(root: Path, gate: str) -> tuple[str, str] | None:
+    core_artifact = CORE_INPUT_ARTIFACTS.get(gate)
+    if not core_artifact:
+        return None
+    path = root / core_artifact
+    if not path.is_file():
+        return (core_artifact, "missing")
+    if not path.read_text().strip():
+        return (core_artifact, "empty")
+    return (core_artifact, "ready")
+
+
 def request_id(gate: str) -> str:
     stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     return f"{stamp}-{gate}-{uuid.uuid4().hex[:8]}"
@@ -151,6 +174,16 @@ def request_id(gate: str) -> str:
 def local_request(gate: str) -> int:
     root = root_dir()
     index_path = root / ".ai/vcm/gate-reviews/index.json"
+    if not index_path.is_file():
+        # Reached only when the VCM API is unreachable (call_vcm_api returned None)
+        # AND no local index exists, so the authoritative enable state is unknown.
+        # Fail safe instead of silently treating an indeterminate state as disabled.
+        print_result(
+            "failed_to_start",
+            gate=gate,
+            reason="cannot reach VCM API and no local gate-review index; enable state is indeterminate",
+        )
+        return 2
     index = read_json(index_path)
     enabled = bool(index.get("enabled", False))
     gate_record = index.get("gates", {}).get(gate, {}) if isinstance(index.get("gates"), dict) else {}
@@ -169,6 +202,30 @@ def local_request(gate: str) -> int:
         gate_record.update({"required": False, "status": "not_required", "updatedAt": now_iso()})
         write_json(index_path, index)
         print_result("not_required", gate=gate)
+        return 0
+
+    core_status = core_input_status(root, gate)
+    if core_status and core_status[1] != "ready":
+        gate_record = index["gates"].setdefault(gate, {})
+        gate_record.update({
+            "status": "not_required",
+            "decision": None,
+            "error": None,
+            "exceptionReason": None,
+            "requestId": None,
+            "requestPath": None,
+            "inputHash": None,
+            "requestedAt": None,
+            "startedAt": None,
+            "completedAt": None,
+            "callbackStatus": "not_sent",
+            "callbackError": None,
+            "updatedAt": now_iso(),
+        })
+        if index.get("activeGate") == gate:
+            index["activeGate"] = None
+        write_json(index_path, index)
+        print_result("not_required", gate=gate, message=f"{core_status[0]} is {core_status[1]}.")
         return 0
 
     current_hash = input_hash(root, gate)

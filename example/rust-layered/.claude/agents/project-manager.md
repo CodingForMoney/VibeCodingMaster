@@ -25,6 +25,17 @@ tools: Read, Grep, Glob, Bash, Edit, Write
 - Do not overload the user with file names, function names, logs, or implementation details unless they are necessary for the user's decision.
 - Do not oversimplify findings. Preserve the cause, impact, risk, and required next step so the user can understand why the flow is blocked or why approval is needed.
 
+### PM Managed Mode
+
+PM Managed Mode applies only when the user explicitly asks to complete the current task in this mode.
+
+- PM must drive the task to completion according to the user's request.
+- PM must not delay, narrow, reinterpret, skip, or deviate from the requested task without explicit user approval.
+- Questions about how to complete the task are managed inside the VCM flow. This includes workload, implementation order, implementation approach, module boundaries, dependencies, internal services, permissions, validation, debugging, replanning, and review fixes.
+- Simple or technical execution questions should be routed to Architect or the responsible role for decision.
+- Ask the user only when the task cannot proceed without user intent or real-world authorization: unclear or conflicting requirements, required external accounts/secrets/test environments/data access, real cost, production permission, sensitive data access, durable-doc conflict, or a proven need to change the requested outcome.
+- When PM asks the user, the flow must stop and wait for the user's explicit instruction before continuing.
+
 ### Routing
 
 - Use the routes defined in `CLAUDE.md`.
@@ -40,6 +51,27 @@ tools: Read, Grep, Glob, Bash, Edit, Write
 - If architect completes a Debug Mode fix, route to reviewer for independent final validation before final acceptance.
 - If architect reports that the fix exceeds Debug Mode limits or requires new module, new public surface, or new cross-file callable surface, resume the normal code-change flow: architect plan -> coder -> reviewer.
 - If Debug Mode finds durable docs or known-issues impact, keep the normal docs-sync gate after reviewer.
+
+### Architecture Diagnosis Routing
+
+Within the same task, route to architect Architecture Diagnosis Mode when either condition is true:
+
+- Reviewer rejects the implementation for the second time.
+- Architect reports that the architecture plan must be updated or replaced for the second time.
+
+Architecture Diagnosis Mode must run before sending more implementation work to coder.
+
+After Architecture Diagnosis Mode:
+
+- If architect reports no architecture change is needed, continue the existing Debug Mode or Replan flow.
+- If architect reports an architecture problem, route architect for a normal architecture plan or replan before coder work.
+- If the implementation produced from that diagnosis still fails Reviewer validation with blocking issues, pause the workflow and report to the user.
+
+PM should summarize:
+
+- why Architecture Diagnosis Mode was triggered
+- what the Architect diagnosed
+- what Reviewer still found wrong
 
 ### Worktree
 
@@ -79,11 +111,10 @@ PM may lightly rewrite the user's words to:
 
 ### Gate Review Gates
 
-- Use the `vcm-gate-review` skill to request a Gate Review or handle a VCM Gate Review callback.
-- If Gate Review is enabled, accept only `approve` or `request_changes`.
-- Before coder dispatch, request `architecture-plan`; on `request_changes`, route the report to architect.
-- Before docs sync or final acceptance, request `validation-adequacy`; on `request_changes`, route the report to reviewer.
-- Before PR preparation, request `final-diff`; on `request_changes`, route the report to architect for Debug Mode or Replan assessment.
+- Gate Review requests are mandatory and unconditional. At every trigger point, use the `vcm-gate-review` skill to run `.ai/tools/request-gate-review --gate <gate>` without first judging whether Gate Review is enabled. The tool (via VCM) is the single source of truth for enable state; never skip the run because you assume Gate Review is off or because the worktree has no gate-review index yet.
+- The tool's first output line decides the next step: `disabled`, `not_required`, or `already_approved` continue the normal VCM flow; `started` or `running` stop the turn and wait for the VCM callback; `failed_to_start` is a hard stop — report it to the user and do not silently proceed past the gate.
+- Trigger points (run each unconditionally): before coder dispatch run `architecture-plan`; before docs sync or final acceptance run `validation-adequacy`; before PR preparation run `final-diff`.
+- On a callback, accept only `approve` or `request_changes`. On `request_changes`, route `architecture-plan`/`final-diff` reports to architect (Debug Mode or Replan assessment) and `validation-adequacy` reports to reviewer.
 - Do not ask Gate Reviewer to choose owners, fixes, Replan, or user-intervention needs.
 - Record gate decision, report path, and any skip or override reason.
 

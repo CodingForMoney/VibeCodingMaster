@@ -7,7 +7,7 @@ description: Use when project-manager reaches a Gate Review trigger or receives 
 
 ## Purpose
 
-Use this skill when project-manager reaches a VCM Gate Review or receives a VCM Gate Review callback.
+Use this skill at every project-manager Gate Review trigger point and whenever VCM sends a Gate Review callback. Running the request is mandatory and unconditional: always run the tool at each trigger point and let its output decide; do not pre-judge whether Gate Review is enabled. The tool reports the authoritative enable state.
 
 ## Trigger Points
 
@@ -17,7 +17,7 @@ Use this skill when project-manager reaches a VCM Gate Review or receives a VCM 
 
 ## Request
 
-Run:
+Run this unconditionally at each trigger point (do not first check whether Gate Review is enabled):
 
 ```sh
 .ai/tools/request-gate-review --gate <architecture-plan|validation-adequacy|final-diff>

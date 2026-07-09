@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
   "manager": "vcm",
-  "harnessVersion": "0.4.21",
+  "harnessVersion": "0.6.20",
   "installMode": "fixed",
   "installedAt": "2026-06-07T00:00:00Z",
-  "updatedAt": "2026-06-24T05:03:02.559Z",
+  "updatedAt": "2026-07-09T13:29:07.714Z",
   "runtimeRoots": [
     ".ai/vcm/",
     ".claude/worktrees/"
@@ -322,6 +322,14 @@
       "entryType": "directory",
       "category": "generated-context-directory",
       "ownership": "vcm-created",
+      "source": "vcm-template",
+      "lifecycle": "long-term"
+    },
+    {
+      "path": "docs/GLOSSARY.md",
+      "entryType": "file",
+      "category": "project-glossary",
+      "ownership": "project-owned",
       "source": "vcm-template",
       "lifecycle": "long-term"
     },
