@@ -4,7 +4,7 @@ export function renderArchitectHarnessRules(): string {
 
 ### Role Scope
 
-- Own technical analysis, architecture planning, module boundaries, file-level responsibilities, cross-file callable surfaces, public contracts, verifiable behavior, task boundaries, behavior/contract proof points, risks, and Replan triggers.
+- Own technical analysis, architecture planning, module boundaries, file-level responsibilities, cross-file callable surfaces, public contracts, verifiable behavior, task boundaries, behavior/contract proof points, risks, and architect-owned replan decisions.
 - Define every changed or created file's purpose, logic boundary, collaboration points, and non-private callable surface.
 - Own \`docs/known-issues.md\` promotion and durable issue updates.
 - Own architecture docs sync across \`docs/ARCHITECTURE.md\` and affected \`<module>/ARCHITECTURE.md\` files.
@@ -16,6 +16,7 @@ export function renderArchitectHarnessRules(): string {
 ### Planning Inputs
 
 - Read the role message, durable plans when present, relevant handoff artifacts, \`docs/ARCHITECTURE.md\`, affected \`<module>/ARCHITECTURE.md\` files when present, and affected project docs before planning.
+- Before writing an architecture plan, read the affected existing source files, relevant tests, runtime entry points, configuration, and call sites needed to verify current code reality.
 - Read \`.ai/generated/module-index.json\` when planning module scope, file scope, dependency direction, or implementation order.
 - Read \`.ai/generated/public-surface.json\` when the task touches public APIs, module boundaries, or public behavior.
 - If durable docs conflict with the requested plan or code reality, report the conflict to project-manager and identify whether user approval is required.
@@ -23,15 +24,17 @@ export function renderArchitectHarnessRules(): string {
 ### Architecture Plan
 
 - Before coder work starts, write \`.ai/vcm/handoffs/architecture-plan.md\`, choose the minimum necessary code scaffolding, and include a Scaffold Manifest for task-specific context and coder guidance.
+- The architecture-plan handoff is not complete until required code scaffolding, callable surfaces, contract comments, and \`VCM:CODE\` placeholders have been written.
 
 #### Plan Document
 
+- \`architecture-plan.md\` must use these sections: Accepted Scope, Current Code Reality, Architecture Decision, Module/File Plan, Public Surface Impact, Scaffold Manifest, Docs Impact, Known Risks, and Coder Handoff Notes.
 - Define the expected implementation scope: affected modules, changed or created files, each file's responsibility, why it is in scope, and user-visible behavior changes.
 - Define every non-private callable surface intended for use outside its file: visibility, signature shape, responsibility, expected callers, behavior contract, side effects, and error boundaries.
-- Include a \`Scaffold Manifest\` for task-specific file context: stable row ID, file action, why the file is in scope, coder work, allowed implementation freedom, expected \`VCM:CODE\` placeholders, durable code comment needs, proof points, and Replan triggers.
+- Include a \`Scaffold Manifest\` for task-specific file context: stable row ID, file action, why the file is in scope, coder work, allowed implementation freedom, expected \`VCM:CODE\` placeholders, durable code comment needs, and proof points.
 - Give each Scaffold Manifest row a stable ID such as \`SCF-001\`; use that ID in any related \`VCM:CODE\` marker so coder can report completion by ID.
 - Put task context, implementation-order notes, handoff instructions, temporary rationale, and coder guidance in the \`Scaffold Manifest\`, not in source-code comments.
-- Cover architecture docs impact, known risks, and Replan triggers.
+- Cover architecture docs impact and known risks.
 - For docs impact, list every touched module and state whether its \`<module>/ARCHITECTURE.md\` is expected to change, stay unchanged, or require final-diff review before deciding; also state whether changes belong in \`docs/ARCHITECTURE.md\`, \`.ai/generated/public-surface.json\`, or no durable architecture doc.
 
 #### Code Scaffolding
@@ -61,7 +64,7 @@ export function renderArchitectHarnessRules(): string {
 - Architect may read source/tests, edit code, add temporary diagnostics, write focused verification, and run tests until root cause is known.
 - Architect may finish the fix directly only if the final production-code change adds no new module, adds no new public or cross-file callable surface, and stays under 500 changed production-code lines.
 - Remove temporary diagnostics before completion.
-- If the fix exceeds those limits, return a normal architecture plan with root cause, evidence, affected scope, and Replan triggers.
+- If the fix exceeds those limits, return a normal architecture plan with root cause, evidence, and affected scope.
 - Architect-run validation in Debug Mode is diagnostic evidence, not final acceptance.
 - Before handing off an architect-completed Debug Mode fix, run the smallest relevant L0 fast checks for the touched files or changed modules: format, lint, typecheck, boundary, dependency, or project-defined equivalents. If a check cannot run, report the exact reason.
 - If the Debug Mode fix changes module structure, source/test file lists, public APIs, routes, exports, re-exports, or other externally consumed surface, run \`.ai/tools/generate-module-index\` / \`.ai/tools/generate-public-surface\` or their \`--check\` mode as applicable.
