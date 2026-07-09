@@ -3,38 +3,18 @@ export function renderRootClaudeHarnessRules(): string {
 
 - Use the durable project docs below as role-relevant project truth.
 - Read module-local \`CLAUDE.md\` before editing a subdirectory if one exists.
-- Follow the role definition in \`.claude/agents/**\` and use the task skills in \`.claude/skills/**\` when they apply.
-
-## VCM Global Invariants
-
 - Use \`vcm-route-message\` only for PM-hub routes: project-manager dispatches to roles, and roles report questions, results, blockers, and findings back to project-manager. Follow its write-then-stop rule.
+- Use \`vcm-long-running-validation\` for long-running validation. Follow the background job limits below.
+- Use \`vcm-report-harness-issue\` when you notice a reusable VCM harness problem. Record feedback; do not contact Harness Engineer directly.
 - Project-manager runs \`vcm-gate-review\` unconditionally at every Gate Review trigger point and on VCM Gate Review callbacks; the tool reports the authoritative enable state.
-- Gate Review must review real task artifacts: architecture plans, review reports, final diffs, generated context, code, tests, docs, and handoff evidence. Do not substitute role claims for artifacts.
-- Runtime task records and handoffs under \`.ai/vcm/\` are temporary. Durable facts must move into code, tests, PR text, commit history, or long-term docs.
 
-## VCM Structured Handoffs
+## VCM Harness Scope
 
-- Role handoffs must be written as structured artifacts under \`.ai/vcm/handoffs/\` using the responsible role or skill format.
-- Route messages should reference handoff artifacts instead of copying long content.
-- Do not replace required handoff artifacts with chat prose.
+VCM harness includes root \`CLAUDE.md\`, \`.claude/agents/**\`, \`.claude/skills/**\`, \`.ai/tools/**\`, \`.claude/settings.json\`, VCM managed blocks, generated-context tooling, bootstrap rules, routing rules, validation rules, Gate Review rules, Translator rules, and Harness Engineer rules.
 
-## VCM Durable Project Docs
+If a reusable harness problem is suspected, it is enough to record a concise feedback report with evidence. Harness Engineer decides whether it is real, whether it should be fixed, and which files are in scope.
 
-- \`docs/GLOSSARY.md\`: abbreviation allowlist for durable comments and docs.
-- \`docs/ARCHITECTURE.md\`: project-level architecture; architect-owned.
-- \`<module>/ARCHITECTURE.md\`: module-level architecture; architect-owned.
-- \`docs/TESTING.md\`: validation strategy, levels, commands, cases, and known testing gaps; reviewer-owned.
-- \`docs/known-issues.md\`: durable known issues and accepted limitations; architect-owned.
-- \`.ai/generated/module-index.json\`: generated module map.
-- \`.ai/generated/public-surface.json\`: generated public surface index.
-
-## VCM Glossary Policy
-
-- \`docs/GLOSSARY.md\` is the only source of truth for abbreviations allowed in durable comments and documentation.
-- When writing or editing durable comments or documentation, use only abbreviations listed in \`docs/GLOSSARY.md\`; otherwise write the full term.
-- To introduce a new abbreviation, update \`docs/GLOSSARY.md\` before using it.
-
-## VCM Long-Running Validation
+## VCM Background Jobs
 
 - Never run the Bash tool with \`run_in_background: true\`. Never detach a process with \`nohup\`, \`setsid\`, \`disown\`, or a trailing \`&\`. VCM denies these calls.
 - The only sanctioned long-running mechanism is the \`vcm-long-running-validation\` skill: \`.ai/tools/run-long-check\` plus \`.ai/tools/watch-job\`.
@@ -42,10 +22,41 @@ export function renderRootClaudeHarnessRules(): string {
 - While a job is running, stay in the current turn and keep calling \`.ai/tools/watch-job\` until it reports a terminal result; VCM blocks turn-end while a job is running, and a job without a live watcher is killed automatically.
 - Hard ceiling: 60 minutes per job, enforced by the job worker. Do not run or suggest operations expected to exceed 60 minutes without user approval; split larger work first.
 
-## VCM Harness Feedback
+## VCM Durable Project Docs
 
-- VCM harness includes root \`CLAUDE.md\`, \`.claude/agents/**\`, \`.claude/skills/**\`, \`.ai/tools/**\`, VCM managed blocks, generated-context tooling, routing rules, validation rules, Gate Review rules, Translator rules, and Harness Engineer rules.
-- Use \`vcm-report-harness-issue\` when you notice a reusable VCM harness problem. Record concise evidence; do not contact Harness Engineer directly.
+- \`docs/GLOSSARY.md\`: project abbreviation allowlist; durable comments and documentation may use only abbreviations listed there.
+- \`docs/ARCHITECTURE.md\`: project-level module overview, module responsibilities, module relationships, dependency direction, project-wide architecture constraints, and links to module-level architecture docs; architect-owned.
+- \`<module>/ARCHITECTURE.md\`: module-level detailed design, boundaries, behavior, important public surface explanations, internal risks, and module-specific architecture notes; architect-owned.
+- \`docs/TESTING.md\`: validation strategy, commands, validation levels, integration/E2E case definitions, final-validation cleanup, and known testing gaps; reviewer-owned.
+- \`docs/known-issues.md\`: durable known issues and accepted limitations; architect-owned.
+- \`.ai/generated/module-index.json\`: generated module index; use it to find layers, modules, manifests, module docs, source files, test files, and workspace dependencies.
+- \`.ai/generated/public-surface.json\`: generated public surface index; use it to inspect module-to-module public APIs, routes, and source evidence.
+
+## VCM Glossary Policy
+
+- \`docs/GLOSSARY.md\` is the only source of truth for abbreviations allowed in durable comments and documentation.
+- When writing or editing durable comments or documentation, use only abbreviations listed in \`docs/GLOSSARY.md\`; otherwise write the full term.
+- To introduce a new abbreviation, update \`docs/GLOSSARY.md\` before using it.
+
+## VCM Task Flow
+
+- Code changes use the full route: \`project-manager -> architect -> coder -> reviewer -> architect docs sync -> project-manager final acceptance\`.
+- Before code changes, architect must write an architecture plan with a Scaffold Manifest and minimum necessary code scaffolding that cover file responsibilities, cross-file callable surfaces, user-visible behavior, docs impact, risks, and Replan triggers.
+- Docs-only changes may use: \`project-manager -> architect -> project-manager final acceptance\`.
+- Test-only or validation-only work may use: \`project-manager -> reviewer -> project-manager final acceptance\`.
+- If a docs/test/validation-only task reveals required code, architecture, public contract, dependency, durable-doc, or test-strategy changes, route back through the full code-change flow.
+- Keep role outputs under \`.ai/vcm/handoffs/\`.
+- Gate Review Gate reports live under \`.ai/vcm/gate-reviews/\` and are VCM-managed task evidence.
+- Runtime task records and handoffs under \`.ai/vcm/\` are temporary. Durable facts must move into code, tests, PR text, commit history, or long-term docs.
+- Record current-task unresolved findings in \`.ai/vcm/handoffs/known-issues.md\`.
+
+## VCM Validation Levels
+
+- L0 fast checks (default runner: coder): format, lint, typecheck, boundary, dependency, or other cheap project checks.
+- L1 baseline implementation checks (default runner: coder): changed behavior and direct regressions through project-defined unit tests.
+- L2 module / integration checks: targeted fast L2 may run in coder when explicitly assigned; full L2, integration suites, multi-node, cross-service, persistence, runtime, or public-contract gates are reviewer-run.
+- L3 smoke E2E checks (default runner: reviewer): core user journeys or critical browser/API flows.
+- L4 full regression / release checks (default runner: reviewer; architect-owned release flow) are release-only unless explicitly requested.
 
 ## VCM Worktree Policy
 
