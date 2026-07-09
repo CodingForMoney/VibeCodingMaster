@@ -49,6 +49,8 @@ At task close, promote still-relevant confirmed issues to \`docs/known-issues.md
 export function renderTestReportTemplate(taskSlug: string): string {
   return `# Test Report: ${taskSlug}
 
+Test Result: TBD
+
 ## Summary
 
 TBD
@@ -61,7 +63,7 @@ TBD
 
 TBD
 
-## Decision
+## Required Follow-ups
 
 TBD
 `;

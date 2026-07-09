@@ -478,7 +478,7 @@ adequacy analysis.
 It checks whether required evidence exists and has clear decisions:
 
 - architecture plan or docs-sync decision when needed
-- tester decision and validation evidence when needed
+- tester test result and validation evidence when needed
 - required Gate Review decisions when enabled
 - known-issues disposition
 - cleanup status

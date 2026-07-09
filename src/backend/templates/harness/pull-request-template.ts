@@ -8,7 +8,7 @@ export function renderPullRequestTemplateHarnessRules(): string {
 
 ## Review
 
-- Tester decision:
+- Test result:
 - Final acceptance:
 
 ## Docs

@@ -28,12 +28,12 @@ Read the relevant task evidence before deciding:
 
 ## Evidence Audit
 
-Check whether the required role evidence exists, is current, and gives a clear decision.
+Check whether the required role evidence exists, is current, and gives a clear result or decision.
 
 Acceptable evidence must show:
 
 - architect plan or docs-sync decision when architecture, public contracts, durable docs, or known issues changed
-- tester decision and validation evidence when code, behavior, tests, or generated context changed
+- tester `Test Result: pass|fail` and validation evidence when code, behavior, tests, or generated context changed
 - required Gate Review decisions, skip reasons, or override reasons when Gate Reviews were enabled
 - known-issues disposition when unresolved findings were recorded
 - explicit user approval for accepted high-risk decisions or intentionally skipped required gates
@@ -61,7 +61,7 @@ Check:
 - required route was followed, or an explicit exception is recorded
 - required handoff artifacts exist and are current
 - architecture plan completion, Replan, or architect follow-up decision is recorded
-- tester report records validation commands, results, skipped checks with reasons, and an acceptable decision
+- tester report records `Test Result: pass|fail`, validation commands, results, and skipped checks with reasons
 - required Gate Reviews are approved, skipped with a recorded reason, or overridden with a recorded reason
 - Gate Review enable state is confirmed authoritatively: do not infer that no Gate Reviews were required from an absent or empty `.ai/vcm/gate-reviews/index.json`. When Gate Review is enabled, a missing index or a required gate without a recorded decision means the gate was skipped — run the matching `.ai/tools/request-gate-review --gate <gate>` (the tool is the source of truth) and do not accept until each required gate returns `approve`/`already_approved`, `disabled`/`not_required`, or a recorded skip/override
 - docs-sync report records docs updated, docs intentionally left unchanged, or required follow-up

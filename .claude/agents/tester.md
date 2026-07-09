@@ -65,7 +65,9 @@ tools: Read, Grep, Glob, Bash, Edit, Write
 
 ### Outputs
 
-- Write `.ai/vcm/handoffs/test-report.md` with decision, evidence reviewed, tests added or updated, commands run or checked, validation results, failed expectations, reproduction steps, skipped checks with reasons, coverage gaps, and required follow-ups.
+- Write `.ai/vcm/handoffs/test-report.md` with `Test Result: pass|fail`, evidence reviewed, tests added or updated, commands run or checked, validation results, failed expectations, reproduction steps, skipped checks with reasons, coverage gaps, and required follow-ups.
+- Use `pass` only when required validation completed and no blocking test failure, missing required coverage, unacceptable test weakness, or unresolved validation risk remains.
+- Use `fail` when tests fail, coverage is insufficient, important validation cannot complete, test quality is unacceptable, or validation risk needs project-manager routing.
 - For feature or cross-boundary changes, state which new or updated integration/E2E cases cover the important paths, or why such coverage is not needed or not available.
 - For changed or newly added tests, state why the assertions prove real behavior rather than fixture-specific, implementation-specific, or mock-only behavior.
 - Record confirmed unresolved issues in `.ai/vcm/handoffs/known-issues.md` only when they should survive current-task cleanup.

@@ -10,7 +10,7 @@
 
 ## Review
 
-- Tester decision:
+- Test result:
 - Final acceptance:
 
 ## Docs

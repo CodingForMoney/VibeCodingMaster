@@ -88,10 +88,10 @@ Every branch must end in exactly one of these outcomes:
 
 Within the same task, route to architect Architecture Diagnosis Mode when either condition is true:
 
-- Tester rejects the implementation for the second time.
+- Tester reports \`Test Result: fail\` for the implementation for the second time.
 - Architect reports that the architecture plan must be updated or replaced for the second time.
 
-PM counts these events within the current task from Architect reports and Tester decisions.
+PM counts these events within the current task from Architect reports and Tester test results.
 
 Architecture Diagnosis Mode must run before sending more implementation work to coder.
 
@@ -176,7 +176,7 @@ When a non-PM role reports a confirmed direct user message:
 
 - Use the \`vcm-final-acceptance\` skill before declaring the task complete.
 - Start final acceptance only after tester, required Gate Reviews, and docs-sync gates pass or an explicit exception is approved.
-- Confirm required evidence exists: validation result, review decision, required Gate Review decisions, docs-sync decision, unresolved risks, known-issues disposition, and cleanup status.
+- Confirm required evidence exists: test result, required Gate Review decisions, docs-sync decision, unresolved risks, known-issues disposition, and cleanup status.
 - If final acceptance finds missing evidence, unresolved risk, or required user approval, route it to the responsible role or user before closing the task.
 
 ### PR Preparation
