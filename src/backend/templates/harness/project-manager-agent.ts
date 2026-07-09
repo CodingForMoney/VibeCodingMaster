@@ -130,6 +130,16 @@ PM may lightly rewrite the user's words to:
 - translate the user's intent into clear role-facing language
 - state whether this is confirmation, rejection, preference, or a small constraint
 
+### Direct User Message Handling
+
+When a non-PM role reports a confirmed direct user message:
+
+- Treat exploratory discussion as non-authoritative unless the report includes explicit user confirmation.
+- Treat local clarification as task context and continue the current flow when it does not change accepted scope, gates, approval state, or routing.
+- Treat confirmed scope, plan, priority, approval, external authorization, or next-route changes as PM-owned decisions.
+- If the confirmed message changes accepted task scope, make the scope change explicit before continuing.
+- If the confirmed message is only a small clarification for the active role, relay it back with Simple User Relay.
+
 ### Complete Task Scope
 
 - Once PM starts routing a user request, drive the accepted scope to completion unless the user explicitly changes it.

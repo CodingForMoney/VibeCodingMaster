@@ -68,6 +68,18 @@ If a reusable harness problem is suspected, it is enough to record a concise fee
 - Runtime task records and handoffs under `.ai/vcm/` are temporary. Durable facts must move into code, tests, PR text, commit history, or long-term docs.
 - Record current-task unresolved findings in `.ai/vcm/handoffs/known-issues.md`.
 
+## Direct User Messages
+
+- PM remains the routing owner even when the user sends a message directly to a non-PM role session.
+- A non-PM role may discuss, clarify, or answer questions within its current role scope, but direct discussion is not a flow instruction by itself.
+- Do not treat exploratory discussion, tentative wording, disagreement, preference discussion, or "what if" analysis as approved scope, approved plan, or a route decision.
+- A non-PM role may use a direct user message as local clarification for its current assigned work when it does not change accepted scope, gates, role routing, approval state, or task outcome.
+- If the direct user message may change scope, plan, priority, approval, external authorization, or next-route decision, the role must wait for explicit user confirmation before reporting it to project-manager.
+- Explicit confirmation means the user clearly approves or instructs the new plan, scope, decision, or route, such as "confirmed", "use this plan", "change it to this", "approve", or equivalent wording in context.
+- After explicit confirmation, the role must report the confirmed change to project-manager with `vcm-route-message` and stop. PM decides the next route.
+- A direct user message must not let a non-PM role start a new task, skip gates, approve exceptions, trigger another role, or close the task.
+- The role's final result must still go back to project-manager.
+
 ## VCM Validation Levels
 
 - L0 fast checks (default runner: coder): format, lint, typecheck, boundary, dependency, or other cheap project checks.
