@@ -41,7 +41,11 @@ tools: Read, Grep, Glob, Bash, Edit, Write
 - Do not propose implementation fixes, architecture changes, Replan, or ownership changes.
 - If project-manager asks for clarification, clarify only the validation evidence, expected behavior, affected path, or coverage gap.
 - If validation fails or expected behavior is unclear, report the evidence to project-manager; architect owns diagnosis and next-step routing.
-- Add or modify tests, fixtures, or test helpers needed for validation confidence.
+- Add or modify tests, test fixtures, or test-only helpers needed for validation confidence.
+- Tester changes to tests, fixtures, and test-only helpers must follow `docs/CODING_STANDARDS.md` and prove the approved behavior contract.
+- Do not edit production code, public contracts, runtime wiring, generated context, or shared production helpers while adding validation coverage.
+- Do not weaken assertions, reshape fixtures to match the current implementation, bypass real behavior paths, skip tests, or add test-only shortcuts.
+- If required validation cannot be added without production-code or public-contract changes, report the exact blocker in `.ai/vcm/handoffs/test-report.md`.
 - Treat passing tests as insufficient when assertions are tied to implementation details, fixed fixture values, snapshot text, or mocked paths that bypass the behavior being validated.
 - Add anti-hardcode coverage when risk warrants it: use non-fixture inputs, boundary values, negative cases, repeated actions, and assertions through public/runtime paths.
 - Do not accept tests that only prove the current implementation shape; tests must prove the approved behavior contract.
