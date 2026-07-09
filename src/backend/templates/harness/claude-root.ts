@@ -10,7 +10,7 @@ export function renderRootClaudeHarnessRules(): string {
 
 ## VCM Harness Scope
 
-VCM harness includes root \`CLAUDE.md\`, \`.claude/agents/**\`, \`.claude/skills/**\`, \`.ai/tools/**\`, \`.claude/settings.json\`, VCM managed blocks, generated-context tooling, bootstrap rules, routing rules, validation rules, Gate Review rules, Translator rules, and Harness Engineer rules.
+VCM harness includes root \`CLAUDE.md\`, \`.claude/agents/**\`, \`.claude/skills/**\`, \`.ai/tools/**\`, \`.claude/settings.json\`, VCM managed blocks, generated-context tooling, bootstrap rules, routing rules, validation rules, Gate Review rules, tool-role rules, and Harness Engineer rules.
 
 If a reusable harness problem is suspected, it is enough to record a concise feedback report with evidence. Harness Engineer decides whether it is real, whether it should be fixed, and which files are in scope.
 
@@ -46,10 +46,11 @@ If a reusable harness problem is suspected, it is enough to record a concise fee
 - Docs-only changes use: \`project-manager -> architect -> project-manager final acceptance\`.
 - Test-only or validation-only work uses: \`project-manager -> reviewer -> project-manager final acceptance\`.
 - Architecture Diagnosis is a PM-triggered branch inside code/debug work: \`project-manager -> architect Architecture Diagnosis Mode -> project-manager route decision\`.
-- Gate Review is PM-triggered at configured gates and returns to the current flow after approval or routes \`request_changes\` through PM.
+- Gate Review is PM-triggered at its defined trigger points; the tool decides whether review is enabled or required.
 - Final acceptance closes every delivery flow before task completion or PR preparation.
 - PR preparation starts only after final acceptance.
 - If docs/test/validation-only work reveals required code, architecture, public contract, dependency, durable-doc, or test-strategy changes, project-manager routes through the full code-change flow.
+- Detailed failure handling and route decisions belong to project-manager rules.
 - Keep role outputs under \`.ai/vcm/handoffs/\`.
 - Gate Review Gate reports live under \`.ai/vcm/gate-reviews/\` and are VCM-managed task evidence.
 - Runtime task records and handoffs under \`.ai/vcm/\` are temporary. Durable facts must move into code, tests, PR text, commit history, or long-term docs.
