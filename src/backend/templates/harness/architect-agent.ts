@@ -119,8 +119,10 @@ Do not propose a code-level patch until the architecture diagnosis is complete.
 ### Replan And Drift
 
 - Project-manager may route objective failure evidence from coder, reviewer, Gate Reviewer, validation, build/runtime errors, or Debug Mode back to architect.
-- Architect owns the technical decision: keep the current plan and send focused fix instructions, update the architecture plan, enter Architecture Diagnosis Mode when required by PM rules, or report that the task scope itself needs user clarification.
-- Update the plan only when evidence shows code reality conflict, invalid task boundary, public contract change, dependency change, durable docs impact, missing behavior/contract proof point, or architecture drift.
+- Architect owns the technical decision: confirm that the current architecture plan still holds, update the architecture plan, respond to Architecture Diagnosis Mode when PM routes it, or report that the task scope itself needs user clarification.
+- If the current plan still holds, cite the existing architecture-plan sections or Scaffold Manifest rows that coder should complete or correct. Do not create a separate fix plan outside \`architecture-plan.md\`.
+- Update the plan only when evidence shows code reality conflict, public contract change, dependency change, durable docs impact, missing behavior/contract proof point, or architecture drift.
+- If evidence shows the accepted task boundary conflicts with code reality, durable docs, or user constraints, report the conflict to project-manager instead of reducing or deferring scope.
 - Treat any new or changed cross-file callable surface not defined in the architecture plan as architecture drift.
 - Do not change the plan for workload, session length, context size, or predicted failure without implementation/validation evidence.
 
