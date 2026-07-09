@@ -901,7 +901,7 @@ describe("round-service", () => {
       stateRepoRoot: "/repo",
       stateRoot: ".ai/vcm",
       taskSlug: "demo-task",
-      role: "reviewer"
+      role: "tester"
     });
     expect(stillWaiting.roleRecovery?.role).toBe("coder");
 

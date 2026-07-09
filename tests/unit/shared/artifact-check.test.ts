@@ -9,8 +9,8 @@ describe("checkMarkdownArtifact", () => {
   });
 
   it("reports ok when required headings exist", () => {
-    const result = checkMarkdownArtifact("review-report", "review-report.md", `
-# Review Report
+    const result = checkMarkdownArtifact("test-report", "test-report.md", `
+# Test Report
 
 ## Summary
 Done
@@ -101,7 +101,7 @@ All changes traced.
 Checks passed.
 
 ## Review And Docs Sync
-Reviewer and docs sync complete.
+Tester and docs sync complete.
 
 ## Known Issues Disposition
 No task issues to promote.

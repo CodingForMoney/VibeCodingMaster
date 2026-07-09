@@ -3,7 +3,7 @@ import type { DispatchableRole } from "./role.js";
 export type ArtifactKind =
   | "architecture-plan"
   | "known-issues"
-  | "review-report"
+  | "test-report"
   | "docs-sync-report"
   | "final-acceptance";
 
@@ -15,7 +15,7 @@ export interface HandoffPaths {
   messageRoutePaths: Record<string, string>;
   architecturePlanPath: string;
   knownIssuesPath: string;
-  reviewReportPath: string;
+  testReportPath: string;
   docsSyncReportPath: string;
   finalAcceptancePath: string;
 }

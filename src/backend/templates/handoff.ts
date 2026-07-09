@@ -46,8 +46,8 @@ At task close, promote still-relevant confirmed issues to \`docs/known-issues.md
 `;
 }
 
-export function renderReviewReportTemplate(taskSlug: string): string {
-  return `# Review Report: ${taskSlug}
+export function renderTestReportTemplate(taskSlug: string): string {
+  return `# Test Report: ${taskSlug}
 
 ## Summary
 

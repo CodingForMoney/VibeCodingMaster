@@ -260,7 +260,7 @@ function degradedArtifactSummary(handoffDir: string): ArtifactSummary {
       messageRoutePaths: {},
       architecturePlanPath: `${handoffDir}/architecture-plan.md`,
       knownIssuesPath: `${handoffDir}/known-issues.md`,
-      reviewReportPath: `${handoffDir}/review-report.md`,
+      testReportPath: `${handoffDir}/test-report.md`,
       docsSyncReportPath: `${handoffDir}/docs-sync-report.md`,
       finalAcceptancePath: `${handoffDir}/final-acceptance.md`
     },

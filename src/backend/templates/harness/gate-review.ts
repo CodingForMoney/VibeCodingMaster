@@ -12,7 +12,7 @@ Return only:
 
 ## Architecture Plan Gate
 
-Read \`.claude/agents/architect.md\`; use coder/reviewer definitions only when
+Read \`.claude/agents/architect.md\`; use coder/tester definitions only when
 judging implementation or validation boundaries. Verify the required plan
 structure, evidence, Scaffold Manifest, proof points, architect-owned replan decisions when present, and no
 task-only source comments.
@@ -25,7 +25,7 @@ guess, or conflict with current project architecture.
 
 ## Validation Adequacy Gate
 
-Read \`.claude/agents/reviewer.md\`; use architect/coder definitions to compare
+Read \`.claude/agents/tester.md\`; use architect/coder definitions to compare
 validation against the plan and implementation test responsibilities. Verify
 plan coverage, public contracts, validation level, commands/results,
 skips/gaps/risks, final cleanup, and durable testing docs impact.
@@ -39,7 +39,7 @@ behavior.
 
 ## Final Diff Gate
 
-Read \`.claude/agents/coder.md\`; use architect/reviewer definitions to compare
+Read \`.claude/agents/coder.md\`; use architect/tester definitions to compare
 the final diff against the approved plan and validation evidence. Check that
 the diff matches plan, has no unapproved surface/dependency/docs changes, no
 \`VCM:CODE\`, no task-process comments or task labels, meaningful tests, and
@@ -130,7 +130,7 @@ Use this skill at every project-manager Gate Review trigger point and whenever V
 ## Trigger Points
 
 - \`architecture-plan\`: after architect writes \`.ai/vcm/handoffs/architecture-plan.md\`, before coder dispatch.
-- \`validation-adequacy\`: after reviewer writes \`.ai/vcm/handoffs/review-report.md\`, before docs sync or final acceptance.
+- \`validation-adequacy\`: after tester writes \`.ai/vcm/handoffs/test-report.md\`, before docs sync or final acceptance.
 - \`final-diff\`: after final acceptance evidence is ready, before PR preparation.
 
 ## Request
@@ -186,18 +186,18 @@ SOURCE_ARTIFACTS = {
     "architecture-plan": [".ai/vcm/handoffs/architecture-plan.md"],
     "validation-adequacy": [
         ".ai/vcm/handoffs/architecture-plan.md",
-        ".ai/vcm/handoffs/review-report.md",
+        ".ai/vcm/handoffs/test-report.md",
     ],
     "final-diff": [
         ".ai/vcm/handoffs/architecture-plan.md",
-        ".ai/vcm/handoffs/review-report.md",
+        ".ai/vcm/handoffs/test-report.md",
         ".ai/vcm/handoffs/docs-sync-report.md",
         ".ai/vcm/handoffs/final-acceptance.md",
     ],
 }
 CORE_INPUT_ARTIFACTS = {
     "architecture-plan": ".ai/vcm/handoffs/architecture-plan.md",
-    "validation-adequacy": ".ai/vcm/handoffs/review-report.md",
+    "validation-adequacy": ".ai/vcm/handoffs/test-report.md",
 }
 
 

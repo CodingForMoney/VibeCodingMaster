@@ -126,7 +126,7 @@ function createProjectServiceStub(): ProjectService {
         config: {
           version: 1,
           repoRoot: "/repo",
-          defaultRoles: ["project-manager", "architect", "coder", "reviewer"],
+          defaultRoles: ["project-manager", "architect", "coder", "tester"],
           handoffRoot: ".ai/vcm/handoffs",
           stateRoot: ".ai/vcm",
           terminalBackend: "node-pty",

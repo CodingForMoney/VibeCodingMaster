@@ -126,10 +126,10 @@ describe("gate-review-service", () => {
     expect(sessionStarts).toEqual([]);
   });
 
-  it("does not start validation-adequacy review when the review report is empty", async () => {
+  it("does not start validation-adequacy review when the test report is empty", async () => {
     tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-gate-review-empty-report-"));
     await writeHarnessFiles(tmpRepo);
-    await writeFile(path.join(taskWorktree(tmpRepo), ".ai/vcm/handoffs/review-report.md"), "\n\n", "utf8");
+    await writeFile(path.join(taskWorktree(tmpRepo), ".ai/vcm/handoffs/test-report.md"), "\n\n", "utf8");
     const sessionStarts: string[] = [];
     const service = createGateReviewService({
       fs: createNodeFileSystemAdapter(),
@@ -146,17 +146,17 @@ describe("gate-review-service", () => {
     const state = await service.getState(tmpRepo, "demo-task");
 
     expect(result.status).toBe("not_required");
-    expect(result.message).toContain("review-report.md is empty");
+    expect(result.message).toContain("test-report.md is empty");
     expect(state.gates["validation-adequacy"].status).toBe("not_required");
     expect(sessionStarts).toEqual([]);
   });
 
   it("reuses validation-adequacy approval when only the architecture plan changed", async () => {
-    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-gate-review-report-hash-"));
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-gate-test-report-hash-"));
     await writeHarnessFiles(tmpRepo);
     const taskRoot = taskWorktree(tmpRepo);
-    const reviewReport = "# Review Report\nAll checks covered.\n";
-    await writeFile(path.join(taskRoot, ".ai/vcm/handoffs/review-report.md"), reviewReport, "utf8");
+    const testReport = "# Test Report\nAll checks covered.\n";
+    await writeFile(path.join(taskRoot, ".ai/vcm/handoffs/test-report.md"), testReport, "utf8");
     await mkdir(path.join(taskRoot, ".ai/vcm/gate-reviews"), { recursive: true });
     await writeFile(
       path.join(taskRoot, ".ai/vcm/gate-reviews/index.json"),
@@ -173,7 +173,7 @@ describe("gate-review-service", () => {
             decision: "approve",
             reportPath: ".ai/vcm/gate-reviews/validation-adequacy-review.md",
             promptPath: ".ai/vcm/gate-reviews/requests/approved.prompt.md",
-            inputHash: gateCoreHash(".ai/vcm/handoffs/review-report.md", reviewReport),
+            inputHash: gateCoreHash(".ai/vcm/handoffs/test-report.md", testReport),
             updatedAt: "2026-06-13T00:00:00.000Z"
           }
         }

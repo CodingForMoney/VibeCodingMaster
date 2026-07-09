@@ -831,7 +831,7 @@ describe("gateway-service long connection", () => {
       startTaskRoleSessions: async () => ({
         taskSlug: "demo-task",
         orchestration: { taskSlug: "demo-task", mode: "auto", updatedAt: NOW },
-        startedRoles: ["project-manager", "architect", "coder", "reviewer"],
+        startedRoles: ["project-manager", "architect", "coder", "tester"],
         sessions: []
       })
     });
@@ -842,7 +842,7 @@ describe("gateway-service long connection", () => {
 
     expect(sentTexts[0]).toContain("Task created and initialized: demo-task");
     expect(sentTexts[0]).toContain("orchestration: auto");
-    expect(sentTexts[0]).toContain("sessions: project-manager, architect, coder, reviewer");
+    expect(sentTexts[0]).toContain("sessions: project-manager, architect, coder, tester");
     expect(settings.current().currentTaskSlug).toBe("demo-task");
     service.stop();
   });
@@ -1442,7 +1442,7 @@ function createProject(): ProjectSummary {
     config: {
       version: 1,
       repoRoot: "/repo",
-      defaultRoles: ["project-manager", "architect", "coder", "reviewer"],
+      defaultRoles: ["project-manager", "architect", "coder", "tester"],
       handoffRoot: ".ai/vcm/handoffs",
       stateRoot: ".ai/vcm",
       terminalBackend: "node-pty",

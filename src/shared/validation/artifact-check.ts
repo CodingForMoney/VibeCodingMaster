@@ -13,7 +13,7 @@ const REQUIRED_HEADINGS: Record<ArtifactKind, readonly string[]> = {
     "Task Issues",
     "Escalation To Docs"
   ],
-  "review-report": [
+  "test-report": [
     "Summary",
     "Findings",
     "Validation",

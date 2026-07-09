@@ -10,7 +10,7 @@
 
 ## Review
 
-- Reviewer decision:
+- Tester decision:
 - Final acceptance:
 
 ## Docs
@@ -23,7 +23,7 @@
 ## Checklist
 
 - [ ] Final acceptance completed.
-- [ ] Reviewer validation completed.
+- [ ] Tester validation completed.
 - [ ] Durable docs updated or confirmed unchanged.
 - [ ] Known issues resolved or recorded.
 - [ ] No uncommitted changes remain.

@@ -41,7 +41,7 @@ CLAUDE.md
 .claude/agents/project-manager.md
 .claude/agents/architect.md
 .claude/agents/coder.md
-.claude/agents/reviewer.md
+.claude/agents/tester.md
 .claude/agents/gate-reviewer.md
 .claude/agents/translator.md
 .claude/agents/harness-engineer.md
@@ -154,7 +154,7 @@ Ownership:
 
 - Architect owns architecture planning, module boundaries, code scaffolding,
   Debug Mode, docs sync, and durable architecture docs.
-- Reviewer owns independent validation and `docs/TESTING.md` as current
+- Tester owns independent validation and `docs/TESTING.md` as current
   validation strategy, with integration/E2E case lists.
 - PM owns routing and final evidence acceptance, not technical analysis.
 - Coder owns implementation, baseline unit/contract/regression tests, scaffold
@@ -174,7 +174,7 @@ Current runtime paths include:
 <taskRepoRoot>/.ai/vcm/handoffs/
 <taskRepoRoot>/.ai/vcm/handoffs/messages/
 <taskRepoRoot>/.ai/vcm/handoffs/architecture-plan.md
-<taskRepoRoot>/.ai/vcm/handoffs/review-report.md
+<taskRepoRoot>/.ai/vcm/handoffs/test-report.md
 <taskRepoRoot>/.ai/vcm/handoffs/docs-sync-report.md
 <taskRepoRoot>/.ai/vcm/handoffs/final-acceptance.md
 <taskRepoRoot>/.ai/vcm/handoffs/known-issues.md
@@ -226,8 +226,8 @@ VCM roles:
   Mode, complete task planning, module docs, and docs sync.
 - `coder`: implementation inside the approved plan, scaffold completion,
   baseline tests, and cleanup of task-only code markers/comments.
-- `reviewer`: independent validation, test adequacy, missing test additions,
-  integration/E2E case assessment, review report, and `docs/TESTING.md`.
+- `tester`: independent validation, test adequacy, missing test additions,
+  integration/E2E case assessment, test report, and `docs/TESTING.md`.
 - `gate-reviewer`: optional VCM flow role. It is visible when any Gate Review
   gate is enabled or a gate-reviewer session already exists. It is task-scoped
   in the active worktree, uses normal Claude hook/Round/translation handling,
@@ -275,7 +275,7 @@ Default code-change route:
 project-manager
   -> architect
   -> coder
-  -> reviewer
+  -> tester
   -> architect docs sync
   -> project-manager final acceptance
 ```
@@ -284,7 +284,7 @@ Shorter routes:
 
 - Docs-only work: `project-manager -> architect -> project-manager final acceptance`
 - Test-only or validation-only work:
-  `project-manager -> reviewer -> project-manager final acceptance`
+  `project-manager -> tester -> project-manager final acceptance`
 
 If a docs/test/validation-only task reveals required code, architecture, public
 contract, dependency, durable-doc, or validation-strategy changes, route back
@@ -363,7 +363,7 @@ Input policy:
 
 - `architecture-plan` uses `.ai/vcm/handoffs/architecture-plan.md` as its core
   input. Missing or empty core input is `not_required`.
-- `validation-adequacy` uses `.ai/vcm/handoffs/review-report.md` as its core
+- `validation-adequacy` uses `.ai/vcm/handoffs/test-report.md` as its core
   input. Missing or empty core input is `not_required`.
 - `final-diff` uses handoff artifacts plus `git status` and `git diff`; it does
   not use the core-input shortcut.
@@ -378,7 +378,7 @@ Gate Reviewer writes reports under:
 Gate Reviewer returns only `approve` or `request_changes`, does not run tests,
 does not edit files, and does not choose fix owners, Replan, or user-intervention
 needs. PM routes `architecture-plan` and `final-diff` findings to architect, and
-`validation-adequacy` findings to reviewer.
+`validation-adequacy` findings to tester.
 
 ## 13. Validation
 
@@ -396,8 +396,8 @@ The fixed harness does not install `check-fast`, `check-changed`, or
 `check-module` wrappers. Roles use native project commands documented in
 `docs/TESTING.md`.
 
-Reviewer owns validation adequacy. Important features should have integration
-or E2E coverage unless the review report explains why such coverage is
+Tester owns validation adequacy. Important features should have integration
+or E2E coverage unless the test report explains why such coverage is
 unnecessary or unavailable. Tests must assert real behavior, not mock-call
 rituals or fixture-specific shortcuts.
 
@@ -478,14 +478,14 @@ adequacy analysis.
 It checks whether required evidence exists and has clear decisions:
 
 - architecture plan or docs-sync decision when needed
-- reviewer decision and validation evidence when needed
+- tester decision and validation evidence when needed
 - required Gate Review decisions when enabled
 - known-issues disposition
 - cleanup status
 - explicit user approval for high-risk exceptions
 - changed-file scope explanation
 
-Do not accept when required role evidence is missing, reviewer findings are
+Do not accept when required role evidence is missing, tester findings are
 unresolved, docs sync is missing for durable changes, known-issues disposition is
 missing, or unexplained high-risk files remain.
 
@@ -536,7 +536,7 @@ Rules:
 
 - Gateway sends ordinary mobile text only to the current task's
   `project-manager`.
-- Gateway never sends directly to architect, coder, reviewer, or Gate Reviewer.
+- Gateway never sends directly to architect, coder, tester, or Gate Reviewer.
 - Gateway can push PM replies to the active mobile chat while enabled.
 - Gateway state, credentials, and audit logs live in app-local state, not
   connected repositories.
@@ -604,7 +604,7 @@ polling a missing terminal session forever.
 14. Use native project commands for validation.
 15. Use generated context only when it has a real generator.
 16. Coder owns implementation and scaffold completion.
-17. Reviewer owns independent validation and current testing strategy.
+17. Tester owns independent validation and current testing strategy.
 18. Architect owns architecture planning, code scaffolding, Debug Mode, and
     durable architecture docs.
 19. PM owns routing and final evidence acceptance, not technical analysis.

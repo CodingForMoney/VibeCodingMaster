@@ -262,12 +262,12 @@ describe("createMessageService", () => {
   });
 
   it("rejects peer route files because VCM routes through project-manager", async () => {
-    const harness = createHarness(["coder", "reviewer"]);
+    const harness = createHarness(["coder", "tester"]);
     await harness.service.updateOrchestrationState({
       ...harness.base,
       mode: "auto"
     });
-    await harness.writeRoute("coder-reviewer.md", "Can you review this directly?");
+    await harness.writeRoute("coder-tester.md", "Can you test this directly?");
 
     const results = await harness.service.scanAndDispatchPendingRouteFiles(harness.base);
 
@@ -280,7 +280,7 @@ describe("createMessageService", () => {
     });
     expect(results[0].message).toBeUndefined();
     expect(harness.writes).toEqual([]);
-    await expect(harness.readRoute("coder-reviewer.md")).resolves.toBe("Can you review this directly?");
+    await expect(harness.readRoute("coder-tester.md")).resolves.toBe("Can you test this directly?");
   });
 });
 

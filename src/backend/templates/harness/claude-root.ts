@@ -28,7 +28,7 @@ If a reusable harness problem is suspected, it is enough to record a concise fee
 - \`docs/CODING_STANDARDS.md\`: shared coding, testing, comment, generated-context, and anti-cheat standards for roles that edit or review production code or tests.
 - \`docs/ARCHITECTURE.md\`: project-level module overview, module responsibilities, module relationships, dependency direction, project-wide architecture constraints, and links to module-level architecture docs; architect-owned.
 - \`<module>/ARCHITECTURE.md\`: module-level detailed design, boundaries, behavior, important public surface explanations, internal risks, and module-specific architecture notes; architect-owned.
-- \`docs/TESTING.md\`: validation strategy, commands, validation levels, integration/E2E case definitions, final-validation cleanup, and known testing gaps; reviewer-owned.
+- \`docs/TESTING.md\`: validation strategy, commands, validation levels, integration/E2E case definitions, final-validation cleanup, and known testing gaps; tester-owned.
 - \`docs/known-issues.md\`: durable known issues and accepted limitations; architect-owned.
 - \`.ai/generated/module-index.json\`: generated module index; use it to find layers, modules, manifests, module docs, source files, test files, and workspace dependencies.
 - \`.ai/generated/public-surface.json\`: generated public surface index; use it to inspect module-to-module public APIs, routes, and source evidence.
@@ -42,10 +42,10 @@ If a reusable harness problem is suspected, it is enough to record a concise fee
 ## VCM Task Flow
 
 - All role routes are PM-hub routes. Project-manager starts and advances every flow; non-PM roles report blockers, failures, conflicts, incomplete work, and findings back to project-manager.
-- Code changes use: \`project-manager -> architect -> coder -> reviewer -> architect docs sync -> project-manager final acceptance\`.
-- Debug work uses: \`project-manager -> architect Debug Mode -> reviewer -> project-manager final acceptance\`.
+- Code changes use: \`project-manager -> architect -> coder -> tester -> architect docs sync -> project-manager final acceptance\`.
+- Debug work uses: \`project-manager -> architect Debug Mode -> tester -> project-manager final acceptance\`.
 - Docs-only changes use: \`project-manager -> architect -> project-manager final acceptance\`.
-- Test-only or validation-only work uses: \`project-manager -> reviewer -> project-manager final acceptance\`.
+- Test-only or validation-only work uses: \`project-manager -> tester -> project-manager final acceptance\`.
 - Architecture Diagnosis is a PM-triggered branch inside code/debug work: \`project-manager -> architect Architecture Diagnosis Mode -> project-manager route decision\`.
 - Gate Review is PM-triggered at its defined trigger points; the tool decides whether review is enabled or required.
 - Final acceptance closes every delivery flow before task completion or PR preparation.
@@ -73,9 +73,9 @@ If a reusable harness problem is suspected, it is enough to record a concise fee
 
 - L0 fast checks (default runner: coder): format, lint, typecheck, boundary, dependency, or other cheap project checks.
 - L1 baseline implementation checks (default runner: coder): changed behavior and direct regressions through project-defined unit tests.
-- L2 module / integration checks: targeted fast L2 may run in coder when explicitly assigned; full L2, integration suites, multi-node, cross-service, persistence, runtime, or public-contract gates are reviewer-run.
-- L3 smoke E2E checks (default runner: reviewer): core user journeys or critical browser/API flows.
-- L4 full regression / release checks (default runner: reviewer; architect-owned release flow) are release-only unless explicitly requested.
+- L2 module / integration checks: targeted fast L2 may run in coder when explicitly assigned; full L2, integration suites, multi-node, cross-service, persistence, runtime, or public-contract gates are tester-run.
+- L3 smoke E2E checks (default runner: tester): core user journeys or critical browser/API flows.
+- L4 full regression / release checks (default runner: tester; architect-owned release flow) are release-only unless explicitly requested.
 
 ## VCM Worktree Policy
 

@@ -9,14 +9,14 @@
   - `src/frontend`: React 19 + Vite single-page GUI, embedded terminals via `@xterm/xterm`, app/session state stores.
   - `src/shared`: cross-layer TypeScript types, constants, and zod-backed validation helpers; imported by both backend and frontend.
 - Runtime model: one Fastify backend (default port 4173) plus a Vite dev server (default port 5173, proxies `/api` and `/ws` to backend). Each Claude Code role runs as a real `pty` process the backend supervises.
-- VCM roles: `project-manager`, `architect`, `coder`, `reviewer`, optional `gate-reviewer`, plus tool roles (translator, harness-engineer). Role definitions live in `src/shared/constants.ts`.
+- VCM roles: `project-manager`, `architect`, `coder`, `tester`, optional `gate-reviewer`, plus tool roles (translator, harness-engineer). Role definitions live in `src/shared/constants.ts`.
 - The harness this repo installs into other projects is authored in `src/backend/templates/harness/**`. Editing harness behavior for downstream users means editing those templates, not the generated files in a target repo.
 - Durable local app state lives outside the repo under `vcmDataDir` (`VCM_DATA_DIR` or `~/.vcm`); per-task runtime state lives under `<taskRepoRoot>/.ai/vcm/`.
 
 ## Release Process
 
 - Release/publish is a recurring, irreversible operation and is **architect-owned**: the architect leads and is responsible for the release.
-- Project release flow: architect (release plan, owns the release) -> coder (version bump in `package.json` + lockfile) -> reviewer (release gate, see `docs/TESTING.md` "Release Gate (L4)") -> `npm publish` -> project-manager final acceptance (record the published commit SHA and confirm with `npm view`).
+- Project release flow: architect (release plan, owns the release) -> coder (version bump in `package.json` + lockfile) -> tester (release gate, see `docs/TESTING.md` "Release Gate (L4)") -> `npm publish` -> project-manager final acceptance (record the published commit SHA and confirm with `npm view`).
 - When the user has already explicitly requested a release, that request **is** the go-ahead: do not insert another user confirmation step before publishing. Only pause for the user if something in the release gate fails or the scope is unclear.
 - `npm publish` runs in the foreground and may prompt for an interactive OTP/2FA, so it must **not** be run through the detached long-running-validation job tooling (`run-long-check`/`watch-job`), which cannot accept interactive input.
 
@@ -59,7 +59,7 @@ If a reusable harness problem is suspected, it is enough to record a concise fee
 - `docs/CODING_STANDARDS.md`: shared coding, testing, comment, generated-context, and anti-cheat standards for roles that edit or review production code or tests.
 - `docs/ARCHITECTURE.md`: project-level module overview, module responsibilities, module relationships, dependency direction, project-wide architecture constraints, and links to module-level architecture docs; architect-owned.
 - `<module>/ARCHITECTURE.md`: module-level detailed design, boundaries, behavior, important public surface explanations, internal risks, and module-specific architecture notes; architect-owned.
-- `docs/TESTING.md`: validation strategy, commands, validation levels, integration/E2E case definitions, final-validation cleanup, and known testing gaps; reviewer-owned.
+- `docs/TESTING.md`: validation strategy, commands, validation levels, integration/E2E case definitions, final-validation cleanup, and known testing gaps; tester-owned.
 - `docs/known-issues.md`: durable known issues and accepted limitations; architect-owned.
 - `.ai/generated/module-index.json`: generated module index; use it to find layers, modules, manifests, module docs, source files, test files, and workspace dependencies.
 - `.ai/generated/public-surface.json`: generated public surface index; use it to inspect module-to-module public APIs, routes, and source evidence.
@@ -73,10 +73,10 @@ If a reusable harness problem is suspected, it is enough to record a concise fee
 ## VCM Task Flow
 
 - All role routes are PM-hub routes. Project-manager starts and advances every flow; non-PM roles report blockers, failures, conflicts, incomplete work, and findings back to project-manager.
-- Code changes use: `project-manager -> architect -> coder -> reviewer -> architect docs sync -> project-manager final acceptance`.
-- Debug work uses: `project-manager -> architect Debug Mode -> reviewer -> project-manager final acceptance`.
+- Code changes use: `project-manager -> architect -> coder -> tester -> architect docs sync -> project-manager final acceptance`.
+- Debug work uses: `project-manager -> architect Debug Mode -> tester -> project-manager final acceptance`.
 - Docs-only changes use: `project-manager -> architect -> project-manager final acceptance`.
-- Test-only or validation-only work uses: `project-manager -> reviewer -> project-manager final acceptance`.
+- Test-only or validation-only work uses: `project-manager -> tester -> project-manager final acceptance`.
 - Architecture Diagnosis is a PM-triggered branch inside code/debug work: `project-manager -> architect Architecture Diagnosis Mode -> project-manager route decision`.
 - Gate Review is PM-triggered at its defined trigger points; the tool decides whether review is enabled or required.
 - Final acceptance closes every delivery flow before task completion or PR preparation.
@@ -104,9 +104,9 @@ If a reusable harness problem is suspected, it is enough to record a concise fee
 
 - L0 fast checks (default runner: coder): format, lint, typecheck, boundary, dependency, or other cheap project checks.
 - L1 baseline implementation checks (default runner: coder): changed behavior and direct regressions through project-defined unit tests.
-- L2 module / integration checks: targeted fast L2 may run in coder when explicitly assigned; full L2, integration suites, multi-node, cross-service, persistence, runtime, or public-contract gates are reviewer-run.
-- L3 smoke E2E checks (default runner: reviewer): core user journeys or critical browser/API flows.
-- L4 full regression / release checks (default runner: reviewer; architect-owned release flow) are release-only unless explicitly requested.
+- L2 module / integration checks: targeted fast L2 may run in coder when explicitly assigned; full L2, integration suites, multi-node, cross-service, persistence, runtime, or public-contract gates are tester-run.
+- L3 smoke E2E checks (default runner: tester): core user journeys or critical browser/API flows.
+- L4 full regression / release checks (default runner: tester; architect-owned release flow) are release-only unless explicitly requested.
 
 ## VCM Worktree Policy
 

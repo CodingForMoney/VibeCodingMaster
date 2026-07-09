@@ -25,7 +25,7 @@ describe("task routes", () => {
             config: {
               version: 1,
               repoRoot: "/repo",
-              defaultRoles: ["project-manager", "architect", "coder", "reviewer"],
+              defaultRoles: ["project-manager", "architect", "coder", "tester"],
               handoffRoot: ".ai/vcm/handoffs",
               stateRoot: ".ai/vcm",
               terminalBackend: "node-pty",
@@ -61,7 +61,7 @@ describe("task routes", () => {
           return [
             createSession("architect", "running"),
             createSession("coder", "resumable"),
-            createSession("reviewer", "running")
+            createSession("tester", "running")
           ];
         },
         async stopRoleSession(_repoRoot: string, _taskSlug: string, role: RoleName) {
@@ -119,7 +119,7 @@ describe("task routes", () => {
     expect(calls).toEqual([
       "list-sessions",
       "stop:architect",
-      "stop:reviewer",
+      "stop:tester",
       "move-safe:translator",
       "move-safe:harness-engineer",
       "translation:/repo/.claude/worktrees/demo-task:demo-task:true",
@@ -221,7 +221,7 @@ describe("task routes", () => {
     const result = {
       taskSlug: "demo-task",
       orchestration: { taskSlug: "demo-task", mode: "auto" as const, updatedAt: "2026-05-31T00:00:00.000Z" },
-      startedRoles: ["project-manager", "architect", "coder", "reviewer"] as RoleName[],
+      startedRoles: ["project-manager", "architect", "coder", "tester"] as RoleName[],
       sessions: [createSession("project-manager", "running")]
     };
 
@@ -264,7 +264,7 @@ describe("task routes", () => {
     expect(response.json()).toMatchObject({
       taskSlug: "demo-task",
       orchestration: { mode: "auto" },
-      startedRoles: ["project-manager", "architect", "coder", "reviewer"]
+      startedRoles: ["project-manager", "architect", "coder", "tester"]
     });
     expect(calls).toEqual([{ repoRoot: "/repo", taskSlug: "demo-task", requireFreshStart: true }]);
     await app.close();

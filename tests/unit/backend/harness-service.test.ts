@@ -33,7 +33,7 @@ describe("createHarnessService", () => {
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("## VCM Harness Scope");
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("## VCM Task Flow");
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("All role routes are PM-hub routes");
-    expect(await fs.readText("/repo/CLAUDE.md")).toContain("Debug work uses: `project-manager -> architect Debug Mode -> reviewer -> project-manager final acceptance`.");
+    expect(await fs.readText("/repo/CLAUDE.md")).toContain("Debug work uses: `project-manager -> architect Debug Mode -> tester -> project-manager final acceptance`.");
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("Architecture Diagnosis is a PM-triggered branch inside code/debug work");
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("Final acceptance closes every delivery flow before task completion or PR preparation.");
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("## VCM Worktree Policy");
@@ -82,7 +82,7 @@ describe("createHarnessService", () => {
     expect(projectManagerAgent).toContain("### Gate Review Gates");
     expect(projectManagerAgent).toContain("Architect reports that the architecture plan must be updated or replaced for the second time");
     const architectAgent = await fs.readText("/repo/.claude/agents/architect.md");
-    expect(architectAgent).toContain("verifiable behavior, task boundaries, behavior/contract proof points");
+    expect(architectAgent).toContain("verifiable behavior, implementation boundaries within the accepted scope, behavior/contract proof points");
     expect(architectAgent).toContain("Read `.ai/vcm/handoffs/known-issues.md`; promote only confirmed unresolved durable issues");
     expect(architectAgent).toContain("Architect owns the technical decision");
     const coderAgent = await fs.readText("/repo/.claude/agents/coder.md");
@@ -99,7 +99,7 @@ describe("createHarnessService", () => {
     expect(coderAgent).toContain("vcm-coder-worker");
     expect(frontmatterOf(await fs.readText("/repo/.claude/agents/project-manager.md"))).not.toContain("Agent");
     expect(frontmatterOf(await fs.readText("/repo/.claude/agents/architect.md"))).not.toContain("Agent");
-    expect(frontmatterOf(await fs.readText("/repo/.claude/agents/reviewer.md"))).not.toContain("Agent");
+    expect(frontmatterOf(await fs.readText("/repo/.claude/agents/tester.md"))).not.toContain("Agent");
     const coderWorkerAgent = await fs.readText("/repo/.claude/agents/vcm-coder-worker.md");
     expect(coderWorkerAgent).toContain("name: vcm-coder-worker");
     expect(coderWorkerAgent).toContain("model: inherit");
@@ -206,7 +206,7 @@ describe("createHarnessService", () => {
 
   it("plans and removes obsolete Codex harness paths", async () => {
     const fs = createMemoryFs();
-    await fs.writeText("/repo/.ai/codex/AGENTS.md", "# old codex reviewer\n");
+    await fs.writeText("/repo/.ai/codex/AGENTS.md", "# old codex tester\n");
     await fs.writeText("/repo/.ai/codex-translator/AGENTS.md", "# old codex translator\n");
     await fs.writeText("/repo/.claude/skills/vcm-codex-review-gate/SKILL.md", "# old skill\n");
     await fs.writeText("/repo/.ai/tools/request-codex-review", "#!/usr/bin/env python3\n");

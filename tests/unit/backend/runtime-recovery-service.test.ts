@@ -253,7 +253,7 @@ function createService(
         return {
           version: 1,
           repoRoot,
-          defaultRoles: ["project-manager", "architect", "coder", "reviewer"],
+          defaultRoles: ["project-manager", "architect", "coder", "tester"],
           handoffRoot: ".ai/vcm/handoffs",
           stateRoot: ".ai/vcm",
           terminalBackend: "node-pty",

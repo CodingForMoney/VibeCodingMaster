@@ -21,7 +21,7 @@ export type HarnessFileKind =
   | "agent-project-manager"
   | "agent-architect"
   | "agent-coder"
-  | "agent-reviewer";
+  | "agent-tester";
 
 export type HarnessFileAction = "create" | "insert" | "update" | "delete" | "ok";
 export type HarnessBootstrapCheckStatus = "ok" | "missing" | "incomplete" | "unknown";

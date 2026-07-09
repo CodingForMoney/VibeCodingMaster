@@ -1547,8 +1547,8 @@ function getHandoffArtifactPath(paths: ReturnType<ArtifactService["getHandoffPat
   if (role === "architect") {
     return paths.architecturePlanPath;
   }
-  if (role === "reviewer") {
-    return paths.reviewReportPath;
+  if (role === "tester") {
+    return paths.testReportPath;
   }
   return undefined;
 }
@@ -1919,7 +1919,7 @@ function createEmptyTaskSessionRecord(taskSlug: string, updatedAt: string): Task
       "project-manager": { id: null, status: "not_started" },
       architect: { id: null, status: "not_started" },
       coder: { id: null, status: "not_started" },
-      reviewer: { id: null, status: "not_started" }
+      tester: { id: null, status: "not_started" }
     }
   };
 }

@@ -46,7 +46,7 @@ import { renderProjectCodingStandardsTemplate } from "../templates/harness/proje
 import { renderProjectGlossaryTemplate } from "../templates/harness/project-glossary.js";
 import { renderProjectManagerHarnessRules } from "../templates/harness/project-manager-agent.js";
 import { renderPullRequestTemplateHarnessRules } from "../templates/harness/pull-request-template.js";
-import { renderReviewerHarnessRules } from "../templates/harness/reviewer-agent.js";
+import { renderTesterHarnessRules } from "../templates/harness/tester-agent.js";
 import { renderVcmFinalAcceptanceSkillRules } from "../templates/harness/vcm-final-acceptance-skill.js";
 import { renderVcmHarnessBootstrapSkillRules } from "../templates/harness/vcm-harness-bootstrap-skill.js";
 import { renderVcmLongRunningValidationSkillRules } from "../templates/harness/vcm-long-running-validation-skill.js";
@@ -349,14 +349,14 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
     renderRules: renderCoderHarnessRules
   },
   {
-    kind: "agent-reviewer",
-    path: ".claude/agents/reviewer.md",
-    title: "Reviewer Agent",
+    kind: "agent-tester",
+    path: ".claude/agents/tester.md",
+    title: "Tester Agent",
     frontmatter: renderAgentFrontmatter(
-      "reviewer",
-      "VCM independent review role for acceptance, test adequacy, scope checks, and risk findings."
+      "tester",
+      "VCM testing role for validation, test adequacy, scope checks, and risk findings."
     ),
-    renderRules: renderReviewerHarnessRules
+    renderRules: renderTesterHarnessRules
   }
 ];
 

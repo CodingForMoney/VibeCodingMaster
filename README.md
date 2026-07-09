@@ -8,7 +8,7 @@ VCM helps you keep one task organized across dedicated roles:
 - Project Manager
 - Architect
 - Coder
-- Reviewer
+- Tester
 - optional Gate Reviewer
 
 It runs locally, connects to a local Git repository, creates a task branch and
@@ -133,7 +133,7 @@ If you want VCM app state to survive container rebuilds, set:
 7. Review the harness/bootstrap commit diff.
 8. Start the role sessions, or use the saved launch template / one-click start.
 9. Talk mostly to Project Manager.
-10. Let PM route work to Architect, Coder, Reviewer, and Gate Reviewer when
+10. Let PM route work to Architect, Coder, Tester, and Gate Reviewer when
     enabled.
 11. Review the final result and close the task when finished.
 
@@ -187,7 +187,7 @@ Typical flow:
 Project Manager
   -> Architect
   -> Coder
-  -> Reviewer
+  -> Tester
   -> Architect docs sync
   -> Project Manager final acceptance
 ```
@@ -337,7 +337,7 @@ Gateway can:
 - translate mobile messages when Gateway translation is enabled
 
 Gateway does not expose the embedded terminal and does not send directly to
-Architect, Coder, Reviewer, or Gate Reviewer.
+Architect, Coder, Tester, or Gate Reviewer.
 
 Common commands:
 

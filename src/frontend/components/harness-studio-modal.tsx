@@ -397,7 +397,7 @@ function isVcmRoleAgent(file: HarnessFileStatus): boolean {
   return file.kind === "agent-project-manager"
     || file.kind === "agent-architect"
     || file.kind === "agent-coder"
-    || file.kind === "agent-reviewer"
+    || file.kind === "agent-tester"
     || file.kind === "agent-gate-reviewer";
 }
 

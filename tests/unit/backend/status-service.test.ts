@@ -21,7 +21,7 @@ describe("createStatusService", () => {
           return createArtifactSummary({
             "architecture-plan": "ok",
             "known-issues": "ok",
-            "review-report": "ok",
+            "test-report": "ok",
             "docs-sync-report": "incomplete",
             "final-acceptance": "ok"
           });
@@ -104,19 +104,19 @@ function createArtifactSummary(statuses: Record<ArtifactSummary["checks"][number
       roleCommandPaths: {
         architect: ".ai/vcm/handoffs/role-commands/architect.md",
         coder: ".ai/vcm/handoffs/role-commands/coder.md",
-        reviewer: ".ai/vcm/handoffs/role-commands/reviewer.md"
+        tester: ".ai/vcm/handoffs/role-commands/tester.md"
       },
       messageRoutePaths: {
         "project-manager-architect": ".ai/vcm/handoffs/messages/project-manager-architect.md",
         "project-manager-coder": ".ai/vcm/handoffs/messages/project-manager-coder.md",
-        "project-manager-reviewer": ".ai/vcm/handoffs/messages/project-manager-reviewer.md",
+        "project-manager-tester": ".ai/vcm/handoffs/messages/project-manager-tester.md",
         "architect-project-manager": ".ai/vcm/handoffs/messages/architect-project-manager.md",
         "coder-project-manager": ".ai/vcm/handoffs/messages/coder-project-manager.md",
-        "reviewer-project-manager": ".ai/vcm/handoffs/messages/reviewer-project-manager.md"
+        "tester-project-manager": ".ai/vcm/handoffs/messages/tester-project-manager.md"
       },
       architecturePlanPath: ".ai/vcm/handoffs/architecture-plan.md",
       knownIssuesPath: ".ai/vcm/handoffs/known-issues.md",
-      reviewReportPath: ".ai/vcm/handoffs/review-report.md",
+      testReportPath: ".ai/vcm/handoffs/test-report.md",
       docsSyncReportPath: ".ai/vcm/handoffs/docs-sync-report.md",
       finalAcceptancePath: ".ai/vcm/handoffs/final-acceptance.md"
     },

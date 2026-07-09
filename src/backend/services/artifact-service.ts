@@ -18,7 +18,7 @@ import {
   renderFinalAcceptanceTemplate,
   renderKnownIssuesTemplate,
   renderMessageRouteTemplate,
-  renderReviewReportTemplate
+  renderTestReportTemplate
 } from "../templates/handoff.js";
 import { renderRoleCommandTemplate } from "../templates/role-command.js";
 
@@ -68,7 +68,7 @@ export interface SaveRoleCommandInput extends ReadRoleCommandInput {
 const ARTIFACT_PATH_KEYS: Array<[ArtifactKind, keyof HandoffPaths]> = [
   ["architecture-plan", "architecturePlanPath"],
   ["known-issues", "knownIssuesPath"],
-  ["review-report", "reviewReportPath"],
+  ["test-report", "testReportPath"],
   ["docs-sync-report", "docsSyncReportPath"],
   ["final-acceptance", "finalAcceptancePath"]
 ];
@@ -76,10 +76,10 @@ const ROLE_COMMAND_PLACEHOLDER_PATTERN = /(^|\n)\s*(TBD|status:\s*draft)\s*(\n|$
 const DEFAULT_MESSAGE_ROUTES: Array<[RoleName, RoleName]> = [
   ["project-manager", "architect"],
   ["project-manager", "coder"],
-  ["project-manager", "reviewer"],
+  ["project-manager", "tester"],
   ["architect", "project-manager"],
   ["coder", "project-manager"],
-  ["reviewer", "project-manager"]
+  ["tester", "project-manager"]
 ];
 
 export function createArtifactService(fs: FileSystemAdapter): ArtifactService {
@@ -95,12 +95,12 @@ export function createArtifactService(fs: FileSystemAdapter): ArtifactService {
         roleCommandPaths: {
           architect: path.posix.join(roleCommandsDir, "architect.md"),
           coder: path.posix.join(roleCommandsDir, "coder.md"),
-          reviewer: path.posix.join(roleCommandsDir, "reviewer.md")
+          tester: path.posix.join(roleCommandsDir, "tester.md")
         },
         messageRoutePaths: getDefaultMessageRoutePaths(messagesDir),
         architecturePlanPath: path.posix.join(handoffDir, "architecture-plan.md"),
         knownIssuesPath: path.posix.join(handoffDir, "known-issues.md"),
-        reviewReportPath: path.posix.join(handoffDir, "review-report.md"),
+        testReportPath: path.posix.join(handoffDir, "test-report.md"),
         docsSyncReportPath: path.posix.join(handoffDir, "docs-sync-report.md"),
         finalAcceptancePath: path.posix.join(handoffDir, "final-acceptance.md")
       };
@@ -120,10 +120,10 @@ export function createArtifactService(fs: FileSystemAdapter): ArtifactService {
       const files: Array<[string, string]> = [
         [paths.roleCommandPaths.architect, renderRoleCommandTemplate(input.taskSlug, "architect", input.repoRoot, input.branch)],
         [paths.roleCommandPaths.coder, renderRoleCommandTemplate(input.taskSlug, "coder", input.repoRoot, input.branch)],
-        [paths.roleCommandPaths.reviewer, renderRoleCommandTemplate(input.taskSlug, "reviewer", input.repoRoot, input.branch)],
+        [paths.roleCommandPaths.tester, renderRoleCommandTemplate(input.taskSlug, "tester", input.repoRoot, input.branch)],
         [paths.architecturePlanPath, renderArchitecturePlanTemplate(input.taskSlug)],
         [paths.knownIssuesPath, renderKnownIssuesTemplate(input.taskSlug)],
-        [paths.reviewReportPath, renderReviewReportTemplate(input.taskSlug)],
+        [paths.testReportPath, renderTestReportTemplate(input.taskSlug)],
         [paths.docsSyncReportPath, renderDocsSyncReportTemplate(input.taskSlug)],
         [paths.finalAcceptancePath, renderFinalAcceptanceTemplate(input.taskSlug)],
         ...Object.values(paths.messageRoutePaths).map((messagePath): [string, string] => [

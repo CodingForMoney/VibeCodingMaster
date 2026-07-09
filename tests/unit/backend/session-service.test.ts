@@ -1034,7 +1034,7 @@ describe("createSessionService", () => {
             updatedAt: "2026-05-29T00:00:00.000Z"
           }
         },
-        reviewer: { id: null, status: "not_started" }
+        tester: { id: null, status: "not_started" }
       }
     });
     const runtimeInputs: CreateTerminalSessionInput[] = [];
@@ -1241,11 +1241,11 @@ function createTestSessionService(
           roleCommandPaths: {
             architect: ".ai/vcm/handoffs/role-commands/architect.md",
             coder: ".ai/vcm/handoffs/role-commands/coder.md",
-            reviewer: ".ai/vcm/handoffs/role-commands/reviewer.md"
+            tester: ".ai/vcm/handoffs/role-commands/tester.md"
           },
           architecturePlanPath: ".ai/vcm/handoffs/architecture-plan.md",
           knownIssuesPath: ".ai/vcm/handoffs/known-issues.md",
-          reviewReportPath: ".ai/vcm/handoffs/review-report.md",
+          testReportPath: ".ai/vcm/handoffs/test-report.md",
           docsSyncReportPath: ".ai/vcm/handoffs/docs-sync-report.md",
           finalAcceptancePath: ".ai/vcm/handoffs/final-acceptance.md"
         };
@@ -1256,7 +1256,7 @@ function createTestSessionService(
         return {
           version: 1,
           repoRoot: "/repo",
-          defaultRoles: ["project-manager", "architect", "coder", "reviewer"],
+          defaultRoles: ["project-manager", "architect", "coder", "tester"],
           handoffRoot: ".ai/vcm/handoffs",
           stateRoot: ".ai/vcm",
           terminalBackend: "node-pty",

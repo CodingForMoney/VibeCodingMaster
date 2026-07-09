@@ -9,7 +9,7 @@ Project-specific rules may be added here when they make the baseline more precis
 
 - Coder and Coder Worker implementation.
 - Architect Debug Mode when it edits production code or tests.
-- Reviewer checks of implementation quality and test integrity.
+- Tester checks of implementation quality and test integrity.
 
 ## Implementation Discipline
 

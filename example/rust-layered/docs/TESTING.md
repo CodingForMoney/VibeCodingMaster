@@ -1,11 +1,11 @@
 # Testing
 
 Status: draft
-Owner: reviewer
+Owner: tester
 
 ## Purpose
 
-`docs/TESTING.md` is the durable testing source of truth for this Rust workspace. Reviewer owns validation strategy, validation commands, validation levels, integration/E2E case definitions, final-validation cleanup, and known testing gaps.
+`docs/TESTING.md` is the durable testing source of truth for this Rust workspace. Tester owns validation strategy, validation commands, validation levels, integration/E2E case definitions, final-validation cleanup, and known testing gaps.
 
 ## Validation Levels
 
@@ -37,9 +37,9 @@ Choose the smallest command that gives the needed confidence for the role and ta
 
 - Unit tests live colocated with source under `src/` using `#[cfg(test)] mod tests`.
 - Coder may add or update colocated unit tests while implementing code and should run affected crate unit tests with `cargo test -p <crate> --lib`.
-- Reviewer reviews unit test adequacy and may add, remove, or adjust unit test cases.
+- Tester reviews unit test adequacy and may add, remove, or adjust unit test cases.
 - Integration tests live under each crate's `tests/` directory and exercise public crate behavior.
-- Reviewer owns integration test design and maintenance.
+- Tester owns integration test design and maintenance.
 - This project does not use `test-map.json`; changed files map to crates through `.ai/generated/module-index.json`.
 
 ## Integration Test Cases
@@ -56,7 +56,7 @@ Choose the smallest command that gives the needed confidence for the role and ta
 
 ## Final Validation Cleanup
 
-- Before reviewer final validation, remove stale build/test artifacts when the project has such caches.
+- Before tester final validation, remove stale build/test artifacts when the project has such caches.
 - This example has no special cache cleanup beyond using fresh Rust commands in the current worktree.
 - Do not use results from before cleanup as final acceptance evidence when cache cleanup is required.
 

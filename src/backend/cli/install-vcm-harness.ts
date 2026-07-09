@@ -21,7 +21,7 @@ import { renderProjectCodingStandardsTemplate } from "../templates/harness/proje
 import { renderProjectGlossaryTemplate } from "../templates/harness/project-glossary.js";
 import { renderProjectManagerHarnessRules } from "../templates/harness/project-manager-agent.js";
 import { renderPullRequestTemplateHarnessRules } from "../templates/harness/pull-request-template.js";
-import { renderReviewerHarnessRules } from "../templates/harness/reviewer-agent.js";
+import { renderTesterHarnessRules } from "../templates/harness/tester-agent.js";
 import { renderVcmFinalAcceptanceSkillRules } from "../templates/harness/vcm-final-acceptance-skill.js";
 import { renderVcmHarnessBootstrapSkillRules } from "../templates/harness/vcm-harness-bootstrap-skill.js";
 import { renderVcmLongRunningValidationSkillRules } from "../templates/harness/vcm-long-running-validation-skill.js";
@@ -67,8 +67,8 @@ const AGENT_FRONTMATTER = {
     description: "VCM implementation role for scoped code changes and focused tests.",
     tools: "Read, Grep, Glob, Bash, Edit, Write, Agent"
   },
-  reviewer: {
-    description: "VCM independent review role for acceptance, test adequacy, scope checks, and risk findings."
+  tester: {
+    description: "VCM testing role for validation, test adequacy, scope checks, and risk findings."
   },
   "gate-reviewer": {
     description: "VCM independent gate review role for architecture plans, validation adequacy, and final diffs."
@@ -127,12 +127,12 @@ const MANAGED_FILES = [
     content: renderCoderHarnessRules()
   },
   {
-    path: ".claude/agents/reviewer.md",
-    title: "Reviewer Agent",
-    agentName: "reviewer",
+    path: ".claude/agents/tester.md",
+    title: "Tester Agent",
+    agentName: "tester",
     commentStyle: "html",
     category: "core-agent",
-    content: renderReviewerHarnessRules()
+    content: renderTesterHarnessRules()
   },
   {
     path: ".github/pull_request_template.md",

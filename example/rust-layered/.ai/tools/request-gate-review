@@ -24,18 +24,18 @@ SOURCE_ARTIFACTS = {
     "architecture-plan": [".ai/vcm/handoffs/architecture-plan.md"],
     "validation-adequacy": [
         ".ai/vcm/handoffs/architecture-plan.md",
-        ".ai/vcm/handoffs/review-report.md",
+        ".ai/vcm/handoffs/test-report.md",
     ],
     "final-diff": [
         ".ai/vcm/handoffs/architecture-plan.md",
-        ".ai/vcm/handoffs/review-report.md",
+        ".ai/vcm/handoffs/test-report.md",
         ".ai/vcm/handoffs/docs-sync-report.md",
         ".ai/vcm/handoffs/final-acceptance.md",
     ],
 }
 CORE_INPUT_ARTIFACTS = {
     "architecture-plan": ".ai/vcm/handoffs/architecture-plan.md",
-    "validation-adequacy": ".ai/vcm/handoffs/review-report.md",
+    "validation-adequacy": ".ai/vcm/handoffs/test-report.md",
 }
 
 

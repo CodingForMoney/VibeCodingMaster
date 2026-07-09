@@ -244,9 +244,9 @@ function buildCoderWorkerBlockReason(tasks: ActiveCoderWorkerTask[]): string {
   const reports = tasks
     .map((task) => task.reportPath)
     .filter((reportPath): reportPath is string => Boolean(reportPath));
-  const reportHint = reports.length > 0 ? ` Review report(s): ${reports.join(", ")}.` : "";
+  const reportHint = reports.length > 0 ? ` Test report(s): ${reports.join(", ")}.` : "";
   return `VCM: coder worker task ${listing} is still unhandled. Do not end the Coder turn while worker tasks are unhandled. `
-    + `Wait for worker subagents, review reports and commits, resolve failed or incomplete workers, set \`handled: true\` in each worker state, and continue.${reportHint}`;
+    + `Wait for worker subagents, test reports and commits, resolve failed or incomplete workers, set \`handled: true\` in each worker state, and continue.${reportHint}`;
 }
 
 function latestMtime(...values: Array<number | undefined>): number | undefined {

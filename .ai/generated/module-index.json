@@ -93,7 +93,7 @@
               "src/backend/templates/harness/harness-engineer-agent.ts",
               "src/backend/templates/harness/project-manager-agent.ts",
               "src/backend/templates/harness/pull-request-template.ts",
-              "src/backend/templates/harness/reviewer-agent.ts",
+              "src/backend/templates/harness/tester-agent.ts",
               "src/backend/templates/harness/vcm-final-acceptance-skill.ts",
               "src/backend/templates/harness/vcm-harness-bootstrap-skill.ts",
               "src/backend/templates/harness/vcm-long-running-validation-skill.ts",

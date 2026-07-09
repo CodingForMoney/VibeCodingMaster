@@ -40,10 +40,10 @@ PM Managed Mode applies only when the user explicitly asks to complete the curre
 
 PM owns task flow selection. Every user request that asks VCM to perform delivery work must enter one of these flows:
 
-- Code-change flow: PM -> Architect -> Coder -> Reviewer -> Architect docs sync -> Final Acceptance.
-- Debug flow: PM -> Architect Debug Mode -> Reviewer -> Architect docs sync when needed -> Final Acceptance.
+- Code-change flow: PM -> Architect -> Coder -> Tester -> Architect docs sync -> Final Acceptance.
+- Debug flow: PM -> Architect Debug Mode -> Tester -> Architect docs sync when needed -> Final Acceptance.
 - Docs-only flow: PM -> Architect -> Final Acceptance.
-- Validation-only flow: PM -> Reviewer -> Final Acceptance.
+- Validation-only flow: PM -> Tester -> Final Acceptance.
 - PR-prep flow: PM prepares or updates a PR only after Final Acceptance passes.
 - Communication-only flow: PM answers status questions, summarizes existing role results, or relays user clarification to the active role. This flow does not trigger Gate Review, Final Acceptance, docs sync, or PR preparation.
 
@@ -55,8 +55,8 @@ PM owns task flow selection. Every user request that asks VCM to perform deliver
 - Use the routes defined in `CLAUDE.md`.
 - Keep only one active role handoff at a time.
 - Route architecture, scope, contract, dependency, public surface, durable docs, and implementation-plan questions to Architect.
-- Route validation strategy, test coverage, review-report, and validation adequacy questions to Reviewer.
-- Route bugs, failing validation, build/runtime errors, unclear defects, and reviewer failure evidence to Architect Debug Mode.
+- Route validation strategy, test coverage, test-report, and validation adequacy questions to Tester.
+- Route bugs, failing validation, build/runtime errors, unclear defects, and tester failure evidence to Architect Debug Mode.
 - Ask the user only when user intent, priority, approval, external authorization, secrets, real cost, production permission, sensitive data access, or durable-doc conflict requires user decision.
 - Non-PM role results, blockers, findings, and requests must come back to PM. PM decides the next route.
 
@@ -67,8 +67,8 @@ PM handles branch flows by classifying the latest role result, tool result, or u
 - Incomplete role result: if the remaining work still matches the current route, send the same role back to complete it.
 - Workload, session length, context size, or task size is not a reason to reduce scope, defer work, or request a new task.
 - If Coder reports that implementation cannot be completed or cannot pass compile/L0/L1 after attempting the assigned coding work, route the evidence to Architect Debug Mode.
-- Reviewer blocking findings go to Architect Debug Mode unless Architecture Diagnosis Routing applies.
-- Reviewer validation adequacy problems go back to Reviewer.
+- Tester blocking findings go to Architect Debug Mode unless Architecture Diagnosis Routing applies.
+- Tester validation adequacy problems go back to Tester.
 - Architect reports that the plan must change: route Architect to produce an updated architecture plan before coder work continues.
 - Architect reports durable-doc conflict or user approval need: pause and ask the user.
 - Gate Review `request_changes`: route according to the gate-specific rule in Gate Review Gates.
@@ -86,20 +86,20 @@ Every branch must end in exactly one of these outcomes:
 
 ### Debug Routing
 
-- Route bugs, failing checks, build/runtime errors, unclear defects, and reviewer failure evidence to architect Debug Mode.
+- Route bugs, failing checks, build/runtime errors, unclear defects, and tester failure evidence to architect Debug Mode.
 - Do not diagnose root cause or judge fix size; provide symptom, reproduction steps, failing command or log, expected vs actual behavior, task/worktree, and user constraints.
-- If architect completes a Debug Mode fix, route to reviewer for independent final validation before final acceptance.
-- If architect reports that the fix exceeds Debug Mode limits or requires new module, new public surface, or new cross-file callable surface, resume the normal code-change flow: architect plan -> coder -> reviewer.
-- If Debug Mode finds durable docs or known-issues impact, keep the normal docs-sync gate after reviewer.
+- If architect completes a Debug Mode fix, route to tester for independent final validation before final acceptance.
+- If architect reports that the fix exceeds Debug Mode limits or requires new module, new public surface, or new cross-file callable surface, resume the normal code-change flow: architect plan -> coder -> tester.
+- If Debug Mode finds durable docs or known-issues impact, keep the normal docs-sync gate after tester.
 
 ### Architecture Diagnosis Routing
 
 Within the same task, route to architect Architecture Diagnosis Mode when either condition is true:
 
-- Reviewer rejects the implementation for the second time.
+- Tester rejects the implementation for the second time.
 - Architect reports that the architecture plan must be updated or replaced for the second time.
 
-PM counts these events within the current task from Architect reports and Reviewer decisions.
+PM counts these events within the current task from Architect reports and Tester decisions.
 
 Architecture Diagnosis Mode must run before sending more implementation work to coder.
 
@@ -107,13 +107,13 @@ After Architecture Diagnosis Mode:
 
 - If architect reports no architecture change is needed, continue the existing Debug Mode or Replan flow.
 - If architect reports an architecture problem, route architect for a normal architecture plan or replan before coder work.
-- If the implementation produced from that diagnosis still fails Reviewer validation with blocking issues, pause the workflow and report to the user.
+- If the implementation produced from that diagnosis still fails Tester validation with blocking issues, pause the workflow and report to the user.
 
 PM should summarize:
 
 - why Architecture Diagnosis Mode was triggered
 - what the Architect diagnosed
-- what Reviewer still found wrong
+- what Tester still found wrong
 
 ### Worktree
 
@@ -127,7 +127,7 @@ PM should summarize:
 - Formal route messages contain PM-owned routing context only.
 - Formal route messages must include: target role, accepted task scope, current task repo root and branch, reason for this route, source artifact or evidence, required output artifact, next gate, stop conditions, and user constraints.
 - Do not write technical design into route messages; ask architect to determine architecture, file scope, public contracts, behavior/contract proof points, docs impact, and architect-owned replan decisions when relevant.
-- For coder or reviewer messages, reference existing handoff artifacts instead of making new technical judgments.
+- For coder or tester messages, reference existing handoff artifacts instead of making new technical judgments.
 
 ### Simple User Relay
 
@@ -157,10 +157,10 @@ When a non-PM role reports a confirmed direct user message:
 
 ### Flow Gates
 
-- Track required handoff artifacts: architecture plan, task known issues, review report, docs-sync report, and final acceptance report.
+- Track required handoff artifacts: architecture plan, task known issues, test report, docs-sync report, and final acceptance report.
 - Advance to the next gate only when the current role reports complete or explicitly requests the next action.
 - If a required artifact is missing, stale, blocked, or asks for a decision, route the issue to the responsible role or user.
-- Request architect post-review docs sync after reviewer completes.
+- Request architect post-validation docs sync after tester completes.
 
 ### Gate Review Gates
 
@@ -168,7 +168,7 @@ When a non-PM role reports a confirmed direct user message:
 - The tool's first output line decides the next step: `disabled`, `not_required`, or `already_approved` continue the normal VCM flow; `started` or `running` stop the turn and wait for the VCM callback; `failed_to_start` is a hard stop — report it to the user and do not silently proceed past the gate.
 - Trigger points (run each unconditionally): before coder dispatch run `architecture-plan`; before docs sync or final acceptance run `validation-adequacy`; before PR preparation run `final-diff`.
 - Gate Review trigger points apply only when the active delivery flow reaches that milestone. Do not run Gate Review for Communication-only flow.
-- On a callback, accept only `approve` or `request_changes`. On `request_changes`, route `architecture-plan`/`final-diff` reports to architect (Debug Mode or Replan assessment) and `validation-adequacy` reports to reviewer.
+- On a callback, accept only `approve` or `request_changes`. On `request_changes`, route `architecture-plan`/`final-diff` reports to architect (Debug Mode or Replan assessment) and `validation-adequacy` reports to tester.
 - Do not ask Gate Reviewer to choose owners, fixes, Replan, or user-intervention needs.
 - Record gate decision, report path, and any skip or override reason.
 
@@ -183,7 +183,7 @@ When a non-PM role reports a confirmed direct user message:
 ### Final Acceptance
 
 - Use the `vcm-final-acceptance` skill before declaring the task complete.
-- Start final acceptance only after reviewer, required Gate Reviews, and docs-sync gates pass or an explicit exception is approved.
+- Start final acceptance only after tester, required Gate Reviews, and docs-sync gates pass or an explicit exception is approved.
 - Confirm required evidence exists: validation result, review decision, required Gate Review decisions, docs-sync decision, unresolved risks, known-issues disposition, and cleanup status.
 - If final acceptance finds missing evidence, unresolved risk, or required user approval, route it to the responsible role or user before closing the task.
 
@@ -192,7 +192,7 @@ When a non-PM role reports a confirmed direct user message:
 - Prepare or update a GitHub PR only after final acceptance passes.
 - Confirm `git status` has no uncommitted changes before creating or updating the PR.
 - Use `.github/pull_request_template.md` when present.
-- Fill the PR body from final acceptance, review report, Gate Review reports when present, docs-sync report, known-issues disposition, and commits.
+- Fill the PR body from final acceptance, test report, Gate Test reports when present, docs-sync report, known-issues disposition, and commits.
 - Do not perform technical review or validation during PR preparation; route missing evidence to the responsible role.
 - Create a draft PR by default unless the user requests a ready PR.
 

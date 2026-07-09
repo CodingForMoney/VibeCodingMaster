@@ -1792,26 +1792,26 @@ describe("translation-service", () => {
       role: "coder",
       claudeSessionId: "claude-coder"
     });
-    const reviewerSession = createRoleSessionRecord({
-      id: "session-reviewer",
-      role: "reviewer",
-      claudeSessionId: "claude-reviewer"
+    const testerSession = createRoleSessionRecord({
+      id: "session-tester",
+      role: "tester",
+      claudeSessionId: "claude-tester"
     });
     const transcripts = createSessionTranscriptStub();
     const translator = createSelectiveDeferredTranslationWorkerServiceStub("Coder output is slow.");
     const service = createTranslationService({
       appSettings,
       translationWorkerService: translator,
-      runtime: createRuntimeStub([coderSession, reviewerSession]),
-      sessionRegistry: createRegistryStub([coderSession, reviewerSession]),
+      runtime: createRuntimeStub([coderSession, testerSession]),
+      sessionRegistry: createRegistryStub([coderSession, testerSession]),
       transcripts,
       sessionService: {} as SessionService
     });
 
     const coderMessages: TranslationWsMessage[] = [];
-    const reviewerMessages: TranslationWsMessage[] = [];
+    const testerMessages: TranslationWsMessage[] = [];
     service.subscribeToSession("session-coder", (message) => coderMessages.push(message));
-    service.subscribeToSession("session-reviewer", (message) => reviewerMessages.push(message));
+    service.subscribeToSession("session-tester", (message) => testerMessages.push(message));
 
     transcripts.emit("session-coder", {
       kind: "text",
@@ -1826,17 +1826,17 @@ describe("translation-service", () => {
       && message.entry.status === "translating"
     ));
 
-    transcripts.emit("session-reviewer", {
+    transcripts.emit("session-tester", {
       kind: "text",
-      id: "reviewer-fast",
+      id: "tester-fast",
       timestamp: "2026-05-30T00:00:01.000Z",
       stopReason: "end_turn",
-      text: "Reviewer output should not wait."
+      text: "Tester output should not wait."
     });
 
-    await waitFor(() => reviewerMessages.some((message) =>
+    await waitFor(() => testerMessages.some((message) =>
       message.type === "translation-entry"
-      && message.entry.id === "reviewer-fast"
+      && message.entry.id === "tester-fast"
       && message.entry.status === "translated"
     ));
     expect(coderMessages.some((message) =>
@@ -1902,7 +1902,7 @@ describe("translation-service", () => {
       agent: {
         description: "Review changes",
         prompt: "Check the patch carefully.",
-        subagent_type: "reviewer"
+        subagent_type: "tester"
       }
     });
 
@@ -2352,7 +2352,7 @@ function createProjectServiceStub() {
       return {
         version: 1,
         repoRoot,
-        defaultRoles: ["project-manager", "architect", "coder", "reviewer"],
+        defaultRoles: ["project-manager", "architect", "coder", "tester"],
         handoffRoot: ".ai/vcm/handoffs",
         stateRoot: ".ai/vcm",
         terminalBackend: "node-pty",

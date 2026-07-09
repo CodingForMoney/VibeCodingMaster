@@ -8,7 +8,7 @@ export function renderPullRequestTemplateHarnessRules(): string {
 
 ## Review
 
-- Reviewer decision:
+- Tester decision:
 - Final acceptance:
 
 ## Docs
@@ -21,7 +21,7 @@ export function renderPullRequestTemplateHarnessRules(): string {
 ## Checklist
 
 - [ ] Final acceptance completed.
-- [ ] Reviewer validation completed.
+- [ ] Tester validation completed.
 - [ ] Durable docs updated or confirmed unchanged.
 - [ ] Known issues resolved or recorded.
 - [ ] No uncommitted changes remain.

@@ -83,11 +83,11 @@ const SOURCE_ARTIFACTS: Record<GateReviewGate, string[]> = {
   ],
   "validation-adequacy": [
     ".ai/vcm/handoffs/architecture-plan.md",
-    ".ai/vcm/handoffs/review-report.md"
+    ".ai/vcm/handoffs/test-report.md"
   ],
   "final-diff": [
     ".ai/vcm/handoffs/architecture-plan.md",
-    ".ai/vcm/handoffs/review-report.md",
+    ".ai/vcm/handoffs/test-report.md",
     ".ai/vcm/handoffs/docs-sync-report.md",
     ".ai/vcm/handoffs/final-acceptance.md"
   ]
@@ -95,7 +95,7 @@ const SOURCE_ARTIFACTS: Record<GateReviewGate, string[]> = {
 
 const CORE_INPUT_ARTIFACTS: Partial<Record<GateReviewGate, string>> = {
   "architecture-plan": ".ai/vcm/handoffs/architecture-plan.md",
-  "validation-adequacy": ".ai/vcm/handoffs/review-report.md"
+  "validation-adequacy": ".ai/vcm/handoffs/test-report.md"
 };
 
 const VALID_SEVERITIES = new Set<GateReviewSeverity>(["critical", "high", "medium", "low"]);
@@ -769,7 +769,7 @@ async function waitForGateReport(
 
   const detail = errorMessage(lastError);
   throw new VcmError({
-    code: "GATE_REVIEW_REPORT_TIMEOUT",
+    code: "GATE_TEST_REPORT_TIMEOUT",
     message: `Gate Reviewer did not produce a valid ${gate} report within ${Math.round(options.timeoutMs / 1000)}s.`,
     statusCode: 504,
     hint: detail
@@ -787,8 +787,8 @@ async function parseGateReport(
   const absolutePath = resolveRepoPath(taskRepoRoot, reportPath);
   if (!(await fs.pathExists(absolutePath))) {
     throw new VcmError({
-      code: "GATE_REVIEW_REPORT_MISSING",
-      message: `Gate review report was not written: ${reportPath}`,
+      code: "GATE_TEST_REPORT_MISSING",
+      message: `Gate test report was not written: ${reportPath}`,
       statusCode: 500
     });
   }
@@ -797,8 +797,8 @@ async function parseGateReport(
   const parsedGate = matchField(content, "Gate");
   if (parsedGate && parsedGate !== gate) {
     throw new VcmError({
-      code: "GATE_REVIEW_REPORT_GATE_MISMATCH",
-      message: `Gate review report gate is ${parsedGate}, expected ${gate}.`,
+      code: "GATE_TEST_REPORT_GATE_MISMATCH",
+      message: `Gate test report gate is ${parsedGate}, expected ${gate}.`,
       statusCode: 500
     });
   }
@@ -806,8 +806,8 @@ async function parseGateReport(
   const parsedRequest = matchField(content, "Request");
   if (requestId && parsedRequest !== requestId) {
     throw new VcmError({
-      code: "GATE_REVIEW_REPORT_STALE",
-      message: `Gate review report request is ${parsedRequest ?? "missing"}, expected ${requestId}.`,
+      code: "GATE_TEST_REPORT_STALE",
+      message: `Gate test report request is ${parsedRequest ?? "missing"}, expected ${requestId}.`,
       statusCode: 500
     });
   }
@@ -816,7 +816,7 @@ async function parseGateReport(
   if (!decision) {
     throw new VcmError({
       code: "GATE_REVIEW_DECISION_MISSING",
-      message: `Gate review report must contain Decision: approve or Decision: request_changes.`,
+      message: `Gate test report must contain Decision: approve or Decision: request_changes.`,
       statusCode: 500
     });
   }
@@ -1019,9 +1019,9 @@ function errorMessage(error: unknown): string {
 function isPendingReportError(error: unknown): boolean {
   return error instanceof VcmError && [
     "GATE_REVIEW_DECISION_MISSING",
-    "GATE_REVIEW_REPORT_GATE_MISMATCH",
-    "GATE_REVIEW_REPORT_MISSING",
-    "GATE_REVIEW_REPORT_STALE"
+    "GATE_TEST_REPORT_GATE_MISMATCH",
+    "GATE_TEST_REPORT_MISSING",
+    "GATE_TEST_REPORT_STALE"
   ].includes(error.code);
 }
 

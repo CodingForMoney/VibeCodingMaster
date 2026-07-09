@@ -1,6 +1,6 @@
 # Testing
 
-Reviewer-owned validation strategy for VibeCodingMaster (VCM). This document maps
+Tester-owned validation strategy for VibeCodingMaster (VCM). This document maps
 the VCM validation levels to project-native commands, where tests live, how to
 select what to run, and the current testing gaps.
 
@@ -62,7 +62,7 @@ process; the job guard denies it. Honor the 60-minute per-job ceiling.
 ## Release Gate (L4)
 
 Run this gate for any version release before `npm publish`. The release is
-architect-owned (see root `CLAUDE.md` "Release Process"); the reviewer runs the
+architect-owned (see root `CLAUDE.md` "Release Process"); the tester runs the
 gate and reports results.
 
 1. `npm run typecheck`

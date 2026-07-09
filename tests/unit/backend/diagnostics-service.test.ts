@@ -31,7 +31,7 @@ describe("createDiagnosticsService", () => {
             {
               id: "exited",
               taskSlug: "demo",
-              role: "reviewer",
+              role: "tester",
               status: "exited",
               startedAt: "2026-06-17T00:00:00.000Z"
             }

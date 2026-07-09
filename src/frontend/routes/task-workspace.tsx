@@ -28,7 +28,7 @@ const DEFAULT_PERMISSION_MODES: Record<RoleName, ClaudePermissionMode> = {
   "project-manager": "bypassPermissions",
   architect: "bypassPermissions",
   coder: "bypassPermissions",
-  reviewer: "bypassPermissions",
+  tester: "bypassPermissions",
   "gate-reviewer": "bypassPermissions",
   translator: "bypassPermissions",
   "harness-engineer": "bypassPermissions"
@@ -38,7 +38,7 @@ const DEFAULT_MODELS: Record<RoleName, SessionModel> = {
   "project-manager": "default",
   architect: "default",
   coder: "default",
-  reviewer: "default",
+  tester: "default",
   "gate-reviewer": "default",
   translator: "default",
   "harness-engineer": "default"
@@ -48,7 +48,7 @@ const DEFAULT_EFFORTS: Record<RoleName, SessionEffort> = {
   "project-manager": "default",
   architect: "default",
   coder: "default",
-  reviewer: "default",
+  tester: "default",
   "gate-reviewer": "default",
   translator: "medium",
   "harness-engineer": "medium"

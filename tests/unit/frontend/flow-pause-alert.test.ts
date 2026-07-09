@@ -72,10 +72,10 @@ describe("selectFlowPauseAlertMessage", () => {
   it("falls back to the stopped wording when reason is role-recovery-failed but recovery is absent", () => {
     const state: VcmSessionRoundState = {
       ...BASE,
-      activeRole: "reviewer",
-      flowPause: { paused: true, reason: "role-recovery-failed", role: "reviewer" }
+      activeRole: "tester",
+      flowPause: { paused: true, reason: "role-recovery-failed", role: "tester" }
     };
-    expect(selectFlowPauseAlertMessage(state, vi.fn())).toBe("No new turn started after reviewer stopped.");
+    expect(selectFlowPauseAlertMessage(state, vi.fn())).toBe("No new turn started after tester stopped.");
   });
 
   it("surfaces awaiting-user through the modal wording (await-user banner removed)", () => {

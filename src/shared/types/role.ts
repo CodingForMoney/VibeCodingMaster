@@ -2,7 +2,7 @@ export type CoreVcmRoleName =
   | "project-manager"
   | "architect"
   | "coder"
-  | "reviewer";
+  | "tester";
 
 export type GateReviewerRoleName = "gate-reviewer";
 export type VcmRoleName = CoreVcmRoleName | GateReviewerRoleName;
@@ -15,7 +15,7 @@ export type RoleName = VcmRoleName | ToolRoleName;
 export type DispatchableRole =
   | "architect"
   | "coder"
-  | "reviewer";
+  | "tester";
 
 export type RoleStatus =
   | "not_started"

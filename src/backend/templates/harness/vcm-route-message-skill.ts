@@ -13,10 +13,10 @@ Allowed routes:
 
 - \`project-manager -> architect\`
 - \`project-manager -> coder\`
-- \`project-manager -> reviewer\`
+- \`project-manager -> tester\`
 - \`architect -> project-manager\`
 - \`coder -> project-manager\`
-- \`reviewer -> project-manager\`
+- \`tester -> project-manager\`
 
 Non-PM roles must not route directly to each other. Report questions, blockers, results, findings, or validation evidence back to project-manager. PM decides the next role route.
 

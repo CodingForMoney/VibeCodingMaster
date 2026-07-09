@@ -170,7 +170,7 @@ Role-specific behavior lives in `.claude/agents/`.
 - Project manager: user communication, task clarification, role routing, handoff verification, final acceptance.
 - Architect: architecture plan, module boundaries, file responsibilities, public contracts, test contracts, implementation order, architecture drift checks.
 - Coder: implementation and direct tests within an approved plan.
-- Reviewer: independent review, validation adequacy, test gaps, docs gaps, acceptance findings.
+- Tester: independent validation, validation adequacy, test gaps, docs gaps, acceptance findings.
 
 Do not use an untagged general session as the implicit owner for non-trivial work.
 
@@ -252,7 +252,7 @@ project manager
   -> architect writes complete accepted-scope plan
   -> optional independent gate review of plan
   -> coder implements approved scope
-  -> reviewer checks validation adequacy and adds/requests missing tests
+  -> tester checks validation adequacy and adds/requests missing tests
   -> architect checks architecture/docs drift when needed
   -> optional independent gate review of final diff
   -> project manager final acceptance
@@ -295,7 +295,7 @@ Core roles:
 - project manager
 - architect
 - coder
-- reviewer
+- tester
 
 Optional quality role:
 
@@ -332,7 +332,7 @@ architecture gate:
   purpose: find missing boundaries, public-interface impacts, dependency impacts, data-flow risks, and plan-level design defects
 
 validation adequacy gate:
-  input: review report and validation evidence
+  input: test report and validation evidence
   purpose: judge whether tests and validation cover important paths, especially integration and E2E behavior
 
 final diff gate:
@@ -403,7 +403,7 @@ L3 E2E / smoke:
   critical user paths, release-level confidence, browser or system-level paths
 ```
 
-Reviewer responsibility is not just confirming that tests ran. Reviewer must judge whether the tests prove the behavior that matters.
+Tester responsibility is not just confirming that tests ran. Tester must judge whether the tests prove the behavior that matters.
 
 Test quality rules:
 
@@ -464,7 +464,7 @@ one task
   -> one PR or merge path
 ```
 
-Do not split worktrees by role. Architect, coder, reviewer, and optional gate reviewer should normally work in the same task worktree sequentially.
+Do not split worktrees by role. Architect, coder, tester, and optional gate reviewer should normally work in the same task worktree sequentially.
 
 Role isolation is enforced by role definitions, permissions, hooks, handoff artifacts, and review. Worktree isolation is enforced at the task boundary.
 
@@ -649,7 +649,7 @@ Too much at once
 One do-everything session
   -> explicit role sessions + file handoffs
 
-Project manager becomes coder/reviewer
+Project manager becomes coder/tester
   -> project manager coordinates and verifies; role sessions execute
 
 Role-based worktree fragmentation
@@ -662,7 +662,7 @@ Permanent scaffolding for old model limits
   -> harness retrospective + remove stale constraints
 
 Coder session self-reviews
-  -> reviewer role session or fresh independent review
+  -> tester role session or fresh independent review
 
 Unbounded multi-agent parallelism
   -> split tasks, ownership, or read/write separation

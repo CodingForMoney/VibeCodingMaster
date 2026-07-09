@@ -12,7 +12,7 @@ Use this skill at every project-manager Gate Review trigger point and whenever V
 ## Trigger Points
 
 - `architecture-plan`: after architect writes `.ai/vcm/handoffs/architecture-plan.md`, before coder dispatch.
-- `validation-adequacy`: after reviewer writes `.ai/vcm/handoffs/review-report.md`, before docs sync or final acceptance.
+- `validation-adequacy`: after tester writes `.ai/vcm/handoffs/test-report.md`, before docs sync or final acceptance.
 - `final-diff`: after final acceptance evidence is ready, before PR preparation.
 
 ## Request
