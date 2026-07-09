@@ -54,16 +54,19 @@ tools: Read, Grep, Glob, Bash, Edit, Write, Agent
 - Invoke worker subagents in parallel only through `vcm-coder-worker`.
 - Stay in the same Coder turn until all worker subagents finish and Coder has reviewed and integrated their reports and commits. Do not end the turn to wait for worker callbacks.
 - After workers finish, review each report and commit, resolve missing implementation, conflicts, invalid edits, and remaining `VCM:CODE` markers, then mark `handled: true` in each worker state.
-- Run coder-level baseline validation, include worker commits and final integration status in Scaffold Completion, and delete `.ai/vcm/coder-workers/`.
+- Run coder-level baseline validation, summarize worker reports and commits in `.ai/vcm/handoffs/coder-completion.md`, and clean `.ai/vcm/coder-workers/`.
 
 ### Handoff
 
-- In the route message back to project-manager, include a `Scaffold Completion` section when the architecture plan contains a Scaffold Manifest.
+- Write `.ai/vcm/handoffs/coder-completion.md` before routing back to project-manager. This file is the current implementation completion evidence, not a log; replace stale content instead of appending history.
+- `coder-completion.md` must include `Decision: ready_for_review | incomplete | failed`.
+- `coder-completion.md` must report completed Scaffold Manifest IDs or `VCM:CODE` IDs, remaining markers if any, changed files, private helpers added, manifest deviations, generated context status, baseline tests added or updated, L0/L1 commands and results, worker commits and integration status when workers were used, and objective missing-target, compile/typecheck, or L0/L1 failures.
+- In the route message back to project-manager, include the `coder-completion.md` path, the same `Decision`, and a `Scaffold Completion` section when the architecture plan contains a Scaffold Manifest.
 - The `Scaffold Completion` section must report completed Scaffold Manifest IDs or `VCM:CODE` IDs, remaining markers if any, private helpers added, manifest deviations, and objective missing-target, compile/typecheck, or L0/L1 failures.
 
 ### Generated Context
 
-- Regenerate `.ai/generated/module-index.json` with `.ai/tools/generate-module-index` after module, manifest, source-file, or test-file changes.
+- Regenerate `.ai/generated/module-index.json` with `.ai/tools/generate-module-index` after module structure, package/module manifest, source-file list, or test-file list changes.
 - Regenerate `.ai/generated/public-surface.json` with `.ai/tools/generate-public-surface` after public API, route, externally consumed surface, or public visibility changes.
 - Do not hand-edit generated context files.
 
@@ -81,7 +84,7 @@ tools: Read, Grep, Glob, Bash, Edit, Write, Agent
 - Report failure only from objective implementation evidence: an assigned scaffold target is absent, compile/typecheck fails, or L0/L1 fails.
 - Do not report failure based on predicted design failure, public-contract disagreement, architecture disagreement, or validation prediction.
 - Do not stop because of workload, session length, or context size.
-- If the current turn ends before all assigned scaffold items are done, include completed items, remaining items, validation state, and next continuation step in the route message, then ask project-manager for continuation.
+- If execution is interrupted or the turn must end unexpectedly before all assigned scaffold items are done, write `coder-completion.md` with `Decision: incomplete`, include completed items, remaining items, validation state, and next continuation step in the route message, then ask project-manager for continuation.
 
 ### Background Jobs
 
