@@ -29,6 +29,16 @@ export function renderArchitectHarnessRules(): string {
 #### Plan Document
 
 - \`architecture-plan.md\` must use these sections: Accepted Scope, Current Code Reality, Architecture Decision, Module/File Plan, Public Surface Impact, Scaffold Manifest, Docs Impact, Known Risks, and Coder Handoff Notes.
+- \`architecture-plan.md\` is the current executable plan, not a changelog. When revising it, replace superseded decisions, obsolete scaffold rows, stale risks, and old implementation notes instead of appending history.
+- \`Accepted Scope\`: state the PM-routed task scope, required user-visible outcome, and any explicit non-scope that prevents accidental expansion.
+- \`Current Code Reality\`: state the existing files, runtime entry points, callers, tests, docs, and constraints verified from the current codebase.
+- \`Architecture Decision\`: state the selected design, ownership, data flow, lifecycle, boundaries, and why it fits the current architecture.
+- \`Module/File Plan\`: list each changed or created module/file, its responsibility, expected change, dependency direction, and any non-private callable surfaces.
+- \`Public Surface Impact\`: state changed APIs, routes, commands, events, exports, storage formats, configuration, UI behavior, or explicitly state none.
+- \`Scaffold Manifest\`: provide one stable row per implementation unit or file context that coder must complete.
+- \`Docs Impact\`: state durable docs and generated context that must change, stay unchanged, or be reviewed again after final diff.
+- \`Known Risks\`: state concrete remaining technical risks, uncertainty, or validation risks that coder or reviewer must pay attention to.
+- \`Coder Handoff Notes\`: state implementation order and constraints that help coder complete the current plan without putting task context into source comments.
 - Define the expected implementation scope: affected modules, changed or created files, each file's responsibility, why it is in scope, and user-visible behavior changes.
 - Define every non-private callable surface intended for use outside its file: visibility, signature shape, responsibility, expected callers, behavior contract, side effects, and error boundaries.
 - Include a \`Scaffold Manifest\` for task-specific file context: stable row ID, file action, why the file is in scope, coder work, allowed implementation freedom, expected \`VCM:CODE\` placeholders, durable code comment needs, and proof points.
