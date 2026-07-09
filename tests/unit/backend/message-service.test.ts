@@ -261,7 +261,7 @@ describe("createMessageService", () => {
     });
   });
 
-  it("delivers peer route files without enforcing a PM-only policy", async () => {
+  it("rejects peer route files because VCM routes through project-manager", async () => {
     const harness = createHarness(["coder", "reviewer"]);
     await harness.service.updateOrchestrationState({
       ...harness.base,
@@ -273,15 +273,14 @@ describe("createMessageService", () => {
 
     expect(results).toHaveLength(1);
     expect(results[0]).toMatchObject({
-      delivered: true,
-      message: {
-        id: "msg_1",
-        fromRole: "coder",
-        toRole: "reviewer",
-        type: "question",
-        body: "Can you review this directly?"
-      }
+      delivered: false,
+      requiresUserApproval: false,
+      clearedRouteFile: false,
+      failureReason: "Invalid route: non-PM roles must route through project-manager."
     });
+    expect(results[0].message).toBeUndefined();
+    expect(harness.writes).toEqual([]);
+    await expect(harness.readRoute("coder-reviewer.md")).resolves.toBe("Can you review this directly?");
   });
 });
 

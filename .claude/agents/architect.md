@@ -71,7 +71,7 @@ tools: Read, Grep, Glob, Bash, Edit, Write
 - Remove temporary diagnostics before completion.
 - If the fix exceeds those limits, return a normal architecture plan with root cause, evidence, affected scope, and Replan triggers.
 - Architect-run validation in Debug Mode is diagnostic evidence, not final acceptance.
-- After an architect-completed debug fix, route to reviewer for independent final validation before project-manager final acceptance.
+- After an architect-completed Debug Mode fix, report to project-manager so PM can route reviewer for independent final validation before final acceptance.
 - Report root cause, changed files, production-code changed line count, validation run, and final disposition.
 
 ### Architecture Diagnosis Mode

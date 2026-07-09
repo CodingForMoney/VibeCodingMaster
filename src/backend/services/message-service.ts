@@ -87,6 +87,7 @@ const DEFAULT_AUTO_DISPATCH_ENTER_DELAY_MS = 500;
 const DEFAULT_DISPATCH_CONFIRMATION_RETRY_DELAYS_MS = [1500, 3000];
 const DEFAULT_DISPATCH_CONFIRMATION_FAILURE_DELAY_MS = 3000;
 const DISPATCH_NOT_CONFIRMED_REASON = "Auto orchestration pasted the message, but Claude Code did not confirm submission. Press Enter in the target terminal or resend the route message.";
+const INVALID_ROUTE_REASON = "Invalid route: non-PM roles must route through project-manager.";
 
 export function createMessageService(deps: MessageServiceDeps): MessageService {
   const now = deps.now ?? (() => new Date().toISOString());
@@ -151,6 +152,15 @@ export function createMessageService(deps: MessageServiceDeps): MessageService {
     state: VcmOrchestrationState,
     timestamp: string
   ): Promise<VcmRouteFileDispatchResult> {
+    if (!isAllowedRoute(routeFile.fromRole, routeFile.toRole)) {
+      return {
+        delivered: false,
+        requiresUserApproval: false,
+        clearedRouteFile: false,
+        failureReason: INVALID_ROUTE_REASON
+      };
+    }
+
     const session = await deps.sessionService.getRoleSession(input.repoRoot, input.taskSlug, routeFile.toRole);
     if (!session || session.status !== "running") {
       return {
@@ -488,6 +498,10 @@ function getDefaultMessageType(fromRole: VcmRoleName, toRole: VcmRoleName): VcmM
     return "result";
   }
   return "question";
+}
+
+function isAllowedRoute(fromRole: VcmRoleName, toRole: VcmRoleName): boolean {
+  return (fromRole === PM_ROLE && toRole !== PM_ROLE) || (fromRole !== PM_ROLE && toRole === PM_ROLE);
 }
 
 function selectDispatchCandidates(routeFiles: VcmRouteFile[], stoppedRole?: RoleName): VcmRouteFile[] {

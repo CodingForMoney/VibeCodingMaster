@@ -1,19 +1,30 @@
 ---
 name: vcm-route-message
-description: Use when a VCM role needs to hand off work, ask a question, report a result, report a blocker, or raise a finding to another VCM role.
+description: Use when project-manager dispatches a VCM role or when a VCM role reports a question, result, blocker, or finding back to project-manager.
 ---
 
 # VCM Route Message Skill
 
 ## Purpose
 
-Use this skill when a VCM role needs to hand work, ask a question, report a result, report a blocker, or raise a finding to another VCM role.
+Use this skill when project-manager dispatches a VCM role or when a VCM role reports a question, result, blocker, or finding back to project-manager.
 
 This skill writes a route file. It does not deliver the message. VCM backend delivery is triggered later by Claude Code hooks.
 
 ## Route Policy
 
-Use only routes allowed by the current VCM role rules and task approval.
+VCM uses project-manager as the routing hub.
+
+Allowed routes:
+
+- `project-manager -> architect`
+- `project-manager -> coder`
+- `project-manager -> reviewer`
+- `architect -> project-manager`
+- `coder -> project-manager`
+- `reviewer -> project-manager`
+
+Non-PM roles must not route directly to each other. Report questions, blockers, results, findings, or validation evidence back to project-manager. PM decides the next role route.
 
 Allowed message types:
 
@@ -33,7 +44,7 @@ Write or update exactly one file:
 .ai/vcm/handoffs/messages/<from-role>-<to-role>.md
 ```
 
-The file name is authoritative. Do not put from/to in frontmatter and do not create alternate message paths.
+Use one allowed route above. The file name is authoritative. Do not put from/to in frontmatter and do not create alternate message paths.
 
 If the same route file already contains a not-yet-delivered message, update that file instead of creating a fragmented follow-up.
 

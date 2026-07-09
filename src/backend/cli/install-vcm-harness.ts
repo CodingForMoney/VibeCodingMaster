@@ -246,7 +246,7 @@ const WHOLE_FILES = [
     content: renderSkillFile(
       "VCM Route Message Skill",
       "vcm-route-message",
-      "Use when a VCM role needs to hand off work, ask a question, report a result, report a blocker, or raise a finding to another VCM role.",
+      "Use when project-manager dispatches a VCM role or when a VCM role reports a question, result, blocker, or finding back to project-manager.",
       renderVcmRouteMessageSkillRules()
     )
   },
