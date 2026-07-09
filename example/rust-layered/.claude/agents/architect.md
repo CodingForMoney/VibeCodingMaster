@@ -71,6 +71,7 @@ tools: Read, Grep, Glob, Bash, Edit, Write
 - Project-manager may route bugs, failing tests, build/runtime failures, or unclear defects directly to architect Debug Mode.
 - Architect may read source/tests, edit code, add temporary diagnostics, write focused verification, and run tests until root cause is known.
 - Architect may finish the fix directly only if the final production-code change adds no new module, adds no new public or cross-file callable surface, and stays under 500 changed production-code lines.
+- When editing production code or tests in Debug Mode, read and follow `docs/CODING_STANDARDS.md`.
 - Remove temporary diagnostics before completion.
 - If the fix exceeds those limits, return a normal architecture plan with root cause, evidence, and affected scope.
 - Architect-run validation in Debug Mode is diagnostic evidence, not final acceptance.

@@ -12,7 +12,7 @@ describe("createHarnessService", () => {
   it("plans and applies recommended harness files when they are missing", async () => {
     const fs = createMemoryFs();
     const service = createHarnessService({ fs });
-    const expectedHarnessFileCount = 20;
+    const expectedHarnessFileCount = 21;
 
     const status = await service.getHarnessStatus("/repo");
     expect(status.needsApply).toBe(true);
@@ -41,6 +41,8 @@ describe("createHarnessService", () => {
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("docs/GLOSSARY.md");
     expect(await fs.readText("/repo/docs/GLOSSARY.md")).toContain("# Glossary");
     expect(await fs.readText("/repo/docs/GLOSSARY.md")).toContain("| Abbreviation | Full Term | Meaning / Allowed Use |");
+    expect(await fs.readText("/repo/docs/CODING_STANDARDS.md")).toContain("# Coding Standards");
+    expect(await fs.readText("/repo/docs/CODING_STANDARDS.md")).toContain("Do not fake completion");
     expect(await fs.readText("/repo/.gitignore")).toContain("# VCM:BEGIN version=1");
     expect(await fs.readText("/repo/.gitignore")).toContain(".ai/vcm/");
     expect(await fs.readText("/repo/.gitignore")).toContain(".claude/worktrees/");
@@ -86,7 +88,8 @@ describe("createHarnessService", () => {
     const coderAgent = await fs.readText("/repo/.claude/agents/coder.md");
     expect(coderAgent).toContain("tools: Read, Grep, Glob, Bash, Edit, Write, Agent");
     expect(coderAgent).toContain("Implement assigned file/function-level scaffold items");
-    expect(coderAgent).toContain("Unit test coverage is required for every callable unit named by the architecture plan");
+    expect(coderAgent).toContain("read and follow `docs/CODING_STANDARDS.md`");
+    expect(await fs.readText("/repo/docs/CODING_STANDARDS.md")).toContain("Unit test coverage is required for every changed callable unit");
     expect(coderAgent).toContain("Compile, typecheck, or L0/L1 failure is the signal to report");
     expect(coderAgent).toContain("### Failure Reporting And Continuation");
     expect(coderAgent).not.toContain("Stop before editing when the architecture plan");

@@ -14,7 +14,7 @@ Return only:
 
 Read \`.claude/agents/architect.md\`; use coder/reviewer definitions only when
 judging implementation or validation boundaries. Verify the required plan
-structure, evidence, Scaffold Manifest, proof points, Replan triggers, and no
+structure, evidence, Scaffold Manifest, proof points, architect-owned replan decisions when present, and no
 task-only source comments.
 
 Focus on architectural soundness. Request changes when module boundaries,

@@ -8,29 +8,12 @@ export function renderCoderHarnessRules(): string {
 - When parallel worker implementation is used, own worker task splitting, worker prompts, worker result review, integration, final Scaffold Completion, and coder-level validation.
 - Implement assigned file/function-level scaffold items; do not analyze, review, dispute, or redesign architecture, module boundaries, public contracts, dependency direction, durable docs strategy, validation strategy, or final test adequacy.
 
-### Coder Implementation Discipline
+### Shared Coding Standards
 
-- Implement the architect-defined scaffold exactly; do not change file responsibilities, callable-surface signatures, or architect-defined contract intent unless the architecture plan explicitly allows it.
-- Implement every \`VCM:CODE\` placeholder, track completion by Scaffold Manifest ID when present, and remove all \`VCM:CODE\` markers before handoff.
-- Do not fake completion: no hardcoded success, disabled logic, swallowed errors, test-only shortcuts, or silent fallback that hides failure.
-- Implement behavior from the approved architecture, existing domain model, real inputs, and project runtime flow; do not derive logic from visible test fixtures, fixed sample values, snapshot text, or special branches that only satisfy known tests.
-- Keep the diff inside approved scope: no unrelated rewrites, drive-by refactors, renamed symbols, moved files, or formatting churn.
-- Preserve existing behavior unless the architecture plan explicitly changes it; keep existing call sites and shared code paths working.
-- Maintain code documentation: preserve durable architect-written contract comments, keep comments consistent with changed behavior, and update affected durable comments when logic changes.
-- Do not copy Scaffold Manifest task context, task labels, implementation-order notes, handoff instructions, temporary rationale, or coder guidance into source comments.
-- Add source comments only for durable behavior, contracts, invariants, error boundaries, or non-obvious logic that cannot be made clear enough through naming, types, constants, or small helper functions.
-- Remove stale, debug, task-process, task-label, and unresolved TODO comments unless a TODO is durable, still accurate, and linked to an owner, issue, or accepted follow-up.
-- Task labels such as \`RP<n>\`, \`SCF-<n>\`, \`KI-<n>\`, \`Phase <n>\`, or temporary task/round/PR labels must not appear in durable source comments.
-
-### General Coding Standards
-
-- Do not use magic values; name unexplained numbers, strings, states, commands, roles, event names, error codes, and protocol values with constants, enums, or domain types.
-- Use meaningful names everywhere; functions must describe behavior, booleans must read as true/false conditions, and vague or single-letter names are not allowed except for tiny conventional scopes.
-- Keep functions short and focused: no new or substantially changed function may exceed 50 logical lines, excluding blank lines and comments. Split longer logic into well-named private helpers.
-- Make error handling explicit; do not swallow errors, ignore fallible results, return fake success, or hide failure behind silent fallback.
-- Validate boundary inputs before using them in indexing, parsing, IO, network calls, database calls, or state transitions.
-- Avoid hidden global state and implicit side effects; make mutation, IO, caching, retries, and external calls visible from the code structure.
-- Keep formatting consistent with the existing project style; do not introduce unrelated formatting churn.
+- Before editing production code or tests, read and follow \`docs/CODING_STANDARDS.md\`.
+- Project-specific additions in \`docs/CODING_STANDARDS.md\` are binding when they make the shared baseline more precise.
+- Keep the implementation inside the approved architecture plan, scaffold, and role message.
+- Implement every assigned \`VCM:CODE\` placeholder, track completion by Scaffold Manifest ID when present, and remove all \`VCM:CODE\` markers before handoff.
 
 ### Inputs
 
@@ -44,8 +27,6 @@ export function renderCoderHarnessRules(): string {
 ### Implementation
 
 - Make only the implementation changes needed for the approved scope.
-- Do not weaken, delete, or skip tests to make validation pass.
-- When changing tests, keep assertions tied to the approved behavior contract; do not relax expectations, remove meaningful coverage, or rewrite tests merely to match the current implementation.
 - Record confirmed out-of-scope issues found during implementation in \`.ai/vcm/handoffs/known-issues.md\`.
 
 ### Complete Implementation
@@ -80,12 +61,8 @@ export function renderCoderHarnessRules(): string {
 
 ### Baseline Tests
 
-- Unit test coverage is required for every callable unit named by the architecture plan or touched by a \`VCM:CODE\` marker.
-- A callable unit means a function, method, handler, command action, route handler, hook callback, reducer, parser, validator, state transition function, or service API function.
-- If the changed callable unit is private, test it through the nearest existing public/exported/module-level callable unit that owns that behavior. Do not expose private helpers only for tests.
-- For each changed callable unit, add at least one success-path unit test.
-- For each changed validation, parsing, branching, error-handling, boundary, permission, lifecycle, retry, or state-transition path inside that callable unit, add a unit test that exercises that path.
-- Pure private helpers added only to support an already-tested callable unit do not need separate direct tests.
+- Follow \`docs/CODING_STANDARDS.md\` Baseline Tests for every changed callable unit.
+- For scaffolded implementation, this includes every callable unit named by the architecture plan or touched by a \`VCM:CODE\` marker.
 - Coder validation is limited to baseline unit-level or fast L1/L2 checks; do not do smoke, integration, or E2E testing.
 - Run available L0/L1 validation after implementation.
 - Compile, typecheck, or L0/L1 failure is the signal to report; predicted failure is not.

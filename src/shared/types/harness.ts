@@ -3,6 +3,7 @@ import type { ClaudePermissionMode, SessionEffort, SessionModel } from "./sessio
 export type HarnessFileKind =
   | "root-claude"
   | "project-glossary"
+  | "project-coding-standards"
   | "gitignore"
   | "claude-settings"
   | "pull-request-template"
@@ -193,6 +194,7 @@ export interface HarnessBootstrapCheck {
     | "module-index"
     | "public-surface"
     | "glossary-doc"
+    | "coding-standards-doc"
     | "project-architecture"
     | "module-architecture"
     | "testing-doc";

@@ -25,8 +25,9 @@ You may inspect:
 - `.ai/tools/**`
 - `.ai/vcm-harness-manifest.json`
 - `.ai/generated/**`
-- durable project docs such as `docs/ARCHITECTURE.md`, `docs/TESTING.md`,
-  and `docs/known-issues.md`
+- durable project docs such as `docs/CODING_STANDARDS.md`,
+  `docs/ARCHITECTURE.md`, `docs/TESTING.md`, and
+  `docs/known-issues.md`
 
 You are not part of the task workflow round state.
 

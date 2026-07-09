@@ -17,7 +17,7 @@ This skill is an operating procedure. It does not replace the deterministic VCM 
 1. Generate context when supported: run \`.ai/tools/generate-module-index\`, then run \`.ai/tools/generate-public-surface\` after \`module-index.json\` exists.
 2. Inspect the project:  read \`README.md\`, read \`CLAUDE.md\`, durable project docs, project manifests/config, source layout, tests, and existing validation commands.
 3. Fill project context: add or update non-managed project facts in \`CLAUDE.md\` above the VCM managed block.
-4. Fill durable docs: update \`docs/GLOSSARY.md\`, \`docs/ARCHITECTURE.md\`, module-level \`ARCHITECTURE.md\` files for clear non-root module boundaries, and \`docs/TESTING.md\` with detailed project-specific content.
+4. Fill durable docs: update \`docs/GLOSSARY.md\`, \`docs/CODING_STANDARDS.md\`, \`docs/ARCHITECTURE.md\`, module-level \`ARCHITECTURE.md\` files for clear non-root module boundaries, and \`docs/TESTING.md\` with detailed project-specific content.
 5. Preserve user-authored content and VCM managed blocks.
 6. Review \`git status\` and \`git diff\`.
 7. Stage only allowed bootstrap harness changes and create a commit in the active task worktree.
@@ -27,6 +27,7 @@ This skill is an operating procedure. It does not replace the deterministic VCM 
 
 - \`CLAUDE.md\` project context and project constraints outside the VCM managed block
 - \`docs/GLOSSARY.md\`
+- \`docs/CODING_STANDARDS.md\`
 - \`docs/ARCHITECTURE.md\`
 - \`docs/TESTING.md\`
 - \`docs/known-issues.md\` only for confirmed durable issues
@@ -54,6 +55,13 @@ This skill is an operating procedure. It does not replace the deterministic VCM 
 - Include abbreviations that are allowed in durable comments and documentation.
 - Remove or avoid project-invented shorthand that is not useful as durable terminology.
 - If an abbreviation is not listed here, roles must write the full term instead.
+
+### \`docs/CODING_STANDARDS.md\`
+
+- Keep shared coding, testing, comment, generated-context, and anti-cheat standards current.
+- Add project-specific implementation rules only when they make the shared baseline more precise.
+- Do not weaken the baseline rules without explicit project approval.
+- Keep role workflow rules out of this file; role routing, Gate Review, Final Acceptance, and role-specific handoff rules belong in role definitions or skills.
 
 ### \`docs/ARCHITECTURE.md\`
 

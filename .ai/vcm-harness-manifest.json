@@ -4,7 +4,7 @@
   "harnessVersion": "0.6.20",
   "installMode": "fixed",
   "installedAt": "2026-06-24T22:49:58.684Z",
-  "updatedAt": "2026-07-09T13:28:54.340Z",
+  "updatedAt": "2026-07-09T15:30:42.664Z",
   "runtimeRoots": [
     ".ai/vcm/",
     ".claude/worktrees/"
@@ -329,6 +329,14 @@
       "path": "docs/GLOSSARY.md",
       "entryType": "file",
       "category": "project-glossary",
+      "ownership": "project-owned",
+      "source": "vcm-template",
+      "lifecycle": "long-term"
+    },
+    {
+      "path": "docs/CODING_STANDARDS.md",
+      "entryType": "file",
+      "category": "project-coding-standards",
       "ownership": "project-owned",
       "source": "vcm-template",
       "lifecycle": "long-term"

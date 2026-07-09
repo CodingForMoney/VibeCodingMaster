@@ -42,6 +42,7 @@ import {
 import { renderHarnessEngineerHarnessRules } from "../templates/harness/harness-engineer-agent.js";
 import { renderRootClaudeHarnessRules } from "../templates/harness/claude-root.js";
 import { renderGitignoreHarnessRules } from "../templates/harness/gitignore.js";
+import { renderProjectCodingStandardsTemplate } from "../templates/harness/project-coding-standards.js";
 import { renderProjectGlossaryTemplate } from "../templates/harness/project-glossary.js";
 import { renderProjectManagerHarnessRules } from "../templates/harness/project-manager-agent.js";
 import { renderPullRequestTemplateHarnessRules } from "../templates/harness/pull-request-template.js";
@@ -180,6 +181,13 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
     title: "Glossary",
     ownership: "project-file",
     renderRules: renderProjectGlossaryTemplate
+  },
+  {
+    kind: "project-coding-standards",
+    path: "docs/CODING_STANDARDS.md",
+    title: "Coding Standards",
+    ownership: "project-file",
+    renderRules: renderProjectCodingStandardsTemplate
   },
   {
     kind: "gitignore",
@@ -1754,6 +1762,13 @@ async function getHarnessBootstrapStatus(
       "Public surface"
     ),
     await checkFilledMarkdown(deps.fs, targetRepoRoot, "docs/GLOSSARY.md", "Glossary", "glossary-doc"),
+    await checkFilledMarkdown(
+      deps.fs,
+      targetRepoRoot,
+      "docs/CODING_STANDARDS.md",
+      "Coding standards",
+      "coding-standards-doc"
+    ),
     await checkFilledMarkdown(deps.fs, targetRepoRoot, "docs/ARCHITECTURE.md", "Project architecture", "project-architecture"),
     await checkModuleArchitectureDocs(deps.fs, targetRepoRoot, moduleIndex),
     await checkFilledMarkdown(deps.fs, targetRepoRoot, "docs/TESTING.md", "Testing doc", "testing-doc")
@@ -1790,6 +1805,7 @@ async function checkFixedHarness(fs: FileSystemAdapter, repoRoot: string, vcmVer
     MANIFEST_PATH,
     ".claude/skills/vcm-harness-bootstrap/SKILL.md",
     "docs/GLOSSARY.md",
+    "docs/CODING_STANDARDS.md",
     ".ai/tools/generate-module-index",
     ".ai/tools/generate-public-surface"
   ];
@@ -2154,6 +2170,7 @@ Required work:
 - Run .ai/tools/generate-public-surface from the target task worktree after module-index.json exists.
 - Add or update project-specific Project Context and Project Constraints in target CLAUDE.md above the VCM managed block.
 - Fill target docs/GLOSSARY.md with the project abbreviation allowlist.
+- Fill target docs/CODING_STANDARDS.md with shared coding, testing, comment, and anti-cheat standards, including project-specific additions when needed.
 - Fill target docs/ARCHITECTURE.md with project-level module overview, responsibilities, relationships, dependency direction, project-wide constraints, and links to module-level architecture docs.
 - Create or update target module-level ARCHITECTURE.md files for clear non-root module boundaries with architectureDoc paths in module-index.json.
 - Fill target docs/TESTING.md with project-native validation levels, commands, validation selection rules, final-validation cleanup, test layout, integration/E2E case lists, generated-context freshness checks, and known testing gaps.
