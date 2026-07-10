@@ -28,7 +28,8 @@ layers plus supporting tools.
 - `services/`: business logic. Key services include `task-service`,
   `task-launch-service` (backend-owned one-click task start, shared by the GUI
   endpoint and the gateway), `session-service`, `round-service`,
-  `runtime-coordinator-service`, `message-service`, `harness-service`,
+  `runtime-coordinator-service`, `runtime-recovery-service`, `message-service`,
+  `artifact-service`, `harness-service`, `harness-feedback-service`,
   `gate-review-service`, `translation-service`/`translation-worker-service`,
   `job-guard-service`, and `command-dispatcher`.
 - `runtime/`: PTY-backed terminal runtime (`node-pty-runtime`,
@@ -40,9 +41,10 @@ layers plus supporting tools.
   (Weixin iLink, Lark) and command parsing; channel connection is gated by a
   runtime, default-off switch. Detailed sub-area design lives in
   [`src/backend/gateway/ARCHITECTURE.md`](../src/backend/gateway/ARCHITECTURE.md).
-- `templates/`: message/handoff/role-command templates and, under
-  `templates/harness/`, the source of truth for the VCM harness that VCM installs
-  into downstream repositories.
+- `templates/`: message, handoff, role-command, and downstream harness
+  templates. `templates/harness/` is the source of truth for the VCM harness
+  installed into target repositories, including role agents, skills, tools, and
+  project durable doc templates.
 - `ws/`: WebSocket bridge (`terminal-ws`) streaming PTY I/O to the frontend.
 - `server.ts`, `main.ts`, `app-version.ts`, `vcm-data-dir.ts`, `errors.ts`:
   composition root, CLI entry, version, data-dir resolution, error types.

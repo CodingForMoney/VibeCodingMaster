@@ -1,6 +1,6 @@
 # VCM Claude Code Best Practices
 
-Last updated: 2026-07-04
+Last updated: 2026-07-10
 
 This is the current VCM-specific Claude Code / AI coding best-practices guide.
 It describes how VCM's harness, roles, runtime state, and task workflow should
@@ -38,6 +38,8 @@ CLAUDE.md
 .gitignore
 .ai/vcm-harness-manifest.json
 .claude/settings.json
+docs/GLOSSARY.md
+docs/CODING_STANDARDS.md
 .claude/agents/project-manager.md
 .claude/agents/architect.md
 .claude/agents/coder.md
@@ -45,6 +47,7 @@ CLAUDE.md
 .claude/agents/gate-reviewer.md
 .claude/agents/translator.md
 .claude/agents/harness-engineer.md
+.claude/agents/vcm-coder-worker.md
 .claude/skills/vcm-route-message/SKILL.md
 .claude/skills/vcm-final-acceptance/SKILL.md
 .claude/skills/vcm-long-running-validation/SKILL.md
@@ -81,7 +84,6 @@ Not part of the current fixed baseline:
 .claude/agents/optional/
 .ai/task-specs/
 .ai/vcm/tasks/
-.ai/vcm/handoffs/role-commands/
 .ai/generated/test-map.json
 .ai/tools/check-fast
 .ai/tools/check-changed
@@ -143,6 +145,8 @@ Rules:
 The current project doc baseline is:
 
 ```text
+docs/GLOSSARY.md
+docs/CODING_STANDARDS.md
 docs/ARCHITECTURE.md
 <module>/ARCHITECTURE.md
 docs/TESTING.md
@@ -173,14 +177,16 @@ Current runtime paths include:
 ```text
 <taskRepoRoot>/.ai/vcm/handoffs/
 <taskRepoRoot>/.ai/vcm/handoffs/messages/
+<taskRepoRoot>/.ai/vcm/handoffs/role-commands/
 <taskRepoRoot>/.ai/vcm/handoffs/architecture-plan.md
+<taskRepoRoot>/.ai/vcm/handoffs/architecture-diagnosis.md
+<taskRepoRoot>/.ai/vcm/handoffs/coder-completion.md
 <taskRepoRoot>/.ai/vcm/handoffs/test-report.md
 <taskRepoRoot>/.ai/vcm/handoffs/docs-sync-report.md
 <taskRepoRoot>/.ai/vcm/handoffs/final-acceptance.md
 <taskRepoRoot>/.ai/vcm/handoffs/known-issues.md
 <taskRepoRoot>/.ai/vcm/gate-reviews/
 <taskRepoRoot>/.ai/vcm/jobs/<job-id>/
-<taskRepoRoot>/.ai/vcm/translation/<task>/<role>/
 <baseRepoRoot>/.ai/vcm/translations/
 <baseRepoRoot>/.ai/vcm/harness-engineer/
 <baseRepoRoot>/.ai/vcm/bootstrap/
@@ -303,14 +309,16 @@ For code changes, architect writes `.ai/vcm/handoffs/architecture-plan.md`.
 
 The plan must cover:
 
-- affected modules and files
-- file responsibilities and why each file is in scope
-- public or cross-file callable surfaces
-- user-visible behavior
-- docs/generated-context impact
-- proof points and validation expectations
-- Replan triggers
-- task boundaries
+- accepted scope
+- current code reality
+- architecture decision
+- module/file plan
+- public surface impact
+- Scaffold Manifest
+- Tester Coverage Hints
+- docs impact
+- known risks
+- coder handoff notes
 
 The Scaffold Manifest carries task-specific context for coder. Task context,
 temporary rationale, implementation-order notes, and coder guidance belong in
@@ -322,6 +330,9 @@ Coder removes/completes those markers and reports Scaffold Completion by ID.
 
 The active architecture plan should describe the full accepted task scope. It
 may include implementation order, but that order must not defer requested scope.
+The plan is the current executable plan, not a changelog; revisions should
+replace superseded decisions and stale scaffold rows instead of appending
+history.
 
 ## 11. Route Messages
 
@@ -443,6 +454,8 @@ procedure. It is not the deterministic fixed installer.
 Bootstrap may create or refresh:
 
 - project context outside VCM managed blocks in `CLAUDE.md`
+- `docs/GLOSSARY.md`
+- `docs/CODING_STANDARDS.md`
 - `docs/ARCHITECTURE.md`
 - module-level `ARCHITECTURE.md`
 - `docs/TESTING.md`
@@ -599,7 +612,8 @@ polling a missing terminal session forever.
     roles.
 8.  No `.claude/commands/` by default.
 9.  No optional agents by default.
-10. No role-command files.
+10. Role-command files are task runtime dispatch inputs, not fixed harness
+    files or inter-role route messages.
 11. No `.ai/vcm/tasks/` in connected repos.
 12. No `test-map.json` by default.
 13. No fixed `check-*` wrappers by default.
