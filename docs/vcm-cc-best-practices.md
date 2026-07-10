@@ -365,8 +365,10 @@ Input policy:
   input. Missing or empty core input is `not_required`.
 - `validation-adequacy` uses `.ai/vcm/handoffs/test-report.md` as its core
   input. Missing or empty core input is `not_required`.
-- `code-diff` reviews the new commits from one PM route flow. Missing new
-  commits are `not_required`.
+- `code-diff` is triggered by PM after Coder `Decision: ready_for_review` or an
+  Architect Debug completed code fix. PM does not inspect commits; the tool
+  reviews committed inputs, returns `not_required` when there are no new
+  commits, and fails to start when the worktree has uncommitted changes.
 - Gates avoid duplicate review by comparing input hashes.
 
 Gate Reviewer writes reports under:

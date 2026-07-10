@@ -248,6 +248,33 @@ describe("gate-review-service", () => {
     expect(runnerCalls.some((call) => call.args.join(" ") === "diff --binary --find-renames base-sha..head-sha")).toBe(true);
   });
 
+  it("fails code-diff start when the worktree has uncommitted changes", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-gate-review-code-diff-dirty-"));
+    await writeHarnessFiles(tmpRepo);
+    const sessionStarts: string[] = [];
+    const service = createGateReviewService({
+      fs: createNodeFileSystemAdapter(),
+      runner: createRunner(tmpRepo, [], {
+        "status --porcelain=v1": " M src/feature.ts\n?? scratch.txt"
+      }),
+      runtime: createRuntime(tmpRepo, []),
+      projectService: createProjectService(),
+      taskService: createTaskService(tmpRepo),
+      appSettings: createAppSettings(["code-diff"]),
+      sessionService: createSessionService(sessionStarts),
+      roundService: createRoundService()
+    });
+
+    const result = await service.requestReviewGate(tmpRepo, "demo-task", "code-diff");
+    const state = await service.getState(tmpRepo, "demo-task");
+
+    expect(result.status).toBe("failed_to_start");
+    expect(result.message).toContain("code-diff requires committed inputs");
+    expect(state.gates["code-diff"].status).toBe("failed");
+    expect(state.gates["code-diff"].error).toContain("M src/feature.ts");
+    expect(sessionStarts).toEqual([]);
+  });
+
   it("updates gate settings from disabled state without enabling stale gates", async () => {
     tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-gate-review-settings-"));
     await writeHarnessFiles(tmpRepo);

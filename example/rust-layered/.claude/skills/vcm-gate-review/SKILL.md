@@ -13,7 +13,7 @@ Use this skill at every project-manager Gate Review trigger point and whenever V
 
 - `architecture-plan`: after architect writes `.ai/vcm/handoffs/architecture-plan.md`, before coder dispatch.
 - `validation-adequacy`: after tester writes `.ai/vcm/handoffs/test-report.md`, before docs sync or final acceptance.
-- `code-diff`: after PM accepts a Coder or Architect Debug route-flow result that produced new commits, before advancing to the next VCM flow gate.
+- `code-diff`: after Coder returns `Decision: ready_for_review`, or after Architect Debug Mode completes a code fix, before PM routes to the next role or flow gate.
 
 ## Request
 

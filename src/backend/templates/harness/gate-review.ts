@@ -152,7 +152,7 @@ Use this skill at every project-manager Gate Review trigger point and whenever V
 
 - \`architecture-plan\`: after architect writes \`.ai/vcm/handoffs/architecture-plan.md\`, before coder dispatch.
 - \`validation-adequacy\`: after tester writes \`.ai/vcm/handoffs/test-report.md\`, before docs sync or final acceptance.
-- \`code-diff\`: after PM accepts a Coder or Architect Debug route-flow result that produced new commits, before advancing to the next VCM flow gate.
+- \`code-diff\`: after Coder returns \`Decision: ready_for_review\`, or after Architect Debug Mode completes a code fix, before PM routes to the next role or flow gate.
 
 ## Request
 
@@ -440,6 +440,40 @@ def local_request(gate: str) -> int:
         write_json(index_path, index)
         print_result("not_required", gate=gate)
         return 0
+
+    if gate == "code-diff":
+        dirty = command_text(root, ["git", "status", "--porcelain=v1"]).splitlines()
+        if dirty:
+            reason = "code-diff requires committed inputs; commit or clean these changes first: " + "; ".join(dirty[:8])
+            if len(dirty) > 8:
+                reason += f"; ... {len(dirty) - 8} more"
+            gate_record = index["gates"].setdefault(gate, {})
+            gate_record.update({
+                "required": True,
+                "status": "failed",
+                "decision": None,
+                "error": reason,
+                "exceptionReason": None,
+                "requestId": None,
+                "requestPath": None,
+                "inputHash": None,
+                "baseCommit": None,
+                "headCommit": None,
+                "commits": None,
+                "changedFiles": None,
+                "diffStat": None,
+                "requestedAt": None,
+                "startedAt": None,
+                "completedAt": now_iso(),
+                "callbackStatus": "not_sent",
+                "callbackError": None,
+                "updatedAt": now_iso(),
+            })
+            if index.get("activeGate") == gate:
+                index["activeGate"] = None
+            write_json(index_path, index)
+            print_result("failed_to_start", gate=gate, reason=reason)
+            return 2
 
     core_status = core_input_status(root, gate)
     if core_status and core_status[1] != "ready":

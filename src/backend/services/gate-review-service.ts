@@ -173,6 +173,39 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
       return { status: "running", gate, record, message: "Gate review is already running." };
     }
 
+    if (gate === "code-diff") {
+      const dirtyStatus = await getDirtyCodeDiffStatus(deps.runner, context.taskRepoRoot);
+      if (dirtyStatus) {
+        const message = `code-diff requires committed inputs; commit or clean these changes first: ${dirtyStatus}`;
+        index = applyGateState(index, gate, {
+          status: "failed",
+          decision: undefined,
+          error: message,
+          exceptionReason: undefined,
+          requestId: undefined,
+          requestPath: undefined,
+          inputHash: undefined,
+          baseCommit: undefined,
+          headCommit: undefined,
+          commits: undefined,
+          changedFiles: undefined,
+          diffStat: undefined,
+          requestedAt: undefined,
+          startedAt: undefined,
+          completedAt: now(),
+          callbackStatus: "not_sent",
+          callbackError: undefined
+        }, now(), true);
+        await saveIndex(deps.fs, context.taskRepoRoot, index);
+        return {
+          status: "failed_to_start",
+          gate,
+          record: index.gates[gate],
+          message
+        };
+      }
+    }
+
     const coreInput = await readCoreInputArtifact(deps.fs, context.taskRepoRoot, gate);
     if (coreInput && coreInput.status !== "ready") {
       index = applyGateState(index, gate, {
@@ -704,6 +737,17 @@ function applyGateState(
 
 async function saveIndex(fs: FileSystemAdapter, taskRepoRoot: string, index: GateReviewIndex): Promise<void> {
   await fs.writeJsonAtomic(getIndexPath(taskRepoRoot), index);
+}
+
+async function getDirtyCodeDiffStatus(runner: CommandRunner, taskRepoRoot: string): Promise<string | undefined> {
+  const status = splitLines(await commandStdout(runner, taskRepoRoot, ["status", "--porcelain=v1"]));
+  if (status.length === 0) {
+    return undefined;
+  }
+  const visible = status.slice(0, 8).join("; ");
+  return status.length > 8
+    ? `${visible}; ... ${status.length - 8} more`
+    : visible;
 }
 
 async function resolveCodeDiffInput(
