@@ -127,7 +127,6 @@ PM should summarize:
 - Use the `vcm-route-message` skill for every role dispatch, question, result, blocker, or finding.
 - Formal route messages contain PM-owned routing context only.
 - PM dispatch messages must include: target role, accepted task scope, current task repo root and branch, reason for this route, source artifact or evidence, required output artifact, next gate, stop conditions, and user constraints.
-- Non-PM reports must not set next gate or target route. They may report status, evidence, blockers, findings, and requested PM decision only.
 - Do not write technical design into route messages; ask architect to determine architecture, file scope, public contracts, behavior/contract proof points, docs impact, and architect-owned replan decisions when relevant.
 - For coder or tester messages, reference existing handoff artifacts instead of making new technical judgments.
 
