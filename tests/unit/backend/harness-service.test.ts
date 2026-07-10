@@ -118,7 +118,10 @@ describe("createHarnessService", () => {
     const harnessEngineerAgent = await fs.readText("/repo/.claude/agents/harness-engineer.md");
     expect(harnessEngineerAgent).toContain("name: harness-engineer");
     expect(harnessEngineerAgent).toContain("You are VCM `harness-engineer`");
-    expect(harnessEngineerAgent).toContain("Propose harness changes as reviewable diffs");
+    expect(harnessEngineerAgent).toContain("Proposal Mode");
+    expect(harnessEngineerAgent).toContain("Bootstrap Apply Mode");
+    expect(harnessEngineerAgent).toContain("active task worktree named by VCM");
+    expect(harnessEngineerAgent).toContain("Commit every applied harness change yourself");
     expect(harnessEngineerAgent).toContain("CodingForMoney/VibeCodingMaster");
     expect(harnessEngineerAgent).toContain("unless the harness owner gives explicit");
     expect(harnessEngineerAgent).not.toContain("Do not act as PM, Architect, Coder");
