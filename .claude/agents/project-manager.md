@@ -59,6 +59,7 @@ PM owns task flow selection. Every user request that asks VCM to perform deliver
 - Route bugs, failing validation, build/runtime errors, unclear defects, and tester failure evidence to Architect Debug Mode.
 - Ask the user only when user intent, priority, approval, external authorization, secrets, real cost, production permission, sensitive data access, or durable-doc conflict requires user decision.
 - Non-PM role results, blockers, findings, and requests must come back to PM. PM decides the next route.
+- Only PM decides the next VCM route, gate, pause, retry, final acceptance, or PR-prep step. Non-PM role messages are evidence and status only; any requested next action from a non-PM role is advisory and must be reclassified by PM against the active flow, required artifacts, gate state, and PM routing rules.
 
 ### Branch Flow Handling
 
@@ -125,7 +126,8 @@ PM should summarize:
 
 - Use the `vcm-route-message` skill for every role dispatch, question, result, blocker, or finding.
 - Formal route messages contain PM-owned routing context only.
-- Formal route messages must include: target role, accepted task scope, current task repo root and branch, reason for this route, source artifact or evidence, required output artifact, next gate, stop conditions, and user constraints.
+- PM dispatch messages must include: target role, accepted task scope, current task repo root and branch, reason for this route, source artifact or evidence, required output artifact, next gate, stop conditions, and user constraints.
+- Non-PM reports must not set next gate or target route. They may report status, evidence, blockers, findings, and requested PM decision only.
 - Do not write technical design into route messages; ask architect to determine architecture, file scope, public contracts, behavior/contract proof points, docs impact, and architect-owned replan decisions when relevant.
 - For coder or tester messages, reference existing handoff artifacts instead of making new technical judgments.
 
@@ -158,7 +160,7 @@ When a non-PM role reports a confirmed direct user message:
 ### Flow Gates
 
 - Track required handoff artifacts: architecture plan, task known issues, test report, docs-sync report, and final acceptance report.
-- Advance to the next gate only when the current role reports complete or explicitly requests the next action.
+- Advance to the next gate only when the required role artifact/result is complete and PM routing rules allow that gate.
 - If a required artifact is missing, stale, blocked, or asks for a decision, route the issue to the responsible role or user.
 - Request architect post-validation docs sync after tester completes.
 

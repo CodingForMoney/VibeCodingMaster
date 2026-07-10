@@ -48,7 +48,7 @@ Use the smallest body that is complete. Include artifact refs instead of copying
 
 For simple user relay, use a lightweight body instead of the formal dispatch format.
 
-For formal dispatch, blocker, finding, review, or gate routing, use:
+For PM dispatch, use:
 
 \`\`\`md
 ---
@@ -67,19 +67,46 @@ Request or result:
 Evidence:
 ...
 
-Expected next action:
+Next gate:
+...
+
+Stop conditions:
 ...
 \`\`\`
+
+For non-PM reports, use:
+
+\`\`\`md
+---
+type: result
+artifact_refs:
+  - .ai/vcm/handoffs/example.md
+---
+
+Summary:
+...
+
+Result, blocker, or finding:
+...
+
+Evidence:
+...
+
+Requested PM decision:
+...
+\`\`\`
+
+For non-PM role reports, \`Requested PM decision\` is a request for PM classification, not an instruction to route, skip gates, continue, pause, or close the task.
 
 ## Formal Body Content
 
 Formal messages should include:
 
 - why this message exists
-- what the target role should do or what result is being reported
+- what the target role should do for PM dispatch, or what result/status is being reported for non-PM reports
 - source of truth or artifact references
 - validation or documentation state when relevant
-- blocker, decision needed, or next step when relevant
+- blocker, finding, status, or PM decision needed when relevant
 
 ## Turn Rule
 

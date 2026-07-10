@@ -114,7 +114,7 @@ Decision: ready_for_review|incomplete|failed
 - Report failure only from objective implementation evidence: an assigned scaffold target is absent, compile/typecheck fails, or L0/L1 fails.
 - Do not report failure based on predicted design failure, public-contract disagreement, architecture disagreement, or validation prediction.
 - Do not stop because of workload, session length, or context size.
-- If execution is interrupted or the turn must end unexpectedly before all assigned scaffold items are done, write `coder-completion.md` with `Decision: incomplete`, include completed items, remaining items, validation state, and next continuation step in the route message, then ask project-manager for continuation.
+- If execution is interrupted or the turn must end unexpectedly before all assigned scaffold items are done, write `coder-completion.md` with `Decision: incomplete`, include completed items, remaining implementation work, validation state, and why continuation is needed. PM decides whether to continue the same route.
 
 ### Background Jobs
 
