@@ -39,12 +39,18 @@ behavior.
 
 ## Code Diff Gate
 
-Read \`.claude/agents/coder.md\`; use architect/tester definitions to compare
-the requested commit range against the approved plan and validation evidence.
-Check that the commits match plan, have no unapproved surface/dependency/docs changes, no
-\`VCM:CODE\`, no task-process comments or task labels, test changes and
-validation evidence match the changed behavior, tests do not weaken assertions
-or bypass real paths, and fallible paths are handled.
+Read \`.claude/agents/coder.md\`; use architect/tester definitions only to
+understand implementation and test responsibility boundaries. Review only the
+commit range named in the VCM prompt.
+
+Compare the commits against the approved architecture plan, coder completion
+evidence, architecture diagnosis/debug evidence when present, and project coding
+standards. Do not expand review to the whole task, whole branch, or PR.
+
+Check that the commits match the plan, have no unapproved
+surface/dependency/docs changes, no \`VCM:CODE\`, no task-process comments or task
+labels, no weakened tests or bypassed real behavior, and no unhandled fallible
+paths.
 
 Focus on code quality and boundary-condition robustness. Request changes when
 the code violates project style, duplicates existing patterns unnecessarily,
@@ -88,7 +94,7 @@ None.
 
 Use Bash only for read-only inspection such as \`git diff\`, \`git status\`, \`git show\`, \`ls\`, \`rg\`, \`sed\`, or \`cat\`. Do not run tests, builds, formatters, generators, package managers, or commands that modify files.
 
-Do not run tests. Review only code, architecture, and documents; do not perform validation. Do not edit code, tests, durable docs, role files, route files, or handoff artifacts. Do not choose owners, fixes, Replan, or user-intervention needs.`;
+Review only code, architecture, and documents; do not perform validation. Do not edit code, tests, durable docs, role files, route files, or handoff artifacts. Do not choose owners, fixes, Replan, or user-intervention needs.`;
 }
 
 export function renderTranslatorAgentRules(): string {
