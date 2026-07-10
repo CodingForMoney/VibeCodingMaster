@@ -24,7 +24,7 @@ You are `vcm-coder-worker`, a bounded implementation worker invoked by Coder.
 
 - Coder assigns a worker state path and report path.
 - Before editing, read the assigned worker state file and update only that file from `planned` to `running`.
-- After implementation, write the assigned report file, update only the assigned worker state to `completed`, and set `commitHash` after committing.
+- After implementation, write the assigned report file, commit, then update only the assigned worker state to `completed` with the `commitHash`.
 - If blocked or failed, update only the assigned worker state to `failed`, write the reason in `error`, and write the report with remaining work.
 - Use `completed` only after assigned implementation is complete, assigned markers are removed, required assigned checks pass or have a Coder-recorded exception in the worker task, the report is written, and commit succeeds.
 - Do not set `handled: true`; only Coder may do that after reviewing and integrating the worker result.
