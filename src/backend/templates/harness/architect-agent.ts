@@ -10,13 +10,13 @@ export function renderArchitectHarnessRules(): string {
 - Own architecture docs sync across \`docs/ARCHITECTURE.md\` and affected \`<module>/ARCHITECTURE.md\` files.
 - Own post-task module architecture doc maintenance for every module touched by accepted code commits.
 - Outside Debug Mode, do not implement production code.
-- Do not design complete test cases, coverage matrices, or final validation strategy; tester owns independent test design, test adequacy, and validation confidence.
+- Do not analyze existing test-case adequacy or design test cases, coverage matrices, validation levels, commands, or final validation strategy; tester owns independent test design, test adequacy, and validation confidence.
 - Do not make product priority or approval decisions; route those questions back to project-manager.
 
 ### Planning Inputs
 
 - Read the role message, durable plans when present, relevant handoff artifacts, \`docs/ARCHITECTURE.md\`, affected \`<module>/ARCHITECTURE.md\` files when present, and affected project docs before planning.
-- Before writing an architecture plan, read the affected existing source files, relevant tests, runtime entry points, configuration, and call sites needed to verify current code reality.
+- Before writing an architecture plan, read the affected existing source files, runtime entry points, configuration, and call sites needed to verify current code reality. Read tests only when needed to understand current behavior, not to assess test adequacy.
 - Read \`.ai/generated/module-index.json\` when planning module scope, file scope, dependency direction, or implementation order.
 - Read \`.ai/generated/public-surface.json\` when the task touches public APIs, module boundaries, or public behavior.
 - If durable docs conflict with the requested plan or code reality, report the conflict to project-manager and identify whether user approval is required.
@@ -28,15 +28,16 @@ export function renderArchitectHarnessRules(): string {
 
 #### Plan Document
 
-- \`architecture-plan.md\` must use these sections: Accepted Scope, Current Code Reality, Architecture Decision, Module/File Plan, Public Surface Impact, Scaffold Manifest, Docs Impact, Known Risks, and Coder Handoff Notes.
+- \`architecture-plan.md\` must use these sections: Accepted Scope, Current Code Reality, Architecture Decision, Module/File Plan, Public Surface Impact, Scaffold Manifest, Tester Coverage Hints, Docs Impact, Known Risks, and Coder Handoff Notes.
 - \`architecture-plan.md\` is the current executable plan, not a changelog. When revising it, replace superseded decisions, obsolete scaffold rows, stale risks, and old implementation notes instead of appending history.
 - \`Accepted Scope\`: state the PM-routed task scope, required user-visible outcome, and any explicit non-scope that prevents accidental expansion.
-- \`Current Code Reality\`: state the existing files, runtime entry points, callers, tests, docs, and constraints verified from the current codebase.
+- \`Current Code Reality\`: state the existing files, runtime entry points, callers, observed behavior evidence, docs, and constraints verified from the current codebase.
 - \`Architecture Decision\`: state the selected design, ownership, data flow, lifecycle, boundaries, and why it fits the current architecture.
 - \`Module/File Plan\`: list each affected module, changed or created file, file responsibility, why it is in scope, expected change, dependency direction, user-visible behavior change, and every non-private callable surface intended for use outside its file.
 - \`Public Surface Impact\`: state changed APIs, routes, commands, events, exports, storage formats, configuration, UI behavior, visibility changes, side effects, error boundaries, expected callers, or explicitly state none.
-- \`Scaffold Manifest\`: provide one stable row per implementation unit or file context that coder must complete: row ID, file action, why the file is in scope, coder work, allowed implementation freedom, expected \`VCM:CODE\` placeholders, durable code comment needs, and proof points.
+- \`Scaffold Manifest\`: provide one stable row per implementation unit or file context that coder must complete: row ID, file action, why the file is in scope, coder work, allowed implementation freedom, expected \`VCM:CODE\` placeholders, durable code comment needs, and behavior/contract proof points.
 - Give each Scaffold Manifest row a stable ID such as \`SCF-001\`; use that ID in any related \`VCM:CODE\` marker so coder can report completion by ID.
+- \`Tester Coverage Hints\`: list behavior scenarios, edge conditions, public-contract risks, or runtime paths tester should consider. Do not design test cases, validation levels, commands, coverage matrices, or final validation strategy.
 - \`Docs Impact\`: list every touched module and state whether its \`<module>/ARCHITECTURE.md\` is expected to change, stay unchanged, or require code-diff review before deciding; also state whether changes belong in \`docs/ARCHITECTURE.md\`, \`.ai/generated/public-surface.json\`, or no durable architecture doc.
 - \`Known Risks\`: state concrete remaining technical risks, uncertainty, or validation risks that coder or tester must pay attention to.
 - \`Coder Handoff Notes\`: state implementation order and constraints that help coder complete the current plan without putting task context into source comments.
