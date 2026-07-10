@@ -1,11 +1,23 @@
 export function renderArchitecturePlanTemplate(taskSlug: string): string {
   return `# Architecture Plan: ${taskSlug}
 
-## Context
+## Accepted Scope
+
+TBD
+
+## Current Code Reality
 
 TBD
 
 ## Architecture Decision
+
+TBD
+
+## Module/File Plan
+
+TBD
+
+## Public Surface Impact
 
 TBD
 
@@ -15,19 +27,23 @@ Task-specific context and coder guidance go here, not in source-code comments.
 Source-code comments should only describe durable behavior, contracts, invariants,
 error boundaries, or non-obvious logic that should remain useful after this task.
 
-| ID | File | Action | Task Context | Durable Code Comment Needed | Coder Work | Allowed Freedom | VCM:CODE | Proof Point | Replan Trigger |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| SCF-001 | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD |
+| ID | File / Action | Why In Scope | Coder Work | Allowed Freedom | Expected VCM:CODE | Durable Comment Needs | Behavior / Contract Proof Points |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| SCF-001 | TBD | TBD | TBD | TBD | TBD | TBD | TBD |
 
-## Implementation Plan
-
-TBD
-
-## Risks
+## Tester Coverage Hints
 
 TBD
 
-## Stop Conditions
+## Docs Impact
+
+TBD
+
+## Known Risks
+
+TBD
+
+## Coder Handoff Notes
 
 TBD
 `;
@@ -59,19 +75,27 @@ TBD
 
 TBD
 
-## Validation Commands
+## Commands Run Or Checked
 
 TBD
 
-## External Behavior Evidence
+## Validation Results
 
 TBD
 
-## Coverage Assessment
+## Failed Expectations
 
 TBD
 
-## Findings
+## Reproduction Steps
+
+TBD
+
+## Skipped Checks With Reasons
+
+TBD
+
+## Coverage Gaps
 
 TBD
 
@@ -178,11 +202,11 @@ TBD
 
 ## Scope Traceability
 
-### Expected Changes
+### Expected Files
 
 TBD
 
-### Supporting Changes
+### Supporting Files
 
 TBD
 
@@ -190,11 +214,11 @@ TBD
 
 TBD
 
-### Unexplained Changes
+### Unexplained Files
 
 TBD
 
-### High-Risk Unexpected Changes
+### High-Risk Unexpected Files
 
 TBD
 
@@ -207,6 +231,10 @@ TBD
 TBD
 
 ## Known Issues Disposition
+
+TBD
+
+## Gate Review Gates
 
 TBD
 

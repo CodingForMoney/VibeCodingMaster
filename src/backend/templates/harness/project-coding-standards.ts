@@ -1,9 +1,6 @@
-export function renderProjectCodingStandardsTemplate(): string {
-  return `# Coding Standards
+const PROJECT_CODING_STANDARDS_RULES = `This file is the shared project baseline for roles that edit production code or tests.
 
-This file is the shared project baseline for roles that edit production code or tests.
-
-Project-specific rules may be added here when they make the baseline more precise. Do not weaken these baseline rules without explicit project approval.
+Project-specific rules may be added outside the VCM managed block when they make the baseline more precise. Do not weaken these baseline rules without explicit project approval.
 
 ## Applies To
 
@@ -60,4 +57,23 @@ Project-specific rules may be added here when they make the baseline more precis
 - Regenerate \`.ai/generated/public-surface.json\` with \`.ai/tools/generate-public-surface\` after public API, route, externally consumed surface, or public visibility changes.
 - Do not hand-edit generated context files.
 `;
+
+export function renderProjectCodingStandardsRules(): string {
+  return PROJECT_CODING_STANDARDS_RULES;
+}
+
+export function renderProjectCodingStandardsProjectSection(): string {
+  return `## Project Coding Standards
+
+No project-specific standards recorded yet.`;
+}
+
+export function renderLegacyProjectCodingStandardsTemplate(): string {
+  return `# Coding Standards
+
+${PROJECT_CODING_STANDARDS_RULES
+  .replace(
+    "Project-specific rules may be added outside the VCM managed block when they make the baseline more precise.",
+    "Project-specific rules may be added here when they make the baseline more precise."
+  )}`;
 }

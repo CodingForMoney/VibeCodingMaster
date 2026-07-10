@@ -6,13 +6,14 @@ import {
   createHarnessService,
   parseGitStatusPorcelainV1
 } from "../../../src/backend/services/harness-service.js";
+import { renderLegacyProjectCodingStandardsTemplate } from "../../../src/backend/templates/harness/project-coding-standards.js";
 import type { RoleSessionRecord, StartRoleSessionRequest } from "../../../src/shared/types/session.js";
 
 describe("createHarnessService", () => {
   it("plans and applies recommended harness files when they are missing", async () => {
     const fs = createMemoryFs();
     const service = createHarnessService({ fs });
-    const expectedHarnessFileCount = 21;
+    const expectedHarnessFileCount = 22;
 
     const status = await service.getHarnessStatus("/repo");
     expect(status.needsApply).toBe(true);
@@ -33,7 +34,7 @@ describe("createHarnessService", () => {
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("## VCM Harness Scope");
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("## VCM Task Flow");
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("All role routes are PM-hub routes");
-    expect(await fs.readText("/repo/CLAUDE.md")).toContain("Debug work uses: `project-manager -> architect Debug Mode -> tester -> project-manager final acceptance`.");
+    expect(await fs.readText("/repo/CLAUDE.md")).toContain("Debug work uses: `project-manager -> architect Debug Mode -> tester -> architect docs sync when needed -> project-manager final acceptance`.");
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("Architecture Diagnosis is a PM-triggered branch inside code/debug work");
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("Final acceptance closes every delivery flow before task completion or PR preparation.");
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("## VCM Worktree Policy");
@@ -43,6 +44,8 @@ describe("createHarnessService", () => {
     expect(await fs.readText("/repo/docs/GLOSSARY.md")).toContain("| Abbreviation | Full Term | Meaning / Allowed Use |");
     expect(await fs.readText("/repo/docs/CODING_STANDARDS.md")).toContain("# Coding Standards");
     expect(await fs.readText("/repo/docs/CODING_STANDARDS.md")).toContain("Do not fake completion");
+    expect(await fs.readText("/repo/docs/CODING_STANDARDS.md")).toContain("<!-- VCM:BEGIN version=1 -->");
+    expect(await fs.readText("/repo/docs/known-issues.md")).toContain("## VCM Known Issues Policy");
     expect(await fs.readText("/repo/.gitignore")).toContain("# VCM:BEGIN version=1");
     expect(await fs.readText("/repo/.gitignore")).toContain(".ai/vcm/");
     expect(await fs.readText("/repo/.gitignore")).toContain(".claude/worktrees/");
@@ -56,7 +59,7 @@ describe("createHarnessService", () => {
     expect(await fs.readText("/repo/.claude/skills/vcm-route-message/SKILL.md")).toContain("Non-PM roles must not route directly to each other.");
     expect(await fs.readText("/repo/.claude/skills/vcm-route-message/SKILL.md")).toContain("After writing or updating the route file, end the current Claude Code turn immediately.");
     expect(await fs.readText("/repo/.claude/skills/vcm-final-acceptance/SKILL.md")).toContain("name: vcm-final-acceptance");
-    expect(await fs.readText("/repo/.claude/skills/vcm-final-acceptance/SKILL.md")).toContain("## File Scope Audit");
+    expect(await fs.readText("/repo/.claude/skills/vcm-final-acceptance/SKILL.md")).toContain("## Scope Traceability Audit");
     expect(await fs.readText("/repo/.claude/skills/vcm-final-acceptance/SKILL.md")).toContain("Do not claim to prove that every diff hunk exactly matches the task.");
     expect(await fs.readText("/repo/.claude/skills/vcm-final-acceptance/SKILL.md")).toContain(".ai/vcm/handoffs/final-acceptance.md");
     expect(await fs.readText("/repo/.claude/skills/vcm-harness-bootstrap/SKILL.md")).toContain("name: vcm-harness-bootstrap");
@@ -71,7 +74,7 @@ describe("createHarnessService", () => {
     expect(await fs.readText("/repo/.claude/agents/project-manager.md")).toContain("name: project-manager");
     expect(await fs.readText("/repo/.claude/agents/project-manager.md")).toContain("<!-- VCM:BEGIN version=1 -->");
     const projectManagerAgent = await fs.readText("/repo/.claude/agents/project-manager.md");
-    expect(projectManagerAgent).toContain("Use the routes defined in `CLAUDE.md`");
+    expect(projectManagerAgent).toContain("Use the PM-hub routes allowed by the `vcm-route-message` skill");
     expect(projectManagerAgent).toContain("Do not perform technical analysis");
     expect(projectManagerAgent).toContain("Use the `vcm-route-message` skill for every role dispatch");
     expect(projectManagerAgent).toContain("### PR Preparation");
@@ -83,7 +86,7 @@ describe("createHarnessService", () => {
     expect(projectManagerAgent).toContain("Architect reports that the architecture plan must be updated or replaced for the second time");
     const architectAgent = await fs.readText("/repo/.claude/agents/architect.md");
     expect(architectAgent).toContain("verifiable behavior, implementation boundaries within the accepted scope, behavior/contract proof points");
-    expect(architectAgent).toContain("Read `.ai/vcm/handoffs/known-issues.md`; promote only confirmed unresolved durable issues");
+    expect(architectAgent).toContain("Own `.ai/vcm/handoffs/known-issues.md` as its only writer");
     expect(architectAgent).toContain("Architect owns the technical decision");
     const coderAgent = await fs.readText("/repo/.claude/agents/coder.md");
     expect(coderAgent).toContain("tools: Read, Grep, Glob, Bash, Edit, Write, Agent");
@@ -105,10 +108,14 @@ describe("createHarnessService", () => {
     expect(coderWorkerAgent).toContain("model: inherit");
     expect(coderWorkerAgent).toContain("Do not set `handled: true`");
     expect(coderWorkerAgent).toContain("Implement assigned file/function-level scaffold items only");
+    expect(coderWorkerAgent).toContain("Run assigned L0/L1 checks in the foreground.");
+    expect(coderWorkerAgent).toContain("the switch-to-skill rule for long commands does not apply inside worker runs");
     expect(coderWorkerAgent).not.toContain("Stop before editing if the assigned module");
-    expect(await fs.readText("/repo/.claude/agents/gate-reviewer.md")).toContain("name: gate-reviewer");
-    expect(await fs.readText("/repo/.claude/agents/gate-reviewer.md")).toContain("You are VCM `gate-reviewer`");
-    expect(await fs.readText("/repo/.claude/agents/gate-reviewer.md")).toContain("Use the task and worktree paths named there");
+    const gateReviewerAgent = await fs.readText("/repo/.claude/agents/gate-reviewer.md");
+    expect(gateReviewerAgent).toContain("name: gate-reviewer");
+    expect(gateReviewerAgent).toContain("tools: Read, Grep, Glob, Bash, Write");
+    expect(gateReviewerAgent).toContain("You are VCM `gate-reviewer`");
+    expect(gateReviewerAgent).toContain("Use the task and worktree paths named there");
     const translatorAgents = await fs.readText("/repo/.claude/agents/translator.md");
     expect(translatorAgents).toContain("name: translator");
     expect(translatorAgents).toContain("You are VCM `translator`");
@@ -205,6 +212,35 @@ describe("createHarnessService", () => {
     await service.applyHarness("/repo");
 
     await expect(fs.readText("/repo/docs/GLOSSARY.md")).resolves.toContain("ACME");
+  });
+
+  it("migrates legacy coding standards and preserves project additions", async () => {
+    const fs = createMemoryFs();
+    await fs.writeText(
+      "/repo/docs/CODING_STANDARDS.md",
+      `${renderLegacyProjectCodingStandardsTemplate()}\nProject-specific tail.\n`
+    );
+    const service = createHarnessService({ fs });
+
+    await service.applyHarness("/repo");
+
+    const content = await fs.readText("/repo/docs/CODING_STANDARDS.md");
+    expect(content).toContain("<!-- VCM:BEGIN version=1 -->");
+    expect(content).toContain("Project-specific tail.");
+  });
+
+  it("preserves existing known issues while installing the managed policy", async () => {
+    const fs = createMemoryFs();
+    await fs.writeText("/repo/docs/known-issues.md", "# Known Issues\n\n## Existing Issue\n\nKeep this issue.\n");
+    const service = createHarnessService({ fs });
+
+    await service.applyHarness("/repo");
+
+    const content = await fs.readText("/repo/docs/known-issues.md");
+    expect(content).toContain("<!-- VCM:BEGIN version=1 -->");
+    expect(content).toContain("## VCM Known Issues Policy");
+    expect(content).toContain("## Existing Issue");
+    expect(content).toContain("Keep this issue.");
   });
 
   it("plans and removes obsolete Codex harness paths", async () => {

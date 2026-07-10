@@ -95,7 +95,7 @@ Decision: ready_for_review|incomplete|failed
 
 - Follow \`docs/CODING_STANDARDS.md\` Baseline Tests for every changed callable unit.
 - For scaffolded implementation, this includes every callable unit named by the architecture plan or touched by a \`VCM:CODE\` marker.
-- Coder validation is limited to baseline unit-level and fast L0/L1 checks; do not run L2/L3/L4, smoke, integration, or E2E validation.
+- Coder validation is limited to baseline unit-level and fast L0/L1 checks; do not run L2/L3/L4, smoke, integration, or E2E validation unless the role message explicitly assigns a targeted fast L2 check.
 - Run available L0/L1 validation after implementation.
 - Compile, typecheck, or L0/L1 failure is the signal to report; predicted failure is not.
 - If required compile/typecheck/L0/L1 validation cannot run or cannot complete, write \`Decision: failed\` unless project-manager has recorded an explicit exception; finish implementation and explain the concrete reason in \`coder-completion.md\` and the route message to project-manager.

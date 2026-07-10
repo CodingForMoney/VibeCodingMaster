@@ -4,7 +4,7 @@
   "harnessVersion": "0.6.20",
   "installMode": "fixed",
   "installedAt": "2026-06-24T22:49:58.684Z",
-  "updatedAt": "2026-07-09T15:30:42.664Z",
+  "updatedAt": "2026-07-10T13:46:50.743Z",
   "runtimeRoots": [
     ".ai/vcm/",
     ".claude/worktrees/"
@@ -22,6 +22,40 @@
       "path": "CLAUDE.md",
       "entryType": "file",
       "category": "root-rules",
+      "ownership": "managed-block",
+      "source": "vcm-template",
+      "lifecycle": "long-term",
+      "marker": {
+        "type": "html",
+        "begin": "<!-- VCM:BEGIN version=1 -->",
+        "end": "<!-- VCM:END -->"
+      },
+      "uninstall": {
+        "action": "remove-managed-block",
+        "requiresConfirmation": false
+      }
+    },
+    {
+      "path": "docs/CODING_STANDARDS.md",
+      "entryType": "file",
+      "category": "project-coding-standards",
+      "ownership": "managed-block",
+      "source": "vcm-template",
+      "lifecycle": "long-term",
+      "marker": {
+        "type": "html",
+        "begin": "<!-- VCM:BEGIN version=1 -->",
+        "end": "<!-- VCM:END -->"
+      },
+      "uninstall": {
+        "action": "remove-managed-block",
+        "requiresConfirmation": false
+      }
+    },
+    {
+      "path": "docs/known-issues.md",
+      "entryType": "file",
+      "category": "project-known-issues",
       "ownership": "managed-block",
       "source": "vcm-template",
       "lifecycle": "long-term",

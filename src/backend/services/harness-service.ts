@@ -42,8 +42,17 @@ import {
 import { renderHarnessEngineerHarnessRules } from "../templates/harness/harness-engineer-agent.js";
 import { renderRootClaudeHarnessRules } from "../templates/harness/claude-root.js";
 import { renderGitignoreHarnessRules } from "../templates/harness/gitignore.js";
-import { renderProjectCodingStandardsTemplate } from "../templates/harness/project-coding-standards.js";
+import {
+  renderLegacyProjectCodingStandardsTemplate,
+  renderProjectCodingStandardsProjectSection,
+  renderProjectCodingStandardsRules
+} from "../templates/harness/project-coding-standards.js";
 import { renderProjectGlossaryTemplate } from "../templates/harness/project-glossary.js";
+import {
+  renderLegacyProjectKnownIssuesTemplate,
+  renderProjectKnownIssuesRules,
+  renderProjectKnownIssuesSection
+} from "../templates/harness/project-known-issues.js";
 import { renderProjectManagerHarnessRules } from "../templates/harness/project-manager-agent.js";
 import { renderPullRequestTemplateHarnessRules } from "../templates/harness/pull-request-template.js";
 import { renderTesterHarnessRules } from "../templates/harness/tester-agent.js";
@@ -131,6 +140,8 @@ interface HarnessFileDefinition {
   commentStyle?: "html" | "hash";
   ownership?: "managed-block" | "whole-file" | "raw-file" | "project-file";
   blankLineBeforeEnd?: boolean;
+  defaultContentAfterBlock?: string;
+  legacyWholeFile?: string;
   renderRules(): string;
 }
 
@@ -186,8 +197,17 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
     kind: "project-coding-standards",
     path: "docs/CODING_STANDARDS.md",
     title: "Coding Standards",
-    ownership: "project-file",
-    renderRules: renderProjectCodingStandardsTemplate
+    defaultContentAfterBlock: renderProjectCodingStandardsProjectSection(),
+    legacyWholeFile: renderLegacyProjectCodingStandardsTemplate(),
+    renderRules: renderProjectCodingStandardsRules
+  },
+  {
+    kind: "project-known-issues",
+    path: "docs/known-issues.md",
+    title: "Known Issues",
+    defaultContentAfterBlock: renderProjectKnownIssuesSection(),
+    legacyWholeFile: renderLegacyProjectKnownIssuesTemplate(),
+    renderRules: renderProjectKnownIssuesRules
   },
   {
     kind: "gitignore",
@@ -274,7 +294,8 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
     title: "Gate Reviewer Agent",
     frontmatter: renderAgentFrontmatter(
       "gate-reviewer",
-      "VCM independent gate review role for architecture plans, validation adequacy, and code diffs."
+      "VCM independent gate review role for architecture plans, validation adequacy, and code diffs.",
+      { tools: "Read, Grep, Glob, Bash, Write" }
     ),
     renderRules: renderGateReviewerAgentRules
   },
@@ -1413,6 +1434,25 @@ async function analyzeHarnessFile(
 
   const match = currentContent.match(managedBlockPattern);
   if (!match) {
+    const migratedContent = migrateLegacyHarnessFile(definition, currentContent, expectedBlock);
+    if (migratedContent) {
+      return {
+        definition,
+        status: {
+          kind: definition.kind,
+          path: definition.path,
+          exists: true,
+          hasManagedBlock: false,
+          action: "update"
+        },
+        plannedChange: {
+          path: definition.path,
+          action: "update",
+          reason: "Legacy VCM whole-file baseline will be migrated to a managed block."
+        },
+        nextContent: migratedContent
+      };
+    }
     return {
       definition,
       status: {
@@ -1554,11 +1594,33 @@ function getManagedBlockPattern(definition: HarnessFileDefinition): RegExp {
     : MANAGED_BLOCK_PATTERN;
 }
 
-function renderNewHarnessFile(definition: HarnessFileDefinition, block: string): string {
+function renderNewHarnessFile(
+  definition: HarnessFileDefinition,
+  block: string,
+  contentAfterBlock = definition.defaultContentAfterBlock
+): string {
   const frontmatter = definition.frontmatter
     ? `${definition.frontmatter.trimEnd()}\n\n`
     : "";
-  return `${frontmatter}# ${definition.title}\n\n${block}\n`;
+  const suffix = contentAfterBlock?.trim();
+  return `${frontmatter}# ${definition.title}\n\n${block}${suffix ? `\n\n${suffix}` : ""}\n`;
+}
+
+function migrateLegacyHarnessFile(
+  definition: HarnessFileDefinition,
+  currentContent: string,
+  block: string
+): string | undefined {
+  const legacyContent = definition.legacyWholeFile?.trimEnd();
+  if (!legacyContent) {
+    return undefined;
+  }
+  const current = currentContent.trimEnd();
+  if (current !== legacyContent && !current.startsWith(`${legacyContent}\n`)) {
+    return undefined;
+  }
+  const projectContent = current.slice(legacyContent.length).trim();
+  return renderNewHarnessFile(definition, block, projectContent || undefined);
 }
 
 function renderWholeHarnessFile(definition: HarnessFileDefinition): string {
@@ -2170,7 +2232,7 @@ Required work:
 - Run .ai/tools/generate-public-surface from the target task worktree after module-index.json exists.
 - Add or update project-specific Project Context and Project Constraints in target CLAUDE.md above the VCM managed block.
 - Fill target docs/GLOSSARY.md with the project abbreviation allowlist.
-- Fill target docs/CODING_STANDARDS.md with shared coding, testing, comment, and anti-cheat standards, including project-specific additions when needed.
+- Add project-specific coding standards outside the VCM managed block in target docs/CODING_STANDARDS.md when needed; do not edit the installer-maintained baseline.
 - Fill target docs/ARCHITECTURE.md with project-level module overview, responsibilities, relationships, dependency direction, project-wide constraints, and links to module-level architecture docs.
 - Create or update target module-level ARCHITECTURE.md files for clear non-root module boundaries with architectureDoc paths in module-index.json.
 - Fill target docs/TESTING.md with project-native validation levels, commands, validation selection rules, final-validation cleanup, test layout, integration/E2E case lists, generated-context freshness checks, and known testing gaps.

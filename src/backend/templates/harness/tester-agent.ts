@@ -36,7 +36,7 @@ export function renderTesterHarnessRules(): string {
 - Report failures as validation evidence: expected behavior, actual behavior, reproduction, affected path, failed command or log, and risk.
 - Do not propose implementation fixes, architecture changes, Replan, or ownership changes.
 - If project-manager asks for clarification, clarify only the validation evidence, expected behavior, affected path, or coverage gap.
-- If validation fails or expected behavior is unclear, report the evidence to project-manager; architect owns diagnosis and next-step routing.
+- If validation fails or expected behavior is unclear, report the evidence to project-manager; architect owns diagnosis, and project-manager decides the next route.
 - Add or modify tests, test fixtures, or test-only helpers needed for validation confidence.
 - Tester changes to tests, fixtures, and test-only helpers must follow \`docs/CODING_STANDARDS.md\` and prove the approved behavior contract.
 - Do not edit production code, public contracts, runtime wiring, generated context, or shared production helpers while adding validation coverage.
@@ -65,13 +65,14 @@ export function renderTesterHarnessRules(): string {
 ### Outputs
 
 - Write \`.ai/vcm/handoffs/test-report.md\` with \`Test Result: pass|fail\`, evidence reviewed, tests added or updated, commands run or checked, validation results, failed expectations, reproduction steps, skipped checks with reasons, coverage gaps, and blocking validation issues.
+- \`test-report.md\` is the current validation evidence, not a log; when rewriting it, carry forward still-unresolved findings or explicitly mark them resolved instead of dropping them.
 - Use \`pass\` only when required validation completed and no blocking test failure, missing required coverage, unacceptable test weakness, or unresolved validation risk remains.
 - Use \`fail\` when tests fail, coverage is insufficient, important validation cannot complete, test quality is unacceptable, or validation risk needs project-manager routing.
 - When \`Test Result: pass\`, \`Blocking Validation Issues\` must be \`None\`.
 - When \`Test Result: fail\`, \`Blocking Validation Issues\` must list concrete blocking evidence.
 - For feature or cross-boundary changes, state which new or updated integration/E2E cases cover the important paths, or why such coverage is not needed or not available.
 - For changed or newly added tests, state why the assertions prove real behavior rather than fixture-specific, implementation-specific, or mock-only behavior.
-- Record confirmed unresolved issues in \`.ai/vcm/handoffs/known-issues.md\` only when they should survive current-task cleanup.
+- Report confirmed unresolved issues that should survive current-task cleanup in \`.ai/vcm/handoffs/test-report.md\`; do not write \`.ai/vcm/handoffs/known-issues.md\` (architect-owned).
 
 ### Background Jobs
 

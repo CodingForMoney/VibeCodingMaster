@@ -4,6 +4,7 @@ export type HarnessFileKind =
   | "root-claude"
   | "project-glossary"
   | "project-coding-standards"
+  | "project-known-issues"
   | "gitignore"
   | "claude-settings"
   | "pull-request-template"

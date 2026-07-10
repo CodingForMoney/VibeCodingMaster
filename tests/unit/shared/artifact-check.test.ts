@@ -12,17 +12,32 @@ describe("checkMarkdownArtifact", () => {
     const result = checkMarkdownArtifact("test-report", "test-report.md", `
 # Test Report
 
-## Summary
-Done
+## Evidence Reviewed
+Reviewed.
 
-## Findings
-None
+## Tests Added Or Updated
+Updated.
 
-## Validation
-Checked
+## Commands Run Or Checked
+Checked.
 
-## Decision
-Pass
+## Validation Results
+Passed.
+
+## Failed Expectations
+None.
+
+## Reproduction Steps
+None.
+
+## Skipped Checks With Reasons
+None.
+
+## Coverage Gaps
+None.
+
+## Blocking Validation Issues
+None.
 `);
     expect(result.status).toBe("ok");
     expect(result.hasPlaceholder).toBe(false);
@@ -32,23 +47,35 @@ Pass
     const result = checkMarkdownArtifact("architecture-plan", "architecture-plan.md", `
 # Architecture Plan
 
-## Context
+## Accepted Scope
 Ready.
+
+## Current Code Reality
+Reviewed.
 
 ## Architecture Decision
 Use the existing boundary.
 
+## Module/File Plan
+One scoped change.
+
+## Public Surface Impact
+None.
+
 ## Scaffold Manifest
 No code scaffold needed.
 
-## Implementation Plan
-One scoped change.
+## Tester Coverage Hints
+Cover changed behavior.
 
-## Risks
+## Docs Impact
 None.
 
-## Stop Conditions
-Public contract drift.
+## Known Risks
+None.
+
+## Coder Handoff Notes
+Implement the manifest.
 `);
     expect(result.status).toBe("ok");
   });
@@ -105,6 +132,9 @@ Tester and docs sync complete.
 
 ## Known Issues Disposition
 No task issues to promote.
+
+## Gate Review Gates
+Complete.
 
 ## Cleanup Readiness
 Ready.

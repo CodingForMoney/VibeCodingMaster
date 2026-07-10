@@ -38,7 +38,7 @@ Acceptable evidence must show:
 - known-issues disposition when unresolved findings were recorded
 - explicit user approval for accepted high-risk decisions or intentionally skipped required gates
 
-## File Scope Audit
+## Scope Traceability Audit
 
 Do not claim to prove that every diff hunk exactly matches the task.
 
@@ -100,7 +100,7 @@ accepted | accepted-with-known-risks | needs-coder-follow-up | needs-architect-f
 
 ## Evidence Reviewed
 
-## File Scope
+## Scope Traceability
 
 ### Expected Files
 
@@ -115,6 +115,8 @@ accepted | accepted-with-known-risks | needs-coder-follow-up | needs-architect-f
 ## Validation Summary
 
 ## Review And Docs Sync
+
+## Known Issues Disposition
 
 ## Gate Review Gates
 

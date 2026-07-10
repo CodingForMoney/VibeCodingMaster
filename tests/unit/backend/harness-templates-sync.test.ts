@@ -11,6 +11,33 @@ import { createHarnessService } from "../../../src/backend/services/harness-serv
 const execFileAsync = promisify(execFile);
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const installerPath = path.join(appRoot, "scripts/install-vcm-harness.mjs");
+const approvedExampleRoot = path.join(appRoot, "example/rust-layered");
+
+const EXACT_EXAMPLE_HARNESS_PATHS = [
+  ".ai/tools/generate-module-index",
+  ".ai/tools/generate-public-surface",
+  ".ai/tools/request-gate-review",
+  ".ai/tools/run-long-check",
+  ".ai/tools/vcm-bash-guard",
+  ".ai/tools/watch-job",
+  ".claude/agents/architect.md",
+  ".claude/agents/coder.md",
+  ".claude/agents/gate-reviewer.md",
+  ".claude/agents/harness-engineer.md",
+  ".claude/agents/project-manager.md",
+  ".claude/agents/tester.md",
+  ".claude/agents/translator.md",
+  ".claude/agents/vcm-coder-worker.md",
+  ".claude/skills/vcm-final-acceptance/SKILL.md",
+  ".claude/skills/vcm-gate-review/SKILL.md",
+  ".claude/skills/vcm-harness-bootstrap/SKILL.md",
+  ".claude/skills/vcm-long-running-validation/SKILL.md",
+  ".claude/skills/vcm-report-harness-issue/SKILL.md",
+  ".claude/skills/vcm-route-message/SKILL.md",
+  ".github/pull_request_template.md",
+  "docs/CODING_STANDARDS.md",
+  "docs/GLOSSARY.md"
+] as const;
 
 let tmpRepo: string | undefined;
 
@@ -22,6 +49,36 @@ afterEach(async () => {
 });
 
 describe("harness templates stay in sync with the script installer", () => {
+  it("renders fixed harness files from the approved rust-layered example", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-example-contract-"));
+    await execFileAsync(process.execPath, [installerPath, tmpRepo]);
+
+    for (const relativePath of EXACT_EXAMPLE_HARNESS_PATHS) {
+      const approved = await readFile(path.join(approvedExampleRoot, relativePath), "utf8");
+      const installed = await readFile(path.join(tmpRepo, relativePath), "utf8");
+      expect(installed, `${relativePath}: installer must follow the approved example`).toBe(approved);
+      if (relativePath !== "docs/GLOSSARY.md") {
+        const selfHarness = await readFile(path.join(appRoot, relativePath), "utf8");
+        expect(selfHarness, `${relativePath}: VCM self-harness must follow the approved example`).toBe(approved);
+      }
+    }
+
+    for (const [relativePath, style] of [
+      ["CLAUDE.md", "html"],
+      ["docs/known-issues.md", "html"],
+      [".gitignore", "hash"]
+    ] as const) {
+      const approved = extractManagedBlock(
+        await readFile(path.join(approvedExampleRoot, relativePath), "utf8"),
+        style
+      );
+      const installed = extractManagedBlock(await readFile(path.join(tmpRepo, relativePath), "utf8"), style);
+      const selfHarness = extractManagedBlock(await readFile(path.join(appRoot, relativePath), "utf8"), style);
+      expect(installed, `${relativePath}: installer managed block must follow the approved example`).toBe(approved);
+      expect(selfHarness, `${relativePath}: VCM managed block must follow the approved example`).toBe(approved);
+    }
+  }, 30_000);
+
   it("reports every file as ok right after a fresh script install", async () => {
     tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-harness-sync-"));
     await execFileAsync(process.execPath, [installerPath, tmpRepo]);
@@ -97,3 +154,14 @@ describe("harness templates stay in sync with the script installer", () => {
     expect(missingGuardOutput).toBe("");
   }, 30_000);
 });
+
+function extractManagedBlock(content: string, style: "html" | "hash"): string {
+  const pattern = style === "hash"
+    ? /# VCM:BEGIN version=1[\s\S]*?# VCM:END/
+    : /<!-- VCM:BEGIN version=1 -->[\s\S]*?<!-- VCM:END -->/;
+  const match = content.match(pattern);
+  if (!match) {
+    throw new Error(`Missing ${style} VCM managed block.`);
+  }
+  return match[0];
+}

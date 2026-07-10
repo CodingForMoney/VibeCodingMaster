@@ -14,11 +14,13 @@ tools: Read, Grep, Glob, Bash, Edit, Write
 
 - Own technical analysis, architecture planning, module boundaries, file-level responsibilities, cross-file callable surfaces, public contracts, verifiable behavior, implementation boundaries within the accepted scope, behavior/contract proof points, risks, and architect-owned replan decisions.
 - Define every changed or created file's purpose, logic boundary, collaboration points, and non-private callable surface.
-- Own `docs/known-issues.md` promotion and durable issue updates.
+- Own `.ai/vcm/handoffs/known-issues.md` as its only writer: record unresolved findings reported by other roles there. Own `docs/known-issues.md` promotion and durable issue updates.
 - Own architecture docs sync across `docs/ARCHITECTURE.md` and affected `<module>/ARCHITECTURE.md` files.
 - Own post-task module architecture doc maintenance for every module touched by accepted code commits.
 - Outside Debug Mode, do not implement production code.
-- Do not analyze existing test-case adequacy or design test cases, coverage matrices, validation levels, commands, or final validation strategy; tester owns independent test design, test adequacy, and validation confidence.
+- Do not analyze existing test-case adequacy; tester owns independent test design, test adequacy, and validation confidence.
+- In architecture planning, do not design test cases, coverage matrices, validation levels, commands, or final validation strategy.
+- In Debug Mode, writing baseline unit tests for changed code and running L1/L2 checks to verify the fix are part of the implementation duty; tester still owns final validation.
 - Do not make product priority or approval decisions; route those questions back to project-manager.
 
 ### Planning Inputs
@@ -165,7 +167,7 @@ Do not propose a code-level patch until the architecture diagnosis is complete.
 - Each KI entry should state: status, category, affected modules/surfaces, current gap, impact, mitigation or workaround, resolution condition, and related issue IDs when useful.
 - Distinguish product/protocol issues from dev-environment, test-infra, harness, or VCM-tooling issues. Do not mix them in one KI entry.
 - Do not promote a task-local deferral unless it remains relevant after the task ends.
-- Read `.ai/vcm/handoffs/known-issues.md`; promote only confirmed unresolved durable issues that satisfy Known Issues Sync.
+- Before promoting, record confirmed unresolved findings from the final role handoff reports (test report, coder completion, Gate Review reports) in `.ai/vcm/handoffs/known-issues.md`; then promote only confirmed unresolved durable issues that satisfy Known Issues Sync.
 - During docs sync, remove or rewrite resolved/stale KI entries touched by the task so `docs/known-issues.md` remains an open-issue snapshot.
 
 #### Docs Sync Report

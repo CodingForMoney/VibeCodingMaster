@@ -1,8 +1,9 @@
 # Coding Standards
 
+<!-- VCM:BEGIN version=1 -->
 This file is the shared project baseline for roles that edit production code or tests.
 
-Project-specific rules may be added here when they make the baseline more precise. Do not weaken these baseline rules without explicit project approval.
+Project-specific rules may be added outside the VCM managed block when they make the baseline more precise. Do not weaken these baseline rules without explicit project approval.
 
 ## Applies To
 
@@ -58,3 +59,8 @@ Project-specific rules may be added here when they make the baseline more precis
 - Regenerate `.ai/generated/module-index.json` with `.ai/tools/generate-module-index` after module, manifest, source-file, or test-file changes.
 - Regenerate `.ai/generated/public-surface.json` with `.ai/tools/generate-public-surface` after public API, route, externally consumed surface, or public visibility changes.
 - Do not hand-edit generated context files.
+<!-- VCM:END -->
+
+## Project Coding Standards
+
+No project-specific standards recorded yet.

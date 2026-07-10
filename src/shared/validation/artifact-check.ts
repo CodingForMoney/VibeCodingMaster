@@ -2,22 +2,31 @@ import type { ArtifactCheckResult, ArtifactKind } from "../types/artifact.js";
 
 const REQUIRED_HEADINGS: Record<ArtifactKind, readonly string[]> = {
   "architecture-plan": [
-    "Context",
+    "Accepted Scope",
+    "Current Code Reality",
     "Architecture Decision",
+    "Module/File Plan",
+    "Public Surface Impact",
     "Scaffold Manifest",
-    "Implementation Plan",
-    "Risks",
-    "Stop Conditions"
+    "Tester Coverage Hints",
+    "Docs Impact",
+    "Known Risks",
+    "Coder Handoff Notes"
   ],
   "known-issues": [
     "Task Issues",
     "Escalation To Docs"
   ],
   "test-report": [
-    "Summary",
-    "Findings",
-    "Validation",
-    "Decision"
+    "Evidence Reviewed",
+    "Tests Added Or Updated",
+    "Commands Run Or Checked",
+    "Validation Results",
+    "Failed Expectations",
+    "Reproduction Steps",
+    "Skipped Checks With Reasons",
+    "Coverage Gaps",
+    "Blocking Validation Issues"
   ],
   "docs-sync-report": [
     "Summary",
@@ -36,6 +45,7 @@ const REQUIRED_HEADINGS: Record<ArtifactKind, readonly string[]> = {
     "Validation Summary",
     "Review And Docs Sync",
     "Known Issues Disposition",
+    "Gate Review Gates",
     "Cleanup Readiness",
     "Final User Summary"
   ]

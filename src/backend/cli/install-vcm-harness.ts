@@ -17,8 +17,17 @@ import {
 import { renderHarnessEngineerHarnessRules } from "../templates/harness/harness-engineer-agent.js";
 import { renderRootClaudeHarnessRules } from "../templates/harness/claude-root.js";
 import { renderGitignoreHarnessRules } from "../templates/harness/gitignore.js";
-import { renderProjectCodingStandardsTemplate } from "../templates/harness/project-coding-standards.js";
+import {
+  renderLegacyProjectCodingStandardsTemplate,
+  renderProjectCodingStandardsProjectSection,
+  renderProjectCodingStandardsRules
+} from "../templates/harness/project-coding-standards.js";
 import { renderProjectGlossaryTemplate } from "../templates/harness/project-glossary.js";
+import {
+  renderLegacyProjectKnownIssuesTemplate,
+  renderProjectKnownIssuesRules,
+  renderProjectKnownIssuesSection
+} from "../templates/harness/project-known-issues.js";
 import { renderProjectManagerHarnessRules } from "../templates/harness/project-manager-agent.js";
 import { renderPullRequestTemplateHarnessRules } from "../templates/harness/pull-request-template.js";
 import { renderTesterHarnessRules } from "../templates/harness/tester-agent.js";
@@ -71,7 +80,8 @@ const AGENT_FRONTMATTER = {
     description: "VCM testing role for validation, test adequacy, approved-scope validation, and risk findings."
   },
   "gate-reviewer": {
-    description: "VCM independent gate review role for architecture plans, validation adequacy, and code diffs."
+    description: "VCM independent gate review role for architecture plans, validation adequacy, and code diffs.",
+    tools: "Read, Grep, Glob, Bash, Write"
   },
   translator: {
     description: "VCM project translation tool role for conversation translation, file translation, bootstrap, and memory updates."
@@ -93,6 +103,24 @@ const MANAGED_FILES = [
     category: "root-rules",
     blankLineBeforeEnd: true,
     content: renderRootClaudeHarnessRules()
+  },
+  {
+    path: "docs/CODING_STANDARDS.md",
+    title: "Coding Standards",
+    commentStyle: "html",
+    category: "project-coding-standards",
+    content: renderProjectCodingStandardsRules(),
+    contentAfterBlock: renderProjectCodingStandardsProjectSection(),
+    legacyWholeFile: renderLegacyProjectCodingStandardsTemplate()
+  },
+  {
+    path: "docs/known-issues.md",
+    title: "Known Issues",
+    commentStyle: "html",
+    category: "project-known-issues",
+    content: renderProjectKnownIssuesRules(),
+    contentAfterBlock: renderProjectKnownIssuesSection(),
+    legacyWholeFile: renderLegacyProjectKnownIssuesTemplate()
   },
   {
     path: ".gitignore",
@@ -181,10 +209,6 @@ const DURABLE_DOC_TEMPLATES = [
     content: renderProjectGlossaryTemplate()
   },
   {
-    path: "docs/CODING_STANDARDS.md",
-    content: renderProjectCodingStandardsTemplate()
-  },
-  {
     path: "docs/ARCHITECTURE.md",
     content: "# Architecture\n"
   },
@@ -192,10 +216,6 @@ const DURABLE_DOC_TEMPLATES = [
     path: "docs/TESTING.md",
     content: "# Testing\n"
   },
-  {
-    path: "docs/known-issues.md",
-    content: "# Known Issues\n"
-  }
 ];
 
 const WHOLE_FILES = [
@@ -574,9 +594,12 @@ async function installManagedFile({ projectRoot, definition, dryRun, operations 
     nextContent = renderNewManagedFile(definition, block);
   } else {
     const pattern = definition.commentStyle === "hash" ? HASH_BLOCK_PATTERN : HTML_BLOCK_PATTERN;
-    nextContent = pattern.test(currentContent)
-      ? currentContent.replace(pattern, block)
-      : `${currentContent.trimEnd()}\n\n${block}\n`;
+    if (pattern.test(currentContent)) {
+      nextContent = currentContent.replace(pattern, block);
+    } else {
+      nextContent = migrateLegacyManagedFile(definition, currentContent, block)
+        ?? `${currentContent.trimEnd()}\n\n${block}\n`;
+    }
   }
 
   await writeIfChanged({
@@ -619,13 +642,30 @@ function renderManagedBlock(definition) {
 }
 
 function renderNewManagedFile(definition, block) {
+  const suffix = definition.contentAfterBlock?.trim();
   if (definition.agentName) {
     const frontmatter = AGENT_FRONTMATTER[definition.agentName];
     const tools = frontmatter.tools ?? "Read, Grep, Glob, Bash, Edit, Write";
     const model = frontmatter.model ? `\nmodel: ${frontmatter.model}` : "";
-    return `---\nname: ${definition.agentName}\ndescription: ${frontmatter.description}\ntools: ${tools}${model}\n---\n\n# ${definition.title}\n\n${block}\n`;
+    return `---\nname: ${definition.agentName}\ndescription: ${frontmatter.description}\ntools: ${tools}${model}\n---\n\n# ${definition.title}\n\n${block}${suffix ? `\n\n${suffix}` : ""}\n`;
   }
-  return `# ${definition.title}\n\n${block}\n`;
+  return `# ${definition.title}\n\n${block}${suffix ? `\n\n${suffix}` : ""}\n`;
+}
+
+function migrateLegacyManagedFile(definition, currentContent, block) {
+  const legacyContent = definition.legacyWholeFile?.trimEnd();
+  if (!legacyContent) {
+    return undefined;
+  }
+  const current = currentContent.trimEnd();
+  if (current !== legacyContent && !current.startsWith(`${legacyContent}\n`)) {
+    return undefined;
+  }
+  const projectContent = current.slice(legacyContent.length).trim();
+  return renderNewManagedFile({
+    ...definition,
+    contentAfterBlock: projectContent || definition.contentAfterBlock
+  }, block);
 }
 
 function renderSkillFile(title, name, description, body) {

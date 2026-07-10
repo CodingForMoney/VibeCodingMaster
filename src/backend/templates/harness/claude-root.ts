@@ -3,7 +3,7 @@ export function renderRootClaudeHarnessRules(): string {
 
 - Use the durable project docs below as role-relevant project truth.
 - Read module-local \`CLAUDE.md\` before editing a subdirectory if one exists.
-- Use \`vcm-route-message\` only for PM-hub routes: project-manager dispatches to roles, and roles report questions, results, blockers, and findings back to project-manager. Follow its write-then-stop rule.
+- \`vcm-route-message\` is the only channel for role dispatch and reporting, and is used only for PM-hub routes: project-manager dispatches to roles, and roles report questions, results, blockers, and findings back to project-manager. Follow its write-then-stop rule.
 - Use \`vcm-long-running-validation\` for long-running validation. Follow the background job limits below.
 - Use \`vcm-report-harness-issue\` when you notice a reusable VCM harness problem. Record feedback; do not contact Harness Engineer directly.
 - Project-manager runs \`vcm-gate-review\` unconditionally at every Gate Review trigger point and on VCM Gate Review callbacks; the tool reports the authoritative enable state.
@@ -17,7 +17,7 @@ If a reusable harness problem is suspected, it is enough to record a concise fee
 ## VCM Background Jobs
 
 - Never run the Bash tool with \`run_in_background: true\`. Never detach a process with \`nohup\`, \`setsid\`, \`disown\`, or a trailing \`&\`. VCM denies these calls.
-- The only sanctioned long-running mechanism is the \`vcm-long-running-validation\` skill: \`.ai/tools/run-long-check\` plus \`.ai/tools/watch-job\`.
+- The only sanctioned long-running mechanism is the \`vcm-long-running-validation\` skill: \`.ai/tools/run-long-check\` plus \`.ai/tools/watch-job\`. Only one job may run at a time.
 - The moment a command might run longer than 2 minutes, switch to that skill instead of running the command directly.
 - While a job is running, stay in the current turn and keep calling \`.ai/tools/watch-job\` until it reports a terminal result; VCM blocks turn-end while a job is running, and a job without a live watcher is killed automatically.
 - Hard ceiling: 60 minutes per job, enforced by the job worker. Do not run or suggest operations expected to exceed 60 minutes without user approval; split larger work first.
@@ -43,7 +43,7 @@ If a reusable harness problem is suspected, it is enough to record a concise fee
 
 - All role routes are PM-hub routes. Project-manager starts and advances every flow; non-PM roles report blockers, failures, conflicts, incomplete work, and findings back to project-manager.
 - Code changes use: \`project-manager -> architect -> coder -> tester -> architect docs sync -> project-manager final acceptance\`.
-- Debug work uses: \`project-manager -> architect Debug Mode -> tester -> project-manager final acceptance\`.
+- Debug work uses: \`project-manager -> architect Debug Mode -> tester -> architect docs sync when needed -> project-manager final acceptance\`.
 - Docs-only changes use: \`project-manager -> architect -> project-manager final acceptance\`.
 - Test-only or validation-only work uses: \`project-manager -> tester -> project-manager final acceptance\`.
 - Architecture Diagnosis is a PM-triggered branch inside code/debug work: \`project-manager -> architect Architecture Diagnosis Mode -> project-manager route decision\`.
@@ -55,7 +55,7 @@ If a reusable harness problem is suspected, it is enough to record a concise fee
 - Keep role outputs under \`.ai/vcm/handoffs/\`.
 - Gate Review Gate reports live under \`.ai/vcm/gate-reviews/\` and are VCM-managed task evidence.
 - Runtime task records and handoffs under \`.ai/vcm/\` are temporary. Durable facts must move into code, tests, PR text, commit history, or long-term docs.
-- Record current-task unresolved findings in \`.ai/vcm/handoffs/known-issues.md\`.
+- Only architect writes \`.ai/vcm/handoffs/known-issues.md\`; other roles report unresolved findings back through their own handoff artifacts.
 
 ## Direct User Messages
 
@@ -63,7 +63,7 @@ If a reusable harness problem is suspected, it is enough to record a concise fee
 - A non-PM role may discuss, clarify, or answer questions within its current role scope, but direct discussion is not a flow instruction by itself.
 - Do not treat exploratory discussion, tentative wording, disagreement, preference discussion, or "what if" analysis as approved scope, approved plan, or a route decision.
 - A non-PM role may use a direct user message as local clarification for its current assigned work when it does not change accepted scope, gates, role routing, approval state, or task outcome.
-- If the direct user message may change scope, plan, priority, approval, external authorization, or next-route decision, the role must wait for explicit user confirmation before reporting it to project-manager.
+- If the direct user message may change scope, plan, priority, approval, external authorization, or next-route decision, the role must ask the user in its own session for explicit confirmation and wait for it before reporting to project-manager.
 - Explicit confirmation means the user clearly approves or instructs the new plan, scope, decision, or route, such as "confirmed", "use this plan", "change it to this", "approve", or equivalent wording in context.
 - After explicit confirmation, the role must report the confirmed change to project-manager with \`vcm-route-message\` and stop. PM decides the next route.
 - A direct user message must not let a non-PM role start a new task, skip gates, approve exceptions, trigger another role, or close the task.
