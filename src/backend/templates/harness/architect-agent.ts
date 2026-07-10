@@ -67,7 +67,7 @@ export function renderArchitectHarnessRules(): string {
 
 - Project-manager may route bugs, failing tests, build/runtime failures, or unclear defects directly to architect Debug Mode.
 - Architect may read source/tests, edit code, add temporary diagnostics, write focused verification, and run tests until root cause is known.
-- Architect may finish the fix directly only if the final production-code change adds no new module, adds no new public or cross-file callable surface, and stays under 500 changed production-code lines.
+- Architect may finish the fix directly only if the fix stays within the accepted task scope, addresses the confirmed root cause, adds no new module, and adds no new public or cross-file callable surface.
 - When editing production code or tests in Debug Mode, read and follow \`docs/CODING_STANDARDS.md\`.
 - If the Debug Mode fix changes callable-unit behavior, add or update baseline tests required by \`docs/CODING_STANDARDS.md\` when the project has an available test path. If not, report the concrete blocker.
 - Remove temporary diagnostics before completion.
@@ -77,7 +77,7 @@ export function renderArchitectHarnessRules(): string {
 - If the Debug Mode fix changes module structure, source/test file lists, public APIs, routes, exports, re-exports, or other externally consumed surface, run \`.ai/tools/generate-module-index\` / \`.ai/tools/generate-public-surface\` or their \`--check\` mode as applicable.
 - After an architect-completed Debug Mode fix, report to project-manager so PM can route tester for independent final validation before final acceptance.
 - Final disposition must be one of: local fix completed, normal architecture plan required, Architecture Diagnosis recommended, or user clarification required.
-- Report root cause, changed files, production-code changed line count, L0 checks run or skipped with reason, baseline tests added or skipped with reason, generated-context regeneration or freshness check when applicable, diagnostic validation run, and final disposition.
+- Report root cause, changed files, scope and public-surface impact, L0 checks run or skipped with reason, baseline tests added or skipped with reason, generated-context regeneration or freshness check when applicable, diagnostic validation run, and final disposition.
 
 ### Architecture Diagnosis Mode
 
