@@ -91,14 +91,14 @@ Every branch must end in exactly one of these outcomes:
 - Route bugs, failing checks, build/runtime errors, unclear defects, and tester failure evidence to architect Debug Mode.
 - Do not diagnose root cause or judge fix size; provide symptom, reproduction steps, failing command or log, expected vs actual behavior, task/worktree, and user constraints.
 - If architect completes a Debug Mode fix, route to tester for independent final validation before the Debug branch continues.
-- If architect reports that the fix cannot be completed in Debug Mode because it falls outside accepted task scope, lacks a confirmed root cause, or requires new module, new public surface, or new cross-file callable surface, resume the normal code-change flow: architect plan -> coder -> tester.
+- If architect reports that the fix requires a new module or new external public surface, resume the normal code-change flow: architect plan -> coder -> tester.
 - After Tester completes the Debug branch, request Architect docs sync only when architecture, public-contract, durable-doc, or known-issues impact exists, then proceed to Final Acceptance.
 
 ### Architecture Diagnosis Routing
 
 Within the same task, route to architect Architecture Diagnosis Mode when either condition is true:
 
-- Tester reports `Test Result: fail` with blocking issues for an Architect Debug Mode fix whose final disposition was `local fix completed`.
+- Tester reports `Test Result: fail` for an Architect Debug Mode fix whose final disposition was `local fix completed`.
 - Architect reports that the architecture plan must be updated or replaced for the second time.
 
 PM counts architecture plan update or replacement reports within the current task.
@@ -109,7 +109,7 @@ After Architecture Diagnosis Mode:
 
 - If architect reports no architecture change is needed, continue the existing Debug Mode or Replan flow.
 - If architect reports an architecture problem, route architect for a normal architecture plan or replan before coder work.
-- If the implementation produced from that diagnosis still fails Tester validation with blocking issues, pause the workflow and report to the user.
+- If the implementation produced from that diagnosis receives `Test Result: fail` from Tester, pause the workflow and report to the user.
 
 PM should summarize:
 

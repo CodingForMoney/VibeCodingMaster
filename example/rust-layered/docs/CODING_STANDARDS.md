@@ -13,14 +13,14 @@ Project-specific rules may be added outside the VCM managed block when they make
 
 ## Implementation Discipline
 
-- Follow the accepted task scope, role message, architecture plan, and scaffold when present.
-- Do not change file responsibilities, callable-surface signatures, visibility, exports, contracts, or architect-defined intent unless the approved plan allows it.
+- Coder and Coder Worker follow the accepted task scope, role message, architecture plan, and scaffold. Architect Debug Mode follows the confirmed root cause and PM-routed failure evidence.
+- Coder and Coder Worker must not change file responsibilities, callable-surface signatures, visibility, exports, contracts, or architect-defined intent unless the approved plan allows it. In Debug Mode, Architect may change file responsibilities and cross-file callable surfaces after confirming the root cause, and must update affected callers, contracts, and tests.
 - Complete assigned `VCM:CODE` placeholders and remove them before handoff.
 - Do not fake completion: no hardcoded success, disabled logic, swallowed errors, test-only shortcuts, or silent fallback that hides failure.
 - Implement behavior from the approved architecture, existing domain model, real inputs, and project runtime flow.
 - Do not derive logic from visible test fixtures, fixed sample values, snapshot text, or special branches that only satisfy known tests.
-- Keep the diff inside approved scope: no unrelated rewrites, drive-by refactors, renamed symbols, moved files, or formatting churn.
-- Preserve existing behavior unless the approved plan explicitly changes it.
+- Coder and Coder Worker keep the diff inside the approved plan. In Debug Mode, Architect owns the technical change boundary after confirming the root cause.
+- Preserve existing behavior unless the approved plan or a confirmed Debug Mode root cause changes it.
 
 ## Comments
 

@@ -12,7 +12,7 @@ export function renderArchitectHarnessRules(): string {
 - Outside Debug Mode, do not implement production code.
 - Do not analyze existing test-case adequacy; tester owns independent test design, test adequacy, and validation confidence.
 - In architecture planning, do not design test cases, coverage matrices, validation levels, commands, or final validation strategy.
-- In Debug Mode, writing baseline unit tests for changed code and running targeted L1/L2 checks to verify the fix are part of the implementation duty; tester still owns final validation.
+- In Debug Mode, writing baseline unit tests for changed code and running targeted L1/L2/L3 checks to verify the fix are part of the implementation duty; tester still owns final validation.
 - Do not make product priority or approval decisions; route those questions back to project-manager.
 
 ### Planning Inputs
@@ -69,13 +69,14 @@ export function renderArchitectHarnessRules(): string {
 ### Debug Mode
 
 - Project-manager may route bugs, failing tests, build/runtime failures, or unclear defects directly to architect Debug Mode.
-- Architect may read source/tests, edit code, add temporary diagnostics, write focused verification, and run tests until root cause is known.
-- Architect may finish the fix directly only if the fix stays within the accepted task scope, addresses the confirmed root cause, adds no new module, and adds no new public or cross-file callable surface.
+- Architect may read source/tests, edit code, and run focused diagnostics until root cause is known. Temporary logs, instrumentation, assertions, or diagnostic code may be added to identify and confirm the root cause.
+- Once the root cause is confirmed, architect owns the technical change boundary for the fix. Architect may modify production code and tests in any existing module, add or change cross-file callable surfaces, and update their callers, contracts, and tests. No pre-approved module or file list limits Debug Mode implementation.
 - When editing production code or tests in Debug Mode, read and follow \`docs/CODING_STANDARDS.md\`.
 - If the Debug Mode fix changes callable-unit behavior, add or update baseline tests required by \`docs/CODING_STANDARDS.md\` when the project has an available test path. If not, report the concrete blocker.
-- Remove temporary diagnostics before completion.
-- If the fix exceeds those limits, return a normal architecture plan with root cause, evidence, and affected scope.
+- Remove all temporary diagnostics before completion.
+- If the fix requires a new module or new external public surface, return a normal architecture plan with root cause, evidence, and affected scope.
 - Architect-run validation in Debug Mode is diagnostic evidence, not final acceptance.
+- Architect may run targeted L1/L2/L3 checks for the affected behavior. Tester still owns full and final validation.
 - Before handing off an architect-completed Debug Mode fix, run the smallest relevant L0 fast checks for the touched files or changed modules: format, lint, typecheck, boundary, dependency, or project-defined equivalents. If a check cannot run, report the exact reason.
 - If the Debug Mode fix changes module structure, source/test file lists, public APIs, routes, exports, re-exports, or other externally consumed surface, run \`.ai/tools/generate-module-index\` / \`.ai/tools/generate-public-surface\` or their \`--check\` mode as applicable.
 - After an architect-completed Debug Mode fix, report to project-manager so PM can route tester for independent final validation before the Debug branch continues.

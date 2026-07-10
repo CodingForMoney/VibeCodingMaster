@@ -39,7 +39,7 @@ describe("createHarnessService", () => {
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("Debug work is a branch inside the code-change flow");
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("Architecture Diagnosis is a PM-triggered branch inside code/debug work");
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("Final acceptance closes only the complete code-change flow");
-    expect(await fs.readText("/repo/CLAUDE.md")).toContain("targeted diagnostic L2 may run in Coder when explicitly assigned or in Architect Debug Mode");
+    expect(await fs.readText("/repo/CLAUDE.md")).toContain("targeted diagnostic L3 may run in Architect Debug Mode");
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("## VCM Worktree Policy");
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("## VCM Glossary Policy");
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("docs/GLOSSARY.md");
@@ -96,7 +96,7 @@ describe("createHarnessService", () => {
     expect(projectManagerAgent).toContain("### Gate Review Gates");
     expect(projectManagerAgent).toContain("code-diff --source coder");
     expect(projectManagerAgent).toContain("code-diff --source architect-debug");
-    expect(projectManagerAgent).toContain("Tester reports `Test Result: fail` with blocking issues for an Architect Debug Mode fix whose final disposition was `local fix completed`");
+    expect(projectManagerAgent).toContain("Tester reports `Test Result: fail` for an Architect Debug Mode fix whose final disposition was `local fix completed`");
     expect(projectManagerAgent).toContain("Architecture Diagnosis Mode must run before another Debug Mode fix or Coder dispatch");
     expect(projectManagerAgent).not.toContain("Tester reports `Test Result: fail` for the implementation for the second time");
     expect(projectManagerAgent).toContain("Architect reports that the architecture plan must be updated or replaced for the second time");
@@ -106,7 +106,7 @@ describe("createHarnessService", () => {
     expect(architectAgent).toContain("verifiable behavior, implementation boundaries within the accepted scope, behavior/contract proof points");
     expect(architectAgent).toContain("Own `.ai/vcm/handoffs/known-issues.md` as its only writer");
     expect(architectAgent).toContain("Architect owns the technical decision");
-    expect(architectAgent).toContain("running targeted L1/L2 checks to verify the fix");
+    expect(architectAgent).toContain("running targeted L1/L2/L3 checks to verify the fix");
     expect(architectAgent).toContain("In docs-only flow, update the PM-assigned durable docs directly");
     expect(architectAgent).toContain("`Decision` must be `synced`, `unchanged`, or `blocked`");
     const testerAgent = await fs.readText("/repo/.claude/agents/tester.md");

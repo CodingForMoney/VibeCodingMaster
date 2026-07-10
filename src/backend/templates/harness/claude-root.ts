@@ -76,7 +76,7 @@ If a reusable harness problem is suspected, it is enough to record a concise fee
 - L0 fast checks (default runner: coder): format, lint, typecheck, boundary, dependency, or other cheap project checks.
 - L1 baseline implementation checks (default runner: coder): changed behavior and direct regressions through project-defined unit tests.
 - L2 module / integration checks: targeted diagnostic L2 may run in Coder when explicitly assigned or in Architect Debug Mode; Tester owns full and final L2 validation.
-- L3 smoke E2E checks (default runner: tester): core user journeys or critical browser/API flows.
+- L3 smoke E2E checks: targeted diagnostic L3 may run in Architect Debug Mode; Tester owns full and final L3 validation for core user journeys or critical browser/API flows.
 - L4 full regression / release checks (default runner: tester; architect-owned release flow) are release-only unless explicitly requested.
 
 ## VCM Worktree Policy
