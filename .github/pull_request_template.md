@@ -10,8 +10,9 @@
 
 ## Review
 
-- Test result:
-- Final acceptance:
+- Delivery flow:
+- Test result when required:
+- Final acceptance for code-change flow:
 
 ## Docs
 
@@ -22,8 +23,9 @@
 
 ## Checklist
 
-- [ ] Final acceptance completed.
-- [ ] Tester validation completed.
+- [ ] Active delivery flow completion evidence is recorded.
+- [ ] Tester validation completed when required.
+- [ ] Final acceptance completed for code-change flow.
 - [ ] Durable docs updated or confirmed unchanged.
 - [ ] Known issues resolved or recorded.
 - [ ] No uncommitted changes remain.

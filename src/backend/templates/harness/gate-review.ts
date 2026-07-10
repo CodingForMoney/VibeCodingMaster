@@ -43,11 +43,13 @@ Read \`.claude/agents/coder.md\`; use architect/tester definitions only to
 understand implementation and test responsibility boundaries. Review only the
 commit range named in the VCM prompt.
 
-Compare the commits against the approved architecture plan, coder completion
-evidence, architecture diagnosis/debug evidence when present, and project coding
-standards. Do not expand review to the whole task, whole branch, or PR.
+Use the code source named in the VCM prompt. For \`coder\`, compare the commits
+against the approved architecture plan and coder completion evidence. For
+\`architect-debug\`, compare the commits against the current Architect route
+command. Apply project coding standards in both cases. Do not expand review to
+the whole task, whole branch, or PR.
 
-Check that the commits match the plan, have no unapproved
+Check that the commits match their source evidence, have no unapproved
 surface/dependency/docs changes, no \`VCM:CODE\`, no task-process comments or task
 labels, no weakened tests or bypassed real behavior, and no unhandled fallible
 paths.
@@ -77,7 +79,7 @@ Use this findings structure:
 \`\`\`md
 ## Findings
 
-### <severity>: <title>
+### <critical|high|medium|low>: <title>
 - Evidence:
 - Expected:
 - Gap:
@@ -157,15 +159,16 @@ Use this skill at every project-manager Gate Review trigger point and whenever V
 ## Trigger Points
 
 - \`architecture-plan\`: after architect writes \`.ai/vcm/handoffs/architecture-plan.md\`, before coder dispatch.
-- \`validation-adequacy\`: after tester writes \`.ai/vcm/handoffs/test-report.md\`, before docs sync or final acceptance.
-- \`code-diff\`: after Coder returns \`Decision: ready_for_review\`, or after Architect Debug Mode completes a code fix, before PM routes to the next role or flow gate.
+- \`validation-adequacy\`: after tester writes \`.ai/vcm/handoffs/test-report.md\`, before docs sync, final acceptance, or validation-only completion.
+- \`code-diff\`: after Coder returns \`Decision: ready_for_review\`, or after Architect Debug Mode completes a code fix, before PM routes to the next role or flow gate. Identify the source with \`--source coder\` or \`--source architect-debug\`.
 
 ## Request
 
 Run this unconditionally at each trigger point (do not first check whether Gate Review is enabled):
 
 \`\`\`sh
-.ai/tools/request-gate-review --gate <architecture-plan|validation-adequacy|code-diff>
+.ai/tools/request-gate-review --gate <architecture-plan|validation-adequacy>
+.ai/tools/request-gate-review --gate code-diff --source <coder|architect-debug>
 \`\`\`
 
 Interpret the first output line:
@@ -204,6 +207,7 @@ from pathlib import Path
 
 
 GATES = ("architecture-plan", "validation-adequacy", "code-diff")
+CODE_DIFF_SOURCES = ("coder", "architect-debug")
 REPORTS = {
     "architecture-plan": ".ai/vcm/gate-reviews/architecture-plan-review.md",
     "validation-adequacy": ".ai/vcm/gate-reviews/validation-adequacy-review.md",
@@ -215,13 +219,14 @@ SOURCE_ARTIFACTS = {
         ".ai/vcm/handoffs/architecture-plan.md",
         ".ai/vcm/handoffs/test-report.md",
     ],
-    "code-diff": [
+    "code-diff": [],
+}
+CODE_DIFF_SOURCE_ARTIFACTS = {
+    "coder": [
         ".ai/vcm/handoffs/architecture-plan.md",
         ".ai/vcm/handoffs/coder-completion.md",
-        ".ai/vcm/handoffs/architecture-diagnosis.md",
-        ".ai/vcm/handoffs/test-report.md",
-        ".ai/vcm/handoffs/docs-sync-report.md",
     ],
+    "architect-debug": [".ai/vcm/handoffs/role-commands/architect.md"],
 }
 CORE_INPUT_ARTIFACTS = {
     "architecture-plan": ".ai/vcm/handoffs/architecture-plan.md",
@@ -244,7 +249,7 @@ def print_result(status: str, **fields: str) -> None:
             print(f"{key}={value}")
 
 
-def call_vcm_api(gate: str) -> int | None:
+def call_vcm_api(gate: str, source: str | None) -> int | None:
     base_url = os.environ.get("VCM_API_URL")
     task_slug = os.environ.get("VCM_TASK_SLUG")
     if not base_url or not task_slug:
@@ -260,7 +265,7 @@ def call_vcm_api(gate: str) -> int | None:
     )
     request = urllib.request.Request(
         url,
-        data=b"{}",
+        data=json.dumps({"codeDiffSource": source}).encode("utf-8"),
         method="POST",
         headers={"content-type": "application/json"},
     )
@@ -353,13 +358,19 @@ def code_diff_range(root: Path, gate_record: dict):
     else:
         base = os.environ.get("VCM_BASE_COMMIT", "").strip()
         if not base or not is_ancestor(root, base, head):
-            upstream = command_text(root, ["rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"])
-            base = command_text(root, ["merge-base", "HEAD", upstream]) if upstream else ""
+            upstream = command_text(root, ["git", "rev-parse", "--abbrev-ref", "--symbolic-full-name", "@{upstream}"])
+            base = command_text(root, ["git", "merge-base", "HEAD", upstream]) if upstream else ""
 
     return (base or head, head)
 
 
-def input_hash(root: Path, gate: str, gate_record=None) -> str:
+def source_artifacts(gate: str, source: str | None) -> list[str]:
+    if gate != "code-diff":
+        return SOURCE_ARTIFACTS[gate]
+    return CODE_DIFF_SOURCE_ARTIFACTS.get(source, [])
+
+
+def input_hash(root: Path, gate: str, source: str | None = None, gate_record=None) -> str:
     gate_record = gate_record or {}
     digest = hashlib.sha256()
     core_artifact = CORE_INPUT_ARTIFACTS.get(gate)
@@ -374,8 +385,9 @@ def input_hash(root: Path, gate: str, gate_record=None) -> str:
         ".claude/agents/gate-reviewer.md",
         ".claude/skills/vcm-gate-review/SKILL.md",
         ".ai/tools/request-gate-review",
+        "docs/CODING_STANDARDS.md",
     ]
-    for relative in common + SOURCE_ARTIFACTS[gate]:
+    for relative in common + source_artifacts(gate, source):
         path = root / relative
         digest.update(relative.encode())
         if path.is_file():
@@ -387,6 +399,7 @@ def input_hash(root: Path, gate: str, gate_record=None) -> str:
         digest.update(command_output(root, ["git", "diff", "--binary"]))
         digest.update(command_output(root, ["git", "diff", "--cached", "--binary"]))
     if gate == "code-diff":
+        digest.update((source or "<missing>").encode())
         base, head = code_diff_range(root, gate_record)
         if base and head and base != head:
             digest.update(base.encode())
@@ -414,7 +427,7 @@ def request_id(gate: str) -> str:
     return f"{stamp}-{gate}-{uuid.uuid4().hex[:8]}"
 
 
-def local_request(gate: str) -> int:
+def local_request(gate: str, source: str | None) -> int:
     root = root_dir()
     index_path = root / ".ai/vcm/gate-reviews/index.json"
     if not index_path.is_file():
@@ -550,7 +563,7 @@ def local_request(gate: str) -> int:
             "diffStat": command_text(root, ["git", "diff", "--stat", "--find-renames", f"{base}..{head}"]),
         }
 
-    current_hash = input_hash(root, gate, gate_record if isinstance(gate_record, dict) else {})
+    current_hash = input_hash(root, gate, source, gate_record if isinstance(gate_record, dict) else {})
     if (
         gate_record.get("status") == "completed"
         and gate_record.get("decision") == "approve"
@@ -571,6 +584,7 @@ def local_request(gate: str) -> int:
         "status": "requested",
         "requestedAt": requested_at,
         "inputHash": current_hash,
+        "codeDiffSource": source,
         "codeDiff": code_diff or None,
         "reportPath": report_path,
         "promptPath": prompt_path,
@@ -590,6 +604,7 @@ def local_request(gate: str) -> int:
         "commits": code_diff.get("commits"),
         "changedFiles": code_diff.get("changedFiles"),
         "diffStat": code_diff.get("diffStat"),
+        "codeDiffSource": source,
         "requestId": rid,
         "requestPath": request_path.relative_to(root).as_posix(),
         "requestedAt": requested_at,
@@ -603,17 +618,25 @@ def local_request(gate: str) -> int:
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--gate", required=True, choices=GATES)
+    parser.add_argument("--source", choices=CODE_DIFF_SOURCES)
     args = parser.parse_args()
+
+    if args.gate == "code-diff" and not args.source:
+        print_result("failed_to_start", gate=args.gate, reason="code-diff requires --source coder or --source architect-debug")
+        return 2
+    if args.gate != "code-diff" and args.source:
+        print_result("failed_to_start", gate=args.gate, reason="--source is valid only for code-diff")
+        return 2
 
     expected_root = os.environ.get("VCM_TASK_REPO_ROOT")
     if expected_root and Path(expected_root).resolve() != Path.cwd().resolve():
         print_result("failed_to_start", gate=args.gate, reason="cwd does not match VCM_TASK_REPO_ROOT")
         return 2
 
-    api_result = call_vcm_api(args.gate)
+    api_result = call_vcm_api(args.gate, args.source)
     if api_result is not None:
         return api_result
-    return local_request(args.gate)
+    return local_request(args.gate, args.source)
 
 
 if __name__ == "__main__":

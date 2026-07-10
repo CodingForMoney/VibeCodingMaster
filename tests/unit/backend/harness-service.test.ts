@@ -52,7 +52,7 @@ describe("createHarnessService", () => {
     expect(await fs.readText("/repo/.gitignore")).toContain(".claude/worktrees/");
     expect(await fs.readText("/repo/.gitignore")).not.toContain(".vcm/");
     expect(await fs.readText("/repo/.github/pull_request_template.md")).toContain("## Validation");
-    expect(await fs.readText("/repo/.github/pull_request_template.md")).toContain("Final acceptance completed");
+    expect(await fs.readText("/repo/.github/pull_request_template.md")).toContain("Final acceptance completed for code-change flow");
     expect(await fs.readText("/repo/.claude/skills/vcm-route-message/SKILL.md")).toContain("name: vcm-route-message");
     expect(await fs.readText("/repo/.claude/skills/vcm-route-message/SKILL.md")).toContain("## Purpose");
     expect(await fs.readText("/repo/.claude/skills/vcm-route-message/SKILL.md")).toContain("This skill writes a route file");
@@ -72,6 +72,8 @@ describe("createHarnessService", () => {
     expect(await fs.readText("/repo/.claude/skills/vcm-long-running-validation/SKILL.md")).toContain(".ai/tools/watch-job");
     expect(await fs.readText("/repo/.claude/skills/vcm-gate-review/SKILL.md")).toContain("name: vcm-gate-review");
     expect(await fs.readText("/repo/.claude/skills/vcm-gate-review/SKILL.md")).toContain(".ai/tools/request-gate-review");
+    expect(await fs.readText("/repo/.claude/skills/vcm-gate-review/SKILL.md")).toContain("--source <coder|architect-debug>");
+    expect(await fs.readText("/repo/.claude/skills/vcm-gate-review/SKILL.md")).toContain("validation-only completion");
     expect(await fs.readText("/repo/.claude/skills/vcm-report-harness-issue/SKILL.md")).toContain("name: vcm-report-harness-issue");
     expect(await fs.readText("/repo/.claude/skills/vcm-report-harness-issue/SKILL.md")).toContain(".ai/vcm/harness-feedback/pending/");
     expect(await fs.readText("/repo/.claude/agents/project-manager.md")).toContain("name: project-manager");
@@ -89,7 +91,11 @@ describe("createHarnessService", () => {
     expect(projectManagerAgent).toContain("VCM_TASK_REPO_ROOT");
     expect(projectManagerAgent).toContain("Include the confirmed task repo root and branch in each role message");
     expect(projectManagerAgent).toContain("### Gate Review Gates");
+    expect(projectManagerAgent).toContain("code-diff --source coder");
+    expect(projectManagerAgent).toContain("code-diff --source architect-debug");
     expect(projectManagerAgent).toContain("Architect reports that the architecture plan must be updated or replaced for the second time");
+    expect(await fs.readText("/repo/.ai/tools/request-gate-review")).toContain('["git", "rev-parse", "--abbrev-ref"');
+    expect(await fs.readText("/repo/.ai/tools/request-gate-review")).toContain('["git", "merge-base", "HEAD", upstream]');
     const architectAgent = await fs.readText("/repo/.claude/agents/architect.md");
     expect(architectAgent).toContain("verifiable behavior, implementation boundaries within the accepted scope, behavior/contract proof points");
     expect(architectAgent).toContain("Own `.ai/vcm/handoffs/known-issues.md` as its only writer");

@@ -57,6 +57,16 @@ describe("gate-review-service", () => {
     const record = state.gates["architecture-plan"];
     expect(state.activeGate).toBeNull();
     expect(record.decision).toBe("request_changes");
+    expect(record.findings).toEqual([{
+      severity: "high",
+      title: "Missing proof point",
+      evidence: "plan has no proof",
+      expected: "proof point exists",
+      gap: "no proof",
+      risk: "coder ambiguity",
+      file: undefined,
+      line: undefined
+    }]);
     expect(record.callbackStatus).toBe("sent");
     expect(record.reportPath).toBe(".ai/vcm/gate-reviews/architecture-plan-review.md");
 
@@ -225,7 +235,9 @@ describe("gate-review-service", () => {
       reportTimeoutMs: 500
     });
 
-    const result = await service.requestReviewGate(tmpRepo, "demo-task", "code-diff");
+    const result = await service.requestReviewGate(tmpRepo, "demo-task", "code-diff", {
+      codeDiffSource: "coder"
+    });
 
     expect(result.status).toBe("started");
     await waitFor(async () => {
@@ -239,9 +251,13 @@ describe("gate-review-service", () => {
     expect(record.headCommit).toBe("head-sha");
     expect(record.commits).toEqual(["abc1234 implement route", "bcd2345 add tests"]);
     expect(record.changedFiles).toEqual(["src/feature.ts", "tests/feature.test.ts"]);
+    expect(record.codeDiffSource).toBe("coder");
     const prompt = writes.find((write) => write.includes("[VCM GATE REVIEW]")) ?? "";
     expect(prompt).toContain("Gate: code-diff");
     expect(prompt).toContain("This code-diff gate reviews the new commits from one PM route flow");
+    expect(prompt).toContain("Code source: coder");
+    expect(prompt).toContain("- .ai/vcm/handoffs/coder-completion.md");
+    expect(prompt).not.toContain("- .ai/vcm/handoffs/test-report.md");
     expect(prompt).toContain("Base commit: base-sha");
     expect(prompt).toContain("Head commit: head-sha");
     expect(prompt).toContain("- abc1234 implement route");
@@ -265,7 +281,9 @@ describe("gate-review-service", () => {
       roundService: createRoundService()
     });
 
-    const result = await service.requestReviewGate(tmpRepo, "demo-task", "code-diff");
+    const result = await service.requestReviewGate(tmpRepo, "demo-task", "code-diff", {
+      codeDiffSource: "coder"
+    });
     const state = await service.getState(tmpRepo, "demo-task");
 
     expect(result.status).toBe("failed_to_start");
@@ -273,6 +291,65 @@ describe("gate-review-service", () => {
     expect(state.gates["code-diff"].status).toBe("failed");
     expect(state.gates["code-diff"].error).toContain("M src/feature.ts");
     expect(sessionStarts).toEqual([]);
+  });
+
+  it("rejects code-diff requests without a code source", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-gate-review-code-source-"));
+    await writeHarnessFiles(tmpRepo);
+    const sessionStarts: string[] = [];
+    const service = createGateReviewService({
+      fs: createNodeFileSystemAdapter(),
+      runner: createRunner(tmpRepo, []),
+      runtime: createRuntime(tmpRepo, []),
+      projectService: createProjectService(),
+      taskService: createTaskService(tmpRepo),
+      appSettings: createAppSettings(["code-diff"]),
+      sessionService: createSessionService(sessionStarts),
+      roundService: createRoundService()
+    });
+
+    const result = await service.requestReviewGate(tmpRepo, "demo-task", "code-diff");
+
+    expect(result.status).toBe("failed_to_start");
+    expect(result.message).toContain("--source coder or --source architect-debug");
+    expect(sessionStarts).toEqual([]);
+  });
+
+  it("uses the current Architect route command for architect-debug code diffs", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-gate-review-debug-source-"));
+    await writeHarnessFiles(tmpRepo);
+    const runner = createRunner(tmpRepo, [], {
+      "rev-parse HEAD": ({ cwd }) => cwd === tmpRepo ? "base-sha" : "head-sha",
+      "merge-base --is-ancestor base-sha head-sha": "",
+      "log --oneline --reverse base-sha..head-sha": "abc1234 fix debug path",
+      "diff --name-only --find-renames base-sha..head-sha": "src/feature.ts",
+      "diff --stat --find-renames base-sha..head-sha": " src/feature.ts | 2 +-",
+      "diff --binary --find-renames base-sha..head-sha": "diff --git a/src/feature.ts b/src/feature.ts\n"
+    });
+    const writes: string[] = [];
+    const service = createGateReviewService({
+      fs: createNodeFileSystemAdapter(),
+      runner,
+      runtime: createRuntime(tmpRepo, writes),
+      projectService: createProjectService(),
+      taskService: createTaskService(tmpRepo),
+      appSettings: createAppSettings(["code-diff"]),
+      sessionService: createSessionService(),
+      roundService: createRoundService(),
+      reportPollIntervalMs: 5,
+      reportTimeoutMs: 500
+    });
+
+    const result = await service.requestReviewGate(tmpRepo, "demo-task", "code-diff", {
+      codeDiffSource: "architect-debug"
+    });
+
+    expect(result.status).toBe("started");
+    await waitFor(async () => (await service.getState(tmpRepo!, "demo-task")).gates["code-diff"].status === "completed");
+    const prompt = writes.find((write) => write.includes("[VCM GATE REVIEW]")) ?? "";
+    expect(prompt).toContain("Code source: architect-debug");
+    expect(prompt).toContain("- .ai/vcm/handoffs/role-commands/architect.md");
+    expect(prompt).not.toContain("- .ai/vcm/handoffs/coder-completion.md");
   });
 
   it("updates gate settings from disabled state without enabling stale gates", async () => {
@@ -370,12 +447,13 @@ function createRuntime(repoRoot: string, writes: string[]): TerminalRuntime {
           "Decision: request_changes",
           "Summary: Missing proof point.",
           "",
-          "severity: high",
-          "title: Missing proof point",
-          "evidence: plan has no proof",
-          "expected: proof point exists",
-          "gap: no proof",
-          "risk: coder ambiguity"
+          "## Findings",
+          "",
+          "### high: Missing proof point",
+          "- Evidence: plan has no proof",
+          "- Expected: proof point exists",
+          "- Gap: no proof",
+          "- Risk: coder ambiguity"
         ].join("\n"),
         "utf8"
       );

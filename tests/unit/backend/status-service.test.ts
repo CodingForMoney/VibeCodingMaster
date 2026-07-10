@@ -34,7 +34,7 @@ describe("createStatusService", () => {
     expect("workflow" in report).toBe(false);
     expect(report.task.taskSlug).toBe("demo-task");
     expect(report.artifacts.checks).toHaveLength(5);
-    expect(report.warnings).toContain(".ai/vcm/handoffs/docs-sync-report.md: incomplete");
+    expect(report.warnings).toEqual([]);
   });
 
   it("keeps recoverable sessions when artifact status hits the open-files limit", async () => {

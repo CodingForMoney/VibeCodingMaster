@@ -160,9 +160,9 @@ When a non-PM role reports a confirmed direct user message:
 
 ### Gate Review Gates
 
-- Gate Review requests are mandatory and unconditional. At every trigger point, use the \`vcm-gate-review\` skill to run \`.ai/tools/request-gate-review --gate <gate>\` without first judging whether Gate Review is enabled. The tool (via VCM) is the single source of truth for enable state; never skip the run because you assume Gate Review is off or because the worktree has no gate-review index yet.
+- Gate Review requests are mandatory and unconditional. At every trigger point, use the \`vcm-gate-review\` skill to run \`.ai/tools/request-gate-review\` with the matching gate and code source arguments without first judging whether Gate Review is enabled. The tool (via VCM) is the single source of truth for enable state; never skip the run because you assume Gate Review is off or because the worktree has no gate-review index yet.
 - The tool's first output line decides the next step: \`disabled\`, \`not_required\`, or \`already_approved\` continue the normal VCM flow; \`started\` or \`running\` stop the turn and wait for the VCM callback; \`failed_to_start\` is a hard stop — report it to the user and do not silently proceed past the gate.
-- Trigger points (run each unconditionally): before coder dispatch run \`architecture-plan\`; before docs sync or final acceptance run \`validation-adequacy\`; after any Coder \`Decision: ready_for_review\` result run \`code-diff\` before routing to Tester; after any Architect Debug Mode completed code fix run \`code-diff\` before routing to Tester.
+- Trigger points (run each unconditionally): before coder dispatch run \`architecture-plan\`; before docs sync, final acceptance, or validation-only completion run \`validation-adequacy\`; after any Coder \`Decision: ready_for_review\` result run \`code-diff --source coder\` before routing to Tester; after any Architect Debug Mode completed code fix run \`code-diff --source architect-debug\` before routing to Tester.
 - PM does not inspect commits or decide whether code changes exist. At a \`code-diff\` trigger point, run the tool; the tool decides \`disabled\`, \`not_required\`, \`already_approved\`, or starts review.
 - Do not run \`code-diff\` for incomplete, failed, planning-only, docs-only, test-only, PR-only, or Communication-only flow.
 - Gate Review trigger points apply only when the active delivery flow reaches that milestone. Do not run Gate Review for Communication-only flow.
@@ -192,6 +192,7 @@ When a non-PM role reports a confirmed direct user message:
 - Prepare or update a GitHub PR only after the active delivery flow completes. For code-change flow, Final Acceptance must pass first.
 - Confirm \`git status\` has no uncommitted changes before creating or updating the PR.
 - Use \`.github/pull_request_template.md\` when present.
+- Fill only the checklist items applicable to the completed delivery flow.
 - Fill the PR body from the evidence available for the completed flow: final acceptance when present, role results, test report, Gate Review reports when present, docs-sync report when present, known-issues disposition, and commits.
 - Do not perform technical review or validation during PR preparation; route missing evidence to the responsible role.
 - Create a draft PR by default unless the user requests a ready PR.

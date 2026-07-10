@@ -16,6 +16,13 @@ export type GateReviewSeverity =
   | "medium"
   | "low";
 
+export const CODE_DIFF_SOURCES = [
+  "coder",
+  "architect-debug"
+] as const;
+
+export type CodeDiffSource = typeof CODE_DIFF_SOURCES[number];
+
 export type GateReviewGateStatus =
   | "disabled"
   | "not_required"
@@ -66,6 +73,7 @@ export interface GateReviewGateRecord {
   commits?: string[];
   changedFiles?: string[];
   diffStat?: string;
+  codeDiffSource?: CodeDiffSource;
   summary?: string;
   findings?: GateReviewFinding[];
   error?: string;
@@ -91,6 +99,10 @@ export interface GateReviewRequestResult {
   gate: GateReviewGate;
   record: GateReviewGateRecord;
   message?: string;
+}
+
+export interface GateReviewRequestInput {
+  codeDiffSource?: CodeDiffSource;
 }
 
 export interface GateReviewSettingsUpdateRequest {

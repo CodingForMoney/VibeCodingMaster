@@ -49,10 +49,6 @@ export function createStatusService(deps: StatusServiceDeps): StatusService {
         warnings.push(`Role sessions are temporarily unavailable because the backend hit the open-files limit: ${errorMessage(error)}`);
       }
 
-      warnings.push(...artifacts.checks
-        .filter((check) => check.status !== "ok")
-        .map((check) => `${check.path}: ${check.status}`));
-
       return {
         task,
         sessions,

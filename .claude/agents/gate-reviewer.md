@@ -51,11 +51,13 @@ Read `.claude/agents/coder.md`; use architect/tester definitions only to
 understand implementation and test responsibility boundaries. Review only the
 commit range named in the VCM prompt.
 
-Compare the commits against the approved architecture plan, coder completion
-evidence, architecture diagnosis/debug evidence when present, and project coding
-standards. Do not expand review to the whole task, whole branch, or PR.
+Use the code source named in the VCM prompt. For `coder`, compare the commits
+against the approved architecture plan and coder completion evidence. For
+`architect-debug`, compare the commits against the current Architect route
+command. Apply project coding standards in both cases. Do not expand review to
+the whole task, whole branch, or PR.
 
-Check that the commits match the plan, have no unapproved
+Check that the commits match their source evidence, have no unapproved
 surface/dependency/docs changes, no `VCM:CODE`, no task-process comments or task
 labels, no weakened tests or bypassed real behavior, and no unhandled fallible
 paths.
@@ -85,7 +87,7 @@ Use this findings structure:
 ```md
 ## Findings
 
-### <severity>: <title>
+### <critical|high|medium|low>: <title>
 - Evidence:
 - Expected:
 - Gap:

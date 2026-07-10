@@ -119,7 +119,7 @@ export function createHarnessFeedbackService(deps: HarnessFeedbackServiceDeps): 
     if (finalAcceptanceCheck.status !== "ok" || !finalAcceptanceContent) {
       throw new VcmError({
         code: "TASK_FINAL_ACCEPTANCE_NOT_READY",
-        message: "Task final acceptance is not complete yet.",
+        message: "Task Harness Retrospective requires a completed code-change flow.",
         statusCode: 409,
         hint: `${finalAcceptancePath} must pass the final-acceptance artifact check before Task Harness Retrospective can start.`
       });

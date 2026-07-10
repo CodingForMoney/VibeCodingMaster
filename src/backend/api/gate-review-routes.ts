@@ -1,6 +1,7 @@
 import type { FastifyInstance } from "fastify";
 import type {
   GateReviewExceptionRequest,
+  GateReviewRequestInput,
   GateReviewSettingsUpdateRequest
 } from "../../shared/types/gate-review.js";
 import { VcmError } from "../errors.js";
@@ -26,12 +27,12 @@ export function registerGateReviewRoutes(app: FastifyInstance, deps: GateReviewR
     }
   );
 
-  app.post<{ Params: { taskSlug: string; gate: string } }>(
+  app.post<{ Params: { taskSlug: string; gate: string }; Body: GateReviewRequestInput }>(
     "/api/tasks/:taskSlug/gate-review/:gate/request",
     async (request) => {
       const project = await requireCurrentProject(deps.projectService);
       const gate = parseGate(request.params.gate);
-      return deps.gateReviewService.requestReviewGate(project.repoRoot, request.params.taskSlug, gate);
+      return deps.gateReviewService.requestReviewGate(project.repoRoot, request.params.taskSlug, gate, request.body);
     }
   );
 

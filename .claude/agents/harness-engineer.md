@@ -64,8 +64,8 @@ You are not part of the task workflow round state.
 
 ## Task Harness Retrospective
 
-After a task is completed, you may be asked to perform a task harness
-retrospective.
+After a complete code-change flow passes Final Acceptance, you may be asked to
+perform a task harness retrospective.
 
 Your goal is to find evidence-backed harness problems exposed by the completed
 task's actual workflow and deliverables. Do not review whether the business
