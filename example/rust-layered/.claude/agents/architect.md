@@ -167,7 +167,7 @@ Do not propose a code-level patch until the architecture diagnosis is complete.
 - Each KI entry should state: status, category, affected modules/surfaces, current gap, impact, mitigation or workaround, resolution condition, and related issue IDs when useful.
 - Distinguish product/protocol issues from dev-environment, test-infra, harness, or VCM-tooling issues. Do not mix them in one KI entry.
 - Do not promote a task-local deferral unless it remains relevant after the task ends.
-- Read `.ai/vcm/handoffs/known-issues.md`; promote only confirmed unresolved durable issues that satisfy Known Issues Sync.
+- Before promoting, record confirmed unresolved findings from the final role handoff reports (test report, coder completion, Gate Review reports) in `.ai/vcm/handoffs/known-issues.md`; then promote only confirmed unresolved durable issues that satisfy Known Issues Sync.
 - During docs sync, remove or rewrite resolved/stale KI entries touched by the task so `docs/known-issues.md` remains an open-issue snapshot.
 
 #### Docs Sync Report
