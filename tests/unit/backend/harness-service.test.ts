@@ -34,9 +34,10 @@ describe("createHarnessService", () => {
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("## VCM Harness Scope");
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("## VCM Task Flow");
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("All role routes are PM-hub routes");
-    expect(await fs.readText("/repo/CLAUDE.md")).toContain("Debug work uses: `project-manager -> architect Debug Mode -> tester -> architect docs sync when needed -> project-manager final acceptance`.");
+    expect(await fs.readText("/repo/CLAUDE.md")).toContain("Debug work is a branch inside the code-change flow");
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("Architecture Diagnosis is a PM-triggered branch inside code/debug work");
-    expect(await fs.readText("/repo/CLAUDE.md")).toContain("Final acceptance closes every delivery flow before task completion or PR preparation.");
+    expect(await fs.readText("/repo/CLAUDE.md")).toContain("Final acceptance closes only the complete code-change flow");
+    expect(await fs.readText("/repo/CLAUDE.md")).toContain("targeted diagnostic L2 may run in Coder when explicitly assigned or in Architect Debug Mode");
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("## VCM Worktree Policy");
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("## VCM Glossary Policy");
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("docs/GLOSSARY.md");
@@ -59,6 +60,8 @@ describe("createHarnessService", () => {
     expect(await fs.readText("/repo/.claude/skills/vcm-route-message/SKILL.md")).toContain("Non-PM roles must not route directly to each other.");
     expect(await fs.readText("/repo/.claude/skills/vcm-route-message/SKILL.md")).toContain("After writing or updating the route file, end the current Claude Code turn immediately.");
     expect(await fs.readText("/repo/.claude/skills/vcm-final-acceptance/SKILL.md")).toContain("name: vcm-final-acceptance");
+    expect(await fs.readText("/repo/.claude/skills/vcm-final-acceptance/SKILL.md")).toContain("only when project-manager is ready to close a complete VCM code-change flow");
+    expect(await fs.readText("/repo/.claude/skills/vcm-final-acceptance/SKILL.md")).toContain("Do not use it for docs-only, validation-only, Communication-only, or PR-prep flow");
     expect(await fs.readText("/repo/.claude/skills/vcm-final-acceptance/SKILL.md")).toContain("## Scope Traceability Audit");
     expect(await fs.readText("/repo/.claude/skills/vcm-final-acceptance/SKILL.md")).toContain("Do not claim to prove that every diff hunk exactly matches the task.");
     expect(await fs.readText("/repo/.claude/skills/vcm-final-acceptance/SKILL.md")).toContain(".ai/vcm/handoffs/final-acceptance.md");
@@ -75,6 +78,9 @@ describe("createHarnessService", () => {
     expect(await fs.readText("/repo/.claude/agents/project-manager.md")).toContain("<!-- VCM:BEGIN version=1 -->");
     const projectManagerAgent = await fs.readText("/repo/.claude/agents/project-manager.md");
     expect(projectManagerAgent).toContain("Use the PM-hub routes allowed by the `vcm-route-message` skill");
+    expect(projectManagerAgent).toContain("Docs-only flow: PM -> Architect -> PM completes the flow from Architect's result.");
+    expect(projectManagerAgent).toContain("Use the `vcm-final-acceptance` skill only to close the complete code-change flow");
+    expect(projectManagerAgent).toContain("Prepare or update a GitHub PR only after the active delivery flow completes");
     expect(projectManagerAgent).toContain("Do not perform technical analysis");
     expect(projectManagerAgent).toContain("Use the `vcm-route-message` skill for every role dispatch");
     expect(projectManagerAgent).toContain("### PR Preparation");
@@ -88,6 +94,11 @@ describe("createHarnessService", () => {
     expect(architectAgent).toContain("verifiable behavior, implementation boundaries within the accepted scope, behavior/contract proof points");
     expect(architectAgent).toContain("Own `.ai/vcm/handoffs/known-issues.md` as its only writer");
     expect(architectAgent).toContain("Architect owns the technical decision");
+    expect(architectAgent).toContain("running targeted L1/L2 checks to verify the fix");
+    expect(architectAgent).toContain("In docs-only flow, update the PM-assigned durable docs directly");
+    const testerAgent = await fs.readText("/repo/.claude/agents/tester.md");
+    expect(testerAgent).toContain("Own L2/L3/L4 final-validation design, execution, and acceptance evidence");
+    expect(testerAgent).toContain("do not replace Tester final validation");
     const coderAgent = await fs.readText("/repo/.claude/agents/coder.md");
     expect(coderAgent).toContain("tools: Read, Grep, Glob, Bash, Edit, Write, Agent");
     expect(coderAgent).toContain("Implement assigned file/function-level scaffold items");
@@ -110,6 +121,9 @@ describe("createHarnessService", () => {
     expect(coderWorkerAgent).toContain("Implement assigned file/function-level scaffold items only");
     expect(coderWorkerAgent).toContain("Run assigned L0/L1 checks in the foreground.");
     expect(coderWorkerAgent).toContain("the switch-to-skill rule for long commands does not apply inside worker runs");
+    expect(coderWorkerAgent).toContain("git commit --only -m \"<message>\" -- <assigned-paths>");
+    expect(coderWorkerAgent).toContain("write the assigned report with the commit hash");
+    expect(coderWorkerAgent).toContain("with the same `commitHash` as the final step");
     expect(coderWorkerAgent).not.toContain("Stop before editing if the assigned module");
     const gateReviewerAgent = await fs.readText("/repo/.claude/agents/gate-reviewer.md");
     expect(gateReviewerAgent).toContain("name: gate-reviewer");
@@ -455,6 +469,20 @@ describe("createHarnessService", () => {
     )).rejects.toMatchObject({
       code: "HARNESS_MANAGED_BLOCK_PROTECTED"
     });
+
+    for (const [filePath, managedText] of [
+      ["docs/CODING_STANDARDS.md", "## Implementation Discipline"],
+      ["docs/known-issues.md", "## VCM Known Issues Policy"]
+    ] as const) {
+      const file = await service.getHarnessFileContent("/repo", filePath);
+      await expect(service.updateHarnessFileContent(
+        "/repo",
+        filePath,
+        file.content.replace(managedText, "## Changed")
+      )).rejects.toMatchObject({
+        code: "HARNESS_MANAGED_BLOCK_PROTECTED"
+      });
+    }
 
     const skillFile = await service.getHarnessFileContent("/repo", ".claude/skills/vcm-route-message/SKILL.md");
     expect(skillFile.editable).toBe(false);

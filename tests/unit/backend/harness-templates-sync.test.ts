@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 import { createNodeFileSystemAdapter } from "../../../src/backend/adapters/filesystem.js";
 import { createHarnessService } from "../../../src/backend/services/harness-service.js";
+import { renderLegacyProjectCodingStandardsTemplate } from "../../../src/backend/templates/harness/project-coding-standards.js";
 
 const execFileAsync = promisify(execFile);
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
@@ -92,6 +93,44 @@ describe("harness templates stay in sync with the script installer", () => {
       "script installer output must exactly match the backend harness templates"
     ).toEqual([]);
     expect(status.needsApply).toBe(false);
+  }, 30_000);
+
+  it("migrates legacy managed documents without losing project content", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-managed-doc-migration-"));
+    await mkdir(path.join(tmpRepo, "docs"), { recursive: true });
+    await writeFile(path.join(tmpRepo, "docs/CODING_STANDARDS.md"), [
+      renderLegacyProjectCodingStandardsTemplate().trimEnd(),
+      "",
+      "## Project Coding Standards",
+      "",
+      "- Use project formatting.",
+      ""
+    ].join("\n"), "utf8");
+    await writeFile(
+      path.join(tmpRepo, "docs/known-issues.md"),
+      "# Known Issues\n\n## Existing Issue\n\nKeep this durable issue.\n",
+      "utf8"
+    );
+
+    await execFileAsync(process.execPath, [installerPath, tmpRepo]);
+
+    const codingStandards = await readFile(path.join(tmpRepo, "docs/CODING_STANDARDS.md"), "utf8");
+    expect(codingStandards).toContain("<!-- VCM:BEGIN version=1 -->");
+    expect(codingStandards).toContain("## Project Coding Standards\n\n- Use project formatting.");
+    expect((codingStandards.match(/## Applies To/g) ?? [])).toHaveLength(1);
+
+    const knownIssues = await readFile(path.join(tmpRepo, "docs/known-issues.md"), "utf8");
+    expect(knownIssues).toContain("<!-- VCM:BEGIN version=1 -->");
+    expect(knownIssues).toContain("## Existing Issue\n\nKeep this durable issue.");
+
+    const manifest = JSON.parse(
+      await readFile(path.join(tmpRepo, ".ai/vcm-harness-manifest.json"), "utf8")
+    ) as { entries: Array<{ path: string; ownership: string }> };
+    for (const filePath of ["docs/CODING_STANDARDS.md", "docs/known-issues.md"]) {
+      expect(manifest.entries.find((entry) => entry.path === filePath)).toMatchObject({
+        ownership: "managed-block"
+      });
+    }
   }, 30_000);
 
   it("does not rewrite the harness manifest for a version-only change", async () => {

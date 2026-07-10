@@ -288,9 +288,11 @@ project-manager
 
 Shorter routes:
 
-- Docs-only work: `project-manager -> architect -> project-manager final acceptance`
+- Debug work is a branch inside the code-change flow:
+  `project-manager -> architect Debug Mode -> tester -> architect docs sync when needed -> project-manager final acceptance`
+- Docs-only work: `project-manager -> architect -> project-manager completion`
 - Test-only or validation-only work:
-  `project-manager -> tester -> project-manager final acceptance`
+  `project-manager -> tester -> project-manager completion`
 
 If a docs/test/validation-only task reveals required code, architecture, public
 contract, dependency, durable-doc, or validation-strategy changes, route back
@@ -486,7 +488,9 @@ re-review the business feature itself.
 
 ## 16. Final Acceptance
 
-`vcm-final-acceptance` is PM's final evidence audit. PM must not use it for
+`vcm-final-acceptance` is PM's final evidence audit for a complete code-change
+flow, including a completed Debug branch. It does not run for shorter flows or
+unfinished branch flows. PM must not use it for
 technical design review, implementation review, source-code analysis, or test
 adequacy analysis.
 

@@ -1,13 +1,15 @@
 ---
 name: vcm-final-acceptance
-description: Use when project-manager is ready to decide whether a VCM-managed task can be accepted, returned for follow-up, or blocked for a decision.
+description: Use when project-manager is ready to close a complete VCM code-change flow.
 ---
 
 # VCM Final Acceptance Skill
 
 ## Purpose
 
-Use this skill when project-manager is ready to decide whether a VCM-managed task can be accepted, returned for follow-up, or blocked for a decision.
+Use this skill only when project-manager is ready to close a complete VCM code-change flow, including a completed Debug branch.
+
+Do not use it for docs-only, validation-only, Communication-only, or PR-prep flow, or for an unfinished Debug, Replan, or Architecture Diagnosis branch.
 
 This skill is a final evidence audit. It does not replace architect docs sync, tester validation acceptance, coder implementation responsibility, or user approval for high-risk decisions.
 
@@ -60,11 +62,11 @@ Check:
 
 - required route was followed, or an explicit exception is recorded
 - required handoff artifacts exist and are current
-- architecture plan completion, Replan, or architect follow-up decision is recorded
+- architecture plan completion, Replan, or architect follow-up decision is recorded when architecture planning was required
 - tester report records `Test Result: pass|fail`, validation commands, results, and skipped checks with reasons
 - required Gate Reviews are approved, skipped with a recorded reason, or overridden with a recorded reason
 - Gate Review enable state is confirmed authoritatively: do not infer that no Gate Reviews were required from an absent or empty `.ai/vcm/gate-reviews/index.json`. When Gate Review is enabled, a missing index or a required gate without a recorded decision means the gate was skipped — run the matching `.ai/tools/request-gate-review --gate <gate>` (the tool is the source of truth) and do not accept until each required gate returns `approve`/`already_approved`, `disabled`/`not_required`, or a recorded skip/override
-- docs-sync report records docs updated, docs intentionally left unchanged, or required follow-up
+- docs-sync report records docs updated, docs intentionally left unchanged, or required follow-up when docs sync was required
 - known issues are either resolved, promoted to durable docs by architect, or explicitly accepted
 - temporary task state is ready to clean after durable facts are promoted
 

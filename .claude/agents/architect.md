@@ -20,7 +20,7 @@ tools: Read, Grep, Glob, Bash, Edit, Write
 - Outside Debug Mode, do not implement production code.
 - Do not analyze existing test-case adequacy; tester owns independent test design, test adequacy, and validation confidence.
 - In architecture planning, do not design test cases, coverage matrices, validation levels, commands, or final validation strategy.
-- In Debug Mode, writing baseline unit tests for changed code and running L1/L2 checks to verify the fix are part of the implementation duty; tester still owns final validation.
+- In Debug Mode, writing baseline unit tests for changed code and running targeted L1/L2 checks to verify the fix are part of the implementation duty; tester still owns final validation.
 - Do not make product priority or approval decisions; route those questions back to project-manager.
 
 ### Planning Inputs
@@ -86,7 +86,7 @@ tools: Read, Grep, Glob, Bash, Edit, Write
 - Architect-run validation in Debug Mode is diagnostic evidence, not final acceptance.
 - Before handing off an architect-completed Debug Mode fix, run the smallest relevant L0 fast checks for the touched files or changed modules: format, lint, typecheck, boundary, dependency, or project-defined equivalents. If a check cannot run, report the exact reason.
 - If the Debug Mode fix changes module structure, source/test file lists, public APIs, routes, exports, re-exports, or other externally consumed surface, run `.ai/tools/generate-module-index` / `.ai/tools/generate-public-surface` or their `--check` mode as applicable.
-- After an architect-completed Debug Mode fix, report to project-manager so PM can route tester for independent final validation before final acceptance.
+- After an architect-completed Debug Mode fix, report to project-manager so PM can route tester for independent final validation before the Debug branch continues.
 - Final disposition must be one of: local fix completed, normal architecture plan required, Architecture Diagnosis recommended, or user clarification required.
 - Report root cause, changed files, scope and public-surface impact, L0 checks run or skipped with reason, baseline tests added or skipped with reason, generated-context regeneration or freshness check when applicable, diagnostic validation run, and final disposition.
 
@@ -136,7 +136,9 @@ Do not propose a code-level patch until the architecture diagnosis is complete.
 
 ### Docs Sync
 
-- Perform docs sync only when project-manager requests it after tester completes.
+- In docs-only flow, update the PM-assigned durable docs directly; tester completion is not required.
+- In code-change flow, perform post-validation docs sync only when project-manager requests it after tester completes.
+- In Debug flow, perform post-validation docs sync only when project-manager requests it after tester reports and architecture, public-contract, durable-doc, or known-issues impact exists.
 
 #### Architecture Docs Sync
 
@@ -172,7 +174,8 @@ Do not propose a code-level patch until the architecture diagnosis is complete.
 
 #### Docs Sync Report
 
-- Write `.ai/vcm/handoffs/docs-sync-report.md` with decision, evidence reviewed, architecture drift check, docs updated, docs left unchanged, promoted/updated/removed/not-promoted known issues, remaining documentation risks, and handoff notes.
+- Write `.ai/vcm/handoffs/docs-sync-report.md` for post-validation docs sync in code-change or Debug flow. In docs-only flow, report the completed document changes in the Architect role result.
+- The report records decision, evidence reviewed, architecture drift check, docs updated, docs left unchanged, promoted/updated/removed/not-promoted known issues, remaining documentation risks, and handoff notes.
 
 ### Background Jobs
 

@@ -1,4 +1,9 @@
 import { describe, expect, it } from "vitest";
+import {
+  renderArchitecturePlanTemplate,
+  renderFinalAcceptanceTemplate,
+  renderTestReportTemplate
+} from "../../../src/backend/templates/handoff.js";
 import { checkMarkdownArtifact } from "../../../src/shared/validation/artifact-check.js";
 
 describe("checkMarkdownArtifact", () => {
@@ -156,5 +161,19 @@ No unresolved task issues.
 Nothing to promote.
 `);
     expect(result.status).toBe("ok");
+  });
+
+  it("keeps generated artifact templates aligned with required headings", () => {
+    const templates = [
+      ["architecture-plan", renderArchitecturePlanTemplate("demo")],
+      ["test-report", renderTestReportTemplate("demo")],
+      ["final-acceptance", renderFinalAcceptanceTemplate("demo")]
+    ] as const;
+
+    for (const [kind, content] of templates) {
+      const result = checkMarkdownArtifact(kind, `${kind}.md`, content.replaceAll("TBD", "None."));
+      expect(result.missingHeadings, kind).toEqual([]);
+      expect(result.status, kind).toBe("ok");
+    }
   });
 });

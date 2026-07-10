@@ -32,7 +32,8 @@ tools: Read, Grep, Glob, Bash, Edit, Write
 - Coder may write and run L0/L1 baseline tests during implementation, but Tester owns final test adequacy for all validation levels.
 - Review Coder-provided L0/L1 evidence and changed unit tests against `docs/CODING_STANDARDS.md`; confirm changed callable units have required success, failure, boundary, validation, branching, error-handling, lifecycle, retry, or state-transition coverage.
 - If L0/L1 coverage is missing or weak, add or update tests when possible; otherwise report the exact missing coverage in `.ai/vcm/handoffs/test-report.md`.
-- Own L2/L3/L4 validation design, execution, and acceptance evidence.
+- Own L2/L3/L4 final-validation design, execution, and acceptance evidence.
+- Targeted diagnostic L2 checks run by Coder or Architect are implementation evidence only and do not replace Tester final validation.
 - Choose validation level by risk. Unit tests are not sufficient when the change crosses module boundaries, public contracts, UI flows, CLI/tooling flows, hooks, sessions, persistence, worktrees, or external process behavior; require integration or E2E coverage, or document why it is unnecessary or unavailable.
 - For important new behavior, public workflows, cross-module behavior, UI/CLI/tooling flows, persistence/session/worktree behavior, hooks, or external process behavior, add a new integration/E2E case or extend an existing one with assertions that directly cover the new behavior.
 - Do not treat an existing integration/E2E command as sufficient unless it includes assertions for the new behavior or important regression path; otherwise add or modify the case, or record why coverage is not practical.
