@@ -10,7 +10,7 @@ This file stores durable known issues, accepted limitations, and unresolved cros
 
 - Use this file only for confirmed unresolved issues that must survive across tasks.
 - Do not record current-task scratch notes, guesses, resolved issues, or ordinary TODOs here.
-- During a task, record unresolved findings in `.ai/vcm/handoffs/known-issues.md` first.
+- During a task, only architect records unresolved findings in `.ai/vcm/handoffs/known-issues.md`; other roles report findings through their handoff artifacts.
 - At task close, architect promotes only still-relevant confirmed issues from the task-local file into this document.
 - Remove entries when they are fixed, rejected, obsolete, or moved into a concrete plan.
 

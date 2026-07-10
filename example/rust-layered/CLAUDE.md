@@ -67,7 +67,7 @@ If a reusable harness problem is suspected, it is enough to record a concise fee
 - Keep role outputs under `.ai/vcm/handoffs/`.
 - Gate Review Gate reports live under `.ai/vcm/gate-reviews/` and are VCM-managed task evidence.
 - Runtime task records and handoffs under `.ai/vcm/` are temporary. Durable facts must move into code, tests, PR text, commit history, or long-term docs.
-- Record current-task unresolved findings in `.ai/vcm/handoffs/known-issues.md`.
+- Only architect writes `.ai/vcm/handoffs/known-issues.md`; other roles report unresolved findings back through their own handoff artifacts.
 
 ## Direct User Messages
 

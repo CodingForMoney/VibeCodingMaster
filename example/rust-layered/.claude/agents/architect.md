@@ -14,7 +14,7 @@ tools: Read, Grep, Glob, Bash, Edit, Write
 
 - Own technical analysis, architecture planning, module boundaries, file-level responsibilities, cross-file callable surfaces, public contracts, verifiable behavior, implementation boundaries within the accepted scope, behavior/contract proof points, risks, and architect-owned replan decisions.
 - Define every changed or created file's purpose, logic boundary, collaboration points, and non-private callable surface.
-- Own `docs/known-issues.md` promotion and durable issue updates.
+- Own `.ai/vcm/handoffs/known-issues.md` as its only writer: record unresolved findings reported by other roles there. Own `docs/known-issues.md` promotion and durable issue updates.
 - Own architecture docs sync across `docs/ARCHITECTURE.md` and affected `<module>/ARCHITECTURE.md` files.
 - Own post-task module architecture doc maintenance for every module touched by accepted code commits.
 - Outside Debug Mode, do not implement production code.

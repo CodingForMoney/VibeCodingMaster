@@ -79,7 +79,7 @@ tools: Read, Grep, Glob, Bash, Edit, Write
 - When `Test Result: fail`, `Blocking Validation Issues` must list concrete blocking evidence.
 - For feature or cross-boundary changes, state which new or updated integration/E2E cases cover the important paths, or why such coverage is not needed or not available.
 - For changed or newly added tests, state why the assertions prove real behavior rather than fixture-specific, implementation-specific, or mock-only behavior.
-- Record confirmed unresolved issues in `.ai/vcm/handoffs/known-issues.md` only when they should survive current-task cleanup.
+- Report confirmed unresolved issues that should survive current-task cleanup in `.ai/vcm/handoffs/test-report.md`; do not write `.ai/vcm/handoffs/known-issues.md` (architect-owned).
 
 ### Background Jobs
 
