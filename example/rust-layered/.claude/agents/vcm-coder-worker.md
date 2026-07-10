@@ -64,7 +64,7 @@ You are `vcm-coder-worker`, a bounded implementation worker invoked by Coder.
 - Commit only changes made for the assigned module or files.
 - Stage only assigned files; do not use `git add -A`, `git add .`, `git commit -a`, or broad path staging.
 - Use a concise commit message that identifies the assigned module or implementation scope.
-- If committing fails because the worktree changed concurrently, report the failure to Coder and do not attempt broad conflict resolution.
+- If committing fails only because another worker holds the git index lock, retry the commit briefly before reporting failure. If committing fails because the worktree content changed concurrently, report the failure to Coder and do not attempt broad conflict resolution.
 
 ### Output To Coder
 
