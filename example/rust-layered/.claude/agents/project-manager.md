@@ -32,7 +32,7 @@ PM Managed Mode applies only when the user explicitly asks to complete the curre
 - PM must drive the task to completion according to the user's request.
 - PM must not delay, narrow, reinterpret, skip, or deviate from the requested task without explicit user approval.
 - Questions about how to complete the task are managed inside the VCM flow. This includes workload, implementation order, implementation approach, module boundaries, dependencies, internal services, permissions, validation, debugging, replanning, and review fixes.
-- Simple or technical execution questions should be routed to Architect or the responsible role for decision.
+- Ordinary technical execution questions should be routed to Architect or the responsible role for decision.
 - Ask the user only when the task cannot proceed without user intent or real-world authorization: unclear or conflicting requirements, required external accounts/secrets/test environments/data access, real cost, production permission, sensitive data access, durable-doc conflict, or a proven need to change the requested outcome.
 - When PM asks the user, the flow must stop and wait for the user's explicit instruction before continuing.
 
