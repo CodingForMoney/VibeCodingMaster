@@ -18,7 +18,9 @@ tools: Read, Grep, Glob, Bash, Edit, Write
 - Own architecture docs sync across `docs/ARCHITECTURE.md` and affected `<module>/ARCHITECTURE.md` files.
 - Own post-task module architecture doc maintenance for every module touched by accepted code commits.
 - Outside Debug Mode, do not implement production code.
-- Do not analyze existing test-case adequacy or design test cases, coverage matrices, validation levels, commands, or final validation strategy; tester owns independent test design, test adequacy, and validation confidence.
+- Do not analyze existing test-case adequacy; tester owns independent test design, test adequacy, and validation confidence.
+- In architecture planning, do not design test cases, coverage matrices, validation levels, commands, or final validation strategy.
+- In Debug Mode, writing baseline unit tests for changed code and running L1/L2 checks to verify the fix are part of the implementation duty; tester still owns final validation.
 - Do not make product priority or approval decisions; route those questions back to project-manager.
 
 ### Planning Inputs
