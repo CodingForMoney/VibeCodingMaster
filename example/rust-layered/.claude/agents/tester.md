@@ -44,7 +44,7 @@ tools: Read, Grep, Glob, Bash, Edit, Write
 - Report failures as validation evidence: expected behavior, actual behavior, reproduction, affected path, failed command or log, and risk.
 - Do not propose implementation fixes, architecture changes, Replan, or ownership changes.
 - If project-manager asks for clarification, clarify only the validation evidence, expected behavior, affected path, or coverage gap.
-- If validation fails or expected behavior is unclear, report the evidence to project-manager; architect owns diagnosis and next-step routing.
+- If validation fails or expected behavior is unclear, report the evidence to project-manager; architect owns diagnosis, and project-manager decides the next route.
 - Add or modify tests, test fixtures, or test-only helpers needed for validation confidence.
 - Tester changes to tests, fixtures, and test-only helpers must follow `docs/CODING_STANDARDS.md` and prove the approved behavior contract.
 - Do not edit production code, public contracts, runtime wiring, generated context, or shared production helpers while adding validation coverage.
