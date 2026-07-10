@@ -55,7 +55,7 @@ If a reusable harness problem is suspected, it is enough to record a concise fee
 
 - All role routes are PM-hub routes. Project-manager starts and advances every flow; non-PM roles report blockers, failures, conflicts, incomplete work, and findings back to project-manager.
 - Code changes use: `project-manager -> architect -> coder -> tester -> architect docs sync -> project-manager final acceptance`.
-- Debug work uses: `project-manager -> architect Debug Mode -> tester -> project-manager final acceptance`.
+- Debug work uses: `project-manager -> architect Debug Mode -> tester -> architect docs sync when needed -> project-manager final acceptance`.
 - Docs-only changes use: `project-manager -> architect -> project-manager final acceptance`.
 - Test-only or validation-only work uses: `project-manager -> tester -> project-manager final acceptance`.
 - Architecture Diagnosis is a PM-triggered branch inside code/debug work: `project-manager -> architect Architecture Diagnosis Mode -> project-manager route decision`.
