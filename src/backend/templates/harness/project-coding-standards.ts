@@ -6,7 +6,7 @@ Project-specific rules may be added outside the VCM managed block when they make
 
 - Coder and Coder Worker implementation.
 - Architect Debug Mode when it edits production code or tests.
-- Tester checks of implementation quality and test integrity.
+- Tester changes to tests, fixtures, and test-only helpers, plus test-integrity review.
 
 ## Implementation Discipline
 
@@ -53,7 +53,7 @@ Project-specific rules may be added outside the VCM managed block when they make
 
 ## Generated Context
 
-- Regenerate \`.ai/generated/module-index.json\` with \`.ai/tools/generate-module-index\` after module, manifest, source-file, or test-file changes.
+- Regenerate \`.ai/generated/module-index.json\` with \`.ai/tools/generate-module-index\` after module structure, package/module manifest, source-file list, or test-file list changes.
 - Regenerate \`.ai/generated/public-surface.json\` with \`.ai/tools/generate-public-surface\` after public API, route, externally consumed surface, or public visibility changes.
 - Do not hand-edit generated context files.
 `;

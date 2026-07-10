@@ -27,6 +27,7 @@ export interface ArtifactCheckResult {
   isEmpty: boolean;
   hasPlaceholder: boolean;
   missingHeadings: string[];
+  invalidFields: string[];
   status: "missing" | "empty" | "incomplete" | "ok";
 }
 

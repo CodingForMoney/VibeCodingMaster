@@ -9,13 +9,16 @@ const PROJECT_KNOWN_ISSUES_RULES = `## VCM Known Issues Policy
 ## Entry Format
 
 \`\`\`md
-## YYYY-MM-DD <short issue title>
+## KI-<n> <short issue title>
 
-- discovered in: <task or PR>
-- type: bug | limitation | technical-debt | validation-gap | docs-gap | decision-needed
-- impact: low | medium | high
 - status: open | planned | accepted
-- proposed action: <next useful step>
+- category: product | protocol | dev-environment | test-infra | harness | vcm-tooling | docs
+- affected modules/surfaces: <current affected scope>
+- current gap: <unresolved behavior or limitation>
+- impact: <current consequence>
+- mitigation or workaround: <current mitigation, workaround, or None>
+- resolution condition: <what must become true before removing this entry>
+- related issues: <issue IDs or None>
 \`\`\``;
 
 export function renderProjectKnownIssuesRules(): string {

@@ -73,7 +73,7 @@ validation.
 
 ## Output
 
-Write only the assigned report under `.ai/vcm/gate-reviews/`. Start with:
+For an active VCM Gate Review request, write only the assigned report under `.ai/vcm/gate-reviews/`. Start with:
 
 ```text
 Gate: <gate>
@@ -105,4 +105,6 @@ None.
 Use Bash only for read-only inspection such as `git diff`, `git status`, `git show`, `ls`, `rg`, `sed`, or `cat`. Do not run tests, builds, formatters, generators, package managers, or commands that modify files.
 
 Review only code, architecture, and documents; do not perform validation. Do not edit code, tests, durable docs, role files, route files, or handoff artifacts. Do not choose owners, fixes, Replan, or user-intervention needs.
+
+Outside an active Gate Review request, you may clarify an existing report with the user. Do not change its decision or task flow; VCM must start a new review for a new gate decision, and flow changes belong to project-manager.
 <!-- VCM:END -->

@@ -33,7 +33,9 @@ describe("createHarnessService", () => {
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("## VCM Start Here");
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("## VCM Harness Scope");
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("## VCM Task Flow");
-    expect(await fs.readText("/repo/CLAUDE.md")).toContain("All role routes are PM-hub routes");
+    expect(await fs.readText("/repo/CLAUDE.md")).toContain("All standard workflow routes among project-manager, architect, coder, and tester are PM-hub routes");
+    expect(await fs.readText("/repo/CLAUDE.md")).toContain("Gate Review and tool-role work use their dedicated VCM skills and controllers");
+    expect(await fs.readText("/repo/CLAUDE.md")).toContain("No approval can raise this ceiling");
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("Debug work is a branch inside the code-change flow");
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("Architecture Diagnosis is a PM-triggered branch inside code/debug work");
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("Final acceptance closes only the complete code-change flow");
@@ -47,6 +49,7 @@ describe("createHarnessService", () => {
     expect(await fs.readText("/repo/docs/CODING_STANDARDS.md")).toContain("Do not fake completion");
     expect(await fs.readText("/repo/docs/CODING_STANDARDS.md")).toContain("<!-- VCM:BEGIN version=1 -->");
     expect(await fs.readText("/repo/docs/known-issues.md")).toContain("## VCM Known Issues Policy");
+    expect(await fs.readText("/repo/docs/known-issues.md")).toContain("affected modules/surfaces");
     expect(await fs.readText("/repo/.gitignore")).toContain("# VCM:BEGIN version=1");
     expect(await fs.readText("/repo/.gitignore")).toContain(".ai/vcm/");
     expect(await fs.readText("/repo/.gitignore")).toContain(".claude/worktrees/");
@@ -102,9 +105,12 @@ describe("createHarnessService", () => {
     expect(architectAgent).toContain("Architect owns the technical decision");
     expect(architectAgent).toContain("running targeted L1/L2 checks to verify the fix");
     expect(architectAgent).toContain("In docs-only flow, update the PM-assigned durable docs directly");
+    expect(architectAgent).toContain("`Decision` must be `synced`, `unchanged`, or `blocked`");
     const testerAgent = await fs.readText("/repo/.claude/agents/tester.md");
     expect(testerAgent).toContain("Own L2/L3/L4 final-validation design, execution, and acceptance evidence");
     expect(testerAgent).toContain("do not replace Tester final validation");
+    expect(testerAgent).toContain("Apply `docs/CODING_STANDARDS.md` to changed tests");
+    expect(testerAgent).not.toContain("shared implementation-quality and baseline-test standard");
     const coderAgent = await fs.readText("/repo/.claude/agents/coder.md");
     expect(coderAgent).toContain("tools: Read, Grep, Glob, Bash, Edit, Write, Agent");
     expect(coderAgent).toContain("Implement assigned file/function-level scaffold items");

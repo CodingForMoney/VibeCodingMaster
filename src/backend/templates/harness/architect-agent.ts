@@ -168,6 +168,7 @@ Do not propose a code-level patch until the architecture diagnosis is complete.
 
 - Write \`.ai/vcm/handoffs/docs-sync-report.md\` for post-validation docs sync in code-change or Debug flow. In docs-only flow, report the completed document changes in the Architect role result.
 - The report records decision, evidence reviewed, architecture drift check, docs updated, docs left unchanged, promoted/updated/removed/not-promoted known issues, remaining documentation risks, and handoff notes.
+- \`Decision\` must be \`synced\`, \`unchanged\`, or \`blocked\`.
 
 ### Background Jobs
 

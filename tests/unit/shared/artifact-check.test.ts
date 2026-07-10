@@ -17,6 +17,8 @@ describe("checkMarkdownArtifact", () => {
     const result = checkMarkdownArtifact("test-report", "test-report.md", `
 # Test Report
 
+Test Result: pass
+
 ## Evidence Reviewed
 Reviewed.
 
@@ -111,7 +113,7 @@ None.
 No task issues to promote.
 
 ## Decision
-Pass.
+unchanged
 `);
     expect(result.status).toBe("ok");
   });
@@ -163,6 +165,49 @@ Nothing to promote.
     expect(result.status).toBe("ok");
   });
 
+  it("rejects unresolved test-report results", () => {
+    const content = renderTestReportTemplate("demo").replaceAll("TBD", "None.");
+    const result = checkMarkdownArtifact("test-report", "test-report.md", content);
+
+    expect(result.status).toBe("incomplete");
+    expect(result.invalidFields).toContain("Test Result must be pass or fail.");
+  });
+
+  it("rejects invalid docs-sync decisions", () => {
+    const result = checkMarkdownArtifact("docs-sync-report", "docs-sync-report.md", `
+# Docs Sync Report
+
+## Summary
+Checked.
+## Architecture Drift Check
+None.
+## Docs Updated
+None.
+## Docs Reviewed And Left Unchanged
+README.md.
+## Public Contract / Module Boundary Notes
+None.
+## Remaining Documentation Risks
+None.
+## Known Issues Disposition
+None.
+## Decision
+looks-good
+`);
+
+    expect(result.status).toBe("incomplete");
+    expect(result.invalidFields[0]).toContain("synced, unchanged, blocked");
+  });
+
+  it("rejects invalid final-acceptance decisions", () => {
+    const content = renderFinalAcceptanceTemplate("demo")
+      .replaceAll("TBD", "None.");
+    const result = checkMarkdownArtifact("final-acceptance", "final-acceptance.md", content);
+
+    expect(result.status).toBe("incomplete");
+    expect(result.invalidFields[0]).toContain("accepted-with-known-risks");
+  });
+
   it("keeps generated artifact templates aligned with required headings", () => {
     const templates = [
       ["architecture-plan", renderArchitecturePlanTemplate("demo")],
@@ -171,9 +216,21 @@ Nothing to promote.
     ] as const;
 
     for (const [kind, content] of templates) {
-      const result = checkMarkdownArtifact(kind, `${kind}.md`, content.replaceAll("TBD", "None."));
+      const completed = completeTemplate(kind, content);
+      const result = checkMarkdownArtifact(kind, `${kind}.md`, completed);
       expect(result.missingHeadings, kind).toEqual([]);
       expect(result.status, kind).toBe("ok");
     }
   });
 });
+
+function completeTemplate(kind: "architecture-plan" | "test-report" | "final-acceptance", content: string): string {
+  const completed = content.replaceAll("TBD", "None.");
+  if (kind === "test-report") {
+    return completed.replace("Test Result: pass|fail", "Test Result: pass");
+  }
+  if (kind === "final-acceptance") {
+    return completed.replace("## Decision\n\nNone.", "## Decision\n\naccepted");
+  }
+  return completed;
+}

@@ -30,7 +30,7 @@ export function renderTesterHarnessRules(): string {
 - For important new behavior, public workflows, cross-module behavior, UI/CLI/tooling flows, persistence/session/worktree behavior, hooks, or external process behavior, add a new integration/E2E case or extend an existing one with assertions that directly cover the new behavior.
 - Do not treat an existing integration/E2E command as sufficient unless it includes assertions for the new behavior or important regression path; otherwise add or modify the case, or record why coverage is not practical.
 - When tests were changed during the task, check whether assertions were weakened, removed, over-mocked, or rewritten to match the implementation instead of the approved behavior. Report this as a validation gap unless the approved contract changed.
-- Treat \`docs/CODING_STANDARDS.md\` as the shared implementation-quality and baseline-test standard when checking changed code and tests.
+- Apply \`docs/CODING_STANDARDS.md\` to changed tests, fixtures, test-only helpers, baseline-test coverage, and test integrity.
 - Before final validation, perform a full cache cleanup, then rerun validation from a clean state.
 - Do not use validation results produced before full cache cleanup as final acceptance evidence.
 - Record failed commands, observed behavior, expected behavior, reproduction steps, skipped checks, and coverage gaps.
@@ -46,7 +46,6 @@ export function renderTesterHarnessRules(): string {
 - Treat passing tests as insufficient when assertions are tied to implementation details, fixed fixture values, snapshot text, or mocked paths that bypass the behavior being validated.
 - Add anti-hardcode coverage when risk warrants it: use non-fixture inputs, boundary values, negative cases, repeated actions, and assertions through public/runtime paths.
 - Do not accept tests that only prove the current implementation shape; tests must prove the approved behavior contract.
-- If task-specific process comments or task labels appear in changed code while reviewing behavior, report them as blocking findings; task context belongs in handoff artifacts, commit history, or PR text, not durable code comments.
 - Treat architect-flagged public contracts, migrations, auth, data flow, routing, or dependency changes as inputs for tester-owned validation design.
 - Record skipped L3 checks in \`.ai/vcm/handoffs/test-report.md\` with the reason.
 - Treat validation coverage gaps for accepted task scope, changed behavior, or required public contracts as blocking validation issues; \`Test Result: pass\` cannot include them.

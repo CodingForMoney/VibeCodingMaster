@@ -11,7 +11,7 @@ import type {
 } from "../../shared/types/harness.js";
 import type { ClaudeHookEventName } from "../../shared/types/claude-hook.js";
 import type { RoleSessionRecord } from "../../shared/types/session.js";
-import { checkMarkdownArtifact } from "../../shared/validation/artifact-check.js";
+import { checkMarkdownArtifact, readArtifactSectionValue } from "../../shared/validation/artifact-check.js";
 import { resolveRepoPath, toRepoRelativePath, type FileSystemAdapter } from "../adapters/filesystem.js";
 import { VcmError } from "../errors.js";
 import type { TerminalRuntime } from "../runtime/terminal-runtime.js";
@@ -116,7 +116,14 @@ export function createHarnessFeedbackService(deps: HarnessFeedbackServiceDeps): 
     const finalAcceptanceAbsolutePath = resolveRepoPath(input.taskRepoRoot, finalAcceptancePath);
     const finalAcceptanceContent = await readAbsoluteOptionalText(finalAcceptanceAbsolutePath);
     const finalAcceptanceCheck = checkMarkdownArtifact("final-acceptance", finalAcceptancePath, finalAcceptanceContent ?? null);
-    if (finalAcceptanceCheck.status !== "ok" || !finalAcceptanceContent) {
+    const finalAcceptanceDecision = finalAcceptanceContent
+      ? readArtifactSectionValue(finalAcceptanceContent, "Decision")?.toLowerCase()
+      : undefined;
+    if (
+      finalAcceptanceCheck.status !== "ok"
+      || !finalAcceptanceContent
+      || (finalAcceptanceDecision !== "accepted" && finalAcceptanceDecision !== "accepted-with-known-risks")
+    ) {
       throw new VcmError({
         code: "TASK_FINAL_ACCEPTANCE_NOT_READY",
         message: "Task Harness Retrospective requires a completed code-change flow.",

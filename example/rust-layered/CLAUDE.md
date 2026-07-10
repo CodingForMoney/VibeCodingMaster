@@ -15,7 +15,7 @@ This is a Rust workspace example for VCM harness experiments. It has three archi
 
 - Use the durable project docs below as role-relevant project truth.
 - Read module-local `CLAUDE.md` before editing a subdirectory if one exists.
-- `vcm-route-message` is the only channel for role dispatch and reporting, and is used only for PM-hub routes: project-manager dispatches to roles, and roles report questions, results, blockers, and findings back to project-manager. Follow its write-then-stop rule.
+- `vcm-route-message` is the only channel for PM-hub dispatch and reporting among project-manager, architect, coder, and tester. Gate Review and tool-role work use their dedicated VCM skills and controllers. Follow the route skill's write-then-stop rule.
 - Use `vcm-long-running-validation` for long-running validation. Follow the background job limits below.
 - Use `vcm-report-harness-issue` when you notice a reusable VCM harness problem. Record feedback; do not contact Harness Engineer directly.
 - Project-manager runs `vcm-gate-review` unconditionally at every Gate Review trigger point and on VCM Gate Review callbacks; the tool reports the authoritative enable state.
@@ -32,7 +32,7 @@ If a reusable harness problem is suspected, it is enough to record a concise fee
 - The only sanctioned long-running mechanism is the `vcm-long-running-validation` skill: `.ai/tools/run-long-check` plus `.ai/tools/watch-job`. Only one job may run at a time.
 - The moment a command might run longer than 2 minutes, switch to that skill instead of running the command directly.
 - While a job is running, stay in the current turn and keep calling `.ai/tools/watch-job` until it reports a terminal result; VCM blocks turn-end while a job is running, and a job without a live watcher is killed automatically.
-- Hard ceiling: 60 minutes per job, enforced by the job worker. Do not run or suggest operations expected to exceed 60 minutes without user approval; split larger work first.
+- Hard ceiling: 60 minutes per job, enforced by the job worker. No approval can raise this ceiling; split larger operations into jobs that each fit within it.
 
 ## VCM Durable Project Docs
 
@@ -53,7 +53,7 @@ If a reusable harness problem is suspected, it is enough to record a concise fee
 
 ## VCM Task Flow
 
-- All role routes are PM-hub routes. Project-manager starts and advances every flow; non-PM roles report blockers, failures, conflicts, incomplete work, and findings back to project-manager.
+- All standard workflow routes among project-manager, architect, coder, and tester are PM-hub routes. Project-manager starts and advances every flow; architect, coder, and tester report blockers, failures, conflicts, incomplete work, and findings back to project-manager.
 - Code changes use: `project-manager -> architect -> coder -> tester -> architect docs sync -> project-manager final acceptance`.
 - Debug work is a branch inside the code-change flow: `project-manager -> architect Debug Mode -> tester -> architect docs sync when needed -> project-manager final acceptance`.
 - Docs-only changes use: `project-manager -> architect -> project-manager completion`.
@@ -71,15 +71,17 @@ If a reusable harness problem is suspected, it is enough to record a concise fee
 
 ## Direct User Messages
 
-- PM remains the routing owner even when the user sends a message directly to a non-PM role session.
-- A non-PM role may discuss, clarify, or answer questions within its current role scope, but direct discussion is not a flow instruction by itself.
+- These rules apply when the user sends a message directly to architect, coder, or tester.
+- PM remains the routing owner during direct role discussion.
+- The role may discuss, clarify, or answer questions within its current scope, but direct discussion is not a flow instruction by itself.
 - Do not treat exploratory discussion, tentative wording, disagreement, preference discussion, or "what if" analysis as approved scope, approved plan, or a route decision.
-- A non-PM role may use a direct user message as local clarification for its current assigned work when it does not change accepted scope, gates, role routing, approval state, or task outcome.
+- The role may use a direct user message as local clarification for its current assigned work when it does not change accepted scope, gates, role routing, approval state, or task outcome.
 - If the direct user message may change scope, plan, priority, approval, external authorization, or next-route decision, the role must ask the user in its own session for explicit confirmation and wait for it before reporting to project-manager.
 - Explicit confirmation means the user clearly approves or instructs the new plan, scope, decision, or route, such as "confirmed", "use this plan", "change it to this", "approve", or equivalent wording in context.
 - After explicit confirmation, the role must report the confirmed change to project-manager with `vcm-route-message` and stop. PM decides the next route.
-- A direct user message must not let a non-PM role start a new task, skip gates, approve exceptions, trigger another role, or close the task.
+- A direct user message must not let the role start a new task, skip gates, approve exceptions, trigger another role, or close the task.
 - The role's final result must still go back to project-manager.
+- Direct Gate Reviewer discussion may clarify its report but cannot change the gate decision or task flow; flow changes must be given to project-manager. Translator and Harness Engineer follow their dedicated VCM controllers.
 
 ## VCM Validation Levels
 
@@ -92,7 +94,7 @@ If a reusable harness problem is suspected, it is enough to record a concise fee
 ## VCM Worktree Policy
 
 - Use one branch, one worktree, one handoff directory, and one PR or final patch per VCM-managed task.
-- Roles work sequentially in the same task worktree.
+- VCM workflow role handoffs run sequentially in the same task worktree. Coder-managed workers may run concurrently within the Coder turn.
 - If `git status` shows uncommitted changes, commit them before handing off to another role.
 
 <!-- VCM:END -->

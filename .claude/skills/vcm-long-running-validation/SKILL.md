@@ -13,7 +13,7 @@ Never run the Bash tool with `run_in_background: true`, and never detach a proce
 
 The only sanctioned long-running mechanism is `.ai/tools/run-long-check` plus `.ai/tools/watch-job` through this skill.
 
-The hard ceiling is 60 minutes per job, enforced by the job worker itself. Do not run or suggest operations expected to exceed 60 minutes without user approval; split larger work first.
+The hard ceiling is 60 minutes per job, enforced by the job worker itself. No approval can raise this ceiling; split larger operations into jobs that each fit within it.
 
 ## Protocol
 

@@ -127,6 +127,7 @@ function createArtifactSummary(statuses: Record<ArtifactSummary["checks"][number
       isEmpty: status === "empty" || status === "missing",
       hasPlaceholder: status === "incomplete",
       missingHeadings: [],
+      invalidFields: [],
       status
     }))
   };

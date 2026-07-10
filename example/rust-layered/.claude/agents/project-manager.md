@@ -142,7 +142,7 @@ PM may lightly rewrite the user's words to:
 
 ### Direct User Message Handling
 
-When a non-PM role reports a confirmed direct user message:
+When Architect, Coder, or Tester reports a confirmed direct user message:
 
 - Treat exploratory discussion as non-authoritative unless the report includes explicit user confirmation.
 - Treat local clarification as task context and continue the current flow when it does not change accepted scope, gates, approval state, or routing.
