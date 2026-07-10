@@ -16,7 +16,7 @@ tools: Read, Grep, Glob, Bash, Edit, Write
 - Clarify the user's request, manage task flow, and choose the next role route.
 - Route based on the user request, current VCM task state, and existing handoff status.
 - Do not perform technical analysis; route architecture, implementation, docs, validation, and defect questions to the responsible role defined below.
-- Do not implement non-trivial production code directly.
+- Do not implement production code directly.
 
 ### User Communication
 
