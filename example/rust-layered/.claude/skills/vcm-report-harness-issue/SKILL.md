@@ -31,17 +31,21 @@ Use only safe filename characters: letters, numbers, dot, dash, and underscore.
 
 ## Required Content
 
-The file must include:
+Use this structure:
 
-- reporter role
-- task slug when known
-- summary
-- observed problem
-- expected behavior
-- evidence, with relevant file paths, command names, logs, or repeated failure pattern
-- suspected harness area
-- impact
-- urgency
+```md
+# <short problem title>
+
+- Reporter role: <role>
+- Task slug: <slug or unknown>
+- Summary: <one line>
+- Observed problem: <what happened>
+- Expected behavior: <what the harness should have done>
+- Evidence: <file paths, command names, logs, or repeated failure pattern>
+- Suspected harness area: <skill, role definition, tool, routing, validation, bootstrap, or managed instruction>
+- Impact: <who is affected and how>
+- Urgency: low | medium | high
+```
 
 ## Constraints
 
