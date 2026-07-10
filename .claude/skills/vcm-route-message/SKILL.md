@@ -98,7 +98,9 @@ Do not:
 - start a shell loop
 - wait for another role's answer
 - paste directly into another role terminal
-- use Claude Code Task/Subagent for VCM role delegation
+- use Claude Code Task/Subagent to replace VCM role routing. Coder worker
+  subagents are governed by Coder's `vcm-coder-worker` rules and are not
+  route-message delivery.
 
 VCM scans pending route files after the Stop hook and delivers later replies in a new turn.
 

@@ -13,6 +13,7 @@ This skill is an operating procedure. It does not replace the deterministic VCM 
 
 ## Boundaries
 
+- Work only in the active task worktree named by VCM.
 - Read the repository before drafting project-specific harness content.
 - Do not edit product source, product tests, package manifests, lockfiles, deployment config, or secrets.
 - Do not own managed-block writes, hook merging, manifest migrations, uninstall behavior, or deterministic skeleton creation; VCM backend owns those.

@@ -75,7 +75,7 @@ Choose exactly one:
 - accepted
 - accepted-with-known-risks
 - needs-coder-follow-up
-- needs-architect-replan
+- needs-architect-follow-up
 - needs-docs-sync
 - blocked-by-user-decision
 
@@ -96,7 +96,7 @@ Use this structure:
 
 ## Decision
 
-accepted | accepted-with-known-risks | needs-coder-follow-up | needs-architect-replan | needs-docs-sync | blocked-by-user-decision
+accepted | accepted-with-known-risks | needs-coder-follow-up | needs-architect-follow-up | needs-docs-sync | blocked-by-user-decision
 
 ## Evidence Reviewed
 

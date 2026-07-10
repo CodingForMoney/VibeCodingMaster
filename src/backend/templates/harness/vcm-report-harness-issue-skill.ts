@@ -11,7 +11,9 @@ Write one markdown file under:
 \${VCM_BASE_REPO_ROOT}/.ai/vcm/harness-feedback/pending/
 \`\`\`
 
-If \`VCM_BASE_REPO_ROOT\` is not set, use the current git root as a fallback.
+If \`VCM_BASE_REPO_ROOT\` is not set, do not guess a fallback path. Report the
+environment problem to project-manager so VCM can retry with the correct base
+repository root.
 
 Use a filename like:
 
