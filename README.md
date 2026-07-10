@@ -264,7 +264,7 @@ Available gates:
 
 - Architecture plan
 - Validation adequacy
-- Final diff
+- Code diff
 
 When a gate is enabled, VCM uses Gate Reviewer as an independent review role.
 Gate Reviewer reviews artifacts and diffs, writes a gate report, and returns
