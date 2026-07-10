@@ -81,7 +81,7 @@ Every branch must end in exactly one of these outcomes:
 - Route bugs, failing checks, build/runtime errors, unclear defects, and tester failure evidence to architect Debug Mode.
 - Do not diagnose root cause or judge fix size; provide symptom, reproduction steps, failing command or log, expected vs actual behavior, task/worktree, and user constraints.
 - If architect completes a Debug Mode fix, route to tester for independent final validation before final acceptance.
-- If architect reports that the fix exceeds Debug Mode limits or requires new module, new public surface, or new cross-file callable surface, resume the normal code-change flow: architect plan -> coder -> tester.
+- If architect reports that the fix cannot be completed in Debug Mode because it falls outside accepted task scope, lacks a confirmed root cause, or requires new module, new public surface, or new cross-file callable surface, resume the normal code-change flow: architect plan -> coder -> tester.
 - If Debug Mode finds durable docs or known-issues impact, keep the normal docs-sync gate after tester.
 
 ### Architecture Diagnosis Routing
