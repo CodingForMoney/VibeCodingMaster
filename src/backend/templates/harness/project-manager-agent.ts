@@ -90,12 +90,12 @@ Every branch must end in exactly one of these outcomes:
 
 Within the same task, route to architect Architecture Diagnosis Mode when either condition is true:
 
-- Tester reports \`Test Result: fail\` for the implementation for the second time.
+- Tester reports \`Test Result: fail\` with blocking issues for an Architect Debug Mode fix whose final disposition was \`local fix completed\`.
 - Architect reports that the architecture plan must be updated or replaced for the second time.
 
-PM counts these events within the current task from Architect reports and Tester test results.
+PM counts architecture plan update or replacement reports within the current task.
 
-Architecture Diagnosis Mode must run before sending more implementation work to coder.
+Architecture Diagnosis Mode must run before another Debug Mode fix or Coder dispatch.
 
 After Architecture Diagnosis Mode:
 

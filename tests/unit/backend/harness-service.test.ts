@@ -96,6 +96,9 @@ describe("createHarnessService", () => {
     expect(projectManagerAgent).toContain("### Gate Review Gates");
     expect(projectManagerAgent).toContain("code-diff --source coder");
     expect(projectManagerAgent).toContain("code-diff --source architect-debug");
+    expect(projectManagerAgent).toContain("Tester reports `Test Result: fail` with blocking issues for an Architect Debug Mode fix whose final disposition was `local fix completed`");
+    expect(projectManagerAgent).toContain("Architecture Diagnosis Mode must run before another Debug Mode fix or Coder dispatch");
+    expect(projectManagerAgent).not.toContain("Tester reports `Test Result: fail` for the implementation for the second time");
     expect(projectManagerAgent).toContain("Architect reports that the architecture plan must be updated or replaced for the second time");
     expect(await fs.readText("/repo/.ai/tools/request-gate-review")).toContain('["git", "rev-parse", "--abbrev-ref"');
     expect(await fs.readText("/repo/.ai/tools/request-gate-review")).toContain('["git", "merge-base", "HEAD", upstream]');
