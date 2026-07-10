@@ -68,7 +68,7 @@ const AGENT_FRONTMATTER = {
     tools: "Read, Grep, Glob, Bash, Edit, Write, Agent"
   },
   tester: {
-    description: "VCM testing role for validation, test adequacy, scope checks, and risk findings."
+    description: "VCM testing role for validation, test adequacy, approved-scope validation, and risk findings."
   },
   "gate-reviewer": {
     description: "VCM independent gate review role for architecture plans, validation adequacy, and code diffs."

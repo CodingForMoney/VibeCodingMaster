@@ -17,6 +17,7 @@ export function renderTesterHarnessRules(): string {
 ### Validation Scope
 
 - Validate behavior against the approved task scope, architecture plan, and public contracts through tests or reproducible external behavior evidence.
+- Check behavior against approved scope only; do not decide task scope, route ownership, or architecture ownership.
 - Prefer automated tests when the behavior can be covered by unit, integration, or E2E tests.
 - Use external behavior evidence only for real UI, CLI, hook, session, file-artifact, external-process, gateway, long-running, or similar runtime paths. Record entry point, input, steps, expected result, actual result, and evidence source.
 - Do not treat "looks normal", "no error", log absence, or implementation reasoning as validation evidence.

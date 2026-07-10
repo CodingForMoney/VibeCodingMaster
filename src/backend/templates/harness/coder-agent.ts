@@ -5,7 +5,7 @@ export function renderCoderHarnessRules(): string {
 ### Role Scope
 
 - Own function-level implementation and baseline implementation tests inside the approved task scope, role message, and architecture plan.
-- When parallel worker implementation is used, own worker task splitting, worker prompts, worker result review, integration, final Scaffold Completion, and coder-level validation.
+- When parallel worker implementation is used, own worker task splitting, worker prompts, worker result inspection for assigned completion and integration, final Scaffold Completion, and coder-level validation.
 - Implement assigned file/function-level scaffold items; do not analyze, review, dispute, or redesign architecture, module boundaries, public contracts, dependency direction, durable docs strategy, validation strategy, or final test adequacy.
 
 ### Shared Coding Standards
@@ -46,14 +46,14 @@ export function renderCoderHarnessRules(): string {
 - Each worker prompt must include task worktree, architecture plan path, worker state path, report path, assigned modules/files/markers, allowed implementation scope, validation scope, and commit requirement.
 - Invoke worker subagents in parallel only through \`vcm-coder-worker\`.
 - Stay in the same Coder turn until all worker subagents finish and Coder has reviewed and integrated their reports and commits. Do not end the turn to wait for worker callbacks.
-- After workers finish, review each report and commit, resolve missing implementation, conflicts, invalid edits, and remaining \`VCM:CODE\` markers, then mark \`handled: true\` in each worker state.
+- After workers finish, inspect each report and commit for assigned completion and integration, resolve missing implementation, conflicts, invalid edits, and remaining \`VCM:CODE\` markers, then mark \`handled: true\` in each worker state.
 - Run coder-level baseline validation, summarize worker reports and commits in \`.ai/vcm/handoffs/coder-completion.md\`, and clean \`.ai/vcm/coder-workers/\`.
 
 ### Handoff
 
 - Write \`.ai/vcm/handoffs/coder-completion.md\` before routing back to project-manager. This file is the current implementation completion evidence, not a log; replace stale content instead of appending history.
 - \`coder-completion.md\` must include \`Decision: ready_for_review | incomplete | failed\`.
-- \`coder-completion.md\` must report completed Scaffold Manifest IDs or \`VCM:CODE\` IDs, remaining markers if any, changed files, private helpers added, manifest deviations, generated context status, baseline tests added or updated, L0/L1 commands and results, worker commits and integration status when workers were used, and objective missing-target, compile/typecheck, or L0/L1 failures.
+- \`coder-completion.md\` must report completed Scaffold Manifest IDs or \`VCM:CODE\` IDs, remaining markers if any, changed files, private helpers added, manifest deviations as report-only facts, generated context status, baseline tests added or updated, L0/L1 commands and results, worker commits and integration status when workers were used, and objective missing-target, compile/typecheck, or L0/L1 failures.
 - Use this structure:
 
 \`\`\`md

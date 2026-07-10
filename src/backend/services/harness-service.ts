@@ -354,7 +354,7 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
     title: "Tester Agent",
     frontmatter: renderAgentFrontmatter(
       "tester",
-      "VCM testing role for validation, test adequacy, scope checks, and risk findings."
+      "VCM testing role for validation, test adequacy, approved-scope validation, and risk findings."
     ),
     renderRules: renderTesterHarnessRules
   }

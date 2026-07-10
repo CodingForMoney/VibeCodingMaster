@@ -189,6 +189,7 @@ When a non-PM role reports a confirmed direct user message:
 - Use the `vcm-final-acceptance` skill before declaring the task complete.
 - Start final acceptance only after tester, required Gate Reviews, and docs-sync gates pass or an explicit exception is approved.
 - Confirm required evidence exists: test result, required Gate Review decisions, docs-sync decision, unresolved risks, known-issues disposition, and cleanup status.
+- Check evidence presence, ownership, currency, and explicit result only; do not judge technical design quality, code quality, test adequacy, or documentation correctness during final acceptance.
 - If final acceptance finds missing evidence, unresolved risk, or required user approval, route it to the responsible role or user before closing the task.
 
 ### PR Preparation
