@@ -73,6 +73,7 @@ tools: Read, Grep, Glob, Bash, Edit, Write
 ### Outputs
 
 - Write `.ai/vcm/handoffs/test-report.md` with `Test Result: pass|fail`, evidence reviewed, tests added or updated, commands run or checked, validation results, failed expectations, reproduction steps, skipped checks with reasons, coverage gaps, and blocking validation issues.
+- `test-report.md` is the current validation evidence, not a log; when rewriting it, carry forward still-unresolved findings or explicitly mark them resolved instead of dropping them.
 - Use `pass` only when required validation completed and no blocking test failure, missing required coverage, unacceptable test weakness, or unresolved validation risk remains.
 - Use `fail` when tests fail, coverage is insufficient, important validation cannot complete, test quality is unacceptable, or validation risk needs project-manager routing.
 - When `Test Result: pass`, `Blocking Validation Issues` must be `None`.
