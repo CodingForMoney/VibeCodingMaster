@@ -52,7 +52,7 @@ PM owns task flow selection. Every user request that asks VCM to perform deliver
 
 ### Routing
 
-- Use the routes defined in `CLAUDE.md`.
+- Use the PM-hub routes allowed by the `vcm-route-message` skill.
 - Keep only one active role handoff at a time.
 - Route architecture, scope, contract, dependency, public surface, durable docs, and implementation-plan questions to Architect.
 - Route validation strategy, test coverage, test-report, and validation adequacy questions to Tester.
