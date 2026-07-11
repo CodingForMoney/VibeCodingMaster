@@ -73,28 +73,6 @@ security risk, not delivery priority.
 - **Resolution condition**: Distinguish spawn/launch errors from non-zero process exits in `command-runner` (e.g., a sentinel exit code or a typed `spawnFailed` flag) and have git-adapter treat spawn failure as an error rather than a `false` result. Requires a cross-file contract change → route through the full code-change flow.
 - **Related**: none.
 
-### KI-010 — Translation queue stuck-head recovery is enqueue-triggered, not continuous
-
-- **Status**: Open (accepted limitation; the primary issue #13 case is resolved).
-- **Category**: Product / robustness (operability).
-- **Affected modules / surfaces**: `src/backend/services/translation-worker-service.ts` (`dispatchNext` / `reconcileStuckActiveItem` / `STALE_CONVERSATION_ITEM_MS`), `src/backend/services/translation-service.ts` (`waitForConversationResult` poll loop).
-- **Current gap**: Recovery of a stuck active queue item (whose Translator `Stop`/`StopFailure` hook was lost) runs only when `dispatchNext` is invoked — i.e. when a new item is enqueued or a hook arrives. The request poll loop (`waitForConversationResult` -> `getState`) does not call `dispatchNext`. The primary case (the result already written to disk, hook lost) self-heals immediately on the next enqueue: conversation output lives in a single shared, self-describing `runtime/conversations/result.json`, and the recovery association key is the in-file `batchId` validated all-or-nothing (`conversationResultAvailable` requires the file to exist, parse, have `batchId` equal to the active item's `batchId`, and contain every expected `batchIndex`). The secondary case (Translator session gone with no result written) is only released after the item passes the 90s `STALE_CONVERSATION_ITEM_MS` window *and* a subsequent enqueue occurs; if the stuck head is still younger than 90s when the next translation is requested, that request can still time out once.
-- **Impact**: Low. A narrow window can still produce a single `translation timed out` (HTTP 502) for the "session gone, no result, head <90s old, no further enqueue" case; it self-heals on the next translation attempt after the stale window. No permanent queue block remains, and a backend restart with a pre-existing stuck item recovers immediately (its `updatedAt` is already stale, or the result is on disk).
-- **Mitigation / workaround**: Retry the translation once; the retry's enqueue triggers reconciliation.
-- **Resolution condition**: Add a periodic / poll-driven reconcile (e.g. reconcile on `getState` or a timer) so stuck heads are released without depending on a new enqueue. Requires a code change → route through the full code-change flow if pursued.
-- **Related**: KI-011.
-
-### KI-011 — Conversation result cleanup deletes the shared dir without a batchId guard
-
-- **Status**: Open (accepted limitation; harm effectively unreachable today).
-- **Category**: Product / robustness (operability).
-- **Affected modules / surfaces**: `src/backend/services/translation-worker-service.ts` (`validateConversationResult` cleanup of the shared `runtime/conversations/` directory holding `result.json`).
-- **Current gap**: Because conversation translation now uses one shared `result.json` (KI-010), cleanup after a consumed result removes the shared `conversations/` directory (the `batchResultPath` dirname) rather than a per-batch directory, and it is not guarded by a `batchId` match against the file actually on disk. In principle a delete could race a newly written `result.json` for a later batch.
-- **Impact**: Negligible in practice. Cleanup fires on the ~500ms consumer poll, far ahead of when a subsequent batch's Translator (LLM latency ≫ 500ms) could write a new `result.json`; and the all-or-nothing in-file `batchId` validation means the worst case is a recoverable dropped result, never a mis-assignment — within the design's accepted "drop over mis-assign" tolerance.
-- **Mitigation / workaround**: None needed; a dropped conversation result self-recovers via re-translate / stale-release.
-- **Resolution condition**: Optional hardening — scope the cleanup to delete only when the on-disk `result.json` `batchId` matches the just-consumed batch (or delete the file, not the directory). Requires a small code change → full code-change flow if pursued.
-- **Related**: KI-010.
-
 ### KI-004 — Claude transcript project-directory hashing does not match Claude Code's encoding
 
 - **Status**: Open.
@@ -151,7 +129,7 @@ security risk, not delivery priority.
 
 - **Status**: Open (maintainability hazard, not a defect).
 - **Category**: Product / maintainability.
-- **Affected modules / surfaces**: `src/backend/services/harness-service.ts` (~2160 lines), `translation-worker-service.ts` (~2155), `translation-service.ts` (~1721), `session-service.ts` (~1682), `gate-review-service.ts` (~980), `claude-hook-service.ts` (~769).
+- **Affected modules / surfaces**: `src/backend/services/harness-service.ts` (~2290 lines), `translation-worker-service.ts` (~2240), `translation-service.ts` (~2120), `session-service.ts` (~1990), `gate-review-service.ts` (~1400), `auto-memory-service.ts` (~980), and `claude-hook-service.ts` (~950).
 - **Current gap**: Several service files greatly exceed comfortable single-file cohesion and bundle orchestration, retry/error handling, and side-effect coordination together. This makes the intended `api -> services -> (runtime | adapters | gateway | templates)` boundary harder to reason about and raises regression risk on edits.
 - **Impact**: Higher change cost and review/regression risk in the highest-traffic backend logic; harder to localize behavior and test seams.
 - **Mitigation / workaround**: Existing unit tests cover many of these services; keep edits narrowly scoped.

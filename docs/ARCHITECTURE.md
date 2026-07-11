@@ -135,6 +135,15 @@ service applies it to canonical and task memory together. Auto Memory hook
 turns update role session activity but do not mutate the completed task round.
 The frontend only displays state and invokes memory file, retry, or revert APIs.
 
+Auto Memory completion is bound to the SHA-256 hash of the current accepted
+`final-acceptance.md`. If that artifact changes, memory is pending again for the
+new acceptance evidence. `runtime-coordinator-service` and the manual Harness
+route use the same readiness policy: Task Harness Retrospective may start only
+when Auto Memory is disabled or completed for that hash. Pending, collecting,
+reviewing, or failed memory work blocks retrospective. The retrospective then
+includes memory drafts, applied memory diffs, and current memory in its task
+evidence.
+
 ## Public Surface
 
 The authoritative machine listing of exported APIs, HTTP routes, and externally
@@ -172,6 +181,7 @@ Update this document when:
 - dependency rules or layer boundaries change;
 - externally meaningful surfaces change in a way that affects consumers;
 - a new external integration, gateway channel, or adapter is added.
+- post-task Auto Memory or Task Harness Retrospective ownership/order changes.
 
 After these changes, regenerate `.ai/generated/module-index.json` and
 `.ai/generated/public-surface.json`.

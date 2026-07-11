@@ -333,7 +333,7 @@ Gateway can:
 - create a task
 - close a task with confirmation
 - send plain text to Project Manager
-- push PM replies back to the active chat
+- push the PM Round-final reply and Round status back to the active chat
 - translate mobile messages when Gateway translation is enabled
 
 Gateway does not expose the embedded terminal and does not send directly to
@@ -361,6 +361,12 @@ Common commands:
 Gateway credentials and audit logs are stored in app-local state, not connected
 repositories.
 
+When Gateway starts, VCM enables conversation translation, auto-send, and the
+`Round final reply` scope. On a normal Round end, Gateway sends the PM original
+reply first, then reuses the matching translation already produced for the
+translation panel. `/retry` explicitly creates a new translation only when the
+previous Gateway translation failed or was unavailable.
+
 ## Harness Studio
 
 Harness Studio is the UI for VCM harness maintenance.
@@ -374,7 +380,7 @@ Use it to:
 - view and edit shared or role-specific VCM memory
 - review and revert memory changes recorded in the active task worktree
 - copy file paths for discussion
-- review task harness after a task completes
+- review task harness after post-task memory processing completes
 - inspect commit diffs for harness changes
 - merge task harness commits back to the connected repository branch when
   appropriate
@@ -394,6 +400,19 @@ Canonical memory is stored under the base repository's `.ai/vcm/memory/`.
 Harness Studio shows current memory and task-local applied history. Memory is
 applied before user review; while the task worktree remains available, the user
 can edit current memory or revert a recorded change.
+
+Post-task processing is ordered by the backend:
+
+```text
+Final Acceptance
+  -> Auto Memory, when enabled
+  -> Task Harness Retrospective
+```
+
+Auto Memory adds no retrospective prerequisite when it is disabled. When it is
+enabled, both automatic and manual retrospective requests wait until memory has
+been applied for the current Final Acceptance. A failed memory review must be
+retried from Harness Studio before retrospective can run.
 
 ## Closing a Task
 
@@ -495,5 +514,5 @@ npm start
 - `docs/ARCHITECTURE.md`: repository architecture
 - `docs/TESTING.md`: validation strategy
 - `docs/vcm-cc-best-practices.md`: current VCM Claude Code harness practice
-- `docs/v0.5-custom-workflow-plan.md`: future custom workflow plan
+- `docs/v0.5-custom-workflow-plan.md`: deferred custom workflow proposal
 - `docs/cc-best-practices.md`: archived generic Claude Code harness notes

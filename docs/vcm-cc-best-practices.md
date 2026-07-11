@@ -1,6 +1,6 @@
 # VCM Claude Code Best Practices
 
-Last updated: 2026-07-10
+Last updated: 2026-07-11
 
 This is the current VCM-specific Claude Code / AI coding best-practices guide.
 It describes how VCM's harness, roles, runtime state, and task workflow should
@@ -187,6 +187,9 @@ Current runtime paths include:
 <taskRepoRoot>/.ai/vcm/handoffs/known-issues.md
 <taskRepoRoot>/.ai/vcm/gate-reviews/
 <taskRepoRoot>/.ai/vcm/jobs/<job-id>/
+<taskRepoRoot>/.ai/vcm/memory/
+<taskRepoRoot>/.ai/vcm/memory-review/
+<baseRepoRoot>/.ai/vcm/memory/
 <baseRepoRoot>/.ai/vcm/translations/
 <baseRepoRoot>/.ai/vcm/harness-engineer/
 <baseRepoRoot>/.ai/vcm/bootstrap/
@@ -385,10 +388,12 @@ Input policy:
   input. Missing or empty core input is `not_required`.
 - `validation-adequacy` uses `.ai/vcm/handoffs/test-report.md` as its core
   input. Missing or empty core input is `not_required`.
-- `code-diff` is triggered by PM after Coder `Decision: ready_for_review` or an
-  Architect Debug completed code fix. PM does not inspect commits; the tool
-  reviews committed inputs, returns `not_required` when there are no new
-  commits, and fails to start when the worktree has uncommitted changes.
+- `code-diff` is triggered by PM after Coder `Decision: ready_for_review`, an
+  Architect Debug completed code fix, or an Architecture Diagnosis completed
+  code fix. PM supplies the matching `coder`, `architect-debug`, or
+  `architect-diagnosis` source. PM does not inspect commits; the tool reviews
+  committed inputs, returns `not_required` when there are no new commits, and
+  fails to start when the worktree has uncommitted changes.
 - Gates avoid duplicate review by comparing input hashes.
 
 Gate Reviewer writes reports under:
@@ -397,10 +402,10 @@ Gate Reviewer writes reports under:
 .ai/vcm/gate-reviews/
 ```
 
-Gate Reviewer returns only `approve` or `request_changes`, does not run tests,
-does not edit files, and does not choose fix owners, Replan, or user-intervention
-needs. PM routes `architecture-plan` and `code-diff` findings to architect, and
-`validation-adequacy` findings to tester.
+Gate Reviewer returns only `approve` or `request_changes`, writes only its
+assigned gate report, does not run tests, and does not choose fix owners,
+Replan, or user-intervention needs. PM routes `architecture-plan` and
+`code-diff` findings to architect, and `validation-adequacy` findings to tester.
 
 ## 13. Validation
 
@@ -488,17 +493,20 @@ Reusable harness issues are reported through `vcm-report-harness-issue`.
 Harness Engineer verifies them when idle, proposes diffs or VCM issue drafts,
 and waits for user approval before applying normal harness changes.
 
-Task Harness Retrospective can be triggered manually or automatically after a
-normal Round end when final acceptance evidence exists. It should inspect the
-completed task workflow and deliverables for reusable harness problems, not
-re-review the business feature itself.
-
-When Auto Memory is enabled, a complete task that passes Final Acceptance may
-run a separate post-task memory review. Workflow roles write evidence-backed
+When Auto Memory is enabled, a normal stopped Round with valid Final Acceptance
+may run a separate post-task memory review. Workflow roles write evidence-backed
 drafts sequentially; Harness Engineer consolidates them into shared and
 role-specific memory. Canonical memory lives under the base repository's
 `.ai/vcm/memory/`, while the active worktree contains the role-visible snapshot
 and review history. These auxiliary turns do not reopen the completed Round.
+
+Task Harness Retrospective runs after that memory workflow. The backend uses the
+current accepted `final-acceptance.md` hash as the ordering key. Automatic and
+manual retrospective requests are allowed only when Auto Memory is disabled or
+completed for that hash; pending, collecting, reviewing, and failed memory work
+blocks them. Retrospective evidence includes the memory drafts, applied diff,
+and current memory. It reviews reusable harness problems exposed by the task,
+not whether the business feature itself is acceptable.
 
 ## 16. Final Acceptance
 
@@ -572,7 +580,8 @@ Rules:
 - Gateway sends ordinary mobile text only to the current task's
   `project-manager`.
 - Gateway never sends directly to architect, coder, tester, or Gate Reviewer.
-- Gateway can push PM replies to the active mobile chat while enabled.
+- Gateway pushes only the last PM reply from a normally completed Round, along
+  with the Round completion notice.
 - Gateway state, credentials, and audit logs live in app-local state, not
   connected repositories.
 - Lark uses the most recent active reachable chat as the PM reply target.
@@ -580,7 +589,11 @@ Rules:
   Gateway becomes the notification path.
 - Gateway translation should reuse the existing translation result when
   available and avoid duplicate translation work.
-- `/retry` retries the latest failed Gateway output translation when possible.
+- Starting Gateway enables conversation translation, auto-send, and the
+  `round-final` output mode.
+- Outbound delivery sends the PM original first, then the existing translation
+  panel result. `/retry` is the explicit path that may create a replacement
+  translation after failure or a missing result.
 
 Gateway must stay conservative: no full terminal exposure, no arbitrary shell
 commands, and no direct role routing from mobile chat.
@@ -644,4 +657,5 @@ polling a missing terminal session forever.
 18. Architect owns architecture planning, code scaffolding, Debug Mode, and
     durable architecture docs.
 19. PM owns routing and final evidence acceptance, not technical analysis.
-20. Temporary documents are deleted; durable documents are updated.
+20. Auto Memory, when enabled, completes before Task Harness Retrospective.
+21. Temporary documents are deleted; durable documents are updated.
