@@ -120,6 +120,9 @@ describe("createHarnessService", () => {
     expect(testerAgent).toContain("do not replace Tester final validation");
     expect(testerAgent).toContain("Apply `docs/CODING_STANDARDS.md` to changed tests");
     expect(testerAgent).not.toContain("shared implementation-quality and baseline-test standard");
+    const diagnosisGateReviewerAgent = await fs.readText("/repo/.claude/agents/gate-reviewer.md");
+    expect(diagnosisGateReviewerAgent).toContain("verify that the commits implement the diagnosed");
+    expect(diagnosisGateReviewerAgent).toContain("local workaround for the surface failure");
     const coderAgent = await fs.readText("/repo/.claude/agents/coder.md");
     expect(coderAgent).toContain("tools: Read, Grep, Glob, Bash, Edit, Write, Agent");
     expect(coderAgent).toContain("Implement assigned file/function-level scaffold items");
