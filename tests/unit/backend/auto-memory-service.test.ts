@@ -23,6 +23,13 @@ describe("auto-memory-service", () => {
     const context = await createContext(false);
     const service = context.service;
     await service.ensureTaskSnapshot(context.baseRepoRoot, context.taskRepoRoot);
+    await expect(service.getTaskRetrospectiveReadiness({
+      baseRepoRoot: context.baseRepoRoot,
+      taskRepoRoot: context.taskRepoRoot,
+      taskSlug: "demo",
+      handoffDir: ".ai/vcm/handoffs",
+      roundReady: true
+    })).resolves.toEqual({ ready: true, disposition: "disabled" });
 
     const state = await service.updateFile(
       context.baseRepoRoot,
@@ -53,6 +60,14 @@ describe("auto-memory-service", () => {
         .replace("## Decision\n\nNone.", "## Decision\n\naccepted"),
       "utf8"
     );
+
+    await expect(context.service.getTaskRetrospectiveReadiness({
+      baseRepoRoot: context.baseRepoRoot,
+      taskRepoRoot: context.taskRepoRoot,
+      taskSlug: "demo",
+      handoffDir: ".ai/vcm/handoffs",
+      roundReady: true
+    })).resolves.toMatchObject({ ready: false, disposition: "pending" });
 
     let state = await context.service.reconcileTask({
       baseRepoRoot: context.baseRepoRoot,
@@ -101,6 +116,26 @@ describe("auto-memory-service", () => {
     expect(state.runs[0].diff).toContain("Lifecycle completion is owned by backend hooks");
     expect(await readText(context.baseRepoRoot, ".ai/vcm/memory/shared.md")).toContain("Lifecycle completion is owned by backend hooks");
     expect(context.terminalWrites.some((entry) => entry.includes("[VCM Auto Memory Review]"))).toBe(true);
+    await expect(context.service.getTaskRetrospectiveReadiness({
+      baseRepoRoot: context.baseRepoRoot,
+      taskRepoRoot: context.taskRepoRoot,
+      taskSlug: "demo",
+      handoffDir: ".ai/vcm/handoffs",
+      roundReady: true
+    })).resolves.toEqual({ ready: true, disposition: "completed" });
+
+    await writeFile(
+      finalAcceptancePath,
+      `${await readFile(finalAcceptancePath, "utf8")}\nUpdated acceptance evidence.\n`,
+      "utf8"
+    );
+    await expect(context.service.getTaskRetrospectiveReadiness({
+      baseRepoRoot: context.baseRepoRoot,
+      taskRepoRoot: context.taskRepoRoot,
+      taskSlug: "demo",
+      handoffDir: ".ai/vcm/handoffs",
+      roundReady: true
+    })).resolves.toMatchObject({ ready: false, disposition: "pending" });
   });
 
   async function createContext(autoMemoryEnabled: boolean) {

@@ -10,6 +10,7 @@ import type {
   MemoryReviewRunSource,
   MemoryReviewRunStatus,
   MemoryReviewRunSummary,
+  TaskRetrospectiveMemoryReadiness,
   VcmMemoryRoleName
 } from "../../shared/types/memory.js";
 import type { RoleName, VcmRoleName } from "../../shared/types/role.js";
@@ -83,6 +84,8 @@ export interface AutoMemoryService {
   ensureTaskSnapshot(baseRepoRoot: string, taskRepoRoot: string): Promise<void>;
   reconcileTask(input: ReconcileAutoMemoryInput): Promise<AutoMemoryStateReport>;
   getState(baseRepoRoot: string, taskRepoRoot: string): Promise<AutoMemoryStateReport>;
+  getTaskRetrospectiveReadiness(input: ReconcileAutoMemoryInput): Promise<TaskRetrospectiveMemoryReadiness>;
+  assertTaskRetrospectiveReady(input: ReconcileAutoMemoryInput): Promise<void>;
   getFile(baseRepoRoot: string, taskRepoRoot: string, filePath: string): Promise<MemoryFileContent>;
   updateFile(baseRepoRoot: string, taskRepoRoot: string, taskSlug: string, filePath: string, content: string): Promise<AutoMemoryStateReport>;
   revertRun(baseRepoRoot: string, taskRepoRoot: string, runId: string): Promise<AutoMemoryStateReport>;
@@ -224,19 +227,10 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
       return getState(input.baseRepoRoot, input.taskRepoRoot);
     }
 
-    const finalAcceptancePath = path.posix.join(input.handoffDir, "final-acceptance.md");
-    const finalAcceptanceAbsolutePath = resolveRepoPath(input.taskRepoRoot, finalAcceptancePath);
-    if (!(await deps.fs.pathExists(finalAcceptanceAbsolutePath))) {
+    const finalAcceptanceHash = await readAcceptedFinalAcceptanceHash(input.taskRepoRoot, input.handoffDir);
+    if (!finalAcceptanceHash) {
       return getState(input.baseRepoRoot, input.taskRepoRoot);
     }
-    const finalAcceptanceContent = await deps.fs.readText(finalAcceptanceAbsolutePath);
-    const check = checkMarkdownArtifact("final-acceptance", finalAcceptancePath, finalAcceptanceContent);
-    const decision = readArtifactSectionValue(finalAcceptanceContent, "Decision")?.toLowerCase();
-    if (check.status !== "ok" || (decision !== "accepted" && decision !== "accepted-with-known-risks")) {
-      return getState(input.baseRepoRoot, input.taskRepoRoot);
-    }
-
-    const finalAcceptanceHash = `sha256:${sha256(finalAcceptanceContent)}`;
     if (await hasCompletedRunForFinalAcceptance(input.taskRepoRoot, finalAcceptanceHash)) {
       return getState(input.baseRepoRoot, input.taskRepoRoot);
     }
@@ -280,6 +274,51 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
     await persistActiveState(input.taskRepoRoot, state);
     await dispatchCurrentDraft(input.baseRepoRoot, input.taskRepoRoot, state);
     return getState(input.baseRepoRoot, input.taskRepoRoot);
+  }
+
+  async function getTaskRetrospectiveReadiness(
+    input: ReconcileAutoMemoryInput
+  ): Promise<TaskRetrospectiveMemoryReadiness> {
+    const preferences = await deps.appSettings.getPreferences();
+    if (!preferences.autoMemoryEnabled) {
+      return { ready: true, disposition: "disabled" };
+    }
+    const finalAcceptanceHash = await readAcceptedFinalAcceptanceHash(input.taskRepoRoot, input.handoffDir);
+    if (!finalAcceptanceHash) {
+      return { ready: true, disposition: "not-applicable" };
+    }
+    const active = await loadActiveState(input.taskRepoRoot);
+    if (active) {
+      const disposition = active.status;
+      return {
+        ready: false,
+        disposition,
+        reason: disposition === "failed"
+          ? "Auto Memory failed for this task. Retry it before Task Harness Retrospective."
+          : `Auto Memory is ${disposition} for this task.`
+      };
+    }
+    if (await hasCompletedRunForFinalAcceptance(input.taskRepoRoot, finalAcceptanceHash)) {
+      return { ready: true, disposition: "completed" };
+    }
+    return {
+      ready: false,
+      disposition: "pending",
+      reason: "Auto Memory must complete for this Final Acceptance before Task Harness Retrospective."
+    };
+  }
+
+  async function assertTaskRetrospectiveReady(input: ReconcileAutoMemoryInput): Promise<void> {
+    const readiness = await getTaskRetrospectiveReadiness(input);
+    if (readiness.ready) {
+      return;
+    }
+    throw new VcmError({
+      code: "TASK_MEMORY_REVIEW_NOT_READY",
+      message: "Task Harness Retrospective must run after Auto Memory.",
+      statusCode: 409,
+      hint: readiness.reason
+    });
   }
 
   async function isRoleMemoryTurn(taskRepoRoot: string, role: RoleName): Promise<boolean> {
@@ -721,12 +760,32 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
     await persistRun(taskRepoRoot, { ...run, status, updatedAt: timestamp });
   }
 
+  async function readAcceptedFinalAcceptanceHash(
+    taskRepoRoot: string,
+    handoffDir: string
+  ): Promise<string | undefined> {
+    const finalAcceptancePath = path.posix.join(handoffDir, "final-acceptance.md");
+    const absolutePath = resolveRepoPath(taskRepoRoot, finalAcceptancePath);
+    if (!(await deps.fs.pathExists(absolutePath))) {
+      return undefined;
+    }
+    const content = await deps.fs.readText(absolutePath);
+    const check = checkMarkdownArtifact("final-acceptance", finalAcceptancePath, content);
+    const decision = readArtifactSectionValue(content, "Decision")?.toLowerCase();
+    if (check.status !== "ok" || (decision !== "accepted" && decision !== "accepted-with-known-risks")) {
+      return undefined;
+    }
+    return `sha256:${sha256(content)}`;
+  }
+
   return {
     ensureTaskSnapshot(baseRepoRoot, taskRepoRoot) {
       return ensureTaskMemorySnapshot(deps.fs, baseRepoRoot, taskRepoRoot);
     },
     reconcileTask,
     getState,
+    getTaskRetrospectiveReadiness,
+    assertTaskRetrospectiveReady,
     getFile,
     updateFile,
     revertRun,

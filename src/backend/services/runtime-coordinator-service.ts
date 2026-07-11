@@ -41,7 +41,7 @@ export interface RuntimeCoordinatorServiceDeps {
   translationService: Pick<TranslationService, "startSession" | "stopTask">;
   harnessService: Pick<HarnessService, "getHarnessStatus">;
   harnessFeedbackService: Pick<HarnessFeedbackService, "startTaskRetrospective">;
-  autoMemoryService: Pick<AutoMemoryService, "reconcileTask">;
+  autoMemoryService: Pick<AutoMemoryService, "reconcileTask" | "getTaskRetrospectiveReadiness">;
   roundService: Pick<RoundService, "getSessionRoundState">;
   gatewayService: Pick<GatewayService, "getStatus">;
   getStateRoot(repoRoot: string): Promise<string>;
@@ -107,13 +107,12 @@ export function createRuntimeCoordinatorService(deps: RuntimeCoordinatorServiceD
           await deps.translationService.stopTask(taskRepoRoot, activeTask.taskSlug).catch(() => undefined);
         }
 
-        const autoMemoryState = await reconcileAutoMemory(repoRoot, activeTask);
-        if (
-          preferences.autoTaskHarnessReviewEnabled
-          && autoMemoryState.status !== "collecting"
-          && autoMemoryState.status !== "reviewing"
-        ) {
-          await maybeStartTaskHarnessRetrospective(repoRoot, activeTask);
+        await reconcileAutoMemory(repoRoot, activeTask);
+        if (preferences.autoTaskHarnessReviewEnabled) {
+          const memoryReadiness = await getTaskRetrospectiveMemoryReadiness(repoRoot, activeTask);
+          if (memoryReadiness.ready) {
+            await maybeStartTaskHarnessRetrospective(repoRoot, activeTask);
+          }
         }
 
         return { activeTask, gatewayStatus };
@@ -250,6 +249,17 @@ export function createRuntimeCoordinatorService(deps: RuntimeCoordinatorServiceD
       roundReady: roundState.status === "stopped"
         && Boolean(roundState.roundId)
         && roundState.roleRecovery?.status !== "failed"
+    });
+  }
+
+  async function getTaskRetrospectiveMemoryReadiness(repoRoot: string, task: TaskRecord) {
+    const taskRepoRoot = getTaskRuntimeRepoRoot(task);
+    return deps.autoMemoryService.getTaskRetrospectiveReadiness({
+      baseRepoRoot: repoRoot,
+      taskRepoRoot,
+      taskSlug: task.taskSlug,
+      handoffDir: task.handoffDir,
+      roundReady: true
     });
   }
 }

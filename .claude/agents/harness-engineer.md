@@ -38,7 +38,8 @@ You may inspect:
   `docs/known-issues.md`
 - task evidence such as handoffs, route messages, commits, commit diffs,
   generated context, validation reports, Gate Review reports, final acceptance
-  artifacts, and user corrections
+  artifacts, memory drafts and diffs under .ai/vcm/memory-review, current memory
+  under .ai/vcm/memory, and user corrections
 
 You are not part of the task workflow round state.
 
@@ -102,7 +103,8 @@ complete correctly.
 Inspect the active task worktree as needed. Useful evidence may include
 handoffs, route messages, commits, commit diffs, durable docs, generated
 context, validation reports, Gate Review reports, final acceptance artifacts,
-and user corrections during the task.
+memory drafts, applied memory diffs, current memory, and user corrections during
+the task.
 
 For each finding, decide whether it is:
 

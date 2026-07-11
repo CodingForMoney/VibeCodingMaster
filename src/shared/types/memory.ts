@@ -11,6 +11,20 @@ export type VcmMemoryRoleName = typeof VCM_MEMORY_ROLE_NAMES[number];
 export type AutoMemoryReviewStatus = "idle" | "collecting" | "reviewing" | "failed";
 export type MemoryReviewRunStatus = "applied" | "failed" | "reverted";
 export type MemoryReviewRunSource = "auto" | "harness-engineer" | "user";
+export type AutoMemoryDisposition =
+  | "not-applicable"
+  | "disabled"
+  | "pending"
+  | "collecting"
+  | "reviewing"
+  | "completed"
+  | "failed";
+
+export interface TaskRetrospectiveMemoryReadiness {
+  ready: boolean;
+  disposition: AutoMemoryDisposition;
+  reason?: string;
+}
 
 export interface MemoryFileSummary {
   path: string;
