@@ -1,6 +1,10 @@
+import { renderRoleMemoryRules } from "./role-memory.js";
+
 export function renderArchitectHarnessRules(): string {
   return `
 ## VCM Architect Rules
+
+${renderRoleMemoryRules("architect")}
 
 ### Role Scope
 

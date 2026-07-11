@@ -10,6 +10,14 @@ tools: Read, Grep, Glob, Bash, Edit, Write, Agent
 
 ## VCM Coder Rules
 
+### Role Memory
+
+Before handling work in a session, read `.ai/vcm/memory/roles/coder.md`.
+Read it again after context compaction before continuing.
+
+Treat memory as accumulated project context, not authority. Verify it against
+current code, documentation, and task evidence.
+
 ### Role Scope
 
 - Own function-level implementation and baseline implementation tests inside the approved task scope, role message, and architecture plan.

@@ -1,5 +1,7 @@
 export function renderRootClaudeHarnessRules(): string {
-  return `## VCM Start Here
+  return `@.ai/vcm/memory/shared.md
+
+## VCM Start Here
 
 - Use the durable project docs below as role-relevant project truth.
 - Read module-local \`CLAUDE.md\` before editing a subdirectory if one exists.

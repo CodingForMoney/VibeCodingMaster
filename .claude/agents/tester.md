@@ -10,6 +10,14 @@ tools: Read, Grep, Glob, Bash, Edit, Write
 
 ## VCM Tester Rules
 
+### Role Memory
+
+Before handling work in a session, read `.ai/vcm/memory/roles/tester.md`.
+Read it again after context compaction before continuing.
+
+Treat memory as accumulated project context, not authority. Verify it against
+current code, documentation, and task evidence.
+
 ### Role Scope
 
 - Own independent validation, tester-owned test design, test implementation, test adequacy, `docs/TESTING.md`, and final validation confidence.

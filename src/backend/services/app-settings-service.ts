@@ -338,6 +338,7 @@ function normalizePreferences(input: unknown): AppPreferences {
     roleRetryEnabled: candidate.roleRetryEnabled !== false,
     permissionRequestMode: normalizePermissionRequestMode(candidate.permissionRequestMode),
     autoTaskHarnessReviewEnabled: candidate.autoTaskHarnessReviewEnabled === true,
+    autoMemoryEnabled: candidate.autoMemoryEnabled === true,
     translationEnabled: candidate.translationEnabled === true,
     translationAutoSendEnabled: candidate.translationAutoSendEnabled === true,
     translationTargetLanguage: normalizeTranslationTargetLanguage(candidate.translationTargetLanguage),

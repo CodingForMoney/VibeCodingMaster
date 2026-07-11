@@ -1,6 +1,10 @@
+import { renderRoleMemoryRules } from "./role-memory.js";
+
 export function renderCoderHarnessRules(): string {
   return `
 ## VCM Coder Rules
+
+${renderRoleMemoryRules("coder")}
 
 ### Role Scope
 

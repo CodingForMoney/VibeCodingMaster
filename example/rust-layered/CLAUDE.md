@@ -11,6 +11,8 @@ This is a Rust workspace example for VCM harness experiments. It has three archi
 - Keep crate public APIs small and intentional.
 
 <!-- VCM:BEGIN version=1 -->
+@.ai/vcm/memory/shared.md
+
 ## VCM Start Here
 
 - Use the durable project docs below as role-relevant project truth.

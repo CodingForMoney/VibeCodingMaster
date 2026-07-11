@@ -1,6 +1,10 @@
+import { renderRoleMemoryRules } from "./role-memory.js";
+
 export function renderProjectManagerHarnessRules(): string {
   return `
 ## VCM Project Manager Rules
+
+${renderRoleMemoryRules("project-manager")}
 
 ### Role Scope
 

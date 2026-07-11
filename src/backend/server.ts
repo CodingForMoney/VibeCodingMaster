@@ -10,6 +10,7 @@ import { createCommandDispatcher, type CommandDispatcher } from "./services/comm
 import { createClaudeHookService, type ClaudeHookService } from "./services/claude-hook-service.js";
 import { createGitAdapter } from "./adapters/git-adapter.js";
 import { createAppSettingsService, type AppSettingsService } from "./services/app-settings-service.js";
+import { createAutoMemoryService, type AutoMemoryService } from "./services/auto-memory-service.js";
 import { createClaudeTranscriptService } from "./services/claude-transcript-service.js";
 import { createGateReviewService, type GateReviewService } from "./services/gate-review-service.js";
 import { createHarnessFeedbackService, type HarnessFeedbackService } from "./services/harness-feedback-service.js";
@@ -76,6 +77,7 @@ export interface ServerDeps {
   artifactService: ArtifactService;
   harnessService: HarnessService;
   harnessFeedbackService: HarnessFeedbackService;
+  autoMemoryService: AutoMemoryService;
   commandDispatcher: CommandDispatcher;
   claudeHookService: ClaudeHookService;
   messageService: MessageService;
@@ -135,6 +137,7 @@ export async function createServer(deps: ServerDeps, options: CreateServerOption
     projectService: deps.projectService,
     harnessService: deps.harnessService,
     harnessFeedbackService: deps.harnessFeedbackService,
+    autoMemoryService: deps.autoMemoryService,
     sessionService: deps.sessionService,
     taskService: deps.taskService
   });
@@ -145,6 +148,7 @@ export async function createServer(deps: ServerDeps, options: CreateServerOption
     translationWorkerService: deps.translationWorkerService,
     harnessService: deps.harnessService,
     harnessFeedbackService: deps.harnessFeedbackService,
+    autoMemoryService: deps.autoMemoryService,
     runtimeCoordinator: deps.runtimeCoordinator
   });
   registerTaskRoutes(app, {
@@ -276,6 +280,16 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     runtime,
     sessionService
   });
+  const autoMemoryService = createAutoMemoryService({
+    fs,
+    runtime,
+    sessionService,
+    appSettings,
+    async isHarnessEngineerAvailable(repoRoot) {
+      const state = await harnessFeedbackService.getState(repoRoot);
+      return state.status === "idle";
+    }
+  });
   const commandDispatcher = createCommandDispatcher({
     runtime,
     sessionService,
@@ -368,6 +382,7 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     translationService,
     harnessService,
     harnessFeedbackService,
+    autoMemoryService,
     roundService,
     gatewayService,
     async getStateRoot(repoRoot) {
@@ -392,6 +407,7 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     runtime,
     harnessService,
     harnessFeedbackService,
+    autoMemoryService,
     gatewayService,
     jobGuard: createJobGuardService(),
     translationWorkerService
@@ -418,6 +434,7 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     artifactService,
     harnessService,
     harnessFeedbackService,
+    autoMemoryService,
     commandDispatcher,
     claudeHookService,
     messageService,

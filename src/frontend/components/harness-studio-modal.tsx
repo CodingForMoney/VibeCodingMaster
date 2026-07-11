@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
 import type { HarnessBootstrapStatusReport, HarnessFileStatus, HarnessStatusReport } from "../../shared/types/harness.js";
-import type { HarnessFileContent } from "../../shared/types/harness.js";
+import type { AutoMemoryStateReport, MemoryReviewRunSummary } from "../../shared/types/memory.js";
 import type { ClaudePermissionMode, RoleSessionRecord, SessionEffort, SessionModel } from "../../shared/types/session.js";
 import { apiClient } from "../state/api-client.js";
 import { formatUiError } from "../state/error-format.js";
@@ -20,6 +20,7 @@ export interface HarnessStudioModalProps {
   bootstrapStatus: HarnessBootstrapStatusReport | null;
   engineerSession: RoleSessionRecord | null;
   status: HarnessStatusReport | null;
+  memoryState: AutoMemoryStateReport | null;
   onClose(): void;
   onEffortChange(effort: SessionEffort): void;
   onModelChange(model: SessionModel): void;
@@ -32,6 +33,16 @@ export interface HarnessStudioModalProps {
   onOpenRepositoryDiff(): void;
   onReviewTaskHarness(): void;
   onRefresh(): void;
+  onMemoryStateChange(state: AutoMemoryStateReport): void;
+}
+
+interface StudioFilePreview {
+  path: string;
+  title: string;
+  content: string;
+  editable: boolean;
+  readonlyReason?: string;
+  source: "harness" | "memory" | "memory-diff";
 }
 
 export function HarnessStudioModal({
@@ -44,6 +55,7 @@ export function HarnessStudioModal({
   bootstrapStatus,
   engineerSession,
   status,
+  memoryState,
   onClose,
   onEffortChange,
   onModelChange,
@@ -55,10 +67,11 @@ export function HarnessStudioModal({
   onEngineerNotifyHarnessUpdated,
   onOpenRepositoryDiff,
   onReviewTaskHarness,
-  onRefresh
+  onRefresh,
+  onMemoryStateChange
 }: HarnessStudioModalProps) {
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
-  const [selectedFile, setSelectedFile] = useState<HarnessFileContent | null>(null);
+  const [selectedFile, setSelectedFile] = useState<StudioFilePreview | null>(null);
   const [draftContent, setDraftContent] = useState("");
   const [editingFile, setEditingFile] = useState(false);
   const [fileBusy, setFileBusy] = useState(false);
@@ -88,12 +101,31 @@ export function HarnessStudioModal({
     if (!open || !selectedPath || !taskSlug) {
       return;
     }
+    if (selectedPath.startsWith("memory-review:")) {
+      return;
+    }
 
     let cancelled = false;
     setFileBusy(true);
     setFileError(null);
     setEditingFile(false);
-    void apiClient.getHarnessFileContent(taskSlug, selectedPath)
+    const loadFile = selectedPath.startsWith(".ai/vcm/memory/")
+      ? apiClient.getMemoryFileContent(taskSlug, selectedPath).then((file): StudioFilePreview => ({
+          path: file.path,
+          title: file.title,
+          content: file.content,
+          editable: file.editable,
+          source: "memory"
+        }))
+      : apiClient.getHarnessFileContent(taskSlug, selectedPath).then((file): StudioFilePreview => ({
+          path: file.path,
+          title: file.title,
+          content: file.content,
+          editable: file.editable,
+          readonlyReason: file.readonlyReason,
+          source: "harness"
+        }));
+    void loadFile
       .then((file) => {
         if (cancelled) {
           return;
@@ -125,9 +157,30 @@ export function HarnessStudioModal({
     setFileBusy(true);
     setFileError(null);
     try {
-      const result = await apiClient.updateHarnessFileContent(taskSlug, selectedFile.path, { content: draftContent });
-      setSelectedFile(result.file);
-      setDraftContent(result.file.content);
+      if (selectedFile.source === "memory") {
+        const nextState = await apiClient.updateMemoryFileContent(taskSlug, selectedFile.path, { content: draftContent });
+        const file = await apiClient.getMemoryFileContent(taskSlug, selectedFile.path);
+        setSelectedFile({
+          path: file.path,
+          title: file.title,
+          content: file.content,
+          editable: true,
+          source: "memory"
+        });
+        setDraftContent(file.content);
+        onMemoryStateChange(nextState);
+      } else {
+        const result = await apiClient.updateHarnessFileContent(taskSlug, selectedFile.path, { content: draftContent });
+        setSelectedFile({
+          path: result.file.path,
+          title: result.file.title,
+          content: result.file.content,
+          editable: result.file.editable,
+          readonlyReason: result.file.readonlyReason,
+          source: "harness"
+        });
+        setDraftContent(result.file.content);
+      }
       setEditingFile(false);
       onRefresh();
     } catch (error) {
@@ -155,6 +208,53 @@ export function HarnessStudioModal({
       }, 1200);
     } catch (error) {
       setFileError(formatUiError(`Copy harness file path ${filePath}`, error));
+    }
+  }
+
+  function openMemoryDiff(run: MemoryReviewRunSummary) {
+    const previewPath = `memory-review:${run.runId}`;
+    setSelectedPath(previewPath);
+    setSelectedFile({
+      path: run.runId,
+      title: `Memory Diff: ${run.runId}`,
+      content: run.diff || "No memory diff was recorded.",
+      editable: false,
+      readonlyReason: `Applied by ${run.source}. Status: ${run.status}.`,
+      source: "memory-diff"
+    });
+    setDraftContent(run.diff || "No memory diff was recorded.");
+    setEditingFile(false);
+  }
+
+  async function revertMemoryRun(run: MemoryReviewRunSummary) {
+    if (!taskSlug || !run.canRevert || !window.confirm(`Revert memory changes from ${run.runId}?`)) {
+      return;
+    }
+    setFileBusy(true);
+    setFileError(null);
+    try {
+      const nextState = await apiClient.revertMemoryRun({ taskSlug, runId: run.runId });
+      onMemoryStateChange(nextState);
+      closeFilePreview();
+    } catch (error) {
+      setFileError(formatUiError(`Revert memory review ${run.runId}`, error));
+    } finally {
+      setFileBusy(false);
+    }
+  }
+
+  async function retryMemoryReview() {
+    if (!taskSlug) {
+      return;
+    }
+    setFileBusy(true);
+    setFileError(null);
+    try {
+      onMemoryStateChange(await apiClient.retryMemoryReview({ taskSlug }));
+    } catch (error) {
+      setFileError(formatUiError("Retry Auto Memory review", error));
+    } finally {
+      setFileBusy(false);
     }
   }
 
@@ -238,6 +338,16 @@ export function HarnessStudioModal({
                 <>
                   <HarnessFileSection title="VCM Roles" files={vcmRoleAgents} selectedPath={selectedPath} copiedPath={copiedPath} onCopy={(path) => void copyHarnessFilePath(path)} onSelect={setSelectedPath} />
                   <HarnessFileSection title="Auxiliary Roles" files={auxiliaryAgents} selectedPath={selectedPath} copiedPath={copiedPath} onCopy={(path) => void copyHarnessFilePath(path)} onSelect={setSelectedPath} />
+                  <MemorySection
+                    state={memoryState}
+                    busy={fileBusy}
+                    copiedPath={copiedPath}
+                    onCopy={(path) => void copyHarnessFilePath(path)}
+                    onSelect={setSelectedPath}
+                    onViewDiff={openMemoryDiff}
+                    onRevert={(run) => void revertMemoryRun(run)}
+                    onRetry={() => void retryMemoryReview()}
+                  />
                   <HarnessCollapsibleSection title="Overview">
                     <section className="harness-studio-overview">
                       <div className="harness-studio-metrics">
@@ -379,6 +489,76 @@ function HarnessFileSection({
   );
 }
 
+function MemorySection({
+  state,
+  busy,
+  copiedPath,
+  onCopy,
+  onSelect,
+  onViewDiff,
+  onRevert,
+  onRetry
+}: {
+  state: AutoMemoryStateReport | null;
+  busy: boolean;
+  copiedPath: string | null;
+  onCopy(path: string): void;
+  onSelect(path: string): void;
+  onViewDiff(run: MemoryReviewRunSummary): void;
+  onRevert(run: MemoryReviewRunSummary): void;
+  onRetry(): void;
+}) {
+  return (
+    <HarnessCollapsibleSection title="Memory">
+      <div className="harness-memory-status">
+        <span>Status</span>
+        <StatusBadge status={memoryStatusBadge(state?.status)} />
+        {state?.active?.currentRole ? <span className="muted">Collecting {state.active.currentRole}</span> : null}
+        {state?.active?.error ? <p className="warnings">{state.active.error}</p> : null}
+        {state?.status === "failed" ? (
+          <button className="harness-memory-action-button" type="button" disabled={busy} onClick={onRetry}>Retry</button>
+        ) : null}
+      </div>
+      <ol className="harness-studio-file-list">
+        {state?.files.map((file) => (
+          <li key={file.path}>
+            <button className="harness-studio-file-path-button" type="button" title={file.path} onClick={() => onSelect(file.path)}>
+              {file.path}
+            </button>
+            <button
+              className="harness-studio-file-copy-button"
+              type="button"
+              title={`Copy ${file.path}`}
+              onClick={() => onCopy(file.path)}
+            >
+              {copiedPath === file.path ? "Copied" : "Copy"}
+            </button>
+            <span className="muted">{formatBytes(file.sizeBytes)}</span>
+          </li>
+        )) ?? <li><span>No memory files.</span></li>}
+      </ol>
+      {state?.runs.length ? (
+        <div className="harness-memory-runs">
+          <h4>Applied History</h4>
+          <ol className="harness-studio-file-list">
+            {state.runs.map((run) => (
+              <li key={run.runId}>
+                <button className="harness-studio-file-path-button" type="button" onClick={() => onViewDiff(run)}>
+                  {run.runId}
+                </button>
+                <StatusBadge status={run.status === "applied" ? "ok" : run.status === "failed" ? "failed" : "unknown"} />
+                {run.canRevert ? (
+                  <button className="harness-memory-action-button" type="button" disabled={busy} onClick={() => onRevert(run)}>Revert</button>
+                ) : null}
+              </li>
+            ))}
+          </ol>
+        </div>
+      ) : null}
+    </HarnessCollapsibleSection>
+  );
+}
+
 function HarnessCollapsibleSection({ title, children }: { title: string; children: ReactNode }) {
   return (
     <details className="harness-studio-section harness-studio-collapsible-section">
@@ -408,6 +588,20 @@ function formatSessionStatus(session: RoleSessionRecord | null): string {
   return session.status === "running"
     ? `${session.status} / ${session.activityStatus ?? "idle"}`
     : session.status;
+}
+
+function formatBytes(value: number): string {
+  return value < 1024 ? `${value} B` : `${(value / 1024).toFixed(1)} KB`;
+}
+
+function memoryStatusBadge(status: AutoMemoryStateReport["status"] | undefined) {
+  if (status === "collecting" || status === "reviewing") {
+    return "running" as const;
+  }
+  if (status === "failed") {
+    return "failed" as const;
+  }
+  return status === "idle" ? "ok" as const : "unknown" as const;
 }
 
 async function writeClipboardText(text: string): Promise<void> {

@@ -9,6 +9,7 @@ export interface FileSystemAdapter {
   readText(path: string): Promise<string>;
   readTextTail?(path: string, maxBytes: number): Promise<string>;
   writeText(path: string, content: string): Promise<void>;
+  writeTextAtomic?(path: string, content: string): Promise<void>;
   appendText(path: string, content: string): Promise<void>;
   readJson<T>(path: string): Promise<T>;
   writeJson<T>(path: string, value: T): Promise<void>;
@@ -69,6 +70,14 @@ export function createNodeFileSystemAdapter(): FileSystemAdapter {
       await runFileOperation(async () => {
         await fs.mkdir(path.dirname(targetPath), { recursive: true });
         await fs.writeFile(targetPath, content, "utf8");
+      });
+    },
+    async writeTextAtomic(targetPath, content) {
+      await runFileOperation(async () => {
+        await fs.mkdir(path.dirname(targetPath), { recursive: true });
+        const tempPath = `${targetPath}.${process.pid}.${Date.now()}.${Math.random().toString(16).slice(2)}.tmp`;
+        await fs.writeFile(tempPath, content, "utf8");
+        await fs.rename(tempPath, targetPath);
       });
     },
     async appendText(targetPath, content) {

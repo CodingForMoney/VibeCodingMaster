@@ -493,6 +493,13 @@ normal Round end when final acceptance evidence exists. It should inspect the
 completed task workflow and deliverables for reusable harness problems, not
 re-review the business feature itself.
 
+When Auto Memory is enabled, a complete task that passes Final Acceptance may
+run a separate post-task memory review. Workflow roles write evidence-backed
+drafts sequentially; Harness Engineer consolidates them into shared and
+role-specific memory. Canonical memory lives under the base repository's
+`.ai/vcm/memory/`, while the active worktree contains the role-visible snapshot
+and review history. These auxiliary turns do not reopen the completed Round.
+
 ## 16. Final Acceptance
 
 `vcm-final-acceptance` is PM's final evidence audit for a complete code-delivery

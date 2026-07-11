@@ -30,6 +30,7 @@ layers plus supporting tools.
   endpoint and the gateway), `session-service`, `round-service`,
   `runtime-coordinator-service`, `runtime-recovery-service`, `message-service`,
   `artifact-service`, `harness-service`, `harness-feedback-service`,
+  `auto-memory-service`,
   `gate-review-service`, `translation-service`/`translation-worker-service`,
   `job-guard-service`, and `command-dispatcher`.
 - `runtime/`: PTY-backed terminal runtime (`node-pty-runtime`,
@@ -118,6 +119,21 @@ by the tools in `.ai/tools/`:
   module docs explain meaning and design intent rather than duplicating it.
 
 Regenerate both after changing module layout, public exports, or HTTP routes.
+
+## Auto Memory Ownership
+
+`auto-memory-service` owns project memory under the base repository's
+`.ai/vcm/memory/`, task-visible snapshots under the active worktree's matching
+path, and review history under `.ai/vcm/memory-review/`. The root `CLAUDE.md`
+imports shared memory; each role definition requires that role to read its own
+memory file.
+
+After a normal stopped round has valid Final Acceptance, the backend runtime
+coordinator may start the Auto Memory state machine. Workflow roles submit
+drafts sequentially, Harness Engineer writes the reviewed memory set, and the
+service applies it to canonical and task memory together. Auto Memory hook
+turns update role session activity but do not mutate the completed task round.
+The frontend only displays state and invokes memory file, retry, or revert APIs.
 
 ## Public Surface
 

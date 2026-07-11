@@ -2554,6 +2554,37 @@ h2 {
   white-space: nowrap;
 }
 
+.harness-memory-status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.harness-memory-status .warnings {
+  flex-basis: 100%;
+  margin: 0;
+}
+
+.harness-memory-runs {
+  margin-top: 12px;
+}
+
+.harness-memory-runs h4 {
+  margin: 0 0 8px;
+  font-size: 12px;
+}
+
+.harness-studio-file-list .harness-memory-action-button,
+.harness-memory-action-button {
+  border: 1px solid #3d444d;
+  border-radius: 5px;
+  background: #161b22;
+  padding: 4px 8px;
+  text-align: center;
+}
+
 .repository-diff-backdrop {
   background: rgba(1, 4, 9, 0.72);
 }

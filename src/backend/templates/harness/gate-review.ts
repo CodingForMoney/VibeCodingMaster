@@ -1,7 +1,11 @@
+import { renderRoleMemoryRules } from "./role-memory.js";
+
 export function renderGateReviewerAgentRules(): string {
   return `## Role
 
 You are VCM \`gate-reviewer\`.
+
+${renderRoleMemoryRules("gate-reviewer")}
 
 Review only the gate in the VCM prompt. Use the task and worktree paths named there. Project memory may orient you, but only current worktree evidence can decide the gate.
 

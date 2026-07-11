@@ -25,6 +25,7 @@ import type {
   StartGatewayQrLoginResult
 } from "../shared/types/gateway.js";
 import type { GateReviewGate, GateReviewIndex } from "../shared/types/gate-review.js";
+import type { AutoMemoryStateReport } from "../shared/types/memory.js";
 import type { VcmOrchestrationState, VcmRoleMessage } from "../shared/types/message.js";
 import type { ProjectSummary } from "../shared/types/project.js";
 import type { ProjectRuntimeState } from "../shared/types/api.js";
@@ -67,6 +68,8 @@ export function App() {
   const [harnessBootstrapStatusTaskSlug, setHarnessBootstrapStatusTaskSlug] = useState<string | null>(null);
   const [harnessApplyResult, setHarnessApplyResult] = useState<HarnessApplyResult | null>(null);
   const [harnessFeedbackState, setHarnessFeedbackState] = useState<HarnessFeedbackStateReport | null>(null);
+  const [autoMemoryState, setAutoMemoryState] = useState<AutoMemoryStateReport | null>(null);
+  const [autoMemoryStateTaskSlug, setAutoMemoryStateTaskSlug] = useState<string | null>(null);
   const [gatewayStatus, setGatewayStatus] = useState<GatewayStatus | null>(null);
   const [gatewayQrLogin, setGatewayQrLogin] = useState<StartGatewayQrLoginResult | null>(null);
   const [gatewayQrCheck, setGatewayQrCheck] = useState<CheckGatewayQrLoginResult | null>(null);
@@ -87,6 +90,7 @@ export function App() {
   const [roleRetryEnabled, setRoleRetryEnabled] = useState(true);
   const [permissionRequestMode, setPermissionRequestMode] = useState<PermissionRequestMode>("off");
   const [autoTaskHarnessReviewEnabled, setAutoTaskHarnessReviewEnabled] = useState(false);
+  const [autoMemoryEnabled, setAutoMemoryEnabled] = useState(false);
   const [translationEnabled, setTranslationEnabled] = useState(false);
   const [translationAutoSendEnabled, setTranslationAutoSendEnabled] = useState(false);
   const [translationTargetLanguage, setTranslationTargetLanguage] = useState<TranslationTargetLanguage>(DEFAULT_TRANSLATION_TARGET_LANGUAGE);
@@ -130,6 +134,7 @@ export function App() {
     : null;
   const currentHarnessStatus = harnessStatusTaskSlug === activeTask?.taskSlug ? harnessStatus : null;
   const currentHarnessBootstrapStatus = harnessBootstrapStatusTaskSlug === activeTask?.taskSlug ? harnessBootstrapStatus : null;
+  const currentAutoMemoryState = autoMemoryStateTaskSlug === activeTask?.taskSlug ? autoMemoryState : null;
   const translationBaseReady = Boolean(project && activeTask && isTranslationHarnessReady(currentHarnessStatus));
   const translatorSessionRunning = translatorSession?.status === "running";
   // Suppress the web flow-pause modal + sound only when the gateway will actually
@@ -149,6 +154,7 @@ export function App() {
     setRoleRetryEnabled(preferences.roleRetryEnabled);
     setPermissionRequestMode(preferences.permissionRequestMode);
     setAutoTaskHarnessReviewEnabled(preferences.autoTaskHarnessReviewEnabled);
+    setAutoMemoryEnabled(preferences.autoMemoryEnabled);
     setTranslationEnabled(preferences.translationEnabled);
     setTranslationAutoSendEnabled(preferences.translationAutoSendEnabled);
     setTranslationTargetLanguage(preferences.translationTargetLanguage);
@@ -476,6 +482,8 @@ export function App() {
     setTranslationMemoryInitialized(Boolean(state.translationState?.memoryInitialized));
     setHarnessEngineerSession(state.harnessEngineerSession);
     setHarnessFeedbackState(state.harnessFeedbackState);
+    setAutoMemoryState(state.autoMemoryState);
+    setAutoMemoryStateTaskSlug(taskSlug && state.autoMemoryState ? taskSlug : null);
     setGatewayStatus(state.gatewayStatus);
 
     if (taskSlug && state.harnessStatus) {
@@ -510,6 +518,8 @@ export function App() {
       setHarnessStatusTaskSlug(null);
       setHarnessBootstrapStatusTaskSlug(null);
       setHarnessFeedbackState(null);
+      setAutoMemoryState(null);
+      setAutoMemoryStateTaskSlug(null);
       return null;
     }
 
@@ -772,6 +782,7 @@ export function App() {
           harnessBootstrapStatus={currentHarnessBootstrapStatus}
           harnessApplyResult={harnessApplyResult}
           autoTaskHarnessReviewEnabled={autoTaskHarnessReviewEnabled}
+          autoMemoryEnabled={autoMemoryEnabled}
           gatewayStatus={gatewayStatus}
           gatewayQrLogin={gatewayQrLogin}
           gatewayQrCheck={gatewayQrCheck}
@@ -867,6 +878,14 @@ export function App() {
               const preferences = await apiClient.updateAppPreferences({ autoTaskHarnessReviewEnabled: enabled });
               applyPreferences(preferences);
             }, "Update auto task harness review setting");
+          }}
+          onAutoMemoryChange={(enabled) => {
+            setAutoMemoryEnabled(enabled);
+            void withBusy(async () => {
+              const preferences = await apiClient.updateAppPreferences({ autoMemoryEnabled: enabled });
+              applyPreferences(preferences);
+              await refreshProjectRuntimeState();
+            }, "Update auto memory setting");
           }}
           onRefreshGateway={() => withBusy(async () => {
             await loadGatewayStatus();
@@ -1236,6 +1255,7 @@ export function App() {
         open={harnessStudioOpen}
         busy={busy}
         status={currentHarnessStatus}
+        memoryState={currentAutoMemoryState}
         bootstrapStatus={currentHarnessBootstrapStatus}
         engineerSession={harnessEngineerSession}
         permissionMode={harnessEngineerPermissionMode}
@@ -1251,7 +1271,11 @@ export function App() {
             await Promise.all([
               loadHarnessStatus(activeTask.taskSlug),
               loadHarnessBootstrapStatus(activeTask.taskSlug),
-              refreshHarnessEngineerSession()
+              refreshHarnessEngineerSession(),
+              apiClient.getAutoMemoryState(activeTask.taskSlug).then((state) => {
+                setAutoMemoryState(state);
+                setAutoMemoryStateTaskSlug(activeTask.taskSlug);
+              })
             ]);
           }, "Refresh Harness Studio");
         }}
@@ -1335,6 +1359,10 @@ export function App() {
             setHarnessFeedbackState(state);
             await refreshHarnessEngineerSession({ syncLaunchOptions: true });
           }, "Review task harness");
+        }}
+        onMemoryStateChange={(state) => {
+          setAutoMemoryState(state);
+          setAutoMemoryStateTaskSlug(activeTask?.taskSlug ?? null);
         }}
       />
       <RepositoryDiffModal

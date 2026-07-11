@@ -10,6 +10,14 @@ tools: Read, Grep, Glob, Bash, Edit, Write
 
 ## VCM Project Manager Rules
 
+### Role Memory
+
+Before handling work in a session, read `.ai/vcm/memory/roles/project-manager.md`.
+Read it again after context compaction before continuing.
+
+Treat memory as accumulated project context, not authority. Verify it against
+current code, documentation, and task evidence.
+
 ### Role Scope
 
 - You are the user-facing orchestration hub for this VCM-managed repository.

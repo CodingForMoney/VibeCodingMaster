@@ -32,6 +32,13 @@ import type {
   UpdateHarnessFileContentResult
 } from "../../shared/types/harness.js";
 import type {
+  AutoMemoryStateReport,
+  MemoryFileContent,
+  RevertMemoryRunRequest,
+  RetryMemoryReviewRequest,
+  UpdateMemoryFileRequest
+} from "../../shared/types/memory.js";
+import type {
   GateReviewExceptionRequest,
   GateReviewGate,
   GateReviewIndex,
@@ -235,6 +242,33 @@ export const apiClient = {
   },
   startTaskHarnessRetrospective(input: StartTaskHarnessRetrospectiveRequest) {
     return request<HarnessFeedbackStateReport>("/api/projects/harness/task-retrospective", {
+      method: "POST",
+      body: JSON.stringify(input)
+    });
+  },
+  getAutoMemoryState(taskSlug: string) {
+    const params = new URLSearchParams({ taskSlug });
+    return request<AutoMemoryStateReport>(`/api/projects/harness/memory?${params.toString()}`);
+  },
+  getMemoryFileContent(taskSlug: string, filePath: string) {
+    const params = new URLSearchParams({ taskSlug, path: filePath });
+    return request<MemoryFileContent>(`/api/projects/harness/memory/file?${params.toString()}`);
+  },
+  updateMemoryFileContent(taskSlug: string, filePath: string, input: UpdateMemoryFileRequest) {
+    const params = new URLSearchParams({ taskSlug, path: filePath });
+    return request<AutoMemoryStateReport>(`/api/projects/harness/memory/file?${params.toString()}`, {
+      method: "PUT",
+      body: JSON.stringify(input)
+    });
+  },
+  revertMemoryRun(input: RevertMemoryRunRequest) {
+    return request<AutoMemoryStateReport>("/api/projects/harness/memory/revert", {
+      method: "POST",
+      body: JSON.stringify(input)
+    });
+  },
+  retryMemoryReview(input: RetryMemoryReviewRequest) {
+    return request<AutoMemoryStateReport>("/api/projects/harness/memory/retry", {
       method: "POST",
       body: JSON.stringify(input)
     });

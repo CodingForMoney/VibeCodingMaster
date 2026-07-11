@@ -371,6 +371,8 @@ Use it to:
 - run bootstrap
 - open Harness Engineer
 - review harness files
+- view and edit shared or role-specific VCM memory
+- review and revert memory changes recorded in the active task worktree
 - copy file paths for discussion
 - review task harness after a task completes
 - inspect commit diffs for harness changes
@@ -379,6 +381,19 @@ Use it to:
 
 Harness Engineer is project-scoped and resumable. When it performs task work,
 VCM runs it from the active task worktree.
+
+### Auto Memory
+
+Enable `Auto memory` in the `VCM Harness` sidebar group to collect durable role
+knowledge after a complete task passes Final Acceptance. Project Manager,
+Architect, Coder, Tester, and an enabled Gate Reviewer submit memory drafts in
+sequence. Harness Engineer verifies and consolidates them before VCM applies
+the result.
+
+Canonical memory is stored under the base repository's `.ai/vcm/memory/`.
+Harness Studio shows current memory and task-local applied history. Memory is
+applied before user review; while the task worktree remains available, the user
+can edit current memory or revert a recorded change.
 
 ## Closing a Task
 

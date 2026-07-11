@@ -30,6 +30,8 @@
 - `package.json`, lockfiles, and build/deploy config are out of scope for **Harness Engineer bootstrap** edits. A deliberate release version bump (e.g. `package.json` version plus lockfile) made by the architect-led release flow inside an explicit release task is a sanctioned exception, not a bootstrap edit.
 
 <!-- VCM:BEGIN version=1 -->
+@.ai/vcm/memory/shared.md
+
 ## VCM Start Here
 
 - Use the durable project docs below as role-relevant project truth.

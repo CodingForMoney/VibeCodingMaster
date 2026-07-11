@@ -90,6 +90,7 @@ function createCoordinator(input: {
           roleRetryEnabled: true,
           permissionRequestMode: "off",
           autoTaskHarnessReviewEnabled: false,
+          autoMemoryEnabled: false,
           translationEnabled,
           translationAutoSendEnabled: false,
           translationTargetLanguage: "zh-CN",
@@ -157,6 +158,17 @@ function createCoordinator(input: {
     harnessFeedbackService: {
       async startTaskRetrospective() {
         throw new Error("unexpected retrospective");
+      }
+    },
+    autoMemoryService: {
+      async reconcileTask() {
+        return {
+          version: 1,
+          status: "idle",
+          files: [],
+          runs: [],
+          warnings: []
+        } as const;
       }
     },
     roundService: {
