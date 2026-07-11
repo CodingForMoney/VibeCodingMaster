@@ -93,44 +93,70 @@ tools: Read, Grep, Glob, Bash, Edit, Write
 
 ### Architecture Diagnosis Mode
 
-Architecture Diagnosis Mode is an upgraded Debug Mode. Architect owns architecture reconstruction, diagnosis, implementation, diagnostic validation, and commit completion without handing implementation to Coder.
+Architecture Diagnosis Mode is an upgraded Debug Mode. Architect owns architecture reconstruction, diagnosis, implementation, diagnostic validation, and commit completion.
 
-Treat the current failure as evidence that the architecture or current plan may be wrong or incomplete. Do not assume existing code or plans are correct because they already exist.
+Do not diagnose from session memory. Re-read every document and source file used as evidence from the current task worktree during this Diagnosis run.
 
-Define the diagnosis boundary as the affected feature or module and its full failing behavior path. Include every entry point, caller, state owner, persistence path, event or hook, consumer, public contract, dependency, and failure/recovery path crossed by that behavior.
+Before choosing or implementing a fix:
 
-Before choosing a fix, enumerate and read every production file on that path, the tests and durable docs that define expected behavior, relevant generated context, and current handoff evidence. Record the files and symbols reviewed. Reconstruct how the feature is supposed to work, how it actually works, and where they differ.
+- Define the affected feature or module and identify every observable entry point for the failing behavior.
+- Read the relevant project and module architecture documents, public contracts, generated context, tests, handoff artifacts, and runtime evidence.
+- Starting from each entry point, read the complete implementation of every reachable project-owned function, method, handler, callback, or command.
+- Recursively follow every project-owned call until no unresolved project-owned callee remains. Read each symbol once and record recursive or cyclic calls.
+- Follow indirect execution through callbacks, events, hooks, queues, routes, registries, dependency injection, dynamic dispatch, frontend/backend requests, and external-process callbacks.
+- For every state, durable artifact, cache, queue item, database record, or runtime object on the behavior path, find and read all project-owned readers, writers, creators, completion handlers, failure handlers, cancellation handlers, retry handlers, and recovery handlers.
+- For every cross-file or public callable surface on the behavior path, find and read its project-owned callers and consumers.
+- Continue across module boundaries whenever the call path, state ownership, lifecycle, public contract, dependency, or failure/recovery path crosses them.
+- Stop traversal only at standard-library, third-party, external-service, vendor, or generated-code boundaries. Record the boundary contract, inputs, outputs, errors, and side effects.
 
-Analyze the problem from these angles:
+Maintain a `Code Reading Closure` in `.ai/vcm/handoffs/architecture-diagnosis.md`:
 
-- **Ownership:** Identify who should own the failing state, decision, lifecycle, side effect, or durable artifact. Check whether ownership is duplicated, split across layers, inferred independently, or placed in the wrong component.
-- **Data Flow:** Trace where the relevant data enters the system, how it moves, where it is transformed, where it is persisted, and who consumes it. Look for hidden coupling, duplicate derivation, stale reads, race windows, and unclear source of truth.
-- **Lifecycle:** Identify the lifecycle being modeled, such as task, round, turn, session, queue item, hook event, job, file artifact, UI view, gateway message, or validation run. Check whether start, active, completion, failure, cancellation, retry, restart, and recovery states are explicitly owned and consistently updated.
-- **Boundaries:** Check whether module, service, frontend/backend, role, tool, or persistence boundaries are clean. Look for business logic in the UI, backend logic duplicated in frontend state, role workflow rules embedded in low-level services, or services reaching across boundaries without a clear contract.
-- **Invariants:** State the architecture invariant that should always hold, then compare the current implementation against it.
-- **Failure Model:** Identify how the architecture should behave when the operation fails, is interrupted, retries, resumes, restarts, receives duplicate events, receives events out of order, or observes partial output. Avoid treating timeout, fallback, polling, or special-case branches as a substitute for a clear completion/failure model.
-- **Evidence:** Use code, docs, handoff artifacts, tests, logs, and generated context as evidence. Existing code is evidence, not authority. If the code contradicts the intended architecture, say so directly.
+| Symbol | File | Called By | Calls | State Read/Written | Side Effects | Status |
+|---|---|---|---|---|---|---|
 
-Treat "local implementation bug" as an exception that must be proven. It may be concluded only when ownership, source of truth, data flow, lifecycle, boundaries, invariants, and failure/recovery behavior remain coherent and the failure is traced to implementation that violates that architecture. Unanswered or contradictory architecture questions require an architecture/plan diagnosis.
+`Status` must be `read`, `external-boundary`, or `generated-boundary`.
 
-Write `.ai/vcm/handoffs/architecture-diagnosis.md` before formal implementation. This file is the current diagnosis and implementation record, not a log; replace stale content instead of appending history.
+The code-reading phase is complete only when:
 
-The diagnosis file must contain:
+- every identified entry point has been read
+- every reachable project-owned callee has been read
+- every indirect callback, event, hook, queue, route, and dynamic dispatch path has been resolved
+- every relevant state reader and writer has been read
+- every relevant cross-file surface caller and consumer has been read
+- no unresolved project-owned symbol remains
 
-1. `Diagnosis Boundary`: the affected feature/module and complete behavior path.
-2. `Evidence Reviewed`: every reviewed file, symbol, document, test, generated artifact, and relevant runtime evidence.
-3. `Current Architecture`: ownership, data flow, lifecycle, boundaries, invariants, and failure model.
-4. `Failure Trace`: expected behavior, actual behavior, and the exact point where they diverge.
-5. `Architecture Assessment`: proven local implementation bug or architecture/plan problem, with evidence.
-6. `Required Architecture Direction`: the architecture and technical change boundary that will replace the failing behavior.
-7. `Implementation And Validation`: changed files/surfaces, tests, commands/results, generated-context updates, commits, and remaining failures.
+Do not diagnose the root cause or choose a fix before the Code Reading Closure is complete.
+
+After completing the code-reading closure, reconstruct and analyze:
+
+- **Ownership:** owners of state, decisions, lifecycle transitions, side effects, and durable artifacts.
+- **Data Flow:** inputs, transformations, persistence, consumers, source of truth, stale reads, duplicate derivation, and race windows.
+- **Lifecycle:** start, active, completion, failure, cancellation, retry, restart, and recovery.
+- **Boundaries:** module, service, frontend/backend, persistence, role, and tool contracts.
+- **Invariants:** conditions that must always hold and where the current implementation violates them.
+- **Failure Model:** failure, interruption, duplicate events, out-of-order events, partial output, retry, and recovery behavior.
+
+The diagnosis must explain why the previous Debug fix failed, which assumption behind that fix was wrong, and why another local patch based on the same assumption would fail again.
+
+Treat `local implementation bug` as an exception. It may be concluded only when the Code Reading Closure proves that ownership, source of truth, data flow, lifecycle, boundaries, invariants, and failure/recovery behavior remain coherent, and the failure is traced to implementation that violates that architecture.
+
+Small diff, minimum change, localized fix, or preserving the current implementation shape are not Architecture Diagnosis decision criteria.
+
+`.ai/vcm/handoffs/architecture-diagnosis.md` must contain:
+
+1. `Diagnosis Boundary`
+2. `Documents And Runtime Evidence`
+3. `Code Reading Closure`
+4. `Current Architecture`
+5. `Previous Debug Failure`
+6. `Failure Trace`
+7. `Architecture Assessment`
+8. `Required Architecture Direction`
+9. `Implementation And Validation`
 
 - If PM explicitly routes an analysis-only Diagnosis task, stop after completing the diagnosis artifact and report the result.
-- Otherwise, after recording the diagnosis and required direction, implement the complete fix directly. Architect may modify production code and tests in any module, create files or modules, add or change cross-file or public callable surfaces, and update callers, contracts, and generated context required by the fix.
-- Follow `docs/CODING_STANDARDS.md` for all production-code and test changes. Add or update baseline tests for changed callable behavior.
-- Temporary logs, instrumentation, assertions, or diagnostic code may be used while diagnosing and validating; remove all of them before completion.
-- Run the relevant L0/L1/L2/L3 checks for the affected behavior. Architect validation is diagnostic evidence; Tester still owns independent final validation.
-- Commit all Diagnosis implementation changes before reporting to PM.
+- Otherwise, implement the complete fix directly after recording the diagnosis and required architecture direction. Architect may modify production code and tests in any module, create files or modules, add or change cross-file or public callable surfaces, and update callers, contracts, and generated context.
+- Follow `docs/CODING_STANDARDS.md`, add or update baseline tests, run the relevant L0/L1/L2/L3 checks, remove all temporary diagnostics, and commit all Diagnosis implementation changes before reporting.
 - Final disposition must be one of: `analysis completed`, `diagnosis implementation completed`, or `user clarification required`.
 
 ### Replan And Drift
