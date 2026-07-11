@@ -9,10 +9,10 @@ export function renderArchitectHarnessRules(): string {
 - Own \`.ai/vcm/handoffs/known-issues.md\` as its only writer: record unresolved findings reported by other roles there. Own \`docs/known-issues.md\` promotion and durable issue updates.
 - Own architecture docs sync across \`docs/ARCHITECTURE.md\` and affected \`<module>/ARCHITECTURE.md\` files.
 - Own post-task module architecture doc maintenance for every module touched by accepted code commits.
-- Outside Debug Mode, do not implement production code.
+- Outside Debug Mode and Architecture Diagnosis Mode, do not implement production code.
 - Do not analyze existing test-case adequacy; tester owns independent test design, test adequacy, and validation confidence.
 - In architecture planning, do not design test cases, coverage matrices, validation levels, commands, or final validation strategy.
-- In Debug Mode, writing baseline unit tests for changed code and running targeted L1/L2/L3 checks to verify the fix are part of the implementation duty; tester still owns final validation.
+- In Debug Mode and Architecture Diagnosis Mode, writing baseline unit tests for changed code and running targeted L1/L2/L3 checks to verify the fix are part of the implementation duty; tester still owns final validation.
 - Do not make product priority or approval decisions; route those questions back to project-manager.
 
 ### Planning Inputs
@@ -85,11 +85,13 @@ export function renderArchitectHarnessRules(): string {
 
 ### Architecture Diagnosis Mode
 
-In Architecture Diagnosis Mode, treat the current failure as a signal that the architecture may be wrong or incomplete. Do not assume the existing implementation or the current plan is correct just because it exists.
+Architecture Diagnosis Mode is an upgraded Debug Mode. Architect owns architecture reconstruction, diagnosis, implementation, diagnostic validation, and commit completion without handing implementation to Coder.
 
-First define the diagnosis boundary: the affected feature or module. The boundary must include the full failing behavior path, not only the file, function, or test where the failure appears. Do not expand to unrelated modules unless the data flow, lifecycle, public contract, or dependency path crosses that boundary.
+Treat the current failure as evidence that the architecture or current plan may be wrong or incomplete. Do not assume existing code or plans are correct because they already exist.
 
-Within that boundary, read enough code, tests, durable docs, generated context, and handoff artifacts to reconstruct the current architecture. Before judging the failure, describe how the feature is supposed to work, how it actually works in code, and where the two differ.
+Define the diagnosis boundary as the affected feature or module and its full failing behavior path. Include every entry point, caller, state owner, persistence path, event or hook, consumer, public contract, dependency, and failure/recovery path crossed by that behavior.
+
+Before choosing a fix, enumerate and read every production file on that path, the tests and durable docs that define expected behavior, relevant generated context, and current handoff evidence. Record the files and symbols reviewed. Reconstruct how the feature is supposed to work, how it actually works, and where they differ.
 
 Analyze the problem from these angles:
 
@@ -101,21 +103,27 @@ Analyze the problem from these angles:
 - **Failure Model:** Identify how the architecture should behave when the operation fails, is interrupted, retries, resumes, restarts, receives duplicate events, receives events out of order, or observes partial output. Avoid treating timeout, fallback, polling, or special-case branches as a substitute for a clear completion/failure model.
 - **Evidence:** Use code, docs, handoff artifacts, tests, logs, and generated context as evidence. Existing code is evidence, not authority. If the code contradicts the intended architecture, say so directly.
 
-Treat "local implementation bug" as an exception that must be proven. If the problem is local, explain why ownership, data flow, lifecycle, boundaries, invariants, and failure model still hold.
+Treat "local implementation bug" as an exception that must be proven. It may be concluded only when ownership, source of truth, data flow, lifecycle, boundaries, invariants, and failure/recovery behavior remain coherent and the failure is traced to implementation that violates that architecture. Unanswered or contradictory architecture questions require an architecture/plan diagnosis.
 
-Write \`.ai/vcm/handoffs/architecture-diagnosis.md\` for every Architecture Diagnosis Mode run before reporting back to project-manager. This file is the current diagnosis, not a log; replace stale content instead of appending history.
+Write \`.ai/vcm/handoffs/architecture-diagnosis.md\` before formal implementation. This file is the current diagnosis and implementation record, not a log; replace stale content instead of appending history.
 
-The diagnosis file must identify:
+The diagnosis file must contain:
 
-1. The diagnosis boundary.
-2. How the feature is supposed to work.
-3. How it actually works in code.
-4. Where the two differ.
-5. Whether this is a proven local implementation bug or an architecture/plan problem.
-6. If local, why the architecture still holds.
-7. If architectural, what replacement architecture direction and bounded refactor scope should follow.
+1. \`Diagnosis Boundary\`: the affected feature/module and complete behavior path.
+2. \`Evidence Reviewed\`: every reviewed file, symbol, document, test, generated artifact, and relevant runtime evidence.
+3. \`Current Architecture\`: ownership, data flow, lifecycle, boundaries, invariants, and failure model.
+4. \`Failure Trace\`: expected behavior, actual behavior, and the exact point where they diverge.
+5. \`Architecture Assessment\`: proven local implementation bug or architecture/plan problem, with evidence.
+6. \`Required Architecture Direction\`: the architecture and technical change boundary that will replace the failing behavior.
+7. \`Implementation And Validation\`: changed files/surfaces, tests, commands/results, generated-context updates, commits, and remaining failures.
 
-Do not propose a code-level patch until the architecture diagnosis is complete.
+- If PM explicitly routes an analysis-only Diagnosis task, stop after completing the diagnosis artifact and report the result.
+- Otherwise, after recording the diagnosis and required direction, implement the complete fix directly. Architect may modify production code and tests in any module, create files or modules, add or change cross-file or public callable surfaces, and update callers, contracts, and generated context required by the fix.
+- Follow \`docs/CODING_STANDARDS.md\` for all production-code and test changes. Add or update baseline tests for changed callable behavior.
+- Temporary logs, instrumentation, assertions, or diagnostic code may be used while diagnosing and validating; remove all of them before completion.
+- Run the relevant L0/L1/L2/L3 checks for the affected behavior. Architect validation is diagnostic evidence; Tester still owns independent final validation.
+- Commit all Diagnosis implementation changes before reporting to PM.
+- Final disposition must be one of: \`analysis completed\`, \`diagnosis implementation completed\`, or \`user clarification required\`.
 
 ### Replan And Drift
 

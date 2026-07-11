@@ -286,10 +286,17 @@ project-manager
   -> project-manager final acceptance
 ```
 
-Shorter routes:
+Additional routes:
 
-- Debug work is a branch inside the code-change flow:
-  `project-manager -> architect Debug Mode -> tester -> architect docs sync when needed -> project-manager final acceptance`
+- A task that begins with Debug or Architecture Diagnosis and produces code
+  changes uses a complete code-delivery flow:
+  `project-manager -> architect mode -> code-diff Gate Review -> tester -> architect docs sync -> project-manager final acceptance`
+- Debug or Architecture Diagnosis entered from an active main flow is a branch:
+  suspend the main flow, record its resume point, run the mode through code-diff
+  Gate Review and tester, then return to that resume point without branch-level
+  final acceptance.
+- An analysis-only primary Architecture Diagnosis completes from its diagnosis
+  result without final acceptance.
 - Docs-only work: `project-manager -> architect -> project-manager completion`
 - Test-only or validation-only work:
   `project-manager -> tester -> project-manager completion`
@@ -488,9 +495,11 @@ re-review the business feature itself.
 
 ## 16. Final Acceptance
 
-`vcm-final-acceptance` is PM's final evidence audit for a complete code-change
-flow, including a completed Debug branch. It does not run for shorter flows or
-unfinished branch flows. PM must not use it for
+`vcm-final-acceptance` is PM's final evidence audit for a complete code-delivery
+flow, including a primary Debug or Architecture Diagnosis flow that produced
+code changes. A Debug or Diagnosis branch inside another active flow returns to
+that flow's recorded resume point and does not run its own final acceptance.
+PM must not use final acceptance for analysis-only or unfinished branch flows, or for
 technical design review, implementation review, source-code analysis, or test
 adequacy analysis.
 

@@ -1,15 +1,15 @@
 ---
 name: vcm-final-acceptance
-description: Use when project-manager is ready to close a complete VCM code-change flow.
+description: Use when project-manager is ready to close a complete VCM code-delivery flow.
 ---
 
 # VCM Final Acceptance Skill
 
 ## Purpose
 
-Use this skill only when project-manager is ready to close a complete VCM code-change flow, including a completed Debug branch.
+Use this skill only when project-manager is ready to close a complete VCM code-delivery flow, including a primary Debug or Architecture Diagnosis flow that produced code changes.
 
-Do not use it for docs-only, validation-only, Communication-only, or PR-prep flow, or for an unfinished Debug, Replan, or Architecture Diagnosis branch.
+Do not use it for docs-only, validation-only, Communication-only, PR-prep, analysis-only Diagnosis, or any Debug/Diagnosis branch inside another flow.
 
 This skill is a final evidence audit. It does not replace architect docs sync, tester validation acceptance, coder implementation responsibility, or user approval for high-risk decisions.
 
@@ -21,6 +21,7 @@ Read the relevant task evidence before deciding:
 
 - original user request, PM route message, or durable plan when present
 - `.ai/vcm/handoffs/architecture-plan.md` when the task required architect planning
+- `.ai/vcm/handoffs/architecture-diagnosis.md` when the flow used Architecture Diagnosis Mode
 - `.ai/vcm/handoffs/test-report.md` when tester validation was required
 - `.ai/vcm/handoffs/docs-sync-report.md` when durable docs could be affected
 - `.ai/vcm/handoffs/known-issues.md` when unresolved findings were recorded
@@ -34,7 +35,7 @@ Check whether the required role evidence exists, is current, and gives a clear r
 
 Acceptable evidence must show:
 
-- architect plan or docs-sync decision when architecture, public contracts, durable docs, or known issues changed
+- architect plan, architecture diagnosis, or docs-sync decision when required by the completed flow
 - tester `Test Result: pass|fail` and validation evidence when code, behavior, tests, or generated context changed
 - required Gate Review decisions, skip reasons, or override reasons when Gate Reviews were enabled
 - known-issues disposition when unresolved findings were recorded
@@ -46,7 +47,7 @@ Do not claim to prove that every diff hunk exactly matches the task.
 
 Review the changed file list only, then classify files:
 
-- expected files: directly named by the user request, route message, durable plan, or architecture plan
+- expected files: directly named by the user request, route message, durable plan, architecture plan, or architecture diagnosis
 - supporting files: tests, fixtures, generated context, docs, or wiring needed for expected files
 - approved deviations: files explained by Replan, tester follow-up, docs-sync, or explicit user / project-manager approval
 - unexplained files: files with no traceable reason in the task evidence
@@ -62,7 +63,7 @@ Check:
 
 - required route was followed, or an explicit exception is recorded
 - required handoff artifacts exist and are current
-- architecture plan completion, Replan, or architect follow-up decision is recorded when architecture planning was required
+- architecture plan, Architecture Diagnosis, Replan, or architect follow-up completion is recorded when required by the flow
 - tester report records `Test Result: pass|fail`, validation commands, results, and skipped checks with reasons
 - required Gate Reviews are approved, skipped with a recorded reason, or overridden with a recorded reason
 - Gate Review enable state is confirmed authoritatively: do not infer that no Gate Reviews were required from an absent or empty `.ai/vcm/gate-reviews/index.json`. When Gate Review is enabled, a missing index or a required gate without a recorded decision means the gate was skipped — run the matching command from the `vcm-gate-review` skill, including the code source for `code-diff`, and do not accept until each required gate returns `approve`/`already_approved`, `disabled`/`not_required`, or a recorded skip/override

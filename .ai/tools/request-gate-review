@@ -15,7 +15,7 @@ from pathlib import Path
 
 
 GATES = ("architecture-plan", "validation-adequacy", "code-diff")
-CODE_DIFF_SOURCES = ("coder", "architect-debug")
+CODE_DIFF_SOURCES = ("coder", "architect-debug", "architect-diagnosis")
 REPORTS = {
     "architecture-plan": ".ai/vcm/gate-reviews/architecture-plan-review.md",
     "validation-adequacy": ".ai/vcm/gate-reviews/validation-adequacy-review.md",
@@ -35,6 +35,7 @@ CODE_DIFF_SOURCE_ARTIFACTS = {
         ".ai/vcm/handoffs/coder-completion.md",
     ],
     "architect-debug": [".ai/vcm/handoffs/role-commands/architect.md"],
+    "architect-diagnosis": [".ai/vcm/handoffs/architecture-diagnosis.md"],
 }
 CORE_INPUT_ARTIFACTS = {
     "architecture-plan": ".ai/vcm/handoffs/architecture-plan.md",
@@ -430,7 +431,7 @@ def main() -> int:
     args = parser.parse_args()
 
     if args.gate == "code-diff" and not args.source:
-        print_result("failed_to_start", gate=args.gate, reason="code-diff requires --source coder or --source architect-debug")
+        print_result("failed_to_start", gate=args.gate, reason="code-diff requires --source coder, --source architect-debug, or --source architect-diagnosis")
         return 2
     if args.gate != "code-diff" and args.source:
         print_result("failed_to_start", gate=args.gate, reason="--source is valid only for code-diff")

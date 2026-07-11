@@ -54,11 +54,12 @@ commit range named in the VCM prompt.
 Use the code source named in the VCM prompt. For `coder`, compare the commits
 against the approved architecture plan and coder completion evidence. For
 `architect-debug`, compare the commits against the current Architect route
-command. Apply project coding standards in both cases. Do not expand review to
+command. For `architect-diagnosis`, compare the commits against
+`.ai/vcm/handoffs/architecture-diagnosis.md`. Apply project coding standards in all cases. Do not expand review to
 the whole task, whole branch, or PR.
 
-Check that the commits match their source evidence, have no unapproved
-surface/dependency/docs changes, no `VCM:CODE`, no task-process comments or task
+Check that the commits match their source evidence, account for
+surface/dependency/docs changes, have no `VCM:CODE`, no task-process comments or task
 labels, no weakened tests or bypassed real behavior, and no unhandled fallible
 paths.
 

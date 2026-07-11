@@ -238,7 +238,7 @@ const WHOLE_FILES = [
     content: renderSkillFile(
       "VCM Final Acceptance Skill",
       "vcm-final-acceptance",
-      "Use when project-manager is ready to close a complete VCM code-change flow.",
+      "Use when project-manager is ready to close a complete VCM code-delivery flow.",
       renderVcmFinalAcceptanceSkillRules()
     )
   },

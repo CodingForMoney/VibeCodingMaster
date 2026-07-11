@@ -18,7 +18,8 @@ export type GateReviewSeverity =
 
 export const CODE_DIFF_SOURCES = [
   "coder",
-  "architect-debug"
+  "architect-debug",
+  "architect-diagnosis"
 ] as const;
 
 export type CodeDiffSource = typeof CODE_DIFF_SOURCES[number];

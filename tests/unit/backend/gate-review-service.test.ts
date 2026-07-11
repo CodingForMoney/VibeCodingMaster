@@ -311,7 +311,7 @@ describe("gate-review-service", () => {
     const result = await service.requestReviewGate(tmpRepo, "demo-task", "code-diff");
 
     expect(result.status).toBe("failed_to_start");
-    expect(result.message).toContain("--source coder or --source architect-debug");
+    expect(result.message).toContain("--source coder, --source architect-debug, or --source architect-diagnosis");
     expect(sessionStarts).toEqual([]);
   });
 
@@ -350,6 +350,48 @@ describe("gate-review-service", () => {
     expect(prompt).toContain("Code source: architect-debug");
     expect(prompt).toContain("- .ai/vcm/handoffs/role-commands/architect.md");
     expect(prompt).not.toContain("- .ai/vcm/handoffs/coder-completion.md");
+  });
+
+  it("uses the diagnosis artifact for architect-diagnosis code diffs", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-gate-review-diagnosis-source-"));
+    await writeHarnessFiles(tmpRepo);
+    await writeFile(
+      path.join(taskWorktree(tmpRepo), ".ai/vcm/handoffs/architecture-diagnosis.md"),
+      "# Architecture Diagnosis\n",
+      "utf8"
+    );
+    const runner = createRunner(tmpRepo, [], {
+      "rev-parse HEAD": ({ cwd }) => cwd === tmpRepo ? "base-sha" : "head-sha",
+      "merge-base --is-ancestor base-sha head-sha": "",
+      "log --oneline --reverse base-sha..head-sha": "abc1234 repair ownership",
+      "diff --name-only --find-renames base-sha..head-sha": "src/feature.ts",
+      "diff --stat --find-renames base-sha..head-sha": " src/feature.ts | 8 ++++----",
+      "diff --binary --find-renames base-sha..head-sha": "diff --git a/src/feature.ts b/src/feature.ts\n"
+    });
+    const writes: string[] = [];
+    const service = createGateReviewService({
+      fs: createNodeFileSystemAdapter(),
+      runner,
+      runtime: createRuntime(tmpRepo, writes),
+      projectService: createProjectService(),
+      taskService: createTaskService(tmpRepo),
+      appSettings: createAppSettings(["code-diff"]),
+      sessionService: createSessionService(),
+      roundService: createRoundService(),
+      reportPollIntervalMs: 5,
+      reportTimeoutMs: 500
+    });
+
+    const result = await service.requestReviewGate(tmpRepo, "demo-task", "code-diff", {
+      codeDiffSource: "architect-diagnosis"
+    });
+
+    expect(result.status).toBe("started");
+    await waitFor(async () => (await service.getState(tmpRepo!, "demo-task")).gates["code-diff"].status === "completed");
+    const prompt = writes.find((write) => write.includes("[VCM GATE REVIEW]")) ?? "";
+    expect(prompt).toContain("Code source: architect-diagnosis");
+    expect(prompt).toContain("- .ai/vcm/handoffs/architecture-diagnosis.md");
+    expect(prompt).not.toContain("- .ai/vcm/handoffs/role-commands/architect.md");
   });
 
   it("updates gate settings from disabled state without enabling stale gates", async () => {

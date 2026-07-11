@@ -239,7 +239,7 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
     title: "VCM Final Acceptance Skill",
     frontmatter: renderSkillFrontmatter(
       "vcm-final-acceptance",
-      "Use when project-manager is ready to close a complete VCM code-change flow."
+      "Use when project-manager is ready to close a complete VCM code-delivery flow."
     ),
     ownership: "whole-file",
     renderRules: renderVcmFinalAcceptanceSkillRules

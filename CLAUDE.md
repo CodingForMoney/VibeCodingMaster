@@ -74,13 +74,15 @@ If a reusable harness problem is suspected, it is enough to record a concise fee
 
 - All standard workflow routes among project-manager, architect, coder, and tester are PM-hub routes. Project-manager starts and advances every flow; architect, coder, and tester report blockers, failures, conflicts, incomplete work, and findings back to project-manager.
 - Code changes use: `project-manager -> architect -> coder -> tester -> architect docs sync -> project-manager final acceptance`.
-- Debug work is a branch inside the code-change flow: `project-manager -> architect Debug Mode -> tester -> architect docs sync when needed -> project-manager final acceptance`.
+- Debug Mode and Architecture Diagnosis Mode may be either the task's primary flow or a branch inside an active main flow.
+- When either mode is entered while a main flow is active, project-manager suspends that flow, records its resume point, runs the mode through code-diff Gate Review and tester validation when code changes are produced, then returns to the recorded resume point. The branch does not run final acceptance.
+- When a task begins with Debug Mode or Architecture Diagnosis Mode and produces code changes, that mode is the task's primary code-delivery flow and continues through code-diff Gate Review, tester validation, architect docs sync, and project-manager final acceptance.
+- A primary Architecture Diagnosis flow that produces analysis only completes from the diagnosis result without final acceptance.
 - Docs-only changes use: `project-manager -> architect -> project-manager completion`.
 - Test-only or validation-only work uses: `project-manager -> tester -> project-manager completion`.
-- Architecture Diagnosis is a PM-triggered branch inside code/debug work: `project-manager -> architect Architecture Diagnosis Mode -> project-manager route decision`.
 - Gate Review is PM-triggered at its defined trigger points; the tool decides whether review is enabled or required.
-- Final acceptance closes only the complete code-change flow, including a completed Debug branch.
-- PR preparation starts only after the active delivery flow completes; code-change flow also requires final acceptance to pass.
+- Final acceptance closes only a complete code-delivery flow; it never closes a Debug or Architecture Diagnosis branch inside another flow.
+- PR preparation starts only after the active delivery flow completes; every complete code-delivery flow requires final acceptance to pass.
 - If docs/test/validation-only work reveals required code, architecture, public contract, dependency, durable-doc, or test-strategy changes, project-manager routes through the full code-change flow.
 - Detailed failure handling and route decisions belong to project-manager rules.
 - Keep role outputs under `.ai/vcm/handoffs/`.
@@ -106,8 +108,8 @@ If a reusable harness problem is suspected, it is enough to record a concise fee
 
 - L0 fast checks (default runner: coder): format, lint, typecheck, boundary, dependency, or other cheap project checks.
 - L1 baseline implementation checks (default runner: coder): changed behavior and direct regressions through project-defined unit tests.
-- L2 module / integration checks: targeted diagnostic L2 may run in Coder when explicitly assigned or in Architect Debug Mode; Tester owns full and final L2 validation.
-- L3 smoke E2E checks: targeted diagnostic L3 may run in Architect Debug Mode; Tester owns full and final L3 validation for core user journeys or critical browser/API flows.
+- L2 module / integration checks: targeted diagnostic L2 may run in Coder when explicitly assigned, Architect Debug Mode, or Architecture Diagnosis Mode; Tester owns full and final L2 validation.
+- L3 smoke E2E checks: targeted diagnostic L3 may run in Architect Debug Mode or Architecture Diagnosis Mode; Tester owns full and final L3 validation for core user journeys or critical browser/API flows.
 - L4 full regression / release checks (default runner: tester; architect-owned release flow) are release-only unless explicitly requested.
 
 ## VCM Worktree Policy

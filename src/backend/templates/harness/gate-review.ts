@@ -46,11 +46,12 @@ commit range named in the VCM prompt.
 Use the code source named in the VCM prompt. For \`coder\`, compare the commits
 against the approved architecture plan and coder completion evidence. For
 \`architect-debug\`, compare the commits against the current Architect route
-command. Apply project coding standards in both cases. Do not expand review to
+command. For \`architect-diagnosis\`, compare the commits against
+\`.ai/vcm/handoffs/architecture-diagnosis.md\`. Apply project coding standards in all cases. Do not expand review to
 the whole task, whole branch, or PR.
 
-Check that the commits match their source evidence, have no unapproved
-surface/dependency/docs changes, no \`VCM:CODE\`, no task-process comments or task
+Check that the commits match their source evidence, account for
+surface/dependency/docs changes, have no \`VCM:CODE\`, no task-process comments or task
 labels, no weakened tests or bypassed real behavior, and no unhandled fallible
 paths.
 
@@ -162,7 +163,7 @@ Use this skill at every project-manager Gate Review trigger point and whenever V
 
 - \`architecture-plan\`: after architect writes \`.ai/vcm/handoffs/architecture-plan.md\`, before coder dispatch.
 - \`validation-adequacy\`: after tester writes \`.ai/vcm/handoffs/test-report.md\`, before docs sync, final acceptance, or validation-only completion.
-- \`code-diff\`: after Coder returns \`Decision: ready_for_review\`, or after Architect Debug Mode completes a code fix, before PM routes to the next role or flow gate. Identify the source with \`--source coder\` or \`--source architect-debug\`.
+- \`code-diff\`: after Coder returns \`Decision: ready_for_review\`, Architect Debug Mode completes a code fix, or Architecture Diagnosis Mode completes a code fix, before PM routes to Tester. Identify the source with \`--source coder\`, \`--source architect-debug\`, or \`--source architect-diagnosis\`.
 
 ## Request
 
@@ -170,7 +171,7 @@ Run this unconditionally at each trigger point (do not first check whether Gate 
 
 \`\`\`sh
 .ai/tools/request-gate-review --gate <architecture-plan|validation-adequacy>
-.ai/tools/request-gate-review --gate code-diff --source <coder|architect-debug>
+.ai/tools/request-gate-review --gate code-diff --source <coder|architect-debug|architect-diagnosis>
 \`\`\`
 
 Interpret the first output line:
@@ -209,7 +210,7 @@ from pathlib import Path
 
 
 GATES = ("architecture-plan", "validation-adequacy", "code-diff")
-CODE_DIFF_SOURCES = ("coder", "architect-debug")
+CODE_DIFF_SOURCES = ("coder", "architect-debug", "architect-diagnosis")
 REPORTS = {
     "architecture-plan": ".ai/vcm/gate-reviews/architecture-plan-review.md",
     "validation-adequacy": ".ai/vcm/gate-reviews/validation-adequacy-review.md",
@@ -229,6 +230,7 @@ CODE_DIFF_SOURCE_ARTIFACTS = {
         ".ai/vcm/handoffs/coder-completion.md",
     ],
     "architect-debug": [".ai/vcm/handoffs/role-commands/architect.md"],
+    "architect-diagnosis": [".ai/vcm/handoffs/architecture-diagnosis.md"],
 }
 CORE_INPUT_ARTIFACTS = {
     "architecture-plan": ".ai/vcm/handoffs/architecture-plan.md",
@@ -624,7 +626,7 @@ def main() -> int:
     args = parser.parse_args()
 
     if args.gate == "code-diff" and not args.source:
-        print_result("failed_to_start", gate=args.gate, reason="code-diff requires --source coder or --source architect-debug")
+        print_result("failed_to_start", gate=args.gate, reason="code-diff requires --source coder, --source architect-debug, or --source architect-diagnosis")
         return 2
     if args.gate != "code-diff" and args.source:
         print_result("failed_to_start", gate=args.gate, reason="--source is valid only for code-diff")

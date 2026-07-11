@@ -107,6 +107,9 @@ const CODE_DIFF_SOURCE_ARTIFACTS: Record<CodeDiffSource, string[]> = {
   ],
   "architect-debug": [
     ".ai/vcm/handoffs/role-commands/architect.md"
+  ],
+  "architect-diagnosis": [
+    ".ai/vcm/handoffs/architecture-diagnosis.md"
   ]
 };
 
@@ -186,7 +189,7 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
     }
 
     if (gate === "code-diff" && !codeDiffSource) {
-      const message = "code-diff requires --source coder or --source architect-debug.";
+      const message = "code-diff requires --source coder, --source architect-debug, or --source architect-diagnosis.";
       index = applyGateState(index, gate, {
         status: "failed",
         decision: undefined,

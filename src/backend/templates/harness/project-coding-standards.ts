@@ -5,19 +5,19 @@ Project-specific rules may be added outside the VCM managed block when they make
 ## Applies To
 
 - Coder and Coder Worker implementation.
-- Architect Debug Mode when it edits production code or tests.
+- Architect Debug Mode and Architecture Diagnosis Mode when they edit production code or tests.
 - Tester changes to tests, fixtures, and test-only helpers, plus test-integrity review.
 
 ## Implementation Discipline
 
-- Coder and Coder Worker follow the accepted task scope, role message, architecture plan, and scaffold. Architect Debug Mode follows the confirmed root cause and PM-routed failure evidence.
-- Coder and Coder Worker must not change file responsibilities, callable-surface signatures, visibility, exports, contracts, or architect-defined intent unless the approved plan allows it. In Debug Mode, Architect may change file responsibilities and cross-file callable surfaces after confirming the root cause, and must update affected callers, contracts, and tests.
+- Coder and Coder Worker follow the accepted task scope, role message, architecture plan, and scaffold. Architect Debug Mode and Architecture Diagnosis Mode follow their confirmed root cause and PM-routed evidence.
+- Coder and Coder Worker must not change file responsibilities, callable-surface signatures, visibility, exports, contracts, or architect-defined intent unless the approved plan allows it. In Debug Mode or Architecture Diagnosis Mode, Architect may change file responsibilities and callable surfaces after confirming the root cause, and must update affected callers, contracts, and tests.
 - Complete assigned \`VCM:CODE\` placeholders and remove them before handoff.
 - Do not fake completion: no hardcoded success, disabled logic, swallowed errors, test-only shortcuts, or silent fallback that hides failure.
 - Implement behavior from the approved architecture, existing domain model, real inputs, and project runtime flow.
 - Do not derive logic from visible test fixtures, fixed sample values, snapshot text, or special branches that only satisfy known tests.
-- Coder and Coder Worker keep the diff inside the approved plan. In Debug Mode, Architect owns the technical change boundary after confirming the root cause.
-- Preserve existing behavior unless the approved plan or a confirmed Debug Mode root cause changes it.
+- Coder and Coder Worker keep the diff inside the approved plan. In Debug Mode or Architecture Diagnosis Mode, Architect owns the technical change boundary after confirming the root cause.
+- Preserve existing behavior unless the approved plan or a confirmed Debug/Diagnosis root cause changes it.
 
 ## Comments
 

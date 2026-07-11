@@ -13,7 +13,7 @@ Use this skill at every project-manager Gate Review trigger point and whenever V
 
 - `architecture-plan`: after architect writes `.ai/vcm/handoffs/architecture-plan.md`, before coder dispatch.
 - `validation-adequacy`: after tester writes `.ai/vcm/handoffs/test-report.md`, before docs sync, final acceptance, or validation-only completion.
-- `code-diff`: after Coder returns `Decision: ready_for_review`, or after Architect Debug Mode completes a code fix, before PM routes to the next role or flow gate. Identify the source with `--source coder` or `--source architect-debug`.
+- `code-diff`: after Coder returns `Decision: ready_for_review`, Architect Debug Mode completes a code fix, or Architecture Diagnosis Mode completes a code fix, before PM routes to Tester. Identify the source with `--source coder`, `--source architect-debug`, or `--source architect-diagnosis`.
 
 ## Request
 
@@ -21,7 +21,7 @@ Run this unconditionally at each trigger point (do not first check whether Gate 
 
 ```sh
 .ai/tools/request-gate-review --gate <architecture-plan|validation-adequacy>
-.ai/tools/request-gate-review --gate code-diff --source <coder|architect-debug>
+.ai/tools/request-gate-review --gate code-diff --source <coder|architect-debug|architect-diagnosis>
 ```
 
 Interpret the first output line:
