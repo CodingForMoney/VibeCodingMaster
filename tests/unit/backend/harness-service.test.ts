@@ -113,6 +113,7 @@ describe("createHarnessService", () => {
     expect(architectAgent).toContain("running targeted L1/L2/L3 checks to verify the fix");
     expect(architectAgent).toContain("Architecture Diagnosis Mode is an upgraded Debug Mode");
     expect(architectAgent).toContain("Do not diagnose from session memory");
+    expect(architectAgent).toContain("Do not assume existing code or comments are correct");
     expect(architectAgent).toContain("Recursively follow every project-owned call until no unresolved project-owned callee remains");
     expect(architectAgent).toContain("Maintain a `Code Reading Closure`");
     expect(architectAgent).toContain("`Previous Debug Failure`");

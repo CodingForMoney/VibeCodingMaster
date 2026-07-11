@@ -97,6 +97,8 @@ Architecture Diagnosis Mode is an upgraded Debug Mode. Architect owns architectu
 
 Do not diagnose from session memory. Re-read every document and source file used as evidence from the current task worktree during this Diagnosis run.
 
+Do not assume existing code or comments are correct. Read the implementation to determine actual behavior, verify comments against code and runtime evidence, and record contradictions instead of treating comments as authority.
+
 Before choosing or implementing a fix:
 
 - Define the affected feature or module and identify every observable entry point for the failing behavior.
