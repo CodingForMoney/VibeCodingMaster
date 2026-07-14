@@ -67,6 +67,34 @@ describe("createRuntimeCoordinatorService", () => {
     expect(calls).toContain("ensure:translator:demo-task");
     expect(calls).toContain("translation-listener:project-manager:demo-task");
   });
+
+  it("waits for Auto Memory before starting the automatic task retrospective", async () => {
+    const calls: string[] = [];
+    const service = createCoordinator({
+      calls,
+      autoTaskHarnessReviewEnabled: true,
+      roundStopped: true,
+      memoryReadiness: { ready: false, disposition: "pending" }
+    });
+
+    await service.reconcileProject("/repo", { taskSlug: "demo-task" });
+
+    expect(calls).not.toContain("task-retrospective");
+  });
+
+  it("starts the automatic task retrospective after Auto Memory completes", async () => {
+    const calls: string[] = [];
+    const service = createCoordinator({
+      calls,
+      autoTaskHarnessReviewEnabled: true,
+      roundStopped: true,
+      memoryReadiness: { ready: true, disposition: "completed" }
+    });
+
+    await service.reconcileProject("/repo", { taskSlug: "demo-task" });
+
+    expect(calls).toContain("task-retrospective");
+  });
 });
 
 function createCoordinator(input: {
@@ -77,6 +105,9 @@ function createCoordinator(input: {
   translationEnabled?: boolean;
   gatewayEnablesTranslationRuntime?: boolean;
   harnessInitialized?: boolean;
+  autoTaskHarnessReviewEnabled?: boolean;
+  roundStopped?: boolean;
+  memoryReadiness?: { ready: boolean; disposition: "pending" | "completed" };
 }) {
   let translator = input.translator;
   let harnessEngineer = input.harnessEngineer;
@@ -89,7 +120,8 @@ function createCoordinator(input: {
           flowPauseAlerts: true,
           roleRetryEnabled: true,
           permissionRequestMode: "off",
-          autoTaskHarnessReviewEnabled: false,
+          autoTaskHarnessReviewEnabled: input.autoTaskHarnessReviewEnabled ?? false,
+          autoMemoryEnabled: false,
           translationEnabled,
           translationAutoSendEnabled: false,
           translationTargetLanguage: "zh-CN",
@@ -156,14 +188,30 @@ function createCoordinator(input: {
     },
     harnessFeedbackService: {
       async startTaskRetrospective() {
-        throw new Error("unexpected retrospective");
+        input.calls.push("task-retrospective");
+        return {} as never;
+      }
+    },
+    autoMemoryService: {
+      async reconcileTask() {
+        return {
+          version: 1,
+          status: "idle",
+          files: [],
+          runs: [],
+          warnings: []
+        } as const;
+      },
+      async getTaskRetrospectiveReadiness() {
+        return input.memoryReadiness ?? { ready: true, disposition: "disabled" };
       }
     },
     roundService: {
       async getSessionRoundState() {
         return {
           taskSlug: "demo-task",
-          status: "running",
+          status: input.roundStopped ? "stopped" : "running",
+          ...(input.roundStopped ? { roundId: "round-1" } : {}),
           turnCount: 0,
           completedTurnCount: 0,
           totalRoundCount: 0,

@@ -4,6 +4,7 @@ import type { HarnessBootstrapStatusReport, HarnessStatusReport } from "../../sh
 import { isOpenFileLimitError, VcmError } from "../errors.js";
 import type { HarnessFeedbackService } from "../services/harness-feedback-service.js";
 import type { HarnessService } from "../services/harness-service.js";
+import type { AutoMemoryService } from "../services/auto-memory-service.js";
 import type { ProjectService } from "../services/project-service.js";
 import type { RuntimeCoordinatorService } from "../services/runtime-coordinator-service.js";
 import type { SessionService } from "../services/session-service.js";
@@ -17,6 +18,7 @@ export interface RuntimeStateRouteDeps {
   translationWorkerService: Pick<TranslationWorkerService, "getState">;
   harnessService: Pick<HarnessService, "getHarnessStatus" | "getBootstrapStatus">;
   harnessFeedbackService: Pick<HarnessFeedbackService, "getState">;
+  autoMemoryService: Pick<AutoMemoryService, "getState">;
   runtimeCoordinator: Pick<RuntimeCoordinatorService, "reconcileProject">;
 }
 
@@ -40,13 +42,14 @@ export function registerRuntimeStateRoutes(app: FastifyInstance, deps: RuntimeSt
         harnessStatus: null,
         harnessBootstrapStatus: null,
         harnessFeedbackState,
+        autoMemoryState: null,
         gatewayStatus: coordinated.gatewayStatus
       } satisfies ProjectRuntimeState;
     }
 
     try {
       const task = await deps.taskService.loadTask(project.repoRoot, taskSlug);
-      const [harnessStatus, harnessBootstrapStatus] = await Promise.all([
+      const [harnessStatus, harnessBootstrapStatus, autoMemoryState] = await Promise.all([
         withOpenFileLimitFallback(
           () => deps.harnessService.getHarnessStatus(task.worktreePath),
           (error) => degradedHarnessStatus(error)
@@ -54,7 +57,8 @@ export function registerRuntimeStateRoutes(app: FastifyInstance, deps: RuntimeSt
         withOpenFileLimitFallback(
           () => deps.harnessService.getBootstrapStatus(project.repoRoot, task.worktreePath),
           (error) => degradedBootstrapStatus(error)
-        )
+        ),
+        deps.autoMemoryService.getState(project.repoRoot, task.worktreePath)
       ]);
 
       return {
@@ -64,6 +68,7 @@ export function registerRuntimeStateRoutes(app: FastifyInstance, deps: RuntimeSt
         harnessStatus,
         harnessBootstrapStatus,
         harnessFeedbackState,
+        autoMemoryState,
         gatewayStatus: coordinated.gatewayStatus
       } satisfies ProjectRuntimeState;
     } catch (error) {
@@ -75,6 +80,7 @@ export function registerRuntimeStateRoutes(app: FastifyInstance, deps: RuntimeSt
           harnessStatus: degradedHarnessStatus(error),
           harnessBootstrapStatus: degradedBootstrapStatus(error),
           harnessFeedbackState,
+          autoMemoryState: null,
           gatewayStatus: coordinated.gatewayStatus
         } satisfies ProjectRuntimeState;
       }

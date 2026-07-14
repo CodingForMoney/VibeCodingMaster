@@ -5,7 +5,7 @@ import type { ClaudeModel, ClaudePermissionMode, SessionEffort } from "./session
 export type ThemeMode = "system" | "light" | "dark";
 export type PermissionRequestMode = "off" | "allowAll";
 export type TranslationTargetLanguage = "zh-CN" | "ja" | "ko" | "fr" | "de" | "es";
-export type TranslationOutputMode = "pm-final-only" | "final-only" | "all";
+export type TranslationOutputMode = "round-final" | "pm-final-only" | "final-only" | "all";
 
 export interface TranslationTargetLanguageOption {
   value: TranslationTargetLanguage;
@@ -35,6 +35,7 @@ export interface AppPreferences {
   roleRetryEnabled: boolean;
   permissionRequestMode: PermissionRequestMode;
   autoTaskHarnessReviewEnabled: boolean;
+  autoMemoryEnabled: boolean;
   translationEnabled: boolean;
   translationAutoSendEnabled: boolean;
   translationTargetLanguage: TranslationTargetLanguage;
@@ -49,6 +50,7 @@ export interface UpdateAppPreferencesRequest {
   roundCompletionAlerts?: boolean;
   permissionRequestMode?: PermissionRequestMode;
   autoTaskHarnessReviewEnabled?: boolean;
+  autoMemoryEnabled?: boolean;
   translationEnabled?: boolean;
   translationAutoSendEnabled?: boolean;
   translationTargetLanguage?: TranslationTargetLanguage;
@@ -69,6 +71,7 @@ export const TRANSLATION_TARGET_LANGUAGE_OPTIONS: readonly TranslationTargetLang
   { value: "es", label: "Spanish" }
 ] as const;
 export const TRANSLATION_OUTPUT_MODE_OPTIONS: readonly TranslationOutputModeOption[] = [
+  { value: "round-final", label: "Round final reply" },
   { value: "pm-final-only", label: "PM final reply" },
   { value: "final-only", label: "Each role final reply" },
   { value: "all", label: "All replies" }

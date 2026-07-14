@@ -106,10 +106,13 @@ describe("harness-feedback-service", () => {
         "Checks passed.",
         "",
         "## Review And Docs Sync",
-        "Reviewer and docs sync complete.",
+        "Tester and docs sync complete.",
         "",
         "## Known Issues Disposition",
         "No task issues to promote.",
+        "",
+        "## Gate Review Gates",
+        "Complete.",
         "",
         "## Cleanup Readiness",
         "Ready.",
@@ -176,6 +179,30 @@ describe("harness-feedback-service", () => {
     })).rejects.toThrow("already been triggered");
   });
 
+  it("does not start a task harness retrospective for a follow-up final-acceptance decision", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-harness-retrospective-follow-up-"));
+    const taskRepoRoot = path.join(tmpRepo, ".claude/worktrees/demo-task");
+    await mkdir(path.join(taskRepoRoot, ".ai/vcm/handoffs"), { recursive: true });
+    await writeFile(
+      path.join(taskRepoRoot, ".ai/vcm/handoffs/final-acceptance.md"),
+      renderFinalAcceptance("needs-coder-follow-up"),
+      "utf8"
+    );
+    const service = createHarnessFeedbackService({
+      fs: createNodeFileSystemAdapter(),
+      runtime: createRuntime([]),
+      sessionService: createSessionService(),
+      now: createClock()
+    });
+
+    await expect(service.startTaskRetrospective(tmpRepo, {
+      taskSlug: "demo-task",
+      taskRepoRoot,
+      handoffDir: ".ai/vcm/handoffs",
+      trigger: "manual"
+    })).rejects.toThrow("requires a completed code-change flow");
+  });
+
   it("cancels an interrupted active task harness retrospective while it is still analyzing", async () => {
     tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-harness-retrospective-cancel-"));
     const taskRepoRoot = path.join(tmpRepo, ".claude/worktrees/demo-task");
@@ -198,10 +225,13 @@ describe("harness-feedback-service", () => {
         "Checks passed.",
         "",
         "## Review And Docs Sync",
-        "Reviewer and docs sync complete.",
+        "Tester and docs sync complete.",
         "",
         "## Known Issues Disposition",
         "No task issues to promote.",
+        "",
+        "## Gate Review Gates",
+        "Complete.",
         "",
         "## Cleanup Readiness",
         "Ready.",
@@ -242,6 +272,32 @@ describe("harness-feedback-service", () => {
     )).resolves.toContain("\"status\": \"canceled\"");
   });
 });
+
+function renderFinalAcceptance(decision: string): string {
+  return [
+    "# Final Acceptance",
+    "",
+    "## Decision",
+    decision,
+    "",
+    "## Evidence Reviewed",
+    "All handoffs.",
+    "## Scope Traceability",
+    "All changes traced.",
+    "## Validation Summary",
+    "Checks passed.",
+    "## Review And Docs Sync",
+    "Complete.",
+    "## Known Issues Disposition",
+    "None.",
+    "## Gate Review Gates",
+    "Complete.",
+    "## Cleanup Readiness",
+    "Ready.",
+    "## Final User Summary",
+    "Done."
+  ].join("\n");
+}
 
 function createRuntime(writes: string[]): TerminalRuntime {
   const session: TerminalSession = {

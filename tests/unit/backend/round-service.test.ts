@@ -118,6 +118,51 @@ describe("round-service", () => {
     });
   });
 
+  it("records a manual interrupt as a stopped round without a flow pause", async () => {
+    const fs = createMemoryFs();
+    let currentTime = "2026-05-31T00:00:00.000Z";
+    const statusUpdates: string[] = [];
+    const service = createRoundService({
+      fs,
+      now: () => currentTime,
+      id: () => "round_1",
+      onSessionStatusChange: async ({ status }) => {
+        statusUpdates.push(status);
+      }
+    });
+
+    await service.recordClaudeHookEvent({
+      repoRoot: "/repo",
+      stateRepoRoot: "/repo",
+      stateRoot: ".ai/vcm",
+      taskSlug: "demo-task",
+      role: "coder",
+      eventName: "UserPromptSubmit"
+    });
+
+    currentTime = "2026-05-31T00:00:05.000Z";
+    const interrupted = await service.recordManualInterrupt({
+      repoRoot: "/repo",
+      stateRepoRoot: "/repo",
+      stateRoot: ".ai/vcm",
+      taskSlug: "demo-task",
+      role: "coder"
+    });
+
+    expect(interrupted).toMatchObject({
+      status: "stopped",
+      activeRole: "coder",
+      activeTurnStartedAt: undefined,
+      stopReason: "manual-interrupt",
+      completedTurnCount: 1,
+      totalCompletedTurnCount: 1,
+      totalCcActiveMs: 5000,
+      currentRoundCcActiveMs: 5000
+    });
+    expect(interrupted.flowPause).toBeUndefined();
+    expect(statusUpdates).toEqual(["running", "stopped"]);
+  });
+
   it("deduplicates a Gate Reviewer prompt when VCM marked the turn before the hook arrives", async () => {
     const fs = createMemoryFs();
     let currentTime = "2026-05-31T00:00:00.000Z";
@@ -856,7 +901,7 @@ describe("round-service", () => {
       stateRepoRoot: "/repo",
       stateRoot: ".ai/vcm",
       taskSlug: "demo-task",
-      role: "reviewer"
+      role: "tester"
     });
     expect(stillWaiting.roleRecovery?.role).toBe("coder");
 

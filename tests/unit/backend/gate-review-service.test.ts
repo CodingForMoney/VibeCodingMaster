@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -36,7 +37,7 @@ describe("gate-review-service", () => {
       runtime: createRuntime(tmpRepo, writes),
       projectService: createProjectService(),
       taskService: createTaskService(tmpRepo),
-      appSettings: createAppSettings(["architecture-plan", "validation-adequacy", "final-diff"]),
+      appSettings: createAppSettings(["architecture-plan", "validation-adequacy", "code-diff"]),
       sessionService: createSessionService(sessionStarts, activityCalls),
       roundService: createRoundService(roundCalls),
       reportPollIntervalMs: 5,
@@ -56,11 +57,20 @@ describe("gate-review-service", () => {
     const record = state.gates["architecture-plan"];
     expect(state.activeGate).toBeNull();
     expect(record.decision).toBe("request_changes");
+    expect(record.findings).toEqual([{
+      severity: "high",
+      title: "Missing proof point",
+      evidence: "plan has no proof",
+      expected: "proof point exists",
+      gap: "no proof",
+      risk: "coder ambiguity",
+      file: undefined,
+      line: undefined
+    }]);
     expect(record.callbackStatus).toBe("sent");
     expect(record.reportPath).toBe(".ai/vcm/gate-reviews/architecture-plan-review.md");
 
-    expect(runnerCalls.some((call) => call.command === "git" && call.args.join(" ") === "status --porcelain=v1")).toBe(true);
-    expect(runnerCalls.some((call) => call.command === "git" && call.args.join(" ") === "diff --binary")).toBe(true);
+    expect(runnerCalls.some((call) => call.command === "git")).toBe(false);
     expect(sessionStarts).toEqual(["gate-reviewer"]);
     expect(activityCalls).toEqual([
       "running:gate-reviewer",
@@ -101,6 +111,289 @@ describe("gate-review-service", () => {
     expect(result.status).toBe("disabled");
   });
 
+  it("does not start architecture-plan review when the architecture plan is missing", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-gate-review-missing-plan-"));
+    await writeHarnessFiles(tmpRepo);
+    await rm(path.join(taskWorktree(tmpRepo), ".ai/vcm/handoffs/architecture-plan.md"), { force: true });
+    const sessionStarts: string[] = [];
+    const service = createGateReviewService({
+      fs: createNodeFileSystemAdapter(),
+      runner: createRunner(tmpRepo, []),
+      runtime: createRuntime(tmpRepo, []),
+      projectService: createProjectService(),
+      taskService: createTaskService(tmpRepo),
+      appSettings: createAppSettings(["architecture-plan"]),
+      sessionService: createSessionService(sessionStarts),
+      roundService: createRoundService()
+    });
+
+    const result = await service.requestReviewGate(tmpRepo, "demo-task", "architecture-plan");
+    const state = await service.getState(tmpRepo, "demo-task");
+
+    expect(result.status).toBe("not_required");
+    expect(result.message).toContain("architecture-plan.md is missing");
+    expect(state.gates["architecture-plan"].status).toBe("not_required");
+    expect(sessionStarts).toEqual([]);
+  });
+
+  it("does not start validation-adequacy review when the test report is empty", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-gate-review-empty-report-"));
+    await writeHarnessFiles(tmpRepo);
+    await writeFile(path.join(taskWorktree(tmpRepo), ".ai/vcm/handoffs/test-report.md"), "\n\n", "utf8");
+    const sessionStarts: string[] = [];
+    const service = createGateReviewService({
+      fs: createNodeFileSystemAdapter(),
+      runner: createRunner(tmpRepo, []),
+      runtime: createRuntime(tmpRepo, []),
+      projectService: createProjectService(),
+      taskService: createTaskService(tmpRepo),
+      appSettings: createAppSettings(["validation-adequacy"]),
+      sessionService: createSessionService(sessionStarts),
+      roundService: createRoundService()
+    });
+
+    const result = await service.requestReviewGate(tmpRepo, "demo-task", "validation-adequacy");
+    const state = await service.getState(tmpRepo, "demo-task");
+
+    expect(result.status).toBe("not_required");
+    expect(result.message).toContain("test-report.md is empty");
+    expect(state.gates["validation-adequacy"].status).toBe("not_required");
+    expect(sessionStarts).toEqual([]);
+  });
+
+  it("reuses validation-adequacy approval when only the architecture plan changed", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-gate-review-report-hash-"));
+    await writeHarnessFiles(tmpRepo);
+    const taskRoot = taskWorktree(tmpRepo);
+    const testReport = "# Test Report\nAll checks covered.\n";
+    await writeFile(path.join(taskRoot, ".ai/vcm/handoffs/test-report.md"), testReport, "utf8");
+    await mkdir(path.join(taskRoot, ".ai/vcm/gate-reviews"), { recursive: true });
+    await writeFile(
+      path.join(taskRoot, ".ai/vcm/gate-reviews/index.json"),
+      JSON.stringify({
+        version: 1,
+        enabled: true,
+        activeGate: null,
+        updatedAt: "2026-06-13T00:00:00.000Z",
+        gates: {
+          "validation-adequacy": {
+            gate: "validation-adequacy",
+            required: true,
+            status: "completed",
+            decision: "approve",
+            reportPath: ".ai/vcm/gate-reviews/validation-adequacy-review.md",
+            promptPath: ".ai/vcm/gate-reviews/requests/approved.prompt.md",
+            inputHash: gateCoreHash(".ai/vcm/handoffs/test-report.md", testReport),
+            updatedAt: "2026-06-13T00:00:00.000Z"
+          }
+        }
+      }),
+      "utf8"
+    );
+    await writeFile(path.join(taskRoot, ".ai/vcm/handoffs/architecture-plan.md"), "# Architecture Plan\nChanged.\n", "utf8");
+    const sessionStarts: string[] = [];
+    const service = createGateReviewService({
+      fs: createNodeFileSystemAdapter(),
+      runner: createRunner(tmpRepo, []),
+      runtime: createRuntime(tmpRepo, []),
+      projectService: createProjectService(),
+      taskService: createTaskService(tmpRepo),
+      appSettings: createAppSettings(["validation-adequacy"]),
+      sessionService: createSessionService(sessionStarts),
+      roundService: createRoundService()
+    });
+
+    const result = await service.requestReviewGate(tmpRepo, "demo-task", "validation-adequacy");
+
+    expect(result.status).toBe("already_approved");
+    expect(sessionStarts).toEqual([]);
+  });
+
+  it("starts code-diff review for the current unreviewed commit range", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-gate-review-code-diff-"));
+    await writeHarnessFiles(tmpRepo);
+    const runnerCalls: Array<{ command: string; args: string[]; options?: CommandRunnerOptions }> = [];
+    const runner = createRunner(tmpRepo, runnerCalls, {
+      "rev-parse HEAD": ({ cwd }) => cwd === tmpRepo ? "base-sha" : "head-sha",
+      "merge-base --is-ancestor base-sha head-sha": "",
+      "log --oneline --reverse base-sha..head-sha": "abc1234 implement route\nbcd2345 add tests",
+      "diff --name-only --find-renames base-sha..head-sha": "src/feature.ts\ntests/feature.test.ts",
+      "diff --stat --find-renames base-sha..head-sha": " src/feature.ts | 10 +++++\n 1 file changed",
+      "diff --binary --find-renames base-sha..head-sha": "diff --git a/src/feature.ts b/src/feature.ts\n"
+    });
+    const writes: string[] = [];
+    const service = createGateReviewService({
+      fs: createNodeFileSystemAdapter(),
+      runner,
+      runtime: createRuntime(tmpRepo, writes),
+      projectService: createProjectService(),
+      taskService: createTaskService(tmpRepo),
+      appSettings: createAppSettings(["code-diff"]),
+      sessionService: createSessionService(),
+      roundService: createRoundService(),
+      reportPollIntervalMs: 5,
+      reportTimeoutMs: 500
+    });
+
+    const result = await service.requestReviewGate(tmpRepo, "demo-task", "code-diff", {
+      codeDiffSource: "coder"
+    });
+
+    expect(result.status).toBe("started");
+    await waitFor(async () => {
+      const state = await service.getState(tmpRepo!, "demo-task");
+      return state.gates["code-diff"].status === "completed";
+    });
+
+    const state = await service.getState(tmpRepo, "demo-task");
+    const record = state.gates["code-diff"];
+    expect(record.baseCommit).toBe("base-sha");
+    expect(record.headCommit).toBe("head-sha");
+    expect(record.commits).toEqual(["abc1234 implement route", "bcd2345 add tests"]);
+    expect(record.changedFiles).toEqual(["src/feature.ts", "tests/feature.test.ts"]);
+    expect(record.codeDiffSource).toBe("coder");
+    const prompt = writes.find((write) => write.includes("[VCM GATE REVIEW]")) ?? "";
+    expect(prompt).toContain("Gate: code-diff");
+    expect(prompt).toContain("This code-diff gate reviews the new commits from one PM route flow");
+    expect(prompt).toContain("Code source: coder");
+    expect(prompt).toContain("- .ai/vcm/handoffs/coder-completion.md");
+    expect(prompt).not.toContain("- .ai/vcm/handoffs/test-report.md");
+    expect(prompt).toContain("Base commit: base-sha");
+    expect(prompt).toContain("Head commit: head-sha");
+    expect(prompt).toContain("- abc1234 implement route");
+    expect(runnerCalls.some((call) => call.args.join(" ") === "diff --binary --find-renames base-sha..head-sha")).toBe(true);
+  });
+
+  it("fails code-diff start when the worktree has uncommitted changes", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-gate-review-code-diff-dirty-"));
+    await writeHarnessFiles(tmpRepo);
+    const sessionStarts: string[] = [];
+    const service = createGateReviewService({
+      fs: createNodeFileSystemAdapter(),
+      runner: createRunner(tmpRepo, [], {
+        "status --porcelain=v1": " M src/feature.ts\n?? scratch.txt"
+      }),
+      runtime: createRuntime(tmpRepo, []),
+      projectService: createProjectService(),
+      taskService: createTaskService(tmpRepo),
+      appSettings: createAppSettings(["code-diff"]),
+      sessionService: createSessionService(sessionStarts),
+      roundService: createRoundService()
+    });
+
+    const result = await service.requestReviewGate(tmpRepo, "demo-task", "code-diff", {
+      codeDiffSource: "coder"
+    });
+    const state = await service.getState(tmpRepo, "demo-task");
+
+    expect(result.status).toBe("failed_to_start");
+    expect(result.message).toContain("code-diff requires committed inputs");
+    expect(state.gates["code-diff"].status).toBe("failed");
+    expect(state.gates["code-diff"].error).toContain("M src/feature.ts");
+    expect(sessionStarts).toEqual([]);
+  });
+
+  it("rejects code-diff requests without a code source", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-gate-review-code-source-"));
+    await writeHarnessFiles(tmpRepo);
+    const sessionStarts: string[] = [];
+    const service = createGateReviewService({
+      fs: createNodeFileSystemAdapter(),
+      runner: createRunner(tmpRepo, []),
+      runtime: createRuntime(tmpRepo, []),
+      projectService: createProjectService(),
+      taskService: createTaskService(tmpRepo),
+      appSettings: createAppSettings(["code-diff"]),
+      sessionService: createSessionService(sessionStarts),
+      roundService: createRoundService()
+    });
+
+    const result = await service.requestReviewGate(tmpRepo, "demo-task", "code-diff");
+
+    expect(result.status).toBe("failed_to_start");
+    expect(result.message).toContain("--source coder, --source architect-debug, or --source architect-diagnosis");
+    expect(sessionStarts).toEqual([]);
+  });
+
+  it("uses the current Architect route command for architect-debug code diffs", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-gate-review-debug-source-"));
+    await writeHarnessFiles(tmpRepo);
+    const runner = createRunner(tmpRepo, [], {
+      "rev-parse HEAD": ({ cwd }) => cwd === tmpRepo ? "base-sha" : "head-sha",
+      "merge-base --is-ancestor base-sha head-sha": "",
+      "log --oneline --reverse base-sha..head-sha": "abc1234 fix debug path",
+      "diff --name-only --find-renames base-sha..head-sha": "src/feature.ts",
+      "diff --stat --find-renames base-sha..head-sha": " src/feature.ts | 2 +-",
+      "diff --binary --find-renames base-sha..head-sha": "diff --git a/src/feature.ts b/src/feature.ts\n"
+    });
+    const writes: string[] = [];
+    const service = createGateReviewService({
+      fs: createNodeFileSystemAdapter(),
+      runner,
+      runtime: createRuntime(tmpRepo, writes),
+      projectService: createProjectService(),
+      taskService: createTaskService(tmpRepo),
+      appSettings: createAppSettings(["code-diff"]),
+      sessionService: createSessionService(),
+      roundService: createRoundService(),
+      reportPollIntervalMs: 5,
+      reportTimeoutMs: 500
+    });
+
+    const result = await service.requestReviewGate(tmpRepo, "demo-task", "code-diff", {
+      codeDiffSource: "architect-debug"
+    });
+
+    expect(result.status).toBe("started");
+    await waitFor(async () => (await service.getState(tmpRepo!, "demo-task")).gates["code-diff"].status === "completed");
+    const prompt = writes.find((write) => write.includes("[VCM GATE REVIEW]")) ?? "";
+    expect(prompt).toContain("Code source: architect-debug");
+    expect(prompt).toContain("- .ai/vcm/handoffs/role-commands/architect.md");
+    expect(prompt).not.toContain("- .ai/vcm/handoffs/coder-completion.md");
+  });
+
+  it("uses the diagnosis artifact for architect-diagnosis code diffs", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-gate-review-diagnosis-source-"));
+    await writeHarnessFiles(tmpRepo);
+    await writeFile(
+      path.join(taskWorktree(tmpRepo), ".ai/vcm/handoffs/architecture-diagnosis.md"),
+      "# Architecture Diagnosis\n",
+      "utf8"
+    );
+    const runner = createRunner(tmpRepo, [], {
+      "rev-parse HEAD": ({ cwd }) => cwd === tmpRepo ? "base-sha" : "head-sha",
+      "merge-base --is-ancestor base-sha head-sha": "",
+      "log --oneline --reverse base-sha..head-sha": "abc1234 repair ownership",
+      "diff --name-only --find-renames base-sha..head-sha": "src/feature.ts",
+      "diff --stat --find-renames base-sha..head-sha": " src/feature.ts | 8 ++++----",
+      "diff --binary --find-renames base-sha..head-sha": "diff --git a/src/feature.ts b/src/feature.ts\n"
+    });
+    const writes: string[] = [];
+    const service = createGateReviewService({
+      fs: createNodeFileSystemAdapter(),
+      runner,
+      runtime: createRuntime(tmpRepo, writes),
+      projectService: createProjectService(),
+      taskService: createTaskService(tmpRepo),
+      appSettings: createAppSettings(["code-diff"]),
+      sessionService: createSessionService(),
+      roundService: createRoundService(),
+      reportPollIntervalMs: 5,
+      reportTimeoutMs: 500
+    });
+
+    const result = await service.requestReviewGate(tmpRepo, "demo-task", "code-diff", {
+      codeDiffSource: "architect-diagnosis"
+    });
+
+    expect(result.status).toBe("started");
+    await waitFor(async () => (await service.getState(tmpRepo!, "demo-task")).gates["code-diff"].status === "completed");
+    const prompt = writes.find((write) => write.includes("[VCM GATE REVIEW]")) ?? "";
+    expect(prompt).toContain("Code source: architect-diagnosis");
+    expect(prompt).toContain("- .ai/vcm/handoffs/architecture-diagnosis.md");
+    expect(prompt).not.toContain("- .ai/vcm/handoffs/role-commands/architect.md");
+  });
+
   it("updates gate settings from disabled state without enabling stale gates", async () => {
     tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-gate-review-settings-"));
     await writeHarnessFiles(tmpRepo);
@@ -123,7 +416,7 @@ describe("gate-review-service", () => {
     expect(state.enabled).toBe(true);
     expect(state.gates["architecture-plan"].required).toBe(true);
     expect(state.gates["validation-adequacy"].required).toBe(false);
-    expect(state.gates["final-diff"].required).toBe(false);
+    expect(state.gates["code-diff"].required).toBe(false);
     expect(appSettings.getStoredRequiredGates()).toEqual(["architecture-plan"]);
 
     const disabledState = await service.updateSettings(tmpRepo, "demo-task", {
@@ -157,12 +450,21 @@ function taskWorktree(repoRoot: string): string {
 
 function createRunner(
   repoRoot: string,
-  calls: Array<{ command: string; args: string[]; options?: CommandRunnerOptions }>
+  calls: Array<{ command: string; args: string[]; options?: CommandRunnerOptions }>,
+  gitOutputs: Record<string, string | ((input: { cwd?: string }) => string)> = {}
 ): CommandRunner {
   return {
     async run(command: string, args: string[] = [], options?: CommandRunnerOptions): Promise<CommandResult> {
       calls.push({ command, args, options });
       if (command === "git") {
+        const key = args.join(" ");
+        const output = gitOutputs[key];
+        if (typeof output === "function") {
+          return { stdout: output({ cwd: options?.cwd }), stderr: "", exitCode: 0 };
+        }
+        if (typeof output === "string") {
+          return { stdout: output, stderr: "", exitCode: 0 };
+        }
         return { stdout: "", stderr: "", exitCode: 0 };
       }
       return { stdout: "", stderr: `unexpected command: ${command}`, exitCode: 1 };
@@ -187,12 +489,13 @@ function createRuntime(repoRoot: string, writes: string[]): TerminalRuntime {
           "Decision: request_changes",
           "Summary: Missing proof point.",
           "",
-          "severity: high",
-          "title: Missing proof point",
-          "evidence: plan has no proof",
-          "expected: proof point exists",
-          "gap: no proof",
-          "risk: coder ambiguity"
+          "## Findings",
+          "",
+          "### high: Missing proof point",
+          "- Evidence: plan has no proof",
+          "- Expected: proof point exists",
+          "- Gap: no proof",
+          "- Risk: coder ambiguity"
         ].join("\n"),
         "utf8"
       );
@@ -339,6 +642,13 @@ function createAppSettings(initialRequiredGates: GateReviewGate[] = []) {
       return requiredGates;
     }
   };
+}
+
+function gateCoreHash(relativePath: string, content: string): string {
+  const digest = createHash("sha256");
+  digest.update(relativePath);
+  digest.update(content);
+  return digest.digest("hex");
 }
 
 async function waitFor(predicate: () => Promise<boolean>, timeoutMs = 1000): Promise<void> {

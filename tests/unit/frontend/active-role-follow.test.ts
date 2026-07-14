@@ -33,7 +33,7 @@ describe("selectAutoFollowRole", () => {
     expect(selectAutoFollowRole({
       mode: "manual",
       status: "running",
-      activeRole: "reviewer",
+      activeRole: "tester",
       lastFollowedRole: "project-manager"
     })).toBeUndefined();
   });
@@ -42,7 +42,7 @@ describe("selectAutoFollowRole", () => {
     expect(selectAutoFollowRole({
       mode: undefined,
       status: "running",
-      activeRole: "reviewer",
+      activeRole: "tester",
       lastFollowedRole: "project-manager"
     })).toBeUndefined();
   });
@@ -51,7 +51,7 @@ describe("selectAutoFollowRole", () => {
     expect(selectAutoFollowRole({
       mode: "auto",
       status: "stopped",
-      activeRole: "reviewer",
+      activeRole: "tester",
       lastFollowedRole: "project-manager"
     })).toBeUndefined();
   });
@@ -70,7 +70,7 @@ describe("selectAutoFollowRole", () => {
       mode: "auto",
       status: "running",
       activeRole: "gate-reviewer",
-      lastFollowedRole: "reviewer"
+      lastFollowedRole: "tester"
     })).toBe("gate-reviewer");
   });
 });

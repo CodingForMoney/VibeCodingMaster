@@ -5,10 +5,7 @@ package that provides a local GUI cockpit for running and orchestrating multiple
 Claude Code role sessions around one engineering task.
 
 This document is architect-owned. It gives the project-wide module overview,
-responsibilities, relationships, dependency direction, and constraints. The
-module-level detailed design lives in [`ARCHITECTURE.md`](../ARCHITECTURE.md) at
-the repository root (the single workspace module recorded in
-`.ai/generated/module-index.json`).
+responsibilities, relationships, dependency direction, and constraints.
 
 ## Module / Layer Overview
 
@@ -31,7 +28,9 @@ layers plus supporting tools.
 - `services/`: business logic. Key services include `task-service`,
   `task-launch-service` (backend-owned one-click task start, shared by the GUI
   endpoint and the gateway), `session-service`, `round-service`,
-  `runtime-coordinator-service`, `message-service`, `harness-service`,
+  `runtime-coordinator-service`, `runtime-recovery-service`, `message-service`,
+  `artifact-service`, `harness-service`, `harness-feedback-service`,
+  `auto-memory-service`,
   `gate-review-service`, `translation-service`/`translation-worker-service`,
   `job-guard-service`, and `command-dispatcher`.
 - `runtime/`: PTY-backed terminal runtime (`node-pty-runtime`,
@@ -43,9 +42,10 @@ layers plus supporting tools.
   (Weixin iLink, Lark) and command parsing; channel connection is gated by a
   runtime, default-off switch. Detailed sub-area design lives in
   [`src/backend/gateway/ARCHITECTURE.md`](../src/backend/gateway/ARCHITECTURE.md).
-- `templates/`: message/handoff/role-command templates and, under
-  `templates/harness/`, the source of truth for the VCM harness that VCM installs
-  into downstream repositories.
+- `templates/`: message, handoff, role-command, and downstream harness
+  templates. `templates/harness/` is the source of truth for the VCM harness
+  installed into target repositories, including role agents, skills, tools, and
+  project durable doc templates.
 - `ws/`: WebSocket bridge (`terminal-ws`) streaming PTY I/O to the frontend.
 - `server.ts`, `main.ts`, `app-version.ts`, `vcm-data-dir.ts`, `errors.ts`:
   composition root, CLI entry, version, data-dir resolution, error types.
@@ -120,13 +120,79 @@ by the tools in `.ai/tools/`:
 
 Regenerate both after changing module layout, public exports, or HTTP routes.
 
-## Module-Level Architecture Docs
+## Auto Memory Ownership
 
-- Root module: [`ARCHITECTURE.md`](../ARCHITECTURE.md) — detailed design,
-  boundaries, behavior, public surface explanation, risks, and update triggers
-  for the `vibe-coding-master` workspace module.
+`auto-memory-service` owns project memory under the base repository's
+`.ai/vcm/memory/`, task-visible snapshots under the active worktree's matching
+path, and review history under `.ai/vcm/memory-review/`. The root `CLAUDE.md`
+imports shared memory; each role definition requires that role to read its own
+memory file.
 
-Sub-area architecture docs (deeper design for a cohesive backend sub-area):
+After a normal stopped round has valid Final Acceptance, the backend runtime
+coordinator may start the Auto Memory state machine. Workflow roles submit
+drafts sequentially, Harness Engineer writes the reviewed memory set, and the
+service applies it to canonical and task memory together. Auto Memory hook
+turns update role session activity but do not mutate the completed task round.
+The frontend only displays state and invokes memory file, retry, or revert APIs.
+
+Auto Memory completion is bound to the SHA-256 hash of the current accepted
+`final-acceptance.md`. If that artifact changes, memory is pending again for the
+new acceptance evidence. `runtime-coordinator-service` and the manual Harness
+route use the same readiness policy: Task Harness Retrospective may start only
+when Auto Memory is disabled or completed for that hash. Pending, collecting,
+reviewing, or failed memory work blocks retrospective. The retrospective then
+includes memory drafts, applied memory diffs, and current memory in its task
+evidence.
+
+## Public Surface
+
+The authoritative machine listing of exported APIs, HTTP routes, and externally
+consumed surfaces is `.ai/generated/public-surface.json`. Do not duplicate that
+listing here.
+
+Design intent of the most externally meaningful surfaces:
+
+- **CLI**: `vcm` with `--help`, `--version`, `--host=`, `--port=`, `--dev`,
+  and `--open`.
+- **HTTP `/api/*`**: route modules under `src/backend/api/`; this is the
+  contract consumed by the frontend and gateway.
+- **`/ws`**: terminal I/O streaming contract used by the embedded terminal.
+- **`src/shared/types/**`**: typed contracts shared across the HTTP boundary.
+- **`src/backend/templates/harness/**`**: downstream-facing harness contract
+  installed into target repositories.
+
+## Risks
+
+- Layer-boundary erosion: accidental `frontend <-> backend` imports or
+  `shared -> backend/frontend` imports.
+- `node-pty` is a native dependency; runtime/spawn changes can be platform
+  sensitive.
+- Harness template edits affect every downstream repo VCM installs into.
+- Shared-type changes are cross-cutting and must typecheck under both frontend
+  and backend tsconfigs.
+- The npm package ships built artifacts (`dist`, `dist-frontend`, `scripts`,
+  `README.md`); runtime-required assets must live in shipped paths.
+
+## Update Triggers
+
+Update this document when:
+
+- a top-level area is added under `src/backend`, `src/frontend`, or `src/shared`;
+- dependency rules or layer boundaries change;
+- externally meaningful surfaces change in a way that affects consumers;
+- a new external integration, gateway channel, or adapter is added.
+- post-task Auto Memory or Task Harness Retrospective ownership/order changes.
+
+After these changes, regenerate `.ai/generated/module-index.json` and
+`.ai/generated/public-surface.json`.
+
+## Sub-Area Architecture Docs
+
+Root packages do not get a separate module-level `ARCHITECTURE.md` by default.
+Create sub-area architecture docs only for clear internal boundaries whose
+details would make this project-level overview too noisy.
+
+Existing sub-area docs:
 
 - Mobile gateway: [`src/backend/gateway/ARCHITECTURE.md`](../src/backend/gateway/ARCHITECTURE.md)
   — channel abstraction, poll/inbound/PM-push flows, settings/persistence,

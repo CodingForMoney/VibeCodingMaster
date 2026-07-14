@@ -77,6 +77,17 @@ describe("runtime state routes", () => {
           };
         }
       } as never,
+      autoMemoryService: {
+        async getState() {
+          return {
+            version: 1,
+            status: "idle",
+            files: [],
+            runs: [],
+            warnings: []
+          };
+        }
+      } as never,
       runtimeCoordinator: {
         async reconcileProject() {
           return {
@@ -102,6 +113,7 @@ describe("runtime state routes", () => {
       harnessStatus: { initialized: true },
       harnessBootstrapStatus: { status: "complete" },
       harnessFeedbackState: { status: "idle" },
+      autoMemoryState: { status: "idle" },
       gatewayStatus: { running: true }
     });
     await app.close();

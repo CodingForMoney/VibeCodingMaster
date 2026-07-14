@@ -7,20 +7,21 @@ description: Use when project-manager reaches a Gate Review trigger or receives 
 
 ## Purpose
 
-Use this skill when project-manager reaches a VCM Gate Review or receives a VCM Gate Review callback.
+Use this skill at every project-manager Gate Review trigger point and whenever VCM sends a Gate Review callback. Running the request is mandatory and unconditional: always run the tool at each trigger point and let its output decide; do not pre-judge whether Gate Review is enabled. The tool reports the authoritative enable state.
 
 ## Trigger Points
 
 - `architecture-plan`: after architect writes `.ai/vcm/handoffs/architecture-plan.md`, before coder dispatch.
-- `validation-adequacy`: after reviewer writes `.ai/vcm/handoffs/review-report.md`, before docs sync or final acceptance.
-- `final-diff`: after final acceptance evidence is ready, before PR preparation.
+- `validation-adequacy`: after tester writes `.ai/vcm/handoffs/test-report.md`, before docs sync, final acceptance, or validation-only completion.
+- `code-diff`: after Coder returns `Decision: ready_for_review`, Architect Debug Mode completes a code fix, or Architecture Diagnosis Mode completes a code fix, before PM routes to Tester. Identify the source with `--source coder`, `--source architect-debug`, or `--source architect-diagnosis`.
 
 ## Request
 
-Run:
+Run this unconditionally at each trigger point (do not first check whether Gate Review is enabled):
 
 ```sh
-.ai/tools/request-gate-review --gate <architecture-plan|validation-adequacy|final-diff>
+.ai/tools/request-gate-review --gate <architecture-plan|validation-adequacy>
+.ai/tools/request-gate-review --gate code-diff --source <coder|architect-debug|architect-diagnosis>
 ```
 
 Interpret the first output line:

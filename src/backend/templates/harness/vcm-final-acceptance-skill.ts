@@ -1,9 +1,11 @@
 export function renderVcmFinalAcceptanceSkillRules(): string {
   return `## Purpose
 
-Use this skill when project-manager is ready to decide whether a VCM-managed task can be accepted, returned for follow-up, or blocked for a decision.
+Use this skill only when project-manager is ready to close a complete VCM code-delivery flow, including a primary Debug or Architecture Diagnosis flow that produced code changes.
 
-This skill is a final evidence audit. It does not replace architect docs sync, reviewer validation acceptance, coder implementation responsibility, or user approval for high-risk decisions.
+Do not use it for docs-only, validation-only, Communication-only, PR-prep, analysis-only Diagnosis, or any Debug/Diagnosis branch inside another flow.
+
+This skill is a final evidence audit. It does not replace architect docs sync, tester validation acceptance, coder implementation responsibility, or user approval for high-risk decisions.
 
 Project-manager must not use this skill to perform technical design review, implementation review, source-code analysis, or test adequacy analysis. Missing or conflicting evidence must be routed to the responsible role.
 
@@ -13,7 +15,8 @@ Read the relevant task evidence before deciding:
 
 - original user request, PM route message, or durable plan when present
 - \`.ai/vcm/handoffs/architecture-plan.md\` when the task required architect planning
-- \`.ai/vcm/handoffs/review-report.md\` when reviewer validation was required
+- \`.ai/vcm/handoffs/architecture-diagnosis.md\` when the flow used Architecture Diagnosis Mode
+- \`.ai/vcm/handoffs/test-report.md\` when tester validation was required
 - \`.ai/vcm/handoffs/docs-sync-report.md\` when durable docs could be affected
 - \`.ai/vcm/handoffs/known-issues.md\` when unresolved findings were recorded
 - \`.ai/vcm/gate-reviews/index.json\` and referenced Gate Review reports when Gate Reviews were required, skipped, or overridden
@@ -22,25 +25,25 @@ Read the relevant task evidence before deciding:
 
 ## Evidence Audit
 
-Check whether the required role evidence exists, is current, and gives a clear decision.
+Check whether the required role evidence exists, is current, and gives a clear result or decision.
 
 Acceptable evidence must show:
 
-- architect plan or docs-sync decision when architecture, public contracts, durable docs, or known issues changed
-- reviewer decision and validation evidence when code, behavior, tests, or generated context changed
+- architect plan, architecture diagnosis, or docs-sync decision when required by the completed flow
+- tester \`Test Result: pass|fail\` and validation evidence when code, behavior, tests, or generated context changed
 - required Gate Review decisions, skip reasons, or override reasons when Gate Reviews were enabled
 - known-issues disposition when unresolved findings were recorded
 - explicit user approval for accepted high-risk decisions or intentionally skipped required gates
 
-## File Scope Audit
+## Scope Traceability Audit
 
 Do not claim to prove that every diff hunk exactly matches the task.
 
 Review the changed file list only, then classify files:
 
-- expected files: directly named by the user request, route message, durable plan, or architecture plan
+- expected files: directly named by the user request, route message, durable plan, architecture plan, or architecture diagnosis
 - supporting files: tests, fixtures, generated context, docs, or wiring needed for expected files
-- approved deviations: files explained by Replan, reviewer follow-up, docs-sync, or explicit user / project-manager approval
+- approved deviations: files explained by Replan, tester follow-up, docs-sync, or explicit user / project-manager approval
 - unexplained files: files with no traceable reason in the task evidence
 - high-risk unexpected files: auth, permissions, payment, billing, schema, migrations, data deletion, secrets, dependencies, lockfiles, broad generated artifacts, or broad formatting churn
 
@@ -54,11 +57,11 @@ Check:
 
 - required route was followed, or an explicit exception is recorded
 - required handoff artifacts exist and are current
-- architecture plan completion, Replan, or architect follow-up decision is recorded
-- reviewer report records validation commands, results, skipped checks with reasons, and an acceptable decision
+- architecture plan, Architecture Diagnosis, Replan, or architect follow-up completion is recorded when required by the flow
+- tester report records \`Test Result: pass|fail\`, validation commands, results, and skipped checks with reasons
 - required Gate Reviews are approved, skipped with a recorded reason, or overridden with a recorded reason
-- Gate Review enable state is confirmed authoritatively: do not infer that no Gate Reviews were required from an absent or empty \`.ai/vcm/gate-reviews/index.json\`. When Gate Review is enabled, a missing index or a required gate without a recorded decision means the gate was skipped — run the matching \`.ai/tools/request-gate-review --gate <gate>\` (the tool is the source of truth) and do not accept until each required gate returns \`approve\`/\`already_approved\`, \`disabled\`/\`not_required\`, or a recorded skip/override
-- docs-sync report records docs updated, docs intentionally left unchanged, or required follow-up
+- Gate Review enable state is confirmed authoritatively: do not infer that no Gate Reviews were required from an absent or empty \`.ai/vcm/gate-reviews/index.json\`. When Gate Review is enabled, a missing index or a required gate without a recorded decision means the gate was skipped — run the matching command from the \`vcm-gate-review\` skill, including the code source for \`code-diff\`, and do not accept until each required gate returns \`approve\`/\`already_approved\`, \`disabled\`/\`not_required\`, or a recorded skip/override
+- docs-sync report records docs updated, docs intentionally left unchanged, or required follow-up when docs sync was required
 - known issues are either resolved, promoted to durable docs by architect, or explicitly accepted
 - temporary task state is ready to clean after durable facts are promoted
 
@@ -69,11 +72,11 @@ Choose exactly one:
 - accepted
 - accepted-with-known-risks
 - needs-coder-follow-up
-- needs-architect-replan
+- needs-architect-follow-up
 - needs-docs-sync
 - blocked-by-user-decision
 
-Do not accept when required role evidence is missing, required Gate Review evidence is missing, reviewer findings are unresolved, docs sync is missing for durable changes, known-issues disposition is missing, or unexplained high-risk files remain.
+Do not accept when required role evidence is missing, required Gate Review evidence is missing, tester findings are unresolved, docs sync is missing for durable changes, known-issues disposition is missing, or unexplained high-risk files remain.
 
 ## Output
 
@@ -90,11 +93,11 @@ Use this structure:
 
 ## Decision
 
-accepted | accepted-with-known-risks | needs-coder-follow-up | needs-architect-replan | needs-docs-sync | blocked-by-user-decision
+accepted | accepted-with-known-risks | needs-coder-follow-up | needs-architect-follow-up | needs-docs-sync | blocked-by-user-decision
 
 ## Evidence Reviewed
 
-## File Scope
+## Scope Traceability
 
 ### Expected Files
 
@@ -109,6 +112,8 @@ accepted | accepted-with-known-risks | needs-coder-follow-up | needs-architect-r
 ## Validation Summary
 
 ## Review And Docs Sync
+
+## Known Issues Disposition
 
 ## Gate Review Gates
 

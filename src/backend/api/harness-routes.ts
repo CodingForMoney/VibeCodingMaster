@@ -10,9 +10,11 @@ import type {
   StartTaskHarnessRetrospectiveRequest,
   UpdateHarnessFileContentRequest
 } from "../../shared/types/harness.js";
+import type { RevertMemoryRunRequest, RetryMemoryReviewRequest, UpdateMemoryFileRequest } from "../../shared/types/memory.js";
 import { isOpenFileLimitError, VcmError } from "../errors.js";
 import type { HarnessService } from "../services/harness-service.js";
 import type { HarnessFeedbackService } from "../services/harness-feedback-service.js";
+import type { AutoMemoryService } from "../services/auto-memory-service.js";
 import type { ProjectService } from "../services/project-service.js";
 import type { SessionService } from "../services/session-service.js";
 import type { TaskService } from "../services/task-service.js";
@@ -22,6 +24,7 @@ export interface HarnessRouteDeps {
   projectService: ProjectService;
   harnessService: HarnessService;
   harnessFeedbackService: HarnessFeedbackService;
+  autoMemoryService: AutoMemoryService;
   sessionService: Pick<
     SessionService,
     | "getProjectHarnessEngineerSession"
@@ -111,12 +114,14 @@ export function registerHarnessRoutes(app: FastifyInstance, deps: HarnessRouteDe
 
   app.post<{ Body: StartHarnessBootstrapRequest }>("/api/projects/harness/bootstrap/start", async (request) => {
     const { project, task } = await requireHarnessTaskContext(deps, request.body?.taskSlug);
+    await deps.autoMemoryService.assertHarnessEngineerAvailable(task.worktreePath);
     await deps.harnessFeedbackService.assertHarnessEngineerAvailable(project.repoRoot);
     return deps.harnessService.startHarnessBootstrap(project.repoRoot, task.worktreePath, request.body ?? {});
   });
 
   app.post<{ Body: RestartHarnessBootstrapRequest }>("/api/projects/harness/bootstrap/restart", async (request) => {
     const { project, task } = await requireHarnessTaskContext(deps, request.body?.taskSlug);
+    await deps.autoMemoryService.assertHarnessEngineerAvailable(task.worktreePath);
     await deps.harnessFeedbackService.assertHarnessEngineerAvailable(project.repoRoot);
     return deps.harnessService.restartHarnessBootstrap(project.repoRoot, task.worktreePath, request.body ?? {});
   });
@@ -128,6 +133,7 @@ export function registerHarnessRoutes(app: FastifyInstance, deps: HarnessRouteDe
 
   app.post<{ Body: { taskSlug?: string } }>("/api/projects/harness/bootstrap/run", async (request) => {
     const { project, task } = await requireHarnessTaskContext(deps, request.body?.taskSlug);
+    await deps.autoMemoryService.assertHarnessEngineerAvailable(task.worktreePath);
     await deps.harnessFeedbackService.assertHarnessEngineerAvailable(project.repoRoot);
     return deps.harnessService.runHarnessBootstrap(project.repoRoot, task.worktreePath);
   });
@@ -144,16 +150,28 @@ export function registerHarnessRoutes(app: FastifyInstance, deps: HarnessRouteDe
 
   app.post<{ Body: StartRoleSessionRequest }>("/api/projects/harness/engineer/session/start", async (request) => {
     const project = await requireCurrentProject(deps.projectService);
+    if (request.body?.taskSlug) {
+      const task = await deps.taskService.loadTask(project.repoRoot, request.body.taskSlug);
+      await deps.autoMemoryService.assertHarnessEngineerAvailable(task.worktreePath);
+    }
     return deps.sessionService.startProjectHarnessEngineerSession(project.repoRoot, request.body);
   });
 
   app.post<{ Body: StartRoleSessionRequest }>("/api/projects/harness/engineer/session/resume", async (request) => {
     const project = await requireCurrentProject(deps.projectService);
+    if (request.body?.taskSlug) {
+      const task = await deps.taskService.loadTask(project.repoRoot, request.body.taskSlug);
+      await deps.autoMemoryService.assertHarnessEngineerAvailable(task.worktreePath);
+    }
     return deps.sessionService.resumeProjectHarnessEngineerSession(project.repoRoot, request.body);
   });
 
   app.post<{ Body: StartRoleSessionRequest }>("/api/projects/harness/engineer/session/restart", async (request) => {
     const project = await requireCurrentProject(deps.projectService);
+    if (request.body?.taskSlug) {
+      const task = await deps.taskService.loadTask(project.repoRoot, request.body.taskSlug);
+      await deps.autoMemoryService.assertHarnessEngineerAvailable(task.worktreePath);
+    }
     return deps.sessionService.restartProjectHarnessEngineerSession(project.repoRoot, request.body);
   });
 
@@ -184,6 +202,10 @@ export function registerHarnessRoutes(app: FastifyInstance, deps: HarnessRouteDe
       });
     }
     const taskSlug = await normalizeOptionalTaskSlug(deps, project.repoRoot, request.body?.taskSlug);
+    if (taskSlug && (action === "approve" || action === "comment")) {
+      const task = await deps.taskService.loadTask(project.repoRoot, taskSlug);
+      await deps.autoMemoryService.assertHarnessEngineerAvailable(task.worktreePath);
+    }
     return deps.harnessFeedbackService.decide(project.repoRoot, {
       action,
       taskSlug,
@@ -193,6 +215,14 @@ export function registerHarnessRoutes(app: FastifyInstance, deps: HarnessRouteDe
 
   app.post<{ Body: StartTaskHarnessRetrospectiveRequest }>("/api/projects/harness/task-retrospective", async (request) => {
     const { project, task } = await requireHarnessTaskContext(deps, request.body?.taskSlug);
+    await deps.autoMemoryService.assertTaskRetrospectiveReady({
+      baseRepoRoot: project.repoRoot,
+      taskRepoRoot: task.worktreePath,
+      taskSlug: task.taskSlug,
+      handoffDir: task.handoffDir,
+      roundReady: true
+    });
+    await deps.autoMemoryService.assertHarnessEngineerAvailable(task.worktreePath);
     const trigger = request.body?.trigger === "auto" ? "auto" : "manual";
     return deps.harnessFeedbackService.startTaskRetrospective(project.repoRoot, {
       taskSlug: task.taskSlug,
@@ -200,6 +230,47 @@ export function registerHarnessRoutes(app: FastifyInstance, deps: HarnessRouteDe
       handoffDir: task.handoffDir,
       trigger
     });
+  });
+
+  app.get<{ Querystring: { taskSlug?: string } }>("/api/projects/harness/memory", async (request) => {
+    const { project, task } = await requireHarnessTaskContext(deps, request.query.taskSlug);
+    return deps.autoMemoryService.getState(project.repoRoot, task.worktreePath);
+  });
+
+  app.get<{ Querystring: { taskSlug?: string; path?: string } }>("/api/projects/harness/memory/file", async (request) => {
+    const { project, task } = await requireHarnessTaskContext(deps, request.query.taskSlug);
+    return deps.autoMemoryService.getFile(project.repoRoot, task.worktreePath, request.query.path ?? "");
+  });
+
+  app.put<{
+    Querystring: { taskSlug?: string; path?: string };
+    Body: UpdateMemoryFileRequest;
+  }>("/api/projects/harness/memory/file", async (request) => {
+    const { project, task } = await requireHarnessTaskContext(deps, request.query.taskSlug ?? request.body?.taskSlug);
+    if (typeof request.body?.content !== "string") {
+      throw new VcmError({
+        code: "MEMORY_FILE_CONTENT_INVALID",
+        message: "Memory file content must be a string.",
+        statusCode: 400
+      });
+    }
+    return deps.autoMemoryService.updateFile(
+      project.repoRoot,
+      task.worktreePath,
+      task.taskSlug,
+      request.query.path ?? "",
+      request.body.content
+    );
+  });
+
+  app.post<{ Body: RevertMemoryRunRequest }>("/api/projects/harness/memory/revert", async (request) => {
+    const { project, task } = await requireHarnessTaskContext(deps, request.body?.taskSlug);
+    return deps.autoMemoryService.revertRun(project.repoRoot, task.worktreePath, request.body?.runId ?? "");
+  });
+
+  app.post<{ Body: RetryMemoryReviewRequest }>("/api/projects/harness/memory/retry", async (request) => {
+    const { project, task } = await requireHarnessTaskContext(deps, request.body?.taskSlug);
+    return deps.autoMemoryService.retryFailedReview(project.repoRoot, task.worktreePath);
   });
 }
 

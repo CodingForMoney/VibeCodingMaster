@@ -129,6 +129,19 @@ export function TranslationPanel({
     }
   }
 
+  async function translateLatestReply() {
+    setBusy(true);
+    setError("");
+    try {
+      const entry = await apiClient.translateLatestReply(taskSlug, role);
+      onEntry(sessionId, role, entry);
+    } catch (caught) {
+      setError(formatUiError("Translate final reply", caught));
+    } finally {
+      setBusy(false);
+    }
+  }
+
   async function sendEnglish() {
     const englishText = composerIsEnglishDraft ? extractTranslatedComposerDraft(composer) : composer;
     if (!englishText.trim()) {
@@ -214,6 +227,9 @@ export function TranslationPanel({
                 ) : null}
               </>
             ) : null}
+            <button type="button" disabled={busy} onClick={() => void translateLatestReply()}>
+              Translate final reply
+            </button>
             <button type="button" onClick={() => void clearPanel()}>Clear</button>
           </div>
         </div>
@@ -222,17 +238,7 @@ export function TranslationPanel({
         </div>
       </header>
 
-      <div className="translation-entry-list" ref={entryListRef}>
-        {entries.length === 0 ? <p className="muted">Translated Claude Code output will appear here.</p> : null}
-        {entries.map((entry) => (
-          <TranslationEntryRow
-            entry={entry}
-            key={entry.id}
-          />
-        ))}
-      </div>
-
-      <div className="translation-composer">
+      <div className="translation-manual-panel">
         <div className="translation-composer-row translation-manual-row">
           <textarea
             value={manualSource}
@@ -249,6 +255,19 @@ export function TranslationPanel({
             </button>
           </div>
         </div>
+      </div>
+
+      <div className="translation-entry-list" ref={entryListRef}>
+        {entries.length === 0 ? <p className="muted">Translated Claude Code output will appear here.</p> : null}
+        {entries.map((entry) => (
+          <TranslationEntryRow
+            entry={entry}
+            key={entry.id}
+          />
+        ))}
+      </div>
+
+      <div className="translation-composer">
         <div className="translation-composer-row">
           <textarea
             value={composer}

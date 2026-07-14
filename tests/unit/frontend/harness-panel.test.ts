@@ -18,10 +18,14 @@ const baseProps = {
   bootstrapStatus: null,
   applyResult: null,
   hasActiveTask: true,
+  autoTaskHarnessReviewEnabled: false,
+  autoMemoryEnabled: false,
   onRefresh: async () => {},
   onApply: async () => {},
   onOpenRepositoryDiff: () => {},
   onOpenStudio: () => {},
+  onAutoTaskHarnessReviewChange: () => {},
+  onAutoMemoryChange: () => {},
   onStartBootstrap: async () => {}
 };
 
@@ -146,6 +150,11 @@ describe("HarnessPanel fixed-install three-state UI", () => {
 
     expect(html).toContain("VCM Harness updated and committed as abc1234");
     expect(html).not.toContain("Commit &amp; rebase task</button>");
+  });
+
+  it("shows Auto Memory as an explicit Harness switch", () => {
+    const html = render(makeStatus({ initialized: true, needsApply: false }));
+    expect(html).toContain("Auto memory");
   });
 
   it("does not show bootstrap check details in the sidebar", () => {

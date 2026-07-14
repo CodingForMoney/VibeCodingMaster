@@ -1,6 +1,7 @@
 import Fastify from "fastify";
 import { describe, expect, it } from "vitest";
 import { registerHarnessRoutes } from "../../../src/backend/api/harness-routes.js";
+import { VcmError } from "../../../src/backend/errors.js";
 
 describe("harness routes", () => {
   it("degrades harness status when the backend hits the open-files limit", async () => {
@@ -286,6 +287,41 @@ describe("harness routes", () => {
         taskBranch: "feature/demo-task"
       }
     ]]);
+    await app.close();
+  });
+
+  it("blocks a manual task retrospective until Auto Memory is ready", async () => {
+    const app = Fastify({ logger: false });
+    let retrospectiveStarted = false;
+    registerHarnessRoutes(app, {
+      projectService: createProjectServiceStub(),
+      taskService: createTaskServiceStub(),
+      autoMemoryService: {
+        async assertTaskRetrospectiveReady() {
+          throw new VcmError({
+            code: "TASK_MEMORY_REVIEW_NOT_READY",
+            message: "Task Harness Retrospective must run after Auto Memory.",
+            statusCode: 409
+          });
+        }
+      },
+      harnessFeedbackService: {
+        async startTaskRetrospective() {
+          retrospectiveStarted = true;
+          return {} as never;
+        }
+      }
+    } as never);
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/projects/harness/task-retrospective",
+      payload: { taskSlug: "demo-task" }
+    });
+
+    expect(response.statusCode).toBe(409);
+    expect(response.json().code).toBe("TASK_MEMORY_REVIEW_NOT_READY");
+    expect(retrospectiveStarted).toBe(false);
     await app.close();
   });
 });

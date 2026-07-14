@@ -10,6 +10,7 @@ import { createCommandDispatcher, type CommandDispatcher } from "./services/comm
 import { createClaudeHookService, type ClaudeHookService } from "./services/claude-hook-service.js";
 import { createGitAdapter } from "./adapters/git-adapter.js";
 import { createAppSettingsService, type AppSettingsService } from "./services/app-settings-service.js";
+import { createAutoMemoryService, type AutoMemoryService } from "./services/auto-memory-service.js";
 import { createClaudeTranscriptService } from "./services/claude-transcript-service.js";
 import { createGateReviewService, type GateReviewService } from "./services/gate-review-service.js";
 import { createHarnessFeedbackService, type HarnessFeedbackService } from "./services/harness-feedback-service.js";
@@ -36,9 +37,11 @@ import { createSessionService, type SessionService } from "./services/session-se
 import { createMessageService, type MessageService } from "./services/message-service.js";
 import { createRoundService, type RoundService } from "./services/round-service.js";
 import { createRuntimeCoordinatorService, type RuntimeCoordinatorService } from "./services/runtime-coordinator-service.js";
+import { createRuntimeRecoveryService, type RuntimeRecoveryService } from "./services/runtime-recovery-service.js";
 import { createStatusService, type StatusService } from "./services/status-service.js";
 import { createTaskService, type TaskService } from "./services/task-service.js";
 import { createTaskLaunchService, type TaskLaunchService } from "./services/task-launch-service.js";
+import { createTerminalInterruptService, type TerminalInterruptService } from "./services/terminal-interrupt-service.js";
 import { createTranslationService, type TranslationService } from "./services/translation-service.js";
 import { createDiagnosticsService, type DiagnosticsService } from "./services/diagnostics-service.js";
 import { registerAppSettingsRoutes } from "./api/app-settings-routes.js";
@@ -74,6 +77,7 @@ export interface ServerDeps {
   artifactService: ArtifactService;
   harnessService: HarnessService;
   harnessFeedbackService: HarnessFeedbackService;
+  autoMemoryService: AutoMemoryService;
   commandDispatcher: CommandDispatcher;
   claudeHookService: ClaudeHookService;
   messageService: MessageService;
@@ -85,6 +89,8 @@ export interface ServerDeps {
   translationService: TranslationService;
   gatewayService: GatewayService;
   runtimeCoordinator: RuntimeCoordinatorService;
+  runtimeRecoveryService: RuntimeRecoveryService;
+  terminalInterruptService: TerminalInterruptService;
   runtime: TerminalRuntime;
   diagnosticsService: DiagnosticsService;
 }
@@ -125,12 +131,13 @@ export async function createServer(deps: ServerDeps, options: CreateServerOption
   });
   registerProjectRoutes(app, {
     projectService: deps.projectService,
-    translationWorkerService: deps.translationWorkerService
+    runtimeRecoveryService: deps.runtimeRecoveryService
   });
   registerHarnessRoutes(app, {
     projectService: deps.projectService,
     harnessService: deps.harnessService,
     harnessFeedbackService: deps.harnessFeedbackService,
+    autoMemoryService: deps.autoMemoryService,
     sessionService: deps.sessionService,
     taskService: deps.taskService
   });
@@ -141,6 +148,7 @@ export async function createServer(deps: ServerDeps, options: CreateServerOption
     translationWorkerService: deps.translationWorkerService,
     harnessService: deps.harnessService,
     harnessFeedbackService: deps.harnessFeedbackService,
+    autoMemoryService: deps.autoMemoryService,
     runtimeCoordinator: deps.runtimeCoordinator
   });
   registerTaskRoutes(app, {
@@ -182,7 +190,10 @@ export async function createServer(deps: ServerDeps, options: CreateServerOption
     translationService: deps.translationService
   });
   registerGatewayRoutes(app, { gatewayService: deps.gatewayService });
-  registerTerminalWs(app, { runtime: deps.runtime });
+  registerTerminalWs(app, {
+    runtime: deps.runtime,
+    onManualInterrupt: (sessionId) => deps.terminalInterruptService.handleManualInterrupt(sessionId)
+  });
 
   app.addHook("onReady", async () => {
     await cleanupRecentTranslationRuntime(deps);
@@ -269,6 +280,16 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     runtime,
     sessionService
   });
+  const autoMemoryService = createAutoMemoryService({
+    fs,
+    runtime,
+    sessionService,
+    appSettings,
+    async isHarnessEngineerAvailable(repoRoot) {
+      const state = await harnessFeedbackService.getState(repoRoot);
+      return state.status === "idle";
+    }
+  });
   const commandDispatcher = createCommandDispatcher({
     runtime,
     sessionService,
@@ -324,6 +345,7 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     translationWorkerService,
     fs,
     projectService,
+    roundService,
     appSettings
   });
   const gatewayChannels = createGatewayChannelRegistry([
@@ -360,11 +382,19 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     translationService,
     harnessService,
     harnessFeedbackService,
+    autoMemoryService,
     roundService,
     gatewayService,
     async getStateRoot(repoRoot) {
       return (await projectService.loadConfig(repoRoot)).stateRoot;
     }
+  });
+  const runtimeRecoveryService = createRuntimeRecoveryService({
+    fs,
+    runtime,
+    projectService,
+    taskService,
+    translationWorkerService
   });
   const claudeHookService = createClaudeHookService({
     projectService,
@@ -377,9 +407,17 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     runtime,
     harnessService,
     harnessFeedbackService,
+    autoMemoryService,
     gatewayService,
     jobGuard: createJobGuardService(),
     translationWorkerService
+  });
+  const terminalInterruptService = createTerminalInterruptService({
+    runtime,
+    projectService,
+    taskService,
+    sessionService,
+    roundService
   });
   const diagnosticsService = createDiagnosticsService({
     appRoot,
@@ -396,6 +434,7 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     artifactService,
     harnessService,
     harnessFeedbackService,
+    autoMemoryService,
     commandDispatcher,
     claudeHookService,
     messageService,
@@ -407,6 +446,8 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     translationService,
     gatewayService,
     runtimeCoordinator,
+    runtimeRecoveryService,
+    terminalInterruptService,
     runtime,
     diagnosticsService
   };

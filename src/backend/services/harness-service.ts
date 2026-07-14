@@ -32,6 +32,7 @@ import type { GitAdapter } from "../adapters/git-adapter.js";
 import type { FileSystemAdapter } from "../adapters/filesystem.js";
 import { renderArchitectHarnessRules } from "../templates/harness/architect-agent.js";
 import { renderCoderHarnessRules } from "../templates/harness/coder-agent.js";
+import { renderCoderWorkerHarnessRules } from "../templates/harness/coder-worker-agent.js";
 import {
   renderGateReviewerAgentRules,
   renderRequestGateReviewTool,
@@ -41,9 +42,20 @@ import {
 import { renderHarnessEngineerHarnessRules } from "../templates/harness/harness-engineer-agent.js";
 import { renderRootClaudeHarnessRules } from "../templates/harness/claude-root.js";
 import { renderGitignoreHarnessRules } from "../templates/harness/gitignore.js";
+import {
+  renderLegacyProjectCodingStandardsTemplate,
+  renderProjectCodingStandardsProjectSection,
+  renderProjectCodingStandardsRules
+} from "../templates/harness/project-coding-standards.js";
+import { renderProjectGlossaryTemplate } from "../templates/harness/project-glossary.js";
+import {
+  renderLegacyProjectKnownIssuesTemplate,
+  renderProjectKnownIssuesRules,
+  renderProjectKnownIssuesSection
+} from "../templates/harness/project-known-issues.js";
 import { renderProjectManagerHarnessRules } from "../templates/harness/project-manager-agent.js";
 import { renderPullRequestTemplateHarnessRules } from "../templates/harness/pull-request-template.js";
-import { renderReviewerHarnessRules } from "../templates/harness/reviewer-agent.js";
+import { renderTesterHarnessRules } from "../templates/harness/tester-agent.js";
 import { renderVcmFinalAcceptanceSkillRules } from "../templates/harness/vcm-final-acceptance-skill.js";
 import { renderVcmHarnessBootstrapSkillRules } from "../templates/harness/vcm-harness-bootstrap-skill.js";
 import { renderVcmLongRunningValidationSkillRules } from "../templates/harness/vcm-long-running-validation-skill.js";
@@ -126,8 +138,10 @@ interface HarnessFileDefinition {
   title: string;
   frontmatter?: string;
   commentStyle?: "html" | "hash";
-  ownership?: "managed-block" | "whole-file" | "raw-file";
+  ownership?: "managed-block" | "whole-file" | "raw-file" | "project-file";
   blankLineBeforeEnd?: boolean;
+  defaultContentAfterBlock?: string;
+  legacyWholeFile?: string;
   renderRules(): string;
 }
 
@@ -154,6 +168,7 @@ const VCM_STOP_HOOK_COMMAND = `sh -c 'if [ -z "\${VCM_TASK_SLUG:-}" ] || [ -z "\
 const VCM_PERMISSION_REQUEST_HOOK_COMMAND = `sh -c 'if [ -z "\${VCM_TASK_SLUG:-}" ] || [ -z "\${VCM_ROLE:-}" ] || [ -z "\${VCM_API_URL:-}" ]; then exit 0; fi; node -e '"'"'let s="";process.stdin.setEncoding("utf8");process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{let event={};try{event=s.trim()?JSON.parse(s):{};}catch{event={raw:s};}process.stdout.write(JSON.stringify({taskSlug:process.env.VCM_TASK_SLUG,role:process.env.VCM_ROLE,event}));});'"'"' | curl -fsS --max-time 5 -X POST "\${VCM_API_URL}/api/hooks/claude-code/permission-request" -H "content-type: application/json" --data-binary @- || true'`;
 const VCM_BASH_GUARD_HOOK_COMMAND = `sh -c 'if [ -z "\${VCM_TASK_SLUG:-}" ] || [ -z "\${VCM_ROLE:-}" ]; then exit 0; fi; guard=""; repo="$(git rev-parse --show-toplevel 2>/dev/null || true)"; if [ -n "$repo" ] && [ -f "$repo/.ai/tools/vcm-bash-guard" ]; then guard="$repo/.ai/tools/vcm-bash-guard"; else cwd="$(pwd -P 2>/dev/null || pwd)"; dir="$cwd"; while [ -n "$dir" ] && [ "$dir" != "/" ]; do if [ -f "$dir/.ai/tools/vcm-bash-guard" ]; then guard="$dir/.ai/tools/vcm-bash-guard"; break; fi; dir="$(dirname "$dir")"; done; if [ -z "$guard" ] && [ -n "\${CLAUDE_PROJECT_DIR:-}" ] && [ -f "\${CLAUDE_PROJECT_DIR}/.ai/tools/vcm-bash-guard" ]; then guard="\${CLAUDE_PROJECT_DIR}/.ai/tools/vcm-bash-guard"; fi; fi; [ -n "$guard" ] || exit 0; python3 "$guard" || exit 0'`;
 const VCM_BASH_DEFAULT_TIMEOUT_MS = "600000";
+const VCM_AUTO_MEMORY_ENABLED = false;
 const VCM_HOOK_DEFINITIONS: ReadonlyArray<{ eventName: string; matcher?: string; command: string; timeout: number }> = [
   { eventName: "PreToolUse", matcher: "Bash", command: VCM_BASH_GUARD_HOOK_COMMAND, timeout: 10 },
   { eventName: "UserPromptSubmit", command: VCM_HOOK_COMMAND, timeout: 5 },
@@ -170,6 +185,29 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
     title: "CLAUDE.md",
     blankLineBeforeEnd: true,
     renderRules: renderRootClaudeHarnessRules
+  },
+  {
+    kind: "project-glossary",
+    path: "docs/GLOSSARY.md",
+    title: "Glossary",
+    ownership: "project-file",
+    renderRules: renderProjectGlossaryTemplate
+  },
+  {
+    kind: "project-coding-standards",
+    path: "docs/CODING_STANDARDS.md",
+    title: "Coding Standards",
+    defaultContentAfterBlock: renderProjectCodingStandardsProjectSection(),
+    legacyWholeFile: renderLegacyProjectCodingStandardsTemplate(),
+    renderRules: renderProjectCodingStandardsRules
+  },
+  {
+    kind: "project-known-issues",
+    path: "docs/known-issues.md",
+    title: "Known Issues",
+    defaultContentAfterBlock: renderProjectKnownIssuesSection(),
+    legacyWholeFile: renderLegacyProjectKnownIssuesTemplate(),
+    renderRules: renderProjectKnownIssuesRules
   },
   {
     kind: "gitignore",
@@ -190,7 +228,7 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
     title: "VCM Route Message Skill",
     frontmatter: renderSkillFrontmatter(
       "vcm-route-message",
-      "Use when a VCM role needs to hand off work, ask a question, report a result, report a blocker, or raise a finding to another VCM role."
+      "Use when project-manager dispatches a VCM role or when a VCM role reports a question, result, blocker, or finding back to project-manager."
     ),
     ownership: "whole-file",
     renderRules: renderVcmRouteMessageSkillRules
@@ -201,7 +239,7 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
     title: "VCM Final Acceptance Skill",
     frontmatter: renderSkillFrontmatter(
       "vcm-final-acceptance",
-      "Use when project-manager is ready to decide whether a VCM-managed task can be accepted, returned for follow-up, or blocked for a decision."
+      "Use when project-manager is ready to close a complete VCM code-delivery flow."
     ),
     ownership: "whole-file",
     renderRules: renderVcmFinalAcceptanceSkillRules
@@ -256,7 +294,8 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
     title: "Gate Reviewer Agent",
     frontmatter: renderAgentFrontmatter(
       "gate-reviewer",
-      "VCM independent gate review role for architecture plans, validation adequacy, and final diffs."
+      "VCM independent gate review role for architecture plans, validation adequacy, and code diffs.",
+      { tools: "Read, Grep, Glob, Bash, Write" }
     ),
     renderRules: renderGateReviewerAgentRules
   },
@@ -279,6 +318,17 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
       "VCM project-scoped harness maintenance role for harness diagnosis, diff proposals, and VCM issue drafts."
     ),
     renderRules: renderHarnessEngineerHarnessRules
+  },
+  {
+    kind: "agent-coder-worker",
+    path: ".claude/agents/vcm-coder-worker.md",
+    title: "VCM Coder Worker Agent",
+    frontmatter: renderAgentFrontmatter(
+      "vcm-coder-worker",
+      "Bounded VCM implementation worker for assigned modules, files, and VCM:CODE markers from Coder.",
+      { model: "inherit" }
+    ),
+    renderRules: renderCoderWorkerHarnessRules
   },
   {
     kind: "tool-request-gate-review",
@@ -314,19 +364,20 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
     title: "Coder Agent",
     frontmatter: renderAgentFrontmatter(
       "coder",
-      "VCM implementation role for scoped code changes and focused tests."
+      "VCM implementation role for scoped code changes and focused tests.",
+      { tools: "Read, Grep, Glob, Bash, Edit, Write, Agent" }
     ),
     renderRules: renderCoderHarnessRules
   },
   {
-    kind: "agent-reviewer",
-    path: ".claude/agents/reviewer.md",
-    title: "Reviewer Agent",
+    kind: "agent-tester",
+    path: ".claude/agents/tester.md",
+    title: "Tester Agent",
     frontmatter: renderAgentFrontmatter(
-      "reviewer",
-      "VCM independent review role for acceptance, test adequacy, scope checks, and risk findings."
+      "tester",
+      "VCM testing role for validation, test adequacy, approved-scope validation, and risk findings."
     ),
-    renderRules: renderReviewerHarnessRules
+    renderRules: renderTesterHarnessRules
   }
 ];
 
@@ -1279,7 +1330,7 @@ function assertManagedBlockUnchanged(
 }
 
 function extractManagedBlock(definition: HarnessFileDefinition, content: string): string | undefined {
-  if (definition.ownership === "whole-file" || definition.ownership === "raw-file") {
+  if (definition.ownership === "whole-file" || definition.ownership === "raw-file" || definition.ownership === "project-file") {
     return undefined;
   }
   return content.match(getManagedBlockPattern(definition))?.[0];
@@ -1302,6 +1353,28 @@ async function analyzeHarnessFile(
   definition: HarnessFileDefinition
 ): Promise<HarnessFileAnalysis> {
   const absolutePath = resolveHarnessPath(repoRoot, definition.path);
+  if (definition.ownership === "project-file") {
+    const exists = await fs.pathExists(absolutePath);
+    return {
+      definition,
+      status: {
+        kind: definition.kind,
+        path: definition.path,
+        exists,
+        hasManagedBlock: false,
+        action: exists ? "ok" : "create"
+      },
+      plannedChange: exists
+        ? undefined
+        : {
+          path: definition.path,
+          action: "create",
+          reason: "Project-owned harness file is missing; VCM will create an editable default."
+        },
+      nextContent: exists ? undefined : ensureTrailingNewline(definition.renderRules().trimEnd())
+    };
+  }
+
   const expectedContent = definition.ownership === "whole-file" || definition.ownership === "raw-file"
     ? renderWholeHarnessFile(definition)
     : undefined;
@@ -1361,6 +1434,25 @@ async function analyzeHarnessFile(
 
   const match = currentContent.match(managedBlockPattern);
   if (!match) {
+    const migratedContent = migrateLegacyHarnessFile(definition, currentContent, expectedBlock);
+    if (migratedContent) {
+      return {
+        definition,
+        status: {
+          kind: definition.kind,
+          path: definition.path,
+          exists: true,
+          hasManagedBlock: false,
+          action: "update"
+        },
+        plannedChange: {
+          path: definition.path,
+          action: "update",
+          reason: "Legacy VCM whole-file baseline will be migrated to a managed block."
+        },
+        nextContent: migratedContent
+      };
+    }
     return {
       definition,
       status: {
@@ -1502,11 +1594,33 @@ function getManagedBlockPattern(definition: HarnessFileDefinition): RegExp {
     : MANAGED_BLOCK_PATTERN;
 }
 
-function renderNewHarnessFile(definition: HarnessFileDefinition, block: string): string {
+function renderNewHarnessFile(
+  definition: HarnessFileDefinition,
+  block: string,
+  contentAfterBlock = definition.defaultContentAfterBlock
+): string {
   const frontmatter = definition.frontmatter
     ? `${definition.frontmatter.trimEnd()}\n\n`
     : "";
-  return `${frontmatter}# ${definition.title}\n\n${block}\n`;
+  const suffix = contentAfterBlock?.trim();
+  return `${frontmatter}# ${definition.title}\n\n${block}${suffix ? `\n\n${suffix}` : ""}\n`;
+}
+
+function migrateLegacyHarnessFile(
+  definition: HarnessFileDefinition,
+  currentContent: string,
+  block: string
+): string | undefined {
+  const legacyContent = definition.legacyWholeFile?.trimEnd();
+  if (!legacyContent) {
+    return undefined;
+  }
+  const current = currentContent.trimEnd();
+  if (current !== legacyContent && !current.startsWith(`${legacyContent}\n`)) {
+    return undefined;
+  }
+  const projectContent = current.slice(legacyContent.length).trim();
+  return renderNewHarnessFile(definition, block, projectContent || undefined);
 }
 
 function renderWholeHarnessFile(definition: HarnessFileDefinition): string {
@@ -1609,7 +1723,8 @@ function withVcmClaudeHooks(settings: Record<string, unknown>): Record<string, u
   return {
     ...settings,
     hooks,
-    env
+    env,
+    autoMemoryEnabled: VCM_AUTO_MEMORY_ENABLED
   };
 }
 
@@ -1634,8 +1749,14 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
 
-function renderAgentFrontmatter(name: string, description: string): string {
-  return `---\nname: ${name}\ndescription: ${description}\ntools: Read, Grep, Glob, Bash, Edit, Write\n---`;
+function renderAgentFrontmatter(
+  name: string,
+  description: string,
+  options: { tools?: string; model?: string } = {}
+): string {
+  const tools = options.tools ?? "Read, Grep, Glob, Bash, Edit, Write";
+  const model = options.model ? `\nmodel: ${options.model}` : "";
+  return `---\nname: ${name}\ndescription: ${description}\ntools: ${tools}${model}\n---`;
 }
 
 function renderSkillFrontmatter(name: string, description: string): string {
@@ -1702,6 +1823,14 @@ async function getHarnessBootstrapStatus(
       "public-surface",
       "Public surface"
     ),
+    await checkFilledMarkdown(deps.fs, targetRepoRoot, "docs/GLOSSARY.md", "Glossary", "glossary-doc"),
+    await checkFilledMarkdown(
+      deps.fs,
+      targetRepoRoot,
+      "docs/CODING_STANDARDS.md",
+      "Coding standards",
+      "coding-standards-doc"
+    ),
     await checkFilledMarkdown(deps.fs, targetRepoRoot, "docs/ARCHITECTURE.md", "Project architecture", "project-architecture"),
     await checkModuleArchitectureDocs(deps.fs, targetRepoRoot, moduleIndex),
     await checkFilledMarkdown(deps.fs, targetRepoRoot, "docs/TESTING.md", "Testing doc", "testing-doc")
@@ -1737,6 +1866,8 @@ async function checkFixedHarness(fs: FileSystemAdapter, repoRoot: string, vcmVer
     "CLAUDE.md",
     MANIFEST_PATH,
     ".claude/skills/vcm-harness-bootstrap/SKILL.md",
+    "docs/GLOSSARY.md",
+    "docs/CODING_STANDARDS.md",
     ".ai/tools/generate-module-index",
     ".ai/tools/generate-public-surface"
   ];
@@ -2100,8 +2231,10 @@ Required work:
 - Run .ai/tools/generate-module-index from the target task worktree when available.
 - Run .ai/tools/generate-public-surface from the target task worktree after module-index.json exists.
 - Add or update project-specific Project Context and Project Constraints in target CLAUDE.md above the VCM managed block.
+- Fill target docs/GLOSSARY.md with the project abbreviation allowlist.
+- Add project-specific coding standards outside the VCM managed block in target docs/CODING_STANDARDS.md when needed; do not edit the installer-maintained baseline.
 - Fill target docs/ARCHITECTURE.md with project-level module overview, responsibilities, relationships, dependency direction, project-wide constraints, and links to module-level architecture docs.
-- Create or update target module-level ARCHITECTURE.md files for clear module boundaries listed by module-index.json.
+- Create or update target module-level ARCHITECTURE.md files for clear non-root module boundaries with architectureDoc paths in module-index.json.
 - Fill target docs/TESTING.md with project-native validation levels, commands, validation selection rules, final-validation cleanup, test layout, integration/E2E case lists, generated-context freshness checks, and known testing gaps.
 - Review git status and git diff in the target task worktree.
 - Stage only allowed bootstrap harness changes and create a commit in the target task worktree.

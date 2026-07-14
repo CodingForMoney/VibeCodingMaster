@@ -1,11 +1,11 @@
 # Testing
 
 Status: draft
-Owner: reviewer
+Owner: tester
 
 ## Purpose
 
-`docs/TESTING.md` is the durable testing source of truth for this Rust workspace. Reviewer owns validation strategy, validation commands, validation levels, integration/E2E case definitions, final-validation cleanup, and known testing gaps.
+`docs/TESTING.md` is the durable testing source of truth for this Rust workspace. Tester owns validation strategy, validation commands, validation levels, integration/E2E case definitions, final-validation cleanup, and known testing gaps.
 
 ## Validation Levels
 
@@ -37,16 +37,16 @@ Choose the smallest command that gives the needed confidence for the role and ta
 
 - Unit tests live colocated with source under `src/` using `#[cfg(test)] mod tests`.
 - Coder may add or update colocated unit tests while implementing code and should run affected crate unit tests with `cargo test -p <crate> --lib`.
-- Reviewer reviews unit test adequacy and may add, remove, or adjust unit test cases.
+- Tester reviews unit test adequacy and may add, remove, or adjust unit test cases.
 - Integration tests live under each crate's `tests/` directory and exercise public crate behavior.
-- Reviewer owns integration test design and maintenance.
+- Tester owns integration test design and maintenance.
 - This project does not use `test-map.json`; changed files map to crates through `.ai/generated/module-index.json`.
 
 ## Integration Test Cases
 
 | ID | Scenario | Entry point | What it proves | Key assertions | When to run | Current limitations |
 | --- | --- | --- | --- | --- | --- | --- |
-| INT-001 | Crate public behavior smoke | `cargo test -p <crate>` | A crate's public API and integration test file compile and run together. | The crate integration test passes and can call the crate through its public surface. | Run for changed crates or crate-external public API changes. | Current examples are intentionally minimal one-case smoke tests. |
+| INTEGRATION-001 | Crate public behavior smoke | `cargo test -p <crate>` | A crate's public API and integration test file compile and run together. | The crate integration test passes and can call the crate through its public surface. | Run for changed crates or crate-external public API changes. | Current examples are intentionally minimal one-case smoke tests. |
 
 ## E2E Test Cases
 
@@ -56,9 +56,9 @@ Choose the smallest command that gives the needed confidence for the role and ta
 
 ## Final Validation Cleanup
 
-- Before reviewer final validation, remove stale build/test artifacts when the project has such caches.
-- This example has no special cache cleanup beyond using fresh Rust commands in the current worktree.
-- Do not use results from before cleanup as final acceptance evidence when cache cleanup is required.
+- Run `cargo clean` from the task worktree immediately before Tester final validation.
+- Run final validation commands again after `cargo clean`.
+- Do not use results produced before `cargo clean` as final acceptance evidence.
 
 ### Generated Context
 
@@ -74,7 +74,7 @@ Checks:
 - `module-index.json` matches current Cargo metadata, crate manifests, source files, and integration test files.
 - `public-surface.json` matches crate-external Rust `pub fn`, `pub struct`, `pub enum`, and `pub trait` items found through the module index.
 
-Regenerate without `--check` after module, manifest, source-file, test-file, or crate-external public API changes.
+Regenerate without `--check` after module structure, workspace/crate manifest, source-file list, integration-test file list, or crate-external public API changes.
 
 ## Test Expectations
 
@@ -90,4 +90,4 @@ Regenerate without `--check` after module, manifest, source-file, test-file, or 
 - `module-index.json` and `public-surface.json` are generated context artifacts, not validation wrappers.
 - No real L3/L4 smoke or release validation is configured; `E2E-001` documents the missing project-level application journey.
 
-Record durable unresolved testing gaps in `docs/known-issues.md` when they must survive task cleanup.
+Record unresolved testing gaps in `.ai/vcm/handoffs/test-report.md`. Architect decides whether a confirmed durable gap is promoted to `docs/known-issues.md`.

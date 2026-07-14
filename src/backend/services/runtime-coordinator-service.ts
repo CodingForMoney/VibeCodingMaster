@@ -6,6 +6,7 @@ import type { TaskRecord } from "../../shared/types/task.js";
 import { VcmError } from "../errors.js";
 import type { GatewayService } from "../gateway/gateway-service.js";
 import type { AppSettingsService } from "./app-settings-service.js";
+import type { AutoMemoryService } from "./auto-memory-service.js";
 import type { HarnessFeedbackService } from "./harness-feedback-service.js";
 import type { HarnessService } from "./harness-service.js";
 import type { RoundService } from "./round-service.js";
@@ -40,6 +41,7 @@ export interface RuntimeCoordinatorServiceDeps {
   translationService: Pick<TranslationService, "startSession" | "stopTask">;
   harnessService: Pick<HarnessService, "getHarnessStatus">;
   harnessFeedbackService: Pick<HarnessFeedbackService, "startTaskRetrospective">;
+  autoMemoryService: Pick<AutoMemoryService, "reconcileTask" | "getTaskRetrospectiveReadiness">;
   roundService: Pick<RoundService, "getSessionRoundState">;
   gatewayService: Pick<GatewayService, "getStatus">;
   getStateRoot(repoRoot: string): Promise<string>;
@@ -105,8 +107,12 @@ export function createRuntimeCoordinatorService(deps: RuntimeCoordinatorServiceD
           await deps.translationService.stopTask(taskRepoRoot, activeTask.taskSlug).catch(() => undefined);
         }
 
+        await reconcileAutoMemory(repoRoot, activeTask);
         if (preferences.autoTaskHarnessReviewEnabled) {
-          await maybeStartTaskHarnessRetrospective(repoRoot, activeTask);
+          const memoryReadiness = await getTaskRetrospectiveMemoryReadiness(repoRoot, activeTask);
+          if (memoryReadiness.ready) {
+            await maybeStartTaskHarnessRetrospective(repoRoot, activeTask);
+          }
         }
 
         return { activeTask, gatewayStatus };
@@ -224,5 +230,36 @@ export function createRuntimeCoordinatorService(deps: RuntimeCoordinatorServiceD
       }
       throw error;
     }
+  }
+
+  async function reconcileAutoMemory(repoRoot: string, task: TaskRecord) {
+    const stateRoot = await deps.getStateRoot(repoRoot);
+    const taskRepoRoot = getTaskRuntimeRepoRoot(task);
+    const roundState = await deps.roundService.getSessionRoundState({
+      repoRoot,
+      stateRepoRoot: taskRepoRoot,
+      stateRoot,
+      taskSlug: task.taskSlug
+    });
+    return deps.autoMemoryService.reconcileTask({
+      baseRepoRoot: repoRoot,
+      taskRepoRoot,
+      taskSlug: task.taskSlug,
+      handoffDir: task.handoffDir,
+      roundReady: roundState.status === "stopped"
+        && Boolean(roundState.roundId)
+        && roundState.roleRecovery?.status !== "failed"
+    });
+  }
+
+  async function getTaskRetrospectiveMemoryReadiness(repoRoot: string, task: TaskRecord) {
+    const taskRepoRoot = getTaskRuntimeRepoRoot(task);
+    return deps.autoMemoryService.getTaskRetrospectiveReadiness({
+      baseRepoRoot: repoRoot,
+      taskRepoRoot,
+      taskSlug: task.taskSlug,
+      handoffDir: task.handoffDir,
+      roundReady: true
+    });
   }
 }

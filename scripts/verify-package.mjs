@@ -28,7 +28,7 @@ const requiredFiles = [
   "dist/backend/templates/harness/project-manager-agent.js",
   "dist/backend/templates/harness/architect-agent.js",
   "dist/backend/templates/harness/coder-agent.js",
-  "dist/backend/templates/harness/reviewer-agent.js",
+  "dist/backend/templates/harness/tester-agent.js",
   "dist/backend/templates/harness/gate-review.js",
   "dist/shared/constants.js",
   "dist/shared/types/gate-review.js",

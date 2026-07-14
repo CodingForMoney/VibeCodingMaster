@@ -64,6 +64,7 @@ export function createNodePtyTerminalRuntime(deps: NodePtyRuntimeDeps): Terminal
 
     const session: TerminalSession = {
       id: sessionId,
+      repoRoot: input.repoRoot,
       taskSlug: input.taskSlug,
       role: input.role,
       status: "running",

@@ -1,6 +1,6 @@
 # Testing
 
-Reviewer-owned validation strategy for VibeCodingMaster (VCM). This document maps
+Tester-owned validation strategy for VibeCodingMaster (VCM). This document maps
 the VCM validation levels to project-native commands, where tests live, how to
 select what to run, and the current testing gaps.
 
@@ -26,7 +26,7 @@ Notes:
   integration tests exist.
 - **Build before `npm test` on a clean tree.**
   `tests/unit/backend/harness-templates-sync.test.ts` shells out to the compiled
-  CLI (`dist/main.js`), so run `npm run build` first; otherwise those 3 cases fail
+  CLI (`dist/main.js`), so run `npm run build` first; otherwise those 5 cases fail
   with "compiled CLI not found" — a build-state failure, not a regression. This is
   why the Release Gate below runs `build` before `test` (see also "Known Testing
   Gaps").
@@ -48,6 +48,10 @@ Notes:
 - `src/backend/templates/harness/**` change: L0 + `npm test` (harness template
   sync and harness service/route tests guard these), because output ships into
   downstream repos.
+- Auto Memory or Task Harness Retrospective sequencing change: run
+  `auto-memory-service.test.ts`, `runtime-coordinator-service.test.ts`, and
+  `harness-routes.test.ts`, then the full unit suite. These tests cover current
+  Final Acceptance hashing plus automatic and manual readiness enforcement.
 - `.ai/tools/**` or `scripts/harness-tools/**` change: run
   `tests/unit/backend/harness-tools.test.ts` and `vcm-bash-guard.test.ts`.
 - Pre-publish / release: L4 (`npm run build` + `npm run verify:package`).
@@ -62,7 +66,7 @@ process; the job guard denies it. Honor the 60-minute per-job ceiling.
 ## Release Gate (L4)
 
 Run this gate for any version release before `npm publish`. The release is
-architect-owned (see root `CLAUDE.md` "Release Process"); the reviewer runs the
+architect-owned (see root `CLAUDE.md` "Release Process"); the tester runs the
 gate and reports results.
 
 1. `npm run typecheck`
@@ -115,6 +119,7 @@ recommended first cases when integration/E2E coverage is added.
 | INT-API-001 | Project + task lifecycle over HTTP | Fastify app via `project-routes` / `task-routes` | Routes + services persist task state correctly | Create project, create task, read back task, status transitions | L2, on backend api/service change | Not yet implemented |
 | INT-API-002 | Message bus round trip | `message-routes` / `message-service` | Route-file dispatch and history persistence | Posted message is persisted and retrievable in order | L2, on messaging change | Not yet implemented |
 | INT-RT-001 | Session start/resume lifecycle | `runtime-coordinator-service` + `session-registry` | PTY session can start, persist id, and resume | Session id persisted; resume reuses id; stop cleans registry | L2, on runtime change | Not yet implemented; needs `claude`/pty test doubles |
+| INT-RT-002 | Post-task memory and harness review order | Final Acceptance + `runtime-coordinator-service` + Harness route | Auto Memory completes before Task Harness Retrospective | Current acceptance hash gates retrospective; pending/failed memory blocks automatic and manual starts | L2, on Auto Memory or retrospective change | Not yet implemented end to end; service and route contracts have unit coverage |
 
 ### E2E (reserved: `tests/e2e/`)
 
@@ -158,7 +163,7 @@ recommended first cases when integration/E2E coverage is added.
 - Coverage thresholds are not enforced by configuration.
 - `tests/unit/backend/harness-templates-sync.test.ts` shells out to
   `scripts/install-vcm-harness.mjs`, which needs the compiled CLI (`dist/main.js`).
-  On a clean checkout with no `dist/`, those 3 cases fail with
+  On a clean checkout with no `dist/`, those 5 cases fail with
   "compiled CLI not found. Run npm run build first." Run `npm run build` before
   `npm test` (or treat these specific failures as build-state, not regressions)
   when validating from a clean tree.
@@ -167,7 +172,7 @@ recommended first cases when integration/E2E coverage is added.
   per-case temp directories are cleaned up concurrently. It is an environmental
   test-isolation flake, not a product regression: re-run the file on its own
   (`npx vitest run tests/unit/backend/translation-worker-service.test.ts`) to
-  confirm 22/22 before treating any `ENOTEMPTY` as a real failure.
+  confirm 23/23 before treating any `ENOTEMPTY` as a real failure.
 - `npm run verify:package` does not assert the negative (that non-whitelisted
   paths such as `src/`/`tests/`/`.ai/` are absent from the published tarball); that
   leak check is currently manual via the Release Gate's `npm pack --dry-run` step.

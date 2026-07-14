@@ -10,7 +10,7 @@ const REPO_ROOT = "/repo";
 const TASK_SLUG = "demo-task";
 const WORKTREE = "/repo/.claude/worktrees/demo-task";
 const NOW = "2026-06-25T00:00:00.000Z";
-const CORE_ROLES: RoleName[] = ["project-manager", "architect", "coder", "reviewer"];
+const CORE_ROLES: RoleName[] = ["project-manager", "architect", "coder", "tester"];
 
 describe("task-launch-service", () => {
   it("starts the full roster, sets the orchestration mode, and returns sessions", async () => {
@@ -31,7 +31,7 @@ describe("task-launch-service", () => {
       "start:project-manager",
       "start:architect",
       "start:coder",
-      "start:reviewer"
+      "start:tester"
     ]);
   });
 
@@ -106,7 +106,7 @@ describe("task-launch-service", () => {
       "mode:auto",
       "resume:architect",
       "start:coder",
-      "start:reviewer"
+      "start:tester"
     ]);
   });
 

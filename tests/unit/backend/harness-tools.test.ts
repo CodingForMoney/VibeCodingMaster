@@ -117,6 +117,34 @@ async function createTypescriptWorkspace(repoRoot: string) {
   `);
 }
 
+async function createRustWorkspaceWithNestedTarget(repoRoot: string) {
+  await writeSource(path.join(repoRoot, "Cargo.toml"), `
+    [package]
+    name = "demo-rust"
+    version = "0.1.0"
+    edition = "2021"
+  `);
+  await writeSource(path.join(repoRoot, "src/lib.rs"), `
+    pub fn answer() -> u32 {
+        42
+    }
+  `);
+  await writeSource(path.join(repoRoot, "tests/integration.rs"), `
+    #[test]
+    fn answer_is_stable() {
+        assert_eq!(demo_rust::answer(), 42);
+    }
+  `);
+  await writeSource(path.join(repoRoot, "tests/fixture/src/lib.rs"), `
+    pub fn fixture_value() -> u32 {
+        7
+    }
+  `);
+  await writeSource(path.join(repoRoot, "tests/fixture/target/debug/build/demo/out/generated.rs"), `
+    pub const GENERATED: u32 = 99;
+  `);
+}
+
 afterEach(async () => {
   if (tmpRepo) {
     await rm(tmpRepo, { recursive: true, force: true });
@@ -177,5 +205,32 @@ describe("harness generated-context tools", () => {
         "POST /tickets"
       ])
     );
+  });
+
+  it("excludes Rust target build outputs from module indexes", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-harness-tools-"));
+    await installHarnessTools(tmpRepo);
+    await createRustWorkspaceWithNestedTarget(tmpRepo);
+
+    await execFileAsync("python3", [path.join(tmpRepo, ".ai/tools/generate-module-index")], { cwd: tmpRepo });
+    const moduleIndex = JSON.parse(await readFile(path.join(tmpRepo, ".ai/generated/module-index.json"), "utf8"));
+    const modules = moduleIndex.layers.flatMap(
+      (layer: { modules: Array<{ files: { source: string[]; tests: string[] } }> }) => layer.modules
+    );
+    const files = modules.flatMap((module: { files: { source: string[]; tests: string[] } }) => [
+      ...module.files.source,
+      ...module.files.tests
+    ]);
+
+    expect(files).toEqual(expect.arrayContaining([
+      "src/lib.rs",
+      "tests/integration.rs",
+      "tests/fixture/src/lib.rs"
+    ]));
+    expect(files.some((filePath: string) => filePath.includes("/target/"))).toBe(false);
+
+    await expect(
+      execFileAsync("python3", [path.join(tmpRepo, ".ai/tools/generate-module-index"), "--check"], { cwd: tmpRepo })
+    ).resolves.toBeTruthy();
   });
 });

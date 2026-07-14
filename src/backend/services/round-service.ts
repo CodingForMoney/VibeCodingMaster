@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { isUserFacingRole } from "../../shared/constants.js";
 import type { ClaudeTurnHookEventName } from "../../shared/types/claude-hook.js";
 import type { RoleName } from "../../shared/types/role.js";
-import type { VcmFlowPauseState, VcmRoleRecoveryState, VcmSessionRoundState } from "../../shared/types/round.js";
+import type { VcmFlowPauseState, VcmRoleRecoveryState, VcmRoundStopReason, VcmSessionRoundState } from "../../shared/types/round.js";
 import type { RoleSessionRecord } from "../../shared/types/session.js";
 import type { TaskStatus } from "../../shared/types/task.js";
 import type { FileSystemAdapter } from "../adapters/filesystem.js";
@@ -13,6 +13,7 @@ export interface RoundService {
   getSessionRoundState(input: SessionRoundInput): Promise<VcmSessionRoundState>;
   recordRoleTurnEvent(input: RecordRoundHookEventInput): Promise<VcmSessionRoundState>;
   recordClaudeHookEvent(input: RecordRoundHookEventInput): Promise<VcmSessionRoundState>;
+  recordManualInterrupt(input: RecordManualInterruptInput): Promise<VcmSessionRoundState>;
   setRoleRecovery(input: SetRoleRecoveryInput): Promise<VcmSessionRoundState>;
   clearRoleRecovery(input: ClearRoleRecoveryInput): Promise<VcmSessionRoundState>;
   stopSession(sessionId: string): void;
@@ -44,6 +45,10 @@ export interface SetRoleRecoveryInput extends SessionRoundInput {
 
 export interface ClearRoleRecoveryInput extends SessionRoundInput {
   role?: RoleName;
+}
+
+export interface RecordManualInterruptInput extends SessionRoundInput {
+  role: RoleName;
 }
 
 export interface RoundSettleGuardInput extends SessionRoundInput {
@@ -127,6 +132,7 @@ interface PersistedRound {
   lastTurnEndedAt?: string;
   settleDeadlineAt?: string;
   stoppedAt?: string;
+  stopReason?: VcmRoundStopReason;
   activeTurnStartedAt?: string;
   ccActiveMs: number;
   turnCount: number;
@@ -424,6 +430,25 @@ export function createRoundService(deps: RoundServiceDeps): RoundService {
     recordClaudeHookEvent(input) {
       return recordRoleTurnEvent(input);
     },
+    async recordManualInterrupt(input) {
+      return withTaskLock(input, async () => {
+        const timestamp = now();
+        const state = await load(input);
+        const next = applyManualInterrupt({
+          state,
+          taskSlug: input.taskSlug,
+          role: input.role,
+          timestamp
+        });
+        if (!manualInterruptWasApplied(state, next, input.role)) {
+          return toSessionRoundState(state, timestamp);
+        }
+        await save(input, next);
+        clearSettleTimer(input);
+        await updateSessionStatus(input, next.currentRound?.status === "running" ? "running" : "stopped");
+        return toSessionRoundState(next, timestamp);
+      });
+    },
     async setRoleRecovery(input) {
       return withTaskLock(input, async () => {
         const timestamp = now();
@@ -522,6 +547,7 @@ function applyPromptSubmitted(input: {
         lastTurnStartedAt: input.timestamp,
         settleDeadlineAt: undefined,
         stoppedAt: undefined,
+        stopReason: undefined,
         activeTurnStartedAt: current.activeTurnStartedAt ?? input.timestamp,
         turnCount: current.turnCount + 1,
         roles: appendUniqueRole(current.roles, input.role)
@@ -565,6 +591,7 @@ function applyStop(input: {
     activeRole: input.role,
     lastTurnEndedAt: input.timestamp,
     settleDeadlineAt: addMilliseconds(input.timestamp, input.settleMs),
+    stopReason: undefined,
     activeTurnStartedAt: undefined,
     ccActiveMs: current.ccActiveMs + activeDurationMs,
     completedTurnCount: current.completedTurnCount + 1,
@@ -579,6 +606,62 @@ function applyStop(input: {
     totalCcActiveMs: input.state.totalCcActiveMs + activeDurationMs,
     updatedAt: input.timestamp
   };
+}
+
+function applyManualInterrupt(input: {
+  state: PersistedRoundFile;
+  taskSlug: string;
+  role: RoleName;
+  timestamp: string;
+}): PersistedRoundFile {
+  const current = input.state.currentRound;
+  if (!current || current.status === "stopped" || !current.activeTurnStartedAt || current.activeRole !== input.role) {
+    return {
+      ...input.state,
+      taskSlug: input.taskSlug,
+      updatedAt: input.timestamp
+    };
+  }
+
+  const activeDurationMs = getDurationMs(current.activeTurnStartedAt, input.timestamp);
+  const stopped: PersistedRound = {
+    ...current,
+    status: "stopped",
+    activeRole: input.role,
+    lastTurnEndedAt: input.timestamp,
+    stoppedAt: input.timestamp,
+    stopReason: "manual-interrupt",
+    settleDeadlineAt: undefined,
+    activeTurnStartedAt: undefined,
+    ccActiveMs: current.ccActiveMs + activeDurationMs,
+    completedTurnCount: current.completedTurnCount + 1,
+    roles: appendUniqueRole(current.roles, input.role)
+  };
+
+  return {
+    ...input.state,
+    taskSlug: input.taskSlug,
+    currentRound: stopped,
+    lastStoppedRound: stopped,
+    totalCompletedTurnCount: input.state.totalCompletedTurnCount + 1,
+    totalCcActiveMs: input.state.totalCcActiveMs + activeDurationMs,
+    pendingUserReply: undefined,
+    updatedAt: input.timestamp
+  };
+}
+
+function manualInterruptWasApplied(
+  previous: PersistedRoundFile,
+  next: PersistedRoundFile,
+  role: RoleName
+): boolean {
+  return Boolean(
+    previous.currentRound?.status === "running"
+    && previous.currentRound.activeTurnStartedAt
+    && previous.currentRound.activeRole === role
+    && next.currentRound?.stopReason === "manual-interrupt"
+    && next.currentRound.status === "stopped"
+  );
 }
 
 function toSessionRoundState(state: PersistedRoundFile, updatedAt: string): VcmSessionRoundState {
@@ -616,6 +699,7 @@ function toSessionRoundState(state: PersistedRoundFile, updatedAt: string): VcmS
     lastTurnEndedAt: current.lastTurnEndedAt,
     settleDeadlineAt: current.settleDeadlineAt,
     stoppedAt: current.stoppedAt,
+    stopReason: current.stopReason,
     activeTurnStartedAt: current.activeTurnStartedAt,
     roundSequence: current.sequence,
     turnCount: current.turnCount,
@@ -653,9 +737,13 @@ function computeFlowPause(
     return undefined;
   }
   const roundStopped = Boolean(current) && current!.status === "stopped" && Boolean(current!.id);
+  const nonAlertingStop = roundStopped && (
+    current!.stopReason === "manual-interrupt" ||
+    current!.stopReason === "runtime-recovery"
+  );
 
   if (roleRecovery?.status === "failed") {
-    return roundStopped
+    return roundStopped && !nonAlertingStop
       ? {
           paused: true,
           reason: "role-recovery-failed",
@@ -676,7 +764,7 @@ function computeFlowPause(
     };
   }
 
-  if (roundStopped) {
+  if (roundStopped && !nonAlertingStop) {
     return {
       paused: true,
       reason: "stopped-no-next-turn",
@@ -889,6 +977,9 @@ function normalizeRound(input: PersistedRound | undefined): PersistedRound | und
       : typeof legacy.pausedAt === "string"
         ? legacy.pausedAt
         : undefined,
+    stopReason: input.stopReason === "manual-interrupt" || input.stopReason === "runtime-recovery"
+      ? input.stopReason
+      : undefined,
     activeTurnStartedAt: typeof input.activeTurnStartedAt === "string"
       ? input.activeTurnStartedAt
       : typeof legacy.runningSince === "string"

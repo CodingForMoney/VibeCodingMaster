@@ -1,7 +1,7 @@
 export const GATE_REVIEW_GATES = [
   "architecture-plan",
   "validation-adequacy",
-  "final-diff"
+  "code-diff"
 ] as const;
 
 export type GateReviewGate = typeof GATE_REVIEW_GATES[number];
@@ -15,6 +15,14 @@ export type GateReviewSeverity =
   | "high"
   | "medium"
   | "low";
+
+export const CODE_DIFF_SOURCES = [
+  "coder",
+  "architect-debug",
+  "architect-diagnosis"
+] as const;
+
+export type CodeDiffSource = typeof CODE_DIFF_SOURCES[number];
 
 export type GateReviewGateStatus =
   | "disabled"
@@ -61,6 +69,12 @@ export interface GateReviewGateRecord {
   requestId?: string;
   requestPath?: string;
   inputHash?: string;
+  baseCommit?: string;
+  headCommit?: string;
+  commits?: string[];
+  changedFiles?: string[];
+  diffStat?: string;
+  codeDiffSource?: CodeDiffSource;
   summary?: string;
   findings?: GateReviewFinding[];
   error?: string;
@@ -86,6 +100,10 @@ export interface GateReviewRequestResult {
   gate: GateReviewGate;
   record: GateReviewGateRecord;
   message?: string;
+}
+
+export interface GateReviewRequestInput {
+  codeDiffSource?: CodeDiffSource;
 }
 
 export interface GateReviewSettingsUpdateRequest {

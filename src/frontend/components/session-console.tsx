@@ -59,8 +59,7 @@ export function SessionConsole({
   onNotifyHarnessUpdated,
   onTerminalEvent
 }: SessionConsoleProps) {
-  const showTranslation = active
-    && isVcmRoleName(role)
+  const showTranslation = isVcmRoleName(role)
     && translationEnabled
     && session?.status === "running";
 

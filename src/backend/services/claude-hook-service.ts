@@ -11,6 +11,7 @@ import type { GatewayService } from "../gateway/gateway-service.js";
 import type { TerminalRuntime } from "../runtime/terminal-runtime.js";
 import { submitTerminalInput } from "../runtime/terminal-submit.js";
 import type { AppSettingsService } from "./app-settings-service.js";
+import type { AutoMemoryService } from "./auto-memory-service.js";
 import type { HarnessService } from "./harness-service.js";
 import type { HarnessFeedbackService } from "./harness-feedback-service.js";
 import type { JobGuardService } from "./job-guard-service.js";
@@ -36,6 +37,7 @@ const NON_RETRYABLE_STOP_FAILURE_ERRORS = new Set([
 ]);
 const DIAGNOSTIC_SNIPPET_MAX_LENGTH = 2000;
 type StopFailureRetryTimer = ReturnType<typeof setTimeout>;
+type StopFailureRetryResult = "scheduled" | "manual-interrupt" | "not-scheduled";
 
 interface StopFailureDiagnostic {
   error: string;
@@ -65,7 +67,8 @@ export interface ClaudeHookServiceDeps {
   retryClearTimeout?: (timer: StopFailureRetryTimer) => void;
   harnessService?: Pick<HarnessService, "recordHarnessBootstrapHook">;
   harnessFeedbackService?: Pick<HarnessFeedbackService, "recordHarnessEngineerHook">;
-  gatewayService?: Pick<GatewayService, "handlePmStop">;
+  autoMemoryService?: Pick<AutoMemoryService, "isRoleMemoryTurn" | "handleRoleHook" | "handleHarnessEngineerHook">;
+  gatewayService?: Pick<GatewayService, "handlePmStop" | "handleRoleStopFailure">;
   jobGuard?: Pick<JobGuardService, "evaluateStop" | "notePromptSubmitted">;
 }
 
@@ -159,6 +162,28 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
       transcriptPath: stringOrUndefined(input.event.transcript_path),
       cwd: stringOrUndefined(input.event.cwd) ?? stringOrUndefined(input.event.new_cwd)
     });
+    const activeTask = deps.autoMemoryService
+      ? (await deps.taskService.listTasks(context.project.repoRoot))
+          .find((task) => task.cleanupStatus !== "cleaned")
+      : undefined;
+    const memoryHandled = activeTask
+      ? await deps.autoMemoryService?.handleHarnessEngineerHook({
+          baseRepoRoot: context.project.repoRoot,
+          taskRepoRoot: getTaskRuntimeRepoRoot(activeTask),
+          taskSlug: activeTask.taskSlug,
+          eventName
+        })
+      : false;
+    if (memoryHandled) {
+      return {
+        ok: true,
+        eventName,
+        taskSlug: activeTask?.taskSlug ?? input.taskSlug,
+        role: input.role,
+        sessionUpdated: Boolean(session),
+        dispatchedCount: 0
+      };
+    }
     await deps.harnessService?.recordHarnessBootstrapHook(context.project.repoRoot, {
       eventName,
       sessionId: session?.id,
@@ -204,6 +229,10 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
     }
 
     const context = await getHookContext(input);
+    const memoryResult = await processAutoMemoryRoleHook(input, context, eventName);
+    if (memoryResult) {
+      return memoryResult;
+    }
     const boundToTask = await isHookSessionBoundToTask(context, input.role);
     if (boundToTask) {
       deps.jobGuard?.notePromptSubmitted({
@@ -270,6 +299,10 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
     }
 
     const context = await getHookContext(input);
+    const memoryResult = await processAutoMemoryRoleHook(input, context, eventName);
+    if (memoryResult) {
+      return memoryResult;
+    }
     await clearStopFailureRecoveryState(context, input.role);
 
     if (options.allowBlock && deps.jobGuard) {
@@ -308,6 +341,10 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
     }
 
     const context = await getHookContext(input);
+    const memoryResult = await processAutoMemoryRoleHook(input, context, eventName);
+    if (memoryResult) {
+      return memoryResult;
+    }
     const routeDispatchInput = createRouteDispatchInput(input, context);
     const pending = await deps.messageService.listPendingRouteFiles(routeDispatchInput);
     const hasCompletionEvidence = pending.some((routeFile) => routeFile.fromRole === input.role);
@@ -323,16 +360,28 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
 
     const failure = parseStopFailureDiagnostic(input.event);
     if (!failure.retryable) {
+      if (await isManualInterruptedStopFailure(context, input.role)) {
+        return recordTurnEnd(input, context, eventName, {
+          dispatchRouteFiles: false,
+          notifyGateway: false,
+          settleGuard: false
+        });
+      }
       await markStopFailureRecoveryFailed(input, context, failure, 0);
       return recordTurnEnd(input, context, eventName, {
         dispatchRouteFiles: false,
         notifyGateway: false,
-        settleGuard: false
+        settleGuard: false,
+        gatewayStopFailure: {
+          ...failure,
+          attempt: 0,
+          maxAttempts: MAX_ROLE_RETRY_ATTEMPTS
+        }
       });
     }
 
-    const retryScheduled = await scheduleStopFailureRetry(input, context, failure);
-    if (retryScheduled) {
+    const retryResult = await scheduleStopFailureRetry(input, context, failure);
+    if (retryResult === "scheduled") {
       return {
         ok: true,
         eventName,
@@ -346,7 +395,8 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
     return recordTurnEnd(input, context, eventName, {
       dispatchRouteFiles: false,
       notifyGateway: false,
-      settleGuard: false
+      settleGuard: false,
+      ...(retryResult === "manual-interrupt" ? {} : { gatewayStopFailure: failure })
     });
   }
 
@@ -357,6 +407,10 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
     }
 
     const context = await getHookContext(input);
+    const memoryResult = await processAutoMemoryRoleHook(input, context, eventName);
+    if (memoryResult) {
+      return memoryResult;
+    }
     const session = await deps.sessionService.recordClaudeHookEvent(context.project.repoRoot, {
       taskSlug: context.taskSlug,
       role: input.role,
@@ -384,6 +438,10 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
       dispatchRouteFiles: boolean;
       notifyGateway: boolean;
       settleGuard: boolean;
+      gatewayStopFailure?: StopFailureDiagnostic & {
+        attempt?: number;
+        maxAttempts?: number;
+      };
     }
   ): Promise<ClaudeHookResult> {
     const scopedRouteDispatchInput = createRouteDispatchInput(input, context, input.role);
@@ -442,6 +500,17 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
         session
       }).catch(() => undefined);
     }
+    if (boundToTask && options.gatewayStopFailure) {
+      void deps.gatewayService?.handleRoleStopFailure({
+        repoRoot: context.project.repoRoot,
+        taskSlug: context.taskSlug,
+        role: input.role,
+        error: options.gatewayStopFailure.error,
+        errorDetails: options.gatewayStopFailure.errorDetails,
+        attempt: options.gatewayStopFailure.attempt,
+        maxAttempts: options.gatewayStopFailure.maxAttempts
+      }).catch(() => undefined);
+    }
 
     const dispatched = options.dispatchRouteFiles
       ? await deps.messageService.scanAndDispatchPendingRouteFiles(scopedRouteDispatchInput)
@@ -454,6 +523,39 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
       role: input.role,
       sessionUpdated: Boolean(session),
       dispatchedCount: dispatched.filter((result) => result.delivered).length
+    };
+  }
+
+  async function processAutoMemoryRoleHook(
+    input: ClaudeHookRequest,
+    context: Awaited<ReturnType<typeof getHookContext>>,
+    eventName: ClaudeHookEventName
+  ): Promise<ClaudeHookResult | undefined> {
+    if (!deps.autoMemoryService || !(await deps.autoMemoryService.isRoleMemoryTurn(context.taskRepoRoot, input.role))) {
+      return undefined;
+    }
+    const session = await deps.sessionService.recordClaudeHookEvent(context.project.repoRoot, {
+      taskSlug: context.taskSlug,
+      role: input.role,
+      eventName,
+      claudeSessionId: stringOrUndefined(input.event.session_id),
+      transcriptPath: stringOrUndefined(input.event.transcript_path),
+      cwd: stringOrUndefined(input.event.cwd) ?? stringOrUndefined(input.event.new_cwd)
+    });
+    await deps.autoMemoryService.handleRoleHook({
+      baseRepoRoot: context.project.repoRoot,
+      taskRepoRoot: context.taskRepoRoot,
+      taskSlug: context.taskSlug,
+      role: input.role,
+      eventName
+    });
+    return {
+      ok: true,
+      eventName,
+      taskSlug: context.taskSlug,
+      role: input.role,
+      sessionUpdated: Boolean(session),
+      dispatchedCount: 0
     };
   }
 
@@ -477,14 +579,21 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
     input: ClaudeHookRequest,
     context: Awaited<ReturnType<typeof getHookContext>>,
     failure: StopFailureDiagnostic
-  ): Promise<boolean> {
+  ): Promise<StopFailureRetryResult> {
     const preferences = await deps.appSettings.getPreferences();
     if (!preferences.roleRetryEnabled || !deps.runtime) {
-      return false;
+      return "not-scheduled";
     }
 
     const stateInput = createRoundStateInput(context);
     const currentRoundState = await deps.roundService.getSessionRoundState(stateInput);
+    if (
+      currentRoundState.stopReason === "manual-interrupt"
+      && currentRoundState.status === "stopped"
+      && currentRoundState.activeRole === input.role
+    ) {
+      return "manual-interrupt";
+    }
     const previousAttempt = currentRoundState.roleRecovery?.role === input.role &&
       currentRoundState.roleRecovery.status !== "failed"
       ? currentRoundState.roleRecovery.attempt
@@ -495,7 +604,7 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
     if (attempt > MAX_ROLE_RETRY_ATTEMPTS) {
       clearStopFailureRetryTimer(context.project.repoRoot, context.taskSlug, input.role);
       await markStopFailureRecoveryFailed(input, context, failure, MAX_ROLE_RETRY_ATTEMPTS, timestamp);
-      return false;
+      return "not-scheduled";
     }
 
     const nextRetryAt = new Date(Date.parse(timestamp) + attempt * ROLE_RETRY_BASE_DELAY_MS).toISOString();
@@ -516,7 +625,21 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
     });
     await deps.sessionService.markRoleActivityRunning(context.project.repoRoot, context.taskSlug, input.role);
     scheduleStopFailureRetryTimer(input, context, attempt, nextRetryAt);
-    return true;
+    return "scheduled";
+  }
+
+  async function isManualInterruptedStopFailure(
+    context: Awaited<ReturnType<typeof getHookContext>>,
+    role: RoleName
+  ): Promise<boolean> {
+    try {
+      const state = await deps.roundService.getSessionRoundState(createRoundStateInput(context));
+      return state.status === "stopped" &&
+        state.stopReason === "manual-interrupt" &&
+        state.activeRole === role;
+    } catch {
+      return false;
+    }
   }
 
   function scheduleStopFailureRetryTimer(
@@ -561,7 +684,15 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
       await recordTurnEnd(input, context, "StopFailure", {
         dispatchRouteFiles: false,
         notifyGateway: false,
-        settleGuard: false
+        settleGuard: false,
+        gatewayStopFailure: {
+          error: recovery.error ?? "stop_failure",
+          errorDetails: recovery.errorDetails,
+          lastAssistantMessage: recovery.lastAssistantMessage,
+          retryable: recovery.retryable ?? true,
+          attempt: recovery.attempt,
+          maxAttempts: recovery.maxAttempts
+        }
       });
       return;
     }

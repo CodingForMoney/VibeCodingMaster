@@ -40,6 +40,7 @@ export interface CleanupTaskResult {
   removedStatePaths: string[];
   deletedBranch: string;
   cleanedAt: string;
+  warnings?: string[];
 }
 
 /**

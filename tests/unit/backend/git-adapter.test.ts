@@ -117,6 +117,46 @@ describe("createGitAdapter", () => {
     expect(calls[0]?.args.slice(-4)).toEqual(["status", "--porcelain=v1", "-z", "--untracked-files=all"]);
   });
 
+  it("checks whether a worktree path is registered", async () => {
+    const calls: RunnerCall[] = [];
+    const adapter = createGitAdapter(createRunner(calls, {
+      stdout: [
+        "worktree /workspace",
+        "HEAD abc123",
+        "branch refs/heads/main",
+        "",
+        "worktree /workspace/.claude/worktrees/demo-task",
+        "HEAD def456",
+        "branch refs/heads/feature/demo-task",
+        ""
+      ].join("\n"),
+      stderr: "",
+      exitCode: 0
+    }));
+
+    await expect(adapter.isWorktreeRegistered("/workspace", "/workspace/.claude/worktrees/demo-task"))
+      .resolves.toBe(true);
+    await expect(adapter.isWorktreeRegistered("/workspace", "/workspace/.claude/worktrees/missing-task"))
+      .resolves.toBe(false);
+
+    expect(calls[0]?.args).toContain("safe.directory=/workspace");
+    expect(calls[0]?.args.slice(-3)).toEqual(["worktree", "list", "--porcelain"]);
+  });
+
+  it("prunes stale worktree metadata with safe.directory", async () => {
+    const calls: RunnerCall[] = [];
+    const adapter = createGitAdapter(createRunner(calls, {
+      stdout: "",
+      stderr: "",
+      exitCode: 0
+    }));
+
+    await adapter.pruneWorktrees("/workspace");
+
+    expect(calls[0]?.args).toContain("safe.directory=/workspace");
+    expect(calls[0]?.args.slice(-2)).toEqual(["worktree", "prune"]);
+  });
+
   it("reads commit metadata and commit diffs with safe.directory", async () => {
     const calls: RunnerCall[] = [];
     const adapter = createGitAdapter({

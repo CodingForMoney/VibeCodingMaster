@@ -2,6 +2,9 @@ import type { ClaudePermissionMode, SessionEffort, SessionModel } from "./sessio
 
 export type HarnessFileKind =
   | "root-claude"
+  | "project-glossary"
+  | "project-coding-standards"
+  | "project-known-issues"
   | "gitignore"
   | "claude-settings"
   | "pull-request-template"
@@ -14,11 +17,12 @@ export type HarnessFileKind =
   | "agent-gate-reviewer"
   | "agent-translator"
   | "agent-harness-engineer"
+  | "agent-coder-worker"
   | "tool-request-gate-review"
   | "agent-project-manager"
   | "agent-architect"
   | "agent-coder"
-  | "agent-reviewer";
+  | "agent-tester";
 
 export type HarnessFileAction = "create" | "insert" | "update" | "delete" | "ok";
 export type HarnessBootstrapCheckStatus = "ok" | "missing" | "incomplete" | "unknown";
@@ -190,6 +194,8 @@ export interface HarnessBootstrapCheck {
     | "project-context"
     | "module-index"
     | "public-surface"
+    | "glossary-doc"
+    | "coding-standards-doc"
     | "project-architecture"
     | "module-architecture"
     | "testing-doc";

@@ -108,6 +108,7 @@ describe("createSessionService", () => {
 
     expect(writes).toHaveLength(0);
     expect(runtimeInputs[0]?.env).toMatchObject({
+      CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1",
       VCM_API_URL: "http://127.0.0.1:4173",
       VCM_TASK_REPO_ROOT: TASK_WORKTREE,
       VCM_TASK_SLUG: "demo-task",
@@ -122,15 +123,15 @@ describe("createSessionService", () => {
     const service = createTestSessionService(fs, runtimeInputs);
 
     const started = await service.startRoleSession("/repo", "demo-task", "coder", {
-      model: "claude-opus-4-8[1m]"
+      model: "opus"
     });
 
-    expect(started.model).toBe("claude-opus-4-8[1m]");
+    expect(started.model).toBe("opus");
     expect(runtimeInputs[0]?.args).toEqual([
       "--agent",
       "coder",
       "--model",
-      "claude-opus-4-8[1m]"
+      "opus"
     ]);
   });
 
@@ -163,13 +164,13 @@ describe("createSessionService", () => {
 
     const started = await service.startRoleSession("/repo", "demo-task", "gate-reviewer", {
       permissionMode: "bypassPermissions",
-      model: "claude-opus-4-8[1m]",
+      model: "opus",
       effort: "high"
     });
 
     expect(started.role).toBe("gate-reviewer");
     expect(started.taskSlug).toBe("demo-task");
-    expect(started.model).toBe("claude-opus-4-8[1m]");
+    expect(started.model).toBe("opus");
     expect(started.effort).toBe("high");
     expect(started.claudeSessionId).toBe("");
     expect(started.transcriptPath).toBeUndefined();
@@ -179,7 +180,7 @@ describe("createSessionService", () => {
       "--agent",
       "gate-reviewer",
       "--model",
-      "claude-opus-4-8[1m]",
+      "opus",
       "--effort",
       "high",
       "--permission-mode",
@@ -255,6 +256,7 @@ describe("createSessionService", () => {
     // exposes the active task root independently of pty cwd.
     expect(firstRuntimeInputs[0]?.cwd).toBe("/repo");
     expect(firstRuntimeInputs[0]?.env).toMatchObject({
+      CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1",
       VCM_TASK_REPO_ROOT: TASK_WORKTREE,
       VCM_TASK_SLUG: "__project__",
       VCM_ROLE: "translator"
@@ -271,6 +273,8 @@ describe("createSessionService", () => {
       cwd: TASK_WORKTREE
     });
     expect(hooked?.claudeSessionId).toBe("translator-real-session");
+    const persisted = await fs.readJson<{ record: { pid?: number } }>("/repo/.ai/vcm/translations/session.json");
+    expect(persisted.record.pid).toBeUndefined();
 
     const secondRuntimeInputs: CreateTerminalSessionInput[] = [];
     const secondService = createTestSessionService(fs, secondRuntimeInputs);
@@ -413,13 +417,13 @@ describe("createSessionService", () => {
     const resumed = await secondService.ensureProjectTranslatorSession("/repo", {
       taskSlug: "demo-task",
       permissionMode: "bypassPermissions",
-      model: "claude-opus-4-8[1m]",
+      model: "opus",
       effort: "high"
     });
 
     expect(resumed.claudeSessionId).toBe("translator-ensure-session");
     expect(resumed.permissionMode).toBe("bypassPermissions");
-    expect(resumed.model).toBe("claude-opus-4-8[1m]");
+    expect(resumed.model).toBe("opus");
     expect(resumed.effort).toBe("high");
     expect(runtimeInputs[0]?.args).toEqual([
       "--agent",
@@ -427,7 +431,7 @@ describe("createSessionService", () => {
       "--resume",
       "translator-ensure-session",
       "--model",
-      "claude-opus-4-8[1m]",
+      "opus",
       "--effort",
       "high",
       "--permission-mode",
@@ -570,6 +574,33 @@ describe("createSessionService", () => {
     expect(writes.some((write) => write.includes("/cd"))).toBe(false);
   });
 
+  it("does not let Translator prompt hooks clobber the VCM-managed cwd", async () => {
+    const fs = createMemoryFs();
+    const runtimeInputs: CreateTerminalSessionInput[] = [];
+    const writes: string[] = [];
+    const service = createTestSessionService(fs, runtimeInputs, writes);
+
+    const started = await service.startProjectTranslatorSession("/repo", { taskSlug: "demo-task" });
+    expect(started.cwd).toBe(TASK_WORKTREE);
+    expect(writes[0]).toContain(`/cd ${TASK_WORKTREE}`);
+    expect(writes[1]).toBe("\r");
+
+    const hooked = await service.recordProjectTranslatorHookEvent("/repo", {
+      eventName: "UserPromptSubmit",
+      sessionId: "translator-cd-prompt-session",
+      transcriptPath: claudeTranscriptPath("/repo", "translator-cd-prompt-session"),
+      cwd: "/repo"
+    });
+    expect(hooked?.cwd).toBe(TASK_WORKTREE);
+
+    const persisted = await fs.readJson<{ record: { cwd: string } }>("/repo/.ai/vcm/translations/session.json");
+    expect(persisted.record.cwd).toBe(TASK_WORKTREE);
+
+    const ensured = await service.ensureProjectTranslatorSession("/repo", { taskSlug: "demo-task" });
+    expect(ensured.cwd).toBe(TASK_WORKTREE);
+    expect(writes.filter((write) => write.includes("/cd"))).toHaveLength(1);
+  });
+
   it("emits /cd as a bare unquoted path so a worktree path with spaces is sent intact (#16 de-quote)", async () => {
     const fs = createMemoryFs();
     const runtimeInputs: CreateTerminalSessionInput[] = [];
@@ -653,6 +684,66 @@ describe("createSessionService", () => {
     await expect(fs.pathExists("/repo/.ai/vcm/translations/session.json")).resolves.toBe(false);
   });
 
+  it("rebuilds a fresh Translator session when the resumed process is not alive", async () => {
+    const fs = createMemoryFs();
+    const firstService = createTestSessionService(fs, []);
+    await firstService.startProjectTranslatorSession("/repo", { taskSlug: "demo-task" });
+    await firstService.recordProjectTranslatorHookEvent("/repo", {
+      eventName: "UserPromptSubmit",
+      sessionId: "translator-dead-pid-session",
+      transcriptPath: `${TASK_WORKTREE}/.claude/projects/translator-dead-pid-session.jsonl`,
+      cwd: TASK_WORKTREE
+    });
+
+    const runtimeInputs: CreateTerminalSessionInput[] = [];
+    const secondService = createTestSessionService(fs, runtimeInputs, [], { deadProcessCalls: [1] });
+    const rebuilt = await secondService.resumeProjectTranslatorSession("/repo", { taskSlug: "demo-task" });
+
+    expect(runtimeInputs).toHaveLength(2);
+    expect(runtimeInputs[0]?.args).toContain("--resume");
+    expect(runtimeInputs[0]?.args).toContain("translator-dead-pid-session");
+    expect(runtimeInputs[1]?.args).not.toContain("--resume");
+    expect(rebuilt.claudeSessionId).toBe("");
+    await expect(fs.pathExists("/repo/.ai/vcm/translations/session.json")).resolves.toBe(false);
+  });
+
+  it("rebuilds a fresh Translator session when /cd finds the resumed terminal missing", async () => {
+    const fs = createMemoryFs();
+    const firstService = createTestSessionService(fs, [], [], {
+      worktreePaths: {
+        "demo-task": TASK_WORKTREE,
+        "other-task": "/repo/.claude/worktrees/other-task"
+      }
+    });
+    await firstService.startProjectTranslatorSession("/repo", { taskSlug: "demo-task" });
+    await firstService.recordProjectTranslatorHookEvent("/repo", {
+      eventName: "UserPromptSubmit",
+      sessionId: "translator-cd-missing-session",
+      transcriptPath: `${TASK_WORKTREE}/.claude/projects/translator-cd-missing-session.jsonl`,
+      cwd: TASK_WORKTREE
+    });
+
+    const runtimeInputs: CreateTerminalSessionInput[] = [];
+    const writes: string[] = [];
+    const secondService = createTestSessionService(fs, runtimeInputs, writes, {
+      worktreePaths: {
+        "demo-task": TASK_WORKTREE,
+        "other-task": "/repo/.claude/worktrees/other-task"
+      },
+      dropBeforeWriteCalls: [1]
+    });
+    const rebuilt = await secondService.resumeProjectTranslatorSession("/repo", { taskSlug: "other-task" });
+
+    expect(runtimeInputs).toHaveLength(2);
+    expect(runtimeInputs[0]?.args).toContain("--resume");
+    expect(runtimeInputs[0]?.args).toContain("translator-cd-missing-session");
+    expect(runtimeInputs[1]?.args).not.toContain("--resume");
+    expect(rebuilt.claudeSessionId).toBe("");
+    expect(rebuilt.cwd).toBe("/repo/.claude/worktrees/other-task");
+    expect(writes.filter((write) => write.includes("/cd /repo/.claude/worktrees/other-task"))).toHaveLength(1);
+    await expect(fs.pathExists("/repo/.ai/vcm/translations/session.json")).resolves.toBe(false);
+  });
+
   it("rebuilds a fresh Harness Engineer session when resume by id fails", async () => {
     const fs = createMemoryFs();
     const firstService = createTestSessionService(fs, []);
@@ -686,7 +777,7 @@ describe("createSessionService", () => {
     const started = await service.startProjectHarnessEngineerSession("/repo", {
       taskSlug: "demo-task",
       permissionMode: "bypassPermissions",
-      model: "claude-opus-4-8[1m]",
+      model: "opus",
       effort: "medium"
     });
 
@@ -695,6 +786,7 @@ describe("createSessionService", () => {
     expect(started.command).toContain("--agent harness-engineer");
     expect(runtimeInputs[0]?.cwd).toBe("/repo");
     expect(runtimeInputs[0]?.env).toMatchObject({
+      CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1",
       VCM_TASK_REPO_ROOT: TASK_WORKTREE,
       VCM_TASK_SLUG: "__project_harness_engineer__",
       VCM_ROLE: "harness-engineer"
@@ -703,7 +795,7 @@ describe("createSessionService", () => {
       "--agent",
       "harness-engineer",
       "--model",
-      "claude-opus-4-8[1m]",
+      "opus",
       "--effort",
       "medium",
       "--permission-mode",
@@ -720,6 +812,33 @@ describe("createSessionService", () => {
       cwd: TASK_WORKTREE
     });
     await expect(fs.pathExists("/repo/.ai/vcm/harness-engineer/session.json")).resolves.toBe(true);
+  });
+
+  it("does not let Harness Engineer prompt hooks clobber the VCM-managed cwd", async () => {
+    const fs = createMemoryFs();
+    const runtimeInputs: CreateTerminalSessionInput[] = [];
+    const writes: string[] = [];
+    const service = createTestSessionService(fs, runtimeInputs, writes);
+
+    const started = await service.startProjectHarnessEngineerSession("/repo", { taskSlug: "demo-task" });
+    expect(started.cwd).toBe(TASK_WORKTREE);
+    expect(writes[0]).toContain(`/cd ${TASK_WORKTREE}`);
+    expect(writes[1]).toBe("\r");
+
+    const hooked = await service.recordProjectHarnessEngineerHookEvent("/repo", {
+      eventName: "UserPromptSubmit",
+      sessionId: "harness-cd-prompt-session",
+      transcriptPath: claudeTranscriptPath("/repo", "harness-cd-prompt-session"),
+      cwd: "/repo"
+    });
+    expect(hooked?.cwd).toBe(TASK_WORKTREE);
+
+    const persisted = await fs.readJson<{ record: { cwd: string } }>("/repo/.ai/vcm/harness-engineer/session.json");
+    expect(persisted.record.cwd).toBe(TASK_WORKTREE);
+
+    const ensured = await service.ensureProjectHarnessEngineerSession("/repo", { taskSlug: "demo-task" });
+    expect(ensured.cwd).toBe(TASK_WORKTREE);
+    expect(writes.filter((write) => write.includes("/cd"))).toHaveLength(1);
   });
 
   it("marks sessions outdated when harness revision advances and notifies them", async () => {
@@ -766,7 +885,7 @@ describe("createSessionService", () => {
     const service = createTestSessionService(fs, runtimeInputs);
 
     const started = await service.startRoleSession("/repo", "demo-task", "gate-reviewer", {
-      model: "claude-sonnet-4-6[1m]",
+      model: "sonnet",
       effort: "max"
     });
 
@@ -915,7 +1034,7 @@ describe("createSessionService", () => {
             updatedAt: "2026-05-29T00:00:00.000Z"
           }
         },
-        reviewer: { id: null, status: "not_started" }
+        tester: { id: null, status: "not_started" }
       }
     });
     const runtimeInputs: CreateTerminalSessionInput[] = [];
@@ -1061,14 +1180,25 @@ function createTestSessionService(
   fs: FileSystemAdapter,
   runtimeInputs: CreateTerminalSessionInput[],
   writes: string[] = [],
-  options: { sandboxMode?: string; worktreePath?: string; worktreePaths?: Record<string, string>; exitedCalls?: number[] } = {}
+  options: {
+    sandboxMode?: string;
+    worktreePath?: string;
+    worktreePaths?: Record<string, string>;
+    exitedCalls?: number[];
+    deadProcessCalls?: number[];
+    dropBeforeWriteCalls?: number[];
+  } = {}
 ) {
   const worktreePath = options.worktreePath ?? TASK_WORKTREE;
   const resolveWorktreePath = (taskSlug: string) => options.worktreePaths?.[taskSlug]
     ?? (taskSlug === "demo-task" ? worktreePath : `/repo/.claude/worktrees/${taskSlug}`);
+  const deadProcessPids = new Set((options.deadProcessCalls ?? []).map((callIndex) => 1000 + callIndex));
   return createSessionService({
     fs,
-    runtime: createFakeRuntime(runtimeInputs, writes, { exitedCalls: options.exitedCalls }),
+    runtime: createFakeRuntime(runtimeInputs, writes, {
+      exitedCalls: options.exitedCalls,
+      dropBeforeWriteCalls: options.dropBeforeWriteCalls
+    }),
     registry: createSessionRegistry(),
     claude: {
       async isAvailable() {
@@ -1111,11 +1241,11 @@ function createTestSessionService(
           roleCommandPaths: {
             architect: ".ai/vcm/handoffs/role-commands/architect.md",
             coder: ".ai/vcm/handoffs/role-commands/coder.md",
-            reviewer: ".ai/vcm/handoffs/role-commands/reviewer.md"
+            tester: ".ai/vcm/handoffs/role-commands/tester.md"
           },
           architecturePlanPath: ".ai/vcm/handoffs/architecture-plan.md",
           knownIssuesPath: ".ai/vcm/handoffs/known-issues.md",
-          reviewReportPath: ".ai/vcm/handoffs/review-report.md",
+          testReportPath: ".ai/vcm/handoffs/test-report.md",
           docsSyncReportPath: ".ai/vcm/handoffs/docs-sync-report.md",
           finalAcceptancePath: ".ai/vcm/handoffs/final-acceptance.md"
         };
@@ -1126,7 +1256,7 @@ function createTestSessionService(
         return {
           version: 1,
           repoRoot: "/repo",
-          defaultRoles: ["project-manager", "architect", "coder", "reviewer"],
+          defaultRoles: ["project-manager", "architect", "coder", "tester"],
           handoffRoot: ".ai/vcm/handoffs",
           stateRoot: ".ai/vcm",
           terminalBackend: "node-pty",
@@ -1166,6 +1296,7 @@ function createTestSessionService(
     } as never,
     apiUrl: "http://127.0.0.1:4173",
     sandboxMode: options.sandboxMode,
+    isProcessAlive: (pid) => !deadProcessPids.has(pid),
     now: () => "2026-05-29T00:00:00.000Z"
   });
 }
@@ -1173,10 +1304,12 @@ function createTestSessionService(
 function createFakeRuntime(
   inputs: CreateTerminalSessionInput[],
   writes: string[],
-  options: { exitedCalls?: number[] } = {}
+  options: { exitedCalls?: number[]; dropBeforeWriteCalls?: number[] } = {}
 ): TerminalRuntime {
   const sessions = new Map<string, TerminalSession>();
   const exitedCalls = new Set(options.exitedCalls ?? []);
+  const dropBeforeWriteCalls = new Set(options.dropBeforeWriteCalls ?? []);
+  let writeCount = 0;
   return {
     async createSession(input) {
       inputs.push(input);
@@ -1187,7 +1320,7 @@ function createFakeRuntime(
         taskSlug: input.taskSlug,
         role: input.role,
         status: exited ? "exited" : "running",
-        pid: exited ? undefined : 123,
+        pid: exited ? undefined : 1000 + callIndex,
         startedAt: "2026-05-29T00:00:00.000Z",
         // A live TUI emits output immediately, which the readiness wait keys off;
         // a failed launch exits and leaves no live runtime entry.
@@ -1208,7 +1341,14 @@ function createFakeRuntime(
     listSessions() {
       return [...sessions.values()];
     },
-    write(_sessionId, data) {
+    write(sessionId, data) {
+      writeCount += 1;
+      if (dropBeforeWriteCalls.has(writeCount)) {
+        sessions.delete(sessionId);
+        throw Object.assign(new Error(`Terminal session does not exist: ${sessionId}`), {
+          code: "SESSION_MISSING"
+        });
+      }
       writes.push(data);
     },
     resize() {},

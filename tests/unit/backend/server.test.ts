@@ -80,6 +80,8 @@ function createServerDepsStub(calls: string[]): ServerDeps {
       }
     } as never,
     runtimeCoordinator: {} as never,
+    runtimeRecoveryService: {} as never,
+    terminalInterruptService: {} as never,
     runtime: {} as never,
     diagnosticsService: {
       getErrorRuntimeInfo() {

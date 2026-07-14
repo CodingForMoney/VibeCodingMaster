@@ -296,12 +296,22 @@ function normalizeGateReviewGates(input: unknown): GateReviewGate[] {
   }
   const gates: GateReviewGate[] = [];
   for (const value of input) {
-    if (!GATE_REVIEW_GATES.includes(value as GateReviewGate) || gates.includes(value as GateReviewGate)) {
+    const gate = normalizeGateReviewGateValue(value);
+    if (!gate || gates.includes(gate)) {
       continue;
     }
-    gates.push(value as GateReviewGate);
+    gates.push(gate);
   }
   return GATE_REVIEW_GATES.filter((gate) => gates.includes(gate));
+}
+
+function normalizeGateReviewGateValue(value: unknown): GateReviewGate | undefined {
+  if (value === "final-diff") {
+    return "code-diff";
+  }
+  return GATE_REVIEW_GATES.includes(value as GateReviewGate)
+    ? value as GateReviewGate
+    : undefined;
 }
 
 function normalizeSettingsFile(input: Partial<AppSettingsFile>): AppSettingsFile {
@@ -328,6 +338,7 @@ function normalizePreferences(input: unknown): AppPreferences {
     roleRetryEnabled: candidate.roleRetryEnabled !== false,
     permissionRequestMode: normalizePermissionRequestMode(candidate.permissionRequestMode),
     autoTaskHarnessReviewEnabled: candidate.autoTaskHarnessReviewEnabled === true,
+    autoMemoryEnabled: candidate.autoMemoryEnabled === true,
     translationEnabled: candidate.translationEnabled === true,
     translationAutoSendEnabled: candidate.translationAutoSendEnabled === true,
     translationTargetLanguage: normalizeTranslationTargetLanguage(candidate.translationTargetLanguage),

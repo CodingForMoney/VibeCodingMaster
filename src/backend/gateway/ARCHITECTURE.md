@@ -2,10 +2,8 @@
 
 Detailed design for the VCM **mobile gateway** — the backend sub-area that lets a
 user drive a VCM task from a phone chat app (Weixin iLink or Lark/Feishu) and
-that pushes project-manager (PM) replies back to that chat. It is part of the
-single workspace module `vibe-coding-master`; for the module-wide overview see
-[`../../../ARCHITECTURE.md`](../../../ARCHITECTURE.md) and
-[`../../../docs/ARCHITECTURE.md`](../../../docs/ARCHITECTURE.md).
+that pushes project-manager (PM) replies back to that chat. For the project-wide
+overview see [`../../../docs/ARCHITECTURE.md`](../../../docs/ARCHITECTURE.md).
 
 ## Boundary
 
@@ -36,8 +34,8 @@ Owned:
 - Run a single resilient poll loop per process that pulls inbound messages,
   de-duplicates them, authorizes the sender, parses a command, executes it, and
   replies.
-- Push PM turn-final replies to the bound chat when a PM session's `Stop` hook
-  fires.
+- On a PM `Stop` hook, wait for a normal Round completion and push only that
+  Round's last PM reply to the bound chat.
 - Mediate translation of inbound user text (to English for the PM session) and
   outbound PM text (to the user's language), with a `/retry` path on failure.
 
@@ -84,7 +82,8 @@ configured channel at boot — the user must arm it (desktop toggle →
   guarantees the default-off cannot be bypassed by self-heal.
 - **Holistic gate (inbound + outbound).** Arming gates both the inbound poll loop
   and the outbound PM push: while disarmed, `handlePmStop` still captures
-  `latestPmReplies` (a local transcript read + settings write — no channel I/O)
+  `latestPmReplies` for a normally completed Round (a local transcript read +
+  settings write — no channel I/O)
   but does **not** send, so a disarmed gateway never opens or touches the channel.
   The cached reply is replayed on the next `/start` once armed.
 - **Toggle behavior.** `setConnectionEnabled(true)` arms then `ensurePolling()`
@@ -163,24 +162,35 @@ Command set (when enabled): `/help /start /retry /status /projects
   `confirm` stops role sessions, parks the project-tool sessions on a safe cwd,
   stops translation + round tracking, then force-cleans the task worktree/branch.
 - Plain text → `sendPlainTextToPm`: requires a running, idle PM session;
-  optionally translates the user text to English first; then writes it into the
-  PM terminal.
+  when translation is enabled, immediately acknowledges the request, translates
+  the user text to English, writes it into the PM terminal, and then reports the
+  translated text. Translation failure is reported without sending the source
+  text to PM.
 
 ### Outbound PM push (`handlePmStop`)
 
-Triggered by `claude-hook-service` on a PM `Stop` (turn-end) hook
-(`notifyGateway: true`, project-manager only):
+Triggered by `claude-hook-service` on a PM `Stop` hook (`notifyGateway: true`,
+project-manager only):
 
 1. Resolve the PM transcript and parse assistant **text** events.
-2. `saveLatestPmReply` — store the latest turn's final text (bounded to
-   `MAX_LATEST_PM_REPLY_CHARS`) keyed by `(repoRoot, taskSlug)`, so `/start` can
-   replay it even when the gateway was off.
-3. If **armed** (`connectionEnabled`) + enabled + account + bound user: select
-   transcript text events **after the per-`(task, claudeSessionId)` cursor** that
-   are turn-final (`stop_reason === end_turn`), render them (translate unless
-   disabled — failure yields a user-facing failure notice + a buffered `/retry`),
-   send to the bound chat, and advance the cursor + audit. While disarmed, only
-   step 2 runs (no send).
+2. Wait for backend Round state. Continue only when the Round stopped normally;
+   manual interruption and failed recovery are not Round-final replies.
+3. Select the latest `end_turn` PM text after the per-session cursor and store
+   it in `latestPmReplies`, bounded by `MAX_LATEST_PM_REPLY_CHARS`, so `/start`
+   can replay it when needed.
+4. If **armed** (`connectionEnabled`) + enabled + account + bound user, send the
+   original PM reply with the Round completion notice first.
+5. When Gateway translation is enabled, request the matching existing
+   translation-panel result and send it separately. Normal push does not create
+   duplicate translation work; a missing result produces a failure notice and
+   buffers `/retry`, whose explicit retry may create a new translation.
+6. Advance the transcript cursor and audit the delivery. While disarmed, only
+   the Round-final reply cache is updated; no channel I/O occurs.
+
+Gateway activation aligns desktop translation preferences to enabled,
+auto-send, and `round-final` output mode. `handleRoleStopFailure` also sends an
+abnormal-interruption notice when Gateway is armed and enabled, but ignores a
+manual Ctrl+C interruption.
 
 ## State and Persistence
 

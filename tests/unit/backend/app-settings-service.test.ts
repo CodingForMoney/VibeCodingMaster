@@ -59,6 +59,7 @@ describe("app-settings-service", () => {
       roleRetryEnabled: false,
       permissionRequestMode: "allowAll",
       autoTaskHarnessReviewEnabled: true,
+      autoMemoryEnabled: true,
       translationEnabled: true,
       translationAutoSendEnabled: true,
       translationTargetLanguage: "ja",
@@ -69,6 +70,7 @@ describe("app-settings-service", () => {
       roleRetryEnabled: false,
       permissionRequestMode: "allowAll",
       autoTaskHarnessReviewEnabled: true,
+      autoMemoryEnabled: true,
       translationEnabled: true,
       translationAutoSendEnabled: true,
       translationTargetLanguage: "ja",
@@ -82,6 +84,7 @@ describe("app-settings-service", () => {
       roleRetryEnabled: false,
       permissionRequestMode: "allowAll",
       autoTaskHarnessReviewEnabled: true,
+      autoMemoryEnabled: true,
       translationEnabled: true,
       translationAutoSendEnabled: true,
       translationTargetLanguage: "ja",
@@ -99,7 +102,7 @@ describe("app-settings-service", () => {
     launchTemplate.autoOrchestration = false;
     launchTemplate.roles.coder = {
       permissionMode: "bypassPermissions",
-      model: "opus[1m]",
+      model: "opus",
       effort: "high"
     };
 
@@ -170,7 +173,7 @@ describe("app-settings-service", () => {
     await service.saveProjectConfig({
       version: 1,
       repoRoot,
-      defaultRoles: ["project-manager", "architect", "coder", "reviewer"],
+      defaultRoles: ["project-manager", "architect", "coder", "tester"],
       handoffRoot: ".ai/vcm/handoffs",
       stateRoot: ".ai/vcm",
       terminalBackend: "node-pty",
@@ -208,22 +211,23 @@ describe("app-settings-service", () => {
     });
 
     await expect(service.updateGateReviewSettings(repoRoot, "demo-task", [
-      "final-diff",
+      "code-diff",
       "architecture-plan",
-      "final-diff"
+      "code-diff",
+      "final-diff" as never
     ])).resolves.toEqual({
       enabled: true,
-      requiredGates: ["architecture-plan", "final-diff"]
+      requiredGates: ["architecture-plan", "code-diff"]
     });
 
     const stored = await fs.readJson<AppSettingsFile>("/home/.vcm/settings.json");
     expect(stored.gateReview).toMatchObject({
-      requiredGates: ["architecture-plan", "final-diff"]
+      requiredGates: ["architecture-plan", "code-diff"]
     });
     expect(stored.gateReview).not.toHaveProperty("projects");
     await expect(service.getGateReviewSettings("/workspace/another-project", "another-task")).resolves.toEqual({
       enabled: true,
-      requiredGates: ["architecture-plan", "final-diff"]
+      requiredGates: ["architecture-plan", "code-diff"]
     });
   });
 });
@@ -235,6 +239,7 @@ function createDefaultPreferences(overrides: Partial<AppPreferences> = {}): AppP
     roleRetryEnabled: true,
     permissionRequestMode: "off",
     autoTaskHarnessReviewEnabled: false,
+    autoMemoryEnabled: false,
     translationEnabled: false,
     translationAutoSendEnabled: false,
     translationTargetLanguage: "zh-CN",

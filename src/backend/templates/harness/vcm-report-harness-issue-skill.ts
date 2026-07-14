@@ -11,7 +11,9 @@ Write one markdown file under:
 \${VCM_BASE_REPO_ROOT}/.ai/vcm/harness-feedback/pending/
 \`\`\`
 
-If \`VCM_BASE_REPO_ROOT\` is not set, use the current git root as a fallback.
+If \`VCM_BASE_REPO_ROOT\` is not set, do not guess a fallback path. Report the
+environment problem to project-manager so VCM can retry with the correct base
+repository root.
 
 Use a filename like:
 
@@ -23,17 +25,21 @@ Use only safe filename characters: letters, numbers, dot, dash, and underscore.
 
 ## Required Content
 
-The file must include:
+Use this structure:
 
-- reporter role
-- task slug when known
-- summary
-- observed problem
-- expected behavior
-- evidence, with relevant file paths, command names, logs, or repeated failure pattern
-- suspected harness area
-- impact
-- urgency
+\`\`\`md
+# <short problem title>
+
+- Reporter role: <role>
+- Task slug: <slug or unknown>
+- Summary: <one line>
+- Observed problem: <what happened>
+- Expected behavior: <what the harness should have done>
+- Evidence: <file paths, command names, logs, or repeated failure pattern>
+- Suspected harness area: <skill, role definition, tool, routing, validation, bootstrap, or managed instruction>
+- Impact: <who is affected and how>
+- Urgency: low | medium | high
+\`\`\`
 
 ## Constraints
 

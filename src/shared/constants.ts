@@ -23,9 +23,9 @@ export const CORE_VCM_ROLE_DEFINITIONS: readonly RoleDefinition<CoreVcmRoleName>
     dispatchable: true
   },
   {
-    name: "reviewer",
-    label: "Reviewer",
-    commandAgent: "reviewer",
+    name: "tester",
+    label: "Tester",
+    commandAgent: "tester",
     dispatchable: true
   }
 ] as const;

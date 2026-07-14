@@ -46,6 +46,8 @@ export interface TranslationEntry {
   translatedText: string;
   status: TranslationStatus;
   contextUsed: boolean;
+  transcriptStopReason?: string;
+  transcriptTimestamp?: string;
   boundaryKind?: TranslationConversationBoundaryKind;
   conversationTurn?: number;
   occurredAt?: string;
@@ -210,8 +212,8 @@ export interface TranslationQueueItem {
    * Inline conversation source for `type: "conversation"` items. Carrying the
    * source on the queue item (persisted in queue.json) removes the need for a
    * per-job conversation `request.json`: the queue is the single durable record
-   * that distinguishes conversation tasks, while the translated output lives in
-   * one shared, self-describing `result.json`. Undefined for non-conversation
+   * that distinguishes conversation tasks, while each translated output lives in
+   * the queue item's own plain-text result path. Undefined for non-conversation
    * types.
    */
   conversation?: ConversationQueueItemSource;

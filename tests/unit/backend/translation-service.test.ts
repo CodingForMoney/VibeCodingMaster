@@ -1,3 +1,6 @@
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import type { FileSystemAdapter } from "../../../src/backend/adapters/filesystem.js";
 import type { TerminalRuntime } from "../../../src/backend/runtime/terminal-runtime.js";
@@ -12,6 +15,7 @@ import type { SessionService } from "../../../src/backend/services/session-servi
 import { formatTerminalPaste, normalizeTerminalSubmitText } from "../../../src/backend/runtime/terminal-submit.js";
 import { createTranslationService as createTranslationServiceBase } from "../../../src/backend/services/translation-service.js";
 import type { TranslationServiceDeps } from "../../../src/backend/services/translation-service.js";
+import type { VcmSessionRoundState } from "../../../src/shared/types/round.js";
 import type { RoleSessionRecord } from "../../../src/shared/types/session.js";
 import type { TranslationSessionEvent, TranslationWsMessage } from "../../../src/shared/types/translation.js";
 import { TRANSLATION_ENTRY_RETENTION_LIMIT } from "../../../src/shared/types/translation.js";
@@ -933,6 +937,76 @@ describe("translation-service", () => {
     ]);
   });
 
+  it("queues the current role latest final reply for manual translation", async () => {
+    const transcriptDir = await mkdtemp(join(tmpdir(), "vcm-translation-reply-"));
+    const transcriptPath = join(transcriptDir, "coder.jsonl");
+    await writeFile(transcriptPath, [
+      assistantTranscriptLine("old-reply", "2026-05-30T00:00:01.000Z", "Older reply.", "end_turn"),
+      assistantTranscriptLine("tool-progress", "2026-05-30T00:00:02.000Z", "Tool progress should not be selected.", "tool_use"),
+      assistantTranscriptLine("latest-reply", "2026-05-30T00:00:03.000Z", "Latest final reply.", "end_turn")
+    ].join("\n"));
+    const fs = createMemoryFs();
+    const appSettings = createAppSettingsService({
+      fs,
+      settingsPath: "/settings.json",
+    });
+    const roleSession = createRoleSessionRecord({
+      transcriptPath,
+      lastTurnStartedAt: "2026-05-30T00:00:02.500Z",
+      lastTurnEndedAt: "2026-05-30T00:00:03.500Z"
+    });
+    const translatorCalls: unknown[] = [];
+    const service = createTranslationService({
+      appSettings,
+      translationWorkerService: createTranslationWorkerServiceStub(translatorCalls, "最后回复。"),
+      runtime: createRuntimeStub([roleSession]),
+      sessionRegistry: createRegistryStub(roleSession),
+      transcripts: createTranscriptStub(),
+      sessionService: {
+        async getRoleSession() {
+          return roleSession;
+        }
+      } as SessionService
+    });
+
+    try {
+      const messages: TranslationWsMessage[] = [];
+      service.subscribeToSession("session-1", (message) => messages.push(message));
+      const entry = await service.translateLatestReply({
+        repoRoot: "/repo",
+        taskRepoRoot: "/repo/.claude/worktrees/demo-task",
+        taskSlug: "demo-task",
+        role: "coder"
+      });
+
+      expect(entry).toMatchObject({
+        direction: "cc-output-to-user",
+        sourceText: "Latest final reply.",
+        transcriptStopReason: "end_turn",
+        transcriptTimestamp: "2026-05-30T00:00:03.000Z",
+        status: "queued"
+      });
+      await waitFor(() => messages.some((message) =>
+        message.type === "translation-entry" &&
+        message.entry.id === entry.id &&
+        message.entry.status === "translated" &&
+        message.entry.translatedText === "最后回复。"
+      ));
+      expect(translatorCalls).toEqual([
+        expect.objectContaining({
+          repoRoot: "/repo",
+          taskSlug: "demo-task",
+          direction: "cc-output-to-user",
+          sourceText: "Latest final reply.",
+          sourceLanguage: "en",
+          targetLanguage: "zh-CN"
+        })
+      ]);
+    } finally {
+      await rm(transcriptDir, { recursive: true, force: true });
+    }
+  });
+
   it("sends translated input by pasting first and pressing enter separately", async () => {
     const fs = createMemoryFs();
     const appSettings = createAppSettingsService({
@@ -1083,6 +1157,357 @@ describe("translation-service", () => {
         status: "preserved"
       })
     }));
+  });
+
+  it("translates only the last normal round reply in round-final mode", async () => {
+    const fs = createMemoryFs();
+    const appSettings = createAppSettingsService({
+      fs,
+      settingsPath: "/settings.json",
+    });
+    await appSettings.updatePreferences({ translationOutputMode: "round-final" });
+    const coderSession = createRoleSessionRecord({
+      id: "session-coder",
+      role: "coder",
+      command: "claude --agent coder",
+      cwd: "/repo/.claude/worktrees/demo-task"
+    });
+    const pmSession = createRoleSessionRecord({
+      id: "session-pm",
+      role: "project-manager",
+      command: "claude --agent project-manager",
+      cwd: "/repo/.claude/worktrees/demo-task"
+    });
+    const runtime = createRuntimeStub([coderSession, pmSession]);
+    const transcripts = createSessionTranscriptStub();
+    const translatorCalls: Array<{ sourceText: string }> = [];
+    const service = createTranslationService({
+      appSettings,
+      translationWorkerService: createTranslationWorkerServiceStub(translatorCalls, "Round final 译文。"),
+      runtime,
+      sessionRegistry: createRegistryStub([coderSession, pmSession]),
+      transcripts,
+      sessionService: {
+        async listRoleSessions() {
+          return [coderSession, pmSession];
+        }
+      } as SessionService,
+      projectService: createProjectServiceStub(),
+      roundService: createRoundServiceStub({
+        status: "stopped",
+        roundId: "round-1",
+        activeRole: "project-manager",
+        stoppedAt: "2026-05-30T00:00:03.000Z"
+      })
+    });
+
+    const pmMessages: TranslationWsMessage[] = [];
+    service.subscribeToSession(pmSession.id, (message) => pmMessages.push(message));
+    service.subscribeToSession(coderSession.id, () => undefined);
+    transcripts.emit(coderSession.id, {
+      kind: "text",
+      id: "coder-final",
+      timestamp: "2026-05-30T00:00:01.000Z",
+      stopReason: "end_turn",
+      text: "Coder final reply."
+    });
+    transcripts.emit(pmSession.id, {
+      kind: "text",
+      id: "pm-final",
+      timestamp: "2026-05-30T00:00:02.000Z",
+      stopReason: "end_turn",
+      text: "PM final reply."
+    });
+
+    await service.pollTaskFeed({
+      repoRoot: "/repo",
+      taskRepoRoot: "/repo/.claude/worktrees/demo-task",
+      taskSlug: "demo-task",
+      after: 1
+    });
+    await waitFor(() => pmMessages.some((message) =>
+      message.type === "translation-entry"
+      && message.entry.id === "pm-final"
+      && message.entry.status === "translated"
+    ));
+
+    expect(translatorCalls).toHaveLength(1);
+    expect(translatorCalls[0]).toMatchObject({
+      sourceText: "PM final reply."
+    });
+  });
+
+  it("does not translate round-final candidates for manual interrupts", async () => {
+    const fs = createMemoryFs();
+    const appSettings = createAppSettingsService({
+      fs,
+      settingsPath: "/settings.json",
+    });
+    await appSettings.updatePreferences({ translationOutputMode: "round-final" });
+    const pmSession = createRoleSessionRecord({
+      id: "session-pm",
+      role: "project-manager",
+      command: "claude --agent project-manager",
+      cwd: "/repo/.claude/worktrees/demo-task"
+    });
+    const transcripts = createSessionTranscriptStub();
+    const translatorCalls: Array<{ sourceText: string }> = [];
+    const service = createTranslationService({
+      appSettings,
+      translationWorkerService: createTranslationWorkerServiceStub(translatorCalls, "PM 译文。"),
+      runtime: createRuntimeStub([pmSession]),
+      sessionRegistry: createRegistryStub(pmSession),
+      transcripts,
+      sessionService: {
+        async listRoleSessions() {
+          return [pmSession];
+        }
+      } as SessionService,
+      projectService: createProjectServiceStub(),
+      roundService: createRoundServiceStub({
+        status: "stopped",
+        roundId: "round-1",
+        activeRole: "project-manager",
+        stoppedAt: "2026-05-30T00:00:02.000Z",
+        stopReason: "manual-interrupt"
+      })
+    });
+
+    const messages: TranslationWsMessage[] = [];
+    service.subscribeToSession(pmSession.id, (message) => messages.push(message));
+    transcripts.emit(pmSession.id, {
+      kind: "text",
+      id: "pm-final",
+      timestamp: "2026-05-30T00:00:01.000Z",
+      stopReason: "end_turn",
+      text: "Interrupted PM reply."
+    });
+
+    await service.pollTaskFeed({
+      repoRoot: "/repo",
+      taskRepoRoot: "/repo/.claude/worktrees/demo-task",
+      taskSlug: "demo-task",
+      after: 1
+    });
+    await delay(20);
+
+    expect(translatorCalls).toHaveLength(0);
+    expect(messages).toContainEqual(expect.objectContaining({
+      type: "translation-entry",
+      entry: expect.objectContaining({
+        id: "pm-final",
+        status: "preserved",
+        translatedText: "Interrupted PM reply."
+      })
+    }));
+  });
+
+  it("reuses an existing PM final reply translation for Gateway output", async () => {
+    const fs = createMemoryFs();
+    const appSettings = createAppSettingsService({
+      fs,
+      settingsPath: "/settings.json",
+    });
+    const pmSession = createRoleSessionRecord({
+      id: "session-pm",
+      role: "project-manager",
+      command: "claude --agent project-manager",
+      cwd: "/repo/.claude/worktrees/demo-task"
+    });
+    const runtime = createRuntimeStub([pmSession]);
+    const transcripts = createSessionTranscriptStub();
+    const translatorCalls: Array<{ sourceText: string }> = [];
+    const service = createTranslationService({
+      appSettings,
+      translationWorkerService: createTranslationWorkerServiceStub(translatorCalls, "PM 译文。"),
+      runtime,
+      sessionRegistry: createRegistryStub(pmSession),
+      transcripts,
+      sessionService: {
+        async getRoleSession() {
+          return pmSession;
+        }
+      } as SessionService
+    });
+
+    const messages: TranslationWsMessage[] = [];
+    service.subscribeToSession(pmSession.id, (message) => messages.push(message));
+    transcripts.emit(pmSession.id, {
+      kind: "text",
+      id: "pm-final",
+      timestamp: "2026-05-30T00:00:01.000Z",
+      stopReason: "end_turn",
+      text: "PM final reply."
+    });
+
+    await waitFor(() => messages.some((message) =>
+      message.type === "translation-entry"
+      && message.entry.id === "pm-final"
+      && message.entry.status === "translated"
+    ));
+    expect(translatorCalls).toHaveLength(1);
+
+    const output = await service.translateGatewayOutput({
+      repoRoot: "/repo",
+      taskSlug: "demo-task",
+      role: "project-manager",
+      text: "PM final reply.",
+      sourceEntryIds: ["pm-final"]
+    });
+
+    expect(output).toBe("PM 译文。");
+    expect(translatorCalls).toHaveLength(1);
+  });
+
+  it("does not create a new translation when Gateway output is missing from the panel", async () => {
+    const fs = createMemoryFs();
+    const appSettings = createAppSettingsService({
+      fs,
+      settingsPath: "/settings.json",
+    });
+    const pmSession = createRoleSessionRecord({
+      id: "session-pm",
+      role: "project-manager",
+      command: "claude --agent project-manager",
+      cwd: "/repo/.claude/worktrees/demo-task"
+    });
+    const translatorCalls: Array<{ sourceText: string }> = [];
+    const service = createTranslationService({
+      appSettings,
+      translationWorkerService: createTranslationWorkerServiceStub(translatorCalls, "PM 译文。"),
+      runtime: createRuntimeStub([pmSession]),
+      sessionRegistry: createRegistryStub(pmSession),
+      transcripts: createSessionTranscriptStub(),
+      sessionService: {
+        async getRoleSession() {
+          return pmSession;
+        }
+      } as SessionService
+    });
+
+    await expect(service.translateGatewayOutput({
+      repoRoot: "/repo",
+      taskSlug: "demo-task",
+      role: "project-manager",
+      text: "PM final reply.",
+      sourceEntryIds: ["pm-final"]
+    })).rejects.toMatchObject({
+      code: "GATEWAY_TRANSLATION_RESULT_MISSING"
+    });
+    expect(translatorCalls).toHaveLength(0);
+  });
+
+  it("creates a new translation for explicit Gateway retry when panel output is missing", async () => {
+    const fs = createMemoryFs();
+    const appSettings = createAppSettingsService({
+      fs,
+      settingsPath: "/settings.json",
+    });
+    const pmSession = createRoleSessionRecord({
+      id: "session-pm",
+      role: "project-manager",
+      command: "claude --agent project-manager",
+      cwd: "/repo/.claude/worktrees/demo-task"
+    });
+    const translatorCalls: Array<{
+      repoRoot: string;
+      taskSlug: string;
+      direction: string;
+      sourceText: string;
+      sourceLanguage: string;
+      targetLanguage: string;
+    }> = [];
+    const service = createTranslationService({
+      appSettings,
+      translationWorkerService: createTranslationWorkerServiceStub(translatorCalls, "PM 译文。"),
+      runtime: createRuntimeStub([pmSession]),
+      sessionRegistry: createRegistryStub(pmSession),
+      transcripts: createSessionTranscriptStub(),
+      sessionService: {
+        async getRoleSession() {
+          return pmSession;
+        }
+      } as SessionService
+    });
+
+    const output = await service.translateGatewayOutput({
+      repoRoot: "/repo",
+      taskSlug: "demo-task",
+      role: "project-manager",
+      text: "PM final reply.",
+      sourceEntryIds: ["pm-final"],
+      allowCreate: true
+    });
+
+    expect(output).toBe("PM 译文。");
+    expect(translatorCalls).toEqual([expect.objectContaining({
+      repoRoot: "/repo",
+      taskSlug: "demo-task",
+      direction: "cc-output-to-user",
+      sourceText: "PM final reply.",
+      sourceLanguage: "en",
+      targetLanguage: "zh-CN"
+    })]);
+  });
+
+  it("waits for an in-flight PM final reply translation before Gateway output", async () => {
+    const fs = createMemoryFs();
+    const appSettings = createAppSettingsService({
+      fs,
+      settingsPath: "/settings.json",
+    });
+    const pmSession = createRoleSessionRecord({
+      id: "session-pm",
+      role: "project-manager",
+      command: "claude --agent project-manager",
+      cwd: "/repo/.claude/worktrees/demo-task"
+    });
+    const runtime = createRuntimeStub([pmSession]);
+    const transcripts = createSessionTranscriptStub();
+    const translatorCalls: Array<{ sourceText: string }> = [];
+    const translator = createDeferredTranslationWorkerServiceStub("PM 译文。", translatorCalls);
+    const service = createTranslationService({
+      appSettings,
+      translationWorkerService: translator,
+      runtime,
+      sessionRegistry: createRegistryStub(pmSession),
+      transcripts,
+      sessionService: {
+        async getRoleSession() {
+          return pmSession;
+        }
+      } as SessionService
+    });
+
+    const messages: TranslationWsMessage[] = [];
+    service.subscribeToSession(pmSession.id, (message) => messages.push(message));
+    transcripts.emit(pmSession.id, {
+      kind: "text",
+      id: "pm-final",
+      timestamp: "2026-05-30T00:00:01.000Z",
+      stopReason: "end_turn",
+      text: "PM final reply."
+    });
+
+    await waitFor(() => messages.some((message) =>
+      message.type === "translation-entry"
+      && message.entry.id === "pm-final"
+      && message.entry.status === "translating"
+    ));
+
+    const outputPromise = service.translateGatewayOutput({
+      repoRoot: "/repo",
+      taskSlug: "demo-task",
+      role: "project-manager",
+      text: "PM final reply.",
+      sourceEntryIds: ["pm-final"]
+    });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(translatorCalls).toHaveLength(1);
+
+    translator.resolve();
+    await expect(outputPromise).resolves.toBe("PM 译文。");
+    expect(translatorCalls).toHaveLength(1);
   });
 
   it("translates assistant tool_use text when output mode is all", async () => {
@@ -1367,26 +1792,26 @@ describe("translation-service", () => {
       role: "coder",
       claudeSessionId: "claude-coder"
     });
-    const reviewerSession = createRoleSessionRecord({
-      id: "session-reviewer",
-      role: "reviewer",
-      claudeSessionId: "claude-reviewer"
+    const testerSession = createRoleSessionRecord({
+      id: "session-tester",
+      role: "tester",
+      claudeSessionId: "claude-tester"
     });
     const transcripts = createSessionTranscriptStub();
     const translator = createSelectiveDeferredTranslationWorkerServiceStub("Coder output is slow.");
     const service = createTranslationService({
       appSettings,
       translationWorkerService: translator,
-      runtime: createRuntimeStub([coderSession, reviewerSession]),
-      sessionRegistry: createRegistryStub([coderSession, reviewerSession]),
+      runtime: createRuntimeStub([coderSession, testerSession]),
+      sessionRegistry: createRegistryStub([coderSession, testerSession]),
       transcripts,
       sessionService: {} as SessionService
     });
 
     const coderMessages: TranslationWsMessage[] = [];
-    const reviewerMessages: TranslationWsMessage[] = [];
+    const testerMessages: TranslationWsMessage[] = [];
     service.subscribeToSession("session-coder", (message) => coderMessages.push(message));
-    service.subscribeToSession("session-reviewer", (message) => reviewerMessages.push(message));
+    service.subscribeToSession("session-tester", (message) => testerMessages.push(message));
 
     transcripts.emit("session-coder", {
       kind: "text",
@@ -1401,17 +1826,17 @@ describe("translation-service", () => {
       && message.entry.status === "translating"
     ));
 
-    transcripts.emit("session-reviewer", {
+    transcripts.emit("session-tester", {
       kind: "text",
-      id: "reviewer-fast",
+      id: "tester-fast",
       timestamp: "2026-05-30T00:00:01.000Z",
       stopReason: "end_turn",
-      text: "Reviewer output should not wait."
+      text: "Tester output should not wait."
     });
 
-    await waitFor(() => reviewerMessages.some((message) =>
+    await waitFor(() => testerMessages.some((message) =>
       message.type === "translation-entry"
-      && message.entry.id === "reviewer-fast"
+      && message.entry.id === "tester-fast"
       && message.entry.status === "translated"
     ));
     expect(coderMessages.some((message) =>
@@ -1477,7 +1902,7 @@ describe("translation-service", () => {
       agent: {
         description: "Review changes",
         prompt: "Check the patch carefully.",
-        subagent_type: "reviewer"
+        subagent_type: "tester"
       }
     });
 
@@ -1672,8 +2097,11 @@ function createAlwaysFailTranslationWorkerServiceStub(): Pick<TranslationWorkerS
   };
 }
 
-function createDeferredTranslationWorkerServiceStub(text = "translated"): Pick<TranslationWorkerService, "createConversationJob" | "validateConversationResult" | "getState"> & { resolve(): void } {
-  const service = createTranslationWorkerServiceStub([], text);
+function createDeferredTranslationWorkerServiceStub(
+  text = "translated",
+  calls: unknown[] = []
+): Pick<TranslationWorkerService, "createConversationJob" | "validateConversationResult" | "getState"> & { resolve(): void } {
+  const service = createTranslationWorkerServiceStub(calls, text);
   let resolveTranslation: (() => void) | undefined;
   let resolved = false;
   return {
@@ -1777,6 +2205,31 @@ function createRegistryStub(
   };
 }
 
+function createRoundServiceStub(overrides: Partial<VcmSessionRoundState> = {}): TranslationServiceDeps["roundService"] {
+  return {
+    async getSessionRoundState(input) {
+      return {
+        taskSlug: input.taskSlug,
+        status: "stopped",
+        roundId: "round-1",
+        activeRole: "project-manager",
+        stoppedAt: "2026-05-30T00:00:02.000Z",
+        roundSequence: 1,
+        turnCount: 1,
+        completedTurnCount: 1,
+        totalRoundCount: 1,
+        totalTurnCount: 1,
+        totalCompletedTurnCount: 1,
+        totalCcActiveMs: 1000,
+        currentRoundCcActiveMs: 1000,
+        roles: ["project-manager"],
+        updatedAt: "2026-05-30T00:00:02.000Z",
+        ...overrides
+      };
+    }
+  };
+}
+
 function createTranscriptStub(subscribeCalls: Array<{
   session: RoleSessionRecord;
   options?: ClaudeTranscriptSubscribeOptions;
@@ -1833,6 +2286,28 @@ function createRoleSessionRecord(overrides: Partial<RoleSessionRecord> = {}): Ro
   };
 }
 
+function assistantTranscriptLine(
+  uuid: string,
+  timestamp: string,
+  text: string,
+  stopReason = "end_turn"
+): string {
+  return JSON.stringify({
+    type: "assistant",
+    uuid,
+    timestamp,
+    message: {
+      stop_reason: stopReason,
+      content: [
+        {
+          type: "text",
+          text
+        }
+      ]
+    }
+  });
+}
+
 function createClock(values: string[]): () => string {
   let index = 0;
   return () => values[Math.min(index++, values.length - 1)] ?? values[values.length - 1] ?? "2026-05-30T00:00:00.000Z";
@@ -1877,7 +2352,7 @@ function createProjectServiceStub() {
       return {
         version: 1,
         repoRoot,
-        defaultRoles: ["project-manager", "architect", "coder", "reviewer"],
+        defaultRoles: ["project-manager", "architect", "coder", "tester"],
         handoffRoot: ".ai/vcm/handoffs",
         stateRoot: ".ai/vcm",
         terminalBackend: "node-pty",

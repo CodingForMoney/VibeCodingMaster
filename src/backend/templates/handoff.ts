@@ -1,11 +1,23 @@
 export function renderArchitecturePlanTemplate(taskSlug: string): string {
   return `# Architecture Plan: ${taskSlug}
 
-## Context
+## Accepted Scope
+
+TBD
+
+## Current Code Reality
 
 TBD
 
 ## Architecture Decision
+
+TBD
+
+## Module/File Plan
+
+TBD
+
+## Public Surface Impact
 
 TBD
 
@@ -15,19 +27,23 @@ Task-specific context and coder guidance go here, not in source-code comments.
 Source-code comments should only describe durable behavior, contracts, invariants,
 error boundaries, or non-obvious logic that should remain useful after this task.
 
-| ID | File | Action | Task Context | Durable Code Comment Needed | Coder Work | Allowed Freedom | VCM:CODE | Proof Point | Replan Trigger |
-| --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| SCF-001 | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD |
+| ID | File / Action | Why In Scope | Coder Work | Allowed Freedom | Expected VCM:CODE | Durable Comment Needs | Behavior / Contract Proof Points |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| SCF-001 | TBD | TBD | TBD | TBD | TBD | TBD | TBD |
 
-## Implementation Plan
-
-TBD
-
-## Risks
+## Tester Coverage Hints
 
 TBD
 
-## Stop Conditions
+## Docs Impact
+
+TBD
+
+## Known Risks
+
+TBD
+
+## Coder Handoff Notes
 
 TBD
 `;
@@ -46,22 +62,91 @@ At task close, promote still-relevant confirmed issues to \`docs/known-issues.md
 `;
 }
 
-export function renderReviewReportTemplate(taskSlug: string): string {
-  return `# Review Report: ${taskSlug}
+export function renderTestReportTemplate(taskSlug: string): string {
+  return `# Test Report: ${taskSlug}
 
-## Summary
+Test Result: pass|fail
 
-TBD
-
-## Findings
+## Evidence Reviewed
 
 TBD
 
-## Validation
+## Tests Added Or Updated
 
 TBD
 
-## Decision
+## Commands Run Or Checked
+
+TBD
+
+## Validation Results
+
+TBD
+
+## Failed Expectations
+
+TBD
+
+## Reproduction Steps
+
+TBD
+
+## Skipped Checks With Reasons
+
+TBD
+
+## Coverage Gaps
+
+TBD
+
+## Blocking Validation Issues
+
+TBD
+`;
+}
+
+export function renderCoderCompletionTemplate(taskSlug: string): string {
+  return `# Coder Completion: ${taskSlug}
+
+Decision: ready_for_review|incomplete|failed
+
+## Scaffold Completion
+
+TBD
+
+## Remaining Markers
+
+TBD
+
+## Changed Files
+
+TBD
+
+## Private Helpers Added
+
+TBD
+
+## Manifest Deviations
+
+TBD
+
+## Generated Context
+
+TBD
+
+## Baseline Tests Added Or Updated
+
+TBD
+
+## L0/L1 Validation
+
+TBD
+
+## Worker Results
+
+TBD
+
+## Objective Failures
 
 TBD
 `;
@@ -117,11 +202,11 @@ TBD
 
 ## Scope Traceability
 
-### Expected Changes
+### Expected Files
 
 TBD
 
-### Supporting Changes
+### Supporting Files
 
 TBD
 
@@ -129,11 +214,11 @@ TBD
 
 TBD
 
-### Unexplained Changes
+### Unexplained Files
 
 TBD
 
-### High-Risk Unexpected Changes
+### High-Risk Unexpected Files
 
 TBD
 
@@ -146,6 +231,10 @@ TBD
 TBD
 
 ## Known Issues Disposition
+
+TBD
+
+## Gate Review Gates
 
 TBD
 

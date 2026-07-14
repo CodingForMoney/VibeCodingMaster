@@ -1,54 +1,59 @@
 # VCM Claude Code Best Practices
 
-Last updated: 2026-06-21
+Last updated: 2026-07-11
 
 This is the current VCM-specific Claude Code / AI coding best-practices guide.
-It is based on the latest `example/rust-layered` harness baseline.
+It describes how VCM's harness, roles, runtime state, and task workflow should
+fit together. It is not installed into target repositories. Target repositories
+receive the concise root `CLAUDE.md` block, role agents, repo-local skills,
+harness tools, generated-context support, and project-owned durable docs.
 
-Do not install this document into target repositories. Target repositories should
-receive a concise root `CLAUDE.md` VCM block, role agents, repo-local VCM
-skills, harness tools, Translator harness files, and project-owned
-durable docs.
-
-`docs/cc-best-practices.md` is archived as the old generic baseline. Current VCM
-implementation should use this document and `docs/full-harness-baseline.md`.
+`docs/cc-best-practices.md` is archived as the generic Claude Code harness
+reference. Use this document for VCM-specific behavior.
 
 ## 1. Core Principle
 
-VCM separates three concerns:
+VCM separates three kinds of content:
 
-- Harness-managed files: VCM owns, upgrades, repairs, audits, and can uninstall
-  these through deterministic installer definitions and managed markers.
-- Project-owned durable docs: VCM bootstrap may create or initialize these, but
-  they become project truth and are not VCM-owned harness.
-- Runtime state: VCM writes these during task execution and cleans them up after
-  durable facts are promoted.
+- **Harness-managed files**: fixed VCM templates, managed blocks, hooks, role
+  agents, skills, and runtime tools owned by the installer.
+- **Project-owned durable docs**: architecture, testing, module docs, and known
+  issues. VCM bootstrap may draft them, but they become project truth.
+- **Runtime state**: task/session/message/job/gate/translation state written
+  during execution and cleaned or reconciled when the task, app, or project
+  changes state.
 
-Temporary documents should be deleted. Durable documents should be updated.
-Completed routine plans, task-local handoffs, logs, and job state should not pile
-up as permanent repository history.
+Temporary coordination files should disappear. Durable facts should be promoted
+to source, tests, durable docs, commits, PR text, or known issues.
 
-## 2. Current Repo Harness Baseline
+## 2. Fixed Harness Baseline
 
-The current baseline is represented by `example/rust-layered`.
+The current baseline is represented by `example/rust-layered` and by the fixed
+installer definitions.
 
 Fixed installer files:
 
 ```text
 CLAUDE.md
 .gitignore
+.ai/vcm-harness-manifest.json
 .claude/settings.json
+docs/GLOSSARY.md
+docs/CODING_STANDARDS.md
 .claude/agents/project-manager.md
 .claude/agents/architect.md
 .claude/agents/coder.md
-.claude/agents/reviewer.md
+.claude/agents/tester.md
 .claude/agents/gate-reviewer.md
+.claude/agents/translator.md
+.claude/agents/harness-engineer.md
+.claude/agents/vcm-coder-worker.md
 .claude/skills/vcm-route-message/SKILL.md
 .claude/skills/vcm-final-acceptance/SKILL.md
 .claude/skills/vcm-long-running-validation/SKILL.md
 .claude/skills/vcm-harness-bootstrap/SKILL.md
 .claude/skills/vcm-gate-review/SKILL.md
-.claude/agents/translator.md
+.claude/skills/vcm-report-harness-issue/SKILL.md
 .ai/tools/generate-module-index
 .ai/tools/generate-public-surface
 .ai/tools/request-gate-review
@@ -65,9 +70,6 @@ Derived bootstrap artifacts:
 .ai/generated/public-surface.json
 ```
 
-The generated artifacts are produced by generator tools during bootstrap or
-later maintenance work. They are not hand-authored fixed templates.
-
 Runtime roots:
 
 ```text
@@ -75,21 +77,13 @@ Runtime roots:
 .claude/worktrees/
 ```
 
-Not part of the current baseline:
+Not part of the current fixed baseline:
 
 ```text
 .claude/commands/
 .claude/agents/optional/
 .ai/task-specs/
 .ai/vcm/tasks/
-.ai/vcm/handoffs/role-commands/
-.ai/vcm-harness-manifest.json
-docs/plans/active/
-docs/plans/completed/
-docs/MODULE_MAP.md
-docs/SECURITY.md
-docs/DEPENDENCY_RULES.md
-docs/AI_WORKFLOW.md
 .ai/generated/test-map.json
 .ai/tools/check-fast
 .ai/tools/check-changed
@@ -106,10 +100,22 @@ Do not reintroduce these unless there is a current VCM requirement.
 
 ## 3. Harness Ownership
 
-VCM harness ownership is defined by the installer code and by managed markers.
-The current implementation does not use `.ai/vcm-harness-manifest.json`.
+VCM harness ownership is defined by fixed installer entries, managed markers,
+and `.ai/vcm-harness-manifest.json`.
 
-VCM-owned managed blocks use markers such as:
+The manifest records:
+
+- schema and manager
+- `harnessVersion`, using the VCM package version
+- fixed entries and ownership mode
+- runtime roots
+- JSON ownership for `.claude/settings.json` hooks/env
+
+VCM may ignore a change where only `harnessVersion` differs. The manifest should
+be updated together with real fixed-harness changes, not as standalone version
+churn.
+
+Managed blocks use:
 
 ```md
 <!-- VCM:BEGIN version=1 -->
@@ -125,93 +131,152 @@ For `.gitignore`, VCM uses:
 # VCM:END
 ```
 
-Whole-file and raw-file harness files are owned by VCM only when their paths are
-listed by the fixed installer. VCM uninstall should remove only VCM-owned
-managed blocks or unchanged VCM-owned whole files. User-authored project docs
-must not be deleted by harness uninstall.
+Rules:
+
+- VCM may replace content inside managed blocks.
+- VCM must preserve user-authored content outside managed blocks.
+- Whole-file harness files are VCM-owned only when listed by the fixed
+  installer.
+- Project durable docs are not VCM-owned harness files after creation.
+- `.claude/settings.json` is JSON-merged; VCM owns only its hook/env entries.
 
 ## 4. Project-Owned Durable Docs
 
-The current Rust layered example uses:
+The current project doc baseline is:
 
 ```text
+docs/GLOSSARY.md
+docs/CODING_STANDARDS.md
 docs/ARCHITECTURE.md
 <module>/ARCHITECTURE.md
 docs/TESTING.md
 docs/known-issues.md
-docs/plans/
+docs/plans/               # only for durable long-running plans
 ```
 
 Ownership:
 
-- Architect owns `docs/ARCHITECTURE.md`, module-level `ARCHITECTURE.md`, and
-  promotion of unresolved durable issues to `docs/known-issues.md`.
-- Reviewer owns `docs/TESTING.md`, validation strategy, test adequacy, and final
-  validation confidence.
-- `docs/plans/` is for durable plans only when a large task needs one.
-  Completed routine plans should be deleted after durable facts are promoted.
+- Architect owns architecture planning, module boundaries, code scaffolding,
+  Debug Mode, docs sync, and durable architecture docs.
+- Tester owns independent validation and `docs/TESTING.md` as current
+  validation strategy, with integration/E2E case lists.
+- PM owns routing and final evidence acceptance, not technical analysis.
+- Coder owns implementation, baseline unit/contract/regression tests, scaffold
+  completion, and ordinary coding standards.
 
-Project-owned durable docs are not VCM harness entries. VCM bootstrap may draft
-or initialize them, but after creation they belong to the project.
+Durable docs must describe current project truth. They must not become task
+logs, terminal logs, or archives of intermediate attempts.
 
 ## 5. Runtime State
 
-Task runtime state lives under `.ai/vcm/` in the task worktree or connected repo.
-It is task-local and temporary.
+Task runtime state lives under `.ai/vcm/` in the task worktree. Project-scoped
+tool state can live under `.ai/vcm/` in the connected base repo.
 
-Current runtime files and directories:
-
-```text
-.ai/vcm/handoffs/
-.ai/vcm/handoffs/messages/
-.ai/vcm/handoffs/architecture-plan.md
-.ai/vcm/handoffs/review-report.md
-.ai/vcm/handoffs/docs-sync-report.md
-.ai/vcm/handoffs/final-acceptance.md
-.ai/vcm/handoffs/known-issues.md
-.ai/vcm/gate-reviews/
-.ai/vcm/jobs/<job-id>/
-.ai/vcm/harness-engineer/session.json
-.ai/vcm/bootstrap/session.json
-```
-
-App-local VCM task records live outside the connected repository:
+Current runtime paths include:
 
 ```text
-<vcmDataDir>/projects/<project-id>/tasks/<task-slug>.json
+<taskRepoRoot>/.ai/vcm/handoffs/
+<taskRepoRoot>/.ai/vcm/handoffs/messages/
+<taskRepoRoot>/.ai/vcm/handoffs/role-commands/
+<taskRepoRoot>/.ai/vcm/handoffs/architecture-plan.md
+<taskRepoRoot>/.ai/vcm/handoffs/architecture-diagnosis.md
+<taskRepoRoot>/.ai/vcm/handoffs/coder-completion.md
+<taskRepoRoot>/.ai/vcm/handoffs/test-report.md
+<taskRepoRoot>/.ai/vcm/handoffs/docs-sync-report.md
+<taskRepoRoot>/.ai/vcm/handoffs/final-acceptance.md
+<taskRepoRoot>/.ai/vcm/handoffs/known-issues.md
+<taskRepoRoot>/.ai/vcm/gate-reviews/
+<taskRepoRoot>/.ai/vcm/jobs/<job-id>/
+<taskRepoRoot>/.ai/vcm/memory/
+<taskRepoRoot>/.ai/vcm/memory-review/
+<baseRepoRoot>/.ai/vcm/memory/
+<baseRepoRoot>/.ai/vcm/translations/
+<baseRepoRoot>/.ai/vcm/harness-engineer/
+<baseRepoRoot>/.ai/vcm/bootstrap/
+<baseRepoRoot>/.ai/vcm/harness-feedback/
 ```
 
-Runtime state is deleted during task cleanup after useful facts are promoted to
-code, tests, durable docs, PR text, or commit history.
+App-local records live under `<vcmDataDir>/projects/` and app settings live in
+`<vcmDataDir>/settings.json`.
 
-## 6. Role Model
+Runtime recovery on project connect should clear or reconcile stale running
+state, recover project tool sessions, recover task rounds, clear impossible
+activity, and remove temporary translation runtime leftovers. Runtime process
+ids are in-memory checks, not durable project data.
 
-VCM uses four core roles:
+## 6. Task and Worktree Model
 
-- `project-manager`: user-facing flow manager. It routes work, tracks gates,
-  asks the user for product or approval decisions, and performs final evidence
-  acceptance. It does not perform technical analysis.
-- `architect`: technical planner and docs-sync owner. It defines module/file
-  responsibilities, cross-file callable surfaces, public contracts, phase
-  boundaries, risks, and durable docs updates. Before coder work starts,
-  architect writes the plan with a Scaffold Manifest whose rows have stable
-  IDs, and materializes only the minimum necessary code scaffolding with
-  durable contract comments and `VCM:CODE <ID>` placeholders.
-- `coder`: implementation owner. It changes production code and baseline unit
-  tests within the approved plan. It follows the architect-defined scaffold,
-  implements and removes `VCM:CODE` placeholders, reports Scaffold Completion
-  by ID in handoff, follows general coding standards, and does not change
-  architecture or durable docs.
-- `reviewer`: independent validation owner. It reads code as needed, writes or
-  updates tests, owns `docs/TESTING.md`, and decides validation sufficiency.
-  `docs/TESTING.md` must be current validation strategy, not a task log, and
-  must include reviewable integration/E2E case lists. Production fixes go back
-  to coder; design conflicts go back to architect.
+VCM is worktree-only:
 
-Roles work sequentially in one task worktree. If `git status` shows uncommitted
-changes, commit them before handing off to another role.
+```text
+one task
+  -> one branch
+  -> one task worktree
+  -> one handoff root
+  -> one VCM role-session set
+```
 
-## 7. Task Flow
+Tasks do not run directly in the connected base repo. Roles for the same task
+share the same task worktree and hand off sequentially.
+
+Harness changes that affect the task should be made in the active task
+worktree. Fixed-harness updates should be committed immediately so users review
+commit diff, not scattered unstaged changes. Harness Engineer owns AI bootstrap
+and harness-maintenance commits made during its turn.
+
+## 7. Role Model
+
+VCM roles:
+
+- `project-manager`: user-facing orchestration hub, PM Managed Mode owner,
+  routing owner, gate tracker, final evidence acceptance owner, and PR
+  preparation owner.
+- `architect`: architecture plan, Scaffold Manifest, code scaffolding, Debug
+  Mode, complete task planning, module docs, and docs sync.
+- `coder`: implementation inside the approved plan, scaffold completion,
+  baseline tests, and cleanup of task-only code markers/comments.
+- `tester`: independent validation, test adequacy, missing test additions,
+  integration/E2E case assessment, test report, and `docs/TESTING.md`.
+- `gate-reviewer`: optional VCM flow role. It is visible when any Gate Review
+  gate is enabled or a gate-reviewer session already exists. It is task-scoped
+  in the active worktree, uses normal Claude hook/Round/translation handling,
+  and does not participate in route-file dispatch.
+
+Tool roles:
+
+- `translator`: project-scoped translation tool role. It is not part of VCM
+  workflow round completion and does not appear in the top role tab bar.
+- `harness-engineer`: project-scoped harness maintenance tool role. It is not
+  part of task workflow round completion.
+
+Project-scoped tool roles persist project state under the base repo, but when
+they perform task work their execution cwd must be the active task worktree.
+When task context changes, VCM should move/resume them safely instead of letting
+old worktree cwd state leak into the next task.
+
+## 8. Launch Template and Permissions
+
+Launch template settings live in app preferences, not in the target repository.
+The template stores permission mode, model, and effort for every VCM role.
+
+Permission options:
+
+```text
+bypassPermissions
+plan
+default
+```
+
+`bypassPermissions` is the default because VCM expects users to run in a
+controlled local boundary such as a Dev Container, VM, or trusted task
+worktree. The template also stores task auto-orchestration preference.
+
+One-click start starts or resumes the four core VCM roles. If any Gate Review
+gate is enabled, it also starts or resumes Gate Reviewer with the saved template
+entry. Translator and Harness Engineer are controlled from their own tool-role
+panels, not from the main task launch template.
+
+## 9. PM Flow and Managed Mode
 
 Default code-change route:
 
@@ -219,96 +284,134 @@ Default code-change route:
 project-manager
   -> architect
   -> coder
-  -> reviewer
+  -> tester
   -> architect docs sync
   -> project-manager final acceptance
 ```
 
-Shorter routes:
+Additional routes:
 
-- Docs-only work: `project-manager -> architect -> project-manager final acceptance`
+- A task that begins with Debug or Architecture Diagnosis and produces code
+  changes uses a complete code-delivery flow:
+  `project-manager -> architect mode -> code-diff Gate Review -> tester -> architect docs sync -> project-manager final acceptance`
+- Debug or Architecture Diagnosis entered from an active main flow is a branch:
+  suspend the main flow, record its resume point, run the mode through code-diff
+  Gate Review and tester, then return to that resume point without branch-level
+  final acceptance.
+- An analysis-only primary Architecture Diagnosis completes from its diagnosis
+  result without final acceptance.
+- Docs-only work: `project-manager -> architect -> project-manager completion`
 - Test-only or validation-only work:
-  `project-manager -> reviewer -> project-manager final acceptance`
+  `project-manager -> tester -> project-manager completion`
 
 If a docs/test/validation-only task reveals required code, architecture, public
 contract, dependency, durable-doc, or validation-strategy changes, route back
 through the full code-change flow.
 
-Complex tasks may be split by architect into phases. PM dispatches one
-architect-defined phase at a time and must not split, merge, reorder, or redefine
-phases. A role may return partial completed work and ask PM for continuation, but
-workload or context size is not a valid reason to change the architect plan.
+PM Managed Mode applies only when the user explicitly requests it. PM must drive
+the task to completion, route ordinary technical decisions to the responsible
+role, and ask the user only when user intent, authorization, real-world
+constraints, external accounts/secrets/data access, cost, production permission,
+sensitive data access, durable-doc conflict, or a proven requested-outcome change
+requires explicit user direction.
 
-## 7.1 Architecture Plan And Code Scaffolding
+## 10. Architecture Plan and Scaffold
 
-For code changes, the architect plan is not only a markdown handoff. It is a
-plan document plus a Scaffold Manifest and the minimum necessary code
-scaffolding.
+For code changes, architect writes `.ai/vcm/handoffs/architecture-plan.md`.
 
-The plan document defines affected modules, changed or created files, file
-responsibilities, why each file is in scope, user-visible behavior changes,
-non-private cross-file callable surfaces, docs impact, risks, and Replan
-triggers.
+The plan must cover:
 
-The Scaffold Manifest carries task-specific file context for the current handoff:
-stable row ID, why a file is in scope, what coder should implement, allowed
-implementation freedom, expected `VCM:CODE` placeholders, durable code comment
-needs, proof points, and Replan triggers. Task context, phase notes, handoff
-instructions, temporary rationale, and coder guidance belong in the Scaffold
-Manifest, not in source-code comments.
+- accepted scope
+- current code reality
+- architecture decision
+- module/file plan
+- public surface impact
+- Scaffold Manifest
+- Tester Coverage Hints
+- docs impact
+- known risks
+- coder handoff notes
 
-Code scaffolding materializes that plan in the repository before coder work
-starts:
+The Scaffold Manifest carries task-specific context for coder. Task context,
+temporary rationale, implementation-order notes, and coder guidance belong in
+the manifest, not in permanent source comments.
 
-- new modules or files are created when needed
-- durable behavior, contracts, invariants, error boundaries, or non-obvious
-  logic are documented in code only when they should remain useful after the
-  task is complete
-- new or changed non-private callable surfaces are defined directly in code with
-  signature shape and contract comments
-- incomplete implementation bodies are marked with `VCM:CODE <Scaffold Manifest ID>`
+Code scaffolding may create files and define non-private callable surfaces, but
+incomplete implementation must use `VCM:CODE <Scaffold Manifest ID>` markers.
+Coder removes/completes those markers and reports Scaffold Completion by ID.
 
-Coder implements the marked placeholders and may add private helpers, but cannot
-change file responsibilities, callable-surface signatures, or contract intent
-without architect replan. Coder handoff reports Scaffold Completion by manifest
-ID, including completed markers, remaining markers if any, private helpers
-added, manifest deviations, and whether Replan is needed.
+The active architecture plan should describe the full accepted task scope. It
+may include implementation order, but that order must not defer requested scope.
+The plan is the current executable plan, not a changelog; revisions should
+replace superseded decisions and stale scaffold rows instead of appending
+history.
 
-Architect may also enter Debug Mode when PM routes bugs, failing tests,
-build/runtime failures, or unclear defects. Debug Mode allows architect to read
-source/tests, edit code, add temporary diagnostics, write focused verification,
-and run tests until the root cause is known. Architect may directly finish only
-localized fixes that add no new module, add no new public or cross-file callable
-surface, and stay under 500 changed production-code lines. Architect-run
-validation is diagnostic evidence, not final acceptance; reviewer still performs
-independent final validation.
+## 11. Route Messages
 
-## 8. Route Messages
+Use `vcm-route-message` for every VCM role dispatch, question, result, blocker,
+or finding.
 
-Use the `vcm-route-message` skill whenever a VCM role hands off work, asks a
-question, reports a result, reports a blocker, or raises a finding.
-
-Current route file path:
+Route path:
 
 ```text
 .ai/vcm/handoffs/messages/<from-role>-<to-role>.md
 ```
 
-The skill is a route-file writing protocol. It should not encode the full role
-policy; role permissions belong in root and role `CLAUDE.md` files.
+The filename is authoritative for source and target. Do not duplicate `from` or
+`to` in frontmatter.
 
-The route file name is authoritative for source and target. Do not duplicate
-`from` or `to` in frontmatter.
+After writing or updating a route file, the role must end the current Claude
+Code turn. Roles must not poll route files, loop, wait for another role, paste
+directly into another role terminal, or use Claude Code Task/Subagent to replace
+VCM role routing.
 
-After writing or updating a route file, end the current Claude Code turn. Do not
-poll route files, loop, wait for another role, paste directly into another role
-terminal, or use Claude Code Task/Subagent to replace VCM role routing.
+PM may use a lightweight relay message when forwarding a user's clarification,
+confirmation, rejection, preference, or small constraint to an active role.
 
-## 9. Validation
+## 12. Gate Review
+
+Gate Review gates are globally configured in VCM app settings and default off:
+
+```text
+architecture-plan
+validation-adequacy
+code-diff
+```
+
+PM must run `vcm-gate-review` at each trigger point. The tool is the source of
+truth for whether a gate is disabled, not required, already approved, running,
+started, or failed.
+
+Input policy:
+
+- `architecture-plan` uses `.ai/vcm/handoffs/architecture-plan.md` as its core
+  input. Missing or empty core input is `not_required`.
+- `validation-adequacy` uses `.ai/vcm/handoffs/test-report.md` as its core
+  input. Missing or empty core input is `not_required`.
+- `code-diff` is triggered by PM after Coder `Decision: ready_for_review`, an
+  Architect Debug completed code fix, or an Architecture Diagnosis completed
+  code fix. PM supplies the matching `coder`, `architect-debug`, or
+  `architect-diagnosis` source. PM does not inspect commits; the tool reviews
+  committed inputs, returns `not_required` when there are no new commits, and
+  fails to start when the worktree has uncommitted changes.
+- Gates avoid duplicate review by comparing input hashes.
+
+Gate Reviewer writes reports under:
+
+```text
+.ai/vcm/gate-reviews/
+```
+
+Gate Reviewer returns only `approve` or `request_changes`, writes only its
+assigned gate report, does not run tests, and does not choose fix owners,
+Replan, or user-intervention needs. PM routes `architecture-plan` and
+`code-diff` findings to architect, and `validation-adequacy` findings to tester.
+
+## 13. Validation
 
 Validation is role-owned, not wrapper-owned.
 
-VCM defines validation levels in root `CLAUDE.md`:
+VCM validation levels:
 
 - L0: fast format/lint/typecheck/boundary/dependency/project checks
 - L1: coder unit checks for changed behavior and direct regressions
@@ -316,44 +419,28 @@ VCM defines validation levels in root `CLAUDE.md`:
 - L3: smoke E2E checks
 - L4: release/full regression checks
 
-The current Rust example does not use fixed `check-fast`, `check-changed`, or
-`check-module` wrappers. Coder and reviewer use native Rust commands such as
-`cargo test`, `cargo test -p <crate>`, `cargo check`, or project-specific
-commands documented in `docs/TESTING.md`.
+The fixed harness does not install `check-fast`, `check-changed`, or
+`check-module` wrappers. Roles use native project commands documented in
+`docs/TESTING.md`.
 
-Reviewer owns `docs/TESTING.md` as the current validation strategy, not as a
-task log or diagnostic history. It must explain what is tested, why it matters,
-how to run it, when to run it, and known gaps. Integration and E2E tests should
-be documented as reviewable case lists with ID, scenario, entry point, what the
-case proves, key assertions, when to run, and current limitations when relevant.
-Superseded failures, temporary diagnostics, and per-task validation logs belong
-in review reports, PR text, or durable known issues when they must persist.
+Tester owns validation adequacy. Important features should have integration
+or E2E coverage unless the test report explains why such coverage is
+unnecessary or unavailable. Tests must assert real behavior, not mock-call
+rituals or fixture-specific shortcuts.
 
-Long-running commands use `vcm-long-running-validation`, backed by:
+Long-running validation uses `vcm-long-running-validation` backed by:
 
 ```text
 .ai/tools/run-long-check
 .ai/tools/watch-job
 ```
 
-This skill is role-independent. It only handles long-running command execution,
-bounded waiting, file-backed status, timeout, and log summaries. The caller
-decides where to record command evidence.
+VCM roles must not run background Bash. `vcm-bash-guard` denies
+`run_in_background`, `nohup`, `setsid`, `disown`, and trailing `&`.
 
-VCM roles must not run background Bash; a `PreToolUse` hook
-(`.ai/tools/vcm-bash-guard`) denies `run_in_background`, `nohup`, `setsid`,
-`disown`, and trailing `&`. The only sanctioned long-running mechanism is
-`.ai/tools/run-long-check` plus `.ai/tools/watch-job` through
-`vcm-long-running-validation`. The job worker enforces a hard 60 minute
-ceiling and a supervision lease that kills unwatched jobs; `watch-job` watches
-in foreground windows of up to 8 minutes (exit `125` means watch again now),
-and the VCM backend blocks turn-end while a validation job is running. Split
-larger validation/build work or ask the user before suggesting anything longer
-than 60 minutes.
+## 14. Generated Context
 
-## 10. Generated Context
-
-The current example has two generated artifacts:
+Current generated artifacts:
 
 ```text
 .ai/generated/module-index.json
@@ -363,30 +450,26 @@ The current example has two generated artifacts:
 `module-index.json` helps agents find layers, modules, manifests, module docs,
 source files, test files, and workspace dependencies.
 
-`public-surface.json` indexes project public APIs, routes, and externally
-consumed surfaces. It is a machine index, not an architecture document.
+`public-surface.json` indexes public APIs, routes, and externally consumed
+surfaces. It is a machine index, not an architecture document.
 
-Current generated-context support covers Rust/Cargo projects and npm workspace
-TypeScript/JavaScript projects. Other repository shapes must use
-project-specific generators before `.ai/generated/*` is considered reliable.
+Current support covers Rust/Cargo projects and npm workspace TypeScript /
+JavaScript projects. Other repository shapes need project-specific generators
+before `.ai/generated/*` is considered reliable.
 
-There is no `test-map.json`. Rust unit tests live with source where appropriate;
-integration tests use Cargo's normal test layout. Test files are discoverable
-through `module-index.json`.
+Generated artifacts are derived context. Regenerate them after relevant source,
+manifest, module, or public API changes. Do not hand-edit them as durable truth.
 
-Generated artifacts are derived context. They must be regenerated by tools after
-relevant source, manifest, module, or public API changes. They should not be
-hand-edited as durable truth.
-
-## 11. Harness Bootstrap
+## 15. Harness Bootstrap and Feedback
 
 `vcm-harness-bootstrap` is the AI-assisted project understanding and refresh
-procedure. It is not the deterministic installer.
+procedure. It is not the deterministic fixed installer.
 
-It may read the repository and create or refresh project-specific content such
-as:
+Bootstrap may create or refresh:
 
-- `CLAUDE.md` project context outside the VCM managed block
+- project context outside VCM managed blocks in `CLAUDE.md`
+- `docs/GLOSSARY.md`
+- `docs/CODING_STANDARDS.md`
 - `docs/ARCHITECTURE.md`
 - module-level `ARCHITECTURE.md`
 - `docs/TESTING.md`
@@ -394,135 +477,185 @@ as:
 - `.ai/generated/module-index.json`
 - `.ai/generated/public-surface.json`
 
-It must not edit product source, product tests, package manifests, lockfiles,
-deployment config, or secrets. It must not create new validation wrapper tools
-during bootstrap.
+Bootstrap must not edit product source, product tests, package manifests,
+lockfiles, deployment config, secrets, or VCM managed blocks.
 
-Important claims should be marked as verified, inferred, unknown, or needing
-human confirmation.
+VCM runs bootstrap through project-scoped `harness-engineer`:
 
-VCM should run bootstrap through the project-scoped `harness-engineer` session,
-not through a separate temporary terminal or invisible background task:
+- run deterministic fixed installer first
+- start/resume Harness Engineer with execution cwd set to the active task
+  worktree
+- ask it to use `vcm-harness-bootstrap`
+- let Harness Engineer create its own bootstrap commit
+- mark bootstrap complete from the Harness Engineer `Stop` hook
 
-- run the deterministic fixed installer first
-- start or resume the project-scoped `harness-engineer` role with execution cwd set to the active task worktree
-- send a prompt that explicitly requires using `vcm-harness-bootstrap` and creating the bootstrap commit
-- persist the bootstrap run marker under `.ai/vcm/bootstrap/session.json`
-- mark the bootstrap run complete when the `harness-engineer` Stop hook arrives
-- do not create the bootstrap commit in VCM; Harness Engineer owns that commit
+Reusable harness issues are reported through `vcm-report-harness-issue`.
+Harness Engineer verifies them when idle, proposes diffs or VCM issue drafts,
+and waits for user approval before applying normal harness changes.
 
-The UI should expose both stages: fixed install status and bootstrap completion
-status. A failed or disconnected Harness Engineer session should be restartable
-without treating project-owned durable docs as VCM-owned harness files.
+When Auto Memory is enabled, a normal stopped Round with valid Final Acceptance
+may run a separate post-task memory review. Workflow roles write evidence-backed
+drafts sequentially; Harness Engineer consolidates them into shared and
+role-specific memory. Canonical memory lives under the base repository's
+`.ai/vcm/memory/`, while the active worktree contains the role-visible snapshot
+and review history. These auxiliary turns do not reopen the completed Round.
 
-## 12. Final Acceptance
+Task Harness Retrospective runs after that memory workflow. The backend uses the
+current accepted `final-acceptance.md` hash as the ordering key. Automatic and
+manual retrospective requests are allowed only when Auto Memory is disabled or
+completed for that hash; pending, collecting, reviewing, and failed memory work
+blocks them. Retrospective evidence includes the memory drafts, applied diff,
+and current memory. It reviews reusable harness problems exposed by the task,
+not whether the business feature itself is acceptable.
 
-`vcm-final-acceptance` is PM's final evidence audit. PM must not use it for
+## 16. Final Acceptance
+
+`vcm-final-acceptance` is PM's final evidence audit for a complete code-delivery
+flow, including a primary Debug or Architecture Diagnosis flow that produced
+code changes. A Debug or Diagnosis branch inside another active flow returns to
+that flow's recorded resume point and does not run its own final acceptance.
+PM must not use final acceptance for analysis-only or unfinished branch flows, or for
 technical design review, implementation review, source-code analysis, or test
 adequacy analysis.
 
 It checks whether required evidence exists and has clear decisions:
 
-- architect plan or docs-sync decision when needed
-- reviewer decision and validation evidence when needed
+- architecture plan or docs-sync decision when needed
+- tester test result and validation evidence when needed
+- required Gate Review decisions when enabled
 - known-issues disposition
+- cleanup status
 - explicit user approval for high-risk exceptions
-- file-scope explanation at changed-file-list level
+- changed-file scope explanation
 
-Do not accept when required role evidence is missing, reviewer findings are
+Do not accept when required role evidence is missing, tester findings are
 unresolved, docs sync is missing for durable changes, known-issues disposition is
 missing, or unexplained high-risk files remain.
 
-## 13. Documentation Lifecycle
+## 17. Translation
 
-Temporary files should be deleted after the task:
-
-- route messages
-- handoff artifacts
-- job logs and status files
-- app-local task records
-- routine completed plans
-
-Durable facts should be moved into:
-
-- code
-- tests
-- `docs/ARCHITECTURE.md`
-- module-level `ARCHITECTURE.md`
-- `docs/TESTING.md`
-- `docs/known-issues.md`
-- PR text
-- commit history
-
-Do not keep completed task notes as a permanent docs archive unless they remain
-valuable durable planning knowledge.
-
-## 14. Embedded Terminal
-
-The embedded terminal should run through backend-managed PTY/session services,
-not as front-end-only command execution. Frontend code displays and controls
-session streams; process ownership, logs, task routing, and terminal safety belong
-to backend services.
-
-High-risk terminal work includes process lifecycle, cross-device control,
-gateway-submitted prompts, and command authorization.
-
-## 15. Mobile Gateway
-
-VCM 0.2 gateway should expose a conservative mobile command surface through
-Tencent iLink Bot API / Weixin DM.
-
-Gateway product rules:
-
-- support Weixin DM only, not group chat
-- bind one mobile Weixin DM identity to one desktop VCM instance
-- do not bind gateway to a single project or task
-- let the bound phone select among the projects and tasks available to that VCM
-  instance
-- send ordinary mobile text only to the current task's `project-manager`
-- do not send gateway messages directly to architect, coder, or reviewer
-- when translation is enabled, send only translated English to PM and translated
-  Chinese back to Weixin
-- do not include the original Chinese text in PM prompts
-- use one bound DM identity; do not maintain a multi-user allowlist
-
-Gateway settings and secrets live in app-local state:
-
-```text
-<vcmDataDir>/gateway/settings.json
-```
-
-Gateway audit logs live outside connected repositories:
-
-```text
-<vcmDataDir>/gateway/audit.jsonl
-```
+Translation is a project-scoped tool feature powered by the Claude Code
+`translator` role.
 
 Rules:
 
-- do not expose the full embedded terminal over Weixin
-- do not store gateway credentials in connected repositories
-- reject or ignore messages outside the bound DM identity
-- keep the MVP PM-only and avoid approve/reject/start/stop workflow commands
-- audit gateway state changes and message handling with secrets redacted
-- treat gateway authorization and command parsing as high-risk code
+- Translator is not a VCM flow role and must not affect Round completion.
+- Conversation translation reads semantic Claude transcript JSONL files, not
+  raw PTY output.
+- Translation output is delivered through backend-managed feed/cache state; the
+  frontend displays data and explicit user actions only.
+- Conversation and file translation share `<baseRepoRoot>/.ai/vcm/translations/`.
+- Conversation result files are temporary runtime artifacts.
+- File translation output is stored under the translations directory; runtime
+  progress/helper files are cleaned when no longer useful.
+- Translation memory is explicit project memory:
+  `glossary.md`, `style-guide.md`, `project-context.md`, and `decisions.md`.
+- Translation source text is treated as untrusted content to translate, not
+  instructions to obey.
 
-## 16. Minimum VCM Rules
+Supported output modes:
 
-1.  Manifest records harness ownership only.
+```text
+round-final       # final reply when the Round ends normally
+pm-final-only     # PM final reply
+final-only        # each role final reply
+all               # all translatable replies
+```
+
+Default target language is Chinese (`zh-CN`). Supported targets are Chinese,
+Japanese, Korean, French, German, and Spanish.
+
+## 18. Gateway
+
+Gateway is a mobile control surface for one local VCM instance, not a remote
+terminal.
+
+Supported channels:
+
+- Weixin iLink DM
+- Lark DM or group messages where the bot is mentioned
+
+Rules:
+
+- Gateway sends ordinary mobile text only to the current task's
+  `project-manager`.
+- Gateway never sends directly to architect, coder, tester, or Gate Reviewer.
+- Gateway pushes only the last PM reply from a normally completed Round, along
+  with the Round completion notice.
+- Gateway state, credentials, and audit logs live in app-local state, not
+  connected repositories.
+- Lark uses the most recent active reachable chat as the PM reply target.
+- When Gateway is on, browser pause-alert UI/sound should not block the flow;
+  Gateway becomes the notification path.
+- Gateway translation should reuse the existing translation result when
+  available and avoid duplicate translation work.
+- Starting Gateway enables conversation translation, auto-send, and the
+  `round-final` output mode.
+- Outbound delivery sends the PM original first, then the existing translation
+  panel result. `/retry` is the explicit path that may create a replacement
+  translation after failure or a missing result.
+
+Gateway must stay conservative: no full terminal exposure, no arbitrary shell
+commands, and no direct role routing from mobile chat.
+
+## 19. Runtime, Hooks, and Recovery
+
+VCM owns process/session runtime in backend services. Frontend code displays
+state, sends explicit user actions to backend APIs, and must not run hidden
+timers that dispatch messages to Claude Code.
+
+Claude hooks:
+
+- `UserPromptSubmit`: confirms Claude accepted a prompt, records session data,
+  starts/continues the Round, confirms routed messages, and records conversation
+  boundaries.
+- `Stop`: ends the active Turn, starts the stop window, and triggers pending
+  route delivery.
+- `StopFailure`: schedules recovery for retryable failures, handles manual
+  interruption, and eventually records recovery failure.
+- `PostCompact`: refreshes session metadata without changing running/idle flow
+  state.
+- `PermissionRequest`: returns the configured local permission decision.
+
+Role retry is enabled by default. Retryable StopFailure events retry up to 20
+times: first after 1 minute, then +1 minute per attempt. Non-retryable errors
+include authentication, billing, invalid request, model-not-found, and
+max-output-token failures.
+
+Round state is backend-owned. Stop starts a 10 second settle window; a new
+`UserPromptSubmit` inside the window continues the same Round. If no new prompt
+arrives, the Round stops. Flow pause alert sound is a preference; the stopped
+Round itself remains visible even when sound is off.
+
+Session IDs are persisted only after the first real `UserPromptSubmit`.
+Restart clears the stored Claude session id until the next accepted prompt.
+Resume failure must fall back or surface a clear error; VCM must not keep
+polling a missing terminal session forever.
+
+## 20. Minimum VCM Rules
+
+1.  Fixed harness ownership is defined by installer entries, managed markers,
+    and `.ai/vcm-harness-manifest.json`.
 2.  Project durable docs are project-owned.
-3.  Runtime state under `.ai/vcm/**` is temporary.
-4.  No `.claude/commands/` by default.
-5.  No optional agents by default.
-6.  No role-command files.
-7.  No `.ai/vcm/tasks/` in connected repos.
-8.  No `docs/plans/active` or `docs/plans/completed`.
-9.  No `test-map.json` by default.
-10. No fixed `check-*` wrappers by default.
-11. Use native project commands for validation.
-12. Use generated context only when it has a real generator.
-13. Coder owns implementation, baseline unit checks, scaffold completion, and general coding standards.
-14. Reviewer owns independent validation and `docs/TESTING.md` as current testing strategy with integration/E2E case lists.
-15. Architect owns architecture planning, code scaffolding, Debug Mode, and durable architecture docs.
-16. PM owns routing and final evidence acceptance, not technical analysis.
-17. Temporary documents are deleted; durable documents are updated.
+3.  Runtime state under `.ai/vcm/**` is temporary or recoverable.
+4.  All tasks use task worktrees.
+5.  Roles for one task share one task worktree and hand off sequentially.
+6.  Gate Reviewer is an optional VCM flow role, task-scoped when used.
+7.  Translator and Harness Engineer are project-scoped tool roles, not flow
+    roles.
+8.  No `.claude/commands/` by default.
+9.  No optional agents by default.
+10. Role-command files are task runtime dispatch inputs, not fixed harness
+    files or inter-role route messages.
+11. No `.ai/vcm/tasks/` in connected repos.
+12. No `test-map.json` by default.
+13. No fixed `check-*` wrappers by default.
+14. Use native project commands for validation.
+15. Use generated context only when it has a real generator.
+16. Coder owns implementation and scaffold completion.
+17. Tester owns independent validation and current testing strategy.
+18. Architect owns architecture planning, code scaffolding, Debug Mode, and
+    durable architecture docs.
+19. PM owns routing and final evidence acceptance, not technical analysis.
+20. Auto Memory, when enabled, completes before Task Harness Retrospective.
+21. Temporary documents are deleted; durable documents are updated.

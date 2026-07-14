@@ -28,12 +28,14 @@ export interface HarnessPanelProps {
   applyResult?: HarnessApplyResult | null;
   hasActiveTask?: boolean;
   autoTaskHarnessReviewEnabled: boolean;
+  autoMemoryEnabled: boolean;
   busy?: boolean;
   onRefresh(): Promise<void>;
   onApply(): Promise<void>;
   onOpenStudio(): void;
   onOpenRepositoryDiff(): void;
   onAutoTaskHarnessReviewChange(enabled: boolean): void;
+  onAutoMemoryChange(enabled: boolean): void;
   onStartBootstrap(input: BootstrapLaunchOptions): Promise<void>;
   onRestartBootstrap(input: BootstrapLaunchOptions): Promise<void>;
   onStopBootstrap(): Promise<void>;
@@ -46,12 +48,14 @@ export function HarnessPanel({
   applyResult,
   hasActiveTask = false,
   autoTaskHarnessReviewEnabled,
+  autoMemoryEnabled,
   busy = false,
   onRefresh,
   onApply,
   onOpenStudio,
   onOpenRepositoryDiff,
   onAutoTaskHarnessReviewChange,
+  onAutoMemoryChange,
   onStartBootstrap,
   onRestartBootstrap,
   onStopBootstrap,
@@ -181,6 +185,14 @@ export function HarnessPanel({
           label="Auto task harness review"
           title="Automatically ask Harness Engineer to review task harness after final acceptance completes"
           onChange={onAutoTaskHarnessReviewChange}
+        />
+        <SwitchControl
+          checked={autoMemoryEnabled}
+          className="sidebar-switch"
+          disabled={busy}
+          label="Auto memory"
+          title="Collect role memory drafts after Final Acceptance and let Harness Engineer apply reviewed memory"
+          onChange={onAutoMemoryChange}
         />
       </div>
 

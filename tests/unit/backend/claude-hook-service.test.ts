@@ -632,6 +632,182 @@ describe("createClaudeHookService", () => {
     expect(writes).toEqual([]);
   });
 
+  it("notifies Gateway when a StopFailure becomes a terminal role failure", async () => {
+    const gatewayCalls: unknown[] = [];
+    const service = createClaudeHookService({
+      projectService: createProjectServiceStub(),
+      taskService: createTaskServiceStub(),
+      sessionService: {
+        getRoleSession: boundRoleSession,
+        async recordClaudeHookEvent(_repoRoot, input) {
+          return {
+            id: "runtime_coder",
+            claudeSessionId: "claude_coder",
+            taskSlug: input.taskSlug,
+            role: input.role,
+            status: "running",
+            activityStatus: "idle",
+            command: "claude --agent coder",
+            permissionMode: "default",
+            cwd: "/repo",
+            terminalBackend: "node-pty",
+            updatedAt: "2026-06-01T00:00:00.000Z"
+          };
+        }
+      } as never,
+      messageService: {
+        async listPendingRouteFiles() {
+          return [];
+        }
+      } as never,
+      roundService: {
+        async setRoleRecovery() {
+          return {} as never;
+        },
+        async recordClaudeHookEvent() {
+          return {} as never;
+        }
+      } as never,
+      translationService: {
+        async recordConversationBoundary() {
+          return undefined;
+        }
+      } as Pick<TranslationService, "recordConversationBoundary">,
+      appSettings: createAppSettingsStub(),
+      gatewayService: {
+        async handlePmStop() {
+          throw new Error("PM stop should not be used for role failures.");
+        },
+        async handleRoleStopFailure(input) {
+          gatewayCalls.push(input);
+        }
+      }
+    });
+
+    await service.handleHook({
+      taskSlug: "demo-task",
+      role: "coder",
+      event: {
+        hook_event_name: "StopFailure",
+        session_id: "claude_coder",
+        error: "billing_error",
+        error_details: "Payment required"
+      }
+    });
+
+    expect(gatewayCalls).toEqual([{
+      repoRoot: "/repo",
+      taskSlug: "demo-task",
+      role: "coder",
+      error: "billing_error",
+      errorDetails: "Payment required",
+      attempt: 0,
+      maxAttempts: 20
+    }]);
+  });
+
+  it("does not notify Gateway for StopFailure after a manual interrupt", async () => {
+    const calls: string[] = [];
+    const gatewayCalls: unknown[] = [];
+    const service = createClaudeHookService({
+      projectService: createProjectServiceStub(),
+      taskService: createTaskServiceStub(),
+      sessionService: {
+        getRoleSession: boundRoleSession,
+        async recordClaudeHookEvent(_repoRoot, input) {
+          calls.push(`session:${input.eventName}:${input.role}`);
+          return {
+            id: "runtime_coder",
+            claudeSessionId: "claude_coder",
+            taskSlug: input.taskSlug,
+            role: input.role,
+            status: "running",
+            activityStatus: "idle",
+            command: "claude --agent coder",
+            permissionMode: "default",
+            cwd: "/repo",
+            terminalBackend: "node-pty",
+            updatedAt: "2026-06-01T00:00:00.000Z"
+          };
+        }
+      } as never,
+      messageService: {
+        async listPendingRouteFiles() {
+          calls.push("list");
+          return [];
+        }
+      } as never,
+      roundService: {
+        async getSessionRoundState() {
+          calls.push("round-state");
+          return {
+            taskSlug: "demo-task",
+            status: "stopped",
+            activeRole: "coder",
+            stopReason: "manual-interrupt",
+            turnCount: 1,
+            completedTurnCount: 1,
+            totalRoundCount: 1,
+            totalTurnCount: 1,
+            totalCompletedTurnCount: 1,
+            totalCcActiveMs: 0,
+            currentRoundCcActiveMs: 0,
+            roles: ["coder"],
+            updatedAt: "2026-06-01T00:00:00.000Z"
+          } as never;
+        },
+        async setRoleRecovery() {
+          calls.push("set-recovery");
+          return {} as never;
+        },
+        async recordClaudeHookEvent(input) {
+          calls.push(`round:${input.eventName}:${input.role}`);
+          return {} as never;
+        }
+      } as never,
+      translationService: {
+        async recordConversationBoundary(input) {
+          calls.push(`boundary:${input.boundaryKind}:${input.role}`);
+        }
+      } as Pick<TranslationService, "recordConversationBoundary">,
+      appSettings: createAppSettingsStub(),
+      gatewayService: {
+        async handlePmStop() {
+          return undefined;
+        },
+        async handleRoleStopFailure(input) {
+          gatewayCalls.push(input);
+        }
+      }
+    });
+
+    const result = await service.handleHook({
+      taskSlug: "demo-task",
+      role: "coder",
+      event: {
+        hook_event_name: "StopFailure",
+        session_id: "claude_coder",
+        error: "billing_error"
+      }
+    });
+
+    expect(result).toMatchObject({
+      ok: true,
+      eventName: "StopFailure",
+      sessionUpdated: true,
+      dispatchedCount: 0
+    });
+    expect(calls).toEqual([
+      "list",
+      "round-state",
+      "session:StopFailure:coder",
+      "round:StopFailure:coder",
+      "boundary:end:coder"
+    ]);
+    expect(calls).not.toContain("set-recovery");
+    expect(gatewayCalls).toEqual([]);
+  });
+
   it("ends StopFailure without retry when role retry is disabled", async () => {
     const calls: string[] = [];
     const service = createClaudeHookService({
@@ -1232,7 +1408,7 @@ function createProjectServiceStub(): ProjectService {
         config: {
           version: 1,
           repoRoot: "/repo",
-          defaultRoles: ["project-manager", "architect", "coder", "reviewer"],
+          defaultRoles: ["project-manager", "architect", "coder", "tester"],
           handoffRoot: ".ai/vcm/handoffs",
           stateRoot: ".ai/vcm",
           terminalBackend: "node-pty",
@@ -1245,7 +1421,7 @@ function createProjectServiceStub(): ProjectService {
       return {
         version: 1,
         repoRoot: "/repo",
-        defaultRoles: ["project-manager", "architect", "coder", "reviewer"],
+        defaultRoles: ["project-manager", "architect", "coder", "tester"],
         handoffRoot: ".ai/vcm/handoffs",
         stateRoot: ".ai/vcm",
         terminalBackend: "node-pty",

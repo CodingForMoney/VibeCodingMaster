@@ -6,13 +6,14 @@ import {
   createHarnessService,
   parseGitStatusPorcelainV1
 } from "../../../src/backend/services/harness-service.js";
+import { renderLegacyProjectCodingStandardsTemplate } from "../../../src/backend/templates/harness/project-coding-standards.js";
 import type { RoleSessionRecord, StartRoleSessionRequest } from "../../../src/shared/types/session.js";
 
 describe("createHarnessService", () => {
   it("plans and applies recommended harness files when they are missing", async () => {
     const fs = createMemoryFs();
     const service = createHarnessService({ fs });
-    const expectedHarnessFileCount = 18;
+    const expectedHarnessFileCount = 22;
 
     const status = await service.getHarnessStatus("/repo");
     expect(status.needsApply).toBe(true);
@@ -32,20 +33,41 @@ describe("createHarnessService", () => {
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("## VCM Start Here");
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("## VCM Harness Scope");
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("## VCM Task Flow");
+    expect(await fs.readText("/repo/CLAUDE.md")).toContain("All standard workflow routes among project-manager, architect, coder, and tester are PM-hub routes");
+    expect(await fs.readText("/repo/CLAUDE.md")).toContain("Gate Review and tool-role work use their dedicated VCM skills and controllers");
+    expect(await fs.readText("/repo/CLAUDE.md")).toContain("No approval can raise this ceiling");
+    expect(await fs.readText("/repo/CLAUDE.md")).toContain("may be either the task's primary flow or a branch inside an active main flow");
+    expect(await fs.readText("/repo/CLAUDE.md")).toContain("The branch does not run final acceptance");
+    expect(await fs.readText("/repo/CLAUDE.md")).toContain("Final acceptance closes only a complete code-delivery flow");
+    expect(await fs.readText("/repo/CLAUDE.md")).toContain("targeted diagnostic L3 may run in Architect Debug Mode or Architecture Diagnosis Mode");
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("## VCM Worktree Policy");
+    expect(await fs.readText("/repo/CLAUDE.md")).toContain("## VCM Glossary Policy");
+    expect(await fs.readText("/repo/CLAUDE.md")).toContain("docs/GLOSSARY.md");
+    expect(await fs.readText("/repo/docs/GLOSSARY.md")).toContain("# Glossary");
+    expect(await fs.readText("/repo/docs/GLOSSARY.md")).toContain("| Abbreviation | Full Term | Meaning / Allowed Use |");
+    expect(await fs.readText("/repo/docs/CODING_STANDARDS.md")).toContain("# Coding Standards");
+    expect(await fs.readText("/repo/docs/CODING_STANDARDS.md")).toContain("Do not fake completion");
+    expect(await fs.readText("/repo/docs/CODING_STANDARDS.md")).toContain("<!-- VCM:BEGIN version=1 -->");
+    expect(await fs.readText("/repo/docs/known-issues.md")).toContain("## VCM Known Issues Policy");
+    expect(await fs.readText("/repo/docs/known-issues.md")).toContain("affected modules/surfaces");
     expect(await fs.readText("/repo/.gitignore")).toContain("# VCM:BEGIN version=1");
     expect(await fs.readText("/repo/.gitignore")).toContain(".ai/vcm/");
     expect(await fs.readText("/repo/.gitignore")).toContain(".claude/worktrees/");
     expect(await fs.readText("/repo/.gitignore")).not.toContain(".vcm/");
     expect(await fs.readText("/repo/.github/pull_request_template.md")).toContain("## Validation");
-    expect(await fs.readText("/repo/.github/pull_request_template.md")).toContain("Final acceptance completed");
+    expect(await fs.readText("/repo/.github/pull_request_template.md")).toContain("Final acceptance completed for code-change flow");
     expect(await fs.readText("/repo/.claude/skills/vcm-route-message/SKILL.md")).toContain("name: vcm-route-message");
     expect(await fs.readText("/repo/.claude/skills/vcm-route-message/SKILL.md")).toContain("## Purpose");
     expect(await fs.readText("/repo/.claude/skills/vcm-route-message/SKILL.md")).toContain("This skill writes a route file");
+    expect(await fs.readText("/repo/.claude/skills/vcm-route-message/SKILL.md")).toContain("VCM uses project-manager as the routing hub.");
+    expect(await fs.readText("/repo/.claude/skills/vcm-route-message/SKILL.md")).toContain("Non-PM roles must not route directly to each other.");
     expect(await fs.readText("/repo/.claude/skills/vcm-route-message/SKILL.md")).toContain("After writing or updating the route file, end the current Claude Code turn immediately.");
     expect(await fs.readText("/repo/.claude/skills/vcm-final-acceptance/SKILL.md")).toContain("name: vcm-final-acceptance");
-    expect(await fs.readText("/repo/.claude/skills/vcm-final-acceptance/SKILL.md")).toContain("## File Scope Audit");
+    expect(await fs.readText("/repo/.claude/skills/vcm-final-acceptance/SKILL.md")).toContain("only when project-manager is ready to close a complete VCM code-delivery flow");
+    expect(await fs.readText("/repo/.claude/skills/vcm-final-acceptance/SKILL.md")).toContain("Do not use it for docs-only, validation-only, Communication-only, PR-prep, analysis-only Diagnosis");
+    expect(await fs.readText("/repo/.claude/skills/vcm-final-acceptance/SKILL.md")).toContain("## Scope Traceability Audit");
     expect(await fs.readText("/repo/.claude/skills/vcm-final-acceptance/SKILL.md")).toContain("Do not claim to prove that every diff hunk exactly matches the task.");
+    expect(await fs.readText("/repo/.claude/skills/vcm-final-acceptance/SKILL.md")).toContain(".ai/vcm/handoffs/architecture-diagnosis.md");
     expect(await fs.readText("/repo/.claude/skills/vcm-final-acceptance/SKILL.md")).toContain(".ai/vcm/handoffs/final-acceptance.md");
     expect(await fs.readText("/repo/.claude/skills/vcm-harness-bootstrap/SKILL.md")).toContain("name: vcm-harness-bootstrap");
     expect(await fs.readText("/repo/.claude/skills/vcm-harness-bootstrap/SKILL.md")).toContain("AI-assisted project understanding");
@@ -54,24 +76,89 @@ describe("createHarnessService", () => {
     expect(await fs.readText("/repo/.claude/skills/vcm-long-running-validation/SKILL.md")).toContain(".ai/tools/watch-job");
     expect(await fs.readText("/repo/.claude/skills/vcm-gate-review/SKILL.md")).toContain("name: vcm-gate-review");
     expect(await fs.readText("/repo/.claude/skills/vcm-gate-review/SKILL.md")).toContain(".ai/tools/request-gate-review");
+    expect(await fs.readText("/repo/.claude/skills/vcm-gate-review/SKILL.md")).toContain("--source <coder|architect-debug|architect-diagnosis>");
+    expect(await fs.readText("/repo/.claude/skills/vcm-gate-review/SKILL.md")).toContain("validation-only completion");
     expect(await fs.readText("/repo/.claude/skills/vcm-report-harness-issue/SKILL.md")).toContain("name: vcm-report-harness-issue");
     expect(await fs.readText("/repo/.claude/skills/vcm-report-harness-issue/SKILL.md")).toContain(".ai/vcm/harness-feedback/pending/");
     expect(await fs.readText("/repo/.claude/agents/project-manager.md")).toContain("name: project-manager");
     expect(await fs.readText("/repo/.claude/agents/project-manager.md")).toContain("<!-- VCM:BEGIN version=1 -->");
-    expect(await fs.readText("/repo/.claude/agents/project-manager.md")).toContain("Use the routes defined in `CLAUDE.md`");
-    expect(await fs.readText("/repo/.claude/agents/project-manager.md")).toContain("Do not perform technical analysis");
-    expect(await fs.readText("/repo/.claude/agents/project-manager.md")).toContain("Use the `vcm-route-message` skill for every role dispatch");
-    expect(await fs.readText("/repo/.claude/agents/project-manager.md")).toContain("### PR Preparation");
-    expect(await fs.readText("/repo/.claude/agents/project-manager.md")).toContain("### Background Jobs");
-    expect(await fs.readText("/repo/.claude/agents/project-manager.md")).toContain(".github/pull_request_template.md");
-    expect(await fs.readText("/repo/.claude/agents/project-manager.md")).toContain("VCM_TASK_REPO_ROOT");
-    expect(await fs.readText("/repo/.claude/agents/project-manager.md")).toContain("Include the confirmed task repo root and branch in each role message");
-    expect(await fs.readText("/repo/.claude/agents/project-manager.md")).toContain("### Gate Review Gates");
-    expect(await fs.readText("/repo/.claude/agents/architect.md")).toContain("verifiable behavior, phase boundaries, behavior/contract proof points");
-    expect(await fs.readText("/repo/.claude/agents/architect.md")).toContain("Read `.ai/vcm/handoffs/known-issues.md`; promote only confirmed unresolved durable issues");
-    expect(await fs.readText("/repo/.claude/agents/gate-reviewer.md")).toContain("name: gate-reviewer");
-    expect(await fs.readText("/repo/.claude/agents/gate-reviewer.md")).toContain("You are VCM `gate-reviewer`");
-    expect(await fs.readText("/repo/.claude/agents/gate-reviewer.md")).toContain("Use the task and worktree paths named there");
+    const projectManagerAgent = await fs.readText("/repo/.claude/agents/project-manager.md");
+    expect(projectManagerAgent).toContain("Use the PM-hub routes allowed by the `vcm-route-message` skill");
+    expect(projectManagerAgent).toContain("Docs-only flow: PM -> Architect -> PM completes the flow from Architect's result.");
+    expect(projectManagerAgent).toContain("Use the `vcm-final-acceptance` skill only to close a complete code-delivery flow");
+    expect(projectManagerAgent).toContain("Prepare or update a GitHub PR only after the active delivery flow completes");
+    expect(projectManagerAgent).toContain("Do not perform technical analysis");
+    expect(projectManagerAgent).toContain("Use the `vcm-route-message` skill for every role dispatch");
+    expect(projectManagerAgent).toContain("### PR Preparation");
+    expect(projectManagerAgent).toContain("### Background Jobs");
+    expect(projectManagerAgent).toContain(".github/pull_request_template.md");
+    expect(projectManagerAgent).toContain("VCM_TASK_REPO_ROOT");
+    expect(projectManagerAgent).toContain("Include the confirmed task repo root and branch in each role message");
+    expect(projectManagerAgent).toContain("### Gate Review Gates");
+    expect(projectManagerAgent).toContain("code-diff --source coder");
+    expect(projectManagerAgent).toContain("code-diff --source architect-debug");
+    expect(projectManagerAgent).toContain("code-diff --source architect-diagnosis");
+    expect(projectManagerAgent).toContain("recorded main-flow resume point");
+    expect(projectManagerAgent).toContain("Do not require a branch-level final acceptance report");
+    expect(projectManagerAgent).toContain("Tester reports `Test Result: fail` for an Architect Debug Mode fix whose final disposition was `local fix completed`");
+    expect(projectManagerAgent).toContain("Architecture Diagnosis Mode must run before another Debug Mode fix or Coder dispatch");
+    expect(projectManagerAgent).not.toContain("Tester reports `Test Result: fail` for the implementation for the second time");
+    expect(projectManagerAgent).toContain("Architect reports that the architecture plan must be updated or replaced for the second time");
+    expect(await fs.readText("/repo/.ai/tools/request-gate-review")).toContain('["git", "rev-parse", "--abbrev-ref"');
+    expect(await fs.readText("/repo/.ai/tools/request-gate-review")).toContain('["git", "merge-base", "HEAD", upstream]');
+    const architectAgent = await fs.readText("/repo/.claude/agents/architect.md");
+    expect(architectAgent).toContain("verifiable behavior, implementation boundaries within the accepted scope, behavior/contract proof points");
+    expect(architectAgent).toContain("Own `.ai/vcm/handoffs/known-issues.md` as its only writer");
+    expect(architectAgent).toContain("Architect owns the technical decision");
+    expect(architectAgent).toContain("running targeted L1/L2/L3 checks to verify the fix");
+    expect(architectAgent).toContain("Architecture Diagnosis Mode is an upgraded Debug Mode");
+    expect(architectAgent).toContain("Do not diagnose from session memory");
+    expect(architectAgent).toContain("Do not assume existing code or comments are correct");
+    expect(architectAgent).toContain("Recursively follow every project-owned call until no unresolved project-owned callee remains");
+    expect(architectAgent).toContain("Maintain a `Code Reading Closure`");
+    expect(architectAgent).toContain("`Previous Debug Failure`");
+    expect(architectAgent).toContain("commit all Diagnosis implementation changes before reporting");
+    expect(architectAgent).toContain("In docs-only flow, update the PM-assigned durable docs directly");
+    expect(architectAgent).toContain("`Decision` must be `synced`, `unchanged`, or `blocked`");
+    const testerAgent = await fs.readText("/repo/.claude/agents/tester.md");
+    expect(testerAgent).toContain("Own L2/L3/L4 final-validation design, execution, and acceptance evidence");
+    expect(testerAgent).toContain("do not replace Tester final validation");
+    expect(testerAgent).toContain("Apply `docs/CODING_STANDARDS.md` to changed tests");
+    expect(testerAgent).not.toContain("shared implementation-quality and baseline-test standard");
+    const diagnosisGateReviewerAgent = await fs.readText("/repo/.claude/agents/gate-reviewer.md");
+    expect(diagnosisGateReviewerAgent).toContain("verify that the commits implement the diagnosed");
+    expect(diagnosisGateReviewerAgent).toContain("local workaround for the surface failure");
+    const coderAgent = await fs.readText("/repo/.claude/agents/coder.md");
+    expect(coderAgent).toContain("tools: Read, Grep, Glob, Bash, Edit, Write, Agent");
+    expect(coderAgent).toContain("Implement assigned file/function-level scaffold items");
+    expect(coderAgent).toContain("read and follow `docs/CODING_STANDARDS.md`");
+    expect(await fs.readText("/repo/docs/CODING_STANDARDS.md")).toContain("Unit test coverage is required for every changed callable unit");
+    expect(coderAgent).toContain("Compile, typecheck, or L0/L1 failure is the signal to report");
+    expect(coderAgent).toContain("### Failure Reporting And Continuation");
+    expect(coderAgent).not.toContain("Stop before editing when the architecture plan");
+    expect(coderAgent).not.toContain("Request Replan");
+    expect(coderAgent).not.toContain("whether Replan is needed");
+    expect(coderAgent).toContain("### Parallel Worker Implementation");
+    expect(coderAgent).toContain("vcm-coder-worker");
+    expect(frontmatterOf(await fs.readText("/repo/.claude/agents/project-manager.md"))).not.toContain("Agent");
+    expect(frontmatterOf(await fs.readText("/repo/.claude/agents/architect.md"))).not.toContain("Agent");
+    expect(frontmatterOf(await fs.readText("/repo/.claude/agents/tester.md"))).not.toContain("Agent");
+    const coderWorkerAgent = await fs.readText("/repo/.claude/agents/vcm-coder-worker.md");
+    expect(coderWorkerAgent).toContain("name: vcm-coder-worker");
+    expect(coderWorkerAgent).toContain("model: inherit");
+    expect(coderWorkerAgent).toContain("Do not set `handled: true`");
+    expect(coderWorkerAgent).toContain("Implement assigned file/function-level scaffold items only");
+    expect(coderWorkerAgent).toContain("Run assigned L0/L1 checks in the foreground.");
+    expect(coderWorkerAgent).toContain("the switch-to-skill rule for long commands does not apply inside worker runs");
+    expect(coderWorkerAgent).toContain("git commit --only -m \"<message>\" -- <assigned-paths>");
+    expect(coderWorkerAgent).toContain("write the assigned report with the commit hash");
+    expect(coderWorkerAgent).toContain("with the same `commitHash` as the final step");
+    expect(coderWorkerAgent).not.toContain("Stop before editing if the assigned module");
+    const gateReviewerAgent = await fs.readText("/repo/.claude/agents/gate-reviewer.md");
+    expect(gateReviewerAgent).toContain("name: gate-reviewer");
+    expect(gateReviewerAgent).toContain("tools: Read, Grep, Glob, Bash, Write");
+    expect(gateReviewerAgent).toContain("You are VCM `gate-reviewer`");
+    expect(gateReviewerAgent).toContain("Use the task and worktree paths named there");
     const translatorAgents = await fs.readText("/repo/.claude/agents/translator.md");
     expect(translatorAgents).toContain("name: translator");
     expect(translatorAgents).toContain("You are VCM `translator`");
@@ -81,7 +168,10 @@ describe("createHarnessService", () => {
     const harnessEngineerAgent = await fs.readText("/repo/.claude/agents/harness-engineer.md");
     expect(harnessEngineerAgent).toContain("name: harness-engineer");
     expect(harnessEngineerAgent).toContain("You are VCM `harness-engineer`");
-    expect(harnessEngineerAgent).toContain("Propose harness changes as reviewable diffs");
+    expect(harnessEngineerAgent).toContain("Proposal Mode");
+    expect(harnessEngineerAgent).toContain("Bootstrap Apply Mode");
+    expect(harnessEngineerAgent).toContain("active task worktree named by VCM");
+    expect(harnessEngineerAgent).toContain("Commit every applied harness change yourself");
     expect(harnessEngineerAgent).toContain("CodingForMoney/VibeCodingMaster");
     expect(harnessEngineerAgent).toContain("unless the harness owner gives explicit");
     expect(harnessEngineerAgent).not.toContain("Do not act as PM, Architect, Coder");
@@ -97,6 +187,7 @@ describe("createHarnessService", () => {
     expect(await fs.readText("/repo/.claude/settings.json")).toContain("/api/hooks/claude-code/stop");
     expect(await fs.readText("/repo/.claude/settings.json")).toContain("/api/hooks/claude-code/permission-request");
     expect(await fs.readText("/repo/.claude/settings.json")).toContain("BASH_DEFAULT_TIMEOUT_MS");
+    expect(await fs.readText("/repo/.claude/settings.json")).toContain('"autoMemoryEnabled": false');
   });
 
   it("inserts VCM rules into an existing file without overwriting user content", async () => {
@@ -145,9 +236,59 @@ describe("createHarnessService", () => {
     expect(content).not.toContain("<!-- VCM:BEGIN");
   });
 
+  it("creates the project glossary only when missing", async () => {
+    const fs = createMemoryFs();
+    await fs.writeText("/repo/docs/GLOSSARY.md", "# Glossary\n\n| Abbreviation | Full Term |\n| --- | --- |\n| ACME | Example Term |\n");
+    const service = createHarnessService({ fs });
+
+    await expect(service.getHarnessFileContent("/repo", "docs/GLOSSARY.md")).resolves.toMatchObject({
+      path: "docs/GLOSSARY.md",
+      kind: "project-glossary",
+      editable: true
+    });
+    expect((await service.getHarnessStatus("/repo")).files.find((file) => file.path === "docs/GLOSSARY.md")).toMatchObject({
+      exists: true,
+      hasManagedBlock: false,
+      action: "ok"
+    });
+
+    await service.applyHarness("/repo");
+
+    await expect(fs.readText("/repo/docs/GLOSSARY.md")).resolves.toContain("ACME");
+  });
+
+  it("migrates legacy coding standards and preserves project additions", async () => {
+    const fs = createMemoryFs();
+    await fs.writeText(
+      "/repo/docs/CODING_STANDARDS.md",
+      `${renderLegacyProjectCodingStandardsTemplate()}\nProject-specific tail.\n`
+    );
+    const service = createHarnessService({ fs });
+
+    await service.applyHarness("/repo");
+
+    const content = await fs.readText("/repo/docs/CODING_STANDARDS.md");
+    expect(content).toContain("<!-- VCM:BEGIN version=1 -->");
+    expect(content).toContain("Project-specific tail.");
+  });
+
+  it("preserves existing known issues while installing the managed policy", async () => {
+    const fs = createMemoryFs();
+    await fs.writeText("/repo/docs/known-issues.md", "# Known Issues\n\n## Existing Issue\n\nKeep this issue.\n");
+    const service = createHarnessService({ fs });
+
+    await service.applyHarness("/repo");
+
+    const content = await fs.readText("/repo/docs/known-issues.md");
+    expect(content).toContain("<!-- VCM:BEGIN version=1 -->");
+    expect(content).toContain("## VCM Known Issues Policy");
+    expect(content).toContain("## Existing Issue");
+    expect(content).toContain("Keep this issue.");
+  });
+
   it("plans and removes obsolete Codex harness paths", async () => {
     const fs = createMemoryFs();
-    await fs.writeText("/repo/.ai/codex/AGENTS.md", "# old codex reviewer\n");
+    await fs.writeText("/repo/.ai/codex/AGENTS.md", "# old codex tester\n");
     await fs.writeText("/repo/.ai/codex-translator/AGENTS.md", "# old codex translator\n");
     await fs.writeText("/repo/.claude/skills/vcm-codex-review-gate/SKILL.md", "# old skill\n");
     await fs.writeText("/repo/.ai/tools/request-codex-review", "#!/usr/bin/env python3\n");
@@ -227,6 +368,7 @@ describe("createHarnessService", () => {
     expect(JSON.stringify(settings.hooks.UserPromptSubmit)).not.toContain("vcmctl");
     expect(JSON.stringify(settings.hooks.Stop)).not.toContain("vcmctl");
     expect(JSON.stringify(settings.hooks.PreToolUse)).toContain("echo keep-user-hook");
+    expect(settings.autoMemoryEnabled).toBe(false);
   });
 
   it("updates only the managed block when VCM rules drift", async () => {
@@ -357,6 +499,20 @@ describe("createHarnessService", () => {
       code: "HARNESS_MANAGED_BLOCK_PROTECTED"
     });
 
+    for (const [filePath, managedText] of [
+      ["docs/CODING_STANDARDS.md", "## Implementation Discipline"],
+      ["docs/known-issues.md", "## VCM Known Issues Policy"]
+    ] as const) {
+      const file = await service.getHarnessFileContent("/repo", filePath);
+      await expect(service.updateHarnessFileContent(
+        "/repo",
+        filePath,
+        file.content.replace(managedText, "## Changed")
+      )).rejects.toMatchObject({
+        code: "HARNESS_MANAGED_BLOCK_PROTECTED"
+      });
+    }
+
     const skillFile = await service.getHarnessFileContent("/repo", ".claude/skills/vcm-route-message/SKILL.md");
     expect(skillFile.editable).toBe(false);
     await expect(service.updateHarnessFileContent(
@@ -443,17 +599,17 @@ describe("createHarnessService", () => {
 
     const started = await service.startHarnessBootstrap("/repo", "/repo", {
       permissionMode: "bypassPermissions",
-      model: "claude-opus-4-8[1m]",
+      model: "opus",
       effort: "high"
     });
 
     expect(started.session.status).toBe("running");
     expect(started.session.permissionMode).toBe("bypassPermissions");
-    expect(started.session.model).toBe("claude-opus-4-8[1m]");
+    expect(started.session.model).toBe("opus");
     expect(started.session.effort).toBe("high");
     expect(ensureRequests[0]).toMatchObject({
       permissionMode: "bypassPermissions",
-      model: "claude-opus-4-8[1m]",
+      model: "opus",
       effort: "high"
     });
     expect(runtimeInputs[0]).toMatchObject({
@@ -801,6 +957,11 @@ function createDiffGitStub() {
       ].join("\n");
     }
   };
+}
+
+function frontmatterOf(content: string): string {
+  const sections = content.split("---");
+  return sections.length >= 3 ? sections[1] : "";
 }
 
 function createMemoryFs(): FileSystemAdapter {

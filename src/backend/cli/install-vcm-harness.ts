@@ -7,6 +7,7 @@ import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { renderArchitectHarnessRules } from "../templates/harness/architect-agent.js";
 import { renderCoderHarnessRules } from "../templates/harness/coder-agent.js";
+import { renderCoderWorkerHarnessRules } from "../templates/harness/coder-worker-agent.js";
 import {
   renderGateReviewerAgentRules,
   renderRequestGateReviewTool,
@@ -16,9 +17,20 @@ import {
 import { renderHarnessEngineerHarnessRules } from "../templates/harness/harness-engineer-agent.js";
 import { renderRootClaudeHarnessRules } from "../templates/harness/claude-root.js";
 import { renderGitignoreHarnessRules } from "../templates/harness/gitignore.js";
+import {
+  renderLegacyProjectCodingStandardsTemplate,
+  renderProjectCodingStandardsProjectSection,
+  renderProjectCodingStandardsRules
+} from "../templates/harness/project-coding-standards.js";
+import { renderProjectGlossaryTemplate } from "../templates/harness/project-glossary.js";
+import {
+  renderLegacyProjectKnownIssuesTemplate,
+  renderProjectKnownIssuesRules,
+  renderProjectKnownIssuesSection
+} from "../templates/harness/project-known-issues.js";
 import { renderProjectManagerHarnessRules } from "../templates/harness/project-manager-agent.js";
 import { renderPullRequestTemplateHarnessRules } from "../templates/harness/pull-request-template.js";
-import { renderReviewerHarnessRules } from "../templates/harness/reviewer-agent.js";
+import { renderTesterHarnessRules } from "../templates/harness/tester-agent.js";
 import { renderVcmFinalAcceptanceSkillRules } from "../templates/harness/vcm-final-acceptance-skill.js";
 import { renderVcmHarnessBootstrapSkillRules } from "../templates/harness/vcm-harness-bootstrap-skill.js";
 import { renderVcmLongRunningValidationSkillRules } from "../templates/harness/vcm-long-running-validation-skill.js";
@@ -43,6 +55,7 @@ const VCM_STOP_HOOK_COMMAND = `sh -c 'if [ -z "\${VCM_TASK_SLUG:-}" ] || [ -z "\
 const VCM_PERMISSION_REQUEST_HOOK_COMMAND = `sh -c 'if [ -z "\${VCM_TASK_SLUG:-}" ] || [ -z "\${VCM_ROLE:-}" ] || [ -z "\${VCM_API_URL:-}" ]; then exit 0; fi; node -e '"'"'let s="";process.stdin.setEncoding("utf8");process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{let event={};try{event=s.trim()?JSON.parse(s):{};}catch{event={raw:s};}process.stdout.write(JSON.stringify({taskSlug:process.env.VCM_TASK_SLUG,role:process.env.VCM_ROLE,event}));});'"'"' | curl -fsS --max-time 5 -X POST "\${VCM_API_URL}/api/hooks/claude-code/permission-request" -H "content-type: application/json" --data-binary @- || true'`;
 const VCM_BASH_GUARD_HOOK_COMMAND = `sh -c 'if [ -z "\${VCM_TASK_SLUG:-}" ] || [ -z "\${VCM_ROLE:-}" ]; then exit 0; fi; guard=""; repo="$(git rev-parse --show-toplevel 2>/dev/null || true)"; if [ -n "$repo" ] && [ -f "$repo/.ai/tools/vcm-bash-guard" ]; then guard="$repo/.ai/tools/vcm-bash-guard"; else cwd="$(pwd -P 2>/dev/null || pwd)"; dir="$cwd"; while [ -n "$dir" ] && [ "$dir" != "/" ]; do if [ -f "$dir/.ai/tools/vcm-bash-guard" ]; then guard="$dir/.ai/tools/vcm-bash-guard"; break; fi; dir="$(dirname "$dir")"; done; if [ -z "$guard" ] && [ -n "\${CLAUDE_PROJECT_DIR:-}" ] && [ -f "\${CLAUDE_PROJECT_DIR}/.ai/tools/vcm-bash-guard" ]; then guard="\${CLAUDE_PROJECT_DIR}/.ai/tools/vcm-bash-guard"; fi; fi; [ -n "$guard" ] || exit 0; python3 "$guard" || exit 0'`;
 const VCM_BASH_DEFAULT_TIMEOUT_MS = "600000";
+const VCM_AUTO_MEMORY_ENABLED = false;
 const VCM_HOOK_DEFINITIONS = [
   { eventName: "PreToolUse", matcher: "Bash", command: VCM_BASH_GUARD_HOOK_COMMAND, timeout: 10 },
   { eventName: "UserPromptSubmit", command: VCM_HOOK_COMMAND, timeout: 5 },
@@ -60,19 +73,25 @@ const AGENT_FRONTMATTER = {
     description: "VCM architecture role for plans, module boundaries, public contracts, verifiable behavior, and docs sync."
   },
   coder: {
-    description: "VCM implementation role for scoped code changes and focused tests."
+    description: "VCM implementation role for scoped code changes and focused tests.",
+    tools: "Read, Grep, Glob, Bash, Edit, Write, Agent"
   },
-  reviewer: {
-    description: "VCM independent review role for acceptance, test adequacy, scope checks, and risk findings."
+  tester: {
+    description: "VCM testing role for validation, test adequacy, approved-scope validation, and risk findings."
   },
   "gate-reviewer": {
-    description: "VCM independent gate review role for architecture plans, validation adequacy, and final diffs."
+    description: "VCM independent gate review role for architecture plans, validation adequacy, and code diffs.",
+    tools: "Read, Grep, Glob, Bash, Write"
   },
   translator: {
     description: "VCM project translation tool role for conversation translation, file translation, bootstrap, and memory updates."
   },
   "harness-engineer": {
     description: "VCM project-scoped harness maintenance role for harness diagnosis, diff proposals, and VCM issue drafts."
+  },
+  "vcm-coder-worker": {
+    description: "Bounded VCM implementation worker for assigned modules, files, and VCM:CODE markers from Coder.",
+    model: "inherit"
   }
 };
 
@@ -84,6 +103,24 @@ const MANAGED_FILES = [
     category: "root-rules",
     blankLineBeforeEnd: true,
     content: renderRootClaudeHarnessRules()
+  },
+  {
+    path: "docs/CODING_STANDARDS.md",
+    title: "Coding Standards",
+    commentStyle: "html",
+    category: "project-coding-standards",
+    content: renderProjectCodingStandardsRules(),
+    contentAfterBlock: renderProjectCodingStandardsProjectSection(),
+    legacyWholeFile: renderLegacyProjectCodingStandardsTemplate()
+  },
+  {
+    path: "docs/known-issues.md",
+    title: "Known Issues",
+    commentStyle: "html",
+    category: "project-known-issues",
+    content: renderProjectKnownIssuesRules(),
+    contentAfterBlock: renderProjectKnownIssuesSection(),
+    legacyWholeFile: renderLegacyProjectKnownIssuesTemplate()
   },
   {
     path: ".gitignore",
@@ -118,12 +155,12 @@ const MANAGED_FILES = [
     content: renderCoderHarnessRules()
   },
   {
-    path: ".claude/agents/reviewer.md",
-    title: "Reviewer Agent",
-    agentName: "reviewer",
+    path: ".claude/agents/tester.md",
+    title: "Tester Agent",
+    agentName: "tester",
     commentStyle: "html",
     category: "core-agent",
-    content: renderReviewerHarnessRules()
+    content: renderTesterHarnessRules()
   },
   {
     path: ".github/pull_request_template.md",
@@ -155,10 +192,22 @@ const MANAGED_FILES = [
     commentStyle: "html",
     category: "agent-harness-engineer",
     content: renderHarnessEngineerHarnessRules()
+  },
+  {
+    path: ".claude/agents/vcm-coder-worker.md",
+    title: "VCM Coder Worker Agent",
+    agentName: "vcm-coder-worker",
+    commentStyle: "html",
+    category: "agent-coder-worker",
+    content: renderCoderWorkerHarnessRules()
   }
 ];
 
 const DURABLE_DOC_TEMPLATES = [
+  {
+    path: "docs/GLOSSARY.md",
+    content: renderProjectGlossaryTemplate()
+  },
   {
     path: "docs/ARCHITECTURE.md",
     content: "# Architecture\n"
@@ -167,10 +216,6 @@ const DURABLE_DOC_TEMPLATES = [
     path: "docs/TESTING.md",
     content: "# Testing\n"
   },
-  {
-    path: "docs/known-issues.md",
-    content: "# Known Issues\n"
-  }
 ];
 
 const WHOLE_FILES = [
@@ -193,7 +238,7 @@ const WHOLE_FILES = [
     content: renderSkillFile(
       "VCM Final Acceptance Skill",
       "vcm-final-acceptance",
-      "Use when project-manager is ready to decide whether a VCM-managed task can be accepted, returned for follow-up, or blocked for a decision.",
+      "Use when project-manager is ready to close a complete VCM code-delivery flow.",
       renderVcmFinalAcceptanceSkillRules()
     )
   },
@@ -226,7 +271,7 @@ const WHOLE_FILES = [
     content: renderSkillFile(
       "VCM Route Message Skill",
       "vcm-route-message",
-      "Use when a VCM role needs to hand off work, ask a question, report a result, report a blocker, or raise a finding to another VCM role.",
+      "Use when project-manager dispatches a VCM role or when a VCM role reports a question, result, blocker, or finding back to project-manager.",
       renderVcmRouteMessageSkillRules()
     )
   },
@@ -419,6 +464,8 @@ async function buildManifest(projectRoot) {
         }
       },
       ...fixedDirectories().map((directory) => manifestEntry(directory, "directory", directoryCategory(directory), "vcm-created")),
+      manifestEntry("docs/GLOSSARY.md", "file", "project-glossary", "project-owned"),
+      manifestEntry("docs/CODING_STANDARDS.md", "file", "project-coding-standards", "project-owned"),
       ...WHOLE_FILES.map((file) => ({
         path: file.path,
         entryType: "file",
@@ -547,9 +594,12 @@ async function installManagedFile({ projectRoot, definition, dryRun, operations 
     nextContent = renderNewManagedFile(definition, block);
   } else {
     const pattern = definition.commentStyle === "hash" ? HASH_BLOCK_PATTERN : HTML_BLOCK_PATTERN;
-    nextContent = pattern.test(currentContent)
-      ? currentContent.replace(pattern, block)
-      : `${currentContent.trimEnd()}\n\n${block}\n`;
+    if (pattern.test(currentContent)) {
+      nextContent = currentContent.replace(pattern, block);
+    } else {
+      nextContent = migrateLegacyManagedFile(definition, currentContent, block)
+        ?? `${currentContent.trimEnd()}\n\n${block}\n`;
+    }
   }
 
   await writeIfChanged({
@@ -592,11 +642,30 @@ function renderManagedBlock(definition) {
 }
 
 function renderNewManagedFile(definition, block) {
+  const suffix = definition.contentAfterBlock?.trim();
   if (definition.agentName) {
     const frontmatter = AGENT_FRONTMATTER[definition.agentName];
-    return `---\nname: ${definition.agentName}\ndescription: ${frontmatter.description}\ntools: Read, Grep, Glob, Bash, Edit, Write\n---\n\n# ${definition.title}\n\n${block}\n`;
+    const tools = frontmatter.tools ?? "Read, Grep, Glob, Bash, Edit, Write";
+    const model = frontmatter.model ? `\nmodel: ${frontmatter.model}` : "";
+    return `---\nname: ${definition.agentName}\ndescription: ${frontmatter.description}\ntools: ${tools}${model}\n---\n\n# ${definition.title}\n\n${block}${suffix ? `\n\n${suffix}` : ""}\n`;
   }
-  return `# ${definition.title}\n\n${block}\n`;
+  return `# ${definition.title}\n\n${block}${suffix ? `\n\n${suffix}` : ""}\n`;
+}
+
+function migrateLegacyManagedFile(definition, currentContent, block) {
+  const legacyContent = definition.legacyWholeFile?.trimEnd();
+  if (!legacyContent) {
+    return undefined;
+  }
+  const current = currentContent.trimEnd();
+  if (current !== legacyContent && !current.startsWith(`${legacyContent}\n`)) {
+    return undefined;
+  }
+  const projectContent = current.slice(legacyContent.length).trim();
+  return renderNewManagedFile({
+    ...definition,
+    contentAfterBlock: projectContent || definition.contentAfterBlock
+  }, block);
 }
 
 function renderSkillFile(title, name, description, body) {
@@ -618,7 +687,7 @@ async function installClaudeSettings({ projectRoot, dryRun, operations }) {
     mode: 0o644,
     dryRun,
     operations,
-    action: "merge VCM Claude hooks"
+    action: "merge VCM Claude settings"
   });
 }
 
@@ -659,6 +728,7 @@ function mergeVcmHooks(settings) {
   const env = isPlainObject(next.env) ? { ...next.env } : {};
   env.BASH_DEFAULT_TIMEOUT_MS = VCM_BASH_DEFAULT_TIMEOUT_MS;
   next.env = env;
+  next.autoMemoryEnabled = VCM_AUTO_MEMORY_ENABLED;
 
   return next;
 }

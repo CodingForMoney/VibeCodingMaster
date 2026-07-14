@@ -38,9 +38,11 @@ import {
   type ClaudeTranscriptEvent,
   type ClaudeTranscriptService
 } from "./claude-transcript-service.js";
+import { readLatestRoleTurnReply } from "./claude-transcript-reply.js";
 import type { TranslationWorkerService } from "./translation-worker-service.js";
 import type { ProjectService } from "./project-service.js";
 import type { SessionService } from "./session-service.js";
+import type { RoundService } from "./round-service.js";
 import { createTranslationQueueRegistry } from "./translation-queue.js";
 
 export interface TranslationService {
@@ -55,6 +57,7 @@ export interface TranslationService {
   recordConversationBoundary(input: RecordTranslationConversationBoundaryInput): Promise<TranslationEntry | undefined>;
   translateUserInput(input: TranslateUserInputServiceInput): Promise<TranslateUserInputResult>;
   translateManualOutput(input: TranslateManualOutputServiceInput): Promise<TranslationEntry>;
+  translateLatestReply(input: TranslateLatestReplyServiceInput): Promise<TranslationEntry>;
   sendTranslatedInput(input: SendTranslatedInputServiceInput): Promise<void>;
   subscribeToSession(sessionId: string, listener: TranslationEventListener): Unsubscribe;
   clearSession(sessionId: string): Promise<void>;
@@ -110,6 +113,13 @@ export interface TranslateManualOutputServiceInput extends TranslateManualOutput
   role: RoleName;
 }
 
+export interface TranslateLatestReplyServiceInput {
+  repoRoot: string;
+  taskRepoRoot?: string;
+  taskSlug: string;
+  role: RoleName;
+}
+
 export interface SendTranslatedInputServiceInput extends SendTranslatedInputRequest {
   repoRoot: string;
   taskRepoRoot?: string;
@@ -128,6 +138,8 @@ export interface TranslateGatewayOutputInput {
   taskSlug: string;
   role: RoleName;
   text: string;
+  sourceEntryIds?: string[];
+  allowCreate?: boolean;
 }
 
 export interface TranslationServiceDeps {
@@ -138,6 +150,7 @@ export interface TranslationServiceDeps {
   translationWorkerService?: Pick<TranslationWorkerService, "createConversationJob" | "validateConversationResult" | "getState">;
   fs?: FileSystemAdapter;
   projectService?: Pick<ProjectService, "loadConfig">;
+  roundService?: Pick<RoundService, "getSessionRoundState">;
   appSettings: Pick<AppSettingsService, "getPreferences">;
   now?: () => string;
   id?: () => string;
@@ -150,7 +163,6 @@ interface TranslationRuntimeConfig {
   inputMode: TranslationInputMode;
   outputMode: TranslationOutputMode;
   contextEnabled: boolean;
-  requestTimeoutMs: number;
 }
 
 interface SessionState {
@@ -182,10 +194,20 @@ interface PendingOutputTranslation {
   config: TranslationRuntimeConfig;
 }
 
+interface TranscriptEntryMetadata {
+  transcriptStopReason?: string;
+  transcriptTimestamp?: string;
+}
+
 interface PendingOutputTranslationBatch {
   timer?: ReturnType<typeof setTimeout>;
   items: PendingOutputTranslation[];
 }
+
+type GatewayOutputLookupResult =
+  | { kind: "translated"; text: string }
+  | { kind: "active" }
+  | { kind: "missing" };
 
 interface TaskFeedState {
   events: TranslationTaskFeedEvent[];
@@ -202,13 +224,14 @@ type TranslationSessionEventInput =
 const TRANSLATION_SOURCE_LANGUAGE = "auto";
 const TRANSLATION_INPUT_MODE: TranslationInputMode = "review-before-send";
 const TRANSLATION_CONTEXT_ENABLED = false;
-const TRANSLATION_TIMEOUT_MS = 120000;
 const TRANSLATION_PROVIDER = "claude-code";
 const TRANSLATION_MODEL = "translator";
 const OUTPUT_TRANSLATION_BATCH_DELAY_MS = 10000;
 
 const TRANSCRIPT_REPLAY_GRACE_MS = 5000;
 const TRANSLATION_TASK_FEED_RETENTION_LIMIT = 2000;
+const GATEWAY_TRANSLATION_REUSE_GRACE_MS = 1500;
+const GATEWAY_TRANSLATION_REUSE_POLL_MS = 50;
 
 export function createTranslationService(deps: TranslationServiceDeps): TranslationService {
   const now = deps.now ?? (() => new Date().toISOString());
@@ -225,8 +248,7 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
       targetLanguage: preferences.translationTargetLanguage,
       inputMode: TRANSLATION_INPUT_MODE,
       outputMode: preferences.translationOutputMode,
-      contextEnabled: TRANSLATION_CONTEXT_ENABLED,
-      requestTimeoutMs: TRANSLATION_TIMEOUT_MS
+      contextEnabled: TRANSLATION_CONTEXT_ENABLED
     };
   }
 
@@ -473,11 +495,13 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
     let displayed = false;
     if (event.kind === "text") {
       const shouldTranslate = shouldTranslateTextTranscriptEvent(state, event, config);
+      const metadata = getTextTranscriptEntryMetadata(event);
       displayed = shouldTranslate
         ? processClaudeOutputText(sessionId, event.text, config, event.id, {
-          flushImmediately: event.stopReason === "end_turn"
+          flushImmediately: event.stopReason === "end_turn",
+          metadata
         })
-        : pushPreservedProseEntry(sessionId, event.id, event.text, config);
+        : pushPreservedProseEntry(sessionId, event.id, event.text, config, metadata);
       if (displayed && shouldTranslate) {
         state.lastAssistantText = event.text;
       }
@@ -503,6 +527,9 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
     if (config.outputMode === "all") {
       return true;
     }
+    if (config.outputMode === "round-final") {
+      return false;
+    }
     if (event.stopReason !== "end_turn") {
       return false;
     }
@@ -517,13 +544,23 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
     rawText: string,
     config: TranslationRuntimeConfig,
     entryId?: string,
-    options: { flushImmediately?: boolean } = {}
+    options: { flushImmediately?: boolean; metadata?: TranscriptEntryMetadata } = {}
   ): boolean {
     return startClaudeOutputTranslation(sessionId, rawText, config, {
       entryId,
       replaceExisting: false,
-      flushImmediately: options.flushImmediately === true
+      flushImmediately: options.flushImmediately === true,
+      metadata: options.metadata
     }) !== undefined;
+  }
+
+  function getTextTranscriptEntryMetadata(
+    event: Extract<ClaudeTranscriptEvent, { kind: "text" }>
+  ): TranscriptEntryMetadata {
+    return {
+      ...(event.stopReason !== undefined ? { transcriptStopReason: event.stopReason } : {}),
+      transcriptTimestamp: event.timestamp
+    };
   }
 
   function startClaudeOutputTranslation(
@@ -534,6 +571,7 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
       entryId?: string;
       replaceExisting: boolean;
       flushImmediately?: boolean;
+      metadata?: TranscriptEntryMetadata;
     }
   ): TranslationEntry | undefined {
     const session = deps.runtime.getSession(sessionId);
@@ -557,7 +595,8 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
         config,
         status: "queued",
         contextUsed: false,
-        id: options.entryId
+        id: options.entryId,
+        ...options.metadata
       })
     };
 
@@ -648,7 +687,7 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
 
         for (const { item, job } of jobs) {
           try {
-            const result = await waitForConversationResult(item.repoRoot!, job, item.config.requestTimeoutMs);
+            const result = await waitForConversationResult(item.repoRoot!, job);
             const completed = {
               ...item.entry,
               status: "translated" as TranslationStatus,
@@ -713,9 +752,10 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
     sessionId: string,
     entryId: string,
     sourceText: string,
-    config: TranslationRuntimeConfig
+    config: TranslationRuntimeConfig,
+    metadata: TranscriptEntryMetadata = {}
   ): boolean {
-    return pushPreservedOutputEntry(sessionId, entryId, sourceText, "prose", config);
+    return pushPreservedOutputEntry(sessionId, entryId, sourceText, "prose", config, metadata);
   }
 
   function pushPreservedOutputEntry(
@@ -723,7 +763,8 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
     entryId: string,
     sourceText: string,
     sourceKind: TranslationSourceKind,
-    config: TranslationRuntimeConfig
+    config: TranslationRuntimeConfig,
+    metadata: TranscriptEntryMetadata = {}
   ): boolean {
     if (!sourceText.trim()) {
       return false;
@@ -746,7 +787,8 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
       contextUsed: false,
       id: entryId,
       translatedText: sourceText,
-      completedAt: now()
+      completedAt: now(),
+      ...metadata
     });
     pushEntry(sessionId, entry);
     return true;
@@ -850,7 +892,11 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
     markFailureRetrying(sessionId, existingFailure);
     const retrying = startClaudeOutputTranslation(sessionId, original.sourceText, config, {
       entryId: original.id,
-      replaceExisting: true
+      replaceExisting: true,
+      metadata: {
+        transcriptStopReason: original.transcriptStopReason,
+        transcriptTimestamp: original.transcriptTimestamp
+      }
     });
     if (!retrying) {
       throw new VcmError({
@@ -874,6 +920,8 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
     id?: string;
     translatedText?: string;
     completedAt?: string;
+    transcriptStopReason?: string;
+    transcriptTimestamp?: string;
     boundaryKind?: TranslationConversationBoundaryKind;
     conversationTurn?: number;
     occurredAt?: string;
@@ -890,6 +938,8 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
       translatedText: input.translatedText ?? "",
       status: input.status,
       contextUsed: input.contextUsed,
+      transcriptStopReason: input.transcriptStopReason,
+      transcriptTimestamp: input.transcriptTimestamp,
       boundaryKind: input.boundaryKind,
       conversationTurn: input.conversationTurn,
       occurredAt: input.occurredAt,
@@ -998,6 +1048,7 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
       };
     },
     async pollTaskFeed(input) {
+      const config = await loadConfig();
       const cursor = Number.isFinite(input.after) ? Math.max(1, Math.floor(input.after)) : 1;
       const maxEvents = Math.min(Math.max(1, Math.floor(input.limit ?? 500)), 1000);
       const roleSessions = await deps.sessionService.listRoleSessions(input.repoRoot, input.taskSlug);
@@ -1022,6 +1073,10 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
           role: roleSession.role,
           status: state.status
         });
+      }
+
+      if (config.outputMode === "round-final") {
+        await translateRoundFinalReplyIfReady(input, config);
       }
 
       const feed = getTaskFeed(input.taskRepoRoot, input.taskSlug);
@@ -1213,6 +1268,53 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
       }
       return entry;
     },
+    async translateLatestReply(input) {
+      const config = await loadConfig();
+      const roleSession = await deps.sessionService.getRoleSession(input.repoRoot, input.taskSlug, input.role);
+      if (!roleSession || roleSession.status !== "running") {
+        throw new VcmError({
+          code: "SESSION_NOT_RUNNING",
+          message: `${input.role} session is not running.`,
+          statusCode: 409
+        });
+      }
+
+      const reply = await readLatestRoleTurnReply(roleSession);
+      if (!reply?.text.trim()) {
+        throw new VcmError({
+          code: "TRANSLATION_REPLY_NOT_FOUND",
+          message: `No completed final reply was found for ${input.role}.`,
+          statusCode: 404,
+          hint: "Wait until the role finishes a Claude Code turn, then try again."
+        });
+      }
+
+      await prepareCache({
+        repoRoot: input.taskRepoRoot ?? input.repoRoot,
+        baseRepoRoot: input.repoRoot,
+        taskSlug: input.taskSlug,
+        role: input.role,
+        sessionId: roleSession.id
+      });
+      startTranscriptTail(roleSession);
+      const entry = startClaudeOutputTranslation(roleSession.id, reply.text, config, {
+        replaceExisting: false,
+        flushImmediately: true,
+        metadata: {
+          transcriptStopReason: "end_turn",
+          ...(reply.transcriptTimestamp ? { transcriptTimestamp: reply.transcriptTimestamp } : {})
+        }
+      });
+      if (!entry) {
+        throw new VcmError({
+          code: "TRANSLATION_NOT_STARTED",
+          message: "Latest reply translation could not be queued.",
+          statusCode: 409,
+          hint: "Check that the role session is still running and try again."
+        });
+      }
+      return entry;
+    },
     async sendTranslatedInput(input) {
       await writeToCurrentRole(input.repoRoot, input.taskSlug, input.role, input.englishText);
     },
@@ -1342,18 +1444,32 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
     },
     async translateGatewayOutput(input) {
       const config = await loadConfig();
-      const translation = await translateText({
-        repoRoot: input.repoRoot,
-        taskSlug: input.taskSlug,
-        role: input.role,
-        direction: "cc-output-to-user",
-        text: input.text,
-        sourceKind: "prose",
-        sourceLanguage: "en",
-        targetLanguage: config.targetLanguage,
-        config
+      const reusable = await findReusableGatewayOutputTranslation(input);
+      if (reusable) {
+        return reusable.trim();
+      }
+
+      if (input.allowCreate) {
+        const translation = await translateText({
+          repoRoot: input.repoRoot,
+          taskSlug: input.taskSlug,
+          role: input.role,
+          direction: "cc-output-to-user",
+          text: input.text,
+          sourceKind: "prose",
+          sourceLanguage: "en",
+          targetLanguage: config.targetLanguage,
+          config
+        });
+        return translation.text.trim();
+      }
+
+      throw new VcmError({
+        code: "GATEWAY_TRANSLATION_RESULT_MISSING",
+        message: "Gateway output translation is not available in the current translation panel.",
+        statusCode: 409,
+        hint: "Wait for the translation panel to finish translating the PM final reply, then retry from Gateway."
       });
-      return translation.text.trim();
     },
     getDiagnostics() {
       let transcriptWatchers = 0;
@@ -1371,6 +1487,279 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
       };
     }
   };
+
+  async function translateRoundFinalReplyIfReady(
+    input: PollTranslationTaskFeedServiceInput,
+    config: TranslationRuntimeConfig
+  ): Promise<void> {
+    if (!deps.roundService || !deps.projectService) {
+      return;
+    }
+
+    const projectConfig = await deps.projectService.loadConfig(input.repoRoot);
+    const round = await deps.roundService.getSessionRoundState({
+      repoRoot: input.repoRoot,
+      stateRepoRoot: input.taskRepoRoot,
+      stateRoot: projectConfig.stateRoot,
+      taskSlug: input.taskSlug
+    });
+    if (!isNormalStoppedRound(round)) {
+      return;
+    }
+
+    const candidate = findRoundFinalReplyCandidate(input, round);
+    if (!candidate || candidate.entry.status !== "preserved") {
+      return;
+    }
+
+    startClaudeOutputTranslation(candidate.sessionId, candidate.entry.sourceText, config, {
+      entryId: candidate.entry.id,
+      replaceExisting: true,
+      flushImmediately: true,
+      metadata: {
+        transcriptStopReason: candidate.entry.transcriptStopReason,
+        transcriptTimestamp: candidate.entry.transcriptTimestamp
+      }
+    });
+  }
+
+  function isNormalStoppedRound(round: {
+    status: string;
+    roundId?: string;
+    stopReason?: string;
+    roleRecovery?: { status: string };
+    flowPause?: { reason?: string };
+  }): boolean {
+    return round.status === "stopped"
+      && Boolean(round.roundId)
+      && !round.stopReason
+      && round.roleRecovery?.status !== "failed"
+      && round.flowPause?.reason !== "role-recovery-failed";
+  }
+
+  function findRoundFinalReplyCandidate(
+    input: PollTranslationTaskFeedServiceInput,
+    round: { activeRole?: RoleName; stoppedAt?: string }
+  ): { sessionId: string; entry: TranslationEntry } | undefined {
+    const candidates: Array<{ sessionId: string; entry: TranslationEntry }> = [];
+    for (const [sessionId, state] of sessionStates) {
+      if (!isRoundFinalCandidateState(state, input, round.activeRole)) {
+        continue;
+      }
+      for (const entry of state.entries) {
+        if (isRoundFinalCandidateEntry(entry, input, round.stoppedAt)) {
+          candidates.push({ sessionId, entry });
+        }
+      }
+    }
+
+    return candidates
+      .sort((left, right) => compareRoundFinalCandidates(left.entry, right.entry))
+      .at(-1);
+  }
+
+  function isRoundFinalCandidateState(
+    state: SessionState,
+    input: PollTranslationTaskFeedServiceInput,
+    activeRole?: RoleName
+  ): boolean {
+    if (state.repoRoot !== input.taskRepoRoot || state.taskSlug !== input.taskSlug || !state.role) {
+      return false;
+    }
+    return !activeRole || state.role === activeRole;
+  }
+
+  function isRoundFinalCandidateEntry(
+    entry: TranslationEntry,
+    input: PollTranslationTaskFeedServiceInput,
+    stoppedAt?: string
+  ): boolean {
+    if (
+      entry.taskSlug !== input.taskSlug ||
+      entry.direction !== "cc-output-to-user" ||
+      entry.sourceKind !== "prose" ||
+      entry.transcriptStopReason !== "end_turn"
+    ) {
+      return false;
+    }
+    if (entry.status !== "preserved" && entry.status !== "queued" && entry.status !== "translating" && entry.status !== "translated") {
+      return false;
+    }
+    if (!stoppedAt || !entry.transcriptTimestamp) {
+      return true;
+    }
+    return entry.transcriptTimestamp <= stoppedAt;
+  }
+
+  function compareRoundFinalCandidates(left: TranslationEntry, right: TranslationEntry): number {
+    const leftTime = left.transcriptTimestamp ?? left.createdAt;
+    const rightTime = right.transcriptTimestamp ?? right.createdAt;
+    if (leftTime === rightTime) {
+      return left.id.localeCompare(right.id);
+    }
+    return leftTime.localeCompare(rightTime);
+  }
+
+  async function findReusableGatewayOutputTranslation(input: TranslateGatewayOutputInput): Promise<string | undefined> {
+    const graceDeadline = Date.now() + (input.sourceEntryIds?.length ? GATEWAY_TRANSLATION_REUSE_GRACE_MS : 0);
+    while (true) {
+      const lookup = await lookupGatewayOutputTranslation(input);
+      if (lookup.kind === "translated") {
+        return lookup.text;
+      }
+      if (lookup.kind === "active") {
+        return waitForReusableGatewayOutputTranslation(input);
+      }
+      if (!input.sourceEntryIds?.length || Date.now() >= graceDeadline) {
+        return undefined;
+      }
+      await delay(GATEWAY_TRANSLATION_REUSE_POLL_MS);
+    }
+  }
+
+  async function waitForReusableGatewayOutputTranslation(input: TranslateGatewayOutputInput): Promise<string | undefined> {
+    while (true) {
+      const lookup = await lookupGatewayOutputTranslation(input);
+      if (lookup.kind === "translated") {
+        return lookup.text;
+      }
+      if (lookup.kind !== "active") {
+        return undefined;
+      }
+      await delay(GATEWAY_TRANSLATION_REUSE_POLL_MS);
+    }
+  }
+
+  async function lookupGatewayOutputTranslation(input: TranslateGatewayOutputInput): Promise<GatewayOutputLookupResult> {
+    const states = await getGatewayOutputCandidateStates(input);
+    return selectGatewayOutputTranslation(states, input);
+  }
+
+  async function getGatewayOutputCandidateStates(input: TranslateGatewayOutputInput): Promise<SessionState[]> {
+    const states: SessionState[] = [];
+    const seen = new Set<SessionState>();
+    const add = (state: SessionState) => {
+      if (seen.has(state) || !isGatewayOutputCandidateState(state, input)) {
+        return;
+      }
+      seen.add(state);
+      states.push(state);
+    };
+
+    const roleSession = await getGatewayRoleSession(input);
+    if (roleSession) {
+      const state = await prepareCache({
+        repoRoot: roleSession.cwd,
+        baseRepoRoot: input.repoRoot,
+        taskSlug: input.taskSlug,
+        role: input.role,
+        sessionId: roleSession.id
+      });
+      if (roleSession.status === "running") {
+        startTranscriptTail(roleSession);
+      }
+      add(state);
+    }
+
+    for (const state of sessionStates.values()) {
+      add(state);
+    }
+
+    return states;
+  }
+
+  async function getGatewayRoleSession(input: TranslateGatewayOutputInput): Promise<RoleSessionRecord | undefined> {
+    try {
+      return await deps.sessionService.getRoleSession(input.repoRoot, input.taskSlug, input.role);
+    } catch {
+      return undefined;
+    }
+  }
+
+  function isGatewayOutputCandidateState(state: SessionState, input: TranslateGatewayOutputInput): boolean {
+    if (state.taskSlug !== input.taskSlug || state.role !== input.role) {
+      return false;
+    }
+    return state.baseRepoRoot === input.repoRoot
+      || state.repoRoot === input.repoRoot
+      || Boolean(state.repoRoot?.startsWith(`${input.repoRoot}${path.sep}`));
+  }
+
+  function selectGatewayOutputTranslation(
+    states: SessionState[],
+    input: TranslateGatewayOutputInput
+  ): GatewayOutputLookupResult {
+    const sourceEntryIds = normalizeGatewaySourceEntryIds(input.sourceEntryIds);
+    if (sourceEntryIds.length > 0) {
+      const entries = sourceEntryIds
+        .map((entryId) => findGatewayOutputEntryById(states, input, entryId));
+      const foundEntries = entries.filter((entry): entry is TranslationEntry => Boolean(entry));
+      if (foundEntries.length === sourceEntryIds.length) {
+        if (foundEntries.some(isActiveTranslationEntry)) {
+          return { kind: "active" };
+        }
+        if (foundEntries.every(isReusableGatewayOutputEntry)) {
+          return {
+            kind: "translated",
+            text: foundEntries.map((entry) => entry.translatedText).join("\n\n")
+          };
+        }
+      } else if (foundEntries.some(isActiveTranslationEntry)) {
+        return { kind: "active" };
+      }
+    }
+
+    const normalizedSourceText = normalizeGatewaySourceText(input.text);
+    const sourceMatches = states
+      .flatMap((state) => state.entries)
+      .filter((entry) =>
+        isGatewayOutputEntry(entry, input)
+        && normalizeGatewaySourceText(entry.sourceText) === normalizedSourceText
+      );
+    const translated = [...sourceMatches].reverse().find(isReusableGatewayOutputEntry);
+    if (translated) {
+      return { kind: "translated", text: translated.translatedText };
+    }
+    if (sourceMatches.some(isActiveTranslationEntry)) {
+      return { kind: "active" };
+    }
+    return { kind: "missing" };
+  }
+
+  function findGatewayOutputEntryById(
+    states: SessionState[],
+    input: TranslateGatewayOutputInput,
+    entryId: string
+  ): TranslationEntry | undefined {
+    for (const state of states) {
+      const entry = state.entries.find((candidate) =>
+        candidate.id === entryId && isGatewayOutputEntry(candidate, input)
+      );
+      if (entry) {
+        return entry;
+      }
+    }
+    return undefined;
+  }
+
+  function isGatewayOutputEntry(entry: TranslationEntry, input: TranslateGatewayOutputInput): boolean {
+    return entry.taskSlug === input.taskSlug
+      && entry.role === input.role
+      && entry.direction === "cc-output-to-user"
+      && entry.sourceKind === "prose";
+  }
+
+  function isReusableGatewayOutputEntry(entry: TranslationEntry): boolean {
+    return entry.status === "translated" && Boolean(entry.translatedText.trim());
+  }
+
+  function normalizeGatewaySourceEntryIds(sourceEntryIds: string[] | undefined): string[] {
+    return Array.from(new Set((sourceEntryIds ?? []).map((entryId) => entryId.trim()).filter(Boolean)));
+  }
+
+  function normalizeGatewaySourceText(text: string): string {
+    return text.trim();
+  }
 
   async function writeToCurrentRole(repoRoot: string, taskSlug: string, role: RoleName, text: string): Promise<void> {
     const record = await deps.sessionService.getRoleSession(repoRoot, taskSlug, role);
@@ -1397,7 +1786,7 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
     config: TranslationRuntimeConfig;
   }): Promise<{ text: string; warning?: string }> {
     const job = await createConversationJob(input);
-    const result = await waitForConversationResult(input.repoRoot!, job, input.config.requestTimeoutMs);
+    const result = await waitForConversationResult(input.repoRoot!, job);
     return {
       text: result.translatedText
     };
@@ -1444,16 +1833,30 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
 
   async function waitForConversationResult(
     repoRoot: string,
-    job: ConversationTranslationJob,
-    timeoutMs: number
+    job: ConversationTranslationJob
   ) {
-    const deadline = Date.now() + timeoutMs;
-    let lastError: unknown;
-    while (Date.now() <= deadline) {
+    while (true) {
       const state = await deps.translationWorkerService!.getState(repoRoot);
       const item = job.queueItemId
         ? state.queue.items.find((candidate) => candidate.id === job.queueItemId)
         : undefined;
+      if (!item) {
+        try {
+          return await deps.translationWorkerService!.validateConversationResult(repoRoot, {
+            resultPath: job.resultPath,
+            sourceHash: job.sourceHash,
+            targetLanguage: job.targetLanguage
+          });
+        } catch (error) {
+          throw new VcmError({
+            code: "TRANSLATION_FAILED",
+            message: error instanceof Error
+              ? `translation queue item is unavailable: ${error.message}`
+              : "translation queue item is unavailable.",
+            statusCode: 502
+          });
+        }
+      }
       if (item && ["failed", "cancelled", "interrupted", "skipped"].includes(item.status)) {
         throw new VcmError({
           code: "TRANSLATION_FAILED",
@@ -1462,7 +1865,7 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
         });
       }
       if (item && item.status !== "completed") {
-        await delay(Math.min(500, Math.max(25, timeoutMs)));
+        await delay(500);
         continue;
       }
       try {
@@ -1472,18 +1875,12 @@ export function createTranslationService(deps: TranslationServiceDeps): Translat
           targetLanguage: job.targetLanguage
         });
       } catch (error) {
-        lastError = error;
         if (item?.status === "completed") {
           throw error;
         }
       }
-      await delay(Math.min(500, Math.max(25, timeoutMs)));
+      await delay(500);
     }
-    throw new VcmError({
-      code: "TRANSLATION_TIMEOUT",
-      message: lastError instanceof Error ? `translation timed out: ${lastError.message}` : "translation timed out.",
-      statusCode: 504
-    });
   }
 }
 

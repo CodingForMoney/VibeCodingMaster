@@ -167,34 +167,128 @@ export function createTaskService(deps: TaskServiceDeps): TaskService {
       const config = await deps.projectService.loadConfig(repoRoot);
       const task = await this.loadTask(repoRoot, taskSlug);
       const taskRepoRoot = getTaskRuntimeRepoRoot(task);
+      const taskStoreRoot = deps.projectService.getProjectDataRoot(repoRoot);
+      const taskPath = getTaskPath(taskStoreRoot, taskSlug);
       const statePaths = getTaskStatePaths(
-        deps.projectService.getProjectDataRoot(repoRoot),
+        taskStoreRoot,
         taskRepoRoot,
         config.stateRoot,
         config.handoffRoot,
         taskSlug
       );
       const removedStatePaths: string[] = [];
+      const warnings: string[] = [];
       const cleanedAt = now();
 
       assertTaskWorktreePath(repoRoot, task.worktreePath);
-      await deps.git.removeWorktree(repoRoot, task.worktreePath, { force: options.force ?? true });
-      await deps.git.deleteBranch(repoRoot, task.branch, { force: options.forceDeleteBranch ?? true });
+      await removeTaskWorktreeIdempotent(
+        deps.fs,
+        deps.git,
+        repoRoot,
+        task.worktreePath,
+        options.force ?? true,
+        warnings
+      );
+      await deleteTaskBranchIdempotent(
+        deps.git,
+        repoRoot,
+        task.branch,
+        options.forceDeleteBranch ?? true
+      );
 
-      for (const statePath of statePaths) {
-        await deps.fs.removePath(statePath, { recursive: true, force: true });
-        removedStatePaths.push(statePath);
+      for (const statePath of statePaths.filter((candidate) => candidate !== taskPath)) {
+        await removeWorktreeStatePathBestEffort(deps.fs, statePath, removedStatePaths, warnings);
       }
+      await deps.fs.removePath(taskPath, { recursive: true, force: true });
+      removedStatePaths.push(taskPath);
 
       return {
         taskSlug,
         removedWorktreePath: task.worktreePath,
         removedStatePaths,
         deletedBranch: task.branch,
-        cleanedAt
+        cleanedAt,
+        warnings: warnings.length > 0 ? warnings : undefined
       };
     }
   };
+}
+
+async function removeTaskWorktreeIdempotent(
+  fs: FileSystemAdapter,
+  git: GitAdapter,
+  repoRoot: string,
+  worktreePath: string,
+  force: boolean,
+  warnings: string[]
+): Promise<void> {
+  const wasRegistered = await git.isWorktreeRegistered(repoRoot, worktreePath);
+  if (wasRegistered) {
+    try {
+      await git.removeWorktree(repoRoot, worktreePath, { force });
+    } catch (error) {
+      await pruneWorktreesBestEffort(git, repoRoot, warnings);
+      if (await git.isWorktreeRegistered(repoRoot, worktreePath)) {
+        throw error;
+      }
+      warnings.push(`Git worktree metadata was already cleared for ${worktreePath}; continuing cleanup.`);
+    }
+  } else {
+    await pruneWorktreesBestEffort(git, repoRoot, warnings);
+  }
+
+  if (await fs.pathExists(worktreePath)) {
+    try {
+      await fs.removePath?.(worktreePath, { recursive: true, force: true });
+    } catch (error) {
+      warnings.push(`Unable to remove stale task worktree directory ${worktreePath}: ${describeError(error)}`);
+    }
+  }
+}
+
+async function deleteTaskBranchIdempotent(
+  git: GitAdapter,
+  repoRoot: string,
+  branch: string,
+  force: boolean
+): Promise<void> {
+  if (!(await git.branchExists(repoRoot, branch))) {
+    return;
+  }
+  try {
+    await git.deleteBranch(repoRoot, branch, { force });
+  } catch (error) {
+    if (!(await git.branchExists(repoRoot, branch))) {
+      return;
+    }
+    throw error;
+  }
+}
+
+async function pruneWorktreesBestEffort(git: GitAdapter, repoRoot: string, warnings: string[]): Promise<void> {
+  try {
+    await git.pruneWorktrees(repoRoot);
+  } catch (error) {
+    warnings.push(`Unable to prune Git worktree metadata: ${describeError(error)}`);
+  }
+}
+
+async function removeWorktreeStatePathBestEffort(
+  fs: FileSystemAdapter,
+  statePath: string,
+  removedStatePaths: string[],
+  warnings: string[]
+): Promise<void> {
+  try {
+    await fs.removePath?.(statePath, { recursive: true, force: true });
+    removedStatePaths.push(statePath);
+  } catch (error) {
+    warnings.push(`Unable to remove stale task state path ${statePath}: ${describeError(error)}`);
+  }
+}
+
+function describeError(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 async function readStoredTasks(fs: FileSystemAdapter, taskStoreRoot: string): Promise<TaskRecord[]> {

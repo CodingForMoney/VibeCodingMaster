@@ -273,9 +273,9 @@ describe("claude-transcript-service", () => {
             id: "toolu_agent",
             name: "Task",
             input: {
-              description: "Review changes",
+              description: "Test changes",
               prompt: "Check the patch carefully.",
-              subagent_type: "reviewer"
+              subagent_type: "tester"
             }
           }
         ]
@@ -300,7 +300,7 @@ describe("claude-transcript-service", () => {
     });
     expect(assistantEvents[2]).toMatchObject({
       kind: "agent",
-      agent: { description: "Review changes", subagent_type: "reviewer" }
+      agent: { description: "Test changes", subagent_type: "tester" }
     });
     expect(resultEvents).toEqual([{
       kind: "tool_result",

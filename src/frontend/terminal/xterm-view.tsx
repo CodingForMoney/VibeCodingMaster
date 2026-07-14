@@ -1,7 +1,8 @@
 import { FitAddon } from "@xterm/addon-fit";
 import { WebLinksAddon } from "@xterm/addon-web-links";
 import { Terminal } from "@xterm/xterm";
-import { useEffect, useRef } from "react";
+import type { MouseEvent, PointerEvent } from "react";
+import { useEffect, useRef, useState } from "react";
 import { TerminalClient } from "./terminal-client.js";
 
 export interface XtermViewProps {
@@ -15,8 +16,36 @@ export function XtermView({ sessionId, active = true, onEvent }: XtermViewProps)
   const clientRef = useRef<TerminalClient | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
   const terminalRef = useRef<Terminal | null>(null);
+  const copyStatusTimerRef = useRef<number | null>(null);
+  const lastSelectionRef = useRef("");
+  const pendingOsc52ClipboardRef = useRef("");
   const activeRef = useRef(active);
   const onEventRef = useRef(onEvent);
+  const [copyStatus, setCopyStatus] = useState<TerminalCopyStatus>("idle");
+
+  function showCopyStatus(status: TerminalCopyStatus): void {
+    setCopyStatus(status);
+    if (copyStatusTimerRef.current !== null) {
+      window.clearTimeout(copyStatusTimerRef.current);
+    }
+    copyStatusTimerRef.current = window.setTimeout(() => {
+      copyStatusTimerRef.current = null;
+      setCopyStatus("idle");
+    }, 1600);
+  }
+
+  async function copySelection(): Promise<void> {
+    const terminal = terminalRef.current;
+    const text = getTerminalCopyText(terminal, lastSelectionRef.current, pendingOsc52ClipboardRef.current);
+    if (!text) {
+      showCopyStatus("empty");
+      terminal?.focus();
+      return;
+    }
+
+    showCopyStatus(await copyText(text) ? "copied" : "failed");
+    terminal?.focus();
+  }
 
   function fitAndResize(options: { focus?: boolean } = {}): boolean {
     const container = containerRef.current;
@@ -77,6 +106,50 @@ export function XtermView({ sessionId, active = true, onEvent }: XtermViewProps)
     terminalRef.current = terminal;
     fitAddonRef.current = fitAddon;
 
+    const selectionDisposable = terminal.onSelectionChange(() => {
+      const selection = terminal.getSelection();
+      if (selection) {
+        lastSelectionRef.current = selection;
+        pendingOsc52ClipboardRef.current = "";
+      }
+    });
+    const osc52Disposable = terminal.parser.registerOscHandler(52, (data) => {
+      const text = decodeOsc52Clipboard(data);
+      if (!text) {
+        return false;
+      }
+      pendingOsc52ClipboardRef.current = text;
+      void copyTextWithClipboardApi(text).then((copied) => {
+        showCopyStatus(copied ? "copied" : "ready");
+      });
+      return true;
+    });
+    const onCopy = (event: ClipboardEvent) => {
+      const text = getTerminalCopyText(terminal, lastSelectionRef.current, pendingOsc52ClipboardRef.current);
+      if (!text || !event.clipboardData) {
+        return;
+      }
+      event.clipboardData.setData("text/plain", text);
+      event.preventDefault();
+      showCopyStatus("copied");
+    };
+    terminal.element?.addEventListener("copy", onCopy);
+    terminal.attachCustomKeyEventHandler((event) => {
+      if (!isMacCopyShortcut(event)) {
+        return true;
+      }
+      const text = terminal.getSelection() || lastSelectionRef.current;
+      if (!text) {
+        return true;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      void copyText(text).then((copied) => {
+        showCopyStatus(copied ? "copied" : "failed");
+      });
+      return false;
+    });
+
     const initialRect = containerRef.current.getBoundingClientRect();
     if (initialRect.width >= MIN_VISIBLE_TERMINAL_WIDTH && initialRect.height >= MIN_VISIBLE_TERMINAL_HEIGHT) {
       fitAddon.fit();
@@ -131,6 +204,9 @@ export function XtermView({ sessionId, active = true, onEvent }: XtermViewProps)
         window.clearTimeout(initialRetry);
       }
       resizeObserver.disconnect();
+      terminal.element?.removeEventListener("copy", onCopy);
+      selectionDisposable.dispose();
+      osc52Disposable.dispose();
       dataDisposable.dispose();
       client.close();
       terminal.dispose();
@@ -174,7 +250,115 @@ export function XtermView({ sessionId, active = true, onEvent }: XtermViewProps)
     return () => window.removeEventListener("resize", onWindowResize);
   }, []);
 
-  return <div className="terminal-frame" ref={containerRef} onMouseDown={() => terminalRef.current?.focus()} />;
+  useEffect(() => () => {
+    if (copyStatusTimerRef.current !== null) {
+      window.clearTimeout(copyStatusTimerRef.current);
+    }
+  }, []);
+
+  return (
+    <div className="terminal-frame-shell">
+      <div className="terminal-frame" ref={containerRef} onClick={() => terminalRef.current?.focus()} />
+      <button
+        type="button"
+        className={`terminal-copy-button is-${copyStatus}`}
+        title="Copy selected terminal text"
+        onMouseDown={stopCopyButtonPointerEvent}
+        onPointerDown={stopCopyButtonPointerEvent}
+        onClick={() => void copySelection()}
+      >
+        {copyStatusLabel(copyStatus)}
+      </button>
+    </div>
+  );
+}
+
+type TerminalCopyStatus = "idle" | "copied" | "empty" | "failed" | "ready";
+
+function copyStatusLabel(status: TerminalCopyStatus): string {
+  if (status === "copied") {
+    return "Copied";
+  }
+  if (status === "empty") {
+    return "No selection";
+  }
+  if (status === "failed") {
+    return "Copy failed";
+  }
+  if (status === "ready") {
+    return "Copy ready";
+  }
+  return "Copy";
+}
+
+function getTerminalCopyText(terminal: Terminal | null | undefined, cachedSelection: string, pendingOsc52: string): string {
+  return terminal?.getSelection() || pendingOsc52 || cachedSelection;
+}
+
+function isMacCopyShortcut(event: KeyboardEvent): boolean {
+  return event.type === "keydown" && event.metaKey && !event.ctrlKey && !event.altKey && event.key.toLowerCase() === "c";
+}
+
+function decodeOsc52Clipboard(data: string): string | null {
+  const parts = data.split(";");
+  const encoded = parts.length >= 2 ? parts.slice(1).join(";") : "";
+  if (!encoded || encoded === "?") {
+    return null;
+  }
+
+  try {
+    const binary = window.atob(encoded);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) {
+      bytes[index] = binary.charCodeAt(index);
+    }
+    return new TextDecoder().decode(bytes);
+  } catch {
+    return null;
+  }
+}
+
+function stopCopyButtonPointerEvent(event: MouseEvent<HTMLButtonElement> | PointerEvent<HTMLButtonElement>): void {
+  event.preventDefault();
+  event.stopPropagation();
+}
+
+async function copyText(text: string): Promise<boolean> {
+  if (await copyTextWithClipboardApi(text)) {
+    return true;
+  }
+
+  return copyTextWithTextarea(text);
+}
+
+async function copyTextWithClipboardApi(text: string): Promise<boolean> {
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    return false;
+  }
+  return false;
+}
+
+function copyTextWithTextarea(text: string): boolean {
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "true");
+  textarea.style.position = "fixed";
+  textarea.style.top = "0";
+  textarea.style.left = "-9999px";
+  textarea.style.opacity = "0";
+  document.body.appendChild(textarea);
+  textarea.focus();
+  textarea.select();
+  try {
+    return document.execCommand("copy");
+  } finally {
+    textarea.remove();
+  }
 }
 
 const MIN_VISIBLE_TERMINAL_WIDTH = 160;

@@ -1,7 +1,9 @@
 import { createHash, randomUUID } from "node:crypto";
 import path from "node:path";
 import {
+  CODE_DIFF_SOURCES,
   GATE_REVIEW_GATES,
+  type CodeDiffSource,
   type GateReviewDecision,
   type GateReviewCallbackStatus,
   type GateReviewExceptionRequest,
@@ -12,6 +14,7 @@ import {
   type GateReviewIndex,
   type GateReviewSettingsUpdateRequest,
   type GateReviewReport,
+  type GateReviewRequestInput,
   type GateReviewRequestResult,
   type GateReviewSeverity
 } from "../../shared/types/gate-review.js";
@@ -30,7 +33,7 @@ import { getTaskRuntimeRepoRoot, type TaskService } from "./task-service.js";
 export interface GateReviewService {
   getState(repoRoot: string, taskSlug: string): Promise<GateReviewIndex>;
   updateSettings(repoRoot: string, taskSlug: string, input: GateReviewSettingsUpdateRequest): Promise<GateReviewIndex>;
-  requestReviewGate(repoRoot: string, taskSlug: string, gate: GateReviewGate): Promise<GateReviewRequestResult>;
+  requestReviewGate(repoRoot: string, taskSlug: string, gate: GateReviewGate, input?: GateReviewRequestInput): Promise<GateReviewRequestResult>;
   retryReviewGate(repoRoot: string, taskSlug: string, gate: GateReviewGate): Promise<GateReviewRequestResult>;
   skipReviewGate(repoRoot: string, taskSlug: string, gate: GateReviewGate, input: GateReviewExceptionRequest): Promise<GateReviewIndex>;
   overrideReviewGate(repoRoot: string, taskSlug: string, gate: GateReviewGate, input: GateReviewExceptionRequest): Promise<GateReviewIndex>;
@@ -64,6 +67,15 @@ interface ReviewContext {
   config: GateReviewRuntimeConfig;
 }
 
+interface CodeDiffInput {
+  baseCommit: string;
+  headCommit: string;
+  commits: string[];
+  changedFiles: string[];
+  diffStat: string;
+  diffHash: string;
+}
+
 interface ParsedReport extends GateReviewReport {
   decision: GateReviewDecision;
 }
@@ -83,14 +95,27 @@ const SOURCE_ARTIFACTS: Record<GateReviewGate, string[]> = {
   ],
   "validation-adequacy": [
     ".ai/vcm/handoffs/architecture-plan.md",
-    ".ai/vcm/handoffs/review-report.md"
+    ".ai/vcm/handoffs/test-report.md"
   ],
-  "final-diff": [
+  "code-diff": []
+};
+
+const CODE_DIFF_SOURCE_ARTIFACTS: Record<CodeDiffSource, string[]> = {
+  coder: [
     ".ai/vcm/handoffs/architecture-plan.md",
-    ".ai/vcm/handoffs/review-report.md",
-    ".ai/vcm/handoffs/docs-sync-report.md",
-    ".ai/vcm/handoffs/final-acceptance.md"
+    ".ai/vcm/handoffs/coder-completion.md"
+  ],
+  "architect-debug": [
+    ".ai/vcm/handoffs/role-commands/architect.md"
+  ],
+  "architect-diagnosis": [
+    ".ai/vcm/handoffs/architecture-diagnosis.md"
   ]
+};
+
+const CORE_INPUT_ARTIFACTS: Partial<Record<GateReviewGate, string>> = {
+  "architecture-plan": ".ai/vcm/handoffs/architecture-plan.md",
+  "validation-adequacy": ".ai/vcm/handoffs/test-report.md"
 };
 
 const VALID_SEVERITIES = new Set<GateReviewSeverity>(["critical", "high", "medium", "low"]);
@@ -118,11 +143,16 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
     repoRoot: string,
     taskSlug: string,
     gate: GateReviewGate,
-    options: { force?: boolean } = {}
+    options: { force?: boolean; codeDiffSource?: CodeDiffSource } = {}
   ): Promise<GateReviewRequestResult> {
     const context = await getContext(repoRoot, taskSlug);
     let index = await loadIndex(deps.fs, context, now());
     const record = index.gates[gate];
+    const requestedCodeDiffSource = options.codeDiffSource
+      ?? (options.force ? record.codeDiffSource : undefined);
+    const codeDiffSource = gate === "code-diff" && isCodeDiffSource(requestedCodeDiffSource)
+      ? requestedCodeDiffSource
+      : undefined;
 
     if (!context.config.enabled) {
       index = applyGateState(index, gate, {
@@ -158,7 +188,129 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
       return { status: "running", gate, record, message: "Gate review is already running." };
     }
 
-    const inputHash = await computeInputHash(deps, context.taskRepoRoot, gate);
+    if (gate === "code-diff" && !codeDiffSource) {
+      const message = "code-diff requires --source coder, --source architect-debug, or --source architect-diagnosis.";
+      index = applyGateState(index, gate, {
+        status: "failed",
+        decision: undefined,
+        error: message,
+        codeDiffSource: undefined,
+        requestId: undefined,
+        requestPath: undefined,
+        inputHash: undefined,
+        baseCommit: undefined,
+        headCommit: undefined,
+        commits: undefined,
+        changedFiles: undefined,
+        diffStat: undefined,
+        requestedAt: undefined,
+        startedAt: undefined,
+        completedAt: now(),
+        callbackStatus: "not_sent",
+        callbackError: undefined
+      }, now(), true);
+      await saveIndex(deps.fs, context.taskRepoRoot, index);
+      return {
+        status: "failed_to_start",
+        gate,
+        record: index.gates[gate],
+        message
+      };
+    }
+
+    if (gate === "code-diff") {
+      const dirtyStatus = await getDirtyCodeDiffStatus(deps.runner, context.taskRepoRoot);
+      if (dirtyStatus) {
+        const message = `code-diff requires committed inputs; commit or clean these changes first: ${dirtyStatus}`;
+        index = applyGateState(index, gate, {
+          status: "failed",
+          decision: undefined,
+          error: message,
+          exceptionReason: undefined,
+          requestId: undefined,
+          requestPath: undefined,
+          inputHash: undefined,
+          baseCommit: undefined,
+          headCommit: undefined,
+          commits: undefined,
+          changedFiles: undefined,
+          diffStat: undefined,
+          codeDiffSource,
+          requestedAt: undefined,
+          startedAt: undefined,
+          completedAt: now(),
+          callbackStatus: "not_sent",
+          callbackError: undefined
+        }, now(), true);
+        await saveIndex(deps.fs, context.taskRepoRoot, index);
+        return {
+          status: "failed_to_start",
+          gate,
+          record: index.gates[gate],
+          message
+        };
+      }
+    }
+
+    const coreInput = await readCoreInputArtifact(deps.fs, context.taskRepoRoot, gate);
+    if (coreInput && coreInput.status !== "ready") {
+      index = applyGateState(index, gate, {
+        status: "not_required",
+        decision: undefined,
+        error: undefined,
+        exceptionReason: undefined,
+        requestId: undefined,
+        requestPath: undefined,
+        inputHash: undefined,
+        requestedAt: undefined,
+        startedAt: undefined,
+        completedAt: undefined,
+        callbackStatus: "not_sent",
+        callbackError: undefined
+      }, now(), true);
+      await saveIndex(deps.fs, context.taskRepoRoot, index);
+      return {
+        status: "not_required",
+        gate,
+        record: index.gates[gate],
+        message: `${coreInput.path} is ${coreInput.status}.`
+      };
+    }
+
+    const codeDiffInput = gate === "code-diff"
+      ? await resolveCodeDiffInput(deps, context, record)
+      : undefined;
+    if (gate === "code-diff" && !codeDiffInput) {
+      index = applyGateState(index, gate, {
+        status: "not_required",
+        decision: undefined,
+        error: undefined,
+        exceptionReason: undefined,
+        requestId: undefined,
+        requestPath: undefined,
+        inputHash: undefined,
+        baseCommit: undefined,
+        headCommit: undefined,
+        commits: undefined,
+        changedFiles: undefined,
+        diffStat: undefined,
+        codeDiffSource,
+        requestedAt: undefined,
+        startedAt: undefined,
+        completedAt: undefined,
+        callbackStatus: "not_sent",
+        callbackError: undefined
+      }, now(), true);
+      await saveIndex(deps.fs, context.taskRepoRoot, index);
+      return {
+        status: "not_required",
+        gate,
+        record: index.gates[gate],
+        message: "No new commits to review."
+      };
+    }
+
+    const inputHash = await computeInputHash(deps, context.taskRepoRoot, gate, codeDiffInput, codeDiffSource);
     if (
       !options.force
       && record.status === "completed"
@@ -187,6 +339,12 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
       requestPath,
       promptPath,
       inputHash,
+      baseCommit: codeDiffInput?.baseCommit,
+      headCommit: codeDiffInput?.headCommit,
+      commits: codeDiffInput?.commits,
+      changedFiles: codeDiffInput?.changedFiles,
+      diffStat: codeDiffInput?.diffStat,
+      codeDiffSource,
       requestedAt: timestamp,
       startedAt: undefined,
       completedAt: undefined,
@@ -210,12 +368,14 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
       status: "requested",
       requestedAt: timestamp,
       inputHash,
+      codeDiffSource,
+      codeDiff: codeDiffInput,
       reportPath: nextRecord.reportPath,
       promptPath: nextRecord.promptPath
     });
     await saveIndex(deps.fs, context.taskRepoRoot, index);
 
-    void runGateReview(context, gate, requestId).catch(() => {
+    void runGateReview(context, gate, requestId, codeDiffInput, codeDiffSource).catch(() => {
       // runGateReview records failures in the persisted gate state.
     });
 
@@ -227,7 +387,13 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
     };
   }
 
-  async function runGateReview(context: ReviewContext, gate: GateReviewGate, requestId: string): Promise<void> {
+  async function runGateReview(
+    context: ReviewContext,
+    gate: GateReviewGate,
+    requestId: string,
+    codeDiffInput?: CodeDiffInput,
+    codeDiffSource?: CodeDiffSource
+  ): Promise<void> {
     const runKey = `${context.taskRepoRoot}:${context.taskSlug}:${gate}`;
     if (activeRuns.has(runKey)) {
       return;
@@ -245,7 +411,7 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
 
       const reviewDir = resolveRepoPath(context.taskRepoRoot, GATE_REVIEW_DIR);
       const agentPath = resolveRepoPath(context.repoRoot, GATE_REVIEW_AGENT_PATH);
-      const prompt = buildGatePrompt(context, gate, requestId);
+      const prompt = buildGatePrompt(context, gate, requestId, codeDiffInput, codeDiffSource);
       await deps.fs.ensureDir(reviewDir);
       await deps.fs.ensureDir(resolveRepoPath(context.taskRepoRoot, REQUESTS_DIR));
       await deps.fs.writeText(resolveRepoPath(context.taskRepoRoot, promptPathForRequest(requestId)), prompt);
@@ -450,8 +616,10 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
       });
       return loadIndex(deps.fs, nextContext, now());
     },
-    requestReviewGate(repoRoot, taskSlug, gate) {
-      return requestReviewGateInternal(repoRoot, taskSlug, gate);
+    requestReviewGate(repoRoot, taskSlug, gate, input) {
+      return requestReviewGateInternal(repoRoot, taskSlug, gate, {
+        codeDiffSource: input?.codeDiffSource
+      });
     },
     retryReviewGate(repoRoot, taskSlug, gate) {
       return requestReviewGateInternal(repoRoot, taskSlug, gate, { force: true });
@@ -549,7 +717,7 @@ function normalizeIndex(
       : "disabled";
     const existingStatus = normalizeGateStatus(existing?.status);
     const status = config.enabled && required
-      ? (existingStatus === "disabled" || existingStatus === "not_required" ? "pending" : existingStatus ?? fallbackStatus)
+      ? (existingStatus === "disabled" ? "pending" : existingStatus ?? fallbackStatus)
       : fallbackStatus;
 
     gates[gate] = {
@@ -562,6 +730,12 @@ function normalizeIndex(
       requestId: typeof existing?.requestId === "string" ? existing.requestId : undefined,
       requestPath: typeof existing?.requestPath === "string" ? existing.requestPath : undefined,
       inputHash: typeof existing?.inputHash === "string" ? existing.inputHash : undefined,
+      baseCommit: typeof existing?.baseCommit === "string" ? existing.baseCommit : undefined,
+      headCommit: typeof existing?.headCommit === "string" ? existing.headCommit : undefined,
+      commits: Array.isArray(existing?.commits) ? existing.commits.filter(isString) : undefined,
+      changedFiles: Array.isArray(existing?.changedFiles) ? existing.changedFiles.filter(isString) : undefined,
+      diffStat: typeof existing?.diffStat === "string" ? existing.diffStat : undefined,
+      codeDiffSource: isCodeDiffSource(existing?.codeDiffSource) ? existing.codeDiffSource : undefined,
       summary: typeof existing?.summary === "string" ? existing.summary : undefined,
       findings: Array.isArray(existing?.findings) ? existing.findings.filter(isFinding) : undefined,
       error: typeof existing?.error === "string" ? existing.error : undefined,
@@ -618,20 +792,191 @@ async function saveIndex(fs: FileSystemAdapter, taskRepoRoot: string, index: Gat
   await fs.writeJsonAtomic(getIndexPath(taskRepoRoot), index);
 }
 
+async function getDirtyCodeDiffStatus(runner: CommandRunner, taskRepoRoot: string): Promise<string | undefined> {
+  const status = splitLines(await commandStdout(runner, taskRepoRoot, ["status", "--porcelain=v1"]));
+  if (status.length === 0) {
+    return undefined;
+  }
+  const visible = status.slice(0, 8).join("; ");
+  return status.length > 8
+    ? `${visible}; ... ${status.length - 8} more`
+    : visible;
+}
+
+async function resolveCodeDiffInput(
+  deps: Pick<GateReviewServiceDeps, "runner">,
+  context: ReviewContext,
+  record: GateReviewGateRecord
+): Promise<CodeDiffInput | undefined> {
+  const headCommit = (await commandStdout(deps.runner, context.taskRepoRoot, ["rev-parse", "HEAD"])).trim();
+  if (!headCommit) {
+    throw new VcmError({
+      code: "GATE_REVIEW_CODE_DIFF_HEAD_MISSING",
+      message: "Unable to resolve current task worktree HEAD for code-diff gate.",
+      statusCode: 409
+    });
+  }
+
+  const baseCommit = await resolveCodeDiffBaseCommit(deps, context, record, headCommit);
+  if (!baseCommit || baseCommit === headCommit) {
+    return undefined;
+  }
+
+  const range = `${baseCommit}..${headCommit}`;
+  const commits = splitLines(await commandStdout(deps.runner, context.taskRepoRoot, [
+    "log",
+    "--oneline",
+    "--reverse",
+    range
+  ]));
+  if (commits.length === 0) {
+    return undefined;
+  }
+
+  const changedFiles = splitLines(await commandStdout(deps.runner, context.taskRepoRoot, [
+    "diff",
+    "--name-only",
+    "--find-renames",
+    range
+  ]));
+  const diffStat = await commandStdout(deps.runner, context.taskRepoRoot, [
+    "diff",
+    "--stat",
+    "--find-renames",
+    range
+  ]);
+  const diff = await commandStdout(deps.runner, context.taskRepoRoot, [
+    "diff",
+    "--binary",
+    "--find-renames",
+    range
+  ]);
+  const diffHash = createHash("sha256").update(diff).digest("hex");
+
+  return {
+    baseCommit,
+    headCommit,
+    commits,
+    changedFiles,
+    diffStat,
+    diffHash
+  };
+}
+
+async function resolveCodeDiffBaseCommit(
+  deps: Pick<GateReviewServiceDeps, "runner">,
+  context: ReviewContext,
+  record: GateReviewGateRecord,
+  headCommit: string
+): Promise<string | undefined> {
+  if (
+    record.gate === "code-diff"
+    && record.status === "completed"
+    && record.decision === "request_changes"
+    && record.baseCommit
+    && await isAncestor(deps.runner, context.taskRepoRoot, record.baseCommit, headCommit)
+  ) {
+    return record.baseCommit;
+  }
+
+  if (
+    record.gate === "code-diff"
+    && record.status === "completed"
+    && record.decision === "approve"
+    && record.headCommit
+    && await isAncestor(deps.runner, context.taskRepoRoot, record.headCommit, headCommit)
+  ) {
+    return record.headCommit;
+  }
+
+  const rootHead = (await commandStdout(deps.runner, context.repoRoot, ["rev-parse", "HEAD"])).trim();
+  if (
+    rootHead
+    && rootHead !== headCommit
+    && await isAncestor(deps.runner, context.taskRepoRoot, rootHead, headCommit)
+  ) {
+    return rootHead;
+  }
+
+  const rootBranch = (await commandStdout(deps.runner, context.repoRoot, [
+    "rev-parse",
+    "--abbrev-ref",
+    "HEAD"
+  ])).trim();
+  if (rootBranch && rootBranch !== "HEAD") {
+    const mergeBase = (await commandStdout(deps.runner, context.taskRepoRoot, [
+      "merge-base",
+      "HEAD",
+      rootBranch
+    ])).trim();
+    if (
+      mergeBase
+      && mergeBase !== headCommit
+      && await isAncestor(deps.runner, context.taskRepoRoot, mergeBase, headCommit)
+    ) {
+      return mergeBase;
+    }
+  }
+
+  const upstream = (await commandStdout(deps.runner, context.taskRepoRoot, [
+    "rev-parse",
+    "--abbrev-ref",
+    "--symbolic-full-name",
+    "@{upstream}"
+  ])).trim();
+  if (upstream) {
+    const mergeBase = (await commandStdout(deps.runner, context.taskRepoRoot, [
+      "merge-base",
+      "HEAD",
+      upstream
+    ])).trim();
+    if (
+      mergeBase
+      && mergeBase !== headCommit
+      && await isAncestor(deps.runner, context.taskRepoRoot, mergeBase, headCommit)
+    ) {
+      return mergeBase;
+    }
+  }
+
+  return headCommit;
+}
+
+async function isAncestor(
+  runner: CommandRunner,
+  cwd: string,
+  ancestor: string,
+  descendant: string
+): Promise<boolean> {
+  const result = await runner.run("git", ["merge-base", "--is-ancestor", ancestor, descendant], { cwd });
+  return result.exitCode === 0;
+}
+
 async function computeInputHash(
   deps: Pick<GateReviewServiceDeps, "fs" | "runner">,
   taskRepoRoot: string,
-  gate: GateReviewGate
+  gate: GateReviewGate,
+  codeDiffInput?: CodeDiffInput,
+  codeDiffSource?: CodeDiffSource
 ): Promise<string> {
   const digest = createHash("sha256");
+  const coreArtifact = CORE_INPUT_ARTIFACTS[gate];
+  if (coreArtifact) {
+    digest.update(coreArtifact);
+    digest.update(await deps.fs.readText(resolveRepoPath(taskRepoRoot, coreArtifact)));
+    return digest.digest("hex");
+  }
+
   const common = [
     "CLAUDE.md",
     ".claude/agents/gate-reviewer.md",
     ".claude/skills/vcm-gate-review/SKILL.md",
-    ".ai/tools/request-gate-review"
+    ".ai/tools/request-gate-review",
+    "docs/CODING_STANDARDS.md"
   ];
 
-  for (const relativePath of [...common, ...SOURCE_ARTIFACTS[gate]]) {
+  const sourceArtifacts = getSourceArtifacts(gate, codeDiffSource);
+  for (const relativePath of [...common, ...sourceArtifacts]) {
     digest.update(relativePath);
     const absolutePath = resolveRepoPath(taskRepoRoot, relativePath);
     if (await deps.fs.pathExists(absolutePath)) {
@@ -641,7 +986,22 @@ async function computeInputHash(
     }
   }
 
-  if (gate === "architecture-plan" || gate === "final-diff") {
+  if (gate === "code-diff" && codeDiffInput) {
+    digest.update("codeDiffSource");
+    digest.update(codeDiffSource ?? "<missing>");
+    digest.update("baseCommit");
+    digest.update(codeDiffInput.baseCommit);
+    digest.update("headCommit");
+    digest.update(codeDiffInput.headCommit);
+    digest.update("commits");
+    digest.update(codeDiffInput.commits.join("\n"));
+    digest.update("changedFiles");
+    digest.update(codeDiffInput.changedFiles.join("\n"));
+    digest.update("diffHash");
+    digest.update(codeDiffInput.diffHash);
+  }
+
+  if (gate === "architecture-plan") {
     digest.update(await commandStdout(deps.runner, taskRepoRoot, ["status", "--porcelain=v1"]));
     digest.update(await commandStdout(deps.runner, taskRepoRoot, ["diff", "--binary"]));
     digest.update(await commandStdout(deps.runner, taskRepoRoot, ["diff", "--cached", "--binary"]));
@@ -650,23 +1010,70 @@ async function computeInputHash(
   return digest.digest("hex");
 }
 
+async function readCoreInputArtifact(
+  fs: FileSystemAdapter,
+  taskRepoRoot: string,
+  gate: GateReviewGate
+): Promise<{ path: string; status: "missing" | "empty" | "ready" } | null> {
+  const relativePath = CORE_INPUT_ARTIFACTS[gate];
+  if (!relativePath) {
+    return null;
+  }
+  const absolutePath = resolveRepoPath(taskRepoRoot, relativePath);
+  if (!await fs.pathExists(absolutePath)) {
+    return { path: relativePath, status: "missing" };
+  }
+  const content = await fs.readText(absolutePath);
+  if (content.trim().length === 0) {
+    return { path: relativePath, status: "empty" };
+  }
+  return { path: relativePath, status: "ready" };
+}
+
 async function commandStdout(runner: CommandRunner, cwd: string, args: string[]): Promise<string> {
   const result = await runner.run("git", args, { cwd });
   return result.exitCode === 0 ? result.stdout : "";
 }
 
+function splitLines(value: string): string[] {
+  return value
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+}
+
 function buildGatePrompt(
   context: ReviewContext,
   gate: GateReviewGate,
-  requestId: string
+  requestId: string,
+  codeDiffInput?: CodeDiffInput,
+  codeDiffSource?: CodeDiffSource
 ): string {
   const reportPath = reportPathForGate(gate);
   const absoluteReportPath = resolveRepoPath(context.taskRepoRoot, reportPath);
-  const evidence = SOURCE_ARTIFACTS[gate]
+  const evidence = getSourceArtifacts(gate, codeDiffSource)
     .map((relativePath) => `- ${relativePath}`)
     .join("\n");
-  const gitLine = gate === "architecture-plan" || gate === "final-diff"
+  const gitLine = gate === "architecture-plan"
     ? "\nDiff: inspect git status/diff in Worktree."
+    : "";
+  const codeDiffSection = gate === "code-diff" && codeDiffInput
+    ? `
+
+Code Diff Input:
+This code-diff gate reviews the new commits from one PM route flow, not the whole task and not one terminal turn.
+Code source: ${codeDiffSource}
+Base commit: ${codeDiffInput.baseCommit}
+Head commit: ${codeDiffInput.headCommit}
+Commits:
+${codeDiffInput.commits.map((line) => `- ${line}`).join("\n")}
+Changed files:
+${codeDiffInput.changedFiles.length > 0 ? codeDiffInput.changedFiles.map((line) => `- ${line}`).join("\n") : "- <none>"}
+Diff commands:
+- git diff --stat --find-renames ${codeDiffInput.baseCommit}..${codeDiffInput.headCommit}
+- git diff --find-renames ${codeDiffInput.baseCommit}..${codeDiffInput.headCommit}
+- git show --stat --oneline <commit>
+Review only this commit range.`
     : "";
 
   return `[VCM GATE REVIEW]
@@ -677,7 +1084,7 @@ Request: ${requestId}
 Report: ${absoluteReportPath}
 
 Evidence:
-${evidence}${gitLine}
+${evidence}${gitLine}${codeDiffSection}
 
 Write only Report. Start exactly:
 Gate: ${gate}
@@ -829,7 +1236,7 @@ async function readJsonOrNull<T>(fs: FileSystemAdapter, targetPath: string): Pro
 }
 
 function matchField(content: string, field: string): string | undefined {
-  const match = content.match(new RegExp(`^\\s*${escapeRegex(field)}\\s*:\\s*(.+?)\\s*$`, "mi"));
+  const match = content.match(new RegExp(`^\\s*(?:[-*]\\s*)?${escapeRegex(field)}\\s*:\\s*(.+?)\\s*$`, "mi"));
   return match?.[1]?.trim();
 }
 
@@ -846,8 +1253,9 @@ function extractFindings(content: string): GateReviewFinding[] {
   const findings: GateReviewFinding[] = [];
   const blocks = content.split(/\n(?=#{2,4}\s+|-+\s*severity\s*:|severity\s*:)/i);
   for (const block of blocks) {
-    const severity = normalizeSeverity(matchField(block, "severity"));
-    const title = matchField(block, "title") ?? block.match(/^#{2,4}\s+(.+)$/m)?.[1]?.trim();
+    const heading = block.match(/^#{2,4}\s+(critical|high|medium|low)\s*:\s*(.+)$/im);
+    const severity = normalizeSeverity(matchField(block, "severity") ?? heading?.[1]);
+    const title = matchField(block, "title") ?? heading?.[2]?.trim() ?? block.match(/^#{2,4}\s+(.+)$/m)?.[1]?.trim();
     if (!severity || !title) {
       continue;
     }
@@ -863,6 +1271,17 @@ function extractFindings(content: string): GateReviewFinding[] {
     });
   }
   return findings;
+}
+
+function getSourceArtifacts(gate: GateReviewGate, codeDiffSource?: CodeDiffSource): string[] {
+  if (gate !== "code-diff") {
+    return SOURCE_ARTIFACTS[gate];
+  }
+  return codeDiffSource ? CODE_DIFF_SOURCE_ARTIFACTS[codeDiffSource] : [];
+}
+
+export function isCodeDiffSource(value: unknown): value is CodeDiffSource {
+  return typeof value === "string" && CODE_DIFF_SOURCES.includes(value as CodeDiffSource);
 }
 
 function normalizeGateStatus(value: unknown): GateReviewGateStatus | undefined {
@@ -903,6 +1322,10 @@ function isFinding(value: unknown): value is GateReviewFinding {
   }
   const candidate = value as GateReviewFinding;
   return Boolean(normalizeSeverity(candidate.severity) && candidate.title);
+}
+
+function isString(value: unknown): value is string {
+  return typeof value === "string";
 }
 
 function parsePositiveInteger(value: string | undefined): number | undefined {

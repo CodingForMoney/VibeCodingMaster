@@ -1296,7 +1296,7 @@ h2 {
   grid-template-rows: minmax(0, 1fr);
 }
 
-.terminal-frame,
+.terminal-frame-shell,
 .terminal-empty {
   width: 100%;
   height: 100%;
@@ -1304,6 +1304,56 @@ h2 {
   border-radius: 6px;
   overflow: hidden;
   background: #111316;
+}
+
+.terminal-frame-shell {
+  position: relative;
+}
+
+.terminal-frame {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+}
+
+.terminal-copy-button {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 5;
+  min-height: 24px;
+  border-color: rgba(139, 148, 158, 0.55);
+  border-radius: 6px;
+  background: rgba(22, 27, 34, 0.86);
+  color: #c9d1d9;
+  padding: 2px 8px;
+  font-size: 11px;
+  font-weight: 650;
+  opacity: 0.72;
+}
+
+.terminal-copy-button:hover:not(:disabled),
+.terminal-copy-button:focus-visible {
+  background: rgba(33, 38, 45, 0.96);
+  border-color: #58a6ff;
+  color: #f0f6fc;
+  opacity: 1;
+}
+
+.terminal-copy-button.is-copied {
+  border-color: #2ea043;
+  color: #b7f7c4;
+}
+
+.terminal-copy-button.is-ready {
+  border-color: #58a6ff;
+  color: #c9e4ff;
+}
+
+.terminal-copy-button.is-empty,
+.terminal-copy-button.is-failed {
+  border-color: #d29922;
+  color: #ffe8a3;
 }
 
 .terminal-empty {
@@ -1913,6 +1963,14 @@ h2 {
   color: #a3715f;
 }
 
+.translation-manual-panel {
+  display: grid;
+  flex: 0 0 auto;
+  gap: 6px;
+  border-bottom: 1px solid #292d31;
+  padding-bottom: 8px;
+}
+
 .translation-composer {
   display: grid;
   flex: 0 0 auto;
@@ -1928,6 +1986,7 @@ h2 {
   align-items: stretch;
 }
 
+.translation-manual-panel textarea,
 .translation-composer textarea {
   width: 100%;
   min-height: 38px;
@@ -1941,15 +2000,19 @@ h2 {
   resize: vertical;
 }
 
+.translation-manual-panel textarea::placeholder,
 .translation-composer textarea::placeholder {
   color: #7d8590;
 }
 
+.translation-manual-panel textarea::selection,
 .translation-composer textarea::selection {
   background: rgba(139, 148, 158, 0.35);
   color: #ffffff;
 }
 
+.translation-manual-panel textarea:focus,
+.translation-manual-panel textarea:focus-visible,
 .translation-composer textarea:focus,
 .translation-composer textarea:focus-visible {
   border-color: #4b5563;
@@ -2489,6 +2552,37 @@ h2 {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.harness-memory-status {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-bottom: 10px;
+}
+
+.harness-memory-status .warnings {
+  flex-basis: 100%;
+  margin: 0;
+}
+
+.harness-memory-runs {
+  margin-top: 12px;
+}
+
+.harness-memory-runs h4 {
+  margin: 0 0 8px;
+  font-size: 12px;
+}
+
+.harness-studio-file-list .harness-memory-action-button,
+.harness-memory-action-button {
+  border: 1px solid #3d444d;
+  border-radius: 5px;
+  background: #161b22;
+  padding: 4px 8px;
+  text-align: center;
 }
 
 .repository-diff-backdrop {
@@ -3231,7 +3325,7 @@ h2 {
     grid-template-columns: 1fr;
   }
 
-  .terminal-frame,
+  .terminal-frame-shell,
   .terminal-empty {
     min-height: 300px;
     height: 54vh;
@@ -3268,7 +3362,7 @@ h2 {
   }
 }
 
-.harness-bootstrap-terminal .terminal-frame {
+.harness-bootstrap-terminal .terminal-frame-shell {
   height: 100%;
   min-height: 0;
 }
