@@ -260,12 +260,7 @@ export interface RecordHarnessBootstrapHookInput {
   claudeSessionId?: string;
 }
 
-export type HarnessFeedbackStatus =
-  | "idle"
-  | "queued"
-  | "analyzing"
-  | "awaiting_user_approval"
-  | "applying";
+export type HarnessFeedbackStatus = "idle" | "queued";
 export type HarnessFeedbackSource = "role-feedback" | "task-retrospective";
 export type TaskHarnessRetrospectiveTrigger = "manual" | "auto";
 
@@ -279,32 +274,12 @@ export interface HarnessFeedbackQueueItem {
   source?: HarnessFeedbackSource;
 }
 
-export interface HarnessFeedbackActiveItem extends HarnessFeedbackQueueItem {
-  status: Exclude<HarnessFeedbackStatus, "idle" | "queued">;
-  startedAt?: string;
-  updatedAt?: string;
-  trigger?: TaskHarnessRetrospectiveTrigger;
-  finalAcceptanceHash?: string;
-  feedbackContent: string;
-  analysisPath?: string;
-  analysisContent?: string;
-  applyReportPath?: string;
-  applyReportContent?: string;
-}
-
 export interface HarnessFeedbackStateReport {
   version: 1;
   status: HarnessFeedbackStatus;
   queuedCount: number;
   pending: HarnessFeedbackQueueItem[];
-  active?: HarnessFeedbackActiveItem;
   warnings: string[];
-}
-
-export interface HarnessFeedbackDecisionRequest {
-  taskSlug?: string;
-  action: "approve" | "reject" | "comment" | "cancel";
-  comment?: string;
 }
 
 export interface StartTaskHarnessRetrospectiveRequest {

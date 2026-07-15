@@ -77,23 +77,11 @@ interface HarnessBootstrapRunState {
   updatedAt: string;
 }
 
-interface HarnessFeedbackState {
-  version: 1;
-  status?: "analyzing" | "awaiting_user_approval" | "applying";
-  active?: {
-    id?: string;
-    analysisPath?: string;
-    updatedAt?: string;
-  };
-  updatedAt?: string;
-}
-
 const TRANSLATOR_SESSION_PATH = ".ai/vcm/translations/session.json";
 const HARNESS_ENGINEER_SESSION_PATH = ".ai/vcm/harness-engineer/session.json";
 const BOOTSTRAP_SESSION_PATH = ".ai/vcm/bootstrap/session.json";
 const HARNESS_FEEDBACK_STATE_PATH = ".ai/vcm/harness-feedback/state.json";
 const CODER_WORKERS_RUNTIME_DIR = ".ai/vcm/coder-workers";
-const RECOVERABLE_FEEDBACK_STATES = new Set(["analyzing", "applying"]);
 
 export function createRuntimeRecoveryService(deps: RuntimeRecoveryServiceDeps): RuntimeRecoveryService {
   const now = deps.now ?? (() => new Date().toISOString());
@@ -113,7 +101,7 @@ export function createRuntimeRecoveryService(deps: RuntimeRecoveryServiceDeps): 
       const config = await deps.projectService.loadConfig(repoRoot);
       await runStep(context, "recover project tool sessions", () => recoverProjectToolSessions(repoRoot, recoveredAt, context));
       await runStep(context, "recover harness bootstrap", () => recoverHarnessBootstrap(repoRoot, recoveredAt, context));
-      await runStep(context, "recover harness feedback", () => recoverHarnessFeedback(repoRoot, recoveredAt, context));
+      await runStep(context, "cleanup legacy harness feedback state", () => cleanupLegacyHarnessFeedback(repoRoot, context));
 
       const tasks = await deps.taskService.listTasks(repoRoot);
       for (const task of tasks.filter((candidate) => candidate.cleanupStatus === "cleaned")) {
@@ -413,45 +401,16 @@ export function createRuntimeRecoveryService(deps: RuntimeRecoveryServiceDeps): 
     context.changedPaths.add(BOOTSTRAP_SESSION_PATH);
   }
 
-  async function recoverHarnessFeedback(
+  async function cleanupLegacyHarnessFeedback(
     repoRoot: string,
-    timestamp: string,
     context: RuntimeRecoveryContext
   ): Promise<void> {
     const absolutePath = path.join(repoRoot, HARNESS_FEEDBACK_STATE_PATH);
-    const state = await readJsonIfExists<HarnessFeedbackState>(absolutePath);
-    if (!state?.status || !RECOVERABLE_FEEDBACK_STATES.has(state.status)) {
+    if (!(await deps.fs.pathExists(absolutePath))) {
       return;
     }
-
-    const previousStatus = state.status;
-    const next: HarnessFeedbackState = {
-      ...state,
-      status: "awaiting_user_approval",
-      updatedAt: timestamp,
-      active: state.active
-        ? {
-            ...state.active,
-            updatedAt: timestamp
-          }
-        : state.active
-    };
-    await deps.fs.writeJsonAtomic(absolutePath, next);
+    await deps.fs.removePath?.(absolutePath, { force: true });
     context.changedPaths.add(HARNESS_FEEDBACK_STATE_PATH);
-
-    const analysisPath = state.active?.analysisPath;
-    if (analysisPath) {
-      const notePath = path.join(repoRoot, analysisPath);
-      if (!(await deps.fs.pathExists(notePath))) {
-        await deps.fs.writeText(notePath, [
-          "# Harness Feedback Recovery",
-          "",
-          `VCM restarted while this harness feedback item was ${previousStatus}.`,
-          "Review the current repository diff and either comment, reject, cancel, or approve explicitly."
-        ].join("\n"));
-        context.changedPaths.add(analysisPath);
-      }
-    }
   }
 
   function hasLiveTaskSession(taskSlug: string): boolean {

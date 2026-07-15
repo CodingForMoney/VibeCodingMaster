@@ -34,7 +34,6 @@ import type { VcmRoleRecoveryState, VcmRoundStatus, VcmSessionRoundState } from 
 import type { ClaudePermissionMode, RoleSessionRecord, SessionEffort, SessionModel } from "../shared/types/session.js";
 import type { TaskRecord } from "../shared/types/task.js";
 import { AppShell } from "./components/app-shell.js";
-import { HarnessFeedbackReview } from "./components/harness-feedback-review.js";
 import { HarnessStudioModal } from "./components/harness-studio-modal.js";
 import { RepositoryDiffModal } from "./components/repository-diff-modal.js";
 import { TranslatorSessionModal } from "./components/translator-session-modal.js";
@@ -1259,6 +1258,7 @@ export function App() {
         open={harnessStudioOpen}
         busy={busy}
         status={currentHarnessStatus}
+        feedbackState={harnessFeedbackState}
         memoryState={currentAutoMemoryState}
         bootstrapStatus={currentHarnessBootstrapStatus}
         engineerSession={harnessEngineerSession}
@@ -1276,6 +1276,7 @@ export function App() {
               loadHarnessStatus(activeTask.taskSlug),
               loadHarnessBootstrapStatus(activeTask.taskSlug),
               refreshHarnessEngineerSession(),
+              refreshHarnessFeedbackState(activeTask.taskSlug),
               apiClient.getAutoMemoryState(activeTask.taskSlug).then((state) => {
                 setAutoMemoryState(state);
                 setAutoMemoryStateTaskSlug(activeTask.taskSlug);
@@ -1448,58 +1449,6 @@ export function App() {
             setTranslatorSession(session);
             syncTranslatorLaunchOptions(session);
           }, "Notify Translator to reload harness");
-        }}
-      />
-      <HarnessFeedbackReview
-        busy={busy}
-        state={harnessFeedbackState}
-        onCancel={(comment) => {
-          void withBusy(async () => {
-            const state = await apiClient.decideHarnessFeedback({
-              action: "cancel",
-              taskSlug: activeTask?.taskSlug,
-              comment
-            });
-            setHarnessFeedbackState(state);
-          }, "Cancel Harness feedback");
-        }}
-        onApprove={(comment) => {
-          void withBusy(async () => {
-            if (!activeTask) {
-              throw new Error("Create or select a task before approving Harness feedback.");
-            }
-            const state = await apiClient.decideHarnessFeedback({
-              action: "approve",
-              taskSlug: activeTask.taskSlug,
-              comment
-            });
-            setHarnessFeedbackState(state);
-            await refreshHarnessEngineerSession();
-          }, "Approve Harness feedback");
-        }}
-        onComment={(comment) => {
-          void withBusy(async () => {
-            if (!activeTask) {
-              throw new Error("Create or select a task before sending Harness feedback comments.");
-            }
-            const state = await apiClient.decideHarnessFeedback({
-              action: "comment",
-              taskSlug: activeTask.taskSlug,
-              comment
-            });
-            setHarnessFeedbackState(state);
-            await refreshHarnessEngineerSession();
-          }, "Send Harness feedback comment");
-        }}
-        onReject={(comment) => {
-          void withBusy(async () => {
-            const state = await apiClient.decideHarnessFeedback({
-              action: "reject",
-              taskSlug: activeTask?.taskSlug,
-              comment
-            });
-            setHarnessFeedbackState(state);
-          }, "Reject Harness feedback");
         }}
       />
     </AppShell>

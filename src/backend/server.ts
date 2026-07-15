@@ -289,9 +289,8 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     runtime,
     sessionService,
     appSettings,
-    async isHarnessEngineerAvailable(repoRoot) {
-      const state = await harnessFeedbackService.getState(repoRoot);
-      return state.status === "idle";
+    async isHarnessEngineerAvailable() {
+      return true;
     }
   });
   const commandDispatcher = createCommandDispatcher({
@@ -403,7 +402,6 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     appSettings,
     runtime,
     harnessService,
-    harnessFeedbackService,
     autoMemoryService,
     gatewayService,
     jobGuard: createJobGuardService(),

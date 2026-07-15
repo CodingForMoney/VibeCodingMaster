@@ -2,7 +2,6 @@ import type { FastifyInstance } from "fastify";
 import type {
   HarnessApplyRequest,
   HarnessBootstrapStatusReport,
-  HarnessFeedbackDecisionRequest,
   MergeRepositoryDiffToCurrentBranchRequest,
   HarnessStatusReport,
   RestartHarnessBootstrapRequest,
@@ -189,28 +188,6 @@ export function registerHarnessRoutes(app: FastifyInstance, deps: HarnessRouteDe
     const project = await requireCurrentProject(deps.projectService);
     const taskSlug = await normalizeOptionalTaskSlug(deps, project.repoRoot, request.query.taskSlug);
     return deps.harnessFeedbackService.getState(project.repoRoot, taskSlug);
-  });
-
-  app.post<{ Body: HarnessFeedbackDecisionRequest }>("/api/projects/harness/feedback/decision", async (request) => {
-    const project = await requireCurrentProject(deps.projectService);
-    const action = request.body?.action;
-    if (action !== "approve" && action !== "reject" && action !== "comment" && action !== "cancel") {
-      throw new VcmError({
-        code: "HARNESS_FEEDBACK_DECISION_INVALID",
-        message: "Harness feedback decision action is invalid.",
-        statusCode: 400
-      });
-    }
-    const taskSlug = await normalizeOptionalTaskSlug(deps, project.repoRoot, request.body?.taskSlug);
-    if (taskSlug && (action === "approve" || action === "comment")) {
-      const task = await deps.taskService.loadTask(project.repoRoot, taskSlug);
-      await deps.autoMemoryService.assertHarnessEngineerAvailable(task.worktreePath);
-    }
-    return deps.harnessFeedbackService.decide(project.repoRoot, {
-      action,
-      taskSlug,
-      comment: typeof request.body?.comment === "string" ? request.body.comment : undefined
-    });
   });
 
   app.post<{ Body: StartTaskHarnessRetrospectiveRequest }>("/api/projects/harness/task-retrospective", async (request) => {

@@ -1,6 +1,11 @@
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
-import type { HarnessBootstrapStatusReport, HarnessFileStatus, HarnessStatusReport } from "../../shared/types/harness.js";
+import type {
+  HarnessBootstrapStatusReport,
+  HarnessFeedbackStateReport,
+  HarnessFileStatus,
+  HarnessStatusReport
+} from "../../shared/types/harness.js";
 import type { AutoMemoryStateReport, MemoryReviewRunSummary } from "../../shared/types/memory.js";
 import type { ClaudePermissionMode, RoleSessionRecord, SessionEffort, SessionModel } from "../../shared/types/session.js";
 import { apiClient } from "../state/api-client.js";
@@ -20,6 +25,7 @@ export interface HarnessStudioModalProps {
   bootstrapStatus: HarnessBootstrapStatusReport | null;
   engineerSession: RoleSessionRecord | null;
   status: HarnessStatusReport | null;
+  feedbackState: HarnessFeedbackStateReport | null;
   memoryState: AutoMemoryStateReport | null;
   onClose(): void;
   onEffortChange(effort: SessionEffort): void;
@@ -55,6 +61,7 @@ export function HarnessStudioModal({
   bootstrapStatus,
   engineerSession,
   status,
+  feedbackState,
   memoryState,
   onClose,
   onEffortChange,
@@ -348,6 +355,7 @@ export function HarnessStudioModal({
                     onRevert={(run) => void revertMemoryRun(run)}
                     onRetry={() => void retryMemoryReview()}
                   />
+                  <HarnessFeedbackInbox state={feedbackState} />
                   <HarnessCollapsibleSection title="Overview">
                     <section className="harness-studio-overview">
                       <div className="harness-studio-metrics">
@@ -432,6 +440,21 @@ function HarnessMetric({ label, value }: { label: string; value: string }) {
       <span>{label}</span>
       <strong>{value}</strong>
     </div>
+  );
+}
+
+function HarnessFeedbackInbox({ state }: { state: HarnessFeedbackStateReport | null }) {
+  return (
+    <HarnessCollapsibleSection title={`Harness Feedback Inbox (${state?.queuedCount ?? 0})`}>
+      <ul className="harness-studio-doc-list">
+        {state?.pending.length ? state.pending.map((item) => (
+          <li key={item.path}>
+            <span title={item.path}>{item.title}</span>
+            <code>{item.reporterRole ?? "unknown"}</code>
+          </li>
+        )) : <li><span>No pending harness feedback.</span></li>}
+      </ul>
+    </HarnessCollapsibleSection>
   );
 }
 

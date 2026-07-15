@@ -231,11 +231,7 @@ describe("createRuntimeRecoveryService", () => {
     expect(harness.record.status).toBe("resumable");
     expect(harness.record.activityStatus).toBe("idle");
     await expectPathMissing(path.join(repoRoot, ".ai/vcm/bootstrap/session.json"));
-    const feedback = await readJson(path.join(repoRoot, ".ai/vcm/harness-feedback/state.json"));
-    expect(feedback.status).toBe("awaiting_user_approval");
-    await expect(readFile(path.join(repoRoot, ".ai/vcm/harness-feedback/active/feedback-1/analysis.md"), "utf8"))
-      .resolves
-      .toContain("VCM restarted");
+    await expectPathMissing(path.join(repoRoot, ".ai/vcm/harness-feedback/state.json"));
   });
 
   it("retries resource cleanup for logically closed task tombstones on project connect", async () => {

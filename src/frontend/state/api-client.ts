@@ -16,7 +16,6 @@ import type {
   HarnessApplyRequest,
   HarnessApplyResult,
   HarnessBootstrapStatusReport,
-  HarnessFeedbackDecisionRequest,
   HarnessFeedbackStateReport,
   HarnessFileContent,
   MergeRepositoryDiffToCurrentBranchResult,
@@ -232,12 +231,6 @@ export const apiClient = {
     }
     const query = params.toString();
     return request<HarnessFeedbackStateReport>(`/api/projects/harness/feedback${query ? `?${query}` : ""}`);
-  },
-  decideHarnessFeedback(input: HarnessFeedbackDecisionRequest) {
-    return request<HarnessFeedbackStateReport>("/api/projects/harness/feedback/decision", {
-      method: "POST",
-      body: JSON.stringify(input)
-    });
   },
   startTaskHarnessRetrospective(input: StartTaskHarnessRetrospectiveRequest) {
     return request<HarnessFeedbackStateReport>("/api/projects/harness/task-retrospective", {

@@ -149,6 +149,10 @@ failed memory work delays retrospective analysis. The retrospective then
 includes memory proposals, applied memory diffs, and current memory in its task
 evidence.
 
+Reusable harness feedback from `vcm-report-harness-issue` is a passive inbox.
+It is listed for Harness Studio and retrospective evidence, but it does not
+auto-dispatch Harness Engineer or create an approval/apply state machine.
+
 ## Turn Runtime Ownership
 
 `round-service` owns the active turn and round state. `session-service` owns role
