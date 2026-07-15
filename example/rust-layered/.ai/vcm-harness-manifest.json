@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
   "manager": "vcm",
-  "harnessVersion": "0.7.1",
+  "harnessVersion": "0.7.2",
   "installMode": "fixed",
   "installedAt": "2026-06-07T00:00:00Z",
-  "updatedAt": "2026-07-15T11:51:41.487Z",
+  "updatedAt": "2026-07-15T13:47:10.246Z",
   "runtimeRoots": [
     ".ai/vcm/",
     ".claude/worktrees/"
