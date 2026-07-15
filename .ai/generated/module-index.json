@@ -105,6 +105,7 @@
               "src/backend/templates/harness/vcm-final-acceptance-skill.ts",
               "src/backend/templates/harness/vcm-harness-bootstrap-skill.ts",
               "src/backend/templates/harness/vcm-long-running-validation-skill.ts",
+              "src/backend/templates/harness/vcm-propose-memory-skill.ts",
               "src/backend/templates/harness/vcm-report-harness-issue-skill.ts",
               "src/backend/templates/harness/vcm-route-message-skill.ts",
               "src/backend/templates/message-envelope.ts",

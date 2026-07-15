@@ -80,6 +80,7 @@ describe("createRuntimeCoordinatorService", () => {
     await service.reconcileProject("/repo", { taskSlug: "demo-task" });
 
     expect(calls).not.toContain("task-retrospective");
+    expect(calls).toContain("memory-reconcile:auto");
   });
 
   it("starts the automatic task retrospective after Auto Memory completes", async () => {
@@ -95,6 +96,20 @@ describe("createRuntimeCoordinatorService", () => {
 
     expect(calls).toContain("task-retrospective");
   });
+
+  it("continues a manually requested Task Harness Review after memory completes", async () => {
+    const calls: string[] = [];
+    const service = createCoordinator({
+      calls,
+      roundStopped: true,
+      memoryReadiness: { ready: true, disposition: "completed", trigger: "manual" }
+    });
+
+    await service.reconcileProject("/repo", { taskSlug: "demo-task" });
+
+    expect(calls).toContain("memory-reconcile:none");
+    expect(calls).toContain("task-retrospective");
+  });
 });
 
 function createCoordinator(input: {
@@ -107,7 +122,11 @@ function createCoordinator(input: {
   harnessInitialized?: boolean;
   autoTaskHarnessReviewEnabled?: boolean;
   roundStopped?: boolean;
-  memoryReadiness?: { ready: boolean; disposition: "pending" | "completed" };
+  memoryReadiness?: {
+    ready: boolean;
+    disposition: "pending" | "completed";
+    trigger?: "manual" | "auto";
+  };
 }) {
   let translator = input.translator;
   let harnessEngineer = input.harnessEngineer;
@@ -198,7 +217,8 @@ function createCoordinator(input: {
       }
     },
     autoMemoryService: {
-      async reconcileTask() {
+      async reconcileTask(request) {
+        input.calls.push(`memory-reconcile:${request.requestTrigger ?? "none"}`);
         return {
           version: 1,
           status: "idle",

@@ -390,11 +390,11 @@ VCM runs it from the active task worktree.
 
 ### Auto Memory
 
-Enable `Auto memory` in the `VCM Harness` sidebar group to collect durable role
-knowledge after a complete task passes Final Acceptance. Project Manager,
-Architect, Coder, Tester, and an enabled Gate Reviewer submit memory drafts in
-sequence. Harness Engineer verifies and consolidates them before VCM applies
-the result.
+`Auto memory` is the switch for the entire automated memory workflow. During
+Review Task Harness after Final Acceptance, Project Manager, Architect, Coder,
+Tester, and an enabled Gate Reviewer submit proposals in sequence through
+`vcm-propose-memory`. Harness Engineer verifies and consolidates them before VCM
+applies the result. Roles cannot edit active memory directly.
 
 Canonical memory is stored under the base repository's `.ai/vcm/memory/`.
 Harness Studio shows current memory and task-local applied history. Memory is
@@ -405,14 +405,16 @@ Post-task processing is ordered by the backend:
 
 ```text
 Final Acceptance
-  -> Auto Memory, when enabled
+  -> Review Task Harness
+  -> Memory proposals and Harness Engineer review, when Auto Memory is enabled
   -> Task Harness Retrospective
 ```
 
-Auto Memory adds no retrospective prerequisite when it is disabled. When it is
-enabled, both automatic and manual retrospective requests wait until memory has
-been applied for the current Final Acceptance. A failed memory review must be
-retried from Harness Studio before retrospective can run.
+When Auto Memory is disabled, Review Task Harness does not collect proposals or
+ask Harness Engineer to update memory. When enabled, both automatic and manual
+review requests complete the memory phase before retrospective analysis. A
+failed memory review must be retried from Harness Studio before retrospective
+can continue.
 
 ## Closing a Task
 

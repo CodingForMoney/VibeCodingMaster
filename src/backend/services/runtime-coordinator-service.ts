@@ -138,12 +138,18 @@ export function createRuntimeCoordinatorService(deps: RuntimeCoordinatorServiceD
           await deps.translationService.stopTask(taskRepoRoot, activeTask.taskSlug).catch(() => undefined);
         }
 
-        await reconcileAutoMemory(repoRoot, activeTask);
-        if (preferences.autoTaskHarnessReviewEnabled) {
-          const memoryReadiness = await getTaskRetrospectiveMemoryReadiness(repoRoot, activeTask);
-          if (memoryReadiness.ready) {
-            await maybeStartTaskHarnessRetrospective(repoRoot, activeTask);
-          }
+        await reconcileAutoMemory(
+          repoRoot,
+          activeTask,
+          preferences.autoTaskHarnessReviewEnabled ? "auto" : undefined
+        );
+        const memoryReadiness = await getTaskRetrospectiveMemoryReadiness(repoRoot, activeTask);
+        if ((preferences.autoTaskHarnessReviewEnabled || memoryReadiness.trigger) && memoryReadiness.ready) {
+          await maybeStartTaskHarnessRetrospective(
+            repoRoot,
+            activeTask,
+            memoryReadiness.trigger ?? "auto"
+          );
         }
 
         return { activeTask, gatewayStatus };
@@ -248,7 +254,11 @@ export function createRuntimeCoordinatorService(deps: RuntimeCoordinatorServiceD
     }
   }
 
-  async function maybeStartTaskHarnessRetrospective(repoRoot: string, task: TaskRecord): Promise<void> {
+  async function maybeStartTaskHarnessRetrospective(
+    repoRoot: string,
+    task: TaskRecord,
+    trigger: "manual" | "auto"
+  ): Promise<void> {
     const stateRoot = await deps.getStateRoot(repoRoot);
     const taskRepoRoot = getTaskRuntimeRepoRoot(task);
     const roundState = await deps.roundService.getSessionRoundState({
@@ -271,7 +281,7 @@ export function createRuntimeCoordinatorService(deps: RuntimeCoordinatorServiceD
         taskSlug: task.taskSlug,
         taskRepoRoot,
         handoffDir: task.handoffDir,
-        trigger: "auto"
+        trigger
       });
     } catch (error) {
       if (error instanceof VcmError && (EXPECTED_AUTO_RETROSPECTIVE_SKIP_CODES.has(error.code) || error.statusCode === 409)) {
@@ -281,7 +291,11 @@ export function createRuntimeCoordinatorService(deps: RuntimeCoordinatorServiceD
     }
   }
 
-  async function reconcileAutoMemory(repoRoot: string, task: TaskRecord) {
+  async function reconcileAutoMemory(
+    repoRoot: string,
+    task: TaskRecord,
+    requestTrigger?: "manual" | "auto"
+  ) {
     const stateRoot = await deps.getStateRoot(repoRoot);
     const taskRepoRoot = getTaskRuntimeRepoRoot(task);
     const roundState = await deps.roundService.getSessionRoundState({
@@ -295,6 +309,7 @@ export function createRuntimeCoordinatorService(deps: RuntimeCoordinatorServiceD
       taskRepoRoot,
       taskSlug: task.taskSlug,
       handoffDir: task.handoffDir,
+      requestTrigger,
       roundReady: roundState.status === "stopped"
         && Boolean(roundState.roundId)
         && roundState.roleRecovery?.status !== "failed"

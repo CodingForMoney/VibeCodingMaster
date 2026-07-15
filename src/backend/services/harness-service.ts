@@ -59,6 +59,7 @@ import { renderTesterHarnessRules } from "../templates/harness/tester-agent.js";
 import { renderVcmFinalAcceptanceSkillRules } from "../templates/harness/vcm-final-acceptance-skill.js";
 import { renderVcmHarnessBootstrapSkillRules } from "../templates/harness/vcm-harness-bootstrap-skill.js";
 import { renderVcmLongRunningValidationSkillRules } from "../templates/harness/vcm-long-running-validation-skill.js";
+import { renderVcmProposeMemorySkillRules } from "../templates/harness/vcm-propose-memory-skill.js";
 import { renderVcmReportHarnessIssueSkillRules } from "../templates/harness/vcm-report-harness-issue-skill.js";
 import { renderVcmRouteMessageSkillRules } from "../templates/harness/vcm-route-message-skill.js";
 import type { TerminalRuntime } from "../runtime/terminal-runtime.js";
@@ -287,6 +288,17 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
     ),
     ownership: "whole-file",
     renderRules: renderVcmReportHarnessIssueSkillRules
+  },
+  {
+    kind: "skill-vcm-propose-memory",
+    path: ".claude/skills/vcm-propose-memory/SKILL.md",
+    title: "VCM Propose Memory Skill",
+    frontmatter: renderSkillFrontmatter(
+      "vcm-propose-memory",
+      "Use only when VCM requests a role memory proposal during Task Harness Review."
+    ),
+    ownership: "whole-file",
+    renderRules: renderVcmProposeMemorySkillRules
   },
   {
     kind: "agent-gate-reviewer",

@@ -54,6 +54,7 @@ docs/CODING_STANDARDS.md
 .claude/skills/vcm-harness-bootstrap/SKILL.md
 .claude/skills/vcm-gate-review/SKILL.md
 .claude/skills/vcm-report-harness-issue/SKILL.md
+.claude/skills/vcm-propose-memory/SKILL.md
 .ai/tools/generate-module-index
 .ai/tools/generate-public-surface
 .ai/tools/request-gate-review
@@ -493,20 +494,23 @@ Reusable harness issues are reported through `vcm-report-harness-issue`.
 Harness Engineer verifies them when idle, proposes diffs or VCM issue drafts,
 and waits for user approval before applying normal harness changes.
 
-When Auto Memory is enabled, a normal stopped Round with valid Final Acceptance
-may run a separate post-task memory review. Workflow roles write evidence-backed
-drafts sequentially; Harness Engineer consolidates them into shared and
-role-specific memory. Canonical memory lives under the base repository's
-`.ai/vcm/memory/`, while the active worktree contains the role-visible snapshot
-and review history. These auxiliary turns do not reopen the completed Round.
+Auto Memory controls the entire automated memory workflow. When enabled, Review
+Task Harness after a normal stopped Round with valid Final Acceptance asks
+workflow roles to submit evidence-backed proposals sequentially through
+`vcm-propose-memory`; Harness Engineer consolidates them into shared and
+role-specific memory. Active memory is read-only to role turns. Canonical memory
+lives under the base repository's `.ai/vcm/memory/`, while the active worktree
+contains the role-visible snapshot and review history. These auxiliary turns do
+not reopen the completed Round.
 
-Task Harness Retrospective runs after that memory workflow. The backend uses the
-current accepted `final-acceptance.md` hash as the ordering key. Automatic and
-manual retrospective requests are allowed only when Auto Memory is disabled or
-completed for that hash; pending, collecting, reviewing, and failed memory work
-blocks them. Retrospective evidence includes the memory drafts, applied diff,
-and current memory. It reviews reusable harness problems exposed by the task,
-not whether the business feature itself is acceptable.
+Task Harness Retrospective runs after the optional memory phase. The backend
+uses the current accepted `final-acceptance.md` hash as the ordering key. When
+Auto Memory is disabled, Harness Engineer does not request proposals or update
+memory. When enabled, pending, collecting, reviewing, and failed memory work
+delays retrospective analysis. Retrospective evidence includes the memory
+proposals, applied diff, and current memory. It reviews reusable harness
+problems exposed by the task, not whether the business feature itself is
+acceptable.
 
 ## 16. Final Acceptance
 
@@ -657,5 +661,6 @@ polling a missing terminal session forever.
 18. Architect owns architecture planning, code scaffolding, Debug Mode, and
     durable architecture docs.
 19. PM owns routing and final evidence acceptance, not technical analysis.
-20. Auto Memory, when enabled, completes before Task Harness Retrospective.
+20. Review Task Harness runs Auto Memory first when enabled, then Task Harness
+    Retrospective.
 21. Temporary documents are deleted; durable documents are updated.

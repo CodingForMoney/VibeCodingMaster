@@ -14,6 +14,7 @@ export type HarnessFileKind =
   | "skill-vcm-route-message"
   | "skill-vcm-gate-review"
   | "skill-vcm-report-harness-issue"
+  | "skill-vcm-propose-memory"
   | "agent-gate-reviewer"
   | "agent-translator"
   | "agent-harness-engineer"

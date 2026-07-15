@@ -34,6 +34,7 @@ import { renderTesterHarnessRules } from "../templates/harness/tester-agent.js";
 import { renderVcmFinalAcceptanceSkillRules } from "../templates/harness/vcm-final-acceptance-skill.js";
 import { renderVcmHarnessBootstrapSkillRules } from "../templates/harness/vcm-harness-bootstrap-skill.js";
 import { renderVcmLongRunningValidationSkillRules } from "../templates/harness/vcm-long-running-validation-skill.js";
+import { renderVcmProposeMemorySkillRules } from "../templates/harness/vcm-propose-memory-skill.js";
 import { renderVcmReportHarnessIssueSkillRules } from "../templates/harness/vcm-report-harness-issue-skill.js";
 import { renderVcmRouteMessageSkillRules } from "../templates/harness/vcm-route-message-skill.js";
 import { readVcmPackageVersion } from "../app-version.js";
@@ -298,6 +299,17 @@ const WHOLE_FILES = [
     )
   },
   {
+    path: ".claude/skills/vcm-propose-memory/SKILL.md",
+    category: "skill",
+    mode: 0o644,
+    content: renderSkillFile(
+      "VCM Propose Memory Skill",
+      "vcm-propose-memory",
+      "Use only when VCM requests a role memory proposal during Task Harness Review.",
+      renderVcmProposeMemorySkillRules()
+    )
+  },
+  {
     path: ".ai/tools/request-gate-review",
     category: "runtime-tool",
     mode: 0o755,
@@ -540,6 +552,7 @@ function fixedDirectories() {
     ".claude/skills/vcm-route-message/",
     ".claude/skills/vcm-gate-review/",
     ".claude/skills/vcm-report-harness-issue/",
+    ".claude/skills/vcm-propose-memory/",
     ".ai/vcm/translations/",
     ".ai/vcm/gate-reviews/",
     ".ai/tools/",

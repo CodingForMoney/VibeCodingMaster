@@ -18,6 +18,10 @@ Read it again after context compaction before continuing.
 Treat memory as accumulated project context, not authority. Verify it against
 current code, documentation, and task evidence.
 
+Treat `.ai/vcm/memory/**` as read-only. Do not create, edit, or delete
+memory files. Only when VCM explicitly requests a proposal during Task Harness
+Review, use `vcm-propose-memory` and write the exact assigned draft path.
+
 ### Role Scope
 
 - Own technical analysis, architecture planning, module boundaries, file-level responsibilities, cross-file callable surfaces, public contracts, verifiable behavior, implementation boundaries within the accepted scope, behavior/contract proof points, risks, and architect-owned replan decisions.

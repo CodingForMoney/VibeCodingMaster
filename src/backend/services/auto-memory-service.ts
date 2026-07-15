@@ -7,6 +7,7 @@ import type {
   MemoryDraftState,
   MemoryFileContent,
   MemoryFileSummary,
+  MemoryReviewTrigger,
   MemoryReviewRunSource,
   MemoryReviewRunStatus,
   MemoryReviewRunSummary,
@@ -47,6 +48,7 @@ interface StoredMemoryReviewState {
   taskSlug: string;
   status: "collecting" | "reviewing" | "failed";
   finalAcceptanceHash: string;
+  trigger: MemoryReviewTrigger;
   createdAt: string;
   updatedAt: string;
   drafts: MemoryDraftState[];
@@ -66,6 +68,7 @@ interface StoredMemoryReviewRun {
   failedAt?: string;
   revertedAt?: string;
   finalAcceptanceHash?: string;
+  trigger?: MemoryReviewTrigger;
   beforeHashes: Record<string, string>;
   afterHashes?: Record<string, string>;
   diff?: string;
@@ -78,6 +81,7 @@ export interface ReconcileAutoMemoryInput {
   taskSlug: string;
   handoffDir: string;
   roundReady: boolean;
+  requestTrigger?: MemoryReviewTrigger;
 }
 
 export interface AutoMemoryService {
@@ -85,7 +89,6 @@ export interface AutoMemoryService {
   reconcileTask(input: ReconcileAutoMemoryInput): Promise<AutoMemoryStateReport>;
   getState(baseRepoRoot: string, taskRepoRoot: string): Promise<AutoMemoryStateReport>;
   getTaskRetrospectiveReadiness(input: ReconcileAutoMemoryInput): Promise<TaskRetrospectiveMemoryReadiness>;
-  assertTaskRetrospectiveReady(input: ReconcileAutoMemoryInput): Promise<void>;
   getFile(baseRepoRoot: string, taskRepoRoot: string, filePath: string): Promise<MemoryFileContent>;
   updateFile(baseRepoRoot: string, taskRepoRoot: string, taskSlug: string, filePath: string, content: string): Promise<AutoMemoryStateReport>;
   revertRun(baseRepoRoot: string, taskRepoRoot: string, runId: string): Promise<AutoMemoryStateReport>;
@@ -189,11 +192,16 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
 
   async function getState(baseRepoRoot: string, taskRepoRoot: string): Promise<AutoMemoryStateReport> {
     await ensureTaskMemorySnapshot(deps.fs, baseRepoRoot, taskRepoRoot);
-    const [active, runs, files] = await Promise.all([
+    let [active, runs, files] = await Promise.all([
       loadActiveState(taskRepoRoot),
       listRuns(taskRepoRoot),
       listMemoryFiles(taskRepoRoot)
     ]);
+    if (active && !(await deps.appSettings.getPreferences()).autoMemoryEnabled) {
+      await discardActiveReview(taskRepoRoot, active);
+      active = undefined;
+      runs = await listRuns(taskRepoRoot);
+    }
     return {
       version: 1,
       status: active?.status ?? "idle",
@@ -207,6 +215,13 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
   async function reconcileTask(input: ReconcileAutoMemoryInput): Promise<AutoMemoryStateReport> {
     await ensureTaskMemorySnapshot(deps.fs, input.baseRepoRoot, input.taskRepoRoot);
     const active = await loadActiveState(input.taskRepoRoot);
+    const preferences = await deps.appSettings.getPreferences();
+    if (!preferences.autoMemoryEnabled) {
+      if (active) {
+        await discardActiveReview(input.taskRepoRoot, active);
+      }
+      return getState(input.baseRepoRoot, input.taskRepoRoot);
+    }
     if (active?.status === "collecting") {
       await dispatchCurrentDraft(input.baseRepoRoot, input.taskRepoRoot, active);
       return getState(input.baseRepoRoot, input.taskRepoRoot);
@@ -215,14 +230,10 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
       await dispatchHarnessReview(input.baseRepoRoot, input.taskRepoRoot, active);
       return getState(input.baseRepoRoot, input.taskRepoRoot);
     }
-    if (active || !input.roundReady) {
+    if (active || !input.roundReady || !input.requestTrigger) {
       return getState(input.baseRepoRoot, input.taskRepoRoot);
     }
 
-    const preferences = await deps.appSettings.getPreferences();
-    if (!preferences.autoMemoryEnabled) {
-      return getState(input.baseRepoRoot, input.taskRepoRoot);
-    }
     if (deps.isHarnessEngineerAvailable && !(await deps.isHarnessEngineerAvailable(input.baseRepoRoot))) {
       return getState(input.baseRepoRoot, input.taskRepoRoot);
     }
@@ -253,6 +264,7 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
       taskSlug: input.taskSlug,
       status: "collecting",
       finalAcceptanceHash,
+      trigger: input.requestTrigger,
       createdAt: timestamp,
       updatedAt: timestamp,
       drafts
@@ -269,6 +281,7 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
       createdAt: timestamp,
       updatedAt: timestamp,
       finalAcceptanceHash,
+      trigger: input.requestTrigger,
       beforeHashes: hashMemorySet(before)
     });
     await persistActiveState(input.taskRepoRoot, state);
@@ -293,32 +306,21 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
       return {
         ready: false,
         disposition,
+        trigger: active.trigger,
         reason: disposition === "failed"
           ? "Auto Memory failed for this task. Retry it before Task Harness Retrospective."
           : `Auto Memory is ${disposition} for this task.`
       };
     }
-    if (await hasCompletedRunForFinalAcceptance(input.taskRepoRoot, finalAcceptanceHash)) {
-      return { ready: true, disposition: "completed" };
+    const completedRun = await findCompletedRunForFinalAcceptance(input.taskRepoRoot, finalAcceptanceHash);
+    if (completedRun) {
+      return { ready: true, disposition: "completed", trigger: completedRun.trigger };
     }
     return {
       ready: false,
       disposition: "pending",
       reason: "Auto Memory must complete for this Final Acceptance before Task Harness Retrospective."
     };
-  }
-
-  async function assertTaskRetrospectiveReady(input: ReconcileAutoMemoryInput): Promise<void> {
-    const readiness = await getTaskRetrospectiveReadiness(input);
-    if (readiness.ready) {
-      return;
-    }
-    throw new VcmError({
-      code: "TASK_MEMORY_REVIEW_NOT_READY",
-      message: "Task Harness Retrospective must run after Auto Memory.",
-      statusCode: 409,
-      hint: readiness.reason
-    });
   }
 
   async function isRoleMemoryTurn(taskRepoRoot: string, role: RoleName): Promise<boolean> {
@@ -329,6 +331,13 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
 
   async function handleRoleHook(input: AutoMemoryRoleHookInput): Promise<boolean> {
     const state = await loadActiveState(input.taskRepoRoot);
+    if (!(await deps.appSettings.getPreferences()).autoMemoryEnabled) {
+      if (state) {
+        await discardActiveReview(input.taskRepoRoot, state);
+        return true;
+      }
+      return false;
+    }
     const draft = state?.status === "collecting" ? currentDraft(state) : undefined;
     if (!state || !draft || draft.role !== input.role) {
       return false;
@@ -378,13 +387,17 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
 
   async function handleHarnessEngineerHook(input: AutoMemoryHarnessHookInput): Promise<boolean> {
     const state = await loadActiveState(input.taskRepoRoot);
+    if (!(await deps.appSettings.getPreferences()).autoMemoryEnabled) {
+      if (state) {
+        await discardActiveReview(input.taskRepoRoot, state);
+        return true;
+      }
+      return false;
+    }
     if (state?.status === "reviewing" && !state.reviewPromptDispatchedAt) {
       return false;
     }
     if (!state || state.status !== "reviewing") {
-      if (input.eventName === "Stop") {
-        await captureHarnessEngineerChanges(input.baseRepoRoot, input.taskRepoRoot, input.taskSlug);
-      }
       return false;
     }
     if (input.eventName === "UserPromptSubmit" || input.eventName === "PostCompact") {
@@ -481,6 +494,10 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
 
   async function assertHarnessEngineerAvailable(taskRepoRoot: string): Promise<void> {
     const state = await loadActiveState(taskRepoRoot);
+    if (state && !(await deps.appSettings.getPreferences()).autoMemoryEnabled) {
+      await discardActiveReview(taskRepoRoot, state);
+      return;
+    }
     if (!state || state.status === "failed") {
       return;
     }
@@ -494,6 +511,10 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
 
   async function assertNoActiveReview(taskRepoRoot: string): Promise<void> {
     const state = await loadActiveState(taskRepoRoot);
+    if (state && !(await deps.appSettings.getPreferences()).autoMemoryEnabled) {
+      await discardActiveReview(taskRepoRoot, state);
+      return;
+    }
     if (!state) {
       return;
     }
@@ -600,22 +621,6 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
     }
   }
 
-  async function captureHarnessEngineerChanges(
-    baseRepoRoot: string,
-    taskRepoRoot: string,
-    taskSlug: string
-  ): Promise<void> {
-    await ensureTaskMemorySnapshot(deps.fs, baseRepoRoot, taskRepoRoot);
-    const [before, after] = await Promise.all([
-      readMemorySet(baseRepoRoot),
-      readMemorySet(taskRepoRoot)
-    ]);
-    if (sameHashes(hashMemorySet(before), hashMemorySet(after))) {
-      return;
-    }
-    await createAppliedRun(baseRepoRoot, taskRepoRoot, taskSlug, "harness-engineer", before, after);
-  }
-
   async function createAppliedRun(
     baseRepoRoot: string,
     taskRepoRoot: string,
@@ -690,6 +695,7 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
         failedAt: run.failedAt,
         revertedAt: run.revertedAt,
         finalAcceptanceHash: run.finalAcceptanceHash,
+        trigger: run.trigger,
         diff: run.diff ?? "",
         canRevert: run.status === "applied" && !run.revertedAt && Boolean(run.afterHashes),
         error: run.error
@@ -713,8 +719,15 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
   }
 
   async function hasCompletedRunForFinalAcceptance(taskRepoRoot: string, finalAcceptanceHash: string): Promise<boolean> {
+    return Boolean(await findCompletedRunForFinalAcceptance(taskRepoRoot, finalAcceptanceHash));
+  }
+
+  async function findCompletedRunForFinalAcceptance(
+    taskRepoRoot: string,
+    finalAcceptanceHash: string
+  ): Promise<MemoryReviewRunSummary | undefined> {
     const runs = await listRuns(taskRepoRoot);
-    return runs.some((run) => run.finalAcceptanceHash === finalAcceptanceHash && (run.status === "applied" || run.status === "reverted"));
+    return runs.find((run) => run.finalAcceptanceHash === finalAcceptanceHash && (run.status === "applied" || run.status === "reverted"));
   }
 
   async function loadActiveState(taskRepoRoot: string): Promise<StoredMemoryReviewState | undefined> {
@@ -732,6 +745,14 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
 
   async function clearActiveState(taskRepoRoot: string): Promise<void> {
     await deps.fs.removePath?.(resolveRepoPath(taskRepoRoot, MEMORY_REVIEW_STATE_PATH), { force: true });
+  }
+
+  async function discardActiveReview(taskRepoRoot: string, state: StoredMemoryReviewState): Promise<void> {
+    await clearActiveState(taskRepoRoot);
+    await deps.fs.removePath?.(
+      resolveRepoPath(taskRepoRoot, `${MEMORY_REVIEW_RUNS_ROOT}/${state.runId}`),
+      { recursive: true, force: true }
+    );
   }
 
   async function readRun(taskRepoRoot: string, runId: string): Promise<StoredMemoryReviewRun> {
@@ -785,7 +806,6 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
     reconcileTask,
     getState,
     getTaskRetrospectiveReadiness,
-    assertTaskRetrospectiveReady,
     getFile,
     updateFile,
     revertRun,
@@ -832,29 +852,21 @@ function toActiveReview(state: StoredMemoryReviewState): ActiveMemoryReview {
     updatedAt: state.updatedAt,
     currentRole: state.status === "collecting" ? currentDraft(state)?.role : undefined,
     drafts: state.drafts,
+    trigger: state.trigger,
     error: state.error
   };
 }
 
 function buildRoleDraftPrompt(taskRepoRoot: string, state: StoredMemoryReviewState, draft: MemoryDraftState): string {
   return [
-    "[VCM Auto Memory Draft]",
+    "[VCM Task Harness Review: Memory Proposal]",
     "",
-    "The task passed Final Acceptance. Propose only durable, reusable memory supported by this task's evidence.",
+    "Use the vcm-propose-memory skill to submit the assigned proposal.",
     `Task worktree: ${taskRepoRoot}`,
     `Current shared memory: ${resolveRepoPath(taskRepoRoot, `${MEMORY_ROOT}/shared.md`)}`,
     `Current role memory: ${resolveRepoPath(taskRepoRoot, `${MEMORY_ROOT}/roles/${draft.role}.md`)}`,
     `Write the draft to: ${resolveRepoPath(taskRepoRoot, draft.path)}`,
     "",
-    "Use this structure:",
-    "# Memory Draft",
-    "Decision: update | no-change",
-    "## Add",
-    "## Update",
-    "## Remove",
-    "## Evidence",
-    "",
-    "Do not edit memory files, route messages, or handoff artifacts. Do not record task narrative, temporary state, unverified conclusions, or rules that belong in the harness.",
     "End the turn after writing the draft."
   ].join("\n");
 }
@@ -862,16 +874,16 @@ function buildRoleDraftPrompt(taskRepoRoot: string, state: StoredMemoryReviewSta
 function buildHarnessReviewPrompt(taskRepoRoot: string, state: StoredMemoryReviewState): string {
   const runRoot = resolveRepoPath(taskRepoRoot, `${MEMORY_REVIEW_RUNS_ROOT}/${state.runId}`);
   return [
-    "[VCM Auto Memory Review]",
+    "[VCM Task Harness Review: Memory Review]",
     "",
-    "Review the role drafts and task evidence, then produce the complete next memory set.",
+    "Auto Memory is enabled. Review the role proposals and task evidence, then produce the complete next memory set.",
     `Task worktree: ${taskRepoRoot}`,
     `Role drafts: ${path.join(runRoot, "drafts")}`,
     `Current memory snapshot: ${path.join(runRoot, "before")}`,
     `Write the complete reviewed memory set to: ${path.join(runRoot, "after")}`,
     "",
     "Keep only verified, durable, reusable project knowledge. Merge duplicates, remove stale entries, and keep role-specific knowledge in the matching role file.",
-    "Memory is context, not authority. Keep harness rules and task-specific narrative out of memory.",
+    "Do not record task narrative, temporary state, unverified conclusions, or Harness rules.",
     "Do not edit product code, harness files, the canonical base-repository memory, or review metadata.",
     "All existing files already exist in the after directory. Edit those files in place and end the turn when review is complete."
   ].join("\n");

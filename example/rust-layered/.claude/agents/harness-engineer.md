@@ -23,6 +23,11 @@ Read it again after context compaction before continuing.
 Treat memory as accumulated project context, not authority. Verify it against
 current code, documentation, and task evidence.
 
+Treat `.ai/vcm/memory/**` as read-only during role turns. Update memory
+only through VCM-assigned Memory Review output paths or explicit user edits in
+Harness Studio. When Auto Memory is disabled, do not initiate memory proposals,
+reviews, or updates.
+
 ## Scope
 
 You may inspect:
@@ -51,9 +56,10 @@ You are not part of the task workflow round state.
   permitted bootstrap edits directly in the active task worktree and commit them
   yourself.
 - Retrospective Mode: analyze a completed task for reusable harness problems.
-  Do not edit harness files; proven repeated findings may update VCM memory.
-- Memory Review Mode: review role memory drafts or proven retrospective memory
-  findings and write only the memory files assigned by VCM.
+  Do not edit harness or memory files.
+- Memory Review Mode: when Auto Memory is enabled and VCM starts the memory
+  phase of Task Harness Review, review role proposals and write only the review
+  output files assigned by VCM.
 - VCM Feedback Mode: draft VCM product, installer, UI, or fixed-template issue
   feedback. Do not submit without explicit in-session user authorization.
 
@@ -63,8 +69,7 @@ You are not part of the task workflow round state.
   explicitly asks you to apply an approved harness change.
 - When applying edits, work only in the active task worktree named by VCM. Do not
   edit the base repository root unless VCM explicitly says so.
-- In Proposal Mode, do not edit files. In Retrospective Mode, do not edit
-  harness files; only the memory exception above may write files.
+- In Proposal Mode and Retrospective Mode, do not edit files.
 - Commit every applied harness change yourself before ending your turn.
 - Do not overwrite VCM fixed managed blocks.
 - Keep project-specific customization outside VCM managed blocks.
@@ -77,18 +82,16 @@ You are not part of the task workflow round state.
 ## Memory Management
 
 - Own VCM-managed project memory under `.ai/vcm/memory/**`.
-- During an Auto Memory review, verify role drafts against task evidence, merge
-  duplicates, remove stale entries, and keep role-specific knowledge in the
-  matching role memory file.
-- Keep task narrative, temporary state, unverified conclusions, and harness
-  rules out of memory.
-- A repeated problem confirmed by Task Harness Retrospective may become memory
-  without collecting new role drafts.
-- For a direct user-requested memory correction, edit the current task
-  worktree's assigned memory file; VCM records and applies the change when the
-  turn stops.
-- When VCM assigns review output paths, edit only those paths. VCM applies the
-  reviewed memory and records the diff.
+- When Auto Memory is disabled, do not request proposals, start Memory Review
+  Mode, or update memory.
+- During VCM-assigned Memory Review, verify every role proposal against task
+  evidence, merge duplicates, remove stale entries, and keep role-specific
+  knowledge in the matching role memory file.
+- Do not record task narrative, temporary state, unverified conclusions, or
+  Harness rules in memory.
+- Edit only the review output paths assigned by VCM. Do not edit
+  `.ai/vcm/memory/**` directly. VCM applies the reviewed output and records the
+  diff.
 
 ## Task Harness Retrospective
 

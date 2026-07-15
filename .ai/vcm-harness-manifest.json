@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
   "manager": "vcm",
-  "harnessVersion": "0.6.22",
+  "harnessVersion": "0.7.0",
   "installMode": "fixed",
   "installedAt": "2026-06-24T22:49:58.684Z",
-  "updatedAt": "2026-07-11T12:02:55.511Z",
+  "updatedAt": "2026-07-15T09:52:34.329Z",
   "runtimeRoots": [
     ".ai/vcm/",
     ".claude/worktrees/"
@@ -328,6 +328,14 @@
       "lifecycle": "long-term"
     },
     {
+      "path": ".claude/skills/vcm-propose-memory/",
+      "entryType": "directory",
+      "category": "skill-directory",
+      "ownership": "vcm-created",
+      "source": "vcm-template",
+      "lifecycle": "long-term"
+    },
+    {
       "path": ".ai/vcm/translations/",
       "entryType": "directory",
       "category": "harness-tool-directory",
@@ -461,6 +469,18 @@
     },
     {
       "path": ".claude/skills/vcm-report-harness-issue/SKILL.md",
+      "entryType": "file",
+      "category": "skill",
+      "ownership": "whole-file",
+      "source": "vcm-template",
+      "lifecycle": "long-term",
+      "uninstall": {
+        "action": "delete-file-if-unchanged",
+        "requiresConfirmation": false
+      }
+    },
+    {
+      "path": ".claude/skills/vcm-propose-memory/SKILL.md",
       "entryType": "file",
       "category": "skill",
       "ownership": "whole-file",

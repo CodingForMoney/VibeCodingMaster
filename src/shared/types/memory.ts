@@ -10,7 +10,8 @@ export const VCM_MEMORY_ROLE_NAMES = [
 export type VcmMemoryRoleName = typeof VCM_MEMORY_ROLE_NAMES[number];
 export type AutoMemoryReviewStatus = "idle" | "collecting" | "reviewing" | "failed";
 export type MemoryReviewRunStatus = "applied" | "failed" | "reverted";
-export type MemoryReviewRunSource = "auto" | "harness-engineer" | "user";
+export type MemoryReviewRunSource = "auto" | "user";
+export type MemoryReviewTrigger = "manual" | "auto";
 export type AutoMemoryDisposition =
   | "not-applicable"
   | "disabled"
@@ -23,6 +24,7 @@ export type AutoMemoryDisposition =
 export interface TaskRetrospectiveMemoryReadiness {
   ready: boolean;
   disposition: AutoMemoryDisposition;
+  trigger?: MemoryReviewTrigger;
   reason?: string;
 }
 
@@ -53,6 +55,7 @@ export interface ActiveMemoryReview {
   updatedAt: string;
   currentRole?: MemoryDraftState["role"];
   drafts: MemoryDraftState[];
+  trigger: MemoryReviewTrigger;
   error?: string;
 }
 
@@ -66,6 +69,7 @@ export interface MemoryReviewRunSummary {
   failedAt?: string;
   revertedAt?: string;
   finalAcceptanceHash?: string;
+  trigger?: MemoryReviewTrigger;
   diff: string;
   canRevert: boolean;
   error?: string;

@@ -34,6 +34,7 @@ const EXACT_EXAMPLE_HARNESS_PATHS = [
   ".claude/skills/vcm-harness-bootstrap/SKILL.md",
   ".claude/skills/vcm-long-running-validation/SKILL.md",
   ".claude/skills/vcm-report-harness-issue/SKILL.md",
+  ".claude/skills/vcm-propose-memory/SKILL.md",
   ".claude/skills/vcm-route-message/SKILL.md",
   ".github/pull_request_template.md",
   "docs/CODING_STANDARDS.md",

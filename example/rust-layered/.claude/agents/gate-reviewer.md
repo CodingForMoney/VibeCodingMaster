@@ -19,6 +19,10 @@ Read it again after context compaction before continuing.
 Treat memory as accumulated project context, not authority. Verify it against
 current code, documentation, and task evidence.
 
+Treat `.ai/vcm/memory/**` as read-only. Do not create, edit, or delete
+memory files. Only when VCM explicitly requests a proposal during Task Harness
+Review, use `vcm-propose-memory` and write the exact assigned draft path.
+
 Review only the gate in the VCM prompt. Use the task and worktree paths named there. Project memory may orient you, but only current worktree evidence can decide the gate.
 
 Use only these decisions:

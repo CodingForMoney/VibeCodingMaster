@@ -76,8 +76,20 @@ describe("auto-memory-service", () => {
       handoffDir: ".ai/vcm/handoffs",
       roundReady: true
     });
+    expect(state.status).toBe("idle");
+    expect(context.terminalWrites).toHaveLength(0);
+
+    state = await context.service.reconcileTask({
+      baseRepoRoot: context.baseRepoRoot,
+      taskRepoRoot: context.taskRepoRoot,
+      taskSlug: "demo",
+      handoffDir: ".ai/vcm/handoffs",
+      roundReady: true,
+      requestTrigger: "manual"
+    });
     expect(state.status).toBe("collecting");
     expect(state.active?.currentRole).toBe("project-manager");
+    expect(state.active?.trigger).toBe("manual");
 
     for (const role of ["project-manager", "architect", "coder", "tester"] as const) {
       state = await context.service.getState(context.baseRepoRoot, context.taskRepoRoot);
@@ -115,14 +127,14 @@ describe("auto-memory-service", () => {
     expect(state.runs[0].status).toBe("applied");
     expect(state.runs[0].diff).toContain("Lifecycle completion is owned by backend hooks");
     expect(await readText(context.baseRepoRoot, ".ai/vcm/memory/shared.md")).toContain("Lifecycle completion is owned by backend hooks");
-    expect(context.terminalWrites.some((entry) => entry.includes("[VCM Auto Memory Review]"))).toBe(true);
+    expect(context.terminalWrites.some((entry) => entry.includes("[VCM Task Harness Review: Memory Review]"))).toBe(true);
     await expect(context.service.getTaskRetrospectiveReadiness({
       baseRepoRoot: context.baseRepoRoot,
       taskRepoRoot: context.taskRepoRoot,
       taskSlug: "demo",
       handoffDir: ".ai/vcm/handoffs",
       roundReady: true
-    })).resolves.toEqual({ ready: true, disposition: "completed" });
+    })).resolves.toEqual({ ready: true, disposition: "completed", trigger: "manual" });
 
     await writeFile(
       finalAcceptancePath,
@@ -138,6 +150,61 @@ describe("auto-memory-service", () => {
     })).resolves.toMatchObject({ ready: false, disposition: "pending" });
   });
 
+  it("does not apply Harness Engineer memory edits outside an active Memory Review", async () => {
+    const context = await createContext(false);
+    await context.service.ensureTaskSnapshot(context.baseRepoRoot, context.taskRepoRoot);
+    await writeFile(
+      path.join(context.taskRepoRoot, ".ai/vcm/memory/shared.md"),
+      "# Shared Memory\n\nUnreviewed Harness Engineer edit.\n",
+      "utf8"
+    );
+
+    await expect(context.service.handleHarnessEngineerHook({
+      baseRepoRoot: context.baseRepoRoot,
+      taskRepoRoot: context.taskRepoRoot,
+      taskSlug: "demo",
+      eventName: "Stop"
+    })).resolves.toBe(false);
+
+    const state = await context.service.getState(context.baseRepoRoot, context.taskRepoRoot);
+    expect(state.runs).toHaveLength(0);
+    expect(await readText(context.baseRepoRoot, ".ai/vcm/memory/shared.md")).not.toContain("Unreviewed");
+  });
+
+  it("discards active memory work when Auto Memory is disabled", async () => {
+    const context = await createContext(true);
+    const finalAcceptancePath = path.join(context.taskRepoRoot, ".ai/vcm/handoffs/final-acceptance.md");
+    await mkdir(path.dirname(finalAcceptancePath), { recursive: true });
+    await writeFile(
+      finalAcceptancePath,
+      renderFinalAcceptanceTemplate("demo")
+        .replaceAll("TBD", "None.")
+        .replace("## Decision\n\nNone.", "## Decision\n\naccepted"),
+      "utf8"
+    );
+    await context.service.reconcileTask({
+      baseRepoRoot: context.baseRepoRoot,
+      taskRepoRoot: context.taskRepoRoot,
+      taskSlug: "demo",
+      handoffDir: ".ai/vcm/handoffs",
+      roundReady: true,
+      requestTrigger: "manual"
+    });
+
+    context.setAutoMemoryEnabled(false);
+    await expect(context.service.handleRoleHook({
+      baseRepoRoot: context.baseRepoRoot,
+      taskRepoRoot: context.taskRepoRoot,
+      taskSlug: "demo",
+      role: "project-manager",
+      eventName: "Stop"
+    })).resolves.toBe(true);
+
+    const state = await context.service.getState(context.baseRepoRoot, context.taskRepoRoot);
+    expect(state.status).toBe("idle");
+    expect(state.runs).toHaveLength(0);
+  });
+
   async function createContext(autoMemoryEnabled: boolean) {
     root = await mkdtemp(path.join(os.tmpdir(), "vcm-auto-memory-"));
     const baseRepoRoot = path.join(root, "repo");
@@ -145,6 +212,7 @@ describe("auto-memory-service", () => {
     await mkdir(baseRepoRoot, { recursive: true });
     await mkdir(taskRepoRoot, { recursive: true });
     const terminalWrites: string[] = [];
+    let memoryEnabled = autoMemoryEnabled;
     const sessionFor = (role: RoleName): RoleSessionRecord => ({
       id: `session-${role}`,
       claudeSessionId: `claude-${role}`,
@@ -195,7 +263,7 @@ describe("auto-memory-service", () => {
             roleRetryEnabled: true,
             permissionRequestMode: "off",
             autoTaskHarnessReviewEnabled: false,
-            autoMemoryEnabled,
+            autoMemoryEnabled: memoryEnabled,
             translationEnabled: false,
             translationAutoSendEnabled: false,
             translationTargetLanguage: "zh-CN",
@@ -212,7 +280,15 @@ describe("auto-memory-service", () => {
       },
       now: () => "2026-07-11T00:00:00.000Z"
     });
-    return { baseRepoRoot, taskRepoRoot, terminalWrites, service };
+    return {
+      baseRepoRoot,
+      taskRepoRoot,
+      terminalWrites,
+      service,
+      setAutoMemoryEnabled(enabled: boolean) {
+        memoryEnabled = enabled;
+      }
+    };
   }
 });
 

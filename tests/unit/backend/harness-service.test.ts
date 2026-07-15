@@ -13,7 +13,7 @@ describe("createHarnessService", () => {
   it("plans and applies recommended harness files when they are missing", async () => {
     const fs = createMemoryFs();
     const service = createHarnessService({ fs });
-    const expectedHarnessFileCount = 22;
+    const expectedHarnessFileCount = 23;
 
     const status = await service.getHarnessStatus("/repo");
     expect(status.needsApply).toBe(true);
@@ -80,6 +80,8 @@ describe("createHarnessService", () => {
     expect(await fs.readText("/repo/.claude/skills/vcm-gate-review/SKILL.md")).toContain("validation-only completion");
     expect(await fs.readText("/repo/.claude/skills/vcm-report-harness-issue/SKILL.md")).toContain("name: vcm-report-harness-issue");
     expect(await fs.readText("/repo/.claude/skills/vcm-report-harness-issue/SKILL.md")).toContain(".ai/vcm/harness-feedback/pending/");
+    expect(await fs.readText("/repo/.claude/skills/vcm-propose-memory/SKILL.md")).toContain("name: vcm-propose-memory");
+    expect(await fs.readText("/repo/.claude/skills/vcm-propose-memory/SKILL.md")).toContain("Treat `.ai/vcm/memory/**` as read-only");
     expect(await fs.readText("/repo/.claude/agents/project-manager.md")).toContain("name: project-manager");
     expect(await fs.readText("/repo/.claude/agents/project-manager.md")).toContain("<!-- VCM:BEGIN version=1 -->");
     const projectManagerAgent = await fs.readText("/repo/.claude/agents/project-manager.md");

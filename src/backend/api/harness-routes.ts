@@ -215,15 +215,21 @@ export function registerHarnessRoutes(app: FastifyInstance, deps: HarnessRouteDe
 
   app.post<{ Body: StartTaskHarnessRetrospectiveRequest }>("/api/projects/harness/task-retrospective", async (request) => {
     const { project, task } = await requireHarnessTaskContext(deps, request.body?.taskSlug);
-    await deps.autoMemoryService.assertTaskRetrospectiveReady({
+    const trigger = request.body?.trigger === "auto" ? "auto" : "manual";
+    const memoryInput = {
       baseRepoRoot: project.repoRoot,
       taskRepoRoot: task.worktreePath,
       taskSlug: task.taskSlug,
       handoffDir: task.handoffDir,
-      roundReady: true
-    });
+      roundReady: true,
+      requestTrigger: trigger
+    } as const;
+    await deps.autoMemoryService.reconcileTask(memoryInput);
+    const memoryReadiness = await deps.autoMemoryService.getTaskRetrospectiveReadiness(memoryInput);
+    if (!memoryReadiness.ready) {
+      return deps.harnessFeedbackService.getState(project.repoRoot, task.taskSlug);
+    }
     await deps.autoMemoryService.assertHarnessEngineerAvailable(task.worktreePath);
-    const trigger = request.body?.trigger === "auto" ? "auto" : "manual";
     return deps.harnessFeedbackService.startTaskRetrospective(project.repoRoot, {
       taskSlug: task.taskSlug,
       taskRepoRoot: task.worktreePath,

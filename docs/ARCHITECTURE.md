@@ -130,20 +130,23 @@ path, and review history under `.ai/vcm/memory-review/`. The root `CLAUDE.md`
 imports shared memory; each role definition requires that role to read its own
 memory file.
 
-After a normal stopped round has valid Final Acceptance, the backend runtime
-coordinator may start the Auto Memory state machine. Workflow roles submit
-drafts sequentially, Harness Engineer writes the reviewed memory set, and the
-service applies it to canonical and task memory together. Auto Memory hook
-turns update role session activity but do not mutate the completed task round.
-The frontend only displays state and invokes memory file, retry, or revert APIs.
+After a normal stopped round has valid Final Acceptance, a manual or automatic
+Review Task Harness request may start the Auto Memory state machine. Workflow
+roles submit proposals sequentially through `vcm-propose-memory`, Harness
+Engineer writes the reviewed memory set, and the service applies it to
+canonical and task memory together. Active memory files are read-only to role
+turns. Auto Memory hook turns update role session activity but do not mutate the
+completed task round. The frontend only displays state and invokes memory file,
+retry, or revert APIs.
 
 Auto Memory completion is bound to the SHA-256 hash of the current accepted
-`final-acceptance.md`. If that artifact changes, memory is pending again for the
-new acceptance evidence. `runtime-coordinator-service` and the manual Harness
-route use the same readiness policy: Task Harness Retrospective may start only
-when Auto Memory is disabled or completed for that hash. Pending, collecting,
-reviewing, or failed memory work blocks retrospective. The retrospective then
-includes memory drafts, applied memory diffs, and current memory in its task
+`final-acceptance.md`. If that artifact changes, the next Review Task Harness
+request creates a new memory phase for the new acceptance evidence.
+`runtime-coordinator-service` and the manual Harness route use the same
+readiness policy. When Auto Memory is disabled, Review Task Harness skips all
+memory collection and updates. When enabled, pending, collecting, reviewing, or
+failed memory work delays retrospective analysis. The retrospective then
+includes memory proposals, applied memory diffs, and current memory in its task
 evidence.
 
 ## Turn Runtime Ownership
