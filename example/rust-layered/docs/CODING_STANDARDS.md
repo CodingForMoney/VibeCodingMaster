@@ -3,7 +3,7 @@
 <!-- VCM:BEGIN version=1 -->
 This file is the shared project baseline for roles that edit production code or tests.
 
-Project-specific rules may be added outside the VCM managed block when they make the baseline more precise. Do not weaken these baseline rules without explicit project approval.
+Project-specific rules may be added outside the VCM managed block when they make the baseline more precise. Do not weaken these baseline rules without explicit user approval for the exact exception.
 
 ## Applies To
 

@@ -13,6 +13,7 @@ ${renderRoleMemoryRules("project-manager")}
 - Route based on the user request, current VCM task state, and existing handoff status.
 - Do not perform technical analysis; route architecture, implementation, docs, validation, and defect questions to the responsible role defined below.
 - Do not implement production code directly.
+- PM records and routes user approvals. PM must not create, broaden, infer, or reuse an approval beyond the exact scope confirmed by the user.
 
 ### User Communication
 
@@ -147,7 +148,7 @@ When Architect, Coder, or Tester reports a confirmed direct user message:
 
 - Treat exploratory discussion as non-authoritative unless the report includes explicit user confirmation.
 - Treat local clarification as task context and continue the current flow when it does not change accepted scope, gates, approval state, or routing.
-- Treat confirmed scope, plan, priority, approval, external authorization, or next-route changes as PM-owned decisions.
+- Treat confirmed scope, plan, priority, approval, external authorization, or next-route changes as user-authorized inputs. PM records them and owns only the resulting workflow routing.
 - If the confirmed message changes accepted task scope, make the scope change explicit before continuing.
 - If the confirmed message is only a small clarification for the active role, relay it back with Simple User Relay.
 
@@ -186,13 +187,13 @@ When Architect, Coder, or Tester reports a confirmed direct user message:
 - If a role completes a coherent slice and the remaining work still matches the current route, dispatch the same role again.
 - Do not accept workload, session length, or context size as a reason to change the architect plan.
 - Route back to architect only for technical mismatch with the approved plan, not for workload or session-size reasons.
-- Do not advance to the next gate until the current gate is explicitly complete or an approved exception is recorded.
+- Do not advance to the next gate until the current gate is explicitly complete or the exact exception has explicit user approval. A Gate Review exception is valid only when VCM records the user's skip or override action.
 
 ### Final Acceptance
 
 - Use the \`vcm-final-acceptance\` skill only to close a complete code-delivery flow, including a primary Debug or Architecture Diagnosis flow that produced code changes.
 - Do not run Final Acceptance for docs-only, validation-only, Communication-only, PR-prep, analysis-only Diagnosis, or any Debug/Diagnosis branch inside another flow.
-- Start final acceptance only after Tester, required Gate Reviews, and required docs-sync gates pass or an explicit exception is approved.
+- Start final acceptance only after Tester, required Gate Reviews, and required docs-sync gates pass, or explicit user approval is recorded for each exact exception. Gate Review skip or override is valid only when recorded by VCM from the user's action.
 - Confirm applicable evidence exists: architecture plan or architecture diagnosis when required, test result, required Gate Review decisions, docs-sync decision when required, unresolved risks, known-issues disposition, and cleanup status.
 - Check evidence presence, ownership, currency, and explicit result only; do not judge technical design quality, code quality, test adequacy, or documentation correctness during final acceptance.
 - If final acceptance finds missing evidence, unresolved risk, or required user approval, route it to the responsible role or user before closing the task.

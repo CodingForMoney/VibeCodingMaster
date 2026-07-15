@@ -61,14 +61,14 @@ High-risk unexpected files require explicit user approval or architect Replan be
 
 Check:
 
-- required route was followed, or an explicit exception is recorded
+- required route was followed, or an explicit user-approved exception is recorded
 - required handoff artifacts exist and are current
 - architecture plan, Architecture Diagnosis, Replan, or architect follow-up completion is recorded when required by the flow
 - tester report records `Test Result: pass|fail`, validation commands, results, and skipped checks with reasons
-- required Gate Reviews are approved, skipped with a recorded reason, or overridden with a recorded reason
-- Gate Review enable state is confirmed authoritatively: do not infer that no Gate Reviews were required from an absent or empty `.ai/vcm/gate-reviews/index.json`. When Gate Review is enabled, a missing index or a required gate without a recorded decision means the gate was skipped — run the matching command from the `vcm-gate-review` skill, including the code source for `code-diff`, and do not accept until each required gate returns `approve`/`already_approved`, `disabled`/`not_required`, or a recorded skip/override
+- required Gate Reviews are approved, or skipped/overridden through a VCM-recorded user action
+- Gate Review enable state is confirmed authoritatively: do not infer that no Gate Reviews were required from an absent or empty `.ai/vcm/gate-reviews/index.json`. When Gate Review is enabled, a missing index or a required gate without a recorded decision means the gate was skipped — run the matching command from the `vcm-gate-review` skill, including the code source for `code-diff`, and do not accept until each required gate returns `approve`/`already_approved`, `disabled`/`not_required`, or a VCM-recorded user skip/override
 - docs-sync report records docs updated, docs intentionally left unchanged, or required follow-up when docs sync was required
-- known issues are either resolved, promoted to durable docs by architect, or explicitly accepted
+- known issues are either resolved, promoted to durable docs by architect, or explicitly accepted by the user
 - temporary task state is ready to clean after durable facts are promoted
 
 ## Decisions

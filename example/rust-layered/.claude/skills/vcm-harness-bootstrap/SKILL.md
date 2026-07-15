@@ -67,7 +67,7 @@ This skill is an operating procedure. It does not replace the deterministic VCM 
 
 - The shared baseline lives inside the VCM managed block and is installer-maintained; do not edit it.
 - Add project-specific implementation rules outside the managed block (for example under `Project Coding Standards`) only when they make the shared baseline more precise.
-- Do not weaken the baseline rules without explicit project approval.
+- Do not weaken the baseline rules without explicit user approval for the exact exception.
 - Keep role workflow rules out of this file; role routing, Gate Review, Final Acceptance, and role-specific handoff rules belong in role definitions or skills.
 
 ### `docs/ARCHITECTURE.md`

@@ -21,6 +21,7 @@ This is a Rust workspace example for VCM harness experiments. It has three archi
 - Use `vcm-long-running-validation` for long-running validation. Follow the background job limits below.
 - Use `vcm-report-harness-issue` when you notice a reusable VCM harness problem. Record feedback; do not contact Harness Engineer directly.
 - Treat `.ai/vcm/memory/**` as read-only. Use `vcm-propose-memory` only when VCM assigns a memory proposal during Task Harness Review.
+- Only the user may approve scope reduction, skipped required validation, Gate Review skip or override, skipped required docs sync, accepted unresolved task-scope risk, or weakening of baseline Harness rules. PM may record and route the user's approval but cannot grant it.
 - Project-manager runs `vcm-gate-review` unconditionally at every Gate Review trigger point and on VCM Gate Review callbacks; the tool reports the authoritative enable state.
 
 ## VCM Harness Scope
