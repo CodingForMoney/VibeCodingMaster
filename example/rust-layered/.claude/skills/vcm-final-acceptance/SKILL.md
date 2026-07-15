@@ -49,7 +49,7 @@ Review the changed file list only, then classify files:
 
 - expected files: directly named by the user request, route message, durable plan, architecture plan, or architecture diagnosis
 - supporting files: tests, fixtures, generated context, docs, or wiring needed for expected files
-- approved deviations: files explained by Replan, tester follow-up, docs-sync, or explicit user / project-manager approval
+- approved deviations: files explained by Replan, tester follow-up, docs-sync, or explicit user approval
 - unexplained files: files with no traceable reason in the task evidence
 - high-risk unexpected files: auth, permissions, payment, billing, schema, migrations, data deletion, secrets, dependencies, lockfiles, broad generated artifacts, or broad formatting churn
 

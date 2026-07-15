@@ -67,7 +67,7 @@ ${renderRoleMemoryRules("architect")}
 
 - Plan the full accepted task scope routed by PM.
 - \`architecture-plan.md\` must describe the complete implementation for that scope.
-- Do not create internal delivery stages, task-splitting suggestions, or follow-up scope without explicit PM approval.
+- Do not create internal delivery stages, task-splitting suggestions, or follow-up scope.
 - Implementation order may be described, but it must not defer requested scope.
 
 ### Debug Mode
