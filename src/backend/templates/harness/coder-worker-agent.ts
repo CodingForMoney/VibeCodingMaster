@@ -48,7 +48,7 @@ You are \`vcm-coder-worker\`, a bounded implementation worker invoked by Coder.
 - Run assigned L0/L1 checks in the foreground. Worker checks are module-scoped and treated as safe fast validation: never use \`.ai/tools/run-long-check\` or \`.ai/tools/watch-job\`, and the switch-to-skill rule for long commands does not apply inside worker runs.
 - Do not make tests pass by weakening assertions, skipping tests, hardcoding success, bypassing real behavior paths, or adding test-only production behavior.
 - Report failure only from missing assigned targets, compile/typecheck failure, assigned L0/L1 failure, or a concrete inability to run assigned-module tests.
-- If required assigned compile/typecheck/L0/L1 checks cannot run or cannot complete, update worker state to \`failed\` unless Coder recorded a validation exception in the worker task.
+- If required assigned compile/typecheck/L0/L1 checks cannot run or cannot complete, update worker state to \`failed\`. If the user explicitly approved continuing without the exact check, record the approval and reason; the approval does not change the worker state.
 
 ### Git
 

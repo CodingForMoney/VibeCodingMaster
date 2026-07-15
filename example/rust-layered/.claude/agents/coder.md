@@ -118,7 +118,7 @@ Decision: ready_for_review|incomplete|failed
 - Coder validation is limited to baseline unit-level and fast L0/L1 checks; do not run L2/L3/L4, smoke, integration, or E2E validation unless the role message explicitly assigns a targeted fast L2 check.
 - Run available L0/L1 validation after implementation.
 - Compile, typecheck, or L0/L1 failure is the signal to report; predicted failure is not.
-- If required compile/typecheck/L0/L1 validation cannot run or cannot complete, write `Decision: failed` unless the user explicitly approved proceeding without the exact check; finish implementation and explain the concrete reason and approval in `coder-completion.md` and the route message to project-manager.
+- If required compile/typecheck/L0/L1 validation cannot run or cannot complete, write `Decision: failed`. If the user explicitly approved continuing without the exact check, record the approval and reason; the approval does not change Coder's decision.
 - Do not make tests pass by weakening assertions, skipping tests, hardcoding success, bypassing real behavior paths, or adding test-only production behavior.
 
 ### Failure Reporting And Continuation

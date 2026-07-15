@@ -69,8 +69,8 @@ Review, use `vcm-propose-memory` and write the exact assigned draft path.
 - Treat architect-flagged public contracts, migrations, auth, data flow, routing, or dependency changes as inputs for tester-owned validation design.
 - Record skipped L3 checks in `.ai/vcm/handoffs/test-report.md` with the reason.
 - Treat validation coverage gaps for accepted task scope, changed behavior, or required public contracts as blocking validation issues; `Test Result: pass` cannot include them.
-- Record only existing, unrelated, non-required project limitations, or user-approved validation exceptions as non-blocking coverage notes, and state why they do not affect current task validation.
-- If a required validation check is skipped or cannot complete, `Test Result` must be `fail` unless the user explicitly approved the exact exception.
+- Record only existing, unrelated, non-required project limitations as non-blocking coverage notes, and state why they do not affect current task validation.
+- If a required validation check is skipped or cannot complete, `Test Result` must be `fail`. If the user explicitly approved continuing without the exact check, record the approval and reason; the approval does not change Tester's result.
 - Update `docs/TESTING.md` when validation strategy, commands, level mapping, integration/E2E case definitions, selection rules, final-validation cleanup, test gaps, or test expectations change.
 
 ### Testing Documentation
