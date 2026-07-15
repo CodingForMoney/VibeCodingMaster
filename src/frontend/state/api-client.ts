@@ -57,7 +57,7 @@ import type { ProjectSummary, ConnectProjectRequest } from "../../shared/types/p
 import type { DispatchableRole, RoleName } from "../../shared/types/role.js";
 import type { VcmSessionRoundState } from "../../shared/types/round.js";
 import type { RoleSessionRecord, StartRoleSessionRequest } from "../../shared/types/session.js";
-import type { CleanupTaskRequest, CleanupTaskResult, CreateTaskRequest, OneClickStartTaskResult, TaskRecord } from "../../shared/types/task.js";
+import type { CleanupTaskResult, CreateTaskRequest, OneClickStartTaskResult, TaskRecord } from "../../shared/types/task.js";
 import { errorReason } from "./error-format.js";
 import type {
   TranslationBootstrapRun,
@@ -118,10 +118,9 @@ export const apiClient = {
       body: JSON.stringify(input)
     });
   },
-  cleanupTask(taskSlug: string, input: CleanupTaskRequest = {}) {
+  cleanupTask(taskSlug: string) {
     return request<CleanupTaskResult>(`/api/tasks/${encodeURIComponent(taskSlug)}/cleanup`, {
-      method: "POST",
-      body: JSON.stringify(input)
+      method: "POST"
     });
   },
   getHarnessStatus(taskSlug: string) {

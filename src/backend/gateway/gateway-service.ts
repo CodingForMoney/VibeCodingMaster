@@ -1,4 +1,3 @@
-import { VCM_ROLE_NAMES } from "../../shared/constants.js";
 import type {
   GatewayDiagnostics
 } from "../../shared/types/diagnostics.js";
@@ -25,6 +24,7 @@ import type { ProjectService } from "../services/project-service.js";
 import type { RoundService } from "../services/round-service.js";
 import type { SessionService } from "../services/session-service.js";
 import { getTaskRuntimeRepoRoot, type TaskService } from "../services/task-service.js";
+import type { TaskCloseService } from "../services/task-close-service.js";
 import type { TaskLaunchService } from "../services/task-launch-service.js";
 import type { TranslationService } from "../services/translation-service.js";
 import type { AppSettingsService } from "../services/app-settings-service.js";
@@ -102,10 +102,11 @@ export interface GatewayServiceDeps {
   channels: GatewayChannelRegistry;
   projectService: ProjectService;
   taskService: TaskService;
-  sessionService: Pick<SessionService, "getRoleSession" | "listRoleSessions" | "resumeRoleSession" | "startRoleSession" | "stopRoleSession" | "moveProjectTranslatorSessionToSafeCwd" | "moveProjectHarnessEngineerSessionToSafeCwd">;
+  taskCloseService: Pick<TaskCloseService, "closeTask">;
+  sessionService: Pick<SessionService, "getRoleSession" | "resumeRoleSession" | "startRoleSession">;
   taskLaunchService: Pick<TaskLaunchService, "startTaskRoleSessions">;
-  translationService: Pick<TranslationService, "translateUserInput" | "translateGatewayOutput" | "stopTask">;
-  roundService: Pick<RoundService, "getSessionRoundState" | "stopTask">;
+  translationService: Pick<TranslationService, "translateUserInput" | "translateGatewayOutput">;
+  roundService: Pick<RoundService, "getSessionRoundState">;
   runtime: Pick<TerminalRuntime, "write">;
   appSettings: Pick<AppSettingsService, "getPreferences" | "updatePreferences">;
   larkRegistration?: LarkRegistrationClient;
@@ -811,15 +812,7 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
       });
     }
 
-    const task = await deps.taskService.loadTask(project.repoRoot, taskSlug);
-    await stopRunningRoleSessions(project.repoRoot, taskSlug);
-    await moveProjectToolSessionsToSafeCwd(project.repoRoot);
-    await deps.translationService.stopTask(getTaskRuntimeRepoRoot(task), taskSlug, { clearCache: true });
-    deps.roundService.stopTask(taskSlug);
-    const result = await deps.taskService.cleanupTask(project.repoRoot, taskSlug, {
-      force: true,
-      forceDeleteBranch: true
-    });
+    const result = await deps.taskCloseService.closeTask(project.repoRoot, taskSlug);
     clearFailedTranslation(project.repoRoot, taskSlug);
     const latestPmReplies = { ...settings.latestPmReplies };
     delete latestPmReplies[latestPmReplyKey(project.repoRoot, taskSlug)];
@@ -835,41 +828,15 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
     });
     const lines = [
       `Closed task: ${result.taskSlug}`,
-      result.removedWorktreePath ? `removed worktree: ${result.removedWorktreePath}` : "removed worktree: none",
-      result.deletedBranch ? `deleted branch: ${result.deletedBranch}` : "deleted branch: none",
+      `worktree removed: ${result.worktreeRemoved ? "yes" : "no"}`,
+      `branch deleted: ${result.branchDeleted ? "yes" : "no"}`,
+      `task state removed: ${result.stateRemoved ? "yes" : "no"}`,
       `removed state paths: ${result.removedStatePaths.length}`
     ];
     if (result.warnings?.length) {
       lines.push("warnings:", ...result.warnings.map((warning) => `- ${warning}`));
     }
     return lines.join("\n");
-  }
-
-  async function stopRunningRoleSessions(repoRoot: string, taskSlug: string): Promise<void> {
-    const sessions = await deps.sessionService.listRoleSessions(repoRoot, taskSlug);
-    for (const session of sessions) {
-      if (session.status === "running" && VCM_ROLE_NAMES.some((role) => role === session.role)) {
-        await deps.sessionService.stopRoleSession(repoRoot, taskSlug, session.role);
-      }
-    }
-  }
-
-  async function moveProjectToolSessionsToSafeCwd(repoRoot: string): Promise<void> {
-    await Promise.all([
-      ignoreMissingSession(deps.sessionService.moveProjectTranslatorSessionToSafeCwd(repoRoot)),
-      ignoreMissingSession(deps.sessionService.moveProjectHarnessEngineerSessionToSafeCwd(repoRoot))
-    ]);
-  }
-
-  async function ignoreMissingSession(operation: Promise<unknown>): Promise<void> {
-    try {
-      await operation;
-    } catch (error) {
-      if (error instanceof VcmError && error.code === "SESSION_MISSING") {
-        return;
-      }
-      throw error;
-    }
   }
 
   async function setGatewayTranslation(enabled: boolean): Promise<string> {

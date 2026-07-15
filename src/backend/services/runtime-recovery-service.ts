@@ -25,7 +25,7 @@ export interface RuntimeRecoveryServiceDeps {
   fs: FileSystemAdapter;
   runtime: Pick<TerminalRuntime, "getSession" | "getSessionByRole" | "listSessions">;
   projectService: Pick<ProjectService, "loadConfig">;
-  taskService: Pick<TaskService, "listTasks" | "updateTaskStatus">;
+  taskService: Pick<TaskService, "listTasks" | "updateTaskStatus" | "cleanupTask">;
   translationWorkerService?: Pick<TranslationWorkerService, "cleanupStartupRuntime">;
   now?: () => string;
 }
@@ -116,6 +116,12 @@ export function createRuntimeRecoveryService(deps: RuntimeRecoveryServiceDeps): 
       await runStep(context, "recover harness feedback", () => recoverHarnessFeedback(repoRoot, recoveredAt, context));
 
       const tasks = await deps.taskService.listTasks(repoRoot);
+      for (const task of tasks.filter((candidate) => candidate.cleanupStatus === "cleaned")) {
+        await runStep(context, `retry cleaned task ${task.taskSlug}`, async () => {
+          const result = await deps.taskService.cleanupTask(repoRoot, task.taskSlug);
+          context.warnings.push(...(result.warnings ?? []).map((warning) => `${task.taskSlug}: ${warning}`));
+        });
+      }
       for (const task of tasks.filter((candidate) => candidate.cleanupStatus !== "cleaned")) {
         const taskRepoRoot = getTaskRuntimeRepoRoot(task);
         await runStep(context, `recover task ${task.taskSlug}`, async () => {

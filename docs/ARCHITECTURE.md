@@ -27,7 +27,8 @@ layers plus supporting tools.
   services.
 - `services/`: business logic. Key services include `task-service`,
   `task-launch-service` (backend-owned one-click task start, shared by the GUI
-  endpoint and the gateway), `session-service`, `round-service`,
+  endpoint and the gateway), `task-close-service` (backend-owned unconditional
+  task close, shared by the GUI endpoint and the gateway), `session-service`, `round-service`,
   `runtime-coordinator-service`, `runtime-recovery-service`,
   `turn-reconciler-service`, `message-service`,
   `artifact-service`, `harness-service`, `harness-feedback-service`,
@@ -157,6 +158,23 @@ every 10 seconds, independently of frontend polling.
 is reconciled through terminal StopFailure; and a live turn with no hook, terminal,
 or transcript activity for 30 minutes is interrupted before StopFailure recovery.
 The reconciler never treats inactivity alone as successful completion.
+
+## Task Close Ownership
+
+`task-close-service` is the single owner of task shutdown for both the GUI and
+Gateway. It first persists `cleanupStatus: cleaned`; that logical close releases
+the project for another task. Session shutdown, project-tool cwd migration,
+translation and Round cleanup, forced worktree removal, stale-directory removal,
+forced branch deletion, and task-state removal then run independently as
+best-effort cleanup. Detection and cleanup failures are returned as warnings and
+never reactivate or block the closed task.
+
+`task-service` owns the destructive Git and filesystem operations. Task branches
+are force-deleted even when they contain commits absent from the base branch; the
+discarded commit list is warning evidence, not a decision gate. If worktree or
+branch cleanup remains unresolved, the cleaned task record is retained as a
+tombstone. `runtime-recovery-service` retries such tombstones when the project is
+connected again.
 
 ## Public Surface
 

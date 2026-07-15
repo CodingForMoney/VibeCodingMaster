@@ -1107,17 +1107,23 @@ function createService(input: {
       },
       async createTask() {
         return task;
-      },
-      async cleanupTask() {
+      }
+    } as never,
+    taskCloseService: {
+      async closeTask() {
         return {
           taskSlug: task.taskSlug,
+          taskClosed: true as const,
+          worktreeRemoved: true,
+          branchDeleted: true,
+          stateRemoved: true,
           removedWorktreePath: task.worktreePath,
           removedStatePaths: [],
           deletedBranch: task.branch,
           cleanedAt: NOW
         };
       }
-    } as never,
+    },
     sessionService: {
       async getRoleSession() {
         return input.pmSession ?? null;

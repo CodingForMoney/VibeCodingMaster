@@ -707,17 +707,14 @@ export function App() {
       `- deletes the Git branch: ${activeTask.branch}`,
       "- deletes VCM task/session/message/orchestration state",
       "",
-      "VCM will not check running sessions or uncommitted changes before closing."
+      "The task will close even if a cleanup step fails; cleanup issues are reported as warnings."
     ].join("\n");
     const confirmed = window.confirm(closeMessage);
     if (!confirmed) {
       return;
     }
 
-    await apiClient.cleanupTask(activeTask.taskSlug, {
-      force: true,
-      forceDeleteBranch: true
-    });
+    const result = await apiClient.cleanupTask(activeTask.taskSlug);
     setActiveTaskSlug(null);
     setActiveMessages(null);
     setActiveOrchestration(null);
@@ -726,6 +723,13 @@ export function App() {
     setActiveGateReview(null);
     setWorkspaceRefreshNonce((current) => current + 1);
     await loadTasks();
+    if (result.warnings?.length) {
+      window.alert([
+        `Task "${result.taskSlug}" closed with cleanup warnings:`,
+        "",
+        ...result.warnings.map((warning) => `- ${warning}`)
+      ].join("\n"));
+    }
   }
 
   const sidebarMessages =

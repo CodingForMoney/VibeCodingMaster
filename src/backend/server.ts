@@ -40,6 +40,7 @@ import { createRuntimeCoordinatorService, type RuntimeCoordinatorService } from 
 import { createRuntimeRecoveryService, type RuntimeRecoveryService } from "./services/runtime-recovery-service.js";
 import { createStatusService, type StatusService } from "./services/status-service.js";
 import { createTaskService, type TaskService } from "./services/task-service.js";
+import { createTaskCloseService, type TaskCloseService } from "./services/task-close-service.js";
 import { createTaskLaunchService, type TaskLaunchService } from "./services/task-launch-service.js";
 import { createTerminalInterruptService, type TerminalInterruptService } from "./services/terminal-interrupt-service.js";
 import { createTranslationService, type TranslationService } from "./services/translation-service.js";
@@ -74,6 +75,7 @@ export interface ServerDeps {
   appSettings: AppSettingsService;
   projectService: ProjectService;
   taskService: TaskService;
+  taskCloseService: TaskCloseService;
   sessionService: SessionService;
   artifactService: ArtifactService;
   harnessService: HarnessService;
@@ -155,11 +157,10 @@ export async function createServer(deps: ServerDeps, options: CreateServerOption
   registerTaskRoutes(app, {
     projectService: deps.projectService,
     taskService: deps.taskService,
-    sessionService: deps.sessionService,
+    taskCloseService: deps.taskCloseService,
     statusService: deps.statusService,
     messageService: deps.messageService,
     taskLaunchService: deps.taskLaunchService,
-    translationService: deps.translationService,
     roundService: deps.roundService
   });
   registerSessionRoutes(app, {
@@ -364,6 +365,12 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     fs,
     auditPath: gatewaySettings.getAuditPath()
   });
+  const taskCloseService = createTaskCloseService({
+    taskService,
+    sessionService,
+    translationService,
+    roundService
+  });
   const gatewayService = createGatewayService({
     fs,
     settings: gatewaySettings,
@@ -371,6 +378,7 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     channels: gatewayChannels,
     projectService,
     taskService,
+    taskCloseService,
     sessionService,
     taskLaunchService,
     translationService,
@@ -441,6 +449,7 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     appSettings,
     projectService,
     taskService,
+    taskCloseService,
     sessionService,
     artifactService,
     harnessService,

@@ -1,29 +1,27 @@
 import type { FastifyInstance } from "fastify";
-import { DISPATCHABLE_ROLES, VCM_ROLE_NAMES } from "../../shared/constants.js";
+import { DISPATCHABLE_ROLES } from "../../shared/constants.js";
 import type { ArtifactSummary } from "../../shared/types/artifact.js";
 import type { DispatchableRole } from "../../shared/types/role.js";
 import type { TaskStatusReport, TaskWorkspaceState } from "../../shared/types/api.js";
 import type { VcmSessionRoundState } from "../../shared/types/round.js";
-import type { CleanupTaskRequest, CreateTaskRequest } from "../../shared/types/task.js";
+import type { CreateTaskRequest } from "../../shared/types/task.js";
 import { isOpenFileLimitError, VcmError } from "../errors.js";
 import type { MessageService } from "../services/message-service.js";
 import type { ProjectService } from "../services/project-service.js";
-import type { SessionService } from "../services/session-service.js";
 import type { StatusService } from "../services/status-service.js";
 import { getTaskRuntimeRepoRoot, type TaskService } from "../services/task-service.js";
+import type { TaskCloseService } from "../services/task-close-service.js";
 import type { TaskLaunchService } from "../services/task-launch-service.js";
-import type { TranslationService } from "../services/translation-service.js";
 import type { RoundService } from "../services/round-service.js";
 
 export interface TaskRouteDeps {
   projectService: ProjectService;
   taskService: TaskService;
-  sessionService: Pick<SessionService, "listRoleSessions" | "stopRoleSession" | "moveProjectTranslatorSessionToSafeCwd" | "moveProjectHarnessEngineerSessionToSafeCwd">;
+  taskCloseService: Pick<TaskCloseService, "closeTask">;
   statusService: StatusService;
   messageService: MessageService;
   taskLaunchService: Pick<TaskLaunchService, "startTaskRoleSessions">;
-  translationService: Pick<TranslationService, "stopTask">;
-  roundService: Pick<RoundService, "stopTask" | "getSessionRoundState">;
+  roundService: Pick<RoundService, "getSessionRoundState">;
 }
 
 export function registerTaskRoutes(app: FastifyInstance, deps: TaskRouteDeps): void {
@@ -133,52 +131,10 @@ export function registerTaskRoutes(app: FastifyInstance, deps: TaskRouteDeps): v
     });
   });
 
-  app.post<{ Params: { taskSlug: string }; Body: CleanupTaskRequest }>(
-    "/api/tasks/:taskSlug/cleanup",
-    async (request) => {
-      const project = await requireCurrentProject(deps.projectService);
-      const task = await deps.taskService.loadTask(project.repoRoot, request.params.taskSlug);
-      await stopRunningRoleSessions(deps, project.repoRoot, request.params.taskSlug);
-      await moveProjectToolSessionsToSafeCwd(deps, project.repoRoot);
-      await deps.translationService.stopTask(getTaskRuntimeRepoRoot(task), request.params.taskSlug, { clearCache: true });
-      deps.roundService.stopTask(request.params.taskSlug);
-      return deps.taskService.cleanupTask(project.repoRoot, request.params.taskSlug, request.body ?? {});
-    }
-  );
-}
-
-async function stopRunningRoleSessions(
-  deps: Pick<TaskRouteDeps, "sessionService">,
-  repoRoot: string,
-  taskSlug: string
-): Promise<void> {
-  const sessions = await deps.sessionService.listRoleSessions(repoRoot, taskSlug);
-  for (const session of sessions) {
-    if (session.status === "running" && VCM_ROLE_NAMES.some((role) => role === session.role)) {
-      await deps.sessionService.stopRoleSession(repoRoot, taskSlug, session.role);
-    }
-  }
-}
-
-async function moveProjectToolSessionsToSafeCwd(
-  deps: Pick<TaskRouteDeps, "sessionService">,
-  repoRoot: string
-): Promise<void> {
-  await Promise.all([
-    ignoreMissingSession(deps.sessionService.moveProjectTranslatorSessionToSafeCwd(repoRoot)),
-    ignoreMissingSession(deps.sessionService.moveProjectHarnessEngineerSessionToSafeCwd(repoRoot))
-  ]);
-}
-
-async function ignoreMissingSession(operation: Promise<unknown>): Promise<void> {
-  try {
-    await operation;
-  } catch (error) {
-    if (error instanceof VcmError && error.code === "SESSION_MISSING") {
-      return;
-    }
-    throw error;
-  }
+  app.post<{ Params: { taskSlug: string } }>("/api/tasks/:taskSlug/cleanup", async (request) => {
+    const project = await requireCurrentProject(deps.projectService);
+    return deps.taskCloseService.closeTask(project.repoRoot, request.params.taskSlug);
+  });
 }
 
 async function requireCurrentProject(projectService: ProjectService) {

@@ -237,6 +237,69 @@ describe("createRuntimeRecoveryService", () => {
       .resolves
       .toContain("VCM restarted");
   });
+
+  it("retries resource cleanup for logically closed task tombstones on project connect", async () => {
+    const repoRoot = await makeTempRepo(tempDirs);
+    const cleanupCalls: string[] = [];
+    const service = createRuntimeRecoveryService({
+      fs: createNodeFileSystemAdapter(),
+      runtime: createRuntime([]),
+      projectService: {
+        async loadConfig() {
+          return {
+            version: 1,
+            repoRoot,
+            defaultRoles: ["project-manager", "architect", "coder", "tester"],
+            handoffRoot: ".ai/vcm/handoffs",
+            stateRoot: ".ai/vcm",
+            terminalBackend: "node-pty",
+            claudeCommand: "claude"
+          };
+        }
+      },
+      taskService: {
+        async listTasks() {
+          return [{
+            version: 1,
+            taskSlug: "closed-task",
+            createdAt: TIMESTAMP,
+            updatedAt: TIMESTAMP,
+            repoRoot,
+            worktreePath: path.join(repoRoot, ".claude/worktrees/closed-task"),
+            branch: "feature/closed-task",
+            handoffDir: ".ai/vcm/handoffs",
+            status: "stopped",
+            cleanupStatus: "cleaned",
+            cleanedAt: TIMESTAMP
+          }];
+        },
+        async updateTaskStatus() {
+          throw new Error("not used");
+        },
+        async cleanupTask(_repoRoot, taskSlug) {
+          cleanupCalls.push(taskSlug);
+          return {
+            taskSlug,
+            taskClosed: true as const,
+            worktreeRemoved: false,
+            branchDeleted: false,
+            stateRemoved: false,
+            removedWorktreePath: null,
+            removedStatePaths: [],
+            deletedBranch: null,
+            cleanedAt: TIMESTAMP,
+            warnings: ["branch remains"]
+          };
+        }
+      },
+      now: () => TIMESTAMP
+    });
+
+    const report = await service.recoverProject(repoRoot);
+
+    expect(cleanupCalls).toEqual(["closed-task"]);
+    expect(report.warnings).toContain("closed-task: branch remains");
+  });
 });
 
 function createService(
@@ -279,6 +342,9 @@ function createService(
       async updateTaskStatus(_repoRoot, taskSlug, status) {
         statusUpdates.push(`${taskSlug}:${status}`);
         return {} as never;
+      },
+      async cleanupTask() {
+        throw new Error("not used");
       }
     },
     translationWorkerService: {

@@ -56,6 +56,7 @@ function createServerDepsStub(calls: string[]): ServerDeps {
       }
     } as never,
     taskService: {} as never,
+    taskCloseService: {} as never,
     sessionService: {} as never,
     artifactService: {} as never,
     harnessService: {} as never,
