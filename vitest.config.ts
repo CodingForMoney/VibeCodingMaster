@@ -8,7 +8,8 @@ export default defineConfig({
       "tests/unit/backend/**/*.test.ts",
       "tests/unit/frontend/**/*.test.ts",
       "tests/integration/api/**/*.test.ts",
-      "tests/integration/runtime/**/*.test.ts"
+      "tests/integration/runtime/**/*.test.ts",
+      "tests/e2e/backend/**/*.test.ts"
     ]
   }
 });
