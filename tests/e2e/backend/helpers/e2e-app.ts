@@ -157,7 +157,9 @@ export async function createMockClaudeE2eApp(): Promise<MockClaudeE2eApp> {
     taskService,
     appSettings,
     sessionService,
-    roundService
+    roundService,
+    reportPollIntervalMs: 10,
+    reportTimeoutMs: 2_000
   });
   const translationWorkerService = createTranslationWorkerService({
     fs: fsAdapter,
@@ -174,7 +176,8 @@ export async function createMockClaudeE2eApp(): Promise<MockClaudeE2eApp> {
     fs: fsAdapter,
     projectService,
     roundService,
-    appSettings
+    appSettings,
+    outputBatchDelayMs: 0
   });
   const gatewayChannels = createGatewayChannelRegistry([
     createWeixinIlinkChannel(),

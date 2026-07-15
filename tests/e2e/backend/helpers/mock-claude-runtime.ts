@@ -332,6 +332,10 @@ export class MockClaudePromptContext {
 
   async writeFile(relativePath: string, content: string): Promise<void> {
     const absolutePath = path.join(this.cwd, relativePath);
+    await this.writeAbsoluteFile(absolutePath, content);
+  }
+
+  async writeAbsoluteFile(absolutePath: string, content: string): Promise<void> {
     await mkdir(path.dirname(absolutePath), { recursive: true });
     await writeFile(absolutePath, content, "utf8");
   }

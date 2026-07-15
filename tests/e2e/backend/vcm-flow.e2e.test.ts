@@ -1,12 +1,16 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import type { FastifyInstance } from "fastify";
-import { createMockClaudeE2eApp, roleLaunchBody, type MockClaudeE2eApp } from "./helpers/e2e-app.js";
-import { createE2eRepo, type E2eRepo } from "./helpers/e2e-repo.js";
-import type { TaskRecord } from "../../../src/shared/types/task.js";
-import type { RoleSessionRecord } from "../../../src/shared/types/session.js";
-import type { TaskWorkspaceState } from "../../../src/shared/types/api.js";
+import { createMockClaudeE2eApp } from "./helpers/e2e-app.js";
+import { createE2eRepo } from "./helpers/e2e-repo.js";
+import {
+  connectAndCreateTask,
+  getWorkspaceState,
+  nextTick,
+  sleep,
+  startRole,
+  waitFor
+} from "./helpers/e2e-actions.js";
 
 const cleanups: Array<() => Promise<void>> = [];
 
@@ -155,74 +159,43 @@ describe("backend E2E with mock Claude Code", () => {
       role: "coder"
     });
   });
+
+  it("does not retry a non-retryable StopFailure and pauses the round", async () => {
+    const env = await createMockClaudeE2eApp();
+    cleanups.push(() => env.close());
+    const repo = await createE2eRepo();
+    cleanups.push(() => repo.cleanup());
+    const task = await connectAndCreateTask(env.app, repo, "mock-nonretry");
+
+    env.mockRuntime.onPrompt("coder", "Trigger non-retryable failure", async (ctx) => {
+      await ctx.userPromptSubmit();
+      await ctx.writeOutput("Coder hit auth failure\n");
+      await ctx.stopFailure({
+        error: "authentication_failed",
+        errorDetails: "mock auth failure"
+      });
+    });
+
+    await startRole(env.app, task.taskSlug, "coder");
+    const coderSession = env.mockRuntime.getSessionByRole(task.taskSlug, "coder");
+    expect(coderSession).toBeDefined();
+
+    env.mockRuntime.write(coderSession!.id, "Trigger non-retryable failure");
+    await env.mockRuntime.waitForIdle();
+
+    const writes = env.mockRuntime.getWrites(coderSession!.id).join("\n");
+    expect(writes).not.toContain("[VCM Recovery]");
+    const state = await getWorkspaceState(env.app, task.taskSlug);
+    expect(state.roundState.roleRecovery).toMatchObject({
+      role: "coder",
+      status: "failed",
+      error: "authentication_failed",
+      retryable: false
+    });
+    expect(state.roundState.flowPause).toMatchObject({
+      paused: true,
+      reason: "role-recovery-failed",
+      role: "coder"
+    });
+  });
 });
-
-async function connectAndCreateTask(app: FastifyInstance, repo: E2eRepo, taskSlug: string): Promise<TaskRecord> {
-  await injectOk(app, {
-    method: "POST",
-    url: "/api/projects/connect",
-    payload: { repoPath: repo.repoRoot }
-  });
-  const response = await injectOk(app, {
-    method: "POST",
-    url: "/api/tasks",
-    payload: { taskSlug, title: "Mock Claude flow" }
-  });
-  return response.json<TaskRecord>();
-}
-
-async function startRole(app: FastifyInstance, taskSlug: string, role: string): Promise<RoleSessionRecord> {
-  const response = await injectOk(app, {
-    method: "POST",
-    url: `/api/tasks/${taskSlug}/sessions/${role}/start`,
-    payload: roleLaunchBody()
-  });
-  return response.json<RoleSessionRecord>();
-}
-
-async function getWorkspaceState(app: FastifyInstance, taskSlug: string): Promise<TaskWorkspaceState> {
-  const response = await injectOk(app, {
-    method: "GET",
-    url: `/api/tasks/${taskSlug}/workspace-state`
-  });
-  return response.json<TaskWorkspaceState>();
-}
-
-async function injectOk(
-  app: FastifyInstance,
-  input: Parameters<FastifyInstance["inject"]>[0]
-): Promise<Awaited<ReturnType<FastifyInstance["inject"]>>> {
-  const response = await app.inject(input);
-  if (response.statusCode >= 400) {
-    throw new Error(`Expected ${input.method ?? "GET"} ${input.url} to succeed, got ${response.statusCode}: ${response.body}`);
-  }
-  return response;
-}
-
-async function waitFor(assertion: () => void | boolean | Promise<void | boolean>, timeoutMs = 1000): Promise<void> {
-  const startedAt = Date.now();
-  let lastError: unknown;
-  while (Date.now() - startedAt < timeoutMs) {
-    try {
-      const result = await assertion();
-      if (result !== false) {
-        return;
-      }
-    } catch (error) {
-      lastError = error;
-    }
-    await new Promise((resolve) => setTimeout(resolve, 10));
-  }
-  if (lastError) {
-    throw lastError;
-  }
-  throw new Error("Timed out waiting for condition.");
-}
-
-async function nextTick(): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, 0));
-}
-
-async function sleep(ms: number): Promise<void> {
-  await new Promise((resolve) => setTimeout(resolve, ms));
-}

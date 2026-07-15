@@ -20,7 +20,14 @@ export async function createE2eRepo(): Promise<E2eRepo> {
   await git(repoRoot, "config", "user.email", "vcm-e2e@example.test");
   await git(repoRoot, "config", "user.name", "VCM E2E");
   await fs.writeFile(path.join(repoRoot, "README.md"), "# VCM E2E Repo\n", "utf8");
-  await git(repoRoot, "add", "README.md");
+  await fs.writeFile(path.join(repoRoot, ".gitignore"), ".ai/\n.claude/worktrees/\n", "utf8");
+  await fs.mkdir(path.join(repoRoot, ".claude", "agents"), { recursive: true });
+  await fs.writeFile(
+    path.join(repoRoot, ".claude", "agents", "gate-reviewer.md"),
+    "# Gate Reviewer\n\nMock-compatible Gate Reviewer definition for backend E2E.\n",
+    "utf8"
+  );
+  await git(repoRoot, "add", "README.md", ".gitignore", ".claude/agents/gate-reviewer.md");
   await git(repoRoot, "commit", "-m", "initial commit");
   return {
     repoRoot,
