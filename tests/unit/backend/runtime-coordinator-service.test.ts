@@ -113,6 +113,11 @@ function createCoordinator(input: {
   let harnessEngineer = input.harnessEngineer;
   let translationEnabled = input.translationEnabled ?? true;
   return createRuntimeCoordinatorService({
+    projectService: {
+      async getCurrentProject() {
+        return { repoRoot: "/repo" } as never;
+      }
+    },
     appSettings: {
       async getPreferences() {
         return {
@@ -231,6 +236,12 @@ function createCoordinator(input: {
           translationEnabled = true;
         }
         return null as never;
+      }
+    },
+    turnReconciler: {
+      async reconcileTask() {
+        input.calls.push("turn-reconcile");
+        return { status: "inactive" };
       }
     },
     async getStateRoot() {

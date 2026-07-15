@@ -43,6 +43,7 @@ import { createTaskService, type TaskService } from "./services/task-service.js"
 import { createTaskLaunchService, type TaskLaunchService } from "./services/task-launch-service.js";
 import { createTerminalInterruptService, type TerminalInterruptService } from "./services/terminal-interrupt-service.js";
 import { createTranslationService, type TranslationService } from "./services/translation-service.js";
+import { createTurnReconcilerService } from "./services/turn-reconciler-service.js";
 import { createDiagnosticsService, type DiagnosticsService } from "./services/diagnostics-service.js";
 import { registerAppSettingsRoutes } from "./api/app-settings-routes.js";
 import { registerArtifactRoutes } from "./api/artifact-routes.js";
@@ -197,9 +198,11 @@ export async function createServer(deps: ServerDeps, options: CreateServerOption
 
   app.addHook("onReady", async () => {
     await cleanupRecentTranslationRuntime(deps);
+    deps.runtimeCoordinator.start();
     await deps.gatewayService.start();
   });
   app.addHook("onClose", async () => {
+    deps.runtimeCoordinator.stop();
     await deps.gatewayService.stop();
   });
 
@@ -375,20 +378,6 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     runtime,
     appSettings
   });
-  const runtimeCoordinator = createRuntimeCoordinatorService({
-    appSettings,
-    taskService,
-    sessionService,
-    translationService,
-    harnessService,
-    harnessFeedbackService,
-    autoMemoryService,
-    roundService,
-    gatewayService,
-    async getStateRoot(repoRoot) {
-      return (await projectService.loadConfig(repoRoot)).stateRoot;
-    }
-  });
   const runtimeRecoveryService = createRuntimeRecoveryService({
     fs,
     runtime,
@@ -411,6 +400,28 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     gatewayService,
     jobGuard: createJobGuardService(),
     translationWorkerService
+  });
+  const turnReconciler = createTurnReconcilerService({
+    sessionService,
+    roundService,
+    claudeHookService,
+    runtime
+  });
+  const runtimeCoordinator = createRuntimeCoordinatorService({
+    appSettings,
+    projectService,
+    taskService,
+    sessionService,
+    translationService,
+    harnessService,
+    harnessFeedbackService,
+    autoMemoryService,
+    roundService,
+    gatewayService,
+    turnReconciler,
+    async getStateRoot(repoRoot) {
+      return (await projectService.loadConfig(repoRoot)).stateRoot;
+    }
   });
   const terminalInterruptService = createTerminalInterruptService({
     runtime,

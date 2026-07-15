@@ -1376,6 +1376,86 @@ describe("createClaudeHookService", () => {
       truncated: false
     });
   });
+
+  it("ignores a late duplicate Stop after transcript reconciliation completed the turn", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "vcm-hook-duplicate-"));
+    transcriptDirs.push(dir);
+    const transcriptPath = join(dir, "tester.jsonl");
+    await writeFile(transcriptPath, JSON.stringify({
+      type: "assistant",
+      uuid: "completed-event",
+      timestamp: "2026-06-11T00:00:01.000Z",
+      message: { stop_reason: "end_turn", content: [{ type: "text", text: "Complete." }] }
+    }), "utf8");
+
+    const calls: string[] = [];
+    const service = createClaudeHookService({
+      projectService: createProjectServiceStub(),
+      taskService: createTaskServiceStub(),
+      sessionService: {
+        async getRoleSession() {
+          return {
+            id: "runtime_tester",
+            claudeSessionId: "claude_tester",
+            transcriptPath,
+            taskSlug: "demo-task",
+            role: "tester",
+            status: "running",
+            activityStatus: "idle",
+            command: "claude --agent tester",
+            permissionMode: "default",
+            cwd: "/repo",
+            terminalBackend: "node-pty",
+            lastTurnStartedAt: "2026-06-11T00:00:00.000Z",
+            lastTurnEndedAt: "2026-06-11T00:00:02.000Z",
+            updatedAt: "2026-06-11T00:00:02.000Z"
+          };
+        },
+        async recordClaudeHookEvent() {
+          calls.push("session");
+          return undefined;
+        }
+      } as never,
+      messageService: {
+        async scanAndDispatchPendingRouteFiles() {
+          calls.push("route");
+          return [];
+        }
+      } as never,
+      roundService: {
+        async recordClaudeHookEvent() {
+          calls.push("round");
+          return {} as never;
+        }
+      } as never,
+      translationService: {
+        async recordConversationBoundary() {
+          calls.push("translation");
+        }
+      },
+      appSettings: createAppSettingsStub(),
+      jobGuard: {
+        async evaluateStop() {
+          calls.push("guard");
+          return { behavior: "allow" } as never;
+        },
+        notePromptSubmitted() {}
+      }
+    });
+
+    const result = await service.handleStopHook({
+      taskSlug: "demo-task",
+      role: "tester",
+      event: {
+        hook_event_name: "Stop",
+        session_id: "claude_tester",
+        transcript_path: transcriptPath
+      }
+    });
+
+    expect(result).toMatchObject({ sessionUpdated: false, dispatchedCount: 0 });
+    expect(calls).toEqual([]);
+  });
 });
 
 const transcriptDirs: string[] = [];

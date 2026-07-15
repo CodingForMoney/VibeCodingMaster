@@ -185,6 +185,7 @@ describe("createHarnessService", () => {
     expect(await fs.readText("/repo/.claude/settings.json")).toContain("vcm-bash-guard");
     expect(await fs.readText("/repo/.claude/settings.json")).toContain("/api/hooks/claude-code");
     expect(await fs.readText("/repo/.claude/settings.json")).toContain("/api/hooks/claude-code/stop");
+    expect(await fs.readText("/repo/.claude/settings.json")).toContain("--retry-all-errors");
     expect(await fs.readText("/repo/.claude/settings.json")).toContain("/api/hooks/claude-code/permission-request");
     expect(await fs.readText("/repo/.claude/settings.json")).toContain("BASH_DEFAULT_TIMEOUT_MS");
     expect(await fs.readText("/repo/.claude/settings.json")).toContain('"autoMemoryEnabled": false');

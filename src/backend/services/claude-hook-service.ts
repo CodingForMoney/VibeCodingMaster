@@ -6,7 +6,7 @@ import type {
 } from "../../shared/types/claude-hook.js";
 import { isGateReviewerRoleName, isHarnessEngineerToolRoleName, isTranslatorToolRoleName, isUserFacingRole, isVcmRoleName } from "../../shared/constants.js";
 import { VcmError } from "../errors.js";
-import { readLatestRoleTurnReply } from "./claude-transcript-reply.js";
+import { readLatestRoleTurnReply, readTranscriptTurnEvidence } from "./claude-transcript-reply.js";
 import type { GatewayService } from "../gateway/gateway-service.js";
 import type { TerminalRuntime } from "../runtime/terminal-runtime.js";
 import { submitTerminalInput } from "../runtime/terminal-submit.js";
@@ -33,7 +33,9 @@ const NON_RETRYABLE_STOP_FAILURE_ERRORS = new Set([
   "billing_error",
   "invalid_request",
   "model_not_found",
-  "max_output_tokens"
+  "max_output_tokens",
+  "terminal_session_exited",
+  "terminal_session_missing"
 ]);
 const DIAGNOSTIC_SNIPPET_MAX_LENGTH = 2000;
 type StopFailureRetryTimer = ReturnType<typeof setTimeout>;
@@ -49,6 +51,7 @@ interface StopFailureDiagnostic {
 export interface ClaudeHookService {
   handleHook(input: ClaudeHookRequest): Promise<ClaudeHookResult>;
   handleStopHook(input: ClaudeHookRequest): Promise<ClaudeHookResult>;
+  handleReconciledTurnEnd(input: ClaudeHookRequest): Promise<ClaudeHookResult>;
   handlePermissionRequestHook(input: ClaudeHookRequest): Promise<ClaudePermissionRequestHookResult | undefined>;
 }
 
@@ -299,6 +302,9 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
     }
 
     const context = await getHookContext(input);
+    if (await isDuplicateCompletedStop(context, input)) {
+      return completedHookResult(input, eventName);
+    }
     const memoryResult = await processAutoMemoryRoleHook(input, context, eventName);
     if (memoryResult) {
       return memoryResult;
@@ -332,6 +338,36 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
       notifyGateway: true,
       settleGuard: true
     });
+  }
+
+  async function isDuplicateCompletedStop(
+    context: Awaited<ReturnType<typeof getHookContext>>,
+    input: ClaudeHookRequest
+  ): Promise<boolean> {
+    const session = await deps.sessionService.getRoleSession(context.project.repoRoot, context.taskSlug, input.role);
+    if (!session || session.activityStatus === "running" || !session.lastTurnEndedAt) {
+      return false;
+    }
+    const evidence = await readTranscriptTurnEvidence(session);
+    if (!evidence.completion) {
+      return false;
+    }
+    const completionAt = Date.parse(evidence.completion.timestamp);
+    const recordedEndAt = Date.parse(session.lastTurnEndedAt);
+    return Number.isFinite(completionAt)
+      && Number.isFinite(recordedEndAt)
+      && completionAt <= recordedEndAt + 1_000;
+  }
+
+  function completedHookResult(input: ClaudeHookRequest, eventName: ClaudeHookEventName): ClaudeHookResult {
+    return {
+      ok: true,
+      eventName,
+      taskSlug: input.taskSlug,
+      role: input.role,
+      sessionUpdated: false,
+      dispatchedCount: 0
+    };
   }
 
   async function processStopFailureHook(input: ClaudeHookRequest): Promise<ClaudeHookResult> {
@@ -861,6 +897,16 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
         return processHarnessEngineerHook(input);
       }
       return processStopHook(input, { allowBlock: true });
+    },
+    handleReconciledTurnEnd(input) {
+      const eventName = parseHookEvent(input.event.hook_event_name);
+      if (eventName === "Stop") {
+        return processStopHook(input, { allowBlock: false });
+      }
+      if (eventName === "StopFailure") {
+        return processStopFailureHook(input);
+      }
+      throwUnsupportedEvent(eventName);
     },
     handlePermissionRequestHook
   };

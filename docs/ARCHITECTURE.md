@@ -28,7 +28,8 @@ layers plus supporting tools.
 - `services/`: business logic. Key services include `task-service`,
   `task-launch-service` (backend-owned one-click task start, shared by the GUI
   endpoint and the gateway), `session-service`, `round-service`,
-  `runtime-coordinator-service`, `runtime-recovery-service`, `message-service`,
+  `runtime-coordinator-service`, `runtime-recovery-service`,
+  `turn-reconciler-service`, `message-service`,
   `artifact-service`, `harness-service`, `harness-feedback-service`,
   `auto-memory-service`,
   `gate-review-service`, `translation-service`/`translation-worker-service`,
@@ -143,6 +144,19 @@ when Auto Memory is disabled or completed for that hash. Pending, collecting,
 reviewing, or failed memory work blocks retrospective. The retrospective then
 includes memory drafts, applied memory diffs, and current memory in its task
 evidence.
+
+## Turn Runtime Ownership
+
+`round-service` owns the active turn and round state. `session-service` owns role
+session activity, while the PTY runtime owns Claude process liveness and terminal
+output timestamps. `runtime-coordinator-service` runs backend turn reconciliation
+every 10 seconds, independently of frontend polling.
+
+`turn-reconciler-service` closes gaps left by a missing Stop hook. A transcript
+`end_turn` is reconciled through the normal Stop path; a missing or exited terminal
+is reconciled through terminal StopFailure; and a live turn with no hook, terminal,
+or transcript activity for 30 minutes is interrupted before StopFailure recovery.
+The reconciler never treats inactivity alone as successful completion.
 
 ## Public Surface
 

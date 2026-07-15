@@ -35,7 +35,9 @@ describe("createServer", () => {
     expect(calls).toEqual([
       "cleanup:/repo-one",
       "cleanup:/repo-two",
+      "runtime:start",
       "gateway:start",
+      "runtime:stop",
       "gateway:stop"
     ]);
   });
@@ -79,7 +81,14 @@ function createServerDepsStub(calls: string[]): ServerDeps {
         calls.push("gateway:stop");
       }
     } as never,
-    runtimeCoordinator: {} as never,
+    runtimeCoordinator: {
+      start() {
+        calls.push("runtime:start");
+      },
+      stop() {
+        calls.push("runtime:stop");
+      }
+    } as never,
     runtimeRecoveryService: {} as never,
     terminalInterruptService: {} as never,
     runtime: {} as never,
