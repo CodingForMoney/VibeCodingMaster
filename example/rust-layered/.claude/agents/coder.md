@@ -62,9 +62,11 @@ Review, use `vcm-propose-memory` and write the exact assigned draft path.
 ### Parallel Worker Implementation
 
 - Coder may use Claude Code subagents to invoke `vcm-coder-worker` for parallel implementation.
-- Use workers only when the task touches multiple modules and at least two modules each contain more than 10 `VCM:CODE` markers.
+- Use workers when the task has at least 20 `VCM:CODE` markers and the marker distribution can form at least two worker-sized groups.
 - Before invoking workers, count `VCM:CODE` markers by module and create one runtime state file per worker under `.ai/vcm/coder-workers/tasks/<worker-id>.json`.
-- Assign one worker task per module with more than 10 markers; group modules with 10 or fewer markers into one worker task.
+- Create one worker task for each module with more than 10 `VCM:CODE` markers.
+- Group modules with 10 or fewer `VCM:CODE` markers into one small-modules worker when their combined marker count is more than 10.
+- If the combined small-module marker count is 10 or fewer, Coder handles those modules directly after worker results return.
 - Each worker prompt must include task worktree, architecture plan path, worker state path, report path, assigned modules/files/markers, allowed implementation scope, validation scope, and commit requirement.
 - Invoke worker subagents in parallel only through `vcm-coder-worker`.
 - Stay in the same Coder turn until all worker subagents finish and Coder has reviewed and integrated their reports and commits. Do not end the turn to wait for worker callbacks.
