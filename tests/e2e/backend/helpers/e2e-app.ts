@@ -51,11 +51,16 @@ export interface MockClaudeE2eApp {
   mockRuntime: MockClaudeRuntime;
   mockGateway: MockGatewayChannel;
   tempRoot: string;
-  close(): Promise<void>;
+  close(options?: { preserveTempRoot?: boolean }): Promise<void>;
 }
 
-export async function createMockClaudeE2eApp(): Promise<MockClaudeE2eApp> {
-  const tempRoot = await fs.mkdtemp(path.join(os.tmpdir(), "vcm-backend-e2e-"));
+export interface MockClaudeE2eAppOptions {
+  tempRoot?: string;
+}
+
+export async function createMockClaudeE2eApp(options: MockClaudeE2eAppOptions = {}): Promise<MockClaudeE2eApp> {
+  const tempRoot = options.tempRoot ?? await fs.mkdtemp(path.join(os.tmpdir(), "vcm-backend-e2e-"));
+  await fs.mkdir(tempRoot, { recursive: true });
   const settingsPath = path.join(tempRoot, "settings", "settings.json");
   const gatewaySettingsPath = path.join(tempRoot, "settings", "gateway", "settings.json");
   const gatewayAuditPath = path.join(tempRoot, "settings", "gateway", "audit.jsonl");
@@ -79,7 +84,10 @@ export async function createMockClaudeE2eApp(): Promise<MockClaudeE2eApp> {
     artifactService,
     projectService,
     taskService,
-    apiUrl: "http://127.0.0.1/mock-vcm"
+    apiUrl: "http://127.0.0.1/mock-vcm",
+    isProcessAlive(pid) {
+      return mockRuntime.listSessions().some((session) => session.pid === pid && session.status === "running");
+    }
   });
   const harnessService = createHarnessService({
     fs: fsAdapter,
@@ -330,9 +338,11 @@ export async function createMockClaudeE2eApp(): Promise<MockClaudeE2eApp> {
     mockRuntime,
     mockGateway,
     tempRoot,
-    async close() {
+    async close(closeOptions = {}) {
       await app.close();
-      await fs.rm(tempRoot, { recursive: true, force: true });
+      if (!closeOptions.preserveTempRoot) {
+        await fs.rm(tempRoot, { recursive: true, force: true });
+      }
     }
   };
 }

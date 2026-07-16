@@ -83,6 +83,7 @@ export class MockClaudeRuntime implements TerminalRuntime {
     const id = `mock-terminal-${seq}`;
     const claudeSessionId = `mock-claude-${input.role}-${seq}`;
     const transcriptPath = path.join(this.options.transcriptRoot, `${claudeSessionId}.jsonl`);
+    const startedAt = this.now();
     const session: TerminalSession = {
       id,
       repoRoot: input.repoRoot,
@@ -90,7 +91,8 @@ export class MockClaudeRuntime implements TerminalRuntime {
       role: input.role,
       status: "running",
       pid: 20_000 + seq,
-      startedAt: this.now(),
+      startedAt,
+      lastOutputAt: startedAt,
       exitCode: null
     };
     this.entries.set(id, {
@@ -163,6 +165,7 @@ export class MockClaudeRuntime implements TerminalRuntime {
     const seq = ++this.sessionSeq;
     const claudeSessionId = `mock-claude-${input.role}-${seq}`;
     const transcriptPath = path.join(this.options.transcriptRoot, `${claudeSessionId}.jsonl`);
+    const startedAt = this.now();
     entry.writes.length = 0;
     entry.claudeSessionId = claudeSessionId;
     entry.transcriptPath = transcriptPath;
@@ -173,7 +176,8 @@ export class MockClaudeRuntime implements TerminalRuntime {
       role: input.role,
       status: "running",
       pid: 20_000 + seq,
-      startedAt: this.now(),
+      startedAt,
+      lastOutputAt: startedAt,
       exitCode: null
     };
     await mkdir(path.dirname(transcriptPath), { recursive: true });

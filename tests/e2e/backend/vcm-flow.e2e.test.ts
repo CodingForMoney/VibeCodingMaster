@@ -160,6 +160,54 @@ describe("backend E2E with mock Claude Code", () => {
     });
   });
 
+  it("keeps a manually interrupted turn stopped when a later StopFailure hook arrives", async () => {
+    const env = await createMockClaudeE2eApp();
+    cleanups.push(() => env.close());
+    const repo = await createE2eRepo();
+    cleanups.push(() => repo.cleanup());
+    const task = await connectAndCreateTask(env.app, repo, "mock-manual-interrupt");
+    let promptStarted = false;
+    let releaseFailure: (() => void) | undefined;
+    const failureReleased = new Promise<void>((resolve) => {
+      releaseFailure = resolve;
+    });
+
+    env.mockRuntime.onPrompt("coder", "Interrupt this active turn", async (ctx) => {
+      await ctx.userPromptSubmit();
+      promptStarted = true;
+      await failureReleased;
+      await ctx.stopFailure({
+        error: "rate_limit_error",
+        errorDetails: "StopFailure emitted after the user interrupt"
+      });
+    });
+
+    await startRole(env.app, task.taskSlug, "coder");
+    const coderSession = env.mockRuntime.getSessionByRole(task.taskSlug, "coder");
+    expect(coderSession).toBeDefined();
+
+    env.mockRuntime.write(coderSession!.id, "Interrupt this active turn");
+    await waitFor(() => promptStarted);
+    await env.deps.terminalInterruptService.handleManualInterrupt(coderSession!.id);
+
+    const interrupted = await getWorkspaceState(env.app, task.taskSlug);
+    expect(interrupted.roundState).toMatchObject({
+      status: "stopped",
+      stopReason: "manual-interrupt",
+      activeRole: "coder"
+    });
+    expect(interrupted.taskStatus.sessions.find((session) => session.role === "coder")?.activityStatus).toBe("idle");
+
+    releaseFailure?.();
+    await env.mockRuntime.waitForIdle();
+
+    const writes = env.mockRuntime.getWrites(coderSession!.id).join("\n");
+    expect(writes).not.toContain("[VCM Recovery]");
+    const finalState = await getWorkspaceState(env.app, task.taskSlug);
+    expect(finalState.roundState.stopReason).toBe("manual-interrupt");
+    expect(finalState.roundState.roleRecovery).toBeUndefined();
+  });
+
   it("does not retry a non-retryable StopFailure and pauses the round", async () => {
     const env = await createMockClaudeE2eApp();
     cleanups.push(() => env.close());

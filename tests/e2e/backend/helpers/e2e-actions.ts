@@ -65,6 +65,27 @@ export async function restartRole(app: FastifyInstance, taskSlug: string, role: 
   return response.json<RoleSessionRecord>();
 }
 
+export async function resumeRole(app: FastifyInstance, taskSlug: string, role: RoleName): Promise<RoleSessionRecord> {
+  const response = await injectOk(app, {
+    method: "POST",
+    url: `/api/tasks/${taskSlug}/sessions/${role}/resume`,
+    payload: roleLaunchBody()
+  });
+  return response.json<RoleSessionRecord>();
+}
+
+export async function startHarnessEngineer(app: FastifyInstance, taskSlug: string): Promise<RoleSessionRecord> {
+  const response = await injectOk(app, {
+    method: "POST",
+    url: "/api/projects/harness/engineer/session/start",
+    payload: {
+      ...roleLaunchBody(),
+      taskSlug
+    }
+  });
+  return response.json<RoleSessionRecord>();
+}
+
 export async function startTranslation(app: FastifyInstance, taskSlug: string, role: RoleName): Promise<StartTranslationSessionResult> {
   const response = await injectOk(app, {
     method: "POST",
