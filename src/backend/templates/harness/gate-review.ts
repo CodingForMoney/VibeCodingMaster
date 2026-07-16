@@ -16,16 +16,27 @@ Use only these decisions:
 
 ## Architecture Plan Gate
 
-Read \`.claude/agents/architect.md\`; use coder/tester definitions only when
-judging implementation or validation boundaries. Verify the required plan
-structure, evidence, Scaffold Manifest, proof points, architect-owned replan decisions when present, and no
-task-only source comments.
+Format is necessary but not sufficient. Do not approve an architecture plan
+only because required sections exist.
 
-Focus on architectural soundness. Request changes when module boundaries,
-public surface impact, dependency direction, state ownership, lifecycle,
-failure paths, concurrency/restart behavior, docs/generated-context impact, or
-key design decisions are missing, contradictory, unsafe, left for coder to
-guess, or conflict with current project architecture.
+For \`architecture-plan\`, reconstruct the proposed architecture and look for
+design flaws before checking formatting. Read \`.ai/vcm/handoffs/architecture-plan.md\`,
+\`.claude/agents/architect.md\`, root \`CLAUDE.md\`, \`docs/ARCHITECTURE.md\`,
+affected module \`ARCHITECTURE.md\` files, \`.ai/generated/module-index.json\`,
+\`.ai/generated/public-surface.json\` when public surface may change, and the
+affected source files, scaffold changes, and relevant call sites.
+
+Analyze accepted scope versus proposed design, current code reality versus
+plan claims, ownership, data flow, lifecycle, module boundaries, dependency
+direction, public surface and callers, state or durable artifact ownership,
+failure/retry/restart/cancellation/concurrency behavior, docs/generated-context
+impact, and whether Coder is left to make architecture decisions.
+
+Request changes when the plan is structurally complete but architecturally
+under-specified, logically inconsistent, unsupported by code evidence, unsafe
+for boundary cases, conflicts with current project architecture, or leaves key
+ownership, data-flow, lifecycle, boundary, public-contract, or failure-model
+decisions to Coder.
 
 ## Validation Adequacy Gate
 
@@ -88,6 +99,18 @@ Summary: <one or two sentences>
 Use this findings structure:
 
 \`\`\`md
+<!-- Include Architecture Analysis only for architecture-plan gate. -->
+## Architecture Analysis
+
+- Scope Fit:
+- Code Reality:
+- Ownership:
+- Data Flow:
+- Lifecycle:
+- Boundaries And Public Surface:
+- Failure Model:
+- Coder Readiness:
+
 ## Findings
 
 ### <critical|high|medium|low>: <title>
@@ -100,6 +123,18 @@ Use this findings structure:
 If there are no findings, write:
 
 \`\`\`md
+<!-- Include Architecture Analysis only for architecture-plan gate. -->
+## Architecture Analysis
+
+- Scope Fit:
+- Code Reality:
+- Ownership:
+- Data Flow:
+- Lifecycle:
+- Boundaries And Public Surface:
+- Failure Model:
+- Coder Readiness:
+
 ## Findings
 
 None.
