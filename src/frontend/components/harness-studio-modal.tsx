@@ -342,7 +342,7 @@ export function HarnessStudioModal({
                   />
                 </section>
               ) : (
-                <>
+                <div className="harness-studio-left-scroll">
                   <HarnessFileSection title="VCM Roles" files={vcmRoleAgents} selectedPath={selectedPath} copiedPath={copiedPath} onCopy={(path) => void copyHarnessFilePath(path)} onSelect={setSelectedPath} />
                   <HarnessFileSection title="Auxiliary Roles" files={auxiliaryAgents} selectedPath={selectedPath} copiedPath={copiedPath} onCopy={(path) => void copyHarnessFilePath(path)} onSelect={setSelectedPath} />
                   <MemorySection
@@ -387,7 +387,7 @@ export function HarnessStudioModal({
                       )) ?? <li><span>No bootstrap status loaded.</span></li>}
                     </ul>
                   </HarnessCollapsibleSection>
-                </>
+                </div>
               )}
             </aside>
 
