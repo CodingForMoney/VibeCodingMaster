@@ -18,6 +18,7 @@ import {
   type GateReviewRequestResult,
   type GateReviewSeverity
 } from "../../shared/types/gate-review.js";
+import { checkMarkdownArtifact } from "../../shared/validation/artifact-check.js";
 import { VcmError } from "../errors.js";
 import { resolveRepoPath } from "../adapters/filesystem.js";
 import type { FileSystemAdapter } from "../adapters/filesystem.js";
@@ -101,6 +102,18 @@ const ARCHITECTURE_ANALYSIS_FIELDS = [
   "Failure Model",
   "Coder Readiness"
 ] as const;
+const VALIDATION_ANALYSIS_FIELDS = [
+  "Evidence Read",
+  "Changed Behavior And Risk",
+  "Coverage Mapping",
+  "Baseline Coverage",
+  "Integration And E2E Coverage",
+  "Boundary And Failure Coverage",
+  "Public Contract Coverage",
+  "Test Integrity",
+  "Skips And Gaps",
+  "Validation Readiness"
+] as const;
 
 const SOURCE_ARTIFACTS: Record<GateReviewGate, string[]> = {
   "architecture-plan": [
@@ -108,7 +121,8 @@ const SOURCE_ARTIFACTS: Record<GateReviewGate, string[]> = {
   ],
   "validation-adequacy": [
     ".ai/vcm/handoffs/architecture-plan.md",
-    ".ai/vcm/handoffs/test-report.md"
+    ".ai/vcm/handoffs/test-report.md",
+    "docs/TESTING.md"
   ],
   "code-diff": []
 };
@@ -979,14 +993,14 @@ async function computeInputHash(
   if (coreArtifact) {
     digest.update(coreArtifact);
     digest.update(await deps.fs.readText(resolveRepoPath(taskRepoRoot, coreArtifact)));
-    if (gate !== "architecture-plan") {
-      return digest.digest("hex");
-    }
   }
 
   const common = [
     "CLAUDE.md",
+    ".claude/agents/architect.md",
+    ".claude/agents/coder.md",
     ".claude/agents/gate-reviewer.md",
+    ".claude/agents/tester.md",
     ".claude/skills/vcm-gate-review/SKILL.md",
     ".ai/tools/request-gate-review",
     "docs/CODING_STANDARDS.md"
@@ -1034,6 +1048,27 @@ async function computeInputHash(
     ]));
     for (const relativePath of untracked) {
       digest.update("untracked");
+      digest.update(relativePath);
+      digest.update(await commandStdout(deps.runner, taskRepoRoot, ["hash-object", "--", relativePath]));
+    }
+  }
+
+  if (gate === "validation-adequacy") {
+    const evidencePathspec = ["--", ".", ":(exclude).ai/vcm/**", ":(exclude)docs/**"];
+    digest.update("trackedEvidence");
+    digest.update(await commandStdout(deps.runner, taskRepoRoot, ["ls-files", "-s", ...evidencePathspec]));
+    digest.update("workingEvidence");
+    digest.update(await commandStdout(deps.runner, taskRepoRoot, ["diff", "--binary", ...evidencePathspec]));
+    digest.update("stagedEvidence");
+    digest.update(await commandStdout(deps.runner, taskRepoRoot, ["diff", "--cached", "--binary", ...evidencePathspec]));
+    const untracked = splitLines(await commandStdout(deps.runner, taskRepoRoot, [
+      "ls-files",
+      "--others",
+      "--exclude-standard",
+      ...evidencePathspec
+    ]));
+    for (const relativePath of untracked) {
+      digest.update("untrackedEvidence");
       digest.update(relativePath);
       digest.update(await commandStdout(deps.runner, taskRepoRoot, ["hash-object", "--", relativePath]));
     }
@@ -1092,6 +1127,9 @@ function buildGatePrompt(
   const architectureContract = gate === "architecture-plan"
     ? "\n\nComplete every Architecture Analysis field required by the Gate Reviewer role with concrete current-worktree evidence before deciding."
     : "";
+  const validationContract = gate === "validation-adequacy"
+    ? "\n\nComplete every Validation Analysis field required by the Gate Reviewer role with concrete current-worktree production and test evidence before deciding."
+    : "";
   const codeDiffSection = gate === "code-diff" && codeDiffInput
     ? `
 
@@ -1119,7 +1157,7 @@ Request: ${requestId}
 Report: ${absoluteReportPath}
 
 Evidence:
-${evidence}${gitLine}${architectureContract}${codeDiffSection}
+${evidence}${gitLine}${architectureContract}${validationContract}${codeDiffSection}
 
 Write only Report. Start exactly:
 Gate: ${gate}
@@ -1210,6 +1248,12 @@ async function parseGateReport(
   if (gate === "architecture-plan") {
     validateArchitectureAnalysis(content);
   }
+  if (gate === "validation-adequacy") {
+    validateValidationAnalysis(content);
+    if (decision === "approve") {
+      await validateValidationApprovalInput(fs, taskRepoRoot);
+    }
+  }
   if (decision === "request_changes") {
     validateRequestChangeFindings(findings);
   }
@@ -1244,6 +1288,56 @@ function validateArchitectureAnalysis(content: string): void {
       statusCode: 500
     });
   }
+}
+
+function validateValidationAnalysis(content: string): void {
+  const section = extractMarkdownSection(content, "Validation Analysis");
+  if (!section) {
+    throw new VcmError({
+      code: "GATE_REVIEW_VALIDATION_ANALYSIS_MISSING",
+      message: "Validation-adequacy review must contain a non-empty Validation Analysis section.",
+      statusCode: 500
+    });
+  }
+
+  const missingFields = VALIDATION_ANALYSIS_FIELDS.filter((field) => !matchField(section, field));
+  if (missingFields.length > 0) {
+    throw new VcmError({
+      code: "GATE_REVIEW_VALIDATION_ANALYSIS_INCOMPLETE",
+      message: `Validation Analysis is missing required evidence: ${missingFields.join(", ")}.`,
+      statusCode: 500
+    });
+  }
+}
+
+async function validateValidationApprovalInput(
+  fs: FileSystemAdapter,
+  taskRepoRoot: string
+): Promise<void> {
+  const relativePath = CORE_INPUT_ARTIFACTS["validation-adequacy"];
+  if (!relativePath) {
+    return;
+  }
+  const absolutePath = resolveRepoPath(taskRepoRoot, relativePath);
+  const content = await fs.pathExists(absolutePath) ? await fs.readText(absolutePath) : null;
+  const check = checkMarkdownArtifact("test-report", relativePath, content);
+  const testResult = content ? matchField(content, "Test Result")?.toLowerCase() : undefined;
+  if (check.status === "ok" && testResult === "pass") {
+    return;
+  }
+
+  const details = [
+    check.status !== "ok" ? `status=${check.status}` : "",
+    check.missingHeadings.length > 0 ? `missing headings: ${check.missingHeadings.join(", ")}` : "",
+    check.invalidFields.length > 0 ? check.invalidFields.join(" ") : "",
+    check.hasPlaceholder ? "contains placeholders" : "",
+    testResult !== "pass" ? "Test Result must be pass before approval." : ""
+  ].filter(Boolean).join("; ");
+  throw new VcmError({
+    code: "GATE_REVIEW_VALIDATION_INPUT_INCOMPLETE",
+    message: `Validation-adequacy cannot approve incomplete Tester evidence in ${relativePath}. ${details}`,
+    statusCode: 500
+  });
 }
 
 function validateRequestChangeFindings(findings: GateReviewFinding[]): void {

@@ -25,6 +25,9 @@ Reviewed.
 ## Tests Added Or Updated
 Updated.
 
+## Coverage Mapping
+Feature behavior -> tests/feature.test.ts -> pass.
+
 ## Commands Run Or Checked
 Checked.
 
@@ -247,6 +250,19 @@ Nothing to promote.
 
     expect(result.status).toBe("incomplete");
     expect(result.invalidFields).toContain("Test Result must be pass or fail.");
+  });
+
+  it("rejects pass test reports with blocking validation issues", () => {
+    const content = renderTestReportTemplate("demo")
+      .replace("Test Result: pass|fail", "Test Result: pass")
+      .replaceAll("TBD", "None.")
+      .replace("## Blocking Validation Issues\n\nNone.", "## Blocking Validation Issues\n\nMissing E2E coverage.");
+    const result = checkMarkdownArtifact("test-report", "test-report.md", content);
+
+    expect(result.status).toBe("incomplete");
+    expect(result.invalidFields).toContain(
+      "Blocking Validation Issues must be None when Test Result is pass."
+    );
   });
 
   it("rejects invalid docs-sync decisions", () => {

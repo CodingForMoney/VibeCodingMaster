@@ -80,7 +80,7 @@ describe("backend E2E Gate Review with mock Claude Code", () => {
 
     await fs.writeFile(
       path.join(task.worktreePath, ".ai/vcm/handoffs/test-report.md"),
-      "# Test Report\n\nDecision: pass\n",
+      validTestReport(),
       "utf8"
     );
     const validationStarted = await requestGateReview(env.app, task.taskSlug, "validation-adequacy");
@@ -142,14 +142,79 @@ async function writeApproveGateReport(ctx: MockClaudePromptContext): Promise<voi
         ""
       ]
     : [];
+  const validationAnalysis = gate === "validation-adequacy"
+    ? validationAnalysisLines()
+    : [];
   await ctx.writeAbsoluteFile(report, [
     `Gate: ${gate}`,
     `Request: ${request}`,
     "Decision: approve",
     `Summary: ${gate} inputs are acceptable for this E2E scenario.`,
     "",
-    ...architectureAnalysis
+    ...architectureAnalysis,
+    ...validationAnalysis
   ].join("\n"));
+}
+
+function validTestReport(): string {
+  return [
+    "# Test Report",
+    "",
+    "Test Result: pass",
+    "",
+    "## Evidence Reviewed",
+    "src/feature.txt and the mock feature test.",
+    "",
+    "## Tests Added Or Updated",
+    "Mock feature integration case.",
+    "",
+    "## Coverage Mapping",
+    "Feature behavior -> L2 -> mock feature integration case -> public path -> pass.",
+    "",
+    "## Commands Run Or Checked",
+    "Mock integration check: pass.",
+    "",
+    "## Validation Results",
+    "Pass.",
+    "",
+    "## Failed Expectations",
+    "None.",
+    "",
+    "## Reproduction Steps",
+    "None.",
+    "",
+    "## Skipped Checks With Reasons",
+    "None.",
+    "",
+    "## Coverage Gaps",
+    "None.",
+    "",
+    "## Blocking Validation Issues",
+    "None.",
+    ""
+  ].join("\n");
+}
+
+function validationAnalysisLines(): string[] {
+  return [
+    "## Validation Analysis",
+    "",
+    "- Evidence Read: test report, feature entry point, and integration case",
+    "- Changed Behavior And Risk: feature behavior and integration risk",
+    "- Coverage Mapping: feature mapped to the integration case",
+    "- Baseline Coverage: baseline evidence inspected",
+    "- Integration And E2E Coverage: integration path covered",
+    "- Boundary And Failure Coverage: relevant boundary covered",
+    "- Public Contract Coverage: public behavior asserted",
+    "- Test Integrity: real path and observable assertion inspected",
+    "- Skips And Gaps: none",
+    "- Validation Readiness: ready",
+    "",
+    "## Findings",
+    "",
+    "None.",
+    ""
+  ];
 }
 
 function matchPromptField(prompt: string, field: string): string | undefined {

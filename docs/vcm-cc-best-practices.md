@@ -395,7 +395,10 @@ Input policy:
   `architect-diagnosis` source. PM does not inspect commits; the tool reviews
   committed inputs, returns `not_required` when there are no new commits, and
   fails to start when the worktree has uncommitted changes.
-- Gates avoid duplicate review by comparing input hashes.
+- Gates avoid duplicate review by comparing input hashes. Architecture review
+  binds the plan to current scaffold/code evidence; validation review binds the
+  test report to current non-document code/test evidence and `docs/TESTING.md`;
+  code-diff review binds the selected commit range and diff.
 
 Gate Reviewer writes reports under:
 
@@ -424,10 +427,18 @@ The fixed harness does not install `check-fast`, `check-changed`, or
 `check-module` wrappers. Roles use native project commands documented in
 `docs/TESTING.md`.
 
-Tester owns validation adequacy. Important features should have integration
-or E2E coverage unless the test report explains why such coverage is
-unnecessary or unavailable. Tests must assert real behavior, not mock-call
-rituals or fixture-specific shortcuts.
+Tester owns validation adequacy. `test-report.md` maps each accepted changed
+behavior or relevant risk to its validation level, actual test case or external
+evidence, exercised entry path, assertions, result, and remaining gap.
+Important features require integration or E2E coverage unless a concrete
+risk-based reason shows that coverage is unnecessary. Unavailable required
+coverage is blocking. Tests must assert real behavior, not mock-call rituals or
+fixture-specific shortcuts.
+
+The Validation Adequacy Gate reads the actual implementation entry points and
+test files behind that mapping. Its report must contain structured Validation
+Analysis; `Test Result: pass` and green commands alone are not approval
+evidence. Gate Reviewer inspects evidence but does not run validation.
 
 Long-running validation uses `vcm-long-running-validation` backed by:
 

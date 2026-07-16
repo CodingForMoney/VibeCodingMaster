@@ -46,17 +46,39 @@ decisions to Coder.
 
 ## Validation Adequacy Gate
 
-Read \`.claude/agents/tester.md\`; use architect/coder definitions to compare
-validation against the plan and implementation test responsibilities. Verify
-plan coverage, public contracts, validation level, commands/results,
-skips/gaps/risks, final cleanup, and durable testing docs impact.
+Read \`.claude/agents/tester.md\`, the relevant architect/coder definitions,
+root \`CLAUDE.md\`, \`.ai/vcm/handoffs/architecture-plan.md\`,
+\`.ai/vcm/handoffs/test-report.md\`, \`docs/CODING_STANDARDS.md\`,
+\`docs/TESTING.md\`, the actual tests and fixtures named by the report, and the
+production entry points needed to verify what those tests exercise. Read
+\`.ai/generated/public-surface.json\` when public contracts changed.
 
-Focus on whether validation matches risk. Request changes when important user
-or system paths lack integration or E2E case coverage, or when the review
-test report does not explain why such coverage is unnecessary or unavailable. Pay
-special attention to module boundaries, public contracts, UI flows,
-CLI/tooling, hooks, sessions, persistence, worktrees, and external process
-behavior.
+Reconstruct the changed observable behavior and its risks from the current
+plan and implementation. Treat Tester conclusions, green commands, and
+architecture coverage hints as evidence, not authority. Record the concrete
+production files, test files, test cases, entry paths, assertions, commands,
+and results inspected.
+
+Map every important changed behavior and risk to its validation level, actual
+test case or reproducible external behavior evidence, exercised entry path,
+assertions, and result. Verify baseline coverage for changed callable units,
+then verify that cross-module, public-contract, UI, CLI/tooling, hook, session,
+persistence, worktree, external-process, and other important user or system
+paths have integration or E2E coverage that exercises real behavior.
+
+Inspect boundary, failure, cancellation, retry, restart, recovery,
+concurrency, repeated-action, stale-state, cleanup, and compatibility paths
+when they are relevant to the changed behavior. Check that tests were not
+weakened, over-mocked, tied only to fixture values or implementation details,
+or made green by bypassing the real behavior path.
+
+Do not approve only because \`Test Result: pass\` or all recorded commands are
+green. Request changes when the report is incomplete or inconsistent with the
+actual tests, validation level does not match risk, an important behavior has
+no concrete coverage mapping, a required check was skipped, required coverage
+is unavailable, or a current-task coverage gap remains. A concrete risk-based
+reason may show that integration or E2E coverage is unnecessary; unavailable
+required coverage is not an approval reason.
 
 ## Code Diff Gate
 
@@ -120,6 +142,20 @@ Use this findings structure:
 - Failure Model:
 - Coder Readiness:
 
+<!-- Include Validation Analysis only for validation-adequacy gate. -->
+## Validation Analysis
+
+- Evidence Read:
+- Changed Behavior And Risk:
+- Coverage Mapping:
+- Baseline Coverage:
+- Integration And E2E Coverage:
+- Boundary And Failure Coverage:
+- Public Contract Coverage:
+- Test Integrity:
+- Skips And Gaps:
+- Validation Readiness:
+
 ## Findings
 
 ### <critical|high|medium|low>: <title>
@@ -146,6 +182,20 @@ If there are no findings, write:
 - Boundaries And Public Surface:
 - Failure Model:
 - Coder Readiness:
+
+<!-- Include Validation Analysis only for validation-adequacy gate. -->
+## Validation Analysis
+
+- Evidence Read:
+- Changed Behavior And Risk:
+- Coverage Mapping:
+- Baseline Coverage:
+- Integration And E2E Coverage:
+- Boundary And Failure Coverage:
+- Public Contract Coverage:
+- Test Integrity:
+- Skips And Gaps:
+- Validation Readiness:
 
 ## Findings
 
@@ -278,6 +328,7 @@ SOURCE_ARTIFACTS = {
     "validation-adequacy": [
         ".ai/vcm/handoffs/architecture-plan.md",
         ".ai/vcm/handoffs/test-report.md",
+        "docs/TESTING.md",
     ],
     "code-diff": [],
 }
@@ -439,12 +490,13 @@ def input_hash(root: Path, gate: str, source: str | None = None, gate_record=Non
         path = root / core_artifact
         digest.update(core_artifact.encode())
         digest.update(path.read_bytes())
-        if gate != "architecture-plan":
-            return digest.hexdigest()
 
     common = [
         "CLAUDE.md",
+        ".claude/agents/architect.md",
+        ".claude/agents/coder.md",
         ".claude/agents/gate-reviewer.md",
+        ".claude/agents/tester.md",
         ".claude/skills/vcm-gate-review/SKILL.md",
         ".ai/tools/request-gate-review",
         "docs/CODING_STANDARDS.md",
@@ -468,6 +520,19 @@ def input_hash(root: Path, gate: str, source: str | None = None, gate_record=Non
         untracked = command_text(root, ["git", "ls-files", "--others", "--exclude-standard", *evidence_pathspec]).splitlines()
         for relative in untracked:
             digest.update(b"untracked")
+            digest.update(relative.encode())
+            digest.update(command_output(root, ["git", "hash-object", "--", relative]))
+    if gate == "validation-adequacy":
+        evidence_pathspec = ["--", ".", ":(exclude).ai/vcm/**", ":(exclude)docs/**"]
+        digest.update(b"trackedEvidence")
+        digest.update(command_output(root, ["git", "ls-files", "-s", *evidence_pathspec]))
+        digest.update(b"workingEvidence")
+        digest.update(command_output(root, ["git", "diff", "--binary", *evidence_pathspec]))
+        digest.update(b"stagedEvidence")
+        digest.update(command_output(root, ["git", "diff", "--cached", "--binary", *evidence_pathspec]))
+        untracked = command_text(root, ["git", "ls-files", "--others", "--exclude-standard", *evidence_pathspec]).splitlines()
+        for relative in untracked:
+            digest.update(b"untrackedEvidence")
             digest.update(relative.encode())
             digest.update(command_output(root, ["git", "hash-object", "--", relative]))
     if gate == "code-diff":

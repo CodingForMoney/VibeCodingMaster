@@ -32,6 +32,7 @@ const REQUIRED_HEADINGS: Record<ArtifactKind, readonly string[]> = {
   "test-report": [
     "Evidence Reviewed",
     "Tests Added Or Updated",
+    "Coverage Mapping",
     "Commands Run Or Checked",
     "Validation Results",
     "Failed Expectations",
@@ -116,9 +117,16 @@ export function checkMarkdownArtifact(
 function validateArtifactFields(kind: ArtifactKind, content: string): string[] {
   if (kind === "test-report") {
     const result = /^\s*Test Result\s*:\s*(\S+)\s*$/im.exec(content)?.[1]?.toLowerCase();
-    return result === "pass" || result === "fail"
+    const invalidFields = result === "pass" || result === "fail"
       ? []
       : ["Test Result must be pass or fail."];
+    if (result === "pass") {
+      const blockingIssues = readArtifactSectionValue(content, "Blocking Validation Issues");
+      if (!blockingIssues || !/^none\.?$/i.test(blockingIssues)) {
+        invalidFields.push("Blocking Validation Issues must be None when Test Result is pass.");
+      }
+    }
+    return invalidFields;
   }
 
   if (kind === "docs-sync-report") {

@@ -26,6 +26,7 @@ SOURCE_ARTIFACTS = {
     "validation-adequacy": [
         ".ai/vcm/handoffs/architecture-plan.md",
         ".ai/vcm/handoffs/test-report.md",
+        "docs/TESTING.md",
     ],
     "code-diff": [],
 }
@@ -187,12 +188,13 @@ def input_hash(root: Path, gate: str, source: str | None = None, gate_record=Non
         path = root / core_artifact
         digest.update(core_artifact.encode())
         digest.update(path.read_bytes())
-        if gate != "architecture-plan":
-            return digest.hexdigest()
 
     common = [
         "CLAUDE.md",
+        ".claude/agents/architect.md",
+        ".claude/agents/coder.md",
         ".claude/agents/gate-reviewer.md",
+        ".claude/agents/tester.md",
         ".claude/skills/vcm-gate-review/SKILL.md",
         ".ai/tools/request-gate-review",
         "docs/CODING_STANDARDS.md",
@@ -216,6 +218,19 @@ def input_hash(root: Path, gate: str, source: str | None = None, gate_record=Non
         untracked = command_text(root, ["git", "ls-files", "--others", "--exclude-standard", *evidence_pathspec]).splitlines()
         for relative in untracked:
             digest.update(b"untracked")
+            digest.update(relative.encode())
+            digest.update(command_output(root, ["git", "hash-object", "--", relative]))
+    if gate == "validation-adequacy":
+        evidence_pathspec = ["--", ".", ":(exclude).ai/vcm/**", ":(exclude)docs/**"]
+        digest.update(b"trackedEvidence")
+        digest.update(command_output(root, ["git", "ls-files", "-s", *evidence_pathspec]))
+        digest.update(b"workingEvidence")
+        digest.update(command_output(root, ["git", "diff", "--binary", *evidence_pathspec]))
+        digest.update(b"stagedEvidence")
+        digest.update(command_output(root, ["git", "diff", "--cached", "--binary", *evidence_pathspec]))
+        untracked = command_text(root, ["git", "ls-files", "--others", "--exclude-standard", *evidence_pathspec]).splitlines()
+        for relative in untracked:
+            digest.update(b"untrackedEvidence")
             digest.update(relative.encode())
             digest.update(command_output(root, ["git", "hash-object", "--", relative]))
     if gate == "code-diff":

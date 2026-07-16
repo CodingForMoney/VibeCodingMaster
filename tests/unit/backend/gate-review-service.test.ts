@@ -1,4 +1,3 @@
-import { createHash } from "node:crypto";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -162,52 +161,38 @@ describe("gate-review-service", () => {
     expect(sessionStarts).toEqual([]);
   });
 
-  it("reuses validation-adequacy approval when only the architecture plan changed", async () => {
+  it("invalidates validation-adequacy approval when current code or test evidence changes", async () => {
     tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-gate-review-report-hash-"));
     await writeHarnessFiles(tmpRepo);
     const taskRoot = taskWorktree(tmpRepo);
-    const testReport = "# Test Report\nAll checks covered.\n";
-    await writeFile(path.join(taskRoot, ".ai/vcm/handoffs/test-report.md"), testReport, "utf8");
-    await mkdir(path.join(taskRoot, ".ai/vcm/gate-reviews"), { recursive: true });
-    await writeFile(
-      path.join(taskRoot, ".ai/vcm/gate-reviews/index.json"),
-      JSON.stringify({
-        version: 1,
-        enabled: true,
-        activeGate: null,
-        updatedAt: "2026-06-13T00:00:00.000Z",
-        gates: {
-          "validation-adequacy": {
-            gate: "validation-adequacy",
-            required: true,
-            status: "completed",
-            decision: "approve",
-            reportPath: ".ai/vcm/gate-reviews/validation-adequacy-review.md",
-            promptPath: ".ai/vcm/gate-reviews/requests/approved.prompt.md",
-            inputHash: gateCoreHash(".ai/vcm/handoffs/test-report.md", testReport),
-            updatedAt: "2026-06-13T00:00:00.000Z"
-          }
-        }
-      }),
-      "utf8"
-    );
-    await writeFile(path.join(taskRoot, ".ai/vcm/handoffs/architecture-plan.md"), "# Architecture Plan\nChanged.\n", "utf8");
-    const sessionStarts: string[] = [];
+    await writeFile(path.join(taskRoot, ".ai/vcm/handoffs/test-report.md"), validTestReport(), "utf8");
+    let trackedEvidence = "100644 blob-a 0\tsrc/feature.ts\n100644 test-a 0\ttests/feature.test.ts\n";
+    const writes: string[] = [];
     const service = createGateReviewService({
       fs: createNodeFileSystemAdapter(),
-      runner: createRunner(tmpRepo, []),
-      runtime: createRuntime(tmpRepo, []),
+      runner: createRunner(tmpRepo, [], {
+        "ls-files -s -- . :(exclude).ai/vcm/** :(exclude)docs/**": () => trackedEvidence
+      }),
+      runtime: createRuntime(tmpRepo, writes, "approve"),
       projectService: createProjectService(),
       taskService: createTaskService(tmpRepo),
       appSettings: createAppSettings(["validation-adequacy"]),
-      sessionService: createSessionService(sessionStarts),
-      roundService: createRoundService()
+      sessionService: createSessionService(),
+      roundService: createRoundService(),
+      reportPollIntervalMs: 5,
+      reportTimeoutMs: 500
     });
 
-    const result = await service.requestReviewGate(tmpRepo, "demo-task", "validation-adequacy");
+    expect((await service.requestReviewGate(tmpRepo, "demo-task", "validation-adequacy")).status).toBe("started");
+    await waitFor(async () => (await service.getState(tmpRepo!, "demo-task")).gates["validation-adequacy"].status === "completed");
+    expect((await service.requestReviewGate(tmpRepo, "demo-task", "validation-adequacy")).status).toBe("already_approved");
+    expect(writes.find((write) => write.includes("Gate: validation-adequacy"))).toContain(
+      "Complete every Validation Analysis field"
+    );
 
-    expect(result.status).toBe("already_approved");
-    expect(sessionStarts).toEqual([]);
+    trackedEvidence = "100644 blob-b 0\tsrc/feature.ts\n100644 test-b 0\ttests/feature.test.ts\n";
+    expect((await service.requestReviewGate(tmpRepo, "demo-task", "validation-adequacy")).status).toBe("started");
+    await waitFor(async () => (await service.getState(tmpRepo!, "demo-task")).gates["validation-adequacy"].status === "completed");
   });
 
   it("invalidates architecture approval when scaffold evidence changes", async () => {
@@ -265,6 +250,76 @@ describe("gate-review-service", () => {
 
     await expect(service.readReport(tmpRepo, "demo-task", "architecture-plan")).rejects.toMatchObject({
       code: "GATE_REVIEW_ARCHITECTURE_ANALYSIS_MISSING"
+    });
+  });
+
+  it("rejects validation reports without complete validation analysis", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-gate-review-validation-contract-"));
+    await writeHarnessFiles(tmpRepo);
+    const taskRoot = taskWorktree(tmpRepo);
+    await writeFile(path.join(taskRoot, ".ai/vcm/handoffs/test-report.md"), validTestReport(), "utf8");
+    const reportDir = path.join(taskRoot, ".ai/vcm/gate-reviews");
+    await mkdir(reportDir, { recursive: true });
+    await writeFile(
+      path.join(reportDir, "validation-adequacy-review.md"),
+      "Gate: validation-adequacy\nDecision: approve\nSummary: Test report says pass.\n",
+      "utf8"
+    );
+    const service = createGateReviewService({
+      fs: createNodeFileSystemAdapter(),
+      runner: createRunner(tmpRepo, []),
+      runtime: createRuntime(tmpRepo, []),
+      projectService: createProjectService(),
+      taskService: createTaskService(tmpRepo),
+      appSettings: createAppSettings(["validation-adequacy"]),
+      sessionService: createSessionService(),
+      roundService: createRoundService()
+    });
+
+    await expect(service.readReport(tmpRepo, "demo-task", "validation-adequacy")).rejects.toMatchObject({
+      code: "GATE_REVIEW_VALIDATION_ANALYSIS_MISSING"
+    });
+  });
+
+  it("rejects validation approval when Tester evidence is incomplete", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-gate-review-validation-input-"));
+    await writeHarnessFiles(tmpRepo);
+    const taskRoot = taskWorktree(tmpRepo);
+    await writeFile(
+      path.join(taskRoot, ".ai/vcm/handoffs/test-report.md"),
+      "# Test Report\n\nTest Result: pass\n",
+      "utf8"
+    );
+    const reportDir = path.join(taskRoot, ".ai/vcm/gate-reviews");
+    await mkdir(reportDir, { recursive: true });
+    await writeFile(
+      path.join(reportDir, "validation-adequacy-review.md"),
+      [
+        "Gate: validation-adequacy",
+        "Decision: approve",
+        "Summary: The incomplete report claims pass.",
+        "",
+        ...validationAnalysisLines(),
+        "## Findings",
+        "",
+        "None.",
+        ""
+      ].join("\n"),
+      "utf8"
+    );
+    const service = createGateReviewService({
+      fs: createNodeFileSystemAdapter(),
+      runner: createRunner(tmpRepo, []),
+      runtime: createRuntime(tmpRepo, []),
+      projectService: createProjectService(),
+      taskService: createTaskService(tmpRepo),
+      appSettings: createAppSettings(["validation-adequacy"]),
+      sessionService: createSessionService(),
+      roundService: createRoundService()
+    });
+
+    await expect(service.readReport(tmpRepo, "demo-task", "validation-adequacy")).rejects.toMatchObject({
+      code: "GATE_REVIEW_VALIDATION_INPUT_INCOMPLETE"
     });
   });
 
@@ -562,6 +617,9 @@ function createRuntime(
             ""
           ]
         : [];
+      const validationAnalysis = gate === "validation-adequacy"
+        ? validationAnalysisLines()
+        : [];
       const findings = decision === "request_changes"
         ? [
             "## Findings",
@@ -582,6 +640,7 @@ function createRuntime(
           decision === "request_changes" ? "Summary: Missing proof point." : "Summary: Approved.",
           "",
           ...architectureAnalysis,
+          ...validationAnalysis,
           ...findings
         ].join("\n"),
         "utf8"
@@ -731,11 +790,61 @@ function createAppSettings(initialRequiredGates: GateReviewGate[] = []) {
   };
 }
 
-function gateCoreHash(relativePath: string, content: string): string {
-  const digest = createHash("sha256");
-  digest.update(relativePath);
-  digest.update(content);
-  return digest.digest("hex");
+function validTestReport(): string {
+  return [
+    "# Test Report",
+    "",
+    "Test Result: pass",
+    "",
+    "## Evidence Reviewed",
+    "src/feature.ts and tests/feature.test.ts.",
+    "",
+    "## Tests Added Or Updated",
+    "tests/feature.test.ts.",
+    "",
+    "## Coverage Mapping",
+    "Feature behavior -> L2 -> tests/feature.test.ts -> public entry path -> pass.",
+    "",
+    "## Commands Run Or Checked",
+    "npm test -- feature.test.ts: pass.",
+    "",
+    "## Validation Results",
+    "Pass.",
+    "",
+    "## Failed Expectations",
+    "None.",
+    "",
+    "## Reproduction Steps",
+    "None.",
+    "",
+    "## Skipped Checks With Reasons",
+    "None.",
+    "",
+    "## Coverage Gaps",
+    "None.",
+    "",
+    "## Blocking Validation Issues",
+    "None.",
+    ""
+  ].join("\n");
+}
+
+function validationAnalysisLines(): string[] {
+  return [
+    "## Validation Analysis",
+    "",
+    "- Evidence Read: test report, implementation entry point, and actual tests",
+    "- Changed Behavior And Risk: feature behavior and boundary risk",
+    "- Coverage Mapping: behavior mapped to the named test case",
+    "- Baseline Coverage: changed callable units covered",
+    "- Integration And E2E Coverage: required integration path covered",
+    "- Boundary And Failure Coverage: relevant failure path covered",
+    "- Public Contract Coverage: public behavior asserted",
+    "- Test Integrity: real entry path and observable assertions inspected",
+    "- Skips And Gaps: none",
+    "- Validation Readiness: ready",
+    ""
+  ];
 }
 
 async function waitFor(predicate: () => Promise<boolean>, timeoutMs = 1000): Promise<void> {
