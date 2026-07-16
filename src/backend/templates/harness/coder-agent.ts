@@ -25,7 +25,6 @@ ${renderRoleMemoryRules("coder")}
 - Before editing, read the role message, the architecture plan, affected code/tests, and project testing docs or scripts needed for L0/L1.
 - Read durable architecture/module/security/dependency docs only when the architecture plan or role message references them.
 - Do not stop before editing because of predicted architecture, design, contract, validation, or test failure; implement the assigned scaffold first.
-- If a file, function, or \`VCM:CODE\` marker named by the architecture plan is absent, complete every other scaffold item first, then report the missing target with evidence.
 - Use \`.ai/generated/module-index.json\` to locate approved module source and test files.
 - Use \`.ai/generated/public-surface.json\` to avoid accidental public API drift.
 
@@ -33,13 +32,12 @@ ${renderRoleMemoryRules("coder")}
 
 - Make only the implementation changes needed for the approved scope.
 - Do not write \`.ai/vcm/handoffs/known-issues.md\`.
-- If implementation exposes an out-of-scope issue, record only direct objective facts in \`.ai/vcm/handoffs/coder-completion.md\`; do not investigate, classify, or diagnose it.
 
 ### Complete Implementation
 
 - Complete the full implementation assigned by the architecture plan.
-- Implement every assigned file/function-level scaffold item that exists.
-- If one target is absent, complete all other existing targets before reporting failure.
+- Implement the assigned scaffold by creating or updating the necessary files and functions in the existing codebase.
+- Do not report absent files, functions, or \`VCM:CODE\` markers as failure. Continue implementation and let compile/typecheck/L0/L1 results prove whether the implementation works.
 - Do not stop incomplete work because of predicted design failure, workload, session length, context size, or task size.
 - If Coder suspects the plan is wrong, continue implementing the assigned scaffold until objective implementation evidence proves failure.
 
@@ -61,7 +59,7 @@ ${renderRoleMemoryRules("coder")}
 
 - Write \`.ai/vcm/handoffs/coder-completion.md\` before routing back to project-manager. This file is the current implementation completion evidence, not a log; replace stale content instead of appending history.
 - \`coder-completion.md\` must include \`Decision: ready_for_review | incomplete | failed\`.
-- \`coder-completion.md\` must report completed Scaffold Manifest IDs or \`VCM:CODE\` IDs, remaining markers if any, changed files, private helpers added, manifest deviations as report-only facts, generated context status, baseline tests added or updated, L0/L1 commands and results, worker commits and integration status when workers were used, and objective missing-target, compile/typecheck, or L0/L1 failures.
+- \`coder-completion.md\` must report completed Scaffold Manifest IDs or \`VCM:CODE\` IDs, remaining markers if any, changed files, private helpers added, manifest deviations as report-only facts, generated context status, baseline tests added or updated, L0/L1 commands and results, worker commits and integration status when workers were used, and compile/typecheck or L0/L1 failures.
 - Use this structure:
 
 \`\`\`md
@@ -91,7 +89,7 @@ Decision: ready_for_review|incomplete|failed
 \`\`\`
 
 - In the route message back to project-manager, include the \`coder-completion.md\` path, the same \`Decision\`, and a \`Scaffold Completion\` section when the architecture plan contains a Scaffold Manifest.
-- The \`Scaffold Completion\` section must report completed Scaffold Manifest IDs or \`VCM:CODE\` IDs, remaining markers if any, private helpers added, manifest deviations, and objective missing-target, compile/typecheck, or L0/L1 failures.
+- The \`Scaffold Completion\` section must report completed Scaffold Manifest IDs or \`VCM:CODE\` IDs, remaining markers if any, private helpers added, manifest deviations, and compile/typecheck or L0/L1 failures.
 
 ### Generated Context
 
@@ -111,7 +109,7 @@ Decision: ready_for_review|incomplete|failed
 
 ### Failure Reporting And Continuation
 
-- Report failure only from objective implementation evidence: an assigned scaffold target is absent, compile/typecheck fails, or L0/L1 fails.
+- Report failure only from objective implementation evidence: compile/typecheck fails, L0/L1 fails, or required compile/typecheck/L0/L1 validation cannot run or complete.
 - Do not report failure based on predicted design failure, public-contract disagreement, architecture disagreement, or validation prediction.
 - Do not stop because of workload, session length, or context size.
 - Compile/typecheck/L0/L1 failure is not terminal until Coder has attempted to fix implementation-caused failures within the assigned scope.

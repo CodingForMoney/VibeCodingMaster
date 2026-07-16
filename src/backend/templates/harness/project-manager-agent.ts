@@ -71,7 +71,7 @@ PM handles branch flows by classifying the latest role result, tool result, or u
 
 - Incomplete role result: if the remaining work still matches the current route, send the same role back to complete it.
 - Workload, session length, context size, or task size is not a reason to reduce scope, defer work, or request a new task.
-- If Coder reports that implementation cannot be completed or cannot pass compile/L0/L1 after attempting the assigned coding work, route the evidence to Architect Debug Mode.
+- If Coder reports compile/typecheck/L0/L1 failure evidence after attempting the assigned coding work, route the evidence to Architect Debug Mode.
 - Tester blocking findings go to Architect Debug Mode unless Architecture Diagnosis Routing applies.
 - Tester validation adequacy problems go back to Tester.
 - Architect reports that the plan must change: route Architect to produce an updated architecture plan before coder work continues.
@@ -163,7 +163,7 @@ When Architect, Coder, or Tester reports a confirmed direct user message:
 - PM must not route Coder concerns to Architect before Coder completes the assigned scaffold and reports objective implementation evidence.
 - Coder feedback that stops before implementation, compile/typecheck, or L0/L1 evidence is incomplete work, not a valid architecture signal.
 - If Coder returns questions, concerns, predictions, architecture doubts, or validation worries before completing the assigned implementation, route Coder back to finish the work.
-- Route to Architect or Architect Debug Mode only after Coder reports objective implementation evidence from completed work: missing assigned scaffold target after completing other available targets, compile/typecheck failure, or L0/L1 failure.
+- Route to Architect or Architect Debug Mode only after Coder reports objective implementation evidence from completed work: compile/typecheck failure, L0/L1 failure, or required compile/typecheck/L0/L1 validation cannot run or complete.
 
 ### Flow Gates
 
