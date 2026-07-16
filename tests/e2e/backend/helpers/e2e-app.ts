@@ -28,7 +28,6 @@ import { createClaudeTranscriptService } from "../../../../src/backend/services/
 import { createTranslationService } from "../../../../src/backend/services/translation-service.js";
 import { createGatewayChannelRegistry } from "../../../../src/backend/gateway/gateway-channel.js";
 import { createWeixinIlinkChannel } from "../../../../src/backend/gateway/channels/weixin-ilink-channel.js";
-import { createLarkChannel } from "../../../../src/backend/gateway/channels/lark-channel.js";
 import { createGatewaySettingsService } from "../../../../src/backend/gateway/gateway-settings-service.js";
 import { createGatewayAuditLog } from "../../../../src/backend/gateway/gateway-audit-log.js";
 import { createTaskCloseService } from "../../../../src/backend/services/task-close-service.js";
@@ -44,11 +43,13 @@ import { readVcmPackageVersion } from "../../../../src/backend/app-version.js";
 import type { RoleName } from "../../../../src/shared/types/role.js";
 import type { ClaudeModel, ClaudePermissionMode, SessionEffort } from "../../../../src/shared/types/session.js";
 import { MockClaudeRuntime } from "./mock-claude-runtime.js";
+import { MockGatewayChannel } from "./mock-gateway-channel.js";
 
 export interface MockClaudeE2eApp {
   app: FastifyInstance;
   deps: ServerDeps;
   mockRuntime: MockClaudeRuntime;
+  mockGateway: MockGatewayChannel;
   tempRoot: string;
   close(): Promise<void>;
 }
@@ -179,9 +180,10 @@ export async function createMockClaudeE2eApp(): Promise<MockClaudeE2eApp> {
     appSettings,
     outputBatchDelayMs: 0
   });
+  const mockGateway = new MockGatewayChannel();
   const gatewayChannels = createGatewayChannelRegistry([
-    createWeixinIlinkChannel(),
-    createLarkChannel()
+    mockGateway,
+    createWeixinIlinkChannel()
   ]);
   const gatewaySettings = createGatewaySettingsService({
     fs: fsAdapter,
@@ -326,6 +328,7 @@ export async function createMockClaudeE2eApp(): Promise<MockClaudeE2eApp> {
     app,
     deps,
     mockRuntime,
+    mockGateway,
     tempRoot,
     async close() {
       await app.close();

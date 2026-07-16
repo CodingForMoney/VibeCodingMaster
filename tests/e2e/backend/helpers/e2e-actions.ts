@@ -12,6 +12,13 @@ import type { RoleName } from "../../../../src/shared/types/role.js";
 import type { RoleSessionRecord } from "../../../../src/shared/types/session.js";
 import type { TaskRecord } from "../../../../src/shared/types/task.js";
 import type {
+  BindGatewayLarkAppRequest,
+  CheckGatewayLarkRegistrationResult,
+  GatewayStatus,
+  SetGatewayConnectionRequest,
+  UpdateGatewaySettingsRequest
+} from "../../../../src/shared/types/gateway.js";
+import type {
   PollTranslationTaskFeedResult,
   StartTranslationSessionResult
 } from "../../../../src/shared/types/translation.js";
@@ -132,6 +139,42 @@ export async function closeTask(app: FastifyInstance, taskSlug: string): Promise
     url: `/api/tasks/${taskSlug}/cleanup`
   });
   return response.json();
+}
+
+export async function bindGatewayLarkApp(
+  app: FastifyInstance,
+  input: BindGatewayLarkAppRequest
+): Promise<CheckGatewayLarkRegistrationResult> {
+  const response = await injectOk(app, {
+    method: "POST",
+    url: "/api/gateway/lark-registration/bind",
+    payload: input
+  });
+  return response.json<CheckGatewayLarkRegistrationResult>();
+}
+
+export async function setGatewayConnection(
+  app: FastifyInstance,
+  enabled: boolean
+): Promise<GatewayStatus> {
+  const response = await injectOk(app, {
+    method: "PUT",
+    url: "/api/gateway/connection",
+    payload: { enabled } satisfies SetGatewayConnectionRequest
+  });
+  return response.json<GatewayStatus>();
+}
+
+export async function updateGatewaySettings(
+  app: FastifyInstance,
+  input: UpdateGatewaySettingsRequest
+): Promise<GatewayStatus> {
+  const response = await injectOk(app, {
+    method: "PUT",
+    url: "/api/gateway/settings",
+    payload: input
+  });
+  return response.json<GatewayStatus>();
 }
 
 export async function startTaskHarnessRetrospective(app: FastifyInstance, taskSlug: string): Promise<unknown> {
