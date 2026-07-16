@@ -88,6 +88,19 @@ const GATE_REVIEWER_ROLE = "gate-reviewer";
 const DEFAULT_REPORT_POLL_INTERVAL_MS = 1000;
 const DEFAULT_REPORT_TIMEOUT_MS = 30 * 60 * 1000;
 const activeRuns = new Set<string>();
+const ARCHITECTURE_ANALYSIS_FIELDS = [
+  "Evidence Read",
+  "End-To-End Flow",
+  "Scope Fit",
+  "Code Reality",
+  "Ownership",
+  "Data Flow",
+  "Lifecycle",
+  "Invariants",
+  "Boundaries And Public Surface",
+  "Failure Model",
+  "Coder Readiness"
+] as const;
 
 const SOURCE_ARTIFACTS: Record<GateReviewGate, string[]> = {
   "architecture-plan": [
@@ -445,6 +458,12 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
       const completedAt = now();
       await recordGateReviewerTurnStop(context, gateTurnStarted);
       gateTurnStarted = false;
+      await updateRequestStatus(deps.fs, context, requestId, "completed", {
+        completedAt,
+        decision: parsed.decision,
+        reportPath: parsed.reportPath
+      });
+      activeRuns.delete(runKey);
       await updateGateRecord(context, gate, {
         status: "completed",
         decision: parsed.decision,
@@ -456,17 +475,17 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
         callbackError: undefined,
         updatedAt: completedAt
       }, { clearActiveGate: true });
-      await updateRequestStatus(deps.fs, context, requestId, "completed", {
-        completedAt,
-        decision: parsed.decision,
-        reportPath: parsed.reportPath
-      });
       await callbackProjectManager(context, gate, "completed", parsed.decision, parsed.reportPath);
     } catch (error) {
       const timestamp = now();
       const message = errorMessage(error);
       await recordGateReviewerTurnStop(context, gateTurnStarted);
       gateTurnStarted = false;
+      await updateRequestStatus(deps.fs, context, requestId, "failed", {
+        completedAt: timestamp,
+        error: message
+      });
+      activeRuns.delete(runKey);
       await updateGateRecord(context, gate, {
         status: "failed",
         error: message,
@@ -475,10 +494,6 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
         callbackError: undefined,
         updatedAt: timestamp
       }, { clearActiveGate: true });
-      await updateRequestStatus(deps.fs, context, requestId, "failed", {
-        completedAt: timestamp,
-        error: message
-      });
       await callbackProjectManager(context, gate, "failed", undefined, reportPathForGate(gate), message);
     } finally {
       activeRuns.delete(runKey);
@@ -964,7 +979,9 @@ async function computeInputHash(
   if (coreArtifact) {
     digest.update(coreArtifact);
     digest.update(await deps.fs.readText(resolveRepoPath(taskRepoRoot, coreArtifact)));
-    return digest.digest("hex");
+    if (gate !== "architecture-plan") {
+      return digest.digest("hex");
+    }
   }
 
   const common = [
@@ -976,7 +993,7 @@ async function computeInputHash(
   ];
 
   const sourceArtifacts = getSourceArtifacts(gate, codeDiffSource);
-  for (const relativePath of [...common, ...sourceArtifacts]) {
+  for (const relativePath of new Set([...common, ...sourceArtifacts].filter((item) => item !== coreArtifact))) {
     digest.update(relativePath);
     const absolutePath = resolveRepoPath(taskRepoRoot, relativePath);
     if (await deps.fs.pathExists(absolutePath)) {
@@ -1002,9 +1019,24 @@ async function computeInputHash(
   }
 
   if (gate === "architecture-plan") {
-    digest.update(await commandStdout(deps.runner, taskRepoRoot, ["status", "--porcelain=v1"]));
-    digest.update(await commandStdout(deps.runner, taskRepoRoot, ["diff", "--binary"]));
-    digest.update(await commandStdout(deps.runner, taskRepoRoot, ["diff", "--cached", "--binary"]));
+    const evidencePathspec = ["--", ".", ":(exclude).ai/vcm/**"];
+    digest.update("head");
+    digest.update(await commandStdout(deps.runner, taskRepoRoot, ["rev-parse", "HEAD"]));
+    digest.update("workingDiff");
+    digest.update(await commandStdout(deps.runner, taskRepoRoot, ["diff", "--binary", ...evidencePathspec]));
+    digest.update("stagedDiff");
+    digest.update(await commandStdout(deps.runner, taskRepoRoot, ["diff", "--cached", "--binary", ...evidencePathspec]));
+    const untracked = splitLines(await commandStdout(deps.runner, taskRepoRoot, [
+      "ls-files",
+      "--others",
+      "--exclude-standard",
+      ...evidencePathspec
+    ]));
+    for (const relativePath of untracked) {
+      digest.update("untracked");
+      digest.update(relativePath);
+      digest.update(await commandStdout(deps.runner, taskRepoRoot, ["hash-object", "--", relativePath]));
+    }
   }
 
   return digest.digest("hex");
@@ -1057,6 +1089,9 @@ function buildGatePrompt(
   const gitLine = gate === "architecture-plan"
     ? "\nDiff: inspect git status/diff in Worktree."
     : "";
+  const architectureContract = gate === "architecture-plan"
+    ? "\n\nComplete every Architecture Analysis field required by the Gate Reviewer role with concrete current-worktree evidence before deciding."
+    : "";
   const codeDiffSection = gate === "code-diff" && codeDiffInput
     ? `
 
@@ -1084,7 +1119,7 @@ Request: ${requestId}
 Report: ${absoluteReportPath}
 
 Evidence:
-${evidence}${gitLine}${codeDiffSection}
+${evidence}${gitLine}${architectureContract}${codeDiffSection}
 
 Write only Report. Start exactly:
 Gate: ${gate}
@@ -1171,16 +1206,78 @@ async function parseGateReport(
     });
   }
 
+  const findings = extractFindings(content);
+  if (gate === "architecture-plan") {
+    validateArchitectureAnalysis(content);
+  }
+  if (decision === "request_changes") {
+    validateRequestChangeFindings(findings);
+  }
+
   return {
     gate,
     requestId: parsedRequest,
     decision,
     summary: extractSummary(content),
-    findings: extractFindings(content),
+    findings,
     reportPath,
     content,
     parsedAt: timestamp
   };
+}
+
+function validateArchitectureAnalysis(content: string): void {
+  const section = extractMarkdownSection(content, "Architecture Analysis");
+  if (!section) {
+    throw new VcmError({
+      code: "GATE_REVIEW_ARCHITECTURE_ANALYSIS_MISSING",
+      message: "Architecture-plan review must contain a non-empty Architecture Analysis section.",
+      statusCode: 500
+    });
+  }
+
+  const missingFields = ARCHITECTURE_ANALYSIS_FIELDS.filter((field) => !matchField(section, field));
+  if (missingFields.length > 0) {
+    throw new VcmError({
+      code: "GATE_REVIEW_ARCHITECTURE_ANALYSIS_INCOMPLETE",
+      message: `Architecture Analysis is missing required evidence: ${missingFields.join(", ")}.`,
+      statusCode: 500
+    });
+  }
+}
+
+function validateRequestChangeFindings(findings: GateReviewFinding[]): void {
+  if (findings.length === 0) {
+    throw new VcmError({
+      code: "GATE_REVIEW_FINDINGS_MISSING",
+      message: "A request_changes decision must contain at least one structured finding.",
+      statusCode: 500
+    });
+  }
+  const incomplete = findings.find((finding) => (
+    !finding.evidence.trim()
+    || !finding.expected.trim()
+    || !finding.gap.trim()
+    || !finding.risk.trim()
+  ));
+  if (incomplete) {
+    throw new VcmError({
+      code: "GATE_REVIEW_FINDING_INCOMPLETE",
+      message: `Finding ${incomplete.title} must contain Evidence, Expected, Gap, and Risk.`,
+      statusCode: 500
+    });
+  }
+}
+
+function extractMarkdownSection(content: string, heading: string): string | undefined {
+  const match = new RegExp(`^##\\s+${escapeRegex(heading)}\\s*$`, "im").exec(content);
+  if (!match || match.index === undefined) {
+    return undefined;
+  }
+  const remainder = content.slice(match.index + match[0].length);
+  const nextHeading = remainder.search(/^##\s+/m);
+  const section = (nextHeading >= 0 ? remainder.slice(0, nextHeading) : remainder).trim();
+  return section || undefined;
 }
 
 async function updateRequestStatus(
@@ -1385,6 +1482,10 @@ function errorMessage(error: unknown): string {
 function isPendingReportError(error: unknown): boolean {
   return error instanceof VcmError && [
     "GATE_REVIEW_DECISION_MISSING",
+    "GATE_REVIEW_ARCHITECTURE_ANALYSIS_MISSING",
+    "GATE_REVIEW_ARCHITECTURE_ANALYSIS_INCOMPLETE",
+    "GATE_REVIEW_FINDINGS_MISSING",
+    "GATE_REVIEW_FINDING_INCOMPLETE",
     "GATE_REVIEW_REPORT_GATE_MISMATCH",
     "GATE_REVIEW_REPORT_MISSING",
     "GATE_REVIEW_REPORT_STALE"

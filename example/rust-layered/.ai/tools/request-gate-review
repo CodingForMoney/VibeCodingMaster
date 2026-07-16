@@ -187,7 +187,8 @@ def input_hash(root: Path, gate: str, source: str | None = None, gate_record=Non
         path = root / core_artifact
         digest.update(core_artifact.encode())
         digest.update(path.read_bytes())
-        return digest.hexdigest()
+        if gate != "architecture-plan":
+            return digest.hexdigest()
 
     common = [
         "CLAUDE.md",
@@ -196,7 +197,8 @@ def input_hash(root: Path, gate: str, source: str | None = None, gate_record=Non
         ".ai/tools/request-gate-review",
         "docs/CODING_STANDARDS.md",
     ]
-    for relative in common + source_artifacts(gate, source):
+    inputs = dict.fromkeys(relative for relative in common + source_artifacts(gate, source) if relative != core_artifact)
+    for relative in inputs:
         path = root / relative
         digest.update(relative.encode())
         if path.is_file():
@@ -204,9 +206,18 @@ def input_hash(root: Path, gate: str, source: str | None = None, gate_record=Non
         else:
             digest.update(b"<missing>")
     if gate == "architecture-plan":
-        digest.update(command_output(root, ["git", "status", "--porcelain=v1"]))
-        digest.update(command_output(root, ["git", "diff", "--binary"]))
-        digest.update(command_output(root, ["git", "diff", "--cached", "--binary"]))
+        evidence_pathspec = ["--", ".", ":(exclude).ai/vcm/**"]
+        digest.update(b"head")
+        digest.update(command_output(root, ["git", "rev-parse", "HEAD"]))
+        digest.update(b"workingDiff")
+        digest.update(command_output(root, ["git", "diff", "--binary", *evidence_pathspec]))
+        digest.update(b"stagedDiff")
+        digest.update(command_output(root, ["git", "diff", "--cached", "--binary", *evidence_pathspec]))
+        untracked = command_text(root, ["git", "ls-files", "--others", "--exclude-standard", *evidence_pathspec]).splitlines()
+        for relative in untracked:
+            digest.update(b"untracked")
+            digest.update(relative.encode())
+            digest.update(command_output(root, ["git", "hash-object", "--", relative]))
     if gate == "code-diff":
         digest.update((source or "<missing>").encode())
         base, head = code_diff_range(root, gate_record)

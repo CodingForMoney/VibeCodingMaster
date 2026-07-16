@@ -70,7 +70,7 @@ describe("gate-review-service", () => {
     expect(record.callbackStatus).toBe("sent");
     expect(record.reportPath).toBe(".ai/vcm/gate-reviews/architecture-plan-review.md");
 
-    expect(runnerCalls.some((call) => call.command === "git")).toBe(false);
+    expect(runnerCalls.some((call) => call.command === "git" && call.args[0] === "diff")).toBe(true);
     expect(sessionStarts).toEqual(["gate-reviewer"]);
     expect(activityCalls).toEqual([
       "running:gate-reviewer",
@@ -86,6 +86,7 @@ describe("gate-review-service", () => {
     expect(gatePrompt).toContain("Task: demo-task");
     expect(gatePrompt).toContain(`Worktree: ${taskWorktree(tmpRepo)}`);
     expect(gatePrompt).toContain(`Report: ${path.join(taskWorktree(tmpRepo), ".ai/vcm/gate-reviews/architecture-plan-review.md")}`);
+    expect(gatePrompt).toContain("Complete every Architecture Analysis field");
     expect(gatePrompt).not.toContain("Findings, when present");
     expect(writes.join("")).toContain("[VCM GATE REVIEW CALLBACK]");
     expect(writes.join("")).toContain("decision: request_changes");
@@ -207,6 +208,64 @@ describe("gate-review-service", () => {
 
     expect(result.status).toBe("already_approved");
     expect(sessionStarts).toEqual([]);
+  });
+
+  it("invalidates architecture approval when scaffold evidence changes", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-gate-review-scaffold-hash-"));
+    await writeHarnessFiles(tmpRepo);
+    let workingDiff = "";
+    const runner = createRunner(tmpRepo, [], {
+      "rev-parse HEAD": "head-sha",
+      "diff --binary -- . :(exclude).ai/vcm/**": () => workingDiff,
+      "diff --cached --binary -- . :(exclude).ai/vcm/**": "",
+      "ls-files --others --exclude-standard -- . :(exclude).ai/vcm/**": ""
+    });
+    const service = createGateReviewService({
+      fs: createNodeFileSystemAdapter(),
+      runner,
+      runtime: createRuntime(tmpRepo, [], "approve"),
+      projectService: createProjectService(),
+      taskService: createTaskService(tmpRepo),
+      appSettings: createAppSettings(["architecture-plan"]),
+      sessionService: createSessionService(),
+      roundService: createRoundService(),
+      reportPollIntervalMs: 5,
+      reportTimeoutMs: 500
+    });
+
+    expect((await service.requestReviewGate(tmpRepo, "demo-task", "architecture-plan")).status).toBe("started");
+    await waitFor(async () => (await service.getState(tmpRepo!, "demo-task")).gates["architecture-plan"].status === "completed");
+    expect((await service.requestReviewGate(tmpRepo, "demo-task", "architecture-plan")).status).toBe("already_approved");
+
+    workingDiff = "diff --git a/src/scaffold.ts b/src/scaffold.ts\n+export const changed = true;\n";
+    expect((await service.requestReviewGate(tmpRepo, "demo-task", "architecture-plan")).status).toBe("started");
+    await waitFor(async () => (await service.getState(tmpRepo!, "demo-task")).gates["architecture-plan"].status === "completed");
+  });
+
+  it("rejects architecture reports without complete architecture analysis", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-gate-review-analysis-contract-"));
+    await writeHarnessFiles(tmpRepo);
+    const reportDir = path.join(taskWorktree(tmpRepo), ".ai/vcm/gate-reviews");
+    await mkdir(reportDir, { recursive: true });
+    await writeFile(
+      path.join(reportDir, "architecture-plan-review.md"),
+      "Gate: architecture-plan\nDecision: approve\nSummary: Format only.\n",
+      "utf8"
+    );
+    const service = createGateReviewService({
+      fs: createNodeFileSystemAdapter(),
+      runner: createRunner(tmpRepo, []),
+      runtime: createRuntime(tmpRepo, []),
+      projectService: createProjectService(),
+      taskService: createTaskService(tmpRepo),
+      appSettings: createAppSettings(["architecture-plan"]),
+      sessionService: createSessionService(),
+      roundService: createRoundService()
+    });
+
+    await expect(service.readReport(tmpRepo, "demo-task", "architecture-plan")).rejects.toMatchObject({
+      code: "GATE_REVIEW_ARCHITECTURE_ANALYSIS_MISSING"
+    });
   });
 
   it("starts code-diff review for the current unreviewed commit range", async () => {
@@ -472,7 +531,11 @@ function createRunner(
   };
 }
 
-function createRuntime(repoRoot: string, writes: string[]): TerminalRuntime {
+function createRuntime(
+  repoRoot: string,
+  writes: string[],
+  decision: "approve" | "request_changes" = "request_changes"
+): TerminalRuntime {
   return {
     write(sessionId, data) {
       writes.push(data);
@@ -481,21 +544,45 @@ function createRuntime(repoRoot: string, writes: string[]): TerminalRuntime {
       }
       const gate = /Gate:\s*([a-z-]+)/.exec(data)?.[1] ?? "architecture-plan";
       const requestId = /Request:\s*([a-z0-9_.-]+)/i.exec(data)?.[1] ?? "request-id";
+      const architectureAnalysis = gate === "architecture-plan"
+        ? [
+            "## Architecture Analysis",
+            "",
+            "- Evidence Read: architecture-plan.md, source files, and callers",
+            "- End-To-End Flow: entry to owner to completion",
+            "- Scope Fit: accepted scope is covered",
+            "- Code Reality: plan was compared with current code",
+            "- Ownership: state ownership was checked",
+            "- Data Flow: data flow was traced",
+            "- Lifecycle: completion and failure were checked",
+            "- Invariants: project invariants were checked",
+            "- Boundaries And Public Surface: callers and consumers were checked",
+            "- Failure Model: retries and failures were checked",
+            "- Coder Readiness: implementation decisions are complete",
+            ""
+          ]
+        : [];
+      const findings = decision === "request_changes"
+        ? [
+            "## Findings",
+            "",
+            "### high: Missing proof point",
+            "- Evidence: plan has no proof",
+            "- Expected: proof point exists",
+            "- Gap: no proof",
+            "- Risk: coder ambiguity"
+          ]
+        : ["## Findings", "", "None."];
       void writeFile(
         path.join(taskWorktree(repoRoot), ".ai/vcm/gate-reviews", `${gate}-review.md`),
         [
           `Gate: ${gate}`,
           `Request: ${requestId}`,
-          "Decision: request_changes",
-          "Summary: Missing proof point.",
+          `Decision: ${decision}`,
+          decision === "request_changes" ? "Summary: Missing proof point." : "Summary: Approved.",
           "",
-          "## Findings",
-          "",
-          "### high: Missing proof point",
-          "- Evidence: plan has no proof",
-          "- Expected: proof point exists",
-          "- Gap: no proof",
-          "- Risk: coder ambiguity"
+          ...architectureAnalysis,
+          ...findings
         ].join("\n"),
         "utf8"
       );

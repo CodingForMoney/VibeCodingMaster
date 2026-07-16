@@ -120,12 +120,35 @@ async function writeApproveGateReport(ctx: MockClaudePromptContext): Promise<voi
     throw new Error(`Unable to parse gate prompt:\n${ctx.prompt}`);
   }
   await ctx.writeOutput(`Gate ${gate} approved\n`);
+  const architectureAnalysis = gate === "architecture-plan"
+    ? [
+        "## Architecture Analysis",
+        "",
+        "- Evidence Read: architecture plan, current source, and callers",
+        "- End-To-End Flow: entry to owner to completion",
+        "- Scope Fit: complete",
+        "- Code Reality: verified",
+        "- Ownership: verified",
+        "- Data Flow: verified",
+        "- Lifecycle: verified",
+        "- Invariants: verified",
+        "- Boundaries And Public Surface: verified",
+        "- Failure Model: verified",
+        "- Coder Readiness: ready",
+        "",
+        "## Findings",
+        "",
+        "None.",
+        ""
+      ]
+    : [];
   await ctx.writeAbsoluteFile(report, [
     `Gate: ${gate}`,
     `Request: ${request}`,
     "Decision: approve",
     `Summary: ${gate} inputs are acceptable for this E2E scenario.`,
-    ""
+    "",
+    ...architectureAnalysis
   ].join("\n"));
 }
 

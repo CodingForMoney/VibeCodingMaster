@@ -26,9 +26,15 @@ affected module \`ARCHITECTURE.md\` files, \`.ai/generated/module-index.json\`,
 \`.ai/generated/public-surface.json\` when public surface may change, and the
 affected source files, scaffold changes, and relevant call sites.
 
+Record the concrete files, symbols, and call sites inspected. Trace each
+architecturally significant changed behavior from its entry point through
+ownership, cross-module calls, state changes or side effects, completion and
+failure signals, and consumers. For every changed cross-file or public surface,
+inspect its current callers and consumers.
+
 Analyze accepted scope versus proposed design, current code reality versus
 plan claims, ownership, data flow, lifecycle, module boundaries, dependency
-direction, public surface and callers, state or durable artifact ownership,
+direction, public surface and callers, architecture invariants, state or durable artifact ownership,
 failure/retry/restart/cancellation/concurrency behavior, docs/generated-context
 impact, and whether Coder is left to make architecture decisions.
 
@@ -102,11 +108,14 @@ Use this findings structure:
 <!-- Include Architecture Analysis only for architecture-plan gate. -->
 ## Architecture Analysis
 
+- Evidence Read:
+- End-To-End Flow:
 - Scope Fit:
 - Code Reality:
 - Ownership:
 - Data Flow:
 - Lifecycle:
+- Invariants:
 - Boundaries And Public Surface:
 - Failure Model:
 - Coder Readiness:
@@ -126,11 +135,14 @@ If there are no findings, write:
 <!-- Include Architecture Analysis only for architecture-plan gate. -->
 ## Architecture Analysis
 
+- Evidence Read:
+- End-To-End Flow:
 - Scope Fit:
 - Code Reality:
 - Ownership:
 - Data Flow:
 - Lifecycle:
+- Invariants:
 - Boundaries And Public Surface:
 - Failure Model:
 - Coder Readiness:
@@ -142,7 +154,7 @@ None.
 
 Use Bash only for read-only inspection such as \`git diff\`, \`git status\`, \`git show\`, \`ls\`, \`rg\`, \`sed\`, or \`cat\`. Do not run tests, builds, formatters, generators, package managers, or commands that modify files.
 
-Review only code, architecture, and documents; do not perform validation. Do not edit code, tests, durable docs, role files, route files, or handoff artifacts. Do not choose owners, fixes, Replan, or user-intervention needs.
+Review only code, architecture, and documents; do not perform validation. Do not edit code, tests, durable docs, role files, route files, or handoff artifacts. Do not assign findings or remediation work to VCM roles, choose fixes, decide Replan, or decide whether user intervention is needed.
 
 Outside an active Gate Review request, you may clarify an existing report with the user. Do not change its decision or task flow; VCM must start a new review for a new gate decision, and flow changes belong to project-manager.`;
 }
@@ -427,7 +439,8 @@ def input_hash(root: Path, gate: str, source: str | None = None, gate_record=Non
         path = root / core_artifact
         digest.update(core_artifact.encode())
         digest.update(path.read_bytes())
-        return digest.hexdigest()
+        if gate != "architecture-plan":
+            return digest.hexdigest()
 
     common = [
         "CLAUDE.md",
@@ -436,7 +449,8 @@ def input_hash(root: Path, gate: str, source: str | None = None, gate_record=Non
         ".ai/tools/request-gate-review",
         "docs/CODING_STANDARDS.md",
     ]
-    for relative in common + source_artifacts(gate, source):
+    inputs = dict.fromkeys(relative for relative in common + source_artifacts(gate, source) if relative != core_artifact)
+    for relative in inputs:
         path = root / relative
         digest.update(relative.encode())
         if path.is_file():
@@ -444,9 +458,18 @@ def input_hash(root: Path, gate: str, source: str | None = None, gate_record=Non
         else:
             digest.update(b"<missing>")
     if gate == "architecture-plan":
-        digest.update(command_output(root, ["git", "status", "--porcelain=v1"]))
-        digest.update(command_output(root, ["git", "diff", "--binary"]))
-        digest.update(command_output(root, ["git", "diff", "--cached", "--binary"]))
+        evidence_pathspec = ["--", ".", ":(exclude).ai/vcm/**"]
+        digest.update(b"head")
+        digest.update(command_output(root, ["git", "rev-parse", "HEAD"]))
+        digest.update(b"workingDiff")
+        digest.update(command_output(root, ["git", "diff", "--binary", *evidence_pathspec]))
+        digest.update(b"stagedDiff")
+        digest.update(command_output(root, ["git", "diff", "--cached", "--binary", *evidence_pathspec]))
+        untracked = command_text(root, ["git", "ls-files", "--others", "--exclude-standard", *evidence_pathspec]).splitlines()
+        for relative in untracked:
+            digest.update(b"untracked")
+            digest.update(relative.encode())
+            digest.update(command_output(root, ["git", "hash-object", "--", relative]))
     if gate == "code-diff":
         digest.update((source or "<missing>").encode())
         base, head = code_diff_range(root, gate_record)

@@ -32,16 +32,33 @@ Use only these decisions:
 
 ## Architecture Plan Gate
 
-Read `.claude/agents/architect.md`; use coder/tester definitions only when
-judging implementation or validation boundaries. Verify the required plan
-structure, evidence, Scaffold Manifest, proof points, architect-owned replan decisions when present, and no
-task-only source comments.
+Format is necessary but not sufficient. Do not approve an architecture plan
+only because required sections exist.
 
-Focus on architectural soundness. Request changes when module boundaries,
-public surface impact, dependency direction, state ownership, lifecycle,
-failure paths, concurrency/restart behavior, docs/generated-context impact, or
-key design decisions are missing, contradictory, unsafe, left for coder to
-guess, or conflict with current project architecture.
+For `architecture-plan`, reconstruct the proposed architecture and look for
+design flaws before checking formatting. Read `.ai/vcm/handoffs/architecture-plan.md`,
+`.claude/agents/architect.md`, root `CLAUDE.md`, `docs/ARCHITECTURE.md`,
+affected module `ARCHITECTURE.md` files, `.ai/generated/module-index.json`,
+`.ai/generated/public-surface.json` when public surface may change, and the
+affected source files, scaffold changes, and relevant call sites.
+
+Record the concrete files, symbols, and call sites inspected. Trace each
+architecturally significant changed behavior from its entry point through
+ownership, cross-module calls, state changes or side effects, completion and
+failure signals, and consumers. For every changed cross-file or public surface,
+inspect its current callers and consumers.
+
+Analyze accepted scope versus proposed design, current code reality versus
+plan claims, ownership, data flow, lifecycle, module boundaries, dependency
+direction, public surface and callers, architecture invariants, state or durable artifact ownership,
+failure/retry/restart/cancellation/concurrency behavior, docs/generated-context
+impact, and whether Coder is left to make architecture decisions.
+
+Request changes when the plan is structurally complete but architecturally
+under-specified, logically inconsistent, unsupported by code evidence, unsafe
+for boundary cases, conflicts with current project architecture, or leaves key
+ownership, data-flow, lifecycle, boundary, public-contract, or failure-model
+decisions to Coder.
 
 ## Validation Adequacy Gate
 
@@ -104,6 +121,21 @@ Summary: <one or two sentences>
 Use this findings structure:
 
 ```md
+<!-- Include Architecture Analysis only for architecture-plan gate. -->
+## Architecture Analysis
+
+- Evidence Read:
+- End-To-End Flow:
+- Scope Fit:
+- Code Reality:
+- Ownership:
+- Data Flow:
+- Lifecycle:
+- Invariants:
+- Boundaries And Public Surface:
+- Failure Model:
+- Coder Readiness:
+
 ## Findings
 
 ### <critical|high|medium|low>: <title>
@@ -116,6 +148,21 @@ Use this findings structure:
 If there are no findings, write:
 
 ```md
+<!-- Include Architecture Analysis only for architecture-plan gate. -->
+## Architecture Analysis
+
+- Evidence Read:
+- End-To-End Flow:
+- Scope Fit:
+- Code Reality:
+- Ownership:
+- Data Flow:
+- Lifecycle:
+- Invariants:
+- Boundaries And Public Surface:
+- Failure Model:
+- Coder Readiness:
+
 ## Findings
 
 None.
@@ -123,7 +170,7 @@ None.
 
 Use Bash only for read-only inspection such as `git diff`, `git status`, `git show`, `ls`, `rg`, `sed`, or `cat`. Do not run tests, builds, formatters, generators, package managers, or commands that modify files.
 
-Review only code, architecture, and documents; do not perform validation. Do not edit code, tests, durable docs, role files, route files, or handoff artifacts. Do not choose owners, fixes, Replan, or user-intervention needs.
+Review only code, architecture, and documents; do not perform validation. Do not edit code, tests, durable docs, role files, route files, or handoff artifacts. Do not assign findings or remediation work to VCM roles, choose fixes, decide Replan, or decide whether user intervention is needed.
 
 Outside an active Gate Review request, you may clarify an existing report with the user. Do not change its decision or task flow; VCM must start a new review for a new gate decision, and flow changes belong to project-manager.
 <!-- VCM:END -->
