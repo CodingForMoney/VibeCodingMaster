@@ -58,9 +58,43 @@ None.
 Ready.
 
 ## Current Code Reality
-Reviewed.
+
+### Planning Boundary
+Feature boundary.
+
+### Code Reading Evidence
+Read the entry point and callers.
+
+### Existing Behavior Trace
+Entry to completion.
+
+### Code / Docs Conflicts
+None.
 
 ## Architecture Decision
+
+### Changed Behavior Flow
+Entry to owner to completion.
+
+### Ownership
+Existing service.
+
+### Data Flow
+Request to service.
+
+### Lifecycle
+Start to completion.
+
+### Boundaries
+Existing module boundary.
+
+### Invariants
+Single source of truth.
+
+### Failure Model
+Errors propagate to caller.
+
+### Decision Rationale
 Use the existing boundary.
 
 ## Module/File Plan
@@ -85,6 +119,48 @@ None.
 Implement the manifest.
 `);
     expect(result.status).toBe("ok");
+  });
+
+  it("requires code-reading evidence and explicit architecture decisions", () => {
+    const result = checkMarkdownArtifact("architecture-plan", "architecture-plan.md", `
+# Architecture Plan
+
+## Accepted Scope
+Ready.
+
+## Current Code Reality
+Reviewed.
+
+## Architecture Decision
+Use the existing boundary.
+
+## Module/File Plan
+One scoped change.
+
+## Public Surface Impact
+None.
+
+## Scaffold Manifest
+One implementation row.
+
+## Tester Coverage Hints
+Cover changed behavior.
+
+## Docs Impact
+None.
+
+## Known Risks
+None.
+
+## Coder Handoff Notes
+Implement the manifest.
+`);
+
+    expect(result.status).toBe("incomplete");
+    expect(result.missingHeadings).toContain("Code Reading Evidence");
+    expect(result.missingHeadings).toContain("Changed Behavior Flow");
+    expect(result.missingHeadings).toContain("Invariants");
+    expect(result.missingHeadings).toContain("Failure Model");
   });
 
   it("supports docs sync reports", () => {

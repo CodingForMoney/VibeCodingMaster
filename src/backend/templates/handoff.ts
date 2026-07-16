@@ -7,9 +7,55 @@ TBD
 
 ## Current Code Reality
 
+### Planning Boundary
+
+TBD
+
+### Code Reading Evidence
+
+| File / Symbol | Called By | Calls / Consumers | State / Side Effects | Verified Behavior |
+| --- | --- | --- | --- | --- |
+| TBD | TBD | TBD | TBD | TBD |
+
+### Existing Behavior Trace
+
+TBD
+
+### Code / Docs Conflicts
+
 TBD
 
 ## Architecture Decision
+
+### Changed Behavior Flow
+
+TBD
+
+### Ownership
+
+TBD
+
+### Data Flow
+
+TBD
+
+### Lifecycle
+
+TBD
+
+### Boundaries
+
+TBD
+
+### Invariants
+
+TBD
+
+### Failure Model
+
+TBD
+
+### Decision Rationale
 
 TBD
 
@@ -27,7 +73,7 @@ Task-specific context and coder guidance go here, not in source-code comments.
 Source-code comments should only describe durable behavior, contracts, invariants,
 error boundaries, or non-obvious logic that should remain useful after this task.
 
-| ID | File / Action | Why In Scope | Coder Work | Allowed Freedom | Expected VCM:CODE | Durable Comment Needs | Behavior / Contract Proof Points |
+| ID | File / Action | Current Evidence / Why In Scope | Coder Work | Allowed Freedom | Expected VCM:CODE | Durable Comment Needs | Behavior / Contract Proof Points |
 | --- | --- | --- | --- | --- | --- | --- | --- |
 | SCF-001 | TBD | TBD | TBD | TBD | TBD | TBD | TBD |
 

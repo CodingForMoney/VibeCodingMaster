@@ -38,10 +38,24 @@ Review, use `vcm-propose-memory` and write the exact assigned draft path.
 ### Planning Inputs
 
 - Read the role message, durable plans when present, relevant handoff artifacts, `docs/ARCHITECTURE.md`, affected `<module>/ARCHITECTURE.md` files when present, and affected project docs before planning.
-- Before writing an architecture plan, read the affected existing source files, runtime entry points, configuration, and call sites needed to verify current code reality. Read tests only when needed to understand current behavior, not to assess test adequacy.
 - Read `.ai/generated/module-index.json` when planning module scope, file scope, dependency direction, or implementation order.
 - Read `.ai/generated/public-surface.json` when the task touches public APIs, module boundaries, or public behavior.
 - If durable docs conflict with the requested plan or code reality, report the conflict to project-manager and identify whether user approval is required.
+
+### Planning Code Reading
+
+- Do not plan from session memory, architecture docs, generated context, or code comments alone. Re-read current-worktree source and verify actual behavior from implementation.
+- Define the planning boundary as the affected feature or module and identify every existing or intended observable entry point for the behavior being changed.
+- Read the complete implementation of each relevant existing entry point.
+- Follow every project-owned call path the plan will change through cross-module calls, state reads and writes, persistence, side effects, completion and failure signals, and consumers.
+- For every cross-file or public callable surface the plan will add or change, read its current project-owned callers and consumers.
+- When the plan changes state ownership or lifecycle behavior, read the relevant project-owned creators, readers, writers, completion handlers, failure handlers, cancellation handlers, retry handlers, and recovery handlers.
+- Continue across module boundaries whenever the changed behavior path, state ownership, lifecycle, public contract, or failure path crosses them.
+- Stop at standard-library, third-party, external-service, vendor, or generated-code boundaries and record the boundary contract, inputs, outputs, errors, and side effects relevant to the plan.
+- For new behavior, read the existing integration points and caller or consumer paths it will join.
+- Treat architecture docs, generated context, and comments as navigation evidence, not authority. Record contradictions with implementation in Current Code Reality.
+- Read tests only when needed to understand current behavior, not to assess test adequacy.
+- Do not write Architecture Decision or begin Code Scaffolding while a project-owned symbol remains unresolved on a behavior path the plan will change.
 
 ### Architecture Plan
 
@@ -53,11 +67,11 @@ Review, use `vcm-propose-memory` and write the exact assigned draft path.
 - `architecture-plan.md` must use these sections: Accepted Scope, Current Code Reality, Architecture Decision, Module/File Plan, Public Surface Impact, Scaffold Manifest, Tester Coverage Hints, Docs Impact, Known Risks, and Coder Handoff Notes.
 - `architecture-plan.md` is the current executable plan, not a changelog. When revising it, replace superseded decisions, obsolete scaffold rows, stale risks, and old implementation notes instead of appending history.
 - `Accepted Scope`: state the PM-routed task scope, required user-visible outcome, and any explicit non-scope that prevents accidental expansion.
-- `Current Code Reality`: state the existing files, runtime entry points, callers, observed behavior evidence, docs, and constraints verified from the current codebase.
-- `Architecture Decision`: state the selected design, ownership, data flow, lifecycle, boundaries, and why it fits the current architecture.
+- `Current Code Reality`: use the required Planning Boundary, Code Reading Evidence, Existing Behavior Trace, and Code / Docs Conflicts subsections. The evidence table must identify each inspected file or symbol, callers, calls or consumers, state or side effects, and verified current behavior.
+- `Architecture Decision`: use the required Changed Behavior Flow, Ownership, Data Flow, Lifecycle, Boundaries, Invariants, Failure Model, and Decision Rationale subsections. Describe why the design fits verified current code.
 - `Module/File Plan`: list each affected module, changed or created file, file responsibility, why it is in scope, expected change, dependency direction, user-visible behavior change, and every non-private callable surface intended for use outside its file.
 - `Public Surface Impact`: state changed APIs, routes, commands, events, exports, storage formats, configuration, UI behavior, visibility changes, side effects, error boundaries, expected callers, or explicitly state none.
-- `Scaffold Manifest`: provide one stable row per implementation unit or file context that coder must complete: row ID, file action, why the file is in scope, coder work, allowed implementation freedom, expected `VCM:CODE` placeholders, durable code comment needs, and behavior/contract proof points.
+- `Scaffold Manifest`: provide one stable row per implementation unit or file context that coder must complete: row ID, file action, current code or integration-point evidence and why the file is in scope, coder work, allowed implementation freedom, expected `VCM:CODE` placeholders, durable code comment needs, and behavior/contract proof points.
 - Give each Scaffold Manifest row a stable ID such as `SCF-001`; use that ID in any related `VCM:CODE` marker so coder can report completion by ID.
 - `Tester Coverage Hints`: list behavior scenarios, edge conditions, public-contract risks, or runtime paths tester should consider. Do not design test cases, validation levels, commands, coverage matrices, or final validation strategy.
 - `Docs Impact`: list every touched module and state whether its `<module>/ARCHITECTURE.md` is expected to change, stay unchanged, or require code-diff review before deciding; also state whether changes belong in `docs/ARCHITECTURE.md`, `.ai/generated/public-surface.json`, or no durable architecture doc.
