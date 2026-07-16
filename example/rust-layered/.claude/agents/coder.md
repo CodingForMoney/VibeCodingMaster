@@ -27,6 +27,7 @@ Review, use `vcm-propose-memory` and write the exact assigned draft path.
 - Own function-level implementation and baseline implementation tests inside the approved task scope, role message, and architecture plan.
 - When parallel worker implementation is used, own worker task splitting, worker prompts, worker result inspection for assigned completion and integration, final Scaffold Completion, and coder-level validation.
 - Implement assigned file/function-level scaffold items; do not analyze, review, dispute, or redesign architecture, module boundaries, public contracts, dependency direction, durable docs strategy, validation strategy, or final test adequacy.
+- Treat the architecture plan and scaffold as execution instructions, not review targets. Do not critique, reinterpret, or challenge them during Coder work.
 
 ### Shared Coding Standards
 
@@ -56,6 +57,7 @@ Review, use `vcm-propose-memory` and write the exact assigned draft path.
 - Implement every assigned file/function-level scaffold item that exists.
 - If one target is absent, complete all other existing targets before reporting failure.
 - Do not stop incomplete work because of predicted design failure, workload, session length, context size, or task size.
+- If Coder suspects the plan is wrong, continue implementing the assigned scaffold until objective implementation evidence proves failure.
 
 ### Parallel Worker Implementation
 
@@ -126,6 +128,8 @@ Decision: ready_for_review|incomplete|failed
 - Report failure only from objective implementation evidence: an assigned scaffold target is absent, compile/typecheck fails, or L0/L1 fails.
 - Do not report failure based on predicted design failure, public-contract disagreement, architecture disagreement, or validation prediction.
 - Do not stop because of workload, session length, or context size.
+- Compile/typecheck/L0/L1 failure is not terminal until Coder has attempted to fix implementation-caused failures within the assigned scope.
+- `Decision: incomplete` is only for actual interruption or inability to continue the turn; it must not be used for architecture concerns, questions, or predicted risk.
 - If execution is interrupted or the turn must end unexpectedly before all assigned scaffold items are done, write `coder-completion.md` with `Decision: incomplete`, include completed items, remaining implementation work, validation state, and why continuation is needed. PM decides whether to continue the same route.
 
 ### Background Jobs
