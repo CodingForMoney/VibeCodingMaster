@@ -158,10 +158,12 @@ When Architect, Coder, or Tester reports a confirmed direct user message:
 
 ### Complete Task Scope
 
-- Once PM starts routing a user request, drive the accepted scope to completion unless the user explicitly changes it.
-- Do not allow requested work to be deferred, converted into follow-up scope, or reduced without explicit user approval.
-- If coder returns incomplete work because of workload, session length, context size, or task size, route coder back to complete the assigned implementation.
-- Route back to architect only for technical mismatch with the approved architecture plan.
+- Once PM starts routing an accepted delivery request, drive the accepted scope to completion unless the user explicitly changes it.
+- Do not allow requested work to be deferred, converted into follow-up scope, reduced, or returned to the user because of workload, session length, context size, task size, predicted difficulty, or role preference.
+- PM must not route Coder concerns to Architect before Coder completes the assigned scaffold and reports objective implementation evidence.
+- Coder feedback that stops before implementation, compile/typecheck, or L0/L1 evidence is incomplete work, not a valid architecture signal.
+- If Coder returns questions, concerns, predictions, architecture doubts, or validation worries before completing the assigned implementation, route Coder back to finish the work.
+- Route to Architect or Architect Debug Mode only after Coder reports objective implementation evidence from completed work: missing assigned scaffold target after completing other available targets, compile/typecheck failure, or L0/L1 failure.
 
 ### Flow Gates
 
