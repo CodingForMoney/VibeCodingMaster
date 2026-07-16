@@ -239,6 +239,9 @@ async function writeApproveGateReport(ctx: MockClaudePromptContext): Promise<voi
   const validationAnalysis = gate === "validation-adequacy"
     ? validationAnalysisLines()
     : [];
+  const codeDiffAnalysis = gate === "code-diff"
+    ? codeDiffAnalysisLines()
+    : [];
   await ctx.writeAbsoluteFile(report, [
     `Gate: ${gate}`,
     `Request: ${request}`,
@@ -246,7 +249,8 @@ async function writeApproveGateReport(ctx: MockClaudePromptContext): Promise<voi
     `Summary: ${gate} approved in complete flow E2E.`,
     "",
     ...architectureAnalysis,
-    ...validationAnalysis
+    ...validationAnalysis,
+    ...codeDiffAnalysis
   ].join("\n"));
 }
 
@@ -303,6 +307,29 @@ function validationAnalysisLines(): string[] {
     "- Test Integrity: real path and observable assertion inspected",
     "- Skips And Gaps: none",
     "- Validation Readiness: ready",
+    "",
+    "## Findings",
+    "",
+    "None.",
+    ""
+  ];
+}
+
+function codeDiffAnalysisLines(): string[] {
+  return [
+    "## Code Diff Analysis",
+    "",
+    "- Commit Range And Sources: current coder commit range",
+    "- Evidence Read: architecture plan, completion evidence, diff, and feature file",
+    "- Changed Files And Symbols: src/feature.txt mocked feature",
+    "- Changed Behavior: complete mocked feature inspected",
+    "- Source Evidence Fit: implementation matches the approved plan",
+    "- Callers And Public Surface: no callable surface change",
+    "- State Lifecycle And Failure Paths: no state lifecycle change",
+    "- Coding Standards: applicable standards inspected",
+    "- Baseline Test Integrity: mock baseline evidence remains intact",
+    "- Generated Context And Durable Docs: no generated or durable impact",
+    "- Code Readiness: ready",
     "",
     "## Findings",
     "",

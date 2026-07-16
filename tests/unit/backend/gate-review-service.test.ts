@@ -64,7 +64,8 @@ describe("gate-review-service", () => {
       gap: "no proof",
       risk: "coder ambiguity",
       file: undefined,
-      line: undefined
+      line: undefined,
+      location: undefined
     }]);
     expect(record.callbackStatus).toBe("sent");
     expect(record.reportPath).toBe(".ai/vcm/gate-reviews/architecture-plan-review.md");
@@ -281,6 +282,72 @@ describe("gate-review-service", () => {
     });
   });
 
+  it("rejects code-diff reports without complete code analysis", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-gate-review-code-analysis-contract-"));
+    await writeHarnessFiles(tmpRepo);
+    const reportDir = path.join(taskWorktree(tmpRepo), ".ai/vcm/gate-reviews");
+    await mkdir(reportDir, { recursive: true });
+    await writeFile(
+      path.join(reportDir, "code-diff-review.md"),
+      "Gate: code-diff\nDecision: approve\nSummary: Diff looks good.\n",
+      "utf8"
+    );
+    const service = createGateReviewService({
+      fs: createNodeFileSystemAdapter(),
+      runner: createRunner(tmpRepo, []),
+      runtime: createRuntime(tmpRepo, []),
+      projectService: createProjectService(),
+      taskService: createTaskService(tmpRepo),
+      appSettings: createAppSettings(["code-diff"]),
+      sessionService: createSessionService(),
+      roundService: createRoundService()
+    });
+
+    await expect(service.readReport(tmpRepo, "demo-task", "code-diff")).rejects.toMatchObject({
+      code: "GATE_REVIEW_CODE_DIFF_ANALYSIS_MISSING"
+    });
+  });
+
+  it("requires code-diff findings to identify a file and line or symbol", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-gate-review-code-finding-location-"));
+    await writeHarnessFiles(tmpRepo);
+    const reportDir = path.join(taskWorktree(tmpRepo), ".ai/vcm/gate-reviews");
+    await mkdir(reportDir, { recursive: true });
+    await writeFile(
+      path.join(reportDir, "code-diff-review.md"),
+      [
+        "Gate: code-diff",
+        "Decision: request_changes",
+        "Summary: A code issue was found.",
+        "",
+        ...codeDiffAnalysisLines(),
+        "## Findings",
+        "",
+        "### high: Unlocated code issue",
+        "- Evidence: changed behavior is wrong",
+        "- Expected: behavior follows the contract",
+        "- Gap: implementation contradicts the contract",
+        "- Risk: runtime failure",
+        ""
+      ].join("\n"),
+      "utf8"
+    );
+    const service = createGateReviewService({
+      fs: createNodeFileSystemAdapter(),
+      runner: createRunner(tmpRepo, []),
+      runtime: createRuntime(tmpRepo, []),
+      projectService: createProjectService(),
+      taskService: createTaskService(tmpRepo),
+      appSettings: createAppSettings(["code-diff"]),
+      sessionService: createSessionService(),
+      roundService: createRoundService()
+    });
+
+    await expect(service.readReport(tmpRepo, "demo-task", "code-diff")).rejects.toMatchObject({
+      code: "GATE_REVIEW_CODE_DIFF_FINDING_LOCATION_MISSING"
+    });
+  });
+
   it("rejects validation approval when Tester evidence is incomplete", async () => {
     tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-gate-review-validation-input-"));
     await writeHarnessFiles(tmpRepo);
@@ -369,7 +436,8 @@ describe("gate-review-service", () => {
     const prompt = writes.find((write) => write.includes("[VCM GATE REVIEW]")) ?? "";
     expect(prompt).toContain("Gate: code-diff");
     expect(prompt).toContain("This code-diff gate reviews the new commits from one PM route flow");
-    expect(prompt).toContain("Code source: coder");
+    expect(prompt).toContain("Code sources: coder");
+    expect(prompt).toContain("Complete every Code Diff Analysis field");
     expect(prompt).toContain("- .ai/vcm/handoffs/coder-completion.md");
     expect(prompt).not.toContain("- .ai/vcm/handoffs/test-report.md");
     expect(prompt).toContain("Base commit: base-sha");
@@ -461,8 +529,9 @@ describe("gate-review-service", () => {
     expect(result.status).toBe("started");
     await waitFor(async () => (await service.getState(tmpRepo!, "demo-task")).gates["code-diff"].status === "completed");
     const prompt = writes.find((write) => write.includes("[VCM GATE REVIEW]")) ?? "";
-    expect(prompt).toContain("Code source: architect-debug");
+    expect(prompt).toContain("Code sources: architect-debug");
     expect(prompt).toContain("- .ai/vcm/handoffs/role-commands/architect.md");
+    expect(prompt).toContain("- .ai/vcm/handoffs/architect-debug.md");
     expect(prompt).not.toContain("- .ai/vcm/handoffs/coder-completion.md");
   });
 
@@ -503,9 +572,60 @@ describe("gate-review-service", () => {
     expect(result.status).toBe("started");
     await waitFor(async () => (await service.getState(tmpRepo!, "demo-task")).gates["code-diff"].status === "completed");
     const prompt = writes.find((write) => write.includes("[VCM GATE REVIEW]")) ?? "";
-    expect(prompt).toContain("Code source: architect-diagnosis");
+    expect(prompt).toContain("Code sources: architect-diagnosis");
     expect(prompt).toContain("- .ai/vcm/handoffs/architecture-diagnosis.md");
     expect(prompt).not.toContain("- .ai/vcm/handoffs/role-commands/architect.md");
+  });
+
+  it("retains original evidence sources when rejected code is fixed by Architect", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-gate-review-source-chain-"));
+    await writeHarnessFiles(tmpRepo);
+    let head = "coder-head";
+    const writes: string[] = [];
+    const runner = createRunner(tmpRepo, [], {
+      "rev-parse HEAD": ({ cwd }) => cwd === tmpRepo ? "base-sha" : head,
+      "merge-base --is-ancestor base-sha coder-head": "",
+      "merge-base --is-ancestor base-sha debug-head": "",
+      "log --oneline --reverse base-sha..coder-head": "abc1234 implement feature",
+      "log --oneline --reverse base-sha..debug-head": "abc1234 implement feature\ndef5678 fix rejected code",
+      "diff --name-only --find-renames base-sha..coder-head": "src/feature.ts",
+      "diff --name-only --find-renames base-sha..debug-head": "src/feature.ts",
+      "diff --stat --find-renames base-sha..coder-head": " src/feature.ts | 8 +++++---",
+      "diff --stat --find-renames base-sha..debug-head": " src/feature.ts | 10 ++++++----",
+      "diff --binary --find-renames base-sha..coder-head": "diff --git a/src/feature.ts b/src/feature.ts\n+coder\n",
+      "diff --binary --find-renames base-sha..debug-head": "diff --git a/src/feature.ts b/src/feature.ts\n+debug\n"
+    });
+    const service = createGateReviewService({
+      fs: createNodeFileSystemAdapter(),
+      runner,
+      runtime: createRuntime(tmpRepo, writes),
+      projectService: createProjectService(),
+      taskService: createTaskService(tmpRepo),
+      appSettings: createAppSettings(["code-diff"]),
+      sessionService: createSessionService(),
+      roundService: createRoundService(),
+      reportPollIntervalMs: 5,
+      reportTimeoutMs: 500
+    });
+
+    expect((await service.requestReviewGate(tmpRepo, "demo-task", "code-diff", {
+      codeDiffSource: "coder"
+    })).status).toBe("started");
+    await waitFor(async () => (await service.getState(tmpRepo!, "demo-task")).gates["code-diff"].status === "completed");
+
+    head = "debug-head";
+    expect((await service.requestReviewGate(tmpRepo, "demo-task", "code-diff", {
+      codeDiffSource: "architect-debug"
+    })).status).toBe("started");
+    await waitFor(async () => (await service.getState(tmpRepo!, "demo-task")).gates["code-diff"].status === "completed");
+
+    const record = (await service.getState(tmpRepo, "demo-task")).gates["code-diff"];
+    expect(record.baseCommit).toBe("base-sha");
+    expect(record.codeDiffSources).toEqual(["coder", "architect-debug"]);
+    const prompt = writes.filter((write) => write.includes("[VCM GATE REVIEW]")).at(-1) ?? "";
+    expect(prompt).toContain("Code sources: coder -> architect-debug");
+    expect(prompt).toContain("- .ai/vcm/handoffs/coder-completion.md");
+    expect(prompt).toContain("- .ai/vcm/handoffs/architect-debug.md");
   });
 
   it("updates gate settings from disabled state without enabling stale gates", async () => {
@@ -620,11 +740,15 @@ function createRuntime(
       const validationAnalysis = gate === "validation-adequacy"
         ? validationAnalysisLines()
         : [];
+      const codeDiffAnalysis = gate === "code-diff"
+        ? codeDiffAnalysisLines()
+        : [];
       const findings = decision === "request_changes"
         ? [
             "## Findings",
             "",
             "### high: Missing proof point",
+            ...(gate === "code-diff" ? ["- File: src/feature.ts", "- Line Or Symbol: feature"] : []),
             "- Evidence: plan has no proof",
             "- Expected: proof point exists",
             "- Gap: no proof",
@@ -641,6 +765,7 @@ function createRuntime(
           "",
           ...architectureAnalysis,
           ...validationAnalysis,
+          ...codeDiffAnalysis,
           ...findings
         ].join("\n"),
         "utf8"
@@ -843,6 +968,25 @@ function validationAnalysisLines(): string[] {
     "- Test Integrity: real entry path and observable assertions inspected",
     "- Skips And Gaps: none",
     "- Validation Readiness: ready",
+    ""
+  ];
+}
+
+function codeDiffAnalysisLines(): string[] {
+  return [
+    "## Code Diff Analysis",
+    "",
+    "- Commit Range And Sources: base-sha..head-sha from coder",
+    "- Evidence Read: source evidence, diff, changed files, and callers",
+    "- Changed Files And Symbols: src/feature.ts feature",
+    "- Changed Behavior: feature behavior inspected",
+    "- Source Evidence Fit: implementation matches governing evidence",
+    "- Callers And Public Surface: callers and exports inspected",
+    "- State Lifecycle And Failure Paths: applicable state and failures inspected",
+    "- Coding Standards: project standards inspected",
+    "- Baseline Test Integrity: changed tests and required baseline coverage inspected",
+    "- Generated Context And Durable Docs: applicable context and docs inspected",
+    "- Code Readiness: ready",
     ""
   ];
 }

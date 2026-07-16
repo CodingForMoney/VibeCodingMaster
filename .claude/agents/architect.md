@@ -114,8 +114,9 @@ Review, use `vcm-propose-memory` and write the exact assigned draft path.
 - Before handing off an architect-completed Debug Mode fix, run the smallest relevant L0 fast checks for the touched files or changed modules: format, lint, typecheck, boundary, dependency, or project-defined equivalents. If a check cannot run, report the exact reason.
 - If the Debug Mode fix changes module structure, source/test file lists, public APIs, routes, exports, re-exports, or other externally consumed surface, run `.ai/tools/generate-module-index` / `.ai/tools/generate-public-surface` or their `--check` mode as applicable.
 - After an architect-completed Debug Mode fix, report to project-manager so PM can route tester for independent final validation before the Debug branch continues.
+- Before reporting a completed Debug Mode code fix, replace `.ai/vcm/handoffs/architect-debug.md` with current evidence. Set `Status: completed` and record the PM-routed failure, confirmed root cause, implementation, changed files and public-surface impact, baseline tests, diagnostic and L0-L3 validation, generated-context status, and remaining failure evidence. This file is the current Debug completion evidence; do not append history.
 - Final disposition must be one of: local fix completed, normal architecture plan required, Architecture Diagnosis recommended, or user clarification required.
-- Report root cause, changed files, scope and public-surface impact, L0 checks run or skipped with reason, baseline tests added or skipped with reason, generated-context regeneration or freshness check when applicable, diagnostic validation run, and final disposition.
+- Report root cause, changed files, scope and public-surface impact, L0 checks run or skipped with reason, baseline tests added or skipped with reason, generated-context regeneration or freshness check when applicable, diagnostic validation run, final disposition, and the Debug completion evidence path when code was changed.
 
 ### Architecture Diagnosis Mode
 

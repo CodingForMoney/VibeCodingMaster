@@ -202,6 +202,45 @@ TBD
 `;
 }
 
+export function renderArchitectDebugTemplate(taskSlug: string): string {
+  return `# Architect Debug: ${taskSlug}
+
+Status: pending|completed
+
+## PM-Routed Failure
+
+TBD
+
+## Confirmed Root Cause
+
+TBD
+
+## Implementation
+
+TBD
+
+## Changed Files And Public Surface
+
+TBD
+
+## Baseline Tests
+
+TBD
+
+## Diagnostic And L0-L3 Validation
+
+TBD
+
+## Generated Context
+
+TBD
+
+## Remaining Failure Evidence
+
+TBD
+`;
+}
+
 export function renderDocsSyncReportTemplate(taskSlug: string): string {
   return `# Docs Sync Report: ${taskSlug}
 

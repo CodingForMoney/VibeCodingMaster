@@ -98,36 +98,61 @@ required coverage is not an approval reason.
 
 ## Code Diff Gate
 
-Read `.claude/agents/coder.md`; use architect/tester definitions only to
-understand implementation and test responsibility boundaries. Review only the
-commit range named in the VCM prompt.
+Read `.claude/agents/coder.md` and `docs/CODING_STANDARDS.md`; use
+architect/tester definitions only to understand implementation and test
+responsibility boundaries. Review every commit in the range named by VCM and
+nothing outside that range.
 
-Use the code source named in the VCM prompt. For `coder`, compare the commits
-against the approved architecture plan and coder completion evidence. For
-`architect-debug`, compare the commits against the current Architect route
-command. For `architect-diagnosis`, compare the commits against
-`.ai/vcm/handoffs/architecture-diagnosis.md`. Apply project coding standards
-in all cases. Do not expand review to the whole task, whole branch, or PR.
+Use every code source and evidence artifact named in the VCM prompt. A source
+chain means the range contains the original implementation and later corrective
+commits; review the complete range against the combined evidence. Plans,
+completion reports, existing code, comments, and tests are evidence, not
+authority. Determine whether the committed implementation is actually correct.
 
-For `architect-diagnosis`, verify that the commits implement the diagnosed
+Before deciding:
+
+- Inspect every changed file and diff hunk. Read the complete implementation of
+  each changed callable unit instead of judging an isolated hunk.
+- Identify the behavior changed by each production-code change. When a callable
+  surface, state, lifecycle, event, command, persisted artifact, or public
+  contract changes, read its project-owned callers, consumers, readers,
+  writers, and adjacent completion, failure, cancellation, retry, recovery, and
+  cleanup paths.
+- Keep this reading bounded to behavior affected by the named commit range. Do
+  not expand review to unrelated code, the whole task, whole branch, or PR.
+- Derive applicable boundary and failure cases from the actual changed behavior.
+  Do not satisfy review by repeating a generic checklist.
+
+For `coder`, compare the commits with the approved architecture plan,
+scaffold, and coder completion evidence. Verify that the complete planned
+behavior is implemented without changing architect-owned boundaries or
+contracts.
+
+For `architect-debug`, compare the commits with the current Architect route
+command and `.ai/vcm/handoffs/architect-debug.md`. Verify that the confirmed
+root cause is supported by the code, the implementation fixes that cause rather
+than only its surface symptom, temporary diagnostics are removed, and affected
+callers, contracts, and tests are updated.
+
+For `architect-diagnosis`, compare the commits with
+`.ai/vcm/handoffs/architecture-diagnosis.md`, and verify that the commits implement the diagnosed
 ownership, data flow, lifecycle, boundaries, invariants, and failure model.
-Request changes when the implementation leaves the diagnosed architecture
-problem in place, contradicts the required architecture direction, or only
-adds a local workaround for the surface failure.
+Request changes when the architecture problem remains, the required direction
+is contradicted, or the implementation is only a local workaround for the surface failure.
 
-Check that the commits match their source evidence, account for
-surface/dependency/docs changes, have no `VCM:CODE`, no task-process comments or task
-labels, no weakened tests or bypassed real behavior, and no unhandled fallible
-paths.
+Check every source for project coding-standard compliance, unnecessary
+duplication or abstraction, inconsistent error handling, unhandled fallible
+paths, debug/task-only artifacts, `VCM:CODE`, task-process comments or labels,
+and changes outside its governing evidence. Verify callable and public-surface
+changes against their callers, exports, compatibility obligations, generated
+context, and durable documentation.
 
-Focus on code quality and boundary-condition robustness. Request changes when
-the code violates project style, duplicates existing patterns unnecessarily,
-adds avoidable abstraction, leaves debug/task-only artifacts, handles errors
-inconsistently, changes files outside scope, weakens tests, or misses important
-boundary conditions: empty/missing inputs, invalid data, permissions, external
-command failure, partial writes, retries, concurrency, repeated UI actions,
-stale state, restart recovery, cleanup, compatibility, or public API
-validation.
+Inspect changed baseline tests for the changed callable units and applicable
+branches. Request changes for weakened, deleted, skipped, fabricated, or
+implementation-shaped tests, and for obvious missing baseline coverage required
+by `docs/CODING_STANDARDS.md`. Do not execute tests or decide final
+integration/E2E adequacy; Tester and the validation-adequacy gate own that
+evidence.
 
 ## Output
 
@@ -172,9 +197,27 @@ Use this findings structure:
 - Skips And Gaps:
 - Validation Readiness:
 
+<!-- Include Code Diff Analysis only for code-diff gate. -->
+## Code Diff Analysis
+
+- Commit Range And Sources:
+- Evidence Read:
+- Changed Files And Symbols:
+- Changed Behavior:
+- Source Evidence Fit:
+- Callers And Public Surface:
+- State Lifecycle And Failure Paths:
+- Coding Standards:
+- Baseline Test Integrity:
+- Generated Context And Durable Docs:
+- Code Readiness:
+
 ## Findings
 
 ### <critical|high|medium|low>: <title>
+<!-- File and Line Or Symbol are required for code-diff findings. -->
+- File:
+- Line Or Symbol:
 - Evidence:
 - Expected:
 - Gap:
@@ -212,6 +255,21 @@ If there are no findings, write:
 - Test Integrity:
 - Skips And Gaps:
 - Validation Readiness:
+
+<!-- Include Code Diff Analysis only for code-diff gate. -->
+## Code Diff Analysis
+
+- Commit Range And Sources:
+- Evidence Read:
+- Changed Files And Symbols:
+- Changed Behavior:
+- Source Evidence Fit:
+- Callers And Public Surface:
+- State Lifecycle And Failure Paths:
+- Coding Standards:
+- Baseline Test Integrity:
+- Generated Context And Durable Docs:
+- Code Readiness:
 
 ## Findings
 

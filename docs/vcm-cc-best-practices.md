@@ -395,6 +395,12 @@ Input policy:
   `architect-diagnosis` source. PM does not inspect commits; the tool reviews
   committed inputs, returns `not_required` when there are no new commits, and
   fails to start when the worktree has uncommitted changes.
+- When rejected code receives corrective commits from another source, code-diff
+  retains the original base and source evidence and appends the corrective
+  source. The next review covers the complete source chain and revised range.
+- Architect Debug writes `.ai/vcm/handoffs/architect-debug.md` before code-diff
+  so the review receives the confirmed root cause and completed-fix evidence,
+  not only the original Architect route command.
 - Gates avoid duplicate review by comparing input hashes. Architecture review
   binds the plan to current scaffold/code evidence; validation review binds the
   test report to current non-document code/test evidence and `docs/TESTING.md`;
@@ -410,6 +416,9 @@ Gate Reviewer returns only `approve` or `request_changes`, writes only its
 assigned gate report, does not run tests, and does not choose fix owners,
 Replan, or user-intervention needs. PM routes `architecture-plan` and
 `code-diff` findings to architect, and `validation-adequacy` findings to tester.
+Each gate report must include its gate-specific structured analysis. Code-diff
+analysis accounts for every changed file and affected behavior; its findings
+must identify a concrete file and line or symbol.
 
 ## 13. Validation
 

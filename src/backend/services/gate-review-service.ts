@@ -114,6 +114,19 @@ const VALIDATION_ANALYSIS_FIELDS = [
   "Skips And Gaps",
   "Validation Readiness"
 ] as const;
+const CODE_DIFF_ANALYSIS_FIELDS = [
+  "Commit Range And Sources",
+  "Evidence Read",
+  "Changed Files And Symbols",
+  "Changed Behavior",
+  "Source Evidence Fit",
+  "Callers And Public Surface",
+  "State Lifecycle And Failure Paths",
+  "Coding Standards",
+  "Baseline Test Integrity",
+  "Generated Context And Durable Docs",
+  "Code Readiness"
+] as const;
 
 const SOURCE_ARTIFACTS: Record<GateReviewGate, string[]> = {
   "architecture-plan": [
@@ -133,7 +146,8 @@ const CODE_DIFF_SOURCE_ARTIFACTS: Record<CodeDiffSource, string[]> = {
     ".ai/vcm/handoffs/coder-completion.md"
   ],
   "architect-debug": [
-    ".ai/vcm/handoffs/role-commands/architect.md"
+    ".ai/vcm/handoffs/role-commands/architect.md",
+    ".ai/vcm/handoffs/architect-debug.md"
   ],
   "architect-diagnosis": [
     ".ai/vcm/handoffs/architecture-diagnosis.md"
@@ -222,6 +236,7 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
         decision: undefined,
         error: message,
         codeDiffSource: undefined,
+        codeDiffSources: undefined,
         requestId: undefined,
         requestPath: undefined,
         inputHash: undefined,
@@ -263,6 +278,7 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
           changedFiles: undefined,
           diffStat: undefined,
           codeDiffSource,
+          codeDiffSources: codeDiffSource ? [codeDiffSource] : undefined,
           requestedAt: undefined,
           startedAt: undefined,
           completedAt: now(),
@@ -322,6 +338,7 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
         changedFiles: undefined,
         diffStat: undefined,
         codeDiffSource,
+        codeDiffSources: codeDiffSource ? [codeDiffSource] : undefined,
         requestedAt: undefined,
         startedAt: undefined,
         completedAt: undefined,
@@ -337,7 +354,10 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
       };
     }
 
-    const inputHash = await computeInputHash(deps, context.taskRepoRoot, gate, codeDiffInput, codeDiffSource);
+    const codeDiffSources = gate === "code-diff" && codeDiffInput && codeDiffSource
+      ? resolveCodeDiffSources(record, codeDiffInput, codeDiffSource)
+      : undefined;
+    const inputHash = await computeInputHash(deps, context.taskRepoRoot, gate, codeDiffInput, codeDiffSources);
     if (
       !options.force
       && record.status === "completed"
@@ -372,6 +392,7 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
       changedFiles: codeDiffInput?.changedFiles,
       diffStat: codeDiffInput?.diffStat,
       codeDiffSource,
+      codeDiffSources,
       requestedAt: timestamp,
       startedAt: undefined,
       completedAt: undefined,
@@ -396,13 +417,14 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
       requestedAt: timestamp,
       inputHash,
       codeDiffSource,
+      codeDiffSources,
       codeDiff: codeDiffInput,
       reportPath: nextRecord.reportPath,
       promptPath: nextRecord.promptPath
     });
     await saveIndex(deps.fs, context.taskRepoRoot, index);
 
-    void runGateReview(context, gate, requestId, codeDiffInput, codeDiffSource).catch(() => {
+    void runGateReview(context, gate, requestId, codeDiffInput, codeDiffSources).catch(() => {
       // runGateReview records failures in the persisted gate state.
     });
 
@@ -419,7 +441,7 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
     gate: GateReviewGate,
     requestId: string,
     codeDiffInput?: CodeDiffInput,
-    codeDiffSource?: CodeDiffSource
+    codeDiffSources?: CodeDiffSource[]
   ): Promise<void> {
     const runKey = `${context.taskRepoRoot}:${context.taskSlug}:${gate}`;
     if (activeRuns.has(runKey)) {
@@ -438,7 +460,7 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
 
       const reviewDir = resolveRepoPath(context.taskRepoRoot, GATE_REVIEW_DIR);
       const agentPath = resolveRepoPath(context.repoRoot, GATE_REVIEW_AGENT_PATH);
-      const prompt = buildGatePrompt(context, gate, requestId, codeDiffInput, codeDiffSource);
+      const prompt = buildGatePrompt(context, gate, requestId, codeDiffInput, codeDiffSources);
       await deps.fs.ensureDir(reviewDir);
       await deps.fs.ensureDir(resolveRepoPath(context.taskRepoRoot, REQUESTS_DIR));
       await deps.fs.writeText(resolveRepoPath(context.taskRepoRoot, promptPathForRequest(requestId)), prompt);
@@ -765,6 +787,7 @@ function normalizeIndex(
       changedFiles: Array.isArray(existing?.changedFiles) ? existing.changedFiles.filter(isString) : undefined,
       diffStat: typeof existing?.diffStat === "string" ? existing.diffStat : undefined,
       codeDiffSource: isCodeDiffSource(existing?.codeDiffSource) ? existing.codeDiffSource : undefined,
+      codeDiffSources: normalizeCodeDiffSources(existing?.codeDiffSources, existing?.codeDiffSource),
       summary: typeof existing?.summary === "string" ? existing.summary : undefined,
       findings: Array.isArray(existing?.findings) ? existing.findings.filter(isFinding) : undefined,
       error: typeof existing?.error === "string" ? existing.error : undefined,
@@ -986,7 +1009,7 @@ async function computeInputHash(
   taskRepoRoot: string,
   gate: GateReviewGate,
   codeDiffInput?: CodeDiffInput,
-  codeDiffSource?: CodeDiffSource
+  codeDiffSources?: CodeDiffSource[]
 ): Promise<string> {
   const digest = createHash("sha256");
   const coreArtifact = CORE_INPUT_ARTIFACTS[gate];
@@ -1006,7 +1029,7 @@ async function computeInputHash(
     "docs/CODING_STANDARDS.md"
   ];
 
-  const sourceArtifacts = getSourceArtifacts(gate, codeDiffSource);
+  const sourceArtifacts = getSourceArtifacts(gate, codeDiffSources);
   for (const relativePath of new Set([...common, ...sourceArtifacts].filter((item) => item !== coreArtifact))) {
     digest.update(relativePath);
     const absolutePath = resolveRepoPath(taskRepoRoot, relativePath);
@@ -1018,8 +1041,8 @@ async function computeInputHash(
   }
 
   if (gate === "code-diff" && codeDiffInput) {
-    digest.update("codeDiffSource");
-    digest.update(codeDiffSource ?? "<missing>");
+    digest.update("codeDiffSources");
+    digest.update(codeDiffSources?.join("\n") ?? "<missing>");
     digest.update("baseCommit");
     digest.update(codeDiffInput.baseCommit);
     digest.update("headCommit");
@@ -1114,11 +1137,11 @@ function buildGatePrompt(
   gate: GateReviewGate,
   requestId: string,
   codeDiffInput?: CodeDiffInput,
-  codeDiffSource?: CodeDiffSource
+  codeDiffSources?: CodeDiffSource[]
 ): string {
   const reportPath = reportPathForGate(gate);
   const absoluteReportPath = resolveRepoPath(context.taskRepoRoot, reportPath);
-  const evidence = getSourceArtifacts(gate, codeDiffSource)
+  const evidence = getSourceArtifacts(gate, codeDiffSources)
     .map((relativePath) => `- ${relativePath}`)
     .join("\n");
   const gitLine = gate === "architecture-plan"
@@ -1130,12 +1153,15 @@ function buildGatePrompt(
   const validationContract = gate === "validation-adequacy"
     ? "\n\nComplete every Validation Analysis field required by the Gate Reviewer role with concrete current-worktree production and test evidence before deciding."
     : "";
+  const codeDiffContract = gate === "code-diff"
+    ? "\n\nComplete every Code Diff Analysis field required by the Gate Reviewer role with concrete evidence from the named commit range before deciding."
+    : "";
   const codeDiffSection = gate === "code-diff" && codeDiffInput
     ? `
 
 Code Diff Input:
 This code-diff gate reviews the new commits from one PM route flow, not the whole task and not one terminal turn.
-Code source: ${codeDiffSource}
+Code sources: ${codeDiffSources?.join(" -> ") ?? "<missing>"}
 Base commit: ${codeDiffInput.baseCommit}
 Head commit: ${codeDiffInput.headCommit}
 Commits:
@@ -1157,7 +1183,7 @@ Request: ${requestId}
 Report: ${absoluteReportPath}
 
 Evidence:
-${evidence}${gitLine}${architectureContract}${validationContract}${codeDiffSection}
+${evidence}${gitLine}${architectureContract}${validationContract}${codeDiffContract}${codeDiffSection}
 
 Write only Report. Start exactly:
 Gate: ${gate}
@@ -1254,8 +1280,14 @@ async function parseGateReport(
       await validateValidationApprovalInput(fs, taskRepoRoot);
     }
   }
+  if (gate === "code-diff") {
+    validateCodeDiffAnalysis(content);
+  }
   if (decision === "request_changes") {
     validateRequestChangeFindings(findings);
+    if (gate === "code-diff") {
+      validateCodeDiffFindings(findings);
+    }
   }
 
   return {
@@ -1310,6 +1342,26 @@ function validateValidationAnalysis(content: string): void {
   }
 }
 
+function validateCodeDiffAnalysis(content: string): void {
+  const section = extractMarkdownSection(content, "Code Diff Analysis");
+  if (!section) {
+    throw new VcmError({
+      code: "GATE_REVIEW_CODE_DIFF_ANALYSIS_MISSING",
+      message: "Code-diff review must contain a non-empty Code Diff Analysis section.",
+      statusCode: 500
+    });
+  }
+
+  const missingFields = CODE_DIFF_ANALYSIS_FIELDS.filter((field) => !matchField(section, field));
+  if (missingFields.length > 0) {
+    throw new VcmError({
+      code: "GATE_REVIEW_CODE_DIFF_ANALYSIS_INCOMPLETE",
+      message: `Code Diff Analysis is missing required evidence: ${missingFields.join(", ")}.`,
+      statusCode: 500
+    });
+  }
+}
+
 async function validateValidationApprovalInput(
   fs: FileSystemAdapter,
   taskRepoRoot: string
@@ -1358,6 +1410,17 @@ function validateRequestChangeFindings(findings: GateReviewFinding[]): void {
     throw new VcmError({
       code: "GATE_REVIEW_FINDING_INCOMPLETE",
       message: `Finding ${incomplete.title} must contain Evidence, Expected, Gap, and Risk.`,
+      statusCode: 500
+    });
+  }
+}
+
+function validateCodeDiffFindings(findings: GateReviewFinding[]): void {
+  const incomplete = findings.find((finding) => !finding.file?.trim() || !finding.location?.trim());
+  if (incomplete) {
+    throw new VcmError({
+      code: "GATE_REVIEW_CODE_DIFF_FINDING_LOCATION_MISSING",
+      message: `Code-diff finding ${incomplete.title} must contain File and Line Or Symbol.`,
       statusCode: 500
     });
   }
@@ -1455,6 +1518,7 @@ function extractFindings(content: string): GateReviewFinding[] {
       title,
       file: matchField(block, "file"),
       line: parsePositiveInteger(matchField(block, "line")),
+      location: matchField(block, "line or symbol"),
       evidence: matchField(block, "evidence") ?? "",
       expected: matchField(block, "expected") ?? "",
       gap: matchField(block, "gap") ?? "",
@@ -1464,11 +1528,38 @@ function extractFindings(content: string): GateReviewFinding[] {
   return findings;
 }
 
-function getSourceArtifacts(gate: GateReviewGate, codeDiffSource?: CodeDiffSource): string[] {
+function getSourceArtifacts(gate: GateReviewGate, codeDiffSources?: CodeDiffSource[]): string[] {
   if (gate !== "code-diff") {
     return SOURCE_ARTIFACTS[gate];
   }
-  return codeDiffSource ? CODE_DIFF_SOURCE_ARTIFACTS[codeDiffSource] : [];
+  return [...new Set((codeDiffSources ?? []).flatMap((source) => CODE_DIFF_SOURCE_ARTIFACTS[source]))];
+}
+
+function resolveCodeDiffSources(
+  record: GateReviewGateRecord,
+  codeDiffInput: CodeDiffInput,
+  currentSource: CodeDiffSource
+): CodeDiffSource[] {
+  const continuingRecordedRange = record.baseCommit === codeDiffInput.baseCommit
+    && (
+      (record.status === "completed" && record.decision === "request_changes")
+      || record.status === "failed"
+    );
+  if (!continuingRecordedRange) {
+    return [currentSource];
+  }
+  return [...new Set([
+    ...(normalizeCodeDiffSources(record.codeDiffSources, record.codeDiffSource) ?? []),
+    currentSource
+  ])];
+}
+
+function normalizeCodeDiffSources(sources: unknown, source: unknown): CodeDiffSource[] | undefined {
+  const normalized = Array.isArray(sources) ? sources.filter(isCodeDiffSource) : [];
+  if (normalized.length === 0 && isCodeDiffSource(source)) {
+    normalized.push(source);
+  }
+  return normalized.length > 0 ? [...new Set(normalized)] : undefined;
 }
 
 export function isCodeDiffSource(value: unknown): value is CodeDiffSource {

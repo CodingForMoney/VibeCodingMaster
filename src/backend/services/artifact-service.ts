@@ -14,6 +14,7 @@ import {
 } from "../adapters/filesystem.js";
 import {
   renderArchitecturePlanTemplate,
+  renderArchitectDebugTemplate,
   renderCoderCompletionTemplate,
   renderDocsSyncReportTemplate,
   renderFinalAcceptanceTemplate,
@@ -125,6 +126,7 @@ export function createArtifactService(fs: FileSystemAdapter): ArtifactService {
         [paths.architecturePlanPath, renderArchitecturePlanTemplate(input.taskSlug)],
         [paths.knownIssuesPath, renderKnownIssuesTemplate(input.taskSlug)],
         [path.posix.join(paths.handoffDir, "coder-completion.md"), renderCoderCompletionTemplate(input.taskSlug)],
+        [path.posix.join(paths.handoffDir, "architect-debug.md"), renderArchitectDebugTemplate(input.taskSlug)],
         [paths.testReportPath, renderTestReportTemplate(input.taskSlug)],
         [paths.docsSyncReportPath, renderDocsSyncReportTemplate(input.taskSlug)],
         [paths.finalAcceptancePath, renderFinalAcceptanceTemplate(input.taskSlug)],
