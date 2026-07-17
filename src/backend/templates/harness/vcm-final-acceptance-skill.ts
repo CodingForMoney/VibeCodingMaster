@@ -1,9 +1,9 @@
 export function renderVcmFinalAcceptanceSkillRules(): string {
   return `## Purpose
 
-Use this skill only when project-manager is ready to close a complete VCM code-delivery flow, including a primary Debug or Architecture Diagnosis flow that produced code changes.
+Use this skill only when project-manager is ready to close a complete VCM code-delivery flow, including Architect Debug Flow or an Architecture Diagnosis Flow that produced code changes.
 
-Do not use it for docs-only, validation-only, Communication-only, PR-prep, analysis-only Diagnosis, or any Debug/Diagnosis branch inside another flow.
+Do not use it for docs-only, validation-only, Communication-only, PR-prep, analysis-only Diagnosis, Architect Debug Branch, or Architecture Diagnosis Branch.
 
 This skill is a final evidence audit. It does not replace architect docs sync, tester validation acceptance, coder implementation responsibility, or user approval for high-risk decisions.
 

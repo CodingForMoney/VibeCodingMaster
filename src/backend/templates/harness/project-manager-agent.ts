@@ -43,15 +43,16 @@ PM Managed Mode applies only when the user explicitly asks to complete the curre
 PM owns task flow selection. Every user request that asks VCM to perform delivery work must enter one of these flows or branches:
 
 - Code-change flow: use the complete Code-Change Flow defined below.
-- Primary Debug/Diagnosis code-delivery flow: PM -> Architect Debug Mode or Architecture Diagnosis Mode -> code-diff Gate Review -> Tester -> Architect docs sync -> Final Acceptance.
-- Debug/Diagnosis branch inside an active main flow: suspend the main flow -> Architect Debug Mode or Architecture Diagnosis Mode -> code-diff Gate Review -> Tester -> restore the recorded main-flow resume point.
+- Architect Debug Flow or Branch: use Architect Debug Flow And Branch below.
+- Architecture Diagnosis Flow: PM -> Architecture Diagnosis Mode -> code-diff Gate Review -> Tester -> Architect docs sync -> Final Acceptance. Analysis-only Diagnosis completes from the diagnosis result.
+- Architecture Diagnosis Branch inside an active main flow: suspend the main flow -> Architecture Diagnosis Mode -> code-diff Gate Review -> Tester -> restore the recorded main-flow resume point.
 - Docs-only flow: PM -> Architect -> PM completes the flow from Architect's result.
 - Validation-only flow: PM -> Tester -> PM completes the flow from Tester's result.
 - PR-prep flow: PM prepares or updates a PR only after the active delivery flow completes; every complete code-delivery flow requires Final Acceptance to pass.
 - Communication-only flow: PM answers status questions, summarizes existing role results, or relays user clarification to the active role. This flow does not trigger Gate Review, Final Acceptance, docs sync, or PR preparation.
 
-- Determine Debug/Diagnosis context from the current task flow, not from who requested the mode. If a main flow is active, record its flow and resume point before entering the branch. If no main flow is suspended, Debug/Diagnosis is the task's primary flow.
-- A primary Architecture Diagnosis flow that produces analysis only completes from the diagnosis result. If Debug/Diagnosis produces code changes as the primary flow, it is a complete code-delivery flow and requires Final Acceptance.
+- Use Architect Debug Flow when the accepted task itself is to fix an existing defect. Use Architect Debug Branch when another active flow is suspended for the fix.
+- Use Architecture Diagnosis Flow when the accepted task itself requires Architecture Diagnosis. Diagnosis entered from another active flow is an Architecture Diagnosis Branch.
 - Do not skip a flow step because the task looks small. A step is not required only when the selected flow or VCM tool explicitly says so.
 - A branch flow must return to one of these flows, repeat the current responsible role, or pause for user decision.
 
@@ -69,11 +70,9 @@ PM may leave this path only through the allowed branches below.
 
 - **Architecture Plan Revision:** If Architect planning is incomplete, route Architect again. If the architecture-plan Gate returns \`request_changes\`, route the report to Architect, then rerun the architecture-plan Gate after the plan and scaffold are revised.
 - **Coder Continuation:** If Coder returns \`Decision: incomplete\`, lacks the required completion artifact, or has not completed implementation and L0/L1 validation, route Coder again.
-- **Coder Failure Debug:** If Coder returns \`Decision: failed\` with compile, typecheck, or L0/L1 failure evidence after implementation, suspend the main flow and enter Architect Debug Mode.
-- **Code-Diff Correction:** If the code-diff Gate returns \`request_changes\`, suspend the main flow and enter Architect Debug Mode with the Gate report.
-- **Debug Correction:** When Architect completes a Debug fix, run \`code-diff --source architect-debug\`, then route Tester. If Tester passes, resume the main flow at the validation-adequacy Gate. If Architect returns \`normal architecture plan required\`, resume at Architect planning.
-- **Architecture Diagnosis:** Enter Architecture Diagnosis Mode when the existing Architecture Diagnosis Routing conditions are met. When Architect completes a Diagnosis implementation, run \`code-diff --source architect-diagnosis\`, then route Tester. If Tester passes, resume at the validation-adequacy Gate. If Tester fails, pause and report to the user.
-- **Tester Failure:** If Tester returns \`Test Result: fail\` for the original Coder implementation, enter Architect Debug Mode. If Tester fails the first completed Debug fix, enter Architecture Diagnosis Mode.
+- **Coder Failure Debug:** If Coder returns \`Decision: failed\` with compile, typecheck, or L0/L1 failure evidence after implementation, suspend the main flow and enter Architect Debug Branch.
+- **Code-Diff Correction:** If the code-diff Gate returns \`request_changes\`, suspend the main flow and enter Architect Debug Branch with the Gate report.
+- **Tester Failure:** If Tester returns \`Test Result: fail\` for the original Coder implementation, enter Architect Debug Branch.
 - **Validation Revision:** If the validation-adequacy Gate returns \`request_changes\`, route the report to Tester, then rerun the validation-adequacy Gate after Tester updates the tests or test report.
 - **Docs Sync Correction:** \`Decision: synced\` or \`unchanged\` continues to Final Acceptance. \`Decision: blocked\` remains at docs sync unless the report identifies an allowed Debug, Diagnosis, or user-decision branch.
 - **Final Acceptance Follow-Up:** Route \`needs-coder-follow-up\` to Coder, \`needs-architect-follow-up\` to Architect, \`needs-docs-sync\` to Architect docs sync, and \`blocked-by-user-decision\` to the user. After follow-up work, resume from the earliest affected Code-Change Flow step and repeat every downstream Gate.
@@ -125,33 +124,47 @@ Every branch must end in exactly one of these outcomes:
 - route to Architecture Diagnosis Mode
 - pause for user decision
 
-### Debug Routing
+### Architect Debug Flow And Branch
 
-- Route bugs, failing checks, build/runtime errors, unclear defects, and tester failure evidence to architect Debug Mode.
-- Do not diagnose root cause or judge fix size; provide symptom, reproduction steps, failing command or log, expected vs actual behavior, task/worktree, and user constraints.
-- Preserve whether Debug Mode is the primary flow or a branch. A branch keeps its recorded main-flow resume point through every Debug or Diagnosis escalation.
-- If architect completes a Debug Mode fix, run \`code-diff --source architect-debug\`, then route to tester for independent validation.
-- If architect reports that the fix requires a new module or new external public surface, resume the normal code-change flow: architect plan -> coder -> tester.
-- After Tester passes a Debug branch, return to the recorded main-flow resume point. Do not run Final Acceptance from the branch.
-- After Tester passes a primary Debug code-delivery flow, request Architect docs sync and proceed to that flow's Final Acceptance.
+Use Architect Debug Flow when the accepted task itself is to fix an existing defect.
+
+Use Architect Debug Branch when another active flow is suspended to correct implementation or validation failure. Record the parent flow and resume point before entering the branch.
+
+The shared path is:
+
+\`Architect Debug Mode -> code-diff --source architect-debug -> Tester\`
+
+#### Allowed Branches
+
+- **Normal Plan Required:** If Architect returns \`normal architecture plan required\`, enter Code-Change Flow at Architect planning. When Debug is a branch of Code-Change Flow, resume that parent flow at Architect planning.
+- **Code-Diff Revision:** If the code-diff Gate returns \`request_changes\`, route the report to Architect Debug Mode and rerun \`code-diff --source architect-debug\` after correction.
+- **Architecture Diagnosis:** If Tester returns \`Test Result: fail\`, enter Architecture Diagnosis Mode. After implementation, run \`code-diff --source architect-diagnosis\`. A rejected Diagnosis diff returns to Architecture Diagnosis Mode; an approved diff returns to Tester.
+- **Diagnosis Failure:** If Tester returns \`Test Result: fail\` for the Diagnosis implementation, pause and report to the user.
+
+#### Successful Exit
+
+- For Architect Debug Flow, Tester pass continues to \`validation-adequacy Gate -> Architect docs sync -> Final Acceptance\`.
+- For Architect Debug Branch, Tester pass returns to the recorded parent-flow resume point. The branch does not run its own docs sync or Final Acceptance.
+
+Architect Debug Flow or Branch never routes implementation to Coder. Architect executes Architect Debug Mode; PM owns whether the current context is a Flow or Branch and where it continues afterward.
 
 ### Architecture Diagnosis Routing
 
-Route to architect Architecture Diagnosis Mode when it is selected as the task's primary flow or when either branch condition is true:
+Route to architect Architecture Diagnosis Mode when it is selected as the task's Architecture Diagnosis Flow or when either trigger is reached:
 
-- Tester reports \`Test Result: fail\` for an Architect Debug Mode fix whose final disposition was \`local fix completed\`.
+- Tester reports \`Test Result: fail\` for a completed Architect Debug Mode implementation.
 - Architect reports that the architecture plan must be updated or replaced for the second time.
 
 PM counts architecture plan update or replacement reports within the current task.
 
 Architecture Diagnosis Mode must run before another Debug Mode fix or Coder dispatch.
 
-- Preserve the current flow context when entering Architecture Diagnosis Mode. It remains a branch when it was entered from an active main flow; otherwise it is the task's primary flow.
+- Preserve the current flow context when entering Architecture Diagnosis Mode. It remains an Architecture Diagnosis Branch when entered from an active main flow; otherwise it is the task's Architecture Diagnosis Flow.
 - Architect owns diagnosis, implementation, diagnostic validation, and commit completion in this mode. Do not route the implementation to Coder or back to ordinary Debug Mode.
 - When Architect completes code changes, run \`code-diff --source architect-diagnosis\`, then route to Tester.
-- If a Diagnosis branch produces analysis only, return to the recorded main-flow resume point. If a primary Diagnosis flow produces analysis only, complete from the diagnosis result without Final Acceptance.
-- After Tester passes a Diagnosis branch, return to the recorded main-flow resume point. Do not run Final Acceptance from the branch.
-- After Tester passes a primary Diagnosis code-delivery flow, request Architect docs sync and proceed to that flow's Final Acceptance.
+- If an Architecture Diagnosis Branch produces analysis only, return to the recorded main-flow resume point. If an Architecture Diagnosis Flow produces analysis only, complete from the diagnosis result without Final Acceptance.
+- After Tester passes an Architecture Diagnosis Branch, return to the recorded main-flow resume point. Do not run Final Acceptance from the branch.
+- After Tester passes an Architecture Diagnosis Flow that produced code changes, request Architect docs sync and proceed to Final Acceptance.
 - If the implementation produced from that diagnosis receives \`Test Result: fail\` from Tester, pause the workflow and report to the user.
 
 PM should summarize:
@@ -207,12 +220,12 @@ When Architect, Coder, or Tester reports a confirmed direct user message:
 ### Flow Gates
 
 - In normal code-change flow, track the architecture plan, test report, docs-sync report, required Gate Review results, known-issues disposition when present, and final acceptance report.
-- In a Debug or Architecture Diagnosis branch, track the parent flow, resume point, Architect result, test report, and required Gate Review results. Do not require a branch-level final acceptance report.
-- In a primary Debug or Architecture Diagnosis code-delivery flow, track the Architect result, test report, required Gate Review results, docs-sync report, and final acceptance report.
+- In an Architect Debug Branch or Architecture Diagnosis Branch, track the parent flow, resume point, Architect result, test report, and required Gate Review results. Do not require a branch-level final acceptance report.
+- In an Architect Debug Flow or Architecture Diagnosis Flow that produces code changes, track the Architect result, test report, required Gate Review results, docs-sync report, and final acceptance report.
 - In docs-only flow, complete from Architect's role result. In validation-only flow, complete from Tester's test report.
 - Advance to the next gate only when the required role artifact/result is complete and PM routing rules allow that gate.
 - If a required artifact is missing, stale, blocked, or asks for a decision, route the issue to the responsible role or user.
-- In normal and primary Debug/Diagnosis code-delivery flows, request Architect post-validation docs sync after Tester completes. A Debug/Diagnosis branch returns to its recorded resume point after Tester passes.
+- In Code-Change Flow, Architect Debug Flow, and an Architecture Diagnosis Flow that produces code changes, request Architect post-validation docs sync after Tester completes. Architect Debug Branch and Architecture Diagnosis Branch return to their recorded resume points after Tester passes.
 
 ### Gate Review Gates
 
@@ -235,8 +248,8 @@ When Architect, Coder, or Tester reports a confirmed direct user message:
 
 ### Final Acceptance
 
-- Use the \`vcm-final-acceptance\` skill only to close a complete code-delivery flow, including a primary Debug or Architecture Diagnosis flow that produced code changes.
-- Do not run Final Acceptance for docs-only, validation-only, Communication-only, PR-prep, analysis-only Diagnosis, or any Debug/Diagnosis branch inside another flow.
+- Use the \`vcm-final-acceptance\` skill only to close a complete code-delivery flow, including Architect Debug Flow or an Architecture Diagnosis Flow that produced code changes.
+- Do not run Final Acceptance for docs-only, validation-only, Communication-only, PR-prep, analysis-only Diagnosis, Architect Debug Branch, or Architecture Diagnosis Branch.
 - Start final acceptance only after Tester, required Gate Reviews, and required docs-sync gates pass, or explicit user approval is recorded for each exact exception. Gate Review skip or override is valid only when recorded by VCM from the user's action.
 - Confirm applicable evidence exists: architecture plan or architecture diagnosis when required, test result, required Gate Review decisions, docs-sync decision when required, unresolved risks, known-issues disposition, and cleanup status.
 - Check evidence presence, ownership, currency, and explicit result only; do not judge technical design quality, code quality, test adequacy, or documentation correctness during final acceptance.

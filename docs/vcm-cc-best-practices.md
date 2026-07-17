@@ -536,9 +536,9 @@ acceptable.
 ## 16. Final Acceptance
 
 `vcm-final-acceptance` is PM's final evidence audit for a complete code-delivery
-flow, including a primary Debug or Architecture Diagnosis flow that produced
-code changes. A Debug or Diagnosis branch inside another active flow returns to
-that flow's recorded resume point and does not run its own final acceptance.
+flow, including Architect Debug Flow or an Architecture Diagnosis Flow that
+produced code changes. Architect Debug Branch or Architecture Diagnosis Branch
+returns to the recorded parent-flow resume point and does not run its own final acceptance.
 PM must not use final acceptance for analysis-only or unfinished branch flows, or for
 technical design review, implementation review, source-code analysis, or test
 adequacy analysis.
