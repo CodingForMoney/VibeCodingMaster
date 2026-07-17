@@ -301,7 +301,7 @@ Additional routes:
   final acceptance.
 - An analysis-only primary Architecture Diagnosis completes from its diagnosis
   result without final acceptance.
-- Docs-only work: `project-manager -> architect -> project-manager completion`
+- Docs-Only Flow: `project-manager -> architect -> project-manager completion`
 - Test-only or validation-only work:
   `project-manager -> tester -> project-manager completion`
 

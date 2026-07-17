@@ -184,7 +184,7 @@ Small diff, minimum change, localized fix, or preserving the current implementat
 
 ### Docs Sync
 
-- In docs-only flow, update the PM-assigned durable docs directly; tester completion is not required.
+- In Docs-Only Flow, verify claims against current code and durable docs, update the PM-assigned project documents directly, run applicable documentation checks, and commit the changes; tester completion is not required.
 - In code-change flow, perform post-validation docs sync only when project-manager requests it after tester completes.
 - In Debug flow, perform post-validation docs sync only when project-manager requests it after tester reports and architecture, public-contract, durable-doc, or known-issues impact exists.
 
@@ -222,7 +222,8 @@ Small diff, minimum change, localized fix, or preserving the current implementat
 
 #### Docs Sync Report
 
-- Write \`.ai/vcm/handoffs/docs-sync-report.md\` for post-validation docs sync in code-change or Debug flow. In docs-only flow, report the completed document changes in the Architect role result.
+- Write \`.ai/vcm/handoffs/docs-sync-report.md\` for post-validation docs sync in code-change or Debug flow. Do not write it for Docs-Only Flow.
+- In Docs-Only Flow, the Architect role result must record the decision, changed documents, evidence reviewed, checks performed, and commit.
 - The report records decision, evidence reviewed, architecture drift check, docs updated, docs left unchanged, promoted/updated/removed/not-promoted known issues, remaining documentation risks, and handoff notes.
 - \`Decision\` must be \`synced\`, \`unchanged\`, or \`blocked\`.
 

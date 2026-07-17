@@ -81,12 +81,12 @@ If a reusable harness problem is suspected, it is enough to record a concise fee
 - Architect Debug Mode runs inside either Architect Debug Flow or Architect Debug Branch. Architecture Diagnosis Mode runs inside either Architecture Diagnosis Flow or Architecture Diagnosis Branch.
 - Architect Debug Flow and an Architecture Diagnosis Flow that produces code changes continue through code-diff Gate Review, tester validation, architect docs sync, and project-manager final acceptance. An analysis-only Architecture Diagnosis Flow completes from the diagnosis result.
 - Architect Debug Branch and Architecture Diagnosis Branch preserve the active parent flow and resume point, then return there after successful validation. They do not run their own final acceptance.
-- Docs-only changes use: `project-manager -> architect -> project-manager completion`.
+- Docs-Only Flow uses: `project-manager -> architect -> project-manager completion`.
 - Test-only or validation-only work uses: `project-manager -> tester -> project-manager completion`.
 - Gate Review is PM-triggered at its defined trigger points; the tool decides whether review is enabled or required.
 - Final acceptance closes only a complete code-delivery flow; it never closes Architect Debug Branch or Architecture Diagnosis Branch.
 - PR preparation starts only after the active delivery flow completes; every complete code-delivery flow requires final acceptance to pass.
-- If docs/test/validation-only work reveals required code, architecture, public contract, dependency, durable-doc, or test-strategy changes, project-manager routes through the full code-change flow.
+- If docs/test/validation-only work reveals that the accepted outcome requires production-code, runtime-behavior, public-contract, dependency, or system-architecture changes, project-manager routes through the full Code-Change Flow.
 - Detailed failure handling and route decisions belong to project-manager rules.
 - Keep role outputs under `.ai/vcm/handoffs/`.
 - Gate Review Gate reports live under `.ai/vcm/gate-reviews/` and are VCM-managed task evidence.
