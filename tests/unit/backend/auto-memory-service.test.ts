@@ -247,12 +247,6 @@ describe("auto-memory-service", () => {
         },
         async resumeRoleSession(_repoRoot, _taskSlug, role) {
           return sessionFor(role);
-        },
-        async getProjectHarnessEngineerSession() {
-          return sessionFor("harness-engineer");
-        },
-        async ensureProjectHarnessEngineerSession() {
-          return sessionFor("harness-engineer");
         }
       },
       appSettings: {

@@ -23,19 +23,22 @@ describe("runtime state routes", () => {
         }
       } as never,
       sessionService: {
-        async getProjectTranslatorSession() {
-          return {
-            id: "translator-runtime",
-            role: "translator",
-            status: "running"
-          };
-        },
-        async getProjectHarnessEngineerSession() {
-          return {
-            id: "harness-runtime",
-            role: "harness-engineer",
-            status: "resumable"
-          };
+        async getRoleSession(_repoRoot: string, _taskSlug: string, role: string) {
+          if (role === "translator") {
+            return {
+              id: "translator-runtime",
+              role: "translator",
+              status: "running"
+            };
+          }
+          if (role === "harness-engineer") {
+            return {
+              id: "harness-runtime",
+              role: "harness-engineer",
+              status: "resumable"
+            };
+          }
+          return undefined;
         }
       } as never,
       translationWorkerService: {

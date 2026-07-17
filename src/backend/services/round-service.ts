@@ -1,6 +1,6 @@
 import path from "node:path";
 import { randomUUID } from "node:crypto";
-import { isUserFacingRole } from "../../shared/constants.js";
+import { isUserFacingRole, isVcmRoleName } from "../../shared/constants.js";
 import type { ClaudeTurnHookEventName } from "../../shared/types/claude-hook.js";
 import type { RoleName } from "../../shared/types/role.js";
 import type { VcmFlowPauseState, VcmRoleRecoveryState, VcmRoundStopReason, VcmSessionRoundState } from "../../shared/types/round.js";
@@ -197,7 +197,7 @@ export function createRoundService(deps: RoundServiceDeps): RoundService {
     }
 
     const active = sessions
-      .filter((session) => session.status === "running" && session.activityStatus === "running")
+      .filter((session) => isVcmRoleName(session.role) && session.status === "running" && session.activityStatus === "running")
       .sort((left, right) => timestampMs(roleActivityTimestamp(right, timestamp)) - timestampMs(roleActivityTimestamp(left, timestamp)))[0];
     if (!active) {
       return undefined;

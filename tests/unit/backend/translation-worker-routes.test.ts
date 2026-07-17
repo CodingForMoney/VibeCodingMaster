@@ -45,7 +45,7 @@ describe("translation worker routes", () => {
     await app.close();
   });
 
-  it("clears Translator translation state before restarting the project Translator session", async () => {
+  it("clears Translator translation state before restarting the task Translator session", async () => {
     const calls: string[] = [];
     const session = createRoleSessionRecord({ id: "translator-runtime-old" });
     const app = Fastify({ logger: false });
@@ -53,11 +53,11 @@ describe("translation worker routes", () => {
       projectService: createProjectServiceStub(),
       translationWorkerService: {} as TranslationWorkerService,
       sessionService: createSessionServiceStub({
-        async getProjectTranslatorSession() {
+        async getRoleSession() {
           return session;
         },
-        async restartProjectTranslatorSession() {
-          calls.push("restartProjectTranslatorSession");
+        async restartRoleSession() {
+          calls.push("restartRoleSession");
           return createRoleSessionRecord({ id: "translator-runtime-new" });
         }
       }),
@@ -71,18 +71,18 @@ describe("translation worker routes", () => {
     const response = await app.inject({
       method: "POST",
       url: "/api/translation/session/restart",
-      payload: {}
+      payload: { taskSlug: "demo-task" }
     });
 
     expect(response.statusCode).toBe(200);
     expect(calls).toEqual([
       "stopSession:translator-runtime-old:clear",
-      "restartProjectTranslatorSession"
+      "restartRoleSession"
     ]);
     await app.close();
   });
 
-  it("clears Translator translation state when stopping the project Translator session", async () => {
+  it("clears Translator translation state when stopping the task Translator session", async () => {
     const calls: string[] = [];
     const session = createRoleSessionRecord({ id: "translator-runtime-old" });
     const app = Fastify({ logger: false });
@@ -90,8 +90,8 @@ describe("translation worker routes", () => {
       projectService: createProjectServiceStub(),
       translationWorkerService: {} as TranslationWorkerService,
       sessionService: createSessionServiceStub({
-        async stopProjectTranslatorSession() {
-          calls.push("stopProjectTranslatorSession");
+        async stopRoleSession() {
+          calls.push("stopRoleSession");
           return session;
         }
       }),
@@ -104,12 +104,13 @@ describe("translation worker routes", () => {
 
     const response = await app.inject({
       method: "POST",
-      url: "/api/translation/session/stop"
+      url: "/api/translation/session/stop",
+      payload: { taskSlug: "demo-task" }
     });
 
     expect(response.statusCode).toBe(200);
     expect(calls).toEqual([
-      "stopProjectTranslatorSession",
+      "stopRoleSession",
       "stopSession:translator-runtime-old:keep"
     ]);
     await app.close();
@@ -158,30 +159,26 @@ function createProjectServiceStub(): ProjectService {
 
 function createSessionServiceStub(overrides: Partial<SessionService> = {}): Pick<
   SessionService,
-  | "getProjectTranslatorSession"
-  | "ensureProjectTranslatorSession"
-  | "startProjectTranslatorSession"
-  | "resumeProjectTranslatorSession"
-  | "restartProjectTranslatorSession"
-  | "stopProjectTranslatorSession"
+  | "getRoleSession"
+  | "startRoleSession"
+  | "resumeRoleSession"
+  | "restartRoleSession"
+  | "stopRoleSession"
 > {
   return {
-    async getProjectTranslatorSession() {
+    async getRoleSession() {
       return undefined;
     },
-    async ensureProjectTranslatorSession() {
+    async startRoleSession() {
       return createRoleSessionRecord();
     },
-    async startProjectTranslatorSession() {
+    async resumeRoleSession() {
       return createRoleSessionRecord();
     },
-    async resumeProjectTranslatorSession() {
+    async restartRoleSession() {
       return createRoleSessionRecord();
     },
-    async restartProjectTranslatorSession() {
-      return createRoleSessionRecord();
-    },
-    async stopProjectTranslatorSession() {
+    async stopRoleSession() {
       return createRoleSessionRecord();
     },
     ...overrides
@@ -199,7 +196,7 @@ function createRoleSessionRecord(overrides: Partial<RoleSessionRecord> = {}): Ro
   return {
     id: "translator-runtime",
     claudeSessionId: "translator-claude",
-    taskSlug: "__project__",
+    taskSlug: "demo-task",
     role: "translator",
     status: "running",
     activityStatus: "idle",

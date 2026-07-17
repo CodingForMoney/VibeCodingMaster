@@ -14,7 +14,7 @@ import type { TranslationWorkerService } from "../services/translation-worker-se
 export interface RuntimeStateRouteDeps {
   projectService: ProjectService;
   taskService: Pick<TaskService, "loadTask">;
-  sessionService: Pick<SessionService, "getProjectTranslatorSession" | "getProjectHarnessEngineerSession">;
+  sessionService: Pick<SessionService, "getRoleSession">;
   translationWorkerService: Pick<TranslationWorkerService, "getState">;
   harnessService: Pick<HarnessService, "getHarnessStatus" | "getBootstrapStatus">;
   harnessFeedbackService: Pick<HarnessFeedbackService, "getState">;
@@ -28,9 +28,13 @@ export function registerRuntimeStateRoutes(app: FastifyInstance, deps: RuntimeSt
     const taskSlug = request.query.taskSlug?.trim();
     const coordinated = await deps.runtimeCoordinator.reconcileProject(project.repoRoot, { taskSlug });
     const [translatorSession, translationState, harnessEngineerSession, harnessFeedbackState] = await Promise.all([
-      deps.sessionService.getProjectTranslatorSession(project.repoRoot).then((session) => session ?? null),
+      taskSlug
+        ? deps.sessionService.getRoleSession(project.repoRoot, taskSlug, "translator").then((session) => session ?? null)
+        : Promise.resolve(null),
       deps.translationWorkerService.getState(project.repoRoot, { visibility: "public" }),
-      deps.sessionService.getProjectHarnessEngineerSession(project.repoRoot).then((session) => session ?? null),
+      taskSlug
+        ? deps.sessionService.getRoleSession(project.repoRoot, taskSlug, "harness-engineer").then((session) => session ?? null)
+        : Promise.resolve(null),
       deps.harnessFeedbackService.getState(project.repoRoot, taskSlug || undefined)
     ]);
 
@@ -55,7 +59,7 @@ export function registerRuntimeStateRoutes(app: FastifyInstance, deps: RuntimeSt
           (error) => degradedHarnessStatus(error)
         ),
         withOpenFileLimitFallback(
-          () => deps.harnessService.getBootstrapStatus(project.repoRoot, task.worktreePath),
+          () => deps.harnessService.getBootstrapStatus(project.repoRoot, task.worktreePath, task.taskSlug),
           (error) => degradedBootstrapStatus(error)
         ),
         deps.autoMemoryService.getState(project.repoRoot, task.worktreePath)

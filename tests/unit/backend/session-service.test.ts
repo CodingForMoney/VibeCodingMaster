@@ -4,6 +4,7 @@ import type { RoleName } from "../../../src/shared/types/role.js";
 import {
   CLAUDE_EFFORT_OPTIONS,
   type ClaudeModel,
+  type RoleSessionRecord,
   type SessionEffort
 } from "../../../src/shared/types/session.js";
 import type { CreateTerminalSessionInput, TerminalRuntime, TerminalSession } from "../../../src/backend/runtime/terminal-runtime.js";
@@ -235,6 +236,67 @@ describe("createSessionService", () => {
       "--model",
       "default"
     ]);
+  });
+
+  it("starts tool roles as task-scoped sessions through the normal role entrypoint", async () => {
+    const fs = createMemoryFs();
+    const runtimeInputs: CreateTerminalSessionInput[] = [];
+    const service = createTestSessionService(fs, runtimeInputs, [], {
+      worktreePath: TASK_WORKTREE
+    });
+
+    const translator = await service.startRoleSession("/repo", "demo-task", "translator", {
+      effort: "medium"
+    });
+    const harnessEngineer = await service.startRoleSession("/repo", "demo-task", "harness-engineer", {
+      model: "opus"
+    });
+
+    expect(translator).toMatchObject({
+      role: "translator",
+      taskSlug: "demo-task",
+      cwd: TASK_WORKTREE
+    });
+    expect(harnessEngineer).toMatchObject({
+      role: "harness-engineer",
+      taskSlug: "demo-task",
+      cwd: TASK_WORKTREE
+    });
+    expect(runtimeInputs[0]).toMatchObject({
+      taskSlug: "demo-task",
+      role: "translator",
+      cwd: TASK_WORKTREE
+    });
+    expect(runtimeInputs[1]).toMatchObject({
+      taskSlug: "demo-task",
+      role: "harness-engineer",
+      cwd: TASK_WORKTREE
+    });
+    await expect(fs.pathExists("/repo/.ai/vcm/translations/session.json")).resolves.toBe(false);
+    await expect(fs.pathExists("/repo/.ai/vcm/harness-engineer/session.json")).resolves.toBe(false);
+
+    await service.recordRoleHookEvent("/repo", {
+      taskSlug: "demo-task",
+      role: "translator",
+      eventName: "UserPromptSubmit",
+      sessionId: "translator-task-session",
+      transcriptPath: `${TASK_WORKTREE}/.claude/projects/translator-task-session.jsonl`,
+      cwd: TASK_WORKTREE
+    });
+    await service.recordRoleHookEvent("/repo", {
+      taskSlug: "demo-task",
+      role: "harness-engineer",
+      eventName: "UserPromptSubmit",
+      sessionId: "harness-task-session",
+      transcriptPath: `${TASK_WORKTREE}/.claude/projects/harness-task-session.jsonl`,
+      cwd: TASK_WORKTREE
+    });
+
+    const persisted = await fs.readJson<{ roles: Record<string, { record?: RoleSessionRecord }> }>(
+      `${TASK_WORKTREE}/.ai/vcm/sessions/demo-task.json`
+    );
+    expect(persisted.roles.translator?.record?.taskSlug).toBe("demo-task");
+    expect(persisted.roles["harness-engineer"]?.record?.taskSlug).toBe("demo-task");
   });
 
   it("persists Translator sessions under project translation runtime state", async () => {

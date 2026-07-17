@@ -82,11 +82,11 @@ export interface HarnessService {
   getRepositoryDiff(repoRoot: string, input?: RepositoryDiffRequest): Promise<RepositoryDiffReport>;
   getRepositoryFileDiff(repoRoot: string, input: RepositoryFileDiffRequest): Promise<RepositoryFileDiffReport>;
   mergeRepositoryDiffToCurrentBranch(baseRepoRoot: string, input: MergeRepositoryDiffToCurrentBranchInput): Promise<MergeRepositoryDiffToCurrentBranchResult>;
-  getBootstrapStatus(repoRoot: string, targetRepoRoot?: string): Promise<HarnessBootstrapStatusReport>;
+  getBootstrapStatus(repoRoot: string, targetRepoRoot?: string, taskSlug?: string): Promise<HarnessBootstrapStatusReport>;
   startHarnessBootstrap(repoRoot: string, targetRepoRoot?: string, input?: StartHarnessBootstrapRequest): Promise<StartHarnessBootstrapResult>;
   restartHarnessBootstrap(repoRoot: string, targetRepoRoot?: string, input?: RestartHarnessBootstrapRequest): Promise<StartHarnessBootstrapResult>;
-  stopHarnessBootstrap(repoRoot: string): Promise<HarnessBootstrapStatusReport>;
-  runHarnessBootstrap(repoRoot: string, targetRepoRoot?: string): Promise<RunHarnessBootstrapResult>;
+  stopHarnessBootstrap(repoRoot: string, targetRepoRoot?: string, taskSlug?: string): Promise<HarnessBootstrapStatusReport>;
+  runHarnessBootstrap(repoRoot: string, targetRepoRoot?: string, taskSlug?: string): Promise<RunHarnessBootstrapResult>;
   recordHarnessBootstrapHook(repoRoot: string, input: RecordHarnessBootstrapHookInput): Promise<HarnessBootstrapStatusReport>;
 }
 
@@ -97,10 +97,11 @@ export interface HarnessServiceDeps {
   runtime?: TerminalRuntime;
   harnessEngineerSessions?: Pick<
     SessionService,
-    | "ensureProjectHarnessEngineerSession"
-    | "restartProjectHarnessEngineerSession"
-    | "stopProjectHarnessEngineerSession"
-    | "getProjectHarnessEngineerSession"
+    | "getRoleSession"
+    | "startRoleSession"
+    | "resumeRoleSession"
+    | "restartRoleSession"
+    | "stopRoleSession"
   >;
   now?: () => string;
   runFixedInstaller?: (repoRoot: string) => Promise<HarnessApplyResult>;
@@ -110,6 +111,7 @@ export interface HarnessServiceDeps {
 interface HarnessBootstrapRunState {
   version: 1;
   status: "running" | "complete";
+  taskSlug?: string;
   targetRepoRoot?: string;
   sessionId?: string;
   claudeSessionId?: string;
@@ -329,7 +331,7 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
     title: "Translator Agent",
     frontmatter: renderAgentFrontmatter(
       "translator",
-      "VCM project translation tool role for conversation translation, file translation, bootstrap, and memory updates."
+      "VCM task-scoped translation tool role for conversation translation, file translation, bootstrap, and memory updates."
     ),
     renderRules: renderTranslatorAgentRules
   },
@@ -339,7 +341,7 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
     title: "Harness Engineer Agent",
     frontmatter: renderAgentFrontmatter(
       "harness-engineer",
-      "VCM project-scoped harness maintenance role for harness diagnosis, diff proposals, and VCM issue drafts."
+      "VCM task-scoped harness maintenance role for harness diagnosis, diff proposals, and VCM issue drafts."
     ),
     renderRules: renderHarnessEngineerHarnessRules
   },
@@ -524,12 +526,12 @@ export function createHarnessService(deps: HarnessServiceDeps): HarnessService {
     async mergeRepositoryDiffToCurrentBranch(baseRepoRoot, input) {
       return mergeRepositoryDiffToCurrentBranch(requireRepositoryMergeGit(deps.git), baseRepoRoot, input, now());
     },
-    async getBootstrapStatus(repoRoot, targetRepoRoot = repoRoot) {
-      return getHarnessBootstrapStatus(deps, repoRoot, targetRepoRoot, now, vcmVersion);
+    async getBootstrapStatus(repoRoot, targetRepoRoot = repoRoot, taskSlug) {
+      return getHarnessBootstrapStatus(deps, repoRoot, targetRepoRoot, now, vcmVersion, taskSlug);
     },
     async startHarnessBootstrap(repoRoot, targetRepoRoot = repoRoot, input = {}) {
       const session = await ensureHarnessEngineerForBootstrap(deps, repoRoot, targetRepoRoot, now, vcmVersion, input);
-      const nextStatus = await getHarnessBootstrapStatus(deps, repoRoot, targetRepoRoot, now, vcmVersion);
+      const nextStatus = await getHarnessBootstrapStatus(deps, repoRoot, targetRepoRoot, now, vcmVersion, input.taskSlug);
 
       return {
         status: {
@@ -542,7 +544,7 @@ export function createHarnessService(deps: HarnessServiceDeps): HarnessService {
     },
     async restartHarnessBootstrap(repoRoot, targetRepoRoot = repoRoot, input = {}) {
       const session = await restartHarnessEngineerForBootstrap(deps, repoRoot, targetRepoRoot, now, vcmVersion, input);
-      const nextStatus = await getHarnessBootstrapStatus(deps, repoRoot, targetRepoRoot, now, vcmVersion);
+      const nextStatus = await getHarnessBootstrapStatus(deps, repoRoot, targetRepoRoot, now, vcmVersion, input.taskSlug);
       return {
         status: {
           ...nextStatus,
@@ -552,8 +554,8 @@ export function createHarnessService(deps: HarnessServiceDeps): HarnessService {
         prompt: buildHarnessBootstrapPrompt(repoRoot, targetRepoRoot)
       };
     },
-    async stopHarnessBootstrap(repoRoot) {
-      const existing = await getCurrentHarnessEngineerBootstrapSession(deps, repoRoot);
+    async stopHarnessBootstrap(repoRoot, targetRepoRoot = repoRoot, taskSlug) {
+      const existing = await getCurrentHarnessEngineerBootstrapSession(deps, repoRoot, taskSlug);
       if (!existing) {
         throw new VcmError({
           code: "HARNESS_BOOTSTRAP_SESSION_MISSING",
@@ -561,11 +563,13 @@ export function createHarnessService(deps: HarnessServiceDeps): HarnessService {
           statusCode: 404
         });
       }
-      await deps.harnessEngineerSessions?.stopProjectHarnessEngineerSession(repoRoot);
+      if (taskSlug) {
+        await deps.harnessEngineerSessions?.stopRoleSession(repoRoot, taskSlug, "harness-engineer");
+      }
       await clearHarnessBootstrapRunState(deps.fs, repoRoot);
-      return getHarnessBootstrapStatus(deps, repoRoot, repoRoot, now, vcmVersion);
+      return getHarnessBootstrapStatus(deps, repoRoot, targetRepoRoot, now, vcmVersion, taskSlug);
     },
-    async runHarnessBootstrap(repoRoot, targetRepoRoot = repoRoot) {
+    async runHarnessBootstrap(repoRoot, targetRepoRoot = repoRoot, taskSlug) {
       if (!deps.runtime || !deps.harnessEngineerSessions) {
         throw new VcmError({
           code: "HARNESS_BOOTSTRAP_UNAVAILABLE",
@@ -574,7 +578,7 @@ export function createHarnessService(deps: HarnessServiceDeps): HarnessService {
         });
       }
       await assertHarnessWorktreeClean(deps.git, targetRepoRoot);
-      const status = await getHarnessBootstrapStatus(deps, repoRoot, targetRepoRoot, now, vcmVersion);
+      const status = await getHarnessBootstrapStatus(deps, repoRoot, targetRepoRoot, now, vcmVersion, taskSlug);
       const session = status.session;
       if (!session || session.status !== "running" || !deps.runtime.getSession(session.id)) {
         throw new VcmError({
@@ -588,6 +592,7 @@ export function createHarnessService(deps: HarnessServiceDeps): HarnessService {
       await persistHarnessBootstrapRunState(deps.fs, repoRoot, {
         version: 1,
         status: "running",
+        taskSlug,
         targetRepoRoot,
         sessionId: session.id,
         claudeSessionId: session.claudeSessionId,
@@ -595,7 +600,7 @@ export function createHarnessService(deps: HarnessServiceDeps): HarnessService {
         updatedAt: timestamp
       });
       await submitTerminalInput(deps.runtime, session.id, prompt);
-      const nextStatus = await getHarnessBootstrapStatus(deps, repoRoot, targetRepoRoot, now, vcmVersion);
+      const nextStatus = await getHarnessBootstrapStatus(deps, repoRoot, targetRepoRoot, now, vcmVersion, taskSlug);
       return {
         status: {
           ...nextStatus,
@@ -609,7 +614,7 @@ export function createHarnessService(deps: HarnessServiceDeps): HarnessService {
     async recordHarnessBootstrapHook(repoRoot, input) {
       const state = await loadPersistedHarnessBootstrapRunState(deps.fs, repoRoot);
       if (state?.status !== "running" || !matchesBootstrapRunState(state, input)) {
-        return getHarnessBootstrapStatus(deps, repoRoot, state?.targetRepoRoot ?? repoRoot, now, vcmVersion);
+        return getHarnessBootstrapStatus(deps, repoRoot, state?.targetRepoRoot ?? repoRoot, now, vcmVersion, state?.taskSlug);
       }
 
       const timestamp = now();
@@ -623,7 +628,7 @@ export function createHarnessService(deps: HarnessServiceDeps): HarnessService {
         updatedAt: timestamp,
         lastHookEvent: input.eventName
       });
-      return getHarnessBootstrapStatus(deps, repoRoot, state.targetRepoRoot ?? repoRoot, now, vcmVersion);
+      return getHarnessBootstrapStatus(deps, repoRoot, state.targetRepoRoot ?? repoRoot, now, vcmVersion, state.taskSlug);
     }
   };
 }
@@ -644,7 +649,8 @@ async function ensureHarnessEngineerForBootstrap(
     });
   }
 
-  const currentStatus = await getHarnessBootstrapStatus(deps, repoRoot, targetRepoRoot, now, vcmVersion);
+  const taskSlug = requireHarnessEngineerTaskSlug(input.taskSlug);
+  const currentStatus = await getHarnessBootstrapStatus(deps, repoRoot, targetRepoRoot, now, vcmVersion, taskSlug);
   if (currentStatus.session?.status === "running") {
     return currentStatus.session;
   }
@@ -656,7 +662,14 @@ async function ensureHarnessEngineerForBootstrap(
     });
   }
 
-  return toHarnessBootstrapSession(await deps.harnessEngineerSessions.ensureProjectHarnessEngineerSession(repoRoot, input));
+  const existing = await deps.harnessEngineerSessions.getRoleSession(repoRoot, taskSlug, "harness-engineer");
+  if (existing?.status === "running") {
+    return toHarnessBootstrapSession(existing);
+  }
+  if (existing?.claudeSessionId) {
+    return toHarnessBootstrapSession(await deps.harnessEngineerSessions.resumeRoleSession(repoRoot, taskSlug, "harness-engineer", input));
+  }
+  return toHarnessBootstrapSession(await deps.harnessEngineerSessions.startRoleSession(repoRoot, taskSlug, "harness-engineer", input));
 }
 
 async function restartHarnessEngineerForBootstrap(
@@ -675,7 +688,8 @@ async function restartHarnessEngineerForBootstrap(
     });
   }
 
-  const currentStatus = await getHarnessBootstrapStatus(deps, repoRoot, targetRepoRoot, now, vcmVersion);
+  const taskSlug = requireHarnessEngineerTaskSlug(input.taskSlug);
+  const currentStatus = await getHarnessBootstrapStatus(deps, repoRoot, targetRepoRoot, now, vcmVersion, taskSlug);
   if (!currentStatus.canStart) {
     throw new VcmError({
       code: "HARNESS_BOOTSTRAP_NOT_READY",
@@ -684,15 +698,32 @@ async function restartHarnessEngineerForBootstrap(
     });
   }
 
-  return toHarnessBootstrapSession(await deps.harnessEngineerSessions.restartProjectHarnessEngineerSession(repoRoot, input));
+  return toHarnessBootstrapSession(await deps.harnessEngineerSessions.restartRoleSession(repoRoot, taskSlug, "harness-engineer", input));
 }
 
 async function getCurrentHarnessEngineerBootstrapSession(
   deps: HarnessServiceDeps,
-  repoRoot: string
+  repoRoot: string,
+  taskSlug?: string
 ): Promise<HarnessBootstrapSession | undefined> {
-  const session = await deps.harnessEngineerSessions?.getProjectHarnessEngineerSession(repoRoot);
+  if (!taskSlug) {
+    return undefined;
+  }
+  const session = await deps.harnessEngineerSessions?.getRoleSession(repoRoot, taskSlug, "harness-engineer");
   return session ? toHarnessBootstrapSession(session) : undefined;
+}
+
+function requireHarnessEngineerTaskSlug(value: string | undefined): string {
+  const taskSlug = value?.trim();
+  if (!taskSlug) {
+    throw new VcmError({
+      code: "HARNESS_ENGINEER_TASK_REQUIRED",
+      message: "Harness Engineer requires an active task.",
+      statusCode: 409,
+      hint: "Create or select a task before using Harness Engineer."
+    });
+  }
+  return taskSlug;
 }
 
 function toHarnessBootstrapSession(session: RoleSessionRecord): HarnessBootstrapSession {
@@ -1834,7 +1865,8 @@ async function getHarnessBootstrapStatus(
   repoRoot: string,
   targetRepoRoot: string,
   now: () => string,
-  vcmVersion: string
+  vcmVersion: string,
+  taskSlug?: string
 ): Promise<HarnessBootstrapStatusReport> {
   const moduleIndex = await readOptionalJsonObject(deps.fs, targetRepoRoot, ".ai/generated/module-index.json");
   const checks: HarnessBootstrapCheck[] = [
@@ -1859,8 +1891,11 @@ async function getHarnessBootstrapStatus(
     await checkModuleArchitectureDocs(deps.fs, targetRepoRoot, moduleIndex),
     await checkFilledMarkdown(deps.fs, targetRepoRoot, "docs/TESTING.md", "Testing doc", "testing-doc")
   ];
-  const runState = await loadPersistedHarnessBootstrapRunState(deps.fs, repoRoot);
-  const session = await getCurrentHarnessEngineerBootstrapSession(deps, repoRoot);
+  const persistedRunState = await loadPersistedHarnessBootstrapRunState(deps.fs, repoRoot);
+  const runState = taskSlug && persistedRunState?.taskSlug !== taskSlug
+    ? undefined
+    : persistedRunState;
+  const session = await getCurrentHarnessEngineerBootstrapSession(deps, repoRoot, taskSlug);
   const fixedHarnessReady = checks[0]?.status === "ok";
   const projectChecks = checks.slice(1);
   const projectComplete = projectChecks.every((check) => check.status === "ok");
@@ -2151,6 +2186,8 @@ async function loadPersistedHarnessBootstrapRunState(
   return {
     version: 1,
     status,
+    taskSlug: typeof payload.taskSlug === "string" ? payload.taskSlug : undefined,
+    targetRepoRoot: typeof payload.targetRepoRoot === "string" ? payload.targetRepoRoot : undefined,
     sessionId: typeof payload.sessionId === "string" ? payload.sessionId : undefined,
     claudeSessionId: typeof payload.claudeSessionId === "string" ? payload.claudeSessionId : undefined,
     startedAt: typeof payload.startedAt === "string" ? payload.startedAt : undefined,

@@ -5,6 +5,7 @@ import type {
   HarnessFeedbackStateReport,
   TaskHarnessRetrospectiveTrigger
 } from "../../shared/types/harness.js";
+import type { RoleSessionRecord } from "../../shared/types/session.js";
 import { checkMarkdownArtifact, readArtifactSectionValue } from "../../shared/validation/artifact-check.js";
 import { resolveRepoPath, type FileSystemAdapter } from "../adapters/filesystem.js";
 import { VcmError } from "../errors.js";
@@ -30,7 +31,7 @@ export interface HarnessFeedbackServiceDeps {
   runtime: TerminalRuntime;
   sessionService: Pick<
     SessionService,
-    "ensureProjectHarnessEngineerSession" | "getProjectHarnessEngineerSession"
+    "getRoleSession" | "startRoleSession" | "resumeRoleSession"
   >;
   now?: () => string;
 }
@@ -117,8 +118,8 @@ export function createHarnessFeedbackService(deps: HarnessFeedbackServiceDeps): 
     return undefined;
   }
 
-  async function ensureIdleHarnessEngineer(repoRoot: string, taskSlug: string) {
-    const existing = await deps.sessionService.getProjectHarnessEngineerSession(repoRoot);
+  async function getIdleHarnessEngineer(repoRoot: string, taskSlug: string): Promise<RoleSessionRecord | undefined> {
+    const existing = await deps.sessionService.getRoleSession(repoRoot, taskSlug, "harness-engineer");
     if (existing?.status === "running" && existing.activityStatus === "running") {
       throw new VcmError({
         code: "HARNESS_ENGINEER_BUSY",
@@ -127,12 +128,24 @@ export function createHarnessFeedbackService(deps: HarnessFeedbackServiceDeps): 
         hint: "Wait for the current Harness Engineer turn to finish, then retry."
       });
     }
-    const session = await deps.sessionService.ensureProjectHarnessEngineerSession(repoRoot, {
-      taskSlug,
-      cols: 120,
-      rows: 32
-    });
-    if (session.status !== "running" || session.activityStatus === "running" || !deps.runtime.getSession(session.id)) {
+    const input = { cols: 120, rows: 32 };
+    const session = existing?.status === "running"
+      ? existing
+      : existing?.claudeSessionId
+        ? await deps.sessionService.resumeRoleSession(repoRoot, taskSlug, "harness-engineer", input)
+        : await deps.sessionService.startRoleSession(repoRoot, taskSlug, "harness-engineer", input);
+    if (session.status !== "running" || session.activityStatus === "running") {
+      return undefined;
+    }
+    if (!deps.runtime.getSession(session.id)) {
+      return undefined;
+    }
+    return session;
+  }
+
+  async function ensureIdleHarnessEngineer(repoRoot: string, taskSlug: string): Promise<RoleSessionRecord> {
+    const session = await getIdleHarnessEngineer(repoRoot, taskSlug);
+    if (!session) {
       throw new VcmError({
         code: "HARNESS_ENGINEER_BUSY",
         message: "Harness Engineer is busy or unavailable.",

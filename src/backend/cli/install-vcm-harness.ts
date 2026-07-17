@@ -86,10 +86,10 @@ const AGENT_FRONTMATTER = {
     tools: "Read, Grep, Glob, Bash, Write"
   },
   translator: {
-    description: "VCM project translation tool role for conversation translation, file translation, bootstrap, and memory updates."
+    description: "VCM task-scoped translation tool role for conversation translation, file translation, bootstrap, and memory updates."
   },
   "harness-engineer": {
-    description: "VCM project-scoped harness maintenance role for harness diagnosis, diff proposals, and VCM issue drafts."
+    description: "VCM task-scoped harness maintenance role for harness diagnosis, diff proposals, and VCM issue drafts."
   },
   "vcm-coder-worker": {
     description: "Bounded VCM implementation worker for assigned modules, files, and VCM:CODE markers from Coder.",

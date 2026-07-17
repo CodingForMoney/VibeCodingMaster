@@ -19,7 +19,7 @@ const TASK: TaskRecord = {
 };
 
 describe("createRuntimeCoordinatorService", () => {
-  it("does not create project tool sessions when no resumable session exists", async () => {
+  it("does not create task tool sessions when no resumable session exists", async () => {
     const calls: string[] = [];
     const service = createCoordinator({
       calls,
@@ -34,7 +34,7 @@ describe("createRuntimeCoordinatorService", () => {
     expect(calls).not.toContain("ensure:harness-engineer");
   });
 
-  it("ensures existing project tool sessions and starts conversation translation listeners", async () => {
+  it("resumes existing task tool sessions and starts conversation translation listeners", async () => {
     const calls: string[] = [];
     const service = createCoordinator({
       calls,
@@ -45,8 +45,8 @@ describe("createRuntimeCoordinatorService", () => {
 
     await service.reconcileProject("/repo", { taskSlug: "demo-task" });
 
-    expect(calls).toContain("ensure:translator:demo-task");
-    expect(calls).toContain("ensure:harness-engineer:demo-task");
+    expect(calls).not.toContain("resume:translator:demo-task");
+    expect(calls).toContain("resume:harness-engineer:demo-task");
     expect(calls).toContain("translation-listener:project-manager:demo-task");
   });
 
@@ -64,7 +64,7 @@ describe("createRuntimeCoordinatorService", () => {
     await service.reconcileProject("/repo", { taskSlug: "demo-task" });
 
     expect(calls).toContain("gateway-status");
-    expect(calls).toContain("ensure:translator:demo-task");
+    expect(calls).toContain("resume:translator:demo-task");
     expect(calls).toContain("translation-listener:project-manager:demo-task");
   });
 
@@ -164,20 +164,29 @@ function createCoordinator(input: {
       }
     },
     sessionService: {
-      async getProjectTranslatorSession() {
-        return translator;
+      async getRoleSession(_repoRoot, _taskSlug, role) {
+        return role === "translator"
+          ? translator
+          : role === "harness-engineer"
+            ? harnessEngineer
+            : undefined;
       },
-      async ensureProjectTranslatorSession(_repoRoot, request = {}) {
-        input.calls.push(`ensure:translator:${request.taskSlug ?? ""}`);
-        translator = { ...(translator ?? projectToolSession("translator", "running")), status: "running" };
-        return translator;
-      },
-      async getProjectHarnessEngineerSession() {
+      async startRoleSession(_repoRoot, taskSlug, role) {
+        input.calls.push(`start:${role}:${taskSlug}`);
+        if (role === "translator") {
+          translator = { ...(translator ?? projectToolSession("translator", "running")), taskSlug, status: "running" };
+          return translator;
+        }
+        harnessEngineer = { ...(harnessEngineer ?? projectToolSession("harness-engineer", "running")), taskSlug, status: "running" };
         return harnessEngineer;
       },
-      async ensureProjectHarnessEngineerSession(_repoRoot, request = {}) {
-        input.calls.push(`ensure:harness-engineer:${request.taskSlug ?? ""}`);
-        harnessEngineer = { ...(harnessEngineer ?? projectToolSession("harness-engineer", "running")), status: "running" };
+      async resumeRoleSession(_repoRoot, taskSlug, role) {
+        input.calls.push(`resume:${role}:${taskSlug}`);
+        if (role === "translator") {
+          translator = { ...(translator ?? projectToolSession("translator", "running")), taskSlug, status: "running" };
+          return translator;
+        }
+        harnessEngineer = { ...(harnessEngineer ?? projectToolSession("harness-engineer", "running")), taskSlug, status: "running" };
         return harnessEngineer;
       },
       async listRoleSessions() {

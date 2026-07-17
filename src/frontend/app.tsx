@@ -432,7 +432,7 @@ export function App() {
   }
 
   async function refreshTranslatorSession(options: { syncLaunchOptions?: boolean } = {}) {
-    const session = await apiClient.getTranslatorSession();
+    const session = await apiClient.getTranslatorSession(activeTask?.taskSlug ?? null);
     setTranslatorSession(session);
     if (options.syncLaunchOptions) {
       syncTranslatorLaunchOptions(session);
@@ -454,7 +454,7 @@ export function App() {
   }
 
   async function refreshHarnessEngineerSession(options: { syncLaunchOptions?: boolean } = {}) {
-    const session = await apiClient.getHarnessEngineerSession();
+    const session = await apiClient.getHarnessEngineerSession(activeTask?.taskSlug ?? null);
     setHarnessEngineerSession(session);
     if (options.syncLaunchOptions) {
       syncHarnessEngineerLaunchOptions(session);
@@ -701,7 +701,7 @@ export function App() {
       "",
       "This is destructive:",
       "- stops VCM-managed running role sessions for this task",
-      "- moves project-scoped Translator and Harness Engineer sessions to the base repository cwd",
+      "- stops Translator and Harness Engineer sessions for this task",
       `- deletes the task worktree: ${activeTask.worktreePath}`,
       `- deletes the Git branch: ${activeTask.branch}`,
       "- deletes VCM task/session/message/orchestration state",
@@ -859,7 +859,10 @@ export function App() {
             await refreshHarnessEngineerSession({ syncLaunchOptions: true });
           }, "Restart Harness Bootstrap")}
           onStopHarnessBootstrap={() => withBusy(async () => {
-            const status = await apiClient.stopHarnessBootstrap();
+            if (!activeTask) {
+              throw new Error("Create or select a task before stopping Harness Bootstrap.");
+            }
+            const status = await apiClient.stopHarnessBootstrap({ taskSlug: activeTask.taskSlug });
             setHarnessBootstrapStatus(status);
             setHarnessBootstrapStatusTaskSlug(activeTask?.taskSlug ?? null);
             await refreshHarnessEngineerSession();
@@ -1340,13 +1343,19 @@ export function App() {
         }}
         onEngineerStop={() => {
           void withBusy(async () => {
-            const session = await apiClient.stopHarnessEngineerSession();
+            if (!activeTask) {
+              throw new Error("Create or select a task before stopping Harness Engineer.");
+            }
+            const session = await apiClient.stopHarnessEngineerSession({ taskSlug: activeTask.taskSlug });
             setHarnessEngineerSession(session);
           }, "Stop Harness Engineer");
         }}
         onEngineerNotifyHarnessUpdated={() => {
           void withBusy(async () => {
-            const session = await apiClient.notifyHarnessEngineerHarnessUpdated();
+            if (!activeTask) {
+              throw new Error("Create or select a task before notifying Harness Engineer.");
+            }
+            const session = await apiClient.notifyHarnessEngineerHarnessUpdated({ taskSlug: activeTask.taskSlug });
             setHarnessEngineerSession(session);
             syncHarnessEngineerLaunchOptions(session);
           }, "Notify Harness Engineer to reload harness");
@@ -1439,13 +1448,19 @@ export function App() {
         }}
         onStop={() => {
           void withBusy(async () => {
-            const session = await apiClient.stopTranslatorSession();
+            if (!activeTask) {
+              throw new Error("Create or select a task before stopping Translator.");
+            }
+            const session = await apiClient.stopTranslatorSession({ taskSlug: activeTask.taskSlug });
             setTranslatorSession(session);
           }, "Stop Translator session");
         }}
         onNotifyHarnessUpdated={() => {
           void withBusy(async () => {
-            const session = await apiClient.notifyTranslatorHarnessUpdated();
+            if (!activeTask) {
+              throw new Error("Create or select a task before notifying Translator.");
+            }
+            const session = await apiClient.notifyTranslatorHarnessUpdated({ taskSlug: activeTask.taskSlug });
             setTranslatorSession(session);
             syncTranslatorLaunchOptions(session);
           }, "Notify Translator to reload harness");

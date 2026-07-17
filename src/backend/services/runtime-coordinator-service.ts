@@ -37,10 +37,9 @@ export interface RuntimeCoordinatorServiceDeps {
   taskService: Pick<TaskService, "listTasks">;
   sessionService: Pick<
     SessionService,
-    | "getProjectTranslatorSession"
-    | "ensureProjectTranslatorSession"
-    | "getProjectHarnessEngineerSession"
-    | "ensureProjectHarnessEngineerSession"
+    | "getRoleSession"
+    | "startRoleSession"
+    | "resumeRoleSession"
     | "listRoleSessions"
   >;
   translationService: Pick<TranslationService, "startSession" | "stopTask">;
@@ -188,12 +187,11 @@ export function createRuntimeCoordinatorService(deps: RuntimeCoordinatorServiceD
   }
 
   async function reconcileHarnessEngineer(repoRoot: string, task: TaskRecord): Promise<void> {
-    const existing = await deps.sessionService.getProjectHarnessEngineerSession(repoRoot);
-    if (!shouldAutoEnsureProjectToolSession(existing)) {
+    const existing = await deps.sessionService.getRoleSession(repoRoot, task.taskSlug, "harness-engineer");
+    if (!shouldAutoEnsureTaskToolSession(existing)) {
       return;
     }
-    await deps.sessionService.ensureProjectHarnessEngineerSession(repoRoot, {
-      taskSlug: task.taskSlug,
+    await ensureTaskToolRoleSession(repoRoot, task.taskSlug, "harness-engineer", {
       permissionMode: existing?.permissionMode,
       model: existing?.model,
       effort: existing?.effort
@@ -204,24 +202,43 @@ export function createRuntimeCoordinatorService(deps: RuntimeCoordinatorServiceD
     if (!enabled) {
       return;
     }
-    const existing = await deps.sessionService.getProjectTranslatorSession(repoRoot);
-    if (!shouldAutoEnsureProjectToolSession(existing)) {
+    const existing = await deps.sessionService.getRoleSession(repoRoot, task.taskSlug, "translator");
+    if (!shouldAutoEnsureTaskToolSession(existing)) {
       return;
     }
-    await deps.sessionService.ensureProjectTranslatorSession(repoRoot, {
-      taskSlug: task.taskSlug,
+    await ensureTaskToolRoleSession(repoRoot, task.taskSlug, "translator", {
       permissionMode: existing?.permissionMode,
       model: existing?.model,
       effort: existing?.effort
     });
   }
 
-  function shouldAutoEnsureProjectToolSession(session: RoleSessionRecord | undefined): boolean {
+  function shouldAutoEnsureTaskToolSession(session: RoleSessionRecord | undefined): boolean {
     return Boolean(session && (session.status === "running" || session.claudeSessionId));
   }
 
+  async function ensureTaskToolRoleSession(
+    repoRoot: string,
+    taskSlug: string,
+    role: "translator" | "harness-engineer",
+    input: {
+      permissionMode?: RoleSessionRecord["permissionMode"];
+      model?: RoleSessionRecord["model"];
+      effort?: RoleSessionRecord["effort"];
+    }
+  ): Promise<RoleSessionRecord> {
+    const existing = await deps.sessionService.getRoleSession(repoRoot, taskSlug, role);
+    if (existing?.status === "running") {
+      return existing;
+    }
+    if (existing?.claudeSessionId) {
+      return deps.sessionService.resumeRoleSession(repoRoot, taskSlug, role, input);
+    }
+    return deps.sessionService.startRoleSession(repoRoot, taskSlug, role, input);
+  }
+
   async function startConversationTranslationListeners(repoRoot: string, task: TaskRecord): Promise<void> {
-    const translator = await deps.sessionService.getProjectTranslatorSession(repoRoot);
+    const translator = await deps.sessionService.getRoleSession(repoRoot, task.taskSlug, "translator");
     if (translator?.status !== "running") {
       return;
     }

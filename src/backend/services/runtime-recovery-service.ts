@@ -99,7 +99,7 @@ export function createRuntimeRecoveryService(deps: RuntimeRecoveryServiceDeps): 
       );
 
       const config = await deps.projectService.loadConfig(repoRoot);
-      await runStep(context, "recover project tool sessions", () => recoverProjectToolSessions(repoRoot, recoveredAt, context));
+      await runStep(context, "recover legacy project tool sessions", () => recoverProjectToolSessions(repoRoot, recoveredAt, context));
       await runStep(context, "recover harness bootstrap", () => recoverHarnessBootstrap(repoRoot, recoveredAt, context));
       await runStep(context, "cleanup legacy harness feedback state", () => cleanupLegacyHarnessFeedback(repoRoot, context));
 

@@ -421,7 +421,7 @@ export function HarnessStudioModal({
                 ) : (
                   <div className="terminal-empty">
                     <strong>harness-engineer</strong>
-                    <span>{engineerSession?.claudeSessionId ? "Resume this project Harness Engineer session." : "Start this project Harness Engineer session."}</span>
+                    <span>{engineerSession?.claudeSessionId ? "Resume this task Harness Engineer session." : "Start this task Harness Engineer session."}</span>
                   </div>
                 )}
               </div>

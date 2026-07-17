@@ -192,8 +192,8 @@ preserve execution history.
 
 ## 5. Runtime State
 
-Task runtime state lives under `.ai/vcm/` in the task worktree. Project-scoped
-tool state can live under `.ai/vcm/` in the connected base repo.
+Task runtime state lives under `.ai/vcm/` in the task worktree. Durable tool
+state can live under `.ai/vcm/` in the connected base repo.
 
 Current runtime paths include:
 
@@ -224,7 +224,7 @@ App-local records live under `<vcmDataDir>/projects/` and app settings live in
 `<vcmDataDir>/settings.json`.
 
 Runtime recovery on project connect should clear or reconcile stale running
-state, recover project tool sessions, recover task rounds, clear impossible
+state, recover tool sessions, recover task rounds, clear impossible
 activity, and remove temporary translation runtime leftovers. Runtime process
 ids are in-memory checks, not durable project data.
 
@@ -268,15 +268,13 @@ VCM roles:
 
 Tool roles:
 
-- `translator`: project-scoped translation tool role. It is not part of VCM
+- `translator`: task-scoped translation tool role. It is not part of VCM
   workflow round completion and does not appear in the top role tab bar.
-- `harness-engineer`: project-scoped harness maintenance tool role. It is not
+- `harness-engineer`: task-scoped harness maintenance tool role. It is not
   part of task workflow round completion.
 
-Project-scoped tool roles persist project state under the base repo, but when
-they perform task work their execution cwd must be the active task worktree.
-When task context changes, VCM should move/resume them safely instead of letting
-old worktree cwd state leak into the next task.
+Tool roles run in the active task worktree. Durable tool state such as
+translation memory or harness feedback may still live under the base repo.
 
 ## 8. Launch Template and Permissions
 
@@ -558,11 +556,10 @@ Before its commit, bootstrap runs `.ai/tools/check-durable-docs` and corrects
 bootstrap-owned findings so the first durable-doc baseline is already a
 current-state snapshot.
 
-VCM runs bootstrap through project-scoped `harness-engineer`:
+VCM runs bootstrap through task-scoped `harness-engineer`:
 
 - run deterministic fixed installer first
-- start/resume Harness Engineer with execution cwd set to the active task
-  worktree
+- start/resume Harness Engineer in the active task worktree
 - ask it to use `vcm-harness-bootstrap`
 - let Harness Engineer create its own bootstrap commit
 - mark bootstrap complete from the Harness Engineer `Stop` hook
@@ -617,7 +614,7 @@ missing, or unexplained high-risk files remain.
 
 ## 17. Translation
 
-Translation is a project-scoped tool feature powered by the Claude Code
+Translation is a task-scoped tool feature powered by the Claude Code
 `translator` role.
 
 Rules:
@@ -724,7 +721,7 @@ polling a missing terminal session forever.
 4.  All tasks use task worktrees.
 5.  Roles for one task share one task worktree and hand off sequentially.
 6.  Gate Reviewer is an optional VCM flow role, task-scoped when used.
-7.  Translator and Harness Engineer are project-scoped tool roles, not flow
+7.  Translator and Harness Engineer are task-scoped tool roles, not flow
     roles.
 8.  No `.claude/commands/` by default.
 9.  No optional agents by default.

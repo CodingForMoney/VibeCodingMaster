@@ -1,6 +1,5 @@
 import { describe, expect, it } from "vitest";
 import { createTaskCloseService } from "../../../src/backend/services/task-close-service.js";
-import { VcmError } from "../../../src/backend/errors.js";
 import type { CleanupTaskResult, TaskRecord } from "../../../src/shared/types/task.js";
 
 const CLEANED_TASK: TaskRecord = {
@@ -39,21 +38,6 @@ describe("createTaskCloseService", () => {
         },
         async stopRoleSession() {
           throw new Error("not reached");
-        },
-        async moveProjectTranslatorSessionToSafeCwd() {
-          calls.push("move-translator");
-          throw new Error("translator cwd failed");
-        },
-        async stopProjectTranslatorSession() {
-          calls.push("stop-translator");
-          throw new Error("translator stop failed");
-        },
-        async moveProjectHarnessEngineerSessionToSafeCwd() {
-          calls.push("move-harness");
-          throw new VcmError({ code: "SESSION_MISSING", message: "missing", statusCode: 404 });
-        },
-        async stopProjectHarnessEngineerSession() {
-          throw new Error("not reached");
         }
       },
       translationService: {
@@ -77,8 +61,6 @@ describe("createTaskCloseService", () => {
     expect(calls.at(-1)).toBe("cleanup-resources");
     expect(result.warnings).toEqual(expect.arrayContaining([
       expect.stringContaining("session registry unavailable"),
-      expect.stringContaining("translator cwd failed"),
-      expect.stringContaining("translator stop failed"),
       expect.stringContaining("translation cleanup failed"),
       expect.stringContaining("round cleanup failed"),
       "worktree directory remained"
@@ -95,7 +77,7 @@ describe("createTaskCloseService", () => {
           throw new Error("filesystem unavailable");
         }
       },
-      sessionService: missingProjectSessions(),
+      sessionService: emptyTaskSessions(),
       translationService: {
         async stopTask() {}
       },
@@ -117,6 +99,44 @@ describe("createTaskCloseService", () => {
       "Task was closed, but resource cleanup did not finish: filesystem unavailable"
     ]);
   });
+
+  it("stops running workflow and tool sessions owned by the task", async () => {
+    const stopped: string[] = [];
+    const service = createTaskCloseService({
+      taskService: {
+        async markTaskCleaned() {
+          return CLEANED_TASK;
+        },
+        async cleanupTask() {
+          return successfulCleanup();
+        }
+      },
+      sessionService: {
+        async listRoleSessions() {
+          return [
+            { role: "project-manager", status: "running" },
+            { role: "coder", status: "resumable" },
+            { role: "translator", status: "running" },
+            { role: "harness-engineer", status: "running" }
+          ] as never;
+        },
+        async stopRoleSession(_repoRoot, _taskSlug, role) {
+          stopped.push(role);
+          return {} as never;
+        }
+      },
+      translationService: {
+        async stopTask() {}
+      },
+      roundService: {
+        stopTask() {}
+      }
+    });
+
+    await service.closeTask("/repo", "demo-task");
+
+    expect(stopped).toEqual(["project-manager", "translator", "harness-engineer"]);
+  });
 });
 
 function successfulCleanup(overrides: Partial<CleanupTaskResult> = {}): CleanupTaskResult {
@@ -134,22 +154,13 @@ function successfulCleanup(overrides: Partial<CleanupTaskResult> = {}): CleanupT
   };
 }
 
-function missingProjectSessions() {
-  const missing = () => Promise.reject(new VcmError({
-    code: "SESSION_MISSING",
-    message: "missing",
-    statusCode: 404
-  }));
+function emptyTaskSessions() {
   return {
     async listRoleSessions() {
       return [];
     },
     async stopRoleSession() {
       throw new Error("not reached");
-    },
-    moveProjectTranslatorSessionToSafeCwd: missing,
-    moveProjectHarnessEngineerSessionToSafeCwd: missing,
-    stopProjectTranslatorSession: missing,
-    stopProjectHarnessEngineerSession: missing
+    }
   };
 }

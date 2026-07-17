@@ -160,7 +160,7 @@ function renderFinalAcceptance(decision: string): string {
 function createRuntime(writes: string[]): TerminalRuntime {
   const session: TerminalSession = {
     id: "session-1",
-    taskSlug: "__project_harness_engineer__",
+    taskSlug: "demo-task",
     role: "harness-engineer",
     status: "running",
     startedAt: "2026-01-01T00:00:00.000Z"
@@ -214,10 +214,13 @@ function createSessionService() {
     updatedAt: "2026-01-01T00:00:00.000Z"
   };
   return {
-    async getProjectHarnessEngineerSession() {
+    async getRoleSession() {
       return record;
     },
-    async ensureProjectHarnessEngineerSession() {
+    async startRoleSession() {
+      return record;
+    },
+    async resumeRoleSession() {
       return record;
     }
   };

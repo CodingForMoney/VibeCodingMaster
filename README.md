@@ -280,8 +280,9 @@ findings back to the responsible role.
 
 Conversation translation is controlled from the sidebar `Translation` section.
 
-VCM uses the project-scoped Translator role and Claude transcript JSONL files,
-not raw terminal text.
+VCM uses a task-scoped Translator role and Claude transcript JSONL files, not
+raw terminal text. Translation memory and completed file translations remain
+project-level durable data.
 
 Common controls:
 
@@ -385,8 +386,9 @@ Use it to:
 - merge task harness commits back to the connected repository branch when
   appropriate
 
-Harness Engineer is project-scoped and resumable. When it performs task work,
-VCM runs it from the active task worktree.
+Harness Engineer is task-scoped and runs from the active task worktree. A new
+task receives its own Harness Engineer session while durable harness feedback
+and shared memory remain project-level data.
 
 ### Auto Memory
 
@@ -420,12 +422,9 @@ can continue.
 
 `Close Task` is destructive.
 
-It stops task-owned VCM role sessions and removes task-owned worktree/branch
-state. Commit or preserve anything important before closing.
-
-Project-scoped tool sessions such as Translator and Harness Engineer are not
-ordinary task deliverables. VCM may move them to a safe cwd when task context
-changes.
+It stops every running session owned by the task, including Translator and
+Harness Engineer, then removes task-owned worktree/branch state. Commit or
+preserve anything important before closing.
 
 ## Troubleshooting
 

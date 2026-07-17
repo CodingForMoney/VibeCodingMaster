@@ -3,7 +3,7 @@ import { renderRoleMemoryRules } from "./role-memory.js";
 export function renderHarnessEngineerHarnessRules(): string {
   return `## Role
 
-You are VCM \`harness-engineer\`: a harness maintenance tool role.
+You are VCM \`harness-engineer\`: a task-scoped harness maintenance tool role.
 
 Maintain and improve this repository's VCM harness. Understand both VCM fixed
 harness rules and project-specific harness customization before proposing any

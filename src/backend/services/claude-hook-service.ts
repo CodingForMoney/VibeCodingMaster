@@ -137,12 +137,22 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
   async function processTranslatorHook(input: ClaudeHookRequest): Promise<ClaudeHookResult> {
     const eventName = parseHookEvent(input.event.hook_event_name);
     const context = await getTranslatorHookContext();
-    const session = await deps.sessionService.recordProjectTranslatorHookEvent(context.project.repoRoot, {
-      eventName,
-      sessionId: stringOrUndefined(input.event.session_id),
-      transcriptPath: stringOrUndefined(input.event.transcript_path),
-      cwd: stringOrUndefined(input.event.cwd) ?? stringOrUndefined(input.event.new_cwd)
-    });
+    const session = input.taskSlug === "__project__"
+      ? await deps.sessionService.recordProjectTranslatorHookEvent(context.project.repoRoot, {
+          eventName,
+          sessionId: stringOrUndefined(input.event.session_id),
+          transcriptPath: stringOrUndefined(input.event.transcript_path),
+          cwd: stringOrUndefined(input.event.cwd) ?? stringOrUndefined(input.event.new_cwd)
+        })
+      : await deps.sessionService.recordRoleHookEvent(context.project.repoRoot, {
+          taskSlug: input.taskSlug,
+          role: input.role,
+          eventName,
+          sessionId: stringOrUndefined(input.event.session_id),
+          transcriptPath: stringOrUndefined(input.event.transcript_path),
+          cwd: stringOrUndefined(input.event.cwd) ?? stringOrUndefined(input.event.new_cwd),
+          allowSessionMismatch: true
+        });
     await deps.translationWorkerService?.handleTranslatorHook(context.project.repoRoot, eventName, input.taskSlug);
     return {
       ok: true,
@@ -157,15 +167,26 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
   async function processHarnessEngineerHook(input: ClaudeHookRequest): Promise<ClaudeHookResult> {
     const eventName = parseHookEvent(input.event.hook_event_name);
     const context = await getProjectToolHookContext("Harness Engineer");
-    const session = await deps.sessionService.recordProjectHarnessEngineerHookEvent(context.project.repoRoot, {
-      eventName,
-      sessionId: stringOrUndefined(input.event.session_id),
-      transcriptPath: stringOrUndefined(input.event.transcript_path),
-      cwd: stringOrUndefined(input.event.cwd) ?? stringOrUndefined(input.event.new_cwd)
-    });
+    const projectScoped = input.taskSlug === "__project_harness_engineer__";
+    const session = projectScoped
+      ? await deps.sessionService.recordProjectHarnessEngineerHookEvent(context.project.repoRoot, {
+          eventName,
+          sessionId: stringOrUndefined(input.event.session_id),
+          transcriptPath: stringOrUndefined(input.event.transcript_path),
+          cwd: stringOrUndefined(input.event.cwd) ?? stringOrUndefined(input.event.new_cwd)
+        })
+      : await deps.sessionService.recordRoleHookEvent(context.project.repoRoot, {
+          taskSlug: input.taskSlug,
+          role: input.role,
+          eventName,
+          sessionId: stringOrUndefined(input.event.session_id),
+          transcriptPath: stringOrUndefined(input.event.transcript_path),
+          cwd: stringOrUndefined(input.event.cwd) ?? stringOrUndefined(input.event.new_cwd),
+          allowSessionMismatch: true
+        });
     const activeTask = deps.autoMemoryService
       ? (await deps.taskService.listTasks(context.project.repoRoot))
-          .find((task) => task.cleanupStatus !== "cleaned")
+          .find((task) => task.cleanupStatus !== "cleaned" && (projectScoped || task.taskSlug === input.taskSlug))
       : undefined;
     const memoryHandled = activeTask
       ? await deps.autoMemoryService?.handleHarnessEngineerHook({

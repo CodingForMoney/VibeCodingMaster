@@ -40,7 +40,7 @@ describe("backend E2E task harness retrospective with mock Claude Code", () => {
 
     const session = await injectOk(env.app, {
       method: "GET",
-      url: "/api/projects/harness/engineer/session"
+      url: `/api/projects/harness/engineer/session?taskSlug=${task.taskSlug}`
     });
     expect(session.json()).toBeNull();
   });
@@ -138,7 +138,7 @@ describe("backend E2E task harness retrospective with mock Claude Code", () => {
     expect(harnessSession.activityStatus).toBe("idle");
     const startedHarnessSession = await injectOk(env.app, {
       method: "GET",
-      url: "/api/projects/harness/engineer/session"
+      url: `/api/projects/harness/engineer/session?taskSlug=${task.taskSlug}`
     });
     expect(startedHarnessSession.json()).toMatchObject({ id: harnessSession.id, activityStatus: "idle" });
     const pmSession = env.mockRuntime.getSessionByRole(task.taskSlug, "project-manager");
@@ -148,7 +148,7 @@ describe("backend E2E task harness retrospective with mock Claude Code", () => {
 
     const idleHarnessSession = await injectOk(env.app, {
       method: "GET",
-      url: "/api/projects/harness/engineer/session"
+      url: `/api/projects/harness/engineer/session?taskSlug=${task.taskSlug}`
     });
     expect(env.mockRuntime.getSession(harnessSession.id)).toBeDefined();
     expect(idleHarnessSession.json()).toMatchObject({ activityStatus: "idle" });

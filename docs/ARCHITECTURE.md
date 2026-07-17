@@ -189,11 +189,11 @@ The reconciler never treats inactivity alone as successful completion.
 
 `task-close-service` is the single owner of task shutdown for both the GUI and
 Gateway. It first persists `cleanupStatus: cleaned`; that logical close releases
-the project for another task. Session shutdown, project-tool cwd migration,
-translation and Round cleanup, forced worktree removal, stale-directory removal,
-forced branch deletion, and task-state removal then run independently as
-best-effort cleanup. Detection and cleanup failures are returned as warnings and
-never reactivate or block the closed task.
+the project for another task. Session shutdown (including task-scoped Translator
+and Harness Engineer sessions), translation and Round cleanup, forced worktree
+removal, stale-directory removal, forced branch deletion, and task-state removal
+then run independently as best-effort cleanup. Detection and cleanup failures are
+returned as warnings and never reactivate or block the closed task.
 
 `task-service` owns the destructive Git and filesystem operations. Task branches
 are force-deleted even when they contain commits absent from the base branch; the

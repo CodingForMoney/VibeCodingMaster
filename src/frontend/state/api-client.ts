@@ -176,9 +176,10 @@ export const apiClient = {
       body: JSON.stringify(input)
     });
   },
-  stopHarnessBootstrap() {
+  stopHarnessBootstrap(input: { taskSlug: string }) {
     return request<HarnessBootstrapStatusReport>("/api/projects/harness/bootstrap/stop", {
-      method: "POST"
+      method: "POST",
+      body: JSON.stringify(input)
     });
   },
   runHarnessBootstrap(input: { taskSlug: string }) {
@@ -187,8 +188,13 @@ export const apiClient = {
       body: JSON.stringify(input)
     });
   },
-  getHarnessEngineerSession() {
-    return request<RoleSessionRecord | null>("/api/projects/harness/engineer/session");
+  getHarnessEngineerSession(taskSlug?: string | null) {
+    const params = new URLSearchParams();
+    if (taskSlug) {
+      params.set("taskSlug", taskSlug);
+    }
+    const suffix = params.toString() ? `?${params.toString()}` : "";
+    return request<RoleSessionRecord | null>(`/api/projects/harness/engineer/session${suffix}`);
   },
   ensureHarnessEngineerSession(input: StartRoleSessionRequest = {}) {
     return request<RoleSessionRecord>("/api/projects/harness/engineer/session/ensure", {
@@ -214,14 +220,16 @@ export const apiClient = {
       body: JSON.stringify(input)
     });
   },
-  stopHarnessEngineerSession() {
+  stopHarnessEngineerSession(input: StartRoleSessionRequest = {}) {
     return request<RoleSessionRecord>("/api/projects/harness/engineer/session/stop", {
-      method: "POST"
+      method: "POST",
+      body: JSON.stringify(input)
     });
   },
-  notifyHarnessEngineerHarnessUpdated() {
+  notifyHarnessEngineerHarnessUpdated(input: StartRoleSessionRequest = {}) {
     return request<RoleSessionRecord>("/api/projects/harness/engineer/session/notify-harness", {
-      method: "POST"
+      method: "POST",
+      body: JSON.stringify(input)
     });
   },
   getHarnessFeedbackState(taskSlug?: string | null) {
@@ -431,9 +439,10 @@ export const apiClient = {
       method: "POST"
     });
   },
-  notifyTranslatorHarnessUpdated() {
+  notifyTranslatorHarnessUpdated(input: StartRoleSessionRequest = {}) {
     return request<RoleSessionRecord>("/api/projects/translation/session/notify-harness", {
-      method: "POST"
+      method: "POST",
+      body: JSON.stringify(input)
     });
   },
   retryTranslation(sessionId: string, translationId: string) {
@@ -454,8 +463,13 @@ export const apiClient = {
   getTranslationState() {
     return request<TranslationState>("/api/translation/state");
   },
-  getTranslatorSession() {
-    return request<RoleSessionRecord | null>("/api/translation/session");
+  getTranslatorSession(taskSlug?: string | null) {
+    const params = new URLSearchParams();
+    if (taskSlug) {
+      params.set("taskSlug", taskSlug);
+    }
+    const suffix = params.toString() ? `?${params.toString()}` : "";
+    return request<RoleSessionRecord | null>(`/api/translation/session${suffix}`);
   },
   ensureTranslatorSession(input: StartRoleSessionRequest = {}) {
     return request<RoleSessionRecord>("/api/translation/session/ensure", {
@@ -481,9 +495,10 @@ export const apiClient = {
       body: JSON.stringify(input)
     });
   },
-  stopTranslatorSession() {
+  stopTranslatorSession(input: StartRoleSessionRequest = {}) {
     return request<RoleSessionRecord>("/api/translation/session/stop", {
-      method: "POST"
+      method: "POST",
+      body: JSON.stringify(input)
     });
   },
   browseTranslationSourceFiles(input: { path?: string; query?: string; limit?: number } = {}) {

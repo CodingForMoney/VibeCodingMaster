@@ -122,8 +122,6 @@ export interface AutoMemoryServiceDeps {
     | "getRoleSession"
     | "startRoleSession"
     | "resumeRoleSession"
-    | "ensureProjectHarnessEngineerSession"
-    | "getProjectHarnessEngineerSession"
   >;
   appSettings: Pick<AppSettingsService, "getPreferences" | "getGateReviewSettings">;
   isHarnessEngineerAvailable?: (repoRoot: string) => Promise<boolean>;
@@ -555,15 +553,16 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
       return;
     }
     try {
-      const existing = await deps.sessionService.getProjectHarnessEngineerSession(baseRepoRoot);
+      const existing = await deps.sessionService.getRoleSession(baseRepoRoot, state.taskSlug, "harness-engineer");
       if (existing?.activityStatus === "running") {
         return;
       }
-      const session = await deps.sessionService.ensureProjectHarnessEngineerSession(baseRepoRoot, {
-        taskSlug: state.taskSlug,
-        cols: 120,
-        rows: 32
-      });
+      const input = { cols: 120, rows: 32 };
+      const session = existing?.status === "running"
+        ? existing
+        : existing?.claudeSessionId
+          ? await deps.sessionService.resumeRoleSession(baseRepoRoot, state.taskSlug, "harness-engineer", input)
+          : await deps.sessionService.startRoleSession(baseRepoRoot, state.taskSlug, "harness-engineer", input);
       if (session.status !== "running" || session.activityStatus === "running" || !deps.runtime.getSession(session.id)) {
         return;
       }
