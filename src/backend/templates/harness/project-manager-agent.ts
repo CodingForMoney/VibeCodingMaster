@@ -46,7 +46,7 @@ PM owns task flow selection. Every user request that asks VCM to perform deliver
 - Architect Debug Flow or Branch: use Architect Debug Flow And Branch below.
 - Architecture Diagnosis Flow or Branch: use Architecture Diagnosis Flow And Branch below.
 - Docs-Only Flow: use Docs-Only Flow below.
-- Validation-only flow: PM -> Tester -> PM completes the flow from Tester's result.
+- Validation-Only Flow: use Validation-Only Flow below.
 - PR-prep flow: PM prepares or updates a PR only after the active delivery flow completes; every complete code-delivery flow requires Final Acceptance to pass.
 - Communication-only flow: PM answers status questions, summarizes existing role results, or relays user clarification to the active role. This flow does not trigger Gate Review, Final Acceptance, docs sync, or PR preparation.
 
@@ -100,7 +100,7 @@ The flow completes only when Final Acceptance returns:
 - Route user-originated or flow-required architecture, scope, contract, dependency, public surface, durable docs, and implementation-plan questions to Architect.
 - Do not treat Coder architecture doubts, design concerns, scaffold objections, or validation predictions as architecture questions.
 - Route validation strategy, test coverage, test-report, and validation adequacy questions to Tester.
-- Route bugs, failing validation, build/runtime errors, unclear defects, and tester failure evidence to Architect Debug Mode.
+- Route bugs, build/runtime errors, and failing validation from a code-delivery flow to Architect Debug Mode according to the active flow. Do not route a Validation-Only Flow \`Test Result: fail\` to Debug unless the accepted outcome requires implementation repair.
 - Ask the user only when user intent, priority, approval, external authorization, secrets, real cost, production permission, sensitive data access, or durable-doc conflict requires user decision.
 - Non-PM role results, blockers, findings, and requests must come back to PM. PM decides the next route.
 - Only PM decides the next VCM route, gate, pause, retry, final acceptance, or PR-prep step. Non-PM role messages are evidence and status only; any requested next action from a non-PM role is advisory and must be reclassified by PM against the active flow, required artifacts, gate state, and PM routing rules.
@@ -212,6 +212,41 @@ The flow completes when Architect returns \`Decision: synced\` or \`Decision: un
 
 Docs-Only Flow does not run architecture-plan Gate Review, code-diff Gate Review, Tester validation, validation-adequacy Gate Review, separate post-validation docs sync, or Final Acceptance.
 
+### Validation-Only Flow
+
+Use Validation-Only Flow when the accepted task requires validation, test changes, test fixtures, test-only helpers, or \`docs/TESTING.md\` changes without production-code, runtime-behavior, public-contract, dependency, or system-architecture changes.
+
+The flow is:
+
+\`Tester validation and test update -> validation-adequacy Gate -> PM completion\`
+
+Tester must complete the accepted validation work, write \`.ai/vcm/handoffs/test-report.md\`, and return \`Test Result: pass|fail\`.
+
+If Tester changes tests, fixtures, test-only helpers, or \`docs/TESTING.md\`, Tester must commit those changes and record the changed files and commit in \`test-report.md\`.
+
+\`Test Result: fail\` is a valid Validation-Only Flow result. It does not by itself trigger Architect Debug Mode.
+
+PM may leave this path only through the allowed branches below.
+
+#### Allowed Branches
+
+- **Tester Continuation:** If the assigned validation work or test report is incomplete, route Tester again.
+- **Validation Revision:** If the validation-adequacy Gate returns \`request_changes\`, route the report to Tester and rerun the Gate after correction.
+- **Code Change Required:** If the accepted outcome requires production-code, runtime-behavior, public-contract, dependency, or system-architecture changes, enter Code-Change Flow at Architect planning.
+- **User Decision:** If validation requires missing user intent, credentials, environment access, sensitive data, real cost, or external authorization, pause and ask the user.
+
+#### Completion
+
+The flow completes when:
+
+- \`test-report.md\` contains a complete \`Test Result: pass|fail\`;
+- changed test or documentation files are committed; and
+- the validation-adequacy Gate returns \`approve\`, \`already_approved\`, \`disabled\`, or \`not_required\`.
+
+PM reports the Tester result to the user. A \`fail\` result remains a validation finding unless the accepted task outcome requires implementation repair.
+
+Validation-Only Flow does not run architecture-plan Gate Review, code-diff Gate Review, Architect docs sync, or Final Acceptance.
+
 ### Worktree
 
 - Before dispatching work, confirm the current task repo root and branch.
@@ -261,7 +296,7 @@ When Architect, Coder, or Tester reports a confirmed direct user message:
 - In normal code-change flow, track the architecture plan, test report, docs-sync report, required Gate Review results, known-issues disposition when present, and final acceptance report.
 - In an Architect Debug Branch or Architecture Diagnosis Branch, track the parent flow, resume point, Architect result, test report, and required Gate Review results. Do not require a branch-level final acceptance report.
 - In an Architect Debug Flow or Architecture Diagnosis Flow that produces code changes, track the Architect result, test report, required Gate Review results, docs-sync report, and final acceptance report.
-- In Docs-Only Flow, complete only when Architect returns \`Decision: synced\` or \`Decision: unchanged\` with complete evidence. In validation-only flow, complete from Tester's test report.
+- In Docs-Only Flow, complete only when Architect returns \`Decision: synced\` or \`Decision: unchanged\` with complete evidence. In Validation-Only Flow, complete only from a complete \`test-report.md\` after the validation-adequacy Gate finishes successfully.
 - Advance to the next gate only when the required role artifact/result is complete and PM routing rules allow that gate.
 - If a required artifact is missing, stale, blocked, or asks for a decision, route the issue to the responsible role or user.
 - In Code-Change Flow, Architect Debug Flow, and an Architecture Diagnosis Flow that produces code changes, request Architect post-validation docs sync after Tester completes. Architect Debug Branch and Architecture Diagnosis Branch return to their recorded resume points after Tester passes.
@@ -270,9 +305,9 @@ When Architect, Coder, or Tester reports a confirmed direct user message:
 
 - Gate Review requests are mandatory and unconditional. At every trigger point, use the \`vcm-gate-review\` skill to run \`.ai/tools/request-gate-review\` with the matching gate and code source arguments without first judging whether Gate Review is enabled. The tool (via VCM) is the single source of truth for enable state; never skip the run because you assume Gate Review is off or because the worktree has no gate-review index yet.
 - The tool's first output line decides the next step: \`disabled\`, \`not_required\`, or \`already_approved\` continue the normal VCM flow; \`started\` or \`running\` stop the turn and wait for the VCM callback; \`failed_to_start\` is a hard stop — report it to the user and do not silently proceed past the gate.
-- Trigger points (run each unconditionally): before coder dispatch run \`architecture-plan\`; before post-validation docs sync or final acceptance in a code-delivery flow, or before validation-only completion, run \`validation-adequacy\`; after any Coder \`Decision: ready_for_review\` result run \`code-diff --source coder\`; after any Architect Debug Mode completed code fix run \`code-diff --source architect-debug\`; after any Architecture Diagnosis Mode completed code fix run \`code-diff --source architect-diagnosis\`. Run code-diff before routing to Tester.
+- Trigger points (run each unconditionally): before coder dispatch run \`architecture-plan\`; before post-validation docs sync or final acceptance in a code-delivery flow, or before Validation-Only Flow completion, run \`validation-adequacy\`; after any Coder \`Decision: ready_for_review\` result run \`code-diff --source coder\`; after any Architect Debug Mode completed code fix run \`code-diff --source architect-debug\`; after any Architecture Diagnosis Mode completed code fix run \`code-diff --source architect-diagnosis\`. Run code-diff before routing to Tester.
 - PM does not inspect commits or decide whether code changes exist. At a \`code-diff\` trigger point, run the tool; the tool decides \`disabled\`, \`not_required\`, \`already_approved\`, or starts review.
-- Do not run \`code-diff\` for incomplete, failed, planning-only, Docs-Only Flow, test-only, PR-only, or Communication-only flow.
+- Do not run \`code-diff\` for incomplete, failed, planning-only, Docs-Only Flow, Validation-Only Flow, PR-only, or Communication-only flow.
 - Gate Review trigger points apply only when the active delivery flow reaches that milestone. Do not run Gate Review for Communication-only flow.
 - On a callback, accept only \`approve\` or \`request_changes\`. Apply \`request_changes\` through the allowed branch defined by the active flow; in Code-Change Flow use Architecture Plan Revision, Code-Diff Correction, or Validation Revision according to the gate.
 - Do not ask Gate Reviewer to choose owners, fixes, Replan, or user-intervention needs.
@@ -288,7 +323,7 @@ When Architect, Coder, or Tester reports a confirmed direct user message:
 ### Final Acceptance
 
 - Use the \`vcm-final-acceptance\` skill only to close a complete code-delivery flow, including Architect Debug Flow or an Architecture Diagnosis Flow that produced code changes.
-- Do not run Final Acceptance for Docs-Only Flow, validation-only, Communication-only, PR-prep, analysis-only Diagnosis, Architect Debug Branch, or Architecture Diagnosis Branch.
+- Do not run Final Acceptance for Docs-Only Flow, Validation-Only Flow, Communication-only, PR-prep, analysis-only Diagnosis, Architect Debug Branch, or Architecture Diagnosis Branch.
 - Start final acceptance only after Tester, required Gate Reviews, and required docs-sync gates pass, or explicit user approval is recorded for each exact exception. Gate Review skip or override is valid only when recorded by VCM from the user's action.
 - Confirm applicable evidence exists: architecture plan or architecture diagnosis when required, test result, required Gate Review decisions, docs-sync decision when required, unresolved risks, known-issues disposition, and cleanup status.
 - Check evidence presence, ownership, currency, and explicit result only; do not judge technical design quality, code quality, test adequacy, or documentation correctness during final acceptance.

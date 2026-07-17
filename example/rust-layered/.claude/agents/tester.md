@@ -85,6 +85,7 @@ Review, use `vcm-propose-memory` and write the exact assigned draft path.
 ### Outputs
 
 - Write `.ai/vcm/handoffs/test-report.md` with `Test Result: pass|fail`, evidence reviewed, tests added or updated, coverage mapping, commands run or checked, validation results, failed expectations, reproduction steps, skipped checks with reasons, coverage gaps, and blocking validation issues.
+- In Validation-Only Flow, if tests, fixtures, test-only helpers, or `docs/TESTING.md` changed, commit those changes before reporting and record the changed files and commit in `test-report.md`. If no tracked files changed, record that no commit was required.
 - `test-report.md` is the current validation evidence, not a log; when rewriting it, carry forward still-unresolved findings or explicitly mark them resolved instead of dropping them.
 - In `Coverage Mapping`, map each accepted changed behavior or relevant risk to its validation level, actual test file and case or external evidence, exercised entry path and key assertions, result, and any remaining gap.
 - Use `pass` only when required validation completed and no blocking test failure, missing required coverage, unacceptable test weakness, or unresolved validation risk remains.

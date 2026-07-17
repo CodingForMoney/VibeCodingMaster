@@ -292,22 +292,22 @@ project-manager
 
 Additional routes:
 
-- A task that begins with Debug or Architecture Diagnosis and produces code
-  changes uses a complete code-delivery flow:
+- Architect Debug Flow or a code-producing Architecture Diagnosis Flow uses a
+  complete code-delivery flow:
   `project-manager -> architect mode -> code-diff Gate Review -> tester -> architect docs sync -> project-manager final acceptance`
-- Debug or Architecture Diagnosis entered from an active main flow is a branch:
-  suspend the main flow, record its resume point, run the mode through code-diff
-  Gate Review and tester, then return to that resume point without branch-level
-  final acceptance.
-- An analysis-only primary Architecture Diagnosis completes from its diagnosis
+- Architect Debug Branch or Architecture Diagnosis Branch suspends the parent
+  flow, records its resume point, runs the mode through code-diff Gate Review
+  and tester, then returns to that resume point without branch-level final
+  acceptance.
+- An analysis-only Architecture Diagnosis Flow completes from its diagnosis
   result without final acceptance.
 - Docs-Only Flow: `project-manager -> architect -> project-manager completion`
-- Test-only or validation-only work:
-  `project-manager -> tester -> project-manager completion`
+- Validation-Only Flow:
+  `project-manager -> tester -> validation-adequacy Gate Review -> project-manager completion`
 
-If a docs/test/validation-only task reveals required code, architecture, public
-contract, dependency, durable-doc, or validation-strategy changes, route back
-through the full code-change flow.
+If Docs-Only Flow or Validation-Only Flow reveals that the accepted outcome
+requires production-code, runtime-behavior, public-contract, dependency, or
+system-architecture changes, route through the full Code-Change Flow.
 
 PM Managed Mode applies only when the user explicitly requests it. PM must drive
 the task to completion, route ordinary technical decisions to the responsible

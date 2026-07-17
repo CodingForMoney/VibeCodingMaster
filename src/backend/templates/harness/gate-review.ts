@@ -46,23 +46,26 @@ decisions to Coder.
 
 ## Validation Adequacy Gate
 
-Read \`.claude/agents/tester.md\`, the relevant architect/coder definitions,
-root \`CLAUDE.md\`, \`.ai/vcm/handoffs/architecture-plan.md\`,
+Read \`.claude/agents/tester.md\`, root \`CLAUDE.md\`,
 \`.ai/vcm/handoffs/test-report.md\`, \`docs/CODING_STANDARDS.md\`,
 \`docs/TESTING.md\`, the actual tests and fixtures named by the report, and the
-production entry points needed to verify what those tests exercise. Read
+production entry points needed to verify what those tests exercise. Read the
+relevant architect/coder definitions and \`.ai/vcm/handoffs/architecture-plan.md\`
+when the active flow produced an architecture plan. Read
 \`.ai/generated/public-surface.json\` when public contracts changed.
 
-Reconstruct the changed observable behavior and its risks from the current
-plan and implementation. Treat Tester conclusions, green commands, and
+Reconstruct the accepted validation target, observable behavior, and risks
+from the active flow evidence and current implementation. Treat Tester
+conclusions, green commands, and
 architecture coverage hints as evidence, not authority. Record the concrete
 production files, test files, test cases, entry paths, assertions, commands,
 and results inspected.
 
-Map every important changed behavior and risk to its validation level, actual
+Map every important validated or changed behavior and risk to its validation level, actual
 test case or reproducible external behavior evidence, exercised entry path,
-assertions, and result. Verify baseline coverage for changed callable units,
-then verify that cross-module, public-contract, UI, CLI/tooling, hook, session,
+assertions, and result. Verify baseline coverage for changed callable units
+when implementation changed, then verify that cross-module, public-contract,
+UI, CLI/tooling, hook, session,
 persistence, worktree, external-process, and other important user or system
 paths have integration or E2E coverage that exercises real behavior.
 
@@ -327,7 +330,7 @@ Use this skill at every project-manager Gate Review trigger point and whenever V
 ## Trigger Points
 
 - \`architecture-plan\`: after architect writes \`.ai/vcm/handoffs/architecture-plan.md\`, before coder dispatch.
-- \`validation-adequacy\`: after tester writes \`.ai/vcm/handoffs/test-report.md\`, before post-validation docs sync or final acceptance in a code-delivery flow, or before validation-only completion.
+- \`validation-adequacy\`: after tester writes \`.ai/vcm/handoffs/test-report.md\`, before post-validation docs sync or final acceptance in a code-delivery flow, or before Validation-Only Flow completion.
 - \`code-diff\`: after Coder returns \`Decision: ready_for_review\`, Architect Debug Mode completes a code fix, or Architecture Diagnosis Mode completes a code fix, before PM routes to Tester. Identify the source with \`--source coder\`, \`--source architect-debug\`, or \`--source architect-diagnosis\`.
 
 ## Request
