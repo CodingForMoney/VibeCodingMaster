@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  renderArchitectureBriefTemplate,
   renderArchitecturePlanTemplate,
   renderFinalAcceptanceTemplate,
   renderTestReportTemplate
@@ -302,6 +303,7 @@ looks-good
 
   it("keeps generated artifact templates aligned with required headings", () => {
     const templates = [
+      ["architecture-brief", renderArchitectureBriefTemplate("demo")],
       ["architecture-plan", renderArchitecturePlanTemplate("demo")],
       ["test-report", renderTestReportTemplate("demo")],
       ["final-acceptance", renderFinalAcceptanceTemplate("demo")]
@@ -316,8 +318,14 @@ looks-good
   });
 });
 
-function completeTemplate(kind: "architecture-plan" | "test-report" | "final-acceptance", content: string): string {
+function completeTemplate(kind: "architecture-brief" | "architecture-plan" | "test-report" | "final-acceptance", content: string): string {
   const completed = content.replaceAll("TBD", "None.");
+  if (kind === "architecture-brief") {
+    return completed.replace(
+      "Architecture Brief Status: interviewing|confirmed",
+      "Architecture Brief Status: confirmed"
+    );
+  }
   if (kind === "test-report") {
     return completed.replace("Test Result: pass|fail", "Test Result: pass");
   }

@@ -1243,6 +1243,7 @@ function createTestSessionService(
             coder: ".ai/vcm/handoffs/role-commands/coder.md",
             tester: ".ai/vcm/handoffs/role-commands/tester.md"
           },
+          architectureBriefPath: ".ai/vcm/handoffs/architecture-brief.md",
           architecturePlanPath: ".ai/vcm/handoffs/architecture-plan.md",
           knownIssuesPath: ".ai/vcm/handoffs/known-issues.md",
           testReportPath: ".ai/vcm/handoffs/test-report.md",

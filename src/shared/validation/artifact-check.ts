@@ -1,6 +1,13 @@
 import type { ArtifactCheckResult, ArtifactKind } from "../types/artifact.js";
 
 const REQUIRED_HEADINGS: Record<ArtifactKind, readonly string[]> = {
+  "architecture-brief": [
+    "Accepted Outcome",
+    "Confirmed User Decisions",
+    "Existing Constraints",
+    "Unresolved User Decisions",
+    "User Confirmation"
+  ],
   "architecture-plan": [
     "Accepted Scope",
     "Current Code Reality",
@@ -115,6 +122,20 @@ export function checkMarkdownArtifact(
 }
 
 function validateArtifactFields(kind: ArtifactKind, content: string): string[] {
+  if (kind === "architecture-brief") {
+    const status = /^\s*Architecture Brief Status\s*:\s*(\S+)\s*$/im.exec(content)?.[1]?.toLowerCase();
+    const invalidFields = status === "interviewing" || status === "confirmed"
+      ? []
+      : ["Architecture Brief Status must be interviewing or confirmed."];
+    if (status === "confirmed") {
+      const unresolved = readArtifactSectionValue(content, "Unresolved User Decisions");
+      if (!unresolved || !/^none\.?$/i.test(unresolved)) {
+        invalidFields.push("Unresolved User Decisions must be None when Architecture Brief Status is confirmed.");
+      }
+    }
+    return invalidFields;
+  }
+
   if (kind === "test-report") {
     const result = /^\s*Test Result\s*:\s*(\S+)\s*$/im.exec(content)?.[1]?.toLowerCase();
     const invalidFields = result === "pass" || result === "fail"

@@ -20,7 +20,8 @@ Format is necessary but not sufficient. Do not approve an architecture plan
 only because required sections exist.
 
 For \`architecture-plan\`, reconstruct the proposed architecture and look for
-design flaws before checking formatting. Read \`.ai/vcm/handoffs/architecture-plan.md\`,
+design flaws before checking formatting. Read the confirmed
+\`.ai/vcm/handoffs/architecture-brief.md\`, \`.ai/vcm/handoffs/architecture-plan.md\`,
 \`.claude/agents/architect.md\`, root \`CLAUDE.md\`, \`docs/ARCHITECTURE.md\`,
 affected module \`ARCHITECTURE.md\` files, \`.ai/generated/module-index.json\`,
 \`.ai/generated/public-surface.json\` when public surface may change, and the
@@ -32,6 +33,8 @@ ownership, cross-module calls, state changes or side effects, completion and
 failure signals, and consumers. For every changed cross-file or public surface,
 inspect its current callers and consumers.
 
+Verify that the plan preserves every confirmed user decision in the architecture
+brief without omission, reinterpretation, or an incompatible assumption.
 Analyze accepted scope versus proposed design, current code reality versus
 plan claims, ownership, data flow, lifecycle, module boundaries, dependency
 direction, public surface and callers, architecture invariants, state or durable artifact ownership,
@@ -165,6 +168,7 @@ Use this findings structure:
 ## Architecture Analysis
 
 - Evidence Read:
+- Architecture Brief Fit:
 - End-To-End Flow:
 - Scope Fit:
 - Code Reality:
@@ -335,7 +339,7 @@ Use this skill at every project-manager Gate Review trigger point and whenever V
 
 ## Trigger Points
 
-- \`architecture-plan\`: after architect writes \`.ai/vcm/handoffs/architecture-plan.md\`, before coder dispatch.
+- \`architecture-plan\`: after the user confirms \`.ai/vcm/handoffs/architecture-brief.md\` and architect writes \`.ai/vcm/handoffs/architecture-plan.md\`, before coder dispatch.
 - \`validation-adequacy\`: after tester writes \`.ai/vcm/handoffs/test-report.md\`, before post-validation docs sync or final acceptance in a code-delivery flow, or before Validation-Only Flow completion.
 - \`code-diff\`: after Coder returns \`Decision: ready_for_review\`, Architect Debug Mode completes a code fix, or Architecture Diagnosis Mode completes a code fix, before PM routes to Tester. Identify the source with \`--source coder\`, \`--source architect-debug\`, or \`--source architect-diagnosis\`.
 

@@ -179,6 +179,7 @@ Current runtime paths include:
 <taskRepoRoot>/.ai/vcm/handoffs/
 <taskRepoRoot>/.ai/vcm/handoffs/messages/
 <taskRepoRoot>/.ai/vcm/handoffs/role-commands/
+<taskRepoRoot>/.ai/vcm/handoffs/architecture-brief.md
 <taskRepoRoot>/.ai/vcm/handoffs/architecture-plan.md
 <taskRepoRoot>/.ai/vcm/handoffs/architecture-diagnosis.md
 <taskRepoRoot>/.ai/vcm/handoffs/coder-completion.md
@@ -283,7 +284,8 @@ Default code-change route:
 
 ```text
 project-manager
-  -> architect
+  -> architect interview
+  -> architect planning
   -> coder
   -> tester
   -> architect docs sync
@@ -318,9 +320,16 @@ constraints, external accounts/secrets/data access, cost, production permission,
 sensitive data access, durable-doc conflict, or a proven requested-outcome change
 requires explicit user direction.
 
-## 10. Architecture Plan and Scaffold
+## 10. Architecture Interview, Plan, and Scaffold
 
-For code changes, architect writes `.ai/vcm/handoffs/architecture-plan.md`.
+Before architecture planning, Architect uses \`vcm-architecture-interview\` to
+resolve user-owned behavior and contract decisions one question at a time.
+Facts available from the worktree are investigated rather than asked. The
+confirmed result lives in \`.ai/vcm/handoffs/architecture-brief.md\`; Architect
+does not plan, scaffold, or implement during the interview.
+
+After PM routes planning from the confirmed brief, Architect writes
+`.ai/vcm/handoffs/architecture-plan.md`.
 
 The plan must cover:
 
@@ -387,8 +396,11 @@ started, or failed.
 
 Input policy:
 
-- `architecture-plan` uses `.ai/vcm/handoffs/architecture-plan.md` as its core
-  input. Missing or empty core input is `not_required`.
+- `architecture-plan` requires a complete, confirmed
+  `.ai/vcm/handoffs/architecture-brief.md` and uses
+  `.ai/vcm/handoffs/architecture-plan.md` as its core plan input. A missing,
+  incomplete, or unconfirmed brief fails the gate request; a missing or empty
+  plan is `not_required`.
 - `validation-adequacy` uses `.ai/vcm/handoffs/test-report.md` as its core
   input. Missing or empty core input is `not_required`.
 - `code-diff` is triggered by PM after Coder `Decision: ready_for_review`, an
@@ -404,7 +416,7 @@ Input policy:
   so the review receives the confirmed root cause and completed-fix evidence,
   not only the original Architect route command.
 - Gates avoid duplicate review by comparing input hashes. Architecture review
-  binds the plan to current scaffold/code evidence; validation review binds the
+  binds the confirmed brief and plan to current scaffold/code evidence; validation review binds the
   test report to current non-document code/test evidence and `docs/TESTING.md`;
   code-diff review binds the selected commit range and diff.
 

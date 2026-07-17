@@ -1,3 +1,30 @@
+export function renderArchitectureBriefTemplate(taskSlug: string): string {
+  return `# Architecture Brief: ${taskSlug}
+
+Architecture Brief Status: interviewing|confirmed
+
+## Accepted Outcome
+
+TBD
+
+## Confirmed User Decisions
+
+TBD
+
+## Existing Constraints
+
+TBD
+
+## Unresolved User Decisions
+
+TBD
+
+## User Confirmation
+
+TBD
+`;
+}
+
 export function renderArchitecturePlanTemplate(taskSlug: string): string {
   return `# Architecture Plan: ${taskSlug}
 

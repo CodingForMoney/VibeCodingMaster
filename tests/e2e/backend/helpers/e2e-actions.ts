@@ -1,3 +1,5 @@
+import fs from "node:fs/promises";
+import path from "node:path";
 import type { FastifyInstance } from "fastify";
 import type { TaskWorkspaceState } from "../../../../src/shared/types/api.js";
 import type {
@@ -45,6 +47,35 @@ export async function createTask(app: FastifyInstance, taskSlug: string): Promis
     payload: { taskSlug, title: "Mock Claude flow" }
   });
   return response.json<TaskRecord>();
+}
+
+export async function writeConfirmedArchitectureBrief(taskRepoRoot: string, taskSlug: string): Promise<void> {
+  await fs.writeFile(path.join(taskRepoRoot, ".ai/vcm/handoffs/architecture-brief.md"), [
+    `# Architecture Brief: ${taskSlug}`,
+    "",
+    "Architecture Brief Status: confirmed",
+    "",
+    "## Accepted Outcome",
+    "",
+    "Deliver the accepted E2E behavior.",
+    "",
+    "## Confirmed User Decisions",
+    "",
+    "Use the behavior stated by the test task.",
+    "",
+    "## Existing Constraints",
+    "",
+    "Preserve the current test repository contract.",
+    "",
+    "## Unresolved User Decisions",
+    "",
+    "None",
+    "",
+    "## User Confirmation",
+    "",
+    "Confirmed for this E2E scenario.",
+    ""
+  ].join("\n"), "utf8");
 }
 
 export async function startRole(app: FastifyInstance, taskSlug: string, role: RoleName): Promise<RoleSessionRecord> {

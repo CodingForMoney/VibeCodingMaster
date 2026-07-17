@@ -8,7 +8,8 @@ import {
   getGateState,
   requestGateReview,
   updateGateSettings,
-  waitFor
+  waitFor,
+  writeConfirmedArchitectureBrief
 } from "./helpers/e2e-actions.js";
 import type { GateReviewGate } from "../../../src/shared/types/gate-review.js";
 import type { MockClaudePromptContext } from "./helpers/mock-claude-runtime.js";
@@ -38,6 +39,11 @@ describe("backend E2E Gate Review with mock Claude Code", () => {
     });
     env.mockRuntime.onPrompt("gate-reviewer", "[VCM GATE REVIEW]", writeApproveGateReport, { once: false });
 
+    const unconfirmedArchitecture = await requestGateReview(env.app, task.taskSlug, "architecture-plan");
+    expect(unconfirmedArchitecture.status).toBe("failed_to_start");
+    expect(unconfirmedArchitecture.message).toContain("architecture-brief.md is incomplete");
+    await writeConfirmedArchitectureBrief(task.worktreePath, task.taskSlug);
+
     await fs.writeFile(path.join(task.worktreePath, ".ai/vcm/handoffs/architecture-plan.md"), "", "utf8");
     const emptyArchitecture = await requestGateReview(env.app, task.taskSlug, "architecture-plan");
     expect(emptyArchitecture.status).toBe("not_required");
@@ -61,6 +67,16 @@ describe("backend E2E Gate Review with mock Claude Code", () => {
     const unchangedArchitecture = await requestGateReview(env.app, task.taskSlug, "architecture-plan");
     expect(unchangedArchitecture.status).toBe("already_approved");
     expect(unchangedArchitecture.record.inputHash).toBe(firstArchitectureHash);
+
+    const briefPath = path.join(task.worktreePath, ".ai/vcm/handoffs/architecture-brief.md");
+    const revisedBrief = (await fs.readFile(briefPath, "utf8"))
+      .replace("Use the behavior stated by the test task.", "Use the revised behavior confirmed by the test task.");
+    await fs.writeFile(briefPath, revisedBrief, "utf8");
+    const changedBriefArchitecture = await requestGateReview(env.app, task.taskSlug, "architecture-plan");
+    expect(changedBriefArchitecture.status).toBe("started");
+    await waitForGate(env.app, task.taskSlug, "architecture-plan");
+    const architectureAfterBriefChange = await getGateState(env.app, task.taskSlug);
+    expect(architectureAfterBriefChange.gates["architecture-plan"].inputHash).not.toBe(firstArchitectureHash);
 
     await fs.appendFile(
       path.join(task.worktreePath, ".ai/vcm/handoffs/architecture-plan.md"),
@@ -125,6 +141,7 @@ async function writeApproveGateReport(ctx: MockClaudePromptContext): Promise<voi
         "## Architecture Analysis",
         "",
         "- Evidence Read: architecture plan, current source, and callers",
+        "- Architecture Brief Fit: confirmed decisions are preserved",
         "- End-To-End Flow: entry to owner to completion",
         "- Scope Fit: complete",
         "- Code Reality: verified",

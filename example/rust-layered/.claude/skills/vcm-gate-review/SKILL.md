@@ -11,7 +11,7 @@ Use this skill at every project-manager Gate Review trigger point and whenever V
 
 ## Trigger Points
 
-- `architecture-plan`: after architect writes `.ai/vcm/handoffs/architecture-plan.md`, before coder dispatch.
+- `architecture-plan`: after the user confirms `.ai/vcm/handoffs/architecture-brief.md` and architect writes `.ai/vcm/handoffs/architecture-plan.md`, before coder dispatch.
 - `validation-adequacy`: after tester writes `.ai/vcm/handoffs/test-report.md`, before post-validation docs sync or final acceptance in a code-delivery flow, or before Validation-Only Flow completion.
 - `code-diff`: after Coder returns `Decision: ready_for_review`, Architect Debug Mode completes a code fix, or Architecture Diagnosis Mode completes a code fix, before PM routes to Tester. Identify the source with `--source coder`, `--source architect-debug`, or `--source architect-diagnosis`.
 

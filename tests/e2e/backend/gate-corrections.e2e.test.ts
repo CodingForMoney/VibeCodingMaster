@@ -13,7 +13,8 @@ import {
   requestGateReview,
   startRole,
   updateGateSettings,
-  waitFor
+  waitFor,
+  writeConfirmedArchitectureBrief
 } from "./helpers/e2e-actions.js";
 import { createMockClaudeE2eApp } from "./helpers/e2e-app.js";
 import { createE2eRepo, git } from "./helpers/e2e-repo.js";
@@ -34,6 +35,7 @@ describe("backend E2E Gate Review correction loops", () => {
     const repo = await createE2eRepo();
     cleanups.push(() => repo.cleanup());
     const task = await connectAndCreateTask(env.app, repo, "mock-architecture-correction");
+    await writeConfirmedArchitectureBrief(task.worktreePath, task.taskSlug);
     await updateGateSettings(env.app, task.taskSlug, { "architecture-plan": true });
     await startRole(env.app, task.taskSlug, "project-manager");
     registerPmGateCallback(env, "architecture-plan");
@@ -236,6 +238,7 @@ function analysisForGate(gate: GateReviewGate): string[] {
       "## Architecture Analysis",
       "",
       "- Evidence Read: plan, current source, and affected callers",
+      "- Architecture Brief Fit: confirmed decisions are preserved",
       "- End-To-End Flow: entry through completion",
       "- Scope Fit: accepted scope inspected",
       "- Code Reality: current implementation inspected",

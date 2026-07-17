@@ -32,6 +32,7 @@ describe("createTaskService", () => {
       worktreePath: path.join(repoRoot, ".claude/worktrees/demo-task")
     });
     await expect(fileExists(path.join(task.worktreePath, ".git"))).resolves.toBe(true);
+    await expect(fileExists(path.join(task.worktreePath, ".ai/vcm/handoffs/architecture-brief.md"))).resolves.toBe(true);
     await expect(fileExists(path.join(task.worktreePath, ".ai/vcm/handoffs/architecture-plan.md"))).resolves.toBe(true);
     await expect(fileExists(path.join(task.worktreePath, ".ai/vcm/handoffs/final-acceptance.md"))).resolves.toBe(true);
     await expect(fileExists(path.join(task.worktreePath, ".ai/vcm/sessions"))).resolves.toBe(true);

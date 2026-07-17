@@ -137,6 +137,33 @@ describe("gate-review-service", () => {
     expect(sessionStarts).toEqual([]);
   });
 
+  it("does not start architecture-plan review before the architecture brief is confirmed", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-gate-review-unconfirmed-brief-"));
+    await writeHarnessFiles(tmpRepo);
+    await writeFile(
+      path.join(taskWorktree(tmpRepo), ".ai/vcm/handoffs/architecture-brief.md"),
+      validArchitectureBrief().replace("Architecture Brief Status: confirmed", "Architecture Brief Status: interviewing"),
+      "utf8"
+    );
+    const sessionStarts: string[] = [];
+    const service = createGateReviewService({
+      fs: createNodeFileSystemAdapter(),
+      runner: createRunner(tmpRepo, []),
+      runtime: createRuntime(tmpRepo, []),
+      projectService: createProjectService(),
+      taskService: createTaskService(tmpRepo),
+      appSettings: createAppSettings(["architecture-plan"]),
+      sessionService: createSessionService(sessionStarts),
+      roundService: createRoundService()
+    });
+
+    const result = await service.requestReviewGate(tmpRepo, "demo-task", "architecture-plan");
+
+    expect(result.status).toBe("failed_to_start");
+    expect(result.message).toContain("architecture-brief.md is not confirmed");
+    expect(sessionStarts).toEqual([]);
+  });
+
   it("does not start validation-adequacy review when the test report is empty", async () => {
     tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-gate-review-empty-report-"));
     await writeHarnessFiles(tmpRepo);
@@ -675,7 +702,37 @@ async function writeHarnessFiles(repoRoot: string): Promise<void> {
   await writeFile(path.join(taskRepoRoot, ".claude/agents/gate-reviewer.md"), "# VCM Gate Reviewer\n", "utf8");
   await writeFile(path.join(taskRepoRoot, ".claude/skills/vcm-gate-review/SKILL.md"), "# Gate Review Skill\n", "utf8");
   await writeFile(path.join(taskRepoRoot, ".ai/tools/request-gate-review"), "#!/usr/bin/env python3\n", "utf8");
+  await writeFile(path.join(taskRepoRoot, ".ai/vcm/handoffs/architecture-brief.md"), validArchitectureBrief(), "utf8");
   await writeFile(path.join(taskRepoRoot, ".ai/vcm/handoffs/architecture-plan.md"), "# Architecture Plan\n", "utf8");
+}
+
+function validArchitectureBrief(): string {
+  return [
+    "# Architecture Brief: demo-task",
+    "",
+    "Architecture Brief Status: confirmed",
+    "",
+    "## Accepted Outcome",
+    "",
+    "Deliver the accepted behavior.",
+    "",
+    "## Confirmed User Decisions",
+    "",
+    "Preserve the current contract.",
+    "",
+    "## Existing Constraints",
+    "",
+    "Use the current worktree.",
+    "",
+    "## Unresolved User Decisions",
+    "",
+    "None",
+    "",
+    "## User Confirmation",
+    "",
+    "Confirmed.",
+    ""
+  ].join("\n");
 }
 
 function taskWorktree(repoRoot: string): string {
@@ -724,6 +781,7 @@ function createRuntime(
             "## Architecture Analysis",
             "",
             "- Evidence Read: architecture-plan.md, source files, and callers",
+            "- Architecture Brief Fit: confirmed decisions are preserved",
             "- End-To-End Flow: entry to owner to completion",
             "- Scope Fit: accepted scope is covered",
             "- Code Reality: plan was compared with current code",

@@ -46,7 +46,7 @@ If a reusable harness problem is suspected, it is enough to record a concise fee
 ## VCM Task Flow
 
 - All standard workflow routes among project-manager, architect, coder, and tester are PM-hub routes. Project-manager starts and advances every flow; architect, coder, and tester report blockers, failures, conflicts, incomplete work, and findings back to project-manager.
-- Code changes use: \`project-manager -> architect -> coder -> tester -> architect docs sync -> project-manager final acceptance\`.
+- Code changes use: \`project-manager -> architect interview -> architect planning -> coder -> tester -> architect docs sync -> project-manager final acceptance\`.
 - Architect Debug Mode runs inside either Architect Debug Flow or Architect Debug Branch. Architecture Diagnosis Mode runs inside either Architecture Diagnosis Flow or Architecture Diagnosis Branch.
 - Architect Debug Flow and an Architecture Diagnosis Flow that produces code changes continue through code-diff Gate Review, tester validation, architect docs sync, and project-manager final acceptance. An analysis-only Architecture Diagnosis Flow completes from the diagnosis result.
 - Architect Debug Branch and Architecture Diagnosis Branch preserve the active parent flow and resume point, then return there after successful validation. They do not run their own final acceptance.
@@ -73,6 +73,7 @@ If a reusable harness problem is suspected, it is enough to record a concise fee
 - If the direct user message may change scope, plan, priority, approval, external authorization, or next-route decision, the role must ask the user in its own session for explicit confirmation and wait for it before reporting to project-manager.
 - Explicit confirmation means the user clearly approves or instructs the new plan, scope, decision, or route, such as "confirmed", "use this plan", "change it to this", "approve", or equivalent wording in context.
 - After explicit confirmation, the role must report the confirmed change to project-manager with \`vcm-route-message\` and stop. PM decides the next route.
+- During a PM-routed Architect Interview, Architect may continue direct user discussion across turns and reports once after the complete \`architecture-brief.md\` is explicitly confirmed.
 - A direct user message must not let the role start a new task, skip gates, approve exceptions, trigger another role, or close the task.
 - The role's final result must still go back to project-manager.
 - Direct Gate Reviewer discussion may clarify its report but cannot change the gate decision or task flow; flow changes must be given to project-manager. Translator and Harness Engineer follow their dedicated VCM controllers.

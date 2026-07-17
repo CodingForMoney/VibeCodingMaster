@@ -13,7 +13,7 @@ describe("createHarnessService", () => {
   it("plans and applies recommended harness files when they are missing", async () => {
     const fs = createMemoryFs();
     const service = createHarnessService({ fs });
-    const expectedHarnessFileCount = 23;
+    const expectedHarnessFileCount = 24;
 
     const status = await service.getHarnessStatus("/repo");
     expect(status.needsApply).toBe(true);
@@ -36,8 +36,8 @@ describe("createHarnessService", () => {
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("All standard workflow routes among project-manager, architect, coder, and tester are PM-hub routes");
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("Gate Review and tool-role work use their dedicated VCM skills and controllers");
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("No approval can raise this ceiling");
-    expect(await fs.readText("/repo/CLAUDE.md")).toContain("may be either the task's primary flow or a branch inside an active main flow");
-    expect(await fs.readText("/repo/CLAUDE.md")).toContain("The branch does not run final acceptance");
+    expect(await fs.readText("/repo/CLAUDE.md")).toContain("Architect Debug Mode runs inside either Architect Debug Flow or Architect Debug Branch");
+    expect(await fs.readText("/repo/CLAUDE.md")).toContain("They do not run their own final acceptance");
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("Final acceptance closes only a complete code-delivery flow");
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("targeted diagnostic L3 may run in Architect Debug Mode or Architecture Diagnosis Mode");
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("## VCM Worktree Policy");
@@ -64,7 +64,7 @@ describe("createHarnessService", () => {
     expect(await fs.readText("/repo/.claude/skills/vcm-route-message/SKILL.md")).toContain("After writing or updating the route file, end the current Claude Code turn immediately.");
     expect(await fs.readText("/repo/.claude/skills/vcm-final-acceptance/SKILL.md")).toContain("name: vcm-final-acceptance");
     expect(await fs.readText("/repo/.claude/skills/vcm-final-acceptance/SKILL.md")).toContain("only when project-manager is ready to close a complete VCM code-delivery flow");
-    expect(await fs.readText("/repo/.claude/skills/vcm-final-acceptance/SKILL.md")).toContain("Do not use it for docs-only, validation-only, Communication-only, PR-prep, analysis-only Diagnosis");
+    expect(await fs.readText("/repo/.claude/skills/vcm-final-acceptance/SKILL.md")).toContain("Do not use it for Docs-Only Flow, Validation-Only Flow, Communication-Only Flow, PR-Preparation Flow, analysis-only Diagnosis");
     expect(await fs.readText("/repo/.claude/skills/vcm-final-acceptance/SKILL.md")).toContain("## Scope Traceability Audit");
     expect(await fs.readText("/repo/.claude/skills/vcm-final-acceptance/SKILL.md")).toContain("Do not claim to prove that every diff hunk exactly matches the task.");
     expect(await fs.readText("/repo/.claude/skills/vcm-final-acceptance/SKILL.md")).toContain(".ai/vcm/handoffs/architecture-diagnosis.md");
@@ -77,7 +77,8 @@ describe("createHarnessService", () => {
     expect(await fs.readText("/repo/.claude/skills/vcm-gate-review/SKILL.md")).toContain("name: vcm-gate-review");
     expect(await fs.readText("/repo/.claude/skills/vcm-gate-review/SKILL.md")).toContain(".ai/tools/request-gate-review");
     expect(await fs.readText("/repo/.claude/skills/vcm-gate-review/SKILL.md")).toContain("--source <coder|architect-debug|architect-diagnosis>");
-    expect(await fs.readText("/repo/.claude/skills/vcm-gate-review/SKILL.md")).toContain("validation-only completion");
+    expect(await fs.readText("/repo/.claude/skills/vcm-gate-review/SKILL.md")).toContain("before Validation-Only Flow completion");
+    expect(await fs.readText("/repo/.claude/skills/vcm-architecture-interview/SKILL.md")).toContain("name: vcm-architecture-interview");
     expect(await fs.readText("/repo/.claude/skills/vcm-report-harness-issue/SKILL.md")).toContain("name: vcm-report-harness-issue");
     expect(await fs.readText("/repo/.claude/skills/vcm-report-harness-issue/SKILL.md")).toContain(".ai/vcm/harness-feedback/pending/");
     expect(await fs.readText("/repo/.claude/skills/vcm-propose-memory/SKILL.md")).toContain("name: vcm-propose-memory");
@@ -86,14 +87,13 @@ describe("createHarnessService", () => {
     expect(await fs.readText("/repo/.claude/agents/project-manager.md")).toContain("<!-- VCM:BEGIN version=1 -->");
     const projectManagerAgent = await fs.readText("/repo/.claude/agents/project-manager.md");
     expect(projectManagerAgent).toContain("Use the PM-hub routes allowed by the `vcm-route-message` skill");
-    expect(projectManagerAgent).toContain("Docs-only flow: PM -> Architect -> PM completes the flow from Architect's result.");
+    expect(projectManagerAgent).toContain("Use Docs-Only Flow when the accepted task changes Architect-owned project documentation");
     expect(projectManagerAgent).toContain("Use the `vcm-final-acceptance` skill only to close a complete code-delivery flow");
-    expect(projectManagerAgent).toContain("Prepare or update a GitHub PR only after the active delivery flow completes");
+    expect(projectManagerAgent).toContain("PM confirms the worktree is clean, prepares or updates the PR");
     expect(projectManagerAgent).toContain("Do not perform technical analysis");
     expect(projectManagerAgent).toContain("Use the `vcm-route-message` skill for every role dispatch");
-    expect(projectManagerAgent).toContain("### PR Preparation");
+    expect(projectManagerAgent).toContain("### PR-Preparation Flow");
     expect(projectManagerAgent).toContain("### Background Jobs");
-    expect(projectManagerAgent).toContain(".github/pull_request_template.md");
     expect(projectManagerAgent).toContain("VCM_TASK_REPO_ROOT");
     expect(projectManagerAgent).toContain("Include the confirmed task repo root and branch in each role message");
     expect(projectManagerAgent).toContain("### Gate Review Gates");
@@ -102,7 +102,7 @@ describe("createHarnessService", () => {
     expect(projectManagerAgent).toContain("code-diff --source architect-diagnosis");
     expect(projectManagerAgent).toContain("recorded main-flow resume point");
     expect(projectManagerAgent).toContain("Do not require a branch-level final acceptance report");
-    expect(projectManagerAgent).toContain("Tester reports `Test Result: fail` for an Architect Debug Mode fix whose final disposition was `local fix completed`");
+    expect(projectManagerAgent).toContain("Tester returns `Test Result: fail` for a completed Architect Debug Mode implementation");
     expect(projectManagerAgent).toContain("Architecture Diagnosis Mode must run before another Debug Mode fix or Coder dispatch");
     expect(projectManagerAgent).not.toContain("Tester reports `Test Result: fail` for the implementation for the second time");
     expect(projectManagerAgent).toContain("Architect reports that the architecture plan must be updated or replaced for the second time");
@@ -112,7 +112,7 @@ describe("createHarnessService", () => {
     expect(architectAgent).toContain("verifiable behavior, implementation boundaries within the accepted scope, behavior/contract proof points");
     expect(architectAgent).toContain("Own `.ai/vcm/handoffs/known-issues.md` as its only writer");
     expect(architectAgent).toContain("Architect owns the technical decision");
-    expect(architectAgent).toContain("running targeted L1/L2/L3 checks to verify the fix");
+    expect(architectAgent).toContain("running required L0/L1 plus applicable L2/L3 checks are part of the implementation duty");
     expect(architectAgent).toContain("Architecture Diagnosis Mode is an upgraded Debug Mode");
     expect(architectAgent).toContain("Do not diagnose from session memory");
     expect(architectAgent).toContain("Do not assume existing code or comments are correct");
@@ -120,7 +120,7 @@ describe("createHarnessService", () => {
     expect(architectAgent).toContain("Maintain a `Code Reading Closure`");
     expect(architectAgent).toContain("`Previous Debug Failure`");
     expect(architectAgent).toContain("commit all Diagnosis implementation changes before reporting");
-    expect(architectAgent).toContain("In docs-only flow, update the PM-assigned durable docs directly");
+    expect(architectAgent).toContain("In Docs-Only Flow, the Architect role result must record the decision");
     expect(architectAgent).toContain("`Decision` must be `synced`, `unchanged`, or `blocked`");
     const testerAgent = await fs.readText("/repo/.claude/agents/tester.md");
     expect(testerAgent).toContain("Own L2/L3/L4 final-validation design, execution, and acceptance evidence");

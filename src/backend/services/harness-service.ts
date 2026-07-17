@@ -56,6 +56,7 @@ import {
 import { renderProjectManagerHarnessRules } from "../templates/harness/project-manager-agent.js";
 import { renderPullRequestTemplateHarnessRules } from "../templates/harness/pull-request-template.js";
 import { renderTesterHarnessRules } from "../templates/harness/tester-agent.js";
+import { renderVcmArchitectureInterviewSkillRules } from "../templates/harness/vcm-architecture-interview-skill.js";
 import { renderVcmFinalAcceptanceSkillRules } from "../templates/harness/vcm-final-acceptance-skill.js";
 import { renderVcmHarnessBootstrapSkillRules } from "../templates/harness/vcm-harness-bootstrap-skill.js";
 import { renderVcmLongRunningValidationSkillRules } from "../templates/harness/vcm-long-running-validation-skill.js";
@@ -222,6 +223,17 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
     path: ".github/pull_request_template.md",
     title: "Pull Request Template",
     renderRules: renderPullRequestTemplateHarnessRules
+  },
+  {
+    kind: "skill-vcm-architecture-interview",
+    path: ".claude/skills/vcm-architecture-interview/SKILL.md",
+    title: "VCM Architecture Interview Skill",
+    frontmatter: renderSkillFrontmatter(
+      "vcm-architecture-interview",
+      "Use when Architect must confirm user-owned behavior and contract decisions before architecture planning."
+    ),
+    ownership: "whole-file",
+    renderRules: renderVcmArchitectureInterviewSkillRules
   },
   {
     kind: "skill-vcm-route-message",

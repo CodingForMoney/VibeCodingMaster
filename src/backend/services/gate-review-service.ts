@@ -91,6 +91,7 @@ const DEFAULT_REPORT_TIMEOUT_MS = 30 * 60 * 1000;
 const activeRuns = new Set<string>();
 const ARCHITECTURE_ANALYSIS_FIELDS = [
   "Evidence Read",
+  "Architecture Brief Fit",
   "End-To-End Flow",
   "Scope Fit",
   "Code Reality",
@@ -130,6 +131,7 @@ const CODE_DIFF_ANALYSIS_FIELDS = [
 
 const SOURCE_ARTIFACTS: Record<GateReviewGate, string[]> = {
   "architecture-plan": [
+    ".ai/vcm/handoffs/architecture-brief.md",
     ".ai/vcm/handoffs/architecture-plan.md"
   ],
   "validation-adequacy": [
@@ -291,6 +293,33 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
           gate,
           record: index.gates[gate],
           message
+        };
+      }
+    }
+
+    if (gate === "architecture-plan") {
+      const architectureBriefError = await readArchitectureBriefError(deps.fs, context.taskRepoRoot);
+      if (architectureBriefError) {
+        index = applyGateState(index, gate, {
+          status: "failed",
+          decision: undefined,
+          error: architectureBriefError,
+          exceptionReason: undefined,
+          requestId: undefined,
+          requestPath: undefined,
+          inputHash: undefined,
+          requestedAt: undefined,
+          startedAt: undefined,
+          completedAt: now(),
+          callbackStatus: "not_sent",
+          callbackError: undefined
+        }, now(), true);
+        await saveIndex(deps.fs, context.taskRepoRoot, index);
+        return {
+          status: "failed_to_start",
+          gate,
+          record: index.gates[gate],
+          message: architectureBriefError
         };
       }
     }
@@ -1118,6 +1147,26 @@ async function readCoreInputArtifact(
     return { path: relativePath, status: "empty" };
   }
   return { path: relativePath, status: "ready" };
+}
+
+async function readArchitectureBriefError(
+  fs: FileSystemAdapter,
+  taskRepoRoot: string
+): Promise<string | undefined> {
+  const relativePath = ".ai/vcm/handoffs/architecture-brief.md";
+  const absolutePath = resolveRepoPath(taskRepoRoot, relativePath);
+  if (!await fs.pathExists(absolutePath)) {
+    return `${relativePath} is missing. Complete Architect Interview before architecture planning.`;
+  }
+  const content = await fs.readText(absolutePath);
+  const check = checkMarkdownArtifact("architecture-brief", relativePath, content);
+  if (check.status !== "ok") {
+    return `${relativePath} is incomplete. Complete and confirm Architect Interview before requesting architecture-plan review.`;
+  }
+  if (!/^\s*Architecture Brief Status\s*:\s*confirmed\s*$/im.test(content)) {
+    return `${relativePath} is not confirmed. Obtain explicit user confirmation before architecture planning.`;
+  }
+  return undefined;
 }
 
 async function commandStdout(runner: CommandRunner, cwd: string, args: string[]): Promise<string> {

@@ -10,7 +10,8 @@ import {
   sleep,
   startRole,
   updateGateSettings,
-  waitFor
+  waitFor,
+  writeConfirmedArchitectureBrief
 } from "./helpers/e2e-actions.js";
 import type { GateReviewGate } from "../../../src/shared/types/gate-review.js";
 import type { MockClaudePromptContext } from "./helpers/mock-claude-runtime.js";
@@ -30,6 +31,7 @@ describe("backend E2E complete VCM flow with mock Claude Code", () => {
     const repo = await createE2eRepo();
     cleanups.push(() => repo.cleanup());
     const task = await connectAndCreateTask(env.app, repo, "mock-main-flow");
+    await writeConfirmedArchitectureBrief(task.worktreePath, task.taskSlug);
     await updateGateSettings(env.app, task.taskSlug, {
       "architecture-plan": true,
       "code-diff": true,
@@ -219,6 +221,7 @@ async function writeApproveGateReport(ctx: MockClaudePromptContext): Promise<voi
         "## Architecture Analysis",
         "",
         "- Evidence Read: architecture plan, current source, and callers",
+        "- Architecture Brief Fit: confirmed decisions are preserved",
         "- End-To-End Flow: entry to owner to completion",
         "- Scope Fit: complete",
         "- Code Reality: verified",

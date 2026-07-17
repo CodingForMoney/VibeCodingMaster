@@ -60,6 +60,8 @@ describe("createArtifactService", () => {
     expect(created).toContain(".ai/vcm/handoffs/known-issues.md");
     expect(created).toContain(".ai/vcm/handoffs/coder-completion.md");
     expect(created).toContain(".ai/vcm/handoffs/architect-debug.md");
+    expect(created).toContain(".ai/vcm/handoffs/architecture-brief.md");
+    expect(summary.paths.architectureBriefPath).toBe(".ai/vcm/handoffs/architecture-brief.md");
     expect(summary.paths.docsSyncReportPath).toBe(".ai/vcm/handoffs/docs-sync-report.md");
     expect(summary.paths.finalAcceptancePath).toBe(".ai/vcm/handoffs/final-acceptance.md");
     expect(summary.paths.knownIssuesPath).toBe(".ai/vcm/handoffs/known-issues.md");
@@ -73,6 +75,8 @@ describe("createArtifactService", () => {
       .resolves.toContain("## L0/L1 Validation");
     await expect(fs.readText("/repo/.ai/vcm/handoffs/architecture-plan.md"))
       .resolves.toContain("Planning Result: complete|incomplete|user clarification required");
+    await expect(fs.readText("/repo/.ai/vcm/handoffs/architecture-brief.md"))
+      .resolves.toContain("Architecture Brief Status: interviewing|confirmed");
     await expect(fs.readText("/repo/.ai/vcm/handoffs/architect-debug.md"))
       .resolves.toContain("## Confirmed Root Cause");
     await expect(fs.readText("/repo/.ai/vcm/handoffs/architect-debug.md"))

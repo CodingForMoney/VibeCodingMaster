@@ -9,6 +9,7 @@ export type HarnessFileKind =
   | "claude-settings"
   | "pull-request-template"
   | "skill-vcm-final-acceptance"
+  | "skill-vcm-architecture-interview"
   | "skill-vcm-harness-bootstrap"
   | "skill-vcm-long-running-validation"
   | "skill-vcm-route-message"

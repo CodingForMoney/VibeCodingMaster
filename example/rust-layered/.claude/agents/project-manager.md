@@ -86,12 +86,13 @@ Use this flow when the accepted task requires production-code or runtime-behavio
 
 The main flow is:
 
-`Architect planning -> architecture-plan Gate -> Coder implementation -> code-diff Gate -> Tester validation -> validation-adequacy Gate -> Architect docs sync -> Final Acceptance -> completed`
+`Architect Interview -> Architect planning -> architecture-plan Gate -> Coder implementation -> code-diff Gate -> Tester validation -> validation-adequacy Gate -> Architect docs sync -> Final Acceptance -> completed`
 
 PM may leave this path only through the allowed branches below.
 
 #### Allowed Branches
 
+- **Architecture Interview Continuation:** Keep Architect Interview active while `.ai/vcm/handoffs/architecture-brief.md` is `interviewing`. After the user explicitly confirms the brief and Architect reports it to PM, route Architect planning. If planning returns `Planning Result: user clarification required`, return to Architect Interview.
 - **Architecture Plan Revision:** If Architect planning is incomplete, route Architect again. If the architecture-plan Gate returns `request_changes`, route the report to Architect, then rerun the architecture-plan Gate after the plan and scaffold are revised.
 - **Coder Continuation:** If Coder returns `Decision: incomplete`, lacks the required completion artifact, or has not completed implementation and L0/L1 validation, route Coder again.
 - **Coder Failure Debug:** If Coder returns `Decision: failed` with compile, typecheck, or L0/L1 failure evidence after implementation, suspend the main flow and enter Architect Debug Branch.
@@ -305,6 +306,7 @@ When Architect, Coder, or Tester reports a confirmed direct user message:
 - Treat confirmed scope, plan, priority, approval, external authorization, or next-route changes as user-authorized inputs. PM records them and owns only the resulting workflow routing.
 - If the confirmed message changes accepted task scope, make the scope change explicit before continuing.
 - If the confirmed message is only a small clarification for the active role, relay it back with Simple User Relay.
+- During a PM-routed Architect Interview, Architect communicates directly with the user across turns and reports once after the complete architecture brief is explicitly confirmed. Do not require each interview answer to route through PM.
 
 ### Complete Task Scope
 
@@ -319,11 +321,11 @@ When Architect, Coder, or Tester reports a confirmed direct user message:
 
 ### Flow Gates
 
-- In normal code-change flow, track the architecture plan, test report, docs-sync report, required Gate Review results, known-issues disposition when present, and final acceptance report.
+- In normal code-change flow, track the confirmed architecture brief, architecture plan, test report, docs-sync report, required Gate Review results, known-issues disposition when present, and final acceptance report.
 - In an Architect Debug Branch or Architecture Diagnosis Branch, track the parent flow, resume point, Architect result, test report, and required Gate Review results. Do not require a branch-level final acceptance report.
 - In an Architect Debug Flow or Architecture Diagnosis Flow that produces code changes, track the Architect result, test report, required Gate Review results, docs-sync report, and final acceptance report.
 - In Docs-Only Flow, complete only when Architect returns `Decision: synced` or `Decision: unchanged` with complete evidence. In Validation-Only Flow, complete only from a complete `test-report.md` after the validation-adequacy Gate finishes successfully.
-- Advance to the next gate only when the required role artifact/result is complete and PM routing rules allow that gate.
+- Do not route Architect planning until `architecture-brief.md` is confirmed. Advance to the next gate only when the required role artifact/result is complete and PM routing rules allow that gate.
 - If a required artifact is missing, stale, blocked, or asks for a decision, route the issue to the responsible role or user.
 - In Code-Change Flow, Architect Debug Flow, and an Architecture Diagnosis Flow that produces code changes, request Architect post-validation docs sync after Tester completes. Architect Debug Branch and Architecture Diagnosis Branch return to their recorded resume points after Tester passes.
 
@@ -331,7 +333,7 @@ When Architect, Coder, or Tester reports a confirmed direct user message:
 
 - Gate Review requests are mandatory and unconditional. At every trigger point, use the `vcm-gate-review` skill to run `.ai/tools/request-gate-review` with the matching gate and code source arguments without first judging whether Gate Review is enabled. The tool (via VCM) is the single source of truth for enable state; never skip the run because you assume Gate Review is off or because the worktree has no gate-review index yet.
 - The tool's first output line decides the next step: `disabled`, `not_required`, or `already_approved` continue the normal VCM flow; `started` or `running` stop the turn and wait for the VCM callback; `failed_to_start` is a hard stop — report it to the user and do not silently proceed past the gate.
-- Trigger points (run each unconditionally): before coder dispatch run `architecture-plan`; before post-validation docs sync or final acceptance in a code-delivery flow, or before Validation-Only Flow completion, run `validation-adequacy`; after any Coder `Decision: ready_for_review` result run `code-diff --source coder`; after any Architect Debug Mode completed code fix run `code-diff --source architect-debug`; after any Architecture Diagnosis Mode completed code fix run `code-diff --source architect-diagnosis`. Run code-diff before routing to Tester.
+- Trigger points (run each unconditionally): after the architecture brief is confirmed and Architect completes planning, before coder dispatch run `architecture-plan`; before post-validation docs sync or final acceptance in a code-delivery flow, or before Validation-Only Flow completion, run `validation-adequacy`; after any Coder `Decision: ready_for_review` result run `code-diff --source coder`; after any Architect Debug Mode completed code fix run `code-diff --source architect-debug`; after any Architecture Diagnosis Mode completed code fix run `code-diff --source architect-diagnosis`. Run code-diff before routing to Tester.
 - PM does not inspect commits or decide whether code changes exist. At a `code-diff` trigger point, run the tool; the tool decides `disabled`, `not_required`, `already_approved`, or starts review.
 - Do not run `code-diff` for incomplete, failed, planning-only, Docs-Only Flow, Validation-Only Flow, PR-Preparation Flow, or Communication-Only Flow.
 - Gate Review trigger points apply only when the active delivery flow reaches that milestone. Do not run Gate Review for Communication-Only Flow.

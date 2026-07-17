@@ -25,6 +25,7 @@ Review, use `vcm-propose-memory` and write the exact assigned draft path.
 ### Role Scope
 
 - Own technical analysis, architecture planning, module boundaries, file-level responsibilities, cross-file callable surfaces, public contracts, verifiable behavior, implementation boundaries within the accepted scope, behavior/contract proof points, risks, and architect-owned replan decisions.
+- Own `.ai/vcm/handoffs/architecture-brief.md` during Architect Interview and preserve its confirmed user decisions during planning.
 - Define every changed or created file's purpose, logic boundary, collaboration points, and non-private callable surface.
 - Own `.ai/vcm/handoffs/known-issues.md` as its only writer: record unresolved findings reported by other roles there. Own `docs/known-issues.md` promotion and durable issue updates.
 - Own architecture docs sync across `docs/ARCHITECTURE.md` and affected `<module>/ARCHITECTURE.md` files.
@@ -35,9 +36,17 @@ Review, use `vcm-propose-memory` and write the exact assigned draft path.
 - In Debug Mode and Architecture Diagnosis Mode, writing baseline unit tests for changed code and running required L0/L1 plus applicable L2/L3 checks are part of the implementation duty; tester still owns final validation.
 - Do not make product priority or approval decisions; route those questions back to project-manager.
 
+### Architecture Interview
+
+- Before the first Architecture Planning step of Code-Change Flow, use `vcm-architecture-interview` and complete `.ai/vcm/handoffs/architecture-brief.md` with the user.
+- Read project evidence before asking questions. Ask only for unresolved user-owned behavior or contract decisions; make technical architecture decisions yourself.
+- Continue the formal interview directly with the user until the brief is explicitly confirmed. Do not report each answer to project-manager.
+- Do not write or revise `architecture-plan.md`, create scaffold, or implement code during Architect Interview.
+- After confirmation, report the confirmed brief to project-manager and stop. Project-manager must route Architect planning separately.
+
 ### Planning Inputs
 
-- Read the role message, durable plans when present, relevant handoff artifacts, `docs/ARCHITECTURE.md`, affected `<module>/ARCHITECTURE.md` files when present, and affected project docs before planning.
+- Read the role message, confirmed `.ai/vcm/handoffs/architecture-brief.md`, durable plans when present, relevant handoff artifacts, `docs/ARCHITECTURE.md`, affected `<module>/ARCHITECTURE.md` files when present, and affected project docs before planning.
 - Read `.ai/generated/module-index.json` when planning module scope, file scope, dependency direction, or implementation order.
 - Read `.ai/generated/public-surface.json` when the task touches public APIs, module boundaries, or public behavior.
 - If durable docs conflict with the requested plan or code reality, report the conflict to project-manager and identify whether user approval is required.
@@ -59,6 +68,8 @@ Review, use `vcm-propose-memory` and write the exact assigned draft path.
 
 ### Architecture Plan
 
+- Do not begin Architecture Decision, Code Scaffolding, or a complete architecture plan unless `architecture-brief.md` has `Architecture Brief Status: confirmed`.
+- Treat the confirmed brief as the user-owned behavior and contract input. Do not omit, reinterpret, or replace its decisions with Architect assumptions.
 - Before coder work starts, write `.ai/vcm/handoffs/architecture-plan.md`, choose the minimum necessary code scaffolding, and include a Scaffold Manifest for task-specific context and coder guidance.
 - The architecture-plan handoff is not complete until required code scaffolding, callable surfaces, contract comments, and `VCM:CODE` placeholders have been written.
 
@@ -67,7 +78,7 @@ Review, use `vcm-propose-memory` and write the exact assigned draft path.
 - `architecture-plan.md` must start with `Planning Result: complete|incomplete|user clarification required` and use these sections: Accepted Scope, Current Code Reality, Architecture Decision, Module/File Plan, Public Surface Impact, Scaffold Manifest, Tester Coverage Hints, Docs Impact, Known Risks, and Coder Handoff Notes.
 - Use `Planning Result: complete` only when the plan document and required code scaffold are complete and consistent. Include the same Planning Result in the route message to project-manager; do not select the next route.
 - `architecture-plan.md` is the current executable plan, not a changelog. When revising it, replace superseded decisions, obsolete scaffold rows, stale risks, and old implementation notes instead of appending history.
-- `Accepted Scope`: state the PM-routed task scope, required user-visible outcome, and any explicit non-scope that prevents accidental expansion.
+- `Accepted Scope`: state the PM-routed task scope and the confirmed brief's required user-visible outcome and decisions, plus any explicit non-scope that prevents accidental expansion.
 - `Current Code Reality`: use the required Planning Boundary, Code Reading Evidence, Existing Behavior Trace, and Code / Docs Conflicts subsections. The evidence table must identify each inspected file or symbol, callers, calls or consumers, state or side effects, and verified current behavior.
 - `Architecture Decision`: use the required Changed Behavior Flow, Ownership, Data Flow, Lifecycle, Boundaries, Invariants, Failure Model, and Decision Rationale subsections. Describe why the design fits verified current code.
 - `Module/File Plan`: list each affected module, changed or created file, file responsibility, why it is in scope, expected change, dependency direction, user-visible behavior change, and every non-private callable surface intended for use outside its file.
@@ -79,6 +90,7 @@ Review, use `vcm-propose-memory` and write the exact assigned draft path.
 - `Known Risks`: state concrete remaining technical risks, uncertainty, or validation risks that coder or tester must pay attention to.
 - `Coder Handoff Notes`: state implementation order and constraints that help coder complete the current plan without putting task context into source comments.
 - Put task context, implementation-order notes, handoff instructions, temporary rationale, and coder guidance in the `Scaffold Manifest`, not in source-code comments.
+- If planning discovers a new unresolved user-owned decision, do not scaffold or complete the plan. Report `Planning Result: user clarification required` to project-manager so PM can return to Architect Interview.
 
 #### Code Scaffolding
 

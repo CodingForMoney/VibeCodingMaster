@@ -214,6 +214,7 @@ function degradedArtifactSummary(handoffDir: string): ArtifactSummary {
         DISPATCHABLE_ROLES.map((role) => [role, `${roleCommandsDir}/${role}.md`])
       ) as Record<DispatchableRole, string>,
       messageRoutePaths: {},
+      architectureBriefPath: `${handoffDir}/architecture-brief.md`,
       architecturePlanPath: `${handoffDir}/architecture-plan.md`,
       knownIssuesPath: `${handoffDir}/known-issues.md`,
       testReportPath: `${handoffDir}/test-report.md`,

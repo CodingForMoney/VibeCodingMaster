@@ -29,6 +29,7 @@ const EXACT_EXAMPLE_HARNESS_PATHS = [
   ".claude/agents/tester.md",
   ".claude/agents/translator.md",
   ".claude/agents/vcm-coder-worker.md",
+  ".claude/skills/vcm-architecture-interview/SKILL.md",
   ".claude/skills/vcm-final-acceptance/SKILL.md",
   ".claude/skills/vcm-gate-review/SKILL.md",
   ".claude/skills/vcm-harness-bootstrap/SKILL.md",

@@ -31,6 +31,7 @@ import {
 import { renderProjectManagerHarnessRules } from "../templates/harness/project-manager-agent.js";
 import { renderPullRequestTemplateHarnessRules } from "../templates/harness/pull-request-template.js";
 import { renderTesterHarnessRules } from "../templates/harness/tester-agent.js";
+import { renderVcmArchitectureInterviewSkillRules } from "../templates/harness/vcm-architecture-interview-skill.js";
 import { renderVcmFinalAcceptanceSkillRules } from "../templates/harness/vcm-final-acceptance-skill.js";
 import { renderVcmHarnessBootstrapSkillRules } from "../templates/harness/vcm-harness-bootstrap-skill.js";
 import { renderVcmLongRunningValidationSkillRules } from "../templates/harness/vcm-long-running-validation-skill.js";
@@ -231,6 +232,17 @@ const WHOLE_FILES = [
     category: "generated-context-tool",
     mode: 0o755,
     templatePath: "scripts/harness-tools/generate-public-surface"
+  },
+  {
+    path: ".claude/skills/vcm-architecture-interview/SKILL.md",
+    category: "skill",
+    mode: 0o644,
+    content: renderSkillFile(
+      "VCM Architecture Interview Skill",
+      "vcm-architecture-interview",
+      "Use when Architect must confirm user-owned behavior and contract decisions before architecture planning.",
+      renderVcmArchitectureInterviewSkillRules()
+    )
   },
   {
     path: ".claude/skills/vcm-final-acceptance/SKILL.md",
