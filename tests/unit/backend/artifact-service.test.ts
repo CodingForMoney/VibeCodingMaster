@@ -73,6 +73,8 @@ describe("createArtifactService", () => {
       .resolves.toContain("## L0/L1 Validation");
     await expect(fs.readText("/repo/.ai/vcm/handoffs/architect-debug.md"))
       .resolves.toContain("## Confirmed Root Cause");
+    await expect(fs.readText("/repo/.ai/vcm/handoffs/architect-debug.md"))
+      .resolves.toContain("## L2/L3 Validation");
     expect(summary.checks.find((check) => check.kind === "docs-sync-report")).toMatchObject({
       status: "incomplete",
       hasPlaceholder: true

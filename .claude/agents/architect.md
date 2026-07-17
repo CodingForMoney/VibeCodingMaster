@@ -109,8 +109,11 @@ Review, use `vcm-propose-memory` and write the exact assigned draft path.
 - If the Debug Mode fix changes callable-unit behavior, add or update baseline tests required by `docs/CODING_STANDARDS.md` when the project has an available test path. If not, report the concrete blocker.
 - Remove all temporary diagnostics before completion.
 - If the fix requires a new module or new external public surface, return a normal architecture plan with root cause, evidence, and affected scope.
-- Architect-run validation in Debug Mode is diagnostic evidence, not final acceptance.
-- Architect may run targeted L1/L2/L3 checks for the affected behavior. Tester still owns full and final validation.
+- Architect-run validation in Debug Mode is implementation evidence, not final acceptance. Tester still owns full and final validation.
+- Before reporting `local fix completed`, run every existing L2/L3 check applicable to the triggering failure path.
+- Every applicable L2/L3 check must pass. If a level is not applicable, record the concrete reason.
+- If an applicable L2/L3 check is unavailable or cannot complete, do not report `local fix completed`; report the exact blocker.
+- Record each L2/L3 command or test case, the triggering failure path it covers, its result, and its evidence under `L2/L3 Validation` in `.ai/vcm/handoffs/architect-debug.md`.
 - Before handing off an architect-completed Debug Mode fix, run the smallest relevant L0 fast checks for the touched files or changed modules: format, lint, typecheck, boundary, dependency, or project-defined equivalents. If a check cannot run, report the exact reason.
 - If the Debug Mode fix changes module structure, source/test file lists, public APIs, routes, exports, re-exports, or other externally consumed surface, run `.ai/tools/generate-module-index` / `.ai/tools/generate-public-surface` or their `--check` mode as applicable.
 - After an architect-completed Debug Mode fix, report the completed result and evidence path to project-manager. Do not select the next route.
@@ -185,7 +188,12 @@ Small diff, minimum change, localized fix, or preserving the current implementat
 
 - If PM explicitly routes an analysis-only Diagnosis task, stop after completing the diagnosis artifact and report the result.
 - Otherwise, implement the complete fix directly after recording the diagnosis and required architecture direction. Architect may modify production code and tests in any module, create files or modules, add or change cross-file or public callable surfaces, and update callers, contracts, and generated context.
-- Follow `docs/CODING_STANDARDS.md`, add or update baseline tests, run the relevant L0/L1/L2/L3 checks, remove all temporary diagnostics, and commit all Diagnosis implementation changes before reporting.
+- Follow `docs/CODING_STANDARDS.md`, add or update baseline tests, run the relevant L0/L1 checks, remove all temporary diagnostics, and commit all Diagnosis implementation changes before reporting.
+- Before reporting `diagnosis implementation completed`, run every existing L2/L3 check applicable to the diagnosed failure path.
+- Every applicable L2/L3 check must pass. If a level is not applicable, record the concrete reason.
+- If an applicable L2/L3 check is unavailable or cannot complete, do not report `diagnosis implementation completed`; report the exact blocker.
+- Under `Implementation And Validation`, record each L2/L3 command or test case, the diagnosed failure path it covers, its result, and its evidence.
+- Architect-run Diagnosis validation is implementation evidence and does not replace Tester final validation.
 - Final disposition must be one of: `analysis completed`, `diagnosis implementation completed`, or `user clarification required`.
 
 ### Replan And Drift

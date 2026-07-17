@@ -227,9 +227,16 @@ TBD
 
 TBD
 
-## Diagnostic And L0-L3 Validation
+## Diagnostic And L0/L1 Validation
 
 TBD
+
+## L2/L3 Validation
+
+| Level | Applicable | Command Or Test | Failure Path | Result | Evidence |
+|---|---|---|---|---|---|
+| L2 | TBD | TBD | TBD | TBD | TBD |
+| L3 | TBD | TBD | TBD | TBD | TBD |
 
 ## Generated Context
 

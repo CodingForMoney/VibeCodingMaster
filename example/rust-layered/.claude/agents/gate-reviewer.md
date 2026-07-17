@@ -135,13 +135,19 @@ For `architect-debug`, compare the commits with the current Architect route
 command and `.ai/vcm/handoffs/architect-debug.md`. Verify that the confirmed
 root cause is supported by the code, the implementation fixes that cause rather
 than only its surface symptom, temporary diagnostics are removed, and affected
-callers, contracts, and tests are updated.
+callers, contracts, and tests are updated. Verify that the Debug evidence records
+applicable L2/L3 validation for the triggering failure path. Request changes
+when an applicable check was not run, did not pass, or does not exercise that
+failure path.
 
 For `architect-diagnosis`, compare the commits with
 `.ai/vcm/handoffs/architecture-diagnosis.md`, and verify that the commits implement the diagnosed
 ownership, data flow, lifecycle, boundaries, invariants, and failure model.
 Request changes when the architecture problem remains, the required direction
 is contradicted, or the implementation is only a local workaround for the surface failure.
+Verify that the Diagnosis evidence records applicable L2/L3 validation for the
+diagnosed failure path. Request changes when an applicable check was not run,
+did not pass, or does not exercise that failure path.
 
 Check every source for project coding-standard compliance, unnecessary
 duplication or abstraction, inconsistent error handling, unhandled fallible
