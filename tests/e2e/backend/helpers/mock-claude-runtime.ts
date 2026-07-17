@@ -23,6 +23,7 @@ interface RuntimeEntry {
   listeners: Set<TerminalEventListener>;
   replayBuffer: string;
   writes: string[];
+  pendingPaste?: string;
   claudeSessionId: string;
   transcriptPath: string;
 }
@@ -133,7 +134,16 @@ export class MockClaudeRuntime implements TerminalRuntime {
     const entry = this.getEntry(sessionId);
     entry.writes.push(data);
     this.emit(entry, { type: "input", data });
-    const prompt = normalizeTerminalWrite(data);
+    if (isBracketedPaste(data)) {
+      entry.pendingPaste = normalizeTerminalWrite(data);
+      return;
+    }
+    const prompt = isEnter(data)
+      ? entry.pendingPaste
+      : normalizeTerminalWrite(data);
+    if (isEnter(data)) {
+      entry.pendingPaste = undefined;
+    }
     if (!prompt) {
       return;
     }
@@ -167,6 +177,7 @@ export class MockClaudeRuntime implements TerminalRuntime {
     const transcriptPath = path.join(this.options.transcriptRoot, `${claudeSessionId}.jsonl`);
     const startedAt = this.now();
     entry.writes.length = 0;
+    entry.pendingPaste = undefined;
     entry.claudeSessionId = claudeSessionId;
     entry.transcriptPath = transcriptPath;
     entry.session = {
@@ -362,6 +373,14 @@ function normalizeTerminalWrite(data: string): string {
     .replace(/\r/g, "\n")
     .replace(/\n+$/g, "")
     .trim();
+}
+
+function isBracketedPaste(data: string): boolean {
+  return data.includes("\x1b[200~") && data.includes("\x1b[201~");
+}
+
+function isEnter(data: string): boolean {
+  return data === "\r" || data === "\n";
 }
 
 function matchesPrompt(matcher: PromptMatcher, prompt: string, session: TerminalSession): boolean {

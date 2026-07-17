@@ -137,7 +137,7 @@ tests/
 | INT-API-001 | Project + task lifecycle over HTTP | Fastify app via `project-routes` / `task-routes` | Routes + services persist task state correctly | Create project, create task, read back task, status transitions | L2, on backend api/service change | No dedicated integration spec; exercised by backend E2E journeys |
 | INT-API-002 | Message bus round trip | `message-routes` / `message-service` | Route-file dispatch and history persistence | Posted message is persisted and retrievable in order | L2, on messaging change | No dedicated integration spec; exercised by backend E2E routing journeys |
 | INT-RT-001 | Session start/resume lifecycle | `runtime-coordinator-service` + `session-registry` | PTY session can start, persist id, and resume | Session id persisted; resume reuses id; stop cleans registry | L2, on runtime change | Covered with the mock Claude runtime; live PTY coverage remains absent |
-| INT-RT-002 | Post-task memory and harness review order | Final Acceptance + Review Task Harness + `runtime-coordinator-service` + Harness route | Review Task Harness starts the optional Auto Memory phase before direct Task Harness Retrospective prompt | With Auto Memory on, current acceptance hash and review request gate memory collection; with it off, no memory workflow starts; pending harness feedback remains an inbox and is not auto-dispatched | L2, on Auto Memory or retrospective change | Covered by backend E2E with mock role sessions |
+| INT-RT-002 | Post-task memory and harness review order | Final Acceptance + Review Task Harness + `runtime-coordinator-service` + Harness route | A normally stopped complete flow automatically starts Harness review, after optional Auto Memory | With automatic review enabled, accepted Final Acceptance and a stopped Round dispatch Task Harness Retrospective with an `auto` trigger; with Auto Memory on, memory completes first; pending harness feedback remains an inbox and is not auto-dispatched | L2, on Auto Memory or retrospective change | Covered by backend E2E with mock role sessions |
 
 ### Backend E2E (implemented: `tests/e2e/backend/`)
 
@@ -148,8 +148,8 @@ services with controlled runtime doubles:
   interruption without retry.
 - Session ID persistence, restart/close behavior, backend restart recovery, and
   resuming a recovered Claude session.
-- Complete architecture, code, test, Gate Review callback, and Final Acceptance
-  orchestration.
+- Complete architecture, code, test, Gate Review callback, Final Acceptance,
+  and automatic Task Harness Retrospective orchestration.
 - Architecture, validation, and code-diff rejection/correction loops, including
   corrected commit source chains and unchanged-input suppression.
 - Role-scoped translation feeds and Gateway input/output translation without

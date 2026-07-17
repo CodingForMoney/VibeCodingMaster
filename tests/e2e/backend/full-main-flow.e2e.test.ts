@@ -1,14 +1,18 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { renderFinalAcceptanceTemplate } from "../../../src/backend/templates/handoff.js";
 import { createMockClaudeE2eApp } from "./helpers/e2e-app.js";
 import { createE2eRepo, git } from "./helpers/e2e-repo.js";
 import {
   connectAndCreateTask,
   getGateState,
+  getWorkspaceState,
   requestGateReview,
   sleep,
+  startHarnessEngineer,
   startRole,
+  updatePreferences,
   updateGateSettings,
   waitFor,
   writeConfirmedArchitectureBrief
@@ -37,8 +41,25 @@ describe("backend E2E complete VCM flow with mock Claude Code", () => {
       "code-diff": true,
       "validation-adequacy": true
     });
+    await updatePreferences(env.app, {
+      autoTaskHarnessReviewEnabled: true,
+      autoMemoryEnabled: false
+    });
+    let testerResultHandled = false;
 
     env.mockRuntime.onPrompt("gate-reviewer", "[VCM GATE REVIEW]", writeApproveGateReport, { once: false });
+    env.mockRuntime.onPrompt("harness-engineer", "[VCM Task Harness Retrospective]", async (ctx) => {
+      await ctx.userPromptSubmit();
+      const resultPath = matchPromptField(ctx.prompt, "Write the analysis to Result Path");
+      if (!resultPath) {
+        throw new Error(`Unable to parse Harness Retrospective prompt:\n${ctx.prompt}`);
+      }
+      await ctx.writeAbsoluteFile(
+        resultPath,
+        "# Task Harness Retrospective\n\nComplete main flow reviewed by Harness Engineer.\n"
+      );
+      await ctx.stop();
+    });
 
     env.mockRuntime.onPrompt("project-manager", "Build the complete mocked feature", async (ctx) => {
       await ctx.userPromptSubmit();
@@ -157,18 +178,16 @@ describe("backend E2E complete VCM flow with mock Claude Code", () => {
       await ctx.userPromptSubmit();
       await ctx.appendTranscriptText("Tester result received.");
       await ctx.stop();
+      testerResultHandled = true;
     });
 
     env.mockRuntime.onPrompt("project-manager", /gate: validation-adequacy[\s\S]*decision: approve/, async (ctx) => {
       await ctx.userPromptSubmit();
       await ctx.appendTranscriptText("Validation gate approved. Final acceptance complete.");
-      await ctx.writeFile(".ai/vcm/handoffs/final-acceptance.md", [
-        "# Final Acceptance",
-        "",
-        "Decision: accepted",
-        "Evidence: architecture, code diff, and validation gates approved.",
-        ""
-      ].join("\n"));
+      await ctx.writeFile(
+        ".ai/vcm/handoffs/final-acceptance.md",
+        acceptedFinalAcceptance(task.taskSlug)
+      );
       await ctx.stop();
     });
 
@@ -176,6 +195,7 @@ describe("backend E2E complete VCM flow with mock Claude Code", () => {
     await startRole(env.app, task.taskSlug, "architect");
     await startRole(env.app, task.taskSlug, "coder");
     await startRole(env.app, task.taskSlug, "tester");
+    const harnessSession = await startHarnessEngineer(env.app, task.taskSlug);
     const pmSession = env.mockRuntime.getSessionByRole(task.taskSlug, "project-manager");
     expect(pmSession).toBeDefined();
 
@@ -193,20 +213,58 @@ describe("backend E2E complete VCM flow with mock Claude Code", () => {
     await waitForGate(env.app, task.taskSlug, "code-diff");
     await waitForFile(path.join(task.worktreePath, ".ai/vcm/handoffs/test-report.md"));
     await env.mockRuntime.waitForIdle();
+    await waitFor(() => testerResultHandled);
 
     await requestGateReview(env.app, task.taskSlug, "validation-adequacy");
     await waitForGate(env.app, task.taskSlug, "validation-adequacy");
-    await waitForFile(path.join(task.worktreePath, ".ai/vcm/handoffs/final-acceptance.md"));
+    await waitFor(async () => {
+      const content = await fs.readFile(
+        path.join(task.worktreePath, ".ai/vcm/handoffs/final-acceptance.md"),
+        "utf8"
+      );
+      expect(content).toContain("## Decision\n\naccepted");
+    });
     await env.mockRuntime.waitForIdle();
 
     const finalAcceptance = await fs.readFile(path.join(task.worktreePath, ".ai/vcm/handoffs/final-acceptance.md"), "utf8");
-    expect(finalAcceptance).toContain("Decision: accepted");
+    expect(finalAcceptance).toContain("## Decision\n\naccepted");
     const gateState = await getGateState(env.app, task.taskSlug);
     expect(gateState.gates["architecture-plan"]).toMatchObject({ status: "completed", decision: "approve" });
     expect(gateState.gates["code-diff"]).toMatchObject({ status: "completed", decision: "approve" });
     expect(gateState.gates["validation-adequacy"]).toMatchObject({ status: "completed", decision: "approve" });
+
+    await waitFor(async () => {
+      const workspace = await getWorkspaceState(env.app, task.taskSlug);
+      expect(workspace.roundState.status).toBe("stopped");
+      expect(workspace.roundState.roundId).toBeTruthy();
+    });
+    expect(env.mockRuntime.getWrites(harnessSession.id).join("\n"))
+      .not.toContain("[VCM Task Harness Retrospective]");
+
+    await env.deps.runtimeCoordinator.reconcileProject(repo.repoRoot, { taskSlug: task.taskSlug });
+    await env.mockRuntime.waitForIdle();
+
+    expect(env.mockRuntime.getWrites(harnessSession.id).join("\n"))
+      .toContain("[VCM Task Harness Retrospective]");
+    await expect(fs.readFile(
+      path.join(repo.repoRoot, ".ai/vcm/harness-feedback/task-retrospectives", `${task.taskSlug}.md`),
+      "utf8"
+    )).resolves.toContain("Complete main flow reviewed by Harness Engineer.");
+    await expect(fs.readFile(
+      path.join(repo.repoRoot, ".ai/vcm/harness-feedback/task-retrospectives", `${task.taskSlug}.json`),
+      "utf8"
+    )).resolves.toContain('"trigger": "auto"');
   });
 });
+
+function acceptedFinalAcceptance(taskSlug: string): string {
+  return renderFinalAcceptanceTemplate(taskSlug)
+    .replaceAll("TBD", "Complete main flow evidence verified.")
+    .replace(
+      "## Decision\n\nComplete main flow evidence verified.",
+      "## Decision\n\naccepted"
+    );
+}
 
 async function writeApproveGateReport(ctx: MockClaudePromptContext): Promise<void> {
   const gate = matchPromptField(ctx.prompt, "Gate") as GateReviewGate;
