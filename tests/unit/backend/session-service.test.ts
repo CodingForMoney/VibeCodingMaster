@@ -874,7 +874,9 @@ describe("createSessionService", () => {
       harnessOutdated: false,
       lastHarnessNotifyAt: "2026-05-29T00:00:00.000Z"
     });
+    expect(writes[0]).toContain("[VCM HARNESS UPDATED]");
     expect(writes[0]).toContain("VCM harness was updated.");
+    expect(writes[0]).toContain("[/VCM HARNESS UPDATED]");
     expect(writes[0]).toContain(".claude/agents/architect.md");
     expect(writes[1]).toBe("\r");
   });

@@ -53,7 +53,7 @@ export function createCommandDispatcher(deps: CommandDispatcherDeps): CommandDis
         });
       }
 
-      const instruction = `Please read and execute the role command at: ${commandPath}`;
+      const instruction = `[VCM ROLE COMMAND]\nRead and execute the role command at: ${commandPath}\n[/VCM ROLE COMMAND]`;
       await submitTerminalInput(deps.runtime, session.id, instruction);
 
       return {

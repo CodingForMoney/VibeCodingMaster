@@ -1740,10 +1740,12 @@ function normalizeHarnessRevision(value: unknown): number {
 
 function buildHarnessRefreshPrompt(role: RoleName): string {
   return [
+    "[VCM HARNESS UPDATED]",
     "VCM harness was updated.",
     "Before continuing, re-read the current project `CLAUDE.md`, your agent definition, and any relevant VCM skills from disk.",
     `Your agent definition is \`.claude/agents/${role}.md\` when that file exists.`,
-    "Follow the latest rules from disk. Briefly acknowledge when ready."
+    "Follow the latest rules from disk. Briefly acknowledge when ready.",
+    "[/VCM HARNESS UPDATED]"
   ].join("\n");
 }
 

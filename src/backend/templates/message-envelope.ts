@@ -30,5 +30,5 @@ Instructions:
 
 export function renderManualStagePrompt(message: VcmRoleMessage): string {
   const target = message.bodyPath ?? `VCM message ${message.id}`;
-  return `Read and handle VCM message ${message.id} at ${target}`;
+  return `[VCM MESSAGE]\nid: ${message.id}\nRead and handle the VCM message at ${target}.\n[/VCM MESSAGE]`;
 }

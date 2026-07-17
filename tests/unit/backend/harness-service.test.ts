@@ -40,6 +40,8 @@ describe("createHarnessService", () => {
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("They do not run their own final acceptance");
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("Final acceptance closes only a complete code-delivery flow");
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("targeted diagnostic L3 may run in Architect Debug Mode or Architecture Diagnosis Mode");
+    expect(await fs.readText("/repo/CLAUDE.md")).toContain("A message without a VCM marker is user communication.");
+    expect(await fs.readText("/repo/CLAUDE.md")).toContain("When the user asks a question, answer only.");
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("## VCM Worktree Policy");
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("## VCM Glossary Policy");
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("docs/GLOSSARY.md");
@@ -79,6 +81,7 @@ describe("createHarnessService", () => {
     expect(await fs.readText("/repo/.claude/skills/vcm-gate-review/SKILL.md")).toContain("--source <coder|architect-debug|architect-diagnosis>");
     expect(await fs.readText("/repo/.claude/skills/vcm-gate-review/SKILL.md")).toContain("before Validation-Only Flow completion");
     expect(await fs.readText("/repo/.claude/skills/vcm-architecture-interview/SKILL.md")).toContain("name: vcm-architecture-interview");
+    expect(await fs.readText("/repo/.claude/skills/vcm-architecture-interview/SKILL.md")).toContain("During an active Architect Interview");
     expect(await fs.readText("/repo/.claude/skills/vcm-report-harness-issue/SKILL.md")).toContain("name: vcm-report-harness-issue");
     expect(await fs.readText("/repo/.claude/skills/vcm-report-harness-issue/SKILL.md")).toContain(".ai/vcm/harness-feedback/pending/");
     expect(await fs.readText("/repo/.claude/skills/vcm-propose-memory/SKILL.md")).toContain("name: vcm-propose-memory");
@@ -92,6 +95,7 @@ describe("createHarnessService", () => {
     expect(projectManagerAgent).toContain("PM confirms the worktree is clean, prepares or updates the PR");
     expect(projectManagerAgent).toContain("Do not perform technical analysis");
     expect(projectManagerAgent).toContain("Use the `vcm-route-message` skill for every role dispatch");
+    expect(projectManagerAgent).not.toContain("### Direct User Message Handling");
     expect(projectManagerAgent).toContain("### PR-Preparation Flow");
     expect(projectManagerAgent).toContain("### Background Jobs");
     expect(projectManagerAgent).toContain("VCM_TASK_REPO_ROOT");
@@ -623,7 +627,10 @@ describe("createHarnessService", () => {
     expect(writes).toEqual([]);
 
     const run = await service.runHarnessBootstrap("/repo");
+    expect(run.prompt).toContain("[VCM HARNESS BOOTSTRAP]");
     expect(run.prompt).toContain("Use the vcm-harness-bootstrap skill");
+    expect(run.prompt).toContain("[/VCM HARNESS BOOTSTRAP]");
+    expect(writes[0]).toContain("[VCM HARNESS BOOTSTRAP]");
     expect(writes[0]).toContain("Use the vcm-harness-bootstrap skill");
     expect(writes[1]).toBe("\r");
 

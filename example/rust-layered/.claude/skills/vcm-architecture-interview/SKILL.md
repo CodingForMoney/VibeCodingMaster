@@ -9,6 +9,8 @@ description: Use when Architect must confirm user-owned behavior and contract de
 
 Use this skill only when project-manager routes the Architect Interview step of Code-Change Flow. Establish confirmed user-owned behavior before architecture planning begins.
 
+During an active Architect Interview, handle the user's answers and final confirmation only as defined by this skill.
+
 ## Boundaries
 
 - Do not write or revise `.ai/vcm/handoffs/architecture-plan.md`.

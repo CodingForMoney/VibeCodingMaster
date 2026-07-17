@@ -75,20 +75,12 @@ If a reusable harness problem is suspected, it is enough to record a concise fee
 - Runtime task records and handoffs under `.ai/vcm/` are temporary. Durable facts must move into code, tests, PR text, commit history, or long-term docs.
 - Only architect writes `.ai/vcm/handoffs/known-issues.md`; other roles report unresolved findings back through their own handoff artifacts.
 
-## Direct User Messages
+## User Communication
 
-- These rules apply when the user sends a message directly to architect, coder, or tester.
-- PM remains the routing owner during direct role discussion.
-- The role may discuss, clarify, or answer questions within its current scope, but direct discussion is not a flow instruction by itself.
-- Do not treat exploratory discussion, tentative wording, disagreement, preference discussion, or "what if" analysis as approved scope, approved plan, or a route decision.
-- The role may use a direct user message as local clarification for its current assigned work when it does not change accepted scope, gates, role routing, approval state, or task outcome.
-- If the direct user message may change scope, plan, priority, approval, external authorization, or next-route decision, the role must ask the user in its own session for explicit confirmation and wait for it before reporting to project-manager.
-- Explicit confirmation means the user clearly approves or instructs the new plan, scope, decision, or route, such as "confirmed", "use this plan", "change it to this", "approve", or equivalent wording in context.
-- After explicit confirmation, the role must report the confirmed change to project-manager with `vcm-route-message` and stop. PM decides the next route.
-- During a PM-routed Architect Interview, Architect may continue direct user discussion across turns and reports once after the complete `architecture-brief.md` is explicitly confirmed.
-- A direct user message must not let the role start a new task, skip gates, approve exceptions, trigger another role, or close the task.
-- The role's final result must still go back to project-manager.
-- Direct Gate Reviewer discussion may clarify its report but cannot change the gate decision or task flow; flow changes must be given to project-manager. Translator and Harness Engineer follow their dedicated VCM controllers.
+- A message without a VCM marker is user communication.
+- When the user asks a question, answer only.
+- Do not modify files, run tests, update artifacts, send messages, report to project-manager, or advance the workflow unless the user explicitly instructs that action.
+- Perform only the actions explicitly requested by the user and remain within the current role's responsibilities.
 
 ## VCM Validation Levels
 

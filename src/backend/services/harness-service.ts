@@ -2242,7 +2242,9 @@ function bootstrapWarnings(
 }
 
 function buildHarnessBootstrapPrompt(baseRepoRoot: string, targetRepoRoot: string): string {
-  return `Use the vcm-harness-bootstrap skill to finish the VCM harness bootstrap for the active task worktree.
+  return `[VCM HARNESS BOOTSTRAP]
+
+Use the vcm-harness-bootstrap skill to finish the VCM harness bootstrap for the active task worktree.
 
 Base repository root:
 ${baseRepoRoot}
@@ -2271,7 +2273,9 @@ Boundaries:
 - VCM will not create the bootstrap commit for you.
 
 Final response:
-Summarize files reviewed, files updated, generated artifacts, commit hash, final git status, verified claims, inferred claims, unknowns, confirmation-needed items, and suggested validation commands.`;
+Summarize files reviewed, files updated, generated artifacts, commit hash, final git status, verified claims, inferred claims, unknowns, confirmation-needed items, and suggested validation commands.
+
+[/VCM HARNESS BOOTSTRAP]`;
 }
 
 export function createScriptFixedHarnessInstaller(

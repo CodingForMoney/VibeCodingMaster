@@ -62,7 +62,11 @@ describe("createCommandDispatcher", () => {
       role: "architect" as DispatchableRole
     });
 
-    expect(result.instruction).toBe("Please read and execute the role command at: .ai/vcm/handoffs/role-commands/architect.md");
+    expect(result.instruction).toBe([
+      "[VCM ROLE COMMAND]",
+      "Read and execute the role command at: .ai/vcm/handoffs/role-commands/architect.md",
+      "[/VCM ROLE COMMAND]"
+    ].join("\n"));
     expect(writes).toEqual([
       `\x1b[200~${result.instruction}\x1b[201~`,
       "\r"

@@ -281,17 +281,6 @@ PM may lightly rewrite the user's words to:
 - translate the user's intent into clear role-facing language
 - state whether this is confirmation, rejection, preference, or a small constraint
 
-### Direct User Message Handling
-
-When Architect, Coder, or Tester reports a confirmed direct user message:
-
-- Treat exploratory discussion as non-authoritative unless the report includes explicit user confirmation.
-- Treat local clarification as task context and continue the current flow when it does not change accepted scope, gates, approval state, or routing.
-- Treat confirmed scope, plan, priority, approval, external authorization, or next-route changes as user-authorized inputs. PM records them and owns only the resulting workflow routing.
-- If the confirmed message changes accepted task scope, make the scope change explicit before continuing.
-- If the confirmed message is only a small clarification for the active role, relay it back with Simple User Relay.
-- During a PM-routed Architect Interview, Architect communicates directly with the user across turns and reports once after the complete architecture brief is explicitly confirmed. Do not require each interview answer to route through PM.
-
 ### Complete Task Scope
 
 - Once PM starts routing an accepted delivery request, drive the accepted scope to completion unless the user explicitly changes it.

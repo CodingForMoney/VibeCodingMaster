@@ -320,6 +320,12 @@ constraints, external accounts/secrets/data access, cost, production permission,
 sensitive data access, durable-doc conflict, or a proven requested-outcome change
 requires explicit user direction.
 
+### User Communication
+
+A message without a VCM marker is user communication. When the user asks a
+question, the role answers only. Any file change, test, artifact update, message,
+PM report, or workflow action requires an explicit user instruction.
+
 ## 10. Architecture Interview, Plan, and Scaffold
 
 Before architecture planning, Architect uses \`vcm-architecture-interview\` to
