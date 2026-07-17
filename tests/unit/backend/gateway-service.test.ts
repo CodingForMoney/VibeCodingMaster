@@ -107,7 +107,8 @@ describe("gateway-service long connection", () => {
     expect(preferenceUpdates).toEqual([{
       translationEnabled: true,
       translationAutoSendEnabled: true,
-      translationOutputMode: "round-final"
+      translationOutputMode: "round-final",
+      flowPauseAlerts: false
     }]);
     service.stop();
   });
@@ -133,10 +134,12 @@ describe("gateway-service long connection", () => {
     // Enabling the desktop Gateway must not implicitly arm the connection switch.
     expect(status.connectionEnabled).toBe(false);
     expect(status.running).toBe(false);
+    expect(status.pauseAlertSoundEnabled).toBe(false);
     expect(preferenceUpdates).toEqual([{
       translationEnabled: true,
       translationAutoSendEnabled: true,
-      translationOutputMode: "round-final"
+      translationOutputMode: "round-final",
+      flowPauseAlerts: false
     }]);
     service.stop();
   });
@@ -161,7 +164,8 @@ describe("gateway-service long connection", () => {
       appPreferences: {
         translationEnabled: false,
         translationAutoSendEnabled: false,
-        translationOutputMode: "pm-final-only"
+        translationOutputMode: "pm-final-only",
+        flowPauseAlerts: true
       }
     });
     await service.setConnectionEnabled(true);
@@ -170,6 +174,7 @@ describe("gateway-service long connection", () => {
 
     expect(status.enabled).toBe(true);
     expect(status.running).toBe(true);
+    expect(status.pauseAlertSoundEnabled).toBe(true);
     expect(preferenceUpdates).toEqual([{
       translationEnabled: true,
       translationAutoSendEnabled: true,
@@ -203,9 +208,11 @@ describe("gateway-service long connection", () => {
 
     await service.start();
     await waitFor(() => runtimeWrites.length === 1);
+    await waitFor(() => sentTexts.length === 2);
 
     expect(runtimeWrites[0]).toContain("please continue");
     expect(runtimeWrites[0]).not.toContain("[VCM Gateway]");
+    expect((await service.getStatus()).lastPmInputMessageId).toBe("m1");
     service.stop();
   });
 
@@ -1040,6 +1047,7 @@ function createService(input: {
     translationEnabled?: boolean;
     translationAutoSendEnabled?: boolean;
     translationOutputMode?: "round-final" | "pm-final-only" | "final-only" | "all";
+    flowPauseAlerts?: boolean;
   };
   pmSession?: RoleSessionRecord | null;
   runtimeWrites?: string[];
@@ -1070,7 +1078,8 @@ function createService(input: {
     launchTemplate: createDefaultLaunchTemplate(),
     translationEnabled: input.appPreferences?.translationEnabled ?? true,
     translationAutoSendEnabled: input.appPreferences?.translationAutoSendEnabled ?? false,
-    translationOutputMode: input.appPreferences?.translationOutputMode ?? "pm-final-only"
+    translationOutputMode: input.appPreferences?.translationOutputMode ?? "pm-final-only",
+    flowPauseAlerts: input.appPreferences?.flowPauseAlerts ?? true
   };
   return createGatewayService({
     fs: {} as never,

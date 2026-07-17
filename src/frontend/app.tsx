@@ -41,7 +41,13 @@ import { FileTranslationModalHost } from "./components/translation-panel.js";
 import { UiErrorCenter } from "./components/ui-error-center.js";
 import { selectActiveTask } from "./state/app-store.js";
 import { selectAutoFollowRole } from "./state/active-role-follow.js";
-import { getFlowPauseNotificationKey, selectFlowPauseAlertMessage } from "./state/flow-pause-alert.js";
+import {
+  getFlowPauseNotificationKey,
+  observeGatewayInboundMessage,
+  selectFlowPauseAlarmMode,
+  selectFlowPauseAlertMessage,
+  type GatewayInboundObservation
+} from "./state/flow-pause-alert.js";
 import { apiClient } from "./state/api-client.js";
 import { clearUiErrorForActions, formatUiError } from "./state/error-format.js";
 import { clearPollError, recordPollError } from "./state/poll-error-gate.js";
@@ -50,9 +56,7 @@ import { useScheduledPoll } from "./state/use-scheduled-poll.js";
 import { ProjectDashboard } from "./routes/project-dashboard.js";
 import { TaskWorkspace, type TaskWorkspaceLaunchState } from "./routes/task-workspace.js";
 
-const FLOW_PAUSE_STRONG_ALERT_THRESHOLD_MS = 2 * 60 * 1000;
 const FLOW_PAUSE_CHIME_INTERVAL_MS = 1400;
-const FLOW_PAUSE_WEAK_CHIME_COUNT = 3;
 
 function isTranslationHarnessReady(harnessStatus: HarnessStatusReport | null): boolean {
   return Boolean(harnessStatus?.initialized);
@@ -123,6 +127,10 @@ export function App() {
   const autoFollowedRoleRef = useRef<Record<string, RoleName>>({});
   const activeTaskViewStartedAtRef = useRef<Record<string, number>>({});
   const flowPauseAlarmRef = useRef<number | null>(null);
+  const gatewayInboundObservationRef = useRef<GatewayInboundObservation>({
+    initialized: false,
+    messageId: null
+  });
   const projectRuntimeLaunchSyncKeyRef = useRef("");
   const activeTask = useMemo(
     () => selectActiveTask(tasks, activeTaskSlug),
@@ -136,13 +144,6 @@ export function App() {
   const currentAutoMemoryState = autoMemoryStateTaskSlug === activeTask?.taskSlug ? autoMemoryState : null;
   const translationBaseReady = Boolean(project && activeTask && isTranslationHarnessReady(currentHarnessStatus));
   const translatorSessionRunning = translatorSession?.status === "running";
-  // Suppress the web flow-pause modal + sound only when the gateway will actually
-  // DELIVER the "needs attention" notification — i.e. it is enabled (handlePmStop
-  // pushes only when settings.enabled). The gateway keeps polling while disabled
-  // (to receive a `/start` command), so `gatewayStatus.running` is true even when
-  // disabled; keying suppression on `running` silences the web alert with no push
-  // anywhere. Key on `enabled` instead.
-  const gatewayHandlesAlerts = Boolean(gatewayStatus?.enabled);
   const effectiveTranslationEnabled = Boolean(translationEnabled && translationBaseReady && translatorSessionRunning);
   const canSaveLaunchTemplate = Boolean(activeTaskLaunchState?.statusLoaded);
   const canOneClickStart = Boolean(activeTask && activeTaskLaunchState?.statusLoaded && !activeTaskLaunchState.hasAnySession);
@@ -205,34 +206,9 @@ export function App() {
     }, FLOW_PAUSE_CHIME_INTERVAL_MS);
   }, [stopFlowPauseAlarm]);
 
-  const playWeakFlowPauseAlert = useCallback(() => {
-    stopFlowPauseAlarm();
-    let playCount = 1;
-    void playFlowPauseSound();
-    flowPauseAlarmRef.current = window.setInterval(() => {
-      playCount += 1;
-      void playFlowPauseSound();
-      if (playCount >= FLOW_PAUSE_WEAK_CHIME_COUNT && flowPauseAlarmRef.current !== null) {
-        window.clearInterval(flowPauseAlarmRef.current);
-        flowPauseAlarmRef.current = null;
-      }
-    }, FLOW_PAUSE_CHIME_INTERVAL_MS);
-  }, [stopFlowPauseAlarm]);
-
-  const showFlowPauseNotice = useCallback((
-    text: string,
-    id = `manual-${Date.now()}`,
-    options: { sound?: "none" | "weak" | "strong" } = {}
-  ) => {
+  const showFlowPauseNotice = useCallback((text: string, id = `manual-${Date.now()}`) => {
     setFlowPauseNotice({ id, text });
-    if (options.sound === "strong") {
-      startStrongFlowPauseAlarm();
-    } else if (options.sound === "weak") {
-      playWeakFlowPauseAlert();
-    } else {
-      stopFlowPauseAlarm();
-    }
-  }, [playWeakFlowPauseAlert, startStrongFlowPauseAlarm, stopFlowPauseAlarm]);
+  }, []);
 
   const confirmFlowPauseNotice = useCallback(() => {
     stopFlowPauseAlarm();
@@ -304,19 +280,8 @@ export function App() {
     if (!shouldShowFlowPauseNotice(roundState, previousObservation, activeTaskViewStartedAtRef.current[roundState.taskSlug])) {
       return;
     }
-    if (gatewayHandlesAlerts) {
-      stopFlowPauseAlarm();
-      setFlowPauseNotice(null);
-      return;
-    }
-
-    const sound = !pauseAlertSound
-      ? "none"
-      : getFlowPauseDurationMs(roundState) >= FLOW_PAUSE_STRONG_ALERT_THRESHOLD_MS
-        ? "strong"
-        : "weak";
-    showFlowPauseNotice(flowPauseMessage, pauseKey, { sound });
-  }, [activeTask?.taskSlug, gatewayHandlesAlerts, pauseAlertSound, showFlowPauseNotice, stopFlowPauseAlarm]);
+    showFlowPauseNotice(flowPauseMessage, pauseKey);
+  }, [activeTask?.taskSlug, showFlowPauseNotice]);
 
   const handleLaunchStateChanged = useCallback((launchState: TaskWorkspaceLaunchState) => {
     setActiveLaunchState((current) => {
@@ -580,12 +545,23 @@ export function App() {
   }, [stopFlowPauseAlarm]);
 
   useEffect(() => {
-    if (!gatewayHandlesAlerts) {
-      return;
+    if (gatewayStatus?.pauseAlertSoundEnabled !== undefined) {
+      setPauseAlertSound(gatewayStatus.pauseAlertSoundEnabled);
+    }
+    const next = observeGatewayInboundMessage(gatewayInboundObservationRef.current, gatewayStatus);
+    gatewayInboundObservationRef.current = next.observation;
+    if (next.dismissPauseAlert) {
+      confirmFlowPauseNotice();
+    }
+  }, [confirmFlowPauseNotice, gatewayStatus]);
+
+  useEffect(() => {
+    if (flowPauseNotice && selectFlowPauseAlarmMode(pauseAlertSound) === "strong") {
+      startStrongFlowPauseAlarm();
+      return stopFlowPauseAlarm;
     }
     stopFlowPauseAlarm();
-    setFlowPauseNotice(null);
-  }, [gatewayHandlesAlerts, stopFlowPauseAlarm]);
+  }, [flowPauseNotice?.id, pauseAlertSound, startStrongFlowPauseAlarm, stopFlowPauseAlarm]);
 
   useEffect(() => {
     const resolvedTheme = themeMode === "system"
@@ -1726,15 +1702,6 @@ type AudioContextWindow = Window & typeof globalThis & {
 };
 
 let flowPauseAudioContext: AudioContext | null = null;
-
-function getFlowPauseDurationMs(roundState: VcmSessionRoundState): number {
-  const startedAt = Date.parse(roundState.startedAt ?? "");
-  const endedAt = Date.parse(roundState.stoppedAt ?? roundState.lastTurnEndedAt ?? "");
-  if (!Number.isFinite(startedAt) || !Number.isFinite(endedAt)) {
-    return 0;
-  }
-  return Math.max(0, endedAt - startedAt);
-}
 
 function shouldShowFlowPauseNotice(
   roundState: VcmSessionRoundState,

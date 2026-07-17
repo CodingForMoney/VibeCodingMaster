@@ -1,9 +1,11 @@
 import { afterEach, describe, expect, it } from "vitest";
 import { createMockClaudeE2eApp } from "./helpers/e2e-app.js";
 import { createE2eRepo } from "./helpers/e2e-repo.js";
+import type { GatewayStatus } from "../../../src/shared/types/gateway.js";
 import {
   bindGatewayLarkApp,
   connectAndCreateTask,
+  getPreferences,
   setGatewayConnection,
   startRole,
   updateGatewaySettings,
@@ -53,6 +55,8 @@ describe("backend E2E Gateway with mock channel and mock Claude Code", () => {
     });
     expect(status.enabled).toBe(true);
     expect(status.running).toBe(true);
+    expect(status.pauseAlertSoundEnabled).toBe(false);
+    expect((await getPreferences(env.app)).flowPauseAlerts).toBe(false);
 
     env.mockGateway.enqueueText("请检查 gateway 任务", {
       fromUserId: "mock-user",
@@ -69,6 +73,12 @@ describe("backend E2E Gateway with mock channel and mock Claude Code", () => {
 
     await waitFor(() => {
       expect(env.mockRuntime.getWrites(pmSession!.id).join("\n")).toContain("Please inspect the gateway task.");
+    }, 12_000);
+
+    await waitFor(async () => {
+      const response = await env.app.inject({ method: "GET", url: "/api/gateway/status" });
+      expect(response.statusCode).toBe(200);
+      expect(response.json<GatewayStatus>().lastPmInputMessageId).toBeTruthy();
     }, 12_000);
 
     await waitFor(() => {

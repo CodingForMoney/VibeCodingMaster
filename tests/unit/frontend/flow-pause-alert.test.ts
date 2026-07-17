@@ -1,5 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
-import { getFlowPauseNotificationKey, selectFlowPauseAlertMessage } from "../../../src/frontend/state/flow-pause-alert.js";
+import {
+  getFlowPauseNotificationKey,
+  observeGatewayInboundMessage,
+  selectFlowPauseAlarmMode,
+  selectFlowPauseAlertMessage
+} from "../../../src/frontend/state/flow-pause-alert.js";
+import type { GatewayStatus } from "../../../src/shared/types/gateway.js";
 import type { VcmSessionRoundState } from "../../../src/shared/types/round.js";
 
 const BASE: VcmSessionRoundState = {
@@ -106,6 +112,42 @@ describe("selectFlowPauseAlertMessage", () => {
   });
 });
 
+describe("flow pause presentation", () => {
+  it("always keeps the modal decision separate from the sound preference", () => {
+    const pausedState: VcmSessionRoundState = {
+      ...BASE,
+      flowPause: { paused: true, reason: "stopped-no-next-turn", role: "project-manager" }
+    };
+
+    expect(selectFlowPauseAlertMessage(pausedState, vi.fn())).not.toBeNull();
+    expect(selectFlowPauseAlarmMode(false)).toBe("none");
+    expect(selectFlowPauseAlarmMode(true)).toBe("strong");
+  });
+
+  it("dismisses an existing pause only for a new inbound message while Gateway is enabled", () => {
+    const initial = observeGatewayInboundMessage(
+      { initialized: false, messageId: null },
+      gatewayStatus({ enabled: true, lastPmInputMessageId: "old-message" })
+    );
+    expect(initial.dismissPauseAlert).toBe(false);
+
+    const next = observeGatewayInboundMessage(
+      initial.observation,
+      gatewayStatus({ enabled: true, lastPmInputMessageId: "new-message" })
+    );
+    expect(next.dismissPauseAlert).toBe(true);
+
+    expect(observeGatewayInboundMessage(next.observation, gatewayStatus({
+      enabled: true,
+      lastPmInputMessageId: "new-message"
+    })).dismissPauseAlert).toBe(false);
+    expect(observeGatewayInboundMessage(next.observation, gatewayStatus({
+      enabled: false,
+      lastPmInputMessageId: "newer-message"
+    })).dismissPauseAlert).toBe(false);
+  });
+});
+
 // Single-fire guard for the GUI alert dedup key (gate Finding 2). The GUI fires the
 // flow-pause modal + alarm once per distinct key; these pin the keying contract that
 // makes a sticky awaiting-user decision alert exactly once while still re-alerting on
@@ -188,3 +230,32 @@ describe("getFlowPauseNotificationKey", () => {
     expect(getFlowPauseNotificationKey(laterStop)).not.toBe(getFlowPauseNotificationKey(stoppedNoNextTurn));
   });
 });
+
+function gatewayStatus(input: Pick<GatewayStatus, "enabled" | "lastPmInputMessageId">): GatewayStatus {
+  return {
+    version: 1,
+    enabled: input.enabled,
+    running: input.enabled,
+    connectionEnabled: input.enabled,
+    channel: "lark",
+    translationEnabled: true,
+    currentProjectId: "/repo",
+    currentTaskSlug: "demo-task",
+    binding: {
+      accountId: null,
+      baseUrl: "https://open.larksuite.com",
+      boundUserId: "user-1",
+      loginUserId: "user-1",
+      tokenConfigured: false,
+      appId: "app-1",
+      appIdConfigured: true,
+      appSecretConfigured: true,
+      homeChatId: "chat-1"
+    },
+    pendingConfirmations: {},
+    lastPollStatus: { state: "running" },
+    lastMessageStatus: null,
+    lastPmInputMessageId: input.lastPmInputMessageId,
+    updatedAt: BASE.updatedAt
+  };
+}

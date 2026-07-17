@@ -1,4 +1,10 @@
+import type { GatewayStatus } from "../../shared/types/gateway.js";
 import type { VcmRoleRecoveryState, VcmSessionRoundState } from "../../shared/types/round.js";
+
+export interface GatewayInboundObservation {
+  initialized: boolean;
+  messageId: string | null;
+}
 
 /**
  * Derive the flow-pause alert message from the AUTHORITATIVE backend signal
@@ -42,4 +48,30 @@ export function getFlowPauseNotificationKey(roundState: VcmSessionRoundState): s
   const roundKey = roundState.roundId ?? roundState.startedAt ?? roundState.taskSlug;
   const stoppedKey = roundState.stoppedAt ?? roundState.lastTurnEndedAt ?? "stopped";
   return `${roundKey}:${stoppedKey}`;
+}
+
+export function selectFlowPauseAlarmMode(soundEnabled: boolean): "none" | "strong" {
+  return soundEnabled ? "strong" : "none";
+}
+
+export function observeGatewayInboundMessage(
+  current: GatewayInboundObservation,
+  status: GatewayStatus | null
+): { observation: GatewayInboundObservation; dismissPauseAlert: boolean } {
+  if (!status) {
+    return { observation: current, dismissPauseAlert: false };
+  }
+
+  const messageId = status.lastPmInputMessageId ?? null;
+  if (!current.initialized) {
+    return {
+      observation: { initialized: true, messageId },
+      dismissPauseAlert: false
+    };
+  }
+
+  return {
+    observation: { initialized: true, messageId },
+    dismissPauseAlert: Boolean(status.enabled && messageId && messageId !== current.messageId)
+  };
 }

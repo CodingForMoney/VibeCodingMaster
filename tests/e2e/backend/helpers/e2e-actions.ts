@@ -150,6 +150,14 @@ export async function updatePreferences(app: FastifyInstance, input: UpdateAppPr
   return response.json<AppPreferences>();
 }
 
+export async function getPreferences(app: FastifyInstance): Promise<AppPreferences> {
+  const response = await injectOk(app, {
+    method: "GET",
+    url: "/api/settings/preferences"
+  });
+  return response.json<AppPreferences>();
+}
+
 export async function updateGateSettings(
   app: FastifyInstance,
   taskSlug: string,

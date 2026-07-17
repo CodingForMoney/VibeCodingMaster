@@ -138,7 +138,8 @@ configured channel at boot — the user must arm it (desktop toggle →
 2. **Bind/identity**: persist sender metadata via `saveInboundMetadata`. Weixin
    binds the sender only if no `boundUserId` exists yet (`if-missing`); Lark binds
    the sender on every message (`always`) and also records `contextToken`/`chatId`
-   per user.
+   per user. After user text is successfully submitted to PM, status exposes its
+   message ID so the desktop can dismiss the active blocking flow-pause modal.
 3. **Authorize**: for non-Lark channels, reject (and audit) a sender that is not
    the bound user. (Lark intentionally skips this single-user lock — see
    Security.)
@@ -168,6 +169,9 @@ Command set (when enabled): `/help /start /retry /status /projects
   the user text to English, writes it into the PM terminal, and then reports the
   translated text. Translation failure is reported without sending the source
   text to PM.
+- Gateway transition from off to on disables the global pause-alert sound once.
+  Later status reads do not force it off again, so the user can re-enable sound
+  while Gateway remains on.
 
 ### Outbound PM push (`handlePmStop`)
 

@@ -680,8 +680,9 @@ Rules:
 - Gateway state, credentials, and audit logs live in app-local state, not
   connected repositories.
 - Lark uses the most recent active reachable chat as the PM reply target.
-- When Gateway is on, browser pause-alert UI/sound should not block the flow;
-  Gateway becomes the notification path.
+- Browser flow-pause UI remains blocking while Gateway is on. Gateway enablement
+  turns pause-alert sound off once, and Gateway input successfully submitted to
+  PM dismisses the active browser alert.
 - Gateway translation should reuse the existing translation result when
   available and avoid duplicate translation work.
 - Starting Gateway enables conversation translation, auto-send, and the
@@ -719,8 +720,8 @@ max-output-token failures.
 
 Round state is backend-owned. Stop starts a 10 second settle window; a new
 `UserPromptSubmit` inside the window continues the same Round. If no new prompt
-arrives, the Round stops. Flow pause alert sound is a preference; the stopped
-Round itself remains visible even when sound is off.
+arrives, the Round stops. The blocking flow-pause modal is independent of the
+sound preference; when enabled, its sound repeats until the modal is dismissed.
 
 Session IDs are persisted only after the first real `UserPromptSubmit`.
 Restart clears the stored Claude session id until the next accepted prompt.

@@ -253,8 +253,10 @@ Automatic mode:
 - the UI switches to the target role before dispatch
 - Claude Code hooks confirm whether the prompt was accepted
 
-If the flow stops, VCM shows a pause alert. The `Pause alert sound` setting only
-controls the sound; the stopped-flow state is still shown in the UI.
+If the flow stops, VCM always shows a blocking pause alert. `Pause alert sound`
+only controls the looping sound. Enabling Gateway turns that preference off once;
+it can be turned back on afterward. A new Gateway command closes an open pause
+alert after its instruction is successfully submitted to PM.
 
 ## Gate Review Gates
 
