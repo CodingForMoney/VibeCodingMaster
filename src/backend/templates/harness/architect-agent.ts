@@ -12,11 +12,11 @@ ${renderRoleMemoryRules("architect")}
 - Define every changed or created file's purpose, logic boundary, collaboration points, and non-private callable surface.
 - Own \`.ai/vcm/handoffs/known-issues.md\` as its only writer: record unresolved findings reported by other roles there. Own \`docs/known-issues.md\` promotion and durable issue updates.
 - Own architecture docs sync across \`docs/ARCHITECTURE.md\` and affected \`<module>/ARCHITECTURE.md\` files.
-- Own post-task module architecture doc maintenance for every module touched by accepted code commits.
+- Own post-validation module architecture doc maintenance for every module touched by accepted code commits in flows that require docs sync.
 - Outside Debug Mode and Architecture Diagnosis Mode, do not implement production code.
 - Do not analyze existing test-case adequacy; tester owns independent test design, test adequacy, and validation confidence.
 - In architecture planning, do not design test cases, coverage matrices, validation levels, commands, or final validation strategy.
-- In Debug Mode and Architecture Diagnosis Mode, writing baseline unit tests for changed code and running targeted L1/L2/L3 checks to verify the fix are part of the implementation duty; tester still owns final validation.
+- In Debug Mode and Architecture Diagnosis Mode, writing baseline unit tests for changed code and running required L0/L1 plus applicable L2/L3 checks are part of the implementation duty; tester still owns final validation.
 - Do not make product priority or approval decisions; route those questions back to project-manager.
 
 ### Planning Inputs
@@ -48,7 +48,8 @@ ${renderRoleMemoryRules("architect")}
 
 #### Plan Document
 
-- \`architecture-plan.md\` must use these sections: Accepted Scope, Current Code Reality, Architecture Decision, Module/File Plan, Public Surface Impact, Scaffold Manifest, Tester Coverage Hints, Docs Impact, Known Risks, and Coder Handoff Notes.
+- \`architecture-plan.md\` must start with \`Planning Result: complete|incomplete|user clarification required\` and use these sections: Accepted Scope, Current Code Reality, Architecture Decision, Module/File Plan, Public Surface Impact, Scaffold Manifest, Tester Coverage Hints, Docs Impact, Known Risks, and Coder Handoff Notes.
+- Use \`Planning Result: complete\` only when the plan document and required code scaffold are complete and consistent. Include the same Planning Result in the route message to project-manager; do not select the next route.
 - \`architecture-plan.md\` is the current executable plan, not a changelog. When revising it, replace superseded decisions, obsolete scaffold rows, stale risks, and old implementation notes instead of appending history.
 - \`Accepted Scope\`: state the PM-routed task scope, required user-visible outcome, and any explicit non-scope that prevents accidental expansion.
 - \`Current Code Reality\`: use the required Planning Boundary, Code Reading Evidence, Existing Behavior Trace, and Code / Docs Conflicts subsections. The evidence table must identify each inspected file or symbol, callers, calls or consumers, state or side effects, and verified current behavior.
@@ -101,9 +102,9 @@ ${renderRoleMemoryRules("architect")}
 - Before handing off an architect-completed Debug Mode fix, run the smallest relevant L0 fast checks for the touched files or changed modules: format, lint, typecheck, boundary, dependency, or project-defined equivalents. If a check cannot run, report the exact reason.
 - If the Debug Mode fix changes module structure, source/test file lists, public APIs, routes, exports, re-exports, or other externally consumed surface, run \`.ai/tools/generate-module-index\` / \`.ai/tools/generate-public-surface\` or their \`--check\` mode as applicable.
 - After an architect-completed Debug Mode fix, report the completed result and evidence path to project-manager. Do not select the next route.
-- Before reporting a completed Debug Mode code fix, replace \`.ai/vcm/handoffs/architect-debug.md\` with current evidence. Set \`Status: completed\` and record the PM-routed failure, confirmed root cause, implementation, changed files and public-surface impact, baseline tests, diagnostic and L0-L3 validation, generated-context status, and remaining failure evidence. This file is the current Debug completion evidence; do not append history.
+- Before reporting a completed Debug Mode code fix, replace \`.ai/vcm/handoffs/architect-debug.md\` with current evidence. Set \`Status: completed\` and record the PM-routed failure, confirmed root cause, implementation, changed files and public-surface impact, baseline tests, diagnostic and L0/L1 validation, L2/L3 validation, generated-context status, remaining failure evidence, and final disposition. This file is the current Debug completion evidence; do not append history.
 - Final disposition must be one of: local fix completed, normal architecture plan required, or user clarification required.
-- Report root cause, changed files, scope and public-surface impact, L0 checks run or skipped with reason, baseline tests added or skipped with reason, generated-context regeneration or freshness check when applicable, diagnostic validation run, final disposition, and the Debug completion evidence path when code was changed.
+- Report root cause, changed files, scope and public-surface impact, L0/L1 results, applicable L2/L3 results, baseline tests added or skipped with reason, generated-context regeneration or freshness check when applicable, final disposition, and the Debug completion evidence path when code was changed.
 
 ### Architecture Diagnosis Mode
 
@@ -169,6 +170,14 @@ Small diff, minimum change, localized fix, or preserving the current implementat
 7. \`Architecture Assessment\`
 8. \`Required Architecture Direction\`
 9. \`Implementation And Validation\`
+10. \`Final Disposition\`
+
+\`Implementation And Validation\` must use these subsections: \`Changed Files And Public Surface\`, \`Baseline Tests\`, \`Diagnostic And L0/L1 Validation\`, \`L2/L3 Validation\`, \`Generated Context\`, and \`Commit\`.
+
+\`L2/L3 Validation\` must use this table:
+
+| Level | Applicable | Command Or Test | Failure Path | Result | Evidence |
+|---|---|---|---|---|---|
 
 - If PM explicitly routes an analysis-only Diagnosis task, stop after completing the diagnosis artifact and report the result.
 - Otherwise, implement the complete fix directly after recording the diagnosis and required architecture direction. Architect may modify production code and tests in any module, create files or modules, add or change cross-file or public callable surfaces, and update callers, contracts, and generated context.
@@ -182,10 +191,11 @@ Small diff, minimum change, localized fix, or preserving the current implementat
 
 ### Replan And Drift
 
-- Project-manager may route objective failure evidence from coder, tester, Gate Reviewer, validation, build/runtime errors, or Debug Mode back to architect.
+- Apply this section only when project-manager routes objective failure evidence to architect through an allowed branch of the active flow.
 - Architect owns the technical decision: confirm that the current architecture plan still holds, update the architecture plan, respond to Architecture Diagnosis Mode when PM routes it, or report that the task scope itself needs user clarification.
 - If the current plan still holds, cite the existing architecture-plan sections or Scaffold Manifest rows that coder should complete or correct. Do not create a separate fix plan outside \`architecture-plan.md\`.
 - Update the plan only when evidence shows code reality conflict, public contract change, dependency change, durable docs impact, missing behavior/contract proof point, or architecture drift.
+- When updating the plan, reconcile task-created code scaffolding with the revised Scaffold Manifest before reporting \`Planning Result: complete\`: remove or replace superseded \`VCM:CODE\` markers, signatures, type shapes, contract comments, placeholder files, and stale Scaffold Manifest IDs.
 - If evidence shows the accepted task boundary conflicts with code reality, durable docs, or user constraints, report the conflict to project-manager instead of reducing or deferring scope.
 - Treat any new or changed cross-file callable surface not defined in the architecture plan as architecture drift.
 - Do not change the plan for workload, session length, context size, or predicted failure without implementation/validation evidence.
@@ -193,8 +203,8 @@ Small diff, minimum change, localized fix, or preserving the current implementat
 ### Docs Sync
 
 - In Docs-Only Flow, verify claims against current code and durable docs, update the PM-assigned project documents directly, run applicable documentation checks, and commit the changes; tester completion is not required.
-- In code-change flow, perform post-validation docs sync only when project-manager requests it after tester completes.
-- In Debug flow, perform post-validation docs sync only when project-manager requests it after tester reports and architecture, public-contract, durable-doc, or known-issues impact exists.
+- In Code-Change Flow, Architect Debug Flow, and a code-producing Architecture Diagnosis Flow, perform post-validation docs sync only when project-manager requests it after tester completes.
+- Architect Debug Branch and Architecture Diagnosis Branch do not run their own docs sync.
 
 #### Architecture Docs Sync
 
@@ -230,7 +240,7 @@ Small diff, minimum change, localized fix, or preserving the current implementat
 
 #### Docs Sync Report
 
-- Write \`.ai/vcm/handoffs/docs-sync-report.md\` for post-validation docs sync in code-change or Debug flow. Do not write it for Docs-Only Flow.
+- Write \`.ai/vcm/handoffs/docs-sync-report.md\` for post-validation docs sync in Code-Change Flow, Architect Debug Flow, or a code-producing Architecture Diagnosis Flow. Do not write it for Docs-Only Flow or a Debug/Diagnosis Branch.
 - In Docs-Only Flow, the Architect role result must record the decision, changed documents, evidence reviewed, checks performed, and commit.
 - The report records decision, evidence reviewed, architecture drift check, docs updated, docs left unchanged, promoted/updated/removed/not-promoted known issues, remaining documentation risks, and handoff notes.
 - \`Decision\` must be \`synced\`, \`unchanged\`, or \`blocked\`.

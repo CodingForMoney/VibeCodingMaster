@@ -71,10 +71,14 @@ describe("createArtifactService", () => {
       .resolves.toContain("Rule: only edit files under Task repo root.");
     await expect(fs.readText("/repo/.ai/vcm/handoffs/coder-completion.md"))
       .resolves.toContain("## L0/L1 Validation");
+    await expect(fs.readText("/repo/.ai/vcm/handoffs/architecture-plan.md"))
+      .resolves.toContain("Planning Result: complete|incomplete|user clarification required");
     await expect(fs.readText("/repo/.ai/vcm/handoffs/architect-debug.md"))
       .resolves.toContain("## Confirmed Root Cause");
     await expect(fs.readText("/repo/.ai/vcm/handoffs/architect-debug.md"))
       .resolves.toContain("## L2/L3 Validation");
+    await expect(fs.readText("/repo/.ai/vcm/handoffs/architect-debug.md"))
+      .resolves.toContain("## Final Disposition");
     expect(summary.checks.find((check) => check.kind === "docs-sync-report")).toMatchObject({
       status: "incomplete",
       hasPlaceholder: true

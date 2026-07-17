@@ -1,6 +1,8 @@
 export function renderArchitecturePlanTemplate(taskSlug: string): string {
   return `# Architecture Plan: ${taskSlug}
 
+Planning Result: complete|incomplete|user clarification required
+
 ## Accepted Scope
 
 TBD
@@ -243,6 +245,10 @@ TBD
 TBD
 
 ## Remaining Failure Evidence
+
+TBD
+
+## Final Disposition
 
 TBD
 `;
