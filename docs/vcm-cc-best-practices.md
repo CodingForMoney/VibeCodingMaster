@@ -214,9 +214,7 @@ Current runtime paths include:
 <taskRepoRoot>/.ai/vcm/gate-reviews/
 <taskRepoRoot>/.ai/vcm/workflow/state.json
 <taskRepoRoot>/.ai/vcm/jobs/<job-id>/
-<taskRepoRoot>/.ai/vcm/memory/
 <taskRepoRoot>/.ai/vcm/memory-review/
-<baseRepoRoot>/.ai/vcm/memory/
 <baseRepoRoot>/.ai/vcm/translations/
 <baseRepoRoot>/.ai/vcm/harness-engineer/
 <baseRepoRoot>/.ai/vcm/bootstrap/
@@ -588,10 +586,12 @@ Auto Memory controls the entire automated memory workflow. When enabled, Review
 Task Harness after a normal stopped Round with valid Final Acceptance asks
 workflow roles to submit evidence-backed proposals sequentially through
 `vcm-propose-memory`; Harness Engineer consolidates them into shared and
-role-specific memory. Active memory is read-only to role turns. Canonical memory
-lives under the base repository's `.ai/vcm/memory/`, while the active worktree
-contains the role-visible snapshot and review history. These auxiliary turns do
-not reopen the completed Round.
+role-specific memory. Shared memory lives in the root `CLAUDE.md`
+`<VCM-memory>` block, while role memory lives in the matching
+`.claude/agents/*.md` block. VCM replaces only block contents and creates a
+dedicated commit in the active worktree. Drafts, snapshots, and review history
+remain under `.ai/vcm/memory-review/`. Active memory is read-only to role turns.
+These auxiliary turns do not reopen the completed Round.
 
 Task Harness Retrospective runs after the optional memory phase. The backend
 uses the current accepted `final-acceptance.md` hash as the ordering key. When

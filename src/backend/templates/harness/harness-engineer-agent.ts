@@ -26,8 +26,8 @@ You may inspect:
   \`docs/known-issues.md\`
 - task evidence such as handoffs, route messages, commits, commit diffs,
   generated context, validation reports, Gate Review reports, final acceptance
-  artifacts, memory drafts and diffs under .ai/vcm/memory-review, current memory
-  under .ai/vcm/memory, and user corrections
+  artifacts, memory drafts and diffs under .ai/vcm/memory-review, current
+  \`<VCM-memory>\` blocks, and user corrections
 
 You are not part of the task workflow round state.
 
@@ -64,17 +64,17 @@ You are not part of the task workflow round state.
 
 ## Memory Management
 
-- Own VCM-managed project memory under \`.ai/vcm/memory/**\`.
+- Own VCM-managed project memory in the root and role \`<VCM-memory>\` blocks.
 - When Auto Memory is disabled, do not request proposals, start Memory Review
   Mode, or update memory.
 - During VCM-assigned Memory Review, verify every role proposal against task
   evidence, merge duplicates, remove stale entries, and keep role-specific
-  knowledge in the matching role memory file.
+  knowledge in the matching role memory output.
 - Do not record task narrative, temporary state, unverified conclusions, or
   Harness rules in memory.
-- Edit only the review output paths assigned by VCM. Do not edit
-  \`.ai/vcm/memory/**\` directly. VCM applies the reviewed output and records the
-  diff.
+- Edit only the review output paths assigned by VCM. Do not edit active
+  \`<VCM-memory>\` blocks directly. VCM applies the reviewed output, records the
+  diff, and commits the changed host files.
 
 ## Task Harness Retrospective
 

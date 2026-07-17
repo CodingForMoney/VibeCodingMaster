@@ -42,6 +42,7 @@ import {
 import { renderHarnessEngineerHarnessRules } from "../templates/harness/harness-engineer-agent.js";
 import { renderRootClaudeHarnessRules } from "../templates/harness/claude-root.js";
 import { renderGitignoreHarnessRules } from "../templates/harness/gitignore.js";
+import { ensureVcmMemoryBlock } from "../templates/harness/memory-block.js";
 import {
   renderLegacyProjectCodingStandardsTemplate,
   renderProjectCodingStandardsProjectSection,
@@ -145,6 +146,7 @@ interface HarnessFileDefinition {
   commentStyle?: "html" | "hash";
   ownership?: "managed-block" | "whole-file" | "raw-file" | "project-file";
   blankLineBeforeEnd?: boolean;
+  memoryBlock?: boolean;
   defaultContentAfterBlock?: string;
   legacyWholeFile?: string;
   renderRules(): string;
@@ -189,6 +191,7 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
     path: "CLAUDE.md",
     title: "CLAUDE.md",
     blankLineBeforeEnd: true,
+    memoryBlock: true,
     renderRules: renderRootClaudeHarnessRules
   },
   {
@@ -330,6 +333,7 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
     kind: "agent-gate-reviewer",
     path: ".claude/agents/gate-reviewer.md",
     title: "Gate Reviewer Agent",
+    memoryBlock: true,
     frontmatter: renderAgentFrontmatter(
       "gate-reviewer",
       "VCM independent gate review role for architecture plans, validation adequacy, and code diffs.",
@@ -351,6 +355,7 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
     kind: "agent-harness-engineer",
     path: ".claude/agents/harness-engineer.md",
     title: "Harness Engineer Agent",
+    memoryBlock: true,
     frontmatter: renderAgentFrontmatter(
       "harness-engineer",
       "VCM task-scoped harness maintenance role for harness diagnosis, diff proposals, and VCM issue drafts."
@@ -386,6 +391,7 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
     kind: "agent-project-manager",
     path: ".claude/agents/project-manager.md",
     title: "Project Manager Agent",
+    memoryBlock: true,
     frontmatter: renderAgentFrontmatter(
       "project-manager",
       "User-facing VCM orchestration role for task clarification, role routing, handoffs, acceptance, and PR preparation."
@@ -396,6 +402,7 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
     kind: "agent-architect",
     path: ".claude/agents/architect.md",
     title: "Architect Agent",
+    memoryBlock: true,
     blankLineBeforeEnd: true,
     frontmatter: renderAgentFrontmatter(
       "architect",
@@ -407,6 +414,7 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
     kind: "agent-coder",
     path: ".claude/agents/coder.md",
     title: "Coder Agent",
+    memoryBlock: true,
     frontmatter: renderAgentFrontmatter(
       "coder",
       "VCM implementation role for scoped code changes and focused tests.",
@@ -418,6 +426,7 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
     kind: "agent-tester",
     path: ".claude/agents/tester.md",
     title: "Tester Agent",
+    memoryBlock: true,
     frontmatter: renderAgentFrontmatter(
       "tester",
       "VCM testing role for validation, test adequacy, approved-scope validation, and risk findings."
@@ -1461,6 +1470,7 @@ async function analyzeHarnessFile(
   const exists = await fs.pathExists(absolutePath);
 
   if (!exists) {
+    const newContent = expectedContent ?? renderNewHarnessFile(definition, expectedBlock ?? "");
     return {
       definition,
       status: {
@@ -1475,7 +1485,7 @@ async function analyzeHarnessFile(
         action: "create",
         reason: "File is missing; VCM will create a recommended default."
       },
-      nextContent: expectedContent ?? renderNewHarnessFile(definition, expectedBlock ?? "")
+      nextContent: definition.memoryBlock ? ensureVcmMemoryBlock(newContent) : newContent
     };
   }
 
@@ -1510,6 +1520,7 @@ async function analyzeHarnessFile(
   if (!match) {
     const migratedContent = migrateLegacyHarnessFile(definition, currentContent, expectedBlock);
     if (migratedContent) {
+      const nextContent = definition.memoryBlock ? ensureVcmMemoryBlock(migratedContent) : migratedContent;
       return {
         definition,
         status: {
@@ -1524,9 +1535,10 @@ async function analyzeHarnessFile(
           action: "update",
           reason: "Legacy VCM whole-file baseline will be migrated to a managed block."
         },
-        nextContent: migratedContent
+        nextContent
       };
     }
+    const insertedContent = `${currentContent.trimEnd()}\n\n${expectedBlock}\n`;
     return {
       definition,
       status: {
@@ -1541,13 +1553,15 @@ async function analyzeHarnessFile(
         action: "insert",
         reason: "File exists but does not contain VCM managed rules."
       },
-      nextContent: `${currentContent.trimEnd()}\n\n${expectedBlock}\n`
+      nextContent: definition.memoryBlock ? ensureVcmMemoryBlock(insertedContent) : insertedContent
     };
   }
 
   const managedVersion = match[1] ? Number(match[1]) : undefined;
   const currentBlock = match[0];
-  const action: HarnessFileAction = currentBlock === expectedBlock ? "ok" : "update";
+  const blockUpdatedContent = currentContent.replace(managedBlockPattern, expectedBlock);
+  const nextContent = definition.memoryBlock ? ensureVcmMemoryBlock(blockUpdatedContent) : blockUpdatedContent;
+  const action: HarnessFileAction = currentContent === nextContent ? "ok" : "update";
 
   return {
     definition,
@@ -1564,13 +1578,15 @@ async function analyzeHarnessFile(
       : {
           path: definition.path,
           action,
-          reason: managedVersion === VCM_HARNESS_VERSION
-            ? "VCM managed rules differ from the current recommended template."
+          reason: currentBlock === expectedBlock && definition.memoryBlock
+            ? "VCM memory block is missing."
+            : managedVersion === VCM_HARNESS_VERSION
+              ? "VCM managed rules differ from the current recommended template."
             : `VCM managed block version is ${managedVersion ?? "missing"}; current version is ${VCM_HARNESS_VERSION}.`
         },
     nextContent: action === "ok"
       ? undefined
-      : currentContent.replace(managedBlockPattern, expectedBlock)
+      : nextContent
   };
 }
 

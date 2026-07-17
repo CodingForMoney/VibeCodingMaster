@@ -3,7 +3,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { renderFinalAcceptanceTemplate } from "../../../src/backend/templates/handoff.js";
 import { createMockClaudeE2eApp } from "./helpers/e2e-app.js";
-import { createE2eRepo } from "./helpers/e2e-repo.js";
+import { createE2eRepo, git } from "./helpers/e2e-repo.js";
 import {
   connectAndCreateTask,
   injectOk,
@@ -69,8 +69,8 @@ describe("backend E2E task harness retrospective with mock Claude Code", () => {
       await ctx.userPromptSubmit();
       const afterRoot = matchPromptPath(ctx.prompt, "Write the complete reviewed memory set to");
       await ctx.writeAbsoluteFile(
-        path.join(afterRoot, "shared.md"),
-        "# Shared Memory\n\nBackend hooks own lifecycle completion.\n"
+        path.join(afterRoot, "CLAUDE.md"),
+        "Backend hooks own lifecycle completion.\n"
       );
       await ctx.stop();
     });
@@ -97,8 +97,10 @@ describe("backend E2E task harness retrospective with mock Claude Code", () => {
       status: "idle",
       runs: [expect.objectContaining({ status: "applied", trigger: "manual" })]
     });
-    await expect(fs.readFile(path.join(repo.repoRoot, ".ai/vcm/memory/shared.md"), "utf8"))
+    await expect(fs.readFile(path.join(task.worktreePath, "CLAUDE.md"), "utf8"))
       .resolves.toContain("Backend hooks own lifecycle completion.");
+    await expect(git(task.worktreePath, "log", "-1", "--pretty=%s"))
+      .resolves.toMatchObject({ stdout: "chore: update VCM memory\n" });
     expect(env.mockRuntime.getWrites(harnessSession.id).join("\n")).not.toContain("[VCM Task Harness Retrospective]");
 
     await env.deps.runtimeCoordinator.reconcileProject(repo.repoRoot, { taskSlug: task.taskSlug });

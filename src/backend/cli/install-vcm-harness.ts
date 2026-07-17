@@ -17,6 +17,7 @@ import {
 import { renderHarnessEngineerHarnessRules } from "../templates/harness/harness-engineer-agent.js";
 import { renderRootClaudeHarnessRules } from "../templates/harness/claude-root.js";
 import { renderGitignoreHarnessRules } from "../templates/harness/gitignore.js";
+import { ensureVcmMemoryBlock } from "../templates/harness/memory-block.js";
 import {
   renderLegacyProjectCodingStandardsTemplate,
   renderProjectCodingStandardsProjectSection,
@@ -105,6 +106,7 @@ const MANAGED_FILES = [
     commentStyle: "html",
     category: "root-rules",
     blankLineBeforeEnd: true,
+    memoryBlock: true,
     content: renderRootClaudeHarnessRules()
   },
   {
@@ -138,6 +140,7 @@ const MANAGED_FILES = [
     agentName: "project-manager",
     commentStyle: "html",
     category: "core-agent",
+    memoryBlock: true,
     content: renderProjectManagerHarnessRules()
   },
   {
@@ -147,6 +150,7 @@ const MANAGED_FILES = [
     commentStyle: "html",
     category: "core-agent",
     blankLineBeforeEnd: true,
+    memoryBlock: true,
     content: renderArchitectHarnessRules()
   },
   {
@@ -155,6 +159,7 @@ const MANAGED_FILES = [
     agentName: "coder",
     commentStyle: "html",
     category: "core-agent",
+    memoryBlock: true,
     content: renderCoderHarnessRules()
   },
   {
@@ -163,6 +168,7 @@ const MANAGED_FILES = [
     agentName: "tester",
     commentStyle: "html",
     category: "core-agent",
+    memoryBlock: true,
     content: renderTesterHarnessRules()
   },
   {
@@ -178,6 +184,7 @@ const MANAGED_FILES = [
     agentName: "gate-reviewer",
     commentStyle: "html",
     category: "gate-reviewer-agent",
+    memoryBlock: true,
     content: renderGateReviewerAgentRules()
   },
   {
@@ -194,6 +201,7 @@ const MANAGED_FILES = [
     agentName: "harness-engineer",
     commentStyle: "html",
     category: "agent-harness-engineer",
+    memoryBlock: true,
     content: renderHarnessEngineerHarnessRules()
   },
   {
@@ -650,6 +658,9 @@ async function installManagedFile({ projectRoot, definition, dryRun, operations 
       nextContent = migrateLegacyManagedFile(definition, currentContent, block)
         ?? `${currentContent.trimEnd()}\n\n${block}\n`;
     }
+  }
+  if (definition.memoryBlock) {
+    nextContent = ensureVcmMemoryBlock(nextContent);
   }
 
   await writeIfChanged({

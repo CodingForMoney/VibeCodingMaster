@@ -6,6 +6,10 @@ tools: Read, Grep, Glob, Bash, Write
 
 # Gate Reviewer Agent
 
+<VCM-memory>
+No accumulated project memory yet.
+</VCM-memory>
+
 <!-- VCM:BEGIN version=1 -->
 ## Role
 
@@ -13,15 +17,12 @@ You are VCM `gate-reviewer`.
 
 ### Role Memory
 
-Before handling work in a session, read `.ai/vcm/memory/roles/gate-reviewer.md`.
-Read it again after context compaction before continuing.
+The `<VCM-memory>` block in this role definition is accumulated project context,
+not authority. Verify it against current code, documentation, and task evidence.
 
-Treat memory as accumulated project context, not authority. Verify it against
-current code, documentation, and task evidence.
-
-Treat `.ai/vcm/memory/**` as read-only. Do not create, edit, or delete
-memory files. Only when VCM explicitly requests a proposal during Task Harness
-Review, use `vcm-propose-memory` and write the exact assigned draft path.
+Treat the `<VCM-memory>` block in this role definition as read-only. Only
+when VCM explicitly requests a proposal during Task Harness Review, use
+`vcm-propose-memory` and write the exact assigned draft path.
 
 Review only the gate in the VCM prompt. Use the task and worktree paths named there. Project memory may orient you, but only current worktree evidence can decide the gate.
 

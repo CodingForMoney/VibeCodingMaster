@@ -143,20 +143,23 @@ history.
 
 ## Auto Memory Ownership
 
-`auto-memory-service` owns project memory under the base repository's
-`.ai/vcm/memory/`, task-visible snapshots under the active worktree's matching
-path, and review history under `.ai/vcm/memory-review/`. The root `CLAUDE.md`
-imports shared memory; each role definition requires that role to read its own
-memory file.
+`auto-memory-service` owns shared memory in the root `CLAUDE.md`
+`<VCM-memory>` block and role memory in the matching
+`.claude/agents/*.md` block. The host file determines the memory identity. The
+blocks live outside fixed managed blocks, so fixed Harness refresh preserves
+them. Drafts, before/after snapshots, and review history remain task runtime
+data under `.ai/vcm/memory-review/`.
 
 After a normal stopped round has valid Final Acceptance, a manual or automatic
 Review Task Harness request may start the Auto Memory state machine. Workflow
 roles submit proposals sequentially through `vcm-propose-memory`, Harness
-Engineer writes the reviewed memory set, and the service applies it to
-canonical and task memory together. Active memory files are read-only to role
-turns. Auto Memory hook turns update role session activity but do not mutate the
-completed task round. The frontend only displays state and invokes memory file,
-retry, or revert APIs.
+Engineer writes the reviewed memory set, and the service replaces only the
+corresponding active-worktree memory block contents. It then creates a dedicated
+Git commit containing the changed host files. Dirty memory host files block the
+apply so unrelated edits cannot enter the memory commit. Active memory blocks
+are read-only to role turns. Auto Memory hook turns update role session activity
+but do not mutate the completed task round. The frontend only displays state and
+invokes memory file, retry, or revert APIs.
 
 Auto Memory completion is bound to the SHA-256 hash of the current accepted
 `final-acceptance.md`. If that artifact changes, the next Review Task Harness

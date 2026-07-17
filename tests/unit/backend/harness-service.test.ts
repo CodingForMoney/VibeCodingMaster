@@ -87,10 +87,12 @@ describe("createHarnessService", () => {
     expect(await fs.readText("/repo/.claude/skills/vcm-report-harness-issue/SKILL.md")).toContain("name: vcm-report-harness-issue");
     expect(await fs.readText("/repo/.claude/skills/vcm-report-harness-issue/SKILL.md")).toContain(".ai/vcm/harness-feedback/pending/");
     expect(await fs.readText("/repo/.claude/skills/vcm-propose-memory/SKILL.md")).toContain("name: vcm-propose-memory");
-    expect(await fs.readText("/repo/.claude/skills/vcm-propose-memory/SKILL.md")).toContain("Treat `.ai/vcm/memory/**` as read-only");
+    expect(await fs.readText("/repo/.claude/skills/vcm-propose-memory/SKILL.md")).toContain("Treat every `<VCM-memory>` block as read-only");
+    expect(await fs.readText("/repo/CLAUDE.md")).toContain("<VCM-memory>\nNo accumulated project memory yet.\n</VCM-memory>");
     expect(await fs.readText("/repo/.claude/agents/project-manager.md")).toContain("name: project-manager");
     expect(await fs.readText("/repo/.claude/agents/project-manager.md")).toContain("<!-- VCM:BEGIN version=1 -->");
     const projectManagerAgent = await fs.readText("/repo/.claude/agents/project-manager.md");
+    expect(projectManagerAgent).toContain("<VCM-memory>\nNo accumulated project memory yet.\n</VCM-memory>");
     expect(projectManagerAgent).toContain("Use the PM-hub routes allowed by the `vcm-route-message` skill");
     expect(projectManagerAgent).toContain("Use Docs-Only Flow when the accepted task changes Architect-owned project documentation");
     expect(projectManagerAgent).toContain("Use the `vcm-final-acceptance` skill only to close a complete code-delivery flow");
@@ -221,6 +223,7 @@ describe("createHarnessService", () => {
     const content = await fs.readText("/repo/CLAUDE.md");
     expect(content).toContain("# Existing Rules");
     expect(content).toContain("Keep this project-specific note.");
+    expect(content).toContain("<VCM-memory>\nNo accumulated project memory yet.\n</VCM-memory>");
     expect(content).toContain("<!-- VCM:BEGIN version=1 -->");
     expect(content).toContain("## VCM Start Here");
   });
@@ -390,6 +393,10 @@ describe("createHarnessService", () => {
       "",
       "Before block.",
       "",
+      "<VCM-memory>",
+      "Keep this accumulated project fact.",
+      "</VCM-memory>",
+      "",
       "<!-- VCM:BEGIN version=0 -->",
       "old managed rules",
       "<!-- VCM:END -->",
@@ -415,6 +422,7 @@ describe("createHarnessService", () => {
     const content = await fs.readText("/repo/CLAUDE.md");
     expect(content).toContain("Before block.");
     expect(content).toContain("After block.");
+    expect(content).toContain("<VCM-memory>\nKeep this accumulated project fact.\n</VCM-memory>");
     expect(content).not.toContain("old managed rules");
     expect(content).toContain("<!-- VCM:BEGIN version=1 -->");
     expect(content).toContain("## VCM Start Here");

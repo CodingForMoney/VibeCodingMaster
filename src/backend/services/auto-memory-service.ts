@@ -18,25 +18,29 @@ import type { RoleName, VcmRoleName } from "../../shared/types/role.js";
 import type { RoleSessionRecord } from "../../shared/types/session.js";
 import { checkMarkdownArtifact, readArtifactSectionValue } from "../../shared/validation/artifact-check.js";
 import { resolveRepoPath, type FileSystemAdapter } from "../adapters/filesystem.js";
+import type { GitAdapter } from "../adapters/git-adapter.js";
 import { VcmError } from "../errors.js";
 import type { TerminalRuntime } from "../runtime/terminal-runtime.js";
 import { submitTerminalInput } from "../runtime/terminal-submit.js";
+import {
+  readVcmMemoryBlock,
+  replaceVcmMemoryBlock
+} from "../templates/harness/memory-block.js";
 import type { AppSettingsService } from "./app-settings-service.js";
 import type { SessionService } from "./session-service.js";
 
-const MEMORY_ROOT = ".ai/vcm/memory";
 const MEMORY_REVIEW_ROOT = ".ai/vcm/memory-review";
 const MEMORY_REVIEW_RUNS_ROOT = `${MEMORY_REVIEW_ROOT}/runs`;
 const MEMORY_REVIEW_STATE_PATH = `${MEMORY_REVIEW_ROOT}/state.json`;
 
 const MEMORY_FILE_DEFINITIONS = [
-  { path: `${MEMORY_ROOT}/shared.md`, title: "Shared Memory" },
-  { path: `${MEMORY_ROOT}/roles/project-manager.md`, title: "Project Manager Memory", role: "project-manager" },
-  { path: `${MEMORY_ROOT}/roles/architect.md`, title: "Architect Memory", role: "architect" },
-  { path: `${MEMORY_ROOT}/roles/coder.md`, title: "Coder Memory", role: "coder" },
-  { path: `${MEMORY_ROOT}/roles/tester.md`, title: "Tester Memory", role: "tester" },
-  { path: `${MEMORY_ROOT}/roles/gate-reviewer.md`, title: "Gate Reviewer Memory", role: "gate-reviewer" },
-  { path: `${MEMORY_ROOT}/roles/harness-engineer.md`, title: "Harness Engineer Memory", role: "harness-engineer" }
+  { path: "CLAUDE.md", title: "Shared Memory" },
+  { path: ".claude/agents/project-manager.md", title: "Project Manager Memory", role: "project-manager" },
+  { path: ".claude/agents/architect.md", title: "Architect Memory", role: "architect" },
+  { path: ".claude/agents/coder.md", title: "Coder Memory", role: "coder" },
+  { path: ".claude/agents/tester.md", title: "Tester Memory", role: "tester" },
+  { path: ".claude/agents/gate-reviewer.md", title: "Gate Reviewer Memory", role: "gate-reviewer" },
+  { path: ".claude/agents/harness-engineer.md", title: "Harness Engineer Memory", role: "harness-engineer" }
 ] as const satisfies ReadonlyArray<{ path: string; title: string; role?: VcmMemoryRoleName }>;
 
 type WorkflowMemoryRole = Exclude<VcmMemoryRoleName, "harness-engineer">;
@@ -85,7 +89,6 @@ export interface ReconcileAutoMemoryInput {
 }
 
 export interface AutoMemoryService {
-  ensureTaskSnapshot(baseRepoRoot: string, taskRepoRoot: string): Promise<void>;
   reconcileTask(input: ReconcileAutoMemoryInput): Promise<AutoMemoryStateReport>;
   getState(baseRepoRoot: string, taskRepoRoot: string): Promise<AutoMemoryStateReport>;
   getTaskRetrospectiveReadiness(input: ReconcileAutoMemoryInput): Promise<TaskRetrospectiveMemoryReadiness>;
@@ -116,6 +119,7 @@ export interface AutoMemoryHarnessHookInput {
 
 export interface AutoMemoryServiceDeps {
   fs: FileSystemAdapter;
+  git: Pick<GitAdapter, "commitPaths" | "getDiff">;
   runtime: Pick<TerminalRuntime, "getSession" | "write">;
   sessionService: Pick<
     SessionService,
@@ -134,7 +138,12 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
   async function readMemorySet(repoRoot: string): Promise<MemorySet> {
     const memory: MemorySet = {};
     for (const definition of MEMORY_FILE_DEFINITIONS) {
-      memory[definition.path] = await deps.fs.readText(resolveRepoPath(repoRoot, definition.path));
+      const hostContent = await deps.fs.readText(resolveRepoPath(repoRoot, definition.path));
+      const blockContent = readVcmMemoryBlock(hostContent);
+      if (blockContent === undefined) {
+        throw missingMemoryBlockError(definition.path);
+      }
+      memory[definition.path] = blockContent;
     }
     return memory;
   }
@@ -143,7 +152,8 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
     assertCompleteMemorySet(memory);
     for (const definition of MEMORY_FILE_DEFINITIONS) {
       const targetPath = resolveRepoPath(repoRoot, definition.path);
-      const content = ensureTrailingNewline(memory[definition.path]);
+      const hostContent = await deps.fs.readText(targetPath);
+      const content = replaceVcmMemoryBlock(hostContent, memory[definition.path]);
       if (deps.fs.writeTextAtomic) {
         await deps.fs.writeTextAtomic(targetPath, content);
       } else {
@@ -152,9 +162,45 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
     }
   }
 
-  async function applyMemorySet(baseRepoRoot: string, taskRepoRoot: string, memory: MemorySet): Promise<void> {
-    await writeMemorySet(baseRepoRoot, memory);
-    await writeMemorySet(taskRepoRoot, memory);
+  async function applyAndCommitMemorySet(
+    taskRepoRoot: string,
+    before: MemorySet,
+    after: MemorySet,
+    commitMessage: string
+  ): Promise<void> {
+    assertCompleteMemorySet(after);
+    const changedPaths = MEMORY_FILE_DEFINITIONS
+      .filter((definition) => before[definition.path] !== after[definition.path])
+      .map((definition) => definition.path);
+    if (changedPaths.length === 0) {
+      return;
+    }
+    const current = await readMemorySet(taskRepoRoot);
+    if (!sameHashes(hashMemorySet(current), hashMemorySet(before))) {
+      throw new VcmError({
+        code: "MEMORY_TARGET_CHANGED",
+        message: "VCM memory changed while the review was in progress.",
+        statusCode: 409,
+        hint: "Review the current memory, then retry the memory review."
+      });
+    }
+    const existingDiff = await deps.git.getDiff(taskRepoRoot, "HEAD", null, changedPaths);
+    if (existingDiff.trim()) {
+      throw new VcmError({
+        code: "MEMORY_HOST_FILE_DIRTY",
+        message: "A file containing VCM memory already has uncommitted changes.",
+        statusCode: 409,
+        hint: "Commit or discard the existing host-file changes before applying memory."
+      });
+    }
+
+    await writeMemorySet(taskRepoRoot, after);
+    try {
+      await deps.git.commitPaths(taskRepoRoot, commitMessage, changedPaths);
+    } catch (error) {
+      await writeMemorySet(taskRepoRoot, before);
+      throw error;
+    }
   }
 
   async function writeRunMemorySet(
@@ -189,8 +235,7 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
   }
 
   async function getState(baseRepoRoot: string, taskRepoRoot: string): Promise<AutoMemoryStateReport> {
-    await ensureTaskMemorySnapshot(deps.fs, baseRepoRoot, taskRepoRoot);
-    let [active, runs, files] = await Promise.all([
+    let [active, runs, memoryFiles] = await Promise.all([
       loadActiveState(taskRepoRoot),
       listRuns(taskRepoRoot),
       listMemoryFiles(taskRepoRoot)
@@ -203,15 +248,14 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
     return {
       version: 1,
       status: active?.status ?? "idle",
-      files,
+      files: memoryFiles.files,
       runs,
       ...(active ? { active: toActiveReview(active) } : {}),
-      warnings: []
+      warnings: memoryFiles.warnings
     };
   }
 
   async function reconcileTask(input: ReconcileAutoMemoryInput): Promise<AutoMemoryStateReport> {
-    await ensureTaskMemorySnapshot(deps.fs, input.baseRepoRoot, input.taskRepoRoot);
     const active = await loadActiveState(input.taskRepoRoot);
     const preferences = await deps.appSettings.getPreferences();
     if (!preferences.autoMemoryEnabled) {
@@ -220,6 +264,7 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
       }
       return getState(input.baseRepoRoot, input.taskRepoRoot);
     }
+    await assertMemoryBlocksInstalled(deps.fs, input.taskRepoRoot);
     if (active?.status === "collecting") {
       await dispatchCurrentDraft(input.baseRepoRoot, input.taskRepoRoot, active);
       return getState(input.baseRepoRoot, input.taskRepoRoot);
@@ -267,7 +312,7 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
       updatedAt: timestamp,
       drafts
     };
-    const before = await readMemorySet(input.baseRepoRoot);
+    const before = await readMemorySet(input.taskRepoRoot);
     await writeRunMemorySet(input.taskRepoRoot, runId, "before", before);
     await writeRunMemorySet(input.taskRepoRoot, runId, "after", before);
     await persistRun(input.taskRepoRoot, {
@@ -406,16 +451,20 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
       return true;
     }
     if (input.eventName === "Stop") {
-      await applyReviewedMemory(input.baseRepoRoot, input.taskRepoRoot, state);
+      await applyReviewedMemory(input.taskRepoRoot, state);
       return true;
     }
     return true;
   }
 
-  async function getFile(baseRepoRoot: string, taskRepoRoot: string, filePath: string): Promise<MemoryFileContent> {
-    await ensureTaskMemorySnapshot(deps.fs, baseRepoRoot, taskRepoRoot);
+  async function getFile(_baseRepoRoot: string, taskRepoRoot: string, filePath: string): Promise<MemoryFileContent> {
+    await assertMemoryBlocksInstalled(deps.fs, taskRepoRoot);
     const definition = requireMemoryFileDefinition(filePath);
-    const content = await deps.fs.readText(resolveRepoPath(taskRepoRoot, definition.path));
+    const hostContent = await deps.fs.readText(resolveRepoPath(taskRepoRoot, definition.path));
+    const content = readVcmMemoryBlock(hostContent);
+    if (content === undefined) {
+      throw missingMemoryBlockError(definition.path);
+    }
     return {
       path: definition.path,
       title: definition.title,
@@ -435,13 +484,13 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
   ): Promise<AutoMemoryStateReport> {
     await assertNoActiveReview(taskRepoRoot);
     const definition = requireMemoryFileDefinition(filePath);
-    const before = await readMemorySet(baseRepoRoot);
+    const before = await readMemorySet(taskRepoRoot);
     const normalizedContent = ensureTrailingNewline(content);
     if (before[definition.path] === normalizedContent) {
       return getState(baseRepoRoot, taskRepoRoot);
     }
     const after = { ...before, [definition.path]: normalizedContent };
-    await createAppliedRun(baseRepoRoot, taskRepoRoot, taskSlug, "user", before, after);
+    await createAppliedRun(taskRepoRoot, taskSlug, "user", before, after);
     return getState(baseRepoRoot, taskRepoRoot);
   }
 
@@ -455,7 +504,7 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
         statusCode: 409
       });
     }
-    const current = await readMemorySet(baseRepoRoot);
+    const current = await readMemorySet(taskRepoRoot);
     if (!sameHashes(hashMemorySet(current), run.afterHashes)) {
       throw new VcmError({
         code: "MEMORY_RUN_CHANGED",
@@ -465,8 +514,7 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
       });
     }
     const before = await readRunMemorySet(taskRepoRoot, run.runId, "before");
-    await writeMemorySet(baseRepoRoot, before);
-    await writeMemorySet(taskRepoRoot, before);
+    await applyAndCommitMemorySet(taskRepoRoot, current, before, "chore: revert VCM memory");
     const timestamp = now();
     await persistRun(taskRepoRoot, {
       ...run,
@@ -593,7 +641,6 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
   }
 
   async function applyReviewedMemory(
-    baseRepoRoot: string,
     taskRepoRoot: string,
     state: StoredMemoryReviewState
   ): Promise<void> {
@@ -601,7 +648,7 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
       const before = await readRunMemorySet(taskRepoRoot, state.runId, "before");
       const after = await readRunMemorySet(taskRepoRoot, state.runId, "after");
       assertCompleteMemorySet(after);
-      await applyMemorySet(baseRepoRoot, taskRepoRoot, after);
+      await applyAndCommitMemorySet(taskRepoRoot, before, after, "chore: update VCM memory");
       const timestamp = now();
       const diff = renderMemoryDiff(before, after);
       const run = await readRun(taskRepoRoot, state.runId);
@@ -621,7 +668,6 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
   }
 
   async function createAppliedRun(
-    baseRepoRoot: string,
     taskRepoRoot: string,
     taskSlug: string,
     source: MemoryReviewRunSource,
@@ -633,22 +679,30 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
     const runId = createRunId(timestamp, source);
     await writeRunMemorySet(taskRepoRoot, runId, "before", before);
     await writeRunMemorySet(taskRepoRoot, runId, "after", after);
-    await applyMemorySet(baseRepoRoot, taskRepoRoot, after);
-    const diff = renderMemoryDiff(before, after);
-    await persistRun(taskRepoRoot, {
-      version: 1,
-      runId,
-      taskSlug,
-      source,
-      status: "applied",
-      createdAt: timestamp,
-      updatedAt: timestamp,
-      appliedAt: timestamp,
-      beforeHashes: hashMemorySet(before),
-      afterHashes: hashMemorySet(after),
-      diff
-    });
-    await deps.fs.writeText(resolveRepoPath(taskRepoRoot, `${MEMORY_REVIEW_RUNS_ROOT}/${runId}/applied.patch`), diff);
+    try {
+      await applyAndCommitMemorySet(taskRepoRoot, before, after, "chore: update VCM memory");
+      const diff = renderMemoryDiff(before, after);
+      await persistRun(taskRepoRoot, {
+        version: 1,
+        runId,
+        taskSlug,
+        source,
+        status: "applied",
+        createdAt: timestamp,
+        updatedAt: timestamp,
+        appliedAt: timestamp,
+        beforeHashes: hashMemorySet(before),
+        afterHashes: hashMemorySet(after),
+        diff
+      });
+      await deps.fs.writeText(resolveRepoPath(taskRepoRoot, `${MEMORY_REVIEW_RUNS_ROOT}/${runId}/applied.patch`), diff);
+    } catch (error) {
+      await deps.fs.removePath?.(
+        resolveRepoPath(taskRepoRoot, `${MEMORY_REVIEW_RUNS_ROOT}/${runId}`),
+        { recursive: true, force: true }
+      );
+      throw error;
+    }
   }
 
   async function failReview(taskRepoRoot: string, state: StoredMemoryReviewState, message: string): Promise<void> {
@@ -703,10 +757,22 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
     return runs.sort((left, right) => right.createdAt.localeCompare(left.createdAt));
   }
 
-  async function listMemoryFiles(taskRepoRoot: string): Promise<MemoryFileSummary[]> {
+  async function listMemoryFiles(taskRepoRoot: string): Promise<{ files: MemoryFileSummary[]; warnings: string[] }> {
     const files: MemoryFileSummary[] = [];
+    const warnings: string[] = [];
     for (const definition of MEMORY_FILE_DEFINITIONS) {
-      const content = await deps.fs.readText(resolveRepoPath(taskRepoRoot, definition.path));
+      let content = "";
+      const hostPath = resolveRepoPath(taskRepoRoot, definition.path);
+      try {
+        if (await deps.fs.pathExists(hostPath)) {
+          content = readVcmMemoryBlock(await deps.fs.readText(hostPath)) ?? "";
+        }
+      } catch (error) {
+        warnings.push(`${definition.path}: ${errorMessage(error)}`);
+      }
+      if (!content) {
+        warnings.push(`${definition.path}: VCM memory block is missing. Refresh the VCM Harness.`);
+      }
       files.push({
         path: definition.path,
         title: definition.title,
@@ -714,7 +780,7 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
         sizeBytes: Buffer.byteLength(content, "utf8")
       });
     }
-    return files;
+    return { files, warnings: [...new Set(warnings)] };
   }
 
   async function hasCompletedRunForFinalAcceptance(taskRepoRoot: string, finalAcceptanceHash: string): Promise<boolean> {
@@ -799,9 +865,6 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
   }
 
   return {
-    ensureTaskSnapshot(baseRepoRoot, taskRepoRoot) {
-      return ensureTaskMemorySnapshot(deps.fs, baseRepoRoot, taskRepoRoot);
-    },
     reconcileTask,
     getState,
     getTaskRetrospectiveReadiness,
@@ -816,25 +879,20 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
   };
 }
 
-export async function ensureTaskMemorySnapshot(
+export async function assertMemoryBlocksInstalled(
   fs: FileSystemAdapter,
-  baseRepoRoot: string,
   taskRepoRoot: string
 ): Promise<void> {
   for (const definition of MEMORY_FILE_DEFINITIONS) {
-    const canonicalPath = resolveRepoPath(baseRepoRoot, definition.path);
-    if (!(await fs.pathExists(canonicalPath))) {
-      await fs.writeText(canonicalPath, renderDefaultMemoryFile(definition.title));
+    const hostPath = resolveRepoPath(taskRepoRoot, definition.path);
+    if (!(await fs.pathExists(hostPath))) {
+      throw missingMemoryBlockError(definition.path);
     }
-    const snapshotPath = resolveRepoPath(taskRepoRoot, definition.path);
-    if (!(await fs.pathExists(snapshotPath))) {
-      await fs.writeText(snapshotPath, await fs.readText(canonicalPath));
+    const content = await fs.readText(hostPath);
+    if (readVcmMemoryBlock(content) === undefined) {
+      throw missingMemoryBlockError(definition.path);
     }
   }
-}
-
-function renderDefaultMemoryFile(title: string): string {
-  return `# ${title}\n\nNo accumulated project memory yet.\n`;
 }
 
 function currentDraft(state: StoredMemoryReviewState): MemoryDraftState | undefined {
@@ -857,13 +915,17 @@ function toActiveReview(state: StoredMemoryReviewState): ActiveMemoryReview {
 }
 
 function buildRoleDraftPrompt(taskRepoRoot: string, state: StoredMemoryReviewState, draft: MemoryDraftState): string {
+  const roleDefinition = MEMORY_FILE_DEFINITIONS.find((definition) => "role" in definition && definition.role === draft.role);
+  if (!roleDefinition) {
+    throw new Error(`Missing memory definition for role: ${draft.role}`);
+  }
   return [
     "[VCM Task Harness Review: Memory Proposal]",
     "",
     "Use the vcm-propose-memory skill to submit the assigned proposal.",
     `Task worktree: ${taskRepoRoot}`,
-    `Current shared memory: ${resolveRepoPath(taskRepoRoot, `${MEMORY_ROOT}/shared.md`)}`,
-    `Current role memory: ${resolveRepoPath(taskRepoRoot, `${MEMORY_ROOT}/roles/${draft.role}.md`)}`,
+    `Current shared memory block: ${resolveRepoPath(taskRepoRoot, "CLAUDE.md")}`,
+    `Current role memory block: ${resolveRepoPath(taskRepoRoot, roleDefinition.path)}`,
     `Write the draft to: ${resolveRepoPath(taskRepoRoot, draft.path)}`,
     "",
     "End the turn after writing the draft."
@@ -881,9 +943,10 @@ function buildHarnessReviewPrompt(taskRepoRoot: string, state: StoredMemoryRevie
     `Current memory snapshot: ${path.join(runRoot, "before")}`,
     `Write the complete reviewed memory set to: ${path.join(runRoot, "after")}`,
     "",
+    "Each snapshot file contains only the matching <VCM-memory> block content, not the full host file.",
     "Keep only verified, durable, reusable project knowledge. Merge duplicates, remove stale entries, and keep role-specific knowledge in the matching role file.",
     "Do not record task narrative, temporary state, unverified conclusions, or Harness rules.",
-    "Do not edit product code, harness files, the canonical base-repository memory, or review metadata.",
+    "Do not edit product code, active harness files, active memory blocks, or review metadata.",
     "All existing files already exist in the after directory. Edit those files in place and end the turn when review is complete."
   ].join("\n");
 }
@@ -914,7 +977,16 @@ function requireSafeRunId(runId: string): string {
 }
 
 function memoryRunFilePath(runId: string, snapshot: "before" | "after", memoryPath: string): string {
-  return `${MEMORY_REVIEW_RUNS_ROOT}/${runId}/${snapshot}/${memoryPath.slice(`${MEMORY_ROOT}/`.length)}`;
+  return `${MEMORY_REVIEW_RUNS_ROOT}/${runId}/${snapshot}/${memoryPath}`;
+}
+
+function missingMemoryBlockError(filePath: string): VcmError {
+  return new VcmError({
+    code: "MEMORY_BLOCK_MISSING",
+    message: `VCM memory block is missing from ${filePath}.`,
+    statusCode: 409,
+    hint: "Refresh the VCM Harness in the active task worktree before using Auto Memory."
+  });
 }
 
 function assertCompleteMemorySet(memory: MemorySet): void {

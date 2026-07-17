@@ -19,7 +19,6 @@ import type { SessionRegistry } from "../runtime/session-registry.js";
 import type { TerminalRuntime, TerminalSession } from "../runtime/terminal-runtime.js";
 import { submitTerminalInput } from "../runtime/terminal-submit.js";
 import type { ArtifactService } from "./artifact-service.js";
-import { ensureTaskMemorySnapshot } from "./auto-memory-service.js";
 import { claudeTranscriptPath } from "./claude-transcript-service.js";
 import { readHarnessRevisionState } from "./harness-revision.js";
 import type { ProjectService } from "./project-service.js";
@@ -171,7 +170,6 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     const config = await deps.projectService.loadConfig(repoRoot);
     const task = await deps.taskService.loadTask(repoRoot, taskSlug);
     const taskRepoRoot = getTaskRuntimeRepoRoot(task);
-    await ensureTaskMemorySnapshot(deps.fs, repoRoot, taskRepoRoot);
     const paths = deps.artifactService.getHandoffPaths(taskRepoRoot, task.handoffDir);
     const persisted = await loadPersistedRoleRecordForRole(deps.fs, repoRoot, taskRepoRoot, config.stateRoot, taskSlug, role);
     const permissionMode = normalizeClaudePermissionMode(input.permissionMode ?? persisted?.permissionMode);
@@ -432,7 +430,6 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     launchMode: LaunchMode
   ): Promise<RoleSessionRecord> {
     const taskContext = await resolveProjectToolTaskContext(repoRoot, input, "Harness Engineer");
-    await ensureTaskMemorySnapshot(deps.fs, repoRoot, taskContext.taskRepoRoot);
     const live = toRoleSessionRecordView(
       getRegisteredProjectHarnessEngineerSession(deps.registry, deps.runtime),
       deps.runtime

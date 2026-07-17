@@ -78,6 +78,7 @@ export function HarnessStudioModal({
   onMemoryStateChange
 }: HarnessStudioModalProps) {
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
+  const [selectedMemoryPath, setSelectedMemoryPath] = useState(false);
   const [selectedFile, setSelectedFile] = useState<StudioFilePreview | null>(null);
   const [draftContent, setDraftContent] = useState("");
   const [editingFile, setEditingFile] = useState(false);
@@ -97,6 +98,7 @@ export function HarnessStudioModal({
   useEffect(() => {
     if (!open) {
       setSelectedPath(null);
+      setSelectedMemoryPath(false);
       setSelectedFile(null);
       setDraftContent("");
       setEditingFile(false);
@@ -116,7 +118,7 @@ export function HarnessStudioModal({
     setFileBusy(true);
     setFileError(null);
     setEditingFile(false);
-    const loadFile = selectedPath.startsWith(".ai/vcm/memory/")
+    const loadFile = selectedMemoryPath
       ? apiClient.getMemoryFileContent(taskSlug, selectedPath).then((file): StudioFilePreview => ({
           path: file.path,
           title: file.title,
@@ -154,7 +156,7 @@ export function HarnessStudioModal({
     return () => {
       cancelled = true;
     };
-  }, [open, selectedPath, taskSlug]);
+  }, [open, selectedMemoryPath, selectedPath, taskSlug]);
 
   async function saveSelectedFile() {
     if (!selectedFile || !selectedFile.editable || !dirty || !taskSlug) {
@@ -199,6 +201,7 @@ export function HarnessStudioModal({
 
   function closeFilePreview() {
     setSelectedPath(null);
+    setSelectedMemoryPath(false);
     setSelectedFile(null);
     setDraftContent("");
     setEditingFile(false);
@@ -221,6 +224,7 @@ export function HarnessStudioModal({
   function openMemoryDiff(run: MemoryReviewRunSummary) {
     const previewPath = `memory-review:${run.runId}`;
     setSelectedPath(previewPath);
+    setSelectedMemoryPath(false);
     setSelectedFile({
       path: run.runId,
       title: `Memory Diff: ${run.runId}`,
@@ -343,14 +347,14 @@ export function HarnessStudioModal({
                 </section>
               ) : (
                 <div className="harness-studio-left-scroll">
-                  <HarnessFileSection title="VCM Roles" files={vcmRoleAgents} selectedPath={selectedPath} copiedPath={copiedPath} onCopy={(path) => void copyHarnessFilePath(path)} onSelect={setSelectedPath} />
-                  <HarnessFileSection title="Auxiliary Roles" files={auxiliaryAgents} selectedPath={selectedPath} copiedPath={copiedPath} onCopy={(path) => void copyHarnessFilePath(path)} onSelect={setSelectedPath} />
+                  <HarnessFileSection title="VCM Roles" files={vcmRoleAgents} selectedPath={selectedPath} copiedPath={copiedPath} onCopy={(path) => void copyHarnessFilePath(path)} onSelect={(path) => { setSelectedMemoryPath(false); setSelectedPath(path); }} />
+                  <HarnessFileSection title="Auxiliary Roles" files={auxiliaryAgents} selectedPath={selectedPath} copiedPath={copiedPath} onCopy={(path) => void copyHarnessFilePath(path)} onSelect={(path) => { setSelectedMemoryPath(false); setSelectedPath(path); }} />
                   <MemorySection
                     state={memoryState}
                     busy={fileBusy}
                     copiedPath={copiedPath}
                     onCopy={(path) => void copyHarnessFilePath(path)}
-                    onSelect={setSelectedPath}
+                    onSelect={(path) => { setSelectedMemoryPath(true); setSelectedPath(path); }}
                     onViewDiff={openMemoryDiff}
                     onRevert={(run) => void revertMemoryRun(run)}
                     onRetry={() => void retryMemoryReview()}
@@ -373,9 +377,9 @@ export function HarnessStudioModal({
                       ) : null}
                     </section>
                   </HarnessCollapsibleSection>
-                  <HarnessFileSection title="Skills" files={skills} selectedPath={selectedPath} copiedPath={copiedPath} onCopy={(path) => void copyHarnessFilePath(path)} onSelect={setSelectedPath} collapsible />
-                  <HarnessFileSection title="Root Context" files={rootContext} selectedPath={selectedPath} copiedPath={copiedPath} onCopy={(path) => void copyHarnessFilePath(path)} onSelect={setSelectedPath} collapsible />
-                  <HarnessFileSection title="Tools" files={tools} selectedPath={selectedPath} copiedPath={copiedPath} onCopy={(path) => void copyHarnessFilePath(path)} onSelect={setSelectedPath} collapsible />
+                  <HarnessFileSection title="Skills" files={skills} selectedPath={selectedPath} copiedPath={copiedPath} onCopy={(path) => void copyHarnessFilePath(path)} onSelect={(path) => { setSelectedMemoryPath(false); setSelectedPath(path); }} collapsible />
+                  <HarnessFileSection title="Root Context" files={rootContext} selectedPath={selectedPath} copiedPath={copiedPath} onCopy={(path) => void copyHarnessFilePath(path)} onSelect={(path) => { setSelectedMemoryPath(false); setSelectedPath(path); }} collapsible />
+                  <HarnessFileSection title="Tools" files={tools} selectedPath={selectedPath} copiedPath={copiedPath} onCopy={(path) => void copyHarnessFilePath(path)} onSelect={(path) => { setSelectedMemoryPath(false); setSelectedPath(path); }} collapsible />
 
                   <HarnessCollapsibleSection title="Project Docs">
                     <ul className="harness-studio-doc-list">

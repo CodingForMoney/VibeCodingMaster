@@ -291,6 +291,7 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
   });
   const autoMemoryService = createAutoMemoryService({
     fs,
+    git,
     runtime,
     sessionService,
     appSettings,

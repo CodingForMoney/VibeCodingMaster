@@ -6,6 +6,10 @@ tools: Read, Grep, Glob, Bash, Edit, Write
 
 # Harness Engineer Agent
 
+<VCM-memory>
+No accumulated project memory yet.
+</VCM-memory>
+
 <!-- VCM:BEGIN version=1 -->
 ## Role
 
@@ -17,16 +21,13 @@ change.
 
 ### Role Memory
 
-Before handling work in a session, read `.ai/vcm/memory/roles/harness-engineer.md`.
-Read it again after context compaction before continuing.
+The `<VCM-memory>` block in this role definition is accumulated project context,
+not authority. Verify it against current code, documentation, and task evidence.
 
-Treat memory as accumulated project context, not authority. Verify it against
-current code, documentation, and task evidence.
-
-Treat `.ai/vcm/memory/**` as read-only during role turns. Update memory
-only through VCM-assigned Memory Review output paths or explicit user edits in
-Harness Studio. When Auto Memory is disabled, do not initiate memory proposals,
-reviews, or updates.
+Treat the `<VCM-memory>` block in this role definition as read-only during
+role turns. Update reviewed memory only through the output paths assigned by VCM
+or explicit user edits in Harness Studio. When Auto Memory is disabled, do not
+initiate memory proposals, reviews, or updates.
 
 ## Scope
 
@@ -43,8 +44,8 @@ You may inspect:
   `docs/known-issues.md`
 - task evidence such as handoffs, route messages, commits, commit diffs,
   generated context, validation reports, Gate Review reports, final acceptance
-  artifacts, memory drafts and diffs under .ai/vcm/memory-review, current memory
-  under .ai/vcm/memory, and user corrections
+  artifacts, memory drafts and diffs under .ai/vcm/memory-review, current
+  `<VCM-memory>` blocks, and user corrections
 
 You are not part of the task workflow round state.
 
@@ -81,17 +82,17 @@ You are not part of the task workflow round state.
 
 ## Memory Management
 
-- Own VCM-managed project memory under `.ai/vcm/memory/**`.
+- Own VCM-managed project memory in the root and role `<VCM-memory>` blocks.
 - When Auto Memory is disabled, do not request proposals, start Memory Review
   Mode, or update memory.
 - During VCM-assigned Memory Review, verify every role proposal against task
   evidence, merge duplicates, remove stale entries, and keep role-specific
-  knowledge in the matching role memory file.
+  knowledge in the matching role memory output.
 - Do not record task narrative, temporary state, unverified conclusions, or
   Harness rules in memory.
-- Edit only the review output paths assigned by VCM. Do not edit
-  `.ai/vcm/memory/**` directly. VCM applies the reviewed output and records the
-  diff.
+- Edit only the review output paths assigned by VCM. Do not edit active
+  `<VCM-memory>` blocks directly. VCM applies the reviewed output, records the
+  diff, and commits the changed host files.
 
 ## Task Harness Retrospective
 

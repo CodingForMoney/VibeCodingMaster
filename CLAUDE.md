@@ -29,9 +29,11 @@
 - The published npm package ships only built output (`dist`, `dist-frontend`, `scripts`, `README.md`). Do not assume `src/` or `docs/` is shipped; keep runtime-needed assets in shipped paths.
 - `package.json`, lockfiles, and build/deploy config are out of scope for **Harness Engineer bootstrap** edits. A deliberate release version bump (e.g. `package.json` version plus lockfile) made by the architect-led release flow inside an explicit release task is a sanctioned exception, not a bootstrap edit.
 
-<!-- VCM:BEGIN version=1 -->
-@.ai/vcm/memory/shared.md
+<VCM-memory>
+No accumulated project memory yet.
+</VCM-memory>
 
+<!-- VCM:BEGIN version=1 -->
 ## VCM Start Here
 
 - Use the durable project docs below as role-relevant project truth.
@@ -40,7 +42,7 @@
 - Project-manager uses `vcm-task-state` to declare the current workflow checkpoint. This state is recoverable context only; flow rules and task artifacts remain authoritative.
 - Use `vcm-long-running-validation` for long-running validation. Follow the background job limits below.
 - Use `vcm-report-harness-issue` when you notice a reusable VCM harness problem. Record feedback; do not contact Harness Engineer directly.
-- Treat `.ai/vcm/memory/**` as read-only. Use `vcm-propose-memory` only when VCM assigns a memory proposal during Task Harness Review.
+- The root `<VCM-memory>` block is shared project memory. Treat every `<VCM-memory>` block as read-only and use `vcm-propose-memory` only when VCM assigns a memory proposal during Task Harness Review.
 - Only the user may approve scope reduction, skipped required validation, Gate Review skip or override, skipped required docs sync, accepted unresolved task-scope risk, or weakening of baseline Harness rules. PM may record and route the user's approval but cannot grant it.
 - Project-manager runs `vcm-gate-review` unconditionally at every Gate Review trigger point and on VCM Gate Review callbacks; the tool reports the authoritative enable state.
 

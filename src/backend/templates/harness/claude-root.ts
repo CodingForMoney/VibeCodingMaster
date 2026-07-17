@@ -1,7 +1,5 @@
 export function renderRootClaudeHarnessRules(): string {
-  return `@.ai/vcm/memory/shared.md
-
-## VCM Start Here
+  return `## VCM Start Here
 
 - Use the durable project docs below as role-relevant project truth.
 - Read module-local \`CLAUDE.md\` before editing a subdirectory if one exists.
@@ -9,7 +7,7 @@ export function renderRootClaudeHarnessRules(): string {
 - Project-manager uses \`vcm-task-state\` to declare the current workflow checkpoint. This state is recoverable context only; flow rules and task artifacts remain authoritative.
 - Use \`vcm-long-running-validation\` for long-running validation. Follow the background job limits below.
 - Use \`vcm-report-harness-issue\` when you notice a reusable VCM harness problem. Record feedback; do not contact Harness Engineer directly.
-- Treat \`.ai/vcm/memory/**\` as read-only. Use \`vcm-propose-memory\` only when VCM assigns a memory proposal during Task Harness Review.
+- The root \`<VCM-memory>\` block is shared project memory. Treat every \`<VCM-memory>\` block as read-only and use \`vcm-propose-memory\` only when VCM assigns a memory proposal during Task Harness Review.
 - Only the user may approve scope reduction, skipped required validation, Gate Review skip or override, skipped required docs sync, accepted unresolved task-scope risk, or weakening of baseline Harness rules. PM may record and route the user's approval but cannot grant it.
 - Project-manager runs \`vcm-gate-review\` unconditionally at every Gate Review trigger point and on VCM Gate Review callbacks; the tool reports the authoritative enable state.
 

@@ -10,8 +10,8 @@ Harness Review and provides an exact draft path.
 
 ## Rules
 
-- Treat `.ai/vcm/memory/**` as read-only. This skill creates a proposal; it
-  never edits active memory.
+- Treat every `<VCM-memory>` block as read-only. This skill creates a proposal;
+  it never edits active memory.
 - Write only to the exact draft path assigned by VCM. The path must be under
   `.ai/vcm/memory-review/runs/<run-id>/drafts/` in the active task worktree.
 - If VCM did not provide a draft path, do not create a proposal.

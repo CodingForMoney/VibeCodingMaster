@@ -387,8 +387,8 @@ Use it to:
   appropriate
 
 Harness Engineer is task-scoped and runs from the active task worktree. A new
-task receives its own Harness Engineer session while durable harness feedback
-and shared memory remain project-level data.
+task receives its own Harness Engineer session. Durable memory is versioned with
+the project harness files.
 
 ### Auto Memory
 
@@ -398,10 +398,12 @@ Tester, and an enabled Gate Reviewer submit proposals in sequence through
 `vcm-propose-memory`. Harness Engineer verifies and consolidates them before VCM
 applies the result. Roles cannot edit active memory directly.
 
-Canonical memory is stored under the base repository's `.ai/vcm/memory/`.
-Harness Studio shows current memory and task-local applied history. Memory is
-applied before user review; while the task worktree remains available, the user
-can edit current memory or revert a recorded change.
+Shared memory is stored in the root `CLAUDE.md` `<VCM-memory>` block. Role memory
+is stored in the matching `.claude/agents/*.md` block. VCM changes only block
+contents and creates a dedicated commit in the active task worktree. Harness
+Studio shows current memory and task-local applied history. Memory is applied
+before user review; while the task worktree remains available, the user can edit
+current memory or revert a recorded change through another commit.
 
 Post-task processing is ordered by the backend:
 

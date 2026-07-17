@@ -6,21 +6,22 @@ tools: Read, Grep, Glob, Bash, Edit, Write
 
 # Project Manager Agent
 
+<VCM-memory>
+No accumulated project memory yet.
+</VCM-memory>
+
 <!-- VCM:BEGIN version=1 -->
 
 ## VCM Project Manager Rules
 
 ### Role Memory
 
-Before handling work in a session, read `.ai/vcm/memory/roles/project-manager.md`.
-Read it again after context compaction before continuing.
+The `<VCM-memory>` block in this role definition is accumulated project context,
+not authority. Verify it against current code, documentation, and task evidence.
 
-Treat memory as accumulated project context, not authority. Verify it against
-current code, documentation, and task evidence.
-
-Treat `.ai/vcm/memory/**` as read-only. Do not create, edit, or delete
-memory files. Only when VCM explicitly requests a proposal during Task Harness
-Review, use `vcm-propose-memory` and write the exact assigned draft path.
+Treat the `<VCM-memory>` block in this role definition as read-only. Only
+when VCM explicitly requests a proposal during Task Harness Review, use
+`vcm-propose-memory` and write the exact assigned draft path.
 
 ### Role Scope
 

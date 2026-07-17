@@ -102,6 +102,35 @@ describe("createGitAdapter", () => {
     expect(calls[2]?.args.slice(-2)).toEqual(["rev-parse", "HEAD"]);
   });
 
+  it("commits only the requested memory host files", async () => {
+    const calls: RunnerCall[] = [];
+    const adapter = createGitAdapter({
+      async run(command, args = [], options = {}) {
+        calls.push({ command, args, options });
+        if (args.at(-1) === "HEAD") {
+          return { stdout: "memory123", stderr: "", exitCode: 0 };
+        }
+        return { stdout: "", stderr: "", exitCode: 0 };
+      }
+    });
+
+    await expect(adapter.commitPaths(
+      "/workspace",
+      "chore: update VCM memory",
+      ["CLAUDE.md", ".claude/agents/coder.md"]
+    )).resolves.toBe("memory123");
+
+    expect(calls[0]?.args.slice(-7)).toEqual([
+      "commit",
+      "--only",
+      "-m",
+      "chore: update VCM memory",
+      "--",
+      "CLAUDE.md",
+      ".claude/agents/coder.md"
+    ]);
+  });
+
   it("reads porcelain status with safe.directory", async () => {
     const calls: RunnerCall[] = [];
     const adapter = createGitAdapter(createRunner(calls, {

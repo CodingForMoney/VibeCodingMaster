@@ -113,6 +113,7 @@ export async function createMockClaudeE2eApp(options: MockClaudeE2eAppOptions = 
   });
   const autoMemoryService = createAutoMemoryService({
     fs: fsAdapter,
+    git,
     runtime: mockRuntime,
     sessionService,
     appSettings,
