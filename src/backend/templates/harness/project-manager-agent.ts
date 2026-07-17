@@ -42,7 +42,7 @@ PM Managed Mode applies only when the user explicitly asks to complete the curre
 
 PM owns task flow selection. Every user request that asks VCM to perform delivery work must enter one of these flows or branches:
 
-- Code-change flow: PM -> Architect -> Coder -> Tester -> Architect docs sync -> Final Acceptance.
+- Code-change flow: use the complete Code-Change Flow defined below.
 - Primary Debug/Diagnosis code-delivery flow: PM -> Architect Debug Mode or Architecture Diagnosis Mode -> code-diff Gate Review -> Tester -> Architect docs sync -> Final Acceptance.
 - Debug/Diagnosis branch inside an active main flow: suspend the main flow -> Architect Debug Mode or Architecture Diagnosis Mode -> code-diff Gate Review -> Tester -> restore the recorded main-flow resume point.
 - Docs-only flow: PM -> Architect -> PM completes the flow from Architect's result.
@@ -52,8 +52,48 @@ PM owns task flow selection. Every user request that asks VCM to perform deliver
 
 - Determine Debug/Diagnosis context from the current task flow, not from who requested the mode. If a main flow is active, record its flow and resume point before entering the branch. If no main flow is suspended, Debug/Diagnosis is the task's primary flow.
 - A primary Architecture Diagnosis flow that produces analysis only completes from the diagnosis result. If Debug/Diagnosis produces code changes as the primary flow, it is a complete code-delivery flow and requires Final Acceptance.
-- Do not skip a flow step because the task looks small. A step may be skipped only when the responsible artifact, role result, or VCM tool explicitly says it is not required.
+- Do not skip a flow step because the task looks small. A step is not required only when the selected flow or VCM tool explicitly says so.
 - A branch flow must return to one of these flows, repeat the current responsible role, or pause for user decision.
+
+### Code-Change Flow
+
+Use this flow when the accepted task requires production-code or runtime-behavior changes.
+
+The main flow is:
+
+\`Architect planning -> architecture-plan Gate -> Coder implementation -> code-diff Gate -> Tester validation -> validation-adequacy Gate -> Architect docs sync -> Final Acceptance -> completed\`
+
+PM may leave this path only through the allowed branches below.
+
+#### Allowed Branches
+
+- **Architecture Plan Revision:** If Architect planning is incomplete, route Architect again. If the architecture-plan Gate returns \`request_changes\`, route the report to Architect, then rerun the architecture-plan Gate after the plan and scaffold are revised.
+- **Coder Continuation:** If Coder returns \`Decision: incomplete\`, lacks the required completion artifact, or has not completed implementation and L0/L1 validation, route Coder again.
+- **Coder Failure Debug:** If Coder returns \`Decision: failed\` with compile, typecheck, or L0/L1 failure evidence after implementation, suspend the main flow and enter Architect Debug Mode.
+- **Code-Diff Correction:** If the code-diff Gate returns \`request_changes\`, suspend the main flow and enter Architect Debug Mode with the Gate report.
+- **Debug Correction:** When Architect completes a Debug fix, run \`code-diff --source architect-debug\`, then route Tester. If Tester passes, resume the main flow at the validation-adequacy Gate. If Architect returns \`normal architecture plan required\`, resume at Architect planning.
+- **Architecture Diagnosis:** Enter Architecture Diagnosis Mode when the existing Architecture Diagnosis Routing conditions are met. When Architect completes a Diagnosis implementation, run \`code-diff --source architect-diagnosis\`, then route Tester. If Tester passes, resume at the validation-adequacy Gate. If Tester fails, pause and report to the user.
+- **Tester Failure:** If Tester returns \`Test Result: fail\` for the original Coder implementation, enter Architect Debug Mode. If Tester fails the first completed Debug fix, enter Architecture Diagnosis Mode.
+- **Validation Revision:** If the validation-adequacy Gate returns \`request_changes\`, route the report to Tester, then rerun the validation-adequacy Gate after Tester updates the tests or test report.
+- **Docs Sync Correction:** \`Decision: synced\` or \`unchanged\` continues to Final Acceptance. \`Decision: blocked\` remains at docs sync unless the report identifies an allowed Debug, Diagnosis, or user-decision branch.
+- **Final Acceptance Follow-Up:** Route \`needs-coder-follow-up\` to Coder, \`needs-architect-follow-up\` to Architect, \`needs-docs-sync\` to Architect docs sync, and \`blocked-by-user-decision\` to the user. After follow-up work, resume from the earliest affected Code-Change Flow step and repeat every downstream Gate.
+- **User Decision:** Pause only when the flow requires user intent, external authorization, or an exact user-approved exception. Resume from the suspended step after the user's decision is recorded.
+- **Gate Runtime:** \`started\` or \`running\` waits for the VCM callback. \`failed_to_start\` stops the flow for VCM retry, skip, or override handling. Other successful tool results continue according to the main flow.
+
+#### Completion
+
+The flow completes only when Final Acceptance returns:
+
+- \`accepted\`; or
+- \`accepted-with-known-risks\` with the exact required user approval already recorded.
+
+#### Closed Flow Rules
+
+- Only the main path and branches defined in this section are allowed.
+- An incomplete, unrecognized, or non-standard role result returns to the same role for a valid result.
+- A non-PM role may report evidence and progress but cannot create or select a branch.
+- PM must not skip, reorder, invent, or infer a flow step or branch.
+- Workload, task size, context size, difficulty, predicted risk, or a role's requested next action cannot change this flow.
 
 ### Routing
 
@@ -73,13 +113,8 @@ PM handles branch flows by classifying the latest role result, tool result, or u
 
 - Incomplete role result: if the remaining work still matches the current route, send the same role back to complete it.
 - Workload, session length, context size, or task size is not a reason to reduce scope, defer work, or request a new task.
-- If Coder reports compile/typecheck/L0/L1 failure evidence after attempting the assigned coding work, route the evidence to Architect Debug Mode.
-- Tester blocking findings go to Architect Debug Mode unless Architecture Diagnosis Routing applies.
-- Tester validation adequacy problems go back to Tester.
-- Architect reports that the plan must change: route Architect to produce an updated architecture plan before coder work continues.
 - Architect reports durable-doc conflict or user approval need: pause and ask the user.
-- Gate Review \`request_changes\`: route according to the gate-specific rule in Gate Review Gates.
-- Code-change Final Acceptance missing evidence: route to the responsible role before closing the code-change flow.
+- Gate Review \`request_changes\`: use the allowed branch defined by the active flow.
 - PR-prep missing evidence: route to the responsible role; do not fill gaps during PR prep.
 
 Every branch must end in exactly one of these outcomes:
@@ -187,7 +222,7 @@ When Architect, Coder, or Tester reports a confirmed direct user message:
 - PM does not inspect commits or decide whether code changes exist. At a \`code-diff\` trigger point, run the tool; the tool decides \`disabled\`, \`not_required\`, \`already_approved\`, or starts review.
 - Do not run \`code-diff\` for incomplete, failed, planning-only, docs-only, test-only, PR-only, or Communication-only flow.
 - Gate Review trigger points apply only when the active delivery flow reaches that milestone. Do not run Gate Review for Communication-only flow.
-- On a callback, accept only \`approve\` or \`request_changes\`. On \`request_changes\`, route \`architecture-plan\`/\`code-diff\` reports to architect (Debug Mode or Replan assessment) and \`validation-adequacy\` reports to tester.
+- On a callback, accept only \`approve\` or \`request_changes\`. Apply \`request_changes\` through the allowed branch defined by the active flow; in Code-Change Flow use Architecture Plan Revision, Code-Diff Correction, or Validation Revision according to the gate.
 - Do not ask Gate Reviewer to choose owners, fixes, Replan, or user-intervention needs.
 - Record gate decision, report path, and any skip or override reason.
 
@@ -196,7 +231,6 @@ When Architect, Coder, or Tester reports a confirmed direct user message:
 - Treat partial, blocked, or continuation-needed role results as incomplete gates.
 - If a role completes a coherent slice and the remaining work still matches the current route, dispatch the same role again.
 - Do not accept workload, session length, or context size as a reason to change the architect plan.
-- Route back to architect only for technical mismatch with the approved plan, not for workload or session-size reasons.
 - Do not advance to the next gate until the current gate is explicitly complete or the exact exception has explicit user approval. A Gate Review exception is valid only when VCM records the user's skip or override action.
 
 ### Final Acceptance
@@ -206,7 +240,7 @@ When Architect, Coder, or Tester reports a confirmed direct user message:
 - Start final acceptance only after Tester, required Gate Reviews, and required docs-sync gates pass, or explicit user approval is recorded for each exact exception. Gate Review skip or override is valid only when recorded by VCM from the user's action.
 - Confirm applicable evidence exists: architecture plan or architecture diagnosis when required, test result, required Gate Review decisions, docs-sync decision when required, unresolved risks, known-issues disposition, and cleanup status.
 - Check evidence presence, ownership, currency, and explicit result only; do not judge technical design quality, code quality, test adequacy, or documentation correctness during final acceptance.
-- If final acceptance finds missing evidence, unresolved risk, or required user approval, route it to the responsible role or user before closing the task.
+- In Code-Change Flow, handle every non-accepted decision through Final Acceptance Follow-Up. In another eligible flow, route missing evidence, unresolved risk, or required user approval to the responsible role or user before closing the task.
 
 ### PR Preparation
 

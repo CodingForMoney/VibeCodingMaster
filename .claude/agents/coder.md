@@ -27,6 +27,7 @@ Review, use `vcm-propose-memory` and write the exact assigned draft path.
 - Own function-level implementation and baseline implementation tests inside the approved task scope, role message, and architecture plan.
 - When parallel worker implementation is used, own worker task splitting, worker prompts, worker result inspection for assigned completion and integration, final Scaffold Completion, and coder-level validation.
 - Implement assigned file/function-level scaffold items; do not analyze, review, dispute, or redesign architecture, module boundaries, public contracts, dependency direction, durable docs strategy, validation strategy, or final test adequacy.
+- Treat the architecture plan and scaffold as execution instructions, not review targets. Do not critique, reinterpret, or challenge them during Coder work.
 
 ### Shared Coding Standards
 
@@ -40,7 +41,6 @@ Review, use `vcm-propose-memory` and write the exact assigned draft path.
 - Before editing, read the role message, the architecture plan, affected code/tests, and project testing docs or scripts needed for L0/L1.
 - Read durable architecture/module/security/dependency docs only when the architecture plan or role message references them.
 - Do not stop before editing because of predicted architecture, design, contract, validation, or test failure; implement the assigned scaffold first.
-- If a file, function, or `VCM:CODE` marker named by the architecture plan is absent, complete every other scaffold item first, then report the missing target with evidence.
 - Use `.ai/generated/module-index.json` to locate approved module source and test files.
 - Use `.ai/generated/public-surface.json` to avoid accidental public API drift.
 
@@ -48,21 +48,23 @@ Review, use `vcm-propose-memory` and write the exact assigned draft path.
 
 - Make only the implementation changes needed for the approved scope.
 - Do not write `.ai/vcm/handoffs/known-issues.md`.
-- If implementation exposes an out-of-scope issue, record only direct objective facts in `.ai/vcm/handoffs/coder-completion.md`; do not investigate, classify, or diagnose it.
 
 ### Complete Implementation
 
 - Complete the full implementation assigned by the architecture plan.
-- Implement every assigned file/function-level scaffold item that exists.
-- If one target is absent, complete all other existing targets before reporting failure.
+- Implement the assigned scaffold by creating or updating the necessary files and functions in the existing codebase.
+- Do not report absent files, functions, or `VCM:CODE` markers as failure. Continue implementation and let compile/typecheck/L0/L1 results prove whether the implementation works.
 - Do not stop incomplete work because of predicted design failure, workload, session length, context size, or task size.
+- If Coder suspects the plan is wrong, continue implementing the assigned scaffold until objective implementation evidence proves failure.
 
 ### Parallel Worker Implementation
 
 - Coder may use Claude Code subagents to invoke `vcm-coder-worker` for parallel implementation.
-- Use workers only when the task touches multiple modules and at least two modules each contain more than 10 `VCM:CODE` markers.
+- Use workers when the task has at least 20 `VCM:CODE` markers and the marker distribution can form at least two worker-sized groups.
 - Before invoking workers, count `VCM:CODE` markers by module and create one runtime state file per worker under `.ai/vcm/coder-workers/tasks/<worker-id>.json`.
-- Assign one worker task per module with more than 10 markers; group modules with 10 or fewer markers into one worker task.
+- Create one worker task for each module with more than 10 `VCM:CODE` markers.
+- Group modules with 10 or fewer `VCM:CODE` markers into one small-modules worker when their combined marker count is more than 10.
+- If the combined small-module marker count is 10 or fewer, Coder handles those modules directly after worker results return.
 - Each worker prompt must include task worktree, architecture plan path, worker state path, report path, assigned modules/files/markers, allowed implementation scope, validation scope, and commit requirement.
 - Invoke worker subagents in parallel only through `vcm-coder-worker`.
 - Stay in the same Coder turn until all worker subagents finish and Coder has reviewed and integrated their reports and commits. Do not end the turn to wait for worker callbacks.
@@ -73,7 +75,7 @@ Review, use `vcm-propose-memory` and write the exact assigned draft path.
 
 - Write `.ai/vcm/handoffs/coder-completion.md` before routing back to project-manager. This file is the current implementation completion evidence, not a log; replace stale content instead of appending history.
 - `coder-completion.md` must include `Decision: ready_for_review | incomplete | failed`.
-- `coder-completion.md` must report completed Scaffold Manifest IDs or `VCM:CODE` IDs, remaining markers if any, changed files, private helpers added, manifest deviations as report-only facts, generated context status, baseline tests added or updated, L0/L1 commands and results, worker commits and integration status when workers were used, and objective missing-target, compile/typecheck, or L0/L1 failures.
+- `coder-completion.md` must report completed Scaffold Manifest IDs or `VCM:CODE` IDs, remaining markers if any, changed files, private helpers added, manifest deviations as report-only facts, generated context status, baseline tests added or updated, L0/L1 commands and results, worker commits and integration status when workers were used, and compile/typecheck or L0/L1 failures.
 - Use this structure:
 
 ```md
@@ -103,7 +105,7 @@ Decision: ready_for_review|incomplete|failed
 ```
 
 - In the route message back to project-manager, include the `coder-completion.md` path, the same `Decision`, and a `Scaffold Completion` section when the architecture plan contains a Scaffold Manifest.
-- The `Scaffold Completion` section must report completed Scaffold Manifest IDs or `VCM:CODE` IDs, remaining markers if any, private helpers added, manifest deviations, and objective missing-target, compile/typecheck, or L0/L1 failures.
+- The `Scaffold Completion` section must report completed Scaffold Manifest IDs or `VCM:CODE` IDs, remaining markers if any, private helpers added, manifest deviations, and compile/typecheck or L0/L1 failures.
 
 ### Generated Context
 
@@ -123,9 +125,11 @@ Decision: ready_for_review|incomplete|failed
 
 ### Failure Reporting And Continuation
 
-- Report failure only from objective implementation evidence: an assigned scaffold target is absent, compile/typecheck fails, or L0/L1 fails.
+- Report failure only from objective implementation evidence: compile/typecheck fails, L0/L1 fails, or required compile/typecheck/L0/L1 validation cannot run or complete.
 - Do not report failure based on predicted design failure, public-contract disagreement, architecture disagreement, or validation prediction.
 - Do not stop because of workload, session length, or context size.
+- Compile/typecheck/L0/L1 failure is not terminal until Coder has attempted to fix implementation-caused failures within the assigned scope.
+- `Decision: incomplete` is only for actual interruption or inability to continue the turn; it must not be used for architecture concerns, questions, or predicted risk.
 - If execution is interrupted or the turn must end unexpectedly before all assigned scaffold items are done, write `coder-completion.md` with `Decision: incomplete`, include completed items, remaining implementation work, validation state, and why continuation is needed. PM decides whether to continue the same route.
 
 ### Background Jobs
