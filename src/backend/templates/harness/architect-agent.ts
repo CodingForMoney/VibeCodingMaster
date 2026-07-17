@@ -221,10 +221,12 @@ Small diff, minimum change, localized fix, or preserving the current implementat
 #### Architecture Docs Sync
 
 - Architecture docs describe the current durable system architecture, not task history, implementation chronology, changelog, investigation notes, validation logs, or handoff content.
+- Rewrite affected sections around the current architecture and remove superseded descriptions; do not preserve old and new designs together as chronology.
 - Do not add task labels such as \`RP<n>\`, \`SCF-<n>\`, \`KI-<n>\`, \`Phase <n>\`, or temporary task/round/PR labels to durable architecture docs.
 - Keep only durable product, protocol, spec, or domain identifiers that future maintainers must understand.
 - Keep project-level docs focused on module map, dependency direction, cross-module relationships, major runtime flows, and project-wide constraints.
-- Keep module-level docs focused on current responsibility boundaries, owned behavior, non-owned behavior, collaboration points, important public contracts, invariants, risks, and update triggers.
+- Keep module-level docs focused on current responsibilities, boundaries, data flow, lifecycle, state ownership, invariants, collaboration contracts, important public-surface meaning, failure behavior, risks, and update triggers.
+- Do not turn module architecture docs into source-file inventories, exhaustive callable lists, implementation walkthroughs, or API dumps.
 - Do not duplicate the generated public API index; explain design intent and contract meaning instead.
 - Update \`docs/ARCHITECTURE.md\` only when project-level module overview changes: module list, module responsibilities, module relationships, dependency direction, project-wide architecture constraints, or module architecture doc links.
 - Update affected \`<module>/ARCHITECTURE.md\` when module-level detailed design changes: boundaries, behavior, important public surface explanations, internal risks, or module-specific architecture notes.
@@ -233,8 +235,16 @@ Small diff, minimum change, localized fix, or preserving the current implementat
 - If a touched module's architecture doc does not need changes, record why in \`.ai/vcm/handoffs/docs-sync-report.md\`.
 - Do not move task logs, temporary rationale, or per-task validation history into durable architecture docs.
 - Treat \`.ai/generated/public-surface.json\` as the full machine index for public surface. Verify or report its freshness when public APIs changed; do not replace it with prose in architecture docs.
+- Treat \`.ai/generated/module-index.json\` as the source of truth for module, manifest, dependency, source-file, test-file, and architecture-doc inventories. Do not maintain independent prose counts or exhaustive inventories that can drift from it.
 - When module structure changes, require \`.ai/tools/generate-module-index --check\` or regeneration.
 - When public APIs, routes, or externally consumed surfaces change, require \`.ai/tools/generate-public-surface --check\` or regeneration.
+
+#### Active Plans Sync
+
+- Keep \`docs/plans/**\` limited to active or planned work.
+- When a plan is fully implemented or superseded, remove it from the active plans collection instead of converting it into a completion report, changelog, or historical archive; Git and PR history preserve the prior plan.
+- Replace superseded requirements in an active plan and reconcile references from other durable docs. Do not append successive task decisions or completed-step narratives.
+- If the same current status, ordering, dependency, or scope is stated in more than one durable document, identify the owning document and make every other reference consistent with it.
 
 #### Known Issues Sync
 
@@ -250,11 +260,18 @@ Small diff, minimum change, localized fix, or preserving the current implementat
 - Before promoting, record confirmed unresolved findings from the final role handoff reports (test report, coder completion, Gate Review reports) in \`.ai/vcm/handoffs/known-issues.md\`; then promote only confirmed unresolved durable issues that satisfy Known Issues Sync.
 - During docs sync, remove or rewrite resolved/stale KI entries touched by the task so \`docs/known-issues.md\` remains an open-issue snapshot.
 
+#### Cross-Document Consistency
+
+- Compare every durable fact changed by the task across architecture docs, active plans, testing docs, known issues, code, and generated context. Resolve contradictions before reporting \`synced\`.
+- Verify names, ownership, dependency direction, lifecycle, public contracts, validation commands, current gaps, and active-plan status against their owning source.
+- Do not edit tester-owned \`docs/TESTING.md\` during post-validation docs sync. If it contradicts accepted code, generated context, or other durable docs, report the exact conflict to project-manager for Tester correction.
+- Run \`.ai/tools/check-durable-docs\` after durable-doc changes. A failing audit prevents \`Decision: synced\`; fix Architect-owned findings and report Tester-owned findings for routing.
+
 #### Docs Sync Report
 
 - Write \`.ai/vcm/handoffs/docs-sync-report.md\` for post-validation docs sync in Code-Change Flow, Architect Debug Flow, or a code-producing Architecture Diagnosis Flow. Do not write it for Docs-Only Flow or a Debug/Diagnosis Branch.
 - In Docs-Only Flow, the Architect role result must record the decision, changed documents, evidence reviewed, checks performed, and commit.
-- The report records decision, evidence reviewed, architecture drift check, docs updated, docs left unchanged, promoted/updated/removed/not-promoted known issues, remaining documentation risks, and handoff notes.
+- The report records decision, evidence reviewed, current-truth reconciliation, generated-context freshness, cross-document consistency, architecture docs, active plans, testing-doc consistency, known-issues disposition, durable-doc audit command and result, docs updated, docs left unchanged, remaining documentation risks, and handoff notes.
 - \`Decision\` must be \`synced\`, \`unchanged\`, or \`blocked\`.
 
 ### Background Jobs

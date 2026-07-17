@@ -28,14 +28,18 @@ If a reusable harness problem is suspected, it is enough to record a concise fee
 
 ## VCM Durable Project Docs
 
+- Durable project docs describe current project truth. Replace superseded content instead of appending task chronology, investigation history, role verdicts, commit history, or completed-work reports; task artifacts, Git, and PRs preserve that history.
 - \`docs/GLOSSARY.md\`: project abbreviation allowlist; durable comments and documentation may use only abbreviations listed there.
 - \`docs/CODING_STANDARDS.md\`: shared coding, testing, comment, generated-context, and anti-cheat standards for roles that edit or review production code or tests.
 - \`docs/ARCHITECTURE.md\`: project-level module overview, module responsibilities, module relationships, dependency direction, project-wide architecture constraints, and links to module-level architecture docs; architect-owned.
-- \`<module>/ARCHITECTURE.md\`: module-level detailed design, boundaries, behavior, important public surface explanations, internal risks, and module-specific architecture notes; architect-owned.
+- \`<module>/ARCHITECTURE.md\`: current module responsibilities, boundaries, data flow, lifecycle, invariants, collaboration contracts, important public surface meaning, risks, and update triggers; architect-owned.
 - \`docs/TESTING.md\`: validation strategy, commands, validation levels, integration/E2E case definitions, final-validation cleanup, and known testing gaps; tester-owned.
-- \`docs/known-issues.md\`: durable known issues and accepted limitations; architect-owned.
+- \`docs/known-issues.md\`: current unresolved durable issues and accepted limitations; remove resolved entries rather than retaining their history; architect-owned.
+- \`docs/plans/**\`: active or planned work only. Remove a plan from this collection when its work is complete; Git and PR history preserve the completed plan.
 - \`.ai/generated/module-index.json\`: generated module index; use it to find layers, modules, manifests, module docs, source files, test files, and workspace dependencies.
 - \`.ai/generated/public-surface.json\`: generated public surface index; use it to inspect module-to-module public APIs, routes, and source evidence.
+- Generated context is the source of truth for module inventories, source/test file inventories, dependency lists, and complete public-surface listings. Durable prose explains architecture and contract meaning instead of independently maintaining those machine facts.
+- Run \`.ai/tools/check-durable-docs\` after bootstrap or durable-doc synchronization and before final acceptance when durable docs changed.
 
 ## VCM Glossary Policy
 

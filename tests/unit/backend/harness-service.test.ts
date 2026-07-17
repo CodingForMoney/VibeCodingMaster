@@ -452,6 +452,7 @@ describe("createHarnessService", () => {
       manager: "vcm",
       harnessVersion: "0.3.0-fixed"
     });
+    await fs.writeText("/repo/.ai/tools/check-durable-docs", "#!/usr/bin/env python3\n");
     await fs.writeText("/repo/.ai/tools/generate-module-index", "#!/usr/bin/env python3\n");
     await fs.writeText("/repo/.ai/tools/generate-public-surface", "#!/usr/bin/env python3\n");
     const service = createHarnessService({
@@ -604,6 +605,7 @@ describe("createHarnessService", () => {
     });
     await service.applyHarness("/repo");
     await fs.writeText("/repo/.ai/vcm-harness-manifest.json", "{}\n");
+    await fs.writeText("/repo/.ai/tools/check-durable-docs", "#!/usr/bin/env python3\n");
     await fs.writeText("/repo/.ai/tools/generate-module-index", "#!/usr/bin/env python3\n");
     await fs.writeText("/repo/.ai/tools/generate-public-surface", "#!/usr/bin/env python3\n");
 
@@ -654,6 +656,7 @@ describe("createHarnessService", () => {
     const service = createHarnessService({ fs });
     await service.applyHarness("/repo");
     await fs.writeText("/repo/.ai/vcm-harness-manifest.json", "{}\n");
+    await fs.writeText("/repo/.ai/tools/check-durable-docs", "#!/usr/bin/env python3\n");
     await fs.writeText("/repo/.ai/tools/generate-module-index", "#!/usr/bin/env python3\n");
     await fs.writeText("/repo/.ai/tools/generate-public-surface", "#!/usr/bin/env python3\n");
     await fs.writeJson("/repo/.ai/vcm/bootstrap/session.json", {

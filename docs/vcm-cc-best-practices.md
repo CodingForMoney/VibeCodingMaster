@@ -1,6 +1,6 @@
 # VCM Claude Code Best Practices
 
-Last updated: 2026-07-11
+Last updated: 2026-07-17
 
 This is the current VCM-specific Claude Code / AI coding best-practices guide.
 It describes how VCM's harness, roles, runtime state, and task workflow should
@@ -55,6 +55,7 @@ docs/CODING_STANDARDS.md
 .claude/skills/vcm-gate-review/SKILL.md
 .claude/skills/vcm-report-harness-issue/SKILL.md
 .claude/skills/vcm-propose-memory/SKILL.md
+.ai/tools/check-durable-docs
 .ai/tools/generate-module-index
 .ai/tools/generate-public-surface
 .ai/tools/request-gate-review
@@ -152,7 +153,7 @@ docs/ARCHITECTURE.md
 <module>/ARCHITECTURE.md
 docs/TESTING.md
 docs/known-issues.md
-docs/plans/               # only for durable long-running plans
+docs/plans/               # active or planned work only
 ```
 
 Ownership:
@@ -165,8 +166,29 @@ Ownership:
 - Coder owns implementation, baseline unit/contract/regression tests, scaffold
   completion, and ordinary coding standards.
 
-Durable docs must describe current project truth. They must not become task
-logs, terminal logs, or archives of intermediate attempts.
+Durable docs describe current project truth. Updating them replaces superseded
+content; it does not append task chronology, investigation history, role
+verdicts, commit history, or completed-work reports. Git, PRs, and task handoffs
+preserve execution history.
+
+- Project and module architecture docs explain current responsibilities,
+  boundaries, data flow, lifecycle, invariants, collaboration contracts, and
+  public-surface meaning. They do not duplicate source inventories or complete
+  API listings.
+- `docs/TESTING.md` keeps current strategy, runnable commands, stable
+  behavior-level integration/E2E cases, selection rules, cleanup, and current
+  gaps. It does not inventory every test function or retain past verdicts.
+- `docs/known-issues.md` contains only current unresolved durable issues and
+  accepted limitations. Resolved entries are removed; partially resolved
+  entries are rewritten around the remaining gap.
+- `docs/plans/**` contains only active or planned work. Completed or superseded
+  plans leave that collection; Git and PR history retain their previous form.
+- Architect Docs Sync reconciles changed facts across architecture docs, active
+  plans, testing docs, known issues, code, and generated context. The owning
+  role fixes contradictions before the task can be accepted.
+- `.ai/tools/check-durable-docs` mechanically checks high-confidence violations
+  after bootstrap and durable-doc updates. It supplements semantic Docs Sync;
+  it does not attempt to infer architecture correctness.
 
 ## 5. Runtime State
 
@@ -500,6 +522,11 @@ source files, test files, and workspace dependencies.
 `public-surface.json` indexes public APIs, routes, and externally consumed
 surfaces. It is a machine index, not an architecture document.
 
+Generated context is the source of truth for module inventories, manifests,
+workspace dependencies, source/test file inventories, and complete public
+surface listings. Durable prose explains design intent and contract meaning
+instead of independently maintaining those machine facts.
+
 Current support covers Rust/Cargo projects and npm workspace TypeScript /
 JavaScript projects. Other repository shapes need project-specific generators
 before `.ai/generated/*` is considered reliable.
@@ -526,6 +553,10 @@ Bootstrap may create or refresh:
 
 Bootstrap must not edit product source, product tests, package manifests,
 lockfiles, deployment config, secrets, or VCM managed blocks.
+
+Before its commit, bootstrap runs `.ai/tools/check-durable-docs` and corrects
+bootstrap-owned findings so the first durable-doc baseline is already a
+current-state snapshot.
 
 VCM runs bootstrap through project-scoped `harness-engineer`:
 
@@ -580,7 +611,8 @@ It checks whether required evidence exists and has clear decisions:
 - changed-file scope explanation
 
 Do not accept when required role evidence is missing, tester findings are
-unresolved, docs sync is missing for durable changes, known-issues disposition is
+unresolved, docs sync is missing for durable changes, the durable-doc audit is
+missing or failed after durable-doc changes, known-issues disposition is
 missing, or unexplained high-risk files remain.
 
 ## 17. Translation

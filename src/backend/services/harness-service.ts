@@ -1892,6 +1892,7 @@ async function checkFixedHarness(fs: FileSystemAdapter, repoRoot: string, vcmVer
     ".claude/skills/vcm-harness-bootstrap/SKILL.md",
     "docs/GLOSSARY.md",
     "docs/CODING_STANDARDS.md",
+    ".ai/tools/check-durable-docs",
     ".ai/tools/generate-module-index",
     ".ai/tools/generate-public-surface"
   ];
@@ -2262,6 +2263,7 @@ Required work:
 - Fill target docs/ARCHITECTURE.md with project-level module overview, responsibilities, relationships, dependency direction, project-wide constraints, and links to module-level architecture docs.
 - Create or update target module-level ARCHITECTURE.md files for clear non-root module boundaries with architectureDoc paths in module-index.json.
 - Fill target docs/TESTING.md with project-native validation levels, commands, validation selection rules, final-validation cleanup, test layout, integration/E2E case lists, generated-context freshness checks, and known testing gaps.
+- Run .ai/tools/check-durable-docs and correct every bootstrap-owned finding.
 - Review git status and git diff in the target task worktree.
 - Stage only allowed bootstrap harness changes and create a commit in the target task worktree.
 
@@ -2273,7 +2275,7 @@ Boundaries:
 - VCM will not create the bootstrap commit for you.
 
 Final response:
-Summarize files reviewed, files updated, generated artifacts, commit hash, final git status, verified claims, inferred claims, unknowns, confirmation-needed items, and suggested validation commands.
+Summarize files reviewed, files updated, generated artifacts, durable-doc audit result, commit hash, final git status, verified claims, inferred claims, unknowns, confirmation-needed items, and suggested validation commands.
 
 [/VCM HARNESS BOOTSTRAP]`;
 }

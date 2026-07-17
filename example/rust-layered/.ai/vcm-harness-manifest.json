@@ -4,7 +4,7 @@
   "harnessVersion": "0.7.5",
   "installMode": "fixed",
   "installedAt": "2026-06-07T00:00:00Z",
-  "updatedAt": "2026-07-17T09:13:17.424Z",
+  "updatedAt": "2026-07-17T14:54:44.289Z",
   "runtimeRoots": [
     ".ai/vcm/",
     ".claude/worktrees/"
@@ -382,6 +382,18 @@
       "ownership": "project-owned",
       "source": "vcm-template",
       "lifecycle": "long-term"
+    },
+    {
+      "path": ".ai/tools/check-durable-docs",
+      "entryType": "file",
+      "category": "durable-docs-tool",
+      "ownership": "whole-file",
+      "source": "vcm-template",
+      "lifecycle": "long-term",
+      "uninstall": {
+        "action": "delete-file-if-unchanged",
+        "requiresConfirmation": false
+      }
     },
     {
       "path": ".ai/tools/generate-module-index",

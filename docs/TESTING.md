@@ -60,6 +60,12 @@ Notes:
   Final Acceptance hashing plus automatic and manual readiness enforcement.
 - `.ai/tools/**` or `scripts/harness-tools/**` change: run
   `tests/unit/backend/harness-tools.test.ts` and `vcm-bash-guard.test.ts`.
+- Durable-doc template or audit change: run
+  `tests/unit/backend/harness-tools.test.ts`,
+  `tests/unit/backend/harness-templates-sync.test.ts`, and
+  `tests/unit/backend/harness-service.test.ts`. The audit tests cover clean
+  current-state docs and representative history, plan, and generated-context
+  drift failures.
 - Pre-publish / release: L4 (`npm run build` + `npm run verify:package`).
 
 ## Long-Running Validation

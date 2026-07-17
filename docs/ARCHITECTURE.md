@@ -122,6 +122,25 @@ by the tools in `.ai/tools/`:
 
 Regenerate both after changing module layout, public exports, or HTTP routes.
 
+## Durable Documentation Ownership
+
+The fixed installer ships `.ai/tools/check-durable-docs`. Harness Bootstrap,
+Architect Docs Sync, and Tester testing-doc updates run it after changing
+durable docs. The tool detects high-confidence contract violations such as
+resolved issue history, terminal plans left under `docs/plans/`, task history in
+architecture/testing docs, missing module architecture docs, and generated
+module-count drift.
+
+Semantic consistency remains role-owned: Architect reconciles changed facts
+across architecture docs, active plans, known issues, code, and generated
+context; Tester owns `docs/TESTING.md`. Final Acceptance requires the relevant
+evidence to record a passing audit after durable-doc changes.
+
+Generated indexes own machine inventories and complete public-surface lists.
+Durable prose owns current architecture, contract meaning, validation strategy,
+active plans, and unresolved limitations. Git, PRs, and task handoffs own
+history.
+
 ## Auto Memory Ownership
 
 `auto-memory-service` owns project memory under the base repository's

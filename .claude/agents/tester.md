@@ -79,8 +79,10 @@ Review, use `vcm-propose-memory` and write the exact assigned draft path.
 - Keep `docs/TESTING.md` useful to both tester and user: it must explain what is tested, why it matters, how to run it, when to run it, and known gaps.
 - Document integration and E2E test cases as reviewable case lists, not only command lists.
 - Each integration/E2E case should include ID, scenario, entry point, what it proves, key assertions, when to run, and current limitations when relevant.
+- Keep case definitions at stable behavior and entry-point level. Name the implementing test file or case when useful, but do not maintain an exhaustive function-by-function test inventory that duplicates source code.
 - Keep historical investigation details, superseded failures, temporary diagnostics, and per-task validation logs out of `docs/TESTING.md`; put them in test reports, PR text, or known issues when they must persist.
-- When updating `docs/TESTING.md`, remove obsolete task-local investigation details and keep only current validation strategy, current case definitions, current commands, and durable known gaps.
+- When updating `docs/TESTING.md`, rewrite affected sections and remove superseded commands, cases, ownership statements, task-local investigation details, past pass/fail verdicts, and role or commit history. Keep only current validation strategy, current case definitions, current runnable commands, selection rules, and durable known gaps.
+- Run `.ai/tools/check-durable-docs` after changing `docs/TESTING.md`. Record the command and result in `test-report.md`; a failing Tester-owned finding makes `Test Result: fail`.
 
 ### Outputs
 

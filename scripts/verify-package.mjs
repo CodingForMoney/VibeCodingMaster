@@ -6,6 +6,7 @@ const requiredFiles = [
   "README.md",
   "package.json",
   "scripts/fix-node-pty-spawn-helper.mjs",
+  "scripts/harness-tools/check-durable-docs",
   "scripts/harness-tools/generate-module-index",
   "scripts/harness-tools/generate-public-surface",
   "scripts/harness-tools/run-long-check",

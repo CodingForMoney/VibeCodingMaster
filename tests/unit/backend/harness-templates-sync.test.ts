@@ -15,6 +15,7 @@ const installerPath = path.join(appRoot, "scripts/install-vcm-harness.mjs");
 const approvedExampleRoot = path.join(appRoot, "example/rust-layered");
 
 const EXACT_EXAMPLE_HARNESS_PATHS = [
+  ".ai/tools/check-durable-docs",
   ".ai/tools/generate-module-index",
   ".ai/tools/generate-public-surface",
   ".ai/tools/request-gate-review",

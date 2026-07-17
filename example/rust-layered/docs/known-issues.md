@@ -13,6 +13,7 @@ This file stores durable known issues, accepted limitations, and unresolved cros
 - During a task, only architect records unresolved findings in `.ai/vcm/handoffs/known-issues.md`; other roles report findings through their handoff artifacts.
 - At task close, architect promotes only still-relevant confirmed issues from the task-local file into this document.
 - Remove entries when they are fixed, rejected, obsolete, or moved into a concrete plan.
+- After changing this file, run `.ai/tools/check-durable-docs` and fix every Known Issues finding before reporting completion.
 
 ## Entry Format
 

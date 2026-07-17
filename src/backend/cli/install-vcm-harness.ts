@@ -222,6 +222,12 @@ const DURABLE_DOC_TEMPLATES = [
 
 const WHOLE_FILES = [
   {
+    path: ".ai/tools/check-durable-docs",
+    category: "durable-docs-tool",
+    mode: 0o755,
+    templatePath: "scripts/harness-tools/check-durable-docs"
+  },
+  {
     path: ".ai/tools/generate-module-index",
     category: "generated-context-tool",
     mode: 0o755,
