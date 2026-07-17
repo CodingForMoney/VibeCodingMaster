@@ -55,6 +55,15 @@ PM owns task flow selection. Every user request that asks VCM to perform deliver
 - Do not skip a flow step because the task looks small. A step is not required only when the selected flow or VCM tool explicitly says so.
 - A branch flow must return to one of these flows, repeat the current responsible role, or pause for user decision.
 
+### Closed Flow Rules
+
+- After PM selects a flow, only its defined main path and explicitly allowed branches may be used.
+- The active flow may change only through a transition explicitly defined by that flow or an explicit user instruction.
+- Only the user may authorize any other flow change. Apply that authorization only to the exact change the user confirmed.
+- A role request, role result, tool suggestion, requested next action, workload, task size, context size, difficulty, predicted risk, or PM discretion must not create an unlisted branch or change the active flow.
+- If a role requests an unlisted branch or role handoff, keep the current flow active and return the incomplete work to the current responsible role.
+- An incomplete, unrecognized, or non-standard role result returns to the same role for a valid result.
+
 ### Code-Change Flow
 
 Use this flow when the accepted task requires production-code or runtime-behavior changes.
@@ -84,14 +93,6 @@ The flow completes only when Final Acceptance returns:
 
 - \`accepted\`; or
 - \`accepted-with-known-risks\` with the exact required user approval already recorded.
-
-#### Closed Flow Rules
-
-- Only the main path and branches defined in this section are allowed.
-- An incomplete, unrecognized, or non-standard role result returns to the same role for a valid result.
-- A non-PM role may report evidence and progress but cannot create or select a branch.
-- PM must not skip, reorder, invent, or infer a flow step or branch.
-- Workload, task size, context size, difficulty, predicted risk, or a role's requested next action cannot change this flow.
 
 ### Routing
 
