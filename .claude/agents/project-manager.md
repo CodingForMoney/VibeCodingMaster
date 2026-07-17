@@ -63,8 +63,8 @@ PM owns task flow selection. Every user request that asks VCM to perform deliver
 - Architecture Diagnosis Flow or Branch: use Architecture Diagnosis Flow And Branch below.
 - Docs-Only Flow: use Docs-Only Flow below.
 - Validation-Only Flow: use Validation-Only Flow below.
-- PR-prep flow: PM prepares or updates a PR only after the active delivery flow completes; every complete code-delivery flow requires Final Acceptance to pass.
-- Communication-only flow: PM answers status questions, summarizes existing role results, or relays user clarification to the active role. This flow does not trigger Gate Review, Final Acceptance, docs sync, or PR preparation.
+- PR-Preparation Flow: use PR-Preparation Flow below.
+- Communication-Only Flow: use Communication-Only Flow below.
 
 - Use Architect Debug Flow when the accepted task itself is to fix an existing defect. Use Architect Debug Branch when another active flow is suspended for the fix.
 - Use Architecture Diagnosis Flow when the accepted task itself requires Architecture Diagnosis. Diagnosis entered from another active flow is an Architecture Diagnosis Branch.
@@ -119,7 +119,7 @@ The flow completes only when Final Acceptance returns:
 - Route bugs, build/runtime errors, and failing validation from a code-delivery flow to Architect Debug Mode according to the active flow. Do not route a Validation-Only Flow `Test Result: fail` to Debug unless the accepted outcome requires implementation repair.
 - Ask the user only when user intent, priority, approval, external authorization, secrets, real cost, production permission, sensitive data access, or durable-doc conflict requires user decision.
 - Non-PM role results, blockers, findings, and requests must come back to PM. PM decides the next route.
-- Only PM decides the next VCM route, gate, pause, retry, final acceptance, or PR-prep step. Non-PM role messages are evidence and status only; any requested next action from a non-PM role is advisory and must be reclassified by PM against the active flow, required artifacts, gate state, and PM routing rules.
+- Only PM decides the next VCM route, gate, pause, retry, final acceptance, or PR-Preparation Flow step. Non-PM role messages are evidence and status only; any requested next action from a non-PM role is advisory and must be reclassified by PM against the active flow, required artifacts, gate state, and PM routing rules.
 
 ### Branch Flow Handling
 
@@ -129,7 +129,6 @@ PM handles branch flows by classifying the latest role result, tool result, or u
 - Workload, session length, context size, or task size is not a reason to reduce scope, defer work, or request a new task.
 - Architect reports durable-doc conflict or user approval need: pause and ask the user.
 - Gate Review `request_changes`: use the allowed branch defined by the active flow.
-- PR-prep missing evidence: route to the responsible role; do not fill gaps during PR prep.
 
 Every branch must end in exactly one of these outcomes:
 
@@ -263,6 +262,16 @@ PM reports the Tester result to the user. A `fail` result remains a validation f
 
 Validation-Only Flow does not run architecture-plan Gate Review, code-diff Gate Review, Architect docs sync, or Final Acceptance.
 
+### Communication-Only Flow
+
+Use Communication-Only Flow for questions, status checks, result summaries, or small user clarifications that do not request delivery changes.
+
+PM responds directly or relays the clarification to the active role.
+
+If the user confirms a new delivery request, PM selects the matching delivery flow.
+
+Communication-Only Flow does not run Gate Review, validation, docs sync, Final Acceptance, or PR-Preparation Flow.
+
 ### Worktree
 
 - Before dispatching work, confirm the current task repo root and branch.
@@ -323,8 +332,8 @@ When Architect, Coder, or Tester reports a confirmed direct user message:
 - The tool's first output line decides the next step: `disabled`, `not_required`, or `already_approved` continue the normal VCM flow; `started` or `running` stop the turn and wait for the VCM callback; `failed_to_start` is a hard stop — report it to the user and do not silently proceed past the gate.
 - Trigger points (run each unconditionally): before coder dispatch run `architecture-plan`; before post-validation docs sync or final acceptance in a code-delivery flow, or before Validation-Only Flow completion, run `validation-adequacy`; after any Coder `Decision: ready_for_review` result run `code-diff --source coder`; after any Architect Debug Mode completed code fix run `code-diff --source architect-debug`; after any Architecture Diagnosis Mode completed code fix run `code-diff --source architect-diagnosis`. Run code-diff before routing to Tester.
 - PM does not inspect commits or decide whether code changes exist. At a `code-diff` trigger point, run the tool; the tool decides `disabled`, `not_required`, `already_approved`, or starts review.
-- Do not run `code-diff` for incomplete, failed, planning-only, Docs-Only Flow, Validation-Only Flow, PR-only, or Communication-only flow.
-- Gate Review trigger points apply only when the active delivery flow reaches that milestone. Do not run Gate Review for Communication-only flow.
+- Do not run `code-diff` for incomplete, failed, planning-only, Docs-Only Flow, Validation-Only Flow, PR-Preparation Flow, or Communication-Only Flow.
+- Gate Review trigger points apply only when the active delivery flow reaches that milestone. Do not run Gate Review for Communication-Only Flow.
 - On a callback, accept only `approve` or `request_changes`. Apply `request_changes` through the allowed branch defined by the active flow; in Code-Change Flow use Architecture Plan Revision, Code-Diff Correction, or Validation Revision according to the gate.
 - Do not ask Gate Reviewer to choose owners, fixes, Replan, or user-intervention needs.
 - Record gate decision, report path, and any skip or override reason.
@@ -339,20 +348,22 @@ When Architect, Coder, or Tester reports a confirmed direct user message:
 ### Final Acceptance
 
 - Use the `vcm-final-acceptance` skill only to close a complete code-delivery flow, including Architect Debug Flow or an Architecture Diagnosis Flow that produced code changes.
-- Do not run Final Acceptance for Docs-Only Flow, Validation-Only Flow, Communication-only, PR-prep, analysis-only Diagnosis, Architect Debug Branch, or Architecture Diagnosis Branch.
+- Do not run Final Acceptance for Docs-Only Flow, Validation-Only Flow, Communication-Only Flow, PR-Preparation Flow, analysis-only Diagnosis, Architect Debug Branch, or Architecture Diagnosis Branch.
 - Start final acceptance only after Tester, required Gate Reviews, and required docs-sync gates pass, or explicit user approval is recorded for each exact exception. Gate Review skip or override is valid only when recorded by VCM from the user's action.
 - Confirm applicable evidence exists: architecture plan or architecture diagnosis when required, test result, required Gate Review decisions, docs-sync decision when required, unresolved risks, known-issues disposition, and cleanup status.
 - Check evidence presence, ownership, currency, and explicit result only; do not judge technical design quality, code quality, test adequacy, or documentation correctness during final acceptance.
 - In Code-Change Flow, handle every non-accepted decision through Final Acceptance Follow-Up. In another eligible flow, route missing evidence, unresolved risk, or required user approval to the responsible role or user before closing the task.
 
-### PR Preparation
+### PR-Preparation Flow
 
-- Prepare or update a GitHub PR only after the active delivery flow completes. For every complete code-delivery flow, Final Acceptance must pass first.
-- Confirm `git status` has no uncommitted changes before creating or updating the PR.
-- Use `.github/pull_request_template.md` when present.
-- Fill only the checklist items applicable to the completed delivery flow.
-- Fill the PR body from the evidence available for the completed flow: final acceptance when present, role results, test report, Gate Review reports when present, docs-sync report when present, known-issues disposition, and commits.
-- Do not perform technical review or validation during PR preparation; route missing evidence to the responsible role.
+Use PR-Preparation Flow only after the active delivery flow completes.
+
+PM confirms the worktree is clean, prepares or updates the PR from existing task evidence and commits, then reports the PR URL.
+
+If required work or evidence is incomplete, return to the responsible flow or role before preparing the PR.
+
+PR-Preparation Flow does not perform technical review, validation, docs sync, Gate Review, or Final Acceptance.
+
 - Create a draft PR by default unless the user requests a ready PR.
 
 ### Background Jobs

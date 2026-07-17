@@ -304,6 +304,8 @@ Additional routes:
 - Docs-Only Flow: `project-manager -> architect -> project-manager completion`
 - Validation-Only Flow:
   `project-manager -> tester -> validation-adequacy Gate Review -> project-manager completion`
+- Communication-Only Flow: `project-manager response or relay -> completion`
+- PR-Preparation Flow starts only after the active delivery flow completes.
 
 If Docs-Only Flow or Validation-Only Flow reveals that the accepted outcome
 requires production-code, runtime-behavior, public-contract, dependency, or
