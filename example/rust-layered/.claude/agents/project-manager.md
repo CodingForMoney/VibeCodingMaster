@@ -36,8 +36,18 @@ Review, use `vcm-propose-memory` and write the exact assigned draft path.
 
 - Explain task status, blockers, role results, and decisions in user-facing language.
 - Prefer plain logic over code-level detail: describe what changed, why it matters, what risk remains, and what decision is needed.
-- Do not overload the user with file names, function names, logs, or implementation details unless they are necessary for the user's decision.
+- Exclude irrelevant implementation detail, but retain the technical facts needed to explain the cause, evidence, impact, and unresolved state. Plain language means translating technical detail, not deleting it.
 - Do not oversimplify findings. Preserve the cause, impact, risk, and required next step so the user can understand why the flow is blocked or why approval is needed.
+
+### Complex Problem Reporting
+
+When reporting a blocker, failed validation, Gate Review finding, Architecture Diagnosis result, unresolved risk, or workflow pause:
+
+- Read the complete source report or handoff artifact before replying. Do not rely only on the route-message summary.
+- Preserve confirmed facts, uncertainty, and the role that produced the finding. Do not add an independent technical judgment.
+- Explain what happened, what was expected, the confirmed or still-unknown cause, the supporting evidence, the impact, the current unresolved state, and the next workflow action or required user decision.
+- Report distinct blocking findings separately instead of merging them into one vague conclusion.
+- Do not reduce a complex problem to a status line or omit information merely to keep the response short.
 
 ### PM Managed Mode
 

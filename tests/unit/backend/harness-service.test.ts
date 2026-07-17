@@ -96,6 +96,9 @@ describe("createHarnessService", () => {
     expect(projectManagerAgent).toContain("Do not perform technical analysis");
     expect(projectManagerAgent).toContain("Use the `vcm-route-message` skill for every role dispatch");
     expect(projectManagerAgent).not.toContain("### Direct User Message Handling");
+    expect(projectManagerAgent).toContain("### Complex Problem Reporting");
+    expect(projectManagerAgent).toContain("Plain language means translating technical detail, not deleting it.");
+    expect(projectManagerAgent).toContain("Read the complete source report or handoff artifact before replying.");
     expect(projectManagerAgent).toContain("### PR-Preparation Flow");
     expect(projectManagerAgent).toContain("### Background Jobs");
     expect(projectManagerAgent).toContain("VCM_TASK_REPO_ROOT");

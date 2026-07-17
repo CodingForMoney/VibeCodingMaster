@@ -320,6 +320,12 @@ constraints, external accounts/secrets/data access, cost, production permission,
 sensitive data access, durable-doc conflict, or a proven requested-outcome change
 requires explicit user direction.
 
+When PM reports a blocker, failed validation, Gate Review finding, Architecture
+Diagnosis result, unresolved risk, or workflow pause, it reads the complete
+source artifact and preserves the problem, expected behavior, cause or remaining
+uncertainty, evidence, impact, unresolved state, and next action. Plain language
+translates technical facts instead of deleting them.
+
 ### User Communication
 
 A message without a VCM marker is user communication. When the user asks a
