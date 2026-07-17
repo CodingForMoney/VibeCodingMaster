@@ -24,6 +24,7 @@ import { claudeTranscriptPath } from "./claude-transcript-service.js";
 import { readHarnessRevisionState } from "./harness-revision.js";
 import type { ProjectService } from "./project-service.js";
 import { getTaskRuntimeRepoRoot, type TaskService } from "./task-service.js";
+import type { TaskWorkflowService } from "./task-workflow-service.js";
 
 export interface SessionService {
   startProjectTranslatorSession(repoRoot: string, input?: StartRoleSessionRequest): Promise<RoleSessionRecord>;
@@ -66,6 +67,7 @@ export interface SessionServiceDeps {
   artifactService: ArtifactService;
   projectService: Pick<ProjectService, "loadConfig">;
   taskService: Pick<TaskService, "loadTask">;
+  taskWorkflowService?: Pick<TaskWorkflowService, "getState" | "renderPmResumeContext">;
   apiUrl?: string;
   sandboxMode?: string;
   isProcessAlive?: (pid: number) => boolean;
@@ -254,7 +256,34 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
 
     deps.registry.upsert(record);
     await persistRoleSessionRecord(deps.fs, repoRoot, taskRepoRoot, config.stateRoot, record);
+    if (role === "project-manager") {
+      await restoreProjectManagerWorkflowContext(record, taskRepoRoot, config.stateRoot);
+    }
     return withHarnessRevisionView(repoRoot, record);
+  }
+
+  async function restoreProjectManagerWorkflowContext(
+    record: RoleSessionRecord,
+    taskRepoRoot: string,
+    stateRoot: string
+  ): Promise<void> {
+    if (!deps.taskWorkflowService || record.status !== "running") {
+      return;
+    }
+    try {
+      const state = await deps.taskWorkflowService.getState({
+        taskRepoRoot,
+        stateRoot,
+        taskSlug: record.taskSlug
+      });
+      const context = deps.taskWorkflowService.renderPmResumeContext(state);
+      if (!context || await waitForSessionInputReady(record.id) === "exited") {
+        return;
+      }
+      await submitTerminalInput(deps.runtime, record.id, context);
+    } catch {
+      // Workflow context is advisory; restore failures cannot fail session launch.
+    }
   }
 
   async function launchProjectTranslatorSession(

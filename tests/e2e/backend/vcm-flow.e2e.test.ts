@@ -246,4 +246,42 @@ describe("backend E2E with mock Claude Code", () => {
       role: "coder"
     });
   });
+
+  it("persists a PM workflow checkpoint and restores it to project-manager", async () => {
+    const env = await createMockClaudeE2eApp();
+    cleanups.push(() => env.close());
+    const repo = await createE2eRepo();
+    cleanups.push(() => repo.cleanup());
+    const task = await connectAndCreateTask(env.app, repo, "workflow-state");
+
+    const update = await env.app.inject({
+      method: "POST",
+      url: `/api/tasks/${task.taskSlug}/workflow-state`,
+      payload: {
+        flow: "code-change",
+        step: "tester-validation",
+        branch: "architect-debug",
+        resumePoint: "tester-validation",
+        evidenceRefs: [".ai/vcm/handoffs/architect-debug.md"]
+      }
+    });
+    expect(update.statusCode).toBe(200);
+
+    const workspace = await getWorkspaceState(env.app, task.taskSlug);
+    expect(workspace.workflowState).toMatchObject({
+      declared: {
+        flow: "code-change",
+        step: "tester-validation",
+        branch: "architect-debug",
+        resumePoint: "tester-validation"
+      }
+    });
+
+    const pm = await startRole(env.app, task.taskSlug, "project-manager");
+    await env.mockRuntime.waitForIdle();
+    const writes = env.mockRuntime.getWrites(pm.id).join("\n");
+    expect(writes).toContain("[VCM TASK STATE]");
+    expect(writes).toContain("Step: tester-validation");
+    expect(writes).toContain("does not authorize or advance any workflow step");
+  });
 });

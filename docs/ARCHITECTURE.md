@@ -30,7 +30,7 @@ layers plus supporting tools.
   endpoint and the gateway), `task-close-service` (backend-owned unconditional
   task close, shared by the GUI endpoint and the gateway), `session-service`, `round-service`,
   `runtime-coordinator-service`, `runtime-recovery-service`,
-  `turn-reconciler-service`, `message-service`,
+  `turn-reconciler-service`, `message-service`, `task-workflow-service`,
   `artifact-service`, `harness-service`, `harness-feedback-service`,
   `auto-memory-service`,
   `gate-review-service`, `translation-service`/`translation-worker-service`,
@@ -184,6 +184,21 @@ every 10 seconds, independently of frontend polling.
 is reconciled through terminal StopFailure; and a live turn with no hook, terminal,
 or transcript activity for 30 minutes is interrupted before StopFailure recovery.
 The reconciler never treats inactivity alone as successful completion.
+
+## Task Workflow State Ownership
+
+`task-workflow-service` stores PM-declared workflow context at
+`<taskRepoRoot>/.ai/vcm/workflow/state.json`. The declaration records the
+current flow, step, optional branch and resume point, status, and evidence
+references. It is separate from Round, Turn, Session, Gate Review, and process
+state: those services remain the source of truth for observed runtime facts.
+
+PM declarations arrive through PM route-file frontmatter or the
+`update-task-state` tool. The backend writes them atomically, returns them in the
+task workspace aggregate, and restores saved context into a restarted or
+resumed PM session. The frontend only renders the aggregate state. Missing,
+stale, malformed, or unwritable workflow state never blocks message delivery,
+Gate Review, final acceptance, session launch, or task close.
 
 ## Task Close Ownership
 

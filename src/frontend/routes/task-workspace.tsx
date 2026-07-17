@@ -4,6 +4,7 @@ import type { TaskStatusReport } from "../../shared/types/api.js";
 import type { VcmOrchestrationState, VcmRoleMessage } from "../../shared/types/message.js";
 import type { CoreVcmRoleName, RoleDefinition, RoleName, VcmRoleName } from "../../shared/types/role.js";
 import type { VcmSessionRoundState } from "../../shared/types/round.js";
+import type { TaskWorkflowState } from "../../shared/types/workflow.js";
 import type { ClaudeModel, ClaudePermissionMode, SessionEffort, SessionModel } from "../../shared/types/session.js";
 import type { LaunchTemplate, TranslationTargetLanguage } from "../../shared/types/app-settings.js";
 import type { TaskRecord } from "../../shared/types/task.js";
@@ -112,6 +113,7 @@ export function TaskWorkspace({
   const [, setError] = useUiErrorState("");
   const [events, setEvents] = useState<string[]>([]);
   const [orchestration, setOrchestration] = useState<VcmOrchestrationState | null>(null);
+  const [workflowState, setWorkflowState] = useState<TaskWorkflowState | null>(null);
   const [translationFeedStore, setTranslationFeedStore] = useState(() => createTranslationPanelFeedStore(task.taskSlug));
   const taskStatusSyncKeyRef = useRef("");
   const translationFeedCursorRef = useRef(1);
@@ -134,15 +136,16 @@ export function TaskWorkspace({
     onOrchestrationChanged?.(nextOrchestration);
   }, [onMessagesChanged, onOrchestrationChanged]);
 
-  const applyFetchedState = useCallback((nextStatusReport: TaskStatusReport, nextMessages: VcmRoleMessage[], nextOrchestration: VcmOrchestrationState, nextRoundState: VcmSessionRoundState) => {
+  const applyFetchedState = useCallback((nextStatusReport: TaskStatusReport, nextMessages: VcmRoleMessage[], nextOrchestration: VcmOrchestrationState, nextRoundState: VcmSessionRoundState, nextWorkflowState: TaskWorkflowState) => {
     setStatusReport(nextStatusReport);
+    setWorkflowState(nextWorkflowState);
     applyMessageState(nextMessages, nextOrchestration);
     onRoundStateChanged?.(nextRoundState);
   }, [applyMessageState, onRoundStateChanged]);
 
   const refresh = useCallback(async () => {
     const nextState = await apiClient.getTaskWorkspaceState(task.taskSlug);
-    applyFetchedState(nextState.taskStatus, nextState.messages, nextState.orchestration, nextState.roundState);
+    applyFetchedState(nextState.taskStatus, nextState.messages, nextState.orchestration, nextState.roundState, nextState.workflowState);
     clearPollError("Poll task workspace state");
     setError((current) => clearUiErrorForActions(current, ["Load task workspace state", "Poll task workspace state"]));
   }, [applyFetchedState, task.taskSlug]);
@@ -186,6 +189,7 @@ export function TaskWorkspace({
 
   useEffect(() => {
     setEvents([]);
+    setWorkflowState(null);
     onEventsChanged?.([]);
   }, [onEventsChanged, task.taskSlug]);
 
@@ -313,6 +317,19 @@ export function TaskWorkspace({
       <header className="workspace-header">
         <div className="workspace-title-line">
           <h1>{task.title || task.taskSlug}</h1>
+          {workflowState?.declared ? (
+            <div
+              className="workspace-workflow-state"
+              title={[
+                workflowState.declared.branch ? `Branch: ${workflowState.declared.branch}` : "",
+                workflowState.declared.resumePoint ? `Resume: ${workflowState.declared.resumePoint}` : "",
+                workflowState.declared.status ? `Status: ${workflowState.declared.status}` : ""
+              ].filter(Boolean).join(" | ")}
+            >
+              <span>{workflowState.declared.flow ?? "Workflow"}</span>
+              {workflowState.declared.step ? <strong>{workflowState.declared.step}</strong> : null}
+            </div>
+          ) : null}
         </div>
         <RoleSessionTabs
           activeRole={activeRole}

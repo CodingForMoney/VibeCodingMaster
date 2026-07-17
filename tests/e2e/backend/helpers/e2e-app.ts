@@ -12,6 +12,7 @@ import { createAppSettingsService } from "../../../../src/backend/services/app-s
 import { createArtifactService } from "../../../../src/backend/services/artifact-service.js";
 import { createProjectService } from "../../../../src/backend/services/project-service.js";
 import { createTaskService } from "../../../../src/backend/services/task-service.js";
+import { createTaskWorkflowService } from "../../../../src/backend/services/task-workflow-service.js";
 import { createSessionRegistry } from "../../../../src/backend/runtime/session-registry.js";
 import { createSessionService } from "../../../../src/backend/services/session-service.js";
 import { createHarnessService } from "../../../../src/backend/services/harness-service.js";
@@ -75,6 +76,7 @@ export async function createMockClaudeE2eApp(options: MockClaudeE2eAppOptions = 
   const artifactService = createArtifactService(fsAdapter);
   const projectService = createProjectService({ fs: fsAdapter, git, appSettings });
   const taskService = createTaskService({ fs: fsAdapter, git, artifactService, projectService });
+  const taskWorkflowService = createTaskWorkflowService({ fs: fsAdapter });
   const registry = createSessionRegistry();
   const sessionService = createSessionService({
     fs: fsAdapter,
@@ -84,6 +86,7 @@ export async function createMockClaudeE2eApp(options: MockClaudeE2eAppOptions = 
     artifactService,
     projectService,
     taskService,
+    taskWorkflowService,
     apiUrl: "http://127.0.0.1/mock-vcm",
     isProcessAlive(pid) {
       return mockRuntime.listSessions().some((session) => session.pid === pid && session.status === "running");
@@ -133,6 +136,7 @@ export async function createMockClaudeE2eApp(options: MockClaudeE2eAppOptions = 
     runtime: mockRuntime,
     sessionService,
     taskService,
+    taskWorkflowService,
     preDispatchSwitchDelayMs: 0,
     autoDispatchEnterDelayMs: 0,
     dispatchConfirmationEnabled: false
@@ -208,7 +212,9 @@ export async function createMockClaudeE2eApp(options: MockClaudeE2eAppOptions = 
     taskService,
     sessionService,
     translationService,
-    roundService
+    roundService,
+    projectService,
+    taskWorkflowService
   });
   const gatewayService = createGatewayService({
     fs: fsAdapter,
@@ -298,6 +304,7 @@ export async function createMockClaudeE2eApp(options: MockClaudeE2eAppOptions = 
     projectService,
     taskService,
     taskCloseService,
+    taskWorkflowService,
     sessionService,
     artifactService,
     harnessService,

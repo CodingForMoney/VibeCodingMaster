@@ -63,6 +63,7 @@ import { renderVcmLongRunningValidationSkillRules } from "../templates/harness/v
 import { renderVcmProposeMemorySkillRules } from "../templates/harness/vcm-propose-memory-skill.js";
 import { renderVcmReportHarnessIssueSkillRules } from "../templates/harness/vcm-report-harness-issue-skill.js";
 import { renderVcmRouteMessageSkillRules } from "../templates/harness/vcm-route-message-skill.js";
+import { renderUpdateTaskStateTool, renderVcmTaskStateSkillRules } from "../templates/harness/vcm-task-state-skill.js";
 import type { TerminalRuntime } from "../runtime/terminal-runtime.js";
 import { submitTerminalInput } from "../runtime/terminal-submit.js";
 import { VcmError } from "../errors.js";
@@ -249,6 +250,17 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
     renderRules: renderVcmRouteMessageSkillRules
   },
   {
+    kind: "skill-vcm-task-state",
+    path: ".claude/skills/vcm-task-state/SKILL.md",
+    title: "VCM Task State Skill",
+    frontmatter: renderSkillFrontmatter(
+      "vcm-task-state",
+      "Use only as project-manager to declare the current task workflow checkpoint to VCM."
+    ),
+    ownership: "whole-file",
+    renderRules: renderVcmTaskStateSkillRules
+  },
+  {
     kind: "skill-vcm-final-acceptance",
     path: ".claude/skills/vcm-final-acceptance/SKILL.md",
     title: "VCM Final Acceptance Skill",
@@ -362,6 +374,13 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
     title: "Request Gate Review Tool",
     ownership: "raw-file",
     renderRules: renderRequestGateReviewTool
+  },
+  {
+    kind: "tool-update-task-state",
+    path: ".ai/tools/update-task-state",
+    title: "Update Task State Tool",
+    ownership: "raw-file",
+    renderRules: renderUpdateTaskStateTool
   },
   {
     kind: "agent-project-manager",

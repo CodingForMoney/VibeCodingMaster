@@ -19,6 +19,7 @@ const EXACT_EXAMPLE_HARNESS_PATHS = [
   ".ai/tools/generate-module-index",
   ".ai/tools/generate-public-surface",
   ".ai/tools/request-gate-review",
+  ".ai/tools/update-task-state",
   ".ai/tools/run-long-check",
   ".ai/tools/vcm-bash-guard",
   ".ai/tools/watch-job",
@@ -38,6 +39,7 @@ const EXACT_EXAMPLE_HARNESS_PATHS = [
   ".claude/skills/vcm-report-harness-issue/SKILL.md",
   ".claude/skills/vcm-propose-memory/SKILL.md",
   ".claude/skills/vcm-route-message/SKILL.md",
+  ".claude/skills/vcm-task-state/SKILL.md",
   ".github/pull_request_template.md",
   "docs/CODING_STANDARDS.md",
   "docs/GLOSSARY.md"

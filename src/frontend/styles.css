@@ -1068,14 +1068,46 @@ h2 {
 }
 
 .workspace-title-line {
-  display: flex;
+  display: grid;
+  gap: 2px;
+  max-width: 260px;
   min-width: 0;
 }
 
 .workspace-title-line h1 {
   margin-bottom: 0;
+  overflow: hidden;
   font-size: 18px;
   line-height: 1.15;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-workflow-state {
+  display: flex;
+  gap: 5px;
+  min-width: 0;
+  color: #66717c;
+  font-size: 10px;
+  line-height: 1.2;
+}
+
+.workspace-workflow-state span,
+.workspace-workflow-state strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workspace-workflow-state strong {
+  color: #34434b;
+  font-weight: 700;
+}
+
+.workspace-workflow-state strong::before {
+  content: "/";
+  margin-right: 5px;
+  color: #8b959d;
 }
 
 .role-tabs {

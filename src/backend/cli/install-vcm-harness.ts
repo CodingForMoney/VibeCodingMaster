@@ -38,6 +38,7 @@ import { renderVcmLongRunningValidationSkillRules } from "../templates/harness/v
 import { renderVcmProposeMemorySkillRules } from "../templates/harness/vcm-propose-memory-skill.js";
 import { renderVcmReportHarnessIssueSkillRules } from "../templates/harness/vcm-report-harness-issue-skill.js";
 import { renderVcmRouteMessageSkillRules } from "../templates/harness/vcm-route-message-skill.js";
+import { renderUpdateTaskStateTool, renderVcmTaskStateSkillRules } from "../templates/harness/vcm-task-state-skill.js";
 import { readVcmPackageVersion } from "../app-version.js";
 
 const CLI_DIR = path.dirname(fileURLToPath(import.meta.url));
@@ -295,6 +296,17 @@ const WHOLE_FILES = [
     )
   },
   {
+    path: ".claude/skills/vcm-task-state/SKILL.md",
+    category: "skill",
+    mode: 0o644,
+    content: renderSkillFile(
+      "VCM Task State Skill",
+      "vcm-task-state",
+      "Use only as project-manager to declare the current task workflow checkpoint to VCM.",
+      renderVcmTaskStateSkillRules()
+    )
+  },
+  {
     path: ".claude/skills/vcm-gate-review/SKILL.md",
     category: "skill",
     mode: 0o644,
@@ -332,6 +344,12 @@ const WHOLE_FILES = [
     category: "runtime-tool",
     mode: 0o755,
     content: renderRequestGateReviewTool()
+  },
+  {
+    path: ".ai/tools/update-task-state",
+    category: "runtime-tool",
+    mode: 0o755,
+    content: renderUpdateTaskStateTool()
   },
   {
     path: ".ai/tools/run-long-check",
@@ -568,6 +586,7 @@ function fixedDirectories() {
     ".claude/skills/vcm-harness-bootstrap/",
     ".claude/skills/vcm-long-running-validation/",
     ".claude/skills/vcm-route-message/",
+    ".claude/skills/vcm-task-state/",
     ".claude/skills/vcm-gate-review/",
     ".claude/skills/vcm-report-harness-issue/",
     ".claude/skills/vcm-propose-memory/",

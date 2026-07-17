@@ -48,6 +48,10 @@ Notes:
   cross-service wiring.
 - Session lifecycle, round routing, Gate Review, translation, Gateway, Auto
   Memory, or Harness Retrospective change: run `npm run test:e2e:backend`.
+- Task workflow-state changes: run `task-workflow-service.test.ts`,
+  `message-service.test.ts`, `session-service.test.ts`, and
+  `task-routes.test.ts`; verify corrupt or unavailable state remains
+  non-blocking.
 - `src/frontend/**` change: L0 + the affected `tests/unit/frontend/**` files; add
   L3 (`npm run e2e`) when changing a core user journey (connect repo, create task,
   start/resume a role session, send a message, translation panel).

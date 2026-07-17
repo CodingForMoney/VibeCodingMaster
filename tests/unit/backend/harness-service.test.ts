@@ -13,7 +13,7 @@ describe("createHarnessService", () => {
   it("plans and applies recommended harness files when they are missing", async () => {
     const fs = createMemoryFs();
     const service = createHarnessService({ fs });
-    const expectedHarnessFileCount = 24;
+    const expectedHarnessFileCount = 26;
 
     const status = await service.getHarnessStatus("/repo");
     expect(status.needsApply).toBe(true);
@@ -63,6 +63,8 @@ describe("createHarnessService", () => {
     expect(await fs.readText("/repo/.claude/skills/vcm-route-message/SKILL.md")).toContain("This skill writes a route file");
     expect(await fs.readText("/repo/.claude/skills/vcm-route-message/SKILL.md")).toContain("VCM uses project-manager as the routing hub.");
     expect(await fs.readText("/repo/.claude/skills/vcm-route-message/SKILL.md")).toContain("Non-PM roles must not route directly to each other.");
+    expect(await fs.readText("/repo/.claude/skills/vcm-task-state/SKILL.md")).toContain("recoverable context, not a workflow controller");
+    expect(await fs.readText("/repo/.ai/tools/update-task-state")).toContain("/workflow-state");
     expect(await fs.readText("/repo/.claude/skills/vcm-route-message/SKILL.md")).toContain("After writing or updating the route file, end the current Claude Code turn immediately.");
     expect(await fs.readText("/repo/.claude/skills/vcm-final-acceptance/SKILL.md")).toContain("name: vcm-final-acceptance");
     expect(await fs.readText("/repo/.claude/skills/vcm-final-acceptance/SKILL.md")).toContain("only when project-manager is ready to close a complete VCM code-delivery flow");

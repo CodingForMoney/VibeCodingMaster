@@ -41,6 +41,7 @@ import { createRuntimeRecoveryService, type RuntimeRecoveryService } from "./ser
 import { createStatusService, type StatusService } from "./services/status-service.js";
 import { createTaskService, type TaskService } from "./services/task-service.js";
 import { createTaskCloseService, type TaskCloseService } from "./services/task-close-service.js";
+import { createTaskWorkflowService, type TaskWorkflowService } from "./services/task-workflow-service.js";
 import { createTaskLaunchService, type TaskLaunchService } from "./services/task-launch-service.js";
 import { createTerminalInterruptService, type TerminalInterruptService } from "./services/terminal-interrupt-service.js";
 import { createTranslationService, type TranslationService } from "./services/translation-service.js";
@@ -76,6 +77,7 @@ export interface ServerDeps {
   projectService: ProjectService;
   taskService: TaskService;
   taskCloseService: TaskCloseService;
+  taskWorkflowService: TaskWorkflowService;
   sessionService: SessionService;
   artifactService: ArtifactService;
   harnessService: HarnessService;
@@ -161,7 +163,8 @@ export async function createServer(deps: ServerDeps, options: CreateServerOption
     statusService: deps.statusService,
     messageService: deps.messageService,
     taskLaunchService: deps.taskLaunchService,
-    roundService: deps.roundService
+    roundService: deps.roundService,
+    taskWorkflowService: deps.taskWorkflowService
   });
   registerSessionRoutes(app, {
     projectService: deps.projectService,
@@ -261,6 +264,7 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
   const artifactService = createArtifactService(fs);
   const projectService = createProjectService({ fs, git, appSettings });
   const taskService = createTaskService({ fs, git, artifactService, projectService });
+  const taskWorkflowService = createTaskWorkflowService({ fs });
   const sessionService = createSessionService({
     fs,
     runtime,
@@ -269,6 +273,7 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     artifactService,
     projectService,
     taskService,
+    taskWorkflowService,
     apiUrl: options.apiUrl
   });
   const harnessService = createHarnessService({
@@ -308,7 +313,8 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     fs,
     runtime,
     sessionService,
-    taskService
+    taskService,
+    taskWorkflowService
   });
   const taskLaunchService = createTaskLaunchService({
     projectService,
@@ -368,7 +374,9 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     taskService,
     sessionService,
     translationService,
-    roundService
+    roundService,
+    projectService,
+    taskWorkflowService
   });
   const gatewayService = createGatewayService({
     fs,
@@ -448,6 +456,7 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     projectService,
     taskService,
     taskCloseService,
+    taskWorkflowService,
     sessionService,
     artifactService,
     harnessService,

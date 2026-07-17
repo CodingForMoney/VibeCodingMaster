@@ -49,6 +49,7 @@ docs/CODING_STANDARDS.md
 .claude/agents/harness-engineer.md
 .claude/agents/vcm-coder-worker.md
 .claude/skills/vcm-route-message/SKILL.md
+.claude/skills/vcm-task-state/SKILL.md
 .claude/skills/vcm-final-acceptance/SKILL.md
 .claude/skills/vcm-long-running-validation/SKILL.md
 .claude/skills/vcm-harness-bootstrap/SKILL.md
@@ -59,6 +60,7 @@ docs/CODING_STANDARDS.md
 .ai/tools/generate-module-index
 .ai/tools/generate-public-surface
 .ai/tools/request-gate-review
+.ai/tools/update-task-state
 .ai/tools/run-long-check
 .ai/tools/watch-job
 .ai/tools/vcm-bash-guard
@@ -210,6 +212,7 @@ Current runtime paths include:
 <taskRepoRoot>/.ai/vcm/handoffs/final-acceptance.md
 <taskRepoRoot>/.ai/vcm/handoffs/known-issues.md
 <taskRepoRoot>/.ai/vcm/gate-reviews/
+<taskRepoRoot>/.ai/vcm/workflow/state.json
 <taskRepoRoot>/.ai/vcm/jobs/<job-id>/
 <taskRepoRoot>/.ai/vcm/memory/
 <taskRepoRoot>/.ai/vcm/memory-review/
@@ -227,6 +230,12 @@ Runtime recovery on project connect should clear or reconcile stale running
 state, recover tool sessions, recover task rounds, clear impossible
 activity, and remove temporary translation runtime leftovers. Runtime process
 ids are in-memory checks, not durable project data.
+
+Task workflow state is PM-declared recovery context. PM includes it in route
+frontmatter and uses `vcm-task-state` at checkpoints without a role route. VCM
+stores and displays the declaration but does not infer transitions or choose the
+next role. Round, Turn, Session, and Gate Review state remain separate observed
+runtime facts. Workflow-state failures are warnings and never block the task.
 
 ## 6. Task and Worktree Model
 
@@ -411,6 +420,12 @@ VCM role routing.
 
 PM may use a lightweight relay message when forwarding a user's clarification,
 confirmation, rejection, preference, or small constraint to an active role.
+
+PM route frontmatter also declares the current workflow checkpoint through the
+fields defined by `vcm-task-state`. At waiting, Gate, completion, or another
+checkpoint without a role route, PM uses `.ai/tools/update-task-state`. This
+declaration supports recovery and display only; normal flow rules and artifacts
+remain authoritative.
 
 ## 12. Gate Review
 

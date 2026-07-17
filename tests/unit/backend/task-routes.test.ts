@@ -220,6 +220,7 @@ describe("task routes", () => {
   it("returns aggregated task workspace state", async () => {
     const app = Fastify({ logger: false });
     const task = createTask();
+    let declaredWorkflow: Record<string, unknown> | undefined;
 
     registerTaskRoutes(app, {
       taskLaunchService: notUsedTaskLaunchService(),
@@ -298,7 +299,44 @@ describe("task routes", () => {
           };
         },
         stopTask() {}
-      } as never
+      } as never,
+      taskWorkflowService: {
+        async getState() {
+          return {
+            version: 1 as const,
+            taskSlug: "demo-task",
+            revision: 2,
+            declared: {
+              flow: "code-change",
+              step: "architect-planning",
+              evidenceRefs: [],
+              updatedBy: "project-manager" as const,
+              updatedAt: "2026-05-31T00:00:00.000Z"
+            },
+            lastDispatch: null,
+            warnings: [],
+            updatedAt: "2026-05-31T00:00:00.000Z"
+          };
+        },
+        async declare(_input, declaration) {
+          declaredWorkflow = declaration;
+          return {
+            version: 1 as const,
+            taskSlug: "demo-task",
+            revision: 3,
+            declared: {
+              flow: "code-change",
+              step: typeof declaration.step === "string" ? declaration.step : undefined,
+              evidenceRefs: [],
+              updatedBy: "project-manager" as const,
+              updatedAt: "2026-05-31T00:00:00.000Z"
+            },
+            lastDispatch: null,
+            warnings: [],
+            updatedAt: "2026-05-31T00:00:00.000Z"
+          };
+        }
+      }
     });
 
     const response = await app.inject({
@@ -314,7 +352,21 @@ describe("task routes", () => {
       },
       messages: [{ id: "msg-1" }],
       orchestration: { mode: "auto" },
-      roundState: { status: "running" }
+      roundState: { status: "running" },
+      workflowState: {
+        declared: { flow: "code-change", step: "architect-planning" }
+      }
+    });
+
+    const updateResponse = await app.inject({
+      method: "POST",
+      url: "/api/tasks/demo-task/workflow-state",
+      payload: { step: "awaiting-user", status: "awaiting-user" }
+    });
+    expect(updateResponse.statusCode).toBe(200);
+    expect(declaredWorkflow).toEqual({ step: "awaiting-user", status: "awaiting-user" });
+    expect(updateResponse.json()).toMatchObject({
+      declared: { step: "awaiting-user" }
     });
     await app.close();
   });

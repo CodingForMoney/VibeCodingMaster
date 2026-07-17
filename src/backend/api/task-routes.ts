@@ -5,6 +5,7 @@ import type { DispatchableRole } from "../../shared/types/role.js";
 import type { TaskStatusReport, TaskWorkspaceState } from "../../shared/types/api.js";
 import type { VcmSessionRoundState } from "../../shared/types/round.js";
 import type { CreateTaskRequest } from "../../shared/types/task.js";
+import type { TaskWorkflowState, UpdateTaskWorkflowStateRequest } from "../../shared/types/workflow.js";
 import { isOpenFileLimitError, VcmError } from "../errors.js";
 import type { MessageService } from "../services/message-service.js";
 import type { ProjectService } from "../services/project-service.js";
@@ -13,6 +14,7 @@ import { getTaskRuntimeRepoRoot, type TaskService } from "../services/task-servi
 import type { TaskCloseService } from "../services/task-close-service.js";
 import type { TaskLaunchService } from "../services/task-launch-service.js";
 import type { RoundService } from "../services/round-service.js";
+import type { TaskWorkflowService } from "../services/task-workflow-service.js";
 
 export interface TaskRouteDeps {
   projectService: ProjectService;
@@ -22,6 +24,7 @@ export interface TaskRouteDeps {
   messageService: MessageService;
   taskLaunchService: Pick<TaskLaunchService, "startTaskRoleSessions">;
   roundService: Pick<RoundService, "getSessionRoundState">;
+  taskWorkflowService?: Pick<TaskWorkflowService, "getState" | "declare">;
 }
 
 export function registerTaskRoutes(app: FastifyInstance, deps: TaskRouteDeps): void {
@@ -72,7 +75,7 @@ export function registerTaskRoutes(app: FastifyInstance, deps: TaskRouteDeps): v
         taskSlug
       };
 
-      const [taskStatus, messages, orchestration, roundState] = await Promise.all([
+      const [taskStatus, messages, orchestration, roundState, workflowState] = await Promise.all([
         withOpenFileLimitFallback(
           () => deps.statusService.getTaskStatus(project.repoRoot, taskSlug),
           (error) => degradedTaskStatus(project.repoRoot, taskSlug, error)
@@ -97,14 +100,20 @@ export function registerTaskRoutes(app: FastifyInstance, deps: TaskRouteDeps): v
             taskSlug
           }),
           () => degradedRoundState(taskSlug)
-        )
+        ),
+        deps.taskWorkflowService?.getState({
+          taskRepoRoot,
+          stateRoot: config.stateRoot,
+          taskSlug
+        }) ?? Promise.resolve(degradedWorkflowState(taskSlug))
       ]);
 
       return {
         taskStatus,
         messages,
         orchestration,
-        roundState
+        roundState,
+        workflowState
       } satisfies TaskWorkspaceState;
     } catch (error) {
       if (isOpenFileLimitError(error)) {
@@ -116,11 +125,29 @@ export function registerTaskRoutes(app: FastifyInstance, deps: TaskRouteDeps): v
             mode: "auto" as const,
             updatedAt: new Date().toISOString()
           },
-          roundState: degradedRoundState(taskSlug)
+          roundState: degradedRoundState(taskSlug),
+          workflowState: degradedWorkflowState(taskSlug)
         } satisfies TaskWorkspaceState;
       }
       throw error;
     }
+  });
+
+  app.post<{
+    Params: { taskSlug: string };
+    Body: UpdateTaskWorkflowStateRequest;
+  }>("/api/tasks/:taskSlug/workflow-state", async (request) => {
+    const project = await requireCurrentProject(deps.projectService);
+    const config = await deps.projectService.loadConfig(project.repoRoot);
+    const task = await deps.taskService.loadTask(project.repoRoot, request.params.taskSlug);
+    if (!deps.taskWorkflowService) {
+      return degradedWorkflowState(task.taskSlug);
+    }
+    return deps.taskWorkflowService.declare({
+      taskRepoRoot: getTaskRuntimeRepoRoot(task),
+      stateRoot: config.stateRoot,
+      taskSlug: task.taskSlug
+    }, request.body ?? {});
   });
 
   app.post<{ Params: { taskSlug: string } }>("/api/tasks/:taskSlug/one-click-start", async (request) => {
@@ -184,6 +211,18 @@ function degradedRoundState(taskSlug: string): VcmSessionRoundState {
     totalCcActiveMs: 0,
     currentRoundCcActiveMs: 0,
     roles: [],
+    updatedAt: new Date().toISOString()
+  };
+}
+
+function degradedWorkflowState(taskSlug: string): TaskWorkflowState {
+  return {
+    version: 1,
+    taskSlug,
+    revision: 0,
+    declared: null,
+    lastDispatch: null,
+    warnings: ["Task workflow state is temporarily unavailable."],
     updatedAt: new Date().toISOString()
   };
 }

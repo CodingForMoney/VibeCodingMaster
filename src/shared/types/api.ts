@@ -9,6 +9,7 @@ import type { VcmSessionRoundState } from "./round.js";
 import type { RoleSessionRecord } from "./session.js";
 import type { TaskRecord } from "./task.js";
 import type { TranslationState } from "./translation.js";
+import type { TaskWorkflowState } from "./workflow.js";
 
 export interface ApiErrorResponse {
   error: {
@@ -30,6 +31,7 @@ export interface TaskWorkspaceState {
   messages: VcmRoleMessage[];
   orchestration: VcmOrchestrationState;
   roundState: VcmSessionRoundState;
+  workflowState: TaskWorkflowState;
 }
 
 export interface ProjectRuntimeState {

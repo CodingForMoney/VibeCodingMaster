@@ -19,6 +19,7 @@ import { submitTerminalInput } from "../runtime/terminal-submit.js";
 import { renderMessageEnvelope } from "../templates/message-envelope.js";
 import type { TaskService } from "./task-service.js";
 import type { SessionService } from "./session-service.js";
+import type { TaskWorkflowService } from "./task-workflow-service.js";
 
 export interface MessageService {
   listMessages(input: ListMessagesInput): Promise<VcmRoleMessage[]>;
@@ -72,6 +73,7 @@ export interface MessageServiceDeps {
   runtime: TerminalRuntime;
   sessionService: SessionService;
   taskService: Pick<TaskService, "loadTask">;
+  taskWorkflowService?: Pick<TaskWorkflowService, "recordPmDispatch">;
   now?: () => string;
   id?: () => string;
   preDispatchSwitchDelayMs?: number;
@@ -197,6 +199,7 @@ export function createMessageService(deps: MessageServiceDeps): MessageService {
       type: routeFile.type,
       body: routeFile.body,
       artifactRefs: routeFile.artifactRefs,
+      workflow: routeFile.fromRole === PM_ROLE ? routeFile.workflow : undefined,
       bodyPath: routeFile.path,
       routePath: routeFile.path,
       dispatchingAt: timestamp,
@@ -212,6 +215,16 @@ export function createMessageService(deps: MessageServiceDeps): MessageService {
       enterDelayMs: autoDispatchEnterDelayMs
     });
     await deps.sessionService.markRoleActivityRunning(input.repoRoot, input.taskSlug, routeFile.toRole);
+    if (routeFile.fromRole === PM_ROLE) {
+      await deps.taskWorkflowService?.recordPmDispatch({
+        taskRepoRoot: input.taskRepoRoot ?? input.repoRoot,
+        stateRoot: input.stateRoot,
+        taskSlug: input.taskSlug
+      }, routeFile.workflow, {
+        messageId: delivered.id,
+        toRole: delivered.toRole
+      }).catch(() => undefined);
+    }
     scheduleDispatchConfirmation(input, delivered, session.id);
 
     return {
@@ -400,6 +413,7 @@ async function listRouteFiles(fs: FileSystemAdapter, input: RouteContext): Promi
       type: parsed.type,
       body: parsed.body,
       artifactRefs: parsed.artifactRefs,
+      workflow: parsed.workflow,
       exists: true,
       pending: parsed.body.trim().length > 0
     });
@@ -426,14 +440,17 @@ function parseRouteFileContent(content: string, fromRole: VcmRoleName, toRole: V
   type: VcmMessageType;
   body: string;
   artifactRefs: string[];
+  workflow?: VcmRouteFile["workflow"];
 } {
   const { frontmatter, body } = splitFrontmatter(content);
   const type = parseMessageType(frontmatter.type) ?? getDefaultMessageType(fromRole, toRole);
   const artifactRefs = parseArtifactRefs(frontmatter);
+  const workflow = fromRole === PM_ROLE ? parseWorkflowDeclaration(frontmatter) : undefined;
   return {
     type,
     body: body.trim(),
-    artifactRefs
+    artifactRefs,
+    workflow
   };
 }
 
@@ -488,6 +505,27 @@ function parseArtifactRefs(frontmatter: Record<string, string>): string[] {
     .split(",")
     .map((entry) => entry.trim())
     .filter(Boolean);
+}
+
+function parseWorkflowDeclaration(frontmatter: Record<string, string>): VcmRouteFile["workflow"] {
+  const declaration = {
+    flow: frontmatter.workflow_flow,
+    step: frontmatter.workflow_step,
+    branch: frontmatter.workflow_branch,
+    resumePoint: frontmatter.workflow_resume_point,
+    status: frontmatter.workflow_status,
+    evidenceRefs: parseCommaSeparated(frontmatter.workflow_evidence_refs)
+  };
+  return Object.values(declaration).some((value) => Array.isArray(value) ? value.length > 0 : value !== undefined)
+    ? declaration
+    : undefined;
+}
+
+function parseCommaSeparated(value: string | undefined): string[] | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  return value.split(",").map((entry) => entry.trim()).filter(Boolean);
 }
 
 function getDefaultMessageType(fromRole: VcmRoleName, toRole: VcmRoleName): VcmMessageType {
@@ -572,10 +610,18 @@ async function clearRouteFileIfStillMatchesMessage(
   if (
     parsed.body.trim() === message.body.trim() &&
     parsed.type === message.type &&
-    arraysEqual(parsed.artifactRefs, message.artifactRefs)
+    arraysEqual(parsed.artifactRefs, message.artifactRefs) &&
+    workflowDeclarationsEqual(parsed.workflow, message.workflow)
   ) {
     await fs.writeText(absolutePath, "");
   }
+}
+
+function workflowDeclarationsEqual(
+  left: VcmRouteFile["workflow"],
+  right: VcmRoleMessage["workflow"]
+): boolean {
+  return JSON.stringify(left ?? null) === JSON.stringify(right ?? null);
 }
 
 function isCoreRouteRole(role: string): role is VcmRoleName {

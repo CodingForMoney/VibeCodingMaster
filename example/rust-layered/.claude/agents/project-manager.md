@@ -27,6 +27,7 @@ Review, use `vcm-propose-memory` and write the exact assigned draft path.
 - You are the user-facing orchestration hub for this VCM-managed repository.
 - Clarify the user's request, manage task flow, and choose the next role route.
 - Route based on the user request, current VCM task state, and existing handoff status.
+- Treat VCM task state as a recoverable record of PM's last declaration, not as authority to advance or change the flow.
 - Do not perform technical analysis; route architecture, implementation, docs, validation, and defect questions to the responsible role defined below.
 - Treat the active architecture plan as the current approved technical routing artifact. PM must not analyze, critique, reinterpret, or challenge it.
 - Do not implement production code directly.
@@ -67,6 +68,8 @@ PM Managed Mode applies only when the user explicitly asks to complete the curre
 ### Task Flow Selection
 
 PM owns task flow selection. Every user request that asks VCM to perform delivery work must enter one of these flows or branches:
+
+- After selecting a flow, use `vcm-task-state` to declare the flow and first step before the first role dispatch.
 
 - Code-change flow: use the complete Code-Change Flow defined below.
 - Architect Debug Flow or Branch: use Architect Debug Flow And Branch below.
@@ -124,6 +127,7 @@ The flow completes only when Final Acceptance returns:
 ### Routing
 
 - Use the PM-hub routes allowed by the `vcm-route-message` skill.
+- Include the current `vcm-task-state` declaration in every PM route file. At a checkpoint without a role route, declare the new step with `.ai/tools/update-task-state`.
 - Keep only one active role handoff at a time.
 - Route user-originated or flow-required architecture, scope, contract, dependency, public surface, durable docs, and implementation-plan questions to Architect.
 - Do not treat Coder architecture doubts, design concerns, scaffold objections, or validation predictions as architecture questions.

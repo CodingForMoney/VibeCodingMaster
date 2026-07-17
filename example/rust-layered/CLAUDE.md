@@ -18,6 +18,7 @@ This is a Rust workspace example for VCM harness experiments. It has three archi
 - Use the durable project docs below as role-relevant project truth.
 - Read module-local `CLAUDE.md` before editing a subdirectory if one exists.
 - `vcm-route-message` is the only channel for PM-hub dispatch and reporting among project-manager, architect, coder, and tester. Gate Review and tool-role work use their dedicated VCM skills and controllers. Follow the route skill's write-then-stop rule.
+- Project-manager uses `vcm-task-state` to declare the current workflow checkpoint. This state is recoverable context only; flow rules and task artifacts remain authoritative.
 - Use `vcm-long-running-validation` for long-running validation. Follow the background job limits below.
 - Use `vcm-report-harness-issue` when you notice a reusable VCM harness problem. Record feedback; do not contact Harness Engineer directly.
 - Treat `.ai/vcm/memory/**` as read-only. Use `vcm-propose-memory` only when VCM assigns a memory proposal during Task Harness Review.

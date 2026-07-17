@@ -59,6 +59,9 @@ For PM dispatch, use:
 ```md
 ---
 type: task
+workflow_flow: code-change
+workflow_step: coder-implementation
+workflow_status: active
 artifact_refs:
   - .ai/vcm/handoffs/architecture-plan.md
   - docs/plans/example.md
@@ -79,6 +82,8 @@ Next gate:
 Stop conditions:
 ...
 ```
+
+PM route files should declare the workflow checkpoint fields defined by the `vcm-task-state` skill. Non-PM reports must not declare workflow state.
 
 For non-PM reports, use:
 

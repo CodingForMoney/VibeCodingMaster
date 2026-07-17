@@ -4,6 +4,8 @@ import type { RoundService } from "./round-service.js";
 import type { SessionService } from "./session-service.js";
 import { getTaskRuntimeRepoRoot, type TaskService } from "./task-service.js";
 import type { TranslationService } from "./translation-service.js";
+import type { ProjectService } from "./project-service.js";
+import type { TaskWorkflowService } from "./task-workflow-service.js";
 
 export interface TaskCloseService {
   closeTask(repoRoot: string, taskSlug: string): Promise<CleanupTaskResult>;
@@ -18,6 +20,8 @@ export interface TaskCloseServiceDeps {
   >;
   translationService: Pick<TranslationService, "stopTask">;
   roundService: Pick<RoundService, "stopTask">;
+  projectService?: Pick<ProjectService, "loadConfig">;
+  taskWorkflowService?: Pick<TaskWorkflowService, "clearState">;
 }
 
 export function createTaskCloseService(deps: TaskCloseServiceDeps): TaskCloseService {
@@ -37,6 +41,20 @@ export function createTaskCloseService(deps: TaskCloseServiceDeps): TaskCloseSer
         () => deps.roundService.stopTask(taskSlug),
         warnings
       );
+      if (deps.projectService && deps.taskWorkflowService) {
+        await bestEffort(
+          "Unable to clear task workflow state",
+          async () => {
+            const config = await deps.projectService!.loadConfig(repoRoot);
+            await deps.taskWorkflowService!.clearState({
+              taskRepoRoot: getTaskRuntimeRepoRoot(task),
+              stateRoot: config.stateRoot,
+              taskSlug
+            });
+          },
+          warnings
+        );
+      }
 
       try {
         const result = await deps.taskService.cleanupTask(repoRoot, taskSlug);

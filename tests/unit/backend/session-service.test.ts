@@ -118,6 +118,21 @@ describe("createSessionService", () => {
     expect(runtimeInputs[0]?.env?.VCM_SESSION_ID).toBeUndefined();
   });
 
+  it("restores PM-declared workflow context when a project-manager session starts", async () => {
+    const fs = createMemoryFs();
+    const runtimeInputs: CreateTerminalSessionInput[] = [];
+    const writes: string[] = [];
+    const service = createTestSessionService(fs, runtimeInputs, writes, {
+      workflowContext: "[VCM TASK STATE]\nFlow: code-change\nStep: tester-validation\n[/VCM TASK STATE]"
+    });
+
+    await service.startRoleSession("/repo", "demo-task", "project-manager");
+
+    expect(writes[0]).toContain("[VCM TASK STATE]");
+    expect(writes[0]).toContain("Step: tester-validation");
+    expect(writes[1]).toBe("\r");
+  });
+
   it("starts role sessions with the selected Claude model", async () => {
     const fs = createMemoryFs();
     const runtimeInputs: CreateTerminalSessionInput[] = [];
@@ -1251,6 +1266,7 @@ function createTestSessionService(
     exitedCalls?: number[];
     deadProcessCalls?: number[];
     dropBeforeWriteCalls?: number[];
+    workflowContext?: string;
   } = {}
 ) {
   const worktreePath = options.worktreePath ?? TASK_WORKTREE;
@@ -1359,6 +1375,14 @@ function createTestSessionService(
         };
       }
     } as never,
+    taskWorkflowService: options.workflowContext ? {
+      async getState() {
+        return {} as never;
+      },
+      renderPmResumeContext() {
+        return options.workflowContext;
+      }
+    } : undefined,
     apiUrl: "http://127.0.0.1:4173",
     sandboxMode: options.sandboxMode,
     isProcessAlive: (pid) => !deadProcessPids.has(pid),
