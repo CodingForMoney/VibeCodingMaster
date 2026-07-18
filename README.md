@@ -181,6 +181,12 @@ By default:
 Roles for the same task share the same task worktree. VCM does not create one
 worktree per role.
 
+Project Manager may record an advisory task checkpoint under
+`.ai/vcm/workflow/state.json`. VCM restores and displays this context after a
+restart, but it does not infer transitions or choose the next role. Current
+artifacts, Gate Review state, Round/Turn state, and the role rules remain
+authoritative.
+
 Typical flow:
 
 ```text
@@ -412,9 +418,15 @@ Post-task processing is ordered by the backend:
 ```text
 Final Acceptance
   -> Review Task Harness
-  -> Memory proposals and Harness Engineer review, when Auto Memory is enabled
+  -> Workflow-role memory proposals, when Auto Memory is enabled
+  -> Harness Engineer memory review, when Auto Memory is enabled
   -> Task Harness Retrospective
 ```
+
+Memory proposal prompts sent to Project Manager, Architect, Coder, Tester, and
+an enabled Gate Reviewer use their normal task sessions and participate in
+Round/Turn tracking. Harness Engineer review and retrospective work remain tool
+role activity and do not participate in Round completion.
 
 When Auto Memory is disabled, Review Task Harness does not collect proposals or
 ask Harness Engineer to update memory. When enabled, both automatic and manual
@@ -429,6 +441,11 @@ can continue.
 It stops every running session owned by the task, including Translator and
 Harness Engineer, then removes task-owned worktree/branch state. Commit or
 preserve anything important before closing.
+
+Uncommitted changes, unmerged commits, and cleanup failures are reported as
+warnings; they do not block logical task closure. VCM may discard the task
+worktree and task branch even when they contain commits that are not present on
+the connected repository branch.
 
 ## Troubleshooting
 
@@ -517,7 +534,11 @@ npm start
 ## Documentation
 
 - `docs/ARCHITECTURE.md`: repository architecture
+- `docs/CODING_STANDARDS.md`: shared implementation and test standards
+- `docs/GLOSSARY.md`: allowed durable abbreviations
 - `docs/TESTING.md`: validation strategy
+- `docs/known-issues.md`: current unresolved durable issues
+- `src/backend/gateway/ARCHITECTURE.md`: mobile gateway sub-area architecture
 - `docs/vcm-cc-best-practices.md`: current VCM Claude Code harness practice
 - `docs/v0.5-custom-workflow-plan.md`: deferred custom workflow proposal
 - `docs/cc-best-practices.md`: archived generic Claude Code harness notes

@@ -130,7 +130,7 @@ security risk, not delivery priority.
 
 - **Status**: Open (maintainability hazard, not a defect).
 - **Category**: Product / maintainability.
-- **Affected modules / surfaces**: `src/backend/services/harness-service.ts` (~2290 lines), `translation-worker-service.ts` (~2240), `translation-service.ts` (~2120), `session-service.ts` (~1990), `gate-review-service.ts` (~1400), `auto-memory-service.ts` (~980), and `claude-hook-service.ts` (~950).
+- **Affected modules / surfaces**: `src/backend/services/harness-service.ts` (~2395 lines), `translation-worker-service.ts` (~2245), `translation-service.ts` (~2118), `session-service.ts` (~1933), `gate-review-service.ts` (~1738), `auto-memory-service.ts` (~1076), and `claude-hook-service.ts` (~1002).
 - **Current gap**: Several service files greatly exceed comfortable single-file cohesion and bundle orchestration, retry/error handling, and side-effect coordination together. This makes the intended `api -> services -> (runtime | adapters | gateway | templates)` boundary harder to reason about and raises regression risk on edits.
 - **Impact**: Higher change cost and review/regression risk in the highest-traffic backend logic; harder to localize behavior and test seams.
 - **Mitigation / workaround**: Existing unit tests cover many of these services; keep edits narrowly scoped.

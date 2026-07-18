@@ -1,6 +1,6 @@
 # VCM Claude Code Best Practices
 
-Last updated: 2026-07-17
+Last updated: 2026-07-18
 
 This is the current VCM-specific Claude Code / AI coding best-practices guide.
 It describes how VCM's harness, roles, runtime state, and task workflow should
@@ -216,7 +216,7 @@ Current runtime paths include:
 <taskRepoRoot>/.ai/vcm/jobs/<job-id>/
 <taskRepoRoot>/.ai/vcm/memory-review/
 <baseRepoRoot>/.ai/vcm/translations/
-<baseRepoRoot>/.ai/vcm/harness-engineer/
+<baseRepoRoot>/.ai/vcm/harness-engineer/  # retained legacy project-session state
 <baseRepoRoot>/.ai/vcm/bootstrap/
 <baseRepoRoot>/.ai/vcm/harness-feedback/
 ```
@@ -591,7 +591,11 @@ role-specific memory. Shared memory lives in the root `CLAUDE.md`
 `.claude/agents/*.md` block. VCM replaces only block contents and creates a
 dedicated commit in the active worktree. Drafts, snapshots, and review history
 remain under `.ai/vcm/memory-review/`. Active memory is read-only to role turns.
-These auxiliary turns do not reopen the completed Round.
+Proposal prompts sent to workflow roles use their normal task sessions and
+participate in Round/Turn tracking. Their hooks start or continue the
+post-acceptance Round, which settles to stopped after the last workflow-role
+proposal. Harness Engineer review remains tool-role activity and is excluded
+from that Round.
 
 Task Harness Retrospective runs after the optional memory phase. The backend
 uses the current accepted `final-acceptance.md` hash as the ordering key. When
@@ -722,6 +726,8 @@ Round state is backend-owned. Stop starts a 10 second settle window; a new
 `UserPromptSubmit` inside the window continues the same Round. If no new prompt
 arrives, the Round stops. The blocking flow-pause modal is independent of the
 sound preference; when enabled, its sound repeats until the modal is dismissed.
+Round tracking includes the five workflow roles only; Translator and Harness
+Engineer sessions do not affect Round completion.
 
 Session IDs are persisted only after the first real `UserPromptSubmit`.
 Restart clears the stored Claude session id until the next accepted prompt.

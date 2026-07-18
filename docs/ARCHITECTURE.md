@@ -157,9 +157,12 @@ Engineer writes the reviewed memory set, and the service replaces only the
 corresponding active-worktree memory block contents. It then creates a dedicated
 Git commit containing the changed host files. Dirty memory host files block the
 apply so unrelated edits cannot enter the memory commit. Active memory blocks
-are read-only to role turns. Auto Memory hook turns update role session activity
-but do not mutate the completed task round. The frontend only displays state and
-invokes memory file, retry, or revert APIs.
+are read-only to role turns. Proposal prompts run through the normal workflow-role
+sessions, so their `UserPromptSubmit`, `Stop`, and `StopFailure` hooks participate
+in Round/Turn tracking. Sequential proposals continue the post-acceptance Round,
+which settles to stopped after the last workflow-role proposal. Harness Engineer
+review is tool-role activity and is excluded from Round tracking. The frontend
+only displays state and invokes memory file, retry, or revert APIs.
 
 Auto Memory completion is bound to the SHA-256 hash of the current accepted
 `final-acceptance.md`. If that artifact changes, the next Review Task Harness
@@ -181,6 +184,11 @@ auto-dispatch Harness Engineer or create an approval/apply state machine.
 session activity, while the PTY runtime owns Claude process liveness and terminal
 output timestamps. `runtime-coordinator-service` runs backend turn reconciliation
 every 10 seconds, independently of frontend polling.
+
+Round tracking includes Project Manager, Architect, Coder, Tester, and optional
+Gate Reviewer sessions. Translator and Harness Engineer are task-scoped tool
+roles and are excluded. A tool workflow that prompts a workflow role still
+participates in Round tracking through that workflow role's hooks.
 
 `turn-reconciler-service` closes gaps left by a missing Stop hook. A transcript
 `end_turn` is reconciled through the normal Stop path; a missing or exited terminal

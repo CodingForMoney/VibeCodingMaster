@@ -60,8 +60,10 @@ Notes:
   downstream repos.
 - Auto Memory or Task Harness Retrospective sequencing change: run
   `auto-memory-service.test.ts`, `runtime-coordinator-service.test.ts`, and
-  `harness-routes.test.ts`, then the full unit suite. These tests cover current
-  Final Acceptance hashing plus automatic and manual readiness enforcement.
+  `harness-routes.test.ts`, then `npm run test:e2e:backend`. These tests cover
+  current Final Acceptance hashing, automatic and manual readiness enforcement,
+  workflow-role proposal Round tracking, and Harness Engineer exclusion from the
+  Round.
 - `.ai/tools/**` or `scripts/harness-tools/**` change: run
   `tests/unit/backend/harness-tools.test.ts` and `vcm-bash-guard.test.ts`.
 - Durable-doc template or audit change: run
@@ -137,7 +139,7 @@ tests/
 | INT-API-001 | Project + task lifecycle over HTTP | Fastify app via `project-routes` / `task-routes` | Routes + services persist task state correctly | Create project, create task, read back task, status transitions | L2, on backend api/service change | No dedicated integration spec; exercised by backend E2E journeys |
 | INT-API-002 | Message bus round trip | `message-routes` / `message-service` | Route-file dispatch and history persistence | Posted message is persisted and retrievable in order | L2, on messaging change | No dedicated integration spec; exercised by backend E2E routing journeys |
 | INT-RT-001 | Session start/resume lifecycle | `runtime-coordinator-service` + `session-registry` | PTY session can start, persist id, and resume | Session id persisted; resume reuses id; stop cleans registry | L2, on runtime change | Covered with the mock Claude runtime; live PTY coverage remains absent |
-| INT-RT-002 | Post-task memory and harness review order | Final Acceptance + Review Task Harness + `runtime-coordinator-service` + Harness route | A normally stopped complete flow automatically starts Harness review, after optional Auto Memory | With automatic review enabled, accepted Final Acceptance and a stopped Round dispatch Task Harness Retrospective with an `auto` trigger; with Auto Memory on, memory completes first; pending harness feedback remains an inbox and is not auto-dispatched | L2, on Auto Memory or retrospective change | Covered by backend E2E with mock role sessions |
+| INT-RT-002 | Post-task memory and harness review order | Final Acceptance + Review Task Harness + `runtime-coordinator-service` + Harness route | A normally stopped complete flow runs optional Auto Memory before Task Harness Retrospective | With Auto Memory on, workflow-role proposal hooks start and stop a normal Round, Harness Engineer remains outside that Round, memory completes first, and pending harness feedback remains an inbox; with Auto Memory off, retrospective starts directly | L2, on Auto Memory or retrospective change | Covered by backend E2E with mock role sessions |
 
 ### Backend E2E (implemented: `tests/e2e/backend/`)
 
@@ -155,7 +157,11 @@ services with controlled runtime doubles:
 - Role-scoped translation feeds and Gateway input/output translation without
   duplicate translation work.
 - Auto Memory review before Task Harness Retrospective, plus direct
-  retrospective execution when Auto Memory is disabled.
+  retrospective execution when Auto Memory is disabled. The Auto Memory journey
+  also proves that workflow-role proposals produce a running then stopped Round
+  while Harness Engineer remains excluded.
+- PM-declared task workflow state persistence, workspace aggregation, and PM
+  session restoration.
 
 Run all backend journeys with `npm run test:e2e:backend`.
 
