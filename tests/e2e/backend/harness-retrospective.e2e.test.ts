@@ -6,6 +6,7 @@ import { createMockClaudeE2eApp } from "./helpers/e2e-app.js";
 import { createE2eRepo, git } from "./helpers/e2e-repo.js";
 import {
   connectAndCreateTask,
+  getWorkspaceState,
   injectOk,
   startHarnessEngineer,
   startRole,
@@ -52,6 +53,8 @@ describe("backend E2E task harness retrospective with mock Claude Code", () => {
     cleanups.push(() => repo.cleanup());
     const task = await connectAndCreateTask(env.app, repo, "mock-memory-retrospective");
     await updatePreferences(env.app, { autoMemoryEnabled: true });
+    const pmMemoryStarted = createDeferred();
+    const releasePmMemory = createDeferred();
 
     env.mockRuntime.onPrompt("project-manager", "Complete task for memory review", async (ctx) => {
       await ctx.userPromptSubmit();
@@ -62,7 +65,13 @@ describe("backend E2E task harness retrospective with mock Claude Code", () => {
       await ctx.appendTranscriptText("Task accepted for memory review.");
       await ctx.stop();
     });
-    for (const role of ["project-manager", "architect", "coder", "tester"] as const) {
+    env.mockRuntime.onPrompt("project-manager", "[VCM Task Harness Review: Memory Proposal]", async (ctx) => {
+      await ctx.userPromptSubmit();
+      pmMemoryStarted.resolve();
+      await releasePmMemory.promise;
+      await writeNoChangeMemoryDraftResult(ctx);
+    });
+    for (const role of ["architect", "coder", "tester"] as const) {
       env.mockRuntime.onPrompt(role, "[VCM Task Harness Review: Memory Proposal]", writeNoChangeMemoryDraft);
     }
     env.mockRuntime.onPrompt("harness-engineer", "[VCM Task Harness Review: Memory Review]", async (ctx) => {
@@ -87,6 +96,16 @@ describe("backend E2E task harness retrospective with mock Claude Code", () => {
     await env.mockRuntime.waitForIdle();
 
     await startTaskHarnessRetrospective(env.app, task.taskSlug);
+    await pmMemoryStarted.promise;
+
+    const activeMemoryRound = await getWorkspaceState(env.app, task.taskSlug);
+    expect(activeMemoryRound.roundState).toMatchObject({
+      status: "running",
+      activeRole: "project-manager",
+      activeTurnStartedAt: expect.any(String)
+    });
+
+    releasePmMemory.resolve();
     await env.mockRuntime.waitForIdle();
 
     const memoryBeforeRetrospective = await injectOk(env.app, {
@@ -105,6 +124,12 @@ describe("backend E2E task harness retrospective with mock Claude Code", () => {
 
     await env.deps.runtimeCoordinator.reconcileProject(repo.repoRoot, { taskSlug: task.taskSlug });
     await env.mockRuntime.waitForIdle();
+
+    const completedMemoryRound = await getWorkspaceState(env.app, task.taskSlug);
+    expect(completedMemoryRound.roundState.status).toBe("stopped");
+    expect(completedMemoryRound.roundState.activeTurnStartedAt).toBeUndefined();
+    expect(completedMemoryRound.roundState.completedTurnCount).toBeGreaterThan(0);
+    expect(completedMemoryRound.roundState.activeRole).not.toBe("harness-engineer");
 
     const harnessWrites = env.mockRuntime.getWrites(harnessSession.id).join("\n");
     expect(harnessWrites.indexOf("[VCM Task Harness Review: Memory Review]")).toBeGreaterThanOrEqual(0);
@@ -172,9 +197,21 @@ describe("backend E2E task harness retrospective with mock Claude Code", () => {
 
 async function writeNoChangeMemoryDraft(ctx: MockClaudePromptContext): Promise<void> {
   await ctx.userPromptSubmit();
+  await writeNoChangeMemoryDraftResult(ctx);
+}
+
+async function writeNoChangeMemoryDraftResult(ctx: MockClaudePromptContext): Promise<void> {
   const draftPath = matchPromptPath(ctx.prompt, "Write the draft to");
   await ctx.writeAbsoluteFile(draftPath, "# Memory Draft\n\nDecision: no-change\n");
   await ctx.stop();
+}
+
+function createDeferred(): { promise: Promise<void>; resolve: () => void } {
+  let resolve!: () => void;
+  const promise = new Promise<void>((complete) => {
+    resolve = complete;
+  });
+  return { promise, resolve };
 }
 
 async function writeHarnessRetrospective(ctx: MockClaudePromptContext): Promise<void> {

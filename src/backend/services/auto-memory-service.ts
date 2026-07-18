@@ -60,6 +60,12 @@ interface StoredMemoryReviewState {
   error?: string;
 }
 
+type StoredMemoryReviewStateOnDisk = Omit<StoredMemoryReviewState, "drafts"> & {
+  drafts: Array<Omit<MemoryDraftState, "status"> & {
+    status: MemoryDraftState["status"] | "running";
+  }>;
+};
+
 interface StoredMemoryReviewRun {
   version: 1;
   runId: string;
@@ -369,7 +375,7 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
   async function isRoleMemoryTurn(taskRepoRoot: string, role: RoleName): Promise<boolean> {
     const state = await loadActiveState(taskRepoRoot);
     const draft = state?.status === "collecting" ? currentDraft(state) : undefined;
-    return draft?.role === role && draft.status === "running";
+    return draft?.role === role && draft.status === "dispatched";
   }
 
   async function handleRoleHook(input: AutoMemoryRoleHookInput): Promise<boolean> {
@@ -386,11 +392,6 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
       return false;
     }
     if (input.eventName === "UserPromptSubmit" || input.eventName === "PostCompact") {
-      if (draft.status !== "running") {
-        draft.status = "running";
-        state.updatedAt = now();
-        await persistActiveState(input.taskRepoRoot, state);
-      }
       return true;
     }
     if (input.eventName === "StopFailure") {
@@ -584,7 +585,7 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
       if (session.activityStatus === "running") {
         return;
       }
-      draft.status = "running";
+      draft.status = "dispatched";
       state.updatedAt = now();
       await persistActiveState(taskRepoRoot, state);
       await submitTerminalInput(deps.runtime, session.id, buildRoleDraftPrompt(taskRepoRoot, state, draft));
@@ -800,8 +801,22 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
     if (!(await deps.fs.pathExists(statePath))) {
       return undefined;
     }
-    const state = await deps.fs.readJson<StoredMemoryReviewState>(statePath);
-    return state?.version === 1 && state.runId ? state : undefined;
+    const stored = await deps.fs.readJson<StoredMemoryReviewStateOnDisk>(statePath);
+    if (stored?.version !== 1 || !stored.runId) {
+      return undefined;
+    }
+    const migrated = stored.drafts.some((draft) => draft.status === "running");
+    const state: StoredMemoryReviewState = {
+      ...stored,
+      drafts: stored.drafts.map((draft) => ({
+        ...draft,
+        status: draft.status === "running" ? "dispatched" : draft.status
+      }))
+    };
+    if (migrated) {
+      await persistActiveState(taskRepoRoot, state);
+    }
+    return state;
   }
 
   async function persistActiveState(taskRepoRoot: string, state: StoredMemoryReviewState): Promise<void> {

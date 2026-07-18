@@ -43,7 +43,7 @@ export interface MemoryFileContent extends MemoryFileSummary {
 export interface MemoryDraftState {
   role: Exclude<VcmMemoryRoleName, "harness-engineer">;
   path: string;
-  status: "pending" | "running" | "completed";
+  status: "pending" | "dispatched" | "completed";
 }
 
 export interface ActiveMemoryReview {

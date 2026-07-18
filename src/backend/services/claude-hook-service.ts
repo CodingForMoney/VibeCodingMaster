@@ -320,12 +320,12 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
     }
 
     const context = await getHookContext(input);
-    if (await isDuplicateCompletedStop(context, input)) {
-      return completedHookResult(input, eventName);
-    }
     const memoryResult = await processAutoMemoryRoleHook(input, context, eventName);
     if (memoryResult) {
       return memoryResult;
+    }
+    if (await isDuplicateCompletedStop(context, input)) {
+      return completedHookResult(input, eventName);
     }
     await clearStopFailureRecoveryState(context, input.role);
 
@@ -594,6 +594,17 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
       transcriptPath: stringOrUndefined(input.event.transcript_path),
       cwd: stringOrUndefined(input.event.cwd) ?? stringOrUndefined(input.event.new_cwd)
     });
+    const boundToTask = await isHookSessionBoundToTask(context, input.role);
+    if (boundToTask && eventName !== "PostCompact") {
+      await deps.roundService.recordClaudeHookEvent({
+        repoRoot: context.project.repoRoot,
+        stateRepoRoot: context.taskRepoRoot,
+        stateRoot: context.config.stateRoot,
+        taskSlug: context.taskSlug,
+        role: input.role,
+        eventName
+      });
+    }
     await deps.autoMemoryService.handleRoleHook({
       baseRepoRoot: context.project.repoRoot,
       taskRepoRoot: context.taskRepoRoot,

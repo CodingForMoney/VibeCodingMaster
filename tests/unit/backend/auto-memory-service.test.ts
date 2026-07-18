@@ -95,6 +95,20 @@ describe("auto-memory-service", () => {
     expect(state.status).toBe("collecting");
     expect(state.active?.currentRole).toBe("project-manager");
     expect(state.active?.trigger).toBe("manual");
+    expect(state.active?.drafts[0]).toMatchObject({
+      role: "project-manager",
+      status: "dispatched"
+    });
+
+    const activeStatePath = path.join(context.taskRepoRoot, ".ai/vcm/memory-review/state.json");
+    const legacyState = JSON.parse(await readFile(activeStatePath, "utf8")) as {
+      drafts: Array<{ status: string }>;
+    };
+    legacyState.drafts[0].status = "running";
+    await writeFile(activeStatePath, `${JSON.stringify(legacyState, null, 2)}\n`, "utf8");
+    state = await context.service.getState(context.baseRepoRoot, context.taskRepoRoot);
+    expect(state.active?.drafts[0].status).toBe("dispatched");
+    await expect(readFile(activeStatePath, "utf8")).resolves.toContain('"status": "dispatched"');
 
     for (const role of ["project-manager", "architect", "coder", "tester"] as const) {
       state = await context.service.getState(context.baseRepoRoot, context.taskRepoRoot);
