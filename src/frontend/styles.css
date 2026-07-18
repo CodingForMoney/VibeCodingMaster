@@ -2415,7 +2415,11 @@ h2 {
 }
 
 .harness-studio-doc-list li {
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+}
+
+.harness-studio-doc-list button {
+  padding: 4px 8px;
 }
 
 .harness-studio-file-list li.selected {

@@ -328,6 +328,38 @@ describe("harness routes", () => {
     await app.close();
   });
 
+  it("sends a selected pending feedback to the active task Harness Engineer", async () => {
+    const app = Fastify({ logger: false });
+    let received: { repoRoot: string; taskSlug: string; feedbackPath: string } | undefined;
+    registerHarnessRoutes(app, {
+      projectService: createProjectServiceStub(),
+      taskService: createTaskServiceStub(),
+      harnessFeedbackService: {
+        async sendPendingFeedback(repoRoot, input) {
+          received = { repoRoot, ...input };
+          return { id: "harness-session" } as never;
+        }
+      }
+    } as never);
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/projects/harness/feedback/send",
+      payload: {
+        taskSlug: "demo-task",
+        feedbackPath: ".ai/vcm/harness-feedback/pending/example.md"
+      }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(received).toEqual({
+      repoRoot: "/workspace",
+      taskSlug: "demo-task",
+      feedbackPath: ".ai/vcm/harness-feedback/pending/example.md"
+    });
+    await app.close();
+  });
+
   it("starts a manual task retrospective without memory work when Auto Memory is disabled", async () => {
     const app = Fastify({ logger: false });
     let retrospectiveStarted = false;

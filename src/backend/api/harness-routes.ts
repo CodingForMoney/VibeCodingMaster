@@ -3,6 +3,7 @@ import type {
   HarnessApplyRequest,
   HarnessBootstrapStatusReport,
   MergeRepositoryDiffToCurrentBranchRequest,
+  SendHarnessFeedbackRequest,
   HarnessStatusReport,
   RestartHarnessBootstrapRequest,
   StartHarnessBootstrapRequest,
@@ -198,6 +199,14 @@ export function registerHarnessRoutes(app: FastifyInstance, deps: HarnessRouteDe
     const project = await requireCurrentProject(deps.projectService);
     const taskSlug = await normalizeOptionalTaskSlug(deps, project.repoRoot, request.query.taskSlug);
     return deps.harnessFeedbackService.getState(project.repoRoot, taskSlug);
+  });
+
+  app.post<{ Body: SendHarnessFeedbackRequest }>("/api/projects/harness/feedback/send", async (request) => {
+    const { project, task } = await requireHarnessTaskContext(deps, request.body?.taskSlug);
+    return deps.harnessFeedbackService.sendPendingFeedback(project.repoRoot, {
+      taskSlug: task.taskSlug,
+      feedbackPath: request.body?.feedbackPath ?? ""
+    });
   });
 
   app.post<{ Body: StartTaskHarnessRetrospectiveRequest }>("/api/projects/harness/task-retrospective", async (request) => {

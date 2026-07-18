@@ -1336,6 +1336,19 @@ export function App() {
             syncHarnessEngineerLaunchOptions(session);
           }, "Notify Harness Engineer to reload harness");
         }}
+        onSendFeedback={(feedbackPath) => {
+          void withBusy(async () => {
+            if (!activeTask) {
+              throw new Error("Create or select a task before sending Harness Feedback.");
+            }
+            const session = await apiClient.sendHarnessFeedback({
+              taskSlug: activeTask.taskSlug,
+              feedbackPath
+            });
+            setHarnessEngineerSession(session);
+            syncHarnessEngineerLaunchOptions(session);
+          }, "Send Harness Feedback to Harness Engineer");
+        }}
         onOpenRepositoryDiff={() => setRepositoryDiffOpen(true)}
         onReviewTaskHarness={() => {
           void withBusy(async () => {

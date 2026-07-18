@@ -56,6 +56,56 @@ describe("harness-feedback-service", () => {
     expect(writes).toEqual([]);
   });
 
+  it("sends one selected pending feedback to Harness Engineer without removing it", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-harness-feedback-send-"));
+    const feedbackPath = ".ai/vcm/harness-feedback/pending/2026-01-01-coder-routing.md";
+    await mkdir(path.join(tmpRepo, ".ai/vcm/harness-feedback/pending"), { recursive: true });
+    await writeFile(
+      path.join(tmpRepo, feedbackPath),
+      [
+        "# Route message skill is unclear",
+        "",
+        "Reporter role: coder",
+        "Task slug: demo-task"
+      ].join("\n"),
+      "utf8"
+    );
+
+    const writes: string[] = [];
+    const service = createHarnessFeedbackService({
+      fs: createNodeFileSystemAdapter(),
+      runtime: createRuntime(writes),
+      sessionService: createSessionService(),
+      now: createClock()
+    });
+
+    const session = await service.sendPendingFeedback(tmpRepo, {
+      taskSlug: "demo-task",
+      feedbackPath
+    });
+
+    expect(session.role).toBe("harness-engineer");
+    expect(writes.join("\n")).toContain("[VCM Harness Feedback]");
+    expect(writes.join("\n")).toContain(path.join(tmpRepo, feedbackPath));
+    expect(writes.join("\n")).toContain("Report your findings and proposed changes to the user.");
+    expect((await service.getState(tmpRepo)).queuedCount).toBe(1);
+  });
+
+  it("rejects a feedback path that is not in the pending Inbox", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-harness-feedback-invalid-"));
+    const service = createHarnessFeedbackService({
+      fs: createNodeFileSystemAdapter(),
+      runtime: createRuntime([]),
+      sessionService: createSessionService(),
+      now: createClock()
+    });
+
+    await expect(service.sendPendingFeedback(tmpRepo, {
+      taskSlug: "demo-task",
+      feedbackPath: ".ai/vcm/harness-feedback/pending/missing.md"
+    })).rejects.toThrow("no longer pending");
+  });
+
   it("starts a task harness retrospective only after final acceptance is complete", async () => {
     tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-harness-retrospective-"));
     const taskRepoRoot = path.join(tmpRepo, ".claude/worktrees/demo-task");

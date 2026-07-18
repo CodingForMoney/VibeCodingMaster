@@ -15,8 +15,14 @@ import type { SessionService } from "./session-service.js";
 
 export interface HarnessFeedbackService {
   getState(repoRoot: string, activeTaskSlug?: string): Promise<HarnessFeedbackStateReport>;
+  sendPendingFeedback(repoRoot: string, input: SendPendingFeedbackInput): Promise<RoleSessionRecord>;
   startTaskRetrospective(repoRoot: string, input: StartTaskRetrospectiveInput): Promise<HarnessFeedbackStateReport>;
   assertHarnessEngineerAvailable(repoRoot: string): Promise<void>;
+}
+
+export interface SendPendingFeedbackInput {
+  taskSlug: string;
+  feedbackPath: string;
 }
 
 export interface StartTaskRetrospectiveInput {
@@ -54,6 +60,25 @@ export function createHarnessFeedbackService(deps: HarnessFeedbackServiceDeps): 
       pending,
       warnings: []
     };
+  }
+
+  async function sendPendingFeedback(repoRoot: string, input: SendPendingFeedbackInput): Promise<RoleSessionRecord> {
+    await cleanupLegacyState(repoRoot);
+    const feedbackPath = input.feedbackPath.trim();
+    const pending = await listPendingFeedback(repoRoot);
+    const feedback = pending.find((item) => item.path === feedbackPath);
+    if (!feedback) {
+      throw new VcmError({
+        code: "HARNESS_FEEDBACK_NOT_PENDING",
+        message: "The selected Harness Feedback is no longer pending.",
+        statusCode: 404,
+        hint: "Refresh Harness Studio and select a feedback item that is still listed in the Inbox."
+      });
+    }
+
+    const session = await ensureIdleHarnessEngineer(repoRoot, input.taskSlug);
+    await submitTerminalInput(deps.runtime, session.id, buildPendingFeedbackPrompt(repoRoot, feedback.path));
+    return session;
   }
 
   async function startTaskRetrospective(repoRoot: string, input: StartTaskRetrospectiveInput): Promise<HarnessFeedbackStateReport> {
@@ -202,6 +227,17 @@ export function createHarnessFeedbackService(deps: HarnessFeedbackServiceDeps): 
     ].join("\n");
   }
 
+  function buildPendingFeedbackPrompt(repoRoot: string, feedbackPath: string): string {
+    return [
+      "[VCM Harness Feedback]",
+      "",
+      "Review this feedback:",
+      resolveRepoPath(repoRoot, feedbackPath),
+      "",
+      "Verify the issue against the current harness and project evidence. Report your findings and proposed changes to the user."
+    ].join("\n");
+  }
+
   async function loadTaskRetrospectiveMarker(repoRoot: string, taskSlug: string): Promise<unknown | undefined> {
     const markerPath = resolveRepoPath(repoRoot, getTaskRetrospectiveMarkerPath(taskSlug));
     if (!(await deps.fs.pathExists(markerPath))) {
@@ -237,6 +273,7 @@ export function createHarnessFeedbackService(deps: HarnessFeedbackServiceDeps): 
 
   return {
     getState,
+    sendPendingFeedback,
     startTaskRetrospective,
     assertHarnessEngineerAvailable
   };

@@ -23,6 +23,7 @@ import type {
   RepositoryFileDiffReport,
   RestartHarnessBootstrapRequest,
   RunHarnessBootstrapResult,
+  SendHarnessFeedbackRequest,
   HarnessStatusReport,
   StartHarnessBootstrapRequest,
   StartHarnessBootstrapResult,
@@ -239,6 +240,12 @@ export const apiClient = {
     }
     const query = params.toString();
     return request<HarnessFeedbackStateReport>(`/api/projects/harness/feedback${query ? `?${query}` : ""}`);
+  },
+  sendHarnessFeedback(input: SendHarnessFeedbackRequest) {
+    return request<RoleSessionRecord>("/api/projects/harness/feedback/send", {
+      method: "POST",
+      body: JSON.stringify(input)
+    });
   },
   startTaskHarnessRetrospective(input: StartTaskHarnessRetrospectiveRequest) {
     return request<HarnessFeedbackStateReport>("/api/projects/harness/task-retrospective", {

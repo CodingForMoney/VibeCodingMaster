@@ -578,9 +578,9 @@ VCM runs bootstrap through task-scoped `harness-engineer`:
 - mark bootstrap complete from the Harness Engineer `Stop` hook
 
 Reusable harness issues are reported through `vcm-report-harness-issue`.
-These reports are stored as pending feedback for Harness Studio and task
-retrospectives. They do not automatically dispatch Harness Engineer or create a
-separate approval workflow.
+These reports are stored as pending feedback in Harness Studio. The user may
+send one report to the active task's Harness Engineer for review. Reports do not
+automatically dispatch Harness Engineer or create a separate approval workflow.
 
 Auto Memory controls the entire automated memory workflow. When enabled, Review
 Task Harness after a normal stopped Round with valid Final Acceptance asks

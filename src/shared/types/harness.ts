@@ -289,3 +289,8 @@ export interface StartTaskHarnessRetrospectiveRequest {
   taskSlug?: string;
   trigger?: TaskHarnessRetrospectiveTrigger;
 }
+
+export interface SendHarnessFeedbackRequest {
+  taskSlug?: string;
+  feedbackPath?: string;
+}

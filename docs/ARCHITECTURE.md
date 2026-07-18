@@ -175,8 +175,9 @@ includes memory proposals, applied memory diffs, and current memory in its task
 evidence.
 
 Reusable harness feedback from `vcm-report-harness-issue` is a passive inbox.
-It is listed for Harness Studio and retrospective evidence, but it does not
-auto-dispatch Harness Engineer or create an approval/apply state machine.
+Harness Studio lets the user send one pending report to the active task's
+Harness Engineer for review. Reports are never auto-dispatched, removed after
+sending, or placed in a separate approval/apply state machine.
 
 ## Turn Runtime Ownership
 

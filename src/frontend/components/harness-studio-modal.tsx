@@ -36,6 +36,7 @@ export interface HarnessStudioModalProps {
   onEngineerStart(): void;
   onEngineerStop(): void;
   onEngineerNotifyHarnessUpdated(): void;
+  onSendFeedback(feedbackPath: string): void;
   onOpenRepositoryDiff(): void;
   onReviewTaskHarness(): void;
   onRefresh(): void;
@@ -72,6 +73,7 @@ export function HarnessStudioModal({
   onEngineerStart,
   onEngineerStop,
   onEngineerNotifyHarnessUpdated,
+  onSendFeedback,
   onOpenRepositoryDiff,
   onReviewTaskHarness,
   onRefresh,
@@ -359,7 +361,7 @@ export function HarnessStudioModal({
                     onRevert={(run) => void revertMemoryRun(run)}
                     onRetry={() => void retryMemoryReview()}
                   />
-                  <HarnessFeedbackInbox state={feedbackState} />
+                  <HarnessFeedbackInbox state={feedbackState} busy={busy} taskSlug={taskSlug} onSend={onSendFeedback} />
                   <HarnessCollapsibleSection title="Overview">
                     <section className="harness-studio-overview">
                       <div className="harness-studio-metrics">
@@ -447,7 +449,17 @@ function HarnessMetric({ label, value }: { label: string; value: string }) {
   );
 }
 
-function HarnessFeedbackInbox({ state }: { state: HarnessFeedbackStateReport | null }) {
+function HarnessFeedbackInbox({
+  state,
+  busy,
+  taskSlug,
+  onSend
+}: {
+  state: HarnessFeedbackStateReport | null;
+  busy?: boolean;
+  taskSlug: string | null;
+  onSend(feedbackPath: string): void;
+}) {
   return (
     <HarnessCollapsibleSection title={`Harness Feedback Inbox (${state?.queuedCount ?? 0})`}>
       <ul className="harness-studio-doc-list">
@@ -455,6 +467,14 @@ function HarnessFeedbackInbox({ state }: { state: HarnessFeedbackStateReport | n
           <li key={item.path}>
             <span title={item.path}>{item.title}</span>
             <code>{item.reporterRole ?? "unknown"}</code>
+            <button
+              type="button"
+              title="Send this feedback to Harness Engineer"
+              disabled={busy || !taskSlug}
+              onClick={() => onSend(item.path)}
+            >
+              Send
+            </button>
           </li>
         )) : <li><span>No pending harness feedback.</span></li>}
       </ul>
