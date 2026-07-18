@@ -93,10 +93,9 @@ describe("backend E2E with mock Claude Code", () => {
     expect(state.roundState.status).toBe("stopped");
     expect(state.roundState.flowPause).toMatchObject({
       paused: true,
-      reason: "awaiting-user",
+      reason: "stopped-no-next-turn",
       role: "project-manager"
     });
-    expect(state.roundState.flowPause?.message).toContain("Architecture plan received");
     expect(state.messages).toEqual(
       expect.arrayContaining([
         expect.objectContaining({

@@ -4,9 +4,9 @@ import type {
   ClaudeHookResult,
   ClaudePermissionRequestHookResult
 } from "../../shared/types/claude-hook.js";
-import { isGateReviewerRoleName, isHarnessEngineerToolRoleName, isTranslatorToolRoleName, isUserFacingRole, isVcmRoleName } from "../../shared/constants.js";
+import { isGateReviewerRoleName, isHarnessEngineerToolRoleName, isTranslatorToolRoleName, isVcmRoleName } from "../../shared/constants.js";
 import { VcmError } from "../errors.js";
-import { readLatestRoleTurnReply, readTranscriptTurnEvidence } from "./claude-transcript-reply.js";
+import { readTranscriptTurnEvidence } from "./claude-transcript-reply.js";
 import type { GatewayService } from "../gateway/gateway-service.js";
 import type { TerminalRuntime } from "../runtime/terminal-runtime.js";
 import { submitTerminalInput } from "../runtime/terminal-submit.js";
@@ -511,7 +511,6 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
       cwd: stringOrUndefined(input.event.cwd) ?? stringOrUndefined(input.event.new_cwd)
     });
     if (boundToTask) {
-      const userFacingReply = await captureUserFacingReply(eventName, input.role, session);
       await deps.roundService.recordClaudeHookEvent({
         repoRoot: context.project.repoRoot,
         stateRepoRoot: context.taskRepoRoot,
@@ -519,7 +518,6 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
         taskSlug: context.taskSlug,
         role: input.role,
         eventName,
-        ...(userFacingReply ? { userFacingReply } : {}),
         ...(options.settleGuard
           ? {
               settleGuard: async () => {
@@ -945,25 +943,6 @@ function parseHookEvent(value: unknown): ClaudeHookEventName {
     statusCode: 400,
     hint: "VCM accepts UserPromptSubmit, Stop, StopFailure, and PostCompact hooks only."
   });
-}
-
-// On a user-facing role's Stop, best-effort capture its last user-facing turn
-// text to seed the await-user pause message. Capture failure is non-fatal and
-// must never block turn-end, so a missing/failed read just omits the field.
-async function captureUserFacingReply(
-  eventName: "Stop" | "StopFailure",
-  role: RoleName,
-  session: RoleSessionRecord | undefined
-): Promise<{ text: string; truncated: boolean } | undefined> {
-  if (eventName !== "Stop" || !isUserFacingRole(role) || !session) {
-    return undefined;
-  }
-  try {
-    const reply = await readLatestRoleTurnReply(session);
-    return reply ? { text: reply.text, truncated: reply.truncated } : undefined;
-  } catch {
-    return undefined;
-  }
 }
 
 function throwUnsupportedEvent(eventName: ClaudeHookEventName): never {

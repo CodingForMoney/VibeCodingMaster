@@ -28,15 +28,10 @@ export interface VcmRoleRecoveryState {
  * Why the automated flow is paused/stalled.
  * - `stopped-no-next-turn`: a round ended and the auto flow did not start a new turn.
  * - `role-recovery-failed`: a role's CC recovery exhausted retries / is non-retryable.
- * - `awaiting-user`: a user-facing role stopped its turn with no onward route and is
- *   awaiting a user decision. This pause is sticky: it persists until the awaiting
- *   role receives the user's next input, and is NOT cleared by other roles' activity
- *   or round auto-continuation.
  */
 export type VcmFlowPauseReason =
   | "stopped-no-next-turn"
-  | "role-recovery-failed"
-  | "awaiting-user";
+  | "role-recovery-failed";
 
 export type VcmRoundStopReason =
   | "manual-interrupt"
@@ -56,13 +51,6 @@ export interface VcmFlowPauseState {
   role?: RoleName;
   /** When the pause condition began (e.g. stoppedAt / lastTurnEndedAt). */
   since?: string;
-  /**
-   * The awaiting role's captured user-facing turn text. Present only for reason
-   * `awaiting-user`, and only when capture succeeded (best-effort; may be absent).
-   */
-  message?: string;
-  /** True when `message` was truncated to the capture length limit. */
-  messageTruncated?: boolean;
 }
 
 export interface VcmSessionRoundState {

@@ -44,7 +44,6 @@ interface RecoverableRoundFile {
     role?: string;
     status?: string;
   };
-  pendingUserReply?: unknown;
   totalCompletedTurnCount?: number;
   totalCcActiveMs?: number;
   updatedAt: string;
@@ -274,7 +273,6 @@ export function createRuntimeRecoveryService(deps: RuntimeRecoveryServiceDeps): 
       state.lastStoppedRound = current;
       state.totalCompletedTurnCount = (state.totalCompletedTurnCount ?? 0) + completedIncrement;
       state.totalCcActiveMs = (state.totalCcActiveMs ?? 0) + activeDurationMs;
-      state.pendingUserReply = undefined;
     }
 
     if (state.roleRecovery?.status === "waiting" || state.roleRecovery?.status === "retrying") {
