@@ -2194,14 +2194,17 @@ h2 {
 
 .harness-studio-left-scroll {
   display: grid;
+  grid-auto-rows: max-content;
   align-content: start;
   gap: 10px;
   min-width: 0;
   min-height: 0;
+  height: 100%;
   max-height: 100%;
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior: contain;
+  scrollbar-gutter: stable;
   padding-right: 2px;
 }
 
