@@ -291,7 +291,189 @@ Diagnosis execution steps are `architect-diagnosis`,
 `diagnosis-code-diff-gate`, and `diagnosis-tester-validation`. The remaining
 flows receive the same fixed-step treatment from their existing PM flow rules.
 
-## 11. Workflow Policy
+## 11. Workflow And Branch Inventory
+
+This inventory is the complete source list for the machine workflow policy.
+Every main-path transition and allowed branch listed here must be represented in
+the backend policy. Anything not listed is denied unless VCM records an exact
+one-time user-authorized override.
+
+### 11.1 Code-Change Flow
+
+The main path is:
+
+```text
+architect-interview
+-> architect-planning
+-> architecture-plan-gate
+-> coder-implementation
+-> code-diff-gate
+-> tester-validation
+-> validation-adequacy-gate
+-> architect-docs-sync
+-> final-acceptance
+-> completed
+```
+
+The allowed branches are:
+
+- an `interviewing` architecture brief remains at Architect Interview
+- a confirmed architecture brief advances to Architect Planning
+- incomplete planning returns to Architect Planning
+- planning that requires user clarification returns to Architect Interview
+- Architecture Plan Gate `request_changes` returns to Architect Planning and
+  repeats the Gate after revision
+- incomplete Coder work returns to Coder
+- completed Coder work with compile, typecheck, or L0/L1 failure evidence enters
+  Architect Debug Branch
+- Coder `ready_for_review` advances to Code Diff Gate
+- Code Diff Gate `request_changes` enters Architect Debug Branch
+- Tester `fail` for the Coder implementation enters Architect Debug Branch
+- Tester `pass` advances to Validation Adequacy Gate
+- Validation Adequacy Gate `request_changes` returns to Tester and repeats the
+  Gate after correction
+- Architect Docs Sync `synced` or `unchanged` advances to Final Acceptance
+- blocked docs sync remains at docs sync unless its evidence permits Architect
+  Debug Branch, Architecture Diagnosis Branch, or a user decision
+- Final Acceptance `needs-coder-follow-up` returns to Coder
+- Final Acceptance `needs-architect-follow-up` returns to Architect
+- Final Acceptance `needs-docs-sync` returns to Architect Docs Sync
+- Final Acceptance `blocked-by-user-decision` waits for the user
+- follow-up work resumes from the earliest affected Code-Change step and repeats
+  every downstream Gate
+- Final Acceptance `accepted` completes the flow
+- Final Acceptance `accepted-with-known-risks` completes only with the exact
+  required user approval already recorded
+
+### 11.2 Architect Debug Flow And Branch
+
+The shared execution path is:
+
+```text
+architect-debug -> debug-code-diff-gate -> debug-tester-validation
+```
+
+Architect Debug is a standalone Flow when fixing an existing defect is the
+accepted task. It is a Branch when another flow is suspended because Coder
+failed after implementation, Code Diff Gate requested changes, or Tester failed
+the Coder implementation.
+
+The allowed branches are:
+
+- `local fix completed` advances to Debug Code Diff Gate
+- `normal architecture plan required` enters Code-Change Flow at Architect
+  Planning; when Debug is already a Code-Change Branch, its parent resumes at
+  Architect Planning
+- `user clarification required` waits for the user and then resumes Debug
+- Debug Code Diff Gate `request_changes` returns to Architect Debug
+- Debug Tester `fail` enters Architecture Diagnosis Branch
+- Debug Tester `pass` in a standalone Flow advances to Validation Adequacy Gate,
+  Architect Docs Sync, and Final Acceptance
+- Debug Tester `pass` in a Branch returns to its recorded parent-flow resume
+  step without branch-level docs sync or Final Acceptance
+
+### 11.3 Architecture Diagnosis Flow And Branch
+
+Architecture Diagnosis is a standalone Flow when diagnosis itself is the
+accepted task. It is a Branch when another flow is suspended after a completed
+Debug fix still fails Tester validation, or Architect must update or replace the
+architecture plan for the second time.
+
+The allowed paths and branches are:
+
+- `analysis completed` in a standalone Flow completes from the diagnosis result
+- `analysis completed` in a Branch returns to its recorded parent-flow resume
+  step
+- `diagnosis implementation completed` advances to Diagnosis Code Diff Gate
+- `user clarification required` waits for the user and then resumes Diagnosis
+- Diagnosis Code Diff Gate `request_changes` returns to Architecture Diagnosis
+- Diagnosis Tester `fail` pauses the workflow and reports to the user
+- Diagnosis Tester `pass` in a standalone code-producing Flow advances to
+  Validation Adequacy Gate, Architect Docs Sync, and Final Acceptance
+- Diagnosis Tester `pass` in a code-producing Branch returns to its recorded
+  parent-flow resume step without branch-level docs sync or Final Acceptance
+
+### 11.4 Docs-Only Flow
+
+The main path is:
+
+```text
+architect-documentation-update -> completed
+```
+
+The allowed branches are:
+
+- incomplete document work or evidence returns to Architect
+- required production-code or runtime-behavior work switches to Code-Change
+  Flow at Architect Planning
+- `docs/TESTING.md` or validation-strategy work switches to Validation-Only Flow
+- conflicting durable requirements wait for a user decision
+- Architect `synced` or `unchanged` completes the flow
+
+Docs-Only Flow does not run Gate Review, Tester validation, separate docs sync,
+or Final Acceptance.
+
+### 11.5 Validation-Only Flow
+
+The main path is:
+
+```text
+tester-validation -> validation-adequacy-gate -> completed
+```
+
+The allowed branches are:
+
+- incomplete validation work or test-report evidence returns to Tester
+- Validation Adequacy Gate `request_changes` returns to Tester and repeats the
+  Gate after correction
+- required production-code, runtime-behavior, public-contract, dependency, or
+  system-architecture work switches to Code-Change Flow at Architect Planning
+- missing user intent or external authorization waits for the user
+- a complete Tester `pass` or `fail` result completes after the Validation
+  Adequacy Gate permits continuation
+
+Validation-Only Flow does not run Architecture Plan Gate, Code Diff Gate,
+Architect Docs Sync, or Final Acceptance.
+
+### 11.6 Communication-Only Flow
+
+PM answers the user or relays a clarification, then completes the flow. If the
+user confirms a delivery request, PM starts the matching delivery flow.
+Communication-Only Flow does not run Gate Review, validation, docs sync, Final
+Acceptance, or PR Preparation.
+
+### 11.7 PR-Preparation Flow
+
+PR Preparation starts only after the active delivery flow completes. PM prepares
+or updates the PR from existing commits and evidence, then completes the flow.
+Incomplete required work or evidence returns to the responsible flow before PR
+preparation continues. This flow does not perform technical review, validation,
+docs sync, Gate Review, or Final Acceptance.
+
+### 11.8 Global Branch Rules
+
+- incomplete or non-standard role output returns to the same responsible role
+- user intent, external authorization, or an exact required exception changes
+  status to `awaiting-user`; the recorded suspended step resumes after the user
+  decides
+- Gate Review `started` or `running` remains at the Gate until the VCM callback
+- Gate Review `disabled`, `not_required`, `already_approved`, or `approve`
+  advances according to the active flow
+- Gate Review `request_changes` uses only the branch defined for that Gate in
+  the active flow
+- Gate Review `failed_to_start` or `failed` stops advancement for VCM retry,
+  user skip, or user override handling
+- a recorded user skip or override applies only to its exact checkpoint
+- a direct role-to-PM report does not advance workflow state
+- Translator and Harness Engineer are auxiliary roles and never become Round or
+  core workflow nodes
+
+Architect Debug Branch and Architecture Diagnosis Branch are the only branch
+flows that suspend a parent flow and require a recorded resume step. Ordinary
+same-role continuation, Gate waiting, and user waiting are state transitions,
+not nested branch flows.
+
+## 12. Workflow Policy
 
 The backend needs a typed, explicit transition policy for every supported fixed
 flow and allowed branch. Natural-language PM rules are not an enforcement
@@ -327,7 +509,7 @@ The machine policy and installed PM Harness rules must remain synchronized by
 tests. The machine policy is authoritative for dispatch permission; the PM rules
 explain the same policy to the model.
 
-## 12. Checkpoints Without A Role Route
+## 13. Checkpoints Without A Role Route
 
 Not every workflow checkpoint sends a PM route message. Waiting for the user,
 starting Gate Review, receiving a Gate callback, Final Acceptance, task
@@ -345,7 +527,7 @@ Before implementation, the policy must enumerate which no-route checkpoints:
 - are direct user decisions
 - are observations that do not change workflow state
 
-## 13. Persistence And Recovery
+## 14. Persistence And Recovery
 
 Workflow state, pending approval, dispatching approval, rejection fingerprint,
 and override evidence are task-scoped backend state in the active worktree.
@@ -363,10 +545,19 @@ On VCM restart or task re-entry:
 Task close clears runtime workflow state after any required workflow evidence
 has been surfaced to the user.
 
-## 14. Required Tests
+## 15. Required Tests
 
 Backend unit and end-to-end coverage must include:
 
+- every main-path transition in Section 11 has a positive policy and backend
+  integration test
+- every allowed branch in Section 11 has a positive policy and end-to-end test
+- every top-level flow in Section 11 has an end-to-end scenario through its
+  valid completion
+- every flow has negative tests proving unlisted role targets, flow switches,
+  branch entries, branch exits, and skipped checkpoints are denied
+- standalone and branch forms of Architect Debug and Architecture Diagnosis are
+  tested separately, including parent-flow resume behavior
 - starting without an active flow requires `--flow`
 - starting a flow with a legal target derives the initial destination state
 - omitting `--flow` continues the current flow
@@ -393,7 +584,7 @@ Backend unit and end-to-end coverage must include:
 - missing, mismatched, stale, or reused user authorization is rejected
 - user override cannot bypass non-workflow safety controls
 
-## 15. Open Decisions Before Implementation
+## 16. Open Decisions Before Implementation
 
 The authoritative state model, workflow-review command-line interface, and
 deny-by-default transition-policy shape are decided above. The following must
@@ -406,3 +597,7 @@ still be resolved before coding:
 3. The list and enforcement point of every no-route workflow checkpoint.
 4. Whether workflow override evidence must survive task close or is task-runtime
    evidence only.
+5. Whether Architecture Diagnosis entered from an Architect Debug Branch
+   replaces Debug while inheriting its original parent and resume step, or is a
+   true nested branch that requires a branch stack. The planned single
+   `branch`/`parent flow`/`resume step` state cannot represent recursive nesting.
