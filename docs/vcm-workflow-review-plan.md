@@ -7,10 +7,10 @@ implementation.
 
 ## 1. Goal
 
-VCM must enforce the fixed task flows and their explicitly allowed branches.
-Project Manager proposes the next target role and, only when starting or
-switching a flow, the selected flow. VCM decides whether that request is legal
-in the current workflow state.
+VCM must enforce the role-dispatch portions of the fixed task flows and their
+explicitly allowed branches. Project Manager proposes the next target role and,
+only when starting or switching a flow, the selected flow. VCM decides whether
+that PM-to-role dispatch is legal in the current workflow state.
 
 The governing rule is deny by default:
 
@@ -22,6 +22,10 @@ The governing rule is deny by default:
 
 VCM validates workflow legality. It does not perform technical analysis or
 choose the next target for PM.
+
+Workflow Review does not review PM-only activity. Waiting for the user, PM's
+own analysis or final response, Final Acceptance completion, task completion,
+and PR preparation do not require a Workflow Review request.
 
 ## 2. Current Gap
 
@@ -84,8 +88,7 @@ or replacing a Code-Change Branch, or requesting return from a Branch:
   Diagnosis Branch replacement as determined by current state
 
 The supported flow values are `code-change`, `architect-debug`,
-`architecture-diagnosis`, `docs-only`, `validation-only`,
-`communication-only`, and `pr-preparation`.
+`architecture-diagnosis`, `docs-only`, and `validation-only`.
 
 The request does not contain a destination step, branch, resume point, workflow
 revision, evidence references, approval identifier, or separate operation
@@ -283,12 +286,10 @@ revision
 flow
 step
 branch
-status
 ```
 
 `flow` is one of `code-change`, `architect-debug`,
-`architecture-diagnosis`, `docs-only`, `validation-only`,
-`communication-only`, or `pr-preparation`.
+`architecture-diagnosis`, `docs-only`, or `validation-only`.
 
 Only Code-Change Flow may contain a branch. `branch` is either absent or has
 this backend-owned shape:
@@ -306,8 +307,10 @@ Branch, but branches never contain another branch. Other flows move to
 Architect Debug or Architecture Diagnosis through a top-level flow switch and
 do not retain an automatic return point.
 
-`status` is limited to `active`, `awaiting-user`, or `completed`. Role process
-and activity states do not belong here; Round and Session continue to own them.
+Authoritative Workflow State records only what is needed to validate the next
+PM-to-role dispatch. It does not represent user waiting, PM activity, Final
+Acceptance completion, task completion, or PR preparation. Round, Session, and
+the existing task runtime continue to own those states.
 
 Each flow has a fixed step set. The Code-Change steps are:
 
@@ -321,7 +324,6 @@ tester-validation
 validation-adequacy-gate
 architect-docs-sync
 final-acceptance
-completed
 ```
 
 The Architect Debug execution steps are `architect-debug`,
@@ -351,7 +353,6 @@ architect-interview
 -> validation-adequacy-gate
 -> architect-docs-sync
 -> final-acceptance
--> completed
 ```
 
 The allowed branches are:
@@ -377,12 +378,14 @@ The allowed branches are:
 - Final Acceptance `needs-coder-follow-up` returns to Coder
 - Final Acceptance `needs-architect-follow-up` returns to Architect
 - Final Acceptance `needs-docs-sync` returns to Architect Docs Sync
-- Final Acceptance `blocked-by-user-decision` waits for the user
+- Final Acceptance `blocked-by-user-decision` makes PM wait for the user without
+  changing Workflow Review state
 - follow-up work resumes from the earliest affected Code-Change step and repeats
   every downstream Gate
-- Final Acceptance `accepted` completes the flow
-- Final Acceptance `accepted-with-known-risks` completes only with the exact
-  required user approval already recorded
+- Final Acceptance `accepted` completes the task through the existing task
+  lifecycle without a Workflow Review request
+- Final Acceptance `accepted-with-known-risks` uses the existing user-approval
+  and task-completion path without a Workflow Review request
 
 ### 11.2 Architect Debug Flow And Branch
 
@@ -404,7 +407,8 @@ The allowed branches are:
 - `normal architecture plan required` enters Code-Change Flow at Architect
   Planning; when Debug is already a Code-Change Branch, its parent resumes at
   Architect Planning
-- `user clarification required` waits for the user and then resumes Debug
+- `user clarification required` makes PM wait for the user; the next role
+  dispatch is reviewed from the unchanged Debug state
 - Debug Code Diff Gate `request_changes` returns to Architect Debug
 - Debug Tester `fail` in a standalone Flow switches to standalone Architecture
   Diagnosis Flow
@@ -430,7 +434,8 @@ The allowed paths and branches are:
 - `analysis completed` in a Branch returns to its recorded Code-Change resume
   step
 - `diagnosis implementation completed` advances to Diagnosis Code Diff Gate
-- `user clarification required` waits for the user and then resumes Diagnosis
+- `user clarification required` makes PM wait for the user; the next role
+  dispatch is reviewed from the unchanged Diagnosis state
 - Diagnosis Code Diff Gate `request_changes` returns to Architecture Diagnosis
 - Diagnosis Tester `fail` pauses the workflow and reports to the user
 - Diagnosis Tester `pass` in a standalone code-producing Flow advances to
@@ -443,7 +448,7 @@ The allowed paths and branches are:
 The main path is:
 
 ```text
-architect-documentation-update -> completed
+architect-documentation-update
 ```
 
 The allowed branches are:
@@ -452,8 +457,10 @@ The allowed branches are:
 - required production-code or runtime-behavior work switches to Code-Change
   Flow at Architect Planning
 - `docs/TESTING.md` or validation-strategy work switches to Validation-Only Flow
-- conflicting durable requirements wait for a user decision
-- Architect `synced` or `unchanged` completes the flow
+- conflicting durable requirements make PM wait for a user decision without
+  changing Workflow Review state
+- Architect `synced` or `unchanged` completes through the existing task
+  lifecycle without another Workflow Review request
 
 Docs-Only Flow does not run Gate Review, Tester validation, separate docs sync,
 or Final Acceptance.
@@ -463,7 +470,7 @@ or Final Acceptance.
 The main path is:
 
 ```text
-tester-validation -> validation-adequacy-gate -> completed
+tester-validation -> validation-adequacy-gate
 ```
 
 The allowed branches are:
@@ -473,34 +480,31 @@ The allowed branches are:
   Gate after correction
 - required production-code, runtime-behavior, public-contract, dependency, or
   system-architecture work switches to Code-Change Flow at Architect Planning
-- missing user intent or external authorization waits for the user
-- a complete Tester `pass` or `fail` result completes after the Validation
-  Adequacy Gate permits continuation
+- missing user intent or external authorization makes PM wait for the user
+  without changing Workflow Review state
+- a complete Tester `pass` or `fail` result completes through the existing task
+  lifecycle after the Validation Adequacy Gate permits continuation
 
 Validation-Only Flow does not run Architecture Plan Gate, Code Diff Gate,
 Architect Docs Sync, or Final Acceptance.
 
-### 11.6 Communication-Only Flow
+### 11.6 PM-Only Activity Outside Workflow Review
 
-PM answers the user or relays a clarification, then completes the flow. If the
-user confirms a delivery request, PM starts the matching delivery flow.
-Communication-Only Flow does not run Gate Review, validation, docs sync, Final
-Acceptance, or PR Preparation.
+Communication-only work, waiting for the user, PM final responses, Final
+Acceptance completion, task completion, and PR preparation do not dispatch work
+to another role and are outside Workflow Review. They do not call
+`request-workflow-review`, create a pending dispatch approval, or change
+authoritative Workflow Review state.
 
-### 11.7 PR-Preparation Flow
-
-PR Preparation starts only after the active delivery flow completes. PM prepares
-or updates the PR from existing commits and evidence, then completes the flow.
-Incomplete required work or evidence returns to the responsible flow before PR
-preparation continues. This flow does not perform technical review, validation,
-docs sync, Gate Review, or Final Acceptance.
+If PM later dispatches another role, that dispatch is reviewed against the
+current authoritative state. Starting or switching to a supported delivery flow
+uses `--flow` together with the actual target role.
 
 ### 11.8 Global Branch Rules
 
 - incomplete or non-standard role output returns to the same responsible role
-- user intent, external authorization, or an exact required exception changes
-  status to `awaiting-user`; the recorded suspended step resumes after the user
-  decides
+- user intent, external authorization, or an exact required exception makes PM
+  wait without changing authoritative Workflow Review state
 - Gate Review `started` or `running` remains at the Gate until the VCM callback
 - Gate Review `disabled`, `not_required`, `already_approved`, or `approve`
   advances according to the active flow
@@ -634,27 +638,17 @@ The machine policy and installed PM Harness rules must remain synchronized by
 tests. The machine policy is authoritative for dispatch permission; the PM rules
 explain the same policy to the model.
 
-## 13. Checkpoints Without A Role Route
+## 13. Dispatch-Only Boundary
 
-Not every workflow checkpoint sends a PM route message. Waiting for the user,
-handling a Gate callback, Final Acceptance, task completion, and PR preparation
-may also change workflow state. Starting Gate Review and returning from a Branch
-are role transitions because they include `--target-role gate-reviewer` or the
-next owning role.
+Workflow Review has no checkpoint operation without a target role. PM calls it
+only before dispatching work to another role. There is no synthetic
+`--target-role project-manager` and no separate request for user waiting, PM
+analysis, Final Acceptance completion, task completion, or PR preparation.
 
-Every no-route checkpoint that changes authoritative workflow state starts with
-a PM workflow-review request. When allowed, the request applies the state change
-without creating a dispatch approval. Gate controllers, Hooks, role reports,
-and handoff artifacts may notify PM or confirm an already approved dispatch;
-they do not originate or choose the next workflow transition.
-
-Before implementation, the policy must enumerate which no-route checkpoints:
-
-- PM may request from each source state
-- apply immediately after approval without a role dispatch
-- consume or confirm a previously approved dispatch without choosing a new
-  transition
-- are observations delivered to PM without changing workflow state
+Gate callbacks, Hooks, role reports, handoff artifacts, and user messages may
+inform PM, but they do not create an approval or select the next dispatch. When
+PM next dispatches a role, it submits the real target role and optional flow to
+Workflow Review.
 
 ## 14. Persistence And Recovery
 
@@ -681,8 +675,8 @@ Backend unit and end-to-end coverage must include:
 - every main-path transition in Section 11 has a positive policy and backend
   integration test
 - every allowed branch in Section 11 has a positive policy and end-to-end test
-- every top-level flow in Section 11 has an end-to-end scenario through its
-  valid completion
+- every supported role-dispatch flow in Section 11 has an end-to-end scenario
+  through its final reviewed dispatch
 - every flow has negative tests proving unlisted role targets, flow switches,
   branch entries, branch exits, and skipped checkpoints are denied
 - standalone and branch forms of Architect Debug and Architecture Diagnosis are
@@ -725,6 +719,9 @@ Backend unit and end-to-end coverage must include:
 - a new review invalidates the prior unused approval
 - workflow revision change invalidates approval
 - non-PM report to PM remains deliverable without approval
+- user waiting, PM final responses, Final Acceptance completion, task
+  completion, and PR preparation never require Workflow Review
+- Workflow Review cannot create a PM-target or targetless approval
 - state changes only after target `UserPromptSubmit`
 - failed terminal submission does not advance state
 - restart reconciles pending and dispatching approvals
@@ -741,57 +738,55 @@ items in order before coding. Discuss one item at a time: state the problem,
 present a recommendation, and record the user's decision before changing the
 design.
 
-1. **Checkpoints without a target role.** Final Acceptance, waiting for the
-   user, task completion, PR Preparation, and similar PM-owned checkpoints may
-   change workflow state without dispatching another role, while the decided
-   workflow-review interface currently requires `--target-role`. Define their
-   request and approval mechanism without creating another workflow driver.
-2. **Ambiguous transitions with the same Flow and target role.** Architect
+The targetless-checkpoint question is resolved: Workflow Review reviews only
+PM-to-role dispatches. PM-only activity is outside its state and approval
+mechanism.
+
+1. **Ambiguous transitions with the same Flow and target role.** Architect
    Planning continuation versus return to Architect Interview both target
    Architect in Code-Change. Final Acceptance architect follow-up and docs-sync
    follow-up also both target Architect. Redesign these edges so current state,
    optional requested Flow, and target role always derive one destination.
-3. **Complete fixed step sets.** Define every step for standalone Architect
-   Debug, standalone Architecture Diagnosis, Docs-Only, Validation-Only,
-   Communication-Only, and PR-Preparation flows. The current document fully
-   enumerates only Code-Change and the execution portions of Debug and
-   Diagnosis.
-4. **Complete typed transition table.** Convert every main-path edge, allowed
-   branch, retry, return, pause, and completion into a machine rule containing
-   source state, active Branch, requested Flow, target role when present,
-   destination state, and transition behavior. Every valid input must have one
-   destination; every absent edge is denied.
-5. **Non-Code-Change switches to Debug or Diagnosis.** Enumerate which flows and
+2. **Complete fixed step sets.** Define every step for standalone Architect
+   Debug, standalone Architecture Diagnosis, Docs-Only, and Validation-Only.
+   The current document fully enumerates only Code-Change and the execution
+   portions of Debug and Diagnosis.
+3. **Complete typed transition table.** Convert every reviewed role-dispatch
+   edge, allowed branch, retry, and return into a machine rule containing source
+   state, active Branch, requested Flow, target role, destination state, and
+   transition behavior. Every valid input must have one destination; every
+   absent edge is denied.
+4. **Non-Code-Change switches to Debug or Diagnosis.** Enumerate which flows and
    steps may switch to standalone Architect Debug or Architecture Diagnosis,
    the required target role, and whether the replaced flow is simply closed or
    retained only as audit history.
-6. **Final Acceptance follow-up mapping.** Replace "earliest affected step" with
+5. **Final Acceptance follow-up mapping.** Replace "earliest affected step" with
    fixed destinations and required downstream Gates for
    `needs-coder-follow-up`, `needs-architect-follow-up`, and
    `needs-docs-sync`.
-7. **Approval-to-dispatch correlation.** Target-role equality alone cannot
+6. **Approval-to-dispatch correlation.** Target-role equality alone cannot
    distinguish the newly approved message from an older pending route to the
    same role. Define how VCM recognizes the first eligible dispatch created
    after approval without adding approval metadata to route files.
-8. **Gate Reviewer approval consumption.** Define exact matching for gate type
+7. **Gate Reviewer approval consumption.** Define exact matching for gate type
    and code source, existing running Gate behavior, consumption for
    `started`/`running`/`disabled`/`not_required`/`already_approved`, recovery for
    `failed_to_start`, and tests that distinguish Gate consumption from normal
    `UserPromptSubmit` confirmation.
-9. **Restart reconciliation.** Define how a restored `dispatching` approval is
+8. **Restart reconciliation.** Define how a restored `dispatching` approval is
    classified as unsent, submitted, started, completed, or failed so VCM neither
    duplicates a dispatch nor advances a transition that never started.
-10. **Workflow lifecycle boundaries.** Define the no-Flow initial state,
-    `awaiting-user` resume, completed Flow behavior, entry into PR Preparation,
+9. **Workflow lifecycle boundaries.** Define the no-Flow initial state,
     top-level Flow replacement history, and guaranteed task close that cannot be
-    blocked by malformed or unfinished workflow runtime state.
-11. **User-authorization source capture.** Define how VCM captures and identifies
-    exact direct user messages from Embedded Terminal, Gateway, and other input
-    paths so PM cannot fabricate, broaden, or reuse override authorization.
-12. **Override evidence retention.** Decide whether override evidence survives
-    task close or remains task-runtime evidence only, while preserving audit and
-    one-time-use guarantees for the lifetime selected.
-13. **Machine-policy and Harness synchronization.** Decide whether one source
-    generates both the backend transition policy and PM Harness description, or
-    independent definitions are compared by synchronization tests. Manual drift
-    must fail validation before release.
+    blocked by malformed or unfinished workflow runtime state. User waiting,
+    Final Acceptance completion, and PR preparation are outside Workflow Review.
+10. **User-authorization source capture.** Define how VCM captures and identifies
+   exact direct user messages from Embedded Terminal, Gateway, and other input
+   paths so PM cannot fabricate, broaden, or reuse override authorization.
+11. **Override evidence retention.** Decide whether override evidence survives
+   task close or remains task-runtime evidence only, while preserving audit and
+   one-time-use guarantees for the lifetime selected.
+12. **Machine-policy and Harness synchronization.** Decide whether one source
+   generates both the backend transition policy and PM Harness description, or
+   independent definitions are compared by synchronization tests. Manual drift
+   must fail validation before release.
