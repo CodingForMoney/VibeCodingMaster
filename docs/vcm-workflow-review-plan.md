@@ -136,7 +136,9 @@ The backend record contains at least:
 task slug
 base Flow Record sequence and hash
 requested flow when supplied
+effective flow
 approved target role
+allowed Gate signatures when target role is Gate Reviewer
 normal or user-override decision
 created time
 user-authorization evidence when applicable
@@ -175,7 +177,8 @@ not match, or the approval is stale, VCM must not send the message.
 
 When the approved target is Gate Reviewer, `.ai/tools/request-gate-review` must
 find a matching pending approval before the Gate controller may start or reuse
-the Gate Reviewer. A different gate target, source, or Flow Record base is
+the Gate Reviewer. Its Gate type and code source must match one of the approval's
+allowed Gate signatures. A different Gate signature or Flow Record base is
 rejected.
 
 Non-PM reports to PM do not require workflow approval. They provide evidence
@@ -644,6 +647,33 @@ requested flow and target role that may be appended next. The policy may use
 reusable sequence matchers, but it must not depend on a mutable cursor or PM's
 stated reason. Any candidate dispatch not accepted by a rule is illegal.
 
+The backend exposes one pure matcher:
+
+```text
+reviewFlowRecord(confirmedRecord, requestedFlow?, targetRole)
+-> allowed | denied
+```
+
+The matcher performs no persistence or dispatch:
+
+1. validate the complete existing Flow Record against the fixed policy
+2. derive the effective Flow from an explicit request or legal continuation
+3. enumerate the dispatch events that may be appended after the full record
+4. filter them by effective Flow and target role
+5. deny when no legal event remains; otherwise return the matching event set
+
+For a normal role, every matching event has the same effective Flow and target
+role, so one Pending Approval is sufficient. For Gate Reviewer, matching events
+also carry Gate type and code source. The Pending Approval stores all Gate
+signatures legal for that exact record, Flow, and target. The Gate controller
+must later match one of those signatures before confirmation appends the exact
+Gate event.
+
+The matcher does not persist a derived position, cache a PM-provided state, or
+read role results. Repetition, Flow switch, Branch entry, Branch replacement,
+and Branch return are accepted only when the complete record plus candidate
+matches Section 11.
+
 VCM never asks PM to name or choose a separate operation label. Its decision is:
 
 ```text
@@ -707,6 +737,13 @@ Backend unit and end-to-end coverage must include:
 - all main dispatch sequences, same-role repetitions, Gate revision loops, Flow
   switches, Branch replacements, and Branch returns listed in Section 11 are
   covered
+- the pure matcher does not mutate the Flow Record or persist a derived cursor
+- the same Flow Record, requested Flow, and target role always return the same
+  decision and legal Gate-signature set
+- malformed records, reordered events, skipped dispatches, and invalid
+  candidates are denied
+- Gate Reviewer approval stores only Gate signatures legal for the exact base
+  record and rejects every other Gate type or code source
 - every flow has negative tests proving unlisted role targets, flow switches,
   branch entries, branch exits, and skipped checkpoints are denied
 - standalone and branch forms of Architect Debug and Architecture Diagnosis are
@@ -780,42 +817,43 @@ Record events identify the effective Flow, target role, Gate type, and code
 source. Main sequences, role repetitions, Gate revisions, Flow switches, Branch
 replacement, and Branch return are explicitly listed.
 
-1. **Complete typed policy matchers.** Convert every reviewed role-dispatch
-   path, retry, Branch entry, replacement, and return into a machine rule that
-   matches a confirmed Flow Record prefix plus requested Flow and target role.
-   Every absent candidate is denied.
-2. **Non-Code-Change switches to Debug or Diagnosis.** Enumerate which Flow
+The typed-matcher question is resolved in Section 12. A pure matcher validates
+the complete record and returns the legal append events for the requested Flow
+and target role. It stores no cursor. Gate Reviewer approvals retain the Gate
+signatures legal for that exact record.
+
+1. **Non-Code-Change switches to Debug or Diagnosis.** Enumerate which Flow
    Record prefixes may switch to standalone Architect Debug or Architecture
    Diagnosis, the required target role, and how the top-level switch is
    represented in history.
-3. **Final Acceptance follow-up mapping.** Replace "earliest affected step" with
+2. **Final Acceptance follow-up mapping.** Replace "earliest affected step" with
    fixed destinations and required downstream Gates for
    `needs-coder-follow-up`, `needs-architect-follow-up`, and
    `needs-docs-sync`.
-4. **Approval-to-dispatch correlation.** Target-role equality alone cannot
+3. **Approval-to-dispatch correlation.** Target-role equality alone cannot
    distinguish the newly approved message from an older pending route to the
    same role. Define how VCM recognizes the first eligible dispatch created
    after approval without adding approval metadata to route files.
-5. **Gate Reviewer approval consumption.** Define exact matching for gate type
+4. **Gate Reviewer approval consumption.** Define exact matching for gate type
    and code source, existing running Gate behavior, consumption for
    `started`/`running`/`disabled`/`not_required`/`already_approved`, recovery for
    `failed_to_start`, and tests that distinguish Gate consumption from normal
    `UserPromptSubmit` confirmation.
-6. **Restart reconciliation.** Define how a restored `dispatching` approval is
+5. **Restart reconciliation.** Define how a restored `dispatching` approval is
    classified as unsent, submitted, started, completed, or failed so VCM neither
    duplicates a dispatch nor advances a transition that never started.
-7. **Flow Record lifecycle boundaries.** Define the empty initial record,
+6. **Flow Record lifecycle boundaries.** Define the empty initial record,
     top-level Flow replacement history, record retention at task close, and
     guaranteed task close that cannot be blocked by malformed or unfinished
     Workflow Review runtime data. User waiting, Final Acceptance completion, and
     PR preparation are outside Workflow Review.
-8. **User-authorization source capture.** Define how VCM captures and identifies
+7. **User-authorization source capture.** Define how VCM captures and identifies
    exact direct user messages from Embedded Terminal, Gateway, and other input
    paths so PM cannot fabricate, broaden, or reuse override authorization.
-9. **Override evidence retention.** Decide whether override evidence survives
+8. **Override evidence retention.** Decide whether override evidence survives
    task close or remains task-runtime evidence only, while preserving audit and
    one-time-use guarantees for the lifetime selected.
-10. **Machine-policy and Harness synchronization.** Decide whether one source
+9. **Machine-policy and Harness synchronization.** Decide whether one source
    generates both the backend transition policy and PM Harness description, or
    independent definitions are compared by synchronization tests. Manual drift
    must fail validation before release.
