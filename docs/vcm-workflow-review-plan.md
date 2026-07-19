@@ -736,13 +736,62 @@ Backend unit and end-to-end coverage must include:
 ## 16. Open Decisions Before Implementation
 
 The authoritative state model, workflow-review command-line interface, and
-deny-by-default transition-policy shape are decided above. The following must
-still be resolved before coding:
+deny-by-default transition-policy shape are decided above. Resolve the following
+items in order before coding. Discuss one item at a time: state the problem,
+present a recommendation, and record the user's decision before changing the
+design.
 
-1. How VCM captures and identifies direct user messages from embedded terminal,
-   Gateway, and other supported input paths for override evidence.
-2. The exact reconciliation rule for a dispatching approval after process or
-   application restart.
-3. The list and enforcement point of every no-route workflow checkpoint.
-4. Whether workflow override evidence must survive task close or is task-runtime
-   evidence only.
+1. **Checkpoints without a target role.** Final Acceptance, waiting for the
+   user, task completion, PR Preparation, and similar PM-owned checkpoints may
+   change workflow state without dispatching another role, while the decided
+   workflow-review interface currently requires `--target-role`. Define their
+   request and approval mechanism without creating another workflow driver.
+2. **Ambiguous transitions with the same Flow and target role.** Architect
+   Planning continuation versus return to Architect Interview both target
+   Architect in Code-Change. Final Acceptance architect follow-up and docs-sync
+   follow-up also both target Architect. Redesign these edges so current state,
+   optional requested Flow, and target role always derive one destination.
+3. **Complete fixed step sets.** Define every step for standalone Architect
+   Debug, standalone Architecture Diagnosis, Docs-Only, Validation-Only,
+   Communication-Only, and PR-Preparation flows. The current document fully
+   enumerates only Code-Change and the execution portions of Debug and
+   Diagnosis.
+4. **Complete typed transition table.** Convert every main-path edge, allowed
+   branch, retry, return, pause, and completion into a machine rule containing
+   source state, active Branch, requested Flow, target role when present,
+   destination state, and transition behavior. Every valid input must have one
+   destination; every absent edge is denied.
+5. **Non-Code-Change switches to Debug or Diagnosis.** Enumerate which flows and
+   steps may switch to standalone Architect Debug or Architecture Diagnosis,
+   the required target role, and whether the replaced flow is simply closed or
+   retained only as audit history.
+6. **Final Acceptance follow-up mapping.** Replace "earliest affected step" with
+   fixed destinations and required downstream Gates for
+   `needs-coder-follow-up`, `needs-architect-follow-up`, and
+   `needs-docs-sync`.
+7. **Approval-to-dispatch correlation.** Target-role equality alone cannot
+   distinguish the newly approved message from an older pending route to the
+   same role. Define how VCM recognizes the first eligible dispatch created
+   after approval without adding approval metadata to route files.
+8. **Gate Reviewer approval consumption.** Define exact matching for gate type
+   and code source, existing running Gate behavior, consumption for
+   `started`/`running`/`disabled`/`not_required`/`already_approved`, recovery for
+   `failed_to_start`, and tests that distinguish Gate consumption from normal
+   `UserPromptSubmit` confirmation.
+9. **Restart reconciliation.** Define how a restored `dispatching` approval is
+   classified as unsent, submitted, started, completed, or failed so VCM neither
+   duplicates a dispatch nor advances a transition that never started.
+10. **Workflow lifecycle boundaries.** Define the no-Flow initial state,
+    `awaiting-user` resume, completed Flow behavior, entry into PR Preparation,
+    top-level Flow replacement history, and guaranteed task close that cannot be
+    blocked by malformed or unfinished workflow runtime state.
+11. **User-authorization source capture.** Define how VCM captures and identifies
+    exact direct user messages from Embedded Terminal, Gateway, and other input
+    paths so PM cannot fabricate, broaden, or reuse override authorization.
+12. **Override evidence retention.** Decide whether override evidence survives
+    task close or remains task-runtime evidence only, while preserving audit and
+    one-time-use guarantees for the lifetime selected.
+13. **Machine-policy and Harness synchronization.** Decide whether one source
+    generates both the backend transition policy and PM Harness description, or
+    independent definitions are compared by synchronization tests. Manual drift
+    must fail validation before release.
