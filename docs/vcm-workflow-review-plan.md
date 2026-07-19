@@ -271,14 +271,18 @@ sequence
 effective flow
 target role
 dispatch type
+gate type when target role is Gate Reviewer
+code source when gate type is code-diff
 confirmed time
 override evidence reference when applicable
 ```
 
 `effective flow` is one of `code-change`, `architect-debug`,
 `architecture-diagnosis`, `docs-only`, or `validation-only`. `dispatch type`
-distinguishes the normal role route from the Gate Review controller; exact Gate
-matching is defined separately.
+distinguishes the normal role route from the Gate Review controller. `gate type`
+is `architecture-plan`, `code-diff`, or `validation-adequacy`; `code source` is
+`coder`, `architect-debug`, or `architect-diagnosis`. Gate identity is part of
+the dispatched node, not a reason for the dispatch.
 
 The Flow Record does not persist a current step, cursor, status, Branch object,
 entry point, or resume point. It also does not store the role's reason, result,
@@ -316,21 +320,29 @@ Every main-path transition and allowed branch listed here must be represented in
 the backend policy. Anything not listed is denied unless VCM records an exact
 one-time user-authorized override.
 
+The sequences below contain only confirmed PM-to-role dispatches. A repeated
+role is another confirmed dispatch to that role. Gate entries include the Gate
+identity stored in the Flow Record. Role results, Gate decisions, user waiting,
+PM work, and completion do not appear as record events.
+
 ### 11.1 Code-Change Flow
 
-The main path is:
+The main confirmed dispatch sequence is:
 
 ```text
-architect-interview
--> architect-planning
--> architecture-plan-gate
--> coder-implementation
--> code-diff-gate
--> tester-validation
--> validation-adequacy-gate
--> architect-docs-sync
--> final-acceptance
+code-change / architect
+-> code-change / architect
+-> code-change / gate-reviewer / architecture-plan
+-> code-change / coder
+-> code-change / gate-reviewer / code-diff / coder
+-> code-change / tester
+-> code-change / gate-reviewer / validation-adequacy
+-> code-change / architect
 ```
+
+The first Architect dispatch owns the interview. One or more later Architect
+dispatches own planning and planning revision. The final Architect dispatch
+owns post-validation docs sync. Final Acceptance and completion append nothing.
 
 The allowed branches are:
 
@@ -364,12 +376,32 @@ The allowed branches are:
 - Final Acceptance `accepted-with-known-risks` uses the existing user-approval
   and task-completion path without a Workflow Review request
 
+These branches produce the following record extensions:
+
+- interview, planning, planning revision, Coder continuation, Tester revision,
+  and docs-sync correction repeat the same responsible role
+- Architecture Plan Gate revision appends Architect and later another
+  `architecture-plan` Gate dispatch
+- Coder completion appends `code-diff` with source `coder`
+- Coder failure, Code Diff Gate correction, Tester failure, or a permitted
+  implementation correction during docs sync appends `architect-debug` /
+  Architect
+- Validation Adequacy revision appends Tester and later another
+  `validation-adequacy` Gate dispatch
+- a Final Acceptance Coder follow-up appends Coder and repeats every downstream
+  Code-Change Gate and role dispatch
+- a Final Acceptance Architect or docs-sync follow-up appends Architect; any
+  later dispatch must independently match a legal Code-Change continuation,
+  Debug entry, or Diagnosis entry
+
 ### 11.2 Architect Debug Flow And Branch
 
-The shared execution path is:
+The shared confirmed dispatch sequence is:
 
 ```text
-architect-debug -> debug-code-diff-gate -> debug-tester-validation
+architect-debug / architect
+-> architect-debug / gate-reviewer / code-diff / architect-debug
+-> architect-debug / tester
 ```
 
 Architect Debug is a standalone Flow when fixing an existing defect is the
@@ -385,7 +417,7 @@ The allowed branches are:
   Planning; when Debug is already a Code-Change Branch, its parent resumes at
   Architect Planning
 - `user clarification required` makes PM wait for the user; the next role
-  dispatch is reviewed from the unchanged Debug state
+  dispatch is reviewed from the unchanged Flow Record
 - Debug Code Diff Gate `request_changes` returns to Architect Debug
 - Debug Tester `fail` in a standalone Flow switches to standalone Architecture
   Diagnosis Flow
@@ -397,6 +429,17 @@ The allowed branches are:
 - Debug Tester `pass` in a Branch returns to the legal Code-Change continuation
   path without branch-level docs sync or Final Acceptance
 
+These branches produce the following record extensions:
+
+- Code Diff Gate revision appends Architect in `architect-debug` and later
+  another `code-diff` Gate dispatch with source `architect-debug`
+- `normal architecture plan required` appends `code-change` / Architect
+- Tester failure appends `architecture-diagnosis` / Architect
+- standalone Tester pass appends `validation-adequacy` Gate Review and then
+  Architect docs sync, both in `architect-debug`
+- Branch Tester pass appends the approved `code-change` return dispatch to Gate
+  Reviewer for `validation-adequacy`
+
 ### 11.3 Architecture Diagnosis Flow And Branch
 
 Architecture Diagnosis is a standalone Flow when diagnosis itself is the
@@ -405,6 +448,16 @@ Branch only inside Code-Change Flow, either when Architect Debug Branch is
 replaced after its completed fix still fails Tester validation, or Architect
 must update or replace the architecture plan for the second time.
 
+The code-producing confirmed dispatch sequence is:
+
+```text
+architecture-diagnosis / architect
+-> architecture-diagnosis / gate-reviewer / code-diff / architect-diagnosis
+-> architecture-diagnosis / tester
+```
+
+An analysis-only Diagnosis ends its role-dispatch sequence after Architect.
+
 The allowed paths and branches are:
 
 - `analysis completed` in a standalone Flow completes from the diagnosis result
@@ -412,7 +465,7 @@ The allowed paths and branches are:
   continuation path
 - `diagnosis implementation completed` advances to Diagnosis Code Diff Gate
 - `user clarification required` makes PM wait for the user; the next role
-  dispatch is reviewed from the unchanged Diagnosis state
+  dispatch is reviewed from the unchanged Flow Record
 - Diagnosis Code Diff Gate `request_changes` returns to Architecture Diagnosis
 - Diagnosis Tester `fail` pauses the workflow and reports to the user
 - Diagnosis Tester `pass` in a standalone code-producing Flow advances to
@@ -421,12 +474,24 @@ The allowed paths and branches are:
   Code-Change continuation path without branch-level docs sync or Final
   Acceptance
 
+These paths produce the following record extensions:
+
+- Code Diff Gate revision appends Architect in `architecture-diagnosis` and
+  later another `code-diff` Gate dispatch with source `architect-diagnosis`
+- standalone code-producing Tester pass appends `validation-adequacy` Gate
+  Review and then Architect docs sync, both in `architecture-diagnosis`
+- code-producing Branch Tester pass appends the approved `code-change` return
+  dispatch to Gate Reviewer for `validation-adequacy`
+- analysis-only Branch completion appends the approved `code-change` return
+  dispatch to Architect
+- Tester failure and user waiting append nothing
+
 ### 11.4 Docs-Only Flow
 
-The main path is:
+The main confirmed dispatch sequence is:
 
 ```text
-architect-documentation-update
+docs-only / architect
 ```
 
 The allowed branches are:
@@ -436,19 +501,24 @@ The allowed branches are:
   Flow at Architect Planning
 - `docs/TESTING.md` or validation-strategy work switches to Validation-Only Flow
 - conflicting durable requirements make PM wait for a user decision without
-  changing Workflow Review state
+  appending to the Flow Record
 - Architect `synced` or `unchanged` completes through the existing task
   lifecycle without another Workflow Review request
+
+Documentation revision repeats Architect in `docs-only`. Code work appends
+`code-change` / Architect. Validation documentation appends `validation-only` /
+Tester. Completion and user waiting append nothing.
 
 Docs-Only Flow does not run Gate Review, Tester validation, separate docs sync,
 or Final Acceptance.
 
 ### 11.5 Validation-Only Flow
 
-The main path is:
+The main confirmed dispatch sequence is:
 
 ```text
-tester-validation -> validation-adequacy-gate
+validation-only / tester
+-> validation-only / gate-reviewer / validation-adequacy
 ```
 
 The allowed branches are:
@@ -459,9 +529,14 @@ The allowed branches are:
 - required production-code, runtime-behavior, public-contract, dependency, or
   system-architecture work switches to Code-Change Flow at Architect Planning
 - missing user intent or external authorization makes PM wait for the user
-  without changing Workflow Review state
+  without appending to the Flow Record
 - a complete Tester `pass` or `fail` result completes through the existing task
   lifecycle after the Validation Adequacy Gate permits continuation
+
+Tester continuation and Validation Adequacy revision append Tester and later
+another `validation-adequacy` Gate dispatch in `validation-only`. Required code
+work appends `code-change` / Architect. Completion and user waiting append
+nothing.
 
 Validation-Only Flow does not run Architecture Plan Gate, Code Diff Gate,
 Architect Docs Sync, or Final Acceptance.
@@ -478,7 +553,7 @@ If PM later dispatches another role, that dispatch is reviewed against the
 complete Flow Record. Starting or switching to a supported delivery flow
 uses `--flow` together with the actual target role.
 
-### 11.8 Global Branch Rules
+### 11.7 Global Branch Rules
 
 - incomplete or non-standard role output returns to the same responsible role
 - user intent, external authorization, or an exact required exception makes PM
@@ -501,7 +576,7 @@ Code-Change Flow. At most one is inferred from the record. Ordinary same-role
 continuation, Gate waiting, and user waiting do not create nested branches.
 An explicit top-level flow switch is recorded by the next confirmed dispatch.
 
-### 11.9 Branch Entry, Replacement, And Exit
+### 11.8 Branch Entry, Replacement, And Exit
 
 VCM derives Branch entry, replacement, and return from the complete confirmed
 Flow Record. It does not persist a Branch object, entry step, or resume step.
@@ -627,6 +702,11 @@ Backend unit and end-to-end coverage must include:
 - every allowed branch in Section 11 has a positive policy and end-to-end test
 - every supported role-dispatch flow in Section 11 has an end-to-end scenario
   through its final reviewed dispatch
+- Flow Record entries preserve effective Flow, target role, Gate type, and code
+  source exactly for every confirmed dispatch
+- all main dispatch sequences, same-role repetitions, Gate revision loops, Flow
+  switches, Branch replacements, and Branch returns listed in Section 11 are
+  covered
 - every flow has negative tests proving unlisted role targets, flow switches,
   branch entries, branch exits, and skipped checkpoints are denied
 - standalone and branch forms of Architect Debug and Architecture Diagnosis are
@@ -695,46 +775,47 @@ complete confirmed Flow Record is the source of truth. Workflow Review does not
 store a step or reason. The same record plus the same requested flow and target
 role is the same candidate dispatch.
 
-1. **Complete Flow dispatch sequences.** Define the legal target-role and Gate
-   dispatch sequences for Code-Change, standalone Architect Debug, standalone
-   Architecture Diagnosis, Docs-Only, and Validation-Only, including legal
-   retries and Branch sequences.
-2. **Complete typed policy matchers.** Convert every reviewed role-dispatch
+The complete Flow dispatch sequence question is resolved in Section 11. Flow
+Record events identify the effective Flow, target role, Gate type, and code
+source. Main sequences, role repetitions, Gate revisions, Flow switches, Branch
+replacement, and Branch return are explicitly listed.
+
+1. **Complete typed policy matchers.** Convert every reviewed role-dispatch
    path, retry, Branch entry, replacement, and return into a machine rule that
    matches a confirmed Flow Record prefix plus requested Flow and target role.
    Every absent candidate is denied.
-3. **Non-Code-Change switches to Debug or Diagnosis.** Enumerate which Flow
+2. **Non-Code-Change switches to Debug or Diagnosis.** Enumerate which Flow
    Record prefixes may switch to standalone Architect Debug or Architecture
    Diagnosis, the required target role, and how the top-level switch is
    represented in history.
-4. **Final Acceptance follow-up mapping.** Replace "earliest affected step" with
+3. **Final Acceptance follow-up mapping.** Replace "earliest affected step" with
    fixed destinations and required downstream Gates for
    `needs-coder-follow-up`, `needs-architect-follow-up`, and
    `needs-docs-sync`.
-5. **Approval-to-dispatch correlation.** Target-role equality alone cannot
+4. **Approval-to-dispatch correlation.** Target-role equality alone cannot
    distinguish the newly approved message from an older pending route to the
    same role. Define how VCM recognizes the first eligible dispatch created
    after approval without adding approval metadata to route files.
-6. **Gate Reviewer approval consumption.** Define exact matching for gate type
+5. **Gate Reviewer approval consumption.** Define exact matching for gate type
    and code source, existing running Gate behavior, consumption for
    `started`/`running`/`disabled`/`not_required`/`already_approved`, recovery for
    `failed_to_start`, and tests that distinguish Gate consumption from normal
    `UserPromptSubmit` confirmation.
-7. **Restart reconciliation.** Define how a restored `dispatching` approval is
+6. **Restart reconciliation.** Define how a restored `dispatching` approval is
    classified as unsent, submitted, started, completed, or failed so VCM neither
    duplicates a dispatch nor advances a transition that never started.
-8. **Flow Record lifecycle boundaries.** Define the empty initial record,
+7. **Flow Record lifecycle boundaries.** Define the empty initial record,
     top-level Flow replacement history, record retention at task close, and
     guaranteed task close that cannot be blocked by malformed or unfinished
     Workflow Review runtime data. User waiting, Final Acceptance completion, and
     PR preparation are outside Workflow Review.
-9. **User-authorization source capture.** Define how VCM captures and identifies
+8. **User-authorization source capture.** Define how VCM captures and identifies
    exact direct user messages from Embedded Terminal, Gateway, and other input
    paths so PM cannot fabricate, broaden, or reuse override authorization.
-10. **Override evidence retention.** Decide whether override evidence survives
+9. **Override evidence retention.** Decide whether override evidence survives
    task close or remains task-runtime evidence only, while preserving audit and
    one-time-use guarantees for the lifetime selected.
-11. **Machine-policy and Harness synchronization.** Decide whether one source
+10. **Machine-policy and Harness synchronization.** Decide whether one source
    generates both the backend transition policy and PM Harness description, or
    independent definitions are compared by synchronization tests. Manual drift
    must fail validation before release.
