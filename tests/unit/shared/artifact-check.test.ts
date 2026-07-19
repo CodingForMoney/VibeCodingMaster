@@ -58,6 +58,8 @@ None.
     const result = checkMarkdownArtifact("architecture-plan", "architecture-plan.md", `
 # Architecture Plan
 
+Planning Result: complete
+
 ## Accepted Scope
 Ready.
 
@@ -110,6 +112,9 @@ None.
 ## Scaffold Manifest
 No code scaffold needed.
 
+## Scaffold Build Evidence
+Compile check passed at the scaffold commit.
+
 ## Tester Coverage Hints
 Cover changed behavior.
 
@@ -125,9 +130,53 @@ Implement the manifest.
     expect(result.status).toBe("ok");
   });
 
+  it("requires Scaffold Build Evidence in architecture plans", () => {
+    const content = completeTemplate("architecture-plan", renderArchitecturePlanTemplate("demo"))
+      .replace("## Scaffold Build Evidence", "Scaffold Build Evidence");
+    const result = checkMarkdownArtifact("architecture-plan", "architecture-plan.md", content);
+
+    expect(result.status).toBe("incomplete");
+    expect(result.missingHeadings).toContain("Scaffold Build Evidence");
+  });
+
+  it("accepts only complete architecture planning results", () => {
+    const content = completeTemplate("architecture-plan", renderArchitecturePlanTemplate("demo"));
+    const result = checkMarkdownArtifact("architecture-plan", "architecture-plan.md", content);
+
+    expect(result.status).toBe("ok");
+    expect(result.invalidFields).toEqual([]);
+  });
+
+  it.each([
+    "incomplete",
+    "user clarification required",
+    "complete|incomplete|user clarification required",
+    "unknown"
+  ])("rejects architecture planning result %s", (planningResult) => {
+    const content = completeTemplate("architecture-plan", renderArchitecturePlanTemplate("demo"))
+      .replace("Planning Result: complete", `Planning Result: ${planningResult}`);
+    const result = checkMarkdownArtifact("architecture-plan", "architecture-plan.md", content);
+
+    expect(result.status).toBe("incomplete");
+    expect(result.invalidFields).toContain(
+      `Planning Result must be complete; received "${planningResult}".`
+    );
+  });
+
+  it("rejects architecture plans without a planning result", () => {
+    const content = completeTemplate("architecture-plan", renderArchitecturePlanTemplate("demo"))
+      .replace("Planning Result: complete\n", "");
+    const result = checkMarkdownArtifact("architecture-plan", "architecture-plan.md", content);
+
+    expect(result.status).toBe("incomplete");
+    expect(result.invalidFields).toContain("Planning Result is required and must be complete.");
+  });
+
   it("requires code-reading evidence and explicit architecture decisions", () => {
     const result = checkMarkdownArtifact("architecture-plan", "architecture-plan.md", `
 # Architecture Plan
+
+Planning Result: complete
 
 ## Accepted Scope
 Ready.
@@ -331,6 +380,12 @@ function completeTemplate(kind: "architecture-brief" | "architecture-plan" | "te
   }
   if (kind === "final-acceptance") {
     return completed.replace("## Decision\n\nNone.", "## Decision\n\naccepted");
+  }
+  if (kind === "architecture-plan") {
+    return completed.replace(
+      "Planning Result: complete|incomplete|user clarification required",
+      "Planning Result: complete"
+    );
   }
   return completed;
 }

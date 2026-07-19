@@ -102,9 +102,15 @@ Task-specific context and coder guidance go here, not in source-code comments.
 Source-code comments should only describe durable behavior, contracts, invariants,
 error boundaries, or non-obvious logic that should remain useful after this task.
 
-| ID | File / Action | Current Evidence / Why In Scope | Coder Work | Allowed Freedom | Expected VCM:CODE | Durable Comment Needs | Behavior / Contract Proof Points |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| SCF-001 | TBD | TBD | TBD | TBD | TBD | TBD | TBD |
+| ID | Action | File | Symbol Or Site | Coder Work | Allowed Implementation Freedom | Behavior / Contract Proof Point |
+| --- | --- | --- | --- | --- | --- | --- |
+| TBD | TBD | TBD | TBD | TBD | TBD | TBD |
+
+## Scaffold Build Evidence
+
+| Check | Command | Result | Scaffold Commit |
+| --- | --- | --- | --- |
+| TBD | TBD | TBD | TBD |
 
 ## Tester Coverage Hints
 

@@ -79,6 +79,16 @@ describe("createArtifactService", () => {
       .resolves.not.toContain("## Remaining Markers");
     await expect(fs.readText("/repo/.ai/vcm/handoffs/architecture-plan.md"))
       .resolves.toContain("Planning Result: complete|incomplete|user clarification required");
+    await expect(fs.readText("/repo/.ai/vcm/handoffs/architecture-plan.md"))
+      .resolves.toContain("| ID | Action | File | Symbol Or Site | Coder Work | Allowed Implementation Freedom | Behavior / Contract Proof Point |");
+    await expect(fs.readText("/repo/.ai/vcm/handoffs/architecture-plan.md"))
+      .resolves.toContain("## Scaffold Build Evidence");
+    await expect(fs.readText("/repo/.ai/vcm/handoffs/architecture-plan.md"))
+      .resolves.not.toContain("File / Action");
+    await expect(fs.readText("/repo/.ai/vcm/handoffs/architecture-plan.md"))
+      .resolves.not.toContain("Expected VCM:CODE");
+    await expect(fs.readText("/repo/.ai/vcm/handoffs/architecture-plan.md"))
+      .resolves.not.toContain("SCF-001");
     await expect(fs.readText("/repo/.ai/vcm/handoffs/architecture-brief.md"))
       .resolves.toContain("Architecture Brief Status: interviewing|confirmed");
     await expect(fs.readText("/repo/.ai/vcm/handoffs/architect-debug.md"))

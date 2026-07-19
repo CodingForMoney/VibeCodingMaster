@@ -27,6 +27,7 @@ const REQUIRED_HEADINGS: Record<ArtifactKind, readonly string[]> = {
     "Module/File Plan",
     "Public Surface Impact",
     "Scaffold Manifest",
+    "Scaffold Build Evidence",
     "Tester Coverage Hints",
     "Docs Impact",
     "Known Risks",
@@ -122,6 +123,16 @@ export function checkMarkdownArtifact(
 }
 
 function validateArtifactFields(kind: ArtifactKind, content: string): string[] {
+  if (kind === "architecture-plan") {
+    const result = /^\s*Planning Result\s*:\s*(.+?)\s*$/im.exec(content)?.[1]?.trim().toLowerCase();
+    if (!result) {
+      return ["Planning Result is required and must be complete."];
+    }
+    return result === "complete"
+      ? []
+      : [`Planning Result must be complete; received "${result}".`];
+  }
+
   if (kind === "architecture-brief") {
     const status = /^\s*Architecture Brief Status\s*:\s*(\S+)\s*$/im.exec(content)?.[1]?.toLowerCase();
     const invalidFields = status === "interviewing" || status === "confirmed"
