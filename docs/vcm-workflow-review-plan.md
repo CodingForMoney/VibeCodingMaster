@@ -303,6 +303,12 @@ Workflow Review cannot rely on a PM-declared current state. Its only source of
 truth is an append-only task-scoped record of confirmed normal-role dispatches
 and resolved Gate checkpoints.
 
+VCM initializes a versioned Flow Record with the task slug and an empty event
+list when a task is created. An active older task with no Flow Record is
+initialized the same way. An existing malformed record is never treated as
+empty: VCM denies new role dispatches and reports the parsing or validation
+error until the task is repaired or closed.
+
 Each entry contains at least:
 
 ```text
@@ -355,6 +361,11 @@ Branch state is derived from the sequence:
 The complete record therefore determines whether a Branch is active and which
 Code-Change path may resume. No separately persisted cursor can drift from the
 dispatch history.
+
+A top-level Flow switch appends a new Flow segment to the same record. It never
+clears, replaces, or truncates earlier events. Earlier segments remain evidence
+for validating which switch was legal, but they create no automatic return
+point.
 
 PM cannot append or rewrite this record. Session, Turn, Round, Gate Review,
 artifact, and process states remain independent. Runtime events may only confirm
@@ -836,7 +847,8 @@ Workflow Review.
 ## 14. Persistence And Recovery
 
 The Flow Record, pending approval, dispatching approval, rejection fingerprint,
-and override evidence are task-scoped backend data in the active worktree.
+and override evidence are task-scoped backend data in the active worktree. They
+are not copied to the base repository or a project-wide workflow history.
 
 VCM restores the authoritative Flow Record first. A malformed record produces
 an explicit recovery error and grants no transition. Every restored approval
@@ -879,13 +891,24 @@ or resolved Gate checkpoint and consuming its approval is atomic. Repeating
 reconciliation after another restart cannot append the same Flow Record event,
 consume an approval twice, or resend a route already proven complete.
 
-Task close clears runtime approval state. Flow Record retention follows the
-task-close policy decided before implementation and cannot block task close.
+Task close always clears pending and dispatching approvals and proceeds even if
+Workflow Review data is incomplete or malformed. Such conditions may produce a
+warning but cannot block worktree removal. The Flow Record is deleted with the
+task worktree and is not archived elsewhere. Re-entering an active task restores
+its record; a closed task has no resumable Workflow Review state.
 
 ## 15. Required Tests
 
 Backend unit and end-to-end coverage must include:
 
+- new task creation initializes a versioned empty Flow Record
+- entering an active older task with no Flow Record initializes an empty record
+- a malformed existing Flow Record denies role dispatch with an exact error but
+  cannot block task close
+- top-level Flow switches append new segments without clearing earlier events
+- re-entering an active task restores its complete Flow Record
+- task close clears approval state, succeeds with unfinished or malformed
+  Workflow Review data, and creates no base-repository or project-wide archive
 - every main-path transition in Section 11 has a positive policy and backend
   integration test
 - every allowed branch in Section 11 has a positive policy and end-to-end test
@@ -1061,18 +1084,18 @@ transcript message before advancing. Gate recovery uses its exact request ID,
 signature, and actionable result. Unproven work returns to pending only when its
 original input remains intact; otherwise it is invalidated without advancing.
 
-1. **Flow Record lifecycle boundaries.** Define the empty initial record,
-    top-level Flow replacement history, record retention at task close, and
-    guaranteed task close that cannot be blocked by malformed or unfinished
-    Workflow Review runtime data. User waiting, Final Acceptance completion, and
-    PR preparation are outside Workflow Review.
-2. **User-authorization source capture.** Define how VCM captures and identifies
+The Flow Record lifecycle question is resolved in Sections 10 and 14. A task
+starts with a versioned empty record, active tasks restore it, and Flow switches
+append history. Task close always succeeds and removes Workflow Review state
+with the worktree without copying or archiving it elsewhere.
+
+1. **User-authorization source capture.** Define how VCM captures and identifies
    exact direct user messages from Embedded Terminal, Gateway, and other input
    paths so PM cannot fabricate, broaden, or reuse override authorization.
-3. **Override evidence retention.** Decide whether override evidence survives
+2. **Override evidence retention.** Decide whether override evidence survives
    task close or remains task-runtime evidence only, while preserving audit and
    one-time-use guarantees for the lifetime selected.
-4. **Machine-policy and Harness synchronization.** Decide whether one source
+3. **Machine-policy and Harness synchronization.** Decide whether one source
    generates both the backend transition policy and PM Harness description, or
    independent definitions are compared by synchronization tests. Manual drift
    must fail validation before release.
