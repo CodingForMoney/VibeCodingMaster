@@ -371,9 +371,8 @@ The allowed branches are:
 - Final Acceptance `needs-architect-follow-up` returns to Architect
 - Final Acceptance `needs-docs-sync` returns to Architect Docs Sync
 - Final Acceptance `blocked-by-user-decision` makes PM wait for the user without
-  changing Workflow Review state
-- follow-up work resumes from the earliest affected Code-Change step and repeats
-  every downstream Gate
+  appending to the Flow Record
+- each follow-up uses the fixed dispatch sequence below
 - Final Acceptance `accepted` completes the task through the existing task
   lifecycle without a Workflow Review request
 - Final Acceptance `accepted-with-known-risks` uses the existing user-approval
@@ -396,6 +395,48 @@ These branches produce the following record extensions:
 - a Final Acceptance Architect or docs-sync follow-up appends Architect; any
   later dispatch must independently match a legal Code-Change continuation,
   Debug entry, or Diagnosis entry
+
+Final Acceptance follow-up sequences are fixed.
+
+Coder follow-up appends:
+
+```text
+code-change / coder
+-> code-change / gate-reviewer / code-diff / coder
+-> code-change / tester
+-> code-change / gate-reviewer / validation-adequacy
+-> code-change / architect
+```
+
+Coder continuation may repeat Coder before Code Diff Gate. Every downstream
+Gate, Tester dispatch, and docs-sync dispatch is required again.
+
+Architect follow-up appends:
+
+```text
+code-change / architect
+-> code-change / gate-reviewer / architecture-plan
+-> code-change / coder
+-> code-change / gate-reviewer / code-diff / coder
+-> code-change / tester
+-> code-change / gate-reviewer / validation-adequacy
+-> code-change / architect
+```
+
+Architect continuation and Gate revision loops remain legal inside this fixed
+sequence. The architecture-plan Gate, Coder, and every downstream dispatch are
+required again.
+
+Docs-sync follow-up appends Architect in `code-change`. Incomplete docs sync may
+repeat Architect. Successful docs sync returns to PM Final Acceptance without
+another role or Gate dispatch.
+
+Architect follow-up and docs-sync follow-up begin with the same Flow Record
+event. Workflow Review does not record the reason. A later architecture-plan
+Gate selects the Architect follow-up sequence; repeated Architect dispatches or
+no further role dispatch remain the docs-sync path. Direct Coder, Tester, or
+another Gate dispatch from that shared prefix is denied unless it matches one
+of these fixed sequences or an explicitly allowed Debug or Diagnosis entry.
 
 ### 11.2 Architect Debug Flow And Branch
 
@@ -769,6 +810,12 @@ Backend unit and end-to-end coverage must include:
 - all main dispatch sequences, same-role repetitions, Gate revision loops, Flow
   switches, Branch replacements, and Branch returns listed in Section 11 are
   covered
+- Final Acceptance Coder follow-up repeats Code Diff Gate, Tester, Validation
+  Adequacy Gate, and Architect docs sync
+- Final Acceptance Architect follow-up repeats Architecture Plan Gate, Coder,
+  every downstream Gate, Tester, and Architect docs sync
+- Final Acceptance docs-sync follow-up permits Architect repetition but no
+  direct Coder, Tester, or Gate dispatch
 - the pure matcher does not mutate the Flow Record or persist a derived cursor
 - the same Flow Record, requested Flow, and target role always return the same
   decision and legal Gate-signature set
@@ -868,34 +915,35 @@ sequence through Tester may switch to standalone Diagnosis. These are top-level
 Flow segments with no automatic return. Other switches require exact user
 authorization.
 
-1. **Final Acceptance follow-up mapping.** Replace "earliest affected step" with
-   fixed destinations and required downstream Gates for
-   `needs-coder-follow-up`, `needs-architect-follow-up`, and
-   `needs-docs-sync`.
-2. **Approval-to-dispatch correlation.** Target-role equality alone cannot
+The Final Acceptance follow-up question is resolved in Section 11.1. Coder
+follow-up repeats Code Diff Gate and every downstream dispatch. Architect
+follow-up repeats Architecture Plan Gate and the complete downstream path.
+Docs-sync follow-up repeats only Architect before PM reruns Final Acceptance.
+
+1. **Approval-to-dispatch correlation.** Target-role equality alone cannot
    distinguish the newly approved message from an older pending route to the
    same role. Define how VCM recognizes the first eligible dispatch created
    after approval without adding approval metadata to route files.
-3. **Gate Reviewer approval consumption.** Define exact matching for gate type
+2. **Gate Reviewer approval consumption.** Define exact matching for gate type
    and code source, existing running Gate behavior, consumption for
    `started`/`running`/`disabled`/`not_required`/`already_approved`, recovery for
    `failed_to_start`, and tests that distinguish Gate consumption from normal
    `UserPromptSubmit` confirmation.
-4. **Restart reconciliation.** Define how a restored `dispatching` approval is
+3. **Restart reconciliation.** Define how a restored `dispatching` approval is
    classified as unsent, submitted, started, completed, or failed so VCM neither
    duplicates a dispatch nor advances a transition that never started.
-5. **Flow Record lifecycle boundaries.** Define the empty initial record,
+4. **Flow Record lifecycle boundaries.** Define the empty initial record,
     top-level Flow replacement history, record retention at task close, and
     guaranteed task close that cannot be blocked by malformed or unfinished
     Workflow Review runtime data. User waiting, Final Acceptance completion, and
     PR preparation are outside Workflow Review.
-6. **User-authorization source capture.** Define how VCM captures and identifies
+5. **User-authorization source capture.** Define how VCM captures and identifies
    exact direct user messages from Embedded Terminal, Gateway, and other input
    paths so PM cannot fabricate, broaden, or reuse override authorization.
-7. **Override evidence retention.** Decide whether override evidence survives
+6. **Override evidence retention.** Decide whether override evidence survives
    task close or remains task-runtime evidence only, while preserving audit and
    one-time-use guarantees for the lifetime selected.
-8. **Machine-policy and Harness synchronization.** Decide whether one source
+7. **Machine-policy and Harness synchronization.** Decide whether one source
    generates both the backend transition policy and PM Harness description, or
    independent definitions are compared by synchronization tests. Manual drift
    must fail validation before release.
