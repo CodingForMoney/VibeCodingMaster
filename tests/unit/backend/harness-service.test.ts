@@ -176,6 +176,11 @@ describe("createHarnessService", () => {
     expect(gateReviewerAgent).toContain("tools: Read, Grep, Glob, Bash, Write");
     expect(gateReviewerAgent).toContain("You are VCM `gate-reviewer`");
     expect(gateReviewerAgent).toContain("Use the task and worktree paths named there");
+    expect(gateReviewerAgent).toContain("Every Gate Review is a complete review of the current gate inputs");
+    expect(gateReviewerAgent).toContain("complete current executable plan, not");
+    expect(gateReviewerAgent).not.toContain("record a verification plan");
+    expect(gateReviewerAgent).not.toContain("carry hash-valid");
+    expect(projectManagerAgent).not.toContain("only unverified remaining verification items");
     const translatorAgents = await fs.readText("/repo/.claude/agents/translator.md");
     expect(translatorAgents).toContain("name: translator");
     expect(translatorAgents).toContain("You are VCM `translator`");

@@ -31,28 +31,22 @@ Use only these decisions:
 - `approve`: required gate evidence is present, current, internally consistent, sufficient for that gate, and has no gate-blocking finding.
 - `request_changes`: evidence is missing, stale, contradictory, incomplete, insufficient, not reviewable, or unsafe.
 
-On a re-review of a revised artifact, run the full gate review again on the
-current artifact state. Verifying that prior findings are resolved is
-necessary but never sufficient to approve. Re-run every mechanical check each
-round; a substantive verification item closed at a recorded artifact commit
-hash stays closed while that hash is unchanged and re-opens when it changes.
-
-At the start of any gate review, record a verification plan in the report:
-every mandatory check for that gate, the per-module closure items implied by
-the reviewed artifact, and every cross-cutting load-bearing claim — each with
-its verification method (tool run, command re-run, or direct reading) and
-status, and on closure the artifact commit hash it was verified at. On a
-re-request, load the prior report's verification plan and carry hash-valid
-closures forward. Approve only when every item is closed at the current
-artifact state. If the round ends before every item is closed, return
-`request_changes` whose report marks the remaining items as unverified —
-distinguishing unverified from defective — so project-manager can re-request
-the gate to continue verification.
+Every Gate Review is a complete review of the current gate inputs. Review all
+required evidence and rerun every required mechanical check before deciding.
+Do not carry forward prior conclusions, closed checks, or partial verification.
+Resolving prior findings does not replace the complete review. Return `approve`
+or `request_changes` only after the review is complete.
 
 ## Architecture Plan Gate
 
 Format is necessary but not sufficient. Do not approve an architecture plan
 only because required sections exist.
+
+Treat `architecture-plan.md` as the complete current executable plan, not
+revision history. Review the entire current plan and scaffold, not only changed
+sections or prior findings. Return `request_changes` if the plan retains
+superseded decisions, obsolete ledger items, resolved findings, prior-round
+notes, stale risks, or outdated implementation guidance.
 
 Before any other architecture-plan analysis, reconcile the Scaffold Manifest
 ledger against the committed scaffold (`.ai/tools/check-scaffold-ledger`
