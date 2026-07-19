@@ -62,17 +62,25 @@ The command-line interface is:
 ```text
 .ai/tools/request-workflow-review --target-role <role>
 .ai/tools/request-workflow-review --flow <flow> --target-role <role>
+.ai/tools/request-workflow-review --flow <flow>
 .ai/tools/request-workflow-review [--flow <flow>] --target-role <role> \
   --user-authorization <exact-user-text>
 ```
 
-`--target-role` is required for every PM-to-role dispatch. `--flow` is supplied
-only when starting a flow or switching to another flow:
+`--target-role` is required for every PM-to-role dispatch. A request without a
+target role is allowed only for an explicitly defined checkpoint that does not
+dispatch a role, including successful return from a Code-Change Branch.
+
+`--flow` is supplied when starting a flow, switching a top-level flow, entering
+or replacing a Code-Change Branch, or requesting return from a Branch:
 
 - no active flow plus `--flow` starts that flow
 - omitted `--flow` continues the current flow
-- the current flow supplied again is an idempotent continuation request
-- a different flow requests a flow switch or branch entry
+- the current top-level flow supplied again without an active Branch is an
+  idempotent continuation request
+- `--flow code-change` while a Code-Change Branch is active requests Branch exit
+- a different flow requests a top-level switch, Branch entry, or Debug-to-
+  Diagnosis Branch replacement as determined by current state
 
 The supported flow values are `code-change`, `architect-debug`,
 `architecture-diagnosis`, `docs-only`, `validation-only`,
@@ -80,10 +88,12 @@ The supported flow values are `code-change`, `architect-debug`,
 
 The request does not contain a destination step, branch, resume point, workflow
 revision, evidence references, approval identifier, or separate operation
-label. VCM derives the legal destination from authoritative workflow state,
-observed artifacts, Gate Review state, the optional requested flow, and the
-target role. Architect Debug and Architecture Diagnosis are interpreted as
-standalone flows or Code-Change branches from the current authoritative state.
+label. VCM derives the legal destination from authoritative workflow state, the
+optional requested flow, and the target role. PM selects the requested legal
+path from the role or Gate result it received; VCM does not parse that result or
+use a Hook to choose the transition for PM. Architect Debug and Architecture
+Diagnosis are interpreted as standalone flows or Code-Change branches from the
+current authoritative state.
 From a non-Code-Change flow they are top-level flow switches. From Code-Change,
 Debug or Diagnosis enters the single Branch slot; Diagnosis requested while
 Debug Branch is active replaces Debug and preserves its entry and resume steps.
@@ -98,8 +108,10 @@ allowed
 denied
 ```
 
-For `allowed`, VCM stores the approved target role and derived destination
-state. PM then writes the normal route message and ends the turn.
+For `allowed` with a target role, VCM stores the approved target role and
+derived destination state. PM then writes the normal route message and ends the
+turn. For an allowed no-route checkpoint, VCM applies the derived state change
+immediately and creates no pending dispatch approval.
 
 For `denied`, VCM stores no dispatch approval. The tool returns the current
 workflow state, requested target role and flow, the exact rejection reason, and
@@ -244,9 +256,9 @@ Implementation must separate or replace the existing advisory declaration:
 - PM cannot directly set authoritative flow, step, branch, resume point, or
   revision
 - Session, Turn, Round, Gate Review, artifact, and process states remain
-  independent sources of observed facts
-- workflow policy may use those facts as transition guards without merging
-  their state machines
+  independent and cannot originate an authoritative workflow transition
+- runtime events may confirm execution of an already approved dispatch but do
+  not select or apply PM's next workflow transition
 - frontend code only displays state and user-authorization controls
 
 The existing `update-task-state` endpoint and tool must not be able to mutate
@@ -514,32 +526,41 @@ When Debug Branch escalates, VCM atomically replaces its `type` and `step` with
 Architecture Diagnosis while preserving `entered from step` and `resume step`.
 Debug is no longer active and Diagnosis completion never returns to Debug.
 
-A Debug Branch may exit successfully only after its Code Diff Gate permits
-continuation and Tester passes. A code-producing Diagnosis Branch has the same
-exit requirement. An analysis-only Diagnosis Branch is permitted only for the
-second architecture-plan update or replacement path and returns to Architect
-Planning after the diagnosis artifact is complete.
+A Debug Branch is eligible for successful exit after PM receives Code Diff Gate
+continuation and Tester `pass`. A code-producing Diagnosis Branch has the same
+exit point. An analysis-only Diagnosis Branch may return only from the second
+architecture-plan update or replacement path after Architect reports analysis
+completion.
 
 `normal architecture plan required` is not a successful Debug return. VCM
 clears Debug Branch and moves Code-Change to Architect Planning according to
 that explicit branch outcome instead of using the stored success resume step.
 
-Successful Branch exit is one backend transaction:
+After receiving the qualifying role result, PM requests successful return with:
 
-1. verify the current Branch, terminal evidence, workflow revision, and stored
-   resume step
+```text
+.ai/tools/request-workflow-review --flow code-change
+```
+
+VCM checks that the current Branch step has an allowed return edge. It does not
+read the role report or infer the result independently. An allowed no-route
+request applies this transaction immediately:
+
+1. verify the current Branch, exit-capable Branch step, workflow revision, and
+   stored resume step
 2. clear `branch`
 3. set the Code-Change `step` to the stored resume step
 4. increment the workflow revision and invalidate any pending dispatch approval
 
-PM does not request Branch exit and cannot escape an active Branch by requesting
-`--flow code-change`. The backend applies exit when the owning Hook, Gate
-controller, or workflow checkpoint confirms the required terminal evidence.
-Until then, all Code-Change parent-flow dispatches are denied.
+PM is the only source of the Branch-exit request. Hooks, Gate controllers, role
+reports, and handoff artifacts do not exit the Branch automatically. A request
+from a non-exit-capable Branch step is denied. Until PM obtains an allowed exit,
+all Code-Change parent-flow dispatches are denied.
 
-If Diagnosis Tester fails, VCM retains the Diagnosis Branch and resume step and
-sets status to `awaiting-user`. A user-authorized flow switch may leave the
-Branch only for the exact recorded exception.
+If Diagnosis Tester fails, PM does not request Branch exit; the Diagnosis Branch
+and resume step remain active while PM requests the permitted user-waiting
+checkpoint. A user-authorized flow switch may leave the Branch only for the
+exact recorded exception.
 
 ## 12. Workflow Policy
 
@@ -553,7 +574,6 @@ Each transition definition must identify:
 - optional active branch and resume point
 - optional requested flow
 - permitted target role, if the transition dispatches a role
-- required artifact, Gate Review, or runtime guards
 - destination flow and step
 - branch entry, branch exit, or resume behavior
 
@@ -563,11 +583,14 @@ VCM never asks PM to name or choose a separate operation label. Its decision is:
 
 ```text
 current authoritative state
-+ observed facts
 + optional requested flow
 + target role
 -> allow or deny, plus the unique destination state
 ```
+
+PM selects one of the legal outgoing transitions after interpreting the role,
+Gate, or user result. VCM validates the requested transition against the closed
+policy; it does not independently interpret those results to choose for PM.
 
 If those inputs permit multiple incompatible destination states, the machine
 policy is ambiguous and must be corrected. PM must not resolve such ambiguity
@@ -580,20 +603,22 @@ explain the same policy to the model.
 ## 13. Checkpoints Without A Role Route
 
 Not every workflow checkpoint sends a PM route message. Waiting for the user,
-starting Gate Review, receiving a Gate callback, Final Acceptance, task
-completion, and PR preparation may also change workflow state.
+starting Gate Review, handling a Gate callback, Final Acceptance, task
+completion, Branch exit, and PR preparation may also change workflow state.
 
-The same workflow-review service must eventually validate those changes at
-their backend controller. Route-message enforcement covers PM role dispatch but
-cannot by itself prevent every illegal workflow advance.
+Every no-route checkpoint that changes authoritative workflow state starts with
+a PM workflow-review request. When allowed, the request applies the state change
+without creating a dispatch approval. Gate controllers, Hooks, role reports,
+and handoff artifacts may notify PM or confirm an already approved dispatch;
+they do not originate or choose the next workflow transition.
 
 Before implementation, the policy must enumerate which no-route checkpoints:
 
-- require PM to call the workflow-review tool first
-- are backend events applied automatically after an already approved
+- PM may request from each source state
+- apply immediately after approval without a role dispatch
+- consume or confirm a previously approved dispatch without choosing a new
   transition
-- are direct user decisions
-- are observations that do not change workflow state
+- are observations delivered to PM without changing workflow state
 
 ## 14. Persistence And Recovery
 
@@ -632,15 +657,21 @@ Backend unit and end-to-end coverage must include:
   steps without creating another Branch layer
 - successful Branch exit atomically clears the Branch, restores the stored
   Code-Change resume step, increments revision, and invalidates stale approvals
-- incomplete Branch evidence and Diagnosis Tester failure retain the Branch and
-  prevent Code-Change dispatch
+- an active Branch remains unchanged without a PM exit request
+- Branch exit from a non-exit-capable step is denied
+- Hooks, Gate callbacks, role reports, and handoff changes do not automatically
+  exit a Branch
 - a non-Code-Change flow moves to Debug or Diagnosis by top-level flow switch,
   never by Branch creation
 - starting without an active flow requires `--flow`
 - starting a flow with a legal target derives the initial destination state
 - omitting `--flow` continues the current flow
-- repeating the current `--flow` is an idempotent continuation request
-- requesting another flow is validated as a flow switch or branch entry
+- repeating the current `--flow` without an active Branch is an idempotent
+  continuation request
+- `--flow code-change` from an exit-capable Code-Change Branch performs an
+  allowed no-route Branch exit
+- requesting another flow is validated as a top-level switch, Branch entry, or
+  Debug-to-Diagnosis Branch replacement
 - Architect Debug and Architecture Diagnosis resolve to a standalone flow or
   branch from authoritative state
 - ambiguous destination states are denied instead of delegated to PM
