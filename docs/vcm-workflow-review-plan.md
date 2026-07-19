@@ -8,8 +8,9 @@ implementation.
 ## 1. Goal
 
 VCM must enforce the fixed task flows and their explicitly allowed branches.
-Project Manager proposes the next workflow action, but VCM decides whether that
-action is legal in the current workflow state.
+Project Manager proposes the next target role and, only when starting or
+switching a flow, the selected flow. VCM decides whether that request is legal
+in the current workflow state.
 
 The governing rule is deny by default:
 
@@ -20,7 +21,7 @@ The governing rule is deny by default:
 - only an exact user-authorized override may bypass a rejected transition
 
 VCM validates workflow legality. It does not perform technical analysis or
-choose the next action for PM.
+choose the next target for PM.
 
 ## 2. Current Gap
 
@@ -36,7 +37,8 @@ next role or bypassing a required flow branch.
 
 Workflow dispatch uses two backend-enforced stages:
 
-1. PM asks VCM to review the proposed next workflow action.
+1. PM asks VCM to review the proposed target role and any requested flow start
+   or switch.
 2. VCM allows the next PM route only when it matches the approved target role.
 
 The approval is backend state. PM does not copy an approval identifier,
@@ -55,17 +57,36 @@ Add:
 
 PM must use the skill before every PM-to-role route.
 
-The review request identifies:
+The command-line interface is:
 
-- the proposed workflow action or destination step
-- the target role
-- evidence references required by that action
-- user-authorization evidence only when requesting an override
+```text
+.ai/tools/request-workflow-review --target-role <role>
+.ai/tools/request-workflow-review --flow <flow> --target-role <role>
+.ai/tools/request-workflow-review [--flow <flow>] --target-role <role> \
+  --user-authorization <exact-user-text>
+```
 
-The proposed workflow action is required because the same target role can serve
-different steps. An Architect dispatch may mean interview, planning, revision,
-Debug, Architecture Diagnosis, or docs sync. This information belongs to the
-workflow-review request and backend state, not to the later route message.
+`--target-role` is required for every PM-to-role dispatch. `--flow` is supplied
+only when starting a flow or switching to another flow:
+
+- no active flow plus `--flow` starts that flow
+- omitted `--flow` continues the current flow
+- the current flow supplied again is an idempotent continuation request
+- a different flow requests a flow switch or branch entry
+
+The supported flow values are `code-change`, `architect-debug`,
+`architecture-diagnosis`, `docs-only`, `validation-only`,
+`communication-only`, and `pr-preparation`.
+
+The request does not contain a destination step, branch, resume point, workflow
+revision, evidence references, approval identifier, or separate operation
+label. VCM derives the legal destination from authoritative workflow state,
+observed artifacts, Gate Review state, the optional requested flow, and the
+target role. Architect Debug and Architecture Diagnosis are interpreted as
+standalone flows or branches from the current authoritative state.
+
+When requesting an override after a denial, PM also supplies the exact user
+authorization text. VCM resolves and verifies its backend-owned source record.
 
 The tool returns one of two normal results:
 
@@ -74,13 +95,13 @@ allowed
 denied
 ```
 
-For `allowed`, VCM stores the approved next dispatch. PM then writes the normal
-route message and ends the turn.
+For `allowed`, VCM stores the approved target role and derived destination
+state. PM then writes the normal route message and ends the turn.
 
 For `denied`, VCM stores no dispatch approval. The tool returns the current
-workflow state, the rejected action, the exact rejection reason, and the actions
-allowed from the current state. PM remains in the current turn, checks the flow
-again, and proposes another action.
+workflow state, requested target role and flow, the exact rejection reason, and
+the target roles or flow changes allowed from the current state. PM remains in
+the current turn, checks the flow again, and submits another review request.
 
 ## 5. Pending Dispatch Approval
 
@@ -92,10 +113,11 @@ The backend record contains at least:
 task slug
 workflow revision
 source workflow state
-approved action
+requested flow when supplied
 approved target role
+derived destination workflow state
 normal or user-override decision
-evidence references
+evaluated backend guard facts
 created time
 user-authorization evidence when applicable
 dispatch status
@@ -175,23 +197,23 @@ changes the route or obtains a new approval.
 An override permits one specific transition that normal workflow review denied.
 It does not disable workflow enforcement.
 
-PM submits the same workflow-review request with:
+PM retries workflow review with:
 
-- the rejected proposed action
+- the requested flow when starting or switching a flow
 - the target role
 - the exact user authorization text
-- a VCM-owned reference to the source user message
 
-VCM must verify that the quoted text matches the recorded source message. PM
-text alone is not proof of authorization.
+VCM must resolve a VCM-owned source user-message record and verify that the
+quoted text matches it. PM text alone is not proof of authorization.
 
 The override record binds:
 
 - task slug
 - current workflow revision
 - rejected source state
-- exact approved action
+- requested flow when supplied
 - exact target role
+- exact derived destination state
 - user authorization text and source
 - the normal rule being bypassed
 - approval and consumption times
@@ -200,7 +222,7 @@ The resulting pending dispatch approval uses the same route enforcement as a
 normal approval. The route message still contains no approval metadata.
 
 An override is one-time and cannot be reused after any workflow state change,
-for another role, another action, another task, or a broader exception.
+for another role, another flow request, another task, or a broader exception.
 
 Workflow override authority bypasses only the fixed workflow transition rule.
 It does not bypass filesystem permissions, role boundaries, PM-hub routing,
@@ -214,7 +236,8 @@ that appears legal.
 
 Implementation must separate or replace the existing advisory declaration:
 
-- authoritative workflow state is changed only by confirmed approved actions
+- authoritative workflow state is changed only by confirmed approved
+  transitions
 - PM cannot directly set authoritative flow, step, branch, resume point, or
   revision
 - Session, Turn, Round, Gate Review, artifact, and process states remain
@@ -278,38 +301,48 @@ Each transition definition must identify:
 
 - source flow and step
 - optional active branch and resume point
-- proposed action
-- permitted target role, if the action dispatches a role
+- optional requested flow
+- permitted target role, if the transition dispatches a role
 - required artifact, Gate Review, or runtime guards
 - destination flow and step
 - branch entry, branch exit, or resume behavior
 
 Any transition absent from this policy is illegal.
 
-The workflow-review request identifies an action as well as its target role.
-The action distinguishes different legal uses of the same role, while the
-pending dispatch approval exposes only the resulting target role to route
-enforcement.
+VCM never asks PM to name or choose a separate operation label. Its decision is:
+
+```text
+current authoritative state
++ observed facts
++ optional requested flow
++ target role
+-> allow or deny, plus the unique destination state
+```
+
+If those inputs permit multiple incompatible destination states, the machine
+policy is ambiguous and must be corrected. PM must not resolve such ambiguity
+by supplying an extra label.
 
 The machine policy and installed PM Harness rules must remain synchronized by
 tests. The machine policy is authoritative for dispatch permission; the PM rules
 explain the same policy to the model.
 
-## 12. Operations Without A Role Route
+## 12. Checkpoints Without A Role Route
 
-Not every workflow action sends a PM route message. Waiting for the user,
+Not every workflow checkpoint sends a PM route message. Waiting for the user,
 starting Gate Review, receiving a Gate callback, Final Acceptance, task
-completion, and PR preparation also change workflow checkpoints.
+completion, and PR preparation may also change workflow state.
 
-The same workflow-review service must eventually validate those actions at
+The same workflow-review service must eventually validate those changes at
 their backend controller. Route-message enforcement covers PM role dispatch but
 cannot by itself prevent every illegal workflow advance.
 
-Before implementation, the policy must enumerate which no-route operations:
+Before implementation, the policy must enumerate which no-route checkpoints:
 
 - require PM to call the workflow-review tool first
-- are backend events applied automatically after an already approved action
-- are user actions
+- are backend events applied automatically after an already approved
+  transition
+- are direct user decisions
 - are observations that do not change workflow state
 
 ## 13. Persistence And Recovery
@@ -334,8 +367,17 @@ has been surfaced to the user.
 
 Backend unit and end-to-end coverage must include:
 
-- allowed review creates one pending target-role approval
-- denied review creates no approval and returns allowed alternatives
+- starting without an active flow requires `--flow`
+- starting a flow with a legal target derives the initial destination state
+- omitting `--flow` continues the current flow
+- repeating the current `--flow` is an idempotent continuation request
+- requesting another flow is validated as a flow switch or branch entry
+- Architect Debug and Architecture Diagnosis resolve to a standalone flow or
+  branch from authoritative state
+- ambiguous destination states are denied instead of delegated to PM
+- allowed flow-and-target review creates one pending target-role approval
+- denied flow-and-target review creates no approval and returns allowed
+  alternatives
 - PM route without approval is rejected
 - PM route to the approved role is dispatched
 - PM route to another role is rejected
@@ -353,14 +395,14 @@ Backend unit and end-to-end coverage must include:
 
 ## 15. Open Decisions Before Implementation
 
-The authoritative state model and deny-by-default transition-policy shape are
-decided above. The following must still be resolved before coding:
+The authoritative state model, workflow-review command-line interface, and
+deny-by-default transition-policy shape are decided above. The following must
+still be resolved before coding:
 
-1. The exact workflow-review request fields and command-line interface.
-2. How VCM captures and identifies direct user messages from embedded terminal,
+1. How VCM captures and identifies direct user messages from embedded terminal,
    Gateway, and other supported input paths for override evidence.
-3. The exact reconciliation rule for a dispatching approval after process or
+2. The exact reconciliation rule for a dispatching approval after process or
    application restart.
-4. The list and enforcement point of every no-route workflow operation.
-5. Whether workflow override evidence must survive task close or is task-runtime
+3. The list and enforcement point of every no-route workflow checkpoint.
+4. Whether workflow override evidence must survive task close or is task-runtime
    evidence only.
