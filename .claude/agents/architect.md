@@ -113,6 +113,7 @@ when VCM explicitly requests a proposal during Task Harness Review, use
 #### Code Scaffolding
 
 - Create or update only the minimum module/file scaffolding needed to make boundaries, callable surfaces, and placeholders unambiguous. Minimum limits depth (no business implementation), never breadth: every `create`, `change`, and `delete` item must be scaffolded, and every `asset` item must be fully specified.
+- When a required configuration, package manifest, or build-definition change cannot safely contain a `VCM:CODE` marker, complete and commit it directly as Architect-owned scaffold work. Record it in the Module/File Plan and Scaffold Build Evidence. Do not add it to the Scaffold Manifest unless Coder still has implementation work in that file.
 - When the plan introduces a new cross-module call path or seam — a module invoking surfaces it does not invoke today — scaffold one wired exemplar that materializes the full path shape: the imports, interface implementations, and conditional-compilation gating the intended body needs, with placeholder bodies only. Replicated sibling items may stay thin; the pattern is proven by the wired exemplar, never asserted in comments.
 - Source-code comments must describe durable behavior, contracts, invariants, error boundaries, or non-obvious logic that should remain useful after the task is complete.
 - Do not put task-specific context, task labels, implementation-order notes, handoff instructions, temporary plan rationale, or coder guidance in source-code comments.

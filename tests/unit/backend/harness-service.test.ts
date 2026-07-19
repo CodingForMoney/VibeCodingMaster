@@ -127,6 +127,7 @@ describe("createHarnessService", () => {
     expect(architectAgent).toContain("Architecture Diagnosis Mode is an upgraded Debug Mode");
     expect(architectAgent).toContain("first write a `Current Code Reality / Scope Discovery` row");
     expect(architectAgent).toContain("After `Current Code Reality / Scope Discovery` is complete");
+    expect(architectAgent).toContain("complete and commit it directly as Architect-owned scaffold work");
     expect(architectAgent).not.toContain("before deep analysis, write the planning work plan");
     expect(architectAgent).toContain("Do not diagnose from session memory");
     expect(architectAgent).toContain("Do not assume existing code or comments are correct");
