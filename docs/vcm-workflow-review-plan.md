@@ -130,6 +130,12 @@ current turn, checks the flow again, and submits another review request.
 
 Each task has at most one pending PM dispatch approval.
 
+Before creating a normal-role approval, VCM requires every
+`project-manager-*.md` outbound route file to be empty. A non-empty outbound
+file means an earlier message is still pending or unreconciled; the new review
+is denied with the exact file path and no approval is created. VCM does not
+silently clear or reuse that content.
+
 The backend record contains at least:
 
 ```text
@@ -138,6 +144,7 @@ base Flow Record sequence and hash
 requested flow when supplied
 effective flow
 approved target role
+expected route path for a normal role
 allowed Gate signatures when target role is Gate Reviewer
 normal or user-override decision
 created time
@@ -165,12 +172,18 @@ loads the task's pending dispatch approval and compares only backend-owned facts
 with the route:
 
 - the route is from Project Manager
+- the route path equals the approval's expected route path
 - the route target role equals the approved target role
 - the approval still matches the current Flow Record sequence and hash
 - the approval has not already been consumed or invalidated
 
 When these conditions match, VCM permits the normal message dispatch. No
 workflow approval fields are required in route-file frontmatter.
+
+Workflow Review approval creation, route scanning, approval claiming, and
+dispatch confirmation use the same task lock. After approval, only newly
+written non-empty content at the expected route path may claim it. An outbound
+file at another path has no approval and is not dispatched.
 
 When no pending approval exists, the approval was denied, the target role does
 not match, or the approval is stale, VCM must not send the message.
@@ -189,9 +202,10 @@ for PM's next workflow-review request and cannot append to the Flow Record.
 VCM must prevent both duplicate dispatch and false state advancement.
 
 When a matching normal route is selected for delivery, the pending approval
-moves to an internal dispatching state so another Hook cannot reuse it. The
-approval is consumed and cleared only when Claude Code confirms the target
-prompt through `UserPromptSubmit`.
+moves to an internal dispatching state and stores the exact route-content hash
+and generated message ID so another Hook cannot reuse it. The approval is
+consumed and cleared only when Claude Code confirms that message through
+`UserPromptSubmit`.
 
 For Gate Reviewer, the Gate controller consumes the approval and applies the
 confirmed dispatch record only when the matching request returns `started`,
@@ -207,6 +221,9 @@ target role started successfully.
 The confirmed dispatch atomically appends the approved flow-and-target event to
 the Flow Record and clears the pending approval. Branch entry, replacement, or
 return is derived from that complete record rather than stored as mutable state.
+The route file is cleared only when its current content still matches the
+claimed route-content hash. Content written after the claim remains pending and
+requires another Workflow Review approval.
 
 ## 8. Rejected Route Handling
 
@@ -792,6 +809,8 @@ On VCM restart or task re-entry:
 - stale approvals are invalidated with a recorded reason
 - a malformed Flow Record must produce an explicit recovery error rather than
   silently granting a transition
+- a non-empty PM outbound route file without a matching pending or dispatching
+  approval remains undelivered and is surfaced as an unauthorized pending route
 
 Task close clears runtime approval state. Flow Record retention follows the
 task-close policy decided before implementation and cannot block task close.
@@ -866,8 +885,17 @@ Backend unit and end-to-end coverage must include:
 - denied flow-and-target review creates no approval and returns allowed
   alternatives
 - PM route without approval is rejected
+- approval creation is denied while any PM outbound route file is non-empty
+- a normal-role approval records the only route path allowed to claim it
+- only route content written at that expected path after approval may move the
+  approval to dispatching
 - PM route to the approved role is dispatched
 - PM route to another role is rejected
+- claiming stores the exact route-content hash and message ID
+- confirmation clears the route file only when its content still matches the
+  claimed hash
+- content written after claim remains pending and cannot reuse the consumed
+  approval
 - one approval cannot dispatch two messages
 - a new review invalidates the prior unused approval
 - a Flow Record append invalidates an approval based on an older sequence
@@ -878,6 +906,8 @@ Backend unit and end-to-end coverage must include:
 - the Flow Record changes only after target `UserPromptSubmit`
 - failed terminal submission does not append to the Flow Record
 - restart reconciles pending and dispatching approvals
+- restart never sends a non-empty PM outbound route that has no matching
+  pending or dispatching approval
 - unchanged rejected routes do not generate repeated callbacks
 - exact user override is accepted and recorded
 - missing, mismatched, stale, or reused user authorization is rejected
@@ -920,30 +950,31 @@ follow-up repeats Code Diff Gate and every downstream dispatch. Architect
 follow-up repeats Architecture Plan Gate and the complete downstream path.
 Docs-sync follow-up repeats only Architect before PM reruns Final Acceptance.
 
-1. **Approval-to-dispatch correlation.** Target-role equality alone cannot
-   distinguish the newly approved message from an older pending route to the
-   same role. Define how VCM recognizes the first eligible dispatch created
-   after approval without adding approval metadata to route files.
-2. **Gate Reviewer approval consumption.** Define exact matching for gate type
+The normal route-correlation question is resolved in Sections 5 through 7.
+Every PM outbound route file must be empty before approval. The approval binds
+the expected path; claiming stores the exact content hash and message ID. Route
+files carry no workflow approval metadata.
+
+1. **Gate Reviewer approval consumption.** Define exact matching for gate type
    and code source, existing running Gate behavior, consumption for
    `started`/`running`/`disabled`/`not_required`/`already_approved`, recovery for
    `failed_to_start`, and tests that distinguish Gate consumption from normal
    `UserPromptSubmit` confirmation.
-3. **Restart reconciliation.** Define how a restored `dispatching` approval is
+2. **Restart reconciliation.** Define how a restored `dispatching` approval is
    classified as unsent, submitted, started, completed, or failed so VCM neither
    duplicates a dispatch nor advances a transition that never started.
-4. **Flow Record lifecycle boundaries.** Define the empty initial record,
+3. **Flow Record lifecycle boundaries.** Define the empty initial record,
     top-level Flow replacement history, record retention at task close, and
     guaranteed task close that cannot be blocked by malformed or unfinished
     Workflow Review runtime data. User waiting, Final Acceptance completion, and
     PR preparation are outside Workflow Review.
-5. **User-authorization source capture.** Define how VCM captures and identifies
+4. **User-authorization source capture.** Define how VCM captures and identifies
    exact direct user messages from Embedded Terminal, Gateway, and other input
    paths so PM cannot fabricate, broaden, or reuse override authorization.
-6. **Override evidence retention.** Decide whether override evidence survives
+5. **Override evidence retention.** Decide whether override evidence survives
    task close or remains task-runtime evidence only, while preserving audit and
    one-time-use guarantees for the lifetime selected.
-7. **Machine-policy and Harness synchronization.** Decide whether one source
+6. **Machine-policy and Harness synchronization.** Decide whether one source
    generates both the backend transition policy and PM Harness description, or
    independent definitions are compared by synchronization tests. Manual drift
    must fail validation before release.
