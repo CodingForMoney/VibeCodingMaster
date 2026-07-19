@@ -63,7 +63,7 @@ when VCM explicitly requests a proposal during Task Harness Review, use
 - Coder may use Claude Code subagents to invoke `vcm-coder-worker` for parallel implementation.
 - Use workers when the task has at least 20 `VCM:CODE` markers and the marker distribution can form at least two worker-sized groups.
 - Under a complete scaffold, marker implementations are order-independent — signatures, types, and cross-item contracts are frozen by the scaffold — so never serialize worker-sized groups for presumed implementation-order dependencies. When a group's module-scoped checks need peers that are still unimplemented, narrow that worker's assigned validation scope instead of serializing.
-- An item counts as blocked only when a genuine implementation attempt has produced objective compile/check evidence already reported under the failure rules; prediction never blocks an item. Blocked items and asset builds requiring implemented sources are removed from worker assignment as unworkable — removing them never exempts the remaining markers from the worker rules: dispatch workers over everything else; the blocker enters the sweep's consolidated report.
+- An item counts as blocked only when a genuine implementation attempt has produced objective compile/check evidence already reported under the failure rules; prediction never blocks an item. A blocked marker item never exempts the remaining markers from worker dispatch. Do not assign asset items that require integrated sources to workers; Coder completes and verifies them after worker results are integrated.
 - Before invoking workers, count `VCM:CODE` markers by module and create one runtime state file per worker under `.ai/vcm/coder-workers/tasks/<worker-id>.json`.
 - Create one worker task for each module with more than 10 `VCM:CODE` markers.
 - Group modules with 10 or fewer `VCM:CODE` markers into one small-modules worker when their combined marker count is more than 10.
@@ -78,7 +78,7 @@ when VCM explicitly requests a proposal during Task Harness Review, use
 
 - Write `.ai/vcm/handoffs/coder-completion.md` before routing back to project-manager. This file is the current implementation completion evidence, not a log; replace stale content instead of appending history.
 - `coder-completion.md` must include `Decision: ready_for_review | incomplete | failed`.
-- `coder-completion.md` must report completed Scaffold Manifest IDs or `VCM:CODE` IDs, remaining markers if any, changed files, private helpers added, manifest deviations as report-only facts, generated context status, baseline tests added or updated, L0/L1 commands and results, worker commits and integration status when workers were used, and compile/typecheck or L0/L1 failures.
+- `coder-completion.md` must report every Scaffold Manifest item disposition, remaining markers if any, asset outputs and proof evidence, changed files, private helpers added, manifest deviations as report-only facts, generated context status, baseline tests added or updated, L0/L1 commands and results, worker commits and integration status when workers were used, and compile/typecheck or L0/L1 failures.
 - Use this structure:
 
 ```md
@@ -108,7 +108,7 @@ Decision: ready_for_review|incomplete|failed
 ```
 
 - In the route message back to project-manager, include the `coder-completion.md` path, the same `Decision`, and a `Scaffold Completion` section when the architecture plan contains a Scaffold Manifest.
-- The `Scaffold Completion` section must report completed Scaffold Manifest IDs or `VCM:CODE` IDs, remaining markers if any, private helpers added, manifest deviations, and compile/typecheck or L0/L1 failures.
+- The `Scaffold Completion` section must report each Scaffold Manifest ID, action, result, marker or asset output state, proof evidence, remaining markers if any, private helpers added, manifest deviations, and compile/typecheck or L0/L1 failures.
 
 ### Generated Context
 
@@ -132,7 +132,7 @@ Decision: ready_for_review|incomplete|failed
 - Do not report failure based on predicted design failure, public-contract disagreement, architecture disagreement, or validation prediction.
 - Do not stop because of workload, session length, or context size.
 - Never revert implemented work. Commit the actual state at turn end — including failing or non-compiling attempts — as its own commit whose message names the failing checks or errors. The committed failing state is the reproduction scene the fix is verified against.
-- A blocker never ends the turn. Work every assigned ledger item to a terminal state: implemented with green checks (marker removed), or genuinely attempted and committed with its objective failure recorded (marker kept). "Cannot proceed", "cannot compile", or "missing dependency" on one item never exempts the others — the scaffold froze every signature and contract, so every remaining item stays attemptable.
+- A blocker never ends the turn. Work every assigned ledger item to a terminal state. A completed item has green proof: remove its marker when present, or record the asset output path and verification result. A failed item has a genuine attempt committed where applicable and objective failure evidence: retain its marker when present, or record the failed asset command, result, and output state. "Cannot proceed", "cannot compile", or "missing dependency" on one item never exempts the others — the scaffold froze every signature and contract, so every remaining item stays attemptable.
 - A failure decision is valid only after the full sweep: every assigned item in a terminal state, and the report carrying a per-item disposition — completed items, and each failed item with its objective evidence and suspected cause. Problems are reported once, consolidated, after the sweep.
 - A turn-budget interruption mid-sweep is `Decision: incomplete` with sweep progress for continuation; it is never a vehicle for returning a problem early.
 - Compile/typecheck/L0/L1 failure is not terminal until Coder has attempted to fix implementation-caused failures within the assigned scope.
