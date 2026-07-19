@@ -292,6 +292,8 @@ normal approval. The route message still contains no approval metadata.
 
 An override is one-time and cannot be reused after any Flow Record append,
 for another role, another flow request, another task, or a broader exception.
+Its evidence remains available for the lifetime of the active task so the
+decision can be audited and its consumption can be enforced.
 
 Workflow override authority bypasses only the fixed workflow transition rule.
 It does not bypass filesystem permissions, role boundaries, PM-hub routing,
@@ -893,9 +895,10 @@ consume an approval twice, or resend a route already proven complete.
 
 Task close always clears pending and dispatching approvals and proceeds even if
 Workflow Review data is incomplete or malformed. Such conditions may produce a
-warning but cannot block worktree removal. The Flow Record is deleted with the
-task worktree and is not archived elsewhere. Re-entering an active task restores
-its record; a closed task has no resumable Workflow Review state.
+warning but cannot block worktree removal. The Flow Record and override evidence
+are deleted with the task worktree and are not archived elsewhere. Re-entering
+an active task restores its record and override evidence; a closed task has no
+resumable Workflow Review state.
 
 ## 15. Required Tests
 
@@ -1028,6 +1031,9 @@ Backend unit and end-to-end coverage must include:
 - unchanged rejected routes do not generate repeated callbacks
 - exact user override is accepted and recorded
 - missing, stale, or reused user authorization is rejected
+- override evidence remains auditable and non-reusable throughout the active
+  task, then is deleted with the worktree without project-level archival
+- malformed override evidence may warn but cannot block task close
 - user override cannot bypass non-workflow safety controls
 
 ## 16. Open Decisions Before Implementation
@@ -1093,10 +1099,11 @@ User-authorization source capture is intentionally out of scope. PM supplies
 the exact user authorization text, and VCM records and binds it without
 authenticating the originating input channel.
 
-1. **Override evidence retention.** Decide whether override evidence survives
-   task close or remains task-runtime evidence only, while preserving audit and
-   one-time-use guarantees for the lifetime selected.
-2. **Machine-policy and Harness synchronization.** Decide whether one source
+Override evidence retention follows the Flow Record lifecycle. Evidence remains
+auditable and one-time within the active task, then is deleted with the task
+worktree without base-repository or project-wide archival.
+
+1. **Machine-policy and Harness synchronization.** Decide whether one source
    generates both the backend transition policy and PM Harness description, or
    independent definitions are compared by synchronization tests. Manual drift
    must fail validation before release.
