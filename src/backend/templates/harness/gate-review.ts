@@ -282,6 +282,7 @@ If there are no findings, write:
 ## Architecture Analysis
 
 - Evidence Read:
+- Architecture Brief Fit:
 - End-To-End Flow:
 - Scope Fit:
 - Code Reality:

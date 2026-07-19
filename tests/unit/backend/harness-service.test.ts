@@ -188,6 +188,7 @@ describe("createHarnessService", () => {
     expect(gateReviewerAgent).toContain("Use the task and worktree paths named there");
     expect(gateReviewerAgent).toContain("Every Gate Review is a complete review of the current gate inputs");
     expect(gateReviewerAgent).toContain("complete current executable plan, not");
+    expect(gateReviewerAgent.match(/- Architecture Brief Fit:/g)).toHaveLength(2);
     expect(gateReviewerAgent).not.toContain("record a verification plan");
     expect(gateReviewerAgent).not.toContain("carry hash-valid");
     expect(gateReviewerAgent).not.toContain("`asset`");
