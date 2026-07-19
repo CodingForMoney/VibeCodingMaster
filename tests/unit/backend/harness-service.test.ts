@@ -687,6 +687,51 @@ describe("createHarnessService", () => {
     expect(completedStatus.status).toBe("complete");
   });
 
+  it("keeps legacy project bootstrap completion for task-scoped status queries", async () => {
+    const fs = createMemoryFs();
+    const service = createHarnessService({ fs });
+    await service.applyHarness("/repo");
+    await fs.writeText("/repo/.ai/vcm-harness-manifest.json", "{}\n");
+    await fs.writeText("/repo/.ai/tools/check-durable-docs", "#!/usr/bin/env python3\n");
+    await fs.writeText("/repo/.ai/tools/generate-module-index", "#!/usr/bin/env python3\n");
+    await fs.writeText("/repo/.ai/tools/generate-public-surface", "#!/usr/bin/env python3\n");
+    await fs.writeText("/repo/docs/ARCHITECTURE.md", "# Architecture\n");
+    await fs.writeJson("/repo/.ai/vcm/bootstrap/session.json", {
+      version: 1,
+      status: "complete",
+      completedAt: "2026-07-02T00:00:00.000Z",
+      updatedAt: "2026-07-02T00:00:00.000Z"
+    });
+
+    const status = await service.getBootstrapStatus("/repo", "/repo", "new-task");
+
+    expect(status.checks.some((check) => check.status !== "ok")).toBe(true);
+    expect(status.status).toBe("complete");
+  });
+
+  it("keeps project bootstrap completion after the task that performed it", async () => {
+    const fs = createMemoryFs();
+    const service = createHarnessService({ fs });
+    await service.applyHarness("/repo");
+    await fs.writeText("/repo/.ai/vcm-harness-manifest.json", "{}\n");
+    await fs.writeText("/repo/.ai/tools/check-durable-docs", "#!/usr/bin/env python3\n");
+    await fs.writeText("/repo/.ai/tools/generate-module-index", "#!/usr/bin/env python3\n");
+    await fs.writeText("/repo/.ai/tools/generate-public-surface", "#!/usr/bin/env python3\n");
+    await fs.writeText("/repo/docs/ARCHITECTURE.md", "# Architecture\n");
+    await fs.writeJson("/repo/.ai/vcm/bootstrap/session.json", {
+      version: 1,
+      status: "complete",
+      taskSlug: "bootstrap-task",
+      targetRepoRoot: "/repo/bootstrap-task",
+      completedAt: "2026-07-02T00:00:00.000Z",
+      updatedAt: "2026-07-02T00:00:00.000Z"
+    });
+
+    const status = await service.getBootstrapStatus("/repo", "/repo", "later-task");
+
+    expect(status.status).toBe("complete");
+  });
+
   it("does not expose another task's active bootstrap state", async () => {
     const fs = createMemoryFs();
     const service = createHarnessService({
@@ -727,6 +772,60 @@ describe("createHarnessService", () => {
     const status = await service.getBootstrapStatus("/repo", "/repo", "task-b");
 
     expect(status.status).not.toBe("running");
+  });
+
+  it("does not treat a running bootstrap as active in another target worktree", async () => {
+    const fs = createMemoryFs();
+    const service = createHarnessService({
+      fs,
+      harnessEngineerSessions: {
+        async getRoleSession(_repoRoot, taskSlug) {
+          return {
+            id: "shared-harness-session",
+            claudeSessionId: "shared-claude-session",
+            taskSlug,
+            role: "harness-engineer",
+            status: "running",
+            activityStatus: "idle",
+            command: "claude --agent harness-engineer",
+            permissionMode: "default",
+            cwd: "/repo/current-task",
+            terminalBackend: "node-pty",
+            startedAt: "2026-06-22T00:00:00.000Z",
+            updatedAt: "2026-06-22T00:00:00.000Z"
+          } as RoleSessionRecord;
+        }
+      } as never
+    });
+    await service.applyHarness("/repo/current-task");
+    await fs.writeJson("/repo/.ai/vcm/bootstrap/session.json", {
+      version: 1,
+      status: "running",
+      targetRepoRoot: "/repo/previous-task",
+      sessionId: "shared-harness-session",
+      claudeSessionId: "shared-claude-session",
+      updatedAt: "2026-06-22T00:00:00.000Z"
+    });
+
+    const status = await service.getBootstrapStatus("/repo", "/repo/current-task", "current-task");
+
+    expect(status.status).not.toBe("running");
+  });
+
+  it("keeps fixed harness readiness ahead of project bootstrap completion", async () => {
+    const fs = createMemoryFs();
+    const service = createHarnessService({ fs, vcmVersion: "0.7.9" });
+    await service.applyHarness("/repo");
+    await fs.removePath?.("/repo/.ai/tools/generate-module-index", { force: true });
+    await fs.writeJson("/repo/.ai/vcm/bootstrap/session.json", {
+      version: 1,
+      status: "complete",
+      updatedAt: "2026-07-02T00:00:00.000Z"
+    });
+
+    const status = await service.getBootstrapStatus("/repo", "/repo", "new-task");
+
+    expect(status.status).toBe("not_ready");
   });
 
   it("ignores stale legacy bootstrap terminal session records", async () => {

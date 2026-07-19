@@ -114,7 +114,6 @@ export interface HarnessServiceDeps {
 interface HarnessBootstrapRunState {
   version: 1;
   status: "running" | "complete";
-  taskSlug?: string;
   targetRepoRoot?: string;
   sessionId?: string;
   claudeSessionId?: string;
@@ -628,7 +627,6 @@ export function createHarnessService(deps: HarnessServiceDeps): HarnessService {
       await persistHarnessBootstrapRunState(deps.fs, repoRoot, {
         version: 1,
         status: "running",
-        taskSlug,
         targetRepoRoot,
         sessionId: session.id,
         claudeSessionId: session.claudeSessionId,
@@ -650,7 +648,7 @@ export function createHarnessService(deps: HarnessServiceDeps): HarnessService {
     async recordHarnessBootstrapHook(repoRoot, input) {
       const state = await loadPersistedHarnessBootstrapRunState(deps.fs, repoRoot);
       if (state?.status !== "running" || !matchesBootstrapRunState(state, input)) {
-        return getHarnessBootstrapStatus(deps, repoRoot, state?.targetRepoRoot ?? repoRoot, now, vcmVersion, state?.taskSlug);
+        return getHarnessBootstrapStatus(deps, repoRoot, state?.targetRepoRoot ?? repoRoot, now, vcmVersion, input.taskSlug);
       }
 
       const timestamp = now();
@@ -664,7 +662,7 @@ export function createHarnessService(deps: HarnessServiceDeps): HarnessService {
         updatedAt: timestamp,
         lastHookEvent: input.eventName
       });
-      return getHarnessBootstrapStatus(deps, repoRoot, state.targetRepoRoot ?? repoRoot, now, vcmVersion, state.taskSlug);
+      return getHarnessBootstrapStatus(deps, repoRoot, state.targetRepoRoot ?? repoRoot, now, vcmVersion, input.taskSlug);
     }
   };
 }
@@ -1935,15 +1933,13 @@ async function getHarnessBootstrapStatus(
     await checkFilledMarkdown(deps.fs, targetRepoRoot, "docs/TESTING.md", "Testing doc", "testing-doc")
   ];
   const persistedRunState = await loadPersistedHarnessBootstrapRunState(deps.fs, repoRoot);
-  const runState = taskSlug && persistedRunState?.taskSlug !== taskSlug
-    ? undefined
-    : persistedRunState;
+  const runState = persistedRunState;
   const session = await getCurrentHarnessEngineerBootstrapSession(deps, repoRoot, taskSlug);
   const fixedHarnessReady = checks[0]?.status === "ok";
   const projectChecks = checks.slice(1);
   const projectComplete = projectChecks.every((check) => check.status === "ok");
   const projectStarted = projectChecks.some((check) => check.status === "ok" || check.status === "incomplete");
-  const runActive = runState?.status === "running" && session?.status === "running";
+  const runActive = isActiveHarnessBootstrapRun(runState, session, targetRepoRoot);
   const status = !fixedHarnessReady
     ? "not_ready"
     : runActive
@@ -2229,7 +2225,6 @@ async function loadPersistedHarnessBootstrapRunState(
   return {
     version: 1,
     status,
-    taskSlug: typeof payload.taskSlug === "string" ? payload.taskSlug : undefined,
     targetRepoRoot: typeof payload.targetRepoRoot === "string" ? payload.targetRepoRoot : undefined,
     sessionId: typeof payload.sessionId === "string" ? payload.sessionId : undefined,
     claudeSessionId: typeof payload.claudeSessionId === "string" ? payload.claudeSessionId : undefined,
@@ -2267,6 +2262,18 @@ function matchesBootstrapRunState(
     return false;
   }
   return true;
+}
+
+function isActiveHarnessBootstrapRun(
+  state: HarnessBootstrapRunState | undefined,
+  session: HarnessBootstrapSession | undefined,
+  targetRepoRoot: string
+): boolean {
+  return state?.status === "running"
+    && session?.status === "running"
+    && state.sessionId === session.id
+    && state.targetRepoRoot === targetRepoRoot
+    && (!state.claudeSessionId || state.claudeSessionId === session.claudeSessionId);
 }
 
 async function readOptionalText(

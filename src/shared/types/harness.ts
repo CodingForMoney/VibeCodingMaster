@@ -260,6 +260,7 @@ export interface RunHarnessBootstrapResult {
 
 export interface RecordHarnessBootstrapHookInput {
   eventName: "Stop" | "StopFailure" | "UserPromptSubmit" | "PostCompact";
+  taskSlug?: string;
   sessionId?: string;
   claudeSessionId?: string;
 }

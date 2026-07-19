@@ -208,6 +208,7 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
     }
     await deps.harnessService?.recordHarnessBootstrapHook(context.project.repoRoot, {
       eventName,
+      taskSlug: input.taskSlug,
       sessionId: session?.id,
       claudeSessionId: stringOrUndefined(input.event.session_id)
     });
