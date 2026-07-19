@@ -226,6 +226,48 @@ Implementation must separate or replace the existing advisory declaration:
 The existing `update-task-state` endpoint and tool must not be able to mutate
 the authoritative workflow state after this change.
 
+The authoritative state uses this fixed model:
+
+```text
+revision
+flow
+step
+branch
+parent flow
+resume step
+status
+```
+
+`flow` is one of `code-change`, `architect-debug`,
+`architecture-diagnosis`, `docs-only`, `validation-only`,
+`communication-only`, or `pr-preparation`. Architect Debug and Architecture
+Diagnosis may also be the active branch of another flow. A branch records its
+parent flow and exact resume step.
+
+`status` is limited to `active`, `awaiting-user`, or `completed`. Role process
+and activity states do not belong here; Round and Session continue to own them.
+
+Each flow has a fixed step set. The Code-Change steps are:
+
+```text
+architect-interview
+architect-planning
+architecture-plan-gate
+coder-implementation
+code-diff-gate
+tester-validation
+validation-adequacy-gate
+architect-docs-sync
+final-acceptance
+completed
+```
+
+The Architect Debug execution steps are `architect-debug`,
+`debug-code-diff-gate`, and `debug-tester-validation`. The Architecture
+Diagnosis execution steps are `architect-diagnosis`,
+`diagnosis-code-diff-gate`, and `diagnosis-tester-validation`. The remaining
+flows receive the same fixed-step treatment from their existing PM flow rules.
+
 ## 11. Workflow Policy
 
 The backend needs a typed, explicit transition policy for every supported fixed
@@ -243,6 +285,11 @@ Each transition definition must identify:
 - branch entry, branch exit, or resume behavior
 
 Any transition absent from this policy is illegal.
+
+The workflow-review request identifies an action as well as its target role.
+The action distinguishes different legal uses of the same role, while the
+pending dispatch approval exposes only the resulting target role to route
+enforcement.
 
 The machine policy and installed PM Harness rules must remain synchronized by
 tests. The machine policy is authoritative for dispatch permission; the PM rules
@@ -306,15 +353,14 @@ Backend unit and end-to-end coverage must include:
 
 ## 15. Open Decisions Before Implementation
 
-The following must be resolved in this document before coding:
+The authoritative state model and deny-by-default transition-policy shape are
+decided above. The following must still be resolved before coding:
 
-1. The complete typed state and transition table for every existing fixed flow
-   and branch.
-2. The exact workflow-review request fields and command-line interface.
-3. How VCM captures and identifies direct user messages from embedded terminal,
+1. The exact workflow-review request fields and command-line interface.
+2. How VCM captures and identifies direct user messages from embedded terminal,
    Gateway, and other supported input paths for override evidence.
-4. The exact reconciliation rule for a dispatching approval after process or
+3. The exact reconciliation rule for a dispatching approval after process or
    application restart.
-5. The list and enforcement point of every no-route workflow operation.
-6. Whether workflow override evidence must survive task close or is task-runtime
+4. The list and enforcement point of every no-route workflow operation.
+5. Whether workflow override evidence must survive task close or is task-runtime
    evidence only.
