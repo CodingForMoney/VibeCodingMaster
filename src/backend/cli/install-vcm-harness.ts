@@ -40,6 +40,7 @@ import { renderVcmProposeMemorySkillRules } from "../templates/harness/vcm-propo
 import { renderVcmReportHarnessIssueSkillRules } from "../templates/harness/vcm-report-harness-issue-skill.js";
 import { renderVcmRouteMessageSkillRules } from "../templates/harness/vcm-route-message-skill.js";
 import { renderUpdateTaskStateTool, renderVcmTaskStateSkillRules } from "../templates/harness/vcm-task-state-skill.js";
+import { renderCheckScaffoldLedgerTool } from "../templates/harness/check-scaffold-ledger.js";
 import { readVcmPackageVersion } from "../app-version.js";
 
 const CLI_DIR = path.dirname(fileURLToPath(import.meta.url));
@@ -358,6 +359,12 @@ const WHOLE_FILES = [
     category: "runtime-tool",
     mode: 0o755,
     content: renderUpdateTaskStateTool()
+  },
+  {
+    path: ".ai/tools/check-scaffold-ledger",
+    category: "runtime-tool",
+    mode: 0o755,
+    content: renderCheckScaffoldLedgerTool()
   },
   {
     path: ".ai/tools/run-long-check",

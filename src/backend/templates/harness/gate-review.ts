@@ -14,10 +14,61 @@ Use only these decisions:
 - \`approve\`: required gate evidence is present, current, internally consistent, sufficient for that gate, and has no gate-blocking finding.
 - \`request_changes\`: evidence is missing, stale, contradictory, incomplete, insufficient, not reviewable, or unsafe.
 
+On a re-review of a revised artifact, run the full gate review again on the
+current artifact state. Verifying that prior findings are resolved is
+necessary but never sufficient to approve. Re-run every mechanical check each
+round; a substantive verification item closed at a recorded artifact commit
+hash stays closed while that hash is unchanged and re-opens when it changes.
+
+At the start of any gate review, record a verification plan in the report:
+every mandatory check for that gate, the per-module closure items implied by
+the reviewed artifact, and every cross-cutting load-bearing claim — each with
+its verification method (tool run, command re-run, or direct reading) and
+status, and on closure the artifact commit hash it was verified at. On a
+re-request, load the prior report's verification plan and carry hash-valid
+closures forward. Approve only when every item is closed at the current
+artifact state. If the round ends before every item is closed, return
+\`request_changes\` whose report marks the remaining items as unverified —
+distinguishing unverified from defective — so project-manager can re-request
+the gate to continue verification.
+
 ## Architecture Plan Gate
 
 Format is necessary but not sufficient. Do not approve an architecture plan
 only because required sections exist.
+
+Before any other architecture-plan analysis, reconcile the Scaffold Manifest
+ledger against the committed scaffold (\`.ai/tools/check-scaffold-ledger\`
+automates it). Run this on every review round, including revision rounds:
+
+- Extract the ledger ID set from \`architecture-plan.md\` and the \`VCM:CODE\` ID
+  set from the worktree. They must be equal, every ID exactly once on each
+  side, and every marker in its declared file.
+- Every \`create\`, \`change\`, and \`delete\` ledger item must have its marker
+  pre-placed; every no-marker entry must be an \`asset\` item naming
+  machine-checkable completion evidence.
+- Any set mismatch, duplicated or missing ID, marker outside its declared
+  file, deferred-placeholder or open-ended coverage language ("as work
+  proceeds", "replicate", "etc.", "and others"), or non-\`asset\` entry without
+  a marker is \`request_changes\` regardless of plan prose quality. Record both
+  ID sets (or their exact diff) in the report.
+- Verify \`Scaffold Build Evidence\` names the compile/typecheck commands, a
+  green result, and the scaffold commit hash, and that the hash matches the
+  reviewed scaffold commits. Missing, red, or hash-mismatched evidence is
+  \`request_changes\`.
+- For every module whose build configuration the plan changes, open its package
+  manifest and verify the evidence table's dependency claims match it exactly,
+  and verify each claimed configuration has its own named proving check, green
+  at the scaffold hash, in \`Scaffold Build Evidence\`. A dependency claim that
+  contradicts the manifest, or a build-configuration claim without a named
+  green check, is \`request_changes\`.
+- For every new cross-module call path the plan's design describes, verify the
+  scaffold materializes it in a wired exemplar — imports, interface
+  implementations, and gating present, placeholder bodies — covered by a named
+  green check, and that every symbol the path requires is reachable from the
+  consuming module's declared dependencies. A call path that exists only in
+  prose over stub-only scaffold is \`request_changes\`.
+- Record each of these pre-checks and its result in the report.
 
 For \`architecture-plan\`, reconstruct the proposed architecture and look for
 design flaws before checking formatting. Read the confirmed
@@ -40,6 +91,17 @@ plan claims, ownership, data flow, lifecycle, module boundaries, dependency
 direction, public surface and callers, architecture invariants, state or durable artifact ownership,
 failure/retry/restart/cancellation/concurrency behavior, docs/generated-context
 impact, and whether Coder is left to make architecture decisions.
+
+For every exhaustiveness claim the design depends on — "only", "all", "none",
+"never", or an item count — reconstruct the claimed set independently. When
+the plan records a generating command, re-run it at the reviewed commit, diff
+its output against the claimed set, and then judge whether the query itself is
+adequate (what the pattern could miss); a clean diff with an adequate query
+closes the item. When the claim is marked judgment-derived, reconstruct it
+from the source (search, package manifests, or the relevant catalogue) instead
+of verifying only the cited instances. A claimed-complete enumeration with
+neither a recorded command nor a judgment-derived basis, or one that fails
+reconstruction, is unsupported by code evidence and is \`request_changes\`.
 
 Request changes when the plan is structurally complete but architecturally
 under-specified, logically inconsistent, unsupported by code evidence, unsafe

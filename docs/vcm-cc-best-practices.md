@@ -61,6 +61,7 @@ docs/CODING_STANDARDS.md
 .ai/tools/generate-public-surface
 .ai/tools/request-gate-review
 .ai/tools/update-task-state
+.ai/tools/check-scaffold-ledger
 .ai/tools/run-long-check
 .ai/tools/watch-job
 .ai/tools/vcm-bash-guard

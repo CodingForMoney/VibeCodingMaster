@@ -65,6 +65,7 @@ import { renderVcmProposeMemorySkillRules } from "../templates/harness/vcm-propo
 import { renderVcmReportHarnessIssueSkillRules } from "../templates/harness/vcm-report-harness-issue-skill.js";
 import { renderVcmRouteMessageSkillRules } from "../templates/harness/vcm-route-message-skill.js";
 import { renderUpdateTaskStateTool, renderVcmTaskStateSkillRules } from "../templates/harness/vcm-task-state-skill.js";
+import { renderCheckScaffoldLedgerTool } from "../templates/harness/check-scaffold-ledger.js";
 import type { TerminalRuntime } from "../runtime/terminal-runtime.js";
 import { submitTerminalInput } from "../runtime/terminal-submit.js";
 import { VcmError } from "../errors.js";
@@ -386,6 +387,13 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
     title: "Update Task State Tool",
     ownership: "raw-file",
     renderRules: renderUpdateTaskStateTool
+  },
+  {
+    kind: "tool-check-scaffold-ledger",
+    path: ".ai/tools/check-scaffold-ledger",
+    title: "Check Scaffold Ledger Tool",
+    ownership: "raw-file",
+    renderRules: renderCheckScaffoldLedgerTool
   },
   {
     kind: "agent-project-manager",

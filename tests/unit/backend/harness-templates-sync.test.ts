@@ -20,6 +20,7 @@ const EXACT_EXAMPLE_HARNESS_PATHS = [
   ".ai/tools/generate-public-surface",
   ".ai/tools/request-gate-review",
   ".ai/tools/update-task-state",
+  ".ai/tools/check-scaffold-ledger",
   ".ai/tools/run-long-check",
   ".ai/tools/vcm-bash-guard",
   ".ai/tools/watch-job",

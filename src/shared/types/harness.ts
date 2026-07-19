@@ -23,6 +23,7 @@ export type HarnessFileKind =
   | "agent-coder-worker"
   | "tool-request-gate-review"
   | "tool-update-task-state"
+  | "tool-check-scaffold-ledger"
   | "agent-project-manager"
   | "agent-architect"
   | "agent-coder"

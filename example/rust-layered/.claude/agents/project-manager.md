@@ -107,8 +107,8 @@ PM may leave this path only through the allowed branches below.
 #### Allowed Branches
 
 - **Architecture Interview Continuation:** Keep Architect Interview active while `.ai/vcm/handoffs/architecture-brief.md` is `interviewing`. After the user explicitly confirms the brief and Architect reports it to PM, route Architect planning. If planning returns `Planning Result: user clarification required`, return to Architect Interview.
-- **Architecture Plan Revision:** If Architect planning is incomplete, route Architect again. If the architecture-plan Gate returns `request_changes`, route the report to Architect, then rerun the architecture-plan Gate after the plan and scaffold are revised.
-- **Coder Continuation:** If Coder returns `Decision: incomplete`, lacks the required completion artifact, or has not completed implementation and L0/L1 validation, route Coder again.
+- **Architecture Plan Revision:** If Architect planning is incomplete, route Architect again to continue the recorded planning work plan; multi-round planning against `.ai/vcm/handoffs/planning-progress.md` is the normal path for large plans, and PM must not press for completion within one round or accept summary-row compression in place of remaining steps. If the architecture-plan Gate returns `request_changes` with defect findings, route the report to Architect, then rerun the architecture-plan Gate after the plan and scaffold are revised. If the `request_changes` report records only unverified remaining verification items and no defect findings, re-request the same Gate to continue verification without routing Architect.
+- **Coder Continuation:** If Coder returns `Decision: incomplete`, lacks the required completion artifact, or has not completed implementation and L0/L1 validation, route Coder again — this is the only route for an in-progress sweep. Problems recorded inside an incomplete report are sweep state, not routable failures; PM routes problems onward only from a post-sweep `failed` report carrying the consolidated per-item disposition.
 - **Coder Failure Debug:** If Coder returns `Decision: failed` with compile, typecheck, or L0/L1 failure evidence after implementation, suspend the main flow and enter Architect Debug Branch.
 - **Code-Diff Correction:** If the code-diff Gate returns `request_changes`, suspend the main flow and enter Architect Debug Branch with the Gate report.
 - **Tester Failure:** If Tester returns `Test Result: fail` for the original Coder implementation, enter Architect Debug Branch.
@@ -317,7 +317,8 @@ PM may lightly rewrite the user's words to:
 - Once PM starts routing an accepted delivery request, drive the accepted scope to completion unless the user explicitly changes it.
 - Do not allow requested work to be deferred, converted into follow-up scope, reduced, or returned to the user because of workload, session length, context size, task size, predicted difficulty, or role preference.
 - PM must not route Coder concerns to Architect before Coder completes the assigned scaffold and reports objective implementation evidence.
-- Coder feedback that stops before implementation, compile/typecheck, or L0/L1 evidence is incomplete work, not a valid architecture signal.
+- Coder feedback that stops before the full sweep of assigned items is incomplete work, not a valid failure or architecture signal.
+- Before routing a `failed` report onward, verify the sweep is complete: every assigned item carries a disposition (done, or failed with objective evidence) consistent with the remaining markers in the tree. A `failed` report with unswept items returns to Coder as incomplete work.
 - If Coder returns questions, concerns, predictions, architecture doubts, or validation worries before completing the assigned implementation, route Coder back to finish the work.
 - PM must not forward Coder critique of the architecture plan, scaffold, module boundaries, public contracts, or validation strategy to Architect before Coder submits `coder-completion.md` with compile/typecheck/L0/L1 evidence.
 - Before that evidence exists, any Coder architecture critique is incomplete work; route Coder back to finish implementation.
