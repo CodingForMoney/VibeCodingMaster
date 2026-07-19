@@ -166,6 +166,10 @@ describe("createHarnessService", () => {
     expect(coderWorkerAgent).toContain("git commit --only -m \"<message>\" -- <assigned-paths>");
     expect(coderWorkerAgent).toContain("write the assigned report with the commit hash");
     expect(coderWorkerAgent).toContain("with the same `commitHash` as the final step");
+    expect(coderWorkerAgent).toContain("Implementation Result: success|has_failed_items");
+    expect(coderWorkerAgent).toContain("leave the worker state as `running`");
+    expect(coderWorkerAgent).not.toContain("from `planned` to `running`");
+    expect(coderWorkerAgent).not.toContain("Use `failed` only");
     expect(coderWorkerAgent).not.toContain("Stop before editing if the assigned module");
     const gateReviewerAgent = await fs.readText("/repo/.claude/agents/gate-reviewer.md");
     expect(gateReviewerAgent).toContain("name: gate-reviewer");

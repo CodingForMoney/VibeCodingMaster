@@ -47,14 +47,15 @@ ${renderRoleMemoryRules("coder")}
 - Use workers when the task has at least 20 \`VCM:CODE\` markers and the marker distribution can form at least two worker-sized groups.
 - Under a complete scaffold, marker implementations are order-independent — signatures, types, and cross-item contracts are frozen by the scaffold — so never serialize worker-sized groups for presumed implementation-order dependencies. When a group's module-scoped checks need peers that are still unimplemented, narrow that worker's assigned validation scope instead of serializing.
 - An item counts as blocked only when a genuine implementation attempt has produced objective compile/check evidence already reported under the failure rules; prediction never blocks an item. A blocked marker item never exempts the remaining markers from worker dispatch. Do not assign asset items that require integrated sources to workers; Coder completes and verifies them after worker results are integrated.
-- Before invoking workers, count \`VCM:CODE\` markers by module and create one runtime state file per worker under \`.ai/vcm/coder-workers/tasks/<worker-id>.json\`.
+- Before invoking workers, count \`VCM:CODE\` markers by module and create one runtime state file per worker under \`.ai/vcm/coder-workers/tasks/<worker-id>.json\` with \`status: running\`.
 - Create one worker task for each module with more than 10 \`VCM:CODE\` markers.
 - Group modules with 10 or fewer \`VCM:CODE\` markers into one small-modules worker when their combined marker count is more than 10.
 - If the combined small-module marker count is 10 or fewer, Coder handles those modules directly after worker results return.
 - Each worker prompt must include task worktree, architecture plan path, worker state path, report path, assigned modules/files/markers, allowed implementation scope, validation scope, and commit requirement.
 - Invoke worker subagents in parallel only through \`vcm-coder-worker\`.
-- Stay in the same Coder turn until all worker subagents finish and Coder has reviewed and integrated their reports and commits. Do not end the turn to wait for worker callbacks.
-- After workers finish, inspect each report and commit for assigned completion and integration, resolve missing implementation, conflicts, invalid edits, and remaining \`VCM:CODE\` markers, then mark \`handled: true\` in each worker state.
+- Stay in the same Coder turn until every worker state is \`completed\` and Coder has reviewed and integrated all reports and commits. Do not end the turn to wait for worker callbacks.
+- A completed worker reports \`Implementation Result: success|has_failed_items\`; \`completed\` means the full assigned sweep and handoff finished, not that every item passed.
+- After workers finish, inspect each item disposition and commit, integrate successful work and committed failure scenes, resolve integration conflicts or invalid edits, and verify that every remaining marker corresponds to a failed disposition. Only then mark \`handled: true\` in each worker state.
 - Run coder-level baseline validation, summarize worker reports and commits in \`.ai/vcm/handoffs/coder-completion.md\`, and clean \`.ai/vcm/coder-workers/\`.
 
 ### Handoff
