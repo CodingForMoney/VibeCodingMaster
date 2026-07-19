@@ -83,7 +83,10 @@ revision, evidence references, approval identifier, or separate operation
 label. VCM derives the legal destination from authoritative workflow state,
 observed artifacts, Gate Review state, the optional requested flow, and the
 target role. Architect Debug and Architecture Diagnosis are interpreted as
-standalone flows or branches from the current authoritative state.
+standalone flows or Code-Change branches from the current authoritative state.
+From a non-Code-Change flow they are top-level flow switches. From Code-Change,
+Debug or Diagnosis enters the single Branch slot; Diagnosis requested while
+Debug Branch is active replaces Debug and preserves its entry and resume steps.
 
 When requesting an override after a denial, PM also supplies the exact user
 authorization text. VCM resolves and verifies its backend-owned source record.
@@ -256,16 +259,28 @@ revision
 flow
 step
 branch
-parent flow
-resume step
 status
 ```
 
 `flow` is one of `code-change`, `architect-debug`,
 `architecture-diagnosis`, `docs-only`, `validation-only`,
-`communication-only`, or `pr-preparation`. Architect Debug and Architecture
-Diagnosis may also be the active branch of another flow. A branch records its
-parent flow and exact resume step.
+`communication-only`, or `pr-preparation`.
+
+Only Code-Change Flow may contain a branch. `branch` is either absent or has
+this backend-owned shape:
+
+```text
+type: architect-debug | architecture-diagnosis
+step
+entered from step
+resume step
+```
+
+The Code-Change `step` remains at its suspended checkpoint while a branch is
+active. Architect Debug Branch may be replaced by Architecture Diagnosis
+Branch, but branches never contain another branch. Other flows move to
+Architect Debug or Architecture Diagnosis through a top-level flow switch and
+do not retain an automatic return point.
 
 `status` is limited to `active`, `awaiting-user`, or `completed`. Role process
 and activity states do not belong here; Round and Session continue to own them.
@@ -354,9 +369,10 @@ architect-debug -> debug-code-diff-gate -> debug-tester-validation
 ```
 
 Architect Debug is a standalone Flow when fixing an existing defect is the
-accepted task. It is a Branch when another flow is suspended because Coder
-failed after implementation, Code Diff Gate requested changes, or Tester failed
-the Coder implementation.
+accepted task or another non-Code-Change flow switches to Debug. It is a Branch
+only when Code-Change Flow is suspended because Coder failed after
+implementation, Code Diff Gate requested changes, or Tester failed the Coder
+implementation.
 
 The allowed branches are:
 
@@ -366,23 +382,28 @@ The allowed branches are:
   Architect Planning
 - `user clarification required` waits for the user and then resumes Debug
 - Debug Code Diff Gate `request_changes` returns to Architect Debug
-- Debug Tester `fail` enters Architecture Diagnosis Branch
+- Debug Tester `fail` in a standalone Flow switches to standalone Architecture
+  Diagnosis Flow
+- Debug Tester `fail` in a Code-Change Branch replaces Architect Debug Branch
+  with Architecture Diagnosis Branch while preserving the original
+  Code-Change entry and resume steps
 - Debug Tester `pass` in a standalone Flow advances to Validation Adequacy Gate,
   Architect Docs Sync, and Final Acceptance
-- Debug Tester `pass` in a Branch returns to its recorded parent-flow resume
+- Debug Tester `pass` in a Branch returns to its recorded Code-Change resume
   step without branch-level docs sync or Final Acceptance
 
 ### 11.3 Architecture Diagnosis Flow And Branch
 
 Architecture Diagnosis is a standalone Flow when diagnosis itself is the
-accepted task. It is a Branch when another flow is suspended after a completed
-Debug fix still fails Tester validation, or Architect must update or replace the
-architecture plan for the second time.
+accepted task or another non-Code-Change flow switches to Diagnosis. It is a
+Branch only inside Code-Change Flow, either when Architect Debug Branch is
+replaced after its completed fix still fails Tester validation, or Architect
+must update or replace the architecture plan for the second time.
 
 The allowed paths and branches are:
 
 - `analysis completed` in a standalone Flow completes from the diagnosis result
-- `analysis completed` in a Branch returns to its recorded parent-flow resume
+- `analysis completed` in a Branch returns to its recorded Code-Change resume
   step
 - `diagnosis implementation completed` advances to Diagnosis Code Diff Gate
 - `user clarification required` waits for the user and then resumes Diagnosis
@@ -391,7 +412,7 @@ The allowed paths and branches are:
 - Diagnosis Tester `pass` in a standalone code-producing Flow advances to
   Validation Adequacy Gate, Architect Docs Sync, and Final Acceptance
 - Diagnosis Tester `pass` in a code-producing Branch returns to its recorded
-  parent-flow resume step without branch-level docs sync or Final Acceptance
+  Code-Change resume step without branch-level docs sync or Final Acceptance
 
 ### 11.4 Docs-Only Flow
 
@@ -468,10 +489,57 @@ docs sync, Gate Review, or Final Acceptance.
 - Translator and Harness Engineer are auxiliary roles and never become Round or
   core workflow nodes
 
-Architect Debug Branch and Architecture Diagnosis Branch are the only branch
-flows that suspend a parent flow and require a recorded resume step. Ordinary
-same-role continuation, Gate waiting, and user waiting are state transitions,
-not nested branch flows.
+Architect Debug Branch and Architecture Diagnosis Branch exist only inside
+Code-Change Flow. At most one is active. Ordinary same-role continuation, Gate
+waiting, user waiting, and top-level flow switching are state transitions, not
+nested branch flows.
+
+### 11.9 Branch Entry, Replacement, And Exit
+
+VCM, not PM, derives the Branch entry and resume steps from the transition
+policy. The required Code-Change mappings are:
+
+| Branch reason | Entered from step | Resume step after successful Branch |
+| --- | --- | --- |
+| Coder compile, typecheck, or L0/L1 failure | `coder-implementation` | `validation-adequacy-gate` |
+| Code Diff Gate `request_changes` | `code-diff-gate` | `validation-adequacy-gate` |
+| Tester `fail` | `tester-validation` | `validation-adequacy-gate` |
+| implementation defect found during docs sync | `architect-docs-sync` | `validation-adequacy-gate` |
+| second architecture-plan update or replacement | `architect-planning` or `architecture-plan-gate` | `architect-planning` |
+
+Entering a Branch keeps the Code-Change step at `entered from step` and creates
+the Branch with the policy-selected `resume step`.
+
+When Debug Branch escalates, VCM atomically replaces its `type` and `step` with
+Architecture Diagnosis while preserving `entered from step` and `resume step`.
+Debug is no longer active and Diagnosis completion never returns to Debug.
+
+A Debug Branch may exit successfully only after its Code Diff Gate permits
+continuation and Tester passes. A code-producing Diagnosis Branch has the same
+exit requirement. An analysis-only Diagnosis Branch is permitted only for the
+second architecture-plan update or replacement path and returns to Architect
+Planning after the diagnosis artifact is complete.
+
+`normal architecture plan required` is not a successful Debug return. VCM
+clears Debug Branch and moves Code-Change to Architect Planning according to
+that explicit branch outcome instead of using the stored success resume step.
+
+Successful Branch exit is one backend transaction:
+
+1. verify the current Branch, terminal evidence, workflow revision, and stored
+   resume step
+2. clear `branch`
+3. set the Code-Change `step` to the stored resume step
+4. increment the workflow revision and invalidate any pending dispatch approval
+
+PM does not request Branch exit and cannot escape an active Branch by requesting
+`--flow code-change`. The backend applies exit when the owning Hook, Gate
+controller, or workflow checkpoint confirms the required terminal evidence.
+Until then, all Code-Change parent-flow dispatches are denied.
+
+If Diagnosis Tester fails, VCM retains the Diagnosis Branch and resume step and
+sets status to `awaiting-user`. A user-authorized flow switch may leave the
+Branch only for the exact recorded exception.
 
 ## 12. Workflow Policy
 
@@ -557,7 +625,17 @@ Backend unit and end-to-end coverage must include:
 - every flow has negative tests proving unlisted role targets, flow switches,
   branch entries, branch exits, and skipped checkpoints are denied
 - standalone and branch forms of Architect Debug and Architecture Diagnosis are
-  tested separately, including parent-flow resume behavior
+  tested separately, including Code-Change resume behavior
+- entering a Branch preserves the suspended Code-Change step and stores the
+  policy-derived resume step
+- Debug Branch replacement by Diagnosis preserves the original entry and resume
+  steps without creating another Branch layer
+- successful Branch exit atomically clears the Branch, restores the stored
+  Code-Change resume step, increments revision, and invalidates stale approvals
+- incomplete Branch evidence and Diagnosis Tester failure retain the Branch and
+  prevent Code-Change dispatch
+- a non-Code-Change flow moves to Debug or Diagnosis by top-level flow switch,
+  never by Branch creation
 - starting without an active flow requires `--flow`
 - starting a flow with a legal target derives the initial destination state
 - omitting `--flow` continues the current flow
@@ -597,7 +675,3 @@ still be resolved before coding:
 3. The list and enforcement point of every no-route workflow checkpoint.
 4. Whether workflow override evidence must survive task close or is task-runtime
    evidence only.
-5. Whether Architecture Diagnosis entered from an Architect Debug Branch
-   replaces Debug while inheriting its original parent and resume step, or is a
-   true nested branch that requires a branch stack. The planned single
-   `branch`/`parent flow`/`resume step` state cannot represent recursive nesting.
