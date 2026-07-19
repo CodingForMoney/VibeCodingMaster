@@ -125,6 +125,9 @@ describe("createHarnessService", () => {
     expect(architectAgent).toContain("Architect owns the technical decision");
     expect(architectAgent).toContain("running required L0/L1 plus applicable L2/L3 checks are part of the implementation duty");
     expect(architectAgent).toContain("Architecture Diagnosis Mode is an upgraded Debug Mode");
+    expect(architectAgent).toContain("first write a `Current Code Reality / Scope Discovery` row");
+    expect(architectAgent).toContain("After `Current Code Reality / Scope Discovery` is complete");
+    expect(architectAgent).not.toContain("before deep analysis, write the planning work plan");
     expect(architectAgent).toContain("Do not diagnose from session memory");
     expect(architectAgent).toContain("Do not assume existing code or comments are correct");
     expect(architectAgent).toContain("Recursively follow every project-owned call until no unresolved project-owned callee remains");
