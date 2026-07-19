@@ -128,6 +128,7 @@ describe("createHarnessService", () => {
     expect(architectAgent).toContain("first write a `Current Code Reality / Scope Discovery` row");
     expect(architectAgent).toContain("After `Current Code Reality / Scope Discovery` is complete");
     expect(architectAgent).toContain("complete and commit it directly as Architect-owned scaffold work");
+    expect(architectAgent).not.toContain("`asset`");
     expect(architectAgent).not.toContain("before deep analysis, write the planning work plan");
     expect(architectAgent).toContain("Do not diagnose from session memory");
     expect(architectAgent).toContain("Do not assume existing code or comments are correct");
@@ -172,6 +173,7 @@ describe("createHarnessService", () => {
     expect(coderWorkerAgent).toContain("with the same `commitHash` as the final step");
     expect(coderWorkerAgent).toContain("Implementation Result: success|has_failed_items");
     expect(coderWorkerAgent).toContain("leave the worker state as `running`");
+    expect(coderWorkerAgent).not.toContain("asset output");
     expect(coderWorkerAgent).not.toContain("from `planned` to `running`");
     expect(coderWorkerAgent).not.toContain("Use `failed` only");
     expect(coderWorkerAgent).not.toContain("Stop before editing if the assigned module");
@@ -184,7 +186,11 @@ describe("createHarnessService", () => {
     expect(gateReviewerAgent).toContain("complete current executable plan, not");
     expect(gateReviewerAgent).not.toContain("record a verification plan");
     expect(gateReviewerAgent).not.toContain("carry hash-valid");
+    expect(gateReviewerAgent).not.toContain("`asset`");
     expect(projectManagerAgent).not.toContain("only unverified remaining verification items");
+    expect(await fs.readText("/repo/.ai/tools/check-scaffold-ledger")).toContain(
+      'ACTIONS = frozenset({"create", "change", "delete"})'
+    );
     const translatorAgents = await fs.readText("/repo/.claude/agents/translator.md");
     expect(translatorAgents).toContain("name: translator");
     expect(translatorAgents).toContain("You are VCM `translator`");

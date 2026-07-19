@@ -28,6 +28,7 @@ async function installHarnessTools(repoRoot: string) {
   const toolsRoot = path.join(repoRoot, ".ai/tools");
   await mkdir(toolsRoot, { recursive: true });
   await cp(path.join(appRoot, "scripts/harness-tools/check-durable-docs"), path.join(toolsRoot, "check-durable-docs"));
+  await cp(path.join(appRoot, ".ai/tools/check-scaffold-ledger"), path.join(toolsRoot, "check-scaffold-ledger"));
   await cp(path.join(appRoot, "scripts/harness-tools/generate-module-index"), path.join(toolsRoot, "generate-module-index"));
   await cp(path.join(appRoot, "scripts/harness-tools/generate-public-surface"), path.join(toolsRoot, "generate-public-surface"));
 }
@@ -237,6 +238,67 @@ describe("harness generated-context tools", () => {
     await expect(
       execFileAsync("python3", [path.join(tmpRepo, ".ai/tools/generate-module-index"), "--check"], { cwd: tmpRepo })
     ).resolves.toBeTruthy();
+  });
+});
+
+describe("scaffold ledger audit", () => {
+  async function createLedgerRepo(planRow: string, source: string) {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-scaffold-ledger-"));
+    await installHarnessTools(tmpRepo);
+    await execFileAsync("git", ["init"], { cwd: tmpRepo });
+    await writeSource(path.join(tmpRepo, "src/lib.ts"), source);
+    await execFileAsync("git", ["add", "src/lib.ts"], { cwd: tmpRepo });
+    await writeSource(path.join(tmpRepo, ".ai/vcm/handoffs/architecture-plan.md"), `
+      # Architecture Plan
+
+      ## Scaffold Manifest
+
+      | ID | Action | File | Symbol | Work | Freedom | Proof |
+      | --- | --- | --- | --- | --- | --- | --- |
+      ${planRow}
+    `);
+  }
+
+  async function runLedgerAuditFailure() {
+    try {
+      await execFileAsync("python3", [path.join(tmpRepo!, ".ai/tools/check-scaffold-ledger")], { cwd: tmpRepo });
+      throw new Error("expected scaffold ledger audit to fail");
+    } catch (error) {
+      return (error as Error & { stderr?: string }).stderr ?? "";
+    }
+  }
+
+  it("accepts an exact ledger-to-marker mapping", async () => {
+    await createLedgerRepo(
+      "| SCF-001 | change | `src/lib.ts` | `run` | implement | local | compile |",
+      "export function run() { // VCM:CODE SCF-001\n  return true;\n}"
+    );
+
+    await expect(
+      execFileAsync("python3", [path.join(tmpRepo!, ".ai/tools/check-scaffold-ledger")], { cwd: tmpRepo })
+    ).resolves.toMatchObject({ stdout: expect.stringContaining("ledger reconciliation clean") });
+  });
+
+  it("rejects asset rows and their missing markers", async () => {
+    await createLedgerRepo(
+      "| SCF-001 | asset | `dist/output.json` | output | generate | none | exists |",
+      "export const ready = true;"
+    );
+
+    const stderr = await runLedgerAuditFailure();
+    expect(stderr).toContain("action column is not exactly one of create/change/delete");
+    expect(stderr).toContain("SCF-001 has no marker");
+  });
+
+  it("rejects missing and unmanifested markers", async () => {
+    await createLedgerRepo(
+      "| SCF-001 | change | `src/lib.ts` | `run` | implement | local | compile |",
+      "// VCM:CODE SCF-002\nexport const ready = true;"
+    );
+
+    const stderr = await runLedgerAuditFailure();
+    expect(stderr).toContain("SCF-001 has no marker");
+    expect(stderr).toContain("marker SCF-002 has no ledger entry");
   });
 });
 

@@ -3,16 +3,14 @@
 
 The architecture plan's Scaffold Manifest is an item ledger: one entry per implementation
 item, one unique ID per entry, and exactly one `VCM:CODE <ID>` marker in the tree per
-`create`/`change`/`delete` entry (an `asset` entry carries no marker). This tool checks:
+`create`/`change`/`delete` entry. This tool checks:
 
   1. the ledger header follows the mandated column order (`ID | Action | File | ...`),
      every ledger ID is unique, classified by its whole-cell action column
-     (create/change/delete/asset), and — except for `asset` — bound to a declared file
-     path in the file column;
+     (create/change/delete), and bound to a declared file path in the file column;
   2. the ledger ID set equals the tree marker ID set, each ID exactly once on each side;
   3. every marker sits in its entry's declared file;
-  4. `asset` entries have no marker in the tree;
-  5. the manifest contains no open-ended coverage language ("as work proceeds",
+  4. the manifest contains no open-ended coverage language ("as work proceeds",
      "replicate", "etc.", "and others").
 
 Markers are scanned in git-tracked source files only (`.md` files and `.ai/` are excluded:
@@ -33,7 +31,7 @@ ID_TOKEN = re.compile(r"\b([A-Z]{2,6}-\d{1,4})\b")
 # Mandated column order: ID | action | file | symbol/site | work | freedom | proof.
 # The action is read from its own cell as a whole-cell verb — never sniffed from the
 # row text, so paths or prose containing action words cannot flip an item's class.
-ACTIONS = frozenset({"create", "change", "delete", "asset"})
+ACTIONS = frozenset({"create", "change", "delete"})
 PATH_TOKEN = re.compile(r"`([^`\s]+/[^`\s]+|[^`\s]+\.[A-Za-z0-9]{1,8})`")
 MARKER_ID = re.compile(r"VCM:CODE[:\s]\s*([A-Za-z]{2,6}-\d{1,4})")
 MARKER_ANY = re.compile(r"VCM:CODE")
@@ -103,9 +101,9 @@ def parse_ledger(section_start: int, section: list[str], plan: str) -> tuple[dic
         if action is None:
             findings.append(
                 f"{plan}:{line_no}  [ledger] {entry_id} action column is not exactly "
-                f"one of create/change/delete/asset -> classify the item in column 2"
+                f"one of create/change/delete -> classify the item in column 2"
             )
-        if action != "asset" and declared is None:
+        if declared is None:
             findings.append(
                 f"{plan}:{line_no}  [ledger] {entry_id} has no declared file path in "
                 f"column 3 -> bind the item to its exact file"
@@ -188,11 +186,10 @@ def main() -> int:
     ledger_ids = set(entries)
     tree_ids = set(markers)
     for entry_id in sorted(ledger_ids - tree_ids):
-        if entries[entry_id]["action"] != "asset":
-            findings.append(
-                f"{plan}:{entries[entry_id]['line']}  [ledger] {entry_id} has no marker "
-                f"in the tree -> pre-place `VCM:CODE {entry_id}` in its declared file"
-            )
+        findings.append(
+            f"{plan}:{entries[entry_id]['line']}  [ledger] {entry_id} has no marker "
+            f"in the tree -> pre-place `VCM:CODE {entry_id}` in its declared file"
+        )
     for entry_id in sorted(tree_ids - ledger_ids):
         path, line_no = markers[entry_id][0]
         findings.append(
@@ -201,12 +198,7 @@ def main() -> int:
         )
     for entry_id in sorted(ledger_ids & tree_ids):
         entry = entries[entry_id]
-        if entry["action"] == "asset":
-            path, line_no = markers[entry_id][0]
-            findings.append(
-                f"{path}:{line_no}  [ledger] asset entry {entry_id} must not carry a marker"
-            )
-        elif entry["path"]:
+        if entry["path"]:
             declared = entry["path"]
             for path, line_no in markers[entry_id]:
                 if not (path == declared or path.endswith("/" + declared) or declared.endswith("/" + path)):

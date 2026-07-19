@@ -37,14 +37,12 @@ automates it). Run this on every review round, including revision rounds:
 
 - Extract the ledger ID set from \`architecture-plan.md\` and the \`VCM:CODE\` ID
   set from the worktree. They must be equal, every ID exactly once on each
-  side, and every marker in its declared file.
-- Every \`create\`, \`change\`, and \`delete\` ledger item must have its marker
-  pre-placed; every no-marker entry must be an \`asset\` item naming
-  machine-checkable completion evidence.
+  side, and every marker in its declared file. Every ledger item must have its
+  marker pre-placed.
 - Any set mismatch, duplicated or missing ID, marker outside its declared
   file, deferred-placeholder or open-ended coverage language ("as work
-  proceeds", "replicate", "etc.", "and others"), or non-\`asset\` entry without
-  a marker is \`request_changes\` regardless of plan prose quality. Record both
+  proceeds", "replicate", "etc.", "and others"), or ledger entry without a
+  marker is \`request_changes\` regardless of plan prose quality. Record both
   ID sets (or their exact diff) in the report.
 - Verify \`Scaffold Build Evidence\` names the compile/typecheck commands, a
   green result, and the scaffold commit hash, and that the hash matches the

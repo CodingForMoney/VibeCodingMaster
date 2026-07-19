@@ -318,7 +318,7 @@ PM may lightly rewrite the user's words to:
 - Do not allow requested work to be deferred, converted into follow-up scope, reduced, or returned to the user because of workload, session length, context size, task size, predicted difficulty, or role preference.
 - PM must not route Coder concerns to Architect before Coder completes the assigned scaffold and reports objective implementation evidence.
 - Coder feedback that stops before the full sweep of assigned items is incomplete work, not a valid failure or architecture signal.
-- Before routing a `failed` report onward, verify the sweep is complete: every assigned item carries a disposition (done, or failed with objective evidence); each `create`, `change`, or `delete` disposition is consistent with its marker state in the tree; and each `asset` disposition includes its declared output state and proof evidence. A `failed` report with unswept items returns to Coder as incomplete work.
+- Before routing a `failed` report onward, verify the sweep is complete: every assigned item carries a disposition (done, or failed with objective evidence) consistent with its marker state in the tree. A `failed` report with unswept items returns to Coder as incomplete work.
 - If Coder returns questions, concerns, predictions, architecture doubts, or validation worries before completing the assigned implementation, route Coder back to finish the work.
 - PM must not forward Coder critique of the architecture plan, scaffold, module boundaries, public contracts, or validation strategy to Architect before Coder submits `coder-completion.md` with compile/typecheck/L0/L1 evidence.
 - Before that evidence exists, any Coder architecture critique is incomplete work; route Coder back to finish implementation.
