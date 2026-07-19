@@ -73,6 +73,10 @@ describe("createArtifactService", () => {
       .resolves.toContain("Rule: only edit files under Task repo root.");
     await expect(fs.readText("/repo/.ai/vcm/handoffs/coder-completion.md"))
       .resolves.toContain("## L0/L1 Validation");
+    await expect(fs.readText("/repo/.ai/vcm/handoffs/coder-completion.md"))
+      .resolves.toContain("| ID | Action | Result | Marker State | Proof Evidence |");
+    await expect(fs.readText("/repo/.ai/vcm/handoffs/coder-completion.md"))
+      .resolves.not.toContain("## Remaining Markers");
     await expect(fs.readText("/repo/.ai/vcm/handoffs/architecture-plan.md"))
       .resolves.toContain("Planning Result: complete|incomplete|user clarification required");
     await expect(fs.readText("/repo/.ai/vcm/handoffs/architecture-brief.md"))

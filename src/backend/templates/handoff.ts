@@ -191,11 +191,9 @@ Decision: ready_for_review|incomplete|failed
 
 ## Scaffold Completion
 
-TBD
-
-## Remaining Markers
-
-TBD
+| ID | Action | Result | Marker State | Proof Evidence |
+| --- | --- | --- | --- | --- |
+| TBD | TBD | TBD | TBD | TBD |
 
 ## Changed Files
 

@@ -79,7 +79,7 @@ when VCM explicitly requests a proposal during Task Harness Review, use
 
 - Write `.ai/vcm/handoffs/coder-completion.md` before routing back to project-manager. This file is the current implementation completion evidence, not a log; replace stale content instead of appending history.
 - `coder-completion.md` must include `Decision: ready_for_review | incomplete | failed`.
-- `coder-completion.md` must report every Scaffold Manifest item disposition, remaining markers if any, proof evidence, changed files, private helpers added, manifest deviations as report-only facts, generated context status, baseline tests added or updated, L0/L1 commands and results, worker commits and integration status when workers were used, and compile/typecheck or L0/L1 failures.
+- `coder-completion.md` must report every Scaffold Manifest item disposition in the fixed Scaffold Completion table, plus changed files, private helpers added, manifest deviations as report-only facts, generated context status, baseline tests added or updated, L0/L1 commands and results, worker commits and integration status when workers were used, and compile/typecheck or L0/L1 failures.
 - Use this structure:
 
 ```md
@@ -89,7 +89,9 @@ Decision: ready_for_review|incomplete|failed
 
 ## Scaffold Completion
 
-## Remaining Markers
+| ID | Action | Result | Marker State | Proof Evidence |
+| --- | --- | --- | --- | --- |
+| <ID> | <create/change/delete> | <done/failed> | <removed/present> | <evidence> |
 
 ## Changed Files
 
@@ -109,7 +111,9 @@ Decision: ready_for_review|incomplete|failed
 ```
 
 - In the route message back to project-manager, include the `coder-completion.md` path, the same `Decision`, and a `Scaffold Completion` section when the architecture plan contains a Scaffold Manifest.
-- The `Scaffold Completion` section must report each Scaffold Manifest ID, action, result, marker state, proof evidence, remaining markers if any, private helpers added, manifest deviations, and compile/typecheck or L0/L1 failures.
+- The Scaffold Completion ID set must equal the Scaffold Manifest ID set, with every ID appearing exactly once.
+- `done` requires `Marker State: removed` and green proof evidence. `failed` requires `Marker State: present` and objective failure evidence.
+- Use `Decision: ready_for_review` only when every item is `done`, `Decision: failed` only after the complete sweep contains at least one `failed` item, and `Decision: incomplete` when the sweep is unfinished.
 
 ### Generated Context
 

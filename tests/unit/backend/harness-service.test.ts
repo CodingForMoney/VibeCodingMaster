@@ -108,6 +108,8 @@ describe("createHarnessService", () => {
     expect(projectManagerAgent).toContain("VCM_TASK_REPO_ROOT");
     expect(projectManagerAgent).toContain("Include the confirmed task repo root and branch in each role message");
     expect(projectManagerAgent).toContain("### Gate Review Gates");
+    expect(projectManagerAgent).toContain("Before acting on any Coder decision");
+    expect(projectManagerAgent).toContain("regardless of the reported Decision");
     expect(projectManagerAgent).toContain("code-diff --source coder");
     expect(projectManagerAgent).toContain("code-diff --source architect-debug");
     expect(projectManagerAgent).toContain("code-diff --source architect-diagnosis");
@@ -158,6 +160,8 @@ describe("createHarnessService", () => {
     expect(coderAgent).not.toContain("whether Replan is needed");
     expect(coderAgent).toContain("### Parallel Worker Implementation");
     expect(coderAgent).toContain("vcm-coder-worker");
+    expect(coderAgent).toContain("| ID | Action | Result | Marker State | Proof Evidence |");
+    expect(coderAgent).not.toContain("## Remaining Markers");
     expect(frontmatterOf(await fs.readText("/repo/.claude/agents/project-manager.md"))).not.toContain("Agent");
     expect(frontmatterOf(await fs.readText("/repo/.claude/agents/architect.md"))).not.toContain("Agent");
     expect(frontmatterOf(await fs.readText("/repo/.claude/agents/tester.md"))).not.toContain("Agent");
