@@ -106,7 +106,7 @@ Debug Branch is active replaces Debug while preserving the prior Code-Change
 sequence.
 
 When requesting an override after a denial, PM also supplies the exact user
-authorization text. VCM resolves and verifies its backend-owned source record.
+authorization text. VCM records that text as the override evidence.
 
 The tool returns one of two normal results:
 
@@ -274,8 +274,8 @@ PM retries workflow review with:
 - the target role
 - the exact user authorization text
 
-VCM must resolve a VCM-owned source user-message record and verify that the
-quoted text matches it. PM text alone is not proof of authorization.
+VCM requires non-empty authorization text but does not authenticate its input
+channel or resolve a separate user-message source record.
 
 The override record binds:
 
@@ -283,7 +283,7 @@ The override record binds:
 - base Flow Record sequence and hash
 - requested flow when supplied
 - exact target role
-- user authorization text and source
+- user authorization text supplied by PM
 - the normal rule being bypassed
 - approval and consumption times
 
@@ -1027,7 +1027,7 @@ Backend unit and end-to-end coverage must include:
   pending or dispatching approval
 - unchanged rejected routes do not generate repeated callbacks
 - exact user override is accepted and recorded
-- missing, mismatched, stale, or reused user authorization is rejected
+- missing, stale, or reused user authorization is rejected
 - user override cannot bypass non-workflow safety controls
 
 ## 16. Open Decisions Before Implementation
@@ -1089,13 +1089,14 @@ starts with a versioned empty record, active tasks restore it, and Flow switches
 append history. Task close always succeeds and removes Workflow Review state
 with the worktree without copying or archiving it elsewhere.
 
-1. **User-authorization source capture.** Define how VCM captures and identifies
-   exact direct user messages from Embedded Terminal, Gateway, and other input
-   paths so PM cannot fabricate, broaden, or reuse override authorization.
-2. **Override evidence retention.** Decide whether override evidence survives
+User-authorization source capture is intentionally out of scope. PM supplies
+the exact user authorization text, and VCM records and binds it without
+authenticating the originating input channel.
+
+1. **Override evidence retention.** Decide whether override evidence survives
    task close or remains task-runtime evidence only, while preserving audit and
    one-time-use guarantees for the lifetime selected.
-3. **Machine-policy and Harness synchronization.** Decide whether one source
+2. **Machine-policy and Harness synchronization.** Decide whether one source
    generates both the backend transition policy and PM Harness description, or
    independent definitions are compared by synchronization tests. Manual drift
    must fail validation before release.
