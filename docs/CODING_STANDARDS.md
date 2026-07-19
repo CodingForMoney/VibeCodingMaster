@@ -15,7 +15,7 @@ Project-specific rules may be added outside the VCM managed block when they make
 
 - Coder and Coder Worker follow the accepted task scope, role message, architecture plan, and scaffold. Architect Debug Mode and Architecture Diagnosis Mode follow their confirmed root cause and PM-routed evidence.
 - Coder and Coder Worker must not change file responsibilities, callable-surface signatures, visibility, exports, contracts, or architect-defined intent unless the approved plan allows it. In Debug Mode or Architecture Diagnosis Mode, Architect may change file responsibilities and callable surfaces after confirming the root cause, and must update affected callers, contracts, and tests.
-- Complete assigned `VCM:CODE` placeholders and remove them before handoff.
+- Remove each `VCM:CODE` marker when its item completes successfully. If implementation fails after a genuine attempt, keep the failed item's marker on the committed attempt and report the objective failure evidence. A successful implementation handoff must not contain remaining assigned markers.
 - Do not fake completion: no hardcoded success, disabled logic, swallowed errors, test-only shortcuts, or silent fallback that hides failure.
 - Implement behavior from the approved architecture, existing domain model, real inputs, and project runtime flow.
 - Do not derive logic from visible test fixtures, fixed sample values, snapshot text, or special branches that only satisfy known tests.
