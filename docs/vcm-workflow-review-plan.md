@@ -155,8 +155,8 @@ dispatch status
 The record is internal VCM state. Route messages do not carry these fields.
 
 A new workflow-review request replaces any unused pending approval for the same
-task. Appending another confirmed dispatch to the Flow Record invalidates an
-unused approval based on an older record.
+task. Appending another event to the Flow Record invalidates an unused approval
+based on an older record.
 
 An approval is valid for one PM dispatch only. It cannot authorize multiple
 messages to the same role.
@@ -164,8 +164,8 @@ messages to the same role.
 ## 6. Role Dispatch Enforcement
 
 `vcm-route-message` remains the PM-hub channel for normal role messages. Gate
-Reviewer dispatch uses the Gate Review controller. Both paths require and
-consume the matching pending workflow approval.
+Reviewer dispatch uses the Gate Review controller. Both paths require and claim
+the matching pending workflow approval; Section 7 defines when it is consumed.
 
 The backend remains the enforcement boundary. For a normal PM-to-role route, it
 loads the task's pending dispatch approval and compares only backend-owned facts
@@ -207,23 +207,39 @@ and generated message ID so another Hook cannot reuse it. The approval is
 consumed and cleared only when Claude Code confirms that message through
 `UserPromptSubmit`.
 
-For Gate Reviewer, the Gate controller consumes the approval and applies the
-confirmed dispatch record only when the matching request returns `started`,
-`running`, `disabled`, `not_required`, or `already_approved`. `failed_to_start`
-does not append a record; the approval remains recoverable against the same
-Flow Record base.
+Gate Reviewer uses the following status rules because starting a review is not
+the same as resolving its checkpoint:
+
+| Gate result | Approval and Flow Record handling |
+| --- | --- |
+| `disabled` | consume the approval and append a Gate event with disposition `disabled` |
+| `not_required` | consume the approval and append a Gate event with disposition `not_required` |
+| `already_approved` | consume the approval and append a Gate event with disposition `already_approved` |
+| `started` | move the approval to `dispatching`, bind the exact Gate request ID, and append nothing |
+| `running` for the same request ID | keep the existing `dispatching` approval and append nothing |
+| `running` for another Gate or request ID | reject the request without consuming the approval or appending an event |
+| `failed_to_start` | return the approval to recoverable `pending` and append nothing |
+| callback `approve` | consume the approval and append a Gate event with decision `approve` |
+| callback `request_changes` | consume the approval and append a Gate event with decision `request_changes` |
+| callback `failed` | keep a recoverable failed approval and append nothing |
+| user skip or override | consume the approval and append the exact Gate event plus its exception evidence |
+
+The Gate type and code source must match the approval before any status may
+change it. A `dispatching` Gate approval stores the exact request ID and Gate
+signature so an unrelated running review cannot claim it.
 
 If terminal submission fails before confirmation, VCM records the failed
 attempt and makes the approval recoverable for the same unchanged route, or
 returns it to pending. It must not append a Flow Record event as though the
 target role started successfully.
 
-The confirmed dispatch atomically appends the approved flow-and-target event to
-the Flow Record and clears the pending approval. Branch entry, replacement, or
-return is derived from that complete record rather than stored as mutable state.
-The route file is cleared only when its current content still matches the
-claimed route-content hash. Content written after the claim remains pending and
-requires another Workflow Review approval.
+A confirmed normal-role dispatch atomically appends the approved
+flow-and-target event and clears the pending approval. A resolved Gate
+checkpoint atomically appends its Gate event and consumes its approval. Branch
+entry, replacement, or return is derived from that complete record rather than
+stored as mutable state. A normal route file is cleared only when its current
+content still matches the claimed route-content hash. Content written after the
+claim remains pending and requires another Workflow Review approval.
 
 ## 8. Rejected Route Handling
 
@@ -282,9 +298,10 @@ task ownership, or other runtime safety controls.
 ## 10. Authoritative Flow Record
 
 Workflow Review cannot rely on a PM-declared current state. Its only source of
-truth is an append-only task-scoped record of confirmed PM-to-role dispatches.
+truth is an append-only task-scoped record of confirmed normal-role dispatches
+and resolved Gate checkpoints.
 
-Each confirmed entry contains at least:
+Each entry contains at least:
 
 ```text
 sequence
@@ -293,6 +310,8 @@ target role
 dispatch type
 gate type when target role is Gate Reviewer
 code source when gate type is code-diff
+Gate disposition when target role is Gate Reviewer
+Gate decision when disposition has a review decision
 confirmed time
 override evidence reference when applicable
 ```
@@ -301,19 +320,26 @@ override evidence reference when applicable
 `architecture-diagnosis`, `docs-only`, or `validation-only`. `dispatch type`
 distinguishes the normal role route from the Gate Review controller. `gate type`
 is `architecture-plan`, `code-diff`, or `validation-adequacy`; `code source` is
-`coder`, `architect-debug`, or `architect-diagnosis`. Gate identity is part of
-the dispatched node, not a reason for the dispatch.
+`coder`, `architect-debug`, or `architect-diagnosis`. Gate `disposition` is
+`disabled`, `not_required`, `already_approved`, `completed`, `skipped`, or
+`overridden`. A completed disposition records decision `approve` or
+`request_changes`. Gate identity and resolution are part of the Gate node, not
+PM's reason for choosing the next dispatch.
 
 The Flow Record does not persist a current step, cursor, status, Branch object,
 entry point, or resume point. It also does not store the role's reason, result,
-or PM interpretation. VCM matches the complete confirmed dispatch sequence
-against the fixed policy to determine which next flow-and-target combinations
-are legal.
+or PM interpretation. VCM matches the complete Flow Record sequence against the
+fixed policy to determine which next flow-and-target combinations are legal.
 
-Only a confirmed approved dispatch appends an entry. Approval, route-file
-creation, terminal submission failure, role output, user waiting, PM activity,
-Final Acceptance completion, task completion, and PR preparation do not append
-entries.
+A normal-role entry is appended only after the target `UserPromptSubmit`
+confirms the approved route. A Gate entry is appended only after the matching
+checkpoint has an actionable resolution: `disabled`, `not_required`,
+`already_approved`, callback `approve`, callback `request_changes`, or an exact
+user skip or override. Gate request creation, `started`, `running`,
+`failed_to_start`, and callback `failed` do not append entries. Approval,
+route-file creation, terminal submission failure, ordinary role output, user
+waiting, PM activity, Final Acceptance completion, task completion, and PR
+preparation do not append entries.
 
 Branch state is derived from the sequence:
 
@@ -329,9 +355,9 @@ dispatch history.
 
 PM cannot append or rewrite this record. Session, Turn, Round, Gate Review,
 artifact, and process states remain independent. Runtime events may only confirm
-an already approved dispatch. The existing `update-task-state` endpoint and tool
-must not mutate the Flow Record. Frontend code only displays the record and
-user-authorization controls.
+an already approved normal route or resolve an already approved Gate checkpoint.
+The existing `update-task-state` endpoint and tool must not mutate the Flow
+Record. Frontend code only displays the record and user-authorization controls.
 
 ## 11. Workflow And Branch Inventory
 
@@ -340,14 +366,15 @@ Every main-path transition and allowed branch listed here must be represented in
 the backend policy. Anything not listed is denied unless VCM records an exact
 one-time user-authorized override.
 
-The sequences below contain only confirmed PM-to-role dispatches. A repeated
-role is another confirmed dispatch to that role. Gate entries include the Gate
-identity stored in the Flow Record. Role results, Gate decisions, user waiting,
-PM work, and completion do not appear as record events.
+The sequences below contain confirmed normal-role dispatches and resolved Gate
+checkpoints. A repeated normal role is another confirmed dispatch to that role.
+A Gate entry includes its Gate identity and actionable resolution. Ordinary
+role results, unresolved Gate activity, user waiting, PM work, and completion do
+not appear as record events.
 
 ### 11.1 Code-Change Flow
 
-The main confirmed dispatch sequence is:
+The main Flow Record sequence is:
 
 ```text
 code-change / architect
@@ -400,13 +427,13 @@ These branches produce the following record extensions:
 - interview, planning, planning revision, Coder continuation, Tester revision,
   and docs-sync correction repeat the same responsible role
 - Architecture Plan Gate revision appends Architect and later another
-  `architecture-plan` Gate dispatch
+  `architecture-plan` Gate event
 - Coder completion appends `code-diff` with source `coder`
 - Coder failure, Code Diff Gate correction, Tester failure, or a permitted
   implementation correction during docs sync appends `architect-debug` /
   Architect
 - Validation Adequacy revision appends Tester and later another
-  `validation-adequacy` Gate dispatch
+  `validation-adequacy` Gate event
 - a Final Acceptance Coder follow-up appends Coder and repeats every downstream
   Code-Change Gate and role dispatch
 - a Final Acceptance Architect or docs-sync follow-up appends Architect; any
@@ -441,23 +468,23 @@ code-change / architect
 ```
 
 Architect continuation and Gate revision loops remain legal inside this fixed
-sequence. The architecture-plan Gate, Coder, and every downstream dispatch are
+sequence. The architecture-plan Gate, Coder, and every downstream event are
 required again.
 
 Docs-sync follow-up appends Architect in `code-change`. Incomplete docs sync may
 repeat Architect. Successful docs sync returns to PM Final Acceptance without
-another role or Gate dispatch.
+another role dispatch or Gate event.
 
 Architect follow-up and docs-sync follow-up begin with the same Flow Record
 event. Workflow Review does not record the reason. A later architecture-plan
 Gate selects the Architect follow-up sequence; repeated Architect dispatches or
 no further role dispatch remain the docs-sync path. Direct Coder, Tester, or
-another Gate dispatch from that shared prefix is denied unless it matches one
+another Gate request from that shared prefix is denied unless it matches one
 of these fixed sequences or an explicitly allowed Debug or Diagnosis entry.
 
 ### 11.2 Architect Debug Flow And Branch
 
-The shared confirmed dispatch sequence is:
+The shared Flow Record sequence is:
 
 ```text
 architect-debug / architect
@@ -493,7 +520,7 @@ The allowed branches are:
 These branches produce the following record extensions:
 
 - Code Diff Gate revision appends Architect in `architect-debug` and later
-  another `code-diff` Gate dispatch with source `architect-debug`
+  another `code-diff` Gate event with source `architect-debug`
 - `normal architecture plan required` appends `code-change` / Architect
 - Tester failure appends `architecture-diagnosis` / Architect
 - standalone Tester pass appends `validation-adequacy` Gate Review and then
@@ -509,7 +536,7 @@ Branch only inside Code-Change Flow, either when Architect Debug Branch is
 replaced after its completed fix still fails Tester validation, or Architect
 must update or replace the architecture plan for the second time.
 
-The code-producing confirmed dispatch sequence is:
+The code-producing Flow Record sequence is:
 
 ```text
 architecture-diagnosis / architect
@@ -538,7 +565,7 @@ The allowed paths and branches are:
 These paths produce the following record extensions:
 
 - Code Diff Gate revision appends Architect in `architecture-diagnosis` and
-  later another `code-diff` Gate dispatch with source `architect-diagnosis`
+  later another `code-diff` Gate event with source `architect-diagnosis`
 - standalone code-producing Tester pass appends `validation-adequacy` Gate
   Review and then Architect docs sync, both in `architecture-diagnosis`
 - code-producing Branch Tester pass appends the approved `code-change` return
@@ -549,7 +576,7 @@ These paths produce the following record extensions:
 
 ### 11.4 Docs-Only Flow
 
-The main confirmed dispatch sequence is:
+The main Flow Record sequence is:
 
 ```text
 docs-only / architect
@@ -575,7 +602,7 @@ or Final Acceptance.
 
 ### 11.5 Validation-Only Flow
 
-The main confirmed dispatch sequence is:
+The main Flow Record sequence is:
 
 ```text
 validation-only / tester
@@ -595,7 +622,7 @@ The allowed branches are:
   lifecycle after the Validation Adequacy Gate permits continuation
 
 Tester continuation and Validation Adequacy revision append Tester and later
-another `validation-adequacy` Gate dispatch in `validation-only`. Required code
+another `validation-adequacy` Gate event in `validation-only`. Required code
 work appends `code-change` / Architect. After the complete Validation-Only
 sequence, PM may instead append `architect-debug` / Architect when the accepted
 outcome requires repair of the confirmed implementation defect. Completion and
@@ -651,15 +678,17 @@ uses `--flow` together with the actual target role.
 - incomplete or non-standard role output returns to the same responsible role
 - user intent, external authorization, or an exact required exception makes PM
   wait without appending to the Flow Record
-- Gate Review `started` or `running` remains at the Gate until the VCM callback
+- Gate Review `started` or same-request `running` appends nothing and remains at
+  the Gate until an actionable resolution
+- another running Gate or request cannot consume the pending approval
 - Gate Review `disabled`, `not_required`, `already_approved`, or `approve`
-  informs PM which next dispatch to request; the callback itself appends no new
-  workflow event
-- Gate Review `request_changes` uses only the branch defined for that Gate in
-  the active flow
+  appends its resolved Gate event and permits the normal next dispatch
+- Gate Review `request_changes` appends its resolved Gate event and permits only
+  the correction path defined for that Gate in the active flow
 - Gate Review `failed_to_start` or `failed` stops advancement for VCM retry,
-  user skip, or user override handling
-- a recorded user skip or override applies only to its exact checkpoint
+  user skip, or user override handling and appends nothing
+- a recorded user skip or override appends one Gate event and applies only to
+  its exact checkpoint
 - a direct role-to-PM report does not append to the Flow Record
 - Translator and Harness Engineer are auxiliary roles and never become Round or
   core workflow nodes
@@ -667,7 +696,8 @@ uses `--flow` together with the actual target role.
 Architect Debug Branch and Architecture Diagnosis Branch exist only inside
 Code-Change Flow. At most one is inferred from the record. Ordinary same-role
 continuation, Gate waiting, and user waiting do not create nested branches.
-An explicit top-level flow switch is recorded by the next confirmed dispatch.
+An explicit top-level flow switch is recorded by the next confirmed normal-role
+dispatch.
 
 ### 11.9 Branch Entry, Replacement, And Exit
 
@@ -732,8 +762,8 @@ The backend needs a typed, explicit transition policy for every supported fixed
 flow and allowed branch. Natural-language PM rules are not an enforcement
 mechanism.
 
-Each rule identifies a legal confirmed Flow Record pattern plus the optional
-requested flow and target role that may be appended next. The policy may use
+Each rule identifies a legal Flow Record pattern plus the optional requested
+flow and target role that may be requested next. The policy may use
 reusable sequence matchers, but it must not depend on a mutable cursor or PM's
 stated reason. Any candidate dispatch not accepted by a rule is illegal.
 
@@ -748,7 +778,7 @@ The matcher performs no persistence or dispatch:
 
 1. validate the complete existing Flow Record against the fixed policy
 2. derive the effective Flow from an explicit request or legal continuation
-3. enumerate the dispatch events that may be appended after the full record
+3. enumerate the role or Gate candidates that may follow the full record
 4. filter them by effective Flow and target role
 5. deny when no legal event remains; otherwise return the matching event set
 
@@ -756,8 +786,14 @@ For a normal role, every matching event has the same effective Flow and target
 role, so one Pending Approval is sufficient. For Gate Reviewer, matching events
 also carry Gate type and code source. The Pending Approval stores all Gate
 signatures legal for that exact record, Flow, and target. The Gate controller
-must later match one of those signatures before confirmation appends the exact
-Gate event.
+must later match one of those signatures, bind its exact request ID, and append
+the Gate event only after an actionable resolution.
+
+The matcher treats the resolved Gate event's disposition and decision as part
+of the record. `approve`, `disabled`, `not_required`, and `already_approved`
+open the normal continuation. `request_changes` opens only the Gate's correction
+path. An unresolved or failed Gate has no Flow Record event and therefore cannot
+open either path.
 
 The matcher does not persist a derived position, cache a PM-provided state, or
 read role results. Repetition, Flow switch, Branch entry, Branch replacement,
@@ -806,6 +842,8 @@ On VCM restart or task re-entry:
   match the Flow Record
 - a dispatching approval is reconciled against message snapshots,
   `UserPromptSubmit`, route content, and target Session state
+- a Gate dispatching approval is bound to its exact request ID and signature and
+  is reconciled against that Gate request and its actionable resolution
 - stale approvals are invalidated with a recorded reason
 - a malformed Flow Record must produce an explicit recovery error rather than
   silently granting a transition
@@ -824,8 +862,8 @@ Backend unit and end-to-end coverage must include:
 - every allowed branch in Section 11 has a positive policy and end-to-end test
 - every supported role-dispatch flow in Section 11 has an end-to-end scenario
   through its final reviewed dispatch
-- Flow Record entries preserve effective Flow, target role, Gate type, and code
-  source exactly for every confirmed dispatch
+- Flow Record entries preserve effective Flow, target role, Gate type, code
+  source, disposition, and decision exactly where each field applies
 - all main dispatch sequences, same-role repetitions, Gate revision loops, Flow
   switches, Branch replacements, and Branch returns listed in Section 11 are
   covered
@@ -842,6 +880,15 @@ Backend unit and end-to-end coverage must include:
   candidates are denied
 - Gate Reviewer approval stores only Gate signatures legal for the exact base
   record and rejects every other Gate type or code source
+- Gate `disabled`, `not_required`, `already_approved`, callback `approve`,
+  callback `request_changes`, user skip, and user override each consume the
+  matching approval and append the exact resolved Gate event
+- Gate `started`, same-request `running`, `failed_to_start`, and callback
+  `failed` append no Gate event and permit no next role
+- another running Gate or mismatched request ID cannot consume or reuse the
+  pending approval
+- Gate `request_changes` permits only its correction path; all other actionable
+  Gate dispositions permit only the normal continuation
 - every flow has negative tests proving unlisted role targets, flow switches,
   branch entries, branch exits, and skipped checkpoints are denied
 - standalone and branch forms of Architect Debug and Architecture Diagnosis are
@@ -955,26 +1002,27 @@ Every PM outbound route file must be empty before approval. The approval binds
 the expected path; claiming stores the exact content hash and message ID. Route
 files carry no workflow approval metadata.
 
-1. **Gate Reviewer approval consumption.** Define exact matching for gate type
-   and code source, existing running Gate behavior, consumption for
-   `started`/`running`/`disabled`/`not_required`/`already_approved`, recovery for
-   `failed_to_start`, and tests that distinguish Gate consumption from normal
-   `UserPromptSubmit` confirmation.
-2. **Restart reconciliation.** Define how a restored `dispatching` approval is
+The Gate Reviewer consumption question is resolved in Sections 7 and 10.
+Starting or running a Gate does not append a Flow Record event. Only a matching
+actionable resolution consumes the approval and appends the resolved Gate
+checkpoint; failed starts and failed callbacks remain recoverable without
+advancing the flow.
+
+1. **Restart reconciliation.** Define how a restored `dispatching` approval is
    classified as unsent, submitted, started, completed, or failed so VCM neither
    duplicates a dispatch nor advances a transition that never started.
-3. **Flow Record lifecycle boundaries.** Define the empty initial record,
+2. **Flow Record lifecycle boundaries.** Define the empty initial record,
     top-level Flow replacement history, record retention at task close, and
     guaranteed task close that cannot be blocked by malformed or unfinished
     Workflow Review runtime data. User waiting, Final Acceptance completion, and
     PR preparation are outside Workflow Review.
-4. **User-authorization source capture.** Define how VCM captures and identifies
+3. **User-authorization source capture.** Define how VCM captures and identifies
    exact direct user messages from Embedded Terminal, Gateway, and other input
    paths so PM cannot fabricate, broaden, or reuse override authorization.
-5. **Override evidence retention.** Decide whether override evidence survives
+4. **Override evidence retention.** Decide whether override evidence survives
    task close or remains task-runtime evidence only, while preserving audit and
    one-time-use guarantees for the lifetime selected.
-6. **Machine-policy and Harness synchronization.** Decide whether one source
+5. **Machine-policy and Harness synchronization.** Decide whether one source
    generates both the backend transition policy and PM Harness description, or
    independent definitions are compared by synchronization tests. Manual drift
    must fail validation before release.
