@@ -538,13 +538,45 @@ The allowed branches are:
 
 Tester continuation and Validation Adequacy revision append Tester and later
 another `validation-adequacy` Gate dispatch in `validation-only`. Required code
-work appends `code-change` / Architect. Completion and user waiting append
-nothing.
+work appends `code-change` / Architect. After the complete Validation-Only
+sequence, PM may instead append `architect-debug` / Architect when the accepted
+outcome requires repair of the confirmed implementation defect. Completion and
+user waiting append nothing.
 
 Validation-Only Flow does not run Architecture Plan Gate, Code Diff Gate,
 Architect Docs Sync, or Final Acceptance.
 
-### 11.6 PM-Only Activity Outside Workflow Review
+### 11.6 Top-Level Debug And Diagnosis Switches
+
+A non-Code-Change switch creates a new top-level Flow segment. Earlier events
+remain in the Flow Record as audit history, but no parent Flow or automatic
+return point is retained.
+
+The only normal switches directly to Debug or Diagnosis are:
+
+```text
+validation-only / tester
+-> validation-only / gate-reviewer / validation-adequacy
+-> architect-debug / architect
+```
+
+```text
+architect-debug / architect
+-> architect-debug / gate-reviewer / code-diff / architect-debug
+-> architect-debug / tester
+-> architecture-diagnosis / architect
+```
+
+Docs-Only does not switch directly to Debug or Diagnosis. It switches to
+Code-Change for production work or Validation-Only for validation work.
+Standalone Architecture Diagnosis never switches back to Debug. Any other
+top-level Debug or Diagnosis switch requires an exact user-authorized override.
+
+Starting Debug or Diagnosis from an empty Flow Record is a Flow start, not a
+switch. Code-Change entry into Debug or Diagnosis follows the Branch rules below
+instead of this section.
+
+### 11.7 PM-Only Activity Outside Workflow Review
 
 Communication-only work, waiting for the user, PM final responses, Final
 Acceptance completion, task completion, and PR preparation do not dispatch work
@@ -556,7 +588,7 @@ If PM later dispatches another role, that dispatch is reviewed against the
 complete Flow Record. Starting or switching to a supported delivery flow
 uses `--flow` together with the actual target role.
 
-### 11.7 Global Branch Rules
+### 11.8 Global Branch Rules
 
 - incomplete or non-standard role output returns to the same responsible role
 - user intent, external authorization, or an exact required exception makes PM
@@ -579,7 +611,7 @@ Code-Change Flow. At most one is inferred from the record. Ordinary same-role
 continuation, Gate waiting, and user waiting do not create nested branches.
 An explicit top-level flow switch is recorded by the next confirmed dispatch.
 
-### 11.8 Branch Entry, Replacement, And Exit
+### 11.9 Branch Entry, Replacement, And Exit
 
 VCM derives Branch entry, replacement, and return from the complete confirmed
 Flow Record. It does not persist a Branch object, entry step, or resume step.
@@ -764,6 +796,14 @@ Backend unit and end-to-end coverage must include:
   without a PM-approved composite transition
 - a non-Code-Change flow moves to Debug or Diagnosis by top-level flow switch,
   never by Branch creation
+- Validation-Only may switch to standalone Debug only after its Tester and
+  Validation Adequacy Gate sequence
+- standalone Debug may switch to standalone Diagnosis only after its Architect,
+  Code Diff Gate, and Tester sequence
+- Docs-Only cannot switch directly to Debug or Diagnosis, and standalone
+  Diagnosis cannot switch back to Debug without an exact user override
+- a top-level switch retains earlier Flow events as history but creates no
+  parent or automatic return point
 - starting without an active flow requires `--flow`
 - starting a flow with a legal target appends its first confirmed dispatch
 - omitting `--flow` continues the current flow
@@ -822,38 +862,40 @@ the complete record and returns the legal append events for the requested Flow
 and target role. It stores no cursor. Gate Reviewer approvals retain the Gate
 signatures legal for that exact record.
 
-1. **Non-Code-Change switches to Debug or Diagnosis.** Enumerate which Flow
-   Record prefixes may switch to standalone Architect Debug or Architecture
-   Diagnosis, the required target role, and how the top-level switch is
-   represented in history.
-2. **Final Acceptance follow-up mapping.** Replace "earliest affected step" with
+The non-Code-Change switch question is resolved in Section 11.6. A completed
+Validation-Only sequence may switch to standalone Debug. A standalone Debug
+sequence through Tester may switch to standalone Diagnosis. These are top-level
+Flow segments with no automatic return. Other switches require exact user
+authorization.
+
+1. **Final Acceptance follow-up mapping.** Replace "earliest affected step" with
    fixed destinations and required downstream Gates for
    `needs-coder-follow-up`, `needs-architect-follow-up`, and
    `needs-docs-sync`.
-3. **Approval-to-dispatch correlation.** Target-role equality alone cannot
+2. **Approval-to-dispatch correlation.** Target-role equality alone cannot
    distinguish the newly approved message from an older pending route to the
    same role. Define how VCM recognizes the first eligible dispatch created
    after approval without adding approval metadata to route files.
-4. **Gate Reviewer approval consumption.** Define exact matching for gate type
+3. **Gate Reviewer approval consumption.** Define exact matching for gate type
    and code source, existing running Gate behavior, consumption for
    `started`/`running`/`disabled`/`not_required`/`already_approved`, recovery for
    `failed_to_start`, and tests that distinguish Gate consumption from normal
    `UserPromptSubmit` confirmation.
-5. **Restart reconciliation.** Define how a restored `dispatching` approval is
+4. **Restart reconciliation.** Define how a restored `dispatching` approval is
    classified as unsent, submitted, started, completed, or failed so VCM neither
    duplicates a dispatch nor advances a transition that never started.
-6. **Flow Record lifecycle boundaries.** Define the empty initial record,
+5. **Flow Record lifecycle boundaries.** Define the empty initial record,
     top-level Flow replacement history, record retention at task close, and
     guaranteed task close that cannot be blocked by malformed or unfinished
     Workflow Review runtime data. User waiting, Final Acceptance completion, and
     PR preparation are outside Workflow Review.
-7. **User-authorization source capture.** Define how VCM captures and identifies
+6. **User-authorization source capture.** Define how VCM captures and identifies
    exact direct user messages from Embedded Terminal, Gateway, and other input
    paths so PM cannot fabricate, broaden, or reuse override authorization.
-8. **Override evidence retention.** Decide whether override evidence survives
+7. **Override evidence retention.** Decide whether override evidence survives
    task close or remains task-runtime evidence only, while preserving audit and
    one-time-use guarantees for the lifetime selected.
-9. **Machine-policy and Harness synchronization.** Decide whether one source
+8. **Machine-policy and Harness synchronization.** Decide whether one source
    generates both the backend transition policy and PM Harness description, or
    independent definitions are compared by synchronization tests. Manual drift
    must fail validation before release.
