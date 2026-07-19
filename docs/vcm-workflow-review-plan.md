@@ -776,7 +776,8 @@ user-authorized flow switch may leave it only for the exact recorded exception.
 
 The backend needs a typed, explicit transition policy for every supported fixed
 flow and allowed branch. Natural-language PM rules are not an enforcement
-mechanism.
+mechanism. This typed `workflow-policy` is the single source of truth for the
+machine dispatch graph.
 
 Each rule identifies a legal Flow Record pattern plus the optional requested
 flow and target role that may be requested next. The policy may use
@@ -830,9 +831,21 @@ Gate, or user result. VCM validates only whether appending that flow-and-target
 dispatch produces an allowed record. It does not independently interpret those
 results or store why PM selected the dispatch.
 
-The machine policy and installed PM Harness rules must remain synchronized by
-tests. The machine policy is authoritative for dispatch permission; the PM rules
-explain the same policy to the model.
+The matcher reads the typed policy directly. A renderer reads the same policy
+and generates a fixed Workflow Dispatch Policy block for the Project Manager
+Harness. That generated block contains the ordered role and Gate nodes, legal
+repetitions, Flow switches, Branch entry, Branch replacement, Branch return,
+target roles, and Gate signatures. It is not hand-edited.
+
+PM rules that explain how to interpret role, Gate, or user results remain
+manually authored because they are model behavior rules rather than the machine
+dispatch graph. They may guide PM's choice among legal candidates but cannot
+add a transition absent from the typed policy.
+
+The installer template, VCM self-Harness, and `example/rust-layered` use the
+same rendered block. Synchronization tests fail when any copy differs from the
+renderer. The machine policy remains authoritative for dispatch permission even
+if explanatory PM prose is incomplete or stale.
 
 ## 13. Dispatch-Only Boundary
 
@@ -912,6 +925,13 @@ Backend unit and end-to-end coverage must include:
 - re-entering an active task restores its complete Flow Record
 - task close clears approval state, succeeds with unfinished or malformed
   Workflow Review data, and creates no base-repository or project-wide archive
+- the backend matcher and PM Workflow Dispatch Policy block are produced from
+  the same typed workflow policy
+- installer output, VCM self-Harness, and `example/rust-layered` contain the
+  exact generated PM policy block
+- hand-edited or stale generated PM policy content fails synchronization tests
+- every transition in the typed policy has a positive matcher test and every
+  unlisted flow-and-target candidate is denied
 - every main-path transition in Section 11 has a positive policy and backend
   integration test
 - every allowed branch in Section 11 has a positive policy and end-to-end test
@@ -1036,12 +1056,10 @@ Backend unit and end-to-end coverage must include:
 - malformed override evidence may warn but cannot block task close
 - user override cannot bypass non-workflow safety controls
 
-## 16. Open Decisions Before Implementation
+## 16. Resolved Design Decisions
 
-The authoritative Flow Record, workflow-review command-line interface, and
-deny-by-default policy shape are decided above. Resolve the following items in
-order before coding. Discuss one item at a time: state the problem, present a
-recommendation, and record the user's decision before changing the design.
+All pre-implementation design questions are resolved. The decisions below
+summarize the constraints that implementation must preserve.
 
 The targetless-checkpoint question is resolved: Workflow Review reviews only
 PM-to-role dispatches. PM-only activity is outside its record and approval
@@ -1103,7 +1121,7 @@ Override evidence retention follows the Flow Record lifecycle. Evidence remains
 auditable and one-time within the active task, then is deleted with the task
 worktree without base-repository or project-wide archival.
 
-1. **Machine-policy and Harness synchronization.** Decide whether one source
-   generates both the backend transition policy and PM Harness description, or
-   independent definitions are compared by synchronization tests. Manual drift
-   must fail validation before release.
+Machine-policy and Harness synchronization is resolved in Section 12. One typed
+workflow policy drives both the backend matcher and the generated PM Workflow
+Dispatch Policy block. PM's result-interpretation prose remains manual, while
+the generated dispatch graph and its synchronized Harness copies cannot drift.
