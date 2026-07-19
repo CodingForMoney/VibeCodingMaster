@@ -203,9 +203,11 @@ VCM must prevent both duplicate dispatch and false state advancement.
 
 When a matching normal route is selected for delivery, the pending approval
 moves to an internal dispatching state and stores the exact route-content hash
-and generated message ID so another Hook cannot reuse it. The approval is
-consumed and cleared only when Claude Code confirms that message through
-`UserPromptSubmit`.
+and generated message ID so another Hook cannot reuse it. This write-ahead
+transition must be persisted before terminal input is submitted. The approval
+is consumed and cleared only when Claude Code confirms that message through
+`UserPromptSubmit`; Section 14 defines the transcript fallback used only during
+restart recovery.
 
 Gate Reviewer uses the following status rules because starting a review is not
 the same as resolving its checkpoint:
@@ -332,7 +334,8 @@ or PM interpretation. VCM matches the complete Flow Record sequence against the
 fixed policy to determine which next flow-and-target combinations are legal.
 
 A normal-role entry is appended only after the target `UserPromptSubmit`
-confirms the approved route. A Gate entry is appended only after the matching
+confirms the approved route, except for the exact transcript-based restart
+recovery defined in Section 14. A Gate entry is appended only after the matching
 checkpoint has an actionable resolution: `disabled`, `not_required`,
 `already_approved`, callback `approve`, callback `request_changes`, or an exact
 user skip or override. Gate request creation, `started`, `running`,
@@ -835,20 +838,46 @@ Workflow Review.
 The Flow Record, pending approval, dispatching approval, rejection fingerprint,
 and override evidence are task-scoped backend data in the active worktree.
 
-On VCM restart or task re-entry:
+VCM restores the authoritative Flow Record first. A malformed record produces
+an explicit recovery error and grants no transition. Every restored approval
+must still match the record's current sequence and hash; otherwise VCM
+invalidates it with the exact reason.
 
-- the authoritative Flow Record is restored
-- an unused approval is restored only when its base sequence and hash still
-  match the Flow Record
-- a dispatching approval is reconciled against message snapshots,
-  `UserPromptSubmit`, route content, and target Session state
-- a Gate dispatching approval is bound to its exact request ID and signature and
-  is reconciled against that Gate request and its actionable resolution
-- stale approvals are invalidated with a recorded reason
-- a malformed Flow Record must produce an explicit recovery error rather than
-  silently granting a transition
-- a non-empty PM outbound route file without a matching pending or dispatching
-  approval remains undelivered and is surfaced as an unauthorized pending route
+A restored normal-role `pending` approval remains pending when its base still
+matches. A route file may claim it through the ordinary locked dispatch path.
+VCM never sends a non-empty PM outbound route that has no matching pending or
+dispatching approval.
+
+Normal-role `dispatching` is a persisted write-ahead state. Recovery classifies
+it from durable evidence:
+
+- a matching `UserPromptSubmit` receipt completes the dispatch
+- if that Hook receipt was lost, an exact accepted user message in the approved
+  target Session transcript, recorded after the claim and matching the route
+  content hash, also completes the dispatch
+- completion atomically appends the approved Flow Record event and consumes the
+  approval
+- without either completion proof, unchanged route content with the claimed
+  hash returns the approval to `pending` so the ordinary dispatcher may retry
+- missing or changed route content invalidates the approval and reports a
+  recovery error; VCM neither sends nor appends an event
+
+Gate Reviewer recovery uses the exact Gate request ID and Gate signature stored
+by its `dispatching` approval:
+
+- a persisted actionable Gate resolution is applied through the Section 7
+  status rules
+- a live Gate process bound to the same request in the current runtime keeps the
+  approval `dispatching`
+- `failed_to_start` or callback `failed` returns the approval to recoverable
+  `pending` without appending an event
+- a missing request, mismatched request ID, or mismatched Gate signature
+  invalidates the approval and reports a recovery error
+
+Reconciliation runs under the task lock. Applying a confirmed normal dispatch
+or resolved Gate checkpoint and consuming its approval is atomic. Repeating
+reconciliation after another restart cannot append the same Flow Record event,
+consume an approval twice, or resend a route already proven complete.
 
 Task close clears runtime approval state. Flow Record retention follows the
 task-close policy decided before implementation and cannot block task close.
@@ -950,9 +979,27 @@ Backend unit and end-to-end coverage must include:
 - user waiting, PM final responses, Final Acceptance completion, task
   completion, and PR preparation never require Workflow Review
 - Workflow Review cannot create a PM-target or targetless approval
-- the Flow Record changes only after target `UserPromptSubmit`
+- ordinary normal-role dispatch changes the Flow Record only after target
+  `UserPromptSubmit`; only Section 14's exact transcript recovery may replace a
+  lost receipt
 - failed terminal submission does not append to the Flow Record
-- restart reconciles pending and dispatching approvals
+- dispatching state is durably recorded before normal terminal submission
+- restart restores a current-base pending approval without granting any other
+  route permission
+- restart completes a normal dispatch from its matching `UserPromptSubmit`
+  receipt without sending it again
+- restart may recover a lost Hook receipt only from an exact accepted target
+  Session transcript message recorded after the claim with matching content hash
+- restart returns an unconfirmed dispatch to pending only when the claimed route
+  content and hash remain unchanged
+- restart invalidates an unconfirmed dispatch when its route is missing or
+  changed and appends no Flow Record event
+- restart resolves a Gate only from the exact stored request ID, signature, and
+  actionable result
+- restart keeps only a currently live matching Gate request in `dispatching`
+- failed Gate recovery returns to pending; missing or mismatched Gate recovery
+  invalidates the approval
+- repeated reconciliation is idempotent for normal and Gate dispatches
 - restart never sends a non-empty PM outbound route that has no matching
   pending or dispatching approval
 - unchanged rejected routes do not generate repeated callbacks
@@ -1008,21 +1055,24 @@ actionable resolution consumes the approval and appends the resolved Gate
 checkpoint; failed starts and failed callbacks remain recoverable without
 advancing the flow.
 
-1. **Restart reconciliation.** Define how a restored `dispatching` approval is
-   classified as unsent, submitted, started, completed, or failed so VCM neither
-   duplicates a dispatch nor advances a transition that never started.
-2. **Flow Record lifecycle boundaries.** Define the empty initial record,
+The restart-reconciliation question is resolved in Section 14. Normal dispatch
+uses persisted write-ahead state and requires an exact Hook receipt or accepted
+transcript message before advancing. Gate recovery uses its exact request ID,
+signature, and actionable result. Unproven work returns to pending only when its
+original input remains intact; otherwise it is invalidated without advancing.
+
+1. **Flow Record lifecycle boundaries.** Define the empty initial record,
     top-level Flow replacement history, record retention at task close, and
     guaranteed task close that cannot be blocked by malformed or unfinished
     Workflow Review runtime data. User waiting, Final Acceptance completion, and
     PR preparation are outside Workflow Review.
-3. **User-authorization source capture.** Define how VCM captures and identifies
+2. **User-authorization source capture.** Define how VCM captures and identifies
    exact direct user messages from Embedded Terminal, Gateway, and other input
    paths so PM cannot fabricate, broaden, or reuse override authorization.
-4. **Override evidence retention.** Decide whether override evidence survives
+3. **Override evidence retention.** Decide whether override evidence survives
    task close or remains task-runtime evidence only, while preserving audit and
    one-time-use guarantees for the lifetime selected.
-5. **Machine-policy and Harness synchronization.** Decide whether one source
+4. **Machine-policy and Harness synchronization.** Decide whether one source
    generates both the backend transition policy and PM Harness description, or
    independent definitions are compared by synchronization tests. Manual drift
    must fail validation before release.
