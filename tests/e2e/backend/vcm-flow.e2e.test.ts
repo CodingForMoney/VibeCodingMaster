@@ -16,7 +16,7 @@ const cleanups: Array<() => Promise<void>> = [];
 
 afterEach(async () => {
   while (cleanups.length > 0) {
-    await cleanups.pop()?.();
+    await cleanups.shift()?.();
   }
 });
 

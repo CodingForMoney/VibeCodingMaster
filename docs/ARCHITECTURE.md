@@ -100,9 +100,10 @@ local endpoint `http://127.0.0.1:3456` or DevContainer endpoint
 `ccr-gateway-adapter` verifies the gateway identity and performs authenticated
 model discovery, selecting the first valid runtime endpoint. `ccr-integration-service` owns the enabled state, volatile
 connection result, shared in-flight check, short cache, safe API response, and
-session-scoped child environment. The API key is persisted only in global app
-settings, is used only for gateway checks and model discovery, and settings
-responses expose only whether it is configured. GPT-backed children clear
+session-scoped child environment and settings override. The API key is
+persisted only in global app settings and is used for gateway checks, model
+discovery, and GPT child authentication through the helper; settings responses
+expose only whether it is configured. GPT-backed children clear
 inherited Anthropic credential variables and receive an isolated `apiKeyHelper`
 through `--settings`. `claude-settings-adapter` removes only CCR-owned takeover
 entries from global Claude settings, leaving native Claude launches unchanged.

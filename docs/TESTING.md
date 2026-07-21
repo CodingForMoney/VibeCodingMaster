@@ -49,7 +49,8 @@ Notes:
 - Session lifecycle, round routing, Gate Review, translation, Gateway, Auto
   Memory, or Harness Retrospective change: run `npm run test:e2e:backend`.
 - CCR model integration change: run `ccr-gateway-adapter.test.ts`,
-  `ccr-integration-service.test.ts`, `claude-adapter.test.ts`, and
+  `ccr-integration-service.test.ts`, `claude-settings-adapter.test.ts`,
+  `ccr-api-key-helper.test.ts`, `claude-adapter.test.ts`, and
   `ccr-integration.e2e.test.ts`; then run the complete backend E2E suite when
   changing Session launch wiring.
 - Task workflow-state changes: run `task-workflow-service.test.ts`,
@@ -168,9 +169,9 @@ services with controlled runtime doubles:
 - PM-declared task workflow state persistence, workspace aggregation, and PM
   session restoration.
 - CCR settings redaction, authenticated model availability, native-vs-CCR
-  command behavior, blocked unavailable launches, and shared CCR child
-  environment across workflow, Gate Reviewer, Translator, and Harness Engineer
-  Session paths.
+  command behavior, GPT-only settings overrides, global CCR takeover cleanup,
+  blocked unavailable launches, and shared CCR child environment across
+  workflow, Gate Reviewer, Translator, and Harness Engineer Session paths.
 
 Run all backend journeys with `npm run test:e2e:backend`.
 

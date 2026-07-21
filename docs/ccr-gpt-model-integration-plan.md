@@ -18,7 +18,7 @@ host. VCM does not manage the CCR process. VCM provides:
   backend from its current runtime
 - availability detection for the supported CCR model in existing model
   selectors
-- per-session environment injection when a CCR model is selected
+- per-session environment and `--settings` injection when a CCR model is selected
 - explicit launch errors when the selected CCR model is unavailable
 
 VCM continues to launch and supervise every Claude Code process through its
@@ -48,7 +48,9 @@ VCM must not:
 - invoke host-side `ccr`, `ccr-app`, or a CCR-managed Claude profile
 - read or store the user's ChatGPT/Codex account credentials
 - connect to the CCR management UI or its management API
-- change global Claude Code settings or the container shell environment
+- use global Claude Code settings or the container shell environment to activate
+  CCR; VCM may remove known CCR takeover entries to restore native Claude
+  behavior
 - silently replace an unavailable CCR model with Claude or another model
 
 VCM connects only to CCR's model gateway. CCR remains the source of truth for
@@ -323,6 +325,8 @@ or launch a session without the CCR environment.
 
 - persist and normalize global CCR settings in `app-settings-service`
 - add the CCR HTTP adapter and settings/status routes
+- add a Claude settings adapter that removes only known CCR takeover entries
+- provide a GPT-only API-key helper for the child `--settings` override
 - compose one shared CCR connection service in `server.ts`
 - extend `claude-adapter` to distinguish native and CCR launch models
 - centralize CCR child-environment construction in the Session launch path
@@ -348,7 +352,9 @@ or launch a session without the CCR environment.
   successful model discovery
 - CCR model parsing and unchanged native Claude-model normalization
 - native Claude command generation remains unchanged
-- CCR launch omits native `--model` and injects the complete environment
+- global Claude settings cleanup preserves unrelated user settings
+- CCR launch omits native `--model`, injects the complete child environment,
+  and supplies the GPT-only `apiKeyHelper` through `--settings`
 - no secret is present in command display, records, logs, or returned errors
 - disabled/unavailable/missing-model launches are rejected without fallback
 
@@ -361,7 +367,7 @@ Use a mock CCR HTTP server plus the existing mock Claude Code runtime to cover:
 3. start multiple roles with one-click launch and verify one shared connection
    check is used
 4. resume and restart a CCR-backed session
-5. verify native Claude sessions receive no CCR environment
+5. verify native Claude sessions receive no CCR environment or `--settings`
 6. stop CCR and verify a new launch is blocked with a precise error
 7. reject an invalid API key and a missing `gpt-5.6-sol` model
 8. verify Hooks, Session state, Round state, retry, and close-task behavior are
@@ -384,7 +390,8 @@ Use a mock CCR HTTP server plus the existing mock Claude Code runtime to cover:
 
 1. shared model/settings contracts
 2. backend CCR adapter, status cache, safe settings API, and tests
-3. centralized session launch environment and launch validation
+3. centralized session launch environment, GPT-only settings override, and
+   launch validation
 4. backend-owned frontend model controls and global Settings UI
 5. launch-template, auxiliary-session, Bootstrap, and one-click coverage
 6. backend E2E and DevContainer smoke verification
@@ -398,8 +405,11 @@ Use a mock CCR HTTP server plus the existing mock Claude Code runtime to cover:
 - Enabling CCR exposes `GPT-5.6 Sol (CCR)` only when CCR reports
   `Codex API/gpt-5.6-sol`.
 - Selecting `GPT-5.6 Sol (CCR)` starts the normal VCM-managed Claude Code
-  process with only session-scoped environment changes.
-- Native Claude model launches remain unchanged.
+  process with child-scoped CCR environment variables and a GPT-only
+  `--settings` override.
+- Native Claude model launches receive neither CCR environment variables nor a
+  settings override, and known global CCR takeover entries are removed without
+  changing unrelated Claude settings.
 - CCR credentials never appear in frontend responses, terminal commands,
   session records, or logs.
 - An unavailable endpoint, rejected key, or missing model blocks the launch
