@@ -6,15 +6,16 @@ Status: implemented on the `v07` branch.
 
 ## 1. Goal
 
-Allow VCM-managed Claude Code sessions running inside a DevContainer to use
-the supported GPT model exposed by a host-running Claude Code Router (CCR).
+Allow VCM-managed Claude Code sessions running locally or inside a DevContainer
+to use the supported GPT model exposed by a host-running Claude Code Router
+(CCR).
 
 The user installs, authenticates, configures, starts, and updates CCR on the
 host. VCM does not manage the CCR process. VCM provides:
 
 - a global CCR integration switch
 - an authenticated connectivity and capability check performed by the VCM
-  backend from inside the container
+  backend from its current runtime
 - availability detection for the supported CCR model in existing model
   selectors
 - per-session environment injection when a CCR model is selected
@@ -54,13 +55,19 @@ VCM connects only to CCR's model gateway. CCR remains the source of truth for
 provider authentication, upstream model configuration, request conversion,
 and ChatGPT subscription usage.
 
-## 3. Host And Container Contract
+## 3. Runtime Endpoint Contract
 
-VCM uses this fixed endpoint:
+VCM checks these fixed endpoints in order:
 
 ```text
+http://127.0.0.1:3456
 http://host.docker.internal:3456
 ```
+
+The first endpoint supports VCM running directly on the CCR host. The second
+supports VCM running inside a DevContainer. VCM verifies the CCR identity before
+selecting an endpoint, then uses that same endpoint for model discovery and GPT
+session launches.
 
 CCR must listen on an interface reachable from the DevContainer. For the
 VCM integration contract this means:
@@ -79,9 +86,7 @@ only to authenticate to the local CCR gateway; it is not an OpenAI or ChatGPT
 credential.
 
 Docker Desktop supplies `host.docker.internal`. Linux DevContainer setups must
-map that name to the host gateway. VCM must report a connectivity error when
-the fixed endpoint is unreachable rather than trying to infer another address
-or port.
+map that name to the host gateway. VCM does not scan arbitrary hosts or ports.
 
 The CCR management UI port is outside this contract. VCM must not assume that
 the management UI and model gateway use the same port or authentication.
@@ -217,9 +222,9 @@ For a CCR selection, VCM launches the normal container `claude` executable and
 injects these variables only into that child process:
 
 ```text
-ANTHROPIC_BASE_URL=http://host.docker.internal:3456
-ANTHROPIC_API_BASE_URL=http://host.docker.internal:3456
-CLAUDE_AGENT_API_BASE_URL=http://host.docker.internal:3456
+ANTHROPIC_BASE_URL=<identified CCR endpoint>
+ANTHROPIC_API_BASE_URL=<identified CCR endpoint>
+CLAUDE_AGENT_API_BASE_URL=<identified CCR endpoint>
 ANTHROPIC_AUTH_TOKEN=<unset>
 ANTHROPIC_API_KEY=<unset>
 ANTHROPIC_MODEL=Codex API/gpt-5.6-sol
@@ -227,7 +232,7 @@ CCR_CLAUDE_CODE_MODEL=Codex API/gpt-5.6-sol
 CODEXL_CLAUDE_CODE_MODEL=Codex API/gpt-5.6-sol
 ANTHROPIC_SMALL_FAST_MODEL=Codex API/gpt-5.6-sol
 CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1
-NO_PROXY=<existing entries plus host.docker.internal>
+NO_PROXY=<existing entries plus identified CCR host>
 ```
 
 The selected CCR model is supplied through the environment. The Claude adapter
@@ -293,8 +298,8 @@ cases:
 | Condition | Required result |
 | --- | --- |
 | Integration disabled | Report that CCR GPT models are disabled. |
-| Host or port unreachable | Include the fixed URL and state that the check ran from the VCM container. |
-| Request timeout | Report the timeout and suggest checking the host listener and container route. |
+| Host or port unreachable | Include both supported runtime URLs and their connection errors. |
+| Request timeout | Report the endpoint and timeout. |
 | HTTP 401/403 | Report that the CCR API key was rejected. |
 | Endpoint is not CCR | Report that the URL did not identify a CCR gateway. |
 | Invalid model response | Report the invalid `/v1/models` response without dumping secrets. |

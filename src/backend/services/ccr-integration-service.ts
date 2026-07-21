@@ -183,14 +183,16 @@ export function createCcrIntegrationService(deps: CcrIntegrationServiceDeps): Cc
         });
       }
 
+      const gatewayBaseUrl = checked.result.baseUrl ?? CCR_GATEWAY_BASE_URL;
+      const gatewayHost = new URL(gatewayBaseUrl).hostname;
       const noProxy = mergeNoProxy(
         deps.baseEnv?.NO_PROXY ?? deps.baseEnv?.no_proxy ?? process.env.NO_PROXY ?? process.env.no_proxy,
-        "host.docker.internal"
+        gatewayHost
       );
       return {
-        ANTHROPIC_BASE_URL: CCR_GATEWAY_BASE_URL,
-        ANTHROPIC_API_BASE_URL: CCR_GATEWAY_BASE_URL,
-        CLAUDE_AGENT_API_BASE_URL: CCR_GATEWAY_BASE_URL,
+        ANTHROPIC_BASE_URL: gatewayBaseUrl,
+        ANTHROPIC_API_BASE_URL: gatewayBaseUrl,
+        CLAUDE_AGENT_API_BASE_URL: gatewayBaseUrl,
         ANTHROPIC_AUTH_TOKEN: undefined,
         ANTHROPIC_API_KEY: undefined,
         ANTHROPIC_MODEL: CCR_GPT_MODEL_ID,

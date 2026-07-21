@@ -52,6 +52,26 @@ describe("createCcrIntegrationService", () => {
     await expect(service.getLaunchEnvironment("opus")).resolves.toEqual({});
   });
 
+  it("launches GPT sessions through the endpoint identified by the probe", async () => {
+    const service = createService({
+      initial: { version: 1, enabled: true, apiKey: "saved" },
+      baseEnv: { NO_PROXY: "localhost" },
+      probeResult: {
+        connectionState: "available",
+        modelAvailable: true,
+        baseUrl: "http://127.0.0.1:3456"
+      }
+    });
+
+    await expect(service.getLaunchEnvironment(CCR_GPT_SESSION_MODEL)).resolves.toMatchObject({
+      ANTHROPIC_BASE_URL: "http://127.0.0.1:3456",
+      ANTHROPIC_API_BASE_URL: "http://127.0.0.1:3456",
+      CLAUDE_AGENT_API_BASE_URL: "http://127.0.0.1:3456",
+      NO_PROXY: "localhost,127.0.0.1",
+      no_proxy: "localhost,127.0.0.1"
+    });
+  });
+
   it("blocks CCR-backed launches while disabled or unavailable", async () => {
     const disabled = createService();
     await expect(disabled.getLaunchEnvironment(CCR_GPT_SESSION_MODEL)).rejects.toMatchObject({
@@ -102,6 +122,7 @@ function createService(options: {
   probeResult?: {
     connectionState: "available" | "unreachable";
     modelAvailable: boolean;
+    baseUrl?: string;
     error?: string;
   };
   onProbe?(): void;

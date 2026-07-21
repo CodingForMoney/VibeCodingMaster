@@ -62,7 +62,13 @@ export const CLAUDE_MODEL_OPTIONS = [
 
 export type ClaudeModel = typeof CLAUDE_MODEL_OPTIONS[number]["value"];
 
-export const CCR_GATEWAY_BASE_URL = "http://host.docker.internal:3456" as const;
+export const CCR_LOCAL_GATEWAY_BASE_URL = "http://127.0.0.1:3456" as const;
+export const CCR_CONTAINER_GATEWAY_BASE_URL = "http://host.docker.internal:3456" as const;
+export const CCR_GATEWAY_BASE_URL = CCR_CONTAINER_GATEWAY_BASE_URL;
+export const CCR_GATEWAY_BASE_URLS = [
+  CCR_LOCAL_GATEWAY_BASE_URL,
+  CCR_CONTAINER_GATEWAY_BASE_URL
+] as const;
 export const CCR_GPT_MODEL_ID = "Codex API/gpt-5.6-sol" as const;
 export const CCR_GPT_SESSION_MODEL = `ccr:${CCR_GPT_MODEL_ID}` as const;
 export type CcrSessionModel = typeof CCR_GPT_SESSION_MODEL;

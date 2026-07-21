@@ -1,5 +1,5 @@
 import {
-  CCR_GATEWAY_BASE_URL,
+  CCR_GATEWAY_BASE_URLS,
   CCR_GPT_MODEL_ID
 } from "../../shared/types/session.js";
 import type { CcrConnectionState } from "../../shared/types/app-settings.js";
@@ -7,6 +7,7 @@ import type { CcrConnectionState } from "../../shared/types/app-settings.js";
 export interface CcrGatewayProbeResult {
   connectionState: Exclude<CcrConnectionState, "disabled" | "checking">;
   modelAvailable: boolean;
+  baseUrl?: string;
   error?: string;
 }
 
@@ -29,63 +30,92 @@ interface CcrModelDescriptor {
 }
 
 export function createCcrGatewayAdapter(deps: CcrGatewayAdapterDeps = {}): CcrGatewayAdapter {
-  const baseUrl = (deps.baseUrl ?? CCR_GATEWAY_BASE_URL).replace(/\/+$/, "");
+  const baseUrls = (deps.baseUrl ? [deps.baseUrl] : CCR_GATEWAY_BASE_URLS)
+    .map((baseUrl) => baseUrl.replace(/\/+$/, ""));
   const fetchImpl = deps.fetch ?? globalThis.fetch;
   const timeoutMs = deps.timeoutMs ?? DEFAULT_TIMEOUT_MS;
 
   return {
     async probe(apiKey) {
-      try {
-        const root = await requestJson(fetchImpl, `${baseUrl}/`, timeoutMs);
-        if (!root.response.ok) {
-          return invalidResponse(`CCR gateway root returned HTTP ${root.response.status}.`);
+      const failures: CcrGatewayProbeResult[] = [];
+      for (const baseUrl of baseUrls) {
+        const result = await probeEndpoint(fetchImpl, baseUrl, apiKey, timeoutMs);
+        if (result.baseUrl) {
+          return result;
         }
-        if (!isCcrGateway(root.payload)) {
-          return {
-            connectionState: "not-ccr",
-            modelAvailable: false,
-            error: `The fixed CCR endpoint ${baseUrl} did not identify a Claude Code Router gateway.`
-          };
-        }
-
-        const models = await requestJson(fetchImpl, `${baseUrl}/v1/models`, timeoutMs, {
-          authorization: `Bearer ${apiKey}`,
-          "user-agent": "Claude Code"
-        });
-        if (models.response.status === 401 || models.response.status === 403) {
-          return {
-            connectionState: "unauthorized",
-            modelAvailable: false,
-            error: "CCR rejected the configured API key."
-          };
-        }
-        if (!models.response.ok) {
-          return invalidResponse(`CCR model discovery returned HTTP ${models.response.status}.`);
-        }
-
-        const modelDescriptors = readModelDescriptors(models.payload);
-        if (!modelDescriptors) {
-          return invalidResponse("CCR returned an invalid /v1/models response.");
-        }
-        const modelAvailable = modelDescriptors.some(isRequiredModel);
-        return {
-          connectionState: "available",
-          modelAvailable,
-          ...(modelAvailable
-            ? {}
-            : { error: `CCR does not expose the required model ${CCR_GPT_MODEL_ID}.` })
-        };
-      } catch (error) {
-        const timedOut = isAbortError(error);
-        return {
-          connectionState: "unreachable",
-          modelAvailable: false,
-          error: timedOut
-            ? `CCR connection timed out after ${timeoutMs} ms at ${baseUrl}.`
-            : `CCR could not be reached from the VCM container backend at ${baseUrl}. Reason: ${errorMessage(error)}`
-        };
+        failures.push(result);
       }
+      return combineProbeFailures(baseUrls, failures);
     }
+  };
+}
+
+async function probeEndpoint(
+  fetchImpl: typeof globalThis.fetch,
+  baseUrl: string,
+  apiKey: string,
+  timeoutMs: number
+): Promise<CcrGatewayProbeResult> {
+  try {
+    const root = await requestJson(fetchImpl, `${baseUrl}/`, timeoutMs);
+    if (!root.response.ok) {
+      return invalidResponse(`Gateway root at ${baseUrl} returned HTTP ${root.response.status}.`);
+    }
+    if (!isCcrGateway(root.payload)) {
+      return {
+        connectionState: "not-ccr",
+        modelAvailable: false,
+        error: `${baseUrl} did not identify a Claude Code Router gateway.`
+      };
+    }
+
+    const models = await requestJson(fetchImpl, `${baseUrl}/v1/models`, timeoutMs, {
+      authorization: `Bearer ${apiKey}`,
+      "user-agent": "Claude Code"
+    });
+    if (models.response.status === 401 || models.response.status === 403) {
+      return {
+        connectionState: "unauthorized",
+        modelAvailable: false,
+        baseUrl,
+        error: "CCR rejected the configured API key."
+      };
+    }
+    if (!models.response.ok) {
+      return invalidResponse(`CCR model discovery at ${baseUrl} returned HTTP ${models.response.status}.`, baseUrl);
+    }
+
+    const modelDescriptors = readModelDescriptors(models.payload);
+    if (!modelDescriptors) {
+      return invalidResponse("CCR returned an invalid /v1/models response.", baseUrl);
+    }
+    const modelAvailable = modelDescriptors.some(isRequiredModel);
+    return {
+      connectionState: "available",
+      modelAvailable,
+      baseUrl,
+      ...(modelAvailable
+        ? {}
+        : { error: `CCR does not expose the required model ${CCR_GPT_MODEL_ID}.` })
+    };
+  } catch (error) {
+    const timedOut = isAbortError(error);
+    return {
+      connectionState: "unreachable",
+      modelAvailable: false,
+      error: timedOut
+        ? `CCR connection timed out after ${timeoutMs} ms at ${baseUrl}.`
+        : `CCR could not be reached from the VCM backend at ${baseUrl}. Reason: ${errorMessage(error)}`
+    };
+  }
+}
+
+function combineProbeFailures(baseUrls: string[], failures: CcrGatewayProbeResult[]): CcrGatewayProbeResult {
+  const lastFailure = failures.at(-1);
+  return {
+    connectionState: lastFailure?.connectionState ?? "unreachable",
+    modelAvailable: false,
+    error: `CCR was not found at ${baseUrls.join(" or ")}. ${failures.map((failure) => failure.error).filter(Boolean).join(" ")}`.trim()
   };
 }
 
@@ -170,10 +200,11 @@ function normalizeModelName(value: string | undefined): string {
   return (value ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "");
 }
 
-function invalidResponse(error: string): CcrGatewayProbeResult {
+function invalidResponse(error: string, baseUrl?: string): CcrGatewayProbeResult {
   return {
     connectionState: "invalid-response",
     modelAvailable: false,
+    ...(baseUrl ? { baseUrl } : {}),
     error
   };
 }

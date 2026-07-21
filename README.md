@@ -235,14 +235,16 @@ a host-running [Claude Code Router](https://github.com/musistudio/claude-code-ro
 CCR must already be installed, authenticated, configured, and running on the
 host. VCM does not manage the CCR process.
 
-VCM uses this fixed Dev Container endpoint:
+VCM automatically checks the local-host and DevContainer endpoints:
 
 ```text
+http://127.0.0.1:3456
 http://host.docker.internal:3456
 ```
 
-Configure CCR to listen on port `3456` with an API key and make it reachable
-from the container. In the VCM `Settings` section:
+Configure CCR to listen on port `3456` with an API key. When VCM runs in a
+DevContainer, make the second endpoint reachable from the container. In the VCM
+`Settings` section:
 
 1. enter and save the CCR API key;
 2. enable `CCR GPT models`;

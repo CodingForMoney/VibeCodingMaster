@@ -14,7 +14,8 @@ describe("createCcrGatewayAdapter", () => {
 
     await expect(adapter.probe("local-secret")).resolves.toEqual({
       connectionState: "available",
-      modelAvailable: true
+      modelAvailable: true,
+      baseUrl: "http://127.0.0.1:3456"
     });
     expect(fetchMock).toHaveBeenNthCalledWith(2, "http://127.0.0.1:3456/v1/models", expect.objectContaining({
       headers: expect.objectContaining({
@@ -37,7 +38,22 @@ describe("createCcrGatewayAdapter", () => {
 
     await expect(adapter.probe("secret")).resolves.toEqual({
       connectionState: "available",
-      modelAvailable: true
+      modelAvailable: true,
+      baseUrl: "http://127.0.0.1:3456"
+    });
+  });
+
+  it("falls back to the container host endpoint when localhost is unavailable", async () => {
+    const fetchMock = vi.fn<typeof fetch>()
+      .mockRejectedValueOnce(new Error("connect refused"))
+      .mockResolvedValueOnce(jsonResponse({ name: "claude-code-router" }))
+      .mockResolvedValueOnce(jsonResponse({ data: [{ id: CCR_GPT_MODEL_ID }] }));
+    const adapter = createCcrGatewayAdapter({ fetch: fetchMock });
+
+    await expect(adapter.probe("secret")).resolves.toMatchObject({
+      connectionState: "available",
+      modelAvailable: true,
+      baseUrl: "http://host.docker.internal:3456"
     });
   });
 
@@ -102,15 +118,18 @@ describe("createCcrGatewayAdapter", () => {
     });
   });
 
-  it("reports an unreachable fixed endpoint", async () => {
+  it("reports all unreachable automatic endpoints", async () => {
     const adapter = createCcrGatewayAdapter({
       fetch: vi.fn<typeof fetch>().mockRejectedValue(new Error("connect refused"))
     });
 
-    await expect(adapter.probe("secret")).resolves.toMatchObject({
+    const result = await adapter.probe("secret");
+    expect(result).toMatchObject({
       connectionState: "unreachable",
-      error: expect.stringContaining("host.docker.internal:3456")
+      modelAvailable: false
     });
+    expect(result.error).toContain("127.0.0.1:3456");
+    expect(result.error).toContain("host.docker.internal:3456");
   });
 });
 

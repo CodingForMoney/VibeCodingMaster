@@ -93,11 +93,12 @@ frontend  --depends on-->  shared  <--depends on--  backend
 
 CCR is an optional global integration for running the existing VCM-managed
 Claude Code processes against one supported GPT model. The host owns the CCR
-process and account authentication. The VCM backend reaches the fixed container
-endpoint `http://host.docker.internal:3456`; the frontend never calls CCR.
+process and account authentication. The VCM backend identifies CCR at the fixed
+local endpoint `http://127.0.0.1:3456` or DevContainer endpoint
+`http://host.docker.internal:3456`; the frontend never calls CCR.
 
 `ccr-gateway-adapter` verifies the gateway identity and performs authenticated
-model discovery. `ccr-integration-service` owns the enabled state, volatile
+model discovery, selecting the first valid runtime endpoint. `ccr-integration-service` owns the enabled state, volatile
 connection result, shared in-flight check, short cache, safe API response, and
 session-scoped child environment. The API key is persisted only in global app
 settings, is used only for gateway checks and model discovery, and settings
