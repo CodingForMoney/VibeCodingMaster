@@ -62,6 +62,11 @@ describe("backend E2E CCR integration", () => {
     const input = env.mockRuntime.getCreateInput(runtimeSession!.id);
     expect(input.args).not.toContain("--model");
     expect(input.args).toEqual(expect.arrayContaining(["--effort", "medium"]));
+    const ccrSettingsIndex = input.args.indexOf("--settings");
+    expect(ccrSettingsIndex).toBeGreaterThan(-1);
+    expect(JSON.parse(input.args[ccrSettingsIndex + 1]!)).toMatchObject({
+      apiKeyHelper: expect.stringContaining("scripts/ccr-api-key-helper.mjs")
+    });
     expect(input.env).toMatchObject({
       ANTHROPIC_BASE_URL: "http://host.docker.internal:3456",
       ANTHROPIC_AUTH_TOKEN: undefined,
@@ -98,17 +103,7 @@ describe("backend E2E CCR integration", () => {
     const nativeRuntime = env.mockRuntime.getSessionByRole(task.taskSlug, "architect");
     const nativeInput = env.mockRuntime.getCreateInput(nativeRuntime!.id);
     expect(nativeInput.args).toEqual(expect.arrayContaining(["--model", "opus"]));
-    const settingsIndex = nativeInput.args.indexOf("--settings");
-    expect(settingsIndex).toBeGreaterThan(-1);
-    expect(JSON.parse(nativeInput.args[settingsIndex + 1]!)).toEqual({
-      apiKeyHelper: "",
-      env: {
-        CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY: "0",
-        ANTHROPIC_BASE_URL: "https://api.anthropic.com",
-        ANTHROPIC_API_BASE_URL: "https://api.anthropic.com",
-        CLAUDE_AGENT_API_BASE_URL: "https://api.anthropic.com"
-      }
-    });
+    expect(nativeInput.args).not.toContain("--settings");
     expect(nativeInput.env).not.toHaveProperty("ANTHROPIC_BASE_URL");
     expect(nativeInput.env).not.toHaveProperty("ANTHROPIC_AUTH_TOKEN");
 
@@ -167,6 +162,11 @@ describe("backend E2E CCR integration", () => {
       expect(session.model).toBe(CCR_GPT_SESSION_MODEL);
       const input = env.mockRuntime.getCreateInput(session.id);
       expect(input.args).not.toContain("--model");
+      const settingsIndex = input.args.indexOf("--settings");
+      expect(settingsIndex).toBeGreaterThan(-1);
+      expect(JSON.parse(input.args[settingsIndex + 1]!)).toMatchObject({
+        apiKeyHelper: expect.stringContaining("scripts/ccr-api-key-helper.mjs")
+      });
       expect(input.env).toMatchObject({
         ANTHROPIC_AUTH_TOKEN: undefined,
         ANTHROPIC_API_KEY: undefined,

@@ -252,13 +252,13 @@ DevContainer, make the second endpoint reachable from the container. In the VCM
 4. select `GPT-5.6 Sol (CCR)` in any Session model control.
 
 The key is stored in global VCM state (`~/.vcm/settings.json`) with owner-only
-permissions, is used only to check CCR and discover models, and is never
-returned by the settings API. GPT sessions use the CCR-managed Claude Code
-`apiKeyHelper`; VCM removes inherited Anthropic token variables only from those
-child processes. Native Claude selections receive a child-only settings
-override that bypasses CCR's user-level profile takeover and keeps Claude
-account authentication; global Claude settings are not modified. If CCR is
-disabled, unreachable, rejects the key, or does not expose
+permissions and is never returned by the settings API. It is used for CCR
+checks, model discovery, and the GPT-only `apiKeyHelper`. GPT sessions receive a
+child-only `--settings` override; VCM removes inherited Anthropic token
+variables only from those child processes. VCM removes CCR-owned takeover
+entries from global Claude settings, so native Claude selections keep their
+normal launch and account authentication. If CCR is disabled, unreachable,
+rejects the key, or does not expose
 `Codex API/gpt-5.6-sol`, VCM blocks the new Start, Resume, or Restart and does
 not fall back to another model.
 

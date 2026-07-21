@@ -10,6 +10,7 @@ import {
   isCcrSessionModel,
   type SessionModel
 } from "../../shared/types/session.js";
+import { fileURLToPath } from "node:url";
 import type { CcrGatewayAdapter, CcrGatewayProbeResult } from "../adapters/ccr-gateway-adapter.js";
 import { VcmError } from "../errors.js";
 import type { AppSettingsService } from "./app-settings-service.js";
@@ -29,9 +30,14 @@ export interface CcrIntegrationServiceDeps {
   now?: () => Date;
   cacheTtlMs?: number;
   baseEnv?: NodeJS.ProcessEnv;
+  restoreNativeClaudeSettings?: () => Promise<unknown>;
+  apiKeyHelperPath?: string;
 }
 
 const DEFAULT_CACHE_TTL_MS = 10_000;
+const DEFAULT_API_KEY_HELPER_PATH = fileURLToPath(
+  new URL("../../../scripts/ccr-api-key-helper.mjs", import.meta.url)
+);
 
 interface CachedProbe {
   result: CcrGatewayProbeResult;
@@ -106,6 +112,9 @@ export function createCcrIntegrationService(deps: CcrIntegrationServiceDeps): Cc
   return {
     async initialize() {
       const settings = await deps.settings.getCcrIntegrationSettings();
+      if (settings.apiKey) {
+        await deps.restoreNativeClaudeSettings?.();
+      }
       if (settings.enabled) {
         await probe(true);
       }
@@ -138,6 +147,9 @@ export function createCcrIntegrationService(deps: CcrIntegrationServiceDeps): Cc
         enabled: nextEnabled,
         apiKey: nextApiKey
       });
+      if (nextApiKey) {
+        await deps.restoreNativeClaudeSettings?.();
+      }
       if (clearApiKey || !nextEnabled) {
         cachedProbe = undefined;
         return buildStatus();
@@ -206,21 +218,15 @@ export function createCcrIntegrationService(deps: CcrIntegrationServiceDeps): Cc
       };
     },
     async getLaunchSettingsOverride(model) {
-      if (isCcrSessionModel(model)) {
-        return undefined;
-      }
       const settings = await deps.settings.getCcrIntegrationSettings();
-      if (!settings.apiKey) {
+      if (settings.apiKey) {
+        await deps.restoreNativeClaudeSettings?.();
+      }
+      if (!isCcrSessionModel(model)) {
         return undefined;
       }
       return {
-        apiKeyHelper: "",
-        env: {
-          CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY: "0",
-          ANTHROPIC_BASE_URL: "https://api.anthropic.com",
-          ANTHROPIC_API_BASE_URL: "https://api.anthropic.com",
-          CLAUDE_AGENT_API_BASE_URL: "https://api.anthropic.com"
-        }
+        apiKeyHelper: buildApiKeyHelperCommand(deps.apiKeyHelperPath ?? DEFAULT_API_KEY_HELPER_PATH)
       };
     }
   };
@@ -261,4 +267,15 @@ export function mergeNoProxy(current: string | undefined, host: string): string 
     values.push(host);
   }
   return values.join(",");
+}
+
+export function buildApiKeyHelperCommand(helperPath: string): string {
+  if (process.platform === "win32") {
+    return `${JSON.stringify(process.execPath)} ${JSON.stringify(helperPath)}`;
+  }
+  return `${quotePosixShell(process.execPath)} ${quotePosixShell(helperPath)}`;
+}
+
+function quotePosixShell(value: string): string {
+  return `'${value.replaceAll("'", `'\\''`)}'`;
 }

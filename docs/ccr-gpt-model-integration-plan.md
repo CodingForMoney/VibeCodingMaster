@@ -215,13 +215,11 @@ the selection or normalize it to `default`.
 
 ## 7. Claude Code Launch Environment
 
-Native Claude selections receive no CCR environment variables. Once CCR is
-configured in VCM, VCM also supplies a command-line `--settings`
-override that clears CCR's user-level `apiKeyHelper`, restores Anthropic's API
-endpoints, and disables gateway model discovery for that child only. This is
-required because CCR profile takeover writes gateway settings into
-`~/.claude/settings.json`. The override does not mutate that file and allows
-native Claude and CCR-backed sessions to run concurrently.
+Native Claude selections keep the normal Claude Code launch behavior and
+receive neither CCR environment variables nor a `--settings` override. When CCR
+is configured, VCM removes only CCR-owned `apiKeyHelper`, gateway endpoint,
+gateway model, and model-discovery entries from `~/.claude/settings.json` while
+preserving unrelated user settings.
 
 For a CCR selection, VCM launches the normal container `claude` executable and
 injects these variables only into that child process:
@@ -244,16 +242,15 @@ The selected CCR model is supplied through the environment. The Claude adapter
 must not also append the native `--model` argument for a CCR selection. Native
 Claude selections continue to use `--model` exactly as they do now.
 
-CCR-managed Claude Code profiles authenticate through the `apiKeyHelper` in
-Claude settings. VCM therefore removes inherited Anthropic token and API-key
-variables from CCR-backed child processes so they cannot override that helper.
-The API key saved in VCM is used only for CCR connection and model discovery.
-Native Claude sessions retain their Claude account authentication and do not
-receive the CCR model environment.
+For a CCR selection, VCM adds a child-only `--settings` override whose
+`apiKeyHelper` reads the saved VCM CCR key. VCM also removes inherited Anthropic
+token and API-key variables from that child so they cannot override the helper.
+Native Claude sessions retain their normal Claude account authentication.
 
-The API key must never appear in the display command, terminal output, session
-record, event stream, diagnostics, or process error text. Session records and
-launch templates persist only the namespaced model identifier.
+The API key is used for CCR connection, model discovery, and the CCR-only
+`apiKeyHelper`. It must never appear in the display command, terminal output,
+session record, event stream, diagnostics, or process error text. Session
+records and launch templates persist only the namespaced model identifier.
 
 The same launch-environment builder must be used by every VCM-owned Claude
 session path. Adding CCR logic independently to role, Translator, Harness

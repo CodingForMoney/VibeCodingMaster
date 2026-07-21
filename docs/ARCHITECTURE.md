@@ -103,10 +103,9 @@ connection result, shared in-flight check, short cache, safe API response, and
 session-scoped child environment. The API key is persisted only in global app
 settings, is used only for gateway checks and model discovery, and settings
 responses expose only whether it is configured. GPT-backed children clear
-inherited Anthropic credential variables so Claude Code uses CCR's configured
-`apiKeyHelper`. Native Claude children receive a command-line settings override
-that neutralizes CCR's user-level gateway settings without mutating global
-Claude configuration, so native and CCR-backed sessions remain isolated.
+inherited Anthropic credential variables and receive an isolated `apiKeyHelper`
+through `--settings`. `claude-settings-adapter` removes only CCR-owned takeover
+entries from global Claude settings, leaving native Claude launches unchanged.
 
 `session-service` is the single process-launch boundary for CCR. It requests the
 model environment before every Start, Resume, or Restart path and merges it into

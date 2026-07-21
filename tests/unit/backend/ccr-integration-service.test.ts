@@ -53,21 +53,21 @@ describe("createCcrIntegrationService", () => {
     await expect(service.getLaunchSettingsOverride("opus")).resolves.toBeUndefined();
   });
 
-  it("isolates native Claude sessions from CCR-managed user settings once CCR is configured", async () => {
+  it("restores native settings and applies apiKeyHelper only to GPT sessions", async () => {
+    let restores = 0;
     const service = createService({
-      initial: { version: 1, enabled: false, apiKey: "saved" }
-    });
-
-    await expect(service.getLaunchSettingsOverride("sonnet")).resolves.toEqual({
-      apiKeyHelper: "",
-      env: {
-        CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY: "0",
-        ANTHROPIC_BASE_URL: "https://api.anthropic.com",
-        ANTHROPIC_API_BASE_URL: "https://api.anthropic.com",
-        CLAUDE_AGENT_API_BASE_URL: "https://api.anthropic.com"
+      initial: { version: 1, enabled: false, apiKey: "saved" },
+      apiKeyHelperPath: "/mock/ccr-api-key-helper.mjs",
+      onRestoreNativeClaudeSettings() {
+        restores += 1;
       }
     });
-    await expect(service.getLaunchSettingsOverride(CCR_GPT_SESSION_MODEL)).resolves.toBeUndefined();
+
+    await expect(service.getLaunchSettingsOverride("sonnet")).resolves.toBeUndefined();
+    await expect(service.getLaunchSettingsOverride(CCR_GPT_SESSION_MODEL)).resolves.toMatchObject({
+      apiKeyHelper: expect.stringContaining("/mock/ccr-api-key-helper.mjs")
+    });
+    expect(restores).toBe(2);
   });
 
   it("launches GPT sessions through the endpoint identified by the probe", async () => {
@@ -144,6 +144,8 @@ function createService(options: {
     error?: string;
   };
   onProbe?(): void;
+  onRestoreNativeClaudeSettings?(): void;
+  apiKeyHelperPath?: string;
   baseEnv?: NodeJS.ProcessEnv;
 } = {}) {
   let settings = options.initial ?? { version: 1, enabled: false, apiKey: "" };
@@ -163,6 +165,10 @@ function createService(options: {
         return options.probeResult ?? { connectionState: "available", modelAvailable: true };
       }
     },
-    baseEnv: options.baseEnv
+    baseEnv: options.baseEnv,
+    apiKeyHelperPath: options.apiKeyHelperPath,
+    async restoreNativeClaudeSettings() {
+      options.onRestoreNativeClaudeSettings?.();
+    }
   });
 }
