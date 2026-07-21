@@ -24,6 +24,37 @@ describe("createCcrGatewayAdapter", () => {
     }));
   });
 
+  it("recognizes the encoded model id returned by CCR", async () => {
+    const fetchMock = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(jsonResponse({ name: "claude-code-router" }))
+      .mockResolvedValueOnce(jsonResponse({
+        data: [{
+          id: "anthropic/claude-ccr-h436f646578204150492f6770742d352e362d736f6c",
+          display_name: "Codex API/GPT-5.6 Sol"
+        }]
+      }));
+    const adapter = createCcrGatewayAdapter({ fetch: fetchMock });
+
+    await expect(adapter.probe("secret")).resolves.toEqual({
+      connectionState: "available",
+      modelAvailable: true
+    });
+  });
+
+  it("decodes a CCR model id when display_name is absent", async () => {
+    const fetchMock = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(jsonResponse({ core: "next-ai-gateway" }))
+      .mockResolvedValueOnce(jsonResponse({
+        data: [{ id: "anthropic/claude-ccr-h436f646578204150492f6770742d352e362d736f6c" }]
+      }));
+    const adapter = createCcrGatewayAdapter({ fetch: fetchMock });
+
+    await expect(adapter.probe("secret")).resolves.toMatchObject({
+      connectionState: "available",
+      modelAvailable: true
+    });
+  });
+
   it("rejects an endpoint that does not identify as CCR", async () => {
     const adapter = createCcrGatewayAdapter({
       fetch: vi.fn<typeof fetch>().mockResolvedValue(jsonResponse({ name: "another-gateway" }))

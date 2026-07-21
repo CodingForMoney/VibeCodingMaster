@@ -21,6 +21,12 @@ export interface CcrGatewayAdapterDeps {
 }
 
 const DEFAULT_TIMEOUT_MS = 3_000;
+const CCR_ENCODED_MODEL_PREFIX = "anthropic/claude-ccr-h";
+
+interface CcrModelDescriptor {
+  id: string;
+  displayName?: string;
+}
 
 export function createCcrGatewayAdapter(deps: CcrGatewayAdapterDeps = {}): CcrGatewayAdapter {
   const baseUrl = (deps.baseUrl ?? CCR_GATEWAY_BASE_URL).replace(/\/+$/, "");
@@ -57,11 +63,11 @@ export function createCcrGatewayAdapter(deps: CcrGatewayAdapterDeps = {}): CcrGa
           return invalidResponse(`CCR model discovery returned HTTP ${models.response.status}.`);
         }
 
-        const modelIds = readModelIds(models.payload);
-        if (!modelIds) {
+        const modelDescriptors = readModelDescriptors(models.payload);
+        if (!modelDescriptors) {
           return invalidResponse("CCR returned an invalid /v1/models response.");
         }
-        const modelAvailable = modelIds.includes(CCR_GPT_MODEL_ID);
+        const modelAvailable = modelDescriptors.some(isRequiredModel);
         return {
           connectionState: "available",
           modelAvailable,
@@ -121,18 +127,47 @@ function isCcrGateway(value: unknown): boolean {
     || value.core === "next-ai-gateway";
 }
 
-function readModelIds(value: unknown): string[] | undefined {
+function readModelDescriptors(value: unknown): CcrModelDescriptor[] | undefined {
   if (!isObject(value) || !Array.isArray(value.data)) {
     return undefined;
   }
-  const ids: string[] = [];
+  const models: CcrModelDescriptor[] = [];
   for (const item of value.data) {
     if (!isObject(item) || typeof item.id !== "string" || !item.id.trim()) {
       return undefined;
     }
-    ids.push(item.id.trim());
+    models.push({
+      id: item.id.trim(),
+      ...(typeof item.display_name === "string" && item.display_name.trim()
+        ? { displayName: item.display_name.trim() }
+        : {})
+    });
   }
-  return ids;
+  return models;
+}
+
+function isRequiredModel(model: CcrModelDescriptor): boolean {
+  if (model.id === CCR_GPT_MODEL_ID) {
+    return true;
+  }
+  const target = normalizeModelName(CCR_GPT_MODEL_ID);
+  return normalizeModelName(model.displayName) === target
+    || normalizeModelName(decodeCcrModelId(model.id)) === target;
+}
+
+function decodeCcrModelId(modelId: string): string | undefined {
+  if (!modelId.startsWith(CCR_ENCODED_MODEL_PREFIX)) {
+    return undefined;
+  }
+  const encoded = modelId.slice(CCR_ENCODED_MODEL_PREFIX.length);
+  if (!encoded || encoded.length % 2 !== 0 || !/^[0-9a-f]+$/i.test(encoded)) {
+    return undefined;
+  }
+  return Buffer.from(encoded, "hex").toString("utf8");
+}
+
+function normalizeModelName(value: string | undefined): string {
+  return (value ?? "").toLowerCase().replace(/[^a-z0-9]+/g, "");
 }
 
 function invalidResponse(error: string): CcrGatewayProbeResult {
