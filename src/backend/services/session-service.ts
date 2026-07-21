@@ -2,14 +2,15 @@ import path from "node:path";
 import { ROLE_NAMES, isDispatchableRole } from "../../shared/constants.js";
 import type { ClaudeHookEventName } from "../../shared/types/claude-hook.js";
 import type { RoleName } from "../../shared/types/role.js";
-import type {
-  ClaudeModel,
-  ClaudePermissionMode,
-  RoleSessionRecord,
-  SessionEffort,
-  SessionModel,
-  StartRoleSessionRequest,
-  TaskSessionRecord
+import {
+  CCR_GPT_SESSION_MODEL,
+  isCcrSessionModel,
+  type ClaudePermissionMode,
+  type RoleSessionRecord,
+  type SessionEffort,
+  type SessionModel,
+  type StartRoleSessionRequest,
+  type TaskSessionRecord
 } from "../../shared/types/session.js";
 import { VcmError } from "../errors.js";
 import { resolveRepoPath } from "../adapters/filesystem.js";
@@ -24,8 +25,10 @@ import { readHarnessRevisionState } from "./harness-revision.js";
 import type { ProjectService } from "./project-service.js";
 import { getTaskRuntimeRepoRoot, type TaskService } from "./task-service.js";
 import type { TaskWorkflowService } from "./task-workflow-service.js";
+import type { CcrIntegrationService } from "./ccr-integration-service.js";
 
 export interface SessionService {
+  assertModelLaunchReady(model?: SessionModel): Promise<void>;
   startProjectTranslatorSession(repoRoot: string, input?: StartRoleSessionRequest): Promise<RoleSessionRecord>;
   resumeProjectTranslatorSession(repoRoot: string, input?: StartRoleSessionRequest): Promise<RoleSessionRecord>;
   stopProjectTranslatorSession(repoRoot: string): Promise<RoleSessionRecord>;
@@ -67,6 +70,7 @@ export interface SessionServiceDeps {
   projectService: Pick<ProjectService, "loadConfig">;
   taskService: Pick<TaskService, "loadTask">;
   taskWorkflowService?: Pick<TaskWorkflowService, "getState" | "renderPmResumeContext">;
+  ccrIntegration?: Pick<CcrIntegrationService, "getLaunchEnvironment">;
   apiUrl?: string;
   sandboxMode?: string;
   isProcessAlive?: (pid: number) => boolean;
@@ -175,6 +179,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     const permissionMode = normalizeClaudePermissionMode(input.permissionMode ?? persisted?.permissionMode);
     const model: SessionModel = normalizeClaudeModel(input.model ?? persisted?.model);
     const effort = normalizeClaudeEffort(input.effort ?? persisted?.effort);
+    const modelEnvironment = await getModelLaunchEnvironment(model);
     const resumeClaudeSessionId = launchMode === "resume"
       ? persisted?.claudeSessionId
       : undefined;
@@ -201,7 +206,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
         permissionMode,
         resumeClaudeSessionId,
         launchMode === "resume",
-        model as ClaudeModel,
+        model,
         effort
       ),
       cwd: taskRepoRoot
@@ -220,7 +225,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
         VCM_TASK_SLUG: taskSlug,
         VCM_ROLE: role,
         VCM_SESSION_ID: claudeSessionId || undefined
-      }),
+      }, modelEnvironment),
       cols: input.cols,
       rows: input.rows
     });
@@ -306,6 +311,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     const permissionMode = normalizeClaudePermissionMode(input.permissionMode ?? persisted?.permissionMode);
     const model = normalizeClaudeModel(input.model ?? persisted?.model);
     const effort = normalizeClaudeEffort(input.effort ?? persisted?.effort ?? "medium");
+    const modelEnvironment = await getModelLaunchEnvironment(model);
     const resumeClaudeSessionId = launchMode === "resume"
       ? persisted?.claudeSessionId
       : undefined;
@@ -366,7 +372,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
         VCM_TASK_SLUG: PROJECT_TRANSLATOR_SCOPE,
         VCM_ROLE: TRANSLATOR_ROLE,
         VCM_SESSION_ID: claudeSessionId || undefined
-      }),
+      }, modelEnvironment),
       cols: input.cols,
       rows: input.rows
     });
@@ -446,6 +452,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     const permissionMode = normalizeClaudePermissionMode(input.permissionMode ?? persisted?.permissionMode);
     const model = normalizeClaudeModel(input.model ?? persisted?.model);
     const effort = normalizeClaudeEffort(input.effort ?? persisted?.effort ?? "medium");
+    const modelEnvironment = await getModelLaunchEnvironment(model);
     const resumeClaudeSessionId = launchMode === "resume"
       ? persisted?.claudeSessionId
       : undefined;
@@ -502,7 +509,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
         VCM_TASK_SLUG: PROJECT_HARNESS_ENGINEER_SCOPE,
         VCM_ROLE: HARNESS_ENGINEER_ROLE,
         VCM_SESSION_ID: claudeSessionId || undefined
-      }),
+      }, modelEnvironment),
       cols: input.cols,
       rows: input.rows
     });
@@ -701,6 +708,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     const permissionMode = normalizeClaudePermissionMode(session.permissionMode);
     const model = normalizeClaudeModel(session.model);
     const effort = normalizeClaudeEffort(session.effort);
+    const modelEnvironment = await getModelLaunchEnvironment(model);
     // Spawn (`claude --resume`) always anchors at the base repoRoot so resume works
     // even if the persisted task cwd was deleted. `--resume` then restores the
     // session's own last cwd (tracked on `session.cwd`), so the `/cd` migrate below
@@ -732,7 +740,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
         VCM_TASK_SLUG: normalizeProjectScopedRecordForPersistence(session).taskSlug,
         VCM_ROLE: session.role,
         VCM_SESSION_ID: session.claudeSessionId
-      })
+      }, modelEnvironment)
     });
     if ((await waitForSessionInputReady(runtimeSession.id)) === "exited") {
       deps.registry.remove(runtimeSession.id);
@@ -774,6 +782,21 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     deps.registry.upsert(normalizeProjectScopedRecordForPersistence(resumed));
     await persistProjectScopedToolSession(repoRoot, resumed);
     return migrateRunningProjectToolSessionCwd(repoRoot, resumed, targetCwd);
+  }
+
+  async function getModelLaunchEnvironment(model: SessionModel): Promise<NodeJS.ProcessEnv> {
+    if (!isCcrSessionModel(model)) {
+      return {};
+    }
+    if (!deps.ccrIntegration) {
+      throw new VcmError({
+        code: "CCR_UNAVAILABLE",
+        message: "CCR integration is not available in this VCM runtime.",
+        statusCode: 409,
+        hint: "Enable and configure CCR GPT models before starting this session."
+      });
+    }
+    return deps.ccrIntegration.getLaunchEnvironment(model);
   }
 
   function isRuntimeSessionAlive(session: ReturnType<TerminalRuntime["getSession"]>): session is TerminalSession & { pid: number } {
@@ -919,6 +942,9 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
   }
 
   return {
+    async assertModelLaunchReady(model = "default") {
+      await getModelLaunchEnvironment(normalizeClaudeModel(model));
+    },
     startProjectTranslatorSession(repoRoot, input = {}) {
       return launchProjectTranslatorSession(repoRoot, input, "fresh");
     },
@@ -974,6 +1000,8 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       if (!existing) {
         return launchProjectTranslatorSession(repoRoot, input, "fresh");
       }
+
+      await getModelLaunchEnvironment(normalizeClaudeModel(input.model ?? existing.model));
 
       if (deps.runtime.getSession(existing.id)) {
         await deps.runtime.stop(existing.id);
@@ -1108,6 +1136,8 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
         return launchProjectHarnessEngineerSession(repoRoot, input, "fresh");
       }
 
+      await getModelLaunchEnvironment(normalizeClaudeModel(input.model ?? existing.model));
+
       if (deps.runtime.getSession(existing.id)) {
         await deps.runtime.stop(existing.id);
       }
@@ -1222,6 +1252,8 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       if (!existing) {
         return launchRoleSession(repoRoot, taskSlug, role, input, "fresh");
       }
+
+      await getModelLaunchEnvironment(normalizeClaudeModel(input.model ?? existing.model));
 
       if (deps.runtime.getSession(existing.id)) {
         await deps.runtime.stop(existing.id);
@@ -1881,11 +1913,12 @@ function normalizeClaudePermissionMode(value: unknown): ClaudePermissionMode {
   return "default";
 }
 
-function normalizeClaudeModel(value: unknown): ClaudeModel {
+function normalizeClaudeModel(value: unknown): SessionModel {
   if (
     value === "opus"
     || value === "sonnet"
     || value === "fable"
+    || value === CCR_GPT_SESSION_MODEL
   ) {
     return value;
   }
@@ -1918,9 +1951,13 @@ function isExitedStatus(status: string | undefined): boolean {
   return status === "exited" || status === "crashed" || status === "missing";
 }
 
-function withClaudeCodeRuntimeEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+function withClaudeCodeRuntimeEnv(
+  env: NodeJS.ProcessEnv,
+  modelEnvironment: NodeJS.ProcessEnv = {}
+): NodeJS.ProcessEnv {
   return {
     ...env,
+    ...modelEnvironment,
     CLAUDE_CODE_DISABLE_AUTO_MEMORY
   };
 }

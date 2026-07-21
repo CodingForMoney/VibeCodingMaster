@@ -45,7 +45,7 @@ describe("translation worker routes", () => {
     await app.close();
   });
 
-  it("clears Translator translation state before restarting the task Translator session", async () => {
+  it("checks launch readiness before clearing Translator state and restarting", async () => {
     const calls: string[] = [];
     const session = createRoleSessionRecord({ id: "translator-runtime-old" });
     const app = Fastify({ logger: false });
@@ -53,6 +53,9 @@ describe("translation worker routes", () => {
       projectService: createProjectServiceStub(),
       translationWorkerService: {} as TranslationWorkerService,
       sessionService: createSessionServiceStub({
+        async assertModelLaunchReady() {
+          calls.push("assertModelLaunchReady");
+        },
         async getRoleSession() {
           return session;
         },
@@ -76,6 +79,7 @@ describe("translation worker routes", () => {
 
     expect(response.statusCode).toBe(200);
     expect(calls).toEqual([
+      "assertModelLaunchReady",
       "stopSession:translator-runtime-old:clear",
       "restartRoleSession"
     ]);
@@ -159,6 +163,7 @@ function createProjectServiceStub(): ProjectService {
 
 function createSessionServiceStub(overrides: Partial<SessionService> = {}): Pick<
   SessionService,
+  | "assertModelLaunchReady"
   | "getRoleSession"
   | "startRoleSession"
   | "resumeRoleSession"
@@ -166,6 +171,7 @@ function createSessionServiceStub(overrides: Partial<SessionService> = {}): Pick
   | "stopRoleSession"
 > {
   return {
+    async assertModelLaunchReady() {},
     async getRoleSession() {
       return undefined;
     },

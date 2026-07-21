@@ -1,5 +1,10 @@
 import type { DispatchRoleCommandResult, ProjectRuntimeState, TaskStatusReport, TaskWorkspaceState } from "../../shared/types/api.js";
-import type { AppPreferences, UpdateAppPreferencesRequest } from "../../shared/types/app-settings.js";
+import type {
+  AppPreferences,
+  CcrIntegrationStatus,
+  UpdateAppPreferencesRequest,
+  UpdateCcrIntegrationRequest
+} from "../../shared/types/app-settings.js";
 import type {
   BindGatewayLarkAppRequest,
   CheckGatewayQrLoginRequest,
@@ -87,6 +92,20 @@ export const apiClient = {
     return request<AppPreferences>("/api/settings/preferences", {
       method: "PUT",
       body: JSON.stringify(input)
+    });
+  },
+  getCcrIntegrationStatus() {
+    return request<CcrIntegrationStatus>("/api/settings/ccr");
+  },
+  updateCcrIntegration(input: UpdateCcrIntegrationRequest) {
+    return request<CcrIntegrationStatus>("/api/settings/ccr", {
+      method: "PUT",
+      body: JSON.stringify(input)
+    });
+  },
+  checkCcrIntegration() {
+    return request<CcrIntegrationStatus>("/api/settings/ccr/check", {
+      method: "POST"
     });
   },
   getRuntimeDiagnostics() {

@@ -24,6 +24,7 @@
           "language": "typescript",
           "files": {
             "source": [
+              "src/backend/adapters/ccr-gateway-adapter.ts",
               "src/backend/adapters/claude-adapter.ts",
               "src/backend/adapters/command-runner.ts",
               "src/backend/adapters/filesystem.ts",
@@ -62,6 +63,7 @@
               "src/backend/services/app-settings-service.ts",
               "src/backend/services/artifact-service.ts",
               "src/backend/services/auto-memory-service.ts",
+              "src/backend/services/ccr-integration-service.ts",
               "src/backend/services/claude-hook-service.ts",
               "src/backend/services/claude-transcript-reply.ts",
               "src/backend/services/claude-transcript-service.ts",
@@ -90,6 +92,7 @@
               "src/backend/services/turn-reconciler-service.ts",
               "src/backend/templates/handoff.ts",
               "src/backend/templates/harness/architect-agent.ts",
+              "src/backend/templates/harness/check-scaffold-ledger.ts",
               "src/backend/templates/harness/claude-root.ts",
               "src/backend/templates/harness/coder-agent.ts",
               "src/backend/templates/harness/coder-worker-agent.ts",
@@ -175,6 +178,7 @@
               "src/shared/validation/slug-check.ts"
             ],
             "tests": [
+              "tests/e2e/backend/ccr-integration.e2e.test.ts",
               "tests/e2e/backend/full-main-flow.e2e.test.ts",
               "tests/e2e/backend/gate-corrections.e2e.test.ts",
               "tests/e2e/backend/gate-review.e2e.test.ts",
@@ -192,6 +196,8 @@
               "tests/unit/backend/app-settings-service.test.ts",
               "tests/unit/backend/artifact-service.test.ts",
               "tests/unit/backend/auto-memory-service.test.ts",
+              "tests/unit/backend/ccr-gateway-adapter.test.ts",
+              "tests/unit/backend/ccr-integration-service.test.ts",
               "tests/unit/backend/claude-adapter.test.ts",
               "tests/unit/backend/claude-hook-routes.test.ts",
               "tests/unit/backend/claude-hook-service.test.ts",

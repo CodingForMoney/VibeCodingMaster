@@ -73,6 +73,10 @@ export class MockClaudeRuntime implements TerminalRuntime {
     return [...this.getEntry(sessionId).writes];
   }
 
+  getCreateInput(sessionId: string): CreateTerminalSessionInput {
+    return this.getEntry(sessionId).input;
+  }
+
   async waitForIdle(): Promise<void> {
     while (this.pending.size > 0) {
       await Promise.all([...this.pending]);

@@ -2,7 +2,7 @@
 
 Last updated: 2026-07-21
 
-Status: confirmed design for the `v07` branch.
+Status: implemented on the `v07` branch.
 
 ## 1. Goal
 

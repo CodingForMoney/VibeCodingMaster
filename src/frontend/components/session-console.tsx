@@ -1,7 +1,7 @@
 import { isVcmRoleName } from "../../shared/constants.js";
 import type { TranslationTargetLanguage } from "../../shared/types/app-settings.js";
 import type { RoleName } from "../../shared/types/role.js";
-import type { ClaudePermissionMode, RoleSessionRecord, SessionEffort, SessionModel } from "../../shared/types/session.js";
+import type { ClaudePermissionMode, RoleSessionRecord, SessionEffort, SessionModel, SessionModelOption } from "../../shared/types/session.js";
 import { XtermView } from "../terminal/xterm-view.js";
 import { SessionToolbar } from "./session-toolbar.js";
 import { TranslationPanel } from "./translation-panel.js";
@@ -14,6 +14,7 @@ export interface SessionConsoleProps {
   permissionMode: ClaudePermissionMode;
   model: SessionModel;
   effort: SessionEffort;
+  modelOptions: SessionModelOption[];
   active?: boolean;
   busy?: boolean;
   translationEnabled: boolean;
@@ -40,6 +41,7 @@ export function SessionConsole({
   permissionMode,
   model,
   effort,
+  modelOptions,
   active = true,
   busy,
   translationEnabled,
@@ -73,6 +75,7 @@ export function SessionConsole({
             permissionMode={permissionMode}
             model={model}
             effort={effort}
+            modelOptions={modelOptions}
             busy={busy}
             onPermissionModeChange={onPermissionModeChange}
             onModelChange={onModelChange}

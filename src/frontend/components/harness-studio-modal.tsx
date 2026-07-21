@@ -7,7 +7,7 @@ import type {
   HarnessStatusReport
 } from "../../shared/types/harness.js";
 import type { AutoMemoryStateReport, MemoryReviewRunSummary } from "../../shared/types/memory.js";
-import type { ClaudePermissionMode, RoleSessionRecord, SessionEffort, SessionModel } from "../../shared/types/session.js";
+import type { ClaudePermissionMode, RoleSessionRecord, SessionEffort, SessionModel, SessionModelOption } from "../../shared/types/session.js";
 import { apiClient } from "../state/api-client.js";
 import { formatUiError } from "../state/error-format.js";
 import { useUiErrorState } from "../state/ui-error-state.js";
@@ -19,6 +19,7 @@ export interface HarnessStudioModalProps {
   busy?: boolean;
   effort: SessionEffort;
   model: SessionModel;
+  modelOptions: SessionModelOption[];
   open: boolean;
   permissionMode: ClaudePermissionMode;
   taskSlug: string | null;
@@ -56,6 +57,7 @@ export function HarnessStudioModal({
   busy,
   effort,
   model,
+  modelOptions,
   open,
   permissionMode,
   taskSlug,
@@ -410,6 +412,7 @@ export function HarnessStudioModal({
                 session={engineerSession ?? undefined}
                 permissionMode={permissionMode}
                 model={model}
+                modelOptions={modelOptions}
                 effort={effort}
                 busy={busy}
                 onPermissionModeChange={onPermissionModeChange}

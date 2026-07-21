@@ -54,6 +54,22 @@ describe("createClaudeAdapter", () => {
     });
   });
 
+  it("uses the child environment instead of --model for CCR models", () => {
+    expect(adapter.buildRoleStartCommand(
+      "coder",
+      "claude",
+      "default",
+      undefined,
+      false,
+      "ccr:Codex API/gpt-5.6-sol",
+      "medium"
+    )).toEqual({
+      command: "claude",
+      args: ["--agent", "coder", "--effort", "medium"],
+      display: "claude --agent coder --effort medium"
+    });
+  });
+
   it("adds effort when one is selected", () => {
     expect(adapter.buildRoleStartCommand(
       "architect",

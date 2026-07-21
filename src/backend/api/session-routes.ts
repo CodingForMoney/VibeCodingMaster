@@ -49,6 +49,7 @@ export function registerSessionRoutes(app: FastifyInstance, deps: SessionRouteDe
       const project = await requireCurrentProject(deps.projectService);
       const role = parseRole(request.params.role);
       const existing = await deps.sessionService.getRoleSession(project.repoRoot, request.params.taskSlug, role);
+      await deps.sessionService.assertModelLaunchReady(request.body?.model ?? existing?.model);
       if (existing) {
         await deps.translationService.stopSession(existing.id, { clearCache: true });
         deps.roundService.stopSession(existing.id);

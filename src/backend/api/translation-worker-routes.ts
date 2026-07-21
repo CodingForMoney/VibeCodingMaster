@@ -16,6 +16,7 @@ export interface TranslationWorkerRouteDeps {
   translationWorkerService: TranslationWorkerService;
   sessionService: Pick<
     SessionService,
+    | "assertModelLaunchReady"
     | "getRoleSession"
     | "startRoleSession"
     | "resumeRoleSession"
@@ -71,6 +72,7 @@ export function registerTranslationWorkerRoutes(app: FastifyInstance, deps: Tran
     const project = await requireCurrentProject(deps.projectService);
     const taskSlug = requireTaskSlug(request.body?.taskSlug, "Translator");
     const existing = await deps.sessionService.getRoleSession(project.repoRoot, taskSlug, "translator");
+    await deps.sessionService.assertModelLaunchReady(request.body?.model ?? existing?.model);
     if (existing) {
       await deps.translationService.stopSession(existing.id, { clearCache: true });
     }

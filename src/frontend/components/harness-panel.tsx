@@ -7,10 +7,10 @@ import type {
 import {
   CLAUDE_PERMISSION_MODE_OPTIONS,
   CLAUDE_EFFORT_OPTIONS,
-  CLAUDE_MODEL_OPTIONS,
   type ClaudePermissionMode,
   type SessionEffort,
-  type SessionModel
+  type SessionModel,
+  type SessionModelOption
 } from "../../shared/types/session.js";
 import { XtermView } from "../terminal/xterm-view.js";
 import { SwitchControl } from "./switch-control.js";
@@ -29,6 +29,7 @@ export interface HarnessPanelProps {
   hasActiveTask?: boolean;
   autoTaskHarnessReviewEnabled: boolean;
   autoMemoryEnabled: boolean;
+  modelOptions: SessionModelOption[];
   busy?: boolean;
   onRefresh(): Promise<void>;
   onApply(): Promise<void>;
@@ -49,6 +50,7 @@ export function HarnessPanel({
   hasActiveTask = false,
   autoTaskHarnessReviewEnabled,
   autoMemoryEnabled,
+  modelOptions,
   busy = false,
   onRefresh,
   onApply,
@@ -273,11 +275,22 @@ export function HarnessPanel({
                 <span>Model</span>
                 <select
                   value={bootstrapModel}
+                  title={(() => {
+                    const option = modelOptions.find((candidate) => candidate.value === bootstrapModel);
+                    return option?.available ? option.description : option?.unavailableReason;
+                  })()}
                   disabled={busy || bootstrapRunning || bootstrapSessionRunning}
                   onChange={(event) => setBootstrapModel(event.target.value as SessionModel)}
                 >
-                  {CLAUDE_MODEL_OPTIONS.map((option) => (
-                    <option key={option.value} value={option.value}>{option.label}</option>
+                  {modelOptions.map((option) => (
+                    <option
+                      key={option.value}
+                      value={option.value}
+                      disabled={!option.available}
+                      title={option.available ? option.description : option.unavailableReason}
+                    >
+                      {option.label}
+                    </option>
                   ))}
                 </select>
               </label>

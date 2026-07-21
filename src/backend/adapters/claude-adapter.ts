@@ -1,5 +1,10 @@
 import type { RoleName } from "../../shared/types/role.js";
-import type { ClaudeModel, ClaudePermissionMode, SessionEffort } from "../../shared/types/session.js";
+import {
+  isCcrSessionModel,
+  type ClaudePermissionMode,
+  type SessionEffort,
+  type SessionModel
+} from "../../shared/types/session.js";
 import { VcmError } from "../errors.js";
 import type { CommandRunner } from "./command-runner.js";
 
@@ -12,7 +17,7 @@ export interface ClaudeAdapter {
     permissionMode?: ClaudePermissionMode,
     claudeSessionId?: string,
     resume?: boolean,
-    model?: ClaudeModel,
+    model?: SessionModel,
     effort?: SessionEffort
   ): { command: string; args: string[]; display: string };
 }
@@ -41,7 +46,9 @@ export function createClaudeAdapter(runner: CommandRunner): ClaudeAdapter {
       if (claudeSessionId) {
         args.push(resume ? "--resume" : "--session-id", claudeSessionId);
       }
-      args.push("--model", model);
+      if (!isCcrSessionModel(model)) {
+        args.push("--model", model);
+      }
       if (effort === "ultracode") {
         args.push("--settings", JSON.stringify({ ultracode: true }));
       } else if (effort !== "default") {

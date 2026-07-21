@@ -14,6 +14,7 @@ export interface FileSystemAdapter {
   readJson<T>(path: string): Promise<T>;
   writeJson<T>(path: string, value: T): Promise<void>;
   writeJsonAtomic<T>(path: string, value: T): Promise<void>;
+  chmod?(path: string, mode: number): Promise<void>;
   ensureFile(path: string, content: string, options?: EnsureFileOptions): Promise<boolean>;
   removePath?(targetPath: string, options?: RemovePathOptions): Promise<void>;
 }
@@ -112,6 +113,9 @@ export function createNodeFileSystemAdapter(): FileSystemAdapter {
         await fs.writeFile(tempPath, `${JSON.stringify(value, null, 2)}\n`, "utf8");
         await fs.rename(tempPath, targetPath);
       });
+    },
+    async chmod(targetPath, mode) {
+      await runFileOperation(() => fs.chmod(targetPath, mode));
     },
     async ensureFile(targetPath, content, options = {}) {
       if (!options.overwrite && await this.pathExists(targetPath)) {

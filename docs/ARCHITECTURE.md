@@ -34,12 +34,12 @@ layers plus supporting tools.
   `artifact-service`, `harness-service`, `harness-feedback-service`,
   `auto-memory-service`,
   `gate-review-service`, `translation-service`/`translation-worker-service`,
-  `job-guard-service`, and `command-dispatcher`.
+  `ccr-integration-service`, `job-guard-service`, and `command-dispatcher`.
 - `runtime/`: PTY-backed terminal runtime (`node-pty-runtime`,
   `terminal-runtime`, `session-registry`, `terminal-submit`) that supervises one
   Claude Code process per role.
-- `adapters/`: side-effect boundaries — `claude-adapter`, `git-adapter`,
-  `command-runner`, `filesystem`.
+- `adapters/`: side-effect boundaries — `claude-adapter`,
+  `ccr-gateway-adapter`, `git-adapter`, `command-runner`, `filesystem`.
 - `gateway/`: mobile gateway service plus channel implementations
   (Weixin iLink, Lark) and command parsing; channel connection is gated by a
   runtime, default-off switch. Detailed sub-area design lives in
@@ -88,6 +88,28 @@ frontend  --depends on-->  shared  <--depends on--  backend
   `api -> services -> (runtime | adapters | gateway | templates)`. Routes should
   not contain business logic; services should reach the outside world only
   through adapters and the runtime.
+
+## CCR Model Integration
+
+CCR is an optional global integration for running the existing VCM-managed
+Claude Code processes against one supported GPT model. The host owns the CCR
+process and account authentication. The VCM backend reaches the fixed container
+endpoint `http://host.docker.internal:3456`; the frontend never calls CCR.
+
+`ccr-gateway-adapter` verifies the gateway identity and performs authenticated
+model discovery. `ccr-integration-service` owns the enabled state, volatile
+connection result, shared in-flight check, short cache, safe API response, and
+session-scoped child environment. The API key is persisted only in global app
+settings and settings responses expose only whether it is configured.
+
+`session-service` is the single process-launch boundary for CCR. It requests the
+model environment before every Start, Resume, or Restart path and merges it into
+the PTY child environment. This covers workflow roles, Gate Reviewer,
+Translator, Harness Engineer, Harness Bootstrap, and one-click launch without
+separate role-specific CCR logic. `claude-adapter` omits native `--model` only
+for the namespaced CCR model. Native Claude commands and environments are
+unchanged. An unavailable CCR selection fails before process creation and is
+never normalized or silently replaced.
 
 ## Project-Wide Constraints
 

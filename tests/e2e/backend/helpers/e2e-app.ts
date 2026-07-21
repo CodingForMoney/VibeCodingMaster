@@ -8,7 +8,9 @@ import { createNodeFileSystemAdapter } from "../../../../src/backend/adapters/fi
 import { createCommandRunner } from "../../../../src/backend/adapters/command-runner.js";
 import { createGitAdapter } from "../../../../src/backend/adapters/git-adapter.js";
 import type { ClaudeAdapter } from "../../../../src/backend/adapters/claude-adapter.js";
+import type { CcrGatewayAdapter } from "../../../../src/backend/adapters/ccr-gateway-adapter.js";
 import { createAppSettingsService } from "../../../../src/backend/services/app-settings-service.js";
+import { createCcrIntegrationService } from "../../../../src/backend/services/ccr-integration-service.js";
 import { createArtifactService } from "../../../../src/backend/services/artifact-service.js";
 import { createProjectService } from "../../../../src/backend/services/project-service.js";
 import { createTaskService } from "../../../../src/backend/services/task-service.js";
@@ -42,7 +44,12 @@ import { createDiagnosticsService } from "../../../../src/backend/services/diagn
 import { createJobGuardService } from "../../../../src/backend/services/job-guard-service.js";
 import { readVcmPackageVersion } from "../../../../src/backend/app-version.js";
 import type { RoleName } from "../../../../src/shared/types/role.js";
-import type { ClaudeModel, ClaudePermissionMode, SessionEffort } from "../../../../src/shared/types/session.js";
+import {
+  isCcrSessionModel,
+  type ClaudePermissionMode,
+  type SessionEffort,
+  type SessionModel
+} from "../../../../src/shared/types/session.js";
 import { MockClaudeRuntime } from "./mock-claude-runtime.js";
 import { MockGatewayChannel } from "./mock-gateway-channel.js";
 
@@ -57,6 +64,7 @@ export interface MockClaudeE2eApp {
 
 export interface MockClaudeE2eAppOptions {
   tempRoot?: string;
+  ccrGateway?: CcrGatewayAdapter;
 }
 
 export async function createMockClaudeE2eApp(options: MockClaudeE2eAppOptions = {}): Promise<MockClaudeE2eApp> {
@@ -73,6 +81,14 @@ export async function createMockClaudeE2eApp(options: MockClaudeE2eAppOptions = 
   const mockRuntime = new MockClaudeRuntime({ transcriptRoot });
   const claude = createMockClaudeAdapter();
   const appSettings = createAppSettingsService({ fs: fsAdapter, settingsPath });
+  const ccrIntegration = createCcrIntegrationService({
+    settings: appSettings,
+    gateway: options.ccrGateway ?? {
+      async probe() {
+        return { connectionState: "available", modelAvailable: true };
+      }
+    }
+  });
   const artifactService = createArtifactService(fsAdapter);
   const projectService = createProjectService({ fs: fsAdapter, git, appSettings });
   const taskService = createTaskService({ fs: fsAdapter, git, artifactService, projectService });
@@ -87,6 +103,7 @@ export async function createMockClaudeE2eApp(options: MockClaudeE2eAppOptions = 
     projectService,
     taskService,
     taskWorkflowService,
+    ccrIntegration,
     apiUrl: "http://127.0.0.1/mock-vcm",
     isProcessAlive(pid) {
       return mockRuntime.listSessions().some((session) => session.pid === pid && session.status === "running");
@@ -302,6 +319,7 @@ export async function createMockClaudeE2eApp(options: MockClaudeE2eAppOptions = 
 
   const deps: ServerDeps = {
     appSettings,
+    ccrIntegration,
     projectService,
     taskService,
     taskCloseService,
@@ -368,7 +386,9 @@ function createMockClaudeAdapter(): ClaudeAdapter {
       if (claudeSessionId) {
         args.push(resume ? "--resume" : "--session-id", claudeSessionId);
       }
-      args.push("--model", model);
+      if (!isCcrSessionModel(model)) {
+        args.push("--model", model);
+      }
       if (effort !== "default") {
         args.push("--effort", effort);
       }
@@ -386,7 +406,7 @@ function createMockClaudeAdapter(): ClaudeAdapter {
 
 export function roleLaunchBody(input: {
   permissionMode?: ClaudePermissionMode;
-  model?: ClaudeModel;
+  model?: SessionModel;
   effort?: SessionEffort;
 } = {}): Record<string, string> {
   return {

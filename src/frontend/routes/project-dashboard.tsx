@@ -2,6 +2,7 @@ import { FormEvent, type ReactNode, useEffect, useState } from "react";
 import {
   TRANSLATION_OUTPUT_MODE_OPTIONS,
   TRANSLATION_TARGET_LANGUAGE_OPTIONS,
+  type CcrIntegrationStatus,
   type LaunchTemplate,
   type PermissionRequestMode,
   type ThemeMode,
@@ -25,7 +26,7 @@ import { GATE_REVIEW_GATES, type GateReviewGate, type GateReviewIndex } from "..
 import type { VcmOrchestrationState, VcmRoleMessage } from "../../shared/types/message.js";
 import type { ProjectSummary } from "../../shared/types/project.js";
 import type { VcmSessionRoundState } from "../../shared/types/round.js";
-import type { ClaudePermissionMode, RoleSessionRecord, SessionEffort, SessionModel } from "../../shared/types/session.js";
+import type { ClaudePermissionMode, RoleSessionRecord, SessionEffort, SessionModel, SessionModelOption } from "../../shared/types/session.js";
 import type { TaskRecord } from "../../shared/types/task.js";
 import { EventLog } from "../components/event-log.js";
 import { HarnessPanel } from "../components/harness-panel.js";
@@ -69,6 +70,8 @@ export interface ProjectDashboardProps {
   gatewayQrCheck: CheckGatewayQrLoginResult | null;
   gatewayLarkRegistration: StartGatewayLarkRegistrationResult | null;
   gatewayLarkRegistrationCheck: CheckGatewayLarkRegistrationResult | null;
+  ccrStatus: CcrIntegrationStatus | null;
+  modelOptions: SessionModelOption[];
   busy?: boolean;
   onConnect(repoPath: string): Promise<void>;
   onRefreshConnectedRepository(): Promise<void>;
@@ -86,6 +89,8 @@ export interface ProjectDashboardProps {
   onRefreshGateway(): Promise<void>;
   onGatewayEnabledChange(enabled: boolean): void;
   onGatewaySettingsChange(input: UpdateGatewaySettingsRequest): Promise<void>;
+  onCcrSettingsChange(input: { enabled?: boolean; apiKey?: string; clearApiKey?: boolean }): Promise<void>;
+  onCcrCheck(): Promise<void>;
   onGatewayTranslationChange(enabled: boolean): void;
   // Arm/disarm the runtime channel-connection switch (process-local, not persisted).
   onGatewayConnectionChange(enabled: boolean): void;
@@ -148,6 +153,8 @@ export function ProjectDashboard({
   gatewayQrCheck,
   gatewayLarkRegistration,
   gatewayLarkRegistrationCheck,
+  ccrStatus,
+  modelOptions,
   busy,
   onConnect,
   onRefreshConnectedRepository,
@@ -165,6 +172,8 @@ export function ProjectDashboard({
   onRefreshGateway,
   onGatewayEnabledChange,
   onGatewaySettingsChange,
+  onCcrSettingsChange,
+  onCcrCheck,
   onGatewayTranslationChange,
   onGatewayConnectionChange,
   onStartGatewayQrLogin,
@@ -319,6 +328,12 @@ export function ProjectDashboard({
               <option value="allowAll">allow all</option>
             </select>
           </label>
+          <CcrIntegrationSettings
+            busy={busy}
+            status={ccrStatus}
+            onCheck={onCcrCheck}
+            onSettingsChange={onCcrSettingsChange}
+          />
           <button
             className="settings-toggle"
             disabled={busy || !canSaveLaunchTemplate}
@@ -437,6 +452,7 @@ export function ProjectDashboard({
             hasActiveTask={Boolean(activeTask)}
             autoTaskHarnessReviewEnabled={autoTaskHarnessReviewEnabled}
             autoMemoryEnabled={autoMemoryEnabled}
+            modelOptions={modelOptions}
             busy={busy}
             onRefresh={onRefreshHarness}
             onApply={onApplyHarness}
@@ -540,6 +556,76 @@ function getLaunchTemplateSummary(template: LaunchTemplate): string {
     .map(([role, config]) => `${role}: ${config.permissionMode} / ${config.model} / ${config.effort}`)
     .join("; ");
   return `Launch template: ${getLaunchTemplateBadge(template)}; ${roles}`;
+}
+
+function CcrIntegrationSettings({
+  busy,
+  status,
+  onCheck,
+  onSettingsChange
+}: {
+  busy?: boolean;
+  status: CcrIntegrationStatus | null;
+  onCheck(): Promise<void>;
+  onSettingsChange(input: { enabled?: boolean; apiKey?: string; clearApiKey?: boolean }): Promise<void>;
+}) {
+  const [apiKey, setApiKey] = useState("");
+  const configured = Boolean(status?.apiKeyConfigured);
+
+  const saveApiKey = async (event: FormEvent) => {
+    event.preventDefault();
+    const nextApiKey = apiKey.trim();
+    if (!nextApiKey) {
+      return;
+    }
+    await onSettingsChange({ apiKey: nextApiKey });
+    setApiKey("");
+  };
+
+  return (
+    <div className="ccr-settings">
+      <SwitchControl
+        checked={Boolean(status?.enabled)}
+        className="sidebar-switch"
+        disabled={busy || !configured}
+        label="CCR GPT models"
+        title={configured ? "Enable GPT models through Claude Code Router" : "Save the CCR API key first"}
+        onChange={(enabled) => void onSettingsChange({ enabled })}
+      />
+      <form className="ccr-api-key-form" onSubmit={(event) => void saveApiKey(event)}>
+        <label htmlFor="ccr-api-key">CCR API key</label>
+        <div>
+          <input
+            id="ccr-api-key"
+            type="password"
+            autoComplete="off"
+            disabled={busy}
+            placeholder={configured ? "Saved" : "Required"}
+            value={apiKey}
+            onChange={(event) => setApiKey(event.target.value)}
+          />
+          <button type="submit" disabled={busy || !apiKey.trim()}>Save</button>
+        </div>
+      </form>
+      <div className="settings-status-row">
+        <span>CCR status</span>
+        <strong>{status?.connectionState ?? "loading"}</strong>
+      </div>
+      <div className="ccr-actions">
+        <button type="button" disabled={busy || !status?.enabled} onClick={() => void onCheck()}>
+          Check
+        </button>
+        <button
+          type="button"
+          disabled={busy || !configured}
+          onClick={() => void onSettingsChange({ clearApiKey: true })}
+        >
+          Clear key
+        </button>
+      </div>
+      {status?.error ? <p className="settings-help-text">{status.error}</p> : null}
+    </div>
+  );
 }
 
 function TranslationControlsPanel({

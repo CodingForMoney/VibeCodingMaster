@@ -1,9 +1,13 @@
+import fsPromises from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createDefaultLaunchTemplate,
   type AppPreferences
 } from "../../../src/shared/types/app-settings.js";
 import type { FileSystemAdapter } from "../../../src/backend/adapters/filesystem.js";
+import { createNodeFileSystemAdapter } from "../../../src/backend/adapters/filesystem.js";
 import {
   createAppSettingsService,
   getProjectId,
@@ -39,6 +43,11 @@ describe("app-settings-service", () => {
 
     expect(settings).toEqual({
       version: 1,
+      ccr: {
+        version: 1,
+        enabled: false,
+        apiKey: ""
+      },
       preferences: createDefaultPreferences(),
       recentRepositoryPaths: []
     });
@@ -112,6 +121,38 @@ describe("app-settings-service", () => {
 
     const stored = await fs.readJson<AppSettingsFile>("/settings.json");
     expect(stored.preferences.launchTemplate).toEqual(launchTemplate);
+  });
+
+  it("stores CCR credentials globally and preserves namespaced launch models", async () => {
+    const fs = createMemoryFs();
+    const service = createAppSettingsService({ fs, settingsPath: "/settings.json" });
+    const launchTemplate = createDefaultLaunchTemplate();
+    launchTemplate.roles.architect.model = "ccr:Codex API/gpt-5.6-sol";
+
+    await expect(service.updateCcrIntegrationSettings({ apiKey: "local-secret", enabled: true }))
+      .resolves.toEqual({ version: 1, apiKey: "local-secret", enabled: true });
+    await service.updatePreferences({ launchTemplate });
+
+    const stored = await fs.readJson<AppSettingsFile>("/settings.json");
+    expect(stored.ccr).toEqual({ version: 1, apiKey: "local-secret", enabled: true });
+    expect(stored.preferences.launchTemplate.roles.architect.model).toBe("ccr:Codex API/gpt-5.6-sol");
+  });
+
+  it("protects the global settings file with owner-only permissions", async () => {
+    const tempRoot = await fsPromises.mkdtemp(path.join(os.tmpdir(), "vcm-settings-mode-"));
+    const settingsPath = path.join(tempRoot, "settings.json");
+    try {
+      const service = createAppSettingsService({
+        fs: createNodeFileSystemAdapter(),
+        settingsPath
+      });
+      await service.updateCcrIntegrationSettings({ apiKey: "local-secret" });
+
+      const stat = await fsPromises.stat(settingsPath);
+      expect(stat.mode & 0o777).toBe(0o600);
+    } finally {
+      await fsPromises.rm(tempRoot, { recursive: true, force: true });
+    }
   });
 
   it("migrates the old round completion alert preference", async () => {

@@ -20,10 +20,11 @@ import type { ProjectConfig } from "../../shared/types/project.js";
 import type { VcmRoleName } from "../../shared/types/role.js";
 import {
   CLAUDE_MODEL_OPTIONS,
+  CCR_GPT_SESSION_MODEL,
   SESSION_EFFORT_OPTIONS,
-  type ClaudeModel,
   type ClaudePermissionMode,
-  type SessionEffort
+  type SessionEffort,
+  type SessionModel
 } from "../../shared/types/session.js";
 import type { FileSystemAdapter } from "../adapters/filesystem.js";
 import { resolveVcmDataDir } from "../vcm-data-dir.js";
@@ -32,7 +33,14 @@ export interface AppSettingsFile {
   version: 1;
   preferences: AppPreferences;
   gateReview?: AppGateReviewSettingsState;
+  ccr?: AppCcrIntegrationSettingsState;
   recentRepositoryPaths: string[];
+}
+
+export interface AppCcrIntegrationSettingsState {
+  version: 1;
+  enabled: boolean;
+  apiKey: string;
 }
 
 export interface AppProjectIndexEntry {
@@ -69,6 +77,8 @@ export interface AppSettingsService {
   saveProjectConfig(config: ProjectConfig): Promise<ProjectConfig>;
   getGateReviewSettings(repoRoot: string, taskSlug: string): Promise<AppGateReviewSettings>;
   updateGateReviewSettings(repoRoot: string, taskSlug: string, requiredGates: GateReviewGate[]): Promise<AppGateReviewSettings>;
+  getCcrIntegrationSettings(): Promise<AppCcrIntegrationSettingsState>;
+  updateCcrIntegrationSettings(input: Partial<Pick<AppCcrIntegrationSettingsState, "enabled" | "apiKey">>): Promise<AppCcrIntegrationSettingsState>;
   getSettingsPath(): string;
   getProjectIndexPath(): string;
   getProjectConfigPath(repoRoot: string): string;
@@ -97,6 +107,7 @@ export function createAppSettingsService(deps: AppSettingsServiceDeps): AppSetti
     let shouldSave = false;
     if (await deps.fs.pathExists(settingsPath)) {
       raw = await deps.fs.readJson<Partial<AppSettingsFile>>(settingsPath);
+      await deps.fs.chmod?.(settingsPath, 0o600);
     } else {
       shouldSave = true;
     }
@@ -111,6 +122,7 @@ export function createAppSettingsService(deps: AppSettingsServiceDeps): AppSetti
   async function saveSettings(settings: AppSettingsFile): Promise<void> {
     cachedSettings = settings;
     await deps.fs.writeJsonAtomic(settingsPath, settings);
+    await deps.fs.chmod?.(settingsPath, 0o600);
   }
 
   async function loadProjectIndex(): Promise<AppProjectIndexFile> {
@@ -230,6 +242,21 @@ export function createAppSettingsService(deps: AppSettingsServiceDeps): AppSetti
         requiredGates: normalizedRequiredGates
       };
     },
+    async getCcrIntegrationSettings() {
+      return normalizeCcrIntegrationSettings((await loadSettings()).ccr);
+    },
+    async updateCcrIntegrationSettings(input) {
+      const current = await loadSettings();
+      const ccr = normalizeCcrIntegrationSettings({
+        ...current.ccr,
+        ...input
+      });
+      await saveSettings({
+        ...current,
+        ccr
+      });
+      return ccr;
+    },
     getSettingsPath() {
       return settingsPath;
     },
@@ -324,7 +351,18 @@ function normalizeSettingsFile(input: Partial<AppSettingsFile>): AppSettingsFile
   if (gateReview) {
     settings.gateReview = gateReview;
   }
+  settings.ccr = normalizeCcrIntegrationSettings(input.ccr);
   return settings;
+}
+
+function normalizeCcrIntegrationSettings(input: unknown): AppCcrIntegrationSettingsState {
+  const candidate = isObject(input) ? input : {};
+  const apiKey = typeof candidate.apiKey === "string" ? candidate.apiKey.trim() : "";
+  return {
+    version: 1,
+    enabled: candidate.enabled === true && apiKey.length > 0,
+    apiKey
+  };
 }
 
 function normalizePreferences(input: unknown): AppPreferences {
@@ -412,9 +450,12 @@ function normalizeClaudePermissionMode(
   return fallback;
 }
 
-function normalizeClaudeModel(input: unknown, fallback: ClaudeModel): ClaudeModel {
+function normalizeClaudeModel(input: unknown, fallback: SessionModel): SessionModel {
   if (typeof input !== "string") {
     return fallback;
+  }
+  if (input === CCR_GPT_SESSION_MODEL) {
+    return input;
   }
   const model = CLAUDE_MODEL_OPTIONS.find((option) => option.value === input);
   return model?.value ?? fallback;

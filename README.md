@@ -228,6 +228,34 @@ such as a Dev Container or VM.
 Model and effort can be selected before start/resume/restart. Changes affect the
 next launched process, not a currently running Claude Code process.
 
+### GPT Through Claude Code Router
+
+VCM can launch its normal Claude Code sessions with `GPT-5.6 Sol (CCR)` through
+a host-running [Claude Code Router](https://github.com/musistudio/claude-code-router).
+CCR must already be installed, authenticated, configured, and running on the
+host. VCM does not manage the CCR process.
+
+VCM uses this fixed Dev Container endpoint:
+
+```text
+http://host.docker.internal:3456
+```
+
+Configure CCR to listen on port `3456` with an API key and make it reachable
+from the container. In the VCM `Settings` section:
+
+1. enter and save the CCR API key;
+2. enable `CCR GPT models`;
+3. confirm the status is `available`;
+4. select `GPT-5.6 Sol (CCR)` in any Session model control.
+
+The key is stored in global VCM state (`~/.vcm/settings.json`) with owner-only
+permissions and is never returned by the settings API. CCR settings are applied
+only to the child Claude Code process being launched. Native Claude selections
+remain unchanged. If CCR is disabled, unreachable, rejects the key, or does not
+expose `Codex API/gpt-5.6-sol`, VCM blocks the new Start, Resume, or Restart and
+does not fall back to another model.
+
 ## Launch Template
 
 The launch template stores per-role defaults:

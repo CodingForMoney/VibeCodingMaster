@@ -278,6 +278,27 @@ describe("apiClient", () => {
     expect(preferences.autoTaskHarnessReviewEnabled).toBe(true);
   });
 
+  it("updates and checks global CCR integration settings", async () => {
+    const fetchMock = mockFetch({
+      enabled: true,
+      apiKeyConfigured: true,
+      connectionState: "available",
+      modelAvailable: true,
+      modelOptions: []
+    });
+
+    await apiClient.updateCcrIntegration({ apiKey: "local-secret", enabled: true });
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/settings/ccr");
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
+      apiKey: "local-secret",
+      enabled: true
+    });
+
+    await apiClient.checkCcrIntegration();
+    expect(fetchMock.mock.calls[1]?.[0]).toBe("/api/settings/ccr/check");
+    expect(fetchMock.mock.calls[1]?.[1]?.body).toBeUndefined();
+  });
+
   it("starts and polls translation sessions through HTTP APIs", async () => {
     const fetchMock = mockFetch({
       sessionId: "session-1",
