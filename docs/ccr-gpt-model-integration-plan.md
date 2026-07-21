@@ -2,13 +2,12 @@
 
 Last updated: 2026-07-21
 
-Status: design draft for the `v07` branch. Implement after this plan is
-reviewed.
+Status: confirmed design for the `v07` branch.
 
 ## 1. Goal
 
 Allow VCM-managed Claude Code sessions running inside a DevContainer to use
-GPT models exposed by a host-running Claude Code Router (CCR).
+the supported GPT model exposed by a host-running Claude Code Router (CCR).
 
 The user installs, authenticates, configures, starts, and updates CCR on the
 host. VCM does not manage the CCR process. VCM provides:
@@ -16,7 +15,8 @@ host. VCM does not manage the CCR process. VCM provides:
 - a global CCR integration switch
 - an authenticated connectivity and capability check performed by the VCM
   backend from inside the container
-- dynamically discovered CCR models in existing model selectors
+- availability detection for the supported CCR model in existing model
+  selectors
 - per-session environment injection when a CCR model is selected
 - explicit launch errors when the selected CCR model is unavailable
 
@@ -35,7 +35,7 @@ Host
             v
 DevContainer
   VCM backend
-    -> checks CCR and discovers models
+    -> checks CCR and verifies the supported model
     -> launches `claude` with a session-scoped CCR environment
   Claude Code
     -> sends model requests to CCR
@@ -56,16 +56,14 @@ and ChatGPT subscription usage.
 
 ## 3. Host And Container Contract
 
-The default VCM endpoint is:
+VCM uses this fixed endpoint:
 
 ```text
 http://host.docker.internal:3456
 ```
 
-The user may replace it with another container-reachable HTTP or HTTPS URL.
-
 CCR must listen on an interface reachable from the DevContainer. For the
-standard CCR configuration this means:
+VCM integration contract this means:
 
 ```json
 {
@@ -81,9 +79,9 @@ only to authenticate to the local CCR gateway; it is not an OpenAI or ChatGPT
 credential.
 
 Docker Desktop supplies `host.docker.internal`. Linux DevContainer setups must
-map that name to the host gateway or configure another reachable host address.
-VCM must report this as a connectivity error rather than trying to infer a host
-address.
+map that name to the host gateway. VCM must report a connectivity error when
+the fixed endpoint is unreachable rather than trying to infer another address
+or port.
 
 The CCR management UI port is outside this contract. VCM must not assume that
 the management UI and model gateway use the same port or authentication.
@@ -99,28 +97,34 @@ Persist one top-level settings object:
 interface CcrIntegrationSettingsState {
   version: 1;
   enabled: boolean;
-  baseUrl: string;
   apiKey: string;
 }
 ```
 
-The Settings sidebar adds a `CCR GPT models` switch. Its expanded settings
-contain:
+The Settings sidebar adds:
 
-- gateway URL, defaulting to `http://host.docker.internal:3456`
+- a `CCR GPT models` switch
 - CCR API key as a password field
+- a `Save API key` command
 - connection state
 - a `Check connection` command
 
 The API key is write-only in frontend API responses. Responses expose only
 `apiKeyConfigured: boolean`. An omitted API key during an update preserves the
-saved value; an explicit clear operation removes it. Error messages and logs
-must redact the key.
+saved value; an explicit clear operation removes it and disables CCR
+integration. Error messages and logs must redact the key. The settings file
+must be written with owner-only `0600` permissions.
 
-Enabling the switch records the user's intent and immediately asks the backend
-to check CCR. A failed check leaves the integration enabled but unavailable so
-that a later check can recover without losing the configuration. CCR models
-remain unavailable until a check succeeds.
+The API key must be saved before the switch can be enabled. After a successful
+save, the password field is cleared and the UI shows only that a key is
+configured. The switch and `Check connection` remain disabled until then.
+Enabling without a saved key is rejected and leaves the switch off.
+
+After a key is configured, enabling the switch records the user's intent and
+immediately asks the backend to check CCR. A failed check leaves the integration
+enabled but unavailable so that a later check can recover without losing the
+configuration. The supported CCR model remains unavailable until a check
+succeeds.
 
 ## 5. Backend CCR Adapter
 
@@ -130,7 +134,7 @@ must never call CCR directly.
 The check runs:
 
 1. when CCR integration is enabled
-2. when the URL or API key changes
+2. when the API key changes
 3. when the user requests `Check connection`
 4. during VCM startup when the saved switch is enabled
 5. before starting, resuming, or restarting a session configured with a CCR
@@ -141,6 +145,7 @@ The adapter performs:
 1. `GET /` to verify that the endpoint identifies itself as a CCR gateway
 2. authenticated `GET /v1/models` with a Claude Code user agent
 3. schema validation of the returned model list
+4. confirmation that `Codex API/gpt-5.6-sol` is present
 
 The check does not submit an inference request and does not consume model
 quota. It returns one of these runtime states:
@@ -156,15 +161,15 @@ type CcrConnectionState =
   | "invalid-response";
 ```
 
-The runtime result includes the discovered models, `checkedAt`, and a precise
-redacted error. Runtime state is held in backend memory and is not written to
-settings.
+The runtime result includes whether `Codex API/gpt-5.6-sol` is available,
+`checkedAt`, and a precise redacted error. Runtime state is held in backend
+memory and is not written to settings.
 
 Checks use a short timeout, one shared in-flight request, and a short cache
 lifetime so a one-click launch does not perform the same request once per role.
-There is no
-component-owned polling interval. A pre-launch check may use the fresh cached
-result; an expired result must be refreshed before process creation.
+There is no component-owned polling interval. A pre-launch check may use the
+fresh cached result; an expired result must be refreshed before process
+creation.
 
 ## 6. Model Identity And Discovery
 
@@ -172,25 +177,26 @@ The current `SessionModel` type contains only static Claude aliases. CCR models
 must be namespaced so they cannot collide with Claude aliases or be mistaken
 for native Claude models.
 
-Use stable stored values such as:
+Keep native Claude values unchanged and namespace only CCR models:
 
 ```text
-claude:default
-claude:opus
-ccr:Codex API/gpt-5.5
+default
+opus
+ccr:Codex API/gpt-5.6-sol
 ```
 
 Existing persisted Claude values (`default`, `fable`, `opus`, and `sonnet`)
-normalize to their `claude:` equivalents. No existing launch template should
-change behavior during this normalization.
+remain valid without migration. The CCR prefix is sufficient to distinguish
+the new launch path.
 
-VCM must not hard-code GPT versions. The authenticated CCR `/v1/models`
-response is the source of available CCR model identifiers and display names.
-The UI displays them in a separate `CCR / GPT` model group while retaining the
-existing Claude group.
+The first implementation supports only `Codex API/gpt-5.6-sol`, displayed as
+`GPT-5.6 Sol (CCR)`. The authenticated CCR `/v1/models` response confirms
+whether that exact model is currently available. Other CCR models are ignored
+and are not added to model selectors.
 
-All controls must consume backend-provided model options instead of importing
-only `CLAUDE_MODEL_OPTIONS`. This includes:
+When available, the backend appends this model to the options returned to all
+controls. Controls must not infer CCR availability independently. This
+includes:
 
 - each VCM role toolbar
 - Gate Reviewer when enabled
@@ -198,9 +204,9 @@ only `CLAUDE_MODEL_OPTIONS`. This includes:
 - Harness Bootstrap controls
 - saved launch-template controls and one-click launch
 
-A saved CCR model remains visible as unavailable when CCR is disabled, down,
-or no longer reports that model. VCM must not erase the selection or normalize
-it to `default`.
+A saved `ccr:Codex API/gpt-5.6-sol` selection remains visible as unavailable
+when CCR is disabled, down, or no longer reports that model. VCM must not erase
+the selection or normalize it to `default`.
 
 ## 7. Claude Code Launch Environment
 
@@ -211,16 +217,16 @@ For a CCR selection, VCM launches the normal container `claude` executable and
 injects these variables only into that child process:
 
 ```text
-ANTHROPIC_BASE_URL=<configured CCR gateway URL>
-ANTHROPIC_API_BASE_URL=<configured CCR gateway URL>
-CLAUDE_AGENT_API_BASE_URL=<configured CCR gateway URL>
+ANTHROPIC_BASE_URL=http://host.docker.internal:3456
+ANTHROPIC_API_BASE_URL=http://host.docker.internal:3456
+CLAUDE_AGENT_API_BASE_URL=http://host.docker.internal:3456
 ANTHROPIC_AUTH_TOKEN=<configured CCR API key>
-ANTHROPIC_MODEL=<exact discovered CCR model id>
-CCR_CLAUDE_CODE_MODEL=<exact discovered CCR model id>
-CODEXL_CLAUDE_CODE_MODEL=<exact discovered CCR model id>
-ANTHROPIC_SMALL_FAST_MODEL=<exact discovered CCR model id>
+ANTHROPIC_MODEL=Codex API/gpt-5.6-sol
+CCR_CLAUDE_CODE_MODEL=Codex API/gpt-5.6-sol
+CODEXL_CLAUDE_CODE_MODEL=Codex API/gpt-5.6-sol
+ANTHROPIC_SMALL_FAST_MODEL=Codex API/gpt-5.6-sol
 CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1
-NO_PROXY=<existing entries plus the CCR gateway host>
+NO_PROXY=<existing entries plus host.docker.internal>
 ```
 
 The selected CCR model is supplied through the environment. The Claude adapter
@@ -262,9 +268,9 @@ PUT  /api/settings/ccr
 POST /api/settings/ccr/check
 ```
 
-`GET` returns safe settings, runtime status, and discovered model options.
-`PUT` updates the global switch, URL, or write-only API key and then refreshes
-status when required. `POST /check` forces a backend check.
+`GET` returns safe settings, runtime status, and the supported CCR model option
+when available. `PUT` updates the global switch or write-only API key and then
+refreshes status when required. `POST /check` forces a backend check.
 
 Session start requests continue to carry one `model` selection. Backend
 validation resolves its namespace, verifies an available CCR model when
@@ -279,12 +285,12 @@ cases:
 | Condition | Required result |
 | --- | --- |
 | Integration disabled | Report that CCR GPT models are disabled. |
-| Host or port unreachable | Include the configured URL and state that the check ran from the VCM container. |
+| Host or port unreachable | Include the fixed URL and state that the check ran from the VCM container. |
 | Request timeout | Report the timeout and suggest checking the host listener and container route. |
 | HTTP 401/403 | Report that the CCR API key was rejected. |
 | Endpoint is not CCR | Report that the URL did not identify a CCR gateway. |
 | Invalid model response | Report the invalid `/v1/models` response without dumping secrets. |
-| Selected model missing | Name the unavailable model and require model refresh or reselection. |
+| `gpt-5.6-sol` missing | Name the unavailable model and require a CCR configuration check. |
 
 No failure may silently change the saved model, start Claude with `default`,
 or launch a session without the CCR environment.
@@ -294,9 +300,9 @@ or launch a session without the CCR environment.
 ### Shared contracts
 
 - extend app settings contracts with safe CCR settings/status types
-- replace the Claude-only `SessionModel` representation with namespaced model
-  identity
-- define dynamic model-option contracts returned by the backend
+- extend `SessionModel` with the namespaced `gpt-5.6-sol` value while retaining
+  existing Claude values
+- define backend-owned model-option contracts
 
 ### Backend
 
@@ -310,9 +316,8 @@ or launch a session without the CCR environment.
 
 ### Frontend
 
-- add the global CCR switch, URL, API-key input, status, and manual check to
-  Settings
-- load dynamic model options from the VCM backend
+- add the global CCR switch, API-key input, status, and manual check to Settings
+- load backend-owned model options
 - pass model options into shared session controls instead of reading a static
   constant inside each component
 - preserve unavailable saved CCR selections and show why they cannot launch
@@ -323,10 +328,10 @@ or launch a session without the CCR environment.
 
 - settings defaults, normalization, persistence, API-key preservation, clear,
   and response redaction
-- CCR URL normalization and `NO_PROXY` merging
+- fixed CCR endpoint handling and `NO_PROXY` merging
 - gateway identity, authentication, timeout, invalid response, empty list, and
   successful model discovery
-- namespaced model parsing and legacy Claude-model normalization
+- CCR model parsing and unchanged native Claude-model normalization
 - native Claude command generation remains unchanged
 - CCR launch omits native `--model` and injects the complete environment
 - no secret is present in command display, records, logs, or returned errors
@@ -336,14 +341,14 @@ or launch a session without the CCR environment.
 
 Use a mock CCR HTTP server plus the existing mock Claude Code runtime to cover:
 
-1. enable CCR, discover models, select one, and start a role
+1. enable CCR, detect `gpt-5.6-sol`, select it, and start a role
 2. verify the mock Claude process receives the CCR environment
 3. start multiple roles with one-click launch and verify one shared connection
    check is used
 4. resume and restart a CCR-backed session
 5. verify native Claude sessions receive no CCR environment
 6. stop CCR and verify a new launch is blocked with a precise error
-7. reject an invalid API key and a removed model
+7. reject an invalid API key and a missing `gpt-5.6-sol` model
 8. verify Hooks, Session state, Round state, retry, and close-task behavior are
    unchanged for a CCR-backed role
 9. start Translator, Harness Engineer, Gate Reviewer, and Harness Bootstrap
@@ -353,8 +358,8 @@ Use a mock CCR HTTP server plus the existing mock Claude Code runtime to cover:
 
 1. start and authenticate CCR on the host
 2. confirm `GET /v1/models` succeeds from inside the DevContainer
-3. enable CCR in VCM and confirm models appear
-4. start one Claude Code role with a GPT model
+3. enable CCR in VCM and confirm `GPT-5.6 Sol (CCR)` appears
+4. start one Claude Code role with `GPT-5.6 Sol (CCR)`
 5. confirm CCR receives the request and the role's Hook/terminal lifecycle is
    normal
 6. stop CCR and confirm VCM refuses a new GPT-backed launch without falling
@@ -362,10 +367,10 @@ Use a mock CCR HTTP server plus the existing mock Claude Code runtime to cover:
 
 ## 13. Delivery Order
 
-1. shared model/settings contracts and legacy normalization
+1. shared model/settings contracts
 2. backend CCR adapter, status cache, safe settings API, and tests
 3. centralized session launch environment and launch validation
-4. dynamic frontend model controls and global Settings UI
+4. backend-owned frontend model controls and global Settings UI
 5. launch-template, auxiliary-session, Bootstrap, and one-click coverage
 6. backend E2E and DevContainer smoke verification
 7. architecture, testing, and user documentation updates
@@ -375,10 +380,10 @@ Use a mock CCR HTTP server plus the existing mock Claude Code runtime to cover:
 - CCR is installed and run only by the user on the host.
 - VCM can verify the CCR gateway from inside its DevContainer without making an
   inference request.
-- Enabling CCR exposes the models currently reported by CCR without a VCM
-  release for each new GPT model.
-- Selecting a CCR model starts the normal VCM-managed Claude Code process with
-  only session-scoped environment changes.
+- Enabling CCR exposes `GPT-5.6 Sol (CCR)` only when CCR reports
+  `Codex API/gpt-5.6-sol`.
+- Selecting `GPT-5.6 Sol (CCR)` starts the normal VCM-managed Claude Code
+  process with only session-scoped environment changes.
 - Native Claude model launches remain unchanged.
 - CCR credentials never appear in frontend responses, terminal commands,
   session records, or logs.
