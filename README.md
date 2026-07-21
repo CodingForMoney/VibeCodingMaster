@@ -250,11 +250,13 @@ from the container. In the VCM `Settings` section:
 4. select `GPT-5.6 Sol (CCR)` in any Session model control.
 
 The key is stored in global VCM state (`~/.vcm/settings.json`) with owner-only
-permissions and is never returned by the settings API. CCR settings are applied
-only to the child Claude Code process being launched. Native Claude selections
-remain unchanged. If CCR is disabled, unreachable, rejects the key, or does not
-expose `Codex API/gpt-5.6-sol`, VCM blocks the new Start, Resume, or Restart and
-does not fall back to another model.
+permissions, is used only to check CCR and discover models, and is never
+returned by the settings API. GPT sessions use the CCR-managed Claude Code
+`apiKeyHelper`; VCM removes inherited Anthropic token variables only from those
+child processes. Native Claude selections retain their existing launch and
+authentication behavior. If CCR is disabled, unreachable, rejects the key, or
+does not expose `Codex API/gpt-5.6-sol`, VCM blocks the new Start, Resume, or
+Restart and does not fall back to another model.
 
 ## Launch Template
 

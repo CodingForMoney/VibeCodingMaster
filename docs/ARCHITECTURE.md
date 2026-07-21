@@ -100,7 +100,10 @@ endpoint `http://host.docker.internal:3456`; the frontend never calls CCR.
 model discovery. `ccr-integration-service` owns the enabled state, volatile
 connection result, shared in-flight check, short cache, safe API response, and
 session-scoped child environment. The API key is persisted only in global app
-settings and settings responses expose only whether it is configured.
+settings, is used only for gateway checks and model discovery, and settings
+responses expose only whether it is configured. GPT-backed children clear
+inherited Anthropic credential variables so Claude Code uses CCR's configured
+`apiKeyHelper`; native Claude children keep their existing authentication.
 
 `session-service` is the single process-launch boundary for CCR. It requests the
 model environment before every Start, Resume, or Restart path and merges it into

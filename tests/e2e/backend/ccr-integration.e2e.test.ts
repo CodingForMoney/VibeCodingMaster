@@ -64,10 +64,12 @@ describe("backend E2E CCR integration", () => {
     expect(input.args).toEqual(expect.arrayContaining(["--effort", "medium"]));
     expect(input.env).toMatchObject({
       ANTHROPIC_BASE_URL: "http://host.docker.internal:3456",
-      ANTHROPIC_AUTH_TOKEN: "local-ccr-secret",
+      ANTHROPIC_AUTH_TOKEN: undefined,
+      ANTHROPIC_API_KEY: undefined,
       ANTHROPIC_MODEL: CCR_GPT_MODEL_ID,
       VCM_TASK_SLUG: task.taskSlug
     });
+    expect(JSON.stringify(input.env)).not.toContain("local-ccr-secret");
     expect(input.command).toBe("claude");
     expect(probeKeys).toEqual(["local-ccr-secret"]);
   });
@@ -155,7 +157,8 @@ describe("backend E2E CCR integration", () => {
       const input = env.mockRuntime.getCreateInput(session.id);
       expect(input.args).not.toContain("--model");
       expect(input.env).toMatchObject({
-        ANTHROPIC_AUTH_TOKEN: "saved",
+        ANTHROPIC_AUTH_TOKEN: undefined,
+        ANTHROPIC_API_KEY: undefined,
         ANTHROPIC_MODEL: CCR_GPT_MODEL_ID
       });
     }

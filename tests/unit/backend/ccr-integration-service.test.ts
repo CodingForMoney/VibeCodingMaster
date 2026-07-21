@@ -17,7 +17,7 @@ describe("createCcrIntegrationService", () => {
     });
   });
 
-  it("builds the complete child-only CCR environment without exposing the key in status", async () => {
+  it("builds the CCR environment around the CCR-managed apiKeyHelper", async () => {
     const service = createService({ baseEnv: { NO_PROXY: "localhost" } });
     const saved = await service.updateSettings({ apiKey: "local-secret" });
     expect(saved).toMatchObject({ enabled: false, apiKeyConfigured: true });
@@ -34,7 +34,8 @@ describe("createCcrIntegrationService", () => {
       ANTHROPIC_BASE_URL: "http://host.docker.internal:3456",
       ANTHROPIC_API_BASE_URL: "http://host.docker.internal:3456",
       CLAUDE_AGENT_API_BASE_URL: "http://host.docker.internal:3456",
-      ANTHROPIC_AUTH_TOKEN: "local-secret",
+      ANTHROPIC_AUTH_TOKEN: undefined,
+      ANTHROPIC_API_KEY: undefined,
       ANTHROPIC_MODEL: CCR_GPT_MODEL_ID,
       CCR_CLAUDE_CODE_MODEL: CCR_GPT_MODEL_ID,
       CODEXL_CLAUDE_CODE_MODEL: CCR_GPT_MODEL_ID,
@@ -43,6 +44,7 @@ describe("createCcrIntegrationService", () => {
       NO_PROXY: "localhost,host.docker.internal",
       no_proxy: "localhost,host.docker.internal"
     });
+    expect(JSON.stringify(environment)).not.toContain("local-secret");
   });
 
   it("does not inject CCR environment for native Claude models", async () => {

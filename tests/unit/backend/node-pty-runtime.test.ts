@@ -49,6 +49,24 @@ describe("node-pty-runtime", () => {
     expect(env.NO_COLOR).toBeUndefined();
   });
 
+  it("removes inherited variables explicitly unset for one child process", () => {
+    const env = buildPtyEnvironment(
+      {
+        ANTHROPIC_AUTH_TOKEN: "inherited-token",
+        ANTHROPIC_API_KEY: "inherited-key",
+        KEEP_ME: "native-value"
+      },
+      {
+        ANTHROPIC_AUTH_TOKEN: undefined,
+        ANTHROPIC_API_KEY: undefined
+      }
+    );
+
+    expect(env.ANTHROPIC_AUTH_TOKEN).toBeUndefined();
+    expect(env.ANTHROPIC_API_KEY).toBeUndefined();
+    expect(env.KEEP_ME).toBe("native-value");
+  });
+
   it("limits replayed terminal logs to a tail window", () => {
     const replay = tailTerminalReplay([
       "old line 1",

@@ -220,7 +220,8 @@ injects these variables only into that child process:
 ANTHROPIC_BASE_URL=http://host.docker.internal:3456
 ANTHROPIC_API_BASE_URL=http://host.docker.internal:3456
 CLAUDE_AGENT_API_BASE_URL=http://host.docker.internal:3456
-ANTHROPIC_AUTH_TOKEN=<configured CCR API key>
+ANTHROPIC_AUTH_TOKEN=<unset>
+ANTHROPIC_API_KEY=<unset>
 ANTHROPIC_MODEL=Codex API/gpt-5.6-sol
 CCR_CLAUDE_CODE_MODEL=Codex API/gpt-5.6-sol
 CODEXL_CLAUDE_CODE_MODEL=Codex API/gpt-5.6-sol
@@ -232,6 +233,13 @@ NO_PROXY=<existing entries plus host.docker.internal>
 The selected CCR model is supplied through the environment. The Claude adapter
 must not also append the native `--model` argument for a CCR selection. Native
 Claude selections continue to use `--model` exactly as they do now.
+
+CCR-managed Claude Code profiles authenticate through the `apiKeyHelper` in
+Claude settings. VCM therefore removes inherited Anthropic token and API-key
+variables from CCR-backed child processes so they cannot override that helper.
+The API key saved in VCM is used only for CCR connection and model discovery.
+Native Claude sessions do not receive these removals and retain their existing
+authentication behavior.
 
 The API key must never appear in the display command, terminal output, session
 record, event stream, diagnostics, or process error text. Session records and
