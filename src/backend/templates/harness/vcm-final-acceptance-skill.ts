@@ -1,9 +1,9 @@
 export function renderVcmFinalAcceptanceSkillRules(): string {
   return `## Purpose
 
-Use this skill only when project-manager is ready to close a complete VCM code-delivery flow, including a primary Debug or Architecture Diagnosis flow that produced code changes.
+Use this skill only when project-manager is ready to close a complete VCM code-delivery flow, including Architect Debug Flow or an Architecture Diagnosis Flow that produced code changes.
 
-Do not use it for docs-only, validation-only, Communication-only, PR-prep, analysis-only Diagnosis, or any Debug/Diagnosis branch inside another flow.
+Do not use it for Docs-Only Flow, Validation-Only Flow, Communication-Only Flow, PR-Preparation Flow, analysis-only Diagnosis, Architect Debug Branch, or Architecture Diagnosis Branch.
 
 This skill is a final evidence audit. It does not replace architect docs sync, tester validation acceptance, coder implementation responsibility, or user approval for high-risk decisions.
 
@@ -43,7 +43,7 @@ Review the changed file list only, then classify files:
 
 - expected files: directly named by the user request, route message, durable plan, architecture plan, or architecture diagnosis
 - supporting files: tests, fixtures, generated context, docs, or wiring needed for expected files
-- approved deviations: files explained by Replan, tester follow-up, docs-sync, or explicit user / project-manager approval
+- approved deviations: files explained by Replan, tester follow-up, docs-sync, or explicit user approval
 - unexplained files: files with no traceable reason in the task evidence
 - high-risk unexpected files: auth, permissions, payment, billing, schema, migrations, data deletion, secrets, dependencies, lockfiles, broad generated artifacts, or broad formatting churn
 
@@ -55,14 +55,15 @@ High-risk unexpected files require explicit user approval or architect Replan be
 
 Check:
 
-- required route was followed, or an explicit exception is recorded
+- required route was followed, or an explicit user-approved exception is recorded
 - required handoff artifacts exist and are current
 - architecture plan, Architecture Diagnosis, Replan, or architect follow-up completion is recorded when required by the flow
 - tester report records \`Test Result: pass|fail\`, validation commands, results, and skipped checks with reasons
-- required Gate Reviews are approved, skipped with a recorded reason, or overridden with a recorded reason
-- Gate Review enable state is confirmed authoritatively: do not infer that no Gate Reviews were required from an absent or empty \`.ai/vcm/gate-reviews/index.json\`. When Gate Review is enabled, a missing index or a required gate without a recorded decision means the gate was skipped — run the matching command from the \`vcm-gate-review\` skill, including the code source for \`code-diff\`, and do not accept until each required gate returns \`approve\`/\`already_approved\`, \`disabled\`/\`not_required\`, or a recorded skip/override
+- required Gate Reviews are approved, or skipped/overridden through a VCM-recorded user action
+- Gate Review enable state is confirmed authoritatively: do not infer that no Gate Reviews were required from an absent or empty \`.ai/vcm/gate-reviews/index.json\`. When Gate Review is enabled, a missing index or a required gate without a recorded decision means the gate was skipped — run the matching command from the \`vcm-gate-review\` skill, including the code source for \`code-diff\`, and do not accept until each required gate returns \`approve\`/\`already_approved\`, \`disabled\`/\`not_required\`, or a VCM-recorded user skip/override
 - docs-sync report records docs updated, docs intentionally left unchanged, or required follow-up when docs sync was required
-- known issues are either resolved, promoted to durable docs by architect, or explicitly accepted
+- when durable docs changed, docs-sync or tester evidence records a passing \`.ai/tools/check-durable-docs\` result and any cross-document inconsistency was resolved by the owning role
+- known issues are either resolved, promoted to durable docs by architect, or explicitly accepted by the user
 - temporary task state is ready to clean after durable facts are promoted
 
 ## Decisions
@@ -76,7 +77,7 @@ Choose exactly one:
 - needs-docs-sync
 - blocked-by-user-decision
 
-Do not accept when required role evidence is missing, required Gate Review evidence is missing, tester findings are unresolved, docs sync is missing for durable changes, known-issues disposition is missing, or unexplained high-risk files remain.
+Do not accept when required role evidence is missing, required Gate Review evidence is missing, tester findings are unresolved, docs sync is missing for durable changes, the durable-doc audit failed or is missing after durable-doc changes, known-issues disposition is missing, or unexplained high-risk files remain.
 
 ## Output
 

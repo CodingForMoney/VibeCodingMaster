@@ -29,16 +29,15 @@ export interface CreateTaskRequest {
   specPath?: string;
 }
 
-export interface CleanupTaskRequest {
-  force?: boolean;
-  forceDeleteBranch?: boolean;
-}
-
 export interface CleanupTaskResult {
   taskSlug: string;
-  removedWorktreePath: string;
+  taskClosed: true;
+  worktreeRemoved: boolean;
+  branchDeleted: boolean;
+  stateRemoved: boolean;
+  removedWorktreePath: string | null;
   removedStatePaths: string[];
-  deletedBranch: string;
+  deletedBranch: string | null;
   cleanedAt: string;
   warnings?: string[];
 }

@@ -30,7 +30,7 @@ ${renderRoleMemoryRules("tester")}
 - If L0/L1 coverage is missing or weak, add or update tests when possible; otherwise report the exact missing coverage in \`.ai/vcm/handoffs/test-report.md\`.
 - Own L2/L3/L4 final-validation design, execution, and acceptance evidence.
 - Targeted diagnostic L2 checks run by Coder or Architect are implementation evidence only and do not replace Tester final validation.
-- Choose validation level by risk. Unit tests are not sufficient when the change crosses module boundaries, public contracts, UI flows, CLI/tooling flows, hooks, sessions, persistence, worktrees, or external process behavior; require integration or E2E coverage, or document why it is unnecessary or unavailable.
+- Choose validation level by risk. Unit tests are not sufficient when the change crosses module boundaries, public contracts, UI flows, CLI/tooling flows, hooks, sessions, persistence, worktrees, or external process behavior; require integration or E2E coverage, or document a concrete risk-based reason why it is unnecessary. Unavailable required coverage is a blocking validation gap.
 - For important new behavior, public workflows, cross-module behavior, UI/CLI/tooling flows, persistence/session/worktree behavior, hooks, or external process behavior, add a new integration/E2E case or extend an existing one with assertions that directly cover the new behavior.
 - Do not treat an existing integration/E2E command as sufficient unless it includes assertions for the new behavior or important regression path; otherwise add or modify the case, or record why coverage is not practical.
 - When tests were changed during the task, check whether assertions were weakened, removed, over-mocked, or rewritten to match the implementation instead of the approved behavior. Report this as a validation gap unless the approved contract changed.
@@ -53,8 +53,8 @@ ${renderRoleMemoryRules("tester")}
 - Treat architect-flagged public contracts, migrations, auth, data flow, routing, or dependency changes as inputs for tester-owned validation design.
 - Record skipped L3 checks in \`.ai/vcm/handoffs/test-report.md\` with the reason.
 - Treat validation coverage gaps for accepted task scope, changed behavior, or required public contracts as blocking validation issues; \`Test Result: pass\` cannot include them.
-- Record only existing, unrelated, non-required project limitations, or PM-recorded validation exceptions as non-blocking coverage notes, and state why they do not affect current task validation.
-- If a required validation check is skipped or cannot complete, \`Test Result\` must be \`fail\` unless project-manager has recorded an explicit exception.
+- Record only existing, unrelated, non-required project limitations as non-blocking coverage notes, and state why they do not affect current task validation.
+- If a required validation check is skipped or cannot complete, \`Test Result\` must be \`fail\`. If the user explicitly approved continuing without the exact check, record the approval and reason; the approval does not change Tester's result.
 - Update \`docs/TESTING.md\` when validation strategy, commands, level mapping, integration/E2E case definitions, selection rules, final-validation cleanup, test gaps, or test expectations change.
 
 ### Testing Documentation
@@ -63,18 +63,22 @@ ${renderRoleMemoryRules("tester")}
 - Keep \`docs/TESTING.md\` useful to both tester and user: it must explain what is tested, why it matters, how to run it, when to run it, and known gaps.
 - Document integration and E2E test cases as reviewable case lists, not only command lists.
 - Each integration/E2E case should include ID, scenario, entry point, what it proves, key assertions, when to run, and current limitations when relevant.
+- Keep case definitions at stable behavior and entry-point level. Name the implementing test file or case when useful, but do not maintain an exhaustive function-by-function test inventory that duplicates source code.
 - Keep historical investigation details, superseded failures, temporary diagnostics, and per-task validation logs out of \`docs/TESTING.md\`; put them in test reports, PR text, or known issues when they must persist.
-- When updating \`docs/TESTING.md\`, remove obsolete task-local investigation details and keep only current validation strategy, current case definitions, current commands, and durable known gaps.
+- When updating \`docs/TESTING.md\`, rewrite affected sections and remove superseded commands, cases, ownership statements, task-local investigation details, past pass/fail verdicts, and role or commit history. Keep only current validation strategy, current case definitions, current runnable commands, selection rules, and durable known gaps.
+- Run \`.ai/tools/check-durable-docs\` after changing \`docs/TESTING.md\`. Record the command and result in \`test-report.md\`; a failing Tester-owned finding makes \`Test Result: fail\`.
 
 ### Outputs
 
-- Write \`.ai/vcm/handoffs/test-report.md\` with \`Test Result: pass|fail\`, evidence reviewed, tests added or updated, commands run or checked, validation results, failed expectations, reproduction steps, skipped checks with reasons, coverage gaps, and blocking validation issues.
+- Write \`.ai/vcm/handoffs/test-report.md\` with \`Test Result: pass|fail\`, evidence reviewed, tests added or updated, coverage mapping, commands run or checked, validation results, failed expectations, reproduction steps, skipped checks with reasons, coverage gaps, and blocking validation issues.
+- In Validation-Only Flow, if tests, fixtures, test-only helpers, or \`docs/TESTING.md\` changed, commit those changes before reporting and record the changed files and commit in \`test-report.md\`. If no tracked files changed, record that no commit was required.
 - \`test-report.md\` is the current validation evidence, not a log; when rewriting it, carry forward still-unresolved findings or explicitly mark them resolved instead of dropping them.
+- In \`Coverage Mapping\`, map each accepted changed behavior or relevant risk to its validation level, actual test file and case or external evidence, exercised entry path and key assertions, result, and any remaining gap.
 - Use \`pass\` only when required validation completed and no blocking test failure, missing required coverage, unacceptable test weakness, or unresolved validation risk remains.
 - Use \`fail\` when tests fail, coverage is insufficient, important validation cannot complete, test quality is unacceptable, or validation risk needs project-manager routing.
 - When \`Test Result: pass\`, \`Blocking Validation Issues\` must be \`None\`.
 - When \`Test Result: fail\`, \`Blocking Validation Issues\` must list concrete blocking evidence.
-- For feature or cross-boundary changes, state which new or updated integration/E2E cases cover the important paths, or why such coverage is not needed or not available.
+- For feature or cross-boundary changes, state which new or updated integration/E2E cases cover the important paths, or give the concrete risk-based reason such coverage is unnecessary. If required coverage is unavailable, report it as a blocking issue.
 - For changed or newly added tests, state why the assertions prove real behavior rather than fixture-specific, implementation-specific, or mock-only behavior.
 - Report confirmed unresolved issues that should survive current-task cleanup in \`.ai/vcm/handoffs/test-report.md\`; do not write \`.ai/vcm/handoffs/known-issues.md\` (architect-owned).
 

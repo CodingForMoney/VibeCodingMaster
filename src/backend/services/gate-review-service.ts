@@ -18,6 +18,7 @@ import {
   type GateReviewRequestResult,
   type GateReviewSeverity
 } from "../../shared/types/gate-review.js";
+import { checkMarkdownArtifact } from "../../shared/validation/artifact-check.js";
 import { VcmError } from "../errors.js";
 import { resolveRepoPath } from "../adapters/filesystem.js";
 import type { FileSystemAdapter } from "../adapters/filesystem.js";
@@ -88,14 +89,55 @@ const GATE_REVIEWER_ROLE = "gate-reviewer";
 const DEFAULT_REPORT_POLL_INTERVAL_MS = 1000;
 const DEFAULT_REPORT_TIMEOUT_MS = 30 * 60 * 1000;
 const activeRuns = new Set<string>();
+const ARCHITECTURE_ANALYSIS_FIELDS = [
+  "Evidence Read",
+  "Architecture Brief Fit",
+  "End-To-End Flow",
+  "Scope Fit",
+  "Code Reality",
+  "Ownership",
+  "Data Flow",
+  "Lifecycle",
+  "Invariants",
+  "Boundaries And Public Surface",
+  "Failure Model",
+  "Coder Readiness"
+] as const;
+const VALIDATION_ANALYSIS_FIELDS = [
+  "Evidence Read",
+  "Changed Behavior And Risk",
+  "Coverage Mapping",
+  "Baseline Coverage",
+  "Integration And E2E Coverage",
+  "Boundary And Failure Coverage",
+  "Public Contract Coverage",
+  "Test Integrity",
+  "Skips And Gaps",
+  "Validation Readiness"
+] as const;
+const CODE_DIFF_ANALYSIS_FIELDS = [
+  "Commit Range And Sources",
+  "Evidence Read",
+  "Changed Files And Symbols",
+  "Changed Behavior",
+  "Source Evidence Fit",
+  "Callers And Public Surface",
+  "State Lifecycle And Failure Paths",
+  "Coding Standards",
+  "Baseline Test Integrity",
+  "Generated Context And Durable Docs",
+  "Code Readiness"
+] as const;
 
 const SOURCE_ARTIFACTS: Record<GateReviewGate, string[]> = {
   "architecture-plan": [
+    ".ai/vcm/handoffs/architecture-brief.md",
     ".ai/vcm/handoffs/architecture-plan.md"
   ],
   "validation-adequacy": [
     ".ai/vcm/handoffs/architecture-plan.md",
-    ".ai/vcm/handoffs/test-report.md"
+    ".ai/vcm/handoffs/test-report.md",
+    "docs/TESTING.md"
   ],
   "code-diff": []
 };
@@ -106,7 +148,8 @@ const CODE_DIFF_SOURCE_ARTIFACTS: Record<CodeDiffSource, string[]> = {
     ".ai/vcm/handoffs/coder-completion.md"
   ],
   "architect-debug": [
-    ".ai/vcm/handoffs/role-commands/architect.md"
+    ".ai/vcm/handoffs/role-commands/architect.md",
+    ".ai/vcm/handoffs/architect-debug.md"
   ],
   "architect-diagnosis": [
     ".ai/vcm/handoffs/architecture-diagnosis.md"
@@ -195,6 +238,7 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
         decision: undefined,
         error: message,
         codeDiffSource: undefined,
+        codeDiffSources: undefined,
         requestId: undefined,
         requestPath: undefined,
         inputHash: undefined,
@@ -236,6 +280,7 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
           changedFiles: undefined,
           diffStat: undefined,
           codeDiffSource,
+          codeDiffSources: codeDiffSource ? [codeDiffSource] : undefined,
           requestedAt: undefined,
           startedAt: undefined,
           completedAt: now(),
@@ -248,6 +293,33 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
           gate,
           record: index.gates[gate],
           message
+        };
+      }
+    }
+
+    if (gate === "architecture-plan") {
+      const architectureBriefError = await readArchitectureBriefError(deps.fs, context.taskRepoRoot);
+      if (architectureBriefError) {
+        index = applyGateState(index, gate, {
+          status: "failed",
+          decision: undefined,
+          error: architectureBriefError,
+          exceptionReason: undefined,
+          requestId: undefined,
+          requestPath: undefined,
+          inputHash: undefined,
+          requestedAt: undefined,
+          startedAt: undefined,
+          completedAt: now(),
+          callbackStatus: "not_sent",
+          callbackError: undefined
+        }, now(), true);
+        await saveIndex(deps.fs, context.taskRepoRoot, index);
+        return {
+          status: "failed_to_start",
+          gate,
+          record: index.gates[gate],
+          message: architectureBriefError
         };
       }
     }
@@ -295,6 +367,7 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
         changedFiles: undefined,
         diffStat: undefined,
         codeDiffSource,
+        codeDiffSources: codeDiffSource ? [codeDiffSource] : undefined,
         requestedAt: undefined,
         startedAt: undefined,
         completedAt: undefined,
@@ -310,7 +383,10 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
       };
     }
 
-    const inputHash = await computeInputHash(deps, context.taskRepoRoot, gate, codeDiffInput, codeDiffSource);
+    const codeDiffSources = gate === "code-diff" && codeDiffInput && codeDiffSource
+      ? resolveCodeDiffSources(record, codeDiffInput, codeDiffSource)
+      : undefined;
+    const inputHash = await computeInputHash(deps, context.taskRepoRoot, gate, codeDiffInput, codeDiffSources);
     if (
       !options.force
       && record.status === "completed"
@@ -345,6 +421,7 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
       changedFiles: codeDiffInput?.changedFiles,
       diffStat: codeDiffInput?.diffStat,
       codeDiffSource,
+      codeDiffSources,
       requestedAt: timestamp,
       startedAt: undefined,
       completedAt: undefined,
@@ -369,13 +446,14 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
       requestedAt: timestamp,
       inputHash,
       codeDiffSource,
+      codeDiffSources,
       codeDiff: codeDiffInput,
       reportPath: nextRecord.reportPath,
       promptPath: nextRecord.promptPath
     });
     await saveIndex(deps.fs, context.taskRepoRoot, index);
 
-    void runGateReview(context, gate, requestId, codeDiffInput, codeDiffSource).catch(() => {
+    void runGateReview(context, gate, requestId, codeDiffInput, codeDiffSources).catch(() => {
       // runGateReview records failures in the persisted gate state.
     });
 
@@ -392,7 +470,7 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
     gate: GateReviewGate,
     requestId: string,
     codeDiffInput?: CodeDiffInput,
-    codeDiffSource?: CodeDiffSource
+    codeDiffSources?: CodeDiffSource[]
   ): Promise<void> {
     const runKey = `${context.taskRepoRoot}:${context.taskSlug}:${gate}`;
     if (activeRuns.has(runKey)) {
@@ -411,7 +489,7 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
 
       const reviewDir = resolveRepoPath(context.taskRepoRoot, GATE_REVIEW_DIR);
       const agentPath = resolveRepoPath(context.repoRoot, GATE_REVIEW_AGENT_PATH);
-      const prompt = buildGatePrompt(context, gate, requestId, codeDiffInput, codeDiffSource);
+      const prompt = buildGatePrompt(context, gate, requestId, codeDiffInput, codeDiffSources);
       await deps.fs.ensureDir(reviewDir);
       await deps.fs.ensureDir(resolveRepoPath(context.taskRepoRoot, REQUESTS_DIR));
       await deps.fs.writeText(resolveRepoPath(context.taskRepoRoot, promptPathForRequest(requestId)), prompt);
@@ -445,6 +523,12 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
       const completedAt = now();
       await recordGateReviewerTurnStop(context, gateTurnStarted);
       gateTurnStarted = false;
+      await updateRequestStatus(deps.fs, context, requestId, "completed", {
+        completedAt,
+        decision: parsed.decision,
+        reportPath: parsed.reportPath
+      });
+      activeRuns.delete(runKey);
       await updateGateRecord(context, gate, {
         status: "completed",
         decision: parsed.decision,
@@ -456,17 +540,17 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
         callbackError: undefined,
         updatedAt: completedAt
       }, { clearActiveGate: true });
-      await updateRequestStatus(deps.fs, context, requestId, "completed", {
-        completedAt,
-        decision: parsed.decision,
-        reportPath: parsed.reportPath
-      });
       await callbackProjectManager(context, gate, "completed", parsed.decision, parsed.reportPath);
     } catch (error) {
       const timestamp = now();
       const message = errorMessage(error);
       await recordGateReviewerTurnStop(context, gateTurnStarted);
       gateTurnStarted = false;
+      await updateRequestStatus(deps.fs, context, requestId, "failed", {
+        completedAt: timestamp,
+        error: message
+      });
+      activeRuns.delete(runKey);
       await updateGateRecord(context, gate, {
         status: "failed",
         error: message,
@@ -475,10 +559,6 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
         callbackError: undefined,
         updatedAt: timestamp
       }, { clearActiveGate: true });
-      await updateRequestStatus(deps.fs, context, requestId, "failed", {
-        completedAt: timestamp,
-        error: message
-      });
       await callbackProjectManager(context, gate, "failed", undefined, reportPathForGate(gate), message);
     } finally {
       activeRuns.delete(runKey);
@@ -736,6 +816,7 @@ function normalizeIndex(
       changedFiles: Array.isArray(existing?.changedFiles) ? existing.changedFiles.filter(isString) : undefined,
       diffStat: typeof existing?.diffStat === "string" ? existing.diffStat : undefined,
       codeDiffSource: isCodeDiffSource(existing?.codeDiffSource) ? existing.codeDiffSource : undefined,
+      codeDiffSources: normalizeCodeDiffSources(existing?.codeDiffSources, existing?.codeDiffSource),
       summary: typeof existing?.summary === "string" ? existing.summary : undefined,
       findings: Array.isArray(existing?.findings) ? existing.findings.filter(isFinding) : undefined,
       error: typeof existing?.error === "string" ? existing.error : undefined,
@@ -957,26 +1038,28 @@ async function computeInputHash(
   taskRepoRoot: string,
   gate: GateReviewGate,
   codeDiffInput?: CodeDiffInput,
-  codeDiffSource?: CodeDiffSource
+  codeDiffSources?: CodeDiffSource[]
 ): Promise<string> {
   const digest = createHash("sha256");
   const coreArtifact = CORE_INPUT_ARTIFACTS[gate];
   if (coreArtifact) {
     digest.update(coreArtifact);
     digest.update(await deps.fs.readText(resolveRepoPath(taskRepoRoot, coreArtifact)));
-    return digest.digest("hex");
   }
 
   const common = [
     "CLAUDE.md",
+    ".claude/agents/architect.md",
+    ".claude/agents/coder.md",
     ".claude/agents/gate-reviewer.md",
+    ".claude/agents/tester.md",
     ".claude/skills/vcm-gate-review/SKILL.md",
     ".ai/tools/request-gate-review",
     "docs/CODING_STANDARDS.md"
   ];
 
-  const sourceArtifacts = getSourceArtifacts(gate, codeDiffSource);
-  for (const relativePath of [...common, ...sourceArtifacts]) {
+  const sourceArtifacts = getSourceArtifacts(gate, codeDiffSources);
+  for (const relativePath of new Set([...common, ...sourceArtifacts].filter((item) => item !== coreArtifact))) {
     digest.update(relativePath);
     const absolutePath = resolveRepoPath(taskRepoRoot, relativePath);
     if (await deps.fs.pathExists(absolutePath)) {
@@ -987,8 +1070,8 @@ async function computeInputHash(
   }
 
   if (gate === "code-diff" && codeDiffInput) {
-    digest.update("codeDiffSource");
-    digest.update(codeDiffSource ?? "<missing>");
+    digest.update("codeDiffSources");
+    digest.update(codeDiffSources?.join("\n") ?? "<missing>");
     digest.update("baseCommit");
     digest.update(codeDiffInput.baseCommit);
     digest.update("headCommit");
@@ -1002,9 +1085,45 @@ async function computeInputHash(
   }
 
   if (gate === "architecture-plan") {
-    digest.update(await commandStdout(deps.runner, taskRepoRoot, ["status", "--porcelain=v1"]));
-    digest.update(await commandStdout(deps.runner, taskRepoRoot, ["diff", "--binary"]));
-    digest.update(await commandStdout(deps.runner, taskRepoRoot, ["diff", "--cached", "--binary"]));
+    const evidencePathspec = ["--", ".", ":(exclude).ai/vcm/**"];
+    digest.update("head");
+    digest.update(await commandStdout(deps.runner, taskRepoRoot, ["rev-parse", "HEAD"]));
+    digest.update("workingDiff");
+    digest.update(await commandStdout(deps.runner, taskRepoRoot, ["diff", "--binary", ...evidencePathspec]));
+    digest.update("stagedDiff");
+    digest.update(await commandStdout(deps.runner, taskRepoRoot, ["diff", "--cached", "--binary", ...evidencePathspec]));
+    const untracked = splitLines(await commandStdout(deps.runner, taskRepoRoot, [
+      "ls-files",
+      "--others",
+      "--exclude-standard",
+      ...evidencePathspec
+    ]));
+    for (const relativePath of untracked) {
+      digest.update("untracked");
+      digest.update(relativePath);
+      digest.update(await commandStdout(deps.runner, taskRepoRoot, ["hash-object", "--", relativePath]));
+    }
+  }
+
+  if (gate === "validation-adequacy") {
+    const evidencePathspec = ["--", ".", ":(exclude).ai/vcm/**", ":(exclude)docs/**"];
+    digest.update("trackedEvidence");
+    digest.update(await commandStdout(deps.runner, taskRepoRoot, ["ls-files", "-s", ...evidencePathspec]));
+    digest.update("workingEvidence");
+    digest.update(await commandStdout(deps.runner, taskRepoRoot, ["diff", "--binary", ...evidencePathspec]));
+    digest.update("stagedEvidence");
+    digest.update(await commandStdout(deps.runner, taskRepoRoot, ["diff", "--cached", "--binary", ...evidencePathspec]));
+    const untracked = splitLines(await commandStdout(deps.runner, taskRepoRoot, [
+      "ls-files",
+      "--others",
+      "--exclude-standard",
+      ...evidencePathspec
+    ]));
+    for (const relativePath of untracked) {
+      digest.update("untrackedEvidence");
+      digest.update(relativePath);
+      digest.update(await commandStdout(deps.runner, taskRepoRoot, ["hash-object", "--", relativePath]));
+    }
   }
 
   return digest.digest("hex");
@@ -1030,6 +1149,26 @@ async function readCoreInputArtifact(
   return { path: relativePath, status: "ready" };
 }
 
+async function readArchitectureBriefError(
+  fs: FileSystemAdapter,
+  taskRepoRoot: string
+): Promise<string | undefined> {
+  const relativePath = ".ai/vcm/handoffs/architecture-brief.md";
+  const absolutePath = resolveRepoPath(taskRepoRoot, relativePath);
+  if (!await fs.pathExists(absolutePath)) {
+    return `${relativePath} is missing. Complete Architect Interview before architecture planning.`;
+  }
+  const content = await fs.readText(absolutePath);
+  const check = checkMarkdownArtifact("architecture-brief", relativePath, content);
+  if (check.status !== "ok") {
+    return `${relativePath} is incomplete. Complete and confirm Architect Interview before requesting architecture-plan review.`;
+  }
+  if (!/^\s*Architecture Brief Status\s*:\s*confirmed\s*$/im.test(content)) {
+    return `${relativePath} is not confirmed. Obtain explicit user confirmation before architecture planning.`;
+  }
+  return undefined;
+}
+
 async function commandStdout(runner: CommandRunner, cwd: string, args: string[]): Promise<string> {
   const result = await runner.run("git", args, { cwd });
   return result.exitCode === 0 ? result.stdout : "";
@@ -1047,22 +1186,31 @@ function buildGatePrompt(
   gate: GateReviewGate,
   requestId: string,
   codeDiffInput?: CodeDiffInput,
-  codeDiffSource?: CodeDiffSource
+  codeDiffSources?: CodeDiffSource[]
 ): string {
   const reportPath = reportPathForGate(gate);
   const absoluteReportPath = resolveRepoPath(context.taskRepoRoot, reportPath);
-  const evidence = getSourceArtifacts(gate, codeDiffSource)
+  const evidence = getSourceArtifacts(gate, codeDiffSources)
     .map((relativePath) => `- ${relativePath}`)
     .join("\n");
   const gitLine = gate === "architecture-plan"
     ? "\nDiff: inspect git status/diff in Worktree."
+    : "";
+  const architectureContract = gate === "architecture-plan"
+    ? "\n\nComplete every Architecture Analysis field required by the Gate Reviewer role with concrete current-worktree evidence before deciding."
+    : "";
+  const validationContract = gate === "validation-adequacy"
+    ? "\n\nComplete every Validation Analysis field required by the Gate Reviewer role with concrete current-worktree production and test evidence before deciding."
+    : "";
+  const codeDiffContract = gate === "code-diff"
+    ? "\n\nComplete every Code Diff Analysis field required by the Gate Reviewer role with concrete evidence from the named commit range before deciding."
     : "";
   const codeDiffSection = gate === "code-diff" && codeDiffInput
     ? `
 
 Code Diff Input:
 This code-diff gate reviews the new commits from one PM route flow, not the whole task and not one terminal turn.
-Code source: ${codeDiffSource}
+Code sources: ${codeDiffSources?.join(" -> ") ?? "<missing>"}
 Base commit: ${codeDiffInput.baseCommit}
 Head commit: ${codeDiffInput.headCommit}
 Commits:
@@ -1084,7 +1232,7 @@ Request: ${requestId}
 Report: ${absoluteReportPath}
 
 Evidence:
-${evidence}${gitLine}${codeDiffSection}
+${evidence}${gitLine}${architectureContract}${validationContract}${codeDiffContract}${codeDiffSection}
 
 Write only Report. Start exactly:
 Gate: ${gate}
@@ -1171,16 +1319,171 @@ async function parseGateReport(
     });
   }
 
+  const findings = extractFindings(content);
+  if (gate === "architecture-plan") {
+    validateArchitectureAnalysis(content);
+  }
+  if (gate === "validation-adequacy") {
+    validateValidationAnalysis(content);
+    if (decision === "approve") {
+      await validateValidationApprovalInput(fs, taskRepoRoot);
+    }
+  }
+  if (gate === "code-diff") {
+    validateCodeDiffAnalysis(content);
+  }
+  if (decision === "request_changes") {
+    validateRequestChangeFindings(findings);
+    if (gate === "code-diff") {
+      validateCodeDiffFindings(findings);
+    }
+  }
+
   return {
     gate,
     requestId: parsedRequest,
     decision,
     summary: extractSummary(content),
-    findings: extractFindings(content),
+    findings,
     reportPath,
     content,
     parsedAt: timestamp
   };
+}
+
+function validateArchitectureAnalysis(content: string): void {
+  const section = extractMarkdownSection(content, "Architecture Analysis");
+  if (!section) {
+    throw new VcmError({
+      code: "GATE_REVIEW_ARCHITECTURE_ANALYSIS_MISSING",
+      message: "Architecture-plan review must contain a non-empty Architecture Analysis section.",
+      statusCode: 500
+    });
+  }
+
+  const missingFields = ARCHITECTURE_ANALYSIS_FIELDS.filter((field) => !matchField(section, field));
+  if (missingFields.length > 0) {
+    throw new VcmError({
+      code: "GATE_REVIEW_ARCHITECTURE_ANALYSIS_INCOMPLETE",
+      message: `Architecture Analysis is missing required evidence: ${missingFields.join(", ")}.`,
+      statusCode: 500
+    });
+  }
+}
+
+function validateValidationAnalysis(content: string): void {
+  const section = extractMarkdownSection(content, "Validation Analysis");
+  if (!section) {
+    throw new VcmError({
+      code: "GATE_REVIEW_VALIDATION_ANALYSIS_MISSING",
+      message: "Validation-adequacy review must contain a non-empty Validation Analysis section.",
+      statusCode: 500
+    });
+  }
+
+  const missingFields = VALIDATION_ANALYSIS_FIELDS.filter((field) => !matchField(section, field));
+  if (missingFields.length > 0) {
+    throw new VcmError({
+      code: "GATE_REVIEW_VALIDATION_ANALYSIS_INCOMPLETE",
+      message: `Validation Analysis is missing required evidence: ${missingFields.join(", ")}.`,
+      statusCode: 500
+    });
+  }
+}
+
+function validateCodeDiffAnalysis(content: string): void {
+  const section = extractMarkdownSection(content, "Code Diff Analysis");
+  if (!section) {
+    throw new VcmError({
+      code: "GATE_REVIEW_CODE_DIFF_ANALYSIS_MISSING",
+      message: "Code-diff review must contain a non-empty Code Diff Analysis section.",
+      statusCode: 500
+    });
+  }
+
+  const missingFields = CODE_DIFF_ANALYSIS_FIELDS.filter((field) => !matchField(section, field));
+  if (missingFields.length > 0) {
+    throw new VcmError({
+      code: "GATE_REVIEW_CODE_DIFF_ANALYSIS_INCOMPLETE",
+      message: `Code Diff Analysis is missing required evidence: ${missingFields.join(", ")}.`,
+      statusCode: 500
+    });
+  }
+}
+
+async function validateValidationApprovalInput(
+  fs: FileSystemAdapter,
+  taskRepoRoot: string
+): Promise<void> {
+  const relativePath = CORE_INPUT_ARTIFACTS["validation-adequacy"];
+  if (!relativePath) {
+    return;
+  }
+  const absolutePath = resolveRepoPath(taskRepoRoot, relativePath);
+  const content = await fs.pathExists(absolutePath) ? await fs.readText(absolutePath) : null;
+  const check = checkMarkdownArtifact("test-report", relativePath, content);
+  const testResult = content ? matchField(content, "Test Result")?.toLowerCase() : undefined;
+  if (check.status === "ok" && testResult === "pass") {
+    return;
+  }
+
+  const details = [
+    check.status !== "ok" ? `status=${check.status}` : "",
+    check.missingHeadings.length > 0 ? `missing headings: ${check.missingHeadings.join(", ")}` : "",
+    check.invalidFields.length > 0 ? check.invalidFields.join(" ") : "",
+    check.hasPlaceholder ? "contains placeholders" : "",
+    testResult !== "pass" ? "Test Result must be pass before approval." : ""
+  ].filter(Boolean).join("; ");
+  throw new VcmError({
+    code: "GATE_REVIEW_VALIDATION_INPUT_INCOMPLETE",
+    message: `Validation-adequacy cannot approve incomplete Tester evidence in ${relativePath}. ${details}`,
+    statusCode: 500
+  });
+}
+
+function validateRequestChangeFindings(findings: GateReviewFinding[]): void {
+  if (findings.length === 0) {
+    throw new VcmError({
+      code: "GATE_REVIEW_FINDINGS_MISSING",
+      message: "A request_changes decision must contain at least one structured finding.",
+      statusCode: 500
+    });
+  }
+  const incomplete = findings.find((finding) => (
+    !finding.evidence.trim()
+    || !finding.expected.trim()
+    || !finding.gap.trim()
+    || !finding.risk.trim()
+  ));
+  if (incomplete) {
+    throw new VcmError({
+      code: "GATE_REVIEW_FINDING_INCOMPLETE",
+      message: `Finding ${incomplete.title} must contain Evidence, Expected, Gap, and Risk.`,
+      statusCode: 500
+    });
+  }
+}
+
+function validateCodeDiffFindings(findings: GateReviewFinding[]): void {
+  const incomplete = findings.find((finding) => !finding.file?.trim() || !finding.location?.trim());
+  if (incomplete) {
+    throw new VcmError({
+      code: "GATE_REVIEW_CODE_DIFF_FINDING_LOCATION_MISSING",
+      message: `Code-diff finding ${incomplete.title} must contain File and Line Or Symbol.`,
+      statusCode: 500
+    });
+  }
+}
+
+function extractMarkdownSection(content: string, heading: string): string | undefined {
+  const match = new RegExp(`^##\\s+${escapeRegex(heading)}\\s*$`, "im").exec(content);
+  if (!match || match.index === undefined) {
+    return undefined;
+  }
+  const remainder = content.slice(match.index + match[0].length);
+  const nextHeading = remainder.search(/^##\s+/m);
+  const section = (nextHeading >= 0 ? remainder.slice(0, nextHeading) : remainder).trim();
+  return section || undefined;
 }
 
 async function updateRequestStatus(
@@ -1264,6 +1567,7 @@ function extractFindings(content: string): GateReviewFinding[] {
       title,
       file: matchField(block, "file"),
       line: parsePositiveInteger(matchField(block, "line")),
+      location: matchField(block, "line or symbol"),
       evidence: matchField(block, "evidence") ?? "",
       expected: matchField(block, "expected") ?? "",
       gap: matchField(block, "gap") ?? "",
@@ -1273,11 +1577,38 @@ function extractFindings(content: string): GateReviewFinding[] {
   return findings;
 }
 
-function getSourceArtifacts(gate: GateReviewGate, codeDiffSource?: CodeDiffSource): string[] {
+function getSourceArtifacts(gate: GateReviewGate, codeDiffSources?: CodeDiffSource[]): string[] {
   if (gate !== "code-diff") {
     return SOURCE_ARTIFACTS[gate];
   }
-  return codeDiffSource ? CODE_DIFF_SOURCE_ARTIFACTS[codeDiffSource] : [];
+  return [...new Set((codeDiffSources ?? []).flatMap((source) => CODE_DIFF_SOURCE_ARTIFACTS[source]))];
+}
+
+function resolveCodeDiffSources(
+  record: GateReviewGateRecord,
+  codeDiffInput: CodeDiffInput,
+  currentSource: CodeDiffSource
+): CodeDiffSource[] {
+  const continuingRecordedRange = record.baseCommit === codeDiffInput.baseCommit
+    && (
+      (record.status === "completed" && record.decision === "request_changes")
+      || record.status === "failed"
+    );
+  if (!continuingRecordedRange) {
+    return [currentSource];
+  }
+  return [...new Set([
+    ...(normalizeCodeDiffSources(record.codeDiffSources, record.codeDiffSource) ?? []),
+    currentSource
+  ])];
+}
+
+function normalizeCodeDiffSources(sources: unknown, source: unknown): CodeDiffSource[] | undefined {
+  const normalized = Array.isArray(sources) ? sources.filter(isCodeDiffSource) : [];
+  if (normalized.length === 0 && isCodeDiffSource(source)) {
+    normalized.push(source);
+  }
+  return normalized.length > 0 ? [...new Set(normalized)] : undefined;
 }
 
 export function isCodeDiffSource(value: unknown): value is CodeDiffSource {
@@ -1385,6 +1716,10 @@ function errorMessage(error: unknown): string {
 function isPendingReportError(error: unknown): boolean {
   return error instanceof VcmError && [
     "GATE_REVIEW_DECISION_MISSING",
+    "GATE_REVIEW_ARCHITECTURE_ANALYSIS_MISSING",
+    "GATE_REVIEW_ARCHITECTURE_ANALYSIS_INCOMPLETE",
+    "GATE_REVIEW_FINDINGS_MISSING",
+    "GATE_REVIEW_FINDING_INCOMPLETE",
     "GATE_REVIEW_REPORT_GATE_MISMATCH",
     "GATE_REVIEW_REPORT_MISSING",
     "GATE_REVIEW_REPORT_STALE"

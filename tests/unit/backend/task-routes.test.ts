@@ -6,7 +6,7 @@ import type { RoleSessionRecord } from "../../../src/shared/types/session.js";
 import type { TaskRecord } from "../../../src/shared/types/task.js";
 
 describe("task routes", () => {
-  it("stops task role sessions and moves project tool sessions before closing a task", async () => {
+  it("delegates task close to the backend close service", async () => {
     const app = Fastify({ logger: false });
     const calls: string[] = [];
     const task = createTask({
@@ -43,38 +43,22 @@ describe("task routes", () => {
         },
         async loadTask() {
           return task;
-        },
-        async cleanupTask() {
-          calls.push("cleanup");
+        }
+      } as never,
+      taskCloseService: {
+        async closeTask() {
+          calls.push("close");
           return {
-            taskSlug: "demo-task",
+            taskSlug: task.taskSlug,
+            taskClosed: true as const,
+            worktreeRemoved: true,
+            branchDeleted: true,
+            stateRemoved: true,
             removedWorktreePath: task.worktreePath,
             removedStatePaths: [],
             deletedBranch: task.branch,
             cleanedAt: "2026-05-31T00:00:00.000Z"
           };
-        }
-      } as never,
-      sessionService: {
-        async listRoleSessions() {
-          calls.push("list-sessions");
-          return [
-            createSession("architect", "running"),
-            createSession("coder", "resumable"),
-            createSession("tester", "running")
-          ];
-        },
-        async stopRoleSession(_repoRoot: string, _taskSlug: string, role: RoleName) {
-          calls.push(`stop:${role}`);
-          return createSession(role, "exited");
-        },
-        async moveProjectTranslatorSessionToSafeCwd() {
-          calls.push("move-safe:translator");
-          return createSession("translator", "running");
-        },
-        async moveProjectHarnessEngineerSessionToSafeCwd() {
-          calls.push("move-safe:harness-engineer");
-          return createSession("harness-engineer", "running");
         }
       },
       statusService: {
@@ -94,11 +78,6 @@ describe("task routes", () => {
           };
         }
       } as never,
-      translationService: {
-        async stopTask(repoRoot: string, taskSlug: string, options) {
-          calls.push(`translation:${repoRoot}:${taskSlug}:${String(options?.clearCache)}`);
-        }
-      },
       roundService: {
         async getSessionRoundState() {
           throw new Error("not used");
@@ -116,16 +95,7 @@ describe("task routes", () => {
     });
 
     expect(response.statusCode).toBe(200);
-    expect(calls).toEqual([
-      "list-sessions",
-      "stop:architect",
-      "stop:tester",
-      "move-safe:translator",
-      "move-safe:harness-engineer",
-      "translation:/repo/.claude/worktrees/demo-task:demo-task:true",
-      "round:demo-task",
-      "cleanup"
-    ]);
+    expect(calls).toEqual(["close"]);
 
     await app.close();
   });
@@ -156,20 +126,7 @@ describe("task routes", () => {
           throw new Error("not used");
         }
       } as never,
-      sessionService: {
-        async listRoleSessions() {
-          return [];
-        },
-        async stopRoleSession() {
-          throw new Error("not used");
-        },
-        async moveProjectTranslatorSessionToSafeCwd() {
-          throw new Error("not used");
-        },
-        async moveProjectHarnessEngineerSessionToSafeCwd() {
-          throw new Error("not used");
-        }
-      },
+      taskCloseService: notUsedTaskCloseService(),
       statusService: {
         async getTaskStatus() {
           throw Object.assign(new Error("EMFILE: too many open files"), {
@@ -189,11 +146,6 @@ describe("task routes", () => {
           };
         }
       } as never,
-      translationService: {
-        async stopTask() {
-          throw new Error("not used");
-        }
-      },
       roundService: {
         async getSessionRoundState() {
           throw new Error("not used");
@@ -238,14 +190,9 @@ describe("task routes", () => {
         }
       } as never,
       taskService: {} as never,
-      sessionService: {} as never,
+      taskCloseService: notUsedTaskCloseService(),
       statusService: {} as never,
       messageService: {} as never,
-      translationService: {
-        async stopTask() {
-          throw new Error("not used");
-        }
-      },
       roundService: {
         async getSessionRoundState() {
           throw new Error("not used");
@@ -273,6 +220,7 @@ describe("task routes", () => {
   it("returns aggregated task workspace state", async () => {
     const app = Fastify({ logger: false });
     const task = createTask();
+    let declaredWorkflow: Record<string, unknown> | undefined;
 
     registerTaskRoutes(app, {
       taskLaunchService: notUsedTaskLaunchService(),
@@ -302,20 +250,7 @@ describe("task routes", () => {
           throw new Error("not used");
         }
       } as never,
-      sessionService: {
-        async listRoleSessions() {
-          return [];
-        },
-        async stopRoleSession() {
-          throw new Error("not used");
-        },
-        async moveProjectTranslatorSessionToSafeCwd() {
-          throw new Error("not used");
-        },
-        async moveProjectHarnessEngineerSessionToSafeCwd() {
-          throw new Error("not used");
-        }
-      },
+      taskCloseService: notUsedTaskCloseService(),
       statusService: {
         async getTaskStatus() {
           return {
@@ -347,11 +282,6 @@ describe("task routes", () => {
           };
         }
       } as never,
-      translationService: {
-        async stopTask() {
-          throw new Error("not used");
-        }
-      },
       roundService: {
         async getSessionRoundState() {
           return {
@@ -369,7 +299,44 @@ describe("task routes", () => {
           };
         },
         stopTask() {}
-      } as never
+      } as never,
+      taskWorkflowService: {
+        async getState() {
+          return {
+            version: 1 as const,
+            taskSlug: "demo-task",
+            revision: 2,
+            declared: {
+              flow: "code-change",
+              step: "architect-planning",
+              evidenceRefs: [],
+              updatedBy: "project-manager" as const,
+              updatedAt: "2026-05-31T00:00:00.000Z"
+            },
+            lastDispatch: null,
+            warnings: [],
+            updatedAt: "2026-05-31T00:00:00.000Z"
+          };
+        },
+        async declare(_input, declaration) {
+          declaredWorkflow = declaration;
+          return {
+            version: 1 as const,
+            taskSlug: "demo-task",
+            revision: 3,
+            declared: {
+              flow: "code-change",
+              step: typeof declaration.step === "string" ? declaration.step : undefined,
+              evidenceRefs: [],
+              updatedBy: "project-manager" as const,
+              updatedAt: "2026-05-31T00:00:00.000Z"
+            },
+            lastDispatch: null,
+            warnings: [],
+            updatedAt: "2026-05-31T00:00:00.000Z"
+          };
+        }
+      }
     });
 
     const response = await app.inject({
@@ -385,7 +352,21 @@ describe("task routes", () => {
       },
       messages: [{ id: "msg-1" }],
       orchestration: { mode: "auto" },
-      roundState: { status: "running" }
+      roundState: { status: "running" },
+      workflowState: {
+        declared: { flow: "code-change", step: "architect-planning" }
+      }
+    });
+
+    const updateResponse = await app.inject({
+      method: "POST",
+      url: "/api/tasks/demo-task/workflow-state",
+      payload: { step: "awaiting-user", status: "awaiting-user" }
+    });
+    expect(updateResponse.statusCode).toBe(200);
+    expect(declaredWorkflow).toEqual({ step: "awaiting-user", status: "awaiting-user" });
+    expect(updateResponse.json()).toMatchObject({
+      declared: { step: "awaiting-user" }
     });
     await app.close();
   });
@@ -394,6 +375,14 @@ describe("task routes", () => {
 function notUsedTaskLaunchService() {
   return {
     async startTaskRoleSessions() {
+      throw new Error("not used");
+    }
+  };
+}
+
+function notUsedTaskCloseService() {
+  return {
+    async closeTask() {
       throw new Error("not used");
     }
   };

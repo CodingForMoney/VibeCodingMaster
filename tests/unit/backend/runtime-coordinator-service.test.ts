@@ -19,7 +19,7 @@ const TASK: TaskRecord = {
 };
 
 describe("createRuntimeCoordinatorService", () => {
-  it("does not create project tool sessions when no resumable session exists", async () => {
+  it("does not create task tool sessions when no resumable session exists", async () => {
     const calls: string[] = [];
     const service = createCoordinator({
       calls,
@@ -34,7 +34,7 @@ describe("createRuntimeCoordinatorService", () => {
     expect(calls).not.toContain("ensure:harness-engineer");
   });
 
-  it("ensures existing project tool sessions and starts conversation translation listeners", async () => {
+  it("resumes existing task tool sessions and starts conversation translation listeners", async () => {
     const calls: string[] = [];
     const service = createCoordinator({
       calls,
@@ -45,8 +45,8 @@ describe("createRuntimeCoordinatorService", () => {
 
     await service.reconcileProject("/repo", { taskSlug: "demo-task" });
 
-    expect(calls).toContain("ensure:translator:demo-task");
-    expect(calls).toContain("ensure:harness-engineer:demo-task");
+    expect(calls).not.toContain("resume:translator:demo-task");
+    expect(calls).toContain("resume:harness-engineer:demo-task");
     expect(calls).toContain("translation-listener:project-manager:demo-task");
   });
 
@@ -64,7 +64,7 @@ describe("createRuntimeCoordinatorService", () => {
     await service.reconcileProject("/repo", { taskSlug: "demo-task" });
 
     expect(calls).toContain("gateway-status");
-    expect(calls).toContain("ensure:translator:demo-task");
+    expect(calls).toContain("resume:translator:demo-task");
     expect(calls).toContain("translation-listener:project-manager:demo-task");
   });
 
@@ -80,6 +80,7 @@ describe("createRuntimeCoordinatorService", () => {
     await service.reconcileProject("/repo", { taskSlug: "demo-task" });
 
     expect(calls).not.toContain("task-retrospective");
+    expect(calls).toContain("memory-reconcile:auto");
   });
 
   it("starts the automatic task retrospective after Auto Memory completes", async () => {
@@ -95,6 +96,20 @@ describe("createRuntimeCoordinatorService", () => {
 
     expect(calls).toContain("task-retrospective");
   });
+
+  it("continues a manually requested Task Harness Review after memory completes", async () => {
+    const calls: string[] = [];
+    const service = createCoordinator({
+      calls,
+      roundStopped: true,
+      memoryReadiness: { ready: true, disposition: "completed", trigger: "manual" }
+    });
+
+    await service.reconcileProject("/repo", { taskSlug: "demo-task" });
+
+    expect(calls).toContain("memory-reconcile:none");
+    expect(calls).toContain("task-retrospective");
+  });
 });
 
 function createCoordinator(input: {
@@ -107,12 +122,21 @@ function createCoordinator(input: {
   harnessInitialized?: boolean;
   autoTaskHarnessReviewEnabled?: boolean;
   roundStopped?: boolean;
-  memoryReadiness?: { ready: boolean; disposition: "pending" | "completed" };
+  memoryReadiness?: {
+    ready: boolean;
+    disposition: "pending" | "completed";
+    trigger?: "manual" | "auto";
+  };
 }) {
   let translator = input.translator;
   let harnessEngineer = input.harnessEngineer;
   let translationEnabled = input.translationEnabled ?? true;
   return createRuntimeCoordinatorService({
+    projectService: {
+      async getCurrentProject() {
+        return { repoRoot: "/repo" } as never;
+      }
+    },
     appSettings: {
       async getPreferences() {
         return {
@@ -140,20 +164,29 @@ function createCoordinator(input: {
       }
     },
     sessionService: {
-      async getProjectTranslatorSession() {
-        return translator;
+      async getRoleSession(_repoRoot, _taskSlug, role) {
+        return role === "translator"
+          ? translator
+          : role === "harness-engineer"
+            ? harnessEngineer
+            : undefined;
       },
-      async ensureProjectTranslatorSession(_repoRoot, request = {}) {
-        input.calls.push(`ensure:translator:${request.taskSlug ?? ""}`);
-        translator = { ...(translator ?? projectToolSession("translator", "running")), status: "running" };
-        return translator;
-      },
-      async getProjectHarnessEngineerSession() {
+      async startRoleSession(_repoRoot, taskSlug, role) {
+        input.calls.push(`start:${role}:${taskSlug}`);
+        if (role === "translator") {
+          translator = { ...(translator ?? projectToolSession("translator", "running")), taskSlug, status: "running" };
+          return translator;
+        }
+        harnessEngineer = { ...(harnessEngineer ?? projectToolSession("harness-engineer", "running")), taskSlug, status: "running" };
         return harnessEngineer;
       },
-      async ensureProjectHarnessEngineerSession(_repoRoot, request = {}) {
-        input.calls.push(`ensure:harness-engineer:${request.taskSlug ?? ""}`);
-        harnessEngineer = { ...(harnessEngineer ?? projectToolSession("harness-engineer", "running")), status: "running" };
+      async resumeRoleSession(_repoRoot, taskSlug, role) {
+        input.calls.push(`resume:${role}:${taskSlug}`);
+        if (role === "translator") {
+          translator = { ...(translator ?? projectToolSession("translator", "running")), taskSlug, status: "running" };
+          return translator;
+        }
+        harnessEngineer = { ...(harnessEngineer ?? projectToolSession("harness-engineer", "running")), taskSlug, status: "running" };
         return harnessEngineer;
       },
       async listRoleSessions() {
@@ -193,7 +226,8 @@ function createCoordinator(input: {
       }
     },
     autoMemoryService: {
-      async reconcileTask() {
+      async reconcileTask(request) {
+        input.calls.push(`memory-reconcile:${request.requestTrigger ?? "none"}`);
         return {
           version: 1,
           status: "idle",
@@ -231,6 +265,12 @@ function createCoordinator(input: {
           translationEnabled = true;
         }
         return null as never;
+      }
+    },
+    turnReconciler: {
+      async reconcileTask() {
+        input.calls.push("turn-reconcile");
+        return { status: "inactive" };
       }
     },
     async getStateRoot() {

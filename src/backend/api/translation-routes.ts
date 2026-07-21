@@ -10,11 +10,12 @@ import type { ProjectService } from "../services/project-service.js";
 import type { SessionService } from "../services/session-service.js";
 import { getTaskRuntimeRepoRoot, type TaskService } from "../services/task-service.js";
 import type { TranslationService } from "../services/translation-service.js";
+import type { StartRoleSessionRequest } from "../../shared/types/session.js";
 
 export interface TranslationRouteDeps {
   projectService: ProjectService;
   taskService: TaskService;
-  sessionService: Pick<SessionService, "notifyProjectTranslatorHarnessUpdated">;
+  sessionService: Pick<SessionService, "notifyRoleHarnessUpdated">;
   translationService: TranslationService;
 }
 
@@ -138,9 +139,18 @@ export function registerTranslationRoutes(app: FastifyInstance, deps: Translatio
     return { ok: true };
   });
 
-  app.post("/api/projects/translation/session/notify-harness", async () => {
+  app.post<{ Body: StartRoleSessionRequest }>("/api/projects/translation/session/notify-harness", async (request) => {
     const project = await requireCurrentProject(deps.projectService);
-    return deps.sessionService.notifyProjectTranslatorHarnessUpdated(project.repoRoot);
+    const taskSlug = request.body?.taskSlug?.trim();
+    if (!taskSlug) {
+      throw new VcmError({
+        code: "TOOL_SESSION_TASK_REQUIRED",
+        message: "Translator requires an active task.",
+        statusCode: 409,
+        hint: "Create or select a task before notifying Translator."
+      });
+    }
+    return deps.sessionService.notifyRoleHarnessUpdated(project.repoRoot, taskSlug, "translator");
   });
 
   app.post<{ Params: { sessionId: string; translationId: string } }>(

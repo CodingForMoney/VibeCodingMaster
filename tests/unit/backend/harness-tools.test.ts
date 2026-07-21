@@ -17,12 +17,18 @@ async function writeJson(filePath: string, value: unknown) {
 
 async function writeSource(filePath: string, content: string) {
   await mkdir(path.dirname(filePath), { recursive: true });
-  await writeFile(filePath, content.trimStart());
+  const lines = content.replace(/^\s*\n/, "").trimEnd().split("\n");
+  const commonIndent = Math.min(
+    ...lines.filter((line) => line.trim()).map((line) => line.match(/^\s*/)?.[0].length ?? 0)
+  );
+  await writeFile(filePath, `${lines.map((line) => line.slice(commonIndent)).join("\n")}\n`);
 }
 
 async function installHarnessTools(repoRoot: string) {
   const toolsRoot = path.join(repoRoot, ".ai/tools");
   await mkdir(toolsRoot, { recursive: true });
+  await cp(path.join(appRoot, "scripts/harness-tools/check-durable-docs"), path.join(toolsRoot, "check-durable-docs"));
+  await cp(path.join(appRoot, ".ai/tools/check-scaffold-ledger"), path.join(toolsRoot, "check-scaffold-ledger"));
   await cp(path.join(appRoot, "scripts/harness-tools/generate-module-index"), path.join(toolsRoot, "generate-module-index"));
   await cp(path.join(appRoot, "scripts/harness-tools/generate-public-surface"), path.join(toolsRoot, "generate-public-surface"));
 }
@@ -232,5 +238,187 @@ describe("harness generated-context tools", () => {
     await expect(
       execFileAsync("python3", [path.join(tmpRepo, ".ai/tools/generate-module-index"), "--check"], { cwd: tmpRepo })
     ).resolves.toBeTruthy();
+  });
+});
+
+describe("scaffold ledger audit", () => {
+  async function createLedgerRepo(planRow: string, source: string) {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-scaffold-ledger-"));
+    await installHarnessTools(tmpRepo);
+    await execFileAsync("git", ["init"], { cwd: tmpRepo });
+    await writeSource(path.join(tmpRepo, "src/lib.ts"), source);
+    await execFileAsync("git", ["add", "src/lib.ts"], { cwd: tmpRepo });
+    await writeSource(path.join(tmpRepo, ".ai/vcm/handoffs/architecture-plan.md"), `
+      # Architecture Plan
+
+      ## Scaffold Manifest
+
+      | ID | Action | File | Symbol | Work | Freedom | Proof |
+      | --- | --- | --- | --- | --- | --- | --- |
+      ${planRow}
+    `);
+  }
+
+  async function runLedgerAuditFailure() {
+    try {
+      await execFileAsync("python3", [path.join(tmpRepo!, ".ai/tools/check-scaffold-ledger")], { cwd: tmpRepo });
+      throw new Error("expected scaffold ledger audit to fail");
+    } catch (error) {
+      return (error as Error & { stderr?: string }).stderr ?? "";
+    }
+  }
+
+  it("accepts an exact ledger-to-marker mapping", async () => {
+    await createLedgerRepo(
+      "| SCF-001 | change | `src/lib.ts` | `run` | implement | local | compile |",
+      "export function run() { // VCM:CODE SCF-001\n  return true;\n}"
+    );
+
+    await expect(
+      execFileAsync("python3", [path.join(tmpRepo!, ".ai/tools/check-scaffold-ledger")], { cwd: tmpRepo })
+    ).resolves.toMatchObject({ stdout: expect.stringContaining("ledger reconciliation clean") });
+  });
+
+  it("rejects asset rows and their missing markers", async () => {
+    await createLedgerRepo(
+      "| SCF-001 | asset | `dist/output.json` | output | generate | none | exists |",
+      "export const ready = true;"
+    );
+
+    const stderr = await runLedgerAuditFailure();
+    expect(stderr).toContain("action column is not exactly one of create/change/delete");
+    expect(stderr).toContain("SCF-001 has no marker");
+  });
+
+  it("rejects missing and unmanifested markers", async () => {
+    await createLedgerRepo(
+      "| SCF-001 | change | `src/lib.ts` | `run` | implement | local | compile |",
+      "// VCM:CODE SCF-002\nexport const ready = true;"
+    );
+
+    const stderr = await runLedgerAuditFailure();
+    expect(stderr).toContain("SCF-001 has no marker");
+    expect(stderr).toContain("marker SCF-002 has no ledger entry");
+  });
+});
+
+describe("durable documentation audit", () => {
+  it("accepts current-state durable docs backed by generated module facts", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-durable-docs-"));
+    await installHarnessTools(tmpRepo);
+    await writeSource(path.join(tmpRepo, "docs/known-issues.md"), `
+      # Known Issues
+
+      No known issues.
+    `);
+    await writeSource(path.join(tmpRepo, "docs/plans/current.md"), `
+      # Current Plan
+
+      Status: active
+    `);
+    await writeSource(path.join(tmpRepo, "docs/ARCHITECTURE.md"), `
+      # Architecture
+
+      | Layer | Module Count |
+      | --- | ---: |
+      | application | 1 |
+    `);
+    await writeSource(path.join(tmpRepo, "application/api/ARCHITECTURE.md"), `
+      # API Architecture
+
+      Owns request handling and response contracts.
+    `);
+    await writeSource(path.join(tmpRepo, "docs/TESTING.md"), `
+      # Testing
+
+      Run unit tests with \`npm test\`.
+    `);
+    await writeJson(path.join(tmpRepo, ".ai/generated/module-index.json"), {
+      layers: [
+        {
+          name: "application",
+          modules: [
+            {
+              name: "api",
+              architectureDoc: "application/api/ARCHITECTURE.md"
+            }
+          ]
+        }
+      ]
+    });
+
+    const result = await execFileAsync("python3", [path.join(tmpRepo, ".ai/tools/check-durable-docs")], {
+      cwd: tmpRepo
+    });
+
+    expect(result.stdout).toContain("Durable docs audit passed.");
+  });
+
+  it("rejects resolved issue history, completed active plans, stale generated facts, and task history", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-durable-docs-"));
+    await installHarnessTools(tmpRepo);
+    await writeSource(path.join(tmpRepo, "docs/known-issues.md"), `
+      # Known Issues
+
+      ## KI-1 Stale entry
+
+      - status: open
+      - category: docs
+      - affected modules/surfaces: docs
+      - current gap: RESOLVED in the last task
+      - impact: none
+      - mitigation or workaround: None
+      - resolution condition: remove this entry
+      - related issues: None
+    `);
+    await writeSource(path.join(tmpRepo, "docs/plans/completed.md"), `
+      # Completed Plan
+
+      Status: completed
+    `);
+    await writeSource(path.join(tmpRepo, "docs/ARCHITECTURE.md"), `
+      # Architecture
+
+      SCF-001 introduced the module.
+
+      | Layer | Module Count |
+      | --- | ---: |
+      | application | 1 |
+    `);
+    await writeSource(path.join(tmpRepo, "application/api/ARCHITECTURE.md"), `
+      # API Architecture
+
+      Tester confirmed this design.
+    `);
+    await writeSource(path.join(tmpRepo, "docs/TESTING.md"), `
+      # Testing
+
+      Reviewer-owned L2 validation.
+    `);
+    await writeJson(path.join(tmpRepo, ".ai/generated/module-index.json"), {
+      layers: [
+        {
+          name: "application",
+          modules: [
+            { name: "api", architectureDoc: "application/api/ARCHITECTURE.md" },
+            { name: "worker", architectureDoc: "application/worker/ARCHITECTURE.md" }
+          ]
+        }
+      ]
+    });
+
+    let output = "";
+    try {
+      await execFileAsync("python3", [path.join(tmpRepo, ".ai/tools/check-durable-docs")], { cwd: tmpRepo });
+    } catch (error) {
+      output = (error as Error & { stdout?: string }).stdout ?? "";
+    }
+
+    expect(output).toContain("DD_KI_RESOLVED_HISTORY");
+    expect(output).toContain("DD_ACTIVE_PLAN_TERMINAL");
+    expect(output).toContain("DD_ARCH_TASK_LABEL");
+    expect(output).toContain("DD_ARCH_GENERATED_COUNT");
+    expect(output).toContain("DD_MODULE_ARCH_MISSING");
+    expect(output).toContain("DD_TEST_LEGACY_OWNER");
   });
 });

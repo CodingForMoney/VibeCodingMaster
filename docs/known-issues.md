@@ -8,6 +8,7 @@
 - During a task, only architect records unresolved findings in `.ai/vcm/handoffs/known-issues.md`; other roles report findings through their handoff artifacts.
 - At task close, architect promotes only still-relevant confirmed issues from the task-local file into this document.
 - Remove entries when they are fixed, rejected, obsolete, or moved into a concrete plan.
+- After changing this file, run `.ai/tools/check-durable-docs` and fix every Known Issues finding before reporting completion.
 
 ## Entry Format
 
@@ -129,7 +130,7 @@ security risk, not delivery priority.
 
 - **Status**: Open (maintainability hazard, not a defect).
 - **Category**: Product / maintainability.
-- **Affected modules / surfaces**: `src/backend/services/harness-service.ts` (~2290 lines), `translation-worker-service.ts` (~2240), `translation-service.ts` (~2120), `session-service.ts` (~1990), `gate-review-service.ts` (~1400), `auto-memory-service.ts` (~980), and `claude-hook-service.ts` (~950).
+- **Affected modules / surfaces**: `src/backend/services/harness-service.ts` (~2395 lines), `translation-worker-service.ts` (~2245), `translation-service.ts` (~2118), `session-service.ts` (~1933), `gate-review-service.ts` (~1738), `auto-memory-service.ts` (~1076), and `claude-hook-service.ts` (~1002).
 - **Current gap**: Several service files greatly exceed comfortable single-file cohesion and bundle orchestration, retry/error handling, and side-effect coordination together. This makes the intended `api -> services -> (runtime | adapters | gateway | templates)` boundary harder to reason about and raises regression risk on edits.
 - **Impact**: Higher change cost and review/regression risk in the highest-traffic backend logic; harder to localize behavior and test seams.
 - **Mitigation / workaround**: Existing unit tests cover many of these services; keep edits narrowly scoped.
@@ -147,37 +148,26 @@ security risk, not delivery priority.
 - **Resolution condition**: Gate verbose `hint`/`runtime` detail behind a dev flag, or sanitize before returning, if non-loopback exposure is ever supported.
 - **Related**: KI-001, KI-007.
 
-### KI-013 — `RoleSessionRecord.cwd` / `previousCwd` persistence is redundant for project-level tool sessions
+### KI-013 — legacy project-level tool session cwd persistence is redundant
 
-- **Status**: Open (accepted limitation / deferred cleanup; not a defect).
+- **Status**: Open (legacy path retained; not used by the default task-scoped tool sessions).
 - **Category**: Product / maintainability (cleanup).
-- **Affected modules / surfaces**: `src/shared/types/session.ts` (`RoleSessionRecord.cwd`, `RoleSessionRecord.previousCwd`), `src/backend/services/session-service.ts` (project-level tool session launch/resume/`/cd` migrate), and `cwd` consumers `src/backend/services/claude-transcript-service.ts` (`resolveExistingClaudeTranscriptPath`), `translation-service.ts`, `harness-service.ts`.
-- **Current gap**: Project-level tool sessions (translator, harness-engineer) now anchor launch/resume cwd and `transcriptPath` at the base `repoRoot` and enter the active task worktree via `/cd`. Both the launch anchor (`repoRoot`) and the `/cd` target (the active task worktree) are derivable, so persisting `cwd`/`previousCwd` for these sessions is no longer load-bearing — `cwd` now only tracks the logical `/cd` target for the redundant-`/cd` skip check. The fields were intentionally retained to keep the underlying fix inside Debug Mode scope, because removing a `src/shared` public type field is a public-surface change.
-- **Impact**: None functional. A shared public type carries fields that are derivable for project-level sessions, which can mislead future maintainers about which cwd value is authoritative.
+- **Affected modules / surfaces**: `src/shared/types/session.ts` (`RoleSessionRecord.cwd`, `RoleSessionRecord.previousCwd`) and legacy project-level tool session helpers in `src/backend/services/session-service.ts`.
+- **Current gap**: VCM defaults Translator and Harness Engineer to task-scoped sessions. The older project-level helper path is retained for possible future use, and still carries cwd/previousCwd tracking for `/cd` migration.
+- **Impact**: None functional in the default task-scoped path.
 - **Mitigation / workaround**: None needed.
 - **Resolution condition**: If pursued, drop `cwd`/`previousCwd` from `RoleSessionRecord` and migrate the remaining consumers to derive cwd (repoRoot anchor plus active task root). This is a `src/shared` public-contract change and must go through the full `architect plan -> coder -> tester` flow (out of Debug Mode scope).
 - **Related**: KI-004.
 
-### KI-014 — Inert await-user message-capture pipeline on the web surface
+### KI-015 — Legacy project-level `/cd` correctness depends on unverified Claude Code behaviors
 
-- **Status**: Open (accepted limitation / deferred cleanup; not a defect).
-- **Category**: Product / maintainability (cleanup).
-- **Affected modules / surfaces**: `src/shared/types/round.ts` (`VcmFlowPauseState.message`/`messageTruncated`), `src/backend/services/round-service.ts` (`awaitingUser.message`/`messageTruncated`, `pendingUserReply` stash, `RecordRoundHookEventInput.userFacingReply`), `src/backend/services/claude-hook-service.ts` (best-effort `readLatestRoleTurnReply` capture on a user-facing Stop).
-- **Current gap**: issue #17 shipped a persistent web banner that displayed the PM's captured user-facing reply via `flowPause.message`. The banner was removed at the user's request; await-user now reuses the transient flow-pause modal + alarm, whose wording does NOT include `flowPause.message`. The backend still captures, stashes, promotes, and emits that reply text, but no web consumer reads it. (The `claude-transcript-reply` helper itself is NOT dead — the gateway push path still uses it independently.) The sticky `reason`/`role`/`since` and the task-binding guard remain load-bearing; only the message-capture/`message` plumbing is inert on the web.
-- **Impact**: None functional. A best-effort transcript read runs on each user-facing Stop and a `src/shared` field (`flowPause.message`) plus round-state fields are produced that no consumer reads — can mislead future maintainers.
-- **Mitigation / workaround**: None needed.
-- **Resolution condition**: Either re-surface `flowPause.message` (e.g. in the modal or a detail view) or remove the inert plumbing (`userFacingReply`, `pendingUserReply`, `awaitingUser.message`, `flowPause.message`, and the claude-hook-service capture call). Removal touches the `src/shared` public contract → full `architect plan -> coder -> tester` flow.
-- **Related**: KI-013.
-
-### KI-015 — Project-level `/cd` correctness depends on unverified Claude Code behaviors (not unit-testable)
-
-- **Status**: Open (accepted empirical dependency; needs a real-run confirmation in a live environment).
-- **Category**: Product / correctness (external coupling to Claude Code's own `/cd` and `--resume` behavior).
-- **Affected modules / surfaces**: `src/backend/services/session-service.ts` (`formatClaudeCdCommand`, `migrateRunningProjectToolSessionCwd`, project-level launch/resume cwd tracking), translator + harness-engineer project-level sessions.
-- **Current gap**: The project-level `/cd` migration relies on two Claude Code behaviors that VCM's unit tests cannot verify (they only assert the bytes VCM emits and the cwd it tracks, not Claude's reaction):
+- **Status**: Open (legacy path retained; not used by default task-scoped tool sessions).
+- **Category**: Product / maintainability.
+- **Affected modules / surfaces**: Legacy project-level helpers in `src/backend/services/session-service.ts` (`formatClaudeCdCommand`, `migrateRunningProjectToolSessionCwd`, and project-level launch/resume cwd tracking).
+- **Current gap**: If the retained project-level helpers are re-enabled, their `/cd` migration relies on two Claude Code behaviors that VCM's unit tests cannot verify:
   1. **`/cd` argument parsing**: VCM now emits a **bare, unquoted** path (`/cd <path>`), assuming Claude Code's `/cd` consumes the literal rest-of-line (so spaces are fine and surrounding quotes would be taken literally). Previously VCM emitted `/cd "<path>"` (JSON-quoted); if the literal-rest-of-line assumption is correct, that quoted form was **silently failing** — the quotes became part of the path, the `cd` errored, and project-level sessions **may never have actually switched into the task worktree** (they kept operating in their launch cwd). The de-quote fix is low-risk: if the premise is wrong, the switch simply fails as before — no new breakage.
   2. **`claude --resume` cwd restoration**: VCM now skips `/cd` when the session's tracked (persisted/restored) cwd already equals the target, assuming `claude --resume` restores the session's prior working directory (user-confirmed). If this premise is wrong, a needed `/cd` is skipped and the resumed session stays at the `repoRoot` spawn cwd → the #16 wrong-directory symptom returns for the resume-same-task path. Higher risk than (1).
-- **Impact**: If either premise is false, project-level sessions can operate in the wrong directory. The behavior is correct under the (reasonable, user-confirmed for #2) premises, but only an end-to-end run confirms the `/cd` takes effect.
-- **Mitigation / workaround**: Real-run smoke (below) in a live environment; the spawn anchor at the always-present `repoRoot` (#16) bounds the worst case (sessions land at repoRoot, not a crash).
-- **Resolution condition**: A real-run smoke confirming a project-level session actually operates in the active task worktree across fresh launch, resume-same-task (no `/cd`, still in worktree), and switch-task (`/cd` fires, moves to new worktree). Optionally confirm `/cd`/`new_cwd` via the hook to convert these empirical assumptions into runtime-verified state (issue #16 optional confirmation step).
+- **Impact**: None in the default task-scoped path. A future project-scoped mode could operate in the wrong directory if either premise is false.
+- **Mitigation / workaround**: Keep tool sessions task-scoped unless the legacy path is restored and verified against a live Claude Code session.
+- **Resolution condition**: Remove the legacy project-level helpers, or verify their fresh launch, resume, and task-switch behavior before exposing project-scoped tool sessions again.
 - **Related**: KI-004 (Claude transcript directory-encoding external coupling).

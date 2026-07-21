@@ -1,5 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
-import { getFlowPauseNotificationKey, selectFlowPauseAlertMessage } from "../../../src/frontend/state/flow-pause-alert.js";
+import {
+  getFlowPauseNotificationKey,
+  observeGatewayInboundMessage,
+  selectFlowPauseAlarmMode,
+  selectFlowPauseAlertMessage
+} from "../../../src/frontend/state/flow-pause-alert.js";
+import type { GatewayStatus } from "../../../src/shared/types/gateway.js";
 import type { VcmSessionRoundState } from "../../../src/shared/types/round.js";
 
 const BASE: VcmSessionRoundState = {
@@ -78,24 +84,6 @@ describe("selectFlowPauseAlertMessage", () => {
     expect(selectFlowPauseAlertMessage(state, vi.fn())).toBe("No new turn started after tester stopped.");
   });
 
-  it("surfaces awaiting-user through the modal wording (await-user banner removed)", () => {
-    const formatRecoveryFailure = vi.fn();
-    const state: VcmSessionRoundState = {
-      ...BASE,
-      activeRole: "project-manager",
-      flowPause: {
-        paused: true,
-        reason: "awaiting-user",
-        role: "project-manager",
-        message: "Need your call on the rollout."
-      }
-    };
-    expect(selectFlowPauseAlertMessage(state, formatRecoveryFailure)).toBe(
-      "No new turn started after project-manager stopped."
-    );
-    expect(formatRecoveryFailure).not.toHaveBeenCalled();
-  });
-
   it("uses a generic role label when the active role is unknown", () => {
     const state: VcmSessionRoundState = {
       ...BASE,
@@ -106,62 +94,45 @@ describe("selectFlowPauseAlertMessage", () => {
   });
 });
 
-// Single-fire guard for the GUI alert dedup key (gate Finding 2). The GUI fires the
-// flow-pause modal + alarm once per distinct key; these pin the keying contract that
-// makes a sticky awaiting-user decision alert exactly once while still re-alerting on
-// a genuinely new decision, and leaves non-sticky pauses on their per-stop identity.
+describe("flow pause presentation", () => {
+  it("always keeps the modal decision separate from the sound preference", () => {
+    const pausedState: VcmSessionRoundState = {
+      ...BASE,
+      flowPause: { paused: true, reason: "stopped-no-next-turn", role: "project-manager" }
+    };
+
+    expect(selectFlowPauseAlertMessage(pausedState, vi.fn())).not.toBeNull();
+    expect(selectFlowPauseAlarmMode(false)).toBe("none");
+    expect(selectFlowPauseAlarmMode(true)).toBe("strong");
+  });
+
+  it("dismisses an existing pause only for a new inbound message while Gateway is enabled", () => {
+    const initial = observeGatewayInboundMessage(
+      { initialized: false, messageId: null },
+      gatewayStatus({ enabled: true, lastPmInputMessageId: "old-message" })
+    );
+    expect(initial.dismissPauseAlert).toBe(false);
+
+    const next = observeGatewayInboundMessage(
+      initial.observation,
+      gatewayStatus({ enabled: true, lastPmInputMessageId: "new-message" })
+    );
+    expect(next.dismissPauseAlert).toBe(true);
+
+    expect(observeGatewayInboundMessage(next.observation, gatewayStatus({
+      enabled: true,
+      lastPmInputMessageId: "new-message"
+    })).dismissPauseAlert).toBe(false);
+    expect(observeGatewayInboundMessage(next.observation, gatewayStatus({
+      enabled: false,
+      lastPmInputMessageId: "newer-message"
+    })).dismissPauseAlert).toBe(false);
+  });
+});
+
 describe("getFlowPauseNotificationKey", () => {
   const SINCE = "2026-05-31T00:00:02.000Z";
-
-  it("keys a sticky awaiting-user decision on its stable `since`, so a round cycle dedups to ONE alert", () => {
-    // Same pending decision (`since`), but the round identity has advanced under a
-    // helper role (new roundId + new stoppedAt) — exactly the running->stopped cycle.
-    const firstStop: VcmSessionRoundState = {
-      ...BASE,
-      roundId: "round_1",
-      stoppedAt: SINCE,
-      activeRole: "project-manager",
-      flowPause: { paused: true, reason: "awaiting-user", role: "project-manager", since: SINCE }
-    };
-    const reStopAfterCycle: VcmSessionRoundState = {
-      ...BASE,
-      roundId: "round_2",
-      stoppedAt: "2026-05-31T01:01:02.000Z",
-      activeRole: "gate-reviewer",
-      flowPause: { paused: true, reason: "awaiting-user", role: "project-manager", since: SINCE }
-    };
-
-    // Stable key across the cycle => the alert effect dedups => single fire.
-    // (Reverting the awaiting-user key branch makes these fall back to the advancing
-    // roundId:stoppedAt — `round_1:...` vs `round_2:...` — failing this assertion.)
-    expect(getFlowPauseNotificationKey(firstStop)).toBe(`awaiting-user:${SINCE}`);
-    expect(getFlowPauseNotificationKey(reStopAfterCycle)).toBe(getFlowPauseNotificationKey(firstStop));
-  });
-
-  it("re-keys when a genuinely new awaiting-user decision arrives (`since` changes)", () => {
-    // Identical round identity, different decision anchor — proves the dedup keys on
-    // `since`, not the round. (On revert both would share roundId:stoppedAt and key
-    // identically, failing this `not.toBe`.)
-    const base = {
-      ...BASE,
-      roundId: "round_1",
-      stoppedAt: SINCE,
-      activeRole: "project-manager"
-    } satisfies VcmSessionRoundState;
-    const firstDecision: VcmSessionRoundState = {
-      ...base,
-      flowPause: { paused: true, reason: "awaiting-user", role: "project-manager", since: SINCE }
-    };
-    const newDecision: VcmSessionRoundState = {
-      ...base,
-      flowPause: { paused: true, reason: "awaiting-user", role: "project-manager", since: "2026-05-31T05:00:00.000Z" }
-    };
-
-    expect(getFlowPauseNotificationKey(newDecision)).not.toBe(getFlowPauseNotificationKey(firstDecision));
-    expect(getFlowPauseNotificationKey(newDecision)).toBe("awaiting-user:2026-05-31T05:00:00.000Z");
-  });
-
-  it("keys non-sticky pauses on roundId:stoppedAt, so each genuine stop is a distinct alert", () => {
+  it("keys pauses on roundId:stoppedAt, so each genuine stop is a distinct alert", () => {
     const stoppedNoNextTurn: VcmSessionRoundState = {
       ...BASE,
       roundId: "round_1",
@@ -188,3 +159,32 @@ describe("getFlowPauseNotificationKey", () => {
     expect(getFlowPauseNotificationKey(laterStop)).not.toBe(getFlowPauseNotificationKey(stoppedNoNextTurn));
   });
 });
+
+function gatewayStatus(input: Pick<GatewayStatus, "enabled" | "lastPmInputMessageId">): GatewayStatus {
+  return {
+    version: 1,
+    enabled: input.enabled,
+    running: input.enabled,
+    connectionEnabled: input.enabled,
+    channel: "lark",
+    translationEnabled: true,
+    currentProjectId: "/repo",
+    currentTaskSlug: "demo-task",
+    binding: {
+      accountId: null,
+      baseUrl: "https://open.larksuite.com",
+      boundUserId: "user-1",
+      loginUserId: "user-1",
+      tokenConfigured: false,
+      appId: "app-1",
+      appIdConfigured: true,
+      appSecretConfigured: true,
+      homeChatId: "chat-1"
+    },
+    pendingConfirmations: {},
+    lastPollStatus: { state: "running" },
+    lastMessageStatus: null,
+    lastPmInputMessageId: input.lastPmInputMessageId,
+    updatedAt: BASE.updatedAt
+  };
+}

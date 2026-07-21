@@ -27,8 +27,10 @@ layers plus supporting tools.
   services.
 - `services/`: business logic. Key services include `task-service`,
   `task-launch-service` (backend-owned one-click task start, shared by the GUI
-  endpoint and the gateway), `session-service`, `round-service`,
-  `runtime-coordinator-service`, `runtime-recovery-service`, `message-service`,
+  endpoint and the gateway), `task-close-service` (backend-owned unconditional
+  task close, shared by the GUI endpoint and the gateway), `session-service`, `round-service`,
+  `runtime-coordinator-service`, `runtime-recovery-service`,
+  `turn-reconciler-service`, `message-service`, `task-workflow-service`,
   `artifact-service`, `harness-service`, `harness-feedback-service`,
   `auto-memory-service`,
   `gate-review-service`, `translation-service`/`translation-worker-service`,
@@ -120,29 +122,112 @@ by the tools in `.ai/tools/`:
 
 Regenerate both after changing module layout, public exports, or HTTP routes.
 
+## Durable Documentation Ownership
+
+The fixed installer ships `.ai/tools/check-durable-docs`. Harness Bootstrap,
+Architect Docs Sync, and Tester testing-doc updates run it after changing
+durable docs. The tool detects high-confidence contract violations such as
+resolved issue history, terminal plans left under `docs/plans/`, task history in
+architecture/testing docs, missing module architecture docs, and generated
+module-count drift.
+
+Semantic consistency remains role-owned: Architect reconciles changed facts
+across architecture docs, active plans, known issues, code, and generated
+context; Tester owns `docs/TESTING.md`. Final Acceptance requires the relevant
+evidence to record a passing audit after durable-doc changes.
+
+Generated indexes own machine inventories and complete public-surface lists.
+Durable prose owns current architecture, contract meaning, validation strategy,
+active plans, and unresolved limitations. Git, PRs, and task handoffs own
+history.
+
 ## Auto Memory Ownership
 
-`auto-memory-service` owns project memory under the base repository's
-`.ai/vcm/memory/`, task-visible snapshots under the active worktree's matching
-path, and review history under `.ai/vcm/memory-review/`. The root `CLAUDE.md`
-imports shared memory; each role definition requires that role to read its own
-memory file.
+`auto-memory-service` owns shared memory in the root `CLAUDE.md`
+`<VCM-memory>` block and role memory in the matching
+`.claude/agents/*.md` block. The host file determines the memory identity. The
+blocks live outside fixed managed blocks, so fixed Harness refresh preserves
+them. Drafts, before/after snapshots, and review history remain task runtime
+data under `.ai/vcm/memory-review/`.
 
-After a normal stopped round has valid Final Acceptance, the backend runtime
-coordinator may start the Auto Memory state machine. Workflow roles submit
-drafts sequentially, Harness Engineer writes the reviewed memory set, and the
-service applies it to canonical and task memory together. Auto Memory hook
-turns update role session activity but do not mutate the completed task round.
-The frontend only displays state and invokes memory file, retry, or revert APIs.
+After a normal stopped round has valid Final Acceptance, a manual or automatic
+Review Task Harness request may start the Auto Memory state machine. Workflow
+roles submit proposals sequentially through `vcm-propose-memory`, Harness
+Engineer writes the reviewed memory set, and the service replaces only the
+corresponding active-worktree memory block contents. It then creates a dedicated
+Git commit containing the changed host files. Dirty memory host files block the
+apply so unrelated edits cannot enter the memory commit. Active memory blocks
+are read-only to role turns. Proposal prompts run through the normal workflow-role
+sessions, so their `UserPromptSubmit`, `Stop`, and `StopFailure` hooks participate
+in Round/Turn tracking. Sequential proposals continue the post-acceptance Round,
+which settles to stopped after the last workflow-role proposal. Harness Engineer
+review is tool-role activity and is excluded from Round tracking. The frontend
+only displays state and invokes memory file, retry, or revert APIs.
 
 Auto Memory completion is bound to the SHA-256 hash of the current accepted
-`final-acceptance.md`. If that artifact changes, memory is pending again for the
-new acceptance evidence. `runtime-coordinator-service` and the manual Harness
-route use the same readiness policy: Task Harness Retrospective may start only
-when Auto Memory is disabled or completed for that hash. Pending, collecting,
-reviewing, or failed memory work blocks retrospective. The retrospective then
-includes memory drafts, applied memory diffs, and current memory in its task
+`final-acceptance.md`. If that artifact changes, the next Review Task Harness
+request creates a new memory phase for the new acceptance evidence.
+`runtime-coordinator-service` and the manual Harness route use the same
+readiness policy. When Auto Memory is disabled, Review Task Harness skips all
+memory collection and updates. When enabled, pending, collecting, reviewing, or
+failed memory work delays retrospective analysis. The retrospective then
+includes memory proposals, applied memory diffs, and current memory in its task
 evidence.
+
+Reusable harness feedback from `vcm-report-harness-issue` is a passive inbox.
+Harness Studio lets the user send one pending report to the active task's
+Harness Engineer for review. Reports are never auto-dispatched, removed after
+sending, or placed in a separate approval/apply state machine.
+
+## Turn Runtime Ownership
+
+`round-service` owns the active turn and round state. `session-service` owns role
+session activity, while the PTY runtime owns Claude process liveness and terminal
+output timestamps. `runtime-coordinator-service` runs backend turn reconciliation
+every 10 seconds, independently of frontend polling.
+
+Round tracking includes Project Manager, Architect, Coder, Tester, and optional
+Gate Reviewer sessions. Translator and Harness Engineer are task-scoped tool
+roles and are excluded. A tool workflow that prompts a workflow role still
+participates in Round tracking through that workflow role's hooks.
+
+`turn-reconciler-service` closes gaps left by a missing Stop hook. A transcript
+`end_turn` is reconciled through the normal Stop path; a missing or exited terminal
+is reconciled through terminal StopFailure; and a live turn with no hook, terminal,
+or transcript activity for 30 minutes is interrupted before StopFailure recovery.
+The reconciler never treats inactivity alone as successful completion.
+
+## Task Workflow State Ownership
+
+`task-workflow-service` stores PM-declared workflow context at
+`<taskRepoRoot>/.ai/vcm/workflow/state.json`. The declaration records the
+current flow, step, optional branch and resume point, status, and evidence
+references. It is separate from Round, Turn, Session, Gate Review, and process
+state: those services remain the source of truth for observed runtime facts.
+
+PM declarations arrive through PM route-file frontmatter or the
+`update-task-state` tool. The backend writes them atomically, returns them in the
+task workspace aggregate, and restores saved context into a restarted or
+resumed PM session. The frontend only renders the aggregate state. Missing,
+stale, malformed, or unwritable workflow state never blocks message delivery,
+Gate Review, final acceptance, session launch, or task close.
+
+## Task Close Ownership
+
+`task-close-service` is the single owner of task shutdown for both the GUI and
+Gateway. It first persists `cleanupStatus: cleaned`; that logical close releases
+the project for another task. Session shutdown (including task-scoped Translator
+and Harness Engineer sessions), translation and Round cleanup, forced worktree
+removal, stale-directory removal, forced branch deletion, and task-state removal
+then run independently as best-effort cleanup. Detection and cleanup failures are
+returned as warnings and never reactivate or block the closed task.
+
+`task-service` owns the destructive Git and filesystem operations. Task branches
+are force-deleted even when they contain commits absent from the base branch; the
+discarded commit list is warning evidence, not a decision gate. If worktree or
+branch cleanup remains unresolved, the cleaned task record is retained as a
+tombstone. `runtime-recovery-service` retries such tombstones when the project is
+connected again.
 
 ## Public Surface
 

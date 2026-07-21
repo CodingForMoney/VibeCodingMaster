@@ -1,7 +1,6 @@
 import Fastify from "fastify";
 import { describe, expect, it } from "vitest";
 import { registerHarnessRoutes } from "../../../src/backend/api/harness-routes.js";
-import { VcmError } from "../../../src/backend/errors.js";
 
 describe("harness routes", () => {
   it("degrades harness status when the backend hits the open-files limit", async () => {
@@ -290,22 +289,26 @@ describe("harness routes", () => {
     await app.close();
   });
 
-  it("blocks a manual task retrospective until Auto Memory is ready", async () => {
+  it("starts Auto Memory as the first phase of a manual task retrospective", async () => {
     const app = Fastify({ logger: false });
+    let memoryTrigger: string | undefined;
     let retrospectiveStarted = false;
     registerHarnessRoutes(app, {
       projectService: createProjectServiceStub(),
       taskService: createTaskServiceStub(),
       autoMemoryService: {
-        async assertTaskRetrospectiveReady() {
-          throw new VcmError({
-            code: "TASK_MEMORY_REVIEW_NOT_READY",
-            message: "Task Harness Retrospective must run after Auto Memory.",
-            statusCode: 409
-          });
+        async reconcileTask(input) {
+          memoryTrigger = input.requestTrigger;
+          return {} as never;
+        },
+        async getTaskRetrospectiveReadiness() {
+          return { ready: false, disposition: "collecting", trigger: "manual" } as const;
         }
       },
       harnessFeedbackService: {
+        async getState() {
+          return { status: "idle" } as never;
+        },
         async startTaskRetrospective() {
           retrospectiveStarted = true;
           return {} as never;
@@ -319,9 +322,75 @@ describe("harness routes", () => {
       payload: { taskSlug: "demo-task" }
     });
 
-    expect(response.statusCode).toBe(409);
-    expect(response.json().code).toBe("TASK_MEMORY_REVIEW_NOT_READY");
+    expect(response.statusCode).toBe(200);
+    expect(memoryTrigger).toBe("manual");
     expect(retrospectiveStarted).toBe(false);
+    await app.close();
+  });
+
+  it("sends a selected pending feedback to the active task Harness Engineer", async () => {
+    const app = Fastify({ logger: false });
+    let received: { repoRoot: string; taskSlug: string; feedbackPath: string } | undefined;
+    registerHarnessRoutes(app, {
+      projectService: createProjectServiceStub(),
+      taskService: createTaskServiceStub(),
+      harnessFeedbackService: {
+        async sendPendingFeedback(repoRoot, input) {
+          received = { repoRoot, ...input };
+          return { id: "harness-session" } as never;
+        }
+      }
+    } as never);
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/projects/harness/feedback/send",
+      payload: {
+        taskSlug: "demo-task",
+        feedbackPath: ".ai/vcm/harness-feedback/pending/example.md"
+      }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(received).toEqual({
+      repoRoot: "/workspace",
+      taskSlug: "demo-task",
+      feedbackPath: ".ai/vcm/harness-feedback/pending/example.md"
+    });
+    await app.close();
+  });
+
+  it("starts a manual task retrospective without memory work when Auto Memory is disabled", async () => {
+    const app = Fastify({ logger: false });
+    let retrospectiveStarted = false;
+    registerHarnessRoutes(app, {
+      projectService: createProjectServiceStub(),
+      taskService: createTaskServiceStub(),
+      autoMemoryService: {
+        async reconcileTask() {
+          return {} as never;
+        },
+        async getTaskRetrospectiveReadiness() {
+          return { ready: true, disposition: "disabled" } as const;
+        },
+        async assertHarnessEngineerAvailable() {}
+      },
+      harnessFeedbackService: {
+        async startTaskRetrospective() {
+          retrospectiveStarted = true;
+          return { status: "running" } as never;
+        }
+      }
+    } as never);
+
+    const response = await app.inject({
+      method: "POST",
+      url: "/api/projects/harness/task-retrospective",
+      payload: { taskSlug: "demo-task" }
+    });
+
+    expect(response.statusCode).toBe(200);
+    expect(retrospectiveStarted).toBe(true);
     await app.close();
   });
 });

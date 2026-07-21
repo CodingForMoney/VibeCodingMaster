@@ -42,6 +42,7 @@ import {
 import { renderHarnessEngineerHarnessRules } from "../templates/harness/harness-engineer-agent.js";
 import { renderRootClaudeHarnessRules } from "../templates/harness/claude-root.js";
 import { renderGitignoreHarnessRules } from "../templates/harness/gitignore.js";
+import { ensureVcmMemoryBlock } from "../templates/harness/memory-block.js";
 import {
   renderLegacyProjectCodingStandardsTemplate,
   renderProjectCodingStandardsProjectSection,
@@ -56,11 +57,15 @@ import {
 import { renderProjectManagerHarnessRules } from "../templates/harness/project-manager-agent.js";
 import { renderPullRequestTemplateHarnessRules } from "../templates/harness/pull-request-template.js";
 import { renderTesterHarnessRules } from "../templates/harness/tester-agent.js";
+import { renderVcmArchitectureInterviewSkillRules } from "../templates/harness/vcm-architecture-interview-skill.js";
 import { renderVcmFinalAcceptanceSkillRules } from "../templates/harness/vcm-final-acceptance-skill.js";
 import { renderVcmHarnessBootstrapSkillRules } from "../templates/harness/vcm-harness-bootstrap-skill.js";
 import { renderVcmLongRunningValidationSkillRules } from "../templates/harness/vcm-long-running-validation-skill.js";
+import { renderVcmProposeMemorySkillRules } from "../templates/harness/vcm-propose-memory-skill.js";
 import { renderVcmReportHarnessIssueSkillRules } from "../templates/harness/vcm-report-harness-issue-skill.js";
 import { renderVcmRouteMessageSkillRules } from "../templates/harness/vcm-route-message-skill.js";
+import { renderUpdateTaskStateTool, renderVcmTaskStateSkillRules } from "../templates/harness/vcm-task-state-skill.js";
+import { renderCheckScaffoldLedgerTool } from "../templates/harness/check-scaffold-ledger.js";
 import type { TerminalRuntime } from "../runtime/terminal-runtime.js";
 import { submitTerminalInput } from "../runtime/terminal-submit.js";
 import { VcmError } from "../errors.js";
@@ -80,11 +85,11 @@ export interface HarnessService {
   getRepositoryDiff(repoRoot: string, input?: RepositoryDiffRequest): Promise<RepositoryDiffReport>;
   getRepositoryFileDiff(repoRoot: string, input: RepositoryFileDiffRequest): Promise<RepositoryFileDiffReport>;
   mergeRepositoryDiffToCurrentBranch(baseRepoRoot: string, input: MergeRepositoryDiffToCurrentBranchInput): Promise<MergeRepositoryDiffToCurrentBranchResult>;
-  getBootstrapStatus(repoRoot: string, targetRepoRoot?: string): Promise<HarnessBootstrapStatusReport>;
+  getBootstrapStatus(repoRoot: string, targetRepoRoot?: string, taskSlug?: string): Promise<HarnessBootstrapStatusReport>;
   startHarnessBootstrap(repoRoot: string, targetRepoRoot?: string, input?: StartHarnessBootstrapRequest): Promise<StartHarnessBootstrapResult>;
   restartHarnessBootstrap(repoRoot: string, targetRepoRoot?: string, input?: RestartHarnessBootstrapRequest): Promise<StartHarnessBootstrapResult>;
-  stopHarnessBootstrap(repoRoot: string): Promise<HarnessBootstrapStatusReport>;
-  runHarnessBootstrap(repoRoot: string, targetRepoRoot?: string): Promise<RunHarnessBootstrapResult>;
+  stopHarnessBootstrap(repoRoot: string, targetRepoRoot?: string, taskSlug?: string): Promise<HarnessBootstrapStatusReport>;
+  runHarnessBootstrap(repoRoot: string, targetRepoRoot?: string, taskSlug?: string): Promise<RunHarnessBootstrapResult>;
   recordHarnessBootstrapHook(repoRoot: string, input: RecordHarnessBootstrapHookInput): Promise<HarnessBootstrapStatusReport>;
 }
 
@@ -95,10 +100,11 @@ export interface HarnessServiceDeps {
   runtime?: TerminalRuntime;
   harnessEngineerSessions?: Pick<
     SessionService,
-    | "ensureProjectHarnessEngineerSession"
-    | "restartProjectHarnessEngineerSession"
-    | "stopProjectHarnessEngineerSession"
-    | "getProjectHarnessEngineerSession"
+    | "getRoleSession"
+    | "startRoleSession"
+    | "resumeRoleSession"
+    | "restartRoleSession"
+    | "stopRoleSession"
   >;
   now?: () => string;
   runFixedInstaller?: (repoRoot: string) => Promise<HarnessApplyResult>;
@@ -140,6 +146,7 @@ interface HarnessFileDefinition {
   commentStyle?: "html" | "hash";
   ownership?: "managed-block" | "whole-file" | "raw-file" | "project-file";
   blankLineBeforeEnd?: boolean;
+  memoryBlock?: boolean;
   defaultContentAfterBlock?: string;
   legacyWholeFile?: string;
   renderRules(): string;
@@ -164,7 +171,7 @@ const LEGACY_CODEX_HARNESS_PATHS = [
   ".ai/tools/request-codex-review"
 ] as const;
 const VCM_HOOK_COMMAND = `sh -c 'if [ -z "\${VCM_TASK_SLUG:-}" ] || [ -z "\${VCM_ROLE:-}" ] || [ -z "\${VCM_API_URL:-}" ]; then exit 0; fi; node -e '"'"'let s="";process.stdin.setEncoding("utf8");process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{let event={};try{event=s.trim()?JSON.parse(s):{};}catch{event={raw:s};}process.stdout.write(JSON.stringify({taskSlug:process.env.VCM_TASK_SLUG,role:process.env.VCM_ROLE,event}));});'"'"' | curl -fsS --max-time 2 -X POST "\${VCM_API_URL}/api/hooks/claude-code" -H "content-type: application/json" --data-binary @- >/dev/null || true'`;
-const VCM_STOP_HOOK_COMMAND = `sh -c 'if [ -z "\${VCM_TASK_SLUG:-}" ] || [ -z "\${VCM_ROLE:-}" ] || [ -z "\${VCM_API_URL:-}" ]; then exit 0; fi; node -e '"'"'let s="";process.stdin.setEncoding("utf8");process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{let event={};try{event=s.trim()?JSON.parse(s):{};}catch{event={raw:s};}process.stdout.write(JSON.stringify({taskSlug:process.env.VCM_TASK_SLUG,role:process.env.VCM_ROLE,event}));});'"'"' | curl -fsS --max-time 5 -X POST "\${VCM_API_URL}/api/hooks/claude-code/stop" -H "content-type: application/json" --data-binary @- || true'`;
+const VCM_STOP_HOOK_COMMAND = `sh -c 'if [ -z "\${VCM_TASK_SLUG:-}" ] || [ -z "\${VCM_ROLE:-}" ] || [ -z "\${VCM_API_URL:-}" ]; then exit 0; fi; node -e '"'"'let s="";process.stdin.setEncoding("utf8");process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{let event={};try{event=s.trim()?JSON.parse(s):{};}catch{event={raw:s};}process.stdout.write(JSON.stringify({taskSlug:process.env.VCM_TASK_SLUG,role:process.env.VCM_ROLE,event}));});'"'"' | curl -fsS --retry 2 --retry-delay 1 --retry-all-errors --connect-timeout 1 --max-time 2 -X POST "\${VCM_API_URL}/api/hooks/claude-code/stop" -H "content-type: application/json" --data-binary @- || true'`;
 const VCM_PERMISSION_REQUEST_HOOK_COMMAND = `sh -c 'if [ -z "\${VCM_TASK_SLUG:-}" ] || [ -z "\${VCM_ROLE:-}" ] || [ -z "\${VCM_API_URL:-}" ]; then exit 0; fi; node -e '"'"'let s="";process.stdin.setEncoding("utf8");process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{let event={};try{event=s.trim()?JSON.parse(s):{};}catch{event={raw:s};}process.stdout.write(JSON.stringify({taskSlug:process.env.VCM_TASK_SLUG,role:process.env.VCM_ROLE,event}));});'"'"' | curl -fsS --max-time 5 -X POST "\${VCM_API_URL}/api/hooks/claude-code/permission-request" -H "content-type: application/json" --data-binary @- || true'`;
 const VCM_BASH_GUARD_HOOK_COMMAND = `sh -c 'if [ -z "\${VCM_TASK_SLUG:-}" ] || [ -z "\${VCM_ROLE:-}" ]; then exit 0; fi; guard=""; repo="$(git rev-parse --show-toplevel 2>/dev/null || true)"; if [ -n "$repo" ] && [ -f "$repo/.ai/tools/vcm-bash-guard" ]; then guard="$repo/.ai/tools/vcm-bash-guard"; else cwd="$(pwd -P 2>/dev/null || pwd)"; dir="$cwd"; while [ -n "$dir" ] && [ "$dir" != "/" ]; do if [ -f "$dir/.ai/tools/vcm-bash-guard" ]; then guard="$dir/.ai/tools/vcm-bash-guard"; break; fi; dir="$(dirname "$dir")"; done; if [ -z "$guard" ] && [ -n "\${CLAUDE_PROJECT_DIR:-}" ] && [ -f "\${CLAUDE_PROJECT_DIR}/.ai/tools/vcm-bash-guard" ]; then guard="\${CLAUDE_PROJECT_DIR}/.ai/tools/vcm-bash-guard"; fi; fi; [ -n "$guard" ] || exit 0; python3 "$guard" || exit 0'`;
 const VCM_BASH_DEFAULT_TIMEOUT_MS = "600000";
@@ -184,6 +191,7 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
     path: "CLAUDE.md",
     title: "CLAUDE.md",
     blankLineBeforeEnd: true,
+    memoryBlock: true,
     renderRules: renderRootClaudeHarnessRules
   },
   {
@@ -223,6 +231,17 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
     renderRules: renderPullRequestTemplateHarnessRules
   },
   {
+    kind: "skill-vcm-architecture-interview",
+    path: ".claude/skills/vcm-architecture-interview/SKILL.md",
+    title: "VCM Architecture Interview Skill",
+    frontmatter: renderSkillFrontmatter(
+      "vcm-architecture-interview",
+      "Use when Architect must confirm user-owned behavior and contract decisions before architecture planning."
+    ),
+    ownership: "whole-file",
+    renderRules: renderVcmArchitectureInterviewSkillRules
+  },
+  {
     kind: "skill-vcm-route-message",
     path: ".claude/skills/vcm-route-message/SKILL.md",
     title: "VCM Route Message Skill",
@@ -232,6 +251,17 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
     ),
     ownership: "whole-file",
     renderRules: renderVcmRouteMessageSkillRules
+  },
+  {
+    kind: "skill-vcm-task-state",
+    path: ".claude/skills/vcm-task-state/SKILL.md",
+    title: "VCM Task State Skill",
+    frontmatter: renderSkillFrontmatter(
+      "vcm-task-state",
+      "Use only as project-manager to declare the current task workflow checkpoint to VCM."
+    ),
+    ownership: "whole-file",
+    renderRules: renderVcmTaskStateSkillRules
   },
   {
     kind: "skill-vcm-final-acceptance",
@@ -289,9 +319,21 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
     renderRules: renderVcmReportHarnessIssueSkillRules
   },
   {
+    kind: "skill-vcm-propose-memory",
+    path: ".claude/skills/vcm-propose-memory/SKILL.md",
+    title: "VCM Propose Memory Skill",
+    frontmatter: renderSkillFrontmatter(
+      "vcm-propose-memory",
+      "Use only when VCM requests a role memory proposal during Task Harness Review."
+    ),
+    ownership: "whole-file",
+    renderRules: renderVcmProposeMemorySkillRules
+  },
+  {
     kind: "agent-gate-reviewer",
     path: ".claude/agents/gate-reviewer.md",
     title: "Gate Reviewer Agent",
+    memoryBlock: true,
     frontmatter: renderAgentFrontmatter(
       "gate-reviewer",
       "VCM independent gate review role for architecture plans, validation adequacy, and code diffs.",
@@ -305,7 +347,7 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
     title: "Translator Agent",
     frontmatter: renderAgentFrontmatter(
       "translator",
-      "VCM project translation tool role for conversation translation, file translation, bootstrap, and memory updates."
+      "VCM task-scoped translation tool role for conversation translation, file translation, bootstrap, and memory updates."
     ),
     renderRules: renderTranslatorAgentRules
   },
@@ -313,9 +355,10 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
     kind: "agent-harness-engineer",
     path: ".claude/agents/harness-engineer.md",
     title: "Harness Engineer Agent",
+    memoryBlock: true,
     frontmatter: renderAgentFrontmatter(
       "harness-engineer",
-      "VCM project-scoped harness maintenance role for harness diagnosis, diff proposals, and VCM issue drafts."
+      "VCM task-scoped harness maintenance role for harness diagnosis, diff proposals, and VCM issue drafts."
     ),
     renderRules: renderHarnessEngineerHarnessRules
   },
@@ -338,9 +381,24 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
     renderRules: renderRequestGateReviewTool
   },
   {
+    kind: "tool-update-task-state",
+    path: ".ai/tools/update-task-state",
+    title: "Update Task State Tool",
+    ownership: "raw-file",
+    renderRules: renderUpdateTaskStateTool
+  },
+  {
+    kind: "tool-check-scaffold-ledger",
+    path: ".ai/tools/check-scaffold-ledger",
+    title: "Check Scaffold Ledger Tool",
+    ownership: "raw-file",
+    renderRules: renderCheckScaffoldLedgerTool
+  },
+  {
     kind: "agent-project-manager",
     path: ".claude/agents/project-manager.md",
     title: "Project Manager Agent",
+    memoryBlock: true,
     frontmatter: renderAgentFrontmatter(
       "project-manager",
       "User-facing VCM orchestration role for task clarification, role routing, handoffs, acceptance, and PR preparation."
@@ -351,6 +409,7 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
     kind: "agent-architect",
     path: ".claude/agents/architect.md",
     title: "Architect Agent",
+    memoryBlock: true,
     blankLineBeforeEnd: true,
     frontmatter: renderAgentFrontmatter(
       "architect",
@@ -362,6 +421,7 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
     kind: "agent-coder",
     path: ".claude/agents/coder.md",
     title: "Coder Agent",
+    memoryBlock: true,
     frontmatter: renderAgentFrontmatter(
       "coder",
       "VCM implementation role for scoped code changes and focused tests.",
@@ -373,6 +433,7 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
     kind: "agent-tester",
     path: ".claude/agents/tester.md",
     title: "Tester Agent",
+    memoryBlock: true,
     frontmatter: renderAgentFrontmatter(
       "tester",
       "VCM testing role for validation, test adequacy, approved-scope validation, and risk findings."
@@ -500,12 +561,12 @@ export function createHarnessService(deps: HarnessServiceDeps): HarnessService {
     async mergeRepositoryDiffToCurrentBranch(baseRepoRoot, input) {
       return mergeRepositoryDiffToCurrentBranch(requireRepositoryMergeGit(deps.git), baseRepoRoot, input, now());
     },
-    async getBootstrapStatus(repoRoot, targetRepoRoot = repoRoot) {
-      return getHarnessBootstrapStatus(deps, repoRoot, targetRepoRoot, now, vcmVersion);
+    async getBootstrapStatus(repoRoot, targetRepoRoot = repoRoot, taskSlug) {
+      return getHarnessBootstrapStatus(deps, repoRoot, targetRepoRoot, now, vcmVersion, taskSlug);
     },
     async startHarnessBootstrap(repoRoot, targetRepoRoot = repoRoot, input = {}) {
       const session = await ensureHarnessEngineerForBootstrap(deps, repoRoot, targetRepoRoot, now, vcmVersion, input);
-      const nextStatus = await getHarnessBootstrapStatus(deps, repoRoot, targetRepoRoot, now, vcmVersion);
+      const nextStatus = await getHarnessBootstrapStatus(deps, repoRoot, targetRepoRoot, now, vcmVersion, input.taskSlug);
 
       return {
         status: {
@@ -518,7 +579,7 @@ export function createHarnessService(deps: HarnessServiceDeps): HarnessService {
     },
     async restartHarnessBootstrap(repoRoot, targetRepoRoot = repoRoot, input = {}) {
       const session = await restartHarnessEngineerForBootstrap(deps, repoRoot, targetRepoRoot, now, vcmVersion, input);
-      const nextStatus = await getHarnessBootstrapStatus(deps, repoRoot, targetRepoRoot, now, vcmVersion);
+      const nextStatus = await getHarnessBootstrapStatus(deps, repoRoot, targetRepoRoot, now, vcmVersion, input.taskSlug);
       return {
         status: {
           ...nextStatus,
@@ -528,8 +589,8 @@ export function createHarnessService(deps: HarnessServiceDeps): HarnessService {
         prompt: buildHarnessBootstrapPrompt(repoRoot, targetRepoRoot)
       };
     },
-    async stopHarnessBootstrap(repoRoot) {
-      const existing = await getCurrentHarnessEngineerBootstrapSession(deps, repoRoot);
+    async stopHarnessBootstrap(repoRoot, targetRepoRoot = repoRoot, taskSlug) {
+      const existing = await getCurrentHarnessEngineerBootstrapSession(deps, repoRoot, taskSlug);
       if (!existing) {
         throw new VcmError({
           code: "HARNESS_BOOTSTRAP_SESSION_MISSING",
@@ -537,11 +598,13 @@ export function createHarnessService(deps: HarnessServiceDeps): HarnessService {
           statusCode: 404
         });
       }
-      await deps.harnessEngineerSessions?.stopProjectHarnessEngineerSession(repoRoot);
+      if (taskSlug) {
+        await deps.harnessEngineerSessions?.stopRoleSession(repoRoot, taskSlug, "harness-engineer");
+      }
       await clearHarnessBootstrapRunState(deps.fs, repoRoot);
-      return getHarnessBootstrapStatus(deps, repoRoot, repoRoot, now, vcmVersion);
+      return getHarnessBootstrapStatus(deps, repoRoot, targetRepoRoot, now, vcmVersion, taskSlug);
     },
-    async runHarnessBootstrap(repoRoot, targetRepoRoot = repoRoot) {
+    async runHarnessBootstrap(repoRoot, targetRepoRoot = repoRoot, taskSlug) {
       if (!deps.runtime || !deps.harnessEngineerSessions) {
         throw new VcmError({
           code: "HARNESS_BOOTSTRAP_UNAVAILABLE",
@@ -550,7 +613,7 @@ export function createHarnessService(deps: HarnessServiceDeps): HarnessService {
         });
       }
       await assertHarnessWorktreeClean(deps.git, targetRepoRoot);
-      const status = await getHarnessBootstrapStatus(deps, repoRoot, targetRepoRoot, now, vcmVersion);
+      const status = await getHarnessBootstrapStatus(deps, repoRoot, targetRepoRoot, now, vcmVersion, taskSlug);
       const session = status.session;
       if (!session || session.status !== "running" || !deps.runtime.getSession(session.id)) {
         throw new VcmError({
@@ -571,7 +634,7 @@ export function createHarnessService(deps: HarnessServiceDeps): HarnessService {
         updatedAt: timestamp
       });
       await submitTerminalInput(deps.runtime, session.id, prompt);
-      const nextStatus = await getHarnessBootstrapStatus(deps, repoRoot, targetRepoRoot, now, vcmVersion);
+      const nextStatus = await getHarnessBootstrapStatus(deps, repoRoot, targetRepoRoot, now, vcmVersion, taskSlug);
       return {
         status: {
           ...nextStatus,
@@ -585,7 +648,7 @@ export function createHarnessService(deps: HarnessServiceDeps): HarnessService {
     async recordHarnessBootstrapHook(repoRoot, input) {
       const state = await loadPersistedHarnessBootstrapRunState(deps.fs, repoRoot);
       if (state?.status !== "running" || !matchesBootstrapRunState(state, input)) {
-        return getHarnessBootstrapStatus(deps, repoRoot, state?.targetRepoRoot ?? repoRoot, now, vcmVersion);
+        return getHarnessBootstrapStatus(deps, repoRoot, state?.targetRepoRoot ?? repoRoot, now, vcmVersion, input.taskSlug);
       }
 
       const timestamp = now();
@@ -599,7 +662,7 @@ export function createHarnessService(deps: HarnessServiceDeps): HarnessService {
         updatedAt: timestamp,
         lastHookEvent: input.eventName
       });
-      return getHarnessBootstrapStatus(deps, repoRoot, state.targetRepoRoot ?? repoRoot, now, vcmVersion);
+      return getHarnessBootstrapStatus(deps, repoRoot, state.targetRepoRoot ?? repoRoot, now, vcmVersion, input.taskSlug);
     }
   };
 }
@@ -620,7 +683,8 @@ async function ensureHarnessEngineerForBootstrap(
     });
   }
 
-  const currentStatus = await getHarnessBootstrapStatus(deps, repoRoot, targetRepoRoot, now, vcmVersion);
+  const taskSlug = requireHarnessEngineerTaskSlug(input.taskSlug);
+  const currentStatus = await getHarnessBootstrapStatus(deps, repoRoot, targetRepoRoot, now, vcmVersion, taskSlug);
   if (currentStatus.session?.status === "running") {
     return currentStatus.session;
   }
@@ -632,7 +696,14 @@ async function ensureHarnessEngineerForBootstrap(
     });
   }
 
-  return toHarnessBootstrapSession(await deps.harnessEngineerSessions.ensureProjectHarnessEngineerSession(repoRoot, input));
+  const existing = await deps.harnessEngineerSessions.getRoleSession(repoRoot, taskSlug, "harness-engineer");
+  if (existing?.status === "running") {
+    return toHarnessBootstrapSession(existing);
+  }
+  if (existing?.claudeSessionId) {
+    return toHarnessBootstrapSession(await deps.harnessEngineerSessions.resumeRoleSession(repoRoot, taskSlug, "harness-engineer", input));
+  }
+  return toHarnessBootstrapSession(await deps.harnessEngineerSessions.startRoleSession(repoRoot, taskSlug, "harness-engineer", input));
 }
 
 async function restartHarnessEngineerForBootstrap(
@@ -651,7 +722,8 @@ async function restartHarnessEngineerForBootstrap(
     });
   }
 
-  const currentStatus = await getHarnessBootstrapStatus(deps, repoRoot, targetRepoRoot, now, vcmVersion);
+  const taskSlug = requireHarnessEngineerTaskSlug(input.taskSlug);
+  const currentStatus = await getHarnessBootstrapStatus(deps, repoRoot, targetRepoRoot, now, vcmVersion, taskSlug);
   if (!currentStatus.canStart) {
     throw new VcmError({
       code: "HARNESS_BOOTSTRAP_NOT_READY",
@@ -660,15 +732,32 @@ async function restartHarnessEngineerForBootstrap(
     });
   }
 
-  return toHarnessBootstrapSession(await deps.harnessEngineerSessions.restartProjectHarnessEngineerSession(repoRoot, input));
+  return toHarnessBootstrapSession(await deps.harnessEngineerSessions.restartRoleSession(repoRoot, taskSlug, "harness-engineer", input));
 }
 
 async function getCurrentHarnessEngineerBootstrapSession(
   deps: HarnessServiceDeps,
-  repoRoot: string
+  repoRoot: string,
+  taskSlug?: string
 ): Promise<HarnessBootstrapSession | undefined> {
-  const session = await deps.harnessEngineerSessions?.getProjectHarnessEngineerSession(repoRoot);
+  if (!taskSlug) {
+    return undefined;
+  }
+  const session = await deps.harnessEngineerSessions?.getRoleSession(repoRoot, taskSlug, "harness-engineer");
   return session ? toHarnessBootstrapSession(session) : undefined;
+}
+
+function requireHarnessEngineerTaskSlug(value: string | undefined): string {
+  const taskSlug = value?.trim();
+  if (!taskSlug) {
+    throw new VcmError({
+      code: "HARNESS_ENGINEER_TASK_REQUIRED",
+      message: "Harness Engineer requires an active task.",
+      statusCode: 409,
+      hint: "Create or select a task before using Harness Engineer."
+    });
+  }
+  return taskSlug;
 }
 
 function toHarnessBootstrapSession(session: RoleSessionRecord): HarnessBootstrapSession {
@@ -1387,6 +1476,7 @@ async function analyzeHarnessFile(
   const exists = await fs.pathExists(absolutePath);
 
   if (!exists) {
+    const newContent = expectedContent ?? renderNewHarnessFile(definition, expectedBlock ?? "");
     return {
       definition,
       status: {
@@ -1401,7 +1491,7 @@ async function analyzeHarnessFile(
         action: "create",
         reason: "File is missing; VCM will create a recommended default."
       },
-      nextContent: expectedContent ?? renderNewHarnessFile(definition, expectedBlock ?? "")
+      nextContent: definition.memoryBlock ? ensureVcmMemoryBlock(newContent) : newContent
     };
   }
 
@@ -1436,6 +1526,7 @@ async function analyzeHarnessFile(
   if (!match) {
     const migratedContent = migrateLegacyHarnessFile(definition, currentContent, expectedBlock);
     if (migratedContent) {
+      const nextContent = definition.memoryBlock ? ensureVcmMemoryBlock(migratedContent) : migratedContent;
       return {
         definition,
         status: {
@@ -1450,9 +1541,10 @@ async function analyzeHarnessFile(
           action: "update",
           reason: "Legacy VCM whole-file baseline will be migrated to a managed block."
         },
-        nextContent: migratedContent
+        nextContent
       };
     }
+    const insertedContent = `${currentContent.trimEnd()}\n\n${expectedBlock}\n`;
     return {
       definition,
       status: {
@@ -1467,13 +1559,15 @@ async function analyzeHarnessFile(
         action: "insert",
         reason: "File exists but does not contain VCM managed rules."
       },
-      nextContent: `${currentContent.trimEnd()}\n\n${expectedBlock}\n`
+      nextContent: definition.memoryBlock ? ensureVcmMemoryBlock(insertedContent) : insertedContent
     };
   }
 
   const managedVersion = match[1] ? Number(match[1]) : undefined;
   const currentBlock = match[0];
-  const action: HarnessFileAction = currentBlock === expectedBlock ? "ok" : "update";
+  const blockUpdatedContent = currentContent.replace(managedBlockPattern, expectedBlock);
+  const nextContent = definition.memoryBlock ? ensureVcmMemoryBlock(blockUpdatedContent) : blockUpdatedContent;
+  const action: HarnessFileAction = currentContent === nextContent ? "ok" : "update";
 
   return {
     definition,
@@ -1490,13 +1584,15 @@ async function analyzeHarnessFile(
       : {
           path: definition.path,
           action,
-          reason: managedVersion === VCM_HARNESS_VERSION
-            ? "VCM managed rules differ from the current recommended template."
+          reason: currentBlock === expectedBlock && definition.memoryBlock
+            ? "VCM memory block is missing."
+            : managedVersion === VCM_HARNESS_VERSION
+              ? "VCM managed rules differ from the current recommended template."
             : `VCM managed block version is ${managedVersion ?? "missing"}; current version is ${VCM_HARNESS_VERSION}.`
         },
     nextContent: action === "ok"
       ? undefined
-      : currentContent.replace(managedBlockPattern, expectedBlock)
+      : nextContent
   };
 }
 
@@ -1810,7 +1906,8 @@ async function getHarnessBootstrapStatus(
   repoRoot: string,
   targetRepoRoot: string,
   now: () => string,
-  vcmVersion: string
+  vcmVersion: string,
+  taskSlug?: string
 ): Promise<HarnessBootstrapStatusReport> {
   const moduleIndex = await readOptionalJsonObject(deps.fs, targetRepoRoot, ".ai/generated/module-index.json");
   const checks: HarnessBootstrapCheck[] = [
@@ -1835,13 +1932,14 @@ async function getHarnessBootstrapStatus(
     await checkModuleArchitectureDocs(deps.fs, targetRepoRoot, moduleIndex),
     await checkFilledMarkdown(deps.fs, targetRepoRoot, "docs/TESTING.md", "Testing doc", "testing-doc")
   ];
-  const runState = await loadPersistedHarnessBootstrapRunState(deps.fs, repoRoot);
-  const session = await getCurrentHarnessEngineerBootstrapSession(deps, repoRoot);
+  const persistedRunState = await loadPersistedHarnessBootstrapRunState(deps.fs, repoRoot);
+  const runState = persistedRunState;
+  const session = await getCurrentHarnessEngineerBootstrapSession(deps, repoRoot, taskSlug);
   const fixedHarnessReady = checks[0]?.status === "ok";
   const projectChecks = checks.slice(1);
   const projectComplete = projectChecks.every((check) => check.status === "ok");
   const projectStarted = projectChecks.some((check) => check.status === "ok" || check.status === "incomplete");
-  const runActive = runState?.status === "running" && session?.status === "running";
+  const runActive = isActiveHarnessBootstrapRun(runState, session, targetRepoRoot);
   const status = !fixedHarnessReady
     ? "not_ready"
     : runActive
@@ -1868,6 +1966,7 @@ async function checkFixedHarness(fs: FileSystemAdapter, repoRoot: string, vcmVer
     ".claude/skills/vcm-harness-bootstrap/SKILL.md",
     "docs/GLOSSARY.md",
     "docs/CODING_STANDARDS.md",
+    ".ai/tools/check-durable-docs",
     ".ai/tools/generate-module-index",
     ".ai/tools/generate-public-surface"
   ];
@@ -2126,6 +2225,7 @@ async function loadPersistedHarnessBootstrapRunState(
   return {
     version: 1,
     status,
+    targetRepoRoot: typeof payload.targetRepoRoot === "string" ? payload.targetRepoRoot : undefined,
     sessionId: typeof payload.sessionId === "string" ? payload.sessionId : undefined,
     claudeSessionId: typeof payload.claudeSessionId === "string" ? payload.claudeSessionId : undefined,
     startedAt: typeof payload.startedAt === "string" ? payload.startedAt : undefined,
@@ -2162,6 +2262,18 @@ function matchesBootstrapRunState(
     return false;
   }
   return true;
+}
+
+function isActiveHarnessBootstrapRun(
+  state: HarnessBootstrapRunState | undefined,
+  session: HarnessBootstrapSession | undefined,
+  targetRepoRoot: string
+): boolean {
+  return state?.status === "running"
+    && session?.status === "running"
+    && state.sessionId === session.id
+    && state.targetRepoRoot === targetRepoRoot
+    && (!state.claudeSessionId || state.claudeSessionId === session.claudeSessionId);
 }
 
 async function readOptionalText(
@@ -2218,7 +2330,9 @@ function bootstrapWarnings(
 }
 
 function buildHarnessBootstrapPrompt(baseRepoRoot: string, targetRepoRoot: string): string {
-  return `Use the vcm-harness-bootstrap skill to finish the VCM harness bootstrap for the active task worktree.
+  return `[VCM HARNESS BOOTSTRAP]
+
+Use the vcm-harness-bootstrap skill to finish the VCM harness bootstrap for the active task worktree.
 
 Base repository root:
 ${baseRepoRoot}
@@ -2236,6 +2350,7 @@ Required work:
 - Fill target docs/ARCHITECTURE.md with project-level module overview, responsibilities, relationships, dependency direction, project-wide constraints, and links to module-level architecture docs.
 - Create or update target module-level ARCHITECTURE.md files for clear non-root module boundaries with architectureDoc paths in module-index.json.
 - Fill target docs/TESTING.md with project-native validation levels, commands, validation selection rules, final-validation cleanup, test layout, integration/E2E case lists, generated-context freshness checks, and known testing gaps.
+- Run .ai/tools/check-durable-docs and correct every bootstrap-owned finding.
 - Review git status and git diff in the target task worktree.
 - Stage only allowed bootstrap harness changes and create a commit in the target task worktree.
 
@@ -2247,7 +2362,9 @@ Boundaries:
 - VCM will not create the bootstrap commit for you.
 
 Final response:
-Summarize files reviewed, files updated, generated artifacts, commit hash, final git status, verified claims, inferred claims, unknowns, confirmation-needed items, and suggested validation commands.`;
+Summarize files reviewed, files updated, generated artifacts, durable-doc audit result, commit hash, final git status, verified claims, inferred claims, unknowns, confirmation-needed items, and suggested validation commands.
+
+[/VCM HARNESS BOOTSTRAP]`;
 }
 
 export function createScriptFixedHarnessInstaller(

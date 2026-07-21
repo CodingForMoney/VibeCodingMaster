@@ -1,14 +1,8 @@
-# Review Report
+# Test Report: rust-layered
 
-## Summary
+Test Result: pass|fail
 
-No review has been run yet.
-
-## Role / Handoff Compliance
-
-TBD
-
-## Validation Scope
+## Evidence Reviewed
 
 TBD
 
@@ -16,7 +10,11 @@ TBD
 
 TBD
 
-## Commands Run
+## Coverage Mapping
+
+TBD
+
+## Commands Run Or Checked
 
 TBD
 
@@ -32,7 +30,7 @@ TBD
 
 TBD
 
-## Skipped Checks
+## Skipped Checks With Reasons
 
 TBD
 
@@ -40,10 +38,6 @@ TBD
 
 TBD
 
-## Required Follow-ups
-
-TBD
-
-## Decision
+## Blocking Validation Issues
 
 TBD

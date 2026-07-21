@@ -12,7 +12,7 @@ All commands run from the repository root (the task worktree during a VCM task).
 | --- | --- | --- |
 | L0 fast checks | Format/lint/typecheck/boundary. Project ships typecheck across both tsconfigs. | `npm run typecheck` |
 | L1 coder unit checks | Changed behavior + direct regressions via Vitest unit tests. | `npm run build` then `npm test` on a clean tree (build first — see note); optionally a scoped `npx vitest run <path>` |
-| L2 module / integration checks | Module/API/runtime wiring. Vitest config reserves `tests/integration/api/**` and `tests/integration/runtime/**`. | `npm run build` then `npm test` on a clean tree (build first — see note); runs unit + any integration tests that exist |
+| L2 module / integration checks | Module/API/runtime wiring, including backend E2E with mock Claude Code and Gateway runtimes. | `npm run build` then `npm test` on a clean tree (build first — see note); use `npm run test:e2e:backend` for backend orchestration journeys |
 | L3 smoke E2E checks | Core GUI journeys via Playwright. | `npm run e2e` |
 | L4 full regression / release | Build + package verification before publish. | `npm run build` then `npm run verify:package` |
 
@@ -21,17 +21,21 @@ Notes:
 - `npm run typecheck` runs `tsc` against both `tsconfig.json` (frontend + shared)
   and `tsconfig.node.json` (backend), so it is the boundary/type gate for the
   whole module.
-- `npm test` is `vitest run`. Its `include` globs already cover unit and the
-  reserved integration directories, so a single `npm test` is both L1 and L2 once
-  integration tests exist.
+- `npm test` is `vitest run`. Its `include` globs cover unit, reserved
+  integration, and backend E2E tests, so the full suite includes all non-browser
+  validation.
 - **Build before `npm test` on a clean tree.**
   `tests/unit/backend/harness-templates-sync.test.ts` shells out to the compiled
   CLI (`dist/main.js`), so run `npm run build` first; otherwise those 5 cases fail
   with "compiled CLI not found" — a build-state failure, not a regression. This is
   why the Release Gate below runs `build` before `test` (see also "Known Testing
   Gaps").
-- `npm run e2e` is `playwright test` against `tests/e2e`, and its `webServer`
-  starts `npm run dev` automatically (reusing an existing server if one is up).
+- `npm run e2e` is `playwright test` against future browser specs under
+  `tests/e2e`; `tests/e2e/backend/**` is excluded. Its `webServer` starts
+  `npm run dev` automatically (reusing an existing server if one is up).
+- `npm run test:e2e:backend` runs the backend journeys under
+  `tests/e2e/backend/**` with deterministic Claude Code and Gateway doubles; it
+  does not require a live Claude process or browser.
 
 ## Validation Selection Rules
 
@@ -42,6 +46,12 @@ Notes:
 - `src/backend/**` change: L0 + the affected `tests/unit/backend/**` files; run
   full `npm test` before handoff. Add L2 when touching runtime, routes, or
   cross-service wiring.
+- Session lifecycle, round routing, Gate Review, translation, Gateway, Auto
+  Memory, or Harness Retrospective change: run `npm run test:e2e:backend`.
+- Task workflow-state changes: run `task-workflow-service.test.ts`,
+  `message-service.test.ts`, `session-service.test.ts`, and
+  `task-routes.test.ts`; verify corrupt or unavailable state remains
+  non-blocking.
 - `src/frontend/**` change: L0 + the affected `tests/unit/frontend/**` files; add
   L3 (`npm run e2e`) when changing a core user journey (connect repo, create task,
   start/resume a role session, send a message, translation panel).
@@ -50,10 +60,18 @@ Notes:
   downstream repos.
 - Auto Memory or Task Harness Retrospective sequencing change: run
   `auto-memory-service.test.ts`, `runtime-coordinator-service.test.ts`, and
-  `harness-routes.test.ts`, then the full unit suite. These tests cover current
-  Final Acceptance hashing plus automatic and manual readiness enforcement.
+  `harness-routes.test.ts`, then `npm run test:e2e:backend`. These tests cover
+  current Final Acceptance hashing, automatic and manual readiness enforcement,
+  workflow-role proposal Round tracking, and Harness Engineer exclusion from the
+  Round.
 - `.ai/tools/**` or `scripts/harness-tools/**` change: run
   `tests/unit/backend/harness-tools.test.ts` and `vcm-bash-guard.test.ts`.
+- Durable-doc template or audit change: run
+  `tests/unit/backend/harness-tools.test.ts`,
+  `tests/unit/backend/harness-templates-sync.test.ts`, and
+  `tests/unit/backend/harness-service.test.ts`. The audit tests cover clean
+  current-state docs and representative history, plan, and generated-context
+  drift failures.
 - Pre-publish / release: L4 (`npm run build` + `npm run verify:package`).
 
 ## Long-Running Validation
@@ -98,30 +116,57 @@ tests/
     frontend/  # api-client, stores, components (message timeline, harness panel, translation panel)
     shared/    # pure validators (artifact-check, language-detect, slug-check)
   integration/ # reserved by vitest config: api/**, runtime/** (not yet present)
-  e2e/         # reserved by playwright config (not yet present)
+  e2e/
+    backend/   # mock Claude Code/Gateway backend journeys run by Vitest
+    # browser Playwright specs may be added here later
 ```
 
 - Place unit tests next to their layer under `tests/unit/<layer>/` named
   `<subject>.test.ts`.
 - Place integration tests under `tests/integration/api/**` or
   `tests/integration/runtime/**` so the existing Vitest `include` picks them up.
-- Place Playwright specs under `tests/e2e/`.
+- Place backend E2E tests under `tests/e2e/backend/` named
+  `<journey>.e2e.test.ts`.
+- Place future Playwright specs under `tests/e2e/` using Playwright's spec
+  naming convention so they remain separate from the Vitest backend suite.
 
 ## Integration / E2E Case List
-
-These are reserved by configuration but not yet implemented. They are the
-recommended first cases when integration/E2E coverage is added.
 
 ### Integration (reserved: `tests/integration/api/**`, `tests/integration/runtime/**`)
 
 | ID | Scenario | Entry point | Proves | Key assertions | When to run | Limitation |
 | --- | --- | --- | --- | --- | --- | --- |
-| INT-API-001 | Project + task lifecycle over HTTP | Fastify app via `project-routes` / `task-routes` | Routes + services persist task state correctly | Create project, create task, read back task, status transitions | L2, on backend api/service change | Not yet implemented |
-| INT-API-002 | Message bus round trip | `message-routes` / `message-service` | Route-file dispatch and history persistence | Posted message is persisted and retrievable in order | L2, on messaging change | Not yet implemented |
-| INT-RT-001 | Session start/resume lifecycle | `runtime-coordinator-service` + `session-registry` | PTY session can start, persist id, and resume | Session id persisted; resume reuses id; stop cleans registry | L2, on runtime change | Not yet implemented; needs `claude`/pty test doubles |
-| INT-RT-002 | Post-task memory and harness review order | Final Acceptance + `runtime-coordinator-service` + Harness route | Auto Memory completes before Task Harness Retrospective | Current acceptance hash gates retrospective; pending/failed memory blocks automatic and manual starts | L2, on Auto Memory or retrospective change | Not yet implemented end to end; service and route contracts have unit coverage |
+| INT-API-001 | Project + task lifecycle over HTTP | Fastify app via `project-routes` / `task-routes` | Routes + services persist task state correctly | Create project, create task, read back task, status transitions | L2, on backend api/service change | No dedicated integration spec; exercised by backend E2E journeys |
+| INT-API-002 | Message bus round trip | `message-routes` / `message-service` | Route-file dispatch and history persistence | Posted message is persisted and retrievable in order | L2, on messaging change | No dedicated integration spec; exercised by backend E2E routing journeys |
+| INT-RT-001 | Session start/resume lifecycle | `runtime-coordinator-service` + `session-registry` | PTY session can start, persist id, and resume | Session id persisted; resume reuses id; stop cleans registry | L2, on runtime change | Covered with the mock Claude runtime; live PTY coverage remains absent |
+| INT-RT-002 | Post-task memory and harness review order | Final Acceptance + Review Task Harness + `runtime-coordinator-service` + Harness route | A normally stopped complete flow runs optional Auto Memory before Task Harness Retrospective | With Auto Memory on, workflow-role proposal hooks start and stop a normal Round, Harness Engineer remains outside that Round, memory completes first, and pending harness feedback remains an inbox; with Auto Memory off, retrospective starts directly | L2, on Auto Memory or retrospective change | Covered by backend E2E with mock role sessions |
+| INT-RT-003 | Manual Harness Feedback delivery | Harness Studio + `POST /api/projects/harness/feedback/send` | A user can send one pending report to the active task's Harness Engineer without automatic queue processing | Only a path still present in the pending Inbox is accepted; the exact absolute path is submitted; the report remains pending | L1, on Harness Feedback changes | Covered by service and route unit tests; live PTY coverage remains absent |
 
-### E2E (reserved: `tests/e2e/`)
+### Backend E2E (implemented: `tests/e2e/backend/`)
+
+The backend suite currently covers these journeys through real routes and
+services with controlled runtime doubles:
+
+- PM-to-role routing, round completion, retryable failures, and manual
+  interruption without retry.
+- Session ID persistence, restart/close behavior, backend restart recovery, and
+  resuming a recovered Claude session.
+- Complete architecture, code, test, Gate Review callback, Final Acceptance,
+  and automatic Task Harness Retrospective orchestration.
+- Architecture, validation, and code-diff rejection/correction loops, including
+  corrected commit source chains and unchanged-input suppression.
+- Role-scoped translation feeds and Gateway input/output translation without
+  duplicate translation work.
+- Auto Memory review before Task Harness Retrospective, plus direct
+  retrospective execution when Auto Memory is disabled. The Auto Memory journey
+  also proves that workflow-role proposals produce a running then stopped Round
+  while Harness Engineer remains excluded.
+- PM-declared task workflow state persistence, workspace aggregation, and PM
+  session restoration.
+
+Run all backend journeys with `npm run test:e2e:backend`.
+
+### Browser E2E (reserved: `tests/e2e/`)
 
 | ID | Scenario | Entry point | Proves | Key assertions | When to run | Limitation |
 | --- | --- | --- | --- | --- | --- | --- |
@@ -129,7 +174,7 @@ recommended first cases when integration/E2E coverage is added.
 | E2E-002 | Start a role session and observe terminal output | Task workspace role tabs | Embedded terminal streams PTY output over `/ws` | Session starts, xterm receives output, status badge updates | L3, on runtime/terminal change | Not yet implemented; environment-dependent |
 | E2E-003 | Translation panel renders translated transcript | Translation panel | Translator session reads transcript JSONL and renders | Panel shows translated entries without mutating handoffs | L3, on translation change | Not yet implemented |
 | E2E-004 | Auto-orchestration journey (one-click → auto-follow → flow-pause) | GUI task workspace, auto mode | The relocated backend-owned orchestration drives the GUI end to end | One-click starts the roster via `POST /api/tasks/:slug/one-click-start`; the role tab follows `roundState.activeRole`; a stopped round with no next turn raises the `roundState.flowPause` notice | L3, on one-click/round/role-follow change | Not yet implemented; needs a Playwright harness + live `claude`/pty. Until then the three contracts are covered at integration level: task-routes inject + gateway inbound (P1), active-role-follow + app wiring (P2), round-service flowPause matrix + flow-pause-alert (P3) |
-| E2E-005 | Await-user alert (a user-facing role stops awaiting a user decision → flow-pause modal + alarm sound) | GUI task workspace; backend `roundState.flowPause` (reason `awaiting-user`) via workspace-state | A user-facing role's await-user pause reuses the standard flow-pause modal + alarm/notification sound; the issue #17 persistent web banner was removed (per user decision) and the backend await-user state is inert on the web | When `flowPause.reason === "awaiting-user"`, `selectFlowPauseAlertMessage` returns the generic modal wording ("No new turn started after project-manager stopped.") so the centered modal renders and the pause alarm/chime fires via the shared flow-pause sound path; the inert backend `flowPause.message` is NOT surfaced; no separate await-user banner exists | L3, on await-user / flow-pause-alert change | Not yet implemented as a browser spec; needs a Playwright harness + live `claude`/pty. Until then covered below L3 by `flow-pause-alert.test.ts` (awaiting-user → restored modal wording), plus the shared modal+sound mechanics exercised through E2E-004's flow-pause-notice contract |
+| E2E-005 | Flow-pause alert (a Round stops with no next Turn → blocking modal + optional alarm sound) | GUI task workspace; backend `roundState.flowPause` (reason `stopped-no-next-turn`) via workspace-state | A normally stopped Round opens the standard blocking flow-pause modal; sound is independent and repeats while enabled; Gateway does not suppress the modal, and successfully submitted Gateway input dismisses it | `selectFlowPauseAlertMessage` uses the backend pause signal; sound mode is `strong` whenever the preference is enabled; the latest successful Gateway-to-PM input ID is deduplicated before requesting dismissal | L3, on Round / flow-pause-alert change | Not yet implemented as a browser spec; covered below L3 by `flow-pause-alert.test.ts` and Gateway backend E2E status assertions |
 | E2E-006 | Gateway runtime connection switch arms/disarms the channel | Project dashboard `GatewayPanel` Connection switch | The desktop toggle gates channel connection (default off each session) end to end | Connection switch is disabled until an account is configured; arming it sets `connectionEnabled`/`running` and the phone can drive the gateway; disarming stops polling; it stays visually distinct from the `Gateway` (command-scope) switch | L3, on gateway connection/dashboard change | Not yet implemented; needs a Playwright harness + a channel double. Until then PP1–PP6 (default-disarmed, arm/connect, disarm/stop, disarmed-outbound-gate-with-cache, self-heal-cannot-bypass, expose orthogonality) are covered at unit level in `gateway-service.test.ts` / `gateway-settings-service.test.ts`; the live UI arm/disarm is verified by static wiring review + manual desktop check |
 
 ## Generated-Context Freshness Checks
@@ -156,9 +201,10 @@ recommended first cases when integration/E2E coverage is added.
 ## Known Testing Gaps
 
 - No integration tests exist yet; `tests/integration/**` is configured but empty.
-- No E2E tests exist yet; `tests/e2e/**` is configured (Playwright) but empty.
-- E2E and live runtime tests depend on a real `claude` binary and `node-pty`,
-  which are environment-sensitive and not currently stubbed for CI.
+- No browser/Playwright E2E specs exist yet. Backend E2E coverage exists under
+  `tests/e2e/backend/**` and uses mock Claude Code and Gateway runtimes.
+- Live runtime and browser E2E still depend on a real `claude` binary,
+  `node-pty`, and browser environment; those paths remain environment-sensitive.
 - There is no lint command in `package.json`; L0 is currently typecheck-only.
 - Coverage thresholds are not enforced by configuration.
 - `tests/unit/backend/harness-templates-sync.test.ts` shells out to

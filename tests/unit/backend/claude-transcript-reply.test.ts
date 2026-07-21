@@ -6,6 +6,7 @@ import {
   MAX_TURN_REPLY_CHARS,
   limitTranscriptReply,
   readLatestRoleTurnReply,
+  readTranscriptTurnEvidence,
   selectLatestTurnReply,
   type TranscriptTextEvent
 } from "../../../src/backend/services/claude-transcript-reply.js";
@@ -99,6 +100,32 @@ describe("readLatestRoleTurnReply", () => {
     const reply = await readLatestRoleTurnReply(pmSession(transcriptPath));
 
     expect(reply).toBeUndefined();
+  });
+});
+
+describe("readTranscriptTurnEvidence", () => {
+  it("finds an end_turn completion after the active turn began", async () => {
+    const transcriptPath = await writeTranscript([
+      assistantLine("old", "2026-06-10T23:00:00.000Z", "Earlier turn."),
+      assistantLine("current", "2026-06-11T00:00:01.000Z", "Current turn complete.")
+    ]);
+
+    const evidence = await readTranscriptTurnEvidence(pmSession(transcriptPath));
+
+    expect(evidence.completion).toEqual({
+      id: "current",
+      timestamp: "2026-06-11T00:00:01.000Z"
+    });
+  });
+
+  it("does not treat tool_use output as a completed turn", async () => {
+    const transcriptPath = await writeTranscript([
+      assistantLine("partial", "2026-06-11T00:00:01.000Z", "Still working.", "tool_use")
+    ]);
+
+    const evidence = await readTranscriptTurnEvidence(pmSession(transcriptPath));
+
+    expect(evidence.completion).toBeUndefined();
   });
 });
 

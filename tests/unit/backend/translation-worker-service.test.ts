@@ -1097,12 +1097,12 @@ function createBootstrapRunRecord(id: string, status: string) {
 function createTranslatorSessionService(
   starts: string[],
   options: { initialStatus?: RoleSessionRecord["status"] } = {}
-): Pick<SessionService, "ensureProjectTranslatorSession" | "getProjectTranslatorSession"> {
+): Pick<SessionService, "getRoleSession" | "startRoleSession" | "resumeRoleSession"> {
   let session: RoleSessionRecord | undefined;
-  const createSession = (): RoleSessionRecord => ({
+  const createSession = (taskSlug = "demo-task"): RoleSessionRecord => ({
     id: "translator-session",
     claudeSessionId: "translator-session",
-    taskSlug: "__project__",
+    taskSlug,
     role: "translator",
     status: options.initialStatus ?? "running",
     activityStatus: options.initialStatus === "idle" ? "idle" : "running",
@@ -1115,16 +1115,34 @@ function createTranslatorSessionService(
     updatedAt: "2026-06-20T00:00:00.000Z"
   });
   return {
-    async getProjectTranslatorSession() {
+    async getRoleSession() {
       return session;
     },
-    async ensureProjectTranslatorSession(_repoRoot, input = {}) {
+    async startRoleSession(_repoRoot, taskSlug, _role, input = {}) {
       if (session) {
         return session;
       }
-      starts.push(`start:translator:${input.taskSlug ?? "missing"}:${input.model ?? "default"}:${input.effort ?? "default"}`);
+      starts.push(`start:translator:${taskSlug}:${input.model ?? "default"}:${input.effort ?? "default"}`);
       session = {
-        ...createSession(),
+        ...createSession(taskSlug),
+        model: input.model ?? "gpt-5.5",
+        effort: input.effort ?? "medium"
+      };
+      return session;
+    },
+    async resumeRoleSession(_repoRoot, taskSlug, _role, input = {}) {
+      if (session) {
+        return {
+          ...session,
+          taskSlug,
+          status: "running",
+          model: input.model ?? session.model,
+          effort: input.effort ?? session.effort
+        };
+      }
+      starts.push(`resume:translator:${taskSlug}:${input.model ?? "default"}:${input.effort ?? "default"}`);
+      session = {
+        ...createSession(taskSlug),
         model: input.model ?? "gpt-5.5",
         effort: input.effort ?? "medium"
       };

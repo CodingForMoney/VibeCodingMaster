@@ -17,6 +17,7 @@ import {
 import { renderHarnessEngineerHarnessRules } from "../templates/harness/harness-engineer-agent.js";
 import { renderRootClaudeHarnessRules } from "../templates/harness/claude-root.js";
 import { renderGitignoreHarnessRules } from "../templates/harness/gitignore.js";
+import { ensureVcmMemoryBlock } from "../templates/harness/memory-block.js";
 import {
   renderLegacyProjectCodingStandardsTemplate,
   renderProjectCodingStandardsProjectSection,
@@ -31,11 +32,15 @@ import {
 import { renderProjectManagerHarnessRules } from "../templates/harness/project-manager-agent.js";
 import { renderPullRequestTemplateHarnessRules } from "../templates/harness/pull-request-template.js";
 import { renderTesterHarnessRules } from "../templates/harness/tester-agent.js";
+import { renderVcmArchitectureInterviewSkillRules } from "../templates/harness/vcm-architecture-interview-skill.js";
 import { renderVcmFinalAcceptanceSkillRules } from "../templates/harness/vcm-final-acceptance-skill.js";
 import { renderVcmHarnessBootstrapSkillRules } from "../templates/harness/vcm-harness-bootstrap-skill.js";
 import { renderVcmLongRunningValidationSkillRules } from "../templates/harness/vcm-long-running-validation-skill.js";
+import { renderVcmProposeMemorySkillRules } from "../templates/harness/vcm-propose-memory-skill.js";
 import { renderVcmReportHarnessIssueSkillRules } from "../templates/harness/vcm-report-harness-issue-skill.js";
 import { renderVcmRouteMessageSkillRules } from "../templates/harness/vcm-route-message-skill.js";
+import { renderUpdateTaskStateTool, renderVcmTaskStateSkillRules } from "../templates/harness/vcm-task-state-skill.js";
+import { renderCheckScaffoldLedgerTool } from "../templates/harness/check-scaffold-ledger.js";
 import { readVcmPackageVersion } from "../app-version.js";
 
 const CLI_DIR = path.dirname(fileURLToPath(import.meta.url));
@@ -51,7 +56,7 @@ const LEGACY_CODEX_HARNESS_PATHS = [
   ".ai/tools/request-codex-review"
 ];
 const VCM_HOOK_COMMAND = `sh -c 'if [ -z "\${VCM_TASK_SLUG:-}" ] || [ -z "\${VCM_ROLE:-}" ] || [ -z "\${VCM_API_URL:-}" ]; then exit 0; fi; node -e '"'"'let s="";process.stdin.setEncoding("utf8");process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{let event={};try{event=s.trim()?JSON.parse(s):{};}catch{event={raw:s};}process.stdout.write(JSON.stringify({taskSlug:process.env.VCM_TASK_SLUG,role:process.env.VCM_ROLE,event}));});'"'"' | curl -fsS --max-time 2 -X POST "\${VCM_API_URL}/api/hooks/claude-code" -H "content-type: application/json" --data-binary @- >/dev/null || true'`;
-const VCM_STOP_HOOK_COMMAND = `sh -c 'if [ -z "\${VCM_TASK_SLUG:-}" ] || [ -z "\${VCM_ROLE:-}" ] || [ -z "\${VCM_API_URL:-}" ]; then exit 0; fi; node -e '"'"'let s="";process.stdin.setEncoding("utf8");process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{let event={};try{event=s.trim()?JSON.parse(s):{};}catch{event={raw:s};}process.stdout.write(JSON.stringify({taskSlug:process.env.VCM_TASK_SLUG,role:process.env.VCM_ROLE,event}));});'"'"' | curl -fsS --max-time 5 -X POST "\${VCM_API_URL}/api/hooks/claude-code/stop" -H "content-type: application/json" --data-binary @- || true'`;
+const VCM_STOP_HOOK_COMMAND = `sh -c 'if [ -z "\${VCM_TASK_SLUG:-}" ] || [ -z "\${VCM_ROLE:-}" ] || [ -z "\${VCM_API_URL:-}" ]; then exit 0; fi; node -e '"'"'let s="";process.stdin.setEncoding("utf8");process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{let event={};try{event=s.trim()?JSON.parse(s):{};}catch{event={raw:s};}process.stdout.write(JSON.stringify({taskSlug:process.env.VCM_TASK_SLUG,role:process.env.VCM_ROLE,event}));});'"'"' | curl -fsS --retry 2 --retry-delay 1 --retry-all-errors --connect-timeout 1 --max-time 2 -X POST "\${VCM_API_URL}/api/hooks/claude-code/stop" -H "content-type: application/json" --data-binary @- || true'`;
 const VCM_PERMISSION_REQUEST_HOOK_COMMAND = `sh -c 'if [ -z "\${VCM_TASK_SLUG:-}" ] || [ -z "\${VCM_ROLE:-}" ] || [ -z "\${VCM_API_URL:-}" ]; then exit 0; fi; node -e '"'"'let s="";process.stdin.setEncoding("utf8");process.stdin.on("data",d=>s+=d);process.stdin.on("end",()=>{let event={};try{event=s.trim()?JSON.parse(s):{};}catch{event={raw:s};}process.stdout.write(JSON.stringify({taskSlug:process.env.VCM_TASK_SLUG,role:process.env.VCM_ROLE,event}));});'"'"' | curl -fsS --max-time 5 -X POST "\${VCM_API_URL}/api/hooks/claude-code/permission-request" -H "content-type: application/json" --data-binary @- || true'`;
 const VCM_BASH_GUARD_HOOK_COMMAND = `sh -c 'if [ -z "\${VCM_TASK_SLUG:-}" ] || [ -z "\${VCM_ROLE:-}" ]; then exit 0; fi; guard=""; repo="$(git rev-parse --show-toplevel 2>/dev/null || true)"; if [ -n "$repo" ] && [ -f "$repo/.ai/tools/vcm-bash-guard" ]; then guard="$repo/.ai/tools/vcm-bash-guard"; else cwd="$(pwd -P 2>/dev/null || pwd)"; dir="$cwd"; while [ -n "$dir" ] && [ "$dir" != "/" ]; do if [ -f "$dir/.ai/tools/vcm-bash-guard" ]; then guard="$dir/.ai/tools/vcm-bash-guard"; break; fi; dir="$(dirname "$dir")"; done; if [ -z "$guard" ] && [ -n "\${CLAUDE_PROJECT_DIR:-}" ] && [ -f "\${CLAUDE_PROJECT_DIR}/.ai/tools/vcm-bash-guard" ]; then guard="\${CLAUDE_PROJECT_DIR}/.ai/tools/vcm-bash-guard"; fi; fi; [ -n "$guard" ] || exit 0; python3 "$guard" || exit 0'`;
 const VCM_BASH_DEFAULT_TIMEOUT_MS = "600000";
@@ -84,10 +89,10 @@ const AGENT_FRONTMATTER = {
     tools: "Read, Grep, Glob, Bash, Write"
   },
   translator: {
-    description: "VCM project translation tool role for conversation translation, file translation, bootstrap, and memory updates."
+    description: "VCM task-scoped translation tool role for conversation translation, file translation, bootstrap, and memory updates."
   },
   "harness-engineer": {
-    description: "VCM project-scoped harness maintenance role for harness diagnosis, diff proposals, and VCM issue drafts."
+    description: "VCM task-scoped harness maintenance role for harness diagnosis, diff proposals, and VCM issue drafts."
   },
   "vcm-coder-worker": {
     description: "Bounded VCM implementation worker for assigned modules, files, and VCM:CODE markers from Coder.",
@@ -102,6 +107,7 @@ const MANAGED_FILES = [
     commentStyle: "html",
     category: "root-rules",
     blankLineBeforeEnd: true,
+    memoryBlock: true,
     content: renderRootClaudeHarnessRules()
   },
   {
@@ -135,6 +141,7 @@ const MANAGED_FILES = [
     agentName: "project-manager",
     commentStyle: "html",
     category: "core-agent",
+    memoryBlock: true,
     content: renderProjectManagerHarnessRules()
   },
   {
@@ -144,6 +151,7 @@ const MANAGED_FILES = [
     commentStyle: "html",
     category: "core-agent",
     blankLineBeforeEnd: true,
+    memoryBlock: true,
     content: renderArchitectHarnessRules()
   },
   {
@@ -152,6 +160,7 @@ const MANAGED_FILES = [
     agentName: "coder",
     commentStyle: "html",
     category: "core-agent",
+    memoryBlock: true,
     content: renderCoderHarnessRules()
   },
   {
@@ -160,6 +169,7 @@ const MANAGED_FILES = [
     agentName: "tester",
     commentStyle: "html",
     category: "core-agent",
+    memoryBlock: true,
     content: renderTesterHarnessRules()
   },
   {
@@ -175,6 +185,7 @@ const MANAGED_FILES = [
     agentName: "gate-reviewer",
     commentStyle: "html",
     category: "gate-reviewer-agent",
+    memoryBlock: true,
     content: renderGateReviewerAgentRules()
   },
   {
@@ -191,6 +202,7 @@ const MANAGED_FILES = [
     agentName: "harness-engineer",
     commentStyle: "html",
     category: "agent-harness-engineer",
+    memoryBlock: true,
     content: renderHarnessEngineerHarnessRules()
   },
   {
@@ -220,6 +232,12 @@ const DURABLE_DOC_TEMPLATES = [
 
 const WHOLE_FILES = [
   {
+    path: ".ai/tools/check-durable-docs",
+    category: "durable-docs-tool",
+    mode: 0o755,
+    templatePath: "scripts/harness-tools/check-durable-docs"
+  },
+  {
     path: ".ai/tools/generate-module-index",
     category: "generated-context-tool",
     mode: 0o755,
@@ -230,6 +248,17 @@ const WHOLE_FILES = [
     category: "generated-context-tool",
     mode: 0o755,
     templatePath: "scripts/harness-tools/generate-public-surface"
+  },
+  {
+    path: ".claude/skills/vcm-architecture-interview/SKILL.md",
+    category: "skill",
+    mode: 0o644,
+    content: renderSkillFile(
+      "VCM Architecture Interview Skill",
+      "vcm-architecture-interview",
+      "Use when Architect must confirm user-owned behavior and contract decisions before architecture planning.",
+      renderVcmArchitectureInterviewSkillRules()
+    )
   },
   {
     path: ".claude/skills/vcm-final-acceptance/SKILL.md",
@@ -276,6 +305,17 @@ const WHOLE_FILES = [
     )
   },
   {
+    path: ".claude/skills/vcm-task-state/SKILL.md",
+    category: "skill",
+    mode: 0o644,
+    content: renderSkillFile(
+      "VCM Task State Skill",
+      "vcm-task-state",
+      "Use only as project-manager to declare the current task workflow checkpoint to VCM.",
+      renderVcmTaskStateSkillRules()
+    )
+  },
+  {
     path: ".claude/skills/vcm-gate-review/SKILL.md",
     category: "skill",
     mode: 0o644,
@@ -298,10 +338,33 @@ const WHOLE_FILES = [
     )
   },
   {
+    path: ".claude/skills/vcm-propose-memory/SKILL.md",
+    category: "skill",
+    mode: 0o644,
+    content: renderSkillFile(
+      "VCM Propose Memory Skill",
+      "vcm-propose-memory",
+      "Use only when VCM requests a role memory proposal during Task Harness Review.",
+      renderVcmProposeMemorySkillRules()
+    )
+  },
+  {
     path: ".ai/tools/request-gate-review",
     category: "runtime-tool",
     mode: 0o755,
     content: renderRequestGateReviewTool()
+  },
+  {
+    path: ".ai/tools/update-task-state",
+    category: "runtime-tool",
+    mode: 0o755,
+    content: renderUpdateTaskStateTool()
+  },
+  {
+    path: ".ai/tools/check-scaffold-ledger",
+    category: "runtime-tool",
+    mode: 0o755,
+    content: renderCheckScaffoldLedgerTool()
   },
   {
     path: ".ai/tools/run-long-check",
@@ -538,8 +601,10 @@ function fixedDirectories() {
     ".claude/skills/vcm-harness-bootstrap/",
     ".claude/skills/vcm-long-running-validation/",
     ".claude/skills/vcm-route-message/",
+    ".claude/skills/vcm-task-state/",
     ".claude/skills/vcm-gate-review/",
     ".claude/skills/vcm-report-harness-issue/",
+    ".claude/skills/vcm-propose-memory/",
     ".ai/vcm/translations/",
     ".ai/vcm/gate-reviews/",
     ".ai/tools/",
@@ -600,6 +665,9 @@ async function installManagedFile({ projectRoot, definition, dryRun, operations 
       nextContent = migrateLegacyManagedFile(definition, currentContent, block)
         ?? `${currentContent.trimEnd()}\n\n${block}\n`;
     }
+  }
+  if (definition.memoryBlock) {
+    nextContent = ensureVcmMemoryBlock(nextContent);
   }
 
   await writeIfChanged({

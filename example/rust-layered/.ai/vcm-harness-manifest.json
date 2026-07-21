@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
   "manager": "vcm",
-  "harnessVersion": "0.6.22",
+  "harnessVersion": "0.7.5",
   "installMode": "fixed",
   "installedAt": "2026-06-07T00:00:00Z",
-  "updatedAt": "2026-07-11T12:03:01.299Z",
+  "updatedAt": "2026-07-17T16:05:21.385Z",
   "runtimeRoots": [
     ".ai/vcm/",
     ".claude/worktrees/"
@@ -312,6 +312,14 @@
       "lifecycle": "long-term"
     },
     {
+      "path": ".claude/skills/vcm-task-state/",
+      "entryType": "directory",
+      "category": "skill-directory",
+      "ownership": "vcm-created",
+      "source": "vcm-template",
+      "lifecycle": "long-term"
+    },
+    {
       "path": ".claude/skills/vcm-gate-review/",
       "entryType": "directory",
       "category": "skill-directory",
@@ -321,6 +329,14 @@
     },
     {
       "path": ".claude/skills/vcm-report-harness-issue/",
+      "entryType": "directory",
+      "category": "skill-directory",
+      "ownership": "vcm-created",
+      "source": "vcm-template",
+      "lifecycle": "long-term"
+    },
+    {
+      "path": ".claude/skills/vcm-propose-memory/",
       "entryType": "directory",
       "category": "skill-directory",
       "ownership": "vcm-created",
@@ -376,6 +392,18 @@
       "lifecycle": "long-term"
     },
     {
+      "path": ".ai/tools/check-durable-docs",
+      "entryType": "file",
+      "category": "durable-docs-tool",
+      "ownership": "whole-file",
+      "source": "vcm-template",
+      "lifecycle": "long-term",
+      "uninstall": {
+        "action": "delete-file-if-unchanged",
+        "requiresConfirmation": false
+      }
+    },
+    {
       "path": ".ai/tools/generate-module-index",
       "entryType": "file",
       "category": "generated-context-tool",
@@ -391,6 +419,18 @@
       "path": ".ai/tools/generate-public-surface",
       "entryType": "file",
       "category": "generated-context-tool",
+      "ownership": "whole-file",
+      "source": "vcm-template",
+      "lifecycle": "long-term",
+      "uninstall": {
+        "action": "delete-file-if-unchanged",
+        "requiresConfirmation": false
+      }
+    },
+    {
+      "path": ".claude/skills/vcm-architecture-interview/SKILL.md",
+      "entryType": "file",
+      "category": "skill",
       "ownership": "whole-file",
       "source": "vcm-template",
       "lifecycle": "long-term",
@@ -448,6 +488,18 @@
       }
     },
     {
+      "path": ".claude/skills/vcm-task-state/SKILL.md",
+      "entryType": "file",
+      "category": "skill",
+      "ownership": "whole-file",
+      "source": "vcm-template",
+      "lifecycle": "long-term",
+      "uninstall": {
+        "action": "delete-file-if-unchanged",
+        "requiresConfirmation": false
+      }
+    },
+    {
       "path": ".claude/skills/vcm-gate-review/SKILL.md",
       "entryType": "file",
       "category": "skill",
@@ -472,7 +524,31 @@
       }
     },
     {
+      "path": ".claude/skills/vcm-propose-memory/SKILL.md",
+      "entryType": "file",
+      "category": "skill",
+      "ownership": "whole-file",
+      "source": "vcm-template",
+      "lifecycle": "long-term",
+      "uninstall": {
+        "action": "delete-file-if-unchanged",
+        "requiresConfirmation": false
+      }
+    },
+    {
       "path": ".ai/tools/request-gate-review",
+      "entryType": "file",
+      "category": "runtime-tool",
+      "ownership": "whole-file",
+      "source": "vcm-template",
+      "lifecycle": "conditional-long-term",
+      "uninstall": {
+        "action": "delete-file-if-unchanged",
+        "requiresConfirmation": false
+      }
+    },
+    {
+      "path": ".ai/tools/update-task-state",
       "entryType": "file",
       "category": "runtime-tool",
       "ownership": "whole-file",

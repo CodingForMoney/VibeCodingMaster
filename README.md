@@ -181,6 +181,12 @@ By default:
 Roles for the same task share the same task worktree. VCM does not create one
 worktree per role.
 
+Project Manager may record an advisory task checkpoint under
+`.ai/vcm/workflow/state.json`. VCM restores and displays this context after a
+restart, but it does not infer transitions or choose the next role. Current
+artifacts, Gate Review state, Round/Turn state, and the role rules remain
+authoritative.
+
 Typical flow:
 
 ```text
@@ -253,8 +259,10 @@ Automatic mode:
 - the UI switches to the target role before dispatch
 - Claude Code hooks confirm whether the prompt was accepted
 
-If the flow stops, VCM shows a pause alert. The `Pause alert sound` setting only
-controls the sound; the stopped-flow state is still shown in the UI.
+If the flow stops, VCM always shows a blocking pause alert. `Pause alert sound`
+only controls the looping sound. Enabling Gateway turns that preference off once;
+it can be turned back on afterward. A new Gateway command closes an open pause
+alert after its instruction is successfully submitted to PM.
 
 ## Gate Review Gates
 
@@ -280,8 +288,9 @@ findings back to the responsible role.
 
 Conversation translation is controlled from the sidebar `Translation` section.
 
-VCM uses the project-scoped Translator role and Claude transcript JSONL files,
-not raw terminal text.
+VCM uses a task-scoped Translator role and Claude transcript JSONL files, not
+raw terminal text. Translation memory and completed file translations remain
+project-level durable data.
 
 Common controls:
 
@@ -385,45 +394,58 @@ Use it to:
 - merge task harness commits back to the connected repository branch when
   appropriate
 
-Harness Engineer is project-scoped and resumable. When it performs task work,
-VCM runs it from the active task worktree.
+Harness Engineer is task-scoped and runs from the active task worktree. A new
+task receives its own Harness Engineer session. Durable memory is versioned with
+the project harness files.
 
 ### Auto Memory
 
-Enable `Auto memory` in the `VCM Harness` sidebar group to collect durable role
-knowledge after a complete task passes Final Acceptance. Project Manager,
-Architect, Coder, Tester, and an enabled Gate Reviewer submit memory drafts in
-sequence. Harness Engineer verifies and consolidates them before VCM applies
-the result.
+`Auto memory` is the switch for the entire automated memory workflow. During
+Review Task Harness after Final Acceptance, Project Manager, Architect, Coder,
+Tester, and an enabled Gate Reviewer submit proposals in sequence through
+`vcm-propose-memory`. Harness Engineer verifies and consolidates them before VCM
+applies the result. Roles cannot edit active memory directly.
 
-Canonical memory is stored under the base repository's `.ai/vcm/memory/`.
-Harness Studio shows current memory and task-local applied history. Memory is
-applied before user review; while the task worktree remains available, the user
-can edit current memory or revert a recorded change.
+Shared memory is stored in the root `CLAUDE.md` `<VCM-memory>` block. Role memory
+is stored in the matching `.claude/agents/*.md` block. VCM changes only block
+contents and creates a dedicated commit in the active task worktree. Harness
+Studio shows current memory and task-local applied history. Memory is applied
+before user review; while the task worktree remains available, the user can edit
+current memory or revert a recorded change through another commit.
 
 Post-task processing is ordered by the backend:
 
 ```text
 Final Acceptance
-  -> Auto Memory, when enabled
+  -> Review Task Harness
+  -> Workflow-role memory proposals, when Auto Memory is enabled
+  -> Harness Engineer memory review, when Auto Memory is enabled
   -> Task Harness Retrospective
 ```
 
-Auto Memory adds no retrospective prerequisite when it is disabled. When it is
-enabled, both automatic and manual retrospective requests wait until memory has
-been applied for the current Final Acceptance. A failed memory review must be
-retried from Harness Studio before retrospective can run.
+Memory proposal prompts sent to Project Manager, Architect, Coder, Tester, and
+an enabled Gate Reviewer use their normal task sessions and participate in
+Round/Turn tracking. Harness Engineer review and retrospective work remain tool
+role activity and do not participate in Round completion.
+
+When Auto Memory is disabled, Review Task Harness does not collect proposals or
+ask Harness Engineer to update memory. When enabled, both automatic and manual
+review requests complete the memory phase before retrospective analysis. A
+failed memory review must be retried from Harness Studio before retrospective
+can continue.
 
 ## Closing a Task
 
 `Close Task` is destructive.
 
-It stops task-owned VCM role sessions and removes task-owned worktree/branch
-state. Commit or preserve anything important before closing.
+It stops every running session owned by the task, including Translator and
+Harness Engineer, then removes task-owned worktree/branch state. Commit or
+preserve anything important before closing.
 
-Project-scoped tool sessions such as Translator and Harness Engineer are not
-ordinary task deliverables. VCM may move them to a safe cwd when task context
-changes.
+Uncommitted changes, unmerged commits, and cleanup failures are reported as
+warnings; they do not block logical task closure. VCM may discard the task
+worktree and task branch even when they contain commits that are not present on
+the connected repository branch.
 
 ## Troubleshooting
 
@@ -512,7 +534,11 @@ npm start
 ## Documentation
 
 - `docs/ARCHITECTURE.md`: repository architecture
+- `docs/CODING_STANDARDS.md`: shared implementation and test standards
+- `docs/GLOSSARY.md`: allowed durable abbreviations
 - `docs/TESTING.md`: validation strategy
+- `docs/known-issues.md`: current unresolved durable issues
+- `src/backend/gateway/ARCHITECTURE.md`: mobile gateway sub-area architecture
 - `docs/vcm-cc-best-practices.md`: current VCM Claude Code harness practice
 - `docs/v0.5-custom-workflow-plan.md`: deferred custom workflow proposal
 - `docs/cc-best-practices.md`: archived generic Claude Code harness notes

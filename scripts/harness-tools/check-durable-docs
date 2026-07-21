@@ -1,0 +1,298 @@
+#!/usr/bin/env python3
+import argparse
+import json
+import re
+import subprocess
+import sys
+from dataclasses import asdict, dataclass
+from pathlib import Path
+
+
+EXCLUDED_PARTS = {".git", ".claude", ".ai", "target", "node_modules", "dist", "build"}
+KNOWN_ISSUE_FIELDS = (
+    "status",
+    "category",
+    "affected modules/surfaces",
+    "current gap",
+    "impact",
+    "mitigation or workaround",
+    "resolution condition",
+    "related issues",
+)
+TERMINAL_PLAN_WORDS = ("complete", "completed", "shipped", "delivered", "closed", "done", "superseded", "obsolete")
+
+
+@dataclass(frozen=True)
+class Finding:
+    code: str
+    path: str
+    line: int
+    message: str
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="Check VCM durable project documentation contracts.")
+    parser.add_argument("--json", action="store_true", dest="json_output", help="Write machine-readable output.")
+    return parser.parse_args()
+
+
+def repository_root() -> Path:
+    try:
+        result = subprocess.run(
+            ["git", "rev-parse", "--show-toplevel"],
+            check=False,
+            text=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.DEVNULL,
+        )
+    except FileNotFoundError:
+        return Path.cwd().resolve()
+    if result.returncode == 0 and result.stdout.strip():
+        return Path(result.stdout.strip()).resolve()
+    return Path.cwd().resolve()
+
+
+def relative(path: Path, root: Path) -> str:
+    return path.resolve().relative_to(root).as_posix()
+
+
+def read_text(path: Path) -> str:
+    return path.read_text(encoding="utf-8")
+
+
+def markdown_headings(lines: list[str], pattern: re.Pattern[str]) -> list[tuple[int, re.Match[str]]]:
+    headings: list[tuple[int, re.Match[str]]] = []
+    fenced = False
+    for index, line in enumerate(lines):
+        if re.match(r"^\s*(```|~~~)", line):
+            fenced = not fenced
+            continue
+        if fenced:
+            continue
+        match = pattern.match(line)
+        if match:
+            headings.append((index, match))
+    return headings
+
+
+def first_match_line(lines: list[str], pattern: re.Pattern[str], start: int = 0, end: int | None = None) -> int | None:
+    stop = len(lines) if end is None else min(end, len(lines))
+    for index in range(start, stop):
+        if pattern.search(lines[index]):
+            return index + 1
+    return None
+
+
+def check_known_issues(root: Path, findings: list[Finding]) -> None:
+    path = root / "docs/known-issues.md"
+    if not path.is_file():
+        return
+    lines = read_text(path).splitlines()
+    heading_pattern = re.compile(r"^##\s+(?:\[)?KI-(\d+)(?:\])?\b", re.IGNORECASE)
+    headings = markdown_headings(lines, heading_pattern)
+    for heading_index, (start, match) in enumerate(headings):
+        end = headings[heading_index + 1][0] if heading_index + 1 < len(headings) else len(lines)
+        body = "\n".join(lines[start + 1:end])
+        issue_id = f"KI-{match.group(1)}"
+        fields: dict[str, str] = {}
+        for line in lines[start + 1:end]:
+            field_match = re.match(r"^\s*-\s*([^:]+):\s*(.*)$", line)
+            if field_match:
+                fields[field_match.group(1).strip().lower()] = field_match.group(2).strip()
+        missing = [field for field in KNOWN_ISSUE_FIELDS if field not in fields]
+        if missing:
+            findings.append(Finding(
+                "DD_KI_FIELDS",
+                relative(path, root),
+                start + 1,
+                f"{issue_id} is missing required current-state fields: {', '.join(missing)}.",
+            ))
+        status = fields.get("status", "").lower()
+        if status and status not in {"open", "planned", "accepted"}:
+            findings.append(Finding(
+                "DD_KI_STATUS",
+                relative(path, root),
+                start + 1,
+                f"{issue_id} has non-current status '{fields['status']}'. Remove terminal issues instead of retaining history.",
+            ))
+        resolved_line = first_match_line(
+            lines,
+            re.compile(r"(?:\bRESOLVED\b|\bFIXED\b|\bCLOSED\b|\bOBSOLETE\b|nothing remains open)", re.IGNORECASE),
+            start,
+            end,
+        )
+        if resolved_line is not None:
+            findings.append(Finding(
+                "DD_KI_RESOLVED_HISTORY",
+                relative(path, root),
+                resolved_line,
+                f"{issue_id} retains resolved or terminal history. Rewrite the entry around only the current unresolved gap.",
+            ))
+        provenance_line = first_match_line(
+            lines,
+            re.compile(r"\bROUND-?\d+\b|\b(?:reviewer|tester)[ -]?(?:confirmed|approved|proven)|\bcommit\s+`?[0-9a-f]{7,40}\b", re.IGNORECASE),
+            start,
+            end,
+        )
+        if provenance_line is not None:
+            findings.append(Finding(
+                "DD_KI_TASK_HISTORY",
+                relative(path, root),
+                provenance_line,
+                f"{issue_id} contains task or validation provenance that belongs in Git, PR, or task evidence.",
+            ))
+
+
+def check_active_plans(root: Path, findings: list[Finding]) -> None:
+    plans_root = root / "docs/plans"
+    if not plans_root.is_dir():
+        return
+    terminal_pattern = re.compile(r"\b(?:" + "|".join(TERMINAL_PLAN_WORDS) + r")\b", re.IGNORECASE)
+    status_pattern = re.compile(r"^\s*(?:>\s*)?(?:\*\*)?(?:status|stability)(?:\*\*)?\s*[:\-\u2014]", re.IGNORECASE)
+    closed_doc_pattern = re.compile(r"\b(?:plan|task|document|doc|phase|work)\b.{0,40}\b(?:is\s+)?(?:closed|complete|completed|shipped|delivered|done)\b", re.IGNORECASE)
+    for path in sorted(plans_root.rglob("*.md")):
+        lines = read_text(path).splitlines()
+        for index, line in enumerate(lines[:60]):
+            if (status_pattern.search(line) and terminal_pattern.search(line)) or (index < 15 and closed_doc_pattern.search(line)):
+                findings.append(Finding(
+                    "DD_ACTIVE_PLAN_TERMINAL",
+                    relative(path, root),
+                    index + 1,
+                    "Completed or terminal plans must leave the active plans collection; Git and PR history preserve execution history.",
+                ))
+                break
+
+
+def architecture_docs(root: Path) -> list[Path]:
+    paths: list[Path] = []
+    project_doc = root / "docs/ARCHITECTURE.md"
+    if project_doc.is_file():
+        paths.append(project_doc)
+    for path in root.rglob("ARCHITECTURE.md"):
+        if path == project_doc or any(part in EXCLUDED_PARTS for part in path.relative_to(root).parts):
+            continue
+        paths.append(path)
+    return sorted(set(paths))
+
+
+def check_architecture_history(root: Path, findings: list[Finding]) -> None:
+    patterns = (
+        ("DD_ARCH_TASK_LABEL", re.compile(r"\bSCF-[A-Za-z0-9.-]+\b|\bROUND-?\d+\b", re.IGNORECASE), "task labels"),
+        ("DD_ARCH_COMMIT_HISTORY", re.compile(r"\bcommit\s+`?[0-9a-f]{7,40}\b", re.IGNORECASE), "commit history"),
+        ("DD_ARCH_VALIDATION_HISTORY", re.compile(r"\b(?:reviewer|tester).{0,40}(?:PASS|confirmed|approved|proven)\b", re.IGNORECASE), "role validation history"),
+    )
+    for path in architecture_docs(root):
+        lines = read_text(path).splitlines()
+        for code, pattern, label in patterns:
+            line = first_match_line(lines, pattern)
+            if line is not None:
+                findings.append(Finding(
+                    code,
+                    relative(path, root),
+                    line,
+                    f"Architecture documentation contains {label}; keep only current architecture and use Git, PR, or task evidence for history.",
+                ))
+
+
+def check_testing_history(root: Path, findings: list[Finding]) -> None:
+    path = root / "docs/TESTING.md"
+    if not path.is_file():
+        return
+    lines = read_text(path).splitlines()
+    patterns = (
+        ("DD_TEST_TASK_HISTORY", re.compile(r"\bROUND-?\d+\b|\bcommit\s+`?[0-9a-f]{7,40}\b", re.IGNORECASE), "task or commit history"),
+        ("DD_TEST_VERDICT_HISTORY", re.compile(r"\b(?:reviewer|tester)[ -]?(?:confirmed|approved|proven)|\bL[0-4]\s+(?:PASS|FAIL)\b", re.IGNORECASE), "past validation verdicts"),
+        ("DD_TEST_LEGACY_OWNER", re.compile(r"\breviewer-owned\b|\brun by the reviewer\b", re.IGNORECASE), "legacy Reviewer ownership"),
+    )
+    for code, pattern, label in patterns:
+        line = first_match_line(lines, pattern)
+        if line is not None:
+            findings.append(Finding(
+                code,
+                relative(path, root),
+                line,
+                f"Testing documentation contains {label}; keep current strategy, runnable commands, case definitions, and current gaps only.",
+            ))
+
+
+def load_module_index(root: Path) -> dict | None:
+    path = root / ".ai/generated/module-index.json"
+    if not path.is_file():
+        return None
+    try:
+        value = json.loads(read_text(path))
+    except (json.JSONDecodeError, OSError):
+        return None
+    return value if isinstance(value, dict) else None
+
+
+def check_generated_architecture_facts(root: Path, findings: list[Finding]) -> None:
+    index = load_module_index(root)
+    if index is None:
+        return
+    layers = index.get("layers")
+    if not isinstance(layers, list):
+        return
+    layer_counts: dict[str, int] = {}
+    for layer in layers:
+        if not isinstance(layer, dict) or not isinstance(layer.get("name"), str) or not isinstance(layer.get("modules"), list):
+            continue
+        name = layer["name"]
+        modules = layer["modules"]
+        layer_counts[name] = len(modules)
+        for module in modules:
+            if not isinstance(module, dict):
+                continue
+            architecture_doc = module.get("architectureDoc")
+            if isinstance(architecture_doc, str) and architecture_doc and not (root / architecture_doc).is_file():
+                findings.append(Finding(
+                    "DD_MODULE_ARCH_MISSING",
+                    architecture_doc,
+                    1,
+                    f"Module index names a missing architecture document for module '{module.get('name', 'unknown')}'.",
+                ))
+    project_doc = root / "docs/ARCHITECTURE.md"
+    if not project_doc.is_file():
+        return
+    row_pattern = re.compile(r"^\|\s*`?([^`|]+)`?\s*\|\s*(\d+)\s*\|")
+    for index_number, line in enumerate(read_text(project_doc).splitlines()):
+        match = row_pattern.match(line)
+        if not match:
+            continue
+        name = match.group(1).strip()
+        if name not in layer_counts:
+            continue
+        documented = int(match.group(2))
+        generated = layer_counts[name]
+        if documented != generated:
+            findings.append(Finding(
+                "DD_ARCH_GENERATED_COUNT",
+                relative(project_doc, root),
+                index_number + 1,
+                f"Layer '{name}' documents {documented} modules, but .ai/generated/module-index.json contains {generated}.",
+            ))
+
+
+def main() -> int:
+    args = parse_args()
+    root = repository_root()
+    findings: list[Finding] = []
+    check_known_issues(root, findings)
+    check_active_plans(root, findings)
+    check_architecture_history(root, findings)
+    check_testing_history(root, findings)
+    check_generated_architecture_facts(root, findings)
+    findings.sort(key=lambda item: (item.path, item.line, item.code))
+    if args.json_output:
+        print(json.dumps({"ok": not findings, "findings": [asdict(item) for item in findings]}, indent=2))
+    elif findings:
+        for item in findings:
+            print(f"{item.path}:{item.line}: [{item.code}] {item.message}")
+        print(f"Durable docs audit failed with {len(findings)} finding(s).")
+    else:
+        print("Durable docs audit passed.")
+    return 1 if findings else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

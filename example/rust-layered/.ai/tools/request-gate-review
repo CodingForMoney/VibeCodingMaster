@@ -26,6 +26,7 @@ SOURCE_ARTIFACTS = {
     "validation-adequacy": [
         ".ai/vcm/handoffs/architecture-plan.md",
         ".ai/vcm/handoffs/test-report.md",
+        "docs/TESTING.md",
     ],
     "code-diff": [],
 }
@@ -34,7 +35,10 @@ CODE_DIFF_SOURCE_ARTIFACTS = {
         ".ai/vcm/handoffs/architecture-plan.md",
         ".ai/vcm/handoffs/coder-completion.md",
     ],
-    "architect-debug": [".ai/vcm/handoffs/role-commands/architect.md"],
+    "architect-debug": [
+        ".ai/vcm/handoffs/role-commands/architect.md",
+        ".ai/vcm/handoffs/architect-debug.md",
+    ],
     "architect-diagnosis": [".ai/vcm/handoffs/architecture-diagnosis.md"],
 }
 CORE_INPUT_ARTIFACTS = {
@@ -173,13 +177,40 @@ def code_diff_range(root: Path, gate_record: dict):
     return (base or head, head)
 
 
-def source_artifacts(gate: str, source: str | None) -> list[str]:
+def normalize_code_diff_sources(gate_record: dict) -> list[str]:
+    sources = gate_record.get("codeDiffSources")
+    normalized = [item for item in sources if item in CODE_DIFF_SOURCES] if isinstance(sources, list) else []
+    source = gate_record.get("codeDiffSource")
+    if not normalized and source in CODE_DIFF_SOURCES:
+        normalized.append(source)
+    return list(dict.fromkeys(normalized))
+
+
+def code_diff_sources(gate_record: dict, source: str | None, code_diff: dict) -> list[str]:
+    if source not in CODE_DIFF_SOURCES:
+        return []
+    continuing_recorded_range = (
+        gate_record.get("baseCommit") == code_diff.get("baseCommit")
+        and (
+            (gate_record.get("status") == "completed" and gate_record.get("decision") == "request_changes")
+            or gate_record.get("status") == "failed"
+        )
+    )
+    previous = normalize_code_diff_sources(gate_record) if continuing_recorded_range else []
+    return list(dict.fromkeys([*previous, source]))
+
+
+def source_artifacts(gate: str, sources: list[str] | None) -> list[str]:
     if gate != "code-diff":
         return SOURCE_ARTIFACTS[gate]
-    return CODE_DIFF_SOURCE_ARTIFACTS.get(source, [])
+    return list(dict.fromkeys(
+        artifact
+        for source in (sources or [])
+        for artifact in CODE_DIFF_SOURCE_ARTIFACTS.get(source, [])
+    ))
 
 
-def input_hash(root: Path, gate: str, source: str | None = None, gate_record=None) -> str:
+def input_hash(root: Path, gate: str, sources: list[str] | None = None, gate_record=None) -> str:
     gate_record = gate_record or {}
     digest = hashlib.sha256()
     core_artifact = CORE_INPUT_ARTIFACTS.get(gate)
@@ -187,16 +218,19 @@ def input_hash(root: Path, gate: str, source: str | None = None, gate_record=Non
         path = root / core_artifact
         digest.update(core_artifact.encode())
         digest.update(path.read_bytes())
-        return digest.hexdigest()
 
     common = [
         "CLAUDE.md",
+        ".claude/agents/architect.md",
+        ".claude/agents/coder.md",
         ".claude/agents/gate-reviewer.md",
+        ".claude/agents/tester.md",
         ".claude/skills/vcm-gate-review/SKILL.md",
         ".ai/tools/request-gate-review",
         "docs/CODING_STANDARDS.md",
     ]
-    for relative in common + source_artifacts(gate, source):
+    inputs = dict.fromkeys(relative for relative in common + source_artifacts(gate, sources) if relative != core_artifact)
+    for relative in inputs:
         path = root / relative
         digest.update(relative.encode())
         if path.is_file():
@@ -204,11 +238,33 @@ def input_hash(root: Path, gate: str, source: str | None = None, gate_record=Non
         else:
             digest.update(b"<missing>")
     if gate == "architecture-plan":
-        digest.update(command_output(root, ["git", "status", "--porcelain=v1"]))
-        digest.update(command_output(root, ["git", "diff", "--binary"]))
-        digest.update(command_output(root, ["git", "diff", "--cached", "--binary"]))
+        evidence_pathspec = ["--", ".", ":(exclude).ai/vcm/**"]
+        digest.update(b"head")
+        digest.update(command_output(root, ["git", "rev-parse", "HEAD"]))
+        digest.update(b"workingDiff")
+        digest.update(command_output(root, ["git", "diff", "--binary", *evidence_pathspec]))
+        digest.update(b"stagedDiff")
+        digest.update(command_output(root, ["git", "diff", "--cached", "--binary", *evidence_pathspec]))
+        untracked = command_text(root, ["git", "ls-files", "--others", "--exclude-standard", *evidence_pathspec]).splitlines()
+        for relative in untracked:
+            digest.update(b"untracked")
+            digest.update(relative.encode())
+            digest.update(command_output(root, ["git", "hash-object", "--", relative]))
+    if gate == "validation-adequacy":
+        evidence_pathspec = ["--", ".", ":(exclude).ai/vcm/**", ":(exclude)docs/**"]
+        digest.update(b"trackedEvidence")
+        digest.update(command_output(root, ["git", "ls-files", "-s", *evidence_pathspec]))
+        digest.update(b"workingEvidence")
+        digest.update(command_output(root, ["git", "diff", "--binary", *evidence_pathspec]))
+        digest.update(b"stagedEvidence")
+        digest.update(command_output(root, ["git", "diff", "--cached", "--binary", *evidence_pathspec]))
+        untracked = command_text(root, ["git", "ls-files", "--others", "--exclude-standard", *evidence_pathspec]).splitlines()
+        for relative in untracked:
+            digest.update(b"untrackedEvidence")
+            digest.update(relative.encode())
+            digest.update(command_output(root, ["git", "hash-object", "--", relative]))
     if gate == "code-diff":
-        digest.update((source or "<missing>").encode())
+        digest.update(("\n".join(sources or []) or "<missing>").encode())
         base, head = code_diff_range(root, gate_record)
         if base and head and base != head:
             digest.update(base.encode())
@@ -372,7 +428,8 @@ def local_request(gate: str, source: str | None) -> int:
             "diffStat": command_text(root, ["git", "diff", "--stat", "--find-renames", f"{base}..{head}"]),
         }
 
-    current_hash = input_hash(root, gate, source, gate_record if isinstance(gate_record, dict) else {})
+    sources = code_diff_sources(gate_record, source, code_diff) if gate == "code-diff" else None
+    current_hash = input_hash(root, gate, sources, gate_record if isinstance(gate_record, dict) else {})
     if (
         gate_record.get("status") == "completed"
         and gate_record.get("decision") == "approve"
@@ -394,6 +451,7 @@ def local_request(gate: str, source: str | None) -> int:
         "requestedAt": requested_at,
         "inputHash": current_hash,
         "codeDiffSource": source,
+        "codeDiffSources": sources,
         "codeDiff": code_diff or None,
         "reportPath": report_path,
         "promptPath": prompt_path,
@@ -414,6 +472,7 @@ def local_request(gate: str, source: str | None) -> int:
         "changedFiles": code_diff.get("changedFiles"),
         "diffStat": code_diff.get("diffStat"),
         "codeDiffSource": source,
+        "codeDiffSources": sources,
         "requestId": rid,
         "requestPath": request_path.relative_to(root).as_posix(),
         "requestedAt": requested_at,

@@ -9,16 +9,21 @@ export type HarnessFileKind =
   | "claude-settings"
   | "pull-request-template"
   | "skill-vcm-final-acceptance"
+  | "skill-vcm-architecture-interview"
   | "skill-vcm-harness-bootstrap"
   | "skill-vcm-long-running-validation"
   | "skill-vcm-route-message"
+  | "skill-vcm-task-state"
   | "skill-vcm-gate-review"
   | "skill-vcm-report-harness-issue"
+  | "skill-vcm-propose-memory"
   | "agent-gate-reviewer"
   | "agent-translator"
   | "agent-harness-engineer"
   | "agent-coder-worker"
   | "tool-request-gate-review"
+  | "tool-update-task-state"
+  | "tool-check-scaffold-ledger"
   | "agent-project-manager"
   | "agent-architect"
   | "agent-coder"
@@ -255,16 +260,12 @@ export interface RunHarnessBootstrapResult {
 
 export interface RecordHarnessBootstrapHookInput {
   eventName: "Stop" | "StopFailure" | "UserPromptSubmit" | "PostCompact";
+  taskSlug?: string;
   sessionId?: string;
   claudeSessionId?: string;
 }
 
-export type HarnessFeedbackStatus =
-  | "idle"
-  | "queued"
-  | "analyzing"
-  | "awaiting_user_approval"
-  | "applying";
+export type HarnessFeedbackStatus = "idle" | "queued";
 export type HarnessFeedbackSource = "role-feedback" | "task-retrospective";
 export type TaskHarnessRetrospectiveTrigger = "manual" | "auto";
 
@@ -278,35 +279,20 @@ export interface HarnessFeedbackQueueItem {
   source?: HarnessFeedbackSource;
 }
 
-export interface HarnessFeedbackActiveItem extends HarnessFeedbackQueueItem {
-  status: Exclude<HarnessFeedbackStatus, "idle" | "queued">;
-  startedAt?: string;
-  updatedAt?: string;
-  trigger?: TaskHarnessRetrospectiveTrigger;
-  finalAcceptanceHash?: string;
-  feedbackContent: string;
-  analysisPath?: string;
-  analysisContent?: string;
-  applyReportPath?: string;
-  applyReportContent?: string;
-}
-
 export interface HarnessFeedbackStateReport {
   version: 1;
   status: HarnessFeedbackStatus;
   queuedCount: number;
   pending: HarnessFeedbackQueueItem[];
-  active?: HarnessFeedbackActiveItem;
   warnings: string[];
-}
-
-export interface HarnessFeedbackDecisionRequest {
-  taskSlug?: string;
-  action: "approve" | "reject" | "comment" | "cancel";
-  comment?: string;
 }
 
 export interface StartTaskHarnessRetrospectiveRequest {
   taskSlug?: string;
   trigger?: TaskHarnessRetrospectiveTrigger;
+}
+
+export interface SendHarnessFeedbackRequest {
+  taskSlug?: string;
+  feedbackPath?: string;
 }

@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createCommandRunner } from "../../../src/backend/adapters/command-runner.js";
 import { createNodeFileSystemAdapter } from "../../../src/backend/adapters/filesystem.js";
 import { createGitAdapter } from "../../../src/backend/adapters/git-adapter.js";
+import type { GitAdapter } from "../../../src/backend/adapters/git-adapter.js";
 import { createArtifactService } from "../../../src/backend/services/artifact-service.js";
 import { createTaskService } from "../../../src/backend/services/task-service.js";
 import type { ProjectConfig } from "../../../src/shared/types/project.js";
@@ -31,6 +32,7 @@ describe("createTaskService", () => {
       worktreePath: path.join(repoRoot, ".claude/worktrees/demo-task")
     });
     await expect(fileExists(path.join(task.worktreePath, ".git"))).resolves.toBe(true);
+    await expect(fileExists(path.join(task.worktreePath, ".ai/vcm/handoffs/architecture-brief.md"))).resolves.toBe(true);
     await expect(fileExists(path.join(task.worktreePath, ".ai/vcm/handoffs/architecture-plan.md"))).resolves.toBe(true);
     await expect(fileExists(path.join(task.worktreePath, ".ai/vcm/handoffs/final-acceptance.md"))).resolves.toBe(true);
     await expect(fileExists(path.join(task.worktreePath, ".ai/vcm/sessions"))).resolves.toBe(true);
@@ -53,6 +55,10 @@ describe("createTaskService", () => {
 
     const result = await service.cleanupTask(repoRoot, "cleanup-task");
 
+    expect(result.taskClosed).toBe(true);
+    expect(result.worktreeRemoved).toBe(true);
+    expect(result.branchDeleted).toBe(true);
+    expect(result.stateRemoved).toBe(true);
     expect(result.removedWorktreePath).toBe(task.worktreePath);
     expect(result.deletedBranch).toBe("feature/cleanup-task");
     expect(result.removedStatePaths).toContain(path.join(getAppProjectDataRoot(repoRoot), "tasks/cleanup-task.json"));
@@ -97,10 +103,64 @@ describe("createTaskService", () => {
 
     const result = await service.cleanupTask(repoRoot, "retry-close-task");
 
-    expect(result.deletedBranch).toBe("feature/retry-close-task");
+    expect(result.taskClosed).toBe(true);
+    expect(result.worktreeRemoved).toBe(true);
+    expect(result.branchDeleted).toBe(true);
+    expect(result.deletedBranch).toBeNull();
     await expect(fileExists(task.worktreePath)).resolves.toBe(false);
     await expect(fileExists(path.join(getAppProjectDataRoot(repoRoot), "tasks/retry-close-task.json")))
       .resolves.toBe(false);
+  });
+
+  it("force-deletes a task branch with commits not contained in the base branch", async () => {
+    const repoRoot = await createTempGitRepo(tempDirs);
+    const service = createService(repoRoot);
+    const task = await service.createTask(repoRoot, { taskSlug: "unmerged-task" });
+    await fs.writeFile(path.join(task.worktreePath, "task-change.txt"), "task-only\n");
+    await readGit(task.worktreePath, ["add", "task-change.txt"]);
+    await readGit(task.worktreePath, ["commit", "-qm", "task-only commit"]);
+
+    const result = await service.cleanupTask(repoRoot, "unmerged-task");
+
+    expect(result.taskClosed).toBe(true);
+    expect(result.branchDeleted).toBe(true);
+    expect(result.deletedBranch).toBe("feature/unmerged-task");
+    expect(result.warnings).toEqual(expect.arrayContaining([
+      expect.stringContaining("1 commit(s) not contained")
+    ]));
+    await expect(gitExitCode(repoRoot, ["show-ref", "--verify", "--quiet", "refs/heads/feature/unmerged-task"]))
+      .resolves.toBe(1);
+  });
+
+  it("keeps the task logically closed when forced branch deletion fails", async () => {
+    const repoRoot = await createTempGitRepo(tempDirs);
+    const git = createGitAdapter(createCommandRunner());
+    const service = createService(repoRoot, {
+      git: {
+        ...git,
+        async deleteBranch() {
+          throw new Error("branch is locked");
+        }
+      }
+    });
+    await service.createTask(repoRoot, { taskSlug: "locked-branch-task" });
+
+    const result = await service.cleanupTask(repoRoot, "locked-branch-task");
+
+    expect(result.taskClosed).toBe(true);
+    expect(result.branchDeleted).toBe(false);
+    expect(result.stateRemoved).toBe(false);
+    expect(result.warnings).toEqual(expect.arrayContaining([
+      expect.stringContaining("Unable to force-delete task branch feature/locked-branch-task")
+    ]));
+    await expect(gitExitCode(repoRoot, ["show-ref", "--verify", "--quiet", "refs/heads/feature/locked-branch-task"]))
+      .resolves.toBe(0);
+    await expect(
+      fs.readFile(path.join(getAppProjectDataRoot(repoRoot), "tasks/locked-branch-task.json"), "utf8")
+    ).resolves.toContain('"cleanupStatus": "cleaned"');
+
+    const nextTask = await service.createTask(repoRoot, { taskSlug: "next-task" });
+    expect(nextTask.taskSlug).toBe("next-task");
   });
 
   it("refuses to create a second active task for the same project", async () => {
@@ -153,7 +213,7 @@ describe("createTaskService", () => {
 
 });
 
-function createService(repoRoot: string) {
+function createService(repoRoot: string, options: { git?: GitAdapter } = {}) {
   const fsAdapter = createNodeFileSystemAdapter();
   const config: ProjectConfig = {
     version: 1,
@@ -167,7 +227,7 @@ function createService(repoRoot: string) {
 
   return createTaskService({
     fs: fsAdapter,
-    git: createGitAdapter(createCommandRunner()),
+    git: options.git ?? createGitAdapter(createCommandRunner()),
     artifactService: createArtifactService(fsAdapter),
     projectService: {
       async loadConfig() {

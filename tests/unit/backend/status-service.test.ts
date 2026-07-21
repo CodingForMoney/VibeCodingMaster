@@ -114,6 +114,7 @@ function createArtifactSummary(statuses: Record<ArtifactSummary["checks"][number
         "coder-project-manager": ".ai/vcm/handoffs/messages/coder-project-manager.md",
         "tester-project-manager": ".ai/vcm/handoffs/messages/tester-project-manager.md"
       },
+      architectureBriefPath: ".ai/vcm/handoffs/architecture-brief.md",
       architecturePlanPath: ".ai/vcm/handoffs/architecture-plan.md",
       knownIssuesPath: ".ai/vcm/handoffs/known-issues.md",
       testReportPath: ".ai/vcm/handoffs/test-report.md",

@@ -4,6 +4,10 @@ import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { afterEach, describe, expect, it } from "vitest";
 import { createNodeFileSystemAdapter } from "../../../src/backend/adapters/filesystem.js";
 import { createAutoMemoryService } from "../../../src/backend/services/auto-memory-service.js";
+import {
+  renderVcmMemoryBlock,
+  replaceVcmMemoryBlock
+} from "../../../src/backend/templates/harness/memory-block.js";
 import { createDefaultLaunchTemplate } from "../../../src/shared/types/app-settings.js";
 import type { RoleName } from "../../../src/shared/types/role.js";
 import type { RoleSessionRecord } from "../../../src/shared/types/session.js";
@@ -19,10 +23,9 @@ describe("auto-memory-service", () => {
     }
   });
 
-  it("applies manual memory edits to canonical and task memory and can revert them", async () => {
+  it("commits manual memory block edits in the task worktree and can revert them", async () => {
     const context = await createContext(false);
     const service = context.service;
-    await service.ensureTaskSnapshot(context.baseRepoRoot, context.taskRepoRoot);
     await expect(service.getTaskRetrospectiveReadiness({
       baseRepoRoot: context.baseRepoRoot,
       taskRepoRoot: context.taskRepoRoot,
@@ -35,17 +38,19 @@ describe("auto-memory-service", () => {
       context.baseRepoRoot,
       context.taskRepoRoot,
       "demo",
-      ".ai/vcm/memory/shared.md",
-      "# Shared Memory\n\nUse the project event bus for lifecycle notifications.\n"
+      "CLAUDE.md",
+      "Use the project event bus for lifecycle notifications.\n"
     );
 
-    expect(await readText(context.baseRepoRoot, ".ai/vcm/memory/shared.md")).toContain("project event bus");
-    expect(await readText(context.taskRepoRoot, ".ai/vcm/memory/shared.md")).toContain("project event bus");
+    expect(await readText(context.taskRepoRoot, "CLAUDE.md")).toContain("project event bus");
+    await expect(readText(context.baseRepoRoot, "CLAUDE.md")).rejects.toThrow();
+    expect(context.gitCommits).toEqual([{ message: "chore: update VCM memory", paths: ["CLAUDE.md"] }]);
     expect(state.runs).toHaveLength(1);
     expect(state.runs[0].canRevert).toBe(true);
 
     const reverted = await service.revertRun(context.baseRepoRoot, context.taskRepoRoot, state.runs[0].runId);
-    expect(await readText(context.baseRepoRoot, ".ai/vcm/memory/shared.md")).toContain("No accumulated project memory yet");
+    expect(await readText(context.taskRepoRoot, "CLAUDE.md")).toContain("No accumulated project memory yet");
+    expect(context.gitCommits.at(-1)).toEqual({ message: "chore: revert VCM memory", paths: ["CLAUDE.md"] });
     expect(reverted.runs[0].status).toBe("reverted");
   });
 
@@ -76,8 +81,34 @@ describe("auto-memory-service", () => {
       handoffDir: ".ai/vcm/handoffs",
       roundReady: true
     });
+    expect(state.status).toBe("idle");
+    expect(context.terminalWrites).toHaveLength(0);
+
+    state = await context.service.reconcileTask({
+      baseRepoRoot: context.baseRepoRoot,
+      taskRepoRoot: context.taskRepoRoot,
+      taskSlug: "demo",
+      handoffDir: ".ai/vcm/handoffs",
+      roundReady: true,
+      requestTrigger: "manual"
+    });
     expect(state.status).toBe("collecting");
     expect(state.active?.currentRole).toBe("project-manager");
+    expect(state.active?.trigger).toBe("manual");
+    expect(state.active?.drafts[0]).toMatchObject({
+      role: "project-manager",
+      status: "dispatched"
+    });
+
+    const activeStatePath = path.join(context.taskRepoRoot, ".ai/vcm/memory-review/state.json");
+    const legacyState = JSON.parse(await readFile(activeStatePath, "utf8")) as {
+      drafts: Array<{ status: string }>;
+    };
+    legacyState.drafts[0].status = "running";
+    await writeFile(activeStatePath, `${JSON.stringify(legacyState, null, 2)}\n`, "utf8");
+    state = await context.service.getState(context.baseRepoRoot, context.taskRepoRoot);
+    expect(state.active?.drafts[0].status).toBe("dispatched");
+    await expect(readFile(activeStatePath, "utf8")).resolves.toContain('"status": "dispatched"');
 
     for (const role of ["project-manager", "architect", "coder", "tester"] as const) {
       state = await context.service.getState(context.baseRepoRoot, context.taskRepoRoot);
@@ -100,9 +131,9 @@ describe("auto-memory-service", () => {
       context.taskRepoRoot,
       ".ai/vcm/memory-review/runs",
       state.active!.runId,
-      "after/shared.md"
+      "after/CLAUDE.md"
     );
-    await writeFile(reviewedSharedPath, "# Shared Memory\n\nLifecycle completion is owned by backend hooks.\n", "utf8");
+    await writeFile(reviewedSharedPath, "Lifecycle completion is owned by backend hooks.\n", "utf8");
     await context.service.handleHarnessEngineerHook({
       baseRepoRoot: context.baseRepoRoot,
       taskRepoRoot: context.taskRepoRoot,
@@ -114,15 +145,16 @@ describe("auto-memory-service", () => {
     expect(state.status).toBe("idle");
     expect(state.runs[0].status).toBe("applied");
     expect(state.runs[0].diff).toContain("Lifecycle completion is owned by backend hooks");
-    expect(await readText(context.baseRepoRoot, ".ai/vcm/memory/shared.md")).toContain("Lifecycle completion is owned by backend hooks");
-    expect(context.terminalWrites.some((entry) => entry.includes("[VCM Auto Memory Review]"))).toBe(true);
+    expect(await readText(context.taskRepoRoot, "CLAUDE.md")).toContain("Lifecycle completion is owned by backend hooks");
+    expect(context.gitCommits.at(-1)?.message).toBe("chore: update VCM memory");
+    expect(context.terminalWrites.some((entry) => entry.includes("[VCM Task Harness Review: Memory Review]"))).toBe(true);
     await expect(context.service.getTaskRetrospectiveReadiness({
       baseRepoRoot: context.baseRepoRoot,
       taskRepoRoot: context.taskRepoRoot,
       taskSlug: "demo",
       handoffDir: ".ai/vcm/handoffs",
       roundReady: true
-    })).resolves.toEqual({ ready: true, disposition: "completed" });
+    })).resolves.toEqual({ ready: true, disposition: "completed", trigger: "manual" });
 
     await writeFile(
       finalAcceptancePath,
@@ -138,13 +170,88 @@ describe("auto-memory-service", () => {
     })).resolves.toMatchObject({ ready: false, disposition: "pending" });
   });
 
+  it("does not apply Harness Engineer memory edits outside an active Memory Review", async () => {
+    const context = await createContext(false);
+    const current = await readText(context.taskRepoRoot, "CLAUDE.md");
+    await writeFile(
+      path.join(context.taskRepoRoot, "CLAUDE.md"),
+      replaceVcmMemoryBlock(current, "Unreviewed Harness Engineer edit.\n"),
+      "utf8"
+    );
+
+    await expect(context.service.handleHarnessEngineerHook({
+      baseRepoRoot: context.baseRepoRoot,
+      taskRepoRoot: context.taskRepoRoot,
+      taskSlug: "demo",
+      eventName: "Stop"
+    })).resolves.toBe(false);
+
+    const state = await context.service.getState(context.baseRepoRoot, context.taskRepoRoot);
+    expect(state.runs).toHaveLength(0);
+    expect(context.gitCommits).toHaveLength(0);
+  });
+
+  it("does not mix existing host-file changes into a memory commit", async () => {
+    const context = await createContext(false);
+    context.setGitDiff("existing CLAUDE.md change");
+
+    await expect(context.service.updateFile(
+      context.baseRepoRoot,
+      context.taskRepoRoot,
+      "demo",
+      "CLAUDE.md",
+      "New memory must not be applied.\n"
+    )).rejects.toMatchObject({ code: "MEMORY_HOST_FILE_DIRTY" });
+
+    expect(await readText(context.taskRepoRoot, "CLAUDE.md")).not.toContain("New memory must not be applied");
+    expect(context.gitCommits).toHaveLength(0);
+  });
+
+  it("discards active memory work when Auto Memory is disabled", async () => {
+    const context = await createContext(true);
+    const finalAcceptancePath = path.join(context.taskRepoRoot, ".ai/vcm/handoffs/final-acceptance.md");
+    await mkdir(path.dirname(finalAcceptancePath), { recursive: true });
+    await writeFile(
+      finalAcceptancePath,
+      renderFinalAcceptanceTemplate("demo")
+        .replaceAll("TBD", "None.")
+        .replace("## Decision\n\nNone.", "## Decision\n\naccepted"),
+      "utf8"
+    );
+    await context.service.reconcileTask({
+      baseRepoRoot: context.baseRepoRoot,
+      taskRepoRoot: context.taskRepoRoot,
+      taskSlug: "demo",
+      handoffDir: ".ai/vcm/handoffs",
+      roundReady: true,
+      requestTrigger: "manual"
+    });
+
+    context.setAutoMemoryEnabled(false);
+    await expect(context.service.handleRoleHook({
+      baseRepoRoot: context.baseRepoRoot,
+      taskRepoRoot: context.taskRepoRoot,
+      taskSlug: "demo",
+      role: "project-manager",
+      eventName: "Stop"
+    })).resolves.toBe(true);
+
+    const state = await context.service.getState(context.baseRepoRoot, context.taskRepoRoot);
+    expect(state.status).toBe("idle");
+    expect(state.runs).toHaveLength(0);
+  });
+
   async function createContext(autoMemoryEnabled: boolean) {
     root = await mkdtemp(path.join(os.tmpdir(), "vcm-auto-memory-"));
     const baseRepoRoot = path.join(root, "repo");
     const taskRepoRoot = path.join(root, "task");
     await mkdir(baseRepoRoot, { recursive: true });
     await mkdir(taskRepoRoot, { recursive: true });
+    await seedMemoryHosts(taskRepoRoot);
     const terminalWrites: string[] = [];
+    const gitCommits: Array<{ message: string; paths: string[] }> = [];
+    let gitDiff = "";
+    let memoryEnabled = autoMemoryEnabled;
     const sessionFor = (role: RoleName): RoleSessionRecord => ({
       id: `session-${role}`,
       claudeSessionId: `claude-${role}`,
@@ -162,6 +269,15 @@ describe("auto-memory-service", () => {
     });
     const service = createAutoMemoryService({
       fs: createNodeFileSystemAdapter(),
+      git: {
+        async getDiff() {
+          return gitDiff;
+        },
+        async commitPaths(_repoRoot, message, paths) {
+          gitCommits.push({ message, paths });
+          return `commit-${gitCommits.length}`;
+        }
+      },
       runtime: {
         getSession() {
           return {} as never;
@@ -179,12 +295,6 @@ describe("auto-memory-service", () => {
         },
         async resumeRoleSession(_repoRoot, _taskSlug, role) {
           return sessionFor(role);
-        },
-        async getProjectHarnessEngineerSession() {
-          return sessionFor("harness-engineer");
-        },
-        async ensureProjectHarnessEngineerSession() {
-          return sessionFor("harness-engineer");
         }
       },
       appSettings: {
@@ -195,7 +305,7 @@ describe("auto-memory-service", () => {
             roleRetryEnabled: true,
             permissionRequestMode: "off",
             autoTaskHarnessReviewEnabled: false,
-            autoMemoryEnabled,
+            autoMemoryEnabled: memoryEnabled,
             translationEnabled: false,
             translationAutoSendEnabled: false,
             translationTargetLanguage: "zh-CN",
@@ -212,9 +322,42 @@ describe("auto-memory-service", () => {
       },
       now: () => "2026-07-11T00:00:00.000Z"
     });
-    return { baseRepoRoot, taskRepoRoot, terminalWrites, service };
+    return {
+      baseRepoRoot,
+      taskRepoRoot,
+      terminalWrites,
+      gitCommits,
+      service,
+      setAutoMemoryEnabled(enabled: boolean) {
+        memoryEnabled = enabled;
+      },
+      setGitDiff(diff: string) {
+        gitDiff = diff;
+      }
+    };
   }
 });
+
+async function seedMemoryHosts(taskRepoRoot: string): Promise<void> {
+  const paths = [
+    "CLAUDE.md",
+    ".claude/agents/project-manager.md",
+    ".claude/agents/architect.md",
+    ".claude/agents/coder.md",
+    ".claude/agents/tester.md",
+    ".claude/agents/gate-reviewer.md",
+    ".claude/agents/harness-engineer.md"
+  ];
+  for (const relativePath of paths) {
+    const absolutePath = path.join(taskRepoRoot, relativePath);
+    await mkdir(path.dirname(absolutePath), { recursive: true });
+    await writeFile(
+      absolutePath,
+      `# ${path.basename(relativePath)}\n\n${renderVcmMemoryBlock()}\n\n<!-- VCM:BEGIN version=1 -->\nRules\n<!-- VCM:END -->\n`,
+      "utf8"
+    );
+  }
+}
 
 async function readText(repoRoot: string, relativePath: string): Promise<string> {
   return readFile(path.join(repoRoot, relativePath), "utf8");

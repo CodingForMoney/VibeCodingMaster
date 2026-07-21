@@ -30,6 +30,7 @@ export interface GitAdapter {
   mergeBranchFastForward(repoRoot: string, branch: string): Promise<GitMergeResult>;
   addPaths(repoRoot: string, paths: string[]): Promise<void>;
   commit(repoRoot: string, message: string): Promise<string>;
+  commitPaths(repoRoot: string, message: string, paths: string[]): Promise<string>;
   createWorktree(input: CreateGitWorktreeInput): Promise<void>;
   removeWorktree(repoRoot: string, worktreePath: string, options?: { force?: boolean }): Promise<void>;
   deleteBranch(repoRoot: string, branch: string, options?: { force?: boolean }): Promise<void>;
@@ -363,6 +364,22 @@ export function createGitAdapter(runner: CommandRunner): GitAdapter {
         throw new VcmError({
           code: "GIT_COMMIT_FAILED",
           message: "Unable to commit harness changes.",
+          statusCode: 409,
+          hint: result.stderr || result.stdout
+        });
+      }
+
+      return this.getHeadCommit(repoRoot);
+    },
+    async commitPaths(repoRoot, message, paths) {
+      if (paths.length === 0) {
+        return this.getHeadCommit(repoRoot);
+      }
+      const result = await runGit(runner, repoRoot, ["commit", "--only", "-m", message, "--", ...paths]);
+      if (result.exitCode !== 0) {
+        throw new VcmError({
+          code: "GIT_COMMIT_FAILED",
+          message: "Unable to commit VCM memory changes.",
           statusCode: 409,
           hint: result.stderr || result.stdout
         });

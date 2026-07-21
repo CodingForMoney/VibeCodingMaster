@@ -1,6 +1,5 @@
 import path from "node:path";
 import type {
-  CleanupTaskRequest,
   CleanupTaskResult,
   CreateTaskRequest,
   TaskRecord,
@@ -19,7 +18,8 @@ export interface TaskService {
   loadTask(repoRoot: string, taskSlug: string): Promise<TaskRecord>;
   saveTask(repoRoot: string, task: TaskRecord): Promise<void>;
   updateTaskStatus(repoRoot: string, taskSlug: string, status: TaskStatus): Promise<TaskRecord>;
-  cleanupTask(repoRoot: string, taskSlug: string, options?: CleanupTaskRequest): Promise<CleanupTaskResult>;
+  markTaskCleaned(repoRoot: string, taskSlug: string): Promise<TaskRecord>;
+  cleanupTask(repoRoot: string, taskSlug: string): Promise<CleanupTaskResult>;
 }
 
 export interface TaskServiceDeps {
@@ -154,114 +154,225 @@ export function createTaskService(deps: TaskServiceDeps): TaskService {
       await this.saveTask(repoRoot, updated);
       return updated;
     },
-    async cleanupTask(repoRoot, taskSlug, options = {}) {
-      assertValidTaskSlug(taskSlug);
-      if (!deps.fs.removePath) {
-        throw new VcmError({
-          code: "FILESYSTEM_REMOVE_UNAVAILABLE",
-          message: "This VCM runtime cannot remove task files.",
-          statusCode: 500
-        });
-      }
-
-      const config = await deps.projectService.loadConfig(repoRoot);
+    async markTaskCleaned(repoRoot, taskSlug) {
       const task = await this.loadTask(repoRoot, taskSlug);
+      if (task.cleanupStatus === "cleaned" && task.cleanedAt) {
+        return task;
+      }
+      const timestamp = now();
+      const updated: TaskRecord = {
+        ...task,
+        status: "stopped",
+        cleanupStatus: "cleaned",
+        cleanedAt: timestamp,
+        updatedAt: timestamp
+      };
+      await this.saveTask(repoRoot, updated);
+      return updated;
+    },
+    async cleanupTask(repoRoot, taskSlug) {
+      assertValidTaskSlug(taskSlug);
+      const task = await this.markTaskCleaned(repoRoot, taskSlug);
       const taskRepoRoot = getTaskRuntimeRepoRoot(task);
       const taskStoreRoot = deps.projectService.getProjectDataRoot(repoRoot);
       const taskPath = getTaskPath(taskStoreRoot, taskSlug);
+      const warnings: string[] = [];
+      if (!deps.fs.removePath) {
+        warnings.push("This VCM runtime cannot remove task files; the task remains logically closed.");
+      }
+      let stateRoot = ".ai/vcm";
+      let handoffRoot = task.handoffDir;
+      try {
+        const config = await deps.projectService.loadConfig(repoRoot);
+        stateRoot = config.stateRoot;
+        handoffRoot = config.handoffRoot;
+      } catch (error) {
+        warnings.push(`Unable to load project cleanup paths; using task defaults: ${describeError(error)}`);
+      }
       const statePaths = getTaskStatePaths(
         taskStoreRoot,
         taskRepoRoot,
-        config.stateRoot,
-        config.handoffRoot,
+        stateRoot,
+        handoffRoot,
         taskSlug
       );
       const removedStatePaths: string[] = [];
-      const warnings: string[] = [];
-      const cleanedAt = now();
-
-      assertTaskWorktreePath(repoRoot, task.worktreePath);
-      await removeTaskWorktreeIdempotent(
-        deps.fs,
-        deps.git,
-        repoRoot,
-        task.worktreePath,
-        options.force ?? true,
-        warnings
-      );
-      await deleteTaskBranchIdempotent(
+      let worktreeRemoved = false;
+      try {
+        assertTaskWorktreePath(repoRoot, task.worktreePath);
+        worktreeRemoved = await removeTaskWorktreeBestEffort(
+          deps.fs,
+          deps.git,
+          repoRoot,
+          task.worktreePath,
+          warnings
+        );
+      } catch (error) {
+        warnings.push(`Skipped unsafe task worktree path ${task.worktreePath}: ${describeError(error)}`);
+      }
+      const branchCleanup = await deleteTaskBranchBestEffort(
         deps.git,
         repoRoot,
         task.branch,
-        options.forceDeleteBranch ?? true
+        warnings
       );
 
       for (const statePath of statePaths.filter((candidate) => candidate !== taskPath)) {
         await removeWorktreeStatePathBestEffort(deps.fs, statePath, removedStatePaths, warnings);
       }
-      await deps.fs.removePath(taskPath, { recursive: true, force: true });
-      removedStatePaths.push(taskPath);
+      let stateRemoved = false;
+      if (worktreeRemoved && branchCleanup.resolved) {
+        try {
+          await deps.fs.removePath?.(taskPath, { recursive: true, force: true });
+          stateRemoved = !(await deps.fs.pathExists(taskPath));
+          if (stateRemoved) {
+            removedStatePaths.push(taskPath);
+          } else {
+            warnings.push(`Task state remained after cleanup: ${taskPath}`);
+          }
+        } catch (error) {
+          warnings.push(`Unable to remove cleaned task state ${taskPath}: ${describeError(error)}`);
+        }
+      } else {
+        warnings.push("Retained cleaned task state so unresolved resource cleanup can be retried later.");
+      }
 
       return {
         taskSlug,
-        removedWorktreePath: task.worktreePath,
+        taskClosed: true,
+        worktreeRemoved,
+        branchDeleted: branchCleanup.resolved,
+        stateRemoved,
+        removedWorktreePath: worktreeRemoved ? task.worktreePath : null,
         removedStatePaths,
-        deletedBranch: task.branch,
-        cleanedAt,
+        deletedBranch: branchCleanup.deleted ? task.branch : null,
+        cleanedAt: task.cleanedAt ?? now(),
         warnings: warnings.length > 0 ? warnings : undefined
       };
     }
   };
 }
 
-async function removeTaskWorktreeIdempotent(
+async function removeTaskWorktreeBestEffort(
   fs: FileSystemAdapter,
   git: GitAdapter,
   repoRoot: string,
   worktreePath: string,
-  force: boolean,
   warnings: string[]
-): Promise<void> {
-  const wasRegistered = await git.isWorktreeRegistered(repoRoot, worktreePath);
-  if (wasRegistered) {
+): Promise<boolean> {
+  let wasRegistered: boolean | undefined;
+  try {
+    wasRegistered = await git.isWorktreeRegistered(repoRoot, worktreePath);
+  } catch (error) {
+    warnings.push(`Unable to inspect task worktree registration for ${worktreePath}: ${describeError(error)}`);
+  }
+
+  if (wasRegistered !== false) {
     try {
-      await git.removeWorktree(repoRoot, worktreePath, { force });
+      await git.removeWorktree(repoRoot, worktreePath, { force: true });
     } catch (error) {
       await pruneWorktreesBestEffort(git, repoRoot, warnings);
-      if (await git.isWorktreeRegistered(repoRoot, worktreePath)) {
-        throw error;
+      let stillRegistered = true;
+      try {
+        stillRegistered = await git.isWorktreeRegistered(repoRoot, worktreePath);
+      } catch (inspectionError) {
+        warnings.push(`Unable to verify task worktree registration after forced removal: ${describeError(inspectionError)}`);
       }
-      warnings.push(`Git worktree metadata was already cleared for ${worktreePath}; continuing cleanup.`);
+      if (stillRegistered) {
+        warnings.push(`Unable to force-remove Git worktree ${worktreePath}: ${describeError(error)}`);
+      } else {
+        warnings.push(`Git worktree metadata was already cleared for ${worktreePath}; continuing cleanup.`);
+      }
     }
   } else {
     await pruneWorktreesBestEffort(git, repoRoot, warnings);
   }
 
-  if (await fs.pathExists(worktreePath)) {
+  let staleDirectoryExists = true;
+  try {
+    staleDirectoryExists = await fs.pathExists(worktreePath);
+  } catch (error) {
+    warnings.push(`Unable to inspect stale task worktree directory ${worktreePath}: ${describeError(error)}`);
+  }
+  if (staleDirectoryExists) {
     try {
       await fs.removePath?.(worktreePath, { recursive: true, force: true });
     } catch (error) {
       warnings.push(`Unable to remove stale task worktree directory ${worktreePath}: ${describeError(error)}`);
     }
   }
+
+  let pathExists = true;
+  let registered = true;
+  try {
+    pathExists = await fs.pathExists(worktreePath);
+  } catch (error) {
+    warnings.push(`Unable to verify task worktree directory cleanup: ${describeError(error)}`);
+  }
+  try {
+    registered = await git.isWorktreeRegistered(repoRoot, worktreePath);
+  } catch (error) {
+    warnings.push(`Unable to verify task worktree metadata cleanup: ${describeError(error)}`);
+  }
+  return !pathExists && !registered;
 }
 
-async function deleteTaskBranchIdempotent(
+async function deleteTaskBranchBestEffort(
   git: GitAdapter,
   repoRoot: string,
   branch: string,
-  force: boolean
-): Promise<void> {
-  if (!(await git.branchExists(repoRoot, branch))) {
-    return;
-  }
+  warnings: string[]
+): Promise<{ resolved: boolean; deleted: boolean }> {
+  let branchExists: boolean | undefined;
   try {
-    await git.deleteBranch(repoRoot, branch, { force });
+    branchExists = await git.branchExists(repoRoot, branch);
   } catch (error) {
-    if (!(await git.branchExists(repoRoot, branch))) {
+    warnings.push(`Unable to inspect task branch ${branch}: ${describeError(error)}`);
+  }
+
+  if (branchExists === false) {
+    return { resolved: true, deleted: false };
+  }
+
+  await warnAboutDiscardedCommits(git, repoRoot, branch, warnings);
+  try {
+    await git.deleteBranch(repoRoot, branch, { force: true });
+    return { resolved: true, deleted: true };
+  } catch (error) {
+    try {
+      if (!(await git.branchExists(repoRoot, branch))) {
+        return { resolved: true, deleted: true };
+      }
+    } catch (inspectionError) {
+      warnings.push(`Unable to verify task branch cleanup for ${branch}: ${describeError(inspectionError)}`);
+    }
+    warnings.push(`Unable to force-delete task branch ${branch}: ${describeError(error)}`);
+    return { resolved: false, deleted: false };
+  }
+}
+
+async function warnAboutDiscardedCommits(
+  git: GitAdapter,
+  repoRoot: string,
+  branch: string,
+  warnings: string[]
+): Promise<void> {
+  try {
+    const baseBranch = await git.getCurrentBranch(repoRoot);
+    const commits = await git.getCommitList(repoRoot, `${baseBranch}..${branch}`);
+    if (commits.length === 0) {
       return;
     }
-    throw error;
+    const summary = commits
+      .slice(0, 5)
+      .map((commit) => `${commit.sha.slice(0, 8)} ${commit.subject}`)
+      .join("; ");
+    const remainder = commits.length > 5 ? `; and ${commits.length - 5} more` : "";
+    warnings.push(
+      `${branch} has ${commits.length} commit(s) not contained in ${baseBranch}; close force-deletes the branch: ${summary}${remainder}`
+    );
+  } catch (error) {
+    warnings.push(`Unable to inspect commits before force-deleting ${branch}: ${describeError(error)}`);
   }
 }
 

@@ -1296,85 +1296,84 @@ describe("createClaudeHookService", () => {
     ]);
   });
 
-  it("captures the user-facing reply on a project-manager Stop and threads it to round-service", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "vcm-hook-capture-"));
+  it("ignores a late duplicate Stop after transcript reconciliation completed the turn", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "vcm-hook-duplicate-"));
     transcriptDirs.push(dir);
-    const transcriptPath = join(dir, "pm.jsonl");
+    const transcriptPath = join(dir, "tester.jsonl");
     await writeFile(transcriptPath, JSON.stringify({
       type: "assistant",
-      uuid: "e1",
+      uuid: "completed-event",
       timestamp: "2026-06-11T00:00:01.000Z",
-      message: { stop_reason: "end_turn", content: [{ type: "text", text: "Decision needed from you." }] }
+      message: { stop_reason: "end_turn", content: [{ type: "text", text: "Complete." }] }
     }), "utf8");
 
-    let roundInput: { userFacingReply?: { text: string; truncated: boolean } } | undefined;
+    const calls: string[] = [];
     const service = createClaudeHookService({
       projectService: createProjectServiceStub(),
       taskService: createTaskServiceStub(),
       sessionService: {
-        getRoleSession: boundRoleSession,
-        async recordClaudeHookEvent(_repoRoot, input) {
+        async getRoleSession() {
           return {
-            id: "runtime_pm",
-            claudeSessionId: "claude_pm",
+            id: "runtime_tester",
+            claudeSessionId: "claude_tester",
             transcriptPath,
-            taskSlug: input.taskSlug,
-            role: input.role,
+            taskSlug: "demo-task",
+            role: "tester",
             status: "running",
             activityStatus: "idle",
-            command: "claude --agent project-manager",
+            command: "claude --agent tester",
             permissionMode: "default",
             cwd: "/repo",
             terminalBackend: "node-pty",
-            updatedAt: "2026-06-11T00:00:02.000Z",
             lastTurnStartedAt: "2026-06-11T00:00:00.000Z",
-            lastTurnEndedAt: "2026-06-11T00:00:02.000Z"
+            lastTurnEndedAt: "2026-06-11T00:00:02.000Z",
+            updatedAt: "2026-06-11T00:00:02.000Z"
           };
-        }
-      } as SessionService,
-      messageService: {
-        async listPendingRouteFiles() {
-          return [];
         },
-        async scanAndDispatchPendingRouteFiles() {
-          return [];
-        }
-      } as unknown as MessageService,
-      roundService: {
-        async recordClaudeHookEvent(input) {
-          roundInput = input;
-          return {} as never;
-        }
-      } as RoundService,
-      translationService: {
-        async recordConversationBoundary() {
+        async recordClaudeHookEvent() {
+          calls.push("session");
           return undefined;
         }
-      } as Pick<TranslationService, "recordConversationBoundary">,
+      } as never,
+      messageService: {
+        async scanAndDispatchPendingRouteFiles() {
+          calls.push("route");
+          return [];
+        }
+      } as never,
+      roundService: {
+        async recordClaudeHookEvent() {
+          calls.push("round");
+          return {} as never;
+        }
+      } as never,
+      translationService: {
+        async recordConversationBoundary() {
+          calls.push("translation");
+        }
+      },
       appSettings: createAppSettingsStub(),
       jobGuard: {
         async evaluateStop() {
+          calls.push("guard");
           return { behavior: "allow" } as never;
         },
         notePromptSubmitted() {}
-      } as never
+      }
     });
 
     const result = await service.handleStopHook({
       taskSlug: "demo-task",
-      role: "project-manager",
+      role: "tester",
       event: {
         hook_event_name: "Stop",
-        session_id: "claude_pm",
+        session_id: "claude_tester",
         transcript_path: transcriptPath
       }
     });
 
-    expect(result.ok).toBe(true);
-    expect(roundInput?.userFacingReply).toEqual({
-      text: "Decision needed from you.",
-      truncated: false
-    });
+    expect(result).toMatchObject({ sessionUpdated: false, dispatchedCount: 0 });
+    expect(calls).toEqual([]);
   });
 });
 

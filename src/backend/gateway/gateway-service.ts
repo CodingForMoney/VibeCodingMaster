@@ -1,7 +1,7 @@
-import { VCM_ROLE_NAMES } from "../../shared/constants.js";
 import type {
   GatewayDiagnostics
 } from "../../shared/types/diagnostics.js";
+import type { UpdateAppPreferencesRequest } from "../../shared/types/app-settings.js";
 import type { VcmSessionRoundState } from "../../shared/types/round.js";
 import type {
   BindGatewayLarkAppRequest,
@@ -25,6 +25,7 @@ import type { ProjectService } from "../services/project-service.js";
 import type { RoundService } from "../services/round-service.js";
 import type { SessionService } from "../services/session-service.js";
 import { getTaskRuntimeRepoRoot, type TaskService } from "../services/task-service.js";
+import type { TaskCloseService } from "../services/task-close-service.js";
 import type { TaskLaunchService } from "../services/task-launch-service.js";
 import type { TranslationService } from "../services/translation-service.js";
 import type { AppSettingsService } from "../services/app-settings-service.js";
@@ -102,10 +103,11 @@ export interface GatewayServiceDeps {
   channels: GatewayChannelRegistry;
   projectService: ProjectService;
   taskService: TaskService;
-  sessionService: Pick<SessionService, "getRoleSession" | "listRoleSessions" | "resumeRoleSession" | "startRoleSession" | "stopRoleSession" | "moveProjectTranslatorSessionToSafeCwd" | "moveProjectHarnessEngineerSessionToSafeCwd">;
+  taskCloseService: Pick<TaskCloseService, "closeTask">;
+  sessionService: Pick<SessionService, "getRoleSession" | "resumeRoleSession" | "startRoleSession">;
   taskLaunchService: Pick<TaskLaunchService, "startTaskRoleSessions">;
-  translationService: Pick<TranslationService, "translateUserInput" | "translateGatewayOutput" | "stopTask">;
-  roundService: Pick<RoundService, "getSessionRoundState" | "stopTask">;
+  translationService: Pick<TranslationService, "translateUserInput" | "translateGatewayOutput">;
+  roundService: Pick<RoundService, "getSessionRoundState">;
   runtime: Pick<TerminalRuntime, "write">;
   appSettings: Pick<AppSettingsService, "getPreferences" | "updatePreferences">;
   larkRegistration?: LarkRegistrationClient;
@@ -181,6 +183,7 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
   let qrLogin: QrLoginState | null = null;
   let larkRegistrationState: LarkRegistrationState | null = null;
   let lastFailedTranslation: LastFailedGatewayTranslation | null = null;
+  let lastPmInputMessageId: string | null = null;
   // Runtime channel-connection arming switch. Not persisted: every process starts
   // disarmed. `ensurePolling` is the single chokepoint that reads it, so no
   // self-heal path can connect the channel while this is false.
@@ -438,6 +441,7 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
         : text;
 
       await submitTerminalInput(deps.runtime, target.session.id, englishText);
+      lastPmInputMessageId = update.messageId;
       await reply(
         await deps.settings.loadSettings(),
         update.fromUserId,
@@ -811,15 +815,7 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
       });
     }
 
-    const task = await deps.taskService.loadTask(project.repoRoot, taskSlug);
-    await stopRunningRoleSessions(project.repoRoot, taskSlug);
-    await moveProjectToolSessionsToSafeCwd(project.repoRoot);
-    await deps.translationService.stopTask(getTaskRuntimeRepoRoot(task), taskSlug, { clearCache: true });
-    deps.roundService.stopTask(taskSlug);
-    const result = await deps.taskService.cleanupTask(project.repoRoot, taskSlug, {
-      force: true,
-      forceDeleteBranch: true
-    });
+    const result = await deps.taskCloseService.closeTask(project.repoRoot, taskSlug);
     clearFailedTranslation(project.repoRoot, taskSlug);
     const latestPmReplies = { ...settings.latestPmReplies };
     delete latestPmReplies[latestPmReplyKey(project.repoRoot, taskSlug)];
@@ -835,8 +831,9 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
     });
     const lines = [
       `Closed task: ${result.taskSlug}`,
-      result.removedWorktreePath ? `removed worktree: ${result.removedWorktreePath}` : "removed worktree: none",
-      result.deletedBranch ? `deleted branch: ${result.deletedBranch}` : "deleted branch: none",
+      `worktree removed: ${result.worktreeRemoved ? "yes" : "no"}`,
+      `branch deleted: ${result.branchDeleted ? "yes" : "no"}`,
+      `task state removed: ${result.stateRemoved ? "yes" : "no"}`,
       `removed state paths: ${result.removedStatePaths.length}`
     ];
     if (result.warnings?.length) {
@@ -845,52 +842,30 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
     return lines.join("\n");
   }
 
-  async function stopRunningRoleSessions(repoRoot: string, taskSlug: string): Promise<void> {
-    const sessions = await deps.sessionService.listRoleSessions(repoRoot, taskSlug);
-    for (const session of sessions) {
-      if (session.status === "running" && VCM_ROLE_NAMES.some((role) => role === session.role)) {
-        await deps.sessionService.stopRoleSession(repoRoot, taskSlug, session.role);
-      }
-    }
-  }
-
-  async function moveProjectToolSessionsToSafeCwd(repoRoot: string): Promise<void> {
-    await Promise.all([
-      ignoreMissingSession(deps.sessionService.moveProjectTranslatorSessionToSafeCwd(repoRoot)),
-      ignoreMissingSession(deps.sessionService.moveProjectHarnessEngineerSessionToSafeCwd(repoRoot))
-    ]);
-  }
-
-  async function ignoreMissingSession(operation: Promise<unknown>): Promise<void> {
-    try {
-      await operation;
-    } catch (error) {
-      if (error instanceof VcmError && error.code === "SESSION_MISSING") {
-        return;
-      }
-      throw error;
-    }
-  }
-
   async function setGatewayTranslation(enabled: boolean): Promise<string> {
     const settings = await deps.settings.updateSettings({ translationEnabled: enabled });
     return `Gateway translation ${settings.translationEnabled ? "on" : "off"}.`;
   }
 
-  async function enableGatewayTranslationRuntime(): Promise<void> {
+  async function enableGatewayTranslationRuntime(options: { disablePauseAlertSound?: boolean } = {}): Promise<void> {
     const preferences = await deps.appSettings.getPreferences();
+    const update: UpdateAppPreferencesRequest = {};
     if (
-      preferences.translationEnabled &&
-      preferences.translationAutoSendEnabled &&
-      preferences.translationOutputMode === "round-final"
+      !preferences.translationEnabled ||
+      !preferences.translationAutoSendEnabled ||
+      preferences.translationOutputMode !== "round-final"
     ) {
+      update.translationEnabled = true;
+      update.translationAutoSendEnabled = true;
+      update.translationOutputMode = "round-final";
+    }
+    if (options.disablePauseAlertSound && preferences.flowPauseAlerts !== false) {
+      update.flowPauseAlerts = false;
+    }
+    if (Object.keys(update).length === 0) {
       return;
     }
-    await deps.appSettings.updatePreferences({
-      translationEnabled: true,
-      translationAutoSendEnabled: true,
-      translationOutputMode: "round-final"
-    });
+    await deps.appSettings.updatePreferences(update);
   }
 
   async function startGateway(): Promise<string> {
@@ -904,7 +879,7 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
       await enableGatewayTranslationRuntime();
       return "Gateway is already on.";
     }
-    await enableGatewayTranslationRuntime();
+    await enableGatewayTranslationRuntime({ disablePauseAlertSound: true });
     const enabled = await syncDesktopContext(await deps.settings.updateSettings({
       enabled: true,
       translationEnabled: true
@@ -1018,6 +993,15 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
     });
   }
 
+  async function exposeStatus(settings: GatewaySettingsFile): Promise<GatewayStatus> {
+    const preferences = await deps.appSettings.getPreferences();
+    return {
+      ...deps.settings.expose(settings, isRunning(), connectionEnabled),
+      lastPmInputMessageId,
+      pauseAlertSoundEnabled: preferences.flowPauseAlerts
+    };
+  }
+
   async function statusText(settings: GatewaySettingsFile): Promise<string> {
     const synced = await syncDesktopContext(settings);
     const project = await deps.projectService.getCurrentProject();
@@ -1047,9 +1031,11 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
         await enableGatewayTranslationRuntime();
       }
       await ensurePolling();
-      return deps.settings.expose(settings, isRunning(), connectionEnabled);
+      return exposeStatus(settings);
     },
     async updateSettings(input) {
+      const currentSettings = await deps.settings.loadSettings();
+      const enablingGateway = input.enabled === true && !currentSettings.enabled;
       const gatewayStartInput = input.enabled === true
         ? { ...input, translationEnabled: true }
         : input;
@@ -1060,7 +1046,7 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
           }
         : gatewayStartInput;
       if (input.enabled === true) {
-        await enableGatewayTranslationRuntime();
+        await enableGatewayTranslationRuntime({ disablePauseAlertSound: enablingGateway });
       }
       let settings = await deps.settings.updateSettings(updateInput);
       if (settings.enabled) {
@@ -1071,7 +1057,7 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
       } else {
         await stopPolling();
       }
-      return deps.settings.expose(settings, isRunning(), connectionEnabled);
+      return exposeStatus(settings);
     },
     async resetBinding() {
       await stopPolling();
@@ -1082,7 +1068,7 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
       qrLogin = null;
       larkRegistrationState = null;
       const settings = await deps.settings.resetBinding();
-      return deps.settings.expose(settings, isRunning(), connectionEnabled);
+      return exposeStatus(settings);
     },
     async setConnectionEnabled(enabled) {
       connectionEnabled = enabled;
@@ -1094,7 +1080,7 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
         await stopPolling();
       }
       const settings = await deps.settings.loadSettings();
-      return deps.settings.expose(settings, isRunning(), connectionEnabled);
+      return exposeStatus(settings);
     },
     async startQrLogin() {
       const settings = await deps.settings.loadSettings();
@@ -1262,7 +1248,7 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
       });
       larkRegistrationState = null;
       await ensurePolling();
-      const status = deps.settings.expose(settings, isRunning(), connectionEnabled);
+      const status = await exposeStatus(settings);
       return {
         status: "confirmed",
         appIdConfigured: Boolean(result.appId),
@@ -1327,7 +1313,7 @@ export function createGatewayService(deps: GatewayServiceDeps): GatewayService {
       });
       larkRegistrationState = null;
       await ensurePolling();
-      const status = deps.settings.expose(settings, isRunning(), connectionEnabled);
+      const status = await exposeStatus(settings);
       return {
         status: "confirmed",
         appIdConfigured: true,

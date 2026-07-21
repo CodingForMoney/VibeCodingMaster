@@ -193,17 +193,20 @@ describe("createJobGuardService", () => {
     }
   });
 
-  it("blocks completed and failed worker tasks until coder handles them", async () => {
+  it("blocks a completed worker until coder handles its report", async () => {
     const repo = await makeTaskRepo();
-    await writeCoderWorkerTask(repo, "worker-completed", { status: "completed", handled: false });
-    await writeCoderWorkerTask(repo, "worker-failed", { status: "failed", handled: false, error: "conflict" });
+    await writeCoderWorkerTask(repo, "worker-completed", {
+      status: "completed",
+      handled: false,
+      reportPath: ".ai/vcm/coder-workers/reports/worker-completed.md"
+    });
     const guard = createGuard();
 
     const verdict = await guard.evaluateStop(stopInput(repo));
     expect(verdict.behavior).toBe("block");
     if (verdict.behavior === "block") {
       expect(verdict.reason).toContain("worker-completed (completed)");
-      expect(verdict.reason).toContain("worker-failed (failed)");
+      expect(verdict.reason).toContain("implementation result");
     }
   });
 

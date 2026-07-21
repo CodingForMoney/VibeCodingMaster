@@ -16,12 +16,11 @@ export interface TranslationWorkerRouteDeps {
   translationWorkerService: TranslationWorkerService;
   sessionService: Pick<
     SessionService,
-    | "getProjectTranslatorSession"
-    | "ensureProjectTranslatorSession"
-    | "startProjectTranslatorSession"
-    | "resumeProjectTranslatorSession"
-    | "restartProjectTranslatorSession"
-    | "stopProjectTranslatorSession"
+    | "getRoleSession"
+    | "startRoleSession"
+    | "resumeRoleSession"
+    | "restartRoleSession"
+    | "stopRoleSession"
   >;
   translationService: Pick<TranslationService, "stopSession">;
 }
@@ -34,38 +33,54 @@ export function registerTranslationWorkerRoutes(app: FastifyInstance, deps: Tran
     });
   });
 
-  app.get("/api/translation/session", async () => {
+  app.get<{ Querystring: { taskSlug?: string } }>("/api/translation/session", async (request) => {
     const project = await requireCurrentProject(deps.projectService);
-    return (await deps.sessionService.getProjectTranslatorSession(project.repoRoot)) ?? null;
+    const taskSlug = request.query.taskSlug?.trim();
+    if (!taskSlug) {
+      return null;
+    }
+    return (await deps.sessionService.getRoleSession(project.repoRoot, taskSlug, "translator")) ?? null;
   });
 
   app.post<{ Body: StartRoleSessionRequest }>("/api/translation/session/ensure", async (request) => {
     const project = await requireCurrentProject(deps.projectService);
-    return deps.sessionService.ensureProjectTranslatorSession(project.repoRoot, request.body);
+    const taskSlug = requireTaskSlug(request.body?.taskSlug, "Translator");
+    const existing = await deps.sessionService.getRoleSession(project.repoRoot, taskSlug, "translator");
+    if (existing?.status === "running") {
+      return existing;
+    }
+    if (existing?.claudeSessionId) {
+      return deps.sessionService.resumeRoleSession(project.repoRoot, taskSlug, "translator", request.body);
+    }
+    return deps.sessionService.startRoleSession(project.repoRoot, taskSlug, "translator", request.body);
   });
 
   app.post<{ Body: StartRoleSessionRequest }>("/api/translation/session/start", async (request) => {
     const project = await requireCurrentProject(deps.projectService);
-    return deps.sessionService.startProjectTranslatorSession(project.repoRoot, request.body);
+    const taskSlug = requireTaskSlug(request.body?.taskSlug, "Translator");
+    return deps.sessionService.startRoleSession(project.repoRoot, taskSlug, "translator", request.body);
   });
 
   app.post<{ Body: StartRoleSessionRequest }>("/api/translation/session/resume", async (request) => {
     const project = await requireCurrentProject(deps.projectService);
-    return deps.sessionService.resumeProjectTranslatorSession(project.repoRoot, request.body);
+    const taskSlug = requireTaskSlug(request.body?.taskSlug, "Translator");
+    return deps.sessionService.resumeRoleSession(project.repoRoot, taskSlug, "translator", request.body);
   });
 
   app.post<{ Body: StartRoleSessionRequest }>("/api/translation/session/restart", async (request) => {
     const project = await requireCurrentProject(deps.projectService);
-    const existing = await deps.sessionService.getProjectTranslatorSession(project.repoRoot);
+    const taskSlug = requireTaskSlug(request.body?.taskSlug, "Translator");
+    const existing = await deps.sessionService.getRoleSession(project.repoRoot, taskSlug, "translator");
     if (existing) {
       await deps.translationService.stopSession(existing.id, { clearCache: true });
     }
-    return deps.sessionService.restartProjectTranslatorSession(project.repoRoot, request.body);
+    return deps.sessionService.restartRoleSession(project.repoRoot, taskSlug, "translator", request.body);
   });
 
-  app.post("/api/translation/session/stop", async () => {
+  app.post<{ Body: StartRoleSessionRequest }>("/api/translation/session/stop", async (request) => {
     const project = await requireCurrentProject(deps.projectService);
-    const session = await deps.sessionService.stopProjectTranslatorSession(project.repoRoot);
+    const taskSlug = requireTaskSlug(request.body?.taskSlug, "Translator");
+    const session = await deps.sessionService.stopRoleSession(project.repoRoot, taskSlug, "translator");
     await deps.translationService.stopSession(session.id);
     return session;
   });
@@ -117,6 +132,19 @@ export function registerTranslationWorkerRoutes(app: FastifyInstance, deps: Tran
       return deps.translationWorkerService.promoteFileJob(project.repoRoot, request.params.jobId, targetPath);
     }
   );
+}
+
+function requireTaskSlug(value: string | undefined, roleLabel: string): string {
+  const taskSlug = value?.trim();
+  if (!taskSlug) {
+    throw new VcmError({
+      code: "TOOL_SESSION_TASK_REQUIRED",
+      message: `${roleLabel} requires an active task.`,
+      statusCode: 409,
+      hint: "Create or select a task before using this session."
+    });
+  }
+  return taskSlug;
 }
 
 async function requireCurrentProject(projectService: ProjectService) {

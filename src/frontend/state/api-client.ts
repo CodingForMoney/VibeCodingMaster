@@ -16,7 +16,6 @@ import type {
   HarnessApplyRequest,
   HarnessApplyResult,
   HarnessBootstrapStatusReport,
-  HarnessFeedbackDecisionRequest,
   HarnessFeedbackStateReport,
   HarnessFileContent,
   MergeRepositoryDiffToCurrentBranchResult,
@@ -24,6 +23,7 @@ import type {
   RepositoryFileDiffReport,
   RestartHarnessBootstrapRequest,
   RunHarnessBootstrapResult,
+  SendHarnessFeedbackRequest,
   HarnessStatusReport,
   StartHarnessBootstrapRequest,
   StartHarnessBootstrapResult,
@@ -57,7 +57,7 @@ import type { ProjectSummary, ConnectProjectRequest } from "../../shared/types/p
 import type { DispatchableRole, RoleName } from "../../shared/types/role.js";
 import type { VcmSessionRoundState } from "../../shared/types/round.js";
 import type { RoleSessionRecord, StartRoleSessionRequest } from "../../shared/types/session.js";
-import type { CleanupTaskRequest, CleanupTaskResult, CreateTaskRequest, OneClickStartTaskResult, TaskRecord } from "../../shared/types/task.js";
+import type { CleanupTaskResult, CreateTaskRequest, OneClickStartTaskResult, TaskRecord } from "../../shared/types/task.js";
 import { errorReason } from "./error-format.js";
 import type {
   TranslationBootstrapRun,
@@ -118,10 +118,9 @@ export const apiClient = {
       body: JSON.stringify(input)
     });
   },
-  cleanupTask(taskSlug: string, input: CleanupTaskRequest = {}) {
+  cleanupTask(taskSlug: string) {
     return request<CleanupTaskResult>(`/api/tasks/${encodeURIComponent(taskSlug)}/cleanup`, {
-      method: "POST",
-      body: JSON.stringify(input)
+      method: "POST"
     });
   },
   getHarnessStatus(taskSlug: string) {
@@ -178,9 +177,10 @@ export const apiClient = {
       body: JSON.stringify(input)
     });
   },
-  stopHarnessBootstrap() {
+  stopHarnessBootstrap(input: { taskSlug: string }) {
     return request<HarnessBootstrapStatusReport>("/api/projects/harness/bootstrap/stop", {
-      method: "POST"
+      method: "POST",
+      body: JSON.stringify(input)
     });
   },
   runHarnessBootstrap(input: { taskSlug: string }) {
@@ -189,8 +189,13 @@ export const apiClient = {
       body: JSON.stringify(input)
     });
   },
-  getHarnessEngineerSession() {
-    return request<RoleSessionRecord | null>("/api/projects/harness/engineer/session");
+  getHarnessEngineerSession(taskSlug?: string | null) {
+    const params = new URLSearchParams();
+    if (taskSlug) {
+      params.set("taskSlug", taskSlug);
+    }
+    const suffix = params.toString() ? `?${params.toString()}` : "";
+    return request<RoleSessionRecord | null>(`/api/projects/harness/engineer/session${suffix}`);
   },
   ensureHarnessEngineerSession(input: StartRoleSessionRequest = {}) {
     return request<RoleSessionRecord>("/api/projects/harness/engineer/session/ensure", {
@@ -216,14 +221,16 @@ export const apiClient = {
       body: JSON.stringify(input)
     });
   },
-  stopHarnessEngineerSession() {
+  stopHarnessEngineerSession(input: StartRoleSessionRequest = {}) {
     return request<RoleSessionRecord>("/api/projects/harness/engineer/session/stop", {
-      method: "POST"
+      method: "POST",
+      body: JSON.stringify(input)
     });
   },
-  notifyHarnessEngineerHarnessUpdated() {
+  notifyHarnessEngineerHarnessUpdated(input: StartRoleSessionRequest = {}) {
     return request<RoleSessionRecord>("/api/projects/harness/engineer/session/notify-harness", {
-      method: "POST"
+      method: "POST",
+      body: JSON.stringify(input)
     });
   },
   getHarnessFeedbackState(taskSlug?: string | null) {
@@ -234,8 +241,8 @@ export const apiClient = {
     const query = params.toString();
     return request<HarnessFeedbackStateReport>(`/api/projects/harness/feedback${query ? `?${query}` : ""}`);
   },
-  decideHarnessFeedback(input: HarnessFeedbackDecisionRequest) {
-    return request<HarnessFeedbackStateReport>("/api/projects/harness/feedback/decision", {
+  sendHarnessFeedback(input: SendHarnessFeedbackRequest) {
+    return request<RoleSessionRecord>("/api/projects/harness/feedback/send", {
       method: "POST",
       body: JSON.stringify(input)
     });
@@ -439,9 +446,10 @@ export const apiClient = {
       method: "POST"
     });
   },
-  notifyTranslatorHarnessUpdated() {
+  notifyTranslatorHarnessUpdated(input: StartRoleSessionRequest = {}) {
     return request<RoleSessionRecord>("/api/projects/translation/session/notify-harness", {
-      method: "POST"
+      method: "POST",
+      body: JSON.stringify(input)
     });
   },
   retryTranslation(sessionId: string, translationId: string) {
@@ -462,8 +470,13 @@ export const apiClient = {
   getTranslationState() {
     return request<TranslationState>("/api/translation/state");
   },
-  getTranslatorSession() {
-    return request<RoleSessionRecord | null>("/api/translation/session");
+  getTranslatorSession(taskSlug?: string | null) {
+    const params = new URLSearchParams();
+    if (taskSlug) {
+      params.set("taskSlug", taskSlug);
+    }
+    const suffix = params.toString() ? `?${params.toString()}` : "";
+    return request<RoleSessionRecord | null>(`/api/translation/session${suffix}`);
   },
   ensureTranslatorSession(input: StartRoleSessionRequest = {}) {
     return request<RoleSessionRecord>("/api/translation/session/ensure", {
@@ -489,9 +502,10 @@ export const apiClient = {
       body: JSON.stringify(input)
     });
   },
-  stopTranslatorSession() {
+  stopTranslatorSession(input: StartRoleSessionRequest = {}) {
     return request<RoleSessionRecord>("/api/translation/session/stop", {
-      method: "POST"
+      method: "POST",
+      body: JSON.stringify(input)
     });
   },
   browseTranslationSourceFiles(input: { path?: string; query?: string; limit?: number } = {}) {

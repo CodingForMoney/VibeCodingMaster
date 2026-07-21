@@ -1,6 +1,6 @@
 {
   "name": "vibe-coding-master",
-  "version": "0.6.23",
+  "version": "0.7.11",
   "description": "Local GUI session cockpit for Claude Code role sessions.",
   "type": "module",
   "files": [
@@ -31,6 +31,7 @@
     "start": "node dist/main.js",
     "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.node.json --noEmit",
     "test": "vitest run",
+    "test:e2e:backend": "vitest run tests/e2e/backend",
     "test:watch": "vitest",
     "e2e": "playwright test"
   },

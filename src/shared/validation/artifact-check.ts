@@ -1,13 +1,33 @@
 import type { ArtifactCheckResult, ArtifactKind } from "../types/artifact.js";
 
 const REQUIRED_HEADINGS: Record<ArtifactKind, readonly string[]> = {
+  "architecture-brief": [
+    "Accepted Outcome",
+    "Confirmed User Decisions",
+    "Existing Constraints",
+    "Unresolved User Decisions",
+    "User Confirmation"
+  ],
   "architecture-plan": [
     "Accepted Scope",
     "Current Code Reality",
+    "Planning Boundary",
+    "Code Reading Evidence",
+    "Existing Behavior Trace",
+    "Code / Docs Conflicts",
     "Architecture Decision",
+    "Changed Behavior Flow",
+    "Ownership",
+    "Data Flow",
+    "Lifecycle",
+    "Boundaries",
+    "Invariants",
+    "Failure Model",
+    "Decision Rationale",
     "Module/File Plan",
     "Public Surface Impact",
     "Scaffold Manifest",
+    "Scaffold Build Evidence",
     "Tester Coverage Hints",
     "Docs Impact",
     "Known Risks",
@@ -20,6 +40,7 @@ const REQUIRED_HEADINGS: Record<ArtifactKind, readonly string[]> = {
   "test-report": [
     "Evidence Reviewed",
     "Tests Added Or Updated",
+    "Coverage Mapping",
     "Commands Run Or Checked",
     "Validation Results",
     "Failed Expectations",
@@ -102,11 +123,42 @@ export function checkMarkdownArtifact(
 }
 
 function validateArtifactFields(kind: ArtifactKind, content: string): string[] {
+  if (kind === "architecture-plan") {
+    const result = /^\s*Planning Result\s*:\s*(.+?)\s*$/im.exec(content)?.[1]?.trim().toLowerCase();
+    if (!result) {
+      return ["Planning Result is required and must be complete."];
+    }
+    return result === "complete"
+      ? []
+      : [`Planning Result must be complete; received "${result}".`];
+  }
+
+  if (kind === "architecture-brief") {
+    const status = /^\s*Architecture Brief Status\s*:\s*(\S+)\s*$/im.exec(content)?.[1]?.toLowerCase();
+    const invalidFields = status === "interviewing" || status === "confirmed"
+      ? []
+      : ["Architecture Brief Status must be interviewing or confirmed."];
+    if (status === "confirmed") {
+      const unresolved = readArtifactSectionValue(content, "Unresolved User Decisions");
+      if (!unresolved || !/^none\.?$/i.test(unresolved)) {
+        invalidFields.push("Unresolved User Decisions must be None when Architecture Brief Status is confirmed.");
+      }
+    }
+    return invalidFields;
+  }
+
   if (kind === "test-report") {
     const result = /^\s*Test Result\s*:\s*(\S+)\s*$/im.exec(content)?.[1]?.toLowerCase();
-    return result === "pass" || result === "fail"
+    const invalidFields = result === "pass" || result === "fail"
       ? []
       : ["Test Result must be pass or fail."];
+    if (result === "pass") {
+      const blockingIssues = readArtifactSectionValue(content, "Blocking Validation Issues");
+      if (!blockingIssues || !/^none\.?$/i.test(blockingIssues)) {
+        invalidFields.push("Blocking Validation Issues must be None when Test Result is pass.");
+      }
+    }
+    return invalidFields;
   }
 
   if (kind === "docs-sync-report") {

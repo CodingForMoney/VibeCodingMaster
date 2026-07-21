@@ -3,7 +3,7 @@ import path from "node:path";
 import type { RoleName } from "../../shared/types/role.js";
 
 const ACTIVE_JOB_STATUSES = new Set(["queued", "starting", "running"]);
-const ACTIVE_CODER_WORKER_STATUSES = new Set(["planned", "running", "completed", "failed"]);
+const ACTIVE_CODER_WORKER_STATUSES = new Set(["running", "completed"]);
 const QUEUED_JOB_FRESH_MS = 120_000;
 
 export const MAX_CONSECUTIVE_STOP_BLOCKS = 3;
@@ -22,7 +22,6 @@ interface ActiveCoderWorkerTask {
   workerId: string;
   status: string;
   reportPath?: string;
-  error?: string;
   stateMtimeMs?: number;
 }
 
@@ -210,7 +209,6 @@ async function findActiveCoderWorkerTasks(taskRepoRoot: string): Promise<ActiveC
       workerId: typeof state.workerId === "string" ? state.workerId : path.basename(entry, ".json"),
       status,
       reportPath: typeof state.reportPath === "string" ? state.reportPath : undefined,
-      error: typeof state.error === "string" ? state.error : undefined,
       stateMtimeMs
     });
   }
@@ -244,9 +242,10 @@ function buildCoderWorkerBlockReason(tasks: ActiveCoderWorkerTask[]): string {
   const reports = tasks
     .map((task) => task.reportPath)
     .filter((reportPath): reportPath is string => Boolean(reportPath));
-  const reportHint = reports.length > 0 ? ` Test report(s): ${reports.join(", ")}.` : "";
+  const reportHint = reports.length > 0 ? ` Worker report(s): ${reports.join(", ")}.` : "";
   return `VCM: coder worker task ${listing} is still unhandled. Do not end the Coder turn while worker tasks are unhandled. `
-    + `Wait for worker subagents, test reports and commits, resolve failed or incomplete workers, set \`handled: true\` in each worker state, and continue.${reportHint}`;
+    + `Wait for running workers; inspect every completed worker report, implementation result, item disposition, and commit; `
+    + `then set \`handled: true\` in each worker state and continue.${reportHint}`;
 }
 
 function latestMtime(...values: Array<number | undefined>): number | undefined {

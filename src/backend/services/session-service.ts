@@ -1,5 +1,5 @@
 import path from "node:path";
-import { VCM_ROLE_NAMES, isDispatchableRole } from "../../shared/constants.js";
+import { ROLE_NAMES, isDispatchableRole } from "../../shared/constants.js";
 import type { ClaudeHookEventName } from "../../shared/types/claude-hook.js";
 import type { RoleName } from "../../shared/types/role.js";
 import type {
@@ -19,11 +19,11 @@ import type { SessionRegistry } from "../runtime/session-registry.js";
 import type { TerminalRuntime, TerminalSession } from "../runtime/terminal-runtime.js";
 import { submitTerminalInput } from "../runtime/terminal-submit.js";
 import type { ArtifactService } from "./artifact-service.js";
-import { ensureTaskMemorySnapshot } from "./auto-memory-service.js";
 import { claudeTranscriptPath } from "./claude-transcript-service.js";
 import { readHarnessRevisionState } from "./harness-revision.js";
 import type { ProjectService } from "./project-service.js";
 import { getTaskRuntimeRepoRoot, type TaskService } from "./task-service.js";
+import type { TaskWorkflowService } from "./task-workflow-service.js";
 
 export interface SessionService {
   startProjectTranslatorSession(repoRoot: string, input?: StartRoleSessionRequest): Promise<RoleSessionRecord>;
@@ -66,6 +66,7 @@ export interface SessionServiceDeps {
   artifactService: ArtifactService;
   projectService: Pick<ProjectService, "loadConfig">;
   taskService: Pick<TaskService, "loadTask">;
+  taskWorkflowService?: Pick<TaskWorkflowService, "getState" | "renderPmResumeContext">;
   apiUrl?: string;
   sandboxMode?: string;
   isProcessAlive?: (pid: number) => boolean;
@@ -169,7 +170,6 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     const config = await deps.projectService.loadConfig(repoRoot);
     const task = await deps.taskService.loadTask(repoRoot, taskSlug);
     const taskRepoRoot = getTaskRuntimeRepoRoot(task);
-    await ensureTaskMemorySnapshot(deps.fs, repoRoot, taskRepoRoot);
     const paths = deps.artifactService.getHandoffPaths(taskRepoRoot, task.handoffDir);
     const persisted = await loadPersistedRoleRecordForRole(deps.fs, repoRoot, taskRepoRoot, config.stateRoot, taskSlug, role);
     const permissionMode = normalizeClaudePermissionMode(input.permissionMode ?? persisted?.permissionMode);
@@ -254,7 +254,34 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
 
     deps.registry.upsert(record);
     await persistRoleSessionRecord(deps.fs, repoRoot, taskRepoRoot, config.stateRoot, record);
+    if (role === "project-manager") {
+      await restoreProjectManagerWorkflowContext(record, taskRepoRoot, config.stateRoot);
+    }
     return withHarnessRevisionView(repoRoot, record);
+  }
+
+  async function restoreProjectManagerWorkflowContext(
+    record: RoleSessionRecord,
+    taskRepoRoot: string,
+    stateRoot: string
+  ): Promise<void> {
+    if (!deps.taskWorkflowService || record.status !== "running") {
+      return;
+    }
+    try {
+      const state = await deps.taskWorkflowService.getState({
+        taskRepoRoot,
+        stateRoot,
+        taskSlug: record.taskSlug
+      });
+      const context = deps.taskWorkflowService.renderPmResumeContext(state);
+      if (!context || await waitForSessionInputReady(record.id) === "exited") {
+        return;
+      }
+      await submitTerminalInput(deps.runtime, record.id, context);
+    } catch {
+      // Workflow context is advisory; restore failures cannot fail session launch.
+    }
   }
 
   async function launchProjectTranslatorSession(
@@ -403,7 +430,6 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     launchMode: LaunchMode
   ): Promise<RoleSessionRecord> {
     const taskContext = await resolveProjectToolTaskContext(repoRoot, input, "Harness Engineer");
-    await ensureTaskMemorySnapshot(deps.fs, repoRoot, taskContext.taskRepoRoot);
     const live = toRoleSessionRecordView(
       getRegisteredProjectHarnessEngineerSession(deps.registry, deps.runtime),
       deps.runtime
@@ -1160,32 +1186,12 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       return notifyHarnessUpdatedForSession(repoRoot, current);
     },
     startRoleSession(repoRoot, taskSlug, role, input = {}) {
-      if (role === TRANSLATOR_ROLE) {
-        return this.startProjectTranslatorSession(repoRoot, { ...input, taskSlug });
-      }
-      if (role === HARNESS_ENGINEER_ROLE) {
-        return this.startProjectHarnessEngineerSession(repoRoot, { ...input, taskSlug });
-      }
       return launchRoleSession(repoRoot, taskSlug, role, input, "fresh");
     },
     resumeRoleSession(repoRoot, taskSlug, role, input = {}) {
-      if (role === TRANSLATOR_ROLE) {
-        return this.resumeProjectTranslatorSession(repoRoot, { ...input, taskSlug });
-      }
-      if (role === HARNESS_ENGINEER_ROLE) {
-        return this.resumeProjectHarnessEngineerSession(repoRoot, { ...input, taskSlug });
-      }
       return launchRoleSession(repoRoot, taskSlug, role, input, "resume");
     },
     async stopRoleSession(repoRoot, taskSlug, role) {
-      if (role === TRANSLATOR_ROLE) {
-        void taskSlug;
-        return this.stopProjectTranslatorSession(repoRoot);
-      }
-      if (role === HARNESS_ENGINEER_ROLE) {
-        void taskSlug;
-        return this.stopProjectHarnessEngineerSession(repoRoot);
-      }
       const existing = await this.getRoleSession(repoRoot, taskSlug, role);
       if (!existing) {
         throw new VcmError({
@@ -1212,12 +1218,6 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       return updated;
     },
     async restartRoleSession(repoRoot, taskSlug, role, input = {}) {
-      if (role === TRANSLATOR_ROLE) {
-        return this.restartProjectTranslatorSession(repoRoot, { ...input, taskSlug });
-      }
-      if (role === HARNESS_ENGINEER_ROLE) {
-        return this.restartProjectHarnessEngineerSession(repoRoot, { ...input, taskSlug });
-      }
       const existing = await this.getRoleSession(repoRoot, taskSlug, role);
       if (!existing) {
         return launchRoleSession(repoRoot, taskSlug, role, input, "fresh");
@@ -1241,14 +1241,6 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       return launchRoleSession(repoRoot, taskSlug, role, input, "fresh");
     },
     async getRoleSession(repoRoot, taskSlug, role) {
-      if (role === TRANSLATOR_ROLE) {
-        void taskSlug;
-        return this.getProjectTranslatorSession(repoRoot);
-      }
-      if (role === HARNESS_ENGINEER_ROLE) {
-        void taskSlug;
-        return this.getProjectHarnessEngineerSession(repoRoot);
-      }
       const config = await deps.projectService.loadConfig(repoRoot);
       const task = await deps.taskService.loadTask(repoRoot, taskSlug);
       const taskRepoRoot = getTaskRuntimeRepoRoot(task);
@@ -1267,7 +1259,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       const task = await deps.taskService.loadTask(repoRoot, taskSlug);
       const taskRepoRoot = getTaskRuntimeRepoRoot(task);
       const persistedTaskSession = await loadPersistedTaskSessionRecord(deps.fs, taskRepoRoot, config.stateRoot, taskSlug);
-      for (const role of VCM_ROLE_NAMES) {
+      for (const role of ROLE_NAMES) {
         const record = deps.registry.getByRole(taskSlug, role)
           ?? normalizePersistedRoleRecord(persistedTaskSession?.roles[role]?.record);
         const session = toRoleSessionRecordView(
@@ -1292,24 +1284,6 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       return notifyHarnessUpdatedForSession(repoRoot, current);
     },
     async recordRoleHookEvent(repoRoot, input) {
-      if (input.role === TRANSLATOR_ROLE) {
-        void input.taskSlug;
-        return this.recordProjectTranslatorHookEvent(repoRoot, {
-          eventName: input.eventName,
-          sessionId: input.sessionId,
-          transcriptPath: input.transcriptPath,
-          cwd: input.cwd
-        });
-      }
-      if (input.role === HARNESS_ENGINEER_ROLE) {
-        void input.taskSlug;
-        return this.recordProjectHarnessEngineerHookEvent(repoRoot, {
-          eventName: input.eventName,
-          sessionId: input.sessionId,
-          transcriptPath: input.transcriptPath,
-          cwd: input.cwd
-        });
-      }
       const current = await this.getRoleSession(repoRoot, input.taskSlug, input.role);
       if (!current || (!input.allowSessionMismatch && !matchesRoleHookSession(current, input))) {
         return undefined;
@@ -1357,13 +1331,13 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
         return undefined;
       }
 
-      if (role === TRANSLATOR_ROLE) {
+      if (role === TRANSLATOR_ROLE && taskSlug === PROJECT_TRANSLATOR_SCOPE) {
         const current = await getProjectToolSessionView(repoRoot, TRANSLATOR_ROLE);
         return current?.id === sessionId
           ? markProjectToolActivityIdle(repoRoot, current, persistTranslatorSession)
           : undefined;
       }
-      if (role === HARNESS_ENGINEER_ROLE) {
+      if (role === HARNESS_ENGINEER_ROLE && taskSlug === PROJECT_HARNESS_ENGINEER_SCOPE) {
         const current = await getProjectToolSessionView(repoRoot, HARNESS_ENGINEER_ROLE);
         return current?.id === sessionId
           ? markProjectToolActivityIdle(repoRoot, current, persistHarnessEngineerSession)
@@ -1395,15 +1369,13 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       return updated;
     },
     async markRoleActivityIdle(repoRoot, taskSlug, role) {
-      if (role === TRANSLATOR_ROLE) {
-        void taskSlug;
+      if (role === TRANSLATOR_ROLE && taskSlug === PROJECT_TRANSLATOR_SCOPE) {
         const current = await getProjectToolSessionView(repoRoot, TRANSLATOR_ROLE);
         return current
           ? markProjectToolActivityIdle(repoRoot, current, persistTranslatorSession)
           : undefined;
       }
-      if (role === HARNESS_ENGINEER_ROLE) {
-        void taskSlug;
+      if (role === HARNESS_ENGINEER_ROLE && taskSlug === PROJECT_HARNESS_ENGINEER_SCOPE) {
         const current = await getProjectToolSessionView(repoRoot, HARNESS_ENGINEER_ROLE);
         return current
           ? markProjectToolActivityIdle(repoRoot, current, persistHarnessEngineerSession)
@@ -1562,16 +1534,8 @@ function getRegisteredRoleSession(
   taskSlug: string,
   role: RoleName
 ): RoleSessionRecord | undefined {
-  if (role !== TRANSLATOR_ROLE && role !== HARNESS_ENGINEER_ROLE) {
-    return registry.getByRole(taskSlug, role);
-  }
-
-  const candidates = registry.list().filter((session) => session.role === role);
-  const live = candidates.find((session) => runtime.getSession(session.id)?.status === "running");
-  const scoped = live
-    ?? candidates.find((session) => session.taskSlug === taskSlug)
-    ?? candidates.sort(compareSessionUpdatedAtDesc)[0];
-  return scopeProjectRoleSession(scoped, taskSlug);
+  void runtime;
+  return registry.getByRole(taskSlug, role);
 }
 
 function getRegisteredProjectTranslatorSession(
@@ -1596,16 +1560,6 @@ function compareSessionUpdatedAtDesc(left: RoleSessionRecord, right: RoleSession
   return (right.updatedAt ?? "").localeCompare(left.updatedAt ?? "");
 }
 
-function scopeProjectRoleSession(record: RoleSessionRecord | undefined, taskSlug: string): RoleSessionRecord | undefined {
-  if (!record || (record.role !== TRANSLATOR_ROLE && record.role !== HARNESS_ENGINEER_ROLE)) {
-    return record;
-  }
-  return {
-    ...record,
-    taskSlug
-  };
-}
-
 async function loadPersistedRoleRecordForRole(
   fs: FileSystemAdapter,
   baseRepoRoot: string,
@@ -1614,15 +1568,7 @@ async function loadPersistedRoleRecordForRole(
   taskSlug: string,
   role: RoleName
 ): Promise<RoleSessionRecord | undefined> {
-  if (role === TRANSLATOR_ROLE) {
-    void taskSlug;
-    return loadPersistedTranslatorSession(fs, baseRepoRoot);
-  }
-  if (role === HARNESS_ENGINEER_ROLE) {
-    void taskSlug;
-    return loadPersistedHarnessEngineerSession(fs, baseRepoRoot);
-  }
-
+  void baseRepoRoot;
   return loadPersistedRoleRecord(fs, taskRepoRoot, stateRoot, taskSlug, role);
 }
 
@@ -1740,10 +1686,12 @@ function normalizeHarnessRevision(value: unknown): number {
 
 function buildHarnessRefreshPrompt(role: RoleName): string {
   return [
+    "[VCM HARNESS UPDATED]",
     "VCM harness was updated.",
     "Before continuing, re-read the current project `CLAUDE.md`, your agent definition, and any relevant VCM skills from disk.",
     `Your agent definition is \`.claude/agents/${role}.md\` when that file exists.`,
-    "Follow the latest rules from disk. Briefly acknowledge when ready."
+    "Follow the latest rules from disk. Briefly acknowledge when ready.",
+    "[/VCM HARNESS UPDATED]"
   ].join("\n");
 }
 
@@ -1815,15 +1763,7 @@ async function persistRoleSessionRecord(
   stateRoot: string,
   session: RoleSessionRecord
 ): Promise<void> {
-  if (session.role === TRANSLATOR_ROLE) {
-    await persistTranslatorSession(fs, baseRepoRoot, session);
-    return;
-  }
-  if (session.role === HARNESS_ENGINEER_ROLE) {
-    await persistHarnessEngineerSession(fs, baseRepoRoot, session);
-    return;
-  }
-
+  void baseRepoRoot;
   await persistTaskSession(fs, taskRepoRoot, stateRoot, session);
 }
 

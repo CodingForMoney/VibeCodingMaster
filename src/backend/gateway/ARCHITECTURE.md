@@ -138,7 +138,8 @@ configured channel at boot — the user must arm it (desktop toggle →
 2. **Bind/identity**: persist sender metadata via `saveInboundMetadata`. Weixin
    binds the sender only if no `boundUserId` exists yet (`if-missing`); Lark binds
    the sender on every message (`always`) and also records `contextToken`/`chatId`
-   per user.
+   per user. After user text is successfully submitted to PM, status exposes its
+   message ID so the desktop can dismiss the active blocking flow-pause modal.
 3. **Authorize**: for non-Lark channels, reject (and audit) a sender that is not
    the bound user. (Lark intentionally skips this single-user lock — see
    Security.)
@@ -159,13 +160,18 @@ Command set (when enabled): `/help /start /retry /status /projects
 - `/create-task` reuses `taskLaunchService.startTaskRoleSessions` (shared with the
   GUI one-click start) and maps a partial start to `GATEWAY_TASK_PARTIAL_START`.
 - `/close-task` is a two-step confirm with a TTL (`CLOSE_CONFIRM_TTL_MS`);
-  `confirm` stops role sessions, parks the project-tool sessions on a safe cwd,
-  stops translation + round tracking, then force-cleans the task worktree/branch.
+  `confirm` delegates to the shared backend `task-close-service`. The task is
+  logically closed first; all runtime, worktree, branch, and state cleanup is
+  forceful and best-effort, with failures returned as warnings rather than
+  blocking close.
 - Plain text → `sendPlainTextToPm`: requires a running, idle PM session;
   when translation is enabled, immediately acknowledges the request, translates
   the user text to English, writes it into the PM terminal, and then reports the
   translated text. Translation failure is reported without sending the source
   text to PM.
+- Gateway transition from off to on disables the global pause-alert sound once.
+  Later status reads do not force it off again, so the user can re-enable sound
+  while Gateway remains on.
 
 ### Outbound PM push (`handlePmStop`)
 

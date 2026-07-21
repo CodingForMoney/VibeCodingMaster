@@ -34,7 +34,6 @@ import type { VcmRoleRecoveryState, VcmRoundStatus, VcmSessionRoundState } from 
 import type { ClaudePermissionMode, RoleSessionRecord, SessionEffort, SessionModel } from "../shared/types/session.js";
 import type { TaskRecord } from "../shared/types/task.js";
 import { AppShell } from "./components/app-shell.js";
-import { HarnessFeedbackReview } from "./components/harness-feedback-review.js";
 import { HarnessStudioModal } from "./components/harness-studio-modal.js";
 import { RepositoryDiffModal } from "./components/repository-diff-modal.js";
 import { TranslatorSessionModal } from "./components/translator-session-modal.js";
@@ -42,7 +41,13 @@ import { FileTranslationModalHost } from "./components/translation-panel.js";
 import { UiErrorCenter } from "./components/ui-error-center.js";
 import { selectActiveTask } from "./state/app-store.js";
 import { selectAutoFollowRole } from "./state/active-role-follow.js";
-import { getFlowPauseNotificationKey, selectFlowPauseAlertMessage } from "./state/flow-pause-alert.js";
+import {
+  getFlowPauseNotificationKey,
+  observeGatewayInboundMessage,
+  selectFlowPauseAlarmMode,
+  selectFlowPauseAlertMessage,
+  type GatewayInboundObservation
+} from "./state/flow-pause-alert.js";
 import { apiClient } from "./state/api-client.js";
 import { clearUiErrorForActions, formatUiError } from "./state/error-format.js";
 import { clearPollError, recordPollError } from "./state/poll-error-gate.js";
@@ -51,9 +56,7 @@ import { useScheduledPoll } from "./state/use-scheduled-poll.js";
 import { ProjectDashboard } from "./routes/project-dashboard.js";
 import { TaskWorkspace, type TaskWorkspaceLaunchState } from "./routes/task-workspace.js";
 
-const FLOW_PAUSE_STRONG_ALERT_THRESHOLD_MS = 2 * 60 * 1000;
 const FLOW_PAUSE_CHIME_INTERVAL_MS = 1400;
-const FLOW_PAUSE_WEAK_CHIME_COUNT = 3;
 
 function isTranslationHarnessReady(harnessStatus: HarnessStatusReport | null): boolean {
   return Boolean(harnessStatus?.initialized);
@@ -124,6 +127,10 @@ export function App() {
   const autoFollowedRoleRef = useRef<Record<string, RoleName>>({});
   const activeTaskViewStartedAtRef = useRef<Record<string, number>>({});
   const flowPauseAlarmRef = useRef<number | null>(null);
+  const gatewayInboundObservationRef = useRef<GatewayInboundObservation>({
+    initialized: false,
+    messageId: null
+  });
   const projectRuntimeLaunchSyncKeyRef = useRef("");
   const activeTask = useMemo(
     () => selectActiveTask(tasks, activeTaskSlug),
@@ -137,13 +144,6 @@ export function App() {
   const currentAutoMemoryState = autoMemoryStateTaskSlug === activeTask?.taskSlug ? autoMemoryState : null;
   const translationBaseReady = Boolean(project && activeTask && isTranslationHarnessReady(currentHarnessStatus));
   const translatorSessionRunning = translatorSession?.status === "running";
-  // Suppress the web flow-pause modal + sound only when the gateway will actually
-  // DELIVER the "needs attention" notification — i.e. it is enabled (handlePmStop
-  // pushes only when settings.enabled). The gateway keeps polling while disabled
-  // (to receive a `/start` command), so `gatewayStatus.running` is true even when
-  // disabled; keying suppression on `running` silences the web alert with no push
-  // anywhere. Key on `enabled` instead.
-  const gatewayHandlesAlerts = Boolean(gatewayStatus?.enabled);
   const effectiveTranslationEnabled = Boolean(translationEnabled && translationBaseReady && translatorSessionRunning);
   const canSaveLaunchTemplate = Boolean(activeTaskLaunchState?.statusLoaded);
   const canOneClickStart = Boolean(activeTask && activeTaskLaunchState?.statusLoaded && !activeTaskLaunchState.hasAnySession);
@@ -206,34 +206,9 @@ export function App() {
     }, FLOW_PAUSE_CHIME_INTERVAL_MS);
   }, [stopFlowPauseAlarm]);
 
-  const playWeakFlowPauseAlert = useCallback(() => {
-    stopFlowPauseAlarm();
-    let playCount = 1;
-    void playFlowPauseSound();
-    flowPauseAlarmRef.current = window.setInterval(() => {
-      playCount += 1;
-      void playFlowPauseSound();
-      if (playCount >= FLOW_PAUSE_WEAK_CHIME_COUNT && flowPauseAlarmRef.current !== null) {
-        window.clearInterval(flowPauseAlarmRef.current);
-        flowPauseAlarmRef.current = null;
-      }
-    }, FLOW_PAUSE_CHIME_INTERVAL_MS);
-  }, [stopFlowPauseAlarm]);
-
-  const showFlowPauseNotice = useCallback((
-    text: string,
-    id = `manual-${Date.now()}`,
-    options: { sound?: "none" | "weak" | "strong" } = {}
-  ) => {
+  const showFlowPauseNotice = useCallback((text: string, id = `manual-${Date.now()}`) => {
     setFlowPauseNotice({ id, text });
-    if (options.sound === "strong") {
-      startStrongFlowPauseAlarm();
-    } else if (options.sound === "weak") {
-      playWeakFlowPauseAlert();
-    } else {
-      stopFlowPauseAlarm();
-    }
-  }, [playWeakFlowPauseAlert, startStrongFlowPauseAlarm, stopFlowPauseAlarm]);
+  }, []);
 
   const confirmFlowPauseNotice = useCallback(() => {
     stopFlowPauseAlarm();
@@ -305,19 +280,8 @@ export function App() {
     if (!shouldShowFlowPauseNotice(roundState, previousObservation, activeTaskViewStartedAtRef.current[roundState.taskSlug])) {
       return;
     }
-    if (gatewayHandlesAlerts) {
-      stopFlowPauseAlarm();
-      setFlowPauseNotice(null);
-      return;
-    }
-
-    const sound = !pauseAlertSound
-      ? "none"
-      : getFlowPauseDurationMs(roundState) >= FLOW_PAUSE_STRONG_ALERT_THRESHOLD_MS
-        ? "strong"
-        : "weak";
-    showFlowPauseNotice(flowPauseMessage, pauseKey, { sound });
-  }, [activeTask?.taskSlug, gatewayHandlesAlerts, pauseAlertSound, showFlowPauseNotice, stopFlowPauseAlarm]);
+    showFlowPauseNotice(flowPauseMessage, pauseKey);
+  }, [activeTask?.taskSlug, showFlowPauseNotice]);
 
   const handleLaunchStateChanged = useCallback((launchState: TaskWorkspaceLaunchState) => {
     setActiveLaunchState((current) => {
@@ -433,7 +397,7 @@ export function App() {
   }
 
   async function refreshTranslatorSession(options: { syncLaunchOptions?: boolean } = {}) {
-    const session = await apiClient.getTranslatorSession();
+    const session = await apiClient.getTranslatorSession(activeTask?.taskSlug ?? null);
     setTranslatorSession(session);
     if (options.syncLaunchOptions) {
       syncTranslatorLaunchOptions(session);
@@ -455,7 +419,7 @@ export function App() {
   }
 
   async function refreshHarnessEngineerSession(options: { syncLaunchOptions?: boolean } = {}) {
-    const session = await apiClient.getHarnessEngineerSession();
+    const session = await apiClient.getHarnessEngineerSession(activeTask?.taskSlug ?? null);
     setHarnessEngineerSession(session);
     if (options.syncLaunchOptions) {
       syncHarnessEngineerLaunchOptions(session);
@@ -581,12 +545,23 @@ export function App() {
   }, [stopFlowPauseAlarm]);
 
   useEffect(() => {
-    if (!gatewayHandlesAlerts) {
-      return;
+    if (gatewayStatus?.pauseAlertSoundEnabled !== undefined) {
+      setPauseAlertSound(gatewayStatus.pauseAlertSoundEnabled);
+    }
+    const next = observeGatewayInboundMessage(gatewayInboundObservationRef.current, gatewayStatus);
+    gatewayInboundObservationRef.current = next.observation;
+    if (next.dismissPauseAlert) {
+      confirmFlowPauseNotice();
+    }
+  }, [confirmFlowPauseNotice, gatewayStatus]);
+
+  useEffect(() => {
+    if (flowPauseNotice && selectFlowPauseAlarmMode(pauseAlertSound) === "strong") {
+      startStrongFlowPauseAlarm();
+      return stopFlowPauseAlarm;
     }
     stopFlowPauseAlarm();
-    setFlowPauseNotice(null);
-  }, [gatewayHandlesAlerts, stopFlowPauseAlarm]);
+  }, [flowPauseNotice?.id, pauseAlertSound, startStrongFlowPauseAlarm, stopFlowPauseAlarm]);
 
   useEffect(() => {
     const resolvedTheme = themeMode === "system"
@@ -702,22 +677,19 @@ export function App() {
       "",
       "This is destructive:",
       "- stops VCM-managed running role sessions for this task",
-      "- moves project-scoped Translator and Harness Engineer sessions to the base repository cwd",
+      "- stops Translator and Harness Engineer sessions for this task",
       `- deletes the task worktree: ${activeTask.worktreePath}`,
       `- deletes the Git branch: ${activeTask.branch}`,
       "- deletes VCM task/session/message/orchestration state",
       "",
-      "VCM will not check running sessions or uncommitted changes before closing."
+      "The task will close even if a cleanup step fails; cleanup issues are reported as warnings."
     ].join("\n");
     const confirmed = window.confirm(closeMessage);
     if (!confirmed) {
       return;
     }
 
-    await apiClient.cleanupTask(activeTask.taskSlug, {
-      force: true,
-      forceDeleteBranch: true
-    });
+    const result = await apiClient.cleanupTask(activeTask.taskSlug);
     setActiveTaskSlug(null);
     setActiveMessages(null);
     setActiveOrchestration(null);
@@ -726,6 +698,13 @@ export function App() {
     setActiveGateReview(null);
     setWorkspaceRefreshNonce((current) => current + 1);
     await loadTasks();
+    if (result.warnings?.length) {
+      window.alert([
+        `Task "${result.taskSlug}" closed with cleanup warnings:`,
+        "",
+        ...result.warnings.map((warning) => `- ${warning}`)
+      ].join("\n"));
+    }
   }
 
   const sidebarMessages =
@@ -856,7 +835,10 @@ export function App() {
             await refreshHarnessEngineerSession({ syncLaunchOptions: true });
           }, "Restart Harness Bootstrap")}
           onStopHarnessBootstrap={() => withBusy(async () => {
-            const status = await apiClient.stopHarnessBootstrap();
+            if (!activeTask) {
+              throw new Error("Create or select a task before stopping Harness Bootstrap.");
+            }
+            const status = await apiClient.stopHarnessBootstrap({ taskSlug: activeTask.taskSlug });
             setHarnessBootstrapStatus(status);
             setHarnessBootstrapStatusTaskSlug(activeTask?.taskSlug ?? null);
             await refreshHarnessEngineerSession();
@@ -1255,6 +1237,7 @@ export function App() {
         open={harnessStudioOpen}
         busy={busy}
         status={currentHarnessStatus}
+        feedbackState={harnessFeedbackState}
         memoryState={currentAutoMemoryState}
         bootstrapStatus={currentHarnessBootstrapStatus}
         engineerSession={harnessEngineerSession}
@@ -1272,6 +1255,7 @@ export function App() {
               loadHarnessStatus(activeTask.taskSlug),
               loadHarnessBootstrapStatus(activeTask.taskSlug),
               refreshHarnessEngineerSession(),
+              refreshHarnessFeedbackState(activeTask.taskSlug),
               apiClient.getAutoMemoryState(activeTask.taskSlug).then((state) => {
                 setAutoMemoryState(state);
                 setAutoMemoryStateTaskSlug(activeTask.taskSlug);
@@ -1335,16 +1319,35 @@ export function App() {
         }}
         onEngineerStop={() => {
           void withBusy(async () => {
-            const session = await apiClient.stopHarnessEngineerSession();
+            if (!activeTask) {
+              throw new Error("Create or select a task before stopping Harness Engineer.");
+            }
+            const session = await apiClient.stopHarnessEngineerSession({ taskSlug: activeTask.taskSlug });
             setHarnessEngineerSession(session);
           }, "Stop Harness Engineer");
         }}
         onEngineerNotifyHarnessUpdated={() => {
           void withBusy(async () => {
-            const session = await apiClient.notifyHarnessEngineerHarnessUpdated();
+            if (!activeTask) {
+              throw new Error("Create or select a task before notifying Harness Engineer.");
+            }
+            const session = await apiClient.notifyHarnessEngineerHarnessUpdated({ taskSlug: activeTask.taskSlug });
             setHarnessEngineerSession(session);
             syncHarnessEngineerLaunchOptions(session);
           }, "Notify Harness Engineer to reload harness");
+        }}
+        onSendFeedback={(feedbackPath) => {
+          void withBusy(async () => {
+            if (!activeTask) {
+              throw new Error("Create or select a task before sending Harness Feedback.");
+            }
+            const session = await apiClient.sendHarnessFeedback({
+              taskSlug: activeTask.taskSlug,
+              feedbackPath
+            });
+            setHarnessEngineerSession(session);
+            syncHarnessEngineerLaunchOptions(session);
+          }, "Send Harness Feedback to Harness Engineer");
         }}
         onOpenRepositoryDiff={() => setRepositoryDiffOpen(true)}
         onReviewTaskHarness={() => {
@@ -1434,68 +1437,22 @@ export function App() {
         }}
         onStop={() => {
           void withBusy(async () => {
-            const session = await apiClient.stopTranslatorSession();
+            if (!activeTask) {
+              throw new Error("Create or select a task before stopping Translator.");
+            }
+            const session = await apiClient.stopTranslatorSession({ taskSlug: activeTask.taskSlug });
             setTranslatorSession(session);
           }, "Stop Translator session");
         }}
         onNotifyHarnessUpdated={() => {
           void withBusy(async () => {
-            const session = await apiClient.notifyTranslatorHarnessUpdated();
+            if (!activeTask) {
+              throw new Error("Create or select a task before notifying Translator.");
+            }
+            const session = await apiClient.notifyTranslatorHarnessUpdated({ taskSlug: activeTask.taskSlug });
             setTranslatorSession(session);
             syncTranslatorLaunchOptions(session);
           }, "Notify Translator to reload harness");
-        }}
-      />
-      <HarnessFeedbackReview
-        busy={busy}
-        state={harnessFeedbackState}
-        onCancel={(comment) => {
-          void withBusy(async () => {
-            const state = await apiClient.decideHarnessFeedback({
-              action: "cancel",
-              taskSlug: activeTask?.taskSlug,
-              comment
-            });
-            setHarnessFeedbackState(state);
-          }, "Cancel Harness feedback");
-        }}
-        onApprove={(comment) => {
-          void withBusy(async () => {
-            if (!activeTask) {
-              throw new Error("Create or select a task before approving Harness feedback.");
-            }
-            const state = await apiClient.decideHarnessFeedback({
-              action: "approve",
-              taskSlug: activeTask.taskSlug,
-              comment
-            });
-            setHarnessFeedbackState(state);
-            await refreshHarnessEngineerSession();
-          }, "Approve Harness feedback");
-        }}
-        onComment={(comment) => {
-          void withBusy(async () => {
-            if (!activeTask) {
-              throw new Error("Create or select a task before sending Harness feedback comments.");
-            }
-            const state = await apiClient.decideHarnessFeedback({
-              action: "comment",
-              taskSlug: activeTask.taskSlug,
-              comment
-            });
-            setHarnessFeedbackState(state);
-            await refreshHarnessEngineerSession();
-          }, "Send Harness feedback comment");
-        }}
-        onReject={(comment) => {
-          void withBusy(async () => {
-            const state = await apiClient.decideHarnessFeedback({
-              action: "reject",
-              taskSlug: activeTask?.taskSlug,
-              comment
-            });
-            setHarnessFeedbackState(state);
-          }, "Reject Harness feedback");
         }}
       />
     </AppShell>
@@ -1758,15 +1715,6 @@ type AudioContextWindow = Window & typeof globalThis & {
 };
 
 let flowPauseAudioContext: AudioContext | null = null;
-
-function getFlowPauseDurationMs(roundState: VcmSessionRoundState): number {
-  const startedAt = Date.parse(roundState.startedAt ?? "");
-  const endedAt = Date.parse(roundState.stoppedAt ?? roundState.lastTurnEndedAt ?? "");
-  if (!Number.isFinite(startedAt) || !Number.isFinite(endedAt)) {
-    return 0;
-  }
-  return Math.max(0, endedAt - startedAt);
-}
 
 function shouldShowFlowPauseNotice(
   roundState: VcmSessionRoundState,

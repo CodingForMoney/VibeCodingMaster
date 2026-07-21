@@ -59,6 +59,9 @@ describe("createArtifactService", () => {
     expect(created).toContain(".ai/vcm/handoffs/final-acceptance.md");
     expect(created).toContain(".ai/vcm/handoffs/known-issues.md");
     expect(created).toContain(".ai/vcm/handoffs/coder-completion.md");
+    expect(created).toContain(".ai/vcm/handoffs/architect-debug.md");
+    expect(created).toContain(".ai/vcm/handoffs/architecture-brief.md");
+    expect(summary.paths.architectureBriefPath).toBe(".ai/vcm/handoffs/architecture-brief.md");
     expect(summary.paths.docsSyncReportPath).toBe(".ai/vcm/handoffs/docs-sync-report.md");
     expect(summary.paths.finalAcceptancePath).toBe(".ai/vcm/handoffs/final-acceptance.md");
     expect(summary.paths.knownIssuesPath).toBe(".ai/vcm/handoffs/known-issues.md");
@@ -70,6 +73,30 @@ describe("createArtifactService", () => {
       .resolves.toContain("Rule: only edit files under Task repo root.");
     await expect(fs.readText("/repo/.ai/vcm/handoffs/coder-completion.md"))
       .resolves.toContain("## L0/L1 Validation");
+    await expect(fs.readText("/repo/.ai/vcm/handoffs/coder-completion.md"))
+      .resolves.toContain("| ID | Action | Result | Marker State | Proof Evidence |");
+    await expect(fs.readText("/repo/.ai/vcm/handoffs/coder-completion.md"))
+      .resolves.not.toContain("## Remaining Markers");
+    await expect(fs.readText("/repo/.ai/vcm/handoffs/architecture-plan.md"))
+      .resolves.toContain("Planning Result: complete|incomplete|user clarification required");
+    await expect(fs.readText("/repo/.ai/vcm/handoffs/architecture-plan.md"))
+      .resolves.toContain("| ID | Action | File | Symbol Or Site | Coder Work | Allowed Implementation Freedom | Behavior / Contract Proof Point |");
+    await expect(fs.readText("/repo/.ai/vcm/handoffs/architecture-plan.md"))
+      .resolves.toContain("## Scaffold Build Evidence");
+    await expect(fs.readText("/repo/.ai/vcm/handoffs/architecture-plan.md"))
+      .resolves.not.toContain("File / Action");
+    await expect(fs.readText("/repo/.ai/vcm/handoffs/architecture-plan.md"))
+      .resolves.not.toContain("Expected VCM:CODE");
+    await expect(fs.readText("/repo/.ai/vcm/handoffs/architecture-plan.md"))
+      .resolves.not.toContain("SCF-001");
+    await expect(fs.readText("/repo/.ai/vcm/handoffs/architecture-brief.md"))
+      .resolves.toContain("Architecture Brief Status: interviewing|confirmed");
+    await expect(fs.readText("/repo/.ai/vcm/handoffs/architect-debug.md"))
+      .resolves.toContain("## Confirmed Root Cause");
+    await expect(fs.readText("/repo/.ai/vcm/handoffs/architect-debug.md"))
+      .resolves.toContain("## L2/L3 Validation");
+    await expect(fs.readText("/repo/.ai/vcm/handoffs/architect-debug.md"))
+      .resolves.toContain("## Final Disposition");
     expect(summary.checks.find((check) => check.kind === "docs-sync-report")).toMatchObject({
       status: "incomplete",
       hasPlaceholder: true

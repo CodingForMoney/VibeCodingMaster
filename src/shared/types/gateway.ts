@@ -71,6 +71,10 @@ export interface GatewayStatus {
   pendingConfirmations: GatewayPendingConfirmations;
   lastPollStatus: GatewayPollStatus;
   lastMessageStatus: GatewayMessageStatus | null;
+  /** Latest Gateway message successfully submitted to PM, used to acknowledge web UI pauses. */
+  lastPmInputMessageId?: string | null;
+  /** Backend-owned global preference mirrored here for Gateway-triggered updates. */
+  pauseAlertSoundEnabled?: boolean;
   updatedAt: string;
 }
 

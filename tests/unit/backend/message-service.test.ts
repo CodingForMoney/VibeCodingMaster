@@ -50,6 +50,9 @@ describe("createMessageService", () => {
       "---",
       "type: question",
       "artifact_refs: .ai/vcm/handoffs/architecture-plan.md",
+      "workflow_flow: code-change",
+      "workflow_step: coder-implementation",
+      "workflow_status: active",
       "---",
       "Can this implementation start?"
     ].join("\n"));
@@ -68,6 +71,11 @@ describe("createMessageService", () => {
         id: "msg_1",
         type: "question",
         artifactRefs: [".ai/vcm/handoffs/architecture-plan.md"],
+        workflow: {
+          flow: "code-change",
+          step: "coder-implementation",
+          status: "active"
+        },
         routePath: ".ai/vcm/handoffs/messages/project-manager-coder.md",
         dispatchingAt: "2026-05-29T00:00:00.000Z",
         deliveredAt: "2026-05-29T00:00:00.000Z"
@@ -92,6 +100,17 @@ describe("createMessageService", () => {
     expect(harness.writes[0]).toMatch(/\x1b\[201~$/);
     expect(harness.writes[1]).toBe("\r");
     expect(harness.runningMarks).toEqual(["coder"]);
+    expect(harness.workflowUpdates).toMatchObject([{
+      declaration: {
+        flow: "code-change",
+        step: "coder-implementation",
+        status: "active"
+      },
+      dispatch: {
+        messageId: "msg_1",
+        toRole: "coder"
+      }
+    }]);
     await expect(harness.readRoute("project-manager-coder.md")).resolves.toContain("Can this implementation start?");
 
     const submitted = await harness.service.confirmPromptSubmitted({
@@ -261,6 +280,25 @@ describe("createMessageService", () => {
     });
   });
 
+  it("does not block PM delivery when workflow-state recording fails", async () => {
+    const harness = createHarness(["coder"], { workflowRecordThrows: true });
+    await harness.writeRoute("project-manager-coder.md", [
+      "---",
+      "workflow_flow: code-change",
+      "workflow_step: coder-implementation",
+      "---",
+      "Implement the assigned scaffold."
+    ].join("\n"));
+
+    const [result] = await harness.service.scanAndDispatchPendingRouteFiles(harness.base);
+
+    expect(result).toMatchObject({
+      delivered: true,
+      message: { body: "Implement the assigned scaffold." }
+    });
+    expect(harness.writes[0]).toContain("Implement the assigned scaffold.");
+  });
+
   it("rejects peer route files because VCM routes through project-manager", async () => {
     const harness = createHarness(["coder", "tester"]);
     await harness.service.updateOrchestrationState({
@@ -289,10 +327,12 @@ function createHarness(runningRoles: RoleName[], options: {
   dispatchConfirmationEnabled?: boolean;
   dispatchConfirmationRetryDelaysMs?: number[];
   dispatchConfirmationFailureDelayMs?: number;
+  workflowRecordThrows?: boolean;
 } = {}) {
   const fs = createMemoryFs();
   const writes: string[] = [];
   const runningMarks: RoleName[] = [];
+  const workflowUpdates: Array<Record<string, unknown>> = [];
   const activity = new Map<RoleName, RoleSessionRecord["activityStatus"]>();
   let nextId = 1;
   const service = createMessageService({
@@ -314,6 +354,15 @@ function createHarness(runningRoles: RoleName[], options: {
         };
       }
     },
+    taskWorkflowService: {
+      async recordPmDispatch(_input, declaration, dispatch) {
+        if (options.workflowRecordThrows) {
+          throw new Error("workflow state unavailable");
+        }
+        workflowUpdates.push({ declaration, dispatch });
+        return {} as never;
+      }
+    },
     now: () => "2026-05-29T00:00:00.000Z",
     id: () => `msg_${nextId++}`,
     preDispatchSwitchDelayMs: 0,
@@ -329,6 +378,7 @@ function createHarness(runningRoles: RoleName[], options: {
     service,
     writes,
     runningMarks,
+    workflowUpdates,
     setActivity(role: RoleName, nextActivity: RoleSessionRecord["activityStatus"]) {
       activity.set(role, nextActivity);
     },

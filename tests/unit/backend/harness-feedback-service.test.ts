@@ -18,7 +18,7 @@ afterEach(async () => {
 });
 
 describe("harness-feedback-service", () => {
-  it("dispatches one pending feedback item, waits for approval, then applies it", async () => {
+  it("lists pending feedback without dispatching it to Harness Engineer", async () => {
     tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-harness-feedback-"));
     await mkdir(path.join(tmpRepo, ".ai/vcm/harness-feedback/pending"), { recursive: true });
     await writeFile(
@@ -36,52 +36,74 @@ describe("harness-feedback-service", () => {
     );
 
     const writes: string[] = [];
-    const runtime = createRuntime(writes);
     const service = createHarnessFeedbackService({
       fs: createNodeFileSystemAdapter(),
-      runtime,
+      runtime: createRuntime(writes),
       sessionService: createSessionService(),
       now: createClock()
     });
 
-    const analyzing = await service.getState(tmpRepo, "demo-task");
-    expect(analyzing.status).toBe("analyzing");
-    expect(analyzing.active?.title).toBe("Route message skill is unclear");
-    expect(writes.join("\n")).toContain("[VCM Harness Feedback Analysis]");
-    expect(writes.join("\n")).toContain("Route message skill is unclear");
+    const state = await service.getState(tmpRepo, "demo-task");
 
-    await writeFile(
-      path.join(tmpRepo, ".ai/vcm/harness-feedback/active/2026-01-01-coder-routing/analysis.md"),
-      "Diagnosis: valid. Proposed change: update vcm-route-message examples.\n",
-      "utf8"
-    );
-    await service.recordHarnessEngineerHook(tmpRepo, "Stop");
-    const awaiting = await service.getState(tmpRepo, "demo-task");
-    expect(awaiting.status).toBe("awaiting_user_approval");
-    expect(awaiting.active?.analysisContent).toContain("Diagnosis: valid");
-
-    const applying = await service.decide(tmpRepo, {
-      action: "approve",
+    expect(state.status).toBe("queued");
+    expect(state.queuedCount).toBe(1);
+    expect(state.pending[0]).toMatchObject({
+      title: "Route message skill is unclear",
+      reporterRole: "coder",
       taskSlug: "demo-task",
-      comment: "Keep it concise."
+      source: "role-feedback"
     });
-    expect(applying.status).toBe("applying");
-    expect(writes.join("\n")).toContain("[VCM Harness Feedback Approved]");
-    expect(writes.join("\n")).toContain("Keep it concise.");
+    expect(writes).toEqual([]);
+  });
 
+  it("sends one selected pending feedback to Harness Engineer without removing it", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-harness-feedback-send-"));
+    const feedbackPath = ".ai/vcm/harness-feedback/pending/2026-01-01-coder-routing.md";
+    await mkdir(path.join(tmpRepo, ".ai/vcm/harness-feedback/pending"), { recursive: true });
     await writeFile(
-      path.join(tmpRepo, ".ai/vcm/harness-feedback/active/2026-01-01-coder-routing/apply-report.md"),
-      "Committed abc1234.\n",
+      path.join(tmpRepo, feedbackPath),
+      [
+        "# Route message skill is unclear",
+        "",
+        "Reporter role: coder",
+        "Task slug: demo-task"
+      ].join("\n"),
       "utf8"
     );
-    await service.recordHarnessEngineerHook(tmpRepo, "Stop");
-    const done = await service.getState(tmpRepo, "demo-task");
-    expect(done.status).toBe("idle");
-    expect(done.queuedCount).toBe(0);
-    await expect(readFile(
-      path.join(tmpRepo, ".ai/vcm/harness-feedback/completed/2026-01-01-coder-routing/apply-report.md"),
-      "utf8"
-    )).resolves.toContain("Committed abc1234");
+
+    const writes: string[] = [];
+    const service = createHarnessFeedbackService({
+      fs: createNodeFileSystemAdapter(),
+      runtime: createRuntime(writes),
+      sessionService: createSessionService(),
+      now: createClock()
+    });
+
+    const session = await service.sendPendingFeedback(tmpRepo, {
+      taskSlug: "demo-task",
+      feedbackPath
+    });
+
+    expect(session.role).toBe("harness-engineer");
+    expect(writes.join("\n")).toContain("[VCM Harness Feedback]");
+    expect(writes.join("\n")).toContain(path.join(tmpRepo, feedbackPath));
+    expect(writes.join("\n")).toContain("Report your findings and proposed changes to the user.");
+    expect((await service.getState(tmpRepo)).queuedCount).toBe(1);
+  });
+
+  it("rejects a feedback path that is not in the pending Inbox", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-harness-feedback-invalid-"));
+    const service = createHarnessFeedbackService({
+      fs: createNodeFileSystemAdapter(),
+      runtime: createRuntime([]),
+      sessionService: createSessionService(),
+      now: createClock()
+    });
+
+    await expect(service.sendPendingFeedback(tmpRepo, {
+      taskSlug: "demo-task",
+      feedbackPath: ".ai/vcm/harness-feedback/pending/missing.md"
+    })).rejects.toThrow("no longer pending");
   });
 
   it("starts a task harness retrospective only after final acceptance is complete", async () => {
@@ -90,36 +112,7 @@ describe("harness-feedback-service", () => {
     await mkdir(path.join(taskRepoRoot, ".ai/vcm/handoffs"), { recursive: true });
     await writeFile(
       path.join(taskRepoRoot, ".ai/vcm/handoffs/final-acceptance.md"),
-      [
-        "# Final Acceptance",
-        "",
-        "## Decision",
-        "accepted",
-        "",
-        "## Evidence Reviewed",
-        "All handoffs.",
-        "",
-        "## Scope Traceability",
-        "All changes traced.",
-        "",
-        "## Validation Summary",
-        "Checks passed.",
-        "",
-        "## Review And Docs Sync",
-        "Tester and docs sync complete.",
-        "",
-        "## Known Issues Disposition",
-        "No task issues to promote.",
-        "",
-        "## Gate Review Gates",
-        "Complete.",
-        "",
-        "## Cleanup Readiness",
-        "Ready.",
-        "",
-        "## Final User Summary",
-        "Done."
-      ].join("\n"),
+      renderFinalAcceptance("accepted"),
       "utf8"
     );
 
@@ -138,17 +131,11 @@ describe("harness-feedback-service", () => {
       trigger: "manual"
     });
 
-    expect(state.status).toBe("analyzing");
-    expect(state.active).toMatchObject({
-      title: "Task Harness Retrospective: demo-task",
-      source: "task-retrospective",
-      taskSlug: "demo-task",
-      trigger: "manual"
-    });
+    expect(state.status).toBe("idle");
     expect(writes.join("\n")).toContain("[VCM Task Harness Retrospective]");
     expect(writes.join("\n")).toContain("Review the completed task from the current active task worktree.");
     expect(writes.join("\n")).toContain("Write the analysis to Result Path:");
-    expect(writes.join("\n")).not.toContain(".ai/vcm/handoffs/final-acceptance.md");
+    expect(writes.join("\n")).toContain(".ai/vcm/harness-feedback/task-retrospectives/demo-task.md");
 
     const marker = JSON.parse(await readFile(
       path.join(tmpRepo, ".ai/vcm/harness-feedback/task-retrospectives/demo-task.json"),
@@ -157,18 +144,8 @@ describe("harness-feedback-service", () => {
     expect(marker).toMatchObject({
       taskSlug: "demo-task",
       trigger: "manual",
-      status: "analyzing"
-    });
-
-    await writeFile(
-      path.join(tmpRepo, ".ai/vcm/harness-feedback/active/2026-01-01T00-00-00.000Z-task-retrospective-demo-task/analysis.md"),
-      "No reusable harness problem found.\n",
-      "utf8"
-    );
-    await service.recordHarnessEngineerHook(tmpRepo, "Stop");
-    await service.decide(tmpRepo, {
-      action: "reject",
-      taskSlug: "demo-task"
+      status: "triggered",
+      analysisPath: ".ai/vcm/harness-feedback/task-retrospectives/demo-task.md"
     });
 
     await expect(service.startTaskRetrospective(tmpRepo, {
@@ -202,75 +179,6 @@ describe("harness-feedback-service", () => {
       trigger: "manual"
     })).rejects.toThrow("requires a completed code-change flow");
   });
-
-  it("cancels an interrupted active task harness retrospective while it is still analyzing", async () => {
-    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-harness-retrospective-cancel-"));
-    const taskRepoRoot = path.join(tmpRepo, ".claude/worktrees/demo-task");
-    await mkdir(path.join(taskRepoRoot, ".ai/vcm/handoffs"), { recursive: true });
-    await writeFile(
-      path.join(taskRepoRoot, ".ai/vcm/handoffs/final-acceptance.md"),
-      [
-        "# Final Acceptance",
-        "",
-        "## Decision",
-        "accepted",
-        "",
-        "## Evidence Reviewed",
-        "All handoffs.",
-        "",
-        "## Scope Traceability",
-        "All changes traced.",
-        "",
-        "## Validation Summary",
-        "Checks passed.",
-        "",
-        "## Review And Docs Sync",
-        "Tester and docs sync complete.",
-        "",
-        "## Known Issues Disposition",
-        "No task issues to promote.",
-        "",
-        "## Gate Review Gates",
-        "Complete.",
-        "",
-        "## Cleanup Readiness",
-        "Ready.",
-        "",
-        "## Final User Summary",
-        "Done."
-      ].join("\n"),
-      "utf8"
-    );
-
-    const service = createHarnessFeedbackService({
-      fs: createNodeFileSystemAdapter(),
-      runtime: createRuntime([]),
-      sessionService: createSessionService(),
-      now: createClock()
-    });
-    await service.startTaskRetrospective(tmpRepo, {
-      taskSlug: "demo-task",
-      taskRepoRoot,
-      handoffDir: ".ai/vcm/handoffs",
-      trigger: "auto"
-    });
-
-    const canceled = await service.decide(tmpRepo, {
-      action: "cancel",
-      taskSlug: "demo-task",
-      comment: "User interrupted Harness Engineer."
-    });
-
-    expect(canceled.status).toBe("idle");
-    await expect(readFile(
-      path.join(tmpRepo, ".ai/vcm/harness-feedback/completed/2026-01-01T00-00-00.000Z-task-retrospective-demo-task/decision.json"),
-      "utf8"
-    )).resolves.toContain("\"outcome\": \"canceled\"");
-    await expect(readFile(
-      path.join(tmpRepo, ".ai/vcm/harness-feedback/task-retrospectives/demo-task.json"),
-      "utf8"
-    )).resolves.toContain("\"status\": \"canceled\"");
-  });
 });
 
 function renderFinalAcceptance(decision: string): string {
@@ -302,7 +210,7 @@ function renderFinalAcceptance(decision: string): string {
 function createRuntime(writes: string[]): TerminalRuntime {
   const session: TerminalSession = {
     id: "session-1",
-    taskSlug: "__project_harness_engineer__",
+    taskSlug: "demo-task",
     role: "harness-engineer",
     status: "running",
     startedAt: "2026-01-01T00:00:00.000Z"
@@ -356,10 +264,13 @@ function createSessionService() {
     updatedAt: "2026-01-01T00:00:00.000Z"
   };
   return {
-    async getProjectHarnessEngineerSession() {
+    async getRoleSession() {
       return record;
     },
-    async ensureProjectHarnessEngineerSession() {
+    async startRoleSession() {
+      return record;
+    },
+    async resumeRoleSession() {
       return record;
     }
   };

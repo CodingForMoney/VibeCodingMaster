@@ -4,16 +4,15 @@ import type {
   ClaudeHookResult,
   ClaudePermissionRequestHookResult
 } from "../../shared/types/claude-hook.js";
-import { isGateReviewerRoleName, isHarnessEngineerToolRoleName, isTranslatorToolRoleName, isUserFacingRole, isVcmRoleName } from "../../shared/constants.js";
+import { isGateReviewerRoleName, isHarnessEngineerToolRoleName, isTranslatorToolRoleName, isVcmRoleName } from "../../shared/constants.js";
 import { VcmError } from "../errors.js";
-import { readLatestRoleTurnReply } from "./claude-transcript-reply.js";
+import { readTranscriptTurnEvidence } from "./claude-transcript-reply.js";
 import type { GatewayService } from "../gateway/gateway-service.js";
 import type { TerminalRuntime } from "../runtime/terminal-runtime.js";
 import { submitTerminalInput } from "../runtime/terminal-submit.js";
 import type { AppSettingsService } from "./app-settings-service.js";
 import type { AutoMemoryService } from "./auto-memory-service.js";
 import type { HarnessService } from "./harness-service.js";
-import type { HarnessFeedbackService } from "./harness-feedback-service.js";
 import type { JobGuardService } from "./job-guard-service.js";
 import type { MessageService } from "./message-service.js";
 import type { ProjectService } from "./project-service.js";
@@ -33,7 +32,9 @@ const NON_RETRYABLE_STOP_FAILURE_ERRORS = new Set([
   "billing_error",
   "invalid_request",
   "model_not_found",
-  "max_output_tokens"
+  "max_output_tokens",
+  "terminal_session_exited",
+  "terminal_session_missing"
 ]);
 const DIAGNOSTIC_SNIPPET_MAX_LENGTH = 2000;
 type StopFailureRetryTimer = ReturnType<typeof setTimeout>;
@@ -49,6 +50,7 @@ interface StopFailureDiagnostic {
 export interface ClaudeHookService {
   handleHook(input: ClaudeHookRequest): Promise<ClaudeHookResult>;
   handleStopHook(input: ClaudeHookRequest): Promise<ClaudeHookResult>;
+  handleReconciledTurnEnd(input: ClaudeHookRequest): Promise<ClaudeHookResult>;
   handlePermissionRequestHook(input: ClaudeHookRequest): Promise<ClaudePermissionRequestHookResult | undefined>;
 }
 
@@ -66,7 +68,6 @@ export interface ClaudeHookServiceDeps {
   retrySetTimeout?: (callback: () => void, delayMs: number) => StopFailureRetryTimer;
   retryClearTimeout?: (timer: StopFailureRetryTimer) => void;
   harnessService?: Pick<HarnessService, "recordHarnessBootstrapHook">;
-  harnessFeedbackService?: Pick<HarnessFeedbackService, "recordHarnessEngineerHook">;
   autoMemoryService?: Pick<AutoMemoryService, "isRoleMemoryTurn" | "handleRoleHook" | "handleHarnessEngineerHook">;
   gatewayService?: Pick<GatewayService, "handlePmStop" | "handleRoleStopFailure">;
   jobGuard?: Pick<JobGuardService, "evaluateStop" | "notePromptSubmitted">;
@@ -136,12 +137,22 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
   async function processTranslatorHook(input: ClaudeHookRequest): Promise<ClaudeHookResult> {
     const eventName = parseHookEvent(input.event.hook_event_name);
     const context = await getTranslatorHookContext();
-    const session = await deps.sessionService.recordProjectTranslatorHookEvent(context.project.repoRoot, {
-      eventName,
-      sessionId: stringOrUndefined(input.event.session_id),
-      transcriptPath: stringOrUndefined(input.event.transcript_path),
-      cwd: stringOrUndefined(input.event.cwd) ?? stringOrUndefined(input.event.new_cwd)
-    });
+    const session = input.taskSlug === "__project__"
+      ? await deps.sessionService.recordProjectTranslatorHookEvent(context.project.repoRoot, {
+          eventName,
+          sessionId: stringOrUndefined(input.event.session_id),
+          transcriptPath: stringOrUndefined(input.event.transcript_path),
+          cwd: stringOrUndefined(input.event.cwd) ?? stringOrUndefined(input.event.new_cwd)
+        })
+      : await deps.sessionService.recordRoleHookEvent(context.project.repoRoot, {
+          taskSlug: input.taskSlug,
+          role: input.role,
+          eventName,
+          sessionId: stringOrUndefined(input.event.session_id),
+          transcriptPath: stringOrUndefined(input.event.transcript_path),
+          cwd: stringOrUndefined(input.event.cwd) ?? stringOrUndefined(input.event.new_cwd),
+          allowSessionMismatch: true
+        });
     await deps.translationWorkerService?.handleTranslatorHook(context.project.repoRoot, eventName, input.taskSlug);
     return {
       ok: true,
@@ -156,15 +167,26 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
   async function processHarnessEngineerHook(input: ClaudeHookRequest): Promise<ClaudeHookResult> {
     const eventName = parseHookEvent(input.event.hook_event_name);
     const context = await getProjectToolHookContext("Harness Engineer");
-    const session = await deps.sessionService.recordProjectHarnessEngineerHookEvent(context.project.repoRoot, {
-      eventName,
-      sessionId: stringOrUndefined(input.event.session_id),
-      transcriptPath: stringOrUndefined(input.event.transcript_path),
-      cwd: stringOrUndefined(input.event.cwd) ?? stringOrUndefined(input.event.new_cwd)
-    });
+    const projectScoped = input.taskSlug === "__project_harness_engineer__";
+    const session = projectScoped
+      ? await deps.sessionService.recordProjectHarnessEngineerHookEvent(context.project.repoRoot, {
+          eventName,
+          sessionId: stringOrUndefined(input.event.session_id),
+          transcriptPath: stringOrUndefined(input.event.transcript_path),
+          cwd: stringOrUndefined(input.event.cwd) ?? stringOrUndefined(input.event.new_cwd)
+        })
+      : await deps.sessionService.recordRoleHookEvent(context.project.repoRoot, {
+          taskSlug: input.taskSlug,
+          role: input.role,
+          eventName,
+          sessionId: stringOrUndefined(input.event.session_id),
+          transcriptPath: stringOrUndefined(input.event.transcript_path),
+          cwd: stringOrUndefined(input.event.cwd) ?? stringOrUndefined(input.event.new_cwd),
+          allowSessionMismatch: true
+        });
     const activeTask = deps.autoMemoryService
       ? (await deps.taskService.listTasks(context.project.repoRoot))
-          .find((task) => task.cleanupStatus !== "cleaned")
+          .find((task) => task.cleanupStatus !== "cleaned" && (projectScoped || task.taskSlug === input.taskSlug))
       : undefined;
     const memoryHandled = activeTask
       ? await deps.autoMemoryService?.handleHarnessEngineerHook({
@@ -186,10 +208,10 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
     }
     await deps.harnessService?.recordHarnessBootstrapHook(context.project.repoRoot, {
       eventName,
+      taskSlug: input.taskSlug,
       sessionId: session?.id,
       claudeSessionId: stringOrUndefined(input.event.session_id)
     });
-    await deps.harnessFeedbackService?.recordHarnessEngineerHook(context.project.repoRoot, eventName);
     return {
       ok: true,
       eventName,
@@ -303,6 +325,9 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
     if (memoryResult) {
       return memoryResult;
     }
+    if (await isDuplicateCompletedStop(context, input)) {
+      return completedHookResult(input, eventName);
+    }
     await clearStopFailureRecoveryState(context, input.role);
 
     if (options.allowBlock && deps.jobGuard) {
@@ -332,6 +357,36 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
       notifyGateway: true,
       settleGuard: true
     });
+  }
+
+  async function isDuplicateCompletedStop(
+    context: Awaited<ReturnType<typeof getHookContext>>,
+    input: ClaudeHookRequest
+  ): Promise<boolean> {
+    const session = await deps.sessionService.getRoleSession(context.project.repoRoot, context.taskSlug, input.role);
+    if (!session || session.activityStatus === "running" || !session.lastTurnEndedAt) {
+      return false;
+    }
+    const evidence = await readTranscriptTurnEvidence(session);
+    if (!evidence.completion) {
+      return false;
+    }
+    const completionAt = Date.parse(evidence.completion.timestamp);
+    const recordedEndAt = Date.parse(session.lastTurnEndedAt);
+    return Number.isFinite(completionAt)
+      && Number.isFinite(recordedEndAt)
+      && completionAt <= recordedEndAt + 1_000;
+  }
+
+  function completedHookResult(input: ClaudeHookRequest, eventName: ClaudeHookEventName): ClaudeHookResult {
+    return {
+      ok: true,
+      eventName,
+      taskSlug: input.taskSlug,
+      role: input.role,
+      sessionUpdated: false,
+      dispatchedCount: 0
+    };
   }
 
   async function processStopFailureHook(input: ClaudeHookRequest): Promise<ClaudeHookResult> {
@@ -457,7 +512,6 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
       cwd: stringOrUndefined(input.event.cwd) ?? stringOrUndefined(input.event.new_cwd)
     });
     if (boundToTask) {
-      const userFacingReply = await captureUserFacingReply(eventName, input.role, session);
       await deps.roundService.recordClaudeHookEvent({
         repoRoot: context.project.repoRoot,
         stateRepoRoot: context.taskRepoRoot,
@@ -465,7 +519,6 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
         taskSlug: context.taskSlug,
         role: input.role,
         eventName,
-        ...(userFacingReply ? { userFacingReply } : {}),
         ...(options.settleGuard
           ? {
               settleGuard: async () => {
@@ -542,6 +595,17 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
       transcriptPath: stringOrUndefined(input.event.transcript_path),
       cwd: stringOrUndefined(input.event.cwd) ?? stringOrUndefined(input.event.new_cwd)
     });
+    const boundToTask = await isHookSessionBoundToTask(context, input.role);
+    if (boundToTask && eventName !== "PostCompact") {
+      await deps.roundService.recordClaudeHookEvent({
+        repoRoot: context.project.repoRoot,
+        stateRepoRoot: context.taskRepoRoot,
+        stateRoot: context.config.stateRoot,
+        taskSlug: context.taskSlug,
+        role: input.role,
+        eventName
+      });
+    }
     await deps.autoMemoryService.handleRoleHook({
       baseRepoRoot: context.project.repoRoot,
       taskRepoRoot: context.taskRepoRoot,
@@ -862,6 +926,16 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
       }
       return processStopHook(input, { allowBlock: true });
     },
+    handleReconciledTurnEnd(input) {
+      const eventName = parseHookEvent(input.event.hook_event_name);
+      if (eventName === "Stop") {
+        return processStopHook(input, { allowBlock: false });
+      }
+      if (eventName === "StopFailure") {
+        return processStopFailureHook(input);
+      }
+      throwUnsupportedEvent(eventName);
+    },
     handlePermissionRequestHook
   };
 }
@@ -881,25 +955,6 @@ function parseHookEvent(value: unknown): ClaudeHookEventName {
     statusCode: 400,
     hint: "VCM accepts UserPromptSubmit, Stop, StopFailure, and PostCompact hooks only."
   });
-}
-
-// On a user-facing role's Stop, best-effort capture its last user-facing turn
-// text to seed the await-user pause message. Capture failure is non-fatal and
-// must never block turn-end, so a missing/failed read just omits the field.
-async function captureUserFacingReply(
-  eventName: "Stop" | "StopFailure",
-  role: RoleName,
-  session: RoleSessionRecord | undefined
-): Promise<{ text: string; truncated: boolean } | undefined> {
-  if (eventName !== "Stop" || !isUserFacingRole(role) || !session) {
-    return undefined;
-  }
-  try {
-    const reply = await readLatestRoleTurnReply(session);
-    return reply ? { text: reply.text, truncated: reply.truncated } : undefined;
-  } catch {
-    return undefined;
-  }
 }
 
 function throwUnsupportedEvent(eventName: ClaudeHookEventName): never {

@@ -1,5 +1,34 @@
+export function renderArchitectureBriefTemplate(taskSlug: string): string {
+  return `# Architecture Brief: ${taskSlug}
+
+Architecture Brief Status: interviewing|confirmed
+
+## Accepted Outcome
+
+TBD
+
+## Confirmed User Decisions
+
+TBD
+
+## Existing Constraints
+
+TBD
+
+## Unresolved User Decisions
+
+TBD
+
+## User Confirmation
+
+TBD
+`;
+}
+
 export function renderArchitecturePlanTemplate(taskSlug: string): string {
   return `# Architecture Plan: ${taskSlug}
+
+Planning Result: complete|incomplete|user clarification required
 
 ## Accepted Scope
 
@@ -7,9 +36,55 @@ TBD
 
 ## Current Code Reality
 
+### Planning Boundary
+
+TBD
+
+### Code Reading Evidence
+
+| File / Symbol | Called By | Calls / Consumers | State / Side Effects | Verified Behavior |
+| --- | --- | --- | --- | --- |
+| TBD | TBD | TBD | TBD | TBD |
+
+### Existing Behavior Trace
+
+TBD
+
+### Code / Docs Conflicts
+
 TBD
 
 ## Architecture Decision
+
+### Changed Behavior Flow
+
+TBD
+
+### Ownership
+
+TBD
+
+### Data Flow
+
+TBD
+
+### Lifecycle
+
+TBD
+
+### Boundaries
+
+TBD
+
+### Invariants
+
+TBD
+
+### Failure Model
+
+TBD
+
+### Decision Rationale
 
 TBD
 
@@ -27,9 +102,15 @@ Task-specific context and coder guidance go here, not in source-code comments.
 Source-code comments should only describe durable behavior, contracts, invariants,
 error boundaries, or non-obvious logic that should remain useful after this task.
 
-| ID | File / Action | Why In Scope | Coder Work | Allowed Freedom | Expected VCM:CODE | Durable Comment Needs | Behavior / Contract Proof Points |
-| --- | --- | --- | --- | --- | --- | --- | --- |
-| SCF-001 | TBD | TBD | TBD | TBD | TBD | TBD | TBD |
+| ID | Action | File | Symbol Or Site | Coder Work | Allowed Implementation Freedom | Behavior / Contract Proof Point |
+| --- | --- | --- | --- | --- | --- | --- |
+| TBD | TBD | TBD | TBD | TBD | TBD | TBD |
+
+## Scaffold Build Evidence
+
+| Check | Command | Result | Scaffold Commit |
+| --- | --- | --- | --- |
+| TBD | TBD | TBD | TBD |
 
 ## Tester Coverage Hints
 
@@ -75,6 +156,10 @@ TBD
 
 TBD
 
+## Coverage Mapping
+
+TBD
+
 ## Commands Run Or Checked
 
 TBD
@@ -112,11 +197,9 @@ Decision: ready_for_review|incomplete|failed
 
 ## Scaffold Completion
 
-TBD
-
-## Remaining Markers
-
-TBD
+| ID | Action | Result | Marker State | Proof Evidence |
+| --- | --- | --- | --- | --- |
+| TBD | TBD | TBD | TBD | TBD |
 
 ## Changed Files
 
@@ -147,6 +230,56 @@ TBD
 TBD
 
 ## Objective Failures
+
+TBD
+`;
+}
+
+export function renderArchitectDebugTemplate(taskSlug: string): string {
+  return `# Architect Debug: ${taskSlug}
+
+Status: pending|completed
+
+## PM-Routed Failure
+
+TBD
+
+## Confirmed Root Cause
+
+TBD
+
+## Implementation
+
+TBD
+
+## Changed Files And Public Surface
+
+TBD
+
+## Baseline Tests
+
+TBD
+
+## Diagnostic And L0/L1 Validation
+
+TBD
+
+## L2/L3 Validation
+
+| Level | Applicable | Command Or Test | Failure Path | Result | Evidence |
+|---|---|---|---|---|---|
+| L2 | TBD | TBD | TBD | TBD | TBD |
+| L3 | TBD | TBD | TBD | TBD | TBD |
+
+## Generated Context
+
+TBD
+
+## Remaining Failure Evidence
+
+TBD
+
+## Final Disposition
 
 TBD
 `;

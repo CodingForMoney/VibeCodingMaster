@@ -15,9 +15,12 @@ const installerPath = path.join(appRoot, "scripts/install-vcm-harness.mjs");
 const approvedExampleRoot = path.join(appRoot, "example/rust-layered");
 
 const EXACT_EXAMPLE_HARNESS_PATHS = [
+  ".ai/tools/check-durable-docs",
   ".ai/tools/generate-module-index",
   ".ai/tools/generate-public-surface",
   ".ai/tools/request-gate-review",
+  ".ai/tools/update-task-state",
+  ".ai/tools/check-scaffold-ledger",
   ".ai/tools/run-long-check",
   ".ai/tools/vcm-bash-guard",
   ".ai/tools/watch-job",
@@ -29,12 +32,15 @@ const EXACT_EXAMPLE_HARNESS_PATHS = [
   ".claude/agents/tester.md",
   ".claude/agents/translator.md",
   ".claude/agents/vcm-coder-worker.md",
+  ".claude/skills/vcm-architecture-interview/SKILL.md",
   ".claude/skills/vcm-final-acceptance/SKILL.md",
   ".claude/skills/vcm-gate-review/SKILL.md",
   ".claude/skills/vcm-harness-bootstrap/SKILL.md",
   ".claude/skills/vcm-long-running-validation/SKILL.md",
   ".claude/skills/vcm-report-harness-issue/SKILL.md",
+  ".claude/skills/vcm-propose-memory/SKILL.md",
   ".claude/skills/vcm-route-message/SKILL.md",
+  ".claude/skills/vcm-task-state/SKILL.md",
   ".github/pull_request_template.md",
   "docs/CODING_STANDARDS.md",
   "docs/GLOSSARY.md"

@@ -22,11 +22,11 @@ You are `vcm-coder-worker`, a bounded implementation worker invoked by Coder.
 
 ### Worker Runtime State
 
-- Coder assigns a worker state path and report path.
-- Before editing, read the assigned worker state file and update only that file from `planned` to `running`.
-- After implementation and assigned checks, commit the assigned files. After the commit succeeds, write the assigned report with the commit hash, then update only the assigned worker state to `completed` with the same `commitHash` as the final step.
-- If blocked or failed, update only the assigned worker state to `failed`, write the reason in `error`, and write the report with remaining work.
-- Use `completed` only after assigned implementation is complete, assigned markers are removed, required assigned checks pass or have a Coder-recorded exception in the worker task, the report is written, and commit succeeds.
+- Worker runtime status is only `running` or `completed`.
+- Coder creates the assigned worker state with `status: running` and assigns its state path and report path.
+- After the sweep of assigned items and their assigned checks, commit the assigned files. After the commit succeeds, write the assigned report with the commit hash and `Implementation Result: success|has_failed_items`, then update only the assigned worker state to `completed` with the same `commitHash` as the final step.
+- Use `completed` only after every assigned item reached a terminal state. A successful item has green assigned proof and its marker removed. A failed item has a genuine attempt committed with objective failure evidence and its marker retained. Use `success` only when every item succeeded; otherwise use `has_failed_items`.
+- If execution is interrupted before the sweep, commit, or report completes, leave the worker state as `running`. Coder must resume the worker or take over the remaining work.
 - Do not set `handled: true`; only Coder may do that after reviewing and integrating the worker result.
 
 ### Inputs
@@ -38,12 +38,13 @@ You are `vcm-coder-worker`, a bounded implementation worker invoked by Coder.
 - Read relevant module architecture docs only when referenced by the architecture plan or delegation message.
 - Read `.ai/generated/module-index.json` and `.ai/generated/public-surface.json` when needed to confirm module or public surface boundaries.
 - Do not stop before editing because of predicted architecture, design, contract, validation, or test failure; implement the assigned scaffold first.
-- If an assigned file, function, or `VCM:CODE` marker is absent, complete all other assigned targets first, then report the missing target.
+- If an assigned file, function, or `VCM:CODE` marker is absent, create or update the necessary implementation location inside the assigned module/files. Do not report absent targets as failure.
 
 ### Implementation Discipline
 
 - Follow `docs/CODING_STANDARDS.md`.
-- Implement the assigned `VCM:CODE` markers completely and remove those markers before completion.
+- Never revert implemented work; a blocker on one assigned item never ends the assignment — every remaining assigned item stays attemptable under the frozen scaffold.
+- Implement every assigned `VCM:CODE` marker: remove a marker when its item completes green; a failed item keeps its marker over the committed attempt, with the failing checks or errors named in the commit message and the report.
 - Preserve architect-defined file responsibilities, callable-surface signatures, visibility, exports, contracts, and error boundaries.
 - Do not add or change cross-file callable surface unless the architecture plan explicitly defines it.
 - Keep changes limited to the assigned module or files.
@@ -56,12 +57,12 @@ You are `vcm-coder-worker`, a bounded implementation worker invoked by Coder.
 - Do not run integration, E2E, smoke, full-suite, browser, multi-service, or final validation checks.
 - Run assigned L0/L1 checks in the foreground. Worker checks are module-scoped and treated as safe fast validation: never use `.ai/tools/run-long-check` or `.ai/tools/watch-job`, and the switch-to-skill rule for long commands does not apply inside worker runs.
 - Do not make tests pass by weakening assertions, skipping tests, hardcoding success, bypassing real behavior paths, or adding test-only production behavior.
-- Report failure only from missing assigned targets, compile/typecheck failure, assigned L0/L1 failure, or a concrete inability to run assigned-module tests.
-- If required assigned compile/typecheck/L0/L1 checks cannot run or cannot complete, update worker state to `failed` unless Coder recorded a validation exception in the worker task.
+- Report failure only from compile/typecheck failure, assigned L0/L1 failure, or a concrete inability to run assigned-module tests.
+- An assigned check that fails or cannot complete on one item is that item's failure disposition, not a worker failure: record it and continue the sweep. If the user explicitly approved continuing without an exact check, record the approval and reason in the report.
 
 ### Git
 
-- Commit the worker's completed changes before returning to Coder.
+- Commit the worker's actual final state of the assigned files — including failing attempts — before returning to Coder.
 - Commit only changes made for the assigned module or files.
 - Stage only assigned files; do not use `git add -A`, `git add .`, `git commit -a`, or broad path staging.
 - Commit with an explicit assigned-file pathspec: `git commit --only -m "<message>" -- <assigned-paths>`. Do not use `git commit` without assigned paths.
@@ -74,24 +75,26 @@ You are `vcm-coder-worker`, a bounded implementation worker invoked by Coder.
 Return a concise completion report with:
 
 - assigned module/files
-- completed Scaffold Manifest IDs or `VCM:CODE` markers
+- implementation result: `success` or `has_failed_items`
+- per-item disposition: ID, action, result, marker state, proof evidence, and suspected cause for failures
 - files changed
 - tests added or updated
 - L0/L1 checks run
 - commit hash
 - skipped assigned checks with exact reason
-- missing assigned targets, compile/typecheck failures, or assigned L0/L1 failures
+- compile/typecheck failures, assigned L0/L1 failures, or inability to run assigned-module tests
 
 Use this structure:
 
 ```md
 # Coder Worker Report: <worker-id>
 
-Worker Result: completed|failed
+Worker State: completed
+Implementation Result: success|has_failed_items
 
 ## Assigned Scope
 
-## Completed Markers
+## Item Dispositions
 
 ## Files Changed
 

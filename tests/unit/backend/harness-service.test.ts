@@ -13,7 +13,7 @@ describe("createHarnessService", () => {
   it("plans and applies recommended harness files when they are missing", async () => {
     const fs = createMemoryFs();
     const service = createHarnessService({ fs });
-    const expectedHarnessFileCount = 22;
+    const expectedHarnessFileCount = 27;
 
     const status = await service.getHarnessStatus("/repo");
     expect(status.needsApply).toBe(true);
@@ -36,10 +36,12 @@ describe("createHarnessService", () => {
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("All standard workflow routes among project-manager, architect, coder, and tester are PM-hub routes");
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("Gate Review and tool-role work use their dedicated VCM skills and controllers");
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("No approval can raise this ceiling");
-    expect(await fs.readText("/repo/CLAUDE.md")).toContain("may be either the task's primary flow or a branch inside an active main flow");
-    expect(await fs.readText("/repo/CLAUDE.md")).toContain("The branch does not run final acceptance");
+    expect(await fs.readText("/repo/CLAUDE.md")).toContain("Architect Debug Mode runs inside either Architect Debug Flow or Architect Debug Branch");
+    expect(await fs.readText("/repo/CLAUDE.md")).toContain("They do not run their own final acceptance");
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("Final acceptance closes only a complete code-delivery flow");
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("targeted diagnostic L3 may run in Architect Debug Mode or Architecture Diagnosis Mode");
+    expect(await fs.readText("/repo/CLAUDE.md")).toContain("A message without a VCM marker is user communication.");
+    expect(await fs.readText("/repo/CLAUDE.md")).toContain("When the user asks a question, answer only.");
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("## VCM Worktree Policy");
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("## VCM Glossary Policy");
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("docs/GLOSSARY.md");
@@ -61,10 +63,12 @@ describe("createHarnessService", () => {
     expect(await fs.readText("/repo/.claude/skills/vcm-route-message/SKILL.md")).toContain("This skill writes a route file");
     expect(await fs.readText("/repo/.claude/skills/vcm-route-message/SKILL.md")).toContain("VCM uses project-manager as the routing hub.");
     expect(await fs.readText("/repo/.claude/skills/vcm-route-message/SKILL.md")).toContain("Non-PM roles must not route directly to each other.");
+    expect(await fs.readText("/repo/.claude/skills/vcm-task-state/SKILL.md")).toContain("recoverable context, not a workflow controller");
+    expect(await fs.readText("/repo/.ai/tools/update-task-state")).toContain("/workflow-state");
     expect(await fs.readText("/repo/.claude/skills/vcm-route-message/SKILL.md")).toContain("After writing or updating the route file, end the current Claude Code turn immediately.");
     expect(await fs.readText("/repo/.claude/skills/vcm-final-acceptance/SKILL.md")).toContain("name: vcm-final-acceptance");
     expect(await fs.readText("/repo/.claude/skills/vcm-final-acceptance/SKILL.md")).toContain("only when project-manager is ready to close a complete VCM code-delivery flow");
-    expect(await fs.readText("/repo/.claude/skills/vcm-final-acceptance/SKILL.md")).toContain("Do not use it for docs-only, validation-only, Communication-only, PR-prep, analysis-only Diagnosis");
+    expect(await fs.readText("/repo/.claude/skills/vcm-final-acceptance/SKILL.md")).toContain("Do not use it for Docs-Only Flow, Validation-Only Flow, Communication-Only Flow, PR-Preparation Flow, analysis-only Diagnosis");
     expect(await fs.readText("/repo/.claude/skills/vcm-final-acceptance/SKILL.md")).toContain("## Scope Traceability Audit");
     expect(await fs.readText("/repo/.claude/skills/vcm-final-acceptance/SKILL.md")).toContain("Do not claim to prove that every diff hunk exactly matches the task.");
     expect(await fs.readText("/repo/.claude/skills/vcm-final-acceptance/SKILL.md")).toContain(".ai/vcm/handoffs/architecture-diagnosis.md");
@@ -77,30 +81,41 @@ describe("createHarnessService", () => {
     expect(await fs.readText("/repo/.claude/skills/vcm-gate-review/SKILL.md")).toContain("name: vcm-gate-review");
     expect(await fs.readText("/repo/.claude/skills/vcm-gate-review/SKILL.md")).toContain(".ai/tools/request-gate-review");
     expect(await fs.readText("/repo/.claude/skills/vcm-gate-review/SKILL.md")).toContain("--source <coder|architect-debug|architect-diagnosis>");
-    expect(await fs.readText("/repo/.claude/skills/vcm-gate-review/SKILL.md")).toContain("validation-only completion");
+    expect(await fs.readText("/repo/.claude/skills/vcm-gate-review/SKILL.md")).toContain("before Validation-Only Flow completion");
+    expect(await fs.readText("/repo/.claude/skills/vcm-architecture-interview/SKILL.md")).toContain("name: vcm-architecture-interview");
+    expect(await fs.readText("/repo/.claude/skills/vcm-architecture-interview/SKILL.md")).toContain("During an active Architect Interview");
     expect(await fs.readText("/repo/.claude/skills/vcm-report-harness-issue/SKILL.md")).toContain("name: vcm-report-harness-issue");
     expect(await fs.readText("/repo/.claude/skills/vcm-report-harness-issue/SKILL.md")).toContain(".ai/vcm/harness-feedback/pending/");
+    expect(await fs.readText("/repo/.claude/skills/vcm-propose-memory/SKILL.md")).toContain("name: vcm-propose-memory");
+    expect(await fs.readText("/repo/.claude/skills/vcm-propose-memory/SKILL.md")).toContain("Treat every `<VCM-memory>` block as read-only");
+    expect(await fs.readText("/repo/CLAUDE.md")).toContain("<VCM-memory>\nNo accumulated project memory yet.\n</VCM-memory>");
     expect(await fs.readText("/repo/.claude/agents/project-manager.md")).toContain("name: project-manager");
     expect(await fs.readText("/repo/.claude/agents/project-manager.md")).toContain("<!-- VCM:BEGIN version=1 -->");
     const projectManagerAgent = await fs.readText("/repo/.claude/agents/project-manager.md");
+    expect(projectManagerAgent).toContain("<VCM-memory>\nNo accumulated project memory yet.\n</VCM-memory>");
     expect(projectManagerAgent).toContain("Use the PM-hub routes allowed by the `vcm-route-message` skill");
-    expect(projectManagerAgent).toContain("Docs-only flow: PM -> Architect -> PM completes the flow from Architect's result.");
+    expect(projectManagerAgent).toContain("Use Docs-Only Flow when the accepted task changes Architect-owned project documentation");
     expect(projectManagerAgent).toContain("Use the `vcm-final-acceptance` skill only to close a complete code-delivery flow");
-    expect(projectManagerAgent).toContain("Prepare or update a GitHub PR only after the active delivery flow completes");
+    expect(projectManagerAgent).toContain("PM confirms the worktree is clean, prepares or updates the PR");
     expect(projectManagerAgent).toContain("Do not perform technical analysis");
     expect(projectManagerAgent).toContain("Use the `vcm-route-message` skill for every role dispatch");
-    expect(projectManagerAgent).toContain("### PR Preparation");
+    expect(projectManagerAgent).not.toContain("### Direct User Message Handling");
+    expect(projectManagerAgent).toContain("### Complex Problem Reporting");
+    expect(projectManagerAgent).toContain("Plain language means translating technical detail, not deleting it.");
+    expect(projectManagerAgent).toContain("Read the complete source report or handoff artifact before replying.");
+    expect(projectManagerAgent).toContain("### PR-Preparation Flow");
     expect(projectManagerAgent).toContain("### Background Jobs");
-    expect(projectManagerAgent).toContain(".github/pull_request_template.md");
     expect(projectManagerAgent).toContain("VCM_TASK_REPO_ROOT");
     expect(projectManagerAgent).toContain("Include the confirmed task repo root and branch in each role message");
     expect(projectManagerAgent).toContain("### Gate Review Gates");
+    expect(projectManagerAgent).toContain("Before acting on any Coder decision");
+    expect(projectManagerAgent).toContain("regardless of the reported Decision");
     expect(projectManagerAgent).toContain("code-diff --source coder");
     expect(projectManagerAgent).toContain("code-diff --source architect-debug");
     expect(projectManagerAgent).toContain("code-diff --source architect-diagnosis");
     expect(projectManagerAgent).toContain("recorded main-flow resume point");
     expect(projectManagerAgent).toContain("Do not require a branch-level final acceptance report");
-    expect(projectManagerAgent).toContain("Tester reports `Test Result: fail` for an Architect Debug Mode fix whose final disposition was `local fix completed`");
+    expect(projectManagerAgent).toContain("Tester returns `Test Result: fail` for a completed Architect Debug Mode implementation");
     expect(projectManagerAgent).toContain("Architecture Diagnosis Mode must run before another Debug Mode fix or Coder dispatch");
     expect(projectManagerAgent).not.toContain("Tester reports `Test Result: fail` for the implementation for the second time");
     expect(projectManagerAgent).toContain("Architect reports that the architecture plan must be updated or replaced for the second time");
@@ -110,15 +125,20 @@ describe("createHarnessService", () => {
     expect(architectAgent).toContain("verifiable behavior, implementation boundaries within the accepted scope, behavior/contract proof points");
     expect(architectAgent).toContain("Own `.ai/vcm/handoffs/known-issues.md` as its only writer");
     expect(architectAgent).toContain("Architect owns the technical decision");
-    expect(architectAgent).toContain("running targeted L1/L2/L3 checks to verify the fix");
+    expect(architectAgent).toContain("running required L0/L1 plus applicable L2/L3 checks are part of the implementation duty");
     expect(architectAgent).toContain("Architecture Diagnosis Mode is an upgraded Debug Mode");
+    expect(architectAgent).toContain("first write a `Current Code Reality / Scope Discovery` row");
+    expect(architectAgent).toContain("After `Current Code Reality / Scope Discovery` is complete");
+    expect(architectAgent).toContain("complete and commit it directly as Architect-owned scaffold work");
+    expect(architectAgent).not.toContain("`asset`");
+    expect(architectAgent).not.toContain("before deep analysis, write the planning work plan");
     expect(architectAgent).toContain("Do not diagnose from session memory");
     expect(architectAgent).toContain("Do not assume existing code or comments are correct");
     expect(architectAgent).toContain("Recursively follow every project-owned call until no unresolved project-owned callee remains");
     expect(architectAgent).toContain("Maintain a `Code Reading Closure`");
     expect(architectAgent).toContain("`Previous Debug Failure`");
     expect(architectAgent).toContain("commit all Diagnosis implementation changes before reporting");
-    expect(architectAgent).toContain("In docs-only flow, update the PM-assigned durable docs directly");
+    expect(architectAgent).toContain("In Docs-Only Flow, the Architect role result must record the decision");
     expect(architectAgent).toContain("`Decision` must be `synced`, `unchanged`, or `blocked`");
     const testerAgent = await fs.readText("/repo/.claude/agents/tester.md");
     expect(testerAgent).toContain("Own L2/L3/L4 final-validation design, execution, and acceptance evidence");
@@ -140,6 +160,8 @@ describe("createHarnessService", () => {
     expect(coderAgent).not.toContain("whether Replan is needed");
     expect(coderAgent).toContain("### Parallel Worker Implementation");
     expect(coderAgent).toContain("vcm-coder-worker");
+    expect(coderAgent).toContain("| ID | Action | Result | Marker State | Proof Evidence |");
+    expect(coderAgent).not.toContain("## Remaining Markers");
     expect(frontmatterOf(await fs.readText("/repo/.claude/agents/project-manager.md"))).not.toContain("Agent");
     expect(frontmatterOf(await fs.readText("/repo/.claude/agents/architect.md"))).not.toContain("Agent");
     expect(frontmatterOf(await fs.readText("/repo/.claude/agents/tester.md"))).not.toContain("Agent");
@@ -153,12 +175,27 @@ describe("createHarnessService", () => {
     expect(coderWorkerAgent).toContain("git commit --only -m \"<message>\" -- <assigned-paths>");
     expect(coderWorkerAgent).toContain("write the assigned report with the commit hash");
     expect(coderWorkerAgent).toContain("with the same `commitHash` as the final step");
+    expect(coderWorkerAgent).toContain("Implementation Result: success|has_failed_items");
+    expect(coderWorkerAgent).toContain("leave the worker state as `running`");
+    expect(coderWorkerAgent).not.toContain("asset output");
+    expect(coderWorkerAgent).not.toContain("from `planned` to `running`");
+    expect(coderWorkerAgent).not.toContain("Use `failed` only");
     expect(coderWorkerAgent).not.toContain("Stop before editing if the assigned module");
     const gateReviewerAgent = await fs.readText("/repo/.claude/agents/gate-reviewer.md");
     expect(gateReviewerAgent).toContain("name: gate-reviewer");
     expect(gateReviewerAgent).toContain("tools: Read, Grep, Glob, Bash, Write");
     expect(gateReviewerAgent).toContain("You are VCM `gate-reviewer`");
     expect(gateReviewerAgent).toContain("Use the task and worktree paths named there");
+    expect(gateReviewerAgent).toContain("Every Gate Review is a complete review of the current gate inputs");
+    expect(gateReviewerAgent).toContain("complete current executable plan, not");
+    expect(gateReviewerAgent.match(/- Architecture Brief Fit:/g)).toHaveLength(2);
+    expect(gateReviewerAgent).not.toContain("record a verification plan");
+    expect(gateReviewerAgent).not.toContain("carry hash-valid");
+    expect(gateReviewerAgent).not.toContain("`asset`");
+    expect(projectManagerAgent).not.toContain("only unverified remaining verification items");
+    expect(await fs.readText("/repo/.ai/tools/check-scaffold-ledger")).toContain(
+      'ACTIONS = frozenset({"create", "change", "delete"})'
+    );
     const translatorAgents = await fs.readText("/repo/.claude/agents/translator.md");
     expect(translatorAgents).toContain("name: translator");
     expect(translatorAgents).toContain("You are VCM `translator`");
@@ -185,6 +222,7 @@ describe("createHarnessService", () => {
     expect(await fs.readText("/repo/.claude/settings.json")).toContain("vcm-bash-guard");
     expect(await fs.readText("/repo/.claude/settings.json")).toContain("/api/hooks/claude-code");
     expect(await fs.readText("/repo/.claude/settings.json")).toContain("/api/hooks/claude-code/stop");
+    expect(await fs.readText("/repo/.claude/settings.json")).toContain("--retry-all-errors");
     expect(await fs.readText("/repo/.claude/settings.json")).toContain("/api/hooks/claude-code/permission-request");
     expect(await fs.readText("/repo/.claude/settings.json")).toContain("BASH_DEFAULT_TIMEOUT_MS");
     expect(await fs.readText("/repo/.claude/settings.json")).toContain('"autoMemoryEnabled": false');
@@ -209,6 +247,7 @@ describe("createHarnessService", () => {
     const content = await fs.readText("/repo/CLAUDE.md");
     expect(content).toContain("# Existing Rules");
     expect(content).toContain("Keep this project-specific note.");
+    expect(content).toContain("<VCM-memory>\nNo accumulated project memory yet.\n</VCM-memory>");
     expect(content).toContain("<!-- VCM:BEGIN version=1 -->");
     expect(content).toContain("## VCM Start Here");
   });
@@ -378,6 +417,10 @@ describe("createHarnessService", () => {
       "",
       "Before block.",
       "",
+      "<VCM-memory>",
+      "Keep this accumulated project fact.",
+      "</VCM-memory>",
+      "",
       "<!-- VCM:BEGIN version=0 -->",
       "old managed rules",
       "<!-- VCM:END -->",
@@ -403,6 +446,7 @@ describe("createHarnessService", () => {
     const content = await fs.readText("/repo/CLAUDE.md");
     expect(content).toContain("Before block.");
     expect(content).toContain("After block.");
+    expect(content).toContain("<VCM-memory>\nKeep this accumulated project fact.\n</VCM-memory>");
     expect(content).not.toContain("old managed rules");
     expect(content).toContain("<!-- VCM:BEGIN version=1 -->");
     expect(content).toContain("## VCM Start Here");
@@ -442,6 +486,7 @@ describe("createHarnessService", () => {
       manager: "vcm",
       harnessVersion: "0.3.0-fixed"
     });
+    await fs.writeText("/repo/.ai/tools/check-durable-docs", "#!/usr/bin/env python3\n");
     await fs.writeText("/repo/.ai/tools/generate-module-index", "#!/usr/bin/env python3\n");
     await fs.writeText("/repo/.ai/tools/generate-public-surface", "#!/usr/bin/env python3\n");
     const service = createHarnessService({
@@ -581,7 +626,7 @@ describe("createHarnessService", () => {
     });
   });
 
-  it("uses the project harness-engineer session for bootstrap", async () => {
+  it("uses the task harness-engineer session for bootstrap", async () => {
     const fs = createMemoryFs();
     const runtimeInputs: CreateTerminalSessionInput[] = [];
     const writes: string[] = [];
@@ -594,10 +639,12 @@ describe("createHarnessService", () => {
     });
     await service.applyHarness("/repo");
     await fs.writeText("/repo/.ai/vcm-harness-manifest.json", "{}\n");
+    await fs.writeText("/repo/.ai/tools/check-durable-docs", "#!/usr/bin/env python3\n");
     await fs.writeText("/repo/.ai/tools/generate-module-index", "#!/usr/bin/env python3\n");
     await fs.writeText("/repo/.ai/tools/generate-public-surface", "#!/usr/bin/env python3\n");
 
     const started = await service.startHarnessBootstrap("/repo", "/repo", {
+      taskSlug: "demo-task",
       permissionMode: "bypassPermissions",
       model: "opus",
       effort: "high"
@@ -608,23 +655,27 @@ describe("createHarnessService", () => {
     expect(started.session.model).toBe("opus");
     expect(started.session.effort).toBe("high");
     expect(ensureRequests[0]).toMatchObject({
+      taskSlug: "demo-task",
       permissionMode: "bypassPermissions",
       model: "opus",
       effort: "high"
     });
     expect(runtimeInputs[0]).toMatchObject({
-      taskSlug: "__project_harness_engineer__",
+      taskSlug: "demo-task",
       role: "harness-engineer",
       cwd: "/repo"
     });
     expect(writes).toEqual([]);
 
-    const run = await service.runHarnessBootstrap("/repo");
+    const run = await service.runHarnessBootstrap("/repo", "/repo", "demo-task");
+    expect(run.prompt).toContain("[VCM HARNESS BOOTSTRAP]");
     expect(run.prompt).toContain("Use the vcm-harness-bootstrap skill");
+    expect(run.prompt).toContain("[/VCM HARNESS BOOTSTRAP]");
+    expect(writes[0]).toContain("[VCM HARNESS BOOTSTRAP]");
     expect(writes[0]).toContain("Use the vcm-harness-bootstrap skill");
     expect(writes[1]).toBe("\r");
 
-    const runningStatus = await service.getBootstrapStatus("/repo");
+    const runningStatus = await service.getBootstrapStatus("/repo", "/repo", "demo-task");
     expect(runningStatus.status).toBe("running");
 
     await service.recordHarnessBootstrapHook("/repo", {
@@ -632,8 +683,149 @@ describe("createHarnessService", () => {
       sessionId: started.session.id,
       claudeSessionId: started.session.claudeSessionId
     });
-    const completedStatus = await service.getBootstrapStatus("/repo");
+    const completedStatus = await service.getBootstrapStatus("/repo", "/repo", "demo-task");
     expect(completedStatus.status).toBe("complete");
+  });
+
+  it("keeps legacy project bootstrap completion for task-scoped status queries", async () => {
+    const fs = createMemoryFs();
+    const service = createHarnessService({ fs });
+    await service.applyHarness("/repo");
+    await fs.writeText("/repo/.ai/vcm-harness-manifest.json", "{}\n");
+    await fs.writeText("/repo/.ai/tools/check-durable-docs", "#!/usr/bin/env python3\n");
+    await fs.writeText("/repo/.ai/tools/generate-module-index", "#!/usr/bin/env python3\n");
+    await fs.writeText("/repo/.ai/tools/generate-public-surface", "#!/usr/bin/env python3\n");
+    await fs.writeText("/repo/docs/ARCHITECTURE.md", "# Architecture\n");
+    await fs.writeJson("/repo/.ai/vcm/bootstrap/session.json", {
+      version: 1,
+      status: "complete",
+      completedAt: "2026-07-02T00:00:00.000Z",
+      updatedAt: "2026-07-02T00:00:00.000Z"
+    });
+
+    const status = await service.getBootstrapStatus("/repo", "/repo", "new-task");
+
+    expect(status.checks.some((check) => check.status !== "ok")).toBe(true);
+    expect(status.status).toBe("complete");
+  });
+
+  it("keeps project bootstrap completion after the task that performed it", async () => {
+    const fs = createMemoryFs();
+    const service = createHarnessService({ fs });
+    await service.applyHarness("/repo");
+    await fs.writeText("/repo/.ai/vcm-harness-manifest.json", "{}\n");
+    await fs.writeText("/repo/.ai/tools/check-durable-docs", "#!/usr/bin/env python3\n");
+    await fs.writeText("/repo/.ai/tools/generate-module-index", "#!/usr/bin/env python3\n");
+    await fs.writeText("/repo/.ai/tools/generate-public-surface", "#!/usr/bin/env python3\n");
+    await fs.writeText("/repo/docs/ARCHITECTURE.md", "# Architecture\n");
+    await fs.writeJson("/repo/.ai/vcm/bootstrap/session.json", {
+      version: 1,
+      status: "complete",
+      taskSlug: "bootstrap-task",
+      targetRepoRoot: "/repo/bootstrap-task",
+      completedAt: "2026-07-02T00:00:00.000Z",
+      updatedAt: "2026-07-02T00:00:00.000Z"
+    });
+
+    const status = await service.getBootstrapStatus("/repo", "/repo", "later-task");
+
+    expect(status.status).toBe("complete");
+  });
+
+  it("does not expose another task's active bootstrap state", async () => {
+    const fs = createMemoryFs();
+    const service = createHarnessService({
+      fs,
+      harnessEngineerSessions: {
+        async getRoleSession(_repoRoot, taskSlug) {
+          return {
+            id: "task-b-harness",
+            claudeSessionId: "task-b-claude",
+            taskSlug,
+            role: "harness-engineer",
+            status: "running",
+            activityStatus: "idle",
+            command: "claude --agent harness-engineer",
+            permissionMode: "default",
+            cwd: "/repo/task-b",
+            terminalBackend: "node-pty",
+            startedAt: "2026-06-22T00:00:00.000Z",
+            updatedAt: "2026-06-22T00:00:00.000Z"
+          } as RoleSessionRecord;
+        }
+      } as never
+    });
+    await service.applyHarness("/repo");
+    await fs.writeText("/repo/.ai/vcm-harness-manifest.json", "{}\n");
+    await fs.writeText("/repo/.ai/tools/check-durable-docs", "#!/usr/bin/env python3\n");
+    await fs.writeText("/repo/.ai/tools/generate-module-index", "#!/usr/bin/env python3\n");
+    await fs.writeText("/repo/.ai/tools/generate-public-surface", "#!/usr/bin/env python3\n");
+    await fs.writeJson("/repo/.ai/vcm/bootstrap/session.json", {
+      version: 1,
+      status: "running",
+      taskSlug: "task-a",
+      targetRepoRoot: "/repo/task-a",
+      sessionId: "task-a-harness",
+      updatedAt: "2026-06-22T00:00:00.000Z"
+    });
+
+    const status = await service.getBootstrapStatus("/repo", "/repo", "task-b");
+
+    expect(status.status).not.toBe("running");
+  });
+
+  it("does not treat a running bootstrap as active in another target worktree", async () => {
+    const fs = createMemoryFs();
+    const service = createHarnessService({
+      fs,
+      harnessEngineerSessions: {
+        async getRoleSession(_repoRoot, taskSlug) {
+          return {
+            id: "shared-harness-session",
+            claudeSessionId: "shared-claude-session",
+            taskSlug,
+            role: "harness-engineer",
+            status: "running",
+            activityStatus: "idle",
+            command: "claude --agent harness-engineer",
+            permissionMode: "default",
+            cwd: "/repo/current-task",
+            terminalBackend: "node-pty",
+            startedAt: "2026-06-22T00:00:00.000Z",
+            updatedAt: "2026-06-22T00:00:00.000Z"
+          } as RoleSessionRecord;
+        }
+      } as never
+    });
+    await service.applyHarness("/repo/current-task");
+    await fs.writeJson("/repo/.ai/vcm/bootstrap/session.json", {
+      version: 1,
+      status: "running",
+      targetRepoRoot: "/repo/previous-task",
+      sessionId: "shared-harness-session",
+      claudeSessionId: "shared-claude-session",
+      updatedAt: "2026-06-22T00:00:00.000Z"
+    });
+
+    const status = await service.getBootstrapStatus("/repo", "/repo/current-task", "current-task");
+
+    expect(status.status).not.toBe("running");
+  });
+
+  it("keeps fixed harness readiness ahead of project bootstrap completion", async () => {
+    const fs = createMemoryFs();
+    const service = createHarnessService({ fs, vcmVersion: "0.7.9" });
+    await service.applyHarness("/repo");
+    await fs.removePath?.("/repo/.ai/tools/generate-module-index", { force: true });
+    await fs.writeJson("/repo/.ai/vcm/bootstrap/session.json", {
+      version: 1,
+      status: "complete",
+      updatedAt: "2026-07-02T00:00:00.000Z"
+    });
+
+    const status = await service.getBootstrapStatus("/repo", "/repo", "new-task");
+
+    expect(status.status).toBe("not_ready");
   });
 
   it("ignores stale legacy bootstrap terminal session records", async () => {
@@ -641,6 +833,7 @@ describe("createHarnessService", () => {
     const service = createHarnessService({ fs });
     await service.applyHarness("/repo");
     await fs.writeText("/repo/.ai/vcm-harness-manifest.json", "{}\n");
+    await fs.writeText("/repo/.ai/tools/check-durable-docs", "#!/usr/bin/env python3\n");
     await fs.writeText("/repo/.ai/tools/generate-module-index", "#!/usr/bin/env python3\n");
     await fs.writeText("/repo/.ai/tools/generate-public-surface", "#!/usr/bin/env python3\n");
     await fs.writeJson("/repo/.ai/vcm/bootstrap/session.json", {
@@ -797,7 +990,7 @@ function createFakeHarnessEngineerSessions(
   async function createRecord(input: StartRoleSessionRequest = {}): Promise<RoleSessionRecord> {
     ensureRequests.push(input);
     const runtimeSession = await runtime.createSession({
-      taskSlug: "__project_harness_engineer__",
+      taskSlug: input.taskSlug ?? "demo-task",
       role: "harness-engineer",
       command: "claude",
       args: ["--agent", "harness-engineer"],
@@ -808,7 +1001,7 @@ function createFakeHarnessEngineerSessions(
     record = {
       id: runtimeSession.id,
       claudeSessionId: "claude-harness-engineer",
-      taskSlug: "__project_harness_engineer__",
+      taskSlug: input.taskSlug ?? "demo-task",
       role: "harness-engineer",
       status: runtimeSession.status,
       activityStatus: "idle",
@@ -827,14 +1020,16 @@ function createFakeHarnessEngineerSessions(
   }
 
   return {
-    ensureProjectHarnessEngineerSession: async (_repoRoot: string, input: StartRoleSessionRequest = {}) => {
+    getRoleSession: async () => record,
+    startRoleSession: async (_repoRoot: string, _taskSlug: string, _role: string, input: StartRoleSessionRequest = {}) => {
       if (record?.status === "running") {
         return record;
       }
       return createRecord(input);
     },
-    restartProjectHarnessEngineerSession: async (_repoRoot: string, input: StartRoleSessionRequest = {}) => createRecord(input),
-    stopProjectHarnessEngineerSession: async () => {
+    resumeRoleSession: async (_repoRoot: string, _taskSlug: string, _role: string, input: StartRoleSessionRequest = {}) => createRecord(input),
+    restartRoleSession: async (_repoRoot: string, _taskSlug: string, _role: string, input: StartRoleSessionRequest = {}) => createRecord(input),
+    stopRoleSession: async () => {
       if (!record) {
         throw new Error("missing harness engineer session");
       }
@@ -846,8 +1041,7 @@ function createFakeHarnessEngineerSessions(
         exitCode: 0
       };
       return record;
-    },
-    getProjectHarnessEngineerSession: async () => record
+    }
   };
 }
 

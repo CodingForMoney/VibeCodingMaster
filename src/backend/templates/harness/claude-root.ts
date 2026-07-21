@@ -1,13 +1,14 @@
 export function renderRootClaudeHarnessRules(): string {
-  return `@.ai/vcm/memory/shared.md
-
-## VCM Start Here
+  return `## VCM Start Here
 
 - Use the durable project docs below as role-relevant project truth.
 - Read module-local \`CLAUDE.md\` before editing a subdirectory if one exists.
 - \`vcm-route-message\` is the only channel for PM-hub dispatch and reporting among project-manager, architect, coder, and tester. Gate Review and tool-role work use their dedicated VCM skills and controllers. Follow the route skill's write-then-stop rule.
+- Project-manager uses \`vcm-task-state\` to declare the current workflow checkpoint. This state is recoverable context only; flow rules and task artifacts remain authoritative.
 - Use \`vcm-long-running-validation\` for long-running validation. Follow the background job limits below.
 - Use \`vcm-report-harness-issue\` when you notice a reusable VCM harness problem. Record feedback; do not contact Harness Engineer directly.
+- The root \`<VCM-memory>\` block is shared project memory. Treat every \`<VCM-memory>\` block as read-only and use \`vcm-propose-memory\` only when VCM assigns a memory proposal during Task Harness Review.
+- Only the user may approve scope reduction, skipped required validation, Gate Review skip or override, skipped required docs sync, accepted unresolved task-scope risk, or weakening of baseline Harness rules. PM may record and route the user's approval but cannot grant it.
 - Project-manager runs \`vcm-gate-review\` unconditionally at every Gate Review trigger point and on VCM Gate Review callbacks; the tool reports the authoritative enable state.
 
 ## VCM Harness Scope
@@ -26,14 +27,18 @@ If a reusable harness problem is suspected, it is enough to record a concise fee
 
 ## VCM Durable Project Docs
 
+- Durable project docs describe current project truth. Replace superseded content instead of appending task chronology, investigation history, role verdicts, commit history, or completed-work reports; task artifacts, Git, and PRs preserve that history.
 - \`docs/GLOSSARY.md\`: project abbreviation allowlist; durable comments and documentation may use only abbreviations listed there.
 - \`docs/CODING_STANDARDS.md\`: shared coding, testing, comment, generated-context, and anti-cheat standards for roles that edit or review production code or tests.
 - \`docs/ARCHITECTURE.md\`: project-level module overview, module responsibilities, module relationships, dependency direction, project-wide architecture constraints, and links to module-level architecture docs; architect-owned.
-- \`<module>/ARCHITECTURE.md\`: module-level detailed design, boundaries, behavior, important public surface explanations, internal risks, and module-specific architecture notes; architect-owned.
+- \`<module>/ARCHITECTURE.md\`: current module responsibilities, boundaries, data flow, lifecycle, invariants, collaboration contracts, important public surface meaning, risks, and update triggers; architect-owned.
 - \`docs/TESTING.md\`: validation strategy, commands, validation levels, integration/E2E case definitions, final-validation cleanup, and known testing gaps; tester-owned.
-- \`docs/known-issues.md\`: durable known issues and accepted limitations; architect-owned.
+- \`docs/known-issues.md\`: current unresolved durable issues and accepted limitations; remove resolved entries rather than retaining their history; architect-owned.
+- \`docs/plans/**\`: active or planned work only. Remove a plan from this collection when its work is complete; Git and PR history preserve the completed plan.
 - \`.ai/generated/module-index.json\`: generated module index; use it to find layers, modules, manifests, module docs, source files, test files, and workspace dependencies.
 - \`.ai/generated/public-surface.json\`: generated public surface index; use it to inspect module-to-module public APIs, routes, and source evidence.
+- Generated context is the source of truth for module inventories, source/test file inventories, dependency lists, and complete public-surface listings. Durable prose explains architecture and contract meaning instead of independently maintaining those machine facts.
+- Run \`.ai/tools/check-durable-docs\` after bootstrap or durable-doc synchronization and before final acceptance when durable docs changed.
 
 ## VCM Glossary Policy
 
@@ -44,36 +49,29 @@ If a reusable harness problem is suspected, it is enough to record a concise fee
 ## VCM Task Flow
 
 - All standard workflow routes among project-manager, architect, coder, and tester are PM-hub routes. Project-manager starts and advances every flow; architect, coder, and tester report blockers, failures, conflicts, incomplete work, and findings back to project-manager.
-- Code changes use: \`project-manager -> architect -> coder -> tester -> architect docs sync -> project-manager final acceptance\`.
-- Debug Mode and Architecture Diagnosis Mode may be either the task's primary flow or a branch inside an active main flow.
-- When either mode is entered while a main flow is active, project-manager suspends that flow, records its resume point, runs the mode through code-diff Gate Review and tester validation when code changes are produced, then returns to the recorded resume point. The branch does not run final acceptance.
-- When a task begins with Debug Mode or Architecture Diagnosis Mode and produces code changes, that mode is the task's primary code-delivery flow and continues through code-diff Gate Review, tester validation, architect docs sync, and project-manager final acceptance.
-- A primary Architecture Diagnosis flow that produces analysis only completes from the diagnosis result without final acceptance.
-- Docs-only changes use: \`project-manager -> architect -> project-manager completion\`.
-- Test-only or validation-only work uses: \`project-manager -> tester -> project-manager completion\`.
+- Code changes use: \`project-manager -> architect interview -> architect planning -> coder -> tester -> architect docs sync -> project-manager final acceptance\`.
+- Architect Debug Mode runs inside either Architect Debug Flow or Architect Debug Branch. Architecture Diagnosis Mode runs inside either Architecture Diagnosis Flow or Architecture Diagnosis Branch.
+- Architect Debug Flow and an Architecture Diagnosis Flow that produces code changes continue through code-diff Gate Review, tester validation, architect docs sync, and project-manager final acceptance. An analysis-only Architecture Diagnosis Flow completes from the diagnosis result.
+- Architect Debug Branch and Architecture Diagnosis Branch preserve the active parent flow and resume point, then return there after successful validation. They do not run their own final acceptance.
+- Docs-Only Flow uses: \`project-manager -> architect -> project-manager completion\`.
+- Validation-Only Flow uses: \`project-manager -> tester -> validation-adequacy Gate Review -> project-manager completion\`.
+- Communication-Only Flow uses: \`project-manager response or relay -> completion\`.
 - Gate Review is PM-triggered at its defined trigger points; the tool decides whether review is enabled or required.
-- Final acceptance closes only a complete code-delivery flow; it never closes a Debug or Architecture Diagnosis branch inside another flow.
-- PR preparation starts only after the active delivery flow completes; every complete code-delivery flow requires final acceptance to pass.
-- If docs/test/validation-only work reveals required code, architecture, public contract, dependency, durable-doc, or test-strategy changes, project-manager routes through the full code-change flow.
+- Final acceptance closes only a complete code-delivery flow; it never closes Architect Debug Branch or Architecture Diagnosis Branch.
+- PR-Preparation Flow starts only after the active delivery flow completes; every complete code-delivery flow requires final acceptance to pass.
+- If Docs-Only Flow or Validation-Only Flow reveals that the accepted outcome requires production-code, runtime-behavior, public-contract, dependency, or system-architecture changes, project-manager routes through the full Code-Change Flow.
 - Detailed failure handling and route decisions belong to project-manager rules.
 - Keep role outputs under \`.ai/vcm/handoffs/\`.
 - Gate Review Gate reports live under \`.ai/vcm/gate-reviews/\` and are VCM-managed task evidence.
 - Runtime task records and handoffs under \`.ai/vcm/\` are temporary. Durable facts must move into code, tests, PR text, commit history, or long-term docs.
 - Only architect writes \`.ai/vcm/handoffs/known-issues.md\`; other roles report unresolved findings back through their own handoff artifacts.
 
-## Direct User Messages
+## User Communication
 
-- These rules apply when the user sends a message directly to architect, coder, or tester.
-- PM remains the routing owner during direct role discussion.
-- The role may discuss, clarify, or answer questions within its current scope, but direct discussion is not a flow instruction by itself.
-- Do not treat exploratory discussion, tentative wording, disagreement, preference discussion, or "what if" analysis as approved scope, approved plan, or a route decision.
-- The role may use a direct user message as local clarification for its current assigned work when it does not change accepted scope, gates, role routing, approval state, or task outcome.
-- If the direct user message may change scope, plan, priority, approval, external authorization, or next-route decision, the role must ask the user in its own session for explicit confirmation and wait for it before reporting to project-manager.
-- Explicit confirmation means the user clearly approves or instructs the new plan, scope, decision, or route, such as "confirmed", "use this plan", "change it to this", "approve", or equivalent wording in context.
-- After explicit confirmation, the role must report the confirmed change to project-manager with \`vcm-route-message\` and stop. PM decides the next route.
-- A direct user message must not let the role start a new task, skip gates, approve exceptions, trigger another role, or close the task.
-- The role's final result must still go back to project-manager.
-- Direct Gate Reviewer discussion may clarify its report but cannot change the gate decision or task flow; flow changes must be given to project-manager. Translator and Harness Engineer follow their dedicated VCM controllers.
+- A message without a VCM marker is user communication.
+- When the user asks a question, answer only.
+- Do not modify files, run tests, update artifacts, send messages, report to project-manager, or advance the workflow unless the user explicitly instructs that action.
+- Perform only the actions explicitly requested by the user and remain within the current role's responsibilities.
 
 ## VCM Validation Levels
 

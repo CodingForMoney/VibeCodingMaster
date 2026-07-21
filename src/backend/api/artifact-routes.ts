@@ -90,6 +90,9 @@ function parseDispatchableRole(role: string): DispatchableRole {
 }
 
 function artifactNameToPath(paths: ReturnType<ArtifactService["getHandoffPaths"]>, artifactName: string): string {
+  if (artifactName === "architecture-brief.md") {
+    return paths.architectureBriefPath;
+  }
   if (artifactName === "architecture-plan.md") {
     return paths.architecturePlanPath;
   }

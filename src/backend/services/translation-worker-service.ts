@@ -44,7 +44,7 @@ export interface TranslationWorkerService {
 export interface TranslationWorkerServiceDeps {
   fs: FileSystemAdapter;
   runtime?: TerminalRuntime;
-  sessionService?: Pick<SessionService, "ensureProjectTranslatorSession" | "getProjectTranslatorSession">;
+  sessionService?: Pick<SessionService, "getRoleSession" | "startRoleSession" | "resumeRoleSession">;
   now?: () => string;
   id?: () => string;
 }
@@ -376,11 +376,18 @@ export function createTranslationWorkerService(deps: TranslationWorkerServiceDep
         statusCode: 500
       });
     }
-    return deps.sessionService.ensureProjectTranslatorSession(repoRoot, {
-      taskSlug,
-      model: "default",
-      effort: "medium"
-    });
+    const input = {
+      model: "default" as const,
+      effort: "medium" as const
+    };
+    const existing = await deps.sessionService.getRoleSession(repoRoot, taskSlug, "translator");
+    if (existing?.status === "running") {
+      return existing;
+    }
+    if (existing?.claudeSessionId) {
+      return deps.sessionService.resumeRoleSession(repoRoot, taskSlug, "translator", input);
+    }
+    return deps.sessionService.startRoleSession(repoRoot, taskSlug, "translator", input);
   }
 
   async function buildQueuePrompt(repoRoot: string, item: TranslationQueueItem): Promise<string> {
@@ -550,7 +557,7 @@ export function createTranslationWorkerService(deps: TranslationWorkerServiceDep
       await validateActiveQueueItem(repoRoot);
       return true;
     }
-    if (await translatorSessionSettled(repoRoot)) {
+    if (await translatorSessionSettled(repoRoot, active.taskSlug)) {
       await validateActiveQueueItem(repoRoot);
       return true;
     }
@@ -624,11 +631,11 @@ export function createTranslationWorkerService(deps: TranslationWorkerServiceDep
     return deps.fs.readText(resultPath);
   }
 
-  async function translatorSessionSettled(repoRoot: string): Promise<boolean> {
-    if (!deps.sessionService?.getProjectTranslatorSession) {
+  async function translatorSessionSettled(repoRoot: string, taskSlug: string): Promise<boolean> {
+    if (!deps.sessionService?.getRoleSession) {
       return false;
     }
-    const session = await deps.sessionService.getProjectTranslatorSession(repoRoot);
+    const session = await deps.sessionService.getRoleSession(repoRoot, taskSlug, "translator");
     return !session || session.status !== "running";
   }
 

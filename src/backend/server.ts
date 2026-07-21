@@ -40,9 +40,12 @@ import { createRuntimeCoordinatorService, type RuntimeCoordinatorService } from 
 import { createRuntimeRecoveryService, type RuntimeRecoveryService } from "./services/runtime-recovery-service.js";
 import { createStatusService, type StatusService } from "./services/status-service.js";
 import { createTaskService, type TaskService } from "./services/task-service.js";
+import { createTaskCloseService, type TaskCloseService } from "./services/task-close-service.js";
+import { createTaskWorkflowService, type TaskWorkflowService } from "./services/task-workflow-service.js";
 import { createTaskLaunchService, type TaskLaunchService } from "./services/task-launch-service.js";
 import { createTerminalInterruptService, type TerminalInterruptService } from "./services/terminal-interrupt-service.js";
 import { createTranslationService, type TranslationService } from "./services/translation-service.js";
+import { createTurnReconcilerService } from "./services/turn-reconciler-service.js";
 import { createDiagnosticsService, type DiagnosticsService } from "./services/diagnostics-service.js";
 import { registerAppSettingsRoutes } from "./api/app-settings-routes.js";
 import { registerArtifactRoutes } from "./api/artifact-routes.js";
@@ -73,6 +76,8 @@ export interface ServerDeps {
   appSettings: AppSettingsService;
   projectService: ProjectService;
   taskService: TaskService;
+  taskCloseService: TaskCloseService;
+  taskWorkflowService: TaskWorkflowService;
   sessionService: SessionService;
   artifactService: ArtifactService;
   harnessService: HarnessService;
@@ -154,12 +159,12 @@ export async function createServer(deps: ServerDeps, options: CreateServerOption
   registerTaskRoutes(app, {
     projectService: deps.projectService,
     taskService: deps.taskService,
-    sessionService: deps.sessionService,
+    taskCloseService: deps.taskCloseService,
     statusService: deps.statusService,
     messageService: deps.messageService,
     taskLaunchService: deps.taskLaunchService,
-    translationService: deps.translationService,
-    roundService: deps.roundService
+    roundService: deps.roundService,
+    taskWorkflowService: deps.taskWorkflowService
   });
   registerSessionRoutes(app, {
     projectService: deps.projectService,
@@ -197,9 +202,11 @@ export async function createServer(deps: ServerDeps, options: CreateServerOption
 
   app.addHook("onReady", async () => {
     await cleanupRecentTranslationRuntime(deps);
+    deps.runtimeCoordinator.start();
     await deps.gatewayService.start();
   });
   app.addHook("onClose", async () => {
+    deps.runtimeCoordinator.stop();
     await deps.gatewayService.stop();
   });
 
@@ -257,6 +264,7 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
   const artifactService = createArtifactService(fs);
   const projectService = createProjectService({ fs, git, appSettings });
   const taskService = createTaskService({ fs, git, artifactService, projectService });
+  const taskWorkflowService = createTaskWorkflowService({ fs });
   const sessionService = createSessionService({
     fs,
     runtime,
@@ -265,6 +273,7 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     artifactService,
     projectService,
     taskService,
+    taskWorkflowService,
     apiUrl: options.apiUrl
   });
   const harnessService = createHarnessService({
@@ -282,12 +291,12 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
   });
   const autoMemoryService = createAutoMemoryService({
     fs,
+    git,
     runtime,
     sessionService,
     appSettings,
-    async isHarnessEngineerAvailable(repoRoot) {
-      const state = await harnessFeedbackService.getState(repoRoot);
-      return state.status === "idle";
+    async isHarnessEngineerAvailable() {
+      return true;
     }
   });
   const commandDispatcher = createCommandDispatcher({
@@ -305,7 +314,8 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     fs,
     runtime,
     sessionService,
-    taskService
+    taskService,
+    taskWorkflowService
   });
   const taskLaunchService = createTaskLaunchService({
     projectService,
@@ -361,6 +371,14 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     fs,
     auditPath: gatewaySettings.getAuditPath()
   });
+  const taskCloseService = createTaskCloseService({
+    taskService,
+    sessionService,
+    translationService,
+    roundService,
+    projectService,
+    taskWorkflowService
+  });
   const gatewayService = createGatewayService({
     fs,
     settings: gatewaySettings,
@@ -368,26 +386,13 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     channels: gatewayChannels,
     projectService,
     taskService,
+    taskCloseService,
     sessionService,
     taskLaunchService,
     translationService,
     roundService,
     runtime,
     appSettings
-  });
-  const runtimeCoordinator = createRuntimeCoordinatorService({
-    appSettings,
-    taskService,
-    sessionService,
-    translationService,
-    harnessService,
-    harnessFeedbackService,
-    autoMemoryService,
-    roundService,
-    gatewayService,
-    async getStateRoot(repoRoot) {
-      return (await projectService.loadConfig(repoRoot)).stateRoot;
-    }
   });
   const runtimeRecoveryService = createRuntimeRecoveryService({
     fs,
@@ -406,11 +411,32 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     appSettings,
     runtime,
     harnessService,
-    harnessFeedbackService,
     autoMemoryService,
     gatewayService,
     jobGuard: createJobGuardService(),
     translationWorkerService
+  });
+  const turnReconciler = createTurnReconcilerService({
+    sessionService,
+    roundService,
+    claudeHookService,
+    runtime
+  });
+  const runtimeCoordinator = createRuntimeCoordinatorService({
+    appSettings,
+    projectService,
+    taskService,
+    sessionService,
+    translationService,
+    harnessService,
+    harnessFeedbackService,
+    autoMemoryService,
+    roundService,
+    gatewayService,
+    turnReconciler,
+    async getStateRoot(repoRoot) {
+      return (await projectService.loadConfig(repoRoot)).stateRoot;
+    }
   });
   const terminalInterruptService = createTerminalInterruptService({
     runtime,
@@ -430,6 +456,8 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     appSettings,
     projectService,
     taskService,
+    taskCloseService,
+    taskWorkflowService,
     sessionService,
     artifactService,
     harnessService,

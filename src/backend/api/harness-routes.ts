@@ -2,8 +2,8 @@ import type { FastifyInstance } from "fastify";
 import type {
   HarnessApplyRequest,
   HarnessBootstrapStatusReport,
-  HarnessFeedbackDecisionRequest,
   MergeRepositoryDiffToCurrentBranchRequest,
+  SendHarnessFeedbackRequest,
   HarnessStatusReport,
   RestartHarnessBootstrapRequest,
   StartHarnessBootstrapRequest,
@@ -27,13 +27,12 @@ export interface HarnessRouteDeps {
   autoMemoryService: AutoMemoryService;
   sessionService: Pick<
     SessionService,
-    | "getProjectHarnessEngineerSession"
-    | "ensureProjectHarnessEngineerSession"
-    | "startProjectHarnessEngineerSession"
-    | "resumeProjectHarnessEngineerSession"
-    | "restartProjectHarnessEngineerSession"
-    | "stopProjectHarnessEngineerSession"
-    | "notifyProjectHarnessEngineerHarnessUpdated"
+    | "getRoleSession"
+    | "startRoleSession"
+    | "resumeRoleSession"
+    | "restartRoleSession"
+    | "stopRoleSession"
+    | "notifyRoleHarnessUpdated"
   >;
   taskService: Pick<TaskService, "loadTask">;
 }
@@ -103,7 +102,7 @@ export function registerHarnessRoutes(app: FastifyInstance, deps: HarnessRouteDe
   app.get<{ Querystring: { taskSlug?: string } }>("/api/projects/harness/bootstrap", async (request) => {
     const { project, task } = await requireHarnessTaskContext(deps, request.query.taskSlug);
     try {
-      return await deps.harnessService.getBootstrapStatus(project.repoRoot, task.worktreePath);
+      return await deps.harnessService.getBootstrapStatus(project.repoRoot, task.worktreePath, task.taskSlug);
     } catch (error) {
       if (isOpenFileLimitError(error)) {
         return degradedBootstrapStatus(error);
@@ -126,63 +125,74 @@ export function registerHarnessRoutes(app: FastifyInstance, deps: HarnessRouteDe
     return deps.harnessService.restartHarnessBootstrap(project.repoRoot, task.worktreePath, request.body ?? {});
   });
 
-  app.post("/api/projects/harness/bootstrap/stop", async () => {
-    const project = await requireCurrentProject(deps.projectService);
-    return deps.harnessService.stopHarnessBootstrap(project.repoRoot);
+  app.post<{ Body: { taskSlug?: string } }>("/api/projects/harness/bootstrap/stop", async (request) => {
+    const { project, task } = await requireHarnessTaskContext(deps, request.body?.taskSlug);
+    return deps.harnessService.stopHarnessBootstrap(project.repoRoot, task.worktreePath, task.taskSlug);
   });
 
   app.post<{ Body: { taskSlug?: string } }>("/api/projects/harness/bootstrap/run", async (request) => {
     const { project, task } = await requireHarnessTaskContext(deps, request.body?.taskSlug);
     await deps.autoMemoryService.assertHarnessEngineerAvailable(task.worktreePath);
     await deps.harnessFeedbackService.assertHarnessEngineerAvailable(project.repoRoot);
-    return deps.harnessService.runHarnessBootstrap(project.repoRoot, task.worktreePath);
+    return deps.harnessService.runHarnessBootstrap(project.repoRoot, task.worktreePath, task.taskSlug);
   });
 
-  app.get("/api/projects/harness/engineer/session", async () => {
+  app.get<{ Querystring: { taskSlug?: string } }>("/api/projects/harness/engineer/session", async (request) => {
     const project = await requireCurrentProject(deps.projectService);
-    return (await deps.sessionService.getProjectHarnessEngineerSession(project.repoRoot)) ?? null;
+    const taskSlug = request.query.taskSlug?.trim();
+    if (!taskSlug) {
+      return null;
+    }
+    return (await deps.sessionService.getRoleSession(project.repoRoot, taskSlug, "harness-engineer")) ?? null;
   });
 
   app.post<{ Body: StartRoleSessionRequest }>("/api/projects/harness/engineer/session/ensure", async (request) => {
     const project = await requireCurrentProject(deps.projectService);
-    return deps.sessionService.ensureProjectHarnessEngineerSession(project.repoRoot, request.body);
+    const taskSlug = requireTaskSlug(request.body?.taskSlug, "Harness Engineer");
+    const existing = await deps.sessionService.getRoleSession(project.repoRoot, taskSlug, "harness-engineer");
+    if (existing?.status === "running") {
+      return existing;
+    }
+    if (existing?.claudeSessionId) {
+      return deps.sessionService.resumeRoleSession(project.repoRoot, taskSlug, "harness-engineer", request.body);
+    }
+    return deps.sessionService.startRoleSession(project.repoRoot, taskSlug, "harness-engineer", request.body);
   });
 
   app.post<{ Body: StartRoleSessionRequest }>("/api/projects/harness/engineer/session/start", async (request) => {
     const project = await requireCurrentProject(deps.projectService);
-    if (request.body?.taskSlug) {
-      const task = await deps.taskService.loadTask(project.repoRoot, request.body.taskSlug);
-      await deps.autoMemoryService.assertHarnessEngineerAvailable(task.worktreePath);
-    }
-    return deps.sessionService.startProjectHarnessEngineerSession(project.repoRoot, request.body);
+    const taskSlug = requireTaskSlug(request.body?.taskSlug, "Harness Engineer");
+    const task = await deps.taskService.loadTask(project.repoRoot, taskSlug);
+    await deps.autoMemoryService.assertHarnessEngineerAvailable(task.worktreePath);
+    return deps.sessionService.startRoleSession(project.repoRoot, taskSlug, "harness-engineer", request.body);
   });
 
   app.post<{ Body: StartRoleSessionRequest }>("/api/projects/harness/engineer/session/resume", async (request) => {
     const project = await requireCurrentProject(deps.projectService);
-    if (request.body?.taskSlug) {
-      const task = await deps.taskService.loadTask(project.repoRoot, request.body.taskSlug);
-      await deps.autoMemoryService.assertHarnessEngineerAvailable(task.worktreePath);
-    }
-    return deps.sessionService.resumeProjectHarnessEngineerSession(project.repoRoot, request.body);
+    const taskSlug = requireTaskSlug(request.body?.taskSlug, "Harness Engineer");
+    const task = await deps.taskService.loadTask(project.repoRoot, taskSlug);
+    await deps.autoMemoryService.assertHarnessEngineerAvailable(task.worktreePath);
+    return deps.sessionService.resumeRoleSession(project.repoRoot, taskSlug, "harness-engineer", request.body);
   });
 
   app.post<{ Body: StartRoleSessionRequest }>("/api/projects/harness/engineer/session/restart", async (request) => {
     const project = await requireCurrentProject(deps.projectService);
-    if (request.body?.taskSlug) {
-      const task = await deps.taskService.loadTask(project.repoRoot, request.body.taskSlug);
-      await deps.autoMemoryService.assertHarnessEngineerAvailable(task.worktreePath);
-    }
-    return deps.sessionService.restartProjectHarnessEngineerSession(project.repoRoot, request.body);
+    const taskSlug = requireTaskSlug(request.body?.taskSlug, "Harness Engineer");
+    const task = await deps.taskService.loadTask(project.repoRoot, taskSlug);
+    await deps.autoMemoryService.assertHarnessEngineerAvailable(task.worktreePath);
+    return deps.sessionService.restartRoleSession(project.repoRoot, taskSlug, "harness-engineer", request.body);
   });
 
-  app.post("/api/projects/harness/engineer/session/stop", async () => {
+  app.post<{ Body: StartRoleSessionRequest }>("/api/projects/harness/engineer/session/stop", async (request) => {
     const project = await requireCurrentProject(deps.projectService);
-    return deps.sessionService.stopProjectHarnessEngineerSession(project.repoRoot);
+    const taskSlug = requireTaskSlug(request.body?.taskSlug, "Harness Engineer");
+    return deps.sessionService.stopRoleSession(project.repoRoot, taskSlug, "harness-engineer");
   });
 
-  app.post("/api/projects/harness/engineer/session/notify-harness", async () => {
+  app.post<{ Body: StartRoleSessionRequest }>("/api/projects/harness/engineer/session/notify-harness", async (request) => {
     const project = await requireCurrentProject(deps.projectService);
-    return deps.sessionService.notifyProjectHarnessEngineerHarnessUpdated(project.repoRoot);
+    const taskSlug = requireTaskSlug(request.body?.taskSlug, "Harness Engineer");
+    return deps.sessionService.notifyRoleHarnessUpdated(project.repoRoot, taskSlug, "harness-engineer");
   });
 
   app.get<{ Querystring: { taskSlug?: string } }>("/api/projects/harness/feedback", async (request) => {
@@ -191,39 +201,31 @@ export function registerHarnessRoutes(app: FastifyInstance, deps: HarnessRouteDe
     return deps.harnessFeedbackService.getState(project.repoRoot, taskSlug);
   });
 
-  app.post<{ Body: HarnessFeedbackDecisionRequest }>("/api/projects/harness/feedback/decision", async (request) => {
-    const project = await requireCurrentProject(deps.projectService);
-    const action = request.body?.action;
-    if (action !== "approve" && action !== "reject" && action !== "comment" && action !== "cancel") {
-      throw new VcmError({
-        code: "HARNESS_FEEDBACK_DECISION_INVALID",
-        message: "Harness feedback decision action is invalid.",
-        statusCode: 400
-      });
-    }
-    const taskSlug = await normalizeOptionalTaskSlug(deps, project.repoRoot, request.body?.taskSlug);
-    if (taskSlug && (action === "approve" || action === "comment")) {
-      const task = await deps.taskService.loadTask(project.repoRoot, taskSlug);
-      await deps.autoMemoryService.assertHarnessEngineerAvailable(task.worktreePath);
-    }
-    return deps.harnessFeedbackService.decide(project.repoRoot, {
-      action,
-      taskSlug,
-      comment: typeof request.body?.comment === "string" ? request.body.comment : undefined
+  app.post<{ Body: SendHarnessFeedbackRequest }>("/api/projects/harness/feedback/send", async (request) => {
+    const { project, task } = await requireHarnessTaskContext(deps, request.body?.taskSlug);
+    return deps.harnessFeedbackService.sendPendingFeedback(project.repoRoot, {
+      taskSlug: task.taskSlug,
+      feedbackPath: request.body?.feedbackPath ?? ""
     });
   });
 
   app.post<{ Body: StartTaskHarnessRetrospectiveRequest }>("/api/projects/harness/task-retrospective", async (request) => {
     const { project, task } = await requireHarnessTaskContext(deps, request.body?.taskSlug);
-    await deps.autoMemoryService.assertTaskRetrospectiveReady({
+    const trigger = request.body?.trigger === "auto" ? "auto" : "manual";
+    const memoryInput = {
       baseRepoRoot: project.repoRoot,
       taskRepoRoot: task.worktreePath,
       taskSlug: task.taskSlug,
       handoffDir: task.handoffDir,
-      roundReady: true
-    });
+      roundReady: true,
+      requestTrigger: trigger
+    } as const;
+    await deps.autoMemoryService.reconcileTask(memoryInput);
+    const memoryReadiness = await deps.autoMemoryService.getTaskRetrospectiveReadiness(memoryInput);
+    if (!memoryReadiness.ready) {
+      return deps.harnessFeedbackService.getState(project.repoRoot, task.taskSlug);
+    }
     await deps.autoMemoryService.assertHarnessEngineerAvailable(task.worktreePath);
-    const trigger = request.body?.trigger === "auto" ? "auto" : "manual";
     return deps.harnessFeedbackService.startTaskRetrospective(project.repoRoot, {
       taskSlug: task.taskSlug,
       taskRepoRoot: task.worktreePath,
@@ -272,6 +274,19 @@ export function registerHarnessRoutes(app: FastifyInstance, deps: HarnessRouteDe
     const { project, task } = await requireHarnessTaskContext(deps, request.body?.taskSlug);
     return deps.autoMemoryService.retryFailedReview(project.repoRoot, task.worktreePath);
   });
+}
+
+function requireTaskSlug(value: string | undefined, roleLabel: string): string {
+  const taskSlug = value?.trim();
+  if (!taskSlug) {
+    throw new VcmError({
+      code: "TOOL_SESSION_TASK_REQUIRED",
+      message: `${roleLabel} requires an active task.`,
+      statusCode: 409,
+      hint: "Create or select a task before using this session."
+    });
+  }
+  return taskSlug;
 }
 
 function degradedHarnessStatus(error: unknown): HarnessStatusReport {

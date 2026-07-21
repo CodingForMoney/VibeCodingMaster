@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { open, readFile } from "node:fs/promises";
 import type { RoleSessionRecord } from "../../shared/types/session.js";
 import { parseAssistantContent, resolveExistingClaudeTranscriptPath } from "./claude-transcript-service.js";
 
@@ -22,11 +22,20 @@ export interface TranscriptTextEvent {
   stopReason?: string;
 }
 
+export interface TranscriptTurnEvidence {
+  lastActivityAt?: string;
+  completion?: {
+    id: string | null;
+    timestamp: string;
+  };
+}
+
 /** Default maximum captured-reply length (characters). */
 export const MAX_TURN_REPLY_CHARS = 8_000;
 
 /** Tolerance applied when matching transcript events to the role's last-turn window. */
 const TURN_WINDOW_TOLERANCE_MS = 1_000;
+const TRANSCRIPT_EVIDENCE_TAIL_BYTES = 2 * 1024 * 1024;
 
 /**
  * Best-effort read of a role's latest user-facing turn reply.
@@ -74,6 +83,87 @@ export async function readTranscriptTextEvents(transcriptPath: string): Promise<
     }
   }
   return events;
+}
+
+/** Read transcript activity and a completed assistant turn after this turn began. */
+export async function readTranscriptTurnEvidence(session: RoleSessionRecord): Promise<TranscriptTurnEvidence> {
+  const transcriptPath = resolveExistingClaudeTranscriptPath(session);
+  if (!transcriptPath) {
+    return {};
+  }
+
+  let raw: string;
+  let modifiedAt: string;
+  let handle: Awaited<ReturnType<typeof open>> | undefined;
+  try {
+    handle = await open(transcriptPath, "r");
+    const metadata = await handle.stat();
+    modifiedAt = metadata.mtime.toISOString();
+    const readLength = Math.min(metadata.size, TRANSCRIPT_EVIDENCE_TAIL_BYTES);
+    const readOffset = Math.max(0, metadata.size - readLength);
+    const buffer = Buffer.alloc(readLength);
+    await handle.read(buffer, 0, readLength, readOffset);
+    raw = buffer.toString("utf8");
+    if (readOffset > 0) {
+      const firstNewline = raw.indexOf("\n");
+      raw = firstNewline >= 0 ? raw.slice(firstNewline + 1) : "";
+    }
+  } catch {
+    return {};
+  } finally {
+    await handle?.close().catch(() => undefined);
+  }
+
+  const turnStartedAtMs = timestampMs(session.lastTurnStartedAt);
+  let lastActivityAt: string | undefined;
+  let completion: TranscriptTurnEvidence["completion"];
+
+  for (const line of raw.split("\n")) {
+    if (!line.trim()) {
+      continue;
+    }
+    let record: Record<string, unknown>;
+    try {
+      record = JSON.parse(line) as Record<string, unknown>;
+    } catch {
+      continue;
+    }
+
+    const timestamp = typeof record.timestamp === "string" ? record.timestamp : undefined;
+    if (timestamp && isLaterTimestamp(timestamp, lastActivityAt)) {
+      lastActivityAt = timestamp;
+    }
+    if (record.type !== "assistant" || !timestamp) {
+      continue;
+    }
+
+    const message = record.message as Record<string, unknown> | undefined;
+    if (message?.model === "<synthetic>" || message?.stop_reason !== "end_turn") {
+      continue;
+    }
+    const completionAtMs = timestampMs(timestamp);
+    if (
+      completionAtMs === undefined
+      || (turnStartedAtMs !== undefined && completionAtMs < turnStartedAtMs - TURN_WINDOW_TOLERANCE_MS)
+    ) {
+      continue;
+    }
+    if (!completion || isLaterTimestamp(timestamp, completion.timestamp)) {
+      completion = {
+        id: typeof record.uuid === "string" ? record.uuid : null,
+        timestamp
+      };
+    }
+  }
+
+  if (isLaterTimestamp(modifiedAt, lastActivityAt)) {
+    lastActivityAt = modifiedAt;
+  }
+
+  return {
+    ...(lastActivityAt ? { lastActivityAt } : {}),
+    ...(completion ? { completion } : {})
+  };
 }
 
 /** True for a text event that completed a turn (assistant stopped of its own accord). */
@@ -142,4 +232,10 @@ function timestampMs(value: string | undefined): number | undefined {
   }
   const parsed = Date.parse(value);
   return Number.isFinite(parsed) ? parsed : undefined;
+}
+
+function isLaterTimestamp(candidate: string, current: string | undefined): boolean {
+  const candidateMs = timestampMs(candidate);
+  const currentMs = timestampMs(current);
+  return candidateMs !== undefined && (currentMs === undefined || candidateMs > currentMs);
 }

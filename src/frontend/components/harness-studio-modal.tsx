@@ -1,6 +1,11 @@
 import { useEffect, useState } from "react";
 import type { ReactNode } from "react";
-import type { HarnessBootstrapStatusReport, HarnessFileStatus, HarnessStatusReport } from "../../shared/types/harness.js";
+import type {
+  HarnessBootstrapStatusReport,
+  HarnessFeedbackStateReport,
+  HarnessFileStatus,
+  HarnessStatusReport
+} from "../../shared/types/harness.js";
 import type { AutoMemoryStateReport, MemoryReviewRunSummary } from "../../shared/types/memory.js";
 import type { ClaudePermissionMode, RoleSessionRecord, SessionEffort, SessionModel } from "../../shared/types/session.js";
 import { apiClient } from "../state/api-client.js";
@@ -20,6 +25,7 @@ export interface HarnessStudioModalProps {
   bootstrapStatus: HarnessBootstrapStatusReport | null;
   engineerSession: RoleSessionRecord | null;
   status: HarnessStatusReport | null;
+  feedbackState: HarnessFeedbackStateReport | null;
   memoryState: AutoMemoryStateReport | null;
   onClose(): void;
   onEffortChange(effort: SessionEffort): void;
@@ -30,6 +36,7 @@ export interface HarnessStudioModalProps {
   onEngineerStart(): void;
   onEngineerStop(): void;
   onEngineerNotifyHarnessUpdated(): void;
+  onSendFeedback(feedbackPath: string): void;
   onOpenRepositoryDiff(): void;
   onReviewTaskHarness(): void;
   onRefresh(): void;
@@ -55,6 +62,7 @@ export function HarnessStudioModal({
   bootstrapStatus,
   engineerSession,
   status,
+  feedbackState,
   memoryState,
   onClose,
   onEffortChange,
@@ -65,12 +73,14 @@ export function HarnessStudioModal({
   onEngineerStart,
   onEngineerStop,
   onEngineerNotifyHarnessUpdated,
+  onSendFeedback,
   onOpenRepositoryDiff,
   onReviewTaskHarness,
   onRefresh,
   onMemoryStateChange
 }: HarnessStudioModalProps) {
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
+  const [selectedMemoryPath, setSelectedMemoryPath] = useState(false);
   const [selectedFile, setSelectedFile] = useState<StudioFilePreview | null>(null);
   const [draftContent, setDraftContent] = useState("");
   const [editingFile, setEditingFile] = useState(false);
@@ -90,6 +100,7 @@ export function HarnessStudioModal({
   useEffect(() => {
     if (!open) {
       setSelectedPath(null);
+      setSelectedMemoryPath(false);
       setSelectedFile(null);
       setDraftContent("");
       setEditingFile(false);
@@ -109,7 +120,7 @@ export function HarnessStudioModal({
     setFileBusy(true);
     setFileError(null);
     setEditingFile(false);
-    const loadFile = selectedPath.startsWith(".ai/vcm/memory/")
+    const loadFile = selectedMemoryPath
       ? apiClient.getMemoryFileContent(taskSlug, selectedPath).then((file): StudioFilePreview => ({
           path: file.path,
           title: file.title,
@@ -147,7 +158,7 @@ export function HarnessStudioModal({
     return () => {
       cancelled = true;
     };
-  }, [open, selectedPath, taskSlug]);
+  }, [open, selectedMemoryPath, selectedPath, taskSlug]);
 
   async function saveSelectedFile() {
     if (!selectedFile || !selectedFile.editable || !dirty || !taskSlug) {
@@ -192,6 +203,7 @@ export function HarnessStudioModal({
 
   function closeFilePreview() {
     setSelectedPath(null);
+    setSelectedMemoryPath(false);
     setSelectedFile(null);
     setDraftContent("");
     setEditingFile(false);
@@ -214,6 +226,7 @@ export function HarnessStudioModal({
   function openMemoryDiff(run: MemoryReviewRunSummary) {
     const previewPath = `memory-review:${run.runId}`;
     setSelectedPath(previewPath);
+    setSelectedMemoryPath(false);
     setSelectedFile({
       path: run.runId,
       title: `Memory Diff: ${run.runId}`,
@@ -335,19 +348,20 @@ export function HarnessStudioModal({
                   />
                 </section>
               ) : (
-                <>
-                  <HarnessFileSection title="VCM Roles" files={vcmRoleAgents} selectedPath={selectedPath} copiedPath={copiedPath} onCopy={(path) => void copyHarnessFilePath(path)} onSelect={setSelectedPath} />
-                  <HarnessFileSection title="Auxiliary Roles" files={auxiliaryAgents} selectedPath={selectedPath} copiedPath={copiedPath} onCopy={(path) => void copyHarnessFilePath(path)} onSelect={setSelectedPath} />
+                <div className="harness-studio-left-scroll">
+                  <HarnessFileSection title="VCM Roles" files={vcmRoleAgents} selectedPath={selectedPath} copiedPath={copiedPath} onCopy={(path) => void copyHarnessFilePath(path)} onSelect={(path) => { setSelectedMemoryPath(false); setSelectedPath(path); }} />
+                  <HarnessFileSection title="Auxiliary Roles" files={auxiliaryAgents} selectedPath={selectedPath} copiedPath={copiedPath} onCopy={(path) => void copyHarnessFilePath(path)} onSelect={(path) => { setSelectedMemoryPath(false); setSelectedPath(path); }} />
                   <MemorySection
                     state={memoryState}
                     busy={fileBusy}
                     copiedPath={copiedPath}
                     onCopy={(path) => void copyHarnessFilePath(path)}
-                    onSelect={setSelectedPath}
+                    onSelect={(path) => { setSelectedMemoryPath(true); setSelectedPath(path); }}
                     onViewDiff={openMemoryDiff}
                     onRevert={(run) => void revertMemoryRun(run)}
                     onRetry={() => void retryMemoryReview()}
                   />
+                  <HarnessFeedbackInbox state={feedbackState} busy={busy} taskSlug={taskSlug} onSend={onSendFeedback} />
                   <HarnessCollapsibleSection title="Overview">
                     <section className="harness-studio-overview">
                       <div className="harness-studio-metrics">
@@ -365,9 +379,9 @@ export function HarnessStudioModal({
                       ) : null}
                     </section>
                   </HarnessCollapsibleSection>
-                  <HarnessFileSection title="Skills" files={skills} selectedPath={selectedPath} copiedPath={copiedPath} onCopy={(path) => void copyHarnessFilePath(path)} onSelect={setSelectedPath} collapsible />
-                  <HarnessFileSection title="Root Context" files={rootContext} selectedPath={selectedPath} copiedPath={copiedPath} onCopy={(path) => void copyHarnessFilePath(path)} onSelect={setSelectedPath} collapsible />
-                  <HarnessFileSection title="Tools" files={tools} selectedPath={selectedPath} copiedPath={copiedPath} onCopy={(path) => void copyHarnessFilePath(path)} onSelect={setSelectedPath} collapsible />
+                  <HarnessFileSection title="Skills" files={skills} selectedPath={selectedPath} copiedPath={copiedPath} onCopy={(path) => void copyHarnessFilePath(path)} onSelect={(path) => { setSelectedMemoryPath(false); setSelectedPath(path); }} collapsible />
+                  <HarnessFileSection title="Root Context" files={rootContext} selectedPath={selectedPath} copiedPath={copiedPath} onCopy={(path) => void copyHarnessFilePath(path)} onSelect={(path) => { setSelectedMemoryPath(false); setSelectedPath(path); }} collapsible />
+                  <HarnessFileSection title="Tools" files={tools} selectedPath={selectedPath} copiedPath={copiedPath} onCopy={(path) => void copyHarnessFilePath(path)} onSelect={(path) => { setSelectedMemoryPath(false); setSelectedPath(path); }} collapsible />
 
                   <HarnessCollapsibleSection title="Project Docs">
                     <ul className="harness-studio-doc-list">
@@ -379,7 +393,7 @@ export function HarnessStudioModal({
                       )) ?? <li><span>No bootstrap status loaded.</span></li>}
                     </ul>
                   </HarnessCollapsibleSection>
-                </>
+                </div>
               )}
             </aside>
 
@@ -413,7 +427,7 @@ export function HarnessStudioModal({
                 ) : (
                   <div className="terminal-empty">
                     <strong>harness-engineer</strong>
-                    <span>{engineerSession?.claudeSessionId ? "Resume this project Harness Engineer session." : "Start this project Harness Engineer session."}</span>
+                    <span>{engineerSession?.claudeSessionId ? "Resume this task Harness Engineer session." : "Start this task Harness Engineer session."}</span>
                   </div>
                 )}
               </div>
@@ -432,6 +446,39 @@ function HarnessMetric({ label, value }: { label: string; value: string }) {
       <span>{label}</span>
       <strong>{value}</strong>
     </div>
+  );
+}
+
+function HarnessFeedbackInbox({
+  state,
+  busy,
+  taskSlug,
+  onSend
+}: {
+  state: HarnessFeedbackStateReport | null;
+  busy?: boolean;
+  taskSlug: string | null;
+  onSend(feedbackPath: string): void;
+}) {
+  return (
+    <HarnessCollapsibleSection title={`Harness Feedback Inbox (${state?.queuedCount ?? 0})`}>
+      <ul className="harness-studio-doc-list">
+        {state?.pending.length ? state.pending.map((item) => (
+          <li key={item.path}>
+            <span title={item.path}>{item.title}</span>
+            <code>{item.reporterRole ?? "unknown"}</code>
+            <button
+              type="button"
+              title="Send this feedback to Harness Engineer"
+              disabled={busy || !taskSlug}
+              onClick={() => onSend(item.path)}
+            >
+              Send
+            </button>
+          </li>
+        )) : <li><span>No pending harness feedback.</span></li>}
+      </ul>
+    </HarnessCollapsibleSection>
   );
 }
 

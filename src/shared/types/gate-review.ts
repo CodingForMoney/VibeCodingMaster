@@ -53,6 +53,7 @@ export interface GateReviewFinding {
   title: string;
   file?: string;
   line?: number;
+  location?: string;
   evidence: string;
   expected: string;
   gap: string;
@@ -75,6 +76,7 @@ export interface GateReviewGateRecord {
   changedFiles?: string[];
   diffStat?: string;
   codeDiffSource?: CodeDiffSource;
+  codeDiffSources?: CodeDiffSource[];
   summary?: string;
   findings?: GateReviewFinding[];
   error?: string;

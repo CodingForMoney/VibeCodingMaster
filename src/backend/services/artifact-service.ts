@@ -13,7 +13,9 @@ import {
   type FileSystemAdapter
 } from "../adapters/filesystem.js";
 import {
+  renderArchitectureBriefTemplate,
   renderArchitecturePlanTemplate,
+  renderArchitectDebugTemplate,
   renderCoderCompletionTemplate,
   renderDocsSyncReportTemplate,
   renderFinalAcceptanceTemplate,
@@ -67,6 +69,7 @@ export interface SaveRoleCommandInput extends ReadRoleCommandInput {
 }
 
 const ARTIFACT_PATH_KEYS: Array<[ArtifactKind, keyof HandoffPaths]> = [
+  ["architecture-brief", "architectureBriefPath"],
   ["architecture-plan", "architecturePlanPath"],
   ["known-issues", "knownIssuesPath"],
   ["test-report", "testReportPath"],
@@ -99,6 +102,7 @@ export function createArtifactService(fs: FileSystemAdapter): ArtifactService {
           tester: path.posix.join(roleCommandsDir, "tester.md")
         },
         messageRoutePaths: getDefaultMessageRoutePaths(messagesDir),
+        architectureBriefPath: path.posix.join(handoffDir, "architecture-brief.md"),
         architecturePlanPath: path.posix.join(handoffDir, "architecture-plan.md"),
         knownIssuesPath: path.posix.join(handoffDir, "known-issues.md"),
         testReportPath: path.posix.join(handoffDir, "test-report.md"),
@@ -122,9 +126,11 @@ export function createArtifactService(fs: FileSystemAdapter): ArtifactService {
         [paths.roleCommandPaths.architect, renderRoleCommandTemplate(input.taskSlug, "architect", input.repoRoot, input.branch)],
         [paths.roleCommandPaths.coder, renderRoleCommandTemplate(input.taskSlug, "coder", input.repoRoot, input.branch)],
         [paths.roleCommandPaths.tester, renderRoleCommandTemplate(input.taskSlug, "tester", input.repoRoot, input.branch)],
+        [paths.architectureBriefPath, renderArchitectureBriefTemplate(input.taskSlug)],
         [paths.architecturePlanPath, renderArchitecturePlanTemplate(input.taskSlug)],
         [paths.knownIssuesPath, renderKnownIssuesTemplate(input.taskSlug)],
         [path.posix.join(paths.handoffDir, "coder-completion.md"), renderCoderCompletionTemplate(input.taskSlug)],
+        [path.posix.join(paths.handoffDir, "architect-debug.md"), renderArchitectDebugTemplate(input.taskSlug)],
         [paths.testReportPath, renderTestReportTemplate(input.taskSlug)],
         [paths.docsSyncReportPath, renderDocsSyncReportTemplate(input.taskSlug)],
         [paths.finalAcceptancePath, renderFinalAcceptanceTemplate(input.taskSlug)],
