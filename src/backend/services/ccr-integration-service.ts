@@ -20,6 +20,7 @@ export interface CcrIntegrationService {
   updateSettings(input: UpdateCcrIntegrationRequest): Promise<CcrIntegrationStatus>;
   checkConnection(): Promise<CcrIntegrationStatus>;
   getLaunchEnvironment(model: SessionModel): Promise<NodeJS.ProcessEnv>;
+  getLaunchSettingsOverride(model: SessionModel): Promise<Record<string, unknown> | undefined>;
 }
 
 export interface CcrIntegrationServiceDeps {
@@ -202,6 +203,24 @@ export function createCcrIntegrationService(deps: CcrIntegrationServiceDeps): Cc
         CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY: "1",
         NO_PROXY: noProxy,
         no_proxy: noProxy
+      };
+    },
+    async getLaunchSettingsOverride(model) {
+      if (isCcrSessionModel(model)) {
+        return undefined;
+      }
+      const settings = await deps.settings.getCcrIntegrationSettings();
+      if (!settings.apiKey) {
+        return undefined;
+      }
+      return {
+        apiKeyHelper: "",
+        env: {
+          CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY: "0",
+          ANTHROPIC_BASE_URL: "https://api.anthropic.com",
+          ANTHROPIC_API_BASE_URL: "https://api.anthropic.com",
+          CLAUDE_AGENT_API_BASE_URL: "https://api.anthropic.com"
+        }
       };
     }
   };

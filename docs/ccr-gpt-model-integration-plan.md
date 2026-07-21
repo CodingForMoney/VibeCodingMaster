@@ -215,8 +215,13 @@ the selection or normalize it to `default`.
 
 ## 7. Claude Code Launch Environment
 
-Native Claude selections keep the current launch behavior and receive no CCR
-environment variables.
+Native Claude selections receive no CCR environment variables. Once CCR is
+configured in VCM, VCM also supplies a command-line `--settings`
+override that clears CCR's user-level `apiKeyHelper`, restores Anthropic's API
+endpoints, and disables gateway model discovery for that child only. This is
+required because CCR profile takeover writes gateway settings into
+`~/.claude/settings.json`. The override does not mutate that file and allows
+native Claude and CCR-backed sessions to run concurrently.
 
 For a CCR selection, VCM launches the normal container `claude` executable and
 injects these variables only into that child process:
@@ -243,8 +248,8 @@ CCR-managed Claude Code profiles authenticate through the `apiKeyHelper` in
 Claude settings. VCM therefore removes inherited Anthropic token and API-key
 variables from CCR-backed child processes so they cannot override that helper.
 The API key saved in VCM is used only for CCR connection and model discovery.
-Native Claude sessions do not receive these removals and retain their existing
-authentication behavior.
+Native Claude sessions retain their Claude account authentication and do not
+receive the CCR model environment.
 
 The API key must never appear in the display command, terminal output, session
 record, event stream, diagnostics, or process error text. Session records and

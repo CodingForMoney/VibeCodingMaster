@@ -70,7 +70,7 @@ export interface SessionServiceDeps {
   projectService: Pick<ProjectService, "loadConfig">;
   taskService: Pick<TaskService, "loadTask">;
   taskWorkflowService?: Pick<TaskWorkflowService, "getState" | "renderPmResumeContext">;
-  ccrIntegration?: Pick<CcrIntegrationService, "getLaunchEnvironment">;
+  ccrIntegration?: Pick<CcrIntegrationService, "getLaunchEnvironment" | "getLaunchSettingsOverride">;
   apiUrl?: string;
   sandboxMode?: string;
   isProcessAlive?: (pid: number) => boolean;
@@ -179,7 +179,10 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     const permissionMode = normalizeClaudePermissionMode(input.permissionMode ?? persisted?.permissionMode);
     const model: SessionModel = normalizeClaudeModel(input.model ?? persisted?.model);
     const effort = normalizeClaudeEffort(input.effort ?? persisted?.effort);
-    const modelEnvironment = await getModelLaunchEnvironment(model);
+    const [modelEnvironment, modelSettingsOverride] = await Promise.all([
+      getModelLaunchEnvironment(model),
+      getModelLaunchSettingsOverride(model)
+    ]);
     const resumeClaudeSessionId = launchMode === "resume"
       ? persisted?.claudeSessionId
       : undefined;
@@ -207,7 +210,8 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
         resumeClaudeSessionId,
         launchMode === "resume",
         model,
-        effort
+        effort,
+        modelSettingsOverride
       ),
       cwd: taskRepoRoot
     };
@@ -311,7 +315,10 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     const permissionMode = normalizeClaudePermissionMode(input.permissionMode ?? persisted?.permissionMode);
     const model = normalizeClaudeModel(input.model ?? persisted?.model);
     const effort = normalizeClaudeEffort(input.effort ?? persisted?.effort ?? "medium");
-    const modelEnvironment = await getModelLaunchEnvironment(model);
+    const [modelEnvironment, modelSettingsOverride] = await Promise.all([
+      getModelLaunchEnvironment(model),
+      getModelLaunchSettingsOverride(model)
+    ]);
     const resumeClaudeSessionId = launchMode === "resume"
       ? persisted?.claudeSessionId
       : undefined;
@@ -351,7 +358,8 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
         resumeClaudeSessionId,
         launchMode === "resume",
         model,
-        effort
+        effort,
+        modelSettingsOverride
       ),
       cwd: launchCwd
     };
@@ -452,7 +460,10 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     const permissionMode = normalizeClaudePermissionMode(input.permissionMode ?? persisted?.permissionMode);
     const model = normalizeClaudeModel(input.model ?? persisted?.model);
     const effort = normalizeClaudeEffort(input.effort ?? persisted?.effort ?? "medium");
-    const modelEnvironment = await getModelLaunchEnvironment(model);
+    const [modelEnvironment, modelSettingsOverride] = await Promise.all([
+      getModelLaunchEnvironment(model),
+      getModelLaunchSettingsOverride(model)
+    ]);
     const resumeClaudeSessionId = launchMode === "resume"
       ? persisted?.claudeSessionId
       : undefined;
@@ -488,7 +499,8 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
         resumeClaudeSessionId,
         launchMode === "resume",
         model,
-        effort
+        effort,
+        modelSettingsOverride
       ),
       cwd: launchCwd
     };
@@ -708,7 +720,10 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     const permissionMode = normalizeClaudePermissionMode(session.permissionMode);
     const model = normalizeClaudeModel(session.model);
     const effort = normalizeClaudeEffort(session.effort);
-    const modelEnvironment = await getModelLaunchEnvironment(model);
+    const [modelEnvironment, modelSettingsOverride] = await Promise.all([
+      getModelLaunchEnvironment(model),
+      getModelLaunchSettingsOverride(model)
+    ]);
     // Spawn (`claude --resume`) always anchors at the base repoRoot so resume works
     // even if the persisted task cwd was deleted. `--resume` then restores the
     // session's own last cwd (tracked on `session.cwd`), so the `/cd` migrate below
@@ -722,7 +737,8 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
         session.claudeSessionId,
         true,
         model,
-        effort
+        effort,
+        modelSettingsOverride
       ),
       cwd: launchCwd
     };
@@ -797,6 +813,10 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       });
     }
     return deps.ccrIntegration.getLaunchEnvironment(model);
+  }
+
+  async function getModelLaunchSettingsOverride(model: SessionModel): Promise<Record<string, unknown> | undefined> {
+    return deps.ccrIntegration?.getLaunchSettingsOverride(model);
   }
 
   function isRuntimeSessionAlive(session: ReturnType<TerminalRuntime["getSession"]>): session is TerminalSession & { pid: number } {

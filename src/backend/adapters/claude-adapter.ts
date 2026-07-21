@@ -18,7 +18,8 @@ export interface ClaudeAdapter {
     claudeSessionId?: string,
     resume?: boolean,
     model?: SessionModel,
-    effort?: SessionEffort
+    effort?: SessionEffort,
+    settingsOverride?: Record<string, unknown>
   ): { command: string; args: string[]; display: string };
 }
 
@@ -41,8 +42,9 @@ export function createClaudeAdapter(runner: CommandRunner): ClaudeAdapter {
 
       return result.stdout.trim();
     },
-    buildRoleStartCommand(role, command = "claude", permissionMode = "default", claudeSessionId, resume = false, model = "default", effort = "default") {
+    buildRoleStartCommand(role, command = "claude", permissionMode = "default", claudeSessionId, resume = false, model = "default", effort = "default", settingsOverride) {
       const args = ["--agent", role];
+      const sessionSettings = { ...settingsOverride };
       if (claudeSessionId) {
         args.push(resume ? "--resume" : "--session-id", claudeSessionId);
       }
@@ -50,9 +52,12 @@ export function createClaudeAdapter(runner: CommandRunner): ClaudeAdapter {
         args.push("--model", model);
       }
       if (effort === "ultracode") {
-        args.push("--settings", JSON.stringify({ ultracode: true }));
+        sessionSettings.ultracode = true;
       } else if (effort !== "default") {
         args.push("--effort", effort);
+      }
+      if (Object.keys(sessionSettings).length > 0) {
+        args.push("--settings", JSON.stringify(sessionSettings));
       }
       if (permissionMode !== "default") {
         args.push("--permission-mode", permissionMode);

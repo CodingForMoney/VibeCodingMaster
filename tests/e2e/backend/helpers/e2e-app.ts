@@ -381,16 +381,22 @@ function createMockClaudeAdapter(): ClaudeAdapter {
     async getVersion() {
       return "mock-claude-code/0.0.0";
     },
-    buildRoleStartCommand(role, command = "claude", permissionMode = "default", claudeSessionId, resume = false, model = "default", effort = "default") {
+    buildRoleStartCommand(role, command = "claude", permissionMode = "default", claudeSessionId, resume = false, model = "default", effort = "default", settingsOverride) {
       const args = ["--agent", role];
+      const sessionSettings = { ...settingsOverride };
       if (claudeSessionId) {
         args.push(resume ? "--resume" : "--session-id", claudeSessionId);
       }
       if (!isCcrSessionModel(model)) {
         args.push("--model", model);
       }
-      if (effort !== "default") {
+      if (effort === "ultracode") {
+        sessionSettings.ultracode = true;
+      } else if (effort !== "default") {
         args.push("--effort", effort);
+      }
+      if (Object.keys(sessionSettings).length > 0) {
+        args.push("--settings", JSON.stringify(sessionSettings));
       }
       if (permissionMode !== "default") {
         args.push("--permission-mode", permissionMode);

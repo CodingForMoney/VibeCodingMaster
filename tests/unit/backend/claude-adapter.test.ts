@@ -70,6 +70,36 @@ describe("createClaudeAdapter", () => {
     });
   });
 
+  it("applies a session-only settings override to native Claude models", () => {
+    const settingsOverride = {
+      apiKeyHelper: "",
+      env: { ANTHROPIC_BASE_URL: "https://api.anthropic.com" }
+    };
+    expect(adapter.buildRoleStartCommand(
+      "coder",
+      "claude",
+      "default",
+      undefined,
+      false,
+      "sonnet",
+      "medium",
+      settingsOverride
+    )).toEqual({
+      command: "claude",
+      args: [
+        "--agent",
+        "coder",
+        "--model",
+        "sonnet",
+        "--effort",
+        "medium",
+        "--settings",
+        JSON.stringify(settingsOverride)
+      ],
+      display: `claude --agent coder --model sonnet --effort medium --settings '${JSON.stringify(settingsOverride)}'`
+    });
+  });
+
   it("adds effort when one is selected", () => {
     expect(adapter.buildRoleStartCommand(
       "architect",

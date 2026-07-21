@@ -50,6 +50,24 @@ describe("createCcrIntegrationService", () => {
   it("does not inject CCR environment for native Claude models", async () => {
     const service = createService();
     await expect(service.getLaunchEnvironment("opus")).resolves.toEqual({});
+    await expect(service.getLaunchSettingsOverride("opus")).resolves.toBeUndefined();
+  });
+
+  it("isolates native Claude sessions from CCR-managed user settings once CCR is configured", async () => {
+    const service = createService({
+      initial: { version: 1, enabled: false, apiKey: "saved" }
+    });
+
+    await expect(service.getLaunchSettingsOverride("sonnet")).resolves.toEqual({
+      apiKeyHelper: "",
+      env: {
+        CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY: "0",
+        ANTHROPIC_BASE_URL: "https://api.anthropic.com",
+        ANTHROPIC_API_BASE_URL: "https://api.anthropic.com",
+        CLAUDE_AGENT_API_BASE_URL: "https://api.anthropic.com"
+      }
+    });
+    await expect(service.getLaunchSettingsOverride(CCR_GPT_SESSION_MODEL)).resolves.toBeUndefined();
   });
 
   it("launches GPT sessions through the endpoint identified by the probe", async () => {

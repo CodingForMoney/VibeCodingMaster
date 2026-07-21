@@ -98,6 +98,17 @@ describe("backend E2E CCR integration", () => {
     const nativeRuntime = env.mockRuntime.getSessionByRole(task.taskSlug, "architect");
     const nativeInput = env.mockRuntime.getCreateInput(nativeRuntime!.id);
     expect(nativeInput.args).toEqual(expect.arrayContaining(["--model", "opus"]));
+    const settingsIndex = nativeInput.args.indexOf("--settings");
+    expect(settingsIndex).toBeGreaterThan(-1);
+    expect(JSON.parse(nativeInput.args[settingsIndex + 1]!)).toEqual({
+      apiKeyHelper: "",
+      env: {
+        CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY: "0",
+        ANTHROPIC_BASE_URL: "https://api.anthropic.com",
+        ANTHROPIC_API_BASE_URL: "https://api.anthropic.com",
+        CLAUDE_AGENT_API_BASE_URL: "https://api.anthropic.com"
+      }
+    });
     expect(nativeInput.env).not.toHaveProperty("ANTHROPIC_BASE_URL");
     expect(nativeInput.env).not.toHaveProperty("ANTHROPIC_AUTH_TOKEN");
 
