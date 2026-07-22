@@ -105,8 +105,8 @@ Proposed definition:
 
 - name: `vcm-architect-scaffold-worker`
 - scope: project harness under `.claude/agents/`
-- model: Sonnet by default
-- effort: Medium by default
+- model: Opus
+- effort: xhigh
 - tools: only the file, search, shell, and editing tools required for scaffold work
 - execution: foreground only
 - working directory: the active task worktree
@@ -250,7 +250,7 @@ The restoration instruction applies only to the newly restarted Architect Sessio
 
 - Stage 1 Architecture Interview and Evidence: Fable
 - Stage 2 Architecture Design and Plan: Fable
-- Scaffold Execution SubAgent: Sonnet with Medium effort by default
+- Scaffold Execution SubAgent: Opus with xhigh effort
 - Parent Architect scaffold review: Fable
 - Architecture Gate corrections: Fable
 - Architect Debug Mode: Fable
@@ -352,4 +352,4 @@ Add backend unit and mock-Claude E2E coverage for:
 
 ## Final Review Decision
 
-The remaining model choice to confirm before implementation is the Scaffold SubAgent default. This plan recommends Sonnet with Medium effort. All other model boundaries and workflow behavior are defined above.
+The Scaffold SubAgent uses Opus with xhigh effort. All model boundaries and workflow behavior are defined above.
