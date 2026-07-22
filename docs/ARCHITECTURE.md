@@ -105,17 +105,25 @@ persisted only in global app settings and is used for gateway checks, model
 discovery, and GPT child authentication through the helper; settings responses
 expose only whether it is configured. GPT-backed children clear
 inherited Anthropic credential variables and receive an isolated `apiKeyHelper`
-through `--settings`. `claude-settings-adapter` removes only CCR-owned takeover
-entries from global Claude settings, leaving native Claude launches unchanged.
+through `--settings`. They also use the VCM-owned Claude configuration root
+`~/.vcm/claude/ccr`, which keeps CCR model discovery, cache, and transcripts out
+of the user's global `~/.claude` state. VCM never edits global Claude settings.
+Native child processes retain normal Claude configuration and authentication;
+only inherited environment variables that identify the local CCR gateway are
+removed from that child.
 
 `session-service` is the single process-launch boundary for CCR. It requests the
 model environment before every Start, Resume, or Restart path and merges it into
 the PTY child environment. This covers workflow roles, Gate Reviewer,
 Translator, Harness Engineer, Harness Bootstrap, and one-click launch without
 separate role-specific CCR logic. `claude-adapter` omits native `--model` only
-for the namespaced CCR model. Native Claude commands and environments are
-unchanged. An unavailable CCR selection fails before process creation and is
-never normalized or silently replaced.
+for the namespaced CCR model. Native Claude commands remain unchanged, and the
+native child environment removes only inherited local-CCR takeover variables.
+An unavailable CCR selection fails before process creation and is never
+normalized or silently replaced. Session records persist the Claude
+configuration root so transcript discovery and Resume use the same provider
+state. Resume cannot cross between native Claude and CCR; Restart creates the
+new provider Session.
 
 ## Project-Wide Constraints
 

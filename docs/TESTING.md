@@ -52,10 +52,12 @@ Notes:
   verify fresh and resumable task-scoped tool Sessions are reconciled without a
   frontend trigger.
 - CCR model integration change: run `ccr-gateway-adapter.test.ts`,
-  `ccr-integration-service.test.ts`, `claude-settings-adapter.test.ts`,
-  `ccr-api-key-helper.test.ts`, `claude-adapter.test.ts`, and
-  `ccr-integration.e2e.test.ts`; then run the complete backend E2E suite when
-  changing Session launch wiring.
+  `ccr-integration-service.test.ts`, `ccr-api-key-helper.test.ts`,
+  `claude-adapter.test.ts`, `claude-transcript-service.test.ts`,
+  `session-registry.test.ts`, and `ccr-integration.e2e.test.ts`; verify isolated
+  CCR configuration/transcript paths, native environment cleanup, same-provider
+  Resume, and provider switching through Restart. Run the complete backend E2E
+  suite when changing Session launch wiring.
 - Task workflow-state changes: run `task-workflow-service.test.ts`,
   `message-service.test.ts`, `session-service.test.ts`, and
   `task-routes.test.ts`; verify corrupt or unavailable state remains

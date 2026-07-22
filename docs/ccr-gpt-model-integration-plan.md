@@ -48,9 +48,8 @@ VCM must not:
 - invoke host-side `ccr`, `ccr-app`, or a CCR-managed Claude profile
 - read or store the user's ChatGPT/Codex account credentials
 - connect to the CCR management UI or its management API
-- use global Claude Code settings or the container shell environment to activate
-  CCR; VCM may remove known CCR takeover entries to restore native Claude
-  behavior
+- read or modify global Claude Code settings to activate or deactivate CCR
+- depend on global shell environment changes to activate CCR
 - silently replace an unavailable CCR model with Claude or another model
 
 VCM connects only to CCR's model gateway. CCR remains the source of truth for
@@ -218,10 +217,10 @@ the selection or normalize it to `default`.
 ## 7. Claude Code Launch Environment
 
 Native Claude selections keep the normal Claude Code launch behavior and
-receive neither CCR environment variables nor a `--settings` override. When CCR
-is configured, VCM removes only CCR-owned `apiKeyHelper`, gateway endpoint,
-gateway model, and model-discovery entries from `~/.claude/settings.json` while
-preserving unrelated user settings.
+receive neither CCR environment variables nor a `--settings` override. VCM does
+not read or modify `~/.claude/settings.json`. If the VCM backend itself inherited
+environment variables that clearly select the local CCR gateway, VCM removes
+those variables only from native Claude child processes.
 
 For a CCR selection, VCM launches the normal container `claude` executable and
 injects these variables only into that child process:
@@ -237,6 +236,7 @@ CCR_CLAUDE_CODE_MODEL=Codex API/gpt-5.6-sol
 CODEXL_CLAUDE_CODE_MODEL=Codex API/gpt-5.6-sol
 ANTHROPIC_SMALL_FAST_MODEL=Codex API/gpt-5.6-sol
 CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1
+CLAUDE_CONFIG_DIR=~/.vcm/claude/ccr
 NO_PROXY=<existing entries plus identified CCR host>
 ```
 
@@ -248,6 +248,10 @@ For a CCR selection, VCM adds a child-only `--settings` override whose
 `apiKeyHelper` reads the saved VCM CCR key. VCM also removes inherited Anthropic
 token and API-key variables from that child so they cannot override the helper.
 Native Claude sessions retain their normal Claude account authentication.
+The stable VCM-owned `CLAUDE_CONFIG_DIR` isolates CCR model discovery, settings,
+cache, Session transcripts, and Resume state from the user's global Claude
+configuration. Session records persist this path, and transcript discovery uses
+the recorded path rather than assuming `~/.claude/projects`.
 
 The API key is used for CCR connection, model discovery, and the CCR-only
 `apiKeyHelper`. It must never appear in the display command, terminal output,
@@ -262,7 +266,12 @@ Engineer, or Bootstrap launch code is not acceptable.
 
 - `Start`, `Resume`, and `Restart` use the model currently selected in that
   session panel.
-- Resume may use a different selected model, matching current VCM behavior.
+- Resume must use the same provider as the persisted Session. A native Claude
+  Session cannot resume through CCR, and a CCR Session cannot resume as native
+  Claude.
+- Restart clears the previous Session identity and may switch providers.
+- CCR Sessions created before isolated configuration roots were recorded require
+  one Restart before they can be resumed.
 - One-click launch validates CCR once and applies the configured model to each
   role from the saved launch template.
 - Disabling CCR affects future Start, Resume, and Restart operations. It does
@@ -325,11 +334,12 @@ or launch a session without the CCR environment.
 
 - persist and normalize global CCR settings in `app-settings-service`
 - add the CCR HTTP adapter and settings/status routes
-- add a Claude settings adapter that removes only known CCR takeover entries
 - provide a GPT-only API-key helper for the child `--settings` override
 - compose one shared CCR connection service in `server.ts`
 - extend `claude-adapter` to distinguish native and CCR launch models
 - centralize CCR child-environment construction in the Session launch path
+- persist the provider configuration root in Session records and use it for
+  transcript discovery
 - validate CCR availability for all Start, Resume, Restart, Bootstrap, and
   one-click launch paths
 
@@ -352,9 +362,13 @@ or launch a session without the CCR environment.
   successful model discovery
 - CCR model parsing and unchanged native Claude-model normalization
 - native Claude command generation remains unchanged
-- global Claude settings cleanup preserves unrelated user settings
+- native child launch removes inherited local-CCR takeover variables without
+  modifying global Claude settings
 - CCR launch omits native `--model`, injects the complete child environment,
-  and supplies the GPT-only `apiKeyHelper` through `--settings`
+  supplies the GPT-only `apiKeyHelper` through `--settings`, and uses the
+  isolated VCM Claude configuration root
+- transcript discovery uses the Session's recorded Claude configuration root
+- Resume rejects provider changes and Restart permits them
 - no secret is present in command display, records, logs, or returned errors
 - disabled/unavailable/missing-model launches are rejected without fallback
 
@@ -366,7 +380,8 @@ Use a mock CCR HTTP server plus the existing mock Claude Code runtime to cover:
 2. verify the mock Claude process receives the CCR environment
 3. start multiple roles with one-click launch and verify one shared connection
    check is used
-4. resume and restart a CCR-backed session
+4. resume a CCR-backed session through the same provider, reject a native Resume,
+   and switch to native Claude through Restart
 5. verify native Claude sessions receive no CCR environment or `--settings`
 6. stop CCR and verify a new launch is blocked with a precise error
 7. reject an invalid API key and a missing `gpt-5.6-sol` model
@@ -406,10 +421,11 @@ Use a mock CCR HTTP server plus the existing mock Claude Code runtime to cover:
   `Codex API/gpt-5.6-sol`.
 - Selecting `GPT-5.6 Sol (CCR)` starts the normal VCM-managed Claude Code
   process with child-scoped CCR environment variables and a GPT-only
-  `--settings` override.
+  `--settings` override under the VCM-owned Claude configuration root.
 - Native Claude model launches receive neither CCR environment variables nor a
-  settings override, and known global CCR takeover entries are removed without
-  changing unrelated Claude settings.
+  settings override. VCM does not modify global Claude settings.
+- Resume stays on the Session's recorded provider; Restart is required to move
+  between native Claude and CCR.
 - CCR credentials never appear in frontend responses, terminal commands,
   session records, or logs.
 - An unavailable endpoint, rejected key, or missing model blocks the launch

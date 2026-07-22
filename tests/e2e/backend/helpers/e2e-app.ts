@@ -65,6 +65,7 @@ export interface MockClaudeE2eApp {
 export interface MockClaudeE2eAppOptions {
   tempRoot?: string;
   ccrGateway?: CcrGatewayAdapter;
+  ccrBaseEnv?: NodeJS.ProcessEnv;
 }
 
 export async function createMockClaudeE2eApp(options: MockClaudeE2eAppOptions = {}): Promise<MockClaudeE2eApp> {
@@ -83,6 +84,8 @@ export async function createMockClaudeE2eApp(options: MockClaudeE2eAppOptions = 
   const appSettings = createAppSettingsService({ fs: fsAdapter, settingsPath });
   const ccrIntegration = createCcrIntegrationService({
     settings: appSettings,
+    baseEnv: options.ccrBaseEnv ?? {},
+    configDir: path.join(tempRoot, "settings", "claude", "ccr"),
     gateway: options.ccrGateway ?? {
       async probe() {
         return { connectionState: "available", modelAvailable: true };

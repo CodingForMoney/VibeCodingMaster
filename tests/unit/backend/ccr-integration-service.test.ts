@@ -41,6 +41,7 @@ describe("createCcrIntegrationService", () => {
       CODEXL_CLAUDE_CODE_MODEL: CCR_GPT_MODEL_ID,
       ANTHROPIC_SMALL_FAST_MODEL: CCR_GPT_MODEL_ID,
       CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY: "1",
+      CLAUDE_CONFIG_DIR: "/mock/.vcm/claude/ccr",
       NO_PROXY: "localhost,host.docker.internal",
       no_proxy: "localhost,host.docker.internal"
     });
@@ -48,26 +49,61 @@ describe("createCcrIntegrationService", () => {
   });
 
   it("does not inject CCR environment for native Claude models", async () => {
-    const service = createService();
+    const service = createService({ baseEnv: {} });
     await expect(service.getLaunchEnvironment("opus")).resolves.toEqual({});
     await expect(service.getLaunchSettingsOverride("opus")).resolves.toBeUndefined();
   });
 
-  it("restores native settings and applies apiKeyHelper only to GPT sessions", async () => {
-    let restores = 0;
+  it("removes inherited CCR takeover variables from native Claude launches", async () => {
+    const service = createService({
+      baseEnv: {
+        ANTHROPIC_BASE_URL: "http://127.0.0.1:3456",
+        ANTHROPIC_AUTH_TOKEN: "ccr-token",
+        ANTHROPIC_API_KEY: "ccr-key",
+        ANTHROPIC_MODEL: CCR_GPT_MODEL_ID,
+        CCR_CLAUDE_CODE_MODEL: CCR_GPT_MODEL_ID,
+        CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY: "1",
+        CLAUDE_CONFIG_DIR: "/custom/native-claude"
+      }
+    });
+
+    await expect(service.getLaunchEnvironment("sonnet")).resolves.toEqual({
+      ANTHROPIC_BASE_URL: undefined,
+      ANTHROPIC_AUTH_TOKEN: undefined,
+      ANTHROPIC_API_KEY: undefined,
+      ANTHROPIC_MODEL: undefined,
+      CCR_CLAUDE_CODE_MODEL: undefined,
+      CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY: undefined,
+      CLAUDE_CONFIG_DIR: "/custom/native-claude"
+    });
+  });
+
+  it("removes inherited CCR credentials when only CCR model markers remain", async () => {
+    const service = createService({
+      baseEnv: {
+        ANTHROPIC_AUTH_TOKEN: "ccr-token",
+        ANTHROPIC_API_KEY: "ccr-key",
+        ANTHROPIC_MODEL: CCR_GPT_MODEL_ID
+      }
+    });
+
+    await expect(service.getLaunchEnvironment("opus")).resolves.toEqual({
+      ANTHROPIC_AUTH_TOKEN: undefined,
+      ANTHROPIC_API_KEY: undefined,
+      ANTHROPIC_MODEL: undefined
+    });
+  });
+
+  it("applies apiKeyHelper only to GPT sessions", async () => {
     const service = createService({
       initial: { version: 1, enabled: false, apiKey: "saved" },
-      apiKeyHelperPath: "/mock/ccr-api-key-helper.mjs",
-      onRestoreNativeClaudeSettings() {
-        restores += 1;
-      }
+      apiKeyHelperPath: "/mock/ccr-api-key-helper.mjs"
     });
 
     await expect(service.getLaunchSettingsOverride("sonnet")).resolves.toBeUndefined();
     await expect(service.getLaunchSettingsOverride(CCR_GPT_SESSION_MODEL)).resolves.toMatchObject({
       apiKeyHelper: expect.stringContaining("/mock/ccr-api-key-helper.mjs")
     });
-    expect(restores).toBe(2);
   });
 
   it("launches GPT sessions through the endpoint identified by the probe", async () => {
@@ -144,9 +180,9 @@ function createService(options: {
     error?: string;
   };
   onProbe?(): void;
-  onRestoreNativeClaudeSettings?(): void;
   apiKeyHelperPath?: string;
   baseEnv?: NodeJS.ProcessEnv;
+  configDir?: string;
 } = {}) {
   let settings = options.initial ?? { version: 1, enabled: false, apiKey: "" };
   return createCcrIntegrationService({
@@ -165,10 +201,8 @@ function createService(options: {
         return options.probeResult ?? { connectionState: "available", modelAvailable: true };
       }
     },
-    baseEnv: options.baseEnv,
+    baseEnv: options.baseEnv ?? {},
+    configDir: options.configDir ?? "/mock/.vcm/claude/ccr",
     apiKeyHelperPath: options.apiKeyHelperPath,
-    async restoreNativeClaudeSettings() {
-      options.onRestoreNativeClaudeSettings?.();
-    }
   });
 }

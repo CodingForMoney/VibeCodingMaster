@@ -179,6 +179,9 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     const permissionMode = normalizeClaudePermissionMode(input.permissionMode ?? persisted?.permissionMode);
     const model: SessionModel = normalizeClaudeModel(input.model ?? persisted?.model);
     const effort = normalizeClaudeEffort(input.effort ?? persisted?.effort);
+    if (launchMode === "resume" && persisted) {
+      assertResumeProviderCompatible(persisted, model);
+    }
     const [modelEnvironment, modelSettingsOverride] = await Promise.all([
       getModelLaunchEnvironment(model),
       getModelLaunchSettingsOverride(model)
@@ -199,7 +202,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     const transcriptPath = launchMode === "resume" && persisted?.transcriptPath
       ? persisted.transcriptPath
       : resumeClaudeSessionId
-        ? claudeTranscriptPath(taskRepoRoot, resumeClaudeSessionId)
+        ? claudeTranscriptPath(taskRepoRoot, resumeClaudeSessionId, persisted?.claudeConfigDir)
         : undefined;
 
     const startCommand = {
@@ -248,6 +251,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       model,
       effort,
       cwd: startCommand.cwd,
+      claudeConfigDir: readClaudeConfigDir(modelEnvironment),
       terminalBackend: "node-pty",
       pid: runtimeSession.pid,
       roleCommandPath: isDispatchableRole(role)
@@ -315,6 +319,9 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     const permissionMode = normalizeClaudePermissionMode(input.permissionMode ?? persisted?.permissionMode);
     const model = normalizeClaudeModel(input.model ?? persisted?.model);
     const effort = normalizeClaudeEffort(input.effort ?? persisted?.effort ?? "medium");
+    if (launchMode === "resume" && persisted) {
+      assertResumeProviderCompatible(persisted, model);
+    }
     const [modelEnvironment, modelSettingsOverride] = await Promise.all([
       getModelLaunchEnvironment(model),
       getModelLaunchSettingsOverride(model)
@@ -348,7 +355,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     const sessionCwd = launchMode === "resume" ? persisted?.cwd ?? launchCwd : launchCwd;
     const claudeSessionId = resumeClaudeSessionId ?? "";
     const transcriptPath = resumeClaudeSessionId
-      ? claudeTranscriptPath(repoRoot, resumeClaudeSessionId)
+      ? claudeTranscriptPath(repoRoot, resumeClaudeSessionId, persisted?.claudeConfigDir)
       : undefined;
     const startCommand = {
       ...deps.claude.buildRoleStartCommand(
@@ -399,6 +406,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       model,
       effort,
       cwd: sessionCwd,
+      claudeConfigDir: readClaudeConfigDir(modelEnvironment),
       terminalBackend: "node-pty",
       pid: runtimeSession.pid,
       startedAt: runtimeSession.startedAt,
@@ -460,6 +468,9 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     const permissionMode = normalizeClaudePermissionMode(input.permissionMode ?? persisted?.permissionMode);
     const model = normalizeClaudeModel(input.model ?? persisted?.model);
     const effort = normalizeClaudeEffort(input.effort ?? persisted?.effort ?? "medium");
+    if (launchMode === "resume" && persisted) {
+      assertResumeProviderCompatible(persisted, model);
+    }
     const [modelEnvironment, modelSettingsOverride] = await Promise.all([
       getModelLaunchEnvironment(model),
       getModelLaunchSettingsOverride(model)
@@ -489,7 +500,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     const sessionCwd = launchMode === "resume" ? persisted?.cwd ?? launchCwd : launchCwd;
     const claudeSessionId = resumeClaudeSessionId ?? "";
     const transcriptPath = resumeClaudeSessionId
-      ? claudeTranscriptPath(repoRoot, resumeClaudeSessionId)
+      ? claudeTranscriptPath(repoRoot, resumeClaudeSessionId, persisted?.claudeConfigDir)
       : undefined;
     const startCommand = {
       ...deps.claude.buildRoleStartCommand(
@@ -540,6 +551,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       model,
       effort,
       cwd: sessionCwd,
+      claudeConfigDir: readClaudeConfigDir(modelEnvironment),
       terminalBackend: "node-pty",
       pid: runtimeSession.pid,
       startedAt: runtimeSession.startedAt,
@@ -720,6 +732,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     const permissionMode = normalizeClaudePermissionMode(session.permissionMode);
     const model = normalizeClaudeModel(session.model);
     const effort = normalizeClaudeEffort(session.effort);
+    assertResumeProviderCompatible(session, model);
     const [modelEnvironment, modelSettingsOverride] = await Promise.all([
       getModelLaunchEnvironment(model),
       getModelLaunchSettingsOverride(model)
@@ -786,13 +799,14 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       permissionMode,
       model,
       effort,
+      claudeConfigDir: readClaudeConfigDir(modelEnvironment),
       pid: runtimeSession.pid,
       startedAt: runtimeSession.startedAt,
       updatedAt: timestamp,
       lastOutputAt: runtimeSession.lastOutputAt,
       exitCode: runtimeSession.exitCode,
       transcriptPath: session.claudeSessionId
-        ? claudeTranscriptPath(repoRoot, session.claudeSessionId)
+        ? claudeTranscriptPath(repoRoot, session.claudeSessionId, session.claudeConfigDir)
         : session.transcriptPath
     };
     deps.registry.upsert(normalizeProjectScopedRecordForPersistence(resumed));
@@ -801,16 +815,16 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
   }
 
   async function getModelLaunchEnvironment(model: SessionModel): Promise<NodeJS.ProcessEnv> {
-    if (!isCcrSessionModel(model)) {
-      return {};
-    }
     if (!deps.ccrIntegration) {
-      throw new VcmError({
-        code: "CCR_UNAVAILABLE",
-        message: "CCR integration is not available in this VCM runtime.",
-        statusCode: 409,
-        hint: "Enable and configure CCR GPT models before starting this session."
-      });
+      if (isCcrSessionModel(model)) {
+        throw new VcmError({
+          code: "CCR_UNAVAILABLE",
+          message: "CCR integration is not available in this VCM runtime.",
+          statusCode: 409,
+          hint: "Enable and configure CCR GPT models before starting this session."
+        });
+      }
+      return {};
     }
     return deps.ccrIntegration.getLaunchEnvironment(model);
   }
@@ -1957,6 +1971,30 @@ function normalizeClaudeEffort(value: unknown): SessionEffort {
     return value;
   }
   return "default";
+}
+
+function assertResumeProviderCompatible(session: RoleSessionRecord, requestedModel: SessionModel): void {
+  const persistedModel = normalizeClaudeModel(session.model);
+  if (isCcrSessionModel(persistedModel) !== isCcrSessionModel(requestedModel)) {
+    throw new VcmError({
+      code: "SESSION_PROVIDER_SWITCH_REQUIRES_RESTART",
+      message: `Cannot resume ${session.role} with a different model provider.`,
+      statusCode: 409,
+      hint: "Use Restart to switch between native Claude and CCR models."
+    });
+  }
+  if (isCcrSessionModel(requestedModel) && !session.claudeConfigDir) {
+    throw new VcmError({
+      code: "CCR_SESSION_CONFIG_MISSING",
+      message: `${session.role} was created before isolated CCR session storage was enabled.`,
+      statusCode: 409,
+      hint: "Restart this role once to create an isolated CCR session."
+    });
+  }
+}
+
+function readClaudeConfigDir(environment: NodeJS.ProcessEnv): string | undefined {
+  return environment.CLAUDE_CONFIG_DIR?.trim() || undefined;
 }
 
 function formatClaudeCdCommand(targetCwd: string): string {

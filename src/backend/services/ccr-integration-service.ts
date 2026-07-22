@@ -10,9 +10,11 @@ import {
   isCcrSessionModel,
   type SessionModel
 } from "../../shared/types/session.js";
+import path from "node:path";
 import { fileURLToPath } from "node:url";
 import type { CcrGatewayAdapter, CcrGatewayProbeResult } from "../adapters/ccr-gateway-adapter.js";
 import { VcmError } from "../errors.js";
+import { resolveVcmDataDir } from "../vcm-data-dir.js";
 import type { AppSettingsService } from "./app-settings-service.js";
 
 export interface CcrIntegrationService {
@@ -30,7 +32,7 @@ export interface CcrIntegrationServiceDeps {
   now?: () => Date;
   cacheTtlMs?: number;
   baseEnv?: NodeJS.ProcessEnv;
-  restoreNativeClaudeSettings?: () => Promise<unknown>;
+  configDir?: string;
   apiKeyHelperPath?: string;
 }
 
@@ -48,6 +50,8 @@ interface CachedProbe {
 export function createCcrIntegrationService(deps: CcrIntegrationServiceDeps): CcrIntegrationService {
   const now = deps.now ?? (() => new Date());
   const cacheTtlMs = deps.cacheTtlMs ?? DEFAULT_CACHE_TTL_MS;
+  const baseEnv = deps.baseEnv ?? process.env;
+  const configDir = deps.configDir ?? path.join(resolveVcmDataDir(baseEnv), "claude", "ccr");
   let cachedProbe: CachedProbe | undefined;
   let inFlight: Promise<CachedProbe> | undefined;
 
@@ -112,9 +116,6 @@ export function createCcrIntegrationService(deps: CcrIntegrationServiceDeps): Cc
   return {
     async initialize() {
       const settings = await deps.settings.getCcrIntegrationSettings();
-      if (settings.apiKey) {
-        await deps.restoreNativeClaudeSettings?.();
-      }
       if (settings.enabled) {
         await probe(true);
       }
@@ -147,9 +148,6 @@ export function createCcrIntegrationService(deps: CcrIntegrationServiceDeps): Cc
         enabled: nextEnabled,
         apiKey: nextApiKey
       });
-      if (nextApiKey) {
-        await deps.restoreNativeClaudeSettings?.();
-      }
       if (clearApiKey || !nextEnabled) {
         cachedProbe = undefined;
         return buildStatus();
@@ -175,7 +173,7 @@ export function createCcrIntegrationService(deps: CcrIntegrationServiceDeps): Cc
     },
     async getLaunchEnvironment(model) {
       if (!isCcrSessionModel(model)) {
-        return {};
+        return buildNativeLaunchEnvironment(baseEnv);
       }
       const settings = await deps.settings.getCcrIntegrationSettings();
       if (!settings.enabled) {
@@ -213,15 +211,12 @@ export function createCcrIntegrationService(deps: CcrIntegrationServiceDeps): Cc
         CODEXL_CLAUDE_CODE_MODEL: CCR_GPT_MODEL_ID,
         ANTHROPIC_SMALL_FAST_MODEL: CCR_GPT_MODEL_ID,
         CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY: "1",
+        CLAUDE_CONFIG_DIR: configDir,
         NO_PROXY: noProxy,
         no_proxy: noProxy
       };
     },
     async getLaunchSettingsOverride(model) {
-      const settings = await deps.settings.getCcrIntegrationSettings();
-      if (settings.apiKey) {
-        await deps.restoreNativeClaudeSettings?.();
-      }
       if (!isCcrSessionModel(model)) {
         return undefined;
       }
@@ -230,6 +225,77 @@ export function createCcrIntegrationService(deps: CcrIntegrationServiceDeps): Cc
       };
     }
   };
+}
+
+const CCR_BASE_URL_KEYS = [
+  "ANTHROPIC_BASE_URL",
+  "ANTHROPIC_API_BASE_URL",
+  "CLAUDE_AGENT_API_BASE_URL"
+] as const;
+
+const CCR_MODEL_KEYS = [
+  "ANTHROPIC_MODEL",
+  "ANTHROPIC_SMALL_FAST_MODEL"
+] as const;
+
+const CCR_ONLY_ENV_KEYS = [
+  "CCR_CLAUDE_CODE_MODEL",
+  "CODEXL_CLAUDE_CODE_MODEL",
+  "CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY"
+] as const;
+
+export function buildNativeLaunchEnvironment(baseEnv: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+  const environment: NodeJS.ProcessEnv = {};
+  let inheritedCcrTakeover = false;
+
+  if (baseEnv.CLAUDE_CONFIG_DIR?.trim()) {
+    environment.CLAUDE_CONFIG_DIR = baseEnv.CLAUDE_CONFIG_DIR.trim();
+  }
+
+  for (const key of CCR_BASE_URL_KEYS) {
+    if (isCcrGatewayUrl(baseEnv[key])) {
+      environment[key] = undefined;
+      inheritedCcrTakeover = true;
+    }
+  }
+  for (const key of CCR_MODEL_KEYS) {
+    if (isCcrModelName(baseEnv[key])) {
+      environment[key] = undefined;
+      inheritedCcrTakeover = true;
+    }
+  }
+  for (const key of CCR_ONLY_ENV_KEYS) {
+    if (baseEnv[key] !== undefined) {
+      environment[key] = undefined;
+      inheritedCcrTakeover = true;
+    }
+  }
+  if (inheritedCcrTakeover) {
+    environment.ANTHROPIC_AUTH_TOKEN = undefined;
+    environment.ANTHROPIC_API_KEY = undefined;
+  }
+  return environment;
+}
+
+function isCcrGatewayUrl(value: string | undefined): boolean {
+  if (!value) {
+    return false;
+  }
+  try {
+    const url = new URL(value);
+    return url.port === "3456"
+      && ["127.0.0.1", "localhost", "host.docker.internal"].includes(url.hostname);
+  } catch {
+    return false;
+  }
+}
+
+function isCcrModelName(value: string | undefined): boolean {
+  if (!value) {
+    return false;
+  }
+  return value === CCR_GPT_MODEL_ID
+    || value.startsWith("anthropic/claude-ccr-h");
 }
 
 function createStatus(input: Omit<CcrIntegrationStatus, "modelOptions">): CcrIntegrationStatus {

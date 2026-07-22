@@ -15,6 +15,15 @@ export function createSessionRegistry(): SessionRegistry {
 
   return {
     upsert(session) {
+      for (const [sessionId, candidate] of sessions) {
+        if (
+          sessionId !== session.id
+          && candidate.taskSlug === session.taskSlug
+          && candidate.role === session.role
+        ) {
+          sessions.delete(sessionId);
+        }
+      }
       sessions.set(session.id, session);
     },
     get(sessionId) {

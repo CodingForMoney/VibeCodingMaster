@@ -6,7 +6,6 @@ import type { ArtifactService } from "./services/artifact-service.js";
 import { createArtifactService } from "./services/artifact-service.js";
 import { createClaudeAdapter } from "./adapters/claude-adapter.js";
 import { createCcrGatewayAdapter } from "./adapters/ccr-gateway-adapter.js";
-import { createClaudeSettingsAdapter } from "./adapters/claude-settings-adapter.js";
 import { createCommandRunner } from "./adapters/command-runner.js";
 import { createCommandDispatcher, type CommandDispatcher } from "./services/command-dispatcher.js";
 import { createClaudeHookService, type ClaudeHookService } from "./services/claude-hook-service.js";
@@ -267,11 +266,9 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
   const git = createGitAdapter(runner);
   const claude = createClaudeAdapter(runner);
   const appSettings = createAppSettingsService({ fs });
-  const claudeSettings = createClaudeSettingsAdapter({ fs });
   const ccrIntegration = createCcrIntegrationService({
     settings: appSettings,
-    gateway: createCcrGatewayAdapter(),
-    restoreNativeClaudeSettings: () => claudeSettings.restoreNativeSettings()
+    gateway: createCcrGatewayAdapter()
   });
   const runtime = createNodePtyTerminalRuntime({ fs });
   const registry = createSessionRegistry();

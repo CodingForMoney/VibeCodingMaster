@@ -72,6 +72,7 @@ describe("backend E2E CCR integration", () => {
       ANTHROPIC_AUTH_TOKEN: undefined,
       ANTHROPIC_API_KEY: undefined,
       ANTHROPIC_MODEL: CCR_GPT_MODEL_ID,
+      CLAUDE_CONFIG_DIR: expect.stringContaining("/settings/claude/ccr"),
       VCM_TASK_SLUG: task.taskSlug
     });
     expect(JSON.stringify(input.env)).not.toContain("local-ccr-secret");
@@ -80,7 +81,14 @@ describe("backend E2E CCR integration", () => {
   });
 
   it("keeps native launches clean and blocks future CCR launches after disabling", async () => {
-    const env = await createMockClaudeE2eApp();
+    const env = await createMockClaudeE2eApp({
+      ccrBaseEnv: {
+        ANTHROPIC_BASE_URL: "http://host.docker.internal:3456",
+        ANTHROPIC_AUTH_TOKEN: "inherited-ccr-token",
+        ANTHROPIC_MODEL: CCR_GPT_MODEL_ID,
+        CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY: "1"
+      }
+    });
     cleanups.push(() => env.close());
     const repo = await createE2eRepo();
     cleanups.push(() => repo.cleanup());
@@ -104,8 +112,10 @@ describe("backend E2E CCR integration", () => {
     const nativeInput = env.mockRuntime.getCreateInput(nativeRuntime!.id);
     expect(nativeInput.args).toEqual(expect.arrayContaining(["--model", "opus"]));
     expect(nativeInput.args).not.toContain("--settings");
-    expect(nativeInput.env).not.toHaveProperty("ANTHROPIC_BASE_URL");
-    expect(nativeInput.env).not.toHaveProperty("ANTHROPIC_AUTH_TOKEN");
+    expect(nativeInput.env.ANTHROPIC_BASE_URL).toBeUndefined();
+    expect(nativeInput.env.ANTHROPIC_AUTH_TOKEN).toBeUndefined();
+    expect(nativeInput.env.ANTHROPIC_MODEL).toBeUndefined();
+    expect(nativeInput.env.CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY).toBeUndefined();
 
     await env.app.inject({ method: "PUT", url: "/api/settings/ccr", payload: { enabled: false } });
     const blockedRestart = await env.app.inject({
@@ -170,8 +180,86 @@ describe("backend E2E CCR integration", () => {
       expect(input.env).toMatchObject({
         ANTHROPIC_AUTH_TOKEN: undefined,
         ANTHROPIC_API_KEY: undefined,
-        ANTHROPIC_MODEL: CCR_GPT_MODEL_ID
+        ANTHROPIC_MODEL: CCR_GPT_MODEL_ID,
+        CLAUDE_CONFIG_DIR: expect.stringContaining("/settings/claude/ccr")
       });
     }
+  });
+
+  it("keeps Resume on the recorded provider and uses Restart to switch providers", async () => {
+    const env = await createMockClaudeE2eApp();
+    cleanups.push(() => env.close());
+    const repo = await createE2eRepo();
+    cleanups.push(() => repo.cleanup());
+    const task = await connectAndCreateTask(env.app, repo, "ccr-provider-switch");
+    await env.app.inject({
+      method: "PUT",
+      url: "/api/settings/ccr",
+      payload: { apiKey: "saved", enabled: true }
+    });
+
+    env.mockRuntime.onPrompt("project-manager", "Persist this CCR session", async (ctx) => {
+      await ctx.userPromptSubmit();
+      await ctx.appendTranscriptText("CCR session persisted.");
+      await ctx.stop();
+    });
+
+    const started = await env.app.inject({
+      method: "POST",
+      url: `/api/tasks/${task.taskSlug}/sessions/project-manager/start`,
+      payload: roleLaunchBody({ model: CCR_GPT_SESSION_MODEL })
+    });
+    expect(started.statusCode).toBe(200);
+    const startedSession = started.json<{ id: string }>();
+    env.mockRuntime.write(startedSession.id, "Persist this CCR session");
+    await env.mockRuntime.waitForIdle();
+
+    const stopped = await env.app.inject({
+      method: "POST",
+      url: `/api/tasks/${task.taskSlug}/sessions/project-manager/stop`
+    });
+    expect(stopped.statusCode).toBe(200);
+    const persisted = stopped.json<{ claudeSessionId: string; claudeConfigDir: string }>();
+    expect(persisted.claudeSessionId).toMatch(/^mock-claude-project-manager-/);
+    expect(persisted.claudeConfigDir).toContain("/settings/claude/ccr");
+
+    const blockedNativeResume = await env.app.inject({
+      method: "POST",
+      url: `/api/tasks/${task.taskSlug}/sessions/project-manager/resume`,
+      payload: roleLaunchBody({ model: "opus" })
+    });
+    expect(blockedNativeResume.statusCode).toBe(409);
+    expect(blockedNativeResume.body).toContain("SESSION_PROVIDER_SWITCH_REQUIRES_RESTART");
+
+    const resumed = await env.app.inject({
+      method: "POST",
+      url: `/api/tasks/${task.taskSlug}/sessions/project-manager/resume`,
+      payload: roleLaunchBody({ model: CCR_GPT_SESSION_MODEL })
+    });
+    expect(resumed.statusCode).toBe(200);
+    const resumedSession = resumed.json<{ id: string; claudeConfigDir: string }>();
+    expect(resumedSession.claudeConfigDir).toBe(persisted.claudeConfigDir);
+    const resumedInput = env.mockRuntime.getCreateInput(resumedSession.id);
+    expect(resumedInput.args).toEqual(expect.arrayContaining([
+      "--resume",
+      persisted.claudeSessionId
+    ]));
+    expect(resumedInput.env.CLAUDE_CONFIG_DIR).toBe(persisted.claudeConfigDir);
+
+    const restarted = await env.app.inject({
+      method: "POST",
+      url: `/api/tasks/${task.taskSlug}/sessions/project-manager/restart`,
+      payload: roleLaunchBody({ model: "opus" })
+    });
+    expect(restarted.statusCode).toBe(200);
+    const restartedSession = restarted.json<{ id: string; model: string; claudeConfigDir?: string }>();
+    expect(restartedSession.model).toBe("opus");
+    expect(restartedSession.claudeConfigDir).toBeUndefined();
+    const restartedInput = env.mockRuntime.getCreateInput(restartedSession.id);
+    expect(restartedInput.args).toEqual(expect.arrayContaining(["--model", "opus"]));
+    expect(restartedInput.args).not.toContain("--resume");
+    expect(restartedInput.args).not.toContain("--settings");
+    expect(restartedInput.env.CLAUDE_CONFIG_DIR).toBeUndefined();
+    expect(restartedInput.env.ANTHROPIC_BASE_URL).toBeUndefined();
   });
 });

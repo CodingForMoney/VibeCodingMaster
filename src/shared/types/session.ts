@@ -164,6 +164,7 @@ export interface RoleSessionRecord {
   model?: SessionModel;
   effort?: SessionEffort;
   cwd: string;
+  claudeConfigDir?: string;
   previousCwd?: string;
   terminalBackend: "node-pty";
   pid?: number;
