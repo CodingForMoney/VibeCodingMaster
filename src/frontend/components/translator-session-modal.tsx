@@ -16,7 +16,6 @@ export interface TranslatorSessionModalProps {
   onPermissionModeChange(permissionMode: ClaudePermissionMode): void;
   onResume(): void;
   onRestart(): void;
-  onSaveSettings(): void;
   onStart(): void;
   onStop(): void;
   onNotifyHarnessUpdated(): void;
@@ -36,7 +35,6 @@ export function TranslatorSessionModal({
   onPermissionModeChange,
   onResume,
   onRestart,
-  onSaveSettings,
   onStart,
   onStop,
   onNotifyHarnessUpdated
@@ -70,7 +68,6 @@ export function TranslatorSessionModal({
           onStart={onStart}
           onResume={onResume}
           onRestart={onRestart}
-          onSaveSettings={onSaveSettings}
           onStop={onStop}
           onNotifyHarnessUpdated={onNotifyHarnessUpdated}
         />

@@ -117,13 +117,13 @@ export function createRuntimeCoordinatorService(deps: RuntimeCoordinatorServiceD
         reconcileHarnessEngineer(
           repoRoot,
           activeTask,
-          preferences.launchTemplate.roles["harness-engineer"]
+          preferences.toolSessionDefaults["harness-engineer"]
         ),
         reconcileTranslator(
           repoRoot,
           activeTask,
           preferences.translationEnabled && harnessInitialized,
-          preferences.launchTemplate.roles.translator
+          preferences.toolSessionDefaults.translator
         )
       ]);
 

@@ -5,6 +5,7 @@ import type { TranslationWorkerService } from "../../../src/backend/services/tra
 import type { ProjectService } from "../../../src/backend/services/project-service.js";
 import type { SessionService } from "../../../src/backend/services/session-service.js";
 import type { TranslationService } from "../../../src/backend/services/translation-service.js";
+import type { AppSettingsService } from "../../../src/backend/services/app-settings-service.js";
 import type { RoleSessionRecord } from "../../../src/shared/types/session.js";
 
 describe("translation worker routes", () => {
@@ -12,6 +13,7 @@ describe("translation worker routes", () => {
     const calls: unknown[] = [];
     const app = Fastify({ logger: false });
     registerTranslationWorkerRoutes(app, {
+      appSettings: createAppSettingsStub(),
       projectService: createProjectServiceStub(),
       translationWorkerService: {
         async browseSourceFiles(repoRoot, input) {
@@ -50,6 +52,7 @@ describe("translation worker routes", () => {
     const session = createRoleSessionRecord({ id: "translator-runtime-old" });
     const app = Fastify({ logger: false });
     registerTranslationWorkerRoutes(app, {
+      appSettings: createAppSettingsStub(calls),
       projectService: createProjectServiceStub(),
       translationWorkerService: {} as TranslationWorkerService,
       sessionService: createSessionServiceStub({
@@ -81,7 +84,8 @@ describe("translation worker routes", () => {
     expect(calls).toEqual([
       "assertModelLaunchReady",
       "stopSession:translator-runtime-old:clear",
-      "restartRoleSession"
+      "restartRoleSession",
+      "save:translator:bypassPermissions:default:medium"
     ]);
     await app.close();
   });
@@ -91,6 +95,7 @@ describe("translation worker routes", () => {
     const session = createRoleSessionRecord({ id: "translator-runtime-old" });
     const app = Fastify({ logger: false });
     registerTranslationWorkerRoutes(app, {
+      appSettings: createAppSettingsStub(),
       projectService: createProjectServiceStub(),
       translationWorkerService: {} as TranslationWorkerService,
       sessionService: createSessionServiceStub({
@@ -119,7 +124,55 @@ describe("translation worker routes", () => {
     ]);
     await app.close();
   });
+
+  it("persists Translator defaults after Start but not Resume", async () => {
+    const calls: string[] = [];
+    const app = Fastify({ logger: false });
+    registerTranslationWorkerRoutes(app, {
+      appSettings: createAppSettingsStub(calls),
+      projectService: createProjectServiceStub(),
+      translationWorkerService: {} as TranslationWorkerService,
+      sessionService: createSessionServiceStub({
+        async startRoleSession() {
+          calls.push("startRoleSession");
+          return createRoleSessionRecord({ permissionMode: "plan", model: "sonnet", effort: "high" });
+        },
+        async resumeRoleSession() {
+          calls.push("resumeRoleSession");
+          return createRoleSessionRecord();
+        }
+      }),
+      translationService: createTranslationServiceStub()
+    });
+
+    expect((await app.inject({
+      method: "POST",
+      url: "/api/translation/session/start",
+      payload: { taskSlug: "demo-task", permissionMode: "plan", model: "sonnet", effort: "high" }
+    })).statusCode).toBe(200);
+    expect((await app.inject({
+      method: "POST",
+      url: "/api/translation/session/resume",
+      payload: { taskSlug: "demo-task" }
+    })).statusCode).toBe(200);
+
+    expect(calls).toEqual([
+      "startRoleSession",
+      "save:translator:plan:sonnet:high",
+      "resumeRoleSession"
+    ]);
+    await app.close();
+  });
 });
+
+function createAppSettingsStub(calls: string[] = []): Pick<AppSettingsService, "updateToolSessionDefaults"> {
+  return {
+    async updateToolSessionDefaults(role, input) {
+      calls.push(`save:${role}:${input.permissionMode}:${input.model}:${input.effort}`);
+      return input;
+    }
+  };
+}
 
 function createProjectServiceStub(): ProjectService {
   return {

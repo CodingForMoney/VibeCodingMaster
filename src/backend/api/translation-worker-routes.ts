@@ -10,9 +10,12 @@ import type { ProjectService } from "../services/project-service.js";
 import type { SessionService } from "../services/session-service.js";
 import type { TranslationService } from "../services/translation-service.js";
 import type { StartRoleSessionRequest } from "../../shared/types/session.js";
+import { createDefaultToolSessionDefaults } from "../../shared/types/app-settings.js";
+import type { AppSettingsService } from "../services/app-settings-service.js";
 
 export interface TranslationWorkerRouteDeps {
   projectService: ProjectService;
+  appSettings: Pick<AppSettingsService, "updateToolSessionDefaults">;
   translationWorkerService: TranslationWorkerService;
   sessionService: Pick<
     SessionService,
@@ -59,7 +62,9 @@ export function registerTranslationWorkerRoutes(app: FastifyInstance, deps: Tran
   app.post<{ Body: StartRoleSessionRequest }>("/api/translation/session/start", async (request) => {
     const project = await requireCurrentProject(deps.projectService);
     const taskSlug = requireTaskSlug(request.body?.taskSlug, "Translator");
-    return deps.sessionService.startRoleSession(project.repoRoot, taskSlug, "translator", request.body);
+    const session = await deps.sessionService.startRoleSession(project.repoRoot, taskSlug, "translator", request.body);
+    await persistToolSessionDefaults(deps.appSettings, "translator", session);
+    return session;
   });
 
   app.post<{ Body: StartRoleSessionRequest }>("/api/translation/session/resume", async (request) => {
@@ -76,7 +81,9 @@ export function registerTranslationWorkerRoutes(app: FastifyInstance, deps: Tran
     if (existing) {
       await deps.translationService.stopSession(existing.id, { clearCache: true });
     }
-    return deps.sessionService.restartRoleSession(project.repoRoot, taskSlug, "translator", request.body);
+    const session = await deps.sessionService.restartRoleSession(project.repoRoot, taskSlug, "translator", request.body);
+    await persistToolSessionDefaults(deps.appSettings, "translator", session);
+    return session;
   });
 
   app.post<{ Body: StartRoleSessionRequest }>("/api/translation/session/stop", async (request) => {
@@ -134,6 +141,19 @@ export function registerTranslationWorkerRoutes(app: FastifyInstance, deps: Tran
       return deps.translationWorkerService.promoteFileJob(project.repoRoot, request.params.jobId, targetPath);
     }
   );
+}
+
+async function persistToolSessionDefaults(
+  appSettings: Pick<AppSettingsService, "updateToolSessionDefaults">,
+  role: "translator",
+  session: Awaited<ReturnType<SessionService["startRoleSession"]>>
+): Promise<void> {
+  const defaults = createDefaultToolSessionDefaults().translator;
+  await appSettings.updateToolSessionDefaults(role, {
+    permissionMode: session.permissionMode,
+    model: session.model ?? defaults.model,
+    effort: session.effort ?? defaults.effort
+  });
 }
 
 function requireTaskSlug(value: string | undefined, roleLabel: string): string {

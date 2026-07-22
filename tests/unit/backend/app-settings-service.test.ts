@@ -4,6 +4,7 @@ import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createDefaultLaunchTemplate,
+  createDefaultToolSessionDefaults,
   type AppPreferences
 } from "../../../src/shared/types/app-settings.js";
 import type { FileSystemAdapter } from "../../../src/backend/adapters/filesystem.js";
@@ -114,16 +115,6 @@ describe("app-settings-service", () => {
       model: "opus",
       effort: "high"
     };
-    launchTemplate.roles.translator = {
-      permissionMode: "plan",
-      model: "sonnet",
-      effort: "low"
-    };
-    launchTemplate.roles["harness-engineer"] = {
-      permissionMode: "default",
-      model: "fable",
-      effort: "xhigh"
-    };
 
     await expect(service.updatePreferences({ launchTemplate })).resolves.toEqual(createDefaultPreferences({
       launchTemplate
@@ -133,19 +124,13 @@ describe("app-settings-service", () => {
     expect(stored.preferences.launchTemplate).toEqual(launchTemplate);
   });
 
-  it("adds tool role launch defaults to settings written before tool roles were templated", async () => {
+  it("uses independent tool Session defaults when settings do not contain them", async () => {
     const defaults = createDefaultPreferences();
-    const { translator: _translator, "harness-engineer": _harnessEngineer, ...workflowRoles } = defaults.launchTemplate.roles;
+    const { toolSessionDefaults: _toolSessionDefaults, ...legacyPreferences } = defaults;
     const fs = createMemoryFs({
       "/settings.json": {
         version: 1,
-        preferences: {
-          ...defaults,
-          launchTemplate: {
-            ...defaults.launchTemplate,
-            roles: workflowRoles
-          }
-        },
+        preferences: legacyPreferences,
         recentRepositoryPaths: []
       }
     });
@@ -153,15 +138,42 @@ describe("app-settings-service", () => {
 
     const preferences = await service.getPreferences();
 
-    expect(preferences.launchTemplate.roles.translator).toEqual({
+    expect(preferences.toolSessionDefaults.translator).toEqual({
       permissionMode: "bypassPermissions",
       model: "default",
       effort: "medium"
     });
-    expect(preferences.launchTemplate.roles["harness-engineer"]).toEqual({
+    expect(preferences.toolSessionDefaults["harness-engineer"]).toEqual({
       permissionMode: "bypassPermissions",
       model: "default",
       effort: "medium"
+    });
+  });
+
+  it("updates one tool Session default without changing the launch template", async () => {
+    const fs = createMemoryFs();
+    const service = createAppSettingsService({ fs, settingsPath: "/settings.json" });
+    const launchTemplate = createDefaultLaunchTemplate();
+
+    await expect(service.updateToolSessionDefaults("translator", {
+      permissionMode: "plan",
+      model: "sonnet",
+      effort: "high"
+    })).resolves.toEqual({
+      permissionMode: "plan",
+      model: "sonnet",
+      effort: "high"
+    });
+
+    const stored = await fs.readJson<AppSettingsFile>("/settings.json");
+    expect(stored.preferences.launchTemplate).toEqual(launchTemplate);
+    expect(stored.preferences.toolSessionDefaults).toEqual({
+      ...createDefaultToolSessionDefaults(),
+      translator: {
+        permissionMode: "plan",
+        model: "sonnet",
+        effort: "high"
+      }
     });
   });
 
@@ -328,6 +340,7 @@ function createDefaultPreferences(overrides: Partial<AppPreferences> = {}): AppP
     translationTargetLanguage: "zh-CN",
     translationOutputMode: "pm-final-only",
     launchTemplate: createDefaultLaunchTemplate(),
+    toolSessionDefaults: createDefaultToolSessionDefaults(),
     ...overrides
   };
 }

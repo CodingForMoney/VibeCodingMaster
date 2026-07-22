@@ -140,6 +140,7 @@ export async function createServer(deps: ServerDeps, options: CreateServerOption
     gateReviewService: deps.gateReviewService
   });
   registerTranslationWorkerRoutes(app, {
+    appSettings: deps.appSettings,
     projectService: deps.projectService,
     translationWorkerService: deps.translationWorkerService,
     sessionService: deps.sessionService,
@@ -150,6 +151,7 @@ export async function createServer(deps: ServerDeps, options: CreateServerOption
     runtimeRecoveryService: deps.runtimeRecoveryService
   });
   registerHarnessRoutes(app, {
+    appSettings: deps.appSettings,
     projectService: deps.projectService,
     harnessService: deps.harnessService,
     harnessFeedbackService: deps.harnessFeedbackService,

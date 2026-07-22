@@ -16,7 +16,7 @@ import { XtermView } from "../terminal/xterm-view.js";
 import { SwitchControl } from "./switch-control.js";
 import { StatusBadge } from "./status-badge.js";
 
-type BootstrapLaunchOptions = {
+export type BootstrapLaunchOptions = {
   permissionMode: ClaudePermissionMode;
   model: SessionModel;
   effort: SessionEffort;
@@ -29,6 +29,7 @@ export interface HarnessPanelProps {
   hasActiveTask?: boolean;
   autoTaskHarnessReviewEnabled: boolean;
   autoMemoryEnabled: boolean;
+  launchOptions: BootstrapLaunchOptions;
   modelOptions: SessionModelOption[];
   busy?: boolean;
   onRefresh(): Promise<void>;
@@ -37,6 +38,7 @@ export interface HarnessPanelProps {
   onOpenRepositoryDiff(): void;
   onAutoTaskHarnessReviewChange(enabled: boolean): void;
   onAutoMemoryChange(enabled: boolean): void;
+  onLaunchOptionsChange(input: BootstrapLaunchOptions): void;
   onStartBootstrap(input: BootstrapLaunchOptions): Promise<void>;
   onRestartBootstrap(input: BootstrapLaunchOptions): Promise<void>;
   onStopBootstrap(): Promise<void>;
@@ -50,6 +52,7 @@ export function HarnessPanel({
   hasActiveTask = false,
   autoTaskHarnessReviewEnabled,
   autoMemoryEnabled,
+  launchOptions,
   modelOptions,
   busy = false,
   onRefresh,
@@ -58,25 +61,17 @@ export function HarnessPanel({
   onOpenRepositoryDiff,
   onAutoTaskHarnessReviewChange,
   onAutoMemoryChange,
+  onLaunchOptionsChange,
   onStartBootstrap,
   onRestartBootstrap,
   onStopBootstrap,
   onRunBootstrap
 }: HarnessPanelProps) {
   const [showBootstrapTerminal, setShowBootstrapTerminal] = useState(false);
-  const [bootstrapPermissionMode, setBootstrapPermissionMode] = useState<ClaudePermissionMode>("bypassPermissions");
-  const [bootstrapModel, setBootstrapModel] = useState<SessionModel>("default");
-  const [bootstrapEffort, setBootstrapEffort] = useState<SessionEffort>("default");
   const bootstrapSession = bootstrapStatus?.session;
   const bootstrapRunning = bootstrapStatus?.status === "running";
   const bootstrapSessionRunning = bootstrapSession?.status === "running";
   const showBootstrapStage = bootstrapStatus?.status !== "complete";
-
-  const bootstrapLaunchOptions = {
-    permissionMode: bootstrapPermissionMode,
-    model: bootstrapModel,
-    effort: bootstrapEffort
-  };
 
   if (!hasActiveTask) {
     return (
@@ -262,9 +257,12 @@ export function HarnessPanel({
               <label>
                 <span>Permission</span>
                 <select
-                  value={bootstrapPermissionMode}
+                  value={launchOptions.permissionMode}
                   disabled={busy || bootstrapRunning || bootstrapSessionRunning}
-                  onChange={(event) => setBootstrapPermissionMode(event.target.value as ClaudePermissionMode)}
+                  onChange={(event) => onLaunchOptionsChange({
+                    ...launchOptions,
+                    permissionMode: event.target.value as ClaudePermissionMode
+                  })}
                 >
                   {CLAUDE_PERMISSION_MODE_OPTIONS.map((option) => (
                     <option key={option.value} value={option.value}>{option.label}</option>
@@ -274,13 +272,16 @@ export function HarnessPanel({
               <label>
                 <span>Model</span>
                 <select
-                  value={bootstrapModel}
+                  value={launchOptions.model}
                   title={(() => {
-                    const option = modelOptions.find((candidate) => candidate.value === bootstrapModel);
+                    const option = modelOptions.find((candidate) => candidate.value === launchOptions.model);
                     return option?.available ? option.description : option?.unavailableReason;
                   })()}
                   disabled={busy || bootstrapRunning || bootstrapSessionRunning}
-                  onChange={(event) => setBootstrapModel(event.target.value as SessionModel)}
+                  onChange={(event) => onLaunchOptionsChange({
+                    ...launchOptions,
+                    model: event.target.value as SessionModel
+                  })}
                 >
                   {modelOptions.map((option) => (
                     <option
@@ -297,9 +298,12 @@ export function HarnessPanel({
               <label>
                 <span>Effort</span>
                 <select
-                  value={bootstrapEffort}
+                  value={launchOptions.effort}
                   disabled={busy || bootstrapRunning || bootstrapSessionRunning}
-                  onChange={(event) => setBootstrapEffort(event.target.value as SessionEffort)}
+                  onChange={(event) => onLaunchOptionsChange({
+                    ...launchOptions,
+                    effort: event.target.value as SessionEffort
+                  })}
                 >
                   {CLAUDE_EFFORT_OPTIONS.map((option) => (
                     <option key={option.value} value={option.value}>{option.label}</option>
@@ -310,14 +314,14 @@ export function HarnessPanel({
                 <button
                   type="button"
                   disabled={busy || bootstrapRunning || !bootstrapStatus?.canStart}
-                  onClick={() => void onStartBootstrap(bootstrapLaunchOptions)}
+                  onClick={() => void onStartBootstrap(launchOptions)}
                 >
                   Start
                 </button>
                 <button
                   type="button"
                   disabled={busy || bootstrapRunning || !bootstrapStatus?.canStart}
-                  onClick={() => void onRestartBootstrap(bootstrapLaunchOptions)}
+                  onClick={() => void onRestartBootstrap(launchOptions)}
                 >
                   Restart
                 </button>

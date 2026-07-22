@@ -173,12 +173,12 @@ export function App() {
     setTranslationOutputMode(preferences.translationOutputMode);
     setLaunchTemplate(preferences.launchTemplate);
     if (options.syncToolLaunchOptions) {
-      setTranslatorPermissionMode(preferences.launchTemplate.roles.translator.permissionMode);
-      setTranslatorModel(preferences.launchTemplate.roles.translator.model);
-      setTranslatorEffort(preferences.launchTemplate.roles.translator.effort);
-      setHarnessEngineerPermissionMode(preferences.launchTemplate.roles["harness-engineer"].permissionMode);
-      setHarnessEngineerModel(preferences.launchTemplate.roles["harness-engineer"].model);
-      setHarnessEngineerEffort(preferences.launchTemplate.roles["harness-engineer"].effort);
+      setTranslatorPermissionMode(preferences.toolSessionDefaults.translator.permissionMode);
+      setTranslatorModel(preferences.toolSessionDefaults.translator.model);
+      setTranslatorEffort(preferences.toolSessionDefaults.translator.effort);
+      setHarnessEngineerPermissionMode(preferences.toolSessionDefaults["harness-engineer"].permissionMode);
+      setHarnessEngineerModel(preferences.toolSessionDefaults["harness-engineer"].model);
+      setHarnessEngineerEffort(preferences.toolSessionDefaults["harness-engineer"].effort);
     }
   }, []);
 
@@ -778,6 +778,11 @@ export function App() {
           harnessStatus={currentHarnessStatus}
           harnessBootstrapStatus={currentHarnessBootstrapStatus}
           harnessApplyResult={harnessApplyResult}
+          harnessEngineerLaunchOptions={{
+            permissionMode: harnessEngineerPermissionMode,
+            model: harnessEngineerModel,
+            effort: harnessEngineerEffort
+          }}
           autoTaskHarnessReviewEnabled={autoTaskHarnessReviewEnabled}
           autoMemoryEnabled={autoMemoryEnabled}
           gatewayStatus={gatewayStatus}
@@ -888,6 +893,11 @@ export function App() {
               applyPreferences(preferences);
               await refreshProjectRuntimeState();
             }, "Update auto memory setting");
+          }}
+          onHarnessEngineerLaunchOptionsChange={(input) => {
+            setHarnessEngineerPermissionMode(input.permissionMode);
+            setHarnessEngineerModel(input.model);
+            setHarnessEngineerEffort(input.effort);
           }}
           onRefreshGateway={() => withBusy(async () => {
             await loadGatewayStatus();
@@ -1093,24 +1103,11 @@ export function App() {
               const preferences = await apiClient.updateAppPreferences({
                 launchTemplate: {
                   version: 1,
-                  roles: {
-                    ...launchTemplate.roles,
-                    ...activeTaskLaunchState.roles,
-                    translator: {
-                      permissionMode: translatorPermissionMode,
-                      model: translatorModel,
-                      effort: translatorEffort
-                    },
-                    "harness-engineer": {
-                      permissionMode: harnessEngineerPermissionMode,
-                      model: harnessEngineerModel,
-                      effort: harnessEngineerEffort
-                    }
-                  },
+                  roles: activeTaskLaunchState.roles,
                   autoOrchestration: activeTaskLaunchState.autoOrchestration
                 }
               });
-              applyPreferences(preferences, { syncToolLaunchOptions: true });
+              applyPreferences(preferences);
             }, "Save launch template");
           }}
           onOneClickStart={() => {
@@ -1307,24 +1304,6 @@ export function App() {
         onPermissionModeChange={setHarnessEngineerPermissionMode}
         onModelChange={setHarnessEngineerModel}
         onEffortChange={setHarnessEngineerEffort}
-        onEngineerSaveSettings={() => {
-          void withBusy(async () => {
-            const preferences = await apiClient.updateAppPreferences({
-              launchTemplate: {
-                ...launchTemplate,
-                roles: {
-                  ...launchTemplate.roles,
-                  "harness-engineer": {
-                    permissionMode: harnessEngineerPermissionMode,
-                    model: harnessEngineerModel,
-                    effort: harnessEngineerEffort
-                  }
-                }
-              }
-            });
-            applyPreferences(preferences, { syncToolLaunchOptions: true });
-          }, "Save Harness Engineer settings");
-        }}
         onEngineerStart={() => {
           void withBusy(async () => {
             if (!activeTask) {
@@ -1444,24 +1423,6 @@ export function App() {
         onPermissionModeChange={setTranslatorPermissionMode}
         onModelChange={setTranslatorModel}
         onEffortChange={setTranslatorEffort}
-        onSaveSettings={() => {
-          void withBusy(async () => {
-            const preferences = await apiClient.updateAppPreferences({
-              launchTemplate: {
-                ...launchTemplate,
-                roles: {
-                  ...launchTemplate.roles,
-                  translator: {
-                    permissionMode: translatorPermissionMode,
-                    model: translatorModel,
-                    effort: translatorEffort
-                  }
-                }
-              }
-            });
-            applyPreferences(preferences, { syncToolLaunchOptions: true });
-          }, "Save Translator settings");
-        }}
         onStart={() => {
           void withBusy(async () => {
             if (!activeTask) {

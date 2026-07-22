@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 import { createRuntimeCoordinatorService } from "../../../src/backend/services/runtime-coordinator-service.js";
-import { createDefaultLaunchTemplate, type RoleLaunchTemplateEntry } from "../../../src/shared/types/app-settings.js";
+import {
+  createDefaultLaunchTemplate,
+  createDefaultToolSessionDefaults,
+  type RoleLaunchTemplateEntry
+} from "../../../src/shared/types/app-settings.js";
 import type { RoleName } from "../../../src/shared/types/role.js";
 import type { RoleSessionRecord } from "../../../src/shared/types/session.js";
 import type { TaskRecord } from "../../../src/shared/types/task.js";
@@ -201,9 +205,9 @@ function createCoordinator(input: {
   let translator = input.translator;
   let harnessEngineer = input.harnessEngineer;
   let translationEnabled = input.translationEnabled ?? true;
-  const launchTemplate = createDefaultLaunchTemplate();
+  const toolSessionDefaults = createDefaultToolSessionDefaults();
   for (const [role, options] of Object.entries(input.toolLaunchOptions ?? {})) {
-    launchTemplate.roles[role as "translator" | "harness-engineer"] = options;
+    toolSessionDefaults[role as "translator" | "harness-engineer"] = options;
   }
   return createRuntimeCoordinatorService({
     projectService: {
@@ -224,7 +228,8 @@ function createCoordinator(input: {
           translationAutoSendEnabled: false,
           translationTargetLanguage: "zh-CN",
           translationOutputMode: "pm-final-only",
-          launchTemplate
+          launchTemplate: createDefaultLaunchTemplate(),
+          toolSessionDefaults
         };
       }
     },

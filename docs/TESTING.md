@@ -187,8 +187,9 @@ services with controlled runtime doubles:
   task, role, and model aggregation; deduplication and concurrent-write behavior
   are covered by service tests, while CCR exclusion is covered by the CCR
   journey.
-- Global launch-template normalization and persistence for all workflow and tool
-  roles, plus saved tool launch options on fresh backend-managed task Sessions.
+- Workflow-role launch-template normalization remains separate from tool Session
+  defaults. Route tests verify that explicit tool Start and Restart persist the
+  successful options while Resume and automatic startup do not.
 
 Run all backend journeys with `npm run test:e2e:backend`.
 

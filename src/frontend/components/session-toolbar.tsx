@@ -26,7 +26,6 @@ export interface SessionToolbarProps {
   onResume(): void;
   onStop(): void;
   onRestart(): void;
-  onSaveSettings?(): void;
   onNotifyHarnessUpdated?(): void;
 }
 
@@ -45,7 +44,6 @@ export function SessionToolbar({
   onResume,
   onStop,
   onRestart,
-  onSaveSettings,
   onNotifyHarnessUpdated
 }: SessionToolbarProps) {
   const isRunning = session?.status === "running";
@@ -113,11 +111,6 @@ export function SessionToolbar({
       </label>
 
       <div className="session-toolbar">
-        {onSaveSettings ? (
-          <button type="button" disabled={busy} onClick={onSaveSettings}>
-            Save settings
-          </button>
-        ) : null}
         <button type="button" disabled={busy || !canStart} onClick={onStart}>
           Start
         </button>

@@ -34,7 +34,6 @@ export interface HarnessStudioModalProps {
   onPermissionModeChange(permissionMode: ClaudePermissionMode): void;
   onEngineerResume(): void;
   onEngineerRestart(): void;
-  onEngineerSaveSettings(): void;
   onEngineerStart(): void;
   onEngineerStop(): void;
   onEngineerNotifyHarnessUpdated(): void;
@@ -73,7 +72,6 @@ export function HarnessStudioModal({
   onPermissionModeChange,
   onEngineerResume,
   onEngineerRestart,
-  onEngineerSaveSettings,
   onEngineerStart,
   onEngineerStop,
   onEngineerNotifyHarnessUpdated,
@@ -423,7 +421,6 @@ export function HarnessStudioModal({
                 onStart={onEngineerStart}
                 onResume={onEngineerResume}
                 onRestart={onEngineerRestart}
-                onSaveSettings={onEngineerSaveSettings}
                 onStop={onEngineerStop}
                 onNotifyHarnessUpdated={onEngineerNotifyHarnessUpdated}
               />

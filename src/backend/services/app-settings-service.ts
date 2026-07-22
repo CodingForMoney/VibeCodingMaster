@@ -1,9 +1,10 @@
 import path from "node:path";
 import { createHash } from "node:crypto";
-import { ROLE_NAMES } from "../../shared/constants.js";
+import { VCM_ROLE_NAMES } from "../../shared/constants.js";
 import { GATE_REVIEW_GATES, type GateReviewGate } from "../../shared/types/gate-review.js";
 import {
   createDefaultLaunchTemplate,
+  createDefaultToolSessionDefaults,
   DEFAULT_TRANSLATION_OUTPUT_MODE,
   DEFAULT_TRANSLATION_TARGET_LANGUAGE,
   TRANSLATION_OUTPUT_MODE_OPTIONS,
@@ -12,12 +13,13 @@ import {
   type LaunchTemplate,
   type PermissionRequestMode,
   type RoleLaunchTemplateEntry,
+  type ToolSessionDefaults,
   type TranslationOutputMode,
   type TranslationTargetLanguage,
   type ThemeMode
 } from "../../shared/types/app-settings.js";
 import type { ProjectConfig } from "../../shared/types/project.js";
-import type { RoleName } from "../../shared/types/role.js";
+import type { ToolRoleName, VcmRoleName } from "../../shared/types/role.js";
 import {
   CLAUDE_MODEL_OPTIONS,
   CCR_GPT_SESSION_MODEL,
@@ -70,6 +72,7 @@ export interface AppSettingsService {
   loadSettings(): Promise<AppSettingsFile>;
   getPreferences(): Promise<AppPreferences>;
   updatePreferences(input: Partial<AppPreferences>): Promise<AppPreferences>;
+  updateToolSessionDefaults(role: ToolRoleName, input: RoleLaunchTemplateEntry): Promise<RoleLaunchTemplateEntry>;
   getRecentRepositoryPaths(): Promise<string[]>;
   recordRecentRepositoryPath(repoRoot: string): Promise<string[]>;
   loadProjectIndex(): Promise<AppProjectIndexFile>;
@@ -166,6 +169,21 @@ export function createAppSettingsService(deps: AppSettingsServiceDeps): AppSetti
         preferences
       });
       return preferences;
+    },
+    async updateToolSessionDefaults(role, input) {
+      const current = await loadSettings();
+      const preferences = normalizePreferences({
+        ...current.preferences,
+        toolSessionDefaults: {
+          ...current.preferences.toolSessionDefaults,
+          [role]: input
+        }
+      });
+      await saveSettings({
+        ...current,
+        preferences
+      });
+      return preferences.toolSessionDefaults[role];
     },
     async getRecentRepositoryPaths() {
       return (await loadSettings()).recentRepositoryPaths;
@@ -381,7 +399,8 @@ function normalizePreferences(input: unknown): AppPreferences {
     translationAutoSendEnabled: candidate.translationAutoSendEnabled === true,
     translationTargetLanguage: normalizeTranslationTargetLanguage(candidate.translationTargetLanguage),
     translationOutputMode: normalizeTranslationOutputMode(candidate.translationOutputMode),
-    launchTemplate: normalizeLaunchTemplate(candidate.launchTemplate)
+    launchTemplate: normalizeLaunchTemplate(candidate.launchTemplate),
+    toolSessionDefaults: normalizeToolSessionDefaults(candidate.toolSessionDefaults)
   };
 }
 
@@ -416,8 +435,8 @@ function normalizeLaunchTemplate(input: unknown): LaunchTemplate {
   }
 
   const rawRoles = isObject(input.roles) ? input.roles : {};
-  const roles = {} as Record<RoleName, RoleLaunchTemplateEntry>;
-  for (const role of ROLE_NAMES) {
+  const roles = {} as Record<VcmRoleName, RoleLaunchTemplateEntry>;
+  for (const role of VCM_ROLE_NAMES) {
     roles[role] = normalizeRoleLaunchTemplateEntry(rawRoles[role], defaults.roles[role]);
   }
 
@@ -425,6 +444,18 @@ function normalizeLaunchTemplate(input: unknown): LaunchTemplate {
     version: 1,
     roles,
     autoOrchestration: input.autoOrchestration !== false
+  };
+}
+
+function normalizeToolSessionDefaults(input: unknown): ToolSessionDefaults {
+  const defaults = createDefaultToolSessionDefaults();
+  const candidate = isObject(input) ? input : {};
+  return {
+    translator: normalizeRoleLaunchTemplateEntry(candidate.translator, defaults.translator),
+    "harness-engineer": normalizeRoleLaunchTemplateEntry(
+      candidate["harness-engineer"],
+      defaults["harness-engineer"]
+    )
   };
 }
 

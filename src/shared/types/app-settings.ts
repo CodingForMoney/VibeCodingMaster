@@ -1,5 +1,5 @@
-import { ROLE_NAMES } from "../constants.js";
-import type { RoleName } from "./role.js";
+import { VCM_ROLE_NAMES } from "../constants.js";
+import type { ToolRoleName, VcmRoleName } from "./role.js";
 import type {
   ClaudePermissionMode,
   SessionEffort,
@@ -55,9 +55,11 @@ export interface UpdateCcrIntegrationRequest {
 
 export interface LaunchTemplate {
   version: 1;
-  roles: Record<RoleName, RoleLaunchTemplateEntry>;
+  roles: Record<VcmRoleName, RoleLaunchTemplateEntry>;
   autoOrchestration: boolean;
 }
+
+export type ToolSessionDefaults = Record<ToolRoleName, RoleLaunchTemplateEntry>;
 
 export interface AppPreferences {
   themeMode: ThemeMode;
@@ -71,6 +73,7 @@ export interface AppPreferences {
   translationTargetLanguage: TranslationTargetLanguage;
   translationOutputMode: TranslationOutputMode;
   launchTemplate: LaunchTemplate;
+  toolSessionDefaults: ToolSessionDefaults;
 }
 
 export interface UpdateAppPreferencesRequest {
@@ -108,12 +111,12 @@ export const TRANSLATION_OUTPUT_MODE_OPTIONS: readonly TranslationOutputModeOpti
 ] as const;
 
 export function createDefaultLaunchTemplate(): LaunchTemplate {
-  const roles = {} as Record<RoleName, RoleLaunchTemplateEntry>;
-  for (const role of ROLE_NAMES) {
+  const roles = {} as Record<VcmRoleName, RoleLaunchTemplateEntry>;
+  for (const role of VCM_ROLE_NAMES) {
     roles[role] = {
       permissionMode: "bypassPermissions",
       model: "default",
-      effort: role === "translator" || role === "harness-engineer" ? "medium" : "default"
+      effort: "default"
     };
   }
 
@@ -121,5 +124,20 @@ export function createDefaultLaunchTemplate(): LaunchTemplate {
     version: 1,
     roles,
     autoOrchestration: true
+  };
+}
+
+export function createDefaultToolSessionDefaults(): ToolSessionDefaults {
+  return {
+    translator: {
+      permissionMode: "bypassPermissions",
+      model: "default",
+      effort: "medium"
+    },
+    "harness-engineer": {
+      permissionMode: "bypassPermissions",
+      model: "default",
+      effort: "medium"
+    }
   };
 }

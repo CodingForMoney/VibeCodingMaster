@@ -29,7 +29,7 @@ import type { VcmSessionRoundState } from "../../shared/types/round.js";
 import type { ClaudePermissionMode, RoleSessionRecord, SessionEffort, SessionModel, SessionModelOption } from "../../shared/types/session.js";
 import type { TaskRecord } from "../../shared/types/task.js";
 import { EventLog } from "../components/event-log.js";
-import { HarnessPanel } from "../components/harness-panel.js";
+import { HarnessPanel, type BootstrapLaunchOptions } from "../components/harness-panel.js";
 import { MessageTimeline, getMessageCounts } from "../components/message-timeline.js";
 import { RepoConnectForm } from "../components/repo-connect-form.js";
 import { SwitchControl } from "../components/switch-control.js";
@@ -64,6 +64,7 @@ export interface ProjectDashboardProps {
   harnessStatus: HarnessStatusReport | null;
   harnessBootstrapStatus: HarnessBootstrapStatusReport | null;
   harnessApplyResult?: HarnessApplyResult | null;
+  harnessEngineerLaunchOptions: BootstrapLaunchOptions;
   autoTaskHarnessReviewEnabled: boolean;
   autoMemoryEnabled: boolean;
   gatewayStatus: GatewayStatus | null;
@@ -87,6 +88,7 @@ export interface ProjectDashboardProps {
   onOpenRepositoryDiff(): void;
   onAutoTaskHarnessReviewChange(enabled: boolean): void;
   onAutoMemoryChange(enabled: boolean): void;
+  onHarnessEngineerLaunchOptionsChange(input: BootstrapLaunchOptions): void;
   onRefreshGateway(): Promise<void>;
   onGatewayEnabledChange(enabled: boolean): void;
   onGatewaySettingsChange(input: UpdateGatewaySettingsRequest): Promise<void>;
@@ -147,6 +149,7 @@ export function ProjectDashboard({
   harnessStatus,
   harnessBootstrapStatus,
   harnessApplyResult,
+  harnessEngineerLaunchOptions,
   autoTaskHarnessReviewEnabled,
   autoMemoryEnabled,
   gatewayStatus,
@@ -170,6 +173,7 @@ export function ProjectDashboard({
   onOpenRepositoryDiff,
   onAutoTaskHarnessReviewChange,
   onAutoMemoryChange,
+  onHarnessEngineerLaunchOptionsChange,
   onRefreshGateway,
   onGatewayEnabledChange,
   onGatewaySettingsChange,
@@ -339,7 +343,7 @@ export function ProjectDashboard({
           <button
             className="settings-toggle"
             disabled={busy || !canSaveLaunchTemplate}
-            title="Save the current launch settings for workflow and tool roles"
+            title="Save the current core role launch settings and optional Gate Reviewer settings"
             type="button"
             onClick={onSaveLaunchTemplate}
           >
@@ -454,6 +458,7 @@ export function ProjectDashboard({
             hasActiveTask={Boolean(activeTask)}
             autoTaskHarnessReviewEnabled={autoTaskHarnessReviewEnabled}
             autoMemoryEnabled={autoMemoryEnabled}
+            launchOptions={harnessEngineerLaunchOptions}
             modelOptions={modelOptions}
             busy={busy}
             onRefresh={onRefreshHarness}
@@ -462,6 +467,7 @@ export function ProjectDashboard({
             onOpenRepositoryDiff={onOpenRepositoryDiff}
             onAutoTaskHarnessReviewChange={onAutoTaskHarnessReviewChange}
             onAutoMemoryChange={onAutoMemoryChange}
+            onLaunchOptionsChange={onHarnessEngineerLaunchOptionsChange}
             onStartBootstrap={onStartHarnessBootstrap}
             onRestartBootstrap={onRestartHarnessBootstrap}
             onStopBootstrap={onStopHarnessBootstrap}

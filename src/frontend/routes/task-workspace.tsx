@@ -119,10 +119,7 @@ export function TaskWorkspace({
   const [translationFeedStore, setTranslationFeedStore] = useState(() => createTranslationPanelFeedStore(task.taskSlug));
   const taskStatusSyncKeyRef = useRef("");
   const translationFeedCursorRef = useRef(1);
-  const launchTemplateKey = useMemo(
-    () => JSON.stringify(VCM_ROLE_DEFINITIONS.map(({ name }) => [name, launchTemplate.roles[name]])),
-    [launchTemplate]
-  );
+  const launchTemplateKey = useMemo(() => JSON.stringify(launchTemplate), [launchTemplate]);
   const hasGateReviewerSession = Boolean(
     statusReport?.sessions.some((session) => session.role === "gate-reviewer")
   );
