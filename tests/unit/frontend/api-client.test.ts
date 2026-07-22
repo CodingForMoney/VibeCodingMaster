@@ -88,6 +88,30 @@ describe("apiClient", () => {
     expect(diagnostics.pid).toBe(123);
   });
 
+  it("loads task usage analytics on demand", async () => {
+    const fetchMock = mockFetch({
+      version: 1,
+      taskSlug: "demo-task",
+      updatedAt: null,
+      totals: {
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheReadTokens: 0,
+        cacheCreationTokens: 0,
+        costUsd: 0,
+        requestCount: 0,
+        sessionCount: 0
+      },
+      byRole: [],
+      byModel: []
+    });
+
+    await apiClient.getTaskUsageAnalytics("demo-task");
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/tasks/demo-task/usage-analytics");
+    expect(fetchMock.mock.calls[0]?.[1]?.method).toBeUndefined();
+  });
+
   it("adds backend runtime info to API errors", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
       error: {

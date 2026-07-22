@@ -63,6 +63,7 @@ import type { DispatchableRole, RoleName } from "../../shared/types/role.js";
 import type { VcmSessionRoundState } from "../../shared/types/round.js";
 import type { RoleSessionRecord, StartRoleSessionRequest } from "../../shared/types/session.js";
 import type { CleanupTaskResult, CreateTaskRequest, OneClickStartTaskResult, TaskRecord } from "../../shared/types/task.js";
+import type { TaskUsageAnalyticsReport } from "../../shared/types/usage-analytics.js";
 import { errorReason } from "./error-format.js";
 import type {
   TranslationBootstrapRun,
@@ -309,6 +310,9 @@ export const apiClient = {
   },
   getTaskWorkspaceState(taskSlug: string) {
     return request<TaskWorkspaceState>(`/api/tasks/${encodeURIComponent(taskSlug)}/workspace-state`);
+  },
+  getTaskUsageAnalytics(taskSlug: string) {
+    return request<TaskUsageAnalyticsReport>(`/api/tasks/${encodeURIComponent(taskSlug)}/usage-analytics`);
   },
   getProjectRuntimeState(taskSlug?: string | null) {
     const params = new URLSearchParams();

@@ -23,8 +23,8 @@ layers plus supporting tools.
 
 - `api/`: Fastify route modules, one per domain (project, task, session, round,
   message, harness, gate-review, translation, gateway, diagnostics, artifacts,
-  runtime-state, app-settings, claude-hook). Routes are thin and delegate to
-  services.
+  runtime-state, usage analytics, app-settings, claude-hook). Routes are thin
+  and delegate to services.
 - `services/`: business logic. Key services include `task-service`,
   `task-launch-service` (backend-owned one-click task start, shared by the GUI
   endpoint and the gateway), `task-close-service` (backend-owned unconditional
@@ -35,7 +35,8 @@ layers plus supporting tools.
   `artifact-service`, `harness-service`, `harness-feedback-service`,
   `auto-memory-service`,
   `gate-review-service`, `translation-service`/`translation-worker-service`,
-  `ccr-integration-service`, `job-guard-service`, and `command-dispatcher`.
+  `ccr-integration-service`, `usage-analytics-service`, `job-guard-service`, and
+  `command-dispatcher`.
 - `runtime/`: PTY-backed terminal runtime (`node-pty-runtime`,
   `terminal-runtime`, `session-registry`, `terminal-submit`) that supervises one
   Claude Code process per role.
@@ -125,6 +126,23 @@ normalized or silently replaced. Session records persist the Claude
 configuration root so transcript discovery and Resume use the same provider
 state. Resume cannot cross between native Claude and CCR; Restart creates the
 new provider Session.
+
+## Task Usage Analytics
+
+`session-service` enables Claude Code OpenTelemetry log export for every native
+Claude role process and attaches only `vcm.role` plus a per-process launch ID.
+It disables the exporter for CCR/GPT processes. Prompt, response, tool-detail,
+and raw API body logging remain disabled.
+
+Claude Code posts `api_request` events to
+`POST /api/telemetry/v1/logs`. `usage-analytics-service` attributes them to the
+single active task, deduplicates retried OTLP batches, and aggregates token and
+estimated cost data across every launch and Claude session. It stores only the
+aggregate at `<taskRepoRoot>/.ai/vcm/telemetry/usage.json`; no raw telemetry is
+retained. The report returned by
+`GET /api/tasks/:taskSlug/usage-analytics` contains task totals plus role and
+model breakdowns. The frontend loads it only when Usage Analytics is opened or
+manually refreshed. Task close removes the worktree and therefore the report.
 
 ## Project-Wide Constraints
 

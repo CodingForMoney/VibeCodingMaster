@@ -34,6 +34,7 @@ import { MessageTimeline, getMessageCounts } from "../components/message-timelin
 import { RepoConnectForm } from "../components/repo-connect-form.js";
 import { SwitchControl } from "../components/switch-control.js";
 import { TaskNav } from "../components/task-nav.js";
+import { UsageAnalyticsModal } from "../components/usage-analytics-modal.js";
 
 type SidebarSectionId =
   | "repository"
@@ -211,6 +212,7 @@ export function ProjectDashboard({
   const [taskSlug, setTaskSlug] = useState("");
   const [showMessages, setShowMessages] = useState(false);
   const [showEvents, setShowEvents] = useState(false);
+  const [showUsageAnalytics, setShowUsageAnalytics] = useState(false);
   const [openSidebarSection, setOpenSidebarSection] = useState<SidebarSectionId | null>(
     () => activeTaskSlug ? null : "repository"
   );
@@ -480,6 +482,12 @@ export function ProjectDashboard({
               {activeTask ? (
                 <div className="task-panel-actions">
                   <button
+                    type="button"
+                    onClick={() => setShowUsageAnalytics(true)}
+                  >
+                    Usage Analytics
+                  </button>
+                  <button
                     className="danger-button"
                     disabled={busy}
                     type="button"
@@ -538,6 +546,15 @@ export function ProjectDashboard({
         <EventDialog
           events={events}
           onClose={() => setShowEvents(false)}
+        />
+      ) : null}
+
+      {activeTask ? (
+        <UsageAnalyticsModal
+          open={showUsageAnalytics}
+          taskSlug={activeTask.taskSlug}
+          taskTitle={activeTask.title}
+          onClose={() => setShowUsageAnalytics(false)}
         />
       ) : null}
     </div>

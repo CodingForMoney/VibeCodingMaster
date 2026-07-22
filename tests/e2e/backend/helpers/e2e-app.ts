@@ -42,6 +42,7 @@ import { createTurnReconcilerService } from "../../../../src/backend/services/tu
 import { createRuntimeCoordinatorService } from "../../../../src/backend/services/runtime-coordinator-service.js";
 import { createTerminalInterruptService } from "../../../../src/backend/services/terminal-interrupt-service.js";
 import { createDiagnosticsService } from "../../../../src/backend/services/diagnostics-service.js";
+import { createUsageAnalyticsService } from "../../../../src/backend/services/usage-analytics-service.js";
 import { createJobGuardService } from "../../../../src/backend/services/job-guard-service.js";
 import { readVcmPackageVersion } from "../../../../src/backend/app-version.js";
 import type { RoleName } from "../../../../src/shared/types/role.js";
@@ -329,6 +330,7 @@ export async function createMockClaudeE2eApp(options: MockClaudeE2eAppOptions = 
     gatewayService,
     translationService
   });
+  const usageAnalyticsService = createUsageAnalyticsService({ fs: fsAdapter });
 
   const deps: ServerDeps = {
     appSettings,
@@ -357,7 +359,8 @@ export async function createMockClaudeE2eApp(options: MockClaudeE2eAppOptions = 
     runtimeRecoveryService,
     terminalInterruptService,
     runtime: mockRuntime,
-    diagnosticsService
+    diagnosticsService,
+    usageAnalyticsService
   };
   const app = await createServer(deps);
   mockRuntime.setHookDispatcher(async (input, options) => {

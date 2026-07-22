@@ -72,7 +72,9 @@ describe("backend E2E CCR integration", () => {
       ANTHROPIC_AUTH_TOKEN: undefined,
       ANTHROPIC_API_KEY: undefined,
       ANTHROPIC_MODEL: CCR_GPT_MODEL_ID,
+      CLAUDE_CODE_ENABLE_TELEMETRY: undefined,
       CLAUDE_CONFIG_DIR: expect.stringContaining("/settings/claude/ccr"),
+      OTEL_LOGS_EXPORTER: "none",
       VCM_TASK_SLUG: task.taskSlug
     });
     expect(JSON.stringify(input.env)).not.toContain("local-ccr-secret");
@@ -116,6 +118,13 @@ describe("backend E2E CCR integration", () => {
     expect(nativeInput.env.ANTHROPIC_AUTH_TOKEN).toBeUndefined();
     expect(nativeInput.env.ANTHROPIC_MODEL).toBeUndefined();
     expect(nativeInput.env.CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY).toBeUndefined();
+    expect(nativeInput.env.CLAUDE_CODE_ENABLE_TELEMETRY).toBe("1");
+    expect(nativeInput.env.OTEL_LOGS_EXPORTER).toBe("otlp");
+    expect(nativeInput.env.OTEL_EXPORTER_OTLP_LOGS_PROTOCOL).toBe("http/json");
+    expect(nativeInput.env.OTEL_EXPORTER_OTLP_LOGS_ENDPOINT).toMatch(/\/api\/telemetry\/v1\/logs$/);
+    expect(nativeInput.env.OTEL_RESOURCE_ATTRIBUTES).toMatch(
+      /^vcm\.role=architect,vcm\.launch_id=[0-9a-f-]+$/
+    );
 
     await env.app.inject({ method: "PUT", url: "/api/settings/ccr", payload: { enabled: false } });
     const blockedRestart = await env.app.inject({

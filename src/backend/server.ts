@@ -48,6 +48,7 @@ import { createTaskWorkflowService, type TaskWorkflowService } from "./services/
 import { createTaskLaunchService, type TaskLaunchService } from "./services/task-launch-service.js";
 import { createTerminalInterruptService, type TerminalInterruptService } from "./services/terminal-interrupt-service.js";
 import { createTranslationService, type TranslationService } from "./services/translation-service.js";
+import { createUsageAnalyticsService, type UsageAnalyticsService } from "./services/usage-analytics-service.js";
 import { createTurnReconcilerService } from "./services/turn-reconciler-service.js";
 import { createDiagnosticsService, type DiagnosticsService } from "./services/diagnostics-service.js";
 import { registerAppSettingsRoutes } from "./api/app-settings-routes.js";
@@ -63,6 +64,7 @@ import { registerRuntimeStateRoutes } from "./api/runtime-state-routes.js";
 import { registerSessionRoutes } from "./api/session-routes.js";
 import { registerTaskRoutes } from "./api/task-routes.js";
 import { registerTranslationRoutes } from "./api/translation-routes.js";
+import { registerUsageAnalyticsRoutes } from "./api/usage-analytics-routes.js";
 import { registerTerminalWs } from "./ws/terminal-ws.js";
 import { toVcmError } from "./errors.js";
 import type { TerminalRuntime } from "./runtime/terminal-runtime.js";
@@ -103,6 +105,7 @@ export interface ServerDeps {
   terminalInterruptService: TerminalInterruptService;
   runtime: TerminalRuntime;
   diagnosticsService: DiagnosticsService;
+  usageAnalyticsService: UsageAnalyticsService;
 }
 
 export async function createServer(deps: ServerDeps, options: CreateServerOptions = {}): Promise<FastifyInstance> {
@@ -202,6 +205,11 @@ export async function createServer(deps: ServerDeps, options: CreateServerOption
     taskService: deps.taskService,
     sessionService: deps.sessionService,
     translationService: deps.translationService
+  });
+  registerUsageAnalyticsRoutes(app, {
+    projectService: deps.projectService,
+    taskService: deps.taskService,
+    usageAnalyticsService: deps.usageAnalyticsService
   });
   registerGatewayRoutes(app, { gatewayService: deps.gatewayService });
   registerTerminalWs(app, {
@@ -380,6 +388,7 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     roundService,
     appSettings
   });
+  const usageAnalyticsService = createUsageAnalyticsService({ fs });
   const gatewayChannels = createGatewayChannelRegistry([
     createWeixinIlinkChannel(),
     createLarkChannel()
@@ -503,7 +512,8 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     runtimeRecoveryService,
     terminalInterruptService,
     runtime,
-    diagnosticsService
+    diagnosticsService,
+    usageAnalyticsService
   };
 }
 

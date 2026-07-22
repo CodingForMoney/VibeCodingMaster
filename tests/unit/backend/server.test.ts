@@ -103,6 +103,7 @@ function createServerDepsStub(calls: string[]): ServerDeps {
       getErrorRuntimeInfo() {
         return {};
       }
-    } as never
+    } as never,
+    usageAnalyticsService: {} as never
   };
 }

@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { ROLE_NAMES, isDispatchableRole } from "../../shared/constants.js";
 import type { ClaudeHookEventName } from "../../shared/types/claude-hook.js";
@@ -233,7 +234,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
         VCM_TASK_SLUG: taskSlug,
         VCM_ROLE: role,
         VCM_SESSION_ID: claudeSessionId || undefined
-      }, modelEnvironment),
+      }, modelEnvironment, buildUsageTelemetryEnvironment(deps.apiUrl, role, model)),
       cols: input.cols,
       rows: input.rows
     });
@@ -388,7 +389,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
         VCM_TASK_SLUG: PROJECT_TRANSLATOR_SCOPE,
         VCM_ROLE: TRANSLATOR_ROLE,
         VCM_SESSION_ID: claudeSessionId || undefined
-      }, modelEnvironment),
+      }, modelEnvironment, buildUsageTelemetryEnvironment(deps.apiUrl, TRANSLATOR_ROLE, model)),
       cols: input.cols,
       rows: input.rows
     });
@@ -533,7 +534,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
         VCM_TASK_SLUG: PROJECT_HARNESS_ENGINEER_SCOPE,
         VCM_ROLE: HARNESS_ENGINEER_ROLE,
         VCM_SESSION_ID: claudeSessionId || undefined
-      }, modelEnvironment),
+      }, modelEnvironment, buildUsageTelemetryEnvironment(deps.apiUrl, HARNESS_ENGINEER_ROLE, model)),
       cols: input.cols,
       rows: input.rows
     });
@@ -770,7 +771,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
         VCM_TASK_SLUG: normalizeProjectScopedRecordForPersistence(session).taskSlug,
         VCM_ROLE: session.role,
         VCM_SESSION_ID: session.claudeSessionId
-      }, modelEnvironment)
+      }, modelEnvironment, buildUsageTelemetryEnvironment(deps.apiUrl, session.role, model))
     });
     if ((await waitForSessionInputReady(runtimeSession.id)) === "exited") {
       deps.registry.remove(runtimeSession.id);
@@ -2012,12 +2013,46 @@ function isExitedStatus(status: string | undefined): boolean {
 
 function withClaudeCodeRuntimeEnv(
   env: NodeJS.ProcessEnv,
-  modelEnvironment: NodeJS.ProcessEnv = {}
+  modelEnvironment: NodeJS.ProcessEnv = {},
+  telemetryEnvironment: NodeJS.ProcessEnv = {}
 ): NodeJS.ProcessEnv {
   return {
     ...env,
     ...modelEnvironment,
+    ...telemetryEnvironment,
     CLAUDE_CODE_DISABLE_AUTO_MEMORY
+  };
+}
+
+function buildUsageTelemetryEnvironment(
+  apiUrl: string | undefined,
+  role: RoleName,
+  model: SessionModel
+): NodeJS.ProcessEnv {
+  const disabled: NodeJS.ProcessEnv = {
+    CLAUDE_CODE_ENABLE_TELEMETRY: undefined,
+    OTEL_LOGS_EXPORTER: "none",
+    OTEL_METRICS_EXPORTER: "none",
+    OTEL_TRACES_EXPORTER: "none",
+    OTEL_EXPORTER_OTLP_LOGS_PROTOCOL: undefined,
+    OTEL_EXPORTER_OTLP_LOGS_ENDPOINT: undefined,
+    OTEL_RESOURCE_ATTRIBUTES: undefined,
+    OTEL_LOG_USER_PROMPTS: "0",
+    OTEL_LOG_ASSISTANT_RESPONSES: "0",
+    OTEL_LOG_TOOL_DETAILS: "0",
+    OTEL_LOG_RAW_API_BODIES: "0"
+  };
+  if (!apiUrl || isCcrSessionModel(model)) {
+    return disabled;
+  }
+
+  return {
+    ...disabled,
+    CLAUDE_CODE_ENABLE_TELEMETRY: "1",
+    OTEL_LOGS_EXPORTER: "otlp",
+    OTEL_EXPORTER_OTLP_LOGS_PROTOCOL: "http/json",
+    OTEL_EXPORTER_OTLP_LOGS_ENDPOINT: `${apiUrl.replace(/\/+$/, "")}/api/telemetry/v1/logs`,
+    OTEL_RESOURCE_ATTRIBUTES: `vcm.role=${role},vcm.launch_id=${randomUUID()}`
   };
 }
 

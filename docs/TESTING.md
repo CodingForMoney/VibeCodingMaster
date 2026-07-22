@@ -58,6 +58,12 @@ Notes:
   CCR configuration/transcript paths, native environment cleanup, same-provider
   Resume, and provider switching through Restart. Run the complete backend E2E
   suite when changing Session launch wiring.
+- Task usage analytics change: run `usage-analytics-service.test.ts`,
+  `usage-analytics-modal.test.ts`, `api-client.test.ts`,
+  `usage-analytics.e2e.test.ts`, and `ccr-integration.e2e.test.ts`. Verify
+  retried OTLP batches are deduplicated, concurrent batches do not lose data,
+  all seven roles aggregate across launches and sessions, CCR/GPT processes do
+  not export usage, and no raw event files are retained.
 - Task workflow-state changes: run `task-workflow-service.test.ts`,
   `message-service.test.ts`, `session-service.test.ts`, and
   `task-routes.test.ts`; verify corrupt or unavailable state remains
@@ -177,6 +183,10 @@ services with controlled runtime doubles:
   command behavior, GPT-only settings overrides, global CCR takeover cleanup,
   blocked unavailable launches, and shared CCR child environment across
   workflow, Gate Reviewer, Translator, and Harness Engineer Session paths.
+- Native Claude OpenTelemetry ingestion into the active task worktree, including
+  task, role, and model aggregation; deduplication and concurrent-write behavior
+  are covered by service tests, while CCR exclusion is covered by the CCR
+  journey.
 
 Run all backend journeys with `npm run test:e2e:backend`.
 

@@ -228,6 +228,18 @@ such as a Dev Container or VM.
 Model and effort can be selected before start/resume/restart. Changes affect the
 next launched process, not a currently running Claude Code process.
 
+## Usage Analytics
+
+Open `Usage Analytics` in the sidebar `Task` section to inspect native Claude
+Code usage for the active task. The report shows task totals and breakdowns by
+role and model for input, output, cache-read, and cache-creation tokens plus
+estimated USD cost. It combines every restart and resumed Claude session for
+all seven roles. CCR/GPT usage is excluded.
+
+VCM retains only aggregate task data in
+`<task-worktree>/.ai/vcm/telemetry/usage.json`. The file is temporary runtime
+state and is removed with the task worktree when the task is closed.
+
 ### GPT Through Claude Code Router
 
 VCM can launch its normal Claude Code sessions with `GPT-5.6 Sol (CCR)` through
