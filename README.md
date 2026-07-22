@@ -282,7 +282,8 @@ not fall back to another model.
 
 ## Launch Template
 
-The launch template stores per-role defaults:
+The global launch template stores per-role defaults for all five workflow roles
+and both task-scoped tool roles:
 
 - permission mode
 - model
@@ -293,7 +294,10 @@ One-click start launches the four core roles. If any Gate Review Gate is enabled
 it also launches Gate Reviewer.
 
 Translator and Harness Engineer are tool roles. They are controlled from their
-own panels, not from the main role tab bar.
+own panels, not from the main role tab bar. Use `Save settings` in either panel
+to persist its permission, model, and effort. A fresh task uses those saved
+values when the backend automatically starts the tool Session; an existing task
+Session keeps its own recorded values.
 
 ## Orchestration
 

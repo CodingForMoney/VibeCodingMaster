@@ -114,6 +114,16 @@ describe("app-settings-service", () => {
       model: "opus",
       effort: "high"
     };
+    launchTemplate.roles.translator = {
+      permissionMode: "plan",
+      model: "sonnet",
+      effort: "low"
+    };
+    launchTemplate.roles["harness-engineer"] = {
+      permissionMode: "default",
+      model: "fable",
+      effort: "xhigh"
+    };
 
     await expect(service.updatePreferences({ launchTemplate })).resolves.toEqual(createDefaultPreferences({
       launchTemplate
@@ -121,6 +131,38 @@ describe("app-settings-service", () => {
 
     const stored = await fs.readJson<AppSettingsFile>("/settings.json");
     expect(stored.preferences.launchTemplate).toEqual(launchTemplate);
+  });
+
+  it("adds tool role launch defaults to settings written before tool roles were templated", async () => {
+    const defaults = createDefaultPreferences();
+    const { translator: _translator, "harness-engineer": _harnessEngineer, ...workflowRoles } = defaults.launchTemplate.roles;
+    const fs = createMemoryFs({
+      "/settings.json": {
+        version: 1,
+        preferences: {
+          ...defaults,
+          launchTemplate: {
+            ...defaults.launchTemplate,
+            roles: workflowRoles
+          }
+        },
+        recentRepositoryPaths: []
+      }
+    });
+    const service = createAppSettingsService({ fs, settingsPath: "/settings.json" });
+
+    const preferences = await service.getPreferences();
+
+    expect(preferences.launchTemplate.roles.translator).toEqual({
+      permissionMode: "bypassPermissions",
+      model: "default",
+      effort: "medium"
+    });
+    expect(preferences.launchTemplate.roles["harness-engineer"]).toEqual({
+      permissionMode: "bypassPermissions",
+      model: "default",
+      effort: "medium"
+    });
   });
 
   it("stores CCR credentials globally and preserves namespaced launch models", async () => {

@@ -242,7 +242,9 @@ output timestamps. `runtime-coordinator-service` runs full active-task
 reconciliation every 10 seconds, independently of frontend polling. It
 reconciles Turns, automatically starts or resumes the task-scoped Harness
 Engineer, and starts or resumes the task-scoped Translator when translation is
-enabled and the Harness is initialized.
+enabled and the Harness is initialized. Fresh tool Sessions use their persisted
+global launch-template permission, model, and effort; resumable task Sessions
+keep the launch options recorded by that Session.
 
 Round tracking includes Project Manager, Architect, Coder, Tester, and optional
 Gate Reviewer sessions. Translator and Harness Engineer are task-scoped tool

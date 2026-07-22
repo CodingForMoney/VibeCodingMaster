@@ -1,5 +1,5 @@
-import { VCM_ROLE_NAMES } from "../constants.js";
-import type { VcmRoleName } from "./role.js";
+import { ROLE_NAMES } from "../constants.js";
+import type { RoleName } from "./role.js";
 import type {
   ClaudePermissionMode,
   SessionEffort,
@@ -55,7 +55,7 @@ export interface UpdateCcrIntegrationRequest {
 
 export interface LaunchTemplate {
   version: 1;
-  roles: Record<VcmRoleName, RoleLaunchTemplateEntry>;
+  roles: Record<RoleName, RoleLaunchTemplateEntry>;
   autoOrchestration: boolean;
 }
 
@@ -108,12 +108,12 @@ export const TRANSLATION_OUTPUT_MODE_OPTIONS: readonly TranslationOutputModeOpti
 ] as const;
 
 export function createDefaultLaunchTemplate(): LaunchTemplate {
-  const roles = {} as Record<VcmRoleName, RoleLaunchTemplateEntry>;
-  for (const role of VCM_ROLE_NAMES) {
+  const roles = {} as Record<RoleName, RoleLaunchTemplateEntry>;
+  for (const role of ROLE_NAMES) {
     roles[role] = {
       permissionMode: "bypassPermissions",
       model: "default",
-      effort: "default"
+      effort: role === "translator" || role === "harness-engineer" ? "medium" : "default"
     };
   }
 

@@ -187,6 +187,8 @@ services with controlled runtime doubles:
   task, role, and model aggregation; deduplication and concurrent-write behavior
   are covered by service tests, while CCR exclusion is covered by the CCR
   journey.
+- Global launch-template normalization and persistence for all workflow and tool
+  roles, plus saved tool launch options on fresh backend-managed task Sessions.
 
 Run all backend journeys with `npm run test:e2e:backend`.
 

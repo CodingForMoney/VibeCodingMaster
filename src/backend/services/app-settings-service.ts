@@ -1,6 +1,6 @@
 import path from "node:path";
 import { createHash } from "node:crypto";
-import { VCM_ROLE_NAMES } from "../../shared/constants.js";
+import { ROLE_NAMES } from "../../shared/constants.js";
 import { GATE_REVIEW_GATES, type GateReviewGate } from "../../shared/types/gate-review.js";
 import {
   createDefaultLaunchTemplate,
@@ -17,7 +17,7 @@ import {
   type ThemeMode
 } from "../../shared/types/app-settings.js";
 import type { ProjectConfig } from "../../shared/types/project.js";
-import type { VcmRoleName } from "../../shared/types/role.js";
+import type { RoleName } from "../../shared/types/role.js";
 import {
   CLAUDE_MODEL_OPTIONS,
   CCR_GPT_SESSION_MODEL,
@@ -416,8 +416,8 @@ function normalizeLaunchTemplate(input: unknown): LaunchTemplate {
   }
 
   const rawRoles = isObject(input.roles) ? input.roles : {};
-  const roles = {} as Record<VcmRoleName, RoleLaunchTemplateEntry>;
-  for (const role of VCM_ROLE_NAMES) {
+  const roles = {} as Record<RoleName, RoleLaunchTemplateEntry>;
+  for (const role of ROLE_NAMES) {
     roles[role] = normalizeRoleLaunchTemplateEntry(rawRoles[role], defaults.roles[role]);
   }
 

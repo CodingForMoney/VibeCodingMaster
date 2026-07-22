@@ -157,7 +157,10 @@ export function App() {
   const canOneClickStart = Boolean(activeTask && activeTaskLaunchState?.statusLoaded && !activeTaskLaunchState.hasAnySession);
   const modelOptions = ccrStatus?.modelOptions ?? createSessionModelOptions();
 
-  const applyPreferences = useCallback((preferences: AppPreferences) => {
+  const applyPreferences = useCallback((
+    preferences: AppPreferences,
+    options: { syncToolLaunchOptions?: boolean } = {}
+  ) => {
     setThemeMode(preferences.themeMode);
     setPauseAlertSound(preferences.flowPauseAlerts);
     setRoleRetryEnabled(preferences.roleRetryEnabled);
@@ -169,6 +172,14 @@ export function App() {
     setTranslationTargetLanguage(preferences.translationTargetLanguage);
     setTranslationOutputMode(preferences.translationOutputMode);
     setLaunchTemplate(preferences.launchTemplate);
+    if (options.syncToolLaunchOptions) {
+      setTranslatorPermissionMode(preferences.launchTemplate.roles.translator.permissionMode);
+      setTranslatorModel(preferences.launchTemplate.roles.translator.model);
+      setTranslatorEffort(preferences.launchTemplate.roles.translator.effort);
+      setHarnessEngineerPermissionMode(preferences.launchTemplate.roles["harness-engineer"].permissionMode);
+      setHarnessEngineerModel(preferences.launchTemplate.roles["harness-engineer"].model);
+      setHarnessEngineerEffort(preferences.launchTemplate.roles["harness-engineer"].effort);
+    }
   }, []);
 
   useEffect(() => {
@@ -535,7 +546,7 @@ export function App() {
         setRecentRepositoryPaths(recentPaths);
         setGatewayStatus(nextGatewayStatus);
         setCcrStatus(nextCcrStatus);
-        applyPreferences(preferences);
+        applyPreferences(preferences, { syncToolLaunchOptions: true });
         if (currentProject) {
           await loadTasks();
         }
@@ -594,26 +605,22 @@ export function App() {
   useEffect(() => {
     projectRuntimeLaunchSyncKeyRef.current = "";
     setTranslatorSession(null);
-    setTranslatorPermissionMode("bypassPermissions");
-    setTranslatorModel("default");
-    setTranslatorEffort("medium");
     setTranslationMemoryInitialized(false);
     setHarnessEngineerSession(null);
-    setHarnessEngineerPermissionMode("bypassPermissions");
-    setHarnessEngineerModel("default");
-    setHarnessEngineerEffort("medium");
     setHarnessStatus(null);
     setHarnessBootstrapStatus(null);
     setHarnessStatusTaskSlug(null);
     setHarnessBootstrapStatusTaskSlug(null);
     setHarnessFeedbackState(null);
-  }, [project?.repoRoot]);
+  }, [project?.repoRoot, activeTask?.taskSlug]);
 
   useScheduledPoll(
     project ? `project-runtime:${project.repoRoot}:${activeTask?.taskSlug ?? "no-task"}` : null,
     async () => {
       try {
-        const syncKey = project?.repoRoot ?? "";
+        const syncKey = project
+          ? `${project.repoRoot}:${activeTask?.taskSlug ?? "no-task"}`
+          : "";
         const syncLaunchOptions = Boolean(project && projectRuntimeLaunchSyncKeyRef.current !== syncKey);
         await refreshProjectRuntimeState({ syncLaunchOptions });
         if (syncLaunchOptions) {
@@ -1086,11 +1093,24 @@ export function App() {
               const preferences = await apiClient.updateAppPreferences({
                 launchTemplate: {
                   version: 1,
-                  roles: activeTaskLaunchState.roles,
+                  roles: {
+                    ...launchTemplate.roles,
+                    ...activeTaskLaunchState.roles,
+                    translator: {
+                      permissionMode: translatorPermissionMode,
+                      model: translatorModel,
+                      effort: translatorEffort
+                    },
+                    "harness-engineer": {
+                      permissionMode: harnessEngineerPermissionMode,
+                      model: harnessEngineerModel,
+                      effort: harnessEngineerEffort
+                    }
+                  },
                   autoOrchestration: activeTaskLaunchState.autoOrchestration
                 }
               });
-              applyPreferences(preferences);
+              applyPreferences(preferences, { syncToolLaunchOptions: true });
             }, "Save launch template");
           }}
           onOneClickStart={() => {
@@ -1287,6 +1307,24 @@ export function App() {
         onPermissionModeChange={setHarnessEngineerPermissionMode}
         onModelChange={setHarnessEngineerModel}
         onEffortChange={setHarnessEngineerEffort}
+        onEngineerSaveSettings={() => {
+          void withBusy(async () => {
+            const preferences = await apiClient.updateAppPreferences({
+              launchTemplate: {
+                ...launchTemplate,
+                roles: {
+                  ...launchTemplate.roles,
+                  "harness-engineer": {
+                    permissionMode: harnessEngineerPermissionMode,
+                    model: harnessEngineerModel,
+                    effort: harnessEngineerEffort
+                  }
+                }
+              }
+            });
+            applyPreferences(preferences, { syncToolLaunchOptions: true });
+          }, "Save Harness Engineer settings");
+        }}
         onEngineerStart={() => {
           void withBusy(async () => {
             if (!activeTask) {
@@ -1406,6 +1444,24 @@ export function App() {
         onPermissionModeChange={setTranslatorPermissionMode}
         onModelChange={setTranslatorModel}
         onEffortChange={setTranslatorEffort}
+        onSaveSettings={() => {
+          void withBusy(async () => {
+            const preferences = await apiClient.updateAppPreferences({
+              launchTemplate: {
+                ...launchTemplate,
+                roles: {
+                  ...launchTemplate.roles,
+                  translator: {
+                    permissionMode: translatorPermissionMode,
+                    model: translatorModel,
+                    effort: translatorEffort
+                  }
+                }
+              }
+            });
+            applyPreferences(preferences, { syncToolLaunchOptions: true });
+          }, "Save Translator settings");
+        }}
         onStart={() => {
           void withBusy(async () => {
             if (!activeTask) {

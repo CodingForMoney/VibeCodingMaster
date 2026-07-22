@@ -1,4 +1,5 @@
 import { isVcmRoleName } from "../../shared/constants.js";
+import type { RoleLaunchTemplateEntry } from "../../shared/types/app-settings.js";
 import type { GatewayStatus } from "../../shared/types/gateway.js";
 import type { RoleName } from "../../shared/types/role.js";
 import type { RoleSessionRecord } from "../../shared/types/session.js";
@@ -113,8 +114,17 @@ export function createRuntimeCoordinatorService(deps: RuntimeCoordinatorServiceD
         .catch(() => false);
 
       await Promise.all([
-        reconcileHarnessEngineer(repoRoot, activeTask),
-        reconcileTranslator(repoRoot, activeTask, preferences.translationEnabled && harnessInitialized)
+        reconcileHarnessEngineer(
+          repoRoot,
+          activeTask,
+          preferences.launchTemplate.roles["harness-engineer"]
+        ),
+        reconcileTranslator(
+          repoRoot,
+          activeTask,
+          preferences.translationEnabled && harnessInitialized,
+          preferences.launchTemplate.roles.translator
+        )
       ]);
 
       if (preferences.translationEnabled && harnessInitialized) {
@@ -181,19 +191,28 @@ export function createRuntimeCoordinatorService(deps: RuntimeCoordinatorServiceD
     return activeTasks[0] ?? null;
   }
 
-  async function reconcileHarnessEngineer(repoRoot: string, task: TaskRecord): Promise<void> {
+  async function reconcileHarnessEngineer(
+    repoRoot: string,
+    task: TaskRecord,
+    launchOptions: RoleLaunchTemplateEntry
+  ): Promise<void> {
     const existing = await deps.sessionService.getRoleSession(repoRoot, task.taskSlug, "harness-engineer");
     if (!shouldAutoEnsureTaskToolSession(existing)) {
       return;
     }
     await ensureTaskToolRoleSession(repoRoot, task.taskSlug, "harness-engineer", {
-      permissionMode: existing?.permissionMode,
-      model: existing?.model,
-      effort: existing?.effort
+      permissionMode: existing?.permissionMode ?? launchOptions.permissionMode,
+      model: existing?.model ?? launchOptions.model,
+      effort: existing?.effort ?? launchOptions.effort
     });
   }
 
-  async function reconcileTranslator(repoRoot: string, task: TaskRecord, enabled: boolean): Promise<void> {
+  async function reconcileTranslator(
+    repoRoot: string,
+    task: TaskRecord,
+    enabled: boolean,
+    launchOptions: RoleLaunchTemplateEntry
+  ): Promise<void> {
     if (!enabled) {
       return;
     }
@@ -202,9 +221,9 @@ export function createRuntimeCoordinatorService(deps: RuntimeCoordinatorServiceD
       return;
     }
     await ensureTaskToolRoleSession(repoRoot, task.taskSlug, "translator", {
-      permissionMode: existing?.permissionMode,
-      model: existing?.model,
-      effort: existing?.effort
+      permissionMode: existing?.permissionMode ?? launchOptions.permissionMode,
+      model: existing?.model ?? launchOptions.model,
+      effort: existing?.effort ?? launchOptions.effort
     });
   }
 
