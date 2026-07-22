@@ -211,8 +211,11 @@ sending, or placed in a separate approval/apply state machine.
 
 `round-service` owns the active turn and round state. `session-service` owns role
 session activity, while the PTY runtime owns Claude process liveness and terminal
-output timestamps. `runtime-coordinator-service` runs backend turn reconciliation
-every 10 seconds, independently of frontend polling.
+output timestamps. `runtime-coordinator-service` runs full active-task
+reconciliation every 10 seconds, independently of frontend polling. It
+reconciles Turns, automatically starts or resumes the task-scoped Harness
+Engineer, and starts or resumes the task-scoped Translator when translation is
+enabled and the Harness is initialized.
 
 Round tracking includes Project Manager, Architect, Coder, Tester, and optional
 Gate Reviewer sessions. Translator and Harness Engineer are task-scoped tool

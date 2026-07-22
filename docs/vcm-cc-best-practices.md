@@ -283,6 +283,9 @@ Tool roles:
 
 Tool roles run in the active task worktree. Durable tool state such as
 translation memory or harness feedback may still live under the base repo.
+The backend runtime coordinator creates or resumes Harness Engineer for the
+active task and does the same for Translator when translation is enabled and
+Harness initialization is complete.
 
 ## 8. Launch Template and Permissions
 

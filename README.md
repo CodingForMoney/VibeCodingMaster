@@ -324,7 +324,9 @@ Conversation translation is controlled from the sidebar `Translation` section.
 
 VCM uses a task-scoped Translator role and Claude transcript JSONL files, not
 raw terminal text. Translation memory and completed file translations remain
-project-level durable data.
+project-level durable data. When translation is enabled and the active task's
+Harness is initialized, the backend automatically starts a fresh Translator for
+the task or resumes its saved Session.
 
 Common controls:
 
@@ -428,9 +430,10 @@ Use it to:
 - merge task harness commits back to the connected repository branch when
   appropriate
 
-Harness Engineer is task-scoped and runs from the active task worktree. A new
-task receives its own Harness Engineer session. Durable memory is versioned with
-the project harness files.
+Harness Engineer is task-scoped and runs from the active task worktree. The
+backend automatically starts a fresh Harness Engineer for each active task or
+resumes its saved Session. Durable memory is versioned with the project harness
+files.
 
 ### Auto Memory
 

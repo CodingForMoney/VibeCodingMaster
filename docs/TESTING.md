@@ -48,6 +48,9 @@ Notes:
   cross-service wiring.
 - Session lifecycle, round routing, Gate Review, translation, Gateway, Auto
   Memory, or Harness Retrospective change: run `npm run test:e2e:backend`.
+- Runtime Coordinator changes: run `runtime-coordinator-service.test.ts` and
+  verify fresh and resumable task-scoped tool Sessions are reconciled without a
+  frontend trigger.
 - CCR model integration change: run `ccr-gateway-adapter.test.ts`,
   `ccr-integration-service.test.ts`, `claude-settings-adapter.test.ts`,
   `ccr-api-key-helper.test.ts`, `claude-adapter.test.ts`, and

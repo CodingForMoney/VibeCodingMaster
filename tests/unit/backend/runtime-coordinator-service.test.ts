@@ -19,7 +19,7 @@ const TASK: TaskRecord = {
 };
 
 describe("createRuntimeCoordinatorService", () => {
-  it("does not create task tool sessions when no resumable session exists", async () => {
+  it("creates fresh task tool sessions when no session exists", async () => {
     const calls: string[] = [];
     const service = createCoordinator({
       calls,
@@ -30,8 +30,23 @@ describe("createRuntimeCoordinatorService", () => {
 
     await service.reconcileProject("/repo", { taskSlug: "demo-task" });
 
-    expect(calls).not.toContain("ensure:translator");
-    expect(calls).not.toContain("ensure:harness-engineer");
+    expect(calls).toContain("start:translator:demo-task");
+    expect(calls).toContain("start:harness-engineer:demo-task");
+  });
+
+  it("runs full task tool reconciliation when the backend coordinator starts", async () => {
+    const calls: string[] = [];
+    const service = createCoordinator({
+      calls,
+      translator: undefined,
+      harnessEngineer: undefined,
+      translationEnabled: true
+    });
+
+    service.start();
+    await waitForCall(calls, "start:translator:demo-task");
+    await waitForCall(calls, "start:harness-engineer:demo-task");
+    service.stop();
   });
 
   it("resumes existing task tool sessions and starts conversation translation listeners", async () => {
@@ -273,10 +288,24 @@ function createCoordinator(input: {
         return { status: "inactive" };
       }
     },
+    setInterval() {
+      return "runtime-coordinator-timer";
+    },
+    clearInterval() {},
     async getStateRoot() {
       return ".ai/vcm";
     }
   });
+}
+
+async function waitForCall(calls: string[], expected: string): Promise<void> {
+  for (let attempt = 0; attempt < 50; attempt += 1) {
+    if (calls.includes(expected)) {
+      return;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 5));
+  }
+  throw new Error(`Timed out waiting for ${expected}. Calls: ${calls.join(", ")}`);
 }
 
 function projectToolSession(role: RoleName, status: RoleSessionRecord["status"]): RoleSessionRecord {
