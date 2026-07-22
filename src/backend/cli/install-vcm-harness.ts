@@ -8,6 +8,7 @@ import { fileURLToPath } from "node:url";
 import { renderArchitectHarnessRules } from "../templates/harness/architect-agent.js";
 import { renderCoderHarnessRules } from "../templates/harness/coder-agent.js";
 import { renderCoderWorkerHarnessRules } from "../templates/harness/coder-worker-agent.js";
+import { renderArchitectScaffoldWorkerHarnessRules } from "../templates/harness/architect-scaffold-worker-agent.js";
 import {
   renderGateReviewerAgentRules,
   renderRequestGateReviewTool,
@@ -41,6 +42,10 @@ import { renderVcmReportHarnessIssueSkillRules } from "../templates/harness/vcm-
 import { renderVcmRouteMessageSkillRules } from "../templates/harness/vcm-route-message-skill.js";
 import { renderUpdateTaskStateTool, renderVcmTaskStateSkillRules } from "../templates/harness/vcm-task-state-skill.js";
 import { renderCheckScaffoldLedgerTool } from "../templates/harness/check-scaffold-ledger.js";
+import {
+  renderRequestArchitectRestartTool,
+  renderRestartArchitectSkillRules
+} from "../templates/harness/restart-architect-skill.js";
 import { readVcmPackageVersion } from "../app-version.js";
 
 const CLI_DIR = path.dirname(fileURLToPath(import.meta.url));
@@ -75,7 +80,8 @@ const AGENT_FRONTMATTER = {
     description: "User-facing VCM orchestration role for task clarification, role routing, handoffs, acceptance, and PR preparation."
   },
   architect: {
-    description: "VCM architecture role for plans, module boundaries, public contracts, verifiable behavior, and docs sync."
+    description: "VCM architecture role for plans, module boundaries, public contracts, verifiable behavior, and docs sync.",
+    tools: "Read, Grep, Glob, Bash, Edit, Write, Agent"
   },
   coder: {
     description: "VCM implementation role for scoped code changes and focused tests.",
@@ -97,6 +103,11 @@ const AGENT_FRONTMATTER = {
   "vcm-coder-worker": {
     description: "Bounded VCM implementation worker for assigned modules, files, and VCM:CODE markers from Coder.",
     model: "inherit"
+  },
+  "vcm-architect-scaffold-worker": {
+    description: "Foreground Architect worker for exact scaffold execution and scaffold validation.",
+    model: "opus",
+    effort: "xhigh"
   }
 };
 
@@ -212,6 +223,14 @@ const MANAGED_FILES = [
     commentStyle: "html",
     category: "agent-coder-worker",
     content: renderCoderWorkerHarnessRules()
+  },
+  {
+    path: ".claude/agents/vcm-architect-scaffold-worker.md",
+    title: "VCM Architect Scaffold Worker Agent",
+    agentName: "vcm-architect-scaffold-worker",
+    commentStyle: "html",
+    category: "agent-architect-scaffold-worker",
+    content: renderArchitectScaffoldWorkerHarnessRules()
   }
 ];
 
@@ -349,6 +368,17 @@ const WHOLE_FILES = [
     )
   },
   {
+    path: ".claude/skills/restart-architect/SKILL.md",
+    category: "skill",
+    mode: 0o644,
+    content: renderSkillFile(
+      "Restart Architect Skill",
+      "restart-architect",
+      "Use after Architect completes and commits architecture planning and scaffold work.",
+      renderRestartArchitectSkillRules()
+    )
+  },
+  {
     path: ".ai/tools/request-gate-review",
     category: "runtime-tool",
     mode: 0o755,
@@ -365,6 +395,12 @@ const WHOLE_FILES = [
     category: "runtime-tool",
     mode: 0o755,
     content: renderCheckScaffoldLedgerTool()
+  },
+  {
+    path: ".ai/tools/request-architect-restart",
+    category: "runtime-tool",
+    mode: 0o755,
+    content: renderRequestArchitectRestartTool()
   },
   {
     path: ".ai/tools/run-long-check",
@@ -605,6 +641,7 @@ function fixedDirectories() {
     ".claude/skills/vcm-gate-review/",
     ".claude/skills/vcm-report-harness-issue/",
     ".claude/skills/vcm-propose-memory/",
+    ".claude/skills/restart-architect/",
     ".ai/vcm/translations/",
     ".ai/vcm/gate-reviews/",
     ".ai/tools/",
@@ -669,6 +706,9 @@ async function installManagedFile({ projectRoot, definition, dryRun, operations 
   if (definition.memoryBlock) {
     nextContent = ensureVcmMemoryBlock(nextContent);
   }
+  if (definition.agentName === "architect") {
+    nextContent = ensureAgentTool(nextContent, "Agent");
+  }
 
   await writeIfChanged({
     targetPath,
@@ -715,9 +755,30 @@ function renderNewManagedFile(definition, block) {
     const frontmatter = AGENT_FRONTMATTER[definition.agentName];
     const tools = frontmatter.tools ?? "Read, Grep, Glob, Bash, Edit, Write";
     const model = frontmatter.model ? `\nmodel: ${frontmatter.model}` : "";
-    return `---\nname: ${definition.agentName}\ndescription: ${frontmatter.description}\ntools: ${tools}${model}\n---\n\n# ${definition.title}\n\n${block}${suffix ? `\n\n${suffix}` : ""}\n`;
+    const effort = frontmatter.effort ? `\neffort: ${frontmatter.effort}` : "";
+    return `---\nname: ${definition.agentName}\ndescription: ${frontmatter.description}\ntools: ${tools}${model}${effort}\n---\n\n# ${definition.title}\n\n${block}${suffix ? `\n\n${suffix}` : ""}\n`;
   }
   return `# ${definition.title}\n\n${block}${suffix ? `\n\n${suffix}` : ""}\n`;
+}
+
+function ensureAgentTool(content, requiredTool) {
+  const frontmatterMatch = content.match(/^---\r?\n[\s\S]*?\r?\n---/);
+  if (!frontmatterMatch) {
+    return content;
+  }
+
+  const toolsMatch = frontmatterMatch[0].match(/^tools:\s*(.*)$/m);
+  if (!toolsMatch) {
+    return content.replace(/^(---\r?\n[\s\S]*?)(\r?\n---)/, `$1\ntools: ${requiredTool}$2`);
+  }
+
+  const tools = toolsMatch[1].split(",").map((tool) => tool.trim()).filter(Boolean);
+  if (tools.includes(requiredTool)) {
+    return content;
+  }
+
+  const nextTools = [...tools, requiredTool].join(", ");
+  return content.replace(frontmatterMatch[0], frontmatterMatch[0].replace(toolsMatch[0], `tools: ${nextTools}`));
 }
 
 function migrateLegacyManagedFile(definition, currentContent, block) {

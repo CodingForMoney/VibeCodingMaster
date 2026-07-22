@@ -703,6 +703,11 @@ async function writeHarnessFiles(repoRoot: string): Promise<void> {
   await writeFile(path.join(taskRepoRoot, ".claude/skills/vcm-gate-review/SKILL.md"), "# Gate Review Skill\n", "utf8");
   await writeFile(path.join(taskRepoRoot, ".ai/tools/request-gate-review"), "#!/usr/bin/env python3\n", "utf8");
   await writeFile(path.join(taskRepoRoot, ".ai/vcm/handoffs/architecture-brief.md"), validArchitectureBrief(), "utf8");
+  await writeFile(
+    path.join(taskRepoRoot, ".ai/vcm/handoffs/architecture-evidence.md"),
+    "# Architecture Evidence\n\nArchitecture Evidence Status: complete\n",
+    "utf8"
+  );
   await writeFile(path.join(taskRepoRoot, ".ai/vcm/handoffs/architecture-plan.md"), "# Architecture Plan\n", "utf8");
 }
 

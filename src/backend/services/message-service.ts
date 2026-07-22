@@ -81,6 +81,11 @@ export interface MessageServiceDeps {
   dispatchConfirmationEnabled?: boolean;
   dispatchConfirmationRetryDelaysMs?: number[];
   dispatchConfirmationFailureDelayMs?: number;
+  onRouteDelivered?: (input: {
+    repoRoot: string;
+    taskSlug: string;
+    message: VcmRoleMessage;
+  }) => Promise<void> | void;
 }
 
 const PM_ROLE: VcmRoleName = "project-manager";
@@ -226,6 +231,11 @@ export function createMessageService(deps: MessageServiceDeps): MessageService {
       }).catch(() => undefined);
     }
     scheduleDispatchConfirmation(input, delivered, session.id);
+    await deps.onRouteDelivered?.({
+      repoRoot: input.repoRoot,
+      taskSlug: input.taskSlug,
+      message: delivered
+    });
 
     return {
       message: delivered,

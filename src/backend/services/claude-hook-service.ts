@@ -23,6 +23,7 @@ import type { SessionService } from "./session-service.js";
 import { getTaskRuntimeRepoRoot, type TaskService } from "./task-service.js";
 import type { TranslationService } from "./translation-service.js";
 import type { TranslationWorkerService } from "./translation-worker-service.js";
+import type { ArchitectRestartService } from "./architect-restart-service.js";
 
 const MAX_ROLE_RETRY_ATTEMPTS = 20;
 const ROLE_RETRY_BASE_DELAY_MS = 60_000;
@@ -71,6 +72,10 @@ export interface ClaudeHookServiceDeps {
   autoMemoryService?: Pick<AutoMemoryService, "isRoleMemoryTurn" | "handleRoleHook" | "handleHarnessEngineerHook">;
   gatewayService?: Pick<GatewayService, "handlePmStop" | "handleRoleStopFailure">;
   jobGuard?: Pick<JobGuardService, "evaluateStop" | "notePromptSubmitted">;
+  architectRestartService?: Pick<
+    ArchitectRestartService,
+    "recordArchitectStop" | "recordRouteAccepted"
+  >;
 }
 
 export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHookService {
@@ -302,6 +307,13 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
       role: input.role,
       prompt: stringOrUndefined(input.event.prompt)
     });
+    if (submitted) {
+      await deps.architectRestartService?.recordRouteAccepted(
+        context.project.repoRoot,
+        context.taskSlug,
+        submitted
+      );
+    }
 
     return {
       ok: true,
@@ -545,6 +557,13 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
         boundaryKind: "end",
         occurredAt: session.lastTurnEndedAt ?? session.updatedAt
       });
+    }
+    if (eventName === "Stop" && input.role === "architect" && session) {
+      await deps.architectRestartService?.recordArchitectStop(
+        context.project.repoRoot,
+        context.taskSlug,
+        session.id
+      );
     }
     if (options.notifyGateway && session && input.role === "project-manager") {
       void deps.gatewayService?.handlePmStop({

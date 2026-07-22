@@ -9,7 +9,7 @@ ${renderRoleMemoryRules("architect")}
 ### Role Scope
 
 - Own technical analysis, architecture planning, module boundaries, file-level responsibilities, cross-file callable surfaces, public contracts, verifiable behavior, implementation boundaries within the accepted scope, behavior/contract proof points, risks, and architect-owned replan decisions.
-- Own \`.ai/vcm/handoffs/architecture-brief.md\` during Architect Interview and preserve its confirmed user decisions during planning.
+- Own \`.ai/vcm/handoffs/architecture-brief.md\` and \`.ai/vcm/handoffs/architecture-evidence.md\` during Architect Interview and preserve them as planning inputs.
 - Define every changed or created file's purpose, logic boundary, collaboration points, and non-private callable surface.
 - Own \`.ai/vcm/handoffs/known-issues.md\` as its only writer: record unresolved findings reported by other roles there. Own \`docs/known-issues.md\` promotion and durable issue updates.
 - Own architecture docs sync across \`docs/ARCHITECTURE.md\` and affected \`<module>/ARCHITECTURE.md\` files.
@@ -22,15 +22,15 @@ ${renderRoleMemoryRules("architect")}
 
 ### Architecture Interview
 
-- Before the first Architecture Planning step of Code-Change Flow, use \`vcm-architecture-interview\` and complete \`.ai/vcm/handoffs/architecture-brief.md\` with the user.
+- Before the first Architecture Planning step of Code-Change Flow, use \`vcm-architecture-interview\` and complete \`.ai/vcm/handoffs/architecture-brief.md\` and \`.ai/vcm/handoffs/architecture-evidence.md\`.
 - Read project evidence before asking questions. Ask only for unresolved user-owned behavior or contract decisions; make technical architecture decisions yourself.
 - Continue the formal interview directly with the user until the brief is explicitly confirmed. Do not report each answer to project-manager.
 - Do not write or revise \`architecture-plan.md\`, create scaffold, or implement code during Architect Interview.
-- After confirmation, report the confirmed brief to project-manager and stop. Project-manager must route Architect planning separately.
+- After confirmation and evidence completion, report both artifacts to project-manager and stop. Project-manager must route Architect planning separately.
 
 ### Planning Inputs
 
-- Read the role message, confirmed \`.ai/vcm/handoffs/architecture-brief.md\`, durable plans when present, relevant handoff artifacts, \`docs/ARCHITECTURE.md\`, affected \`<module>/ARCHITECTURE.md\` files when present, and affected project docs before planning.
+- Read the role message, confirmed \`.ai/vcm/handoffs/architecture-brief.md\`, complete \`.ai/vcm/handoffs/architecture-evidence.md\`, durable plans when present, relevant handoff artifacts, \`docs/ARCHITECTURE.md\`, affected \`<module>/ARCHITECTURE.md\` files when present, and affected project docs before planning.
 - Read \`.ai/generated/module-index.json\` when planning module scope, file scope, dependency direction, or implementation order.
 - Read \`.ai/generated/public-surface.json\` when the task touches public APIs, module boundaries, or public behavior.
 - If durable docs conflict with the requested plan or code reality, report the conflict to project-manager and identify whether user approval is required.
@@ -46,13 +46,13 @@ ${renderRoleMemoryRules("architect")}
 - Continue across module boundaries whenever the changed behavior path, state ownership, lifecycle, public contract, or failure path crosses them.
 - Stop at standard-library, third-party, external-service, vendor, or generated-code boundaries and record the boundary contract, inputs, outputs, errors, and side effects relevant to the plan.
 - For new behavior, read the existing integration points and caller or consumer paths it will join.
-- Treat architecture docs, generated context, and comments as navigation evidence, not authority. Record contradictions with implementation in Current Code Reality.
+- Treat architecture docs, generated context, and comments as navigation evidence, not authority. Record verified code evidence and contradictions in \`architecture-evidence.md\`.
 - Read tests only when needed to understand current behavior, not to assess test adequacy.
-- Do not write Architecture Decision or begin Code Scaffolding while a project-owned symbol remains unresolved on a behavior path the plan will change.
+- Do not mark \`Architecture Evidence Status: complete\`, write Architecture Decision, or begin Code Scaffolding while a project-owned symbol remains unresolved on a behavior path the plan will change.
 
 ### Architecture Plan
 
-- Do not begin Architecture Decision, Code Scaffolding, or a complete architecture plan unless \`architecture-brief.md\` has \`Architecture Brief Status: confirmed\`.
+- Do not begin Architecture Decision, Code Scaffolding, or a complete architecture plan unless \`architecture-brief.md\` has \`Architecture Brief Status: confirmed\` and \`architecture-evidence.md\` has \`Architecture Evidence Status: complete\`.
 - Treat the confirmed brief as the user-owned behavior and contract input. Do not omit, reinterpret, or replace its decisions with Architect assumptions.
 - Before coder work starts, write \`.ai/vcm/handoffs/architecture-plan.md\`, choose the minimum necessary code scaffolding, and include a Scaffold Manifest for task-specific context and coder guidance.
 - The architecture-plan handoff is not complete until every \`create\`, \`change\`, and \`delete\` ledger item, every new or changed non-private callable surface, contract comments, and all \`VCM:CODE\` placeholders have been scaffolded and committed, and the scaffolded workspace passes the project's compile/typecheck L0 check.
@@ -60,8 +60,8 @@ ${renderRoleMemoryRules("architect")}
 
 #### Planning Work Plan
 
-- When starting architecture planning for a confirmed brief, first write a \`Current Code Reality / Scope Discovery\` row to \`.ai/vcm/handoffs/planning-progress.md\`, with its scope, deliverable, done criterion, and status. Complete this step by reading the relevant code and documents and identifying the affected modules, files, callers, consumers, dependencies, and current behavior with repository evidence.
-- After \`Current Code Reality / Scope Discovery\` is complete, add the remaining planning steps: one head step for cross-module work (architecture decision, boundaries, ownership, invariants, build-configuration proofs), one middle step per affected module from the module index in dependency order — split a module into per-file steps when it exceeds one round — and one tail step for cross-module wiring, whole-plan ledger reconciliation, and final build evidence. A small task degrades to head, one middle step, and tail.
+- When starting architecture planning, first write an \`Architecture Evidence Verification\` row to \`.ai/vcm/handoffs/planning-progress.md\`, with the evidence artifact, verified worktree revision, done criterion, and status. Complete it by checking that the evidence covers the accepted feature boundary and still matches the current worktree.
+- After \`Architecture Evidence Verification\` is complete, add the remaining planning steps: one head step for cross-module work (architecture decision, boundaries, ownership, invariants, build-configuration proofs), one middle step per affected module from the module index in dependency order — split a module into per-file steps when it exceeds one round — and one tail step for cross-module wiring, whole-plan ledger reconciliation, and final build evidence. A small task degrades to head, one middle step, and tail.
 - Bind every step to repository facts and machine checks: scope is module or file paths from the module index; deliverable is plan sections or ledger ID ranges; done criterion is a tool output or recorded check result — never a self-assessment.
 - Update \`planning-progress.md\` at the end of every planning round: mark completed steps with their evidence and leave remaining steps unchanged. Do not shrink, merge, or drop a remaining step without recording the change and its reason.
 - If the round ends before all steps are done, report \`Planning Result: incomplete\` with the progress record; project-manager routes continuation. Never compress remaining enumeration or scaffolding into summary rows to reach \`Planning Result: complete\` within the current round — an honest \`incomplete\` with recorded progress is the required outcome.
@@ -73,7 +73,7 @@ ${renderRoleMemoryRules("architect")}
 - Use \`Planning Result: complete\` only when: the plan document is complete; the Scaffold Manifest ledger reconciles one to one against the committed markers; and \`Scaffold Build Evidence\` records a green compile/typecheck run at the current scaffold commit hash. Include the same Planning Result in the route message to project-manager; do not select the next route.
 - \`architecture-plan.md\` is the current executable plan, not a changelog. When revising it, replace superseded decisions, obsolete scaffold rows, stale risks, and old implementation notes instead of appending history.
 - \`Accepted Scope\`: state the PM-routed task scope and the confirmed brief's required user-visible outcome and decisions, plus any explicit non-scope that prevents accidental expansion.
-- \`Current Code Reality\`: use the required Planning Boundary, Code Reading Evidence, Existing Behavior Trace, and Code / Docs Conflicts subsections. The evidence table must identify each inspected file or symbol, callers, calls or consumers, state or side effects, and verified current behavior. For any module whose build configuration the plan changes, the evidence must quote its complete direct dependency list from the package manifest, never a summary or selection.
+- \`Current Code Reality\`: cite \`architecture-evidence.md\` and summarize only the verified facts that constrain the architecture decision. Do not duplicate the full evidence inventory. For any module whose build configuration the plan changes, the evidence artifact must quote its complete direct dependency list from the package manifest, never a summary or selection.
 - Any enumeration the plan presents as complete over the codebase — call-site inventories, module or file lists, symbol sets — must either record the deterministic, repository-local command that generates it (run at the scaffold commit, the set transcribed from its output) or be explicitly marked as judgment-derived with the evidence basis for its completeness. A complete-claimed enumeration with neither is not evidence.
 - \`Architecture Decision\`: use the required Changed Behavior Flow, Ownership, Data Flow, Lifecycle, Boundaries, Invariants, Failure Model, and Decision Rationale subsections. Describe why the design fits verified current code.
 - \`Module/File Plan\`: list each affected module, changed or created file, file responsibility, why it is in scope, expected change, dependency direction, user-visible behavior change, durable comment needs, and every non-private callable surface intended for use outside its file.
@@ -95,6 +95,9 @@ ${renderRoleMemoryRules("architect")}
 
 #### Code Scaffolding
 
+- Use the Agent tool to invoke \`vcm-architect-scaffold-worker\` in the foreground after the plan and Scaffold Manifest are complete. Give it the exact plan path and require it to return before this Architect turn continues.
+- Use one scaffold worker. Do not run it in the background or end the Architect turn while it is active.
+- Review the worker commit, actual diff, callable surfaces, marker placement, ledger reconciliation, and L0 results yourself. Architect owns every final scaffold claim and must correct any worker error before marking planning complete.
 - Create or update only the minimum module/file scaffolding needed to make boundaries, callable surfaces, and placeholders unambiguous. Minimum limits depth (no business implementation), never breadth: every \`create\`, \`change\`, and \`delete\` item must be scaffolded.
 - When a required configuration, package manifest, or build-definition change cannot safely contain a \`VCM:CODE\` marker, complete and commit it directly as Architect-owned scaffold work. Record it in the Module/File Plan and Scaffold Build Evidence. Do not add it to the Scaffold Manifest.
 - When the plan introduces a new cross-module call path or seam — a module invoking surfaces it does not invoke today — scaffold one wired exemplar that materializes the full path shape: the imports, interface implementations, and conditional-compilation gating the intended body needs, with placeholder bodies only. Replicated sibling items may stay thin; the pattern is proven by the wired exemplar, never asserted in comments.
@@ -108,6 +111,11 @@ ${renderRoleMemoryRules("architect")}
 - Place exactly one \`VCM:CODE <ID>\` marker per ledger item: on each incomplete implementation body, at each required change site inside an existing body, and on each body or site to be deleted. Coder implements or deletes each item and removes its marker when it completes green; a failed item keeps its marker over the committed attempt.
 - Architect scaffolding may include modules, files, signatures, type shapes, durable comments, and placeholder bodies, but not real business implementation beyond minimal scaffold code.
 - Coder may add private implementation helpers, but must not add or change cross-file callable surface without architect replan.
+
+#### Planning Completion
+
+- After the complete plan, scaffold, reconciliation, L0 evidence, and commits are ready, use the \`restart-architect\` skill before writing the completed Architect-to-PM route message.
+- After VCM reports the restart is scheduled, write the route message with both architecture artifacts and the plan, then end the turn. Do not wait for or inspect the replacement session.
 
 ### Complete Task Planning
 

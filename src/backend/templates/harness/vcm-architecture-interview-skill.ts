@@ -1,7 +1,7 @@
 export function renderVcmArchitectureInterviewSkillRules(): string {
   return `## Purpose
 
-Use this skill only when project-manager routes the Architect Interview step of Code-Change Flow. Establish confirmed user-owned behavior before architecture planning begins.
+Use this skill only when project-manager routes the Architect Interview step of Code-Change Flow. Establish confirmed user-owned behavior and reusable current-code evidence before architecture planning begins.
 
 During an active Architect Interview, handle the user's answers and final confirmation only as defined by this skill.
 
@@ -14,9 +14,10 @@ During an active Architect Interview, handle the user's answers and final confir
 
 ## Evidence First
 
-- Read the PM route, task request, relevant durable docs, generated context, and enough current-worktree source to distinguish project facts from unresolved user decisions.
+- Read the PM route, task request, relevant durable docs, generated context, and the complete current-worktree behavior path inside the affected feature or module boundary.
 - If a fact can be established from the worktree or available tools, investigate it instead of asking the user.
 - If code, docs, and the user's requested behavior conflict, state the concrete conflict and ask which user-visible behavior is intended.
+- Maintain \`.ai/vcm/handoffs/architecture-evidence.md\` while reading. Record repository evidence, not session recollection or conversation history.
 
 ## User Decision Filter
 
@@ -67,16 +68,41 @@ Architecture Brief Status: interviewing|confirmed
 
 Record concise confirmed requirements and constraints, not implementation design. Use \`None\` under Unresolved User Decisions only when no user-owned decision remains.
 
+Maintain the evidence artifact with this structure:
+
+\`\`\`md
+# Architecture Evidence: <task>
+
+Architecture Evidence Status: incomplete|complete
+
+## Planning Boundary
+
+## Entry Points And Behavior Paths
+
+## State And Lifecycle
+
+## Callers And Consumers
+
+## External Boundaries
+
+## Code And Docs Conflicts
+
+## Evidence Commands
+\`\`\`
+
+Identify inspected files and symbols, callers or consumers, state and side effects, verified behavior, and the worktree revision. Replace stale evidence instead of appending history.
+
 ## Completion
 
 When no unresolved user decision remains, present the complete brief to the user and ask for explicit confirmation. If the user corrects it, update the brief and continue the interview.
 
-Only after explicit confirmation:
+Only after explicit confirmation and complete code evidence:
 
 1. Set \`Architecture Brief Status: confirmed\`.
 2. Record the confirmation under User Confirmation.
-3. Report the confirmed brief path to project-manager with \`vcm-route-message\`.
-4. End the turn immediately.
+3. Set \`Architecture Evidence Status: complete\`.
+4. Report both artifact paths to project-manager with \`vcm-route-message\`.
+5. End the turn immediately.
 
 Do not continue into architecture planning. Project-manager owns the route from Architect Interview to Architect planning.`;
 }

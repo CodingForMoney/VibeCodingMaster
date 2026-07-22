@@ -132,6 +132,7 @@ const CODE_DIFF_ANALYSIS_FIELDS = [
 const SOURCE_ARTIFACTS: Record<GateReviewGate, string[]> = {
   "architecture-plan": [
     ".ai/vcm/handoffs/architecture-brief.md",
+    ".ai/vcm/handoffs/architecture-evidence.md",
     ".ai/vcm/handoffs/architecture-plan.md"
   ],
   "validation-adequacy": [
@@ -320,6 +321,30 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
           gate,
           record: index.gates[gate],
           message: architectureBriefError
+        };
+      }
+      const architectureEvidenceError = await readArchitectureEvidenceError(deps.fs, context.taskRepoRoot);
+      if (architectureEvidenceError) {
+        index = applyGateState(index, gate, {
+          status: "failed",
+          decision: undefined,
+          error: architectureEvidenceError,
+          exceptionReason: undefined,
+          requestId: undefined,
+          requestPath: undefined,
+          inputHash: undefined,
+          requestedAt: undefined,
+          startedAt: undefined,
+          completedAt: now(),
+          callbackStatus: "not_sent",
+          callbackError: undefined
+        }, now(), true);
+        await saveIndex(deps.fs, context.taskRepoRoot, index);
+        return {
+          status: "failed_to_start",
+          gate,
+          record: index.gates[gate],
+          message: architectureEvidenceError
         };
       }
     }
@@ -1165,6 +1190,25 @@ async function readArchitectureBriefError(
   }
   if (!/^\s*Architecture Brief Status\s*:\s*confirmed\s*$/im.test(content)) {
     return `${relativePath} is not confirmed. Obtain explicit user confirmation before architecture planning.`;
+  }
+  return undefined;
+}
+
+async function readArchitectureEvidenceError(
+  fs: FileSystemAdapter,
+  taskRepoRoot: string
+): Promise<string | undefined> {
+  const relativePath = ".ai/vcm/handoffs/architecture-evidence.md";
+  const absolutePath = resolveRepoPath(taskRepoRoot, relativePath);
+  if (!await fs.pathExists(absolutePath)) {
+    return `${relativePath} is missing. Complete architecture evidence before requesting architecture-plan review.`;
+  }
+  const content = await fs.readText(absolutePath);
+  if (content.trim().length === 0) {
+    return `${relativePath} is empty. Complete architecture evidence before requesting architecture-plan review.`;
+  }
+  if (!/^\s*Architecture Evidence Status\s*:\s*complete\s*$/im.test(content)) {
+    return `${relativePath} is incomplete. Finish current-worktree evidence before requesting architecture-plan review.`;
   }
   return undefined;
 }

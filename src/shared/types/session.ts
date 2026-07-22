@@ -206,4 +206,5 @@ export interface StartRoleSessionRequest {
   permissionMode?: ClaudePermissionMode;
   model?: SessionModel;
   effort?: SessionEffort;
+  appendSystemPrompt?: string;
 }

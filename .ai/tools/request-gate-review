@@ -22,7 +22,11 @@ REPORTS = {
     "code-diff": ".ai/vcm/gate-reviews/code-diff-review.md",
 }
 SOURCE_ARTIFACTS = {
-    "architecture-plan": [".ai/vcm/handoffs/architecture-plan.md"],
+    "architecture-plan": [
+        ".ai/vcm/handoffs/architecture-brief.md",
+        ".ai/vcm/handoffs/architecture-evidence.md",
+        ".ai/vcm/handoffs/architecture-plan.md",
+    ],
     "validation-adequacy": [
         ".ai/vcm/handoffs/architecture-plan.md",
         ".ai/vcm/handoffs/test-report.md",

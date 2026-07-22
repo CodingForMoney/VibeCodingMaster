@@ -214,7 +214,8 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
         launchMode === "resume",
         model,
         effort,
-        modelSettingsOverride
+        modelSettingsOverride,
+        input.appendSystemPrompt
       ),
       cwd: taskRepoRoot
     };

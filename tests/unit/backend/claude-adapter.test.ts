@@ -150,6 +150,35 @@ describe("createClaudeAdapter", () => {
     });
   });
 
+  it("appends a restoration system prompt for a fresh role session", () => {
+    expect(adapter.buildRoleStartCommand(
+      "architect",
+      "claude",
+      "bypassPermissions",
+      undefined,
+      false,
+      "fable",
+      "high",
+      undefined,
+      "Read the completed architecture artifacts."
+    )).toEqual({
+      command: "claude",
+      args: [
+        "--agent",
+        "architect",
+        "--model",
+        "fable",
+        "--effort",
+        "high",
+        "--permission-mode",
+        "bypassPermissions",
+        "--append-system-prompt",
+        "Read the completed architecture artifacts."
+      ],
+      display: "claude --agent architect --model fable --effort high --permission-mode bypassPermissions --append-system-prompt 'Read the completed architecture artifacts.'"
+    });
+  });
+
   it("builds resume commands with the persisted Claude session id", () => {
     expect(adapter.buildRoleStartCommand(
       "architect",

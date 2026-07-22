@@ -48,6 +48,7 @@ docs/CODING_STANDARDS.md
 .claude/agents/translator.md
 .claude/agents/harness-engineer.md
 .claude/agents/vcm-coder-worker.md
+.claude/agents/vcm-architect-scaffold-worker.md
 .claude/skills/vcm-route-message/SKILL.md
 .claude/skills/vcm-task-state/SKILL.md
 .claude/skills/vcm-final-acceptance/SKILL.md
@@ -56,12 +57,14 @@ docs/CODING_STANDARDS.md
 .claude/skills/vcm-gate-review/SKILL.md
 .claude/skills/vcm-report-harness-issue/SKILL.md
 .claude/skills/vcm-propose-memory/SKILL.md
+.claude/skills/restart-architect/SKILL.md
 .ai/tools/check-durable-docs
 .ai/tools/generate-module-index
 .ai/tools/generate-public-surface
 .ai/tools/request-gate-review
 .ai/tools/update-task-state
 .ai/tools/check-scaffold-ledger
+.ai/tools/request-architect-restart
 .ai/tools/run-long-check
 .ai/tools/watch-job
 .ai/tools/vcm-bash-guard
@@ -205,6 +208,7 @@ Current runtime paths include:
 <taskRepoRoot>/.ai/vcm/handoffs/messages/
 <taskRepoRoot>/.ai/vcm/handoffs/role-commands/
 <taskRepoRoot>/.ai/vcm/handoffs/architecture-brief.md
+<taskRepoRoot>/.ai/vcm/handoffs/architecture-evidence.md
 <taskRepoRoot>/.ai/vcm/handoffs/architecture-plan.md
 <taskRepoRoot>/.ai/vcm/handoffs/architecture-diagnosis.md
 <taskRepoRoot>/.ai/vcm/handoffs/coder-completion.md
@@ -366,10 +370,13 @@ PM report, or workflow action requires an explicit user instruction.
 ## 10. Architecture Interview, Plan, and Scaffold
 
 Before architecture planning, Architect uses \`vcm-architecture-interview\` to
-resolve user-owned behavior and contract decisions one question at a time.
-Facts available from the worktree are investigated rather than asked. The
-confirmed result lives in \`.ai/vcm/handoffs/architecture-brief.md\`; Architect
-does not plan, scaffold, or implement during the interview.
+resolve user-owned behavior and contract decisions one question at a time and
+to capture current-worktree code evidence. Facts available from the worktree
+are investigated rather than asked. User decisions live in
+\`.ai/vcm/handoffs/architecture-brief.md\`; the bounded code paths, lifecycle,
+callers, consumers, external boundaries, and code/doc conflicts live in
+\`.ai/vcm/handoffs/architecture-evidence.md\`. Architect does not plan,
+scaffold, or implement during the interview.
 
 After PM routes planning from the confirmed brief, Architect writes
 `.ai/vcm/handoffs/architecture-plan.md`.
@@ -394,6 +401,19 @@ the manifest, not in permanent source comments.
 Code scaffolding may create files and define non-private callable surfaces, but
 incomplete implementation must use `VCM:CODE <Scaffold Manifest ID>` markers.
 Coder removes/completes those markers and reports Scaffold Completion by ID.
+
+After the plan and Scaffold Manifest are complete, Architect invokes one
+foreground `vcm-architect-scaffold-worker`. The worker uses Opus with xhigh
+effort in an independent context, creates and validates the exact scaffold, and
+commits it. Architect waits for the worker, reviews its actual commit and
+evidence, and owns any correction.
+
+After completed planning and scaffold commits, Architect runs the
+`restart-architect` skill before writing its completed route to PM. VCM waits
+for normal Architect Stop and PM's actual acceptance of that route, then starts
+a fresh Architect session with the same launch settings and a short restoration
+system prompt. No restart occurs for incomplete planning, Debug/Diagnosis/docs
+work, StopFailure, or task close.
 
 The active architecture plan should describe the full accepted task scope. It
 may include implementation order, but that order must not defer requested scope.
@@ -446,10 +466,11 @@ started, or failed.
 Input policy:
 
 - `architecture-plan` requires a complete, confirmed
-  `.ai/vcm/handoffs/architecture-brief.md` and uses
+  `.ai/vcm/handoffs/architecture-brief.md`, a complete
+  `.ai/vcm/handoffs/architecture-evidence.md`, and uses
   `.ai/vcm/handoffs/architecture-plan.md` as its core plan input. A missing,
-  incomplete, or unconfirmed brief fails the gate request; a missing or empty
-  plan is `not_required`.
+  incomplete, or unconfirmed brief/evidence artifact fails the gate request; a
+  missing or empty plan is `not_required`.
 - `validation-adequacy` uses `.ai/vcm/handoffs/test-report.md` as its core
   input. Missing or empty core input is `not_required`.
 - `code-diff` is triggered by PM after Coder `Decision: ready_for_review`, an
@@ -465,7 +486,7 @@ Input policy:
   so the review receives the confirmed root cause and completed-fix evidence,
   not only the original Architect route command.
 - Gates avoid duplicate review by comparing input hashes. Architecture review
-  binds the confirmed brief and plan to current scaffold/code evidence; validation review binds the
+  binds the confirmed brief, code evidence, and plan to current scaffold/code evidence; validation review binds the
   test report to current non-document code/test evidence and `docs/TESTING.md`;
   code-diff review binds the selected commit range and diff.
 

@@ -19,7 +19,8 @@ export interface ClaudeAdapter {
     resume?: boolean,
     model?: SessionModel,
     effort?: SessionEffort,
-    settingsOverride?: Record<string, unknown>
+    settingsOverride?: Record<string, unknown>,
+    appendSystemPrompt?: string
   ): { command: string; args: string[]; display: string };
 }
 
@@ -42,7 +43,7 @@ export function createClaudeAdapter(runner: CommandRunner): ClaudeAdapter {
 
       return result.stdout.trim();
     },
-    buildRoleStartCommand(role, command = "claude", permissionMode = "default", claudeSessionId, resume = false, model = "default", effort = "default", settingsOverride) {
+    buildRoleStartCommand(role, command = "claude", permissionMode = "default", claudeSessionId, resume = false, model = "default", effort = "default", settingsOverride, appendSystemPrompt) {
       const args = ["--agent", role];
       const sessionSettings = { ...settingsOverride };
       if (claudeSessionId) {
@@ -61,6 +62,9 @@ export function createClaudeAdapter(runner: CommandRunner): ClaudeAdapter {
       }
       if (permissionMode !== "default") {
         args.push("--permission-mode", permissionMode);
+      }
+      if (appendSystemPrompt) {
+        args.push("--append-system-prompt", appendSystemPrompt);
       }
 
       return {

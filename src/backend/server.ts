@@ -13,6 +13,7 @@ import { createGitAdapter } from "./adapters/git-adapter.js";
 import { createAppSettingsService, type AppSettingsService } from "./services/app-settings-service.js";
 import { createCcrIntegrationService, type CcrIntegrationService } from "./services/ccr-integration-service.js";
 import { createAutoMemoryService, type AutoMemoryService } from "./services/auto-memory-service.js";
+import { createArchitectRestartService, type ArchitectRestartService } from "./services/architect-restart-service.js";
 import { createClaudeTranscriptService } from "./services/claude-transcript-service.js";
 import { createGateReviewService, type GateReviewService } from "./services/gate-review-service.js";
 import { createHarnessFeedbackService, type HarnessFeedbackService } from "./services/harness-feedback-service.js";
@@ -81,6 +82,7 @@ export interface ServerDeps {
   taskService: TaskService;
   taskCloseService: TaskCloseService;
   taskWorkflowService: TaskWorkflowService;
+  architectRestartService: ArchitectRestartService;
   sessionService: SessionService;
   artifactService: ArtifactService;
   harnessService: HarnessService;
@@ -177,7 +179,8 @@ export async function createServer(deps: ServerDeps, options: CreateServerOption
     sessionService: deps.sessionService,
     commandDispatcher: deps.commandDispatcher,
     translationService: deps.translationService,
-    roundService: deps.roundService
+    roundService: deps.roundService,
+    architectRestartService: deps.architectRestartService
   });
   registerArtifactRoutes(app, {
     projectService: deps.projectService,
@@ -322,12 +325,19 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     sessionService,
     artifactService
   });
+  const architectRestartService = createArchitectRestartService({
+    fs,
+    taskService,
+    sessionService
+  });
   const messageService = createMessageService({
     fs,
     runtime,
     sessionService,
     taskService,
-    taskWorkflowService
+    taskWorkflowService,
+    onRouteDelivered: ({ repoRoot, taskSlug, message }) =>
+      architectRestartService.recordRouteDelivered(repoRoot, taskSlug, message)
   });
   const taskLaunchService = createTaskLaunchService({
     projectService,
@@ -389,7 +399,8 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     translationService,
     roundService,
     projectService,
-    taskWorkflowService
+    taskWorkflowService,
+    architectRestartService
   });
   const gatewayService = createGatewayService({
     fs,
@@ -426,7 +437,8 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     autoMemoryService,
     gatewayService,
     jobGuard: createJobGuardService(),
-    translationWorkerService
+    translationWorkerService,
+    architectRestartService
   });
   const turnReconciler = createTurnReconcilerService({
     sessionService,
@@ -471,6 +483,7 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     taskService,
     taskCloseService,
     taskWorkflowService,
+    architectRestartService,
     sessionService,
     artifactService,
     harnessService,

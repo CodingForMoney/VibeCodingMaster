@@ -31,6 +31,7 @@ layers plus supporting tools.
   task close, shared by the GUI endpoint and the gateway), `session-service`, `round-service`,
   `runtime-coordinator-service`, `runtime-recovery-service`,
   `turn-reconciler-service`, `message-service`, `task-workflow-service`,
+  `architect-restart-service`,
   `artifact-service`, `harness-service`, `harness-feedback-service`,
   `auto-memory-service`,
   `gate-review-service`, `translation-service`/`translation-worker-service`,
@@ -235,6 +236,31 @@ participates in Round tracking through that workflow role's hooks.
 is reconciled through terminal StopFailure; and a live turn with no hook, terminal,
 or transcript activity for 30 minutes is interrupted before StopFailure recovery.
 The reconciler never treats inactivity alone as successful completion.
+
+## Architect Planning Context Ownership
+
+Architect Interview produces two separate task artifacts: the user-confirmed
+`.ai/vcm/handoffs/architecture-brief.md` and the current-worktree
+`.ai/vcm/handoffs/architecture-evidence.md`. Planning consumes those artifacts
+and writes the executable `architecture-plan.md`; the architecture-plan Gate
+hashes all three so changed evidence invalidates an earlier approval.
+
+Architect delegates exact scaffold execution to one foreground
+`vcm-architect-scaffold-worker` subagent configured with `model: opus` and
+`effort: xhigh`. The worker has an independent context and returns before the
+Architect turn continues. Architect remains responsible for reviewing the
+scaffold commit, ledger reconciliation, and build evidence.
+
+`architect-restart-service` owns the task-local, in-memory deferred restart
+between completed planning and later Architect work. The Architect schedules it
+through `.ai/tools/request-architect-restart` before writing the completed route
+to PM. The service starts a fresh Architect session only after a normal
+Architect Stop, delivery of that Architect-to-PM message, and PM's matching
+`UserPromptSubmit` confirmation. It preserves the selected permission, model,
+and effort and launches Claude Code with a short `--append-system-prompt` that
+points to the completed brief, evidence, plan, scaffold, and Gate report. It
+does not inject a user prompt or create an extra turn. StopFailure and task close
+never execute a pending restart.
 
 ## Task Workflow State Ownership
 

@@ -81,7 +81,8 @@ automates it). Run this on every review round, including revision rounds:
 
 For `architecture-plan`, reconstruct the proposed architecture and look for
 design flaws before checking formatting. Read the confirmed
-`.ai/vcm/handoffs/architecture-brief.md`, `.ai/vcm/handoffs/architecture-plan.md`,
+`.ai/vcm/handoffs/architecture-brief.md`, `.ai/vcm/handoffs/architecture-evidence.md`,
+`.ai/vcm/handoffs/architecture-plan.md`,
 `.claude/agents/architect.md`, root `CLAUDE.md`, `docs/ARCHITECTURE.md`,
 affected module `ARCHITECTURE.md` files, `.ai/generated/module-index.json`,
 `.ai/generated/public-surface.json` when public surface may change, and the

@@ -33,6 +33,7 @@ import type { FileSystemAdapter } from "../adapters/filesystem.js";
 import { renderArchitectHarnessRules } from "../templates/harness/architect-agent.js";
 import { renderCoderHarnessRules } from "../templates/harness/coder-agent.js";
 import { renderCoderWorkerHarnessRules } from "../templates/harness/coder-worker-agent.js";
+import { renderArchitectScaffoldWorkerHarnessRules } from "../templates/harness/architect-scaffold-worker-agent.js";
 import {
   renderGateReviewerAgentRules,
   renderRequestGateReviewTool,
@@ -66,6 +67,10 @@ import { renderVcmReportHarnessIssueSkillRules } from "../templates/harness/vcm-
 import { renderVcmRouteMessageSkillRules } from "../templates/harness/vcm-route-message-skill.js";
 import { renderUpdateTaskStateTool, renderVcmTaskStateSkillRules } from "../templates/harness/vcm-task-state-skill.js";
 import { renderCheckScaffoldLedgerTool } from "../templates/harness/check-scaffold-ledger.js";
+import {
+  renderRequestArchitectRestartTool,
+  renderRestartArchitectSkillRules
+} from "../templates/harness/restart-architect-skill.js";
 import type { TerminalRuntime } from "../runtime/terminal-runtime.js";
 import { submitTerminalInput } from "../runtime/terminal-submit.js";
 import { VcmError } from "../errors.js";
@@ -330,6 +335,17 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
     renderRules: renderVcmProposeMemorySkillRules
   },
   {
+    kind: "skill-restart-architect",
+    path: ".claude/skills/restart-architect/SKILL.md",
+    title: "Restart Architect Skill",
+    frontmatter: renderSkillFrontmatter(
+      "restart-architect",
+      "Use after Architect completes and commits architecture planning and scaffold work."
+    ),
+    ownership: "whole-file",
+    renderRules: renderRestartArchitectSkillRules
+  },
+  {
     kind: "agent-gate-reviewer",
     path: ".claude/agents/gate-reviewer.md",
     title: "Gate Reviewer Agent",
@@ -374,6 +390,17 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
     renderRules: renderCoderWorkerHarnessRules
   },
   {
+    kind: "agent-architect-scaffold-worker",
+    path: ".claude/agents/vcm-architect-scaffold-worker.md",
+    title: "VCM Architect Scaffold Worker Agent",
+    frontmatter: renderAgentFrontmatter(
+      "vcm-architect-scaffold-worker",
+      "Foreground Architect worker for exact scaffold execution and scaffold validation.",
+      { model: "opus", effort: "xhigh" }
+    ),
+    renderRules: renderArchitectScaffoldWorkerHarnessRules
+  },
+  {
     kind: "tool-request-gate-review",
     path: ".ai/tools/request-gate-review",
     title: "Request Gate Review Tool",
@@ -395,6 +422,13 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
     renderRules: renderCheckScaffoldLedgerTool
   },
   {
+    kind: "tool-request-architect-restart",
+    path: ".ai/tools/request-architect-restart",
+    title: "Request Architect Restart Tool",
+    ownership: "raw-file",
+    renderRules: renderRequestArchitectRestartTool
+  },
+  {
     kind: "agent-project-manager",
     path: ".claude/agents/project-manager.md",
     title: "Project Manager Agent",
@@ -413,7 +447,8 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
     blankLineBeforeEnd: true,
     frontmatter: renderAgentFrontmatter(
       "architect",
-      "VCM architecture role for plans, module boundaries, public contracts, verifiable behavior, and docs sync."
+      "VCM architecture role for plans, module boundaries, public contracts, verifiable behavior, and docs sync.",
+      { tools: "Read, Grep, Glob, Bash, Edit, Write, Agent" }
     ),
     renderRules: renderArchitectHarnessRules
   },
@@ -1545,6 +1580,9 @@ async function analyzeHarnessFile(
       };
     }
     const insertedContent = `${currentContent.trimEnd()}\n\n${expectedBlock}\n`;
+    const nextContent = definition.kind === "agent-architect"
+      ? ensureAgentTool(insertedContent, "Agent")
+      : insertedContent;
     return {
       definition,
       status: {
@@ -1559,14 +1597,17 @@ async function analyzeHarnessFile(
         action: "insert",
         reason: "File exists but does not contain VCM managed rules."
       },
-      nextContent: definition.memoryBlock ? ensureVcmMemoryBlock(insertedContent) : insertedContent
+      nextContent: definition.memoryBlock ? ensureVcmMemoryBlock(nextContent) : nextContent
     };
   }
 
   const managedVersion = match[1] ? Number(match[1]) : undefined;
   const currentBlock = match[0];
   const blockUpdatedContent = currentContent.replace(managedBlockPattern, expectedBlock);
-  const nextContent = definition.memoryBlock ? ensureVcmMemoryBlock(blockUpdatedContent) : blockUpdatedContent;
+  const memoryUpdatedContent = definition.memoryBlock ? ensureVcmMemoryBlock(blockUpdatedContent) : blockUpdatedContent;
+  const nextContent = definition.kind === "agent-architect"
+    ? ensureAgentTool(memoryUpdatedContent, "Agent")
+    : memoryUpdatedContent;
   const action: HarnessFileAction = currentContent === nextContent ? "ok" : "update";
 
   return {
@@ -1700,6 +1741,26 @@ function renderNewHarnessFile(
     : "";
   const suffix = contentAfterBlock?.trim();
   return `${frontmatter}# ${definition.title}\n\n${block}${suffix ? `\n\n${suffix}` : ""}\n`;
+}
+
+function ensureAgentTool(content: string, requiredTool: string): string {
+  const frontmatterMatch = content.match(/^---\r?\n[\s\S]*?\r?\n---/);
+  if (!frontmatterMatch) {
+    return content;
+  }
+
+  const toolsMatch = frontmatterMatch[0].match(/^tools:\s*(.*)$/m);
+  if (!toolsMatch) {
+    return content.replace(/^(---\r?\n[\s\S]*?)(\r?\n---)/, `$1\ntools: ${requiredTool}$2`);
+  }
+
+  const tools = toolsMatch[1].split(",").map((tool) => tool.trim()).filter(Boolean);
+  if (tools.includes(requiredTool)) {
+    return content;
+  }
+
+  const nextTools = [...tools, requiredTool].join(", ");
+  return content.replace(frontmatterMatch[0], frontmatterMatch[0].replace(toolsMatch[0], `tools: ${nextTools}`));
 }
 
 function migrateLegacyHarnessFile(
@@ -1848,11 +1909,12 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 function renderAgentFrontmatter(
   name: string,
   description: string,
-  options: { tools?: string; model?: string } = {}
+  options: { tools?: string; model?: string; effort?: string } = {}
 ): string {
   const tools = options.tools ?? "Read, Grep, Glob, Bash, Edit, Write";
   const model = options.model ? `\nmodel: ${options.model}` : "";
-  return `---\nname: ${name}\ndescription: ${description}\ntools: ${tools}${model}\n---`;
+  const effort = options.effort ? `\neffort: ${options.effort}` : "";
+  return `---\nname: ${name}\ndescription: ${description}\ntools: ${tools}${model}${effort}\n---`;
 }
 
 function renderSkillFrontmatter(name: string, description: string): string {

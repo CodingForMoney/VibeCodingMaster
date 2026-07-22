@@ -44,6 +44,14 @@ describe("backend E2E Gate Review with mock Claude Code", () => {
     expect(unconfirmedArchitecture.message).toContain("architecture-brief.md is incomplete");
     await writeConfirmedArchitectureBrief(task.worktreePath, task.taskSlug);
 
+    const evidencePath = path.join(task.worktreePath, ".ai/vcm/handoffs/architecture-evidence.md");
+    const completeEvidence = await fs.readFile(evidencePath, "utf8");
+    await fs.rm(evidencePath);
+    const missingEvidenceArchitecture = await requestGateReview(env.app, task.taskSlug, "architecture-plan");
+    expect(missingEvidenceArchitecture.status).toBe("failed_to_start");
+    expect(missingEvidenceArchitecture.message).toContain("architecture-evidence.md is missing");
+    await fs.writeFile(evidencePath, completeEvidence, "utf8");
+
     await fs.writeFile(path.join(task.worktreePath, ".ai/vcm/handoffs/architecture-plan.md"), "", "utf8");
     const emptyArchitecture = await requestGateReview(env.app, task.taskSlug, "architecture-plan");
     expect(emptyArchitecture.status).toBe("not_required");
@@ -77,6 +85,14 @@ describe("backend E2E Gate Review with mock Claude Code", () => {
     await waitForGate(env.app, task.taskSlug, "architecture-plan");
     const architectureAfterBriefChange = await getGateState(env.app, task.taskSlug);
     expect(architectureAfterBriefChange.gates["architecture-plan"].inputHash).not.toBe(firstArchitectureHash);
+
+    await fs.appendFile(evidencePath, "\nVerified Behavior: revised evidence.\n", "utf8");
+    const changedEvidenceArchitecture = await requestGateReview(env.app, task.taskSlug, "architecture-plan");
+    expect(changedEvidenceArchitecture.status).toBe("started");
+    await waitForGate(env.app, task.taskSlug, "architecture-plan");
+    const architectureAfterEvidenceChange = await getGateState(env.app, task.taskSlug);
+    expect(architectureAfterEvidenceChange.gates["architecture-plan"].inputHash)
+      .not.toBe(architectureAfterBriefChange.gates["architecture-plan"].inputHash);
 
     await fs.appendFile(
       path.join(task.worktreePath, ".ai/vcm/handoffs/architecture-plan.md"),

@@ -13,7 +13,7 @@ describe("createHarnessService", () => {
   it("plans and applies recommended harness files when they are missing", async () => {
     const fs = createMemoryFs();
     const service = createHarnessService({ fs });
-    const expectedHarnessFileCount = 27;
+    const expectedHarnessFileCount = 30;
 
     const status = await service.getHarnessStatus("/repo");
     expect(status.needsApply).toBe(true);
@@ -88,6 +88,9 @@ describe("createHarnessService", () => {
     expect(await fs.readText("/repo/.claude/skills/vcm-report-harness-issue/SKILL.md")).toContain(".ai/vcm/harness-feedback/pending/");
     expect(await fs.readText("/repo/.claude/skills/vcm-propose-memory/SKILL.md")).toContain("name: vcm-propose-memory");
     expect(await fs.readText("/repo/.claude/skills/vcm-propose-memory/SKILL.md")).toContain("Treat every `<VCM-memory>` block as read-only");
+    expect(await fs.readText("/repo/.claude/skills/restart-architect/SKILL.md")).toContain(".ai/tools/request-architect-restart");
+    expect(await fs.readText("/repo/.ai/tools/request-architect-restart")).toContain("/sessions/architect/restart-after-planning");
+    expect(await fs.readText("/repo/.claude/agents/vcm-architect-scaffold-worker.md")).toContain("model: opus\neffort: xhigh");
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("<VCM-memory>\nNo accumulated project memory yet.\n</VCM-memory>");
     expect(await fs.readText("/repo/.claude/agents/project-manager.md")).toContain("name: project-manager");
     expect(await fs.readText("/repo/.claude/agents/project-manager.md")).toContain("<!-- VCM:BEGIN version=1 -->");
@@ -127,8 +130,9 @@ describe("createHarnessService", () => {
     expect(architectAgent).toContain("Architect owns the technical decision");
     expect(architectAgent).toContain("running required L0/L1 plus applicable L2/L3 checks are part of the implementation duty");
     expect(architectAgent).toContain("Architecture Diagnosis Mode is an upgraded Debug Mode");
-    expect(architectAgent).toContain("first write a `Current Code Reality / Scope Discovery` row");
-    expect(architectAgent).toContain("After `Current Code Reality / Scope Discovery` is complete");
+    expect(architectAgent).toContain("first write an `Architecture Evidence Verification` row");
+    expect(architectAgent).toContain("After `Architecture Evidence Verification` is complete");
+    expect(architectAgent).toContain("use the `restart-architect` skill");
     expect(architectAgent).toContain("complete and commit it directly as Architect-owned scaffold work");
     expect(architectAgent).not.toContain("`asset`");
     expect(architectAgent).not.toContain("before deep analysis, write the planning work plan");
@@ -163,7 +167,7 @@ describe("createHarnessService", () => {
     expect(coderAgent).toContain("| ID | Action | Result | Marker State | Proof Evidence |");
     expect(coderAgent).not.toContain("## Remaining Markers");
     expect(frontmatterOf(await fs.readText("/repo/.claude/agents/project-manager.md"))).not.toContain("Agent");
-    expect(frontmatterOf(await fs.readText("/repo/.claude/agents/architect.md"))).not.toContain("Agent");
+    expect(frontmatterOf(await fs.readText("/repo/.claude/agents/architect.md"))).toContain("Agent");
     expect(frontmatterOf(await fs.readText("/repo/.claude/agents/tester.md"))).not.toContain("Agent");
     const coderWorkerAgent = await fs.readText("/repo/.claude/agents/vcm-coder-worker.md");
     expect(coderWorkerAgent).toContain("name: vcm-coder-worker");
@@ -250,6 +254,29 @@ describe("createHarnessService", () => {
     expect(content).toContain("<VCM-memory>\nNo accumulated project memory yet.\n</VCM-memory>");
     expect(content).toContain("<!-- VCM:BEGIN version=1 -->");
     expect(content).toContain("## VCM Start Here");
+  });
+
+  it("adds the Agent tool to an existing Architect frontmatter without replacing its configuration", async () => {
+    const fs = createMemoryFs();
+    const service = createHarnessService({ fs });
+    await service.applyHarness("/repo");
+
+    const architectPath = "/repo/.claude/agents/architect.md";
+    const current = await fs.readText(architectPath);
+    await fs.writeText(
+      architectPath,
+      current
+        .replace("tools: Read, Grep, Glob, Bash, Edit, Write, Agent", "tools: Read, Grep, Glob, Bash, Edit, Write")
+        .replace("description: VCM architecture role", "model: custom-model\ndescription: VCM architecture role")
+    );
+
+    const status = await service.getHarnessStatus("/repo");
+    expect(status.files.find((file) => file.path === ".claude/agents/architect.md")?.action).toBe("update");
+
+    await service.applyHarness("/repo");
+    const updated = await fs.readText(architectPath);
+    expect(frontmatterOf(updated)).toContain("tools: Read, Grep, Glob, Bash, Edit, Write, Agent");
+    expect(frontmatterOf(updated)).toContain("model: custom-model");
   });
 
   it("inserts VCM ignore rules into an existing .gitignore without overwriting user patterns", async () => {
