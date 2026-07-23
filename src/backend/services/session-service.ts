@@ -90,6 +90,7 @@ const PROJECT_TRANSLATOR_SCOPE = "__project__";
 const PROJECT_HARNESS_ENGINEER_SCOPE = "__project_harness_engineer__";
 const PROJECT_TOOL_CD_ENTER_DELAY_MS = 500;
 const CLAUDE_CODE_DISABLE_AUTO_MEMORY = "1";
+const CLAUDE_CODE_DISABLE_BACKGROUND_TASKS = "1";
 // Project tool sessions launch a Claude Code TUI inside a PTY. The PTY reports
 // "running" the instant it is spawned, which is earlier than the moment the TUI
 // can actually accept pasted input. These bounds drive a quiescence-based
@@ -2020,7 +2021,8 @@ function withClaudeCodeRuntimeEnv(
     ...env,
     ...modelEnvironment,
     ...telemetryEnvironment,
-    CLAUDE_CODE_DISABLE_AUTO_MEMORY
+    CLAUDE_CODE_DISABLE_AUTO_MEMORY,
+    CLAUDE_CODE_DISABLE_BACKGROUND_TASKS
   };
 }
 

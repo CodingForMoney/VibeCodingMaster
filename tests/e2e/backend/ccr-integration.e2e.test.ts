@@ -72,6 +72,7 @@ describe("backend E2E CCR integration", () => {
       ANTHROPIC_AUTH_TOKEN: undefined,
       ANTHROPIC_API_KEY: undefined,
       ANTHROPIC_MODEL: CCR_GPT_MODEL_ID,
+      CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: "1",
       CLAUDE_CODE_ENABLE_TELEMETRY: undefined,
       CLAUDE_CONFIG_DIR: expect.stringContaining("/settings/claude/ccr"),
       OTEL_LOGS_EXPORTER: "none",
