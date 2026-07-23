@@ -211,6 +211,7 @@ async function waitForGateDecision(
 }
 
 async function writeGateReport(ctx: MockClaudePromptContext, decision: GateReviewDecision): Promise<void> {
+  await ctx.userPromptSubmit();
   const gate = matchPromptField(ctx.prompt, "Gate") as GateReviewGate;
   const request = matchPromptField(ctx.prompt, "Request");
   const report = matchPromptField(ctx.prompt, "Report");

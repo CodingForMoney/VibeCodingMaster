@@ -171,12 +171,17 @@ async function postRoleHook(
   stopEndpoint: boolean,
   extra: Record<string, unknown> = {}
 ): Promise<void> {
+  const runtimeSession = env.mockRuntime.getSessionByRole(taskSlug, role);
+  const runtimeSessionToken = runtimeSession
+    ? env.mockRuntime.getCreateInput(runtimeSession.id).env?.VCM_RUNTIME_SESSION_TOKEN
+    : undefined;
   await injectOk(env.app, {
     method: "POST",
     url: stopEndpoint ? "/api/hooks/claude-code/stop" : "/api/hooks/claude-code",
     payload: {
       taskSlug,
       role,
+      runtimeSessionToken,
       event: {
         hook_event_name: eventName,
         session_id: claudeSessionId,
@@ -191,12 +196,17 @@ async function postUserPromptHook(
   taskSlug: string,
   claudeSessionId: string
 ): Promise<void> {
+  const runtimeSession = env.mockRuntime.getSessionByRole(taskSlug, "architect");
+  const runtimeSessionToken = runtimeSession
+    ? env.mockRuntime.getCreateInput(runtimeSession.id).env?.VCM_RUNTIME_SESSION_TOKEN
+    : undefined;
   await injectOk(env.app, {
     method: "POST",
     url: "/api/hooks/claude-code",
     payload: {
       taskSlug,
       role: "architect",
+      runtimeSessionToken,
       event: {
         hook_event_name: "UserPromptSubmit",
         session_id: claudeSessionId,

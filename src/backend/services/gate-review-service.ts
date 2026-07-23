@@ -48,7 +48,7 @@ export interface GateReviewServiceDeps {
   projectService: Pick<ProjectService, "loadConfig">;
   taskService: Pick<TaskService, "loadTask">;
   appSettings: Pick<AppSettingsService, "getGateReviewSettings" | "updateGateReviewSettings">;
-  sessionService: Pick<SessionService, "getRoleSession" | "markRoleActivityIdle" | "markRoleActivityRunning" | "resumeRoleSession" | "startRoleSession">;
+  sessionService: Pick<SessionService, "getRoleSession" | "markRoleActivityRunning" | "resumeRoleSession" | "startRoleSession">;
   roundService: Pick<RoundService, "recordRoleTurnEvent">;
   reportPollIntervalMs?: number;
   reportTimeoutMs?: number;
@@ -532,7 +532,6 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
       return;
     }
     activeRuns.add(runKey);
-    let gateTurnStarted = false;
     try {
       const timestamp = now();
       await updateGateRecord(context, gate, {
@@ -560,7 +559,12 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
 
       const session = await ensureGateReviewerSession(context);
       await submitTerminalInput(deps.runtime, session.id, prompt);
-      await deps.sessionService.markRoleActivityRunning(context.repoRoot, context.taskSlug, GATE_REVIEWER_ROLE);
+      await deps.sessionService.markRoleActivityRunning(
+        context.repoRoot,
+        context.taskSlug,
+        GATE_REVIEWER_ROLE,
+        session.id
+      );
       await deps.roundService.recordRoleTurnEvent({
         repoRoot: context.repoRoot,
         stateRepoRoot: context.taskRepoRoot,
@@ -569,15 +573,12 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
         role: GATE_REVIEWER_ROLE,
         eventName: "UserPromptSubmit"
       });
-      gateTurnStarted = true;
 
       const parsed = await waitForGateReport(deps.fs, context.taskRepoRoot, gate, requestId, now(), {
         intervalMs: reportPollIntervalMs,
         timeoutMs: reportTimeoutMs
       });
       const completedAt = now();
-      await recordGateReviewerTurnStop(context, gateTurnStarted);
-      gateTurnStarted = false;
       await updateRequestStatus(deps.fs, context, requestId, "completed", {
         completedAt,
         decision: parsed.decision,
@@ -599,8 +600,6 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
     } catch (error) {
       const timestamp = now();
       const message = errorMessage(error);
-      await recordGateReviewerTurnStop(context, gateTurnStarted);
-      gateTurnStarted = false;
       await updateRequestStatus(deps.fs, context, requestId, "failed", {
         completedAt: timestamp,
         error: message
@@ -618,21 +617,6 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
     } finally {
       activeRuns.delete(runKey);
     }
-  }
-
-  async function recordGateReviewerTurnStop(context: ReviewContext, shouldRecord: boolean): Promise<void> {
-    if (!shouldRecord) {
-      return;
-    }
-    await deps.sessionService.markRoleActivityIdle(context.repoRoot, context.taskSlug, GATE_REVIEWER_ROLE);
-    await deps.roundService.recordRoleTurnEvent({
-      repoRoot: context.repoRoot,
-      stateRepoRoot: context.taskRepoRoot,
-      stateRoot: context.stateRoot,
-      taskSlug: context.taskSlug,
-      role: GATE_REVIEWER_ROLE,
-      eventName: "Stop"
-    });
   }
 
   async function ensureGateReviewerSession(context: ReviewContext) {
@@ -701,7 +685,12 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
 
     try {
       await submitTerminalInput(deps.runtime, session.id, prompt);
-      await deps.sessionService.markRoleActivityRunning(context.repoRoot, context.taskSlug, "project-manager");
+      await deps.sessionService.markRoleActivityRunning(
+        context.repoRoot,
+        context.taskSlug,
+        "project-manager",
+        session.id
+      );
       await deps.roundService.recordRoleTurnEvent({
         repoRoot: context.repoRoot,
         stateRepoRoot: context.taskRepoRoot,

@@ -19,7 +19,7 @@ import type { ProjectService } from "./project-service.js";
 import type { RoundService } from "./round-service.js";
 import type { RoleName } from "../../shared/types/role.js";
 import type { RoleSessionRecord } from "../../shared/types/session.js";
-import type { SessionService } from "./session-service.js";
+import { matchesRoleHookSession, type SessionService } from "./session-service.js";
 import { getTaskRuntimeRepoRoot, type TaskService } from "./task-service.js";
 import type { TranslationService } from "./translation-service.js";
 import type { TranslationWorkerService } from "./translation-worker-service.js";
@@ -80,6 +80,7 @@ export interface ClaudeHookServiceDeps {
 
 export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHookService {
   const stopFailureRetryTimers = new Map<string, StopFailureRetryTimer>();
+  const roleHookLocks = new Map<string, Promise<void>>();
   const now = deps.now ?? (() => new Date().toISOString());
   const retrySetTimeout = deps.retrySetTimeout ?? ((callback: () => void, delayMs: number) => globalThis.setTimeout(callback, delayMs));
   const retryClearTimeout = deps.retryClearTimeout ?? ((timer: StopFailureRetryTimer) => globalThis.clearTimeout(timer));
@@ -147,7 +148,9 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
           eventName,
           sessionId: stringOrUndefined(input.event.session_id),
           transcriptPath: stringOrUndefined(input.event.transcript_path),
-          cwd: stringOrUndefined(input.event.cwd) ?? stringOrUndefined(input.event.new_cwd)
+          cwd: stringOrUndefined(input.event.cwd) ?? stringOrUndefined(input.event.new_cwd),
+          runtimeSessionId: stringOrUndefined(input.event.vcm_runtime_session_id),
+          runtimeSessionToken: input.runtimeSessionToken
         })
       : await deps.sessionService.recordRoleHookEvent(context.project.repoRoot, {
           taskSlug: input.taskSlug,
@@ -156,9 +159,12 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
           sessionId: stringOrUndefined(input.event.session_id),
           transcriptPath: stringOrUndefined(input.event.transcript_path),
           cwd: stringOrUndefined(input.event.cwd) ?? stringOrUndefined(input.event.new_cwd),
-          allowSessionMismatch: true
+          runtimeSessionId: stringOrUndefined(input.event.vcm_runtime_session_id),
+          runtimeSessionToken: input.runtimeSessionToken
         });
-    await deps.translationWorkerService?.handleTranslatorHook(context.project.repoRoot, eventName, input.taskSlug);
+    if (session) {
+      await deps.translationWorkerService?.handleTranslatorHook(context.project.repoRoot, eventName, input.taskSlug);
+    }
     return {
       ok: true,
       eventName,
@@ -178,7 +184,9 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
           eventName,
           sessionId: stringOrUndefined(input.event.session_id),
           transcriptPath: stringOrUndefined(input.event.transcript_path),
-          cwd: stringOrUndefined(input.event.cwd) ?? stringOrUndefined(input.event.new_cwd)
+          cwd: stringOrUndefined(input.event.cwd) ?? stringOrUndefined(input.event.new_cwd),
+          runtimeSessionId: stringOrUndefined(input.event.vcm_runtime_session_id),
+          runtimeSessionToken: input.runtimeSessionToken
         })
       : await deps.sessionService.recordRoleHookEvent(context.project.repoRoot, {
           taskSlug: input.taskSlug,
@@ -187,8 +195,12 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
           sessionId: stringOrUndefined(input.event.session_id),
           transcriptPath: stringOrUndefined(input.event.transcript_path),
           cwd: stringOrUndefined(input.event.cwd) ?? stringOrUndefined(input.event.new_cwd),
-          allowSessionMismatch: true
+          runtimeSessionId: stringOrUndefined(input.event.vcm_runtime_session_id),
+          runtimeSessionToken: input.runtimeSessionToken
         });
+    if (!session) {
+      return completedHookResult(input, eventName);
+    }
     const activeTask = deps.autoMemoryService
       ? (await deps.taskService.listTasks(context.project.repoRoot))
           .find((task) => task.cleanupStatus !== "cleaned" && (projectScoped || task.taskSlug === input.taskSlug))
@@ -256,9 +268,25 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
     }
 
     const context = await getHookContext(input);
+    if (!(await isCurrentRoleHook(context, input, eventName))) {
+      return completedHookResult(input, eventName);
+    }
     const memoryResult = await processAutoMemoryRoleHook(input, context, eventName);
     if (memoryResult) {
       return memoryResult;
+    }
+    const session = await deps.sessionService.recordClaudeHookEvent(context.project.repoRoot, {
+      taskSlug: context.taskSlug,
+      role: input.role,
+      eventName,
+      claudeSessionId: stringOrUndefined(input.event.session_id),
+      transcriptPath: stringOrUndefined(input.event.transcript_path),
+      cwd: stringOrUndefined(input.event.cwd) ?? stringOrUndefined(input.event.new_cwd),
+      runtimeSessionId: stringOrUndefined(input.event.vcm_runtime_session_id),
+      runtimeSessionToken: input.runtimeSessionToken
+    });
+    if (!session) {
+      return completedHookResult(input, eventName);
     }
     const boundToTask = await isHookSessionBoundToTask(context, input.role);
     if (boundToTask) {
@@ -267,16 +295,6 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
         taskSlug: context.taskSlug,
         role: input.role
       });
-    }
-    const session = await deps.sessionService.recordClaudeHookEvent(context.project.repoRoot, {
-      taskSlug: context.taskSlug,
-      role: input.role,
-      eventName,
-      claudeSessionId: stringOrUndefined(input.event.session_id),
-      transcriptPath: stringOrUndefined(input.event.transcript_path),
-      cwd: stringOrUndefined(input.event.cwd) ?? stringOrUndefined(input.event.new_cwd)
-    });
-    if (boundToTask) {
       await deps.roundService.recordClaudeHookEvent({
         repoRoot: context.project.repoRoot,
         stateRepoRoot: context.taskRepoRoot,
@@ -333,6 +351,9 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
     }
 
     const context = await getHookContext(input);
+    if (!(await isCurrentRoleHook(context, input, eventName))) {
+      return completedHookResult(input, eventName);
+    }
     const memoryResult = await processAutoMemoryRoleHook(input, context, eventName);
     if (memoryResult) {
       return memoryResult;
@@ -408,6 +429,9 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
     }
 
     const context = await getHookContext(input);
+    if (!(await isCurrentRoleHook(context, input, eventName))) {
+      return completedHookResult(input, eventName);
+    }
     const memoryResult = await processAutoMemoryRoleHook(input, context, eventName);
     if (memoryResult) {
       return memoryResult;
@@ -474,6 +498,9 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
     }
 
     const context = await getHookContext(input);
+    if (!(await isCurrentRoleHook(context, input, eventName))) {
+      return completedHookResult(input, eventName);
+    }
     const memoryResult = await processAutoMemoryRoleHook(input, context, eventName);
     if (memoryResult) {
       return memoryResult;
@@ -484,7 +511,9 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
       eventName,
       claudeSessionId: stringOrUndefined(input.event.session_id),
       transcriptPath: stringOrUndefined(input.event.transcript_path),
-      cwd: stringOrUndefined(input.event.cwd) ?? stringOrUndefined(input.event.new_cwd)
+      cwd: stringOrUndefined(input.event.cwd) ?? stringOrUndefined(input.event.new_cwd),
+      runtimeSessionId: stringOrUndefined(input.event.vcm_runtime_session_id),
+      runtimeSessionToken: input.runtimeSessionToken
     });
 
     return {
@@ -514,15 +543,20 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
     const scopedRouteDispatchInput = createRouteDispatchInput(input, context, input.role);
     const settleRouteDispatchInput = createRouteDispatchInput(input, context);
 
-    const boundToTask = await isHookSessionBoundToTask(context, input.role);
     const session = await deps.sessionService.recordClaudeHookEvent(context.project.repoRoot, {
       taskSlug: context.taskSlug,
       role: input.role,
       eventName,
       claudeSessionId: stringOrUndefined(input.event.session_id),
       transcriptPath: stringOrUndefined(input.event.transcript_path),
-      cwd: stringOrUndefined(input.event.cwd) ?? stringOrUndefined(input.event.new_cwd)
+      cwd: stringOrUndefined(input.event.cwd) ?? stringOrUndefined(input.event.new_cwd),
+      runtimeSessionId: stringOrUndefined(input.event.vcm_runtime_session_id),
+      runtimeSessionToken: input.runtimeSessionToken
     });
+    if (!session) {
+      return completedHookResult(input, eventName);
+    }
+    const boundToTask = await isHookSessionBoundToTask(context, input.role);
     if (boundToTask) {
       await deps.roundService.recordClaudeHookEvent({
         repoRoot: context.project.repoRoot,
@@ -612,8 +646,13 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
       eventName,
       claudeSessionId: stringOrUndefined(input.event.session_id),
       transcriptPath: stringOrUndefined(input.event.transcript_path),
-      cwd: stringOrUndefined(input.event.cwd) ?? stringOrUndefined(input.event.new_cwd)
+      cwd: stringOrUndefined(input.event.cwd) ?? stringOrUndefined(input.event.new_cwd),
+      runtimeSessionId: stringOrUndefined(input.event.vcm_runtime_session_id),
+      runtimeSessionToken: input.runtimeSessionToken
     });
+    if (!session) {
+      return completedHookResult(input, eventName);
+    }
     const boundToTask = await isHookSessionBoundToTask(context, input.role);
     if (boundToTask && eventName !== "PostCompact") {
       await deps.roundService.recordClaudeHookEvent({
@@ -656,6 +695,43 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
       taskSlug: context.taskSlug,
       ...(stoppedRole ? { stoppedRole } : {})
     };
+  }
+
+  async function isCurrentRoleHook(
+    context: Awaited<ReturnType<typeof getHookContext>>,
+    input: ClaudeHookRequest,
+    eventName: ClaudeHookEventName
+  ): Promise<boolean> {
+    const current = await deps.sessionService.getRoleSession(
+      context.project.repoRoot,
+      context.taskSlug,
+      input.role
+    );
+    return Boolean(current && matchesRoleHookSession(current, {
+      eventName,
+      sessionId: stringOrUndefined(input.event.session_id),
+      transcriptPath: stringOrUndefined(input.event.transcript_path),
+      runtimeSessionId: stringOrUndefined(input.event.vcm_runtime_session_id),
+      runtimeSessionToken: input.runtimeSessionToken
+    }));
+  }
+
+  async function withRoleHookLock<T>(
+    input: ClaudeHookRequest,
+    run: () => Promise<T>
+  ): Promise<T> {
+    const key = `${input.taskSlug}:${input.role}`;
+    const previous = roleHookLocks.get(key) ?? Promise.resolve();
+    const result = previous.catch(() => undefined).then(run);
+    const tail = result.then(() => undefined, () => undefined);
+    roleHookLocks.set(key, tail);
+    try {
+      return await result;
+    } finally {
+      if (roleHookLocks.get(key) === tail) {
+        roleHookLocks.delete(key);
+      }
+    }
   }
 
   async function scheduleStopFailureRetry(
@@ -706,7 +782,19 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
         nextRetryAt
       }
     });
-    await deps.sessionService.markRoleActivityRunning(context.project.repoRoot, context.taskSlug, input.role);
+    const session = await deps.sessionService.getRoleSession(
+      context.project.repoRoot,
+      context.taskSlug,
+      input.role
+    );
+    if (session) {
+      await deps.sessionService.markRoleActivityRunning(
+        context.project.repoRoot,
+        context.taskSlug,
+        input.role,
+        session.id
+      );
+    }
     scheduleStopFailureRetryTimer(input, context, attempt, nextRetryAt);
     return "scheduled";
   }
@@ -790,7 +878,12 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
       }
     });
     await submitTerminalInput(deps.runtime, session.id, renderStopFailureRecoveryPrompt());
-    await deps.sessionService.markRoleActivityRunning(context.project.repoRoot, context.taskSlug, input.role);
+    await deps.sessionService.markRoleActivityRunning(
+      context.project.repoRoot,
+      context.taskSlug,
+      input.role,
+      session.id
+    );
   }
 
   async function markStopFailureRecoveryFailed(
@@ -916,44 +1009,50 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
 
   return {
     async handleHook(input) {
-      if (isTranslatorToolRoleName(input.role)) {
-        return processTranslatorHook(input);
-      }
-      if (isHarnessEngineerToolRoleName(input.role)) {
-        return processHarnessEngineerHook(input);
-      }
-      const eventName = parseHookEvent(input.event.hook_event_name);
-      if (eventName === "UserPromptSubmit") {
-        return handleUserPromptSubmitHook(input);
-      }
-      if (eventName === "StopFailure") {
-        return processStopFailureHook(input);
-      }
-      if (eventName === "PostCompact") {
-        return processPostCompactHook(input);
-      }
-      // Legacy combined endpoint: the installed hook discards the response,
-      // so a block decision could not be enforced. Never block here.
-      return processStopHook(input, { allowBlock: false });
+      return withRoleHookLock(input, async () => {
+        if (isTranslatorToolRoleName(input.role)) {
+          return processTranslatorHook(input);
+        }
+        if (isHarnessEngineerToolRoleName(input.role)) {
+          return processHarnessEngineerHook(input);
+        }
+        const eventName = parseHookEvent(input.event.hook_event_name);
+        if (eventName === "UserPromptSubmit") {
+          return handleUserPromptSubmitHook(input);
+        }
+        if (eventName === "StopFailure") {
+          return processStopFailureHook(input);
+        }
+        if (eventName === "PostCompact") {
+          return processPostCompactHook(input);
+        }
+        // Legacy combined endpoint: the installed hook discards the response,
+        // so a block decision could not be enforced. Never block here.
+        return processStopHook(input, { allowBlock: false });
+      });
     },
     handleStopHook(input) {
-      if (isTranslatorToolRoleName(input.role)) {
-        return processTranslatorHook(input);
-      }
-      if (isHarnessEngineerToolRoleName(input.role)) {
-        return processHarnessEngineerHook(input);
-      }
-      return processStopHook(input, { allowBlock: true });
+      return withRoleHookLock(input, async () => {
+        if (isTranslatorToolRoleName(input.role)) {
+          return processTranslatorHook(input);
+        }
+        if (isHarnessEngineerToolRoleName(input.role)) {
+          return processHarnessEngineerHook(input);
+        }
+        return processStopHook(input, { allowBlock: true });
+      });
     },
     handleReconciledTurnEnd(input) {
-      const eventName = parseHookEvent(input.event.hook_event_name);
-      if (eventName === "Stop") {
-        return processStopHook(input, { allowBlock: false });
-      }
-      if (eventName === "StopFailure") {
-        return processStopFailureHook(input);
-      }
-      throwUnsupportedEvent(eventName);
+      return withRoleHookLock(input, async () => {
+        const eventName = parseHookEvent(input.event.hook_event_name);
+        if (eventName === "Stop") {
+          return processStopHook(input, { allowBlock: false });
+        }
+        if (eventName === "StopFailure") {
+          return processStopFailureHook(input);
+        }
+        throwUnsupportedEvent(eventName);
+      });
     },
     handlePermissionRequestHook
   };

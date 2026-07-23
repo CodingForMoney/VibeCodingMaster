@@ -153,6 +153,7 @@ export type SessionEffort = typeof SESSION_EFFORT_OPTIONS[number]["value"];
 
 export interface RoleSessionRecord {
   id: string;
+  runtimeSessionToken?: string;
   claudeSessionId: string;
   transcriptPath?: string;
   taskSlug: string;

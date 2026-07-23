@@ -33,7 +33,11 @@ describe("createTerminalInterruptService", () => {
       sessionService: {
         async markTerminalSessionActivityIdle(_repoRoot, sessionId) {
           calls.push(`idle:${sessionId}`);
-          return undefined;
+          return {
+            id: sessionId,
+            taskSlug: "demo-task",
+            role: "coder"
+          } as never;
         }
       },
       roundService: {
@@ -92,6 +96,42 @@ describe("createTerminalInterruptService", () => {
     await service.handleManualInterrupt("session_1");
 
     expect(calls).toEqual(["idle:session_1"]);
+  });
+
+  it("does not interrupt the round when the terminal is no longer the current role session", async () => {
+    const calls: string[] = [];
+    const service = createTerminalInterruptService({
+      runtime: createRuntime({
+        id: "old-session",
+        repoRoot: "/repo",
+        taskSlug: "demo-task",
+        role: "coder",
+        status: "running",
+        startedAt: "2026-06-27T00:00:00.000Z"
+      }),
+      projectService: {
+        async getCurrentProject() {
+          return null;
+        }
+      } as never,
+      taskService: {} as never,
+      sessionService: {
+        async markTerminalSessionActivityIdle(_repoRoot, sessionId) {
+          calls.push(`idle:${sessionId}`);
+          return undefined;
+        }
+      },
+      roundService: {
+        async recordManualInterrupt() {
+          calls.push("round");
+          return {} as never;
+        }
+      }
+    });
+
+    await service.handleManualInterrupt("old-session");
+
+    expect(calls).toEqual(["idle:old-session"]);
   });
 });
 

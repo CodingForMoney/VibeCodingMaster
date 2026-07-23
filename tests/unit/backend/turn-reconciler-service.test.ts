@@ -37,6 +37,7 @@ describe("createTurnReconcilerService", () => {
       event: expect.objectContaining({
         hook_event_name: "Stop",
         session_id: "claude-tester",
+        vcm_runtime_session_id: "runtime-tester",
         vcm_completion_id: "assistant-end"
       })
     })]);

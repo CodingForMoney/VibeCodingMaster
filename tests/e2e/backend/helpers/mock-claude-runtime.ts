@@ -233,6 +233,7 @@ export class MockClaudeRuntime implements TerminalRuntime {
     const input: ClaudeHookRequest = {
       taskSlug: entry.session.taskSlug,
       role: entry.session.role,
+      runtimeSessionToken: entry.input.env?.VCM_RUNTIME_SESSION_TOKEN,
       event: {
         hook_event_name: eventName,
         session_id: entry.claudeSessionId,

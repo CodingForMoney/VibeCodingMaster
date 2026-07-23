@@ -58,7 +58,7 @@ export interface SessionService {
   recordRoleHookEvent(repoRoot: string, input: RecordRoleHookEventInput): Promise<RoleSessionRecord | undefined>;
   recordClaudeHookEvent(repoRoot: string, input: RecordClaudeHookEventInput): Promise<RoleSessionRecord | undefined>;
   markTerminalSessionActivityIdle(repoRoot: string, sessionId: string): Promise<RoleSessionRecord | undefined>;
-  markRoleActivityRunning(repoRoot: string, taskSlug: string, role: RoleName): Promise<RoleSessionRecord | undefined>;
+  markRoleActivityRunning(repoRoot: string, taskSlug: string, role: RoleName, expectedSessionId?: string): Promise<RoleSessionRecord | undefined>;
   markRoleActivityIdle(repoRoot: string, taskSlug: string, role: RoleName): Promise<RoleSessionRecord | undefined>;
 }
 
@@ -115,6 +115,8 @@ export interface RecordClaudeHookEventInput {
   claudeSessionId?: string;
   transcriptPath?: string;
   cwd?: string;
+  runtimeSessionId?: string;
+  runtimeSessionToken?: string;
 }
 
 export interface RecordRoleHookEventInput {
@@ -124,7 +126,8 @@ export interface RecordRoleHookEventInput {
   sessionId?: string;
   transcriptPath?: string;
   cwd?: string;
-  allowSessionMismatch?: boolean;
+  runtimeSessionId?: string;
+  runtimeSessionToken?: string;
 }
 
 export interface RecordProjectTranslatorHookEventInput {
@@ -132,6 +135,8 @@ export interface RecordProjectTranslatorHookEventInput {
   sessionId?: string;
   transcriptPath?: string;
   cwd?: string;
+  runtimeSessionId?: string;
+  runtimeSessionToken?: string;
 }
 
 export type RecordProjectToolHookEventInput = RecordProjectTranslatorHookEventInput;
@@ -221,6 +226,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       ),
       cwd: taskRepoRoot
     };
+    const runtimeSessionToken = randomUUID();
     const runtimeSession = await deps.runtime.createSession({
       repoRoot,
       taskSlug,
@@ -234,7 +240,8 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
         VCM_TASK_REPO_ROOT: taskRepoRoot,
         VCM_TASK_SLUG: taskSlug,
         VCM_ROLE: role,
-        VCM_SESSION_ID: claudeSessionId || undefined
+        VCM_SESSION_ID: claudeSessionId || undefined,
+        VCM_RUNTIME_SESSION_TOKEN: runtimeSessionToken
       }, modelEnvironment, buildUsageTelemetryEnvironment(deps.apiUrl, role, model)),
       cols: input.cols,
       rows: input.rows
@@ -243,6 +250,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     const harnessRevision = await readCurrentHarnessRevision(repoRoot);
     const record: RoleSessionRecord = {
       id: runtimeSession.id,
+      runtimeSessionToken,
       claudeSessionId,
       transcriptPath,
       taskSlug,
@@ -373,6 +381,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       ),
       cwd: launchCwd
     };
+    const runtimeSessionToken = randomUUID();
     const runtimeSession = await deps.runtime.createSession({
       repoRoot,
       taskSlug: PROJECT_TRANSLATOR_SCOPE,
@@ -389,7 +398,8 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
         // active task; VCM_TASK_REPO_ROOT remains the active worktree.
         VCM_TASK_SLUG: PROJECT_TRANSLATOR_SCOPE,
         VCM_ROLE: TRANSLATOR_ROLE,
-        VCM_SESSION_ID: claudeSessionId || undefined
+        VCM_SESSION_ID: claudeSessionId || undefined,
+        VCM_RUNTIME_SESSION_TOKEN: runtimeSessionToken
       }, modelEnvironment, buildUsageTelemetryEnvironment(deps.apiUrl, TRANSLATOR_ROLE, model)),
       cols: input.cols,
       rows: input.rows
@@ -398,6 +408,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     const harnessRevision = await readCurrentHarnessRevision(repoRoot);
     const record: RoleSessionRecord = {
       id: runtimeSession.id,
+      runtimeSessionToken,
       claudeSessionId,
       transcriptPath,
       taskSlug: PROJECT_TRANSLATOR_SCOPE,
@@ -518,6 +529,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       ),
       cwd: launchCwd
     };
+    const runtimeSessionToken = randomUUID();
     const runtimeSession = await deps.runtime.createSession({
       repoRoot,
       taskSlug: PROJECT_HARNESS_ENGINEER_SCOPE,
@@ -534,7 +546,8 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
         // active task; VCM_TASK_REPO_ROOT remains the active worktree.
         VCM_TASK_SLUG: PROJECT_HARNESS_ENGINEER_SCOPE,
         VCM_ROLE: HARNESS_ENGINEER_ROLE,
-        VCM_SESSION_ID: claudeSessionId || undefined
+        VCM_SESSION_ID: claudeSessionId || undefined,
+        VCM_RUNTIME_SESSION_TOKEN: runtimeSessionToken
       }, modelEnvironment, buildUsageTelemetryEnvironment(deps.apiUrl, HARNESS_ENGINEER_ROLE, model)),
       cols: input.cols,
       rows: input.rows
@@ -543,6 +556,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     const harnessRevision = await readCurrentHarnessRevision(repoRoot);
     const record: RoleSessionRecord = {
       id: runtimeSession.id,
+      runtimeSessionToken,
       claudeSessionId,
       transcriptPath,
       taskSlug: PROJECT_HARNESS_ENGINEER_SCOPE,
@@ -758,6 +772,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       ),
       cwd: launchCwd
     };
+    const runtimeSessionToken = randomUUID();
     const runtimeSession = await deps.runtime.createSession({
       repoRoot,
       taskSlug: normalizeProjectScopedRecordForPersistence(session).taskSlug,
@@ -771,7 +786,8 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
         VCM_TASK_REPO_ROOT: targetCwd,
         VCM_TASK_SLUG: normalizeProjectScopedRecordForPersistence(session).taskSlug,
         VCM_ROLE: session.role,
-        VCM_SESSION_ID: session.claudeSessionId
+        VCM_SESSION_ID: session.claudeSessionId,
+        VCM_RUNTIME_SESSION_TOKEN: runtimeSessionToken
       }, modelEnvironment, buildUsageTelemetryEnvironment(deps.apiUrl, session.role, model))
     });
     if ((await waitForSessionInputReady(runtimeSession.id)) === "exited") {
@@ -779,6 +795,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       return markProjectToolRuntimeUnavailable(repoRoot, {
         ...session,
         id: runtimeSession.id,
+        runtimeSessionToken,
         status: "crashed",
         activityStatus: "idle",
         command: startCommand.display,
@@ -796,6 +813,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     const resumed: RoleSessionRecord = {
       ...session,
       id: runtimeSession.id,
+      runtimeSessionToken,
       status: runtimeSession.status,
       activityStatus: "idle",
       command: startCommand.display,
@@ -955,10 +973,11 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
   async function markTaskRoleActivityIdle(
     repoRoot: string,
     taskSlug: string,
-    role: RoleName
+    role: RoleName,
+    expectedSessionId?: string
   ): Promise<RoleSessionRecord | undefined> {
     const current = await getTaskRoleSessionView(repoRoot, taskSlug, role);
-    if (!current) {
+    if (!current || (expectedSessionId && current.id !== expectedSessionId)) {
       return undefined;
     }
 
@@ -1083,7 +1102,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     },
     async recordProjectTranslatorHookEvent(repoRoot, input) {
       const current = await this.getProjectTranslatorSession(repoRoot);
-      if (!current) {
+      if (!current || !matchesRoleHookSession(current, input)) {
         return undefined;
       }
 
@@ -1218,7 +1237,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     },
     async recordProjectHarnessEngineerHookEvent(repoRoot, input) {
       const current = await this.getProjectHarnessEngineerSession(repoRoot);
-      if (!current) {
+      if (!current || !matchesRoleHookSession(current, input)) {
         return undefined;
       }
 
@@ -1354,7 +1373,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     },
     async recordRoleHookEvent(repoRoot, input) {
       const current = await this.getRoleSession(repoRoot, input.taskSlug, input.role);
-      if (!current || (!input.allowSessionMismatch && !matchesRoleHookSession(current, input))) {
+      if (!current || !matchesRoleHookSession(current, input)) {
         return undefined;
       }
 
@@ -1388,7 +1407,9 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
         eventName: input.eventName,
         sessionId: input.claudeSessionId,
         transcriptPath: input.transcriptPath,
-        cwd: input.cwd
+        cwd: input.cwd,
+        runtimeSessionId: input.runtimeSessionId,
+        runtimeSessionToken: input.runtimeSessionToken
       });
     },
     async markTerminalSessionActivityIdle(repoRoot, sessionId) {
@@ -1413,11 +1434,11 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
           : undefined;
       }
 
-      return markTaskRoleActivityIdle(repoRoot, taskSlug, role);
+      return markTaskRoleActivityIdle(repoRoot, taskSlug, role, sessionId);
     },
-    async markRoleActivityRunning(repoRoot, taskSlug, role) {
+    async markRoleActivityRunning(repoRoot, taskSlug, role, expectedSessionId) {
       const current = await this.getRoleSession(repoRoot, taskSlug, role);
-      if (!current) {
+      if (!current || (expectedSessionId && current.id !== expectedSessionId)) {
         return undefined;
       }
 
@@ -1483,7 +1504,26 @@ function toRoleSessionRecordView(
   };
 }
 
-function matchesRoleHookSession(record: RoleSessionRecord, input: RecordRoleHookEventInput): boolean {
+export function matchesRoleHookSession(
+  record: RoleSessionRecord,
+  input: Pick<
+    RecordRoleHookEventInput,
+    "eventName" | "sessionId" | "transcriptPath" | "runtimeSessionId" | "runtimeSessionToken"
+  >
+): boolean {
+  if (
+    !record.claudeSessionId
+    && !record.transcriptPath
+    && input.eventName !== "UserPromptSubmit"
+  ) {
+    return false;
+  }
+  if (input.runtimeSessionId) {
+    return record.id === input.runtimeSessionId;
+  }
+  if (record.runtimeSessionToken) {
+    return record.runtimeSessionToken === input.runtimeSessionToken;
+  }
   if (!record.claudeSessionId && !record.transcriptPath) {
     return input.eventName === "UserPromptSubmit";
   }
@@ -1491,9 +1531,6 @@ function matchesRoleHookSession(record: RoleSessionRecord, input: RecordRoleHook
     return true;
   }
   if (input.transcriptPath && record.transcriptPath === input.transcriptPath) {
-    return true;
-  }
-  if (!input.sessionId && !input.transcriptPath) {
     return true;
   }
   return false;
@@ -1554,7 +1591,11 @@ function isSessionMissingError(error: unknown): boolean {
 }
 
 function withoutRuntimeOnlySessionFields(session: RoleSessionRecord): RoleSessionRecord {
-  const { pid: _pid, ...persisted } = session;
+  const {
+    pid: _pid,
+    runtimeSessionToken: _runtimeSessionToken,
+    ...persisted
+  } = session;
   return persisted;
 }
 

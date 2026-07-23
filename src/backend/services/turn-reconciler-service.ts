@@ -163,6 +163,7 @@ function buildReconciledHook(
       ...(session?.claudeSessionId ? { session_id: session.claudeSessionId } : {}),
       ...(session?.transcriptPath ? { transcript_path: session.transcriptPath } : {}),
       ...(session?.cwd ? { cwd: session.cwd } : {}),
+      ...(session?.id ? { vcm_runtime_session_id: session.id } : {}),
       vcm_reconciled: true,
       ...evidence
     }

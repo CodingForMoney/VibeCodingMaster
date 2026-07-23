@@ -74,12 +74,10 @@ describe("gate-review-service", () => {
     expect(sessionStarts).toEqual(["gate-reviewer"]);
     expect(activityCalls).toEqual([
       "running:gate-reviewer",
-      "idle:gate-reviewer",
       "running:project-manager"
     ]);
     expect(roundCalls).toEqual([
       "round:UserPromptSubmit:gate-reviewer",
-      "round:Stop:gate-reviewer",
       "round:UserPromptSubmit:project-manager"
     ]);
     const gatePrompt = writes.find((write) => write.includes("[VCM GATE REVIEW]")) ?? "";

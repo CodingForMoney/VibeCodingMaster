@@ -267,6 +267,7 @@ function acceptedFinalAcceptance(taskSlug: string): string {
 }
 
 async function writeApproveGateReport(ctx: MockClaudePromptContext): Promise<void> {
+  await ctx.userPromptSubmit();
   const gate = matchPromptField(ctx.prompt, "Gate") as GateReviewGate;
   const request = matchPromptField(ctx.prompt, "Request");
   const report = matchPromptField(ctx.prompt, "Report");
@@ -313,6 +314,7 @@ async function writeApproveGateReport(ctx: MockClaudePromptContext): Promise<voi
     ...validationAnalysis,
     ...codeDiffAnalysis
   ].join("\n"));
+  await ctx.stop();
 }
 
 function validTestReport(): string {
