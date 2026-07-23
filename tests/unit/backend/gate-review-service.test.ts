@@ -417,6 +417,51 @@ describe("gate-review-service", () => {
     });
   });
 
+  it("accepts validation approval for a user-approved failed coverage gap", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-gate-review-approved-gap-"));
+    await writeHarnessFiles(tmpRepo);
+    const taskRoot = taskWorktree(tmpRepo);
+    await writeFile(
+      path.join(taskRoot, ".ai/vcm/handoffs/test-report.md"),
+      approvedGapTestReport(),
+      "utf8"
+    );
+    const reportDir = path.join(taskRoot, ".ai/vcm/gate-reviews");
+    await mkdir(reportDir, { recursive: true });
+    await writeFile(
+      path.join(reportDir, "validation-adequacy-review.md"),
+      [
+        "Gate: validation-adequacy",
+        "Decision: approve",
+        "Summary: The failed result and exact user-approved gap are fully recorded.",
+        "",
+        ...validationAnalysisLines().map((line) => line === "- User Approval And Gap Disposition: none"
+          ? "- User Approval And Gap Disposition: exact user approval matches the retained gap"
+          : line),
+        "## Findings",
+        "",
+        "None.",
+        ""
+      ].join("\n"),
+      "utf8"
+    );
+    const service = createGateReviewService({
+      fs: createNodeFileSystemAdapter(),
+      runner: createRunner(tmpRepo, []),
+      runtime: createRuntime(tmpRepo, []),
+      projectService: createProjectService(),
+      taskService: createTaskService(tmpRepo),
+      appSettings: createAppSettings(["validation-adequacy"]),
+      sessionService: createSessionService(),
+      roundService: createRoundService()
+    });
+
+    await expect(service.readReport(tmpRepo, "demo-task", "validation-adequacy")).resolves.toMatchObject({
+      gate: "validation-adequacy",
+      decision: "approve"
+    });
+  });
+
   it("starts code-diff review for the current unreviewed commit range", async () => {
     tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-gate-review-code-diff-"));
     await writeHarnessFiles(tmpRepo);
@@ -1013,8 +1058,25 @@ function validTestReport(): string {
     "",
     "## Blocking Validation Issues",
     "None.",
+    "",
+    "## User Approval Evidence",
+    "None.",
     ""
   ].join("\n");
+}
+
+function approvedGapTestReport(): string {
+  return validTestReport()
+    .replace("Test Result: pass", "Test Result: fail")
+    .replace("## Coverage Gaps\nNone.", "## Coverage Gaps\nMissing live gateway coverage.")
+    .replace(
+      "## Blocking Validation Issues\nNone.",
+      "## Blocking Validation Issues\nLive gateway validation remains unavailable."
+    )
+    .replace(
+      "## User Approval Evidence\nNone.",
+      "## User Approval Evidence\nUser approved retaining the live gateway coverage gap."
+    );
 }
 
 function validationAnalysisLines(): string[] {
@@ -1030,6 +1092,7 @@ function validationAnalysisLines(): string[] {
     "- Public Contract Coverage: public behavior asserted",
     "- Test Integrity: real entry path and observable assertions inspected",
     "- Skips And Gaps: none",
+    "- User Approval And Gap Disposition: none",
     "- Validation Readiness: ready",
     ""
   ];

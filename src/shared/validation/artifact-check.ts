@@ -47,7 +47,8 @@ const REQUIRED_HEADINGS: Record<ArtifactKind, readonly string[]> = {
     "Reproduction Steps",
     "Skipped Checks With Reasons",
     "Coverage Gaps",
-    "Blocking Validation Issues"
+    "Blocking Validation Issues",
+    "User Approval Evidence"
   ],
   "docs-sync-report": [
     "Summary",
@@ -152,11 +153,36 @@ function validateArtifactFields(kind: ArtifactKind, content: string): string[] {
     const invalidFields = result === "pass" || result === "fail"
       ? []
       : ["Test Result must be pass or fail."];
+    const coverageGaps = readArtifactSectionValue(content, "Coverage Gaps");
+    const blockingIssues = readArtifactSectionValue(content, "Blocking Validation Issues");
+    const userApproval = readArtifactSectionValue(content, "User Approval Evidence");
+    const hasCoverageGaps = Boolean(coverageGaps && !/^none\.?$/i.test(coverageGaps));
+    const hasBlockingIssues = Boolean(blockingIssues && !/^none\.?$/i.test(blockingIssues));
+    const hasUserApproval = Boolean(userApproval && !/^none\.?$/i.test(userApproval));
+
     if (result === "pass") {
-      const blockingIssues = readArtifactSectionValue(content, "Blocking Validation Issues");
-      if (!blockingIssues || !/^none\.?$/i.test(blockingIssues)) {
+      if (!coverageGaps || hasCoverageGaps) {
+        invalidFields.push("Coverage Gaps must be None when Test Result is pass.");
+      }
+      if (!blockingIssues || hasBlockingIssues) {
         invalidFields.push("Blocking Validation Issues must be None when Test Result is pass.");
       }
+      if (!userApproval || hasUserApproval) {
+        invalidFields.push("User Approval Evidence must be None when Test Result is pass.");
+      }
+    }
+    if (result === "fail" && !hasBlockingIssues) {
+      invalidFields.push("Blocking Validation Issues must contain concrete evidence when Test Result is fail.");
+    }
+    if (hasCoverageGaps) {
+      if (result !== "fail") {
+        invalidFields.push("Test Result must be fail when Coverage Gaps are recorded.");
+      }
+      if (!hasUserApproval) {
+        invalidFields.push("User Approval Evidence is required when Coverage Gaps are recorded.");
+      }
+    } else if (hasUserApproval) {
+      invalidFields.push("User Approval Evidence must be None when no Coverage Gaps are recorded.");
     }
     return invalidFields;
   }

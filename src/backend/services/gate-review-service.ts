@@ -113,6 +113,7 @@ const VALIDATION_ANALYSIS_FIELDS = [
   "Public Contract Coverage",
   "Test Integrity",
   "Skips And Gaps",
+  "User Approval And Gap Disposition",
   "Validation Readiness"
 ] as const;
 const CODE_DIFF_ANALYSIS_FIELDS = [
@@ -137,6 +138,8 @@ const SOURCE_ARTIFACTS: Record<GateReviewGate, string[]> = {
   ],
   "validation-adequacy": [
     ".ai/vcm/handoffs/architecture-plan.md",
+    ".ai/vcm/handoffs/architect-debug.md",
+    ".ai/vcm/handoffs/architecture-diagnosis.md",
     ".ai/vcm/handoffs/test-report.md",
     "docs/TESTING.md"
   ],
@@ -372,6 +375,33 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
         record: index.gates[gate],
         message: `${coreInput.path} is ${coreInput.status}.`
       };
+    }
+
+    if (gate === "validation-adequacy") {
+      const validationReportError = await readValidationReportError(deps.fs, context.taskRepoRoot);
+      if (validationReportError) {
+        index = applyGateState(index, gate, {
+          status: "failed",
+          decision: undefined,
+          error: validationReportError,
+          exceptionReason: undefined,
+          requestId: undefined,
+          requestPath: undefined,
+          inputHash: undefined,
+          requestedAt: undefined,
+          startedAt: undefined,
+          completedAt: now(),
+          callbackStatus: "not_sent",
+          callbackError: undefined
+        }, now(), true);
+        await saveIndex(deps.fs, context.taskRepoRoot, index);
+        return {
+          status: "failed_to_start",
+          gate,
+          record: index.gates[gate],
+          message: validationReportError
+        };
+      }
     }
 
     const codeDiffInput = gate === "code-diff"
@@ -1194,6 +1224,28 @@ async function readArchitectureBriefError(
   return undefined;
 }
 
+async function readValidationReportError(
+  fs: FileSystemAdapter,
+  taskRepoRoot: string
+): Promise<string | undefined> {
+  const relativePath = CORE_INPUT_ARTIFACTS["validation-adequacy"];
+  if (!relativePath) {
+    return undefined;
+  }
+  const absolutePath = resolveRepoPath(taskRepoRoot, relativePath);
+  const content = await fs.pathExists(absolutePath) ? await fs.readText(absolutePath) : null;
+  const check = checkMarkdownArtifact("test-report", relativePath, content);
+  if (check.status === "ok") {
+    return undefined;
+  }
+  const details = [
+    check.missingHeadings.length > 0 ? `missing headings: ${check.missingHeadings.join(", ")}` : "",
+    check.invalidFields.length > 0 ? check.invalidFields.join(" ") : "",
+    check.hasPlaceholder ? "contains placeholders" : ""
+  ].filter(Boolean).join("; ");
+  return `${relativePath} is incomplete and cannot start validation-adequacy review.${details ? ` ${details}` : ""}`;
+}
+
 async function readArchitectureEvidenceError(
   fs: FileSystemAdapter,
   taskRepoRoot: string
@@ -1466,17 +1518,15 @@ async function validateValidationApprovalInput(
   const absolutePath = resolveRepoPath(taskRepoRoot, relativePath);
   const content = await fs.pathExists(absolutePath) ? await fs.readText(absolutePath) : null;
   const check = checkMarkdownArtifact("test-report", relativePath, content);
-  const testResult = content ? matchField(content, "Test Result")?.toLowerCase() : undefined;
-  if (check.status === "ok" && testResult === "pass") {
+  if (check.status === "ok") {
     return;
   }
 
   const details = [
-    check.status !== "ok" ? `status=${check.status}` : "",
+    `status=${check.status}`,
     check.missingHeadings.length > 0 ? `missing headings: ${check.missingHeadings.join(", ")}` : "",
     check.invalidFields.length > 0 ? check.invalidFields.join(" ") : "",
-    check.hasPlaceholder ? "contains placeholders" : "",
-    testResult !== "pass" ? "Test Result must be pass before approval." : ""
+    check.hasPlaceholder ? "contains placeholders" : ""
   ].filter(Boolean).join("; ");
   throw new VcmError({
     code: "GATE_REVIEW_VALIDATION_INPUT_INCOMPLETE",

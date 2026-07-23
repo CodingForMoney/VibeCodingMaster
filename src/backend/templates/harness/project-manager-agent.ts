@@ -181,7 +181,7 @@ Architecture Diagnosis Mode must run before another Debug Mode fix or Coder disp
 #### Allowed Branches
 
 - **Code-Diff Revision:** If the code-diff Gate returns \`request_changes\`, route the report to Architecture Diagnosis Mode and rerun \`code-diff --source architect-diagnosis\` after correction.
-- **Tester Failure:** If Tester returns \`Test Result: fail\` for the Diagnosis implementation, pause and report to the user.
+- **Tester Failure:** If Tester returns \`Test Result: fail\` for the Diagnosis implementation, pause and report to the user. If required validation remains unavailable, ask whether the user explicitly approves retaining that exact Coverage Gap.
 
 #### Successful Exit
 
@@ -195,6 +195,14 @@ After Tester Failure, PM should summarize:
 - why Architecture Diagnosis Mode was triggered
 - what the Architect diagnosed
 - what Tester still found wrong
+
+If the user approves the exact gap, record the approval verbatim and route
+Tester to add the approved \`Coverage Gaps\` entry and, when applicable, the
+durable \`Known Testing Gaps\` entry. Then run the validation-adequacy Gate and
+continue using the recorded user-approved exception.
+
+Without explicit user approval, the gap remains blocking and the workflow
+stays paused.
 
 ### Docs-Only Flow
 

@@ -142,6 +142,43 @@ describe("backend E2E Gate Review with mock Claude Code", () => {
     });
     expect(codeDiffApproved.gates["code-diff"].changedFiles).toContain("feature.txt");
   });
+
+  it("blocks unapproved coverage gaps and reviews an exact user-approved failed result", async () => {
+    const env = await createMockClaudeE2eApp();
+    cleanups.push(() => env.close());
+    const repo = await createE2eRepo();
+    cleanups.push(() => repo.cleanup());
+    const task = await connectAndCreateTask(env.app, repo, "approved-test-gap");
+
+    await updateGateSettings(env.app, task.taskSlug, {
+      "architecture-plan": false,
+      "validation-adequacy": true,
+      "code-diff": false
+    });
+    env.mockRuntime.onPrompt("gate-reviewer", "[VCM GATE REVIEW]", writeApproveGateReport, { once: false });
+
+    const reportPath = path.join(task.worktreePath, ".ai/vcm/handoffs/test-report.md");
+    await fs.writeFile(reportPath, approvedGapTestReport("None."), "utf8");
+
+    const unapproved = await requestGateReview(env.app, task.taskSlug, "validation-adequacy");
+    expect(unapproved.status).toBe("failed_to_start");
+    expect(unapproved.message).toContain("User Approval Evidence is required");
+
+    await fs.writeFile(
+      reportPath,
+      approvedGapTestReport("User approved retaining the live gateway coverage gap."),
+      "utf8"
+    );
+    const started = await requestGateReview(env.app, task.taskSlug, "validation-adequacy");
+    expect(started.status).toBe("started");
+    await waitForGate(env.app, task.taskSlug, "validation-adequacy");
+
+    const state = await getGateState(env.app, task.taskSlug);
+    expect(state.gates["validation-adequacy"]).toMatchObject({
+      status: "completed",
+      decision: "approve"
+    });
+  });
 });
 
 async function writeApproveGateReport(ctx: MockClaudePromptContext): Promise<void> {
@@ -228,8 +265,22 @@ function validTestReport(): string {
     "",
     "## Blocking Validation Issues",
     "None.",
+    "",
+    "## User Approval Evidence",
+    "None.",
     ""
   ].join("\n");
+}
+
+function approvedGapTestReport(userApproval: string): string {
+  return validTestReport()
+    .replace("Test Result: pass", "Test Result: fail")
+    .replace("## Coverage Gaps\nNone.", "## Coverage Gaps\nMissing live gateway coverage.")
+    .replace(
+      "## Blocking Validation Issues\nNone.",
+      "## Blocking Validation Issues\nLive gateway validation remains unavailable."
+    )
+    .replace("## User Approval Evidence\nNone.", `## User Approval Evidence\n${userApproval}`);
 }
 
 function validationAnalysisLines(): string[] {
@@ -245,6 +296,7 @@ function validationAnalysisLines(): string[] {
     "- Public Contract Coverage: public behavior asserted",
     "- Test Integrity: real path and observable assertion inspected",
     "- Skips And Gaps: none",
+    "- User Approval And Gap Disposition: none",
     "- Validation Readiness: ready",
     "",
     "## Findings",

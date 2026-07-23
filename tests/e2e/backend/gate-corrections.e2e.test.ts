@@ -265,6 +265,7 @@ function analysisForGate(gate: GateReviewGate): string[] {
       "- Public Contract Coverage: observable result asserted",
       "- Test Integrity: real behavior path retained",
       "- Skips And Gaps: none after correction",
+      "- User Approval And Gap Disposition: none",
       "- Validation Readiness: evidence is reviewable",
       ""
     ];

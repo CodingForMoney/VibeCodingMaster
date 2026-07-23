@@ -350,6 +350,9 @@ function validTestReport(): string {
     "",
     "## Blocking Validation Issues",
     "None.",
+    "",
+    "## User Approval Evidence",
+    "None.",
     ""
   ].join("\n");
 }
@@ -367,6 +370,7 @@ function validationAnalysisLines(): string[] {
     "- Public Contract Coverage: public behavior asserted",
     "- Test Integrity: real path and observable assertion inspected",
     "- Skips And Gaps: none",
+    "- User Approval And Gap Disposition: none",
     "- Validation Readiness: ready",
     "",
     "## Findings",

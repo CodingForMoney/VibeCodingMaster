@@ -86,6 +86,11 @@ Regenerate without `--check` after module structure, workspace/crate manifest, s
 
 ## Known Testing Gaps
 
+New entries require the user's explicit approval after the applicable
+Architect Debug and Architecture Diagnosis work has failed to resolve the
+required validation gap. Approval permits the exact gap to remain; it does not
+change the factual Tester result.
+
 - Each crate has colocated unit coverage for `module_summary()` and one basic integration test; broader behavior coverage is still minimal.
 - `module-index.json` and `public-surface.json` are generated context artifacts, not validation wrappers.
 - No real L3/L4 smoke or release validation is configured; `E2E-001` documents the missing project-level application journey.

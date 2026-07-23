@@ -128,6 +128,8 @@ production entry points needed to verify what those tests exercise. Read the
 relevant architect/coder definitions and `.ai/vcm/handoffs/architecture-plan.md`
 when the active flow produced an architecture plan. Read
 `.ai/generated/public-surface.json` when public contracts changed.
+When the report contains an approved Coverage Gap, also read the relevant
+Architect Debug and Architecture Diagnosis evidence.
 
 Reconstruct the accepted validation target, observable behavior, and risks
 from the active flow evidence and current implementation. Treat Tester
@@ -156,7 +158,20 @@ actual tests, validation level does not match risk, an important behavior has
 no concrete coverage mapping, a required check was skipped, required coverage
 is unavailable, or a current-task coverage gap remains. A concrete risk-based
 reason may show that integration or E2E coverage is unnecessary; unavailable
-required coverage is not an approval reason.
+required coverage without exact user approval is not an approval reason.
+
+Treat every unresolved required-coverage item as gate-blocking unless
+`test-report.md` contains the user's exact approval routed by project-manager.
+Verify that Architect Debug and Architecture Diagnosis were completed before
+user acceptance was requested, the approved gap exactly matches the final
+Tester evidence, the affected behavior and remaining risk are stated
+completely, and any new or changed `Known Testing Gaps` entry matches the
+approved durable limitation. Project-manager, Architect, or Tester judgment is
+not user authorization.
+
+An approved gap keeps `Test Result: fail`. Gate approval means the validation
+evidence and exact user exception are complete and consistent; it does not
+convert the result to `pass` or independently accept the risk.
 
 ## Code Diff Gate
 
@@ -264,6 +279,7 @@ Use this findings structure:
 - Public Contract Coverage:
 - Test Integrity:
 - Skips And Gaps:
+- User Approval And Gap Disposition:
 - Validation Readiness:
 
 <!-- Include Code Diff Analysis only for code-diff gate. -->
@@ -324,6 +340,7 @@ If there are no findings, write:
 - Public Contract Coverage:
 - Test Integrity:
 - Skips And Gaps:
+- User Approval And Gap Disposition:
 - Validation Readiness:
 
 <!-- Include Code Diff Analysis only for code-diff gate. -->

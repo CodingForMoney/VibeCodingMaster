@@ -227,6 +227,11 @@ Run all backend journeys with `npm run test:e2e:backend`.
 
 ## Known Testing Gaps
 
+New entries require the user's explicit approval after the applicable
+Architect Debug and Architecture Diagnosis work has failed to resolve the
+required validation gap. Approval permits the exact gap to remain; it does not
+change the factual Tester result.
+
 - No integration tests exist yet; `tests/integration/**` is configured but empty.
 - No browser/Playwright E2E specs exist yet. Backend E2E coverage exists under
   `tests/e2e/backend/**` and uses mock Claude Code and Gateway runtimes.

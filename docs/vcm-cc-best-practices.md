@@ -528,10 +528,20 @@ risk-based reason shows that coverage is unnecessary. Unavailable required
 coverage is blocking. Tests must assert real behavior, not mock-call rituals or
 fixture-specific shortcuts.
 
+Tester cannot create `Coverage Gaps` or add durable `Known Testing Gaps`
+without the user's exact approval. Required coverage that cannot be completed
+remains `Test Result: fail` and follows Architect Debug, then Architecture
+Diagnosis. Only after Diagnosis still cannot resolve the gap may PM ask the
+user to accept it. Approval allows the exact risk to remain and the workflow to
+continue; it does not convert the failed validation result to `pass`.
+
 The Validation Adequacy Gate reads the actual implementation entry points and
 test files behind that mapping. Its report must contain structured Validation
 Analysis; `Test Result: pass` and green commands alone are not approval
-evidence. Gate Reviewer inspects evidence but does not run validation.
+evidence. For an approved gap, Gate Reviewer verifies the Debug and Diagnosis
+evidence, the exact user authorization, the retained risk, and any durable
+testing-gap entry. Gate approval confirms evidence adequacy, not test success.
+Gate Reviewer inspects evidence but does not run validation.
 
 Long-running validation uses `vcm-long-running-validation` backed by:
 
