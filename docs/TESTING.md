@@ -95,7 +95,10 @@ Notes:
 Use the `vcm-long-running-validation` skill (`.ai/tools/run-long-check` +
 `.ai/tools/watch-job`) for any command that may exceed ~2 minutes (notably
 `npm run e2e` and full builds). Never run validation as a detached/background
-process; the job guard denies it. Honor the 60-minute per-job ceiling.
+process; the job guard denies it. Pass the validation executable directly:
+`run-long-check` rejects shell command-string wrappers because pipelines or
+trailing commands can mask the validation exit code. Honor the 60-minute
+per-job ceiling.
 
 ## Release Gate (L4)
 

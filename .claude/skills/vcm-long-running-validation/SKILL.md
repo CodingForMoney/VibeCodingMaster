@@ -17,7 +17,7 @@ The hard ceiling is 60 minutes per job, enforced by the job worker itself. No ap
 
 ## Protocol
 
-1. Start the command with an explicit ceiling: `.ai/tools/run-long-check --timeout <duration> -- <command>`. Pick the ceiling from `docs/TESTING.md` guidance or a realistic estimate, never above 60m. The tool prints the job id and creates job state under `.ai/vcm/jobs/<job-id>/`.
+1. Start the command with an explicit ceiling: `.ai/tools/run-long-check --timeout <duration> -- <command>`. Pass the validation executable and its arguments directly. Do not use a shell command-string wrapper, pipeline its output, or append another command: run-long-check already captures stdout/stderr, and shell wrappers can hide the validation exit code. Pick the ceiling from `docs/TESTING.md` guidance or a realistic estimate, never above 60m. The tool prints the job id and creates job state under `.ai/vcm/jobs/<job-id>/`.
 2. In the same turn, run `.ai/tools/watch-job <job-id>`. The default watch window is 8 minutes.
 3. If watch-job exits 125, the job is still running: run `.ai/tools/watch-job <job-id>` again immediately. Do not end the turn between windows.
 4. Repeat until watch-job reports a terminal result.

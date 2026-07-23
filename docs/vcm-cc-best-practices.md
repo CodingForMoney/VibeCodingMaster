@@ -552,6 +552,9 @@ Long-running validation uses `vcm-long-running-validation` backed by:
 
 VCM roles must not run background Bash. `vcm-bash-guard` denies
 `run_in_background`, `nohup`, `setsid`, `disown`, and trailing `&`.
+`run-long-check` accepts the validation executable and arguments directly and
+rejects shell command-string wrappers whose pipeline or trailing command could
+mask the validation exit code.
 
 ## 14. Generated Context
 
