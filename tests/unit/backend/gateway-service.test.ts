@@ -291,7 +291,7 @@ describe("gateway-service long connection", () => {
 
   it("returns the latest cached PM reply when /start enables Gateway", async () => {
     const transcriptDir = await mkdtemp(join(tmpdir(), "vcm-gateway-transcript-"));
-    const transcriptPath = join(transcriptDir, "pm.jsonl");
+    const transcriptPath = join(transcriptDir, "claude-pm-session.jsonl");
     await writeFile(transcriptPath, [
       assistantTranscriptLine("old-reply", "2026-06-10T23:59:00.000Z", "Old PM reply."),
       assistantTranscriptLine("current-reply", "2026-06-11T00:00:01.000Z", "Current PM reply for the active task.")
@@ -335,7 +335,7 @@ describe("gateway-service long connection", () => {
 
   it("keeps failed output translations in memory and retries them with /retry", async () => {
     const transcriptDir = await mkdtemp(join(tmpdir(), "vcm-gateway-transcript-"));
-    const transcriptPath = join(transcriptDir, "pm.jsonl");
+    const transcriptPath = join(transcriptDir, "claude-pm-session.jsonl");
     await writeFile(transcriptPath, assistantTranscriptLine(
       "current-reply",
       "2026-06-11T00:00:01.000Z",
@@ -401,7 +401,7 @@ describe("gateway-service long connection", () => {
 
   it("pushes only PM final replies when Gateway handles a PM stop", async () => {
     const transcriptDir = await mkdtemp(join(tmpdir(), "vcm-gateway-transcript-"));
-    const transcriptPath = join(transcriptDir, "pm.jsonl");
+    const transcriptPath = join(transcriptDir, "claude-pm-session.jsonl");
     await writeFile(transcriptPath, [
       assistantTranscriptLine(
         "tool-progress",
@@ -463,7 +463,7 @@ describe("gateway-service long connection", () => {
 
   it("pushes only the latest PM final reply after the Gateway cursor", async () => {
     const transcriptDir = await mkdtemp(join(tmpdir(), "vcm-gateway-transcript-"));
-    const transcriptPath = join(transcriptDir, "pm.jsonl");
+    const transcriptPath = join(transcriptDir, "claude-pm-session.jsonl");
     await writeFile(transcriptPath, [
       assistantTranscriptLine(
         "cursor-anchor",
@@ -537,7 +537,7 @@ describe("gateway-service long connection", () => {
 
   it("does not push PM replies for interrupted rounds", async () => {
     const transcriptDir = await mkdtemp(join(tmpdir(), "vcm-gateway-transcript-"));
-    const transcriptPath = join(transcriptDir, "pm.jsonl");
+    const transcriptPath = join(transcriptDir, "claude-pm-session.jsonl");
     await writeFile(transcriptPath, assistantTranscriptLine(
       "current-reply",
       "2026-06-11T00:00:01.000Z",
@@ -1004,7 +1004,7 @@ describe("gateway-service long connection", () => {
     // PP4: a disarmed gateway still records latestPmReplies for later replay but
     // never opens the channel to push.
     const transcriptDir = await mkdtemp(join(tmpdir(), "vcm-gateway-transcript-"));
-    const transcriptPath = join(transcriptDir, "pm.jsonl");
+    const transcriptPath = join(transcriptDir, "claude-pm-session.jsonl");
     await writeFile(transcriptPath, assistantTranscriptLine(
       "current-reply",
       "2026-06-11T00:00:01.000Z",

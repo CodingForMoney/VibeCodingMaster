@@ -210,7 +210,7 @@ describe("claude-transcript-service", () => {
       const events: ReturnType<typeof parseAssistantContent> = [];
       const resolvedPaths: string[] = [];
       const unsubscribe = service.subscribeToRoleSession(createRoleSessionRecord({
-        claudeSessionId: "different-session-id",
+        claudeSessionId: "explicit-session",
         transcriptPath: path
       }), (event) => {
         events.push(event);

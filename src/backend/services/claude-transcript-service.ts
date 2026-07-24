@@ -10,7 +10,7 @@ import {
 } from "node:fs";
 import type { FSWatcher } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import type { RoleSessionRecord } from "../../shared/types/session.js";
 import type { Unsubscribe } from "../runtime/terminal-runtime.js";
 
@@ -35,6 +35,7 @@ export type ClaudeTranscriptStopReason =
 interface BaseTranscriptEvent {
   id: string;
   timestamp: string;
+  isSidechain?: boolean;
 }
 
 export interface RawQuestionOption {
@@ -359,7 +360,12 @@ export function createClaudeTranscriptService(): ClaudeTranscriptService {
 }
 
 export function resolveExistingClaudeTranscriptPath(session: RoleSessionRecord): string | undefined {
-  const sessionPath = existingFile(session.transcriptPath);
+  const sessionPath = transcriptPathMatchesSession(
+    session.transcriptPath,
+    session.claudeSessionId
+  )
+    ? existingFile(session.transcriptPath)
+    : undefined;
   if (sessionPath) {
     return sessionPath;
   }
@@ -374,6 +380,19 @@ export function resolveExistingClaudeTranscriptPath(session: RoleSessionRecord):
   }
 
   return findClaudeTranscriptPathBySessionId(session.claudeSessionId, session.claudeConfigDir);
+}
+
+function transcriptPathMatchesSession(
+  transcriptPath: string | undefined,
+  claudeSessionId: string
+): boolean {
+  return Boolean(
+    transcriptPath
+    && (
+      !claudeSessionId
+      || basename(transcriptPath) === `${claudeSessionId}.jsonl`
+    )
+  );
 }
 
 export function findClaudeTranscriptPathBySessionId(
@@ -477,6 +496,7 @@ export function parseAssistantContent(line: string): ClaudeTranscriptEvent[] {
   const rawTools: { id: string; payload: RawToolUsePayload }[] = [];
   const timestamp = typeof obj.timestamp === "string" ? obj.timestamp : new Date().toISOString();
   const uuid = typeof obj.uuid === "string" ? obj.uuid : undefined;
+  const isSidechain = obj.isSidechain === true;
   const rawStopReason = (message as Record<string, unknown> | undefined)?.stop_reason;
   const stopReason = typeof rawStopReason === "string" ? rawStopReason : undefined;
 
@@ -533,6 +553,7 @@ export function parseAssistantContent(line: string): ClaudeTranscriptEvent[] {
       timestamp,
       text,
       id: uuid ?? `${timestamp}-${text.slice(0, 16)}`,
+      ...(isSidechain ? { isSidechain: true } : {}),
       ...(stopReason !== undefined ? { stopReason } : {})
     });
   }
@@ -543,6 +564,7 @@ export function parseAssistantContent(line: string): ClaudeTranscriptEvent[] {
       timestamp,
       text,
       id: uuid ? `${uuid}#thinking` : `${timestamp}-thinking-${text.slice(0, 16)}`,
+      ...(isSidechain ? { isSidechain: true } : {}),
       ...(stopReason !== undefined ? { stopReason } : {})
     });
   }
@@ -552,6 +574,7 @@ export function parseAssistantContent(line: string): ClaudeTranscriptEvent[] {
       kind: "question",
       timestamp,
       id: question.id,
+      ...(isSidechain ? { isSidechain: true } : {}),
       question: question.payload
     });
   }
@@ -560,6 +583,7 @@ export function parseAssistantContent(line: string): ClaudeTranscriptEvent[] {
       kind: "todo",
       timestamp,
       id: todo.id,
+      ...(isSidechain ? { isSidechain: true } : {}),
       todo: todo.payload
     });
   }
@@ -568,6 +592,7 @@ export function parseAssistantContent(line: string): ClaudeTranscriptEvent[] {
       kind: "agent",
       timestamp,
       id: agent.id,
+      ...(isSidechain ? { isSidechain: true } : {}),
       agent: agent.payload
     });
   }
@@ -576,6 +601,7 @@ export function parseAssistantContent(line: string): ClaudeTranscriptEvent[] {
       kind: "tool_use",
       timestamp,
       id: tool.id,
+      ...(isSidechain ? { isSidechain: true } : {}),
       toolUse: tool.payload
     });
   }
@@ -591,6 +617,7 @@ function parseUserToolResults(obj: Record<string, unknown>): ClaudeTranscriptEve
   }
 
   const timestamp = typeof obj.timestamp === "string" ? obj.timestamp : new Date().toISOString();
+  const isSidechain = obj.isSidechain === true;
   const out: ClaudeTranscriptEvent[] = [];
   for (const entry of content) {
     if (!entry || typeof entry !== "object") {
@@ -608,6 +635,7 @@ function parseUserToolResults(obj: Record<string, unknown>): ClaudeTranscriptEve
       kind: "tool_result",
       timestamp,
       id: `${toolUseId}#result`,
+      ...(isSidechain ? { isSidechain: true } : {}),
       toolResult: {
         tool_use_id: toolUseId,
         content: block.content,

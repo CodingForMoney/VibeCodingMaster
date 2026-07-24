@@ -2,7 +2,6 @@ import type { ClaudeHookRequest } from "../../shared/types/claude-hook.js";
 import type { RoleName } from "../../shared/types/role.js";
 import type { RoleSessionRecord } from "../../shared/types/session.js";
 import type { TaskRecord } from "../../shared/types/task.js";
-import type { TerminalRuntime } from "../runtime/terminal-runtime.js";
 import type { ClaudeHookService } from "./claude-hook-service.js";
 import {
   readTranscriptTurnEvidence,
@@ -11,9 +10,6 @@ import {
 import type { RoundService } from "./round-service.js";
 import type { SessionService } from "./session-service.js";
 import { getTaskRuntimeRepoRoot } from "./task-service.js";
-
-export const TURN_STALL_THRESHOLD_MS = 30 * 60_000;
-export const TURN_INTERRUPT_GRACE_MS = 10_000;
 
 export interface TurnReconcilerService {
   reconcileTask(repoRoot: string, task: TaskRecord, stateRoot: string): Promise<TurnReconcileResult>;
@@ -27,19 +23,11 @@ export interface TurnReconcilerServiceDeps {
   sessionService: Pick<SessionService, "getRoleSession">;
   roundService: Pick<RoundService, "getSessionRoundState">;
   claudeHookService: Pick<ClaudeHookService, "handleReconciledTurnEnd">;
-  runtime: Pick<TerminalRuntime, "write">;
-  now?: () => string;
-  stallThresholdMs?: number;
-  interruptGraceMs?: number;
   readTranscriptEvidence?: (session: RoleSessionRecord) => Promise<TranscriptTurnEvidence>;
 }
 
 export function createTurnReconcilerService(deps: TurnReconcilerServiceDeps): TurnReconcilerService {
-  const now = deps.now ?? (() => new Date().toISOString());
-  const stallThresholdMs = deps.stallThresholdMs ?? TURN_STALL_THRESHOLD_MS;
-  const interruptGraceMs = deps.interruptGraceMs ?? TURN_INTERRUPT_GRACE_MS;
   const readEvidence = deps.readTranscriptEvidence ?? readTranscriptTurnEvidence;
-  const pendingInterrupts = new Map<string, { turnStartedAt: string; requestedAt: string }>();
 
   return {
     async reconcileTask(repoRoot, task, stateRoot) {
@@ -56,19 +44,16 @@ export function createTurnReconcilerService(deps: TurnReconcilerServiceDeps): Tu
         || !round.activeTurnStartedAt
         || round.roleRecovery
       ) {
-        clearTaskInterrupts(repoRoot, task.taskSlug);
         return { status: "inactive" };
       }
 
       const role = round.activeRole;
-      const interruptKey = `${repoRoot}:${task.taskSlug}:${role}`;
       const session = await deps.sessionService.getRoleSession(repoRoot, task.taskSlug, role);
       const evidence = session
         ? await readEvidence({ ...session, lastTurnStartedAt: round.activeTurnStartedAt })
         : {};
 
       if (evidence.completion) {
-        pendingInterrupts.delete(interruptKey);
         await deps.claudeHookService.handleReconciledTurnEnd(buildReconciledHook(
           task.taskSlug,
           role,
@@ -84,7 +69,6 @@ export function createTurnReconcilerService(deps: TurnReconcilerServiceDeps): Tu
       }
 
       if (!session || session.status !== "running") {
-        pendingInterrupts.delete(interruptKey);
         const reason = session ? "terminal-session-exited" : "terminal-session-missing";
         await deps.claudeHookService.handleReconciledTurnEnd(buildReconciledHook(
           task.taskSlug,
@@ -99,53 +83,9 @@ export function createTurnReconcilerService(deps: TurnReconcilerServiceDeps): Tu
         return { status: "failed", role, reason };
       }
 
-      const lastActivityAt = latestTimestamp([
-        round.activeTurnStartedAt,
-        session.lastHookEventAt,
-        session.lastOutputAt,
-        evidence.lastActivityAt
-      ]);
-      const currentTime = now();
-      if (!isStale(lastActivityAt, currentTime, stallThresholdMs)) {
-        pendingInterrupts.delete(interruptKey);
-        return { status: "active" };
-      }
-
-      const pendingInterrupt = pendingInterrupts.get(interruptKey);
-      if (!pendingInterrupt || pendingInterrupt.turnStartedAt !== round.activeTurnStartedAt) {
-        deps.runtime.write(session.id, "\u0003");
-        pendingInterrupts.set(interruptKey, {
-          turnStartedAt: round.activeTurnStartedAt,
-          requestedAt: currentTime
-        });
-        return { status: "active" };
-      }
-      if (!isStale(pendingInterrupt.requestedAt, currentTime, interruptGraceMs)) {
-        return { status: "active" };
-      }
-      pendingInterrupts.delete(interruptKey);
-
-      await deps.claudeHookService.handleReconciledTurnEnd(buildReconciledHook(
-        task.taskSlug,
-        role,
-        session,
-        "StopFailure",
-        {
-          error: "turn_stalled",
-          error_details: `No hook, terminal output, or transcript activity was observed for ${stallThresholdMs}ms.`
-        }
-      ));
-      return { status: "failed", role, reason: "turn-stalled" };
+      return { status: "active" };
     }
   };
-
-  function clearTaskInterrupts(repoRoot: string, taskSlug: string): void {
-    for (const key of pendingInterrupts.keys()) {
-      if (key.startsWith(`${repoRoot}:${taskSlug}:`)) {
-        pendingInterrupts.delete(key);
-      }
-    }
-  }
 }
 
 function buildReconciledHook(
@@ -168,25 +108,4 @@ function buildReconciledHook(
       ...evidence
     }
   };
-}
-
-function latestTimestamp(values: Array<string | undefined>): string | undefined {
-  return values.reduce<string | undefined>((latest, value) => {
-    if (!value) {
-      return latest;
-    }
-    const valueMs = Date.parse(value);
-    const latestMs = latest ? Date.parse(latest) : Number.NaN;
-    return Number.isFinite(valueMs) && (!Number.isFinite(latestMs) || valueMs > latestMs)
-      ? value
-      : latest;
-  }, undefined);
-}
-
-function isStale(lastActivityAt: string | undefined, currentTime: string, thresholdMs: number): boolean {
-  const activityMs = lastActivityAt ? Date.parse(lastActivityAt) : Number.NaN;
-  const currentMs = Date.parse(currentTime);
-  return Number.isFinite(activityMs)
-    && Number.isFinite(currentMs)
-    && currentMs - activityMs >= thresholdMs;
 }

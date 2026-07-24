@@ -11,6 +11,62 @@ import { createMockClaudeE2eApp, type MockClaudeE2eApp } from "./helpers/e2e-app
 import { createE2eRepo } from "./helpers/e2e-repo.js";
 
 describe("backend E2E runtime restart recovery", () => {
+  it("keeps a quiet live parent turn running while a foreground Agent call is unresolved", async () => {
+    const repo = await createE2eRepo();
+    const fixedNow = "2000-01-01T00:00:00.000Z";
+    const e2e = await createMockClaudeE2eApp({ now: () => fixedNow });
+
+    try {
+      const task = await connectAndCreateTask(e2e.app, repo, "mock-quiet-subagent");
+      e2e.mockRuntime.onPrompt("coder", "Run a quiet worker", async (ctx) => {
+        await ctx.userPromptSubmit();
+        await fs.appendFile(ctx.transcriptPath, `${JSON.stringify({
+          type: "assistant",
+          uuid: "parent-agent-dispatch",
+          timestamp: fixedNow,
+          message: {
+            stop_reason: "tool_use",
+            content: [{
+              type: "tool_use",
+              id: "agent-call-1",
+              name: "Agent",
+              input: {
+                description: "Quiet worker",
+                prompt: "Complete the assigned module.",
+                subagent_type: "vcm-coder-worker"
+              }
+            }]
+          }
+        })}\n`, "utf8");
+      });
+
+      const session = await startRole(e2e.app, task.taskSlug, "coder");
+      e2e.mockRuntime.write(session.id, "Run a quiet worker");
+      await e2e.mockRuntime.waitForIdle();
+
+      await e2e.deps.runtimeCoordinator.reconcileProject(repo.repoRoot, {
+        taskSlug: task.taskSlug
+      });
+      await e2e.deps.runtimeCoordinator.reconcileProject(repo.repoRoot, {
+        taskSlug: task.taskSlug
+      });
+
+      expect(e2e.mockRuntime.getWrites(session.id)).not.toContain("\u0003");
+      const workspace = await getWorkspaceState(e2e.app, task.taskSlug);
+      expect(workspace.roundState).toMatchObject({
+        status: "running",
+        activeRole: "coder"
+      });
+      expect(workspace.taskStatus.sessions.find((entry) => entry.role === "coder")).toMatchObject({
+        status: "running",
+        activityStatus: "running"
+      });
+    } finally {
+      await e2e.close();
+      await repo.cleanup();
+    }
+  });
+
   it("recovers stale role and round state before resuming the role in a new backend process", async () => {
     const repo = await createE2eRepo();
     const first = await createMockClaudeE2eApp();

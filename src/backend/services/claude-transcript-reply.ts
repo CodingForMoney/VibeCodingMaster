@@ -20,10 +20,10 @@ export interface TranscriptTextEvent {
   timestamp: string;
   text: string;
   stopReason?: string;
+  isSidechain?: boolean;
 }
 
 export interface TranscriptTurnEvidence {
-  lastActivityAt?: string;
   completion?: {
     id: string | null;
     timestamp: string;
@@ -77,7 +77,8 @@ export async function readTranscriptTextEvents(transcriptPath: string): Promise<
           id: event.id,
           timestamp: event.timestamp,
           text: event.text,
-          stopReason: event.stopReason
+          stopReason: event.stopReason,
+          ...(event.isSidechain ? { isSidechain: true } : {})
         });
       }
     }
@@ -93,12 +94,10 @@ export async function readTranscriptTurnEvidence(session: RoleSessionRecord): Pr
   }
 
   let raw: string;
-  let modifiedAt: string;
   let handle: Awaited<ReturnType<typeof open>> | undefined;
   try {
     handle = await open(transcriptPath, "r");
     const metadata = await handle.stat();
-    modifiedAt = metadata.mtime.toISOString();
     const readLength = Math.min(metadata.size, TRANSCRIPT_EVIDENCE_TAIL_BYTES);
     const readOffset = Math.max(0, metadata.size - readLength);
     const buffer = Buffer.alloc(readLength);
@@ -115,7 +114,6 @@ export async function readTranscriptTurnEvidence(session: RoleSessionRecord): Pr
   }
 
   const turnStartedAtMs = timestampMs(session.lastTurnStartedAt);
-  let lastActivityAt: string | undefined;
   let completion: TranscriptTurnEvidence["completion"];
 
   for (const line of raw.split("\n")) {
@@ -130,10 +128,7 @@ export async function readTranscriptTurnEvidence(session: RoleSessionRecord): Pr
     }
 
     const timestamp = typeof record.timestamp === "string" ? record.timestamp : undefined;
-    if (timestamp && isLaterTimestamp(timestamp, lastActivityAt)) {
-      lastActivityAt = timestamp;
-    }
-    if (record.type !== "assistant" || !timestamp) {
+    if (record.type !== "assistant" || record.isSidechain === true || !timestamp) {
       continue;
     }
 
@@ -156,14 +151,7 @@ export async function readTranscriptTurnEvidence(session: RoleSessionRecord): Pr
     }
   }
 
-  if (isLaterTimestamp(modifiedAt, lastActivityAt)) {
-    lastActivityAt = modifiedAt;
-  }
-
-  return {
-    ...(lastActivityAt ? { lastActivityAt } : {}),
-    ...(completion ? { completion } : {})
-  };
+  return completion ? { completion } : {};
 }
 
 /** True for a text event that completed a turn (assistant stopped of its own accord). */
@@ -187,7 +175,7 @@ export function selectLatestTurnReply(
 
   const startMs = timestampMs(session.lastTurnStartedAt);
   const endMs = timestampMs(session.lastTurnEndedAt);
-  const finalEvents = events.filter(isFinalTurnTextEvent);
+  const finalEvents = events.filter((event) => !event.isSidechain && isFinalTurnTextEvent(event));
   const selected = startMs === undefined
     ? finalEvents.slice(-1)
     : finalEvents.filter((event) => {

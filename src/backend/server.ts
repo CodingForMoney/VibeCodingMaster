@@ -454,8 +454,7 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
   const turnReconciler = createTurnReconcilerService({
     sessionService,
     roundService,
-    claudeHookService,
-    runtime
+    claudeHookService
   });
   const runtimeCoordinator = createRuntimeCoordinatorService({
     appSettings,

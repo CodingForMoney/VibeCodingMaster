@@ -939,7 +939,7 @@ describe("translation-service", () => {
 
   it("queues the current role latest final reply for manual translation", async () => {
     const transcriptDir = await mkdtemp(join(tmpdir(), "vcm-translation-reply-"));
-    const transcriptPath = join(transcriptDir, "coder.jsonl");
+    const transcriptPath = join(transcriptDir, "claude-session-1.jsonl");
     await writeFile(transcriptPath, [
       assistantTranscriptLine("old-reply", "2026-05-30T00:00:01.000Z", "Older reply.", "end_turn"),
       assistantTranscriptLine("tool-progress", "2026-05-30T00:00:02.000Z", "Tool progress should not be selected.", "tool_use"),

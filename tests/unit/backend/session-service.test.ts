@@ -1307,6 +1307,50 @@ describe("createSessionService", () => {
       runtimeSessionToken: "runtime-token-new"
     })).toBe(true);
   });
+
+  it("requires Claude session identity after the first prompt even when the runtime token matches", () => {
+    const current = {
+      id: "runtime-current",
+      runtimeSessionToken: "runtime-token-current",
+      claudeSessionId: "claude-current",
+      transcriptPath: "/repo/.claude/projects/claude-current.jsonl"
+    } as RoleSessionRecord;
+
+    expect(matchesRoleHookSession(current, {
+      eventName: "Stop",
+      sessionId: "claude-stale",
+      transcriptPath: "/repo/.claude/projects/claude-stale.jsonl",
+      runtimeSessionToken: "runtime-token-current"
+    })).toBe(false);
+    expect(matchesRoleHookSession(current, {
+      eventName: "Stop",
+      sessionId: "claude-current",
+      runtimeSessionToken: "runtime-token-current"
+    })).toBe(true);
+    expect(matchesRoleHookSession(current, {
+      eventName: "Stop",
+      transcriptPath: "/repo/.claude/projects/../projects/claude-current.jsonl",
+      runtimeSessionToken: "runtime-token-current"
+    })).toBe(true);
+  });
+
+  it("accepts an exact reconciled runtime session id without a Claude hook token", () => {
+    const current = {
+      id: "runtime-current",
+      runtimeSessionToken: "runtime-token-current",
+      claudeSessionId: "claude-current",
+      transcriptPath: "/repo/.claude/projects/claude-current.jsonl"
+    } as RoleSessionRecord;
+
+    expect(matchesRoleHookSession(current, {
+      eventName: "Stop",
+      runtimeSessionId: "runtime-current"
+    })).toBe(true);
+    expect(matchesRoleHookSession(current, {
+      eventName: "Stop",
+      runtimeSessionId: "runtime-stale"
+    })).toBe(false);
+  });
 });
 
 async function recordCurrentRoleHook(

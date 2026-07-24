@@ -1,7 +1,8 @@
-import { mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { claudeTranscriptPath } from "../../../src/backend/services/claude-transcript-service.js";
 import {
   MAX_TURN_REPLY_CHARS,
   limitTranscriptReply,
@@ -21,16 +22,23 @@ afterEach(async () => {
 async function writeTranscript(lines: string[]): Promise<string> {
   const dir = await mkdtemp(join(tmpdir(), "vcm-transcript-reply-"));
   dirs.push(dir);
-  const path = join(dir, "pm.jsonl");
+  const path = join(dir, "claude-pm-session.jsonl");
   await writeFile(path, lines.join("\n"), "utf8");
   return path;
 }
 
-function assistantLine(uuid: string, timestamp: string, text: string, stopReason = "end_turn"): string {
+function assistantLine(
+  uuid: string,
+  timestamp: string,
+  text: string,
+  stopReason = "end_turn",
+  isSidechain = false
+): string {
   return JSON.stringify({
     type: "assistant",
     uuid,
     timestamp,
+    ...(isSidechain ? { isSidechain: true } : {}),
     message: {
       stop_reason: stopReason,
       content: [{ type: "text", text }]
@@ -101,6 +109,48 @@ describe("readLatestRoleTurnReply", () => {
 
     expect(reply).toBeUndefined();
   });
+
+  it("ignores a sidechain end_turn when selecting the role reply", async () => {
+    const transcriptPath = await writeTranscript([
+      assistantLine("parent", "2026-06-11T00:00:01.000Z", "Parent reply."),
+      assistantLine("sidechain", "2026-06-11T00:00:01.500Z", "Worker reply.", "end_turn", true)
+    ]);
+
+    const reply = await readLatestRoleTurnReply(pmSession(transcriptPath));
+
+    expect(reply).toEqual({
+      text: "Parent reply.",
+      truncated: false,
+      transcriptEventId: "parent",
+      transcriptTimestamp: "2026-06-11T00:00:01.000Z"
+    });
+  });
+
+  it("ignores a stored transcript path that belongs to another Claude session", async () => {
+    const configDir = await mkdtemp(join(tmpdir(), "vcm-transcript-config-"));
+    dirs.push(configDir);
+    const stalePath = join(configDir, "stale-session.jsonl");
+    await writeFile(stalePath, assistantLine(
+      "stale",
+      "2026-06-11T00:00:01.000Z",
+      "Wrong session reply."
+    ), "utf8");
+    const currentPath = claudeTranscriptPath("/repo", "claude-pm-session", configDir);
+    await mkdir(dirname(currentPath), { recursive: true });
+    await writeFile(currentPath, assistantLine(
+      "current",
+      "2026-06-11T00:00:01.000Z",
+      "Current session reply."
+    ), "utf8");
+
+    const reply = await readLatestRoleTurnReply({
+      ...pmSession(stalePath),
+      claudeConfigDir: configDir
+    });
+
+    expect(reply?.text).toBe("Current session reply.");
+    expect(reply?.transcriptEventId).toBe("current");
+  });
 });
 
 describe("readTranscriptTurnEvidence", () => {
@@ -127,6 +177,16 @@ describe("readTranscriptTurnEvidence", () => {
 
     expect(evidence.completion).toBeUndefined();
   });
+
+  it("does not treat a sidechain end_turn as parent-turn completion", async () => {
+    const transcriptPath = await writeTranscript([
+      assistantLine("sidechain", "2026-06-11T00:00:01.000Z", "Worker complete.", "end_turn", true)
+    ]);
+
+    const evidence = await readTranscriptTurnEvidence(pmSession(transcriptPath));
+
+    expect(evidence.completion).toBeUndefined();
+  });
 });
 
 describe("selectLatestTurnReply", () => {
@@ -141,6 +201,21 @@ describe("selectLatestTurnReply", () => {
       transcriptEventId: "e1",
       transcriptTimestamp: "2026-06-11T00:00:01.000Z"
     });
+  });
+
+  it("ignores sidechain final events", () => {
+    const events: TranscriptTextEvent[] = [
+      { id: "parent", timestamp: "2026-06-11T00:00:01.000Z", text: "parent", stopReason: "end_turn" },
+      {
+        id: "worker",
+        timestamp: "2026-06-11T00:00:01.500Z",
+        text: "worker",
+        stopReason: "end_turn",
+        isSidechain: true
+      }
+    ];
+
+    expect(selectLatestTurnReply(events, pmSession("ignored"))?.text).toBe("parent");
   });
 });
 

@@ -1488,7 +1488,7 @@ describe("createClaudeHookService", () => {
   it("ignores a late duplicate Stop after transcript reconciliation completed the turn", async () => {
     const dir = await mkdtemp(join(tmpdir(), "vcm-hook-duplicate-"));
     transcriptDirs.push(dir);
-    const transcriptPath = join(dir, "tester.jsonl");
+    const transcriptPath = join(dir, "claude_tester.jsonl");
     await writeFile(transcriptPath, JSON.stringify({
       type: "assistant",
       uuid: "completed-event",

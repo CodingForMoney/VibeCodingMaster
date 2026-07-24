@@ -254,10 +254,10 @@ roles and are excluded. A tool workflow that prompts a workflow role still
 participates in Round tracking through that workflow role's hooks.
 
 `turn-reconciler-service` closes gaps left by a missing Stop hook. A transcript
-`end_turn` is reconciled through the normal Stop path; a missing or exited terminal
-is reconciled through terminal StopFailure; and a live turn with no hook, terminal,
-or transcript activity for 30 minutes is interrupted before StopFailure recovery.
-The reconciler never treats inactivity alone as successful completion.
+parent `end_turn` is reconciled through the normal Stop path, while sidechain
+completion is ignored. A missing or exited terminal is reconciled through
+terminal StopFailure. A live terminal remains active regardless of inactivity;
+the reconciler never sends terminal input or ends a turn from silence alone.
 
 ## Architect Planning Context Ownership
 

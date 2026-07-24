@@ -1511,6 +1511,9 @@ export function matchesRoleHookSession(
     "eventName" | "sessionId" | "transcriptPath" | "runtimeSessionId" | "runtimeSessionToken"
   >
 ): boolean {
+  if (input.runtimeSessionId) {
+    return record.id === input.runtimeSessionId;
+  }
   if (
     !record.claudeSessionId
     && !record.transcriptPath
@@ -1518,11 +1521,11 @@ export function matchesRoleHookSession(
   ) {
     return false;
   }
-  if (input.runtimeSessionId) {
-    return record.id === input.runtimeSessionId;
-  }
-  if (record.runtimeSessionToken) {
-    return record.runtimeSessionToken === input.runtimeSessionToken;
+  if (
+    record.runtimeSessionToken
+    && record.runtimeSessionToken !== input.runtimeSessionToken
+  ) {
+    return false;
   }
   if (!record.claudeSessionId && !record.transcriptPath) {
     return input.eventName === "UserPromptSubmit";
@@ -1530,7 +1533,11 @@ export function matchesRoleHookSession(
   if (input.sessionId && record.claudeSessionId === input.sessionId) {
     return true;
   }
-  if (input.transcriptPath && record.transcriptPath === input.transcriptPath) {
+  if (
+    input.transcriptPath
+    && record.transcriptPath
+    && samePath(record.transcriptPath, input.transcriptPath)
+  ) {
     return true;
   }
   return false;

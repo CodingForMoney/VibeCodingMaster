@@ -68,6 +68,7 @@ export interface MockClaudeE2eAppOptions {
   tempRoot?: string;
   ccrGateway?: CcrGatewayAdapter;
   ccrBaseEnv?: NodeJS.ProcessEnv;
+  now?: () => string;
 }
 
 export async function createMockClaudeE2eApp(options: MockClaudeE2eAppOptions = {}): Promise<MockClaudeE2eApp> {
@@ -81,7 +82,7 @@ export async function createMockClaudeE2eApp(options: MockClaudeE2eAppOptions = 
   const fsAdapter = createNodeFileSystemAdapter();
   const runner = createCommandRunner();
   const git = createGitAdapter(runner);
-  const mockRuntime = new MockClaudeRuntime({ transcriptRoot });
+  const mockRuntime = new MockClaudeRuntime({ transcriptRoot, now: options.now });
   const claude = createMockClaudeAdapter();
   const appSettings = createAppSettingsService({ fs: fsAdapter, settingsPath });
   const ccrIntegration = createCcrIntegrationService({
@@ -110,6 +111,7 @@ export async function createMockClaudeE2eApp(options: MockClaudeE2eAppOptions = 
     taskWorkflowService,
     ccrIntegration,
     apiUrl: "http://127.0.0.1/mock-vcm",
+    now: options.now,
     isProcessAlive(pid) {
       return mockRuntime.listSessions().some((session) => session.pid === pid && session.status === "running");
     }
@@ -181,6 +183,7 @@ export async function createMockClaudeE2eApp(options: MockClaudeE2eAppOptions = 
   const roundService = createRoundService({
     fs: fsAdapter,
     sessionService,
+    now: options.now,
     settleMs: 0,
     setTimeout(callback) {
       return globalThis.setTimeout(callback, 0);
@@ -294,8 +297,7 @@ export async function createMockClaudeE2eApp(options: MockClaudeE2eAppOptions = 
   const turnReconciler = createTurnReconcilerService({
     sessionService,
     roundService,
-    claudeHookService,
-    runtime: mockRuntime
+    claudeHookService
   });
   const runtimeCoordinator = createRuntimeCoordinatorService({
     appSettings,
