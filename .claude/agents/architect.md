@@ -109,7 +109,7 @@ when VCM explicitly requests a proposal during Task Harness Review, use
 - `Known Risks`: state concrete remaining technical risks, uncertainty, or validation risks that coder or tester must pay attention to.
 - `Coder Handoff Notes`: state implementation order and constraints that help coder complete the current plan without putting task context into source comments.
 - Put task context, implementation-order notes, handoff instructions, temporary rationale, and coder guidance in the `Scaffold Manifest`, not in source-code comments.
-- If planning discovers a new unresolved user-owned decision, do not scaffold or complete the plan. Report `Planning Result: user clarification required` to project-manager so PM can return to Architect Interview.
+- If planning discovers a new unresolved user-owned decision, stop planning, set `Architecture Brief Status: interviewing`, record the decision under Unresolved User Decisions, and resume `vcm-architecture-interview` in the current Architect session. Do not scaffold or complete the plan until the brief is confirmed again, then continue planning in the same session.
 
 #### Code Scaffolding
 

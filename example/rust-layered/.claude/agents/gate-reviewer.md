@@ -111,8 +111,13 @@ For any mechanism sourced from architect inference rather than an explicit user
 requirement — including one the plan inherits from the brief — verify its
 correctness against the authoritative spec or domain docs and current code the
 same way you verify the plan, rather than accepting it because the brief states
-it. A correctness-, determinism-, or safety-critical mechanism choice that was
-never surfaced to the user for decision is `request_changes`.
+it. Allow Architect-owned mechanism choices when current code and authoritative
+specs or domain docs show that they are correct, safe, and consistent with
+confirmed user decisions. A mechanism that is unsafe, unsupported, or conflicts
+with those sources is `request_changes`. Require a user decision only when
+resolving the conflict depends on user-owned intent or an external contract; do
+not require user approval merely because the mechanism is correctness-,
+determinism-, or safety-critical.
 Analyze accepted scope versus proposed design, current code reality versus
 plan claims, ownership, data flow, lifecycle, module boundaries, dependency
 direction, public surface and callers, architecture invariants, state or durable artifact ownership,
