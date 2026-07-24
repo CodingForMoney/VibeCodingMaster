@@ -83,13 +83,13 @@ Use this flow when the accepted task requires production-code or runtime-behavio
 
 The main flow is:
 
-\`Architect Interview -> Architect planning -> architecture-plan Gate -> Coder implementation -> code-diff Gate -> Tester validation -> validation-adequacy Gate -> Architect docs sync -> Final Acceptance -> completed\`
+\`Architect Interview and planning -> architecture-plan Gate -> Coder implementation -> code-diff Gate -> Tester validation -> validation-adequacy Gate -> Architect docs sync -> Final Acceptance -> completed\`
 
 PM may leave this path only through the allowed branches below.
 
 #### Allowed Branches
 
-- **Architecture Interview Continuation:** Keep Architect Interview active while \`.ai/vcm/handoffs/architecture-brief.md\` is \`interviewing\` or \`.ai/vcm/handoffs/architecture-evidence.md\` is incomplete. After the user confirms the brief and Architect reports both complete artifacts, route Architect planning. If planning returns \`Planning Result: user clarification required\`, return to Architect Interview.
+- **Architect Interview and Planning:** The Architect confirms the brief with the user and then continues into planning within the same turn. Keep the Architect turn active while \`.ai/vcm/handoffs/architecture-brief.md\` is \`interviewing\`, \`.ai/vcm/handoffs/architecture-evidence.md\` is incomplete, or the plan is not yet complete; run the architecture-plan Gate only after Architect reports a confirmed brief, complete evidence, and a complete plan. If planning surfaces a new user-owned decision, the Architect re-interviews the user in the same turn (brief status back to \`interviewing\`) instead of routing back through PM; route Architect again only when a turn ends with the plan still incomplete (see Architecture Plan Revision).
 - **Architecture Plan Revision:** If Architect planning is incomplete, route Architect again to continue the recorded planning work plan; multi-round planning against \`.ai/vcm/handoffs/planning-progress.md\` is the normal path for large plans, and PM must not press for completion within one round or accept summary-row compression in place of remaining steps. If the architecture-plan Gate returns \`request_changes\`, route the complete report to Architect, then rerun the full architecture-plan Gate after the plan and scaffold are revised.
 - **Coder Continuation:** If Coder returns \`Decision: incomplete\`, lacks the required completion artifact, or has not completed implementation and L0/L1 validation, route Coder again — this is the only route for an in-progress sweep. Problems recorded inside an incomplete report are sweep state, not routable failures; PM routes problems onward only from a post-sweep \`failed\` report carrying the consolidated per-item disposition.
 - **Coder Failure Debug:** If Coder returns \`Decision: failed\` with compile, typecheck, or L0/L1 failure evidence after implementation, suspend the main flow and enter Architect Debug Branch.
@@ -322,7 +322,7 @@ PM may lightly rewrite the user's words to:
 - In an Architect Debug Branch or Architecture Diagnosis Branch, track the parent flow, resume point, Architect result, test report, and required Gate Review results. Do not require a branch-level final acceptance report.
 - In an Architect Debug Flow or Architecture Diagnosis Flow that produces code changes, track the Architect result, test report, required Gate Review results, docs-sync report, and final acceptance report.
 - In Docs-Only Flow, complete only when Architect returns \`Decision: synced\` or \`Decision: unchanged\` with complete evidence. In Validation-Only Flow, complete only from a complete \`test-report.md\` after the validation-adequacy Gate finishes successfully.
-- Do not route Architect planning until \`architecture-brief.md\` is confirmed. Advance to the next gate only when the required role artifact/result is complete and PM routing rules allow that gate.
+- The Architect does not begin planning until \`architecture-brief.md\` is confirmed (this happens inside the same Architect Interview-and-planning turn, not a separate PM route). Advance to the next gate only when the required role artifact/result is complete and PM routing rules allow that gate.
 - If a required artifact is missing, stale, blocked, or asks for a decision, route the issue to the responsible role or user.
 - In Code-Change Flow, Architect Debug Flow, and an Architecture Diagnosis Flow that produces code changes, request Architect post-validation docs sync after Tester completes. Architect Debug Branch and Architecture Diagnosis Branch return to their recorded resume points after Tester passes.
 

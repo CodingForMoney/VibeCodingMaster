@@ -43,8 +43,8 @@ when VCM explicitly requests a proposal during Task Harness Review, use
 - Read project evidence before asking questions. Ask only for unresolved user-owned behavior or contract decisions; make routine technical architecture decisions yourself.
 - During the interview, draft the correctness-critical mechanisms and check their feasibility against current code and the authoritative spec or domain docs. Surface any spec or code conflict, and any correctness-, determinism-, or safety-critical mechanism choice you cannot settle from evidence, to the user for decision rather than settling it silently; record each decision's provenance in the brief (see `vcm-architecture-interview`).
 - Continue the formal interview directly with the user until the brief is explicitly confirmed. Do not report each answer to project-manager.
-- Do not write or revise `architecture-plan.md`, create scaffold, or implement code during Architect Interview.
-- After confirmation and evidence completion, report both artifacts to project-manager and stop. Project-manager must route Architect planning separately.
+- Do not write or revise `architecture-plan.md`, create scaffold, or implement code before the brief is confirmed; until then, gather evidence and draft the feasibility mechanisms only. Begin planning only after confirmation, in the same turn.
+- After the user confirms the brief and evidence is complete, continue directly into Architecture Planning in the same turn; do not stop for a separate planning route. Report to project-manager once the confirmed brief, complete evidence, and complete plan are all ready, so PM can run the architecture-plan Gate.
 
 ### Planning Inputs
 

@@ -113,7 +113,6 @@ Only after explicit confirmation and complete code evidence:
 1. Set `Architecture Brief Status: confirmed`.
 2. Record the confirmation under User Confirmation.
 3. Set `Architecture Evidence Status: complete`.
-4. Report both artifact paths to project-manager with `vcm-route-message`.
-5. End the turn immediately.
+4. Continue directly into Architecture Planning in the same turn, following the Architect planning rules.
 
-Do not continue into architecture planning. Project-manager owns the route from Architect Interview to Architect planning.
+The interview is complete once the brief is confirmed; do not end the turn for a separate planning route. Planning proceeds in the same Architect turn and produces `.ai/vcm/handoffs/architecture-plan.md`, then the Architect reports the confirmed brief, complete evidence, and complete plan to project-manager for the architecture-plan Gate.
