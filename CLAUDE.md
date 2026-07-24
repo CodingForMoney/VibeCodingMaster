@@ -9,7 +9,7 @@
   - `src/frontend`: React 19 + Vite single-page GUI, embedded terminals via `@xterm/xterm`, app/session state stores.
   - `src/shared`: cross-layer TypeScript types, constants, and zod-backed validation helpers; imported by both backend and frontend.
 - Runtime model: one Fastify backend (default port 4173) plus a Vite dev server (default port 5173, proxies `/api` and `/ws` to backend). Each Claude Code role runs as a real `pty` process the backend supervises.
-- VCM roles: `project-manager`, `architect`, `coder`, `tester`, optional `gate-reviewer`, plus tool roles (translator, harness-engineer). Role definitions live in `src/shared/constants.ts`.
+- VCM roles: `project-manager`, `architect`, `coder`, `tester`, optional `reviewer`, plus tool roles (translator, harness-engineer). Role definitions live in `src/shared/constants.ts`.
 - The harness this repo installs into other projects is authored in `src/backend/templates/harness/**`. Editing harness behavior for downstream users means editing those templates, not the generated files in a target repo.
 - Durable local app state lives outside the repo under `vcmDataDir` (`VCM_DATA_DIR` or `~/.vcm`); per-task runtime state lives under `<taskRepoRoot>/.ai/vcm/`.
 

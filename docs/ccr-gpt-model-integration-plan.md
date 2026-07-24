@@ -23,7 +23,7 @@ host. VCM does not manage the CCR process. VCM provides:
 
 VCM continues to launch and supervise every Claude Code process through its
 existing `node-pty` runtime. Session, Hook, Round, retry, translation, Harness
-Engineer, Gate Reviewer, and orchestration behavior remain owned by VCM.
+Engineer, Reviewer, and orchestration behavior remain owned by VCM.
 
 ## 2. Deployment Boundary
 
@@ -205,7 +205,7 @@ controls. Controls must not infer CCR availability independently. This
 includes:
 
 - each VCM role toolbar
-- Gate Reviewer when enabled
+- Reviewer when enabled
 - Translator and Harness Engineer controls
 - Harness Bootstrap controls
 - saved launch-template controls and one-click launch
@@ -387,7 +387,7 @@ Use a mock CCR HTTP server plus the existing mock Claude Code runtime to cover:
 7. reject an invalid API key and a missing `gpt-5.6-sol` model
 8. verify Hooks, Session state, Round state, retry, and close-task behavior are
    unchanged for a CCR-backed role
-9. start Translator, Harness Engineer, Gate Reviewer, and Harness Bootstrap
+9. start Translator, Harness Engineer, Reviewer, and Harness Bootstrap
    through their existing session paths with a CCR model
 
 ### Manual DevContainer smoke test

@@ -110,7 +110,7 @@ describe("usage-analytics-service", () => {
       "architect",
       "coder",
       "tester",
-      "gate-reviewer",
+      "reviewer",
       "translator",
       "harness-engineer"
     ]);

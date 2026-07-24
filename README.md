@@ -9,7 +9,7 @@ VCM helps you keep one task organized across dedicated roles:
 - Architect
 - Coder
 - Tester
-- optional Gate Reviewer
+- optional Reviewer
 
 It runs locally, connects to a local Git repository, creates a task branch and
 worktree, starts embedded Claude Code terminals, and manages handoffs,
@@ -133,7 +133,7 @@ If you want VCM app state to survive container rebuilds, set:
 7. Review the harness/bootstrap commit diff.
 8. Start the role sessions, or use the saved launch template / one-click start.
 9. Talk mostly to Project Manager.
-10. Let PM route work to Architect, Coder, Tester, and Gate Reviewer when
+10. Let PM route work to Architect, Coder, Tester, and Reviewer when
     enabled.
 11. Review the final result and close the task when finished.
 
@@ -290,7 +290,7 @@ The global launch template stores per-role defaults for the five workflow roles:
 - auto orchestration
 
 One-click start launches the four core roles. If any Gate Review Gate is enabled,
-it also launches Gate Reviewer.
+it also launches Reviewer.
 
 Translator and Harness Engineer are tool roles. They are controlled from their
 own panels, not from the main role tab bar or the one-click launch template.
@@ -331,14 +331,14 @@ Available gates:
 - Validation adequacy
 - Code diff
 
-When a gate is enabled, VCM uses Gate Reviewer as an independent review role.
-Gate Reviewer reviews artifacts and diffs, writes a gate report, and returns
+When a gate is enabled, VCM uses Reviewer as an independent review role.
+Reviewer reviews artifacts and diffs, writes a gate report, and returns
 only:
 
 - `approve`
 - `request_changes`
 
-Gate Reviewer does not run tests and does not choose owners or fixes. PM routes
+Reviewer does not run tests and does not choose owners or fixes. PM routes
 findings back to the responsible role.
 
 ## Translation
@@ -405,7 +405,7 @@ Gateway can:
 - translate mobile messages when Gateway translation is enabled
 
 Gateway does not expose the embedded terminal and does not send directly to
-Architect, Coder, Tester, or Gate Reviewer.
+Architect, Coder, Tester, or Reviewer.
 
 Common commands:
 
@@ -462,7 +462,7 @@ files.
 
 `Auto memory` is the switch for the entire automated memory workflow. During
 Review Task Harness after Final Acceptance, Project Manager, Architect, Coder,
-Tester, and an enabled Gate Reviewer submit proposals in sequence through
+Tester, and an enabled Reviewer submit proposals in sequence through
 `vcm-propose-memory`. Harness Engineer verifies and consolidates them before VCM
 applies the result. Roles cannot edit active memory directly.
 
@@ -484,7 +484,7 @@ Final Acceptance
 ```
 
 Memory proposal prompts sent to Project Manager, Architect, Coder, Tester, and
-an enabled Gate Reviewer use their normal task sessions and participate in
+an enabled Reviewer use their normal task sessions and participate in
 Round/Turn tracking. Harness Engineer review and retrospective work remain tool
 role activity and do not participate in Round completion.
 

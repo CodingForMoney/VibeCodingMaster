@@ -149,9 +149,9 @@ describe("createHarnessService", () => {
     expect(testerAgent).toContain("do not replace Tester final validation");
     expect(testerAgent).toContain("Apply `docs/CODING_STANDARDS.md` to changed tests");
     expect(testerAgent).not.toContain("shared implementation-quality and baseline-test standard");
-    const diagnosisGateReviewerAgent = await fs.readText("/repo/.claude/agents/gate-reviewer.md");
-    expect(diagnosisGateReviewerAgent).toContain("verify that the commits implement the diagnosed");
-    expect(diagnosisGateReviewerAgent).toContain("local workaround for the surface failure");
+    const diagnosisReviewerAgent = await fs.readText("/repo/.claude/agents/reviewer.md");
+    expect(diagnosisReviewerAgent).toContain("verify that the commits implement the diagnosed");
+    expect(diagnosisReviewerAgent).toContain("local workaround for the surface failure");
     const coderAgent = await fs.readText("/repo/.claude/agents/coder.md");
     expect(coderAgent).toContain("tools: Read, Grep, Glob, Bash, Edit, Write, Agent");
     expect(coderAgent).toContain("Implement assigned file/function-level scaffold items");
@@ -185,17 +185,17 @@ describe("createHarnessService", () => {
     expect(coderWorkerAgent).not.toContain("from `planned` to `running`");
     expect(coderWorkerAgent).not.toContain("Use `failed` only");
     expect(coderWorkerAgent).not.toContain("Stop before editing if the assigned module");
-    const gateReviewerAgent = await fs.readText("/repo/.claude/agents/gate-reviewer.md");
-    expect(gateReviewerAgent).toContain("name: gate-reviewer");
-    expect(gateReviewerAgent).toContain("tools: Read, Grep, Glob, Bash, Write");
-    expect(gateReviewerAgent).toContain("You are VCM `gate-reviewer`");
-    expect(gateReviewerAgent).toContain("Use the task and worktree paths named there");
-    expect(gateReviewerAgent).toContain("Every Gate Review is a complete review of the current gate inputs");
-    expect(gateReviewerAgent).toContain("complete current executable plan, not");
-    expect(gateReviewerAgent.match(/- Architecture Brief Fit:/g)).toHaveLength(2);
-    expect(gateReviewerAgent).not.toContain("record a verification plan");
-    expect(gateReviewerAgent).not.toContain("carry hash-valid");
-    expect(gateReviewerAgent).not.toContain("`asset`");
+    const reviewerAgent = await fs.readText("/repo/.claude/agents/reviewer.md");
+    expect(reviewerAgent).toContain("name: reviewer");
+    expect(reviewerAgent).toContain("tools: Read, Grep, Glob, Bash, Write");
+    expect(reviewerAgent).toContain("You are VCM `reviewer`");
+    expect(reviewerAgent).toContain("Use the task and worktree paths named there");
+    expect(reviewerAgent).toContain("Every Gate Review is a complete review of the current gate inputs");
+    expect(reviewerAgent).toContain("complete current executable plan, not");
+    expect(reviewerAgent.match(/- Architecture Brief Fit:/g)).toHaveLength(2);
+    expect(reviewerAgent).not.toContain("record a verification plan");
+    expect(reviewerAgent).not.toContain("carry hash-valid");
+    expect(reviewerAgent).not.toContain("`asset`");
     expect(projectManagerAgent).not.toContain("only unverified remaining verification items");
     expect(await fs.readText("/repo/.ai/tools/check-scaffold-ledger")).toContain(
       'ACTIONS = frozenset({"create", "change", "delete"})'

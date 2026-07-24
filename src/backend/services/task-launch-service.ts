@@ -1,4 +1,4 @@
-import { CORE_VCM_ROLE_DEFINITIONS, GATE_REVIEWER_ROLE_DEFINITION, VCM_ROLE_NAMES } from "../../shared/constants.js";
+import { CORE_VCM_ROLE_DEFINITIONS, REVIEWER_ROLE_DEFINITION, VCM_ROLE_NAMES } from "../../shared/constants.js";
 import type { RoleLaunchTemplateEntry } from "../../shared/types/app-settings.js";
 import type { VcmOrchestrationMode } from "../../shared/types/message.js";
 import type { RoleName } from "../../shared/types/role.js";
@@ -16,7 +16,7 @@ const ONE_CLICK_SESSION_ROWS = 28;
 /**
  * Backend owner of the one-click task start orchestration. This is the single
  * source of truth for: composing the canonical role roster (CORE roles plus
- * gate-reviewer when gate review is enabled), applying the launch-template
+ * reviewer when gate review is enabled), applying the launch-template
  * orchestration mode, and starting/resuming each role. Both the GUI endpoint
  * (`POST /api/tasks/:taskSlug/one-click-start`) and the mobile gateway call this
  * method so the two paths can no longer drift.
@@ -32,7 +32,7 @@ export interface TaskLaunchService {
    * Compose and start the task's role roster.
    *
    * Behavior contract:
-   * - Roster = CORE roles + gate-reviewer iff gate review is enabled for the task.
+   * - Roster = CORE roles + reviewer iff gate review is enabled for the task.
    * - Orchestration mode is set from the launch template (`auto`/`manual`).
    * - Per role: skip when already running, resume when a `claudeSessionId` exists,
    *   otherwise start; using the launch template's permissionMode/model/effort.
@@ -94,10 +94,10 @@ export function createTaskLaunchService(deps: TaskLaunchServiceDeps): TaskLaunch
     });
   }
 
-  function composeRoleDefinitions(gateReviewerEnabled: boolean) {
+  function composeRoleDefinitions(reviewerEnabled: boolean) {
     return [
       ...CORE_VCM_ROLE_DEFINITIONS,
-      ...(gateReviewerEnabled ? [GATE_REVIEWER_ROLE_DEFINITION] : [])
+      ...(reviewerEnabled ? [REVIEWER_ROLE_DEFINITION] : [])
     ];
   }
 

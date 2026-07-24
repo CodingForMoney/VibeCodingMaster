@@ -81,11 +81,11 @@ interface ParsedReport extends GateReviewReport {
   decision: GateReviewDecision;
 }
 
-const GATE_REVIEW_AGENT_PATH = ".claude/agents/gate-reviewer.md";
+const REVIEWER_AGENT_PATH = ".claude/agents/reviewer.md";
 const GATE_REVIEW_DIR = ".ai/vcm/gate-reviews";
 const REQUESTS_DIR = ".ai/vcm/gate-reviews/requests";
 const GATE_REVIEW_VERSION = 1;
-const GATE_REVIEWER_ROLE = "gate-reviewer";
+const REVIEWER_ROLE = "reviewer";
 const DEFAULT_REPORT_POLL_INTERVAL_MS = 1000;
 const DEFAULT_REPORT_TIMEOUT_MS = 30 * 60 * 1000;
 const activeRuns = new Set<string>();
@@ -542,7 +542,7 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
       await updateRequestStatus(deps.fs, context, requestId, "running", { startedAt: timestamp });
 
       const reviewDir = resolveRepoPath(context.taskRepoRoot, GATE_REVIEW_DIR);
-      const agentPath = resolveRepoPath(context.repoRoot, GATE_REVIEW_AGENT_PATH);
+      const agentPath = resolveRepoPath(context.repoRoot, REVIEWER_AGENT_PATH);
       const prompt = buildGatePrompt(context, gate, requestId, codeDiffInput, codeDiffSources);
       await deps.fs.ensureDir(reviewDir);
       await deps.fs.ensureDir(resolveRepoPath(context.taskRepoRoot, REQUESTS_DIR));
@@ -551,18 +551,18 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
       if (!(await deps.fs.pathExists(agentPath))) {
         throw new VcmError({
           code: "GATE_REVIEW_AGENT_MISSING",
-          message: `${GATE_REVIEW_AGENT_PATH} does not exist.`,
+          message: `${REVIEWER_AGENT_PATH} does not exist.`,
           statusCode: 409,
           hint: "Apply the VCM harness before requesting Gate Review Gates."
         });
       }
 
-      const session = await ensureGateReviewerSession(context);
+      const session = await ensureReviewerSession(context);
       await submitTerminalInput(deps.runtime, session.id, prompt);
       await deps.sessionService.markRoleActivityRunning(
         context.repoRoot,
         context.taskSlug,
-        GATE_REVIEWER_ROLE,
+        REVIEWER_ROLE,
         session.id
       );
       await deps.roundService.recordRoleTurnEvent({
@@ -570,7 +570,7 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
         stateRepoRoot: context.taskRepoRoot,
         stateRoot: context.stateRoot,
         taskSlug: context.taskSlug,
-        role: GATE_REVIEWER_ROLE,
+        role: REVIEWER_ROLE,
         eventName: "UserPromptSubmit"
       });
 
@@ -619,25 +619,25 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
     }
   }
 
-  async function ensureGateReviewerSession(context: ReviewContext) {
-    const existing = await deps.sessionService.getRoleSession(context.repoRoot, context.taskSlug, GATE_REVIEWER_ROLE);
+  async function ensureReviewerSession(context: ReviewContext) {
+    const existing = await deps.sessionService.getRoleSession(context.repoRoot, context.taskSlug, REVIEWER_ROLE);
     if (existing?.status === "running" && deps.runtime.getSession(existing.id)) {
       return existing;
     }
 
     if (existing?.claudeSessionId) {
       try {
-        return await deps.sessionService.resumeRoleSession(context.repoRoot, context.taskSlug, GATE_REVIEWER_ROLE, {
+        return await deps.sessionService.resumeRoleSession(context.repoRoot, context.taskSlug, REVIEWER_ROLE, {
           cols: 100,
           rows: 28,
           model: "default"
         });
       } catch {
-        // Fall through to a fresh Gate Reviewer terminal if the saved session cannot be resumed.
+        // Fall through to a fresh Reviewer terminal if the saved session cannot be resumed.
       }
     }
 
-    return deps.sessionService.startRoleSession(context.repoRoot, context.taskSlug, GATE_REVIEWER_ROLE, {
+    return deps.sessionService.startRoleSession(context.repoRoot, context.taskSlug, REVIEWER_ROLE, {
       cols: 100,
       rows: 28,
       model: "default"
@@ -1095,7 +1095,7 @@ async function computeInputHash(
     "CLAUDE.md",
     ".claude/agents/architect.md",
     ".claude/agents/coder.md",
-    ".claude/agents/gate-reviewer.md",
+    ".claude/agents/reviewer.md",
     ".claude/agents/tester.md",
     ".claude/skills/vcm-gate-review/SKILL.md",
     ".ai/tools/request-gate-review",
@@ -1282,13 +1282,13 @@ function buildGatePrompt(
     ? "\nDiff: inspect git status/diff in Worktree."
     : "";
   const architectureContract = gate === "architecture-plan"
-    ? "\n\nComplete every Architecture Analysis field required by the Gate Reviewer role with concrete current-worktree evidence before deciding."
+    ? "\n\nComplete every Architecture Analysis field required by the Reviewer role with concrete current-worktree evidence before deciding."
     : "";
   const validationContract = gate === "validation-adequacy"
-    ? "\n\nComplete every Validation Analysis field required by the Gate Reviewer role with concrete current-worktree production and test evidence before deciding."
+    ? "\n\nComplete every Validation Analysis field required by the Reviewer role with concrete current-worktree production and test evidence before deciding."
     : "";
   const codeDiffContract = gate === "code-diff"
-    ? "\n\nComplete every Code Diff Analysis field required by the Gate Reviewer role with concrete evidence from the named commit range before deciding."
+    ? "\n\nComplete every Code Diff Analysis field required by the Reviewer role with concrete evidence from the named commit range before deciding."
     : "";
   const codeDiffSection = gate === "code-diff" && codeDiffInput
     ? `
@@ -1353,7 +1353,7 @@ async function waitForGateReport(
   const detail = errorMessage(lastError);
   throw new VcmError({
     code: "GATE_REVIEW_REPORT_TIMEOUT",
-    message: `Gate Reviewer did not produce a valid ${gate} report within ${Math.round(options.timeoutMs / 1000)}s.`,
+    message: `Reviewer did not produce a valid ${gate} report within ${Math.round(options.timeoutMs / 1000)}s.`,
     statusCode: 504,
     hint: detail
   });

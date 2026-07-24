@@ -227,7 +227,7 @@ def input_hash(root: Path, gate: str, sources: list[str] | None = None, gate_rec
         "CLAUDE.md",
         ".claude/agents/architect.md",
         ".claude/agents/coder.md",
-        ".claude/agents/gate-reviewer.md",
+        ".claude/agents/reviewer.md",
         ".claude/agents/tester.md",
         ".claude/skills/vcm-gate-review/SKILL.md",
         ".ai/tools/request-gate-review",

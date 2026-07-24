@@ -37,7 +37,7 @@ describe("backend E2E Gate Review with mock Claude Code", () => {
       "validation-adequacy": true,
       "code-diff": true
     });
-    env.mockRuntime.onPrompt("gate-reviewer", "[VCM GATE REVIEW]", writeApproveGateReport, { once: false });
+    env.mockRuntime.onPrompt("reviewer", "[VCM GATE REVIEW]", writeApproveGateReport, { once: false });
 
     const unconfirmedArchitecture = await requestGateReview(env.app, task.taskSlug, "architecture-plan");
     expect(unconfirmedArchitecture.status).toBe("failed_to_start");
@@ -155,7 +155,7 @@ describe("backend E2E Gate Review with mock Claude Code", () => {
       "validation-adequacy": true,
       "code-diff": false
     });
-    env.mockRuntime.onPrompt("gate-reviewer", "[VCM GATE REVIEW]", writeApproveGateReport, { once: false });
+    env.mockRuntime.onPrompt("reviewer", "[VCM GATE REVIEW]", writeApproveGateReport, { once: false });
 
     const reportPath = path.join(task.worktreePath, ".ai/vcm/handoffs/test-report.md");
     await fs.writeFile(reportPath, approvedGapTestReport("None."), "utf8");

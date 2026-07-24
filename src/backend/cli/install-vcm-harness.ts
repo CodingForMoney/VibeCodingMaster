@@ -10,7 +10,7 @@ import { renderCoderHarnessRules } from "../templates/harness/coder-agent.js";
 import { renderCoderWorkerHarnessRules } from "../templates/harness/coder-worker-agent.js";
 import { renderArchitectScaffoldWorkerHarnessRules } from "../templates/harness/architect-scaffold-worker-agent.js";
 import {
-  renderGateReviewerAgentRules,
+  renderReviewerAgentRules,
   renderRequestGateReviewTool,
   renderTranslatorAgentRules,
   renderVcmGateReviewSkillRules
@@ -52,6 +52,8 @@ const CLI_DIR = path.dirname(fileURLToPath(import.meta.url));
 const APP_ROOT = path.resolve(CLI_DIR, "../../..");
 const VCM_PACKAGE_VERSION = readVcmPackageVersion(APP_ROOT);
 const MANIFEST_PATH = ".ai/vcm-harness-manifest.json";
+const LEGACY_REVIEWER_AGENT_PATH = ".claude/agents/gate-reviewer.md";
+const REVIEWER_AGENT_PATH = ".claude/agents/reviewer.md";
 const HTML_BLOCK_PATTERN = /<!-- VCM:BEGIN(?:\s+version=\d+)? -->[\s\S]*?<!-- VCM:END -->/m;
 const HASH_BLOCK_PATTERN = /# VCM:BEGIN(?:\s+version=\d+)?\n[\s\S]*?# VCM:END/m;
 const LEGACY_CODEX_HARNESS_PATHS = [
@@ -90,7 +92,7 @@ const AGENT_FRONTMATTER = {
   tester: {
     description: "VCM testing role for validation, test adequacy, approved-scope validation, and risk findings."
   },
-  "gate-reviewer": {
+  reviewer: {
     description: "VCM independent gate review role for architecture plans, validation adequacy, and code diffs.",
     tools: "Read, Grep, Glob, Bash, Write"
   },
@@ -191,13 +193,13 @@ const MANAGED_FILES = [
     content: renderPullRequestTemplateHarnessRules()
   },
   {
-    path: ".claude/agents/gate-reviewer.md",
-    title: "Gate Reviewer Agent",
-    agentName: "gate-reviewer",
+    path: ".claude/agents/reviewer.md",
+    title: "Reviewer Agent",
+    agentName: "reviewer",
     commentStyle: "html",
-    category: "gate-reviewer-agent",
+    category: "reviewer-agent",
     memoryBlock: true,
-    content: renderGateReviewerAgentRules()
+    content: renderReviewerAgentRules()
   },
   {
     path: ".claude/agents/translator.md",
@@ -457,6 +459,7 @@ async function main() {
 
   await assertDirectory(projectRoot, "Project root");
 
+  await migrateReviewerAgent({ projectRoot, dryRun, operations });
   const manifest = await buildManifest(projectRoot);
   for (const definition of MANAGED_FILES) {
     await installManagedFile({ projectRoot, definition, dryRun, operations });
@@ -482,6 +485,41 @@ async function main() {
   });
 
   printReport({ projectRoot, dryRun, operations });
+}
+
+async function migrateReviewerAgent({ projectRoot, dryRun, operations }) {
+  const legacyPath = resolveInside(projectRoot, LEGACY_REVIEWER_AGENT_PATH);
+  const legacyContent = await readOptionalText(legacyPath);
+  if (legacyContent === undefined) {
+    return;
+  }
+
+  const reviewerPath = resolveInside(projectRoot, REVIEWER_AGENT_PATH);
+  const reviewerContent = await readOptionalText(reviewerPath);
+  if (dryRun) {
+    operations.push(plan(
+      LEGACY_REVIEWER_AGENT_PATH,
+      reviewerContent === undefined
+        ? `rename to ${REVIEWER_AGENT_PATH}`
+        : `delete after ${REVIEWER_AGENT_PATH} was installed`
+    ));
+    return;
+  }
+
+  if (reviewerContent === undefined) {
+    const migratedContent = legacyContent
+      .replace(/^name:[ \t]*gate-reviewer[ \t]*$/m, "name: reviewer")
+      .replace(/^# Gate Reviewer Agent[ \t]*$/m, "# Reviewer Agent");
+    await fs.mkdir(path.dirname(reviewerPath), { recursive: true });
+    await fs.writeFile(reviewerPath, migratedContent, "utf8");
+  }
+  await fs.rm(legacyPath, { force: true });
+  operations.push(done(
+    LEGACY_REVIEWER_AGENT_PATH,
+    reviewerContent === undefined
+      ? `renamed to ${REVIEWER_AGENT_PATH}`
+      : `deleted after ${REVIEWER_AGENT_PATH} was installed`
+  ));
 }
 
 function parseArgs(argv) {

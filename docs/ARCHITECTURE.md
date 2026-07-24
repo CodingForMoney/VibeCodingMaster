@@ -116,7 +116,7 @@ removed from that child.
 
 `session-service` is the single process-launch boundary for CCR. It requests the
 model environment before every Start, Resume, or Restart path and merges it into
-the PTY child environment. This covers workflow roles, Gate Reviewer,
+the PTY child environment. This covers workflow roles, Reviewer,
 Translator, Harness Engineer, Harness Bootstrap, and one-click launch without
 separate role-specific CCR logic. `claude-adapter` omits native `--model` only
 for the namespaced CCR model. Native Claude commands remain unchanged, and the
@@ -249,7 +249,7 @@ Resume never write them. Fresh tool Sessions use the saved defaults, while
 resumable task Sessions keep the launch options recorded by that Session.
 
 Round tracking includes Project Manager, Architect, Coder, Tester, and optional
-Gate Reviewer sessions. Translator and Harness Engineer are task-scoped tool
+Reviewer sessions. Translator and Harness Engineer are task-scoped tool
 roles and are excluded. A tool workflow that prompts a workflow role still
 participates in Round tracking through that workflow role's hooks.
 

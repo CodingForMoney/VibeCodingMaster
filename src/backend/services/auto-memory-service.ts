@@ -39,7 +39,7 @@ const MEMORY_FILE_DEFINITIONS = [
   { path: ".claude/agents/architect.md", title: "Architect Memory", role: "architect" },
   { path: ".claude/agents/coder.md", title: "Coder Memory", role: "coder" },
   { path: ".claude/agents/tester.md", title: "Tester Memory", role: "tester" },
-  { path: ".claude/agents/gate-reviewer.md", title: "Gate Reviewer Memory", role: "gate-reviewer" },
+  { path: ".claude/agents/reviewer.md", title: "Reviewer Memory", role: "reviewer" },
   { path: ".claude/agents/harness-engineer.md", title: "Harness Engineer Memory", role: "harness-engineer" }
 ] as const satisfies ReadonlyArray<{ path: string; title: string; role?: VcmMemoryRoleName }>;
 
@@ -298,7 +298,7 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
     const gateSettings = await deps.appSettings.getGateReviewSettings(input.baseRepoRoot, input.taskSlug);
     const roles: WorkflowMemoryRole[] = ["project-manager", "architect", "coder", "tester"];
     if (gateSettings.enabled) {
-      roles.push("gate-reviewer");
+      roles.push("reviewer");
     }
     const timestamp = now();
     const runId = createRunId(timestamp, "auto");

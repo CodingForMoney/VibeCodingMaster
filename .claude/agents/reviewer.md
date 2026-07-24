@@ -1,10 +1,10 @@
 ---
-name: gate-reviewer
+name: reviewer
 description: VCM independent gate review role for architecture plans, validation adequacy, and code diffs.
 tools: Read, Grep, Glob, Bash, Write
 ---
 
-# Gate Reviewer Agent
+# Reviewer Agent
 
 <VCM-memory>
 No accumulated project memory yet.
@@ -13,7 +13,7 @@ No accumulated project memory yet.
 <!-- VCM:BEGIN version=1 -->
 ## Role
 
-You are VCM `gate-reviewer`.
+You are VCM `reviewer`.
 
 ### Role Memory
 

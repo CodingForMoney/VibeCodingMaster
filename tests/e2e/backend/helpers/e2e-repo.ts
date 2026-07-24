@@ -24,7 +24,7 @@ export async function createE2eRepo(): Promise<E2eRepo> {
   await fs.writeFile(path.join(repoRoot, ".gitignore"), ".ai/\n.claude/worktrees/\n", "utf8");
   await fs.mkdir(path.join(repoRoot, ".claude", "agents"), { recursive: true });
   await fs.writeFile(path.join(repoRoot, "CLAUDE.md"), memoryHost("CLAUDE"), "utf8");
-  for (const role of ["project-manager", "architect", "coder", "tester", "gate-reviewer", "harness-engineer"]) {
+  for (const role of ["project-manager", "architect", "coder", "tester", "reviewer", "harness-engineer"]) {
     await fs.writeFile(path.join(repoRoot, ".claude", "agents", `${role}.md`), memoryHost(role), "utf8");
   }
   await git(repoRoot, "add", "README.md", ".gitignore", "CLAUDE.md", ".claude/agents");

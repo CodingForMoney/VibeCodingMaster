@@ -343,7 +343,7 @@ export function ProjectDashboard({
           <button
             className="settings-toggle"
             disabled={busy || !canSaveLaunchTemplate}
-            title="Save the current core role launch settings and optional Gate Reviewer settings"
+            title="Save the current core role launch settings and optional Reviewer settings"
             type="button"
             onClick={onSaveLaunchTemplate}
           >

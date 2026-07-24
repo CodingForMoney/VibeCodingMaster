@@ -35,7 +35,7 @@ describe("task-launch-service", () => {
     ]);
   });
 
-  it("includes gate-reviewer when gate review is enabled", async () => {
+  it("includes reviewer when gate review is enabled", async () => {
     const service = createTaskLaunchService(createDeps({ gateReviewEnabled: true }));
 
     const result = await service.startTaskRoleSessions(REPO_ROOT, {
@@ -43,7 +43,7 @@ describe("task-launch-service", () => {
       requireFreshStart: true
     });
 
-    expect(result.startedRoles).toEqual([...CORE_ROLES, "gate-reviewer"]);
+    expect(result.startedRoles).toEqual([...CORE_ROLES, "reviewer"]);
   });
 
   it("sets manual mode when the launch template disables auto orchestration", async () => {

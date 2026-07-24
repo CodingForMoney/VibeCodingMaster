@@ -41,7 +41,7 @@ describe("backend E2E Gate Review correction loops", () => {
     registerPmGateCallback(env, "architecture-plan");
 
     let reviewCount = 0;
-    env.mockRuntime.onPrompt("gate-reviewer", "[VCM GATE REVIEW]", async (ctx) => {
+    env.mockRuntime.onPrompt("reviewer", "[VCM GATE REVIEW]", async (ctx) => {
       reviewCount += 1;
       await writeGateReport(ctx, reviewCount === 1 ? "request_changes" : "approve");
     }, { once: false });
@@ -79,7 +79,7 @@ describe("backend E2E Gate Review correction loops", () => {
     registerPmGateCallback(env, "code-diff");
 
     let reviewCount = 0;
-    env.mockRuntime.onPrompt("gate-reviewer", "[VCM GATE REVIEW]", async (ctx) => {
+    env.mockRuntime.onPrompt("reviewer", "[VCM GATE REVIEW]", async (ctx) => {
       reviewCount += 1;
       await writeGateReport(ctx, reviewCount === 1 ? "request_changes" : "approve");
     }, { once: false });
@@ -130,7 +130,7 @@ describe("backend E2E Gate Review correction loops", () => {
     expect(record.commits).toHaveLength(2);
     expect(record.changedFiles).toEqual(["feature.txt"]);
 
-    const reviewer = env.mockRuntime.getSessionByRole(task.taskSlug, "gate-reviewer");
+    const reviewer = env.mockRuntime.getSessionByRole(task.taskSlug, "reviewer");
     expect(reviewer).toBeDefined();
     const prompts = env.mockRuntime.getWrites(reviewer!.id).filter((write) => write.includes("[VCM GATE REVIEW]"));
     expect(prompts.at(-1)).toContain("Code sources: coder -> architect-debug");
@@ -149,7 +149,7 @@ describe("backend E2E Gate Review correction loops", () => {
     registerPmGateCallback(env, "validation-adequacy");
 
     let reviewCount = 0;
-    env.mockRuntime.onPrompt("gate-reviewer", "[VCM GATE REVIEW]", async (ctx) => {
+    env.mockRuntime.onPrompt("reviewer", "[VCM GATE REVIEW]", async (ctx) => {
       reviewCount += 1;
       await writeGateReport(ctx, reviewCount === 1 ? "request_changes" : "approve");
     }, { once: false });

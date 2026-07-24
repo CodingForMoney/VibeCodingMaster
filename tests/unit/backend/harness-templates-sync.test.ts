@@ -26,7 +26,7 @@ const EXACT_EXAMPLE_HARNESS_PATHS = [
   ".ai/tools/watch-job",
   ".claude/agents/architect.md",
   ".claude/agents/coder.md",
-  ".claude/agents/gate-reviewer.md",
+  ".claude/agents/reviewer.md",
   ".claude/agents/harness-engineer.md",
   ".claude/agents/project-manager.md",
   ".claude/agents/tester.md",
@@ -137,6 +137,39 @@ describe("harness templates stay in sync with the script installer", () => {
         ownership: "managed-block"
       });
     }
+  }, 30_000);
+
+  it("renames the legacy gate reviewer agent and preserves its memory", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-reviewer-agent-migration-"));
+    const agentsDir = path.join(tmpRepo, ".claude/agents");
+    const legacyPath = path.join(agentsDir, "gate-reviewer.md");
+    await mkdir(agentsDir, { recursive: true });
+    await writeFile(legacyPath, [
+      "---",
+      "name: gate-reviewer",
+      "description: Legacy reviewer.",
+      "---",
+      "",
+      "# Gate Reviewer Agent",
+      "",
+      "<VCM-memory>",
+      "Preserve this reviewed project fact.",
+      "</VCM-memory>",
+      "",
+      "<!-- VCM:BEGIN version=1 -->",
+      "Old managed rules.",
+      "<!-- VCM:END -->",
+      ""
+    ].join("\n"), "utf8");
+
+    await execFileAsync(process.execPath, [installerPath, tmpRepo]);
+
+    const reviewer = await readFile(path.join(agentsDir, "reviewer.md"), "utf8");
+    expect(reviewer).toContain("name: reviewer");
+    expect(reviewer).toContain("# Reviewer Agent");
+    expect(reviewer).toContain("You are VCM `reviewer`");
+    expect(reviewer).toContain("Preserve this reviewed project fact.");
+    await expect(readFile(legacyPath, "utf8")).rejects.toMatchObject({ code: "ENOENT" });
   }, 30_000);
 
   it("does not rewrite the harness manifest for a version-only change", async () => {

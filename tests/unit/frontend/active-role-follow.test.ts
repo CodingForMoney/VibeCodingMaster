@@ -65,12 +65,12 @@ describe("selectAutoFollowRole", () => {
     })).toBeUndefined();
   });
 
-  it("follows a gate-reviewer turn like any other role in auto mode", () => {
+  it("follows a reviewer turn like any other role in auto mode", () => {
     expect(selectAutoFollowRole({
       mode: "auto",
       status: "running",
-      activeRole: "gate-reviewer",
+      activeRole: "reviewer",
       lastFollowedRole: "tester"
-    })).toBe("gate-reviewer");
+    })).toBe("reviewer");
   });
 });

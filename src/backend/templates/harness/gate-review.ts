@@ -1,11 +1,11 @@
 import { renderRoleMemoryRules } from "./role-memory.js";
 
-export function renderGateReviewerAgentRules(): string {
+export function renderReviewerAgentRules(): string {
   return `## Role
 
-You are VCM \`gate-reviewer\`.
+You are VCM \`reviewer\`.
 
-${renderRoleMemoryRules("gate-reviewer")}
+${renderRoleMemoryRules("reviewer")}
 
 Review only the gate in the VCM prompt. Use the task and worktree paths named there. Project memory may orient you, but only current worktree evidence can decide the gate.
 
@@ -462,7 +462,7 @@ When VCM sends \`[VCM GATE REVIEW CALLBACK]\`, read the named report path.
 - \`failed\`: stop and ask the user to retry, skip, or override in VCM.
 - \`skipped\` or \`overridden\`: record the exception reason in PM context and continue only as appropriate.
 
-Do not ask Gate Reviewer to choose owners, fixes, Replan, or user-intervention needs. PM routes those decisions through normal VCM responsibilities.`;
+Do not ask Reviewer to choose owners, fixes, Replan, or user-intervention needs. PM routes those decisions through normal VCM responsibilities.`;
 }
 
 export function renderRequestGateReviewTool(): string {
@@ -695,7 +695,7 @@ def input_hash(root: Path, gate: str, sources: list[str] | None = None, gate_rec
         "CLAUDE.md",
         ".claude/agents/architect.md",
         ".claude/agents/coder.md",
-        ".claude/agents/gate-reviewer.md",
+        ".claude/agents/reviewer.md",
         ".claude/agents/tester.md",
         ".claude/skills/vcm-gate-review/SKILL.md",
         ".ai/tools/request-gate-review",

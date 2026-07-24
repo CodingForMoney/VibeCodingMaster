@@ -71,13 +71,13 @@ describe("gate-review-service", () => {
     expect(record.reportPath).toBe(".ai/vcm/gate-reviews/architecture-plan-review.md");
 
     expect(runnerCalls.some((call) => call.command === "git" && call.args[0] === "diff")).toBe(true);
-    expect(sessionStarts).toEqual(["gate-reviewer"]);
+    expect(sessionStarts).toEqual(["reviewer"]);
     expect(activityCalls).toEqual([
-      "running:gate-reviewer",
+      "running:reviewer",
       "running:project-manager"
     ]);
     expect(roundCalls).toEqual([
-      "round:UserPromptSubmit:gate-reviewer",
+      "round:UserPromptSubmit:reviewer",
       "round:UserPromptSubmit:project-manager"
     ]);
     const gatePrompt = writes.find((write) => write.includes("[VCM GATE REVIEW]")) ?? "";
@@ -90,7 +90,7 @@ describe("gate-review-service", () => {
     expect(writes.join("")).toContain("decision: request_changes");
   });
 
-  it("does not start Gate Reviewer when the project switch is disabled", async () => {
+  it("does not start Reviewer when the project switch is disabled", async () => {
     tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-gate-review-disabled-"));
     await writeHarnessFiles(tmpRepo);
     const runnerCalls: Array<{ command: string; args: string[]; options?: CommandRunnerOptions }> = [];
@@ -740,9 +740,9 @@ async function writeHarnessFiles(repoRoot: string): Promise<void> {
   await mkdir(path.join(taskRepoRoot, ".ai/tools"), { recursive: true });
   await mkdir(path.join(taskRepoRoot, ".ai/vcm/handoffs"), { recursive: true });
   await writeFile(path.join(repoRoot, "CLAUDE.md"), "# CLAUDE\n", "utf8");
-  await writeFile(path.join(repoRoot, ".claude/agents/gate-reviewer.md"), "# VCM Gate Reviewer\n", "utf8");
+  await writeFile(path.join(repoRoot, ".claude/agents/reviewer.md"), "# VCM Reviewer\n", "utf8");
   await writeFile(path.join(taskRepoRoot, "CLAUDE.md"), "# CLAUDE\n", "utf8");
-  await writeFile(path.join(taskRepoRoot, ".claude/agents/gate-reviewer.md"), "# VCM Gate Reviewer\n", "utf8");
+  await writeFile(path.join(taskRepoRoot, ".claude/agents/reviewer.md"), "# VCM Reviewer\n", "utf8");
   await writeFile(path.join(taskRepoRoot, ".claude/skills/vcm-gate-review/SKILL.md"), "# Gate Review Skill\n", "utf8");
   await writeFile(path.join(taskRepoRoot, ".ai/tools/request-gate-review"), "#!/usr/bin/env python3\n", "utf8");
   await writeFile(path.join(taskRepoRoot, ".ai/vcm/handoffs/architecture-brief.md"), validArchitectureBrief(), "utf8");
@@ -882,7 +882,7 @@ function createRuntime(
         ? {
             id: sessionId,
             taskSlug: "demo-task",
-            role: sessionId === "gate-session" ? "gate-reviewer" : "project-manager",
+            role: sessionId === "gate-session" ? "reviewer" : "project-manager",
             status: "running",
             startedAt: "2026-06-13T00:00:00.000Z",
             exitCode: null
@@ -936,14 +936,14 @@ function createSessionService(starts: string[] = [], activityCalls: string[] = [
     terminalBackend: "node-pty",
     updatedAt: "2026-06-13T00:00:00.000Z"
   };
-  const gateSession: RoleSessionRecord = {
+  const reviewerSession: RoleSessionRecord = {
     id: "gate-session",
     claudeSessionId: "gate-session-id",
     taskSlug: "demo-task",
-    role: "gate-reviewer",
+    role: "reviewer",
     status: "running",
     activityStatus: "idle",
-    command: "claude --agent gate-reviewer",
+    command: "claude --agent reviewer",
     permissionMode: "default",
     model: "default",
     cwd: "/repo",
@@ -959,13 +959,13 @@ function createSessionService(starts: string[] = [], activityCalls: string[] = [
     },
     async resumeRoleSession(_repoRoot: string, _taskSlug: string, role: string) {
       starts.push(`resume:${role}`);
-      sessions.set(role, gateSession);
-      return gateSession;
+      sessions.set(role, reviewerSession);
+      return reviewerSession;
     },
     async startRoleSession(_repoRoot: string, _taskSlug: string, role: string) {
       starts.push(role);
-      sessions.set(role, gateSession);
-      return gateSession;
+      sessions.set(role, reviewerSession);
+      return reviewerSession;
     },
     async markRoleActivityRunning(_repoRoot: string, _taskSlug: string, role: string) {
       const session = sessions.get(role) ?? pmSession;

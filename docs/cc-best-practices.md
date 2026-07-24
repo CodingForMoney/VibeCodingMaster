@@ -299,7 +299,7 @@ Core roles:
 
 Optional quality role:
 
-- gate reviewer, used for independent artifact review at configured gates
+- reviewer, used for independent artifact review at configured gates
 
 Auxiliary sessions:
 
@@ -344,9 +344,9 @@ Gate rules:
 
 - If the required input artifact is missing or empty, the gate should be considered not ready or not required, not silently passed.
 - If the input artifact has not changed since the previous gate decision, avoid duplicate review.
-- The gate reviewer should return `approve` or `request_changes` with concise findings.
-- The gate reviewer should not decide who owns the fix, whether to replan, or whether the user must intervene. The project workflow owns routing.
-- The gate reviewer should not run tests unless the role explicitly owns validation execution. A pure review gate reads code, docs, artifacts, and diffs.
+- The reviewer should return `approve` or `request_changes` with concise findings.
+- The reviewer should not decide who owns the fix, whether to replan, or whether the user must intervene. The project workflow owns routing.
+- The reviewer should not run tests unless the role explicitly owns validation execution. A pure review gate reads code, docs, artifacts, and diffs.
 
 ## 8. Architecture Plans and Scaffold Manifests
 
@@ -464,7 +464,7 @@ one task
   -> one PR or merge path
 ```
 
-Do not split worktrees by role. Architect, coder, tester, and optional gate reviewer should normally work in the same task worktree sequentially.
+Do not split worktrees by role. Architect, coder, tester, and optional reviewer should normally work in the same task worktree sequentially.
 
 Role isolation is enforced by role definitions, permissions, hooks, handoff artifacts, and review. Worktree isolation is enforced at the task boundary.
 

@@ -44,7 +44,7 @@ docs/CODING_STANDARDS.md
 .claude/agents/architect.md
 .claude/agents/coder.md
 .claude/agents/tester.md
-.claude/agents/gate-reviewer.md
+.claude/agents/reviewer.md
 .claude/agents/translator.md
 .claude/agents/harness-engineer.md
 .claude/agents/vcm-coder-worker.md
@@ -273,8 +273,8 @@ VCM roles:
   baseline tests, and cleanup of task-only code markers/comments.
 - `tester`: independent validation, test adequacy, missing test additions,
   integration/E2E case assessment, test report, and `docs/TESTING.md`.
-- `gate-reviewer`: optional VCM flow role. It is visible when any Gate Review
-  gate is enabled or a gate-reviewer session already exists. It is task-scoped
+- `reviewer`: optional VCM flow role. It is visible when any Gate Review
+  gate is enabled or a reviewer session already exists. It is task-scoped
   in the active worktree, uses normal Claude hook/Round/translation handling,
   and does not participate in route-file dispatch.
 
@@ -309,7 +309,7 @@ controlled local boundary such as a Dev Container, VM, or trusted task
 worktree. The template also stores task auto-orchestration preference.
 
 One-click start starts or resumes the four core VCM roles. If any Gate Review
-gate is enabled, it also starts or resumes Gate Reviewer with the saved template
+gate is enabled, it also starts or resumes Reviewer with the saved template
 entry. Translator and Harness Engineer are controlled from their own tool-role
 panels, not from the main task launch template.
 
@@ -490,13 +490,13 @@ Input policy:
   test report to current non-document code/test evidence and `docs/TESTING.md`;
   code-diff review binds the selected commit range and diff.
 
-Gate Reviewer writes reports under:
+Reviewer writes reports under:
 
 ```text
 .ai/vcm/gate-reviews/
 ```
 
-Gate Reviewer returns only `approve` or `request_changes`, writes only its
+Reviewer returns only `approve` or `request_changes`, writes only its
 assigned gate report, does not run tests, and does not choose fix owners,
 Replan, or user-intervention needs. PM routes `architecture-plan` and
 `code-diff` findings to architect, and `validation-adequacy` findings to tester.
@@ -538,10 +538,10 @@ continue; it does not convert the failed validation result to `pass`.
 The Validation Adequacy Gate reads the actual implementation entry points and
 test files behind that mapping. Its report must contain structured Validation
 Analysis; `Test Result: pass` and green commands alone are not approval
-evidence. For an approved gap, Gate Reviewer verifies the Debug and Diagnosis
+evidence. For an approved gap, Reviewer verifies the Debug and Diagnosis
 evidence, the exact user authorization, the retained risk, and any durable
 testing-gap entry. Gate approval confirms evidence adequacy, not test success.
-Gate Reviewer inspects evidence but does not run validation.
+Reviewer inspects evidence but does not run validation.
 
 Long-running validation uses `vcm-long-running-validation` backed by:
 
@@ -716,7 +716,7 @@ Rules:
 
 - Gateway sends ordinary mobile text only to the current task's
   `project-manager`.
-- Gateway never sends directly to architect, coder, tester, or Gate Reviewer.
+- Gateway never sends directly to architect, coder, tester, or Reviewer.
 - Gateway pushes only the last PM reply from a normally completed Round, along
   with the Round completion notice.
 - Gateway state, credentials, and audit logs live in app-local state, not
@@ -780,7 +780,7 @@ polling a missing terminal session forever.
 3.  Runtime state under `.ai/vcm/**` is temporary or recoverable.
 4.  All tasks use task worktrees.
 5.  Roles for one task share one task worktree and hand off sequentially.
-6.  Gate Reviewer is an optional VCM flow role, task-scoped when used.
+6.  Reviewer is an optional VCM flow role, task-scoped when used.
 7.  Translator and Harness Engineer are task-scoped tool roles, not flow
     roles.
 8.  No `.claude/commands/` by default.

@@ -41,7 +41,7 @@ PM Managed Mode applies only when the user explicitly asks to complete the curre
 - PM must drive the accepted task to completion through the normal VCM flow.
 - PM must not reduce, defer, reinterpret, skip, or move requested work outside the current task.
 - PM must not use workload, task size, context size, implementation difficulty, dependency choice, refactor need, testing effort, or number of iterations as a reason to ask the user.
-- Technical execution questions are handled inside the VCM flow. PM routes them to Architect, Coder, Tester, or Gate Reviewer according to role responsibility.
+- Technical execution questions are handled inside the VCM flow. PM routes them to Architect, Coder, Tester, or Reviewer according to role responsibility.
 - PM may defer non-blocking user-facing questions until the final user report, but only when continuing does not require user intent, external authorization, or a user-approved exception.
 - Deferred questions remain part of the current task report. They must not become follow-up scope unless the user explicitly creates a new task.
 - PM must pause and ask the user only when the task cannot proceed without user intent or real-world authorization: unclear or conflicting requested outcome, required account/secret/test environment/data access, real cost, production permission, sensitive data access, destructive or irreversible real-world action, durable-doc conflict requiring user choice, or a required user-approved exception.
@@ -335,7 +335,7 @@ PM may lightly rewrite the user's words to:
 - Do not run \`code-diff\` for incomplete, failed, planning-only, Docs-Only Flow, Validation-Only Flow, PR-Preparation Flow, or Communication-Only Flow.
 - Gate Review trigger points apply only when the active delivery flow reaches that milestone. Do not run Gate Review for Communication-Only Flow.
 - On a callback, accept only \`approve\` or \`request_changes\`. Apply \`request_changes\` through the allowed branch defined by the active flow; in Code-Change Flow use Architecture Plan Revision, Code-Diff Correction, or Validation Revision according to the gate.
-- Do not ask Gate Reviewer to choose owners, fixes, Replan, or user-intervention needs.
+- Do not ask Reviewer to choose owners, fixes, Replan, or user-intervention needs.
 - Record gate decision, report path, and any skip or override reason.
 
 ### Partial Role Results

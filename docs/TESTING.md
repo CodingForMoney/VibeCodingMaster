@@ -185,7 +185,7 @@ services with controlled runtime doubles:
 - CCR settings redaction, authenticated model availability, native-vs-CCR
   command behavior, GPT-only settings overrides, global CCR takeover cleanup,
   blocked unavailable launches, and shared CCR child environment across
-  workflow, Gate Reviewer, Translator, and Harness Engineer Session paths.
+  workflow, Reviewer, Translator, and Harness Engineer Session paths.
 - Native Claude OpenTelemetry ingestion into the active task worktree, including
   task, role, and model aggregation; deduplication and concurrent-write behavior
   are covered by service tests, while CCR exclusion is covered by the CCR

@@ -1,4 +1,4 @@
-import type { CoreVcmRoleName, DispatchableRole, GateReviewerRoleName, HarnessEngineerToolRoleName, RoleDefinition, RoleName, ToolRoleName, TranslatorToolRoleName, VcmRoleName } from "./types/role.js";
+import type { CoreVcmRoleName, DispatchableRole, HarnessEngineerToolRoleName, ReviewerRoleName, RoleDefinition, RoleName, ToolRoleName, TranslatorToolRoleName, VcmRoleName } from "./types/role.js";
 
 export const DEFAULT_BACKEND_PORT = 4173;
 export const DEFAULT_FRONTEND_PORT = 5173;
@@ -30,16 +30,16 @@ export const CORE_VCM_ROLE_DEFINITIONS: readonly RoleDefinition<CoreVcmRoleName>
   }
 ] as const;
 
-export const GATE_REVIEWER_ROLE_DEFINITION: RoleDefinition<GateReviewerRoleName> = {
-  name: "gate-reviewer",
-  label: "Gate Reviewer",
-  commandAgent: "gate-reviewer",
+export const REVIEWER_ROLE_DEFINITION: RoleDefinition<ReviewerRoleName> = {
+  name: "reviewer",
+  label: "Reviewer",
+  commandAgent: "reviewer",
   dispatchable: false
 };
 
 export const VCM_ROLE_DEFINITIONS: readonly RoleDefinition<VcmRoleName>[] = [
   ...CORE_VCM_ROLE_DEFINITIONS,
-  GATE_REVIEWER_ROLE_DEFINITION
+  REVIEWER_ROLE_DEFINITION
 ] as const;
 
 export const TRANSLATOR_TOOL_ROLE_DEFINITION: RoleDefinition<TranslatorToolRoleName> = {
@@ -82,8 +82,8 @@ export function isVcmRoleName(value: string): value is VcmRoleName {
   return VCM_ROLE_NAMES.includes(value as VcmRoleName);
 }
 
-export function isGateReviewerRoleName(value: string): value is GateReviewerRoleName {
-  return value === GATE_REVIEWER_ROLE_DEFINITION.name;
+export function isReviewerRoleName(value: string): value is ReviewerRoleName {
+  return value === REVIEWER_ROLE_DEFINITION.name;
 }
 
 export function isToolRoleName(value: string): value is ToolRoleName {

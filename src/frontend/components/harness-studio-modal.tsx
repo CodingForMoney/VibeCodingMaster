@@ -628,7 +628,7 @@ function isVcmRoleAgent(file: HarnessFileStatus): boolean {
     || file.kind === "agent-architect"
     || file.kind === "agent-coder"
     || file.kind === "agent-tester"
-    || file.kind === "agent-gate-reviewer";
+    || file.kind === "agent-reviewer";
 }
 
 function formatSessionStatus(session: RoleSessionRecord | null): string {

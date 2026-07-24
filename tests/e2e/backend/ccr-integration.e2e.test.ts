@@ -146,7 +146,7 @@ describe("backend E2E CCR integration", () => {
     expect(env.mockRuntime.getSessionByRole(task.taskSlug, "coder")).toBeUndefined();
   });
 
-  it("uses the same CCR launch path for Gate Reviewer and auxiliary sessions", async () => {
+  it("uses the same CCR launch path for Reviewer and auxiliary sessions", async () => {
     const env = await createMockClaudeE2eApp();
     cleanups.push(() => env.close());
     const repo = await createE2eRepo();
@@ -161,7 +161,7 @@ describe("backend E2E CCR integration", () => {
     const launches = [
       await env.app.inject({
         method: "POST",
-        url: `/api/tasks/${task.taskSlug}/sessions/gate-reviewer/start`,
+        url: `/api/tasks/${task.taskSlug}/sessions/reviewer/start`,
         payload: roleLaunchBody({ model: CCR_GPT_SESSION_MODEL })
       }),
       await env.app.inject({

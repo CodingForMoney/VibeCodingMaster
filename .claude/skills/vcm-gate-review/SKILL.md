@@ -39,4 +39,4 @@ When VCM sends `[VCM GATE REVIEW CALLBACK]`, read the named report path.
 - `failed`: stop and ask the user to retry, skip, or override in VCM.
 - `skipped` or `overridden`: record the exception reason in PM context and continue only as appropriate.
 
-Do not ask Gate Reviewer to choose owners, fixes, Replan, or user-intervention needs. PM routes those decisions through normal VCM responsibilities.
+Do not ask Reviewer to choose owners, fixes, Replan, or user-intervention needs. PM routes those decisions through normal VCM responsibilities.

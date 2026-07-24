@@ -45,7 +45,7 @@ export interface CleanupTaskResult {
 /**
  * Result of the backend-owned one-click start for a task: the orchestration mode
  * applied from the launch template, the canonical roles that were started/resumed
- * (CORE roles plus gate-reviewer when gate review is enabled), and the resulting
+ * (CORE roles plus reviewer when gate review is enabled), and the resulting
  * role sessions. Returned by `POST /api/tasks/:taskSlug/one-click-start` and the
  * shared backend launch method that both the GUI endpoint and the gateway call.
  * A per-role failure surfaces as a `TASK_ONE_CLICK_PARTIAL_START` error instead.

@@ -47,7 +47,7 @@ describe("backend E2E complete VCM flow with mock Claude Code", () => {
     });
     let testerResultHandled = false;
 
-    env.mockRuntime.onPrompt("gate-reviewer", "[VCM GATE REVIEW]", writeApproveGateReport, { once: false });
+    env.mockRuntime.onPrompt("reviewer", "[VCM GATE REVIEW]", writeApproveGateReport, { once: false });
     env.mockRuntime.onPrompt("harness-engineer", "[VCM Task Harness Retrospective]", async (ctx) => {
       await ctx.userPromptSubmit();
       const resultPath = matchPromptField(ctx.prompt, "Write the analysis to Result Path");

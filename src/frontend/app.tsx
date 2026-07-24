@@ -268,7 +268,7 @@ export function App() {
     // Follow the authoritative active role (set by the round at turn start) in auto
     // orchestration mode, deduped so a steady role does not re-switch every poll and
     // a user's manual tab focus is not stolen. Replaces the former client-side
-    // message-diff role derivation and the gate-reviewer-only tab special case.
+    // message-diff role derivation and the reviewer-only tab special case.
     const followRole = selectAutoFollowRole({
       mode: orchestrationModeRef.current[roundState.taskSlug],
       status: roundState.status,
@@ -310,7 +310,7 @@ export function App() {
         current.statusLoaded === launchState.statusLoaded &&
         current.sessionCount === launchState.sessionCount &&
         current.hasAnySession === launchState.hasAnySession &&
-        current.hasGateReviewerSession === launchState.hasGateReviewerSession &&
+        current.hasReviewerSession === launchState.hasReviewerSession &&
         current.allRolesHaveSession === launchState.allRolesHaveSession &&
         current.autoOrchestration === launchState.autoOrchestration &&
         JSON.stringify(current.roles) === JSON.stringify(launchState.roles)
@@ -651,8 +651,8 @@ export function App() {
     gateReviewPollTaskSlug
       && (
         gateReviewPollState?.activeGate
-        || gateReviewPollRoundState?.activeRole === "gate-reviewer"
-        || gateReviewPollLaunchState?.hasGateReviewerSession
+        || gateReviewPollRoundState?.activeRole === "reviewer"
+        || gateReviewPollLaunchState?.hasReviewerSession
       )
   );
 
@@ -753,7 +753,7 @@ export function App() {
     activeGateReview && activeGateReview.taskSlug === activeTask?.taskSlug
       ? activeGateReview.state
       : null;
-  const gateReviewerEnabled = Boolean(
+  const reviewerEnabled = Boolean(
     sidebarGateReview && Object.values(sidebarGateReview.gates).some((gate) => gate.required)
   );
   return (
@@ -1237,7 +1237,7 @@ export function App() {
         <TaskWorkspace
           task={activeTask}
           activeRole={activeRole}
-          gateReviewerEnabled={gateReviewerEnabled}
+          reviewerEnabled={reviewerEnabled}
           translationEnabled={effectiveTranslationEnabled}
           translationAutoSendEnabled={translationAutoSendEnabled}
           translationTargetLanguage={translationTargetLanguage}

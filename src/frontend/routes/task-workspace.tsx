@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { CORE_VCM_ROLE_DEFINITIONS, GATE_REVIEWER_ROLE_DEFINITION, VCM_ROLE_DEFINITIONS } from "../../shared/constants.js";
+import { CORE_VCM_ROLE_DEFINITIONS, REVIEWER_ROLE_DEFINITION, VCM_ROLE_DEFINITIONS } from "../../shared/constants.js";
 import type { TaskStatusReport } from "../../shared/types/api.js";
 import type { VcmOrchestrationState, VcmRoleMessage } from "../../shared/types/message.js";
 import type { CoreVcmRoleName, RoleDefinition, RoleName, VcmRoleName } from "../../shared/types/role.js";
@@ -30,7 +30,7 @@ const DEFAULT_PERMISSION_MODES: Record<RoleName, ClaudePermissionMode> = {
   architect: "bypassPermissions",
   coder: "bypassPermissions",
   tester: "bypassPermissions",
-  "gate-reviewer": "bypassPermissions",
+  reviewer: "bypassPermissions",
   translator: "bypassPermissions",
   "harness-engineer": "bypassPermissions"
 };
@@ -40,7 +40,7 @@ const DEFAULT_MODELS: Record<RoleName, SessionModel> = {
   architect: "default",
   coder: "default",
   tester: "default",
-  "gate-reviewer": "default",
+  reviewer: "default",
   translator: "default",
   "harness-engineer": "default"
 };
@@ -50,7 +50,7 @@ const DEFAULT_EFFORTS: Record<RoleName, SessionEffort> = {
   architect: "default",
   coder: "default",
   tester: "default",
-  "gate-reviewer": "default",
+  reviewer: "default",
   translator: "medium",
   "harness-engineer": "medium"
 };
@@ -58,7 +58,7 @@ const DEFAULT_EFFORTS: Record<RoleName, SessionEffort> = {
 export interface TaskWorkspaceProps {
   task: TaskRecord;
   activeRole: RoleName;
-  gateReviewerEnabled: boolean;
+  reviewerEnabled: boolean;
   translationEnabled: boolean;
   translationAutoSendEnabled: boolean;
   translationTargetLanguage: TranslationTargetLanguage;
@@ -85,14 +85,14 @@ export interface TaskWorkspaceLaunchState {
   statusLoaded: boolean;
   sessionCount: number;
   hasAnySession: boolean;
-  hasGateReviewerSession: boolean;
+  hasReviewerSession: boolean;
   allRolesHaveSession: boolean;
 }
 
 export function TaskWorkspace({
   task,
   activeRole,
-  gateReviewerEnabled,
+  reviewerEnabled,
   translationEnabled,
   translationAutoSendEnabled,
   translationTargetLanguage,
@@ -120,13 +120,13 @@ export function TaskWorkspace({
   const taskStatusSyncKeyRef = useRef("");
   const translationFeedCursorRef = useRef(1);
   const launchTemplateKey = useMemo(() => JSON.stringify(launchTemplate), [launchTemplate]);
-  const hasGateReviewerSession = Boolean(
-    statusReport?.sessions.some((session) => session.role === "gate-reviewer")
+  const hasReviewerSession = Boolean(
+    statusReport?.sessions.some((session) => session.role === "reviewer")
   );
-  const gateReviewerVisible = gateReviewerEnabled || hasGateReviewerSession;
+  const reviewerVisible = reviewerEnabled || hasReviewerSession;
   const visibleRoleDefinitions: readonly RoleDefinition[] = [
     ...CORE_VCM_ROLE_DEFINITIONS,
-    ...(gateReviewerVisible ? [GATE_REVIEWER_ROLE_DEFINITION] : [])
+    ...(reviewerVisible ? [REVIEWER_ROLE_DEFINITION] : [])
   ];
 
   const applyMessageState = useCallback((nextMessages: VcmRoleMessage[], nextOrchestration: VcmOrchestrationState) => {
@@ -207,13 +207,13 @@ export function TaskWorkspace({
   }, [launchTemplateKey, task.taskSlug]);
 
   useEffect(() => {
-    if (statusReport && !gateReviewerVisible && activeRole === "gate-reviewer") {
+    if (statusReport && !reviewerVisible && activeRole === "reviewer") {
       onActiveRoleChange("project-manager");
     }
     if (statusReport && activeRole === "translator") {
       onActiveRoleChange("project-manager");
     }
-  }, [activeRole, gateReviewerVisible, onActiveRoleChange, statusReport]);
+  }, [activeRole, reviewerVisible, onActiveRoleChange, statusReport]);
 
   useEffect(() => {
     const fetchedTask = statusReport?.task;
@@ -241,7 +241,7 @@ export function TaskWorkspace({
     const sessions = statusReport?.sessions ?? [];
     const coreSessions = sessions.filter((session) => isCoreVcmRoleName(session.role));
     const coreSessionRoles = new Set(coreSessions.map((session) => session.role));
-    const hasGateReviewerSession = sessions.some((session) => session.role === "gate-reviewer");
+    const hasReviewerSession = sessions.some((session) => session.role === "reviewer");
     const roles = {} as TaskWorkspaceLaunchState["roles"];
     for (const definition of VCM_ROLE_DEFINITIONS) {
       roles[definition.name] = {
@@ -258,7 +258,7 @@ export function TaskWorkspace({
       statusLoaded: Boolean(statusReport),
       sessionCount: coreSessions.length,
       hasAnySession: coreSessions.length > 0,
-      hasGateReviewerSession,
+      hasReviewerSession,
       allRolesHaveSession: CORE_VCM_ROLE_DEFINITIONS.every((definition) => coreSessionRoles.has(definition.name))
     });
   }, [

@@ -39,7 +39,7 @@ describe("round-service", () => {
     });
   });
 
-  it("records Gate Reviewer turns through the provider-neutral hook path", async () => {
+  it("records Reviewer turns through the provider-neutral hook path", async () => {
     const fs = createMemoryFs();
     let currentTime = "2026-05-31T00:00:00.000Z";
     const service = createRoundService({
@@ -52,13 +52,13 @@ describe("round-service", () => {
       stateRepoRoot: "/repo",
       stateRoot: ".ai/vcm",
       taskSlug: "demo-task",
-      role: "gate-reviewer",
+      role: "reviewer",
       eventName: "UserPromptSubmit"
     });
     expect(started).toMatchObject({
       status: "running",
-      activeRole: "gate-reviewer",
-      roles: ["gate-reviewer"],
+      activeRole: "reviewer",
+      roles: ["reviewer"],
       totalTurnCount: 1
     });
 
@@ -67,12 +67,12 @@ describe("round-service", () => {
       stateRepoRoot: "/repo",
       stateRoot: ".ai/vcm",
       taskSlug: "demo-task",
-      role: "gate-reviewer",
+      role: "reviewer",
       eventName: "Stop"
     });
     expect(stopped).toMatchObject({
       status: "running",
-      activeRole: "gate-reviewer",
+      activeRole: "reviewer",
       completedTurnCount: 1,
       totalCompletedTurnCount: 1,
       totalCcActiveMs: 3000,
@@ -162,7 +162,7 @@ describe("round-service", () => {
     expect(statusUpdates).toEqual(["running", "stopped"]);
   });
 
-  it("deduplicates a Gate Reviewer prompt when VCM marked the turn before the hook arrives", async () => {
+  it("deduplicates a Reviewer prompt when VCM marked the turn before the hook arrives", async () => {
     const fs = createMemoryFs();
     let currentTime = "2026-05-31T00:00:00.000Z";
     const service = createRoundService({
@@ -175,7 +175,7 @@ describe("round-service", () => {
       stateRepoRoot: "/repo",
       stateRoot: ".ai/vcm",
       taskSlug: "demo-task",
-      role: "gate-reviewer",
+      role: "reviewer",
       eventName: "UserPromptSubmit"
     });
 
@@ -184,17 +184,17 @@ describe("round-service", () => {
       stateRepoRoot: "/repo",
       stateRoot: ".ai/vcm",
       taskSlug: "demo-task",
-      role: "gate-reviewer",
+      role: "reviewer",
       eventName: "UserPromptSubmit"
     });
 
     expect(duplicate).toMatchObject({
       status: "running",
-      activeRole: "gate-reviewer",
+      activeRole: "reviewer",
       activeTurnStartedAt: "2026-05-31T00:00:00.000Z",
       turnCount: 1,
       totalTurnCount: 1,
-      roles: ["gate-reviewer"]
+      roles: ["reviewer"]
     });
 
     currentTime = "2026-05-31T00:00:03.000Z";
@@ -202,7 +202,7 @@ describe("round-service", () => {
       stateRepoRoot: "/repo",
       stateRoot: ".ai/vcm",
       taskSlug: "demo-task",
-      role: "gate-reviewer",
+      role: "reviewer",
       eventName: "Stop"
     });
 
@@ -213,7 +213,7 @@ describe("round-service", () => {
     });
   });
 
-  it("ignores a stale Gate Reviewer Stop after another role has started", async () => {
+  it("ignores a stale Reviewer Stop after another role has started", async () => {
     const fs = createMemoryFs();
     let currentTime = "2026-05-31T00:00:00.000Z";
     const service = createRoundService({
@@ -226,7 +226,7 @@ describe("round-service", () => {
       stateRepoRoot: "/repo",
       stateRoot: ".ai/vcm",
       taskSlug: "demo-task",
-      role: "gate-reviewer",
+      role: "reviewer",
       eventName: "UserPromptSubmit"
     });
 
@@ -235,7 +235,7 @@ describe("round-service", () => {
       stateRepoRoot: "/repo",
       stateRoot: ".ai/vcm",
       taskSlug: "demo-task",
-      role: "gate-reviewer",
+      role: "reviewer",
       eventName: "Stop"
     });
 
@@ -253,7 +253,7 @@ describe("round-service", () => {
       stateRepoRoot: "/repo",
       stateRoot: ".ai/vcm",
       taskSlug: "demo-task",
-      role: "gate-reviewer",
+      role: "reviewer",
       eventName: "Stop"
     });
 
@@ -419,7 +419,7 @@ describe("round-service", () => {
       eventName: "Stop"
     });
 
-    sessions.push(createRoleSession("gate-reviewer", {
+    sessions.push(createRoleSession("reviewer", {
       activityStatus: "running",
       lastTurnStartedAt: "2026-05-31T00:00:03.000Z"
     }));
@@ -433,7 +433,7 @@ describe("round-service", () => {
 
     expect(active).toMatchObject({
       status: "running",
-      activeRole: "gate-reviewer",
+      activeRole: "reviewer",
       activeTurnStartedAt: "2026-05-31T00:00:03.000Z",
       settleDeadlineAt: undefined,
       turnCount: 2,
@@ -442,7 +442,7 @@ describe("round-service", () => {
       totalCompletedTurnCount: 1,
       totalCcActiveMs: 2000,
       currentRoundCcActiveMs: 2000,
-      roles: ["project-manager", "gate-reviewer"]
+      roles: ["project-manager", "reviewer"]
     });
 
     currentTime = "2026-05-31T00:00:12.000Z";
@@ -457,7 +457,7 @@ describe("round-service", () => {
 
     expect(afterStaleTimer).toMatchObject({
       status: "running",
-      activeRole: "gate-reviewer",
+      activeRole: "reviewer",
       activeTurnStartedAt: "2026-05-31T00:00:03.000Z",
       totalCcActiveMs: 11000,
       currentRoundCcActiveMs: 11000

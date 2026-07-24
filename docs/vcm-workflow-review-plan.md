@@ -145,7 +145,7 @@ requested flow when supplied
 effective flow
 approved target role
 expected route path for a normal role
-allowed Gate signatures when target role is Gate Reviewer
+allowed Gate signatures when target role is Reviewer
 normal or user-override decision
 created time
 user-authorization evidence when applicable
@@ -188,9 +188,9 @@ file at another path has no approval and is not dispatched.
 When no pending approval exists, the approval was denied, the target role does
 not match, or the approval is stale, VCM must not send the message.
 
-When the approved target is Gate Reviewer, `.ai/tools/request-gate-review` must
+When the approved target is Reviewer, `.ai/tools/request-gate-review` must
 find a matching pending approval before the Gate controller may start or reuse
-the Gate Reviewer. Its Gate type and code source must match one of the approval's
+the Reviewer. Its Gate type and code source must match one of the approval's
 allowed Gate signatures. A different Gate signature or Flow Record base is
 rejected.
 
@@ -209,7 +209,7 @@ is consumed and cleared only when Claude Code confirms that message through
 `UserPromptSubmit`; Section 14 defines the transcript fallback used only during
 restart recovery.
 
-Gate Reviewer uses the following status rules because starting a review is not
+Reviewer uses the following status rules because starting a review is not
 the same as resolving its checkpoint:
 
 | Gate result | Approval and Flow Record handling |
@@ -318,9 +318,9 @@ sequence
 effective flow
 target role
 dispatch type
-gate type when target role is Gate Reviewer
+gate type when target role is Reviewer
 code source when gate type is code-diff
-Gate disposition when target role is Gate Reviewer
+Gate disposition when target role is Reviewer
 Gate decision when disposition has a review decision
 confirmed time
 override evidence reference when applicable
@@ -395,11 +395,11 @@ The main Flow Record sequence is:
 ```text
 code-change / architect
 -> code-change / architect
--> code-change / gate-reviewer / architecture-plan
+-> code-change / reviewer / architecture-plan
 -> code-change / coder
--> code-change / gate-reviewer / code-diff / coder
+-> code-change / reviewer / code-diff / coder
 -> code-change / tester
--> code-change / gate-reviewer / validation-adequacy
+-> code-change / reviewer / validation-adequacy
 -> code-change / architect
 ```
 
@@ -462,9 +462,9 @@ Coder follow-up appends:
 
 ```text
 code-change / coder
--> code-change / gate-reviewer / code-diff / coder
+-> code-change / reviewer / code-diff / coder
 -> code-change / tester
--> code-change / gate-reviewer / validation-adequacy
+-> code-change / reviewer / validation-adequacy
 -> code-change / architect
 ```
 
@@ -475,11 +475,11 @@ Architect follow-up appends:
 
 ```text
 code-change / architect
--> code-change / gate-reviewer / architecture-plan
+-> code-change / reviewer / architecture-plan
 -> code-change / coder
--> code-change / gate-reviewer / code-diff / coder
+-> code-change / reviewer / code-diff / coder
 -> code-change / tester
--> code-change / gate-reviewer / validation-adequacy
+-> code-change / reviewer / validation-adequacy
 -> code-change / architect
 ```
 
@@ -504,7 +504,7 @@ The shared Flow Record sequence is:
 
 ```text
 architect-debug / architect
--> architect-debug / gate-reviewer / code-diff / architect-debug
+-> architect-debug / reviewer / code-diff / architect-debug
 -> architect-debug / tester
 ```
 
@@ -556,7 +556,7 @@ The code-producing Flow Record sequence is:
 
 ```text
 architecture-diagnosis / architect
--> architecture-diagnosis / gate-reviewer / code-diff / architect-diagnosis
+-> architecture-diagnosis / reviewer / code-diff / architect-diagnosis
 -> architecture-diagnosis / tester
 ```
 
@@ -585,7 +585,7 @@ These paths produce the following record extensions:
 - standalone code-producing Tester pass appends `validation-adequacy` Gate
   Review and then Architect docs sync, both in `architecture-diagnosis`
 - code-producing Branch Tester pass appends the approved `code-change` return
-  dispatch to Gate Reviewer for `validation-adequacy`
+  dispatch to Reviewer for `validation-adequacy`
 - analysis-only Branch completion appends the approved `code-change` return
   dispatch to Architect
 - Tester failure and user waiting append nothing
@@ -622,7 +622,7 @@ The main Flow Record sequence is:
 
 ```text
 validation-only / tester
--> validation-only / gate-reviewer / validation-adequacy
+-> validation-only / reviewer / validation-adequacy
 ```
 
 The allowed branches are:
@@ -657,13 +657,13 @@ The only normal switches directly to Debug or Diagnosis are:
 
 ```text
 validation-only / tester
--> validation-only / gate-reviewer / validation-adequacy
+-> validation-only / reviewer / validation-adequacy
 -> architect-debug / architect
 ```
 
 ```text
 architect-debug / architect
--> architect-debug / gate-reviewer / code-diff / architect-debug
+-> architect-debug / reviewer / code-diff / architect-debug
 -> architect-debug / tester
 -> architecture-diagnosis / architect
 ```
@@ -728,7 +728,7 @@ record also identifies the suspended parent flow without separate metadata.
 
 The fixed policy defines which complete record prefixes permit a return and
 which target role may receive the return dispatch. A code-producing Debug or
-Diagnosis sequence returns to `gate-reviewer`. An analysis-only Diagnosis or
+Diagnosis sequence returns to `reviewer`. An analysis-only Diagnosis or
 `normal architecture plan required` sequence returns to `architect`.
 
 After receiving the qualifying role result, PM requests Branch return and the
@@ -736,7 +736,7 @@ next role in one review. For a completed code-producing Branch:
 
 ```text
 .ai/tools/request-workflow-review --flow code-change \
-  --target-role gate-reviewer
+  --target-role reviewer
 ```
 
 For an analysis-only Diagnosis return or `normal architecture plan required`:
@@ -800,7 +800,7 @@ The matcher performs no persistence or dispatch:
 5. deny when no legal event remains; otherwise return the matching event set
 
 For a normal role, every matching event has the same effective Flow and target
-role, so one Pending Approval is sufficient. For Gate Reviewer, matching events
+role, so one Pending Approval is sufficient. For Reviewer, matching events
 also carry Gate type and code source. The Pending Approval stores all Gate
 signatures legal for that exact record, Flow, and target. The Gate controller
 must later match one of those signatures, bind its exact request ID, and append
@@ -889,7 +889,7 @@ it from durable evidence:
 - missing or changed route content invalidates the approval and reports a
   recovery error; VCM neither sends nor appends an event
 
-Gate Reviewer recovery uses the exact Gate request ID and Gate signature stored
+Reviewer recovery uses the exact Gate request ID and Gate signature stored
 by its `dispatching` approval:
 
 - a persisted actionable Gate resolution is applied through the Section 7
@@ -953,7 +953,7 @@ Backend unit and end-to-end coverage must include:
   decision and legal Gate-signature set
 - malformed records, reordered events, skipped dispatches, and invalid
   candidates are denied
-- Gate Reviewer approval stores only Gate signatures legal for the exact base
+- Reviewer approval stores only Gate signatures legal for the exact base
   record and rejects every other Gate type or code source
 - Gate `disabled`, `not_required`, `already_approved`, callback `approve`,
   callback `request_changes`, user skip, and user override each consume the
@@ -1077,7 +1077,7 @@ replacement, and Branch return are explicitly listed.
 
 The typed-matcher question is resolved in Section 12. A pure matcher validates
 the complete record and returns the legal append events for the requested Flow
-and target role. It stores no cursor. Gate Reviewer approvals retain the Gate
+and target role. It stores no cursor. Reviewer approvals retain the Gate
 signatures legal for that exact record.
 
 The non-Code-Change switch question is resolved in Section 11.6. A completed
@@ -1096,7 +1096,7 @@ Every PM outbound route file must be empty before approval. The approval binds
 the expected path; claiming stores the exact content hash and message ID. Route
 files carry no workflow approval metadata.
 
-The Gate Reviewer consumption question is resolved in Sections 7 and 10.
+The Reviewer consumption question is resolved in Sections 7 and 10.
 Starting or running a Gate does not append a Flow Record event. Only a matching
 actionable resolution consumes the approval and appends the resolved Gate
 checkpoint; failed starts and failed callbacks remain recoverable without

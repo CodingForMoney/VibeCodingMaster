@@ -349,7 +349,7 @@ async function seedMemoryHosts(taskRepoRoot: string): Promise<void> {
     ".claude/agents/architect.md",
     ".claude/agents/coder.md",
     ".claude/agents/tester.md",
-    ".claude/agents/gate-reviewer.md",
+    ".claude/agents/reviewer.md",
     ".claude/agents/harness-engineer.md"
   ];
   for (const relativePath of paths) {

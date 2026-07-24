@@ -4,8 +4,8 @@ export type CoreVcmRoleName =
   | "coder"
   | "tester";
 
-export type GateReviewerRoleName = "gate-reviewer";
-export type VcmRoleName = CoreVcmRoleName | GateReviewerRoleName;
+export type ReviewerRoleName = "reviewer";
+export type VcmRoleName = CoreVcmRoleName | ReviewerRoleName;
 export type TranslatorToolRoleName = "translator";
 export type HarnessEngineerToolRoleName = "harness-engineer";
 export type ToolRoleName = TranslatorToolRoleName | HarnessEngineerToolRoleName;

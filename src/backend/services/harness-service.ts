@@ -35,7 +35,7 @@ import { renderCoderHarnessRules } from "../templates/harness/coder-agent.js";
 import { renderCoderWorkerHarnessRules } from "../templates/harness/coder-worker-agent.js";
 import { renderArchitectScaffoldWorkerHarnessRules } from "../templates/harness/architect-scaffold-worker-agent.js";
 import {
-  renderGateReviewerAgentRules,
+  renderReviewerAgentRules,
   renderRequestGateReviewTool,
   renderTranslatorAgentRules,
   renderVcmGateReviewSkillRules
@@ -346,16 +346,16 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
     renderRules: renderRestartArchitectSkillRules
   },
   {
-    kind: "agent-gate-reviewer",
-    path: ".claude/agents/gate-reviewer.md",
-    title: "Gate Reviewer Agent",
+    kind: "agent-reviewer",
+    path: ".claude/agents/reviewer.md",
+    title: "Reviewer Agent",
     memoryBlock: true,
     frontmatter: renderAgentFrontmatter(
-      "gate-reviewer",
+      "reviewer",
       "VCM independent gate review role for architecture plans, validation adequacy, and code diffs.",
       { tools: "Read, Grep, Glob, Bash, Write" }
     ),
-    renderRules: renderGateReviewerAgentRules
+    renderRules: renderReviewerAgentRules
   },
   {
     kind: "agent-translator",
@@ -1646,7 +1646,7 @@ async function analyzeLegacyCodexHarnessPaths(fs: FileSystemAdapter, repoRoot: s
     changes.push({
       path: relativePath,
       action: "delete",
-      reason: "Legacy Codex harness path is obsolete; VCM now uses Claude Code Gate Reviewer and Translator roles."
+      reason: "Legacy Codex harness path is obsolete; VCM now uses Claude Code Reviewer and Translator roles."
     });
   }
   return changes;

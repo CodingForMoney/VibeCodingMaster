@@ -176,20 +176,20 @@ describe("createSessionService", () => {
     ]);
   });
 
-  it("starts Gate Reviewer as a task-scoped Claude Code session", async () => {
+  it("starts Reviewer as a task-scoped Claude Code session", async () => {
     const fs = createMemoryFs();
     const runtimeInputs: CreateTerminalSessionInput[] = [];
     const service = createTestSessionService(fs, runtimeInputs, [], {
       worktreePath: TASK_WORKTREE
     });
 
-    const started = await service.startRoleSession("/repo", "demo-task", "gate-reviewer", {
+    const started = await service.startRoleSession("/repo", "demo-task", "reviewer", {
       permissionMode: "bypassPermissions",
       model: "opus",
       effort: "high"
     });
 
-    expect(started.role).toBe("gate-reviewer");
+    expect(started.role).toBe("reviewer");
     expect(started.taskSlug).toBe("demo-task");
     expect(started.model).toBe("opus");
     expect(started.effort).toBe("high");
@@ -199,7 +199,7 @@ describe("createSessionService", () => {
     expect(runtimeInputs[0]?.cwd).toBe(TASK_WORKTREE);
     expect(runtimeInputs[0]?.args).toEqual([
       "--agent",
-      "gate-reviewer",
+      "reviewer",
       "--model",
       "opus",
       "--effort",
@@ -210,31 +210,31 @@ describe("createSessionService", () => {
     expect(runtimeInputs[0]?.env).toMatchObject({
       VCM_TASK_REPO_ROOT: TASK_WORKTREE,
       VCM_TASK_SLUG: "demo-task",
-      VCM_ROLE: "gate-reviewer"
+      VCM_ROLE: "reviewer"
     });
-    await expect(fs.pathExists("/repo/.ai/vcm/gate-reviewer/session.json")).resolves.toBe(false);
+    await expect(fs.pathExists("/repo/.ai/vcm/reviewer/session.json")).resolves.toBe(false);
     await expect(fs.pathExists(`${TASK_WORKTREE}/.ai/vcm/sessions/demo-task.json`)).resolves.toBe(false);
 
     await recordCurrentRoleHook(service, {
       taskSlug: "demo-task",
-      role: "gate-reviewer",
+      role: "reviewer",
       eventName: "UserPromptSubmit",
-      sessionId: "gate-reviewer-real-session",
-      transcriptPath: `${TASK_WORKTREE}/.claude/projects/gate-reviewer-real-session.jsonl`,
+      sessionId: "reviewer-real-session",
+      transcriptPath: `${TASK_WORKTREE}/.claude/projects/reviewer-real-session.jsonl`,
       cwd: TASK_WORKTREE
     });
     await expect(fs.pathExists(`${TASK_WORKTREE}/.ai/vcm/sessions/demo-task.json`)).resolves.toBe(true);
   });
 
-  it("keeps Gate Reviewer sessions isolated per task", async () => {
+  it("keeps Reviewer sessions isolated per task", async () => {
     const fs = createMemoryFs();
     const firstRuntimeInputs: CreateTerminalSessionInput[] = [];
     const firstService = createTestSessionService(fs, firstRuntimeInputs);
 
-    await firstService.startRoleSession("/repo", "demo-task", "gate-reviewer");
+    await firstService.startRoleSession("/repo", "demo-task", "reviewer");
     await recordCurrentRoleHook(firstService, {
       taskSlug: "demo-task",
-      role: "gate-reviewer",
+      role: "reviewer",
       eventName: "UserPromptSubmit",
       sessionId: "gate-demo-session",
       transcriptPath: `${TASK_WORKTREE}/.claude/projects/gate-demo-session.jsonl`,
@@ -243,16 +243,16 @@ describe("createSessionService", () => {
 
     const secondRuntimeInputs: CreateTerminalSessionInput[] = [];
     const secondService = createTestSessionService(fs, secondRuntimeInputs);
-    const recovered = await secondService.getRoleSession("/repo", "another-task", "gate-reviewer");
+    const recovered = await secondService.getRoleSession("/repo", "another-task", "reviewer");
     expect(recovered).toBeUndefined();
 
-    const nextTask = await secondService.startRoleSession("/repo", "another-task", "gate-reviewer");
+    const nextTask = await secondService.startRoleSession("/repo", "another-task", "reviewer");
     expect(nextTask.claudeSessionId).toBe("");
     expect(nextTask.taskSlug).toBe("another-task");
     expect(secondRuntimeInputs[0]?.cwd).toBe("/repo/.claude/worktrees/another-task");
     expect(secondRuntimeInputs[0]?.args).toEqual([
       "--agent",
-      "gate-reviewer",
+      "reviewer",
       "--model",
       "default"
     ]);
@@ -965,19 +965,19 @@ describe("createSessionService", () => {
     expect(writes[1]).toBe("\r");
   });
 
-  it("passes Gate Reviewer effort through Claude Code settings", async () => {
+  it("passes Reviewer effort through Claude Code settings", async () => {
     const fs = createMemoryFs();
     const runtimeInputs: CreateTerminalSessionInput[] = [];
     const service = createTestSessionService(fs, runtimeInputs);
 
-    const started = await service.startRoleSession("/repo", "demo-task", "gate-reviewer", {
+    const started = await service.startRoleSession("/repo", "demo-task", "reviewer", {
       model: "sonnet",
       effort: "max"
     });
 
     expect(started.effort).toBe("max");
     expect(runtimeInputs[0]?.args).toContain("--agent");
-    expect(runtimeInputs[0]?.args).toContain("gate-reviewer");
+    expect(runtimeInputs[0]?.args).toContain("reviewer");
     expect(runtimeInputs[0]?.args).toContain("--effort");
     expect(runtimeInputs[0]?.args).toContain("max");
   });
@@ -1221,24 +1221,24 @@ describe("createSessionService", () => {
     });
   });
 
-  it("records Gate Reviewer hook activity on the task-scoped session", async () => {
+  it("records Reviewer hook activity on the task-scoped session", async () => {
     const fs = createMemoryFs();
     const service = createTestSessionService(fs, []);
-    const started = await service.startRoleSession("/repo", "demo-task", "gate-reviewer");
+    const started = await service.startRoleSession("/repo", "demo-task", "reviewer");
 
     expect(started.claudeSessionId).not.toBe("claude_session_123");
     expect(started.claudeSessionId).toBe("");
 
     const running = await recordCurrentRoleHook(service, {
       taskSlug: "demo-task",
-      role: "gate-reviewer",
+      role: "reviewer",
       eventName: "UserPromptSubmit",
       sessionId: "claude_session_123",
       transcriptPath: "/Users/sheldon/.claude/projects/-repo-.claude-worktrees-demo-task/claude_session_123.jsonl",
       cwd: TASK_WORKTREE
     });
     expect(running).toMatchObject({
-      role: "gate-reviewer",
+      role: "reviewer",
       taskSlug: "demo-task",
       claudeSessionId: "claude_session_123",
       transcriptPath: "/Users/sheldon/.claude/projects/-repo-.claude-worktrees-demo-task/claude_session_123.jsonl",
@@ -1249,7 +1249,7 @@ describe("createSessionService", () => {
 
     const idle = await recordCurrentRoleHook(service, {
       taskSlug: "demo-task",
-      role: "gate-reviewer",
+      role: "reviewer",
       eventName: "Stop",
       sessionId: "claude_session_123"
     });

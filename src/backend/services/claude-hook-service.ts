@@ -4,7 +4,7 @@ import type {
   ClaudeHookResult,
   ClaudePermissionRequestHookResult
 } from "../../shared/types/claude-hook.js";
-import { isGateReviewerRoleName, isHarnessEngineerToolRoleName, isTranslatorToolRoleName, isVcmRoleName } from "../../shared/constants.js";
+import { isHarnessEngineerToolRoleName, isReviewerRoleName, isTranslatorToolRoleName, isVcmRoleName } from "../../shared/constants.js";
 import { VcmError } from "../errors.js";
 import { readTranscriptTurnEvidence } from "./claude-transcript-reply.js";
 import type { GatewayService } from "../gateway/gateway-service.js";
@@ -386,7 +386,7 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
     }
 
     return recordTurnEnd(input, context, eventName, {
-      dispatchRouteFiles: !isGateReviewerRoleName(input.role),
+      dispatchRouteFiles: !isReviewerRoleName(input.role),
       notifyGateway: true,
       settleGuard: true
     });
@@ -443,7 +443,7 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
     if (hasCompletionEvidence) {
       await clearStopFailureRecoveryState(context, input.role);
       return recordTurnEnd(input, context, eventName, {
-        dispatchRouteFiles: !isGateReviewerRoleName(input.role),
+        dispatchRouteFiles: !isReviewerRoleName(input.role),
         notifyGateway: false,
         settleGuard: true
       });

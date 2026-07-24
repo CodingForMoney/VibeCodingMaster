@@ -3,7 +3,7 @@ export const VCM_MEMORY_ROLE_NAMES = [
   "architect",
   "coder",
   "tester",
-  "gate-reviewer",
+  "reviewer",
   "harness-engineer"
 ] as const;
 
