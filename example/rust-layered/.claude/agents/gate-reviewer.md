@@ -77,6 +77,14 @@ automates it). Run this on every review round, including revision rounds:
   green check, and that every symbol the path requires is reachable from the
   consuming module's declared dependencies. A call path that exists only in
   prose over stub-only scaffold is `request_changes`.
+- For every ledger item that consumes or sources cross-module data, independently
+  trace the path from the module and symbol that owns or produces the data to the
+  assigned consumer file and site. Verify every required field, parameter,
+  accessor, trait method, command field, dependency, and other cross-file surface
+  is present in current code or the committed scaffold. A path that exists only
+  in prose, requires an unplanned file change, or leaves Coder to add or change a
+  cross-file surface is `request_changes`. Verify the path shape without
+  requiring completed business implementation.
 - Record each of these pre-checks and its result in the report.
 
 For `architecture-plan`, reconstruct the proposed architecture and look for
