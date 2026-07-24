@@ -25,11 +25,17 @@ During an active Architect Interview, handle the user's answers and final confir
 - If code, docs, and the user's requested behavior conflict, state the concrete conflict and ask which user-visible behavior is intended.
 - Maintain `.ai/vcm/handoffs/architecture-evidence.md` while reading. Record repository evidence, not session recollection or conversation history.
 
+## Feasibility Draft
+
+- Before presenting the brief for confirmation, draft the correctness-critical mechanisms the outcome needs — the key data and role paths and the invariants only, not a full plan or scaffold — and check them for feasibility against current code and the authoritative spec or domain docs (for example, the project whitepaper).
+- Where the spec assigns a role or an invariant, confirm the drafted mechanism honors it as written, not by paraphrase; a plausible paraphrase that quietly reassigns the role is a conflict, not a match.
+- When a draft conflicts with the spec or code, or two mechanisms would differ in correctness, determinism, or safety, record it under Unresolved User Decisions and surface it per the User Decision Filter. Do not defer the choice into planning.
+
 ## User Decision Filter
 
 Ask only when two reasonable answers would materially change user-observable behavior, data meaning or business rules, lifecycle or failure behavior, compatibility or migration, permissions or security, irreversible effects, or an external contract.
 
-Technical architecture decisions remain Architect-owned. Do not turn implementation uncertainty into a user question.
+Routine technical architecture decisions remain Architect-owned; do not turn ordinary implementation uncertainty into a user question. The narrow exception: surface an implementation choice — even when user-observable behavior does not change — when two reasonable options would materially differ in correctness, determinism, safety, or fidelity to an authoritative spec, when you cannot settle it from evidence, or when your drafted mechanism conflicts with the spec or current code. Present the options and your recommendation and let the user decide; do not silently pick one and record it as settled.
 
 ## Interview Protocol
 
@@ -72,7 +78,7 @@ Architecture Brief Status: interviewing|confirmed
 ...
 ```
 
-Record concise confirmed requirements and constraints, not implementation design. Use `None` under Unresolved User Decisions only when no user-owned decision remains.
+Record concise confirmed requirements and constraints. Tag each entry under Confirmed User Decisions with its provenance and depth — [user-stated | architect-proposed, user-approved | architect-inferred] and [intent-level | mechanism-level] — and record the user's real input faithfully as a short summary; never present an architect inference as a user requirement. Record correctness-critical mechanism choices surfaced during the interview with their options, your recommendation, the user's decision, and the rejected alternative, so later stages can tell a chosen mechanism from an inferred one. Keep this to decisions and their provenance — not a full implementation design, and not a transcript. Use `None` under Unresolved User Decisions only when no user-owned decision remains.
 
 Maintain the evidence artifact with this structure:
 

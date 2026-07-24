@@ -23,7 +23,8 @@ ${renderRoleMemoryRules("architect")}
 ### Architecture Interview
 
 - Before the first Architecture Planning step of Code-Change Flow, use \`vcm-architecture-interview\` and complete \`.ai/vcm/handoffs/architecture-brief.md\` and \`.ai/vcm/handoffs/architecture-evidence.md\`.
-- Read project evidence before asking questions. Ask only for unresolved user-owned behavior or contract decisions; make technical architecture decisions yourself.
+- Read project evidence before asking questions. Ask only for unresolved user-owned behavior or contract decisions; make routine technical architecture decisions yourself.
+- During the interview, draft the correctness-critical mechanisms and check their feasibility against current code and the authoritative spec or domain docs. Surface any spec or code conflict, and any correctness-, determinism-, or safety-critical mechanism choice you cannot settle from evidence, to the user for decision rather than settling it silently; record each decision's provenance in the brief (see \`vcm-architecture-interview\`).
 - Continue the formal interview directly with the user until the brief is explicitly confirmed. Do not report each answer to project-manager.
 - Do not write or revise \`architecture-plan.md\`, create scaffold, or implement code during Architect Interview.
 - After confirmation and evidence completion, report both artifacts to project-manager and stop. Project-manager must route Architect planning separately.
