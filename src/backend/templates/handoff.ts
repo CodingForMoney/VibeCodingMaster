@@ -160,6 +160,28 @@ TBD
 
 TBD
 
+## L3 Coverage
+
+L3 Required: yes|no
+
+### Trigger Assessment
+
+TBD
+
+### Affected End-To-End Flows
+
+| Flow | Trigger | Case ID | Test File | Entry Point | Final Observable Result | Action | Result |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD |
+
+### L3 Commands And Evidence
+
+TBD
+
+### Not-Required Evidence
+
+TBD
+
 ## Commands Run Or Checked
 
 TBD

@@ -523,10 +523,15 @@ The fixed harness does not install `check-fast`, `check-changed`, or
 Tester owns validation adequacy. `test-report.md` maps each accepted changed
 behavior or relevant risk to its validation level, actual test case or external
 evidence, exercised entry path, assertions, result, and remaining gap.
-Important features require integration or E2E coverage unless a concrete
-risk-based reason shows that coverage is unnecessary. Unavailable required
-coverage is blocking. Tests must assert real behavior, not mock-call rituals or
-fixture-specific shortcuts.
+L2 covers behavior that can be completely proved from a stable integration
+entry point. L3 is mandatory when a task adds or changes externally observable
+end-to-end behavior, affects a documented L3 production path, changes that
+flow's lifecycle or external contract, changes a cross-component critical
+invariant that requires the complete production path, or fixes a defect that
+escaped L1/L2. Required L3 cannot be replaced by L2. Tester must map each
+affected flow to an existing, updated, or new L3 case and record its command and
+result. Unavailable required coverage is blocking. Tests must assert real
+behavior, not mock-call rituals or fixture-specific shortcuts.
 
 Tester cannot create `Coverage Gaps` or add durable `Known Testing Gaps`
 without the user's exact approval. Required coverage that cannot be completed
@@ -537,11 +542,14 @@ continue; it does not convert the failed validation result to `pass`.
 
 The Validation Adequacy Gate reads the actual implementation entry points and
 test files behind that mapping. Its report must contain structured Validation
-Analysis; `Test Result: pass` and green commands alone are not approval
-evidence. For an approved gap, Reviewer verifies the Debug and Diagnosis
-evidence, the exact user authorization, the retained risk, and any durable
-testing-gap entry. Gate approval confirms evidence adequacy, not test success.
-Reviewer inspects evidence but does not run validation.
+Analysis, including an independent L3 trigger assessment and separate L2 and L3
+coverage findings; `Test Result: pass` and green commands alone are not approval
+evidence. Reviewer rejects required L3 that is missing, replaced by L2,
+unexecuted, mapped to an old case without relevant assertions, or bypasses the
+project-owned production path. For an approved gap, Reviewer verifies the Debug
+and Diagnosis evidence, the exact user authorization, the retained risk, and
+any durable testing-gap entry. Gate approval confirms evidence adequacy, not
+test success. Reviewer inspects evidence but does not run validation.
 
 Long-running validation uses `vcm-long-running-validation` backed by:
 

@@ -168,6 +168,31 @@ UI, CLI/tooling, hook, session,
 persistence, worktree, external-process, and other important user or system
 paths have integration or E2E coverage that exercises real behavior.
 
+Independently apply the Tester L3 trigger rules to the accepted task, actual
+production changes, public contracts, and documented L3 flows. Do not accept
+`L3 Required: no` merely because Tester selected it.
+
+For every affected end-to-end flow:
+
+- Verify that the trigger assessment matches the actual production path.
+- Inspect the actual L3 test file and case.
+- Verify that the case starts from the documented system entry point and reaches
+  the final observable result through the project-owned production path.
+- Verify that internal production wiring is not mocked, replaced, or bypassed.
+- Verify that the assertions directly cover the changed behavior and any changed
+  failure, retry, recovery, or lifecycle path.
+- Verify that an existing case was updated when its prior assertions did not
+  cover the change.
+- Verify the recorded command and result.
+
+Request changes when required L3 coverage is missing, replaced by L2, not
+executed, mapped only to an old case without relevant assertions, bypasses the
+production path, or is classified as unnecessary without satisfying every
+not-required condition.
+
+A required L3 gap is acceptable only when `test-report.md` contains the user's
+exact approval for that specific Coverage Gap.
+
 Inspect boundary, failure, cancellation, retry, restart, recovery,
 concurrency, repeated-action, stale-state, cleanup, and compatibility paths
 when they are relevant to the changed behavior. Check that tests were not
@@ -178,9 +203,8 @@ Do not approve only because `Test Result: pass` or all recorded commands are
 green. Request changes when the report is incomplete or inconsistent with the
 actual tests, validation level does not match risk, an important behavior has
 no concrete coverage mapping, a required check was skipped, required coverage
-is unavailable, or a current-task coverage gap remains. A concrete risk-based
-reason may show that integration or E2E coverage is unnecessary; unavailable
-required coverage without exact user approval is not an approval reason.
+is unavailable, or a current-task coverage gap remains. Required coverage
+without exact user approval is not an approval reason.
 
 Treat every unresolved required-coverage item as gate-blocking unless
 `test-report.md` contains the user's exact approval routed by project-manager.
@@ -296,7 +320,9 @@ Use this findings structure:
 - Changed Behavior And Risk:
 - Coverage Mapping:
 - Baseline Coverage:
-- Integration And E2E Coverage:
+- L2 Integration Coverage:
+- L3 Trigger Assessment:
+- L3 End-To-End Coverage:
 - Boundary And Failure Coverage:
 - Public Contract Coverage:
 - Test Integrity:
@@ -357,7 +383,9 @@ If there are no findings, write:
 - Changed Behavior And Risk:
 - Coverage Mapping:
 - Baseline Coverage:
-- Integration And E2E Coverage:
+- L2 Integration Coverage:
+- L3 Trigger Assessment:
+- L3 End-To-End Coverage:
 - Boundary And Failure Coverage:
 - Public Contract Coverage:
 - Test Integrity:

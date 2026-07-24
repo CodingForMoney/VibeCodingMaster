@@ -261,7 +261,9 @@ function analysisForGate(gate: GateReviewGate): string[] {
       "- Changed Behavior And Risk: delivery completion and retry",
       "- Coverage Mapping: behavior mapped to concrete tests",
       "- Baseline Coverage: callable branches inspected",
-      "- Integration And E2E Coverage: public path inspected",
+      "- L2 Integration Coverage: public path inspected",
+      "- L3 Trigger Assessment: no mandatory L3 trigger",
+      "- L3 End-To-End Coverage: not required",
       "- Boundary And Failure Coverage: retry and recovery inspected",
       "- Public Contract Coverage: observable result asserted",
       "- Test Integrity: real behavior path retained",
@@ -307,10 +309,16 @@ function findingsForDecision(gate: GateReviewGate, decision: GateReviewDecision)
 function validTestReport(taskSlug: string, coverage: string): string {
   return renderTestReportTemplate(taskSlug)
     .replace("Test Result: pass|fail", "Test Result: pass")
+    .replace("L3 Required: yes|no", "L3 Required: no")
     .replaceAll("TBD", "None.")
     .replace("## Evidence Reviewed\n\nNone.", "## Evidence Reviewed\n\nProduction entry point and current tests.")
     .replace("## Tests Added Or Updated\n\nNone.", "## Tests Added Or Updated\n\nDelivery behavior coverage.")
     .replace("## Coverage Mapping\n\nNone.", `## Coverage Mapping\n\n${coverage}`)
+    .replace("### Trigger Assessment\n\nNone.", "### Trigger Assessment\n\nNo mandatory L3 trigger applies.")
+    .replace(
+      "### Not-Required Evidence\n\nNone.",
+      "### Not-Required Evidence\n\nThe fixture changes no externally observable end-to-end behavior, documented L3 path, lifecycle, external contract, or critical invariant; L2 completely proves it."
+    )
     .replace("## Commands Run Or Checked\n\nNone.", "## Commands Run Or Checked\n\nMock validation: pass.")
     .replace("## Validation Results\n\nNone.", "## Validation Results\n\nPass.");
 }

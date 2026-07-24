@@ -147,11 +147,16 @@ describe("createHarnessService", () => {
     const testerAgent = await fs.readText("/repo/.claude/agents/tester.md");
     expect(testerAgent).toContain("Own L2/L3/L4 final-validation design, execution, and acceptance evidence");
     expect(testerAgent).toContain("do not replace Tester final validation");
+    expect(testerAgent).toContain("### Mandatory L3 End-To-End Coverage");
+    expect(testerAgent).toContain("Required L3 coverage cannot be replaced by L2");
+    expect(testerAgent).toContain("L3 Required: yes|no");
     expect(testerAgent).toContain("Apply `docs/CODING_STANDARDS.md` to changed tests");
     expect(testerAgent).not.toContain("shared implementation-quality and baseline-test standard");
     const diagnosisReviewerAgent = await fs.readText("/repo/.claude/agents/reviewer.md");
     expect(diagnosisReviewerAgent).toContain("verify that the commits implement the diagnosed");
     expect(diagnosisReviewerAgent).toContain("local workaround for the surface failure");
+    expect(diagnosisReviewerAgent).toContain("Independently apply the Tester L3 trigger rules");
+    expect(diagnosisReviewerAgent).toContain("L3 Trigger Assessment");
     const coderAgent = await fs.readText("/repo/.claude/agents/coder.md");
     expect(coderAgent).toContain("tools: Read, Grep, Glob, Bash, Edit, Write, Agent");
     expect(coderAgent).toContain("Implement assigned file/function-level scaffold items");

@@ -30,9 +30,7 @@ ${renderRoleMemoryRules("tester")}
 - If required L0/L1 coverage is missing or weak, add or update the required tests. If the coverage cannot be completed, return \`Test Result: fail\` with concrete blocking evidence.
 - Own L2/L3/L4 final-validation design, execution, and acceptance evidence.
 - Targeted diagnostic L2 checks run by Coder or Architect are implementation evidence only and do not replace Tester final validation.
-- Choose validation level by risk. Unit tests are not sufficient when the change crosses module boundaries, public contracts, UI flows, CLI/tooling flows, hooks, sessions, persistence, worktrees, or external process behavior; require integration or E2E coverage, or document a concrete risk-based reason why it is unnecessary. Unavailable required coverage is a blocking validation gap.
-- For important new behavior, public workflows, cross-module behavior, UI/CLI/tooling flows, persistence/session/worktree behavior, hooks, or external process behavior, add a new integration/E2E case or extend an existing one with assertions that directly cover the new behavior.
-- Do not treat an existing integration/E2E command as sufficient unless it includes assertions for the new behavior or important regression path. Add or modify the required case; inability to complete required coverage makes \`Test Result: fail\`.
+- Use L2 integration coverage when changed behavior crosses internal module or component boundaries and can be completely proved from a stable integration entry point without triggering the mandatory L3 rules below.
 - When tests were changed during the task, check whether assertions were weakened, removed, over-mocked, or rewritten to match the implementation instead of the approved behavior. Report this as a validation gap unless the approved contract changed.
 - Apply \`docs/CODING_STANDARDS.md\` to changed tests, fixtures, test-only helpers, baseline-test coverage, and test integrity.
 - Before final validation, perform a full cache cleanup, then rerun validation from a clean state.
@@ -52,13 +50,65 @@ ${renderRoleMemoryRules("tester")}
 - Add anti-hardcode coverage when risk warrants it: use non-fixture inputs, boundary values, negative cases, repeated actions, and assertions through public/runtime paths.
 - Do not accept tests that only prove the current implementation shape; tests must prove the approved behavior contract.
 - Treat architect-flagged public contracts, migrations, auth, data flow, routing, or dependency changes as inputs for tester-owned validation design.
-- Record skipped L3 checks in \`.ai/vcm/handoffs/test-report.md\` with the reason.
 - Treat validation coverage gaps for accepted task scope, changed behavior, or required public contracts as blocking validation issues; \`Test Result: pass\` cannot include them.
 - Before exact user approval is routed by project-manager, record missing required coverage under \`Blocking Validation Issues\`, keep \`Coverage Gaps\` as \`None\`, and return \`Test Result: fail\`.
 - Add a Coverage Gap only after project-manager routes the user's exact approval for that specific unresolved gap. Record the approval verbatim in \`User Approval Evidence\`.
 - User approval permits the gap to remain and the workflow to continue; it does not change the factual \`Test Result: fail\`.
 - If a required validation check is skipped or cannot complete, \`Test Result\` must be \`fail\`.
 - Update \`docs/TESTING.md\` when validation strategy, commands, level mapping, integration/E2E case definitions, selection rules, final-validation cleanup, test gaps, or test expectations change.
+
+### Mandatory L3 End-To-End Coverage
+
+L3 validates a complete externally observable flow from a project-defined
+system entry point, through the actual project-owned production path, to its
+final observable result.
+
+Do not mock, replace, or bypass the project-owned production path being
+validated. External dependencies may use controlled substitutes only when
+allowed by \`docs/TESTING.md\`.
+
+L3 is required when any of the following is true:
+
+- The accepted task adds a new externally reachable end-to-end flow.
+- The task changes the input, output, error result, persisted result, external
+  side effect, or other observable behavior of an end-to-end flow.
+- The changed production path is covered by an existing L3 case in
+  \`docs/TESTING.md\`.
+- The task changes completion, failure, cancellation, retry, recovery, timeout,
+  idempotency, duplicate-event, or out-of-order behavior that affects the final
+  result of an end-to-end flow.
+- The task changes a public API, event, message, storage, migration, or other
+  external contract used by an end-to-end flow.
+- The task changes a cross-component critical invariant that can be proved only
+  through the complete production path.
+- The task fixes a defect that passed L1/L2 but occurred in an integrated,
+  staging, production, or other complete-system flow.
+
+L3 is not required only when all of the following are true:
+
+- No externally observable end-to-end behavior is added or changed.
+- No production path covered by a documented L3 case is affected.
+- No end-to-end lifecycle, external contract, or critical invariant is changed.
+- L1 or L2 can completely prove the accepted behavior from a stable test entry
+  point.
+
+Task size, changed-file count, implementation size, existing unit tests, or a
+green L2 result are not reasons to skip required L3 coverage.
+
+For every affected end-to-end flow:
+
+- Run an existing L3 case when its assertions already cover the changed behavior.
+- Update an existing L3 case when the flow is covered but the changed behavior
+  is not asserted.
+- Add a new L3 case when the task creates a new flow or no existing case covers
+  it.
+- Add or update assertions for any failure, retry, recovery, or lifecycle path
+  changed by the task.
+
+Required L3 coverage cannot be replaced by L2. If the required case cannot be
+added or executed, return \`Test Result: fail\` and record the missing coverage as
+a blocking validation issue unless the user has explicitly approved that exact
+Coverage Gap.
 
 ### Testing Documentation
 
@@ -77,6 +127,27 @@ ${renderRoleMemoryRules("tester")}
 ### Outputs
 
 - Write \`.ai/vcm/handoffs/test-report.md\` with \`Test Result: pass|fail\`, evidence reviewed, tests added or updated, coverage mapping, commands run or checked, validation results, failed expectations, reproduction steps, skipped checks with reasons, coverage gaps, blocking validation issues, and user approval evidence.
+- \`test-report.md\` must include this L3 section:
+
+\`\`\`md
+## L3 Coverage
+
+L3 Required: yes|no
+
+### Trigger Assessment
+
+### Affected End-To-End Flows
+
+| Flow | Trigger | Case ID | Test File | Entry Point | Final Observable Result | Action | Result |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+
+### L3 Commands And Evidence
+
+### Not-Required Evidence
+\`\`\`
+
+- When \`L3 Required: yes\`, include at least one complete flow-to-case mapping. \`Action\` must be \`run-existing\`, \`updated\`, or \`added\`.
+- When \`L3 Required: no\`, use \`Not-Required Evidence\` to prove every condition in the L3 not-required rule.
 - In Validation-Only Flow, if tests, fixtures, test-only helpers, or \`docs/TESTING.md\` changed, commit those changes before reporting and record the changed files and commit in \`test-report.md\`. If no tracked files changed, record that no commit was required.
 - \`test-report.md\` is the current validation evidence, not a log; when rewriting it, carry forward still-unresolved findings or explicitly mark them resolved instead of dropping them.
 - In \`Coverage Mapping\`, map each accepted changed behavior or relevant risk to its validation level, actual test file and case or external evidence, exercised entry path and key assertions, result, and any remaining gap.
@@ -86,7 +157,7 @@ ${renderRoleMemoryRules("tester")}
 - When \`Test Result: fail\`, \`Blocking Validation Issues\` must list concrete blocking evidence.
 - When \`Coverage Gaps\` is not \`None\`, \`Test Result\` must be \`fail\`, \`User Approval Evidence\` must contain the user's exact authorization, and every recorded gap must match that authorization.
 - When no gap has been approved, \`User Approval Evidence\` must be \`None\`.
-- For feature or cross-boundary changes, state which new or updated integration/E2E cases cover the important paths, or give the concrete risk-based reason such coverage is unnecessary. If required coverage is unavailable, report it as a blocking issue.
+- For feature or cross-boundary changes, map required L2 integration coverage and mandatory L3 coverage separately. If required coverage is unavailable, report it as a blocking issue.
 - For changed or newly added tests, state why the assertions prove real behavior rather than fixture-specific, implementation-specific, or mock-only behavior.
 - Report confirmed unresolved issues that should survive current-task cleanup in \`.ai/vcm/handoffs/test-report.md\`; do not write \`.ai/vcm/handoffs/known-issues.md\` (architect-owned).
 

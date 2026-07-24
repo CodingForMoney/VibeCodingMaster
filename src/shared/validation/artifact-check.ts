@@ -41,6 +41,11 @@ const REQUIRED_HEADINGS: Record<ArtifactKind, readonly string[]> = {
     "Evidence Reviewed",
     "Tests Added Or Updated",
     "Coverage Mapping",
+    "L3 Coverage",
+    "Trigger Assessment",
+    "Affected End-To-End Flows",
+    "L3 Commands And Evidence",
+    "Not-Required Evidence",
     "Commands Run Or Checked",
     "Validation Results",
     "Failed Expectations",
@@ -153,6 +158,28 @@ function validateArtifactFields(kind: ArtifactKind, content: string): string[] {
     const invalidFields = result === "pass" || result === "fail"
       ? []
       : ["Test Result must be pass or fail."];
+    const l3Required = /^\s*L3 Required\s*:\s*(\S+)\s*$/im.exec(content)?.[1]?.toLowerCase();
+    if (l3Required !== "yes" && l3Required !== "no") {
+      invalidFields.push("L3 Required must be yes or no.");
+    }
+    const l3TriggerAssessment = readArtifactSectionValue(content, "Trigger Assessment");
+    const l3AffectedFlows = readArtifactSectionContent(content, "Affected End-To-End Flows");
+    const l3Commands = readArtifactSectionValue(content, "L3 Commands And Evidence");
+    const l3NotRequiredEvidence = readArtifactSectionValue(content, "Not-Required Evidence");
+    if (l3Required === "yes") {
+      if (!hasSubstantiveSectionValue(l3TriggerAssessment)) {
+        invalidFields.push("Trigger Assessment is required when L3 Required is yes.");
+      }
+      if (!hasCompleteL3FlowMapping(l3AffectedFlows)) {
+        invalidFields.push("Affected End-To-End Flows are required when L3 Required is yes.");
+      }
+      if (!hasSubstantiveSectionValue(l3Commands)) {
+        invalidFields.push("L3 Commands And Evidence are required when L3 Required is yes.");
+      }
+    }
+    if (l3Required === "no" && !hasSubstantiveSectionValue(l3NotRequiredEvidence)) {
+      invalidFields.push("Not-Required Evidence is required when L3 Required is no.");
+    }
     const coverageGaps = readArtifactSectionValue(content, "Coverage Gaps");
     const blockingIssues = readArtifactSectionValue(content, "Blocking Validation Issues");
     const userApproval = readArtifactSectionValue(content, "User Approval Evidence");
@@ -205,6 +232,27 @@ function validateArtifactFields(kind: ArtifactKind, content: string): string[] {
   return [];
 }
 
+function hasSubstantiveSectionValue(value: string | undefined): boolean {
+  return Boolean(value && !/^(none|tbd)\.?$/i.test(value.trim()));
+}
+
+function hasCompleteL3FlowMapping(value: string | undefined): boolean {
+  if (!value) {
+    return false;
+  }
+  const allowedActions = new Set(["run-existing", "updated", "added"]);
+  return value
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.startsWith("|") && line.endsWith("|"))
+    .some((line) => {
+      const cells = line.slice(1, -1).split("|").map((cell) => cell.trim());
+      return cells.length === 8
+        && allowedActions.has(cells[6]?.toLowerCase() ?? "")
+        && cells.every((cell) => Boolean(cell) && !/^(none|tbd)\.?$/i.test(cell));
+    });
+}
+
 function validateDecision(content: string, allowed: string[]): string[] {
   const decision = readArtifactSectionValue(content, "Decision")?.toLowerCase();
   return decision && allowed.includes(decision)
@@ -213,6 +261,13 @@ function validateDecision(content: string, allowed: string[]): string[] {
 }
 
 export function readArtifactSectionValue(content: string, heading: string): string | undefined {
+  return readArtifactSectionContent(content, heading)
+    ?.split(/\r?\n/)
+    .map((line) => line.trim())
+    .find(Boolean);
+}
+
+function readArtifactSectionContent(content: string, heading: string): string | undefined {
   const match = new RegExp(`^#{1,6}\\s+${escapeRegExp(heading)}\\s*$`, "im").exec(content);
   if (!match || match.index === undefined) {
     return undefined;
@@ -222,7 +277,7 @@ export function readArtifactSectionValue(content: string, heading: string): stri
   const section = nextHeading?.index === undefined
     ? afterHeading
     : afterHeading.slice(0, nextHeading.index);
-  return section.split(/\r?\n/).map((line) => line.trim()).find(Boolean);
+  return section.trim();
 }
 
 function hasHeading(content: string, heading: string): boolean {
