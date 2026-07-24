@@ -19,9 +19,12 @@ import type { ProjectService } from "../services/project-service.js";
 import type { SessionService } from "../services/session-service.js";
 import type { TaskService } from "../services/task-service.js";
 import type { StartRoleSessionRequest } from "../../shared/types/session.js";
+import { createDefaultToolSessionDefaults } from "../../shared/types/app-settings.js";
+import type { AppSettingsService } from "../services/app-settings-service.js";
 
 export interface HarnessRouteDeps {
   projectService: ProjectService;
+  appSettings: Pick<AppSettingsService, "updateToolSessionDefaults">;
   harnessService: HarnessService;
   harnessFeedbackService: HarnessFeedbackService;
   autoMemoryService: AutoMemoryService;
@@ -115,14 +118,18 @@ export function registerHarnessRoutes(app: FastifyInstance, deps: HarnessRouteDe
     const { project, task } = await requireHarnessTaskContext(deps, request.body?.taskSlug);
     await deps.autoMemoryService.assertHarnessEngineerAvailable(task.worktreePath);
     await deps.harnessFeedbackService.assertHarnessEngineerAvailable(project.repoRoot);
-    return deps.harnessService.startHarnessBootstrap(project.repoRoot, task.worktreePath, request.body ?? {});
+    const result = await deps.harnessService.startHarnessBootstrap(project.repoRoot, task.worktreePath, request.body ?? {});
+    await persistHarnessEngineerDefaults(deps.appSettings, result.session);
+    return result;
   });
 
   app.post<{ Body: RestartHarnessBootstrapRequest }>("/api/projects/harness/bootstrap/restart", async (request) => {
     const { project, task } = await requireHarnessTaskContext(deps, request.body?.taskSlug);
     await deps.autoMemoryService.assertHarnessEngineerAvailable(task.worktreePath);
     await deps.harnessFeedbackService.assertHarnessEngineerAvailable(project.repoRoot);
-    return deps.harnessService.restartHarnessBootstrap(project.repoRoot, task.worktreePath, request.body ?? {});
+    const result = await deps.harnessService.restartHarnessBootstrap(project.repoRoot, task.worktreePath, request.body ?? {});
+    await persistHarnessEngineerDefaults(deps.appSettings, result.session);
+    return result;
   });
 
   app.post<{ Body: { taskSlug?: string } }>("/api/projects/harness/bootstrap/stop", async (request) => {
@@ -164,7 +171,9 @@ export function registerHarnessRoutes(app: FastifyInstance, deps: HarnessRouteDe
     const taskSlug = requireTaskSlug(request.body?.taskSlug, "Harness Engineer");
     const task = await deps.taskService.loadTask(project.repoRoot, taskSlug);
     await deps.autoMemoryService.assertHarnessEngineerAvailable(task.worktreePath);
-    return deps.sessionService.startRoleSession(project.repoRoot, taskSlug, "harness-engineer", request.body);
+    const session = await deps.sessionService.startRoleSession(project.repoRoot, taskSlug, "harness-engineer", request.body);
+    await persistHarnessEngineerDefaults(deps.appSettings, session);
+    return session;
   });
 
   app.post<{ Body: StartRoleSessionRequest }>("/api/projects/harness/engineer/session/resume", async (request) => {
@@ -180,7 +189,9 @@ export function registerHarnessRoutes(app: FastifyInstance, deps: HarnessRouteDe
     const taskSlug = requireTaskSlug(request.body?.taskSlug, "Harness Engineer");
     const task = await deps.taskService.loadTask(project.repoRoot, taskSlug);
     await deps.autoMemoryService.assertHarnessEngineerAvailable(task.worktreePath);
-    return deps.sessionService.restartRoleSession(project.repoRoot, taskSlug, "harness-engineer", request.body);
+    const session = await deps.sessionService.restartRoleSession(project.repoRoot, taskSlug, "harness-engineer", request.body);
+    await persistHarnessEngineerDefaults(deps.appSettings, session);
+    return session;
   });
 
   app.post<{ Body: StartRoleSessionRequest }>("/api/projects/harness/engineer/session/stop", async (request) => {
@@ -273,6 +284,22 @@ export function registerHarnessRoutes(app: FastifyInstance, deps: HarnessRouteDe
   app.post<{ Body: RetryMemoryReviewRequest }>("/api/projects/harness/memory/retry", async (request) => {
     const { project, task } = await requireHarnessTaskContext(deps, request.body?.taskSlug);
     return deps.autoMemoryService.retryFailedReview(project.repoRoot, task.worktreePath);
+  });
+}
+
+async function persistHarnessEngineerDefaults(
+  appSettings: Pick<AppSettingsService, "updateToolSessionDefaults">,
+  session: {
+    permissionMode?: StartRoleSessionRequest["permissionMode"];
+    model?: StartRoleSessionRequest["model"];
+    effort?: StartRoleSessionRequest["effort"];
+  }
+): Promise<void> {
+  const defaults = createDefaultToolSessionDefaults()["harness-engineer"];
+  await appSettings.updateToolSessionDefaults("harness-engineer", {
+    permissionMode: session.permissionMode ?? defaults.permissionMode,
+    model: session.model ?? defaults.model,
+    effort: session.effort ?? defaults.effort
   });
 }
 

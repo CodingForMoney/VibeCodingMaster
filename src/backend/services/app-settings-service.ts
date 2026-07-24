@@ -4,6 +4,7 @@ import { VCM_ROLE_NAMES } from "../../shared/constants.js";
 import { GATE_REVIEW_GATES, type GateReviewGate } from "../../shared/types/gate-review.js";
 import {
   createDefaultLaunchTemplate,
+  createDefaultToolSessionDefaults,
   DEFAULT_TRANSLATION_OUTPUT_MODE,
   DEFAULT_TRANSLATION_TARGET_LANGUAGE,
   TRANSLATION_OUTPUT_MODE_OPTIONS,
@@ -12,18 +13,20 @@ import {
   type LaunchTemplate,
   type PermissionRequestMode,
   type RoleLaunchTemplateEntry,
+  type ToolSessionDefaults,
   type TranslationOutputMode,
   type TranslationTargetLanguage,
   type ThemeMode
 } from "../../shared/types/app-settings.js";
 import type { ProjectConfig } from "../../shared/types/project.js";
-import type { VcmRoleName } from "../../shared/types/role.js";
+import type { ToolRoleName, VcmRoleName } from "../../shared/types/role.js";
 import {
   CLAUDE_MODEL_OPTIONS,
+  CCR_GPT_SESSION_MODEL,
   SESSION_EFFORT_OPTIONS,
-  type ClaudeModel,
   type ClaudePermissionMode,
-  type SessionEffort
+  type SessionEffort,
+  type SessionModel
 } from "../../shared/types/session.js";
 import type { FileSystemAdapter } from "../adapters/filesystem.js";
 import { resolveVcmDataDir } from "../vcm-data-dir.js";
@@ -32,7 +35,14 @@ export interface AppSettingsFile {
   version: 1;
   preferences: AppPreferences;
   gateReview?: AppGateReviewSettingsState;
+  ccr?: AppCcrIntegrationSettingsState;
   recentRepositoryPaths: string[];
+}
+
+export interface AppCcrIntegrationSettingsState {
+  version: 1;
+  enabled: boolean;
+  apiKey: string;
 }
 
 export interface AppProjectIndexEntry {
@@ -62,6 +72,7 @@ export interface AppSettingsService {
   loadSettings(): Promise<AppSettingsFile>;
   getPreferences(): Promise<AppPreferences>;
   updatePreferences(input: Partial<AppPreferences>): Promise<AppPreferences>;
+  updateToolSessionDefaults(role: ToolRoleName, input: RoleLaunchTemplateEntry): Promise<RoleLaunchTemplateEntry>;
   getRecentRepositoryPaths(): Promise<string[]>;
   recordRecentRepositoryPath(repoRoot: string): Promise<string[]>;
   loadProjectIndex(): Promise<AppProjectIndexFile>;
@@ -69,6 +80,8 @@ export interface AppSettingsService {
   saveProjectConfig(config: ProjectConfig): Promise<ProjectConfig>;
   getGateReviewSettings(repoRoot: string, taskSlug: string): Promise<AppGateReviewSettings>;
   updateGateReviewSettings(repoRoot: string, taskSlug: string, requiredGates: GateReviewGate[]): Promise<AppGateReviewSettings>;
+  getCcrIntegrationSettings(): Promise<AppCcrIntegrationSettingsState>;
+  updateCcrIntegrationSettings(input: Partial<Pick<AppCcrIntegrationSettingsState, "enabled" | "apiKey">>): Promise<AppCcrIntegrationSettingsState>;
   getSettingsPath(): string;
   getProjectIndexPath(): string;
   getProjectConfigPath(repoRoot: string): string;
@@ -97,6 +110,7 @@ export function createAppSettingsService(deps: AppSettingsServiceDeps): AppSetti
     let shouldSave = false;
     if (await deps.fs.pathExists(settingsPath)) {
       raw = await deps.fs.readJson<Partial<AppSettingsFile>>(settingsPath);
+      await deps.fs.chmod?.(settingsPath, 0o600);
     } else {
       shouldSave = true;
     }
@@ -111,6 +125,7 @@ export function createAppSettingsService(deps: AppSettingsServiceDeps): AppSetti
   async function saveSettings(settings: AppSettingsFile): Promise<void> {
     cachedSettings = settings;
     await deps.fs.writeJsonAtomic(settingsPath, settings);
+    await deps.fs.chmod?.(settingsPath, 0o600);
   }
 
   async function loadProjectIndex(): Promise<AppProjectIndexFile> {
@@ -154,6 +169,21 @@ export function createAppSettingsService(deps: AppSettingsServiceDeps): AppSetti
         preferences
       });
       return preferences;
+    },
+    async updateToolSessionDefaults(role, input) {
+      const current = await loadSettings();
+      const preferences = normalizePreferences({
+        ...current.preferences,
+        toolSessionDefaults: {
+          ...current.preferences.toolSessionDefaults,
+          [role]: input
+        }
+      });
+      await saveSettings({
+        ...current,
+        preferences
+      });
+      return preferences.toolSessionDefaults[role];
     },
     async getRecentRepositoryPaths() {
       return (await loadSettings()).recentRepositoryPaths;
@@ -229,6 +259,21 @@ export function createAppSettingsService(deps: AppSettingsServiceDeps): AppSetti
         enabled: normalizedRequiredGates.length > 0,
         requiredGates: normalizedRequiredGates
       };
+    },
+    async getCcrIntegrationSettings() {
+      return normalizeCcrIntegrationSettings((await loadSettings()).ccr);
+    },
+    async updateCcrIntegrationSettings(input) {
+      const current = await loadSettings();
+      const ccr = normalizeCcrIntegrationSettings({
+        ...current.ccr,
+        ...input
+      });
+      await saveSettings({
+        ...current,
+        ccr
+      });
+      return ccr;
     },
     getSettingsPath() {
       return settingsPath;
@@ -324,7 +369,18 @@ function normalizeSettingsFile(input: Partial<AppSettingsFile>): AppSettingsFile
   if (gateReview) {
     settings.gateReview = gateReview;
   }
+  settings.ccr = normalizeCcrIntegrationSettings(input.ccr);
   return settings;
+}
+
+function normalizeCcrIntegrationSettings(input: unknown): AppCcrIntegrationSettingsState {
+  const candidate = isObject(input) ? input : {};
+  const apiKey = typeof candidate.apiKey === "string" ? candidate.apiKey.trim() : "";
+  return {
+    version: 1,
+    enabled: candidate.enabled === true && apiKey.length > 0,
+    apiKey
+  };
 }
 
 function normalizePreferences(input: unknown): AppPreferences {
@@ -343,7 +399,8 @@ function normalizePreferences(input: unknown): AppPreferences {
     translationAutoSendEnabled: candidate.translationAutoSendEnabled === true,
     translationTargetLanguage: normalizeTranslationTargetLanguage(candidate.translationTargetLanguage),
     translationOutputMode: normalizeTranslationOutputMode(candidate.translationOutputMode),
-    launchTemplate: normalizeLaunchTemplate(candidate.launchTemplate)
+    launchTemplate: normalizeLaunchTemplate(candidate.launchTemplate),
+    toolSessionDefaults: normalizeToolSessionDefaults(candidate.toolSessionDefaults)
   };
 }
 
@@ -390,6 +447,18 @@ function normalizeLaunchTemplate(input: unknown): LaunchTemplate {
   };
 }
 
+function normalizeToolSessionDefaults(input: unknown): ToolSessionDefaults {
+  const defaults = createDefaultToolSessionDefaults();
+  const candidate = isObject(input) ? input : {};
+  return {
+    translator: normalizeRoleLaunchTemplateEntry(candidate.translator, defaults.translator),
+    "harness-engineer": normalizeRoleLaunchTemplateEntry(
+      candidate["harness-engineer"],
+      defaults["harness-engineer"]
+    )
+  };
+}
+
 function normalizeRoleLaunchTemplateEntry(
   input: unknown,
   fallback: RoleLaunchTemplateEntry
@@ -412,9 +481,12 @@ function normalizeClaudePermissionMode(
   return fallback;
 }
 
-function normalizeClaudeModel(input: unknown, fallback: ClaudeModel): ClaudeModel {
+function normalizeClaudeModel(input: unknown, fallback: SessionModel): SessionModel {
   if (typeof input !== "string") {
     return fallback;
+  }
+  if (input === CCR_GPT_SESSION_MODEL) {
+    return input;
   }
   const model = CLAUDE_MODEL_OPTIONS.find((option) => option.value === input);
   return model?.value ?? fallback;

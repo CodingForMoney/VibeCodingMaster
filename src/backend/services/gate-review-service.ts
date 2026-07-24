@@ -48,7 +48,7 @@ export interface GateReviewServiceDeps {
   projectService: Pick<ProjectService, "loadConfig">;
   taskService: Pick<TaskService, "loadTask">;
   appSettings: Pick<AppSettingsService, "getGateReviewSettings" | "updateGateReviewSettings">;
-  sessionService: Pick<SessionService, "getRoleSession" | "markRoleActivityIdle" | "markRoleActivityRunning" | "resumeRoleSession" | "startRoleSession">;
+  sessionService: Pick<SessionService, "getRoleSession" | "markRoleActivityRunning" | "resumeRoleSession" | "startRoleSession">;
   roundService: Pick<RoundService, "recordRoleTurnEvent">;
   reportPollIntervalMs?: number;
   reportTimeoutMs?: number;
@@ -113,6 +113,7 @@ const VALIDATION_ANALYSIS_FIELDS = [
   "Public Contract Coverage",
   "Test Integrity",
   "Skips And Gaps",
+  "User Approval And Gap Disposition",
   "Validation Readiness"
 ] as const;
 const CODE_DIFF_ANALYSIS_FIELDS = [
@@ -132,10 +133,13 @@ const CODE_DIFF_ANALYSIS_FIELDS = [
 const SOURCE_ARTIFACTS: Record<GateReviewGate, string[]> = {
   "architecture-plan": [
     ".ai/vcm/handoffs/architecture-brief.md",
+    ".ai/vcm/handoffs/architecture-evidence.md",
     ".ai/vcm/handoffs/architecture-plan.md"
   ],
   "validation-adequacy": [
     ".ai/vcm/handoffs/architecture-plan.md",
+    ".ai/vcm/handoffs/architect-debug.md",
+    ".ai/vcm/handoffs/architecture-diagnosis.md",
     ".ai/vcm/handoffs/test-report.md",
     "docs/TESTING.md"
   ],
@@ -322,6 +326,30 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
           message: architectureBriefError
         };
       }
+      const architectureEvidenceError = await readArchitectureEvidenceError(deps.fs, context.taskRepoRoot);
+      if (architectureEvidenceError) {
+        index = applyGateState(index, gate, {
+          status: "failed",
+          decision: undefined,
+          error: architectureEvidenceError,
+          exceptionReason: undefined,
+          requestId: undefined,
+          requestPath: undefined,
+          inputHash: undefined,
+          requestedAt: undefined,
+          startedAt: undefined,
+          completedAt: now(),
+          callbackStatus: "not_sent",
+          callbackError: undefined
+        }, now(), true);
+        await saveIndex(deps.fs, context.taskRepoRoot, index);
+        return {
+          status: "failed_to_start",
+          gate,
+          record: index.gates[gate],
+          message: architectureEvidenceError
+        };
+      }
     }
 
     const coreInput = await readCoreInputArtifact(deps.fs, context.taskRepoRoot, gate);
@@ -347,6 +375,33 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
         record: index.gates[gate],
         message: `${coreInput.path} is ${coreInput.status}.`
       };
+    }
+
+    if (gate === "validation-adequacy") {
+      const validationReportError = await readValidationReportError(deps.fs, context.taskRepoRoot);
+      if (validationReportError) {
+        index = applyGateState(index, gate, {
+          status: "failed",
+          decision: undefined,
+          error: validationReportError,
+          exceptionReason: undefined,
+          requestId: undefined,
+          requestPath: undefined,
+          inputHash: undefined,
+          requestedAt: undefined,
+          startedAt: undefined,
+          completedAt: now(),
+          callbackStatus: "not_sent",
+          callbackError: undefined
+        }, now(), true);
+        await saveIndex(deps.fs, context.taskRepoRoot, index);
+        return {
+          status: "failed_to_start",
+          gate,
+          record: index.gates[gate],
+          message: validationReportError
+        };
+      }
     }
 
     const codeDiffInput = gate === "code-diff"
@@ -477,7 +532,6 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
       return;
     }
     activeRuns.add(runKey);
-    let gateTurnStarted = false;
     try {
       const timestamp = now();
       await updateGateRecord(context, gate, {
@@ -505,7 +559,12 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
 
       const session = await ensureGateReviewerSession(context);
       await submitTerminalInput(deps.runtime, session.id, prompt);
-      await deps.sessionService.markRoleActivityRunning(context.repoRoot, context.taskSlug, GATE_REVIEWER_ROLE);
+      await deps.sessionService.markRoleActivityRunning(
+        context.repoRoot,
+        context.taskSlug,
+        GATE_REVIEWER_ROLE,
+        session.id
+      );
       await deps.roundService.recordRoleTurnEvent({
         repoRoot: context.repoRoot,
         stateRepoRoot: context.taskRepoRoot,
@@ -514,15 +573,12 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
         role: GATE_REVIEWER_ROLE,
         eventName: "UserPromptSubmit"
       });
-      gateTurnStarted = true;
 
       const parsed = await waitForGateReport(deps.fs, context.taskRepoRoot, gate, requestId, now(), {
         intervalMs: reportPollIntervalMs,
         timeoutMs: reportTimeoutMs
       });
       const completedAt = now();
-      await recordGateReviewerTurnStop(context, gateTurnStarted);
-      gateTurnStarted = false;
       await updateRequestStatus(deps.fs, context, requestId, "completed", {
         completedAt,
         decision: parsed.decision,
@@ -544,8 +600,6 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
     } catch (error) {
       const timestamp = now();
       const message = errorMessage(error);
-      await recordGateReviewerTurnStop(context, gateTurnStarted);
-      gateTurnStarted = false;
       await updateRequestStatus(deps.fs, context, requestId, "failed", {
         completedAt: timestamp,
         error: message
@@ -563,21 +617,6 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
     } finally {
       activeRuns.delete(runKey);
     }
-  }
-
-  async function recordGateReviewerTurnStop(context: ReviewContext, shouldRecord: boolean): Promise<void> {
-    if (!shouldRecord) {
-      return;
-    }
-    await deps.sessionService.markRoleActivityIdle(context.repoRoot, context.taskSlug, GATE_REVIEWER_ROLE);
-    await deps.roundService.recordRoleTurnEvent({
-      repoRoot: context.repoRoot,
-      stateRepoRoot: context.taskRepoRoot,
-      stateRoot: context.stateRoot,
-      taskSlug: context.taskSlug,
-      role: GATE_REVIEWER_ROLE,
-      eventName: "Stop"
-    });
   }
 
   async function ensureGateReviewerSession(context: ReviewContext) {
@@ -646,7 +685,12 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
 
     try {
       await submitTerminalInput(deps.runtime, session.id, prompt);
-      await deps.sessionService.markRoleActivityRunning(context.repoRoot, context.taskSlug, "project-manager");
+      await deps.sessionService.markRoleActivityRunning(
+        context.repoRoot,
+        context.taskSlug,
+        "project-manager",
+        session.id
+      );
       await deps.roundService.recordRoleTurnEvent({
         repoRoot: context.repoRoot,
         stateRepoRoot: context.taskRepoRoot,
@@ -1169,6 +1213,47 @@ async function readArchitectureBriefError(
   return undefined;
 }
 
+async function readValidationReportError(
+  fs: FileSystemAdapter,
+  taskRepoRoot: string
+): Promise<string | undefined> {
+  const relativePath = CORE_INPUT_ARTIFACTS["validation-adequacy"];
+  if (!relativePath) {
+    return undefined;
+  }
+  const absolutePath = resolveRepoPath(taskRepoRoot, relativePath);
+  const content = await fs.pathExists(absolutePath) ? await fs.readText(absolutePath) : null;
+  const check = checkMarkdownArtifact("test-report", relativePath, content);
+  if (check.status === "ok") {
+    return undefined;
+  }
+  const details = [
+    check.missingHeadings.length > 0 ? `missing headings: ${check.missingHeadings.join(", ")}` : "",
+    check.invalidFields.length > 0 ? check.invalidFields.join(" ") : "",
+    check.hasPlaceholder ? "contains placeholders" : ""
+  ].filter(Boolean).join("; ");
+  return `${relativePath} is incomplete and cannot start validation-adequacy review.${details ? ` ${details}` : ""}`;
+}
+
+async function readArchitectureEvidenceError(
+  fs: FileSystemAdapter,
+  taskRepoRoot: string
+): Promise<string | undefined> {
+  const relativePath = ".ai/vcm/handoffs/architecture-evidence.md";
+  const absolutePath = resolveRepoPath(taskRepoRoot, relativePath);
+  if (!await fs.pathExists(absolutePath)) {
+    return `${relativePath} is missing. Complete architecture evidence before requesting architecture-plan review.`;
+  }
+  const content = await fs.readText(absolutePath);
+  if (content.trim().length === 0) {
+    return `${relativePath} is empty. Complete architecture evidence before requesting architecture-plan review.`;
+  }
+  if (!/^\s*Architecture Evidence Status\s*:\s*complete\s*$/im.test(content)) {
+    return `${relativePath} is incomplete. Finish current-worktree evidence before requesting architecture-plan review.`;
+  }
+  return undefined;
+}
+
 async function commandStdout(runner: CommandRunner, cwd: string, args: string[]): Promise<string> {
   const result = await runner.run("git", args, { cwd });
   return result.exitCode === 0 ? result.stdout : "";
@@ -1422,17 +1507,15 @@ async function validateValidationApprovalInput(
   const absolutePath = resolveRepoPath(taskRepoRoot, relativePath);
   const content = await fs.pathExists(absolutePath) ? await fs.readText(absolutePath) : null;
   const check = checkMarkdownArtifact("test-report", relativePath, content);
-  const testResult = content ? matchField(content, "Test Result")?.toLowerCase() : undefined;
-  if (check.status === "ok" && testResult === "pass") {
+  if (check.status === "ok") {
     return;
   }
 
   const details = [
-    check.status !== "ok" ? `status=${check.status}` : "",
+    `status=${check.status}`,
     check.missingHeadings.length > 0 ? `missing headings: ${check.missingHeadings.join(", ")}` : "",
     check.invalidFields.length > 0 ? check.invalidFields.join(" ") : "",
-    check.hasPlaceholder ? "contains placeholders" : "",
-    testResult !== "pass" ? "Test Result must be pass before approval." : ""
+    check.hasPlaceholder ? "contains placeholders" : ""
   ].filter(Boolean).join("; ");
   throw new VcmError({
     code: "GATE_REVIEW_VALIDATION_INPUT_INCOMPLETE",

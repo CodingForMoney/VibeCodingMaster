@@ -15,6 +15,7 @@ export interface ClaudeHookPayload {
 export interface ClaudeHookRequest {
   taskSlug: string;
   role: RoleName;
+  runtimeSessionToken?: string;
   event: ClaudeHookPayload;
 }
 

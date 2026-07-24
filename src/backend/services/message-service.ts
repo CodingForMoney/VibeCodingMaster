@@ -81,6 +81,11 @@ export interface MessageServiceDeps {
   dispatchConfirmationEnabled?: boolean;
   dispatchConfirmationRetryDelaysMs?: number[];
   dispatchConfirmationFailureDelayMs?: number;
+  onRouteDelivered?: (input: {
+    repoRoot: string;
+    taskSlug: string;
+    message: VcmRoleMessage;
+  }) => Promise<void> | void;
 }
 
 const PM_ROLE: VcmRoleName = "project-manager";
@@ -214,7 +219,12 @@ export function createMessageService(deps: MessageServiceDeps): MessageService {
     await submitTerminalInput(deps.runtime, session.id, renderMessageEnvelope(delivered), {
       enterDelayMs: autoDispatchEnterDelayMs
     });
-    await deps.sessionService.markRoleActivityRunning(input.repoRoot, input.taskSlug, routeFile.toRole);
+    await deps.sessionService.markRoleActivityRunning(
+      input.repoRoot,
+      input.taskSlug,
+      routeFile.toRole,
+      session.id
+    );
     if (routeFile.fromRole === PM_ROLE) {
       await deps.taskWorkflowService?.recordPmDispatch({
         taskRepoRoot: input.taskRepoRoot ?? input.repoRoot,
@@ -226,6 +236,11 @@ export function createMessageService(deps: MessageServiceDeps): MessageService {
       }).catch(() => undefined);
     }
     scheduleDispatchConfirmation(input, delivered, session.id);
+    await deps.onRouteDelivered?.({
+      repoRoot: input.repoRoot,
+      taskSlug: input.taskSlug,
+      message: delivered
+    });
 
     return {
       message: delivered,

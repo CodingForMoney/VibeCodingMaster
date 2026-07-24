@@ -8,7 +8,9 @@ import { createNodeFileSystemAdapter } from "../../../../src/backend/adapters/fi
 import { createCommandRunner } from "../../../../src/backend/adapters/command-runner.js";
 import { createGitAdapter } from "../../../../src/backend/adapters/git-adapter.js";
 import type { ClaudeAdapter } from "../../../../src/backend/adapters/claude-adapter.js";
+import type { CcrGatewayAdapter } from "../../../../src/backend/adapters/ccr-gateway-adapter.js";
 import { createAppSettingsService } from "../../../../src/backend/services/app-settings-service.js";
+import { createCcrIntegrationService } from "../../../../src/backend/services/ccr-integration-service.js";
 import { createArtifactService } from "../../../../src/backend/services/artifact-service.js";
 import { createProjectService } from "../../../../src/backend/services/project-service.js";
 import { createTaskService } from "../../../../src/backend/services/task-service.js";
@@ -18,6 +20,7 @@ import { createSessionService } from "../../../../src/backend/services/session-s
 import { createHarnessService } from "../../../../src/backend/services/harness-service.js";
 import { createHarnessFeedbackService } from "../../../../src/backend/services/harness-feedback-service.js";
 import { createAutoMemoryService } from "../../../../src/backend/services/auto-memory-service.js";
+import { createArchitectRestartService } from "../../../../src/backend/services/architect-restart-service.js";
 import { createCommandDispatcher } from "../../../../src/backend/services/command-dispatcher.js";
 import { createStatusService } from "../../../../src/backend/services/status-service.js";
 import { createMessageService } from "../../../../src/backend/services/message-service.js";
@@ -39,10 +42,16 @@ import { createTurnReconcilerService } from "../../../../src/backend/services/tu
 import { createRuntimeCoordinatorService } from "../../../../src/backend/services/runtime-coordinator-service.js";
 import { createTerminalInterruptService } from "../../../../src/backend/services/terminal-interrupt-service.js";
 import { createDiagnosticsService } from "../../../../src/backend/services/diagnostics-service.js";
+import { createUsageAnalyticsService } from "../../../../src/backend/services/usage-analytics-service.js";
 import { createJobGuardService } from "../../../../src/backend/services/job-guard-service.js";
 import { readVcmPackageVersion } from "../../../../src/backend/app-version.js";
 import type { RoleName } from "../../../../src/shared/types/role.js";
-import type { ClaudeModel, ClaudePermissionMode, SessionEffort } from "../../../../src/shared/types/session.js";
+import {
+  isCcrSessionModel,
+  type ClaudePermissionMode,
+  type SessionEffort,
+  type SessionModel
+} from "../../../../src/shared/types/session.js";
 import { MockClaudeRuntime } from "./mock-claude-runtime.js";
 import { MockGatewayChannel } from "./mock-gateway-channel.js";
 
@@ -57,6 +66,8 @@ export interface MockClaudeE2eApp {
 
 export interface MockClaudeE2eAppOptions {
   tempRoot?: string;
+  ccrGateway?: CcrGatewayAdapter;
+  ccrBaseEnv?: NodeJS.ProcessEnv;
 }
 
 export async function createMockClaudeE2eApp(options: MockClaudeE2eAppOptions = {}): Promise<MockClaudeE2eApp> {
@@ -73,6 +84,16 @@ export async function createMockClaudeE2eApp(options: MockClaudeE2eAppOptions = 
   const mockRuntime = new MockClaudeRuntime({ transcriptRoot });
   const claude = createMockClaudeAdapter();
   const appSettings = createAppSettingsService({ fs: fsAdapter, settingsPath });
+  const ccrIntegration = createCcrIntegrationService({
+    settings: appSettings,
+    baseEnv: options.ccrBaseEnv ?? {},
+    configDir: path.join(tempRoot, "settings", "claude", "ccr"),
+    gateway: options.ccrGateway ?? {
+      async probe() {
+        return { connectionState: "available", modelAvailable: true };
+      }
+    }
+  });
   const artifactService = createArtifactService(fsAdapter);
   const projectService = createProjectService({ fs: fsAdapter, git, appSettings });
   const taskService = createTaskService({ fs: fsAdapter, git, artifactService, projectService });
@@ -87,6 +108,7 @@ export async function createMockClaudeE2eApp(options: MockClaudeE2eAppOptions = 
     projectService,
     taskService,
     taskWorkflowService,
+    ccrIntegration,
     apiUrl: "http://127.0.0.1/mock-vcm",
     isProcessAlive(pid) {
       return mockRuntime.listSessions().some((session) => session.pid === pid && session.status === "running");
@@ -132,6 +154,11 @@ export async function createMockClaudeE2eApp(options: MockClaudeE2eAppOptions = 
     sessionService,
     artifactService
   });
+  const architectRestartService = createArchitectRestartService({
+    fs: fsAdapter,
+    taskService,
+    sessionService
+  });
   const messageService = createMessageService({
     fs: fsAdapter,
     runtime: mockRuntime,
@@ -140,7 +167,9 @@ export async function createMockClaudeE2eApp(options: MockClaudeE2eAppOptions = 
     taskWorkflowService,
     preDispatchSwitchDelayMs: 0,
     autoDispatchEnterDelayMs: 0,
-    dispatchConfirmationEnabled: false
+    dispatchConfirmationEnabled: false,
+    onRouteDelivered: ({ repoRoot, taskSlug, message }) =>
+      architectRestartService.recordRouteDelivered(repoRoot, taskSlug, message)
   });
   const taskLaunchService = createTaskLaunchService({
     projectService,
@@ -215,7 +244,8 @@ export async function createMockClaudeE2eApp(options: MockClaudeE2eAppOptions = 
     translationService,
     roundService,
     projectService,
-    taskWorkflowService
+    taskWorkflowService,
+    architectRestartService
   });
   const gatewayService = createGatewayService({
     fs: fsAdapter,
@@ -253,6 +283,7 @@ export async function createMockClaudeE2eApp(options: MockClaudeE2eAppOptions = 
     gatewayService,
     jobGuard: createJobGuardService(),
     translationWorkerService,
+    architectRestartService,
     retrySetTimeout(callback) {
       return globalThis.setTimeout(callback, 0);
     },
@@ -299,13 +330,16 @@ export async function createMockClaudeE2eApp(options: MockClaudeE2eAppOptions = 
     gatewayService,
     translationService
   });
+  const usageAnalyticsService = createUsageAnalyticsService({ fs: fsAdapter });
 
   const deps: ServerDeps = {
     appSettings,
+    ccrIntegration,
     projectService,
     taskService,
     taskCloseService,
     taskWorkflowService,
+    architectRestartService,
     sessionService,
     artifactService,
     harnessService,
@@ -325,7 +359,8 @@ export async function createMockClaudeE2eApp(options: MockClaudeE2eAppOptions = 
     runtimeRecoveryService,
     terminalInterruptService,
     runtime: mockRuntime,
-    diagnosticsService
+    diagnosticsService,
+    usageAnalyticsService
   };
   const app = await createServer(deps);
   mockRuntime.setHookDispatcher(async (input, options) => {
@@ -363,17 +398,28 @@ function createMockClaudeAdapter(): ClaudeAdapter {
     async getVersion() {
       return "mock-claude-code/0.0.0";
     },
-    buildRoleStartCommand(role, command = "claude", permissionMode = "default", claudeSessionId, resume = false, model = "default", effort = "default") {
+    buildRoleStartCommand(role, command = "claude", permissionMode = "default", claudeSessionId, resume = false, model = "default", effort = "default", settingsOverride, appendSystemPrompt) {
       const args = ["--agent", role];
+      const sessionSettings = { ...settingsOverride };
       if (claudeSessionId) {
         args.push(resume ? "--resume" : "--session-id", claudeSessionId);
       }
-      args.push("--model", model);
-      if (effort !== "default") {
+      if (!isCcrSessionModel(model)) {
+        args.push("--model", model);
+      }
+      if (effort === "ultracode") {
+        sessionSettings.ultracode = true;
+      } else if (effort !== "default") {
         args.push("--effort", effort);
+      }
+      if (Object.keys(sessionSettings).length > 0) {
+        args.push("--settings", JSON.stringify(sessionSettings));
       }
       if (permissionMode !== "default") {
         args.push("--permission-mode", permissionMode);
+      }
+      if (appendSystemPrompt) {
+        args.push("--append-system-prompt", appendSystemPrompt);
       }
       return {
         command,
@@ -386,7 +432,7 @@ function createMockClaudeAdapter(): ClaudeAdapter {
 
 export function roleLaunchBody(input: {
   permissionMode?: ClaudePermissionMode;
-  model?: ClaudeModel;
+  model?: SessionModel;
   effort?: SessionEffort;
 } = {}): Record<string, string> {
   return {

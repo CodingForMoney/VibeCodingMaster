@@ -5,12 +5,15 @@ import fastifyStatic from "@fastify/static";
 import type { ArtifactService } from "./services/artifact-service.js";
 import { createArtifactService } from "./services/artifact-service.js";
 import { createClaudeAdapter } from "./adapters/claude-adapter.js";
+import { createCcrGatewayAdapter } from "./adapters/ccr-gateway-adapter.js";
 import { createCommandRunner } from "./adapters/command-runner.js";
 import { createCommandDispatcher, type CommandDispatcher } from "./services/command-dispatcher.js";
 import { createClaudeHookService, type ClaudeHookService } from "./services/claude-hook-service.js";
 import { createGitAdapter } from "./adapters/git-adapter.js";
 import { createAppSettingsService, type AppSettingsService } from "./services/app-settings-service.js";
+import { createCcrIntegrationService, type CcrIntegrationService } from "./services/ccr-integration-service.js";
 import { createAutoMemoryService, type AutoMemoryService } from "./services/auto-memory-service.js";
+import { createArchitectRestartService, type ArchitectRestartService } from "./services/architect-restart-service.js";
 import { createClaudeTranscriptService } from "./services/claude-transcript-service.js";
 import { createGateReviewService, type GateReviewService } from "./services/gate-review-service.js";
 import { createHarnessFeedbackService, type HarnessFeedbackService } from "./services/harness-feedback-service.js";
@@ -45,6 +48,7 @@ import { createTaskWorkflowService, type TaskWorkflowService } from "./services/
 import { createTaskLaunchService, type TaskLaunchService } from "./services/task-launch-service.js";
 import { createTerminalInterruptService, type TerminalInterruptService } from "./services/terminal-interrupt-service.js";
 import { createTranslationService, type TranslationService } from "./services/translation-service.js";
+import { createUsageAnalyticsService, type UsageAnalyticsService } from "./services/usage-analytics-service.js";
 import { createTurnReconcilerService } from "./services/turn-reconciler-service.js";
 import { createDiagnosticsService, type DiagnosticsService } from "./services/diagnostics-service.js";
 import { registerAppSettingsRoutes } from "./api/app-settings-routes.js";
@@ -60,6 +64,7 @@ import { registerRuntimeStateRoutes } from "./api/runtime-state-routes.js";
 import { registerSessionRoutes } from "./api/session-routes.js";
 import { registerTaskRoutes } from "./api/task-routes.js";
 import { registerTranslationRoutes } from "./api/translation-routes.js";
+import { registerUsageAnalyticsRoutes } from "./api/usage-analytics-routes.js";
 import { registerTerminalWs } from "./ws/terminal-ws.js";
 import { toVcmError } from "./errors.js";
 import type { TerminalRuntime } from "./runtime/terminal-runtime.js";
@@ -74,10 +79,12 @@ export interface CreateServerOptions {
 
 export interface ServerDeps {
   appSettings: AppSettingsService;
+  ccrIntegration: CcrIntegrationService;
   projectService: ProjectService;
   taskService: TaskService;
   taskCloseService: TaskCloseService;
   taskWorkflowService: TaskWorkflowService;
+  architectRestartService: ArchitectRestartService;
   sessionService: SessionService;
   artifactService: ArtifactService;
   harnessService: HarnessService;
@@ -98,6 +105,7 @@ export interface ServerDeps {
   terminalInterruptService: TerminalInterruptService;
   runtime: TerminalRuntime;
   diagnosticsService: DiagnosticsService;
+  usageAnalyticsService: UsageAnalyticsService;
 }
 
 export async function createServer(deps: ServerDeps, options: CreateServerOptions = {}): Promise<FastifyInstance> {
@@ -122,13 +130,17 @@ export async function createServer(deps: ServerDeps, options: CreateServerOption
   });
 
   registerDiagnosticsRoutes(app, { diagnosticsService: deps.diagnosticsService });
-  registerAppSettingsRoutes(app, { appSettings: deps.appSettings });
+  registerAppSettingsRoutes(app, {
+    appSettings: deps.appSettings,
+    ccrIntegration: deps.ccrIntegration
+  });
   registerClaudeHookRoutes(app, { claudeHookService: deps.claudeHookService });
   registerGateReviewRoutes(app, {
     projectService: deps.projectService,
     gateReviewService: deps.gateReviewService
   });
   registerTranslationWorkerRoutes(app, {
+    appSettings: deps.appSettings,
     projectService: deps.projectService,
     translationWorkerService: deps.translationWorkerService,
     sessionService: deps.sessionService,
@@ -139,6 +151,7 @@ export async function createServer(deps: ServerDeps, options: CreateServerOption
     runtimeRecoveryService: deps.runtimeRecoveryService
   });
   registerHarnessRoutes(app, {
+    appSettings: deps.appSettings,
     projectService: deps.projectService,
     harnessService: deps.harnessService,
     harnessFeedbackService: deps.harnessFeedbackService,
@@ -171,7 +184,8 @@ export async function createServer(deps: ServerDeps, options: CreateServerOption
     sessionService: deps.sessionService,
     commandDispatcher: deps.commandDispatcher,
     translationService: deps.translationService,
-    roundService: deps.roundService
+    roundService: deps.roundService,
+    architectRestartService: deps.architectRestartService
   });
   registerArtifactRoutes(app, {
     projectService: deps.projectService,
@@ -194,6 +208,11 @@ export async function createServer(deps: ServerDeps, options: CreateServerOption
     sessionService: deps.sessionService,
     translationService: deps.translationService
   });
+  registerUsageAnalyticsRoutes(app, {
+    projectService: deps.projectService,
+    taskService: deps.taskService,
+    usageAnalyticsService: deps.usageAnalyticsService
+  });
   registerGatewayRoutes(app, { gatewayService: deps.gatewayService });
   registerTerminalWs(app, {
     runtime: deps.runtime,
@@ -201,6 +220,7 @@ export async function createServer(deps: ServerDeps, options: CreateServerOption
   });
 
   app.addHook("onReady", async () => {
+    await deps.ccrIntegration.initialize();
     await cleanupRecentTranslationRuntime(deps);
     deps.runtimeCoordinator.start();
     await deps.gatewayService.start();
@@ -259,6 +279,10 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
   const git = createGitAdapter(runner);
   const claude = createClaudeAdapter(runner);
   const appSettings = createAppSettingsService({ fs });
+  const ccrIntegration = createCcrIntegrationService({
+    settings: appSettings,
+    gateway: createCcrGatewayAdapter()
+  });
   const runtime = createNodePtyTerminalRuntime({ fs });
   const registry = createSessionRegistry();
   const artifactService = createArtifactService(fs);
@@ -274,6 +298,7 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     projectService,
     taskService,
     taskWorkflowService,
+    ccrIntegration,
     apiUrl: options.apiUrl
   });
   const harnessService = createHarnessService({
@@ -310,12 +335,19 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     sessionService,
     artifactService
   });
+  const architectRestartService = createArchitectRestartService({
+    fs,
+    taskService,
+    sessionService
+  });
   const messageService = createMessageService({
     fs,
     runtime,
     sessionService,
     taskService,
-    taskWorkflowService
+    taskWorkflowService,
+    onRouteDelivered: ({ repoRoot, taskSlug, message }) =>
+      architectRestartService.recordRouteDelivered(repoRoot, taskSlug, message)
   });
   const taskLaunchService = createTaskLaunchService({
     projectService,
@@ -358,6 +390,7 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     roundService,
     appSettings
   });
+  const usageAnalyticsService = createUsageAnalyticsService({ fs });
   const gatewayChannels = createGatewayChannelRegistry([
     createWeixinIlinkChannel(),
     createLarkChannel()
@@ -377,7 +410,8 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     translationService,
     roundService,
     projectService,
-    taskWorkflowService
+    taskWorkflowService,
+    architectRestartService
   });
   const gatewayService = createGatewayService({
     fs,
@@ -414,7 +448,8 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     autoMemoryService,
     gatewayService,
     jobGuard: createJobGuardService(),
-    translationWorkerService
+    translationWorkerService,
+    architectRestartService
   });
   const turnReconciler = createTurnReconcilerService({
     sessionService,
@@ -454,10 +489,12 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
 
   return {
     appSettings,
+    ccrIntegration,
     projectService,
     taskService,
     taskCloseService,
     taskWorkflowService,
+    architectRestartService,
     sessionService,
     artifactService,
     harnessService,
@@ -477,7 +514,8 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     runtimeRecoveryService,
     terminalInterruptService,
     runtime,
-    diagnosticsService
+    diagnosticsService,
+    usageAnalyticsService
   };
 }
 

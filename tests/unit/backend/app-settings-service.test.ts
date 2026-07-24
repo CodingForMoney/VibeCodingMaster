@@ -1,9 +1,14 @@
+import fsPromises from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   createDefaultLaunchTemplate,
+  createDefaultToolSessionDefaults,
   type AppPreferences
 } from "../../../src/shared/types/app-settings.js";
 import type { FileSystemAdapter } from "../../../src/backend/adapters/filesystem.js";
+import { createNodeFileSystemAdapter } from "../../../src/backend/adapters/filesystem.js";
 import {
   createAppSettingsService,
   getProjectId,
@@ -39,6 +44,11 @@ describe("app-settings-service", () => {
 
     expect(settings).toEqual({
       version: 1,
+      ccr: {
+        version: 1,
+        enabled: false,
+        apiKey: ""
+      },
       preferences: createDefaultPreferences(),
       recentRepositoryPaths: []
     });
@@ -112,6 +122,91 @@ describe("app-settings-service", () => {
 
     const stored = await fs.readJson<AppSettingsFile>("/settings.json");
     expect(stored.preferences.launchTemplate).toEqual(launchTemplate);
+  });
+
+  it("uses independent tool Session defaults when settings do not contain them", async () => {
+    const defaults = createDefaultPreferences();
+    const { toolSessionDefaults: _toolSessionDefaults, ...legacyPreferences } = defaults;
+    const fs = createMemoryFs({
+      "/settings.json": {
+        version: 1,
+        preferences: legacyPreferences,
+        recentRepositoryPaths: []
+      }
+    });
+    const service = createAppSettingsService({ fs, settingsPath: "/settings.json" });
+
+    const preferences = await service.getPreferences();
+
+    expect(preferences.toolSessionDefaults.translator).toEqual({
+      permissionMode: "bypassPermissions",
+      model: "default",
+      effort: "medium"
+    });
+    expect(preferences.toolSessionDefaults["harness-engineer"]).toEqual({
+      permissionMode: "bypassPermissions",
+      model: "default",
+      effort: "medium"
+    });
+  });
+
+  it("updates one tool Session default without changing the launch template", async () => {
+    const fs = createMemoryFs();
+    const service = createAppSettingsService({ fs, settingsPath: "/settings.json" });
+    const launchTemplate = createDefaultLaunchTemplate();
+
+    await expect(service.updateToolSessionDefaults("translator", {
+      permissionMode: "plan",
+      model: "sonnet",
+      effort: "high"
+    })).resolves.toEqual({
+      permissionMode: "plan",
+      model: "sonnet",
+      effort: "high"
+    });
+
+    const stored = await fs.readJson<AppSettingsFile>("/settings.json");
+    expect(stored.preferences.launchTemplate).toEqual(launchTemplate);
+    expect(stored.preferences.toolSessionDefaults).toEqual({
+      ...createDefaultToolSessionDefaults(),
+      translator: {
+        permissionMode: "plan",
+        model: "sonnet",
+        effort: "high"
+      }
+    });
+  });
+
+  it("stores CCR credentials globally and preserves namespaced launch models", async () => {
+    const fs = createMemoryFs();
+    const service = createAppSettingsService({ fs, settingsPath: "/settings.json" });
+    const launchTemplate = createDefaultLaunchTemplate();
+    launchTemplate.roles.architect.model = "ccr:Codex API/gpt-5.6-sol";
+
+    await expect(service.updateCcrIntegrationSettings({ apiKey: "local-secret", enabled: true }))
+      .resolves.toEqual({ version: 1, apiKey: "local-secret", enabled: true });
+    await service.updatePreferences({ launchTemplate });
+
+    const stored = await fs.readJson<AppSettingsFile>("/settings.json");
+    expect(stored.ccr).toEqual({ version: 1, apiKey: "local-secret", enabled: true });
+    expect(stored.preferences.launchTemplate.roles.architect.model).toBe("ccr:Codex API/gpt-5.6-sol");
+  });
+
+  it("protects the global settings file with owner-only permissions", async () => {
+    const tempRoot = await fsPromises.mkdtemp(path.join(os.tmpdir(), "vcm-settings-mode-"));
+    const settingsPath = path.join(tempRoot, "settings.json");
+    try {
+      const service = createAppSettingsService({
+        fs: createNodeFileSystemAdapter(),
+        settingsPath
+      });
+      await service.updateCcrIntegrationSettings({ apiKey: "local-secret" });
+
+      const stat = await fsPromises.stat(settingsPath);
+      expect(stat.mode & 0o777).toBe(0o600);
+    } finally {
+      await fsPromises.rm(tempRoot, { recursive: true, force: true });
+    }
   });
 
   it("migrates the old round completion alert preference", async () => {
@@ -245,6 +340,7 @@ function createDefaultPreferences(overrides: Partial<AppPreferences> = {}): AppP
     translationTargetLanguage: "zh-CN",
     translationOutputMode: "pm-final-only",
     launchTemplate: createDefaultLaunchTemplate(),
+    toolSessionDefaults: createDefaultToolSessionDefaults(),
     ...overrides
   };
 }

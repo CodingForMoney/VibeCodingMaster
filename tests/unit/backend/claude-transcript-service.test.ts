@@ -93,6 +93,11 @@ describe("claude-transcript-service", () => {
       "/Users/sheldon/Documents/New project 3/VibeCodingMaster",
       "session-1"
     )).toMatch(/\.claude\/projects\/-Users-sheldon-Documents-New-project-3-VibeCodingMaster\/session-1\.jsonl$/);
+    expect(claudeTranscriptPath(
+      "/workspace",
+      "session-1",
+      "/tmp/vcm-claude/ccr"
+    )).toBe("/tmp/vcm-claude/ccr/projects/-workspace/session-1.jsonl");
   });
 
   it("replays current-run transcript events by timestamp before tailing new output", () => {

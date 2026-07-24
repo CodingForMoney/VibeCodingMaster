@@ -76,6 +76,53 @@ export async function writeConfirmedArchitectureBrief(taskRepoRoot: string, task
     "Confirmed for this E2E scenario.",
     ""
   ].join("\n"), "utf8");
+  await fs.writeFile(path.join(taskRepoRoot, ".ai/vcm/handoffs/architecture-evidence.md"), [
+    `# Architecture Evidence: ${taskSlug}`,
+    "",
+    "Architecture Evidence Status: complete",
+    "",
+    "## Planning Boundary",
+    "",
+    "Mock E2E feature boundary.",
+    "",
+    "## Entry Points And Behavior Paths",
+    "",
+    "Verified by the E2E scenario.",
+    "",
+    "## State And Lifecycle",
+    "",
+    "Task-scoped mock runtime.",
+    "",
+    "## Callers And Consumers",
+    "",
+    "Mock role flow.",
+    "",
+    "## External Boundaries",
+    "",
+    "None.",
+    "",
+    "## Code And Docs Conflicts",
+    "",
+    "None.",
+    "",
+    "## Evidence Commands",
+    "",
+    "E2E fixture inspection.",
+    ""
+  ].join("\n"), "utf8");
+}
+
+export async function scheduleArchitectRestart(app: FastifyInstance, taskSlug: string): Promise<{
+  taskSlug: string;
+  sessionId: string;
+  status: "scheduled";
+}> {
+  const response = await injectOk(app, {
+    method: "POST",
+    url: `/api/tasks/${taskSlug}/sessions/architect/restart-after-planning`,
+    payload: {}
+  });
+  return response.json();
 }
 
 export async function startRole(app: FastifyInstance, taskSlug: string, role: RoleName): Promise<RoleSessionRecord> {

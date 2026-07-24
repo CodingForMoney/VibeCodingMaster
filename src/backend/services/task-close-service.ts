@@ -6,6 +6,7 @@ import { getTaskRuntimeRepoRoot, type TaskService } from "./task-service.js";
 import type { TranslationService } from "./translation-service.js";
 import type { ProjectService } from "./project-service.js";
 import type { TaskWorkflowService } from "./task-workflow-service.js";
+import type { ArchitectRestartService } from "./architect-restart-service.js";
 
 export interface TaskCloseService {
   closeTask(repoRoot: string, taskSlug: string): Promise<CleanupTaskResult>;
@@ -22,6 +23,7 @@ export interface TaskCloseServiceDeps {
   roundService: Pick<RoundService, "stopTask">;
   projectService?: Pick<ProjectService, "loadConfig">;
   taskWorkflowService?: Pick<TaskWorkflowService, "clearState">;
+  architectRestartService?: Pick<ArchitectRestartService, "clear">;
 }
 
 export function createTaskCloseService(deps: TaskCloseServiceDeps): TaskCloseService {
@@ -29,6 +31,7 @@ export function createTaskCloseService(deps: TaskCloseServiceDeps): TaskCloseSer
     async closeTask(repoRoot, taskSlug) {
       const task = await deps.taskService.markTaskCleaned(repoRoot, taskSlug);
       const warnings: string[] = [];
+      deps.architectRestartService?.clear(repoRoot, taskSlug);
 
       await stopTaskRoleSessions(repoRoot, taskSlug, warnings);
       await bestEffort(

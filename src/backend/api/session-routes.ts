@@ -7,6 +7,7 @@ import type { ProjectService } from "../services/project-service.js";
 import type { RoundService } from "../services/round-service.js";
 import type { SessionService } from "../services/session-service.js";
 import type { TranslationService } from "../services/translation-service.js";
+import type { ArchitectRestartService } from "../services/architect-restart-service.js";
 
 export interface SessionRouteDeps {
   projectService: ProjectService;
@@ -14,6 +15,7 @@ export interface SessionRouteDeps {
   commandDispatcher: CommandDispatcher;
   translationService: Pick<TranslationService, "stopSession">;
   roundService: Pick<RoundService, "stopSession">;
+  architectRestartService: Pick<ArchitectRestartService, "schedule">;
 }
 
 export function registerSessionRoutes(app: FastifyInstance, deps: SessionRouteDeps): void {
@@ -28,6 +30,18 @@ export function registerSessionRoutes(app: FastifyInstance, deps: SessionRouteDe
       const project = await requireCurrentProject(deps.projectService);
       const role = parseRole(request.params.role);
       return deps.sessionService.startRoleSession(project.repoRoot, request.params.taskSlug, role, request.body);
+    }
+  );
+
+  app.post<{ Params: { taskSlug: string } }>(
+    "/api/tasks/:taskSlug/sessions/architect/restart-after-planning",
+    async (request, reply) => {
+      const project = await requireCurrentProject(deps.projectService);
+      const result = await deps.architectRestartService.schedule(
+        project.repoRoot,
+        request.params.taskSlug
+      );
+      return reply.code(202).send(result);
     }
   );
 
@@ -49,6 +63,7 @@ export function registerSessionRoutes(app: FastifyInstance, deps: SessionRouteDe
       const project = await requireCurrentProject(deps.projectService);
       const role = parseRole(request.params.role);
       const existing = await deps.sessionService.getRoleSession(project.repoRoot, request.params.taskSlug, role);
+      await deps.sessionService.assertModelLaunchReady(request.body?.model ?? existing?.model);
       if (existing) {
         await deps.translationService.stopSession(existing.id, { clearCache: true });
         deps.roundService.stopSession(existing.id);

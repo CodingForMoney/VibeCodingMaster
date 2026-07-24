@@ -33,6 +33,7 @@ describe("createServer", () => {
     await app.close();
 
     expect(calls).toEqual([
+      "ccr:initialize",
       "cleanup:/repo-one",
       "cleanup:/repo-two",
       "runtime:start",
@@ -50,6 +51,11 @@ function getRepoRoot(): string {
 function createServerDepsStub(calls: string[]): ServerDeps {
   return {
     appSettings: {} as never,
+    ccrIntegration: {
+      async initialize() {
+        calls.push("ccr:initialize");
+      }
+    } as never,
     projectService: {
       async getRecentRepositoryPaths() {
         return ["/repo-one", "/repo-two"];
@@ -97,6 +103,7 @@ function createServerDepsStub(calls: string[]): ServerDeps {
       getErrorRuntimeInfo() {
         return {};
       }
-    } as never
+    } as never,
+    usageAnalyticsService: {} as never
   };
 }

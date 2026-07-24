@@ -73,6 +73,10 @@ export class MockClaudeRuntime implements TerminalRuntime {
     return [...this.getEntry(sessionId).writes];
   }
 
+  getCreateInput(sessionId: string): CreateTerminalSessionInput {
+    return this.getEntry(sessionId).input;
+  }
+
   async waitForIdle(): Promise<void> {
     while (this.pending.size > 0) {
       await Promise.all([...this.pending]);
@@ -229,6 +233,7 @@ export class MockClaudeRuntime implements TerminalRuntime {
     const input: ClaudeHookRequest = {
       taskSlug: entry.session.taskSlug,
       role: entry.session.role,
+      runtimeSessionToken: entry.input.env?.VCM_RUNTIME_SESSION_TOKEN,
       event: {
         hook_event_name: eventName,
         session_id: entry.claudeSessionId,

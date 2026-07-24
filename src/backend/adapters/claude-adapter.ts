@@ -1,5 +1,10 @@
 import type { RoleName } from "../../shared/types/role.js";
-import type { ClaudeModel, ClaudePermissionMode, SessionEffort } from "../../shared/types/session.js";
+import {
+  isCcrSessionModel,
+  type ClaudePermissionMode,
+  type SessionEffort,
+  type SessionModel
+} from "../../shared/types/session.js";
 import { VcmError } from "../errors.js";
 import type { CommandRunner } from "./command-runner.js";
 
@@ -12,8 +17,10 @@ export interface ClaudeAdapter {
     permissionMode?: ClaudePermissionMode,
     claudeSessionId?: string,
     resume?: boolean,
-    model?: ClaudeModel,
-    effort?: SessionEffort
+    model?: SessionModel,
+    effort?: SessionEffort,
+    settingsOverride?: Record<string, unknown>,
+    appendSystemPrompt?: string
   ): { command: string; args: string[]; display: string };
 }
 
@@ -36,19 +43,28 @@ export function createClaudeAdapter(runner: CommandRunner): ClaudeAdapter {
 
       return result.stdout.trim();
     },
-    buildRoleStartCommand(role, command = "claude", permissionMode = "default", claudeSessionId, resume = false, model = "default", effort = "default") {
+    buildRoleStartCommand(role, command = "claude", permissionMode = "default", claudeSessionId, resume = false, model = "default", effort = "default", settingsOverride, appendSystemPrompt) {
       const args = ["--agent", role];
+      const sessionSettings = { ...settingsOverride };
       if (claudeSessionId) {
         args.push(resume ? "--resume" : "--session-id", claudeSessionId);
       }
-      args.push("--model", model);
+      if (!isCcrSessionModel(model)) {
+        args.push("--model", model);
+      }
       if (effort === "ultracode") {
-        args.push("--settings", JSON.stringify({ ultracode: true }));
+        sessionSettings.ultracode = true;
       } else if (effort !== "default") {
         args.push("--effort", effort);
       }
+      if (Object.keys(sessionSettings).length > 0) {
+        args.push("--settings", JSON.stringify(sessionSettings));
+      }
       if (permissionMode !== "default") {
         args.push("--permission-mode", permissionMode);
+      }
+      if (appendSystemPrompt) {
+        args.push("--append-system-prompt", appendSystemPrompt);
       }
 
       return {

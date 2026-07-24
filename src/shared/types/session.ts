@@ -33,28 +33,77 @@ export const CLAUDE_MODEL_OPTIONS = [
   {
     value: "default",
     label: "Default",
-    description: "Account default"
+    description: "Account default",
+    source: "claude",
+    available: true
   },
   {
     value: "fable",
     label: "Fable",
-    description: "Claude Fable"
+    description: "Claude Fable",
+    source: "claude",
+    available: true
   },
   {
     value: "opus",
     label: "Opus",
-    description: "Latest Opus"
+    description: "Latest Opus",
+    source: "claude",
+    available: true
   },
   {
     value: "sonnet",
     label: "Sonnet",
-    description: "Latest Sonnet"
+    description: "Latest Sonnet",
+    source: "claude",
+    available: true
   }
 ] as const;
 
 export type ClaudeModel = typeof CLAUDE_MODEL_OPTIONS[number]["value"];
 
-export type SessionModel = ClaudeModel;
+export const CCR_LOCAL_GATEWAY_BASE_URL = "http://127.0.0.1:3456" as const;
+export const CCR_CONTAINER_GATEWAY_BASE_URL = "http://host.docker.internal:3456" as const;
+export const CCR_GATEWAY_BASE_URL = CCR_CONTAINER_GATEWAY_BASE_URL;
+export const CCR_GATEWAY_BASE_URLS = [
+  CCR_LOCAL_GATEWAY_BASE_URL,
+  CCR_CONTAINER_GATEWAY_BASE_URL
+] as const;
+export const CCR_GPT_MODEL_ID = "Codex API/gpt-5.6-sol" as const;
+export const CCR_GPT_SESSION_MODEL = `ccr:${CCR_GPT_MODEL_ID}` as const;
+export type CcrSessionModel = typeof CCR_GPT_SESSION_MODEL;
+
+export type SessionModel = ClaudeModel | CcrSessionModel;
+
+export interface SessionModelOption {
+  value: SessionModel;
+  label: string;
+  description: string;
+  source: "claude" | "ccr";
+  available: boolean;
+  unavailableReason?: string;
+}
+
+export function isCcrSessionModel(model: SessionModel): model is CcrSessionModel {
+  return model === CCR_GPT_SESSION_MODEL;
+}
+
+export function createSessionModelOptions(
+  ccrAvailable = false,
+  unavailableReason = "CCR GPT models are unavailable."
+): SessionModelOption[] {
+  return [
+    ...CLAUDE_MODEL_OPTIONS,
+    {
+      value: CCR_GPT_SESSION_MODEL,
+      label: "GPT-5.6 Sol (CCR)",
+      description: "GPT-5.6 Sol through the host CCR gateway",
+      source: "ccr",
+      available: ccrAvailable,
+      ...(ccrAvailable ? {} : { unavailableReason })
+    }
+  ];
+}
 
 const BASE_EFFORT_OPTIONS = [
   {
@@ -104,6 +153,7 @@ export type SessionEffort = typeof SESSION_EFFORT_OPTIONS[number]["value"];
 
 export interface RoleSessionRecord {
   id: string;
+  runtimeSessionToken?: string;
   claudeSessionId: string;
   transcriptPath?: string;
   taskSlug: string;
@@ -115,6 +165,7 @@ export interface RoleSessionRecord {
   model?: SessionModel;
   effort?: SessionEffort;
   cwd: string;
+  claudeConfigDir?: string;
   previousCwd?: string;
   terminalBackend: "node-pty";
   pid?: number;
@@ -156,4 +207,5 @@ export interface StartRoleSessionRequest {
   permissionMode?: ClaudePermissionMode;
   model?: SessionModel;
   effort?: SessionEffort;
+  appendSystemPrompt?: string;
 }

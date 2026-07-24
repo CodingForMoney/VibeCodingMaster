@@ -364,16 +364,23 @@ export function resolveExistingClaudeTranscriptPath(session: RoleSessionRecord):
     return sessionPath;
   }
 
-  const cwdPath = existingFile(claudeTranscriptPath(session.cwd, session.claudeSessionId));
+  const cwdPath = existingFile(claudeTranscriptPath(
+    session.cwd,
+    session.claudeSessionId,
+    session.claudeConfigDir
+  ));
   if (cwdPath) {
     return cwdPath;
   }
 
-  return findClaudeTranscriptPathBySessionId(session.claudeSessionId);
+  return findClaudeTranscriptPathBySessionId(session.claudeSessionId, session.claudeConfigDir);
 }
 
-export function findClaudeTranscriptPathBySessionId(claudeSessionId: string): string | undefined {
-  const root = claudeProjectsRoot();
+export function findClaudeTranscriptPathBySessionId(
+  claudeSessionId: string,
+  configDir?: string
+): string | undefined {
+  const root = claudeProjectsRoot(configDir);
   let projectDirs;
   try {
     projectDirs = readdirSync(root, { withFileTypes: true });
@@ -415,20 +422,24 @@ function existingFile(candidate: string | undefined): string | undefined {
   }
 }
 
-export function claudeProjectsRoot(): string {
-  return join(homedir(), ".claude", "projects");
+export function claudeProjectsRoot(configDir?: string): string {
+  return join(configDir ?? join(homedir(), ".claude"), "projects");
 }
 
 export function projectHash(projectDir: string): string {
   return projectDir.replace(/[\/\s]+/g, "-");
 }
 
-export function projectsTranscriptDir(projectDir: string): string {
-  return join(claudeProjectsRoot(), projectHash(projectDir));
+export function projectsTranscriptDir(projectDir: string, configDir?: string): string {
+  return join(claudeProjectsRoot(configDir), projectHash(projectDir));
 }
 
-export function claudeTranscriptPath(projectDir: string, claudeSessionId: string): string {
-  return join(projectsTranscriptDir(projectDir), `${claudeSessionId}.jsonl`);
+export function claudeTranscriptPath(
+  projectDir: string,
+  claudeSessionId: string,
+  configDir?: string
+): string {
+  return join(projectsTranscriptDir(projectDir, configDir), `${claudeSessionId}.jsonl`);
 }
 
 export function parseAssistantContent(line: string): ClaudeTranscriptEvent[] {

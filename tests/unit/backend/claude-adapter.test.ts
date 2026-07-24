@@ -54,6 +54,52 @@ describe("createClaudeAdapter", () => {
     });
   });
 
+  it("uses the child environment instead of --model for CCR models", () => {
+    expect(adapter.buildRoleStartCommand(
+      "coder",
+      "claude",
+      "default",
+      undefined,
+      false,
+      "ccr:Codex API/gpt-5.6-sol",
+      "medium"
+    )).toEqual({
+      command: "claude",
+      args: ["--agent", "coder", "--effort", "medium"],
+      display: "claude --agent coder --effort medium"
+    });
+  });
+
+  it("applies a session-only settings override to native Claude models", () => {
+    const settingsOverride = {
+      apiKeyHelper: "",
+      env: { ANTHROPIC_BASE_URL: "https://api.anthropic.com" }
+    };
+    expect(adapter.buildRoleStartCommand(
+      "coder",
+      "claude",
+      "default",
+      undefined,
+      false,
+      "sonnet",
+      "medium",
+      settingsOverride
+    )).toEqual({
+      command: "claude",
+      args: [
+        "--agent",
+        "coder",
+        "--model",
+        "sonnet",
+        "--effort",
+        "medium",
+        "--settings",
+        JSON.stringify(settingsOverride)
+      ],
+      display: `claude --agent coder --model sonnet --effort medium --settings '${JSON.stringify(settingsOverride)}'`
+    });
+  });
+
   it("adds effort when one is selected", () => {
     expect(adapter.buildRoleStartCommand(
       "architect",
@@ -101,6 +147,35 @@ describe("createClaudeAdapter", () => {
         "{\"ultracode\":true}"
       ],
       display: "claude --agent architect --session-id 00000000-0000-4000-8000-000000000001 --model fable --settings '{\"ultracode\":true}'"
+    });
+  });
+
+  it("appends a restoration system prompt for a fresh role session", () => {
+    expect(adapter.buildRoleStartCommand(
+      "architect",
+      "claude",
+      "bypassPermissions",
+      undefined,
+      false,
+      "fable",
+      "high",
+      undefined,
+      "Read the completed architecture artifacts."
+    )).toEqual({
+      command: "claude",
+      args: [
+        "--agent",
+        "architect",
+        "--model",
+        "fable",
+        "--effort",
+        "high",
+        "--permission-mode",
+        "bypassPermissions",
+        "--append-system-prompt",
+        "Read the completed architecture artifacts."
+      ],
+      display: "claude --agent architect --model fable --effort high --permission-mode bypassPermissions --append-system-prompt 'Read the completed architecture artifacts.'"
     });
   });
 

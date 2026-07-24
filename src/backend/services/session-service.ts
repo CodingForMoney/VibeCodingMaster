@@ -1,15 +1,17 @@
+import { randomUUID } from "node:crypto";
 import path from "node:path";
 import { ROLE_NAMES, isDispatchableRole } from "../../shared/constants.js";
 import type { ClaudeHookEventName } from "../../shared/types/claude-hook.js";
 import type { RoleName } from "../../shared/types/role.js";
-import type {
-  ClaudeModel,
-  ClaudePermissionMode,
-  RoleSessionRecord,
-  SessionEffort,
-  SessionModel,
-  StartRoleSessionRequest,
-  TaskSessionRecord
+import {
+  CCR_GPT_SESSION_MODEL,
+  isCcrSessionModel,
+  type ClaudePermissionMode,
+  type RoleSessionRecord,
+  type SessionEffort,
+  type SessionModel,
+  type StartRoleSessionRequest,
+  type TaskSessionRecord
 } from "../../shared/types/session.js";
 import { VcmError } from "../errors.js";
 import { resolveRepoPath } from "../adapters/filesystem.js";
@@ -24,8 +26,10 @@ import { readHarnessRevisionState } from "./harness-revision.js";
 import type { ProjectService } from "./project-service.js";
 import { getTaskRuntimeRepoRoot, type TaskService } from "./task-service.js";
 import type { TaskWorkflowService } from "./task-workflow-service.js";
+import type { CcrIntegrationService } from "./ccr-integration-service.js";
 
 export interface SessionService {
+  assertModelLaunchReady(model?: SessionModel): Promise<void>;
   startProjectTranslatorSession(repoRoot: string, input?: StartRoleSessionRequest): Promise<RoleSessionRecord>;
   resumeProjectTranslatorSession(repoRoot: string, input?: StartRoleSessionRequest): Promise<RoleSessionRecord>;
   stopProjectTranslatorSession(repoRoot: string): Promise<RoleSessionRecord>;
@@ -54,7 +58,7 @@ export interface SessionService {
   recordRoleHookEvent(repoRoot: string, input: RecordRoleHookEventInput): Promise<RoleSessionRecord | undefined>;
   recordClaudeHookEvent(repoRoot: string, input: RecordClaudeHookEventInput): Promise<RoleSessionRecord | undefined>;
   markTerminalSessionActivityIdle(repoRoot: string, sessionId: string): Promise<RoleSessionRecord | undefined>;
-  markRoleActivityRunning(repoRoot: string, taskSlug: string, role: RoleName): Promise<RoleSessionRecord | undefined>;
+  markRoleActivityRunning(repoRoot: string, taskSlug: string, role: RoleName, expectedSessionId?: string): Promise<RoleSessionRecord | undefined>;
   markRoleActivityIdle(repoRoot: string, taskSlug: string, role: RoleName): Promise<RoleSessionRecord | undefined>;
 }
 
@@ -67,6 +71,7 @@ export interface SessionServiceDeps {
   projectService: Pick<ProjectService, "loadConfig">;
   taskService: Pick<TaskService, "loadTask">;
   taskWorkflowService?: Pick<TaskWorkflowService, "getState" | "renderPmResumeContext">;
+  ccrIntegration?: Pick<CcrIntegrationService, "getLaunchEnvironment" | "getLaunchSettingsOverride">;
   apiUrl?: string;
   sandboxMode?: string;
   isProcessAlive?: (pid: number) => boolean;
@@ -85,6 +90,7 @@ const PROJECT_TRANSLATOR_SCOPE = "__project__";
 const PROJECT_HARNESS_ENGINEER_SCOPE = "__project_harness_engineer__";
 const PROJECT_TOOL_CD_ENTER_DELAY_MS = 500;
 const CLAUDE_CODE_DISABLE_AUTO_MEMORY = "1";
+const CLAUDE_CODE_DISABLE_BACKGROUND_TASKS = "1";
 // Project tool sessions launch a Claude Code TUI inside a PTY. The PTY reports
 // "running" the instant it is spawned, which is earlier than the moment the TUI
 // can actually accept pasted input. These bounds drive a quiescence-based
@@ -109,6 +115,8 @@ export interface RecordClaudeHookEventInput {
   claudeSessionId?: string;
   transcriptPath?: string;
   cwd?: string;
+  runtimeSessionId?: string;
+  runtimeSessionToken?: string;
 }
 
 export interface RecordRoleHookEventInput {
@@ -118,7 +126,8 @@ export interface RecordRoleHookEventInput {
   sessionId?: string;
   transcriptPath?: string;
   cwd?: string;
-  allowSessionMismatch?: boolean;
+  runtimeSessionId?: string;
+  runtimeSessionToken?: string;
 }
 
 export interface RecordProjectTranslatorHookEventInput {
@@ -126,6 +135,8 @@ export interface RecordProjectTranslatorHookEventInput {
   sessionId?: string;
   transcriptPath?: string;
   cwd?: string;
+  runtimeSessionId?: string;
+  runtimeSessionToken?: string;
 }
 
 export type RecordProjectToolHookEventInput = RecordProjectTranslatorHookEventInput;
@@ -175,6 +186,13 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     const permissionMode = normalizeClaudePermissionMode(input.permissionMode ?? persisted?.permissionMode);
     const model: SessionModel = normalizeClaudeModel(input.model ?? persisted?.model);
     const effort = normalizeClaudeEffort(input.effort ?? persisted?.effort);
+    if (launchMode === "resume" && persisted) {
+      assertResumeProviderCompatible(persisted, model);
+    }
+    const [modelEnvironment, modelSettingsOverride] = await Promise.all([
+      getModelLaunchEnvironment(model),
+      getModelLaunchSettingsOverride(model)
+    ]);
     const resumeClaudeSessionId = launchMode === "resume"
       ? persisted?.claudeSessionId
       : undefined;
@@ -191,7 +209,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     const transcriptPath = launchMode === "resume" && persisted?.transcriptPath
       ? persisted.transcriptPath
       : resumeClaudeSessionId
-        ? claudeTranscriptPath(taskRepoRoot, resumeClaudeSessionId)
+        ? claudeTranscriptPath(taskRepoRoot, resumeClaudeSessionId, persisted?.claudeConfigDir)
         : undefined;
 
     const startCommand = {
@@ -201,11 +219,14 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
         permissionMode,
         resumeClaudeSessionId,
         launchMode === "resume",
-        model as ClaudeModel,
-        effort
+        model,
+        effort,
+        modelSettingsOverride,
+        input.appendSystemPrompt
       ),
       cwd: taskRepoRoot
     };
+    const runtimeSessionToken = randomUUID();
     const runtimeSession = await deps.runtime.createSession({
       repoRoot,
       taskSlug,
@@ -219,8 +240,9 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
         VCM_TASK_REPO_ROOT: taskRepoRoot,
         VCM_TASK_SLUG: taskSlug,
         VCM_ROLE: role,
-        VCM_SESSION_ID: claudeSessionId || undefined
-      }),
+        VCM_SESSION_ID: claudeSessionId || undefined,
+        VCM_RUNTIME_SESSION_TOKEN: runtimeSessionToken
+      }, modelEnvironment, buildUsageTelemetryEnvironment(deps.apiUrl, role, model)),
       cols: input.cols,
       rows: input.rows
     });
@@ -228,6 +250,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     const harnessRevision = await readCurrentHarnessRevision(repoRoot);
     const record: RoleSessionRecord = {
       id: runtimeSession.id,
+      runtimeSessionToken,
       claudeSessionId,
       transcriptPath,
       taskSlug,
@@ -239,6 +262,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       model,
       effort,
       cwd: startCommand.cwd,
+      claudeConfigDir: readClaudeConfigDir(modelEnvironment),
       terminalBackend: "node-pty",
       pid: runtimeSession.pid,
       roleCommandPath: isDispatchableRole(role)
@@ -306,6 +330,13 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     const permissionMode = normalizeClaudePermissionMode(input.permissionMode ?? persisted?.permissionMode);
     const model = normalizeClaudeModel(input.model ?? persisted?.model);
     const effort = normalizeClaudeEffort(input.effort ?? persisted?.effort ?? "medium");
+    if (launchMode === "resume" && persisted) {
+      assertResumeProviderCompatible(persisted, model);
+    }
+    const [modelEnvironment, modelSettingsOverride] = await Promise.all([
+      getModelLaunchEnvironment(model),
+      getModelLaunchSettingsOverride(model)
+    ]);
     const resumeClaudeSessionId = launchMode === "resume"
       ? persisted?.claudeSessionId
       : undefined;
@@ -335,7 +366,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     const sessionCwd = launchMode === "resume" ? persisted?.cwd ?? launchCwd : launchCwd;
     const claudeSessionId = resumeClaudeSessionId ?? "";
     const transcriptPath = resumeClaudeSessionId
-      ? claudeTranscriptPath(repoRoot, resumeClaudeSessionId)
+      ? claudeTranscriptPath(repoRoot, resumeClaudeSessionId, persisted?.claudeConfigDir)
       : undefined;
     const startCommand = {
       ...deps.claude.buildRoleStartCommand(
@@ -345,10 +376,12 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
         resumeClaudeSessionId,
         launchMode === "resume",
         model,
-        effort
+        effort,
+        modelSettingsOverride
       ),
       cwd: launchCwd
     };
+    const runtimeSessionToken = randomUUID();
     const runtimeSession = await deps.runtime.createSession({
       repoRoot,
       taskSlug: PROJECT_TRANSLATOR_SCOPE,
@@ -365,8 +398,9 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
         // active task; VCM_TASK_REPO_ROOT remains the active worktree.
         VCM_TASK_SLUG: PROJECT_TRANSLATOR_SCOPE,
         VCM_ROLE: TRANSLATOR_ROLE,
-        VCM_SESSION_ID: claudeSessionId || undefined
-      }),
+        VCM_SESSION_ID: claudeSessionId || undefined,
+        VCM_RUNTIME_SESSION_TOKEN: runtimeSessionToken
+      }, modelEnvironment, buildUsageTelemetryEnvironment(deps.apiUrl, TRANSLATOR_ROLE, model)),
       cols: input.cols,
       rows: input.rows
     });
@@ -374,6 +408,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     const harnessRevision = await readCurrentHarnessRevision(repoRoot);
     const record: RoleSessionRecord = {
       id: runtimeSession.id,
+      runtimeSessionToken,
       claudeSessionId,
       transcriptPath,
       taskSlug: PROJECT_TRANSLATOR_SCOPE,
@@ -385,6 +420,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       model,
       effort,
       cwd: sessionCwd,
+      claudeConfigDir: readClaudeConfigDir(modelEnvironment),
       terminalBackend: "node-pty",
       pid: runtimeSession.pid,
       startedAt: runtimeSession.startedAt,
@@ -446,6 +482,13 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     const permissionMode = normalizeClaudePermissionMode(input.permissionMode ?? persisted?.permissionMode);
     const model = normalizeClaudeModel(input.model ?? persisted?.model);
     const effort = normalizeClaudeEffort(input.effort ?? persisted?.effort ?? "medium");
+    if (launchMode === "resume" && persisted) {
+      assertResumeProviderCompatible(persisted, model);
+    }
+    const [modelEnvironment, modelSettingsOverride] = await Promise.all([
+      getModelLaunchEnvironment(model),
+      getModelLaunchSettingsOverride(model)
+    ]);
     const resumeClaudeSessionId = launchMode === "resume"
       ? persisted?.claudeSessionId
       : undefined;
@@ -471,7 +514,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     const sessionCwd = launchMode === "resume" ? persisted?.cwd ?? launchCwd : launchCwd;
     const claudeSessionId = resumeClaudeSessionId ?? "";
     const transcriptPath = resumeClaudeSessionId
-      ? claudeTranscriptPath(repoRoot, resumeClaudeSessionId)
+      ? claudeTranscriptPath(repoRoot, resumeClaudeSessionId, persisted?.claudeConfigDir)
       : undefined;
     const startCommand = {
       ...deps.claude.buildRoleStartCommand(
@@ -481,10 +524,12 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
         resumeClaudeSessionId,
         launchMode === "resume",
         model,
-        effort
+        effort,
+        modelSettingsOverride
       ),
       cwd: launchCwd
     };
+    const runtimeSessionToken = randomUUID();
     const runtimeSession = await deps.runtime.createSession({
       repoRoot,
       taskSlug: PROJECT_HARNESS_ENGINEER_SCOPE,
@@ -501,8 +546,9 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
         // active task; VCM_TASK_REPO_ROOT remains the active worktree.
         VCM_TASK_SLUG: PROJECT_HARNESS_ENGINEER_SCOPE,
         VCM_ROLE: HARNESS_ENGINEER_ROLE,
-        VCM_SESSION_ID: claudeSessionId || undefined
-      }),
+        VCM_SESSION_ID: claudeSessionId || undefined,
+        VCM_RUNTIME_SESSION_TOKEN: runtimeSessionToken
+      }, modelEnvironment, buildUsageTelemetryEnvironment(deps.apiUrl, HARNESS_ENGINEER_ROLE, model)),
       cols: input.cols,
       rows: input.rows
     });
@@ -510,6 +556,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     const harnessRevision = await readCurrentHarnessRevision(repoRoot);
     const record: RoleSessionRecord = {
       id: runtimeSession.id,
+      runtimeSessionToken,
       claudeSessionId,
       transcriptPath,
       taskSlug: PROJECT_HARNESS_ENGINEER_SCOPE,
@@ -521,6 +568,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       model,
       effort,
       cwd: sessionCwd,
+      claudeConfigDir: readClaudeConfigDir(modelEnvironment),
       terminalBackend: "node-pty",
       pid: runtimeSession.pid,
       startedAt: runtimeSession.startedAt,
@@ -701,6 +749,11 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     const permissionMode = normalizeClaudePermissionMode(session.permissionMode);
     const model = normalizeClaudeModel(session.model);
     const effort = normalizeClaudeEffort(session.effort);
+    assertResumeProviderCompatible(session, model);
+    const [modelEnvironment, modelSettingsOverride] = await Promise.all([
+      getModelLaunchEnvironment(model),
+      getModelLaunchSettingsOverride(model)
+    ]);
     // Spawn (`claude --resume`) always anchors at the base repoRoot so resume works
     // even if the persisted task cwd was deleted. `--resume` then restores the
     // session's own last cwd (tracked on `session.cwd`), so the `/cd` migrate below
@@ -714,10 +767,12 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
         session.claudeSessionId,
         true,
         model,
-        effort
+        effort,
+        modelSettingsOverride
       ),
       cwd: launchCwd
     };
+    const runtimeSessionToken = randomUUID();
     const runtimeSession = await deps.runtime.createSession({
       repoRoot,
       taskSlug: normalizeProjectScopedRecordForPersistence(session).taskSlug,
@@ -731,14 +786,16 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
         VCM_TASK_REPO_ROOT: targetCwd,
         VCM_TASK_SLUG: normalizeProjectScopedRecordForPersistence(session).taskSlug,
         VCM_ROLE: session.role,
-        VCM_SESSION_ID: session.claudeSessionId
-      })
+        VCM_SESSION_ID: session.claudeSessionId,
+        VCM_RUNTIME_SESSION_TOKEN: runtimeSessionToken
+      }, modelEnvironment, buildUsageTelemetryEnvironment(deps.apiUrl, session.role, model))
     });
     if ((await waitForSessionInputReady(runtimeSession.id)) === "exited") {
       deps.registry.remove(runtimeSession.id);
       return markProjectToolRuntimeUnavailable(repoRoot, {
         ...session,
         id: runtimeSession.id,
+        runtimeSessionToken,
         status: "crashed",
         activityStatus: "idle",
         command: startCommand.display,
@@ -756,24 +813,45 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     const resumed: RoleSessionRecord = {
       ...session,
       id: runtimeSession.id,
+      runtimeSessionToken,
       status: runtimeSession.status,
       activityStatus: "idle",
       command: startCommand.display,
       permissionMode,
       model,
       effort,
+      claudeConfigDir: readClaudeConfigDir(modelEnvironment),
       pid: runtimeSession.pid,
       startedAt: runtimeSession.startedAt,
       updatedAt: timestamp,
       lastOutputAt: runtimeSession.lastOutputAt,
       exitCode: runtimeSession.exitCode,
       transcriptPath: session.claudeSessionId
-        ? claudeTranscriptPath(repoRoot, session.claudeSessionId)
+        ? claudeTranscriptPath(repoRoot, session.claudeSessionId, session.claudeConfigDir)
         : session.transcriptPath
     };
     deps.registry.upsert(normalizeProjectScopedRecordForPersistence(resumed));
     await persistProjectScopedToolSession(repoRoot, resumed);
     return migrateRunningProjectToolSessionCwd(repoRoot, resumed, targetCwd);
+  }
+
+  async function getModelLaunchEnvironment(model: SessionModel): Promise<NodeJS.ProcessEnv> {
+    if (!deps.ccrIntegration) {
+      if (isCcrSessionModel(model)) {
+        throw new VcmError({
+          code: "CCR_UNAVAILABLE",
+          message: "CCR integration is not available in this VCM runtime.",
+          statusCode: 409,
+          hint: "Enable and configure CCR GPT models before starting this session."
+        });
+      }
+      return {};
+    }
+    return deps.ccrIntegration.getLaunchEnvironment(model);
+  }
+
+  async function getModelLaunchSettingsOverride(model: SessionModel): Promise<Record<string, unknown> | undefined> {
+    return deps.ccrIntegration?.getLaunchSettingsOverride(model);
   }
 
   function isRuntimeSessionAlive(session: ReturnType<TerminalRuntime["getSession"]>): session is TerminalSession & { pid: number } {
@@ -895,10 +973,11 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
   async function markTaskRoleActivityIdle(
     repoRoot: string,
     taskSlug: string,
-    role: RoleName
+    role: RoleName,
+    expectedSessionId?: string
   ): Promise<RoleSessionRecord | undefined> {
     const current = await getTaskRoleSessionView(repoRoot, taskSlug, role);
-    if (!current) {
+    if (!current || (expectedSessionId && current.id !== expectedSessionId)) {
       return undefined;
     }
 
@@ -919,6 +998,9 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
   }
 
   return {
+    async assertModelLaunchReady(model = "default") {
+      await getModelLaunchEnvironment(normalizeClaudeModel(model));
+    },
     startProjectTranslatorSession(repoRoot, input = {}) {
       return launchProjectTranslatorSession(repoRoot, input, "fresh");
     },
@@ -975,6 +1057,8 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
         return launchProjectTranslatorSession(repoRoot, input, "fresh");
       }
 
+      await getModelLaunchEnvironment(normalizeClaudeModel(input.model ?? existing.model));
+
       if (deps.runtime.getSession(existing.id)) {
         await deps.runtime.stop(existing.id);
       }
@@ -1018,7 +1102,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     },
     async recordProjectTranslatorHookEvent(repoRoot, input) {
       const current = await this.getProjectTranslatorSession(repoRoot);
-      if (!current) {
+      if (!current || !matchesRoleHookSession(current, input)) {
         return undefined;
       }
 
@@ -1108,6 +1192,8 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
         return launchProjectHarnessEngineerSession(repoRoot, input, "fresh");
       }
 
+      await getModelLaunchEnvironment(normalizeClaudeModel(input.model ?? existing.model));
+
       if (deps.runtime.getSession(existing.id)) {
         await deps.runtime.stop(existing.id);
       }
@@ -1151,7 +1237,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     },
     async recordProjectHarnessEngineerHookEvent(repoRoot, input) {
       const current = await this.getProjectHarnessEngineerSession(repoRoot);
-      if (!current) {
+      if (!current || !matchesRoleHookSession(current, input)) {
         return undefined;
       }
 
@@ -1223,6 +1309,8 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
         return launchRoleSession(repoRoot, taskSlug, role, input, "fresh");
       }
 
+      await getModelLaunchEnvironment(normalizeClaudeModel(input.model ?? existing.model));
+
       if (deps.runtime.getSession(existing.id)) {
         await deps.runtime.stop(existing.id);
       }
@@ -1285,7 +1373,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     },
     async recordRoleHookEvent(repoRoot, input) {
       const current = await this.getRoleSession(repoRoot, input.taskSlug, input.role);
-      if (!current || (!input.allowSessionMismatch && !matchesRoleHookSession(current, input))) {
+      if (!current || !matchesRoleHookSession(current, input)) {
         return undefined;
       }
 
@@ -1319,7 +1407,9 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
         eventName: input.eventName,
         sessionId: input.claudeSessionId,
         transcriptPath: input.transcriptPath,
-        cwd: input.cwd
+        cwd: input.cwd,
+        runtimeSessionId: input.runtimeSessionId,
+        runtimeSessionToken: input.runtimeSessionToken
       });
     },
     async markTerminalSessionActivityIdle(repoRoot, sessionId) {
@@ -1344,11 +1434,11 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
           : undefined;
       }
 
-      return markTaskRoleActivityIdle(repoRoot, taskSlug, role);
+      return markTaskRoleActivityIdle(repoRoot, taskSlug, role, sessionId);
     },
-    async markRoleActivityRunning(repoRoot, taskSlug, role) {
+    async markRoleActivityRunning(repoRoot, taskSlug, role, expectedSessionId) {
       const current = await this.getRoleSession(repoRoot, taskSlug, role);
-      if (!current) {
+      if (!current || (expectedSessionId && current.id !== expectedSessionId)) {
         return undefined;
       }
 
@@ -1414,7 +1504,26 @@ function toRoleSessionRecordView(
   };
 }
 
-function matchesRoleHookSession(record: RoleSessionRecord, input: RecordRoleHookEventInput): boolean {
+export function matchesRoleHookSession(
+  record: RoleSessionRecord,
+  input: Pick<
+    RecordRoleHookEventInput,
+    "eventName" | "sessionId" | "transcriptPath" | "runtimeSessionId" | "runtimeSessionToken"
+  >
+): boolean {
+  if (
+    !record.claudeSessionId
+    && !record.transcriptPath
+    && input.eventName !== "UserPromptSubmit"
+  ) {
+    return false;
+  }
+  if (input.runtimeSessionId) {
+    return record.id === input.runtimeSessionId;
+  }
+  if (record.runtimeSessionToken) {
+    return record.runtimeSessionToken === input.runtimeSessionToken;
+  }
   if (!record.claudeSessionId && !record.transcriptPath) {
     return input.eventName === "UserPromptSubmit";
   }
@@ -1422,9 +1531,6 @@ function matchesRoleHookSession(record: RoleSessionRecord, input: RecordRoleHook
     return true;
   }
   if (input.transcriptPath && record.transcriptPath === input.transcriptPath) {
-    return true;
-  }
-  if (!input.sessionId && !input.transcriptPath) {
     return true;
   }
   return false;
@@ -1485,7 +1591,11 @@ function isSessionMissingError(error: unknown): boolean {
 }
 
 function withoutRuntimeOnlySessionFields(session: RoleSessionRecord): RoleSessionRecord {
-  const { pid: _pid, ...persisted } = session;
+  const {
+    pid: _pid,
+    runtimeSessionToken: _runtimeSessionToken,
+    ...persisted
+  } = session;
   return persisted;
 }
 
@@ -1881,11 +1991,12 @@ function normalizeClaudePermissionMode(value: unknown): ClaudePermissionMode {
   return "default";
 }
 
-function normalizeClaudeModel(value: unknown): ClaudeModel {
+function normalizeClaudeModel(value: unknown): SessionModel {
   if (
     value === "opus"
     || value === "sonnet"
     || value === "fable"
+    || value === CCR_GPT_SESSION_MODEL
   ) {
     return value;
   }
@@ -1906,6 +2017,30 @@ function normalizeClaudeEffort(value: unknown): SessionEffort {
   return "default";
 }
 
+function assertResumeProviderCompatible(session: RoleSessionRecord, requestedModel: SessionModel): void {
+  const persistedModel = normalizeClaudeModel(session.model);
+  if (isCcrSessionModel(persistedModel) !== isCcrSessionModel(requestedModel)) {
+    throw new VcmError({
+      code: "SESSION_PROVIDER_SWITCH_REQUIRES_RESTART",
+      message: `Cannot resume ${session.role} with a different model provider.`,
+      statusCode: 409,
+      hint: "Use Restart to switch between native Claude and CCR models."
+    });
+  }
+  if (isCcrSessionModel(requestedModel) && !session.claudeConfigDir) {
+    throw new VcmError({
+      code: "CCR_SESSION_CONFIG_MISSING",
+      message: `${session.role} was created before isolated CCR session storage was enabled.`,
+      statusCode: 409,
+      hint: "Restart this role once to create an isolated CCR session."
+    });
+  }
+}
+
+function readClaudeConfigDir(environment: NodeJS.ProcessEnv): string | undefined {
+  return environment.CLAUDE_CONFIG_DIR?.trim() || undefined;
+}
+
 function formatClaudeCdCommand(targetCwd: string): string {
   // Claude Code's `/cd` slash command takes the literal remainder of the line as
   // the path, so the target must NOT be wrapped in quotes (quotes are taken as part
@@ -1918,10 +2053,49 @@ function isExitedStatus(status: string | undefined): boolean {
   return status === "exited" || status === "crashed" || status === "missing";
 }
 
-function withClaudeCodeRuntimeEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
+function withClaudeCodeRuntimeEnv(
+  env: NodeJS.ProcessEnv,
+  modelEnvironment: NodeJS.ProcessEnv = {},
+  telemetryEnvironment: NodeJS.ProcessEnv = {}
+): NodeJS.ProcessEnv {
   return {
     ...env,
-    CLAUDE_CODE_DISABLE_AUTO_MEMORY
+    ...modelEnvironment,
+    ...telemetryEnvironment,
+    CLAUDE_CODE_DISABLE_AUTO_MEMORY,
+    CLAUDE_CODE_DISABLE_BACKGROUND_TASKS
+  };
+}
+
+function buildUsageTelemetryEnvironment(
+  apiUrl: string | undefined,
+  role: RoleName,
+  model: SessionModel
+): NodeJS.ProcessEnv {
+  const disabled: NodeJS.ProcessEnv = {
+    CLAUDE_CODE_ENABLE_TELEMETRY: undefined,
+    OTEL_LOGS_EXPORTER: "none",
+    OTEL_METRICS_EXPORTER: "none",
+    OTEL_TRACES_EXPORTER: "none",
+    OTEL_EXPORTER_OTLP_LOGS_PROTOCOL: undefined,
+    OTEL_EXPORTER_OTLP_LOGS_ENDPOINT: undefined,
+    OTEL_RESOURCE_ATTRIBUTES: undefined,
+    OTEL_LOG_USER_PROMPTS: "0",
+    OTEL_LOG_ASSISTANT_RESPONSES: "0",
+    OTEL_LOG_TOOL_DETAILS: "0",
+    OTEL_LOG_RAW_API_BODIES: "0"
+  };
+  if (!apiUrl || isCcrSessionModel(model)) {
+    return disabled;
+  }
+
+  return {
+    ...disabled,
+    CLAUDE_CODE_ENABLE_TELEMETRY: "1",
+    OTEL_LOGS_EXPORTER: "otlp",
+    OTEL_EXPORTER_OTLP_LOGS_PROTOCOL: "http/json",
+    OTEL_EXPORTER_OTLP_LOGS_ENDPOINT: `${apiUrl.replace(/\/+$/, "")}/api/telemetry/v1/logs`,
+    OTEL_RESOURCE_ATTRIBUTES: `vcm.role=${role},vcm.launch_id=${randomUUID()}`
   };
 }
 

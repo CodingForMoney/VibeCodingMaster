@@ -1,4 +1,5 @@
 import { isVcmRoleName } from "../../shared/constants.js";
+import type { RoleLaunchTemplateEntry } from "../../shared/types/app-settings.js";
 import type { GatewayStatus } from "../../shared/types/gateway.js";
 import type { RoleName } from "../../shared/types/role.js";
 import type { RoleSessionRecord } from "../../shared/types/session.js";
@@ -90,6 +91,66 @@ export function createRuntimeCoordinatorService(deps: RuntimeCoordinatorServiceD
     }
   }
 
+  function reconcileProject(
+    repoRoot: string,
+    input: ReconcileProjectInput = {}
+  ): Promise<RuntimeCoordinatorState> {
+    return withRepoLock(repoRoot, async () => {
+      const [activeTask, gatewayStatus] = await Promise.all([
+        resolveActiveTask(repoRoot, input.taskSlug),
+        deps.gatewayService.getStatus().catch(() => null)
+      ]);
+      const preferences = await deps.appSettings.getPreferences();
+
+      if (!activeTask) {
+        return { activeTask: null, gatewayStatus };
+      }
+
+      const taskRepoRoot = getTaskRuntimeRepoRoot(activeTask);
+      const stateRoot = await deps.getStateRoot(repoRoot);
+      await deps.turnReconciler.reconcileTask(repoRoot, activeTask, stateRoot);
+      const harnessInitialized = await deps.harnessService.getHarnessStatus(taskRepoRoot)
+        .then((status) => status.initialized)
+        .catch(() => false);
+
+      await Promise.all([
+        reconcileHarnessEngineer(
+          repoRoot,
+          activeTask,
+          preferences.toolSessionDefaults["harness-engineer"]
+        ),
+        reconcileTranslator(
+          repoRoot,
+          activeTask,
+          preferences.translationEnabled && harnessInitialized,
+          preferences.toolSessionDefaults.translator
+        )
+      ]);
+
+      if (preferences.translationEnabled && harnessInitialized) {
+        await startConversationTranslationListeners(repoRoot, activeTask);
+      } else {
+        await deps.translationService.stopTask(taskRepoRoot, activeTask.taskSlug).catch(() => undefined);
+      }
+
+      await reconcileAutoMemory(
+        repoRoot,
+        activeTask,
+        preferences.autoTaskHarnessReviewEnabled ? "auto" : undefined
+      );
+      const memoryReadiness = await getTaskRetrospectiveMemoryReadiness(repoRoot, activeTask);
+      if ((preferences.autoTaskHarnessReviewEnabled || memoryReadiness.trigger) && memoryReadiness.ready) {
+        await maybeStartTaskHarnessRetrospective(
+          repoRoot,
+          activeTask,
+          memoryReadiness.trigger ?? "auto"
+        );
+      }
+
+      return { activeTask, gatewayStatus };
+    });
+  }
+
   return {
     start() {
       if (reconcileTimer !== undefined) {
@@ -107,53 +168,7 @@ export function createRuntimeCoordinatorService(deps: RuntimeCoordinatorServiceD
       clearTimer(reconcileTimer);
       reconcileTimer = undefined;
     },
-    reconcileProject(repoRoot, input = {}) {
-      return withRepoLock(repoRoot, async () => {
-        const [activeTask, gatewayStatus] = await Promise.all([
-          resolveActiveTask(repoRoot, input.taskSlug),
-          deps.gatewayService.getStatus().catch(() => null)
-        ]);
-        const preferences = await deps.appSettings.getPreferences();
-
-        if (!activeTask) {
-          return { activeTask: null, gatewayStatus };
-        }
-
-        const taskRepoRoot = getTaskRuntimeRepoRoot(activeTask);
-        const stateRoot = await deps.getStateRoot(repoRoot);
-        await deps.turnReconciler.reconcileTask(repoRoot, activeTask, stateRoot);
-        const harnessInitialized = await deps.harnessService.getHarnessStatus(taskRepoRoot)
-          .then((status) => status.initialized)
-          .catch(() => false);
-
-        await Promise.all([
-          reconcileHarnessEngineer(repoRoot, activeTask),
-          reconcileTranslator(repoRoot, activeTask, preferences.translationEnabled && harnessInitialized)
-        ]);
-
-        if (preferences.translationEnabled && harnessInitialized) {
-          await startConversationTranslationListeners(repoRoot, activeTask);
-        } else {
-          await deps.translationService.stopTask(taskRepoRoot, activeTask.taskSlug).catch(() => undefined);
-        }
-
-        await reconcileAutoMemory(
-          repoRoot,
-          activeTask,
-          preferences.autoTaskHarnessReviewEnabled ? "auto" : undefined
-        );
-        const memoryReadiness = await getTaskRetrospectiveMemoryReadiness(repoRoot, activeTask);
-        if ((preferences.autoTaskHarnessReviewEnabled || memoryReadiness.trigger) && memoryReadiness.ready) {
-          await maybeStartTaskHarnessRetrospective(
-            repoRoot,
-            activeTask,
-            memoryReadiness.trigger ?? "auto"
-          );
-        }
-
-        return { activeTask, gatewayStatus };
-      });
-    }
+    reconcileProject
   };
 
   async function reconcileCurrentProject(): Promise<void> {
@@ -161,17 +176,7 @@ export function createRuntimeCoordinatorService(deps: RuntimeCoordinatorServiceD
     if (!project) {
       return;
     }
-    await withRepoLock(project.repoRoot, async () => {
-      const activeTask = await resolveActiveTask(project.repoRoot);
-      if (activeTask) {
-        await deps.turnReconciler.reconcileTask(
-          project.repoRoot,
-          activeTask,
-          await deps.getStateRoot(project.repoRoot)
-        );
-      }
-      return { activeTask, gatewayStatus: null };
-    });
+    await reconcileProject(project.repoRoot);
   }
 
   async function resolveActiveTask(repoRoot: string, requestedTaskSlug?: string | null): Promise<TaskRecord | null> {
@@ -186,19 +191,28 @@ export function createRuntimeCoordinatorService(deps: RuntimeCoordinatorServiceD
     return activeTasks[0] ?? null;
   }
 
-  async function reconcileHarnessEngineer(repoRoot: string, task: TaskRecord): Promise<void> {
+  async function reconcileHarnessEngineer(
+    repoRoot: string,
+    task: TaskRecord,
+    launchOptions: RoleLaunchTemplateEntry
+  ): Promise<void> {
     const existing = await deps.sessionService.getRoleSession(repoRoot, task.taskSlug, "harness-engineer");
     if (!shouldAutoEnsureTaskToolSession(existing)) {
       return;
     }
     await ensureTaskToolRoleSession(repoRoot, task.taskSlug, "harness-engineer", {
-      permissionMode: existing?.permissionMode,
-      model: existing?.model,
-      effort: existing?.effort
+      permissionMode: existing?.permissionMode ?? launchOptions.permissionMode,
+      model: existing?.model ?? launchOptions.model,
+      effort: existing?.effort ?? launchOptions.effort
     });
   }
 
-  async function reconcileTranslator(repoRoot: string, task: TaskRecord, enabled: boolean): Promise<void> {
+  async function reconcileTranslator(
+    repoRoot: string,
+    task: TaskRecord,
+    enabled: boolean,
+    launchOptions: RoleLaunchTemplateEntry
+  ): Promise<void> {
     if (!enabled) {
       return;
     }
@@ -207,14 +221,14 @@ export function createRuntimeCoordinatorService(deps: RuntimeCoordinatorServiceD
       return;
     }
     await ensureTaskToolRoleSession(repoRoot, task.taskSlug, "translator", {
-      permissionMode: existing?.permissionMode,
-      model: existing?.model,
-      effort: existing?.effort
+      permissionMode: existing?.permissionMode ?? launchOptions.permissionMode,
+      model: existing?.model ?? launchOptions.model,
+      effort: existing?.effort ?? launchOptions.effort
     });
   }
 
   function shouldAutoEnsureTaskToolSession(session: RoleSessionRecord | undefined): boolean {
-    return Boolean(session && (session.status === "running" || session.claudeSessionId));
+    return !session || session.status === "running" || Boolean(session.claudeSessionId);
   }
 
   async function ensureTaskToolRoleSession(

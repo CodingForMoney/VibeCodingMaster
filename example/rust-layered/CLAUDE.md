@@ -100,7 +100,7 @@ If a reusable harness problem is suspected, it is enough to record a concise fee
 ## VCM Worktree Policy
 
 - Use one branch, one worktree, one handoff directory, and one PR or final patch per VCM-managed task.
-- VCM workflow role handoffs run sequentially in the same task worktree. Coder-managed workers may run concurrently within the Coder turn.
+- VCM workflow role handoffs run sequentially in the same task worktree. Coder-managed workers may run concurrently within the Coder turn; Architect may run one foreground scaffold worker inside its planning turn.
 - If `git status` shows uncommitted changes, commit them before handing off to another role.
 
 <!-- VCM:END -->

@@ -1,5 +1,10 @@
 import type { DispatchRoleCommandResult, ProjectRuntimeState, TaskStatusReport, TaskWorkspaceState } from "../../shared/types/api.js";
-import type { AppPreferences, UpdateAppPreferencesRequest } from "../../shared/types/app-settings.js";
+import type {
+  AppPreferences,
+  CcrIntegrationStatus,
+  UpdateAppPreferencesRequest,
+  UpdateCcrIntegrationRequest
+} from "../../shared/types/app-settings.js";
 import type {
   BindGatewayLarkAppRequest,
   CheckGatewayQrLoginRequest,
@@ -58,6 +63,7 @@ import type { DispatchableRole, RoleName } from "../../shared/types/role.js";
 import type { VcmSessionRoundState } from "../../shared/types/round.js";
 import type { RoleSessionRecord, StartRoleSessionRequest } from "../../shared/types/session.js";
 import type { CleanupTaskResult, CreateTaskRequest, OneClickStartTaskResult, TaskRecord } from "../../shared/types/task.js";
+import type { TaskUsageAnalyticsReport } from "../../shared/types/usage-analytics.js";
 import { errorReason } from "./error-format.js";
 import type {
   TranslationBootstrapRun,
@@ -87,6 +93,20 @@ export const apiClient = {
     return request<AppPreferences>("/api/settings/preferences", {
       method: "PUT",
       body: JSON.stringify(input)
+    });
+  },
+  getCcrIntegrationStatus() {
+    return request<CcrIntegrationStatus>("/api/settings/ccr");
+  },
+  updateCcrIntegration(input: UpdateCcrIntegrationRequest) {
+    return request<CcrIntegrationStatus>("/api/settings/ccr", {
+      method: "PUT",
+      body: JSON.stringify(input)
+    });
+  },
+  checkCcrIntegration() {
+    return request<CcrIntegrationStatus>("/api/settings/ccr/check", {
+      method: "POST"
     });
   },
   getRuntimeDiagnostics() {
@@ -290,6 +310,9 @@ export const apiClient = {
   },
   getTaskWorkspaceState(taskSlug: string) {
     return request<TaskWorkspaceState>(`/api/tasks/${encodeURIComponent(taskSlug)}/workspace-state`);
+  },
+  getTaskUsageAnalytics(taskSlug: string) {
+    return request<TaskUsageAnalyticsReport>(`/api/tasks/${encodeURIComponent(taskSlug)}/usage-analytics`);
   },
   getProjectRuntimeState(taskSlug?: string | null) {
     const params = new URLSearchParams();

@@ -18,7 +18,7 @@ const cleanups: Array<() => Promise<void>> = [];
 
 afterEach(async () => {
   while (cleanups.length > 0) {
-    await cleanups.pop()?.();
+    await cleanups.shift()?.();
   }
 });
 
@@ -43,6 +43,14 @@ describe("backend E2E Gate Review with mock Claude Code", () => {
     expect(unconfirmedArchitecture.status).toBe("failed_to_start");
     expect(unconfirmedArchitecture.message).toContain("architecture-brief.md is incomplete");
     await writeConfirmedArchitectureBrief(task.worktreePath, task.taskSlug);
+
+    const evidencePath = path.join(task.worktreePath, ".ai/vcm/handoffs/architecture-evidence.md");
+    const completeEvidence = await fs.readFile(evidencePath, "utf8");
+    await fs.rm(evidencePath);
+    const missingEvidenceArchitecture = await requestGateReview(env.app, task.taskSlug, "architecture-plan");
+    expect(missingEvidenceArchitecture.status).toBe("failed_to_start");
+    expect(missingEvidenceArchitecture.message).toContain("architecture-evidence.md is missing");
+    await fs.writeFile(evidencePath, completeEvidence, "utf8");
 
     await fs.writeFile(path.join(task.worktreePath, ".ai/vcm/handoffs/architecture-plan.md"), "", "utf8");
     const emptyArchitecture = await requestGateReview(env.app, task.taskSlug, "architecture-plan");
@@ -77,6 +85,14 @@ describe("backend E2E Gate Review with mock Claude Code", () => {
     await waitForGate(env.app, task.taskSlug, "architecture-plan");
     const architectureAfterBriefChange = await getGateState(env.app, task.taskSlug);
     expect(architectureAfterBriefChange.gates["architecture-plan"].inputHash).not.toBe(firstArchitectureHash);
+
+    await fs.appendFile(evidencePath, "\nVerified Behavior: revised evidence.\n", "utf8");
+    const changedEvidenceArchitecture = await requestGateReview(env.app, task.taskSlug, "architecture-plan");
+    expect(changedEvidenceArchitecture.status).toBe("started");
+    await waitForGate(env.app, task.taskSlug, "architecture-plan");
+    const architectureAfterEvidenceChange = await getGateState(env.app, task.taskSlug);
+    expect(architectureAfterEvidenceChange.gates["architecture-plan"].inputHash)
+      .not.toBe(architectureAfterBriefChange.gates["architecture-plan"].inputHash);
 
     await fs.appendFile(
       path.join(task.worktreePath, ".ai/vcm/handoffs/architecture-plan.md"),
@@ -126,9 +142,47 @@ describe("backend E2E Gate Review with mock Claude Code", () => {
     });
     expect(codeDiffApproved.gates["code-diff"].changedFiles).toContain("feature.txt");
   });
+
+  it("blocks unapproved coverage gaps and reviews an exact user-approved failed result", async () => {
+    const env = await createMockClaudeE2eApp();
+    cleanups.push(() => env.close());
+    const repo = await createE2eRepo();
+    cleanups.push(() => repo.cleanup());
+    const task = await connectAndCreateTask(env.app, repo, "approved-test-gap");
+
+    await updateGateSettings(env.app, task.taskSlug, {
+      "architecture-plan": false,
+      "validation-adequacy": true,
+      "code-diff": false
+    });
+    env.mockRuntime.onPrompt("gate-reviewer", "[VCM GATE REVIEW]", writeApproveGateReport, { once: false });
+
+    const reportPath = path.join(task.worktreePath, ".ai/vcm/handoffs/test-report.md");
+    await fs.writeFile(reportPath, approvedGapTestReport("None."), "utf8");
+
+    const unapproved = await requestGateReview(env.app, task.taskSlug, "validation-adequacy");
+    expect(unapproved.status).toBe("failed_to_start");
+    expect(unapproved.message).toContain("User Approval Evidence is required");
+
+    await fs.writeFile(
+      reportPath,
+      approvedGapTestReport("User approved retaining the live gateway coverage gap."),
+      "utf8"
+    );
+    const started = await requestGateReview(env.app, task.taskSlug, "validation-adequacy");
+    expect(started.status).toBe("started");
+    await waitForGate(env.app, task.taskSlug, "validation-adequacy");
+
+    const state = await getGateState(env.app, task.taskSlug);
+    expect(state.gates["validation-adequacy"]).toMatchObject({
+      status: "completed",
+      decision: "approve"
+    });
+  });
 });
 
 async function writeApproveGateReport(ctx: MockClaudePromptContext): Promise<void> {
+  await ctx.userPromptSubmit();
   const gate = matchPromptField(ctx.prompt, "Gate") as GateReviewGate;
   const request = matchPromptField(ctx.prompt, "Request");
   const report = matchPromptField(ctx.prompt, "Report");
@@ -175,6 +229,7 @@ async function writeApproveGateReport(ctx: MockClaudePromptContext): Promise<voi
     ...validationAnalysis,
     ...codeDiffAnalysis
   ].join("\n"));
+  await ctx.stop();
 }
 
 function validTestReport(): string {
@@ -212,8 +267,22 @@ function validTestReport(): string {
     "",
     "## Blocking Validation Issues",
     "None.",
+    "",
+    "## User Approval Evidence",
+    "None.",
     ""
   ].join("\n");
+}
+
+function approvedGapTestReport(userApproval: string): string {
+  return validTestReport()
+    .replace("Test Result: pass", "Test Result: fail")
+    .replace("## Coverage Gaps\nNone.", "## Coverage Gaps\nMissing live gateway coverage.")
+    .replace(
+      "## Blocking Validation Issues\nNone.",
+      "## Blocking Validation Issues\nLive gateway validation remains unavailable."
+    )
+    .replace("## User Approval Evidence\nNone.", `## User Approval Evidence\n${userApproval}`);
 }
 
 function validationAnalysisLines(): string[] {
@@ -229,6 +298,7 @@ function validationAnalysisLines(): string[] {
     "- Public Contract Coverage: public behavior asserted",
     "- Test Integrity: real path and observable assertion inspected",
     "- Skips And Gaps: none",
+    "- User Approval And Gap Disposition: none",
     "- Validation Readiness: ready",
     "",
     "## Findings",

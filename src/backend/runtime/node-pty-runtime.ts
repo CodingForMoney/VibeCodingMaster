@@ -335,6 +335,11 @@ export function buildPtyEnvironment(
     TERM_PROGRAM: inputEnv.TERM_PROGRAM ?? "VibeCodingMaster"
   };
 
+  for (const [key, value] of Object.entries(inputEnv)) {
+    if (value === undefined) {
+      delete env[key];
+    }
+  }
   delete env.NO_COLOR;
   return env;
 }

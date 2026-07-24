@@ -2,11 +2,12 @@ import type { RoleName } from "../../shared/types/role.js";
 import {
   CLAUDE_PERMISSION_MODE_OPTIONS,
   CLAUDE_EFFORT_OPTIONS,
-  CLAUDE_MODEL_OPTIONS,
+  createSessionModelOptions,
   type ClaudePermissionMode,
   type RoleSessionRecord,
   type SessionEffort,
-  type SessionModel
+  type SessionModel,
+  type SessionModelOption
 } from "../../shared/types/session.js";
 import { StatusBadge } from "./status-badge.js";
 
@@ -16,6 +17,7 @@ export interface SessionToolbarProps {
   permissionMode: ClaudePermissionMode;
   model: SessionModel;
   effort: SessionEffort;
+  modelOptions?: SessionModelOption[];
   busy?: boolean;
   onPermissionModeChange(mode: ClaudePermissionMode): void;
   onModelChange(model: SessionModel): void;
@@ -33,6 +35,7 @@ export function SessionToolbar({
   permissionMode,
   model,
   effort,
+  modelOptions = createSessionModelOptions(),
   busy = false,
   onPermissionModeChange,
   onModelChange,
@@ -47,6 +50,7 @@ export function SessionToolbar({
   const canResume = Boolean(session?.claudeSessionId && !isRunning);
   const canStart = !isRunning && !session?.claudeSessionId;
   const showHarnessOutdated = Boolean(session?.harnessOutdated);
+  const selectedModelOption = modelOptions.find((option) => option.value === model);
 
   return (
     <div className="session-controls">
@@ -72,10 +76,18 @@ export function SessionToolbar({
         </span>
         <select
           value={model}
+          title={selectedModelOption?.available
+            ? selectedModelOption.description
+            : selectedModelOption?.unavailableReason}
           onChange={(event) => onModelChange(event.target.value as SessionModel)}
         >
-          {CLAUDE_MODEL_OPTIONS.map((option) => (
-            <option key={option.value} value={option.value}>
+          {modelOptions.map((option) => (
+            <option
+              key={option.value}
+              value={option.value}
+              disabled={!option.available}
+              title={option.available ? option.description : option.unavailableReason}
+            >
               {option.label}
             </option>
           ))}

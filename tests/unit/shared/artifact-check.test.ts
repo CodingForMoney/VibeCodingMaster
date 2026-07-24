@@ -49,6 +49,9 @@ None.
 
 ## Blocking Validation Issues
 None.
+
+## User Approval Evidence
+None.
 `);
     expect(result.status).toBe("ok");
     expect(result.hasPlaceholder).toBe(false);
@@ -312,6 +315,86 @@ Nothing to promote.
     expect(result.status).toBe("incomplete");
     expect(result.invalidFields).toContain(
       "Blocking Validation Issues must be None when Test Result is pass."
+    );
+  });
+
+  it("rejects pass test reports with coverage gaps", () => {
+    const content = renderTestReportTemplate("demo")
+      .replace("Test Result: pass|fail", "Test Result: pass")
+      .replaceAll("TBD", "None.")
+      .replace("## Coverage Gaps\n\nNone.", "## Coverage Gaps\n\nMissing E2E coverage.");
+    const result = checkMarkdownArtifact("test-report", "test-report.md", content);
+
+    expect(result.status).toBe("incomplete");
+    expect(result.invalidFields).toContain(
+      "Coverage Gaps must be None when Test Result is pass."
+    );
+  });
+
+  it("rejects fail test reports without blocking evidence", () => {
+    const content = renderTestReportTemplate("demo")
+      .replace("Test Result: pass|fail", "Test Result: fail")
+      .replaceAll("TBD", "None.");
+    const result = checkMarkdownArtifact("test-report", "test-report.md", content);
+
+    expect(result.status).toBe("incomplete");
+    expect(result.invalidFields).toContain(
+      "Blocking Validation Issues must contain concrete evidence when Test Result is fail."
+    );
+  });
+
+  it("rejects coverage gaps without user approval evidence", () => {
+    const content = renderTestReportTemplate("demo")
+      .replace("Test Result: pass|fail", "Test Result: fail")
+      .replaceAll("TBD", "None.")
+      .replace("## Coverage Gaps\n\nNone.", "## Coverage Gaps\n\nMissing live gateway coverage.")
+      .replace(
+        "## Blocking Validation Issues\n\nNone.",
+        "## Blocking Validation Issues\n\nLive gateway validation remains unavailable."
+      );
+    const result = checkMarkdownArtifact("test-report", "test-report.md", content);
+
+    expect(result.status).toBe("incomplete");
+    expect(result.invalidFields).toContain(
+      "User Approval Evidence is required when Coverage Gaps are recorded."
+    );
+  });
+
+  it("accepts user-approved coverage gaps as a failed test result", () => {
+    const content = renderTestReportTemplate("demo")
+      .replace("Test Result: pass|fail", "Test Result: fail")
+      .replaceAll("TBD", "None.")
+      .replace("## Coverage Gaps\n\nNone.", "## Coverage Gaps\n\nMissing live gateway coverage.")
+      .replace(
+        "## Blocking Validation Issues\n\nNone.",
+        "## Blocking Validation Issues\n\nLive gateway validation remains unavailable."
+      )
+      .replace(
+        "## User Approval Evidence\n\nNone.",
+        "## User Approval Evidence\n\nUser approved retaining the live gateway coverage gap."
+      );
+    const result = checkMarkdownArtifact("test-report", "test-report.md", content);
+
+    expect(result.status).toBe("ok");
+  });
+
+  it("rejects user approval evidence when no coverage gap is recorded", () => {
+    const content = renderTestReportTemplate("demo")
+      .replace("Test Result: pass|fail", "Test Result: fail")
+      .replaceAll("TBD", "None.")
+      .replace(
+        "## Blocking Validation Issues\n\nNone.",
+        "## Blocking Validation Issues\n\nA runtime assertion failed."
+      )
+      .replace(
+        "## User Approval Evidence\n\nNone.",
+        "## User Approval Evidence\n\nUser approved an unrelated exception."
+      );
+    const result = checkMarkdownArtifact("test-report", "test-report.md", content);
+
+    expect(result.status).toBe("incomplete");
+    expect(result.invalidFields).toContain(
+      "User Approval Evidence must be None when no Coverage Gaps are recorded."
     );
   });
 

@@ -5,7 +5,7 @@ import type { VcmOrchestrationState, VcmRoleMessage } from "../../shared/types/m
 import type { CoreVcmRoleName, RoleDefinition, RoleName, VcmRoleName } from "../../shared/types/role.js";
 import type { VcmSessionRoundState } from "../../shared/types/round.js";
 import type { TaskWorkflowState } from "../../shared/types/workflow.js";
-import type { ClaudeModel, ClaudePermissionMode, SessionEffort, SessionModel } from "../../shared/types/session.js";
+import type { ClaudePermissionMode, SessionEffort, SessionModel, SessionModelOption } from "../../shared/types/session.js";
 import type { LaunchTemplate, TranslationTargetLanguage } from "../../shared/types/app-settings.js";
 import type { TaskRecord } from "../../shared/types/task.js";
 import { RoleSessionTabs } from "../components/role-session-tabs.js";
@@ -63,6 +63,7 @@ export interface TaskWorkspaceProps {
   translationAutoSendEnabled: boolean;
   translationTargetLanguage: TranslationTargetLanguage;
   launchTemplate: LaunchTemplate;
+  modelOptions: SessionModelOption[];
   refreshNonce?: number;
   onTaskChanged(): Promise<void>;
   onActiveRoleChange(role: RoleName): void;
@@ -77,7 +78,7 @@ export interface TaskWorkspaceLaunchState {
   taskSlug: string;
   roles: Record<VcmRoleName, {
     permissionMode: ClaudePermissionMode;
-    model: ClaudeModel;
+    model: SessionModel;
     effort: SessionEffort;
   }>;
   autoOrchestration: boolean;
@@ -96,6 +97,7 @@ export function TaskWorkspace({
   translationAutoSendEnabled,
   translationTargetLanguage,
   launchTemplate,
+  modelOptions,
   refreshNonce = 0,
   onTaskChanged,
   onActiveRoleChange,
@@ -244,7 +246,7 @@ export function TaskWorkspace({
     for (const definition of VCM_ROLE_DEFINITIONS) {
       roles[definition.name] = {
         permissionMode: permissionModes[definition.name],
-        model: models[definition.name] as ClaudeModel,
+        model: models[definition.name],
         effort: efforts[definition.name]
       };
     }
@@ -363,6 +365,7 @@ export function TaskWorkspace({
                     permissionMode={permissionModes[role]}
                     model={models[role]}
                     effort={efforts[role]}
+                    modelOptions={modelOptions}
                     active={isActive}
                     busy={busy}
                     translationEnabled={translationEnabled}

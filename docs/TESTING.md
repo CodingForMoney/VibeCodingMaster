@@ -48,6 +48,22 @@ Notes:
   cross-service wiring.
 - Session lifecycle, round routing, Gate Review, translation, Gateway, Auto
   Memory, or Harness Retrospective change: run `npm run test:e2e:backend`.
+- Runtime Coordinator changes: run `runtime-coordinator-service.test.ts` and
+  verify fresh and resumable task-scoped tool Sessions are reconciled without a
+  frontend trigger.
+- CCR model integration change: run `ccr-gateway-adapter.test.ts`,
+  `ccr-integration-service.test.ts`, `ccr-api-key-helper.test.ts`,
+  `claude-adapter.test.ts`, `claude-transcript-service.test.ts`,
+  `session-registry.test.ts`, and `ccr-integration.e2e.test.ts`; verify isolated
+  CCR configuration/transcript paths, native environment cleanup, same-provider
+  Resume, and provider switching through Restart. Run the complete backend E2E
+  suite when changing Session launch wiring.
+- Task usage analytics change: run `usage-analytics-service.test.ts`,
+  `usage-analytics-modal.test.ts`, `api-client.test.ts`,
+  `usage-analytics.e2e.test.ts`, and `ccr-integration.e2e.test.ts`. Verify
+  retried OTLP batches are deduplicated, concurrent batches do not lose data,
+  all seven roles aggregate across launches and sessions, CCR/GPT processes do
+  not export usage, and no raw event files are retained.
 - Task workflow-state changes: run `task-workflow-service.test.ts`,
   `message-service.test.ts`, `session-service.test.ts`, and
   `task-routes.test.ts`; verify corrupt or unavailable state remains
@@ -79,7 +95,10 @@ Notes:
 Use the `vcm-long-running-validation` skill (`.ai/tools/run-long-check` +
 `.ai/tools/watch-job`) for any command that may exceed ~2 minutes (notably
 `npm run e2e` and full builds). Never run validation as a detached/background
-process; the job guard denies it. Honor the 60-minute per-job ceiling.
+process; the job guard denies it. Pass the validation executable directly:
+`run-long-check` rejects shell command-string wrappers because pipelines or
+trailing commands can mask the validation exit code. Honor the 60-minute
+per-job ceiling.
 
 ## Release Gate (L4)
 
@@ -163,6 +182,17 @@ services with controlled runtime doubles:
   while Harness Engineer remains excluded.
 - PM-declared task workflow state persistence, workspace aggregation, and PM
   session restoration.
+- CCR settings redaction, authenticated model availability, native-vs-CCR
+  command behavior, GPT-only settings overrides, global CCR takeover cleanup,
+  blocked unavailable launches, and shared CCR child environment across
+  workflow, Gate Reviewer, Translator, and Harness Engineer Session paths.
+- Native Claude OpenTelemetry ingestion into the active task worktree, including
+  task, role, and model aggregation; deduplication and concurrent-write behavior
+  are covered by service tests, while CCR exclusion is covered by the CCR
+  journey.
+- Workflow-role launch-template normalization remains separate from tool Session
+  defaults. Route tests verify that explicit tool Start and Restart persist the
+  successful options while Resume and automatic startup do not.
 
 Run all backend journeys with `npm run test:e2e:backend`.
 
@@ -199,6 +229,11 @@ Run all backend journeys with `npm run test:e2e:backend`.
 - Before publish, `npm run build` and `npm run verify:package` must pass.
 
 ## Known Testing Gaps
+
+New entries require the user's explicit approval after the applicable
+Architect Debug and Architecture Diagnosis work has failed to resolve the
+required validation gap. Approval permits the exact gap to remain; it does not
+change the factual Tester result.
 
 - No integration tests exist yet; `tests/integration/**` is configured but empty.
 - No browser/Playwright E2E specs exist yet. Backend E2E coverage exists under

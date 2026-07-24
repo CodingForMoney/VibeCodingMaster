@@ -4,6 +4,9 @@
 Usage:
   .ai/tools/run-long-check [--timeout <duration>] -- <command> [args...]
 
+Pass the validation executable and its arguments directly. Shell command-string
+wrappers are rejected because they can hide the validation command's exit code.
+
 The command runs in a detached worker process group. The worker itself
 enforces the job ceiling (--timeout, max 60m) and a supervision lease: when
 no foreground watcher renews .ai/vcm/jobs/<job-id>/lease, the worker kills
@@ -28,6 +31,7 @@ QUEUED_STALE_SECONDS = 60
 ACTIVE_STATUSES = {"queued", "starting", "running"}
 DEFAULT_LEASE_START_GRACE_SECONDS = 300
 DEFAULT_LEASE_RENEW_GRACE_SECONDS = 120
+SHELL_EXECUTABLES = {"sh", "bash", "zsh", "dash", "ksh", "fish", "csh", "tcsh"}
 
 
 def root_dir() -> Path:
@@ -81,6 +85,25 @@ def env_seconds(name: str, default: float) -> float:
 def job_id() -> str:
     timestamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
     return f"{timestamp}-{uuid.uuid4().hex[:8]}"
+
+
+def shell_command_wrapper(command: list[str]) -> str | None:
+    if not command:
+        return None
+
+    candidates = range(len(command)) if Path(command[0]).name == "env" else range(1)
+    for index in candidates:
+        executable = Path(command[index]).name
+        if executable not in SHELL_EXECUTABLES:
+            continue
+        if any(
+            option.startswith("-")
+            and not option.startswith("--")
+            and "c" in option[1:]
+            for option in command[index + 1:]
+        ):
+            return executable
+    return None
 
 
 def process_exists(pid: int) -> bool:
@@ -394,7 +417,23 @@ def main() -> int:
         )
         return 2
 
-    return start_job(argv[index + 1:], timeout_seconds)
+    command = argv[index + 1:]
+    shell_wrapper = shell_command_wrapper(command)
+    if shell_wrapper:
+        print(
+            f"error: {shell_wrapper} command-string wrappers are not allowed; "
+            "pass the validation executable and its arguments directly so its "
+            "exit code remains authoritative",
+            file=sys.stderr,
+        )
+        print(
+            "run-long-check already captures stdout/stderr; do not add pipelines "
+            "or trailing commands to trim output",
+            file=sys.stderr,
+        )
+        return 2
+
+    return start_job(command, timeout_seconds)
 
 
 if __name__ == "__main__":

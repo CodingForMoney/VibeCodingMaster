@@ -77,11 +77,20 @@ automates it). Run this on every review round, including revision rounds:
   green check, and that every symbol the path requires is reachable from the
   consuming module's declared dependencies. A call path that exists only in
   prose over stub-only scaffold is `request_changes`.
+- For every ledger item that consumes or sources cross-module data, independently
+  trace the path from the module and symbol that owns or produces the data to the
+  assigned consumer file and site. Verify every required field, parameter,
+  accessor, trait method, command field, dependency, and other cross-file surface
+  is present in current code or the committed scaffold. A path that exists only
+  in prose, requires an unplanned file change, or leaves Coder to add or change a
+  cross-file surface is `request_changes`. Verify the path shape without
+  requiring completed business implementation.
 - Record each of these pre-checks and its result in the report.
 
 For `architecture-plan`, reconstruct the proposed architecture and look for
 design flaws before checking formatting. Read the confirmed
-`.ai/vcm/handoffs/architecture-brief.md`, `.ai/vcm/handoffs/architecture-plan.md`,
+`.ai/vcm/handoffs/architecture-brief.md`, `.ai/vcm/handoffs/architecture-evidence.md`,
+`.ai/vcm/handoffs/architecture-plan.md`,
 `.claude/agents/architect.md`, root `CLAUDE.md`, `docs/ARCHITECTURE.md`,
 affected module `ARCHITECTURE.md` files, `.ai/generated/module-index.json`,
 `.ai/generated/public-surface.json` when public surface may change, and the
@@ -127,6 +136,8 @@ production entry points needed to verify what those tests exercise. Read the
 relevant architect/coder definitions and `.ai/vcm/handoffs/architecture-plan.md`
 when the active flow produced an architecture plan. Read
 `.ai/generated/public-surface.json` when public contracts changed.
+When the report contains an approved Coverage Gap, also read the relevant
+Architect Debug and Architecture Diagnosis evidence.
 
 Reconstruct the accepted validation target, observable behavior, and risks
 from the active flow evidence and current implementation. Treat Tester
@@ -155,7 +166,20 @@ actual tests, validation level does not match risk, an important behavior has
 no concrete coverage mapping, a required check was skipped, required coverage
 is unavailable, or a current-task coverage gap remains. A concrete risk-based
 reason may show that integration or E2E coverage is unnecessary; unavailable
-required coverage is not an approval reason.
+required coverage without exact user approval is not an approval reason.
+
+Treat every unresolved required-coverage item as gate-blocking unless
+`test-report.md` contains the user's exact approval routed by project-manager.
+Verify that Architect Debug and Architecture Diagnosis were completed before
+user acceptance was requested, the approved gap exactly matches the final
+Tester evidence, the affected behavior and remaining risk are stated
+completely, and any new or changed `Known Testing Gaps` entry matches the
+approved durable limitation. Project-manager, Architect, or Tester judgment is
+not user authorization.
+
+An approved gap keeps `Test Result: fail`. Gate approval means the validation
+evidence and exact user exception are complete and consistent; it does not
+convert the result to `pass` or independently accept the risk.
 
 ## Code Diff Gate
 
@@ -263,6 +287,7 @@ Use this findings structure:
 - Public Contract Coverage:
 - Test Integrity:
 - Skips And Gaps:
+- User Approval And Gap Disposition:
 - Validation Readiness:
 
 <!-- Include Code Diff Analysis only for code-diff gate. -->
@@ -323,6 +348,7 @@ If there are no findings, write:
 - Public Contract Coverage:
 - Test Integrity:
 - Skips And Gaps:
+- User Approval And Gap Disposition:
 - Validation Readiness:
 
 <!-- Include Code Diff Analysis only for code-diff gate. -->

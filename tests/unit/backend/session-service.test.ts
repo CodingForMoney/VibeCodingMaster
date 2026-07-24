@@ -9,7 +9,11 @@ import {
 } from "../../../src/shared/types/session.js";
 import type { CreateTerminalSessionInput, TerminalRuntime, TerminalSession } from "../../../src/backend/runtime/terminal-runtime.js";
 import { createSessionRegistry } from "../../../src/backend/runtime/session-registry.js";
-import { createSessionService } from "../../../src/backend/services/session-service.js";
+import {
+  createSessionService,
+  matchesRoleHookSession,
+  type SessionService
+} from "../../../src/backend/services/session-service.js";
 import { claudeTranscriptPath } from "../../../src/backend/services/claude-transcript-service.js";
 import type { FileSystemAdapter } from "../../../src/backend/adapters/filesystem.js";
 
@@ -34,7 +38,7 @@ describe("createSessionService", () => {
     expect(firstRuntimeInputs[0]?.args).not.toContain("--session-id");
     await expect(fs.pathExists(`${TASK_WORKTREE}/.ai/vcm/sessions/demo-task.json`)).resolves.toBe(false);
 
-    const hooked = await firstService.recordRoleHookEvent("/repo", {
+    const hooked = await recordCurrentRoleHook(firstService, {
       taskSlug: "demo-task",
       role: "architect",
       eventName: "UserPromptSubmit",
@@ -74,7 +78,7 @@ describe("createSessionService", () => {
     const service = createTestSessionService(fs, []);
 
     await service.startRoleSession("/repo", "demo-task", "coder");
-    const stopped = await service.recordRoleHookEvent("/repo", {
+    const stopped = await recordCurrentRoleHook(service, {
       taskSlug: "demo-task",
       role: "coder",
       eventName: "Stop",
@@ -86,7 +90,7 @@ describe("createSessionService", () => {
     expect(stopped).toBeUndefined();
     await expect(fs.pathExists(`${TASK_WORKTREE}/.ai/vcm/sessions/demo-task.json`)).resolves.toBe(false);
 
-    const prompted = await service.recordRoleHookEvent("/repo", {
+    const prompted = await recordCurrentRoleHook(service, {
       taskSlug: "demo-task",
       role: "coder",
       eventName: "UserPromptSubmit",
@@ -110,6 +114,7 @@ describe("createSessionService", () => {
     expect(writes).toHaveLength(0);
     expect(runtimeInputs[0]?.env).toMatchObject({
       CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1",
+      CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: "1",
       VCM_API_URL: "http://127.0.0.1:4173",
       VCM_TASK_REPO_ROOT: TASK_WORKTREE,
       VCM_TASK_SLUG: "demo-task",
@@ -210,7 +215,7 @@ describe("createSessionService", () => {
     await expect(fs.pathExists("/repo/.ai/vcm/gate-reviewer/session.json")).resolves.toBe(false);
     await expect(fs.pathExists(`${TASK_WORKTREE}/.ai/vcm/sessions/demo-task.json`)).resolves.toBe(false);
 
-    await service.recordRoleHookEvent("/repo", {
+    await recordCurrentRoleHook(service, {
       taskSlug: "demo-task",
       role: "gate-reviewer",
       eventName: "UserPromptSubmit",
@@ -227,7 +232,7 @@ describe("createSessionService", () => {
     const firstService = createTestSessionService(fs, firstRuntimeInputs);
 
     await firstService.startRoleSession("/repo", "demo-task", "gate-reviewer");
-    await firstService.recordRoleHookEvent("/repo", {
+    await recordCurrentRoleHook(firstService, {
       taskSlug: "demo-task",
       role: "gate-reviewer",
       eventName: "UserPromptSubmit",
@@ -290,7 +295,7 @@ describe("createSessionService", () => {
     await expect(fs.pathExists("/repo/.ai/vcm/translations/session.json")).resolves.toBe(false);
     await expect(fs.pathExists("/repo/.ai/vcm/harness-engineer/session.json")).resolves.toBe(false);
 
-    await service.recordRoleHookEvent("/repo", {
+    await recordCurrentRoleHook(service, {
       taskSlug: "demo-task",
       role: "translator",
       eventName: "UserPromptSubmit",
@@ -298,7 +303,7 @@ describe("createSessionService", () => {
       transcriptPath: `${TASK_WORKTREE}/.claude/projects/translator-task-session.jsonl`,
       cwd: TASK_WORKTREE
     });
-    await service.recordRoleHookEvent("/repo", {
+    await recordCurrentRoleHook(service, {
       taskSlug: "demo-task",
       role: "harness-engineer",
       eventName: "UserPromptSubmit",
@@ -334,6 +339,7 @@ describe("createSessionService", () => {
     expect(firstRuntimeInputs[0]?.cwd).toBe("/repo");
     expect(firstRuntimeInputs[0]?.env).toMatchObject({
       CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1",
+      CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: "1",
       VCM_TASK_REPO_ROOT: TASK_WORKTREE,
       VCM_TASK_SLUG: "__project__",
       VCM_ROLE: "translator"
@@ -343,7 +349,7 @@ describe("createSessionService", () => {
     await expect(fs.pathExists("/repo/.claude/worktrees/demo-task/.ai/vcm/sessions/demo-task.json"))
       .resolves.toBe(false);
 
-    const hooked = await firstService.recordProjectTranslatorHookEvent("/repo", {
+    const hooked = await recordCurrentTranslatorHook(firstService, {
       eventName: "UserPromptSubmit",
       sessionId: "translator-real-session",
       transcriptPath: `${TASK_WORKTREE}/.claude/projects/translator-real-session.jsonl`,
@@ -387,7 +393,7 @@ describe("createSessionService", () => {
     await service.startProjectTranslatorSession("/repo", {
       taskSlug: "demo-task"
     });
-    await service.recordProjectTranslatorHookEvent("/repo", {
+    await recordCurrentTranslatorHook(service, {
       eventName: "UserPromptSubmit",
       sessionId: "translator-old-session",
       transcriptPath: `${TASK_WORKTREE}/.claude/projects/translator-old-session.jsonl`,
@@ -404,7 +410,7 @@ describe("createSessionService", () => {
     await expect(fs.pathExists("/repo/.ai/vcm/translations/session.json")).resolves.toBe(false);
     await expect(createTestSessionService(fs, []).getProjectTranslatorSession("/repo")).resolves.toBeUndefined();
 
-    const hooked = await service.recordProjectTranslatorHookEvent("/repo", {
+    const hooked = await recordCurrentTranslatorHook(service, {
       eventName: "UserPromptSubmit",
       sessionId: "translator-new-session",
       transcriptPath: `${TASK_WORKTREE}/.claude/projects/translator-new-session.jsonl`,
@@ -424,7 +430,7 @@ describe("createSessionService", () => {
     await service.startProjectHarnessEngineerSession("/repo", {
       taskSlug: "demo-task"
     });
-    await service.recordProjectHarnessEngineerHookEvent("/repo", {
+    await recordCurrentHarnessEngineerHook(service, {
       eventName: "UserPromptSubmit",
       sessionId: "harness-old-session",
       transcriptPath: `${TASK_WORKTREE}/.claude/projects/harness-old-session.jsonl`,
@@ -441,7 +447,7 @@ describe("createSessionService", () => {
     await expect(fs.pathExists("/repo/.ai/vcm/harness-engineer/session.json")).resolves.toBe(false);
     await expect(createTestSessionService(fs, []).getProjectHarnessEngineerSession("/repo")).resolves.toBeUndefined();
 
-    const hooked = await service.recordProjectHarnessEngineerHookEvent("/repo", {
+    const hooked = await recordCurrentHarnessEngineerHook(service, {
       eventName: "UserPromptSubmit",
       sessionId: "harness-new-session",
       transcriptPath: `${TASK_WORKTREE}/.claude/projects/harness-new-session.jsonl`,
@@ -482,7 +488,7 @@ describe("createSessionService", () => {
     await firstService.startProjectTranslatorSession("/repo", {
       taskSlug: "demo-task"
     });
-    await firstService.recordProjectTranslatorHookEvent("/repo", {
+    await recordCurrentTranslatorHook(firstService, {
       eventName: "UserPromptSubmit",
       sessionId: "translator-ensure-session",
       transcriptPath: `${TASK_WORKTREE}/.claude/projects/translator-ensure-session.jsonl`,
@@ -530,7 +536,7 @@ describe("createSessionService", () => {
     await service.startProjectTranslatorSession("/repo", {
       taskSlug: "demo-task"
     });
-    await service.recordProjectTranslatorHookEvent("/repo", {
+    await recordCurrentTranslatorHook(service, {
       eventName: "UserPromptSubmit",
       sessionId: "translator-move-session",
       transcriptPath: `${TASK_WORKTREE}/.claude/projects/translator-move-session.jsonl`,
@@ -572,7 +578,7 @@ describe("createSessionService", () => {
     await firstService.startProjectTranslatorSession("/repo", {
       taskSlug: "demo-task"
     });
-    await firstService.recordProjectTranslatorHookEvent("/repo", {
+    await recordCurrentTranslatorHook(firstService, {
       eventName: "UserPromptSubmit",
       sessionId: "translator-resume-session",
       transcriptPath: `${TASK_WORKTREE}/.claude/projects/translator-resume-session.jsonl`,
@@ -626,7 +632,7 @@ describe("createSessionService", () => {
     await firstService.startProjectTranslatorSession("/repo", {
       taskSlug: "demo-task"
     });
-    await firstService.recordProjectTranslatorHookEvent("/repo", {
+    await recordCurrentTranslatorHook(firstService, {
       eventName: "UserPromptSubmit",
       sessionId: "translator-resume-session",
       transcriptPath: `${TASK_WORKTREE}/.claude/projects/translator-resume-session.jsonl`,
@@ -662,7 +668,7 @@ describe("createSessionService", () => {
     expect(writes[0]).toContain(`/cd ${TASK_WORKTREE}`);
     expect(writes[1]).toBe("\r");
 
-    const hooked = await service.recordProjectTranslatorHookEvent("/repo", {
+    const hooked = await recordCurrentTranslatorHook(service, {
       eventName: "UserPromptSubmit",
       sessionId: "translator-cd-prompt-session",
       transcriptPath: claudeTranscriptPath("/repo", "translator-cd-prompt-session"),
@@ -688,7 +694,7 @@ describe("createSessionService", () => {
     });
 
     await service.startProjectTranslatorSession("/repo", { taskSlug: "demo-task" });
-    await service.recordProjectTranslatorHookEvent("/repo", {
+    await recordCurrentTranslatorHook(service, {
       eventName: "UserPromptSubmit",
       sessionId: "translator-spaces-session",
       transcriptPath: `${TASK_WORKTREE}/.claude/projects/translator-spaces-session.jsonl`,
@@ -716,7 +722,7 @@ describe("createSessionService", () => {
     await service.startProjectTranslatorSession("/repo", {
       taskSlug: "demo-task"
     });
-    await service.recordProjectTranslatorHookEvent("/repo", {
+    await recordCurrentTranslatorHook(service, {
       eventName: "UserPromptSubmit",
       sessionId: "translator-safe-session",
       transcriptPath: `${TASK_WORKTREE}/.claude/projects/translator-safe-session.jsonl`,
@@ -738,7 +744,7 @@ describe("createSessionService", () => {
     const fs = createMemoryFs();
     const firstService = createTestSessionService(fs, []);
     await firstService.startProjectTranslatorSession("/repo", { taskSlug: "demo-task" });
-    await firstService.recordProjectTranslatorHookEvent("/repo", {
+    await recordCurrentTranslatorHook(firstService, {
       eventName: "UserPromptSubmit",
       sessionId: "translator-stale-session",
       transcriptPath: `${TASK_WORKTREE}/.claude/projects/translator-stale-session.jsonl`,
@@ -765,7 +771,7 @@ describe("createSessionService", () => {
     const fs = createMemoryFs();
     const firstService = createTestSessionService(fs, []);
     await firstService.startProjectTranslatorSession("/repo", { taskSlug: "demo-task" });
-    await firstService.recordProjectTranslatorHookEvent("/repo", {
+    await recordCurrentTranslatorHook(firstService, {
       eventName: "UserPromptSubmit",
       sessionId: "translator-dead-pid-session",
       transcriptPath: `${TASK_WORKTREE}/.claude/projects/translator-dead-pid-session.jsonl`,
@@ -793,7 +799,7 @@ describe("createSessionService", () => {
       }
     });
     await firstService.startProjectTranslatorSession("/repo", { taskSlug: "demo-task" });
-    await firstService.recordProjectTranslatorHookEvent("/repo", {
+    await recordCurrentTranslatorHook(firstService, {
       eventName: "UserPromptSubmit",
       sessionId: "translator-cd-missing-session",
       transcriptPath: `${TASK_WORKTREE}/.claude/projects/translator-cd-missing-session.jsonl`,
@@ -825,7 +831,7 @@ describe("createSessionService", () => {
     const fs = createMemoryFs();
     const firstService = createTestSessionService(fs, []);
     await firstService.startProjectHarnessEngineerSession("/repo", { taskSlug: "demo-task" });
-    await firstService.recordProjectHarnessEngineerHookEvent("/repo", {
+    await recordCurrentHarnessEngineerHook(firstService, {
       eventName: "UserPromptSubmit",
       sessionId: "harness-stale-session",
       transcriptPath: `${TASK_WORKTREE}/.claude/projects/harness-stale-session.jsonl`,
@@ -864,6 +870,7 @@ describe("createSessionService", () => {
     expect(runtimeInputs[0]?.cwd).toBe("/repo");
     expect(runtimeInputs[0]?.env).toMatchObject({
       CLAUDE_CODE_DISABLE_AUTO_MEMORY: "1",
+      CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: "1",
       VCM_TASK_REPO_ROOT: TASK_WORKTREE,
       VCM_TASK_SLUG: "__project_harness_engineer__",
       VCM_ROLE: "harness-engineer"
@@ -882,7 +889,7 @@ describe("createSessionService", () => {
     await expect(fs.pathExists("/repo/.claude/worktrees/demo-task/.ai/vcm/sessions/demo-task.json"))
       .resolves.toBe(false);
 
-    await service.recordProjectHarnessEngineerHookEvent("/repo", {
+    await recordCurrentHarnessEngineerHook(service, {
       eventName: "UserPromptSubmit",
       sessionId: "harness-engineer-real-session",
       transcriptPath: `${TASK_WORKTREE}/.claude/projects/harness-engineer-real-session.jsonl`,
@@ -902,7 +909,7 @@ describe("createSessionService", () => {
     expect(writes[0]).toContain(`/cd ${TASK_WORKTREE}`);
     expect(writes[1]).toBe("\r");
 
-    const hooked = await service.recordProjectHarnessEngineerHookEvent("/repo", {
+    const hooked = await recordCurrentHarnessEngineerHook(service, {
       eventName: "UserPromptSubmit",
       sessionId: "harness-cd-prompt-session",
       transcriptPath: claudeTranscriptPath("/repo", "harness-cd-prompt-session"),
@@ -1012,7 +1019,7 @@ describe("createSessionService", () => {
     await expect(fs.pathExists("/repo/.ai/vcm/sessions/demo-task.json"))
       .resolves.toBe(false);
 
-    await service.recordRoleHookEvent("/repo", {
+    await recordCurrentRoleHook(service, {
       taskSlug: "demo-task",
       role: "architect",
       eventName: "UserPromptSubmit",
@@ -1039,7 +1046,7 @@ describe("createSessionService", () => {
 
     await firstService.startRoleSession("/repo", "demo-task", "coder");
     expect(firstRuntimeInputs[0]?.args).not.toContain("--session-id");
-    await firstService.recordRoleHookEvent("/repo", {
+    await recordCurrentRoleHook(firstService, {
       taskSlug: "demo-task",
       role: "coder",
       eventName: "UserPromptSubmit",
@@ -1072,7 +1079,7 @@ describe("createSessionService", () => {
     await expect(createTestSessionService(fs, []).getRoleSession("/repo", "demo-task", "coder"))
       .resolves.toBeUndefined();
 
-    const hooked = await secondService.recordRoleHookEvent("/repo", {
+    const hooked = await recordCurrentRoleHook(secondService, {
       taskSlug: "demo-task",
       role: "coder",
       eventName: "UserPromptSubmit",
@@ -1145,7 +1152,7 @@ describe("createSessionService", () => {
       status: "running",
       activityStatus: "idle"
     });
-    const prompted = await service.recordClaudeHookEvent("/repo", {
+    const prompted = await recordCurrentClaudeHook(service, {
       taskSlug: "demo-task",
       role: "coder",
       eventName: "UserPromptSubmit",
@@ -1173,7 +1180,7 @@ describe("createSessionService", () => {
     });
 
     await service.markRoleActivityRunning("/repo", "demo-task", "coder");
-    const idle = await service.recordClaudeHookEvent("/repo", {
+    const idle = await recordCurrentClaudeHook(service, {
       taskSlug: "demo-task",
       role: "coder",
       eventName: "Stop",
@@ -1186,7 +1193,7 @@ describe("createSessionService", () => {
     });
 
     await service.markRoleActivityRunning("/repo", "demo-task", "coder");
-    const failed = await service.recordClaudeHookEvent("/repo", {
+    const failed = await recordCurrentClaudeHook(service, {
       taskSlug: "demo-task",
       role: "coder",
       eventName: "StopFailure",
@@ -1199,7 +1206,7 @@ describe("createSessionService", () => {
     });
 
     await service.markRoleActivityRunning("/repo", "demo-task", "coder");
-    const compacted = await service.recordClaudeHookEvent("/repo", {
+    const compacted = await recordCurrentClaudeHook(service, {
       taskSlug: "demo-task",
       role: "coder",
       eventName: "PostCompact",
@@ -1222,14 +1229,13 @@ describe("createSessionService", () => {
     expect(started.claudeSessionId).not.toBe("claude_session_123");
     expect(started.claudeSessionId).toBe("");
 
-    const running = await service.recordRoleHookEvent("/repo", {
+    const running = await recordCurrentRoleHook(service, {
       taskSlug: "demo-task",
       role: "gate-reviewer",
       eventName: "UserPromptSubmit",
       sessionId: "claude_session_123",
       transcriptPath: "/Users/sheldon/.claude/projects/-repo-.claude-worktrees-demo-task/claude_session_123.jsonl",
-      cwd: TASK_WORKTREE,
-      allowSessionMismatch: true
+      cwd: TASK_WORKTREE
     });
     expect(running).toMatchObject({
       role: "gate-reviewer",
@@ -1241,19 +1247,111 @@ describe("createSessionService", () => {
       lastTurnStartedAt: "2026-05-29T00:00:00.000Z"
     });
 
-    const idle = await service.recordRoleHookEvent("/repo", {
+    const idle = await recordCurrentRoleHook(service, {
       taskSlug: "demo-task",
       role: "gate-reviewer",
       eventName: "Stop",
-      sessionId: "claude_session_123",
-      allowSessionMismatch: true
+      sessionId: "claude_session_123"
     });
     expect(idle).toMatchObject({
       activityStatus: "idle",
       lastTurnEndedAt: "2026-05-29T00:00:00.000Z"
     });
   });
+
+  it("does not let stale project tool Stop hooks mark the current session idle", async () => {
+    const fs = createMemoryFs();
+    const service = createTestSessionService(fs, [], [], {
+      worktreePath: TASK_WORKTREE
+    });
+    await service.startProjectTranslatorSession("/repo", {
+      taskSlug: "demo-task"
+    });
+    await recordCurrentTranslatorHook(service, {
+      eventName: "UserPromptSubmit",
+      sessionId: "translator-current",
+      transcriptPath: `${TASK_WORKTREE}/.claude/projects/translator-current.jsonl`
+    });
+
+    const stale = await service.recordProjectTranslatorHookEvent("/repo", {
+      eventName: "Stop",
+      sessionId: "translator-old",
+      transcriptPath: `${TASK_WORKTREE}/.claude/projects/translator-old.jsonl`,
+      runtimeSessionToken: "stale-runtime-token"
+    });
+    const current = await service.getProjectTranslatorSession("/repo");
+
+    expect(stale).toBeUndefined();
+    expect(current).toMatchObject({
+      claudeSessionId: "translator-current",
+      activityStatus: "running"
+    });
+  });
+
+  it("rejects a stale first prompt from a replaced runtime session", () => {
+    const current = {
+      id: "runtime-new",
+      runtimeSessionToken: "runtime-token-new",
+      claudeSessionId: "",
+      transcriptPath: undefined
+    } as RoleSessionRecord;
+
+    expect(matchesRoleHookSession(current, {
+      eventName: "UserPromptSubmit",
+      sessionId: "claude-old",
+      runtimeSessionToken: "runtime-token-old"
+    })).toBe(false);
+    expect(matchesRoleHookSession(current, {
+      eventName: "UserPromptSubmit",
+      sessionId: "claude-new",
+      runtimeSessionToken: "runtime-token-new"
+    })).toBe(true);
+  });
 });
+
+async function recordCurrentRoleHook(
+  service: SessionService,
+  input: Parameters<SessionService["recordRoleHookEvent"]>[1]
+) {
+  const session = await service.getRoleSession("/repo", input.taskSlug, input.role);
+  return service.recordRoleHookEvent("/repo", {
+    ...input,
+    runtimeSessionToken: session?.runtimeSessionToken
+  });
+}
+
+async function recordCurrentClaudeHook(
+  service: SessionService,
+  input: Parameters<SessionService["recordClaudeHookEvent"]>[1]
+) {
+  const session = await service.getRoleSession("/repo", input.taskSlug, input.role);
+  return service.recordClaudeHookEvent("/repo", {
+    ...input,
+    runtimeSessionToken: session?.runtimeSessionToken
+  });
+}
+
+async function recordCurrentTranslatorHook(
+  service: SessionService,
+  input: Parameters<SessionService["recordProjectTranslatorHookEvent"]>[1]
+) {
+  const session = await service.getProjectTranslatorSession("/repo");
+  return service.recordProjectTranslatorHookEvent("/repo", {
+    ...input,
+    runtimeSessionToken: session?.runtimeSessionToken
+  });
+}
+
+async function recordCurrentHarnessEngineerHook(
+  service: SessionService,
+  input: Parameters<SessionService["recordProjectHarnessEngineerHookEvent"]>[1]
+) {
+  const session = await service.getProjectHarnessEngineerSession("/repo");
+  return service.recordProjectHarnessEngineerHookEvent("/repo", {
+    ...input,
+    runtimeSessionToken: session?.runtimeSessionToken
+  });
+}
 
 function createTestSessionService(
   fs: FileSystemAdapter,

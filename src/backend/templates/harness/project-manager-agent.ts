@@ -89,7 +89,7 @@ PM may leave this path only through the allowed branches below.
 
 #### Allowed Branches
 
-- **Architecture Interview Continuation:** Keep Architect Interview active while \`.ai/vcm/handoffs/architecture-brief.md\` is \`interviewing\`. After the user explicitly confirms the brief and Architect reports it to PM, route Architect planning. If planning returns \`Planning Result: user clarification required\`, return to Architect Interview.
+- **Architecture Interview Continuation:** Keep Architect Interview active while \`.ai/vcm/handoffs/architecture-brief.md\` is \`interviewing\` or \`.ai/vcm/handoffs/architecture-evidence.md\` is incomplete. After the user confirms the brief and Architect reports both complete artifacts, route Architect planning. If planning returns \`Planning Result: user clarification required\`, return to Architect Interview.
 - **Architecture Plan Revision:** If Architect planning is incomplete, route Architect again to continue the recorded planning work plan; multi-round planning against \`.ai/vcm/handoffs/planning-progress.md\` is the normal path for large plans, and PM must not press for completion within one round or accept summary-row compression in place of remaining steps. If the architecture-plan Gate returns \`request_changes\`, route the complete report to Architect, then rerun the full architecture-plan Gate after the plan and scaffold are revised.
 - **Coder Continuation:** If Coder returns \`Decision: incomplete\`, lacks the required completion artifact, or has not completed implementation and L0/L1 validation, route Coder again — this is the only route for an in-progress sweep. Problems recorded inside an incomplete report are sweep state, not routable failures; PM routes problems onward only from a post-sweep \`failed\` report carrying the consolidated per-item disposition.
 - **Coder Failure Debug:** If Coder returns \`Decision: failed\` with compile, typecheck, or L0/L1 failure evidence after implementation, suspend the main flow and enter Architect Debug Branch.
@@ -181,7 +181,7 @@ Architecture Diagnosis Mode must run before another Debug Mode fix or Coder disp
 #### Allowed Branches
 
 - **Code-Diff Revision:** If the code-diff Gate returns \`request_changes\`, route the report to Architecture Diagnosis Mode and rerun \`code-diff --source architect-diagnosis\` after correction.
-- **Tester Failure:** If Tester returns \`Test Result: fail\` for the Diagnosis implementation, pause and report to the user.
+- **Tester Failure:** If Tester returns \`Test Result: fail\` for the Diagnosis implementation, pause and report to the user. If required validation remains unavailable, ask whether the user explicitly approves retaining that exact Coverage Gap.
 
 #### Successful Exit
 
@@ -195,6 +195,14 @@ After Tester Failure, PM should summarize:
 - why Architecture Diagnosis Mode was triggered
 - what the Architect diagnosed
 - what Tester still found wrong
+
+If the user approves the exact gap, record the approval verbatim and route
+Tester to add the approved \`Coverage Gaps\` entry and, when applicable, the
+durable \`Known Testing Gaps\` entry. Then run the validation-adequacy Gate and
+continue using the recorded user-approved exception.
+
+Without explicit user approval, the gap remains blocking and the workflow
+stays paused.
 
 ### Docs-Only Flow
 

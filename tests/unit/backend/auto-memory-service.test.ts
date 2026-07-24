@@ -8,7 +8,10 @@ import {
   renderVcmMemoryBlock,
   replaceVcmMemoryBlock
 } from "../../../src/backend/templates/harness/memory-block.js";
-import { createDefaultLaunchTemplate } from "../../../src/shared/types/app-settings.js";
+import {
+  createDefaultLaunchTemplate,
+  createDefaultToolSessionDefaults
+} from "../../../src/shared/types/app-settings.js";
 import type { RoleName } from "../../../src/shared/types/role.js";
 import type { RoleSessionRecord } from "../../../src/shared/types/session.js";
 import { renderFinalAcceptanceTemplate } from "../../../src/backend/templates/handoff.js";
@@ -310,7 +313,8 @@ describe("auto-memory-service", () => {
             translationAutoSendEnabled: false,
             translationTargetLanguage: "zh-CN",
             translationOutputMode: "pm-final-only",
-            launchTemplate: createDefaultLaunchTemplate()
+            launchTemplate: createDefaultLaunchTemplate(),
+            toolSessionDefaults: createDefaultToolSessionDefaults()
           };
         },
         async getGateReviewSettings() {

@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { access, cp, mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -31,6 +31,8 @@ async function installHarnessTools(repoRoot: string) {
   await cp(path.join(appRoot, ".ai/tools/check-scaffold-ledger"), path.join(toolsRoot, "check-scaffold-ledger"));
   await cp(path.join(appRoot, "scripts/harness-tools/generate-module-index"), path.join(toolsRoot, "generate-module-index"));
   await cp(path.join(appRoot, "scripts/harness-tools/generate-public-surface"), path.join(toolsRoot, "generate-public-surface"));
+  await cp(path.join(appRoot, "scripts/harness-tools/run-long-check"), path.join(toolsRoot, "run-long-check"));
+  await cp(path.join(appRoot, "scripts/harness-tools/watch-job"), path.join(toolsRoot, "watch-job"));
 }
 
 async function createTypescriptWorkspace(repoRoot: string) {
@@ -238,6 +240,114 @@ describe("harness generated-context tools", () => {
     await expect(
       execFileAsync("python3", [path.join(tmpRepo, ".ai/tools/generate-module-index"), "--check"], { cwd: tmpRepo })
     ).resolves.toBeTruthy();
+  });
+});
+
+describe("long-running validation tools", () => {
+  async function startLongCheck(command: string[]) {
+    const result = await execFileAsync(
+      "python3",
+      [
+        path.join(tmpRepo!, ".ai/tools/run-long-check"),
+        "--timeout",
+        "10s",
+        "--",
+        ...command
+      ],
+      { cwd: tmpRepo }
+    );
+    const jobId = result.stdout.match(/^job: (.+)$/m)?.[1];
+    expect(jobId).toBeTruthy();
+    return jobId!;
+  }
+
+  async function watchLongCheck(jobId: string) {
+    try {
+      const result = await execFileAsync(
+        "python3",
+        [
+          path.join(tmpRepo!, ".ai/tools/watch-job"),
+          jobId,
+          "--window",
+          "5s",
+          "--interval",
+          "50ms"
+        ],
+        { cwd: tmpRepo }
+      );
+      return { exitCode: 0, stdout: result.stdout };
+    } catch (error) {
+      const failed = error as Error & { code?: number; stdout?: string };
+      return { exitCode: failed.code, stdout: failed.stdout ?? "" };
+    }
+  }
+
+  it("preserves direct validation command success and failure exit codes", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-long-check-"));
+    await installHarnessTools(tmpRepo);
+
+    const successJob = await startLongCheck([process.execPath, "-e", "process.exit(0)"]);
+    await expect(watchLongCheck(successJob)).resolves.toMatchObject({
+      exitCode: 0,
+      stdout: expect.stringContaining("status: success")
+    });
+
+    const failedJob = await startLongCheck([process.execPath, "-e", "process.exit(7)"]);
+    await expect(watchLongCheck(failedJob)).resolves.toMatchObject({
+      exitCode: 1,
+      stdout: expect.stringContaining("status: failed")
+    });
+    await expect(
+      readFile(path.join(tmpRepo, ".ai/vcm/jobs", failedJob, "status.json"), "utf8")
+    ).resolves.toContain('"exitCode": 7');
+  }, 20_000);
+
+  it("rejects shell command-string wrappers before creating a job", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-long-check-"));
+    await installHarnessTools(tmpRepo);
+    const runLongCheck = path.join(tmpRepo, ".ai/tools/run-long-check");
+
+    await expect(
+      execFileAsync(
+        "python3",
+        [
+          runLongCheck,
+          "--timeout",
+          "10s",
+          "--",
+          "bash",
+          "-c",
+          "false | tail -n 1; echo done"
+        ],
+        { cwd: tmpRepo }
+      )
+    ).rejects.toMatchObject({
+      code: 2,
+      stderr: expect.stringContaining("command-string wrappers are not allowed")
+    });
+
+    await expect(
+      execFileAsync(
+        "python3",
+        [
+          runLongCheck,
+          "--timeout",
+          "10s",
+          "--",
+          "env",
+          "DEMO=1",
+          "sh",
+          "-c",
+          "false; echo done"
+        ],
+        { cwd: tmpRepo }
+      )
+    ).rejects.toMatchObject({
+      code: 2,
+      stderr: expect.stringContaining("command-string wrappers are not allowed")
+    });
+
+    await expect(access(path.join(tmpRepo, ".ai/vcm/jobs"))).rejects.toBeTruthy();
   });
 });
 

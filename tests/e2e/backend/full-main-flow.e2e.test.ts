@@ -24,7 +24,7 @@ const cleanups: Array<() => Promise<void>> = [];
 
 afterEach(async () => {
   while (cleanups.length > 0) {
-    await cleanups.pop()?.();
+    await cleanups.shift()?.();
   }
 });
 
@@ -267,6 +267,7 @@ function acceptedFinalAcceptance(taskSlug: string): string {
 }
 
 async function writeApproveGateReport(ctx: MockClaudePromptContext): Promise<void> {
+  await ctx.userPromptSubmit();
   const gate = matchPromptField(ctx.prompt, "Gate") as GateReviewGate;
   const request = matchPromptField(ctx.prompt, "Request");
   const report = matchPromptField(ctx.prompt, "Report");
@@ -313,6 +314,7 @@ async function writeApproveGateReport(ctx: MockClaudePromptContext): Promise<voi
     ...validationAnalysis,
     ...codeDiffAnalysis
   ].join("\n"));
+  await ctx.stop();
 }
 
 function validTestReport(): string {
@@ -350,6 +352,9 @@ function validTestReport(): string {
     "",
     "## Blocking Validation Issues",
     "None.",
+    "",
+    "## User Approval Evidence",
+    "None.",
     ""
   ].join("\n");
 }
@@ -367,6 +372,7 @@ function validationAnalysisLines(): string[] {
     "- Public Contract Coverage: public behavior asserted",
     "- Test Integrity: real path and observable assertion inspected",
     "- Skips And Gaps: none",
+    "- User Approval And Gap Disposition: none",
     "- Validation Readiness: ready",
     "",
     "## Findings",

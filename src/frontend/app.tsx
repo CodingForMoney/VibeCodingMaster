@@ -5,6 +5,7 @@ import {
   DEFAULT_TRANSLATION_OUTPUT_MODE,
   DEFAULT_TRANSLATION_TARGET_LANGUAGE,
   type AppPreferences,
+  type CcrIntegrationStatus,
   type LaunchTemplate,
   type PermissionRequestMode,
   type TranslationOutputMode,
@@ -31,7 +32,13 @@ import type { ProjectSummary } from "../shared/types/project.js";
 import type { ProjectRuntimeState } from "../shared/types/api.js";
 import type { RoleName } from "../shared/types/role.js";
 import type { VcmRoleRecoveryState, VcmRoundStatus, VcmSessionRoundState } from "../shared/types/round.js";
-import type { ClaudePermissionMode, RoleSessionRecord, SessionEffort, SessionModel } from "../shared/types/session.js";
+import {
+  createSessionModelOptions,
+  type ClaudePermissionMode,
+  type RoleSessionRecord,
+  type SessionEffort,
+  type SessionModel
+} from "../shared/types/session.js";
 import type { TaskRecord } from "../shared/types/task.js";
 import { AppShell } from "./components/app-shell.js";
 import { HarnessStudioModal } from "./components/harness-studio-modal.js";
@@ -74,6 +81,7 @@ export function App() {
   const [autoMemoryState, setAutoMemoryState] = useState<AutoMemoryStateReport | null>(null);
   const [autoMemoryStateTaskSlug, setAutoMemoryStateTaskSlug] = useState<string | null>(null);
   const [gatewayStatus, setGatewayStatus] = useState<GatewayStatus | null>(null);
+  const [ccrStatus, setCcrStatus] = useState<CcrIntegrationStatus | null>(null);
   const [gatewayQrLogin, setGatewayQrLogin] = useState<StartGatewayQrLoginResult | null>(null);
   const [gatewayQrCheck, setGatewayQrCheck] = useState<CheckGatewayQrLoginResult | null>(null);
   const [gatewayQrModalOpen, setGatewayQrModalOpen] = useState(false);
@@ -147,8 +155,12 @@ export function App() {
   const effectiveTranslationEnabled = Boolean(translationEnabled && translationBaseReady && translatorSessionRunning);
   const canSaveLaunchTemplate = Boolean(activeTaskLaunchState?.statusLoaded);
   const canOneClickStart = Boolean(activeTask && activeTaskLaunchState?.statusLoaded && !activeTaskLaunchState.hasAnySession);
+  const modelOptions = ccrStatus?.modelOptions ?? createSessionModelOptions();
 
-  const applyPreferences = useCallback((preferences: AppPreferences) => {
+  const applyPreferences = useCallback((
+    preferences: AppPreferences,
+    options: { syncToolLaunchOptions?: boolean } = {}
+  ) => {
     setThemeMode(preferences.themeMode);
     setPauseAlertSound(preferences.flowPauseAlerts);
     setRoleRetryEnabled(preferences.roleRetryEnabled);
@@ -160,6 +172,14 @@ export function App() {
     setTranslationTargetLanguage(preferences.translationTargetLanguage);
     setTranslationOutputMode(preferences.translationOutputMode);
     setLaunchTemplate(preferences.launchTemplate);
+    if (options.syncToolLaunchOptions) {
+      setTranslatorPermissionMode(preferences.toolSessionDefaults.translator.permissionMode);
+      setTranslatorModel(preferences.toolSessionDefaults.translator.model);
+      setTranslatorEffort(preferences.toolSessionDefaults.translator.effort);
+      setHarnessEngineerPermissionMode(preferences.toolSessionDefaults["harness-engineer"].permissionMode);
+      setHarnessEngineerModel(preferences.toolSessionDefaults["harness-engineer"].model);
+      setHarnessEngineerEffort(preferences.toolSessionDefaults["harness-engineer"].effort);
+    }
   }, []);
 
   useEffect(() => {
@@ -518,13 +538,15 @@ export function App() {
       apiClient.getCurrentProject(),
       apiClient.getRecentRepositoryPaths(),
       apiClient.getAppPreferences(),
-      apiClient.getGatewayStatus()
+      apiClient.getGatewayStatus(),
+      apiClient.getCcrIntegrationStatus()
     ])
-      .then(async ([currentProject, recentPaths, preferences, nextGatewayStatus]) => {
+      .then(async ([currentProject, recentPaths, preferences, nextGatewayStatus, nextCcrStatus]) => {
         setProject(currentProject);
         setRecentRepositoryPaths(recentPaths);
         setGatewayStatus(nextGatewayStatus);
-        applyPreferences(preferences);
+        setCcrStatus(nextCcrStatus);
+        applyPreferences(preferences, { syncToolLaunchOptions: true });
         if (currentProject) {
           await loadTasks();
         }
@@ -583,26 +605,22 @@ export function App() {
   useEffect(() => {
     projectRuntimeLaunchSyncKeyRef.current = "";
     setTranslatorSession(null);
-    setTranslatorPermissionMode("bypassPermissions");
-    setTranslatorModel("default");
-    setTranslatorEffort("medium");
     setTranslationMemoryInitialized(false);
     setHarnessEngineerSession(null);
-    setHarnessEngineerPermissionMode("bypassPermissions");
-    setHarnessEngineerModel("default");
-    setHarnessEngineerEffort("medium");
     setHarnessStatus(null);
     setHarnessBootstrapStatus(null);
     setHarnessStatusTaskSlug(null);
     setHarnessBootstrapStatusTaskSlug(null);
     setHarnessFeedbackState(null);
-  }, [project?.repoRoot]);
+  }, [project?.repoRoot, activeTask?.taskSlug]);
 
   useScheduledPoll(
     project ? `project-runtime:${project.repoRoot}:${activeTask?.taskSlug ?? "no-task"}` : null,
     async () => {
       try {
-        const syncKey = project?.repoRoot ?? "";
+        const syncKey = project
+          ? `${project.repoRoot}:${activeTask?.taskSlug ?? "no-task"}`
+          : "";
         const syncLaunchOptions = Boolean(project && projectRuntimeLaunchSyncKeyRef.current !== syncKey);
         await refreshProjectRuntimeState({ syncLaunchOptions });
         if (syncLaunchOptions) {
@@ -760,6 +778,11 @@ export function App() {
           harnessStatus={currentHarnessStatus}
           harnessBootstrapStatus={currentHarnessBootstrapStatus}
           harnessApplyResult={harnessApplyResult}
+          harnessEngineerLaunchOptions={{
+            permissionMode: harnessEngineerPermissionMode,
+            model: harnessEngineerModel,
+            effort: harnessEngineerEffort
+          }}
           autoTaskHarnessReviewEnabled={autoTaskHarnessReviewEnabled}
           autoMemoryEnabled={autoMemoryEnabled}
           gatewayStatus={gatewayStatus}
@@ -767,6 +790,8 @@ export function App() {
           gatewayQrCheck={gatewayQrCheck}
           gatewayLarkRegistration={gatewayLarkRegistration}
           gatewayLarkRegistrationCheck={gatewayLarkRegistrationCheck}
+          ccrStatus={ccrStatus}
+          modelOptions={modelOptions}
           busy={busy}
           onConnect={(repoPath) => withBusy(async () => {
             const nextProject = await apiClient.connectProject({ repoPath });
@@ -869,6 +894,11 @@ export function App() {
               await refreshProjectRuntimeState();
             }, "Update auto memory setting");
           }}
+          onHarnessEngineerLaunchOptionsChange={(input) => {
+            setHarnessEngineerPermissionMode(input.permissionMode);
+            setHarnessEngineerModel(input.model);
+            setHarnessEngineerEffort(input.effort);
+          }}
           onRefreshGateway={() => withBusy(async () => {
             await loadGatewayStatus();
           }, "Refresh Gateway status")}
@@ -891,6 +921,12 @@ export function App() {
             const nextStatus = await apiClient.updateGatewaySettings(input);
             setGatewayStatus(nextStatus);
           }, "Update Gateway settings")}
+          onCcrSettingsChange={(input) => withBusy(async () => {
+            setCcrStatus(await apiClient.updateCcrIntegration(input));
+          }, "Update CCR settings")}
+          onCcrCheck={() => withBusy(async () => {
+            setCcrStatus(await apiClient.checkCcrIntegration());
+          }, "Check CCR connection")}
           onGatewayTranslationChange={(enabled) => {
             void withBusy(async () => {
               const nextStatus = await apiClient.updateGatewaySettings({ translationEnabled: enabled });
@@ -1206,6 +1242,7 @@ export function App() {
           translationAutoSendEnabled={translationAutoSendEnabled}
           translationTargetLanguage={translationTargetLanguage}
           launchTemplate={launchTemplate}
+          modelOptions={modelOptions}
           refreshNonce={workspaceRefreshNonce}
           onTaskChanged={async () => {
             await loadTasks();
@@ -1243,6 +1280,7 @@ export function App() {
         engineerSession={harnessEngineerSession}
         permissionMode={harnessEngineerPermissionMode}
         model={harnessEngineerModel}
+        modelOptions={modelOptions}
         effort={harnessEngineerEffort}
         taskSlug={activeTask?.taskSlug ?? null}
         onClose={() => setHarnessStudioOpen(false)}
@@ -1379,6 +1417,7 @@ export function App() {
         session={translatorSession}
         permissionMode={translatorPermissionMode}
         model={translatorModel}
+        modelOptions={modelOptions}
         effort={translatorEffort}
         onClose={() => setTranslatorSessionOpen(false)}
         onPermissionModeChange={setTranslatorPermissionMode}

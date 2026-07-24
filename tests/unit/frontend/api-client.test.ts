@@ -88,6 +88,30 @@ describe("apiClient", () => {
     expect(diagnostics.pid).toBe(123);
   });
 
+  it("loads task usage analytics on demand", async () => {
+    const fetchMock = mockFetch({
+      version: 1,
+      taskSlug: "demo-task",
+      updatedAt: null,
+      totals: {
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheReadTokens: 0,
+        cacheCreationTokens: 0,
+        costUsd: 0,
+        requestCount: 0,
+        sessionCount: 0
+      },
+      byRole: [],
+      byModel: []
+    });
+
+    await apiClient.getTaskUsageAnalytics("demo-task");
+
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/tasks/demo-task/usage-analytics");
+    expect(fetchMock.mock.calls[0]?.[1]?.method).toBeUndefined();
+  });
+
   it("adds backend runtime info to API errors", async () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({
       error: {
@@ -276,6 +300,27 @@ describe("apiClient", () => {
     expect(preferences.flowPauseAlerts).toBe(false);
     expect(preferences.roleRetryEnabled).toBe(false);
     expect(preferences.autoTaskHarnessReviewEnabled).toBe(true);
+  });
+
+  it("updates and checks global CCR integration settings", async () => {
+    const fetchMock = mockFetch({
+      enabled: true,
+      apiKeyConfigured: true,
+      connectionState: "available",
+      modelAvailable: true,
+      modelOptions: []
+    });
+
+    await apiClient.updateCcrIntegration({ apiKey: "local-secret", enabled: true });
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/api/settings/ccr");
+    expect(JSON.parse(String(fetchMock.mock.calls[0]?.[1]?.body))).toEqual({
+      apiKey: "local-secret",
+      enabled: true
+    });
+
+    await apiClient.checkCcrIntegration();
+    expect(fetchMock.mock.calls[1]?.[0]).toBe("/api/settings/ccr/check");
+    expect(fetchMock.mock.calls[1]?.[1]?.body).toBeUndefined();
   });
 
   it("starts and polls translation sessions through HTTP APIs", async () => {

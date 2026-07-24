@@ -228,9 +228,61 @@ such as a Dev Container or VM.
 Model and effort can be selected before start/resume/restart. Changes affect the
 next launched process, not a currently running Claude Code process.
 
+## Usage Analytics
+
+Open `Usage Analytics` in the sidebar `Task` section to inspect native Claude
+Code usage for the active task. The report shows task totals and breakdowns by
+role and model for input, output, cache-read, and cache-creation tokens plus
+estimated USD cost. It combines every restart and resumed Claude session for
+all seven roles. CCR/GPT usage is excluded.
+
+VCM retains only aggregate task data in
+`<task-worktree>/.ai/vcm/telemetry/usage.json`. The file is temporary runtime
+state and is removed with the task worktree when the task is closed.
+
+### GPT Through Claude Code Router
+
+VCM can launch its normal Claude Code sessions with `GPT-5.6 Sol (CCR)` through
+a host-running [Claude Code Router](https://github.com/musistudio/claude-code-router).
+CCR must already be installed, authenticated, configured, and running on the
+host. VCM does not manage the CCR process.
+
+VCM automatically checks the local-host and DevContainer endpoints:
+
+```text
+http://127.0.0.1:3456
+http://host.docker.internal:3456
+```
+
+Configure CCR to listen on port `3456` with an API key. When VCM runs in a
+DevContainer, make the second endpoint reachable from the container. In the VCM
+`Settings` section:
+
+1. enter and save the CCR API key;
+2. enable `CCR GPT models`;
+3. confirm the status is `available`;
+4. select `GPT-5.6 Sol (CCR)` in any Session model control.
+
+The key is stored in global VCM state (`~/.vcm/settings.json`) with owner-only
+permissions and is never returned by the settings API. It is used for CCR
+checks, model discovery, and the GPT-only `apiKeyHelper`. GPT sessions receive a
+child-only `--settings` override and use the isolated Claude configuration root
+`~/.vcm/claude/ccr`. VCM never edits `~/.claude/settings.json`. Native Claude
+sessions keep their normal configuration and account authentication; VCM only
+removes inherited environment variables that clearly point at the local CCR
+gateway from the native child process. Configure CCR without enabling its
+global Claude Code or Claude App takeover if those clients should remain on
+Anthropic.
+
+Resume keeps the provider recorded by the existing Session. Use Restart when
+switching between a native Claude model and `GPT-5.6 Sol (CCR)`. If CCR is
+disabled, unreachable, rejects the key, or does not expose
+`Codex API/gpt-5.6-sol`, VCM blocks the new Start, Resume, or Restart and does
+not fall back to another model.
+
 ## Launch Template
 
-The launch template stores per-role defaults:
+The global launch template stores per-role defaults for the five workflow roles:
 
 - permission mode
 - model
@@ -241,7 +293,12 @@ One-click start launches the four core roles. If any Gate Review Gate is enabled
 it also launches Gate Reviewer.
 
 Translator and Harness Engineer are tool roles. They are controlled from their
-own panels, not from the main role tab bar.
+own panels, not from the main role tab bar or the one-click launch template.
+Their permission, model, and effort are stored as independent tool Session
+defaults only after an explicit Start or Restart succeeds. Selector changes,
+Resume, and backend automatic startup do not write these defaults. Without a
+saved value, both tools use `bypassPermissions`, the default model, and medium
+effort. An existing task Session keeps its own recorded values.
 
 ## Orchestration
 
@@ -290,7 +347,9 @@ Conversation translation is controlled from the sidebar `Translation` section.
 
 VCM uses a task-scoped Translator role and Claude transcript JSONL files, not
 raw terminal text. Translation memory and completed file translations remain
-project-level durable data.
+project-level durable data. When translation is enabled and the active task's
+Harness is initialized, the backend automatically starts a fresh Translator for
+the task or resumes its saved Session.
 
 Common controls:
 
@@ -394,9 +453,10 @@ Use it to:
 - merge task harness commits back to the connected repository branch when
   appropriate
 
-Harness Engineer is task-scoped and runs from the active task worktree. A new
-task receives its own Harness Engineer session. Durable memory is versioned with
-the project harness files.
+Harness Engineer is task-scoped and runs from the active task worktree. The
+backend automatically starts a fresh Harness Engineer for each active task or
+resumes its saved Session. Durable memory is versioned with the project harness
+files.
 
 ### Auto Memory
 

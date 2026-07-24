@@ -289,6 +289,132 @@ describe("harness routes", () => {
     await app.close();
   });
 
+  it("persists Harness Engineer defaults after Start and Restart but not Resume", async () => {
+    const calls: string[] = [];
+    const session = {
+      id: "harness-session",
+      taskSlug: "demo-task",
+      role: "harness-engineer",
+      status: "running",
+      activityStatus: "idle",
+      command: "claude",
+      permissionMode: "plan",
+      model: "fable",
+      effort: "xhigh",
+      cwd: "/workspace/.claude/worktrees/demo-task",
+      terminalBackend: "node-pty",
+      updatedAt: "2026-06-24T00:00:00.000Z"
+    };
+    const app = Fastify({ logger: false });
+    registerHarnessRoutes(app, {
+      projectService: createProjectServiceStub(),
+      taskService: createTaskServiceStub(),
+      appSettings: {
+        async updateToolSessionDefaults(role, input) {
+          calls.push(`save:${role}:${input.permissionMode}:${input.model}:${input.effort}`);
+          return input;
+        }
+      },
+      autoMemoryService: {
+        async assertHarnessEngineerAvailable() {}
+      },
+      sessionService: {
+        async startRoleSession() {
+          calls.push("start");
+          return session;
+        },
+        async resumeRoleSession() {
+          calls.push("resume");
+          return session;
+        },
+        async restartRoleSession() {
+          calls.push("restart");
+          return session;
+        }
+      }
+    } as never);
+
+    for (const action of ["start", "resume", "restart"]) {
+      expect((await app.inject({
+        method: "POST",
+        url: `/api/projects/harness/engineer/session/${action}`,
+        payload: { taskSlug: "demo-task" }
+      })).statusCode).toBe(200);
+    }
+
+    expect(calls).toEqual([
+      "start",
+      "save:harness-engineer:plan:fable:xhigh",
+      "resume",
+      "restart",
+      "save:harness-engineer:plan:fable:xhigh"
+    ]);
+    await app.close();
+  });
+
+  it("persists Harness Engineer defaults after explicit Bootstrap Start and Restart", async () => {
+    const calls: string[] = [];
+    const bootstrapResult = {
+      status: { status: "running", canStart: false, checks: [], warnings: [] },
+      session: {
+        id: "harness-session",
+        claudeSessionId: "claude-session",
+        status: "running",
+        command: "claude",
+        permissionMode: "bypassPermissions",
+        model: "sonnet",
+        effort: "high",
+        cwd: "/workspace/.claude/worktrees/demo-task",
+        logPath: ".ai/vcm/harness-bootstrap/session.json",
+        updatedAt: "2026-06-24T00:00:00.000Z"
+      },
+      prompt: "bootstrap"
+    };
+    const app = Fastify({ logger: false });
+    registerHarnessRoutes(app, {
+      projectService: createProjectServiceStub(),
+      taskService: createTaskServiceStub(),
+      appSettings: {
+        async updateToolSessionDefaults(role, input) {
+          calls.push(`save:${role}:${input.permissionMode}:${input.model}:${input.effort}`);
+          return input;
+        }
+      },
+      autoMemoryService: {
+        async assertHarnessEngineerAvailable() {}
+      },
+      harnessFeedbackService: {
+        async assertHarnessEngineerAvailable() {}
+      },
+      harnessService: {
+        async startHarnessBootstrap() {
+          calls.push("bootstrap-start");
+          return bootstrapResult;
+        },
+        async restartHarnessBootstrap() {
+          calls.push("bootstrap-restart");
+          return bootstrapResult;
+        }
+      }
+    } as never);
+
+    for (const action of ["start", "restart"]) {
+      expect((await app.inject({
+        method: "POST",
+        url: `/api/projects/harness/bootstrap/${action}`,
+        payload: { taskSlug: "demo-task" }
+      })).statusCode).toBe(200);
+    }
+
+    expect(calls).toEqual([
+      "bootstrap-start",
+      "save:harness-engineer:bypassPermissions:sonnet:high",
+      "bootstrap-restart",
+      "save:harness-engineer:bypassPermissions:sonnet:high"
+    ]);
+    await app.close();
+  });
+
   it("starts Auto Memory as the first phase of a manual task retrospective", async () => {
     const app = Fastify({ logger: false });
     let memoryTrigger: string | undefined;

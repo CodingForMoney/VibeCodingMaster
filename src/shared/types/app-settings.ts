@@ -1,6 +1,11 @@
 import { VCM_ROLE_NAMES } from "../constants.js";
-import type { VcmRoleName } from "./role.js";
-import type { ClaudeModel, ClaudePermissionMode, SessionEffort } from "./session.js";
+import type { ToolRoleName, VcmRoleName } from "./role.js";
+import type {
+  ClaudePermissionMode,
+  SessionEffort,
+  SessionModel,
+  SessionModelOption
+} from "./session.js";
 
 export type ThemeMode = "system" | "light" | "dark";
 export type PermissionRequestMode = "off" | "allowAll";
@@ -19,8 +24,33 @@ export interface TranslationOutputModeOption {
 
 export interface RoleLaunchTemplateEntry {
   permissionMode: ClaudePermissionMode;
-  model: ClaudeModel;
+  model: SessionModel;
   effort: SessionEffort;
+}
+
+export type CcrConnectionState =
+  | "disabled"
+  | "checking"
+  | "available"
+  | "unreachable"
+  | "unauthorized"
+  | "not-ccr"
+  | "invalid-response";
+
+export interface CcrIntegrationStatus {
+  enabled: boolean;
+  apiKeyConfigured: boolean;
+  connectionState: CcrConnectionState;
+  modelAvailable: boolean;
+  checkedAt?: string;
+  error?: string;
+  modelOptions: SessionModelOption[];
+}
+
+export interface UpdateCcrIntegrationRequest {
+  enabled?: boolean;
+  apiKey?: string;
+  clearApiKey?: boolean;
 }
 
 export interface LaunchTemplate {
@@ -28,6 +58,8 @@ export interface LaunchTemplate {
   roles: Record<VcmRoleName, RoleLaunchTemplateEntry>;
   autoOrchestration: boolean;
 }
+
+export type ToolSessionDefaults = Record<ToolRoleName, RoleLaunchTemplateEntry>;
 
 export interface AppPreferences {
   themeMode: ThemeMode;
@@ -41,6 +73,7 @@ export interface AppPreferences {
   translationTargetLanguage: TranslationTargetLanguage;
   translationOutputMode: TranslationOutputMode;
   launchTemplate: LaunchTemplate;
+  toolSessionDefaults: ToolSessionDefaults;
 }
 
 export interface UpdateAppPreferencesRequest {
@@ -91,5 +124,20 @@ export function createDefaultLaunchTemplate(): LaunchTemplate {
     version: 1,
     roles,
     autoOrchestration: true
+  };
+}
+
+export function createDefaultToolSessionDefaults(): ToolSessionDefaults {
+  return {
+    translator: {
+      permissionMode: "bypassPermissions",
+      model: "default",
+      effort: "medium"
+    },
+    "harness-engineer": {
+      permissionMode: "bypassPermissions",
+      model: "default",
+      effort: "medium"
+    }
   };
 }

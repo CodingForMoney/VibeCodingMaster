@@ -24,7 +24,7 @@ const cleanups: Array<() => Promise<void>> = [];
 
 afterEach(async () => {
   while (cleanups.length > 0) {
-    await cleanups.pop()?.();
+    await cleanups.shift()?.();
   }
 });
 
@@ -211,6 +211,7 @@ async function waitForGateDecision(
 }
 
 async function writeGateReport(ctx: MockClaudePromptContext, decision: GateReviewDecision): Promise<void> {
+  await ctx.userPromptSubmit();
   const gate = matchPromptField(ctx.prompt, "Gate") as GateReviewGate;
   const request = matchPromptField(ctx.prompt, "Request");
   const report = matchPromptField(ctx.prompt, "Report");
@@ -265,6 +266,7 @@ function analysisForGate(gate: GateReviewGate): string[] {
       "- Public Contract Coverage: observable result asserted",
       "- Test Integrity: real behavior path retained",
       "- Skips And Gaps: none after correction",
+      "- User Approval And Gap Disposition: none",
       "- Validation Readiness: evidence is reviewable",
       ""
     ];

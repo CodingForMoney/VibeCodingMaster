@@ -19,7 +19,19 @@ async function boundRoleSession(
   taskSlug: string,
   role: RoleName
 ): Promise<RoleSessionRecord> {
-  return { taskSlug, role } as unknown as RoleSessionRecord;
+  return {
+    id: `runtime_${role}`,
+    claudeSessionId: role === "project-manager" ? "claude_pm" : `claude_${role}`,
+    taskSlug,
+    role,
+    status: "running",
+    activityStatus: "running",
+    command: `claude --agent ${role}`,
+    permissionMode: "default",
+    cwd: "/repo/.claude/worktrees/demo-task",
+    terminalBackend: "node-pty",
+    updatedAt: "2026-06-01T00:00:00.000Z"
+  };
 }
 
 describe("createClaudeHookService", () => {
@@ -496,9 +508,11 @@ describe("createClaudeHookService", () => {
       dispatchedCount: 0
     });
     expect(calls).toEqual([
+      "get-session:coder",
       "list:demo-task:.ai/vcm/handoffs:/repo/.claude/worktrees/demo-task",
       "round-state",
       "set-recovery:waiting:1:2026-06-01T00:01:00.000Z",
+      "get-session:coder",
       "mark-running:coder"
     ]);
     expect(timers).toHaveLength(1);
@@ -950,9 +964,9 @@ describe("createClaudeHookService", () => {
       taskService: createTaskServiceStub(),
       sessionService: {
         getRoleSession: boundRoleSession,
-        async recordClaudeHookEvent() {
+        async recordClaudeHookEvent(_repoRoot, input) {
           calls.push("session");
-          return undefined;
+          return boundRoleSession(_repoRoot, input.taskSlug, input.role);
         }
       } as never,
       messageService: {
@@ -1008,9 +1022,9 @@ describe("createClaudeHookService", () => {
       taskService: createTaskServiceStub(),
       sessionService: {
         getRoleSession: boundRoleSession,
-        async recordClaudeHookEvent() {
+        async recordClaudeHookEvent(_repoRoot, input) {
           calls.push("session");
-          return undefined;
+          return boundRoleSession(_repoRoot, input.taskSlug, input.role);
         }
       } as never,
       messageService: {
@@ -1049,7 +1063,7 @@ describe("createClaudeHookService", () => {
     });
 
     expect(result.stopDecision).toBeUndefined();
-    expect(calls).toEqual(["session", "round", "scan"]);
+    expect(calls).toEqual(["session", "round", "boundary", "scan"]);
   });
 
   it("resets the job-guard block counter on UserPromptSubmit", async () => {
@@ -1059,8 +1073,8 @@ describe("createClaudeHookService", () => {
       taskService: createTaskServiceStub(),
       sessionService: {
         getRoleSession: boundRoleSession,
-        async recordClaudeHookEvent() {
-          return undefined;
+        async recordClaudeHookEvent(_repoRoot, input) {
+          return boundRoleSession(_repoRoot, input.taskSlug, input.role);
         }
       } as never,
       messageService: {
@@ -1294,6 +1308,181 @@ describe("createClaudeHookService", () => {
       "session:Stop:harness_engineer_session",
       "bootstrap:Stop:runtime_harness_engineer:harness_engineer_session"
     ]);
+  });
+
+  it("ignores stale VCM role hooks before workflow side effects", async () => {
+    const calls: string[] = [];
+    const current = await boundRoleSession("/repo", "demo-task", "coder");
+    const service = createClaudeHookService({
+      projectService: createProjectServiceStub(),
+      taskService: createTaskServiceStub(),
+      sessionService: {
+        async getRoleSession() {
+          calls.push("get-session");
+          return {
+            ...current,
+            id: "runtime-new",
+            claudeSessionId: "claude-new"
+          };
+        },
+        async recordClaudeHookEvent() {
+          calls.push("record-session");
+          return undefined;
+        }
+      } as never,
+      messageService: {
+        async scanAndDispatchPendingRouteFiles() {
+          calls.push("route");
+          return [];
+        }
+      } as never,
+      roundService: {
+        async recordClaudeHookEvent() {
+          calls.push("round");
+          return {} as never;
+        }
+      } as never,
+      translationService: {
+        async recordConversationBoundary() {
+          calls.push("translation");
+        }
+      },
+      appSettings: createAppSettingsStub(),
+      jobGuard: {
+        async evaluateStop() {
+          calls.push("guard");
+          return { behavior: "allow" } as never;
+        },
+        notePromptSubmitted() {}
+      }
+    });
+
+    const result = await service.handleStopHook({
+      taskSlug: "demo-task",
+      role: "coder",
+      event: {
+        hook_event_name: "Stop",
+        session_id: "claude-old"
+      }
+    });
+
+    expect(result).toMatchObject({
+      sessionUpdated: false,
+      dispatchedCount: 0
+    });
+    expect(calls).toEqual(["get-session"]);
+  });
+
+  it("does not finalize a task-scoped tool turn when its Hook session is stale", async () => {
+    const calls: string[] = [];
+    const service = createClaudeHookService({
+      projectService: createProjectServiceStub(),
+      taskService: createTaskServiceStub(),
+      sessionService: {
+        async recordRoleHookEvent() {
+          calls.push("session");
+          return undefined;
+        }
+      } as never,
+      messageService: {} as MessageService,
+      roundService: {} as RoundService,
+      translationService: {} as Pick<TranslationService, "recordConversationBoundary">,
+      translationWorkerService: {
+        async handleTranslatorHook() {
+          calls.push("worker");
+        }
+      },
+      appSettings: createAppSettingsStub()
+    });
+
+    const result = await service.handleStopHook({
+      taskSlug: "demo-task",
+      role: "translator",
+      event: {
+        hook_event_name: "Stop",
+        session_id: "translator-old"
+      }
+    });
+
+    expect(result).toMatchObject({
+      sessionUpdated: false,
+      dispatchedCount: 0
+    });
+    expect(calls).toEqual(["session"]);
+  });
+
+  it("serializes Hook handling for consecutive turns of the same role session", async () => {
+    const calls: string[] = [];
+    const current = await boundRoleSession("/repo", "demo-task", "coder");
+    let releaseStop = () => {};
+    let markStopEntered = () => {};
+    const stopRelease = new Promise<void>((resolve) => {
+      releaseStop = resolve;
+    });
+    const stopEntered = new Promise<void>((resolve) => {
+      markStopEntered = resolve;
+    });
+    const service = createClaudeHookService({
+      projectService: createProjectServiceStub(),
+      taskService: createTaskServiceStub(),
+      sessionService: {
+        async getRoleSession() {
+          return current;
+        },
+        async recordClaudeHookEvent(_repoRoot, input) {
+          calls.push(`record:${input.eventName}`);
+          if (input.eventName === "Stop") {
+            markStopEntered();
+            await stopRelease;
+          }
+          return {
+            ...current,
+            activityStatus: input.eventName === "Stop" ? "idle" : "running"
+          };
+        }
+      } as never,
+      messageService: {
+        async scanAndDispatchPendingRouteFiles() {
+          return [];
+        },
+        async confirmPromptSubmitted() {
+          return undefined;
+        }
+      } as never,
+      roundService: {
+        async recordClaudeHookEvent() {
+          return {} as never;
+        }
+      } as never,
+      translationService: {
+        async recordConversationBoundary() {}
+      },
+      appSettings: createAppSettingsStub()
+    });
+
+    const stop = service.handleHook({
+      taskSlug: "demo-task",
+      role: "coder",
+      event: {
+        hook_event_name: "Stop",
+        session_id: "claude_coder"
+      }
+    });
+    await stopEntered;
+    const prompt = service.handleHook({
+      taskSlug: "demo-task",
+      role: "coder",
+      event: {
+        hook_event_name: "UserPromptSubmit",
+        session_id: "claude_coder"
+      }
+    });
+    await Promise.resolve();
+
+    expect(calls).toEqual(["record:Stop"]);
+    releaseStop();
+    await Promise.all([stop, prompt]);
+    expect(calls).toEqual(["record:Stop", "record:UserPromptSubmit"]);
   });
 
   it("ignores a late duplicate Stop after transcript reconciliation completed the turn", async () => {

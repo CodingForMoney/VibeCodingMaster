@@ -30,7 +30,10 @@ export function createTerminalInterruptService(deps: TerminalInterruptServiceDep
         return;
       }
 
-      await deps.sessionService.markTerminalSessionActivityIdle(repoRoot, sessionId);
+      const session = await deps.sessionService.markTerminalSessionActivityIdle(repoRoot, sessionId);
+      if (!session) {
+        return;
+      }
 
       if (!isVcmRoleName(terminalSession.role)) {
         return;

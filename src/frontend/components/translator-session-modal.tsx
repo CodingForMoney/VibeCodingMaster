@@ -1,4 +1,4 @@
-import type { ClaudePermissionMode, RoleSessionRecord, SessionEffort, SessionModel } from "../../shared/types/session.js";
+import type { ClaudePermissionMode, RoleSessionRecord, SessionEffort, SessionModel, SessionModelOption } from "../../shared/types/session.js";
 import { SessionToolbar } from "./session-toolbar.js";
 import { XtermView } from "../terminal/xterm-view.js";
 
@@ -6,6 +6,7 @@ export interface TranslatorSessionModalProps {
   busy?: boolean;
   effort: SessionEffort;
   model: SessionModel;
+  modelOptions: SessionModelOption[];
   open: boolean;
   permissionMode: ClaudePermissionMode;
   session?: RoleSessionRecord | null;
@@ -24,6 +25,7 @@ export function TranslatorSessionModal({
   busy,
   effort,
   model,
+  modelOptions,
   open,
   permissionMode,
   session,
@@ -57,6 +59,7 @@ export function TranslatorSessionModal({
           session={session ?? undefined}
           permissionMode={permissionMode}
           model={model}
+          modelOptions={modelOptions}
           effort={effort}
           busy={busy}
           onPermissionModeChange={onPermissionModeChange}
@@ -75,7 +78,7 @@ export function TranslatorSessionModal({
           ) : (
             <div className="terminal-empty">
               <strong>translator</strong>
-              <span>{session?.claudeSessionId ? "Resume this project translator session." : "Start the project translator session."}</span>
+              <span>{session?.claudeSessionId ? "Resume this task translator session." : "Start the task translator session."}</span>
             </div>
           )}
         </div>

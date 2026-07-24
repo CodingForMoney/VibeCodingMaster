@@ -187,6 +187,10 @@ TBD
 ## Blocking Validation Issues
 
 TBD
+
+## User Approval Evidence
+
+TBD
 `;
 }
 

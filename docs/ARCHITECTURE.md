@@ -23,23 +23,25 @@ layers plus supporting tools.
 
 - `api/`: Fastify route modules, one per domain (project, task, session, round,
   message, harness, gate-review, translation, gateway, diagnostics, artifacts,
-  runtime-state, app-settings, claude-hook). Routes are thin and delegate to
-  services.
+  runtime-state, usage analytics, app-settings, claude-hook). Routes are thin
+  and delegate to services.
 - `services/`: business logic. Key services include `task-service`,
   `task-launch-service` (backend-owned one-click task start, shared by the GUI
   endpoint and the gateway), `task-close-service` (backend-owned unconditional
   task close, shared by the GUI endpoint and the gateway), `session-service`, `round-service`,
   `runtime-coordinator-service`, `runtime-recovery-service`,
   `turn-reconciler-service`, `message-service`, `task-workflow-service`,
+  `architect-restart-service`,
   `artifact-service`, `harness-service`, `harness-feedback-service`,
   `auto-memory-service`,
   `gate-review-service`, `translation-service`/`translation-worker-service`,
-  `job-guard-service`, and `command-dispatcher`.
+  `ccr-integration-service`, `usage-analytics-service`, `job-guard-service`, and
+  `command-dispatcher`.
 - `runtime/`: PTY-backed terminal runtime (`node-pty-runtime`,
   `terminal-runtime`, `session-registry`, `terminal-submit`) that supervises one
   Claude Code process per role.
-- `adapters/`: side-effect boundaries — `claude-adapter`, `git-adapter`,
-  `command-runner`, `filesystem`.
+- `adapters/`: side-effect boundaries — `claude-adapter`,
+  `ccr-gateway-adapter`, `git-adapter`, `command-runner`, `filesystem`.
 - `gateway/`: mobile gateway service plus channel implementations
   (Weixin iLink, Lark) and command parsing; channel connection is gated by a
   runtime, default-off switch. Detailed sub-area design lives in
@@ -88,6 +90,59 @@ frontend  --depends on-->  shared  <--depends on--  backend
   `api -> services -> (runtime | adapters | gateway | templates)`. Routes should
   not contain business logic; services should reach the outside world only
   through adapters and the runtime.
+
+## CCR Model Integration
+
+CCR is an optional global integration for running the existing VCM-managed
+Claude Code processes against one supported GPT model. The host owns the CCR
+process and account authentication. The VCM backend identifies CCR at the fixed
+local endpoint `http://127.0.0.1:3456` or DevContainer endpoint
+`http://host.docker.internal:3456`; the frontend never calls CCR.
+
+`ccr-gateway-adapter` verifies the gateway identity and performs authenticated
+model discovery, selecting the first valid runtime endpoint. `ccr-integration-service` owns the enabled state, volatile
+connection result, shared in-flight check, short cache, safe API response, and
+session-scoped child environment and settings override. The API key is
+persisted only in global app settings and is used for gateway checks, model
+discovery, and GPT child authentication through the helper; settings responses
+expose only whether it is configured. GPT-backed children clear
+inherited Anthropic credential variables and receive an isolated `apiKeyHelper`
+through `--settings`. They also use the VCM-owned Claude configuration root
+`~/.vcm/claude/ccr`, which keeps CCR model discovery, cache, and transcripts out
+of the user's global `~/.claude` state. VCM never edits global Claude settings.
+Native child processes retain normal Claude configuration and authentication;
+only inherited environment variables that identify the local CCR gateway are
+removed from that child.
+
+`session-service` is the single process-launch boundary for CCR. It requests the
+model environment before every Start, Resume, or Restart path and merges it into
+the PTY child environment. This covers workflow roles, Gate Reviewer,
+Translator, Harness Engineer, Harness Bootstrap, and one-click launch without
+separate role-specific CCR logic. `claude-adapter` omits native `--model` only
+for the namespaced CCR model. Native Claude commands remain unchanged, and the
+native child environment removes only inherited local-CCR takeover variables.
+An unavailable CCR selection fails before process creation and is never
+normalized or silently replaced. Session records persist the Claude
+configuration root so transcript discovery and Resume use the same provider
+state. Resume cannot cross between native Claude and CCR; Restart creates the
+new provider Session.
+
+## Task Usage Analytics
+
+`session-service` enables Claude Code OpenTelemetry log export for every native
+Claude role process and attaches only `vcm.role` plus a per-process launch ID.
+It disables the exporter for CCR/GPT processes. Prompt, response, tool-detail,
+and raw API body logging remain disabled.
+
+Claude Code posts `api_request` events to
+`POST /api/telemetry/v1/logs`. `usage-analytics-service` attributes them to the
+single active task, deduplicates retried OTLP batches, and aggregates token and
+estimated cost data across every launch and Claude session. It stores only the
+aggregate at `<taskRepoRoot>/.ai/vcm/telemetry/usage.json`; no raw telemetry is
+retained. The report returned by
+`GET /api/tasks/:taskSlug/usage-analytics` contains task totals plus role and
+model breakdowns. The frontend loads it only when Usage Analytics is opened or
+manually refreshed. Task close removes the worktree and therefore the report.
 
 ## Project-Wide Constraints
 
@@ -183,8 +238,15 @@ sending, or placed in a separate approval/apply state machine.
 
 `round-service` owns the active turn and round state. `session-service` owns role
 session activity, while the PTY runtime owns Claude process liveness and terminal
-output timestamps. `runtime-coordinator-service` runs backend turn reconciliation
-every 10 seconds, independently of frontend polling.
+output timestamps. `runtime-coordinator-service` runs full active-task
+reconciliation every 10 seconds, independently of frontend polling. It
+reconciles Turns, automatically starts or resumes the task-scoped Harness
+Engineer, and starts or resumes the task-scoped Translator when translation is
+enabled and the Harness is initialized. Tool Session defaults are independent
+from the workflow-role launch template. Explicit Start and Restart routes save
+the successful Session's permission, model, and effort; automatic startup and
+Resume never write them. Fresh tool Sessions use the saved defaults, while
+resumable task Sessions keep the launch options recorded by that Session.
 
 Round tracking includes Project Manager, Architect, Coder, Tester, and optional
 Gate Reviewer sessions. Translator and Harness Engineer are task-scoped tool
@@ -196,6 +258,31 @@ participates in Round tracking through that workflow role's hooks.
 is reconciled through terminal StopFailure; and a live turn with no hook, terminal,
 or transcript activity for 30 minutes is interrupted before StopFailure recovery.
 The reconciler never treats inactivity alone as successful completion.
+
+## Architect Planning Context Ownership
+
+Architect Interview produces two separate task artifacts: the user-confirmed
+`.ai/vcm/handoffs/architecture-brief.md` and the current-worktree
+`.ai/vcm/handoffs/architecture-evidence.md`. Planning consumes those artifacts
+and writes the executable `architecture-plan.md`; the architecture-plan Gate
+hashes all three so changed evidence invalidates an earlier approval.
+
+Architect delegates exact scaffold execution to one foreground
+`vcm-architect-scaffold-worker` subagent configured with `model: opus` and
+`effort: xhigh`. The worker has an independent context and returns before the
+Architect turn continues. Architect remains responsible for reviewing the
+scaffold commit, ledger reconciliation, and build evidence.
+
+`architect-restart-service` owns the task-local, in-memory deferred restart
+between completed planning and later Architect work. The Architect schedules it
+through `.ai/tools/request-architect-restart` before writing the completed route
+to PM. The service starts a fresh Architect session only after a normal
+Architect Stop, delivery of that Architect-to-PM message, and PM's matching
+`UserPromptSubmit` confirmation. It preserves the selected permission, model,
+and effort and launches Claude Code with a short `--append-system-prompt` that
+points to the completed brief, evidence, plan, scaffold, and Gate report. It
+does not inject a user prompt or create an extra turn. StopFailure and task close
+never execute a pending restart.
 
 ## Task Workflow State Ownership
 

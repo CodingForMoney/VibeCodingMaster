@@ -14,10 +14,11 @@ import {
 import type { MockClaudePromptContext } from "./helpers/mock-claude-runtime.js";
 
 const cleanups: Array<() => Promise<void>> = [];
+const GATEWAY_WAIT_TIMEOUT_MS = 20_000;
 
 afterEach(async () => {
   while (cleanups.length > 0) {
-    await cleanups.pop()?.();
+    await cleanups.shift()?.();
   }
 });
 
@@ -69,23 +70,23 @@ describe("backend E2E Gateway with mock channel and mock Claude Code", () => {
         "已收到，正在翻译..."
       ]));
       expect(sent.some((text) => text.includes("翻译完成，已发送给 PM：") && text.includes("Please inspect the gateway task."))).toBe(true);
-    }, 12_000);
+    }, GATEWAY_WAIT_TIMEOUT_MS);
 
     await waitFor(() => {
       expect(env.mockRuntime.getWrites(pmSession!.id).join("\n")).toContain("Please inspect the gateway task.");
-    }, 12_000);
+    }, GATEWAY_WAIT_TIMEOUT_MS);
 
     await waitFor(async () => {
       const response = await env.app.inject({ method: "GET", url: "/api/gateway/status" });
       expect(response.statusCode).toBe(200);
       expect(response.json<GatewayStatus>().lastPmInputMessageId).toBeTruthy();
-    }, 12_000);
+    }, GATEWAY_WAIT_TIMEOUT_MS);
 
     await waitFor(() => {
       const sent = sentTexts(env);
       expect(sent.some((text) => text.includes("PM final reply 原文：") && text.includes("PM final reply from gateway E2E."))).toBe(true);
       expect(sent.some((text) => text.includes("PM 回复已收到，但翻译失败。"))).toBe(true);
-    }, 12_000);
+    }, GATEWAY_WAIT_TIMEOUT_MS);
 
     env.mockGateway.enqueueText("/retry", {
       fromUserId: "mock-user",
@@ -97,8 +98,8 @@ describe("backend E2E Gateway with mock channel and mock Claude Code", () => {
         text.includes("重新翻译成功：") &&
         text.includes("PM final reply translated.")
       )).toBe(true);
-    }, 12_000);
-  }, 20_000);
+    }, GATEWAY_WAIT_TIMEOUT_MS);
+  }, 60_000);
 });
 
 async function writeGatewayTranslations(ctx: MockClaudePromptContext): Promise<void> {

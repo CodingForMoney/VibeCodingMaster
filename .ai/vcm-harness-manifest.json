@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
   "manager": "vcm",
-  "harnessVersion": "0.7.5",
+  "harnessVersion": "0.7.16",
   "installMode": "fixed",
   "installedAt": "2026-06-24T22:49:58.684Z",
-  "updatedAt": "2026-07-17T16:05:01.154Z",
+  "updatedAt": "2026-07-22T03:19:41.583Z",
   "runtimeRoots": [
     ".ai/vcm/",
     ".claude/worktrees/"
@@ -240,6 +240,23 @@
       }
     },
     {
+      "path": ".claude/agents/vcm-architect-scaffold-worker.md",
+      "entryType": "file",
+      "category": "agent-architect-scaffold-worker",
+      "ownership": "managed-block",
+      "source": "vcm-template",
+      "lifecycle": "long-term",
+      "marker": {
+        "type": "html",
+        "begin": "<!-- VCM:BEGIN version=1 -->",
+        "end": "<!-- VCM:END -->"
+      },
+      "uninstall": {
+        "action": "remove-managed-block",
+        "requiresConfirmation": false
+      }
+    },
+    {
       "path": ".claude/settings.json",
       "entryType": "file",
       "category": "claude-settings",
@@ -337,6 +354,14 @@
     },
     {
       "path": ".claude/skills/vcm-propose-memory/",
+      "entryType": "directory",
+      "category": "skill-directory",
+      "ownership": "vcm-created",
+      "source": "vcm-template",
+      "lifecycle": "long-term"
+    },
+    {
+      "path": ".claude/skills/restart-architect/",
       "entryType": "directory",
       "category": "skill-directory",
       "ownership": "vcm-created",
@@ -536,6 +561,18 @@
       }
     },
     {
+      "path": ".claude/skills/restart-architect/SKILL.md",
+      "entryType": "file",
+      "category": "skill",
+      "ownership": "whole-file",
+      "source": "vcm-template",
+      "lifecycle": "long-term",
+      "uninstall": {
+        "action": "delete-file-if-unchanged",
+        "requiresConfirmation": false
+      }
+    },
+    {
       "path": ".ai/tools/request-gate-review",
       "entryType": "file",
       "category": "runtime-tool",
@@ -549,6 +586,30 @@
     },
     {
       "path": ".ai/tools/update-task-state",
+      "entryType": "file",
+      "category": "runtime-tool",
+      "ownership": "whole-file",
+      "source": "vcm-template",
+      "lifecycle": "conditional-long-term",
+      "uninstall": {
+        "action": "delete-file-if-unchanged",
+        "requiresConfirmation": false
+      }
+    },
+    {
+      "path": ".ai/tools/check-scaffold-ledger",
+      "entryType": "file",
+      "category": "runtime-tool",
+      "ownership": "whole-file",
+      "source": "vcm-template",
+      "lifecycle": "conditional-long-term",
+      "uninstall": {
+        "action": "delete-file-if-unchanged",
+        "requiresConfirmation": false
+      }
+    },
+    {
+      "path": ".ai/tools/request-architect-restart",
       "entryType": "file",
       "category": "runtime-tool",
       "ownership": "whole-file",
