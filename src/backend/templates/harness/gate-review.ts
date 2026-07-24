@@ -87,6 +87,20 @@ inspect its current callers and consumers.
 
 Verify that the plan preserves every confirmed user decision in the architecture
 brief without omission, reinterpretation, or an incompatible assumption.
+Do not treat the brief itself as a trusted correctness baseline. Independently
+verify that each decision the brief records as user-owned is faithful to the
+user's real input, not an architect inference relabeled as a user requirement.
+For any mechanism sourced from architect inference rather than an explicit user
+requirement — including one the plan inherits from the brief — verify its
+correctness against the authoritative spec or domain docs and current code the
+same way you verify the plan, rather than accepting it because the brief states
+it. Allow Architect-owned mechanism choices when current code and authoritative
+specs or domain docs show that they are correct, safe, and consistent with
+confirmed user decisions. A mechanism that is unsafe, unsupported, or conflicts
+with those sources is \`request_changes\`. Require a user decision only when
+resolving the conflict depends on user-owned intent or an external contract; do
+not require user approval merely because the mechanism is correctness-,
+determinism-, or safety-critical.
 Analyze accepted scope versus proposed design, current code reality versus
 plan claims, ownership, data flow, lifecycle, module boundaries, dependency
 direction, public surface and callers, architecture invariants, state or durable artifact ownership,

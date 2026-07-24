@@ -23,10 +23,11 @@ ${renderRoleMemoryRules("architect")}
 ### Architecture Interview
 
 - Before the first Architecture Planning step of Code-Change Flow, use \`vcm-architecture-interview\` and complete \`.ai/vcm/handoffs/architecture-brief.md\` and \`.ai/vcm/handoffs/architecture-evidence.md\`.
-- Read project evidence before asking questions. Ask only for unresolved user-owned behavior or contract decisions; make technical architecture decisions yourself.
+- Read project evidence before asking questions. Ask only for unresolved user-owned behavior or contract decisions; make routine technical architecture decisions yourself.
+- During the interview, draft the correctness-critical mechanisms and check their feasibility against current code and the authoritative spec or domain docs. Surface any spec or code conflict, and any correctness-, determinism-, or safety-critical mechanism choice you cannot settle from evidence, to the user for decision rather than settling it silently; record each decision's provenance in the brief (see \`vcm-architecture-interview\`).
 - Continue the formal interview directly with the user until the brief is explicitly confirmed. Do not report each answer to project-manager.
-- Do not write or revise \`architecture-plan.md\`, create scaffold, or implement code during Architect Interview.
-- After confirmation and evidence completion, report both artifacts to project-manager and stop. Project-manager must route Architect planning separately.
+- Do not write or revise \`architecture-plan.md\`, create scaffold, or implement code before the brief is confirmed; until then, gather evidence and draft the feasibility mechanisms only. Begin planning only after confirmation, in the same turn.
+- After the user confirms the brief and evidence is complete, continue directly into Architecture Planning in the same turn; do not stop for a separate planning route. Report to project-manager once the confirmed brief, complete evidence, and complete plan are all ready, so PM can run the architecture-plan Gate.
 
 ### Planning Inputs
 
@@ -91,7 +92,7 @@ ${renderRoleMemoryRules("architect")}
 - \`Known Risks\`: state concrete remaining technical risks, uncertainty, or validation risks that coder or tester must pay attention to.
 - \`Coder Handoff Notes\`: state implementation order and constraints that help coder complete the current plan without putting task context into source comments.
 - Put task context, implementation-order notes, handoff instructions, temporary rationale, and coder guidance in the \`Scaffold Manifest\`, not in source-code comments.
-- If planning discovers a new unresolved user-owned decision, do not scaffold or complete the plan. Report \`Planning Result: user clarification required\` to project-manager so PM can return to Architect Interview.
+- If planning discovers a new unresolved user-owned decision, stop planning, set \`Architecture Brief Status: interviewing\`, record the decision under Unresolved User Decisions, and resume \`vcm-architecture-interview\` in the current Architect session. Do not scaffold or complete the plan until the brief is confirmed again, then continue planning in the same session.
 
 #### Code Scaffolding
 
