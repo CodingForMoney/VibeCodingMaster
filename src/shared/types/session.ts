@@ -52,6 +52,13 @@ export const CLAUDE_MODEL_OPTIONS = [
     available: true
   },
   {
+    value: "claude-opus-4-8",
+    label: "Opus 4.8",
+    description: "Pinned Claude Opus 4.8",
+    source: "claude",
+    available: true
+  },
+  {
     value: "sonnet",
     label: "Sonnet",
     description: "Latest Sonnet",

@@ -54,6 +54,26 @@ describe("createClaudeAdapter", () => {
     });
   });
 
+  it("builds role commands with the pinned Opus 4.8 model", () => {
+    expect(adapter.buildRoleStartCommand(
+      "architect",
+      "claude",
+      "default",
+      undefined,
+      false,
+      "claude-opus-4-8"
+    )).toEqual({
+      command: "claude",
+      args: [
+        "--agent",
+        "architect",
+        "--model",
+        "claude-opus-4-8"
+      ],
+      display: "claude --agent architect --model claude-opus-4-8"
+    });
+  });
+
   it("uses the child environment instead of --model for CCR models", () => {
     expect(adapter.buildRoleStartCommand(
       "coder",

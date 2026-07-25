@@ -191,7 +191,8 @@ opus
 ccr:Codex API/gpt-5.6-sol
 ```
 
-Existing persisted Claude values (`default`, `fable`, `opus`, and `sonnet`)
+Existing persisted Claude values (`default`, `fable`, `opus`,
+`claude-opus-4-8`, and `sonnet`)
 remain valid without migration. The CCR prefix is sufficient to distinguish
 the new launch path.
 

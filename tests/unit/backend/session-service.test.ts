@@ -144,15 +144,15 @@ describe("createSessionService", () => {
     const service = createTestSessionService(fs, runtimeInputs);
 
     const started = await service.startRoleSession("/repo", "demo-task", "coder", {
-      model: "opus"
+      model: "claude-opus-4-8"
     });
 
-    expect(started.model).toBe("opus");
+    expect(started.model).toBe("claude-opus-4-8");
     expect(runtimeInputs[0]?.args).toEqual([
       "--agent",
       "coder",
       "--model",
-      "opus"
+      "claude-opus-4-8"
     ]);
   });
 
