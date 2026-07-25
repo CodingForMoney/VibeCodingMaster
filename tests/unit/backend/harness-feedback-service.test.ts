@@ -242,6 +242,9 @@ function createRuntime(writes: string[]): TerminalRuntime {
     },
     subscribe() {
       return () => undefined;
+    },
+    subscribeProcessExits() {
+      return () => undefined;
     }
   };
 }

@@ -7,6 +7,7 @@ import type {
   CreateTerminalSessionInput,
   SubscribeTerminalOptions,
   TerminalEventListener,
+  TerminalProcessExitListener,
   TerminalRuntime,
   TerminalSession,
   Unsubscribe
@@ -43,6 +44,7 @@ export interface MockClaudeRuntimeOptions {
 
 export class MockClaudeRuntime implements TerminalRuntime {
   private readonly entries = new Map<string, RuntimeEntry>();
+  private readonly processExitListeners = new Set<TerminalProcessExitListener>();
   private readonly scenarios: MockClaudeScenario[] = [];
   private readonly pending = new Set<Promise<void>>();
   private readonly now: () => string;
@@ -209,6 +211,28 @@ export class MockClaudeRuntime implements TerminalRuntime {
     return () => {
       entry.listeners.delete(listener);
     };
+  }
+
+  subscribeProcessExits(listener: TerminalProcessExitListener): Unsubscribe {
+    this.processExitListeners.add(listener);
+    return () => {
+      this.processExitListeners.delete(listener);
+    };
+  }
+
+  exitProcess(sessionId: string, exitCode = 1): void {
+    const entry = this.getEntry(sessionId);
+    entry.session.status = exitCode === 0 ? "exited" : "crashed";
+    entry.session.exitCode = exitCode;
+    this.entries.delete(sessionId);
+    for (const listener of this.processExitListeners) {
+      listener({
+        session: { ...entry.session },
+        exitCode
+      });
+    }
+    this.emit(entry, { type: "exit", exitCode });
+    entry.listeners.clear();
   }
 
   private async runPrompt(entry: RuntimeEntry, prompt: string): Promise<void> {

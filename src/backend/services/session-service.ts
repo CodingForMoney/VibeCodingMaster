@@ -58,6 +58,7 @@ export interface SessionService {
   recordRoleHookEvent(repoRoot: string, input: RecordRoleHookEventInput): Promise<RoleSessionRecord | undefined>;
   recordClaudeHookEvent(repoRoot: string, input: RecordClaudeHookEventInput): Promise<RoleSessionRecord | undefined>;
   markTerminalSessionActivityIdle(repoRoot: string, sessionId: string): Promise<RoleSessionRecord | undefined>;
+  recordTerminalProcessExit(repoRoot: string, input: RecordTerminalProcessExitInput): Promise<TerminalProcessExitRecord | undefined>;
   markRoleActivityRunning(repoRoot: string, taskSlug: string, role: RoleName, expectedSessionId?: string): Promise<RoleSessionRecord | undefined>;
   markRoleActivityIdle(repoRoot: string, taskSlug: string, role: RoleName): Promise<RoleSessionRecord | undefined>;
 }
@@ -128,6 +129,17 @@ export interface RecordRoleHookEventInput {
   cwd?: string;
   runtimeSessionId?: string;
   runtimeSessionToken?: string;
+}
+
+export interface RecordTerminalProcessExitInput {
+  sessionId: string;
+  status: Extract<RoleSessionRecord["status"], "exited" | "crashed">;
+  exitCode: number | null;
+}
+
+export interface TerminalProcessExitRecord {
+  record: RoleSessionRecord;
+  turnWasRunning: boolean;
 }
 
 export interface RecordProjectTranslatorHookEventInput {
@@ -997,6 +1009,58 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     return updated;
   }
 
+  async function recordProjectToolProcessExit(
+    repoRoot: string,
+    current: RoleSessionRecord,
+    input: RecordTerminalProcessExitInput,
+    persist: (fs: FileSystemAdapter, repoRoot: string, record: RoleSessionRecord) => Promise<void>
+  ): Promise<TerminalProcessExitRecord> {
+    const timestamp = now();
+    const turnWasRunning = current.activityStatus === "running";
+    const updated: RoleSessionRecord = {
+      ...current,
+      status: input.status,
+      activityStatus: "idle",
+      pid: undefined,
+      exitCode: input.exitCode,
+      lastTurnEndedAt: turnWasRunning ? timestamp : current.lastTurnEndedAt,
+      updatedAt: timestamp
+    };
+    deps.registry.upsert(updated);
+    await persist(deps.fs, repoRoot, updated);
+    return { record: updated, turnWasRunning };
+  }
+
+  async function recordTaskRoleProcessExit(
+    repoRoot: string,
+    taskSlug: string,
+    role: RoleName,
+    input: RecordTerminalProcessExitInput
+  ): Promise<TerminalProcessExitRecord | undefined> {
+    const current = await getTaskRoleSessionView(repoRoot, taskSlug, role);
+    if (!current || current.id !== input.sessionId) {
+      return undefined;
+    }
+
+    const timestamp = now();
+    const turnWasRunning = current.activityStatus === "running";
+    const updated: RoleSessionRecord = {
+      ...current,
+      status: input.status,
+      activityStatus: "idle",
+      pid: undefined,
+      exitCode: input.exitCode,
+      lastTurnEndedAt: turnWasRunning ? timestamp : current.lastTurnEndedAt,
+      updatedAt: timestamp
+    };
+    deps.registry.upsert(updated);
+
+    const config = await deps.projectService.loadConfig(repoRoot);
+    const task = await deps.taskService.loadTask(repoRoot, taskSlug);
+    await persistRoleSessionRecord(deps.fs, repoRoot, getTaskRuntimeRepoRoot(task), config.stateRoot, updated);
+    return { record: updated, turnWasRunning };
+  }
+
   return {
     async assertModelLaunchReady(model = "default") {
       await getModelLaunchEnvironment(normalizeClaudeModel(model));
@@ -1435,6 +1499,29 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       }
 
       return markTaskRoleActivityIdle(repoRoot, taskSlug, role, sessionId);
+    },
+    async recordTerminalProcessExit(repoRoot, input) {
+      const registered = deps.registry.get(input.sessionId);
+      const role = registered?.role;
+      const taskSlug = registered?.taskSlug;
+      if (!role || !taskSlug) {
+        return undefined;
+      }
+
+      if (role === TRANSLATOR_ROLE && taskSlug === PROJECT_TRANSLATOR_SCOPE) {
+        const current = await getProjectToolSessionView(repoRoot, TRANSLATOR_ROLE);
+        return current?.id === input.sessionId
+          ? recordProjectToolProcessExit(repoRoot, current, input, persistTranslatorSession)
+          : undefined;
+      }
+      if (role === HARNESS_ENGINEER_ROLE && taskSlug === PROJECT_HARNESS_ENGINEER_SCOPE) {
+        const current = await getProjectToolSessionView(repoRoot, HARNESS_ENGINEER_ROLE);
+        return current?.id === input.sessionId
+          ? recordProjectToolProcessExit(repoRoot, current, input, persistHarnessEngineerSession)
+          : undefined;
+      }
+
+      return recordTaskRoleProcessExit(repoRoot, taskSlug, role, input);
     },
     async markRoleActivityRunning(repoRoot, taskSlug, role, expectedSessionId) {
       const current = await this.getRoleSession(repoRoot, taskSlug, role);

@@ -47,9 +47,9 @@ import { createTaskCloseService, type TaskCloseService } from "./services/task-c
 import { createTaskWorkflowService, type TaskWorkflowService } from "./services/task-workflow-service.js";
 import { createTaskLaunchService, type TaskLaunchService } from "./services/task-launch-service.js";
 import { createTerminalInterruptService, type TerminalInterruptService } from "./services/terminal-interrupt-service.js";
+import { createTerminalProcessExitService, type TerminalProcessExitService } from "./services/terminal-process-exit-service.js";
 import { createTranslationService, type TranslationService } from "./services/translation-service.js";
 import { createUsageAnalyticsService, type UsageAnalyticsService } from "./services/usage-analytics-service.js";
-import { createTurnReconcilerService } from "./services/turn-reconciler-service.js";
 import { createDiagnosticsService, type DiagnosticsService } from "./services/diagnostics-service.js";
 import { registerAppSettingsRoutes } from "./api/app-settings-routes.js";
 import { registerArtifactRoutes } from "./api/artifact-routes.js";
@@ -103,6 +103,7 @@ export interface ServerDeps {
   runtimeCoordinator: RuntimeCoordinatorService;
   runtimeRecoveryService: RuntimeRecoveryService;
   terminalInterruptService: TerminalInterruptService;
+  terminalProcessExitService: TerminalProcessExitService;
   runtime: TerminalRuntime;
   diagnosticsService: DiagnosticsService;
   usageAnalyticsService: UsageAnalyticsService;
@@ -222,10 +223,12 @@ export async function createServer(deps: ServerDeps, options: CreateServerOption
   app.addHook("onReady", async () => {
     await deps.ccrIntegration.initialize();
     await cleanupRecentTranslationRuntime(deps);
+    deps.terminalProcessExitService.start();
     deps.runtimeCoordinator.start();
     await deps.gatewayService.start();
   });
   app.addHook("onClose", async () => {
+    deps.terminalProcessExitService.stop();
     deps.runtimeCoordinator.stop();
     await deps.gatewayService.stop();
   });
@@ -451,11 +454,6 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     translationWorkerService,
     architectRestartService
   });
-  const turnReconciler = createTurnReconcilerService({
-    sessionService,
-    roundService,
-    claudeHookService
-  });
   const runtimeCoordinator = createRuntimeCoordinatorService({
     appSettings,
     projectService,
@@ -467,12 +465,18 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     autoMemoryService,
     roundService,
     gatewayService,
-    turnReconciler,
     async getStateRoot(repoRoot) {
       return (await projectService.loadConfig(repoRoot)).stateRoot;
     }
   });
   const terminalInterruptService = createTerminalInterruptService({
+    runtime,
+    projectService,
+    taskService,
+    sessionService,
+    roundService
+  });
+  const terminalProcessExitService = createTerminalProcessExitService({
     runtime,
     projectService,
     taskService,
@@ -512,6 +516,7 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     runtimeCoordinator,
     runtimeRecoveryService,
     terminalInterruptService,
+    terminalProcessExitService,
     runtime,
     diagnosticsService,
     usageAnalyticsService

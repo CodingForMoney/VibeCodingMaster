@@ -51,7 +51,6 @@ interface StopFailureDiagnostic {
 export interface ClaudeHookService {
   handleHook(input: ClaudeHookRequest): Promise<ClaudeHookResult>;
   handleStopHook(input: ClaudeHookRequest): Promise<ClaudeHookResult>;
-  handleReconciledTurnEnd(input: ClaudeHookRequest): Promise<ClaudeHookResult>;
   handlePermissionRequestHook(input: ClaudeHookRequest): Promise<ClaudePermissionRequestHookResult | undefined>;
 }
 
@@ -1040,18 +1039,6 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
           return processHarnessEngineerHook(input);
         }
         return processStopHook(input, { allowBlock: true });
-      });
-    },
-    handleReconciledTurnEnd(input) {
-      return withRoleHookLock(input, async () => {
-        const eventName = parseHookEvent(input.event.hook_event_name);
-        if (eventName === "Stop") {
-          return processStopHook(input, { allowBlock: false });
-        }
-        if (eventName === "StopFailure") {
-          return processStopFailureHook(input);
-        }
-        throwUnsupportedEvent(eventName);
       });
     },
     handlePermissionRequestHook

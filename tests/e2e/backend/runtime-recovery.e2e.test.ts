@@ -5,7 +5,8 @@ import {
   connectProject,
   getWorkspaceState,
   resumeRole,
-  startRole
+  startRole,
+  waitFor
 } from "./helpers/e2e-actions.js";
 import { createMockClaudeE2eApp, type MockClaudeE2eApp } from "./helpers/e2e-app.js";
 import { createE2eRepo } from "./helpers/e2e-repo.js";
@@ -60,6 +61,104 @@ describe("backend E2E runtime restart recovery", () => {
       expect(workspace.taskStatus.sessions.find((entry) => entry.role === "coder")).toMatchObject({
         status: "running",
         activityStatus: "running"
+      });
+    } finally {
+      await e2e.close();
+      await repo.cleanup();
+    }
+  });
+
+  it("does not infer turn completion from transcript end_turn when Stop is blocked", async () => {
+    const repo = await createE2eRepo();
+    const e2e = await createMockClaudeE2eApp();
+
+    try {
+      const task = await connectAndCreateTask(e2e.app, repo, "mock-blocked-stop");
+      let architectPrompted = false;
+      e2e.mockRuntime.onPrompt("architect", "Route that must remain pending", () => {
+        architectPrompted = true;
+      });
+      e2e.mockRuntime.onPrompt("coder", "Keep this turn alive", async (ctx) => {
+        await ctx.userPromptSubmit();
+        await ctx.appendTranscriptText("The transcript contains a parent end_turn.");
+        await ctx.writeFile(".ai/vcm/handoffs/messages/coder-architect.md", [
+          "---",
+          "type: task",
+          "---",
+          "Route that must remain pending",
+          ""
+        ].join("\n"));
+        await ctx.writeFile(".ai/vcm/jobs/still-running/status.json", JSON.stringify({
+          jobId: "still-running",
+          status: "running",
+          processId: process.pid
+        }));
+        await ctx.stop();
+      });
+
+      await startRole(e2e.app, task.taskSlug, "architect");
+      const coder = await startRole(e2e.app, task.taskSlug, "coder");
+      e2e.mockRuntime.write(coder.id, "Keep this turn alive");
+      await e2e.mockRuntime.waitForIdle();
+
+      await e2e.deps.runtimeCoordinator.reconcileProject(repo.repoRoot, {
+        taskSlug: task.taskSlug
+      });
+      await e2e.deps.runtimeCoordinator.reconcileProject(repo.repoRoot, {
+        taskSlug: task.taskSlug
+      });
+
+      const workspace = await getWorkspaceState(e2e.app, task.taskSlug);
+      expect(workspace.roundState).toMatchObject({
+        status: "running",
+        activeRole: "coder"
+      });
+      expect(workspace.taskStatus.sessions.find((entry) => entry.role === "coder")).toMatchObject({
+        activityStatus: "running"
+      });
+      expect(architectPrompted).toBe(false);
+      await expect(fs.readFile(
+        `${task.worktreePath}/.ai/vcm/handoffs/messages/coder-architect.md`,
+        "utf8"
+      )).resolves.toContain("Route that must remain pending");
+    } finally {
+      await e2e.close();
+      await repo.cleanup();
+    }
+  });
+
+  it("stops an active workflow turn when the terminal process exits", async () => {
+    const repo = await createE2eRepo();
+    const e2e = await createMockClaudeE2eApp();
+
+    try {
+      const task = await connectAndCreateTask(e2e.app, repo, "mock-terminal-exit");
+      e2e.mockRuntime.onPrompt("coder", "Crash this terminal", async (ctx) => {
+        await ctx.userPromptSubmit();
+      });
+
+      const coder = await startRole(e2e.app, task.taskSlug, "coder");
+      e2e.mockRuntime.write(coder.id, "Crash this terminal");
+      await e2e.mockRuntime.waitForIdle();
+      e2e.mockRuntime.exitProcess(coder.id, 17);
+
+      await waitFor(async () => {
+        const workspace = await getWorkspaceState(e2e.app, task.taskSlug);
+        expect(workspace.roundState).toMatchObject({
+          status: "stopped",
+          activeRole: "coder",
+          stopReason: "terminal-exit",
+          flowPause: {
+            paused: true,
+            reason: "stopped-no-next-turn",
+            role: "coder"
+          }
+        });
+        expect(workspace.taskStatus.sessions.find((entry) => entry.role === "coder")).toMatchObject({
+          status: "resumable",
+          activityStatus: "idle",
+          exitCode: 17
+        });
       });
     } finally {
       await e2e.close();

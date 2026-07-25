@@ -1043,6 +1043,9 @@ function createRuntimeStub(writes: string[]): TerminalRuntime {
     },
     subscribe() {
       return () => {};
+    },
+    subscribeProcessExits() {
+      return () => {};
     }
   };
 }

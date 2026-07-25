@@ -14,6 +14,7 @@ export interface RoundService {
   recordRoleTurnEvent(input: RecordRoundHookEventInput): Promise<VcmSessionRoundState>;
   recordClaudeHookEvent(input: RecordRoundHookEventInput): Promise<VcmSessionRoundState>;
   recordManualInterrupt(input: RecordManualInterruptInput): Promise<VcmSessionRoundState>;
+  recordTerminalExit(input: RecordTerminalExitInput): Promise<VcmSessionRoundState>;
   setRoleRecovery(input: SetRoleRecoveryInput): Promise<VcmSessionRoundState>;
   clearRoleRecovery(input: ClearRoleRecoveryInput): Promise<VcmSessionRoundState>;
   stopSession(sessionId: string): void;
@@ -42,6 +43,10 @@ export interface ClearRoleRecoveryInput extends SessionRoundInput {
 }
 
 export interface RecordManualInterruptInput extends SessionRoundInput {
+  role: RoleName;
+}
+
+export interface RecordTerminalExitInput extends SessionRoundInput {
   role: RoleName;
 }
 
@@ -403,6 +408,25 @@ export function createRoundService(deps: RoundServiceDeps): RoundService {
         return toSessionRoundState(next, timestamp);
       });
     },
+    async recordTerminalExit(input) {
+      return withTaskLock(input, async () => {
+        const timestamp = now();
+        const state = await load(input);
+        const next = applyTerminalExit({
+          state,
+          taskSlug: input.taskSlug,
+          role: input.role,
+          timestamp
+        });
+        if (!terminalExitWasApplied(state, next, input.role)) {
+          return toSessionRoundState(state, timestamp);
+        }
+        await save(input, next);
+        clearSettleTimer(input);
+        await updateSessionStatus(input, "stopped");
+        return toSessionRoundState(next, timestamp);
+      });
+    },
     async setRoleRecovery(input) {
       return withTaskLock(input, async () => {
         const timestamp = now();
@@ -568,6 +592,31 @@ function applyManualInterrupt(input: {
   role: RoleName;
   timestamp: string;
 }): PersistedRoundFile {
+  return applyForcedTurnStop(input, "manual-interrupt");
+}
+
+function applyTerminalExit(input: {
+  state: PersistedRoundFile;
+  taskSlug: string;
+  role: RoleName;
+  timestamp: string;
+}): PersistedRoundFile {
+  const stopped = applyForcedTurnStop(input, "terminal-exit");
+  return stopped.currentRound?.stopReason === "terminal-exit"
+    && stopped.roleRecovery?.role === input.role
+    ? { ...stopped, roleRecovery: undefined }
+    : stopped;
+}
+
+function applyForcedTurnStop(
+  input: {
+    state: PersistedRoundFile;
+    taskSlug: string;
+    role: RoleName;
+    timestamp: string;
+  },
+  stopReason: Extract<VcmRoundStopReason, "manual-interrupt" | "terminal-exit">
+): PersistedRoundFile {
   const current = input.state.currentRound;
   if (!current || current.status === "stopped" || !current.activeTurnStartedAt || current.activeRole !== input.role) {
     return {
@@ -584,7 +633,7 @@ function applyManualInterrupt(input: {
     activeRole: input.role,
     lastTurnEndedAt: input.timestamp,
     stoppedAt: input.timestamp,
-    stopReason: "manual-interrupt",
+    stopReason,
     settleDeadlineAt: undefined,
     activeTurnStartedAt: undefined,
     ccActiveMs: current.ccActiveMs + activeDurationMs,
@@ -613,6 +662,20 @@ function manualInterruptWasApplied(
     && previous.currentRound.activeTurnStartedAt
     && previous.currentRound.activeRole === role
     && next.currentRound?.stopReason === "manual-interrupt"
+    && next.currentRound.status === "stopped"
+  );
+}
+
+function terminalExitWasApplied(
+  previous: PersistedRoundFile,
+  next: PersistedRoundFile,
+  role: RoleName
+): boolean {
+  return Boolean(
+    previous.currentRound?.status === "running"
+    && previous.currentRound.activeTurnStartedAt
+    && previous.currentRound.activeRole === role
+    && next.currentRound?.stopReason === "terminal-exit"
     && next.currentRound.status === "stopped"
   );
 }
@@ -800,7 +863,9 @@ function normalizeRound(input: PersistedRound | undefined): PersistedRound | und
       : typeof legacy.pausedAt === "string"
         ? legacy.pausedAt
         : undefined,
-    stopReason: input.stopReason === "manual-interrupt" || input.stopReason === "runtime-recovery"
+    stopReason: input.stopReason === "manual-interrupt"
+      || input.stopReason === "runtime-recovery"
+      || input.stopReason === "terminal-exit"
       ? input.stopReason
       : undefined,
     activeTurnStartedAt: typeof input.activeTurnStartedAt === "string"

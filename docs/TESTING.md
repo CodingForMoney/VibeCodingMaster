@@ -48,6 +48,10 @@ Notes:
   cross-service wiring.
 - Session lifecycle, round routing, Gate Review, translation, Gateway, Auto
   Memory, or Harness Retrospective change: run `npm run test:e2e:backend`.
+- Turn or terminal-process lifecycle changes: run `round-service.test.ts`,
+  `session-service.test.ts`, `terminal-process-exit-service.test.ts`, and
+  `runtime-recovery.e2e.test.ts`. Verify transcript output cannot complete a
+  Turn, blocked Stop remains running, and a real PTY exit stops the active Round.
 - Runtime Coordinator changes: run `runtime-coordinator-service.test.ts` and
   verify fresh and resumable task-scoped tool Sessions are reconciled without a
   frontend trigger.

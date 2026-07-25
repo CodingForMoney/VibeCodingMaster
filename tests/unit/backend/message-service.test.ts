@@ -431,6 +431,9 @@ function createFakeRuntime(writes: string[]): TerminalRuntime {
     },
     subscribe() {
       return () => {};
+    },
+    subscribeProcessExits() {
+      return () => {};
     }
   };
 }

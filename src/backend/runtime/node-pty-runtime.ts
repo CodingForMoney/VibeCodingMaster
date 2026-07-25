@@ -5,6 +5,7 @@ import type { FileSystemAdapter } from "../adapters/filesystem.js";
 import type {
   CreateTerminalSessionInput,
   TerminalEventListener,
+  TerminalProcessExitListener,
   TerminalRuntime,
   TerminalSession
 } from "./terminal-runtime.js";
@@ -35,6 +36,7 @@ export interface TerminalLogWriter {
 
 export function createNodePtyTerminalRuntime(deps: NodePtyRuntimeDeps): TerminalRuntime {
   const entries = new Map<string, RuntimeEntry>();
+  const processExitListeners = new Set<TerminalProcessExitListener>();
   const now = deps.now ?? (() => new Date().toISOString());
   const id = deps.id ?? (() => `session_${Date.now()}_${Math.random().toString(16).slice(2)}`);
 
@@ -111,6 +113,12 @@ export function createNodePtyTerminalRuntime(deps: NodePtyRuntimeDeps): Terminal
       if (!disposeEntry(entries, entry, exitCode === 0 ? "exited" : "crashed", exitCode)) {
         return;
       }
+      for (const listener of processExitListeners) {
+        listener({
+          session: { ...entry.session },
+          exitCode
+        });
+      }
       emit(entry, {
         sessionId: session.id,
         taskSlug: input.taskSlug,
@@ -162,14 +170,16 @@ export function createNodePtyTerminalRuntime(deps: NodePtyRuntimeDeps): Terminal
     },
     async stop(sessionId) {
       const entry = getEntry(entries, sessionId);
+      const exitCode = entry.session.exitCode ?? null;
+      const disposed = disposeEntry(entries, entry, "exited", exitCode);
       entry.process.kill();
-      if (disposeEntry(entries, entry, "exited", entry.session.exitCode ?? null)) {
+      if (disposed) {
         emit(entry, {
           sessionId,
           taskSlug: entry.session.taskSlug,
           role: entry.session.role,
           type: "exit",
-          exitCode: entry.session.exitCode ?? null
+          exitCode
         });
         entry.listeners.clear();
       }
@@ -177,8 +187,8 @@ export function createNodePtyTerminalRuntime(deps: NodePtyRuntimeDeps): Terminal
     },
     async restart(sessionId) {
       const entry = getEntry(entries, sessionId);
-      entry.process.kill();
       disposeEntry(entries, entry, "exited", entry.session.exitCode ?? null);
+      entry.process.kill();
       entry.listeners.clear();
       await entry.logWriter.close();
       return create(entry.input, sessionId);
@@ -221,6 +231,12 @@ export function createNodePtyTerminalRuntime(deps: NodePtyRuntimeDeps): Terminal
 
       return () => {
         entry.listeners.delete(listener);
+      };
+    },
+    subscribeProcessExits(listener) {
+      processExitListeners.add(listener);
+      return () => {
+        processExitListeners.delete(listener);
       };
     }
   };

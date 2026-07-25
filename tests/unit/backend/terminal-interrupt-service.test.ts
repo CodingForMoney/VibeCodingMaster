@@ -157,6 +157,9 @@ function createRuntime(session: TerminalSession): TerminalRuntime {
     },
     subscribe() {
       return () => {};
+    },
+    subscribeProcessExits() {
+      return () => {};
     }
   };
 }

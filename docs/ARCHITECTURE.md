@@ -30,7 +30,7 @@ layers plus supporting tools.
   endpoint and the gateway), `task-close-service` (backend-owned unconditional
   task close, shared by the GUI endpoint and the gateway), `session-service`, `round-service`,
   `runtime-coordinator-service`, `runtime-recovery-service`,
-  `turn-reconciler-service`, `message-service`, `task-workflow-service`,
+  `terminal-process-exit-service`, `message-service`, `task-workflow-service`,
   `architect-restart-service`,
   `artifact-service`, `harness-service`, `harness-feedback-service`,
   `auto-memory-service`,
@@ -240,24 +240,26 @@ sending, or placed in a separate approval/apply state machine.
 session activity, while the PTY runtime owns Claude process liveness and terminal
 output timestamps. `runtime-coordinator-service` runs full active-task
 reconciliation every 10 seconds, independently of frontend polling. It
-reconciles Turns, automatically starts or resumes the task-scoped Harness
-Engineer, and starts or resumes the task-scoped Translator when translation is
-enabled and the Harness is initialized. Tool Session defaults are independent
-from the workflow-role launch template. Explicit Start and Restart routes save
-the successful Session's permission, model, and effort; automatic startup and
-Resume never write them. Fresh tool Sessions use the saved defaults, while
-resumable task Sessions keep the launch options recorded by that Session.
+automatically starts or resumes the task-scoped Harness Engineer and starts or
+resumes the task-scoped Translator when translation is enabled and the Harness
+is initialized. Tool Session defaults are independent from the workflow-role
+launch template. Explicit Start and Restart routes save the successful Session's
+permission, model, and effort; automatic startup and Resume never write them.
+Fresh tool Sessions use the saved defaults, while resumable task Sessions keep
+the launch options recorded by that Session.
 
 Round tracking includes Project Manager, Architect, Coder, Tester, and optional
 Reviewer sessions. Translator and Harness Engineer are task-scoped tool
 roles and are excluded. A tool workflow that prompts a workflow role still
 participates in Round tracking through that workflow role's hooks.
 
-`turn-reconciler-service` closes gaps left by a missing Stop hook. A transcript
-parent `end_turn` is reconciled through the normal Stop path, while sidechain
-completion is ignored. A missing or exited terminal is reconciled through
-terminal StopFailure. A live terminal remains active regardless of inactivity;
-the reconciler never sends terminal input or ends a turn from silence alone.
+Normal Turn completion and failure come only from Claude Stop and StopFailure
+Hooks. Transcript content is display and translation evidence; it never changes
+Session, Turn, or Round state. `terminal-process-exit-service` subscribes
+directly to PTY process exit events. An unexpected exit marks the current
+Session idle and ends its active workflow-role Round with `terminal-exit`.
+Explicit Stop and Restart dispose the PTY runtime entry before the child exit
+event, so they do not enter this failure path.
 
 ## Architect Planning Context Ownership
 

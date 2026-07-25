@@ -348,12 +348,6 @@ function createCoordinator(input: {
         return null as never;
       }
     },
-    turnReconciler: {
-      async reconcileTask() {
-        input.calls.push("turn-reconcile");
-        return { status: "inactive" };
-      }
-    },
     setInterval() {
       return "runtime-coordinator-timer";
     },

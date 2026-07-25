@@ -1,12 +1,61 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import type { TerminalProcessExitEvent } from "../../../src/backend/runtime/terminal-runtime.js";
 import {
   appendTerminalReplay,
   buildPtyEnvironment,
+  createNodePtyTerminalRuntime,
   createTerminalLogWriter,
   tailTerminalReplay
 } from "../../../src/backend/runtime/node-pty-runtime.js";
 
+const ptyMock = vi.hoisted(() => ({
+  spawn: vi.fn()
+}));
+
+vi.mock("node-pty", () => ({
+  spawn: ptyMock.spawn
+}));
+
 describe("node-pty-runtime", () => {
+  it("reports real process exits but excludes explicit stop and restart", async () => {
+    const first = createPtyProcess(1001);
+    const second = createPtyProcess(1002);
+    const third = createPtyProcess(1003);
+    ptyMock.spawn.mockReset();
+    ptyMock.spawn
+      .mockReturnValueOnce(first.process)
+      .mockReturnValueOnce(second.process)
+      .mockReturnValueOnce(third.process);
+    const runtime = createNodePtyTerminalRuntime({ fs: {} as never });
+    const exits: TerminalProcessExitEvent[] = [];
+    runtime.subscribeProcessExits((event) => exits.push(event));
+    const input = {
+      taskSlug: "demo-task",
+      role: "coder" as const,
+      command: "claude",
+      args: [],
+      cwd: "/repo"
+    };
+
+    const stopped = await runtime.createSession(input);
+    await runtime.stop(stopped.id);
+    expect(exits).toEqual([]);
+
+    const restarted = await runtime.createSession(input);
+    const restartedSession = await runtime.restart(restarted.id);
+    expect(exits).toEqual([]);
+
+    third.exit(17);
+    expect(exits).toMatchObject([{
+      session: {
+        id: restartedSession.id,
+        status: "crashed",
+        exitCode: 17
+      },
+      exitCode: 17
+    }]);
+  });
+
   it("announces truecolor terminal support and removes NO_COLOR", () => {
     const env = buildPtyEnvironment(
       {
@@ -169,4 +218,29 @@ describe("node-pty-runtime", () => {
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+function createPtyProcess(pid: number) {
+  let exitListener: ((event: { exitCode: number; signal: number }) => void) | undefined;
+  const process = {
+    pid,
+    onData() {
+      return { dispose() {} };
+    },
+    onExit(listener: (event: { exitCode: number; signal: number }) => void) {
+      exitListener = listener;
+      return { dispose() {} };
+    },
+    write() {},
+    resize() {},
+    kill() {
+      exitListener?.({ exitCode: 0, signal: 0 });
+    }
+  };
+  return {
+    process,
+    exit(exitCode: number) {
+      exitListener?.({ exitCode, signal: 0 });
+    }
+  };
 }

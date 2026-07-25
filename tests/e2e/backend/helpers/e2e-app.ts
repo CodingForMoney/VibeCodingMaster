@@ -38,9 +38,9 @@ import { createTaskCloseService } from "../../../../src/backend/services/task-cl
 import { createGatewayService } from "../../../../src/backend/gateway/gateway-service.js";
 import { createRuntimeRecoveryService } from "../../../../src/backend/services/runtime-recovery-service.js";
 import { createClaudeHookService } from "../../../../src/backend/services/claude-hook-service.js";
-import { createTurnReconcilerService } from "../../../../src/backend/services/turn-reconciler-service.js";
 import { createRuntimeCoordinatorService } from "../../../../src/backend/services/runtime-coordinator-service.js";
 import { createTerminalInterruptService } from "../../../../src/backend/services/terminal-interrupt-service.js";
+import { createTerminalProcessExitService } from "../../../../src/backend/services/terminal-process-exit-service.js";
 import { createDiagnosticsService } from "../../../../src/backend/services/diagnostics-service.js";
 import { createUsageAnalyticsService } from "../../../../src/backend/services/usage-analytics-service.js";
 import { createJobGuardService } from "../../../../src/backend/services/job-guard-service.js";
@@ -293,11 +293,6 @@ export async function createMockClaudeE2eApp(options: MockClaudeE2eAppOptions = 
       globalThis.clearTimeout(timer);
     }
   });
-  const turnReconciler = createTurnReconcilerService({
-    sessionService,
-    roundService,
-    claudeHookService
-  });
   const runtimeCoordinator = createRuntimeCoordinatorService({
     appSettings,
     projectService,
@@ -309,7 +304,6 @@ export async function createMockClaudeE2eApp(options: MockClaudeE2eAppOptions = 
     autoMemoryService,
     roundService,
     gatewayService,
-    turnReconciler,
     async getStateRoot(repoRoot) {
       return (await projectService.loadConfig(repoRoot)).stateRoot;
     },
@@ -319,6 +313,13 @@ export async function createMockClaudeE2eApp(options: MockClaudeE2eAppOptions = 
     clearInterval() {}
   });
   const terminalInterruptService = createTerminalInterruptService({
+    runtime: mockRuntime,
+    projectService,
+    taskService,
+    sessionService,
+    roundService
+  });
+  const terminalProcessExitService = createTerminalProcessExitService({
     runtime: mockRuntime,
     projectService,
     taskService,
@@ -359,6 +360,7 @@ export async function createMockClaudeE2eApp(options: MockClaudeE2eAppOptions = 
     runtimeCoordinator,
     runtimeRecoveryService,
     terminalInterruptService,
+    terminalProcessExitService,
     runtime: mockRuntime,
     diagnosticsService,
     usageAnalyticsService

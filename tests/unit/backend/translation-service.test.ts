@@ -2190,6 +2190,9 @@ function createRuntimeStub(records: RoleSessionRecord[] = [createRoleSessionReco
     },
     subscribe() {
       return () => {};
+    },
+    subscribeProcessExits() {
+      return () => {};
     }
   };
 }

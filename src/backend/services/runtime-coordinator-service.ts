@@ -15,7 +15,6 @@ import type { RoundService } from "./round-service.js";
 import type { SessionService } from "./session-service.js";
 import { getTaskRuntimeRepoRoot, type TaskService } from "./task-service.js";
 import type { TranslationService } from "./translation-service.js";
-import type { TurnReconcilerService } from "./turn-reconciler-service.js";
 
 export interface RuntimeCoordinatorService {
   start(): void;
@@ -49,7 +48,6 @@ export interface RuntimeCoordinatorServiceDeps {
   autoMemoryService: Pick<AutoMemoryService, "reconcileTask" | "getTaskRetrospectiveReadiness">;
   roundService: Pick<RoundService, "getSessionRoundState">;
   gatewayService: Pick<GatewayService, "getStatus">;
-  turnReconciler: Pick<TurnReconcilerService, "reconcileTask">;
   getStateRoot(repoRoot: string): Promise<string>;
   setInterval?: (callback: () => void, delayMs: number) => unknown;
   clearInterval?: (timer: unknown) => void;
@@ -107,8 +105,6 @@ export function createRuntimeCoordinatorService(deps: RuntimeCoordinatorServiceD
       }
 
       const taskRepoRoot = getTaskRuntimeRepoRoot(activeTask);
-      const stateRoot = await deps.getStateRoot(repoRoot);
-      await deps.turnReconciler.reconcileTask(repoRoot, activeTask, stateRoot);
       const harnessInitialized = await deps.harnessService.getHarnessStatus(taskRepoRoot)
         .then((status) => status.initialized)
         .catch(() => false);

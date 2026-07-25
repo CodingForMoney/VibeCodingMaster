@@ -1125,6 +1125,9 @@ function createFakeRuntime(inputs: CreateTerminalSessionInput[], writes: string[
     },
     subscribe() {
       return () => {};
+    },
+    subscribeProcessExits() {
+      return () => {};
     }
   };
 }

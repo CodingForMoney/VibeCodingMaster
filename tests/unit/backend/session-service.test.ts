@@ -1221,6 +1221,50 @@ describe("createSessionService", () => {
     });
   });
 
+  it("records an unexpected terminal process exit without a synthetic Claude hook", async () => {
+    const fs = createMemoryFs();
+    const service = createTestSessionService(fs, []);
+    const started = await service.startRoleSession("/repo", "demo-task", "coder");
+    await recordCurrentClaudeHook(service, {
+      taskSlug: "demo-task",
+      role: "coder",
+      eventName: "UserPromptSubmit",
+      claudeSessionId: "coder-real-session",
+      transcriptPath: `${TASK_WORKTREE}/.claude/projects/coder-real-session.jsonl`,
+      cwd: TASK_WORKTREE
+    });
+
+    const exited = await service.recordTerminalProcessExit("/repo", {
+      sessionId: started.id,
+      status: "crashed",
+      exitCode: 17
+    });
+
+    expect(exited).toMatchObject({
+      turnWasRunning: true,
+      record: {
+        id: started.id,
+        status: "crashed",
+        activityStatus: "idle",
+        pid: undefined,
+        exitCode: 17,
+        lastTurnEndedAt: "2026-05-29T00:00:00.000Z"
+      }
+    });
+    const persisted = await fs.readJson<{
+      roles: {
+        coder: {
+          record: RoleSessionRecord;
+        };
+      };
+    }>(`${TASK_WORKTREE}/.ai/vcm/sessions/demo-task.json`);
+    expect(persisted.roles.coder.record).toMatchObject({
+      status: "crashed",
+      activityStatus: "idle",
+      exitCode: 17
+    });
+  });
+
   it("records Reviewer hook activity on the task-scoped session", async () => {
     const fs = createMemoryFs();
     const service = createTestSessionService(fs, []);
@@ -1594,6 +1638,9 @@ function createFakeRuntime(
       return current;
     },
     subscribe() {
+      return () => {};
+    },
+    subscribeProcessExits() {
       return () => {};
     }
   };

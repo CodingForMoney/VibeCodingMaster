@@ -27,6 +27,11 @@ export interface TerminalSession {
 }
 
 export type TerminalEventListener = (event: TerminalEvent) => void;
+export interface TerminalProcessExitEvent {
+  session: TerminalSession;
+  exitCode: number | null;
+}
+export type TerminalProcessExitListener = (event: TerminalProcessExitEvent) => void;
 export type Unsubscribe = () => void;
 
 export interface SubscribeTerminalOptions {
@@ -43,4 +48,5 @@ export interface TerminalRuntime {
   stop(sessionId: string): Promise<void>;
   restart(sessionId: string): Promise<TerminalSession>;
   subscribe(sessionId: string, listener: TerminalEventListener, options?: SubscribeTerminalOptions): Unsubscribe;
+  subscribeProcessExits(listener: TerminalProcessExitListener): Unsubscribe;
 }

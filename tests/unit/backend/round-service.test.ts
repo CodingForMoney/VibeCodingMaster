@@ -138,7 +138,6 @@ describe("round-service", () => {
       role: "coder",
       eventName: "UserPromptSubmit"
     });
-
     currentTime = "2026-05-31T00:00:05.000Z";
     const interrupted = await service.recordManualInterrupt({
       repoRoot: "/repo",
@@ -160,6 +159,72 @@ describe("round-service", () => {
     });
     expect(interrupted.flowPause).toBeUndefined();
     expect(statusUpdates).toEqual(["running", "stopped"]);
+  });
+
+  it("records an unexpected terminal exit as a stopped round with a flow pause", async () => {
+    const fs = createMemoryFs();
+    let currentTime = "2026-05-31T00:00:00.000Z";
+    const statusUpdates: string[] = [];
+    const service = createRoundService({
+      fs,
+      now: () => currentTime,
+      id: () => "round_1",
+      onSessionStatusChange: async ({ status }) => {
+        statusUpdates.push(status);
+      }
+    });
+
+    await service.recordClaudeHookEvent({
+      repoRoot: "/repo",
+      stateRepoRoot: "/repo",
+      stateRoot: ".ai/vcm",
+      taskSlug: "demo-task",
+      role: "coder",
+      eventName: "UserPromptSubmit"
+    });
+    await service.setRoleRecovery({
+      repoRoot: "/repo",
+      stateRepoRoot: "/repo",
+      stateRoot: ".ai/vcm",
+      taskSlug: "demo-task",
+      recovery: {
+        role: "coder",
+        status: "waiting",
+        attempt: 1,
+        maxAttempts: 20,
+        lastFailureAt: currentTime,
+        retryable: true,
+        nextRetryAt: "2026-05-31T00:01:00.000Z"
+      }
+    });
+
+    currentTime = "2026-05-31T00:00:05.000Z";
+    const stopped = await service.recordTerminalExit({
+      repoRoot: "/repo",
+      stateRepoRoot: "/repo",
+      stateRoot: ".ai/vcm",
+      taskSlug: "demo-task",
+      role: "coder"
+    });
+
+    expect(stopped).toMatchObject({
+      status: "stopped",
+      activeRole: "coder",
+      activeTurnStartedAt: undefined,
+      stopReason: "terminal-exit",
+      completedTurnCount: 1,
+      totalCompletedTurnCount: 1,
+      totalCcActiveMs: 5000,
+      currentRoundCcActiveMs: 5000,
+      flowPause: {
+        paused: true,
+        reason: "stopped-no-next-turn",
+        role: "coder",
+        since: currentTime
+      }
+    });
+    expect(stopped.roleRecovery).toBeUndefined();
+    expect(statusUpdates).toEqual(["running", "running", "stopped"]);
   });
 
   it("deduplicates a Reviewer prompt when VCM marked the turn before the hook arrives", async () => {

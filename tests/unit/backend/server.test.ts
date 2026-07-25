@@ -36,8 +36,10 @@ describe("createServer", () => {
       "ccr:initialize",
       "cleanup:/repo-one",
       "cleanup:/repo-two",
+      "terminal-exit:start",
       "runtime:start",
       "gateway:start",
+      "terminal-exit:stop",
       "runtime:stop",
       "gateway:stop"
     ]);
@@ -98,6 +100,14 @@ function createServerDepsStub(calls: string[]): ServerDeps {
     } as never,
     runtimeRecoveryService: {} as never,
     terminalInterruptService: {} as never,
+    terminalProcessExitService: {
+      start() {
+        calls.push("terminal-exit:start");
+      },
+      stop() {
+        calls.push("terminal-exit:stop");
+      }
+    } as never,
     runtime: {} as never,
     diagnosticsService: {
       getErrorRuntimeInfo() {
