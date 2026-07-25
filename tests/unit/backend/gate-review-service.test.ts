@@ -39,8 +39,7 @@ describe("gate-review-service", () => {
       appSettings: createAppSettings(["architecture-plan", "validation-adequacy", "code-diff"]),
       sessionService: createSessionService(sessionStarts, activityCalls),
       roundService: createRoundService(roundCalls),
-      reportPollIntervalMs: 5,
-      reportTimeoutMs: 500
+      reportPollIntervalMs: 5
     });
 
     const result = await service.requestReviewGate(tmpRepo, "demo-task", "architecture-plan");
@@ -205,8 +204,7 @@ describe("gate-review-service", () => {
       appSettings: createAppSettings(["validation-adequacy"]),
       sessionService: createSessionService(),
       roundService: createRoundService(),
-      reportPollIntervalMs: 5,
-      reportTimeoutMs: 500
+      reportPollIntervalMs: 5
     });
 
     expect((await service.requestReviewGate(tmpRepo, "demo-task", "validation-adequacy")).status).toBe("started");
@@ -240,8 +238,7 @@ describe("gate-review-service", () => {
       appSettings: createAppSettings(["architecture-plan"]),
       sessionService: createSessionService(),
       roundService: createRoundService(),
-      reportPollIntervalMs: 5,
-      reportTimeoutMs: 500
+      reportPollIntervalMs: 5
     });
 
     expect((await service.requestReviewGate(tmpRepo, "demo-task", "architecture-plan")).status).toBe("started");
@@ -482,8 +479,7 @@ describe("gate-review-service", () => {
       appSettings: createAppSettings(["code-diff"]),
       sessionService: createSessionService(),
       roundService: createRoundService(),
-      reportPollIntervalMs: 5,
-      reportTimeoutMs: 500
+      reportPollIntervalMs: 5
     });
 
     const result = await service.requestReviewGate(tmpRepo, "demo-task", "code-diff", {
@@ -588,8 +584,7 @@ describe("gate-review-service", () => {
       appSettings: createAppSettings(["code-diff"]),
       sessionService: createSessionService(),
       roundService: createRoundService(),
-      reportPollIntervalMs: 5,
-      reportTimeoutMs: 500
+      reportPollIntervalMs: 5
     });
 
     const result = await service.requestReviewGate(tmpRepo, "demo-task", "code-diff", {
@@ -631,8 +626,7 @@ describe("gate-review-service", () => {
       appSettings: createAppSettings(["code-diff"]),
       sessionService: createSessionService(),
       roundService: createRoundService(),
-      reportPollIntervalMs: 5,
-      reportTimeoutMs: 500
+      reportPollIntervalMs: 5
     });
 
     const result = await service.requestReviewGate(tmpRepo, "demo-task", "code-diff", {
@@ -674,8 +668,7 @@ describe("gate-review-service", () => {
       appSettings: createAppSettings(["code-diff"]),
       sessionService: createSessionService(),
       roundService: createRoundService(),
-      reportPollIntervalMs: 5,
-      reportTimeoutMs: 500
+      reportPollIntervalMs: 5
     });
 
     expect((await service.requestReviewGate(tmpRepo, "demo-task", "code-diff", {

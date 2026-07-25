@@ -51,7 +51,6 @@ export interface GateReviewServiceDeps {
   sessionService: Pick<SessionService, "getRoleSession" | "markRoleActivityRunning" | "resumeRoleSession" | "startRoleSession">;
   roundService: Pick<RoundService, "recordRoleTurnEvent">;
   reportPollIntervalMs?: number;
-  reportTimeoutMs?: number;
   now?: () => string;
 }
 
@@ -87,7 +86,6 @@ const REQUESTS_DIR = ".ai/vcm/gate-reviews/requests";
 const GATE_REVIEW_VERSION = 1;
 const REVIEWER_ROLE = "reviewer";
 const DEFAULT_REPORT_POLL_INTERVAL_MS = 1000;
-const DEFAULT_REPORT_TIMEOUT_MS = 30 * 60 * 1000;
 const activeRuns = new Set<string>();
 const ARCHITECTURE_ANALYSIS_FIELDS = [
   "Evidence Read",
@@ -172,7 +170,6 @@ const VALID_SEVERITIES = new Set<GateReviewSeverity>(["critical", "high", "mediu
 export function createGateReviewService(deps: GateReviewServiceDeps): GateReviewService {
   const now = deps.now ?? (() => new Date().toISOString());
   const reportPollIntervalMs = deps.reportPollIntervalMs ?? DEFAULT_REPORT_POLL_INTERVAL_MS;
-  const reportTimeoutMs = deps.reportTimeoutMs ?? DEFAULT_REPORT_TIMEOUT_MS;
 
   async function getContext(repoRoot: string, taskSlug: string): Promise<ReviewContext> {
     const projectConfig = await deps.projectService.loadConfig(repoRoot);
@@ -576,10 +573,14 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
         eventName: "UserPromptSubmit"
       });
 
-      const parsed = await waitForGateReport(deps.fs, context.taskRepoRoot, gate, requestId, now(), {
-        intervalMs: reportPollIntervalMs,
-        timeoutMs: reportTimeoutMs
-      });
+      const parsed = await waitForGateReport(
+        deps.fs,
+        context.taskRepoRoot,
+        gate,
+        requestId,
+        now(),
+        reportPollIntervalMs
+      );
       const completedAt = now();
       await updateRequestStatus(deps.fs, context, requestId, "completed", {
         completedAt,
@@ -1335,30 +1336,18 @@ async function waitForGateReport(
   gate: GateReviewGate,
   requestId: string,
   timestamp: string,
-  options: { intervalMs: number; timeoutMs: number }
+  intervalMs: number
 ): Promise<ParsedReport> {
-  const startedAt = Date.now();
-  let lastError: unknown;
-
-  while (Date.now() - startedAt <= options.timeoutMs) {
+  while (true) {
     try {
       return await parseGateReport(fs, taskRepoRoot, gate, requestId, timestamp);
     } catch (error) {
-      lastError = error;
       if (!isPendingReportError(error)) {
         throw error;
       }
     }
-    await delay(options.intervalMs);
+    await delay(intervalMs);
   }
-
-  const detail = errorMessage(lastError);
-  throw new VcmError({
-    code: "GATE_REVIEW_REPORT_TIMEOUT",
-    message: `Reviewer did not produce a valid ${gate} report within ${Math.round(options.timeoutMs / 1000)}s.`,
-    statusCode: 504,
-    hint: detail
-  });
 }
 
 async function parseGateReport(

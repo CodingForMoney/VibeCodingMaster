@@ -204,8 +204,7 @@ export async function createMockClaudeE2eApp(options: MockClaudeE2eAppOptions = 
     appSettings,
     sessionService,
     roundService,
-    reportPollIntervalMs: 10,
-    reportTimeoutMs: 2_000
+    reportPollIntervalMs: 10
   });
   const translationWorkerService = createTranslationWorkerService({
     fs: fsAdapter,
