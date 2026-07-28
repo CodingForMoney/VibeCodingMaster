@@ -29,6 +29,14 @@ Updated.
 ## Coverage Mapping
 Feature behavior -> tests/feature.test.ts -> pass.
 
+## Validation Progress
+
+### Completed Validation
+L0, L1, and L2 completed.
+
+### Remaining Validation
+None.
+
 ## L3 Coverage
 
 L3 Required: no
@@ -318,12 +326,67 @@ Nothing to promote.
     const result = checkMarkdownArtifact("test-report", "test-report.md", content);
 
     expect(result.status).toBe("incomplete");
-    expect(result.invalidFields).toContain("Test Result must be pass or fail.");
+    expect(result.invalidFields).toContain("Test Result must be pass, fail, or incomplete.");
+  });
+
+  it("accepts a complete in-progress test report as continuation state", () => {
+    const content = completeL3NotRequired(renderTestReportTemplate("demo"))
+      .replace("Test Result: pass|fail|incomplete", "Test Result: incomplete")
+      .replace(
+        "### Completed Validation\n\nNone.",
+        "### Completed Validation\n\nL0 and L1 completed successfully."
+      )
+      .replace(
+        "### Remaining Validation\n\nNone.",
+        "### Remaining Validation\n\nRun the required L2 integration matrix."
+      );
+    const result = checkMarkdownArtifact("test-report", "test-report.md", content);
+
+    expect(result.status).toBe("incomplete");
+    expect(result.invalidFields).toEqual([]);
+  });
+
+  it("rejects an incomplete test report without remaining validation", () => {
+    const content = completeL3NotRequired(renderTestReportTemplate("demo"))
+      .replace("Test Result: pass|fail|incomplete", "Test Result: incomplete")
+      .replace(
+        "### Completed Validation\n\nNone.",
+        "### Completed Validation\n\nL0 and L1 completed successfully."
+      );
+    const result = checkMarkdownArtifact("test-report", "test-report.md", content);
+
+    expect(result.status).toBe("incomplete");
+    expect(result.invalidFields).toContain(
+      "Remaining Validation must list continuation work when Test Result is incomplete."
+    );
+  });
+
+  it("rejects blocking issues disguised as incomplete validation", () => {
+    const content = completeL3NotRequired(renderTestReportTemplate("demo"))
+      .replace("Test Result: pass|fail|incomplete", "Test Result: incomplete")
+      .replace(
+        "### Completed Validation\n\nNone.",
+        "### Completed Validation\n\nL0 and L1 completed successfully."
+      )
+      .replace(
+        "### Remaining Validation\n\nNone.",
+        "### Remaining Validation\n\nRun the required L2 integration matrix."
+      )
+      .replace(
+        "## Blocking Validation Issues\n\nNone.",
+        "## Blocking Validation Issues\n\nThe integration environment is unavailable."
+      );
+    const result = checkMarkdownArtifact("test-report", "test-report.md", content);
+
+    expect(result.status).toBe("incomplete");
+    expect(result.invalidFields).toContain(
+      "Blocking Validation Issues must be None when Test Result is incomplete."
+    );
   });
 
   it("rejects pass test reports with blocking validation issues", () => {
     const content = completeL3NotRequired(renderTestReportTemplate("demo"))
-      .replace("Test Result: pass|fail", "Test Result: pass")
+      .replace("Test Result: pass|fail|incomplete", "Test Result: pass")
       .replace("## Blocking Validation Issues\n\nNone.", "## Blocking Validation Issues\n\nMissing E2E coverage.");
     const result = checkMarkdownArtifact("test-report", "test-report.md", content);
 
@@ -335,7 +398,7 @@ Nothing to promote.
 
   it("rejects pass test reports with coverage gaps", () => {
     const content = completeL3NotRequired(renderTestReportTemplate("demo"))
-      .replace("Test Result: pass|fail", "Test Result: pass")
+      .replace("Test Result: pass|fail|incomplete", "Test Result: pass")
       .replace("## Coverage Gaps\n\nNone.", "## Coverage Gaps\n\nMissing E2E coverage.");
     const result = checkMarkdownArtifact("test-report", "test-report.md", content);
 
@@ -345,9 +408,24 @@ Nothing to promote.
     );
   });
 
+  it("rejects pass test reports with remaining validation", () => {
+    const content = completeL3NotRequired(renderTestReportTemplate("demo"))
+      .replace("Test Result: pass|fail|incomplete", "Test Result: pass")
+      .replace(
+        "### Remaining Validation\n\nNone.",
+        "### Remaining Validation\n\nRun the required L2 integration matrix."
+      );
+    const result = checkMarkdownArtifact("test-report", "test-report.md", content);
+
+    expect(result.status).toBe("incomplete");
+    expect(result.invalidFields).toContain(
+      "Remaining Validation must be None when Test Result is pass."
+    );
+  });
+
   it("rejects fail test reports without blocking evidence", () => {
     const content = completeL3NotRequired(renderTestReportTemplate("demo"))
-      .replace("Test Result: pass|fail", "Test Result: fail");
+      .replace("Test Result: pass|fail|incomplete", "Test Result: fail");
     const result = checkMarkdownArtifact("test-report", "test-report.md", content);
 
     expect(result.status).toBe("incomplete");
@@ -358,7 +436,7 @@ Nothing to promote.
 
   it("rejects coverage gaps without user approval evidence", () => {
     const content = completeL3NotRequired(renderTestReportTemplate("demo"))
-      .replace("Test Result: pass|fail", "Test Result: fail")
+      .replace("Test Result: pass|fail|incomplete", "Test Result: fail")
       .replace("## Coverage Gaps\n\nNone.", "## Coverage Gaps\n\nMissing live gateway coverage.")
       .replace(
         "## Blocking Validation Issues\n\nNone.",
@@ -374,7 +452,7 @@ Nothing to promote.
 
   it("accepts user-approved coverage gaps as a failed test result", () => {
     const content = completeL3NotRequired(renderTestReportTemplate("demo"))
-      .replace("Test Result: pass|fail", "Test Result: fail")
+      .replace("Test Result: pass|fail|incomplete", "Test Result: fail")
       .replace("## Coverage Gaps\n\nNone.", "## Coverage Gaps\n\nMissing live gateway coverage.")
       .replace(
         "## Blocking Validation Issues\n\nNone.",
@@ -391,7 +469,7 @@ Nothing to promote.
 
   it("rejects user approval evidence when no coverage gap is recorded", () => {
     const content = completeL3NotRequired(renderTestReportTemplate("demo"))
-      .replace("Test Result: pass|fail", "Test Result: fail")
+      .replace("Test Result: pass|fail|incomplete", "Test Result: fail")
       .replace(
         "## Blocking Validation Issues\n\nNone.",
         "## Blocking Validation Issues\n\nA runtime assertion failed."
@@ -410,7 +488,7 @@ Nothing to promote.
 
   it("requires an explicit L3 applicability decision", () => {
     const content = completeL3NotRequired(renderTestReportTemplate("demo"))
-      .replace("Test Result: pass|fail", "Test Result: pass")
+      .replace("Test Result: pass|fail|incomplete", "Test Result: pass")
       .replace("L3 Required: no", "L3 Required: undecided");
     const result = checkMarkdownArtifact("test-report", "test-report.md", content);
 
@@ -420,7 +498,7 @@ Nothing to promote.
 
   it("requires L3 mapping and execution evidence when L3 is required", () => {
     const content = completeL3NotRequired(renderTestReportTemplate("demo"))
-      .replace("Test Result: pass|fail", "Test Result: pass")
+      .replace("Test Result: pass|fail|incomplete", "Test Result: pass")
       .replace("L3 Required: no", "L3 Required: yes")
       .replace("### Affected End-To-End Flows\n\n|", "### Affected End-To-End Flows\n\nNone.\n\n|");
     const result = checkMarkdownArtifact("test-report", "test-report.md", content);
@@ -436,7 +514,7 @@ Nothing to promote.
 
   it("accepts complete required L3 mapping and execution evidence", () => {
     const content = completeL3NotRequired(renderTestReportTemplate("demo"))
-      .replace("Test Result: pass|fail", "Test Result: pass")
+      .replace("Test Result: pass|fail|incomplete", "Test Result: pass")
       .replace("L3 Required: no", "L3 Required: yes")
       .replace(
         "| None. | None. | None. | None. | None. | None. | None. | None. |",
@@ -453,7 +531,7 @@ Nothing to promote.
 
   it("requires concrete evidence when L3 is not required", () => {
     const content = completeL3NotRequired(renderTestReportTemplate("demo"))
-      .replace("Test Result: pass|fail", "Test Result: pass")
+      .replace("Test Result: pass|fail|incomplete", "Test Result: pass")
       .replace(
         "### Not-Required Evidence\n\nNo mandatory L3 trigger applies because the change is fully proved at L2.",
         "### Not-Required Evidence\n\nNone."
@@ -528,7 +606,7 @@ function completeTemplate(kind: "architecture-brief" | "architecture-plan" | "te
   }
   if (kind === "test-report") {
     return completeL3NotRequired(completed)
-      .replace("Test Result: pass|fail", "Test Result: pass");
+      .replace("Test Result: pass|fail|incomplete", "Test Result: pass");
   }
   if (kind === "final-acceptance") {
     return completed.replace("## Decision\n\nNone.", "## Decision\n\naccepted");

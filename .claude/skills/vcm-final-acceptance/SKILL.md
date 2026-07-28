@@ -36,7 +36,7 @@ Check whether the required role evidence exists, is current, and gives a clear r
 Acceptable evidence must show:
 
 - architect plan, architecture diagnosis, or docs-sync decision when required by the completed flow
-- tester `Test Result: pass|fail` and validation evidence when code, behavior, tests, or generated context changed
+- tester terminal `Test Result: pass|fail` and validation evidence when code, behavior, tests, or generated context changed; `incomplete` is not acceptance evidence
 - required Gate Review decisions, skip reasons, or override reasons when Gate Reviews were enabled
 - known-issues disposition when unresolved findings were recorded
 - explicit user approval for accepted high-risk decisions or intentionally skipped required gates
@@ -64,7 +64,7 @@ Check:
 - required route was followed, or an explicit user-approved exception is recorded
 - required handoff artifacts exist and are current
 - architecture plan, Architecture Diagnosis, Replan, or architect follow-up completion is recorded when required by the flow
-- tester report records `Test Result: pass|fail`, validation commands, results, and skipped checks with reasons
+- tester report records terminal `Test Result: pass|fail`, validation commands, results, and skipped checks with reasons; do not accept `Test Result: incomplete`
 - required Gate Reviews are approved, or skipped/overridden through a VCM-recorded user action
 - Gate Review enable state is confirmed authoritatively: do not infer that no Gate Reviews were required from an absent or empty `.ai/vcm/gate-reviews/index.json`. When Gate Review is enabled, a missing index or a required gate without a recorded decision means the gate was skipped — run the matching command from the `vcm-gate-review` skill, including the code source for `code-diff`, and do not accept until each required gate returns `approve`/`already_approved`, `disabled`/`not_required`, or a VCM-recorded user skip/override
 - docs-sync report records docs updated, docs intentionally left unchanged, or required follow-up when docs sync was required

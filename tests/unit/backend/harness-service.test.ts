@@ -119,6 +119,9 @@ describe("createHarnessService", () => {
     expect(projectManagerAgent).toContain("recorded main-flow resume point");
     expect(projectManagerAgent).toContain("Do not require a branch-level final acceptance report");
     expect(projectManagerAgent).toContain("Tester returns `Test Result: fail` for a completed Architect Debug Mode implementation");
+    expect(projectManagerAgent).toContain("If Tester returns `Test Result: incomplete`, route Tester again");
+    expect(projectManagerAgent).toContain("Never run validation-adequacy for `Test Result: incomplete`");
+    expect(projectManagerAgent.match(/\*\*Tester Continuation:/g)).toHaveLength(4);
     expect(projectManagerAgent).toContain("Architecture Diagnosis Mode must run before another Debug Mode fix or Coder dispatch");
     expect(projectManagerAgent).not.toContain("Tester reports `Test Result: fail` for the implementation for the second time");
     expect(projectManagerAgent).toContain("Architect reports that the architecture plan must be updated or replaced for the second time");
@@ -151,12 +154,18 @@ describe("createHarnessService", () => {
     expect(testerAgent).toContain("Required L3 coverage cannot be replaced by L2");
     expect(testerAgent).toContain("L3 Required: yes|no");
     expect(testerAgent).toContain("Apply `docs/CODING_STANDARDS.md` to changed tests");
+    expect(testerAgent).toContain("Use `incomplete` only when required validation remains");
+    expect(testerAgent).toContain("`Completed Validation` and `Remaining Validation`");
     expect(testerAgent).not.toContain("shared implementation-quality and baseline-test standard");
     const diagnosisReviewerAgent = await fs.readText("/repo/.claude/agents/reviewer.md");
     expect(diagnosisReviewerAgent).toContain("verify that the commits implement the diagnosed");
     expect(diagnosisReviewerAgent).toContain("local workaround for the surface failure");
     expect(diagnosisReviewerAgent).toContain("Independently apply the Tester L3 trigger rules");
     expect(diagnosisReviewerAgent).toContain("L3 Trigger Assessment");
+    expect(diagnosisReviewerAgent).toContain("`Test Result: incomplete` is Tester continuation state");
+    const finalAcceptanceSkill = await fs.readText("/repo/.claude/skills/vcm-final-acceptance/SKILL.md");
+    expect(finalAcceptanceSkill).toContain("`incomplete` is not acceptance evidence");
+    expect(finalAcceptanceSkill).toContain("do not accept `Test Result: incomplete`");
     const coderAgent = await fs.readText("/repo/.claude/agents/coder.md");
     expect(coderAgent).toContain("tools: Read, Grep, Glob, Bash, Edit, Write, Agent");
     expect(coderAgent).toContain("Implement assigned file/function-level scaffold items");

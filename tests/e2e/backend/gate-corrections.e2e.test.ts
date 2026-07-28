@@ -308,7 +308,7 @@ function findingsForDecision(gate: GateReviewGate, decision: GateReviewDecision)
 
 function validTestReport(taskSlug: string, coverage: string): string {
   return renderTestReportTemplate(taskSlug)
-    .replace("Test Result: pass|fail", "Test Result: pass")
+    .replace("Test Result: pass|fail|incomplete", "Test Result: pass")
     .replace("L3 Required: yes|no", "L3 Required: no")
     .replaceAll("TBD", "None.")
     .replace("## Evidence Reviewed\n\nNone.", "## Evidence Reviewed\n\nProduction entry point and current tests.")

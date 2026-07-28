@@ -523,6 +523,10 @@ The fixed harness does not install `check-fast`, `check-changed`, or
 Tester owns validation adequacy. `test-report.md` maps each accepted changed
 behavior or relevant risk to its validation level, actual test case or external
 evidence, exercised entry path, assertions, result, and remaining gap.
+`Test Result: incomplete` records a validation turn that ended with no blocking
+issue while concrete required checks remain. The report records completed and
+remaining validation, PM routes Tester continuation, and the report cannot
+enter Validation Adequacy Gate or Final Acceptance.
 L2 covers behavior that can be completely proved from a stable integration
 entry point. L3 is mandatory when a task adds or changes externally observable
 end-to-end behavior, affects a documented L3 production path, changes that
@@ -535,10 +539,11 @@ behavior, not mock-call rituals or fixture-specific shortcuts.
 
 Tester cannot create `Coverage Gaps` or add durable `Known Testing Gaps`
 without the user's exact approval. Required coverage that cannot be completed
-remains `Test Result: fail` and follows Architect Debug, then Architecture
-Diagnosis. Only after Diagnosis still cannot resolve the gap may PM ask the
-user to accept it. Approval allows the exact risk to remain and the workflow to
-continue; it does not convert the failed validation result to `pass`.
+by another Tester continuation remains `Test Result: fail` and follows
+Architect Debug, then Architecture Diagnosis. Only after Diagnosis still cannot
+resolve the gap may PM ask the user to accept it. Approval allows the exact risk
+to remain and the workflow to continue; it does not convert the failed
+validation result to `pass`.
 
 The Validation Adequacy Gate reads the actual implementation entry points and
 test files behind that mapping. Its report must contain structured Validation

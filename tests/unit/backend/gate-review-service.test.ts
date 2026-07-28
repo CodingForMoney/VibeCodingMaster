@@ -210,6 +210,37 @@ describe("gate-review-service", () => {
     expect(sessionStarts).toEqual([]);
   });
 
+  it("does not start validation-adequacy review for in-progress Tester evidence", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-gate-review-incomplete-report-"));
+    await writeHarnessFiles(tmpRepo);
+    await writeFile(
+      path.join(taskWorktree(tmpRepo), ".ai/vcm/handoffs/test-report.md"),
+      incompleteTestReport(),
+      "utf8"
+    );
+    const sessionStarts: string[] = [];
+    const service = createGateReviewService({
+      fs: createNodeFileSystemAdapter(),
+      runner: createRunner(tmpRepo, []),
+      runtime: createRuntime(tmpRepo, []),
+      projectService: createProjectService(),
+      taskService: createTaskService(tmpRepo),
+      appSettings: createAppSettings(["validation-adequacy"]),
+      sessionService: createSessionService(sessionStarts),
+      roundService: createRoundService()
+    });
+
+    const result = await service.requestReviewGate(tmpRepo, "demo-task", "validation-adequacy");
+    const state = await service.getState(tmpRepo, "demo-task");
+
+    expect(result.status).toBe("failed_to_start");
+    expect(result.message).toContain(
+      ".ai/vcm/handoffs/test-report.md is incomplete and cannot start validation-adequacy review"
+    );
+    expect(state.gates["validation-adequacy"].status).toBe("failed");
+    expect(sessionStarts).toEqual([]);
+  });
+
   it("invalidates validation-adequacy approval when current code or test evidence changes", async () => {
     tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-gate-review-report-hash-"));
     await writeHarnessFiles(tmpRepo);
@@ -1055,6 +1086,14 @@ function validTestReport(): string {
     "## Coverage Mapping",
     "Feature behavior -> L2 -> tests/feature.test.ts -> public entry path -> pass.",
     "",
+    "## Validation Progress",
+    "",
+    "### Completed Validation",
+    "L0, L1, and L2 completed.",
+    "",
+    "### Remaining Validation",
+    "None.",
+    "",
     "## L3 Coverage",
     "",
     "L3 Required: no",
@@ -1109,6 +1148,15 @@ function approvedGapTestReport(): string {
     .replace(
       "## User Approval Evidence\nNone.",
       "## User Approval Evidence\nUser approved retaining the live gateway coverage gap."
+    );
+}
+
+function incompleteTestReport(): string {
+  return validTestReport()
+    .replace("Test Result: pass", "Test Result: incomplete")
+    .replace(
+      "### Remaining Validation\nNone.",
+      "### Remaining Validation\nRun the remaining L2 integration matrix."
     );
 }
 

@@ -153,6 +153,10 @@ when the active flow produced an architecture plan. Read
 When the report contains an approved Coverage Gap, also read the relevant
 Architect Debug and Architecture Diagnosis evidence.
 
+Validation-adequacy reviews only a terminal `Test Result: pass|fail`.
+`Test Result: incomplete` is Tester continuation state and must not enter this
+gate.
+
 Reconstruct the accepted validation target, observable behavior, and risks
 from the active flow evidence and current implementation. Treat Tester
 conclusions, green commands, and

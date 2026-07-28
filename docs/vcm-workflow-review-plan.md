@@ -627,7 +627,8 @@ validation-only / tester
 
 The allowed branches are:
 
-- incomplete validation work or test-report evidence returns to Tester
+- `Test Result: incomplete` with recorded completed and remaining validation
+  returns to Tester without entering Validation Adequacy Gate
 - Validation Adequacy Gate `request_changes` returns to Tester and repeats the
   Gate after correction
 - required production-code, runtime-behavior, public-contract, dependency, or

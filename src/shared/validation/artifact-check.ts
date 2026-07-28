@@ -41,6 +41,9 @@ const REQUIRED_HEADINGS: Record<ArtifactKind, readonly string[]> = {
     "Evidence Reviewed",
     "Tests Added Or Updated",
     "Coverage Mapping",
+    "Validation Progress",
+    "Completed Validation",
+    "Remaining Validation",
     "L3 Coverage",
     "Trigger Assessment",
     "Affected End-To-End Flows",
@@ -115,6 +118,8 @@ export function checkMarkdownArtifact(
   const missingHeadings = REQUIRED_HEADINGS[kind].filter((heading) => !hasHeading(trimmed, heading));
   const hasPlaceholder = PLACEHOLDER_PATTERN.test(trimmed);
   const invalidFields = validateArtifactFields(kind, trimmed);
+  const isWorkInProgress = kind === "test-report"
+    && /^\s*Test Result\s*:\s*incomplete\s*$/im.test(trimmed);
 
   return {
     kind,
@@ -124,7 +129,12 @@ export function checkMarkdownArtifact(
     hasPlaceholder,
     missingHeadings,
     invalidFields,
-    status: missingHeadings.length === 0 && !hasPlaceholder && invalidFields.length === 0 ? "ok" : "incomplete"
+    status: missingHeadings.length === 0
+      && !hasPlaceholder
+      && invalidFields.length === 0
+      && !isWorkInProgress
+      ? "ok"
+      : "incomplete"
   };
 }
 
@@ -155,9 +165,9 @@ function validateArtifactFields(kind: ArtifactKind, content: string): string[] {
 
   if (kind === "test-report") {
     const result = /^\s*Test Result\s*:\s*(\S+)\s*$/im.exec(content)?.[1]?.toLowerCase();
-    const invalidFields = result === "pass" || result === "fail"
+    const invalidFields = result === "pass" || result === "fail" || result === "incomplete"
       ? []
-      : ["Test Result must be pass or fail."];
+      : ["Test Result must be pass, fail, or incomplete."];
     const l3Required = /^\s*L3 Required\s*:\s*(\S+)\s*$/im.exec(content)?.[1]?.toLowerCase();
     if (l3Required !== "yes" && l3Required !== "no") {
       invalidFields.push("L3 Required must be yes or no.");
@@ -183,9 +193,13 @@ function validateArtifactFields(kind: ArtifactKind, content: string): string[] {
     const coverageGaps = readArtifactSectionValue(content, "Coverage Gaps");
     const blockingIssues = readArtifactSectionValue(content, "Blocking Validation Issues");
     const userApproval = readArtifactSectionValue(content, "User Approval Evidence");
+    const failedExpectations = readArtifactSectionValue(content, "Failed Expectations");
+    const completedValidation = readArtifactSectionValue(content, "Completed Validation");
+    const remainingValidation = readArtifactSectionValue(content, "Remaining Validation");
     const hasCoverageGaps = Boolean(coverageGaps && !/^none\.?$/i.test(coverageGaps));
     const hasBlockingIssues = Boolean(blockingIssues && !/^none\.?$/i.test(blockingIssues));
     const hasUserApproval = Boolean(userApproval && !/^none\.?$/i.test(userApproval));
+    const hasFailedExpectations = Boolean(failedExpectations && !/^none\.?$/i.test(failedExpectations));
 
     if (result === "pass") {
       if (!coverageGaps || hasCoverageGaps) {
@@ -196,6 +210,32 @@ function validateArtifactFields(kind: ArtifactKind, content: string): string[] {
       }
       if (!userApproval || hasUserApproval) {
         invalidFields.push("User Approval Evidence must be None when Test Result is pass.");
+      }
+      if (!failedExpectations || hasFailedExpectations) {
+        invalidFields.push("Failed Expectations must be None when Test Result is pass.");
+      }
+      if (hasSubstantiveSectionValue(remainingValidation)) {
+        invalidFields.push("Remaining Validation must be None when Test Result is pass.");
+      }
+    }
+    if (result === "incomplete") {
+      if (!hasSubstantiveSectionValue(completedValidation)) {
+        invalidFields.push("Completed Validation must record progress when Test Result is incomplete.");
+      }
+      if (!hasSubstantiveSectionValue(remainingValidation)) {
+        invalidFields.push("Remaining Validation must list continuation work when Test Result is incomplete.");
+      }
+      if (hasCoverageGaps) {
+        invalidFields.push("Coverage Gaps must be None when Test Result is incomplete.");
+      }
+      if (hasBlockingIssues) {
+        invalidFields.push("Blocking Validation Issues must be None when Test Result is incomplete.");
+      }
+      if (hasUserApproval) {
+        invalidFields.push("User Approval Evidence must be None when Test Result is incomplete.");
+      }
+      if (hasFailedExpectations) {
+        invalidFields.push("Failed Expectations must be None when Test Result is incomplete.");
       }
     }
     if (result === "fail" && !hasBlockingIssues) {

@@ -44,7 +44,7 @@ when VCM explicitly requests a proposal during Task Harness Review, use
 - Do not treat "looks normal", "no error", log absence, or implementation reasoning as validation evidence.
 - Coder may write and run L0/L1 baseline tests during implementation, but Tester owns final test adequacy for all validation levels.
 - Review Coder-provided L0/L1 evidence and changed unit tests against `docs/CODING_STANDARDS.md`; confirm changed callable units have required success, failure, boundary, validation, branching, error-handling, lifecycle, retry, or state-transition coverage.
-- If required L0/L1 coverage is missing or weak, add or update the required tests. If the coverage cannot be completed, return `Test Result: fail` with concrete blocking evidence.
+- If required L0/L1 coverage is missing or weak, add or update the required tests. If the current turn ends while that work can continue in another Tester turn and no blocking issue has been found, return `Test Result: incomplete` with completed and remaining validation. If Tester continuation cannot resolve the missing coverage, return `Test Result: fail` with concrete blocking evidence.
 - Own L2/L3/L4 final-validation design, execution, and acceptance evidence.
 - Targeted diagnostic L2 checks run by Coder or Architect are implementation evidence only and do not replace Tester final validation.
 - Use L2 integration coverage when changed behavior crosses internal module or component boundaries and can be completely proved from a stable integration entry point without triggering the mandatory L3 rules below.
@@ -71,7 +71,8 @@ when VCM explicitly requests a proposal during Task Harness Review, use
 - Before exact user approval is routed by project-manager, record missing required coverage under `Blocking Validation Issues`, keep `Coverage Gaps` as `None`, and return `Test Result: fail`.
 - Add a Coverage Gap only after project-manager routes the user's exact approval for that specific unresolved gap. Record the approval verbatim in `User Approval Evidence`.
 - User approval permits the gap to remain and the workflow to continue; it does not change the factual `Test Result: fail`.
-- If a required validation check is skipped or cannot complete, `Test Result` must be `fail`.
+- If the current turn ends before required validation finishes, use `Test Result: incomplete` only when no blocking issue has been found and Tester can continue the remaining checks in another turn.
+- A required check that fails, is skipped, or cannot be completed by Tester continuation is a blocking validation issue and requires `Test Result: fail`.
 - Update `docs/TESTING.md` when validation strategy, commands, level mapping, integration/E2E case definitions, selection rules, final-validation cleanup, test gaps, or test expectations change.
 
 ### Mandatory L3 End-To-End Coverage
@@ -143,7 +144,7 @@ Coverage Gap.
 
 ### Outputs
 
-- Write `.ai/vcm/handoffs/test-report.md` with `Test Result: pass|fail`, evidence reviewed, tests added or updated, coverage mapping, commands run or checked, validation results, failed expectations, reproduction steps, skipped checks with reasons, coverage gaps, blocking validation issues, and user approval evidence.
+- Write `.ai/vcm/handoffs/test-report.md` with `Test Result: pass|fail|incomplete`, evidence reviewed, tests added or updated, coverage mapping, validation progress, commands run or checked, validation results, failed expectations, reproduction steps, skipped checks with reasons, coverage gaps, blocking validation issues, and user approval evidence.
 - `test-report.md` must include this L3 section:
 
 ```md
@@ -168,9 +169,12 @@ L3 Required: yes|no
 - In Validation-Only Flow, if tests, fixtures, test-only helpers, or `docs/TESTING.md` changed, commit those changes before reporting and record the changed files and commit in `test-report.md`. If no tracked files changed, record that no commit was required.
 - `test-report.md` is the current validation evidence, not a log; when rewriting it, carry forward still-unresolved findings or explicitly mark them resolved instead of dropping them.
 - In `Coverage Mapping`, map each accepted changed behavior or relevant risk to its validation level, actual test file and case or external evidence, exercised entry path and key assertions, result, and any remaining gap.
+- In `Validation Progress`, record `Completed Validation` and `Remaining Validation`. A final `pass` report must set remaining validation to `None`.
 - Use `pass` only when required validation completed and no blocking test failure, missing required coverage, unacceptable test weakness, or unresolved validation risk remains.
-- Use `fail` when tests fail, coverage is insufficient, important validation cannot complete, test quality is unacceptable, or validation risk needs project-manager routing.
-- When `Test Result: pass`, `Coverage Gaps`, `Blocking Validation Issues`, and `User Approval Evidence` must be `None`.
+- Use `fail` only when tests fail, coverage is insufficient and Tester continuation cannot resolve it, required validation is blocked from completion, test quality is unacceptable, or validation risk needs project-manager routing.
+- Use `incomplete` only when required validation remains, no blocking issue has been found, and another Tester turn can continue the recorded remaining work.
+- When `Test Result: pass`, `Failed Expectations`, `Coverage Gaps`, `Blocking Validation Issues`, and `User Approval Evidence` must be `None`.
+- When `Test Result: incomplete`, `Completed Validation` and `Remaining Validation` must both contain concrete progress, while `Failed Expectations`, `Coverage Gaps`, `Blocking Validation Issues`, and `User Approval Evidence` must be `None`.
 - When `Test Result: fail`, `Blocking Validation Issues` must list concrete blocking evidence.
 - When `Coverage Gaps` is not `None`, `Test Result` must be `fail`, `User Approval Evidence` must contain the user's exact authorization, and every recorded gap must match that authorization.
 - When no gap has been approved, `User Approval Evidence` must be `None`.

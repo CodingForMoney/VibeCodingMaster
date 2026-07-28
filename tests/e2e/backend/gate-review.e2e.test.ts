@@ -112,6 +112,17 @@ describe("backend E2E Gate Review with mock Claude Code", () => {
 
     await fs.writeFile(
       path.join(task.worktreePath, ".ai/vcm/handoffs/test-report.md"),
+      incompleteTestReport(),
+      "utf8"
+    );
+    const incompleteValidation = await requestGateReview(env.app, task.taskSlug, "validation-adequacy");
+    expect(incompleteValidation.status).toBe("failed_to_start");
+    expect(incompleteValidation.message).toContain(
+      ".ai/vcm/handoffs/test-report.md is incomplete and cannot start validation-adequacy review"
+    );
+
+    await fs.writeFile(
+      path.join(task.worktreePath, ".ai/vcm/handoffs/test-report.md"),
       validTestReport(),
       "utf8"
     );
@@ -373,6 +384,14 @@ function validTestReport(): string {
     "## Coverage Mapping",
     "Feature behavior -> L2 -> mock feature integration case -> public path -> pass.",
     "",
+    "## Validation Progress",
+    "",
+    "### Completed Validation",
+    "L0, L1, and L2 completed.",
+    "",
+    "### Remaining Validation",
+    "None.",
+    "",
     "## L3 Coverage",
     "",
     "L3 Required: no",
@@ -425,6 +444,15 @@ function approvedGapTestReport(userApproval: string): string {
       "## Blocking Validation Issues\nLive gateway validation remains unavailable."
     )
     .replace("## User Approval Evidence\nNone.", `## User Approval Evidence\n${userApproval}`);
+}
+
+function incompleteTestReport(): string {
+  return validTestReport()
+    .replace("Test Result: pass", "Test Result: incomplete")
+    .replace(
+      "### Remaining Validation\nNone.",
+      "### Remaining Validation\nRun the remaining L2 integration matrix."
+    );
 }
 
 function validationAnalysisLines(): string[] {

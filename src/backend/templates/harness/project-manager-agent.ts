@@ -94,6 +94,7 @@ PM may leave this path only through the allowed branches below.
 - **Coder Continuation:** If Coder returns \`Decision: incomplete\`, lacks the required completion artifact, or has not completed implementation and L0/L1 validation, route Coder again — this is the only route for an in-progress sweep. Problems recorded inside an incomplete report are sweep state, not routable failures; PM routes problems onward only from a post-sweep \`failed\` report carrying the consolidated per-item disposition.
 - **Coder Failure Debug:** If Coder returns \`Decision: failed\` with compile, typecheck, or L0/L1 failure evidence after implementation, suspend the main flow and enter Architect Debug Branch.
 - **Code-Diff Correction:** If the code-diff Gate returns \`request_changes\`, suspend the main flow and enter Architect Debug Branch with the Gate report.
+- **Tester Continuation:** If Tester returns \`Test Result: incomplete\`, route Tester again to continue the recorded remaining validation. Do not enter Debug, Diagnosis, or validation-adequacy Gate Review.
 - **Tester Failure:** If Tester returns \`Test Result: fail\` for the original Coder implementation, enter Architect Debug Branch.
 - **Validation Revision:** If the validation-adequacy Gate returns \`request_changes\`, route the report to Tester, then rerun the validation-adequacy Gate after Tester updates the tests or test report.
 - **Docs Sync Correction:** \`Decision: synced\` or \`unchanged\` continues to Final Acceptance. \`Decision: blocked\` remains at docs sync unless the report identifies an allowed Debug, Diagnosis, or user-decision branch.
@@ -152,6 +153,7 @@ The shared path is:
 
 - **Normal Plan Required:** If Architect returns \`normal architecture plan required\`, enter Code-Change Flow at Architect planning. When Debug is a branch of Code-Change Flow, resume that parent flow at Architect planning.
 - **Code-Diff Revision:** If the code-diff Gate returns \`request_changes\`, route the report to Architect Debug Mode and rerun \`code-diff --source architect-debug\` after correction.
+- **Tester Continuation:** If Tester returns \`Test Result: incomplete\`, route Tester again to continue the recorded remaining validation.
 - **Architecture Diagnosis:** If Tester returns \`Test Result: fail\`, enter Architecture Diagnosis Branch.
 
 #### Successful Exit
@@ -181,6 +183,7 @@ Architecture Diagnosis Mode must run before another Debug Mode fix or Coder disp
 #### Allowed Branches
 
 - **Code-Diff Revision:** If the code-diff Gate returns \`request_changes\`, route the report to Architecture Diagnosis Mode and rerun \`code-diff --source architect-diagnosis\` after correction.
+- **Tester Continuation:** If Tester returns \`Test Result: incomplete\`, route Tester again to continue the recorded remaining validation.
 - **Tester Failure:** If Tester returns \`Test Result: fail\` for the Diagnosis implementation, pause and report to the user. If required validation remains unavailable, ask whether the user explicitly approves retaining that exact Coverage Gap.
 
 #### Successful Exit
@@ -243,7 +246,7 @@ The flow is:
 
 \`Tester validation and test update -> validation-adequacy Gate -> PM completion\`
 
-Tester must complete the accepted validation work, write \`.ai/vcm/handoffs/test-report.md\`, and return \`Test Result: pass|fail\`.
+Tester must write \`.ai/vcm/handoffs/test-report.md\` and return \`Test Result: pass|fail|incomplete\`.
 
 If Tester changes tests, fixtures, test-only helpers, or \`docs/TESTING.md\`, Tester must commit those changes and record the changed files and commit in \`test-report.md\`.
 
@@ -253,7 +256,7 @@ PM may leave this path only through the allowed branches below.
 
 #### Allowed Branches
 
-- **Tester Continuation:** If the assigned validation work or test report is incomplete, route Tester again.
+- **Tester Continuation:** If Tester returns \`Test Result: incomplete\`, route Tester again to continue the recorded remaining validation.
 - **Validation Revision:** If the validation-adequacy Gate returns \`request_changes\`, route the report to Tester and rerun the Gate after correction.
 - **Code Change Required:** If the accepted outcome requires production-code, runtime-behavior, public-contract, dependency, or system-architecture changes, enter Code-Change Flow at Architect planning.
 - **User Decision:** If validation requires missing user intent, credentials, environment access, sensitive data, real cost, or external authorization, pause and ask the user.
@@ -322,6 +325,7 @@ PM may lightly rewrite the user's words to:
 - In an Architect Debug Branch or Architecture Diagnosis Branch, track the parent flow, resume point, Architect result, test report, and required Gate Review results. Do not require a branch-level final acceptance report.
 - In an Architect Debug Flow or Architecture Diagnosis Flow that produces code changes, track the Architect result, test report, required Gate Review results, docs-sync report, and final acceptance report.
 - In Docs-Only Flow, complete only when Architect returns \`Decision: synced\` or \`Decision: unchanged\` with complete evidence. In Validation-Only Flow, complete only from a complete \`test-report.md\` after the validation-adequacy Gate finishes successfully.
+- A Tester \`Test Result: incomplete\` is continuation state, not failure evidence. Route Tester again and do not run validation-adequacy Gate Review or Final Acceptance from it.
 - The Architect does not begin planning until \`architecture-brief.md\` is confirmed (this happens inside the same Architect Interview-and-planning turn, not a separate PM route). Advance to the next gate only when the required role artifact/result is complete and PM routing rules allow that gate.
 - If a required artifact is missing, stale, blocked, or asks for a decision, route the issue to the responsible role or user.
 - In Code-Change Flow, Architect Debug Flow, and an Architecture Diagnosis Flow that produces code changes, request Architect post-validation docs sync after Tester completes. Architect Debug Branch and Architecture Diagnosis Branch return to their recorded resume points after Tester passes.
@@ -330,7 +334,7 @@ PM may lightly rewrite the user's words to:
 
 - Gate Review requests are mandatory and unconditional. At every trigger point, use the \`vcm-gate-review\` skill to run \`.ai/tools/request-gate-review\` with the matching gate and code source arguments without first judging whether Gate Review is enabled. The tool (via VCM) is the single source of truth for enable state; never skip the run because you assume Gate Review is off or because the worktree has no gate-review index yet.
 - The tool's first output line decides the next step: \`disabled\`, \`not_required\`, or \`already_approved\` continue the normal VCM flow; \`started\` or \`running\` stop the turn and wait for the VCM callback; \`failed_to_start\` is a hard stop — report it to the user and do not silently proceed past the gate.
-- Trigger points (run each unconditionally): after the architecture brief is confirmed and Architect completes planning, before coder dispatch run \`architecture-plan\`; before post-validation docs sync or final acceptance in a code-delivery flow, or before Validation-Only Flow completion, run \`validation-adequacy\`; after any Coder \`Decision: ready_for_review\` result run \`code-diff --source coder\`; after any Architect Debug Mode completed code fix run \`code-diff --source architect-debug\`; after any Architecture Diagnosis Mode completed code fix run \`code-diff --source architect-diagnosis\`. Run code-diff before routing to Tester.
+- Trigger points (run each unconditionally): after the architecture brief is confirmed and Architect completes planning, before coder dispatch run \`architecture-plan\`; after Tester returns a terminal \`Test Result: pass|fail\` that the active flow permits to reach the gate, before post-validation docs sync or final acceptance in a code-delivery flow, or before Validation-Only Flow completion, run \`validation-adequacy\`; after any Coder \`Decision: ready_for_review\` result run \`code-diff --source coder\`; after any Architect Debug Mode completed code fix run \`code-diff --source architect-debug\`; after any Architecture Diagnosis Mode completed code fix run \`code-diff --source architect-diagnosis\`. Never run validation-adequacy for \`Test Result: incomplete\`. Run code-diff before routing to Tester.
 - PM does not inspect commits or decide whether code changes exist. At a \`code-diff\` trigger point, run the tool; the tool decides \`disabled\`, \`not_required\`, \`already_approved\`, or starts review.
 - Do not run \`code-diff\` for incomplete, failed, planning-only, Docs-Only Flow, Validation-Only Flow, PR-Preparation Flow, or Communication-Only Flow.
 - Gate Review trigger points apply only when the active delivery flow reaches that milestone. Do not run Gate Review for Communication-Only Flow.

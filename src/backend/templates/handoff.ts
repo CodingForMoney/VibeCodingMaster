@@ -146,7 +146,7 @@ At task close, promote still-relevant confirmed issues to \`docs/known-issues.md
 export function renderTestReportTemplate(taskSlug: string): string {
   return `# Test Report: ${taskSlug}
 
-Test Result: pass|fail
+Test Result: pass|fail|incomplete
 
 ## Evidence Reviewed
 
@@ -157,6 +157,16 @@ TBD
 TBD
 
 ## Coverage Mapping
+
+TBD
+
+## Validation Progress
+
+### Completed Validation
+
+TBD
+
+### Remaining Validation
 
 TBD
 

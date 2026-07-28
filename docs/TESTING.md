@@ -178,6 +178,8 @@ services with controlled runtime doubles:
   and automatic Task Harness Retrospective orchestration.
 - Architecture, validation, and code-diff rejection/correction loops, including
   corrected commit source chains and unchanged-input suppression.
+- Tester `incomplete` report validation and backend refusal to start
+  Validation Adequacy Gate before remaining validation completes.
 - Role-scoped translation feeds and Gateway input/output translation without
   duplicate translation work.
 - Auto Memory review before Task Harness Retrospective, plus direct
