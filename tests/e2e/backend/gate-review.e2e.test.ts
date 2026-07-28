@@ -143,6 +143,84 @@ describe("backend E2E Gate Review with mock Claude Code", () => {
     expect(codeDiffApproved.gates["code-diff"].changedFiles).toContain("feature.txt");
   });
 
+  it("retains every Gate Review report and publishes only the latest report to the stable path", async () => {
+    const env = await createMockClaudeE2eApp();
+    cleanups.push(() => env.close());
+    const repo = await createE2eRepo();
+    cleanups.push(() => repo.cleanup());
+    const task = await connectAndCreateTask(env.app, repo, "gate-report-history");
+    await writeConfirmedArchitectureBrief(task.worktreePath, task.taskSlug);
+    await fs.writeFile(
+      path.join(task.worktreePath, ".ai/vcm/handoffs/architecture-plan.md"),
+      "Planning Result: complete\n\n# Architecture Plan\n\nInitial plan.\n",
+      "utf8"
+    );
+    await updateGateSettings(env.app, task.taskSlug, {
+      "architecture-plan": true,
+      "validation-adequacy": false,
+      "code-diff": false
+    });
+
+    const decisions: Array<"approve" | "request_changes"> = ["request_changes", "approve"];
+    let round = 0;
+    env.mockRuntime.onPrompt("reviewer", "[VCM GATE REVIEW]", async (ctx) => {
+      round += 1;
+      await writeArchitectureRoundReport(ctx, decisions.shift() ?? "approve", round);
+    }, { once: false });
+
+    expect((await requestGateReview(env.app, task.taskSlug, "architecture-plan")).status).toBe("started");
+    await waitForGate(env.app, task.taskSlug, "architecture-plan");
+    const firstState = await getGateState(env.app, task.taskSlug);
+    const firstRequestId = firstState.gates["architecture-plan"].requestId;
+    expect(firstState.gates["architecture-plan"].decision).toBe("request_changes");
+
+    await fs.appendFile(
+      path.join(task.worktreePath, ".ai/vcm/handoffs/architecture-plan.md"),
+      "\nRevision: explicit ownership.\n",
+      "utf8"
+    );
+    expect((await requestGateReview(env.app, task.taskSlug, "architecture-plan")).status).toBe("started");
+    await waitForGate(env.app, task.taskSlug, "architecture-plan");
+    const secondState = await getGateState(env.app, task.taskSlug);
+    const secondRequestId = secondState.gates["architecture-plan"].requestId;
+    expect(secondState.gates["architecture-plan"].decision).toBe("approve");
+    expect(secondRequestId).not.toBe(firstRequestId);
+
+    const requestDir = path.join(task.worktreePath, ".ai/vcm/gate-reviews/requests");
+    const firstReportPath = path.join(requestDir, `${firstRequestId}.report.md`);
+    const secondReportPath = path.join(requestDir, `${secondRequestId}.report.md`);
+    expect(await fs.readFile(firstReportPath, "utf8")).toContain("Summary: Round 1 needs revision.");
+    const secondReport = await fs.readFile(secondReportPath, "utf8");
+    expect(secondReport).toContain("Summary: Round 2 approved.");
+    expect(await fs.readFile(
+      path.join(task.worktreePath, ".ai/vcm/gate-reviews/architecture-plan-review.md"),
+      "utf8"
+    )).toBe(secondReport);
+
+    const firstRequest = JSON.parse(await fs.readFile(
+      path.join(requestDir, `${firstRequestId}.json`),
+      "utf8"
+    ));
+    const secondRequest = JSON.parse(await fs.readFile(
+      path.join(requestDir, `${secondRequestId}.json`),
+      "utf8"
+    ));
+    expect(firstRequest).toMatchObject({
+      decision: "request_changes",
+      summary: "Round 1 needs revision.",
+      reportPath: `.ai/vcm/gate-reviews/requests/${firstRequestId}.report.md`,
+      latestReportPath: ".ai/vcm/gate-reviews/architecture-plan-review.md"
+    });
+    expect(firstRequest.findings).toHaveLength(1);
+    expect(secondRequest).toMatchObject({
+      decision: "approve",
+      summary: "Round 2 approved.",
+      reportPath: `.ai/vcm/gate-reviews/requests/${secondRequestId}.report.md`,
+      latestReportPath: ".ai/vcm/gate-reviews/architecture-plan-review.md",
+      findings: []
+    });
+  });
+
   it("blocks unapproved coverage gaps and reviews an exact user-approved failed result", async () => {
     const env = await createMockClaudeE2eApp();
     cleanups.push(() => env.close());
@@ -228,6 +306,54 @@ async function writeApproveGateReport(ctx: MockClaudePromptContext): Promise<voi
     ...architectureAnalysis,
     ...validationAnalysis,
     ...codeDiffAnalysis
+  ].join("\n"));
+  await ctx.stop();
+}
+
+async function writeArchitectureRoundReport(
+  ctx: MockClaudePromptContext,
+  decision: "approve" | "request_changes",
+  round: number
+): Promise<void> {
+  await ctx.userPromptSubmit();
+  const request = matchPromptField(ctx.prompt, "Request");
+  const report = matchPromptField(ctx.prompt, "Report");
+  if (!request || !report) {
+    throw new Error(`Unable to parse gate prompt:\n${ctx.prompt}`);
+  }
+  const findings = decision === "request_changes"
+    ? [
+        "## Findings",
+        "",
+        "### high: Ownership is incomplete",
+        "- Evidence: the initial plan omits the state owner",
+        "- Expected: one state owner",
+        "- Gap: ownership is ambiguous",
+        "- Risk: duplicate state"
+      ]
+    : ["## Findings", "", "None."];
+  await ctx.writeAbsoluteFile(report, [
+    "Gate: architecture-plan",
+    `Request: ${request}`,
+    `Decision: ${decision}`,
+    `Summary: Round ${round} ${decision === "approve" ? "approved." : "needs revision."}`,
+    "",
+    "## Architecture Analysis",
+    "",
+    "- Evidence Read: architecture plan, current source, and callers",
+    "- Architecture Brief Fit: confirmed decisions are preserved",
+    "- End-To-End Flow: entry to owner to completion",
+    "- Scope Fit: complete",
+    "- Code Reality: verified",
+    "- Ownership: verified",
+    "- Data Flow: verified",
+    "- Lifecycle: verified",
+    "- Invariants: verified",
+    "- Boundaries And Public Surface: verified",
+    "- Failure Model: verified",
+    "- Coder Readiness: ready",
+    "",
+    ...findings
   ].join("\n"));
   await ctx.stop();
 }

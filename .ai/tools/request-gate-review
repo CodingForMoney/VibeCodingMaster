@@ -16,7 +16,7 @@ from pathlib import Path
 
 GATES = ("architecture-plan", "validation-adequacy", "code-diff")
 CODE_DIFF_SOURCES = ("coder", "architect-debug", "architect-diagnosis")
-REPORTS = {
+LATEST_REPORTS = {
     "architecture-plan": ".ai/vcm/gate-reviews/architecture-plan-review.md",
     "validation-adequacy": ".ai/vcm/gate-reviews/validation-adequacy-review.md",
     "code-diff": ".ai/vcm/gate-reviews/code-diff-review.md",
@@ -439,13 +439,14 @@ def local_request(gate: str, source: str | None) -> int:
         and gate_record.get("decision") == "approve"
         and gate_record.get("inputHash") == current_hash
     ):
-        print_result("already_approved", gate=gate, report=gate_record.get("reportPath", REPORTS[gate]))
+        print_result("already_approved", gate=gate, report=gate_record.get("reportPath", LATEST_REPORTS[gate]))
         return 0
 
     rid = request_id(gate)
     request_path = root / ".ai/vcm/gate-reviews/requests" / f"{rid}.json"
     prompt_path = f".ai/vcm/gate-reviews/requests/{rid}.prompt.md"
-    report_path = REPORTS[gate]
+    report_path = f".ai/vcm/gate-reviews/requests/{rid}.report.md"
+    latest_report_path = LATEST_REPORTS[gate]
     requested_at = now_iso()
     write_json(request_path, {
         "version": 1,
@@ -458,6 +459,7 @@ def local_request(gate: str, source: str | None) -> int:
         "codeDiffSources": sources,
         "codeDiff": code_diff or None,
         "reportPath": report_path,
+        "latestReportPath": latest_report_path,
         "promptPath": prompt_path,
     })
 
@@ -467,7 +469,7 @@ def local_request(gate: str, source: str | None) -> int:
         "required": True,
         "status": "running",
         "decision": None,
-        "reportPath": report_path,
+        "reportPath": latest_report_path,
         "promptPath": prompt_path,
         "inputHash": current_hash,
         "baseCommit": code_diff.get("baseCommit"),

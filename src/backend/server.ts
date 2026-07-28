@@ -374,7 +374,9 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     taskService,
     appSettings,
     sessionService,
-    roundService
+    roundService,
+    onArchitecturePlanDisposition: ({ repoRoot, taskSlug, accepted }) =>
+      architectRestartService.recordArchitectureGateDisposition(repoRoot, taskSlug, accepted)
   });
   const translationWorkerService = createTranslationWorkerService({
     fs,

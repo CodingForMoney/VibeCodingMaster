@@ -9,7 +9,7 @@ Run:
 .ai/tools/request-architect-restart
 \`\`\`
 
-If VCM reports \`scheduled\`, write the completed Architect-to-PM route message and end the turn. VCM restarts Architect only after the route is accepted by PM.
+If VCM reports \`scheduled\`, write the completed Architect-to-PM route message and end the turn. VCM keeps the current Architect session through any architecture-plan Gate revision rounds and restarts it only after the route is accepted by PM and that Gate is approved or explicitly excepted.
 
 Do not use this skill for incomplete planning, user clarification, Debug Mode, Architecture Diagnosis Mode, or docs sync.`;
 }

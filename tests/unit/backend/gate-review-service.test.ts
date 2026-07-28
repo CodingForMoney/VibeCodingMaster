@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -68,6 +68,30 @@ describe("gate-review-service", () => {
     }]);
     expect(record.callbackStatus).toBe("sent");
     expect(record.reportPath).toBe(".ai/vcm/gate-reviews/architecture-plan-review.md");
+    const requestId = record.requestId;
+    expect(requestId).toBeDefined();
+    const requestReportPath = path.join(
+      taskWorktree(tmpRepo),
+      ".ai/vcm/gate-reviews/requests",
+      `${requestId}.report.md`
+    );
+    const requestReport = await readFile(requestReportPath, "utf8");
+    expect(requestReport).toContain("Decision: request_changes");
+    expect(await readFile(
+      path.join(taskWorktree(tmpRepo), ".ai/vcm/gate-reviews/architecture-plan-review.md"),
+      "utf8"
+    )).toBe(requestReport);
+    const requestRecord = JSON.parse(await readFile(
+      path.join(taskWorktree(tmpRepo), ".ai/vcm/gate-reviews/requests", `${requestId}.json`),
+      "utf8"
+    ));
+    expect(requestRecord).toMatchObject({
+      decision: "request_changes",
+      summary: "Missing proof point.",
+      reportPath: `.ai/vcm/gate-reviews/requests/${requestId}.report.md`,
+      latestReportPath: ".ai/vcm/gate-reviews/architecture-plan-review.md"
+    });
+    expect(requestRecord.findings).toEqual(record.findings);
 
     expect(runnerCalls.some((call) => call.command === "git" && call.args[0] === "diff")).toBe(true);
     expect(sessionStarts).toEqual(["reviewer"]);
@@ -82,7 +106,7 @@ describe("gate-review-service", () => {
     const gatePrompt = writes.find((write) => write.includes("[VCM GATE REVIEW]")) ?? "";
     expect(gatePrompt).toContain("Task: demo-task");
     expect(gatePrompt).toContain(`Worktree: ${taskWorktree(tmpRepo)}`);
-    expect(gatePrompt).toContain(`Report: ${path.join(taskWorktree(tmpRepo), ".ai/vcm/gate-reviews/architecture-plan-review.md")}`);
+    expect(gatePrompt).toContain(`Report: ${requestReportPath}`);
     expect(gatePrompt).toContain("Complete every Architecture Analysis field");
     expect(gatePrompt).not.toContain("Findings, when present");
     expect(writes.join("")).toContain("[VCM GATE REVIEW CALLBACK]");
@@ -817,6 +841,8 @@ function createRuntime(
       }
       const gate = /Gate:\s*([a-z-]+)/.exec(data)?.[1] ?? "architecture-plan";
       const requestId = /Request:\s*([a-z0-9_.-]+)/i.exec(data)?.[1] ?? "request-id";
+      const reportPath = /^Report:\s*(.+)$/m.exec(data)?.[1]?.trim()
+        ?? path.join(taskWorktree(repoRoot), ".ai/vcm/gate-reviews/requests", `${requestId}.report.md`);
       const architectureAnalysis = gate === "architecture-plan"
         ? [
             "## Architecture Analysis",
@@ -855,7 +881,7 @@ function createRuntime(
           ]
         : ["## Findings", "", "None."];
       void writeFile(
-        path.join(taskWorktree(repoRoot), ".ai/vcm/gate-reviews", `${gate}-review.md`),
+        reportPath,
         [
           `Gate: ${gate}`,
           `Request: ${requestId}`,

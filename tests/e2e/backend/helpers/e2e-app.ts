@@ -204,6 +204,8 @@ export async function createMockClaudeE2eApp(options: MockClaudeE2eAppOptions = 
     appSettings,
     sessionService,
     roundService,
+    onArchitecturePlanDisposition: ({ repoRoot, taskSlug, accepted }) =>
+      architectRestartService.recordArchitectureGateDisposition(repoRoot, taskSlug, accepted),
     reportPollIntervalMs: 10
   });
   const translationWorkerService = createTranslationWorkerService({

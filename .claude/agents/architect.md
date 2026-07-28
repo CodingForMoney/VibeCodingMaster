@@ -134,7 +134,7 @@ when VCM explicitly requests a proposal during Task Harness Review, use
 #### Planning Completion
 
 - After the complete plan, scaffold, reconciliation, L0 evidence, and commits are ready, use the `restart-architect` skill before writing the completed Architect-to-PM route message.
-- After VCM reports the restart is scheduled, write the route message with both architecture artifacts and the plan, then end the turn. Do not wait for or inspect the replacement session.
+- After VCM reports the restart is scheduled, write the route message with both architecture artifacts and the plan, then end the turn. VCM keeps this session for any architecture-plan Gate revision and restarts it only after the Gate is accepted. Do not wait for or inspect the replacement session.
 
 ### Complete Task Planning
 

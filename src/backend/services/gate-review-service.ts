@@ -50,6 +50,11 @@ export interface GateReviewServiceDeps {
   appSettings: Pick<AppSettingsService, "getGateReviewSettings" | "updateGateReviewSettings">;
   sessionService: Pick<SessionService, "getRoleSession" | "markRoleActivityRunning" | "resumeRoleSession" | "startRoleSession">;
   roundService: Pick<RoundService, "recordRoleTurnEvent">;
+  onArchitecturePlanDisposition?: (input: {
+    repoRoot: string;
+    taskSlug: string;
+    accepted: boolean;
+  }) => Promise<void> | void;
   reportPollIntervalMs?: number;
   now?: () => string;
 }
@@ -208,6 +213,7 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
         error: undefined
       }, now());
       await saveIndex(deps.fs, context.taskRepoRoot, index);
+      await notifyArchitecturePlanDisposition(context, gate, true);
       return { status: "disabled", gate, record: index.gates[gate], message: "Gate review is disabled." };
     }
 
@@ -218,6 +224,7 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
         error: undefined
       }, now());
       await saveIndex(deps.fs, context.taskRepoRoot, index);
+      await notifyArchitecturePlanDisposition(context, gate, true);
       return { status: "not_required", gate, record: index.gates[gate], message: "This gate is not required." };
     }
 
@@ -447,6 +454,7 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
       && record.decision === "approve"
       && record.inputHash === inputHash
     ) {
+      await notifyArchitecturePlanDisposition(context, gate, true);
       return {
         status: "already_approved",
         gate,
@@ -459,6 +467,7 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
     const requestId = createRequestId(gate);
     const requestPath = path.posix.join(REQUESTS_DIR, `${requestId}.json`);
     const promptPath = path.posix.join(REQUESTS_DIR, `${requestId}.prompt.md`);
+    const requestReportPath = reportPathForRequest(requestId);
     const nextRecord: GateReviewGateRecord = {
       ...record,
       status: "running",
@@ -502,10 +511,12 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
       codeDiffSource,
       codeDiffSources,
       codeDiff: codeDiffInput,
-      reportPath: nextRecord.reportPath,
+      reportPath: requestReportPath,
+      latestReportPath: nextRecord.reportPath,
       promptPath: nextRecord.promptPath
     });
     await saveIndex(deps.fs, context.taskRepoRoot, index);
+    await notifyArchitecturePlanDisposition(context, gate, false);
 
     void runGateReview(context, gate, requestId, codeDiffInput, codeDiffSources).catch(() => {
       // runGateReview records failures in the persisted gate state.
@@ -581,11 +592,20 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
         now(),
         reportPollIntervalMs
       );
+      await publishLatestGateReport(
+        deps.fs,
+        context.taskRepoRoot,
+        gate,
+        parsed.content
+      );
       const completedAt = now();
       await updateRequestStatus(deps.fs, context, requestId, "completed", {
         completedAt,
         decision: parsed.decision,
-        reportPath: parsed.reportPath
+        summary: parsed.summary,
+        findings: parsed.findings,
+        reportPath: parsed.reportPath,
+        latestReportPath: reportPathForGate(gate)
       });
       activeRuns.delete(runKey);
       await updateGateRecord(context, gate, {
@@ -599,6 +619,11 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
         callbackError: undefined,
         updatedAt: completedAt
       }, { clearActiveGate: true });
+      await notifyArchitecturePlanDisposition(
+        context,
+        gate,
+        parsed.decision === "approve"
+      );
       await callbackProjectManager(context, gate, "completed", parsed.decision, parsed.reportPath);
     } catch (error) {
       const timestamp = now();
@@ -616,7 +641,8 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
         callbackError: undefined,
         updatedAt: timestamp
       }, { clearActiveGate: true });
-      await callbackProjectManager(context, gate, "failed", undefined, reportPathForGate(gate), message);
+      await notifyArchitecturePlanDisposition(context, gate, false);
+      await callbackProjectManager(context, gate, "failed", undefined, reportPathForRequest(requestId), message);
     } finally {
       activeRuns.delete(runKey);
     }
@@ -716,6 +742,25 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
     }
   }
 
+  async function notifyArchitecturePlanDisposition(
+    context: ReviewContext,
+    gate: GateReviewGate,
+    accepted: boolean
+  ): Promise<void> {
+    if (gate !== "architecture-plan" || !deps.onArchitecturePlanDisposition) {
+      return;
+    }
+    try {
+      await deps.onArchitecturePlanDisposition({
+        repoRoot: context.repoRoot,
+        taskSlug: context.taskSlug,
+        accepted
+      });
+    } catch {
+      // Gate state remains authoritative even if the deferred session restart cannot run yet.
+    }
+  }
+
   return {
     async getState(repoRoot, taskSlug) {
       const context = await getContext(repoRoot, taskSlug);
@@ -773,6 +818,7 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
         callbackError: undefined,
         updatedAt: now()
       }, { clearActiveGate: true });
+      await notifyArchitecturePlanDisposition(context, gate, true);
       await callbackProjectManager(context, gate, "skipped", undefined, index.gates[gate].reportPath);
       return loadIndex(deps.fs, context, now());
     },
@@ -798,12 +844,20 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
         callbackError: undefined,
         updatedAt: now()
       }, { clearActiveGate: true });
+      await notifyArchitecturePlanDisposition(context, gate, true);
       await callbackProjectManager(context, gate, "overridden", "approve", index.gates[gate].reportPath);
       return loadIndex(deps.fs, context, now());
     },
     async readReport(repoRoot, taskSlug, gate) {
       const context = await getContext(repoRoot, taskSlug);
-      return parseGateReport(deps.fs, context.taskRepoRoot, gate, undefined, now());
+      return parseGateReport(
+        deps.fs,
+        context.taskRepoRoot,
+        gate,
+        undefined,
+        now(),
+        reportPathForGate(gate)
+      );
     }
   };
 }
@@ -1276,7 +1330,7 @@ function buildGatePrompt(
   codeDiffInput?: CodeDiffInput,
   codeDiffSources?: CodeDiffSource[]
 ): string {
-  const reportPath = reportPathForGate(gate);
+  const reportPath = reportPathForRequest(requestId);
   const absoluteReportPath = resolveRepoPath(context.taskRepoRoot, reportPath);
   const evidence = getSourceArtifacts(gate, codeDiffSources)
     .map((relativePath) => `- ${relativePath}`)
@@ -1338,9 +1392,10 @@ async function waitForGateReport(
   timestamp: string,
   intervalMs: number
 ): Promise<ParsedReport> {
+  const reportPath = reportPathForRequest(requestId);
   while (true) {
     try {
-      return await parseGateReport(fs, taskRepoRoot, gate, requestId, timestamp);
+      return await parseGateReport(fs, taskRepoRoot, gate, requestId, timestamp, reportPath);
     } catch (error) {
       if (!isPendingReportError(error)) {
         throw error;
@@ -1355,9 +1410,9 @@ async function parseGateReport(
   taskRepoRoot: string,
   gate: GateReviewGate,
   requestId: string | undefined,
-  timestamp: string
+  timestamp: string,
+  reportPath: string
 ): Promise<ParsedReport> {
-  const reportPath = reportPathForGate(gate);
   const absolutePath = resolveRepoPath(taskRepoRoot, reportPath);
   if (!(await fs.pathExists(absolutePath))) {
     throw new VcmError({
@@ -1580,8 +1635,26 @@ async function updateRequestStatus(
   });
 }
 
+async function publishLatestGateReport(
+  fs: FileSystemAdapter,
+  taskRepoRoot: string,
+  gate: GateReviewGate,
+  content: string
+): Promise<void> {
+  const latestPath = resolveRepoPath(taskRepoRoot, reportPathForGate(gate));
+  if (fs.writeTextAtomic) {
+    await fs.writeTextAtomic(latestPath, content);
+    return;
+  }
+  await fs.writeText(latestPath, content);
+}
+
 function reportPathForGate(gate: GateReviewGate): string {
   return path.posix.join(GATE_REVIEW_DIR, `${gate}-review.md`);
+}
+
+function reportPathForRequest(requestId: string): string {
+  return path.posix.join(REQUESTS_DIR, `${requestId}.report.md`);
 }
 
 function promptPathForRequest(requestId: string): string {
