@@ -1,4 +1,14 @@
 import type { ArtifactCheckResult, ArtifactKind } from "../types/artifact.js";
+import {
+  ARCHITECTURE_BRIEF_STATUSES,
+  ARCHITECTURE_PLAN_RESULTS,
+  DOCS_SYNC_DECISIONS,
+  FINAL_ACCEPTANCE_DECISIONS,
+  L3_ACTIONS,
+  L3_REQUIRED_VALUES,
+  STRICT_NONE_VALUE,
+  TEST_RESULTS
+} from "./artifact-contract.js";
 
 const REQUIRED_HEADINGS: Record<ArtifactKind, readonly string[]> = {
   "architecture-brief": [
@@ -140,42 +150,44 @@ export function checkMarkdownArtifact(
 
 function validateArtifactFields(kind: ArtifactKind, content: string): string[] {
   if (kind === "architecture-plan") {
-    const result = /^\s*Planning Result\s*:\s*(.+?)\s*$/im.exec(content)?.[1]?.trim().toLowerCase();
-    if (!result) {
-      return ["Planning Result is required and must be complete."];
-    }
-    return result === "complete"
+    const result = readInlineField(content, "Planning Result");
+    return result === ARCHITECTURE_PLAN_RESULTS[0]
       ? []
-      : [`Planning Result must be complete; received "${result}".`];
+      : [renderExactFieldError("Planning Result", [ARCHITECTURE_PLAN_RESULTS[0]], result)];
   }
 
   if (kind === "architecture-brief") {
-    const status = /^\s*Architecture Brief Status\s*:\s*(\S+)\s*$/im.exec(content)?.[1]?.toLowerCase();
-    const invalidFields = status === "interviewing" || status === "confirmed"
+    const status = readInlineField(content, "Architecture Brief Status");
+    const invalidFields = isAllowedValue(status, ARCHITECTURE_BRIEF_STATUSES)
       ? []
-      : ["Architecture Brief Status must be interviewing or confirmed."];
+      : [renderExactFieldError("Architecture Brief Status", ARCHITECTURE_BRIEF_STATUSES, status)];
     if (status === "confirmed") {
-      const unresolved = readArtifactSectionValue(content, "Unresolved User Decisions");
-      if (!unresolved || !/^none\.?$/i.test(unresolved)) {
-        invalidFields.push("Unresolved User Decisions must be None when Architecture Brief Status is confirmed.");
+      const unresolved = readArtifactSectionContent(content, "Unresolved User Decisions");
+      if (!isExactNone(unresolved)) {
+        invalidFields.push(renderExactSectionError(
+          "Unresolved User Decisions",
+          STRICT_NONE_VALUE,
+          unresolved,
+          "when Architecture Brief Status is confirmed"
+        ));
       }
     }
     return invalidFields;
   }
 
   if (kind === "test-report") {
-    const result = /^\s*Test Result\s*:\s*(\S+)\s*$/im.exec(content)?.[1]?.toLowerCase();
-    const invalidFields = result === "pass" || result === "fail" || result === "incomplete"
+    const result = readInlineField(content, "Test Result");
+    const invalidFields = isAllowedValue(result, TEST_RESULTS)
       ? []
-      : ["Test Result must be pass, fail, or incomplete."];
-    const l3Required = /^\s*L3 Required\s*:\s*(\S+)\s*$/im.exec(content)?.[1]?.toLowerCase();
-    if (l3Required !== "yes" && l3Required !== "no") {
-      invalidFields.push("L3 Required must be yes or no.");
+      : [renderExactFieldError("Test Result", TEST_RESULTS, result)];
+    const l3Required = readInlineField(content, "L3 Required");
+    if (!isAllowedValue(l3Required, L3_REQUIRED_VALUES)) {
+      invalidFields.push(renderExactFieldError("L3 Required", L3_REQUIRED_VALUES, l3Required));
     }
-    const l3TriggerAssessment = readArtifactSectionValue(content, "Trigger Assessment");
+    const l3TriggerAssessment = readArtifactSectionContent(content, "Trigger Assessment");
     const l3AffectedFlows = readArtifactSectionContent(content, "Affected End-To-End Flows");
-    const l3Commands = readArtifactSectionValue(content, "L3 Commands And Evidence");
-    const l3NotRequiredEvidence = readArtifactSectionValue(content, "Not-Required Evidence");
+    const l3Commands = readArtifactSectionContent(content, "L3 Commands And Evidence");
+    const l3NotRequiredEvidence = readArtifactSectionContent(content, "Not-Required Evidence");
     if (l3Required === "yes") {
       if (!hasSubstantiveSectionValue(l3TriggerAssessment)) {
         invalidFields.push("Trigger Assessment is required when L3 Required is yes.");
@@ -190,32 +202,57 @@ function validateArtifactFields(kind: ArtifactKind, content: string): string[] {
     if (l3Required === "no" && !hasSubstantiveSectionValue(l3NotRequiredEvidence)) {
       invalidFields.push("Not-Required Evidence is required when L3 Required is no.");
     }
-    const coverageGaps = readArtifactSectionValue(content, "Coverage Gaps");
-    const blockingIssues = readArtifactSectionValue(content, "Blocking Validation Issues");
-    const userApproval = readArtifactSectionValue(content, "User Approval Evidence");
-    const failedExpectations = readArtifactSectionValue(content, "Failed Expectations");
-    const completedValidation = readArtifactSectionValue(content, "Completed Validation");
-    const remainingValidation = readArtifactSectionValue(content, "Remaining Validation");
-    const hasCoverageGaps = Boolean(coverageGaps && !/^none\.?$/i.test(coverageGaps));
-    const hasBlockingIssues = Boolean(blockingIssues && !/^none\.?$/i.test(blockingIssues));
-    const hasUserApproval = Boolean(userApproval && !/^none\.?$/i.test(userApproval));
-    const hasFailedExpectations = Boolean(failedExpectations && !/^none\.?$/i.test(failedExpectations));
+    const coverageGaps = readArtifactSectionContent(content, "Coverage Gaps");
+    const blockingIssues = readArtifactSectionContent(content, "Blocking Validation Issues");
+    const userApproval = readArtifactSectionContent(content, "User Approval Evidence");
+    const failedExpectations = readArtifactSectionContent(content, "Failed Expectations");
+    const completedValidation = readArtifactSectionContent(content, "Completed Validation");
+    const remainingValidation = readArtifactSectionContent(content, "Remaining Validation");
+    const hasCoverageGaps = hasSubstantiveSectionValue(coverageGaps);
+    const hasBlockingIssues = hasSubstantiveSectionValue(blockingIssues);
+    const hasUserApproval = hasSubstantiveSectionValue(userApproval);
+    const hasFailedExpectations = hasSubstantiveSectionValue(failedExpectations);
 
     if (result === "pass") {
-      if (!coverageGaps || hasCoverageGaps) {
-        invalidFields.push("Coverage Gaps must be None when Test Result is pass.");
+      if (!isExactNone(coverageGaps)) {
+        invalidFields.push(renderExactSectionError(
+          "Coverage Gaps",
+          STRICT_NONE_VALUE,
+          coverageGaps,
+          "when Test Result is pass"
+        ));
       }
-      if (!blockingIssues || hasBlockingIssues) {
-        invalidFields.push("Blocking Validation Issues must be None when Test Result is pass.");
+      if (!isExactNone(blockingIssues)) {
+        invalidFields.push(renderExactSectionError(
+          "Blocking Validation Issues",
+          STRICT_NONE_VALUE,
+          blockingIssues,
+          "when Test Result is pass"
+        ));
       }
-      if (!userApproval || hasUserApproval) {
-        invalidFields.push("User Approval Evidence must be None when Test Result is pass.");
+      if (!isExactNone(userApproval)) {
+        invalidFields.push(renderExactSectionError(
+          "User Approval Evidence",
+          STRICT_NONE_VALUE,
+          userApproval,
+          "when Test Result is pass"
+        ));
       }
-      if (!failedExpectations || hasFailedExpectations) {
-        invalidFields.push("Failed Expectations must be None when Test Result is pass.");
+      if (!isExactNone(failedExpectations)) {
+        invalidFields.push(renderExactSectionError(
+          "Failed Expectations",
+          STRICT_NONE_VALUE,
+          failedExpectations,
+          "when Test Result is pass"
+        ));
       }
-      if (hasSubstantiveSectionValue(remainingValidation)) {
-        invalidFields.push("Remaining Validation must be None when Test Result is pass.");
+      if (!isExactNone(remainingValidation)) {
+        invalidFields.push(renderExactSectionError(
+          "Remaining Validation",
+          STRICT_NONE_VALUE,
+          remainingValidation,
+          "when Test Result is pass"
+        ));
       }
     }
     if (result === "incomplete") {
@@ -225,17 +262,37 @@ function validateArtifactFields(kind: ArtifactKind, content: string): string[] {
       if (!hasSubstantiveSectionValue(remainingValidation)) {
         invalidFields.push("Remaining Validation must list continuation work when Test Result is incomplete.");
       }
-      if (hasCoverageGaps) {
-        invalidFields.push("Coverage Gaps must be None when Test Result is incomplete.");
+      if (!isExactNone(coverageGaps)) {
+        invalidFields.push(renderExactSectionError(
+          "Coverage Gaps",
+          STRICT_NONE_VALUE,
+          coverageGaps,
+          "when Test Result is incomplete"
+        ));
       }
-      if (hasBlockingIssues) {
-        invalidFields.push("Blocking Validation Issues must be None when Test Result is incomplete.");
+      if (!isExactNone(blockingIssues)) {
+        invalidFields.push(renderExactSectionError(
+          "Blocking Validation Issues",
+          STRICT_NONE_VALUE,
+          blockingIssues,
+          "when Test Result is incomplete"
+        ));
       }
-      if (hasUserApproval) {
-        invalidFields.push("User Approval Evidence must be None when Test Result is incomplete.");
+      if (!isExactNone(userApproval)) {
+        invalidFields.push(renderExactSectionError(
+          "User Approval Evidence",
+          STRICT_NONE_VALUE,
+          userApproval,
+          "when Test Result is incomplete"
+        ));
       }
-      if (hasFailedExpectations) {
-        invalidFields.push("Failed Expectations must be None when Test Result is incomplete.");
+      if (!isExactNone(failedExpectations)) {
+        invalidFields.push(renderExactSectionError(
+          "Failed Expectations",
+          STRICT_NONE_VALUE,
+          failedExpectations,
+          "when Test Result is incomplete"
+        ));
       }
     }
     if (result === "fail" && !hasBlockingIssues) {
@@ -249,24 +306,22 @@ function validateArtifactFields(kind: ArtifactKind, content: string): string[] {
         invalidFields.push("User Approval Evidence is required when Coverage Gaps are recorded.");
       }
     } else if (hasUserApproval) {
-      invalidFields.push("User Approval Evidence must be None when no Coverage Gaps are recorded.");
+      invalidFields.push(renderExactSectionError(
+        "User Approval Evidence",
+        STRICT_NONE_VALUE,
+        userApproval,
+        "when no Coverage Gaps are recorded"
+      ));
     }
     return invalidFields;
   }
 
   if (kind === "docs-sync-report") {
-    return validateDecision(content, ["synced", "unchanged", "blocked"]);
+    return validateDecision(content, DOCS_SYNC_DECISIONS);
   }
 
   if (kind === "final-acceptance") {
-    return validateDecision(content, [
-      "accepted",
-      "accepted-with-known-risks",
-      "needs-coder-follow-up",
-      "needs-architect-follow-up",
-      "needs-docs-sync",
-      "blocked-by-user-decision"
-    ]);
+    return validateDecision(content, FINAL_ACCEPTANCE_DECISIONS);
   }
 
   return [];
@@ -280,7 +335,7 @@ function hasCompleteL3FlowMapping(value: string | undefined): boolean {
   if (!value) {
     return false;
   }
-  const allowedActions = new Set(["run-existing", "updated", "added"]);
+  const allowedActions = new Set<string>(L3_ACTIONS);
   return value
     .split(/\r?\n/)
     .map((line) => line.trim())
@@ -293,11 +348,11 @@ function hasCompleteL3FlowMapping(value: string | undefined): boolean {
     });
 }
 
-function validateDecision(content: string, allowed: string[]): string[] {
-  const decision = readArtifactSectionValue(content, "Decision")?.toLowerCase();
-  return decision && allowed.includes(decision)
+function validateDecision(content: string, allowed: readonly string[]): string[] {
+  const decision = readArtifactSectionContent(content, "Decision")?.trim();
+  return decision && allowed.includes(decision.toLowerCase())
     ? []
-    : [`Decision must be one of: ${allowed.join(", ")}.`];
+    : [renderExactSectionError("Decision", allowed.join("|"), decision)];
 }
 
 export function readArtifactSectionValue(content: string, heading: string): string | undefined {
@@ -307,7 +362,7 @@ export function readArtifactSectionValue(content: string, heading: string): stri
     .find(Boolean);
 }
 
-function readArtifactSectionContent(content: string, heading: string): string | undefined {
+export function readArtifactSectionContent(content: string, heading: string): string | undefined {
   const match = new RegExp(`^#{1,6}\\s+${escapeRegExp(heading)}\\s*$`, "im").exec(content);
   if (!match || match.index === undefined) {
     return undefined;
@@ -318,6 +373,44 @@ function readArtifactSectionContent(content: string, heading: string): string | 
     ? afterHeading
     : afterHeading.slice(0, nextHeading.index);
   return section.trim();
+}
+
+function readInlineField(content: string, field: string): string | undefined {
+  return new RegExp(`^\\s*${escapeRegExp(field)}\\s*:\\s*(.+?)\\s*$`, "im")
+    .exec(content)?.[1]?.trim().toLowerCase();
+}
+
+function isAllowedValue<T extends string>(value: string | undefined, allowed: readonly T[]): value is T {
+  return value !== undefined && allowed.includes(value as T);
+}
+
+function isExactNone(value: string | undefined): boolean {
+  return value?.trim() === STRICT_NONE_VALUE;
+}
+
+function renderExactFieldError(
+  field: string,
+  allowed: readonly string[],
+  found: string | undefined
+): string {
+  return `${field} must be exactly one of "${allowed.join("|")}"; found ${renderFoundValue(found)}.`;
+}
+
+function renderExactSectionError(
+  section: string,
+  expected: string,
+  found: string | undefined,
+  condition?: string
+): string {
+  const suffix = condition ? ` ${condition}` : "";
+  return `${section} must contain exactly "${expected}"${suffix}; found ${renderFoundValue(found)}.`;
+}
+
+function renderFoundValue(value: string | undefined): string {
+  if (value === undefined || value.trim().length === 0) {
+    return "<missing>";
+  }
+  return JSON.stringify(value.trim().replace(/\s+/g, " "));
 }
 
 function hasHeading(content: string, heading: string): boolean {

@@ -64,7 +64,18 @@ when VCM explicitly requests a proposal during Task Harness Review, use
 - Use workers when the task has at least 20 `VCM:CODE` markers and the marker distribution can form at least two worker-sized groups.
 - Under a complete scaffold, marker implementations are order-independent — signatures, types, and cross-item contracts are frozen by the scaffold — so never serialize worker-sized groups for presumed implementation-order dependencies. When a group's module-scoped checks need peers that are still unimplemented, narrow that worker's assigned validation scope instead of serializing.
 - An item counts as blocked only when a genuine implementation attempt has produced objective compile/check evidence already reported under the failure rules; prediction never blocks an item. A blocked marker item never exempts the remaining markers from worker dispatch.
-- Before invoking workers, count `VCM:CODE` markers by module and create one runtime state file per worker under `.ai/vcm/coder-workers/tasks/<worker-id>.json` with `status: running`.
+- Before invoking workers, count `VCM:CODE` markers by module and create one runtime state file per worker under `.ai/vcm/coder-workers/tasks/<worker-id>.json` with exactly this initial shape:
+
+```json
+{
+  "workerId": "<worker-id>",
+  "status": "running",
+  "reportPath": ".ai/vcm/coder-workers/reports/<worker-id>.md",
+  "handled": false
+}
+```
+
+- After a worker completes, its state must retain those fields, set `status` to `completed`, and add the exact `commitHash` from its report. Only Coder changes `handled` to `true` after inspecting that report and commit.
 - Create one worker task for each module with more than 10 `VCM:CODE` markers.
 - Group modules with 10 or fewer `VCM:CODE` markers into one small-modules worker when their combined marker count is more than 10.
 - If the combined small-module marker count is 10 or fewer, Coder handles those modules directly after worker results return.

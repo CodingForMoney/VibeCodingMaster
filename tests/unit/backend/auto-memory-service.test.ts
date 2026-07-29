@@ -65,7 +65,10 @@ describe("auto-memory-service", () => {
       finalAcceptancePath,
       renderFinalAcceptanceTemplate("demo")
         .replaceAll("TBD", "None.")
-        .replace("## Decision\n\nNone.", "## Decision\n\naccepted"),
+        .replace(
+          "accepted|accepted-with-known-risks|needs-coder-follow-up|needs-architect-follow-up|needs-docs-sync|blocked-by-user-decision",
+          "accepted"
+        ),
       "utf8"
     );
 
@@ -218,7 +221,10 @@ describe("auto-memory-service", () => {
       finalAcceptancePath,
       renderFinalAcceptanceTemplate("demo")
         .replaceAll("TBD", "None.")
-        .replace("## Decision\n\nNone.", "## Decision\n\naccepted"),
+        .replace(
+          "accepted|accepted-with-known-risks|needs-coder-follow-up|needs-architect-follow-up|needs-docs-sync|blocked-by-user-decision",
+          "accepted"
+        ),
       "utf8"
     );
     await context.service.reconcileTask({

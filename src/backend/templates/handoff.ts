@@ -1,7 +1,19 @@
+import {
+  ARCHITECTURE_BRIEF_STATUSES,
+  ARCHITECTURE_PLAN_RESULTS,
+  DOCS_SYNC_DECISIONS,
+  FINAL_ACCEPTANCE_DECISIONS,
+  L3_ACTIONS,
+  L3_REQUIRED_VALUES,
+  STRICT_NONE_VALUE,
+  TEST_RESULTS,
+  renderArtifactOptions
+} from "../../shared/validation/artifact-contract.js";
+
 export function renderArchitectureBriefTemplate(taskSlug: string): string {
   return `# Architecture Brief: ${taskSlug}
 
-Architecture Brief Status: interviewing|confirmed
+Architecture Brief Status: ${renderArtifactOptions(ARCHITECTURE_BRIEF_STATUSES)}
 
 ## Accepted Outcome
 
@@ -17,7 +29,7 @@ TBD
 
 ## Unresolved User Decisions
 
-TBD
+${STRICT_NONE_VALUE}
 
 ## User Confirmation
 
@@ -28,7 +40,7 @@ TBD
 export function renderArchitecturePlanTemplate(taskSlug: string): string {
   return `# Architecture Plan: ${taskSlug}
 
-Planning Result: complete|incomplete|user clarification required
+Planning Result: ${renderArtifactOptions(ARCHITECTURE_PLAN_RESULTS)}
 
 ## Accepted Scope
 
@@ -101,10 +113,13 @@ TBD
 Task-specific context and coder guidance go here, not in source-code comments.
 Source-code comments should only describe durable behavior, contracts, invariants,
 error boundaries, or non-obvious logic that should remain useful after this task.
+Use an ID matching \`[A-Z]{2,6}-[0-9]{1,4}\`, choose exactly one Action
+(\`create\`, \`change\`, or \`delete\`), put the repo-relative File path in
+backticks, and enumerate every implementation item explicitly.
 
 | ID | Action | File | Symbol Or Site | Coder Work | Allowed Implementation Freedom | Behavior / Contract Proof Point |
 | --- | --- | --- | --- | --- | --- | --- |
-| TBD | TBD | TBD | TBD | TBD | TBD | TBD |
+| <ID> | <create|change|delete> | \`<repo-relative-file>\` | TBD | TBD | TBD | TBD |
 
 ## Scaffold Build Evidence
 
@@ -146,7 +161,7 @@ At task close, promote still-relevant confirmed issues to \`docs/known-issues.md
 export function renderTestReportTemplate(taskSlug: string): string {
   return `# Test Report: ${taskSlug}
 
-Test Result: pass|fail|incomplete
+Test Result: ${renderArtifactOptions(TEST_RESULTS)}
 
 ## Evidence Reviewed
 
@@ -168,11 +183,11 @@ TBD
 
 ### Remaining Validation
 
-TBD
+${STRICT_NONE_VALUE}
 
 ## L3 Coverage
 
-L3 Required: yes|no
+L3 Required: ${renderArtifactOptions(L3_REQUIRED_VALUES)}
 
 ### Trigger Assessment
 
@@ -182,7 +197,7 @@ TBD
 
 | Flow | Trigger | Case ID | Test File | Entry Point | Final Observable Result | Action | Result |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| TBD | TBD | TBD | TBD | TBD | TBD | TBD | TBD |
+| TBD | TBD | TBD | TBD | TBD | TBD | <${renderArtifactOptions(L3_ACTIONS)}> | TBD |
 
 ### L3 Commands And Evidence
 
@@ -202,27 +217,27 @@ TBD
 
 ## Failed Expectations
 
-TBD
+${STRICT_NONE_VALUE}
 
 ## Reproduction Steps
 
-TBD
+${STRICT_NONE_VALUE}
 
 ## Skipped Checks With Reasons
 
-TBD
+${STRICT_NONE_VALUE}
 
 ## Coverage Gaps
 
-TBD
+${STRICT_NONE_VALUE}
 
 ## Blocking Validation Issues
 
-TBD
+${STRICT_NONE_VALUE}
 
 ## User Approval Evidence
 
-TBD
+${STRICT_NONE_VALUE}
 `;
 }
 
@@ -354,7 +369,7 @@ TBD
 
 ## Decision
 
-TBD
+${renderArtifactOptions(DOCS_SYNC_DECISIONS)}
 `;
 }
 
@@ -363,7 +378,7 @@ export function renderFinalAcceptanceTemplate(taskSlug: string): string {
 
 ## Decision
 
-TBD
+${renderArtifactOptions(FINAL_ACCEPTANCE_DECISIONS)}
 
 ## Evidence Reviewed
 

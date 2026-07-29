@@ -173,11 +173,11 @@ L3 Required: yes|no
 - Use `pass` only when required validation completed and no blocking test failure, missing required coverage, unacceptable test weakness, or unresolved validation risk remains.
 - Use `fail` only when tests fail, coverage is insufficient and Tester continuation cannot resolve it, required validation is blocked from completion, test quality is unacceptable, or validation risk needs project-manager routing.
 - Use `incomplete` only when required validation remains, no blocking issue has been found, and another Tester turn can continue the recorded remaining work.
-- When `Test Result: pass`, `Failed Expectations`, `Coverage Gaps`, `Blocking Validation Issues`, and `User Approval Evidence` must be `None`.
-- When `Test Result: incomplete`, `Completed Validation` and `Remaining Validation` must both contain concrete progress, while `Failed Expectations`, `Coverage Gaps`, `Blocking Validation Issues`, and `User Approval Evidence` must be `None`.
+- When `Test Result: pass`, the entire body of `Remaining Validation`, `Failed Expectations`, `Coverage Gaps`, `Blocking Validation Issues`, and `User Approval Evidence` must be exactly `None.` with no additional text.
+- When `Test Result: incomplete`, `Completed Validation` and `Remaining Validation` must both contain concrete progress, while the entire body of `Failed Expectations`, `Coverage Gaps`, `Blocking Validation Issues`, and `User Approval Evidence` must be exactly `None.` with no additional text.
 - When `Test Result: fail`, `Blocking Validation Issues` must list concrete blocking evidence.
 - When `Coverage Gaps` is not `None`, `Test Result` must be `fail`, `User Approval Evidence` must contain the user's exact authorization, and every recorded gap must match that authorization.
-- When no gap has been approved, `User Approval Evidence` must be `None`.
+- When no gap has been approved, the entire `User Approval Evidence` section must be exactly `None.` with no additional text.
 - For feature or cross-boundary changes, map required L2 integration coverage and mandatory L3 coverage separately. If required coverage is unavailable, report it as a blocking issue.
 - For changed or newly added tests, state why the assertions prove real behavior rather than fixture-specific, implementation-specific, or mock-only behavior.
 - Report confirmed unresolved issues that should survive current-task cleanup in `.ai/vcm/handoffs/test-report.md`; do not write `.ai/vcm/handoffs/known-issues.md` (architect-owned).

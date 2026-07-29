@@ -62,9 +62,7 @@ type: task
 workflow_flow: code-change
 workflow_step: coder-implementation
 workflow_status: active
-artifact_refs:
-  - .ai/vcm/handoffs/architecture-plan.md
-  - docs/plans/example.md
+artifact_refs: .ai/vcm/handoffs/architecture-plan.md, docs/plans/example.md
 ---
 
 Summary:
@@ -90,8 +88,7 @@ For non-PM reports, use:
 ```md
 ---
 type: result
-artifact_refs:
-  - .ai/vcm/handoffs/example.md
+artifact_refs: .ai/vcm/handoffs/example.md
 ---
 
 Summary:

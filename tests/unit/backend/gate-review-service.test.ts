@@ -822,7 +822,7 @@ function validArchitectureBrief(): string {
     "",
     "## Unresolved User Decisions",
     "",
-    "None",
+    "None.",
     "",
     "## User Confirmation",
     "",

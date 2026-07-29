@@ -227,7 +227,10 @@ async function writeHarnessRetrospective(ctx: MockClaudePromptContext): Promise<
 function acceptedFinalAcceptance(taskSlug: string): string {
   return renderFinalAcceptanceTemplate(taskSlug)
     .replaceAll("TBD", "None.")
-    .replace("## Decision\n\nNone.", "## Decision\n\naccepted");
+    .replace(
+      "accepted|accepted-with-known-risks|needs-coder-follow-up|needs-architect-follow-up|needs-docs-sync|blocked-by-user-decision",
+      "accepted"
+    );
 }
 
 function matchPromptPath(prompt: string, field: string): string {

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   renderArchitectureBriefTemplate,
   renderArchitecturePlanTemplate,
+  renderDocsSyncReportTemplate,
   renderFinalAcceptanceTemplate,
   renderTestReportTemplate
 } from "../../../src/backend/templates/handoff.js";
@@ -186,7 +187,7 @@ Implement the manifest.
 
     expect(result.status).toBe("incomplete");
     expect(result.invalidFields).toContain(
-      `Planning Result must be complete; received "${planningResult}".`
+      `Planning Result must be exactly one of "complete"; found "${planningResult}".`
     );
   });
 
@@ -196,7 +197,9 @@ Implement the manifest.
     const result = checkMarkdownArtifact("architecture-plan", "architecture-plan.md", content);
 
     expect(result.status).toBe("incomplete");
-    expect(result.invalidFields).toContain("Planning Result is required and must be complete.");
+    expect(result.invalidFields).toContain(
+      "Planning Result must be exactly one of \"complete\"; found <missing>."
+    );
   });
 
   it("requires code-reading evidence and explicit architecture decisions", () => {
@@ -326,7 +329,9 @@ Nothing to promote.
     const result = checkMarkdownArtifact("test-report", "test-report.md", content);
 
     expect(result.status).toBe("incomplete");
-    expect(result.invalidFields).toContain("Test Result must be pass, fail, or incomplete.");
+    expect(result.invalidFields).toContain(
+      "Test Result must be exactly one of \"pass|fail|incomplete\"; found \"pass|fail|incomplete\"."
+    );
   });
 
   it("accepts a complete in-progress test report as continuation state", () => {
@@ -380,7 +385,7 @@ Nothing to promote.
 
     expect(result.status).toBe("incomplete");
     expect(result.invalidFields).toContain(
-      "Blocking Validation Issues must be None when Test Result is incomplete."
+      "Blocking Validation Issues must contain exactly \"None.\" when Test Result is incomplete; found \"The integration environment is unavailable.\"."
     );
   });
 
@@ -392,7 +397,7 @@ Nothing to promote.
 
     expect(result.status).toBe("incomplete");
     expect(result.invalidFields).toContain(
-      "Blocking Validation Issues must be None when Test Result is pass."
+      "Blocking Validation Issues must contain exactly \"None.\" when Test Result is pass; found \"Missing E2E coverage.\"."
     );
   });
 
@@ -404,7 +409,7 @@ Nothing to promote.
 
     expect(result.status).toBe("incomplete");
     expect(result.invalidFields).toContain(
-      "Coverage Gaps must be None when Test Result is pass."
+      "Coverage Gaps must contain exactly \"None.\" when Test Result is pass; found \"Missing E2E coverage.\"."
     );
   });
 
@@ -419,7 +424,7 @@ Nothing to promote.
 
     expect(result.status).toBe("incomplete");
     expect(result.invalidFields).toContain(
-      "Remaining Validation must be None when Test Result is pass."
+      "Remaining Validation must contain exactly \"None.\" when Test Result is pass; found \"Run the required L2 integration matrix.\"."
     );
   });
 
@@ -482,7 +487,7 @@ Nothing to promote.
 
     expect(result.status).toBe("incomplete");
     expect(result.invalidFields).toContain(
-      "User Approval Evidence must be None when no Coverage Gaps are recorded."
+      "User Approval Evidence must contain exactly \"None.\" when no Coverage Gaps are recorded; found \"User approved an unrelated exception.\"."
     );
   });
 
@@ -493,7 +498,9 @@ Nothing to promote.
     const result = checkMarkdownArtifact("test-report", "test-report.md", content);
 
     expect(result.status).toBe("incomplete");
-    expect(result.invalidFields).toContain("L3 Required must be yes or no.");
+    expect(result.invalidFields).toContain(
+      "L3 Required must be exactly one of \"yes|no\"; found \"undecided\"."
+    );
   });
 
   it("requires L3 mapping and execution evidence when L3 is required", () => {
@@ -517,7 +524,7 @@ Nothing to promote.
       .replace("Test Result: pass|fail|incomplete", "Test Result: pass")
       .replace("L3 Required: no", "L3 Required: yes")
       .replace(
-        "| None. | None. | None. | None. | None. | None. | None. | None. |",
+        "| None. | None. | None. | None. | None. | None. | <run-existing|updated|added> | None. |",
         "| Checkout flow | observable result changed | E2E-001 | tests/e2e/checkout.spec.ts | public checkout entry | persisted order | updated | pass |"
       )
       .replace(
@@ -567,7 +574,7 @@ looks-good
 `);
 
     expect(result.status).toBe("incomplete");
-    expect(result.invalidFields[0]).toContain("synced, unchanged, blocked");
+    expect(result.invalidFields[0]).toContain("synced|unchanged|blocked");
   });
 
   it("rejects invalid final-acceptance decisions", () => {
@@ -584,6 +591,7 @@ looks-good
       ["architecture-brief", renderArchitectureBriefTemplate("demo")],
       ["architecture-plan", renderArchitecturePlanTemplate("demo")],
       ["test-report", renderTestReportTemplate("demo")],
+      ["docs-sync-report", renderDocsSyncReportTemplate("demo")],
       ["final-acceptance", renderFinalAcceptanceTemplate("demo")]
     ] as const;
 
@@ -594,9 +602,76 @@ looks-good
       expect(result.status, kind).toBe("ok");
     }
   });
+
+  it("exposes every machine-enforced option in generated templates", () => {
+    expect(renderArchitectureBriefTemplate("demo")).toContain(
+      "Architecture Brief Status: interviewing|confirmed"
+    );
+    expect(renderArchitecturePlanTemplate("demo")).toContain(
+      "Planning Result: complete|incomplete|user clarification required"
+    );
+    expect(renderArchitecturePlanTemplate("demo")).toContain(
+      "| <ID> | <create|change|delete> | `<repo-relative-file>` |"
+    );
+    expect(renderArchitecturePlanTemplate("demo")).toContain(
+      "Use an ID matching `[A-Z]{2,6}-[0-9]{1,4}`"
+    );
+    expect(renderTestReportTemplate("demo")).toContain("Test Result: pass|fail|incomplete");
+    expect(renderTestReportTemplate("demo")).toContain("L3 Required: yes|no");
+    expect(renderTestReportTemplate("demo")).toContain("<run-existing|updated|added>");
+    expect(renderDocsSyncReportTemplate("demo")).toContain(
+      "## Decision\n\nsynced|unchanged|blocked"
+    );
+    expect(renderFinalAcceptanceTemplate("demo")).toContain(
+      "## Decision\n\naccepted|accepted-with-known-risks|needs-coder-follow-up|needs-architect-follow-up|needs-docs-sync|blocked-by-user-decision"
+    );
+  });
+
+  it("rejects text appended after an exact None section value", () => {
+    const content = completeL3NotRequired(renderTestReportTemplate("demo"))
+      .replace("Test Result: pass|fail|incomplete", "Test Result: pass")
+      .replace(
+        "## Coverage Gaps\n\nNone.",
+        "## Coverage Gaps\n\nNone.\n\nExtra explanation."
+      );
+    const result = checkMarkdownArtifact("test-report", "test-report.md", content);
+
+    expect(result.status).toBe("incomplete");
+    expect(result.invalidFields).toContain(
+      "Coverage Gaps must contain exactly \"None.\" when Test Result is pass; found \"None. Extra explanation.\"."
+    );
+  });
+
+  it("rejects text appended after confirmed unresolved decisions", () => {
+    const content = completeTemplate("architecture-brief", renderArchitectureBriefTemplate("demo"))
+      .replace(
+        "## Unresolved User Decisions\n\nNone.",
+        "## Unresolved User Decisions\n\nNone.\n\nNo action needed."
+      );
+    const result = checkMarkdownArtifact("architecture-brief", "architecture-brief.md", content);
+
+    expect(result.status).toBe("incomplete");
+    expect(result.invalidFields).toContain(
+      "Unresolved User Decisions must contain exactly \"None.\" when Architecture Brief Status is confirmed; found \"None. No action needed.\"."
+    );
+  });
+
+  it("rejects explanations appended to exact decision sections", () => {
+    const content = completeTemplate("final-acceptance", renderFinalAcceptanceTemplate("demo"))
+      .replace("## Decision\n\naccepted", "## Decision\n\naccepted\n\nEverything passed.");
+    const result = checkMarkdownArtifact("final-acceptance", "final-acceptance.md", content);
+
+    expect(result.status).toBe("incomplete");
+    expect(result.invalidFields).toContain(
+      "Decision must contain exactly \"accepted|accepted-with-known-risks|needs-coder-follow-up|needs-architect-follow-up|needs-docs-sync|blocked-by-user-decision\"; found \"accepted Everything passed.\"."
+    );
+  });
 });
 
-function completeTemplate(kind: "architecture-brief" | "architecture-plan" | "test-report" | "final-acceptance", content: string): string {
+function completeTemplate(
+  kind: "architecture-brief" | "architecture-plan" | "test-report" | "docs-sync-report" | "final-acceptance",
+  content: string
+): string {
   const completed = content.replaceAll("TBD", "None.");
   if (kind === "architecture-brief") {
     return completed.replace(
@@ -609,13 +684,19 @@ function completeTemplate(kind: "architecture-brief" | "architecture-plan" | "te
       .replace("Test Result: pass|fail|incomplete", "Test Result: pass");
   }
   if (kind === "final-acceptance") {
-    return completed.replace("## Decision\n\nNone.", "## Decision\n\naccepted");
+    return completed.replace(
+      "accepted|accepted-with-known-risks|needs-coder-follow-up|needs-architect-follow-up|needs-docs-sync|blocked-by-user-decision",
+      "accepted"
+    );
   }
   if (kind === "architecture-plan") {
     return completed.replace(
       "Planning Result: complete|incomplete|user clarification required",
       "Planning Result: complete"
     );
+  }
+  if (kind === "docs-sync-report") {
+    return completed.replace("synced|unchanged|blocked", "unchanged");
   }
   return completed;
 }

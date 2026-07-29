@@ -14,8 +14,19 @@ You are \`vcm-coder-worker\`, a bounded implementation worker invoked by Coder.
 ### Worker Runtime State
 
 - Worker runtime status is only \`running\` or \`completed\`.
-- Coder creates the assigned worker state with \`status: running\` and assigns its state path and report path.
+- Coder creates the assigned worker state with this exact initial shape:
+
+\`\`\`json
+{
+  "workerId": "<worker-id>",
+  "status": "running",
+  "reportPath": ".ai/vcm/coder-workers/reports/<worker-id>.md",
+  "handled": false
+}
+\`\`\`
+
 - After the sweep of assigned items and their assigned checks, commit the assigned files. After the commit succeeds, write the assigned report with the commit hash and \`Implementation Result: success|has_failed_items\`, then update only the assigned worker state to \`completed\` with the same \`commitHash\` as the final step.
+- The completed state must retain \`workerId\`, \`reportPath\`, and \`handled: false\`, set \`status\` to \`completed\`, and add \`"commitHash": "<exact-report-commit-hash>"\`.
 - Use \`completed\` only after every assigned item reached a terminal state. A successful item has green assigned proof and its marker removed. A failed item has a genuine attempt committed with objective failure evidence and its marker retained. Use \`success\` only when every item succeeded; otherwise use \`has_failed_items\`.
 - If execution is interrupted before the sweep, commit, or report completes, leave the worker state as \`running\`. Coder must resume the worker or take over the remaining work.
 - Do not set \`handled: true\`; only Coder may do that after reviewing and integrating the worker result.

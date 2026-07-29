@@ -65,14 +65,14 @@ Architecture Brief Status: interviewing|confirmed
 
 ## Unresolved User Decisions
 
-...
+None.
 
 ## User Confirmation
 
 ...
 \`\`\`
 
-Record concise confirmed requirements and constraints. Tag each entry under Confirmed User Decisions with its provenance and depth — [user-stated | architect-proposed, user-approved | architect-inferred] and [intent-level | mechanism-level] — and record the user's real input faithfully as a short summary; never present an architect inference as a user requirement. Record correctness-critical mechanism choices surfaced during the interview with their options, your recommendation, the user's decision, and the rejected alternative, so later stages can tell a chosen mechanism from an inferred one. Keep this to decisions and their provenance — not a full implementation design, and not a transcript. Use \`None\` under Unresolved User Decisions only when no user-owned decision remains.
+Record concise confirmed requirements and constraints. Tag each entry under Confirmed User Decisions with its provenance and depth — [user-stated | architect-proposed, user-approved | architect-inferred] and [intent-level | mechanism-level] — and record the user's real input faithfully as a short summary; never present an architect inference as a user requirement. Record correctness-critical mechanism choices surfaced during the interview with their options, your recommendation, the user's decision, and the rejected alternative, so later stages can tell a chosen mechanism from an inferred one. Keep this to decisions and their provenance — not a full implementation design, and not a transcript. When no user-owned decision remains, the entire Unresolved User Decisions section must be exactly \`None.\` with no additional text.
 
 Maintain the evidence artifact with this structure:
 

@@ -69,7 +69,7 @@ export async function writeConfirmedArchitectureBrief(taskRepoRoot: string, task
     "",
     "## Unresolved User Decisions",
     "",
-    "None",
+    "None.",
     "",
     "## User Confirmation",
     "",

@@ -18,6 +18,7 @@ import {
   type GateReviewRequestResult,
   type GateReviewSeverity
 } from "../../shared/types/gate-review.js";
+import type { ArtifactCheckResult } from "../../shared/types/artifact.js";
 import { checkMarkdownArtifact } from "../../shared/validation/artifact-check.js";
 import { VcmError } from "../errors.js";
 import { resolveRepoPath } from "../adapters/filesystem.js";
@@ -1262,10 +1263,12 @@ async function readArchitectureBriefError(
   const content = await fs.readText(absolutePath);
   const check = checkMarkdownArtifact("architecture-brief", relativePath, content);
   if (check.status !== "ok") {
-    return `${relativePath} is incomplete. Complete and confirm Architect Interview before requesting architecture-plan review.`;
+    return `${relativePath} is incomplete and cannot start architecture-plan review. ${formatArtifactCheckFailure(check)}`;
   }
-  if (!/^\s*Architecture Brief Status\s*:\s*confirmed\s*$/im.test(content)) {
-    return `${relativePath} is not confirmed. Obtain explicit user confirmation before architecture planning.`;
+  const status = /^\s*Architecture Brief Status\s*:\s*(.+?)\s*$/im.exec(content)?.[1]?.trim();
+  if (status?.toLowerCase() !== "confirmed") {
+    return `${relativePath} is not confirmed and cannot start architecture-plan review. `
+      + `Architecture Brief Status must be exactly "confirmed"; found ${renderFoundValue(status)}.`;
   }
   return undefined;
 }
@@ -1284,12 +1287,8 @@ async function readValidationReportError(
   if (check.status === "ok") {
     return undefined;
   }
-  const details = [
-    check.missingHeadings.length > 0 ? `missing headings: ${check.missingHeadings.join(", ")}` : "",
-    check.invalidFields.length > 0 ? check.invalidFields.join(" ") : "",
-    check.hasPlaceholder ? "contains placeholders" : ""
-  ].filter(Boolean).join("; ");
-  return `${relativePath} is incomplete and cannot start validation-adequacy review.${details ? ` ${details}` : ""}`;
+  return `${relativePath} is incomplete and cannot start validation-adequacy review. `
+    + formatValidationArtifactFailure(check, content);
 }
 
 async function readArchitectureEvidenceError(
@@ -1305,8 +1304,10 @@ async function readArchitectureEvidenceError(
   if (content.trim().length === 0) {
     return `${relativePath} is empty. Complete architecture evidence before requesting architecture-plan review.`;
   }
-  if (!/^\s*Architecture Evidence Status\s*:\s*complete\s*$/im.test(content)) {
-    return `${relativePath} is incomplete. Finish current-worktree evidence before requesting architecture-plan review.`;
+  const status = /^\s*Architecture Evidence Status\s*:\s*(.+?)\s*$/im.exec(content)?.[1]?.trim();
+  if (status?.toLowerCase() !== "complete") {
+    return `${relativePath} is incomplete and cannot start architecture-plan review. `
+      + `Architecture Evidence Status must be exactly "complete"; found ${renderFoundValue(status)}.`;
   }
   return undefined;
 }
@@ -1557,17 +1558,40 @@ async function validateValidationApprovalInput(
     return;
   }
 
-  const details = [
-    `status=${check.status}`,
-    check.missingHeadings.length > 0 ? `missing headings: ${check.missingHeadings.join(", ")}` : "",
-    check.invalidFields.length > 0 ? check.invalidFields.join(" ") : "",
-    check.hasPlaceholder ? "contains placeholders" : ""
-  ].filter(Boolean).join("; ");
   throw new VcmError({
     code: "GATE_REVIEW_VALIDATION_INPUT_INCOMPLETE",
-    message: `Validation-adequacy cannot approve incomplete Tester evidence in ${relativePath}. ${details}`,
+    message: `Validation-adequacy cannot approve incomplete Tester evidence in ${relativePath}. `
+      + formatValidationArtifactFailure(check, content),
     statusCode: 500
   });
+}
+
+function formatValidationArtifactFailure(
+  check: ArtifactCheckResult,
+  content: string | null
+): string {
+  return /^\s*Test Result\s*:\s*incomplete\s*$/im.test(content ?? "")
+    ? 'Test Result must be exactly one of "pass|fail"; found "incomplete".'
+    : formatArtifactCheckFailure(check);
+}
+
+function formatArtifactCheckFailure(check: ArtifactCheckResult): string {
+  const details = [
+    check.status === "missing" ? "Artifact is missing." : "",
+    check.status === "empty" ? "Artifact is empty." : "",
+    check.missingHeadings.length > 0
+      ? `Missing headings: ${check.missingHeadings.join(", ")}.`
+      : "",
+    ...check.invalidFields,
+    check.hasPlaceholder ? "Replace every standalone TBD, Not run yet, or draft-status placeholder." : ""
+  ].filter(Boolean);
+  return details.length > 0
+    ? details.join(" ")
+    : "Artifact is not in a gate-ready terminal state.";
+}
+
+function renderFoundValue(value: string | undefined): string {
+  return value && value.trim().length > 0 ? JSON.stringify(value.trim()) : "<missing>";
 }
 
 function validateRequestChangeFindings(findings: GateReviewFinding[]): void {

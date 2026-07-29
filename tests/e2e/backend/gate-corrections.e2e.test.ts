@@ -164,7 +164,7 @@ describe("backend E2E Gate Review correction loops", () => {
       path.join(task.worktreePath, ".ai/vcm/handoffs/final-acceptance.md"),
       "utf8"
     );
-    expect(finalAcceptance).not.toContain("## Decision\n\naccepted");
+    expect(finalAcceptance).not.toMatch(/^accepted$/m);
 
     await fs.writeFile(
       reportPath,
