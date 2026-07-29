@@ -7,8 +7,8 @@ role turns. Update reviewed memory only through the output paths assigned by VCM
 or explicit user edits in Harness Studio. When Auto Memory is disabled, do not
 initiate memory proposals, reviews, or updates.`
     : `Treat the \`<VCM-memory>\` block in this role definition as read-only. Only
-when VCM explicitly requests a proposal during Task Harness Review, use
-\`vcm-propose-memory\` and write the exact assigned draft path.`;
+when VCM explicitly assigns a memory proposal or candidate path, use
+\`vcm-propose-memory\` and write that exact path.`;
 
   return `### Role Memory
 

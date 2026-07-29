@@ -86,9 +86,13 @@ describe("createHarnessService", () => {
     expect(await fs.readText("/repo/.claude/skills/vcm-architecture-interview/SKILL.md")).toContain("During an active Architect Interview");
     expect(await fs.readText("/repo/.claude/skills/vcm-report-harness-issue/SKILL.md")).toContain("name: vcm-report-harness-issue");
     expect(await fs.readText("/repo/.claude/skills/vcm-report-harness-issue/SKILL.md")).toContain(".ai/vcm/harness-feedback/pending/");
-    expect(await fs.readText("/repo/.claude/skills/vcm-propose-memory/SKILL.md")).toContain("name: vcm-propose-memory");
-    expect(await fs.readText("/repo/.claude/skills/vcm-propose-memory/SKILL.md")).toContain("Treat every `<VCM-memory>` block as read-only");
-    expect(await fs.readText("/repo/.claude/skills/restart-architect/SKILL.md")).toContain(".ai/tools/request-architect-restart");
+    const proposeMemorySkill = await fs.readText("/repo/.claude/skills/vcm-propose-memory/SKILL.md");
+    expect(proposeMemorySkill).toContain("name: vcm-propose-memory");
+    expect(proposeMemorySkill).toContain("Treat every `<VCM-memory>` block as read-only");
+    expect(proposeMemorySkill).toContain("planning candidate");
+    const restartArchitectSkill = await fs.readText("/repo/.claude/skills/restart-architect/SKILL.md");
+    expect(restartArchitectSkill).toContain(".ai/tools/request-architect-restart");
+    expect(restartArchitectSkill).toContain("memoryCandidatePath");
     expect(await fs.readText("/repo/.ai/tools/request-architect-restart")).toContain("/sessions/architect/restart-after-planning");
     expect(await fs.readText("/repo/.claude/agents/vcm-architect-scaffold-worker.md")).toContain("model: opus\neffort: xhigh");
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("<VCM-memory>\nNo accumulated project memory yet.\n</VCM-memory>");
@@ -136,6 +140,7 @@ describe("createHarnessService", () => {
     expect(architectAgent).toContain("first write an `Architecture Evidence Verification` row");
     expect(architectAgent).toContain("After `Architecture Evidence Verification` is complete");
     expect(architectAgent).toContain("use the `restart-architect` skill");
+    expect(architectAgent).toContain("planning-session memory candidate");
     expect(architectAgent).toContain("complete and commit it directly as Architect-owned scaffold work");
     expect(architectAgent).not.toContain("`asset`");
     expect(architectAgent).not.toContain("before deep analysis, write the planning work plan");

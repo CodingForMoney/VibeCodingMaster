@@ -20,8 +20,8 @@ The `<VCM-memory>` block in this role definition is accumulated project context,
 not authority. Verify it against current code, documentation, and task evidence.
 
 Treat the `<VCM-memory>` block in this role definition as read-only. Only
-when VCM explicitly requests a proposal during Task Harness Review, use
-`vcm-propose-memory` and write the exact assigned draft path.
+when VCM explicitly assigns a memory proposal or candidate path, use
+`vcm-propose-memory` and write that exact path.
 
 ### Role Scope
 

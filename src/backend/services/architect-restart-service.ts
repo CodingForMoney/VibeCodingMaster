@@ -5,6 +5,8 @@ import { resolveRepoPath, type FileSystemAdapter } from "../adapters/filesystem.
 import { VcmError } from "../errors.js";
 import type { SessionService } from "./session-service.js";
 import { getTaskRuntimeRepoRoot, type TaskService } from "./task-service.js";
+import type { AppSettingsService } from "./app-settings-service.js";
+import { ARCHITECT_PLANNING_MEMORY_CANDIDATE_PATH } from "./memory-review-paths.js";
 
 const ARCHITECT_ROLE = "architect";
 const PM_ROLE = "project-manager";
@@ -25,6 +27,7 @@ export interface ArchitectRestartScheduleResult {
   taskSlug: string;
   sessionId: string;
   status: "scheduled";
+  memoryCandidatePath?: string;
 }
 
 export interface ArchitectRestartService {
@@ -40,6 +43,7 @@ export interface ArchitectRestartServiceDeps {
   fs: FileSystemAdapter;
   taskService: Pick<TaskService, "loadTask">;
   sessionService: Pick<SessionService, "getRoleSession" | "restartRoleSession">;
+  appSettings: Pick<AppSettingsService, "getPreferences">;
 }
 
 interface PendingArchitectRestart {
@@ -51,6 +55,7 @@ interface PendingArchitectRestart {
   acceptedMessageId?: string;
   gateAccepted: boolean;
   executing: boolean;
+  memoryCandidatePath?: string;
 }
 
 export function createArchitectRestartService(deps: ArchitectRestartServiceDeps): ArchitectRestartService {
@@ -60,6 +65,19 @@ export function createArchitectRestartService(deps: ArchitectRestartServiceDeps)
     async schedule(repoRoot, taskSlug) {
       const session = await requireRunningArchitect(repoRoot, taskSlug);
       await requireCompletePlan(repoRoot, taskSlug);
+      const memoryCandidatePath = (await deps.appSettings.getPreferences()).autoMemoryEnabled
+        ? ARCHITECT_PLANNING_MEMORY_CANDIDATE_PATH
+        : undefined;
+      const task = await deps.taskService.loadTask(repoRoot, taskSlug);
+      const candidatePath = resolveRepoPath(
+        getTaskRuntimeRepoRoot(task),
+        ARCHITECT_PLANNING_MEMORY_CANDIDATE_PATH
+      );
+      if (deps.fs.removePath) {
+        await deps.fs.removePath(candidatePath, { force: true });
+      } else if (await deps.fs.pathExists(candidatePath)) {
+        await deps.fs.writeText(candidatePath, "");
+      }
       const key = taskKey(repoRoot, taskSlug);
       const existing = pendingByTask.get(key);
       if (existing?.sessionId === session.id) {
@@ -68,7 +86,13 @@ export function createArchitectRestartService(deps: ArchitectRestartServiceDeps)
         existing.acceptedMessageId = undefined;
         existing.gateAccepted = false;
         existing.executing = false;
-        return { taskSlug, sessionId: session.id, status: "scheduled" };
+        existing.memoryCandidatePath = memoryCandidatePath;
+        return {
+          taskSlug,
+          sessionId: session.id,
+          status: "scheduled",
+          ...(memoryCandidatePath ? { memoryCandidatePath } : {})
+        };
       }
       pendingByTask.set(key, {
         repoRoot,
@@ -76,9 +100,15 @@ export function createArchitectRestartService(deps: ArchitectRestartServiceDeps)
         sessionId: session.id,
         stopped: false,
         gateAccepted: false,
-        executing: false
+        executing: false,
+        memoryCandidatePath
       });
-      return { taskSlug, sessionId: session.id, status: "scheduled" };
+      return {
+        taskSlug,
+        sessionId: session.id,
+        status: "scheduled",
+        ...(memoryCandidatePath ? { memoryCandidatePath } : {})
+      };
     },
 
     async recordArchitectStop(repoRoot, taskSlug, sessionId) {
@@ -183,6 +213,7 @@ export function createArchitectRestartService(deps: ArchitectRestartServiceDeps)
     pending.executing = true;
     try {
       await requireCompletePlan(pending.repoRoot, pending.taskSlug);
+      await requirePlanningMemoryCandidate(pending);
       await deps.sessionService.restartRoleSession(
         pending.repoRoot,
         pending.taskSlug,
@@ -199,6 +230,29 @@ export function createArchitectRestartService(deps: ArchitectRestartServiceDeps)
       pending.executing = false;
     }
   }
+
+  async function requirePlanningMemoryCandidate(pending: PendingArchitectRestart): Promise<void> {
+    if (!pending.memoryCandidatePath) {
+      return;
+    }
+    const task = await deps.taskService.loadTask(pending.repoRoot, pending.taskSlug);
+    const candidatePath = resolveRepoPath(getTaskRuntimeRepoRoot(task), pending.memoryCandidatePath);
+    if (!(await deps.fs.pathExists(candidatePath))) {
+      throw invalidMemoryCandidateError("the assigned candidate file does not exist.");
+    }
+    const content = await deps.fs.readText(candidatePath);
+    const requiredPatterns = [
+      /^# Memory Proposal\s*$/m,
+      /^Decision:\s*(update|no-change)\s*$/m,
+      /^## Add\s*$/m,
+      /^## Update\s*$/m,
+      /^## Remove\s*$/m,
+      /^## Evidence\s*$/m
+    ];
+    if (requiredPatterns.some((pattern) => !pattern.test(content))) {
+      throw invalidMemoryCandidateError("the assigned candidate file does not match the required proposal format.");
+    }
+  }
 }
 
 function isArchitectToPm(message: VcmRoleMessage): boolean {
@@ -213,6 +267,14 @@ function incompletePlanError(reason: string): VcmError {
   return new VcmError({
     code: "ARCHITECT_PLAN_INCOMPLETE",
     message: `Architect restart cannot be scheduled. ${reason}`,
+    statusCode: 409
+  });
+}
+
+function invalidMemoryCandidateError(reason: string): VcmError {
+  return new VcmError({
+    code: "ARCHITECT_MEMORY_CANDIDATE_INVALID",
+    message: `Architect restart is waiting for its planning-session memory candidate because ${reason}`,
     statusCode: 409
   });
 }

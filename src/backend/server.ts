@@ -341,7 +341,8 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
   const architectRestartService = createArchitectRestartService({
     fs,
     taskService,
-    sessionService
+    sessionService,
+    appSettings
   });
   const messageService = createMessageService({
     fs,

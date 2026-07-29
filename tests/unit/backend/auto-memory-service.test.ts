@@ -59,6 +59,28 @@ describe("auto-memory-service", () => {
 
   it("collects role drafts sequentially and applies Harness Engineer reviewed memory", async () => {
     const context = await createContext(true);
+    const planningCandidatePath = path.join(
+      context.taskRepoRoot,
+      ".ai/vcm/memory-review/candidates/architect/planning.md"
+    );
+    await mkdir(path.dirname(planningCandidatePath), { recursive: true });
+    await writeFile(planningCandidatePath, [
+      "# Memory Proposal",
+      "Decision: update",
+      "",
+      "## Add",
+      "",
+      "Planning discovered backend-owned lifecycle state.",
+      "",
+      "## Update",
+      "",
+      "## Remove",
+      "",
+      "## Evidence",
+      "",
+      ".ai/vcm/handoffs/architecture-evidence.md",
+      ""
+    ].join("\n"), "utf8");
     const finalAcceptancePath = path.join(context.taskRepoRoot, ".ai/vcm/handoffs/final-acceptance.md");
     await mkdir(path.dirname(finalAcceptancePath), { recursive: true });
     await writeFile(
@@ -105,6 +127,15 @@ describe("auto-memory-service", () => {
       role: "project-manager",
       status: "dispatched"
     });
+    const planningCandidateSnapshot = path.join(
+      context.taskRepoRoot,
+      ".ai/vcm/memory-review/runs",
+      state.active!.runId,
+      "sources/architect-planning.md"
+    );
+    await expect(readFile(planningCandidateSnapshot, "utf8")).resolves.toContain(
+      "Planning discovered backend-owned lifecycle state."
+    );
 
     const activeStatePath = path.join(context.taskRepoRoot, ".ai/vcm/memory-review/state.json");
     const legacyState = JSON.parse(await readFile(activeStatePath, "utf8")) as {
@@ -120,6 +151,13 @@ describe("auto-memory-service", () => {
       state = await context.service.getState(context.baseRepoRoot, context.taskRepoRoot);
       const draft = state.active?.drafts.find((item) => item.role === role);
       expect(draft).toBeDefined();
+      if (role === "architect") {
+        const writes = context.terminalWrites.join("");
+        expect(writes).toContain(planningCandidateSnapshot);
+        expect(writes).toContain(
+          "Carry forward only facts that remain verified after implementation and testing."
+        );
+      }
       await mkdir(path.dirname(path.join(context.taskRepoRoot, draft!.path)), { recursive: true });
       await writeFile(path.join(context.taskRepoRoot, draft!.path), "# Memory Draft\n\nDecision: no-change\n", "utf8");
       await context.service.handleRoleHook({
@@ -133,6 +171,10 @@ describe("auto-memory-service", () => {
 
     state = await context.service.getState(context.baseRepoRoot, context.taskRepoRoot);
     expect(state.status).toBe("reviewing");
+    expect(context.terminalWrites.join("")).toContain(planningCandidateSnapshot);
+    expect(context.terminalWrites.join("")).toContain(
+      "Treat the planning candidate as an additional proposal, not authority."
+    );
     const reviewedSharedPath = path.join(
       context.taskRepoRoot,
       ".ai/vcm/memory-review/runs",

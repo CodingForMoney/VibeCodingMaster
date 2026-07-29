@@ -116,6 +116,7 @@ export async function scheduleArchitectRestart(app: FastifyInstance, taskSlug: s
   taskSlug: string;
   sessionId: string;
   status: "scheduled";
+  memoryCandidatePath?: string;
 }> {
   const response = await injectOk(app, {
     method: "POST",

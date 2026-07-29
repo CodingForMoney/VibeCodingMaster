@@ -423,6 +423,13 @@ a fresh Architect session with the same launch settings and a short restoration
 system prompt. No restart occurs for incomplete planning, Debug/Diagnosis/docs
 work, StopFailure, or task close.
 
+When Auto Memory is enabled, the restart request assigns an exact
+planning-session memory candidate path. Architect writes a provisional proposal
+there before routing. VCM keeps the old Session if the candidate is missing or
+malformed, then snapshots a valid candidate into the later Auto Memory run. The
+replacement Architect validates it against final task evidence; Harness
+Engineer makes the final keep, revise, or discard decision.
+
 The active architecture plan should describe the full accepted task scope. It
 may include implementation order, but that order must not defer requested scope.
 The plan is the current executable plan, not a changelog; revisions should
@@ -655,6 +662,12 @@ participate in Round/Turn tracking. Their hooks start or continue the
 post-acceptance Round, which settles to stopped after the last workflow-role
 proposal. Harness Engineer review remains tool-role activity and is excluded
 from that Round.
+
+If planning used the post-planning Architect restart, the old planning Session
+first records a provisional candidate at the VCM-assigned path. The Auto Memory
+run snapshots that candidate, presents it to the replacement Architect with the
+final task evidence, and includes it in Harness Engineer review. It is review
+input only and never active memory by itself.
 
 Task Harness Retrospective runs after the optional memory phase. The backend
 uses the current accepted `final-acceptance.md` hash as the ordering key. When

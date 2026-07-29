@@ -38,7 +38,12 @@ def main():
     try:
         with urllib.request.urlopen(request, timeout=5) as response:
             payload = json.loads(response.read().decode("utf-8"))
-        emit(payload.get("status", "scheduled"), taskSlug=task_slug, sessionId=payload.get("sessionId"))
+        emit(
+            payload.get("status", "scheduled"),
+            taskSlug=task_slug,
+            sessionId=payload.get("sessionId"),
+            memoryCandidatePath=payload.get("memoryCandidatePath"),
+        )
         return 0
     except urllib.error.HTTPError as error:
         try:

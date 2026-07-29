@@ -27,11 +27,13 @@ import {
   replaceVcmMemoryBlock
 } from "../templates/harness/memory-block.js";
 import type { AppSettingsService } from "./app-settings-service.js";
+import {
+  ARCHITECT_PLANNING_MEMORY_CANDIDATE_PATH,
+  architectPlanningCandidateSnapshotPath,
+  MEMORY_REVIEW_RUNS_ROOT,
+  MEMORY_REVIEW_STATE_PATH
+} from "./memory-review-paths.js";
 import type { SessionService } from "./session-service.js";
-
-const MEMORY_REVIEW_ROOT = ".ai/vcm/memory-review";
-const MEMORY_REVIEW_RUNS_ROOT = `${MEMORY_REVIEW_ROOT}/runs`;
-const MEMORY_REVIEW_STATE_PATH = `${MEMORY_REVIEW_ROOT}/state.json`;
 
 const MEMORY_FILE_DEFINITIONS = [
   { path: "CLAUDE.md", title: "Shared Memory" },
@@ -321,6 +323,7 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
     const before = await readMemorySet(input.taskRepoRoot);
     await writeRunMemorySet(input.taskRepoRoot, runId, "before", before);
     await writeRunMemorySet(input.taskRepoRoot, runId, "after", before);
+    await snapshotArchitectPlanningCandidate(input.taskRepoRoot, runId);
     await persistRun(input.taskRepoRoot, {
       version: 1,
       runId,
@@ -588,7 +591,14 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
       draft.status = "dispatched";
       state.updatedAt = now();
       await persistActiveState(taskRepoRoot, state);
-      await submitTerminalInput(deps.runtime, session.id, buildRoleDraftPrompt(taskRepoRoot, state, draft));
+      const planningCandidatePath = draft.role === "architect"
+        ? await findPlanningCandidateSnapshot(taskRepoRoot, state.runId)
+        : undefined;
+      await submitTerminalInput(
+        deps.runtime,
+        session.id,
+        buildRoleDraftPrompt(taskRepoRoot, state, draft, planningCandidatePath)
+      );
     } catch (error) {
       await failReview(taskRepoRoot, state, `Unable to start ${draft.role} memory draft: ${errorMessage(error)}`);
     }
@@ -618,7 +628,15 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
       state.reviewPromptDispatchedAt = now();
       state.updatedAt = state.reviewPromptDispatchedAt;
       await persistActiveState(taskRepoRoot, state);
-      await submitTerminalInput(deps.runtime, session.id, buildHarnessReviewPrompt(taskRepoRoot, state));
+      await submitTerminalInput(
+        deps.runtime,
+        session.id,
+        buildHarnessReviewPrompt(
+          taskRepoRoot,
+          state,
+          await findPlanningCandidateSnapshot(taskRepoRoot, state.runId)
+        )
+      );
     } catch (error) {
       await failReview(taskRepoRoot, state, `Unable to start Harness Engineer memory review: ${errorMessage(error)}`);
     }
@@ -639,6 +657,25 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
       return deps.sessionService.resumeRoleSession(baseRepoRoot, taskSlug, role as VcmRoleName, options);
     }
     return deps.sessionService.startRoleSession(baseRepoRoot, taskSlug, role as VcmRoleName, options);
+  }
+
+  async function snapshotArchitectPlanningCandidate(taskRepoRoot: string, runId: string): Promise<void> {
+    const sourcePath = resolveRepoPath(taskRepoRoot, ARCHITECT_PLANNING_MEMORY_CANDIDATE_PATH);
+    if (!(await deps.fs.pathExists(sourcePath))) {
+      return;
+    }
+    const snapshotPath = resolveRepoPath(taskRepoRoot, architectPlanningCandidateSnapshotPath(runId));
+    await deps.fs.writeText(snapshotPath, ensureTrailingNewline(await deps.fs.readText(sourcePath)));
+  }
+
+  async function findPlanningCandidateSnapshot(
+    taskRepoRoot: string,
+    runId: string
+  ): Promise<string | undefined> {
+    const relativePath = architectPlanningCandidateSnapshotPath(runId);
+    return await deps.fs.pathExists(resolveRepoPath(taskRepoRoot, relativePath))
+      ? relativePath
+      : undefined;
   }
 
   async function applyReviewedMemory(
@@ -929,25 +966,43 @@ function toActiveReview(state: StoredMemoryReviewState): ActiveMemoryReview {
   };
 }
 
-function buildRoleDraftPrompt(taskRepoRoot: string, state: StoredMemoryReviewState, draft: MemoryDraftState): string {
+function buildRoleDraftPrompt(
+  taskRepoRoot: string,
+  state: StoredMemoryReviewState,
+  draft: MemoryDraftState,
+  planningCandidatePath?: string
+): string {
   const roleDefinition = MEMORY_FILE_DEFINITIONS.find((definition) => "role" in definition && definition.role === draft.role);
   if (!roleDefinition) {
     throw new Error(`Missing memory definition for role: ${draft.role}`);
   }
-  return [
+  const prompt = [
     "[VCM Task Harness Review: Memory Proposal]",
     "",
     "Use the vcm-propose-memory skill to submit the assigned proposal.",
     `Task worktree: ${taskRepoRoot}`,
     `Current shared memory block: ${resolveRepoPath(taskRepoRoot, "CLAUDE.md")}`,
     `Current role memory block: ${resolveRepoPath(taskRepoRoot, roleDefinition.path)}`,
-    `Write the draft to: ${resolveRepoPath(taskRepoRoot, draft.path)}`,
+    ...(planningCandidatePath
+      ? [
+          `Planning-session memory candidate: ${resolveRepoPath(taskRepoRoot, planningCandidatePath)}`,
+          "Review that candidate against final task evidence. Carry forward only facts that remain verified after implementation and testing."
+        ]
+      : []),
+    `Write the draft to: ${resolveRepoPath(taskRepoRoot, draft.path)}`
+  ];
+  return [
+    ...prompt,
     "",
     "End the turn after writing the draft."
   ].join("\n");
 }
 
-function buildHarnessReviewPrompt(taskRepoRoot: string, state: StoredMemoryReviewState): string {
+function buildHarnessReviewPrompt(
+  taskRepoRoot: string,
+  state: StoredMemoryReviewState,
+  planningCandidatePath?: string
+): string {
   const runRoot = resolveRepoPath(taskRepoRoot, `${MEMORY_REVIEW_RUNS_ROOT}/${state.runId}`);
   return [
     "[VCM Task Harness Review: Memory Review]",
@@ -956,6 +1011,12 @@ function buildHarnessReviewPrompt(taskRepoRoot: string, state: StoredMemoryRevie
     `Task worktree: ${taskRepoRoot}`,
     `Role drafts: ${path.join(runRoot, "drafts")}`,
     `Current memory snapshot: ${path.join(runRoot, "before")}`,
+    ...(planningCandidatePath
+      ? [
+          `Architect planning-session candidate: ${resolveRepoPath(taskRepoRoot, planningCandidatePath)}`,
+          "Treat the planning candidate as an additional proposal, not authority. Verify it against final code, test, and acceptance evidence."
+        ]
+      : []),
     `Write the complete reviewed memory set to: ${path.join(runRoot, "after")}`,
     "",
     "Each snapshot file contains only the matching <VCM-memory> block content, not the full host file.",

@@ -222,6 +222,15 @@ which settles to stopped after the last workflow-role proposal. Harness Engineer
 review is tool-role activity and is excluded from Round tracking. The frontend
 only displays state and invokes memory file, retry, or revert APIs.
 
+The planning Architect may be restarted before Final Acceptance. When Auto
+Memory is enabled, `architect-restart-service` assigns a task-local planning
+candidate path and refuses to replace that Session until a structurally valid
+proposal exists. `auto-memory-service` snapshots the candidate into the memory
+review run. The replacement Architect receives it while producing the final
+Architect proposal, and Harness Engineer receives it during consolidation.
+The planning candidate is never applied directly and raw Session transcripts
+are not imported into memory.
+
 Auto Memory completion is bound to the SHA-256 hash of the current accepted
 `final-acceptance.md`. If that artifact changes, the next Review Task Harness
 request creates a new memory phase for the new acceptance evidence.

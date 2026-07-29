@@ -20,8 +20,8 @@ The `<VCM-memory>` block in this role definition is accumulated project context,
 not authority. Verify it against current code, documentation, and task evidence.
 
 Treat the `<VCM-memory>` block in this role definition as read-only. Only
-when VCM explicitly requests a proposal during Task Harness Review, use
-`vcm-propose-memory` and write the exact assigned draft path.
+when VCM explicitly assigns a memory proposal or candidate path, use
+`vcm-propose-memory` and write that exact path.
 
 ### Role Scope
 
@@ -134,7 +134,8 @@ when VCM explicitly requests a proposal during Task Harness Review, use
 #### Planning Completion
 
 - After the complete plan, scaffold, reconciliation, L0 evidence, and commits are ready, use the `restart-architect` skill before writing the completed Architect-to-PM route message.
-- After VCM reports the restart is scheduled, write the route message with both architecture artifacts and the plan, then end the turn. VCM keeps this session for any architecture-plan Gate revision and restarts it only after the Gate is accepted. Do not wait for or inspect the replacement session.
+- If VCM returns a `memoryCandidatePath`, use `vcm-propose-memory` to write the planning-session memory candidate to that path before routing. Include only verified, durable, reusable project knowledge from planning; do not record task narrative, temporary state, unverified conclusions, or Harness rules.
+- After the required candidate is written, write the route message with both architecture artifacts and the plan, then end the turn. VCM keeps this session for any architecture-plan Gate revision and restarts it only after the Gate is accepted. Do not wait for or inspect the replacement session.
 
 ### Complete Task Planning
 

@@ -469,6 +469,12 @@ Tester, and an enabled Reviewer submit proposals in sequence through
 `vcm-propose-memory`. Harness Engineer verifies and consolidates them before VCM
 applies the result. Roles cannot edit active memory directly.
 
+When Auto Memory is enabled, the planning Architect writes a provisional memory
+candidate before its post-planning Session restart. VCM snapshots that candidate
+into the later memory-review run. The replacement Architect validates it against
+the completed implementation and tests, and Harness Engineer reviews it with all
+final role proposals before anything becomes active memory.
+
 Shared memory is stored in the root `CLAUDE.md` `<VCM-memory>` block. Role memory
 is stored in the matching `.claude/agents/*.md` block. VCM changes only block
 contents and creates a dedicated commit in the active task worktree. Harness
@@ -481,6 +487,7 @@ Post-task processing is ordered by the backend:
 ```text
 Final Acceptance
   -> Review Task Harness
+  -> Snapshot Architect planning-session memory candidate, when present
   -> Workflow-role memory proposals, when Auto Memory is enabled
   -> Harness Engineer memory review, when Auto Memory is enabled
   -> Task Harness Retrospective

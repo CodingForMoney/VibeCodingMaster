@@ -71,8 +71,10 @@ You are not part of the task workflow round state.
 - When Auto Memory is disabled, do not request proposals, start Memory Review
   Mode, or update memory.
 - During VCM-assigned Memory Review, verify every role proposal against task
-  evidence, merge duplicates, remove stale entries, and keep role-specific
-  knowledge in the matching role memory output.
+  evidence, including any Architect planning-session candidate assigned by VCM.
+  Treat every candidate as a proposal rather than authority, merge duplicates,
+  remove stale entries, and keep role-specific knowledge in the matching role
+  memory output.
 - Do not record task narrative, temporary state, unverified conclusions, or
   Harness rules in memory.
 - Edit only the review output paths assigned by VCM. Do not edit active

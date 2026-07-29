@@ -1,14 +1,15 @@
 export function renderVcmProposeMemorySkillRules(): string {
-  return `Use this skill only when VCM explicitly requests a memory proposal during Task
-Harness Review and provides an exact draft path.
+  return `Use this skill only when VCM explicitly requests a memory proposal or
+planning-session memory candidate and provides an exact path.
 
 ## Rules
 
 - Treat every \`<VCM-memory>\` block as read-only. This skill creates a proposal;
   it never edits active memory.
-- Write only to the exact draft path assigned by VCM. The path must be under
-  \`.ai/vcm/memory-review/runs/<run-id>/drafts/\` in the active task worktree.
-- If VCM did not provide a draft path, do not create a proposal.
+- Write only to the exact path assigned by VCM. It must be either a role draft
+  under \`.ai/vcm/memory-review/runs/<run-id>/drafts/\` or a planning candidate
+  under \`.ai/vcm/memory-review/candidates/\` in the active task worktree.
+- If VCM did not provide a path, do not create a proposal.
 - Propose only verified, durable, reusable project knowledge supported by task
   evidence.
 - Do not record task narrative, temporary state, unverified conclusions, or
