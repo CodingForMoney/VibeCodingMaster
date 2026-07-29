@@ -15,6 +15,7 @@ import type { TaskCloseService } from "../services/task-close-service.js";
 import type { TaskLaunchService } from "../services/task-launch-service.js";
 import type { RoundService } from "../services/round-service.js";
 import type { TaskWorkflowService } from "../services/task-workflow-service.js";
+import type { ArchitectRestartService } from "../services/architect-restart-service.js";
 
 export interface TaskRouteDeps {
   projectService: ProjectService;
@@ -25,6 +26,7 @@ export interface TaskRouteDeps {
   taskLaunchService: Pick<TaskLaunchService, "startTaskRoleSessions">;
   roundService: Pick<RoundService, "getSessionRoundState">;
   taskWorkflowService?: Pick<TaskWorkflowService, "getState" | "declare">;
+  architectRestartService: Pick<ArchitectRestartService, "getState">;
 }
 
 export function registerTaskRoutes(app: FastifyInstance, deps: TaskRouteDeps): void {
@@ -113,7 +115,8 @@ export function registerTaskRoutes(app: FastifyInstance, deps: TaskRouteDeps): v
         messages,
         orchestration,
         roundState,
-        workflowState
+        workflowState,
+        architectRestart: deps.architectRestartService.getState(project.repoRoot, taskSlug)
       } satisfies TaskWorkspaceState;
     } catch (error) {
       if (isOpenFileLimitError(error)) {
@@ -126,7 +129,8 @@ export function registerTaskRoutes(app: FastifyInstance, deps: TaskRouteDeps): v
             updatedAt: new Date().toISOString()
           },
           roundState: degradedRoundState(taskSlug),
-          workflowState: degradedWorkflowState(taskSlug)
+          workflowState: degradedWorkflowState(taskSlug),
+          architectRestart: deps.architectRestartService.getState(repoRoot, taskSlug)
         } satisfies TaskWorkspaceState;
       }
       throw error;

@@ -14,6 +14,7 @@ describe("task routes", () => {
     });
 
     registerTaskRoutes(app, {
+      architectRestartService: notUsedArchitectRestartService(),
       taskLaunchService: notUsedTaskLaunchService(),
       projectService: {
         async getCurrentProject() {
@@ -104,6 +105,7 @@ describe("task routes", () => {
     const app = Fastify({ logger: false });
 
     registerTaskRoutes(app, {
+      architectRestartService: notUsedArchitectRestartService(),
       taskLaunchService: notUsedTaskLaunchService(),
       projectService: {
         async getCurrentProject() {
@@ -178,6 +180,7 @@ describe("task routes", () => {
     };
 
     registerTaskRoutes(app, {
+      architectRestartService: notUsedArchitectRestartService(),
       taskLaunchService: {
         async startTaskRoleSessions(repoRoot: string, input: { taskSlug: string; requireFreshStart: boolean }) {
           calls.push({ repoRoot, ...input });
@@ -223,6 +226,15 @@ describe("task routes", () => {
     let declaredWorkflow: Record<string, unknown> | undefined;
 
     registerTaskRoutes(app, {
+      architectRestartService: {
+        getState() {
+          return {
+            taskSlug: "demo-task",
+            sessionId: "runtime-architect",
+            status: "pending" as const
+          };
+        }
+      },
       taskLaunchService: notUsedTaskLaunchService(),
       projectService: {
         async getCurrentProject() {
@@ -355,6 +367,10 @@ describe("task routes", () => {
       roundState: { status: "running" },
       workflowState: {
         declared: { flow: "code-change", step: "architect-planning" }
+      },
+      architectRestart: {
+        sessionId: "runtime-architect",
+        status: "pending"
       }
     });
 
@@ -376,6 +392,14 @@ function notUsedTaskLaunchService() {
   return {
     async startTaskRoleSessions() {
       throw new Error("not used");
+    }
+  };
+}
+
+function notUsedArchitectRestartService() {
+  return {
+    getState() {
+      return null;
     }
   };
 }

@@ -93,6 +93,7 @@ describe("createHarnessService", () => {
     const restartArchitectSkill = await fs.readText("/repo/.claude/skills/restart-architect/SKILL.md");
     expect(restartArchitectSkill).toContain(".ai/tools/request-architect-restart");
     expect(restartArchitectSkill).toContain("memoryCandidatePath");
+    expect(restartArchitectSkill).toContain("already_scheduled");
     expect(await fs.readText("/repo/.ai/tools/request-architect-restart")).toContain("/sessions/architect/restart-after-planning");
     expect(await fs.readText("/repo/.claude/agents/vcm-architect-scaffold-worker.md")).toContain("model: opus\neffort: xhigh");
     expect(await fs.readText("/repo/CLAUDE.md")).toContain("<VCM-memory>\nNo accumulated project memory yet.\n</VCM-memory>");

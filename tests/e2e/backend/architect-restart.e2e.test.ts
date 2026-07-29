@@ -6,6 +6,7 @@ import { createE2eRepo } from "./helpers/e2e-repo.js";
 import {
   connectAndCreateTask,
   getGateState,
+  getWorkspaceState,
   injectOk,
   requestGateReview,
   scheduleArchitectRestart,
@@ -83,7 +84,7 @@ describe("backend E2E Architect post-planning restart", () => {
     await waitFor(async () => (
       await getGateState(env.app, task.taskSlug)
     ).gates["architecture-plan"].decision === "approve");
-    await waitFor(() => env.mockRuntime.getSessionByRole(task.taskSlug, "architect")?.id !== architect.id);
+    await waitForArchitectReplacement(env, task.taskSlug, architect.id);
 
     const replacement = env.mockRuntime.getSessionByRole(task.taskSlug, "architect");
     expect(replacement).toBeDefined();
@@ -126,7 +127,9 @@ describe("backend E2E Architect post-planning restart", () => {
       await ctx.userPromptSubmit();
       await ctx.stop();
     });
-    await scheduleArchitectRestart(env.app, task.taskSlug);
+    const initialSchedule = await scheduleArchitectRestart(env.app, task.taskSlug);
+    expect(initialSchedule).toMatchObject({ status: "scheduled" });
+    expect(initialSchedule.memoryCandidatePath).toBeUndefined();
     await writeArchitectRoute(task.worktreePath);
     await postRoleHook(env, task.taskSlug, "architect", "Stop", "architect-revision-session", true);
     await env.mockRuntime.waitForIdle();
@@ -147,7 +150,12 @@ describe("backend E2E Architect post-planning restart", () => {
       await ctx.userPromptSubmit();
       await ctx.stop();
     });
-    await scheduleArchitectRestart(env.app, task.taskSlug);
+    const repeatedSchedule = await scheduleArchitectRestart(env.app, task.taskSlug);
+    expect(repeatedSchedule).toMatchObject({ status: "already_scheduled" });
+    expect(repeatedSchedule.memoryCandidatePath).toBeUndefined();
+    await expect(fs.access(
+      path.join(task.worktreePath, ".ai/vcm/memory-review/candidates/architect/planning.md")
+    )).rejects.toMatchObject({ code: "ENOENT" });
     await writeArchitectRoute(task.worktreePath, "Architecture revised. Plan ready.");
     await postRoleHook(env, task.taskSlug, "architect", "Stop", "architect-revision-session", true);
     await env.mockRuntime.waitForIdle();
@@ -157,14 +165,89 @@ describe("backend E2E Architect post-planning restart", () => {
     await waitFor(async () => (
       await getGateState(env.app, task.taskSlug)
     ).gates["architecture-plan"].decision === "approve");
-    await waitFor(() => env.mockRuntime.getSessionByRole(task.taskSlug, "architect")?.id !== architect.id);
+    await waitForArchitectReplacement(env, task.taskSlug, architect.id);
     await waitFor(async () => (
       await getGateState(env.app, task.taskSlug)
     ).gates["architecture-plan"].callbackStatus === "sent");
     await env.mockRuntime.waitForIdle();
   });
 
-  it("restarts after the mandatory Gate request reports that Gate Review is disabled", async () => {
+  it("preserves one planning candidate through repeated scheduling and Gate revision when Auto Memory is enabled", async () => {
+    const env = await createMockClaudeE2eApp();
+    cleanups.push(() => env.close());
+    const repo = await createE2eRepo();
+    cleanups.push(() => repo.cleanup());
+    const task = await connectAndCreateTask(env.app, repo, "architect-restart-memory-revision");
+    await updatePreferences(env.app, { autoMemoryEnabled: true });
+    await writeConfirmedArchitectureBrief(task.worktreePath, task.taskSlug);
+    await writeCompletePlan(task.worktreePath);
+
+    await startRole(env.app, task.taskSlug, "project-manager");
+    await updateGateSettings(env.app, task.taskSlug, {
+      "architecture-plan": true,
+      "validation-adequacy": false,
+      "code-diff": false
+    });
+    const decisions: Array<"approve" | "request_changes"> = ["request_changes", "approve"];
+    env.mockRuntime.onPrompt("reviewer", "[VCM GATE REVIEW]", async (ctx) => {
+      await writeArchitectureGateReport(ctx, decisions.shift() ?? "approve");
+    }, { once: false });
+    env.mockRuntime.onPrompt("project-manager", "[VCM GATE REVIEW CALLBACK]", async (ctx) => {
+      await ctx.userPromptSubmit();
+      await ctx.stop();
+    }, { once: false });
+    const architect = await startRole(env.app, task.taskSlug, "architect");
+    await postUserPromptHook(env, task.taskSlug, "architect-memory-revision-session");
+
+    env.mockRuntime.onPrompt("project-manager", "Architecture complete. Plan ready.", async (ctx) => {
+      await ctx.userPromptSubmit();
+      await ctx.stop();
+    });
+    const initialSchedule = await scheduleArchitectRestart(env.app, task.taskSlug);
+    expect(initialSchedule.status).toBe("scheduled");
+    expect(initialSchedule.memoryCandidatePath).toBeDefined();
+    await writePlanningMemoryCandidate(task.worktreePath, initialSchedule.memoryCandidatePath!);
+    const candidatePath = path.join(task.worktreePath, initialSchedule.memoryCandidatePath!);
+    const candidateContent = await fs.readFile(candidatePath, "utf8");
+    await writeArchitectRoute(task.worktreePath);
+    await postRoleHook(env, task.taskSlug, "architect", "Stop", "architect-memory-revision-session", true);
+    await env.mockRuntime.waitForIdle();
+
+    expect((await requestGateReview(env.app, task.taskSlug, "architecture-plan")).status).toBe("started");
+    await waitFor(async () => (
+      await getGateState(env.app, task.taskSlug)
+    ).gates["architecture-plan"].decision === "request_changes");
+    expect(env.mockRuntime.getSessionByRole(task.taskSlug, "architect")?.id).toBe(architect.id);
+
+    await postUserPromptHook(env, task.taskSlug, "architect-memory-revision-session");
+    await fs.appendFile(
+      path.join(task.worktreePath, ".ai/vcm/handoffs/architecture-plan.md"),
+      "\nRevision: close the Gate finding.\n",
+      "utf8"
+    );
+    const repeatedSchedule = await scheduleArchitectRestart(env.app, task.taskSlug);
+    expect(repeatedSchedule).toMatchObject({
+      status: "already_scheduled",
+      memoryCandidatePath: initialSchedule.memoryCandidatePath
+    });
+    expect(await fs.readFile(candidatePath, "utf8")).toBe(candidateContent);
+
+    env.mockRuntime.onPrompt("project-manager", "Architecture revised. Plan ready.", async (ctx) => {
+      await ctx.userPromptSubmit();
+      await ctx.stop();
+    });
+    await writeArchitectRoute(task.worktreePath, "Architecture revised. Plan ready.");
+    await postRoleHook(env, task.taskSlug, "architect", "Stop", "architect-memory-revision-session", true);
+    await env.mockRuntime.waitForIdle();
+    expect((await requestGateReview(env.app, task.taskSlug, "architecture-plan")).status).toBe("started");
+    await waitFor(async () => (
+      await getGateState(env.app, task.taskSlug)
+    ).gates["architecture-plan"].decision === "approve");
+    await waitForArchitectReplacement(env, task.taskSlug, architect.id);
+    expect(await fs.readFile(candidatePath, "utf8")).toBe(candidateContent);
+  });
+
+  it("restarts with Auto Memory disabled and ignores an unrelated invalid candidate", async () => {
     const env = await createMockClaudeE2eApp();
     cleanups.push(() => env.close());
     const repo = await createE2eRepo();
@@ -182,18 +265,20 @@ describe("backend E2E Architect post-planning restart", () => {
     });
 
     const staleCandidatePath = ".ai/vcm/memory-review/candidates/architect/planning.md";
-    await writePlanningMemoryCandidate(task.worktreePath, staleCandidatePath);
-    await scheduleArchitectRestart(env.app, task.taskSlug);
-    await expect(fs.readFile(path.join(task.worktreePath, staleCandidatePath), "utf8")).rejects.toMatchObject({
-      code: "ENOENT"
-    });
+    const absoluteCandidatePath = path.join(task.worktreePath, staleCandidatePath);
+    await fs.mkdir(path.dirname(absoluteCandidatePath), { recursive: true });
+    await fs.writeFile(absoluteCandidatePath, "not a valid memory proposal\n", "utf8");
+    const scheduled = await scheduleArchitectRestart(env.app, task.taskSlug);
+    expect(scheduled.memoryCandidatePath).toBeUndefined();
+    expect(await fs.readFile(absoluteCandidatePath, "utf8")).toBe("not a valid memory proposal\n");
     await writeArchitectRoute(task.worktreePath);
     await postRoleHook(env, task.taskSlug, "architect", "Stop", "architect-disabled-gate-session", true);
     await env.mockRuntime.waitForIdle();
     expect(env.mockRuntime.getSessionByRole(task.taskSlug, "architect")?.id).toBe(architect.id);
 
     expect((await requestGateReview(env.app, task.taskSlug, "architecture-plan")).status).toBe("disabled");
-    await waitFor(() => env.mockRuntime.getSessionByRole(task.taskSlug, "architect")?.id !== architect.id);
+    await waitForArchitectReplacement(env, task.taskSlug, architect.id);
+    expect(await fs.readFile(absoluteCandidatePath, "utf8")).toBe("not a valid memory proposal\n");
   });
 
   it("captures a planning-session memory candidate before restarting when Auto Memory is enabled", async () => {
@@ -216,21 +301,20 @@ describe("backend E2E Architect post-planning restart", () => {
 
     const stableCandidatePath = ".ai/vcm/memory-review/candidates/architect/planning.md";
     await writePlanningMemoryCandidate(task.worktreePath, stableCandidatePath);
+    const candidateContent = await fs.readFile(path.join(task.worktreePath, stableCandidatePath), "utf8");
     const scheduled = await scheduleArchitectRestart(env.app, task.taskSlug);
     expect(scheduled.memoryCandidatePath).toBe(stableCandidatePath);
-    await expect(fs.readFile(path.join(task.worktreePath, stableCandidatePath), "utf8")).rejects.toMatchObject({
-      code: "ENOENT"
-    });
-    await writePlanningMemoryCandidate(task.worktreePath, scheduled.memoryCandidatePath!);
+    expect(await fs.readFile(path.join(task.worktreePath, stableCandidatePath), "utf8")).toBe(candidateContent);
     await writeArchitectRoute(task.worktreePath);
     await postRoleHook(env, task.taskSlug, "architect", "Stop", "architect-memory-session", true);
     await env.mockRuntime.waitForIdle();
 
     expect((await requestGateReview(env.app, task.taskSlug, "architecture-plan")).status).toBe("disabled");
-    await waitFor(() => env.mockRuntime.getSessionByRole(task.taskSlug, "architect")?.id !== architect.id);
+    await waitForArchitectReplacement(env, task.taskSlug, architect.id);
+    expect(await fs.readFile(path.join(task.worktreePath, stableCandidatePath), "utf8")).toBe(candidateContent);
   });
 
-  it("keeps the planning session when Auto Memory is enabled but its candidate is missing", async () => {
+  it("surfaces a missing Auto Memory candidate as blocked and restarts only after explicit retry", async () => {
     const env = await createMockClaudeE2eApp();
     cleanups.push(() => env.close());
     const repo = await createE2eRepo();
@@ -257,6 +341,101 @@ describe("backend E2E Architect post-planning restart", () => {
     await env.mockRuntime.waitForIdle();
 
     expect(env.mockRuntime.getSessionByRole(task.taskSlug, "architect")?.id).toBe(architect.id);
+    const blockedState = (await getWorkspaceState(env.app, task.taskSlug)).architectRestart;
+    expect(blockedState).toMatchObject({
+      status: "blocked",
+      blocker: {
+        code: "ARCHITECT_MEMORY_CANDIDATE_INVALID"
+      }
+    });
+
+    await postRoleHook(env, task.taskSlug, "architect", "Stop", "architect-memory-missing-session", true);
+    await env.mockRuntime.waitForIdle();
+    expect(env.mockRuntime.getSessionByRole(task.taskSlug, "architect")?.id).toBe(architect.id);
+
+    await writePlanningMemoryCandidate(task.worktreePath, scheduled.memoryCandidatePath!);
+    expect((await scheduleArchitectRestart(env.app, task.taskSlug)).status).toBe("scheduled");
+    await waitForArchitectReplacement(env, task.taskSlug, architect.id);
+    expect((await getWorkspaceState(env.app, task.taskSlug)).architectRestart).toBeNull();
+  });
+
+  it("surfaces an invalid Auto Memory candidate and preserves it for correction", async () => {
+    const env = await createMockClaudeE2eApp();
+    cleanups.push(() => env.close());
+    const repo = await createE2eRepo();
+    cleanups.push(() => repo.cleanup());
+    const task = await connectAndCreateTask(env.app, repo, "architect-restart-memory-invalid");
+    await updatePreferences(env.app, { autoMemoryEnabled: true });
+    await writeConfirmedArchitectureBrief(task.worktreePath, task.taskSlug);
+    await writeCompletePlan(task.worktreePath);
+
+    await startRole(env.app, task.taskSlug, "project-manager");
+    const architect = await startRole(env.app, task.taskSlug, "architect");
+    await postUserPromptHook(env, task.taskSlug, "architect-memory-invalid-session");
+    env.mockRuntime.onPrompt("project-manager", "Architecture complete. Plan ready.", async (ctx) => {
+      await ctx.userPromptSubmit();
+      await ctx.stop();
+    });
+
+    const scheduled = await scheduleArchitectRestart(env.app, task.taskSlug);
+    const candidatePath = path.join(task.worktreePath, scheduled.memoryCandidatePath!);
+    await fs.mkdir(path.dirname(candidatePath), { recursive: true });
+    await fs.writeFile(candidatePath, "invalid proposal\n", "utf8");
+    await writeArchitectRoute(task.worktreePath);
+    await postRoleHook(env, task.taskSlug, "architect", "Stop", "architect-memory-invalid-session", true);
+    await env.mockRuntime.waitForIdle();
+    expect((await requestGateReview(env.app, task.taskSlug, "architecture-plan")).status).toBe("disabled");
+    await env.mockRuntime.waitForIdle();
+
+    expect(env.mockRuntime.getSessionByRole(task.taskSlug, "architect")?.id).toBe(architect.id);
+    expect((await getWorkspaceState(env.app, task.taskSlug)).architectRestart).toMatchObject({
+      status: "blocked",
+      blocker: {
+        code: "ARCHITECT_MEMORY_CANDIDATE_INVALID"
+      }
+    });
+    expect(await fs.readFile(candidatePath, "utf8")).toBe("invalid proposal\n");
+
+    await writePlanningMemoryCandidate(task.worktreePath, scheduled.memoryCandidatePath!);
+    expect((await scheduleArchitectRestart(env.app, task.taskSlug)).status).toBe("scheduled");
+    await waitForArchitectReplacement(env, task.taskSlug, architect.id);
+  });
+
+  it("preserves the task-level candidate when a different Architect session replaces the pending owner", async () => {
+    const env = await createMockClaudeE2eApp();
+    cleanups.push(() => env.close());
+    const repo = await createE2eRepo();
+    cleanups.push(() => repo.cleanup());
+    const task = await connectAndCreateTask(env.app, repo, "architect-restart-new-session");
+    await updatePreferences(env.app, { autoMemoryEnabled: true });
+    await writeConfirmedArchitectureBrief(task.worktreePath, task.taskSlug);
+    await writeCompletePlan(task.worktreePath);
+
+    const original = await startRole(env.app, task.taskSlug, "architect");
+    const scheduled = await scheduleArchitectRestart(env.app, task.taskSlug);
+    await writePlanningMemoryCandidate(task.worktreePath, scheduled.memoryCandidatePath!);
+    const candidatePath = path.join(task.worktreePath, scheduled.memoryCandidatePath!);
+    const candidateContent = await fs.readFile(candidatePath, "utf8");
+
+    const response = await injectOk(env.app, {
+      method: "POST",
+      url: `/api/tasks/${task.taskSlug}/sessions/architect/restart`,
+      payload: {
+        permissionMode: "bypassPermissions",
+        model: "default",
+        effort: "default"
+      }
+    });
+    const replacement = response.json<RoleSessionRecord>();
+    expect(replacement.id).not.toBe(original.id);
+
+    const replacementSchedule = await scheduleArchitectRestart(env.app, task.taskSlug);
+    expect(replacementSchedule).toMatchObject({
+      status: "scheduled",
+      sessionId: replacement.id,
+      memoryCandidatePath: scheduled.memoryCandidatePath
+    });
+    expect(await fs.readFile(candidatePath, "utf8")).toBe(candidateContent);
   });
 
   it("does not restart after StopFailure even when the route reaches PM", async () => {
@@ -379,6 +558,17 @@ async function writePlanningMemoryCandidate(taskRepoRoot: string, relativePath: 
     "none",
     ""
   ].join("\n"), "utf8");
+}
+
+async function waitForArchitectReplacement(
+  env: Awaited<ReturnType<typeof createMockClaudeE2eApp>>,
+  taskSlug: string,
+  previousSessionId: string
+): Promise<void> {
+  await waitFor(() => {
+    const session = env.mockRuntime.getSessionByRole(taskSlug, "architect");
+    return Boolean(session && session.id !== previousSessionId);
+  });
 }
 
 async function writeArchitectureGateReport(

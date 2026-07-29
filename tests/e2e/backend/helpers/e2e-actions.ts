@@ -115,7 +115,7 @@ export async function writeConfirmedArchitectureBrief(taskRepoRoot: string, task
 export async function scheduleArchitectRestart(app: FastifyInstance, taskSlug: string): Promise<{
   taskSlug: string;
   sessionId: string;
-  status: "scheduled";
+  status: "scheduled" | "already_scheduled";
   memoryCandidatePath?: string;
 }> {
   const response = await injectOk(app, {

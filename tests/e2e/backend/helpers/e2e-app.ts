@@ -392,7 +392,12 @@ export async function createMockClaudeE2eApp(options: MockClaudeE2eAppOptions = 
     async close(closeOptions = {}) {
       await app.close();
       if (!closeOptions.preserveTempRoot) {
-        await fs.rm(tempRoot, { recursive: true, force: true });
+        await fs.rm(tempRoot, {
+          recursive: true,
+          force: true,
+          maxRetries: 5,
+          retryDelay: 20
+        });
       }
     }
   };

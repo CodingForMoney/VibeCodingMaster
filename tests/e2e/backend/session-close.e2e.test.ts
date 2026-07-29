@@ -68,6 +68,12 @@ describe("backend E2E session lifecycle and close task", () => {
     cleanups.push(() => repo.cleanup());
     const task = await connectAndCreateTask(env.app, repo, "mock-close");
     await startRole(env.app, task.taskSlug, "project-manager");
+    const planningCandidatePath = path.join(
+      task.worktreePath,
+      ".ai/vcm/memory-review/candidates/architect/planning.md"
+    );
+    await fs.mkdir(path.dirname(planningCandidatePath), { recursive: true });
+    await fs.writeFile(planningCandidatePath, "task-level candidate\n", "utf8");
     await fs.writeFile(path.join(task.worktreePath, "close-me.txt"), "task commit\n", "utf8");
     await git(task.worktreePath, "add", "close-me.txt");
     await git(task.worktreePath, "commit", "-m", "task-local commit");
@@ -85,5 +91,6 @@ describe("backend E2E session lifecycle and close task", () => {
     await waitFor(async () => {
       await expect(fs.access(task.worktreePath)).rejects.toThrow();
     });
+    await expect(fs.access(planningCandidatePath)).rejects.toThrow();
   });
 });

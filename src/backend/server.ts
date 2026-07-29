@@ -178,7 +178,8 @@ export async function createServer(deps: ServerDeps, options: CreateServerOption
     messageService: deps.messageService,
     taskLaunchService: deps.taskLaunchService,
     roundService: deps.roundService,
-    taskWorkflowService: deps.taskWorkflowService
+    taskWorkflowService: deps.taskWorkflowService,
+    architectRestartService: deps.architectRestartService
   });
   registerSessionRoutes(app, {
     projectService: deps.projectService,

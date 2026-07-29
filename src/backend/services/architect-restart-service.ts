@@ -1,8 +1,13 @@
 import path from "node:path";
+import type {
+  ArchitectRestartBlocker,
+  ArchitectRestartState,
+  ArchitectRestartStatus
+} from "../../shared/types/architect-restart.js";
 import type { VcmRoleMessage } from "../../shared/types/message.js";
 import type { RoleSessionRecord } from "../../shared/types/session.js";
 import { resolveRepoPath, type FileSystemAdapter } from "../adapters/filesystem.js";
-import { VcmError } from "../errors.js";
+import { toVcmError, VcmError } from "../errors.js";
 import type { SessionService } from "./session-service.js";
 import { getTaskRuntimeRepoRoot, type TaskService } from "./task-service.js";
 import type { AppSettingsService } from "./app-settings-service.js";
@@ -27,12 +32,13 @@ Treat the current artifacts and worktree as the source of truth. The architectur
 export interface ArchitectRestartScheduleResult {
   taskSlug: string;
   sessionId: string;
-  status: "scheduled";
+  status: "scheduled" | "already_scheduled";
   memoryCandidatePath?: string;
 }
 
 export interface ArchitectRestartService {
   schedule(repoRoot: string, taskSlug: string): Promise<ArchitectRestartScheduleResult>;
+  getState(repoRoot: string, taskSlug: string): ArchitectRestartState | null;
   recordArchitectStop(repoRoot: string, taskSlug: string, sessionId: string): Promise<void>;
   recordRouteDelivered(repoRoot: string, taskSlug: string, message: VcmRoleMessage): Promise<void>;
   recordRouteAccepted(repoRoot: string, taskSlug: string, message: VcmRoleMessage): Promise<void>;
@@ -55,8 +61,9 @@ interface PendingArchitectRestart {
   deliveredMessageId?: string;
   acceptedMessageId?: string;
   gateAccepted: boolean;
-  executing: boolean;
+  status: ArchitectRestartStatus;
   memoryCandidatePath?: string;
+  blocker?: ArchitectRestartBlocker;
 }
 
 export function createArchitectRestartService(deps: ArchitectRestartServiceDeps): ArchitectRestartService {
@@ -66,42 +73,41 @@ export function createArchitectRestartService(deps: ArchitectRestartServiceDeps)
     async schedule(repoRoot, taskSlug) {
       const session = await requireRunningArchitect(repoRoot, taskSlug);
       await requireCompletePlan(repoRoot, taskSlug);
-      const memoryCandidatePath = (await deps.appSettings.getPreferences()).autoMemoryEnabled
-        ? ARCHITECT_PLANNING_MEMORY_CANDIDATE_PATH
-        : undefined;
-      const task = await deps.taskService.loadTask(repoRoot, taskSlug);
-      const candidatePath = resolveRepoPath(
-        getTaskRuntimeRepoRoot(task),
-        ARCHITECT_PLANNING_MEMORY_CANDIDATE_PATH
-      );
-      if (deps.fs.removePath) {
-        await deps.fs.removePath(candidatePath, { force: true });
-      } else if (await deps.fs.pathExists(candidatePath)) {
-        await deps.fs.writeText(candidatePath, "");
-      }
       const key = taskKey(repoRoot, taskSlug);
       const existing = pendingByTask.get(key);
       if (existing?.sessionId === session.id) {
-        existing.stopped = false;
-        existing.deliveredMessageId = undefined;
-        existing.acceptedMessageId = undefined;
-        existing.gateAccepted = false;
-        existing.executing = false;
-        existing.memoryCandidatePath = memoryCandidatePath;
+        if (existing.status === "blocked") {
+          existing.status = "pending";
+          existing.blocker = undefined;
+          await tryRestart(existing);
+          return {
+            taskSlug,
+            sessionId: session.id,
+            status: "scheduled",
+            ...(existing.memoryCandidatePath
+              ? { memoryCandidatePath: existing.memoryCandidatePath }
+              : {})
+          };
+        }
         return {
           taskSlug,
           sessionId: session.id,
-          status: "scheduled",
-          ...(memoryCandidatePath ? { memoryCandidatePath } : {})
+          status: "already_scheduled",
+          ...(existing.memoryCandidatePath
+            ? { memoryCandidatePath: existing.memoryCandidatePath }
+            : {})
         };
       }
+      const memoryCandidatePath = (await deps.appSettings.getPreferences()).autoMemoryEnabled
+        ? ARCHITECT_PLANNING_MEMORY_CANDIDATE_PATH
+        : undefined;
       pendingByTask.set(key, {
         repoRoot,
         taskSlug,
         sessionId: session.id,
         stopped: false,
         gateAccepted: false,
-        executing: false,
+        status: "pending",
         memoryCandidatePath
       });
       return {
@@ -112,9 +118,25 @@ export function createArchitectRestartService(deps: ArchitectRestartServiceDeps)
       };
     },
 
+    getState(repoRoot, taskSlug) {
+      const pending = pendingByTask.get(taskKey(repoRoot, taskSlug));
+      if (!pending) {
+        return null;
+      }
+      return {
+        taskSlug: pending.taskSlug,
+        sessionId: pending.sessionId,
+        status: pending.status,
+        ...(pending.memoryCandidatePath
+          ? { memoryCandidatePath: pending.memoryCandidatePath }
+          : {}),
+        ...(pending.blocker ? { blocker: { ...pending.blocker } } : {})
+      };
+    },
+
     async recordArchitectStop(repoRoot, taskSlug, sessionId) {
       const pending = pendingByTask.get(taskKey(repoRoot, taskSlug));
-      if (!pending || pending.sessionId !== sessionId) {
+      if (!pending || pending.sessionId !== sessionId || pending.status === "blocked") {
         return;
       }
       pending.stopped = true;
@@ -126,7 +148,7 @@ export function createArchitectRestartService(deps: ArchitectRestartServiceDeps)
         return;
       }
       const pending = pendingByTask.get(taskKey(repoRoot, taskSlug));
-      if (!pending) {
+      if (!pending || pending.status === "blocked") {
         return;
       }
       pending.deliveredMessageId = message.id;
@@ -138,7 +160,7 @@ export function createArchitectRestartService(deps: ArchitectRestartServiceDeps)
         return;
       }
       const pending = pendingByTask.get(taskKey(repoRoot, taskSlug));
-      if (!pending) {
+      if (!pending || pending.status === "blocked") {
         return;
       }
       pending.acceptedMessageId = message.id;
@@ -147,7 +169,7 @@ export function createArchitectRestartService(deps: ArchitectRestartServiceDeps)
 
     async recordArchitectureGateDisposition(repoRoot, taskSlug, accepted) {
       const pending = pendingByTask.get(taskKey(repoRoot, taskSlug));
-      if (!pending) {
+      if (!pending || pending.status === "blocked") {
         return;
       }
       pending.gateAccepted = accepted;
@@ -188,7 +210,7 @@ export function createArchitectRestartService(deps: ArchitectRestartServiceDeps)
 
   async function tryRestart(pending: PendingArchitectRestart): Promise<void> {
     if (
-      pending.executing
+      pending.status !== "pending"
       || !pending.stopped
       || !pending.deliveredMessageId
       || pending.deliveredMessageId !== pending.acceptedMessageId
@@ -205,13 +227,27 @@ export function createArchitectRestartService(deps: ArchitectRestartServiceDeps)
     if (
       !session
       || session.id !== pending.sessionId
-      || session.status !== "running"
-      || session.activityStatus !== "idle"
     ) {
+      blockPending(pending, new VcmError({
+        code: "ARCHITECT_RESTART_SESSION_UNAVAILABLE",
+        message: "Architect restart is blocked because the scheduled Architect session no longer exists.",
+        statusCode: 409
+      }));
+      return;
+    }
+    if (session.status !== "running") {
+      blockPending(pending, new VcmError({
+        code: "ARCHITECT_RESTART_SESSION_NOT_RUNNING",
+        message: "Architect restart is blocked because the scheduled Architect session is not running.",
+        statusCode: 409
+      }));
+      return;
+    }
+    if (session.activityStatus !== "idle") {
       return;
     }
 
-    pending.executing = true;
+    pending.status = "executing";
     try {
       await requireCompletePlan(pending.repoRoot, pending.taskSlug);
       await requirePlanningMemoryCandidate(pending);
@@ -227,9 +263,19 @@ export function createArchitectRestartService(deps: ArchitectRestartServiceDeps)
         }
       );
       pendingByTask.delete(taskKey(pending.repoRoot, pending.taskSlug));
-    } catch {
-      pending.executing = false;
+    } catch (error) {
+      blockPending(pending, error);
     }
+  }
+
+  function blockPending(pending: PendingArchitectRestart, error: unknown): void {
+    const normalized = toVcmError(error);
+    pending.status = "blocked";
+    pending.blocker = {
+      code: normalized.code,
+      message: normalized.message,
+      blockedAt: new Date().toISOString()
+    };
   }
 
   async function requirePlanningMemoryCandidate(pending: PendingArchitectRestart): Promise<void> {

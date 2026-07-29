@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { CORE_VCM_ROLE_DEFINITIONS, REVIEWER_ROLE_DEFINITION, VCM_ROLE_DEFINITIONS } from "../../shared/constants.js";
 import type { TaskStatusReport } from "../../shared/types/api.js";
+import type { ArchitectRestartState } from "../../shared/types/architect-restart.js";
 import type { VcmOrchestrationState, VcmRoleMessage } from "../../shared/types/message.js";
 import type { CoreVcmRoleName, RoleDefinition, RoleName, VcmRoleName } from "../../shared/types/role.js";
 import type { VcmSessionRoundState } from "../../shared/types/round.js";
@@ -116,6 +117,7 @@ export function TaskWorkspace({
   const [events, setEvents] = useState<string[]>([]);
   const [orchestration, setOrchestration] = useState<VcmOrchestrationState | null>(null);
   const [workflowState, setWorkflowState] = useState<TaskWorkflowState | null>(null);
+  const [architectRestart, setArchitectRestart] = useState<ArchitectRestartState | null>(null);
   const [translationFeedStore, setTranslationFeedStore] = useState(() => createTranslationPanelFeedStore(task.taskSlug));
   const taskStatusSyncKeyRef = useRef("");
   const translationFeedCursorRef = useRef(1);
@@ -147,6 +149,7 @@ export function TaskWorkspace({
 
   const refresh = useCallback(async () => {
     const nextState = await apiClient.getTaskWorkspaceState(task.taskSlug);
+    setArchitectRestart(nextState.architectRestart);
     applyFetchedState(nextState.taskStatus, nextState.messages, nextState.orchestration, nextState.roundState, nextState.workflowState);
     clearPollError("Poll task workspace state");
     setError((current) => clearUiErrorForActions(current, ["Load task workspace state", "Poll task workspace state"]));
@@ -340,6 +343,14 @@ export function TaskWorkspace({
           onSelect={onActiveRoleChange}
         />
       </header>
+
+      {architectRestart?.status === "blocked" && architectRestart.blocker ? (
+        <div className="workspace-runtime-warning" role="alert">
+          <strong>Architect restart blocked</strong>
+          <span>{architectRestart.blocker.message}</span>
+          <code>{architectRestart.blocker.code}</code>
+        </div>
+      ) : null}
 
       <div className="workspace-grid">
         <div className="workspace-main">

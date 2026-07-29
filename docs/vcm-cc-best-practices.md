@@ -420,18 +420,22 @@ commits it. Architect waits for the worker, reviews its actual commit and
 evidence, and owns any correction.
 
 After completed planning and scaffold commits, Architect runs the
-`restart-architect` skill before writing its completed route to PM. VCM waits
-for normal Architect Stop and PM's actual acceptance of that route, then starts
-a fresh Architect session with the same launch settings and a short restoration
-system prompt. No restart occurs for incomplete planning, Debug/Diagnosis/docs
-work, StopFailure, or task close.
+`restart-architect` skill before writing its first completed route to PM. The
+request is task-level and idempotent: architecture-plan Gate revisions reuse
+the same pending restart. VCM waits for normal Architect Stop and PM's actual
+acceptance of the latest route, then starts a fresh Architect session with the
+same launch settings and a short restoration system prompt. No restart occurs
+for incomplete planning, Debug/Diagnosis/docs work, StopFailure, or task close.
 
 When Auto Memory is enabled, the restart request assigns an exact
-planning-session memory candidate path. Architect writes a provisional proposal
-there before routing. VCM keeps the old Session if the candidate is missing or
-malformed, then snapshots a valid candidate into the later Auto Memory run. The
-replacement Architect validates it against final task evidence; Harness
-Engineer makes the final keep, revise, or discard decision.
+task-level planning-session memory candidate path. Architect writes one
+provisional proposal there before routing. VCM never deletes or recreates that
+candidate during restart scheduling or Gate revision. It keeps the old Session
+if the candidate is missing or malformed, reports the blocked restart, and
+snapshots a valid candidate into the later Auto Memory run. The replacement
+Architect validates it against final task evidence; Harness Engineer makes the
+final keep, revise, or discard decision. Close Task removes the candidate with
+the task worktree.
 
 The active architecture plan should describe the full accepted task scope. It
 may include implementation order, but that order must not defer requested scope.

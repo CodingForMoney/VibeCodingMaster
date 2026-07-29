@@ -236,13 +236,14 @@ activity and is excluded from Round tracking. The frontend only displays state
 and invokes memory file, retry, or revert APIs.
 
 The planning Architect may be restarted before Final Acceptance. When Auto
-Memory is enabled, `architect-restart-service` assigns a task-local planning
+Memory is enabled, `architect-restart-service` assigns one task-local planning
 candidate path and refuses to replace that Session until a structurally valid
-proposal exists. `auto-memory-service` snapshots the candidate into the memory
-review run. The replacement Architect receives it while producing the final
-Architect proposal, and Harness Engineer receives it during consolidation.
-The planning candidate is never applied directly and raw Session transcripts
-are not imported into memory.
+proposal exists. Restart scheduling and Gate revisions never delete or recreate
+the candidate. `auto-memory-service` snapshots it into the memory review run.
+The replacement Architect receives it while producing the final Architect
+proposal, and Harness Engineer receives it during consolidation. The planning
+candidate is never applied directly, is removed with the task worktree at Close
+Task, and raw Session transcripts are not imported into memory.
 
 Auto Memory completion is bound to the SHA-256 hash of the current accepted
 `final-acceptance.md`. If that artifact changes, the next Review Task Harness
@@ -305,16 +306,19 @@ scaffold commit, ledger reconciliation, and build evidence.
 
 `architect-restart-service` owns the task-local, in-memory deferred restart
 between completed planning and later Architect work. The Architect schedules it
-through `.ai/tools/request-architect-restart` before writing the completed route
-to PM. The service keeps the current session through architecture-plan
-`request_changes` rounds and starts a fresh Architect session only after a
-normal Architect Stop, delivery of that Architect-to-PM message, PM's matching
-`UserPromptSubmit` confirmation, and an approved, disabled, not-required,
-skipped, or overridden architecture-plan Gate. It preserves the selected
-permission, model, and effort and launches Claude Code with a short
-`--append-system-prompt` that points to the accepted brief, evidence, plan,
-scaffold, and latest Gate report. It does not inject a user prompt or create an
-extra turn. StopFailure and task close never execute a pending restart.
+through `.ai/tools/request-architect-restart` before writing the first completed
+route to PM. Repeated requests from the same Architect Session are idempotent.
+The service keeps the current session and pending restart through
+architecture-plan `request_changes` rounds and starts a fresh Architect session
+only after a normal Architect Stop, delivery of the latest Architect-to-PM
+message, PM's matching `UserPromptSubmit` confirmation, and an approved,
+disabled, not-required, skipped, or overridden architecture-plan Gate. A failed
+restart prerequisite becomes a visible blocked state and is retried only by an
+explicit restart request. The service preserves the selected permission, model,
+and effort and launches Claude Code with a short `--append-system-prompt` that
+points to the accepted brief, evidence, plan, scaffold, and latest Gate report.
+It does not inject a user prompt or create an extra turn. StopFailure and task
+close never execute a pending restart.
 
 Each Gate Review request owns an immutable prompt, metadata record, and report
 under `.ai/vcm/gate-reviews/requests/`. After a report parses successfully, the

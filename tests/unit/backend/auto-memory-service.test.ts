@@ -149,6 +149,9 @@ describe("auto-memory-service", () => {
     await expect(readFile(planningCandidateSnapshot, "utf8")).resolves.toContain(
       "Planning discovered backend-owned lifecycle state."
     );
+    await expect(readFile(planningCandidatePath, "utf8")).resolves.toContain(
+      "Planning discovered backend-owned lifecycle state."
+    );
 
     const activeStatePath = path.join(context.taskRepoRoot, ".ai/vcm/memory-review/state.json");
     const legacyState = JSON.parse(await readFile(activeStatePath, "utf8")) as {

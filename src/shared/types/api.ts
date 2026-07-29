@@ -1,4 +1,5 @@
 import type { ArtifactSummary } from "./artifact.js";
+import type { ArchitectRestartState } from "./architect-restart.js";
 import type { HarnessBootstrapStatusReport, HarnessFeedbackStateReport, HarnessStatusReport } from "./harness.js";
 import type { AutoMemoryStateReport } from "./memory.js";
 import type { GatewayStatus } from "./gateway.js";
@@ -32,6 +33,7 @@ export interface TaskWorkspaceState {
   orchestration: VcmOrchestrationState;
   roundState: VcmSessionRoundState;
   workflowState: TaskWorkflowState;
+  architectRestart: ArchitectRestartState | null;
 }
 
 export interface ProjectRuntimeState {

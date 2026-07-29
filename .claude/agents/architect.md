@@ -133,9 +133,9 @@ when VCM explicitly assigns a memory proposal or candidate path, use
 
 #### Planning Completion
 
-- After the complete plan, scaffold, reconciliation, L0 evidence, and commits are ready, use the `restart-architect` skill before writing the completed Architect-to-PM route message.
-- If VCM returns a `memoryCandidatePath`, use `vcm-propose-memory` to write the planning-session memory candidate to that path before routing. Include only verified, durable, reusable project knowledge from planning; do not record task narrative, temporary state, unverified conclusions, or Harness rules.
-- After the required candidate is written, write the route message with both architecture artifacts and the plan, then end the turn. VCM keeps this session for any architecture-plan Gate revision and restarts it only after the Gate is accepted. Do not wait for or inspect the replacement session.
+- Before the first completed Architect-to-PM planning route, use the `restart-architect` skill after the complete plan, scaffold, reconciliation, L0 evidence, and commits are ready.
+- If VCM returns a `memoryCandidatePath`, ensure one planning-session memory candidate exists at that path before routing. Use `vcm-propose-memory` only when the candidate is absent. Include only verified, durable, reusable project knowledge from planning; do not record task narrative, temporary state, unverified conclusions, or Harness rules.
+- Gate revision rounds reuse the same pending restart and task-level candidate; do not recreate either one. Write the latest route message with both architecture artifacts and the plan, then end the turn. VCM restarts the session only after the Gate is accepted. Do not wait for or inspect the replacement session.
 
 ### Complete Task Planning
 

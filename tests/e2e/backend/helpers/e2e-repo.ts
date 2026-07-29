@@ -33,7 +33,12 @@ export async function createE2eRepo(): Promise<E2eRepo> {
     repoRoot,
     tempRoot,
     async cleanup() {
-      await fs.rm(tempRoot, { recursive: true, force: true });
+      await fs.rm(tempRoot, {
+        recursive: true,
+        force: true,
+        maxRetries: 5,
+        retryDelay: 20
+      });
     }
   };
 }
