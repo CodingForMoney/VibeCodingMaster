@@ -553,9 +553,15 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
         return true;
       }
       const report = await deps.fs.readText(state.retrospectiveReportPath);
+      const currentMemorySnapshot = await readRunMemorySet(
+        input.taskRepoRoot,
+        state.runId,
+        "before"
+      );
       const reportError = validateMemoryReviewReport(
         report,
-        state.drafts.map((draft) => draft.role)
+        state.drafts.map((draft) => draft.role),
+        hasSubstantiveMemory(currentMemorySnapshot)
       );
       if (reportError) {
         await failReview(
@@ -1123,6 +1129,13 @@ function hashMemorySet(memory: MemorySet): Record<string, string> {
     definition.path,
     sha256(memory[definition.path] ?? "")
   ]));
+}
+
+function hasSubstantiveMemory(memory: MemorySet): boolean {
+  return Object.values(memory).some((content) => {
+    const normalized = content.trim();
+    return Boolean(normalized && normalized !== "No accumulated project memory yet.");
+  });
 }
 
 function sameHashes(left: Record<string, string>, right: Record<string, string>): boolean {

@@ -68,17 +68,28 @@ function validateOperationBody(
       : body.length;
     const item = body.slice(itemStart, itemEnd).trim();
     const expectedPattern = operation === "Add"
-      ? /^Target:[ \t]*(shared|current-role)[ \t]*\nContent:[ \t]*(\S.*)[ \t]*\nEvidence:[ \t]*(\S.*)[ \t]*$/
+      ? /^Target:[ \t]*(shared|current-role)[ \t]*\nContent:[ \t]*(\S.*)[ \t]*\nReason:[ \t]*(\S.*)[ \t]*\nImpact if absent:[ \t]*(\S.*)[ \t]*\nDurable doc disposition:[ \t]*(memory|durable-doc|memory-reference)[ \t]*\nDurable doc path:[ \t]*(\S.*)[ \t]*\nEvidence:[ \t]*(\S.*)[ \t]*$/
       : operation === "Update"
-        ? /^Target:[ \t]*(shared|current-role)[ \t]*\nExisting:[ \t]*(\S.*)[ \t]*\nContent:[ \t]*(\S.*)[ \t]*\nEvidence:[ \t]*(\S.*)[ \t]*$/
+        ? /^Target:[ \t]*(shared|current-role)[ \t]*\nExisting:[ \t]*(\S.*)[ \t]*\nContent:[ \t]*(\S.*)[ \t]*\nReason:[ \t]*(\S.*)[ \t]*\nImpact if absent:[ \t]*(\S.*)[ \t]*\nDurable doc disposition:[ \t]*(memory|durable-doc|memory-reference)[ \t]*\nDurable doc path:[ \t]*(\S.*)[ \t]*\nEvidence:[ \t]*(\S.*)[ \t]*$/
         : /^Target:[ \t]*(shared|current-role)[ \t]*\nExisting:[ \t]*(\S.*)[ \t]*\nEvidence:[ \t]*(\S.*)[ \t]*$/;
-    if (!expectedPattern.test(item)) {
+    const fieldMatch = expectedPattern.exec(item);
+    if (!fieldMatch) {
       const fields = operation === "Add"
-        ? "Target, Content, and Evidence"
+        ? "Target, Content, Reason, Impact if absent, Durable doc disposition, Durable doc path, and Evidence"
         : operation === "Update"
-          ? "Target, Existing, Content, and Evidence"
+          ? "Target, Existing, Content, Reason, Impact if absent, Durable doc disposition, Durable doc path, and Evidence"
           : "Target, Existing, and Evidence";
       return `${operation} ${heading[0].trim()} must contain one-line ${fields} fields in that order`;
+    }
+    if (operation === "Add" || operation === "Update") {
+      const disposition = fieldMatch[operation === "Add" ? 5 : 6];
+      const durableDocPath = fieldMatch[operation === "Add" ? 6 : 7];
+      if (
+        (disposition === "memory" && durableDocPath !== "none")
+        || (disposition !== "memory" && durableDocPath === "none")
+      ) {
+        return `${operation} ${heading[0].trim()} must use Durable doc path: none only with Durable doc disposition: memory`;
+      }
     }
   }
   return itemHeadings.length;

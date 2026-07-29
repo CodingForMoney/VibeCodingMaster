@@ -284,6 +284,9 @@ async function writeHarnessRetrospective(ctx: MockClaudePromptContext): Promise<
             "### Proposal Dispositions",
             ...proposalRoles.map((role) => `- ${role}: no-change`),
             "",
+            "### Existing Memory Decisions",
+            "none",
+            "",
             "### Existing Memory Changes",
             "- retained: all verified entries",
             "- updated: shared lifecycle ownership",
@@ -306,7 +309,7 @@ async function writeHarnessRetrospective(ctx: MockClaudePromptContext): Promise<
 
 function matchMemoryProposalRoles(prompt: string): string[] {
   const block = prompt.split("### Proposal Dispositions\n", 2)[1]
-    ?.split("\n\n### Existing Memory Changes", 1)[0]
+    ?.split("\n\n### Existing Memory Decisions", 1)[0]
     ?.trim();
   if (!block) {
     return [];

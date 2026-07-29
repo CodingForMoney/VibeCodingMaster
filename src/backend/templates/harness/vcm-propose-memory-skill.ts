@@ -14,6 +14,12 @@ planning-session memory candidate and provides an exact path.
   evidence.
 - Target shared project knowledge to \`shared\`. Target knowledge used only by
   the current role to \`current-role\`.
+- For every add or update, explain why the memory is necessary, what future
+  impact its absence would have, and whether the knowledge belongs in memory,
+  a durable document, or a short memory reference to a durable document.
+  Use exactly \`memory\`, \`durable-doc\`, or \`memory-reference\`. Use
+  \`Durable doc path: none\` with \`memory\` and an actual path with either
+  durable-document disposition.
 - Do not record task narrative, temporary state, unverified conclusions, or
   Harness rules.
 - Do not edit handoff artifacts or route messages from this skill.
@@ -48,6 +54,10 @@ Decision: update
 ### Item 1
 Target: shared
 Content: <new memory entry>
+Reason: <why this must remain available across tasks>
+Impact if absent: <specific future role or task failure>
+Durable doc disposition: memory
+Durable doc path: none
 Evidence: <task artifact, code, or durable documentation>
 
 ## Update
@@ -55,6 +65,10 @@ Evidence: <task artifact, code, or durable documentation>
 Target: current-role
 Existing: <exact existing memory entry>
 Content: <replacement memory entry>
+Reason: <why the replacement must remain available across tasks>
+Impact if absent: <specific future role or task failure>
+Durable doc disposition: memory-reference
+Durable doc path: docs/ARCHITECTURE.md
 Evidence: <task artifact, code, or durable documentation>
 
 ## Remove

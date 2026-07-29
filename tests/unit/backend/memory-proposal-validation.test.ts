@@ -28,6 +28,10 @@ describe("memory-proposal-validation", () => {
       "### Item 1",
       "Target: shared",
       "Content: Backend hooks own lifecycle completion.",
+      "Reason: Workflow roles need the backend-owned completion rule across tasks.",
+      "Impact if absent: Roles may infer completion independently.",
+      "Durable doc disposition: memory",
+      "Durable doc path: none",
       "Evidence: src/backend/services/claude-hook-service.ts",
       "",
       "## Update",
@@ -35,6 +39,10 @@ describe("memory-proposal-validation", () => {
       "Target: current-role",
       "Existing: Inspect lifecycle state.",
       "Content: Verify lifecycle state against backend hooks.",
+      "Reason: The role must use the current lifecycle source of truth.",
+      "Impact if absent: The role may follow stale frontend state.",
+      "Durable doc disposition: memory-reference",
+      "Durable doc path: docs/ARCHITECTURE.md",
       "Evidence: .ai/vcm/handoffs/final-acceptance.md",
       "",
       "## Remove",
@@ -72,6 +80,10 @@ describe("memory-proposal-validation", () => {
       "### Item 1",
       "Target: shared",
       "Content: Backend hooks own lifecycle completion.",
+      "Reason: Workflow roles need the backend-owned completion rule across tasks.",
+      "Impact if absent: Roles may infer completion independently.",
+      "Durable doc disposition: memory",
+      "Durable doc path: none",
       "Evidence: src/backend/services/claude-hook-service.ts",
       "",
       "## Update",
@@ -81,6 +93,26 @@ describe("memory-proposal-validation", () => {
       "none",
       ""
     ].join("\n"))).toContain("uses Decision: no-change but contains a memory item");
+  });
+
+  it("rejects an add without necessity and durable-document analysis", () => {
+    expect(validateMemoryProposal([
+      "# Memory Proposal",
+      "Decision: update",
+      "",
+      "## Add",
+      "### Item 1",
+      "Target: shared",
+      "Content: Backend hooks own lifecycle completion.",
+      "Evidence: src/backend/services/claude-hook-service.ts",
+      "",
+      "## Update",
+      "none",
+      "",
+      "## Remove",
+      "none",
+      ""
+    ].join("\n"))).toContain("Reason, Impact if absent, Durable doc disposition");
   });
 
   it("rejects an extra legacy evidence section", () => {

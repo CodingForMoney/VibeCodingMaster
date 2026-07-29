@@ -499,12 +499,15 @@ Final Acceptance
 Memory proposal prompts sent to Project Manager, Architect, Coder, Tester, and
 an enabled Reviewer use their normal task sessions and participate in
 Round/Turn tracking. Each proposed add, update, or removal identifies its
-shared or current-role target and its supporting evidence. Harness Engineer
-first reviews every existing memory entry, then evaluates the proposals and
-records proposal dispositions plus retained, updated, and removed memory in the
-Retrospective report. VCM validates that report structure before applying the
-reviewed memory. Harness Engineer review and retrospective work remain tool role
-activity and do not participate in Round completion.
+shared or current-role target and its supporting evidence. Adds and updates
+also state why the memory is necessary, the impact of omitting it, and whether
+the knowledge belongs in memory or a durable document. Harness Engineer first
+reviews every existing memory entry, recording its retention reason, removal
+impact, and durable-document disposition, then evaluates the proposals and
+records the resulting changes in the Retrospective report. VCM validates that
+report structure before applying the reviewed memory. Harness Engineer review
+and retrospective work remain tool role activity and do not participate in
+Round completion.
 
 When Auto Memory is disabled, Review Task Harness does not collect proposals or
 ask Harness Engineer to update memory. When enabled, both automatic and manual

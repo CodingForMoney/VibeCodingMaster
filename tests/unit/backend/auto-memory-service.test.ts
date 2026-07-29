@@ -59,6 +59,15 @@ describe("auto-memory-service", () => {
 
   it("collects role drafts before retrospective and applies its reviewed memory", async () => {
     const context = await createContext(true);
+    const sharedMemoryHostPath = path.join(context.taskRepoRoot, "CLAUDE.md");
+    await writeFile(
+      sharedMemoryHostPath,
+      replaceVcmMemoryBlock(
+        await readFile(sharedMemoryHostPath, "utf8"),
+        "Lifecycle completion is inferred by each client.\n"
+      ),
+      "utf8"
+    );
     const planningCandidatePath = path.join(
       context.taskRepoRoot,
       ".ai/vcm/memory-review/candidates/architect/planning.md"
@@ -72,6 +81,10 @@ describe("auto-memory-service", () => {
       "### Item 1",
       "Target: shared",
       "Content: Planning discovered backend-owned lifecycle state.",
+      "Reason: Workflow roles need the lifecycle owner across future tasks.",
+      "Impact if absent: Roles may infer lifecycle completion independently.",
+      "Durable doc disposition: memory",
+      "Durable doc path: none",
       "Evidence: .ai/vcm/handoffs/architecture-evidence.md",
       "",
       "## Update",
@@ -469,6 +482,17 @@ function memoryReviewReport(roles: RoleName[]): string {
     "",
     "### Proposal Dispositions",
     ...roles.map((role) => `- ${role}: no-change`),
+    "",
+    "### Existing Memory Decisions",
+    "#### Item 1",
+    "Target: shared",
+    "Existing: Lifecycle completion is inferred by each client.",
+    "Decision: update",
+    "Reason: The lifecycle owner must match the current backend architecture.",
+    "Impact if removed: Roles may infer lifecycle completion independently.",
+    "Durable doc disposition: memory",
+    "Durable doc path: none",
+    "Evidence: src/backend/services/claude-hook-service.ts",
     "",
     "### Existing Memory Changes",
     "- retained: all verified entries",

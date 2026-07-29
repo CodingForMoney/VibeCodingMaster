@@ -214,11 +214,15 @@ roles submit proposals sequentially through `vcm-propose-memory`. Once every
 proposal is ready, `harness-feedback-service` starts one Task Harness
 Retrospective turn. Its conditional prompt assigns the proposal paths, current
 snapshot, reviewed output path, and planning candidate to Harness Engineer.
-Role drafts use structured per-item targets and evidence.
+Role drafts use structured per-item targets, evidence, necessity, absence
+impact, and durable-document disposition.
 Harness Engineer performs a full sweep of the current memory snapshot before
-evaluating those drafts, then writes both the reviewed memory set and the
-required `Memory Review` report block. That block records every role proposal
-disposition and summarizes retained, updated, and removed existing memory.
+evaluating those drafts. Every substantive existing entry receives a structured
+retain, update, remove, or move-to-durable-doc decision with its reason, removal
+impact, durable-document disposition, and evidence. Harness Engineer then writes
+both the reviewed memory set and the required `Memory Review` report block.
+That block records every role proposal disposition and summarizes retained,
+updated, and removed existing memory.
 On the same successful `Stop`, `auto-memory-service` validates both artifacts,
 replaces only the corresponding active-worktree memory block contents, and
 creates a dedicated Git commit containing the changed host files. Dirty memory

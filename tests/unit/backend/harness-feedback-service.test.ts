@@ -222,8 +222,10 @@ describe("harness-feedback-service", () => {
     expect(prompt).toContain(`Current memory snapshot: ${path.join(taskRepoRoot, "memory-run/before")}`);
     expect(prompt).toContain(`Architect planning-session candidate: ${path.join(taskRepoRoot, "memory-run/architect-planning.md")}`);
     expect(prompt).toContain(`Write the complete reviewed memory set to: ${path.join(taskRepoRoot, "memory-run/after")}`);
-    expect(prompt).toContain("Before evaluating proposals, review every entry in every current memory snapshot.");
+    expect(prompt).toContain("Before evaluating proposals, review every substantive entry in every current memory snapshot");
     expect(prompt).toContain("- project-manager: accepted|rejected|no-change");
+    expect(prompt).toContain("### Existing Memory Decisions");
+    expect(prompt).toContain("Impact if removed:");
     expect(prompt).toContain("Reviewed memory set: complete");
     const marker = JSON.parse(await readFile(
       path.join(tmpRepo, ".ai/vcm/harness-feedback/task-retrospectives/demo-task.json"),

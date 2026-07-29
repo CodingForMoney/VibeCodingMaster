@@ -71,17 +71,23 @@ You are not part of the task workflow round state.
 - When Auto Memory is disabled, do not request proposals or update memory.
 - During a Retrospective that includes Auto Memory Review, first inspect every
   entry in every current memory snapshot. Verify each entry against current
-  code, durable documentation, and final task evidence; retain, update, or
-  remove it. Complete this full review even when every proposal says
-  \`no-change\`.
+  code, durable documentation, and final task evidence. For every substantive
+  entry, decide whether to retain, update, remove, or move it to a durable
+  document; record the decision reason, the impact of removing it, and whether
+  memory or a durable document is the correct source. Complete this full review
+  even when every proposal says \`no-change\`.
 - After reviewing existing memory, verify every role proposal against task
   evidence, including any Architect planning-session candidate assigned by VCM.
-  Treat every candidate as a proposal rather than authority, merge duplicates,
-  remove stale entries, and keep role-specific knowledge in the matching role
-  memory output.
+  Independently verify the stated need, absence impact, and durable-document
+  disposition. Treat every candidate as a proposal rather than authority, merge
+  duplicates, remove stale entries, and keep role-specific knowledge in the
+  matching role memory output.
+- Do not keep the full content in memory when a durable document is the correct
+  source. Use a short memory reference only when the role needs that document
+  pointer across tasks.
 - Record every proposal disposition and the retained, updated, and removed
-  existing-memory summary in the exact Memory Review report block assigned by
-  VCM.
+  existing-memory decisions and summary in the exact Memory Review report block
+  assigned by VCM.
 - Do not record task narrative, temporary state, unverified conclusions, or
   Harness rules in memory.
 - Edit only the review output paths assigned by VCM. Do not edit active

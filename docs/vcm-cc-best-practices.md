@@ -654,11 +654,14 @@ workflow roles to submit evidence-backed proposals sequentially through
 `vcm-propose-memory`; the following Task Harness Retrospective asks Harness
 Engineer to consolidate them into shared and role-specific memory while
 reviewing the task. Every proposal item identifies its shared or current-role
-target and supporting evidence. Harness Engineer reviews every existing memory
-entry before evaluating proposals, then records proposal dispositions and
-retained, updated, and removed existing memory in a required report block.
-VCM validates that block before applying memory. Shared memory lives in the
-root `CLAUDE.md`
+target and supporting evidence. Adds and updates also state why the memory is
+necessary, the impact of omitting it, and whether the knowledge belongs in
+memory or a durable document. Harness Engineer reviews every existing memory
+entry before evaluating proposals and records why it should remain, what
+removing it would affect, and whether a durable document is the correct source.
+The required report block contains those decisions and the retained, updated,
+and removed summary. VCM validates that block before applying memory. Shared
+memory lives in the root `CLAUDE.md`
 `<VCM-memory>` block, while role memory lives in the matching
 `.claude/agents/*.md` block. VCM replaces only block contents and creates a
 dedicated commit in the active worktree. Drafts, snapshots, and review history
