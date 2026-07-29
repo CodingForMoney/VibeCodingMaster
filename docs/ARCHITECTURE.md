@@ -323,6 +323,13 @@ Gate Review service atomically publishes it to the gate's stable
 request-scoped report, while the Gate index and stable report paths remain the
 current-state interface.
 
+Code-producing flows run Tester validation and validation-adequacy review
+before code-diff review. The Gate Review service rejects code-diff when the
+Tester report is incomplete or when a required validation-adequacy decision is
+missing or stale. Code-diff input binds the committed implementation and test
+range, the current test report, and the validation-adequacy report, so later
+code or test changes invalidate earlier approval.
+
 ## Task Workflow State Ownership
 
 `task-workflow-service` stores PM-declared workflow context at

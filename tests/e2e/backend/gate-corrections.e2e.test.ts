@@ -89,6 +89,11 @@ describe("backend E2E Gate Review correction loops", () => {
       "# Coder Completion\n\nDecision: ready_for_review\n\nChanged Files: feature.txt\n",
       "utf8"
     );
+    await fs.writeFile(
+      path.join(task.worktreePath, ".ai/vcm/handoffs/test-report.md"),
+      validTestReport(task.taskSlug, "Feature behavior -> L2 -> current implementation -> pass."),
+      "utf8"
+    );
     await fs.writeFile(path.join(task.worktreePath, "feature.txt"), "surface workaround\n", "utf8");
     await git(task.worktreePath, "add", "feature.txt");
     await git(task.worktreePath, "commit", "-m", "implement feature");

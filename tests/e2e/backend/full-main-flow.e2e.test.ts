@@ -141,13 +141,7 @@ describe("backend E2E complete VCM flow with mock Claude Code", () => {
 
     env.mockRuntime.onPrompt("project-manager", "Coder complete. Commit ready.", async (ctx) => {
       await ctx.userPromptSubmit();
-      await ctx.appendTranscriptText("Coder result received.");
-      await ctx.stop();
-    });
-
-    env.mockRuntime.onPrompt("project-manager", /gate: code-diff[\s\S]*decision: approve/, async (ctx) => {
-      await ctx.userPromptSubmit();
-      await ctx.appendTranscriptText("Code diff gate approved. Routing to Tester.");
+      await ctx.appendTranscriptText("Coder result received. Routing to Tester.");
       await ctx.writeFile(".ai/vcm/handoffs/messages/project-manager-tester.md", [
         "---",
         "type: task",
@@ -162,7 +156,10 @@ describe("backend E2E complete VCM flow with mock Claude Code", () => {
     env.mockRuntime.onPrompt("tester", "Validate the complete mocked feature.", async (ctx) => {
       await ctx.userPromptSubmit();
       await ctx.appendTranscriptText("Tester validation passed.");
+      await ctx.writeFile("tests/feature.test.txt", "complete mocked feature test\n");
       await ctx.writeFile(".ai/vcm/handoffs/test-report.md", validTestReport());
+      await git(ctx.cwd, "add", "tests/feature.test.txt");
+      await git(ctx.cwd, "commit", "-m", "add mocked feature validation");
       await ctx.writeFile(".ai/vcm/handoffs/messages/tester-project-manager.md", [
         "---",
         "type: result",
@@ -183,7 +180,13 @@ describe("backend E2E complete VCM flow with mock Claude Code", () => {
 
     env.mockRuntime.onPrompt("project-manager", /gate: validation-adequacy[\s\S]*decision: approve/, async (ctx) => {
       await ctx.userPromptSubmit();
-      await ctx.appendTranscriptText("Validation gate approved. Final acceptance complete.");
+      await ctx.appendTranscriptText("Validation gate approved. Ready for code review.");
+      await ctx.stop();
+    });
+
+    env.mockRuntime.onPrompt("project-manager", /gate: code-diff[\s\S]*decision: approve/, async (ctx) => {
+      await ctx.userPromptSubmit();
+      await ctx.appendTranscriptText("Code diff gate approved. Final acceptance complete.");
       await ctx.writeFile(
         ".ai/vcm/handoffs/final-acceptance.md",
         acceptedFinalAcceptance(task.taskSlug)
@@ -209,14 +212,16 @@ describe("backend E2E complete VCM flow with mock Claude Code", () => {
     await waitForFile(path.join(task.worktreePath, "src/feature.txt"));
     await env.mockRuntime.waitForIdle();
 
-    await requestGateReview(env.app, task.taskSlug, "code-diff", { codeDiffSource: "coder" });
-    await waitForGate(env.app, task.taskSlug, "code-diff");
     await waitForFile(path.join(task.worktreePath, ".ai/vcm/handoffs/test-report.md"));
     await env.mockRuntime.waitForIdle();
     await waitFor(() => testerResultHandled);
 
     await requestGateReview(env.app, task.taskSlug, "validation-adequacy");
     await waitForGate(env.app, task.taskSlug, "validation-adequacy");
+    await env.mockRuntime.waitForIdle();
+
+    await requestGateReview(env.app, task.taskSlug, "code-diff", { codeDiffSource: "coder" });
+    await waitForGate(env.app, task.taskSlug, "code-diff");
     await waitFor(async () => {
       const content = await fs.readFile(
         path.join(task.worktreePath, ".ai/vcm/handoffs/final-acceptance.md"),
@@ -232,6 +237,7 @@ describe("backend E2E complete VCM flow with mock Claude Code", () => {
     expect(gateState.gates["architecture-plan"]).toMatchObject({ status: "completed", decision: "approve" });
     expect(gateState.gates["code-diff"]).toMatchObject({ status: "completed", decision: "approve" });
     expect(gateState.gates["validation-adequacy"]).toMatchObject({ status: "completed", decision: "approve" });
+    expect(gateState.gates["code-diff"].changedFiles).toContain("tests/feature.test.txt");
 
     await waitFor(async () => {
       const workspace = await getWorkspaceState(env.app, task.taskSlug);

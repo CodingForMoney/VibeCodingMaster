@@ -81,7 +81,7 @@ describe("createHarnessService", () => {
     expect(await fs.readText("/repo/.claude/skills/vcm-gate-review/SKILL.md")).toContain("name: vcm-gate-review");
     expect(await fs.readText("/repo/.claude/skills/vcm-gate-review/SKILL.md")).toContain(".ai/tools/request-gate-review");
     expect(await fs.readText("/repo/.claude/skills/vcm-gate-review/SKILL.md")).toContain("--source <coder|architect-debug|architect-diagnosis>");
-    expect(await fs.readText("/repo/.claude/skills/vcm-gate-review/SKILL.md")).toContain("before Validation-Only Flow completion");
+    expect(await fs.readText("/repo/.claude/skills/vcm-gate-review/SKILL.md")).toContain("Validation-Only Flow does not request code-diff");
     expect(await fs.readText("/repo/.claude/skills/vcm-architecture-interview/SKILL.md")).toContain("name: vcm-architecture-interview");
     expect(await fs.readText("/repo/.claude/skills/vcm-architecture-interview/SKILL.md")).toContain("During an active Architect Interview");
     expect(await fs.readText("/repo/.claude/skills/vcm-report-harness-issue/SKILL.md")).toContain("name: vcm-report-harness-issue");
@@ -124,7 +124,10 @@ describe("createHarnessService", () => {
     expect(projectManagerAgent).toContain("Do not require a branch-level final acceptance report");
     expect(projectManagerAgent).toContain("Tester returns `Test Result: fail` for a completed Architect Debug Mode implementation");
     expect(projectManagerAgent).toContain("If Tester returns `Test Result: incomplete`, route Tester again");
-    expect(projectManagerAgent).toContain("Never run validation-adequacy for `Test Result: incomplete`");
+    expect(projectManagerAgent).toContain("Never run either post-implementation Gate for `Test Result: incomplete`");
+    expect(projectManagerAgent).toContain("Coder implementation -> Tester validation -> validation-adequacy Gate -> code-diff Gate");
+    expect(projectManagerAgent).toContain("Architect Debug Mode -> Tester -> validation-adequacy Gate -> code-diff --source architect-debug");
+    expect(projectManagerAgent).toContain("Architecture Diagnosis Mode -> Tester -> validation-adequacy Gate -> code-diff --source architect-diagnosis");
     expect(projectManagerAgent.match(/\*\*Tester Continuation:/g)).toHaveLength(4);
     expect(projectManagerAgent).toContain("Architecture Diagnosis Mode must run before another Debug Mode fix or Coder dispatch");
     expect(projectManagerAgent).not.toContain("Tester reports `Test Result: fail` for the implementation for the second time");

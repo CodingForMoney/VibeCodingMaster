@@ -149,7 +149,10 @@ const SOURCE_ARTIFACTS: Record<GateReviewGate, string[]> = {
     ".ai/vcm/handoffs/test-report.md",
     "docs/TESTING.md"
   ],
-  "code-diff": []
+  "code-diff": [
+    ".ai/vcm/handoffs/test-report.md",
+    ".ai/vcm/gate-reviews/validation-adequacy-review.md"
+  ]
 };
 
 const CODE_DIFF_SOURCE_ARTIFACTS: Record<CodeDiffSource, string[]> = {
@@ -407,6 +410,40 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
           gate,
           record: index.gates[gate],
           message: validationReportError
+        };
+      }
+    }
+
+    if (gate === "code-diff") {
+      const prerequisiteError = await readCodeDiffPrerequisiteError(deps, context, index);
+      if (prerequisiteError) {
+        index = applyGateState(index, gate, {
+          status: "failed",
+          decision: undefined,
+          error: prerequisiteError,
+          exceptionReason: undefined,
+          requestId: undefined,
+          requestPath: undefined,
+          inputHash: undefined,
+          baseCommit: undefined,
+          headCommit: undefined,
+          commits: undefined,
+          changedFiles: undefined,
+          diffStat: undefined,
+          codeDiffSource,
+          codeDiffSources: codeDiffSource ? [codeDiffSource] : undefined,
+          requestedAt: undefined,
+          startedAt: undefined,
+          completedAt: now(),
+          callbackStatus: "not_sent",
+          callbackError: undefined
+        }, now(), true);
+        await saveIndex(deps.fs, context.taskRepoRoot, index);
+        return {
+          status: "failed_to_start",
+          gate,
+          record: index.gates[gate],
+          message: prerequisiteError
         };
       }
     }
@@ -1291,6 +1328,38 @@ async function readValidationReportError(
     + formatValidationArtifactFailure(check, content);
 }
 
+async function readCodeDiffPrerequisiteError(
+  deps: Pick<GateReviewServiceDeps, "fs" | "runner">,
+  context: ReviewContext,
+  index: GateReviewIndex
+): Promise<string | undefined> {
+  const reportError = await readValidationReportError(deps.fs, context.taskRepoRoot);
+  if (reportError) {
+    return "code-diff requires completed Tester validation. " + reportError;
+  }
+
+  const validationGate = index.gates["validation-adequacy"];
+  if (!validationGate.required) {
+    return undefined;
+  }
+  if (validationGate.status === "skipped" || validationGate.status === "overridden") {
+    return undefined;
+  }
+  if (validationGate.status !== "completed" || validationGate.decision !== "approve") {
+    return "code-diff requires the validation-adequacy Gate to complete successfully for the current Tester evidence.";
+  }
+
+  const currentValidationHash = await computeInputHash(
+    deps,
+    context.taskRepoRoot,
+    "validation-adequacy"
+  );
+  if (!validationGate.inputHash || validationGate.inputHash !== currentValidationHash) {
+    return "code-diff requires a current validation-adequacy approval; code or test evidence changed after the recorded approval.";
+  }
+  return undefined;
+}
+
 async function readArchitectureEvidenceError(
   fs: FileSystemAdapter,
   taskRepoRoot: string
@@ -1752,7 +1821,10 @@ function getSourceArtifacts(gate: GateReviewGate, codeDiffSources?: CodeDiffSour
   if (gate !== "code-diff") {
     return SOURCE_ARTIFACTS[gate];
   }
-  return [...new Set((codeDiffSources ?? []).flatMap((source) => CODE_DIFF_SOURCE_ARTIFACTS[source]))];
+  return [...new Set([
+    ...SOURCE_ARTIFACTS["code-diff"],
+    ...(codeDiffSources ?? []).flatMap((source) => CODE_DIFF_SOURCE_ARTIFACTS[source])
+  ])];
 }
 
 function resolveCodeDiffSources(

@@ -142,6 +142,12 @@ describe("backend E2E Gate Review with mock Claude Code", () => {
     await fs.writeFile(path.join(task.worktreePath, "feature.txt"), "hello gate diff\n", "utf8");
     await git(task.worktreePath, "add", "feature.txt");
     await git(task.worktreePath, "commit", "-m", "implement feature");
+    const staleCodeDiff = await requestGateReview(env.app, task.taskSlug, "code-diff", { codeDiffSource: "coder" });
+    expect(staleCodeDiff.status).toBe("failed_to_start");
+    expect(staleCodeDiff.message).toContain("current validation-adequacy approval");
+
+    expect((await requestGateReview(env.app, task.taskSlug, "validation-adequacy")).status).toBe("started");
+    await waitForGate(env.app, task.taskSlug, "validation-adequacy");
     const codeDiffStarted = await requestGateReview(env.app, task.taskSlug, "code-diff", { codeDiffSource: "coder" });
     expect(codeDiffStarted.status).toBe("started");
     await waitForGate(env.app, task.taskSlug, "code-diff");

@@ -418,12 +418,13 @@ The allowed branches are:
 - incomplete Coder work returns to Coder
 - completed Coder work with compile, typecheck, or L0/L1 failure evidence enters
   Architect Debug Branch
-- Coder `ready_for_review` advances to Code Diff Gate
+- Coder `ready_for_review` advances to Tester
 - Code Diff Gate `request_changes` enters Architect Debug Branch
 - Tester `fail` for the Coder implementation enters Architect Debug Branch
-- Tester `pass` advances to Validation Adequacy Gate
+- Tester `pass` advances to Validation Adequacy Gate and then Code Diff Gate
 - Validation Adequacy Gate `request_changes` returns to Tester and repeats the
   Gate after correction
+- Code Diff Gate `request_changes` enters Architect Debug Branch
 - Architect Docs Sync `synced` or `unchanged` advances to Final Acceptance
 - blocked docs sync remains at docs sync unless its evidence permits Architect
   Debug Branch, Architecture Diagnosis Branch, or a user decision
@@ -444,7 +445,8 @@ These branches produce the following record extensions:
   and docs-sync correction repeat the same responsible role
 - Architecture Plan Gate revision appends Architect and later another
   `architecture-plan` Gate event
-- Coder completion appends `code-diff` with source `coder`
+- Coder completion appends Tester, `validation-adequacy`, and then `code-diff`
+  with source `coder`
 - Coder failure, Code Diff Gate correction, Tester failure, or a permitted
   implementation correction during docs sync appends `architect-debug` /
   Architect
@@ -462,9 +464,9 @@ Coder follow-up appends:
 
 ```text
 code-change / coder
--> code-change / reviewer / code-diff / coder
 -> code-change / tester
 -> code-change / reviewer / validation-adequacy
+-> code-change / reviewer / code-diff / coder
 -> code-change / architect
 ```
 
@@ -477,9 +479,9 @@ Architect follow-up appends:
 code-change / architect
 -> code-change / reviewer / architecture-plan
 -> code-change / coder
--> code-change / reviewer / code-diff / coder
 -> code-change / tester
 -> code-change / reviewer / validation-adequacy
+-> code-change / reviewer / code-diff / coder
 -> code-change / architect
 ```
 
@@ -504,8 +506,9 @@ The shared Flow Record sequence is:
 
 ```text
 architect-debug / architect
--> architect-debug / reviewer / code-diff / architect-debug
 -> architect-debug / tester
+-> architect-debug / reviewer / validation-adequacy
+-> architect-debug / reviewer / code-diff / architect-debug
 ```
 
 Architect Debug is a standalone Flow when fixing an existing defect is the
@@ -516,33 +519,35 @@ implementation.
 
 The allowed branches are:
 
-- `local fix completed` advances to Debug Code Diff Gate
+- `local fix completed` advances to Debug Tester validation
 - `normal architecture plan required` enters Code-Change Flow at Architect
   Planning; when Debug is already a Code-Change Branch, its parent resumes at
   Architect Planning
 - `user clarification required` makes PM wait for the user; the next role
   dispatch is reviewed from the unchanged Flow Record
-- Debug Code Diff Gate `request_changes` returns to Architect Debug
+- Debug Validation Adequacy Gate `request_changes` returns to Tester
+- Debug Code Diff Gate `request_changes` returns to Architect Debug, then
+  repeats Tester and both Gates
 - Debug Tester `fail` in a standalone Flow switches to standalone Architecture
   Diagnosis Flow
 - Debug Tester `fail` in a Code-Change Branch replaces Architect Debug Branch
   with Architecture Diagnosis Branch while preserving the original Code-Change
   sequence
-- Debug Tester `pass` in a standalone Flow advances to Validation Adequacy Gate,
-  Architect Docs Sync, and Final Acceptance
-- Debug Tester `pass` in a Branch returns to the legal Code-Change continuation
-  path without branch-level docs sync or Final Acceptance
+- Debug Tester `pass` advances to Validation Adequacy Gate and Code Diff Gate
+- Debug Code Diff approval in a standalone Flow advances to Architect Docs Sync
+  and Final Acceptance
+- Debug Code Diff approval in a Branch returns to the legal Code-Change
+  continuation path without branch-level docs sync or Final Acceptance
 
 These branches produce the following record extensions:
 
-- Code Diff Gate revision appends Architect in `architect-debug` and later
-  another `code-diff` Gate event with source `architect-debug`
+- Code Diff Gate revision appends Architect in `architect-debug`, Tester, and
+  later both Gate events
 - `normal architecture plan required` appends `code-change` / Architect
 - Tester failure appends `architecture-diagnosis` / Architect
-- standalone Tester pass appends `validation-adequacy` Gate Review and then
-  Architect docs sync, both in `architect-debug`
-- Branch Tester pass appends the approved `code-change` return dispatch to Gate
-  Reviewer for `validation-adequacy`
+- standalone Tester pass appends `validation-adequacy` and `code-diff` Gate
+  Review and then Architect docs sync, all in `architect-debug`
+- Branch Code Diff approval appends the approved `code-change` return dispatch
 
 ### 11.3 Architecture Diagnosis Flow And Branch
 
@@ -556,8 +561,9 @@ The code-producing Flow Record sequence is:
 
 ```text
 architecture-diagnosis / architect
--> architecture-diagnosis / reviewer / code-diff / architect-diagnosis
 -> architecture-diagnosis / tester
+-> architecture-diagnosis / reviewer / validation-adequacy
+-> architecture-diagnosis / reviewer / code-diff / architect-diagnosis
 ```
 
 An analysis-only Diagnosis ends its role-dispatch sequence after Architect.
@@ -567,25 +573,29 @@ The allowed paths and branches are:
 - `analysis completed` in a standalone Flow completes from the diagnosis result
 - `analysis completed` in a Branch returns to the legal Code-Change
   continuation path
-- `diagnosis implementation completed` advances to Diagnosis Code Diff Gate
+- `diagnosis implementation completed` advances to Diagnosis Tester validation
 - `user clarification required` makes PM wait for the user; the next role
   dispatch is reviewed from the unchanged Flow Record
-- Diagnosis Code Diff Gate `request_changes` returns to Architecture Diagnosis
+- Diagnosis Validation Adequacy Gate `request_changes` returns to Tester
+- Diagnosis Code Diff Gate `request_changes` returns to Architecture Diagnosis,
+  then repeats Tester and both Gates
 - Diagnosis Tester `fail` pauses the workflow and reports to the user
-- Diagnosis Tester `pass` in a standalone code-producing Flow advances to
-  Validation Adequacy Gate, Architect Docs Sync, and Final Acceptance
-- Diagnosis Tester `pass` in a code-producing Branch returns to the legal
+- Diagnosis Tester `pass` advances to Validation Adequacy Gate and Code Diff Gate
+- Diagnosis Code Diff approval in a standalone code-producing Flow advances to
+  Architect Docs Sync and Final Acceptance
+- Diagnosis Code Diff approval in a code-producing Branch returns to the legal
   Code-Change continuation path without branch-level docs sync or Final
   Acceptance
 
 These paths produce the following record extensions:
 
-- Code Diff Gate revision appends Architect in `architecture-diagnosis` and
-  later another `code-diff` Gate event with source `architect-diagnosis`
-- standalone code-producing Tester pass appends `validation-adequacy` Gate
-  Review and then Architect docs sync, both in `architecture-diagnosis`
-- code-producing Branch Tester pass appends the approved `code-change` return
-  dispatch to Reviewer for `validation-adequacy`
+- Code Diff Gate revision appends Architect in `architecture-diagnosis`, Tester,
+  and later both Gate events
+- standalone code-producing Tester pass appends `validation-adequacy` and
+  `code-diff` Gate Review and then Architect docs sync, all in
+  `architecture-diagnosis`
+- code-producing Branch Code Diff approval appends the approved `code-change`
+  return dispatch
 - analysis-only Branch completion appends the approved `code-change` return
   dispatch to Architect
 - Tester failure and user waiting append nothing

@@ -6,7 +6,7 @@ import { createNodeFileSystemAdapter } from "../../../src/backend/adapters/files
 import type { CommandResult, CommandRunner, CommandRunnerOptions } from "../../../src/backend/adapters/command-runner.js";
 import type { TerminalRuntime } from "../../../src/backend/runtime/terminal-runtime.js";
 import { createGateReviewService } from "../../../src/backend/services/gate-review-service.js";
-import type { GateReviewGate } from "../../../src/shared/types/gate-review.js";
+import type { CodeDiffSource, GateReviewGate } from "../../../src/shared/types/gate-review.js";
 import type { RoleSessionRecord } from "../../../src/shared/types/session.js";
 import type { TaskRecord } from "../../../src/shared/types/task.js";
 
@@ -560,11 +560,118 @@ describe("gate-review-service", () => {
     expect(prompt).toContain("Code sources: coder");
     expect(prompt).toContain("Complete every Code Diff Analysis field");
     expect(prompt).toContain("- .ai/vcm/handoffs/coder-completion.md");
-    expect(prompt).not.toContain("- .ai/vcm/handoffs/test-report.md");
+    expect(prompt).toContain("- .ai/vcm/handoffs/test-report.md");
+    expect(prompt).toContain("- .ai/vcm/gate-reviews/validation-adequacy-review.md");
     expect(prompt).toContain("Base commit: base-sha");
     expect(prompt).toContain("Head commit: head-sha");
     expect(prompt).toContain("- abc1234 implement route");
     expect(runnerCalls.some((call) => call.args.join(" ") === "diff --binary --find-renames base-sha..head-sha")).toBe(true);
+  });
+
+  it.each<CodeDiffSource>(["coder", "architect-debug", "architect-diagnosis"])(
+    "does not start %s code-diff before Tester writes a terminal test report",
+    async (codeDiffSource) => {
+      tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-gate-review-code-diff-no-test-report-"));
+      await writeHarnessFiles(tmpRepo);
+      await rm(path.join(taskWorktree(tmpRepo), ".ai/vcm/handoffs/test-report.md"), { force: true });
+      const sessionStarts: string[] = [];
+      const service = createGateReviewService({
+        fs: createNodeFileSystemAdapter(),
+        runner: createRunner(tmpRepo, []),
+        runtime: createRuntime(tmpRepo, []),
+        projectService: createProjectService(),
+        taskService: createTaskService(tmpRepo),
+        appSettings: createAppSettings(["code-diff"]),
+        sessionService: createSessionService(sessionStarts),
+        roundService: createRoundService()
+      });
+
+      const result = await service.requestReviewGate(tmpRepo, "demo-task", "code-diff", {
+        codeDiffSource
+      });
+
+      expect(result.status).toBe("failed_to_start");
+      expect(result.message).toContain("code-diff requires completed Tester validation");
+      expect(result.message).toContain("test-report.md is incomplete");
+      expect(sessionStarts).toEqual([]);
+    }
+  );
+
+  it("requires current validation-adequacy approval before code-diff when that gate is enabled", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-gate-review-code-diff-validation-order-"));
+    await writeHarnessFiles(tmpRepo);
+    const runner = createRunner(tmpRepo, [], {
+      "rev-parse HEAD": ({ cwd }) => cwd === tmpRepo ? "base-sha" : "head-sha",
+      "merge-base --is-ancestor base-sha head-sha": "",
+      "log --oneline --reverse base-sha..head-sha": "abc1234 implement route\nbcd2345 add tests",
+      "diff --name-only --find-renames base-sha..head-sha": "src/feature.ts\ntests/feature.test.ts",
+      "diff --stat --find-renames base-sha..head-sha": " 2 files changed",
+      "diff --binary --find-renames base-sha..head-sha": "diff --git a/src/feature.ts b/src/feature.ts\n"
+    });
+    const service = createGateReviewService({
+      fs: createNodeFileSystemAdapter(),
+      runner,
+      runtime: createRuntime(tmpRepo, [], "approve"),
+      projectService: createProjectService(),
+      taskService: createTaskService(tmpRepo),
+      appSettings: createAppSettings(["validation-adequacy", "code-diff"]),
+      sessionService: createSessionService(),
+      roundService: createRoundService(),
+      reportPollIntervalMs: 5
+    });
+
+    const premature = await service.requestReviewGate(tmpRepo, "demo-task", "code-diff", {
+      codeDiffSource: "coder"
+    });
+    expect(premature.status).toBe("failed_to_start");
+    expect(premature.message).toContain("validation-adequacy Gate to complete successfully");
+
+    expect((await service.requestReviewGate(tmpRepo, "demo-task", "validation-adequacy")).status).toBe("started");
+    await waitFor(async () => {
+      const record = (await service.getState(tmpRepo!, "demo-task")).gates["validation-adequacy"];
+      return record.status === "completed" && record.decision === "approve";
+    });
+
+    expect((await service.requestReviewGate(tmpRepo, "demo-task", "code-diff", {
+      codeDiffSource: "coder"
+    })).status).toBe("started");
+    await waitFor(async () => {
+      const record = (await service.getState(tmpRepo!, "demo-task")).gates["code-diff"];
+      return record.status === "completed" && record.decision === "approve";
+    });
+  });
+
+  it("rejects code-diff when Tester evidence changes after validation-adequacy approval", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-gate-review-code-diff-stale-validation-"));
+    await writeHarnessFiles(tmpRepo);
+    const service = createGateReviewService({
+      fs: createNodeFileSystemAdapter(),
+      runner: createRunner(tmpRepo, []),
+      runtime: createRuntime(tmpRepo, [], "approve"),
+      projectService: createProjectService(),
+      taskService: createTaskService(tmpRepo),
+      appSettings: createAppSettings(["validation-adequacy", "code-diff"]),
+      sessionService: createSessionService(),
+      roundService: createRoundService(),
+      reportPollIntervalMs: 5
+    });
+
+    expect((await service.requestReviewGate(tmpRepo, "demo-task", "validation-adequacy")).status).toBe("started");
+    await waitFor(async () => {
+      const record = (await service.getState(tmpRepo!, "demo-task")).gates["validation-adequacy"];
+      return record.status === "completed" && record.decision === "approve";
+    });
+    await writeFile(
+      path.join(taskWorktree(tmpRepo), ".ai/vcm/handoffs/test-report.md"),
+      validTestReport().replace("npm test -- feature.test.ts: pass.", "npm test -- feature.test.ts --runInBand: pass."),
+      "utf8"
+    );
+
+    const result = await service.requestReviewGate(tmpRepo, "demo-task", "code-diff", {
+      codeDiffSource: "coder"
+    });
+    expect(result.status).toBe("failed_to_start");
+    expect(result.message).toContain("current validation-adequacy approval");
   });
 
   it("fails code-diff start when the worktree has uncommitted changes", async () => {
@@ -800,6 +907,7 @@ async function writeHarnessFiles(repoRoot: string): Promise<void> {
     "utf8"
   );
   await writeFile(path.join(taskRepoRoot, ".ai/vcm/handoffs/architecture-plan.md"), "# Architecture Plan\n", "utf8");
+  await writeFile(path.join(taskRepoRoot, ".ai/vcm/handoffs/test-report.md"), validTestReport(), "utf8");
 }
 
 function validArchitectureBrief(): string {

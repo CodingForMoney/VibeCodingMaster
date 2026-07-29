@@ -208,10 +208,12 @@ convert the result to \`pass\` or independently accept the risk.
 
 ## Code Diff Gate
 
-Read \`.claude/agents/coder.md\` and \`docs/CODING_STANDARDS.md\`; use
-architect/tester definitions only to understand implementation and test
-responsibility boundaries. Review every commit in the range named by VCM and
-nothing outside that range.
+Read \`.claude/agents/coder.md\`, \`.claude/agents/tester.md\`,
+\`.ai/vcm/handoffs/test-report.md\`, the current validation-adequacy Gate report,
+and \`docs/CODING_STANDARDS.md\`; use the architect definition to understand
+implementation responsibility boundaries. Code-diff runs only after Tester
+validation and the current validation-adequacy disposition. Review every commit
+in the range named by VCM and nothing outside that range.
 
 Use every code source and evidence artifact named in the VCM prompt. A source
 chain means the range contains the original implementation and later corrective
@@ -262,6 +264,11 @@ paths, debug/task-only artifacts, \`VCM:CODE\`, task-process comments or labels,
 and changes outside its governing evidence. Verify callable and public-surface
 changes against their callers, exports, compatibility obligations, generated
 context, and durable documentation.
+
+Use the completed test report and validation-adequacy disposition as execution
+evidence while independently deciding whether the implementation handles its
+required behavior and boundary cases. Do not repeat the validation-adequacy
+decision.
 
 Inspect changed baseline tests for the changed callable units and applicable
 branches. Request changes for weakened, deleted, skipped, fabricated, or
@@ -467,8 +474,8 @@ Use this skill at every project-manager Gate Review trigger point and whenever V
 ## Trigger Points
 
 - \`architecture-plan\`: after the user confirms \`.ai/vcm/handoffs/architecture-brief.md\` and architect writes \`.ai/vcm/handoffs/architecture-plan.md\`, before coder dispatch.
-- \`validation-adequacy\`: after tester writes a terminal \`Test Result: pass|fail\` that the active flow permits to reach the gate, before post-validation docs sync or final acceptance in a code-delivery flow, or before Validation-Only Flow completion. Never request this gate for \`Test Result: incomplete\`.
-- \`code-diff\`: after Coder returns \`Decision: ready_for_review\`, Architect Debug Mode completes a code fix, or Architecture Diagnosis Mode completes a code fix, before PM routes to Tester. Identify the source with \`--source coder\`, \`--source architect-debug\`, or \`--source architect-diagnosis\`.
+- \`validation-adequacy\`: after tester writes a terminal \`Test Result: pass|fail\` that the active flow permits to reach the gate. Never request this gate for \`Test Result: incomplete\`.
+- \`code-diff\`: after Tester completes and the current validation-adequacy Gate finishes successfully for a Coder implementation, Architect Debug fix, or Architecture Diagnosis fix. Identify the production-code source with \`--source coder\`, \`--source architect-debug\`, or \`--source architect-diagnosis\`. Validation-Only Flow does not request code-diff.
 
 ## Request
 
@@ -504,6 +511,7 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import subprocess
 import sys
 import urllib.error
@@ -532,7 +540,10 @@ SOURCE_ARTIFACTS = {
         ".ai/vcm/handoffs/test-report.md",
         "docs/TESTING.md",
     ],
-    "code-diff": [],
+    "code-diff": [
+        ".ai/vcm/handoffs/test-report.md",
+        ".ai/vcm/gate-reviews/validation-adequacy-review.md",
+    ],
 }
 CODE_DIFF_SOURCE_ARTIFACTS = {
     "coder": [
@@ -707,11 +718,14 @@ def code_diff_sources(gate_record: dict, source: str | None, code_diff: dict) ->
 def source_artifacts(gate: str, sources: list[str] | None) -> list[str]:
     if gate != "code-diff":
         return SOURCE_ARTIFACTS[gate]
-    return list(dict.fromkeys(
+    return list(dict.fromkeys([
+        *SOURCE_ARTIFACTS["code-diff"],
+        *(
         artifact
         for source in (sources or [])
         for artifact in CODE_DIFF_SOURCE_ARTIFACTS.get(source, [])
-    ))
+        ),
+    ]))
 
 
 def input_hash(root: Path, gate: str, sources: list[str] | None = None, gate_record=None) -> str:
@@ -789,6 +803,31 @@ def core_input_status(root: Path, gate: str) -> tuple[str, str] | None:
     if not path.read_text().strip():
         return (core_artifact, "empty")
     return (core_artifact, "ready")
+
+
+def code_diff_prerequisite_error(root: Path, index: dict) -> str | None:
+    report_path = root / ".ai/vcm/handoffs/test-report.md"
+    try:
+        report = report_path.read_text()
+    except OSError:
+        return "code-diff requires completed Tester validation. .ai/vcm/handoffs/test-report.md is missing."
+    result = re.search(r"^\\s*Test Result\\s*:\\s*(pass|fail|incomplete)\\s*$", report, re.IGNORECASE | re.MULTILINE)
+    if result is None:
+        return "code-diff requires completed Tester validation. Test Result must be exactly pass or fail."
+    if result.group(1).lower() == "incomplete":
+        return "code-diff requires completed Tester validation. Test Result is incomplete."
+
+    validation = index.get("gates", {}).get("validation-adequacy", {})
+    if not isinstance(validation, dict) or not validation.get("required", False):
+        return None
+    if validation.get("status") in ("skipped", "overridden"):
+        return None
+    if validation.get("status") != "completed" or validation.get("decision") != "approve":
+        return "code-diff requires the validation-adequacy Gate to complete successfully for the current Tester evidence."
+    current_hash = input_hash(root, "validation-adequacy")
+    if not validation.get("inputHash") or validation.get("inputHash") != current_hash:
+        return "code-diff requires a current validation-adequacy approval; code or test evidence changed after the recorded approval."
+    return None
 
 
 def request_id(gate: str) -> str:
@@ -886,6 +925,37 @@ def local_request(gate: str, source: str | None) -> int:
         write_json(index_path, index)
         print_result("not_required", gate=gate, message=f"{core_status[0]} is {core_status[1]}.")
         return 0
+
+    if gate == "code-diff":
+        prerequisite_error = code_diff_prerequisite_error(root, index)
+        if prerequisite_error:
+            gate_record = index["gates"].setdefault(gate, {})
+            gate_record.update({
+                "required": True,
+                "status": "failed",
+                "decision": None,
+                "error": prerequisite_error,
+                "exceptionReason": None,
+                "requestId": None,
+                "requestPath": None,
+                "inputHash": None,
+                "baseCommit": None,
+                "headCommit": None,
+                "commits": None,
+                "changedFiles": None,
+                "diffStat": None,
+                "requestedAt": None,
+                "startedAt": None,
+                "completedAt": now_iso(),
+                "callbackStatus": "not_sent",
+                "callbackError": None,
+                "updatedAt": now_iso(),
+            })
+            if index.get("activeGate") == gate:
+                index["activeGate"] = None
+            write_json(index_path, index)
+            print_result("failed_to_start", gate=gate, reason=prerequisite_error)
+            return 2
 
     gate_record = index["gates"].get(gate, {})
     code_diff = {}

@@ -329,8 +329,11 @@ Default code-change route:
 project-manager
   -> architect interview
   -> architect planning
+  -> architecture-plan Gate Review
   -> coder
   -> tester
+  -> validation-adequacy Gate Review
+  -> code-diff Gate Review
   -> architect docs sync
   -> project-manager final acceptance
 ```
@@ -339,11 +342,11 @@ Additional routes:
 
 - Architect Debug Flow or a code-producing Architecture Diagnosis Flow uses a
   complete code-delivery flow:
-  `project-manager -> architect mode -> code-diff Gate Review -> tester -> architect docs sync -> project-manager final acceptance`
+  `project-manager -> architect mode -> tester -> validation-adequacy Gate Review -> code-diff Gate Review -> architect docs sync -> project-manager final acceptance`
 - Architect Debug Branch or Architecture Diagnosis Branch suspends the parent
-  flow, records its resume point, runs the mode through code-diff Gate Review
-  and tester, then returns to that resume point without branch-level final
-  acceptance.
+  flow, records its resume point, runs the mode through tester,
+  validation-adequacy Gate Review, and code-diff Gate Review, then returns to
+  that resume point without branch-level final acceptance.
 - An analysis-only Architecture Diagnosis Flow completes from its diagnosis
   result without final acceptance.
 - Docs-Only Flow: `project-manager -> architect -> project-manager completion`
@@ -488,12 +491,16 @@ Input policy:
   missing or empty plan is `not_required`.
 - `validation-adequacy` uses `.ai/vcm/handoffs/test-report.md` as its core
   input. Missing or empty core input is `not_required`.
-- `code-diff` is triggered by PM after Coder `Decision: ready_for_review`, an
-  Architect Debug completed code fix, or an Architecture Diagnosis completed
-  code fix. PM supplies the matching `coder`, `architect-debug`, or
-  `architect-diagnosis` source. PM does not inspect commits; the tool reviews
-  committed inputs, returns `not_required` when there are no new commits, and
-  fails to start when the worktree has uncommitted changes.
+- `code-diff` is triggered only after Tester completes and the current
+  validation-adequacy Gate finishes successfully for a Coder implementation,
+  Architect Debug fix, or Architecture Diagnosis fix. PM supplies the matching
+  `coder`, `architect-debug`, or `architect-diagnosis` production-code source.
+  PM does not inspect commits; the tool reviews committed implementation and
+  test inputs, returns `not_required` when there are no new commits, and fails
+  to start when the worktree has uncommitted changes.
+- `code-diff` fails to start when `test-report.md` is incomplete or when a
+  required validation-adequacy decision is missing or stale. When
+  validation-adequacy is disabled, completed Tester evidence is still required.
 - When rejected code receives corrective commits from another source, code-diff
   retains the original base and source evidence and appends the corrective
   source. The next review covers the complete source chain and revised range.
@@ -503,7 +510,8 @@ Input policy:
 - Gates avoid duplicate review by comparing input hashes. Architecture review
   binds the confirmed brief, code evidence, and plan to current scaffold/code evidence; validation review binds the
   test report to current non-document code/test evidence and `docs/TESTING.md`;
-  code-diff review binds the selected commit range and diff.
+  code-diff review binds the selected commit range and diff, current test
+  report, and validation-adequacy report.
 
 Reviewer writes reports under:
 

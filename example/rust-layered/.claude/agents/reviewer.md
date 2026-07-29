@@ -225,10 +225,12 @@ convert the result to `pass` or independently accept the risk.
 
 ## Code Diff Gate
 
-Read `.claude/agents/coder.md` and `docs/CODING_STANDARDS.md`; use
-architect/tester definitions only to understand implementation and test
-responsibility boundaries. Review every commit in the range named by VCM and
-nothing outside that range.
+Read `.claude/agents/coder.md`, `.claude/agents/tester.md`,
+`.ai/vcm/handoffs/test-report.md`, the current validation-adequacy Gate report,
+and `docs/CODING_STANDARDS.md`; use the architect definition to understand
+implementation responsibility boundaries. Code-diff runs only after Tester
+validation and the current validation-adequacy disposition. Review every commit
+in the range named by VCM and nothing outside that range.
 
 Use every code source and evidence artifact named in the VCM prompt. A source
 chain means the range contains the original implementation and later corrective
@@ -279,6 +281,11 @@ paths, debug/task-only artifacts, `VCM:CODE`, task-process comments or labels,
 and changes outside its governing evidence. Verify callable and public-surface
 changes against their callers, exports, compatibility obligations, generated
 context, and durable documentation.
+
+Use the completed test report and validation-adequacy disposition as execution
+evidence while independently deciding whether the implementation handles its
+required behavior and boundary cases. Do not repeat the validation-adequacy
+decision.
 
 Inspect changed baseline tests for the changed callable units and applicable
 branches. Request changes for weakened, deleted, skipped, fabricated, or
