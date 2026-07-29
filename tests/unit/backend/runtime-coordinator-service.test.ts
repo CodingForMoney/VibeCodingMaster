@@ -155,13 +155,13 @@ describe("createRuntimeCoordinatorService", () => {
     expect(calls).toContain("memory-reconcile:auto");
   });
 
-  it("starts the automatic task retrospective after Auto Memory completes", async () => {
+  it("starts the automatic task retrospective after Auto Memory proposals are ready", async () => {
     const calls: string[] = [];
     const service = createCoordinator({
       calls,
       autoTaskHarnessReviewEnabled: true,
       roundStopped: true,
-      memoryReadiness: { ready: true, disposition: "completed" }
+      memoryReadiness: { ready: true, disposition: "reviewing" }
     });
 
     await service.reconcileProject("/repo", { taskSlug: "demo-task" });

@@ -651,8 +651,9 @@ automatically dispatch Harness Engineer or create a separate approval workflow.
 Auto Memory controls the entire automated memory workflow. When enabled, Review
 Task Harness after a normal stopped Round with valid Final Acceptance asks
 workflow roles to submit evidence-backed proposals sequentially through
-`vcm-propose-memory`; Harness Engineer consolidates them into shared and
-role-specific memory. Shared memory lives in the root `CLAUDE.md`
+`vcm-propose-memory`; the following Task Harness Retrospective asks Harness
+Engineer to consolidate them into shared and role-specific memory while
+reviewing the task. Shared memory lives in the root `CLAUDE.md`
 `<VCM-memory>` block, while role memory lives in the matching
 `.claude/agents/*.md` block. VCM replaces only block contents and creates a
 dedicated commit in the active worktree. Drafts, snapshots, and review history
@@ -669,14 +670,15 @@ run snapshots that candidate, presents it to the replacement Architect with the
 final task evidence, and includes it in Harness Engineer review. It is review
 input only and never active memory by itself.
 
-Task Harness Retrospective runs after the optional memory phase. The backend
+Task Harness Retrospective runs after optional memory proposal collection. The backend
 uses the current accepted `final-acceptance.md` hash as the ordering key. When
 Auto Memory is disabled, Harness Engineer does not request proposals or update
-memory. When enabled, pending, collecting, reviewing, and failed memory work
-delays retrospective analysis. Retrospective evidence includes the memory
-proposals, applied diff, and current memory. It reviews reusable harness
-problems exposed by the task, not whether the business feature itself is
-acceptable.
+memory. When enabled, pending, collecting, and failed memory work delay the
+retrospective; `reviewing` means proposals are ready. The single retrospective
+turn reviews reusable harness problems, pending Harness Feedback, memory
+proposals, the current memory snapshot, and the final task evidence. VCM applies
+the reviewed memory only after both the retrospective report and complete
+reviewed memory set are valid.
 
 ## 16. Final Acceptance
 

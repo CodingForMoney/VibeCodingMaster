@@ -236,7 +236,6 @@ export function registerHarnessRoutes(app: FastifyInstance, deps: HarnessRouteDe
     if (!memoryReadiness.ready) {
       return deps.harnessFeedbackService.getState(project.repoRoot, task.taskSlug);
     }
-    await deps.autoMemoryService.assertHarnessEngineerAvailable(task.worktreePath);
     return deps.harnessFeedbackService.startTaskRetrospective(project.repoRoot, {
       taskSlug: task.taskSlug,
       taskRepoRoot: task.worktreePath,

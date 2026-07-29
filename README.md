@@ -451,7 +451,7 @@ Use it to:
 - view and edit shared or role-specific VCM memory
 - review and revert memory changes recorded in the active task worktree
 - copy file paths for discussion
-- review task harness after post-task memory processing completes
+- review task harness and consolidate optional Auto Memory in one retrospective
 - inspect commit diffs for harness changes
 - merge task harness commits back to the connected repository branch when
   appropriate
@@ -467,7 +467,8 @@ files.
 Review Task Harness after Final Acceptance, Project Manager, Architect, Coder,
 Tester, and an enabled Reviewer submit proposals in sequence through
 `vcm-propose-memory`. Harness Engineer verifies and consolidates them before VCM
-applies the result. Roles cannot edit active memory directly.
+applies the result as part of the same Task Harness Retrospective. Roles cannot
+edit active memory directly.
 
 When Auto Memory is enabled, the planning Architect writes a provisional memory
 candidate before its post-planning Session restart. VCM snapshots that candidate
@@ -489,8 +490,10 @@ Final Acceptance
   -> Review Task Harness
   -> Snapshot Architect planning-session memory candidate, when present
   -> Workflow-role memory proposals, when Auto Memory is enabled
-  -> Harness Engineer memory review, when Auto Memory is enabled
   -> Task Harness Retrospective
+       -> Review pending Harness Feedback
+       -> Review Auto Memory proposals, when Auto Memory is enabled
+  -> Apply reviewed memory, when Auto Memory is enabled
 ```
 
 Memory proposal prompts sent to Project Manager, Architect, Coder, Tester, and
@@ -500,9 +503,9 @@ role activity and do not participate in Round completion.
 
 When Auto Memory is disabled, Review Task Harness does not collect proposals or
 ask Harness Engineer to update memory. When enabled, both automatic and manual
-review requests complete the memory phase before retrospective analysis. A
-failed memory review must be retried from Harness Studio before retrospective
-can continue.
+review requests collect proposals before starting the retrospective. A failed
+proposal collection or combined retrospective memory review must be retried
+from Harness Studio.
 
 ## Closing a Task
 

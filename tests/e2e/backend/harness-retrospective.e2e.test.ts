@@ -46,7 +46,7 @@ describe("backend E2E task harness retrospective with mock Claude Code", () => {
     expect(session.json()).toBeNull();
   });
 
-  it("applies reviewed role memory before starting Task Harness Retrospective", async () => {
+  it("reviews and applies role memory inside Task Harness Retrospective", async () => {
     const env = await createMockClaudeE2eApp();
     cleanups.push(() => env.close());
     const repo = await createE2eRepo();
@@ -74,15 +74,6 @@ describe("backend E2E task harness retrospective with mock Claude Code", () => {
     for (const role of ["architect", "coder", "tester"] as const) {
       env.mockRuntime.onPrompt(role, "[VCM Task Harness Review: Memory Proposal]", writeNoChangeMemoryDraft);
     }
-    env.mockRuntime.onPrompt("harness-engineer", "[VCM Task Harness Review: Memory Review]", async (ctx) => {
-      await ctx.userPromptSubmit();
-      const afterRoot = matchPromptPath(ctx.prompt, "Write the complete reviewed memory set to");
-      await ctx.writeAbsoluteFile(
-        path.join(afterRoot, "CLAUDE.md"),
-        "Backend hooks own lifecycle completion.\n"
-      );
-      await ctx.stop();
-    });
     env.mockRuntime.onPrompt("harness-engineer", "[VCM Task Harness Retrospective]", writeHarnessRetrospective);
 
     for (const role of ["project-manager", "architect", "coder", "tester"] as const) {
@@ -113,6 +104,19 @@ describe("backend E2E task harness retrospective with mock Claude Code", () => {
       url: `/api/projects/harness/memory?taskSlug=${task.taskSlug}`
     });
     expect(memoryBeforeRetrospective.json()).toMatchObject({
+      status: "reviewing",
+      runs: []
+    });
+    expect(env.mockRuntime.getWrites(harnessSession.id).join("\n")).not.toContain("[VCM Task Harness Retrospective]");
+
+    await env.deps.runtimeCoordinator.reconcileProject(repo.repoRoot, { taskSlug: task.taskSlug });
+    await env.mockRuntime.waitForIdle();
+
+    const completedMemory = await injectOk(env.app, {
+      method: "GET",
+      url: `/api/projects/harness/memory?taskSlug=${task.taskSlug}`
+    });
+    expect(completedMemory.json()).toMatchObject({
       status: "idle",
       runs: [expect.objectContaining({ status: "applied", trigger: "manual" })]
     });
@@ -120,10 +124,6 @@ describe("backend E2E task harness retrospective with mock Claude Code", () => {
       .resolves.toContain("Backend hooks own lifecycle completion.");
     await expect(git(task.worktreePath, "log", "-1", "--pretty=%s"))
       .resolves.toMatchObject({ stdout: "chore: update VCM memory\n" });
-    expect(env.mockRuntime.getWrites(harnessSession.id).join("\n")).not.toContain("[VCM Task Harness Retrospective]");
-
-    await env.deps.runtimeCoordinator.reconcileProject(repo.repoRoot, { taskSlug: task.taskSlug });
-    await env.mockRuntime.waitForIdle();
 
     const completedMemoryRound = await getWorkspaceState(env.app, task.taskSlug);
     expect(completedMemoryRound.roundState.status).toBe("stopped");
@@ -132,14 +132,14 @@ describe("backend E2E task harness retrospective with mock Claude Code", () => {
     expect(completedMemoryRound.roundState.activeRole).not.toBe("harness-engineer");
 
     const harnessWrites = env.mockRuntime.getWrites(harnessSession.id).join("\n");
-    expect(harnessWrites.indexOf("[VCM Task Harness Review: Memory Review]")).toBeGreaterThanOrEqual(0);
-    expect(harnessWrites.indexOf("[VCM Task Harness Retrospective]")).toBeGreaterThan(
-      harnessWrites.indexOf("[VCM Task Harness Review: Memory Review]")
-    );
+    expect(harnessWrites).not.toContain("[VCM Task Harness Review: Memory Review]");
+    expect(harnessWrites).toContain("[VCM Task Harness Retrospective]");
+    expect(harnessWrites).toContain("Auto Memory Review:");
+    expect(harnessWrites).toContain("Write the complete reviewed memory set to:");
     await expect(fs.readFile(
       path.join(repo.repoRoot, ".ai/vcm/harness-feedback/task-retrospectives", `${task.taskSlug}.md`),
       "utf8"
-    )).resolves.toContain("Memory review completed before retrospective.");
+    )).resolves.toContain("Memory reviewed during retrospective.");
   });
 
   it("starts Task Harness Retrospective directly when Auto Memory is disabled", async () => {
@@ -195,6 +195,8 @@ describe("backend E2E task harness retrospective with mock Claude Code", () => {
     expect(harnessWrites).toContain("[VCM Task Harness Retrospective]");
     expect(harnessWrites).not.toContain("[VCM Task Harness Review: Memory Proposal]");
     expect(harnessWrites).not.toContain("[VCM Task Harness Review: Memory Review]");
+    expect(harnessWrites).not.toContain("Auto Memory Review:");
+    expect(harnessWrites).not.toContain("Write the complete reviewed memory set to:");
     expect(harnessWrites).toContain(`- ${pendingFeedback[0]}`);
     expect(harnessWrites).toContain(`- ${pendingFeedback[1]}`);
     const memoryState = await injectOk(env.app, {
@@ -239,6 +241,16 @@ function createDeferred(): { promise: Promise<void>; resolve: () => void } {
 async function writeHarnessRetrospective(ctx: MockClaudePromptContext): Promise<void> {
   await ctx.userPromptSubmit();
   const resultPath = matchPromptPath(ctx.prompt, "Write the analysis to Result Path");
+  const reviewedMemoryPath = matchOptionalPromptPath(
+    ctx.prompt,
+    "Write the complete reviewed memory set to"
+  );
+  if (reviewedMemoryPath) {
+    await ctx.writeAbsoluteFile(
+      path.join(reviewedMemoryPath, "CLAUDE.md"),
+      "Backend hooks own lifecycle completion.\n"
+    );
+  }
   const pendingFeedback = matchPendingFeedbackPaths(ctx.prompt);
   const dispositions = pendingFeedback.map((feedbackPath) => `${feedbackPath}: confirmed`);
   await ctx.writeAbsoluteFile(
@@ -246,7 +258,9 @@ async function writeHarnessRetrospective(ctx: MockClaudePromptContext): Promise<
     [
       "# Task Harness Retrospective",
       "",
-      "Memory review completed before retrospective.",
+      reviewedMemoryPath
+        ? "Memory reviewed during retrospective."
+        : "Auto Memory disabled; no memory review requested.",
       "",
       "## Pending Feedback",
       dispositions.length > 0 ? dispositions.join("\n") : "none",
@@ -285,4 +299,8 @@ function matchPromptPath(prompt: string, field: string): string {
     throw new Error(`Missing ${field} in prompt:\n${prompt}`);
   }
   return matched;
+}
+
+function matchOptionalPromptPath(prompt: string, field: string): string | undefined {
+  return prompt.match(new RegExp(`^${field}:\\s*(.+)$`, "m"))?.[1]?.trim();
 }

@@ -210,17 +210,22 @@ data under `.ai/vcm/memory-review/`.
 
 After a normal stopped round has valid Final Acceptance, a manual or automatic
 Review Task Harness request may start the Auto Memory state machine. Workflow
-roles submit proposals sequentially through `vcm-propose-memory`, Harness
-Engineer writes the reviewed memory set, and the service replaces only the
-corresponding active-worktree memory block contents. It then creates a dedicated
-Git commit containing the changed host files. Dirty memory host files block the
-apply so unrelated edits cannot enter the memory commit. Active memory blocks
-are read-only to role turns. Proposal prompts run through the normal workflow-role
-sessions, so their `UserPromptSubmit`, `Stop`, and `StopFailure` hooks participate
-in Round/Turn tracking. Sequential proposals continue the post-acceptance Round,
-which settles to stopped after the last workflow-role proposal. Harness Engineer
-review is tool-role activity and is excluded from Round tracking. The frontend
-only displays state and invokes memory file, retry, or revert APIs.
+roles submit proposals sequentially through `vcm-propose-memory`. Once every
+proposal is ready, `harness-feedback-service` starts one Task Harness
+Retrospective turn. Its conditional prompt assigns the proposal paths, current
+snapshot, reviewed output path, and planning candidate to Harness Engineer.
+Harness Engineer writes both the retrospective report and reviewed memory set.
+On the same successful `Stop`, `auto-memory-service` validates both artifacts,
+replaces only the corresponding active-worktree memory block contents, and
+creates a dedicated Git commit containing the changed host files. Dirty memory
+host files block the apply so unrelated edits cannot enter the memory commit.
+Active memory blocks are read-only to role turns. Proposal prompts run through
+the normal workflow-role sessions, so their `UserPromptSubmit`, `Stop`, and
+`StopFailure` hooks participate in Round/Turn tracking. Sequential proposals
+continue the post-acceptance Round, which settles to stopped after the last
+workflow-role proposal. Harness Engineer retrospective work is tool-role
+activity and is excluded from Round tracking. The frontend only displays state
+and invokes memory file, retry, or revert APIs.
 
 The planning Architect may be restarted before Final Acceptance. When Auto
 Memory is enabled, `architect-restart-service` assigns a task-local planning
@@ -236,15 +241,18 @@ Auto Memory completion is bound to the SHA-256 hash of the current accepted
 request creates a new memory phase for the new acceptance evidence.
 `runtime-coordinator-service` and the manual Harness route use the same
 readiness policy. When Auto Memory is disabled, Review Task Harness skips all
-memory collection and updates. When enabled, pending, collecting, reviewing, or
-failed memory work delays retrospective analysis. The retrospective then
-includes memory proposals, applied memory diffs, and current memory in its task
-evidence.
+memory collection and updates. When enabled, pending, collecting, or failed
+memory work delays retrospective analysis; `reviewing` means proposals are
+ready and the retrospective may start. The retrospective reviews the proposals,
+current memory snapshot, task evidence, and pending Harness Feedback in one
+turn. Missing or invalid retrospective or memory output prevents completion and
+prevents partial memory application.
 
 Reusable harness feedback from `vcm-report-harness-issue` is a passive inbox.
 Harness Studio lets the user send one pending report to the active task's
-Harness Engineer for review. Reports are never auto-dispatched, removed after
-sending, or placed in a separate approval/apply state machine.
+Harness Engineer for review. Sending does not remove the report. Task Harness
+Retrospective assigns every pending report, records its disposition, and removes
+it only after the report contains that disposition.
 
 ## Turn Runtime Ownership
 

@@ -59,6 +59,7 @@ interface StoredMemoryReviewState {
   updatedAt: string;
   drafts: MemoryDraftState[];
   reviewPromptDispatchedAt?: string;
+  retrospectiveReportPath?: string;
   error?: string;
 }
 
@@ -104,10 +105,23 @@ export interface AutoMemoryService {
   updateFile(baseRepoRoot: string, taskRepoRoot: string, taskSlug: string, filePath: string, content: string): Promise<AutoMemoryStateReport>;
   revertRun(baseRepoRoot: string, taskRepoRoot: string, runId: string): Promise<AutoMemoryStateReport>;
   retryFailedReview(baseRepoRoot: string, taskRepoRoot: string): Promise<AutoMemoryStateReport>;
+  prepareTaskRetrospectiveReview(
+    taskRepoRoot: string,
+    retrospectiveReportPath: string
+  ): Promise<TaskRetrospectiveMemoryReviewContext | undefined>;
+  cancelTaskRetrospectiveReview(taskRepoRoot: string, runId: string): Promise<void>;
   isRoleMemoryTurn(taskRepoRoot: string, role: RoleName): Promise<boolean>;
   handleRoleHook(input: AutoMemoryRoleHookInput): Promise<boolean>;
   handleHarnessEngineerHook(input: AutoMemoryHarnessHookInput): Promise<boolean>;
   assertHarnessEngineerAvailable(taskRepoRoot: string): Promise<void>;
+}
+
+export interface TaskRetrospectiveMemoryReviewContext {
+  runId: string;
+  roleDraftsPath: string;
+  currentMemoryPath: string;
+  reviewedMemoryPath: string;
+  planningCandidatePath?: string;
 }
 
 export interface AutoMemoryRoleHookInput {
@@ -278,7 +292,6 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
       return getState(input.baseRepoRoot, input.taskRepoRoot);
     }
     if (active?.status === "reviewing") {
-      await dispatchHarnessReview(input.baseRepoRoot, input.taskRepoRoot, active);
       return getState(input.baseRepoRoot, input.taskRepoRoot);
     }
     if (active || !input.roundReady || !input.requestTrigger) {
@@ -355,6 +368,13 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
     const active = await loadActiveState(input.taskRepoRoot);
     if (active) {
       const disposition = active.status;
+      if (disposition === "reviewing") {
+        return {
+          ready: true,
+          disposition,
+          trigger: active.trigger
+        };
+      }
       return {
         ready: false,
         disposition,
@@ -371,8 +391,65 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
     return {
       ready: false,
       disposition: "pending",
-      reason: "Auto Memory must complete for this Final Acceptance before Task Harness Retrospective."
+      reason: "Auto Memory proposals must be collected before Task Harness Retrospective."
     };
+  }
+
+  async function prepareTaskRetrospectiveReview(
+    taskRepoRoot: string,
+    retrospectiveReportPath: string
+  ): Promise<TaskRetrospectiveMemoryReviewContext | undefined> {
+    if (!(await deps.appSettings.getPreferences()).autoMemoryEnabled) {
+      return undefined;
+    }
+    const state = await loadActiveState(taskRepoRoot);
+    if (!state) {
+      return undefined;
+    }
+    if (state.status !== "reviewing") {
+      throw new VcmError({
+        code: "AUTO_MEMORY_NOT_READY",
+        message: "Auto Memory proposals are not ready for Task Harness Retrospective.",
+        statusCode: 409,
+        hint: "Wait for every workflow role to finish its memory proposal, then retry Task Harness Retrospective."
+      });
+    }
+    if (state.reviewPromptDispatchedAt) {
+      throw new VcmError({
+        code: "AUTO_MEMORY_REVIEW_RUNNING",
+        message: "Task Harness Retrospective is already reviewing Auto Memory.",
+        statusCode: 409
+      });
+    }
+
+    const timestamp = now();
+    state.reviewPromptDispatchedAt = timestamp;
+    state.retrospectiveReportPath = retrospectiveReportPath;
+    state.updatedAt = timestamp;
+    await persistActiveState(taskRepoRoot, state);
+
+    const runRoot = resolveRepoPath(taskRepoRoot, `${MEMORY_REVIEW_RUNS_ROOT}/${state.runId}`);
+    const planningCandidatePath = await findPlanningCandidateSnapshot(taskRepoRoot, state.runId);
+    return {
+      runId: state.runId,
+      roleDraftsPath: path.join(runRoot, "drafts"),
+      currentMemoryPath: path.join(runRoot, "before"),
+      reviewedMemoryPath: path.join(runRoot, "after"),
+      ...(planningCandidatePath
+        ? { planningCandidatePath: resolveRepoPath(taskRepoRoot, planningCandidatePath) }
+        : {})
+    };
+  }
+
+  async function cancelTaskRetrospectiveReview(taskRepoRoot: string, runId: string): Promise<void> {
+    const state = await loadActiveState(taskRepoRoot);
+    if (!state || state.runId !== runId || state.status !== "reviewing") {
+      return;
+    }
+    delete state.reviewPromptDispatchedAt;
+    delete state.retrospectiveReportPath;
+    state.updatedAt = now();
+    await persistActiveState(taskRepoRoot, state);
   }
 
   async function isRoleMemoryTurn(taskRepoRoot: string, role: RoleName): Promise<boolean> {
@@ -428,7 +505,6 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
     state.status = "reviewing";
     await persistActiveState(input.taskRepoRoot, state);
     await updateRunStatus(input.taskRepoRoot, state.runId, "reviewing", state.updatedAt);
-    await dispatchHarnessReview(input.baseRepoRoot, input.taskRepoRoot, state);
     return true;
   }
 
@@ -451,10 +527,22 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
       return true;
     }
     if (input.eventName === "StopFailure") {
-      await failReview(input.taskRepoRoot, state, "Harness Engineer memory review turn failed.");
+      await failReview(input.taskRepoRoot, state, "Task Harness Retrospective memory review turn failed.");
       return true;
     }
     if (input.eventName === "Stop") {
+      if (
+        !state.retrospectiveReportPath
+        || !(await deps.fs.pathExists(state.retrospectiveReportPath))
+        || !(await deps.fs.readText(state.retrospectiveReportPath)).trim()
+      ) {
+        await failReview(
+          input.taskRepoRoot,
+          state,
+          "Task Harness Retrospective did not write the required retrospective report."
+        );
+        return true;
+      }
       await applyReviewedMemory(input.taskRepoRoot, state);
       return true;
     }
@@ -601,44 +689,6 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
       );
     } catch (error) {
       await failReview(taskRepoRoot, state, `Unable to start ${draft.role} memory draft: ${errorMessage(error)}`);
-    }
-  }
-
-  async function dispatchHarnessReview(baseRepoRoot: string, taskRepoRoot: string, state: StoredMemoryReviewState): Promise<void> {
-    if (state.status !== "reviewing" || state.reviewPromptDispatchedAt) {
-      return;
-    }
-    if (deps.isHarnessEngineerAvailable && !(await deps.isHarnessEngineerAvailable(baseRepoRoot))) {
-      return;
-    }
-    try {
-      const existing = await deps.sessionService.getRoleSession(baseRepoRoot, state.taskSlug, "harness-engineer");
-      if (existing?.activityStatus === "running") {
-        return;
-      }
-      const input = { cols: 120, rows: 32 };
-      const session = existing?.status === "running"
-        ? existing
-        : existing?.claudeSessionId
-          ? await deps.sessionService.resumeRoleSession(baseRepoRoot, state.taskSlug, "harness-engineer", input)
-          : await deps.sessionService.startRoleSession(baseRepoRoot, state.taskSlug, "harness-engineer", input);
-      if (session.status !== "running" || session.activityStatus === "running" || !deps.runtime.getSession(session.id)) {
-        return;
-      }
-      state.reviewPromptDispatchedAt = now();
-      state.updatedAt = state.reviewPromptDispatchedAt;
-      await persistActiveState(taskRepoRoot, state);
-      await submitTerminalInput(
-        deps.runtime,
-        session.id,
-        buildHarnessReviewPrompt(
-          taskRepoRoot,
-          state,
-          await findPlanningCandidateSnapshot(taskRepoRoot, state.runId)
-        )
-      );
-    } catch (error) {
-      await failReview(taskRepoRoot, state, `Unable to start Harness Engineer memory review: ${errorMessage(error)}`);
     }
   }
 
@@ -924,6 +974,8 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
     updateFile,
     revertRun,
     retryFailedReview,
+    prepareTaskRetrospectiveReview,
+    cancelTaskRetrospectiveReview,
     isRoleMemoryTurn,
     handleRoleHook,
     handleHarnessEngineerHook,
@@ -995,35 +1047,6 @@ function buildRoleDraftPrompt(
     ...prompt,
     "",
     "End the turn after writing the draft."
-  ].join("\n");
-}
-
-function buildHarnessReviewPrompt(
-  taskRepoRoot: string,
-  state: StoredMemoryReviewState,
-  planningCandidatePath?: string
-): string {
-  const runRoot = resolveRepoPath(taskRepoRoot, `${MEMORY_REVIEW_RUNS_ROOT}/${state.runId}`);
-  return [
-    "[VCM Task Harness Review: Memory Review]",
-    "",
-    "Auto Memory is enabled. Review the role proposals and task evidence, then produce the complete next memory set.",
-    `Task worktree: ${taskRepoRoot}`,
-    `Role drafts: ${path.join(runRoot, "drafts")}`,
-    `Current memory snapshot: ${path.join(runRoot, "before")}`,
-    ...(planningCandidatePath
-      ? [
-          `Architect planning-session candidate: ${resolveRepoPath(taskRepoRoot, planningCandidatePath)}`,
-          "Treat the planning candidate as an additional proposal, not authority. Verify it against final code, test, and acceptance evidence."
-        ]
-      : []),
-    `Write the complete reviewed memory set to: ${path.join(runRoot, "after")}`,
-    "",
-    "Each snapshot file contains only the matching <VCM-memory> block content, not the full host file.",
-    "Keep only verified, durable, reusable project knowledge. Merge duplicates, remove stale entries, and keep role-specific knowledge in the matching role file.",
-    "Do not record task narrative, temporary state, unverified conclusions, or Harness rules.",
-    "Do not edit product code, active harness files, active memory blocks, or review metadata.",
-    "All existing files already exist in the after directory. Edit those files in place and end the turn when review is complete."
   ].join("\n");
 }
 

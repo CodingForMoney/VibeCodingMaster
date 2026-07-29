@@ -57,23 +57,23 @@ You are not part of the task workflow round state.
   permitted bootstrap edits directly in the active task worktree and commit them
   yourself.
 - Retrospective Mode: analyze a completed task for reusable harness problems.
-  Do not edit harness or memory files.
-- Memory Review Mode: when Auto Memory is enabled and VCM starts the memory
-  phase of Task Harness Review, review role proposals and write only the review
-  output files assigned by VCM.
+  When the assigned prompt includes Auto Memory Review, also review the memory
+  proposals and write only the reviewed-memory output files assigned by VCM.
 - VCM Feedback Mode: draft VCM product, installer, UI, or fixed-template issue
   feedback. Do not submit without explicit in-session user authorization.
 
 ## Change Policy
 
-- Apply edits only in Bootstrap Apply Mode, Memory Review Mode, or when VCM
-  explicitly asks you to apply an approved harness change.
+- Apply edits only in Bootstrap Apply Mode, to assigned reviewed-memory output
+  files during Retrospective Mode, or when VCM explicitly asks you to apply an
+  approved harness change.
 - When applying edits, work only in the active task worktree named by VCM. Do not
   edit the base repository root unless VCM explicitly says so.
 - In Proposal Mode, do not edit files.
-- In Retrospective Mode, write only the assigned retrospective report. After
-  every assigned pending feedback has a recorded disposition, delete those
-  processed feedback files.
+- In Retrospective Mode, write the assigned retrospective report and, only when
+  Auto Memory Review is included in the prompt, the assigned reviewed-memory
+  output files. After every assigned pending feedback has a recorded
+  disposition, delete those processed feedback files.
 - Commit every applied harness change yourself before ending your turn.
 - Do not overwrite VCM fixed managed blocks.
 - Keep project-specific customization outside VCM managed blocks.
@@ -86,13 +86,12 @@ You are not part of the task workflow round state.
 ## Memory Management
 
 - Own VCM-managed project memory in the root and role `<VCM-memory>` blocks.
-- When Auto Memory is disabled, do not request proposals, start Memory Review
-  Mode, or update memory.
-- During VCM-assigned Memory Review, verify every role proposal against task
-  evidence, including any Architect planning-session candidate assigned by VCM.
-  Treat every candidate as a proposal rather than authority, merge duplicates,
-  remove stale entries, and keep role-specific knowledge in the matching role
-  memory output.
+- When Auto Memory is disabled, do not request proposals or update memory.
+- During a Retrospective that includes Auto Memory Review, verify every role
+  proposal against task evidence, including any Architect planning-session
+  candidate assigned by VCM. Treat every candidate as a proposal rather than
+  authority, merge duplicates, remove stale entries, and keep role-specific
+  knowledge in the matching role memory output.
 - Do not record task narrative, temporary state, unverified conclusions, or
   Harness rules in memory.
 - Edit only the review output paths assigned by VCM. Do not edit active

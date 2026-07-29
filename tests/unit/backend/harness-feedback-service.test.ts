@@ -138,6 +138,7 @@ describe("harness-feedback-service", () => {
     expect(writes.join("\n")).toContain("Pending Feedback:\nnone");
     expect(writes.join("\n")).toContain("Write the analysis to Result Path:");
     expect(writes.join("\n")).toContain(".ai/vcm/harness-feedback/task-retrospectives/demo-task.md");
+    expect(writes.join("\n")).not.toContain("Auto Memory Review:");
 
     const marker = JSON.parse(await readFile(
       path.join(tmpRepo, ".ai/vcm/harness-feedback/task-retrospectives/demo-task.json"),
@@ -146,9 +147,25 @@ describe("harness-feedback-service", () => {
     expect(marker).toMatchObject({
       taskSlug: "demo-task",
       trigger: "manual",
-      status: "triggered",
+      status: "running",
       analysisPath: ".ai/vcm/harness-feedback/task-retrospectives/demo-task.md"
     });
+
+    await writeFile(
+      path.join(tmpRepo, ".ai/vcm/harness-feedback/task-retrospectives/demo-task.md"),
+      "# Task Harness Retrospective\n\nComplete.\n",
+      "utf8"
+    );
+    await expect(service.handleTaskRetrospectiveHook(tmpRepo, {
+      taskSlug: "demo-task",
+      eventName: "Stop",
+      memoryReviewSucceeded: true
+    })).resolves.toBe(true);
+    const completedMarker = JSON.parse(await readFile(
+      path.join(tmpRepo, ".ai/vcm/harness-feedback/task-retrospectives/demo-task.json"),
+      "utf8"
+    ));
+    expect(completedMarker.status).toBe("completed");
 
     await expect(service.startTaskRetrospective(tmpRepo, {
       taskSlug: "demo-task",
@@ -156,6 +173,103 @@ describe("harness-feedback-service", () => {
       handoffDir: ".ai/vcm/handoffs",
       trigger: "manual"
     })).rejects.toThrow("already been triggered");
+  });
+
+  it("includes Auto Memory review in the same task retrospective turn", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-harness-retrospective-memory-"));
+    const taskRepoRoot = path.join(tmpRepo, ".claude/worktrees/demo-task");
+    await mkdir(path.join(taskRepoRoot, ".ai/vcm/handoffs"), { recursive: true });
+    await writeFile(
+      path.join(taskRepoRoot, ".ai/vcm/handoffs/final-acceptance.md"),
+      renderFinalAcceptance("accepted"),
+      "utf8"
+    );
+
+    const writes: string[] = [];
+    const service = createHarnessFeedbackService({
+      fs: createNodeFileSystemAdapter(),
+      runtime: createRuntime(writes),
+      sessionService: createSessionService(),
+      autoMemoryService: {
+        async prepareTaskRetrospectiveReview() {
+          return {
+            runId: "memory-run",
+            roleDraftsPath: path.join(taskRepoRoot, "memory-run/drafts"),
+            currentMemoryPath: path.join(taskRepoRoot, "memory-run/before"),
+            reviewedMemoryPath: path.join(taskRepoRoot, "memory-run/after"),
+            planningCandidatePath: path.join(taskRepoRoot, "memory-run/architect-planning.md")
+          };
+        },
+        async cancelTaskRetrospectiveReview() {
+          return undefined;
+        }
+      },
+      now: createClock()
+    });
+
+    await service.startTaskRetrospective(tmpRepo, {
+      taskSlug: "demo-task",
+      taskRepoRoot,
+      handoffDir: ".ai/vcm/handoffs",
+      trigger: "auto"
+    });
+
+    const prompt = writes.join("\n");
+    expect(prompt).toContain("[VCM Task Harness Retrospective]");
+    expect(prompt).toContain("Auto Memory Review:");
+    expect(prompt).toContain(`Role drafts: ${path.join(taskRepoRoot, "memory-run/drafts")}`);
+    expect(prompt).toContain(`Current memory snapshot: ${path.join(taskRepoRoot, "memory-run/before")}`);
+    expect(prompt).toContain(`Architect planning-session candidate: ${path.join(taskRepoRoot, "memory-run/architect-planning.md")}`);
+    expect(prompt).toContain(`Write the complete reviewed memory set to: ${path.join(taskRepoRoot, "memory-run/after")}`);
+    const marker = JSON.parse(await readFile(
+      path.join(tmpRepo, ".ai/vcm/harness-feedback/task-retrospectives/demo-task.json"),
+      "utf8"
+    ));
+    expect(marker).toMatchObject({ status: "running", memoryRunId: "memory-run" });
+  });
+
+  it("marks an incomplete retrospective failed and allows it to be started again", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-harness-retrospective-retry-"));
+    const taskRepoRoot = path.join(tmpRepo, ".claude/worktrees/demo-task");
+    await mkdir(path.join(taskRepoRoot, ".ai/vcm/handoffs"), { recursive: true });
+    await writeFile(
+      path.join(taskRepoRoot, ".ai/vcm/handoffs/final-acceptance.md"),
+      renderFinalAcceptance("accepted"),
+      "utf8"
+    );
+    const service = createHarnessFeedbackService({
+      fs: createNodeFileSystemAdapter(),
+      runtime: createRuntime([]),
+      sessionService: createSessionService(),
+      now: createClock()
+    });
+
+    await service.startTaskRetrospective(tmpRepo, {
+      taskSlug: "demo-task",
+      taskRepoRoot,
+      handoffDir: ".ai/vcm/handoffs",
+      trigger: "manual"
+    });
+    await service.handleTaskRetrospectiveHook(tmpRepo, {
+      taskSlug: "demo-task",
+      eventName: "Stop",
+      memoryReviewSucceeded: true
+    });
+    const failedMarker = JSON.parse(await readFile(
+      path.join(tmpRepo, ".ai/vcm/harness-feedback/task-retrospectives/demo-task.json"),
+      "utf8"
+    ));
+    expect(failedMarker).toMatchObject({
+      status: "failed",
+      error: "Harness Engineer did not write the required Task Harness Retrospective report."
+    });
+
+    await expect(service.startTaskRetrospective(tmpRepo, {
+      taskSlug: "demo-task",
+      taskRepoRoot,
+      handoffDir: ".ai/vcm/handoffs",
+      trigger: "manual"
+    })).resolves.toMatchObject({ version: 1 });
   });
 
   it("assigns every pending feedback file to Task Harness Retrospective", async () => {

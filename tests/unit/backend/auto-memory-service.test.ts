@@ -57,7 +57,7 @@ describe("auto-memory-service", () => {
     expect(reverted.runs[0].status).toBe("reverted");
   });
 
-  it("collects role drafts sequentially and applies Harness Engineer reviewed memory", async () => {
+  it("collects role drafts before retrospective and applies its reviewed memory", async () => {
     const context = await createContext(true);
     const planningCandidatePath = path.join(
       context.taskRepoRoot,
@@ -172,15 +172,35 @@ describe("auto-memory-service", () => {
     state = await context.service.getState(context.baseRepoRoot, context.taskRepoRoot);
     expect(state.status).toBe("reviewing");
     expect(context.terminalWrites.join("")).toContain(planningCandidateSnapshot);
-    expect(context.terminalWrites.join("")).toContain(
-      "Treat the planning candidate as an additional proposal, not authority."
+    expect(context.terminalWrites.join("")).not.toContain("[VCM Task Harness Review: Memory Review]");
+    await expect(context.service.getTaskRetrospectiveReadiness({
+      baseRepoRoot: context.baseRepoRoot,
+      taskRepoRoot: context.taskRepoRoot,
+      taskSlug: "demo",
+      handoffDir: ".ai/vcm/handoffs",
+      roundReady: true
+    })).resolves.toEqual({ ready: true, disposition: "reviewing", trigger: "manual" });
+    const retrospectiveReportPath = path.join(
+      context.baseRepoRoot,
+      ".ai/vcm/harness-feedback/task-retrospectives/demo.md"
     );
-    const reviewedSharedPath = path.join(
+    const memoryReview = await context.service.prepareTaskRetrospectiveReview(
       context.taskRepoRoot,
-      ".ai/vcm/memory-review/runs",
-      state.active!.runId,
-      "after/CLAUDE.md"
+      retrospectiveReportPath
     );
+    expect(memoryReview).toMatchObject({
+      runId: state.active!.runId,
+      planningCandidatePath: planningCandidateSnapshot
+    });
+    expect(memoryReview?.roleDraftsPath).toContain(`${state.active!.runId}/drafts`);
+    expect(memoryReview?.currentMemoryPath).toContain(`${state.active!.runId}/before`);
+    expect(memoryReview?.reviewedMemoryPath).toContain(`${state.active!.runId}/after`);
+    const reviewedSharedPath = path.join(
+      memoryReview!.reviewedMemoryPath,
+      "CLAUDE.md"
+    );
+    await mkdir(path.dirname(retrospectiveReportPath), { recursive: true });
+    await writeFile(retrospectiveReportPath, "# Task Harness Retrospective\n\nMemory approved.\n", "utf8");
     await writeFile(reviewedSharedPath, "Lifecycle completion is owned by backend hooks.\n", "utf8");
     await context.service.handleHarnessEngineerHook({
       baseRepoRoot: context.baseRepoRoot,
@@ -195,7 +215,7 @@ describe("auto-memory-service", () => {
     expect(state.runs[0].diff).toContain("Lifecycle completion is owned by backend hooks");
     expect(await readText(context.taskRepoRoot, "CLAUDE.md")).toContain("Lifecycle completion is owned by backend hooks");
     expect(context.gitCommits.at(-1)?.message).toBe("chore: update VCM memory");
-    expect(context.terminalWrites.some((entry) => entry.includes("[VCM Task Harness Review: Memory Review]"))).toBe(true);
+    expect(context.terminalWrites.some((entry) => entry.includes("[VCM Task Harness Review: Memory Review]"))).toBe(false);
     await expect(context.service.getTaskRetrospectiveReadiness({
       baseRepoRoot: context.baseRepoRoot,
       taskRepoRoot: context.taskRepoRoot,
@@ -218,7 +238,7 @@ describe("auto-memory-service", () => {
     })).resolves.toMatchObject({ ready: false, disposition: "pending" });
   });
 
-  it("does not apply Harness Engineer memory edits outside an active Memory Review", async () => {
+  it("does not apply Harness Engineer memory edits outside an active retrospective review", async () => {
     const context = await createContext(false);
     const current = await readText(context.taskRepoRoot, "CLAUDE.md");
     await writeFile(

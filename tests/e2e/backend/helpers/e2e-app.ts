@@ -130,11 +130,6 @@ export async function createMockClaudeE2eApp(options: MockClaudeE2eAppOptions = 
     },
     vcmVersion: readVcmPackageVersion(appRoot)
   });
-  const harnessFeedbackService = createHarnessFeedbackService({
-    fs: fsAdapter,
-    runtime: mockRuntime,
-    sessionService
-  });
   const autoMemoryService = createAutoMemoryService({
     fs: fsAdapter,
     git,
@@ -144,6 +139,12 @@ export async function createMockClaudeE2eApp(options: MockClaudeE2eAppOptions = 
     async isHarnessEngineerAvailable() {
       return true;
     }
+  });
+  const harnessFeedbackService = createHarnessFeedbackService({
+    fs: fsAdapter,
+    runtime: mockRuntime,
+    sessionService,
+    autoMemoryService
   });
   const commandDispatcher = createCommandDispatcher({
     runtime: mockRuntime,
@@ -285,6 +286,7 @@ export async function createMockClaudeE2eApp(options: MockClaudeE2eAppOptions = 
     runtime: mockRuntime,
     harnessService,
     autoMemoryService,
+    harnessFeedbackService,
     gatewayService,
     jobGuard: createJobGuardService(),
     translationWorkerService,

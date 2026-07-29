@@ -312,11 +312,6 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     runFixedInstaller: createScriptFixedHarnessInstaller(path.join(appRoot, "scripts/install-vcm-harness.mjs")),
     vcmVersion
   });
-  const harnessFeedbackService = createHarnessFeedbackService({
-    fs,
-    runtime,
-    sessionService
-  });
   const autoMemoryService = createAutoMemoryService({
     fs,
     git,
@@ -326,6 +321,12 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     async isHarnessEngineerAvailable() {
       return true;
     }
+  });
+  const harnessFeedbackService = createHarnessFeedbackService({
+    fs,
+    runtime,
+    sessionService,
+    autoMemoryService
   });
   const commandDispatcher = createCommandDispatcher({
     runtime,
@@ -452,6 +453,7 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     runtime,
     harnessService,
     autoMemoryService,
+    harnessFeedbackService,
     gatewayService,
     jobGuard: createJobGuardService(),
     translationWorkerService,

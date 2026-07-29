@@ -12,6 +12,7 @@ import type { TerminalRuntime } from "../runtime/terminal-runtime.js";
 import { submitTerminalInput } from "../runtime/terminal-submit.js";
 import type { AppSettingsService } from "./app-settings-service.js";
 import type { AutoMemoryService } from "./auto-memory-service.js";
+import type { HarnessFeedbackService } from "./harness-feedback-service.js";
 import type { HarnessService } from "./harness-service.js";
 import type { JobGuardService } from "./job-guard-service.js";
 import type { MessageService } from "./message-service.js";
@@ -68,7 +69,11 @@ export interface ClaudeHookServiceDeps {
   retrySetTimeout?: (callback: () => void, delayMs: number) => StopFailureRetryTimer;
   retryClearTimeout?: (timer: StopFailureRetryTimer) => void;
   harnessService?: Pick<HarnessService, "recordHarnessBootstrapHook">;
-  autoMemoryService?: Pick<AutoMemoryService, "isRoleMemoryTurn" | "handleRoleHook" | "handleHarnessEngineerHook">;
+  autoMemoryService?: Pick<
+    AutoMemoryService,
+    "isRoleMemoryTurn" | "handleRoleHook" | "handleHarnessEngineerHook" | "getState"
+  >;
+  harnessFeedbackService?: Pick<HarnessFeedbackService, "handleTaskRetrospectiveHook">;
   gatewayService?: Pick<GatewayService, "handlePmStop" | "handleRoleStopFailure">;
   jobGuard?: Pick<JobGuardService, "evaluateStop" | "notePromptSubmitted">;
   architectRestartService?: Pick<
@@ -200,7 +205,7 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
     if (!session) {
       return completedHookResult(input, eventName);
     }
-    const activeTask = deps.autoMemoryService
+    const activeTask = deps.autoMemoryService || deps.harnessFeedbackService
       ? (await deps.taskService.listTasks(context.project.repoRoot))
           .find((task) => task.cleanupStatus !== "cleaned" && (projectScoped || task.taskSlug === input.taskSlug))
       : undefined;
@@ -212,7 +217,23 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
           eventName
         })
       : false;
-    if (memoryHandled) {
+    const memoryState = activeTask && deps.autoMemoryService
+      ? await deps.autoMemoryService.getState(
+          context.project.repoRoot,
+          getTaskRuntimeRepoRoot(activeTask)
+        )
+      : undefined;
+    const retrospectiveHandled = activeTask
+      ? await deps.harnessFeedbackService?.handleTaskRetrospectiveHook(
+          context.project.repoRoot,
+          {
+            taskSlug: activeTask.taskSlug,
+            eventName,
+            memoryReviewSucceeded: memoryState?.status !== "failed"
+          }
+        )
+      : false;
+    if (memoryHandled || retrospectiveHandled) {
       return {
         ok: true,
         eventName,

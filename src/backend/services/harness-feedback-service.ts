@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import path from "node:path";
+import type { ClaudeHookEventName } from "../../shared/types/claude-hook.js";
 import type {
   HarnessFeedbackQueueItem,
   HarnessFeedbackStateReport,
@@ -11,12 +12,17 @@ import { resolveRepoPath, type FileSystemAdapter } from "../adapters/filesystem.
 import { VcmError } from "../errors.js";
 import type { TerminalRuntime } from "../runtime/terminal-runtime.js";
 import { submitTerminalInput } from "../runtime/terminal-submit.js";
+import type {
+  AutoMemoryService,
+  TaskRetrospectiveMemoryReviewContext
+} from "./auto-memory-service.js";
 import type { SessionService } from "./session-service.js";
 
 export interface HarnessFeedbackService {
   getState(repoRoot: string, activeTaskSlug?: string): Promise<HarnessFeedbackStateReport>;
   sendPendingFeedback(repoRoot: string, input: SendPendingFeedbackInput): Promise<RoleSessionRecord>;
   startTaskRetrospective(repoRoot: string, input: StartTaskRetrospectiveInput): Promise<HarnessFeedbackStateReport>;
+  handleTaskRetrospectiveHook(repoRoot: string, input: TaskRetrospectiveHookInput): Promise<boolean>;
   assertHarnessEngineerAvailable(repoRoot: string): Promise<void>;
 }
 
@@ -32,12 +38,22 @@ export interface StartTaskRetrospectiveInput {
   trigger: TaskHarnessRetrospectiveTrigger;
 }
 
+export interface TaskRetrospectiveHookInput {
+  taskSlug: string;
+  eventName: ClaudeHookEventName;
+  memoryReviewSucceeded: boolean;
+}
+
 export interface HarnessFeedbackServiceDeps {
   fs: FileSystemAdapter;
   runtime: TerminalRuntime;
   sessionService: Pick<
     SessionService,
     "getRoleSession" | "startRoleSession" | "resumeRoleSession"
+  >;
+  autoMemoryService?: Pick<
+    AutoMemoryService,
+    "prepareTaskRetrospectiveReview" | "cancelTaskRetrospectiveReview"
   >;
   now?: () => string;
 }
@@ -46,6 +62,21 @@ const FEEDBACK_ROOT = ".ai/vcm/harness-feedback";
 const PENDING_DIR = `${FEEDBACK_ROOT}/pending`;
 const TASK_RETROSPECTIVE_DIR = `${FEEDBACK_ROOT}/task-retrospectives`;
 const LEGACY_STATE_PATH = `${FEEDBACK_ROOT}/state.json`;
+
+interface TaskRetrospectiveMarker {
+  version: 1;
+  taskSlug: string;
+  trigger: TaskHarnessRetrospectiveTrigger;
+  status: "triggered" | "running" | "completed" | "failed";
+  analysisPath: string;
+  finalAcceptanceHash: string;
+  memoryRunId?: string;
+  createdAt: string;
+  updatedAt: string;
+  completedAt?: string;
+  failedAt?: string;
+  error?: string;
+}
 
 export function createHarnessFeedbackService(deps: HarnessFeedbackServiceDeps): HarnessFeedbackService {
   const now = deps.now ?? (() => new Date().toISOString());
@@ -93,7 +124,7 @@ export function createHarnessFeedbackService(deps: HarnessFeedbackServiceDeps): 
     }
 
     const existingMarker = await loadTaskRetrospectiveMarker(repoRoot, taskSlug);
-    if (existingMarker) {
+    if (existingMarker && existingMarker.status !== "failed") {
       throw new VcmError({
         code: "TASK_HARNESS_RETROSPECTIVE_EXISTS",
         message: `Task Harness Retrospective has already been triggered for task: ${taskSlug}`,
@@ -125,23 +156,97 @@ export function createHarnessFeedbackService(deps: HarnessFeedbackServiceDeps): 
     const session = await ensureIdleHarnessEngineer(repoRoot, taskSlug);
     const timestamp = now();
     const analysisPath = `${TASK_RETROSPECTIVE_DIR}/${sanitizeFeedbackId(taskSlug)}.md`;
-    await persistTaskRetrospectiveMarker(repoRoot, {
+    const analysisAbsolutePath = resolveRepoPath(repoRoot, analysisPath);
+    const memoryReview = await deps.autoMemoryService?.prepareTaskRetrospectiveReview(
+      input.taskRepoRoot,
+      analysisAbsolutePath
+    );
+    const marker: TaskRetrospectiveMarker = {
       version: 1,
       taskSlug,
       trigger: input.trigger,
-      status: "triggered",
+      status: "running",
       analysisPath,
       finalAcceptanceHash: `sha256:${sha256(finalAcceptanceContent)}`,
+      ...(memoryReview ? { memoryRunId: memoryReview.runId } : {}),
       createdAt: timestamp,
       updatedAt: timestamp
-    });
+    };
     const pendingFeedback = await listPendingFeedback(repoRoot);
-    await submitTerminalInput(
-      deps.runtime,
-      session.id,
-      buildTaskRetrospectivePrompt(repoRoot, analysisPath, pendingFeedback.map((item) => item.path))
-    );
+    try {
+      await persistTaskRetrospectiveMarker(repoRoot, marker);
+      await submitTerminalInput(
+        deps.runtime,
+        session.id,
+        buildTaskRetrospectivePrompt(
+          repoRoot,
+          analysisPath,
+          pendingFeedback.map((item) => item.path),
+          memoryReview
+        )
+      );
+    } catch (error) {
+      if (memoryReview) {
+        await deps.autoMemoryService?.cancelTaskRetrospectiveReview(input.taskRepoRoot, memoryReview.runId);
+      }
+      const failedAt = now();
+      await persistTaskRetrospectiveMarker(repoRoot, {
+        ...marker,
+        status: "failed",
+        failedAt,
+        updatedAt: failedAt,
+        error: errorMessage(error)
+      });
+      throw error;
+    }
     return getState(repoRoot);
+  }
+
+  async function handleTaskRetrospectiveHook(
+    repoRoot: string,
+    input: TaskRetrospectiveHookInput
+  ): Promise<boolean> {
+    const marker = await loadTaskRetrospectiveMarker(repoRoot, input.taskSlug);
+    if (!marker || (marker.status !== "running" && marker.status !== "triggered")) {
+      return false;
+    }
+    if (input.eventName === "UserPromptSubmit" || input.eventName === "PostCompact") {
+      return true;
+    }
+
+    const timestamp = now();
+    if (input.eventName === "StopFailure") {
+      await persistTaskRetrospectiveMarker(repoRoot, {
+        ...marker,
+        status: "failed",
+        failedAt: timestamp,
+        updatedAt: timestamp,
+        error: "Harness Engineer Task Harness Retrospective turn failed."
+      });
+      return true;
+    }
+    const reportPath = resolveRepoPath(repoRoot, marker.analysisPath);
+    const reportReady = await deps.fs.pathExists(reportPath)
+      && Boolean((await deps.fs.readText(reportPath)).trim());
+    if (!reportReady || (marker.memoryRunId && !input.memoryReviewSucceeded)) {
+      await persistTaskRetrospectiveMarker(repoRoot, {
+        ...marker,
+        status: "failed",
+        failedAt: timestamp,
+        updatedAt: timestamp,
+        error: !reportReady
+          ? "Harness Engineer did not write the required Task Harness Retrospective report."
+          : "Task Harness Retrospective memory review failed."
+      });
+      return true;
+    }
+    await persistTaskRetrospectiveMarker(repoRoot, {
+      ...marker,
+      status: "completed",
+      completedAt: timestamp,
+      updatedAt: timestamp
+    });
+    return true;
   }
 
   async function assertHarnessEngineerAvailable(_repoRoot: string): Promise<void> {
@@ -224,7 +329,8 @@ export function createHarnessFeedbackService(deps: HarnessFeedbackServiceDeps): 
   function buildTaskRetrospectivePrompt(
     repoRoot: string,
     analysisPath: string,
-    pendingFeedbackPaths: string[]
+    pendingFeedbackPaths: string[],
+    memoryReview?: TaskRetrospectiveMemoryReviewContext
   ): string {
     const pendingFeedback = pendingFeedbackPaths.length > 0
       ? pendingFeedbackPaths.map((feedbackPath) => `- ${resolveRepoPath(repoRoot, feedbackPath)}`)
@@ -244,6 +350,24 @@ export function createHarnessFeedbackService(deps: HarnessFeedbackServiceDeps): 
             "Process every listed feedback inside this retrospective. Record every disposition in the retrospective report, then delete the processed feedback files before ending the turn."
           ]
         : []),
+      ...(memoryReview
+        ? [
+            "",
+            "Auto Memory Review:",
+            `Role drafts: ${memoryReview.roleDraftsPath}`,
+            `Current memory snapshot: ${memoryReview.currentMemoryPath}`,
+            ...(memoryReview.planningCandidatePath
+              ? [`Architect planning-session candidate: ${memoryReview.planningCandidatePath}`]
+              : []),
+            `Write the complete reviewed memory set to: ${memoryReview.reviewedMemoryPath}`,
+            "",
+            "Review every memory candidate against final task evidence while performing this retrospective.",
+            "Each snapshot file contains only the matching <VCM-memory> block content. Edit every existing reviewed-memory file in place.",
+            "Keep only verified, durable, reusable project knowledge. Merge duplicates and keep role-specific knowledge in the matching role file.",
+            "Do not record task narrative, temporary state, unverified conclusions, or Harness rules in memory.",
+            "Record the memory review decisions in the retrospective report."
+          ]
+        : []),
       "",
       `Write the analysis to Result Path: ${resolveRepoPath(repoRoot, analysisPath)}`,
       "End your turn after writing the result."
@@ -261,16 +385,19 @@ export function createHarnessFeedbackService(deps: HarnessFeedbackServiceDeps): 
     ].join("\n");
   }
 
-  async function loadTaskRetrospectiveMarker(repoRoot: string, taskSlug: string): Promise<unknown | undefined> {
+  async function loadTaskRetrospectiveMarker(
+    repoRoot: string,
+    taskSlug: string
+  ): Promise<TaskRetrospectiveMarker | undefined> {
     const markerPath = resolveRepoPath(repoRoot, getTaskRetrospectiveMarkerPath(taskSlug));
     if (!(await deps.fs.pathExists(markerPath))) {
       return undefined;
     }
-    return deps.fs.readJson(markerPath);
+    return deps.fs.readJson<TaskRetrospectiveMarker>(markerPath);
   }
 
-  async function persistTaskRetrospectiveMarker(repoRoot: string, marker: Record<string, unknown>): Promise<void> {
-    const markerPath = resolveRepoPath(repoRoot, getTaskRetrospectiveMarkerPath(String(marker.taskSlug ?? "")));
+  async function persistTaskRetrospectiveMarker(repoRoot: string, marker: TaskRetrospectiveMarker): Promise<void> {
+    const markerPath = resolveRepoPath(repoRoot, getTaskRetrospectiveMarkerPath(marker.taskSlug));
     await deps.fs.ensureDir(path.dirname(markerPath));
     await deps.fs.writeJsonAtomic(markerPath, marker);
   }
@@ -298,6 +425,7 @@ export function createHarnessFeedbackService(deps: HarnessFeedbackServiceDeps): 
     getState,
     sendPendingFeedback,
     startTaskRetrospective,
+    handleTaskRetrospectiveHook,
     assertHarnessEngineerAvailable
   };
 }
@@ -334,4 +462,8 @@ function sanitizeFeedbackId(value: string): string {
 
 function sha256(content: string): string {
   return createHash("sha256").update(content).digest("hex");
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
