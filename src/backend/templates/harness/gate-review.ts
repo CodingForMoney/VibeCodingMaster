@@ -186,6 +186,14 @@ when they are relevant to the changed behavior. Check that tests were not
 weakened, over-mocked, tied only to fixture values or implementation details,
 or made green by bypassing the real behavior path.
 
+Inspect the \`Test Infrastructure\` section of \`test-report.md\`. A report with
+\`repair-required\` or \`production-change-required\` is not gate-ready. When
+status is \`repaired\`, verify the affected files remain Tester-owned, the
+boundary evidence excludes production or shared changes, the defect-class sweep
+covers the affected test-infrastructure family, the repair commit exists in the
+current range, and required clean-state validation was rerun. Request changes
+for missing, contradictory, incomplete, weakened, or unverified repair evidence.
+
 Do not approve only because \`Test Result: pass\` or all recorded commands are
 green. Request changes when the report is incomplete or inconsistent with the
 actual tests, validation level does not match risk, an important behavior has
@@ -239,6 +247,13 @@ For \`coder\`, compare the commits with the approved architecture plan,
 scaffold, and coder completion evidence. Verify that the complete planned
 behavior is implemented without changing architect-owned boundaries or
 contracts.
+
+When the range contains Tester-authored changes recorded in \`test-report.md\`,
+review those tests, fixtures, test-only helpers, and \`docs/TESTING.md\` against
+the Tester role, the repair or coverage evidence, and
+\`docs/CODING_STANDARDS.md\`. Do not reject a valid Tester-owned change merely
+because it is not a Coder scaffold item. Verify that Tester changes remain
+test-only, preserve real behavior paths, and are committed and validated.
 
 For \`architect-debug\`, compare the commits with the current Architect route
 command and \`.ai/vcm/handoffs/architect-debug.md\`. Verify that the confirmed
@@ -320,6 +335,7 @@ Use this findings structure:
 - Boundary And Failure Coverage:
 - Public Contract Coverage:
 - Test Integrity:
+- Test Infrastructure:
 - Skips And Gaps:
 - User Approval And Gap Disposition:
 - Validation Readiness:
@@ -345,6 +361,8 @@ Use this findings structure:
 <!-- File and Line Or Symbol are required for code-diff findings. -->
 - File:
 - Line Or Symbol:
+<!-- Finding Scope is required for code-diff findings. Use test-only only when correction needs no production, runtime, public-contract, dependency, generated-context, architecture, or shared-production change. -->
+- Finding Scope: test-only|implementation
 - Evidence:
 - Expected:
 - Gap:
@@ -383,6 +401,7 @@ If there are no findings, write:
 - Boundary And Failure Coverage:
 - Public Contract Coverage:
 - Test Integrity:
+- Test Infrastructure:
 - Skips And Gaps:
 - User Approval And Gap Disposition:
 - Validation Readiness:

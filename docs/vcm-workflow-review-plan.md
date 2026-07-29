@@ -420,11 +420,15 @@ The allowed branches are:
   Architect Debug Branch
 - Coder `ready_for_review` advances to Tester
 - Code Diff Gate `request_changes` enters Architect Debug Branch
-- Tester `fail` for the Coder implementation enters Architect Debug Branch
+- Tester `fail` with test-infrastructure status `repair-required` returns to
+  Tester for repair, commit, and repeated validation
+- other Tester `fail` results for the Coder implementation enter Architect
+  Debug Branch
 - Tester `pass` advances to Validation Adequacy Gate and then Code Diff Gate
 - Validation Adequacy Gate `request_changes` returns to Tester and repeats the
   Gate after correction
-- Code Diff Gate `request_changes` enters Architect Debug Branch
+- Code Diff Gate `request_changes` returns to Tester when every finding is
+  `test-only`; any `implementation` finding enters Architect Debug Branch
 - Architect Docs Sync `synced` or `unchanged` advances to Final Acceptance
 - blocked docs sync remains at docs sync unless its evidence permits Architect
   Debug Branch, Architecture Diagnosis Branch, or a user decision
@@ -447,9 +451,11 @@ These branches produce the following record extensions:
   `architecture-plan` Gate event
 - Coder completion appends Tester, `validation-adequacy`, and then `code-diff`
   with source `coder`
-- Coder failure, Code Diff Gate correction, Tester failure, or a permitted
-  implementation correction during docs sync appends `architect-debug` /
-  Architect
+- Coder failure, implementation-scoped Code Diff Gate correction, non-test-only
+  Tester failure, or a permitted implementation correction during docs sync
+  appends `architect-debug` / Architect
+- Tester-owned repair and all-test-only Code Diff correction append Tester,
+  then repeat validation-adequacy and code-diff
 - Validation Adequacy revision appends Tester and later another
   `validation-adequacy` Gate event
 - a Final Acceptance Coder follow-up appends Coder and repeats every downstream
@@ -526,13 +532,16 @@ The allowed branches are:
 - `user clarification required` makes PM wait for the user; the next role
   dispatch is reviewed from the unchanged Flow Record
 - Debug Validation Adequacy Gate `request_changes` returns to Tester
-- Debug Code Diff Gate `request_changes` returns to Architect Debug, then
-  repeats Tester and both Gates
-- Debug Tester `fail` in a standalone Flow switches to standalone Architecture
-  Diagnosis Flow
-- Debug Tester `fail` in a Code-Change Branch replaces Architect Debug Branch
-  with Architecture Diagnosis Branch while preserving the original Code-Change
-  sequence
+- Debug Code Diff Gate `request_changes` returns to Tester when every finding
+  is `test-only`; otherwise it returns to Architect Debug, then repeats Tester
+  and both Gates
+- Debug Tester `fail` with test-infrastructure status `repair-required` returns
+  to Tester
+- other Debug Tester `fail` results in a standalone Flow switch to standalone
+  Architecture Diagnosis Flow
+- other Debug Tester `fail` results in a Code-Change Branch replace Architect
+  Debug Branch with Architecture Diagnosis Branch while preserving the original
+  Code-Change sequence
 - Debug Tester `pass` advances to Validation Adequacy Gate and Code Diff Gate
 - Debug Code Diff approval in a standalone Flow advances to Architect Docs Sync
   and Final Acceptance
@@ -541,8 +550,10 @@ The allowed branches are:
 
 These branches produce the following record extensions:
 
-- Code Diff Gate revision appends Architect in `architect-debug`, Tester, and
-  later both Gate events
+- an all-test-only Code Diff Gate revision appends Tester and later both Gate
+  events
+- any implementation-scoped Code Diff Gate revision appends Architect in
+  `architect-debug`, Tester, and later both Gate events
 - `normal architecture plan required` appends `code-change` / Architect
 - Tester failure appends `architecture-diagnosis` / Architect
 - standalone Tester pass appends `validation-adequacy` and `code-diff` Gate
@@ -577,9 +588,12 @@ The allowed paths and branches are:
 - `user clarification required` makes PM wait for the user; the next role
   dispatch is reviewed from the unchanged Flow Record
 - Diagnosis Validation Adequacy Gate `request_changes` returns to Tester
-- Diagnosis Code Diff Gate `request_changes` returns to Architecture Diagnosis,
-  then repeats Tester and both Gates
-- Diagnosis Tester `fail` pauses the workflow and reports to the user
+- Diagnosis Code Diff Gate `request_changes` returns to Tester when every
+  finding is `test-only`; otherwise it returns to Architecture Diagnosis, then
+  repeats Tester and both Gates
+- Diagnosis Tester `fail` with test-infrastructure status `repair-required`
+  returns to Tester
+- other Diagnosis Tester `fail` results pause the workflow and report to the user
 - Diagnosis Tester `pass` advances to Validation Adequacy Gate and Code Diff Gate
 - Diagnosis Code Diff approval in a standalone code-producing Flow advances to
   Architect Docs Sync and Final Acceptance
@@ -589,8 +603,10 @@ The allowed paths and branches are:
 
 These paths produce the following record extensions:
 
-- Code Diff Gate revision appends Architect in `architecture-diagnosis`, Tester,
-  and later both Gate events
+- an all-test-only Code Diff Gate revision appends Tester and later both Gate
+  events
+- any implementation-scoped Code Diff Gate revision appends Architect in
+  `architecture-diagnosis`, Tester, and later both Gate events
 - standalone code-producing Tester pass appends `validation-adequacy` and
   `code-diff` Gate Review and then Architect docs sync, all in
   `architecture-diagnosis`
@@ -639,6 +655,8 @@ The allowed branches are:
 
 - `Test Result: incomplete` with recorded completed and remaining validation
   returns to Tester without entering Validation Adequacy Gate
+- `Test Result: fail` with test-infrastructure status `repair-required` returns
+  to Tester for repair, commit, and repeated validation
 - Validation Adequacy Gate `request_changes` returns to Tester and repeats the
   Gate after correction
 - required production-code, runtime-behavior, public-contract, dependency, or

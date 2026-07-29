@@ -272,6 +272,7 @@ function analysisForGate(gate: GateReviewGate): string[] {
       "- Boundary And Failure Coverage: retry and recovery inspected",
       "- Public Contract Coverage: observable result asserted",
       "- Test Integrity: real behavior path retained",
+      "- Test Infrastructure: no unresolved test-infrastructure defect",
       "- Skips And Gaps: none after correction",
       "- User Approval And Gap Disposition: none",
       "- Validation Readiness: evidence is reviewable",
@@ -302,7 +303,9 @@ function findingsForDecision(gate: GateReviewGate, decision: GateReviewDecision)
   }
   return [
     `### high: ${gate} correction required`,
-    ...(gate === "code-diff" ? ["- File: feature.txt", "- Line Or Symbol: line 1"] : []),
+    ...(gate === "code-diff"
+      ? ["- File: feature.txt", "- Line Or Symbol: line 1", "- Finding Scope: implementation"]
+      : []),
     "- Evidence: current artifact omits required behavior evidence",
     "- Expected: artifact proves the complete behavior and failure path",
     "- Gap: required evidence is absent",
@@ -314,6 +317,10 @@ function findingsForDecision(gate: GateReviewGate, decision: GateReviewDecision)
 function validTestReport(taskSlug: string, coverage: string): string {
   return renderTestReportTemplate(taskSlug)
     .replace("Test Result: pass|fail|incomplete", "Test Result: pass")
+    .replace(
+      "Status: none|repair-required|repaired|production-change-required",
+      "Status: none"
+    )
     .replace("L3 Required: yes|no", "L3 Required: no")
     .replaceAll("TBD", "None.")
     .replace("## Evidence Reviewed\n\nNone.", "## Evidence Reviewed\n\nProduction entry point and current tests.")

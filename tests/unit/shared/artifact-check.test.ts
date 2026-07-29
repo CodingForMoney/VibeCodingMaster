@@ -60,6 +60,22 @@ Checked.
 ## Validation Results
 Passed.
 
+## Test Infrastructure
+
+Status: none
+
+### Affected Files
+None.
+
+### Boundary Evidence
+None.
+
+### Defect-Class Sweep
+None.
+
+### Repair Commit
+None.
+
 ## Failed Expectations
 None.
 
@@ -428,6 +444,52 @@ Nothing to promote.
     );
   });
 
+  it("rejects unresolved test-infrastructure repair status in a passing report", () => {
+    const content = completeL3NotRequired(renderTestReportTemplate("demo"))
+      .replace("Test Result: pass|fail|incomplete", "Test Result: pass")
+      .replace(
+        "Status: none",
+        "Status: repair-required"
+      )
+      .replace("### Affected Files\n\nNone.", "### Affected Files\n\ntests/e2e/runner.sh")
+      .replace(
+        "### Boundary Evidence\n\nNone.",
+        "### Boundary Evidence\n\nOnly the current L3 runner is affected."
+      )
+      .replace(
+        "### Defect-Class Sweep\n\nNone.",
+        "### Defect-Class Sweep\n\nChecked sibling runners for the same pipefail assignment."
+      );
+    const result = checkMarkdownArtifact("test-report", "test-report.md", content);
+
+    expect(result.status).toBe("incomplete");
+    expect(result.invalidFields).toContain(
+      "Test Result must be fail when Test Infrastructure Status is repair-required."
+    );
+  });
+
+  it("accepts a completed test-infrastructure repair with concrete evidence", () => {
+    const content = completeL3NotRequired(renderTestReportTemplate("demo"))
+      .replace("Test Result: pass|fail|incomplete", "Test Result: pass")
+      .replace(
+        "Status: none",
+        "Status: repaired"
+      )
+      .replace("### Affected Files\n\nNone.", "### Affected Files\n\ntests/e2e/runner.sh")
+      .replace(
+        "### Boundary Evidence\n\nNone.",
+        "### Boundary Evidence\n\nThe repair changes only the test runner."
+      )
+      .replace(
+        "### Defect-Class Sweep\n\nNone.",
+        "### Defect-Class Sweep\n\nChecked every sibling runner using the same count pipeline."
+      )
+      .replace("### Repair Commit\n\nNone.", "### Repair Commit\n\nabc1234 fix test runner");
+    const result = checkMarkdownArtifact("test-report", "test-report.md", content);
+
+    expect(result.status).toBe("ok");
+  });
+
   it("rejects fail test reports without blocking evidence", () => {
     const content = completeL3NotRequired(renderTestReportTemplate("demo"))
       .replace("Test Result: pass|fail|incomplete", "Test Result: fail");
@@ -617,6 +679,9 @@ looks-good
       "Use an ID matching `[A-Z]{2,6}-[0-9]{1,4}`"
     );
     expect(renderTestReportTemplate("demo")).toContain("Test Result: pass|fail|incomplete");
+    expect(renderTestReportTemplate("demo")).toContain(
+      "Status: none|repair-required|repaired|production-change-required"
+    );
     expect(renderTestReportTemplate("demo")).toContain("L3 Required: yes|no");
     expect(renderTestReportTemplate("demo")).toContain("<run-existing|updated|added>");
     expect(renderDocsSyncReportTemplate("demo")).toContain(
@@ -703,6 +768,10 @@ function completeTemplate(
 
 function completeL3NotRequired(content: string): string {
   return content
+    .replace(
+      "Status: none|repair-required|repaired|production-change-required",
+      "Status: none"
+    )
     .replace("L3 Required: yes|no", "L3 Required: no")
     .replaceAll("TBD", "None.")
     .replace(

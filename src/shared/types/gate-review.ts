@@ -16,6 +16,13 @@ export type GateReviewSeverity =
   | "medium"
   | "low";
 
+export const CODE_DIFF_FINDING_SCOPES = [
+  "test-only",
+  "implementation"
+] as const;
+
+export type CodeDiffFindingScope = typeof CODE_DIFF_FINDING_SCOPES[number];
+
 export const CODE_DIFF_SOURCES = [
   "coder",
   "architect-debug",
@@ -54,6 +61,7 @@ export interface GateReviewFinding {
   file?: string;
   line?: number;
   location?: string;
+  scope?: CodeDiffFindingScope;
   evidence: string;
   expected: string;
   gap: string;

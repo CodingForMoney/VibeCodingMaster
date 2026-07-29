@@ -1,8 +1,10 @@
 import { createHash, randomUUID } from "node:crypto";
 import path from "node:path";
 import {
+  CODE_DIFF_FINDING_SCOPES,
   CODE_DIFF_SOURCES,
   GATE_REVIEW_GATES,
+  type CodeDiffFindingScope,
   type CodeDiffSource,
   type GateReviewDecision,
   type GateReviewCallbackStatus,
@@ -118,6 +120,7 @@ const VALIDATION_ANALYSIS_FIELDS = [
   "Boundary And Failure Coverage",
   "Public Contract Coverage",
   "Test Integrity",
+  "Test Infrastructure",
   "Skips And Gaps",
   "User Approval And Gap Disposition",
   "Validation Readiness"
@@ -175,6 +178,7 @@ const CORE_INPUT_ARTIFACTS: Partial<Record<GateReviewGate, string>> = {
 };
 
 const VALID_SEVERITIES = new Set<GateReviewSeverity>(["critical", "high", "medium", "low"]);
+const VALID_CODE_DIFF_FINDING_SCOPES = new Set<CodeDiffFindingScope>(CODE_DIFF_FINDING_SCOPES);
 
 export function createGateReviewService(deps: GateReviewServiceDeps): GateReviewService {
   const now = deps.now ?? (() => new Date().toISOString());
@@ -1321,11 +1325,21 @@ async function readValidationReportError(
   const absolutePath = resolveRepoPath(taskRepoRoot, relativePath);
   const content = await fs.pathExists(absolutePath) ? await fs.readText(absolutePath) : null;
   const check = checkMarkdownArtifact("test-report", relativePath, content);
-  if (check.status === "ok") {
-    return undefined;
+  if (check.status !== "ok") {
+    return `${relativePath} is incomplete and cannot start validation-adequacy review. `
+      + formatValidationArtifactFailure(check, content);
   }
-  return `${relativePath} is incomplete and cannot start validation-adequacy review. `
-    + formatValidationArtifactFailure(check, content);
+  const infrastructureStatus = matchField(
+    extractMarkdownSection(content ?? "", "Test Infrastructure") ?? "",
+    "Status"
+  );
+  if (infrastructureStatus === "repair-required") {
+    return `${relativePath} cannot start validation-adequacy review while Test Infrastructure Status is repair-required. Route Tester repair first.`;
+  }
+  if (infrastructureStatus === "production-change-required") {
+    return `${relativePath} cannot start validation-adequacy review while Test Infrastructure Status is production-change-required. Route the active flow's implementation-failure branch first.`;
+  }
+  return undefined;
 }
 
 async function readCodeDiffPrerequisiteError(
@@ -1687,11 +1701,15 @@ function validateRequestChangeFindings(findings: GateReviewFinding[]): void {
 }
 
 function validateCodeDiffFindings(findings: GateReviewFinding[]): void {
-  const incomplete = findings.find((finding) => !finding.file?.trim() || !finding.location?.trim());
+  const incomplete = findings.find((finding) => (
+    !finding.file?.trim()
+    || !finding.location?.trim()
+    || !finding.scope
+  ));
   if (incomplete) {
     throw new VcmError({
       code: "GATE_REVIEW_CODE_DIFF_FINDING_LOCATION_MISSING",
-      message: `Code-diff finding ${incomplete.title} must contain File and Line Or Symbol.`,
+      message: `Code-diff finding ${incomplete.title} must contain File, Line Or Symbol, and Finding Scope.`,
       statusCode: 500
     });
   }
@@ -1808,6 +1826,7 @@ function extractFindings(content: string): GateReviewFinding[] {
       file: matchField(block, "file"),
       line: parsePositiveInteger(matchField(block, "line")),
       location: matchField(block, "line or symbol"),
+      scope: normalizeCodeDiffFindingScope(matchField(block, "finding scope")),
       evidence: matchField(block, "evidence") ?? "",
       expected: matchField(block, "expected") ?? "",
       gap: matchField(block, "gap") ?? "",
@@ -1881,6 +1900,13 @@ function normalizeSeverity(value: unknown): GateReviewSeverity | undefined {
   const normalized = typeof value === "string" ? value.toLowerCase() : "";
   return VALID_SEVERITIES.has(normalized as GateReviewSeverity)
     ? normalized as GateReviewSeverity
+    : undefined;
+}
+
+function normalizeCodeDiffFindingScope(value: unknown): CodeDiffFindingScope | undefined {
+  const normalized = typeof value === "string" ? value.toLowerCase() : "";
+  return VALID_CODE_DIFF_FINDING_SCOPES.has(normalized as CodeDiffFindingScope)
+    ? normalized as CodeDiffFindingScope
     : undefined;
 }
 

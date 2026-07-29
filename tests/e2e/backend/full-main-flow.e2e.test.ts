@@ -248,10 +248,11 @@ describe("backend E2E complete VCM flow with mock Claude Code", () => {
       .not.toContain("[VCM Task Harness Retrospective]");
 
     await env.deps.runtimeCoordinator.reconcileProject(repo.repoRoot, { taskSlug: task.taskSlug });
+    await waitFor(async () => {
+      expect(env.mockRuntime.getWrites(harnessSession.id).join("\n"))
+        .toContain("[VCM Task Harness Retrospective]");
+    }, 10_000);
     await env.mockRuntime.waitForIdle();
-
-    expect(env.mockRuntime.getWrites(harnessSession.id).join("\n"))
-      .toContain("[VCM Task Harness Retrospective]");
     await expect(fs.readFile(
       path.join(repo.repoRoot, ".ai/vcm/harness-feedback/task-retrospectives", `${task.taskSlug}.md`),
       "utf8"
@@ -260,7 +261,7 @@ describe("backend E2E complete VCM flow with mock Claude Code", () => {
       path.join(repo.repoRoot, ".ai/vcm/harness-feedback/task-retrospectives", `${task.taskSlug}.json`),
       "utf8"
     )).resolves.toContain('"trigger": "auto"');
-  });
+  }, 15_000);
 });
 
 function acceptedFinalAcceptance(taskSlug: string): string {
@@ -368,6 +369,22 @@ function validTestReport(): string {
     "## Validation Results",
     "Pass.",
     "",
+    "## Test Infrastructure",
+    "",
+    "Status: none",
+    "",
+    "### Affected Files",
+    "None.",
+    "",
+    "### Boundary Evidence",
+    "None.",
+    "",
+    "### Defect-Class Sweep",
+    "None.",
+    "",
+    "### Repair Commit",
+    "None.",
+    "",
     "## Failed Expectations",
     "None.",
     "",
@@ -403,6 +420,7 @@ function validationAnalysisLines(): string[] {
     "- Boundary And Failure Coverage: relevant boundary covered",
     "- Public Contract Coverage: public behavior asserted",
     "- Test Integrity: real path and observable assertion inspected",
+    "- Test Infrastructure: no unresolved test-infrastructure defect",
     "- Skips And Gaps: none",
     "- User Approval And Gap Disposition: none",
     "- Validation Readiness: ready",

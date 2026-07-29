@@ -334,6 +334,16 @@ missing or stale. Code-diff input binds the committed implementation and test
 range, the current test report, and the validation-adequacy report, so later
 code or test changes invalidate earlier approval.
 
+Tester reports use a strict test-infrastructure disposition:
+`none|repair-required|repaired|production-change-required`. Validation review
+cannot start from either unresolved status. A confined test-only defect returns
+to Tester for repair, commit, defect-class sweep, and clean-state validation;
+production or shared changes use the active flow's Architect failure branch.
+Code-diff continues to review the complete committed range. Each code-diff
+finding classifies its affected scope as `test-only` or `implementation`, so PM
+can route an all-test-only correction to Tester without performing technical
+analysis.
+
 ## Task Workflow State Ownership
 
 `task-workflow-service` stores PM-declared workflow context at

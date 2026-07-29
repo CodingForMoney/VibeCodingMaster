@@ -6,6 +6,7 @@ import {
   L3_ACTIONS,
   L3_REQUIRED_VALUES,
   STRICT_NONE_VALUE,
+  TEST_INFRASTRUCTURE_STATUSES,
   TEST_RESULTS,
   renderArtifactOptions
 } from "../../shared/validation/artifact-contract.js";
@@ -214,6 +215,26 @@ TBD
 ## Validation Results
 
 TBD
+
+## Test Infrastructure
+
+Status: ${renderArtifactOptions(TEST_INFRASTRUCTURE_STATUSES)}
+
+### Affected Files
+
+${STRICT_NONE_VALUE}
+
+### Boundary Evidence
+
+${STRICT_NONE_VALUE}
+
+### Defect-Class Sweep
+
+${STRICT_NONE_VALUE}
+
+### Repair Commit
+
+${STRICT_NONE_VALUE}
 
 ## Failed Expectations
 

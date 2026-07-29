@@ -15,11 +15,11 @@ Run:
 .ai/tools/request-architect-restart
 ```
 
-If VCM reports `scheduled` with a non-empty `memoryCandidatePath`, ensure that
-one planning-session memory candidate exists at that exact path before writing
-the completed route. Use `vcm-propose-memory` to create it when it is absent.
-The candidate is a task-level provisional input for the later Auto Memory
-review; it does not edit active memory.
+If VCM reports `scheduled` with a non-empty `memoryCandidatePath`, ensure
+that one planning-session memory candidate exists at that exact path before
+writing the completed route. Use `vcm-propose-memory` to create it when it is
+absent. The candidate is a task-level provisional input for the later Auto
+Memory review; it does not edit active memory.
 
 If VCM reports `already_scheduled`, keep the existing candidate and pending
 restart. Do not recreate either one.

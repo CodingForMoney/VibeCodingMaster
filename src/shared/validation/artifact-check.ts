@@ -7,6 +7,7 @@ import {
   L3_ACTIONS,
   L3_REQUIRED_VALUES,
   STRICT_NONE_VALUE,
+  TEST_INFRASTRUCTURE_STATUSES,
   TEST_RESULTS
 } from "./artifact-contract.js";
 
@@ -61,6 +62,11 @@ const REQUIRED_HEADINGS: Record<ArtifactKind, readonly string[]> = {
     "Not-Required Evidence",
     "Commands Run Or Checked",
     "Validation Results",
+    "Test Infrastructure",
+    "Affected Files",
+    "Boundary Evidence",
+    "Defect-Class Sweep",
+    "Repair Commit",
     "Failed Expectations",
     "Reproduction Steps",
     "Skipped Checks With Reasons",
@@ -180,6 +186,74 @@ function validateArtifactFields(kind: ArtifactKind, content: string): string[] {
     const invalidFields = isAllowedValue(result, TEST_RESULTS)
       ? []
       : [renderExactFieldError("Test Result", TEST_RESULTS, result)];
+    const infrastructureStatus = readInlineField(
+      readArtifactSectionContent(content, "Test Infrastructure") ?? "",
+      "Status"
+    );
+    if (!isAllowedValue(infrastructureStatus, TEST_INFRASTRUCTURE_STATUSES)) {
+      invalidFields.push(renderExactFieldError(
+        "Test Infrastructure Status",
+        TEST_INFRASTRUCTURE_STATUSES,
+        infrastructureStatus
+      ));
+    }
+    const infrastructureFiles = readArtifactSectionContent(content, "Affected Files");
+    const infrastructureBoundary = readArtifactSectionContent(content, "Boundary Evidence");
+    const infrastructureSweep = readArtifactSectionContent(content, "Defect-Class Sweep");
+    const infrastructureCommit = readArtifactSectionContent(content, "Repair Commit");
+    if (infrastructureStatus === "none") {
+      for (const [heading, value] of [
+        ["Affected Files", infrastructureFiles],
+        ["Boundary Evidence", infrastructureBoundary],
+        ["Defect-Class Sweep", infrastructureSweep],
+        ["Repair Commit", infrastructureCommit]
+      ] as const) {
+        if (!isExactNone(value)) {
+          invalidFields.push(renderExactSectionError(
+            heading,
+            STRICT_NONE_VALUE,
+            value,
+            "when Test Infrastructure Status is none"
+          ));
+        }
+      }
+    }
+    if (infrastructureStatus === "repair-required" || infrastructureStatus === "production-change-required") {
+      for (const [heading, value] of [
+        ["Affected Files", infrastructureFiles],
+        ["Boundary Evidence", infrastructureBoundary],
+        ["Defect-Class Sweep", infrastructureSweep]
+      ] as const) {
+        if (!hasSubstantiveSectionValue(value)) {
+          invalidFields.push(`${heading} is required when Test Infrastructure Status is ${infrastructureStatus}.`);
+        }
+      }
+      if (!isExactNone(infrastructureCommit)) {
+        invalidFields.push(renderExactSectionError(
+          "Repair Commit",
+          STRICT_NONE_VALUE,
+          infrastructureCommit,
+          `when Test Infrastructure Status is ${infrastructureStatus}`
+        ));
+      }
+      if (result !== "fail") {
+        invalidFields.push(
+          `Test Result must be fail when Test Infrastructure Status is ${infrastructureStatus}.`
+        );
+      }
+    }
+    if (infrastructureStatus === "repaired") {
+      for (const [heading, value] of [
+        ["Affected Files", infrastructureFiles],
+        ["Boundary Evidence", infrastructureBoundary],
+        ["Defect-Class Sweep", infrastructureSweep],
+        ["Repair Commit", infrastructureCommit]
+      ] as const) {
+        if (!hasSubstantiveSectionValue(value)) {
+          invalidFields.push(`${heading} is required when Test Infrastructure Status is repaired.`);
+        }
+      }
+    }
     const l3Required = readInlineField(content, "L3 Required");
     if (!isAllowedValue(l3Required, L3_REQUIRED_VALUES)) {
       invalidFields.push(renderExactFieldError("L3 Required", L3_REQUIRED_VALUES, l3Required));

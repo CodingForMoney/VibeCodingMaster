@@ -160,6 +160,43 @@ describe("backend E2E Gate Review with mock Claude Code", () => {
     expect(codeDiffApproved.gates["code-diff"].changedFiles).toContain("feature.txt");
   });
 
+  it("blocks unresolved Tester-owned infrastructure repair and accepts repaired evidence", async () => {
+    const env = await createMockClaudeE2eApp();
+    cleanups.push(() => env.close());
+    const repo = await createE2eRepo();
+    cleanups.push(() => repo.cleanup());
+    const task = await connectAndCreateTask(env.app, repo, "test-infrastructure-repair");
+
+    await updateGateSettings(env.app, task.taskSlug, {
+      "architecture-plan": false,
+      "validation-adequacy": true,
+      "code-diff": false
+    });
+    env.mockRuntime.onPrompt("reviewer", "[VCM GATE REVIEW]", writeApproveGateReport, { once: false });
+
+    const reportPath = path.join(task.worktreePath, ".ai/vcm/handoffs/test-report.md");
+    await fs.writeFile(reportPath, testInfrastructureReport("repair-required", "None."), "utf8");
+    const unresolved = await requestGateReview(env.app, task.taskSlug, "validation-adequacy");
+    expect(unresolved.status).toBe("failed_to_start");
+    expect(unresolved.message).toContain("Route Tester repair first");
+
+    const fixturePath = path.join(task.worktreePath, "tests/fixtures/feature.json");
+    await fs.mkdir(path.dirname(fixturePath), { recursive: true });
+    await fs.writeFile(fixturePath, '{"enabled":true}\n', "utf8");
+    await git(task.worktreePath, "add", "tests/fixtures/feature.json");
+    await git(task.worktreePath, "commit", "-m", "repair feature fixture");
+    const repairCommit = (await git(task.worktreePath, "rev-parse", "HEAD")).stdout.trim();
+    await fs.writeFile(reportPath, testInfrastructureReport("repaired", repairCommit), "utf8");
+
+    const started = await requestGateReview(env.app, task.taskSlug, "validation-adequacy");
+    expect(started.status).toBe("started");
+    await waitForGate(env.app, task.taskSlug, "validation-adequacy");
+    expect((await getGateState(env.app, task.taskSlug)).gates["validation-adequacy"]).toMatchObject({
+      status: "completed",
+      decision: "approve"
+    });
+  });
+
   it("retains every Gate Review report and publishes only the latest report to the stable path", async () => {
     const env = await createMockClaudeE2eApp();
     cleanups.push(() => env.close());
@@ -420,6 +457,22 @@ function validTestReport(): string {
     "## Validation Results",
     "Pass.",
     "",
+    "## Test Infrastructure",
+    "",
+    "Status: none",
+    "",
+    "### Affected Files",
+    "None.",
+    "",
+    "### Boundary Evidence",
+    "None.",
+    "",
+    "### Defect-Class Sweep",
+    "None.",
+    "",
+    "### Repair Commit",
+    "None.",
+    "",
     "## Failed Expectations",
     "None.",
     "",
@@ -461,6 +514,33 @@ function incompleteTestReport(): string {
     );
 }
 
+function testInfrastructureReport(
+  status: "repair-required" | "repaired",
+  repairCommit: string
+): string {
+  return validTestReport()
+    .replace("Test Result: pass", `Test Result: ${status === "repaired" ? "pass" : "fail"}`)
+    .replace("Status: none", `Status: ${status}`)
+    .replace("### Affected Files\nNone.", "### Affected Files\ntests/fixtures/feature.json")
+    .replace(
+      "### Boundary Evidence\nNone.",
+      "### Boundary Evidence\nThe defect is confined to a tracked fixture and requires no production change."
+    )
+    .replace(
+      "### Defect-Class Sweep\nNone.",
+      "### Defect-Class Sweep\nChecked every feature fixture for the same missing enabled field."
+    )
+    .replace("### Repair Commit\nNone.", `### Repair Commit\n${repairCommit}`)
+    .replace(
+      "## Failed Expectations\nNone.",
+      `## Failed Expectations\n${status === "repaired" ? "None." : "The feature fixture omits the required enabled field."}`
+    )
+    .replace(
+      "## Blocking Validation Issues\nNone.",
+      `## Blocking Validation Issues\n${status === "repaired" ? "None." : "The feature fixture cannot validate the enabled path."}`
+    );
+}
+
 function validationAnalysisLines(): string[] {
   return [
     "## Validation Analysis",
@@ -475,6 +555,7 @@ function validationAnalysisLines(): string[] {
     "- Boundary And Failure Coverage: relevant boundary covered",
     "- Public Contract Coverage: public behavior asserted",
     "- Test Integrity: real path and observable assertion inspected",
+    "- Test Infrastructure: no unresolved test-infrastructure defect",
     "- Skips And Gaps: none",
     "- User Approval And Gap Disposition: none",
     "- Validation Readiness: ready",

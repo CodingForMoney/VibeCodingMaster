@@ -355,6 +355,13 @@ Additional routes:
 - Communication-Only Flow: `project-manager response or relay -> completion`
 - PR-Preparation Flow starts only after the active delivery flow completes.
 
+Inside any Tester validation step, a confirmed defect confined to tests,
+fixtures, test-only helpers, or `docs/TESTING.md` returns to Tester for a
+PM-routed repair, commit, bounded defect-class sweep, and repeated validation.
+If the repair requires production, runtime, public-contract, dependency,
+generated-context, architecture, or shared-production changes, the active
+flow's Architect failure branch applies instead.
+
 If Docs-Only Flow or Validation-Only Flow reveals that the accepted outcome
 requires production-code, runtime-behavior, public-contract, dependency, or
 system-architecture changes, route through the full Code-Change Flow.
@@ -525,11 +532,14 @@ Reviewer writes reports under:
 
 Reviewer returns only `approve` or `request_changes`, writes only its
 assigned gate report, does not run tests, and does not choose fix owners,
-Replan, or user-intervention needs. PM routes `architecture-plan` and
-`code-diff` findings to architect, and `validation-adequacy` findings to tester.
+Replan, or user-intervention needs. PM routes `architecture-plan` findings to
+Architect and `validation-adequacy` findings to Tester. Every code-diff finding
+classifies its affected scope. When every finding is `test-only`, PM routes the
+correction to Tester; any `implementation` finding uses the active flow's
+Architect correction branch.
 Each gate report must include its gate-specific structured analysis. Code-diff
 analysis accounts for every changed file and affected behavior; its findings
-must identify a concrete file and line or symbol.
+must identify a concrete file, line or symbol, and finding scope.
 
 ## 13. Validation
 
@@ -550,6 +560,10 @@ The fixed harness does not install `check-fast`, `check-changed`, or
 Tester owns validation adequacy. `test-report.md` maps each accepted changed
 behavior or relevant risk to its validation level, actual test case or external
 evidence, exercised entry path, assertions, result, and remaining gap.
+It also records strict test-infrastructure status, affected files, boundary
+evidence, defect-class sweep, and repair commit. A report with
+`repair-required` or `production-change-required` cannot enter
+validation-adequacy Gate Review.
 `Test Result: incomplete` records a validation turn that ended with no blocking
 issue while concrete required checks remain. The report records completed and
 remaining validation, PM routes Tester continuation, and the report cannot

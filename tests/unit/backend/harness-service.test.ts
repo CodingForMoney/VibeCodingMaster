@@ -125,6 +125,10 @@ describe("createHarnessService", () => {
     expect(projectManagerAgent).toContain("Do not require a branch-level final acceptance report");
     expect(projectManagerAgent).toContain("Tester returns `Test Result: fail` for a completed Architect Debug Mode implementation");
     expect(projectManagerAgent).toContain("If Tester returns `Test Result: incomplete`, route Tester again");
+    expect(projectManagerAgent).toContain("**Tester Test-Infrastructure Repair:**");
+    expect(projectManagerAgent).toContain("`Test Infrastructure Status: repair-required`");
+    expect(projectManagerAgent).toContain("**Tester Code-Diff Correction:**");
+    expect(projectManagerAgent).toContain("every code-diff finding has `Finding Scope: test-only`");
     expect(projectManagerAgent).toContain("Never run either post-implementation Gate for `Test Result: incomplete`");
     expect(projectManagerAgent).toContain("Coder implementation -> Tester validation -> validation-adequacy Gate -> code-diff Gate");
     expect(projectManagerAgent).toContain("Architect Debug Mode -> Tester -> validation-adequacy Gate -> code-diff --source architect-debug");
@@ -163,6 +167,9 @@ describe("createHarnessService", () => {
     expect(testerAgent).toContain("Required L3 coverage cannot be replaced by L2");
     expect(testerAgent).toContain("L3 Required: yes|no");
     expect(testerAgent).toContain("Apply `docs/CODING_STANDARDS.md` to changed tests");
+    expect(testerAgent).toContain("### Test-Infrastructure Repair");
+    expect(testerAgent).toContain("Status: none|repair-required|repaired|production-change-required");
+    expect(testerAgent).toContain("In every flow, if tests, fixtures, test-only helpers");
     expect(testerAgent).toContain("Use `incomplete` only when required validation remains");
     expect(testerAgent).toContain("`Completed Validation` and `Remaining Validation`");
     expect(testerAgent).not.toContain("shared implementation-quality and baseline-test standard");
@@ -170,6 +177,8 @@ describe("createHarnessService", () => {
     expect(diagnosisReviewerAgent).toContain("verify that the commits implement the diagnosed");
     expect(diagnosisReviewerAgent).toContain("local workaround for the surface failure");
     expect(diagnosisReviewerAgent).toContain("Independently apply the Tester L3 trigger rules");
+    expect(diagnosisReviewerAgent).toContain("Inspect the `Test Infrastructure` section");
+    expect(diagnosisReviewerAgent).toContain("Finding Scope: test-only|implementation");
     expect(diagnosisReviewerAgent).toContain("L3 Trigger Assessment");
     expect(diagnosisReviewerAgent).toContain("`Test Result: incomplete` is Tester continuation state");
     const finalAcceptanceSkill = await fs.readText("/repo/.claude/skills/vcm-final-acceptance/SKILL.md");

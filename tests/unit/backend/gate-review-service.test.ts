@@ -241,6 +241,36 @@ describe("gate-review-service", () => {
     expect(sessionStarts).toEqual([]);
   });
 
+  it.each(["repair-required", "production-change-required"] as const)(
+    "does not start validation-adequacy review while test infrastructure is %s",
+    async (status) => {
+      tmpRepo = await mkdtemp(path.join(os.tmpdir(), `vcm-gate-review-test-infrastructure-${status}-`));
+      await writeHarnessFiles(tmpRepo);
+      await writeFile(
+        path.join(taskWorktree(tmpRepo), ".ai/vcm/handoffs/test-report.md"),
+        testInfrastructureFailureReport(status),
+        "utf8"
+      );
+      const sessionStarts: string[] = [];
+      const service = createGateReviewService({
+        fs: createNodeFileSystemAdapter(),
+        runner: createRunner(tmpRepo, []),
+        runtime: createRuntime(tmpRepo, []),
+        projectService: createProjectService(),
+        taskService: createTaskService(tmpRepo),
+        appSettings: createAppSettings(["validation-adequacy"]),
+        sessionService: createSessionService(sessionStarts),
+        roundService: createRoundService()
+      });
+
+      const result = await service.requestReviewGate(tmpRepo, "demo-task", "validation-adequacy");
+
+      expect(result.status).toBe("failed_to_start");
+      expect(result.message).toContain(`Test Infrastructure Status is ${status}`);
+      expect(sessionStarts).toEqual([]);
+    }
+  );
+
   it("invalidates validation-adequacy approval when current code or test evidence changes", async () => {
     tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-gate-review-report-hash-"));
     await writeHarnessFiles(tmpRepo);
@@ -401,6 +431,7 @@ describe("gate-review-service", () => {
         "## Findings",
         "",
         "### high: Unlocated code issue",
+        "- Finding Scope: implementation",
         "- Evidence: changed behavior is wrong",
         "- Expected: behavior follows the contract",
         "- Gap: implementation contradicts the contract",
@@ -422,6 +453,49 @@ describe("gate-review-service", () => {
 
     await expect(service.readReport(tmpRepo, "demo-task", "code-diff")).rejects.toMatchObject({
       code: "GATE_REVIEW_CODE_DIFF_FINDING_LOCATION_MISSING"
+    });
+  });
+
+  it("requires code-diff findings to classify their affected scope", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-gate-review-code-finding-scope-"));
+    await writeHarnessFiles(tmpRepo);
+    const reportDir = path.join(taskWorktree(tmpRepo), ".ai/vcm/gate-reviews");
+    await mkdir(reportDir, { recursive: true });
+    await writeFile(
+      path.join(reportDir, "code-diff-review.md"),
+      [
+        "Gate: code-diff",
+        "Decision: request_changes",
+        "Summary: A code issue was found.",
+        "",
+        ...codeDiffAnalysisLines(),
+        "## Findings",
+        "",
+        "### high: Unclassified code issue",
+        "- File: tests/e2e/runner.sh",
+        "- Line Or Symbol: run_drill",
+        "- Evidence: the runner exits before checking the healthy result",
+        "- Expected: the runner reaches the final assertion",
+        "- Gap: the zero-count path aborts under pipefail",
+        "- Risk: healthy behavior cannot be validated",
+        ""
+      ].join("\n"),
+      "utf8"
+    );
+    const service = createGateReviewService({
+      fs: createNodeFileSystemAdapter(),
+      runner: createRunner(tmpRepo, []),
+      runtime: createRuntime(tmpRepo, []),
+      projectService: createProjectService(),
+      taskService: createTaskService(tmpRepo),
+      appSettings: createAppSettings(["code-diff"]),
+      sessionService: createSessionService(),
+      roundService: createRoundService()
+    });
+
+    await expect(service.readReport(tmpRepo, "demo-task", "code-diff")).rejects.toMatchObject({
+      code: "GATE_REVIEW_CODE_DIFF_FINDING_LOCATION_MISSING",
+      message: expect.stringContaining("Finding Scope")
     });
   });
 
@@ -1012,7 +1086,9 @@ function createRuntime(
             "## Findings",
             "",
             "### high: Missing proof point",
-            ...(gate === "code-diff" ? ["- File: src/feature.ts", "- Line Or Symbol: feature"] : []),
+            ...(gate === "code-diff"
+              ? ["- File: src/feature.ts", "- Line Or Symbol: feature", "- Finding Scope: implementation"]
+              : []),
             "- Evidence: plan has no proof",
             "- Expected: proof point exists",
             "- Gap: no proof",
@@ -1224,6 +1300,22 @@ function validTestReport(): string {
     "## Validation Results",
     "Pass.",
     "",
+    "## Test Infrastructure",
+    "",
+    "Status: none",
+    "",
+    "### Affected Files",
+    "None.",
+    "",
+    "### Boundary Evidence",
+    "None.",
+    "",
+    "### Defect-Class Sweep",
+    "None.",
+    "",
+    "### Repair Commit",
+    "None.",
+    "",
     "## Failed Expectations",
     "None.",
     "",
@@ -1243,6 +1335,27 @@ function validTestReport(): string {
     "None.",
     ""
   ].join("\n");
+}
+
+function testInfrastructureFailureReport(
+  status: "repair-required" | "production-change-required"
+): string {
+  return validTestReport()
+    .replace("Test Result: pass", "Test Result: fail")
+    .replace("Status: none", `Status: ${status}`)
+    .replace("### Affected Files\nNone.", "### Affected Files\ntests/e2e/runner.sh")
+    .replace(
+      "### Boundary Evidence\nNone.",
+      "### Boundary Evidence\nThe failing path is isolated to the current test runner."
+    )
+    .replace(
+      "### Defect-Class Sweep\nNone.",
+      "### Defect-Class Sweep\nChecked every sibling runner using the same pipeline."
+    )
+    .replace(
+      "## Blocking Validation Issues\nNone.",
+      "## Blocking Validation Issues\nThe current test runner cannot validate its healthy path."
+    );
 }
 
 function approvedGapTestReport(): string {
@@ -1282,6 +1395,7 @@ function validationAnalysisLines(): string[] {
     "- Boundary And Failure Coverage: relevant failure path covered",
     "- Public Contract Coverage: public behavior asserted",
     "- Test Integrity: real entry path and observable assertions inspected",
+    "- Test Infrastructure: no unresolved test-infrastructure defect",
     "- Skips And Gaps: none",
     "- User Approval And Gap Disposition: none",
     "- Validation Readiness: ready",
