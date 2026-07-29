@@ -503,11 +503,14 @@ shared or current-role target and its supporting evidence. Adds and updates
 also state why the memory is necessary, the impact of omitting it, and whether
 the knowledge belongs in memory or a durable document. Harness Engineer first
 reviews every existing memory entry, recording its retention reason, removal
-impact, and durable-document disposition, then evaluates the proposals and
-records the resulting changes in the Retrospective report. VCM validates that
-report structure before applying the reviewed memory. Harness Engineer review
-and retrospective work remain tool role activity and do not participate in
-Round completion.
+impact, and durable-document disposition, then evaluates every proposal item
+independently. Each Add or Update decision records why the memory is necessary,
+what happens if it is absent, whether it belongs in memory or a durable
+document, and the exact final memory content when retained. VCM validates that
+every candidate has one matching decision and that the reviewed memory files
+implement those decisions before applying them. Harness Engineer review and
+retrospective work remain tool role activity and do not participate in Round
+completion.
 
 When Auto Memory is disabled, Review Task Harness does not collect proposals or
 ask Harness Engineer to update memory. When enabled, both automatic and manual

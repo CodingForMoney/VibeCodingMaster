@@ -221,10 +221,19 @@ evaluating those drafts. Every substantive existing entry receives a structured
 retain, update, remove, or move-to-durable-doc decision with its reason, removal
 impact, durable-document disposition, and evidence. Harness Engineer then writes
 both the reviewed memory set and the required `Memory Review` report block.
-That block records every role proposal disposition and summarizes retained,
-updated, and removed existing memory.
-On the same successful `Stop`, `auto-memory-service` validates both artifacts,
-replaces only the corresponding active-worktree memory block contents, and
+That block records one decision for every proposal item. Each Add or Update
+decision independently explains why the memory is necessary, what would fail if
+it were absent, whether the knowledge belongs in memory or a durable document,
+the evidence checked, and the exact final memory content when retained. Blanket
+acceptance or rejection of a role draft is invalid.
+On the same successful `Stop`, `auto-memory-service` validates both artifacts.
+It verifies that every source candidate has exactly one matching decision, that
+kept content appears in the declared memory target, that rejected or
+durable-doc-only candidates are not introduced, that updates and removals match
+their decisions, and that referenced durable documents exist. These checks
+validate structure and report/output consistency; Harness Engineer remains
+responsible for the semantic quality of each decision. VCM then replaces only
+the corresponding active-worktree memory block contents, and
 creates a dedicated Git commit containing the changed host files. Dirty memory
 host files block the apply so unrelated edits cannot enter the memory commit.
 Active memory blocks are read-only to role turns. Proposal prompts run through
@@ -255,7 +264,8 @@ memory work delays retrospective analysis; `reviewing` means proposals are
 ready and the retrospective may start. The retrospective reviews the proposals,
 current memory snapshot, task evidence, and pending Harness Feedback in one
 turn. Missing or invalid retrospective or memory output prevents completion and
-prevents partial memory application.
+prevents partial memory application. Backend validation does not attempt to
+judge whether a memory is genuinely useful.
 
 Reusable harness feedback from `vcm-report-harness-issue` is a passive inbox.
 Harness Studio lets the user send one pending report to the active task's

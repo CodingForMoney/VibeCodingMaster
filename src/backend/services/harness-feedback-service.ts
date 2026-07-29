@@ -366,9 +366,13 @@ export function createHarnessFeedbackService(deps: HarnessFeedbackServiceDeps): 
             "Before evaluating proposals, review every substantive entry in every current memory snapshot against current code, documentation, and final task evidence.",
             "For each existing entry, decide retain, update, remove, or move-to-durable-doc. Record the decision reason, the impact of removing it, and whether memory or a durable document is the correct source.",
             "Complete this full existing-memory review even when every proposal says no-change.",
-            "Then evaluate every proposal, including its stated need, absence impact, and durable-document disposition.",
+            "Then evaluate every proposal item independently. Do not accept or reject a whole role draft as one decision.",
+            "For every Add or Update candidate, independently explain why the memory is necessary, what fails if it is absent, and why memory or a durable document is the correct destination.",
+            "Do not copy the proposer rationale as the review. Verify it against current code, durable documentation, and final task evidence.",
             "Keep only verified, durable, reusable project knowledge. Merge duplicates and keep role-specific knowledge in the matching role file.",
             "Do not record task narrative, temporary state, unverified conclusions, or Harness rules in memory.",
+            "Final content must be one exact line written to the selected reviewed-memory file. Use none when the decision does not keep memory.",
+            "For keep-in-memory use Durable doc disposition: memory. For keep-memory-reference use memory-reference. For move-to-durable-doc use durable-doc.",
             "Existing-memory Target must be shared or the exact role name. Decision must be retain, update, remove, or move-to-durable-doc.",
             "Durable doc disposition must be memory, durable-doc, or memory-reference. Use Durable doc path: none with memory and an actual path with the other dispositions.",
             "Do not keep full content in memory when durable-doc is correct. Use memory-reference only when an ongoing role needs the document pointer.",
@@ -378,8 +382,10 @@ export function createHarnessFeedbackService(deps: HarnessFeedbackServiceDeps): 
             "## Memory Review",
             "Existing memory reviewed: complete",
             "",
-            "### Proposal Dispositions",
-            ...memoryReview.proposalRoles.map((role) => `- ${role}: accepted|rejected|no-change`),
+            "### Proposal Decisions",
+            ...(memoryReview.proposalCandidates.length > 0
+              ? memoryReview.proposalCandidates.flatMap(renderMemoryProposalDecisionTemplate)
+              : ["none"]),
             "",
             "### Existing Memory Decisions",
             "#### Item 1",
@@ -404,6 +410,41 @@ export function createHarnessFeedbackService(deps: HarnessFeedbackServiceDeps): 
       `Write the analysis to Result Path: ${resolveRepoPath(repoRoot, analysisPath)}`,
       "End your turn after writing the result."
     ].join("\n");
+  }
+
+  function renderMemoryProposalDecisionTemplate(
+    candidate: TaskRetrospectiveMemoryReviewContext["proposalCandidates"][number]
+  ): string[] {
+    if (candidate.operation === "remove") {
+      return [
+        `#### Candidate ${candidate.id}`,
+        `Source: ${candidate.source}`,
+        "Operation: remove",
+        `Target: ${candidate.target}`,
+        `Existing: ${candidate.existing}`,
+        "Decision: remove|retain",
+        "Reason: <why the proposed removal should be applied or rejected>",
+        "Evidence checked: <current code, durable documentation, or final task evidence>",
+        ""
+      ];
+    }
+    return [
+      `#### Candidate ${candidate.id}`,
+      `Source: ${candidate.source}`,
+      `Operation: ${candidate.operation}`,
+      `Target: ${candidate.target}`,
+      `Candidate: ${candidate.content}`,
+      "Decision: keep-in-memory|keep-memory-reference|move-to-durable-doc|reject",
+      "Final target: shared|project-manager|architect|coder|tester|reviewer|harness-engineer|none",
+      "Why memory is necessary: <independent reason, or why it is not necessary>",
+      "Impact if absent: <specific impact, or why no durable impact exists>",
+      "Durable doc disposition: memory|durable-doc|memory-reference",
+      "Durable doc analysis: <why this destination is correct>",
+      "Durable doc path: <none or a project-relative durable doc path>",
+      "Evidence checked: <current code, durable documentation, or final task evidence>",
+      "Final content: <exact one-line reviewed-memory content or none>",
+      ""
+    ];
   }
 
   function buildPendingFeedbackPrompt(repoRoot: string, feedbackPath: string): string {

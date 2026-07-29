@@ -685,8 +685,14 @@ necessary, the impact of omitting it, and whether the knowledge belongs in
 memory or a durable document. Harness Engineer reviews every existing memory
 entry before evaluating proposals and records why it should remain, what
 removing it would affect, and whether a durable document is the correct source.
-The required report block contains those decisions and the retained, updated,
-and removed summary. VCM validates that block before applying memory. Shared
+It then reviews every proposal item separately. For each Add or Update candidate,
+the report must independently explain why it is necessary, the impact if absent,
+whether it belongs in memory or a durable document, the evidence checked, and
+the exact final memory content when retained. The required report block contains
+those decisions and the retained, updated, and removed summary. VCM rejects
+missing, duplicate, or mismatched candidate decisions and reviewed memory that
+contradicts the report. These checks enforce structure and output consistency;
+Harness Engineer owns the semantic judgment. Shared
 memory lives in the root `CLAUDE.md`
 `<VCM-memory>` block, while role memory lives in the matching
 `.claude/agents/*.md` block. VCM replaces only block contents and creates a

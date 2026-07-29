@@ -210,7 +210,16 @@ describe("auto-memory-service", () => {
     );
     expect(memoryReview).toMatchObject({
       runId: state.active!.runId,
-      planningCandidatePath: planningCandidateSnapshot
+      planningCandidatePath: planningCandidateSnapshot,
+      proposalCandidates: [
+        {
+          id: "architect-planning:add:1",
+          source: "architect-planning",
+          operation: "add",
+          target: "shared",
+          content: "Planning discovered backend-owned lifecycle state."
+        }
+      ]
     });
     expect(memoryReview?.roleDraftsPath).toContain(`${state.active!.runId}/drafts`);
     expect(memoryReview?.currentMemoryPath).toContain(`${state.active!.runId}/before`);
@@ -222,7 +231,7 @@ describe("auto-memory-service", () => {
     await mkdir(path.dirname(retrospectiveReportPath), { recursive: true });
     await writeFile(
       retrospectiveReportPath,
-      memoryReviewReport(["project-manager", "architect", "coder", "tester"]),
+      memoryReviewReport(),
       "utf8"
     );
     await writeFile(reviewedSharedPath, "Lifecycle completion is owned by backend hooks.\n", "utf8");
@@ -476,15 +485,28 @@ function noChangeMemoryProposal(): string {
   ].join("\n");
 }
 
-function memoryReviewReport(roles: RoleName[]): string {
+function memoryReviewReport(): string {
   return [
     "# Task Harness Retrospective",
     "",
     "## Memory Review",
     "Existing memory reviewed: complete",
     "",
-    "### Proposal Dispositions",
-    ...roles.map((role) => `- ${role}: no-change`),
+    "### Proposal Decisions",
+    "#### Candidate architect-planning:add:1",
+    "Source: architect-planning",
+    "Operation: add",
+    "Target: shared",
+    "Candidate: Planning discovered backend-owned lifecycle state.",
+    "Decision: keep-in-memory",
+    "Final target: shared",
+    "Why memory is necessary: Workflow roles need the backend lifecycle owner across future tasks.",
+    "Impact if absent: Roles may infer lifecycle completion independently.",
+    "Durable doc disposition: memory",
+    "Durable doc analysis: This concise cross-task invariant belongs in shared memory.",
+    "Durable doc path: none",
+    "Evidence checked: .ai/vcm/handoffs/final-acceptance.md",
+    "Final content: Lifecycle completion is owned by backend hooks.",
     "",
     "### Existing Memory Decisions",
     "#### Item 1",

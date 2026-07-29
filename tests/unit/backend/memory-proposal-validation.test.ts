@@ -1,5 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { validateMemoryProposal } from "../../../src/backend/services/memory-proposal-validation.js";
+import {
+  parseMemoryProposal,
+  validateMemoryProposal
+} from "../../../src/backend/services/memory-proposal-validation.js";
 
 describe("memory-proposal-validation", () => {
   it("accepts the exact no-change format", () => {
@@ -20,7 +23,7 @@ describe("memory-proposal-validation", () => {
   });
 
   it("accepts structured add, update, and remove items", () => {
-    expect(validateMemoryProposal([
+    const content = [
       "# Memory Proposal",
       "Decision: update",
       "",
@@ -51,7 +54,28 @@ describe("memory-proposal-validation", () => {
       "Existing: Frontend polling owns completion.",
       "Evidence: docs/ARCHITECTURE.md",
       ""
-    ].join("\n"))).toBeUndefined();
+    ].join("\n");
+    expect(validateMemoryProposal(content)).toBeUndefined();
+    expect(parseMemoryProposal(content).proposal?.items).toEqual([
+      expect.objectContaining({
+        operation: "add",
+        ordinal: 1,
+        target: "shared",
+        content: "Backend hooks own lifecycle completion."
+      }),
+      expect.objectContaining({
+        operation: "update",
+        ordinal: 1,
+        target: "current-role",
+        existing: "Inspect lifecycle state."
+      }),
+      expect.objectContaining({
+        operation: "remove",
+        ordinal: 1,
+        target: "current-role",
+        existing: "Frontend polling owns completion."
+      })
+    ]);
   });
 
   it("rejects unstructured proposal prose", () => {

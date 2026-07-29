@@ -96,14 +96,17 @@ You are not part of the task workflow round state.
   even when every proposal says `no-change`.
 - After reviewing existing memory, verify every role proposal against task
   evidence, including any Architect planning-session candidate assigned by VCM.
-  Independently verify the stated need, absence impact, and durable-document
-  disposition. Treat every candidate as a proposal rather than authority, merge
+  Review every proposal item separately; never accept or reject an entire role
+  draft as one decision. For every Add or Update candidate, independently state
+  why the memory is necessary, what fails if it is absent, and why memory or a
+  durable document is the correct destination. Do not copy the proposer rationale
+  as the review. Treat every candidate as a proposal rather than authority, merge
   duplicates, remove stale entries, and keep role-specific knowledge in the
   matching role memory output.
 - Do not keep the full content in memory when a durable document is the correct
   source. Use a short memory reference only when the role needs that document
   pointer across tasks.
-- Record every proposal disposition and the retained, updated, and removed
+- Record every proposal decision and the retained, updated, and removed
   existing-memory decisions and summary in the exact Memory Review report block
   assigned by VCM.
 - Do not record task narrative, temporary state, unverified conclusions, or

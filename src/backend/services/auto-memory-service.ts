@@ -33,8 +33,17 @@ import {
   MEMORY_REVIEW_RUNS_ROOT,
   MEMORY_REVIEW_STATE_PATH
 } from "./memory-review-paths.js";
-import { validateMemoryProposal } from "./memory-proposal-validation.js";
-import { validateMemoryReviewReport } from "./memory-review-validation.js";
+import {
+  parseMemoryProposal,
+  type MemoryProposalItem,
+  validateMemoryProposal
+} from "./memory-proposal-validation.js";
+import {
+  parseMemoryReviewReport,
+  validateMemoryReviewOutput,
+  type MemoryReviewCandidate,
+  type MemoryReviewTarget
+} from "./memory-review-validation.js";
 import type { SessionService } from "./session-service.js";
 
 const MEMORY_FILE_DEFINITIONS = [
@@ -123,7 +132,7 @@ export interface TaskRetrospectiveMemoryReviewContext {
   roleDraftsPath: string;
   currentMemoryPath: string;
   reviewedMemoryPath: string;
-  proposalRoles: RoleName[];
+  proposalCandidates: MemoryReviewCandidate[];
   planningCandidatePath?: string;
 }
 
@@ -425,6 +434,7 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
       });
     }
 
+    const proposalCandidates = await readReviewCandidates(taskRepoRoot, state);
     const timestamp = now();
     state.reviewPromptDispatchedAt = timestamp;
     state.retrospectiveReportPath = retrospectiveReportPath;
@@ -438,7 +448,7 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
       roleDraftsPath: path.join(runRoot, "drafts"),
       currentMemoryPath: path.join(runRoot, "before"),
       reviewedMemoryPath: path.join(runRoot, "after"),
-      proposalRoles: state.drafts.map((draft) => draft.role),
+      proposalCandidates,
       ...(planningCandidatePath
         ? { planningCandidatePath: resolveRepoPath(taskRepoRoot, planningCandidatePath) }
         : {})
@@ -552,22 +562,51 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
         );
         return true;
       }
-      const report = await deps.fs.readText(state.retrospectiveReportPath);
-      const currentMemorySnapshot = await readRunMemorySet(
-        input.taskRepoRoot,
-        state.runId,
-        "before"
-      );
-      const reportError = validateMemoryReviewReport(
-        report,
-        state.drafts.map((draft) => draft.role),
-        hasSubstantiveMemory(currentMemorySnapshot)
-      );
-      if (reportError) {
+      try {
+        const report = await deps.fs.readText(state.retrospectiveReportPath);
+        const currentMemorySnapshot = await readRunMemorySet(
+          input.taskRepoRoot,
+          state.runId,
+          "before"
+        );
+        const reviewedMemorySnapshot = await readRunMemorySet(
+          input.taskRepoRoot,
+          state.runId,
+          "after"
+        );
+        const candidates = await readReviewCandidates(input.taskRepoRoot, state);
+        const reportResult = parseMemoryReviewReport(
+          report,
+          candidates,
+          hasSubstantiveMemory(currentMemorySnapshot)
+        );
+        if (reportResult.error) {
+          await failReview(
+            input.taskRepoRoot,
+            state,
+            `Task Harness Retrospective memory review report ${reportResult.error}.`
+          );
+          return true;
+        }
+        const outputError = await validateReviewedMemoryOutput(
+          input.taskRepoRoot,
+          currentMemorySnapshot,
+          reviewedMemorySnapshot,
+          reportResult.decisions ?? []
+        );
+        if (outputError) {
+          await failReview(
+            input.taskRepoRoot,
+            state,
+            `Task Harness Retrospective reviewed memory ${outputError}.`
+          );
+          return true;
+        }
+      } catch (error) {
         await failReview(
           input.taskRepoRoot,
           state,
-          `Task Harness Retrospective memory review report ${reportError}.`
+          `Task Harness Retrospective memory review validation failed: ${errorMessage(error)}`
         );
         return true;
       }
@@ -754,6 +793,53 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
     return await deps.fs.pathExists(resolveRepoPath(taskRepoRoot, relativePath))
       ? relativePath
       : undefined;
+  }
+
+  async function readReviewCandidates(
+    taskRepoRoot: string,
+    state: StoredMemoryReviewState
+  ): Promise<MemoryReviewCandidate[]> {
+    const candidates: MemoryReviewCandidate[] = [];
+    for (const draft of state.drafts) {
+      const draftPath = resolveRepoPath(taskRepoRoot, draft.path);
+      const parsed = parseMemoryProposal(await deps.fs.readText(draftPath));
+      if (!parsed.proposal) {
+        throw new Error(`${draft.role} memory draft ${parsed.error ?? "could not be parsed"}`);
+      }
+      candidates.push(...toReviewCandidates(draft.role, draft.role, parsed.proposal.items));
+    }
+
+    const planningCandidatePath = await findPlanningCandidateSnapshot(taskRepoRoot, state.runId);
+    if (planningCandidatePath) {
+      const parsed = parseMemoryProposal(
+        await deps.fs.readText(resolveRepoPath(taskRepoRoot, planningCandidatePath))
+      );
+      if (!parsed.proposal) {
+        throw new Error(`Architect planning-session memory candidate ${parsed.error ?? "could not be parsed"}`);
+      }
+      candidates.push(...toReviewCandidates("architect-planning", "architect", parsed.proposal.items));
+    }
+    return candidates;
+  }
+
+  async function validateReviewedMemoryOutput(
+    taskRepoRoot: string,
+    before: MemorySet,
+    after: MemorySet,
+    decisions: NonNullable<ReturnType<typeof parseMemoryReviewReport>["decisions"]>
+  ): Promise<string | undefined> {
+    return validateMemoryReviewOutput({
+      before: memorySetByTarget(before),
+      after: memorySetByTarget(after),
+      decisions,
+      durableDocExists: async (durableDocPath) => {
+        try {
+          return await deps.fs.pathExists(resolveRepoPath(taskRepoRoot, durableDocPath));
+        } catch {
+          return false;
+        }
+      }
+    });
   }
 
   async function applyReviewedMemory(
@@ -1029,6 +1115,46 @@ export async function assertMemoryBlocksInstalled(
 
 function currentDraft(state: StoredMemoryReviewState): MemoryDraftState | undefined {
   return state.drafts.find((draft) => draft.status !== "completed");
+}
+
+function toReviewCandidates(
+  source: string,
+  currentRole: MemoryReviewTarget,
+  items: MemoryProposalItem[]
+): MemoryReviewCandidate[] {
+  return items.map((item) => ({
+    id: `${source}:${item.operation}:${item.ordinal}`,
+    source,
+    operation: item.operation,
+    target: item.target === "shared" ? "shared" : currentRole,
+    ...(item.content ? { content: item.content } : {}),
+    ...(item.existing ? { existing: item.existing } : {})
+  }));
+}
+
+function memoryPathForTarget(target: MemoryReviewTarget): string {
+  if (target === "shared") {
+    return "CLAUDE.md";
+  }
+  const definition = MEMORY_FILE_DEFINITIONS.find(
+    (candidate) => "role" in candidate && candidate.role === target
+  );
+  if (!definition) {
+    throw new Error(`Missing memory file definition for review target: ${target}`);
+  }
+  return definition.path;
+}
+
+function memorySetByTarget(memory: MemorySet): Record<MemoryReviewTarget, string> {
+  return {
+    shared: memory["CLAUDE.md"],
+    "project-manager": memory[memoryPathForTarget("project-manager")],
+    architect: memory[memoryPathForTarget("architect")],
+    coder: memory[memoryPathForTarget("coder")],
+    tester: memory[memoryPathForTarget("tester")],
+    reviewer: memory[memoryPathForTarget("reviewer")],
+    "harness-engineer": memory[memoryPathForTarget("harness-engineer")]
+  };
 }
 
 function toActiveReview(state: StoredMemoryReviewState): ActiveMemoryReview {

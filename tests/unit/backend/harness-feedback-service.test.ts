@@ -197,7 +197,13 @@ describe("harness-feedback-service", () => {
             roleDraftsPath: path.join(taskRepoRoot, "memory-run/drafts"),
             currentMemoryPath: path.join(taskRepoRoot, "memory-run/before"),
             reviewedMemoryPath: path.join(taskRepoRoot, "memory-run/after"),
-            proposalRoles: ["project-manager", "architect", "coder", "tester"],
+            proposalCandidates: [{
+              id: "architect:add:1",
+              source: "architect",
+              operation: "add",
+              target: "shared",
+              content: "Backend hooks own lifecycle completion."
+            }],
             planningCandidatePath: path.join(taskRepoRoot, "memory-run/architect-planning.md")
           };
         },
@@ -223,7 +229,9 @@ describe("harness-feedback-service", () => {
     expect(prompt).toContain(`Architect planning-session candidate: ${path.join(taskRepoRoot, "memory-run/architect-planning.md")}`);
     expect(prompt).toContain(`Write the complete reviewed memory set to: ${path.join(taskRepoRoot, "memory-run/after")}`);
     expect(prompt).toContain("Before evaluating proposals, review every substantive entry in every current memory snapshot");
-    expect(prompt).toContain("- project-manager: accepted|rejected|no-change");
+    expect(prompt).toContain("#### Candidate architect:add:1");
+    expect(prompt).toContain("Why memory is necessary:");
+    expect(prompt).toContain("Durable doc analysis:");
     expect(prompt).toContain("### Existing Memory Decisions");
     expect(prompt).toContain("Impact if removed:");
     expect(prompt).toContain("Reviewed memory set: complete");

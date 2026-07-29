@@ -266,7 +266,6 @@ async function writeHarnessRetrospective(ctx: MockClaudePromptContext): Promise<
   }
   const pendingFeedback = matchPendingFeedbackPaths(ctx.prompt);
   const dispositions = pendingFeedback.map((feedbackPath) => `${feedbackPath}: confirmed`);
-  const proposalRoles = matchMemoryProposalRoles(ctx.prompt);
   await ctx.writeAbsoluteFile(
     resultPath,
     [
@@ -281,8 +280,8 @@ async function writeHarnessRetrospective(ctx: MockClaudePromptContext): Promise<
             "## Memory Review",
             "Existing memory reviewed: complete",
             "",
-            "### Proposal Dispositions",
-            ...proposalRoles.map((role) => `- ${role}: no-change`),
+            "### Proposal Decisions",
+            "none",
             "",
             "### Existing Memory Decisions",
             "none",
@@ -305,22 +304,6 @@ async function writeHarnessRetrospective(ctx: MockClaudePromptContext): Promise<
     await fs.rm(feedbackPath);
   }
   await ctx.stop();
-}
-
-function matchMemoryProposalRoles(prompt: string): string[] {
-  const block = prompt.split("### Proposal Dispositions\n", 2)[1]
-    ?.split("\n\n### Existing Memory Decisions", 1)[0]
-    ?.trim();
-  if (!block) {
-    return [];
-  }
-  return block.split("\n").map((line) => {
-    const match = /^- ([a-z-]+): accepted\|rejected\|no-change$/.exec(line.trim());
-    if (!match) {
-      throw new Error(`Unable to parse memory proposal role from prompt line: ${line}`);
-    }
-    return match[1];
-  });
 }
 
 function matchPendingFeedbackPaths(prompt: string): string[] {
