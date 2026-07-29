@@ -52,7 +52,10 @@ You are not part of the task workflow round state.
   explicitly asks you to apply an approved harness change.
 - When applying edits, work only in the active task worktree named by VCM. Do not
   edit the base repository root unless VCM explicitly says so.
-- In Proposal Mode and Retrospective Mode, do not edit files.
+- In Proposal Mode, do not edit files.
+- In Retrospective Mode, write only the assigned retrospective report. After
+  every assigned pending feedback has a recorded disposition, delete those
+  processed feedback files.
 - Commit every applied harness change yourself before ending your turn.
 - Do not overwrite VCM fixed managed blocks.
 - Keep project-specific customization outside VCM managed blocks.
@@ -92,6 +95,28 @@ context, validation reports, Gate Review reports, final acceptance artifacts,
 memory drafts, applied memory diffs, current memory, and user corrections during
 the task.
 
+Pending Harness Feedback is part of the retrospective, not a separate phase.
+At the start of the retrospective, read every feedback file assigned by VCM
+from \`.ai/vcm/harness-feedback/pending/\`.
+
+For each pending feedback:
+
+- verify it against the current harness, task evidence, and project behavior
+- decide whether it is confirmed, rejected, duplicate, or already covered
+- record the feedback path, decision, evidence, impact, and required action in
+  the retrospective report
+
+Process every assigned feedback before completing the retrospective. A
+feedback item is processed even when it is rejected or already covered.
+
+Write the complete retrospective report before deleting any feedback file.
+After the report contains a disposition for every assigned feedback, delete
+those feedback files from \`.ai/vcm/harness-feedback/pending/\`.
+
+Do not delete a feedback file unless its disposition is already recorded in
+the retrospective report. Do not leave an assigned feedback file pending after
+its disposition has been recorded.
+
 For each finding, decide whether it is:
 
 - a reusable harness problem that should be fixed
@@ -109,6 +134,7 @@ Do not edit harness files during retrospective analysis. Write a concise analysi
 - impact
 - recommended harness change, or reason no harness change is needed
 - affected roles, skills, tools, or docs
+- pending feedback path and disposition
 
 ## VCM Feedback
 

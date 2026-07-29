@@ -149,6 +149,14 @@ describe("backend E2E task harness retrospective with mock Claude Code", () => {
     cleanups.push(() => repo.cleanup());
     const task = await connectAndCreateTask(env.app, repo, "mock-retrospective-no-memory");
     await updatePreferences(env.app, { autoMemoryEnabled: false });
+    const pendingDir = path.join(repo.repoRoot, ".ai/vcm/harness-feedback/pending");
+    const pendingFeedback = [
+      path.join(pendingDir, "01-coder-routing.md"),
+      path.join(pendingDir, "02-tester-validation.md")
+    ];
+    await fs.mkdir(pendingDir, { recursive: true });
+    await fs.writeFile(pendingFeedback[0], "# Coder routing feedback\n", "utf8");
+    await fs.writeFile(pendingFeedback[1], "# Tester validation feedback\n", "utf8");
 
     env.mockRuntime.onPrompt("project-manager", "Complete task without memory", async (ctx) => {
       await ctx.userPromptSubmit();
@@ -187,11 +195,25 @@ describe("backend E2E task harness retrospective with mock Claude Code", () => {
     expect(harnessWrites).toContain("[VCM Task Harness Retrospective]");
     expect(harnessWrites).not.toContain("[VCM Task Harness Review: Memory Proposal]");
     expect(harnessWrites).not.toContain("[VCM Task Harness Review: Memory Review]");
+    expect(harnessWrites).toContain(`- ${pendingFeedback[0]}`);
+    expect(harnessWrites).toContain(`- ${pendingFeedback[1]}`);
     const memoryState = await injectOk(env.app, {
       method: "GET",
       url: `/api/projects/harness/memory?taskSlug=${task.taskSlug}`
     });
     expect(memoryState.json()).toMatchObject({ status: "idle", runs: [] });
+    const retrospective = await fs.readFile(
+      path.join(repo.repoRoot, ".ai/vcm/harness-feedback/task-retrospectives", `${task.taskSlug}.md`),
+      "utf8"
+    );
+    expect(retrospective).toContain(`${pendingFeedback[0]}: confirmed`);
+    expect(retrospective).toContain(`${pendingFeedback[1]}: confirmed`);
+    await expect(fs.readdir(pendingDir)).resolves.toEqual([]);
+    const feedbackState = await injectOk(env.app, {
+      method: "GET",
+      url: `/api/projects/harness/feedback?taskSlug=${task.taskSlug}`
+    });
+    expect(feedbackState.json()).toMatchObject({ status: "idle", queuedCount: 0, pending: [] });
   });
 });
 
@@ -217,11 +239,35 @@ function createDeferred(): { promise: Promise<void>; resolve: () => void } {
 async function writeHarnessRetrospective(ctx: MockClaudePromptContext): Promise<void> {
   await ctx.userPromptSubmit();
   const resultPath = matchPromptPath(ctx.prompt, "Write the analysis to Result Path");
+  const pendingFeedback = matchPendingFeedbackPaths(ctx.prompt);
+  const dispositions = pendingFeedback.map((feedbackPath) => `${feedbackPath}: confirmed`);
   await ctx.writeAbsoluteFile(
     resultPath,
-    "# Task Harness Retrospective\n\nMemory review completed before retrospective.\n"
+    [
+      "# Task Harness Retrospective",
+      "",
+      "Memory review completed before retrospective.",
+      "",
+      "## Pending Feedback",
+      dispositions.length > 0 ? dispositions.join("\n") : "none",
+      ""
+    ].join("\n")
   );
+  for (const feedbackPath of pendingFeedback) {
+    await fs.rm(feedbackPath);
+  }
   await ctx.stop();
+}
+
+function matchPendingFeedbackPaths(prompt: string): string[] {
+  const block = prompt.split("Pending Feedback:\n", 2)[1]?.split("\n\n", 1)[0]?.trim();
+  if (!block || block === "none") {
+    return [];
+  }
+  return block
+    .split("\n")
+    .map((line) => line.match(/^-\s+(.+)$/)?.[1]?.trim())
+    .filter((feedbackPath): feedbackPath is string => Boolean(feedbackPath));
 }
 
 function acceptedFinalAcceptance(taskSlug: string): string {

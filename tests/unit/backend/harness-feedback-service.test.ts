@@ -134,6 +134,8 @@ describe("harness-feedback-service", () => {
     expect(state.status).toBe("idle");
     expect(writes.join("\n")).toContain("[VCM Task Harness Retrospective]");
     expect(writes.join("\n")).toContain("Review the completed task from the current active task worktree.");
+    expect(writes.join("\n")).toContain(`Pending Feedback Directory: ${path.join(tmpRepo, ".ai/vcm/harness-feedback/pending")}`);
+    expect(writes.join("\n")).toContain("Pending Feedback:\nnone");
     expect(writes.join("\n")).toContain("Write the analysis to Result Path:");
     expect(writes.join("\n")).toContain(".ai/vcm/harness-feedback/task-retrospectives/demo-task.md");
 
@@ -154,6 +156,44 @@ describe("harness-feedback-service", () => {
       handoffDir: ".ai/vcm/handoffs",
       trigger: "manual"
     })).rejects.toThrow("already been triggered");
+  });
+
+  it("assigns every pending feedback file to Task Harness Retrospective", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-harness-retrospective-feedback-"));
+    const taskRepoRoot = path.join(tmpRepo, ".claude/worktrees/demo-task");
+    await mkdir(path.join(taskRepoRoot, ".ai/vcm/handoffs"), { recursive: true });
+    await writeFile(
+      path.join(taskRepoRoot, ".ai/vcm/handoffs/final-acceptance.md"),
+      renderFinalAcceptance("accepted"),
+      "utf8"
+    );
+    const pendingDir = path.join(tmpRepo, ".ai/vcm/harness-feedback/pending");
+    await mkdir(pendingDir, { recursive: true });
+    await writeFile(path.join(pendingDir, "02-tester.md"), "# Tester feedback\n", "utf8");
+    await writeFile(path.join(pendingDir, "01-coder.md"), "# Coder feedback\n", "utf8");
+
+    const writes: string[] = [];
+    const service = createHarnessFeedbackService({
+      fs: createNodeFileSystemAdapter(),
+      runtime: createRuntime(writes),
+      sessionService: createSessionService(),
+      now: createClock()
+    });
+
+    await service.startTaskRetrospective(tmpRepo, {
+      taskSlug: "demo-task",
+      taskRepoRoot,
+      handoffDir: ".ai/vcm/handoffs",
+      trigger: "manual"
+    });
+
+    const prompt = writes.join("\n");
+    expect(prompt).toContain(`Pending Feedback Directory: ${pendingDir}`);
+    expect(prompt).toContain(`- ${path.join(pendingDir, "01-coder.md")}`);
+    expect(prompt).toContain(`- ${path.join(pendingDir, "02-tester.md")}`);
+    expect(prompt.indexOf("01-coder.md")).toBeLessThan(prompt.indexOf("02-tester.md"));
+    expect(prompt).toContain("Record every disposition in the retrospective report");
+    expect(prompt).toContain("delete the processed feedback files before ending the turn");
   });
 
   it("does not start a task harness retrospective for a follow-up final-acceptance decision", async () => {

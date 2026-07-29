@@ -135,7 +135,12 @@ export function createHarnessFeedbackService(deps: HarnessFeedbackServiceDeps): 
       createdAt: timestamp,
       updatedAt: timestamp
     });
-    await submitTerminalInput(deps.runtime, session.id, buildTaskRetrospectivePrompt(repoRoot, analysisPath));
+    const pendingFeedback = await listPendingFeedback(repoRoot);
+    await submitTerminalInput(
+      deps.runtime,
+      session.id,
+      buildTaskRetrospectivePrompt(repoRoot, analysisPath, pendingFeedback.map((item) => item.path))
+    );
     return getState(repoRoot);
   }
 
@@ -216,11 +221,29 @@ export function createHarnessFeedbackService(deps: HarnessFeedbackServiceDeps): 
     };
   }
 
-  function buildTaskRetrospectivePrompt(repoRoot: string, analysisPath: string): string {
+  function buildTaskRetrospectivePrompt(
+    repoRoot: string,
+    analysisPath: string,
+    pendingFeedbackPaths: string[]
+  ): string {
+    const pendingFeedback = pendingFeedbackPaths.length > 0
+      ? pendingFeedbackPaths.map((feedbackPath) => `- ${resolveRepoPath(repoRoot, feedbackPath)}`)
+      : ["none"];
     return [
       "[VCM Task Harness Retrospective]",
       "",
       "Review the completed task from the current active task worktree.",
+      "",
+      `Pending Feedback Directory: ${resolveRepoPath(repoRoot, PENDING_DIR)}`,
+      "",
+      "Pending Feedback:",
+      ...pendingFeedback,
+      ...(pendingFeedbackPaths.length > 0
+        ? [
+            "",
+            "Process every listed feedback inside this retrospective. Record every disposition in the retrospective report, then delete the processed feedback files before ending the turn."
+          ]
+        : []),
       "",
       `Write the analysis to Result Path: ${resolveRepoPath(repoRoot, analysisPath)}`,
       "End your turn after writing the result."
