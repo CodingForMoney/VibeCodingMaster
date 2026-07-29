@@ -152,8 +152,9 @@ manually refreshed. Task close removes the worktree and therefore the report.
 - Backend and frontend compile under separate tsconfigs
   (`tsconfig.node.json`, `tsconfig.json`); new files must fall inside the correct
   `include` globs, and `npm run typecheck` must pass both.
-- Downstream harness behavior is defined by `src/backend/templates/harness/**`;
-  change harness output there, not in generated target-repo files.
+- VCM-managed downstream harness behavior is defined by
+  `src/backend/templates/harness/**`. Project-owned generator behavior is
+  changed in the target project's `.ai/tools/` files.
 - Long-running and background process rules from the VCM managed block in
   `CLAUDE.md` apply; never detach processes.
 - The npm package ships only built artifacts (`dist`, `dist-frontend`,
@@ -163,7 +164,9 @@ manually refreshed. Task close removes the worktree and therefore the report.
 ## Generated Context Ownership
 
 Generated indexes under `.ai/generated/` are machine-maintained and regenerated
-by the tools in `.ai/tools/`:
+by project-owned tools in `.ai/tools/`. The fixed installer seeds the generators
+only when missing; Bootstrap and Harness Engineer may adapt them to project
+languages and conventions, and subsequent VCM updates preserve them:
 
 - `.ai/generated/module-index.json` — produced by
   `.ai/tools/generate-module-index`. Maps the workspace to layers, modules,

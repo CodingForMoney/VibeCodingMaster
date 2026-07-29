@@ -1,5 +1,5 @@
 import { execFile, execFileSync } from "node:child_process";
-import { mkdir, mkdtemp, readFile, rm, unlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, unlink, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { promisify } from "node:util";
@@ -13,6 +13,10 @@ const execFileAsync = promisify(execFile);
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const installerPath = path.join(appRoot, "scripts/install-vcm-harness.mjs");
 const approvedExampleRoot = path.join(appRoot, "example/rust-layered");
+const PROJECT_OWNED_GENERATOR_PATHS = [
+  ".ai/tools/generate-module-index",
+  ".ai/tools/generate-public-surface"
+] as const;
 
 const EXACT_EXAMPLE_HARNESS_PATHS = [
   ".ai/tools/check-durable-docs",
@@ -99,6 +103,66 @@ describe("harness templates stay in sync with the script installer", () => {
       "script installer output must exactly match the backend harness templates"
     ).toEqual([]);
     expect(status.needsApply).toBe(false);
+  }, 30_000);
+
+  it("seeds generated-context tools once and preserves project-owned updates", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-project-generators-"));
+    await execFileAsync(process.execPath, [installerPath, tmpRepo]);
+
+    const initialManifestPath = path.join(tmpRepo, ".ai/vcm-harness-manifest.json");
+    const initialManifest = JSON.parse(await readFile(initialManifestPath, "utf8")) as {
+      entries: Array<{ path: string; ownership: string; uninstall?: { action: string } }>;
+    };
+    for (const relativePath of PROJECT_OWNED_GENERATOR_PATHS) {
+      expect(await readFile(path.join(tmpRepo, relativePath), "utf8")).toBe(
+        await readFile(path.join(appRoot, relativePath), "utf8")
+      );
+      expect((await stat(path.join(tmpRepo, relativePath))).mode & 0o111).not.toBe(0);
+      expect(initialManifest.entries.find((entry) => entry.path === relativePath)).toMatchObject({
+        ownership: "project-owned"
+      });
+    }
+
+    const projectVersions = new Map(PROJECT_OWNED_GENERATOR_PATHS.map((relativePath) => [
+      relativePath,
+      `#!/usr/bin/env python3\n# Project-maintained ${path.basename(relativePath)}\n`
+    ]));
+    for (const [relativePath, content] of projectVersions) {
+      await writeFile(path.join(tmpRepo, relativePath), content, "utf8");
+    }
+
+    const legacyManifest = {
+      ...initialManifest,
+      entries: initialManifest.entries.map((entry) =>
+        PROJECT_OWNED_GENERATOR_PATHS.includes(entry.path as typeof PROJECT_OWNED_GENERATOR_PATHS[number])
+          ? {
+              ...entry,
+              ownership: "whole-file",
+              uninstall: {
+                action: "delete-file-if-unchanged"
+              }
+            }
+          : entry
+      )
+    };
+    await writeFile(initialManifestPath, `${JSON.stringify(legacyManifest, null, 2)}\n`, "utf8");
+
+    const { stdout } = await execFileAsync(process.execPath, [installerPath, tmpRepo]);
+
+    const updatedManifest = JSON.parse(await readFile(initialManifestPath, "utf8")) as {
+      entries: Array<{ path: string; ownership: string; uninstall?: { action: string } }>;
+    };
+    for (const [relativePath, content] of projectVersions) {
+      expect(await readFile(path.join(tmpRepo, relativePath), "utf8")).toBe(content);
+      expect(stdout).toContain(`SKIP ${relativePath} - exists; project-owned`);
+      expect(updatedManifest.entries.find((entry) => entry.path === relativePath)).toEqual(
+        expect.objectContaining({
+          path: relativePath,
+          ownership: "project-owned"
+        })
+      );
+      expect(updatedManifest.entries.find((entry) => entry.path === relativePath)?.uninstall).toBeUndefined();
+    }
   }, 30_000);
 
   it("migrates legacy managed documents without losing project content", async () => {

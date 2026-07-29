@@ -123,6 +123,12 @@ VCM may ignore a change where only `harnessVersion` differs. The manifest should
 be updated together with real fixed-harness changes, not as standalone version
 churn.
 
+The fixed installer seeds `.ai/tools/generate-module-index` and
+`.ai/tools/generate-public-surface` only when they are missing. After the first
+install they are project-owned tools: Bootstrap and Harness Engineer may adapt
+them to the project's languages and conventions, and later VCM harness updates
+must preserve their content.
+
 Managed blocks use:
 
 ```md
@@ -143,8 +149,10 @@ Rules:
 
 - VCM may replace content inside managed blocks.
 - VCM must preserve user-authored content outside managed blocks.
-- Whole-file harness files are VCM-owned only when listed by the fixed
-  installer.
+- Whole-file harness files are VCM-owned only when the manifest marks them as
+  `whole-file`.
+- Generated-context tools seeded by the installer are project-owned after
+  creation.
 - Project durable docs are not VCM-owned harness files after creation.
 - `.claude/settings.json` is JSON-merged; VCM owns only its hook/env entries.
 

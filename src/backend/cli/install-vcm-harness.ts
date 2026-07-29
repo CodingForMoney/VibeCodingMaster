@@ -251,13 +251,7 @@ const DURABLE_DOC_TEMPLATES = [
   },
 ];
 
-const WHOLE_FILES = [
-  {
-    path: ".ai/tools/check-durable-docs",
-    category: "durable-docs-tool",
-    mode: 0o755,
-    templatePath: "scripts/harness-tools/check-durable-docs"
-  },
+const PROJECT_OWNED_FILES = [
   {
     path: ".ai/tools/generate-module-index",
     category: "generated-context-tool",
@@ -269,6 +263,15 @@ const WHOLE_FILES = [
     category: "generated-context-tool",
     mode: 0o755,
     templatePath: "scripts/harness-tools/generate-public-surface"
+  }
+];
+
+const WHOLE_FILES = [
+  {
+    path: ".ai/tools/check-durable-docs",
+    category: "durable-docs-tool",
+    mode: 0o755,
+    templatePath: "scripts/harness-tools/check-durable-docs"
   },
   {
     path: ".claude/skills/vcm-architecture-interview/SKILL.md",
@@ -474,6 +477,9 @@ async function main() {
   for (const file of WHOLE_FILES) {
     await installWholeFile({ projectRoot, file, dryRun, operations });
   }
+  for (const file of PROJECT_OWNED_FILES) {
+    await installProjectOwnedFile({ projectRoot, file, dryRun, operations });
+  }
   await removeLegacyFlatSkillFiles({ projectRoot, dryRun, operations });
   await removeLegacyCodexHarnessPaths({ projectRoot, dryRun, operations });
   await installManifest({
@@ -603,6 +609,14 @@ async function buildManifest(projectRoot) {
       ...fixedDirectories().map((directory) => manifestEntry(directory, "directory", directoryCategory(directory), "vcm-created")),
       manifestEntry("docs/GLOSSARY.md", "file", "project-glossary", "project-owned"),
       manifestEntry("docs/CODING_STANDARDS.md", "file", "project-coding-standards", "project-owned"),
+      ...PROJECT_OWNED_FILES.map((file) => ({
+        path: file.path,
+        entryType: "file",
+        category: file.category,
+        ownership: "project-owned",
+        source: "vcm-template",
+        lifecycle: "long-term"
+      })),
       ...WHOLE_FILES.map((file) => ({
         path: file.path,
         entryType: "file",
@@ -939,6 +953,25 @@ async function installWholeFile({ projectRoot, file, dryRun, operations }) {
     dryRun,
     operations,
     action: "write fixed VCM file"
+  });
+}
+
+async function installProjectOwnedFile({ projectRoot, file, dryRun, operations }) {
+  const targetPath = resolveInside(projectRoot, file.path);
+  if (await pathExists(targetPath)) {
+    operations.push(skip(file.path, "exists; project-owned"));
+    return;
+  }
+
+  const content = await wholeFileContent(file);
+  await writeIfChanged({
+    targetPath,
+    relativePath: file.path,
+    content: ensureTrailingNewline(content),
+    mode: file.mode,
+    dryRun,
+    operations,
+    action: "seed project-owned VCM file"
   });
 }
 

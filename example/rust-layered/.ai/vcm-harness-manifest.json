@@ -4,7 +4,7 @@
   "harnessVersion": "0.7.27",
   "installMode": "fixed",
   "installedAt": "2026-06-07T00:00:00Z",
-  "updatedAt": "2026-07-28T23:57:04.792Z",
+  "updatedAt": "2026-07-29T00:39:58.303Z",
   "runtimeRoots": [
     ".ai/vcm/",
     ".claude/worktrees/"
@@ -417,33 +417,25 @@
       "lifecycle": "long-term"
     },
     {
-      "path": ".ai/tools/check-durable-docs",
-      "entryType": "file",
-      "category": "durable-docs-tool",
-      "ownership": "whole-file",
-      "source": "vcm-template",
-      "lifecycle": "long-term",
-      "uninstall": {
-        "action": "delete-file-if-unchanged",
-        "requiresConfirmation": false
-      }
-    },
-    {
       "path": ".ai/tools/generate-module-index",
       "entryType": "file",
       "category": "generated-context-tool",
-      "ownership": "whole-file",
+      "ownership": "project-owned",
       "source": "vcm-template",
-      "lifecycle": "long-term",
-      "uninstall": {
-        "action": "delete-file-if-unchanged",
-        "requiresConfirmation": false
-      }
+      "lifecycle": "long-term"
     },
     {
       "path": ".ai/tools/generate-public-surface",
       "entryType": "file",
       "category": "generated-context-tool",
+      "ownership": "project-owned",
+      "source": "vcm-template",
+      "lifecycle": "long-term"
+    },
+    {
+      "path": ".ai/tools/check-durable-docs",
+      "entryType": "file",
+      "category": "durable-docs-tool",
       "ownership": "whole-file",
       "source": "vcm-template",
       "lifecycle": "long-term",

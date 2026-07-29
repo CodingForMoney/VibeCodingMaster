@@ -137,6 +137,11 @@ async function processEntry(context) {
     return;
   }
 
+  if (entry.ownership === "project-owned") {
+    context.operations.push(skip(entry.path, "project-owned; preserved"));
+    return;
+  }
+
   if (entry.ownership === "managed-block" || uninstallAction === "remove-managed-block") {
     await removeManagedBlock(context);
     return;

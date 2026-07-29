@@ -148,12 +148,15 @@ the active task worktree:
 - `.claude/agents/**`
 - `.claude/skills/**`
 - `.claude/settings.json` hooks
-- `.ai/tools/**`
+- VCM protocol and runtime tools under `.ai/tools/**`
 - `.gitignore` entries for VCM runtime state and task worktrees
-- generated-context tooling
+- initial project-owned generated-context tooling
 - pull request template
 
 VCM preserves user-authored content outside VCM managed blocks.
+VCM seeds `.ai/tools/generate-module-index` and
+`.ai/tools/generate-public-surface` only when missing. After installation these
+generators belong to the project and later harness updates do not replace them.
 
 The fixed harness install is deterministic and creates a commit in the active
 task worktree. Bootstrap is AI-assisted and is run through the Harness Engineer
