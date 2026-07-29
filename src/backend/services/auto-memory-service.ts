@@ -33,6 +33,8 @@ import {
   MEMORY_REVIEW_RUNS_ROOT,
   MEMORY_REVIEW_STATE_PATH
 } from "./memory-review-paths.js";
+import { validateMemoryProposal } from "./memory-proposal-validation.js";
+import { validateMemoryReviewReport } from "./memory-review-validation.js";
 import type { SessionService } from "./session-service.js";
 
 const MEMORY_FILE_DEFINITIONS = [
@@ -121,6 +123,7 @@ export interface TaskRetrospectiveMemoryReviewContext {
   roleDraftsPath: string;
   currentMemoryPath: string;
   reviewedMemoryPath: string;
+  proposalRoles: RoleName[];
   planningCandidatePath?: string;
 }
 
@@ -435,6 +438,7 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
       roleDraftsPath: path.join(runRoot, "drafts"),
       currentMemoryPath: path.join(runRoot, "before"),
       reviewedMemoryPath: path.join(runRoot, "after"),
+      proposalRoles: state.drafts.map((draft) => draft.role),
       ...(planningCandidatePath
         ? { planningCandidatePath: resolveRepoPath(taskRepoRoot, planningCandidatePath) }
         : {})
@@ -488,8 +492,13 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
       return true;
     }
     const content = (await deps.fs.readText(draftAbsolutePath)).trim();
-    if (!content || !/^Decision:\s*(update|no-change)\s*$/im.test(content)) {
-      await failReview(input.taskRepoRoot, state, `${input.role} memory draft is missing a valid Decision: update or Decision: no-change field.`);
+    const validationError = content ? validateMemoryProposal(content) : "is empty";
+    if (validationError) {
+      await failReview(
+        input.taskRepoRoot,
+        state,
+        `${input.role} memory draft ${validationError}.`
+      );
       return true;
     }
 
@@ -540,6 +549,19 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
           input.taskRepoRoot,
           state,
           "Task Harness Retrospective did not write the required retrospective report."
+        );
+        return true;
+      }
+      const report = await deps.fs.readText(state.retrospectiveReportPath);
+      const reportError = validateMemoryReviewReport(
+        report,
+        state.drafts.map((draft) => draft.role)
+      );
+      if (reportError) {
+        await failReview(
+          input.taskRepoRoot,
+          state,
+          `Task Harness Retrospective memory review report ${reportError}.`
         );
         return true;
       }

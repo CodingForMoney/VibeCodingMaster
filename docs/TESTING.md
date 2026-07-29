@@ -186,7 +186,9 @@ services with controlled runtime doubles:
   Task Harness Retrospective, plus direct retrospective execution when Auto
   Memory is disabled. The Auto Memory journey also proves that workflow-role
   proposals produce a running then stopped Round while Harness Engineer remains
-  excluded. Architect restart coverage verifies
+  excluded. Unit coverage verifies strict proposal fields and rejects
+  incomplete Retrospective `Memory Review` reports before apply. Architect
+  restart coverage verifies
   that Auto Memory assigns and preserves a planning-session candidate, blocks
   replacement when that candidate is missing, and supplies its run snapshot to
   the final Architect proposal and Harness Engineer review.

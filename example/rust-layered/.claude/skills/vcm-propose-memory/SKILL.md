@@ -18,23 +18,56 @@ planning-session memory candidate and provides an exact path.
 - If VCM did not provide a path, do not create a proposal.
 - Propose only verified, durable, reusable project knowledge supported by task
   evidence.
+- Target shared project knowledge to `shared`. Target knowledge used only by
+  the current role to `current-role`.
 - Do not record task narrative, temporary state, unverified conclusions, or
   Harness rules.
 - Do not edit handoff artifacts or route messages from this skill.
 
 ## Draft Format
 
+Use this exact format for `Decision: no-change`:
+
 ```markdown
 # Memory Proposal
-Decision: update | no-change
+Decision: no-change
 
 ## Add
+none
 
 ## Update
+none
 
 ## Remove
+none
+```
 
-## Evidence
+For `Decision: update`, use one or more numbered items and write every field
+on one line. Use `none` as the complete body of an operation section that has
+no item:
+
+```markdown
+# Memory Proposal
+Decision: update
+
+## Add
+### Item 1
+Target: shared
+Content: <new memory entry>
+Evidence: <task artifact, code, or durable documentation>
+
+## Update
+### Item 1
+Target: current-role
+Existing: <exact existing memory entry>
+Content: <replacement memory entry>
+Evidence: <task artifact, code, or durable documentation>
+
+## Remove
+### Item 1
+Target: current-role
+Existing: <exact existing memory entry>
+Evidence: <task artifact, code, or durable documentation>
 ```
 
 Use `Decision: no-change` when the completed task produced no qualifying

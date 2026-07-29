@@ -7,6 +7,7 @@ import type { SessionService } from "./session-service.js";
 import { getTaskRuntimeRepoRoot, type TaskService } from "./task-service.js";
 import type { AppSettingsService } from "./app-settings-service.js";
 import { ARCHITECT_PLANNING_MEMORY_CANDIDATE_PATH } from "./memory-review-paths.js";
+import { validateMemoryProposal } from "./memory-proposal-validation.js";
 
 const ARCHITECT_ROLE = "architect";
 const PM_ROLE = "project-manager";
@@ -241,16 +242,9 @@ export function createArchitectRestartService(deps: ArchitectRestartServiceDeps)
       throw invalidMemoryCandidateError("the assigned candidate file does not exist.");
     }
     const content = await deps.fs.readText(candidatePath);
-    const requiredPatterns = [
-      /^# Memory Proposal\s*$/m,
-      /^Decision:\s*(update|no-change)\s*$/m,
-      /^## Add\s*$/m,
-      /^## Update\s*$/m,
-      /^## Remove\s*$/m,
-      /^## Evidence\s*$/m
-    ];
-    if (requiredPatterns.some((pattern) => !pattern.test(content))) {
-      throw invalidMemoryCandidateError("the assigned candidate file does not match the required proposal format.");
+    const validationError = validateMemoryProposal(content);
+    if (validationError) {
+      throw invalidMemoryCandidateError(`the assigned candidate ${validationError}.`);
     }
   }
 }

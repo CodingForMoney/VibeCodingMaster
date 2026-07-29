@@ -69,16 +69,16 @@ describe("auto-memory-service", () => {
       "Decision: update",
       "",
       "## Add",
-      "",
-      "Planning discovered backend-owned lifecycle state.",
+      "### Item 1",
+      "Target: shared",
+      "Content: Planning discovered backend-owned lifecycle state.",
+      "Evidence: .ai/vcm/handoffs/architecture-evidence.md",
       "",
       "## Update",
+      "none",
       "",
       "## Remove",
-      "",
-      "## Evidence",
-      "",
-      ".ai/vcm/handoffs/architecture-evidence.md",
+      "none",
       ""
     ].join("\n"), "utf8");
     const finalAcceptancePath = path.join(context.taskRepoRoot, ".ai/vcm/handoffs/final-acceptance.md");
@@ -159,7 +159,11 @@ describe("auto-memory-service", () => {
         );
       }
       await mkdir(path.dirname(path.join(context.taskRepoRoot, draft!.path)), { recursive: true });
-      await writeFile(path.join(context.taskRepoRoot, draft!.path), "# Memory Draft\n\nDecision: no-change\n", "utf8");
+      await writeFile(
+        path.join(context.taskRepoRoot, draft!.path),
+        noChangeMemoryProposal(),
+        "utf8"
+      );
       await context.service.handleRoleHook({
         baseRepoRoot: context.baseRepoRoot,
         taskRepoRoot: context.taskRepoRoot,
@@ -200,7 +204,11 @@ describe("auto-memory-service", () => {
       "CLAUDE.md"
     );
     await mkdir(path.dirname(retrospectiveReportPath), { recursive: true });
-    await writeFile(retrospectiveReportPath, "# Task Harness Retrospective\n\nMemory approved.\n", "utf8");
+    await writeFile(
+      retrospectiveReportPath,
+      memoryReviewReport(["project-manager", "architect", "coder", "tester"]),
+      "utf8"
+    );
     await writeFile(reviewedSharedPath, "Lifecycle completion is owned by backend hooks.\n", "utf8");
     await context.service.handleHarnessEngineerHook({
       baseRepoRoot: context.baseRepoRoot,
@@ -433,4 +441,41 @@ async function seedMemoryHosts(taskRepoRoot: string): Promise<void> {
 
 async function readText(repoRoot: string, relativePath: string): Promise<string> {
   return readFile(path.join(repoRoot, relativePath), "utf8");
+}
+
+function noChangeMemoryProposal(): string {
+  return [
+    "# Memory Proposal",
+    "Decision: no-change",
+    "",
+    "## Add",
+    "none",
+    "",
+    "## Update",
+    "none",
+    "",
+    "## Remove",
+    "none",
+    ""
+  ].join("\n");
+}
+
+function memoryReviewReport(roles: RoleName[]): string {
+  return [
+    "# Task Harness Retrospective",
+    "",
+    "## Memory Review",
+    "Existing memory reviewed: complete",
+    "",
+    "### Proposal Dispositions",
+    ...roles.map((role) => `- ${role}: no-change`),
+    "",
+    "### Existing Memory Changes",
+    "- retained: all verified entries",
+    "- updated: none",
+    "- removed: none",
+    "",
+    "Reviewed memory set: complete",
+    ""
+  ].join("\n");
 }

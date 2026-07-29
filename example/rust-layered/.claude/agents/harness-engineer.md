@@ -87,11 +87,19 @@ You are not part of the task workflow round state.
 
 - Own VCM-managed project memory in the root and role `<VCM-memory>` blocks.
 - When Auto Memory is disabled, do not request proposals or update memory.
-- During a Retrospective that includes Auto Memory Review, verify every role
-  proposal against task evidence, including any Architect planning-session
-  candidate assigned by VCM. Treat every candidate as a proposal rather than
-  authority, merge duplicates, remove stale entries, and keep role-specific
-  knowledge in the matching role memory output.
+- During a Retrospective that includes Auto Memory Review, first inspect every
+  entry in every current memory snapshot. Verify each entry against current
+  code, durable documentation, and final task evidence; retain, update, or
+  remove it. Complete this full review even when every proposal says
+  `no-change`.
+- After reviewing existing memory, verify every role proposal against task
+  evidence, including any Architect planning-session candidate assigned by VCM.
+  Treat every candidate as a proposal rather than authority, merge duplicates,
+  remove stale entries, and keep role-specific knowledge in the matching role
+  memory output.
+- Record every proposal disposition and the retained, updated, and removed
+  existing-memory summary in the exact Memory Review report block assigned by
+  VCM.
 - Do not record task narrative, temporary state, unverified conclusions, or
   Harness rules in memory.
 - Edit only the review output paths assigned by VCM. Do not edit active

@@ -226,7 +226,20 @@ async function writeNoChangeMemoryDraft(ctx: MockClaudePromptContext): Promise<v
 
 async function writeNoChangeMemoryDraftResult(ctx: MockClaudePromptContext): Promise<void> {
   const draftPath = matchPromptPath(ctx.prompt, "Write the draft to");
-  await ctx.writeAbsoluteFile(draftPath, "# Memory Draft\n\nDecision: no-change\n");
+  await ctx.writeAbsoluteFile(draftPath, [
+    "# Memory Proposal",
+    "Decision: no-change",
+    "",
+    "## Add",
+    "none",
+    "",
+    "## Update",
+    "none",
+    "",
+    "## Remove",
+    "none",
+    ""
+  ].join("\n"));
   await ctx.stop();
 }
 
@@ -253,6 +266,7 @@ async function writeHarnessRetrospective(ctx: MockClaudePromptContext): Promise<
   }
   const pendingFeedback = matchPendingFeedbackPaths(ctx.prompt);
   const dispositions = pendingFeedback.map((feedbackPath) => `${feedbackPath}: confirmed`);
+  const proposalRoles = matchMemoryProposalRoles(ctx.prompt);
   await ctx.writeAbsoluteFile(
     resultPath,
     [
@@ -261,6 +275,23 @@ async function writeHarnessRetrospective(ctx: MockClaudePromptContext): Promise<
       reviewedMemoryPath
         ? "Memory reviewed during retrospective."
         : "Auto Memory disabled; no memory review requested.",
+      ...(reviewedMemoryPath
+        ? [
+            "",
+            "## Memory Review",
+            "Existing memory reviewed: complete",
+            "",
+            "### Proposal Dispositions",
+            ...proposalRoles.map((role) => `- ${role}: no-change`),
+            "",
+            "### Existing Memory Changes",
+            "- retained: all verified entries",
+            "- updated: shared lifecycle ownership",
+            "- removed: none",
+            "",
+            "Reviewed memory set: complete"
+          ]
+        : []),
       "",
       "## Pending Feedback",
       dispositions.length > 0 ? dispositions.join("\n") : "none",
@@ -271,6 +302,22 @@ async function writeHarnessRetrospective(ctx: MockClaudePromptContext): Promise<
     await fs.rm(feedbackPath);
   }
   await ctx.stop();
+}
+
+function matchMemoryProposalRoles(prompt: string): string[] {
+  const block = prompt.split("### Proposal Dispositions\n", 2)[1]
+    ?.split("\n\n### Existing Memory Changes", 1)[0]
+    ?.trim();
+  if (!block) {
+    return [];
+  }
+  return block.split("\n").map((line) => {
+    const match = /^- ([a-z-]+): accepted\|rejected\|no-change$/.exec(line.trim());
+    if (!match) {
+      throw new Error(`Unable to parse memory proposal role from prompt line: ${line}`);
+    }
+    return match[1];
+  });
 }
 
 function matchPendingFeedbackPaths(prompt: string): string[] {
