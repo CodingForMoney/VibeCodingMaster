@@ -416,6 +416,13 @@ The Scaffold Manifest carries task-specific context for coder. Task context,
 temporary rationale, implementation-order notes, and coder guidance belong in
 the manifest, not in permanent source comments.
 
+When a proposed file-local override, normalization, or bypass of a shared
+default, constant, or documented contract already exists in two other files,
+Architect treats the third occurrence as an upstream ownership or contract
+signal. The architecture decision must fix the owner, confirm intentional local
+handling and correct the owning docs, or record the unresolved issue and
+affected call sites. Moving the repeated behavior into a helper is not enough.
+
 Code scaffolding may create files and define non-private callable surfaces, but
 incomplete implementation must use `VCM:CODE <Scaffold Manifest ID>` markers.
 Coder removes/completes those markers and reports Scaffold Completion by ID.
@@ -518,6 +525,10 @@ Input policy:
 - Architect Debug writes `.ai/vcm/handoffs/architect-debug.md` before code-diff
   so the review receives the confirmed root cause and completed-fix evidence,
   not only the original Architect route command.
+- Code-diff searches for repeated file-local overrides when a changed hunk adds
+  one. A third occurrence without the Architect-owned upstream disposition is
+  `request_changes`; a documented post-validation docs-sync commitment is valid
+  when the disposition itself is already explicit.
 - Gates avoid duplicate review by comparing input hashes. Architecture review
   binds the confirmed brief, code evidence, and plan to current scaffold/code evidence; validation review binds the
   test report to current non-document code/test evidence and `docs/TESTING.md`;

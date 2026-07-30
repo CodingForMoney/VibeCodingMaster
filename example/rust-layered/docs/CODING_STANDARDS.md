@@ -21,6 +21,8 @@ Project-specific rules may be added outside the VCM managed block when they make
 - Do not derive logic from visible test fixtures, fixed sample values, snapshot text, or special branches that only satisfy known tests.
 - Coder and Coder Worker keep the diff inside the approved plan. In Debug Mode or Architecture Diagnosis Mode, Architect owns the technical change boundary after confirming the root cause.
 - Preserve existing behavior unless the approved plan or a confirmed Debug/Diagnosis root cause changes it.
+- Do not introduce the same file-local override, normalization, or bypass of a shared default, constant, or documented contract into a third file unless the accepted architecture explicitly fixes the owning behavior, confirms local handling is intended and corrects the owning documentation, or records the unresolved issue and affected call sites through the Architect-owned known-issue flow.
+- Extracting the repeated local workaround into a helper is not an upstream disposition.
 
 ## Comments
 

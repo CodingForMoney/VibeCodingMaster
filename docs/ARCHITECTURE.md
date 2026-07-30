@@ -314,6 +314,13 @@ Architect delegates exact scaffold execution to one foreground
 Architect turn continues. Architect remains responsible for reviewing the
 scaffold commit, ledger reconciliation, and build evidence.
 
+Architecture planning also owns repeated-workaround disposition. When a
+proposed file-local override of a shared default, constant, or documented
+contract would be the third file carrying the same mechanism, the plan must fix
+the owner, confirm intentional local handling and correct its documentation, or
+record the unresolved issue and affected call sites. Code-diff review enforces
+the same threshold against changed hunks.
+
 `architect-restart-service` owns the task-local, in-memory deferred restart
 between completed planning and later Architect work. The Architect schedules it
 through `.ai/tools/request-architect-restart` before writing the first completed

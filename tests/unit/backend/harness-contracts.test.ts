@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
+import { renderArchitectHarnessRules } from "../../../src/backend/templates/harness/architect-agent.js";
 import { renderCoderHarnessRules } from "../../../src/backend/templates/harness/coder-agent.js";
 import { renderCoderWorkerHarnessRules } from "../../../src/backend/templates/harness/coder-worker-agent.js";
+import { renderReviewerAgentRules } from "../../../src/backend/templates/harness/gate-review.js";
+import { renderProjectCodingStandardsRules } from "../../../src/backend/templates/harness/project-coding-standards.js";
 import { renderVcmFinalAcceptanceSkillRules } from "../../../src/backend/templates/harness/vcm-final-acceptance-skill.js";
 import { renderVcmRouteMessageSkillRules } from "../../../src/backend/templates/harness/vcm-route-message-skill.js";
 
@@ -38,5 +41,18 @@ describe("machine-consumed harness contracts", () => {
     expect(renderVcmFinalAcceptanceSkillRules()).toContain(
       "accepted|accepted-with-known-risks|needs-coder-follow-up|needs-architect-follow-up|needs-docs-sync|blocked-by-user-decision"
     );
+  });
+
+  it("requires an upstream disposition for a third file-local workaround", () => {
+    const codingStandards = renderProjectCodingStandardsRules();
+    const architect = renderArchitectHarnessRules();
+    const reviewer = renderReviewerAgentRules();
+
+    expect(codingStandards).toContain("into a third file");
+    expect(codingStandards).toContain("Extracting the repeated local workaround into a helper");
+    expect(architect).toContain("already exists in at least two other files");
+    expect(architect).toContain("record the unresolved issue and affected call sites");
+    expect(reviewer).toContain("search the current worktree for the same mechanism");
+    expect(reviewer).toContain("Classify the finding as `implementation`");
   });
 });

@@ -273,6 +273,18 @@ Verify that the Diagnosis evidence records applicable L2/L3 validation for the
 diagnosed failure path. Request changes when an applicable check was not run,
 did not pass, or does not exercise that failure path.
 
+When a changed production or test hunk adds a file-local override,
+normalization, or bypass of a shared default, constant, or documented contract,
+search the current worktree for the same mechanism. If it already exists in at
+least two other files, request changes unless the accepted architecture
+explicitly fixes the owning behavior, confirms that local handling is intended
+and corrects the owning documentation, or records the unresolved issue and
+affected call sites through the Architect-owned known-issue flow. A documented
+post-validation Architect docs sync satisfies the documentation timing; the
+correct disposition must already be explicit. Extracting the workaround into a
+helper is not an upstream disposition. Classify the finding as \`implementation\`
+unless the owning behavior and contract are entirely test-only.
+
 Check every source for project coding-standard compliance, unnecessary
 duplication or abstraction, inconsistent error handling, unhandled fallible
 paths, debug/task-only artifacts, \`VCM:CODE\`, task-process comments or labels,
