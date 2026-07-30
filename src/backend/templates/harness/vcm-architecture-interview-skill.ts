@@ -18,6 +18,8 @@ During an active Architect Interview, handle the user's answers and final confir
 - If a fact can be established from the worktree or available tools, investigate it instead of asking the user.
 - If code, docs, and the user's requested behavior conflict, state the concrete conflict and ask which user-visible behavior is intended.
 - Maintain \`.ai/vcm/handoffs/architecture-evidence.md\` while reading. Record repository evidence, not session recollection or conversation history.
+- For every existing code site the drafted mechanism may change, record the site's verified safety, configuration, lifecycle, state, data, and contract assumptions. Treat comments and docs as claims to verify against implementation and runtime configuration, not as authority or text to ignore.
+- When the draft newly handles one member of an existing persisted structure, gate, invariant, or other semantic class, reconstruct and record the complete directly related member set and the evidence basis for its completeness.
 
 ## Feasibility Draft
 
@@ -89,6 +91,10 @@ Architecture Evidence Status: incomplete|complete
 
 ## Callers And Consumers
 
+## Existing Assumptions
+
+## Related Class Inventories
+
 ## External Boundaries
 
 ## Code And Docs Conflicts
@@ -96,7 +102,7 @@ Architecture Evidence Status: incomplete|complete
 ## Evidence Commands
 \`\`\`
 
-Identify inspected files and symbols, callers or consumers, state and side effects, verified behavior, and the worktree revision. Replace stale evidence instead of appending history.
+Identify inspected files and symbols, callers or consumers, state and side effects, verified behavior, existing assumptions and their scope, related class members and their completeness basis, and the worktree revision. Replace stale evidence instead of appending history.
 
 ## Completion
 

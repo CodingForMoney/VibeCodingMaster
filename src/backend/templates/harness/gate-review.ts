@@ -118,6 +118,26 @@ of verifying only the cited instances. A claimed-complete enumeration with
 neither a recorded command nor a judgment-derived basis, or one that fails
 reconstruction, is unsupported by code evidence and is \`request_changes\`.
 
+Run a backward-impact pass over the plan:
+
+- For every existing code site named by the Module/File Plan or Scaffold
+  Manifest, inspect the complete callable unit or site and verify its current
+  comments, contracts, preconditions, configuration scope, lifecycle
+  assumptions, and safety assumptions against implementation and runtime
+  configuration.
+- Identify which verified assumptions the plan preserves, updates, or
+  invalidates. Request changes when the plan omits a touched site, misstates an
+  assumption, or invalidates one without correcting the architecture, affected
+  surfaces, scaffold, and docs impact.
+- When the plan newly handles one member of an existing persisted structure,
+  gate, invariant, or other semantic class, independently reconstruct the
+  complete directly related member set from its declaration, catalogue,
+  adjacent contract, or repository search. Verify that every member has an
+  evidence-backed plan disposition.
+- Keep this pass bounded to plan-cited or scaffold-touched existing sites and
+  their directly related semantic classes. Do not expand it into an unrelated
+  whole-repository review.
+
 Request changes when the plan is structurally complete but architecturally
 under-specified, logically inconsistent, unsupported by code evidence, unsafe
 for boundary cases, conflicts with current project architecture, or leaves key
@@ -326,6 +346,8 @@ Use this findings structure:
 - End-To-End Flow:
 - Scope Fit:
 - Code Reality:
+- Invalidated Assumptions:
+- Existing-Class Completeness:
 - Ownership:
 - Data Flow:
 - Lifecycle:

@@ -4,6 +4,7 @@ import { renderCoderHarnessRules } from "../../../src/backend/templates/harness/
 import { renderCoderWorkerHarnessRules } from "../../../src/backend/templates/harness/coder-worker-agent.js";
 import { renderReviewerAgentRules } from "../../../src/backend/templates/harness/gate-review.js";
 import { renderProjectCodingStandardsRules } from "../../../src/backend/templates/harness/project-coding-standards.js";
+import { renderVcmArchitectureInterviewSkillRules } from "../../../src/backend/templates/harness/vcm-architecture-interview-skill.js";
 import { renderVcmFinalAcceptanceSkillRules } from "../../../src/backend/templates/harness/vcm-final-acceptance-skill.js";
 import { renderVcmRouteMessageSkillRules } from "../../../src/backend/templates/harness/vcm-route-message-skill.js";
 
@@ -54,5 +55,20 @@ describe("machine-consumed harness contracts", () => {
     expect(architect).toContain("record the unresolved issue and affected call sites");
     expect(reviewer).toContain("search the current worktree for the same mechanism");
     expect(reviewer).toContain("Classify the finding as `implementation`");
+  });
+
+  it("requires backward architecture review of existing assumptions and related classes", () => {
+    const interview = renderVcmArchitectureInterviewSkillRules();
+    const architect = renderArchitectHarnessRules();
+    const reviewer = renderReviewerAgentRules();
+
+    expect(interview).toContain("## Existing Assumptions");
+    expect(interview).toContain("## Related Class Inventories");
+    expect(architect).toContain("Existing Assumptions And Class Coverage");
+    expect(architect).toContain("Touched Site | Verified Assumption Or Contract | Evidence | Plan Effect | Disposition");
+    expect(architect).toContain("Class Source | Completeness Basis | Member | Plan Disposition");
+    expect(reviewer).toContain("Run a backward-impact pass over the plan");
+    expect(reviewer).toContain("- Invalidated Assumptions:");
+    expect(reviewer).toContain("- Existing-Class Completeness:");
   });
 });

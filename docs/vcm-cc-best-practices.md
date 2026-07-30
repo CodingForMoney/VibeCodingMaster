@@ -403,6 +403,7 @@ The plan must cover:
 
 - accepted scope
 - current code reality
+- existing assumptions and class coverage
 - architecture decision
 - module/file plan
 - public surface impact
@@ -422,6 +423,13 @@ Architect treats the third occurrence as an upstream ownership or contract
 signal. The architecture decision must fix the owner, confirm intentional local
 handling and correct the owning docs, or record the unresolved issue and
 affected call sites. Moving the repeated behavior into a helper is not enough.
+
+For every existing code site the plan or scaffold changes, Architect verifies
+the site's current assumptions against implementation and configuration, then
+records whether the plan preserves, updates, or invalidates them. When the plan
+newly handles one member of an existing persisted structure, gate, invariant,
+or semantic class, it records the complete directly related member set and a
+disposition for each member.
 
 Code scaffolding may create files and define non-private callable surfaces, but
 incomplete implementation must use `VCM:CODE <Scaffold Manifest ID>` markers.
@@ -529,6 +537,10 @@ Input policy:
   one. A third occurrence without the Architect-owned upstream disposition is
   `request_changes`; a documented post-validation docs-sync commitment is valid
   when the disposition itself is already explicit.
+- Architecture-plan review independently runs a backward-impact pass over every
+  plan-cited or scaffold-touched existing site. It rejects invalidated
+  assumptions without architecture correction and incomplete disposition of a
+  directly related existing semantic class.
 - Gates avoid duplicate review by comparing input hashes. Architecture review
   binds the confirmed brief, code evidence, and plan to current scaffold/code evidence; validation review binds the
   test report to current non-document code/test evidence and `docs/TESTING.md`;

@@ -321,6 +321,13 @@ the owner, confirm intentional local handling and correct its documentation, or
 record the unresolved issue and affected call sites. Code-diff review enforces
 the same threshold against changed hunks.
 
+Architecture evidence and planning also preserve backward compatibility with
+existing code assumptions. The evidence artifact records verified assumptions
+at every existing site the plan may change and complete directly related member
+sets when one member of an existing semantic class is newly handled. The plan
+states each assumption's effect and every member's disposition. Architecture
+review reconstructs both from current code before approval.
+
 `architect-restart-service` owns the task-local, in-memory deferred restart
 between completed planning and later Architect work. The Architect schedules it
 through `.ai/tools/request-architect-restart` before writing the first completed
