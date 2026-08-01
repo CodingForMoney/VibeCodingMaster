@@ -162,7 +162,7 @@ tests/
 | INT-API-001 | Project + task lifecycle over HTTP | Fastify app via `project-routes` / `task-routes` | Routes + services persist task state correctly | Create project, create task, read back task, status transitions | L2, on backend api/service change | No dedicated integration spec; exercised by backend E2E journeys |
 | INT-API-002 | Message bus round trip | `message-routes` / `message-service` | Route-file dispatch and history persistence | Posted message is persisted and retrievable in order | L2, on messaging change | No dedicated integration spec; exercised by backend E2E routing journeys |
 | INT-RT-001 | Session start/resume lifecycle | `runtime-coordinator-service` + `session-registry` | PTY session can start, persist id, and resume | Session id persisted; resume reuses id; stop cleans registry | L2, on runtime change | Covered with the mock Claude runtime; live PTY coverage remains absent |
-| INT-RT-002 | Post-task memory and harness review order | Final Acceptance + Review Task Harness + `runtime-coordinator-service` + Harness route | A normally stopped complete flow collects optional Auto Memory proposals before one Task Harness Retrospective | With Auto Memory on, workflow-role proposal hooks start and stop a normal Round, then one Harness Engineer turn reviews every proposal item and pending feedback, writes an item-level memory report and matching reviewed memory, and applies memory; with Auto Memory off, that prompt omits every memory path | L2, on Auto Memory or retrospective change | Covered by backend E2E with mock role sessions |
+| INT-RT-002 | Post-task memory and harness review order | Final Acceptance + Review Task Harness + `runtime-coordinator-service` + Harness route | A normally stopped complete flow collects optional Auto Memory proposals before one Task Harness Retrospective | With Auto Memory on, workflow-role proposal hooks start and stop a normal Round, then one Harness Engineer turn reviews every proposal item and pending feedback, directly updates only assigned `<VCM-memory>` blocks, commits those host files, and lets VCM record the result; with Auto Memory off, that prompt omits every memory path | L2, on Auto Memory or retrospective change | Covered by backend E2E with mock role sessions |
 | INT-GATE-003 | Tester-owned test-infrastructure repair | Test report contract + PM flow rules + validation/code-diff Gate contracts | A defect confined to tests, fixtures, test-only helpers, or `docs/TESTING.md` stays Tester-owned inside a code-producing flow | Unresolved repair status cannot enter validation review; repaired evidence records boundary, class sweep, commit, and rerun; code-diff findings classify `test-only` versus `implementation` for deterministic PM routing | L2, on Tester or Gate workflow change | Covered by artifact, harness-template, Gate service, and backend E2E tests |
 | INT-RT-003 | Manual Harness Feedback delivery | Harness Studio + `POST /api/projects/harness/feedback/send` | A user can send one pending report to the active task's Harness Engineer without automatic queue processing | Only a path still present in the pending Inbox is accepted; the exact absolute path is submitted; the report remains pending | L1, on Harness Feedback changes | Covered by service and route unit tests; live PTY coverage remains absent |
 
@@ -187,9 +187,9 @@ services with controlled runtime doubles:
   Task Harness Retrospective, plus direct retrospective execution when Auto
   Memory is disabled. The Auto Memory journey also proves that workflow-role
   proposals produce a running then stopped Round while Harness Engineer remains
-  excluded. Unit coverage verifies strict proposal fields and rejects
-  missing necessity, absence-impact, durable-document, and existing-memory
-  retention analysis before apply. Architect restart coverage verifies
+  excluded. Unit coverage verifies strict proposal fields, direct memory-block
+  ownership, committed-result recording, and rejection of uncommitted or
+  out-of-scope memory edits. Architect restart coverage verifies
   that Auto Memory assigns and preserves a planning-session candidate, blocks
   replacement when that candidate is missing, and supplies its run snapshot to
   the final Architect proposal and Harness Engineer review.

@@ -2,6 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { renderFinalAcceptanceTemplate } from "../../../src/backend/templates/handoff.js";
+import { replaceVcmMemoryBlock } from "../../../src/backend/templates/harness/memory-block.js";
 import { createMockClaudeE2eApp } from "./helpers/e2e-app.js";
 import { createE2eRepo, git } from "./helpers/e2e-repo.js";
 import {
@@ -135,7 +136,9 @@ describe("backend E2E task harness retrospective with mock Claude Code", () => {
     expect(harnessWrites).not.toContain("[VCM Task Harness Review: Memory Review]");
     expect(harnessWrites).toContain("[VCM Task Harness Retrospective]");
     expect(harnessWrites).toContain("Auto Memory Review:");
-    expect(harnessWrites).toContain("Write the complete reviewed memory set to:");
+    expect(harnessWrites).toContain("Active memory files:");
+    expect(harnessWrites).toContain("Apply the reviewed result directly to the <VCM-memory> blocks");
+    expect(harnessWrites).not.toContain("Write the complete reviewed memory set to:");
     await expect(fs.readFile(
       path.join(repo.repoRoot, ".ai/vcm/harness-feedback/task-retrospectives", `${task.taskSlug}.md`),
       "utf8"
@@ -254,15 +257,17 @@ function createDeferred(): { promise: Promise<void>; resolve: () => void } {
 async function writeHarnessRetrospective(ctx: MockClaudePromptContext): Promise<void> {
   await ctx.userPromptSubmit();
   const resultPath = matchPromptPath(ctx.prompt, "Write the analysis to Result Path");
-  const reviewedMemoryPath = matchOptionalPromptPath(
-    ctx.prompt,
-    "Write the complete reviewed memory set to"
-  );
-  if (reviewedMemoryPath) {
-    await ctx.writeAbsoluteFile(
-      path.join(reviewedMemoryPath, "CLAUDE.md"),
-      "Backend hooks own lifecycle completion.\n"
+  const autoMemoryReview = ctx.prompt.includes("Auto Memory Review:");
+  if (autoMemoryReview) {
+    await ctx.writeFile(
+      "CLAUDE.md",
+      replaceVcmMemoryBlock(
+        await ctx.readFile("CLAUDE.md"),
+        "Backend hooks own lifecycle completion.\n"
+      )
     );
+    await git(ctx.cwd, "add", "--", "CLAUDE.md");
+    await git(ctx.cwd, "commit", "-m", "chore: update VCM memory");
   }
   const pendingFeedback = matchPendingFeedbackPaths(ctx.prompt);
   const dispositions = pendingFeedback.map((feedbackPath) => `${feedbackPath}: confirmed`);
@@ -271,10 +276,10 @@ async function writeHarnessRetrospective(ctx: MockClaudePromptContext): Promise<
     [
       "# Task Harness Retrospective",
       "",
-      reviewedMemoryPath
+      autoMemoryReview
         ? "Memory reviewed during retrospective."
         : "Auto Memory disabled; no memory review requested.",
-      ...(reviewedMemoryPath
+      ...(autoMemoryReview
         ? [
             "",
             "## Memory Review",
@@ -332,8 +337,4 @@ function matchPromptPath(prompt: string, field: string): string {
     throw new Error(`Missing ${field} in prompt:\n${prompt}`);
   }
   return matched;
-}
-
-function matchOptionalPromptPath(prompt: string, field: string): string | undefined {
-  return prompt.match(new RegExp(`^${field}:\\s*(.+)$`, "m"))?.[1]?.trim();
 }

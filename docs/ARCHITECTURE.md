@@ -201,41 +201,41 @@ history.
 
 ## Auto Memory Ownership
 
-`auto-memory-service` owns shared memory in the root `CLAUDE.md`
-`<VCM-memory>` block and role memory in the matching
-`.claude/agents/*.md` block. The host file determines the memory identity. The
-blocks live outside fixed managed blocks, so fixed Harness refresh preserves
-them. Drafts, before/after snapshots, and review history remain task runtime
-data under `.ai/vcm/memory-review/`.
+Harness Engineer owns the reviewed content of shared memory in the root
+`CLAUDE.md` `<VCM-memory>` block and role memory in the matching
+`.claude/agents/*.md` block. `auto-memory-service` owns collection, snapshots,
+mechanical commit-boundary checks, history, and revert. The host file determines
+the memory identity. The blocks live outside fixed managed blocks, so fixed
+Harness refresh preserves them. Drafts, before/after snapshots, and review
+history remain task runtime data under `.ai/vcm/memory-review/`.
 
 After a normal stopped round has valid Final Acceptance, a manual or automatic
 Review Task Harness request may start the Auto Memory state machine. Workflow
 roles submit proposals sequentially through `vcm-propose-memory`. Once every
 proposal is ready, `harness-feedback-service` starts one Task Harness
 Retrospective turn. Its conditional prompt assigns the proposal paths, current
-snapshot, reviewed output path, and planning candidate to Harness Engineer.
+snapshot, active memory files, and planning candidate to Harness Engineer.
 Role drafts use structured per-item targets, evidence, necessity, absence
 impact, and durable-document disposition.
 Harness Engineer performs a full sweep of the current memory snapshot before
 evaluating those drafts. Every substantive existing entry receives a structured
 retain, update, remove, or move-to-durable-doc decision with its reason, removal
-impact, durable-document disposition, and evidence. Harness Engineer then writes
-both the reviewed memory set and the required `Memory Review` report block.
+impact, durable-document disposition, and evidence. Harness Engineer then edits
+the active `<VCM-memory>` blocks directly, writes the required `Memory Review`
+report block, and commits only the changed memory host files.
 That block records one decision for every proposal item. Each Add or Update
 decision independently explains why the memory is necessary, what would fail if
 it were absent, whether the knowledge belongs in memory or a durable document,
 the evidence checked, and the exact final memory content when retained. Blanket
 acceptance or rejection of a role draft is invalid.
-On the same successful `Stop`, `auto-memory-service` validates both artifacts.
-It verifies that every source candidate has exactly one matching decision, that
-kept content appears in the declared memory target, that rejected or
-durable-doc-only candidates are not introduced, that updates and removals match
-their decisions, and that referenced durable documents exist. These checks
-validate structure and report/output consistency; Harness Engineer remains
-responsible for the semantic quality of each decision. VCM then replaces only
-the corresponding active-worktree memory block contents, and
-creates a dedicated Git commit containing the changed host files. Dirty memory
-host files block the apply so unrelated edits cannot enter the memory commit.
+On the same successful `Stop`, `auto-memory-service` records the committed
+result. It verifies only mechanical boundaries: the retrospective report
+exists, memory host files have no uncommitted changes, the commit range contains
+only managed memory host files, and those files changed only inside their
+`<VCM-memory>` blocks. VCM does not parse Harness Engineer's semantic decisions,
+apply staged output, or create the memory commit. It reads the committed active
+memory, writes the after snapshot and diff, and preserves the run for user
+review and revert.
 Active memory blocks are read-only to role turns. Proposal prompts run through
 the normal workflow-role sessions, so their `UserPromptSubmit`, `Stop`, and
 `StopFailure` hooks participate in Round/Turn tracking. Sequential proposals
@@ -263,9 +263,10 @@ memory collection and updates. When enabled, pending, collecting, or failed
 memory work delays retrospective analysis; `reviewing` means proposals are
 ready and the retrospective may start. The retrospective reviews the proposals,
 current memory snapshot, task evidence, and pending Harness Feedback in one
-turn. Missing or invalid retrospective or memory output prevents completion and
-prevents partial memory application. Backend validation does not attempt to
-judge whether a memory is genuinely useful.
+turn. A missing retrospective report, uncommitted memory edit, out-of-scope
+commit, or edit outside a memory block prevents completion. Backend validation
+does not interpret the memory review decision or judge whether a memory is
+genuinely useful.
 
 Reusable harness feedback from `vcm-report-harness-issue` is a passive inbox.
 Harness Studio lets the user send one pending report to the active task's

@@ -467,8 +467,9 @@ files.
 Review Task Harness after Final Acceptance, Project Manager, Architect, Coder,
 Tester, and an enabled Reviewer submit proposals in sequence through
 `vcm-propose-memory`. Harness Engineer verifies and consolidates them before VCM
-applies the result as part of the same Task Harness Retrospective. Roles cannot
-edit active memory directly.
+records the result as part of the same Task Harness Retrospective. Workflow roles
+cannot edit active memory directly; Harness Engineer edits it only during the
+assigned Auto Memory Retrospective.
 
 When Auto Memory is enabled, the planning Architect writes a provisional memory
 candidate before its post-planning Session restart. VCM snapshots that candidate
@@ -477,11 +478,12 @@ the completed implementation and tests, and Harness Engineer reviews it with all
 final role proposals before anything becomes active memory.
 
 Shared memory is stored in the root `CLAUDE.md` `<VCM-memory>` block. Role memory
-is stored in the matching `.claude/agents/*.md` block. VCM changes only block
-contents and creates a dedicated commit in the active task worktree. Harness
-Studio shows current memory and task-local applied history. Memory is applied
-before user review; while the task worktree remains available, the user can edit
-current memory or revert a recorded change through another commit.
+is stored in the matching `.claude/agents/*.md` block. Harness Engineer changes
+only those blocks and creates a dedicated commit in the active task worktree.
+VCM verifies the mechanical commit boundary and records the after snapshot and
+diff. Harness Studio shows current memory and task-local applied history. Memory
+is applied before user review; while the task worktree remains available, the
+user can edit current memory or revert a recorded change through another commit.
 
 Post-task processing is ordered by the backend:
 
@@ -493,7 +495,8 @@ Final Acceptance
   -> Task Harness Retrospective
        -> Review pending Harness Feedback
        -> Review Auto Memory proposals, when Auto Memory is enabled
-  -> Apply reviewed memory, when Auto Memory is enabled
+       -> Harness Engineer updates and commits memory, when Auto Memory is enabled
+  -> VCM records the committed memory result
 ```
 
 Memory proposal prompts sent to Project Manager, Architect, Coder, Tester, and
@@ -507,10 +510,10 @@ impact, and durable-document disposition, then evaluates every proposal item
 independently. Each Add or Update decision records why the memory is necessary,
 what happens if it is absent, whether it belongs in memory or a durable
 document, and the exact final memory content when retained. VCM validates that
-every candidate has one matching decision and that the reviewed memory files
-implement those decisions before applying them. Harness Engineer review and
-retrospective work remain tool role activity and do not participate in Round
-completion.
+the commit changes only assigned memory host files and only their
+`<VCM-memory>` blocks; it does not parse or apply Harness Engineer's semantic
+decisions. Harness Engineer review and retrospective work remain tool role
+activity and do not participate in Round completion.
 
 When Auto Memory is disabled, Review Task Harness does not collect proposals or
 ask Harness Engineer to update memory. When enabled, both automatic and manual

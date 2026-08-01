@@ -21,6 +21,7 @@ export interface GitAdapter {
   getCommitInfo(repoRoot: string, ref?: string): Promise<GitCommitInfo>;
   getCommitDiff(repoRoot: string, ref?: string): Promise<string>;
   getDiff(repoRoot: string, baseRef: string, headRef?: string | null, paths?: string[]): Promise<string>;
+  getChangedPaths(repoRoot: string, baseRef: string, headRef?: string | null): Promise<string[]>;
   getCommitList(repoRoot: string, range: string): Promise<GitCommitInfo[]>;
   getMergeBase(repoRoot: string, leftRef: string, rightRef: string): Promise<string>;
   isIgnored(repoRoot: string, repoRelativePath: string): Promise<boolean>;
@@ -229,6 +230,28 @@ export function createGitAdapter(runner: CommandRunner): GitAdapter {
       }
 
       return result.stdout;
+    },
+    async getChangedPaths(repoRoot, baseRef, headRef = null) {
+      const result = await runGit(runner, repoRoot, [
+        "diff",
+        "--name-only",
+        "-z",
+        baseRef,
+        ...(headRef ? [headRef] : [])
+      ]);
+      if (result.exitCode !== 0) {
+        throw new VcmError({
+          code: "GIT_ERROR",
+          message: "Unable to read changed Git paths.",
+          statusCode: 400,
+          hint: result.stderr
+        });
+      }
+
+      return result.stdout
+        .split("\0")
+        .map((changedPath) => changedPath.trim())
+        .filter(Boolean);
     },
     async getCommitList(repoRoot, range) {
       const result = await runGit(runner, repoRoot, ["log", "--format=%H%x00%s%x00%cI%x1e", range]);

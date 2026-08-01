@@ -722,15 +722,14 @@ It then reviews every proposal item separately. For each Add or Update candidate
 the report must independently explain why it is necessary, the impact if absent,
 whether it belongs in memory or a durable document, the evidence checked, and
 the exact final memory content when retained. The required report block contains
-those decisions and the retained, updated, and removed summary. VCM rejects
-missing, duplicate, or mismatched candidate decisions and reviewed memory that
-contradicts the report. These checks enforce structure and output consistency;
-Harness Engineer owns the semantic judgment. Shared
-memory lives in the root `CLAUDE.md`
-`<VCM-memory>` block, while role memory lives in the matching
-`.claude/agents/*.md` block. VCM replaces only block contents and creates a
-dedicated commit in the active worktree. Drafts, snapshots, and review history
-remain under `.ai/vcm/memory-review/`. Active memory is read-only to role turns.
+those decisions and the retained, updated, and removed summary. Harness Engineer
+owns the semantic judgment, directly edits shared memory in the root
+`CLAUDE.md` `<VCM-memory>` block and role memory in the matching
+`.claude/agents/*.md` block, and commits only the changed memory host files. VCM
+does not parse the semantic decisions, apply an intermediate reviewed-memory
+set, or create that commit. On Stop it verifies only the commit and memory-block
+boundaries, then records the committed after snapshot, diff, and review history
+under `.ai/vcm/memory-review/`. Active memory is read-only to other role turns.
 Proposal prompts sent to workflow roles use their normal task sessions and
 participate in Round/Turn tracking. Their hooks start or continue the
 post-acceptance Round, which settles to stopped after the last workflow-role
@@ -749,9 +748,10 @@ Auto Memory is disabled, Harness Engineer does not request proposals or update
 memory. When enabled, pending, collecting, and failed memory work delay the
 retrospective; `reviewing` means proposals are ready. The single retrospective
 turn reviews reusable harness problems, pending Harness Feedback, memory
-proposals, the current memory snapshot, and the final task evidence. VCM applies
-the reviewed memory only after both the retrospective report and complete
-reviewed memory set are valid.
+proposals, the current memory snapshot, and the final task evidence. Harness
+Engineer applies and commits reviewed memory in that turn; VCM records the result
+only after the retrospective report exists and the committed changes stay within
+the assigned memory blocks.
 
 ## 16. Final Acceptance
 

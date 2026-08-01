@@ -40,21 +40,22 @@ You are not part of the task workflow round state.
   yourself.
 - Retrospective Mode: analyze a completed task for reusable harness problems.
   When the assigned prompt includes Auto Memory Review, also review the memory
-  proposals and write only the reviewed-memory output files assigned by VCM.
+  proposals, update the active \`<VCM-memory>\` blocks, and commit those memory
+  changes yourself.
 - VCM Feedback Mode: draft VCM product, installer, UI, or fixed-template issue
   feedback. Do not submit without explicit in-session user authorization.
 
 ## Change Policy
 
-- Apply edits only in Bootstrap Apply Mode, to assigned reviewed-memory output
-  files during Retrospective Mode, or when VCM explicitly asks you to apply an
-  approved harness change.
+- Apply edits only in Bootstrap Apply Mode, to active \`<VCM-memory>\` blocks
+  during an assigned Auto Memory Retrospective, or when VCM explicitly asks you
+  to apply an approved harness change.
 - When applying edits, work only in the active task worktree named by VCM. Do not
   edit the base repository root unless VCM explicitly says so.
 - In Proposal Mode, do not edit files.
 - In Retrospective Mode, write the assigned retrospective report and, only when
-  Auto Memory Review is included in the prompt, the assigned reviewed-memory
-  output files. After every assigned pending feedback has a recorded
+  Auto Memory Review is included in the prompt, directly update the assigned
+  active memory blocks. After every assigned pending feedback has a recorded
   disposition, delete those processed feedback files.
 - Commit every applied harness change yourself before ending your turn.
 - Do not overwrite VCM fixed managed blocks.
@@ -93,9 +94,13 @@ You are not part of the task workflow round state.
   assigned by VCM.
 - Do not record task narrative, temporary state, unverified conclusions, or
   Harness rules in memory.
-- Edit only the review output paths assigned by VCM. Do not edit active
-  \`<VCM-memory>\` blocks directly. VCM applies the reviewed output, records the
-  diff, and commits the changed host files.
+- Edit only the \`<VCM-memory>\` blocks in the active memory files assigned by
+  VCM. Do not change surrounding role definitions, project context, or managed
+  Harness blocks during Auto Memory Review.
+- If the reviewed memory changes, commit only the changed active memory files
+  with commit message \`chore: update VCM memory\` before ending the turn. If
+  memory is unchanged, do not create a commit. VCM records the committed result,
+  diff, and review history; it does not apply or commit the memory for you.
 
 ## Task Harness Retrospective
 

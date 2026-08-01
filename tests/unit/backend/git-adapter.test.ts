@@ -146,6 +146,28 @@ describe("createGitAdapter", () => {
     expect(calls[0]?.args.slice(-4)).toEqual(["status", "--porcelain=v1", "-z", "--untracked-files=all"]);
   });
 
+  it("reads changed paths as a null-delimited list", async () => {
+    const calls: RunnerCall[] = [];
+    const adapter = createGitAdapter(createRunner(calls, {
+      stdout: "CLAUDE.md\0.claude/agents/harness-engineer.md\0",
+      stderr: "",
+      exitCode: 0
+    }));
+
+    await expect(adapter.getChangedPaths("/workspace", "base123", "HEAD")).resolves.toEqual([
+      "CLAUDE.md",
+      ".claude/agents/harness-engineer.md"
+    ]);
+
+    expect(calls[0]?.args.slice(-5)).toEqual([
+      "diff",
+      "--name-only",
+      "-z",
+      "base123",
+      "HEAD"
+    ]);
+  });
+
   it("checks whether a worktree path is registered", async () => {
     const calls: RunnerCall[] = [];
     const adapter = createGitAdapter(createRunner(calls, {

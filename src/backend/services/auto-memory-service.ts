@@ -36,14 +36,9 @@ import {
 import {
   parseMemoryProposal,
   type MemoryProposalItem,
+  type MemoryProposalOperation,
   validateMemoryProposal
 } from "./memory-proposal-validation.js";
-import {
-  parseMemoryReviewReport,
-  validateMemoryReviewOutput,
-  type MemoryReviewCandidate,
-  type MemoryReviewTarget
-} from "./memory-review-validation.js";
 import type { SessionService } from "./session-service.js";
 
 const MEMORY_FILE_DEFINITIONS = [
@@ -58,6 +53,16 @@ const MEMORY_FILE_DEFINITIONS = [
 
 type WorkflowMemoryRole = Exclude<VcmMemoryRoleName, "harness-engineer">;
 type MemorySet = Record<string, string>;
+type MemoryReviewTarget = "shared" | VcmMemoryRoleName;
+
+export interface MemoryReviewCandidate {
+  id: string;
+  source: string;
+  operation: MemoryProposalOperation;
+  target: MemoryReviewTarget;
+  content?: string;
+  existing?: string;
+}
 
 interface StoredMemoryReviewState {
   version: 1;
@@ -71,6 +76,7 @@ interface StoredMemoryReviewState {
   drafts: MemoryDraftState[];
   reviewPromptDispatchedAt?: string;
   retrospectiveReportPath?: string;
+  reviewBaseCommit?: string;
   error?: string;
 }
 
@@ -131,7 +137,7 @@ export interface TaskRetrospectiveMemoryReviewContext {
   runId: string;
   roleDraftsPath: string;
   currentMemoryPath: string;
-  reviewedMemoryPath: string;
+  activeMemoryPaths: string[];
   proposalCandidates: MemoryReviewCandidate[];
   planningCandidatePath?: string;
 }
@@ -153,7 +159,7 @@ export interface AutoMemoryHarnessHookInput {
 
 export interface AutoMemoryServiceDeps {
   fs: FileSystemAdapter;
-  git: Pick<GitAdapter, "commitPaths" | "getDiff">;
+  git: Pick<GitAdapter, "commitPaths" | "getDiff" | "getHeadCommit" | "getChangedPaths">;
   runtime: Pick<TerminalRuntime, "getSession" | "write">;
   sessionService: Pick<
     SessionService,
@@ -268,6 +274,37 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
     return memory;
   }
 
+  async function writeRunMemoryHostSnapshot(taskRepoRoot: string, runId: string): Promise<void> {
+    for (const definition of MEMORY_FILE_DEFINITIONS) {
+      await deps.fs.writeText(
+        resolveRepoPath(taskRepoRoot, memoryRunHostFilePath(runId, definition.path)),
+        await deps.fs.readText(resolveRepoPath(taskRepoRoot, definition.path))
+      );
+    }
+  }
+
+  async function assertOnlyMemoryBlocksChanged(
+    taskRepoRoot: string,
+    runId: string,
+    currentMemory: MemorySet
+  ): Promise<void> {
+    for (const definition of MEMORY_FILE_DEFINITIONS) {
+      const beforeHost = await deps.fs.readText(
+        resolveRepoPath(taskRepoRoot, memoryRunHostFilePath(runId, definition.path))
+      );
+      const currentHost = await deps.fs.readText(resolveRepoPath(taskRepoRoot, definition.path));
+      const expectedHost = replaceVcmMemoryBlock(beforeHost, currentMemory[definition.path]);
+      if (currentHost !== expectedHost) {
+        throw new VcmError({
+          code: "MEMORY_REVIEW_SCOPE_CHANGED",
+          message: `Harness Engineer changed content outside the VCM memory block: ${definition.path}`,
+          statusCode: 409,
+          hint: "Restore non-memory content, keep only the reviewed <VCM-memory> edit, and commit the correction."
+        });
+      }
+    }
+  }
+
   async function getState(baseRepoRoot: string, taskRepoRoot: string): Promise<AutoMemoryStateReport> {
     let [active, runs, memoryFiles] = await Promise.all([
       loadActiveState(taskRepoRoot),
@@ -347,7 +384,6 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
     };
     const before = await readMemorySet(input.taskRepoRoot);
     await writeRunMemorySet(input.taskRepoRoot, runId, "before", before);
-    await writeRunMemorySet(input.taskRepoRoot, runId, "after", before);
     await snapshotArchitectPlanningCandidate(input.taskRepoRoot, runId);
     await persistRun(input.taskRepoRoot, {
       version: 1,
@@ -435,9 +471,31 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
     }
 
     const proposalCandidates = await readReviewCandidates(taskRepoRoot, state);
+    const currentMemory = await readMemorySet(taskRepoRoot);
+    const beforeMemory = await readRunMemorySet(taskRepoRoot, state.runId, "before");
+    if (!sameHashes(hashMemorySet(currentMemory), hashMemorySet(beforeMemory))) {
+      throw new VcmError({
+        code: "MEMORY_TARGET_CHANGED",
+        message: "VCM memory changed while role proposals were being collected.",
+        statusCode: 409,
+        hint: "Review the current memory, then retry Auto Memory."
+      });
+    }
+    const memoryPaths: string[] = MEMORY_FILE_DEFINITIONS.map((definition) => definition.path);
+    const existingDiff = await deps.git.getDiff(taskRepoRoot, "HEAD", null, memoryPaths);
+    if (existingDiff.trim()) {
+      throw new VcmError({
+        code: "MEMORY_HOST_FILE_DIRTY",
+        message: "A file containing VCM memory has uncommitted changes before Harness Engineer review.",
+        statusCode: 409,
+        hint: "Commit or discard the existing host-file changes before starting Task Harness Retrospective."
+      });
+    }
+    await writeRunMemoryHostSnapshot(taskRepoRoot, state.runId);
     const timestamp = now();
     state.reviewPromptDispatchedAt = timestamp;
     state.retrospectiveReportPath = retrospectiveReportPath;
+    state.reviewBaseCommit = await deps.git.getHeadCommit(taskRepoRoot);
     state.updatedAt = timestamp;
     await persistActiveState(taskRepoRoot, state);
 
@@ -447,7 +505,7 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
       runId: state.runId,
       roleDraftsPath: path.join(runRoot, "drafts"),
       currentMemoryPath: path.join(runRoot, "before"),
-      reviewedMemoryPath: path.join(runRoot, "after"),
+      activeMemoryPaths: memoryPaths.map((memoryPath) => resolveRepoPath(taskRepoRoot, memoryPath)),
       proposalCandidates,
       ...(planningCandidatePath
         ? { planningCandidatePath: resolveRepoPath(taskRepoRoot, planningCandidatePath) }
@@ -462,6 +520,7 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
     }
     delete state.reviewPromptDispatchedAt;
     delete state.retrospectiveReportPath;
+    delete state.reviewBaseCommit;
     state.updatedAt = now();
     await persistActiveState(taskRepoRoot, state);
   }
@@ -563,54 +622,15 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
         return true;
       }
       try {
-        const report = await deps.fs.readText(state.retrospectiveReportPath);
-        const currentMemorySnapshot = await readRunMemorySet(
-          input.taskRepoRoot,
-          state.runId,
-          "before"
-        );
-        const reviewedMemorySnapshot = await readRunMemorySet(
-          input.taskRepoRoot,
-          state.runId,
-          "after"
-        );
-        const candidates = await readReviewCandidates(input.taskRepoRoot, state);
-        const reportResult = parseMemoryReviewReport(
-          report,
-          candidates,
-          hasSubstantiveMemory(currentMemorySnapshot)
-        );
-        if (reportResult.error) {
-          await failReview(
-            input.taskRepoRoot,
-            state,
-            `Task Harness Retrospective memory review report ${reportResult.error}.`
-          );
-          return true;
-        }
-        const outputError = await validateReviewedMemoryOutput(
-          input.taskRepoRoot,
-          currentMemorySnapshot,
-          reviewedMemorySnapshot,
-          reportResult.decisions ?? []
-        );
-        if (outputError) {
-          await failReview(
-            input.taskRepoRoot,
-            state,
-            `Task Harness Retrospective reviewed memory ${outputError}.`
-          );
-          return true;
-        }
+        await recordHarnessEngineerMemoryResult(input.taskRepoRoot, state);
       } catch (error) {
         await failReview(
           input.taskRepoRoot,
           state,
-          `Task Harness Retrospective memory review validation failed: ${errorMessage(error)}`
+          `Harness Engineer memory result could not be recorded: ${errorMessage(error)}`
         );
         return true;
       }
-      await applyReviewedMemory(input.taskRepoRoot, state);
       return true;
     }
     return true;
@@ -822,51 +842,85 @@ export function createAutoMemoryService(deps: AutoMemoryServiceDeps): AutoMemory
     return candidates;
   }
 
-  async function validateReviewedMemoryOutput(
-    taskRepoRoot: string,
-    before: MemorySet,
-    after: MemorySet,
-    decisions: NonNullable<ReturnType<typeof parseMemoryReviewReport>["decisions"]>
-  ): Promise<string | undefined> {
-    return validateMemoryReviewOutput({
-      before: memorySetByTarget(before),
-      after: memorySetByTarget(after),
-      decisions,
-      durableDocExists: async (durableDocPath) => {
-        try {
-          return await deps.fs.pathExists(resolveRepoPath(taskRepoRoot, durableDocPath));
-        } catch {
-          return false;
-        }
-      }
-    });
-  }
-
-  async function applyReviewedMemory(
+  async function recordHarnessEngineerMemoryResult(
     taskRepoRoot: string,
     state: StoredMemoryReviewState
   ): Promise<void> {
-    try {
-      const before = await readRunMemorySet(taskRepoRoot, state.runId, "before");
-      const after = await readRunMemorySet(taskRepoRoot, state.runId, "after");
-      assertCompleteMemorySet(after);
-      await applyAndCommitMemorySet(taskRepoRoot, before, after, "chore: update VCM memory");
-      const timestamp = now();
-      const diff = renderMemoryDiff(before, after);
-      const run = await readRun(taskRepoRoot, state.runId);
-      await persistRun(taskRepoRoot, {
-        ...run,
-        status: "applied",
-        updatedAt: timestamp,
-        appliedAt: timestamp,
-        afterHashes: hashMemorySet(after),
-        diff
+    if (!state.reviewBaseCommit) {
+      throw new VcmError({
+        code: "MEMORY_REVIEW_BASE_MISSING",
+        message: "Harness Engineer memory review has no recorded base commit.",
+        statusCode: 409,
+        hint: "Retry Auto Memory before running Task Harness Retrospective again."
       });
-      await deps.fs.writeText(resolveRepoPath(taskRepoRoot, `${MEMORY_REVIEW_RUNS_ROOT}/${state.runId}/applied.patch`), diff);
-      await clearActiveState(taskRepoRoot);
-    } catch (error) {
-      await failReview(taskRepoRoot, state, `Harness Engineer memory result could not be applied: ${errorMessage(error)}`);
     }
+
+    const before = await readRunMemorySet(taskRepoRoot, state.runId, "before");
+    const after = await readMemorySet(taskRepoRoot);
+    await assertOnlyMemoryBlocksChanged(taskRepoRoot, state.runId, after);
+
+    const memoryPaths: string[] = MEMORY_FILE_DEFINITIONS.map((definition) => definition.path);
+    const uncommittedMemoryDiff = await deps.git.getDiff(taskRepoRoot, "HEAD", null, memoryPaths);
+    if (uncommittedMemoryDiff.trim()) {
+      throw new VcmError({
+        code: "MEMORY_REVIEW_NOT_COMMITTED",
+        message: "Harness Engineer left reviewed memory changes uncommitted.",
+        statusCode: 409,
+        hint: "Commit the reviewed <VCM-memory> changes before ending the retrospective turn."
+      });
+    }
+
+    const changedMemoryPaths = MEMORY_FILE_DEFINITIONS
+      .filter((definition) => before[definition.path] !== after[definition.path])
+      .map((definition) => definition.path);
+    const currentHead = await deps.git.getHeadCommit(taskRepoRoot);
+    const committedPaths = currentHead === state.reviewBaseCommit
+      ? []
+      : await deps.git.getChangedPaths(taskRepoRoot, state.reviewBaseCommit, currentHead);
+    const unexpectedPaths = committedPaths.filter((changedPath) => !memoryPaths.includes(changedPath));
+    if (unexpectedPaths.length > 0) {
+      throw new VcmError({
+        code: "MEMORY_REVIEW_COMMIT_SCOPE_INVALID",
+        message: `Harness Engineer memory commit contains files outside managed memory hosts: ${unexpectedPaths.join(", ")}`,
+        statusCode: 409,
+        hint: "Move unrelated changes to a separate workflow and keep the memory review commit limited to managed memory files."
+      });
+    }
+    const missingCommittedPaths = changedMemoryPaths.filter((changedPath) => !committedPaths.includes(changedPath));
+    if (missingCommittedPaths.length > 0) {
+      throw new VcmError({
+        code: "MEMORY_REVIEW_COMMIT_MISSING",
+        message: `Harness Engineer did not commit reviewed memory files: ${missingCommittedPaths.join(", ")}`,
+        statusCode: 409,
+        hint: "Commit every changed memory host file before ending the retrospective turn."
+      });
+    }
+    if (changedMemoryPaths.length === 0 && committedPaths.length > 0) {
+      throw new VcmError({
+        code: "MEMORY_REVIEW_EMPTY_COMMIT_RANGE",
+        message: "Harness Engineer created memory-host commits but left no final memory change.",
+        statusCode: 409,
+        hint: "Remove the unnecessary memory commits or leave memory unchanged without committing."
+      });
+    }
+
+    await writeRunMemorySet(taskRepoRoot, state.runId, "after", after);
+    const timestamp = now();
+    const diff = renderMemoryDiff(before, after);
+    const run = await readRun(taskRepoRoot, state.runId);
+    await persistRun(taskRepoRoot, {
+      ...run,
+      status: "applied",
+      updatedAt: timestamp,
+      appliedAt: timestamp,
+      afterHashes: hashMemorySet(after),
+      diff
+    });
+    await deps.fs.writeText(
+      resolveRepoPath(taskRepoRoot, `${MEMORY_REVIEW_RUNS_ROOT}/${state.runId}/applied.patch`),
+      diff
+    );
+    await clearActiveState(taskRepoRoot);
   }
 
   async function createAppliedRun(
@@ -1132,31 +1186,6 @@ function toReviewCandidates(
   }));
 }
 
-function memoryPathForTarget(target: MemoryReviewTarget): string {
-  if (target === "shared") {
-    return "CLAUDE.md";
-  }
-  const definition = MEMORY_FILE_DEFINITIONS.find(
-    (candidate) => "role" in candidate && candidate.role === target
-  );
-  if (!definition) {
-    throw new Error(`Missing memory file definition for review target: ${target}`);
-  }
-  return definition.path;
-}
-
-function memorySetByTarget(memory: MemorySet): Record<MemoryReviewTarget, string> {
-  return {
-    shared: memory["CLAUDE.md"],
-    "project-manager": memory[memoryPathForTarget("project-manager")],
-    architect: memory[memoryPathForTarget("architect")],
-    coder: memory[memoryPathForTarget("coder")],
-    tester: memory[memoryPathForTarget("tester")],
-    reviewer: memory[memoryPathForTarget("reviewer")],
-    "harness-engineer": memory[memoryPathForTarget("harness-engineer")]
-  };
-}
-
 function toActiveReview(state: StoredMemoryReviewState): ActiveMemoryReview {
   return {
     runId: state.runId,
@@ -1233,6 +1262,10 @@ function memoryRunFilePath(runId: string, snapshot: "before" | "after", memoryPa
   return `${MEMORY_REVIEW_RUNS_ROOT}/${runId}/${snapshot}/${memoryPath}`;
 }
 
+function memoryRunHostFilePath(runId: string, memoryPath: string): string {
+  return `${MEMORY_REVIEW_RUNS_ROOT}/${runId}/host-before/${memoryPath}`;
+}
+
 function missingMemoryBlockError(filePath: string): VcmError {
   return new VcmError({
     code: "MEMORY_BLOCK_MISSING",
@@ -1255,13 +1288,6 @@ function hashMemorySet(memory: MemorySet): Record<string, string> {
     definition.path,
     sha256(memory[definition.path] ?? "")
   ]));
-}
-
-function hasSubstantiveMemory(memory: MemorySet): boolean {
-  return Object.values(memory).some((content) => {
-    const normalized = content.trim();
-    return Boolean(normalized && normalized !== "No accumulated project memory yet.");
-  });
 }
 
 function sameHashes(left: Record<string, string>, right: Record<string, string>): boolean {
