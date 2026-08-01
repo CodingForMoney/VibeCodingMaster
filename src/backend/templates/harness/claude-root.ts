@@ -66,6 +66,14 @@ If a reusable harness problem is suspected, it is enough to record a concise fee
 - Runtime task records and handoffs under \`.ai/vcm/\` are temporary. Durable facts must move into code, tests, PR text, commit history, or long-term docs.
 - Only architect writes \`.ai/vcm/handoffs/known-issues.md\`; other roles report unresolved findings back through their own handoff artifacts.
 
+## VCM Current Handoff Contract
+
+- A role-owned handoff under \`.ai/vcm/handoffs/\` is the complete current result for that artifact, not an append-only log or a pointer to an earlier revision.
+- Whenever a handoff is rewritten, make the new revision self-contained: restate every still-relevant decision, evidence item, command, result, coverage mapping, finding, approval, and remaining action needed to interpret the current result without another round's artifact.
+- Remove or replace superseded content. Do not use a prior round, prior report revision, consumed route message, role Session, or transcript as a substitute for evidence in the current handoff.
+- A handoff may cite current code, durable docs, commits, preserved job output, or request-scoped Gate Review evidence that still exists at the cited path.
+- Before routing an artifact reference, confirm the referenced handoff satisfies this contract.
+
 ## User Communication
 
 - A message without a VCM marker is user communication.

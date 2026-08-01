@@ -1,12 +1,20 @@
 import { describe, expect, it } from "vitest";
 import { renderArchitectHarnessRules } from "../../../src/backend/templates/harness/architect-agent.js";
+import { renderRootClaudeHarnessRules } from "../../../src/backend/templates/harness/claude-root.js";
 import { renderCoderHarnessRules } from "../../../src/backend/templates/harness/coder-agent.js";
 import { renderCoderWorkerHarnessRules } from "../../../src/backend/templates/harness/coder-worker-agent.js";
 import { renderReviewerAgentRules } from "../../../src/backend/templates/harness/gate-review.js";
 import { renderProjectCodingStandardsRules } from "../../../src/backend/templates/harness/project-coding-standards.js";
+import { renderTesterHarnessRules } from "../../../src/backend/templates/harness/tester-agent.js";
 import { renderVcmArchitectureInterviewSkillRules } from "../../../src/backend/templates/harness/vcm-architecture-interview-skill.js";
 import { renderVcmFinalAcceptanceSkillRules } from "../../../src/backend/templates/harness/vcm-final-acceptance-skill.js";
 import { renderVcmRouteMessageSkillRules } from "../../../src/backend/templates/harness/vcm-route-message-skill.js";
+import {
+  renderArchitecturePlanTemplate,
+  renderCoderCompletionTemplate,
+  renderFinalAcceptanceTemplate,
+  renderTestReportTemplate
+} from "../../../src/backend/templates/handoff.js";
 
 describe("machine-consumed harness contracts", () => {
   it("uses the route frontmatter format parsed by the backend", () => {
@@ -70,5 +78,30 @@ describe("machine-consumed harness contracts", () => {
     expect(reviewer).toContain("Run a backward-impact pass over the plan");
     expect(reviewer).toContain("- Invalidated Assumptions:");
     expect(reviewer).toContain("- Existing-Class Completeness:");
+  });
+
+  it("requires every rewritten handoff to be a self-contained current snapshot", () => {
+    const root = renderRootClaudeHarnessRules();
+    const architect = renderArchitectHarnessRules();
+    const coder = renderCoderHarnessRules();
+    const tester = renderTesterHarnessRules();
+    const route = renderVcmRouteMessageSkillRules();
+
+    expect(root).toContain("## VCM Current Handoff Contract");
+    expect(root).toContain("make the new revision self-contained");
+    expect(architect).toContain("complete, self-contained current executable plan");
+    expect(coder).toContain("complete, self-contained current implementation completion evidence");
+    expect(tester).toContain("complete, self-contained current validation evidence");
+    expect(tester).toContain("as recorded in the prior round");
+    expect(route).toContain("current revision is complete and self-contained");
+
+    for (const artifact of [
+      renderArchitecturePlanTemplate("demo"),
+      renderCoderCompletionTemplate("demo"),
+      renderTestReportTemplate("demo"),
+      renderFinalAcceptanceTemplate("demo")
+    ]) {
+      expect(artifact).toContain("VCM current handoff: replace this file with one complete, self-contained snapshot");
+    }
   });
 });

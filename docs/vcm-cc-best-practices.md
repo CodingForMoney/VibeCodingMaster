@@ -209,6 +209,12 @@ preserve execution history.
 Task runtime state lives under `.ai/vcm/` in the task worktree. Durable tool
 state can live under `.ai/vcm/` in the connected base repo.
 
+Role handoffs are replaceable current-state artifacts, not append-only logs.
+Every rewrite must be a complete, self-contained snapshot of the current
+result: it carries forward all still-relevant decisions and evidence, removes
+superseded content, and never depends on a prior round, overwritten report,
+consumed route message, Session, or transcript.
+
 Current runtime paths include:
 
 ```text
@@ -546,6 +552,10 @@ Input policy:
   test report to current non-document code/test evidence and `docs/TESTING.md`;
   code-diff review binds the selected commit range and diff, current test
   report, and validation-adequacy report.
+- Each Gate request snapshots its referenced `.ai/vcm` handoffs and prior-Gate
+  evidence under the request record. Reviewer uses those immutable snapshots
+  for role-produced evidence, so a later handoff rewrite cannot change what the
+  request reviewed.
 
 Reviewer writes reports under:
 

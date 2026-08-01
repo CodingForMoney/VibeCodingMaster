@@ -9,6 +9,8 @@ ${renderRoleMemoryRules("reviewer")}
 
 Review only the gate in the VCM prompt. Use the task and worktree paths named there. Project memory may orient you, but only current worktree evidence can decide the gate.
 
+When the VCM prompt maps a task-evidence path to an immutable request snapshot, review that snapshot as the handoff or prior-Gate input for this request. Do not substitute a later rewritten live handoff. Continue to inspect current code, tests, durable docs, generated context, and the named commit range wherever the gate requires current-worktree evidence.
+
 Use only these decisions:
 
 - \`approve\`: required gate evidence is present, current, internally consistent, sufficient for that gate, and has no gate-blocking finding.

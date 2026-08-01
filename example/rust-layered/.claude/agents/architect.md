@@ -92,7 +92,7 @@ when VCM explicitly assigns a memory proposal or candidate path, use
 
 - `architecture-plan.md` must start with `Planning Result: complete|incomplete|user clarification required` and use these sections: Accepted Scope, Current Code Reality, Existing Assumptions And Class Coverage, Architecture Decision, Module/File Plan, Public Surface Impact, Scaffold Manifest, Scaffold Build Evidence, Tester Coverage Hints, Docs Impact, Known Risks, and Coder Handoff Notes.
 - Use `Planning Result: complete` only when: the plan document is complete; the Scaffold Manifest ledger reconciles one to one against the committed markers; and `Scaffold Build Evidence` records a green compile/typecheck run at the current scaffold commit hash. Include the same Planning Result in the route message to project-manager; do not select the next route.
-- `architecture-plan.md` is the current executable plan, not a changelog. When revising it, replace superseded decisions, obsolete scaffold rows, stale risks, and old implementation notes instead of appending history.
+- `architecture-plan.md` is the complete, self-contained current executable plan, not a changelog. Each revision must restate every still-current decision, constraint, evidence reference, scaffold row, risk, and implementation instruction needed to execute and review the plan without a prior revision. Replace superseded decisions, obsolete scaffold rows, stale risks, and old implementation notes instead of appending history.
 - `Accepted Scope`: state the PM-routed task scope and the confirmed brief's required user-visible outcome and decisions, plus any explicit non-scope that prevents accidental expansion.
 - `Current Code Reality`: cite `architecture-evidence.md` and summarize only the verified facts that constrain the architecture decision. Do not duplicate the full evidence inventory. For any module whose build configuration the plan changes, the evidence artifact must quote its complete direct dependency list from the package manifest, never a summary or selection.
 - Any enumeration the plan presents as complete over the codebase — call-site inventories, module or file lists, symbol sets — must either record the deterministic, repository-local command that generates it (run at the scaffold commit, the set transcribed from its output) or be explicitly marked as judgment-derived with the evidence basis for its completeness. A complete-claimed enumeration with neither is not evidence.
@@ -167,7 +167,7 @@ when VCM explicitly assigns a memory proposal or candidate path, use
 - Before handing off an architect-completed Debug Mode fix, run the smallest relevant L0 fast checks for the touched files or changed modules: format, lint, typecheck, boundary, dependency, or project-defined equivalents. If a check cannot run, report the exact reason.
 - If the Debug Mode fix changes module structure, source/test file lists, public APIs, routes, exports, re-exports, or other externally consumed surface, run `.ai/tools/generate-module-index` / `.ai/tools/generate-public-surface` or their `--check` mode as applicable.
 - After an architect-completed Debug Mode fix, report the completed result and evidence path to project-manager. Do not select the next route.
-- Before reporting a completed Debug Mode code fix, replace `.ai/vcm/handoffs/architect-debug.md` with current evidence. Set `Status: completed` and record the PM-routed failure, confirmed root cause, implementation, changed files and public-surface impact, baseline tests, diagnostic and L0/L1 validation, L2/L3 validation, generated-context status, remaining failure evidence, and final disposition. This file is the current Debug completion evidence; do not append history.
+- Before reporting a completed Debug Mode code fix, replace `.ai/vcm/handoffs/architect-debug.md` with complete, self-contained current evidence. Set `Status: completed` and restate the PM-routed failure, confirmed root cause, implementation, changed files and public-surface impact, baseline tests, diagnostic and L0/L1 validation, L2/L3 validation, generated-context status, remaining failure evidence, and final disposition needed to review the result without a prior revision. Remove superseded evidence instead of appending history.
 - Final disposition must be one of: local fix completed, normal architecture plan required, or user clarification required.
 - Report root cause, changed files, scope and public-surface impact, L0/L1 results, applicable L2/L3 results, baseline tests added or skipped with reason, generated-context regeneration or freshness check when applicable, final disposition, and the Debug completion evidence path when code was changed.
 
@@ -236,6 +236,8 @@ Small diff, minimum change, localized fix, or preserving the current implementat
 8. `Required Architecture Direction`
 9. `Implementation And Validation`
 10. `Final Disposition`
+
+Each rewritten `architecture-diagnosis.md` must be a complete, self-contained current diagnosis and implementation result. Restate all still-relevant code-reading closure, evidence, architecture findings, changes, validation, and remaining failure evidence; do not refer to a prior round or superseded diagnosis as evidence.
 
 `Implementation And Validation` must use these subsections: `Changed Files And Public Surface`, `Baseline Tests`, `Diagnostic And L0/L1 Validation`, `L2/L3 Validation`, `Generated Context`, and `Commit`.
 
@@ -325,6 +327,7 @@ Small diff, minimum change, localized fix, or preserving the current implementat
 - Write `.ai/vcm/handoffs/docs-sync-report.md` for post-validation docs sync in Code-Change Flow, Architect Debug Flow, or a code-producing Architecture Diagnosis Flow. Do not write it for Docs-Only Flow or a Debug/Diagnosis Branch.
 - In Docs-Only Flow, the Architect role result must record the decision, changed documents, evidence reviewed, checks performed, and commit.
 - The report records decision, evidence reviewed, current-truth reconciliation, generated-context freshness, cross-document consistency, architecture docs, active plans, testing-doc consistency, known-issues disposition, durable-doc audit command and result, docs updated, docs left unchanged, remaining documentation risks, and handoff notes.
+- Each rewritten `docs-sync-report.md` must be a complete, self-contained snapshot of the current docs-sync result and must not rely on a prior report revision.
 - `Decision` must be `synced`, `unchanged`, or `blocked`.
 
 ### Background Jobs

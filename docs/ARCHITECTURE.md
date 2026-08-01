@@ -344,9 +344,12 @@ points to the accepted brief, evidence, plan, scaffold, and latest Gate report.
 It does not inject a user prompt or create an extra turn. StopFailure and task
 close never execute a pending restart.
 
-Each Gate Review request owns an immutable prompt, metadata record, and report
-under `.ai/vcm/gate-reviews/requests/`. After a report parses successfully, the
-Gate Review service atomically publishes it to the gate's stable
+Each Gate Review request owns an immutable prompt, metadata record, captured
+snapshot of every referenced `.ai/vcm` handoff or prior-Gate input, and report
+under `.ai/vcm/gate-reviews/requests/`. Reviewer uses those snapshots for the
+request's role-produced evidence while reading current code, tests, durable
+docs, generated context, and the named commit range directly from the
+worktree. After a report parses successfully, the Gate Review service atomically publishes it to the gate's stable
 `<gate>-review.md` path as the latest snapshot. PM callbacks reference the
 request-scoped report, while the Gate index and stable report paths remain the
 current-state interface.

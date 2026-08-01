@@ -129,4 +129,6 @@ accepted|accepted-with-known-risks|needs-coder-follow-up|needs-architect-follow-
 ## Final User Summary
 ```
 
+Each rewrite must be a complete, self-contained snapshot of the current acceptance decision and supporting evidence. Restate every still-relevant evidence result, file classification, validation result, Gate decision, docs-sync result, known-issues disposition, cleanup result, risk, and next action; do not rely on a prior acceptance revision, route message, Session, or transcript.
+
 The final user summary should be concise and include files changed, validation, docs updates, open risks, and next action.

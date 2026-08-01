@@ -88,6 +88,12 @@ interface ParsedReport extends GateReviewReport {
   decision: GateReviewDecision;
 }
 
+interface GateInputSnapshot {
+  sourcePath: string;
+  snapshotPath?: string;
+  status: "captured" | "missing";
+}
+
 const REVIEWER_AGENT_PATH = ".claude/agents/reviewer.md";
 const GATE_REVIEW_DIR = ".ai/vcm/gate-reviews";
 const REQUESTS_DIR = ".ai/vcm/gate-reviews/requests";
@@ -510,6 +516,12 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
     const requestPath = path.posix.join(REQUESTS_DIR, `${requestId}.json`);
     const promptPath = path.posix.join(REQUESTS_DIR, `${requestId}.prompt.md`);
     const requestReportPath = reportPathForRequest(requestId);
+    const inputSnapshots = await captureGateInputSnapshots(
+      deps.fs,
+      context.taskRepoRoot,
+      requestId,
+      getSourceArtifacts(gate, codeDiffSources)
+    );
     const nextRecord: GateReviewGateRecord = {
       ...record,
       status: "running",
@@ -553,6 +565,7 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
       codeDiffSource,
       codeDiffSources,
       codeDiff: codeDiffInput,
+      inputSnapshots,
       reportPath: requestReportPath,
       latestReportPath: nextRecord.reportPath,
       promptPath: nextRecord.promptPath
@@ -560,7 +573,7 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
     await saveIndex(deps.fs, context.taskRepoRoot, index);
     await notifyArchitecturePlanDisposition(context, gate, false);
 
-    void runGateReview(context, gate, requestId, codeDiffInput, codeDiffSources).catch(() => {
+    void runGateReview(context, gate, requestId, codeDiffInput, codeDiffSources, inputSnapshots).catch(() => {
       // runGateReview records failures in the persisted gate state.
     });
 
@@ -577,7 +590,8 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
     gate: GateReviewGate,
     requestId: string,
     codeDiffInput?: CodeDiffInput,
-    codeDiffSources?: CodeDiffSource[]
+    codeDiffSources?: CodeDiffSource[],
+    inputSnapshots: GateInputSnapshot[] = []
   ): Promise<void> {
     const runKey = `${context.taskRepoRoot}:${context.taskSlug}:${gate}`;
     if (activeRuns.has(runKey)) {
@@ -595,7 +609,7 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
 
       const reviewDir = resolveRepoPath(context.taskRepoRoot, GATE_REVIEW_DIR);
       const agentPath = resolveRepoPath(context.repoRoot, REVIEWER_AGENT_PATH);
-      const prompt = buildGatePrompt(context, gate, requestId, codeDiffInput, codeDiffSources);
+      const prompt = buildGatePrompt(context, gate, requestId, codeDiffInput, codeDiffSources, inputSnapshots);
       await deps.fs.ensureDir(reviewDir);
       await deps.fs.ensureDir(resolveRepoPath(context.taskRepoRoot, REQUESTS_DIR));
       await deps.fs.writeText(resolveRepoPath(context.taskRepoRoot, promptPathForRequest(requestId)), prompt);
@@ -1412,13 +1426,24 @@ function buildGatePrompt(
   gate: GateReviewGate,
   requestId: string,
   codeDiffInput?: CodeDiffInput,
-  codeDiffSources?: CodeDiffSource[]
+  codeDiffSources?: CodeDiffSource[],
+  inputSnapshots: GateInputSnapshot[] = []
 ): string {
   const reportPath = reportPathForRequest(requestId);
   const absoluteReportPath = resolveRepoPath(context.taskRepoRoot, reportPath);
   const evidence = getSourceArtifacts(gate, codeDiffSources)
     .map((relativePath) => `- ${relativePath}`)
     .join("\n");
+  const capturedEvidence = inputSnapshots.length > 0
+    ? `
+
+Captured Task Evidence:
+${inputSnapshots.map((snapshot) => snapshot.status === "captured"
+    ? `- ${snapshot.sourcePath} -> ${snapshot.snapshotPath}`
+    : `- ${snapshot.sourcePath} -> <missing at request time>`).join("\n")}
+
+Use each captured snapshot as the immutable handoff or prior-Gate input for this request. Do not substitute a later rewritten live artifact.`
+    : "";
   const gitLine = gate === "architecture-plan"
     ? "\nDiff: inspect git status/diff in Worktree."
     : "";
@@ -1458,7 +1483,7 @@ Request: ${requestId}
 Report: ${absoluteReportPath}
 
 Evidence:
-${evidence}${gitLine}${architectureContract}${validationContract}${codeDiffContract}${codeDiffSection}
+${evidence}${capturedEvidence}${gitLine}${architectureContract}${validationContract}${codeDiffContract}${codeDiffSection}
 
 Write only Report. Start exactly:
 Gate: ${gate}
@@ -1466,6 +1491,35 @@ Request: ${requestId}
 Decision: approve|request_changes
 Summary: <one or two sentences>
 [/VCM GATE REVIEW]`;
+}
+
+async function captureGateInputSnapshots(
+  fs: FileSystemAdapter,
+  taskRepoRoot: string,
+  requestId: string,
+  sourcePaths: string[]
+): Promise<GateInputSnapshot[]> {
+  const snapshots: GateInputSnapshot[] = [];
+  for (const sourcePath of new Set(sourcePaths.filter(isTaskEvidencePath))) {
+    const absoluteSourcePath = resolveRepoPath(taskRepoRoot, sourcePath);
+    if (!(await fs.pathExists(absoluteSourcePath))) {
+      snapshots.push({ sourcePath, status: "missing" });
+      continue;
+    }
+
+    const snapshotPath = inputSnapshotPathForRequest(requestId, sourcePath);
+    await fs.writeText(
+      resolveRepoPath(taskRepoRoot, snapshotPath),
+      await fs.readText(absoluteSourcePath)
+    );
+    snapshots.push({ sourcePath, snapshotPath, status: "captured" });
+  }
+  return snapshots;
+}
+
+function isTaskEvidencePath(sourcePath: string): boolean {
+  return sourcePath.startsWith(".ai/vcm/handoffs/")
+    || sourcePath.startsWith(".ai/vcm/gate-reviews/");
 }
 
 async function waitForGateReport(
@@ -1770,6 +1824,11 @@ function reportPathForRequest(requestId: string): string {
 
 function promptPathForRequest(requestId: string): string {
   return path.posix.join(REQUESTS_DIR, `${requestId}.prompt.md`);
+}
+
+function inputSnapshotPathForRequest(requestId: string, sourcePath: string): string {
+  const taskEvidencePath = sourcePath.replace(/^\.ai\/vcm\//, "");
+  return path.posix.join(REQUESTS_DIR, `${requestId}.inputs`, taskEvidencePath);
 }
 
 function promptPathForGate(gate: GateReviewGate): string {

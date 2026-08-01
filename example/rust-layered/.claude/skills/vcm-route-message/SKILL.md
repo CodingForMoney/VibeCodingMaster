@@ -50,7 +50,7 @@ If the same route file already contains a not-yet-delivered message, update that
 
 ## Message Format
 
-Use the smallest body that is complete. Include artifact refs instead of copying long documents.
+Use the smallest body that is complete. Include artifact refs instead of copying long documents. Reference a role handoff only after confirming its current revision is complete and self-contained; never use an artifact ref to stand in for evidence that exists only in a prior revision, consumed route message, Session, or transcript.
 
 For simple user relay, use a lightweight body instead of the formal dispatch format.
 

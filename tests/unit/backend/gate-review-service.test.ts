@@ -92,6 +92,25 @@ describe("gate-review-service", () => {
       latestReportPath: ".ai/vcm/gate-reviews/architecture-plan-review.md"
     });
     expect(requestRecord.findings).toEqual(record.findings);
+    expect(requestRecord.inputSnapshots).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        sourcePath: ".ai/vcm/handoffs/architecture-plan.md",
+        status: "captured"
+      })
+    ]));
+    const planSnapshot = requestRecord.inputSnapshots.find(
+      (snapshot: { sourcePath: string }) => snapshot.sourcePath === ".ai/vcm/handoffs/architecture-plan.md"
+    );
+    expect(planSnapshot?.snapshotPath).toBe(
+      `.ai/vcm/gate-reviews/requests/${requestId}.inputs/handoffs/architecture-plan.md`
+    );
+    await writeFile(
+      path.join(taskWorktree(tmpRepo), ".ai/vcm/handoffs/architecture-plan.md"),
+      "# Architecture Plan\n\nRewritten after the request.\n",
+      "utf8"
+    );
+    expect(await readFile(path.join(taskWorktree(tmpRepo), planSnapshot.snapshotPath), "utf8"))
+      .toBe("# Architecture Plan\n");
 
     expect(runnerCalls.some((call) => call.command === "git" && call.args[0] === "diff")).toBe(true);
     expect(sessionStarts).toEqual(["reviewer"]);
@@ -108,6 +127,10 @@ describe("gate-review-service", () => {
     expect(gatePrompt).toContain(`Worktree: ${taskWorktree(tmpRepo)}`);
     expect(gatePrompt).toContain(`Report: ${requestReportPath}`);
     expect(gatePrompt).toContain("Complete every Architecture Analysis field");
+    expect(gatePrompt).toContain(
+      `.ai/vcm/handoffs/architecture-plan.md -> .ai/vcm/gate-reviews/requests/${requestId}.inputs/handoffs/architecture-plan.md`
+    );
+    expect(gatePrompt).toContain("Do not substitute a later rewritten live artifact.");
     expect(gatePrompt).not.toContain("Findings, when present");
     expect(writes.join("")).toContain("[VCM GATE REVIEW CALLBACK]");
     expect(writes.join("")).toContain("decision: request_changes");

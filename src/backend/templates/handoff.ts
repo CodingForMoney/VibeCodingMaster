@@ -11,8 +11,12 @@ import {
   renderArtifactOptions
 } from "../../shared/validation/artifact-contract.js";
 
+const CURRENT_HANDOFF_NOTICE = "<!-- VCM current handoff: replace this file with one complete, self-contained snapshot of the current result. Restate all still-relevant evidence; do not refer to a prior revision, route message, Session, or transcript as evidence. -->";
+
 export function renderArchitectureBriefTemplate(taskSlug: string): string {
   return `# Architecture Brief: ${taskSlug}
+
+${CURRENT_HANDOFF_NOTICE}
 
 Architecture Brief Status: ${renderArtifactOptions(ARCHITECTURE_BRIEF_STATUSES)}
 
@@ -40,6 +44,8 @@ TBD
 
 export function renderArchitecturePlanTemplate(taskSlug: string): string {
   return `# Architecture Plan: ${taskSlug}
+
+${CURRENT_HANDOFF_NOTICE}
 
 Planning Result: ${renderArtifactOptions(ARCHITECTURE_PLAN_RESULTS)}
 
@@ -149,6 +155,8 @@ TBD
 export function renderKnownIssuesTemplate(taskSlug: string): string {
   return `# Known Issues: ${taskSlug}
 
+${CURRENT_HANDOFF_NOTICE}
+
 ## Task Issues
 
 No unresolved task issues recorded yet.
@@ -161,6 +169,8 @@ At task close, promote still-relevant confirmed issues to \`docs/known-issues.md
 
 export function renderTestReportTemplate(taskSlug: string): string {
   return `# Test Report: ${taskSlug}
+
+${CURRENT_HANDOFF_NOTICE}
 
 Test Result: ${renderArtifactOptions(TEST_RESULTS)}
 
@@ -265,6 +275,8 @@ ${STRICT_NONE_VALUE}
 export function renderCoderCompletionTemplate(taskSlug: string): string {
   return `# Coder Completion: ${taskSlug}
 
+${CURRENT_HANDOFF_NOTICE}
+
 Decision: ready_for_review|incomplete|failed
 
 ## Scaffold Completion
@@ -309,6 +321,8 @@ TBD
 
 export function renderArchitectDebugTemplate(taskSlug: string): string {
   return `# Architect Debug: ${taskSlug}
+
+${CURRENT_HANDOFF_NOTICE}
 
 Status: pending|completed
 
@@ -360,6 +374,8 @@ TBD
 export function renderDocsSyncReportTemplate(taskSlug: string): string {
   return `# Docs Sync Report: ${taskSlug}
 
+${CURRENT_HANDOFF_NOTICE}
+
 ## Summary
 
 TBD
@@ -396,6 +412,8 @@ ${renderArtifactOptions(DOCS_SYNC_DECISIONS)}
 
 export function renderFinalAcceptanceTemplate(taskSlug: string): string {
   return `# Final Acceptance: ${taskSlug}
+
+${CURRENT_HANDOFF_NOTICE}
 
 ## Decision
 
