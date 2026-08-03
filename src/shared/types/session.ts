@@ -78,6 +78,7 @@ export const CCR_GATEWAY_BASE_URLS = [
 ] as const;
 export const CCR_GPT_MODEL_ID = "Codex API/gpt-5.6-sol" as const;
 export const CCR_GPT_SESSION_MODEL = `ccr:${CCR_GPT_MODEL_ID}` as const;
+export const CCR_GPT_EFFECTIVE_CONTEXT_TOKENS = 258_400;
 export type CcrSessionModel = typeof CCR_GPT_SESSION_MODEL;
 
 export type SessionModel = ClaudeModel | CcrSessionModel;

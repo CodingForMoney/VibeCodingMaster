@@ -38,6 +38,12 @@ const NON_RETRYABLE_STOP_FAILURE_ERRORS = new Set([
   "terminal_session_exited",
   "terminal_session_missing"
 ]);
+const NON_RETRYABLE_CONTEXT_FAILURE_PATTERNS = [
+  "context_length_exceeded",
+  "request_too_large",
+  "prompt too long",
+  "maximum context length"
+] as const;
 const DIAGNOSTIC_SNIPPET_MAX_LENGTH = 2000;
 type StopFailureRetryTimer = ReturnType<typeof setTimeout>;
 type StopFailureRetryResult = "scheduled" | "manual-interrupt" | "not-scheduled";
@@ -1096,11 +1102,16 @@ function parseStopFailureDiagnostic(event: ClaudeHookRequest["event"]): StopFail
   const error = (normalizeDiagnosticString(event.error, 200) ?? "unknown").toLowerCase();
   const errorDetails = normalizeDiagnosticString(event.error_details, DIAGNOSTIC_SNIPPET_MAX_LENGTH);
   const lastAssistantMessage = normalizeDiagnosticString(event.last_assistant_message, DIAGNOSTIC_SNIPPET_MAX_LENGTH);
+  const diagnosticText = [error, errorDetails, lastAssistantMessage]
+    .filter((value): value is string => Boolean(value))
+    .join("\n")
+    .toLowerCase();
   return {
     error,
     errorDetails,
     lastAssistantMessage,
     retryable: !NON_RETRYABLE_STOP_FAILURE_ERRORS.has(error)
+      && !NON_RETRYABLE_CONTEXT_FAILURE_PATTERNS.some((pattern) => diagnosticText.includes(pattern))
   };
 }
 

@@ -1,7 +1,15 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { CCR_GPT_MODEL_ID, CCR_GPT_SESSION_MODEL } from "../../../src/shared/types/session.js";
+import {
+  CCR_GPT_EFFECTIVE_CONTEXT_TOKENS,
+  CCR_GPT_MODEL_ID,
+  CCR_GPT_SESSION_MODEL
+} from "../../../src/shared/types/session.js";
 import { createMockClaudeE2eApp, roleLaunchBody } from "./helpers/e2e-app.js";
-import { connectAndCreateTask } from "./helpers/e2e-actions.js";
+import {
+  connectAndCreateTask,
+  getPreferences,
+  updatePreferences
+} from "./helpers/e2e-actions.js";
 import { createE2eRepo } from "./helpers/e2e-repo.js";
 
 const cleanups: Array<() => Promise<void>> = [];
@@ -74,6 +82,7 @@ describe("backend E2E CCR integration", () => {
       ANTHROPIC_MODEL: CCR_GPT_MODEL_ID,
       CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: "1",
       CLAUDE_CODE_ENABLE_TELEMETRY: undefined,
+      CLAUDE_CODE_MAX_CONTEXT_TOKENS: String(CCR_GPT_EFFECTIVE_CONTEXT_TOKENS),
       CLAUDE_CONFIG_DIR: expect.stringContaining("/settings/claude/ccr"),
       OTEL_LOGS_EXPORTER: "none",
       VCM_TASK_SLUG: task.taskSlug
@@ -119,6 +128,7 @@ describe("backend E2E CCR integration", () => {
     expect(nativeInput.env.ANTHROPIC_AUTH_TOKEN).toBeUndefined();
     expect(nativeInput.env.ANTHROPIC_MODEL).toBeUndefined();
     expect(nativeInput.env.CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY).toBeUndefined();
+    expect(nativeInput.env.CLAUDE_CODE_MAX_CONTEXT_TOKENS).toBeUndefined();
     expect(nativeInput.env.CLAUDE_CODE_ENABLE_TELEMETRY).toBe("1");
     expect(nativeInput.env.OTEL_LOGS_EXPORTER).toBe("otlp");
     expect(nativeInput.env.OTEL_EXPORTER_OTLP_LOGS_PROTOCOL).toBe("http/json");
@@ -191,6 +201,7 @@ describe("backend E2E CCR integration", () => {
         ANTHROPIC_AUTH_TOKEN: undefined,
         ANTHROPIC_API_KEY: undefined,
         ANTHROPIC_MODEL: CCR_GPT_MODEL_ID,
+        CLAUDE_CODE_MAX_CONTEXT_TOKENS: String(CCR_GPT_EFFECTIVE_CONTEXT_TOKENS),
         CLAUDE_CONFIG_DIR: expect.stringContaining("/settings/claude/ccr")
       });
     }
@@ -255,6 +266,8 @@ describe("backend E2E CCR integration", () => {
       persisted.claudeSessionId
     ]));
     expect(resumedInput.env.CLAUDE_CONFIG_DIR).toBe(persisted.claudeConfigDir);
+    expect(resumedInput.env.CLAUDE_CODE_MAX_CONTEXT_TOKENS)
+      .toBe(String(CCR_GPT_EFFECTIVE_CONTEXT_TOKENS));
 
     const restarted = await env.app.inject({
       method: "POST",
@@ -271,5 +284,49 @@ describe("backend E2E CCR integration", () => {
     expect(restartedInput.args).not.toContain("--settings");
     expect(restartedInput.env.CLAUDE_CONFIG_DIR).toBeUndefined();
     expect(restartedInput.env.ANTHROPIC_BASE_URL).toBeUndefined();
+    expect(restartedInput.env.CLAUDE_CODE_MAX_CONTEXT_TOKENS).toBeUndefined();
+
+    const restartedWithCcr = await env.app.inject({
+      method: "POST",
+      url: `/api/tasks/${task.taskSlug}/sessions/project-manager/restart`,
+      payload: roleLaunchBody({ model: CCR_GPT_SESSION_MODEL })
+    });
+    expect(restartedWithCcr.statusCode).toBe(200);
+    const ccrRestartInput = env.mockRuntime.getCreateInput(restartedWithCcr.json<{ id: string }>().id);
+    expect(ccrRestartInput.env.CLAUDE_CODE_MAX_CONTEXT_TOKENS)
+      .toBe(String(CCR_GPT_EFFECTIVE_CONTEXT_TOKENS));
+  });
+
+  it("applies the CCR context limit through one-click launch", async () => {
+    const env = await createMockClaudeE2eApp();
+    cleanups.push(() => env.close());
+    const repo = await createE2eRepo();
+    cleanups.push(() => repo.cleanup());
+    const task = await connectAndCreateTask(env.app, repo, "ccr-one-click");
+    await env.app.inject({
+      method: "PUT",
+      url: "/api/settings/ccr",
+      payload: { apiKey: "saved", enabled: true }
+    });
+
+    const preferences = await getPreferences(env.app);
+    for (const role of ["project-manager", "architect", "coder", "tester"] as const) {
+      preferences.launchTemplate.roles[role].model = CCR_GPT_SESSION_MODEL;
+    }
+    await updatePreferences(env.app, { launchTemplate: preferences.launchTemplate });
+
+    const response = await env.app.inject({
+      method: "POST",
+      url: `/api/tasks/${task.taskSlug}/one-click-start`
+    });
+    expect(response.statusCode).toBe(200);
+
+    for (const role of ["project-manager", "architect", "coder", "tester"] as const) {
+      const session = env.mockRuntime.getSessionByRole(task.taskSlug, role);
+      expect(session).toBeDefined();
+      const input = env.mockRuntime.getCreateInput(session!.id);
+      expect(input.env.CLAUDE_CODE_MAX_CONTEXT_TOKENS)
+        .toBe(String(CCR_GPT_EFFECTIVE_CONTEXT_TOKENS));
+    }
   });
 });

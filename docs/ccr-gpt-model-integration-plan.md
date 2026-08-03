@@ -237,6 +237,7 @@ CCR_CLAUDE_CODE_MODEL=Codex API/gpt-5.6-sol
 CODEXL_CLAUDE_CODE_MODEL=Codex API/gpt-5.6-sol
 ANTHROPIC_SMALL_FAST_MODEL=Codex API/gpt-5.6-sol
 CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY=1
+CLAUDE_CODE_MAX_CONTEXT_TOKENS=258400
 CLAUDE_CONFIG_DIR=~/.vcm/claude/ccr
 NO_PROXY=<existing entries plus identified CCR host>
 ```
@@ -244,6 +245,9 @@ NO_PROXY=<existing entries plus identified CCR host>
 The selected CCR model is supplied through the environment. The Claude adapter
 must not also append the native `--model` argument for a CCR selection. Native
 Claude selections continue to use `--model` exactly as they do now.
+VCM does not set `CLAUDE_CODE_AUTO_COMPACT_WINDOW`; Claude Code owns automatic
+compaction timing within the injected effective context limit. Native Claude
+sessions receive no VCM-owned context limit.
 
 For a CCR selection, VCM adds a child-only `--settings` override whose
 `apiKeyHelper` reads the saved VCM CCR key. VCM also removes inherited Anthropic
@@ -367,7 +371,7 @@ or launch a session without the CCR environment.
   modifying global Claude settings
 - CCR launch omits native `--model`, injects the complete child environment,
   supplies the GPT-only `apiKeyHelper` through `--settings`, and uses the
-  isolated VCM Claude configuration root
+  isolated VCM Claude configuration root and `258400` effective context limit
 - transcript discovery uses the Session's recorded Claude configuration root
 - Resume rejects provider changes and Restart permits them
 - no secret is present in command display, records, logs, or returned errors
@@ -390,6 +394,7 @@ Use a mock CCR HTTP server plus the existing mock Claude Code runtime to cover:
    unchanged for a CCR-backed role
 9. start Translator, Harness Engineer, Reviewer, and Harness Bootstrap
    through their existing session paths with a CCR model
+10. verify context-limit failures do not enter automatic role retry
 
 ### Manual DevContainer smoke test
 
@@ -397,9 +402,11 @@ Use a mock CCR HTTP server plus the existing mock Claude Code runtime to cover:
 2. confirm `GET /v1/models` succeeds from inside the DevContainer
 3. enable CCR in VCM and confirm `GPT-5.6 Sol (CCR)` appears
 4. start one Claude Code role with `GPT-5.6 Sol (CCR)`
-5. confirm CCR receives the request and the role's Hook/terminal lifecycle is
+5. run `/context` and confirm the reported context limit does not exceed
+   `258400`
+6. confirm CCR receives the request and the role's Hook/terminal lifecycle is
    normal
-6. stop CCR and confirm VCM refuses a new GPT-backed launch without falling
+7. stop CCR and confirm VCM refuses a new GPT-backed launch without falling
    back
 
 ## 13. Delivery Order
@@ -425,6 +432,8 @@ Use a mock CCR HTTP server plus the existing mock Claude Code runtime to cover:
   `--settings` override under the VCM-owned Claude configuration root.
 - Native Claude model launches receive neither CCR environment variables nor a
   settings override. VCM does not modify global Claude settings.
+- CCR-backed launches use a `258400` effective context limit while native Claude
+  launches retain their own context configuration.
 - Resume stays on the Session's recorded provider; Restart is required to move
   between native Claude and CCR.
 - CCR credentials never appear in frontend responses, terminal commands,

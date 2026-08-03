@@ -60,8 +60,9 @@ Notes:
   `claude-adapter.test.ts`, `claude-transcript-service.test.ts`,
   `session-registry.test.ts`, and `ccr-integration.e2e.test.ts`; verify isolated
   CCR configuration/transcript paths, native environment cleanup, same-provider
-  Resume, and provider switching through Restart. Run the complete backend E2E
-  suite when changing Session launch wiring.
+  Resume, provider switching through Restart, the GPT-only `258400` effective
+  context limit, and unchanged native context behavior. Run the complete
+  backend E2E suite when changing Session launch wiring.
 - Task usage analytics change: run `usage-analytics-service.test.ts`,
   `usage-analytics-modal.test.ts`, `api-client.test.ts`,
   `usage-analytics.e2e.test.ts`, and `ccr-integration.e2e.test.ts`. Verify
@@ -198,7 +199,8 @@ services with controlled runtime doubles:
 - CCR settings redaction, authenticated model availability, native-vs-CCR
   command behavior, GPT-only settings overrides, global CCR takeover cleanup,
   blocked unavailable launches, and shared CCR child environment across
-  workflow, Reviewer, Translator, and Harness Engineer Session paths.
+  workflow, Reviewer, Translator, Harness Engineer, and one-click Session paths.
+  Context-limit StopFailure diagnostics are covered as non-retryable failures.
 - Native Claude OpenTelemetry ingestion into the active task worktree, including
   task, role, and model aggregation; deduplication and concurrent-write behavior
   are covered by service tests, while CCR exclusion is covered by the CCR

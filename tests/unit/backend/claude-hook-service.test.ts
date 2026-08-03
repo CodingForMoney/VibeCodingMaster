@@ -551,7 +551,42 @@ describe("createClaudeHookService", () => {
     expect(writes.at(-1)).toBe("\r");
   });
 
-  it("does not retry non-retryable StopFailure errors", async () => {
+  it.each([
+    {
+      label: "billing error",
+      error: "billing_error",
+      errorDetails: "Payment required",
+      lastAssistantMessage: "Cannot continue."
+    },
+    {
+      label: "context error code",
+      error: "context_length_exceeded",
+      errorDetails: "The request exceeded the available context.",
+      lastAssistantMessage: "Cannot continue."
+    },
+    {
+      label: "request-too-large details",
+      error: "api_error",
+      errorDetails: "Upstream returned request_too_large.",
+      lastAssistantMessage: "Cannot continue."
+    },
+    {
+      label: "prompt-too-long details",
+      error: "api_error",
+      errorDetails: "Prompt too long for this model.",
+      lastAssistantMessage: "Cannot continue."
+    },
+    {
+      label: "maximum-context assistant message",
+      error: "api_error",
+      errorDetails: "Request rejected.",
+      lastAssistantMessage: "Maximum context length exceeded."
+    }
+  ])("does not retry non-retryable StopFailure: $label", async ({
+    error,
+    errorDetails,
+    lastAssistantMessage
+  }) => {
     const calls: string[] = [];
     const writes: string[] = [];
     let recovery: unknown;
@@ -614,9 +649,9 @@ describe("createClaudeHookService", () => {
       event: {
         hook_event_name: "StopFailure",
         session_id: "claude_coder",
-        error: "billing_error",
-        error_details: "Payment required",
-        last_assistant_message: "Cannot continue."
+        error,
+        error_details: errorDetails,
+        last_assistant_message: lastAssistantMessage
       }
     });
 
@@ -628,7 +663,7 @@ describe("createClaudeHookService", () => {
     });
     expect(calls).toEqual([
       "list",
-      "set-recovery:failed:0:billing_error:false",
+      `set-recovery:failed:0:${error}:false`,
       "session:StopFailure:coder",
       "round:StopFailure:coder",
       "boundary:end:coder"
@@ -637,9 +672,9 @@ describe("createClaudeHookService", () => {
       role: "coder",
       status: "failed",
       attempt: 0,
-      error: "billing_error",
-      errorDetails: "Payment required",
-      lastAssistantMessage: "Cannot continue.",
+      error,
+      errorDetails,
+      lastAssistantMessage,
       retryable: false,
       failedAt: "2026-06-01T00:00:00.000Z"
     });

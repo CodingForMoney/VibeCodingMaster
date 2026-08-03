@@ -867,7 +867,8 @@ Claude hooks:
 Role retry is enabled by default. Retryable StopFailure events retry up to 20
 times: first after 1 minute, then +1 minute per attempt. Non-retryable errors
 include authentication, billing, invalid request, model-not-found, and
-max-output-token failures.
+max-output-token failures. Context-length and request-too-large failures are
+also non-retryable because resending the unchanged context cannot recover them.
 
 Round state is backend-owned. Stop starts a 10 second settle window; a new
 `UserPromptSubmit` inside the window continues the same Round. If no new prompt

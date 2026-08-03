@@ -121,6 +121,11 @@ Translator, Harness Engineer, Harness Bootstrap, and one-click launch without
 separate role-specific CCR logic. `claude-adapter` omits native `--model` only
 for the namespaced CCR model. Native Claude commands remain unchanged, and the
 native child environment removes only inherited local-CCR takeover variables.
+CCR/GPT children receive `CLAUDE_CODE_MAX_CONTEXT_TOKENS=258400`; VCM does not
+set `CLAUDE_CODE_AUTO_COMPACT_WINDOW`, leaving compaction timing to Claude Code.
+Native Claude children receive neither override. Context-limit StopFailure
+diagnostics are terminal because retrying the unchanged context cannot recover
+them.
 An unavailable CCR selection fails before process creation and is never
 normalized or silently replaced. Session records persist the Claude
 configuration root so transcript discovery and Resume use the same provider

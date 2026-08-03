@@ -4,6 +4,7 @@ import type {
 } from "../../shared/types/app-settings.js";
 import {
   CCR_GATEWAY_BASE_URL,
+  CCR_GPT_EFFECTIVE_CONTEXT_TOKENS,
   CCR_GPT_MODEL_ID,
   CCR_GPT_SESSION_MODEL,
   createSessionModelOptions,
@@ -211,6 +212,7 @@ export function createCcrIntegrationService(deps: CcrIntegrationServiceDeps): Cc
         CODEXL_CLAUDE_CODE_MODEL: CCR_GPT_MODEL_ID,
         ANTHROPIC_SMALL_FAST_MODEL: CCR_GPT_MODEL_ID,
         CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY: "1",
+        CLAUDE_CODE_MAX_CONTEXT_TOKENS: String(CCR_GPT_EFFECTIVE_CONTEXT_TOKENS),
         CLAUDE_CONFIG_DIR: configDir,
         NO_PROXY: noProxy,
         no_proxy: noProxy
