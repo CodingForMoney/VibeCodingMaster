@@ -3,6 +3,7 @@ import path from "node:path";
 import type { FastifyInstance } from "fastify";
 import type { TaskWorkspaceState } from "../../../../src/shared/types/api.js";
 import type {
+  GateReviewCancelRequest,
   GateReviewGate,
   GateReviewIndex,
   GateReviewRequestInput,
@@ -237,6 +238,20 @@ export async function getGateState(app: FastifyInstance, taskSlug: string): Prom
   const response = await injectOk(app, {
     method: "GET",
     url: `/api/tasks/${taskSlug}/gate-review`
+  });
+  return response.json<GateReviewIndex>();
+}
+
+export async function cancelGateReview(
+  app: FastifyInstance,
+  taskSlug: string,
+  gate: GateReviewGate,
+  input: GateReviewCancelRequest
+): Promise<GateReviewIndex> {
+  const response = await injectOk(app, {
+    method: "POST",
+    url: `/api/tasks/${taskSlug}/gate-review/${gate}/cancel`,
+    payload: input
   });
   return response.json<GateReviewIndex>();
 }

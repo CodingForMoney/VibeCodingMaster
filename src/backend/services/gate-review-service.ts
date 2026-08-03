@@ -8,6 +8,7 @@ import {
   type CodeDiffSource,
   type GateReviewDecision,
   type GateReviewCallbackStatus,
+  type GateReviewCancelRequest,
   type GateReviewExceptionRequest,
   type GateReviewFinding,
   type GateReviewGate,
@@ -39,6 +40,7 @@ export interface GateReviewService {
   updateSettings(repoRoot: string, taskSlug: string, input: GateReviewSettingsUpdateRequest): Promise<GateReviewIndex>;
   requestReviewGate(repoRoot: string, taskSlug: string, gate: GateReviewGate, input?: GateReviewRequestInput): Promise<GateReviewRequestResult>;
   retryReviewGate(repoRoot: string, taskSlug: string, gate: GateReviewGate): Promise<GateReviewRequestResult>;
+  cancelReviewGate(repoRoot: string, taskSlug: string, gate: GateReviewGate, input: GateReviewCancelRequest): Promise<GateReviewIndex>;
   skipReviewGate(repoRoot: string, taskSlug: string, gate: GateReviewGate, input: GateReviewExceptionRequest): Promise<GateReviewIndex>;
   overrideReviewGate(repoRoot: string, taskSlug: string, gate: GateReviewGate, input: GateReviewExceptionRequest): Promise<GateReviewIndex>;
   readReport(repoRoot: string, taskSlug: string, gate: GateReviewGate): Promise<GateReviewReport>;
@@ -51,7 +53,10 @@ export interface GateReviewServiceDeps {
   projectService: Pick<ProjectService, "loadConfig">;
   taskService: Pick<TaskService, "loadTask">;
   appSettings: Pick<AppSettingsService, "getGateReviewSettings" | "updateGateReviewSettings">;
-  sessionService: Pick<SessionService, "getRoleSession" | "markRoleActivityRunning" | "resumeRoleSession" | "startRoleSession">;
+  sessionService: Pick<
+    SessionService,
+    "getRoleSession" | "markRoleActivityRunning" | "restartRoleSession" | "resumeRoleSession" | "startRoleSession"
+  >;
   roundService: Pick<RoundService, "recordRoleTurnEvent">;
   onArchitecturePlanDisposition?: (input: {
     repoRoot: string;
@@ -100,7 +105,8 @@ const REQUESTS_DIR = ".ai/vcm/gate-reviews/requests";
 const GATE_REVIEW_VERSION = 1;
 const REVIEWER_ROLE = "reviewer";
 const DEFAULT_REPORT_POLL_INTERVAL_MS = 1000;
-const activeRuns = new Set<string>();
+const activeRuns = new Map<string, AbortController>();
+const gateStateLocks = new Map<string, Promise<unknown>>();
 const ARCHITECTURE_ANALYSIS_FIELDS = [
   "Evidence Read",
   "Architecture Brief Fit",
@@ -211,6 +217,14 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
     options: { force?: boolean; codeDiffSource?: CodeDiffSource } = {}
   ): Promise<GateReviewRequestResult> {
     const context = await getContext(repoRoot, taskSlug);
+    return withGateStateLock(context, () => requestReviewGateLocked(context, gate, options));
+  }
+
+  async function requestReviewGateLocked(
+    context: ReviewContext,
+    gate: GateReviewGate,
+    options: { force?: boolean; codeDiffSource?: CodeDiffSource }
+  ): Promise<GateReviewRequestResult> {
     let index = await loadIndex(deps.fs, context, now());
     const record = index.gates[gate];
     const requestedCodeDiffSource = options.codeDiffSource
@@ -251,7 +265,7 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
       };
     }
 
-    if (record.status === "running" && !options.force) {
+    if (record.status === "running") {
       return { status: "running", gate, record, message: "Gate review is already running." };
     }
 
@@ -593,19 +607,18 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
     codeDiffSources?: CodeDiffSource[],
     inputSnapshots: GateInputSnapshot[] = []
   ): Promise<void> {
-    const runKey = `${context.taskRepoRoot}:${context.taskSlug}:${gate}`;
+    const runKey = gateRunKey(context, gate, requestId);
     if (activeRuns.has(runKey)) {
       return;
     }
-    activeRuns.add(runKey);
+    const controller = new AbortController();
+    activeRuns.set(runKey, controller);
     try {
       const timestamp = now();
-      await updateGateRecord(context, gate, {
-        status: "running",
-        startedAt: timestamp,
-        updatedAt: timestamp
-      });
-      await updateRequestStatus(deps.fs, context, requestId, "running", { startedAt: timestamp });
+      if (!(await markGateRunStarted(context, gate, requestId, timestamp))) {
+        return;
+      }
+      throwIfGateRunCancelled(controller.signal);
 
       const reviewDir = resolveRepoPath(context.taskRepoRoot, GATE_REVIEW_DIR);
       const agentPath = resolveRepoPath(context.repoRoot, REVIEWER_AGENT_PATH);
@@ -613,6 +626,7 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
       await deps.fs.ensureDir(reviewDir);
       await deps.fs.ensureDir(resolveRepoPath(context.taskRepoRoot, REQUESTS_DIR));
       await deps.fs.writeText(resolveRepoPath(context.taskRepoRoot, promptPathForRequest(requestId)), prompt);
+      throwIfGateRunCancelled(controller.signal);
 
       if (!(await deps.fs.pathExists(agentPath))) {
         throw new VcmError({
@@ -624,6 +638,7 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
       }
 
       const session = await ensureReviewerSession(context);
+      throwIfGateRunCancelled(controller.signal);
       await submitTerminalInput(deps.runtime, session.id, prompt);
       await deps.sessionService.markRoleActivityRunning(
         context.repoRoot,
@@ -646,15 +661,98 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
         gate,
         requestId,
         now(),
-        reportPollIntervalMs
+        reportPollIntervalMs,
+        controller.signal
       );
-      await publishLatestGateReport(
-        deps.fs,
-        context.taskRepoRoot,
+      const completedRecord = await completeGateRun(context, gate, requestId, parsed);
+      if (!completedRecord) {
+        return;
+      }
+      await notifyArchitecturePlanDisposition(
+        context,
         gate,
-        parsed.content
+        parsed.decision === "approve"
       );
+      await callbackProjectManager(
+        context,
+        gate,
+        "completed",
+        parsed.decision,
+        parsed.reportPath,
+        undefined,
+        requestId,
+        completedRecord.inputHash
+      );
+    } catch (error) {
+      if (isGateRunCancelled(error)) {
+        return;
+      }
+      const message = errorMessage(error);
+      const failedRecord = await failGateRun(context, gate, requestId, message);
+      if (!failedRecord) {
+        return;
+      }
+      await notifyArchitecturePlanDisposition(context, gate, false);
+      await callbackProjectManager(
+        context,
+        gate,
+        "failed",
+        undefined,
+        reportPathForRequest(requestId),
+        message,
+        requestId,
+        failedRecord.inputHash
+      );
+    } finally {
+      if (activeRuns.get(runKey) === controller) {
+        activeRuns.delete(runKey);
+      }
+    }
+  }
+
+  async function markGateRunStarted(
+    context: ReviewContext,
+    gate: GateReviewGate,
+    requestId: string,
+    timestamp: string
+  ): Promise<boolean> {
+    return withGateStateLock(context, async () => {
+      const index = await loadIndex(deps.fs, context, timestamp);
+      if (!isCurrentRunningRequest(index, gate, requestId)) {
+        return false;
+      }
+      await updateRequestStatus(deps.fs, context, requestId, "running", { startedAt: timestamp });
+      const next = applyGateState(index, gate, {
+        status: "running",
+        startedAt: timestamp,
+        updatedAt: timestamp
+      }, timestamp);
+      await saveIndex(deps.fs, context.taskRepoRoot, next);
+      return true;
+    });
+  }
+
+  async function completeGateRun(
+    context: ReviewContext,
+    gate: GateReviewGate,
+    requestId: string,
+    parsed: ParsedReport
+  ): Promise<GateReviewGateRecord | undefined> {
+    return withGateStateLock(context, async () => {
       const completedAt = now();
+      const index = await loadIndex(deps.fs, context, completedAt);
+      if (!isCurrentRunningRequest(index, gate, requestId)) {
+        await updateRequestStatus(deps.fs, context, requestId, "stale_completion", {
+          completedAt,
+          decision: parsed.decision,
+          summary: parsed.summary,
+          findings: parsed.findings,
+          reportPath: parsed.reportPath
+        });
+        return undefined;
+      }
+
+      await publishLatestGateReport(deps.fs, context.taskRepoRoot, gate, parsed.content);
       await updateRequestStatus(deps.fs, context, requestId, "completed", {
         completedAt,
         decision: parsed.decision,
@@ -663,8 +761,7 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
         reportPath: parsed.reportPath,
         latestReportPath: reportPathForGate(gate)
       });
-      activeRuns.delete(runKey);
-      await updateGateRecord(context, gate, {
+      const next = applyGateState(index, gate, {
         status: "completed",
         decision: parsed.decision,
         summary: parsed.summary,
@@ -674,34 +771,44 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
         callbackStatus: "not_sent",
         callbackError: undefined,
         updatedAt: completedAt
-      }, { clearActiveGate: true });
-      await notifyArchitecturePlanDisposition(
-        context,
-        gate,
-        parsed.decision === "approve"
-      );
-      await callbackProjectManager(context, gate, "completed", parsed.decision, parsed.reportPath);
-    } catch (error) {
-      const timestamp = now();
-      const message = errorMessage(error);
+      }, completedAt, true);
+      await saveIndex(deps.fs, context.taskRepoRoot, next);
+      return next.gates[gate];
+    });
+  }
+
+  async function failGateRun(
+    context: ReviewContext,
+    gate: GateReviewGate,
+    requestId: string,
+    message: string
+  ): Promise<GateReviewGateRecord | undefined> {
+    return withGateStateLock(context, async () => {
+      const completedAt = now();
+      const index = await loadIndex(deps.fs, context, completedAt);
+      if (!isCurrentRunningRequest(index, gate, requestId)) {
+        await updateRequestStatus(deps.fs, context, requestId, "stale_completion", {
+          completedAt,
+          error: message
+        });
+        return undefined;
+      }
+
       await updateRequestStatus(deps.fs, context, requestId, "failed", {
-        completedAt: timestamp,
+        completedAt,
         error: message
       });
-      activeRuns.delete(runKey);
-      await updateGateRecord(context, gate, {
+      const next = applyGateState(index, gate, {
         status: "failed",
         error: message,
-        completedAt: timestamp,
+        completedAt,
         callbackStatus: "not_sent",
         callbackError: undefined,
-        updatedAt: timestamp
-      }, { clearActiveGate: true });
-      await notifyArchitecturePlanDisposition(context, gate, false);
-      await callbackProjectManager(context, gate, "failed", undefined, reportPathForRequest(requestId), message);
-    } finally {
-      activeRuns.delete(runKey);
-    }
+        updatedAt: completedAt
+      }, completedAt, true);
+      await saveIndex(deps.fs, context.taskRepoRoot, next);
+      return next.gates[gate];
+    });
   }
 
   async function ensureReviewerSession(context: ReviewContext) {
@@ -729,29 +836,22 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
     });
   }
 
-  async function updateGateRecord(
-    context: ReviewContext,
-    gate: GateReviewGate,
-    patch: Partial<GateReviewGateRecord>,
-    options: { clearActiveGate?: boolean } = {}
-  ): Promise<GateReviewIndex> {
-    const index = await loadIndex(deps.fs, context, now());
-    const next = applyGateState(index, gate, patch, now(), options.clearActiveGate);
-    await saveIndex(deps.fs, context.taskRepoRoot, next);
-    return next;
-  }
-
   async function callbackProjectManager(
     context: ReviewContext,
     gate: GateReviewGate,
     status: GateReviewGateStatus,
     decision: GateReviewDecision | undefined,
     reportPath: string,
-    error?: string
+    error?: string,
+    requestId?: string,
+    inputHash?: string
   ): Promise<void> {
+    if (!(await gateStateMatches(context, gate, status, requestId))) {
+      return;
+    }
     const session = await deps.sessionService.getRoleSession(context.repoRoot, context.taskSlug, "project-manager");
     if (!session || session.status !== "running") {
-      await updateGateRecord(context, gate, {
+      await updateGateCallbackState(context, gate, status, requestId, {
         callbackStatus: "skipped",
         callbackError: "project-manager session is not running",
         updatedAt: now()
@@ -765,7 +865,9 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
       status,
       decision,
       reportPath,
-      error
+      error,
+      requestId,
+      inputHash
     });
 
     try {
@@ -784,18 +886,51 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
         role: "project-manager",
         eventName: "UserPromptSubmit"
       });
-      await updateGateRecord(context, gate, {
+      await updateGateCallbackState(context, gate, status, requestId, {
         callbackStatus: "sent",
         callbackError: undefined,
         updatedAt: now()
       });
     } catch (caught) {
-      await updateGateRecord(context, gate, {
+      await updateGateCallbackState(context, gate, status, requestId, {
         callbackStatus: "failed",
         callbackError: errorMessage(caught),
         updatedAt: now()
       });
     }
+  }
+
+  async function gateStateMatches(
+    context: ReviewContext,
+    gate: GateReviewGate,
+    expectedStatus: GateReviewGateStatus,
+    requestId?: string
+  ): Promise<boolean> {
+    return withGateStateLock(context, async () => {
+      const index = await loadIndex(deps.fs, context, now());
+      const record = index.gates[gate];
+      return record.status === expectedStatus
+        && (requestId === undefined || record.requestId === requestId);
+    });
+  }
+
+  async function updateGateCallbackState(
+    context: ReviewContext,
+    gate: GateReviewGate,
+    expectedStatus: GateReviewGateStatus,
+    requestId: string | undefined,
+    patch: Partial<GateReviewGateRecord>
+  ): Promise<void> {
+    await withGateStateLock(context, async () => {
+      const timestamp = now();
+      const index = await loadIndex(deps.fs, context, timestamp);
+      const record = index.gates[gate];
+      if (record.status !== expectedStatus || (requestId !== undefined && record.requestId !== requestId)) {
+        return;
+      }
+      const next = applyGateState(index, gate, patch, timestamp);
+      await saveIndex(deps.fs, context.taskRepoRoot, next);
+    });
   }
 
   async function notifyArchitecturePlanDisposition(
@@ -823,26 +958,43 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
       return loadIndex(deps.fs, context, now());
     },
     async updateSettings(repoRoot, taskSlug, input) {
-      const currentSettings = await deps.appSettings.getGateReviewSettings(repoRoot, taskSlug);
-      const requiredGates = new Set(currentSettings.requiredGates);
-      for (const [gate, enabled] of Object.entries(input?.gates ?? {})) {
-        if (!isGateReviewGate(gate)) {
-          continue;
+      const context = await getContext(repoRoot, taskSlug);
+      return withGateStateLock(context, async () => {
+        const timestamp = now();
+        const currentIndex = await loadIndex(deps.fs, context, timestamp);
+        const currentSettings = await deps.appSettings.getGateReviewSettings(repoRoot, taskSlug);
+        const requiredGates = new Set(currentSettings.requiredGates);
+        for (const [gate, enabled] of Object.entries(input?.gates ?? {})) {
+          if (!isGateReviewGate(gate)) {
+            continue;
+          }
+          if (!enabled && currentIndex.gates[gate].status === "running") {
+            throw new VcmError({
+              code: "GATE_REVIEW_RUNNING",
+              message: `Cannot disable ${gate} while its Gate Review request is running.`,
+              statusCode: 409,
+              hint: "Cancel the running request first, then disable this Gate."
+            });
+          }
+          if (enabled) {
+            requiredGates.add(gate);
+          } else {
+            requiredGates.delete(gate);
+          }
         }
-        if (enabled) {
-          requiredGates.add(gate);
-        } else {
-          requiredGates.delete(gate);
-        }
-      }
-      await deps.appSettings.updateGateReviewSettings(repoRoot, taskSlug, [...requiredGates]);
-      const nextContext = await getContext(repoRoot, taskSlug);
-      const index = await loadIndex(deps.fs, nextContext, now());
-      await saveIndex(deps.fs, nextContext.taskRepoRoot, {
-        ...index,
-        updatedAt: now()
+        const settings = await deps.appSettings.updateGateReviewSettings(repoRoot, taskSlug, [...requiredGates]);
+        const nextContext = {
+          ...context,
+          config: loadRuntimeConfig(settings)
+        };
+        const index = await loadIndex(deps.fs, nextContext, timestamp);
+        const next = {
+          ...index,
+          updatedAt: timestamp
+        };
+        await saveIndex(deps.fs, nextContext.taskRepoRoot, next);
+        return next;
       });
-      return loadIndex(deps.fs, nextContext, now());
     },
     requestReviewGate(repoRoot, taskSlug, gate, input) {
       return requestReviewGateInternal(repoRoot, taskSlug, gate, {
@@ -852,28 +1004,90 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
     retryReviewGate(repoRoot, taskSlug, gate) {
       return requestReviewGateInternal(repoRoot, taskSlug, gate, { force: true });
     },
+    async cancelReviewGate(repoRoot, taskSlug, gate, input) {
+      const context = await getContext(repoRoot, taskSlug);
+      assertCancelRequest(input);
+      return withGateStateLock(context, async () => {
+        const timestamp = now();
+        const index = await loadIndex(deps.fs, context, timestamp);
+        const record = index.gates[gate];
+        if (record.status !== "running") {
+          throw new VcmError({
+            code: "GATE_REVIEW_NOT_RUNNING",
+            message: `Gate review ${gate} is not running.`,
+            statusCode: 409
+          });
+        }
+        if (record.requestId !== input.requestId) {
+          throw new VcmError({
+            code: "GATE_REVIEW_REQUEST_MISMATCH",
+            message: `Gate review ${gate} is running request ${record.requestId ?? "unknown"}, not ${input.requestId}.`,
+            statusCode: 409,
+            hint: "Refresh Gate Review state before cancelling the current request."
+          });
+        }
+
+        activeRuns.get(gateRunKey(context, gate, input.requestId))?.abort();
+        await deps.sessionService.restartRoleSession(context.repoRoot, context.taskSlug, REVIEWER_ROLE);
+        await updateRequestStatus(deps.fs, context, input.requestId, "cancelled", {
+          completedAt: timestamp,
+          cancelReason: input.reason.trim()
+        });
+        const next = applyGateState(index, gate, {
+          status: "pending",
+          decision: undefined,
+          summary: undefined,
+          findings: undefined,
+          error: undefined,
+          exceptionReason: undefined,
+          requestId: undefined,
+          requestPath: undefined,
+          inputHash: undefined,
+          baseCommit: undefined,
+          headCommit: undefined,
+          commits: undefined,
+          changedFiles: undefined,
+          diffStat: undefined,
+          codeDiffSource: undefined,
+          codeDiffSources: undefined,
+          requestedAt: undefined,
+          startedAt: undefined,
+          completedAt: undefined,
+          callbackStatus: "not_sent",
+          callbackError: undefined,
+          updatedAt: timestamp
+        }, timestamp, true);
+        await saveIndex(deps.fs, context.taskRepoRoot, next);
+        return next;
+      });
+    },
     async skipReviewGate(repoRoot, taskSlug, gate, input) {
       const context = await getContext(repoRoot, taskSlug);
       assertExceptionReason(input.reason);
-      const current = await loadIndex(deps.fs, context, now());
-      if (current.gates[gate].status === "running") {
-        throw new VcmError({
-          code: "GATE_REVIEW_RUNNING",
-          message: "Cannot skip a running Gate review gate.",
-          statusCode: 409,
-          hint: "Wait for the gate review to finish, then choose retry, skip, or override."
-        });
-      }
-      const index = await updateGateRecord(context, gate, {
-        status: "skipped",
-        decision: undefined,
-        exceptionReason: input.reason,
-        error: undefined,
-        completedAt: now(),
-        callbackStatus: "not_sent",
-        callbackError: undefined,
-        updatedAt: now()
-      }, { clearActiveGate: true });
+      const index = await withGateStateLock(context, async () => {
+        const timestamp = now();
+        const current = await loadIndex(deps.fs, context, timestamp);
+        if (current.gates[gate].status === "running") {
+          throw new VcmError({
+            code: "GATE_REVIEW_RUNNING",
+            message: "Cannot skip a running Gate review gate.",
+            statusCode: 409,
+            hint: "Cancel the running request first, then choose retry, skip, or override."
+          });
+        }
+        const next = applyGateState(current, gate, {
+          status: "skipped",
+          decision: undefined,
+          exceptionReason: input.reason,
+          error: undefined,
+          completedAt: timestamp,
+          callbackStatus: "not_sent",
+          callbackError: undefined,
+          updatedAt: timestamp
+        }, timestamp, true);
+        await saveIndex(deps.fs, context.taskRepoRoot, next);
+        return next;
+      });
       await notifyArchitecturePlanDisposition(context, gate, true);
       await callbackProjectManager(context, gate, "skipped", undefined, index.gates[gate].reportPath);
       return loadIndex(deps.fs, context, now());
@@ -881,25 +1095,30 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
     async overrideReviewGate(repoRoot, taskSlug, gate, input) {
       const context = await getContext(repoRoot, taskSlug);
       assertExceptionReason(input.reason);
-      const current = await loadIndex(deps.fs, context, now());
-      if (current.gates[gate].status === "running") {
-        throw new VcmError({
-          code: "GATE_REVIEW_RUNNING",
-          message: "Cannot override a running Gate review gate.",
-          statusCode: 409,
-          hint: "Wait for the gate review to finish, then choose retry, skip, or override."
-        });
-      }
-      const index = await updateGateRecord(context, gate, {
-        status: "overridden",
-        decision: "approve",
-        exceptionReason: input.reason,
-        error: undefined,
-        completedAt: now(),
-        callbackStatus: "not_sent",
-        callbackError: undefined,
-        updatedAt: now()
-      }, { clearActiveGate: true });
+      const index = await withGateStateLock(context, async () => {
+        const timestamp = now();
+        const current = await loadIndex(deps.fs, context, timestamp);
+        if (current.gates[gate].status === "running") {
+          throw new VcmError({
+            code: "GATE_REVIEW_RUNNING",
+            message: "Cannot override a running Gate review gate.",
+            statusCode: 409,
+            hint: "Cancel the running request first, then choose retry, skip, or override."
+          });
+        }
+        const next = applyGateState(current, gate, {
+          status: "overridden",
+          decision: "approve",
+          exceptionReason: input.reason,
+          error: undefined,
+          completedAt: timestamp,
+          callbackStatus: "not_sent",
+          callbackError: undefined,
+          updatedAt: timestamp
+        }, timestamp, true);
+        await saveIndex(deps.fs, context.taskRepoRoot, next);
+        return next;
+      });
       await notifyArchitecturePlanDisposition(context, gate, true);
       await callbackProjectManager(context, gate, "overridden", "approve", index.gates[gate].reportPath);
       return loadIndex(deps.fs, context, now());
@@ -1024,6 +1243,33 @@ function applyGateState(
     },
     updatedAt: timestamp
   };
+}
+
+function isCurrentRunningRequest(
+  index: GateReviewIndex,
+  gate: GateReviewGate,
+  requestId: string
+): boolean {
+  const record = index.gates[gate];
+  return record.status === "running" && record.requestId === requestId;
+}
+
+function gateRunKey(context: ReviewContext, gate: GateReviewGate, requestId: string): string {
+  return `${context.taskRepoRoot}:${context.taskSlug}:${gate}:${requestId}`;
+}
+
+async function withGateStateLock<T>(context: ReviewContext, run: () => Promise<T>): Promise<T> {
+  const key = getIndexPath(context.taskRepoRoot);
+  const previous = gateStateLocks.get(key) ?? Promise.resolve();
+  const next = previous.catch(() => undefined).then(run);
+  gateStateLocks.set(key, next);
+  try {
+    return await next;
+  } finally {
+    if (gateStateLocks.get(key) === next) {
+      gateStateLocks.delete(key);
+    }
+  }
 }
 
 async function saveIndex(fs: FileSystemAdapter, taskRepoRoot: string, index: GateReviewIndex): Promise<void> {
@@ -1528,10 +1774,12 @@ async function waitForGateReport(
   gate: GateReviewGate,
   requestId: string,
   timestamp: string,
-  intervalMs: number
+  intervalMs: number,
+  signal: AbortSignal
 ): Promise<ParsedReport> {
   const reportPath = reportPathForRequest(requestId);
   while (true) {
+    throwIfGateRunCancelled(signal);
     try {
       return await parseGateReport(fs, taskRepoRoot, gate, requestId, timestamp, reportPath);
     } catch (error) {
@@ -2005,6 +2253,34 @@ function assertExceptionReason(reason: string | undefined): void {
   }
 }
 
+function assertCancelRequest(input: GateReviewCancelRequest | undefined): asserts input is GateReviewCancelRequest {
+  if (!input?.requestId?.trim()) {
+    throw new VcmError({
+      code: "GATE_REVIEW_REQUEST_ID_REQUIRED",
+      message: "The current Gate Review request ID is required.",
+      statusCode: 400
+    });
+  }
+  assertExceptionReason(input.reason);
+}
+
+class GateReviewRunCancelledError extends Error {
+  constructor() {
+    super("Gate Review run was cancelled.");
+    this.name = "GateReviewRunCancelledError";
+  }
+}
+
+function throwIfGateRunCancelled(signal: AbortSignal): void {
+  if (signal.aborted) {
+    throw new GateReviewRunCancelledError();
+  }
+}
+
+function isGateRunCancelled(error: unknown): error is GateReviewRunCancelledError {
+  return error instanceof GateReviewRunCancelledError;
+}
+
 function renderProjectManagerCallback(input: {
   taskSlug: string;
   gate: GateReviewGate;
@@ -2012,6 +2288,8 @@ function renderProjectManagerCallback(input: {
   decision?: GateReviewDecision;
   reportPath: string;
   error?: string;
+  requestId?: string;
+  inputHash?: string;
 }): string {
   const lines = [
     "[VCM GATE REVIEW CALLBACK]",
@@ -2019,6 +2297,8 @@ function renderProjectManagerCallback(input: {
     `gate: ${input.gate}`,
     `status: ${input.status}`,
     `decision: ${input.decision ?? "none"}`,
+    `request_id: ${input.requestId ?? "none"}`,
+    `input_hash: ${input.inputHash ?? "none"}`,
     `report: ${input.reportPath}`,
     ...(input.error ? [`error: ${input.error}`] : []),
     "",

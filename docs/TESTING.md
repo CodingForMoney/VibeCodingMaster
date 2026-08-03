@@ -165,6 +165,7 @@ tests/
 | INT-RT-001 | Session start/resume lifecycle | `runtime-coordinator-service` + `session-registry` | PTY session can start, persist id, and resume | Session id persisted; resume reuses id; stop cleans registry | L2, on runtime change | Covered with the mock Claude runtime; live PTY coverage remains absent |
 | INT-RT-002 | Post-task memory and harness review order | Final Acceptance + Review Task Harness + `runtime-coordinator-service` + Harness route | A normally stopped complete flow collects optional Auto Memory proposals before one Task Harness Retrospective | With Auto Memory on, workflow-role proposal hooks start and stop a normal Round, then one Harness Engineer turn reviews every proposal item and pending feedback, directly updates only assigned `<VCM-memory>` blocks, commits those host files, and lets VCM record the result; with Auto Memory off, that prompt omits every memory path | L2, on Auto Memory or retrospective change | Covered by backend E2E with mock role sessions |
 | INT-GATE-003 | Tester-owned test-infrastructure repair | Test report contract + PM flow rules + validation/code-diff Gate contracts | A defect confined to tests, fixtures, test-only helpers, or `docs/TESTING.md` stays Tester-owned inside a code-producing flow | Unresolved repair status cannot enter validation review; repaired evidence records boundary, class sweep, commit, and rerun; code-diff findings classify `test-only` versus `implementation` for deterministic PM routing | L2, on Tester or Gate workflow change | Covered by artifact, harness-template, Gate service, and backend E2E tests |
+| INT-GATE-004 | Gate Review cancellation and replacement | Gate Review routes + service + Reviewer Session | A late result cannot overwrite a newer request after cancellation | Cancel requires the current request ID; Reviewer restarts; the replacement request alone owns Gate state, stable report, architecture disposition, and PM callback | L2, on Gate request lifecycle change | Covered by service race tests and backend E2E with mock Claude runtime |
 | INT-RT-003 | Manual Harness Feedback delivery | Harness Studio + `POST /api/projects/harness/feedback/send` | A user can send one pending report to the active task's Harness Engineer without automatic queue processing | Only a path still present in the pending Inbox is accepted; the exact absolute path is submitted; the report remains pending | L1, on Harness Feedback changes | Covered by service and route unit tests; live PTY coverage remains absent |
 
 ### Backend E2E (implemented: `tests/e2e/backend/`)
@@ -180,6 +181,8 @@ services with controlled runtime doubles:
   and automatic Task Harness Retrospective orchestration.
 - Architecture, validation, and code-diff rejection/correction loops, including
   corrected commit source chains and unchanged-input suppression.
+- Gate Review cancellation, Reviewer restart, exact request ownership, and
+  protection against cancelled-request reports overwriting replacement state.
 - Tester `incomplete` report validation and backend refusal to start
   Validation Adequacy Gate before remaining validation completes.
 - Role-scoped translation feeds and Gateway input/output translation without

@@ -124,6 +124,11 @@ export interface GateReviewExceptionRequest {
   reason: string;
 }
 
+export interface GateReviewCancelRequest {
+  requestId: string;
+  reason: string;
+}
+
 export interface GateReviewReport {
   gate: GateReviewGate;
   requestId?: string;

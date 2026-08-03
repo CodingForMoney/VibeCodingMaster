@@ -44,6 +44,7 @@ import type {
   UpdateMemoryFileRequest
 } from "../../shared/types/memory.js";
 import type {
+  GateReviewCancelRequest,
   GateReviewExceptionRequest,
   GateReviewGate,
   GateReviewIndex,
@@ -400,6 +401,12 @@ export const apiClient = {
   retryGateReviewGate(taskSlug: string, gate: GateReviewGate) {
     return request<GateReviewRequestResult>(`/api/tasks/${encodeURIComponent(taskSlug)}/gate-review/${gate}/retry`, {
       method: "POST"
+    });
+  },
+  cancelGateReviewGate(taskSlug: string, gate: GateReviewGate, input: GateReviewCancelRequest) {
+    return request<GateReviewIndex>(`/api/tasks/${encodeURIComponent(taskSlug)}/gate-review/${gate}/cancel`, {
+      method: "POST",
+      body: JSON.stringify(input)
     });
   },
   skipGateReviewGate(taskSlug: string, gate: GateReviewGate, input: GateReviewExceptionRequest) {

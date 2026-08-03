@@ -349,6 +349,11 @@ only:
 Reviewer does not run tests and does not choose owners or fixes. PM routes
 findings back to the responsible role.
 
+Each run has its own request ID and immutable request artifacts. A running
+review must be cancelled before replacement; cancellation restarts Reviewer,
+and a late result from the cancelled request cannot replace the current Gate
+state, stable report, or PM callback.
+
 ## Translation
 
 Conversation translation is controlled from the sidebar `Translation` section.

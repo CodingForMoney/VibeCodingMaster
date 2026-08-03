@@ -980,6 +980,21 @@ export function App() {
               setActiveGateReview({ taskSlug: activeTask.taskSlug, state });
             }, `Update ${gate} Gate Review setting`);
           }}
+          onCancelGateReviewGate={(gate, requestId) => {
+            if (!window.confirm(`Cancel the running ${gate} Gate Review request ${requestId}?`)) {
+              return;
+            }
+            void withBusy(async () => {
+              if (!activeTask) {
+                throw new Error("Create or select a task before cancelling Gate Review.");
+              }
+              const state = await apiClient.cancelGateReviewGate(activeTask.taskSlug, gate, {
+                requestId,
+                reason: "Cancelled by the user from VCM."
+              });
+              setActiveGateReview({ taskSlug: activeTask.taskSlug, state });
+            }, `Cancel ${gate} Gate Review`);
+          }}
           onTranslationEnabledChange={(enabled) => {
             setTranslationEnabled(enabled);
             void withBusy(async () => {

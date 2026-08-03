@@ -2,7 +2,7 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { createNodeFileSystemAdapter } from "../../../src/backend/adapters/filesystem.js";
+import { createNodeFileSystemAdapter, type FileSystemAdapter } from "../../../src/backend/adapters/filesystem.js";
 import type { CommandResult, CommandRunner, CommandRunnerOptions } from "../../../src/backend/adapters/command-runner.js";
 import type { TerminalRuntime } from "../../../src/backend/runtime/terminal-runtime.js";
 import { createGateReviewService } from "../../../src/backend/services/gate-review-service.js";
@@ -134,6 +134,108 @@ describe("gate-review-service", () => {
     expect(gatePrompt).not.toContain("Findings, when present");
     expect(writes.join("")).toContain("[VCM GATE REVIEW CALLBACK]");
     expect(writes.join("")).toContain("decision: request_changes");
+    expect(writes.join("")).toContain(`request_id: ${requestId}`);
+    expect(writes.join("")).toContain(`input_hash: ${record.inputHash}`);
+  });
+
+  it("keeps a newer request authoritative when a cancelled request completes late", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-gate-review-stale-completion-"));
+    await writeHarnessFiles(tmpRepo);
+
+    const baseFs = createNodeFileSystemAdapter();
+    let blockedReportPath: string | undefined;
+    let releaseLateRead: (() => void) | undefined;
+    let markLateReadStarted: (() => void) | undefined;
+    const lateReadStarted = new Promise<void>((resolve) => {
+      markLateReadStarted = resolve;
+    });
+    const lateReadRelease = new Promise<void>((resolve) => {
+      releaseLateRead = resolve;
+    });
+    const fsAdapter: FileSystemAdapter = {
+      ...baseFs,
+      async readText(targetPath) {
+        if (!blockedReportPath && targetPath.includes("/gate-reviews/requests/") && targetPath.endsWith(".report.md")) {
+          blockedReportPath = targetPath;
+          markLateReadStarted?.();
+          await lateReadRelease;
+        }
+        return baseFs.readText(targetPath);
+      }
+    };
+    const writes: string[] = [];
+    const sessionStarts: string[] = [];
+    const service = createGateReviewService({
+      fs: fsAdapter,
+      runner: createRunner(tmpRepo, []),
+      runtime: createRuntime(tmpRepo, writes, "approve"),
+      projectService: createProjectService(),
+      taskService: createTaskService(tmpRepo),
+      appSettings: createAppSettings(["architecture-plan"]),
+      sessionService: createSessionService(sessionStarts),
+      roundService: createRoundService(),
+      reportPollIntervalMs: 5
+    });
+
+    const first = await service.requestReviewGate(tmpRepo, "demo-task", "architecture-plan");
+    const firstRequestId = first.record.requestId!;
+    await lateReadStarted;
+
+    const retryWhileRunning = await service.retryReviewGate(tmpRepo, "demo-task", "architecture-plan");
+    expect(retryWhileRunning.status).toBe("running");
+    expect(retryWhileRunning.record.requestId).toBe(firstRequestId);
+    await expect(service.updateSettings(tmpRepo, "demo-task", {
+      gates: { "architecture-plan": false }
+    })).rejects.toMatchObject({ code: "GATE_REVIEW_RUNNING" });
+    await expect(service.cancelReviewGate(tmpRepo, "demo-task", "architecture-plan", {
+      requestId: "stale-request-id",
+      reason: "Wrong request"
+    })).rejects.toMatchObject({ code: "GATE_REVIEW_REQUEST_MISMATCH" });
+
+    const cancelled = await service.cancelReviewGate(tmpRepo, "demo-task", "architecture-plan", {
+      requestId: firstRequestId,
+      reason: "Replace obsolete inputs"
+    });
+    expect(cancelled.activeGate).toBeNull();
+    expect(cancelled.gates["architecture-plan"].status).toBe("pending");
+    expect(sessionStarts).toContain("restart:reviewer");
+
+    await writeFile(
+      path.join(taskWorktree(tmpRepo), ".ai/vcm/handoffs/architecture-plan.md"),
+      "# Architecture Plan\n\nReplacement plan.\n",
+      "utf8"
+    );
+    const second = await service.requestReviewGate(tmpRepo, "demo-task", "architecture-plan");
+    const secondRequestId = second.record.requestId!;
+    expect(secondRequestId).not.toBe(firstRequestId);
+    await waitFor(async () => {
+      const state = await service.getState(tmpRepo!, "demo-task");
+      return state.gates["architecture-plan"].status === "completed";
+    });
+
+    releaseLateRead?.();
+    await waitFor(async () => {
+      const request = JSON.parse(await readFile(
+        path.join(taskWorktree(tmpRepo!), ".ai/vcm/gate-reviews/requests", `${firstRequestId}.json`),
+        "utf8"
+      ));
+      return request.status === "stale_completion";
+    });
+
+    const finalState = await service.getState(tmpRepo, "demo-task");
+    expect(finalState.activeGate).toBeNull();
+    expect(finalState.gates["architecture-plan"]).toMatchObject({
+      requestId: secondRequestId,
+      status: "completed",
+      decision: "approve"
+    });
+    const stableReport = await readFile(
+      path.join(taskWorktree(tmpRepo), ".ai/vcm/gate-reviews/architecture-plan-review.md"),
+      "utf8"
+    );
+    expect(stableReport).toContain(`Request: ${secondRequestId}`);
+    expect(stableReport).not.toContain(`Request: ${firstRequestId}`);
+    expect(writes.filter((value) => value.includes("[VCM GATE REVIEW CALLBACK]")).length).toBe(1);
   });
 
   it("does not start Reviewer when the project switch is disabled", async () => {
@@ -1221,6 +1323,11 @@ function createSessionService(starts: string[] = [], activityCalls: string[] = [
     },
     async startRoleSession(_repoRoot: string, _taskSlug: string, role: string) {
       starts.push(role);
+      sessions.set(role, reviewerSession);
+      return reviewerSession;
+    },
+    async restartRoleSession(_repoRoot: string, _taskSlug: string, role: string) {
+      starts.push(`restart:${role}`);
       sessions.set(role, reviewerSession);
       return reviewerSession;
     },

@@ -101,6 +101,7 @@ export interface ProjectDashboardProps {
   onStartGatewayLarkRegistration(): void;
   onResetGatewayBinding(): void;
   onGateReviewGateEnabledChange(gate: GateReviewGate, enabled: boolean): void;
+  onCancelGateReviewGate(gate: GateReviewGate, requestId: string): void;
   onTranslationEnabledChange(enabled: boolean): void;
   onTranslationAutoSendChange(enabled: boolean): void;
   onTranslationTargetLanguageChange(targetLanguage: TranslationTargetLanguage): void;
@@ -185,6 +186,7 @@ export function ProjectDashboard({
   onStartGatewayLarkRegistration,
   onResetGatewayBinding,
   onGateReviewGateEnabledChange,
+  onCancelGateReviewGate,
   onTranslationEnabledChange,
   onTranslationAutoSendChange,
   onTranslationTargetLanguageChange,
@@ -413,6 +415,7 @@ export function ProjectDashboard({
           <GateReviewGateSettings
             busy={busy}
             state={gateReview}
+            onCancelGateReview={onCancelGateReviewGate}
             onGateEnabledChange={onGateReviewGateEnabledChange}
           />
         </SidebarSection>
@@ -825,10 +828,12 @@ function getTranslationBaseUnavailableReason(
 
 function GateReviewGateSettings({
   busy,
+  onCancelGateReview,
   onGateEnabledChange,
   state
 }: {
   busy?: boolean;
+  onCancelGateReview(gate: GateReviewGate, requestId: string): void;
   onGateEnabledChange(gate: GateReviewGate, enabled: boolean): void;
   state: GateReviewIndex | null;
 }) {
@@ -838,15 +843,26 @@ function GateReviewGateSettings({
         const record = state?.gates[gate];
         const enabled = Boolean(record?.required);
         return (
-          <SwitchControl
-            checked={enabled}
-            className="sidebar-switch"
-            disabled={busy || !state}
-            key={gate}
-            label={getGateReviewGateLabel(gate)}
-            title={record?.status ? `status: ${record.status}` : undefined}
-            onChange={(checked) => onGateEnabledChange(gate, checked)}
-          />
+          <div className="gate-review-setting" key={gate}>
+            <SwitchControl
+              checked={enabled}
+              className="sidebar-switch"
+              disabled={busy || !state || record?.status === "running"}
+              label={getGateReviewGateLabel(gate)}
+              title={record?.status ? `status: ${record.status}` : undefined}
+              onChange={(checked) => onGateEnabledChange(gate, checked)}
+            />
+            {record?.status === "running" && record.requestId ? (
+              <button
+                className="danger-button"
+                disabled={busy}
+                type="button"
+                onClick={() => onCancelGateReview(gate, record.requestId!)}
+              >
+                Cancel review
+              </button>
+            ) : null}
+          </div>
         );
       })}
     </div>

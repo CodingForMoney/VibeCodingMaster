@@ -39,6 +39,31 @@ describe("apiClient", () => {
     expect(new Headers(init?.headers).get("content-type")).toBe("application/json");
   });
 
+  it("cancels the exact running Gate Review request", async () => {
+    const fetchMock = mockFetch({
+      version: 1,
+      enabled: true,
+      activeGate: null,
+      gates: {},
+      updatedAt: "2026-08-03T00:00:00.000Z"
+    });
+
+    await apiClient.cancelGateReviewGate("demo-task", "architecture-plan", {
+      requestId: "architecture-plan-123",
+      reason: "Replace obsolete inputs"
+    });
+
+    const init = fetchMock.mock.calls[0]?.[1];
+    expect(fetchMock.mock.calls[0]?.[0]).toBe(
+      "/api/tasks/demo-task/gate-review/architecture-plan/cancel"
+    );
+    expect(init?.method).toBe("POST");
+    expect(JSON.parse(String(init?.body))).toEqual({
+      requestId: "architecture-plan-123",
+      reason: "Replace obsolete inputs"
+    });
+  });
+
   it("loads recent repository paths", async () => {
     const fetchMock = mockFetch(["/workspace", "/repo"]);
 

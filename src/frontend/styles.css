@@ -852,6 +852,11 @@ h2 {
   gap: 8px;
 }
 
+.gate-review-setting {
+  display: grid;
+  gap: 6px;
+}
+
 .sidebar-settings button {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;

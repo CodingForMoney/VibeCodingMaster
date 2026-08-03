@@ -1,5 +1,6 @@
 import type { FastifyInstance } from "fastify";
 import type {
+  GateReviewCancelRequest,
   GateReviewExceptionRequest,
   GateReviewRequestInput,
   GateReviewSettingsUpdateRequest
@@ -42,6 +43,15 @@ export function registerGateReviewRoutes(app: FastifyInstance, deps: GateReviewR
       const project = await requireCurrentProject(deps.projectService);
       const gate = parseGate(request.params.gate);
       return deps.gateReviewService.retryReviewGate(project.repoRoot, request.params.taskSlug, gate);
+    }
+  );
+
+  app.post<{ Params: { taskSlug: string; gate: string }; Body: GateReviewCancelRequest }>(
+    "/api/tasks/:taskSlug/gate-review/:gate/cancel",
+    async (request) => {
+      const project = await requireCurrentProject(deps.projectService);
+      const gate = parseGate(request.params.gate);
+      return deps.gateReviewService.cancelReviewGate(project.repoRoot, request.params.taskSlug, gate, request.body);
     }
   );
 

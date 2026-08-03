@@ -4,9 +4,11 @@ import { afterEach, describe, expect, it } from "vitest";
 import { createMockClaudeE2eApp } from "./helpers/e2e-app.js";
 import { createE2eRepo, git } from "./helpers/e2e-repo.js";
 import {
+  cancelGateReview,
   connectAndCreateTask,
   getGateState,
   requestGateReview,
+  startRole,
   updateGateSettings,
   waitFor,
   writeConfirmedArchitectureBrief
@@ -23,6 +25,105 @@ afterEach(async () => {
 });
 
 describe("backend E2E Gate Review with mock Claude Code", () => {
+  it("cancels the exact running request before a replacement review starts", async () => {
+    const env = await createMockClaudeE2eApp();
+    cleanups.push(() => env.close());
+    const repo = await createE2eRepo();
+    cleanups.push(() => repo.cleanup());
+    const task = await connectAndCreateTask(env.app, repo, "cancel-gate-review");
+    await startRole(env.app, task.taskSlug, "project-manager");
+    await writeConfirmedArchitectureBrief(task.worktreePath, task.taskSlug);
+    await fs.writeFile(
+      path.join(task.worktreePath, ".ai/vcm/handoffs/architecture-plan.md"),
+      "Planning Result: complete\n\n# Architecture Plan\n\nInitial plan.\n",
+      "utf8"
+    );
+    await updateGateSettings(env.app, task.taskSlug, {
+      "architecture-plan": true,
+      "validation-adequacy": false,
+      "code-diff": false
+    });
+
+    let releaseFirstPrompt: (() => void) | undefined;
+    let markFirstPromptStarted: (() => void) | undefined;
+    const firstPromptStarted = new Promise<void>((resolve) => {
+      markFirstPromptStarted = resolve;
+    });
+    const firstPromptRelease = new Promise<void>((resolve) => {
+      releaseFirstPrompt = resolve;
+    });
+    env.mockRuntime.onPrompt("reviewer", "[VCM GATE REVIEW]", async (ctx) => {
+      await ctx.userPromptSubmit();
+      markFirstPromptStarted?.();
+      await firstPromptRelease;
+      const request = matchPromptField(ctx.prompt, "Request");
+      const report = matchPromptField(ctx.prompt, "Report");
+      if (request && report) {
+        await ctx.writeAbsoluteFile(report, architectureReport(request, "Obsolete cancelled result."));
+      }
+    });
+
+    const first = await requestGateReview(env.app, task.taskSlug, "architecture-plan");
+    expect(first.status).toBe("started");
+    const firstRequestId = first.record.requestId!;
+    await firstPromptStarted;
+    const firstReviewerProcess = env.mockRuntime.getSessionByRole(task.taskSlug, "reviewer");
+    expect(firstReviewerProcess).toBeDefined();
+
+    const stillRunning = await requestGateReview(env.app, task.taskSlug, "architecture-plan");
+    expect(stillRunning).toMatchObject({
+      status: "running",
+      record: { requestId: firstRequestId }
+    });
+    const cancelled = await cancelGateReview(env.app, task.taskSlug, "architecture-plan", {
+      requestId: firstRequestId,
+      reason: "Replace obsolete inputs"
+    });
+    expect(cancelled.activeGate).toBeNull();
+    expect(cancelled.gates["architecture-plan"].status).toBe("pending");
+    const restartedReviewerProcess = env.mockRuntime.getSessionByRole(task.taskSlug, "reviewer");
+    expect(restartedReviewerProcess?.pid).not.toBe(firstReviewerProcess?.pid);
+
+    env.mockRuntime.onPrompt("reviewer", "[VCM GATE REVIEW]", writeApproveGateReport);
+    await fs.appendFile(
+      path.join(task.worktreePath, ".ai/vcm/handoffs/architecture-plan.md"),
+      "\nReplacement: current plan.\n",
+      "utf8"
+    );
+    const second = await requestGateReview(env.app, task.taskSlug, "architecture-plan");
+    expect(second.status).toBe("started");
+    const secondRequestId = second.record.requestId!;
+    expect(secondRequestId).not.toBe(firstRequestId);
+    await waitForGate(env.app, task.taskSlug, "architecture-plan");
+
+    releaseFirstPrompt?.();
+    await env.mockRuntime.waitForIdle();
+    const finalState = await getGateState(env.app, task.taskSlug);
+    expect(finalState.gates["architecture-plan"]).toMatchObject({
+      status: "completed",
+      decision: "approve",
+      requestId: secondRequestId
+    });
+    const stableReport = await fs.readFile(
+      path.join(task.worktreePath, ".ai/vcm/gate-reviews/architecture-plan-review.md"),
+      "utf8"
+    );
+    expect(stableReport).toContain(`Request: ${secondRequestId}`);
+    expect(stableReport).not.toContain(`Request: ${firstRequestId}`);
+    const firstRequest = JSON.parse(await fs.readFile(
+      path.join(task.worktreePath, ".ai/vcm/gate-reviews/requests", `${firstRequestId}.json`),
+      "utf8"
+    ));
+    expect(firstRequest).toMatchObject({
+      status: "cancelled",
+      cancelReason: "Replace obsolete inputs"
+    });
+    const pmSession = env.mockRuntime.getSessionByRole(task.taskSlug, "project-manager");
+    expect(pmSession).toBeDefined();
+    expect(env.mockRuntime.getWrites(pmSession!.id)
+      .filter((value) => value.includes("[VCM GATE REVIEW CALLBACK]"))).toHaveLength(1);
+  });
+
   it("reviews only ready gate inputs and skips unchanged approved inputs", async () => {
     const env = await createMockClaudeE2eApp();
     cleanups.push(() => env.close());
@@ -158,7 +259,7 @@ describe("backend E2E Gate Review with mock Claude Code", () => {
       codeDiffSource: "coder"
     });
     expect(codeDiffApproved.gates["code-diff"].changedFiles).toContain("feature.txt");
-  });
+  }, 10_000);
 
   it("blocks unresolved Tester-owned infrastructure repair and accepts repaired evidence", async () => {
     const env = await createMockClaudeE2eApp();
@@ -362,6 +463,35 @@ async function writeApproveGateReport(ctx: MockClaudePromptContext): Promise<voi
     ...codeDiffAnalysis
   ].join("\n"));
   await ctx.stop();
+}
+
+function architectureReport(requestId: string, summary: string): string {
+  return [
+    "Gate: architecture-plan",
+    `Request: ${requestId}`,
+    "Decision: approve",
+    `Summary: ${summary}`,
+    "",
+    "## Architecture Analysis",
+    "",
+    "- Evidence Read: architecture plan, current source, and callers",
+    "- Architecture Brief Fit: confirmed decisions are preserved",
+    "- End-To-End Flow: entry to owner to completion",
+    "- Scope Fit: complete",
+    "- Code Reality: verified",
+    "- Ownership: verified",
+    "- Data Flow: verified",
+    "- Lifecycle: verified",
+    "- Invariants: verified",
+    "- Boundaries And Public Surface: verified",
+    "- Failure Model: verified",
+    "- Coder Readiness: ready",
+    "",
+    "## Findings",
+    "",
+    "None.",
+    ""
+  ].join("\n");
 }
 
 async function writeArchitectureRoundReport(

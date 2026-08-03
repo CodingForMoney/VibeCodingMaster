@@ -360,6 +360,14 @@ worktree. After a report parses successfully, the Gate Review service atomically
 request-scoped report, while the Gate index and stable report paths remain the
 current-state interface.
 
+Gate mutation is serialized per task. A running review cannot be replaced by
+retry; cancellation must name the current request ID, records that request as
+cancelled, clears the active Gate, and restarts Reviewer before another request
+can begin. Completion and failure use a current-request compare-and-set check.
+A late result from a cancelled or superseded request remains request history
+only and cannot publish the stable report, mutate the Gate index, update
+architecture disposition, or call back PM.
+
 Code-producing flows run Tester validation and validation-adequacy review
 before code-diff review. The Gate Review service rejects code-diff when the
 Tester report is incomplete or when a required validation-adequacy decision is
