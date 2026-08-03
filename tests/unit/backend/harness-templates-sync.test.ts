@@ -286,6 +286,21 @@ describe("harness templates stay in sync with the script installer", () => {
     };
     expect(denied.hookSpecificOutput.permissionDecision).toBe("deny");
 
+    const composedOutput = execFileSync("sh", ["-c", command], {
+      cwd: childDir,
+      env,
+      input: JSON.stringify({
+        tool_name: "Bash",
+        tool_input: { command: ".ai/tools/watch-job job-1 ; true" }
+      }),
+      encoding: "utf8"
+    });
+    const composed = JSON.parse(composedOutput) as {
+      hookSpecificOutput: { permissionDecision: string; permissionDecisionReason: string };
+    };
+    expect(composed.hookSpecificOutput.permissionDecision).toBe("deny");
+    expect(composed.hookSpecificOutput.permissionDecisionReason).toContain("standalone Bash commands");
+
     await unlink(path.join(tmpRepo, ".ai/tools/vcm-bash-guard"));
     const missingGuardOutput = execFileSync("sh", ["-c", command], {
       cwd: childDir,

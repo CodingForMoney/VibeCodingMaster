@@ -261,7 +261,7 @@ describe("long-running validation tools", () => {
     return jobId!;
   }
 
-  async function watchLongCheck(jobId: string) {
+  async function watchLongCheck(jobId: string, window = "5s", interval = "50ms") {
     try {
       const result = await execFileAsync(
         "python3",
@@ -269,9 +269,9 @@ describe("long-running validation tools", () => {
           path.join(tmpRepo!, ".ai/tools/watch-job"),
           jobId,
           "--window",
-          "5s",
+          window,
           "--interval",
-          "50ms"
+          interval
         ],
         { cwd: tmpRepo }
       );
@@ -301,6 +301,34 @@ describe("long-running validation tools", () => {
       readFile(path.join(tmpRepo, ".ai/vcm/jobs", failedJob, "status.json"), "utf8")
     ).resolves.toContain('"exitCode": 7');
   }, 20_000);
+
+  it("preserves every supervised watch-job result code", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-long-check-"));
+    await installHarnessTools(tmpRepo);
+
+    const cases = [
+      { jobId: "failed-job", status: "failed", exitCode: 1, output: "status: failed" },
+      { jobId: "timeout-job", status: "timeout", exitCode: 124, output: "status: timeout" },
+      { jobId: "orphaned-job", status: "orphaned", exitCode: 4, output: "status: orphaned" },
+      { jobId: "running-job", status: "running", exitCode: 125, output: "status: still-running" }
+    ] as const;
+
+    for (const item of cases) {
+      await writeJson(path.join(tmpRepo, ".ai/vcm/jobs", item.jobId, "status.json"), {
+        jobId: item.jobId,
+        status: item.status,
+        startedAt: "2026-08-03T00:00:00Z",
+        finishedAt: item.status === "running" ? null : "2026-08-03T00:00:01Z",
+        exitCode: item.status === "failed" ? 7 : null,
+        durationSeconds: item.status === "running" ? null : 1,
+        timeoutSeconds: 10
+      });
+      await expect(watchLongCheck(item.jobId, "50ms", "10ms")).resolves.toMatchObject({
+        exitCode: item.exitCode,
+        stdout: expect.stringContaining(item.output)
+      });
+    }
+  });
 
   it("rejects shell command-string wrappers before creating a job", async () => {
     tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-long-check-"));

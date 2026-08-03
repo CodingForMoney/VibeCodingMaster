@@ -107,7 +107,8 @@ Use the `vcm-long-running-validation` skill (`.ai/tools/run-long-check` +
 process; the job guard denies it. Pass the validation executable directly:
 `run-long-check` rejects shell command-string wrappers because pipelines or
 trailing commands can mask the validation exit code. Honor the 60-minute
-per-job ceiling.
+per-job ceiling. Invoke `run-long-check` and `watch-job` as standalone Bash
+calls so their exit codes remain authoritative; inspect logs in a later call.
 
 ## Release Gate (L4)
 

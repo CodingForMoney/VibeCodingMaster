@@ -641,7 +641,9 @@ VCM roles must not run background Bash. `vcm-bash-guard` denies
 `run_in_background`, `nohup`, `setsid`, `disown`, and trailing `&`.
 `run-long-check` accepts the validation executable and arguments directly and
 rejects shell command-string wrappers whose pipeline or trailing command could
-mask the validation exit code.
+mask the validation exit code. `run-long-check` and `watch-job` must each be the
+only top-level command in their Bash call so their exit status cannot be
+replaced by a pipeline, command list, conditional chain, or subshell.
 
 ## 14. Generated Context
 

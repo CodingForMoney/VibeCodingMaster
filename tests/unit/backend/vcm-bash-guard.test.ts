@@ -53,7 +53,22 @@ describe("vcm-bash-guard", () => {
     ["backgrounded run-long-check wrapper", bash(".ai/tools/run-long-check --timeout 5m -- cargo test &")],
     ["nohup run-long-check wrapper", bash("nohup .ai/tools/run-long-check --timeout 5m -- cargo test")],
     ["setsid in run-long-check payload", bash(".ai/tools/run-long-check --timeout 5m -- setsid ./daemon")],
-    ["background shell payload in run-long-check", bash('.ai/tools/run-long-check --timeout 5m -- sh -c "x & y"')]
+    ["background shell payload in run-long-check", bash('.ai/tools/run-long-check --timeout 5m -- sh -c "x & y"')],
+    ["piped watch-job", bash(".ai/tools/watch-job job-1 | tail -10")],
+    ["pipe into watch-job", bash("printf ready | .ai/tools/watch-job job-1")],
+    ["watch-job followed by command", bash(".ai/tools/watch-job job-1 ; grep failed stdout.log")],
+    ["watch-job success chain", bash(".ai/tools/watch-job job-1 && echo passed")],
+    ["watch-job failure chain", bash(".ai/tools/watch-job job-1 || echo failed")],
+    ["watch-job newline chain", bash(".ai/tools/watch-job job-1\ngrep failed stdout.log")],
+    ["watch-job subshell", bash("(.ai/tools/watch-job job-1)")],
+    ["watch-job command substitution", bash("result=$(.ai/tools/watch-job job-1)")],
+    ["watch-job double-quoted command substitution", bash('echo "$(.ai/tools/watch-job job-1)"')],
+    ["watch-job double-quoted backtick substitution", bash('echo "`.ai/tools/watch-job job-1`"')],
+    ["watch-job shell command string", bash("bash -lc '.ai/tools/watch-job job-1'")],
+    ["piped run-long-check", bash(".ai/tools/run-long-check --timeout 5m -- cargo test | tail -5")],
+    ["run-long-check followed by command", bash(".ai/tools/run-long-check --timeout 5m -- cargo test ; echo started")],
+    ["run-long-check shell command string", bash('.ai/tools/run-long-check --timeout 5m -- bash -c "cargo test"')],
+    ["run-long-check env shell command string", bash('.ai/tools/run-long-check --timeout 5m -- env DEMO=1 sh -c "cargo test"')]
   ];
 
   const allowed: Array<[string, GuardPayload]> = [
@@ -62,7 +77,11 @@ describe("vcm-bash-guard", () => {
     ["fd redirect", bash("make 2>&1 | tail")],
     ["quoted ampersand inside sh -c", bash("sh -c 'echo \"a & b\"'")],
     ["plain watch-job", bash(".ai/tools/watch-job job-1 --window 8m")],
+    ["redirected watch-job", bash(".ai/tools/watch-job job-1 > watch.log 2>&1")],
     ["plain run-long-check", bash(".ai/tools/run-long-check --timeout 5m -- cargo test")],
+    ["run-long-check direct script", bash('.ai/tools/run-long-check --timeout 5m -- bash /tmp/check.sh "a|b;c"')],
+    ["run-long-check escaped operator argument", bash(".ai/tools/run-long-check --timeout 5m -- node check.js a\\|b")],
+    ["quoted tool mention", bash("printf '%s' '.ai/tools/watch-job job-1 | tail -1'")],
     ["non-Bash tool", { tool_name: "Read", tool_input: { file_path: "a&b.txt" } }]
   ];
 
