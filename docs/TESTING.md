@@ -55,6 +55,10 @@ Notes:
 - Runtime Coordinator changes: run `runtime-coordinator-service.test.ts` and
   verify fresh and resumable task-scoped tool Sessions are reconciled without a
   frontend trigger.
+- Harness revision or Session freshness changes: run `session-service.test.ts`
+  and `harness-revision.e2e.test.ts`; verify all seven task-scoped roles read the
+  active worktree revision even when the base repository contains a conflicting
+  value, and auxiliary notifications remain in task session storage.
 - CCR model integration change: run `ccr-gateway-adapter.test.ts`,
   `ccr-integration-service.test.ts`, `ccr-api-key-helper.test.ts`,
   `claude-adapter.test.ts`, `claude-transcript-service.test.ts`,
@@ -167,6 +171,7 @@ tests/
 | INT-GATE-003 | Tester-owned test-infrastructure repair | Test report contract + PM flow rules + validation/code-diff Gate contracts | A defect confined to tests, fixtures, test-only helpers, or `docs/TESTING.md` stays Tester-owned inside a code-producing flow | Unresolved repair status cannot enter validation review; repaired evidence records boundary, class sweep, commit, and rerun; code-diff findings classify `test-only` versus `implementation` for deterministic PM routing | L2, on Tester or Gate workflow change | Covered by artifact, harness-template, Gate service, and backend E2E tests |
 | INT-GATE-004 | Gate Review cancellation and replacement | Gate Review routes + service + Reviewer Session | A late result cannot overwrite a newer request after cancellation | Cancel requires the current request ID; Reviewer restarts; the replacement request alone owns Gate state, stable report, architecture disposition, and PM callback | L2, on Gate request lifecycle change | Covered by service race tests and backend E2E with mock Claude runtime |
 | INT-RT-003 | Manual Harness Feedback delivery | Harness Studio + `POST /api/projects/harness/feedback/send` | A user can send one pending report to the active task's Harness Engineer without automatic queue processing | Only a path still present in the pending Inbox is accepted; the exact absolute path is submitted; the report remains pending | L1, on Harness Feedback changes | Covered by service and route unit tests; live PTY coverage remains absent |
+| INT-RT-004 | Task worktree Harness revision freshness | Harness Apply/status + task Session routes | Session freshness uses the same task worktree revision that Harness updates | All seven roles snapshot and compare the worktree revision; a conflicting base revision is ignored; task-scoped auxiliary notifications stay in task Session storage | L2, on Harness or Session changes | Covered by `session-service.test.ts` and `harness-revision.e2e.test.ts` with a real linked worktree and mock Claude runtime |
 
 ### Backend E2E (implemented: `tests/e2e/backend/`)
 
@@ -211,6 +216,9 @@ services with controlled runtime doubles:
 - Workflow-role launch-template normalization remains separate from tool Session
   defaults. Route tests verify that explicit tool Start and Restart persist the
   successful options while Resume and automatic startup do not.
+- Task worktree Harness revision freshness for all seven roles, including
+  outdated detection and auxiliary-role refresh notification while the base
+  repository contains a different revision.
 
 Run all backend journeys with `npm run test:e2e:backend`.
 

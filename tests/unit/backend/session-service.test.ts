@@ -931,30 +931,41 @@ describe("createSessionService", () => {
     const writes: string[] = [];
     const service = createTestSessionService(fs, runtimeInputs, writes);
 
-    const started = await service.startRoleSession("/repo", "demo-task", "architect");
-    expect(started.harnessRevision).toBe(0);
-    expect(started.harnessCurrentRevision).toBe(0);
-    expect(started.harnessOutdated).toBe(false);
-
     await fs.writeJson("/repo/.ai/vcm/harness/revision.json", {
       version: 1,
+      revision: 9,
+      updatedAt: "2026-05-29T00:00:00.000Z"
+    });
+    await fs.writeJson(`${TASK_WORKTREE}/.ai/vcm/harness/revision.json`, {
+      version: 1,
       revision: 1,
+      updatedAt: "2026-05-29T00:00:00.000Z"
+    });
+
+    const started = await service.startRoleSession("/repo", "demo-task", "architect");
+    expect(started.harnessRevision).toBe(1);
+    expect(started.harnessCurrentRevision).toBe(1);
+    expect(started.harnessOutdated).toBe(false);
+
+    await fs.writeJson(`${TASK_WORKTREE}/.ai/vcm/harness/revision.json`, {
+      version: 1,
+      revision: 2,
       updatedAt: "2026-05-29T00:00:00.000Z"
     });
 
     const [outdated] = await service.listRoleSessions("/repo", "demo-task");
     expect(outdated).toMatchObject({
       role: "architect",
-      harnessRevision: 0,
-      harnessCurrentRevision: 1,
+      harnessRevision: 1,
+      harnessCurrentRevision: 2,
       harnessOutdated: true
     });
 
     const notified = await service.notifyRoleHarnessUpdated("/repo", "demo-task", "architect");
     expect(notified).toMatchObject({
       role: "architect",
-      harnessRevision: 1,
-      harnessCurrentRevision: 1,
+      harnessRevision: 2,
+      harnessCurrentRevision: 2,
       harnessOutdated: false,
       lastHarnessNotifyAt: "2026-05-29T00:00:00.000Z"
     });
@@ -963,6 +974,53 @@ describe("createSessionService", () => {
     expect(writes[0]).toContain("[/VCM HARNESS UPDATED]");
     expect(writes[0]).toContain(".claude/agents/architect.md");
     expect(writes[1]).toBe("\r");
+  });
+
+  it("keeps task-scoped auxiliary harness notifications in task session storage", async () => {
+    const fs = createMemoryFs();
+    const service = createTestSessionService(fs, []);
+
+    await fs.writeJson(`${TASK_WORKTREE}/.ai/vcm/harness/revision.json`, {
+      version: 1,
+      revision: 3,
+      updatedAt: "2026-05-29T00:00:00.000Z"
+    });
+
+    for (const role of ["translator", "harness-engineer"] satisfies RoleName[]) {
+      await service.startRoleSession("/repo", "demo-task", role);
+      await recordCurrentRoleHook(service, {
+        taskSlug: "demo-task",
+        role,
+        eventName: "UserPromptSubmit",
+        sessionId: `${role}-task-session`,
+        transcriptPath: `${TASK_WORKTREE}/.claude/projects/${role}-task-session.jsonl`,
+        cwd: TASK_WORKTREE
+      });
+      const notified = await service.notifyRoleHarnessUpdated("/repo", "demo-task", role);
+      expect(notified).toMatchObject({
+        taskSlug: "demo-task",
+        role,
+        harnessRevision: 3,
+        harnessCurrentRevision: 3,
+        harnessOutdated: false
+      });
+    }
+
+    const persisted = await fs.readJson<{
+      roles: Record<string, { record?: RoleSessionRecord }>;
+    }>(`${TASK_WORKTREE}/.ai/vcm/sessions/demo-task.json`);
+    expect(persisted.roles.translator?.record).toMatchObject({
+      taskSlug: "demo-task",
+      role: "translator",
+      harnessRevision: 3
+    });
+    expect(persisted.roles["harness-engineer"]?.record).toMatchObject({
+      taskSlug: "demo-task",
+      role: "harness-engineer",
+      harnessRevision: 3
+    });
+    await expect(fs.pathExists("/repo/.ai/vcm/translations/session.json")).resolves.toBe(false);
+    await expect(fs.pathExists("/repo/.ai/vcm/harness-engineer/session.json")).resolves.toBe(false);
   });
 
   it("passes Reviewer effort through Claude Code settings", async () => {

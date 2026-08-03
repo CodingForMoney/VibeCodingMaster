@@ -279,6 +279,14 @@ Harness Engineer for review. Sending does not remove the report. Task Harness
 Retrospective assigns every pending report, records its disposition, and removes
 it only after the report contains that disposition.
 
+Harness revision state is owned by the active task worktree. `session-service`
+reads `.ai/vcm/harness/revision.json` from the same task runtime root used by
+Harness status and Apply. Every task-scoped role records that revision at launch
+and compares it against the same file when sessions are read or listed. Harness
+refresh notification updates the task-scoped session record in the worktree;
+the base repository revision and legacy project-tool session files are not used
+for that comparison or persistence.
+
 ## Turn Runtime Ownership
 
 `round-service` owns the active turn and round state. `session-service` owns role

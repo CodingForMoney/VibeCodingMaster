@@ -157,15 +157,15 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
   const now = deps.now ?? (() => new Date().toISOString());
   const isProcessAlive = deps.isProcessAlive ?? defaultIsProcessAlive;
 
-  async function readCurrentHarnessRevision(repoRoot: string): Promise<number> {
-    return (await readHarnessRevisionState(deps.fs, repoRoot)).revision;
+  async function readCurrentHarnessRevision(harnessRepoRoot: string): Promise<number> {
+    return (await readHarnessRevisionState(deps.fs, harnessRepoRoot)).revision;
   }
 
   async function withHarnessRevisionView(
-    repoRoot: string,
+    harnessRepoRoot: string,
     record: RoleSessionRecord
   ): Promise<RoleSessionRecord> {
-    const currentRevision = await readCurrentHarnessRevision(repoRoot);
+    const currentRevision = await readCurrentHarnessRevision(harnessRepoRoot);
     const sessionRevision = normalizeHarnessRevision(record.harnessRevision);
     return {
       ...record,
@@ -182,17 +182,17 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     input: StartRoleSessionRequest,
     launchMode: LaunchMode
   ): Promise<RoleSessionRecord> {
+    const config = await deps.projectService.loadConfig(repoRoot);
+    const task = await deps.taskService.loadTask(repoRoot, taskSlug);
+    const taskRepoRoot = getTaskRuntimeRepoRoot(task);
     const live = toRoleSessionRecordView(
       getRegisteredRoleSession(deps.registry, deps.runtime, taskSlug, role),
       deps.runtime
     );
     if (live && live.status === "running") {
-      return withHarnessRevisionView(repoRoot, live);
+      return withHarnessRevisionView(taskRepoRoot, live);
     }
 
-    const config = await deps.projectService.loadConfig(repoRoot);
-    const task = await deps.taskService.loadTask(repoRoot, taskSlug);
-    const taskRepoRoot = getTaskRuntimeRepoRoot(task);
     const paths = deps.artifactService.getHandoffPaths(taskRepoRoot, task.handoffDir);
     const persisted = await loadPersistedRoleRecordForRole(deps.fs, repoRoot, taskRepoRoot, config.stateRoot, taskSlug, role);
     const permissionMode = normalizeClaudePermissionMode(input.permissionMode ?? persisted?.permissionMode);
@@ -259,7 +259,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       rows: input.rows
     });
     const timestamp = now();
-    const harnessRevision = await readCurrentHarnessRevision(repoRoot);
+    const harnessRevision = await readCurrentHarnessRevision(taskRepoRoot);
     const record: RoleSessionRecord = {
       id: runtimeSession.id,
       runtimeSessionToken,
@@ -293,7 +293,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     if (role === "project-manager") {
       await restoreProjectManagerWorkflowContext(record, taskRepoRoot, config.stateRoot);
     }
-    return withHarnessRevisionView(repoRoot, record);
+    return withHarnessRevisionView(taskRepoRoot, record);
   }
 
   async function restoreProjectManagerWorkflowContext(
@@ -332,7 +332,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     );
     if (live && live.status === "running") {
       return withHarnessRevisionView(
-        repoRoot,
+        taskContext.taskRepoRoot,
         await migrateRunningProjectToolSessionCwd(repoRoot, live, taskContext.taskRepoRoot)
       );
     }
@@ -417,7 +417,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       rows: input.rows
     });
     const timestamp = now();
-    const harnessRevision = await readCurrentHarnessRevision(repoRoot);
+    const harnessRevision = await readCurrentHarnessRevision(taskContext.taskRepoRoot);
     const record: RoleSessionRecord = {
       id: runtimeSession.id,
       runtimeSessionToken,
@@ -461,13 +461,13 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
         return launchProjectTranslatorSession(repoRoot, input, "fresh");
       }
       return withHarnessRevisionView(
-        repoRoot,
+        taskContext.taskRepoRoot,
         migrated
       );
     }
 
     return withHarnessRevisionView(
-      repoRoot,
+      taskContext.taskRepoRoot,
       await migrateRunningProjectToolSessionCwd(repoRoot, record, taskContext.taskRepoRoot)
     );
   }
@@ -484,7 +484,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     );
     if (live && live.status === "running") {
       return withHarnessRevisionView(
-        repoRoot,
+        taskContext.taskRepoRoot,
         await migrateRunningProjectToolSessionCwd(repoRoot, live, taskContext.taskRepoRoot)
       );
     }
@@ -565,7 +565,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       rows: input.rows
     });
     const timestamp = now();
-    const harnessRevision = await readCurrentHarnessRevision(repoRoot);
+    const harnessRevision = await readCurrentHarnessRevision(taskContext.taskRepoRoot);
     const record: RoleSessionRecord = {
       id: runtimeSession.id,
       runtimeSessionToken,
@@ -608,13 +608,13 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
         return launchProjectHarnessEngineerSession(repoRoot, input, "fresh");
       }
       return withHarnessRevisionView(
-        repoRoot,
+        taskContext.taskRepoRoot,
         migrated
       );
     }
 
     return withHarnessRevisionView(
-      repoRoot,
+      taskContext.taskRepoRoot,
       await migrateRunningProjectToolSessionCwd(repoRoot, record, taskContext.taskRepoRoot)
     );
   }
@@ -883,8 +883,8 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     }
   }
 
-  async function notifyHarnessUpdatedForSession(
-    repoRoot: string,
+  async function buildHarnessUpdatedSession(
+    harnessRepoRoot: string,
     session: RoleSessionRecord
   ): Promise<RoleSessionRecord> {
     const runtimeSession = deps.runtime.getSession(session.id);
@@ -897,11 +897,11 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       });
     }
 
-    const currentRevision = await readCurrentHarnessRevision(repoRoot);
+    const currentRevision = await readCurrentHarnessRevision(harnessRepoRoot);
     const timestamp = now();
     await submitTerminalInput(deps.runtime, session.id, buildHarnessRefreshPrompt(session.role));
 
-    const updated: RoleSessionRecord = {
+    return {
       ...session,
       harnessRevision: currentRevision,
       harnessCurrentRevision: currentRevision,
@@ -909,33 +909,6 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       lastHarnessNotifyAt: timestamp,
       updatedAt: timestamp
     };
-    deps.registry.upsert(normalizeProjectScopedRecordForPersistence(updated));
-    await persistNotifiedHarnessSession(repoRoot, updated);
-    return withHarnessRevisionView(repoRoot, updated);
-  }
-
-  async function persistNotifiedHarnessSession(
-    repoRoot: string,
-    session: RoleSessionRecord
-  ): Promise<void> {
-    if (session.role === TRANSLATOR_ROLE) {
-      await persistTranslatorSession(deps.fs, repoRoot, {
-        ...session,
-        taskSlug: PROJECT_TRANSLATOR_SCOPE
-      });
-      return;
-    }
-    if (session.role === HARNESS_ENGINEER_ROLE) {
-      await persistHarnessEngineerSession(deps.fs, repoRoot, {
-        ...session,
-        taskSlug: PROJECT_HARNESS_ENGINEER_SCOPE
-      });
-      return;
-    }
-
-    const config = await deps.projectService.loadConfig(repoRoot);
-    const task = await deps.taskService.loadTask(repoRoot, session.taskSlug);
-    await persistRoleSessionRecord(deps.fs, repoRoot, getTaskRuntimeRepoRoot(task), config.stateRoot, session);
   }
 
   async function getProjectToolSessionView(
@@ -948,7 +921,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       : getRegisteredProjectHarnessEngineerSession(deps.registry, deps.runtime)
         ?? await loadPersistedHarnessEngineerSession(deps.fs, repoRoot);
     const view = toRoleSessionRecordView(record, deps.runtime);
-    return view ? withHarnessRevisionView(repoRoot, view) : undefined;
+    return view ? withHarnessRevisionView(view.cwd, view) : undefined;
   }
 
   async function markProjectToolActivityIdle(
@@ -979,7 +952,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
     const record = getRegisteredRoleSession(deps.registry, deps.runtime, taskSlug, role)
       ?? await loadPersistedRoleRecordForRole(deps.fs, repoRoot, taskRepoRoot, config.stateRoot, taskSlug, role);
     const view = toRoleSessionRecordView(record, deps.runtime);
-    return view ? withHarnessRevisionView(repoRoot, view) : undefined;
+    return view ? withHarnessRevisionView(taskRepoRoot, view) : undefined;
   }
 
   async function markTaskRoleActivityIdle(
@@ -1135,7 +1108,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       const record = getRegisteredProjectTranslatorSession(deps.registry, deps.runtime)
         ?? await loadPersistedTranslatorSession(deps.fs, repoRoot);
       const view = toRoleSessionRecordView(record, deps.runtime);
-      return view ? withHarnessRevisionView(repoRoot, view) : undefined;
+      return view ? withHarnessRevisionView(view.cwd, view) : undefined;
     },
     async ensureProjectTranslatorSession(repoRoot, input = {}) {
       const existing = await this.getProjectTranslatorSession(repoRoot);
@@ -1198,7 +1171,10 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
           statusCode: 404
         });
       }
-      return notifyHarnessUpdatedForSession(repoRoot, current);
+      const updated = await buildHarnessUpdatedSession(current.cwd, current);
+      deps.registry.upsert(normalizeProjectScopedRecordForPersistence(updated));
+      await persistTranslatorSession(deps.fs, repoRoot, updated);
+      return withHarnessRevisionView(current.cwd, updated);
     },
     startProjectHarnessEngineerSession(repoRoot, input = {}) {
       return launchProjectHarnessEngineerSession(repoRoot, input, "fresh");
@@ -1270,7 +1246,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       const record = getRegisteredProjectHarnessEngineerSession(deps.registry, deps.runtime)
         ?? await loadPersistedHarnessEngineerSession(deps.fs, repoRoot);
       const view = toRoleSessionRecordView(record, deps.runtime);
-      return view ? withHarnessRevisionView(repoRoot, view) : undefined;
+      return view ? withHarnessRevisionView(view.cwd, view) : undefined;
     },
     async ensureProjectHarnessEngineerSession(repoRoot, input = {}) {
       const existing = await this.getProjectHarnessEngineerSession(repoRoot);
@@ -1333,7 +1309,10 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
           statusCode: 404
         });
       }
-      return notifyHarnessUpdatedForSession(repoRoot, current);
+      const updated = await buildHarnessUpdatedSession(current.cwd, current);
+      deps.registry.upsert(normalizeProjectScopedRecordForPersistence(updated));
+      await persistHarnessEngineerSession(deps.fs, repoRoot, updated);
+      return withHarnessRevisionView(current.cwd, updated);
     },
     startRoleSession(repoRoot, taskSlug, role, input = {}) {
       return launchRoleSession(repoRoot, taskSlug, role, input, "fresh");
@@ -1403,7 +1382,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
       }
 
       const view = toRoleSessionRecordView(record, deps.runtime);
-      return view ? withHarnessRevisionView(repoRoot, view) : undefined;
+      return view ? withHarnessRevisionView(taskRepoRoot, view) : undefined;
     },
     async listRoleSessions(repoRoot, taskSlug) {
       const sessions: RoleSessionRecord[] = [];
@@ -1422,7 +1401,7 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
           sessions.push(session);
         }
       }
-      return Promise.all(sessions.map((session) => withHarnessRevisionView(repoRoot, session)));
+      return Promise.all(sessions.map((session) => withHarnessRevisionView(taskRepoRoot, session)));
     },
     async notifyRoleHarnessUpdated(repoRoot, taskSlug, role) {
       const current = await this.getRoleSession(repoRoot, taskSlug, role);
@@ -1433,7 +1412,13 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
           statusCode: 404
         });
       }
-      return notifyHarnessUpdatedForSession(repoRoot, current);
+      const config = await deps.projectService.loadConfig(repoRoot);
+      const task = await deps.taskService.loadTask(repoRoot, taskSlug);
+      const taskRepoRoot = getTaskRuntimeRepoRoot(task);
+      const updated = await buildHarnessUpdatedSession(taskRepoRoot, current);
+      deps.registry.upsert(updated);
+      await persistRoleSessionRecord(deps.fs, repoRoot, taskRepoRoot, config.stateRoot, updated);
+      return withHarnessRevisionView(taskRepoRoot, updated);
     },
     async recordRoleHookEvent(repoRoot, input) {
       const current = await this.getRoleSession(repoRoot, input.taskSlug, input.role);
