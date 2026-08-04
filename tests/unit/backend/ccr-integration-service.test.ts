@@ -2,6 +2,8 @@ import { describe, expect, it } from "vitest";
 import { createCcrIntegrationService, mergeNoProxy } from "../../../src/backend/services/ccr-integration-service.js";
 import type { AppCcrIntegrationSettingsState } from "../../../src/backend/services/app-settings-service.js";
 import {
+  CCR_GPT_AUTO_COMPACT_PERCENT,
+  CCR_GPT_AUTO_COMPACT_WINDOW_TOKENS,
   CCR_GPT_EFFECTIVE_CONTEXT_TOKENS,
   CCR_GPT_MODEL_ID,
   CCR_GPT_SESSION_MODEL
@@ -46,6 +48,8 @@ describe("createCcrIntegrationService", () => {
       ANTHROPIC_SMALL_FAST_MODEL: CCR_GPT_MODEL_ID,
       CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY: "1",
       CLAUDE_CODE_MAX_CONTEXT_TOKENS: String(CCR_GPT_EFFECTIVE_CONTEXT_TOKENS),
+      CLAUDE_CODE_AUTO_COMPACT_WINDOW: String(CCR_GPT_AUTO_COMPACT_WINDOW_TOKENS),
+      CLAUDE_AUTOCOMPACT_PCT_OVERRIDE: String(CCR_GPT_AUTO_COMPACT_PERCENT),
       CLAUDE_CONFIG_DIR: "/mock/.vcm/claude/ccr",
       NO_PROXY: "localhost,host.docker.internal",
       no_proxy: "localhost,host.docker.internal"

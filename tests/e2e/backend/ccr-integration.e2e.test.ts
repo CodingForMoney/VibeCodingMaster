@@ -1,5 +1,7 @@
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  CCR_GPT_AUTO_COMPACT_PERCENT,
+  CCR_GPT_AUTO_COMPACT_WINDOW_TOKENS,
   CCR_GPT_EFFECTIVE_CONTEXT_TOKENS,
   CCR_GPT_MODEL_ID,
   CCR_GPT_SESSION_MODEL
@@ -83,6 +85,8 @@ describe("backend E2E CCR integration", () => {
       CLAUDE_CODE_DISABLE_BACKGROUND_TASKS: "1",
       CLAUDE_CODE_ENABLE_TELEMETRY: undefined,
       CLAUDE_CODE_MAX_CONTEXT_TOKENS: String(CCR_GPT_EFFECTIVE_CONTEXT_TOKENS),
+      CLAUDE_CODE_AUTO_COMPACT_WINDOW: String(CCR_GPT_AUTO_COMPACT_WINDOW_TOKENS),
+      CLAUDE_AUTOCOMPACT_PCT_OVERRIDE: String(CCR_GPT_AUTO_COMPACT_PERCENT),
       CLAUDE_CONFIG_DIR: expect.stringContaining("/settings/claude/ccr"),
       OTEL_LOGS_EXPORTER: "none",
       VCM_TASK_SLUG: task.taskSlug
@@ -129,6 +133,8 @@ describe("backend E2E CCR integration", () => {
     expect(nativeInput.env.ANTHROPIC_MODEL).toBeUndefined();
     expect(nativeInput.env.CLAUDE_CODE_ENABLE_GATEWAY_MODEL_DISCOVERY).toBeUndefined();
     expect(nativeInput.env.CLAUDE_CODE_MAX_CONTEXT_TOKENS).toBeUndefined();
+    expect(nativeInput.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW).toBeUndefined();
+    expect(nativeInput.env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE).toBeUndefined();
     expect(nativeInput.env.CLAUDE_CODE_ENABLE_TELEMETRY).toBe("1");
     expect(nativeInput.env.OTEL_LOGS_EXPORTER).toBe("otlp");
     expect(nativeInput.env.OTEL_EXPORTER_OTLP_LOGS_PROTOCOL).toBe("http/json");
@@ -202,6 +208,8 @@ describe("backend E2E CCR integration", () => {
         ANTHROPIC_API_KEY: undefined,
         ANTHROPIC_MODEL: CCR_GPT_MODEL_ID,
         CLAUDE_CODE_MAX_CONTEXT_TOKENS: String(CCR_GPT_EFFECTIVE_CONTEXT_TOKENS),
+        CLAUDE_CODE_AUTO_COMPACT_WINDOW: String(CCR_GPT_AUTO_COMPACT_WINDOW_TOKENS),
+        CLAUDE_AUTOCOMPACT_PCT_OVERRIDE: String(CCR_GPT_AUTO_COMPACT_PERCENT),
         CLAUDE_CONFIG_DIR: expect.stringContaining("/settings/claude/ccr")
       });
     }
@@ -268,6 +276,10 @@ describe("backend E2E CCR integration", () => {
     expect(resumedInput.env.CLAUDE_CONFIG_DIR).toBe(persisted.claudeConfigDir);
     expect(resumedInput.env.CLAUDE_CODE_MAX_CONTEXT_TOKENS)
       .toBe(String(CCR_GPT_EFFECTIVE_CONTEXT_TOKENS));
+    expect(resumedInput.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW)
+      .toBe(String(CCR_GPT_AUTO_COMPACT_WINDOW_TOKENS));
+    expect(resumedInput.env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE)
+      .toBe(String(CCR_GPT_AUTO_COMPACT_PERCENT));
 
     const restarted = await env.app.inject({
       method: "POST",
@@ -285,6 +297,8 @@ describe("backend E2E CCR integration", () => {
     expect(restartedInput.env.CLAUDE_CONFIG_DIR).toBeUndefined();
     expect(restartedInput.env.ANTHROPIC_BASE_URL).toBeUndefined();
     expect(restartedInput.env.CLAUDE_CODE_MAX_CONTEXT_TOKENS).toBeUndefined();
+    expect(restartedInput.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW).toBeUndefined();
+    expect(restartedInput.env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE).toBeUndefined();
 
     const restartedWithCcr = await env.app.inject({
       method: "POST",
@@ -295,6 +309,10 @@ describe("backend E2E CCR integration", () => {
     const ccrRestartInput = env.mockRuntime.getCreateInput(restartedWithCcr.json<{ id: string }>().id);
     expect(ccrRestartInput.env.CLAUDE_CODE_MAX_CONTEXT_TOKENS)
       .toBe(String(CCR_GPT_EFFECTIVE_CONTEXT_TOKENS));
+    expect(ccrRestartInput.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW)
+      .toBe(String(CCR_GPT_AUTO_COMPACT_WINDOW_TOKENS));
+    expect(ccrRestartInput.env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE)
+      .toBe(String(CCR_GPT_AUTO_COMPACT_PERCENT));
   });
 
   it("applies the CCR context limit through one-click launch", async () => {
@@ -327,6 +345,10 @@ describe("backend E2E CCR integration", () => {
       const input = env.mockRuntime.getCreateInput(session!.id);
       expect(input.env.CLAUDE_CODE_MAX_CONTEXT_TOKENS)
         .toBe(String(CCR_GPT_EFFECTIVE_CONTEXT_TOKENS));
+      expect(input.env.CLAUDE_CODE_AUTO_COMPACT_WINDOW)
+        .toBe(String(CCR_GPT_AUTO_COMPACT_WINDOW_TOKENS));
+      expect(input.env.CLAUDE_AUTOCOMPACT_PCT_OVERRIDE)
+        .toBe(String(CCR_GPT_AUTO_COMPACT_PERCENT));
     }
   });
 });

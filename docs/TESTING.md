@@ -64,8 +64,9 @@ Notes:
   `claude-adapter.test.ts`, `claude-transcript-service.test.ts`,
   `session-registry.test.ts`, and `ccr-integration.e2e.test.ts`; verify isolated
   CCR configuration/transcript paths, native environment cleanup, same-provider
-  Resume, provider switching through Restart, the GPT-only `258400` effective
-  context limit, and unchanged native context behavior. Run the complete
+  Resume, provider switching through Restart, the GPT-only `258400` hard limit
+  and auto-compaction window, the `90%` proactive threshold, and unchanged
+  native context behavior. Run the complete
   backend E2E suite when changing Session launch wiring.
 - Task usage analytics change: run `usage-analytics-service.test.ts`,
   `usage-analytics-modal.test.ts`, `api-client.test.ts`,

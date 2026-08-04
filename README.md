@@ -277,10 +277,10 @@ gateway from the native child process. Configure CCR without enabling its
 global Claude Code or Claude App takeover if those clients should remain on
 Anthropic.
 
-CCR/GPT child processes use an effective context limit of `258400` tokens.
-VCM leaves Claude Code's automatic compaction threshold unset so Claude Code
-can compact against that limit. Native Claude sessions receive no VCM-owned
-context override.
+CCR/GPT child processes use a hard context limit and auto-compaction window of
+`258400` tokens. VCM sets Claude Code's proactive compaction threshold to `90%`
+(about `232560` tokens), leaving headroom before the gateway limit. Native
+Claude sessions receive no VCM-owned context override.
 
 Resume keeps the provider recorded by the existing Session. Use Restart when
 switching between a native Claude model and `GPT-5.6 Sol (CCR)`. If CCR is
