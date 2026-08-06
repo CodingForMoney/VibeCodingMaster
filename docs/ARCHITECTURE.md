@@ -186,6 +186,14 @@ languages and conventions, and subsequent VCM updates preserve them:
 
 Regenerate both after changing module layout, public exports, or HTTP routes.
 
+`code-intelligence-service` derives detected project languages from the
+active task worktree's root manifests and `module-index.json`, then checks
+the backend process `PATH` for the matching language-server executable. It
+does not start a language server or scan the repository recursively. Harness
+status returns the detected languages, server availability, and corresponding
+Claude Code plugin names; Harness Studio renders that backend-owned state. The
+status does not claim that a user-level Claude Code plugin is installed.
+
 ## Durable Documentation Ownership
 
 The fixed installer ships `.ai/tools/check-durable-docs`. Harness Bootstrap,

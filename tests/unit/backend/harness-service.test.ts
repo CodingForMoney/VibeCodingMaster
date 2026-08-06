@@ -6,6 +6,7 @@ import {
   createHarnessService,
   parseGitStatusPorcelainV1
 } from "../../../src/backend/services/harness-service.js";
+import { detectHarnessCodeIntelligence } from "../../../src/backend/services/code-intelligence-service.js";
 import { renderLegacyProjectCodingStandardsTemplate } from "../../../src/backend/templates/harness/project-coding-standards.js";
 import type { RoleSessionRecord, StartRoleSessionRequest } from "../../../src/shared/types/session.js";
 
@@ -13,7 +14,7 @@ describe("createHarnessService", () => {
   it("plans and applies recommended harness files when they are missing", async () => {
     const fs = createMemoryFs();
     const service = createHarnessService({ fs });
-    const expectedHarnessFileCount = 30;
+    const expectedHarnessFileCount = 31;
 
     const status = await service.getHarnessStatus("/repo");
     expect(status.needsApply).toBe(true);
@@ -84,6 +85,7 @@ describe("createHarnessService", () => {
     expect(await fs.readText("/repo/.claude/skills/vcm-gate-review/SKILL.md")).toContain("Validation-Only Flow does not request code-diff");
     expect(await fs.readText("/repo/.claude/skills/vcm-architecture-interview/SKILL.md")).toContain("name: vcm-architecture-interview");
     expect(await fs.readText("/repo/.claude/skills/vcm-architecture-interview/SKILL.md")).toContain("During an active Architect Interview");
+    expect(await fs.readText("/repo/.claude/skills/vcm-code-navigation/SKILL.md")).toContain("When LSP is available");
     expect(await fs.readText("/repo/.claude/skills/vcm-report-harness-issue/SKILL.md")).toContain("name: vcm-report-harness-issue");
     expect(await fs.readText("/repo/.claude/skills/vcm-report-harness-issue/SKILL.md")).toContain(".ai/vcm/harness-feedback/pending/");
     const proposeMemorySkill = await fs.readText("/repo/.claude/skills/vcm-propose-memory/SKILL.md");
@@ -140,6 +142,9 @@ describe("createHarnessService", () => {
     expect(await fs.readText("/repo/.ai/tools/request-gate-review")).toContain('["git", "rev-parse", "--abbrev-ref"');
     expect(await fs.readText("/repo/.ai/tools/request-gate-review")).toContain('["git", "merge-base", "HEAD", upstream]');
     const architectAgent = await fs.readText("/repo/.claude/agents/architect.md");
+    expect(frontmatterOf(architectAgent)).toContain("LSP");
+    expect(architectAgent).toContain("Use `vcm-code-navigation`");
+    expect(architectAgent).toContain("Resolution Evidence");
     expect(architectAgent).toContain("verifiable behavior, implementation boundaries within the accepted scope, behavior/contract proof points");
     expect(architectAgent).toContain("Own `.ai/vcm/handoffs/known-issues.md` as its only writer");
     expect(architectAgent).toContain("Architect owns the technical decision");
@@ -174,6 +179,8 @@ describe("createHarnessService", () => {
     expect(testerAgent).toContain("`Completed Validation` and `Remaining Validation`");
     expect(testerAgent).not.toContain("shared implementation-quality and baseline-test standard");
     const diagnosisReviewerAgent = await fs.readText("/repo/.claude/agents/reviewer.md");
+    expect(frontmatterOf(diagnosisReviewerAgent)).toContain("LSP");
+    expect(diagnosisReviewerAgent).toContain("Use `vcm-code-navigation`");
     expect(diagnosisReviewerAgent).toContain("verify that the commits implement the diagnosed");
     expect(diagnosisReviewerAgent).toContain("local workaround for the surface failure");
     expect(diagnosisReviewerAgent).toContain("Independently apply the Tester L3 trigger rules");
@@ -185,7 +192,7 @@ describe("createHarnessService", () => {
     expect(finalAcceptanceSkill).toContain("`incomplete` is not acceptance evidence");
     expect(finalAcceptanceSkill).toContain("do not accept `Test Result: incomplete`");
     const coderAgent = await fs.readText("/repo/.claude/agents/coder.md");
-    expect(coderAgent).toContain("tools: Read, Grep, Glob, Bash, Edit, Write, Agent");
+    expect(coderAgent).toContain("tools: Read, Grep, Glob, Bash, Edit, Write, Agent, LSP");
     expect(coderAgent).toContain("Implement assigned file/function-level scaffold items");
     expect(coderAgent).toContain("read and follow `docs/CODING_STANDARDS.md`");
     expect(await fs.readText("/repo/docs/CODING_STANDARDS.md")).toContain("Unit test coverage is required for every changed callable unit");
@@ -264,6 +271,43 @@ describe("createHarnessService", () => {
     expect(await fs.readText("/repo/.claude/settings.json")).toContain('"autoMemoryEnabled": false');
   });
 
+  it("detects indexed project languages and language servers without starting a process", async () => {
+    const fs = createMemoryFs();
+    await fs.writeJson("/repo/.ai/generated/module-index.json", {
+      modules: [{ files: { source: ["src/lib.rs", "ui/app.tsx"] } }]
+    });
+    await fs.writeText("/repo/Cargo.toml", "[workspace]\n");
+    await fs.writeText("/repo/package.json", "{}\n");
+    await fs.writeText("/tools/rust-analyzer", "");
+
+    const status = await detectHarnessCodeIntelligence(fs, "/repo", {
+      pathEnv: "/tools",
+      platform: "linux"
+    });
+
+    expect(status.state).toBe("partial");
+    expect(status.languages).toEqual([
+      expect.objectContaining({
+        language: "rust",
+        serverCommand: "rust-analyzer",
+        pluginName: "rust-analyzer-lsp",
+        serverAvailable: true
+      }),
+      expect.objectContaining({
+        language: "typescript",
+        serverCommand: "typescript-language-server",
+        pluginName: "typescript-lsp",
+        serverAvailable: false
+      })
+    ]);
+
+    const harnessStatus = await createHarnessService({ fs }).getHarnessStatus("/repo");
+    expect(harnessStatus.codeIntelligence?.languages.map((language) => language.language)).toEqual([
+      "rust",
+      "typescript"
+    ]);
+  });
+
   it("inserts VCM rules into an existing file without overwriting user content", async () => {
     const fs = createMemoryFs();
     await fs.writeText("/repo/CLAUDE.md", "# Existing Rules\n\nKeep this project-specific note.\n");
@@ -288,7 +332,7 @@ describe("createHarnessService", () => {
     expect(content).toContain("## VCM Start Here");
   });
 
-  it("adds the Agent tool to an existing Architect frontmatter without replacing its configuration", async () => {
+  it("adds required navigation tools to existing Architect frontmatter without replacing its configuration", async () => {
     const fs = createMemoryFs();
     const service = createHarnessService({ fs });
     await service.applyHarness("/repo");
@@ -298,7 +342,7 @@ describe("createHarnessService", () => {
     await fs.writeText(
       architectPath,
       current
-        .replace("tools: Read, Grep, Glob, Bash, Edit, Write, Agent", "tools: Read, Grep, Glob, Bash, Edit, Write")
+        .replace("tools: Read, Grep, Glob, Bash, Edit, Write, Agent, LSP", "tools: Read, Grep, Glob, Bash, Edit, Write")
         .replace("description: VCM architecture role", "model: custom-model\ndescription: VCM architecture role")
     );
 
@@ -307,7 +351,7 @@ describe("createHarnessService", () => {
 
     await service.applyHarness("/repo");
     const updated = await fs.readText(architectPath);
-    expect(frontmatterOf(updated)).toContain("tools: Read, Grep, Glob, Bash, Edit, Write, Agent");
+    expect(frontmatterOf(updated)).toContain("tools: Read, Grep, Glob, Bash, Edit, Write, Agent, LSP");
     expect(frontmatterOf(updated)).toContain("model: custom-model");
   });
 

@@ -84,6 +84,12 @@ Notes:
 - `src/backend/templates/harness/**` change: L0 + `npm test` (harness template
   sync and harness service/route tests guard these), because output ships into
   downstream repos.
+- Code-navigation or Harness code-intelligence changes: run
+  `harness-service.test.ts`, `harness-templates-sync.test.ts`, and
+  `harness-studio-layout.test.ts`. Verify semantic-navigation rules stay in
+  all installed role copies, language detection uses task-worktree indexes and
+  manifests, server checks do not launch processes, and Studio displays only
+  backend-owned status.
 - Auto Memory or Task Harness Retrospective sequencing change: run
   `auto-memory-service.test.ts`, `runtime-coordinator-service.test.ts`, and
   `harness-routes.test.ts`, then `npm run test:e2e:backend`. These tests cover

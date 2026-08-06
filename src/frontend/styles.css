@@ -2674,6 +2674,17 @@ h2 {
   grid-template-columns: minmax(0, 1fr) auto auto;
 }
 
+.harness-studio-code-intelligence-list li {
+  grid-template-columns: minmax(0, 1fr) minmax(0, 0.8fr) minmax(0, 0.8fr) auto;
+}
+
+.harness-studio-code-intelligence-list code {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .harness-studio-doc-list button {
   padding: 4px 8px;
 }

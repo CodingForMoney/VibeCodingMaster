@@ -688,6 +688,16 @@ before `.ai/generated/*` is considered reliable.
 Generated artifacts are derived context. Regenerate them after relevant source,
 manifest, module, or public API changes. Do not hand-edit them as durable truth.
 
+For code reading, generated context locates the boundary; it does not replace
+semantic navigation or source inspection. Architect and Reviewer use the
+`vcm-code-navigation` skill: use Claude Code LSP definitions,
+implementations, references, and call hierarchy when the matching plugin and
+language server are available, then read every resolved callable unit in full.
+Use structural search and Grep for dynamic registrations, configuration or
+string edges, documentation, and explicit fallback. Text search alone is not
+proof of a complete symbol or reference set. Expand one dependency hop at a
+time instead of injecting an unrestricted repository graph.
+
 ## 15. Harness Bootstrap and Feedback
 
 `vcm-harness-bootstrap` is the AI-assisted project understanding and refresh

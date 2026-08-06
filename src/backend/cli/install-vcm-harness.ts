@@ -34,6 +34,7 @@ import { renderProjectManagerHarnessRules } from "../templates/harness/project-m
 import { renderPullRequestTemplateHarnessRules } from "../templates/harness/pull-request-template.js";
 import { renderTesterHarnessRules } from "../templates/harness/tester-agent.js";
 import { renderVcmArchitectureInterviewSkillRules } from "../templates/harness/vcm-architecture-interview-skill.js";
+import { renderVcmCodeNavigationSkillRules } from "../templates/harness/vcm-code-navigation-skill.js";
 import { renderVcmFinalAcceptanceSkillRules } from "../templates/harness/vcm-final-acceptance-skill.js";
 import { renderVcmHarnessBootstrapSkillRules } from "../templates/harness/vcm-harness-bootstrap-skill.js";
 import { renderVcmLongRunningValidationSkillRules } from "../templates/harness/vcm-long-running-validation-skill.js";
@@ -83,18 +84,18 @@ const AGENT_FRONTMATTER = {
   },
   architect: {
     description: "VCM architecture role for plans, module boundaries, public contracts, verifiable behavior, and docs sync.",
-    tools: "Read, Grep, Glob, Bash, Edit, Write, Agent"
+    tools: "Read, Grep, Glob, Bash, Edit, Write, Agent, LSP"
   },
   coder: {
     description: "VCM implementation role for scoped code changes and focused tests.",
-    tools: "Read, Grep, Glob, Bash, Edit, Write, Agent"
+    tools: "Read, Grep, Glob, Bash, Edit, Write, Agent, LSP"
   },
   tester: {
     description: "VCM testing role for validation, test adequacy, approved-scope validation, and risk findings."
   },
   reviewer: {
     description: "VCM independent gate review role for architecture plans, validation adequacy, and code diffs.",
-    tools: "Read, Grep, Glob, Bash, Write"
+    tools: "Read, Grep, Glob, Bash, Write, LSP"
   },
   translator: {
     description: "VCM task-scoped translation tool role for conversation translation, file translation, bootstrap, and memory updates."
@@ -111,6 +112,12 @@ const AGENT_FRONTMATTER = {
     model: "opus",
     effort: "xhigh"
   }
+};
+
+const REQUIRED_AGENT_TOOLS = {
+  architect: ["Agent", "LSP"],
+  coder: ["Agent", "LSP"],
+  reviewer: ["LSP"]
 };
 
 const MANAGED_FILES = [
@@ -282,6 +289,17 @@ const WHOLE_FILES = [
       "vcm-architecture-interview",
       "Use when Architect must confirm user-owned behavior and contract decisions before architecture planning.",
       renderVcmArchitectureInterviewSkillRules()
+    )
+  },
+  {
+    path: ".claude/skills/vcm-code-navigation/SKILL.md",
+    category: "skill",
+    mode: 0o644,
+    content: renderSkillFile(
+      "VCM Code Navigation Skill",
+      "vcm-code-navigation",
+      "Use when Architect or Reviewer must resolve code symbols, references, implementations, call hierarchies, or bounded dependency paths.",
+      renderVcmCodeNavigationSkillRules()
     )
   },
   {
@@ -758,8 +776,8 @@ async function installManagedFile({ projectRoot, definition, dryRun, operations 
   if (definition.memoryBlock) {
     nextContent = ensureVcmMemoryBlock(nextContent);
   }
-  if (definition.agentName === "architect") {
-    nextContent = ensureAgentTool(nextContent, "Agent");
+  for (const requiredTool of REQUIRED_AGENT_TOOLS[definition.agentName] ?? []) {
+    nextContent = ensureAgentTool(nextContent, requiredTool);
   }
 
   await writeIfChanged({

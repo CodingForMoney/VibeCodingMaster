@@ -372,6 +372,7 @@ export function HarnessStudioModal({
                         <HarnessMetric label="Managed files" value={String(files.length)} />
                         <HarnessMetric label="Pending updates" value={String(status?.plannedChanges.length ?? 0)} />
                         <HarnessMetric label="Bootstrap" value={bootstrapStatus?.status.replaceAll("_", " ") ?? "unknown"} />
+                        <HarnessMetric label="Code intelligence" value={formatCodeIntelligenceState(status)} />
                         <HarnessMetric label="Engineer" value={formatSessionStatus(engineerSession)} />
                       </div>
                       {status?.warnings.length ? (
@@ -380,6 +381,18 @@ export function HarnessStudioModal({
                         </ul>
                       ) : null}
                     </section>
+                  </HarnessCollapsibleSection>
+                  <HarnessCollapsibleSection title="Code Intelligence">
+                    <ul className="harness-studio-doc-list harness-studio-code-intelligence-list">
+                      {status?.codeIntelligence?.languages.length ? status.codeIntelligence.languages.map((language) => (
+                        <li key={language.language}>
+                          <span>{language.label}</span>
+                          <code title="Language server">{language.serverCommand}</code>
+                          <code title="Claude Code plugin">{language.pluginName}</code>
+                          <StatusBadge status={language.serverAvailable ? "ok" : "missing"} />
+                        </li>
+                      )) : <li><span>No supported project language detected.</span></li>}
+                    </ul>
                   </HarnessCollapsibleSection>
                   <HarnessFileSection title="Skills" files={skills} selectedPath={selectedPath} copiedPath={copiedPath} onCopy={(path) => void copyHarnessFilePath(path)} onSelect={(path) => { setSelectedMemoryPath(false); setSelectedPath(path); }} collapsible />
                   <HarnessFileSection title="Root Context" files={rootContext} selectedPath={selectedPath} copiedPath={copiedPath} onCopy={(path) => void copyHarnessFilePath(path)} onSelect={(path) => { setSelectedMemoryPath(false); setSelectedPath(path); }} collapsible />
@@ -638,6 +651,10 @@ function formatSessionStatus(session: RoleSessionRecord | null): string {
   return session.status === "running"
     ? `${session.status} / ${session.activityStatus ?? "idle"}`
     : session.status;
+}
+
+function formatCodeIntelligenceState(status: HarnessStatusReport | null): string {
+  return status?.codeIntelligence?.state.replaceAll("_", " ") ?? "unknown";
 }
 
 function formatBytes(value: number): string {

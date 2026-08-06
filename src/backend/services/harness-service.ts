@@ -59,6 +59,7 @@ import { renderProjectManagerHarnessRules } from "../templates/harness/project-m
 import { renderPullRequestTemplateHarnessRules } from "../templates/harness/pull-request-template.js";
 import { renderTesterHarnessRules } from "../templates/harness/tester-agent.js";
 import { renderVcmArchitectureInterviewSkillRules } from "../templates/harness/vcm-architecture-interview-skill.js";
+import { renderVcmCodeNavigationSkillRules } from "../templates/harness/vcm-code-navigation-skill.js";
 import { renderVcmFinalAcceptanceSkillRules } from "../templates/harness/vcm-final-acceptance-skill.js";
 import { renderVcmHarnessBootstrapSkillRules } from "../templates/harness/vcm-harness-bootstrap-skill.js";
 import { renderVcmLongRunningValidationSkillRules } from "../templates/harness/vcm-long-running-validation-skill.js";
@@ -76,6 +77,7 @@ import { submitTerminalInput } from "../runtime/terminal-submit.js";
 import { VcmError } from "../errors.js";
 import { bumpHarnessRevision, readHarnessRevisionState } from "./harness-revision.js";
 import type { SessionService } from "./session-service.js";
+import { detectHarnessCodeIntelligence } from "./code-intelligence-service.js";
 
 const execFileAsync = promisify(execFile);
 const BOOTSTRAP_SESSION_PATH = ".ai/vcm/bootstrap/session.json";
@@ -152,6 +154,7 @@ interface HarnessFileDefinition {
   ownership?: "managed-block" | "whole-file" | "raw-file" | "project-file";
   blankLineBeforeEnd?: boolean;
   memoryBlock?: boolean;
+  requiredTools?: string[];
   defaultContentAfterBlock?: string;
   legacyWholeFile?: string;
   renderRules(): string;
@@ -245,6 +248,17 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
     ),
     ownership: "whole-file",
     renderRules: renderVcmArchitectureInterviewSkillRules
+  },
+  {
+    kind: "skill-vcm-code-navigation",
+    path: ".claude/skills/vcm-code-navigation/SKILL.md",
+    title: "VCM Code Navigation Skill",
+    frontmatter: renderSkillFrontmatter(
+      "vcm-code-navigation",
+      "Use when Architect or Reviewer must resolve code symbols, references, implementations, call hierarchies, or bounded dependency paths."
+    ),
+    ownership: "whole-file",
+    renderRules: renderVcmCodeNavigationSkillRules
   },
   {
     kind: "skill-vcm-route-message",
@@ -350,10 +364,11 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
     path: ".claude/agents/reviewer.md",
     title: "Reviewer Agent",
     memoryBlock: true,
+    requiredTools: ["LSP"],
     frontmatter: renderAgentFrontmatter(
       "reviewer",
       "VCM independent gate review role for architecture plans, validation adequacy, and code diffs.",
-      { tools: "Read, Grep, Glob, Bash, Write" }
+      { tools: "Read, Grep, Glob, Bash, Write, LSP" }
     ),
     renderRules: renderReviewerAgentRules
   },
@@ -444,11 +459,12 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
     path: ".claude/agents/architect.md",
     title: "Architect Agent",
     memoryBlock: true,
+    requiredTools: ["Agent", "LSP"],
     blankLineBeforeEnd: true,
     frontmatter: renderAgentFrontmatter(
       "architect",
       "VCM architecture role for plans, module boundaries, public contracts, verifiable behavior, and docs sync.",
-      { tools: "Read, Grep, Glob, Bash, Edit, Write, Agent" }
+      { tools: "Read, Grep, Glob, Bash, Edit, Write, Agent, LSP" }
     ),
     renderRules: renderArchitectHarnessRules
   },
@@ -457,10 +473,11 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
     path: ".claude/agents/coder.md",
     title: "Coder Agent",
     memoryBlock: true,
+    requiredTools: ["Agent", "LSP"],
     frontmatter: renderAgentFrontmatter(
       "coder",
       "VCM implementation role for scoped code changes and focused tests.",
-      { tools: "Read, Grep, Glob, Bash, Edit, Write, Agent" }
+      { tools: "Read, Grep, Glob, Bash, Edit, Write, Agent, LSP" }
     ),
     renderRules: renderCoderHarnessRules
   },
@@ -483,12 +500,15 @@ export function createHarnessService(deps: HarnessServiceDeps): HarnessService {
 
   return {
     async getHarnessStatus(repoRoot) {
-      const analyses = await analyzeHarnessFiles(deps.fs, repoRoot);
+      const [analyses, codeIntelligence] = await Promise.all([
+        analyzeHarnessFiles(deps.fs, repoRoot),
+        detectHarnessCodeIntelligence(deps.fs, repoRoot)
+      ]);
       const legacyChanges = await analyzeLegacyCodexHarnessPaths(deps.fs, repoRoot);
       const manifestChange = deps.runFixedInstaller
         ? await analyzeHarnessManifest(deps.fs, repoRoot, vcmVersion)
         : undefined;
-      return renderHarnessStatus(await readHarnessRevisionValue(deps.fs, repoRoot), analyses, legacyChanges, manifestChange);
+      return renderHarnessStatus(await readHarnessRevisionValue(deps.fs, repoRoot), analyses, legacyChanges, manifestChange, codeIntelligence);
     },
     async getHarnessFileContent(repoRoot, filePath) {
       return readHarnessFileContent(deps.fs, repoRoot, filePath);
@@ -523,14 +543,17 @@ export function createHarnessService(deps: HarnessServiceDeps): HarnessService {
       }
 
       const file = await readHarnessFileContent(deps.fs, repoRoot, definition.path);
-      const analyses = await analyzeHarnessFiles(deps.fs, repoRoot);
+      const [analyses, codeIntelligence] = await Promise.all([
+        analyzeHarnessFiles(deps.fs, repoRoot),
+        detectHarnessCodeIntelligence(deps.fs, repoRoot)
+      ]);
       const legacyChanges = await analyzeLegacyCodexHarnessPaths(deps.fs, repoRoot);
       const manifestChange = deps.runFixedInstaller
         ? await analyzeHarnessManifest(deps.fs, repoRoot, vcmVersion)
         : undefined;
       return {
         file,
-        status: renderHarnessStatus(await readHarnessRevisionValue(deps.fs, repoRoot), analyses, legacyChanges, manifestChange),
+        status: renderHarnessStatus(await readHarnessRevisionValue(deps.fs, repoRoot), analyses, legacyChanges, manifestChange, codeIntelligence),
         harnessCommit
       };
     },
@@ -1561,7 +1584,8 @@ async function analyzeHarnessFile(
   if (!match) {
     const migratedContent = migrateLegacyHarnessFile(definition, currentContent, expectedBlock);
     if (migratedContent) {
-      const nextContent = definition.memoryBlock ? ensureVcmMemoryBlock(migratedContent) : migratedContent;
+      const memoryUpdatedContent = definition.memoryBlock ? ensureVcmMemoryBlock(migratedContent) : migratedContent;
+      const nextContent = ensureAgentTools(memoryUpdatedContent, definition.requiredTools);
       return {
         definition,
         status: {
@@ -1580,9 +1604,7 @@ async function analyzeHarnessFile(
       };
     }
     const insertedContent = `${currentContent.trimEnd()}\n\n${expectedBlock}\n`;
-    const nextContent = definition.kind === "agent-architect"
-      ? ensureAgentTool(insertedContent, "Agent")
-      : insertedContent;
+    const nextContent = ensureAgentTools(insertedContent, definition.requiredTools);
     return {
       definition,
       status: {
@@ -1605,9 +1627,7 @@ async function analyzeHarnessFile(
   const currentBlock = match[0];
   const blockUpdatedContent = currentContent.replace(managedBlockPattern, expectedBlock);
   const memoryUpdatedContent = definition.memoryBlock ? ensureVcmMemoryBlock(blockUpdatedContent) : blockUpdatedContent;
-  const nextContent = definition.kind === "agent-architect"
-    ? ensureAgentTool(memoryUpdatedContent, "Agent")
-    : memoryUpdatedContent;
+  const nextContent = ensureAgentTools(memoryUpdatedContent, definition.requiredTools);
   const action: HarnessFileAction = currentContent === nextContent ? "ok" : "update";
 
   return {
@@ -1674,7 +1694,8 @@ function renderHarnessStatus(
   harnessRevision: number,
   analyses: HarnessFileAnalysis[],
   legacyChanges: HarnessPlannedChange[] = [],
-  manifestChange?: HarnessPlannedChange
+  manifestChange?: HarnessPlannedChange,
+  codeIntelligence?: HarnessStatusReport["codeIntelligence"]
 ): HarnessStatusReport {
   const files = analyses.map((analysis) => analysis.status);
   const plannedChanges = analyses
@@ -1706,6 +1727,7 @@ function renderHarnessStatus(
     files,
     needsApply: plannedChanges.length > 0,
     plannedChanges,
+    codeIntelligence,
     warnings: plannedChanges.length > 0
       ? ["Review and commit VCM Harness changes before starting long-running work."]
       : []
@@ -1761,6 +1783,10 @@ function ensureAgentTool(content: string, requiredTool: string): string {
 
   const nextTools = [...tools, requiredTool].join(", ");
   return content.replace(frontmatterMatch[0], frontmatterMatch[0].replace(toolsMatch[0], `tools: ${nextTools}`));
+}
+
+function ensureAgentTools(content: string, requiredTools: string[] | undefined): string {
+  return (requiredTools ?? []).reduce(ensureAgentTool, content);
 }
 
 function migrateLegacyHarnessFile(

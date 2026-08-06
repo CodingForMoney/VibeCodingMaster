@@ -21,6 +21,7 @@ During an active Architect Interview, handle the user's answers and final confir
 ## Evidence First
 
 - Read the PM route, task request, relevant durable docs, generated context, and the complete current-worktree behavior path inside the affected feature or module boundary.
+- Use `vcm-code-navigation` when definitions, implementations, references, call hierarchies, or bounded behavior paths must be established.
 - If a fact can be established from the worktree or available tools, investigate it instead of asking the user.
 - If code, docs, and the user's requested behavior conflict, state the concrete conflict and ask which user-visible behavior is intended.
 - Maintain `.ai/vcm/handoffs/architecture-evidence.md` while reading. Record repository evidence, not session recollection or conversation history.

@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
   "manager": "vcm",
-  "harnessVersion": "0.7.33",
+  "harnessVersion": "0.7.36",
   "installMode": "fixed",
   "installedAt": "2026-06-07T00:00:00Z",
-  "updatedAt": "2026-08-01T00:59:15.880Z",
+  "updatedAt": "2026-08-06T02:41:34.636Z",
   "runtimeRoots": [
     ".ai/vcm/",
     ".claude/worktrees/"
@@ -446,6 +446,18 @@
     },
     {
       "path": ".claude/skills/vcm-architecture-interview/SKILL.md",
+      "entryType": "file",
+      "category": "skill",
+      "ownership": "whole-file",
+      "source": "vcm-template",
+      "lifecycle": "long-term",
+      "uninstall": {
+        "action": "delete-file-if-unchanged",
+        "requiresConfirmation": false
+      }
+    },
+    {
+      "path": ".claude/skills/vcm-code-navigation/SKILL.md",
       "entryType": "file",
       "category": "skill",
       "ownership": "whole-file",

@@ -1,7 +1,7 @@
 ---
 name: reviewer
 description: VCM independent gate review role for architecture plans, validation adequacy, and code diffs.
-tools: Read, Grep, Glob, Bash, Write
+tools: Read, Grep, Glob, Bash, Write, LSP
 ---
 
 # Reviewer Agent
@@ -38,6 +38,14 @@ required evidence and rerun every required mechanical check before deciding.
 Do not carry forward prior conclusions, closed checks, or partial verification.
 Resolving prior findings does not replace the complete review. Return `approve`
 or `request_changes` only after the review is complete.
+
+Use `vcm-code-navigation` whenever a gate requires definitions, implementations,
+references, call hierarchies, or a bounded behavior path. Use LSP semantic
+navigation when available and read every resolved callable unit in full. Use
+structural search when available and Grep for dynamic or textual edges and
+explicit fallback discovery. Do not treat Grep as proof of a complete symbol,
+caller, implementation, or reference set when LSP is available. If LSP cannot
+resolve required evidence, record the limitation and exact fallback basis.
 
 ## Architecture Plan Gate
 

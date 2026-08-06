@@ -455,6 +455,7 @@ Harness Studio is the UI for VCM harness maintenance.
 Use it to:
 
 - inspect fixed harness status
+- inspect detected project languages and language-server availability
 - run bootstrap
 - open Harness Engineer
 - review harness files

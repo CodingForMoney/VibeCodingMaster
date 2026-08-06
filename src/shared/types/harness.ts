@@ -10,6 +10,7 @@ export type HarnessFileKind =
   | "pull-request-template"
   | "skill-vcm-final-acceptance"
   | "skill-vcm-architecture-interview"
+  | "skill-vcm-code-navigation"
   | "skill-vcm-harness-bootstrap"
   | "skill-vcm-long-running-validation"
   | "skill-vcm-route-message"
@@ -51,6 +52,23 @@ export interface HarnessPlannedChange {
   reason: string;
 }
 
+export type HarnessCodeIntelligenceLanguage = "rust" | "typescript" | "python" | "go" | "cpp" | "java";
+export type HarnessCodeIntelligenceState = "available" | "partial" | "missing" | "not_detected";
+
+export interface HarnessCodeIntelligenceLanguageStatus {
+  language: HarnessCodeIntelligenceLanguage;
+  label: string;
+  serverCommand: string;
+  pluginName: string;
+  serverAvailable: boolean;
+  detectedBy: string[];
+}
+
+export interface HarnessCodeIntelligenceStatus {
+  state: HarnessCodeIntelligenceState;
+  languages: HarnessCodeIntelligenceLanguageStatus[];
+}
+
 export interface HarnessTaskRequest {
   taskSlug: string;
 }
@@ -77,6 +95,7 @@ export interface HarnessStatusReport {
   needsApply: boolean;
   plannedChanges: HarnessPlannedChange[];
   warnings: string[];
+  codeIntelligence?: HarnessCodeIntelligenceStatus;
 }
 
 export type RepositoryDiffFileStatus = "added" | "copied" | "deleted" | "modified" | "renamed" | "untracked" | "unknown";

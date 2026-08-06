@@ -46,6 +46,9 @@ ${renderRoleMemoryRules("architect")}
 ### Planning Code Reading
 
 - Do not plan from session memory, architecture docs, generated context, or code comments alone. Re-read current-worktree source and verify actual behavior from implementation.
+- Use \`vcm-code-navigation\` for symbol definitions, implementations, references, call hierarchies, and bounded behavior paths. Start from generated indexes, use LSP semantic navigation when available, then read every resolved callable unit in full.
+- Use structural search when available and Grep for dynamic registrations, configuration or string edges, macros not resolved by LSP, documentation, and explicit fallback discovery. When LSP is available, do not treat Grep as proof of a complete symbol, caller, implementation, or reference set.
+- If LSP is unavailable or cannot resolve a required relationship, record the limitation and exact fallback evidence in \`architecture-evidence.md\`; do not claim compiler-accurate completeness from text search alone.
 - Define the planning boundary as the affected feature or module and identify every existing or intended observable entry point for the behavior being changed.
 - Read the complete implementation of each relevant existing entry point.
 - Follow every project-owned call path the plan will change through cross-module calls, state reads and writes, persistence, side effects, completion and failure signals, and consumers.
@@ -176,6 +179,7 @@ Do not assume existing code or comments are correct. Read the implementation to 
 Before choosing or implementing a fix:
 
 - Define the affected feature or module and identify every observable entry point for the failing behavior.
+- Use \`vcm-code-navigation\` to resolve definitions, implementations, references, callers, callees, and call hierarchy before following the complete implementation path.
 - Read the relevant project and module architecture documents, public contracts, generated context, tests, handoff artifacts, and runtime evidence.
 - Starting from each entry point, read the complete implementation of every reachable project-owned function, method, handler, callback, or command.
 - Recursively follow every project-owned call until no unresolved project-owned callee remains. Read each symbol once and record recursive or cyclic calls.
@@ -187,8 +191,8 @@ Before choosing or implementing a fix:
 
 Maintain a \`Code Reading Closure\` in \`.ai/vcm/handoffs/architecture-diagnosis.md\`:
 
-| Symbol | File | Called By | Calls | State Read/Written | Side Effects | Status |
-|---|---|---|---|---|---|---|
+| Symbol | Definition | Implementations | Called By | Calls | State Read/Written | Side Effects | Resolution Evidence | Status |
+|---|---|---|---|---|---|---|---|---|
 
 \`Status\` must be \`read\`, \`external-boundary\`, or \`generated-boundary\`.
 
@@ -199,6 +203,7 @@ The code-reading phase is complete only when:
 - every indirect callback, event, hook, queue, route, and dynamic dispatch path has been resolved
 - every relevant state reader and writer has been read
 - every relevant cross-file surface caller and consumer has been read
+- every semantic relationship records LSP, structural-search, Grep-fallback, runtime, external-boundary, or generated-boundary evidence
 - no unresolved project-owned symbol remains
 
 Do not diagnose the root cause or choose a fix before the Code Reading Closure is complete.

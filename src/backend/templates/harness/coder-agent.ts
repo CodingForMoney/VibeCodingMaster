@@ -27,6 +27,7 @@ ${renderRoleMemoryRules("coder")}
 - Do not stop before editing because of predicted architecture, design, contract, validation, or test failure; implement the assigned scaffold first.
 - Use \`.ai/generated/module-index.json\` to locate approved module source and test files.
 - Use \`.ai/generated/public-surface.json\` to avoid accidental public API drift.
+- When LSP is available, use definitions and references to locate assigned callable surfaces precisely. Use Grep for text or dynamic edges, not to broaden or reinterpret the approved implementation scope.
 
 ### Implementation
 
