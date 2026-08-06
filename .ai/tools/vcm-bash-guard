@@ -1,11 +1,9 @@
 #!/usr/bin/env python3
-"""VCM PreToolUse guard for supervised Bash inside VCM role sessions.
+"""VCM PreToolUse guard for supervised tools inside VCM role sessions.
 
-Reads the Claude Code PreToolUse hook payload on stdin. When the Bash tool
-call would start background work (run_in_background, nohup, setsid, disown,
-or a lone '&'), or composes a supervised long-job tool with another shell
-command, it prints a deny decision that redirects the role to the
-vcm-long-running-validation skill. Anything else is allowed by staying silent.
+Reads the Claude Code PreToolUse hook payload on stdin. It enforces supervised
+Bash execution for every VCM role and prevents LSP-enabled roles from replacing
+semantic code navigation with the Grep tool or shell text-search commands.
 
 Quoted payloads of `sh -c` / `bash -lc` style invocations are executable
 shell code, so they are scanned recursively. `.ai/tools/run-long-check` is the
@@ -13,6 +11,7 @@ only sanctioned detached worker; the command it runs must still stay in the
 supervised foreground process group.
 """
 import json
+import os
 import re
 import sys
 
@@ -22,6 +21,11 @@ SKILL_HINT = (
     "`.ai/tools/watch-job <job-id>` in the same turn, repeating watch-job "
     "until it reports a terminal result."
 )
+CODE_NAV_HINT = (
+    "Use LSP, Glob, Read, generated context, architecture documents, or runtime "
+    "evidence; do not substitute text search."
+)
+LSP_ROLES = {"architect", "coder", "reviewer"}
 
 MAX_NESTED_SHELL_DEPTH = 3
 QUOTED = re.compile(r"'([^']*)'|\"([^\"]*)\"")
@@ -40,6 +44,20 @@ RUN_LONG_CHECK_SHELL_STRING = re.compile(
     r"(?:-\w+\s+)*-\w*c\w*(?:\s|$)"
 )
 COMMAND_SUBSTITUTION = re.compile(r"\$\(([^()]*)\)|`([^`]*)`")
+TEXT_SEARCH_COMMAND = re.compile(
+    r"(?:^|[;&|()\n`])\s*"
+    r"(?:(?:[A-Za-z_][A-Za-z0-9_]*=[^\s;&|()]+)\s+)*"
+    r"(?:env(?:\s+(?:-[^\s]+|[A-Za-z_][A-Za-z0-9_]*=[^\s]+))*\s+)?"
+    r"(?:command\s+|sudo(?:\s+-[^\s]+)*\s+)?"
+    r"(?:[^\s;&|()]*/)?(?:grep|egrep|fgrep|rg|ripgrep)(?=\s|$|[;&|()])"
+)
+GIT_GREP_COMMAND = re.compile(
+    r"(?:^|[;&|()\n`])\s*(?:git)(?:\s+-[^\s]+)*\s+grep(?=\s|$|[;&|()])"
+)
+WRAPPED_TEXT_SEARCH_COMMAND = re.compile(
+    r"(?:^|\s)(?:xargs(?:\s+-[^\s]+)*|-exec|-execdir)\s+"
+    r"(?:[^\s;&|()]*/)?(?:grep|egrep|fgrep|rg|ripgrep)(?=\s|$|[;&|()])"
+)
 
 
 def strip_quoted(command: str) -> str:
@@ -83,7 +101,7 @@ def protected_tool_invoked(command_without_quotes: str) -> bool:
     return bool(PROTECTED_TOOL_INVOCATION.search(command_without_quotes))
 
 
-def scan_shell_command(command: str, depth: int = 0) -> list[str]:
+def scan_shell_command(command: str, depth: int = 0, forbid_text_search: bool = False) -> list[str]:
     reasons = []
     stripped = strip_escaped_characters(strip_quoted(command))
     if re.search(r"(?:^|[\s;&|(])(?:nohup|setsid)(?:\s|$)", stripped):
@@ -92,6 +110,12 @@ def scan_shell_command(command: str, depth: int = 0) -> list[str]:
         reasons.append("disown is forbidden")
     if unquoted_ampersand(stripped):
         reasons.append("'&' background execution is forbidden")
+    if forbid_text_search and (
+        TEXT_SEARCH_COMMAND.search(stripped)
+        or GIT_GREP_COMMAND.search(stripped)
+        or WRAPPED_TEXT_SEARCH_COMMAND.search(stripped)
+    ):
+        reasons.append("text-search commands are forbidden for this LSP-enabled role")
 
     if protected_tool_invoked(stripped):
         if SHELL_CONTROL_OPERATOR.search(stripped):
@@ -104,17 +128,17 @@ def scan_shell_command(command: str, depth: int = 0) -> list[str]:
         for segment in quoted_segments(command):
             if protected_tool_invoked(strip_escaped_characters(strip_quoted(segment))):
                 reasons.append("run-long-check and watch-job must not be invoked through a shell command string")
-            reasons.extend(scan_shell_command(segment, depth + 1))
+            reasons.extend(scan_shell_command(segment, depth + 1, forbid_text_search))
     if depth < MAX_NESTED_SHELL_DEPTH:
         for substitution in double_quoted_command_substitutions(command):
             nested_stripped = strip_escaped_characters(strip_quoted(substitution))
             if protected_tool_invoked(nested_stripped):
                 reasons.append("run-long-check and watch-job must not be invoked through command substitution")
-            reasons.extend(scan_shell_command(substitution, depth + 1))
+            reasons.extend(scan_shell_command(substitution, depth + 1, forbid_text_search))
     return reasons
 
 
-def guard_reasons(tool_input: dict) -> list[str]:
+def guard_reasons(tool_input: dict, forbid_text_search: bool = False) -> list[str]:
     reasons = []
     if tool_input.get("run_in_background"):
         reasons.append("Bash run_in_background is forbidden")
@@ -122,7 +146,7 @@ def guard_reasons(tool_input: dict) -> list[str]:
     command = tool_input.get("command")
     command = command if isinstance(command, str) else ""
 
-    reasons.extend(scan_shell_command(command))
+    reasons.extend(scan_shell_command(command, forbid_text_search=forbid_text_search))
     return list(dict.fromkeys(reasons))
 
 
@@ -132,14 +156,25 @@ def main() -> int:
         payload = json.loads(raw) if raw.strip() else {}
     except ValueError:
         return 0
-    if payload.get("tool_name") != "Bash":
+    tool_name = payload.get("tool_name")
+    role = os.environ.get("VCM_ROLE", "").strip()
+    forbid_text_search = role in LSP_ROLES
+    if tool_name == "Grep" and forbid_text_search:
+        reasons = ["the Grep tool is forbidden for this LSP-enabled role"]
+    elif tool_name == "Bash":
+        tool_input = payload.get("tool_input")
+        tool_input = tool_input if isinstance(tool_input, dict) else {}
+        reasons = guard_reasons(tool_input, forbid_text_search=forbid_text_search)
+    else:
         return 0
-
-    tool_input = payload.get("tool_input")
-    tool_input = tool_input if isinstance(tool_input, dict) else {}
-    reasons = guard_reasons(tool_input)
     if not reasons:
         return 0
+
+    hints = []
+    if any("text-search" in reason or "Grep tool" in reason for reason in reasons):
+        hints.append(CODE_NAV_HINT)
+    if any("text-search" not in reason and "Grep tool" not in reason for reason in reasons):
+        hints.append(SKILL_HINT)
 
     print(
         json.dumps(
@@ -148,7 +183,7 @@ def main() -> int:
                     "hookEventName": "PreToolUse",
                     "permissionDecision": "deny",
                     "permissionDecisionReason": (
-                        "VCM denied this Bash call (" + "; ".join(reasons) + "). " + SKILL_HINT
+                        "VCM denied this tool call (" + "; ".join(reasons) + "). " + " ".join(hints)
                     ),
                 }
             }

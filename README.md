@@ -471,7 +471,10 @@ VCM bundles the Claude Code LSP bridge and loads it for Architect, Coder, and
 Reviewer sessions, including CCR launches. The project environment must still
 provide the language server for each detected language: `rust-analyzer`,
 `typescript-language-server`, `pyright-langserver`, `gopls`, `clangd`, or
-`jdtls`. Harness Studio reports a missing executable or failed startup probe
+`jdtls`. Architect, Coder, and Reviewer do not receive the Grep tool, and the
+Harness guard rejects shell text-search commands for those roles so unresolved
+semantic relationships cannot be hidden by textual fallback. Harness Studio
+reports a missing executable or failed readiness probe
 with the backend diagnostic.
 
 Harness Engineer is task-scoped and runs from the active task worktree. The

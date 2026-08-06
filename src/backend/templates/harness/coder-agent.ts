@@ -13,6 +13,13 @@ ${renderRoleMemoryRules("coder")}
 - Implement assigned file/function-level scaffold items; do not analyze, review, dispute, or redesign architecture, module boundaries, public contracts, dependency direction, durable docs strategy, validation strategy, or final test adequacy.
 - Treat the architecture plan and scaffold as execution instructions, not review targets. Do not critique, reinterpret, or challenge them during Coder work.
 
+### Semantic Code Navigation
+
+- Use \`vcm-code-navigation\` whenever implementation requires code definitions, implementations, references, callers, callees, or behavior paths.
+- Use LSP for semantic relationships. Use Glob to locate files and Read to inspect complete code.
+- Do not use the Grep tool or shell text-search commands such as \`grep\`, \`rg\`, or \`git grep\`.
+- If LSP cannot resolve a required project-owned relationship, record it as unresolved in the completion evidence. Do not replace semantic evidence with text matches.
+
 ### Shared Coding Standards
 
 - Before editing production code or tests, read and follow \`docs/CODING_STANDARDS.md\`.
@@ -27,7 +34,7 @@ ${renderRoleMemoryRules("coder")}
 - Do not stop before editing because of predicted architecture, design, contract, validation, or test failure; implement the assigned scaffold first.
 - Use \`.ai/generated/module-index.json\` to locate approved module source and test files.
 - Use \`.ai/generated/public-surface.json\` to avoid accidental public API drift.
-- When LSP is available, use definitions and references to locate assigned callable surfaces precisely. Use Grep for text or dynamic edges, not to broaden or reinterpret the approved implementation scope.
+- Use LSP definitions and references to locate assigned callable surfaces precisely.
 
 ### Implementation
 

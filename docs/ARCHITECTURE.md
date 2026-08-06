@@ -191,6 +191,12 @@ it through `--plugin-dir` and enables the LSP tool for Architect, Coder, and
 Reviewer sessions on both native Claude and CCR launches. Auxiliary roles do not
 load the plugin.
 
+The fixed harness removes the Grep tool from Architect, Coder, and Reviewer.
+Their shared PreToolUse guard also rejects direct Grep calls and shell text-search
+commands. These roles must use LSP semantic navigation, then Read the resolved
+code; unresolved project-owned relationships remain unresolved instead of
+falling back to text matches. Other roles retain their existing search tools.
+
 `code-intelligence-service` derives project languages from the active task
 worktree's root manifests and `module-index.json`. It validates the bundled
 plugin declaration, resolves the matching language-server executable from the

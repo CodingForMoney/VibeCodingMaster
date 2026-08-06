@@ -11,9 +11,11 @@ interface GuardPayload {
   tool_input: Record<string, unknown>;
 }
 
-async function runGuard(payload: GuardPayload): Promise<string | undefined> {
+async function runGuard(payload: GuardPayload, role?: string): Promise<string | undefined> {
   const reason = await new Promise<string>((resolve, reject) => {
-    const child = execFile("python3", [guardPath], (error, stdout) => {
+    const child = execFile("python3", [guardPath], {
+      env: role ? { ...process.env, VCM_ROLE: role } : process.env
+    }, (error, stdout) => {
       if (error) {
         reject(error);
         return;
@@ -98,4 +100,55 @@ describe("vcm-bash-guard", () => {
       await expect(runGuard(payload)).resolves.toBeUndefined();
     });
   }
+
+  describe("LSP role text-search policy", () => {
+    const lspRoles = ["architect", "coder", "reviewer"];
+    const deniedCommands = [
+      "rg symbol src",
+      "grep -R symbol src",
+      "git grep symbol",
+      "egrep symbol src/file.ts",
+      "fgrep symbol src/file.ts",
+      "ripgrep symbol src",
+      "/usr/bin/grep symbol src/file.ts",
+      "printf x | rg x",
+      "sh -c 'rg symbol src'",
+      'printf "%s" "$(rg symbol src)"',
+      "find src -type f -exec grep symbol {} ;",
+      "find src -type f -print0 | xargs -0 rg symbol"
+    ];
+
+    for (const role of lspRoles) {
+      it(`denies the Grep tool for ${role}`, async () => {
+        const reason = await runGuard({
+          tool_name: "Grep",
+          tool_input: { pattern: "symbol", path: "src" }
+        }, role);
+        expect(reason).toContain("Grep tool is forbidden");
+        expect(reason).toContain("Use LSP");
+      });
+
+      for (const command of deniedCommands) {
+        it(`denies ${command} for ${role}`, async () => {
+          const reason = await runGuard(bash(command), role);
+          expect(reason).toContain("text-search commands are forbidden");
+          expect(reason).toContain("Use LSP");
+        });
+      }
+
+      it(`allows quoted text-search names for ${role}`, async () => {
+        await expect(runGuard(bash("printf '%s' 'rg symbol src'"), role)).resolves.toBeUndefined();
+      });
+    }
+
+    for (const role of ["project-manager", "tester", "translator", "harness-engineer"]) {
+      it(`does not apply the LSP text-search policy to ${role}`, async () => {
+        await expect(runGuard(bash("rg symbol src"), role)).resolves.toBeUndefined();
+        await expect(runGuard({
+          tool_name: "Grep",
+          tool_input: { pattern: "symbol", path: "src" }
+        }, role)).resolves.toBeUndefined();
+      });
+    }
+  });
 });

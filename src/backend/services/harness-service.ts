@@ -157,6 +157,7 @@ interface HarnessFileDefinition {
   blankLineBeforeEnd?: boolean;
   memoryBlock?: boolean;
   requiredTools?: string[];
+  forbiddenTools?: string[];
   defaultContentAfterBlock?: string;
   legacyWholeFile?: string;
   renderRules(): string;
@@ -188,6 +189,7 @@ const VCM_BASH_DEFAULT_TIMEOUT_MS = "600000";
 const VCM_AUTO_MEMORY_ENABLED = false;
 const VCM_HOOK_DEFINITIONS: ReadonlyArray<{ eventName: string; matcher?: string; command: string; timeout: number }> = [
   { eventName: "PreToolUse", matcher: "Bash", command: VCM_BASH_GUARD_HOOK_COMMAND, timeout: 10 },
+  { eventName: "PreToolUse", matcher: "Grep", command: VCM_BASH_GUARD_HOOK_COMMAND, timeout: 10 },
   { eventName: "UserPromptSubmit", command: VCM_HOOK_COMMAND, timeout: 5 },
   { eventName: "Stop", command: VCM_STOP_HOOK_COMMAND, timeout: 10 },
   { eventName: "StopFailure", command: VCM_HOOK_COMMAND, timeout: 5 },
@@ -257,7 +259,7 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
     title: "VCM Code Navigation Skill",
     frontmatter: renderSkillFrontmatter(
       "vcm-code-navigation",
-      "Use when Architect or Reviewer must resolve code symbols, references, implementations, call hierarchies, or bounded dependency paths."
+      "Use when Architect, Coder, or Reviewer must resolve code symbols, references, implementations, call hierarchies, or bounded dependency paths."
     ),
     ownership: "whole-file",
     renderRules: renderVcmCodeNavigationSkillRules
@@ -367,10 +369,11 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
     title: "Reviewer Agent",
     memoryBlock: true,
     requiredTools: ["LSP"],
+    forbiddenTools: ["Grep"],
     frontmatter: renderAgentFrontmatter(
       "reviewer",
       "VCM independent gate review role for architecture plans, validation adequacy, and code diffs.",
-      { tools: "Read, Grep, Glob, Bash, Write, LSP" }
+      { tools: "Read, Glob, Bash, Write, LSP" }
     ),
     renderRules: renderReviewerAgentRules
   },
@@ -462,11 +465,12 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
     title: "Architect Agent",
     memoryBlock: true,
     requiredTools: ["Agent", "LSP"],
+    forbiddenTools: ["Grep"],
     blankLineBeforeEnd: true,
     frontmatter: renderAgentFrontmatter(
       "architect",
       "VCM architecture role for plans, module boundaries, public contracts, verifiable behavior, and docs sync.",
-      { tools: "Read, Grep, Glob, Bash, Edit, Write, Agent, LSP" }
+      { tools: "Read, Glob, Bash, Edit, Write, Agent, LSP" }
     ),
     renderRules: renderArchitectHarnessRules
   },
@@ -476,10 +480,11 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
     title: "Coder Agent",
     memoryBlock: true,
     requiredTools: ["Agent", "LSP"],
+    forbiddenTools: ["Grep"],
     frontmatter: renderAgentFrontmatter(
       "coder",
       "VCM implementation role for scoped code changes and focused tests.",
-      { tools: "Read, Grep, Glob, Bash, Edit, Write, Agent, LSP" }
+      { tools: "Read, Glob, Bash, Edit, Write, Agent, LSP" }
     ),
     renderRules: renderCoderHarnessRules
   },
@@ -1590,7 +1595,7 @@ async function analyzeHarnessFile(
     const migratedContent = migrateLegacyHarnessFile(definition, currentContent, expectedBlock);
     if (migratedContent) {
       const memoryUpdatedContent = definition.memoryBlock ? ensureVcmMemoryBlock(migratedContent) : migratedContent;
-      const nextContent = ensureAgentTools(memoryUpdatedContent, definition.requiredTools);
+      const nextContent = normalizeAgentTools(memoryUpdatedContent, definition.requiredTools, definition.forbiddenTools);
       return {
         definition,
         status: {
@@ -1609,7 +1614,7 @@ async function analyzeHarnessFile(
       };
     }
     const insertedContent = `${currentContent.trimEnd()}\n\n${expectedBlock}\n`;
-    const nextContent = ensureAgentTools(insertedContent, definition.requiredTools);
+    const nextContent = normalizeAgentTools(insertedContent, definition.requiredTools, definition.forbiddenTools);
     return {
       definition,
       status: {
@@ -1632,7 +1637,7 @@ async function analyzeHarnessFile(
   const currentBlock = match[0];
   const blockUpdatedContent = currentContent.replace(managedBlockPattern, expectedBlock);
   const memoryUpdatedContent = definition.memoryBlock ? ensureVcmMemoryBlock(blockUpdatedContent) : blockUpdatedContent;
-  const nextContent = ensureAgentTools(memoryUpdatedContent, definition.requiredTools);
+  const nextContent = normalizeAgentTools(memoryUpdatedContent, definition.requiredTools, definition.forbiddenTools);
   const action: HarnessFileAction = currentContent === nextContent ? "ok" : "update";
 
   return {
@@ -1794,6 +1799,34 @@ function ensureAgentTools(content: string, requiredTools: string[] | undefined):
   return (requiredTools ?? []).reduce(ensureAgentTool, content);
 }
 
+function removeAgentTool(content: string, forbiddenTool: string): string {
+  const frontmatterMatch = content.match(/^---\r?\n[\s\S]*?\r?\n---/);
+  if (!frontmatterMatch) {
+    return content;
+  }
+
+  const toolsMatch = frontmatterMatch[0].match(/^tools:\s*(.*)$/m);
+  if (!toolsMatch) {
+    return content;
+  }
+
+  const tools = toolsMatch[1].split(",").map((tool) => tool.trim()).filter(Boolean);
+  const nextTools = tools.filter((tool) => tool !== forbiddenTool);
+  if (nextTools.length === tools.length) {
+    return content;
+  }
+  return content.replace(frontmatterMatch[0], frontmatterMatch[0].replace(toolsMatch[0], `tools: ${nextTools.join(", ")}`));
+}
+
+function normalizeAgentTools(
+  content: string,
+  requiredTools: string[] | undefined,
+  forbiddenTools: string[] | undefined
+): string {
+  const required = ensureAgentTools(content, requiredTools);
+  return (forbiddenTools ?? []).reduce(removeAgentTool, required);
+}
+
 function migrateLegacyHarnessFile(
   definition: HarnessFileDefinition,
   currentContent: string,
@@ -1891,7 +1924,7 @@ function withVcmClaudeHooks(settings: Record<string, unknown>): Record<string, u
       ? hooks[definition.eventName] as unknown[]
       : [];
     hooks[definition.eventName] = [
-      ...existingMatchers.filter((entry) => !isVcmHookMatcher(entry)),
+      ...existingMatchers,
       {
         ...(definition.matcher ? { matcher: definition.matcher } : {}),
         hooks: [

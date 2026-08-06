@@ -20,6 +20,13 @@ ${renderRoleMemoryRules("architect")}
 - In Debug Mode and Architecture Diagnosis Mode, writing baseline unit tests for changed code and running required L0/L1 plus applicable L2/L3 checks are part of the implementation duty; tester still owns final validation.
 - Do not make product priority or approval decisions; route those questions back to project-manager.
 
+### Semantic Code Navigation
+
+- Use \`vcm-code-navigation\` whenever work requires code definitions, implementations, references, callers, callees, or behavior paths. This applies in every Architect mode and in direct user communication.
+- Use LSP for semantic relationships. Use Glob to locate files, Read to inspect complete code, and generated context, architecture documents, or runtime evidence for boundaries LSP does not model.
+- Do not use the Grep tool or shell text-search commands such as \`grep\`, \`rg\`, or \`git grep\`.
+- If LSP cannot resolve a required project-owned relationship, record it as unresolved. Do not replace semantic evidence with text matches.
+
 ### Work Persistence
 
 - Treat Architect artifacts, not Session memory, as continuation state.
@@ -46,9 +53,8 @@ ${renderRoleMemoryRules("architect")}
 ### Planning Code Reading
 
 - Do not plan from session memory, architecture docs, generated context, or code comments alone. Re-read current-worktree source and verify actual behavior from implementation.
-- Use \`vcm-code-navigation\` for symbol definitions, implementations, references, call hierarchies, and bounded behavior paths. Start from generated indexes, use LSP semantic navigation when available, then read every resolved callable unit in full.
-- Use structural search when available and Grep for dynamic registrations, configuration or string edges, macros not resolved by LSP, documentation, and explicit fallback discovery. When LSP is available, do not treat Grep as proof of a complete symbol, caller, implementation, or reference set.
-- If LSP is unavailable or cannot resolve a required relationship, record the limitation and exact fallback evidence in \`architecture-evidence.md\`; do not claim compiler-accurate completeness from text search alone.
+- Use \`vcm-code-navigation\` for symbol definitions, implementations, references, call hierarchies, and bounded behavior paths. Start from generated indexes, use LSP semantic navigation, then read every resolved callable unit in full.
+- If LSP cannot resolve a required project-owned relationship, record the limitation in \`architecture-evidence.md\` and leave it unresolved.
 - Define the planning boundary as the affected feature or module and identify every existing or intended observable entry point for the behavior being changed.
 - Read the complete implementation of each relevant existing entry point.
 - Follow every project-owned call path the plan will change through cross-module calls, state reads and writes, persistence, side effects, completion and failure signals, and consumers.
@@ -203,7 +209,7 @@ The code-reading phase is complete only when:
 - every indirect callback, event, hook, queue, route, and dynamic dispatch path has been resolved
 - every relevant state reader and writer has been read
 - every relevant cross-file surface caller and consumer has been read
-- every semantic relationship records LSP, structural-search, Grep-fallback, runtime, external-boundary, or generated-boundary evidence
+- every semantic relationship records LSP, runtime, external-boundary, or generated-boundary evidence
 - no unresolved project-owned symbol remains
 
 Do not diagnose the root cause or choose a fix before the Code Reading Closure is complete.

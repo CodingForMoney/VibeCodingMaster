@@ -693,12 +693,12 @@ semantic navigation or source inspection. VCM loads its bundled LSP bridge for
 Architect, Coder, and Reviewer; the project runtime must provide the matching
 language-server executable. The `vcm-code-navigation` skill uses definitions,
 implementations, references, and call hierarchy, then requires every resolved
-callable unit to be read in full. Use structural search and Grep for dynamic
-registrations, configuration or string edges, documentation, and explicit
-fallback. Text search alone is not proof of a complete symbol or reference set.
-An empty LSP result that contradicts direct code or runtime evidence is
-unresolved, not proof that no relationship exists. Expand one dependency hop at
-a time instead of injecting an unrestricted repository graph.
+callable unit to be read in full. Architect, Coder, and Reviewer do not use the
+Grep tool or shell text-search commands. Use Glob, generated context,
+architecture documents, and runtime evidence for boundaries LSP does not model.
+If LSP cannot resolve a required project-owned relationship, keep it unresolved
+instead of substituting text matches. Expand one dependency hop at a time
+instead of injecting an unrestricted repository graph.
 
 ## 15. Harness Bootstrap and Feedback
 

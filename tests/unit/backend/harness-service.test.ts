@@ -88,7 +88,7 @@ describe("createHarnessService", () => {
     expect(await fs.readText("/repo/.claude/skills/vcm-gate-review/SKILL.md")).toContain("Validation-Only Flow does not request code-diff");
     expect(await fs.readText("/repo/.claude/skills/vcm-architecture-interview/SKILL.md")).toContain("name: vcm-architecture-interview");
     expect(await fs.readText("/repo/.claude/skills/vcm-architecture-interview/SKILL.md")).toContain("During an active Architect Interview");
-    expect(await fs.readText("/repo/.claude/skills/vcm-code-navigation/SKILL.md")).toContain("When LSP is available");
+    expect(await fs.readText("/repo/.claude/skills/vcm-code-navigation/SKILL.md")).toContain("Do not substitute text search for semantic navigation");
     expect(await fs.readText("/repo/.claude/skills/vcm-report-harness-issue/SKILL.md")).toContain("name: vcm-report-harness-issue");
     expect(await fs.readText("/repo/.claude/skills/vcm-report-harness-issue/SKILL.md")).toContain(".ai/vcm/harness-feedback/pending/");
     const proposeMemorySkill = await fs.readText("/repo/.claude/skills/vcm-propose-memory/SKILL.md");
@@ -195,7 +195,8 @@ describe("createHarnessService", () => {
     expect(finalAcceptanceSkill).toContain("`incomplete` is not acceptance evidence");
     expect(finalAcceptanceSkill).toContain("do not accept `Test Result: incomplete`");
     const coderAgent = await fs.readText("/repo/.claude/agents/coder.md");
-    expect(coderAgent).toContain("tools: Read, Grep, Glob, Bash, Edit, Write, Agent, LSP");
+    expect(coderAgent).toContain("tools: Read, Glob, Bash, Edit, Write, Agent, LSP");
+    expect(frontmatterOf(coderAgent)).not.toContain("Grep");
     expect(coderAgent).toContain("Implement assigned file/function-level scaffold items");
     expect(coderAgent).toContain("read and follow `docs/CODING_STANDARDS.md`");
     expect(await fs.readText("/repo/docs/CODING_STANDARDS.md")).toContain("Unit test coverage is required for every changed callable unit");
@@ -229,7 +230,8 @@ describe("createHarnessService", () => {
     expect(coderWorkerAgent).not.toContain("Stop before editing if the assigned module");
     const reviewerAgent = await fs.readText("/repo/.claude/agents/reviewer.md");
     expect(reviewerAgent).toContain("name: reviewer");
-    expect(reviewerAgent).toContain("tools: Read, Grep, Glob, Bash, Write");
+    expect(reviewerAgent).toContain("tools: Read, Glob, Bash, Write, LSP");
+    expect(frontmatterOf(reviewerAgent)).not.toContain("Grep");
     expect(reviewerAgent).toContain("You are VCM `reviewer`");
     expect(reviewerAgent).toContain("Use the task and worktree paths named there");
     expect(reviewerAgent).toContain("Every Gate Review is a complete review of the current gate inputs");
@@ -395,7 +397,7 @@ describe("createHarnessService", () => {
     expect(content).toContain("## VCM Start Here");
   });
 
-  it("adds required navigation tools to existing Architect frontmatter without replacing its configuration", async () => {
+  it("normalizes Architect navigation tools without replacing its configuration", async () => {
     const fs = createMemoryFs();
     const service = createHarnessService({ fs });
     await service.applyHarness("/repo");
@@ -405,7 +407,7 @@ describe("createHarnessService", () => {
     await fs.writeText(
       architectPath,
       current
-        .replace("tools: Read, Grep, Glob, Bash, Edit, Write, Agent, LSP", "tools: Read, Grep, Glob, Bash, Edit, Write")
+        .replace("tools: Read, Glob, Bash, Edit, Write, Agent, LSP", "tools: Read, Grep, Glob, Bash, Edit, Write")
         .replace("description: VCM architecture role", "model: custom-model\ndescription: VCM architecture role")
     );
 
@@ -414,7 +416,8 @@ describe("createHarnessService", () => {
 
     await service.applyHarness("/repo");
     const updated = await fs.readText(architectPath);
-    expect(frontmatterOf(updated)).toContain("tools: Read, Grep, Glob, Bash, Edit, Write, Agent, LSP");
+    expect(frontmatterOf(updated)).toContain("tools: Read, Glob, Bash, Edit, Write, Agent, LSP");
+    expect(frontmatterOf(updated)).not.toContain("Grep");
     expect(frontmatterOf(updated)).toContain("model: custom-model");
   });
 

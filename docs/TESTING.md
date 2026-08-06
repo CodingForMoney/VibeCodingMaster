@@ -89,7 +89,9 @@ Notes:
   `harness-service.test.ts`, `harness-templates-sync.test.ts`,
   `harness-studio-layout.test.ts`, and `ccr-integration.e2e.test.ts`. Verify the
   bundled plugin loads only for Architect, Coder, and Reviewer on native and
-  CCR launches; semantic-navigation rules stay in all installed copies;
+  CCR launches; their frontmatter excludes Grep; the shared PreToolUse guard
+  rejects direct Grep and shell text-search commands only for those roles;
+  semantic-navigation rules stay in all installed copies;
   language detection uses task-worktree indexes and manifests; bounded probes
   distinguish missing, broken, and ready servers and are cached; and Studio
   displays only backend-owned status and diagnostics.
