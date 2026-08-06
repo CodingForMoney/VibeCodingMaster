@@ -28,6 +28,7 @@ import type {
   UpdateHarnessFileContentResult
 } from "../../shared/types/harness.js";
 import type { RoleSessionRecord } from "../../shared/types/session.js";
+import type { CommandRunner } from "../adapters/command-runner.js";
 import type { GitAdapter } from "../adapters/git-adapter.js";
 import type { FileSystemAdapter } from "../adapters/filesystem.js";
 import { renderArchitectHarnessRules } from "../templates/harness/architect-agent.js";
@@ -77,7 +78,7 @@ import { submitTerminalInput } from "../runtime/terminal-submit.js";
 import { VcmError } from "../errors.js";
 import { bumpHarnessRevision, readHarnessRevisionState } from "./harness-revision.js";
 import type { SessionService } from "./session-service.js";
-import { detectHarnessCodeIntelligence } from "./code-intelligence-service.js";
+import { createHarnessCodeIntelligenceDetector } from "./code-intelligence-service.js";
 
 const execFileAsync = promisify(execFile);
 const BOOTSTRAP_SESSION_PATH = ".ai/vcm/bootstrap/session.json";
@@ -102,6 +103,7 @@ export interface HarnessService {
 
 export interface HarnessServiceDeps {
   fs: FileSystemAdapter;
+  commandRunner?: Pick<CommandRunner, "run">;
   git?: Pick<GitAdapter, "addPaths" | "commit" | "getStatusPorcelainV1"> &
     Partial<Pick<GitAdapter, "branchExists" | "getCommitDiff" | "getCommitInfo" | "getCommitList" | "getCurrentBranch" | "getDiff" | "getHeadCommit" | "getMergeBase" | "mergeBranchFastForward">>;
   runtime?: TerminalRuntime;
@@ -497,12 +499,15 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
 export function createHarnessService(deps: HarnessServiceDeps): HarnessService {
   const now = deps.now ?? (() => new Date().toISOString());
   const vcmVersion = deps.vcmVersion ?? "unknown";
+  const codeIntelligenceDetector = createHarnessCodeIntelligenceDetector(deps.fs, {
+    runner: deps.commandRunner
+  });
 
   return {
     async getHarnessStatus(repoRoot) {
       const [analyses, codeIntelligence] = await Promise.all([
         analyzeHarnessFiles(deps.fs, repoRoot),
-        detectHarnessCodeIntelligence(deps.fs, repoRoot)
+        codeIntelligenceDetector.detect(repoRoot)
       ]);
       const legacyChanges = await analyzeLegacyCodexHarnessPaths(deps.fs, repoRoot);
       const manifestChange = deps.runFixedInstaller
@@ -545,7 +550,7 @@ export function createHarnessService(deps: HarnessServiceDeps): HarnessService {
       const file = await readHarnessFileContent(deps.fs, repoRoot, definition.path);
       const [analyses, codeIntelligence] = await Promise.all([
         analyzeHarnessFiles(deps.fs, repoRoot),
-        detectHarnessCodeIntelligence(deps.fs, repoRoot)
+        codeIntelligenceDetector.detect(repoRoot)
       ]);
       const legacyChanges = await analyzeLegacyCodexHarnessPaths(deps.fs, repoRoot);
       const manifestChange = deps.runFixedInstaller

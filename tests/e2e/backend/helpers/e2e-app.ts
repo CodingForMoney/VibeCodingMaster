@@ -118,6 +118,7 @@ export async function createMockClaudeE2eApp(options: MockClaudeE2eAppOptions = 
   });
   const harnessService = createHarnessService({
     fs: fsAdapter,
+    commandRunner: runner,
     git,
     runtime: mockRuntime,
     harnessEngineerSessions: sessionService,
@@ -411,8 +412,9 @@ function createMockClaudeAdapter(): ClaudeAdapter {
     async getVersion() {
       return "mock-claude-code/0.0.0";
     },
-    buildRoleStartCommand(role, command = "claude", permissionMode = "default", claudeSessionId, resume = false, model = "default", effort = "default", settingsOverride, appendSystemPrompt) {
-      const args = ["--agent", role];
+    buildRoleStartCommand(role, command = "claude", permissionMode = "default", claudeSessionId, resume = false, model = "default", effort = "default", settingsOverride, appendSystemPrompt, pluginDirs = []) {
+      const args = pluginDirs.flatMap((pluginDir) => ["--plugin-dir", pluginDir]);
+      args.push("--agent", role);
       const sessionSettings = { ...settingsOverride };
       if (claudeSessionId) {
         args.push(resume ? "--resume" : "--session-id", claudeSessionId);

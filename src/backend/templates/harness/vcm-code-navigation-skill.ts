@@ -15,6 +15,7 @@ Use this skill when Architect or Reviewer must establish symbol definitions, imp
 
 - Record each resolved relationship and whether it came from LSP, structural search, Grep fallback, runtime evidence, or a generated boundary.
 - Do not treat a Grep result as proof of a complete definition, caller, implementation, or reference set when LSP is available.
+- When an empty LSP result contradicts a direct call in the code, another LSP result, or runtime evidence, treat the relationship as unresolved. Record the contradiction and use exact fallback evidence.
 - If LSP is unavailable or cannot resolve a relationship, record that limitation and the exact fallback evidence. Do not describe text-search results as compiler-accurate or complete.
 - Generated indexes and architecture docs locate likely code; reading current-worktree implementation establishes behavior.
 

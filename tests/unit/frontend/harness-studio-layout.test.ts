@@ -16,6 +16,7 @@ describe("Harness Studio layout", () => {
 
     expect(component).toContain('title="Code Intelligence"');
     expect(component).toContain("status?.codeIntelligence?.languages");
-    expect(component).toContain("language.serverAvailable");
+    expect(component).toContain('language.state === "ready"');
+    expect(component).toContain('language.error ?? "LSP ready"');
   });
 });

@@ -2675,7 +2675,7 @@ h2 {
 }
 
 .harness-studio-code-intelligence-list li {
-  grid-template-columns: minmax(0, 1fr) minmax(0, 0.8fr) minmax(0, 0.8fr) auto;
+  grid-template-columns: minmax(0, 0.7fr) minmax(0, 0.8fr) minmax(0, 0.7fr) auto minmax(0, 1.5fr);
 }
 
 .harness-studio-code-intelligence-list code {
@@ -2683,6 +2683,12 @@ h2 {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.harness-studio-code-intelligence-detail {
+  min-width: 0;
+  color: #8b949e;
+  overflow-wrap: anywhere;
 }
 
 .harness-studio-doc-list button {
@@ -3444,6 +3450,15 @@ h2 {
   .session-toolbar {
     flex-wrap: wrap;
     overflow: visible;
+  }
+
+  .harness-studio-code-intelligence-list li {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .harness-studio-code-intelligence-list code,
+  .harness-studio-code-intelligence-detail {
+    grid-column: 1 / -1;
   }
 
   .file-translation-modal {

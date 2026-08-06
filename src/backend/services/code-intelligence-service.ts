@@ -1,10 +1,17 @@
 import path from "node:path";
 import type {
   HarnessCodeIntelligenceLanguage,
+  HarnessCodeIntelligenceLanguageState,
   HarnessCodeIntelligenceLanguageStatus,
   HarnessCodeIntelligenceStatus
 } from "../../shared/types/harness.js";
+import type { CommandRunner, CommandResult } from "../adapters/command-runner.js";
 import type { FileSystemAdapter } from "../adapters/filesystem.js";
+import {
+  VCM_LSP_PLUGIN_DIR,
+  VCM_LSP_PLUGIN_MANIFEST,
+  VCM_LSP_PLUGIN_NAME
+} from "./lsp-plugin.js";
 
 interface LanguageDefinition {
   language: HarnessCodeIntelligenceLanguage;
@@ -12,7 +19,8 @@ interface LanguageDefinition {
   extensions: string[];
   manifests: string[];
   serverCommand: string;
-  pluginName: string;
+  pluginServerName: string;
+  probeArgs: string[];
 }
 
 const LANGUAGE_DEFINITIONS: LanguageDefinition[] = [
@@ -22,7 +30,8 @@ const LANGUAGE_DEFINITIONS: LanguageDefinition[] = [
     extensions: [".rs"],
     manifests: ["Cargo.toml"],
     serverCommand: "rust-analyzer",
-    pluginName: "rust-analyzer-lsp"
+    pluginServerName: "rust-analyzer",
+    probeArgs: ["--version"]
   },
   {
     language: "typescript",
@@ -30,7 +39,8 @@ const LANGUAGE_DEFINITIONS: LanguageDefinition[] = [
     extensions: [".ts", ".tsx", ".js", ".jsx", ".mts", ".cts", ".mjs", ".cjs"],
     manifests: ["package.json", "tsconfig.json", "jsconfig.json"],
     serverCommand: "typescript-language-server",
-    pluginName: "typescript-lsp"
+    pluginServerName: "typescript",
+    probeArgs: ["--version"]
   },
   {
     language: "python",
@@ -38,7 +48,8 @@ const LANGUAGE_DEFINITIONS: LanguageDefinition[] = [
     extensions: [".py", ".pyi"],
     manifests: ["pyproject.toml", "requirements.txt", "setup.py"],
     serverCommand: "pyright-langserver",
-    pluginName: "pyright-lsp"
+    pluginServerName: "pyright",
+    probeArgs: ["--version"]
   },
   {
     language: "go",
@@ -46,7 +57,8 @@ const LANGUAGE_DEFINITIONS: LanguageDefinition[] = [
     extensions: [".go"],
     manifests: ["go.mod"],
     serverCommand: "gopls",
-    pluginName: "gopls-lsp"
+    pluginServerName: "gopls",
+    probeArgs: ["version"]
   },
   {
     language: "cpp",
@@ -54,7 +66,8 @@ const LANGUAGE_DEFINITIONS: LanguageDefinition[] = [
     extensions: [".c", ".cc", ".cpp", ".cxx", ".h", ".hh", ".hpp", ".hxx"],
     manifests: ["CMakeLists.txt", "compile_commands.json"],
     serverCommand: "clangd",
-    pluginName: "clangd-lsp"
+    pluginServerName: "clangd",
+    probeArgs: ["--version"]
   },
   {
     language: "java",
@@ -62,14 +75,77 @@ const LANGUAGE_DEFINITIONS: LanguageDefinition[] = [
     extensions: [".java"],
     manifests: ["pom.xml", "build.gradle", "build.gradle.kts", "settings.gradle", "settings.gradle.kts"],
     serverCommand: "jdtls",
-    pluginName: "jdtls-lsp"
+    pluginServerName: "jdtls",
+    probeArgs: ["--version"]
   }
 ];
 
+const DEFAULT_PROBE_TIMEOUT_MS = 3_000;
+const DEFAULT_CACHE_TTL_MS = 60_000;
+
 export interface DetectCodeIntelligenceOptions {
+  runner?: Pick<CommandRunner, "run">;
+  pluginDir?: string;
   pathEnv?: string;
   pathExt?: string;
   platform?: NodeJS.Platform;
+  probeTimeoutMs?: number;
+  cacheTtlMs?: number;
+  now?: () => number;
+}
+
+export interface HarnessCodeIntelligenceDetector {
+  detect(repoRoot: string): Promise<HarnessCodeIntelligenceStatus>;
+}
+
+interface ProbeCacheEntry {
+  expiresAt: number;
+  result: CommandResult;
+}
+
+interface LspPluginManifest {
+  lspServers?: Record<string, { command?: unknown }>;
+}
+
+export function createHarnessCodeIntelligenceDetector(
+  fs: FileSystemAdapter,
+  options: DetectCodeIntelligenceOptions = {}
+): HarnessCodeIntelligenceDetector {
+  const probeCache = new Map<string, ProbeCacheEntry>();
+  const probesInFlight = new Map<string, Promise<CommandResult>>();
+  const now = options.now ?? Date.now;
+  const cacheTtlMs = options.cacheTtlMs ?? DEFAULT_CACHE_TTL_MS;
+
+  return {
+    async detect(repoRoot) {
+      return detectCodeIntelligence(fs, repoRoot, options, async (definition, executablePath) => {
+        const cacheKey = `${executablePath}\u0000${definition.probeArgs.join("\u0000")}`;
+        const cached = probeCache.get(cacheKey);
+        const currentTime = now();
+        if (cached && cached.expiresAt > currentTime) {
+          return cached.result;
+        }
+        if (!options.runner) {
+          return undefined;
+        }
+        const existingProbe = probesInFlight.get(cacheKey);
+        if (existingProbe) {
+          return existingProbe;
+        }
+        const probePromise = options.runner.run(executablePath, definition.probeArgs, {
+          cwd: repoRoot,
+          timeoutMs: options.probeTimeoutMs ?? DEFAULT_PROBE_TIMEOUT_MS
+        });
+        probesInFlight.set(cacheKey, probePromise);
+        const result = await probePromise.finally(() => probesInFlight.delete(cacheKey));
+        probeCache.set(cacheKey, {
+          expiresAt: currentTime + cacheTtlMs,
+          result
+        });
+        return result;
+      });
+    }
+  };
 }
 
 export async function detectHarnessCodeIntelligence(
@@ -77,35 +153,118 @@ export async function detectHarnessCodeIntelligence(
   repoRoot: string,
   options: DetectCodeIntelligenceOptions = {}
 ): Promise<HarnessCodeIntelligenceStatus> {
-  const indexPaths = await readModuleIndexPaths(fs, repoRoot);
-  const languages: HarnessCodeIntelligenceLanguageStatus[] = [];
+  return createHarnessCodeIntelligenceDetector(fs, options).detect(repoRoot);
+}
 
-  for (const definition of LANGUAGE_DEFINITIONS) {
+async function detectCodeIntelligence(
+  fs: FileSystemAdapter,
+  repoRoot: string,
+  options: DetectCodeIntelligenceOptions,
+  probe: (definition: LanguageDefinition, executablePath: string) => Promise<CommandResult | undefined>
+): Promise<HarnessCodeIntelligenceStatus> {
+  const indexPaths = await readModuleIndexPaths(fs, repoRoot);
+  const pluginServers = await readPluginServers(fs, options.pluginDir ?? VCM_LSP_PLUGIN_DIR);
+  const detectedLanguages = await Promise.all(LANGUAGE_DEFINITIONS.map(async (definition) => {
     const detectedBy = await detectLanguage(fs, repoRoot, indexPaths, definition);
     if (detectedBy.length === 0) {
-      continue;
+      return undefined;
     }
-    languages.push({
+    const pluginReady = pluginServers.get(definition.pluginServerName) === definition.serverCommand;
+    const executablePath = await findExecutable(fs, repoRoot, definition.serverCommand, options);
+    const probeResult = executablePath ? await probe(definition, executablePath) : undefined;
+    const serverFound = Boolean(executablePath);
+    const serverRunnable = probeResult?.exitCode === 0;
+    const state = languageState(pluginReady, serverFound, serverRunnable, Boolean(probeResult));
+    const status: HarnessCodeIntelligenceLanguageStatus = {
       language: definition.language,
       label: definition.label,
       serverCommand: definition.serverCommand,
-      pluginName: definition.pluginName,
-      serverAvailable: await executableExists(fs, repoRoot, definition.serverCommand, options),
+      pluginName: VCM_LSP_PLUGIN_NAME,
+      detected: true,
+      pluginReady,
+      serverFound,
+      serverRunnable,
+      state,
+      error: languageError(state, definition.serverCommand, probeResult),
       detectedBy
-    });
-  }
+    };
+    return status;
+  }));
+  const languages = detectedLanguages.filter(
+    (language): language is HarnessCodeIntelligenceLanguageStatus => language !== undefined
+  );
 
-  const availableCount = languages.filter((language) => language.serverAvailable).length;
+  const readyCount = languages.filter((language) => language.state === "ready").length;
   return {
     state: languages.length === 0
       ? "not_detected"
-      : availableCount === languages.length
-        ? "available"
-        : availableCount === 0
+      : readyCount === languages.length
+        ? "ready"
+        : readyCount === 0
           ? "missing"
           : "partial",
     languages
   };
+}
+
+function languageState(
+  pluginReady: boolean,
+  serverFound: boolean,
+  serverRunnable: boolean,
+  probeCompleted: boolean
+): HarnessCodeIntelligenceLanguageState {
+  if (!pluginReady) {
+    return "plugin_missing";
+  }
+  if (!serverFound) {
+    return "server_missing";
+  }
+  if (!probeCompleted) {
+    return "server_unverified";
+  }
+  return serverRunnable ? "ready" : "server_failed";
+}
+
+function languageError(
+  state: HarnessCodeIntelligenceLanguageState,
+  command: string,
+  probeResult: CommandResult | undefined
+): string | undefined {
+  if (state === "plugin_missing") {
+    return `VCM LSP plugin manifest is missing or does not declare ${command}.`;
+  }
+  if (state === "server_missing") {
+    return `${command} was not found in the VCM backend PATH.`;
+  }
+  if (state === "server_unverified") {
+    return `${command} was found but has not been probed by this runtime.`;
+  }
+  if (state !== "server_failed") {
+    return undefined;
+  }
+  const detail = firstNonEmptyLine(probeResult?.stderr, probeResult?.stdout);
+  return detail
+    ? `${command} failed its startup probe. ${detail}`
+    : `${command} failed its startup probe with exit code ${probeResult?.exitCode ?? 1}.`;
+}
+
+async function readPluginServers(fs: FileSystemAdapter, pluginDir: string): Promise<Map<string, string>> {
+  const manifestPath = pluginDir === VCM_LSP_PLUGIN_DIR
+    ? VCM_LSP_PLUGIN_MANIFEST
+    : path.join(pluginDir, ".claude-plugin", "plugin.json");
+  if (!await fs.pathExists(manifestPath)) {
+    return new Map();
+  }
+  try {
+    const manifest = await fs.readJson<LspPluginManifest>(manifestPath);
+    return new Map(
+      Object.entries(manifest.lspServers ?? {})
+        .filter((entry): entry is [string, { command: string }] => typeof entry[1]?.command === "string")
+        .map(([name, server]) => [name, server.command])
+    );
+  } catch {
+    return new Map();
+  }
 }
 
 async function readModuleIndexPaths(fs: FileSystemAdapter, repoRoot: string): Promise<string[]> {
@@ -142,12 +301,12 @@ async function detectLanguage(
   return Array.from(evidence);
 }
 
-async function executableExists(
+async function findExecutable(
   fs: FileSystemAdapter,
   repoRoot: string,
   command: string,
   options: DetectCodeIntelligenceOptions
-): Promise<boolean> {
+): Promise<string | undefined> {
   const platform = options.platform ?? process.platform;
   const pathEnv = options.pathEnv ?? process.env.PATH ?? "";
   const extensions = platform === "win32"
@@ -158,11 +317,21 @@ async function executableExists(
     for (const extension of extensions) {
       const candidate = path.resolve(directory || repoRoot, `${command}${extension.toLowerCase()}`);
       if (await fs.pathExists(candidate)) {
-        return true;
+        return candidate;
       }
     }
   }
-  return false;
+  return undefined;
+}
+
+function firstNonEmptyLine(...values: Array<string | undefined>): string | undefined {
+  for (const value of values) {
+    const line = value?.split(/\r?\n/).map((part) => part.trim()).find(Boolean);
+    if (line) {
+      return line.length > 300 ? `${line.slice(0, 297)}...` : line;
+    }
+  }
+  return undefined;
 }
 
 function collectPathLikeStrings(value: unknown): string[] {

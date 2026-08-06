@@ -186,13 +186,20 @@ languages and conventions, and subsequent VCM updates preserve them:
 
 Regenerate both after changing module layout, public exports, or HTTP routes.
 
-`code-intelligence-service` derives detected project languages from the
-active task worktree's root manifests and `module-index.json`, then checks
-the backend process `PATH` for the matching language-server executable. It
-does not start a language server or scan the repository recursively. Harness
-status returns the detected languages, server availability, and corresponding
-Claude Code plugin names; Harness Studio renders that backend-owned state. The
-status does not claim that a user-level Claude Code plugin is installed.
+VCM ships the local `vcm-lsp-bridge` Claude Code plugin. Session Service passes
+it through `--plugin-dir` and enables the LSP tool for Architect, Coder, and
+Reviewer sessions on both native Claude and CCR launches. Auxiliary roles do not
+load the plugin.
+
+`code-intelligence-service` derives project languages from the active task
+worktree's root manifests and `module-index.json`. It validates the bundled
+plugin declaration, resolves the matching language-server executable from the
+backend `PATH`, and runs a bounded version probe. Probe results are cached for
+the backend process; detection does not start a persistent language server or
+scan the repository recursively. Harness Studio renders the resulting ready,
+missing, or failed state and the exact backend diagnostic. The project runtime,
+not VCM, owns installation of `rust-analyzer`, `typescript-language-server`,
+`pyright-langserver`, `gopls`, `clangd`, or `jdtls`.
 
 ## Durable Documentation Ownership
 

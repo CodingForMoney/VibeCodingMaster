@@ -235,4 +235,32 @@ describe("createClaudeAdapter", () => {
       display: "claude --agent coder --resume 00000000-0000-4000-8000-000000000003 --model default --permission-mode bypassPermissions"
     });
   });
+
+  it("loads VCM-managed plugins before the selected role", () => {
+    expect(adapter.buildRoleStartCommand(
+      "architect",
+      "claude",
+      "default",
+      undefined,
+      false,
+      "opus",
+      "medium",
+      undefined,
+      undefined,
+      ["/opt/vcm/plugins/vcm-lsp-bridge"]
+    )).toEqual({
+      command: "claude",
+      args: [
+        "--plugin-dir",
+        "/opt/vcm/plugins/vcm-lsp-bridge",
+        "--agent",
+        "architect",
+        "--model",
+        "opus",
+        "--effort",
+        "medium"
+      ],
+      display: "claude --plugin-dir /opt/vcm/plugins/vcm-lsp-bridge --agent architect --model opus --effort medium"
+    });
+  });
 });

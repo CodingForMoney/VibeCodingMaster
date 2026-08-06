@@ -307,6 +307,7 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
   });
   const harnessService = createHarnessService({
     fs,
+    commandRunner: runner,
     git,
     runtime,
     harnessEngineerSessions: sessionService,

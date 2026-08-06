@@ -13,6 +13,7 @@ export interface CommandRunner {
 export interface CommandRunnerOptions {
   cwd?: string;
   env?: NodeJS.ProcessEnv;
+  timeoutMs?: number;
 }
 
 export function createCommandRunner(): CommandRunner {
@@ -22,6 +23,7 @@ export function createCommandRunner(): CommandRunner {
         const result = await execa(command, args, {
           cwd: options.cwd,
           env: options.env,
+          timeout: options.timeoutMs,
           reject: false
         });
 

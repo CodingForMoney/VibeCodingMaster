@@ -27,6 +27,7 @@ import type { ProjectService } from "./project-service.js";
 import { getTaskRuntimeRepoRoot, type TaskService } from "./task-service.js";
 import type { TaskWorkflowService } from "./task-workflow-service.js";
 import type { CcrIntegrationService } from "./ccr-integration-service.js";
+import { roleUsesLsp, VCM_LSP_PLUGIN_DIR } from "./lsp-plugin.js";
 
 export interface SessionService {
   assertModelLaunchReady(model?: SessionModel): Promise<void>;
@@ -234,7 +235,8 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
         model,
         effort,
         modelSettingsOverride,
-        input.appendSystemPrompt
+        input.appendSystemPrompt,
+        roleUsesLsp(role) ? [VCM_LSP_PLUGIN_DIR] : []
       ),
       cwd: taskRepoRoot
     };
@@ -254,7 +256,10 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
         VCM_ROLE: role,
         VCM_SESSION_ID: claudeSessionId || undefined,
         VCM_RUNTIME_SESSION_TOKEN: runtimeSessionToken
-      }, modelEnvironment, buildUsageTelemetryEnvironment(deps.apiUrl, role, model)),
+      }, modelEnvironment, {
+        ...buildUsageTelemetryEnvironment(deps.apiUrl, role, model),
+        ...(roleUsesLsp(role) ? { ENABLE_LSP_TOOL: "true" } : {})
+      }),
       cols: input.cols,
       rows: input.rows
     });

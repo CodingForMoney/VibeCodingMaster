@@ -6,6 +6,7 @@ import {
   CCR_GPT_MODEL_ID,
   CCR_GPT_SESSION_MODEL
 } from "../../../src/shared/types/session.js";
+import { VCM_LSP_PLUGIN_DIR } from "../../../src/backend/services/lsp-plugin.js";
 import { createMockClaudeE2eApp, roleLaunchBody } from "./helpers/e2e-app.js";
 import {
   connectAndCreateTask,
@@ -127,6 +128,8 @@ describe("backend E2E CCR integration", () => {
     const nativeRuntime = env.mockRuntime.getSessionByRole(task.taskSlug, "architect");
     const nativeInput = env.mockRuntime.getCreateInput(nativeRuntime!.id);
     expect(nativeInput.args).toEqual(expect.arrayContaining(["--model", "opus"]));
+    expect(nativeInput.args).toEqual(expect.arrayContaining(["--plugin-dir", VCM_LSP_PLUGIN_DIR]));
+    expect(nativeInput.env.ENABLE_LSP_TOOL).toBe("true");
     expect(nativeInput.args).not.toContain("--settings");
     expect(nativeInput.env.ANTHROPIC_BASE_URL).toBeUndefined();
     expect(nativeInput.env.ANTHROPIC_AUTH_TOKEN).toBeUndefined();
@@ -212,6 +215,15 @@ describe("backend E2E CCR integration", () => {
         CLAUDE_AUTOCOMPACT_PCT_OVERRIDE: String(CCR_GPT_AUTO_COMPACT_PERCENT),
         CLAUDE_CONFIG_DIR: expect.stringContaining("/settings/claude/ccr")
       });
+    }
+
+    const reviewerInput = env.mockRuntime.getCreateInput(launches[0].json<{ id: string }>().id);
+    expect(reviewerInput.args).toEqual(expect.arrayContaining(["--plugin-dir", VCM_LSP_PLUGIN_DIR]));
+    expect(reviewerInput.env.ENABLE_LSP_TOOL).toBe("true");
+    for (const auxiliary of launches.slice(1)) {
+      const auxiliaryInput = env.mockRuntime.getCreateInput(auxiliary.json<{ id: string }>().id);
+      expect(auxiliaryInput.args).not.toContain("--plugin-dir");
+      expect(auxiliaryInput.env.ENABLE_LSP_TOOL).toBeUndefined();
     }
   });
 

@@ -6,7 +6,10 @@ import {
   createHarnessService,
   parseGitStatusPorcelainV1
 } from "../../../src/backend/services/harness-service.js";
-import { detectHarnessCodeIntelligence } from "../../../src/backend/services/code-intelligence-service.js";
+import {
+  createHarnessCodeIntelligenceDetector,
+  detectHarnessCodeIntelligence
+} from "../../../src/backend/services/code-intelligence-service.js";
 import { renderLegacyProjectCodingStandardsTemplate } from "../../../src/backend/templates/harness/project-coding-standards.js";
 import type { RoleSessionRecord, StartRoleSessionRequest } from "../../../src/shared/types/session.js";
 
@@ -271,7 +274,7 @@ describe("createHarnessService", () => {
     expect(await fs.readText("/repo/.claude/settings.json")).toContain('"autoMemoryEnabled": false');
   });
 
-  it("detects indexed project languages and language servers without starting a process", async () => {
+  it("reports code intelligence ready only when the VCM plugin and language server probe are ready", async () => {
     const fs = createMemoryFs();
     await fs.writeJson("/repo/.ai/generated/module-index.json", {
       modules: [{ files: { source: ["src/lib.rs", "ui/app.tsx"] } }]
@@ -279,10 +282,24 @@ describe("createHarnessService", () => {
     await fs.writeText("/repo/Cargo.toml", "[workspace]\n");
     await fs.writeText("/repo/package.json", "{}\n");
     await fs.writeText("/tools/rust-analyzer", "");
+    await fs.writeJson("/plugins/vcm-lsp/.claude-plugin/plugin.json", {
+      lspServers: {
+        "rust-analyzer": { command: "rust-analyzer" },
+        typescript: { command: "typescript-language-server" }
+      }
+    });
 
     const status = await detectHarnessCodeIntelligence(fs, "/repo", {
+      pluginDir: "/plugins/vcm-lsp",
       pathEnv: "/tools",
-      platform: "linux"
+      platform: "linux",
+      runner: {
+        async run(command, args) {
+          expect(command).toBe("/tools/rust-analyzer");
+          expect(args).toEqual(["--version"]);
+          return { stdout: "rust-analyzer 1.0", stderr: "", exitCode: 0 };
+        }
+      }
     });
 
     expect(status.state).toBe("partial");
@@ -290,14 +307,20 @@ describe("createHarnessService", () => {
       expect.objectContaining({
         language: "rust",
         serverCommand: "rust-analyzer",
-        pluginName: "rust-analyzer-lsp",
-        serverAvailable: true
+        pluginName: "vcm-lsp-bridge",
+        pluginReady: true,
+        serverFound: true,
+        serverRunnable: true,
+        state: "ready"
       }),
       expect.objectContaining({
         language: "typescript",
         serverCommand: "typescript-language-server",
-        pluginName: "typescript-lsp",
-        serverAvailable: false
+        pluginName: "vcm-lsp-bridge",
+        pluginReady: true,
+        serverFound: false,
+        serverRunnable: false,
+        state: "server_missing"
       })
     ]);
 
@@ -306,6 +329,46 @@ describe("createHarnessService", () => {
       "rust",
       "typescript"
     ]);
+  });
+
+  it("reports a broken language server and caches the failed startup probe", async () => {
+    const fs = createMemoryFs();
+    await fs.writeText("/repo/Cargo.toml", "[workspace]\n");
+    await fs.writeText("/tools/rust-analyzer", "rustup shim");
+    await fs.writeJson("/plugins/vcm-lsp/.claude-plugin/plugin.json", {
+      lspServers: {
+        "rust-analyzer": { command: "rust-analyzer" }
+      }
+    });
+    let probeCalls = 0;
+    const detector = createHarnessCodeIntelligenceDetector(fs, {
+      pluginDir: "/plugins/vcm-lsp",
+      pathEnv: "/tools",
+      platform: "linux",
+      runner: {
+        async run() {
+          probeCalls += 1;
+          return {
+            stdout: "",
+            stderr: "Unknown binary 'rust-analyzer' in official toolchain",
+            exitCode: 1
+          };
+        }
+      }
+    });
+
+    const first = await detector.detect("/repo");
+    const second = await detector.detect("/repo");
+
+    expect(first.state).toBe("missing");
+    expect(first.languages[0]).toMatchObject({
+      state: "server_failed",
+      serverFound: true,
+      serverRunnable: false,
+      error: expect.stringContaining("Unknown binary 'rust-analyzer'")
+    });
+    expect(second.languages[0]?.state).toBe("server_failed");
+    expect(probeCalls).toBe(1);
   });
 
   it("inserts VCM rules into an existing file without overwriting user content", async () => {
