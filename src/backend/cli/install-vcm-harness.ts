@@ -86,7 +86,8 @@ const VCM_HOOK_DEFINITIONS = [
 
 const AGENT_FRONTMATTER = {
   "project-manager": {
-    description: "User-facing VCM orchestration role for task clarification, role routing, handoffs, acceptance, and PR preparation."
+    description: "User-facing VCM orchestration role for task clarification, role routing, handoffs, acceptance, and PR preparation.",
+    tools: "Read, Grep, Glob, Bash, Edit, Write, Skill"
   },
   architect: {
     description: "VCM architecture role for plans, module boundaries, public contracts, verifiable behavior, and docs sync.",
@@ -99,7 +100,8 @@ const AGENT_FRONTMATTER = {
     skills: ["vcm-code-navigation"]
   },
   tester: {
-    description: "VCM testing role for validation, test adequacy, approved-scope validation, and risk findings."
+    description: "VCM testing role for validation, test adequacy, approved-scope validation, and risk findings.",
+    tools: "Read, Grep, Glob, Bash, Edit, Write, Skill"
   },
   reviewer: {
     description: "VCM independent gate review role for architecture plans, validation adequacy, and code diffs.",
@@ -110,7 +112,8 @@ const AGENT_FRONTMATTER = {
     description: "VCM task-scoped translation tool role for conversation translation, file translation, bootstrap, and memory updates."
   },
   "harness-engineer": {
-    description: "VCM task-scoped harness maintenance role for harness diagnosis, diff proposals, and VCM issue drafts."
+    description: "VCM task-scoped harness maintenance role for harness diagnosis, diff proposals, and VCM issue drafts.",
+    tools: "Read, Grep, Glob, Bash, Edit, Write, Skill"
   },
   "vcm-coder-worker": {
     description: "Bounded VCM implementation worker for assigned modules, files, and VCM:CODE markers from Coder.",
@@ -127,6 +130,11 @@ const REQUIRED_AGENT_DISALLOWED_TOOLS = {
   architect: CODE_ROLE_DISALLOWED_TOOLS,
   coder: CODE_ROLE_DISALLOWED_TOOLS,
   reviewer: REVIEWER_DISALLOWED_TOOLS
+};
+const REQUIRED_AGENT_TOOLS = {
+  "project-manager": ["Skill"],
+  tester: ["Skill"],
+  "harness-engineer": ["Skill"]
 };
 const REQUIRED_AGENT_SKILLS = {
   architect: ["vcm-code-navigation"],
@@ -808,6 +816,9 @@ async function installManagedFile({ projectRoot, definition, dryRun, operations 
   if (definition.memoryBlock) {
     nextContent = ensureVcmMemoryBlock(nextContent);
   }
+  for (const requiredTool of REQUIRED_AGENT_TOOLS[definition.agentName] ?? []) {
+    nextContent = ensureAgentAllowedTool(nextContent, requiredTool);
+  }
   const requiredDisallowedTools = REQUIRED_AGENT_DISALLOWED_TOOLS[definition.agentName];
   if (requiredDisallowedTools) {
     nextContent = ensureAgentDisallowedTools(nextContent, requiredDisallowedTools);
@@ -889,6 +900,42 @@ function ensureAgentDisallowedTools(content, requiredTools) {
     ? withoutAllowedTools.replace(disallowedMatch[0], `disallowedTools: ${disallowedTools}`)
     : withoutAllowedTools.replace(/\r?\n---$/, `\ndisallowedTools: ${disallowedTools}\n---`);
   return content.replace(frontmatterMatch[0], nextFrontmatter);
+}
+
+function ensureAgentAllowedTool(content, requiredTool) {
+  const frontmatterMatch = content.match(/^---\r?\n[\s\S]*?\r?\n---/);
+  if (!frontmatterMatch) {
+    return content;
+  }
+
+  const frontmatter = frontmatterMatch[0];
+  const toolsMatch = frontmatter.match(/^tools:\s*(.*)$/m);
+  if (toolsMatch) {
+    const existing = toolsMatch[1]
+      .split(",")
+      .map((tool) => tool.trim())
+      .filter(Boolean);
+    if (existing.includes(requiredTool)) {
+      return content;
+    }
+    return content.replace(
+      frontmatter,
+      frontmatter.replace(toolsMatch[0], `tools: ${[...existing, requiredTool].join(", ")}`)
+    );
+  }
+
+  const disallowedMatch = frontmatter.match(/^disallowedTools:\s*(.*)$/m);
+  if (!disallowedMatch) {
+    return content;
+  }
+  const disallowedTools = disallowedMatch[1]
+    .split(",")
+    .map((tool) => tool.trim())
+    .filter((tool) => tool && tool !== requiredTool);
+  const nextFrontmatter = disallowedTools.length > 0
+    ? frontmatter.replace(disallowedMatch[0], `disallowedTools: ${disallowedTools.join(", ")}`)
+    : frontmatter.replace(/^disallowedTools:\s*.*\r?\n?/m, "");
+  return content.replace(frontmatter, nextFrontmatter);
 }
 
 function ensureAgentSkill(content, requiredSkill) {

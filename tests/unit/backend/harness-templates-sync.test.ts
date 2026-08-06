@@ -107,6 +107,24 @@ describe("harness templates stay in sync with the script installer", () => {
     expect(status.needsApply).toBe(false);
   }, 30_000);
 
+  it("restores Skill access in existing role frontmatter during script install", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-agent-skill-migration-"));
+    await execFileAsync(process.execPath, [installerPath, tmpRepo]);
+
+    for (const role of ["project-manager", "tester", "harness-engineer"]) {
+      const agentPath = path.join(tmpRepo, `.claude/agents/${role}.md`);
+      const current = await readFile(agentPath, "utf8");
+      await writeFile(agentPath, current.replace(", Skill", ""), "utf8");
+    }
+
+    await execFileAsync(process.execPath, [installerPath, tmpRepo]);
+
+    for (const role of ["project-manager", "tester", "harness-engineer"]) {
+      const updated = await readFile(path.join(tmpRepo, `.claude/agents/${role}.md`), "utf8");
+      expect(updated).toContain("tools: Read, Grep, Glob, Bash, Edit, Write, Skill");
+    }
+  }, 30_000);
+
   it("seeds generated-context tools once and preserves project-owned updates", async () => {
     tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-project-generators-"));
     await execFileAsync(process.execPath, [installerPath, tmpRepo]);

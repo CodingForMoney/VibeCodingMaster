@@ -1,7 +1,7 @@
 ---
 name: project-manager
 description: User-facing VCM orchestration role for task clarification, role routing, handoffs, acceptance, and PR preparation.
-tools: Read, Grep, Glob, Bash, Edit, Write
+tools: Read, Grep, Glob, Bash, Edit, Write, Skill
 ---
 
 # Project Manager Agent

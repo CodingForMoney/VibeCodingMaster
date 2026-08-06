@@ -113,6 +113,7 @@ describe("createHarnessService", () => {
     expect(await fs.readText("/repo/.claude/agents/project-manager.md")).toContain("name: project-manager");
     expect(await fs.readText("/repo/.claude/agents/project-manager.md")).toContain("<!-- VCM:BEGIN version=1 -->");
     const projectManagerAgent = await fs.readText("/repo/.claude/agents/project-manager.md");
+    expect(frontmatterOf(projectManagerAgent)).toContain("tools: Read, Grep, Glob, Bash, Edit, Write, Skill");
     expect(projectManagerAgent).toContain("<VCM-memory>\nNo accumulated project memory yet.\n</VCM-memory>");
     expect(projectManagerAgent).toContain("Use the PM-hub routes allowed by the `vcm-route-message` skill");
     expect(projectManagerAgent).toContain("Use Docs-Only Flow when the accepted task changes Architect-owned project documentation");
@@ -182,6 +183,7 @@ describe("createHarnessService", () => {
     expect(architectAgent).toContain("In Docs-Only Flow, the Architect role result must record the decision");
     expect(architectAgent).toContain("`Decision` must be `synced`, `unchanged`, or `blocked`");
     const testerAgent = await fs.readText("/repo/.claude/agents/tester.md");
+    expect(frontmatterOf(testerAgent)).toContain("tools: Read, Grep, Glob, Bash, Edit, Write, Skill");
     expect(testerAgent).toContain("Own L2/L3/L4 final-validation design, execution, and acceptance evidence");
     expect(testerAgent).toContain("do not replace Tester final validation");
     expect(testerAgent).toContain("### Mandatory L3 End-To-End Coverage");
@@ -267,6 +269,7 @@ describe("createHarnessService", () => {
     expect(translatorAgents).toContain("Do not delegate translation to another CLI, package, API, service, browser, or");
     expect(translatorAgents).toContain("write diagnostics to the assigned report path");
     const harnessEngineerAgent = await fs.readText("/repo/.claude/agents/harness-engineer.md");
+    expect(frontmatterOf(harnessEngineerAgent)).toContain("tools: Read, Grep, Glob, Bash, Edit, Write, Skill");
     expect(harnessEngineerAgent).toContain("name: harness-engineer");
     expect(harnessEngineerAgent).toContain("You are VCM `harness-engineer`");
     expect(harnessEngineerAgent).toContain("Proposal Mode");
@@ -437,6 +440,29 @@ describe("createHarnessService", () => {
     expect(frontmatterOf(updated)).not.toMatch(/^tools:/m);
     expect(frontmatterOf(updated)).toContain("skills:\n  - vcm-code-navigation");
     expect(frontmatterOf(updated)).toContain("model: custom-model");
+  });
+
+  it("restores Skill access for roles that invoke VCM skills", async () => {
+    const fs = createMemoryFs();
+    const service = createHarnessService({ fs });
+    await service.applyHarness("/repo");
+
+    for (const role of ["project-manager", "tester", "harness-engineer"]) {
+      const agentPath = `/repo/.claude/agents/${role}.md`;
+      const current = await fs.readText(agentPath);
+      await fs.writeText(agentPath, current.replace(", Skill", ""));
+    }
+
+    const status = await service.getHarnessStatus("/repo");
+    for (const role of ["project-manager", "tester", "harness-engineer"]) {
+      expect(status.files.find((file) => file.path === `.claude/agents/${role}.md`)?.action).toBe("update");
+    }
+
+    await service.applyHarness("/repo");
+    for (const role of ["project-manager", "tester", "harness-engineer"]) {
+      const updated = await fs.readText(`/repo/.claude/agents/${role}.md`);
+      expect(frontmatterOf(updated)).toContain("tools: Read, Grep, Glob, Bash, Edit, Write, Skill");
+    }
   });
 
   it("inserts VCM ignore rules into an existing .gitignore without overwriting user patterns", async () => {

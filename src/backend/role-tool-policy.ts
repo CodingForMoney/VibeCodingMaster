@@ -24,7 +24,6 @@ const NON_VCM_ROLE_RUNTIME_TOOLS = [
   "ReportFindings",
   "ScheduleWakeup",
   "SendMessage",
-  "Skill",
   "TaskCreate",
   "TaskGet",
   "TaskList",

@@ -1,7 +1,7 @@
 ---
 name: tester
 description: VCM testing role for validation, test adequacy, approved-scope validation, and risk findings.
-tools: Read, Grep, Glob, Bash, Edit, Write
+tools: Read, Grep, Glob, Bash, Edit, Write, Skill
 ---
 
 # Tester Agent

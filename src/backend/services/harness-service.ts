@@ -161,6 +161,7 @@ interface HarnessFileDefinition {
   ownership?: "managed-block" | "whole-file" | "raw-file" | "project-file";
   blankLineBeforeEnd?: boolean;
   memoryBlock?: boolean;
+  requiredTools?: string[];
   requiredDisallowedTools?: string[];
   requiredSkills?: string[];
   defaultContentAfterBlock?: string;
@@ -408,9 +409,11 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
     path: ".claude/agents/harness-engineer.md",
     title: "Harness Engineer Agent",
     memoryBlock: true,
+    requiredTools: ["Skill"],
     frontmatter: renderAgentFrontmatter(
       "harness-engineer",
-      "VCM task-scoped harness maintenance role for harness diagnosis, diff proposals, and VCM issue drafts."
+      "VCM task-scoped harness maintenance role for harness diagnosis, diff proposals, and VCM issue drafts.",
+      { tools: "Read, Grep, Glob, Bash, Edit, Write, Skill" }
     ),
     renderRules: renderHarnessEngineerHarnessRules
   },
@@ -469,9 +472,11 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
     path: ".claude/agents/project-manager.md",
     title: "Project Manager Agent",
     memoryBlock: true,
+    requiredTools: ["Skill"],
     frontmatter: renderAgentFrontmatter(
       "project-manager",
-      "User-facing VCM orchestration role for task clarification, role routing, handoffs, acceptance, and PR preparation."
+      "User-facing VCM orchestration role for task clarification, role routing, handoffs, acceptance, and PR preparation.",
+      { tools: "Read, Grep, Glob, Bash, Edit, Write, Skill" }
     ),
     renderRules: renderProjectManagerHarnessRules
   },
@@ -509,9 +514,11 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
     path: ".claude/agents/tester.md",
     title: "Tester Agent",
     memoryBlock: true,
+    requiredTools: ["Skill"],
     frontmatter: renderAgentFrontmatter(
       "tester",
-      "VCM testing role for validation, test adequacy, approved-scope validation, and risk findings."
+      "VCM testing role for validation, test adequacy, approved-scope validation, and risk findings.",
+      { tools: "Read, Grep, Glob, Bash, Edit, Write, Skill" }
     ),
     renderRules: renderTesterHarnessRules
   }
@@ -1813,9 +1820,47 @@ function ensureAgentDisallowedTools(content: string, requiredTools: string[] | u
   return content.replace(frontmatterMatch[0], nextFrontmatter);
 }
 
+function ensureAgentAllowedTool(content: string, requiredTool: string): string {
+  const frontmatterMatch = content.match(/^---\r?\n[\s\S]*?\r?\n---/);
+  if (!frontmatterMatch) {
+    return content;
+  }
+
+  const frontmatter = frontmatterMatch[0];
+  const toolsMatch = frontmatter.match(/^tools:\s*(.*)$/m);
+  if (toolsMatch) {
+    const existing = toolsMatch[1]
+      .split(",")
+      .map((tool) => tool.trim())
+      .filter(Boolean);
+    if (existing.includes(requiredTool)) {
+      return content;
+    }
+    const tools = [...existing, requiredTool].join(", ");
+    return content.replace(frontmatter, frontmatter.replace(toolsMatch[0], `tools: ${tools}`));
+  }
+
+  const disallowedMatch = frontmatter.match(/^disallowedTools:\s*(.*)$/m);
+  if (!disallowedMatch) {
+    return content;
+  }
+  const disallowedTools = disallowedMatch[1]
+    .split(",")
+    .map((tool) => tool.trim())
+    .filter((tool) => tool && tool !== requiredTool);
+  const nextFrontmatter = disallowedTools.length > 0
+    ? frontmatter.replace(disallowedMatch[0], `disallowedTools: ${disallowedTools.join(", ")}`)
+    : frontmatter.replace(/^disallowedTools:\s*.*\r?\n?/m, "");
+  return content.replace(frontmatter, nextFrontmatter);
+}
+
 function normalizeAgentFrontmatter(content: string, definition: HarnessFileDefinition): string {
-  const toolsUpdated = ensureAgentDisallowedTools(content, definition.requiredDisallowedTools);
-  return (definition.requiredSkills ?? []).reduce(ensureAgentSkill, toolsUpdated);
+  const allowedToolsUpdated = (definition.requiredTools ?? []).reduce(ensureAgentAllowedTool, content);
+  const disallowedToolsUpdated = ensureAgentDisallowedTools(
+    allowedToolsUpdated,
+    definition.requiredDisallowedTools
+  );
+  return (definition.requiredSkills ?? []).reduce(ensureAgentSkill, disallowedToolsUpdated);
 }
 
 function ensureAgentSkill(content: string, requiredSkill: string): string {

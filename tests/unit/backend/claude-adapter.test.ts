@@ -264,6 +264,7 @@ describe("createClaudeAdapter", () => {
   });
 
   it("loads VCM-managed plugins before the selected role", () => {
+    expect(CODE_ROLE_RUNTIME_DISALLOWED_TOOLS).not.toContain("Skill");
     expect(adapter.buildRoleStartCommand(
       "architect",
       "claude",
@@ -294,6 +295,7 @@ describe("createClaudeAdapter", () => {
   });
 
   it("preserves the Reviewer no-edit boundary while exposing dynamic LSP tools", () => {
+    expect(REVIEWER_RUNTIME_DISALLOWED_TOOLS).not.toContain("Skill");
     const command = adapter.buildRoleStartCommand(
       "reviewer",
       "claude",

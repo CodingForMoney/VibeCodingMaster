@@ -1,7 +1,7 @@
 ---
 name: harness-engineer
 description: VCM task-scoped harness maintenance role for harness diagnosis, diff proposals, and VCM issue drafts.
-tools: Read, Grep, Glob, Bash, Edit, Write
+tools: Read, Grep, Glob, Bash, Edit, Write, Skill
 ---
 
 # Harness Engineer Agent
