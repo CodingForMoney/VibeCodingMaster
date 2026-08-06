@@ -12,7 +12,7 @@ planning-session memory candidate and provides an exact path.
 
 - Treat every `<VCM-memory>` block as read-only. This skill creates a proposal;
   it never edits active memory.
-- Write only to the exact path assigned by VCM. It must be either a role draft
+- Submit only to the exact path assigned by VCM. It must be either a role draft
   under `.ai/vcm/memory-review/runs/<run-id>/drafts/` or a planning candidate
   under `.ai/vcm/memory-review/candidates/` in the active task worktree.
 - If VCM did not provide a path, do not create a proposal.
@@ -85,4 +85,6 @@ Evidence: <task artifact, code, or durable documentation>
 ```
 
 Use `Decision: no-change` when the completed task produced no qualifying
-memory. End the turn after writing the assigned draft.
+memory. Write the proposal to a candidate outside `.ai/vcm`, submit it with
+`.ai/tools/vcm-artifact memory-proposal --file <candidate> --path <assigned-path> --mode final`,
+and end the turn only after VCM accepts it.

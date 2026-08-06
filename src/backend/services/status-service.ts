@@ -72,8 +72,13 @@ function degradedArtifactSummary(handoffDir: string): ArtifactSummary {
       ) as Record<DispatchableRole, string>,
       messageRoutePaths: {},
       architectureBriefPath: `${handoffDir}/architecture-brief.md`,
+      architectureEvidencePath: `${handoffDir}/architecture-evidence.md`,
+      planningProgressPath: `${handoffDir}/planning-progress.md`,
       architecturePlanPath: `${handoffDir}/architecture-plan.md`,
       knownIssuesPath: `${handoffDir}/known-issues.md`,
+      coderCompletionPath: `${handoffDir}/coder-completion.md`,
+      architectDebugPath: `${handoffDir}/architect-debug.md`,
+      architectureDiagnosisPath: `${handoffDir}/architecture-diagnosis.md`,
       testReportPath: `${handoffDir}/test-report.md`,
       docsSyncReportPath: `${handoffDir}/docs-sync-report.md`,
       finalAcceptancePath: `${handoffDir}/final-acceptance.md`

@@ -1224,12 +1224,12 @@ function buildRoleDraftPrompt(
           "Review that candidate against final task evidence. Carry forward only facts that remain verified after implementation and testing."
         ]
       : []),
-    `Write the draft to: ${resolveRepoPath(taskRepoRoot, draft.path)}`
+    `Assigned proposal path: ${resolveRepoPath(taskRepoRoot, draft.path)}`
   ];
   return [
     ...prompt,
     "",
-    "End the turn after writing the draft."
+    "End the turn after VCM accepts the proposal."
   ].join("\n");
 }
 

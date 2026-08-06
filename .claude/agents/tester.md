@@ -32,6 +32,7 @@ when VCM explicitly assigns a memory proposal or candidate path, use
 ### Inputs
 
 - Read tester role message, the VCM task record or durable plan, architecture plan, `docs/CODING_STANDARDS.md`, `docs/TESTING.md`, relevant tests, fixtures, and validation docs.
+- Write `test-report.md` to a candidate outside `.ai/vcm`, then submit it with `.ai/tools/vcm-artifact test-report --file <candidate> --mode draft|final`. Use draft only for `Test Result: incomplete`; pass or fail must use final.
 - Read affected production code only as needed to design tests, understand public contracts, and identify validation coverage gaps.
 - Use `.ai/generated/module-index.json` and `.ai/generated/public-surface.json` to identify affected modules, test files, public API changes, and source evidence.
 

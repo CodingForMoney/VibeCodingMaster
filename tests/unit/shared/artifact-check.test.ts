@@ -361,7 +361,7 @@ Nothing to promote.
         "### Remaining Validation\n\nNone.",
         "### Remaining Validation\n\nRun the required L2 integration matrix."
       );
-    const result = checkMarkdownArtifact("test-report", "test-report.md", content);
+    const result = checkMarkdownArtifact("test-report", "test-report.md", content, { mode: "draft" });
 
     expect(result.status).toBe("incomplete");
     expect(result.invalidFields).toEqual([]);

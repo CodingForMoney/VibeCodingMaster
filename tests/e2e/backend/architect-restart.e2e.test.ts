@@ -13,6 +13,7 @@ import {
   updateGateSettings,
   updatePreferences,
   waitFor,
+  writeCompleteArchitecturePlan,
   writeConfirmedArchitectureBrief
 } from "./helpers/e2e-actions.js";
 import type { MockClaudePromptContext } from "./helpers/mock-claude-runtime.js";
@@ -509,11 +510,7 @@ async function startRole(
 }
 
 async function writeCompletePlan(taskRepoRoot: string): Promise<void> {
-  await fs.writeFile(
-    path.join(taskRepoRoot, ".ai/vcm/handoffs/architecture-plan.md"),
-    "Planning Result: complete\n\n# Architecture Plan\n\nComplete E2E plan.\n",
-    "utf8"
-  );
+  await writeCompleteArchitecturePlan(taskRepoRoot, "architect-restart", "Complete E2E plan.");
 }
 
 async function writeArchitectRoute(

@@ -229,6 +229,30 @@ Durable prose owns current architecture, contract meaning, validation strategy,
 active plans, and unresolved limitations. Git, PRs, and task handoffs own
 history.
 
+## Managed Workflow Artifact Ownership
+
+Role-authored workflow Markdown is accepted only through
+`.ai/tools/vcm-artifact`. The role writes a candidate outside `.ai/vcm`; the
+tool submits its content, artifact kind, draft/final mode, role identity, and
+runtime Session token to the backend. Static handoffs use the registry in
+`src/shared/validation/artifact-registry.ts`; dynamic reports use their assigned
+repository-relative path.
+
+`artifact-service` verifies the active artifact owner, required heading order,
+strict field values, lifecycle state, and dynamic path contract before writing.
+An accepted submission atomically replaces the authoritative artifact. A
+rejected submission leaves the previous artifact unchanged and returns exact
+validation errors to the role. Draft mode permits explicitly incomplete
+lifecycle values; final mode requires a terminal, placeholder-free artifact.
+
+The shared PreToolUse guard blocks role attempts to write managed workflow
+Markdown directly through Bash, Write, or Edit. Route messages, Coder Worker
+reports, request-scoped Gate reports, memory proposals, Harness Feedback, and
+Task Harness Retrospective reports use the same submission boundary. Workflow
+consumers still validate the accepted artifact before using it, so an invalid
+or stale file cannot advance a Gate, Final Acceptance, memory review, or
+retrospective flow.
+
 ## Auto Memory Ownership
 
 Harness Engineer owns the reviewed content of shared memory in the root

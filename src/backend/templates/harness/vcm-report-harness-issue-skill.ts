@@ -5,7 +5,7 @@ This skill records feedback only. It must not call Harness Engineer directly and
 
 ## Write Location
 
-Write one markdown file under:
+Submit one markdown file under:
 
 \`\`\`
 \${VCM_BASE_REPO_ROOT}/.ai/vcm/harness-feedback/pending/
@@ -47,5 +47,6 @@ Use this structure:
 - Include enough evidence for Harness Engineer to verify the issue.
 - Do not include secrets, private logs, or unnecessary source content.
 - Continue the current VCM role work after writing the report unless the original task is blocked.
+- Write the report to a candidate outside \`.ai/vcm\`, then run \`.ai/tools/vcm-artifact harness-feedback --file <candidate> --path <feedback-path> --mode final\`.
 `;
 }

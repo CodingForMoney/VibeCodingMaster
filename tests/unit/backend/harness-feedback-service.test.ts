@@ -153,7 +153,20 @@ describe("harness-feedback-service", () => {
 
     await writeFile(
       path.join(tmpRepo, ".ai/vcm/harness-feedback/task-retrospectives/demo-task.md"),
-      "# Task Harness Retrospective\n\nComplete.\n",
+      `# Task Harness Retrospective: demo-task
+
+## Findings
+None.
+
+## Feedback Dispositions
+None.
+
+## Recommended Harness Changes
+None.
+
+## VCM Issue Drafts
+None.
+`,
       "utf8"
     );
     await expect(service.handleTaskRetrospectiveHook(tmpRepo, {
@@ -281,7 +294,7 @@ describe("harness-feedback-service", () => {
     ));
     expect(failedMarker).toMatchObject({
       status: "failed",
-      error: "Harness Engineer did not write the required Task Harness Retrospective report."
+      error: "Harness Engineer did not write a valid Task Harness Retrospective report: Report is empty."
     });
 
     await expect(service.startTaskRetrospective(tmpRepo, {

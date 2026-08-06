@@ -19,10 +19,10 @@ ${artifactRefs}
 
 Instructions:
 - Read the message and execute only within this VCM task.
-- If you write or update a VCM route file, use the vcm-route-message skill.
-- If PM sends a VCM message after handling this, write or update .ai/vcm/handoffs/messages/project-manager-<target-role>.md.
-- If a non-PM role sends a VCM message after handling this, reply only to project-manager with .ai/vcm/handoffs/messages/<your-role>-project-manager.md.
-- After writing a route file, end this Claude Code turn immediately.
+- Submit every VCM route file through the vcm-route-message skill and .ai/tools/vcm-artifact.
+- If PM sends a VCM message after handling this, submit .ai/vcm/handoffs/messages/project-manager-<target-role>.md.
+- If a non-PM role sends a VCM message after handling this, submit only .ai/vcm/handoffs/messages/<your-role>-project-manager.md.
+- After VCM accepts a route file, end this Claude Code turn immediately.
 - Do not poll, loop, or wait for another role in this turn. VCM scans route files after your Stop hook and delivers later replies in a new turn.
 [/VCM MESSAGE]
 `;

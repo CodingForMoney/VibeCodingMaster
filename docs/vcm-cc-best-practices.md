@@ -517,6 +517,15 @@ checkpoint without a role route, PM uses `.ai/tools/update-task-state`. This
 declaration supports recovery and display only; normal flow rules and artifacts
 remain authoritative.
 
+Role-authored workflow Markdown must be submitted through
+`.ai/tools/vcm-artifact`. Roles write candidates outside `.ai/vcm`; VCM checks
+the artifact owner, required structure, strict values, lifecycle state, and
+assigned path before atomically replacing the authoritative file. Draft mode is
+for valid in-progress state, while final mode requires a terminal artifact.
+Validation failure preserves the previous accepted file and returns the exact
+errors to the role. The PreToolUse guard blocks direct Bash, Write, or Edit
+updates to managed workflow Markdown.
+
 ## 12. Gate Review
 
 Gate Review gates are globally configured in VCM app settings and default off:

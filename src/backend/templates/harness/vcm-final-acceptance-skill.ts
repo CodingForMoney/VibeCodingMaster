@@ -81,10 +81,10 @@ Do not accept when required role evidence is missing, required Gate Review evide
 
 ## Output
 
-Write or update:
+Write a complete candidate outside \`.ai/vcm\`, then submit it:
 
 \`\`\`text
-.ai/vcm/handoffs/final-acceptance.md
+.ai/tools/vcm-artifact final-acceptance --file <candidate> --mode final
 \`\`\`
 
 Use this structure:

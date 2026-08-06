@@ -53,6 +53,11 @@ Routine technical architecture decisions remain Architect-owned; do not turn ord
 
 ## Artifact
 
+Write brief and evidence candidates outside `.ai/vcm`. Submit updates with
+`.ai/tools/vcm-artifact architecture-brief --file <candidate> --mode draft|final`
+and `.ai/tools/vcm-artifact architecture-evidence --file <candidate> --mode draft|final`.
+Use final only for confirmed brief and complete evidence.
+
 Maintain exactly this structure:
 
 ```md

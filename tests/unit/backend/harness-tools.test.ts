@@ -32,6 +32,7 @@ async function installHarnessTools(repoRoot: string) {
   await cp(path.join(appRoot, "scripts/harness-tools/generate-module-index"), path.join(toolsRoot, "generate-module-index"));
   await cp(path.join(appRoot, "scripts/harness-tools/generate-public-surface"), path.join(toolsRoot, "generate-public-surface"));
   await cp(path.join(appRoot, "scripts/harness-tools/run-long-check"), path.join(toolsRoot, "run-long-check"));
+  await cp(path.join(appRoot, "scripts/harness-tools/vcm-artifact"), path.join(toolsRoot, "vcm-artifact"));
   await cp(path.join(appRoot, "scripts/harness-tools/watch-job"), path.join(toolsRoot, "watch-job"));
 }
 

@@ -150,7 +150,7 @@ For each pending feedback:
 Process every assigned feedback before completing the retrospective. A
 feedback item is processed even when it is rejected or already covered.
 
-Write the complete retrospective report before deleting any feedback file.
+Write the complete retrospective report to a candidate outside `.ai/vcm` and submit it with `.ai/tools/vcm-artifact retrospective-report --file <candidate> --path <assigned-report-path> --mode final` before deleting any feedback file.
 After the report contains a disposition for every assigned feedback, delete
 those feedback files from `.ai/vcm/harness-feedback/pending/`.
 
@@ -176,6 +176,23 @@ Do not edit harness files during retrospective analysis. Write a concise analysi
 - recommended harness change, or reason no harness change is needed
 - affected roles, skills, tools, or docs
 - pending feedback path and disposition
+
+Use this report structure:
+
+```md
+# Task Harness Retrospective: <task>
+
+## Findings
+
+## Feedback Dispositions
+
+## Recommended Harness Changes
+
+## VCM Issue Drafts
+
+<!-- Include Memory Review only when VCM assigns Auto Memory Review. -->
+## Memory Review
+```
 
 ## VCM Feedback
 

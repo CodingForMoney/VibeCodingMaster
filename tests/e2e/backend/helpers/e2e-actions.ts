@@ -98,6 +98,14 @@ export async function writeConfirmedArchitectureBrief(taskRepoRoot: string, task
     "",
     "Mock role flow.",
     "",
+    "## Existing Assumptions",
+    "",
+    "The fixture preserves the current mock repository contract.",
+    "",
+    "## Related Class Inventories",
+    "",
+    "The fixture has one complete behavior class.",
+    "",
     "## External Boundaries",
     "",
     "None.",
@@ -111,6 +119,107 @@ export async function writeConfirmedArchitectureBrief(taskRepoRoot: string, task
     "E2E fixture inspection.",
     ""
   ].join("\n"), "utf8");
+}
+
+export async function writeCompleteArchitecturePlan(
+  taskRepoRoot: string,
+  taskSlug: string,
+  detail = "Implement the complete E2E behavior."
+): Promise<void> {
+  const sections = [
+    "Accepted Scope",
+    "Current Code Reality",
+    "Planning Boundary",
+    "Code Reading Evidence",
+    "Existing Behavior Trace",
+    "Code / Docs Conflicts",
+    "Architecture Decision",
+    "Changed Behavior Flow",
+    "Ownership",
+    "Data Flow",
+    "Lifecycle",
+    "Boundaries",
+    "Invariants",
+    "Failure Model",
+    "Decision Rationale",
+    "Module/File Plan",
+    "Public Surface Impact",
+    "Scaffold Manifest",
+    "Scaffold Build Evidence",
+    "Tester Coverage Hints",
+    "Docs Impact",
+    "Known Risks",
+    "Coder Handoff Notes"
+  ];
+  await fs.writeFile(
+    path.join(taskRepoRoot, ".ai/vcm/handoffs/architecture-plan.md"),
+    [
+      `# Architecture Plan: ${taskSlug}`,
+      "",
+      "Planning Result: complete",
+      "",
+      ...sections.flatMap((section) => [`## ${section}`, "", detail, ""])
+    ].join("\n"),
+    "utf8"
+  );
+}
+
+export async function writeReadyCoderCompletion(
+  taskRepoRoot: string,
+  taskSlug: string,
+  changedFiles = "feature.txt"
+): Promise<void> {
+  const sections: Array<[string, string]> = [
+    ["Scaffold Completion", "All assigned scaffold items completed."],
+    ["Changed Files", changedFiles],
+    ["Private Helpers Added", "None."],
+    ["Manifest Deviations", "None."],
+    ["Generated Context", "Current."],
+    ["Baseline Tests Added Or Updated", "Fixture validation covers the changed behavior."],
+    ["L0/L1 Validation", "Passed."],
+    ["Worker Results", "None."],
+    ["Objective Failures", "None."]
+  ];
+  await fs.writeFile(
+    path.join(taskRepoRoot, ".ai/vcm/handoffs/coder-completion.md"),
+    [
+      `# Coder Completion: ${taskSlug}`,
+      "",
+      "Decision: ready_for_review",
+      "",
+      ...sections.flatMap(([section, value]) => [`## ${section}`, "", value, ""])
+    ].join("\n"),
+    "utf8"
+  );
+}
+
+export async function writeCompletedArchitectDebug(
+  taskRepoRoot: string,
+  taskSlug: string
+): Promise<void> {
+  const sections = [
+    "PM-Routed Failure",
+    "Confirmed Root Cause",
+    "Implementation",
+    "Changed Files And Public Surface",
+    "Baseline Tests",
+    "Diagnostic And L0/L1 Validation",
+    "L2/L3 Validation",
+    "Generated Context",
+    "Remaining Failure Evidence",
+    "Final Disposition"
+  ];
+  await fs.writeFile(
+    path.join(taskRepoRoot, ".ai/vcm/handoffs/architect-debug.md"),
+    [
+      `# Architect Debug: ${taskSlug}`,
+      "",
+      "Status: completed",
+      "",
+      ...sections.flatMap((section) => [`## ${section}`, "", "Completed E2E debug evidence.", ""])
+    ].join("\n"),
+    "utf8"
+  );
 }
 
 export async function scheduleArchitectRestart(app: FastifyInstance, taskSlug: string): Promise<{

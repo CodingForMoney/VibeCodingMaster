@@ -192,7 +192,8 @@ export async function createServer(deps: ServerDeps, options: CreateServerOption
   registerArtifactRoutes(app, {
     projectService: deps.projectService,
     taskService: deps.taskService,
-    artifactService: deps.artifactService
+    artifactService: deps.artifactService,
+    sessionService: deps.sessionService
   });
   registerMessageRoutes(app, {
     projectService: deps.projectService,

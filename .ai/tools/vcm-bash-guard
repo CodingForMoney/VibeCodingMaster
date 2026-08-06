@@ -19,6 +19,11 @@ SKILL_HINT = (
     "`.ai/tools/watch-job <job-id>` in the same turn, repeating watch-job "
     "until it reports a terminal result."
 )
+ARTIFACT_HINT = (
+    "VCM-managed Markdown cannot be written directly. Write a candidate outside "
+    ".ai/vcm, then run .ai/tools/vcm-artifact <kind> --file <candidate> "
+    "--mode <draft|final>."
+)
 MAX_NESTED_SHELL_DEPTH = 3
 QUOTED = re.compile(r"'([^']*)'|\"([^\"]*)\"")
 SHELL_DASH_C = re.compile(r"(?:^|[\s;&|(])(?:sh|bash|zsh|dash|ksh)\s+(?:-\w+\s+)*-\w*c\w*(?:\s|$)")
@@ -36,6 +41,20 @@ RUN_LONG_CHECK_SHELL_STRING = re.compile(
     r"(?:-\w+\s+)*-\w*c\w*(?:\s|$)"
 )
 COMMAND_SUBSTITUTION = re.compile(r"\$\(([^()]*)\)|`([^`]*)`")
+MANAGED_ARTIFACT_PATH = re.compile(
+    r"(?:^|[\s/\\])\.ai[/\\]vcm[/\\](?:"
+    r"handoffs[/\\].*\.md|"
+    r"gate-reviews[/\\]requests[/\\].*\.report\.md|"
+    r"memory-review[/\\].*\.md|"
+    r"coder-workers[/\\]reports[/\\].*\.md|"
+    r"harness-feedback[/\\](?:pending|task-retrospectives)[/\\].*\.md"
+    r")"
+)
+SHELL_WRITE = re.compile(
+    r"(?:>>?|\btee\b|\brm\b|\bmv\b|\bcp\b|"
+    r"\bsed\b[^\n]*\s-i\b|\bperl\b[^\n]*\s-i\b|"
+    r"\bpython\d*\b|\bnode\b)"
+)
 def strip_quoted(command: str) -> str:
     return QUOTED.sub(" ", command)
 
@@ -116,6 +135,13 @@ def guard_reasons(tool_input: dict) -> list[str]:
     command = command if isinstance(command, str) else ""
 
     reasons.extend(scan_shell_command(command))
+    unquoted_path_command = command.replace('"', "").replace("'", "")
+    if (
+        MANAGED_ARTIFACT_PATH.search(unquoted_path_command)
+        and "vcm-artifact" not in command
+        and SHELL_WRITE.search(strip_quoted(command))
+    ):
+        reasons.append("direct Bash writes to VCM-managed Markdown are forbidden")
     return list(dict.fromkeys(reasons))
 
 
@@ -130,6 +156,15 @@ def main() -> int:
         tool_input = payload.get("tool_input")
         tool_input = tool_input if isinstance(tool_input, dict) else {}
         reasons = guard_reasons(tool_input)
+    elif tool_name in ("Write", "Edit"):
+        tool_input = payload.get("tool_input")
+        tool_input = tool_input if isinstance(tool_input, dict) else {}
+        file_path = tool_input.get("file_path") or tool_input.get("path")
+        reasons = (
+            ["direct Write/Edit of VCM-managed Markdown is forbidden"]
+            if isinstance(file_path, str) and MANAGED_ARTIFACT_PATH.search(file_path)
+            else []
+        )
     else:
         return 0
     if not reasons:
@@ -142,7 +177,8 @@ def main() -> int:
                     "hookEventName": "PreToolUse",
                     "permissionDecision": "deny",
                     "permissionDecisionReason": (
-                        "VCM denied this tool call (" + "; ".join(reasons) + "). " + SKILL_HINT
+                        "VCM denied this tool call (" + "; ".join(reasons) + "). "
+                        + (ARTIFACT_HINT if any("Markdown" in reason for reason in reasons) else SKILL_HINT)
                     ),
                 }
             }

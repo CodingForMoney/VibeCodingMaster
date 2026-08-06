@@ -338,7 +338,7 @@ evidence.
 
 ## Output
 
-For an active VCM Gate Review request, write only the assigned report under \`.ai/vcm/gate-reviews/\`. Start with:
+For an active VCM Gate Review request, write only the assigned report under \`.ai/vcm/gate-reviews/\`. Write a candidate outside \`.ai/vcm\`, then submit it with \`.ai/tools/vcm-artifact gate-review-report --file <candidate> --path <assigned-report-path> --mode final\`. Start with:
 
 \`\`\`text
 Gate: <gate>

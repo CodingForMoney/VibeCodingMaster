@@ -16,6 +16,7 @@ import type {
   AutoMemoryService,
   TaskRetrospectiveMemoryReviewContext
 } from "./auto-memory-service.js";
+import { getRetrospectiveReportErrors } from "./artifact-service.js";
 import type { SessionService } from "./session-service.js";
 
 export interface HarnessFeedbackService {
@@ -226,8 +227,11 @@ export function createHarnessFeedbackService(deps: HarnessFeedbackServiceDeps): 
       return true;
     }
     const reportPath = resolveRepoPath(repoRoot, marker.analysisPath);
-    const reportReady = await deps.fs.pathExists(reportPath)
-      && Boolean((await deps.fs.readText(reportPath)).trim());
+    const reportContent = await deps.fs.pathExists(reportPath)
+      ? await deps.fs.readText(reportPath)
+      : "";
+    const reportErrors = reportContent.trim() ? getRetrospectiveReportErrors(reportContent) : ["Report is empty."];
+    const reportReady = reportErrors.length === 0;
     if (!reportReady || (marker.memoryRunId && !input.memoryReviewSucceeded)) {
       await persistTaskRetrospectiveMarker(repoRoot, {
         ...marker,
@@ -235,7 +239,7 @@ export function createHarnessFeedbackService(deps: HarnessFeedbackServiceDeps): 
         failedAt: timestamp,
         updatedAt: timestamp,
         error: !reportReady
-          ? "Harness Engineer did not write the required Task Harness Retrospective report."
+          ? `Harness Engineer did not write a valid Task Harness Retrospective report: ${reportErrors.join(" ")}`
           : "Task Harness Retrospective memory review failed."
       });
       return true;
@@ -350,6 +354,8 @@ export function createHarnessFeedbackService(deps: HarnessFeedbackServiceDeps): 
             "Process every listed feedback inside this retrospective. Record every disposition in the retrospective report, then delete the processed feedback files before ending the turn."
           ]
         : []),
+      "",
+      "The report must contain: # Task Harness Retrospective: <task>, ## Findings, ## Feedback Dispositions, ## Recommended Harness Changes, and ## VCM Issue Drafts.",
       ...(memoryReview
         ? [
             "",
@@ -411,7 +417,8 @@ export function createHarnessFeedbackService(deps: HarnessFeedbackServiceDeps): 
         : []),
       "",
       `Write the analysis to Result Path: ${resolveRepoPath(repoRoot, analysisPath)}`,
-      "End your turn after writing the result."
+      `Submit with: .ai/tools/vcm-artifact retrospective-report --file <candidate> --path ${analysisPath} --mode final`,
+      "End your turn after VCM accepts the result."
     ].join("\n");
   }
 

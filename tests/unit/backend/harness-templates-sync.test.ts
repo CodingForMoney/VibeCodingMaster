@@ -26,6 +26,7 @@ const EXACT_EXAMPLE_HARNESS_PATHS = [
   ".ai/tools/update-task-state",
   ".ai/tools/check-scaffold-ledger",
   ".ai/tools/run-long-check",
+  ".ai/tools/vcm-artifact",
   ".ai/tools/vcm-bash-guard",
   ".ai/tools/watch-job",
   ".claude/agents/architect.md",

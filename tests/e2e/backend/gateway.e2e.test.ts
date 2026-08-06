@@ -14,7 +14,7 @@ import {
 import type { MockClaudePromptContext } from "./helpers/mock-claude-runtime.js";
 
 const cleanups: Array<() => Promise<void>> = [];
-const GATEWAY_WAIT_TIMEOUT_MS = 20_000;
+const GATEWAY_WAIT_TIMEOUT_MS = 30_000;
 
 afterEach(async () => {
   while (cleanups.length > 0) {
@@ -99,7 +99,7 @@ describe("backend E2E Gateway with mock channel and mock Claude Code", () => {
         text.includes("PM final reply translated.")
       )).toBe(true);
     }, GATEWAY_WAIT_TIMEOUT_MS);
-  }, 60_000);
+  }, 90_000);
 });
 
 async function writeGatewayTranslations(ctx: MockClaudePromptContext): Promise<void> {

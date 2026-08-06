@@ -48,6 +48,7 @@ when VCM explicitly assigns a memory proposal or candidate path, use
 ### Work Persistence
 
 - Treat Architect artifacts, not Session memory, as continuation state.
+- Write each owned artifact to a candidate outside `.ai/vcm`, then submit it with `.ai/tools/vcm-artifact <artifact-kind> --file <candidate> --mode draft|final`. Only an accepted submission updates the authoritative artifact.
 - Write each verified code fact, confirmed user decision, architecture decision, root cause, and validation result to its owning artifact as soon as it becomes an input to later work.
 - Before ending any turn, ensure all information required to continue the current Architect work is present in the current artifacts.
 - Keep artifacts current and self-contained. Replace superseded content instead of appending conversation history or investigation logs.

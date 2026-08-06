@@ -11,7 +11,9 @@ import {
   startRole,
   updateGateSettings,
   waitFor,
-  writeConfirmedArchitectureBrief
+  writeCompleteArchitecturePlan,
+  writeConfirmedArchitectureBrief,
+  writeReadyCoderCompletion
 } from "./helpers/e2e-actions.js";
 import type { GateReviewGate } from "../../../src/shared/types/gate-review.js";
 import type { MockClaudePromptContext } from "./helpers/mock-claude-runtime.js";
@@ -33,11 +35,7 @@ describe("backend E2E Gate Review with mock Claude Code", () => {
     const task = await connectAndCreateTask(env.app, repo, "cancel-gate-review");
     await startRole(env.app, task.taskSlug, "project-manager");
     await writeConfirmedArchitectureBrief(task.worktreePath, task.taskSlug);
-    await fs.writeFile(
-      path.join(task.worktreePath, ".ai/vcm/handoffs/architecture-plan.md"),
-      "Planning Result: complete\n\n# Architecture Plan\n\nInitial plan.\n",
-      "utf8"
-    );
+    await writeCompleteArchitecturePlan(task.worktreePath, task.taskSlug, "Initial plan.");
     await updateGateSettings(env.app, task.taskSlug, {
       "architecture-plan": true,
       "validation-adequacy": false,
@@ -142,7 +140,7 @@ describe("backend E2E Gate Review with mock Claude Code", () => {
 
     const unconfirmedArchitecture = await requestGateReview(env.app, task.taskSlug, "architecture-plan");
     expect(unconfirmedArchitecture.status).toBe("failed_to_start");
-    expect(unconfirmedArchitecture.message).toContain("architecture-brief.md is incomplete");
+    expect(unconfirmedArchitecture.message).toContain("architecture-brief.md is not confirmed");
     await writeConfirmedArchitectureBrief(task.worktreePath, task.taskSlug);
 
     const evidencePath = path.join(task.worktreePath, ".ai/vcm/handoffs/architecture-evidence.md");
@@ -150,7 +148,8 @@ describe("backend E2E Gate Review with mock Claude Code", () => {
     await fs.rm(evidencePath);
     const missingEvidenceArchitecture = await requestGateReview(env.app, task.taskSlug, "architecture-plan");
     expect(missingEvidenceArchitecture.status).toBe("failed_to_start");
-    expect(missingEvidenceArchitecture.message).toContain("architecture-evidence.md is missing");
+    expect(missingEvidenceArchitecture.message).toContain("architecture-evidence.md is incomplete");
+    expect(missingEvidenceArchitecture.message).toContain("Artifact is missing");
     await fs.writeFile(evidencePath, completeEvidence, "utf8");
 
     await fs.writeFile(path.join(task.worktreePath, ".ai/vcm/handoffs/architecture-plan.md"), "", "utf8");
@@ -158,11 +157,7 @@ describe("backend E2E Gate Review with mock Claude Code", () => {
     expect(emptyArchitecture.status).toBe("not_required");
     expect(emptyArchitecture.message).toContain(".ai/vcm/handoffs/architecture-plan.md is empty");
 
-    await fs.writeFile(
-      path.join(task.worktreePath, ".ai/vcm/handoffs/architecture-plan.md"),
-      "# Architecture Plan\n\nAccepted Scope: gate E2E.\n",
-      "utf8"
-    );
+    await writeCompleteArchitecturePlan(task.worktreePath, task.taskSlug, "Gate E2E plan.");
     const architectureStarted = await requestGateReview(env.app, task.taskSlug, "architecture-plan");
     expect(architectureStarted.status).toBe("started");
     await waitForGate(env.app, task.taskSlug, "architecture-plan");
@@ -236,6 +231,7 @@ describe("backend E2E Gate Review with mock Claude Code", () => {
       decision: "approve"
     });
 
+    await writeReadyCoderCompletion(task.worktreePath, task.taskSlug);
     const noCodeDiff = await requestGateReview(env.app, task.taskSlug, "code-diff", { codeDiffSource: "coder" });
     expect(noCodeDiff.status).toBe("not_required");
     expect(noCodeDiff.message).toBe("No new commits to review.");
@@ -305,11 +301,7 @@ describe("backend E2E Gate Review with mock Claude Code", () => {
     cleanups.push(() => repo.cleanup());
     const task = await connectAndCreateTask(env.app, repo, "gate-report-history");
     await writeConfirmedArchitectureBrief(task.worktreePath, task.taskSlug);
-    await fs.writeFile(
-      path.join(task.worktreePath, ".ai/vcm/handoffs/architecture-plan.md"),
-      "Planning Result: complete\n\n# Architecture Plan\n\nInitial plan.\n",
-      "utf8"
-    );
+    await writeCompleteArchitecturePlan(task.worktreePath, task.taskSlug, "Initial plan.");
     await updateGateSettings(env.app, task.taskSlug, {
       "architecture-plan": true,
       "validation-adequacy": false,

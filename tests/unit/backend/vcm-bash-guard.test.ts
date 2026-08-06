@@ -130,4 +130,32 @@ describe("vcm-bash-guard", () => {
       });
     }
   });
+
+  describe("managed artifacts", () => {
+    it("denies direct Write and Edit calls", async () => {
+      await expect(runGuard({
+        tool_name: "Write",
+        tool_input: { file_path: ".ai/vcm/handoffs/test-report.md", content: "bad" }
+      }, "tester")).resolves.toContain("vcm-artifact");
+      await expect(runGuard({
+        tool_name: "Edit",
+        tool_input: { file_path: ".ai/vcm/gate-reviews/requests/request.report.md" }
+      }, "reviewer")).resolves.toContain("vcm-artifact");
+    });
+
+    it("denies shell writes but allows vcm-artifact submission", async () => {
+      await expect(runGuard(
+        bash("printf bad > .ai/vcm/handoffs/architecture-plan.md"),
+        "architect"
+      )).resolves.toContain("vcm-artifact");
+      await expect(runGuard(
+        bash("printf bad > \".ai/vcm/handoffs/architecture-plan.md\""),
+        "architect"
+      )).resolves.toContain("vcm-artifact");
+      await expect(runGuard(
+        bash(".ai/tools/vcm-artifact architecture-plan --file /tmp/plan.md --mode final"),
+        "architect"
+      )).resolves.toBeUndefined();
+    });
+  });
 });

@@ -1,10 +1,15 @@
 import {
+  ARCHITECT_DEBUG_STATUSES,
   ARCHITECTURE_BRIEF_STATUSES,
+  ARCHITECTURE_DIAGNOSIS_DISPOSITIONS,
+  ARCHITECTURE_EVIDENCE_STATUSES,
   ARCHITECTURE_PLAN_RESULTS,
+  CODER_COMPLETION_DECISIONS,
   DOCS_SYNC_DECISIONS,
   FINAL_ACCEPTANCE_DECISIONS,
   L3_ACTIONS,
   L3_REQUIRED_VALUES,
+  PLANNING_PROGRESS_STATUSES,
   STRICT_NONE_VALUE,
   TEST_INFRASTRUCTURE_STATUSES,
   TEST_RESULTS,
@@ -154,6 +159,66 @@ TBD
 `;
 }
 
+export function renderArchitectureEvidenceTemplate(taskSlug: string): string {
+  return `# Architecture Evidence: ${taskSlug}
+
+${CURRENT_HANDOFF_NOTICE}
+
+Architecture Evidence Status: ${renderArtifactOptions(ARCHITECTURE_EVIDENCE_STATUSES)}
+
+## Planning Boundary
+
+TBD
+
+## Entry Points And Behavior Paths
+
+TBD
+
+## State And Lifecycle
+
+TBD
+
+## Callers And Consumers
+
+TBD
+
+## Existing Assumptions
+
+TBD
+
+## Related Class Inventories
+
+TBD
+
+## External Boundaries
+
+TBD
+
+## Code And Docs Conflicts
+
+TBD
+
+## Evidence Commands
+
+TBD
+`;
+}
+
+export function renderPlanningProgressTemplate(taskSlug: string): string {
+  return `# Planning Progress: ${taskSlug}
+
+${CURRENT_HANDOFF_NOTICE}
+
+Planning Progress Status: ${renderArtifactOptions(PLANNING_PROGRESS_STATUSES)}
+
+## Planning Steps
+
+| Step | Scope | Deliverable | Done Criterion | Status | Evidence |
+| --- | --- | --- | --- | --- | --- |
+| Architecture Evidence Verification | TBD | TBD | TBD | pending | TBD |
+`;
+}
+
 export function renderKnownIssuesTemplate(taskSlug: string): string {
   return `# Known Issues: ${taskSlug}
 
@@ -279,7 +344,7 @@ export function renderCoderCompletionTemplate(taskSlug: string): string {
 
 ${CURRENT_HANDOFF_NOTICE}
 
-Decision: ready_for_review|incomplete|failed
+Decision: ${renderArtifactOptions(CODER_COMPLETION_DECISIONS)}
 
 ## Scaffold Completion
 
@@ -326,7 +391,7 @@ export function renderArchitectDebugTemplate(taskSlug: string): string {
 
 ${CURRENT_HANDOFF_NOTICE}
 
-Status: pending|completed
+Status: ${renderArtifactOptions(ARCHITECT_DEBUG_STATUSES)}
 
 ## PM-Routed Failure
 
@@ -370,6 +435,78 @@ TBD
 ## Final Disposition
 
 TBD
+`;
+}
+
+export function renderArchitectureDiagnosisTemplate(taskSlug: string): string {
+  return `# Architecture Diagnosis: ${taskSlug}
+
+${CURRENT_HANDOFF_NOTICE}
+
+## Diagnosis Boundary
+
+TBD
+
+## Documents And Runtime Evidence
+
+TBD
+
+## Code Reading Closure
+
+TBD
+
+## Current Architecture
+
+TBD
+
+## Previous Debug Failure
+
+TBD
+
+## Failure Trace
+
+TBD
+
+## Architecture Assessment
+
+TBD
+
+## Required Architecture Direction
+
+TBD
+
+## Implementation And Validation
+
+### Changed Files And Public Surface
+
+TBD
+
+### Baseline Tests
+
+TBD
+
+### Diagnostic And L0/L1 Validation
+
+TBD
+
+### L2/L3 Validation
+
+| Level | Applicable | Command Or Test | Failure Path | Result | Evidence |
+| --- | --- | --- | --- | --- | --- |
+| L2 | TBD | TBD | TBD | TBD | TBD |
+| L3 | TBD | TBD | TBD | TBD | TBD |
+
+### Generated Context
+
+TBD
+
+### Commit
+
+TBD
+
+## Final Disposition
+
+${renderArtifactOptions(ARCHITECTURE_DIAGNOSIS_DISPOSITIONS)}
 `;
 }
 

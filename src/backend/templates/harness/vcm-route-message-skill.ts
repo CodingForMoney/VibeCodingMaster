@@ -32,10 +32,10 @@ Allowed message types:
 
 ## Route File
 
-Write or update exactly one file:
+Write the message to a candidate outside \`.ai/vcm\`, then submit it:
 
 \`\`\`text
-.ai/vcm/handoffs/messages/<from-role>-<to-role>.md
+.ai/tools/vcm-artifact route-message --file <candidate> --path .ai/vcm/handoffs/messages/<from-role>-<to-role>.md --mode final
 \`\`\`
 
 Use one allowed route above. The file name is authoritative. Do not put from/to in frontmatter and do not create alternate message paths.
@@ -112,7 +112,7 @@ Formal messages should include:
 
 ## Turn Rule
 
-After writing or updating the route file, end the current Claude Code turn immediately.
+After VCM accepts the route file, end the current Claude Code turn immediately.
 
 Do not:
 

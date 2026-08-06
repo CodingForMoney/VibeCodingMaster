@@ -1,15 +1,21 @@
 import type { FastifyInstance } from "fastify";
-import { isDispatchableRole } from "../../shared/constants.js";
+import { isDispatchableRole, isRoleName } from "../../shared/constants.js";
+import type { ArtifactSubmissionRequest } from "../../shared/types/artifact.js";
 import type { DispatchableRole } from "../../shared/types/role.js";
 import { VcmError } from "../errors.js";
 import type { ArtifactService } from "../services/artifact-service.js";
 import type { ProjectService } from "../services/project-service.js";
 import { getTaskRuntimeRepoRoot, type TaskService } from "../services/task-service.js";
+import type { SessionService } from "../services/session-service.js";
 
 export interface ArtifactRouteDeps {
   projectService: ProjectService;
   taskService: TaskService;
   artifactService: ArtifactService;
+  sessionService: Pick<
+    SessionService,
+    "getRoleSession" | "getProjectTranslatorSession" | "getProjectHarnessEngineerSession"
+  >;
 }
 
 export function registerArtifactRoutes(app: FastifyInstance, deps: ArtifactRouteDeps): void {
@@ -76,6 +82,61 @@ export function registerArtifactRoutes(app: FastifyInstance, deps: ArtifactRoute
     }
   );
 
+  app.post<{ Params: { taskSlug: string }; Body: ArtifactSubmissionRequest }>(
+    "/api/tasks/:taskSlug/artifacts/submit",
+    async (request) => {
+      const project = await requireCurrentProject(deps.projectService);
+      const task = await deps.taskService.loadTask(project.repoRoot, request.params.taskSlug);
+      const body = request.body;
+      if (!body || !isRoleName(body.role)) {
+        throw new VcmError({
+          code: "ARTIFACT_ROLE_INVALID",
+          message: `Unknown artifact role: ${body?.role ?? "missing"}`,
+          statusCode: 400
+        });
+      }
+      if (body.mode !== "draft" && body.mode !== "final") {
+        throw new VcmError({
+          code: "ARTIFACT_MODE_INVALID",
+          message: "Artifact mode must be draft or final.",
+          statusCode: 400
+        });
+      }
+      if (typeof body.content !== "string") {
+        throw new VcmError({
+          code: "ARTIFACT_CONTENT_INVALID",
+          message: "Artifact content must be text.",
+          statusCode: 400
+        });
+      }
+      const session = body.role === "translator"
+        ? await deps.sessionService.getProjectTranslatorSession(project.repoRoot)
+        : body.role === "harness-engineer"
+          ? await deps.sessionService.getRoleSession(project.repoRoot, task.taskSlug, body.role)
+            ?? await deps.sessionService.getProjectHarnessEngineerSession(project.repoRoot)
+          : await deps.sessionService.getRoleSession(project.repoRoot, task.taskSlug, body.role);
+      if (!session || !session.runtimeSessionToken || session.runtimeSessionToken !== body.runtimeSessionToken) {
+        throw new VcmError({
+          code: "ARTIFACT_SESSION_INVALID",
+          message: `${body.role} does not have the active VCM Session that owns this artifact submission.`,
+          statusCode: 409,
+          hint: "Submit from the active role terminal with .ai/tools/vcm-artifact."
+        });
+      }
+      return deps.artifactService.submitArtifact({
+        repoRoot: getTaskRuntimeRepoRoot(task),
+        baseRepoRoot: project.repoRoot,
+        handoffDir: task.handoffDir,
+        taskSlug: task.taskSlug,
+        kind: body.kind,
+        mode: body.mode,
+        role: body.role,
+        content: body.content,
+        artifactPath: body.path
+      });
+    }
+  );
+
 }
 
 function parseDispatchableRole(role: string): DispatchableRole {
@@ -93,11 +154,26 @@ function artifactNameToPath(paths: ReturnType<ArtifactService["getHandoffPaths"]
   if (artifactName === "architecture-brief.md") {
     return paths.architectureBriefPath;
   }
+  if (artifactName === "architecture-evidence.md") {
+    return paths.architectureEvidencePath;
+  }
+  if (artifactName === "planning-progress.md") {
+    return paths.planningProgressPath;
+  }
   if (artifactName === "architecture-plan.md") {
     return paths.architecturePlanPath;
   }
   if (artifactName === "known-issues.md") {
     return paths.knownIssuesPath;
+  }
+  if (artifactName === "coder-completion.md") {
+    return paths.coderCompletionPath;
+  }
+  if (artifactName === "architect-debug.md") {
+    return paths.architectDebugPath;
+  }
+  if (artifactName === "architecture-diagnosis.md") {
+    return paths.architectureDiagnosisPath;
   }
   if (artifactName === "test-report.md") {
     return paths.testReportPath;

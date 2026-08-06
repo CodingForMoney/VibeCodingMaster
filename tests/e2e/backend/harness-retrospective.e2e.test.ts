@@ -228,7 +228,7 @@ async function writeNoChangeMemoryDraft(ctx: MockClaudePromptContext): Promise<v
 }
 
 async function writeNoChangeMemoryDraftResult(ctx: MockClaudePromptContext): Promise<void> {
-  const draftPath = matchPromptPath(ctx.prompt, "Write the draft to");
+  const draftPath = matchPromptPath(ctx.prompt, "Assigned proposal path");
   await ctx.writeAbsoluteFile(draftPath, [
     "# Memory Proposal",
     "Decision: no-change",
@@ -274,11 +274,21 @@ async function writeHarnessRetrospective(ctx: MockClaudePromptContext): Promise<
   await ctx.writeAbsoluteFile(
     resultPath,
     [
-      "# Task Harness Retrospective",
+      "# Task Harness Retrospective: demo-task",
       "",
+      "## Findings",
       autoMemoryReview
         ? "Memory reviewed during retrospective."
         : "Auto Memory disabled; no memory review requested.",
+      "",
+      "## Feedback Dispositions",
+      dispositions.length > 0 ? dispositions.join("\n") : "none",
+      "",
+      "## Recommended Harness Changes",
+      "None.",
+      "",
+      "## VCM Issue Drafts",
+      "None.",
       ...(autoMemoryReview
         ? [
             "",
@@ -299,9 +309,6 @@ async function writeHarnessRetrospective(ctx: MockClaudePromptContext): Promise<
             "Reviewed memory set: complete"
           ]
         : []),
-      "",
-      "## Pending Feedback",
-      dispositions.length > 0 ? dispositions.join("\n") : "none",
       ""
     ].join("\n")
   );

@@ -111,7 +111,233 @@ describe("createArtifactService", () => {
     });
   });
 
+  it("validates and atomically replaces a role-owned handoff", async () => {
+    const fs = createMemoryFs();
+    const service = createArtifactService(fs);
+    const target = "/repo/.ai/vcm/handoffs/coder-completion.md";
+    await fs.writeText(target, "previous accepted content\n");
+
+    await expect(service.submitArtifact({
+      repoRoot: "/repo",
+      baseRepoRoot: "/repo",
+      handoffDir: ".ai/vcm/handoffs",
+      taskSlug: "demo-task",
+      kind: "coder-completion",
+      mode: "final",
+      role: "coder",
+      content: "# invalid\n"
+    })).rejects.toMatchObject({ code: "ARTIFACT_VALIDATION_FAILED" });
+    await expect(fs.readText(target)).resolves.toBe("previous accepted content\n");
+
+    const result = await service.submitArtifact({
+      repoRoot: "/repo",
+      baseRepoRoot: "/repo",
+      handoffDir: ".ai/vcm/handoffs",
+      taskSlug: "demo-task",
+      kind: "coder-completion",
+      mode: "final",
+      role: "coder",
+      content: validCoderCompletion()
+    });
+
+    expect(result).toMatchObject({
+      path: ".ai/vcm/handoffs/coder-completion.md",
+      status: "ok"
+    });
+    await expect(fs.readText(target)).resolves.toBe(validCoderCompletion());
+  });
+
+  it("rejects a submission from a role that does not own the artifact", async () => {
+    const service = createArtifactService(createMemoryFs());
+
+    await expect(service.submitArtifact({
+      repoRoot: "/repo",
+      baseRepoRoot: "/repo",
+      handoffDir: ".ai/vcm/handoffs",
+      taskSlug: "demo-task",
+      kind: "test-report",
+      mode: "final",
+      role: "coder",
+      content: "# Test Report\n"
+    })).rejects.toMatchObject({ code: "ARTIFACT_OWNER_MISMATCH" });
+  });
+
+  it("accepts incomplete coder evidence only as a draft", async () => {
+    const service = createArtifactService(createMemoryFs());
+    const incomplete = validCoderCompletion().replace(
+      "Decision: ready_for_review",
+      "Decision: incomplete"
+    );
+
+    await expect(service.submitArtifact({
+      repoRoot: "/repo",
+      baseRepoRoot: "/repo",
+      handoffDir: ".ai/vcm/handoffs",
+      taskSlug: "demo-task",
+      kind: "coder-completion",
+      mode: "final",
+      role: "coder",
+      content: incomplete
+    })).rejects.toMatchObject({ code: "ARTIFACT_VALIDATION_FAILED" });
+
+    await expect(service.submitArtifact({
+      repoRoot: "/repo",
+      baseRepoRoot: "/repo",
+      handoffDir: ".ai/vcm/handoffs",
+      taskSlug: "demo-task",
+      kind: "coder-completion",
+      mode: "draft",
+      role: "coder",
+      content: incomplete
+    })).resolves.toMatchObject({ status: "ok" });
+  });
+
+  it("validates dynamic route messages and coder worker reports", async () => {
+    const fs = createMemoryFs();
+    const service = createArtifactService(fs);
+    const routePath = ".ai/vcm/handoffs/messages/coder-project-manager.md";
+    const workerPath = ".ai/vcm/coder-workers/reports/worker-1.md";
+
+    await service.submitArtifact({
+      repoRoot: "/repo",
+      baseRepoRoot: "/repo",
+      handoffDir: ".ai/vcm/handoffs",
+      taskSlug: "demo-task",
+      kind: "route-message",
+      mode: "final",
+      role: "coder",
+      artifactPath: routePath,
+      content: "---\ntype: result\nartifact_refs: .ai/vcm/handoffs/coder-completion.md\n---\n\nSummary:\nComplete.\n"
+    });
+    await service.submitArtifact({
+      repoRoot: "/repo",
+      baseRepoRoot: "/repo",
+      handoffDir: ".ai/vcm/handoffs",
+      taskSlug: "demo-task",
+      kind: "coder-worker-report",
+      mode: "final",
+      role: "coder",
+      artifactPath: workerPath,
+      content: validCoderWorkerReport()
+    });
+
+    await expect(fs.readText(`/repo/${routePath}`)).resolves.toContain("type: result");
+    await expect(fs.readText(`/repo/${workerPath}`)).resolves.toContain("Implementation Result: success");
+  });
+
+  it("allows Reviewer feedback and rejects tool-role workflow artifacts", async () => {
+    const fs = createMemoryFs();
+    const service = createArtifactService(fs);
+    const feedbackPath = ".ai/vcm/harness-feedback/pending/reviewer-feedback.md";
+
+    await expect(service.submitArtifact({
+      repoRoot: "/repo/task",
+      baseRepoRoot: "/repo",
+      handoffDir: ".ai/vcm/handoffs",
+      taskSlug: "demo-task",
+      kind: "harness-feedback",
+      mode: "final",
+      role: "reviewer",
+      artifactPath: feedbackPath,
+      content: validHarnessFeedback()
+    })).resolves.toMatchObject({ path: feedbackPath });
+    await expect(fs.readText(`/repo/${feedbackPath}`)).resolves.toContain("Reporter role: reviewer");
+
+    await expect(service.submitArtifact({
+      repoRoot: "/repo/task",
+      baseRepoRoot: "/repo",
+      handoffDir: ".ai/vcm/handoffs",
+      taskSlug: "demo-task",
+      kind: "memory-proposal",
+      mode: "final",
+      role: "translator",
+      artifactPath: ".ai/vcm/memory-review/candidates/translator.md",
+      content: "# Memory Proposal\n\nDecision: no-change\n\n## Add\nnone\n\n## Update\nnone\n\n## Remove\nnone\n"
+    })).rejects.toMatchObject({ code: "ARTIFACT_VALIDATION_FAILED" });
+  });
+
 });
+
+function validCoderCompletion(): string {
+  return `# Coder Completion: demo-task
+
+Decision: ready_for_review
+
+## Scaffold Completion
+Complete.
+
+## Changed Files
+src/feature.ts
+
+## Private Helpers Added
+None.
+
+## Manifest Deviations
+None.
+
+## Generated Context
+Current.
+
+## Baseline Tests Added Or Updated
+tests/feature.test.ts
+
+## L0/L1 Validation
+Passed.
+
+## Worker Results
+None.
+
+## Objective Failures
+None.
+`;
+}
+
+function validCoderWorkerReport(): string {
+  return `# Coder Worker Report: worker-1
+
+Worker State: completed
+Implementation Result: success
+
+## Assigned Scope
+module-a
+
+## Item Dispositions
+All assigned items passed.
+
+## Files Changed
+src/feature.ts
+
+## Tests Added Or Updated
+tests/feature.test.ts
+
+## L0/L1 Checks
+Passed.
+
+## Commit
+abc1234
+
+## Skipped Assigned Checks
+None.
+
+## Objective Failures
+None.
+`;
+}
+
+function validHarnessFeedback(): string {
+  return `# Reusable Reviewer Finding
+
+- Reporter role: reviewer
+- Task slug: demo-task
+- Summary: The review template omits required evidence.
+- Observed problem: Reviewer repeatedly has to infer an unstated field.
+- Expected behavior: The template includes the required evidence field.
+- Evidence: Two review reports required manual correction.
+- Suspected harness area: Reviewer template
+- Impact: Review results are inconsistent.
+- Urgency: medium
+`;
+}
 
 function createMemoryFs(): FileSystemAdapter {
   const files = new Map<string, string>();

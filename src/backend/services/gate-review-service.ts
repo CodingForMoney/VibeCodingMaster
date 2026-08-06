@@ -22,7 +22,7 @@ import {
   type GateReviewSeverity
 } from "../../shared/types/gate-review.js";
 import type { ArtifactCheckResult } from "../../shared/types/artifact.js";
-import { checkMarkdownArtifact } from "../../shared/validation/artifact-check.js";
+import { checkMarkdownArtifact, readArtifactSectionValue } from "../../shared/validation/artifact-check.js";
 import { VcmError } from "../errors.js";
 import { resolveRepoPath } from "../adapters/filesystem.js";
 import type { FileSystemAdapter } from "../adapters/filesystem.js";
@@ -411,6 +411,33 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
       };
     }
 
+    if (gate === "architecture-plan") {
+      const architecturePlanError = await readArchitecturePlanError(deps.fs, context.taskRepoRoot);
+      if (architecturePlanError) {
+        index = applyGateState(index, gate, {
+          status: "failed",
+          decision: undefined,
+          error: architecturePlanError,
+          exceptionReason: undefined,
+          requestId: undefined,
+          requestPath: undefined,
+          inputHash: undefined,
+          requestedAt: undefined,
+          startedAt: undefined,
+          completedAt: now(),
+          callbackStatus: "not_sent",
+          callbackError: undefined
+        }, now(), true);
+        await saveIndex(deps.fs, context.taskRepoRoot, index);
+        return {
+          status: "failed_to_start",
+          gate,
+          record: index.gates[gate],
+          message: architecturePlanError
+        };
+      }
+    }
+
     if (gate === "validation-adequacy") {
       const validationReportError = await readValidationReportError(deps.fs, context.taskRepoRoot);
       if (validationReportError) {
@@ -439,7 +466,7 @@ export function createGateReviewService(deps: GateReviewServiceDeps): GateReview
     }
 
     if (gate === "code-diff") {
-      const prerequisiteError = await readCodeDiffPrerequisiteError(deps, context, index);
+      const prerequisiteError = await readCodeDiffPrerequisiteError(deps, context, index, codeDiffSource);
       if (prerequisiteError) {
         index = applyGateState(index, gate, {
           status: "failed",
@@ -1558,18 +1585,16 @@ async function readArchitectureBriefError(
 ): Promise<string | undefined> {
   const relativePath = ".ai/vcm/handoffs/architecture-brief.md";
   const absolutePath = resolveRepoPath(taskRepoRoot, relativePath);
-  if (!await fs.pathExists(absolutePath)) {
-    return `${relativePath} is missing. Complete Architect Interview before architecture planning.`;
-  }
-  const content = await fs.readText(absolutePath);
-  const check = checkMarkdownArtifact("architecture-brief", relativePath, content);
-  if (check.status !== "ok") {
-    return `${relativePath} is incomplete and cannot start architecture-plan review. ${formatArtifactCheckFailure(check)}`;
-  }
+  const content = await fs.pathExists(absolutePath) ? await fs.readText(absolutePath) : null;
+  if (content === null) return `${relativePath} is missing. Complete Architect Interview before architecture planning.`;
   const status = /^\s*Architecture Brief Status\s*:\s*(.+?)\s*$/im.exec(content)?.[1]?.trim();
   if (status?.toLowerCase() !== "confirmed") {
     return `${relativePath} is not confirmed and cannot start architecture-plan review. `
       + `Architecture Brief Status must be exactly "confirmed"; found ${renderFoundValue(status)}.`;
+  }
+  const check = checkMarkdownArtifact("architecture-brief", relativePath, content);
+  if (check.status !== "ok") {
+    return `${relativePath} is incomplete and cannot start architecture-plan review. ${formatArtifactCheckFailure(check)}`;
   }
   return undefined;
 }
@@ -1605,7 +1630,8 @@ async function readValidationReportError(
 async function readCodeDiffPrerequisiteError(
   deps: Pick<GateReviewServiceDeps, "fs" | "runner">,
   context: ReviewContext,
-  index: GateReviewIndex
+  index: GateReviewIndex,
+  source: CodeDiffSource | undefined
 ): Promise<string | undefined> {
   const reportError = await readValidationReportError(deps.fs, context.taskRepoRoot);
   if (reportError) {
@@ -1613,25 +1639,22 @@ async function readCodeDiffPrerequisiteError(
   }
 
   const validationGate = index.gates["validation-adequacy"];
-  if (!validationGate.required) {
-    return undefined;
-  }
-  if (validationGate.status === "skipped" || validationGate.status === "overridden") {
-    return undefined;
-  }
-  if (validationGate.status !== "completed" || validationGate.decision !== "approve") {
-    return "code-diff requires the validation-adequacy Gate to complete successfully for the current Tester evidence.";
+  if (validationGate.required && validationGate.status !== "skipped" && validationGate.status !== "overridden") {
+    if (validationGate.status !== "completed" || validationGate.decision !== "approve") {
+      return "code-diff requires the validation-adequacy Gate to complete successfully for the current Tester evidence.";
+    }
+
+    const currentValidationHash = await computeInputHash(
+      deps,
+      context.taskRepoRoot,
+      "validation-adequacy"
+    );
+    if (!validationGate.inputHash || validationGate.inputHash !== currentValidationHash) {
+      return "code-diff requires a current validation-adequacy approval; code or test evidence changed after the recorded approval.";
+    }
   }
 
-  const currentValidationHash = await computeInputHash(
-    deps,
-    context.taskRepoRoot,
-    "validation-adequacy"
-  );
-  if (!validationGate.inputHash || validationGate.inputHash !== currentValidationHash) {
-    return "code-diff requires a current validation-adequacy approval; code or test evidence changed after the recorded approval.";
-  }
-  return undefined;
+  return readCodeDiffSourceArtifactError(deps.fs, context.taskRepoRoot, source);
 }
 
 async function readArchitectureEvidenceError(
@@ -1640,17 +1663,52 @@ async function readArchitectureEvidenceError(
 ): Promise<string | undefined> {
   const relativePath = ".ai/vcm/handoffs/architecture-evidence.md";
   const absolutePath = resolveRepoPath(taskRepoRoot, relativePath);
-  if (!await fs.pathExists(absolutePath)) {
-    return `${relativePath} is missing. Complete architecture evidence before requesting architecture-plan review.`;
+  const content = await fs.pathExists(absolutePath) ? await fs.readText(absolutePath) : null;
+  const check = checkMarkdownArtifact("architecture-evidence", relativePath, content);
+  if (check.status !== "ok") {
+    return `${relativePath} is incomplete and cannot start architecture-plan review. ${formatArtifactCheckFailure(check)}`;
   }
-  const content = await fs.readText(absolutePath);
-  if (content.trim().length === 0) {
-    return `${relativePath} is empty. Complete architecture evidence before requesting architecture-plan review.`;
+  return undefined;
+}
+
+async function readArchitecturePlanError(
+  fs: FileSystemAdapter,
+  taskRepoRoot: string
+): Promise<string | undefined> {
+  const relativePath = ".ai/vcm/handoffs/architecture-plan.md";
+  const absolutePath = resolveRepoPath(taskRepoRoot, relativePath);
+  const content = await fs.pathExists(absolutePath) ? await fs.readText(absolutePath) : null;
+  const check = checkMarkdownArtifact("architecture-plan", relativePath, content);
+  return check.status === "ok"
+    ? undefined
+    : `${relativePath} is incomplete and cannot start architecture-plan review. ${formatArtifactCheckFailure(check)}`;
+}
+
+async function readCodeDiffSourceArtifactError(
+  fs: FileSystemAdapter,
+  taskRepoRoot: string,
+  source: CodeDiffSource | undefined
+): Promise<string | undefined> {
+  if (!source) {
+    return "code-diff requires a production-code source.";
   }
-  const status = /^\s*Architecture Evidence Status\s*:\s*(.+?)\s*$/im.exec(content)?.[1]?.trim();
-  if (status?.toLowerCase() !== "complete") {
-    return `${relativePath} is incomplete and cannot start architecture-plan review. `
-      + `Architecture Evidence Status must be exactly "complete"; found ${renderFoundValue(status)}.`;
+  const sourceArtifacts = {
+    coder: ["coder-completion", ".ai/vcm/handoffs/coder-completion.md", "ready_for_review"],
+    "architect-debug": ["architect-debug", ".ai/vcm/handoffs/architect-debug.md", "completed"],
+    "architect-diagnosis": ["architecture-diagnosis", ".ai/vcm/handoffs/architecture-diagnosis.md", "diagnosis implementation completed"]
+  } as const;
+  const [kind, relativePath, terminalValue] = sourceArtifacts[source];
+  const absolutePath = resolveRepoPath(taskRepoRoot, relativePath);
+  const content = await fs.pathExists(absolutePath) ? await fs.readText(absolutePath) : null;
+  const check = checkMarkdownArtifact(kind, relativePath, content);
+  if (check.status !== "ok") {
+    return `code-diff requires a complete ${relativePath}. ${formatArtifactCheckFailure(check)}`;
+  }
+  const value = kind === "architecture-diagnosis"
+    ? readArtifactSectionValue(content ?? "", "Final Disposition")?.toLowerCase()
+    : matchField(content ?? "", kind === "coder-completion" ? "Decision" : "Status");
+  if (value !== terminalValue) {
+    return `code-diff requires ${relativePath} to report ${terminalValue}; found ${renderFoundValue(value)}.`;
   }
   return undefined;
 }
@@ -1727,11 +1785,12 @@ Worktree: ${context.taskRepoRoot}
 Gate: ${gate}
 Request: ${requestId}
 Report: ${absoluteReportPath}
+Submit: .ai/tools/vcm-artifact gate-review-report --file <candidate> --path ${reportPath} --mode final
 
 Evidence:
 ${evidence}${capturedEvidence}${gitLine}${architectureContract}${validationContract}${codeDiffContract}${codeDiffSection}
 
-Write only Report. Start exactly:
+Write only the candidate Report and submit it with the command above. Start exactly:
 Gate: ${gate}
 Request: ${requestId}
 Decision: approve|request_changes

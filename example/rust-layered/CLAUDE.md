@@ -27,6 +27,13 @@ No accumulated project memory yet.
 - Only the user may approve scope reduction, skipped required validation, Gate Review skip or override, skipped required docs sync, accepted unresolved task-scope risk, or weakening of baseline Harness rules. PM may record and route the user's approval but cannot grant it.
 - Project-manager runs `vcm-gate-review` unconditionally at every Gate Review trigger point and on VCM Gate Review callbacks; the tool reports the authoritative enable state.
 
+## VCM Managed Artifacts
+
+- VCM-managed Markdown under `.ai/vcm/handoffs/`, Coder Worker reports, request-scoped Gate Review reports, route messages, memory proposals, Harness Feedback, and retrospective reports must be submitted with `.ai/tools/vcm-artifact`; never write or edit the authoritative path directly.
+- Write the candidate outside `.ai/vcm/`, then run `.ai/tools/vcm-artifact <kind> --file <candidate> --mode <draft|final>`. Dynamic artifacts also require the exact VCM-assigned `--path`.
+- Use `draft` while an allowed lifecycle remains incomplete. Use `final` before routing or consuming a terminal artifact. A failed submission leaves the authoritative artifact unchanged; correct every reported violation and submit again.
+- Do not route, review, or rely on a candidate file. Only the VCM-written authoritative path is workflow evidence.
+
 ## VCM Harness Scope
 
 VCM harness includes root `CLAUDE.md`, `.claude/agents/**`, `.claude/skills/**`, `.ai/tools/**`, `.claude/settings.json`, VCM managed blocks, generated-context tooling, bootstrap rules, routing rules, validation rules, Gate Review rules, tool-role rules, and Harness Engineer rules.

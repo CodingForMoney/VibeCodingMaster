@@ -69,14 +69,14 @@ describe("createHarnessService", () => {
     expect(await fs.readText("/repo/.claude/skills/vcm-route-message/SKILL.md")).toContain("Non-PM roles must not route directly to each other.");
     expect(await fs.readText("/repo/.claude/skills/vcm-task-state/SKILL.md")).toContain("recoverable context, not a workflow controller");
     expect(await fs.readText("/repo/.ai/tools/update-task-state")).toContain("/workflow-state");
-    expect(await fs.readText("/repo/.claude/skills/vcm-route-message/SKILL.md")).toContain("After writing or updating the route file, end the current Claude Code turn immediately.");
+    expect(await fs.readText("/repo/.claude/skills/vcm-route-message/SKILL.md")).toContain("After VCM accepts the route file, end the current Claude Code turn immediately.");
     expect(await fs.readText("/repo/.claude/skills/vcm-final-acceptance/SKILL.md")).toContain("name: vcm-final-acceptance");
     expect(await fs.readText("/repo/.claude/skills/vcm-final-acceptance/SKILL.md")).toContain("only when project-manager is ready to close a complete VCM code-delivery flow");
     expect(await fs.readText("/repo/.claude/skills/vcm-final-acceptance/SKILL.md")).toContain("Do not use it for Docs-Only Flow, Validation-Only Flow, Communication-Only Flow, PR-Preparation Flow, analysis-only Diagnosis");
     expect(await fs.readText("/repo/.claude/skills/vcm-final-acceptance/SKILL.md")).toContain("## Scope Traceability Audit");
     expect(await fs.readText("/repo/.claude/skills/vcm-final-acceptance/SKILL.md")).toContain("Do not claim to prove that every diff hunk exactly matches the task.");
     expect(await fs.readText("/repo/.claude/skills/vcm-final-acceptance/SKILL.md")).toContain(".ai/vcm/handoffs/architecture-diagnosis.md");
-    expect(await fs.readText("/repo/.claude/skills/vcm-final-acceptance/SKILL.md")).toContain(".ai/vcm/handoffs/final-acceptance.md");
+    expect(await fs.readText("/repo/.claude/skills/vcm-final-acceptance/SKILL.md")).toContain(".ai/tools/vcm-artifact final-acceptance");
     expect(await fs.readText("/repo/.claude/skills/vcm-harness-bootstrap/SKILL.md")).toContain("name: vcm-harness-bootstrap");
     expect(await fs.readText("/repo/.claude/skills/vcm-harness-bootstrap/SKILL.md")).toContain("AI-assisted project understanding");
     expect(await fs.readText("/repo/.claude/skills/vcm-long-running-validation/SKILL.md")).toContain("name: vcm-long-running-validation");
@@ -227,7 +227,7 @@ describe("createHarnessService", () => {
     expect(coderWorkerAgent).toContain("Run assigned L0/L1 checks in the foreground.");
     expect(coderWorkerAgent).toContain("the switch-to-skill rule for long commands does not apply inside worker runs");
     expect(coderWorkerAgent).toContain("git commit --only -m \"<message>\" -- <assigned-paths>");
-    expect(coderWorkerAgent).toContain("write the assigned report with the commit hash");
+    expect(coderWorkerAgent).toContain("submit it with `.ai/tools/vcm-artifact coder-worker-report");
     expect(coderWorkerAgent).toContain("with the same `commitHash` as the final step");
     expect(coderWorkerAgent).toContain("Implementation Result: success|has_failed_items");
     expect(coderWorkerAgent).toContain("leave the worker state as `running`");

@@ -1,0 +1,147 @@
+#!/usr/bin/env python3
+"""Submit a VCM-managed Markdown artifact through the VCM backend."""
+
+import argparse
+import json
+import os
+from pathlib import Path
+import sys
+import urllib.error
+import urllib.parse
+import urllib.request
+
+KINDS = (
+    "architecture-brief",
+    "architecture-evidence",
+    "planning-progress",
+    "architecture-plan",
+    "known-issues",
+    "coder-completion",
+    "architect-debug",
+    "architecture-diagnosis",
+    "test-report",
+    "docs-sync-report",
+    "final-acceptance",
+    "route-message",
+    "coder-worker-report",
+    "gate-review-report",
+    "memory-proposal",
+    "harness-feedback",
+    "retrospective-report",
+)
+DYNAMIC_KINDS = {
+    "route-message",
+    "coder-worker-report",
+    "gate-review-report",
+    "memory-proposal",
+    "harness-feedback",
+    "retrospective-report",
+}
+
+
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        description="Validate and atomically write a VCM-managed artifact."
+    )
+    parser.add_argument("kind", choices=KINDS)
+    parser.add_argument("--file", required=True, help="Candidate Markdown file.")
+    parser.add_argument("--mode", choices=("draft", "final"), default="final")
+    parser.add_argument(
+        "--path",
+        help="VCM-managed repository-relative destination for dynamic artifact kinds.",
+    )
+    parser.add_argument(
+        "--keep-candidate",
+        action="store_true",
+        help="Keep the candidate after a successful submission.",
+    )
+    return parser.parse_args()
+
+
+def required_env(name: str) -> str:
+    value = os.environ.get(name, "").strip()
+    if not value:
+        fail(f"{name} is required. Run this tool from an active VCM role Session.")
+    return value
+
+
+def fail(message: str) -> None:
+    print(f"VCM artifact submission failed: {message}", file=sys.stderr)
+    raise SystemExit(1)
+
+
+def error_text(raw: str) -> str:
+    try:
+        payload = json.loads(raw)
+    except (ValueError, TypeError):
+        return raw.strip() or "VCM backend returned an empty error."
+    if isinstance(payload, dict):
+        message = payload.get("message")
+        hint = payload.get("hint")
+        if isinstance(payload.get("error"), dict):
+            message = payload["error"].get("message", message)
+            hint = payload["error"].get("hint", hint)
+        parts = [str(value).strip() for value in (message, hint) if value]
+        if parts:
+            return "\n".join(parts)
+    return raw.strip() or "VCM backend rejected the artifact."
+
+
+def main() -> int:
+    args = parse_args()
+    if args.kind in DYNAMIC_KINDS and not args.path:
+        fail(f"--path is required for {args.kind}.")
+    if args.kind not in DYNAMIC_KINDS and args.path:
+        fail(f"--path is not allowed for fixed artifact kind {args.kind}.")
+
+    candidate = Path(args.file).expanduser()
+    if not candidate.is_file():
+        fail(f"candidate does not exist: {candidate}")
+    content = candidate.read_text(encoding="utf-8")
+    if not content.strip():
+        fail("candidate is empty.")
+
+    api_url = required_env("VCM_API_URL").rstrip("/")
+    task_slug = required_env("VCM_TASK_SLUG")
+    payload = {
+        "kind": args.kind,
+        "mode": args.mode,
+        "role": required_env("VCM_ROLE"),
+        "runtimeSessionToken": required_env("VCM_RUNTIME_SESSION_TOKEN"),
+        "content": content,
+    }
+    if args.path:
+        payload["path"] = args.path
+
+    request = urllib.request.Request(
+        f"{api_url}/api/tasks/{urllib.parse.quote(task_slug, safe='')}/artifacts/submit",
+        data=json.dumps(payload).encode("utf-8"),
+        headers={"content-type": "application/json"},
+        method="POST",
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=30) as response:
+            raw = response.read().decode("utf-8")
+    except urllib.error.HTTPError as error:
+        fail(error_text(error.read().decode("utf-8", errors="replace")))
+    except urllib.error.URLError as error:
+        fail(f"VCM backend could not be reached at {api_url}: {error.reason}")
+
+    try:
+        result = json.loads(raw)
+    except ValueError:
+        fail("VCM backend returned invalid JSON.")
+    if not isinstance(result, dict) or result.get("ok") is not True:
+        fail(error_text(raw))
+
+    if not args.keep_candidate:
+        candidate.unlink(missing_ok=True)
+    print(
+        f"VCM artifact accepted: {result.get('kind')} -> {result.get('path')} "
+        f"({result.get('mode')}, {result.get('status')})"
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

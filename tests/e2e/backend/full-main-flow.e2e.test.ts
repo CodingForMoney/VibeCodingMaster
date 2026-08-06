@@ -15,7 +15,9 @@ import {
   updatePreferences,
   updateGateSettings,
   waitFor,
-  writeConfirmedArchitectureBrief
+  writeCompleteArchitecturePlan,
+  writeConfirmedArchitectureBrief,
+  writeReadyCoderCompletion
 } from "./helpers/e2e-actions.js";
 import type { GateReviewGate } from "../../../src/shared/types/gate-review.js";
 import type { MockClaudePromptContext } from "./helpers/mock-claude-runtime.js";
@@ -56,7 +58,26 @@ describe("backend E2E complete VCM flow with mock Claude Code", () => {
       }
       await ctx.writeAbsoluteFile(
         resultPath,
-        "# Task Harness Retrospective\n\nComplete main flow reviewed by Harness Engineer.\n"
+        [
+          `# Task Harness Retrospective: ${task.taskSlug}`,
+          "",
+          "## Findings",
+          "",
+          "Complete main flow reviewed by Harness Engineer.",
+          "",
+          "## Feedback Dispositions",
+          "",
+          "None.",
+          "",
+          "## Recommended Harness Changes",
+          "",
+          "None.",
+          "",
+          "## VCM Issue Drafts",
+          "",
+          "None.",
+          ""
+        ].join("\n")
       );
       await ctx.stop();
     });
@@ -77,13 +98,11 @@ describe("backend E2E complete VCM flow with mock Claude Code", () => {
     env.mockRuntime.onPrompt("architect", "Create the architecture plan for the complete mocked feature.", async (ctx) => {
       await ctx.userPromptSubmit();
       await ctx.appendTranscriptText("Architecture plan complete.");
-      await ctx.writeFile(".ai/vcm/handoffs/architecture-plan.md", [
-        "# Architecture Plan",
-        "",
-        "Accepted Scope: complete mocked feature.",
-        "Implementation Plan: add src/feature.txt and verify it with tester evidence.",
-        ""
-      ].join("\n"));
+      await writeCompleteArchitecturePlan(
+        ctx.cwd,
+        task.taskSlug,
+        "Implement the complete mocked feature in src/feature.txt and verify it with Tester evidence."
+      );
       await ctx.writeFile(".ai/vcm/handoffs/messages/architect-project-manager.md", [
         "---",
         "type: result",
@@ -119,13 +138,7 @@ describe("backend E2E complete VCM flow with mock Claude Code", () => {
       await ctx.userPromptSubmit();
       await ctx.appendTranscriptText("Coder implementation complete.");
       await ctx.writeFile("src/feature.txt", "complete mocked feature\n");
-      await ctx.writeFile(".ai/vcm/handoffs/coder-completion.md", [
-        "# Coder Completion",
-        "",
-        "Decision: ready_for_review",
-        "Validation: L0/L1 mock checks passed.",
-        ""
-      ].join("\n"));
+      await writeReadyCoderCompletion(ctx.cwd, task.taskSlug, "src/feature.txt");
       await git(ctx.cwd, "add", "src/feature.txt");
       await git(ctx.cwd, "commit", "-m", "implement mocked feature");
       await ctx.writeFile(".ai/vcm/handoffs/messages/coder-project-manager.md", [

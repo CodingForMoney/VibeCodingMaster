@@ -189,6 +189,7 @@ const VCM_BASH_DEFAULT_TIMEOUT_MS = "600000";
 const VCM_AUTO_MEMORY_ENABLED = false;
 const VCM_HOOK_DEFINITIONS: ReadonlyArray<{ eventName: string; matcher?: string; command: string; timeout: number }> = [
   { eventName: "PreToolUse", matcher: "Bash", command: VCM_BASH_GUARD_HOOK_COMMAND, timeout: 10 },
+  { eventName: "PreToolUse", matcher: "Write|Edit", command: VCM_BASH_GUARD_HOOK_COMMAND, timeout: 10 },
   { eventName: "UserPromptSubmit", command: VCM_HOOK_COMMAND, timeout: 5 },
   { eventName: "Stop", command: VCM_STOP_HOOK_COMMAND, timeout: 10 },
   { eventName: "StopFailure", command: VCM_HOOK_COMMAND, timeout: 5 },

@@ -1,109 +1,35 @@
 import type { ArtifactCheckResult, ArtifactKind } from "../types/artifact.js";
 import {
+  ARCHITECT_DEBUG_STATUSES,
   ARCHITECTURE_BRIEF_STATUSES,
+  ARCHITECTURE_DIAGNOSIS_DISPOSITIONS,
+  ARCHITECTURE_EVIDENCE_STATUSES,
   ARCHITECTURE_PLAN_RESULTS,
+  CODER_COMPLETION_DECISIONS,
   DOCS_SYNC_DECISIONS,
   FINAL_ACCEPTANCE_DECISIONS,
   L3_ACTIONS,
   L3_REQUIRED_VALUES,
+  PLANNING_PROGRESS_STATUSES,
   STRICT_NONE_VALUE,
   TEST_INFRASTRUCTURE_STATUSES,
   TEST_RESULTS
 } from "./artifact-contract.js";
-
-const REQUIRED_HEADINGS: Record<ArtifactKind, readonly string[]> = {
-  "architecture-brief": [
-    "Accepted Outcome",
-    "Confirmed User Decisions",
-    "Existing Constraints",
-    "Unresolved User Decisions",
-    "User Confirmation"
-  ],
-  "architecture-plan": [
-    "Accepted Scope",
-    "Current Code Reality",
-    "Planning Boundary",
-    "Code Reading Evidence",
-    "Existing Behavior Trace",
-    "Code / Docs Conflicts",
-    "Architecture Decision",
-    "Changed Behavior Flow",
-    "Ownership",
-    "Data Flow",
-    "Lifecycle",
-    "Boundaries",
-    "Invariants",
-    "Failure Model",
-    "Decision Rationale",
-    "Module/File Plan",
-    "Public Surface Impact",
-    "Scaffold Manifest",
-    "Scaffold Build Evidence",
-    "Tester Coverage Hints",
-    "Docs Impact",
-    "Known Risks",
-    "Coder Handoff Notes"
-  ],
-  "known-issues": [
-    "Task Issues",
-    "Escalation To Docs"
-  ],
-  "test-report": [
-    "Evidence Reviewed",
-    "Tests Added Or Updated",
-    "Coverage Mapping",
-    "Validation Progress",
-    "Completed Validation",
-    "Remaining Validation",
-    "L3 Coverage",
-    "Trigger Assessment",
-    "Affected End-To-End Flows",
-    "L3 Commands And Evidence",
-    "Not-Required Evidence",
-    "Commands Run Or Checked",
-    "Validation Results",
-    "Test Infrastructure",
-    "Affected Files",
-    "Boundary Evidence",
-    "Defect-Class Sweep",
-    "Repair Commit",
-    "Failed Expectations",
-    "Reproduction Steps",
-    "Skipped Checks With Reasons",
-    "Coverage Gaps",
-    "Blocking Validation Issues",
-    "User Approval Evidence"
-  ],
-  "docs-sync-report": [
-    "Summary",
-    "Architecture Drift Check",
-    "Docs Updated",
-    "Docs Reviewed And Left Unchanged",
-    "Public Contract / Module Boundary Notes",
-    "Remaining Documentation Risks",
-    "Known Issues Disposition",
-    "Decision"
-  ],
-  "final-acceptance": [
-    "Decision",
-    "Evidence Reviewed",
-    "Scope Traceability",
-    "Validation Summary",
-    "Review And Docs Sync",
-    "Known Issues Disposition",
-    "Gate Review Gates",
-    "Cleanup Readiness",
-    "Final User Summary"
-  ]
-};
+import { getArtifactDefinition } from "./artifact-registry.js";
 
 const PLACEHOLDER_PATTERN = /(^|\n)\s*(TBD|Not run yet\.?|status:\s*draft)\s*(\n|$)/i;
+
+export interface ArtifactCheckOptions {
+  mode?: "draft" | "final";
+}
 
 export function checkMarkdownArtifact(
   kind: ArtifactKind,
   artifactPath: string,
-  content: string | null
+  content: string | null,
+  options: ArtifactCheckOptions = {}
 ): ArtifactCheckResult {
+  const requiredHeadings = getArtifactDefinition(kind).requiredHeadings;
   if (content === null) {
     return {
       kind,
@@ -111,7 +37,7 @@ export function checkMarkdownArtifact(
       exists: false,
       isEmpty: true,
       hasPlaceholder: false,
-      missingHeadings: [...REQUIRED_HEADINGS[kind]],
+      missingHeadings: [...requiredHeadings],
       invalidFields: [],
       status: "missing"
     };
@@ -125,15 +51,19 @@ export function checkMarkdownArtifact(
       exists: true,
       isEmpty: true,
       hasPlaceholder: false,
-      missingHeadings: [...REQUIRED_HEADINGS[kind]],
+      missingHeadings: [...requiredHeadings],
       invalidFields: [],
       status: "empty"
     };
   }
 
-  const missingHeadings = REQUIRED_HEADINGS[kind].filter((heading) => !hasHeading(trimmed, heading));
-  const hasPlaceholder = PLACEHOLDER_PATTERN.test(trimmed);
-  const invalidFields = validateArtifactFields(kind, trimmed);
+  const headingErrors = validateHeadingContract(trimmed, requiredHeadings);
+  const missingHeadings = headingErrors.missing;
+  const hasPlaceholder = options.mode === "draft" ? false : PLACEHOLDER_PATTERN.test(trimmed);
+  const invalidFields = [
+    ...headingErrors.invalid,
+    ...validateArtifactFields(kind, trimmed, options.mode ?? "final")
+  ];
   const isWorkInProgress = kind === "test-report"
     && /^\s*Test Result\s*:\s*incomplete\s*$/im.test(trimmed);
 
@@ -154,12 +84,21 @@ export function checkMarkdownArtifact(
   };
 }
 
-function validateArtifactFields(kind: ArtifactKind, content: string): string[] {
+function validateArtifactFields(
+  kind: ArtifactKind,
+  content: string,
+  mode: "draft" | "final"
+): string[] {
   if (kind === "architecture-plan") {
     const result = readInlineField(content, "Planning Result");
-    return result === ARCHITECTURE_PLAN_RESULTS[0]
+    return isAllowedValue(result, ARCHITECTURE_PLAN_RESULTS)
+      && (mode === "draft" || result === ARCHITECTURE_PLAN_RESULTS[0])
       ? []
-      : [renderExactFieldError("Planning Result", [ARCHITECTURE_PLAN_RESULTS[0]], result)];
+      : [renderExactFieldError(
+          "Planning Result",
+          mode === "draft" ? ARCHITECTURE_PLAN_RESULTS : [ARCHITECTURE_PLAN_RESULTS[0]],
+          result
+        )];
   }
 
   if (kind === "architecture-brief") {
@@ -167,6 +106,9 @@ function validateArtifactFields(kind: ArtifactKind, content: string): string[] {
     const invalidFields = isAllowedValue(status, ARCHITECTURE_BRIEF_STATUSES)
       ? []
       : [renderExactFieldError("Architecture Brief Status", ARCHITECTURE_BRIEF_STATUSES, status)];
+    if (mode === "final" && status !== "confirmed") {
+      invalidFields.push(renderExactFieldError("Architecture Brief Status", ["confirmed"], status));
+    }
     if (status === "confirmed") {
       const unresolved = readArtifactSectionContent(content, "Unresolved User Decisions");
       if (!isExactNone(unresolved)) {
@@ -179,6 +121,62 @@ function validateArtifactFields(kind: ArtifactKind, content: string): string[] {
       }
     }
     return invalidFields;
+  }
+
+  if (kind === "architecture-evidence") {
+    return validateLifecycleField(
+      content,
+      "Architecture Evidence Status",
+      ARCHITECTURE_EVIDENCE_STATUSES,
+      "complete",
+      mode
+    );
+  }
+
+  if (kind === "planning-progress") {
+    return validateLifecycleField(
+      content,
+      "Planning Progress Status",
+      PLANNING_PROGRESS_STATUSES,
+      "complete",
+      mode
+    );
+  }
+
+  if (kind === "coder-completion") {
+    const decision = readInlineField(content, "Decision");
+    if (!isAllowedValue(decision, CODER_COMPLETION_DECISIONS)) {
+      return [renderExactFieldError("Decision", CODER_COMPLETION_DECISIONS, decision)];
+    }
+    if (mode === "final" && decision === "incomplete") {
+      return [renderExactFieldError(
+        "Decision",
+        ["ready_for_review", "failed"],
+        decision
+      )];
+    }
+    return [];
+  }
+
+  if (kind === "architect-debug") {
+    return validateLifecycleField(
+      content,
+      "Status",
+      ARCHITECT_DEBUG_STATUSES,
+      "completed",
+      mode
+    );
+  }
+
+  if (kind === "architecture-diagnosis") {
+    const disposition = readArtifactSectionContent(content, "Final Disposition")?.trim().toLowerCase();
+    return isAllowedValue(disposition, ARCHITECTURE_DIAGNOSIS_DISPOSITIONS)
+      ? []
+      : [renderExactSectionError(
+          "Final Disposition",
+          ARCHITECTURE_DIAGNOSIS_DISPOSITIONS.join("|"),
+          disposition
+        )];
   }
 
   if (kind === "test-report") {
@@ -330,6 +328,9 @@ function validateArtifactFields(kind: ArtifactKind, content: string): string[] {
       }
     }
     if (result === "incomplete") {
+      if (mode === "final") {
+        invalidFields.push("Test Result must be pass or fail for final submission.");
+      }
       if (!hasSubstantiveSectionValue(completedValidation)) {
         invalidFields.push("Completed Validation must record progress when Test Result is incomplete.");
       }
@@ -399,6 +400,69 @@ function validateArtifactFields(kind: ArtifactKind, content: string): string[] {
   }
 
   return [];
+}
+
+function validateLifecycleField(
+  content: string,
+  field: string,
+  allowed: readonly string[],
+  finalValue: string | undefined,
+  mode: "draft" | "final"
+): string[] {
+  const value = readInlineField(content, field);
+  if (!isAllowedValue(value, allowed)) {
+    return [renderExactFieldError(field, allowed, value)];
+  }
+  if (mode === "final" && finalValue && value !== finalValue) {
+    return [renderExactFieldError(field, [finalValue], value)];
+  }
+  return [];
+}
+
+function validateHeadingContract(
+  content: string,
+  required: readonly string[]
+): { missing: string[]; invalid: string[] } {
+  const headings = readMarkdownHeadings(content);
+  const missing = required.filter((heading) => !headings.some((candidate) => candidate.text === heading));
+  const invalid: string[] = [];
+  for (const heading of required) {
+    const matches = headings.filter((candidate) => candidate.text === heading);
+    if (matches.length > 1) {
+      invalid.push(`Heading ${heading} must appear exactly once; found ${matches.length}.`);
+    }
+  }
+  let previousIndex = -1;
+  for (const heading of required) {
+    const index = headings.findIndex((candidate) => candidate.text === heading);
+    if (index < 0) {
+      continue;
+    }
+    if (index < previousIndex) {
+      invalid.push(`Heading ${heading} is out of the required order.`);
+    }
+    previousIndex = Math.max(previousIndex, index);
+  }
+  return { missing, invalid };
+}
+
+function readMarkdownHeadings(content: string): Array<{ level: number; text: string }> {
+  const result: Array<{ level: number; text: string }> = [];
+  let fenced = false;
+  for (const line of content.split(/\r?\n/)) {
+    if (/^\s*(```|~~~)/.test(line)) {
+      fenced = !fenced;
+      continue;
+    }
+    if (fenced) {
+      continue;
+    }
+    const match = /^(#{2,6})\s+(.+?)\s*#*\s*$/.exec(line);
+    if (match) {
+      result.push({ level: match[1].length, text: match[2].trim() });
+    }
+  }
+  return result;
 }
 
 function hasSubstantiveSectionValue(value: string | undefined): boolean {

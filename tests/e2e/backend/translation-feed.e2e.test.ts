@@ -43,6 +43,18 @@ describe("backend E2E translation feed with mock Claude Code", () => {
       await ctx.stop();
     });
 
+    const translator = await env.app.inject({
+      method: "POST",
+      url: "/api/translation/session/ensure",
+      payload: {
+        taskSlug: task.taskSlug,
+        permissionMode: "bypassPermissions",
+        model: "default",
+        effort: "medium"
+      }
+    });
+    expect(translator.statusCode).toBe(200);
+
     await startRole(env.app, task.taskSlug, "project-manager");
     await startRole(env.app, task.taskSlug, "architect");
     const pmSession = env.mockRuntime.getSessionByRole(task.taskSlug, "project-manager");

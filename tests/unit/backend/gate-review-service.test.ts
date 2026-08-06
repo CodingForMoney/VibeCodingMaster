@@ -110,7 +110,7 @@ describe("gate-review-service", () => {
       "utf8"
     );
     expect(await readFile(path.join(taskWorktree(tmpRepo), planSnapshot.snapshotPath), "utf8"))
-      .toBe("# Architecture Plan\n");
+      .toBe(validArchitecturePlan());
 
     expect(runnerCalls.some((call) => call.command === "git" && call.args[0] === "diff")).toBe(true);
     expect(sessionStarts).toEqual(["reviewer"]);
@@ -202,7 +202,7 @@ describe("gate-review-service", () => {
 
     await writeFile(
       path.join(taskWorktree(tmpRepo), ".ai/vcm/handoffs/architecture-plan.md"),
-      "# Architecture Plan\n\nReplacement plan.\n",
+      validArchitecturePlan().replace("One scoped change.", "Replacement scoped change."),
       "utf8"
     );
     const second = await service.requestReviewGate(tmpRepo, "demo-task", "architecture-plan");
@@ -966,7 +966,7 @@ describe("gate-review-service", () => {
     await writeHarnessFiles(tmpRepo);
     await writeFile(
       path.join(taskWorktree(tmpRepo), ".ai/vcm/handoffs/architecture-diagnosis.md"),
-      "# Architecture Diagnosis\n",
+      validArchitectureDiagnosis(),
       "utf8"
     );
     const runner = createRunner(tmpRepo, [], {
@@ -1102,11 +1102,245 @@ async function writeHarnessFiles(repoRoot: string): Promise<void> {
   await writeFile(path.join(taskRepoRoot, ".ai/vcm/handoffs/architecture-brief.md"), validArchitectureBrief(), "utf8");
   await writeFile(
     path.join(taskRepoRoot, ".ai/vcm/handoffs/architecture-evidence.md"),
-    "# Architecture Evidence\n\nArchitecture Evidence Status: complete\n",
+    validArchitectureEvidence(),
     "utf8"
   );
-  await writeFile(path.join(taskRepoRoot, ".ai/vcm/handoffs/architecture-plan.md"), "# Architecture Plan\n", "utf8");
+  await writeFile(path.join(taskRepoRoot, ".ai/vcm/handoffs/architecture-plan.md"), validArchitecturePlan(), "utf8");
+  await writeFile(path.join(taskRepoRoot, ".ai/vcm/handoffs/coder-completion.md"), validCoderCompletion(), "utf8");
+  await writeFile(path.join(taskRepoRoot, ".ai/vcm/handoffs/architect-debug.md"), validArchitectDebug(), "utf8");
+  await writeFile(path.join(taskRepoRoot, ".ai/vcm/handoffs/architecture-diagnosis.md"), validArchitectureDiagnosis(), "utf8");
   await writeFile(path.join(taskRepoRoot, ".ai/vcm/handoffs/test-report.md"), validTestReport(), "utf8");
+}
+
+function validArchitectureEvidence(): string {
+  return `# Architecture Evidence: demo-task
+
+Architecture Evidence Status: complete
+
+## Planning Boundary
+Feature boundary.
+
+## Entry Points And Behavior Paths
+Entry to completion.
+
+## State And Lifecycle
+Owned state lifecycle.
+
+## Callers And Consumers
+Current callers and consumers.
+
+## Existing Assumptions
+Verified assumptions.
+
+## Related Class Inventories
+Complete related class inventory.
+
+## External Boundaries
+No external boundary change.
+
+## Code And Docs Conflicts
+None.
+
+## Evidence Commands
+LSP and source reads.
+`;
+}
+
+function validArchitecturePlan(): string {
+  return `# Architecture Plan: demo-task
+
+Planning Result: complete
+
+## Accepted Scope
+Deliver the accepted behavior.
+
+## Current Code Reality
+
+### Planning Boundary
+Feature boundary.
+
+### Code Reading Evidence
+Current implementation and callers were read.
+
+### Existing Behavior Trace
+Entry to completion.
+
+### Code / Docs Conflicts
+None.
+
+## Architecture Decision
+
+### Changed Behavior Flow
+Entry to owner to completion.
+
+### Ownership
+Existing service owns state.
+
+### Data Flow
+Request to service to result.
+
+### Lifecycle
+Start, completion, and failure are explicit.
+
+### Boundaries
+Existing module boundary.
+
+### Invariants
+Single source of truth.
+
+### Failure Model
+Errors propagate to the caller.
+
+### Decision Rationale
+Use the existing boundary.
+
+## Module/File Plan
+One scoped change.
+
+## Public Surface Impact
+None.
+
+## Scaffold Manifest
+No scaffold items.
+
+## Scaffold Build Evidence
+Compile check passed at scaffold commit.
+
+## Tester Coverage Hints
+Cover changed behavior.
+
+## Docs Impact
+None.
+
+## Known Risks
+None.
+
+## Coder Handoff Notes
+Implement the plan.
+`;
+}
+
+function validCoderCompletion(): string {
+  return `# Coder Completion: demo-task
+
+Decision: ready_for_review
+
+## Scaffold Completion
+All items complete.
+
+## Changed Files
+src/feature.ts
+
+## Private Helpers Added
+None.
+
+## Manifest Deviations
+None.
+
+## Generated Context
+Current.
+
+## Baseline Tests Added Or Updated
+tests/feature.test.ts
+
+## L0/L1 Validation
+Passed.
+
+## Worker Results
+None.
+
+## Objective Failures
+None.
+`;
+}
+
+function validArchitectDebug(): string {
+  return `# Architect Debug: demo-task
+
+Status: completed
+
+## PM-Routed Failure
+Tester failure.
+
+## Confirmed Root Cause
+Confirmed root cause.
+
+## Implementation
+Implemented fix.
+
+## Changed Files And Public Surface
+src/feature.ts; no public surface change.
+
+## Baseline Tests
+Updated.
+
+## Diagnostic And L0/L1 Validation
+Passed.
+
+## L2/L3 Validation
+Applicable checks passed.
+
+## Generated Context
+Current.
+
+## Remaining Failure Evidence
+None.
+
+## Final Disposition
+Ready for Tester.
+`;
+}
+
+function validArchitectureDiagnosis(): string {
+  return `# Architecture Diagnosis: demo-task
+
+## Diagnosis Boundary
+Feature module.
+
+## Documents And Runtime Evidence
+Current evidence.
+
+## Code Reading Closure
+Complete.
+
+## Current Architecture
+Current ownership and flow.
+
+## Previous Debug Failure
+Recorded.
+
+## Failure Trace
+Entry to failure.
+
+## Architecture Assessment
+Broken ownership corrected.
+
+## Required Architecture Direction
+Restore single ownership.
+
+## Implementation And Validation
+
+### Changed Files And Public Surface
+src/feature.ts; no public surface change.
+
+### Baseline Tests
+Updated.
+
+### Diagnostic And L0/L1 Validation
+Passed.
+
+### L2/L3 Validation
+Applicable checks passed.
+
+### Generated Context
+Current.
+
+### Commit
+abc1234
+
+## Final Disposition
+diagnosis implementation completed
+`;
 }
 
 function validArchitectureBrief(): string {

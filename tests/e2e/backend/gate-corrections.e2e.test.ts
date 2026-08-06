@@ -14,7 +14,10 @@ import {
   startRole,
   updateGateSettings,
   waitFor,
-  writeConfirmedArchitectureBrief
+  writeCompleteArchitecturePlan,
+  writeCompletedArchitectDebug,
+  writeConfirmedArchitectureBrief,
+  writeReadyCoderCompletion
 } from "./helpers/e2e-actions.js";
 import { createMockClaudeE2eApp } from "./helpers/e2e-app.js";
 import { createE2eRepo, git } from "./helpers/e2e-repo.js";
@@ -47,7 +50,7 @@ describe("backend E2E Gate Review correction loops", () => {
     }, { once: false });
 
     const planPath = path.join(task.worktreePath, ".ai/vcm/handoffs/architecture-plan.md");
-    await fs.writeFile(planPath, "# Architecture Plan\n\nAccepted Scope: notification delivery.\n", "utf8");
+    await writeCompleteArchitecturePlan(task.worktreePath, task.taskSlug, "Initial notification delivery plan.");
 
     expect((await requestGateReview(env.app, task.taskSlug, "architecture-plan")).status).toBe("started");
     const rejected = await waitForGateDecision(env.app, task.taskSlug, "architecture-plan", "request_changes");
@@ -84,11 +87,7 @@ describe("backend E2E Gate Review correction loops", () => {
       await writeGateReport(ctx, reviewCount === 1 ? "request_changes" : "approve");
     }, { once: false });
 
-    await fs.writeFile(
-      path.join(task.worktreePath, ".ai/vcm/handoffs/coder-completion.md"),
-      "# Coder Completion\n\nDecision: ready_for_review\n\nChanged Files: feature.txt\n",
-      "utf8"
-    );
+    await writeReadyCoderCompletion(task.worktreePath, task.taskSlug);
     await fs.writeFile(
       path.join(task.worktreePath, ".ai/vcm/handoffs/test-report.md"),
       validTestReport(task.taskSlug, "Feature behavior -> L2 -> current implementation -> pass."),
@@ -105,22 +104,7 @@ describe("backend E2E Gate Review correction loops", () => {
     const originalBase = rejected.gates["code-diff"].baseCommit;
     expect(rejected.gates["code-diff"].codeDiffSources).toEqual(["coder"]);
 
-    await fs.writeFile(
-      path.join(task.worktreePath, ".ai/vcm/handoffs/architect-debug.md"),
-      [
-        "# Architect Debug",
-        "",
-        "Status: completed",
-        "",
-        "## Confirmed Root Cause",
-        "Delivery state was completed before its durable write.",
-        "",
-        "## Implementation",
-        "Move completion after the durable write.",
-        ""
-      ].join("\n"),
-      "utf8"
-    );
+    await writeCompletedArchitectDebug(task.worktreePath, task.taskSlug);
     await fs.writeFile(path.join(task.worktreePath, "feature.txt"), "durable write before completion\n", "utf8");
     await git(task.worktreePath, "add", "feature.txt");
     await git(task.worktreePath, "commit", "-m", "fix delivery completion ordering");
