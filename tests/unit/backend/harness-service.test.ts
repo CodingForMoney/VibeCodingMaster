@@ -94,8 +94,9 @@ describe("createHarnessService", () => {
     expect(await fs.readText("/repo/.claude/skills/vcm-architecture-interview/SKILL.md")).toContain("During an active Architect Interview");
     const codeNavigationSkill = await fs.readText("/repo/.claude/skills/vcm-code-navigation/SKILL.md");
     expect(codeNavigationSkill).toContain("record that limitation and leave the relationship unresolved");
-    expect(codeNavigationSkill).toContain("call `ToolSearch` with query `select:LSP`");
-    expect(codeNavigationSkill).toContain("start each navigation run with LSP `documentSymbol`");
+    expect(codeNavigationSkill).toContain("If `LSP` is unavailable, report a VCM LSP configuration failure");
+    expect(codeNavigationSkill).not.toContain("ToolSearch");
+    expect(codeNavigationSkill).toContain("Start each navigation run with LSP `documentSymbol`");
     expect(codeNavigationSkill).toContain("retry the same bounded workspace query at most two more times");
     expect(await fs.readText("/repo/.claude/skills/vcm-report-harness-issue/SKILL.md")).toContain("name: vcm-report-harness-issue");
     expect(await fs.readText("/repo/.claude/skills/vcm-report-harness-issue/SKILL.md")).toContain(".ai/vcm/harness-feedback/pending/");
@@ -157,9 +158,9 @@ describe("createHarnessService", () => {
     expect(frontmatterOf(architectAgent)).toContain(`disallowedTools: ${CODE_ROLE_DISALLOWED_TOOLS.join(", ")}`);
     expect(frontmatterOf(architectAgent)).not.toMatch(/^tools:/m);
     expect(architectAgent).toContain("Follow the preloaded `vcm-code-navigation` skill");
-    expect(architectAgent).toContain("LSP is mandatory for navigating project source code");
     expect(architectAgent).toContain("Do not use the built-in `Grep` tool or shell text-search commands");
-    expect(architectAgent).toContain("Do not run a source text search in parallel while LSP is loading");
+    expect(architectAgent).toContain("LSP is mandatory and directly available");
+    expect(architectAgent).toContain("report a VCM LSP configuration failure");
     expect(frontmatterOf(architectAgent)).toContain("skills:\n  - vcm-code-navigation");
     expect(architectAgent).toContain("Resolution Evidence");
     expect(architectAgent).toContain("verifiable behavior, implementation boundaries within the accepted scope, behavior/contract proof points");

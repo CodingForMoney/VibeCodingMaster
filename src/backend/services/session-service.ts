@@ -258,7 +258,12 @@ export function createSessionService(deps: SessionServiceDeps): SessionService {
         VCM_RUNTIME_SESSION_TOKEN: runtimeSessionToken
       }, modelEnvironment, {
         ...buildUsageTelemetryEnvironment(deps.apiUrl, role, model),
-        ...(roleUsesLsp(role) ? { ENABLE_LSP_TOOL: "true" } : {})
+        ...(roleUsesLsp(role)
+          ? {
+              ENABLE_LSP_TOOL: "true",
+              ENABLE_TOOL_SEARCH: "false"
+            }
+          : {})
       }),
       cols: input.cols,
       rows: input.rows

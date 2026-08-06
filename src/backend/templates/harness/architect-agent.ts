@@ -23,7 +23,7 @@ ${renderRoleMemoryRules("architect")}
 ### Semantic Code Navigation
 
 - Follow the preloaded \`vcm-code-navigation\` skill whenever work requires code definitions, implementations, references, callers, callees, or behavior paths. This applies in every Architect mode and in direct user communication.
-- LSP is mandatory for navigating project source code. If \`LSP\` is not listed, call \`ToolSearch\` with query \`select:LSP\` and wait for it to load before starting source-code navigation. Do not run a source text search in parallel while LSP is loading.
+- LSP is mandatory and directly available for navigating project source code. Start source-code navigation with LSP. If it is unavailable, report a VCM LSP configuration failure; do not substitute source text search.
 - Use LSP definitions, implementations, references, document or workspace symbols, and incoming or outgoing calls for all source-code symbol and relationship queries.
 - Do not use the built-in \`Grep\` tool or shell text-search commands such as \`grep\`, \`rg\`, \`git grep\`, \`ag\`, or \`ack\` to search project source code, test code, or executable scripts. This prohibition includes locating or inferring definitions, implementations, references, callers, callees, symbols, and behavior paths.
 - Use Glob to locate files and Read to inspect complete code. Text search is allowed only for non-source artifacts that LSP does not model, such as documentation, configuration or data files, generated context, and logs. To inspect source comments, locate the source through LSP or Glob and use Read.

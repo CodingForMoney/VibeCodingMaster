@@ -78,9 +78,14 @@ describe("createSessionService", () => {
 
   it("does not persist a fresh Claude session id from non-prompt hooks", async () => {
     const fs = createMemoryFs();
-    const service = createTestSessionService(fs, []);
+    const runtimeInputs: CreateTerminalSessionInput[] = [];
+    const service = createTestSessionService(fs, runtimeInputs);
 
     await service.startRoleSession("/repo", "demo-task", "coder");
+    expect(runtimeInputs[0]?.env).toMatchObject({
+      ENABLE_LSP_TOOL: "true",
+      ENABLE_TOOL_SEARCH: "false"
+    });
     const stopped = await recordCurrentRoleHook(service, {
       taskSlug: "demo-task",
       role: "coder",
@@ -124,6 +129,8 @@ describe("createSessionService", () => {
       VCM_ROLE: "project-manager"
     });
     expect(runtimeInputs[0]?.env?.VCM_SESSION_ID).toBeUndefined();
+    expect(runtimeInputs[0]?.env?.ENABLE_LSP_TOOL).toBeUndefined();
+    expect(runtimeInputs[0]?.env?.ENABLE_TOOL_SEARCH).toBeUndefined();
   });
 
   it("restores PM-declared workflow context when a project-manager session starts", async () => {

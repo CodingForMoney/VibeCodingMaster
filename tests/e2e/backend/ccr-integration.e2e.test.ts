@@ -139,6 +139,7 @@ describe("backend E2E CCR integration", () => {
     ]));
     expect(nativeInput.args).not.toContain("--allowedTools");
     expect(nativeInput.env.ENABLE_LSP_TOOL).toBe("true");
+    expect(nativeInput.env.ENABLE_TOOL_SEARCH).toBe("false");
     expect(nativeInput.args).not.toContain("--settings");
     expect(nativeInput.env.ANTHROPIC_BASE_URL).toBeUndefined();
     expect(nativeInput.env.ANTHROPIC_AUTH_TOKEN).toBeUndefined();
@@ -234,11 +235,13 @@ describe("backend E2E CCR integration", () => {
     ]));
     expect(reviewerInput.args).not.toContain("--allowedTools");
     expect(reviewerInput.env.ENABLE_LSP_TOOL).toBe("true");
+    expect(reviewerInput.env.ENABLE_TOOL_SEARCH).toBe("false");
     for (const auxiliary of launches.slice(1)) {
       const auxiliaryInput = env.mockRuntime.getCreateInput(auxiliary.json<{ id: string }>().id);
       expect(auxiliaryInput.args).not.toContain("--plugin-dir");
       expect(auxiliaryInput.args).toEqual(expect.arrayContaining(["--allowedTools", "Glob,Grep"]));
       expect(auxiliaryInput.env.ENABLE_LSP_TOOL).toBeUndefined();
+      expect(auxiliaryInput.env.ENABLE_TOOL_SEARCH).toBeUndefined();
     }
   });
 
