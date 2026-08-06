@@ -1,4 +1,5 @@
 import type { DispatchRoleCommandResult, ProjectRuntimeState, TaskStatusReport, TaskWorkspaceState } from "../../shared/types/api.js";
+import type { WorkflowControlState } from "../../shared/types/workflow.js";
 import type {
   AppPreferences,
   CcrIntegrationStatus,
@@ -322,6 +323,18 @@ export const apiClient = {
     }
     const query = params.toString();
     return request<ProjectRuntimeState>(`/api/projects/runtime-state${query ? `?${query}` : ""}`);
+  },
+  approveWorkflowOverride(taskSlug: string, overrideId: string, authorizationText: string) {
+    return request<WorkflowControlState>(
+      `/api/tasks/${encodeURIComponent(taskSlug)}/workflow-overrides/${encodeURIComponent(overrideId)}/approve`,
+      { method: "POST", body: JSON.stringify({ authorizationText }) }
+    );
+  },
+  rejectWorkflowOverride(taskSlug: string, overrideId: string) {
+    return request<WorkflowControlState>(
+      `/api/tasks/${encodeURIComponent(taskSlug)}/workflow-overrides/${encodeURIComponent(overrideId)}/reject`,
+      { method: "POST" }
+    );
   },
   listSessions(taskSlug: string) {
     return request<RoleSessionRecord[]>(`/api/tasks/${encodeURIComponent(taskSlug)}/sessions`);

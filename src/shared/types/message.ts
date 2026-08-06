@@ -1,5 +1,4 @@
 import type { VcmRoleName } from "./role.js";
-import type { TaskWorkflowDeclaration } from "./workflow.js";
 
 export type VcmMessageActor = VcmRoleName | "user";
 
@@ -32,7 +31,6 @@ export interface VcmRoleMessage {
   deliveredAt?: string;
   acceptedAt?: string;
   failureReason?: string;
-  workflow?: TaskWorkflowDeclaration;
 }
 
 export interface VcmOrchestrationState {
@@ -48,9 +46,9 @@ export interface VcmRouteFile {
   type: VcmMessageType;
   body: string;
   artifactRefs: string[];
-  workflow?: TaskWorkflowDeclaration;
   exists: boolean;
   pending: boolean;
+  contentHash?: string;
   updatedAt?: string;
 }
 

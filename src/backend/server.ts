@@ -50,6 +50,7 @@ import { createTerminalInterruptService, type TerminalInterruptService } from ".
 import { createTerminalProcessExitService, type TerminalProcessExitService } from "./services/terminal-process-exit-service.js";
 import { createTranslationService, type TranslationService } from "./services/translation-service.js";
 import { createUsageAnalyticsService, type UsageAnalyticsService } from "./services/usage-analytics-service.js";
+import { createWorkflowControlService, type WorkflowControlService } from "./services/workflow-control-service.js";
 import { createDiagnosticsService, type DiagnosticsService } from "./services/diagnostics-service.js";
 import { registerAppSettingsRoutes } from "./api/app-settings-routes.js";
 import { registerArtifactRoutes } from "./api/artifact-routes.js";
@@ -65,6 +66,7 @@ import { registerSessionRoutes } from "./api/session-routes.js";
 import { registerTaskRoutes } from "./api/task-routes.js";
 import { registerTranslationRoutes } from "./api/translation-routes.js";
 import { registerUsageAnalyticsRoutes } from "./api/usage-analytics-routes.js";
+import { registerWorkflowControlRoutes } from "./api/workflow-control-routes.js";
 import { registerTerminalWs } from "./ws/terminal-ws.js";
 import { toVcmError } from "./errors.js";
 import type { TerminalRuntime } from "./runtime/terminal-runtime.js";
@@ -107,6 +109,7 @@ export interface ServerDeps {
   runtime: TerminalRuntime;
   diagnosticsService: DiagnosticsService;
   usageAnalyticsService: UsageAnalyticsService;
+  workflowControlService?: WorkflowControlService;
 }
 
 export async function createServer(deps: ServerDeps, options: CreateServerOptions = {}): Promise<FastifyInstance> {
@@ -168,7 +171,8 @@ export async function createServer(deps: ServerDeps, options: CreateServerOption
     harnessService: deps.harnessService,
     harnessFeedbackService: deps.harnessFeedbackService,
     autoMemoryService: deps.autoMemoryService,
-    runtimeCoordinator: deps.runtimeCoordinator
+    runtimeCoordinator: deps.runtimeCoordinator,
+    workflowControlService: deps.workflowControlService
   });
   registerTaskRoutes(app, {
     projectService: deps.projectService,
@@ -195,6 +199,15 @@ export async function createServer(deps: ServerDeps, options: CreateServerOption
     artifactService: deps.artifactService,
     sessionService: deps.sessionService
   });
+  if (deps.workflowControlService) {
+    registerWorkflowControlRoutes(app, {
+      projectService: deps.projectService,
+      taskService: deps.taskService,
+      sessionService: deps.sessionService,
+      workflowControlService: deps.workflowControlService,
+      runtime: deps.runtime
+    });
+  }
   registerMessageRoutes(app, {
     projectService: deps.projectService,
     taskService: deps.taskService,
@@ -290,7 +303,8 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
   });
   const runtime = createNodePtyTerminalRuntime({ fs });
   const registry = createSessionRegistry();
-  const artifactService = createArtifactService(fs);
+  const workflowControlService = createWorkflowControlService({ fs });
+  const artifactService = createArtifactService(fs, { workflowControlService });
   const projectService = createProjectService({ fs, git, appSettings });
   const taskService = createTaskService({ fs, git, artifactService, projectService });
   const taskWorkflowService = createTaskWorkflowService({ fs });
@@ -354,6 +368,7 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     sessionService,
     taskService,
     taskWorkflowService,
+    workflowControlService,
     onRouteDelivered: ({ repoRoot, taskSlug, message }) =>
       architectRestartService.recordRouteDelivered(repoRoot, taskSlug, message)
   });
@@ -527,7 +542,8 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     terminalProcessExitService,
     runtime,
     diagnosticsService,
-    usageAnalyticsService
+    usageAnalyticsService,
+    workflowControlService
   };
 }
 

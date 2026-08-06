@@ -68,6 +68,7 @@ import { renderVcmProposeMemorySkillRules } from "../templates/harness/vcm-propo
 import { renderVcmReportHarnessIssueSkillRules } from "../templates/harness/vcm-report-harness-issue-skill.js";
 import { renderVcmRouteMessageSkillRules } from "../templates/harness/vcm-route-message-skill.js";
 import { renderUpdateTaskStateTool, renderVcmTaskStateSkillRules } from "../templates/harness/vcm-task-state-skill.js";
+import { renderVcmWorkflowReviewSkillRules } from "../templates/harness/vcm-workflow-review-skill.js";
 import { renderCheckScaffoldLedgerTool } from "../templates/harness/check-scaffold-ledger.js";
 import {
   renderRequestArchitectRestartTool,
@@ -285,6 +286,17 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
     ),
     ownership: "whole-file",
     renderRules: renderVcmTaskStateSkillRules
+  },
+  {
+    kind: "skill-vcm-workflow-review",
+    path: ".claude/skills/vcm-workflow-review/SKILL.md",
+    title: "VCM Workflow Review Skill",
+    frontmatter: renderSkillFrontmatter(
+      "vcm-workflow-review",
+      "Use before every project-manager dispatch to Architect, Coder, or Tester so VCM can approve the workflow transition."
+    ),
+    ownership: "whole-file",
+    renderRules: renderVcmWorkflowReviewSkillRules
   },
   {
     kind: "skill-vcm-final-acceptance",

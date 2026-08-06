@@ -39,7 +39,8 @@ No accumulated project memory yet.
 - Use the durable project docs below as role-relevant project truth.
 - Read module-local `CLAUDE.md` before editing a subdirectory if one exists.
 - `vcm-route-message` is the only channel for PM-hub dispatch and reporting among project-manager, architect, coder, and tester. Gate Review and tool-role work use their dedicated VCM skills and controllers. Follow the route skill's write-then-stop rule.
-- Project-manager uses `vcm-task-state` to declare the current workflow checkpoint. This state is recoverable context only; flow rules and task artifacts remain authoritative.
+- Before every PM dispatch to Architect, Coder, or Tester, project-manager must use `vcm-workflow-review`. Only an accepted Workflow Progress transition grants the next route.
+- `vcm-task-state` is recoverable context only. Workflow permission comes only from accepted `workflow-progress.md` submissions.
 - Use `vcm-long-running-validation` for long-running validation. Follow the background job limits below.
 - Use `vcm-report-harness-issue` when you notice a reusable VCM harness problem. Record feedback; do not contact Harness Engineer directly.
 - The root `<VCM-memory>` block is shared project memory. Treat every `<VCM-memory>` block as read-only and use `vcm-propose-memory` only when VCM assigns an exact memory proposal or candidate path.

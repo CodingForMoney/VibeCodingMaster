@@ -21,6 +21,101 @@ afterEach(async () => {
 });
 
 describe("backend E2E with mock Claude Code", () => {
+  it("consumes one workflow approval only after the target role accepts the PM route", async () => {
+    const env = await createMockClaudeE2eApp({ workflowControl: true });
+    cleanups.push(() => env.close());
+    const repo = await createE2eRepo();
+    cleanups.push(() => repo.cleanup());
+    const task = await connectAndCreateTask(env.app, repo, "workflow-approved-route");
+
+    env.mockRuntime.onPrompt("project-manager", "Start the approved workflow", async (ctx) => {
+      await ctx.userPromptSubmit();
+      await ctx.writeFile(".ai/vcm/handoffs/messages/project-manager-architect.md", [
+        "---",
+        "type: task",
+        "---",
+        "Design the complete accepted task.",
+        ""
+      ].join("\n"));
+      await ctx.stop();
+    });
+
+    env.mockRuntime.onPrompt("architect", "Design the complete accepted task", async (ctx) => {
+      await ctx.userPromptSubmit();
+      await ctx.appendTranscriptText("The approved Architect route was accepted.");
+      await ctx.stop();
+    });
+
+    const pm = await startRole(env.app, task.taskSlug, "project-manager");
+    await startRole(env.app, task.taskSlug, "architect");
+    expect(pm.runtimeSessionToken).toBeTruthy();
+
+    const progress = [
+      `# Workflow Progress: ${task.taskSlug}`,
+      "",
+      "Revision: 1",
+      "Flow: none",
+      "Status: not-started",
+      "",
+      "## Dispatch History",
+      "",
+      "none",
+      "",
+      "## Proposed Dispatch",
+      "",
+      "Requested Flow: code-change",
+      "Target Role: architect",
+      "Evidence: user accepted the complete code-change task",
+      "",
+      "## User Override",
+      "",
+      "Authorization ID: none",
+      "Authorization Quote: none",
+      "Violated Rule: none",
+      ""
+    ].join("\n");
+    const approval = await env.app.inject({
+      method: "POST",
+      url: `/api/tasks/${task.taskSlug}/artifacts/submit`,
+      payload: {
+        kind: "workflow-progress",
+        mode: "final",
+        role: "project-manager",
+        runtimeSessionToken: pm.runtimeSessionToken,
+        content: progress
+      }
+    });
+    expect(approval.statusCode, approval.body).toBe(200);
+
+    const beforeDispatch = await env.deps.workflowControlService!.getState({
+      taskRepoRoot: task.worktreePath,
+      stateRoot: ".ai/vcm",
+      handoffDir: ".ai/vcm/handoffs",
+      taskSlug: task.taskSlug
+    });
+    expect(beforeDispatch.pendingDispatch).toMatchObject({
+      targetRole: "architect",
+      status: "pending"
+    });
+
+    const pmSession = env.mockRuntime.getSessionByRole(task.taskSlug, "project-manager");
+    env.mockRuntime.write(pmSession!.id, "Start the approved workflow");
+    await env.mockRuntime.waitForIdle();
+
+    const afterDispatch = await env.deps.workflowControlService!.getState({
+      taskRepoRoot: task.worktreePath,
+      stateRoot: ".ai/vcm",
+      handoffDir: ".ai/vcm/handoffs",
+      taskSlug: task.taskSlug
+    });
+    expect(afterDispatch.pendingDispatch).toBeNull();
+    const savedProgress = await fs.readFile(
+      path.join(task.worktreePath, ".ai/vcm/handoffs/workflow-progress.md"),
+      "utf8"
+    );
+    expect(savedProgress).toContain("| 1 | code-change | architect |");
+  });
+
   it("routes a PM turn to Architect and back through real hooks, messages, and round state", async () => {
     const env = await createMockClaudeE2eApp();
     cleanups.push(() => env.close());

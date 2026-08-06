@@ -1,5 +1,5 @@
 import path from "node:path";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type {
   DeleteMessageHistoryResult,
   MarkAllMessagesDoneResult,
@@ -10,7 +10,7 @@ import type {
   VcmRouteFile,
   VcmRouteFileDispatchResult
 } from "../../shared/types/message.js";
-import type { RoleName, VcmRoleName } from "../../shared/types/role.js";
+import type { DispatchableRole, RoleName, VcmRoleName } from "../../shared/types/role.js";
 import { CORE_VCM_ROLE_NAMES } from "../../shared/constants.js";
 import { resolveRepoPath } from "../adapters/filesystem.js";
 import type { FileSystemAdapter } from "../adapters/filesystem.js";
@@ -20,6 +20,7 @@ import { renderMessageEnvelope } from "../templates/message-envelope.js";
 import type { TaskService } from "./task-service.js";
 import type { SessionService } from "./session-service.js";
 import type { TaskWorkflowService } from "./task-workflow-service.js";
+import type { WorkflowControlService } from "./workflow-control-service.js";
 
 export interface MessageService {
   listMessages(input: ListMessagesInput): Promise<VcmRoleMessage[]>;
@@ -74,6 +75,7 @@ export interface MessageServiceDeps {
   sessionService: SessionService;
   taskService: Pick<TaskService, "loadTask">;
   taskWorkflowService?: Pick<TaskWorkflowService, "recordPmDispatch">;
+  workflowControlService?: Pick<WorkflowControlService, "claimDispatch" | "releaseDispatch" | "confirmDispatch">;
   now?: () => string;
   id?: () => string;
   preDispatchSwitchDelayMs?: number;
@@ -195,8 +197,28 @@ export function createMessageService(deps: MessageServiceDeps): MessageService {
       };
     }
 
+    const messageId = id();
+    if (routeFile.fromRole === PM_ROLE && deps.workflowControlService) {
+      try {
+        await deps.workflowControlService.claimDispatch({
+          ...toWorkflowContext(input),
+          routePath: routeFile.path,
+          targetRole: routeFile.toRole as DispatchableRole,
+          routeContentHash: routeFile.contentHash ?? "",
+          messageId
+        });
+      } catch (error) {
+        return {
+          delivered: false,
+          requiresUserApproval: false,
+          clearedRouteFile: false,
+          failureReason: errorMessage(error)
+        };
+      }
+    }
+
     const message: VcmRoleMessage = {
-      id: id(),
+      id: messageId,
       taskSlug: input.taskSlug,
       createdAt: timestamp,
       fromRole: routeFile.fromRole,
@@ -204,7 +226,6 @@ export function createMessageService(deps: MessageServiceDeps): MessageService {
       type: routeFile.type,
       body: routeFile.body,
       artifactRefs: routeFile.artifactRefs,
-      workflow: routeFile.fromRole === PM_ROLE ? routeFile.workflow : undefined,
       bodyPath: routeFile.path,
       routePath: routeFile.path,
       dispatchingAt: timestamp,
@@ -216,9 +237,16 @@ export function createMessageService(deps: MessageServiceDeps): MessageService {
       ...message,
       deliveredAt: timestamp
     };
-    await submitTerminalInput(deps.runtime, session.id, renderMessageEnvelope(delivered), {
-      enterDelayMs: autoDispatchEnterDelayMs
-    });
+    try {
+      await submitTerminalInput(deps.runtime, session.id, renderMessageEnvelope(delivered), {
+        enterDelayMs: autoDispatchEnterDelayMs
+      });
+    } catch (error) {
+      if (routeFile.fromRole === PM_ROLE) {
+        await deps.workflowControlService?.releaseDispatch(toWorkflowContext(input), messageId);
+      }
+      throw error;
+    }
     await deps.sessionService.markRoleActivityRunning(
       input.repoRoot,
       input.taskSlug,
@@ -230,7 +258,7 @@ export function createMessageService(deps: MessageServiceDeps): MessageService {
         taskRepoRoot: input.taskRepoRoot ?? input.repoRoot,
         stateRoot: input.stateRoot,
         taskSlug: input.taskSlug
-      }, routeFile.workflow, {
+      }, undefined, {
         messageId: delivered.id,
         toRole: delivered.toRole
       }).catch(() => undefined);
@@ -266,7 +294,7 @@ export function createMessageService(deps: MessageServiceDeps): MessageService {
         const messages = await readLatestMessages(deps.fs, getMessagesPath(getStateRepoRoot(input), input.stateRoot, input.taskSlug));
         const messageId = extractVcmMessageId(input.prompt);
         if (!messageId) {
-          return undefined;
+          return confirmManualRoute(input, timestamp);
         }
         const message = findDeliveredMessageForPrompt(messages, input.role, messageId);
         if (!message) {
@@ -278,6 +306,9 @@ export function createMessageService(deps: MessageServiceDeps): MessageService {
           acceptedAt: timestamp,
           failureReason: undefined
         };
+        if (accepted.fromRole === PM_ROLE) {
+          await deps.workflowControlService?.confirmDispatch(toWorkflowContext(input), accepted.id);
+        }
         await appendMessageSnapshot(deps.fs, input, accepted);
         await clearRouteFileIfStillMatchesMessage(deps.fs, input, accepted);
         return accepted;
@@ -374,12 +405,71 @@ export function createMessageService(deps: MessageServiceDeps): MessageService {
     });
   }
 
-  async function markDispatchConfirmationFailure(input: ListMessagesInput, messageId: string, failureReason: string): Promise<void> {
+  async function confirmManualRoute(
+    input: ConfirmPromptSubmittedInput,
+    timestamp: string
+  ): Promise<VcmRoleMessage | undefined> {
+    if (!input.prompt?.trim() || input.role === PM_ROLE) return undefined;
+    const routes = await listRouteFiles(deps.fs, toRouteContext(input));
+    const routeFile = routes.find((candidate) =>
+      candidate.pending
+      && candidate.fromRole === PM_ROLE
+      && candidate.toRole === input.role
+      && candidate.body.trim() === input.prompt!.trim()
+    );
+    if (!routeFile) return undefined;
+
+    const messageId = id();
+    await deps.workflowControlService?.claimDispatch({
+      ...toWorkflowContext(input),
+      routePath: routeFile.path,
+      targetRole: routeFile.toRole as DispatchableRole,
+      routeContentHash: routeFile.contentHash ?? "",
+      messageId
+    });
+    const accepted: VcmRoleMessage = {
+      id: messageId,
+      taskSlug: input.taskSlug,
+      createdAt: timestamp,
+      fromRole: routeFile.fromRole,
+      toRole: routeFile.toRole,
+      type: routeFile.type,
+      body: routeFile.body,
+      artifactRefs: routeFile.artifactRefs,
+      bodyPath: routeFile.path,
+      routePath: routeFile.path,
+      dispatchingAt: timestamp,
+      deliveredAt: timestamp,
+      acceptedAt: timestamp
+    };
+    try {
+      await deps.workflowControlService?.confirmDispatch(toWorkflowContext(input), messageId);
+    } catch (error) {
+      await deps.workflowControlService?.releaseDispatch(toWorkflowContext(input), messageId);
+      throw error;
+    }
+    await appendMessageSnapshot(deps.fs, input, accepted);
+    await clearRouteFileIfStillMatchesMessage(deps.fs, input, accepted);
+    await deps.taskWorkflowService?.recordPmDispatch({
+      taskRepoRoot: input.taskRepoRoot ?? input.repoRoot,
+      stateRoot: input.stateRoot,
+      taskSlug: input.taskSlug
+    }, undefined, {
+      messageId: accepted.id,
+      toRole: accepted.toRole
+    }).catch(() => undefined);
+    return accepted;
+  }
+
+  async function markDispatchConfirmationFailure(input: ScanPendingRouteFilesInput, messageId: string, failureReason: string): Promise<void> {
     await withTaskLock(taskLocks, getMessagesPath(getStateRepoRoot(input), input.stateRoot, input.taskSlug), async () => {
       const messages = await readLatestMessages(deps.fs, getMessagesPath(getStateRepoRoot(input), input.stateRoot, input.taskSlug));
       const current = messages.find((message) => message.id === messageId);
       if (!current || current.acceptedAt) {
         return;
+      }
+      if (current.fromRole === PM_ROLE) {
+        await deps.workflowControlService?.releaseDispatch(toWorkflowContext(input), messageId);
       }
       await appendMessageSnapshot(deps.fs, input, {
         ...current,
@@ -400,6 +490,15 @@ function toRouteContext(input: ListRouteFilesInput): RouteContext {
     repoRoot: input.repoRoot,
     taskRepoRoot: input.taskRepoRoot,
     handoffDir: input.handoffDir
+  };
+}
+
+function toWorkflowContext(input: ListRouteFilesInput) {
+  return {
+    taskRepoRoot: input.taskRepoRoot ?? input.repoRoot,
+    stateRoot: input.stateRoot,
+    handoffDir: input.handoffDir,
+    taskSlug: input.taskSlug
   };
 }
 
@@ -428,9 +527,9 @@ async function listRouteFiles(fs: FileSystemAdapter, input: RouteContext): Promi
       type: parsed.type,
       body: parsed.body,
       artifactRefs: parsed.artifactRefs,
-      workflow: parsed.workflow,
       exists: true,
-      pending: parsed.body.trim().length > 0
+      pending: parsed.body.trim().length > 0,
+      contentHash: createHash("sha256").update(content).digest("hex")
     });
   }
 
@@ -455,17 +554,14 @@ function parseRouteFileContent(content: string, fromRole: VcmRoleName, toRole: V
   type: VcmMessageType;
   body: string;
   artifactRefs: string[];
-  workflow?: VcmRouteFile["workflow"];
 } {
   const { frontmatter, body } = splitFrontmatter(content);
   const type = parseMessageType(frontmatter.type) ?? getDefaultMessageType(fromRole, toRole);
   const artifactRefs = parseArtifactRefs(frontmatter);
-  const workflow = fromRole === PM_ROLE ? parseWorkflowDeclaration(frontmatter) : undefined;
   return {
     type,
     body: body.trim(),
-    artifactRefs,
-    workflow
+    artifactRefs
   };
 }
 
@@ -520,27 +616,6 @@ function parseArtifactRefs(frontmatter: Record<string, string>): string[] {
     .split(",")
     .map((entry) => entry.trim())
     .filter(Boolean);
-}
-
-function parseWorkflowDeclaration(frontmatter: Record<string, string>): VcmRouteFile["workflow"] {
-  const declaration = {
-    flow: frontmatter.workflow_flow,
-    step: frontmatter.workflow_step,
-    branch: frontmatter.workflow_branch,
-    resumePoint: frontmatter.workflow_resume_point,
-    status: frontmatter.workflow_status,
-    evidenceRefs: parseCommaSeparated(frontmatter.workflow_evidence_refs)
-  };
-  return Object.values(declaration).some((value) => Array.isArray(value) ? value.length > 0 : value !== undefined)
-    ? declaration
-    : undefined;
-}
-
-function parseCommaSeparated(value: string | undefined): string[] | undefined {
-  if (value === undefined) {
-    return undefined;
-  }
-  return value.split(",").map((entry) => entry.trim()).filter(Boolean);
 }
 
 function getDefaultMessageType(fromRole: VcmRoleName, toRole: VcmRoleName): VcmMessageType {
@@ -625,18 +700,10 @@ async function clearRouteFileIfStillMatchesMessage(
   if (
     parsed.body.trim() === message.body.trim() &&
     parsed.type === message.type &&
-    arraysEqual(parsed.artifactRefs, message.artifactRefs) &&
-    workflowDeclarationsEqual(parsed.workflow, message.workflow)
+    arraysEqual(parsed.artifactRefs, message.artifactRefs)
   ) {
     await fs.writeText(absolutePath, "");
   }
-}
-
-function workflowDeclarationsEqual(
-  left: VcmRouteFile["workflow"],
-  right: VcmRoleMessage["workflow"]
-): boolean {
-  return JSON.stringify(left ?? null) === JSON.stringify(right ?? null);
 }
 
 function isCoreRouteRole(role: string): role is VcmRoleName {

@@ -267,6 +267,7 @@ function degradedArtifactSummary(handoffDir: string): ArtifactSummary {
       architectureDiagnosisPath: `${handoffDir}/architecture-diagnosis.md`,
       testReportPath: `${handoffDir}/test-report.md`,
       docsSyncReportPath: `${handoffDir}/docs-sync-report.md`,
+      workflowProgressPath: `${handoffDir}/workflow-progress.md`,
       finalAcceptancePath: `${handoffDir}/final-acceptance.md`
     },
     checks: []

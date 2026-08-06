@@ -44,6 +44,7 @@ import { createTerminalProcessExitService } from "../../../../src/backend/servic
 import { createDiagnosticsService } from "../../../../src/backend/services/diagnostics-service.js";
 import { createUsageAnalyticsService } from "../../../../src/backend/services/usage-analytics-service.js";
 import { createJobGuardService } from "../../../../src/backend/services/job-guard-service.js";
+import { createWorkflowControlService } from "../../../../src/backend/services/workflow-control-service.js";
 import { readVcmPackageVersion } from "../../../../src/backend/app-version.js";
 import type { RoleName } from "../../../../src/shared/types/role.js";
 import {
@@ -69,6 +70,7 @@ export interface MockClaudeE2eAppOptions {
   ccrGateway?: CcrGatewayAdapter;
   ccrBaseEnv?: NodeJS.ProcessEnv;
   now?: () => string;
+  workflowControl?: boolean;
 }
 
 export async function createMockClaudeE2eApp(options: MockClaudeE2eAppOptions = {}): Promise<MockClaudeE2eApp> {
@@ -95,7 +97,10 @@ export async function createMockClaudeE2eApp(options: MockClaudeE2eAppOptions = 
       }
     }
   });
-  const artifactService = createArtifactService(fsAdapter);
+  const workflowControlService = options.workflowControl
+    ? createWorkflowControlService({ fs: fsAdapter, now: options.now })
+    : undefined;
+  const artifactService = createArtifactService(fsAdapter, { workflowControlService });
   const projectService = createProjectService({ fs: fsAdapter, git, appSettings });
   const taskService = createTaskService({ fs: fsAdapter, git, artifactService, projectService });
   const taskWorkflowService = createTaskWorkflowService({ fs: fsAdapter });
@@ -170,6 +175,7 @@ export async function createMockClaudeE2eApp(options: MockClaudeE2eAppOptions = 
     sessionService,
     taskService,
     taskWorkflowService,
+    workflowControlService,
     preDispatchSwitchDelayMs: 0,
     autoDispatchEnterDelayMs: 0,
     dispatchConfirmationEnabled: false,
@@ -369,7 +375,8 @@ export async function createMockClaudeE2eApp(options: MockClaudeE2eAppOptions = 
     terminalProcessExitService,
     runtime: mockRuntime,
     diagnosticsService,
-    usageAnalyticsService
+    usageAnalyticsService,
+    workflowControlService
   };
   const app = await createServer(deps);
   mockRuntime.setHookDispatcher(async (input, options) => {

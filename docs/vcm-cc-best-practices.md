@@ -228,6 +228,7 @@ Current runtime paths include:
 <taskRepoRoot>/.ai/vcm/handoffs/coder-completion.md
 <taskRepoRoot>/.ai/vcm/handoffs/test-report.md
 <taskRepoRoot>/.ai/vcm/handoffs/docs-sync-report.md
+<taskRepoRoot>/.ai/vcm/handoffs/workflow-progress.md
 <taskRepoRoot>/.ai/vcm/handoffs/final-acceptance.md
 <taskRepoRoot>/.ai/vcm/handoffs/known-issues.md
 <taskRepoRoot>/.ai/vcm/gate-reviews/
@@ -248,11 +249,11 @@ state, recover tool sessions, recover task rounds, clear impossible
 activity, and remove temporary translation runtime leftovers. Runtime process
 ids are in-memory checks, not durable project data.
 
-Task workflow state is PM-declared recovery context. PM includes it in route
-frontmatter and uses `vcm-task-state` at checkpoints without a role route. VCM
-stores and displays the declaration but does not infer transitions or choose the
-next role. Round, Turn, Session, and Gate Review state remain separate observed
-runtime facts. Workflow-state failures are warnings and never block the task.
+Task workflow state is PM-declared recovery context. PM may use
+`vcm-task-state` at checkpoints, but that declaration cannot authorize a role
+dispatch. Workflow permission comes from the append-only
+`workflow-progress.md` record and one backend-owned pending approval. Round,
+Turn, Session, and Gate Review state remain separate observed runtime facts.
 
 ## 6. Task and Worktree Model
 
@@ -511,11 +512,17 @@ VCM role routing.
 PM may use a lightweight relay message when forwarding a user's clarification,
 confirmation, rejection, preference, or small constraint to an active role.
 
-PM route frontmatter also declares the current workflow checkpoint through the
-fields defined by `vcm-task-state`. At waiting, Gate, completion, or another
-checkpoint without a role route, PM uses `.ai/tools/update-task-state`. This
-declaration supports recovery and display only; normal flow rules and artifacts
-remain authoritative.
+Before every PM dispatch to Architect, Coder, or Tester, PM uses
+`vcm-workflow-review` to submit the next `workflow-progress.md` revision. VCM
+validates the append-only history, requested flow, target role, and current
+artifacts, then grants one matching route. Route frontmatter contains no
+workflow approval metadata. The approval is consumed only when the target
+role's matching `UserPromptSubmit` confirms delivery.
+
+If VCM rejects a transition, PM remains in the current turn. A direct user may
+authorize that exact rejected transition through the VCM approval dialog. The
+authorization is bound to one revision, flow, target, evidence, and violated
+rule and can be consumed only once.
 
 Role-authored workflow Markdown must be submitted through
 `.ai/tools/vcm-artifact`. Roles write candidates outside `.ai/vcm`; VCM checks

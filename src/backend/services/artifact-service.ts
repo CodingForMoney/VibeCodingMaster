@@ -28,10 +28,12 @@ import {
   renderKnownIssuesTemplate,
   renderPlanningProgressTemplate,
   renderMessageRouteTemplate,
-  renderTestReportTemplate
+  renderTestReportTemplate,
+  renderWorkflowProgressTemplate
 } from "../templates/handoff.js";
 import { renderRoleCommandTemplate } from "../templates/role-command.js";
 import { validateMemoryProposal } from "./memory-proposal-validation.js";
+import type { WorkflowControlService } from "./workflow-control-service.js";
 
 export interface ArtifactService {
   getHandoffPaths(repoRoot: string, handoffDir: string): HandoffPaths;
@@ -80,6 +82,7 @@ export interface SaveRoleCommandInput extends ReadRoleCommandInput {
 export interface SubmitArtifactInput {
   repoRoot: string;
   baseRepoRoot: string;
+  stateRoot?: string;
   handoffDir: string;
   taskSlug: string;
   kind: string;
@@ -87,6 +90,10 @@ export interface SubmitArtifactInput {
   role: RoleName;
   content: string;
   artifactPath?: string;
+}
+
+export interface ArtifactServiceDeps {
+  workflowControlService?: Pick<WorkflowControlService, "submitProgress" | "assertRouteAuthorized">;
 }
 
 const ARTIFACT_PATH_KEYS: Array<[ArtifactKind, keyof HandoffPaths]> = [
@@ -100,6 +107,7 @@ const ARTIFACT_PATH_KEYS: Array<[ArtifactKind, keyof HandoffPaths]> = [
   ["architecture-diagnosis", "architectureDiagnosisPath"],
   ["test-report", "testReportPath"],
   ["docs-sync-report", "docsSyncReportPath"],
+  ["workflow-progress", "workflowProgressPath"],
   ["final-acceptance", "finalAcceptancePath"]
 ];
 const ROLE_COMMAND_PLACEHOLDER_PATTERN = /(^|\n)\s*(TBD|status:\s*draft)\s*(\n|$)/i;
@@ -112,7 +120,7 @@ const DEFAULT_MESSAGE_ROUTES: Array<[RoleName, RoleName]> = [
   ["tester", "project-manager"]
 ];
 
-export function createArtifactService(fs: FileSystemAdapter): ArtifactService {
+export function createArtifactService(fs: FileSystemAdapter, deps: ArtifactServiceDeps = {}): ArtifactService {
   return {
     getHandoffPaths(_repoRoot, handoffDir) {
       const roleCommandsDir = path.posix.join(handoffDir, "role-commands");
@@ -138,6 +146,7 @@ export function createArtifactService(fs: FileSystemAdapter): ArtifactService {
         architectureDiagnosisPath: path.posix.join(handoffDir, "architecture-diagnosis.md"),
         testReportPath: path.posix.join(handoffDir, "test-report.md"),
         docsSyncReportPath: path.posix.join(handoffDir, "docs-sync-report.md"),
+        workflowProgressPath: path.posix.join(handoffDir, "workflow-progress.md"),
         finalAcceptancePath: path.posix.join(handoffDir, "final-acceptance.md")
       };
     },
@@ -167,6 +176,7 @@ export function createArtifactService(fs: FileSystemAdapter): ArtifactService {
         [paths.architectureDiagnosisPath, renderArchitectureDiagnosisTemplate(input.taskSlug)],
         [paths.testReportPath, renderTestReportTemplate(input.taskSlug)],
         [paths.docsSyncReportPath, renderDocsSyncReportTemplate(input.taskSlug)],
+        [paths.workflowProgressPath, renderWorkflowProgressTemplate(input.taskSlug)],
         [paths.finalAcceptancePath, renderFinalAcceptanceTemplate(input.taskSlug)],
         ...Object.values(paths.messageRoutePaths).map((messagePath): [string, string] => [
           messagePath,
@@ -295,6 +305,31 @@ export function createArtifactService(fs: FileSystemAdapter): ArtifactService {
         if (errors.length > 0) {
           throw artifactRejected(input.kind, errors);
         }
+        if (input.kind === "workflow-progress") {
+          if (input.mode !== "final") {
+            throw artifactRejected(input.kind, ["Workflow Progress must be submitted in final mode."]);
+          }
+          if (!deps.workflowControlService) {
+            throw new VcmError({
+              code: "WORKFLOW_CONTROL_UNAVAILABLE",
+              message: "Workflow Control is unavailable.",
+              statusCode: 503
+            });
+          }
+          const submitted = await deps.workflowControlService.submitProgress({
+            taskRepoRoot: input.repoRoot,
+            stateRoot: input.stateRoot ?? ".ai/vcm",
+            handoffDir: input.handoffDir,
+            taskSlug: input.taskSlug
+          }, normalized);
+          return {
+            ok: true,
+            kind: input.kind,
+            mode: input.mode,
+            path: submitted.path,
+            status: "accepted"
+          };
+        }
         await writeAtomic(fs, resolveRepoPath(input.repoRoot, artifactPath), normalized);
         return {
           ok: true,
@@ -305,7 +340,7 @@ export function createArtifactService(fs: FileSystemAdapter): ArtifactService {
         };
       }
 
-      const dynamic = await validateDynamicArtifact(fs, input, normalized);
+      const dynamic = await validateDynamicArtifact(fs, input, normalized, deps.workflowControlService);
       await writeAtomic(fs, resolveRepoPath(dynamic.root, dynamic.path), normalized);
       return {
         ok: true,
@@ -341,7 +376,8 @@ function artifactRejected(kind: string, errors: string[]): VcmError {
 async function validateDynamicArtifact(
   fs: FileSystemAdapter,
   input: SubmitArtifactInput,
-  content: string
+  content: string,
+  workflowControlService?: Pick<WorkflowControlService, "assertRouteAuthorized">
 ): Promise<{ kind: "route-message" | "coder-worker-report" | "gate-review-report" | "memory-proposal" | "harness-feedback" | "retrospective-report"; root: string; path: string }> {
   if (input.mode !== "final") {
     throw artifactRejected(input.kind, ["Dynamic artifacts must be submitted in final mode."]);
@@ -354,7 +390,24 @@ async function validateDynamicArtifact(
     if (!route || route[0] !== input.role) {
       throw artifactRejected(input.kind, ["Route-message path must name the submitting role as the sender."]);
     }
-    validateRouteMessage(content, input.role);
+    validateRouteMessage(content);
+    if (input.role === "project-manager") {
+      if (!workflowControlService) {
+        throw new VcmError({
+          code: "WORKFLOW_CONTROL_UNAVAILABLE",
+          message: "Workflow Control is unavailable.",
+          statusCode: 503
+        });
+      }
+      await workflowControlService.assertRouteAuthorized({
+        taskRepoRoot: input.repoRoot,
+        stateRoot: input.stateRoot ?? ".ai/vcm",
+        handoffDir: input.handoffDir,
+        taskSlug: input.taskSlug,
+        routePath: artifactPath,
+        targetRole: route[1] as DispatchableRole
+      });
+    }
     return { kind: input.kind, root: input.repoRoot, path: artifactPath };
   }
   if (input.kind === "coder-worker-report") {
@@ -451,7 +504,7 @@ function validateCoderWorkerReport(content: string): void {
   if (errors.length > 0) throw artifactRejected("coder-worker-report", errors);
 }
 
-function validateRouteMessage(content: string, role: RoleName): void {
+function validateRouteMessage(content: string): void {
   const type = /^type:\s*(\S+)\s*$/m.exec(content)?.[1];
   const allowed = new Set(["task", "question", "revise", "cancel", "result", "blocked", "finding"]);
   if (!type || !allowed.has(type)) {
@@ -459,13 +512,6 @@ function validateRouteMessage(content: string, role: RoleName): void {
   }
   if (!content.startsWith("---\n") || !/\n---\n/.test(content) || !content.split(/\n---\n/, 2)[1]?.trim()) {
     throw artifactRejected("route-message", ["Route message requires frontmatter and a non-empty body."]);
-  }
-  if (role === "project-manager") {
-    for (const field of ["workflow_flow", "workflow_step", "workflow_status"]) {
-      if (!new RegExp(`^${field}:\\s*\\S+\\s*$`, "m").test(content)) {
-        throw artifactRejected("route-message", [`PM route message is missing ${field}.`]);
-      }
-    }
   }
 }
 

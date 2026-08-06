@@ -50,9 +50,6 @@ describe("createMessageService", () => {
       "---",
       "type: question",
       "artifact_refs: .ai/vcm/handoffs/architecture-plan.md",
-      "workflow_flow: code-change",
-      "workflow_step: coder-implementation",
-      "workflow_status: active",
       "---",
       "Can this implementation start?"
     ].join("\n"));
@@ -71,11 +68,6 @@ describe("createMessageService", () => {
         id: "msg_1",
         type: "question",
         artifactRefs: [".ai/vcm/handoffs/architecture-plan.md"],
-        workflow: {
-          flow: "code-change",
-          step: "coder-implementation",
-          status: "active"
-        },
         routePath: ".ai/vcm/handoffs/messages/project-manager-coder.md",
         dispatchingAt: "2026-05-29T00:00:00.000Z",
         deliveredAt: "2026-05-29T00:00:00.000Z"
@@ -101,11 +93,7 @@ describe("createMessageService", () => {
     expect(harness.writes[1]).toBe("\r");
     expect(harness.runningMarks).toEqual(["coder"]);
     expect(harness.workflowUpdates).toMatchObject([{
-      declaration: {
-        flow: "code-change",
-        step: "coder-implementation",
-        status: "active"
-      },
+      declaration: undefined,
       dispatch: {
         messageId: "msg_1",
         toRole: "coder"
@@ -280,15 +268,9 @@ describe("createMessageService", () => {
     });
   });
 
-  it("does not block PM delivery when workflow-state recording fails", async () => {
+  it("does not block PM delivery when dispatch recovery-state recording fails", async () => {
     const harness = createHarness(["coder"], { workflowRecordThrows: true });
-    await harness.writeRoute("project-manager-coder.md", [
-      "---",
-      "workflow_flow: code-change",
-      "workflow_step: coder-implementation",
-      "---",
-      "Implement the assigned scaffold."
-    ].join("\n"));
+    await harness.writeRoute("project-manager-coder.md", "Implement the assigned scaffold.");
 
     const [result] = await harness.service.scanAndDispatchPendingRouteFiles(harness.base);
 
@@ -297,6 +279,80 @@ describe("createMessageService", () => {
       message: { body: "Implement the assigned scaffold." }
     });
     expect(harness.writes[0]).toContain("Implement the assigned scaffold.");
+  });
+
+  it("does not deliver a PM route when Workflow Control denies its one-time claim", async () => {
+    const harness = createHarness(["coder"], { workflowControl: "deny" });
+    await harness.writeRoute("project-manager-coder.md", "Unapproved task.");
+
+    const [result] = await harness.service.scanAndDispatchPendingRouteFiles(harness.base);
+
+    expect(result).toMatchObject({
+      delivered: false,
+      failureReason: "workflow route denied"
+    });
+    expect(harness.writes).toEqual([]);
+    expect(harness.workflowControlClaims).toHaveLength(1);
+    await expect(harness.readRoute("project-manager-coder.md")).resolves.toBe("Unapproved task.");
+  });
+
+  it("confirms a manually pasted PM route only from an exact target UserPromptSubmit", async () => {
+    const harness = createHarness(["coder"], { workflowControl: "allow" });
+    await harness.writeRoute("project-manager-coder.md", [
+      "---",
+      "type: task",
+      "---",
+      "Implement the exact approved change."
+    ].join("\n"));
+
+    const unrelated = await harness.service.confirmPromptSubmitted({
+      ...harness.base,
+      role: "coder",
+      prompt: "Implement a different change."
+    });
+    expect(unrelated).toBeUndefined();
+    expect(harness.workflowControlClaims).toEqual([]);
+
+    const accepted = await harness.service.confirmPromptSubmitted({
+      ...harness.base,
+      role: "coder",
+      prompt: "Implement the exact approved change."
+    });
+
+    expect(accepted).toMatchObject({
+      id: "msg_1",
+      fromRole: "project-manager",
+      toRole: "coder",
+      acceptedAt: "2026-05-29T00:00:00.000Z"
+    });
+    expect(harness.workflowControlClaims).toEqual([expect.objectContaining({
+      targetRole: "coder",
+      messageId: "msg_1"
+    })]);
+    expect(harness.workflowControlConfirmations).toEqual(["msg_1"]);
+    await expect(harness.readRoute("project-manager-coder.md")).resolves.toBe("");
+  });
+
+  it("claims a PM approval before delivery and confirms it only on UserPromptSubmit", async () => {
+    const harness = createHarness(["coder"], { workflowControl: "allow" });
+    await harness.writeRoute("project-manager-coder.md", "Approved task.");
+
+    const [result] = await harness.service.scanAndDispatchPendingRouteFiles(harness.base);
+    expect(result.delivered).toBe(true);
+    expect(harness.workflowControlClaims).toEqual([expect.objectContaining({
+      targetRole: "coder",
+      routePath: ".ai/vcm/handoffs/messages/project-manager-coder.md",
+      messageId: "msg_1",
+      routeContentHash: expect.stringMatching(/^[a-f0-9]{64}$/)
+    })]);
+    expect(harness.workflowControlConfirmations).toEqual([]);
+
+    await harness.service.confirmPromptSubmitted({
+      ...harness.base,
+      role: "coder",
+      prompt: harness.writes[0]
+    });
+    expect(harness.workflowControlConfirmations).toEqual(["msg_1"]);
   });
 
   it("rejects peer route files because VCM routes through project-manager", async () => {
@@ -328,11 +384,14 @@ function createHarness(runningRoles: RoleName[], options: {
   dispatchConfirmationRetryDelaysMs?: number[];
   dispatchConfirmationFailureDelayMs?: number;
   workflowRecordThrows?: boolean;
+  workflowControl?: "allow" | "deny";
 } = {}) {
   const fs = createMemoryFs();
   const writes: string[] = [];
   const runningMarks: RoleName[] = [];
   const workflowUpdates: Array<Record<string, unknown>> = [];
+  const workflowControlClaims: Array<Record<string, unknown>> = [];
+  const workflowControlConfirmations: string[] = [];
   const activity = new Map<RoleName, RoleSessionRecord["activityStatus"]>();
   let nextId = 1;
   const service = createMessageService({
@@ -363,6 +422,16 @@ function createHarness(runningRoles: RoleName[], options: {
         return {} as never;
       }
     },
+    workflowControlService: options.workflowControl ? {
+      async claimDispatch(input) {
+        workflowControlClaims.push(input);
+        if (options.workflowControl === "deny") throw new Error("workflow route denied");
+      },
+      async releaseDispatch() {},
+      async confirmDispatch(_input, messageId) {
+        workflowControlConfirmations.push(messageId);
+      }
+    } : undefined,
     now: () => "2026-05-29T00:00:00.000Z",
     id: () => `msg_${nextId++}`,
     preDispatchSwitchDelayMs: 0,
@@ -379,6 +448,8 @@ function createHarness(runningRoles: RoleName[], options: {
     writes,
     runningMarks,
     workflowUpdates,
+    workflowControlClaims,
+    workflowControlConfirmations,
     setActivity(role: RoleName, nextActivity: RoleSessionRecord["activityStatus"]) {
       activity.set(role, nextActivity);
     },

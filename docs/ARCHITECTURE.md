@@ -23,7 +23,7 @@ layers plus supporting tools.
 
 - `api/`: Fastify route modules, one per domain (project, task, session, round,
   message, harness, gate-review, translation, gateway, diagnostics, artifacts,
-  runtime-state, usage analytics, app-settings, claude-hook). Routes are thin
+  workflow-control, runtime-state, usage analytics, app-settings, claude-hook). Routes are thin
   and delegate to services.
 - `services/`: business logic. Key services include `task-service`,
   `task-launch-service` (backend-owned one-click task start, shared by the GUI
@@ -31,6 +31,7 @@ layers plus supporting tools.
   task close, shared by the GUI endpoint and the gateway), `session-service`, `round-service`,
   `runtime-coordinator-service`, `runtime-recovery-service`,
   `terminal-process-exit-service`, `message-service`, `task-workflow-service`,
+  `workflow-control-service`,
   `architect-restart-service`,
   `artifact-service`, `harness-service`, `harness-feedback-service`,
   `auto-memory-service`,
@@ -253,6 +254,15 @@ consumers still validate the accepted artifact before using it, so an invalid
 or stale file cannot advance a Gate, Final Acceptance, memory review, or
 retrospective flow.
 
+`workflow-progress.md` has an additional backend-owned lifecycle.
+`workflow-control-service` validates its append-only history and legal target
+against the fixed flow policy plus current accepted artifacts and Gate state.
+An accepted revision grants one pending PM route. `message-service` claims that
+approval before terminal submission and confirms it only from the target
+role's matching `UserPromptSubmit`; confirmation appends the history row and
+clears the approval. Exact user overrides are recorded by the backend and are
+bound to one rejected transition.
+
 ## Auto Memory Ownership
 
 Harness Engineer owns the reviewed content of shared memory in the root
@@ -450,12 +460,20 @@ current flow, step, optional branch and resume point, status, and evidence
 references. It is separate from Round, Turn, Session, Gate Review, and process
 state: those services remain the source of truth for observed runtime facts.
 
-PM declarations arrive through PM route-file frontmatter or the
-`update-task-state` tool. The backend writes them atomically, returns them in the
+PM declarations arrive through the `update-task-state` tool. Route files carry
+no workflow declaration or approval metadata. The backend writes task-state
+declarations atomically, returns them in the
 task workspace aggregate, and restores saved context into a restarted or
 resumed PM session. The frontend only renders the aggregate state. Missing,
 stale, malformed, or unwritable workflow state never blocks message delivery,
 Gate Review, final acceptance, session launch, or task close.
+
+This state is recovery and display context only. Dispatch authorization is
+owned separately by `workflow-control-service`, the managed
+`workflow-progress.md` history, and `.ai/vcm/workflow-control.json`. The latter
+stores the pending one-time dispatch and user override decisions in the active
+task worktree. The frontend reads this state from the aggregated project
+runtime endpoint and only submits explicit user approve or reject actions.
 
 ## Task Close Ownership
 

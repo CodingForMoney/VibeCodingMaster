@@ -21,6 +21,7 @@ KINDS = (
     "architecture-diagnosis",
     "test-report",
     "docs-sync-report",
+    "workflow-progress",
     "final-acceptance",
     "route-message",
     "coder-worker-report",

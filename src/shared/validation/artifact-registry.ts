@@ -182,6 +182,16 @@ export const ARTIFACT_DEFINITIONS: readonly ArtifactDefinition[] = [
     ]
   },
   {
+    kind: "workflow-progress",
+    fileName: "workflow-progress.md",
+    owner: "project-manager",
+    requiredHeadings: [
+      "Dispatch History",
+      "Proposed Dispatch",
+      "User Override"
+    ]
+  },
+  {
     kind: "final-acceptance",
     fileName: "final-acceptance.md",
     owner: "project-manager",

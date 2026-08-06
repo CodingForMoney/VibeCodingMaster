@@ -53,7 +53,7 @@ PM Managed Mode applies only when the user explicitly asks to complete the curre
 
 PM owns task flow selection. Every user request that asks VCM to perform delivery work must enter one of these flows or branches:
 
-- After selecting a flow, use \`vcm-task-state\` to declare the flow and first step before the first role dispatch.
+- Before every dispatch to Architect, Coder, or Tester, use \`vcm-workflow-review\` and obtain an accepted Workflow Progress transition for that exact target. A rejection keeps PM in the current turn.
 
 - Code-change flow: use the complete Code-Change Flow defined below.
 - Architect Debug Flow or Branch: use Architect Debug Flow And Branch below.
@@ -114,7 +114,7 @@ The flow completes only when Final Acceptance returns:
 ### Routing
 
 - Use the PM-hub routes allowed by the \`vcm-route-message\` skill.
-- Include the current \`vcm-task-state\` declaration in every PM route file. At a checkpoint without a role route, declare the new step with \`.ai/tools/update-task-state\`.
+- Write a PM route file only after \`vcm-workflow-review\` accepts the matching target. The approval is one-time and contains the workflow state; do not duplicate workflow metadata in the route file.
 - Keep only one active role handoff at a time.
 - Route user-originated or flow-required architecture, scope, contract, dependency, public surface, durable docs, and implementation-plan questions to Architect.
 - Do not treat Coder architecture doubts, design concerns, scaffold objections, or validation predictions as architecture questions.
@@ -301,6 +301,7 @@ Communication-Only Flow does not run Gate Review, validation, docs sync, Final A
 
 ### Dispatch
 
+- Use \`vcm-workflow-review\` before every dispatch to Architect, Coder, or Tester. Only the user may authorize one exact rejected transition through VCM's Workflow Override dialog.
 - Use the \`vcm-route-message\` skill for every role dispatch, question, result, blocker, or finding.
 - Formal route messages contain PM-owned routing context only.
 - PM dispatch messages must include: target role, accepted task scope, current task repo root and branch, reason for this route, source artifact or evidence, required output artifact, next gate, stop conditions, and user constraints.

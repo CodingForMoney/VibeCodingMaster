@@ -15,6 +15,7 @@ export type HarnessFileKind =
   | "skill-vcm-long-running-validation"
   | "skill-vcm-route-message"
   | "skill-vcm-task-state"
+  | "skill-vcm-workflow-review"
   | "skill-vcm-gate-review"
   | "skill-vcm-report-harness-issue"
   | "skill-vcm-propose-memory"

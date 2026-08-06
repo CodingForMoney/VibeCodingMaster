@@ -1,0 +1,66 @@
+---
+name: vcm-workflow-review
+description: Use before every project-manager dispatch to Architect, Coder, or Tester so VCM can approve the workflow transition.
+---
+
+# VCM Workflow Review Skill
+
+## Purpose
+
+Use this skill before every Project Manager dispatch to Architect, Coder, or Tester. VCM validates the proposed transition against the confirmed task Flow Record and real task artifacts.
+
+## Submission
+
+Read the current `.ai/vcm/handoffs/workflow-progress.md`. Copy its Revision, Flow, Status, and Dispatch History exactly, increment Revision by one, and propose one dispatch:
+
+```md
+# Workflow Progress: <task-slug>
+
+Revision: <previous-revision + 1>
+Flow: <copy confirmed Flow exactly>
+Status: <copy confirmed Status exactly>
+
+## Dispatch History
+
+<copy exactly; use none when empty>
+
+## Proposed Dispatch
+
+Requested Flow: <none|code-change|architect-debug|architecture-diagnosis|docs-only|validation-only>
+Target Role: <architect|coder|tester>
+Evidence: <current artifact, Gate result, or user request supporting this dispatch>
+
+## User Override
+
+Authorization ID: none
+Authorization Quote: none
+Violated Rule: none
+```
+
+Use `Requested Flow` only to start a flow, switch a top-level flow, enter or replace a Branch, or return from a Branch. Otherwise use `none`.
+
+Submit the candidate outside `.ai/vcm`:
+
+```text
+.ai/tools/vcm-artifact workflow-progress --file <candidate> --mode final
+```
+
+An accepted submission grants exactly one matching PM route. Then use `vcm-route-message` for that target role.
+
+If VCM rejects the transition, remain in the current PM turn and choose a legal dispatch. Do not write the route file first.
+
+## User Override
+
+Only direct user authorization may override a rejected transition. To request confirmation, resubmit the same transition with:
+
+```text
+Authorization ID: request
+Authorization Quote: <exact proposed exception for the user>
+Violated Rule: <copy the exact VCM rejection reason>
+```
+
+Wait for VCM's user decision callback. If approved, resubmit the unchanged transition with the returned Authorization ID, exact Authorization Text, and the same Violated Rule. The approval applies once and only to that exact transition.
+
+## Completion
+
+When the active flow has completed without another role dispatch, increment Revision, copy the confirmed history exactly, set `Status: completed`, and set every Proposed Dispatch and User Override value to `none`. VCM accepts completion only when the flow's required final artifact and Gate evidence exists.

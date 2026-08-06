@@ -10,6 +10,7 @@ import type { RuntimeCoordinatorService } from "../services/runtime-coordinator-
 import type { SessionService } from "../services/session-service.js";
 import type { TaskService } from "../services/task-service.js";
 import type { TranslationWorkerService } from "../services/translation-worker-service.js";
+import type { WorkflowControlService } from "../services/workflow-control-service.js";
 
 export interface RuntimeStateRouteDeps {
   projectService: ProjectService;
@@ -20,6 +21,7 @@ export interface RuntimeStateRouteDeps {
   harnessFeedbackService: Pick<HarnessFeedbackService, "getState">;
   autoMemoryService: Pick<AutoMemoryService, "getState">;
   runtimeCoordinator: Pick<RuntimeCoordinatorService, "reconcileProject">;
+  workflowControlService?: Pick<WorkflowControlService, "getState">;
 }
 
 export function registerRuntimeStateRoutes(app: FastifyInstance, deps: RuntimeStateRouteDeps): void {
@@ -47,13 +49,17 @@ export function registerRuntimeStateRoutes(app: FastifyInstance, deps: RuntimeSt
         harnessBootstrapStatus: null,
         harnessFeedbackState,
         autoMemoryState: null,
-        gatewayStatus: coordinated.gatewayStatus
+        gatewayStatus: coordinated.gatewayStatus,
+        workflowControlState: null
       } satisfies ProjectRuntimeState;
     }
 
     try {
       const task = await deps.taskService.loadTask(project.repoRoot, taskSlug);
-      const [harnessStatus, harnessBootstrapStatus, autoMemoryState] = await Promise.all([
+      const config = deps.workflowControlService
+        ? await deps.projectService.loadConfig(project.repoRoot)
+        : null;
+      const [harnessStatus, harnessBootstrapStatus, autoMemoryState, workflowControlState] = await Promise.all([
         withOpenFileLimitFallback(
           () => deps.harnessService.getHarnessStatus(task.worktreePath),
           (error) => degradedHarnessStatus(error)
@@ -62,7 +68,13 @@ export function registerRuntimeStateRoutes(app: FastifyInstance, deps: RuntimeSt
           () => deps.harnessService.getBootstrapStatus(project.repoRoot, task.worktreePath, task.taskSlug),
           (error) => degradedBootstrapStatus(error)
         ),
-        deps.autoMemoryService.getState(project.repoRoot, task.worktreePath)
+        deps.autoMemoryService.getState(project.repoRoot, task.worktreePath),
+        deps.workflowControlService && config ? deps.workflowControlService.getState({
+          taskRepoRoot: task.worktreePath,
+          stateRoot: config.stateRoot,
+          handoffDir: task.handoffDir,
+          taskSlug: task.taskSlug
+        }) : Promise.resolve(null)
       ]);
 
       return {
@@ -73,7 +85,8 @@ export function registerRuntimeStateRoutes(app: FastifyInstance, deps: RuntimeSt
         harnessBootstrapStatus,
         harnessFeedbackState,
         autoMemoryState,
-        gatewayStatus: coordinated.gatewayStatus
+        gatewayStatus: coordinated.gatewayStatus,
+        workflowControlState
       } satisfies ProjectRuntimeState;
     } catch (error) {
       if (isOpenFileLimitError(error)) {
@@ -85,7 +98,8 @@ export function registerRuntimeStateRoutes(app: FastifyInstance, deps: RuntimeSt
           harnessBootstrapStatus: degradedBootstrapStatus(error),
           harnessFeedbackState,
           autoMemoryState: null,
-          gatewayStatus: coordinated.gatewayStatus
+          gatewayStatus: coordinated.gatewayStatus,
+          workflowControlState: null
         } satisfies ProjectRuntimeState;
       }
       throw error;

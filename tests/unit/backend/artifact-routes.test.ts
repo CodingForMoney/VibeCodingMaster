@@ -10,6 +10,9 @@ describe("artifact routes", () => {
       projectService: {
         async getCurrentProject() {
           return { repoRoot: "/repo" };
+        },
+        async loadConfig() {
+          return { stateRoot: ".ai/vcm" };
         }
       },
       taskService: {
@@ -57,6 +60,7 @@ describe("artifact routes", () => {
     expect(submissions).toEqual([expect.objectContaining({
       repoRoot: "/repo/.claude/worktrees/demo-task",
       baseRepoRoot: "/repo",
+      stateRoot: ".ai/vcm",
       taskSlug: "demo-task",
       role: "coder",
       kind: "coder-completion"
@@ -71,6 +75,9 @@ describe("artifact routes", () => {
       projectService: {
         async getCurrentProject() {
           return { repoRoot: "/repo" };
+        },
+        async loadConfig() {
+          return { stateRoot: ".ai/vcm" };
         }
       },
       taskService: {

@@ -42,6 +42,7 @@ import { renderVcmProposeMemorySkillRules } from "../templates/harness/vcm-propo
 import { renderVcmReportHarnessIssueSkillRules } from "../templates/harness/vcm-report-harness-issue-skill.js";
 import { renderVcmRouteMessageSkillRules } from "../templates/harness/vcm-route-message-skill.js";
 import { renderUpdateTaskStateTool, renderVcmTaskStateSkillRules } from "../templates/harness/vcm-task-state-skill.js";
+import { renderVcmWorkflowReviewSkillRules } from "../templates/harness/vcm-workflow-review-skill.js";
 import { renderCheckScaffoldLedgerTool } from "../templates/harness/check-scaffold-ledger.js";
 import {
   renderRequestArchitectRestartTool,
@@ -364,6 +365,17 @@ const WHOLE_FILES = [
       "vcm-task-state",
       "Use only as project-manager to declare the current task workflow checkpoint to VCM.",
       renderVcmTaskStateSkillRules()
+    )
+  },
+  {
+    path: ".claude/skills/vcm-workflow-review/SKILL.md",
+    category: "skill",
+    mode: 0o644,
+    content: renderSkillFile(
+      "VCM Workflow Review Skill",
+      "vcm-workflow-review",
+      "Use before every project-manager dispatch to Architect, Coder, or Tester so VCM can approve the workflow transition.",
+      renderVcmWorkflowReviewSkillRules()
     )
   },
   {
@@ -723,6 +735,7 @@ function fixedDirectories() {
     ".claude/skills/vcm-long-running-validation/",
     ".claude/skills/vcm-route-message/",
     ".claude/skills/vcm-task-state/",
+    ".claude/skills/vcm-workflow-review/",
     ".claude/skills/vcm-gate-review/",
     ".claude/skills/vcm-report-harness-issue/",
     ".claude/skills/vcm-propose-memory/",

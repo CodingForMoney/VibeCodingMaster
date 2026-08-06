@@ -549,6 +549,31 @@ ${renderArtifactOptions(DOCS_SYNC_DECISIONS)}
 `;
 }
 
+export function renderWorkflowProgressTemplate(taskSlug: string): string {
+  return `# Workflow Progress: ${taskSlug}
+
+Revision: 0
+Flow: none
+Status: not-started
+
+## Dispatch History
+
+none
+
+## Proposed Dispatch
+
+Requested Flow: none
+Target Role: none
+Evidence: none
+
+## User Override
+
+Authorization ID: none
+Authorization Quote: none
+Violated Rule: none
+`;
+}
+
 export function renderFinalAcceptanceTemplate(taskSlug: string): string {
   return `# Final Acceptance: ${taskSlug}
 

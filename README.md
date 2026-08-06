@@ -324,6 +324,13 @@ Automatic mode:
 - the UI switches to the target role before dispatch
 - Claude Code hooks confirm whether the prompt was accepted
 
+Before Project Manager can dispatch Architect, Coder, or Tester, it submits a
+strict `workflow-progress.md` transition through `vcm-workflow-review`. VCM
+checks the confirmed dispatch history and current task artifacts, then grants
+one matching route. The target role's `UserPromptSubmit` consumes that approval
+and appends the confirmed transition. A rejected transition can be bypassed
+only by an exact one-time user authorization recorded through the VCM dialog.
+
 If the flow stops, VCM always shows a blocking pause alert. `Pause alert sound`
 only controls the looping sound. Enabling Gateway turns that preference off once;
 it can be turned back on afterward. A new Gateway command closes an open pause

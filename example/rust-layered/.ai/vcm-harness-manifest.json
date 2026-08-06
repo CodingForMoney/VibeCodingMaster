@@ -4,7 +4,7 @@
   "harnessVersion": "0.7.39",
   "installMode": "fixed",
   "installedAt": "2026-06-07T00:00:00Z",
-  "updatedAt": "2026-08-06T11:07:33.504Z",
+  "updatedAt": "2026-08-06T12:36:57.207Z",
   "runtimeRoots": [
     ".ai/vcm/",
     ".claude/worktrees/"
@@ -337,6 +337,14 @@
       "lifecycle": "long-term"
     },
     {
+      "path": ".claude/skills/vcm-workflow-review/",
+      "entryType": "directory",
+      "category": "skill-directory",
+      "ownership": "vcm-created",
+      "source": "vcm-template",
+      "lifecycle": "long-term"
+    },
+    {
       "path": ".claude/skills/vcm-gate-review/",
       "entryType": "directory",
       "category": "skill-directory",
@@ -518,6 +526,18 @@
     },
     {
       "path": ".claude/skills/vcm-task-state/SKILL.md",
+      "entryType": "file",
+      "category": "skill",
+      "ownership": "whole-file",
+      "source": "vcm-template",
+      "lifecycle": "long-term",
+      "uninstall": {
+        "action": "delete-file-if-unchanged",
+        "requiresConfirmation": false
+      }
+    },
+    {
+      "path": ".claude/skills/vcm-workflow-review/SKILL.md",
       "entryType": "file",
       "category": "skill",
       "ownership": "whole-file",

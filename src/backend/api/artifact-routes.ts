@@ -86,6 +86,7 @@ export function registerArtifactRoutes(app: FastifyInstance, deps: ArtifactRoute
     "/api/tasks/:taskSlug/artifacts/submit",
     async (request) => {
       const project = await requireCurrentProject(deps.projectService);
+      const config = await deps.projectService.loadConfig(project.repoRoot);
       const task = await deps.taskService.loadTask(project.repoRoot, request.params.taskSlug);
       const body = request.body;
       if (!body || !isRoleName(body.role)) {
@@ -126,6 +127,7 @@ export function registerArtifactRoutes(app: FastifyInstance, deps: ArtifactRoute
       return deps.artifactService.submitArtifact({
         repoRoot: getTaskRuntimeRepoRoot(task),
         baseRepoRoot: project.repoRoot,
+        stateRoot: config.stateRoot,
         handoffDir: task.handoffDir,
         taskSlug: task.taskSlug,
         kind: body.kind,
@@ -180,6 +182,9 @@ function artifactNameToPath(paths: ReturnType<ArtifactService["getHandoffPaths"]
   }
   if (artifactName === "docs-sync-report.md") {
     return paths.docsSyncReportPath;
+  }
+  if (artifactName === "workflow-progress.md") {
+    return paths.workflowProgressPath;
   }
   if (artifactName === "final-acceptance.md") {
     return paths.finalAcceptancePath;

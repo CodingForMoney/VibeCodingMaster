@@ -11,6 +11,7 @@ export type ArtifactKind =
   | "architecture-diagnosis"
   | "test-report"
   | "docs-sync-report"
+  | "workflow-progress"
   | "final-acceptance";
 
 export type DynamicArtifactKind =
@@ -40,6 +41,7 @@ export interface HandoffPaths {
   architectureDiagnosisPath: string;
   testReportPath: string;
   docsSyncReportPath: string;
+  workflowProgressPath: string;
   finalAcceptancePath: string;
 }
 
