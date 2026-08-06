@@ -89,7 +89,7 @@ describe("createHarnessService", () => {
     expect(await fs.readText("/repo/.claude/skills/vcm-architecture-interview/SKILL.md")).toContain("name: vcm-architecture-interview");
     expect(await fs.readText("/repo/.claude/skills/vcm-architecture-interview/SKILL.md")).toContain("During an active Architect Interview");
     const codeNavigationSkill = await fs.readText("/repo/.claude/skills/vcm-code-navigation/SKILL.md");
-    expect(codeNavigationSkill).toContain("Text search may locate candidates or literal content");
+    expect(codeNavigationSkill).toContain("record that limitation and leave the relationship unresolved");
     expect(codeNavigationSkill).toContain("Start each navigation run with LSP `documentSymbol`");
     expect(codeNavigationSkill).toContain("retry the same bounded workspace query at most two more times");
     expect(await fs.readText("/repo/.claude/skills/vcm-report-harness-issue/SKILL.md")).toContain("name: vcm-report-harness-issue");

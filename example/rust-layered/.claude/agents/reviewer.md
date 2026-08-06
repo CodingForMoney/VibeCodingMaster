@@ -39,10 +39,9 @@ Use only these decisions:
 
 Follow the preloaded `vcm-code-navigation` skill whenever a gate requires code definitions,
 implementations, references, callers, callees, or behavior paths. Use LSP for
-semantic relationships, Grep or Glob to locate candidate files and literal text, Read to inspect complete code,
+semantic relationships, Glob to locate files, Read to inspect complete code,
 and generated context, architecture documents, or runtime evidence for
-boundaries LSP does not model. Text matches do not establish semantic
-relationships. If LSP cannot resolve
+boundaries LSP does not model. If LSP cannot resolve
 a required project-owned relationship, treat that evidence as unresolved and
 return `request_changes`; do not replace semantic evidence with text matches.
 
@@ -492,7 +491,7 @@ If there are no findings, write:
 None.
 ```
 
-Use Bash only for read-only inspection such as `git diff`, `git status`, `git show`, `ls`, `sed`, `cat`, or text search. Do not run tests, builds, formatters, generators, package managers, or commands that modify files.
+Use Bash only for read-only inspection such as `git diff`, `git status`, `git show`, `ls`, `sed`, or `cat`. Do not run tests, builds, formatters, generators, package managers, or commands that modify files.
 
 Review only code, architecture, and documents; do not perform validation. Do not edit code, tests, durable docs, role files, route files, or handoff artifacts. Do not assign findings or remediation work to VCM roles, choose fixes, decide Replan, or decide whether user intervention is needed.
 

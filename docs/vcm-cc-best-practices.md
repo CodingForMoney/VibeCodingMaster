@@ -692,13 +692,11 @@ For code reading, generated context locates the boundary; it does not replace
 semantic navigation or source inspection. VCM loads its bundled LSP bridge for
 Architect, Coder, and Reviewer; the project runtime must provide the matching
 language-server executable. Their Agent definitions preload
-`vcm-code-navigation`, and their launches explicitly enable Glob and Grep. The skill
+`vcm-code-navigation`. The skill
 warms the role Session with a file-symbol request before using definitions,
 implementations, references, and call hierarchy, then requires every resolved
 callable unit to be read in full. A successful executable probe alone is not
-workspace readiness. Grep and shell text search may locate candidate files,
-comments, configuration, or literal content, but they do not establish semantic
-relationships. Use generated context, architecture documents, and runtime
+workspace readiness. Use generated context, architecture documents, and runtime
 evidence for boundaries LSP does not model. If LSP cannot resolve a required
 project-owned relationship after the bounded retry, keep it unresolved. Expand
 one dependency hop at a time instead of injecting an unrestricted repository

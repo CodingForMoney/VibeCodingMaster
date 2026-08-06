@@ -23,7 +23,7 @@ Use this skill when Architect, Coder, or Reviewer must establish symbol definiti
 
 - Record each resolved relationship and whether it came from LSP, runtime evidence, an external boundary, or a generated boundary.
 - When an empty LSP result contradicts a direct call in the code, another LSP result, or runtime evidence, treat the relationship as unresolved. Record the contradiction and use exact fallback evidence.
-- If LSP is unavailable or cannot resolve a required project-owned relationship, record that limitation and leave the relationship unresolved. Text search may locate candidates or literal content, but it does not establish semantic relationships.
+- If LSP is unavailable or cannot resolve a required project-owned relationship, record that limitation and leave the relationship unresolved.
 - Generated indexes and architecture docs locate likely code; reading current-worktree implementation establishes behavior.
 
 ## Context Boundary
