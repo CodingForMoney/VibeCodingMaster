@@ -79,14 +79,7 @@ import { submitTerminalInput } from "../runtime/terminal-submit.js";
 import { VcmError } from "../errors.js";
 import { bumpHarnessRevision, readHarnessRevisionState } from "./harness-revision.js";
 import type { SessionService } from "./session-service.js";
-import {
-  CODE_INTELLIGENCE_AGENT_TOOLS,
-  CODE_INTELLIGENCE_MCP_TOOLS
-} from "./lsp-plugin.js";
-import {
-  createHarnessCodeIntelligenceDetector,
-  type CodeIntelligenceManager
-} from "./code-intelligence-service.js";
+import { createHarnessCodeIntelligenceDetector } from "./code-intelligence-service.js";
 
 const execFileAsync = promisify(execFile);
 const BOOTSTRAP_SESSION_PATH = ".ai/vcm/bootstrap/session.json";
@@ -126,7 +119,6 @@ export interface HarnessServiceDeps {
   now?: () => string;
   runFixedInstaller?: (repoRoot: string) => Promise<HarnessApplyResult>;
   vcmVersion?: string;
-  codeIntelligenceManager?: Pick<CodeIntelligenceManager, "getStatus">;
 }
 
 interface HarnessBootstrapRunState {
@@ -166,7 +158,6 @@ interface HarnessFileDefinition {
   blankLineBeforeEnd?: boolean;
   memoryBlock?: boolean;
   requiredTools?: string[];
-  removedTools?: string[];
   requiredSkills?: string[];
   defaultContentAfterBlock?: string;
   legacyWholeFile?: string;
@@ -389,13 +380,12 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
     path: ".claude/agents/reviewer.md",
     title: "Reviewer Agent",
     memoryBlock: true,
-    requiredTools: ["Grep", ...CODE_INTELLIGENCE_MCP_TOOLS],
-    removedTools: ["LSP"],
+    requiredTools: ["Grep", "LSP"],
     requiredSkills: ["vcm-code-navigation"],
     frontmatter: renderAgentFrontmatter(
       "reviewer",
       "VCM independent gate review role for architecture plans, validation adequacy, and code diffs.",
-      { tools: `Read, Grep, Glob, Bash, Write, ${CODE_INTELLIGENCE_AGENT_TOOLS}`, skills: ["vcm-code-navigation"] }
+      { tools: "Read, Grep, Glob, Bash, Write, LSP", skills: ["vcm-code-navigation"] }
     ),
     renderRules: renderReviewerAgentRules
   },
@@ -486,14 +476,13 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
     path: ".claude/agents/architect.md",
     title: "Architect Agent",
     memoryBlock: true,
-    requiredTools: ["Grep", "Agent", ...CODE_INTELLIGENCE_MCP_TOOLS],
-    removedTools: ["LSP"],
+    requiredTools: ["Grep", "Agent", "LSP"],
     requiredSkills: ["vcm-code-navigation"],
     blankLineBeforeEnd: true,
     frontmatter: renderAgentFrontmatter(
       "architect",
       "VCM architecture role for plans, module boundaries, public contracts, verifiable behavior, and docs sync.",
-      { tools: `Read, Grep, Glob, Bash, Edit, Write, Agent, ${CODE_INTELLIGENCE_AGENT_TOOLS}`, skills: ["vcm-code-navigation"] }
+      { tools: "Read, Grep, Glob, Bash, Edit, Write, Agent, LSP", skills: ["vcm-code-navigation"] }
     ),
     renderRules: renderArchitectHarnessRules
   },
@@ -502,13 +491,12 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
     path: ".claude/agents/coder.md",
     title: "Coder Agent",
     memoryBlock: true,
-    requiredTools: ["Grep", "Agent", ...CODE_INTELLIGENCE_MCP_TOOLS],
-    removedTools: ["LSP"],
+    requiredTools: ["Grep", "Agent", "LSP"],
     requiredSkills: ["vcm-code-navigation"],
     frontmatter: renderAgentFrontmatter(
       "coder",
       "VCM implementation role for scoped code changes and focused tests.",
-      { tools: `Read, Grep, Glob, Bash, Edit, Write, Agent, ${CODE_INTELLIGENCE_AGENT_TOOLS}`, skills: ["vcm-code-navigation"] }
+      { tools: "Read, Grep, Glob, Bash, Edit, Write, Agent, LSP", skills: ["vcm-code-navigation"] }
     ),
     renderRules: renderCoderHarnessRules
   },
@@ -531,14 +519,12 @@ export function createHarnessService(deps: HarnessServiceDeps): HarnessService {
   const codeIntelligenceDetector = createHarnessCodeIntelligenceDetector(deps.fs, {
     runner: deps.commandRunner
   });
-  const getCodeIntelligenceStatus = (repoRoot: string) =>
-    deps.codeIntelligenceManager?.getStatus(repoRoot) ?? codeIntelligenceDetector.detect(repoRoot);
 
   return {
     async getHarnessStatus(repoRoot) {
       const [analyses, codeIntelligence] = await Promise.all([
         analyzeHarnessFiles(deps.fs, repoRoot),
-        getCodeIntelligenceStatus(repoRoot)
+        codeIntelligenceDetector.detect(repoRoot)
       ]);
       const legacyChanges = await analyzeLegacyCodexHarnessPaths(deps.fs, repoRoot);
       const manifestChange = deps.runFixedInstaller
@@ -581,7 +567,7 @@ export function createHarnessService(deps: HarnessServiceDeps): HarnessService {
       const file = await readHarnessFileContent(deps.fs, repoRoot, definition.path);
       const [analyses, codeIntelligence] = await Promise.all([
         analyzeHarnessFiles(deps.fs, repoRoot),
-        getCodeIntelligenceStatus(repoRoot)
+        codeIntelligenceDetector.detect(repoRoot)
       ]);
       const legacyChanges = await analyzeLegacyCodexHarnessPaths(deps.fs, repoRoot);
       const manifestChange = deps.runFixedInstaller
@@ -1826,23 +1812,8 @@ function ensureAgentTools(content: string, requiredTools: string[] | undefined):
 }
 
 function normalizeAgentFrontmatter(content: string, definition: HarnessFileDefinition): string {
-  const obsoleteToolsRemoved = (definition.removedTools ?? []).reduce(removeAgentTool, content);
-  const toolsUpdated = ensureAgentTools(obsoleteToolsRemoved, definition.requiredTools);
+  const toolsUpdated = ensureAgentTools(content, definition.requiredTools);
   return (definition.requiredSkills ?? []).reduce(ensureAgentSkill, toolsUpdated);
-}
-
-function removeAgentTool(content: string, removedTool: string): string {
-  const frontmatterMatch = content.match(/^---\r?\n[\s\S]*?\r?\n---/);
-  const toolsMatch = frontmatterMatch?.[0].match(/^tools:\s*(.*)$/m);
-  if (!frontmatterMatch || !toolsMatch) {
-    return content;
-  }
-  const tools = toolsMatch[1].split(",").map((tool) => tool.trim()).filter(Boolean);
-  if (!tools.includes(removedTool)) {
-    return content;
-  }
-  const nextTools = tools.filter((tool) => tool !== removedTool).join(", ");
-  return content.replace(frontmatterMatch[0], frontmatterMatch[0].replace(toolsMatch[0], `tools: ${nextTools}`));
 }
 
 function ensureAgentSkill(content: string, requiredSkill: string): string {

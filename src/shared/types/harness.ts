@@ -56,10 +56,8 @@ export interface HarnessPlannedChange {
 export type HarnessCodeIntelligenceLanguage = "rust" | "typescript" | "python" | "go" | "cpp" | "java";
 export type HarnessCodeIntelligenceState = "available" | "partial" | "missing" | "not_detected";
 export type HarnessCodeIntelligenceLanguageState =
-  | "starting"
-  | "indexing"
-  | "ready"
-  | "stopped"
+  | "server_runnable"
+  | "plugin_missing"
   | "server_missing"
   | "server_failed"
   | "server_unverified";
@@ -68,13 +66,12 @@ export interface HarnessCodeIntelligenceLanguageStatus {
   language: HarnessCodeIntelligenceLanguage;
   label: string;
   serverCommand: string;
-  bridgeName: string;
+  pluginName: string;
   detected: true;
+  pluginReady: boolean;
   serverFound: boolean;
   serverRunnable: boolean;
   state: HarnessCodeIntelligenceLanguageState;
-  workspaceRoot?: string;
-  pid?: number;
   error?: string;
   detectedBy: string[];
 }

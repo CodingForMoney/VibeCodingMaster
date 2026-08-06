@@ -8,7 +8,6 @@ import type { AppSettingsService } from "./app-settings-service.js";
 import type { MessageService } from "./message-service.js";
 import type { ProjectService } from "./project-service.js";
 import type { SessionService } from "./session-service.js";
-import type { CodeIntelligenceManager } from "./code-intelligence-service.js";
 import { getTaskRuntimeRepoRoot, type TaskService } from "./task-service.js";
 
 const ONE_CLICK_SESSION_COLS = 100;
@@ -69,7 +68,6 @@ export interface TaskLaunchServiceDeps {
   appSettings: Pick<AppSettingsService, "getPreferences" | "getGateReviewSettings">;
   sessionService: Pick<SessionService, "getRoleSession" | "startRoleSession" | "resumeRoleSession" | "listRoleSessions">;
   messageService: Pick<MessageService, "updateOrchestrationState">;
-  codeIntelligenceManager: Pick<CodeIntelligenceManager, "activateTask">;
 }
 
 export function createTaskLaunchService(deps: TaskLaunchServiceDeps): TaskLaunchService {
@@ -132,8 +130,6 @@ export function createTaskLaunchService(deps: TaskLaunchServiceDeps): TaskLaunch
   return {
     async startTaskRoleSessions(repoRoot, input) {
       const { taskSlug, requireFreshStart } = input;
-      const task = await deps.taskService.loadTask(repoRoot, taskSlug);
-      await deps.codeIntelligenceManager.activateTask(getTaskRuntimeRepoRoot(task));
       if (requireFreshStart) {
         await assertNoExistingRoleSessions(repoRoot, taskSlug);
       }

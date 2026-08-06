@@ -187,32 +187,29 @@ languages and conventions, and subsequent VCM updates preserve them:
 
 Regenerate both after changing module layout, public exports, or HTTP routes.
 
-`code-intelligence-service` owns task-scoped language-server processes. When a
-task is created, selected, restored, or launched through either the GUI or
-Gateway, it derives languages from the active task worktree's manifests and
-`module-index.json`, probes the matching server executable, and starts one
-process per available language. All role sessions share those processes and
-indexes. Source files are synchronized with LSP `didOpen`/`didChange` before a
-query. Task close, task switch, and backend shutdown stop the processes; one
-unexpected process exit receives one automatic restart.
+VCM ships the local `vcm-lsp-bridge` Claude Code plugin. Session Service passes
+it through `--plugin-dir` and enables the LSP tool for Architect, Coder, and
+Reviewer sessions on both native Claude and CCR launches. Auxiliary roles do not
+load the plugin. Architect, Coder, and Reviewer preload the
+`vcm-code-navigation` skill through Agent frontmatter.
 
-VCM ships `vcm-code-intelligence-bridge`, a stateless Claude Code MCP plugin.
-Session Service passes it through `--plugin-dir` for Architect, Coder, and
-Reviewer on native Claude and CCR launches. The bridge forwards authenticated
-queries to the backend using the task slug, role, and current runtime session
-token; auxiliary roles cannot use it. The backend exposes status, document and
-workspace symbols, definitions, implementations, references, incoming and
-outgoing calls, and hover operations. Harness Studio renders the backend-owned
-workspace, PID, indexing state, and exact diagnostic.
+Architect, Coder, and Reviewer use LSP semantic navigation for definitions,
+references, implementations, and call relationships, then Read the resolved
+code. Unresolved project-owned relationships remain unresolved. The shared
+PreToolUse guard supervises Bash execution but does not prohibit text search.
 
-The `vcm-code-navigation` contract separates discovery from semantic evidence:
-generated indexes and Glob locate files, shared LSP establishes project-owned
-semantic relationships, and Read inspects resolved callable units in full. Grep
-is only for exact text LSP does not model. A starting or indexing server must be
-waited on; an unresolved LSP relationship remains unresolved and cannot be
-replaced by text matches, comments, memory, or inference. The project runtime,
-not VCM, owns installation of `rust-analyzer`, `typescript-language-server`,
-`pyright-langserver`, `gopls`, `clangd`, or `jdtls`.
+`code-intelligence-service` derives project languages from the active task
+worktree's root manifests and `module-index.json`. It validates the bundled
+plugin declaration, resolves the matching language-server executable from the
+backend `PATH`, and runs a bounded version probe. Probe results are cached for
+the backend process; detection does not start a persistent language server or
+scan the repository recursively. A successful probe means the server is
+runnable, not that a role workspace is indexed or semantically ready. Each role
+Session performs a file-symbol warm-up and bounded workspace-query retry through
+`vcm-code-navigation`. Harness Studio renders server availability and the exact
+backend diagnostic. The project runtime, not VCM, owns installation of
+`rust-analyzer`, `typescript-language-server`, `pyright-langserver`, `gopls`,
+`clangd`, or `jdtls`.
 
 ## Durable Documentation Ownership
 

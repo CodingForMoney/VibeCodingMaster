@@ -1,8 +1,5 @@
 import { describe, expect, it } from "vitest";
 import { createClaudeAdapter } from "../../../src/backend/adapters/claude-adapter.js";
-import { CODE_INTELLIGENCE_ALLOWED_TOOL } from "../../../src/shared/types/code-intelligence.js";
-
-const CODE_TOOLS = `Glob,Grep,${CODE_INTELLIGENCE_ALLOWED_TOOL}`;
 
 describe("createClaudeAdapter", () => {
   const adapter = createClaudeAdapter({
@@ -14,24 +11,24 @@ describe("createClaudeAdapter", () => {
   it("builds the default role command with the default model", () => {
     expect(adapter.buildRoleStartCommand("coder", "claude", "default", "00000000-0000-4000-8000-000000000001")).toEqual({
       command: "claude",
-      args: ["--allowedTools", CODE_TOOLS, "--agent", "coder", "--session-id", "00000000-0000-4000-8000-000000000001", "--model", "default"],
-      display: `claude --allowedTools '${CODE_TOOLS}' --agent coder --session-id 00000000-0000-4000-8000-000000000001 --model default`
+      args: ["--allowedTools", "Glob,Grep", "--agent", "coder", "--session-id", "00000000-0000-4000-8000-000000000001", "--model", "default"],
+      display: "claude --allowedTools 'Glob,Grep' --agent coder --session-id 00000000-0000-4000-8000-000000000001 --model default"
     });
   });
 
   it("builds bypassPermissions as a permission mode", () => {
     expect(adapter.buildRoleStartCommand("coder", "claude", "bypassPermissions")).toEqual({
       command: "claude",
-      args: ["--allowedTools", CODE_TOOLS, "--agent", "coder", "--model", "default", "--permission-mode", "bypassPermissions"],
-      display: `claude --allowedTools '${CODE_TOOLS}' --agent coder --model default --permission-mode bypassPermissions`
+      args: ["--allowedTools", "Glob,Grep", "--agent", "coder", "--model", "default", "--permission-mode", "bypassPermissions"],
+      display: "claude --allowedTools 'Glob,Grep' --agent coder --model default --permission-mode bypassPermissions"
     });
   });
 
   it("builds plan as a permission mode", () => {
     expect(adapter.buildRoleStartCommand("architect", "claude", "plan")).toEqual({
       command: "claude",
-      args: ["--allowedTools", CODE_TOOLS, "--agent", "architect", "--model", "default", "--permission-mode", "plan"],
-      display: `claude --allowedTools '${CODE_TOOLS}' --agent architect --model default --permission-mode plan`
+      args: ["--allowedTools", "Glob,Grep", "--agent", "architect", "--model", "default", "--permission-mode", "plan"],
+      display: "claude --allowedTools 'Glob,Grep' --agent architect --model default --permission-mode plan"
     });
   });
 
@@ -42,17 +39,6 @@ describe("createClaudeAdapter", () => {
       "--agent",
       "project-manager"
     ]);
-  });
-
-  it("pre-approves shared code intelligence only for code-reading roles", () => {
-    expect(adapter.buildRoleStartCommand("reviewer").args).toEqual(expect.arrayContaining([
-      "--allowedTools",
-      CODE_TOOLS
-    ]));
-    expect(adapter.buildRoleStartCommand("tester").args).toEqual(expect.arrayContaining([
-      "--allowedTools",
-      "Glob,Grep"
-    ]));
   });
 
   it("builds role commands with a selected model", () => {
@@ -67,7 +53,7 @@ describe("createClaudeAdapter", () => {
       command: "claude",
       args: [
         "--allowedTools",
-        CODE_TOOLS,
+        "Glob,Grep",
         "--agent",
         "coder",
         "--session-id",
@@ -75,7 +61,7 @@ describe("createClaudeAdapter", () => {
         "--model",
         "opus"
       ],
-      display: `claude --allowedTools '${CODE_TOOLS}' --agent coder --session-id 00000000-0000-4000-8000-000000000001 --model opus`
+      display: "claude --allowedTools 'Glob,Grep' --agent coder --session-id 00000000-0000-4000-8000-000000000001 --model opus"
     });
   });
 
@@ -91,13 +77,13 @@ describe("createClaudeAdapter", () => {
       command: "claude",
       args: [
         "--allowedTools",
-        CODE_TOOLS,
+        "Glob,Grep",
         "--agent",
         "architect",
         "--model",
         "claude-opus-4-8"
       ],
-      display: `claude --allowedTools '${CODE_TOOLS}' --agent architect --model claude-opus-4-8`
+      display: "claude --allowedTools 'Glob,Grep' --agent architect --model claude-opus-4-8"
     });
   });
 
@@ -112,8 +98,8 @@ describe("createClaudeAdapter", () => {
       "medium"
     )).toEqual({
       command: "claude",
-      args: ["--allowedTools", CODE_TOOLS, "--agent", "coder", "--effort", "medium"],
-      display: `claude --allowedTools '${CODE_TOOLS}' --agent coder --effort medium`
+      args: ["--allowedTools", "Glob,Grep", "--agent", "coder", "--effort", "medium"],
+      display: "claude --allowedTools 'Glob,Grep' --agent coder --effort medium"
     });
   });
 
@@ -135,7 +121,7 @@ describe("createClaudeAdapter", () => {
       command: "claude",
       args: [
         "--allowedTools",
-        CODE_TOOLS,
+        "Glob,Grep",
         "--agent",
         "coder",
         "--model",
@@ -145,7 +131,7 @@ describe("createClaudeAdapter", () => {
         "--settings",
         JSON.stringify(settingsOverride)
       ],
-      display: `claude --allowedTools '${CODE_TOOLS}' --agent coder --model sonnet --effort medium --settings '${JSON.stringify(settingsOverride)}'`
+      display: `claude --allowedTools 'Glob,Grep' --agent coder --model sonnet --effort medium --settings '${JSON.stringify(settingsOverride)}'`
     });
   });
 
@@ -162,7 +148,7 @@ describe("createClaudeAdapter", () => {
       command: "claude",
       args: [
         "--allowedTools",
-        CODE_TOOLS,
+        "Glob,Grep",
         "--agent",
         "architect",
         "--session-id",
@@ -172,7 +158,7 @@ describe("createClaudeAdapter", () => {
         "--effort",
         "xhigh"
       ],
-      display: `claude --allowedTools '${CODE_TOOLS}' --agent architect --session-id 00000000-0000-4000-8000-000000000001 --model opus --effort xhigh`
+      display: "claude --allowedTools 'Glob,Grep' --agent architect --session-id 00000000-0000-4000-8000-000000000001 --model opus --effort xhigh"
     });
   });
 
@@ -189,7 +175,7 @@ describe("createClaudeAdapter", () => {
       command: "claude",
       args: [
         "--allowedTools",
-        CODE_TOOLS,
+        "Glob,Grep",
         "--agent",
         "architect",
         "--session-id",
@@ -199,7 +185,7 @@ describe("createClaudeAdapter", () => {
         "--settings",
         "{\"ultracode\":true}"
       ],
-      display: `claude --allowedTools '${CODE_TOOLS}' --agent architect --session-id 00000000-0000-4000-8000-000000000001 --model fable --settings '{"ultracode":true}'`
+      display: "claude --allowedTools 'Glob,Grep' --agent architect --session-id 00000000-0000-4000-8000-000000000001 --model fable --settings '{\"ultracode\":true}'"
     });
   });
 
@@ -218,7 +204,7 @@ describe("createClaudeAdapter", () => {
       command: "claude",
       args: [
         "--allowedTools",
-        CODE_TOOLS,
+        "Glob,Grep",
         "--agent",
         "architect",
         "--model",
@@ -230,7 +216,7 @@ describe("createClaudeAdapter", () => {
         "--append-system-prompt",
         "Read the completed architecture artifacts."
       ],
-      display: `claude --allowedTools '${CODE_TOOLS}' --agent architect --model fable --effort high --permission-mode bypassPermissions --append-system-prompt 'Read the completed architecture artifacts.'`
+      display: "claude --allowedTools 'Glob,Grep' --agent architect --model fable --effort high --permission-mode bypassPermissions --append-system-prompt 'Read the completed architecture artifacts.'"
     });
   });
 
@@ -243,8 +229,8 @@ describe("createClaudeAdapter", () => {
       true
     )).toEqual({
       command: "claude",
-      args: ["--allowedTools", CODE_TOOLS, "--agent", "architect", "--resume", "00000000-0000-4000-8000-000000000002", "--model", "default"],
-      display: `claude --allowedTools '${CODE_TOOLS}' --agent architect --resume 00000000-0000-4000-8000-000000000002 --model default`
+      args: ["--allowedTools", "Glob,Grep", "--agent", "architect", "--resume", "00000000-0000-4000-8000-000000000002", "--model", "default"],
+      display: "claude --allowedTools 'Glob,Grep' --agent architect --resume 00000000-0000-4000-8000-000000000002 --model default"
     });
   });
 
@@ -259,7 +245,7 @@ describe("createClaudeAdapter", () => {
       command: "claude",
       args: [
         "--allowedTools",
-        CODE_TOOLS,
+        "Glob,Grep",
         "--agent",
         "coder",
         "--resume",
@@ -269,7 +255,7 @@ describe("createClaudeAdapter", () => {
         "--permission-mode",
         "bypassPermissions"
       ],
-      display: `claude --allowedTools '${CODE_TOOLS}' --agent coder --resume 00000000-0000-4000-8000-000000000003 --model default --permission-mode bypassPermissions`
+      display: "claude --allowedTools 'Glob,Grep' --agent coder --resume 00000000-0000-4000-8000-000000000003 --model default --permission-mode bypassPermissions"
     });
   });
 
@@ -291,7 +277,7 @@ describe("createClaudeAdapter", () => {
         "--plugin-dir",
         "/opt/vcm/plugins/vcm-lsp-bridge",
         "--allowedTools",
-        CODE_TOOLS,
+        "Glob,Grep",
         "--agent",
         "architect",
         "--model",
@@ -299,7 +285,7 @@ describe("createClaudeAdapter", () => {
         "--effort",
         "medium"
       ],
-      display: `claude --plugin-dir /opt/vcm/plugins/vcm-lsp-bridge --allowedTools '${CODE_TOOLS}' --agent architect --model opus --effort medium`
+      display: "claude --plugin-dir /opt/vcm/plugins/vcm-lsp-bridge --allowedTools 'Glob,Grep' --agent architect --model opus --effort medium"
     });
   });
 });

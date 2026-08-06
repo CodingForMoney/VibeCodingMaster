@@ -41,8 +41,7 @@ describe("createServer", () => {
       "gateway:start",
       "terminal-exit:stop",
       "runtime:stop",
-      "gateway:stop",
-      "code-intelligence:stop"
+      "gateway:stop"
     ]);
   });
 });
@@ -115,11 +114,6 @@ function createServerDepsStub(calls: string[]): ServerDeps {
         return {};
       }
     } as never,
-    usageAnalyticsService: {} as never,
-    codeIntelligenceManager: {
-      async shutdown() {
-        calls.push("code-intelligence:stop");
-      }
-    } as never
+    usageAnalyticsService: {} as never
   };
 }

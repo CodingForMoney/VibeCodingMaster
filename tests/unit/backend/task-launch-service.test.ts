@@ -15,8 +15,7 @@ const CORE_ROLES: RoleName[] = ["project-manager", "architect", "coder", "tester
 describe("task-launch-service", () => {
   it("starts the full roster, sets the orchestration mode, and returns sessions", async () => {
     const events: string[] = [];
-    const activatedRoots: string[] = [];
-    const service = createTaskLaunchService(createDeps({ events, activatedRoots }));
+    const service = createTaskLaunchService(createDeps({ events }));
 
     const result = await service.startTaskRoleSessions(REPO_ROOT, {
       taskSlug: TASK_SLUG,
@@ -27,7 +26,6 @@ describe("task-launch-service", () => {
     expect(result.orchestration).toMatchObject({ taskSlug: TASK_SLUG, mode: "auto" });
     expect(result.startedRoles).toEqual(CORE_ROLES);
     expect(result.sessions.map((session) => session.role)).toEqual(CORE_ROLES);
-    expect(activatedRoots).toEqual([WORKTREE]);
     expect(events).toEqual([
       "mode:auto",
       "start:project-manager",
@@ -140,7 +138,6 @@ interface DepsOptions {
   existingSessions?: RoleSessionRecord[];
   existing?: Partial<Record<RoleName, RoleSessionRecord>>;
   failOnRole?: RoleName;
-  activatedRoots?: string[];
 }
 
 function createDeps(options: DepsOptions = {}): TaskLaunchServiceDeps {
@@ -199,12 +196,7 @@ function createDeps(options: DepsOptions = {}): TaskLaunchServiceDeps {
         events.push(`mode:${input.mode}`);
         return { taskSlug: input.taskSlug, mode: input.mode ?? "auto", updatedAt: NOW };
       }
-    } as never,
-    codeIntelligenceManager: {
-      async activateTask(taskRepoRoot: string) {
-        options.activatedRoots?.push(taskRepoRoot);
-      }
-    }
+    } as never
   };
 }
 

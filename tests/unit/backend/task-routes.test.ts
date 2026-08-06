@@ -14,7 +14,6 @@ describe("task routes", () => {
     });
 
     registerTaskRoutes(app, {
-      codeIntelligenceManager: notUsedCodeIntelligenceManager(),
       architectRestartService: notUsedArchitectRestartService(),
       taskLaunchService: notUsedTaskLaunchService(),
       projectService: {
@@ -106,7 +105,6 @@ describe("task routes", () => {
     const app = Fastify({ logger: false });
 
     registerTaskRoutes(app, {
-      codeIntelligenceManager: notUsedCodeIntelligenceManager(),
       architectRestartService: notUsedArchitectRestartService(),
       taskLaunchService: notUsedTaskLaunchService(),
       projectService: {
@@ -182,7 +180,6 @@ describe("task routes", () => {
     };
 
     registerTaskRoutes(app, {
-      codeIntelligenceManager: notUsedCodeIntelligenceManager(),
       architectRestartService: notUsedArchitectRestartService(),
       taskLaunchService: {
         async startTaskRoleSessions(repoRoot: string, input: { taskSlug: string; requireFreshStart: boolean }) {
@@ -229,7 +226,6 @@ describe("task routes", () => {
     let declaredWorkflow: Record<string, unknown> | undefined;
 
     registerTaskRoutes(app, {
-      codeIntelligenceManager: notUsedCodeIntelligenceManager(),
       architectRestartService: {
         getState() {
           return {
@@ -397,12 +393,6 @@ function notUsedTaskLaunchService() {
     async startTaskRoleSessions() {
       throw new Error("not used");
     }
-  };
-}
-
-function notUsedCodeIntelligenceManager() {
-  return {
-    async activateTask() {}
   };
 }
 

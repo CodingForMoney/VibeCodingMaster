@@ -16,10 +16,10 @@ import {
 } from "../../../src/backend/services/session-service.js";
 import { claudeTranscriptPath } from "../../../src/backend/services/claude-transcript-service.js";
 import type { FileSystemAdapter } from "../../../src/backend/adapters/filesystem.js";
-import { VCM_CODE_INTELLIGENCE_PLUGIN_DIR } from "../../../src/backend/services/lsp-plugin.js";
+import { VCM_LSP_PLUGIN_DIR } from "../../../src/backend/services/lsp-plugin.js";
 
 const TASK_WORKTREE = "/repo/.claude/worktrees/demo-task";
-const CODE_INTELLIGENCE_PLUGIN_ARGS = ["--plugin-dir", VCM_CODE_INTELLIGENCE_PLUGIN_DIR];
+const LSP_PLUGIN_ARGS = ["--plugin-dir", VCM_LSP_PLUGIN_DIR];
 
 describe("createSessionService", () => {
   it("keeps Max effort in Claude Code options", () => {
@@ -66,7 +66,7 @@ describe("createSessionService", () => {
     expect(resumed.claudeSessionId).toBe("architect-real-session");
     expect(resumed.transcriptPath).toBe(`${TASK_WORKTREE}/.claude/projects/architect-real-session.jsonl`);
     expect(secondRuntimeInputs[0]?.args).toEqual([
-      ...CODE_INTELLIGENCE_PLUGIN_ARGS,
+      ...LSP_PLUGIN_ARGS,
       "--agent",
       "architect",
       "--resume",
@@ -152,7 +152,7 @@ describe("createSessionService", () => {
 
     expect(started.model).toBe("claude-opus-4-8");
     expect(runtimeInputs[0]?.args).toEqual([
-      ...CODE_INTELLIGENCE_PLUGIN_ARGS,
+      ...LSP_PLUGIN_ARGS,
       "--agent",
       "coder",
       "--model",
@@ -171,7 +171,7 @@ describe("createSessionService", () => {
 
     expect(started.effort).toBe("high");
     expect(runtimeInputs[0]?.args).toEqual([
-      ...CODE_INTELLIGENCE_PLUGIN_ARGS,
+      ...LSP_PLUGIN_ARGS,
       "--agent",
       "architect",
       "--model",
@@ -203,7 +203,7 @@ describe("createSessionService", () => {
     expect(runtimeInputs[0]?.command).toBe("claude");
     expect(runtimeInputs[0]?.cwd).toBe(TASK_WORKTREE);
     expect(runtimeInputs[0]?.args).toEqual([
-      ...CODE_INTELLIGENCE_PLUGIN_ARGS,
+      ...LSP_PLUGIN_ARGS,
       "--agent",
       "reviewer",
       "--model",
@@ -257,7 +257,7 @@ describe("createSessionService", () => {
     expect(nextTask.taskSlug).toBe("another-task");
     expect(secondRuntimeInputs[0]?.cwd).toBe("/repo/.claude/worktrees/another-task");
     expect(secondRuntimeInputs[0]?.args).toEqual([
-      ...CODE_INTELLIGENCE_PLUGIN_ARGS,
+      ...LSP_PLUGIN_ARGS,
       "--agent",
       "reviewer",
       "--model",
@@ -1127,7 +1127,7 @@ describe("createSessionService", () => {
     expect(restarted.claudeSessionId).toBe("");
     expect(restarted.transcriptPath).toBeUndefined();
     expect(secondRuntimeInputs[0]?.args).toEqual([
-      ...CODE_INTELLIGENCE_PLUGIN_ARGS,
+      ...LSP_PLUGIN_ARGS,
       "--agent",
       "coder",
       "--model",
@@ -1197,7 +1197,7 @@ describe("createSessionService", () => {
 
     await service.resumeRoleSession("/repo", "demo-task", "coder");
     expect(runtimeInputs[0]?.args).toEqual([
-      ...CODE_INTELLIGENCE_PLUGIN_ARGS,
+      ...LSP_PLUGIN_ARGS,
       "--agent",
       "coder",
       "--resume",

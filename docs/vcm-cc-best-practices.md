@@ -710,22 +710,19 @@ Generated artifacts are derived context. Regenerate them after relevant source,
 manifest, module, or public API changes. Do not hand-edit them as durable truth.
 
 For code reading, generated context locates the boundary; it does not replace
-semantic navigation or source inspection. VCM starts one language-server process
-per detected language in the active task worktree and shares its index across
-Architect, Coder, and Reviewer through a task-authenticated MCP bridge. The
-project runtime must provide the matching executable.
-
-Use generated indexes and Glob to locate files, shared LSP for definitions,
-implementations, references, callers, callees, types, and call hierarchy, then
-Read each resolved callable unit in full. Grep is for comments, documentation,
-configuration keys, diagnostics, literals, markers, and other exact text LSP
-does not model. Server startup cost, indexing time, query latency, context cost,
-or convenience is not a reason to substitute text search for semantic evidence.
-Wait while the shared server starts or indexes. If it ultimately cannot resolve a
-required project-owned relationship, keep that relationship unresolved. Use
-architecture documents and runtime evidence for boundaries LSP does not model,
-and expand one dependency hop at a time instead of injecting an unrestricted
-repository graph.
+semantic navigation or source inspection. VCM loads its bundled LSP bridge for
+Architect, Coder, and Reviewer; the project runtime must provide the matching
+language-server executable. Their Agent definitions preload
+`vcm-code-navigation`. The skill
+warms the role Session with a file-symbol request before using definitions,
+implementations, references, and call hierarchy, then requires every resolved
+callable unit to be read in full. A successful executable probe alone is not
+workspace readiness. Startup or indexing time does not permit replacing a
+required semantic query with text matching. Use generated context, architecture documents, and runtime
+evidence for boundaries LSP does not model. If LSP cannot resolve a required
+project-owned relationship after the bounded retry, keep it unresolved. Expand
+one dependency hop at a time instead of injecting an unrestricted repository
+graph.
 
 ## 15. Harness Bootstrap and Feedback
 

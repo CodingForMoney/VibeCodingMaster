@@ -388,10 +388,10 @@ export function HarnessStudioModal({
                         <li key={language.language}>
                           <span>{language.label}</span>
                           <code title="Language server">{language.serverCommand}</code>
-                          <code title="VCM shared code intelligence bridge">{language.bridgeName}</code>
-                          <StatusBadge status={language.state === "ready" ? "ok" : language.state === "server_failed" ? "failed" : language.state === "starting" || language.state === "indexing" ? "running" : "missing"} />
+                          <code title={language.pluginReady ? "VCM Claude Code plugin ready" : "VCM Claude Code plugin missing"}>{language.pluginName}</code>
+                          <StatusBadge status={language.state === "server_runnable" ? "ok" : language.state === "server_failed" ? "failed" : "missing"} />
                           <span className="harness-studio-code-intelligence-detail">
-                            {language.error ?? `${language.state}${language.pid ? ` · pid ${language.pid}` : ""}${language.workspaceRoot ? ` · ${language.workspaceRoot}` : ""}`}
+                            {language.error ?? "Server runnable; workspace readiness is checked in each role session."}
                           </span>
                         </li>
                       )) : <li><span>No supported project language detected.</span></li>}

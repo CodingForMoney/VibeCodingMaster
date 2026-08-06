@@ -67,15 +67,10 @@ import { registerTaskRoutes } from "./api/task-routes.js";
 import { registerTranslationRoutes } from "./api/translation-routes.js";
 import { registerUsageAnalyticsRoutes } from "./api/usage-analytics-routes.js";
 import { registerWorkflowControlRoutes } from "./api/workflow-control-routes.js";
-import { registerCodeIntelligenceRoutes } from "./api/code-intelligence-routes.js";
 import { registerTerminalWs } from "./ws/terminal-ws.js";
 import { toVcmError } from "./errors.js";
 import type { TerminalRuntime } from "./runtime/terminal-runtime.js";
 import { readVcmPackageVersion } from "./app-version.js";
-import {
-  createCodeIntelligenceManager,
-  type CodeIntelligenceManager
-} from "./services/code-intelligence-service.js";
 
 export interface CreateServerOptions {
   host?: string;
@@ -115,7 +110,6 @@ export interface ServerDeps {
   diagnosticsService: DiagnosticsService;
   usageAnalyticsService: UsageAnalyticsService;
   workflowControlService?: WorkflowControlService;
-  codeIntelligenceManager: CodeIntelligenceManager;
 }
 
 export async function createServer(deps: ServerDeps, options: CreateServerOptions = {}): Promise<FastifyInstance> {
@@ -145,12 +139,6 @@ export async function createServer(deps: ServerDeps, options: CreateServerOption
     ccrIntegration: deps.ccrIntegration
   });
   registerClaudeHookRoutes(app, { claudeHookService: deps.claudeHookService });
-  registerCodeIntelligenceRoutes(app, {
-    projectService: deps.projectService,
-    taskService: deps.taskService,
-    sessionService: deps.sessionService,
-    codeIntelligenceManager: deps.codeIntelligenceManager
-  });
   registerGateReviewRoutes(app, {
     projectService: deps.projectService,
     gateReviewService: deps.gateReviewService
@@ -164,9 +152,7 @@ export async function createServer(deps: ServerDeps, options: CreateServerOption
   });
   registerProjectRoutes(app, {
     projectService: deps.projectService,
-    runtimeRecoveryService: deps.runtimeRecoveryService,
-    taskService: deps.taskService,
-    codeIntelligenceManager: deps.codeIntelligenceManager
+    runtimeRecoveryService: deps.runtimeRecoveryService
   });
   registerHarnessRoutes(app, {
     appSettings: deps.appSettings,
@@ -197,8 +183,7 @@ export async function createServer(deps: ServerDeps, options: CreateServerOption
     taskLaunchService: deps.taskLaunchService,
     roundService: deps.roundService,
     taskWorkflowService: deps.taskWorkflowService,
-    architectRestartService: deps.architectRestartService,
-    codeIntelligenceManager: deps.codeIntelligenceManager
+    architectRestartService: deps.architectRestartService
   });
   registerSessionRoutes(app, {
     projectService: deps.projectService,
@@ -261,7 +246,6 @@ export async function createServer(deps: ServerDeps, options: CreateServerOption
     deps.terminalProcessExitService.stop();
     deps.runtimeCoordinator.stop();
     await deps.gatewayService.stop();
-    await deps.codeIntelligenceManager.shutdown();
   });
 
   if (options.staticDir) {
@@ -323,7 +307,6 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
   const artifactService = createArtifactService(fs, { workflowControlService });
   const projectService = createProjectService({ fs, git, appSettings });
   const taskService = createTaskService({ fs, git, artifactService, projectService });
-  const codeIntelligenceManager = createCodeIntelligenceManager(fs, { runner });
   const taskWorkflowService = createTaskWorkflowService({ fs });
   const sessionService = createSessionService({
     fs,
@@ -344,8 +327,7 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     runtime,
     harnessEngineerSessions: sessionService,
     runFixedInstaller: createScriptFixedHarnessInstaller(path.join(appRoot, "scripts/install-vcm-harness.mjs")),
-    vcmVersion,
-    codeIntelligenceManager
+    vcmVersion
   });
   const autoMemoryService = createAutoMemoryService({
     fs,
@@ -395,8 +377,7 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     taskService,
     appSettings,
     sessionService,
-    messageService,
-    codeIntelligenceManager
+    messageService
   });
   const roundService = createRoundService({
     fs,
@@ -455,8 +436,7 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     roundService,
     projectService,
     taskWorkflowService,
-    architectRestartService,
-    codeIntelligenceManager
+    architectRestartService
   });
   const gatewayService = createGatewayService({
     fs,
@@ -563,8 +543,7 @@ export function createDefaultServerDeps(options: CreateDefaultServerDepsOptions 
     runtime,
     diagnosticsService,
     usageAnalyticsService,
-    workflowControlService,
-    codeIntelligenceManager
+    workflowControlService
   };
 }
 
