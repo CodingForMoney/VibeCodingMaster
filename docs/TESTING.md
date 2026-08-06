@@ -85,19 +85,19 @@ Notes:
   sync and harness service/route tests guard these), because output ships into
   downstream repos.
 - Code-navigation or Harness code-intelligence changes: run
+  `code-intelligence-service.test.ts`, `code-intelligence.e2e.test.ts`,
   `claude-adapter.test.ts`, `session-service.test.ts`,
   `harness-service.test.ts`, `harness-templates-sync.test.ts`,
   `harness-studio-layout.test.ts`, and `ccr-integration.e2e.test.ts`. Verify the
-  bundled plugin loads only for Architect, Coder, and Reviewer on native and
-  CCR launches; every role launch explicitly opts into Glob and Grep; Architect,
-  Coder, and Reviewer frontmatter includes Grep and preloads
-  `vcm-code-navigation`; the shared PreToolUse guard permits text search while
-  continuing to reject background and unsupervised Bash execution;
-  semantic-navigation rules stay in all installed copies;
-  language detection uses task-worktree indexes and manifests; bounded probes
-  distinguish missing, broken, and runnable servers without claiming workspace
-  readiness and are cached; and Studio displays only backend-owned status and
-  diagnostics.
+  MCP bridge loads only for Architect, Coder, and Reviewer on native and CCR
+  launches; role requests require the current runtime session token; all three
+  roles share one task language-server PID; task creation, selection, restore,
+  and Gateway launch activate the task workspace; source edits are synchronized;
+  one unexpected exit is restarted once; task close stops the runtime; and
+  Studio displays only backend-owned workspace, PID, indexing state, and
+  diagnostics. Verify every installed copy keeps the tool order: generated
+  indexes/Glob for location, shared LSP for semantic relationships, Read for full
+  implementations, and Grep only for non-semantic exact text.
 - Auto Memory or Task Harness Retrospective sequencing change: run
   `auto-memory-service.test.ts`, `runtime-coordinator-service.test.ts`, and
   `harness-routes.test.ts`, then `npm run test:e2e:backend`. These tests cover

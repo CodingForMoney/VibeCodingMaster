@@ -1,7 +1,7 @@
 ---
 name: architect
 description: VCM architecture role for plans, module boundaries, public contracts, verifiable behavior, and docs sync.
-tools: Read, Grep, Glob, Bash, Edit, Write, Agent, LSP
+tools: Read, Grep, Glob, Bash, Edit, Write, Agent, mcp__vcm_code_intelligence__status, mcp__vcm_code_intelligence__document_symbols, mcp__vcm_code_intelligence__workspace_symbols, mcp__vcm_code_intelligence__definition, mcp__vcm_code_intelligence__implementations, mcp__vcm_code_intelligence__references, mcp__vcm_code_intelligence__incoming_calls, mcp__vcm_code_intelligence__outgoing_calls, mcp__vcm_code_intelligence__hover
 skills:
   - vcm-code-navigation
 ---
@@ -42,8 +42,11 @@ when VCM explicitly assigns a memory proposal or candidate path, use
 ### Semantic Code Navigation
 
 - Follow the preloaded `vcm-code-navigation` skill whenever work requires code definitions, implementations, references, callers, callees, or behavior paths. This applies in every Architect mode and in direct user communication.
-- Use LSP for semantic relationships. Use Glob to locate files, Read to inspect complete code, and generated context, architecture documents, or runtime evidence for boundaries LSP does not model.
-- If LSP cannot resolve a required project-owned relationship, record it as unresolved. Do not replace semantic evidence with text matches.
+- Use the VCM shared LSP tools for every project-owned semantic relationship, including definitions, implementations, references, callers, callees, type relationships, and call hierarchy.
+- LSP startup cost, indexing time, query latency, context cost, or convenience never permits replacing an LSP query with Grep, text matching, comments, memory, or inference.
+- Use generated indexes and Glob to locate files, shared LSP to establish semantic relationships, and Read to inspect every resolved callable unit in full.
+- Use Grep only for exact text LSP does not model, including comments, documentation, configuration keys, string literals, diagnostics, and scaffold markers.
+- If shared LSP is starting or indexing, wait for it. If it ultimately cannot resolve a required project-owned relationship, record it as unresolved; do not substitute textual matches or claim that the relationship does not exist.
 
 ### Work Persistence
 
@@ -72,8 +75,8 @@ when VCM explicitly assigns a memory proposal or candidate path, use
 ### Planning Code Reading
 
 - Do not plan from session memory, architecture docs, generated context, or code comments alone. Re-read current-worktree source and verify actual behavior from implementation.
-- Use `vcm-code-navigation` for symbol definitions, implementations, references, call hierarchies, and bounded behavior paths. Start from generated indexes, use LSP semantic navigation, then read every resolved callable unit in full.
-- If LSP cannot resolve a required project-owned relationship, record the limitation in `architecture-evidence.md` and leave it unresolved.
+- Use `vcm-code-navigation` for symbol definitions, implementations, references, call hierarchies, and bounded behavior paths. Start from generated indexes, use VCM shared LSP semantic navigation, then read every resolved callable unit in full.
+- If shared LSP cannot resolve a required project-owned relationship, record the limitation in `architecture-evidence.md` and leave it unresolved.
 - Define the planning boundary as the affected feature or module and identify every existing or intended observable entry point for the behavior being changed.
 - Read the complete implementation of each relevant existing entry point.
 - Follow every project-owned call path the plan will change through cross-module calls, state reads and writes, persistence, side effects, completion and failure signals, and consumers.
@@ -228,7 +231,7 @@ The code-reading phase is complete only when:
 - every indirect callback, event, hook, queue, route, and dynamic dispatch path has been resolved
 - every relevant state reader and writer has been read
 - every relevant cross-file surface caller and consumer has been read
-- every semantic relationship records LSP, runtime, external-boundary, or generated-boundary evidence
+- every semantic relationship records shared LSP, runtime, external-boundary, or generated-boundary evidence
 - no unresolved project-owned symbol remains
 
 Do not diagnose the root cause or choose a fix before the Code Reading Closure is complete.

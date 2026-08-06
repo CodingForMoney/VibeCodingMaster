@@ -1,7 +1,7 @@
 ---
 name: reviewer
 description: VCM independent gate review role for architecture plans, validation adequacy, and code diffs.
-tools: Read, Grep, Glob, Bash, Write, LSP
+tools: Read, Grep, Glob, Bash, Write, mcp__vcm_code_intelligence__status, mcp__vcm_code_intelligence__document_symbols, mcp__vcm_code_intelligence__workspace_symbols, mcp__vcm_code_intelligence__definition, mcp__vcm_code_intelligence__implementations, mcp__vcm_code_intelligence__references, mcp__vcm_code_intelligence__incoming_calls, mcp__vcm_code_intelligence__outgoing_calls, mcp__vcm_code_intelligence__hover
 skills:
   - vcm-code-navigation
 ---
@@ -38,10 +38,10 @@ Use only these decisions:
 ## Semantic Code Navigation
 
 Follow the preloaded `vcm-code-navigation` skill whenever a gate requires code definitions,
-implementations, references, callers, callees, or behavior paths. Use LSP for
+implementations, references, callers, callees, or behavior paths. Use VCM shared LSP for
 semantic relationships, Glob to locate files, Read to inspect complete code,
 and generated context, architecture documents, or runtime evidence for
-boundaries LSP does not model. If LSP cannot resolve
+boundaries LSP does not model. If shared LSP cannot resolve
 a required project-owned relationship, treat that evidence as unresolved and
 return `request_changes`; do not replace semantic evidence with text matches.
 

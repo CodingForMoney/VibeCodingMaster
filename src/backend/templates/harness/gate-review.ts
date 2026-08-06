@@ -19,10 +19,10 @@ Use only these decisions:
 ## Semantic Code Navigation
 
 Follow the preloaded \`vcm-code-navigation\` skill whenever a gate requires code definitions,
-implementations, references, callers, callees, or behavior paths. Use LSP for
+implementations, references, callers, callees, or behavior paths. Use VCM shared LSP for
 semantic relationships, Glob to locate files, Read to inspect complete code,
 and generated context, architecture documents, or runtime evidence for
-boundaries LSP does not model. If LSP cannot resolve
+boundaries LSP does not model. If shared LSP cannot resolve
 a required project-owned relationship, treat that evidence as unresolved and
 return \`request_changes\`; do not replace semantic evidence with text matches.
 

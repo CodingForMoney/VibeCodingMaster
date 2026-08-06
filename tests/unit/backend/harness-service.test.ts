@@ -89,9 +89,9 @@ describe("createHarnessService", () => {
     expect(await fs.readText("/repo/.claude/skills/vcm-architecture-interview/SKILL.md")).toContain("name: vcm-architecture-interview");
     expect(await fs.readText("/repo/.claude/skills/vcm-architecture-interview/SKILL.md")).toContain("During an active Architect Interview");
     const codeNavigationSkill = await fs.readText("/repo/.claude/skills/vcm-code-navigation/SKILL.md");
-    expect(codeNavigationSkill).toContain("record that limitation and leave the relationship unresolved");
-    expect(codeNavigationSkill).toContain("Start each navigation run with LSP `documentSymbol`");
-    expect(codeNavigationSkill).toContain("retry the same bounded workspace query at most two more times");
+    expect(codeNavigationSkill).toContain("Use the VCM shared LSP tools");
+    expect(codeNavigationSkill).toContain("Call shared LSP `status`");
+    expect(codeNavigationSkill).toContain("Grep, comments, memory, and inference cannot replace that semantic evidence");
     expect(await fs.readText("/repo/.claude/skills/vcm-report-harness-issue/SKILL.md")).toContain("name: vcm-report-harness-issue");
     expect(await fs.readText("/repo/.claude/skills/vcm-report-harness-issue/SKILL.md")).toContain(".ai/vcm/harness-feedback/pending/");
     const proposeMemorySkill = await fs.readText("/repo/.claude/skills/vcm-propose-memory/SKILL.md");
@@ -148,7 +148,8 @@ describe("createHarnessService", () => {
     expect(await fs.readText("/repo/.ai/tools/request-gate-review")).toContain('["git", "rev-parse", "--abbrev-ref"');
     expect(await fs.readText("/repo/.ai/tools/request-gate-review")).toContain('["git", "merge-base", "HEAD", upstream]');
     const architectAgent = await fs.readText("/repo/.claude/agents/architect.md");
-    expect(frontmatterOf(architectAgent)).toContain("LSP");
+    expect(frontmatterOf(architectAgent)).toContain("mcp__vcm_code_intelligence__definition");
+    expect(frontmatterOf(architectAgent)).not.toMatch(/(?:^|,\s*)LSP(?:,|$)/m);
     expect(frontmatterOf(architectAgent)).toContain("Grep");
     expect(architectAgent).toContain("Follow the preloaded `vcm-code-navigation` skill");
     expect(frontmatterOf(architectAgent)).toContain("skills:\n  - vcm-code-navigation");
@@ -187,7 +188,7 @@ describe("createHarnessService", () => {
     expect(testerAgent).toContain("`Completed Validation` and `Remaining Validation`");
     expect(testerAgent).not.toContain("shared implementation-quality and baseline-test standard");
     const diagnosisReviewerAgent = await fs.readText("/repo/.claude/agents/reviewer.md");
-    expect(frontmatterOf(diagnosisReviewerAgent)).toContain("LSP");
+    expect(frontmatterOf(diagnosisReviewerAgent)).toContain("mcp__vcm_code_intelligence__definition");
     expect(diagnosisReviewerAgent).toContain("Follow the preloaded `vcm-code-navigation` skill");
     expect(frontmatterOf(diagnosisReviewerAgent)).toContain("skills:\n  - vcm-code-navigation");
     expect(diagnosisReviewerAgent).toContain("verify that the commits implement the diagnosed");
@@ -201,7 +202,8 @@ describe("createHarnessService", () => {
     expect(finalAcceptanceSkill).toContain("`incomplete` is not acceptance evidence");
     expect(finalAcceptanceSkill).toContain("do not accept `Test Result: incomplete`");
     const coderAgent = await fs.readText("/repo/.claude/agents/coder.md");
-    expect(coderAgent).toContain("tools: Read, Grep, Glob, Bash, Edit, Write, Agent, LSP");
+    expect(frontmatterOf(coderAgent)).toContain("mcp__vcm_code_intelligence__definition");
+    expect(frontmatterOf(coderAgent)).not.toMatch(/(?:^|,\s*)LSP(?:,|$)/m);
     expect(frontmatterOf(coderAgent)).toContain("Grep");
     expect(frontmatterOf(coderAgent)).toContain("skills:\n  - vcm-code-navigation");
     expect(coderAgent).toContain("Implement assigned file/function-level scaffold items");
@@ -237,7 +239,8 @@ describe("createHarnessService", () => {
     expect(coderWorkerAgent).not.toContain("Stop before editing if the assigned module");
     const reviewerAgent = await fs.readText("/repo/.claude/agents/reviewer.md");
     expect(reviewerAgent).toContain("name: reviewer");
-    expect(reviewerAgent).toContain("tools: Read, Grep, Glob, Bash, Write, LSP");
+    expect(frontmatterOf(reviewerAgent)).toContain("mcp__vcm_code_intelligence__definition");
+    expect(frontmatterOf(reviewerAgent)).not.toMatch(/(?:^|,\s*)LSP(?:,|$)/m);
     expect(frontmatterOf(reviewerAgent)).toContain("Grep");
     expect(reviewerAgent).toContain("You are VCM `reviewer`");
     expect(reviewerAgent).toContain("Use the task and worktree paths named there");
@@ -291,15 +294,7 @@ describe("createHarnessService", () => {
     await fs.writeText("/repo/Cargo.toml", "[workspace]\n");
     await fs.writeText("/repo/package.json", "{}\n");
     await fs.writeText("/tools/rust-analyzer", "");
-    await fs.writeJson("/plugins/vcm-lsp/.claude-plugin/plugin.json", {
-      lspServers: {
-        "rust-analyzer": { command: "rust-analyzer" },
-        typescript: { command: "typescript-language-server" }
-      }
-    });
-
     const status = await detectHarnessCodeIntelligence(fs, "/repo", {
-      pluginDir: "/plugins/vcm-lsp",
       pathEnv: "/tools",
       platform: "linux",
       runner: {
@@ -316,17 +311,15 @@ describe("createHarnessService", () => {
       expect.objectContaining({
         language: "rust",
         serverCommand: "rust-analyzer",
-        pluginName: "vcm-lsp-bridge",
-        pluginReady: true,
+        bridgeName: "vcm-code-intelligence-bridge",
         serverFound: true,
         serverRunnable: true,
-        state: "server_runnable"
+        state: "stopped"
       }),
       expect.objectContaining({
         language: "typescript",
         serverCommand: "typescript-language-server",
-        pluginName: "vcm-lsp-bridge",
-        pluginReady: true,
+        bridgeName: "vcm-code-intelligence-bridge",
         serverFound: false,
         serverRunnable: false,
         state: "server_missing"
@@ -344,14 +337,8 @@ describe("createHarnessService", () => {
     const fs = createMemoryFs();
     await fs.writeText("/repo/Cargo.toml", "[workspace]\n");
     await fs.writeText("/tools/rust-analyzer", "rustup shim");
-    await fs.writeJson("/plugins/vcm-lsp/.claude-plugin/plugin.json", {
-      lspServers: {
-        "rust-analyzer": { command: "rust-analyzer" }
-      }
-    });
     let probeCalls = 0;
     const detector = createHarnessCodeIntelligenceDetector(fs, {
-      pluginDir: "/plugins/vcm-lsp",
       pathEnv: "/tools",
       platform: "linux",
       runner: {
@@ -414,7 +401,7 @@ describe("createHarnessService", () => {
     await fs.writeText(
       architectPath,
       current
-        .replace("tools: Read, Grep, Glob, Bash, Edit, Write, Agent, LSP", "tools: Read, Glob, Bash, Edit, Write")
+        .replace(/^tools:.*$/m, "tools: Read, Glob, Bash, Edit, Write, LSP, CustomTool")
         .replace("skills:\n  - vcm-code-navigation\n", "")
         .replace("description: VCM architecture role", "model: custom-model\ndescription: VCM architecture role")
     );
@@ -424,8 +411,11 @@ describe("createHarnessService", () => {
 
     await service.applyHarness("/repo");
     const updated = await fs.readText(architectPath);
-    expect(frontmatterOf(updated)).toContain("tools: Read, Glob, Bash, Edit, Write, Grep, Agent, LSP");
+    expect(frontmatterOf(updated)).toContain("mcp__vcm_code_intelligence__status");
+    expect(frontmatterOf(updated)).toContain("mcp__vcm_code_intelligence__references");
     expect(frontmatterOf(updated)).toContain("Grep");
+    expect(frontmatterOf(updated)).toContain("CustomTool");
+    expect(frontmatterOf(updated)).not.toMatch(/(?:^|,\s*)LSP(?:,|$)/m);
     expect(frontmatterOf(updated)).toContain("skills:\n  - vcm-code-navigation");
     expect(frontmatterOf(updated)).toContain("model: custom-model");
   });

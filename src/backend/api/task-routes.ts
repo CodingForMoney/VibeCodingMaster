@@ -16,6 +16,7 @@ import type { TaskLaunchService } from "../services/task-launch-service.js";
 import type { RoundService } from "../services/round-service.js";
 import type { TaskWorkflowService } from "../services/task-workflow-service.js";
 import type { ArchitectRestartService } from "../services/architect-restart-service.js";
+import type { CodeIntelligenceManager } from "../services/code-intelligence-service.js";
 
 export interface TaskRouteDeps {
   projectService: ProjectService;
@@ -27,6 +28,7 @@ export interface TaskRouteDeps {
   roundService: Pick<RoundService, "getSessionRoundState">;
   taskWorkflowService?: Pick<TaskWorkflowService, "getState" | "declare">;
   architectRestartService: Pick<ArchitectRestartService, "getState">;
+  codeIntelligenceManager: Pick<CodeIntelligenceManager, "activateTask">;
 }
 
 export function registerTaskRoutes(app: FastifyInstance, deps: TaskRouteDeps): void {
@@ -37,12 +39,16 @@ export function registerTaskRoutes(app: FastifyInstance, deps: TaskRouteDeps): v
 
   app.post<{ Body: CreateTaskRequest }>("/api/tasks", async (request) => {
     const project = await requireCurrentProject(deps.projectService);
-    return deps.taskService.createTask(project.repoRoot, request.body);
+    const task = await deps.taskService.createTask(project.repoRoot, request.body);
+    await deps.codeIntelligenceManager.activateTask(getTaskRuntimeRepoRoot(task));
+    return task;
   });
 
   app.get<{ Params: { taskSlug: string } }>("/api/tasks/:taskSlug", async (request) => {
     const project = await requireCurrentProject(deps.projectService);
-    return deps.taskService.loadTask(project.repoRoot, request.params.taskSlug);
+    const task = await deps.taskService.loadTask(project.repoRoot, request.params.taskSlug);
+    await deps.codeIntelligenceManager.activateTask(getTaskRuntimeRepoRoot(task));
+    return task;
   });
 
   app.get<{ Params: { taskSlug: string } }>("/api/tasks/:taskSlug/status", async (request) => {

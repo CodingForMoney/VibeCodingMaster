@@ -474,14 +474,21 @@ Use it to:
 - merge task harness commits back to the connected repository branch when
   appropriate
 
-VCM bundles the Claude Code LSP bridge and loads it for Architect, Coder, and
-Reviewer sessions, including CCR launches. The project environment must still
-provide the language server for each detected language: `rust-analyzer`,
-`typescript-language-server`, `pyright-langserver`, `gopls`, `clangd`, or
-`jdtls`. Their Agent definitions preload `vcm-code-navigation`. Architect,
-Coder, and Reviewer use LSP for semantic relationships. Harness Studio reports
-whether the server executable and plugin can run; the role Session performs the
-real workspace warm-up and semantic query retries.
+VCM starts one shared language-server process per detected language in the active
+task worktree. Architect, Coder, and Reviewer sessions, including CCR launches,
+reach that task runtime through the bundled `vcm-code-intelligence-bridge` MCP
+plugin instead of starting independent indexes. The project environment must
+provide `rust-analyzer`, `typescript-language-server`, `pyright-langserver`,
+`gopls`, `clangd`, or `jdtls`. VCM starts indexing when the task is created,
+selected, restored, or launched, synchronizes changed source before queries,
+stops the servers with the task, and retries one unexpected server exit.
+
+The role rules use generated indexes and Glob to locate files, shared LSP queries
+for project-owned semantic relationships, and Read for complete implementations.
+Grep is reserved for exact text that LSP does not model, such as comments,
+documentation, configuration, diagnostics, string literals, and scaffold
+markers. Harness Studio shows backend-owned indexing state, PID, workspace, and
+server diagnostics.
 
 Harness Engineer is task-scoped and runs from the active task worktree. The
 backend automatically starts a fresh Harness Engineer for each active task or

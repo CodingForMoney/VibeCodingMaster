@@ -1,5 +1,9 @@
 import type { RoleName } from "../../shared/types/role.js";
 import {
+  CODE_INTELLIGENCE_ALLOWED_TOOL,
+  CODE_INTELLIGENCE_ROLES
+} from "../../shared/types/code-intelligence.js";
+import {
   isCcrSessionModel,
   type ClaudePermissionMode,
   type SessionEffort,
@@ -46,7 +50,10 @@ export function createClaudeAdapter(runner: CommandRunner): ClaudeAdapter {
     },
     buildRoleStartCommand(role, command = "claude", permissionMode = "default", claudeSessionId, resume = false, model = "default", effort = "default", settingsOverride, appendSystemPrompt, pluginDirs = []) {
       const args = pluginDirs.flatMap((pluginDir) => ["--plugin-dir", pluginDir]);
-      args.push("--allowedTools", "Glob,Grep");
+      const allowedTools = CODE_INTELLIGENCE_ROLES.includes(role as typeof CODE_INTELLIGENCE_ROLES[number])
+        ? `Glob,Grep,${CODE_INTELLIGENCE_ALLOWED_TOOL}`
+        : "Glob,Grep";
+      args.push("--allowedTools", allowedTools);
       args.push("--agent", role);
       const sessionSettings = { ...settingsOverride };
       if (claudeSessionId) {

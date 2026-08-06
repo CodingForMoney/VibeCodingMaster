@@ -49,6 +49,10 @@ import {
   renderRestartArchitectSkillRules
 } from "../templates/harness/restart-architect-skill.js";
 import { readVcmPackageVersion } from "../app-version.js";
+import {
+  CODE_INTELLIGENCE_AGENT_TOOLS,
+  CODE_INTELLIGENCE_MCP_TOOLS
+} from "../services/lsp-plugin.js";
 
 const CLI_DIR = path.dirname(fileURLToPath(import.meta.url));
 const APP_ROOT = path.resolve(CLI_DIR, "../../..");
@@ -86,12 +90,12 @@ const AGENT_FRONTMATTER = {
   },
   architect: {
     description: "VCM architecture role for plans, module boundaries, public contracts, verifiable behavior, and docs sync.",
-    tools: "Read, Grep, Glob, Bash, Edit, Write, Agent, LSP",
+    tools: `Read, Grep, Glob, Bash, Edit, Write, Agent, ${CODE_INTELLIGENCE_AGENT_TOOLS}`,
     skills: ["vcm-code-navigation"]
   },
   coder: {
     description: "VCM implementation role for scoped code changes and focused tests.",
-    tools: "Read, Grep, Glob, Bash, Edit, Write, Agent, LSP",
+    tools: `Read, Grep, Glob, Bash, Edit, Write, Agent, ${CODE_INTELLIGENCE_AGENT_TOOLS}`,
     skills: ["vcm-code-navigation"]
   },
   tester: {
@@ -99,7 +103,7 @@ const AGENT_FRONTMATTER = {
   },
   reviewer: {
     description: "VCM independent gate review role for architecture plans, validation adequacy, and code diffs.",
-    tools: "Read, Grep, Glob, Bash, Write, LSP",
+    tools: `Read, Grep, Glob, Bash, Write, ${CODE_INTELLIGENCE_AGENT_TOOLS}`,
     skills: ["vcm-code-navigation"]
   },
   translator: {
@@ -118,11 +122,16 @@ const AGENT_FRONTMATTER = {
     effort: "xhigh"
   }
 };
+const REMOVED_AGENT_TOOLS = {
+  architect: ["LSP"],
+  coder: ["LSP"],
+  reviewer: ["LSP"]
+};
 
 const REQUIRED_AGENT_TOOLS = {
-  architect: ["Grep", "Agent", "LSP"],
-  coder: ["Grep", "Agent", "LSP"],
-  reviewer: ["Grep", "LSP"]
+  architect: ["Grep", "Agent", ...CODE_INTELLIGENCE_MCP_TOOLS],
+  coder: ["Grep", "Agent", ...CODE_INTELLIGENCE_MCP_TOOLS],
+  reviewer: ["Grep", ...CODE_INTELLIGENCE_MCP_TOOLS]
 };
 const REQUIRED_AGENT_SKILLS = {
   architect: ["vcm-code-navigation"],
@@ -807,6 +816,9 @@ async function installManagedFile({ projectRoot, definition, dryRun, operations 
   for (const requiredTool of REQUIRED_AGENT_TOOLS[definition.agentName] ?? []) {
     nextContent = ensureAgentTool(nextContent, requiredTool);
   }
+  for (const removedTool of REMOVED_AGENT_TOOLS[definition.agentName] ?? []) {
+    nextContent = removeAgentTool(nextContent, removedTool);
+  }
   for (const requiredSkill of REQUIRED_AGENT_SKILLS[definition.agentName] ?? []) {
     nextContent = ensureAgentSkill(nextContent, requiredSkill);
   }
@@ -882,6 +894,20 @@ function ensureAgentTool(content, requiredTool) {
   }
 
   const nextTools = [...tools, requiredTool].join(", ");
+  return content.replace(frontmatterMatch[0], frontmatterMatch[0].replace(toolsMatch[0], `tools: ${nextTools}`));
+}
+
+function removeAgentTool(content, removedTool) {
+  const frontmatterMatch = content.match(/^---\r?\n[\s\S]*?\r?\n---/);
+  const toolsMatch = frontmatterMatch?.[0].match(/^tools:\s*(.*)$/m);
+  if (!frontmatterMatch || !toolsMatch) {
+    return content;
+  }
+  const tools = toolsMatch[1].split(",").map((tool) => tool.trim()).filter(Boolean);
+  if (!tools.includes(removedTool)) {
+    return content;
+  }
+  const nextTools = tools.filter((tool) => tool !== removedTool).join(", ");
   return content.replace(frontmatterMatch[0], frontmatterMatch[0].replace(toolsMatch[0], `tools: ${nextTools}`));
 }
 

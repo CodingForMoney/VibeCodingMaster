@@ -7,6 +7,7 @@ import type { TranslationService } from "./translation-service.js";
 import type { ProjectService } from "./project-service.js";
 import type { TaskWorkflowService } from "./task-workflow-service.js";
 import type { ArchitectRestartService } from "./architect-restart-service.js";
+import type { CodeIntelligenceManager } from "./code-intelligence-service.js";
 
 export interface TaskCloseService {
   closeTask(repoRoot: string, taskSlug: string): Promise<CleanupTaskResult>;
@@ -24,6 +25,7 @@ export interface TaskCloseServiceDeps {
   projectService?: Pick<ProjectService, "loadConfig">;
   taskWorkflowService?: Pick<TaskWorkflowService, "clearState">;
   architectRestartService?: Pick<ArchitectRestartService, "clear">;
+  codeIntelligenceManager?: Pick<CodeIntelligenceManager, "stopTask">;
 }
 
 export function createTaskCloseService(deps: TaskCloseServiceDeps): TaskCloseService {
@@ -42,6 +44,11 @@ export function createTaskCloseService(deps: TaskCloseServiceDeps): TaskCloseSer
       await bestEffort(
         "Unable to clear task round runtime",
         () => deps.roundService.stopTask(taskSlug),
+        warnings
+      );
+      await bestEffort(
+        "Unable to stop task code intelligence runtime",
+        () => deps.codeIntelligenceManager?.stopTask(getTaskRuntimeRepoRoot(task)),
         warnings
       );
       if (deps.projectService && deps.taskWorkflowService) {

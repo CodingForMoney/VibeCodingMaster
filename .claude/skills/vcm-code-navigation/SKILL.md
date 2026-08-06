@@ -9,21 +9,29 @@ description: Use when Architect, Coder, or Reviewer must resolve code symbols, r
 
 Use this skill when Architect, Coder, or Reviewer must establish symbol definitions, implementations, references, callers, callees, or a bounded behavior path from current-worktree evidence.
 
+## Search Selection
+
+- Use `.ai/generated/module-index.json`, `.ai/generated/public-surface.json`, and Glob to locate modules and files.
+- Use the VCM shared LSP tools for project-owned symbol definitions, implementations, references, callers, callees, type relationships, hover information, and call hierarchy.
+- Use Read to inspect each resolved callable unit or source site in full.
+- Use Grep only for exact text LSP does not model: comments, documentation, configuration keys, string literals, diagnostics, and `VCM:CODE` markers.
+- Use generated context, architecture documents, runtime evidence, and exact non-semantic text search for dynamic registrations, configuration-driven edges, macros, generated code, and external boundaries.
+
 ## Navigation Order
 
-1. Define the affected feature or module boundary and locate entry symbols with `.ai/generated/module-index.json` and `.ai/generated/public-surface.json` when available.
-2. Start each navigation run with LSP `documentSymbol` on a known affected project source file. This initializes the actual role-session language server and proves that it can parse that file; an executable version probe is not workspace readiness.
-3. Use LSP workspace or file symbols, definitions, implementations, references, and incoming or outgoing call hierarchy to resolve project-owned relationships.
-4. If an initial workspace-symbol request is empty or reports indexing, do not conclude that the symbol is absent. After a successful file-symbol request, retry the same bounded workspace query at most two more times. If it still cannot resolve, record the operation and result as unresolved.
-5. Read the complete project-owned callable unit at every resolved location.
-6. Expand one project-owned dependency hop at a time until the required behavior path has no unresolved symbol.
-7. Use Glob, generated context, architecture documents, and runtime evidence to locate dynamic registrations, configuration or string edges, macros, documentation, and external boundaries that LSP does not model.
+1. Define the affected feature or module boundary and locate its project files.
+2. Call shared LSP `status`; if the language is starting or indexing, wait by retrying the semantic query. Do not substitute another search method.
+3. Resolve each project-owned relationship with the matching shared LSP operation.
+4. Read the complete project-owned callable unit at every resolved location.
+5. Expand one project-owned dependency hop at a time until the required behavior path has no unresolved symbol.
+6. Resolve non-LSP boundaries with the specific generated, runtime, configuration, documentation, or exact-text evidence they require.
 
 ## Evidence
 
-- Record each resolved relationship and whether it came from LSP, runtime evidence, an external boundary, or a generated boundary.
-- When an empty LSP result contradicts a direct call in the code, another LSP result, or runtime evidence, treat the relationship as unresolved. Record the contradiction and use exact fallback evidence.
-- If LSP is unavailable or cannot resolve a required project-owned relationship, record that limitation and leave the relationship unresolved.
+- Record each resolved relationship and whether it came from shared LSP, runtime evidence, an external boundary, or a generated boundary.
+- A shared LSP result of `unresolved` is not evidence that a symbol or relationship is absent.
+- When an empty LSP result contradicts code or runtime evidence, record the contradiction and leave the semantic relationship unresolved.
+- If shared LSP ultimately cannot resolve a required project-owned relationship, record the operation and limitation. Grep, comments, memory, and inference cannot replace that semantic evidence.
 - Generated indexes and architecture docs locate likely code; reading current-worktree implementation establishes behavior.
 
 ## Context Boundary

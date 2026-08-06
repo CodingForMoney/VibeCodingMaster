@@ -45,6 +45,7 @@ import { createDiagnosticsService } from "../../../../src/backend/services/diagn
 import { createUsageAnalyticsService } from "../../../../src/backend/services/usage-analytics-service.js";
 import { createJobGuardService } from "../../../../src/backend/services/job-guard-service.js";
 import { createWorkflowControlService } from "../../../../src/backend/services/workflow-control-service.js";
+import type { CodeIntelligenceManager } from "../../../../src/backend/services/code-intelligence-service.js";
 import { readVcmPackageVersion } from "../../../../src/backend/app-version.js";
 import type { RoleName } from "../../../../src/shared/types/role.js";
 import {
@@ -71,6 +72,7 @@ export interface MockClaudeE2eAppOptions {
   ccrBaseEnv?: NodeJS.ProcessEnv;
   now?: () => string;
   workflowControl?: boolean;
+  codeIntelligenceManager?: CodeIntelligenceManager;
 }
 
 export async function createMockClaudeE2eApp(options: MockClaudeE2eAppOptions = {}): Promise<MockClaudeE2eApp> {
@@ -103,6 +105,7 @@ export async function createMockClaudeE2eApp(options: MockClaudeE2eAppOptions = 
   const artifactService = createArtifactService(fsAdapter, { workflowControlService });
   const projectService = createProjectService({ fs: fsAdapter, git, appSettings });
   const taskService = createTaskService({ fs: fsAdapter, git, artifactService, projectService });
+  const codeIntelligenceManager = options.codeIntelligenceManager ?? createNoopCodeIntelligenceManager();
   const taskWorkflowService = createTaskWorkflowService({ fs: fsAdapter });
   const registry = createSessionRegistry();
   const sessionService = createSessionService({
@@ -134,7 +137,8 @@ export async function createMockClaudeE2eApp(options: MockClaudeE2eAppOptions = 
         message: "mock fixed harness install"
       };
     },
-    vcmVersion: readVcmPackageVersion(appRoot)
+    vcmVersion: readVcmPackageVersion(appRoot),
+    codeIntelligenceManager
   });
   const autoMemoryService = createAutoMemoryService({
     fs: fsAdapter,
@@ -187,7 +191,8 @@ export async function createMockClaudeE2eApp(options: MockClaudeE2eAppOptions = 
     taskService,
     appSettings,
     sessionService,
-    messageService
+    messageService,
+    codeIntelligenceManager
   });
   const roundService = createRoundService({
     fs: fsAdapter,
@@ -258,7 +263,8 @@ export async function createMockClaudeE2eApp(options: MockClaudeE2eAppOptions = 
     roundService,
     projectService,
     taskWorkflowService,
-    architectRestartService
+    architectRestartService,
+    codeIntelligenceManager
   });
   const gatewayService = createGatewayService({
     fs: fsAdapter,
@@ -376,7 +382,8 @@ export async function createMockClaudeE2eApp(options: MockClaudeE2eAppOptions = 
     runtime: mockRuntime,
     diagnosticsService,
     usageAnalyticsService,
-    workflowControlService
+    workflowControlService,
+    codeIntelligenceManager
   };
   const app = await createServer(deps);
   mockRuntime.setHookDispatcher(async (input, options) => {
@@ -407,6 +414,26 @@ export async function createMockClaudeE2eApp(options: MockClaudeE2eAppOptions = 
           retryDelay: 20
         });
       }
+    }
+  };
+}
+
+function createNoopCodeIntelligenceManager(): CodeIntelligenceManager {
+  return {
+    async activateTask() {},
+    async stopTask() {},
+    async shutdown() {},
+    async getStatus() {
+      return { state: "not_detected", languages: [] };
+    },
+    async query(taskRepoRoot, request) {
+      return {
+        status: "unresolved",
+        operation: request.operation,
+        workspaceRoot: taskRepoRoot,
+        reason: "Mock E2E code intelligence is not configured.",
+        errorCode: "LSP_UNAVAILABLE"
+      };
     }
   };
 }

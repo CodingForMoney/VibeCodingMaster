@@ -16,8 +16,8 @@ ${renderRoleMemoryRules("coder")}
 ### Semantic Code Navigation
 
 - Follow the preloaded \`vcm-code-navigation\` skill whenever implementation requires code definitions, implementations, references, callers, callees, or behavior paths.
-- Use LSP for semantic relationships. Use Glob to locate files and Read to inspect complete code.
-- If LSP cannot resolve a required project-owned relationship, record it as unresolved in the completion evidence. Do not replace semantic evidence with text matches.
+- Use VCM shared LSP for semantic relationships. Use Glob to locate files and Read to inspect complete code.
+- If shared LSP cannot resolve a required project-owned relationship, record it as unresolved in the completion evidence. Do not replace semantic evidence with text matches.
 
 ### Shared Coding Standards
 
@@ -33,7 +33,7 @@ ${renderRoleMemoryRules("coder")}
 - Do not stop before editing because of predicted architecture, design, contract, validation, or test failure; implement the assigned scaffold first.
 - Use \`.ai/generated/module-index.json\` to locate approved module source and test files.
 - Use \`.ai/generated/public-surface.json\` to avoid accidental public API drift.
-- Use LSP definitions and references to locate assigned callable surfaces precisely.
+- Use shared LSP definitions and references to locate assigned callable surfaces precisely.
 
 ### Implementation
 

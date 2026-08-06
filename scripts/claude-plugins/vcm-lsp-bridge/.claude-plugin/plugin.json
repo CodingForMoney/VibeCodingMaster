@@ -1,72 +1,8 @@
 {
-  "name": "vcm-lsp-bridge",
-  "description": "VCM-managed Claude Code LSP bridge for supported project languages",
-  "version": "1.0.0",
+  "name": "vcm-code-intelligence-bridge",
+  "description": "Stateless Claude Code MCP bridge to the VCM-managed shared LSP runtime",
+  "version": "2.0.0",
   "author": {
     "name": "VibeCodingMaster"
-  },
-  "lspServers": {
-    "rust-analyzer": {
-      "command": "rust-analyzer",
-      "extensionToLanguage": {
-        ".rs": "rust"
-      }
-    },
-    "typescript": {
-      "command": "typescript-language-server",
-      "args": [
-        "--stdio"
-      ],
-      "extensionToLanguage": {
-        ".ts": "typescript",
-        ".tsx": "typescriptreact",
-        ".js": "javascript",
-        ".jsx": "javascriptreact",
-        ".mts": "typescript",
-        ".cts": "typescript",
-        ".mjs": "javascript",
-        ".cjs": "javascript"
-      }
-    },
-    "pyright": {
-      "command": "pyright-langserver",
-      "args": [
-        "--stdio"
-      ],
-      "extensionToLanguage": {
-        ".py": "python",
-        ".pyi": "python"
-      }
-    },
-    "gopls": {
-      "command": "gopls",
-      "extensionToLanguage": {
-        ".go": "go"
-      }
-    },
-    "clangd": {
-      "command": "clangd",
-      "args": [
-        "--background-index"
-      ],
-      "extensionToLanguage": {
-        ".c": "c",
-        ".h": "c",
-        ".cpp": "cpp",
-        ".cc": "cpp",
-        ".cxx": "cpp",
-        ".hpp": "cpp",
-        ".hxx": "cpp",
-        ".C": "cpp",
-        ".H": "cpp"
-      }
-    },
-    "jdtls": {
-      "command": "jdtls",
-      "extensionToLanguage": {
-        ".java": "java"
-      },
-      "startupTimeout": 120000
-    }
   }
 }

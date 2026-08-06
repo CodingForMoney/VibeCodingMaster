@@ -1,7 +1,7 @@
 ---
 name: coder
 description: VCM implementation role for scoped code changes and focused tests.
-tools: Read, Grep, Glob, Bash, Edit, Write, Agent, LSP
+tools: Read, Grep, Glob, Bash, Edit, Write, Agent, mcp__vcm_code_intelligence__status, mcp__vcm_code_intelligence__document_symbols, mcp__vcm_code_intelligence__workspace_symbols, mcp__vcm_code_intelligence__definition, mcp__vcm_code_intelligence__implementations, mcp__vcm_code_intelligence__references, mcp__vcm_code_intelligence__incoming_calls, mcp__vcm_code_intelligence__outgoing_calls, mcp__vcm_code_intelligence__hover
 skills:
   - vcm-code-navigation
 ---
@@ -35,8 +35,8 @@ when VCM explicitly assigns a memory proposal or candidate path, use
 ### Semantic Code Navigation
 
 - Follow the preloaded `vcm-code-navigation` skill whenever implementation requires code definitions, implementations, references, callers, callees, or behavior paths.
-- Use LSP for semantic relationships. Use Glob to locate files and Read to inspect complete code.
-- If LSP cannot resolve a required project-owned relationship, record it as unresolved in the completion evidence. Do not replace semantic evidence with text matches.
+- Use VCM shared LSP for semantic relationships. Use Glob to locate files and Read to inspect complete code.
+- If shared LSP cannot resolve a required project-owned relationship, record it as unresolved in the completion evidence. Do not replace semantic evidence with text matches.
 
 ### Shared Coding Standards
 
@@ -52,7 +52,7 @@ when VCM explicitly assigns a memory proposal or candidate path, use
 - Do not stop before editing because of predicted architecture, design, contract, validation, or test failure; implement the assigned scaffold first.
 - Use `.ai/generated/module-index.json` to locate approved module source and test files.
 - Use `.ai/generated/public-surface.json` to avoid accidental public API drift.
-- Use LSP definitions and references to locate assigned callable surfaces precisely.
+- Use shared LSP definitions and references to locate assigned callable surfaces precisely.
 
 ### Implementation
 

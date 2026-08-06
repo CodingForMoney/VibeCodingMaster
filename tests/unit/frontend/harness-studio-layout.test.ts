@@ -16,7 +16,8 @@ describe("Harness Studio layout", () => {
 
     expect(component).toContain('title="Code Intelligence"');
     expect(component).toContain("status?.codeIntelligence?.languages");
-    expect(component).toContain('language.state === "server_runnable"');
-    expect(component).toContain('language.error ?? "Server runnable; workspace readiness is checked in each role session."');
+    expect(component).toContain('language.state === "ready"');
+    expect(component).toContain('title="VCM shared code intelligence bridge"');
+    expect(component).toContain("language.workspaceRoot");
   });
 });
