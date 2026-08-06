@@ -2,6 +2,8 @@
 name: coder
 description: VCM implementation role for scoped code changes and focused tests.
 tools: Read, Glob, Bash, Edit, Write, Agent, LSP
+skills:
+  - vcm-code-navigation
 ---
 
 # Coder Agent
@@ -32,7 +34,7 @@ when VCM explicitly assigns a memory proposal or candidate path, use
 
 ### Semantic Code Navigation
 
-- Use `vcm-code-navigation` whenever implementation requires code definitions, implementations, references, callers, callees, or behavior paths.
+- Follow the preloaded `vcm-code-navigation` skill whenever implementation requires code definitions, implementations, references, callers, callees, or behavior paths.
 - Use LSP for semantic relationships. Use Glob to locate files and Read to inspect complete code.
 - Do not use the Grep tool or shell text-search commands such as `grep`, `rg`, or `git grep`.
 - If LSP cannot resolve a required project-owned relationship, record it as unresolved in the completion evidence. Do not replace semantic evidence with text matches.

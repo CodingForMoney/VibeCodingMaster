@@ -194,13 +194,13 @@ async function detectCodeIntelligence(
     (language): language is HarnessCodeIntelligenceLanguageStatus => language !== undefined
   );
 
-  const readyCount = languages.filter((language) => language.state === "ready").length;
+  const runnableCount = languages.filter((language) => language.state === "server_runnable").length;
   return {
     state: languages.length === 0
       ? "not_detected"
-      : readyCount === languages.length
-        ? "ready"
-        : readyCount === 0
+      : runnableCount === languages.length
+        ? "available"
+        : runnableCount === 0
           ? "missing"
           : "partial",
     languages
@@ -222,7 +222,7 @@ function languageState(
   if (!probeCompleted) {
     return "server_unverified";
   }
-  return serverRunnable ? "ready" : "server_failed";
+  return serverRunnable ? "server_runnable" : "server_failed";
 }
 
 function languageError(

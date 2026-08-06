@@ -189,7 +189,9 @@ Regenerate both after changing module layout, public exports, or HTTP routes.
 VCM ships the local `vcm-lsp-bridge` Claude Code plugin. Session Service passes
 it through `--plugin-dir` and enables the LSP tool for Architect, Coder, and
 Reviewer sessions on both native Claude and CCR launches. Auxiliary roles do not
-load the plugin.
+load the plugin. The Claude adapter explicitly opts these roles into Glob and
+opts non-LSP roles into Glob and Grep. Architect, Coder, and Reviewer preload the
+`vcm-code-navigation` skill through Agent frontmatter.
 
 The fixed harness removes the Grep tool from Architect, Coder, and Reviewer.
 Their shared PreToolUse guard also rejects direct Grep calls and shell text-search
@@ -202,10 +204,13 @@ worktree's root manifests and `module-index.json`. It validates the bundled
 plugin declaration, resolves the matching language-server executable from the
 backend `PATH`, and runs a bounded version probe. Probe results are cached for
 the backend process; detection does not start a persistent language server or
-scan the repository recursively. Harness Studio renders the resulting ready,
-missing, or failed state and the exact backend diagnostic. The project runtime,
-not VCM, owns installation of `rust-analyzer`, `typescript-language-server`,
-`pyright-langserver`, `gopls`, `clangd`, or `jdtls`.
+scan the repository recursively. A successful probe means the server is
+runnable, not that a role workspace is indexed or semantically ready. Each role
+Session performs a file-symbol warm-up and bounded workspace-query retry through
+`vcm-code-navigation`. Harness Studio renders server availability and the exact
+backend diagnostic. The project runtime, not VCM, owns installation of
+`rust-analyzer`, `typescript-language-server`, `pyright-langserver`, `gopls`,
+`clangd`, or `jdtls`.
 
 ## Durable Documentation Ownership
 

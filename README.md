@@ -455,7 +455,7 @@ Harness Studio is the UI for VCM harness maintenance.
 Use it to:
 
 - inspect fixed harness status
-- inspect detected project languages and verified language-server readiness
+- inspect detected project languages and language-server availability
 - run bootstrap
 - open Harness Engineer
 - review harness files
@@ -471,11 +471,12 @@ VCM bundles the Claude Code LSP bridge and loads it for Architect, Coder, and
 Reviewer sessions, including CCR launches. The project environment must still
 provide the language server for each detected language: `rust-analyzer`,
 `typescript-language-server`, `pyright-langserver`, `gopls`, `clangd`, or
-`jdtls`. Architect, Coder, and Reviewer do not receive the Grep tool, and the
-Harness guard rejects shell text-search commands for those roles so unresolved
+`jdtls`. Their Agent definitions preload `vcm-code-navigation`, and their
+launches explicitly enable Glob while leaving Grep unavailable. The Harness
+guard also rejects shell text-search commands for those roles so unresolved
 semantic relationships cannot be hidden by textual fallback. Harness Studio
-reports a missing executable or failed readiness probe
-with the backend diagnostic.
+reports whether the server executable and plugin can run; the role Session
+performs the real workspace warm-up and semantic query retries.
 
 Harness Engineer is task-scoped and runs from the active task worktree. The
 backend automatically starts a fresh Harness Engineer for each active task or

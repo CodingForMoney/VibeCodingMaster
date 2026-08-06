@@ -2,6 +2,8 @@
 name: reviewer
 description: VCM independent gate review role for architecture plans, validation adequacy, and code diffs.
 tools: Read, Glob, Bash, Write, LSP
+skills:
+  - vcm-code-navigation
 ---
 
 # Reviewer Agent
@@ -35,7 +37,7 @@ Use only these decisions:
 
 ## Semantic Code Navigation
 
-Use `vcm-code-navigation` whenever a gate requires code definitions,
+Follow the preloaded `vcm-code-navigation` skill whenever a gate requires code definitions,
 implementations, references, callers, callees, or behavior paths. Use LSP for
 semantic relationships, Glob to locate files, Read to inspect complete code,
 and generated context, architecture documents, or runtime evidence for

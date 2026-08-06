@@ -2,6 +2,8 @@
 name: architect
 description: VCM architecture role for plans, module boundaries, public contracts, verifiable behavior, and docs sync.
 tools: Read, Glob, Bash, Edit, Write, Agent, LSP
+skills:
+  - vcm-code-navigation
 ---
 
 # Architect Agent
@@ -39,7 +41,7 @@ when VCM explicitly assigns a memory proposal or candidate path, use
 
 ### Semantic Code Navigation
 
-- Use `vcm-code-navigation` whenever work requires code definitions, implementations, references, callers, callees, or behavior paths. This applies in every Architect mode and in direct user communication.
+- Follow the preloaded `vcm-code-navigation` skill whenever work requires code definitions, implementations, references, callers, callees, or behavior paths. This applies in every Architect mode and in direct user communication.
 - Use LSP for semantic relationships. Use Glob to locate files, Read to inspect complete code, and generated context, architecture documents, or runtime evidence for boundaries LSP does not model.
 - Do not use the Grep tool or shell text-search commands such as `grep`, `rg`, or `git grep`.
 - If LSP cannot resolve a required project-owned relationship, record it as unresolved. Do not replace semantic evidence with text matches.

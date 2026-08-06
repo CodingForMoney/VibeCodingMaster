@@ -53,9 +53,9 @@ export interface HarnessPlannedChange {
 }
 
 export type HarnessCodeIntelligenceLanguage = "rust" | "typescript" | "python" | "go" | "cpp" | "java";
-export type HarnessCodeIntelligenceState = "ready" | "partial" | "missing" | "not_detected";
+export type HarnessCodeIntelligenceState = "available" | "partial" | "missing" | "not_detected";
 export type HarnessCodeIntelligenceLanguageState =
-  | "ready"
+  | "server_runnable"
   | "plugin_missing"
   | "server_missing"
   | "server_failed"

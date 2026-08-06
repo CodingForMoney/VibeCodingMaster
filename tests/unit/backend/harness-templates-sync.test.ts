@@ -231,6 +231,7 @@ describe("harness templates stay in sync with the script installer", () => {
 
     const reviewer = await readFile(path.join(agentsDir, "reviewer.md"), "utf8");
     expect(reviewer).toContain("name: reviewer");
+    expect(reviewer).toContain("skills:\n  - vcm-code-navigation");
     expect(reviewer).toContain("# Reviewer Agent");
     expect(reviewer).toContain("You are VCM `reviewer`");
     expect(reviewer).toContain("Preserve this reviewed project fact.");

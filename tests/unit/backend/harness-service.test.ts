@@ -88,7 +88,10 @@ describe("createHarnessService", () => {
     expect(await fs.readText("/repo/.claude/skills/vcm-gate-review/SKILL.md")).toContain("Validation-Only Flow does not request code-diff");
     expect(await fs.readText("/repo/.claude/skills/vcm-architecture-interview/SKILL.md")).toContain("name: vcm-architecture-interview");
     expect(await fs.readText("/repo/.claude/skills/vcm-architecture-interview/SKILL.md")).toContain("During an active Architect Interview");
-    expect(await fs.readText("/repo/.claude/skills/vcm-code-navigation/SKILL.md")).toContain("Do not substitute text search for semantic navigation");
+    const codeNavigationSkill = await fs.readText("/repo/.claude/skills/vcm-code-navigation/SKILL.md");
+    expect(codeNavigationSkill).toContain("Do not substitute text search for semantic navigation");
+    expect(codeNavigationSkill).toContain("Start each navigation run with LSP `documentSymbol`");
+    expect(codeNavigationSkill).toContain("retry the same bounded workspace query at most two more times");
     expect(await fs.readText("/repo/.claude/skills/vcm-report-harness-issue/SKILL.md")).toContain("name: vcm-report-harness-issue");
     expect(await fs.readText("/repo/.claude/skills/vcm-report-harness-issue/SKILL.md")).toContain(".ai/vcm/harness-feedback/pending/");
     const proposeMemorySkill = await fs.readText("/repo/.claude/skills/vcm-propose-memory/SKILL.md");
@@ -146,7 +149,8 @@ describe("createHarnessService", () => {
     expect(await fs.readText("/repo/.ai/tools/request-gate-review")).toContain('["git", "merge-base", "HEAD", upstream]');
     const architectAgent = await fs.readText("/repo/.claude/agents/architect.md");
     expect(frontmatterOf(architectAgent)).toContain("LSP");
-    expect(architectAgent).toContain("Use `vcm-code-navigation`");
+    expect(architectAgent).toContain("Follow the preloaded `vcm-code-navigation` skill");
+    expect(frontmatterOf(architectAgent)).toContain("skills:\n  - vcm-code-navigation");
     expect(architectAgent).toContain("Resolution Evidence");
     expect(architectAgent).toContain("verifiable behavior, implementation boundaries within the accepted scope, behavior/contract proof points");
     expect(architectAgent).toContain("Own `.ai/vcm/handoffs/known-issues.md` as its only writer");
@@ -183,7 +187,8 @@ describe("createHarnessService", () => {
     expect(testerAgent).not.toContain("shared implementation-quality and baseline-test standard");
     const diagnosisReviewerAgent = await fs.readText("/repo/.claude/agents/reviewer.md");
     expect(frontmatterOf(diagnosisReviewerAgent)).toContain("LSP");
-    expect(diagnosisReviewerAgent).toContain("Use `vcm-code-navigation`");
+    expect(diagnosisReviewerAgent).toContain("Follow the preloaded `vcm-code-navigation` skill");
+    expect(frontmatterOf(diagnosisReviewerAgent)).toContain("skills:\n  - vcm-code-navigation");
     expect(diagnosisReviewerAgent).toContain("verify that the commits implement the diagnosed");
     expect(diagnosisReviewerAgent).toContain("local workaround for the surface failure");
     expect(diagnosisReviewerAgent).toContain("Independently apply the Tester L3 trigger rules");
@@ -197,6 +202,7 @@ describe("createHarnessService", () => {
     const coderAgent = await fs.readText("/repo/.claude/agents/coder.md");
     expect(coderAgent).toContain("tools: Read, Glob, Bash, Edit, Write, Agent, LSP");
     expect(frontmatterOf(coderAgent)).not.toContain("Grep");
+    expect(frontmatterOf(coderAgent)).toContain("skills:\n  - vcm-code-navigation");
     expect(coderAgent).toContain("Implement assigned file/function-level scaffold items");
     expect(coderAgent).toContain("read and follow `docs/CODING_STANDARDS.md`");
     expect(await fs.readText("/repo/docs/CODING_STANDARDS.md")).toContain("Unit test coverage is required for every changed callable unit");
@@ -276,7 +282,7 @@ describe("createHarnessService", () => {
     expect(await fs.readText("/repo/.claude/settings.json")).toContain('"autoMemoryEnabled": false');
   });
 
-  it("reports code intelligence ready only when the VCM plugin and language server probe are ready", async () => {
+  it("reports the server runnable without claiming that a role workspace is semantically ready", async () => {
     const fs = createMemoryFs();
     await fs.writeJson("/repo/.ai/generated/module-index.json", {
       modules: [{ files: { source: ["src/lib.rs", "ui/app.tsx"] } }]
@@ -313,7 +319,7 @@ describe("createHarnessService", () => {
         pluginReady: true,
         serverFound: true,
         serverRunnable: true,
-        state: "ready"
+        state: "server_runnable"
       }),
       expect.objectContaining({
         language: "typescript",
@@ -408,6 +414,7 @@ describe("createHarnessService", () => {
       architectPath,
       current
         .replace("tools: Read, Glob, Bash, Edit, Write, Agent, LSP", "tools: Read, Grep, Glob, Bash, Edit, Write")
+        .replace("skills:\n  - vcm-code-navigation\n", "")
         .replace("description: VCM architecture role", "model: custom-model\ndescription: VCM architecture role")
     );
 
@@ -418,6 +425,7 @@ describe("createHarnessService", () => {
     const updated = await fs.readText(architectPath);
     expect(frontmatterOf(updated)).toContain("tools: Read, Glob, Bash, Edit, Write, Agent, LSP");
     expect(frontmatterOf(updated)).not.toContain("Grep");
+    expect(frontmatterOf(updated)).toContain("skills:\n  - vcm-code-navigation");
     expect(frontmatterOf(updated)).toContain("model: custom-model");
   });
 

@@ -85,18 +85,21 @@ const AGENT_FRONTMATTER = {
   },
   architect: {
     description: "VCM architecture role for plans, module boundaries, public contracts, verifiable behavior, and docs sync.",
-    tools: "Read, Glob, Bash, Edit, Write, Agent, LSP"
+    tools: "Read, Glob, Bash, Edit, Write, Agent, LSP",
+    skills: ["vcm-code-navigation"]
   },
   coder: {
     description: "VCM implementation role for scoped code changes and focused tests.",
-    tools: "Read, Glob, Bash, Edit, Write, Agent, LSP"
+    tools: "Read, Glob, Bash, Edit, Write, Agent, LSP",
+    skills: ["vcm-code-navigation"]
   },
   tester: {
     description: "VCM testing role for validation, test adequacy, approved-scope validation, and risk findings."
   },
   reviewer: {
     description: "VCM independent gate review role for architecture plans, validation adequacy, and code diffs.",
-    tools: "Read, Glob, Bash, Write, LSP"
+    tools: "Read, Glob, Bash, Write, LSP",
+    skills: ["vcm-code-navigation"]
   },
   translator: {
     description: "VCM task-scoped translation tool role for conversation translation, file translation, bootstrap, and memory updates."
@@ -124,6 +127,11 @@ const FORBIDDEN_AGENT_TOOLS = {
   architect: ["Grep"],
   coder: ["Grep"],
   reviewer: ["Grep"]
+};
+const REQUIRED_AGENT_SKILLS = {
+  architect: ["vcm-code-navigation"],
+  coder: ["vcm-code-navigation"],
+  reviewer: ["vcm-code-navigation"]
 };
 
 const MANAGED_FILES = [
@@ -788,6 +796,9 @@ async function installManagedFile({ projectRoot, definition, dryRun, operations 
   for (const forbiddenTool of FORBIDDEN_AGENT_TOOLS[definition.agentName] ?? []) {
     nextContent = removeAgentTool(nextContent, forbiddenTool);
   }
+  for (const requiredSkill of REQUIRED_AGENT_SKILLS[definition.agentName] ?? []) {
+    nextContent = ensureAgentSkill(nextContent, requiredSkill);
+  }
 
   await writeIfChanged({
     targetPath,
@@ -835,7 +846,10 @@ function renderNewManagedFile(definition, block) {
     const tools = frontmatter.tools ?? "Read, Grep, Glob, Bash, Edit, Write";
     const model = frontmatter.model ? `\nmodel: ${frontmatter.model}` : "";
     const effort = frontmatter.effort ? `\neffort: ${frontmatter.effort}` : "";
-    return `---\nname: ${definition.agentName}\ndescription: ${frontmatter.description}\ntools: ${tools}${model}${effort}\n---\n\n# ${definition.title}\n\n${block}${suffix ? `\n\n${suffix}` : ""}\n`;
+    const skills = frontmatter.skills?.length
+      ? `\nskills:\n${frontmatter.skills.map((skill) => `  - ${skill}`).join("\n")}`
+      : "";
+    return `---\nname: ${definition.agentName}\ndescription: ${frontmatter.description}\ntools: ${tools}${model}${effort}${skills}\n---\n\n# ${definition.title}\n\n${block}${suffix ? `\n\n${suffix}` : ""}\n`;
   }
   return `# ${definition.title}\n\n${block}${suffix ? `\n\n${suffix}` : ""}\n`;
 }
@@ -877,6 +891,33 @@ function removeAgentTool(content, forbiddenTool) {
     return content;
   }
   return content.replace(frontmatterMatch[0], frontmatterMatch[0].replace(toolsMatch[0], `tools: ${nextTools.join(", ")}`));
+}
+
+function ensureAgentSkill(content, requiredSkill) {
+  const frontmatterMatch = content.match(/^---\r?\n[\s\S]*?\r?\n---/);
+  if (!frontmatterMatch) {
+    return content;
+  }
+
+  const frontmatter = frontmatterMatch[0];
+  const skillsMatch = frontmatter.match(/^skills:[ \t]*(?:\r?\n((?:\s+-\s+[^\r\n]+\r?\n?)*))?/m);
+  if (!skillsMatch) {
+    return content.replace(
+      frontmatter,
+      frontmatter.replace(/\r?\n---$/, `\nskills:\n  - ${requiredSkill}\n---`)
+    );
+  }
+
+  const listedSkills = (skillsMatch[1] ?? "")
+    .split(/\r?\n/)
+    .map((line) => line.match(/^\s+-\s+(.+)$/)?.[1]?.trim())
+    .filter(Boolean);
+  if (listedSkills.includes(requiredSkill)) {
+    return content;
+  }
+
+  const nextSkills = `${skillsMatch[0].trimEnd()}\n  - ${requiredSkill}`;
+  return content.replace(frontmatter, frontmatter.replace(skillsMatch[0], nextSkills));
 }
 
 function migrateLegacyManagedFile(definition, currentContent, block) {

@@ -389,9 +389,9 @@ export function HarnessStudioModal({
                           <span>{language.label}</span>
                           <code title="Language server">{language.serverCommand}</code>
                           <code title={language.pluginReady ? "VCM Claude Code plugin ready" : "VCM Claude Code plugin missing"}>{language.pluginName}</code>
-                          <StatusBadge status={language.state === "ready" ? "ok" : language.state === "server_failed" ? "failed" : "missing"} />
+                          <StatusBadge status={language.state === "server_runnable" ? "ok" : language.state === "server_failed" ? "failed" : "missing"} />
                           <span className="harness-studio-code-intelligence-detail">
-                            {language.error ?? "LSP ready"}
+                            {language.error ?? "Server runnable; workspace readiness is checked in each role session."}
                           </span>
                         </li>
                       )) : <li><span>No supported project language detected.</span></li>}

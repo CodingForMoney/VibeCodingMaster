@@ -18,7 +18,7 @@ Use only these decisions:
 
 ## Semantic Code Navigation
 
-Use \`vcm-code-navigation\` whenever a gate requires code definitions,
+Follow the preloaded \`vcm-code-navigation\` skill whenever a gate requires code definitions,
 implementations, references, callers, callees, or behavior paths. Use LSP for
 semantic relationships, Glob to locate files, Read to inspect complete code,
 and generated context, architecture documents, or runtime evidence for

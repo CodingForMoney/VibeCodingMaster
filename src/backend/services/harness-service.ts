@@ -158,6 +158,7 @@ interface HarnessFileDefinition {
   memoryBlock?: boolean;
   requiredTools?: string[];
   forbiddenTools?: string[];
+  requiredSkills?: string[];
   defaultContentAfterBlock?: string;
   legacyWholeFile?: string;
   renderRules(): string;
@@ -370,10 +371,11 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
     memoryBlock: true,
     requiredTools: ["LSP"],
     forbiddenTools: ["Grep"],
+    requiredSkills: ["vcm-code-navigation"],
     frontmatter: renderAgentFrontmatter(
       "reviewer",
       "VCM independent gate review role for architecture plans, validation adequacy, and code diffs.",
-      { tools: "Read, Glob, Bash, Write, LSP" }
+      { tools: "Read, Glob, Bash, Write, LSP", skills: ["vcm-code-navigation"] }
     ),
     renderRules: renderReviewerAgentRules
   },
@@ -466,11 +468,12 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
     memoryBlock: true,
     requiredTools: ["Agent", "LSP"],
     forbiddenTools: ["Grep"],
+    requiredSkills: ["vcm-code-navigation"],
     blankLineBeforeEnd: true,
     frontmatter: renderAgentFrontmatter(
       "architect",
       "VCM architecture role for plans, module boundaries, public contracts, verifiable behavior, and docs sync.",
-      { tools: "Read, Glob, Bash, Edit, Write, Agent, LSP" }
+      { tools: "Read, Glob, Bash, Edit, Write, Agent, LSP", skills: ["vcm-code-navigation"] }
     ),
     renderRules: renderArchitectHarnessRules
   },
@@ -481,10 +484,11 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
     memoryBlock: true,
     requiredTools: ["Agent", "LSP"],
     forbiddenTools: ["Grep"],
+    requiredSkills: ["vcm-code-navigation"],
     frontmatter: renderAgentFrontmatter(
       "coder",
       "VCM implementation role for scoped code changes and focused tests.",
-      { tools: "Read, Glob, Bash, Edit, Write, Agent, LSP" }
+      { tools: "Read, Glob, Bash, Edit, Write, Agent, LSP", skills: ["vcm-code-navigation"] }
     ),
     renderRules: renderCoderHarnessRules
   },
@@ -1595,7 +1599,7 @@ async function analyzeHarnessFile(
     const migratedContent = migrateLegacyHarnessFile(definition, currentContent, expectedBlock);
     if (migratedContent) {
       const memoryUpdatedContent = definition.memoryBlock ? ensureVcmMemoryBlock(migratedContent) : migratedContent;
-      const nextContent = normalizeAgentTools(memoryUpdatedContent, definition.requiredTools, definition.forbiddenTools);
+      const nextContent = normalizeAgentFrontmatter(memoryUpdatedContent, definition);
       return {
         definition,
         status: {
@@ -1614,7 +1618,7 @@ async function analyzeHarnessFile(
       };
     }
     const insertedContent = `${currentContent.trimEnd()}\n\n${expectedBlock}\n`;
-    const nextContent = normalizeAgentTools(insertedContent, definition.requiredTools, definition.forbiddenTools);
+    const nextContent = normalizeAgentFrontmatter(insertedContent, definition);
     return {
       definition,
       status: {
@@ -1637,7 +1641,7 @@ async function analyzeHarnessFile(
   const currentBlock = match[0];
   const blockUpdatedContent = currentContent.replace(managedBlockPattern, expectedBlock);
   const memoryUpdatedContent = definition.memoryBlock ? ensureVcmMemoryBlock(blockUpdatedContent) : blockUpdatedContent;
-  const nextContent = normalizeAgentTools(memoryUpdatedContent, definition.requiredTools, definition.forbiddenTools);
+  const nextContent = normalizeAgentFrontmatter(memoryUpdatedContent, definition);
   const action: HarnessFileAction = currentContent === nextContent ? "ok" : "update";
 
   return {
@@ -1827,6 +1831,38 @@ function normalizeAgentTools(
   return (forbiddenTools ?? []).reduce(removeAgentTool, required);
 }
 
+function normalizeAgentFrontmatter(content: string, definition: HarnessFileDefinition): string {
+  const toolsUpdated = normalizeAgentTools(content, definition.requiredTools, definition.forbiddenTools);
+  return (definition.requiredSkills ?? []).reduce(ensureAgentSkill, toolsUpdated);
+}
+
+function ensureAgentSkill(content: string, requiredSkill: string): string {
+  const frontmatterMatch = content.match(/^---\r?\n[\s\S]*?\r?\n---/);
+  if (!frontmatterMatch) {
+    return content;
+  }
+
+  const frontmatter = frontmatterMatch[0];
+  const skillsMatch = frontmatter.match(/^skills:[ \t]*(?:\r?\n((?:\s+-\s+[^\r\n]+\r?\n?)*))?/m);
+  if (!skillsMatch) {
+    return content.replace(
+      frontmatter,
+      frontmatter.replace(/\r?\n---$/, `\nskills:\n  - ${requiredSkill}\n---`)
+    );
+  }
+
+  const listedSkills = (skillsMatch[1] ?? "")
+    .split(/\r?\n/)
+    .map((line) => line.match(/^\s+-\s+(.+)$/)?.[1]?.trim())
+    .filter((skill): skill is string => Boolean(skill));
+  if (listedSkills.includes(requiredSkill)) {
+    return content;
+  }
+
+  const nextSkills = `${skillsMatch[0].trimEnd()}\n  - ${requiredSkill}`;
+  return content.replace(frontmatter, frontmatter.replace(skillsMatch[0], nextSkills));
+}
+
 function migrateLegacyHarnessFile(
   definition: HarnessFileDefinition,
   currentContent: string,
@@ -1973,12 +2009,15 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 function renderAgentFrontmatter(
   name: string,
   description: string,
-  options: { tools?: string; model?: string; effort?: string } = {}
+  options: { tools?: string; model?: string; effort?: string; skills?: string[] } = {}
 ): string {
   const tools = options.tools ?? "Read, Grep, Glob, Bash, Edit, Write";
   const model = options.model ? `\nmodel: ${options.model}` : "";
   const effort = options.effort ? `\neffort: ${options.effort}` : "";
-  return `---\nname: ${name}\ndescription: ${description}\ntools: ${tools}${model}${effort}\n---`;
+  const skills = options.skills?.length
+    ? `\nskills:\n${options.skills.map((skill) => `  - ${skill}`).join("\n")}`
+    : "";
+  return `---\nname: ${name}\ndescription: ${description}\ntools: ${tools}${model}${effort}${skills}\n---`;
 }
 
 function renderSkillFrontmatter(name: string, description: string): string {
