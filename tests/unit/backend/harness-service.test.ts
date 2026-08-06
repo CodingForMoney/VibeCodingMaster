@@ -156,6 +156,9 @@ describe("createHarnessService", () => {
     expect(frontmatterOf(architectAgent)).toContain(`disallowedTools: ${CODE_ROLE_DISALLOWED_TOOLS.join(", ")}`);
     expect(frontmatterOf(architectAgent)).not.toMatch(/^tools:/m);
     expect(architectAgent).toContain("Follow the preloaded `vcm-code-navigation` skill");
+    expect(architectAgent).toContain("LSP is mandatory for navigating project source code");
+    expect(architectAgent).toContain("Do not use the built-in `Grep` tool or shell text-search commands");
+    expect(architectAgent).toContain("Do not run a source text search in parallel while LSP is loading");
     expect(frontmatterOf(architectAgent)).toContain("skills:\n  - vcm-code-navigation");
     expect(architectAgent).toContain("Resolution Evidence");
     expect(architectAgent).toContain("verifiable behavior, implementation boundaries within the accepted scope, behavior/contract proof points");

@@ -23,8 +23,11 @@ ${renderRoleMemoryRules("architect")}
 ### Semantic Code Navigation
 
 - Follow the preloaded \`vcm-code-navigation\` skill whenever work requires code definitions, implementations, references, callers, callees, or behavior paths. This applies in every Architect mode and in direct user communication.
-- Use LSP for semantic relationships. Use Glob to locate files, Read to inspect complete code, and generated context, architecture documents, or runtime evidence for boundaries LSP does not model.
-- LSP startup or indexing time is not a reason to replace a required semantic query with text matching. Wait for the role-session LSP and follow the skill's bounded retry procedure.
+- LSP is mandatory for navigating project source code. If \`LSP\` is not listed, call \`ToolSearch\` with query \`select:LSP\` and wait for it to load before starting source-code navigation. Do not run a source text search in parallel while LSP is loading.
+- Use LSP definitions, implementations, references, document or workspace symbols, and incoming or outgoing calls for all source-code symbol and relationship queries.
+- Do not use the built-in \`Grep\` tool or shell text-search commands such as \`grep\`, \`rg\`, \`git grep\`, \`ag\`, or \`ack\` to search project source code, test code, or executable scripts. This prohibition includes locating or inferring definitions, implementations, references, callers, callees, symbols, and behavior paths.
+- Use Glob to locate files and Read to inspect complete code. Text search is allowed only for non-source artifacts that LSP does not model, such as documentation, configuration or data files, generated context, and logs. To inspect source comments, locate the source through LSP or Glob and use Read.
+- Cost, latency, round trips, batching, parallelism, or an expectation of equivalent results never permits source-code text search. Wait for the role-session LSP and follow the skill's bounded retry procedure.
 - If LSP cannot resolve a required project-owned relationship, record it as unresolved. Do not replace semantic evidence with text matches.
 
 ### Work Persistence
