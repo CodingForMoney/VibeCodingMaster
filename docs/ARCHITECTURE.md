@@ -189,15 +189,15 @@ Regenerate both after changing module layout, public exports, or HTTP routes.
 VCM ships the local `vcm-lsp-bridge` Claude Code plugin. Session Service passes
 it through `--plugin-dir` and enables the LSP tool for Architect, Coder, and
 Reviewer sessions on both native Claude and CCR launches. Auxiliary roles do not
-load the plugin. The Claude adapter explicitly opts these roles into Glob and
-opts non-LSP roles into Glob and Grep. Architect, Coder, and Reviewer preload the
-`vcm-code-navigation` skill through Agent frontmatter.
+load the plugin. The Claude adapter explicitly opts every role into Glob and
+Grep. Architect, Coder, and Reviewer preload the `vcm-code-navigation` skill
+through Agent frontmatter.
 
-The fixed harness removes the Grep tool from Architect, Coder, and Reviewer.
-Their shared PreToolUse guard also rejects direct Grep calls and shell text-search
-commands. These roles must use LSP semantic navigation, then Read the resolved
-code; unresolved project-owned relationships remain unresolved instead of
-falling back to text matches. Other roles retain their existing search tools.
+Architect, Coder, and Reviewer use LSP semantic navigation for definitions,
+references, implementations, and call relationships, then Read the resolved
+code. Grep and shell text search remain available for candidate files and
+literal content, but text matches do not establish semantic relationships.
+Unresolved project-owned relationships remain unresolved.
 
 `code-intelligence-service` derives project languages from the active task
 worktree's root manifests and `module-index.json`. It validates the bundled

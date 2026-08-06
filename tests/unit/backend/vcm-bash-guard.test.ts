@@ -101,9 +101,8 @@ describe("vcm-bash-guard", () => {
     });
   }
 
-  describe("LSP role text-search policy", () => {
-    const lspRoles = ["architect", "coder", "reviewer"];
-    const deniedCommands = [
+  describe("text search", () => {
+    const commands = [
       "rg symbol src",
       "grep -R symbol src",
       "git grep symbol",
@@ -118,31 +117,11 @@ describe("vcm-bash-guard", () => {
       "find src -type f -print0 | xargs -0 rg symbol"
     ];
 
-    for (const role of lspRoles) {
-      it(`denies the Grep tool for ${role}`, async () => {
-        const reason = await runGuard({
-          tool_name: "Grep",
-          tool_input: { pattern: "symbol", path: "src" }
-        }, role);
-        expect(reason).toContain("Grep tool is forbidden");
-        expect(reason).toContain("Use LSP");
-      });
-
-      for (const command of deniedCommands) {
-        it(`denies ${command} for ${role}`, async () => {
-          const reason = await runGuard(bash(command), role);
-          expect(reason).toContain("text-search commands are forbidden");
-          expect(reason).toContain("Use LSP");
-        });
-      }
-
-      it(`allows quoted text-search names for ${role}`, async () => {
-        await expect(runGuard(bash("printf '%s' 'rg symbol src'"), role)).resolves.toBeUndefined();
-      });
-    }
-
-    for (const role of ["project-manager", "tester", "translator", "harness-engineer"]) {
-      it(`does not apply the LSP text-search policy to ${role}`, async () => {
+    for (const role of ["project-manager", "architect", "coder", "tester", "reviewer", "translator", "harness-engineer"]) {
+      it(`allows Grep and shell text search for ${role}`, async () => {
+        for (const command of commands) {
+          await expect(runGuard(bash(command), role)).resolves.toBeUndefined();
+        }
         await expect(runGuard(bash("rg symbol src"), role)).resolves.toBeUndefined();
         await expect(runGuard({
           tool_name: "Grep",

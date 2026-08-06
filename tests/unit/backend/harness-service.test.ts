@@ -89,7 +89,7 @@ describe("createHarnessService", () => {
     expect(await fs.readText("/repo/.claude/skills/vcm-architecture-interview/SKILL.md")).toContain("name: vcm-architecture-interview");
     expect(await fs.readText("/repo/.claude/skills/vcm-architecture-interview/SKILL.md")).toContain("During an active Architect Interview");
     const codeNavigationSkill = await fs.readText("/repo/.claude/skills/vcm-code-navigation/SKILL.md");
-    expect(codeNavigationSkill).toContain("Do not substitute text search for semantic navigation");
+    expect(codeNavigationSkill).toContain("Text search may locate candidates or literal content");
     expect(codeNavigationSkill).toContain("Start each navigation run with LSP `documentSymbol`");
     expect(codeNavigationSkill).toContain("retry the same bounded workspace query at most two more times");
     expect(await fs.readText("/repo/.claude/skills/vcm-report-harness-issue/SKILL.md")).toContain("name: vcm-report-harness-issue");
@@ -149,6 +149,7 @@ describe("createHarnessService", () => {
     expect(await fs.readText("/repo/.ai/tools/request-gate-review")).toContain('["git", "merge-base", "HEAD", upstream]');
     const architectAgent = await fs.readText("/repo/.claude/agents/architect.md");
     expect(frontmatterOf(architectAgent)).toContain("LSP");
+    expect(frontmatterOf(architectAgent)).toContain("Grep");
     expect(architectAgent).toContain("Follow the preloaded `vcm-code-navigation` skill");
     expect(frontmatterOf(architectAgent)).toContain("skills:\n  - vcm-code-navigation");
     expect(architectAgent).toContain("Resolution Evidence");
@@ -200,8 +201,8 @@ describe("createHarnessService", () => {
     expect(finalAcceptanceSkill).toContain("`incomplete` is not acceptance evidence");
     expect(finalAcceptanceSkill).toContain("do not accept `Test Result: incomplete`");
     const coderAgent = await fs.readText("/repo/.claude/agents/coder.md");
-    expect(coderAgent).toContain("tools: Read, Glob, Bash, Edit, Write, Agent, LSP");
-    expect(frontmatterOf(coderAgent)).not.toContain("Grep");
+    expect(coderAgent).toContain("tools: Read, Grep, Glob, Bash, Edit, Write, Agent, LSP");
+    expect(frontmatterOf(coderAgent)).toContain("Grep");
     expect(frontmatterOf(coderAgent)).toContain("skills:\n  - vcm-code-navigation");
     expect(coderAgent).toContain("Implement assigned file/function-level scaffold items");
     expect(coderAgent).toContain("read and follow `docs/CODING_STANDARDS.md`");
@@ -236,8 +237,8 @@ describe("createHarnessService", () => {
     expect(coderWorkerAgent).not.toContain("Stop before editing if the assigned module");
     const reviewerAgent = await fs.readText("/repo/.claude/agents/reviewer.md");
     expect(reviewerAgent).toContain("name: reviewer");
-    expect(reviewerAgent).toContain("tools: Read, Glob, Bash, Write, LSP");
-    expect(frontmatterOf(reviewerAgent)).not.toContain("Grep");
+    expect(reviewerAgent).toContain("tools: Read, Grep, Glob, Bash, Write, LSP");
+    expect(frontmatterOf(reviewerAgent)).toContain("Grep");
     expect(reviewerAgent).toContain("You are VCM `reviewer`");
     expect(reviewerAgent).toContain("Use the task and worktree paths named there");
     expect(reviewerAgent).toContain("Every Gate Review is a complete review of the current gate inputs");
@@ -403,7 +404,7 @@ describe("createHarnessService", () => {
     expect(content).toContain("## VCM Start Here");
   });
 
-  it("normalizes Architect navigation tools without replacing its configuration", async () => {
+  it("restores Architect navigation tools without replacing its configuration", async () => {
     const fs = createMemoryFs();
     const service = createHarnessService({ fs });
     await service.applyHarness("/repo");
@@ -413,7 +414,7 @@ describe("createHarnessService", () => {
     await fs.writeText(
       architectPath,
       current
-        .replace("tools: Read, Glob, Bash, Edit, Write, Agent, LSP", "tools: Read, Grep, Glob, Bash, Edit, Write")
+        .replace("tools: Read, Grep, Glob, Bash, Edit, Write, Agent, LSP", "tools: Read, Glob, Bash, Edit, Write")
         .replace("skills:\n  - vcm-code-navigation\n", "")
         .replace("description: VCM architecture role", "model: custom-model\ndescription: VCM architecture role")
     );
@@ -423,8 +424,8 @@ describe("createHarnessService", () => {
 
     await service.applyHarness("/repo");
     const updated = await fs.readText(architectPath);
-    expect(frontmatterOf(updated)).toContain("tools: Read, Glob, Bash, Edit, Write, Agent, LSP");
-    expect(frontmatterOf(updated)).not.toContain("Grep");
+    expect(frontmatterOf(updated)).toContain("tools: Read, Glob, Bash, Edit, Write, Grep, Agent, LSP");
+    expect(frontmatterOf(updated)).toContain("Grep");
     expect(frontmatterOf(updated)).toContain("skills:\n  - vcm-code-navigation");
     expect(frontmatterOf(updated)).toContain("model: custom-model");
   });

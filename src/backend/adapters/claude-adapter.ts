@@ -46,7 +46,7 @@ export function createClaudeAdapter(runner: CommandRunner): ClaudeAdapter {
     },
     buildRoleStartCommand(role, command = "claude", permissionMode = "default", claudeSessionId, resume = false, model = "default", effort = "default", settingsOverride, appendSystemPrompt, pluginDirs = []) {
       const args = pluginDirs.flatMap((pluginDir) => ["--plugin-dir", pluginDir]);
-      args.push("--allowedTools", roleSearchToolOptIns(role).join(","));
+      args.push("--allowedTools", "Glob,Grep");
       args.push("--agent", role);
       const sessionSettings = { ...settingsOverride };
       if (claudeSessionId) {
@@ -77,12 +77,6 @@ export function createClaudeAdapter(runner: CommandRunner): ClaudeAdapter {
       };
     }
   };
-}
-
-function roleSearchToolOptIns(role: RoleName): string[] {
-  return role === "architect" || role === "coder" || role === "reviewer"
-    ? ["Glob"]
-    : ["Glob", "Grep"];
 }
 
 function formatDisplayArg(value: string): string {

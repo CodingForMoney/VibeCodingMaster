@@ -471,12 +471,12 @@ VCM bundles the Claude Code LSP bridge and loads it for Architect, Coder, and
 Reviewer sessions, including CCR launches. The project environment must still
 provide the language server for each detected language: `rust-analyzer`,
 `typescript-language-server`, `pyright-langserver`, `gopls`, `clangd`, or
-`jdtls`. Their Agent definitions preload `vcm-code-navigation`, and their
-launches explicitly enable Glob while leaving Grep unavailable. The Harness
-guard also rejects shell text-search commands for those roles so unresolved
-semantic relationships cannot be hidden by textual fallback. Harness Studio
-reports whether the server executable and plugin can run; the role Session
-performs the real workspace warm-up and semantic query retries.
+`jdtls`. Their Agent definitions preload `vcm-code-navigation`, and every role
+launch explicitly enables Glob and Grep. Architect, Coder, and Reviewer use LSP
+for semantic relationships while text search remains available for candidate
+files and literal content. Harness Studio reports whether the server executable
+and plugin can run; the role Session performs the real workspace warm-up and
+semantic query retries.
 
 Harness Engineer is task-scoped and runs from the active task worktree. The
 backend automatically starts a fresh Harness Engineer for each active task or

@@ -270,7 +270,7 @@ describe("harness templates stay in sync with the script installer", () => {
     const bashHook = settings.hooks.PreToolUse.find((entry) => entry.matcher === "Bash");
     const grepHook = settings.hooks.PreToolUse.find((entry) => entry.matcher === "Grep");
     const command = bashHook?.hooks[0]?.command;
-    expect(grepHook?.hooks[0]?.command).toBe(command);
+    expect(grepHook).toBeUndefined();
     expect(command).toContain("git rev-parse --show-toplevel");
     expect(command).toContain("[ -n \"$guard\" ] || exit 0");
 

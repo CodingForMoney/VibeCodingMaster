@@ -71,7 +71,6 @@ const VCM_BASH_DEFAULT_TIMEOUT_MS = "600000";
 const VCM_AUTO_MEMORY_ENABLED = false;
 const VCM_HOOK_DEFINITIONS = [
   { eventName: "PreToolUse", matcher: "Bash", command: VCM_BASH_GUARD_HOOK_COMMAND, timeout: 10 },
-  { eventName: "PreToolUse", matcher: "Grep", command: VCM_BASH_GUARD_HOOK_COMMAND, timeout: 10 },
   { eventName: "UserPromptSubmit", command: VCM_HOOK_COMMAND, timeout: 5 },
   { eventName: "Stop", command: VCM_STOP_HOOK_COMMAND, timeout: 10 },
   { eventName: "StopFailure", command: VCM_HOOK_COMMAND, timeout: 5 },
@@ -85,12 +84,12 @@ const AGENT_FRONTMATTER = {
   },
   architect: {
     description: "VCM architecture role for plans, module boundaries, public contracts, verifiable behavior, and docs sync.",
-    tools: "Read, Glob, Bash, Edit, Write, Agent, LSP",
+    tools: "Read, Grep, Glob, Bash, Edit, Write, Agent, LSP",
     skills: ["vcm-code-navigation"]
   },
   coder: {
     description: "VCM implementation role for scoped code changes and focused tests.",
-    tools: "Read, Glob, Bash, Edit, Write, Agent, LSP",
+    tools: "Read, Grep, Glob, Bash, Edit, Write, Agent, LSP",
     skills: ["vcm-code-navigation"]
   },
   tester: {
@@ -98,7 +97,7 @@ const AGENT_FRONTMATTER = {
   },
   reviewer: {
     description: "VCM independent gate review role for architecture plans, validation adequacy, and code diffs.",
-    tools: "Read, Glob, Bash, Write, LSP",
+    tools: "Read, Grep, Glob, Bash, Write, LSP",
     skills: ["vcm-code-navigation"]
   },
   translator: {
@@ -119,14 +118,9 @@ const AGENT_FRONTMATTER = {
 };
 
 const REQUIRED_AGENT_TOOLS = {
-  architect: ["Agent", "LSP"],
-  coder: ["Agent", "LSP"],
-  reviewer: ["LSP"]
-};
-const FORBIDDEN_AGENT_TOOLS = {
-  architect: ["Grep"],
-  coder: ["Grep"],
-  reviewer: ["Grep"]
+  architect: ["Grep", "Agent", "LSP"],
+  coder: ["Grep", "Agent", "LSP"],
+  reviewer: ["Grep", "LSP"]
 };
 const REQUIRED_AGENT_SKILLS = {
   architect: ["vcm-code-navigation"],
@@ -793,9 +787,6 @@ async function installManagedFile({ projectRoot, definition, dryRun, operations 
   for (const requiredTool of REQUIRED_AGENT_TOOLS[definition.agentName] ?? []) {
     nextContent = ensureAgentTool(nextContent, requiredTool);
   }
-  for (const forbiddenTool of FORBIDDEN_AGENT_TOOLS[definition.agentName] ?? []) {
-    nextContent = removeAgentTool(nextContent, forbiddenTool);
-  }
   for (const requiredSkill of REQUIRED_AGENT_SKILLS[definition.agentName] ?? []) {
     nextContent = ensureAgentSkill(nextContent, requiredSkill);
   }
@@ -872,25 +863,6 @@ function ensureAgentTool(content, requiredTool) {
 
   const nextTools = [...tools, requiredTool].join(", ");
   return content.replace(frontmatterMatch[0], frontmatterMatch[0].replace(toolsMatch[0], `tools: ${nextTools}`));
-}
-
-function removeAgentTool(content, forbiddenTool) {
-  const frontmatterMatch = content.match(/^---\r?\n[\s\S]*?\r?\n---/);
-  if (!frontmatterMatch) {
-    return content;
-  }
-
-  const toolsMatch = frontmatterMatch[0].match(/^tools:\s*(.*)$/m);
-  if (!toolsMatch) {
-    return content;
-  }
-
-  const tools = toolsMatch[1].split(",").map((tool) => tool.trim()).filter(Boolean);
-  const nextTools = tools.filter((tool) => tool !== forbiddenTool);
-  if (nextTools.length === tools.length) {
-    return content;
-  }
-  return content.replace(frontmatterMatch[0], frontmatterMatch[0].replace(toolsMatch[0], `tools: ${nextTools.join(", ")}`));
 }
 
 function ensureAgentSkill(content, requiredSkill) {
