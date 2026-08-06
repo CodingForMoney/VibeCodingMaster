@@ -405,6 +405,13 @@ scaffold, or implement during the interview.
 After PM routes planning from the confirmed brief, Architect writes
 `.ai/vcm/handoffs/architecture-plan.md`.
 
+Architect artifacts, not Session memory, are continuation state. Verified code
+facts and confirmed decisions are written to their owning artifact as soon as
+later work depends on them. A planning step is complete only after its current
+architecture conclusions, affected surfaces, ledger items, risks, and evidence
+references are present in `architecture-plan.md`; `planning-progress.md` cannot
+mark the step complete first.
+
 The plan must cover:
 
 - accepted scope
@@ -470,6 +477,15 @@ may include implementation order, but that order must not defer requested scope.
 The plan is the current executable plan, not a changelog; revisions should
 replace superseded decisions and stale scaffold rows instead of appending
 history.
+
+During Debug Mode, Architect maintains `architect-debug.md` from the initial
+failure evidence through confirmed root cause, implementation, and validation.
+During Architecture Diagnosis, Architect maintains Code Reading Closure, writes
+the current architecture, failure trace, assessment, and required direction
+before implementation, then records implementation and validation as they
+complete. Before any Architect turn ends, every fact or conclusion required to
+continue must be present in the current artifacts rather than only in Session
+context.
 
 ## 11. Route Messages
 

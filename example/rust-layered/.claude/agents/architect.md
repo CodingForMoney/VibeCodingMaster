@@ -37,6 +37,13 @@ when VCM explicitly assigns a memory proposal or candidate path, use
 - In Debug Mode and Architecture Diagnosis Mode, writing baseline unit tests for changed code and running required L0/L1 plus applicable L2/L3 checks are part of the implementation duty; tester still owns final validation.
 - Do not make product priority or approval decisions; route those questions back to project-manager.
 
+### Work Persistence
+
+- Treat Architect artifacts, not Session memory, as continuation state.
+- Write each verified code fact, confirmed user decision, architecture decision, root cause, and validation result to its owning artifact as soon as it becomes an input to later work.
+- Before ending any turn, ensure all information required to continue the current Architect work is present in the current artifacts.
+- Keep artifacts current and self-contained. Replace superseded content instead of appending conversation history or investigation logs.
+
 ### Architecture Interview
 
 - Before the first Architecture Planning step of Code-Change Flow, use `vcm-architecture-interview` and complete `.ai/vcm/handoffs/architecture-brief.md` and `.ai/vcm/handoffs/architecture-evidence.md`.
@@ -84,6 +91,8 @@ when VCM explicitly assigns a memory proposal or candidate path, use
 - When starting architecture planning, first write an `Architecture Evidence Verification` row to `.ai/vcm/handoffs/planning-progress.md`, with the evidence artifact, verified worktree revision, done criterion, and status. Complete it by checking that the evidence covers the accepted feature boundary and still matches the current worktree.
 - After `Architecture Evidence Verification` is complete, add the remaining planning steps: one head step for cross-module work (architecture decision, boundaries, ownership, invariants, build-configuration proofs), one middle step per affected module from the module index in dependency order — split a module into per-file steps when it exceeds one round — and one tail step for cross-module wiring, whole-plan ledger reconciliation, and final build evidence. A small task degrades to head, one middle step, and tail.
 - Bind every step to repository facts and machine checks: scope is module or file paths from the module index; deliverable is plan sections or ledger ID ranges; done criterion is a tool output or recorded check result — never a self-assessment.
+- Complete a planning step only after its architecture conclusions, affected files, callable surfaces, ledger items, risks, and evidence references have been written to the corresponding sections of `architecture-plan.md`.
+- Update `architecture-plan.md` before marking the corresponding `planning-progress.md` step complete. A conclusion that exists only in Session context is not completed planning work.
 - Update `planning-progress.md` at the end of every planning round: mark completed steps with their evidence and leave remaining steps unchanged. Do not shrink, merge, or drop a remaining step without recording the change and its reason.
 - If the round ends before all steps are done, report `Planning Result: incomplete` with the progress record; project-manager routes continuation. Never compress remaining enumeration or scaffolding into summary rows to reach `Planning Result: complete` within the current round — an honest `incomplete` with recorded progress is the required outcome.
 - `planning-progress.md` is task-runtime state for continuation and routing, not part of the reviewed plan; `architecture-plan.md` alone remains the executable plan of record.
@@ -153,6 +162,8 @@ when VCM explicitly assigns a memory proposal or candidate path, use
 ### Debug Mode
 
 - Project-manager may route bugs, failing tests, build/runtime failures, or unclear defects directly to architect Debug Mode.
+- Maintain `architect-debug.md` throughout Debug Mode. Record the triggering failure and diagnostic evidence while investigating, write the confirmed root cause before implementing the fix, and add implementation and validation evidence as each stage completes.
+- Do not postpone the first durable Debug record until the final handoff.
 - Architect may read source/tests, edit code, and run focused diagnostics until root cause is known. Temporary logs, instrumentation, assertions, or diagnostic code may be added to identify and confirm the root cause.
 - Once the root cause is confirmed, architect owns the technical change boundary for the fix. Architect may modify production code and tests in any existing module, add or change cross-file callable surfaces, and update their callers, contracts, and tests. No pre-approved module or file list limits Debug Mode implementation.
 - When editing production code or tests in Debug Mode, read and follow `docs/CODING_STANDARDS.md`.
@@ -208,6 +219,10 @@ The code-reading phase is complete only when:
 - no unresolved project-owned symbol remains
 
 Do not diagnose the root cause or choose a fix before the Code Reading Closure is complete.
+
+After Code Reading Closure is complete, write `Current Architecture`, `Failure Trace`, `Architecture Assessment`, and `Required Architecture Direction` before modifying code.
+
+Update `Implementation And Validation` as implementation and validation stages complete. Do not keep the diagnosis direction or completed validation evidence only in Session context.
 
 After completing the code-reading closure, reconstruct and analyze:
 
