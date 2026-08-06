@@ -515,7 +515,7 @@ describe("long-running validation tools", () => {
 });
 
 describe("scaffold ledger audit", () => {
-  async function createLedgerRepo(planRow: string, source: string) {
+  async function createManifestRepo(manifest: string, source: string) {
     tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-scaffold-ledger-"));
     await installHarnessTools(tmpRepo);
     await execFileAsync("git", ["init"], { cwd: tmpRepo });
@@ -526,10 +526,16 @@ describe("scaffold ledger audit", () => {
 
       ## Scaffold Manifest
 
+      ${manifest}
+    `);
+  }
+
+  async function createLedgerRepo(planRow: string, source: string) {
+    await createManifestRepo(`
       | ID | Action | File | Symbol | Work | Freedom | Proof |
       | --- | --- | --- | --- | --- | --- | --- |
       ${planRow}
-    `);
+    `, source);
   }
 
   async function runLedgerAuditFailure() {
@@ -572,6 +578,56 @@ describe("scaffold ledger audit", () => {
     const stderr = await runLedgerAuditFailure();
     expect(stderr).toContain("SCF-001 has no marker");
     expect(stderr).toContain("marker SCF-002 has no ledger entry");
+  });
+
+  it("rejects malformed manifest IDs instead of reporting a clean 0/0 ledger", async () => {
+    await createLedgerRepo(
+      "| SCF-J1 | change | `src/lib.ts` | `run` | implement | local | compile |",
+      "export const ready = true;"
+    );
+
+    const stderr = await runLedgerAuditFailure();
+    expect(stderr).toMatch(/architecture-plan\.md:\d+  \[ledger\] ID cell `SCF-J1` must match/);
+    expect(stderr).toContain("Scaffold Manifest contains no valid entries");
+  });
+
+  it("rejects a marker whose ID only has a valid prefix", async () => {
+    await createLedgerRepo(
+      "| SCF-001 | change | `src/lib.ts` | `run` | implement | local | compile |",
+      "// VCM:CODE SCF-001-extra\nexport const ready = true;"
+    );
+
+    const stderr = await runLedgerAuditFailure();
+    expect(stderr).toContain("marker ID `SCF-001-extra` must match");
+    expect(stderr).toContain("SCF-001 has no marker");
+  });
+
+  it("rejects a present Scaffold Manifest with an empty table", async () => {
+    await createLedgerRepo("", "export const ready = true;");
+
+    const stderr = await runLedgerAuditFailure();
+    expect(stderr).toContain("Scaffold Manifest contains no valid entries");
+    expect(stderr).toContain("use the exact line `No scaffold items.`");
+  });
+
+  it("accepts the exact explicit-empty Scaffold Manifest representation", async () => {
+    await createManifestRepo("No scaffold items.", "export const ready = true;");
+
+    await expect(
+      execFileAsync("python3", [path.join(tmpRepo!, ".ai/tools/check-scaffold-ledger")], { cwd: tmpRepo })
+    ).resolves.toMatchObject({
+      stdout: expect.stringContaining("ledger explicitly empty: 0 ledger item(s), 0 marker(s)")
+    });
+  });
+
+  it("continues to treat an absent architecture plan as nothing to check", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-scaffold-ledger-"));
+    await installHarnessTools(tmpRepo);
+    await execFileAsync("git", ["init"], { cwd: tmpRepo });
+
+    await expect(
+      execFileAsync("python3", [path.join(tmpRepo, ".ai/tools/check-scaffold-ledger")], { cwd: tmpRepo })
+    ).resolves.toMatchObject({ stdout: expect.stringContaining("nothing to check") });
   });
 });
 

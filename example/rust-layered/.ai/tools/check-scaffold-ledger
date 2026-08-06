@@ -6,7 +6,8 @@ item, one unique ID per entry, and exactly one `VCM:CODE <ID>` marker in the tre
 `create`/`change`/`delete` entry. This tool checks:
 
   1. the ledger header follows the mandated column order (`ID | Action | File | ...`),
-     every ledger ID is unique, classified by its whole-cell action column
+     every data-row ID matches the documented grammar as a complete cell and is unique,
+     classified by its whole-cell action column
      (create/change/delete), and bound to a declared file path in the file column;
   2. the ledger ID set equals the tree marker ID set, each ID exactly once on each side;
   3. every marker sits in its entry's declared file;
@@ -27,14 +28,15 @@ from pathlib import Path
 PLAN = ".ai/vcm/handoffs/architecture-plan.md"
 MANIFEST_HEADING = re.compile(r"^##\s+Scaffold Manifest\s*$")
 SECTION_HEADING = re.compile(r"^##\s+\S")
-ID_TOKEN = re.compile(r"\b([A-Z]{2,6}-\d{1,4})\b")
+ID_PATTERN = re.compile(r"[A-Z]{2,6}-\d{1,4}")
+EMPTY_MANIFEST = "No scaffold items."
+TABLE_SEPARATOR_CELL = re.compile(r":?-{3,}:?")
 # Mandated column order: ID | action | file | symbol/site | work | freedom | proof.
 # The action is read from its own cell as a whole-cell verb — never sniffed from the
 # row text, so paths or prose containing action words cannot flip an item's class.
 ACTIONS = frozenset({"create", "change", "delete"})
 PATH_TOKEN = re.compile(r"`([^`\s]+/[^`\s]+|[^`\s]+\.[A-Za-z0-9]{1,8})`")
-MARKER_ID = re.compile(r"VCM:CODE[:\s]\s*([A-Za-z]{2,6}-\d{1,4})")
-MARKER_ANY = re.compile(r"VCM:CODE")
+MARKER_ANY = re.compile(r"VCM:CODE(?![A-Za-z0-9_])")
 FORBIDDEN = [
     re.compile(r"as work proceeds", re.IGNORECASE),
     re.compile(r"\breplicate\b", re.IGNORECASE),
@@ -56,36 +58,66 @@ def manifest_section(plan_text: str) -> tuple[int, list[str]] | None:
     return None if start is None else (start, lines[start:])
 
 
-def parse_ledger(section_start: int, section: list[str], plan: str) -> tuple[dict, list[str]]:
-    """{id: {"path", "action", "line"}} plus parse findings. Positional parsing per the
-    mandated column order; the first non-entry table row is validated as the header."""
+def is_separator_row(cells: list[str]) -> bool:
+    return bool(cells) and all(TABLE_SEPARATOR_CELL.fullmatch(cell.replace(" ", "")) for cell in cells)
+
+
+def parse_ledger(section_start: int, section: list[str], plan: str) -> tuple[dict, list[str], bool]:
+    """{id: {"path", "action", "line"}}, parse findings, and explicit-empty state."""
     entries: dict[str, dict] = {}
     findings: list[str] = []
-    header_checked = False
+    header_line = None
+    separator_seen = False
+    explicit_empty_line = None
     for offset, line in enumerate(section):
         line_no = section_start + offset + 1
         stripped = line.strip()
+        if stripped == EMPTY_MANIFEST:
+            if explicit_empty_line is not None:
+                findings.append(
+                    f"{plan}:{line_no}  [ledger] duplicate `{EMPTY_MANIFEST}` declaration "
+                    f"(first at line {explicit_empty_line})"
+                )
+            else:
+                explicit_empty_line = line_no
+            continue
         if not stripped.startswith("|"):
             continue
         cells = [cell.strip() for cell in stripped.strip("|").split("|")]
-        if not cells or set(cells[0]) <= {"-", ":", " "}:
-            continue  # separator row
-        id_match = ID_TOKEN.search(cells[0])
-        if not id_match:
-            if not header_checked:
-                header_checked = True
-                head = [cell.lower() for cell in cells[:3]] + ["", "", ""]
-                if not (
-                    "id" in head[0]
-                    and "action" in head[1]
-                    and ("file" in head[2] or "path" in head[2])
-                ):
-                    findings.append(
-                        f"{plan}:{line_no}  [ledger] header columns must be "
-                        f"`ID | Action | File | ...` -> fix the ledger column order"
-                    )
+
+        if header_line is None:
+            header_line = line_no
+            head = [cell.lower() for cell in cells[:3]]
+            if head != ["id", "action", "file"]:
+                findings.append(
+                    f"{plan}:{line_no}  [ledger] header columns must begin exactly "
+                    f"`ID | Action | File | ...` -> fix the ledger column order"
+                )
             continue
-        entry_id = id_match.group(1)
+
+        if not separator_seen:
+            if is_separator_row(cells):
+                separator_seen = True
+                continue
+            findings.append(
+                f"{plan}:{line_no}  [ledger] missing Markdown separator row after "
+                f"the Scaffold Manifest header"
+            )
+            separator_seen = True
+        elif is_separator_row(cells):
+            findings.append(
+                f"{plan}:{line_no}  [ledger] unexpected separator row inside Scaffold Manifest data"
+            )
+            continue
+
+        id_cell = cells[0] if cells else ""
+        if not ID_PATTERN.fullmatch(id_cell):
+            findings.append(
+                f"{plan}:{line_no}  [ledger] ID cell `{id_cell}` must match "
+                f"`[A-Z]{{2,6}}-[0-9]{{1,4}}` exactly"
+            )
+            continue
+        entry_id = id_cell
         if entry_id in entries:
             findings.append(
                 f"{plan}:{line_no}  [ledger] duplicate ledger ID {entry_id} "
@@ -109,7 +141,30 @@ def parse_ledger(section_start: int, section: list[str], plan: str) -> tuple[dic
                 f"column 3 -> bind the item to its exact file"
             )
         entries[entry_id] = {"path": declared, "action": action, "line": line_no}
-    return entries, findings
+    if explicit_empty_line is not None:
+        if header_line is not None:
+            findings.append(
+                f"{plan}:{explicit_empty_line}  [ledger] `{EMPTY_MANIFEST}` cannot be "
+                f"combined with a Scaffold Manifest table"
+            )
+        return entries, findings, True
+
+    if header_line is None:
+        findings.append(
+            f"{plan}:{section_start + 1}  [ledger] Scaffold Manifest must contain the "
+            f"required table or the exact line `{EMPTY_MANIFEST}`"
+        )
+        return entries, findings, False
+    if not separator_seen:
+        findings.append(
+            f"{plan}:{header_line}  [ledger] Scaffold Manifest table is missing its separator row"
+        )
+    if not entries:
+        findings.append(
+            f"{plan}:{header_line}  [ledger] Scaffold Manifest contains no valid entries; "
+            f"use the exact line `{EMPTY_MANIFEST}` only when no scaffold item exists"
+        )
+    return entries, findings, False
 
 
 def forbidden_language(section_start: int, section: list[str], plan: str) -> list[str]:
@@ -139,14 +194,22 @@ def tree_markers(root: Path) -> tuple[dict[str, list[tuple[str, int]]], list[str
         if len(parts) < 3:
             continue
         path, line_no, content = parts[0], int(parts[1]), parts[2]
-        id_match = MARKER_ID.search(content)
-        if id_match:
-            markers.setdefault(id_match.group(1), []).append((path, line_no))
-        elif MARKER_ANY.search(content):
-            findings.append(
-                f"{path}:{line_no}  [ledger] marker without a parseable ID -> "
-                f"use `VCM:CODE <ID>`"
-            )
+        for occurrence in MARKER_ANY.finditer(content):
+            token_match = re.match(r"\s+(\S+)", content[occurrence.end():])
+            if token_match is None:
+                findings.append(
+                    f"{path}:{line_no}  [ledger] marker without an ID -> "
+                    f"use `VCM:CODE <ID>`"
+                )
+                continue
+            marker_id = token_match.group(1)
+            if not ID_PATTERN.fullmatch(marker_id):
+                findings.append(
+                    f"{path}:{line_no}  [ledger] marker ID `{marker_id}` must match "
+                    f"`[A-Z]{{2,6}}-[0-9]{{1,4}}` exactly"
+                )
+                continue
+            markers.setdefault(marker_id, []).append((path, line_no))
     return markers, findings
 
 
@@ -169,7 +232,7 @@ def main() -> int:
     if section is None:
         sys.stderr.write(f"{plan_path}:1  [ledger] no `## Scaffold Manifest` section\n")
         return 1
-    entries, parse_findings = parse_ledger(*section, str(plan_path))
+    entries, parse_findings, explicit_empty = parse_ledger(*section, str(plan_path))
     findings += parse_findings
     findings += forbidden_language(*section, str(plan_path))
 
@@ -212,10 +275,13 @@ def main() -> int:
     if findings:
         sys.stderr.write(f"ledger reconciliation failed with {len(findings)} finding(s)\n")
         return 1
-    print(
-        f"ledger reconciliation clean: {len(ledger_ids)} ledger item(s), "
-        f"{len(tree_ids)} marker(s)"
-    )
+    if explicit_empty:
+        print("ledger explicitly empty: 0 ledger item(s), 0 marker(s)")
+    else:
+        print(
+            f"ledger reconciliation clean: {len(ledger_ids)} ledger item(s), "
+            f"{len(tree_ids)} marker(s)"
+        )
     return 0
 
 

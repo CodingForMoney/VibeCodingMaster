@@ -123,6 +123,8 @@ error boundaries, or non-obvious logic that should remain useful after this task
 Use an ID matching \`[A-Z]{2,6}-[0-9]{1,4}\`, choose exactly one Action
 (\`create\`, \`change\`, or \`delete\`), put the repo-relative File path in
 backticks, and enumerate every implementation item explicitly.
+When no scaffold item exists, replace the table with exactly \`No scaffold items.\`;
+an empty table is invalid.
 
 | ID | Action | File | Symbol Or Site | Coder Work | Allowed Implementation Freedom | Behavior / Contract Proof Point |
 | --- | --- | --- | --- | --- | --- | --- |

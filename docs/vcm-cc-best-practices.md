@@ -428,7 +428,9 @@ The plan must cover:
 
 The Scaffold Manifest carries task-specific context for coder. Task context,
 temporary rationale, implementation-order notes, and coder guidance belong in
-the manifest, not in permanent source comments.
+the manifest, not in permanent source comments. Its table uses full-token IDs
+matching `[A-Z]{2,6}-[0-9]{1,4}`. A plan with no scaffold items uses the exact
+line `No scaffold items.` instead of an empty table.
 
 When a proposed file-local override, normalization, or bypass of a shared
 default, constant, or documented contract already exists in two other files,
