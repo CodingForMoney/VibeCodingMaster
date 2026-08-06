@@ -21,7 +21,7 @@ The hard ceiling is 60 minutes per job, enforced by the job worker itself. No ap
 
 1. Start the command with an explicit ceiling: `.ai/tools/run-long-check --timeout <duration> -- <command>`. Pass the validation executable and its arguments directly. Do not use a shell command-string wrapper, pipeline its output, or append another command: run-long-check already captures stdout/stderr, and shell wrappers can hide the validation exit code. Pick the ceiling from `docs/TESTING.md` guidance or a realistic estimate, never above 60m. The tool prints the job id and creates job state under `.ai/vcm/jobs/<job-id>/`.
 2. In the same turn, run `.ai/tools/watch-job <job-id>` as its own Bash tool call. The default watch window is 8 minutes.
-3. If watch-job exits 125, the job is still running: run `.ai/tools/watch-job <job-id>` again immediately. Do not end the turn between windows.
+3. If watch-job exits 125, the job is still running and a bounded handoff is active for the next watcher: run `.ai/tools/watch-job <job-id>` again immediately. Do not end the turn between windows.
 4. Repeat until watch-job reports a terminal result.
 5. Read the final status and the relevant log tail.
 6. Record command, result, duration, and required follow-up wherever the caller normally records command evidence.
@@ -50,7 +50,8 @@ Treat watch-job exit codes as explicit results:
 A running job requires a live foreground watcher:
 
 - watch-job renews the job supervision lease while it runs.
-- If no watcher renews the lease for about 2 minutes, the worker kills the command process group and records `orphaned`. A job cannot keep running unsupervised.
+- A normal exit 125 records a five-minute handoff deadline for the next model-generated watcher call. The next watcher renews the lease and clears that handoff when it starts.
+- Without a normal handoff, about two minutes without lease renewal causes the worker to kill the command process group and record `orphaned`. An expired handoff is also recorded as `orphaned` with a distinct reason.
 - VCM also blocks ending the turn while a job is running. Stay in the turn and keep watching.
 - Only one validation job may run at a time; run-long-check refuses to start a second one.
 
@@ -62,6 +63,7 @@ A running job requires a live foreground watcher:
 .ai/vcm/jobs/<job-id>/stdout.log
 .ai/vcm/jobs/<job-id>/stderr.log
 .ai/vcm/jobs/<job-id>/lease
+.ai/vcm/jobs/<job-id>/watch-handoff.json   # present only between normal watch windows
 ```
 
 ## Timeout

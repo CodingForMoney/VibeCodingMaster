@@ -659,7 +659,10 @@ VCM roles must not run background Bash. `vcm-bash-guard` denies
 rejects shell command-string wrappers whose pipeline or trailing command could
 mask the validation exit code. `run-long-check` and `watch-job` must each be the
 only top-level command in their Bash call so their exit status cannot be
-replaced by a pipeline, command list, conditional chain, or subshell.
+replaced by a pipeline, command list, conditional chain, or subshell. While a
+watcher is active it renews a short supervision lease. A normal watch-window
+exit records a bounded handoff for the next model-generated watcher call;
+watcher disappearance without that handoff still causes short-lease orphan cleanup.
 
 ## 14. Generated Context
 

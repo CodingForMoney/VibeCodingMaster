@@ -154,6 +154,25 @@ def lease_iso(lease_path: Path) -> str | None:
     return datetime.fromtimestamp(mtime, timezone.utc).isoformat().replace("+00:00", "Z")
 
 
+def handoff_deadline(handoff_path: Path) -> tuple[float, str] | None:
+    handoff = read_optional_json(handoff_path)
+    if not handoff or not isinstance(handoff.get("nextWatchDueAt"), str):
+        return None
+    due_at = handoff["nextWatchDueAt"]
+    try:
+        deadline = datetime.fromisoformat(due_at.replace("Z", "+00:00")).timestamp()
+    except ValueError:
+        return None
+    return deadline, due_at
+
+
+def clear_handoff(handoff_path: Path) -> None:
+    try:
+        handoff_path.unlink()
+    except FileNotFoundError:
+        pass
+
+
 def mark_stale(status_path: Path, status: dict, reason: str) -> None:
     stale = dict(status)
     stale.update({"status": "stale", "finishedAt": now_iso(), "staleReason": reason})
@@ -252,6 +271,7 @@ def run_worker(job: str) -> int:
     command_path = directory / "command.json"
     status_path = directory / "status.json"
     lease_path = directory / "lease"
+    handoff_path = directory / "watch-handoff.json"
 
     payload = json.loads(command_path.read_text())
     command = payload["command"]
@@ -334,21 +354,31 @@ def run_worker(job: str) -> int:
                     exit_code = process.wait()
                     break
             elif lease_age >= renew_grace:
+                handoff = handoff_deadline(handoff_path)
+                if handoff is not None and time.time() < handoff[0]:
+                    time.sleep(1)
+                    continue
+
                 stop_result = stop_command(process)
-                verdict = (
-                    "orphaned",
-                    {
-                        "orphanReason": f"lease not renewed for {int(lease_age)}s",
-                        "lastWatchedAt": lease_iso(lease_path),
-                        "processStopResult": stop_result,
-                    },
-                )
+                extra = {
+                    "lastWatchedAt": lease_iso(lease_path),
+                    "processStopResult": stop_result,
+                }
+                if handoff is not None:
+                    extra.update({
+                        "nextWatchDueAt": handoff[1],
+                        "orphanReason": "next watcher did not resume before handoff deadline",
+                    })
+                else:
+                    extra["orphanReason"] = f"lease not renewed for {int(lease_age)}s"
+                verdict = ("orphaned", extra)
                 exit_code = process.wait()
                 break
 
             time.sleep(1)
 
     duration = round(time.time() - started, 3)
+    clear_handoff(handoff_path)
     current = read_optional_json(status_path) or {}
     if current.get("status") in {"timeout", "orphaned", "stale"}:
         current["processExitCode"] = exit_code

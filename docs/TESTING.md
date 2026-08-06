@@ -124,6 +124,8 @@ process; the job guard denies it. Pass the validation executable directly:
 trailing commands can mask the validation exit code. Honor the 60-minute
 per-job ceiling. Invoke `run-long-check` and `watch-job` as standalone Bash
 calls so their exit codes remain authoritative; inspect logs in a later call.
+When a watch window returns 125, its bounded handoff keeps the job supervised
+while the next watcher call is generated; call `watch-job` again immediately.
 
 ## Release Gate (L4)
 

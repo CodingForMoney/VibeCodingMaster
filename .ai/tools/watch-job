@@ -6,8 +6,9 @@ Usage:
 
 watch-job renews the job supervision lease while it runs. When the watch
 window elapses and the job is still running, it exits 125 WITHOUT stopping
-the job; call watch-job again immediately in the same turn. The job ceiling
-itself is enforced by the run-long-check worker, not by watch-job.
+the job and grants a bounded handoff for the next watcher; call watch-job
+again immediately in the same turn. The job ceiling itself is enforced by
+the run-long-check worker, not by watch-job.
 
 Exit codes:
   0    success
@@ -19,13 +20,16 @@ Exit codes:
 """
 import argparse
 import json
+import os
 import sys
 import time
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 MAX_WINDOW_SECONDS = 8 * 60
 DEFAULT_WINDOW = "8m"
 STATUS_WAIT_SECONDS = 10
+DEFAULT_NEXT_WATCH_HANDOFF_GRACE_SECONDS = 5 * 60
 TERMINAL_EXIT_CODES = {
     "success": 0,
     "failed": 1,
@@ -57,6 +61,42 @@ def read_optional_json(path: Path) -> dict | None:
         return json.loads(path.read_text())
     except (OSError, ValueError):
         return None
+
+
+def write_json(path: Path, data: dict) -> None:
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(json.dumps(data, indent=2, sort_keys=True) + "\n")
+    tmp.replace(path)
+
+
+def env_seconds(name: str, default: float) -> float:
+    raw = os.environ.get(name)
+    if not raw:
+        return default
+    try:
+        return max(1.0, float(raw))
+    except ValueError:
+        return default
+
+
+def clear_handoff(handoff_path: Path) -> None:
+    try:
+        handoff_path.unlink()
+    except FileNotFoundError:
+        pass
+
+
+def begin_handoff(handoff_path: Path, grace_seconds: float) -> str:
+    now = datetime.now(timezone.utc)
+    due_at = (now + timedelta(seconds=grace_seconds)).isoformat().replace("+00:00", "Z")
+    write_json(
+        handoff_path,
+        {
+            "createdAt": now.isoformat().replace("+00:00", "Z"),
+            "nextWatchDueAt": due_at,
+        },
+    )
+    return due_at
 
 
 def renew_lease(lease_path: Path) -> None:
@@ -105,6 +145,9 @@ def print_summary(job_id: str, status: dict, directory: Path) -> None:
         print(f"processStopResult: {status.get('processStopResult')}")
     if state == "orphaned":
         print(f"orphanReason: {status.get('orphanReason')}")
+        print(f"lastWatchedAt: {status.get('lastWatchedAt')}")
+        if status.get("nextWatchDueAt"):
+            print(f"nextWatchDueAt: {status.get('nextWatchDueAt')}")
         print(f"processStopResult: {status.get('processStopResult')}")
     if state == "stale":
         print(f"staleReason: {status.get('staleReason')}")
@@ -120,7 +163,7 @@ def print_summary(job_id: str, status: dict, directory: Path) -> None:
             print(stderr_tail)
 
 
-def print_progress(job_id: str, status: dict, directory: Path, window: float) -> None:
+def print_progress(job_id: str, status: dict, directory: Path, window: float, next_watch_due_at: str) -> None:
     print(f"job: {job_id}")
     print("status: still-running")
     print(f"jobStatus: {status.get('status')}")
@@ -131,6 +174,7 @@ def print_progress(job_id: str, status: dict, directory: Path, window: float) ->
         if isinstance(ceiling, (int, float)):
             print(f"ceilingRemainingSeconds: {max(0, round(ceiling - elapsed))}")
     print(f"watchWindowSeconds: {int(window)}")
+    print(f"nextWatchDueAt: {next_watch_due_at}")
     stdout_tail = tail(directory / "stdout.log", lines=5)
     if stdout_tail:
         print("\nstdout tail:")
@@ -173,6 +217,11 @@ def main() -> int:
     directory = root_dir() / ".ai/vcm/jobs" / args.job_id
     status_path = directory / "status.json"
     lease_path = directory / "lease"
+    handoff_path = directory / "watch-handoff.json"
+    handoff_grace = env_seconds(
+        "VCM_JOB_NEXT_WATCH_HANDOFF_GRACE_SECONDS",
+        DEFAULT_NEXT_WATCH_HANDOFF_GRACE_SECONDS,
+    )
 
     found_deadline = time.time() + STATUS_WAIT_SECONDS
     while not status_path.is_file():
@@ -180,6 +229,9 @@ def main() -> int:
             print(f"error: unknown job id: {args.job_id} (no {status_path})", file=sys.stderr)
             return 2
         time.sleep(0.2)
+
+    renew_lease(lease_path)
+    clear_handoff(handoff_path)
 
     deadline = time.time() + window
     last_status: dict = {}
@@ -190,11 +242,13 @@ def main() -> int:
             last_status = status
             state = status.get("status")
             if state in TERMINAL_EXIT_CODES:
+                clear_handoff(handoff_path)
                 print_summary(args.job_id, status, directory)
                 return TERMINAL_EXIT_CODES[state]
 
         if time.time() >= deadline:
-            print_progress(args.job_id, last_status, directory, window)
+            next_watch_due_at = begin_handoff(handoff_path, handoff_grace)
+            print_progress(args.job_id, last_status, directory, window, next_watch_due_at)
             return 125
 
         time.sleep(interval)

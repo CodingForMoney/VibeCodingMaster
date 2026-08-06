@@ -244,24 +244,32 @@ describe("harness generated-context tools", () => {
 });
 
 describe("long-running validation tools", () => {
-  async function startLongCheck(command: string[]) {
+  async function startLongCheck(
+    command: string[],
+    options: { timeout?: string; env?: NodeJS.ProcessEnv } = {}
+  ) {
     const result = await execFileAsync(
       "python3",
       [
         path.join(tmpRepo!, ".ai/tools/run-long-check"),
         "--timeout",
-        "10s",
+        options.timeout ?? "10s",
         "--",
         ...command
       ],
-      { cwd: tmpRepo }
+      { cwd: tmpRepo, env: { ...process.env, ...options.env } }
     );
     const jobId = result.stdout.match(/^job: (.+)$/m)?.[1];
     expect(jobId).toBeTruthy();
     return jobId!;
   }
 
-  async function watchLongCheck(jobId: string, window = "5s", interval = "50ms") {
+  async function watchLongCheck(
+    jobId: string,
+    window = "5s",
+    interval = "50ms",
+    env: NodeJS.ProcessEnv = {}
+  ) {
     try {
       const result = await execFileAsync(
         "python3",
@@ -273,13 +281,44 @@ describe("long-running validation tools", () => {
           "--interval",
           interval
         ],
-        { cwd: tmpRepo }
+        { cwd: tmpRepo, env: { ...process.env, ...env } }
       );
       return { exitCode: 0, stdout: result.stdout };
     } catch (error) {
       const failed = error as Error & { code?: number; stdout?: string };
       return { exitCode: failed.code, stdout: failed.stdout ?? "" };
     }
+  }
+
+  async function readJobStatus(jobId: string): Promise<Record<string, unknown>> {
+    return JSON.parse(
+      await readFile(path.join(tmpRepo!, ".ai/vcm/jobs", jobId, "status.json"), "utf8")
+    ) as Record<string, unknown>;
+  }
+
+  async function waitForJobStatus(jobId: string, expected: string, timeoutMs = 5_000) {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      const status = await readJobStatus(jobId);
+      if (status.status === expected) {
+        return status;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 50));
+    }
+    throw new Error(`job ${jobId} did not reach ${expected}; latest: ${JSON.stringify(await readJobStatus(jobId))}`);
+  }
+
+  async function waitForMissing(filePath: string, timeoutMs = 2_000) {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      try {
+        await access(filePath);
+      } catch {
+        return;
+      }
+      await new Promise((resolve) => setTimeout(resolve, 25));
+    }
+    throw new Error(`${filePath} was not removed`);
   }
 
   it("preserves direct validation command success and failure exit codes", async () => {
@@ -329,6 +368,102 @@ describe("long-running validation tools", () => {
       });
     }
   });
+
+  it("keeps a job alive during a normal next-watcher handoff", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-long-check-"));
+    await installHarnessTools(tmpRepo);
+    const env = {
+      VCM_JOB_LEASE_RENEW_GRACE_SECONDS: "1",
+      VCM_JOB_NEXT_WATCH_HANDOFF_GRACE_SECONDS: "3"
+    };
+    const jobId = await startLongCheck(
+      [process.execPath, "-e", "setTimeout(() => process.exit(0), 2500)"],
+      { env }
+    );
+
+    await expect(watchLongCheck(jobId, "100ms", "20ms", env)).resolves.toMatchObject({
+      exitCode: 125,
+      stdout: expect.stringContaining("nextWatchDueAt:")
+    });
+    await new Promise((resolve) => setTimeout(resolve, 1_400));
+    await expect(readJobStatus(jobId)).resolves.toMatchObject({ status: "running" });
+
+    await expect(watchLongCheck(jobId, "3s", "20ms", env)).resolves.toMatchObject({
+      exitCode: 0,
+      stdout: expect.stringContaining("status: success")
+    });
+    await expect(access(path.join(tmpRepo, ".ai/vcm/jobs", jobId, "watch-handoff.json"))).rejects.toBeTruthy();
+  }, 10_000);
+
+  it("orphans a job after a watcher disappears without a handoff", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-long-check-"));
+    await installHarnessTools(tmpRepo);
+    const jobId = await startLongCheck(
+      [process.execPath, "-e", "setTimeout(() => process.exit(0), 10000)"],
+      { env: { VCM_JOB_LEASE_RENEW_GRACE_SECONDS: "1" } }
+    );
+    await waitForJobStatus(jobId, "running");
+    await writeFile(path.join(tmpRepo, ".ai/vcm/jobs", jobId, "lease"), "");
+
+    const status = await waitForJobStatus(jobId, "orphaned");
+    expect(status.orphanReason).toMatch(/^lease not renewed for /);
+    expect(status.nextWatchDueAt).toBeUndefined();
+  }, 10_000);
+
+  it("orphans a job with a distinct reason after the normal handoff deadline", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-long-check-"));
+    await installHarnessTools(tmpRepo);
+    const env = {
+      VCM_JOB_LEASE_RENEW_GRACE_SECONDS: "1",
+      VCM_JOB_NEXT_WATCH_HANDOFF_GRACE_SECONDS: "1"
+    };
+    const jobId = await startLongCheck(
+      [process.execPath, "-e", "setTimeout(() => process.exit(0), 10000)"],
+      { env }
+    );
+    await expect(watchLongCheck(jobId, "100ms", "20ms", env)).resolves.toMatchObject({ exitCode: 125 });
+
+    const status = await waitForJobStatus(jobId, "orphaned");
+    expect(status).toMatchObject({
+      orphanReason: "next watcher did not resume before handoff deadline",
+      nextWatchDueAt: expect.any(String),
+      lastWatchedAt: expect.any(String)
+    });
+    await expect(watchLongCheck(jobId, "100ms", "20ms", env)).resolves.toMatchObject({
+      exitCode: 4,
+      stdout: expect.stringMatching(/lastWatchedAt: .+/)
+    });
+  }, 10_000);
+
+  it("clears the handoff when the next watcher takes over", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-long-check-"));
+    await installHarnessTools(tmpRepo);
+    const env = {
+      VCM_JOB_LEASE_RENEW_GRACE_SECONDS: "1",
+      VCM_JOB_NEXT_WATCH_HANDOFF_GRACE_SECONDS: "3"
+    };
+    const jobId = await startLongCheck(
+      [process.execPath, "-e", "setTimeout(() => process.exit(0), 10000)"],
+      { env }
+    );
+    await watchLongCheck(jobId, "100ms", "20ms", env);
+    const handoffPath = path.join(tmpRepo, ".ai/vcm/jobs", jobId, "watch-handoff.json");
+    await expect(access(handoffPath)).resolves.toBeUndefined();
+
+    const watcher = execFile(
+      "python3",
+      [path.join(tmpRepo, ".ai/tools/watch-job"), jobId, "--window", "3s", "--interval", "20ms"],
+      { cwd: tmpRepo, env: { ...process.env, ...env } }
+    );
+    const watcherExited = new Promise((resolve) => watcher.once("exit", resolve));
+    await waitForMissing(handoffPath);
+    watcher.kill("SIGTERM");
+    await watcherExited;
+
+    const status = await waitForJobStatus(jobId, "orphaned");
+    expect(status.orphanReason).toMatch(/^lease not renewed for /);
+    expect(status.nextWatchDueAt).toBeUndefined();
+  }, 10_000);
 
   it("rejects shell command-string wrappers before creating a job", async () => {
     tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-long-check-"));
