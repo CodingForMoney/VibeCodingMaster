@@ -1,4 +1,5 @@
 import type { RoleName } from "../../shared/types/role.js";
+import { roleRuntimeDisallowedTools, roleUsesLsp } from "../role-tool-policy.js";
 import {
   isCcrSessionModel,
   type ClaudePermissionMode,
@@ -46,7 +47,12 @@ export function createClaudeAdapter(runner: CommandRunner): ClaudeAdapter {
     },
     buildRoleStartCommand(role, command = "claude", permissionMode = "default", claudeSessionId, resume = false, model = "default", effort = "default", settingsOverride, appendSystemPrompt, pluginDirs = []) {
       const args = pluginDirs.flatMap((pluginDir) => ["--plugin-dir", pluginDir]);
-      args.push("--allowedTools", "Glob,Grep");
+      const lspEnabled = roleUsesLsp(role) && pluginDirs.length > 0;
+      if (lspEnabled) {
+        args.push("--disallowedTools", roleRuntimeDisallowedTools(role).join(","));
+      } else {
+        args.push("--allowedTools", "Glob,Grep");
+      }
       args.push("--agent", role);
       const sessionSettings = { ...settingsOverride };
       if (claudeSessionId) {

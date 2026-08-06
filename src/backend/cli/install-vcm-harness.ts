@@ -6,6 +6,10 @@ import path from "node:path";
 import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { renderArchitectHarnessRules } from "../templates/harness/architect-agent.js";
+import {
+  CODE_ROLE_DISALLOWED_TOOLS,
+  REVIEWER_DISALLOWED_TOOLS
+} from "../role-tool-policy.js";
 import { renderCoderHarnessRules } from "../templates/harness/coder-agent.js";
 import { renderCoderWorkerHarnessRules } from "../templates/harness/coder-worker-agent.js";
 import { renderArchitectScaffoldWorkerHarnessRules } from "../templates/harness/architect-scaffold-worker-agent.js";
@@ -86,12 +90,12 @@ const AGENT_FRONTMATTER = {
   },
   architect: {
     description: "VCM architecture role for plans, module boundaries, public contracts, verifiable behavior, and docs sync.",
-    tools: "Read, Grep, Glob, Bash, Edit, Write, Agent, LSP",
+    disallowedTools: CODE_ROLE_DISALLOWED_TOOLS.join(", "),
     skills: ["vcm-code-navigation"]
   },
   coder: {
     description: "VCM implementation role for scoped code changes and focused tests.",
-    tools: "Read, Grep, Glob, Bash, Edit, Write, Agent, LSP",
+    disallowedTools: CODE_ROLE_DISALLOWED_TOOLS.join(", "),
     skills: ["vcm-code-navigation"]
   },
   tester: {
@@ -99,7 +103,7 @@ const AGENT_FRONTMATTER = {
   },
   reviewer: {
     description: "VCM independent gate review role for architecture plans, validation adequacy, and code diffs.",
-    tools: "Read, Grep, Glob, Bash, Write, LSP",
+    disallowedTools: REVIEWER_DISALLOWED_TOOLS.join(", "),
     skills: ["vcm-code-navigation"]
   },
   translator: {
@@ -119,10 +123,10 @@ const AGENT_FRONTMATTER = {
   }
 };
 
-const REQUIRED_AGENT_TOOLS = {
-  architect: ["Grep", "Agent", "LSP"],
-  coder: ["Grep", "Agent", "LSP"],
-  reviewer: ["Grep", "LSP"]
+const REQUIRED_AGENT_DISALLOWED_TOOLS = {
+  architect: CODE_ROLE_DISALLOWED_TOOLS,
+  coder: CODE_ROLE_DISALLOWED_TOOLS,
+  reviewer: REVIEWER_DISALLOWED_TOOLS
 };
 const REQUIRED_AGENT_SKILLS = {
   architect: ["vcm-code-navigation"],
@@ -804,8 +808,9 @@ async function installManagedFile({ projectRoot, definition, dryRun, operations 
   if (definition.memoryBlock) {
     nextContent = ensureVcmMemoryBlock(nextContent);
   }
-  for (const requiredTool of REQUIRED_AGENT_TOOLS[definition.agentName] ?? []) {
-    nextContent = ensureAgentTool(nextContent, requiredTool);
+  const requiredDisallowedTools = REQUIRED_AGENT_DISALLOWED_TOOLS[definition.agentName];
+  if (requiredDisallowedTools) {
+    nextContent = ensureAgentDisallowedTools(nextContent, requiredDisallowedTools);
   }
   for (const requiredSkill of REQUIRED_AGENT_SKILLS[definition.agentName] ?? []) {
     nextContent = ensureAgentSkill(nextContent, requiredSkill);
@@ -854,35 +859,36 @@ function renderNewManagedFile(definition, block) {
   const suffix = definition.contentAfterBlock?.trim();
   if (definition.agentName) {
     const frontmatter = AGENT_FRONTMATTER[definition.agentName];
-    const tools = frontmatter.tools ?? "Read, Grep, Glob, Bash, Edit, Write";
+    const toolPolicy = frontmatter.disallowedTools
+      ? `disallowedTools: ${frontmatter.disallowedTools}`
+      : `tools: ${frontmatter.tools ?? "Read, Grep, Glob, Bash, Edit, Write"}`;
     const model = frontmatter.model ? `\nmodel: ${frontmatter.model}` : "";
     const effort = frontmatter.effort ? `\neffort: ${frontmatter.effort}` : "";
     const skills = frontmatter.skills?.length
       ? `\nskills:\n${frontmatter.skills.map((skill) => `  - ${skill}`).join("\n")}`
       : "";
-    return `---\nname: ${definition.agentName}\ndescription: ${frontmatter.description}\ntools: ${tools}${model}${effort}${skills}\n---\n\n# ${definition.title}\n\n${block}${suffix ? `\n\n${suffix}` : ""}\n`;
+    return `---\nname: ${definition.agentName}\ndescription: ${frontmatter.description}\n${toolPolicy}${model}${effort}${skills}\n---\n\n# ${definition.title}\n\n${block}${suffix ? `\n\n${suffix}` : ""}\n`;
   }
   return `# ${definition.title}\n\n${block}${suffix ? `\n\n${suffix}` : ""}\n`;
 }
 
-function ensureAgentTool(content, requiredTool) {
+function ensureAgentDisallowedTools(content, requiredTools) {
   const frontmatterMatch = content.match(/^---\r?\n[\s\S]*?\r?\n---/);
   if (!frontmatterMatch) {
     return content;
   }
 
-  const toolsMatch = frontmatterMatch[0].match(/^tools:\s*(.*)$/m);
-  if (!toolsMatch) {
-    return content.replace(/^(---\r?\n[\s\S]*?)(\r?\n---)/, `$1\ntools: ${requiredTool}$2`);
-  }
-
-  const tools = toolsMatch[1].split(",").map((tool) => tool.trim()).filter(Boolean);
-  if (tools.includes(requiredTool)) {
-    return content;
-  }
-
-  const nextTools = [...tools, requiredTool].join(", ");
-  return content.replace(frontmatterMatch[0], frontmatterMatch[0].replace(toolsMatch[0], `tools: ${nextTools}`));
+  const withoutAllowedTools = frontmatterMatch[0].replace(/^tools:\s*.*\r?\n?/m, "");
+  const disallowedMatch = withoutAllowedTools.match(/^disallowedTools:\s*(.*)$/m);
+  const existing = disallowedMatch?.[1]
+    .split(",")
+    .map((tool) => tool.trim())
+    .filter(Boolean) ?? [];
+  const disallowedTools = [...new Set([...existing, ...requiredTools])].join(", ");
+  const nextFrontmatter = disallowedMatch
+    ? withoutAllowedTools.replace(disallowedMatch[0], `disallowedTools: ${disallowedTools}`)
+    : withoutAllowedTools.replace(/\r?\n---$/, `\ndisallowedTools: ${disallowedTools}\n---`);
+  return content.replace(frontmatterMatch[0], nextFrontmatter);
 }
 
 function ensureAgentSkill(content, requiredSkill) {

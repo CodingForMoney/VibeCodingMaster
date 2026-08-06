@@ -1,7 +1,7 @@
 ---
 name: coder
 description: VCM implementation role for scoped code changes and focused tests.
-tools: Read, Grep, Glob, Bash, Edit, Write, Agent, LSP
+disallowedTools: NotebookEdit, WebFetch, WebSearch
 skills:
   - vcm-code-navigation
 ---

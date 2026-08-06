@@ -1,7 +1,7 @@
 ---
 name: reviewer
 description: VCM independent gate review role for architecture plans, validation adequacy, and code diffs.
-tools: Read, Grep, Glob, Bash, Write, LSP
+disallowedTools: Agent, Edit, NotebookEdit, WebFetch, WebSearch
 skills:
   - vcm-code-navigation
 ---

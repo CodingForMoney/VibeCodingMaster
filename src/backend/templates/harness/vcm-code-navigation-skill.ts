@@ -6,7 +6,7 @@ Use this skill when Architect, Coder, or Reviewer must establish symbol definiti
 ## Navigation Order
 
 1. Define the affected feature or module boundary and locate entry symbols with \`.ai/generated/module-index.json\` and \`.ai/generated/public-surface.json\` when available.
-2. Start each navigation run with LSP \`documentSymbol\` on a known affected project source file. This initializes the actual role-session language server and proves that it can parse that file; an executable version probe is not workspace readiness.
+2. If \`LSP\` is not listed initially, call \`ToolSearch\` with query \`select:LSP\` to load the deferred plugin tool. Then start each navigation run with LSP \`documentSymbol\` on a known affected project source file. This initializes the actual role-session language server and proves that it can parse that file; an executable version probe is not workspace readiness.
 3. Use LSP workspace or file symbols, definitions, implementations, references, and incoming or outgoing call hierarchy to resolve project-owned relationships.
 4. If an initial workspace-symbol request is empty or reports indexing, wait and retry; startup or indexing time does not permit replacing a required semantic query with text matching. After a successful file-symbol request, retry the same bounded workspace query at most two more times. If it still cannot resolve, record the operation and result as unresolved.
 5. Read the complete project-owned callable unit at every resolved location.

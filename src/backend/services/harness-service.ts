@@ -32,6 +32,10 @@ import type { CommandRunner } from "../adapters/command-runner.js";
 import type { GitAdapter } from "../adapters/git-adapter.js";
 import type { FileSystemAdapter } from "../adapters/filesystem.js";
 import { renderArchitectHarnessRules } from "../templates/harness/architect-agent.js";
+import {
+  CODE_ROLE_DISALLOWED_TOOLS,
+  REVIEWER_DISALLOWED_TOOLS
+} from "../role-tool-policy.js";
 import { renderCoderHarnessRules } from "../templates/harness/coder-agent.js";
 import { renderCoderWorkerHarnessRules } from "../templates/harness/coder-worker-agent.js";
 import { renderArchitectScaffoldWorkerHarnessRules } from "../templates/harness/architect-scaffold-worker-agent.js";
@@ -157,7 +161,7 @@ interface HarnessFileDefinition {
   ownership?: "managed-block" | "whole-file" | "raw-file" | "project-file";
   blankLineBeforeEnd?: boolean;
   memoryBlock?: boolean;
-  requiredTools?: string[];
+  requiredDisallowedTools?: string[];
   requiredSkills?: string[];
   defaultContentAfterBlock?: string;
   legacyWholeFile?: string;
@@ -380,12 +384,12 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
     path: ".claude/agents/reviewer.md",
     title: "Reviewer Agent",
     memoryBlock: true,
-    requiredTools: ["Grep", "LSP"],
+    requiredDisallowedTools: REVIEWER_DISALLOWED_TOOLS,
     requiredSkills: ["vcm-code-navigation"],
     frontmatter: renderAgentFrontmatter(
       "reviewer",
       "VCM independent gate review role for architecture plans, validation adequacy, and code diffs.",
-      { tools: "Read, Grep, Glob, Bash, Write, LSP", skills: ["vcm-code-navigation"] }
+      { disallowedTools: REVIEWER_DISALLOWED_TOOLS.join(", "), skills: ["vcm-code-navigation"] }
     ),
     renderRules: renderReviewerAgentRules
   },
@@ -476,13 +480,13 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
     path: ".claude/agents/architect.md",
     title: "Architect Agent",
     memoryBlock: true,
-    requiredTools: ["Grep", "Agent", "LSP"],
+    requiredDisallowedTools: CODE_ROLE_DISALLOWED_TOOLS,
     requiredSkills: ["vcm-code-navigation"],
     blankLineBeforeEnd: true,
     frontmatter: renderAgentFrontmatter(
       "architect",
       "VCM architecture role for plans, module boundaries, public contracts, verifiable behavior, and docs sync.",
-      { tools: "Read, Grep, Glob, Bash, Edit, Write, Agent, LSP", skills: ["vcm-code-navigation"] }
+      { disallowedTools: CODE_ROLE_DISALLOWED_TOOLS.join(", "), skills: ["vcm-code-navigation"] }
     ),
     renderRules: renderArchitectHarnessRules
   },
@@ -491,12 +495,12 @@ const HARNESS_FILES: HarnessFileDefinition[] = [
     path: ".claude/agents/coder.md",
     title: "Coder Agent",
     memoryBlock: true,
-    requiredTools: ["Grep", "Agent", "LSP"],
+    requiredDisallowedTools: CODE_ROLE_DISALLOWED_TOOLS,
     requiredSkills: ["vcm-code-navigation"],
     frontmatter: renderAgentFrontmatter(
       "coder",
       "VCM implementation role for scoped code changes and focused tests.",
-      { tools: "Read, Grep, Glob, Bash, Edit, Write, Agent, LSP", skills: ["vcm-code-navigation"] }
+      { disallowedTools: CODE_ROLE_DISALLOWED_TOOLS.join(", "), skills: ["vcm-code-navigation"] }
     ),
     renderRules: renderCoderHarnessRules
   },
@@ -1787,32 +1791,30 @@ function renderNewHarnessFile(
   return `${frontmatter}# ${definition.title}\n\n${block}${suffix ? `\n\n${suffix}` : ""}\n`;
 }
 
-function ensureAgentTool(content: string, requiredTool: string): string {
+function ensureAgentDisallowedTools(content: string, requiredTools: string[] | undefined): string {
+  if (!requiredTools) {
+    return content;
+  }
   const frontmatterMatch = content.match(/^---\r?\n[\s\S]*?\r?\n---/);
   if (!frontmatterMatch) {
     return content;
   }
 
-  const toolsMatch = frontmatterMatch[0].match(/^tools:\s*(.*)$/m);
-  if (!toolsMatch) {
-    return content.replace(/^(---\r?\n[\s\S]*?)(\r?\n---)/, `$1\ntools: ${requiredTool}$2`);
-  }
-
-  const tools = toolsMatch[1].split(",").map((tool) => tool.trim()).filter(Boolean);
-  if (tools.includes(requiredTool)) {
-    return content;
-  }
-
-  const nextTools = [...tools, requiredTool].join(", ");
-  return content.replace(frontmatterMatch[0], frontmatterMatch[0].replace(toolsMatch[0], `tools: ${nextTools}`));
-}
-
-function ensureAgentTools(content: string, requiredTools: string[] | undefined): string {
-  return (requiredTools ?? []).reduce(ensureAgentTool, content);
+  const withoutAllowedTools = frontmatterMatch[0].replace(/^tools:\s*.*\r?\n?/m, "");
+  const disallowedMatch = withoutAllowedTools.match(/^disallowedTools:\s*(.*)$/m);
+  const existing = disallowedMatch?.[1]
+    .split(",")
+    .map((tool) => tool.trim())
+    .filter(Boolean) ?? [];
+  const disallowedTools = [...new Set([...existing, ...requiredTools])].join(", ");
+  const nextFrontmatter = disallowedMatch
+    ? withoutAllowedTools.replace(disallowedMatch[0], `disallowedTools: ${disallowedTools}`)
+    : withoutAllowedTools.replace(/\r?\n---$/, `\ndisallowedTools: ${disallowedTools}\n---`);
+  return content.replace(frontmatterMatch[0], nextFrontmatter);
 }
 
 function normalizeAgentFrontmatter(content: string, definition: HarnessFileDefinition): string {
-  const toolsUpdated = ensureAgentTools(content, definition.requiredTools);
+  const toolsUpdated = ensureAgentDisallowedTools(content, definition.requiredDisallowedTools);
   return (definition.requiredSkills ?? []).reduce(ensureAgentSkill, toolsUpdated);
 }
 
@@ -1989,15 +1991,17 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 function renderAgentFrontmatter(
   name: string,
   description: string,
-  options: { tools?: string; model?: string; effort?: string; skills?: string[] } = {}
+  options: { tools?: string; disallowedTools?: string; model?: string; effort?: string; skills?: string[] } = {}
 ): string {
-  const tools = options.tools ?? "Read, Grep, Glob, Bash, Edit, Write";
+  const toolPolicy = options.disallowedTools
+    ? `disallowedTools: ${options.disallowedTools}`
+    : `tools: ${options.tools ?? "Read, Grep, Glob, Bash, Edit, Write"}`;
   const model = options.model ? `\nmodel: ${options.model}` : "";
   const effort = options.effort ? `\neffort: ${options.effort}` : "";
   const skills = options.skills?.length
     ? `\nskills:\n${options.skills.map((skill) => `  - ${skill}`).join("\n")}`
     : "";
-  return `---\nname: ${name}\ndescription: ${description}\ntools: ${tools}${model}${effort}${skills}\n---`;
+  return `---\nname: ${name}\ndescription: ${description}\n${toolPolicy}${model}${effort}${skills}\n---`;
 }
 
 function renderSkillFrontmatter(name: string, description: string): string {

@@ -10,6 +10,10 @@ import {
   createHarnessCodeIntelligenceDetector,
   detectHarnessCodeIntelligence
 } from "../../../src/backend/services/code-intelligence-service.js";
+import {
+  CODE_ROLE_DISALLOWED_TOOLS,
+  REVIEWER_DISALLOWED_TOOLS
+} from "../../../src/backend/role-tool-policy.js";
 import { renderLegacyProjectCodingStandardsTemplate } from "../../../src/backend/templates/harness/project-coding-standards.js";
 import type { RoleSessionRecord, StartRoleSessionRequest } from "../../../src/shared/types/session.js";
 
@@ -90,7 +94,8 @@ describe("createHarnessService", () => {
     expect(await fs.readText("/repo/.claude/skills/vcm-architecture-interview/SKILL.md")).toContain("During an active Architect Interview");
     const codeNavigationSkill = await fs.readText("/repo/.claude/skills/vcm-code-navigation/SKILL.md");
     expect(codeNavigationSkill).toContain("record that limitation and leave the relationship unresolved");
-    expect(codeNavigationSkill).toContain("Start each navigation run with LSP `documentSymbol`");
+    expect(codeNavigationSkill).toContain("call `ToolSearch` with query `select:LSP`");
+    expect(codeNavigationSkill).toContain("start each navigation run with LSP `documentSymbol`");
     expect(codeNavigationSkill).toContain("retry the same bounded workspace query at most two more times");
     expect(await fs.readText("/repo/.claude/skills/vcm-report-harness-issue/SKILL.md")).toContain("name: vcm-report-harness-issue");
     expect(await fs.readText("/repo/.claude/skills/vcm-report-harness-issue/SKILL.md")).toContain(".ai/vcm/harness-feedback/pending/");
@@ -148,8 +153,8 @@ describe("createHarnessService", () => {
     expect(await fs.readText("/repo/.ai/tools/request-gate-review")).toContain('["git", "rev-parse", "--abbrev-ref"');
     expect(await fs.readText("/repo/.ai/tools/request-gate-review")).toContain('["git", "merge-base", "HEAD", upstream]');
     const architectAgent = await fs.readText("/repo/.claude/agents/architect.md");
-    expect(frontmatterOf(architectAgent)).toContain("LSP");
-    expect(frontmatterOf(architectAgent)).toContain("Grep");
+    expect(frontmatterOf(architectAgent)).toContain(`disallowedTools: ${CODE_ROLE_DISALLOWED_TOOLS.join(", ")}`);
+    expect(frontmatterOf(architectAgent)).not.toMatch(/^tools:/m);
     expect(architectAgent).toContain("Follow the preloaded `vcm-code-navigation` skill");
     expect(frontmatterOf(architectAgent)).toContain("skills:\n  - vcm-code-navigation");
     expect(architectAgent).toContain("Resolution Evidence");
@@ -187,7 +192,8 @@ describe("createHarnessService", () => {
     expect(testerAgent).toContain("`Completed Validation` and `Remaining Validation`");
     expect(testerAgent).not.toContain("shared implementation-quality and baseline-test standard");
     const diagnosisReviewerAgent = await fs.readText("/repo/.claude/agents/reviewer.md");
-    expect(frontmatterOf(diagnosisReviewerAgent)).toContain("LSP");
+    expect(frontmatterOf(diagnosisReviewerAgent)).toContain(`disallowedTools: ${REVIEWER_DISALLOWED_TOOLS.join(", ")}`);
+    expect(frontmatterOf(diagnosisReviewerAgent)).not.toMatch(/^tools:/m);
     expect(diagnosisReviewerAgent).toContain("Follow the preloaded `vcm-code-navigation` skill");
     expect(frontmatterOf(diagnosisReviewerAgent)).toContain("skills:\n  - vcm-code-navigation");
     expect(diagnosisReviewerAgent).toContain("verify that the commits implement the diagnosed");
@@ -201,8 +207,8 @@ describe("createHarnessService", () => {
     expect(finalAcceptanceSkill).toContain("`incomplete` is not acceptance evidence");
     expect(finalAcceptanceSkill).toContain("do not accept `Test Result: incomplete`");
     const coderAgent = await fs.readText("/repo/.claude/agents/coder.md");
-    expect(coderAgent).toContain("tools: Read, Grep, Glob, Bash, Edit, Write, Agent, LSP");
-    expect(frontmatterOf(coderAgent)).toContain("Grep");
+    expect(frontmatterOf(coderAgent)).toContain(`disallowedTools: ${CODE_ROLE_DISALLOWED_TOOLS.join(", ")}`);
+    expect(frontmatterOf(coderAgent)).not.toMatch(/^tools:/m);
     expect(frontmatterOf(coderAgent)).toContain("skills:\n  - vcm-code-navigation");
     expect(coderAgent).toContain("Implement assigned file/function-level scaffold items");
     expect(coderAgent).toContain("read and follow `docs/CODING_STANDARDS.md`");
@@ -217,7 +223,7 @@ describe("createHarnessService", () => {
     expect(coderAgent).toContain("| ID | Action | Result | Marker State | Proof Evidence |");
     expect(coderAgent).not.toContain("## Remaining Markers");
     expect(frontmatterOf(await fs.readText("/repo/.claude/agents/project-manager.md"))).not.toContain("Agent");
-    expect(frontmatterOf(await fs.readText("/repo/.claude/agents/architect.md"))).toContain("Agent");
+    expect(frontmatterOf(await fs.readText("/repo/.claude/agents/architect.md"))).not.toMatch(/^disallowedTools:.*(?:^|, )Agent(?:,|$)/m);
     expect(frontmatterOf(await fs.readText("/repo/.claude/agents/tester.md"))).not.toContain("Agent");
     const coderWorkerAgent = await fs.readText("/repo/.claude/agents/vcm-coder-worker.md");
     expect(coderWorkerAgent).toContain("name: vcm-coder-worker");
@@ -237,8 +243,8 @@ describe("createHarnessService", () => {
     expect(coderWorkerAgent).not.toContain("Stop before editing if the assigned module");
     const reviewerAgent = await fs.readText("/repo/.claude/agents/reviewer.md");
     expect(reviewerAgent).toContain("name: reviewer");
-    expect(reviewerAgent).toContain("tools: Read, Grep, Glob, Bash, Write, LSP");
-    expect(frontmatterOf(reviewerAgent)).toContain("Grep");
+    expect(frontmatterOf(reviewerAgent)).toContain(`disallowedTools: ${REVIEWER_DISALLOWED_TOOLS.join(", ")}`);
+    expect(frontmatterOf(reviewerAgent)).not.toMatch(/^tools:/m);
     expect(reviewerAgent).toContain("You are VCM `reviewer`");
     expect(reviewerAgent).toContain("Use the task and worktree paths named there");
     expect(reviewerAgent).toContain("Every Gate Review is a complete review of the current gate inputs");
@@ -404,7 +410,7 @@ describe("createHarnessService", () => {
     expect(content).toContain("## VCM Start Here");
   });
 
-  it("restores Architect navigation tools without replacing its configuration", async () => {
+  it("migrates Architect to the dynamic LSP tool policy without replacing its configuration", async () => {
     const fs = createMemoryFs();
     const service = createHarnessService({ fs });
     await service.applyHarness("/repo");
@@ -414,7 +420,7 @@ describe("createHarnessService", () => {
     await fs.writeText(
       architectPath,
       current
-        .replace("tools: Read, Grep, Glob, Bash, Edit, Write, Agent, LSP", "tools: Read, Glob, Bash, Edit, Write")
+        .replace(`disallowedTools: ${CODE_ROLE_DISALLOWED_TOOLS.join(", ")}`, "tools: Read, Glob, Bash, Edit, Write")
         .replace("skills:\n  - vcm-code-navigation\n", "")
         .replace("description: VCM architecture role", "model: custom-model\ndescription: VCM architecture role")
     );
@@ -424,8 +430,8 @@ describe("createHarnessService", () => {
 
     await service.applyHarness("/repo");
     const updated = await fs.readText(architectPath);
-    expect(frontmatterOf(updated)).toContain("tools: Read, Glob, Bash, Edit, Write, Grep, Agent, LSP");
-    expect(frontmatterOf(updated)).toContain("Grep");
+    expect(frontmatterOf(updated)).toContain(`disallowedTools: ${CODE_ROLE_DISALLOWED_TOOLS.join(", ")}`);
+    expect(frontmatterOf(updated)).not.toMatch(/^tools:/m);
     expect(frontmatterOf(updated)).toContain("skills:\n  - vcm-code-navigation");
     expect(frontmatterOf(updated)).toContain("model: custom-model");
   });

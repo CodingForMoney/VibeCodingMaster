@@ -1,7 +1,7 @@
 ---
 name: architect
 description: VCM architecture role for plans, module boundaries, public contracts, verifiable behavior, and docs sync.
-tools: Read, Grep, Glob, Bash, Edit, Write, Agent, LSP
+disallowedTools: NotebookEdit, WebFetch, WebSearch
 skills:
   - vcm-code-navigation
 ---

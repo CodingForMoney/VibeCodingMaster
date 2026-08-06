@@ -1,6 +1,6 @@
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import type { RoleName } from "../../shared/types/role.js";
+export { roleUsesLsp } from "../role-tool-policy.js";
 
 export const VCM_LSP_PLUGIN_NAME = "vcm-lsp-bridge";
 export const VCM_LSP_PLUGIN_DIR = fileURLToPath(
@@ -11,9 +11,3 @@ export const VCM_LSP_PLUGIN_MANIFEST = path.join(
   ".claude-plugin",
   "plugin.json"
 );
-
-const LSP_ROLES = new Set<RoleName>(["architect", "coder", "reviewer"]);
-
-export function roleUsesLsp(role: RoleName): boolean {
-  return LSP_ROLES.has(role);
-}

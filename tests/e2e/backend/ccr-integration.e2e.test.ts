@@ -6,6 +6,10 @@ import {
   CCR_GPT_MODEL_ID,
   CCR_GPT_SESSION_MODEL
 } from "../../../src/shared/types/session.js";
+import {
+  CODE_ROLE_RUNTIME_DISALLOWED_TOOLS,
+  REVIEWER_RUNTIME_DISALLOWED_TOOLS
+} from "../../../src/backend/role-tool-policy.js";
 import { VCM_LSP_PLUGIN_DIR } from "../../../src/backend/services/lsp-plugin.js";
 import { createMockClaudeE2eApp, roleLaunchBody } from "./helpers/e2e-app.js";
 import {
@@ -129,6 +133,11 @@ describe("backend E2E CCR integration", () => {
     const nativeInput = env.mockRuntime.getCreateInput(nativeRuntime!.id);
     expect(nativeInput.args).toEqual(expect.arrayContaining(["--model", "opus"]));
     expect(nativeInput.args).toEqual(expect.arrayContaining(["--plugin-dir", VCM_LSP_PLUGIN_DIR]));
+    expect(nativeInput.args).toEqual(expect.arrayContaining([
+      "--disallowedTools",
+      CODE_ROLE_RUNTIME_DISALLOWED_TOOLS.join(",")
+    ]));
+    expect(nativeInput.args).not.toContain("--allowedTools");
     expect(nativeInput.env.ENABLE_LSP_TOOL).toBe("true");
     expect(nativeInput.args).not.toContain("--settings");
     expect(nativeInput.env.ANTHROPIC_BASE_URL).toBeUndefined();
@@ -219,10 +228,16 @@ describe("backend E2E CCR integration", () => {
 
     const reviewerInput = env.mockRuntime.getCreateInput(launches[0].json<{ id: string }>().id);
     expect(reviewerInput.args).toEqual(expect.arrayContaining(["--plugin-dir", VCM_LSP_PLUGIN_DIR]));
+    expect(reviewerInput.args).toEqual(expect.arrayContaining([
+      "--disallowedTools",
+      REVIEWER_RUNTIME_DISALLOWED_TOOLS.join(",")
+    ]));
+    expect(reviewerInput.args).not.toContain("--allowedTools");
     expect(reviewerInput.env.ENABLE_LSP_TOOL).toBe("true");
     for (const auxiliary of launches.slice(1)) {
       const auxiliaryInput = env.mockRuntime.getCreateInput(auxiliary.json<{ id: string }>().id);
       expect(auxiliaryInput.args).not.toContain("--plugin-dir");
+      expect(auxiliaryInput.args).toEqual(expect.arrayContaining(["--allowedTools", "Glob,Grep"]));
       expect(auxiliaryInput.env.ENABLE_LSP_TOOL).toBeUndefined();
     }
   });
