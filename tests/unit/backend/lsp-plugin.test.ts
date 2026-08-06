@@ -25,7 +25,7 @@ describe("VCM LSP plugin", () => {
   it("declares every supported language server in the packaged plugin", async () => {
     const manifest = JSON.parse(await readFile(VCM_LSP_PLUGIN_MANIFEST, "utf8")) as {
       name?: string;
-      lspServers?: Record<string, { command?: string }>;
+      lspServers?: Record<string, { command?: string; startupTimeout?: number }>;
     };
 
     expect(manifest.name).toBe(VCM_LSP_PLUGIN_NAME);
@@ -37,5 +37,6 @@ describe("VCM LSP plugin", () => {
       "clangd",
       "jdtls"
     ]);
+    expect(manifest.lspServers?.["rust-analyzer"]?.startupTimeout).toBe(180_000);
   });
 });

@@ -10,7 +10,8 @@
       "command": "rust-analyzer",
       "extensionToLanguage": {
         ".rs": "rust"
-      }
+      },
+      "startupTimeout": 180000
     },
     "typescript": {
       "command": "typescript-language-server",
