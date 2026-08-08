@@ -321,7 +321,41 @@ describe("backend E2E with mock Claude Code", () => {
       }
     });
     expect(completion.statusCode, completion.body).toBe(200);
-    expect(parseWorkflowProgress(await fs.readFile(progressPath, "utf8"), task.taskSlug).status).toBe("completed");
+    const completed = parseWorkflowProgress(await fs.readFile(progressPath, "utf8"), task.taskSlug);
+    expect(completed.status).toBe("completed");
+
+    const nextFlow = await env.app.inject({
+      method: "POST",
+      url: `/api/tasks/${task.taskSlug}/artifacts/submit`,
+      payload: {
+        kind: "workflow-progress",
+        mode: "final",
+        role: "project-manager",
+        runtimeSessionToken: pm.runtimeSessionToken,
+        content: renderWorkflowProgress({
+          ...completed,
+          revision: completed.revision + 1,
+          proposal: {
+            requestedFlow: "validation-only",
+            targetRole: "tester",
+            evidence: "a new accepted validation request"
+          }
+        })
+      }
+    });
+    expect(nextFlow.statusCode, nextFlow.body).toBe(200);
+
+    const workflowState = await env.app.inject({
+      method: "GET",
+      url: `/api/tasks/${task.taskSlug}/workflow-control`
+    });
+    expect(workflowState.statusCode, workflowState.body).toBe(200);
+    expect(workflowState.json()).toMatchObject({
+      pendingDispatch: {
+        effectiveFlow: "validation-only",
+        targetRole: "tester"
+      }
+    });
   });
 
   it("retries a retryable StopFailure by sending a recovery prompt to the same role session", async () => {

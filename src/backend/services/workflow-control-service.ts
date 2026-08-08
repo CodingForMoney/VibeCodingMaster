@@ -12,6 +12,7 @@ import type {
   WorkflowEvidenceArtifact,
   WorkflowEvidenceGate,
   WorkflowFlow,
+  WorkflowFlowRun,
   WorkflowOverrideRequest,
   WorkflowPendingDispatch,
   WorkflowProgressDocument
@@ -119,6 +120,14 @@ export function createWorkflowControlService(deps: WorkflowControlServiceDeps): 
         const normalized = renderWorkflowProgress(candidate);
         await writeAtomic(deps.fs, progressPath(input), normalized);
         return { path: relativeProgressPath(input), content: normalized };
+      }
+
+      if (current.status === "completed" && !candidate.proposal.requestedFlow) {
+        throw workflowError(
+          "WORKFLOW_FLOW_REQUIRED",
+          "Requested Flow is required when starting another flow after completion.",
+          "Select the next flow explicitly before dispatching its first role."
+        );
       }
 
       const baseHistoryHash = historyHash(current.history);
@@ -328,6 +337,15 @@ export function createWorkflowControlService(deps: WorkflowControlServiceDeps): 
         entry.targetRole,
         timestamp
       );
+      const flowRun = await advanceFlowRun(
+        deps.fs,
+        input,
+        state,
+        current,
+        pending.effectiveFlow,
+        Boolean(pending.overrideAuthorizationId),
+        entry.sequence
+      );
       const completed: WorkflowProgressDocument = {
         ...current,
         flow: pending.effectiveFlow,
@@ -345,6 +363,7 @@ export function createWorkflowControlService(deps: WorkflowControlServiceDeps): 
         ...state,
         pendingDispatch: null,
         activeDispatch,
+        flowRun,
         overrideRequests,
         updatedAt: timestamp
       });
@@ -557,17 +576,12 @@ async function getAllowedTransitions(
   state: WorkflowControlState,
   current: WorkflowProgressDocument
 ): Promise<string[]> {
-  if (current.status === "completed") return [];
+  if (current.status === "completed") return initialTransitions();
   if (!current.flow || current.history.length === 0) {
-    return [
-      "code-change/architect",
-      "architect-debug/architect",
-      "architecture-diagnosis/architect",
-      "docs-only/architect",
-      "validation-only/tester"
-    ];
+    return initialTransitions();
   }
   const flow = current.flow;
+  const flowRun = resolveFlowRun(state.flowRun, current);
   if (flow === "docs-only") {
     const docs = await artifactState(fs, input, "docs-sync-report.md", "docs-sync-report");
     return evidenceIsFresh(state, flow, "architect", "docs-sync-report.md", docs.hash)
@@ -587,20 +601,54 @@ async function getAllowedTransitions(
     if (!gatePassedForDispatch(state, flow, "tester", "validation-adequacy", validationGate)) return [];
     return [];
   }
-  const segment = current.history.slice(findLastIndex(current.history, (entry) => entry.flow !== flow) + 1);
-  if (flow === "code-change") return allowedCodeChange(fs, input, state, current.history);
-  if (flow === "architect-debug") return allowedArchitectFix(fs, input, state, current, segment, "architect-debug");
-  return allowedArchitectFix(fs, input, state, current, segment, "architecture-diagnosis");
+  const segment = activeFlowSegment(current.history, flow, flowRun.startedAtSequence);
+  if (flow === "code-change") {
+    return allowedCodeChange(fs, input, state, segment, flowRun.resumedFromBranch !== undefined);
+  }
+  if (flow === "architect-debug") {
+    return allowedArchitectFix(
+      fs,
+      input,
+      state,
+      segment,
+      "architect-debug",
+      flowRun.resumedFromBranch !== undefined,
+      flowRun.activeBranch ? flowRun.rootFlow : undefined
+    );
+  }
+  return allowedArchitectFix(
+    fs,
+    input,
+    state,
+    segment,
+    "architecture-diagnosis",
+    false,
+    flowRun.activeBranch ? flowRun.rootFlow : undefined
+  );
+}
+
+function initialTransitions(): string[] {
+  return [
+    "code-change/architect",
+    "architect-debug/architect",
+    "architecture-diagnosis/architect",
+    "docs-only/architect",
+    "validation-only/tester"
+  ];
 }
 
 async function allowedCodeChange(
   fs: FileSystemAdapter,
   input: WorkflowControlContext,
   state: WorkflowControlState,
-  segment: WorkflowDispatchHistoryEntry[]
+  segment: WorkflowDispatchHistoryEntry[],
+  resumedFromBranch: boolean
 ): Promise<string[]> {
   const coderIndex = findLastIndex(segment, (entry) => entry.targetRole === "coder");
   const testerIndex = findLastIndex(segment, (entry) => entry.targetRole === "tester");
+  if (resumedFromBranch && coderIndex < 0 && testerIndex < 0) {
+    return allowedPostImplementationArchitect(fs, input, state, "code-change", segment);
+  }
   if (coderIndex < 0) {
     const plan = await artifactState(fs, input, "architecture-plan.md", "architecture-plan");
     if (!evidenceIsFresh(state, "code-change", "architect", "architecture-plan.md", plan.hash)
@@ -623,21 +671,7 @@ async function allowedCodeChange(
   }
   const architectsAfterTester = segment.filter((entry, index) => index > testerIndex && entry.targetRole === "architect");
   if (architectsAfterTester.length > 0) {
-    const docs = await artifactState(fs, input, "docs-sync-report.md", "docs-sync-report");
-    const acceptance = await artifactState(fs, input, "final-acceptance.md", "final-acceptance");
-    if (architectsAfterTester.length > 1 && acceptance.value === "needs-architect-follow-up") {
-      return allowedArchitectureFollowup(fs, input, state, architectsAfterTester[1]?.confirmedAt);
-    }
-    if (evidenceIsFresh(state, "code-change", "architect", "docs-sync-report.md", docs.hash)
-      && (docs.value === "synced" || docs.value === "unchanged")) {
-      if (acceptance.value === "needs-coder-follow-up") return ["code-change/coder"];
-      if (acceptance.value === "needs-docs-sync") return ["code-change/architect"];
-      if (acceptance.value === "needs-architect-follow-up") {
-        return ["code-change/architect"];
-      }
-      return [];
-    }
-    return ["code-change/architect"];
+    return allowedPostImplementationArchitect(fs, input, state, "code-change", architectsAfterTester);
   }
   return allowedAfterTester(fs, input, state, "coder", {
     testerFailureFlow: "architect-debug",
@@ -669,12 +703,16 @@ async function allowedArchitectFix(
   fs: FileSystemAdapter,
   input: WorkflowControlContext,
   state: WorkflowControlState,
-  current: WorkflowProgressDocument,
   segment: WorkflowDispatchHistoryEntry[],
-  source: "architect-debug" | "architecture-diagnosis"
+  source: "architect-debug" | "architecture-diagnosis",
+  resumedFromBranch: boolean,
+  parentFlow: WorkflowFlow | undefined
 ): Promise<string[]> {
   const architectIndex = findLastIndex(segment, (entry) => entry.targetRole === "architect");
   const testerIndex = findLastIndex(segment, (entry) => entry.targetRole === "tester");
+  if (resumedFromBranch && architectIndex >= 0 && testerIndex < 0) {
+    return allowedPostImplementationArchitect(fs, input, state, source, segment);
+  }
   if (architectIndex < 0) return [`${source}/architect`];
   if (testerIndex < 0) {
     const artifact = source === "architect-debug"
@@ -703,12 +741,33 @@ async function allowedArchitectFix(
       ? []
       : [`${source}/architect`];
   }
-  const parentCodeChange = current.history.slice(0, -segment.length).some((entry) => entry.flow === "code-change");
   return allowedAfterTester(fs, input, state, source, {
     testerFailureFlow: source === "architect-debug" ? "architecture-diagnosis" : undefined,
     implementationFailureFlow: source,
-    successTarget: parentCodeChange ? "code-change/architect" : `${source}/architect`
+    successTarget: parentFlow ? `${parentFlow}/architect` : `${source}/architect`
   });
+}
+
+async function allowedPostImplementationArchitect(
+  fs: FileSystemAdapter,
+  input: WorkflowControlContext,
+  state: WorkflowControlState,
+  flow: "code-change" | "architect-debug" | "architecture-diagnosis",
+  architectEntries: WorkflowDispatchHistoryEntry[]
+): Promise<string[]> {
+  const docs = await artifactState(fs, input, "docs-sync-report.md", "docs-sync-report");
+  const acceptance = await artifactState(fs, input, "final-acceptance.md", "final-acceptance");
+  if (flow === "code-change" && architectEntries.length > 1 && acceptance.value === "needs-architect-follow-up") {
+    return allowedArchitectureFollowup(fs, input, state, architectEntries[1]?.confirmedAt);
+  }
+  if (evidenceIsFresh(state, flow, "architect", "docs-sync-report.md", docs.hash)
+    && (docs.value === "synced" || docs.value === "unchanged")) {
+    if (acceptance.value === "needs-coder-follow-up" && flow === "code-change") return ["code-change/coder"];
+    if (acceptance.value === "needs-docs-sync") return [`${flow}/architect`];
+    if (acceptance.value === "needs-architect-follow-up") return [`${flow}/architect`];
+    return [];
+  }
+  return [`${flow}/architect`];
 }
 
 async function allowedAfterTester(
@@ -826,6 +885,126 @@ async function captureEvidenceBaseline(
   };
 }
 
+async function advanceFlowRun(
+  fs: FileSystemAdapter,
+  input: WorkflowControlContext,
+  state: WorkflowControlState,
+  current: WorkflowProgressDocument,
+  effectiveFlow: WorkflowFlow,
+  usedOverride: boolean,
+  nextSequence: number
+): Promise<WorkflowFlowRun> {
+  if (!current.flow || current.status === "completed" || (usedOverride && effectiveFlow !== current.flow)) {
+    return newFlowRun(effectiveFlow, nextSequence);
+  }
+  const run = resolveFlowRun(state.flowRun, current);
+  if (effectiveFlow === current.flow) return run;
+
+  if (current.flow === "code-change" && effectiveFlow === "architect-debug" && run.rootFlow === "code-change") {
+    return { ...run, activeBranch: "architect-debug", resumedFromBranch: undefined };
+  }
+  if (current.flow === "architect-debug" && effectiveFlow === "architecture-diagnosis") {
+    if (run.rootFlow === "code-change" && run.activeBranch === "architect-debug") {
+      return { ...run, activeBranch: "architecture-diagnosis", resumedFromBranch: undefined };
+    }
+    if (run.rootFlow === "architect-debug" && !run.activeBranch) {
+      return { ...run, activeBranch: "architecture-diagnosis", resumedFromBranch: undefined };
+    }
+  }
+  if (run.activeBranch === current.flow && effectiveFlow === run.rootFlow) {
+    if (current.flow === "architect-debug" && effectiveFlow === "code-change") {
+      const debug = await artifactState(fs, input, "architect-debug.md", "architect-debug");
+      if (debug.disposition === "normal architecture plan required") {
+        return newFlowRun("code-change", nextSequence);
+      }
+    }
+    return {
+      ...run,
+      activeBranch: undefined,
+      resumedFromBranch: current.flow
+    };
+  }
+  return newFlowRun(effectiveFlow, nextSequence);
+}
+
+function newFlowRun(flow: WorkflowFlow, startedAtSequence: number): WorkflowFlowRun {
+  return { rootFlow: flow, startedAtSequence };
+}
+
+function resolveFlowRun(
+  recorded: WorkflowFlowRun | null,
+  current: WorkflowProgressDocument
+): WorkflowFlowRun {
+  if (recorded && current.flow
+    && (recorded.rootFlow === current.flow || recorded.activeBranch === current.flow)) {
+    return recorded;
+  }
+  if (!current.flow || current.history.length === 0) {
+    return newFlowRun(current.flow ?? "code-change", 1);
+  }
+  const segments = flowHistorySegments(current.history);
+  const last = segments.at(-1)!;
+  const previous = segments.at(-2);
+  const grandparent = segments.at(-3);
+  if (last.flow === "architect-debug" && previous?.flow === "code-change") {
+    return {
+      rootFlow: "code-change",
+      activeBranch: "architect-debug",
+      startedAtSequence: previous.startedAtSequence
+    };
+  }
+  if (last.flow === "architecture-diagnosis" && previous?.flow === "architect-debug") {
+    return {
+      rootFlow: grandparent?.flow === "code-change" ? "code-change" : "architect-debug",
+      activeBranch: "architecture-diagnosis",
+      startedAtSequence: grandparent?.flow === "code-change"
+        ? grandparent.startedAtSequence
+        : previous.startedAtSequence
+    };
+  }
+  if (last.flow === "architecture-diagnosis" && previous?.flow === "code-change") {
+    return {
+      rootFlow: "code-change",
+      activeBranch: "architecture-diagnosis",
+      startedAtSequence: previous.startedAtSequence
+    };
+  }
+  if (last.flow === "code-change" && previous
+    && (previous.flow === "architect-debug" || previous.flow === "architecture-diagnosis")
+    && grandparent?.flow === "code-change") {
+    return {
+      rootFlow: "code-change",
+      resumedFromBranch: previous.flow,
+      startedAtSequence: grandparent.startedAtSequence
+    };
+  }
+  return newFlowRun(last.flow, last.startedAtSequence);
+}
+
+function flowHistorySegments(history: WorkflowDispatchHistoryEntry[]): Array<{
+  flow: WorkflowFlow;
+  startedAtSequence: number;
+}> {
+  const segments: Array<{ flow: WorkflowFlow; startedAtSequence: number }> = [];
+  for (const entry of history) {
+    if (segments.at(-1)?.flow !== entry.flow) {
+      segments.push({ flow: entry.flow, startedAtSequence: entry.sequence });
+    }
+  }
+  return segments;
+}
+
+function activeFlowSegment(
+  history: WorkflowDispatchHistoryEntry[],
+  flow: WorkflowFlow,
+  startedAtSequence: number
+): WorkflowDispatchHistoryEntry[] {
+  const runStart = history.findIndex((entry) => entry.sequence >= startedAtSequence);
+  const lastDifferent = findLastIndex(history, (entry) => entry.flow !== flow);
+  const start = Math.max(runStart < 0 ? 0 : runStart, lastDifferent + 1);
+  return history.slice(start);
+}
+
 function evidenceIsFresh(
   state: WorkflowControlState,
   flow: WorkflowFlow,
@@ -923,9 +1102,17 @@ async function validateCompletion(
   if (!candidate.flow || candidate.history.length === 0) {
     throw workflowError("WORKFLOW_COMPLETION_INVALID", "An unstarted workflow cannot be completed.");
   }
+  const flowRun = resolveFlowRun(state.flowRun, candidate);
+  if (flowRun.activeBranch === candidate.flow) {
+    throw workflowError(
+      "WORKFLOW_COMPLETION_INVALID",
+      `${candidate.flow} is an active branch and must return to ${flowRun.rootFlow} before completion.`
+    );
+  }
   if (candidate.flow === "code-change" || candidate.flow === "architect-debug") {
     const acceptance = await artifactState(fs, input, "final-acceptance.md", "final-acceptance");
-    if (acceptance.value !== "accepted" && acceptance.value !== "accepted-with-known-risks") {
+    if (!evidenceProducedAfterActiveDispatch(state, candidate.flow, "architect", "final-acceptance.md", acceptance.hash)
+      || (acceptance.value !== "accepted" && acceptance.value !== "accepted-with-known-risks")) {
       throw workflowError("WORKFLOW_COMPLETION_INVALID", "Final Acceptance is not accepted for this complete delivery flow.");
     }
     return;
@@ -933,16 +1120,23 @@ async function validateCompletion(
   if (candidate.flow === "architecture-diagnosis") {
     const diagnosis = await artifactState(fs, input, "architecture-diagnosis.md", "architecture-diagnosis");
     if (diagnosis.disposition === "analysis completed"
-      && evidenceIsFresh(state, candidate.flow, "architect", "architecture-diagnosis.md", diagnosis.hash)) return;
+      && evidenceProducedAfterActiveDispatch(
+        state,
+        candidate.flow,
+        "architect",
+        "architecture-diagnosis.md",
+        diagnosis.hash
+      )) return;
     const acceptance = await artifactState(fs, input, "final-acceptance.md", "final-acceptance");
-    if (acceptance.value !== "accepted" && acceptance.value !== "accepted-with-known-risks") {
+    if (!evidenceProducedAfterActiveDispatch(state, candidate.flow, "architect", "final-acceptance.md", acceptance.hash)
+      || (acceptance.value !== "accepted" && acceptance.value !== "accepted-with-known-risks")) {
       throw workflowError("WORKFLOW_COMPLETION_INVALID", "Implemented Architecture Diagnosis requires accepted Final Acceptance evidence.");
     }
     return;
   }
   if (candidate.flow === "docs-only") {
     const docs = await artifactState(fs, input, "docs-sync-report.md", "docs-sync-report");
-    if (!evidenceIsFresh(state, candidate.flow, "architect", "docs-sync-report.md", docs.hash)
+    if (!evidenceProducedAfterActiveDispatch(state, candidate.flow, "architect", "docs-sync-report.md", docs.hash)
       || !docs.complete || (docs.value !== "synced" && docs.value !== "unchanged")) {
       throw workflowError("WORKFLOW_COMPLETION_INVALID", "Docs-only completion requires a complete Docs Sync Report with Decision: synced or Decision: unchanged.");
     }
@@ -951,12 +1145,23 @@ async function validateCompletion(
   if (candidate.flow === "validation-only") {
     const test = await artifactState(fs, input, "test-report.md", "test-report");
     const gate = await gateState(fs, input, "validation-adequacy");
-    if (!evidenceIsFresh(state, candidate.flow, "tester", "test-report.md", test.hash)
+    if (!evidenceProducedAfterActiveDispatch(state, candidate.flow, "tester", "test-report.md", test.hash)
       || (test.value !== "pass" && test.value !== "fail")
       || !gatePassedForDispatch(state, candidate.flow, "tester", "validation-adequacy", gate)) {
       throw workflowError("WORKFLOW_COMPLETION_INVALID", "Validation-only completion requires a terminal Test Report and a passed Validation Adequacy Gate.");
     }
   }
+}
+
+function evidenceProducedAfterActiveDispatch(
+  state: WorkflowControlState,
+  flow: WorkflowFlow,
+  targetRole: DispatchableRole,
+  artifact: WorkflowEvidenceArtifact,
+  currentHash: string
+): boolean {
+  const baseline = matchingEvidenceBaseline(state, flow, targetRole);
+  return Boolean(baseline && baseline.artifactHashes[artifact] !== currentHash);
 }
 
 function validateCandidateAgainstCurrent(current: WorkflowProgressDocument, candidate: WorkflowProgressDocument): void {
@@ -1089,8 +1294,11 @@ function normalizeState(value: unknown, taskSlug: string, timestamp: string): Wo
     : undefined;
   const activeDispatch = value.activeDispatch === undefined || value.activeDispatch === null
     ? null
-    : isDispatchEvidenceBaseline(value.activeDispatch) ? value.activeDispatch : undefined;
-  if (pendingDispatch === undefined || activeDispatch === undefined || overrideRequests === undefined) {
+    : normalizeDispatchEvidenceBaseline(value.activeDispatch);
+  const flowRun = value.flowRun === undefined || value.flowRun === null
+    ? null
+    : isFlowRun(value.flowRun) ? value.flowRun : undefined;
+  if (pendingDispatch === undefined || activeDispatch === undefined || flowRun === undefined || overrideRequests === undefined) {
     return { ...emptyState(taskSlug, timestamp), warnings: ["Workflow control state has an unsupported shape."] };
   }
   return {
@@ -1098,6 +1306,7 @@ function normalizeState(value: unknown, taskSlug: string, timestamp: string): Wo
     taskSlug,
     pendingDispatch,
     activeDispatch,
+    flowRun,
     overrideRequests,
     warnings: [],
     updatedAt: typeof value.updatedAt === "string" ? value.updatedAt : timestamp
@@ -1110,6 +1319,7 @@ function emptyState(taskSlug: string, timestamp: string): WorkflowControlState {
     taskSlug,
     pendingDispatch: null,
     activeDispatch: null,
+    flowRun: null,
     overrideRequests: [],
     warnings: [],
     updatedAt: timestamp
@@ -1231,16 +1441,43 @@ function isOverrideRequest(value: unknown): value is WorkflowOverrideRequest {
     && (value.consumedAt === undefined || typeof value.consumedAt === "string");
 }
 
-function isDispatchEvidenceBaseline(value: unknown): value is WorkflowDispatchEvidenceBaseline {
-  if (!isRecord(value) || !isRecord(value.artifactHashes) || !isRecord(value.gateFingerprints)) return false;
+function normalizeDispatchEvidenceBaseline(value: unknown): WorkflowDispatchEvidenceBaseline | undefined {
+  if (!isRecord(value) || !isRecord(value.artifactHashes) || !isRecord(value.gateFingerprints)) return undefined;
   const artifactHashes = value.artifactHashes;
   const gateFingerprints = value.gateFingerprints;
-  return Number.isInteger(value.sequence)
+  if (!(Number.isInteger(value.sequence)
     && Boolean(asFlow(typeof value.flow === "string" ? value.flow : undefined))
     && Boolean(asTargetRole(typeof value.targetRole === "string" ? value.targetRole : undefined))
-    && WORKFLOW_EVIDENCE_ARTIFACTS.every((artifact) => typeof artifactHashes[artifact] === "string")
     && WORKFLOW_EVIDENCE_GATES.every((gate) => typeof gateFingerprints[gate] === "string")
-    && typeof value.confirmedAt === "string";
+    && typeof value.confirmedAt === "string")) return undefined;
+  return {
+    sequence: Number(value.sequence),
+    flow: value.flow as WorkflowFlow,
+    targetRole: value.targetRole as DispatchableRole,
+    artifactHashes: Object.fromEntries(WORKFLOW_EVIDENCE_ARTIFACTS.map((artifact) => [
+      artifact,
+      typeof artifactHashes[artifact] === "string" ? artifactHashes[artifact] : MISSING_EVIDENCE_HASH
+    ])) as Record<WorkflowEvidenceArtifact, string>,
+    gateFingerprints: Object.fromEntries(WORKFLOW_EVIDENCE_GATES.map((gate) => [
+      gate,
+      gateFingerprints[gate] as string
+    ])) as Record<WorkflowEvidenceGate, string>,
+    confirmedAt: value.confirmedAt as string
+  };
+}
+
+function isFlowRun(value: unknown): value is WorkflowFlowRun {
+  if (!isRecord(value)) return false;
+  const rootFlow = asFlow(typeof value.rootFlow === "string" ? value.rootFlow : undefined);
+  const activeBranch = value.activeBranch;
+  const resumedFromBranch = value.resumedFromBranch;
+  return Boolean(rootFlow)
+    && (activeBranch === undefined || activeBranch === "architect-debug" || activeBranch === "architecture-diagnosis")
+    && (resumedFromBranch === undefined
+      || resumedFromBranch === "architect-debug"
+      || resumedFromBranch === "architecture-diagnosis")
+    && Number.isInteger(value.startedAtSequence)
+    && Number(value.startedAtSequence) >= 1;
 }
 
 function findLastIndex<T>(values: T[], predicate: (value: T) => boolean): number {

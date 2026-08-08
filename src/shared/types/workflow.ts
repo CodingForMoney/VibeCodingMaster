@@ -16,7 +16,8 @@ export const WORKFLOW_EVIDENCE_ARTIFACTS = [
   "test-report.md",
   "architect-debug.md",
   "architecture-diagnosis.md",
-  "docs-sync-report.md"
+  "docs-sync-report.md",
+  "final-acceptance.md"
 ] as const;
 
 export const WORKFLOW_EVIDENCE_GATES = [
@@ -80,6 +81,13 @@ export interface WorkflowDispatchEvidenceBaseline {
   confirmedAt: string;
 }
 
+export interface WorkflowFlowRun {
+  rootFlow: WorkflowFlow;
+  activeBranch?: "architect-debug" | "architecture-diagnosis";
+  resumedFromBranch?: "architect-debug" | "architecture-diagnosis";
+  startedAtSequence: number;
+}
+
 export interface WorkflowOverrideRequest {
   id: string;
   status: "pending" | "approved" | "rejected" | "consumed";
@@ -102,6 +110,7 @@ export interface WorkflowControlState {
   taskSlug: string;
   pendingDispatch: WorkflowPendingDispatch | null;
   activeDispatch: WorkflowDispatchEvidenceBaseline | null;
+  flowRun: WorkflowFlowRun | null;
   overrideRequests: WorkflowOverrideRequest[];
   warnings: string[];
   updatedAt: string;

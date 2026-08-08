@@ -78,6 +78,12 @@ Notes:
   `message-service.test.ts`, `session-service.test.ts`, and
   `task-routes.test.ts`; verify corrupt or unavailable state remains
   non-blocking.
+- Workflow-control changes: run `workflow-control-service.test.ts`,
+  `workflow-control-routes.test.ts`, and `vcm-flow.e2e.test.ts`. Cover initial
+  dispatch, completed-flow restart, same-flow restart, Docs-to-Validation and
+  Validation-to-Code switches, nested Debug/Diagnosis replacement and parent
+  restoration, service restart during a branch, illegal switches, stale
+  evidence rejection, and one-time route authorization.
 - `src/frontend/**` change: L0 + the affected `tests/unit/frontend/**` files; add
   L3 (`npm run e2e`) when changing a core user journey (connect repo, create task,
   start/resume a role session, send a message, translation panel).

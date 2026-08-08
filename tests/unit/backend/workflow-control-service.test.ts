@@ -247,7 +247,7 @@ describe("workflow control service", () => {
     await advance(service, fs, context, "architect", "architecture-diagnosis", "accepted diagnosis task");
     await writeArchitectureDiagnosis(fs, context, "initial diagnosis");
     await advance(service, fs, context, "tester", undefined, "implemented diagnosis");
-    await writeTestReport(fs, context, "fail");
+    await writeTestReport(fs, context, "fail", "none", "code-change validation failure");
     await writeGateIndex(fs, context, { validation: "request_changes" }, "2026-08-06T00:00:10.000Z");
 
     await expect(propose(service, fs, context, "architect", undefined, "repair after Tester failure"))
@@ -295,7 +295,7 @@ describe("workflow control service", () => {
     await advance(service, fs, context, "architect", "architect-debug", "accepted debug task");
     await writeArchitectDebug(fs, context, "debug repair");
     await advance(service, fs, context, "tester", undefined, "validate debug repair");
-    await writeTestReport(fs, context, "fail");
+    await writeTestReport(fs, context, "fail", "none", "debug validation failure");
 
     await advance(service, fs, context, "architect", "architecture-diagnosis", "debug validation failed");
     await writeArchitectureDiagnosis(fs, context, "diagnosis repair");
@@ -308,6 +308,210 @@ describe("workflow control service", () => {
       "architecture-diagnosis/tester"
     ]);
   });
+
+  it("starts a completed flow again as a fresh run and rejects stale artifacts", async () => {
+    const { context, fs } = await createContext(roots);
+    const service = createWorkflowControlService({ fs, now: sequenceClock() });
+
+    await advance(service, fs, context, "architect", "docs-only", "first docs request");
+    await writeDocsSyncReport(fs, context, "synced", "first run");
+    await completeFlow(service, fs, context);
+
+    await expect(propose(service, fs, context, "architect", undefined, "start another docs run"))
+      .rejects.toMatchObject({ code: "WORKFLOW_FLOW_REQUIRED" });
+
+    await advance(service, fs, context, "architect", "docs-only", "second docs request");
+    await expect(completeFlow(service, fs, context)).rejects.toMatchObject({
+      code: "WORKFLOW_COMPLETION_INVALID"
+    });
+
+    await writeDocsSyncReport(fs, context, "unchanged", "second run");
+    await completeFlow(service, fs, context);
+
+    const progress = await readProgress(fs, context);
+    expect(progress.status).toBe("completed");
+    expect(progress.history.map((entry) => `${entry.flow}/${entry.targetRole}`)).toEqual([
+      "docs-only/architect",
+      "docs-only/architect"
+    ]);
+  });
+
+  it("does not reuse a completed Code-Change history when starting another Code-Change flow", async () => {
+    const { context, fs } = await createContext(roots);
+    const service = createWorkflowControlService({ fs, now: sequenceClock() });
+    await enterCodeChangeTester(service, fs, context, "first code-change plan");
+    await writeTestReport(fs, context, "pass");
+    await writeGateIndex(fs, context, {
+      validation: "approve",
+      codeDiff: "approve",
+      codeDiffSource: "coder"
+    }, "2026-08-06T00:00:40.000Z");
+    await advance(service, fs, context, "architect", undefined, "finish first code change");
+    await writeDocsSyncReport(fs, context, "synced", "first code change");
+    await writeFinalAcceptance(fs, context);
+    await completeFlow(service, fs, context);
+
+    await advance(service, fs, context, "architect", "code-change", "second code-change request");
+    await expect(completeFlow(service, fs, context)).rejects.toMatchObject({
+      code: "WORKFLOW_COMPLETION_INVALID"
+    });
+    await writeArchitecturePlan(fs, context, "second code-change plan");
+    await writeGateIndex(fs, context, { architecture: "approve" }, "2026-08-06T00:00:50.000Z");
+    await advance(service, fs, context, "coder", undefined, "second fresh plan and Gate");
+
+    const history = (await readProgress(fs, context)).history;
+    expect(history.at(-1)).toMatchObject({ flow: "code-change", targetRole: "coder" });
+  });
+
+  it("switches Docs-Only to Validation-Only and completes from fresh Tester evidence", async () => {
+    const { context, fs } = await createContext(roots);
+    const service = createWorkflowControlService({ fs, now: sequenceClock() });
+
+    await advance(service, fs, context, "architect", "docs-only", "documentation request");
+    await advance(service, fs, context, "tester", "validation-only", "validation ownership discovered");
+    await writeTestReport(fs, context, "pass");
+    await writeGateIndex(fs, context, { validation: "approve" }, "2026-08-06T00:01:00.000Z");
+    await completeFlow(service, fs, context);
+
+    expect((await readProgress(fs, context))).toMatchObject({
+      flow: "validation-only",
+      status: "completed"
+    });
+  });
+
+  it("switches Validation-Only to a fresh Code-Change plan when production code is required", async () => {
+    const { context, fs } = await createContext(roots);
+    const service = createWorkflowControlService({ fs, now: sequenceClock() });
+
+    await advance(service, fs, context, "tester", "validation-only", "validation request");
+    await writeTestReport(fs, context, "fail", "production-change-required");
+    await advance(service, fs, context, "architect", "code-change", "production change required");
+
+    await expect(propose(service, fs, context, "coder", undefined, "reuse prior flow evidence"))
+      .rejects.toMatchObject({ code: "WORKFLOW_TRANSITION_DENIED" });
+
+    await writeArchitecturePlan(fs, context);
+    await writeGateIndex(fs, context, { architecture: "approve" }, "2026-08-06T00:01:10.000Z");
+    await advance(service, fs, context, "coder", undefined, "fresh plan and architecture Gate");
+
+    expect((await readProgress(fs, context)).history.map((entry) => `${entry.flow}/${entry.targetRole}`)).toEqual([
+      "validation-only/tester",
+      "code-change/architect",
+      "code-change/coder"
+    ]);
+  });
+
+  it("returns a successful Debug Branch to Code-Change docs sync", async () => {
+    const { context, fs } = await createContext(roots);
+    const service = createWorkflowControlService({ fs, now: sequenceClock() });
+    await enterCodeChangeTester(service, fs, context);
+    await writeTestReport(fs, context, "fail", "none", "code-change validation failure");
+
+    await advance(service, fs, context, "architect", "architect-debug", "Tester failed");
+    await writeArchitectDebug(fs, context, "debug repair");
+    await advance(service, fs, context, "tester", undefined, "validate debug repair");
+    await writeTestReport(fs, context, "pass");
+    await writeGateIndex(fs, context, {
+      validation: "approve",
+      codeDiff: "approve",
+      codeDiffSource: "architect-debug"
+    }, "2026-08-06T00:02:00.000Z");
+
+    await expect(completeFlow(service, fs, context)).rejects.toMatchObject({
+      code: "WORKFLOW_COMPLETION_INVALID",
+      message: expect.stringContaining("active branch")
+    });
+
+    await advance(service, fs, context, "architect", "code-change", "resume parent flow");
+    await writeDocsSyncReport(fs, context, "synced", "debug branch result");
+    await writeFinalAcceptance(fs, context);
+    await completeFlow(service, fs, context);
+
+    expect((await readProgress(fs, context)).status).toBe("completed");
+  });
+
+  it("replaces a failed Debug Branch with Diagnosis and returns to Code-Change", async () => {
+    const { context, fs } = await createContext(roots);
+    const service = createWorkflowControlService({ fs, now: sequenceClock() });
+    await enterCodeChangeTester(service, fs, context);
+    await writeTestReport(fs, context, "fail");
+
+    await advance(service, fs, context, "architect", "architect-debug", "Tester failed");
+    await writeArchitectDebug(fs, context, "debug repair");
+    await advance(service, fs, context, "tester", undefined, "validate debug repair");
+    await writeTestReport(fs, context, "fail", "none", "debug validation failure");
+
+    await advance(service, fs, context, "architect", "architecture-diagnosis", "debug repair failed");
+    await writeArchitectureDiagnosis(fs, context, "diagnosis repair");
+    await advance(service, fs, context, "tester", undefined, "validate diagnosis repair");
+    await writeTestReport(fs, context, "pass");
+    await writeGateIndex(fs, context, {
+      validation: "approve",
+      codeDiff: "approve",
+      codeDiffSource: "architect-diagnosis"
+    }, "2026-08-06T00:02:10.000Z");
+
+    const restored = createWorkflowControlService({ fs, now: sequenceClock() });
+    await advance(restored, fs, context, "architect", "code-change", "resume parent flow");
+    await writeDocsSyncReport(fs, context, "synced", "diagnosis branch result");
+    await writeFinalAcceptance(fs, context);
+    await completeFlow(restored, fs, context);
+
+    expect((await readProgress(fs, context)).history.map((entry) => entry.flow)).toEqual([
+      "code-change",
+      "code-change",
+      "code-change",
+      "architect-debug",
+      "architect-debug",
+      "architecture-diagnosis",
+      "architecture-diagnosis",
+      "code-change"
+    ]);
+  });
+
+  it("returns a successful Diagnosis Branch to a standalone Debug Flow", async () => {
+    const { context, fs } = await createContext(roots);
+    const service = createWorkflowControlService({ fs, now: sequenceClock() });
+
+    await advance(service, fs, context, "architect", "architect-debug", "standalone debug request");
+    await writeArchitectDebug(fs, context, "debug repair");
+    await advance(service, fs, context, "tester", undefined, "validate debug repair");
+    await writeTestReport(fs, context, "fail");
+    await advance(service, fs, context, "architect", "architecture-diagnosis", "debug repair failed");
+    await writeArchitectureDiagnosis(fs, context, "diagnosis repair");
+    await advance(service, fs, context, "tester", undefined, "validate diagnosis repair");
+    await writeTestReport(fs, context, "pass");
+    await writeGateIndex(fs, context, {
+      validation: "approve",
+      codeDiff: "approve",
+      codeDiffSource: "architect-diagnosis"
+    }, "2026-08-06T00:02:20.000Z");
+
+    await advance(service, fs, context, "architect", "architect-debug", "resume standalone debug flow");
+    await writeDocsSyncReport(fs, context, "unchanged", "diagnosis branch result");
+    await writeFinalAcceptance(fs, context);
+    await completeFlow(service, fs, context);
+
+    expect((await readProgress(fs, context))).toMatchObject({ flow: "architect-debug", status: "completed" });
+  });
+
+  it.each([
+    ["code-change", "architect", "docs-only", "architect"],
+    ["code-change", "architect", "validation-only", "tester"],
+    ["architect-debug", "architect", "docs-only", "architect"],
+    ["architecture-diagnosis", "architect", "validation-only", "tester"],
+    ["validation-only", "tester", "docs-only", "architect"]
+  ] as const)(
+    "rejects an unlisted active-flow switch from %s to %s",
+    async (sourceFlow, sourceRole, requestedFlow, targetRole) => {
+      const { context, fs } = await createContext(roots);
+      const service = createWorkflowControlService({ fs, now: sequenceClock() });
+      await advance(service, fs, context, sourceRole, sourceFlow, "accepted source flow");
+
+      await expect(propose(service, fs, context, targetRole, requestedFlow, "unlisted flow switch"))
+        .rejects.toMatchObject({ code: "WORKFLOW_TRANSITION_DENIED" });
+    }
+  );
 
   it("distinguishes post-Gate Diagnosis docs sync from another implementation repair", async () => {
     const { context, fs } = await createContext(roots);
@@ -611,13 +815,76 @@ async function writeArchitectDebug(
 async function writeTestReport(
   fs: FileSystemAdapter,
   context: WorkflowControlContext,
-  result: "pass" | "fail"
+  result: "pass" | "fail",
+  infrastructure: "none" | "repair-required" | "repaired" | "production-change-required" = "none",
+  evidence = `${result} validation evidence`
 ): Promise<void> {
   await writeFinalArtifact(fs, context, "test-report.md", renderTestReportTemplate(context.taskSlug), [
     ["Test Result: pass|fail|incomplete", `Test Result: ${result}`],
     ["L3 Required: yes|no", "L3 Required: no"],
-    ["Status: none|repair-required|repaired|production-change-required", "Status: none"]
+    ["Status: none|repair-required|repaired|production-change-required", `Status: ${infrastructure}`],
+    ["## Evidence Reviewed\n\nTBD", `## Evidence Reviewed\n\n${evidence}`]
   ]);
+}
+
+async function writeArchitecturePlan(
+  fs: FileSystemAdapter,
+  context: WorkflowControlContext,
+  scope = "accepted implementation scope"
+): Promise<void> {
+  await writeFinalArtifact(fs, context, "architecture-plan.md", renderArchitecturePlanTemplate(context.taskSlug), [
+    ["Planning Result: complete|incomplete|user clarification required", "Planning Result: complete"],
+    ["## Accepted Scope\n\nTBD", `## Accepted Scope\n\n${scope}`]
+  ]);
+}
+
+async function writeDocsSyncReport(
+  fs: FileSystemAdapter,
+  context: WorkflowControlContext,
+  decision: "synced" | "unchanged",
+  evidence: string
+): Promise<void> {
+  await writeFinalArtifact(fs, context, "docs-sync-report.md", renderDocsSyncReportTemplate(context.taskSlug), [
+    ["synced|unchanged|blocked", decision],
+    ["## Evidence Reviewed\n\nTBD", `## Evidence Reviewed\n\n${evidence}`]
+  ]);
+}
+
+async function writeFinalAcceptance(fs: FileSystemAdapter, context: WorkflowControlContext): Promise<void> {
+  await writeFinalArtifact(fs, context, "final-acceptance.md", renderFinalAcceptanceTemplate(context.taskSlug), [[
+    "accepted|accepted-with-known-risks|needs-coder-follow-up|needs-architect-follow-up|needs-docs-sync|blocked-by-user-decision",
+    "accepted"
+  ]]);
+}
+
+async function completeFlow(
+  service: WorkflowControlService,
+  fs: FileSystemAdapter,
+  context: WorkflowControlContext
+): Promise<void> {
+  const current = await readProgress(fs, context);
+  await service.submitProgress(context, renderWorkflowProgress({
+    ...current,
+    revision: current.revision + 1,
+    status: "completed",
+    proposal: undefined
+  }));
+}
+
+async function enterCodeChangeTester(
+  service: WorkflowControlService,
+  fs: FileSystemAdapter,
+  context: WorkflowControlContext,
+  scope = "accepted implementation scope"
+): Promise<void> {
+  await advance(service, fs, context, "architect", "code-change", "accepted code change");
+  await writeArchitecturePlan(fs, context, scope);
+  await writeGateIndex(fs, context, { architecture: "approve" }, "2026-08-06T00:00:30.000Z");
+  await advance(service, fs, context, "coder", undefined, "approved architecture plan");
+  await writeFinalArtifact(fs, context, "coder-completion.md", renderCoderCompletionTemplate(context.taskSlug), [
+    ["Decision: ready_for_review|incomplete|failed", "Decision: ready_for_review"]
+  ]);
+  await advance(service, fs, context, "tester", undefined, "completed Coder implementation");
 }
 
 async function readProgress(fs: FileSystemAdapter, context: WorkflowControlContext): Promise<WorkflowProgressDocument> {

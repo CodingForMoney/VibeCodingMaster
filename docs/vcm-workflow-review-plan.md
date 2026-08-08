@@ -145,7 +145,9 @@ and a Gate result newer than that follow-up dispatch before Coder is legal.
 Architect Debug may replace itself with Architecture Diagnosis after its first
 Tester failure. A successful Debug or Diagnosis Branch returns by requesting
 `Flow: code-change` with the next Code-Change target. The complete history
-preserves the parent flow; no separate branch cursor is stored.
+preserves every dispatch, while task runtime state records the current root
+flow, active branch, branch return, and flow-run start sequence. This prevents
+earlier completed flows from being mistaken for the active parent flow.
 
 ### Architect Debug
 
@@ -201,6 +203,11 @@ revision with `Status: completed` and every proposal and override field set to
 - Validation Only requires a terminal Test Report and resolved Validation
   Adequacy Gate.
 
+Another flow may start after completion, but its first dispatch must name an
+explicit `Requested Flow`. VCM starts a fresh flow run and does not reuse role
+position or unchanged evidence from the completed flow, including when the new
+flow has the same name.
+
 ## Recovery
 
 Workflow Progress is the append-only durable task record. Pending dispatches
@@ -222,6 +229,8 @@ Unit and backend E2E coverage verifies:
 
 - strict parsing, append-only history, revision checks, and stale-state rejection
 - legal and illegal flow transitions
+- completed-flow restarts, same-flow restarts, top-level switches, nested Debug
+  and Diagnosis branches, and parent-flow restoration
 - one-time exact user override binding
 - route denial without approval and target mismatch rejection
 - claim before terminal submission, release on failure, and confirmation only
