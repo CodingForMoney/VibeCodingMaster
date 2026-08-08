@@ -15,6 +15,7 @@ describe("task routes", () => {
 
     registerTaskRoutes(app, {
       architectRestartService: notUsedArchitectRestartService(),
+      roleStallDetector: notUsedRoleStallDetector(),
       taskLaunchService: notUsedTaskLaunchService(),
       projectService: {
         async getCurrentProject() {
@@ -106,6 +107,7 @@ describe("task routes", () => {
 
     registerTaskRoutes(app, {
       architectRestartService: notUsedArchitectRestartService(),
+      roleStallDetector: notUsedRoleStallDetector(),
       taskLaunchService: notUsedTaskLaunchService(),
       projectService: {
         async getCurrentProject() {
@@ -181,6 +183,7 @@ describe("task routes", () => {
 
     registerTaskRoutes(app, {
       architectRestartService: notUsedArchitectRestartService(),
+      roleStallDetector: notUsedRoleStallDetector(),
       taskLaunchService: {
         async startTaskRoleSessions(repoRoot: string, input: { taskSlug: string; requireFreshStart: boolean }) {
           calls.push({ repoRoot, ...input });
@@ -235,6 +238,7 @@ describe("task routes", () => {
           };
         }
       },
+      roleStallDetector: notUsedRoleStallDetector(),
       taskLaunchService: notUsedTaskLaunchService(),
       projectService: {
         async getCurrentProject() {
@@ -400,6 +404,20 @@ function notUsedArchitectRestartService() {
   return {
     getState() {
       return null;
+    }
+  };
+}
+
+function notUsedRoleStallDetector() {
+  return {
+    getWarning() {
+      return null;
+    },
+    ignoreWarning() {
+      throw new Error("not used");
+    },
+    async recoverWarning() {
+      throw new Error("not used");
     }
   };
 }

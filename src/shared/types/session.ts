@@ -2,26 +2,6 @@ import type { RoleName, RoleStatus } from "./role.js";
 
 export type RoleActivityStatus = "idle" | "running";
 
-export type ArchitectLspStallStatus = "stalled" | "recovering" | "failed";
-
-export interface ArchitectLspStallState {
-  status: ArchitectLspStallStatus;
-  roundId: string;
-  toolUseId: string;
-  operation?: string;
-  startedAt: string;
-  detectedAt: string;
-  recoveryAttempt: number;
-  error?: string;
-}
-
-export interface ArchitectLspRecoveryRecord {
-  roundId: string;
-  toolUseId: string;
-  operation?: string;
-  recoveredAt: string;
-}
-
 export type ClaudePermissionMode =
   | "default"
   | "plan"
@@ -212,9 +192,7 @@ export interface RoleSessionRecord {
   harnessCurrentRevision?: number;
   harnessOutdated?: boolean;
   lastHarnessNotifyAt?: string;
-  architectLspStall?: ArchitectLspStallState;
-  lastArchitectLspRecovery?: ArchitectLspRecoveryRecord;
-  expectedRuntimeExitReason?: "architect-lsp-recovery";
+  expectedRuntimeExitReason?: "role-stall-recovery";
   exitCode?: number | null;
 }
 

@@ -1,7 +1,15 @@
 import type { RoleName } from "./role.js";
 
 export type ClaudeTurnHookEventName = "UserPromptSubmit" | "Stop" | "StopFailure";
-export type ClaudeHookEventName = ClaudeTurnHookEventName | "PostCompact";
+export type ClaudeProgressHookEventName =
+  | "PreToolUse"
+  | "PostToolUse"
+  | "PostToolUseFailure"
+  | "PostToolBatch"
+  | "SubagentStart"
+  | "SubagentStop"
+  | "PreCompact";
+export type ClaudeHookEventName = ClaudeTurnHookEventName | ClaudeProgressHookEventName | "PostCompact" | "PermissionRequest";
 
 export interface ClaudeHookPayload {
   hook_event_name?: string;

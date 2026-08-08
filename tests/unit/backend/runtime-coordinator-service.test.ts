@@ -339,9 +339,9 @@ function createCoordinator(input: {
         };
       }
     },
-    architectLspWatchdog: {
+    roleStallDetector: {
       async reconcileTask(request) {
-        input.calls.push(`architect-lsp-watchdog:${request.taskSlug}`);
+        input.calls.push(`role-stall-detector:${request.taskSlug}`);
       },
       clearProject() {},
       stop() {}

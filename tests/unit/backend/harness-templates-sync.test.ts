@@ -310,8 +310,24 @@ describe("harness templates stay in sync with the script installer", () => {
     expect(settings.autoMemoryEnabled).toBe(false);
     const bashHook = settings.hooks.PreToolUse.find((entry) => entry.matcher === "Bash");
     const grepHook = settings.hooks.PreToolUse.find((entry) => entry.matcher === "Grep");
+    const progressHook = settings.hooks.PreToolUse.find((entry) => !entry.matcher);
     const command = bashHook?.hooks[0]?.command;
     expect(grepHook).toBeUndefined();
+    expect(progressHook?.hooks[0]?.command).toContain("/api/hooks/claude-code");
+    expect(Object.keys(settings.hooks)).toEqual(expect.arrayContaining([
+      "UserPromptSubmit",
+      "PreToolUse",
+      "PostToolUse",
+      "PostToolUseFailure",
+      "PostToolBatch",
+      "SubagentStart",
+      "SubagentStop",
+      "PreCompact",
+      "PostCompact",
+      "Stop",
+      "StopFailure",
+      "PermissionRequest"
+    ]));
     expect(command).toContain("git rev-parse --show-toplevel");
     expect(command).toContain("[ -n \"$guard\" ] || exit 0");
 

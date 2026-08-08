@@ -1,8 +1,10 @@
 import type {
   ClaudeHookEventName,
+  ClaudeProgressHookEventName,
   ClaudeHookRequest,
   ClaudeHookResult,
-  ClaudePermissionRequestHookResult
+  ClaudePermissionRequestHookResult,
+  ClaudeTurnHookEventName
 } from "../../shared/types/claude-hook.js";
 import { isHarnessEngineerToolRoleName, isReviewerRoleName, isTranslatorToolRoleName, isVcmRoleName } from "../../shared/constants.js";
 import { VcmError } from "../errors.js";
@@ -18,13 +20,14 @@ import type { JobGuardService } from "./job-guard-service.js";
 import type { MessageService } from "./message-service.js";
 import type { ProjectService } from "./project-service.js";
 import type { RoundService } from "./round-service.js";
-import type { RoleName } from "../../shared/types/role.js";
+import type { RoleName, VcmRoleName } from "../../shared/types/role.js";
 import type { RoleSessionRecord } from "../../shared/types/session.js";
 import { matchesRoleHookSession, type SessionService } from "./session-service.js";
 import { getTaskRuntimeRepoRoot, type TaskService } from "./task-service.js";
 import type { TranslationService } from "./translation-service.js";
 import type { TranslationWorkerService } from "./translation-worker-service.js";
 import type { ArchitectRestartService } from "./architect-restart-service.js";
+import type { RoleStallDetectorService } from "./role-stall-detector-service.js";
 
 const MAX_ROLE_RETRY_ATTEMPTS = 20;
 const ROLE_RETRY_BASE_DELAY_MS = 60_000;
@@ -47,6 +50,7 @@ const NON_RETRYABLE_CONTEXT_FAILURE_PATTERNS = [
 const DIAGNOSTIC_SNIPPET_MAX_LENGTH = 2000;
 type StopFailureRetryTimer = ReturnType<typeof setTimeout>;
 type StopFailureRetryResult = "scheduled" | "manual-interrupt" | "not-scheduled";
+type ClaudeBusinessHookEventName = ClaudeTurnHookEventName | "PostCompact";
 
 interface StopFailureDiagnostic {
   error: string;
@@ -86,6 +90,7 @@ export interface ClaudeHookServiceDeps {
     ArchitectRestartService,
     "recordArchitectStop" | "recordRouteAccepted"
   >;
+  roleStallDetector?: Pick<RoleStallDetectorService, "recordHook">;
 }
 
 export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHookService {
@@ -151,7 +156,7 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
   }
 
   async function processTranslatorHook(input: ClaudeHookRequest): Promise<ClaudeHookResult> {
-    const eventName = parseHookEvent(input.event.hook_event_name);
+    const eventName = parseBusinessHookEvent(input.event.hook_event_name);
     const context = await getTranslatorHookContext();
     const session = input.taskSlug === "__project__"
       ? await deps.sessionService.recordProjectTranslatorHookEvent(context.project.repoRoot, {
@@ -186,7 +191,7 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
   }
 
   async function processHarnessEngineerHook(input: ClaudeHookRequest): Promise<ClaudeHookResult> {
-    const eventName = parseHookEvent(input.event.hook_event_name);
+    const eventName = parseBusinessHookEvent(input.event.hook_event_name);
     const context = await getProjectToolHookContext("Harness Engineer");
     const projectScoped = input.taskSlug === "__project_harness_engineer__";
     const session = projectScoped
@@ -329,6 +334,12 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
         role: input.role,
         eventName
       });
+      await deps.roleStallDetector?.recordHook({
+        ...createStallContext(context),
+        role: input.role as VcmRoleName,
+        eventName,
+        event: input.event
+      });
     }
     if (session) {
       await deps.translationService.recordConversationBoundary({
@@ -411,6 +422,13 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
       }
     }
 
+    await deps.roleStallDetector?.recordHook({
+      ...createStallContext(context),
+      role: input.role as VcmRoleName,
+      eventName,
+      event: input.event
+    });
+
     return recordTurnEnd(input, context, eventName, {
       dispatchRouteFiles: !isReviewerRoleName(input.role),
       notifyGateway: true,
@@ -462,6 +480,12 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
     if (memoryResult) {
       return memoryResult;
     }
+    await deps.roleStallDetector?.recordHook({
+      ...createStallContext(context),
+      role: input.role as VcmRoleName,
+      eventName,
+      event: input.event
+    });
     const routeDispatchInput = createRouteDispatchInput(input, context);
     const pending = await deps.messageService.listPendingRouteFiles(routeDispatchInput);
     const hasCompletionEvidence = pending.some((routeFile) => routeFile.fromRole === input.role);
@@ -541,6 +565,14 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
       runtimeSessionId: stringOrUndefined(input.event.vcm_runtime_session_id),
       runtimeSessionToken: input.runtimeSessionToken
     });
+    if (session) {
+      await deps.roleStallDetector?.recordHook({
+        ...createStallContext(context),
+        role: input.role as VcmRoleName,
+        eventName,
+        event: input.event
+      });
+    }
 
     return {
       ok: true,
@@ -661,7 +693,7 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
   async function processAutoMemoryRoleHook(
     input: ClaudeHookRequest,
     context: Awaited<ReturnType<typeof getHookContext>>,
-    eventName: ClaudeHookEventName
+    eventName: ClaudeBusinessHookEventName
   ): Promise<ClaudeHookResult | undefined> {
     if (!deps.autoMemoryService || !(await deps.autoMemoryService.isRoleMemoryTurn(context.taskRepoRoot, input.role))) {
       return undefined;
@@ -688,6 +720,14 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
         taskSlug: context.taskSlug,
         role: input.role,
         eventName
+      });
+    }
+    if (boundToTask) {
+      await deps.roleStallDetector?.recordHook({
+        ...createStallContext(context),
+        role: input.role as VcmRoleName,
+        eventName,
+        event: input.event
       });
     }
     await deps.autoMemoryService.handleRoleHook({
@@ -975,6 +1015,36 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
     };
   }
 
+  function createStallContext(context: Awaited<ReturnType<typeof getHookContext>>) {
+    return {
+      repoRoot: context.project.repoRoot,
+      taskRepoRoot: context.taskRepoRoot,
+      stateRoot: context.config.stateRoot,
+      taskSlug: context.taskSlug
+    };
+  }
+
+  async function processProgressHook(
+    input: ClaudeHookRequest,
+    eventName: ClaudeProgressHookEventName
+  ): Promise<ClaudeHookResult> {
+    const role = input.role;
+    if (!isVcmRoleName(role)) {
+      return completedHookResult(input, eventName);
+    }
+    const context = await getHookContext(input);
+    if (!(await isCurrentRoleHook(context, input, eventName))) {
+      return completedHookResult(input, eventName);
+    }
+    await deps.roleStallDetector?.recordHook({
+      ...createStallContext(context),
+      role,
+      eventName,
+      event: input.event
+    });
+    return completedHookResult(input, eventName);
+  }
+
   function renderStopFailureRecoveryPrompt(): string {
     return [
       "[VCM Recovery]",
@@ -1019,6 +1089,17 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
     }
 
     const preferences = await deps.appSettings.getPreferences();
+    if (deps.roleStallDetector) {
+      const context = await getHookContext(input);
+      if (await isCurrentRoleHook(context, input, "PermissionRequest")) {
+        await deps.roleStallDetector.recordHook({
+          ...createStallContext(context),
+          role: input.role as VcmRoleName,
+          eventName: "PermissionRequest",
+          event: input.event
+        });
+      }
+    }
     if (preferences.permissionRequestMode !== "allowAll") {
       return undefined;
     }
@@ -1036,13 +1117,16 @@ export function createClaudeHookService(deps: ClaudeHookServiceDeps): ClaudeHook
   return {
     async handleHook(input) {
       return withRoleHookLock(input, async () => {
+        const eventName = parseHookEvent(input.event.hook_event_name);
+        if (isProgressHook(eventName)) {
+          return processProgressHook(input, eventName);
+        }
         if (isTranslatorToolRoleName(input.role)) {
           return processTranslatorHook(input);
         }
         if (isHarnessEngineerToolRoleName(input.role)) {
           return processHarnessEngineerHook(input);
         }
-        const eventName = parseHookEvent(input.event.hook_event_name);
         if (eventName === "UserPromptSubmit") {
           return handleUserPromptSubmitHook(input);
         }
@@ -1077,6 +1161,13 @@ function parseHookEvent(value: unknown): ClaudeHookEventName {
     value === "UserPromptSubmit"
     || value === "Stop"
     || value === "StopFailure"
+    || value === "PreToolUse"
+    || value === "PostToolUse"
+    || value === "PostToolUseFailure"
+    || value === "PostToolBatch"
+    || value === "SubagentStart"
+    || value === "SubagentStop"
+    || value === "PreCompact"
     || value === "PostCompact"
   ) {
     return value;
@@ -1085,8 +1176,29 @@ function parseHookEvent(value: unknown): ClaudeHookEventName {
     code: "HOOK_EVENT_UNSUPPORTED",
     message: `Unsupported Claude Code hook event: ${String(value)}`,
     statusCode: 400,
-    hint: "VCM accepts UserPromptSubmit, Stop, StopFailure, and PostCompact hooks only."
+    hint: "Use a Claude Code event installed by the VCM Harness."
   });
+}
+
+function isProgressHook(eventName: ClaudeHookEventName): eventName is ClaudeProgressHookEventName {
+  return eventName === "PreToolUse"
+    || eventName === "PostToolUse"
+    || eventName === "PostToolUseFailure"
+    || eventName === "PostToolBatch"
+    || eventName === "SubagentStart"
+    || eventName === "SubagentStop"
+    || eventName === "PreCompact";
+}
+
+function parseBusinessHookEvent(value: unknown): ClaudeBusinessHookEventName {
+  const eventName = parseHookEvent(value);
+  if (eventName === "UserPromptSubmit"
+    || eventName === "Stop"
+    || eventName === "StopFailure"
+    || eventName === "PostCompact") {
+    return eventName;
+  }
+  throwUnsupportedEvent(eventName);
 }
 
 function throwUnsupportedEvent(eventName: ClaudeHookEventName): never {

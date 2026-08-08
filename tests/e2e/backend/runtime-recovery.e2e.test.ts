@@ -12,29 +12,66 @@ import { createMockClaudeE2eApp, type MockClaudeE2eApp } from "./helpers/e2e-app
 import { createE2eRepo } from "./helpers/e2e-repo.js";
 
 describe("backend E2E runtime restart recovery", () => {
-  it("resumes the same Architect Claude session after a dangling LSP call", async () => {
+  it("dismisses a stall warning without interrupting the role Session or Round", async () => {
     const repo = await createE2eRepo();
-    let currentTime = "2026-08-08T00:00:00.000Z";
-    const e2e = await createMockClaudeE2eApp({ now: () => currentTime });
+    const e2e = await createMockClaudeE2eApp();
+
+    try {
+      const task = await connectAndCreateTask(e2e.app, repo, "mock-stall-ignore");
+      e2e.mockRuntime.onPrompt("coder", "Wait for model output", async (ctx) => {
+        await ctx.userPromptSubmit();
+      });
+
+      const session = await startRole(e2e.app, task.taskSlug, "coder");
+      e2e.mockRuntime.write(session.id, "Wait for model output");
+      await e2e.mockRuntime.waitForIdle();
+      let warningId = "";
+      await waitFor(async () => {
+        const workspace = await getWorkspaceState(e2e.app, task.taskSlug);
+        expect(workspace.roleStallWarning).toMatchObject({
+          role: "coder",
+          phase: "awaiting-model"
+        });
+        warningId = workspace.roleStallWarning!.id;
+      });
+
+      const ignored = await e2e.app.inject({
+        method: "POST",
+        url: `/api/tasks/${task.taskSlug}/role-stall/ignore`,
+        payload: { warningId }
+      });
+      expect(ignored.statusCode).toBe(200);
+
+      const workspace = await getWorkspaceState(e2e.app, task.taskSlug);
+      expect(workspace.roleStallWarning).toBeNull();
+      expect(workspace.taskStatus.sessions.find((entry) => entry.role === "coder")).toMatchObject({
+        id: session.id,
+        status: "running",
+        activityStatus: "running"
+      });
+      expect(workspace.roundState).toMatchObject({
+        status: "running",
+        activeRole: "coder"
+      });
+    } finally {
+      await e2e.close();
+      await repo.cleanup();
+    }
+  });
+
+  it("warns about a stalled role and recovers only after the user requests it", async () => {
+    const repo = await createE2eRepo();
+    const e2e = await createMockClaudeE2eApp();
 
     try {
       const task = await connectAndCreateTask(e2e.app, repo, "mock-lsp-stall");
       e2e.mockRuntime.onPrompt("architect", "Run semantic analysis", async (ctx) => {
         await ctx.userPromptSubmit();
-        await fs.appendFile(ctx.transcriptPath, `${JSON.stringify({
-          type: "assistant",
-          uuid: "architect-lsp-stall",
-          timestamp: currentTime,
-          message: {
-            stop_reason: "tool_use",
-            content: [{
-              type: "tool_use",
-              id: "lsp-call-1",
-              name: "LSP",
-              input: { operation: "findReferences" }
-            }]
-          }
-        })}\n`, "utf8");
+        await ctx.hook("PreToolUse", {
+          tool_name: "LSP",
+          tool_use_id: "lsp-call-1",
+          tool_input: { operation: "findReferences" }
+        });
       });
 
       const originalRuntime = await startRole(e2e.app, task.taskSlug, "architect");
@@ -44,32 +81,39 @@ describe("backend E2E runtime restart recovery", () => {
       const originalSession = before.taskStatus.sessions.find((entry) => entry.role === "architect");
       expect(originalSession?.claudeSessionId).toBeTruthy();
 
-      currentTime = "2026-08-08T00:11:00.000Z";
-      await e2e.deps.runtimeCoordinator.reconcileProject(repo.repoRoot, {
-        taskSlug: task.taskSlug
-      });
-
       await waitFor(async () => {
         const workspace = await getWorkspaceState(e2e.app, task.taskSlug);
-        const recovered = workspace.taskStatus.sessions.find((entry) => entry.role === "architect");
-        expect(recovered).toMatchObject({
-          status: "running",
-          activityStatus: "running",
-          claudeSessionId: originalSession?.claudeSessionId,
-          lastArchitectLspRecovery: {
-            roundId: workspace.roundState.roundId,
-            toolUseId: "lsp-call-1",
-            operation: "findReferences"
-          }
+        expect(workspace.roleStallWarning).toMatchObject({
+          role: "architect",
+          phase: "tool-running",
+          toolName: "LSP",
+          toolUseId: "lsp-call-1"
         });
-        expect(recovered?.id).not.toBe(originalRuntime.id);
-        expect(workspace.roundState).toMatchObject({
-          status: "running",
-          activeRole: "architect"
-        });
-        expect(workspace.roundState.roleRecovery).toBeUndefined();
-        expect(workspace.roundState.flowPause).toBeUndefined();
       });
+      expect(e2e.mockRuntime.getWrites(originalRuntime.id)).toEqual(["Run semantic analysis"]);
+
+      const warning = (await getWorkspaceState(e2e.app, task.taskSlug)).roleStallWarning!;
+      const recovery = await e2e.app.inject({
+        method: "POST",
+        url: `/api/tasks/${task.taskSlug}/role-stall/recover`,
+        payload: { warningId: warning.id }
+      });
+      expect(recovery.statusCode).toBe(200);
+
+      const workspace = await getWorkspaceState(e2e.app, task.taskSlug);
+      const recovered = workspace.taskStatus.sessions.find((entry) => entry.role === "architect");
+      expect(recovered).toMatchObject({
+        status: "running",
+        activityStatus: "running",
+        claudeSessionId: originalSession?.claudeSessionId
+      });
+      expect(recovered?.id).not.toBe(originalRuntime.id);
+      expect(workspace.roleStallWarning).toBeNull();
+      expect(workspace.roundState).toMatchObject({
+        status: "running",
+        activeRole: "architect"
+      });
+      expect(workspace.roundState.flowPause).toBeUndefined();
     } finally {
       await e2e.close();
       await repo.cleanup();

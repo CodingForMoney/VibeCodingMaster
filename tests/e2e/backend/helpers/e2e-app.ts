@@ -21,7 +21,7 @@ import { createHarnessService } from "../../../../src/backend/services/harness-s
 import { createHarnessFeedbackService } from "../../../../src/backend/services/harness-feedback-service.js";
 import { createAutoMemoryService } from "../../../../src/backend/services/auto-memory-service.js";
 import { createArchitectRestartService } from "../../../../src/backend/services/architect-restart-service.js";
-import { createArchitectLspWatchdogService } from "../../../../src/backend/services/architect-lsp-watchdog-service.js";
+import { createRoleStallDetectorService } from "../../../../src/backend/services/role-stall-detector-service.js";
 import { createCommandDispatcher } from "../../../../src/backend/services/command-dispatcher.js";
 import { createStatusService } from "../../../../src/backend/services/status-service.js";
 import { createMessageService } from "../../../../src/backend/services/message-service.js";
@@ -225,10 +225,12 @@ export async function createMockClaudeE2eApp(options: MockClaudeE2eAppOptions = 
     sessionService
   });
   const transcripts = createClaudeTranscriptService();
-  const architectLspWatchdog = createArchitectLspWatchdogService({
-    transcripts,
+  const roleStallDetector = createRoleStallDetectorService({
     sessionService,
-    roundService
+    roundService,
+    modelTimeoutMs: 1,
+    toolTimeoutMs: 1,
+    subagentTimeoutMs: 1
   });
   const translationService = createTranslationService({
     runtime: mockRuntime,
@@ -305,6 +307,7 @@ export async function createMockClaudeE2eApp(options: MockClaudeE2eAppOptions = 
     jobGuard: createJobGuardService(),
     translationWorkerService,
     architectRestartService,
+    roleStallDetector,
     retrySetTimeout(callback) {
       return globalThis.setTimeout(callback, 0);
     },
@@ -322,7 +325,7 @@ export async function createMockClaudeE2eApp(options: MockClaudeE2eAppOptions = 
     harnessFeedbackService,
     autoMemoryService,
     roundService,
-    architectLspWatchdog,
+    roleStallDetector,
     gatewayService,
     async getStateRoot(repoRoot) {
       return (await projectService.loadConfig(repoRoot)).stateRoot;
@@ -369,6 +372,7 @@ export async function createMockClaudeE2eApp(options: MockClaudeE2eAppOptions = 
     autoMemoryService,
     commandDispatcher,
     claudeHookService,
+    roleStallDetector,
     messageService,
     taskLaunchService,
     gateReviewService,

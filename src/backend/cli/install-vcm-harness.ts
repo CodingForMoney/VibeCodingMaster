@@ -78,8 +78,15 @@ const VCM_HOOK_DEFINITIONS = [
   { eventName: "PreToolUse", matcher: "Bash", command: VCM_BASH_GUARD_HOOK_COMMAND, timeout: 10 },
   { eventName: "PreToolUse", matcher: "Write|Edit", command: VCM_BASH_GUARD_HOOK_COMMAND, timeout: 10 },
   { eventName: "UserPromptSubmit", command: VCM_HOOK_COMMAND, timeout: 5 },
+  { eventName: "PreToolUse", command: VCM_HOOK_COMMAND, timeout: 5 },
+  { eventName: "PostToolUse", command: VCM_HOOK_COMMAND, timeout: 5 },
+  { eventName: "PostToolUseFailure", command: VCM_HOOK_COMMAND, timeout: 5 },
+  { eventName: "PostToolBatch", command: VCM_HOOK_COMMAND, timeout: 5 },
+  { eventName: "SubagentStart", command: VCM_HOOK_COMMAND, timeout: 5 },
+  { eventName: "SubagentStop", command: VCM_HOOK_COMMAND, timeout: 5 },
   { eventName: "Stop", command: VCM_STOP_HOOK_COMMAND, timeout: 10 },
   { eventName: "StopFailure", command: VCM_HOOK_COMMAND, timeout: 5 },
+  { eventName: "PreCompact", command: VCM_HOOK_COMMAND, timeout: 5 },
   { eventName: "PostCompact", command: VCM_HOOK_COMMAND, timeout: 5 },
   { eventName: "PermissionRequest", command: VCM_PERMISSION_REQUEST_HOOK_COMMAND, timeout: 5 }
 ];

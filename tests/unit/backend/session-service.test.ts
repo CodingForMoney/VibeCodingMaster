@@ -1332,7 +1332,7 @@ describe("createSessionService", () => {
     });
   });
 
-  it("recovers a stalled Architect by resuming the same Claude session", async () => {
+  it("recovers a stalled role by resuming the same Claude session", async () => {
     const fs = createMemoryFs();
     const runtimeInputs: CreateTerminalSessionInput[] = [];
     const writes: string[] = [];
@@ -1362,24 +1362,12 @@ describe("createSessionService", () => {
       cwd: TASK_WORKTREE
     });
 
-    const recovered = await service.recoverArchitectLspSession("/repo", "demo-task", {
+    const current = await service.getRoleSession("/repo", "demo-task", "architect");
+    const recovered = await service.recoverRoleSession("/repo", "demo-task", {
+      role: "architect",
       expectedSessionId: started.id,
-      stall: {
-        status: "stalled",
-        roundId: "round-1",
-        toolUseId: "lsp-1",
-        operation: "findReferences",
-        startedAt: "2026-05-28T23:50:00.000Z",
-        detectedAt: "2026-05-29T00:00:00.000Z",
-        recoveryAttempt: 1
-      },
-      recovery: {
-        roundId: "round-1",
-        toolUseId: "lsp-1",
-        operation: "findReferences",
-        recoveredAt: "2026-05-29T00:00:00.000Z"
-      },
-      recoveryPrompt: "[VCM LSP RECOVERY] Continue the current Architect command."
+      expectedRuntimeSessionToken: current?.runtimeSessionToken,
+      recoveryPrompt: "[VCM Session Recovery] Continue the current Architect command."
     });
 
     expect(runtimeInputs).toHaveLength(2);
@@ -1398,20 +1386,14 @@ describe("createSessionService", () => {
       "bypassPermissions"
     ]);
     expect(writes).toEqual([
-      "\u001b[200~[VCM LSP RECOVERY] Continue the current Architect command.\u001b[201~",
+      "\u001b[200~[VCM Session Recovery] Continue the current Architect command.\u001b[201~",
       "\r"
     ]);
     expect(recovered).toMatchObject({
       id: "runtime_2",
       claudeSessionId: "architect-stalled-session",
       status: "running",
-      activityStatus: "running",
-      architectLspStall: undefined,
-      lastArchitectLspRecovery: {
-        roundId: "round-1",
-        toolUseId: "lsp-1",
-        operation: "findReferences"
-      }
+      activityStatus: "running"
     });
   });
 

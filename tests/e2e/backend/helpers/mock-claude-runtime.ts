@@ -354,6 +354,10 @@ export class MockClaudePromptContext {
     await this.runtime.dispatchHook(this.entry, "UserPromptSubmit", { prompt: this.prompt });
   }
 
+  async hook(eventName: ClaudeHookEventName, extra: Record<string, unknown> = {}): Promise<void> {
+    await this.runtime.dispatchHook(this.entry, eventName, extra);
+  }
+
   async stop(): Promise<void> {
     await this.runtime.dispatchHook(this.entry, "Stop");
   }

@@ -1,5 +1,6 @@
 import type { DispatchRoleCommandResult, ProjectRuntimeState, TaskStatusReport, TaskWorkspaceState } from "../../shared/types/api.js";
 import type { WorkflowControlState } from "../../shared/types/workflow.js";
+import type { RoleStallActionResult } from "../../shared/types/role-stall.js";
 import type {
   AppPreferences,
   CcrIntegrationStatus,
@@ -312,6 +313,18 @@ export const apiClient = {
   },
   getTaskWorkspaceState(taskSlug: string) {
     return request<TaskWorkspaceState>(`/api/tasks/${encodeURIComponent(taskSlug)}/workspace-state`);
+  },
+  ignoreRoleStallWarning(taskSlug: string, warningId: string) {
+    return request<RoleStallActionResult>(`/api/tasks/${encodeURIComponent(taskSlug)}/role-stall/ignore`, {
+      method: "POST",
+      body: JSON.stringify({ warningId })
+    });
+  },
+  recoverRoleStallWarning(taskSlug: string, warningId: string) {
+    return request<RoleStallActionResult>(`/api/tasks/${encodeURIComponent(taskSlug)}/role-stall/recover`, {
+      method: "POST",
+      body: JSON.stringify({ warningId })
+    });
   },
   getTaskUsageAnalytics(taskSlug: string) {
     return request<TaskUsageAnalyticsReport>(`/api/tasks/${encodeURIComponent(taskSlug)}/usage-analytics`);

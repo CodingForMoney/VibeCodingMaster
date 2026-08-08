@@ -30,7 +30,7 @@ layers plus supporting tools.
   endpoint and the gateway), `task-close-service` (backend-owned unconditional
   task close, shared by the GUI endpoint and the gateway), `session-service`, `round-service`,
   `runtime-coordinator-service`, `runtime-recovery-service`,
-  `architect-lsp-watchdog-service`,
+  `role-stall-detector-service`,
   `terminal-process-exit-service`, `message-service`, `task-workflow-service`,
   `workflow-control-service`,
   `architect-restart-service`,
@@ -208,14 +208,16 @@ the backend process; detection does not start a persistent language server or
 scan the repository recursively. A successful probe means the server is
 runnable, not that a role workspace is indexed or semantically ready. Architect
 uses bounded workspace-query retries through `vcm-code-navigation`; the skill
-does not issue an unconditional warm-up query. Runtime Coordinator attaches the
-Architect LSP watchdog only while Architect owns a running Round. The watchdog
-replays the current Turn transcript, pairs top-level `LSP` tool uses with their
-tool results, and treats an unmatched call older than ten minutes as stalled. It
-may stop and resume the same Claude Session once per Round without converting
-the expected old-process exit into a Round stop. A repeated stall or failed
-resume records failed role recovery and stops the Round for the normal pause
-alert. LSP liveness diagnostics are stored separately from role activity state.
+does not issue an unconditional warm-up query. `role-stall-detector-service`
+consumes Claude Code progress hooks for the active workflow role and reports a
+suspected model, tool, subagent, or compaction stall after the phase deadline.
+It keeps warnings in backend runtime memory and never mutates Session activity,
+Round state, routing, or retry state. A newer progress hook clears the warning.
+Ignore suppresses only that warning generation; Recover revalidates the same
+Session token and active Round before stopping the PTY, resuming the same Claude
+Session, and submitting a bounded continuation prompt. The existing aggregated
+task workspace poll carries the warning to the UI; no separate polling loop is
+created. Transcript content is not used for liveness detection.
 Harness Studio renders server availability and the exact backend diagnostic.
 The project runtime, not VCM, owns installation of
 `rust-analyzer`, `typescript-language-server`, `pyright-langserver`, `gopls`,

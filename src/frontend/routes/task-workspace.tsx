@@ -9,7 +9,9 @@ import type { TaskWorkflowState } from "../../shared/types/workflow.js";
 import type { ClaudePermissionMode, SessionEffort, SessionModel, SessionModelOption } from "../../shared/types/session.js";
 import type { LaunchTemplate, TranslationTargetLanguage } from "../../shared/types/app-settings.js";
 import type { TaskRecord } from "../../shared/types/task.js";
+import type { RoleStallWarning } from "../../shared/types/role-stall.js";
 import { RoleSessionTabs } from "../components/role-session-tabs.js";
+import { RoleStallWarningModal } from "../components/role-stall-warning-modal.js";
 import { SessionConsole } from "../components/session-console.js";
 import { clearUiErrorForActions, formatUiError } from "../state/error-format.js";
 import { clearPollError, recordPollError } from "../state/poll-error-gate.js";
@@ -118,6 +120,8 @@ export function TaskWorkspace({
   const [orchestration, setOrchestration] = useState<VcmOrchestrationState | null>(null);
   const [workflowState, setWorkflowState] = useState<TaskWorkflowState | null>(null);
   const [architectRestart, setArchitectRestart] = useState<ArchitectRestartState | null>(null);
+  const [roleStallWarning, setRoleStallWarning] = useState<RoleStallWarning | null>(null);
+  const [roleStallActionBusy, setRoleStallActionBusy] = useState(false);
   const [translationFeedStore, setTranslationFeedStore] = useState(() => createTranslationPanelFeedStore(task.taskSlug));
   const taskStatusSyncKeyRef = useRef("");
   const translationFeedCursorRef = useRef(1);
@@ -150,6 +154,7 @@ export function TaskWorkspace({
   const refresh = useCallback(async () => {
     const nextState = await apiClient.getTaskWorkspaceState(task.taskSlug);
     setArchitectRestart(nextState.architectRestart);
+    setRoleStallWarning(nextState.roleStallWarning);
     applyFetchedState(nextState.taskStatus, nextState.messages, nextState.orchestration, nextState.roundState, nextState.workflowState);
     clearPollError("Poll task workspace state");
     setError((current) => clearUiErrorForActions(current, ["Load task workspace state", "Poll task workspace state"]));
@@ -195,6 +200,7 @@ export function TaskWorkspace({
   useEffect(() => {
     setEvents([]);
     setWorkflowState(null);
+    setRoleStallWarning(null);
     onEventsChanged?.([]);
   }, [onEventsChanged, task.taskSlug]);
 
@@ -296,6 +302,26 @@ export function TaskWorkspace({
     });
   }
 
+  async function handleRoleStallAction(action: "ignore" | "recover"): Promise<void> {
+    const warning = roleStallWarning;
+    if (!warning || roleStallActionBusy) {
+      return;
+    }
+    setRoleStallActionBusy(true);
+    try {
+      const result = action === "recover"
+        ? await apiClient.recoverRoleStallWarning(task.taskSlug, warning.id)
+        : await apiClient.ignoreRoleStallWarning(task.taskSlug, warning.id);
+      setRoleStallWarning(result.warning);
+      setError("");
+      await refresh();
+    } catch (caught) {
+      setError(formatUiError(`${action === "recover" ? "Recover" : "Ignore"} stalled role`, caught));
+    } finally {
+      setRoleStallActionBusy(false);
+    }
+  }
+
   function setRolePermissionMode(role: RoleName, permissionMode: ClaudePermissionMode) {
     setPermissionModes((current) => ({
       ...current,
@@ -350,6 +376,15 @@ export function TaskWorkspace({
           <span>{architectRestart.blocker.message}</span>
           <code>{architectRestart.blocker.code}</code>
         </div>
+      ) : null}
+
+      {roleStallWarning ? (
+        <RoleStallWarningModal
+          warning={roleStallWarning}
+          busy={roleStallActionBusy}
+          onIgnore={() => void handleRoleStallAction("ignore")}
+          onRecover={() => void handleRoleStallAction("recover")}
+        />
       ) : null}
 
       <div className="workspace-grid">
