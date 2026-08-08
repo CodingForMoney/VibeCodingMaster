@@ -71,6 +71,7 @@ interface TaskRetrospectiveMarker {
   status: "triggered" | "running" | "completed" | "failed";
   analysisPath: string;
   finalAcceptanceHash: string;
+  pendingFeedbackPaths: string[];
   memoryRunId?: string;
   createdAt: string;
   updatedAt: string;
@@ -155,6 +156,7 @@ export function createHarnessFeedbackService(deps: HarnessFeedbackServiceDeps): 
     }
 
     const session = await ensureIdleHarnessEngineer(repoRoot, taskSlug);
+    const pendingFeedback = await listPendingFeedback(repoRoot);
     const timestamp = now();
     const analysisPath = `${TASK_RETROSPECTIVE_DIR}/${sanitizeFeedbackId(taskSlug)}.md`;
     const analysisAbsolutePath = resolveRepoPath(repoRoot, analysisPath);
@@ -169,11 +171,11 @@ export function createHarnessFeedbackService(deps: HarnessFeedbackServiceDeps): 
       status: "running",
       analysisPath,
       finalAcceptanceHash: `sha256:${sha256(finalAcceptanceContent)}`,
+      pendingFeedbackPaths: pendingFeedback.map((item) => item.path),
       ...(memoryReview ? { memoryRunId: memoryReview.runId } : {}),
       createdAt: timestamp,
       updatedAt: timestamp
     };
-    const pendingFeedback = await listPendingFeedback(repoRoot);
     try {
       await persistTaskRetrospectiveMarker(repoRoot, marker);
       await submitTerminalInput(
@@ -230,7 +232,12 @@ export function createHarnessFeedbackService(deps: HarnessFeedbackServiceDeps): 
     const reportContent = await deps.fs.pathExists(reportPath)
       ? await deps.fs.readText(reportPath)
       : "";
-    const reportErrors = reportContent.trim() ? getRetrospectiveReportErrors(reportContent) : ["Report is empty."];
+    const reportErrors = reportContent.trim()
+      ? [
+          ...getRetrospectiveReportErrors(reportContent),
+          ...getFeedbackDispositionErrors(repoRoot, marker.pendingFeedbackPaths ?? [], reportContent)
+        ]
+      : ["Report is empty."];
     const reportReady = reportErrors.length === 0;
     if (!reportReady || (marker.memoryRunId && !input.memoryReviewSucceeded)) {
       await persistTaskRetrospectiveMarker(repoRoot, {
@@ -241,6 +248,18 @@ export function createHarnessFeedbackService(deps: HarnessFeedbackServiceDeps): 
         error: !reportReady
           ? `Harness Engineer did not write a valid Task Harness Retrospective report: ${reportErrors.join(" ")}`
           : "Task Harness Retrospective memory review failed."
+      });
+      return true;
+    }
+    try {
+      await removeProcessedFeedback(repoRoot, marker.pendingFeedbackPaths ?? []);
+    } catch (error) {
+      await persistTaskRetrospectiveMarker(repoRoot, {
+        ...marker,
+        status: "failed",
+        failedAt: timestamp,
+        updatedAt: timestamp,
+        error: `VCM could not remove processed Harness Feedback: ${errorMessage(error)}`
       });
       return true;
     }
@@ -351,7 +370,15 @@ export function createHarnessFeedbackService(deps: HarnessFeedbackServiceDeps): 
       ...(pendingFeedbackPaths.length > 0
         ? [
             "",
-            "Process every listed feedback inside this retrospective. Record every disposition in the retrospective report, then delete the processed feedback files before ending the turn."
+            "Process every listed feedback inside this retrospective. Record every disposition in the retrospective report using this exact block for each assigned path:",
+            "",
+            "### Feedback: <exact assigned absolute path>",
+            "Decision: confirmed|rejected|duplicate|already-covered",
+            "Evidence: <concise evidence>",
+            "Impact: <impact>",
+            "Required action: <action or none>",
+            "",
+            "Do not edit or delete pending feedback files. VCM removes the assigned files after validating every disposition in the accepted report."
           ]
         : []),
       "",
@@ -492,6 +519,21 @@ export function createHarnessFeedbackService(deps: HarnessFeedbackServiceDeps): 
     }
   }
 
+  async function removeProcessedFeedback(repoRoot: string, feedbackPaths: string[]): Promise<void> {
+    if (feedbackPaths.length === 0) {
+      return;
+    }
+    if (!deps.fs.removePath) {
+      throw new Error("The filesystem adapter does not support feedback removal.");
+    }
+    for (const feedbackPath of feedbackPaths) {
+      assertPendingFeedbackPath(feedbackPath);
+    }
+    for (const feedbackPath of feedbackPaths) {
+      await deps.fs.removePath(resolveRepoPath(repoRoot, feedbackPath), { force: true });
+    }
+  }
+
   async function readOptionalText(repoRoot: string, relativePath: string): Promise<string | undefined> {
     const absolutePath = resolveRepoPath(repoRoot, relativePath);
     return readAbsoluteOptionalText(absolutePath);
@@ -511,6 +553,75 @@ export function createHarnessFeedbackService(deps: HarnessFeedbackServiceDeps): 
     handleTaskRetrospectiveHook,
     assertHarnessEngineerAvailable
   };
+}
+
+function getFeedbackDispositionErrors(
+  repoRoot: string,
+  feedbackPaths: string[],
+  reportContent: string
+): string[] {
+  if (feedbackPaths.length === 0) {
+    return [];
+  }
+  const section = readLevelTwoSection(reportContent, "Feedback Dispositions");
+  if (!section) {
+    return ["Feedback Dispositions is empty."];
+  }
+
+  const errors: string[] = [];
+  const lines = section.split(/\r?\n/);
+  for (const feedbackPath of feedbackPaths) {
+    try {
+      assertPendingFeedbackPath(feedbackPath);
+    } catch (error) {
+      errors.push(errorMessage(error));
+      continue;
+    }
+    const absolutePath = resolveRepoPath(repoRoot, feedbackPath);
+    const heading = `### Feedback: ${absolutePath}`;
+    const start = lines.findIndex((line) => line.trim() === heading);
+    if (start < 0) {
+      errors.push(`Missing disposition for assigned feedback: ${absolutePath}.`);
+      continue;
+    }
+    const endOffset = lines.slice(start + 1).findIndex((line) => /^###\s+/.test(line.trim()));
+    const end = endOffset < 0 ? lines.length : start + 1 + endOffset;
+    const block = lines.slice(start + 1, end);
+    const decision = readDispositionField(block, "Decision");
+    if (!decision || !["confirmed", "rejected", "duplicate", "already-covered"].includes(decision)) {
+      errors.push(`Feedback disposition Decision for ${absolutePath} must be confirmed|rejected|duplicate|already-covered.`);
+    }
+    for (const field of ["Evidence", "Impact", "Required action"]) {
+      if (!readDispositionField(block, field)) {
+        errors.push(`Feedback disposition ${field} is required for ${absolutePath}.`);
+      }
+    }
+  }
+  return errors;
+}
+
+function readLevelTwoSection(content: string, heading: string): string | undefined {
+  const escapedHeading = heading.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = new RegExp(`^##\\s+${escapedHeading}\\s*$`, "im").exec(content);
+  if (!match || match.index === undefined) {
+    return undefined;
+  }
+  const afterHeading = content.slice(match.index + match[0].length);
+  const nextHeading = /\n##\s+\S/.exec(afterHeading);
+  return (nextHeading ? afterHeading.slice(0, nextHeading.index) : afterHeading).trim();
+}
+
+function readDispositionField(lines: string[], field: string): string | undefined {
+  const escapedField = field.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return lines
+    .map((line) => new RegExp(`^${escapedField}:\\s*(.+)$`, "i").exec(line.trim())?.[1]?.trim())
+    .find((value): value is string => Boolean(value));
+}
+
+function assertPendingFeedbackPath(feedbackPath: string): void {
+  if (!/^\.ai\/vcm\/harness-feedback\/pending\/[A-Za-z0-9._-]+\.md$/.test(feedbackPath)) {
+    throw new Error(`Invalid assigned Harness Feedback path: ${feedbackPath}.`);
+  }
 }
 
 function parseSimpleMetadata(content: string): Record<string, string> {

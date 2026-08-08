@@ -211,8 +211,9 @@ describe("backend E2E task harness retrospective with mock Claude Code", () => {
       path.join(repo.repoRoot, ".ai/vcm/harness-feedback/task-retrospectives", `${task.taskSlug}.md`),
       "utf8"
     );
-    expect(retrospective).toContain(`${pendingFeedback[0]}: confirmed`);
-    expect(retrospective).toContain(`${pendingFeedback[1]}: confirmed`);
+    expect(retrospective).toContain(`### Feedback: ${pendingFeedback[0]}`);
+    expect(retrospective).toContain(`### Feedback: ${pendingFeedback[1]}`);
+    expect(retrospective).toContain("Decision: confirmed");
     await expect(fs.readdir(pendingDir)).resolves.toEqual([]);
     const feedbackState = await injectOk(env.app, {
       method: "GET",
@@ -270,7 +271,14 @@ async function writeHarnessRetrospective(ctx: MockClaudePromptContext): Promise<
     await git(ctx.cwd, "commit", "-m", "chore: update VCM memory");
   }
   const pendingFeedback = matchPendingFeedbackPaths(ctx.prompt);
-  const dispositions = pendingFeedback.map((feedbackPath) => `${feedbackPath}: confirmed`);
+  const dispositions = pendingFeedback.flatMap((feedbackPath) => [
+    `### Feedback: ${feedbackPath}`,
+    "Decision: confirmed",
+    "Evidence: Confirmed against task evidence.",
+    "Impact: Reusable harness behavior.",
+    "Required action: Track the confirmed finding.",
+    ""
+  ]);
   await ctx.writeAbsoluteFile(
     resultPath,
     [
@@ -312,9 +320,6 @@ async function writeHarnessRetrospective(ctx: MockClaudePromptContext): Promise<
       ""
     ].join("\n")
   );
-  for (const feedbackPath of pendingFeedback) {
-    await fs.rm(feedbackPath);
-  }
   await ctx.stop();
 }
 

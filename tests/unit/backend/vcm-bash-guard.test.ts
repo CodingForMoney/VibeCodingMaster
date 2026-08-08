@@ -215,5 +215,12 @@ describe("vcm-bash-guard", () => {
         await expect(runGuard(bash(command), "architect"), command).resolves.toContain("vcm-artifact");
       }
     });
+
+    it("does not let Harness Engineer delete pending feedback directly", async () => {
+      await expect(runGuard(
+        bash("rm .ai/vcm/harness-feedback/pending/confirmed.md"),
+        "harness-engineer"
+      )).resolves.toContain("vcm-artifact");
+    });
   });
 });

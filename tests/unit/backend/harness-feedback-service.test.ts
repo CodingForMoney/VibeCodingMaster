@@ -340,7 +340,119 @@ None.
     expect(prompt).toContain(`- ${path.join(pendingDir, "02-tester.md")}`);
     expect(prompt.indexOf("01-coder.md")).toBeLessThan(prompt.indexOf("02-tester.md"));
     expect(prompt).toContain("Record every disposition in the retrospective report");
-    expect(prompt).toContain("delete the processed feedback files before ending the turn");
+    expect(prompt).toContain("### Feedback: <exact assigned absolute path>");
+    expect(prompt).toContain("Do not edit or delete pending feedback files");
+    expect(prompt).toContain("VCM removes the assigned files after validating every disposition");
+    const marker = JSON.parse(await readFile(
+      path.join(tmpRepo, ".ai/vcm/harness-feedback/task-retrospectives/demo-task.json"),
+      "utf8"
+    ));
+    expect(marker.pendingFeedbackPaths).toEqual([
+      ".ai/vcm/harness-feedback/pending/01-coder.md",
+      ".ai/vcm/harness-feedback/pending/02-tester.md"
+    ]);
+  });
+
+  it("removes only the feedback assigned when an accepted retrospective completes", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-harness-retrospective-cleanup-"));
+    const taskRepoRoot = path.join(tmpRepo, ".claude/worktrees/demo-task");
+    await mkdir(path.join(taskRepoRoot, ".ai/vcm/handoffs"), { recursive: true });
+    await writeFile(
+      path.join(taskRepoRoot, ".ai/vcm/handoffs/final-acceptance.md"),
+      renderFinalAcceptance("accepted"),
+      "utf8"
+    );
+    const pendingDir = path.join(tmpRepo, ".ai/vcm/harness-feedback/pending");
+    await mkdir(pendingDir, { recursive: true });
+    const assigned = ["01-coder.md", "02-tester.md"];
+    for (const name of assigned) {
+      await writeFile(path.join(pendingDir, name), `# ${name}\n`, "utf8");
+    }
+    const service = createHarnessFeedbackService({
+      fs: createNodeFileSystemAdapter(),
+      runtime: createRuntime([]),
+      sessionService: createSessionService(),
+      now: createClock()
+    });
+
+    await service.startTaskRetrospective(tmpRepo, {
+      taskSlug: "demo-task",
+      taskRepoRoot,
+      handoffDir: ".ai/vcm/handoffs",
+      trigger: "manual"
+    });
+    await writeFile(path.join(pendingDir, "03-late.md"), "# Late feedback\n", "utf8");
+    await writeFile(
+      path.join(tmpRepo, ".ai/vcm/harness-feedback/task-retrospectives/demo-task.md"),
+      renderRetrospectiveReport(assigned.map((name) => path.join(pendingDir, name))),
+      "utf8"
+    );
+
+    await service.handleTaskRetrospectiveHook(tmpRepo, {
+      taskSlug: "demo-task",
+      eventName: "Stop",
+      memoryReviewSucceeded: true
+    });
+
+    for (const name of assigned) {
+      await expect(readFile(path.join(pendingDir, name), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
+    }
+    await expect(readFile(path.join(pendingDir, "03-late.md"), "utf8")).resolves.toContain("Late feedback");
+    const marker = JSON.parse(await readFile(
+      path.join(tmpRepo, ".ai/vcm/harness-feedback/task-retrospectives/demo-task.json"),
+      "utf8"
+    ));
+    expect(marker.status).toBe("completed");
+  });
+
+  it("keeps assigned feedback when the retrospective omits a disposition", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-harness-retrospective-invalid-feedback-"));
+    const taskRepoRoot = path.join(tmpRepo, ".claude/worktrees/demo-task");
+    await mkdir(path.join(taskRepoRoot, ".ai/vcm/handoffs"), { recursive: true });
+    await writeFile(
+      path.join(taskRepoRoot, ".ai/vcm/handoffs/final-acceptance.md"),
+      renderFinalAcceptance("accepted"),
+      "utf8"
+    );
+    const pendingDir = path.join(tmpRepo, ".ai/vcm/harness-feedback/pending");
+    await mkdir(pendingDir, { recursive: true });
+    const assigned = ["01-coder.md", "02-tester.md"];
+    for (const name of assigned) {
+      await writeFile(path.join(pendingDir, name), `# ${name}\n`, "utf8");
+    }
+    const service = createHarnessFeedbackService({
+      fs: createNodeFileSystemAdapter(),
+      runtime: createRuntime([]),
+      sessionService: createSessionService(),
+      now: createClock()
+    });
+    await service.startTaskRetrospective(tmpRepo, {
+      taskSlug: "demo-task",
+      taskRepoRoot,
+      handoffDir: ".ai/vcm/handoffs",
+      trigger: "manual"
+    });
+    await writeFile(
+      path.join(tmpRepo, ".ai/vcm/harness-feedback/task-retrospectives/demo-task.md"),
+      renderRetrospectiveReport([path.join(pendingDir, assigned[0])]),
+      "utf8"
+    );
+
+    await service.handleTaskRetrospectiveHook(tmpRepo, {
+      taskSlug: "demo-task",
+      eventName: "Stop",
+      memoryReviewSucceeded: true
+    });
+
+    for (const name of assigned) {
+      await expect(readFile(path.join(pendingDir, name), "utf8")).resolves.toContain(name);
+    }
+    const marker = JSON.parse(await readFile(
+      path.join(tmpRepo, ".ai/vcm/harness-feedback/task-retrospectives/demo-task.json"),
+      "utf8"
+    ));
+    expect(marker).toMatchObject({ status: "failed" });
+    expect(marker.error).toContain(path.join(pendingDir, assigned[1]));
   });
 
   it("does not start a task harness retrospective for a follow-up final-acceptance decision", async () => {
@@ -391,6 +503,32 @@ function renderFinalAcceptance(decision: string): string {
     "Ready.",
     "## Final User Summary",
     "Done."
+  ].join("\n");
+}
+
+function renderRetrospectiveReport(feedbackPaths: string[]): string {
+  const dispositions = feedbackPaths.flatMap((feedbackPath) => [
+    `### Feedback: ${feedbackPath}`,
+    "Decision: confirmed",
+    "Evidence: Confirmed against task evidence.",
+    "Impact: Reusable harness behavior.",
+    "Required action: Track the confirmed finding.",
+    ""
+  ]);
+  return [
+    "# Task Harness Retrospective: demo-task",
+    "",
+    "## Findings",
+    "Confirmed feedback reviewed.",
+    "",
+    "## Feedback Dispositions",
+    ...dispositions,
+    "## Recommended Harness Changes",
+    "None.",
+    "",
+    "## VCM Issue Drafts",
+    "None.",
+    ""
   ].join("\n");
 }
 

@@ -73,8 +73,9 @@ You are not part of the task workflow round state.
 - In Proposal Mode, do not edit files.
 - In Retrospective Mode, write the assigned retrospective report and, only when
   Auto Memory Review is included in the prompt, directly update the assigned
-  active memory blocks. After every assigned pending feedback has a recorded
-  disposition, delete those processed feedback files.
+  active memory blocks. Record every assigned pending feedback disposition in
+  the report. Do not edit or delete pending feedback files; VCM removes accepted
+  assignments after validating the report.
 - Commit every applied harness change yourself before ending your turn.
 - Do not overwrite VCM fixed managed blocks.
 - Keep project-specific customization outside VCM managed blocks.
@@ -150,13 +151,22 @@ For each pending feedback:
 Process every assigned feedback before completing the retrospective. A
 feedback item is processed even when it is rejected or already covered.
 
-Write the complete retrospective report to a candidate outside `.ai/vcm` and submit it with `.ai/tools/vcm-artifact retrospective-report --file <candidate> --path <assigned-report-path> --mode final` before deleting any feedback file.
-After the report contains a disposition for every assigned feedback, delete
-those feedback files from `.ai/vcm/harness-feedback/pending/`.
+Use this exact block for each assigned feedback:
 
-Do not delete a feedback file unless its disposition is already recorded in
-the retrospective report. Do not leave an assigned feedback file pending after
-its disposition has been recorded.
+```md
+### Feedback: <exact assigned absolute path>
+Decision: confirmed|rejected|duplicate|already-covered
+Evidence: <concise evidence>
+Impact: <impact>
+Required action: <action or none>
+```
+
+Write the complete retrospective report to a candidate outside `.ai/vcm` and
+submit it with `.ai/tools/vcm-artifact retrospective-report --file <candidate>
+--path <assigned-report-path> --mode final`.
+
+Do not edit or delete pending feedback files. VCM validates every assigned
+disposition and removes the assigned files after accepting the report.
 
 For each finding, decide whether it is:
 
