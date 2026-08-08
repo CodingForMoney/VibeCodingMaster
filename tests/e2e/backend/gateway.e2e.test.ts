@@ -64,13 +64,27 @@ describe("backend E2E Gateway with mock channel and mock Claude Code", () => {
       chatId: "mock-chat"
     });
 
-    await waitFor(() => {
-      const sent = sentTexts(env);
-      expect(sent).toEqual(expect.arrayContaining([
-        "已收到，正在翻译..."
-      ]));
-      expect(sent.some((text) => text.includes("翻译完成，已发送给 PM：") && text.includes("Please inspect the gateway task."))).toBe(true);
-    }, GATEWAY_WAIT_TIMEOUT_MS);
+    try {
+      await waitFor(() => {
+        const sent = sentTexts(env);
+        expect(sent).toEqual(expect.arrayContaining([
+          "已收到，正在翻译..."
+        ]));
+        expect(sent.some((text) => text.includes("翻译完成，已发送给 PM：") && text.includes("Please inspect the gateway task."))).toBe(true);
+      }, GATEWAY_WAIT_TIMEOUT_MS);
+    } catch (error) {
+      const [gatewayStatus, translationState] = await Promise.all([
+        env.deps.gatewayService.getStatus(),
+        env.deps.translationWorkerService.getState(repo.repoRoot)
+      ]);
+      throw new Error([
+        error instanceof Error ? error.message : String(error),
+        `Gateway status: ${JSON.stringify(gatewayStatus)}`,
+        `Gateway messages: ${JSON.stringify(sentTexts(env))}`,
+        `Translation queue: ${JSON.stringify(translationState.queue)}`,
+        `Translator sessions: ${JSON.stringify(env.mockRuntime.listSessions(task.taskSlug).filter((session) => session.role === "translator"))}`
+      ].join("\n"));
+    }
 
     await waitFor(() => {
       expect(env.mockRuntime.getWrites(pmSession!.id).join("\n")).toContain("Please inspect the gateway task.");

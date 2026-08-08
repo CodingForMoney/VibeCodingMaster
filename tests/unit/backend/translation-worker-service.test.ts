@@ -352,6 +352,40 @@ describe("translator-translation-service", () => {
     expect(prompt).not.toContain("diagnostics");
   });
 
+  it("does not fail a dispatching conversation before the Translator prompt starts", async () => {
+    tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-translator-conversation-dispatching-"));
+    const fs = createNodeFileSystemAdapter();
+    const writes: string[] = [];
+    const service = createTranslationWorkerService({
+      fs,
+      runtime: createRuntimeStub(writes),
+      sessionService: createTranslatorSessionService([], { initialStatus: "idle" })
+    });
+
+    const job = await service.createConversationJob(tmpRepo, {
+      taskSlug: "demo-task",
+      direction: "user-input-to-english",
+      sourceText: "请检查失败的测试。",
+      sourceLanguage: "auto",
+      targetLanguage: "en"
+    });
+    const queuePath = path.join(tmpRepo, ".ai/vcm/translations/runtime/queue.json");
+    await waitForCondition(async () => {
+      const queue = await fs.readJson<{ items: Array<{ id: string; status: string }> }>(queuePath);
+      return queue.items.find((item) => item.id === job.queueItemId)?.status === "dispatching";
+    });
+
+    const stateDuringSubmit = await service.getState(tmpRepo);
+    expect(stateDuringSubmit.queue.activeItemId).toBe(job.queueItemId);
+    const itemDuringSubmit = stateDuringSubmit.queue.items.find((item) => item.id === job.queueItemId);
+    expect(itemDuringSubmit?.status).toBe("dispatching");
+    expect(itemDuringSubmit?.error).toBeUndefined();
+
+    await waitForDispatcher();
+    const queueAfterSubmit = await fs.readJson<{ items: Array<{ id: string; status: string }> }>(queuePath);
+    expect(queueAfterSubmit.items.find((item) => item.id === job.queueItemId)?.status).toBe("running");
+  });
+
   it("batches queued conversation translations into one prompt and per-item plain text result files", async () => {
     tmpRepo = await mkdtemp(path.join(os.tmpdir(), "vcm-translator-conversation-batch-"));
     const fs = createNodeFileSystemAdapter();

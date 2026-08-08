@@ -308,14 +308,25 @@ export function createTranslationWorkerService(deps: TranslationWorkerServiceDep
       }
       const session = await ensureTranslatorSession(repoRoot, next.targetLanguage, next.taskSlug);
       await submitTerminalInput(deps.runtime, session.id, batch?.prompt ?? await buildQueuePrompt(repoRoot, next));
+      const latestQueue = await loadQueue(repoRoot);
+      if (latestQueue.activeItemId !== next.id) {
+        return;
+      }
+      const dispatchedItems = latestQueue.items.filter((item) =>
+        item.status === "dispatching" &&
+        (batch ? item.batchId === batch.items[0]?.batchId : item.id === next.id)
+      );
+      if (dispatchedItems.length === 0) {
+        return;
+      }
       const dispatchedAt = now();
-      for (const item of batch?.items ?? [next]) {
+      for (const item of dispatchedItems) {
         item.status = "running";
         item.updatedAt = dispatchedAt;
       }
-      queue.updatedAt = dispatchedAt;
-      await saveQueue(repoRoot, queue);
-      await Promise.all((batch?.items ?? [next]).map((item) => syncJobStatus(repoRoot, item)));
+      latestQueue.updatedAt = dispatchedAt;
+      await saveQueue(repoRoot, latestQueue);
+      await Promise.all(dispatchedItems.map((item) => syncJobStatus(repoRoot, item)));
     } catch (error) {
       const failedItems = queue.activeItemId === next.id
         ? queue.items.filter((item) => item.id === next.id || item.batchId === next.batchId)
@@ -556,6 +567,12 @@ export function createTranslationWorkerService(deps: TranslationWorkerServiceDep
     if (await activeItemResultAvailable(repoRoot, active)) {
       await validateActiveQueueItem(repoRoot);
       return true;
+    }
+    // `dispatching` covers the interval between writing the prompt and the
+    // Translator's UserPromptSubmit hook. The role session is legitimately idle
+    // during that interval, so only an actual result can reconcile the item.
+    if (active.status === "dispatching") {
+      return false;
     }
     if (await translatorSessionSettled(repoRoot, active.taskSlug)) {
       await validateActiveQueueItem(repoRoot);
