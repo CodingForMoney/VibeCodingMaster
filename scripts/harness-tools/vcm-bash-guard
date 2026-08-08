@@ -11,6 +11,7 @@ supervised foreground process group.
 """
 import json
 import re
+import shlex
 import sys
 
 SKILL_HINT = (
@@ -32,6 +33,14 @@ PROTECTED_TOOL_INVOCATION = re.compile(
     r"(?:(?:[A-Za-z_][A-Za-z0-9_]*=[^\s;&|()]+)\s+)*"
     r"(?:[^\s;&|()]*/)?(?:run-long-check|watch-job)(?=\s|$)"
 )
+HEREDOC_START = re.compile(
+    r"<<(?!<)(-?)\s*(?:(['\"])([^'\"]+)\2|([^\s;&|()<>]+))"
+)
+EXECUTABLE_HEREDOC_RECEIVER = re.compile(
+    r"(?:^|[;&|()])\s*"
+    r"(?:(?:env\s+)?(?:[A-Za-z_][A-Za-z0-9_]*=[^\s;&|()]+\s+)*)"
+    r"(?:[^\s;&|()]*/)?(?:sh|bash|zsh|dash|ksh|python\d*(?:\.\d+)?|node)(?=\s|$)"
+)
 SHELL_CONTROL_OPERATOR = re.compile(r"(?:\|&?|&&|\|\||;|\n|\(|\)|`)")
 RUN_LONG_CHECK_SHELL_STRING = re.compile(
     r"(?:^|[;&|()\n])\s*"
@@ -50,11 +59,23 @@ MANAGED_ARTIFACT_PATH = re.compile(
     r"harness-feedback[/\\](?:pending|task-retrospectives)[/\\].*\.md"
     r")"
 )
-SHELL_WRITE = re.compile(
-    r"(?:>>?|\btee\b|\brm\b|\bmv\b|\bcp\b|"
-    r"\bsed\b[^\n]*\s-i\b|\bperl\b[^\n]*\s-i\b|"
-    r"\bpython\d*\b|\bnode\b)"
+SHELL_SEPARATOR_TOKEN = re.compile(r"^[;&|()]+$")
+SHELL_ASSIGNMENT = re.compile(r"^[A-Za-z_][A-Za-z0-9_]*=")
+PYTHON_PATH_MUTATION = re.compile(
+    r"\bPath\s*\(\s*(['\"])(?P<path>[^'\"]+)\1\s*\)\s*\.\s*"
+    r"(?:write_text|write_bytes|unlink|rmdir|touch|rename|replace)\s*\("
 )
+PYTHON_OPEN = re.compile(
+    r"\bopen\s*\(\s*(['\"])(?P<path>[^'\"]+)\1\s*,\s*"
+    r"(['\"])(?P<mode>[^'\"]+)\3"
+)
+NODE_PATH_MUTATION = re.compile(
+    r"\b(?:writeFile|writeFileSync|appendFile|appendFileSync|unlink|unlinkSync|"
+    r"rm|rmSync|rmdir|rmdirSync|createWriteStream)\s*\(\s*"
+    r"(['\"])(?P<path>[^'\"]+)\1"
+)
+
+
 def strip_quoted(command: str) -> str:
     return QUOTED.sub(" ", command)
 
@@ -85,6 +106,179 @@ def strip_escaped_characters(command: str) -> str:
     return "".join(cleaned)
 
 
+def strip_heredoc_bodies(command: str) -> str:
+    """Remove heredoc data while preserving executable lines and separators."""
+    pending: list[tuple[str, bool, bool]] = []
+    executable = []
+    for line in command.splitlines(keepends=True):
+        if pending:
+            delimiter, strip_tabs, preserve_body = pending[0]
+            candidate = line.rstrip("\r\n")
+            if strip_tabs:
+                candidate = candidate.lstrip("\t")
+            if candidate == delimiter:
+                pending.pop(0)
+            elif preserve_body:
+                executable.append(line)
+            elif line.endswith(("\n", "\r")):
+                executable.append("\n")
+            continue
+
+        executable.append(line)
+        preserve_body = bool(EXECUTABLE_HEREDOC_RECEIVER.search(line))
+        for match in HEREDOC_START.finditer(line):
+            delimiter = match.group(3) or match.group(4)
+            pending.append((delimiter, bool(match.group(1)), preserve_body))
+    return "".join(executable)
+
+
+def shell_segments(command: str) -> list[list[str]]:
+    normalized = strip_heredoc_bodies(command).replace("\\\n", " ").replace("\n", " ; ")
+    try:
+        lexer = shlex.shlex(normalized, posix=True, punctuation_chars=";&|()<>")
+        lexer.whitespace_split = True
+        lexer.commenters = ""
+        tokens = list(lexer)
+    except ValueError:
+        return []
+
+    segments: list[list[str]] = []
+    current: list[str] = []
+    for token in tokens:
+        if SHELL_SEPARATOR_TOKEN.fullmatch(token):
+            if current:
+                segments.append(current)
+                current = []
+            continue
+        current.append(token)
+    if current:
+        segments.append(current)
+    return segments
+
+
+def is_managed_artifact_path(value: str) -> bool:
+    return bool(MANAGED_ARTIFACT_PATH.search(value))
+
+
+def command_index(segment: list[str]):
+    index = 0
+    while index < len(segment) and SHELL_ASSIGNMENT.match(segment[index]):
+        index += 1
+    if index < len(segment) and segment[index].rsplit("/", 1)[-1] == "env":
+        index += 1
+        while index < len(segment) and (
+            segment[index].startswith("-") or SHELL_ASSIGNMENT.match(segment[index])
+        ):
+            index += 1
+    return index if index < len(segment) else None
+
+
+def redirection_details(segment: list[str]) -> tuple[list[str], set[int]]:
+    targets: list[str] = []
+    consumed: set[int] = set()
+    for index, token in enumerate(segment):
+        if ">" not in token or not all(character in "<>&|" for character in token):
+            continue
+        consumed.add(index)
+        if index > 0 and segment[index - 1].isdigit():
+            consumed.add(index - 1)
+        if index + 1 >= len(segment):
+            continue
+        consumed.add(index + 1)
+        target = segment[index + 1]
+        if token in (">&", "<&") and (target.isdigit() or target == "-"):
+            continue
+        targets.append(target)
+    return targets, consumed
+
+
+def command_operands(segment: list[str], start: int, consumed: set[int]) -> list[str]:
+    operands = []
+    options_done = False
+    for index in range(start, len(segment)):
+        if index in consumed:
+            continue
+        token = segment[index]
+        if token == "--":
+            options_done = True
+            continue
+        if not options_done and token.startswith("-"):
+            continue
+        operands.append(token)
+    return operands
+
+
+def explicit_interpreter_mutation(command_names: set[str], source: str) -> bool:
+    if any(re.fullmatch(r"python\d*(?:\.\d+)?", name) for name in command_names):
+        for match in PYTHON_PATH_MUTATION.finditer(source):
+            if is_managed_artifact_path(match.group("path")):
+                return True
+        for match in PYTHON_OPEN.finditer(source):
+            if is_managed_artifact_path(match.group("path")) and any(
+                flag in match.group("mode") for flag in "wax+"
+            ):
+                return True
+    if "node" in command_names:
+        return any(
+            is_managed_artifact_path(match.group("path"))
+            for match in NODE_PATH_MUTATION.finditer(source)
+        )
+    return False
+
+
+def mutates_managed_artifact(command: str) -> bool:
+    executable_command = strip_heredoc_bodies(command)
+    segments = shell_segments(command)
+    command_names = {
+        segment[index].rsplit("/", 1)[-1]
+        for segment in segments
+        if (index := command_index(segment)) is not None
+    }
+    if explicit_interpreter_mutation(command_names, executable_command):
+        return True
+
+    for segment in segments:
+        redirects, consumed = redirection_details(segment)
+        if any(is_managed_artifact_path(target) for target in redirects):
+            return True
+
+        executable_index = command_index(segment)
+        if executable_index is None:
+            continue
+        command_name = segment[executable_index].rsplit("/", 1)[-1]
+        argument_start = executable_index + 1
+        arguments = segment[argument_start:]
+        operands = command_operands(segment, argument_start, consumed)
+
+        target_directory = None
+        for index, argument in enumerate(arguments):
+            if argument in ("-t", "--target-directory") and index + 1 < len(arguments):
+                target_directory = arguments[index + 1]
+            elif argument.startswith("--target-directory="):
+                target_directory = argument.split("=", 1)[1]
+
+        if command_name == "cp":
+            destination = target_directory or (operands[-1] if len(operands) >= 2 else None)
+            if destination and is_managed_artifact_path(destination):
+                return True
+        elif command_name == "mv":
+            if target_directory and is_managed_artifact_path(target_directory):
+                return True
+            if any(is_managed_artifact_path(operand) for operand in operands):
+                return True
+        elif command_name in ("rm", "tee"):
+            if any(is_managed_artifact_path(operand) for operand in operands):
+                return True
+        elif command_name in ("sed", "perl"):
+            in_place = any(
+                argument.startswith("-") and "i" in argument[1:]
+                for argument in arguments
+            )
+            if in_place and any(is_managed_artifact_path(argument) for argument in arguments):
+                return True
+    return False
+
+
 def unquoted_ampersand(command_without_quotes: str) -> bool:
     cleaned = re.sub(r"\d*>&\d*", " ", command_without_quotes)
     cleaned = re.sub(r"<&\d*", " ", cleaned)
@@ -98,7 +292,8 @@ def protected_tool_invoked(command_without_quotes: str) -> bool:
 
 def scan_shell_command(command: str, depth: int = 0) -> list[str]:
     reasons = []
-    stripped = strip_escaped_characters(strip_quoted(command))
+    executable_command = strip_heredoc_bodies(command)
+    stripped = strip_escaped_characters(strip_quoted(executable_command))
     if re.search(r"(?:^|[\s;&|(])(?:nohup|setsid)(?:\s|$)", stripped):
         reasons.append("nohup/setsid detach is forbidden")
     if re.search(r"(?:^|[\s;&|(])disown(?:\s|$)", stripped):
@@ -113,12 +308,12 @@ def scan_shell_command(command: str, depth: int = 0) -> list[str]:
 
     # `sh -c '...'` quoted payloads are shell code, not plain strings.
     if depth < MAX_NESTED_SHELL_DEPTH and SHELL_DASH_C.search(stripped):
-        for segment in quoted_segments(command):
+        for segment in quoted_segments(executable_command):
             if protected_tool_invoked(strip_escaped_characters(strip_quoted(segment))):
                 reasons.append("run-long-check and watch-job must not be invoked through a shell command string")
             reasons.extend(scan_shell_command(segment, depth + 1))
     if depth < MAX_NESTED_SHELL_DEPTH:
-        for substitution in double_quoted_command_substitutions(command):
+        for substitution in double_quoted_command_substitutions(executable_command):
             nested_stripped = strip_escaped_characters(strip_quoted(substitution))
             if protected_tool_invoked(nested_stripped):
                 reasons.append("run-long-check and watch-job must not be invoked through command substitution")
@@ -135,12 +330,7 @@ def guard_reasons(tool_input: dict) -> list[str]:
     command = command if isinstance(command, str) else ""
 
     reasons.extend(scan_shell_command(command))
-    unquoted_path_command = command.replace('"', "").replace("'", "")
-    if (
-        MANAGED_ARTIFACT_PATH.search(unquoted_path_command)
-        and "vcm-artifact" not in command
-        and SHELL_WRITE.search(strip_quoted(command))
-    ):
+    if mutates_managed_artifact(command):
         reasons.append("direct Bash writes to VCM-managed Markdown are forbidden")
     return list(dict.fromkeys(reasons))
 

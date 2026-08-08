@@ -70,7 +70,12 @@ describe("vcm-bash-guard", () => {
     ["piped run-long-check", bash(".ai/tools/run-long-check --timeout 5m -- cargo test | tail -5")],
     ["run-long-check followed by command", bash(".ai/tools/run-long-check --timeout 5m -- cargo test ; echo started")],
     ["run-long-check shell command string", bash('.ai/tools/run-long-check --timeout 5m -- bash -c "cargo test"')],
-    ["run-long-check env shell command string", bash('.ai/tools/run-long-check --timeout 5m -- env DEMO=1 sh -c "cargo test"')]
+    ["run-long-check env shell command string", bash('.ai/tools/run-long-check --timeout 5m -- env DEMO=1 sh -c "cargo test"')],
+    ["run-long-check in executable heredoc", bash([
+      "bash <<'EOF'",
+      ".ai/tools/run-long-check --timeout 5m -- cargo test | tail -5",
+      "EOF"
+    ].join("\n"))]
   ];
 
   const allowed: Array<[string, GuardPayload]> = [
@@ -84,6 +89,18 @@ describe("vcm-bash-guard", () => {
     ["run-long-check direct script", bash('.ai/tools/run-long-check --timeout 5m -- bash /tmp/check.sh "a|b;c"')],
     ["run-long-check escaped operator argument", bash(".ai/tools/run-long-check --timeout 5m -- node check.js a\\|b")],
     ["quoted tool mention", bash("printf '%s' '.ai/tools/watch-job job-1 | tail -1'")],
+    ["heredoc tool documentation", bash([
+      "cat > /tmp/probe-prose.md <<'EOF'",
+      "Use `.ai/tools/run-long-check --timeout 30m -- cargo test`.",
+      "Then use `.ai/tools/watch-job <job-id>` until it completes.",
+      "EOF"
+    ].join("\n"))],
+    ["plain heredoc tool documentation", bash([
+      "cat > /tmp/probe-prose.md <<EOF",
+      ".ai/tools/run-long-check --timeout 30m -- cargo test",
+      ".ai/tools/watch-job job-id",
+      "EOF"
+    ].join("\n"))],
     ["non-Bash tool", { tool_name: "Read", tool_input: { file_path: "a&b.txt" } }]
   ];
 
@@ -160,6 +177,43 @@ describe("vcm-bash-guard", () => {
         bash(".ai/tools/vcm-artifact memory-proposal --file /tmp/memory.md --path .ai/vcm/memory-review/candidates/architect/planning.md --mode final"),
         "architect"
       )).resolves.toBeUndefined();
+    });
+
+    it("allows managed artifacts as read-only inputs", async () => {
+      await expect(runGuard(
+        bash("cat .ai/vcm/handoffs/architecture-plan.md"),
+        "architect"
+      )).resolves.toBeUndefined();
+      await expect(runGuard(
+        bash("cp .ai/vcm/handoffs/architecture-plan.md /tmp/probe-plan.md"),
+        "architect"
+      )).resolves.toBeUndefined();
+      await expect(runGuard(
+        bash("python3 -c 'from pathlib import Path; print(Path(\".ai/vcm/handoffs/architecture-plan.md\").read_text())'"),
+        "architect"
+      )).resolves.toBeUndefined();
+    });
+
+    it("denies commands that mutate a managed artifact target", async () => {
+      const commands = [
+        "cp /tmp/plan.md .ai/vcm/handoffs/architecture-plan.md",
+        "mv .ai/vcm/handoffs/architecture-plan.md /tmp/plan.md",
+        "rm .ai/vcm/handoffs/architecture-plan.md",
+        "printf bad | tee .ai/vcm/handoffs/architecture-plan.md",
+        "sed -i s/old/new/ .ai/vcm/handoffs/architecture-plan.md",
+        "python3 -c 'from pathlib import Path; Path(\".ai/vcm/handoffs/architecture-plan.md\").write_text(\"bad\")'",
+        [
+          "python3 - <<'PY'",
+          "from pathlib import Path",
+          "Path(\".ai/vcm/handoffs/architecture-plan.md\").write_text(\"bad\")",
+          "PY"
+        ].join("\n"),
+        "node -e 'require(\"fs\").writeFileSync(\".ai/vcm/handoffs/architecture-plan.md\", \"bad\")'",
+        "echo vcm-artifact; printf bad > .ai/vcm/handoffs/architecture-plan.md"
+      ];
+      for (const command of commands) {
+        await expect(runGuard(bash(command), "architect"), command).resolves.toContain("vcm-artifact");
+      }
     });
   });
 });
